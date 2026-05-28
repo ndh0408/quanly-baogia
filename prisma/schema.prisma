@@ -18,6 +18,28 @@ enum QuoteStatus {
   pending
   approved
   rejected
+  sent
+  expired
+  converted
+}
+
+enum CustomerStatus {
+  lead
+  prospect
+  active
+  inactive
+}
+
+enum ApprovalDecision {
+  pending
+  approved
+  rejected
+}
+
+enum NotificationChannel {
+  in_app
+  email
+  telegram
 }
 
 model User {
@@ -25,16 +47,21 @@ model User {
   username     String   @unique
   passwordHash String
   displayName  String
+  email        String?
   role         Role     @default(employee)
   phone        String?
   title        String?
   active       Boolean  @default(true)
 
-  // Auth hardening: rate limit / lockout state
-  failedAttempts Int      @default(0)
+  failedAttempts Int       @default(0)
   lockedUntil    DateTime?
   lastLoginAt    DateTime?
   lastLoginIp    String?
+
+  // MFA TOTP
+  mfaEnabled   Boolean  @default(false)
+  mfaSecret    String?
+  mfaBackupCodes String[] @default([])
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -42,9 +69,29 @@ model User {
 
   createdQuotes  Quote[] @relation("CreatedBy")
   approvedQuotes Quote[] @relation("ApprovedBy")
+  ownedCustomers Customer[]
   auditEvents    AuditEvent[]
+  notifications  Notification[]
+  approvals      Approval[]
+  refreshTokens  RefreshToken[]
 
   @@index([deletedAt, active])
+}
+
+model RefreshToken {
+  id        BigInt   @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  family    String   // rotation family id; revoke whole family on reuse
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([family])
 }
 
 model Company {
@@ -56,6 +103,7 @@ model Company {
   city      String   @default("TP. Hồ Chí Minh")
   phone     String?
   email     String?
+  taxCode   String?
   logoPath  String?
   active    Boolean  @default(true)
   deletedAt DateTime?
@@ -79,12 +127,100 @@ model QuoteTemplate {
   @@index([companyId, active])
 }
 
+// === CRM ===
+model Customer {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  taxCode   String?
+  email     String?
+  phone     String?
+  address   String?
+  city      String?
+  contactName String?
+  contactTitle String?
+  status    CustomerStatus @default(lead)
+  tags      String[] @default([])
+  ownerId   Int?
+  owner     User?    @relation(fields: [ownerId], references: [id])
+  notes     CustomerNote[]
+  followUps FollowUp[]
+  quotes    Quote[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt, status])
+  @@index([ownerId])
+  @@index([name])
+}
+
+model CustomerNote {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  body       String
+  authorId   Int?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt(sort: Desc)])
+}
+
+model FollowUp {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  dueAt      DateTime
+  doneAt     DateTime?
+  note       String
+  assigneeId Int?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, dueAt])
+  @@index([assigneeId, doneAt, dueAt])
+}
+
+// === Product Catalog ===
+model Product {
+  id         Int      @id @default(autoincrement())
+  sku        String   @unique
+  name       String
+  category   String?
+  unit       String?
+  costPrice  Decimal  @default(0) @db.Decimal(18, 4)
+  basePrice  Decimal  @default(0) @db.Decimal(18, 4)
+  description String?
+  active     Boolean  @default(true)
+  priceTiers ProductPriceTier[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  @@index([deletedAt, active])
+  @@index([category])
+  @@index([name])
+}
+
+model ProductPriceTier {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String  // "Sỉ", "Lẻ", "VIP"
+  minQty    Int     @default(0)
+  price     Decimal @db.Decimal(18, 4)
+
+  @@unique([productId, name])
+}
+
+// === Quote ===
 model Quote {
   id            Int         @id @default(autoincrement())
   quoteNumber   String      @unique
   title         String
-  toCompany     String
+  toCompany     String              // legacy free-text; kept for backwards compat
   toContact     String?
+  customerId    Int?                // new: link to CRM Customer (optional during migration)
+  customer      Customer?   @relation(fields: [customerId], references: [id])
   companyId     Int
   company       Company     @relation(fields: [companyId], references: [id])
   fromContact   String
@@ -93,12 +229,13 @@ model Quote {
   fromAddress   String
   city          String
   quoteDate     DateTime
+  validUntil    DateTime?
   greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
   vatPercent    Decimal     @default(8) @db.Decimal(5, 2)
   status        QuoteStatus @default(draft)
   notes         String?
+  currentVersion Int        @default(1)
 
-  // Snapshot totals so the issued amount is locked at approval time
   subtotal      Decimal     @default(0) @db.Decimal(18, 2)
   vat           Decimal     @default(0) @db.Decimal(18, 2)
   total         Decimal     @default(0) @db.Decimal(18, 2)
@@ -109,6 +246,12 @@ model Quote {
   approvedBy    User?       @relation("ApprovedBy", fields: [approvedById], references: [id])
 
   sheets        QuoteSheet[]
+  versions      QuoteVersion[]
+  approvals     Approval[]
+
+  sentAt        DateTime?
+  expiredAt     DateTime?
+  convertedAt   DateTime?
 
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
@@ -116,9 +259,25 @@ model Quote {
 
   @@index([status, createdAt(sort: Desc)])
   @@index([companyId, status])
+  @@index([customerId])
   @@index([createdById])
   @@index([approvedById])
   @@index([deletedAt])
+  @@index([validUntil])
+}
+
+model QuoteVersion {
+  id         BigInt   @id @default(autoincrement())
+  quoteId    Int
+  quote      Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  versionNo  Int
+  payload    Json     // full snapshot of fields + sheets + items at this revision
+  total      Decimal  @db.Decimal(18, 2)
+  createdById Int?
+  createdAt  DateTime @default(now())
+
+  @@unique([quoteId, versionNo])
+  @@index([quoteId, versionNo(sort: Desc)])
 }
 
 model QuoteSheet {
@@ -139,6 +298,7 @@ model QuoteItem {
   sheetId    Int
   sheet      QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
   order      Int
+  productId  Int?               // optional link to catalog
   name       String
   detail     String?
   unit       String?
@@ -148,10 +308,64 @@ model QuoteItem {
   notes      String?
 
   @@index([sheetId, order])
+  @@index([productId])
 }
 
-// Atomic counter for quoteNumber generation, replaces racey findFirst+increment.
-// One row per year so reset happens naturally per calendar year.
+// === Approval matrix + workflow ===
+model ApprovalMatrix {
+  id        Int      @id @default(autoincrement())
+  name      String
+  minAmount Decimal  @db.Decimal(18, 2)
+  maxAmount Decimal? @db.Decimal(18, 2)
+  levels    Json     // [{level: 1, roles: ["manager"], any: 1}, {level: 2, roles: ["admin"], any: 1}]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([active, minAmount])
+}
+
+model Approval {
+  id         Int      @id @default(autoincrement())
+  quoteId    Int
+  quote      Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  versionNo  Int
+  level      Int
+  approverId Int?
+  approver   User?    @relation(fields: [approverId], references: [id])
+  decision   ApprovalDecision @default(pending)
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@unique([quoteId, versionNo, level])
+  @@index([approverId, decision])
+}
+
+// === Notification ===
+model Notification {
+  id        BigInt   @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel @default(in_app)
+  title     String
+  body      String
+  link      String?
+  resource  String?
+  resourceId String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+}
+
+// === Settings (key-value per tenant - global for now) ===
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// === Counters ===
 model QuoteCounter {
   id     Int    @id @default(autoincrement())
   prefix String
@@ -161,13 +375,22 @@ model QuoteCounter {
   @@unique([prefix, year])
 }
 
-// Audit log for compliance: who did what, when, with before/after diff
+model CustomerCounter {
+  id     Int    @id @default(autoincrement())
+  prefix String
+  year   Int
+  value  Int    @default(0)
+
+  @@unique([prefix, year])
+}
+
+// === Audit ===
 model AuditEvent {
   id         BigInt   @id @default(autoincrement())
   actorId    Int?
   actor      User?    @relation(fields: [actorId], references: [id])
-  action     String   // "login.success" "quote.create" "quote.update" "quote.delete" "quote.approve" ...
-  resource   String?  // "quote" | "user" | ...
+  action     String
+  resource   String?
   resourceId String?
   before     Json?
   after      Json?
@@ -180,7 +403,6 @@ model AuditEvent {
   @@index([action, createdAt(sort: Desc)])
 }
 
-// Track login attempts for rate-limiting + forensic analysis
 model LoginAttempt {
   id        BigInt   @id @default(autoincrement())
   username  String

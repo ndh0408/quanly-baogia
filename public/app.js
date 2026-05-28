@@ -130,10 +130,17 @@ function renderShell() {
         <h2>Báo Giá</h2>
         <div class="org">Quản lý nội bộ</div>
         <nav class="menu">
+          <a href="#" data-page="dashboard" class="${state.page === "dashboard" ? "active" : ""}">📊 Dashboard</a>
           <a href="#" data-page="list" class="${state.page === "list" ? "active" : ""}">📋 Danh sách báo giá</a>
           <a href="#" data-page="new" class="${state.page === "new" ? "active" : ""}">➕ Tạo báo giá mới</a>
+          <a href="#" data-page="customers" class="${state.page === "customers" ? "active" : ""}">🏢 Khách hàng (CRM)</a>
+          <a href="#" data-page="products" class="${state.page === "products" ? "active" : ""}">📦 Sản phẩm</a>
+          ${(role === "admin" || role === "manager") ? `<a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}">✅ Hàng chờ duyệt <span id="badge-pending" class="badge-num"></span></a>` : ""}
+          <a href="#" data-page="notifications" class="${state.page === "notifications" ? "active" : ""}">🔔 Thông báo <span id="badge-notif" class="badge-num"></span></a>
           ${role === "admin" ? `<a href="#" data-page="users" class="${state.page === "users" ? "active" : ""}">👥 Quản lý nhân viên</a>` : ""}
-          <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Đổi mật khẩu</a>
+          ${role === "admin" ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
+          ${role === "admin" ? `<a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}">⚙️ Cài đặt</a>` : ""}
+          <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
         </nav>
         <div class="who">
           <strong>${escapeHtml(state.user.displayName)}</strong>
@@ -164,6 +171,31 @@ function renderShell() {
   else if (state.page === "edit") renderEditor(mainEl, state.currentQuote);
   else if (state.page === "users") renderUsers(mainEl);
   else if (state.page === "profile") renderProfile(mainEl);
+  else if (state.page === "dashboard") renderDashboard(mainEl);
+  else if (state.page === "customers") renderCustomers(mainEl);
+  else if (state.page === "products") renderProducts(mainEl);
+  else if (state.page === "approvals") renderApprovalQueue(mainEl);
+  else if (state.page === "notifications") renderNotifications(mainEl);
+  else if (state.page === "audit") renderAuditLog(mainEl);
+  else if (state.page === "settings") renderSettings(mainEl);
+
+  // Refresh notification + approval queue badges
+  refreshBadges();
+}
+
+async function refreshBadges() {
+  try {
+    const n = await api("/api/notifications/unread-count");
+    const badge = document.getElementById("badge-notif");
+    if (badge) badge.textContent = n.count > 0 ? n.count : "";
+  } catch {}
+  if (state.user && (state.user.role === "admin" || state.user.role === "manager")) {
+    try {
+      const q = await api("/api/approvals/queue");
+      const b = document.getElementById("badge-pending");
+      if (b) b.textContent = q.meta.total > 0 ? q.meta.total : "";
+    } catch {}
+  }
 }
 
 // ---------------- List ----------------
@@ -189,7 +221,8 @@ async function renderList(el) {
     if (state.filter.q) params.set("q", state.filter.q);
     if (state.filter.status) params.set("status", state.filter.status);
     try {
-      state.quoteList = await api("/api/quotes?" + params.toString());
+      const r = await api("/api/quotes?" + params.toString());
+      state.quoteList = Array.isArray(r) ? r : (r.data || []);
       drawList();
     } catch (e) { toast(e.message, "error"); }
   };
@@ -937,6 +970,424 @@ function renderProfile(el) {
       document.getElementById("new-pw").value = "";
     } catch (e) { toast(e.message, "error"); }
   });
+}
+
+// ============================================================
+// EXTENDED PAGES — Phase 2 modules
+// ============================================================
+
+// ---------------- Dashboard ----------------
+async function renderDashboard(el) {
+  el.innerHTML = `<h1>📊 Dashboard</h1>
+    <div id="dash-kpi" class="kpi-grid">Đang tải...</div>
+    <h3 style="margin-top:24px">Phễu báo giá</h3>
+    <div id="dash-funnel" class="funnel"></div>
+    <h3 style="margin-top:24px">Top nhân viên (theo doanh số duyệt)</h3>
+    <div id="dash-top"></div>`;
+  try {
+    const [overview, funnel, top] = await Promise.all([
+      api("/api/analytics/overview"),
+      api("/api/analytics/funnel"),
+      api("/api/analytics/top-sales?limit=10"),
+    ]);
+    const k = overview.kpi;
+    document.getElementById("dash-kpi").innerHTML = `
+      <div class="kpi"><span>Tổng báo giá 30d</span><strong>${k.totalQuotes}</strong></div>
+      <div class="kpi"><span>Doanh số duyệt</span><strong>${fmtMoney(k.approvedAmount)}</strong></div>
+      <div class="kpi"><span>TB / báo giá</span><strong>${fmtMoney(Math.round(k.avgDealSize))}</strong></div>
+      <div class="kpi"><span>Tỷ lệ chốt</span><strong>${k.conversionRate}%</strong></div>
+      <div class="kpi"><span>Sắp hết hạn (≤7d)</span><strong>${k.expiringSoon}</strong></div>`;
+    document.getElementById("dash-funnel").innerHTML = funnel.data.map(s => `
+      <div class="funnel-row">
+        <span class="status ${s.status}">${STATUS_LABEL[s.status] || s.status}</span>
+        <div class="funnel-bar" style="width:${Math.min(100, s.count * 8)}%"></div>
+        <strong>${s.count}</strong>
+      </div>
+    `).join("") || "<div class='empty-state'>Không có dữ liệu</div>";
+    document.getElementById("dash-top").innerHTML = top.data.length ? `
+      <table class="list-table">
+        <thead><tr><th>#</th><th>Nhân viên</th><th>Số BG</th><th style="text-align:right">Doanh số</th></tr></thead>
+        <tbody>${top.data.map((t, i) => `
+          <tr><td>${i + 1}</td><td>${escapeHtml(t.user?.displayName || "—")}</td><td>${t.count}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>
+        `).join("")}</tbody>
+      </table>` : "<div class='empty-state'>Chưa có doanh số duyệt</div>";
+  } catch (e) { toast(e.message, "error"); }
+}
+
+// ---------------- Customers (CRM) ----------------
+async function renderCustomers(el) {
+  el.innerHTML = `<h1>🏢 Khách hàng (CRM)</h1>
+    <div class="toolbar">
+      <input id="cust-q" placeholder="Tìm theo tên, mã, SĐT, email..." style="flex:1; min-width:240px"/>
+      <select id="cust-status">
+        <option value="">Tất cả</option>
+        <option value="lead">Lead</option>
+        <option value="prospect">Prospect</option>
+        <option value="active">Đang giao dịch</option>
+        <option value="inactive">Ngưng</option>
+      </select>
+      <button class="btn btn-primary" id="btn-new-cust">+ Khách mới</button>
+    </div>
+    <div id="cust-body">Đang tải...</div>`;
+  let q = "", status = "";
+  const reload = async () => {
+    const params = new URLSearchParams({ q, status, size: "50" });
+    try {
+      const r = await api("/api/customers?" + params);
+      const body = document.getElementById("cust-body");
+      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có khách hàng</div>"; return; }
+      body.innerHTML = `<table class="list-table">
+        <thead><tr><th>Mã</th><th>Tên</th><th>SĐT</th><th>Email</th><th>Trạng thái</th><th>Tags</th><th>Phụ trách</th><th></th></tr></thead>
+        <tbody>${r.data.map(c => `
+          <tr>
+            <td><strong>${escapeHtml(c.code)}</strong></td>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.phone || "")}</td>
+            <td>${escapeHtml(c.email || "")}</td>
+            <td><span class="status ${c.status}">${c.status}</span></td>
+            <td>${(c.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</td>
+            <td>${escapeHtml(c.owner?.displayName || "")}</td>
+            <td>
+              <button class="btn btn-sm" data-edit="${c.id}">Sửa</button>
+              <button class="btn btn-sm btn-danger" data-del="${c.id}">Xóa</button>
+            </td>
+          </tr>`).join("")}</tbody>
+      </table>`;
+      body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editCustomer(parseInt(b.dataset.edit))));
+      body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+        if (!confirm("Xóa khách hàng?")) return;
+        try { await api(`/api/customers/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
+        catch (e) { toast(e.message, "error"); }
+      }));
+    } catch (e) { toast(e.message, "error"); }
+  };
+  document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
+  document.getElementById("cust-status").addEventListener("change", (e) => { status = e.target.value; reload(); });
+  document.getElementById("btn-new-cust").addEventListener("click", () => editCustomer(null));
+  await reload();
+}
+
+function editCustomer(id) {
+  const isNew = id == null;
+  const m = openModal(isNew ? "Tạo khách hàng" : "Sửa khách hàng", `
+    <div class="form-grid">
+      <label>Tên <span class="req">*</span><input id="cf-name" required/></label>
+      <label>Mã số thuế<input id="cf-tax"/></label>
+      <label>Điện thoại<input id="cf-phone"/></label>
+      <label>Email<input id="cf-email" type="email"/></label>
+      <label>Người liên hệ<input id="cf-contact"/></label>
+      <label>Chức vụ<input id="cf-title"/></label>
+      <label style="grid-column:1/-1">Địa chỉ<input id="cf-addr"/></label>
+      <label>Thành phố<input id="cf-city"/></label>
+      <label>Trạng thái<select id="cf-status">
+        <option value="lead">Lead</option><option value="prospect">Prospect</option>
+        <option value="active">Đang giao dịch</option><option value="inactive">Ngưng</option>
+      </select></label>
+      <label style="grid-column:1/-1">Tags (phân tách dấu phẩy)<input id="cf-tags" placeholder="hot, vip"/></label>
+    </div>`);
+  if (!isNew) {
+    api(`/api/customers/${id}`).then(c => {
+      m.find("#cf-name").value = c.name || "";
+      m.find("#cf-tax").value = c.taxCode || "";
+      m.find("#cf-phone").value = c.phone || "";
+      m.find("#cf-email").value = c.email || "";
+      m.find("#cf-contact").value = c.contactName || "";
+      m.find("#cf-title").value = c.contactTitle || "";
+      m.find("#cf-addr").value = c.address || "";
+      m.find("#cf-city").value = c.city || "";
+      m.find("#cf-status").value = c.status || "lead";
+      m.find("#cf-tags").value = (c.tags || []).join(", ");
+    });
+  }
+  m.onSave(async () => {
+    const body = {
+      name: m.find("#cf-name").value.trim(),
+      taxCode: m.find("#cf-tax").value.trim() || null,
+      phone: m.find("#cf-phone").value.trim() || null,
+      email: m.find("#cf-email").value.trim() || null,
+      contactName: m.find("#cf-contact").value.trim() || null,
+      contactTitle: m.find("#cf-title").value.trim() || null,
+      address: m.find("#cf-addr").value.trim() || null,
+      city: m.find("#cf-city").value.trim() || null,
+      status: m.find("#cf-status").value,
+      tags: m.find("#cf-tags").value.split(",").map(s => s.trim()).filter(Boolean),
+    };
+    if (!body.name) { toast("Thiếu tên", "error"); return; }
+    try {
+      if (isNew) await api("/api/customers", { method: "POST", body: JSON.stringify(body) });
+      else await api(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(body) });
+      toast("Đã lưu", "success");
+      m.close();
+      renderCustomers(document.getElementById("main"));
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+// ---------------- Products ----------------
+async function renderProducts(el) {
+  el.innerHTML = `<h1>📦 Sản phẩm / Dịch vụ</h1>
+    <div class="toolbar">
+      <input id="p-q" placeholder="Tìm theo SKU hoặc tên..." style="flex:1"/>
+      <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
+    </div>
+    <div id="p-body">Đang tải...</div>`;
+  let q = "";
+  const reload = async () => {
+    try {
+      const r = await api("/api/products?size=100" + (q ? `&q=${encodeURIComponent(q)}` : ""));
+      const body = document.getElementById("p-body");
+      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có sản phẩm</div>"; return; }
+      body.innerHTML = `<table class="list-table">
+        <thead><tr><th>SKU</th><th>Tên</th><th>Loại</th><th>ĐVT</th>
+          <th style="text-align:right">Giá vốn</th><th style="text-align:right">Giá bán</th>
+          <th style="text-align:right">Margin</th><th></th></tr></thead>
+        <tbody>${r.data.map(p => `
+          <tr>
+            <td><strong>${escapeHtml(p.sku)}</strong></td>
+            <td>${escapeHtml(p.name)}</td>
+            <td>${escapeHtml(p.category || "")}</td>
+            <td>${escapeHtml(p.unit || "")}</td>
+            <td style="text-align:right">${fmtMoney(p.costPrice)}</td>
+            <td style="text-align:right">${fmtMoney(p.basePrice)}</td>
+            <td style="text-align:right">${p.margin != null ? p.margin + "%" : "—"}</td>
+            <td><button class="btn btn-sm" data-edit="${p.id}">Sửa</button>
+                <button class="btn btn-sm btn-danger" data-del="${p.id}">Xóa</button></td>
+          </tr>`).join("")}</tbody></table>`;
+      body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editProduct(parseInt(b.dataset.edit))));
+      body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+        if (!confirm("Xóa sản phẩm?")) return;
+        try { await api(`/api/products/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
+        catch (e) { toast(e.message, "error"); }
+      }));
+    } catch (e) { toast(e.message, "error"); }
+  };
+  document.getElementById("p-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._pt); window._pt = setTimeout(reload, 300); });
+  document.getElementById("btn-new-p").addEventListener("click", () => editProduct(null));
+  await reload();
+}
+
+function editProduct(id) {
+  const isNew = id == null;
+  const m = openModal(isNew ? "Tạo sản phẩm" : "Sửa sản phẩm", `
+    <div class="form-grid">
+      <label>SKU <span class="req">*</span><input id="pf-sku" required ${isNew ? "" : "disabled"}/></label>
+      <label>Tên <span class="req">*</span><input id="pf-name" required/></label>
+      <label>Loại<input id="pf-cat"/></label>
+      <label>ĐVT<input id="pf-unit"/></label>
+      <label>Giá vốn<input id="pf-cost" type="number" min="0" step="1" value="0"/></label>
+      <label>Giá bán<input id="pf-base" type="number" min="0" step="1" value="0"/></label>
+      <label style="grid-column:1/-1">Mô tả<textarea id="pf-desc" rows="2"></textarea></label>
+    </div>`);
+  if (!isNew) {
+    api(`/api/products/${id}`).then(p => {
+      m.find("#pf-sku").value = p.sku || "";
+      m.find("#pf-name").value = p.name || "";
+      m.find("#pf-cat").value = p.category || "";
+      m.find("#pf-unit").value = p.unit || "";
+      m.find("#pf-cost").value = p.costPrice || 0;
+      m.find("#pf-base").value = p.basePrice || 0;
+      m.find("#pf-desc").value = p.description || "";
+    });
+  }
+  m.onSave(async () => {
+    const body = {
+      sku: m.find("#pf-sku").value.trim(),
+      name: m.find("#pf-name").value.trim(),
+      category: m.find("#pf-cat").value.trim() || null,
+      unit: m.find("#pf-unit").value.trim() || null,
+      costPrice: Number(m.find("#pf-cost").value) || 0,
+      basePrice: Number(m.find("#pf-base").value) || 0,
+      description: m.find("#pf-desc").value.trim() || null,
+    };
+    if (!body.sku || !body.name) { toast("Thiếu SKU hoặc tên", "error"); return; }
+    try {
+      if (isNew) await api("/api/products", { method: "POST", body: JSON.stringify(body) });
+      else await api(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(body) });
+      toast("Đã lưu", "success"); m.close();
+      renderProducts(document.getElementById("main"));
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+// ---------------- Approval queue ----------------
+async function renderApprovalQueue(el) {
+  el.innerHTML = `<h1>✅ Hàng chờ duyệt</h1><div id="aq-body">Đang tải...</div>`;
+  try {
+    const r = await api("/api/approvals/queue");
+    const body = document.getElementById("aq-body");
+    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
+    body.innerHTML = `<table class="list-table">
+      <thead><tr><th>Số BG</th><th>Tiêu đề</th><th>Khách</th><th>Level</th>
+        <th style="text-align:right">Tổng</th><th>Người tạo</th><th></th></tr></thead>
+      <tbody>${r.data.map(a => `
+        <tr>
+          <td><strong>${escapeHtml(a.quote?.quoteNumber)}</strong></td>
+          <td>${escapeHtml(a.quote?.title || "")}</td>
+          <td>${escapeHtml(a.quote?.toCompany || "")}</td>
+          <td>L${a.level}</td>
+          <td style="text-align:right">${fmtMoney(a.quote?.total)}</td>
+          <td>${escapeHtml(a.quote?.createdBy?.displayName || "")}</td>
+          <td>
+            <button class="btn btn-sm" data-open="${a.quote?.id}">Xem</button>
+            <button class="btn btn-sm btn-primary" data-approve="${a.quote?.id}">✓ Duyệt</button>
+            <button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>
+          </td>
+        </tr>`).join("")}</tbody></table>`;
+    body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", async () => {
+      const q = await api(`/api/quotes/${b.dataset.open}`); state.currentQuote = q; state.page = "edit"; render();
+    }));
+    body.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", async () => {
+      const comment = prompt("Comment duyệt (tuỳ chọn):") ?? "";
+      try { await api(`/api/quotes/${b.dataset.approve}/approve`, { method: "POST", body: JSON.stringify({ comment }) });
+        toast("Đã duyệt", "success"); renderApprovalQueue(el);
+      } catch (e) { toast(e.message, "error"); }
+    }));
+    body.querySelectorAll("[data-reject]").forEach(b => b.addEventListener("click", async () => {
+      const comment = prompt("Lý do từ chối:") ?? "";
+      if (!comment.trim()) return;
+      try { await api(`/api/quotes/${b.dataset.reject}/reject`, { method: "POST", body: JSON.stringify({ comment }) });
+        toast("Đã từ chối", "success"); renderApprovalQueue(el);
+      } catch (e) { toast(e.message, "error"); }
+    }));
+  } catch (e) { toast(e.message, "error"); }
+}
+
+// ---------------- Notifications ----------------
+async function renderNotifications(el) {
+  el.innerHTML = `<h1>🔔 Thông báo</h1>
+    <div class="toolbar"><button class="btn" id="btn-read-all">Đánh dấu đã đọc tất cả</button></div>
+    <div id="n-body">Đang tải...</div>`;
+  document.getElementById("btn-read-all").addEventListener("click", async () => {
+    await api("/api/notifications/read-all", { method: "POST" });
+    renderNotifications(el);
+  });
+  try {
+    const r = await api("/api/notifications?size=50");
+    const body = document.getElementById("n-body");
+    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có thông báo</div>"; return; }
+    body.innerHTML = r.data.map(n => `
+      <div class="notif ${n.readAt ? "" : "unread"}" data-id="${n.id}">
+        <div class="notif-title">${escapeHtml(n.title)}</div>
+        <div class="notif-body">${escapeHtml(n.body)}</div>
+        <div class="notif-meta">${fmtDate(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
+      </div>`).join("");
+    body.querySelectorAll(".notif.unread").forEach(d => d.addEventListener("click", async () => {
+      await api(`/api/notifications/${d.dataset.id}/read`, { method: "POST" });
+      d.classList.remove("unread");
+      refreshBadges();
+    }));
+  } catch (e) { toast(e.message, "error"); }
+}
+
+// ---------------- Audit log (admin) ----------------
+async function renderAuditLog(el) {
+  el.innerHTML = `<h1>📜 Audit log</h1>
+    <div class="toolbar">
+      <input id="a-action" placeholder="action (vd: quote.create)"/>
+      <input id="a-resource" placeholder="resource (vd: quote)"/>
+      <button class="btn" id="a-reload">Tải</button>
+    </div>
+    <div id="a-body">Đang tải...</div>`;
+  const reload = async () => {
+    const params = new URLSearchParams();
+    if (document.getElementById("a-action").value) params.set("action", document.getElementById("a-action").value);
+    if (document.getElementById("a-resource").value) params.set("resource", document.getElementById("a-resource").value);
+    params.set("size", "100");
+    try {
+      const r = await api("/api/audit?" + params);
+      const body = document.getElementById("a-body");
+      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có sự kiện</div>"; return; }
+      body.innerHTML = `<table class="list-table">
+        <thead><tr><th>Thời gian</th><th>Actor</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead>
+        <tbody>${r.data.map(e => `
+          <tr>
+            <td>${new Date(e.createdAt).toLocaleString("vi-VN")}</td>
+            <td>${escapeHtml(e.actor?.username || "—")}</td>
+            <td><code>${escapeHtml(e.action)}</code></td>
+            <td>${escapeHtml(e.resource || "")}/${escapeHtml(e.resourceId || "")}</td>
+            <td>${escapeHtml(e.ip || "")}</td>
+          </tr>`).join("")}</tbody></table>`;
+    } catch (e) { toast(e.message, "error"); }
+  };
+  document.getElementById("a-reload").addEventListener("click", reload);
+  await reload();
+}
+
+// ---------------- Settings (admin) ----------------
+async function renderSettings(el) {
+  el.innerHTML = `<h1>⚙️ Cài đặt hệ thống</h1>
+    <p>Quản lý approval matrix, key/value settings tổ chức.</p>
+    <h3>Approval matrix</h3>
+    <div id="s-matrix-body">Đang tải...</div>
+    <button class="btn btn-primary" id="btn-add-matrix">+ Thêm matrix</button>`;
+
+  const reload = async () => {
+    try {
+      const rows = await api("/api/approvals/matrix");
+      document.getElementById("s-matrix-body").innerHTML = rows.length ? `
+        <table class="list-table">
+          <thead><tr><th>Tên</th><th>Min</th><th>Max</th><th>Levels</th><th>Active</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `
+            <tr>
+              <td>${escapeHtml(r.name)}</td>
+              <td>${fmtMoney(r.minAmount)}</td>
+              <td>${r.maxAmount != null ? fmtMoney(r.maxAmount) : "∞"}</td>
+              <td><code style="font-size:11px">${escapeHtml(JSON.stringify(r.levels))}</code></td>
+              <td>${r.active ? "✓" : "✗"}</td>
+              <td><button class="btn btn-sm btn-danger" data-del="${r.id}">Xóa</button></td>
+            </tr>`).join("")}</tbody>
+        </table>` : "<div class='empty-state'>Chưa có matrix</div>";
+      document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+        if (!confirm("Xóa matrix?")) return;
+        await api(`/api/approvals/matrix/${b.dataset.del}`, { method: "DELETE" });
+        reload();
+      }));
+    } catch (e) { toast(e.message, "error"); }
+  };
+  document.getElementById("btn-add-matrix").addEventListener("click", () => {
+    const m = openModal("Thêm approval matrix", `
+      <div class="form-grid">
+        <label>Tên<input id="m-name" value="Default"/></label>
+        <label>Min amount<input id="m-min" type="number" value="0"/></label>
+        <label>Max amount (để trống = ∞)<input id="m-max" type="number"/></label>
+        <label style="grid-column:1/-1">Levels (JSON)<textarea id="m-lvl" rows="4">[{"level":1,"roles":["manager","admin"],"any":1}]</textarea></label>
+      </div>`);
+    m.onSave(async () => {
+      try {
+        await api("/api/approvals/matrix", { method: "POST", body: JSON.stringify({
+          name: m.find("#m-name").value || "Default",
+          minAmount: Number(m.find("#m-min").value) || 0,
+          maxAmount: m.find("#m-max").value ? Number(m.find("#m-max").value) : null,
+          levels: JSON.parse(m.find("#m-lvl").value),
+        })});
+        toast("Đã lưu", "success"); m.close(); reload();
+      } catch (e) { toast(e.message, "error"); }
+    });
+  });
+  await reload();
+}
+
+// ---------------- Modal helper ----------------
+function openModal(title, bodyHtml) {
+  const d = document.createElement("div");
+  d.className = "modal-backdrop";
+  d.innerHTML = `<div class="modal">
+    <div class="modal-head"><h3>${escapeHtml(title)}</h3><button class="modal-x">×</button></div>
+    <div class="modal-body">${bodyHtml}</div>
+    <div class="modal-foot">
+      <button class="btn" data-cancel>Hủy</button>
+      <button class="btn btn-primary" data-save>Lưu</button>
+    </div>
+  </div>`;
+  document.body.appendChild(d);
+  const close = () => d.remove();
+  d.querySelector(".modal-x").addEventListener("click", close);
+  d.querySelector("[data-cancel]").addEventListener("click", close);
+  return {
+    find: (sel) => d.querySelector(sel),
+    close,
+    onSave: (cb) => d.querySelector("[data-save]").addEventListener("click", cb),
+  };
 }
 
 boot();

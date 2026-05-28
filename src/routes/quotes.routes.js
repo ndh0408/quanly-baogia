@@ -11,6 +11,9 @@ import {
 import { computeQuoteTotals, totalsToJson, D } from "../money.js";
 import { nextQuoteNumber } from "../quoteNumber.js";
 import { audit } from "../audit.js";
+import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
+import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
+import { notify } from "../notifications.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -199,9 +202,13 @@ router.post(
     draft.vat = t.vat;
     draft.total = t.total;
 
-    const quote = await prisma.quote.create({
-      data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) } },
-      include: QUOTE_INCLUDE,
+    const quote = await prisma.$transaction(async (tx) => {
+      const created = await tx.quote.create({
+        data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) } },
+        include: QUOTE_INCLUDE,
+      });
+      await snapshotQuoteVersion(tx, created.id, req.session.userId, "create");
+      return created;
     });
 
     await audit(req, "quote.create", {
@@ -240,7 +247,8 @@ router.put(
       data.quoteNumber = b.quoteNumber;
     }
 
-    // Sheets full replace + recompute snapshot totals
+    // Sheets full replace + recompute snapshot totals + bump version
+    data.currentVersion = (existing.currentVersion ?? 1) + 1;
     let updated;
     if (Array.isArray(b.sheets)) {
       const vatPct = data.vatPercent ?? existing.vatPercent;
@@ -250,24 +258,25 @@ router.put(
       data.total = t.total;
       updated = await prisma.$transaction(async (tx) => {
         await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
-        return tx.quote.update({
+        const u = await tx.quote.update({
           where: { id },
           data: { ...data, sheets: { create: buildSheetsCreate(b.sheets) } },
           include: QUOTE_INCLUDE,
         });
+        await snapshotQuoteVersion(tx, id, req.session.userId, "update");
+        return u;
       });
     } else {
-      // Only metadata changed; recompute totals if vatPercent changed
       if (data.vatPercent !== undefined) {
         const t = computeQuoteTotals({ vatPercent: data.vatPercent, sheets: existing.sheets });
         data.subtotal = t.subtotal;
         data.vat = t.vat;
         data.total = t.total;
       }
-      updated = await prisma.quote.update({
-        where: { id },
-        data,
-        include: QUOTE_INCLUDE,
+      updated = await prisma.$transaction(async (tx) => {
+        const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE });
+        await snapshotQuoteVersion(tx, id, req.session.userId, "update");
+        return u;
       });
     }
 
@@ -282,7 +291,7 @@ router.put(
   })
 );
 
-// SUBMIT for approval
+// SUBMIT for approval (uses matrix engine: creates per-level Approval rows)
 router.post(
   "/:id/submit",
   validate({ params: idParam }),
@@ -301,6 +310,23 @@ router.post(
       data: { status: "pending", approvedById: null },
       include: QUOTE_INCLUDE,
     });
+    await startApprovalChain(id, quote.currentVersion);
+
+    // Notify approvers
+    const approvers = await prisma.user.findMany({
+      where: { active: true, role: { in: ["manager", "admin"] } },
+      select: { id: true },
+    });
+    for (const u of approvers) {
+      await notify(u.id, {
+        title: `Báo giá ${quote.quoteNumber} chờ duyệt`,
+        body: `${quote.title} • Tổng ${Number(quote.total).toLocaleString("vi-VN")} VND`,
+        link: `/#/quotes/${id}`,
+        resource: "quote",
+        resourceId: id,
+      });
+    }
+
     await audit(req, "quote.submit", { resource: "quote", resourceId: id });
     res.json(presentQuote(quote));
   })
@@ -309,18 +335,43 @@ router.post(
 router.post(
   "/:id/approve",
   requireRole("admin", "manager"),
-  validate({ params: idParam }),
+  validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
+
+    const pending = await nextPendingLevel(id, existing.currentVersion);
+    if (!pending) return res.status(400).json({ error: "Không có level chờ duyệt" });
+    if (await hasEarlierPending(id, existing.currentVersion, pending.level)) {
+      return res.status(400).json({ error: "Có level trước chưa duyệt" });
+    }
+    if (!(await canApproveLevel(id, existing.currentVersion, pending.level, req.session.role))) {
+      return res.status(403).json({ error: "Vai trò không được duyệt level này" });
+    }
+
+    await prisma.approval.update({
+      where: { id: pending.id },
+      data: { decision: "approved", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
+    });
+
+    const complete = await isChainComplete(id, existing.currentVersion);
     const quote = await prisma.quote.update({
       where: { id },
-      data: { status: "approved", approvedById: req.session.userId },
+      data: complete ? { status: "approved", approvedById: req.session.userId } : {},
       include: QUOTE_INCLUDE,
     });
-    await audit(req, "quote.approve", { resource: "quote", resourceId: id });
+
+    await notify(existing.createdById, {
+      title: `Báo giá ${quote.quoteNumber} ${complete ? "đã được duyệt" : `level ${pending.level} đã duyệt`}`,
+      body: complete ? "Có thể gửi cho khách." : "Đang chờ level tiếp theo.",
+      link: `/#/quotes/${id}`,
+      resource: "quote",
+      resourceId: id,
+    });
+
+    await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { level: pending.level, complete } });
     res.json(presentQuote(quote));
   })
 );
@@ -328,19 +379,132 @@ router.post(
 router.post(
   "/:id/reject",
   requireRole("admin", "manager"),
-  validate({ params: idParam }),
+  validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
+
+    const pending = await nextPendingLevel(id, existing.currentVersion);
+    if (pending) {
+      await prisma.approval.update({
+        where: { id: pending.id },
+        data: { decision: "rejected", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
+      });
+    }
     const quote = await prisma.quote.update({
       where: { id },
       data: { status: "rejected", approvedById: req.session.userId },
       include: QUOTE_INCLUDE,
     });
-    await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body?.reason || null } });
+
+    await notify(existing.createdById, {
+      title: `Báo giá ${quote.quoteNumber} bị từ chối`,
+      body: req.body.comment || "Vui lòng kiểm tra lại.",
+      link: `/#/quotes/${id}`,
+      resource: "quote",
+      resourceId: id,
+    });
+
+    await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body.comment || null } });
     res.json(presentQuote(quote));
+  })
+);
+
+// SEND quote to customer (after approval)
+router.post(
+  "/:id/send",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (existing.status !== "approved" && existing.status !== "sent") {
+      return res.status(400).json({ error: "Chỉ gửi được sau khi duyệt" });
+    }
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "sent", sentAt: new Date() },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.send", { resource: "quote", resourceId: id });
+    res.json(presentQuote(quote));
+  })
+);
+
+router.post(
+  "/:id/mark-converted",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "converted", convertedAt: new Date() },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.convert", { resource: "quote", resourceId: id });
+    res.json(presentQuote(quote));
+  })
+);
+
+// VERSIONS
+router.get(
+  "/:id/versions",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const versions = await prisma.quoteVersion.findMany({
+      where: { quoteId: id },
+      orderBy: { versionNo: "desc" },
+      select: { id: true, versionNo: true, total: true, createdAt: true, createdById: true },
+    });
+    res.json({
+      data: versions.map((v) => ({ ...v, id: v.id.toString(), total: Number(v.total) })),
+    });
+  })
+);
+
+router.get(
+  "/:id/versions/:v",
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), v: z.coerce.number().int().min(0) }) }),
+  asyncHandler(async (req, res) => {
+    const ver = await prisma.quoteVersion.findUnique({
+      where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.v } },
+    });
+    if (!ver) return res.status(404).json({ error: "Không tìm thấy version" });
+    res.json({ ...ver, id: ver.id.toString(), total: Number(ver.total) });
+  })
+);
+
+router.get(
+  "/:id/versions/:a/diff/:b",
+  validate({ params: z.object({
+    id: z.coerce.number().int().positive(),
+    a: z.coerce.number().int().min(0),
+    b: z.coerce.number().int().min(0),
+  }) }),
+  asyncHandler(async (req, res) => {
+    const [va, vb] = await Promise.all([
+      prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.a } } }),
+      prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.b } } }),
+    ]);
+    if (!va || !vb) return res.status(404).json({ error: "Version không tồn tại" });
+    res.json({ from: req.params.a, to: req.params.b, changes: diffVersions(va.payload, vb.payload) });
+  })
+);
+
+// APPROVAL trail for a quote
+router.get(
+  "/:id/approvals",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.approval.findMany({
+      where: { quoteId: req.params.id },
+      orderBy: [{ versionNo: "asc" }, { level: "asc" }],
+      include: { approver: { select: { id: true, username: true, displayName: true } } },
+    });
+    res.json({ data: rows });
   })
 );
 

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
+import speakeasy from "speakeasy";
+import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -27,9 +29,9 @@ function clientIp(req) {
 router.post(
   "/login",
   loginLimiter,
-  validate({ body: LoginSchema }),
+  validate({ body: LoginSchema.extend({ mfaToken: z.string().regex(/^\d{6,8}$/).optional() }) }),
   asyncHandler(async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
     const ua = req.headers["user-agent"] || null;
 
@@ -77,6 +79,32 @@ router.post(
           ? `Sai mật khẩu nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút`
           : "Sai mật khẩu",
       });
+    }
+
+    // MFA gate: if enabled, require valid TOTP or backup code before issuing session
+    if (user.mfaEnabled) {
+      if (!mfaToken) {
+        return res.status(401).json({ error: "Cần mã MFA", mfaRequired: true });
+      }
+      // 6 digits = TOTP, 10 hex chars = backup code
+      const isTotp = /^\d{6}$/.test(mfaToken);
+      let mfaOk = false;
+      if (isTotp) {
+        mfaOk = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: "base32", token: mfaToken, window: 1 });
+      } else {
+        const idx = (user.mfaBackupCodes || []).indexOf(mfaToken.toUpperCase());
+        if (idx >= 0) {
+          const remaining = [...user.mfaBackupCodes];
+          remaining.splice(idx, 1);
+          await prisma.user.update({ where: { id: user.id }, data: { mfaBackupCodes: remaining } });
+          mfaOk = true;
+        }
+      }
+      if (!mfaOk) {
+        await recordAttempt(false, "bad_mfa");
+        await audit(req, "login.mfa.failed", { resource: "user", resourceId: user.id, actorId: user.id });
+        return res.status(401).json({ error: "Mã MFA không đúng", mfaRequired: true });
+      }
     }
 
     // Reset lockout counters + bookkeeping

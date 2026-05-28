@@ -16,6 +16,13 @@ import quotesRoutes from "./routes/quotes.routes.js";
 import exportRoutes from "./routes/export.routes.js";
 import metaRoutes from "./routes/meta.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import customersRoutes from "./routes/customers.routes.js";
+import productsRoutes from "./routes/products.routes.js";
+import approvalsRoutes from "./routes/approvals.routes.js";
+import notificationsRoutes from "./routes/notifications.routes.js";
+import mfaRoutes from "./routes/mfa.routes.js";
+import analyticsRoutes from "./routes/analytics.routes.js";
+import settingsRoutes from "./routes/settings.routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
@@ -106,6 +113,13 @@ app.use("/api/quotes", quotesRoutes);
 app.use("/api/export", exportRoutes);
 app.use("/api/meta", metaRoutes);
 app.use("/api/audit", auditRoutes);
+app.use("/api/customers", customersRoutes);
+app.use("/api/products", productsRoutes);
+app.use("/api/approvals", approvalsRoutes);
+app.use("/api/notifications", notificationsRoutes);
+app.use("/api/mfa", mfaRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Health probes
 app.get("/livez", (_req, res) => res.json({ ok: true }));
