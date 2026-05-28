@@ -29,37 +29,54 @@ model User {
   phone        String?
   title        String?
   active       Boolean  @default(true)
+
+  // Auth hardening: rate limit / lockout state
+  failedAttempts Int      @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
+  lastLoginIp    String?
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
 
   createdQuotes  Quote[] @relation("CreatedBy")
   approvedQuotes Quote[] @relation("ApprovedBy")
+  auditEvents    AuditEvent[]
+
+  @@index([deletedAt, active])
 }
 
 model Company {
   id        Int      @id @default(autoincrement())
-  code      String   @unique          // "gia_nguyen", "clofull"
-  name      String                    // "Công ty Gia Nguyễn"
-  shortName String?                   // for short display
+  code      String   @unique
+  name      String
+  shortName String?
   address   String
   city      String   @default("TP. Hồ Chí Minh")
   phone     String?
   email     String?
-  logoPath  String?                   // path to logo image
+  logoPath  String?
   active    Boolean  @default(true)
+  deletedAt DateTime?
   templates QuoteTemplate[]
   quotes    Quote[]
+
+  @@index([deletedAt, active])
 }
 
 model QuoteTemplate {
   id        Int      @id @default(autoincrement())
-  code      String   @unique          // "marico_decor", "unibenfood"
-  name      String                    // "Décor (Marico-style)"
+  code      String   @unique
+  name      String
   companyId Int
   company   Company  @relation(fields: [companyId], references: [id])
-  filePath  String                    // "templates/Marico_Decor.xlsx"
+  filePath  String
   active    Boolean  @default(true)
+  deletedAt DateTime?
   sheets    QuoteSheet[]
+
+  @@index([companyId, active])
 }
 
 model Quote {
@@ -73,13 +90,18 @@ model Quote {
   fromContact   String
   fromPhone     String?
   fromTitle     String?
-  fromAddress   String                 // snapshot at creation time
+  fromAddress   String
   city          String
   quoteDate     DateTime
   greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
-  vatPercent    Float       @default(8)
+  vatPercent    Decimal     @default(8) @db.Decimal(5, 2)
   status        QuoteStatus @default(draft)
   notes         String?
+
+  // Snapshot totals so the issued amount is locked at approval time
+  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
+  vat           Decimal     @default(0) @db.Decimal(18, 2)
+  total         Decimal     @default(0) @db.Decimal(18, 2)
 
   createdById   Int
   createdBy     User        @relation("CreatedBy", fields: [createdById], references: [id])
@@ -90,6 +112,13 @@ model Quote {
 
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([companyId, status])
+  @@index([createdById])
+  @@index([approvedById])
+  @@index([deletedAt])
 }
 
 model QuoteSheet {
@@ -98,9 +127,11 @@ model QuoteSheet {
   quote       Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   templateId  Int
   template    QuoteTemplate @relation(fields: [templateId], references: [id])
-  order       Int                       // tab order (1, 2, 3...)
-  name        String?                   // optional sheet display name (e.g. "Décor", "Sampling")
+  order       Int
+  name        String?
   items       QuoteItem[]
+
+  @@index([quoteId, order])
 }
 
 model QuoteItem {
@@ -111,8 +142,54 @@ model QuoteItem {
   name       String
   detail     String?
   unit       String?
-  quantity   Float   @default(0)
-  unitPrice  Float   @default(0)
-  days       Float?                     // for templates needing day-count (Unibenfood)
+  quantity   Decimal @default(0) @db.Decimal(18, 4)
+  unitPrice  Decimal @default(0) @db.Decimal(18, 4)
+  days       Decimal? @db.Decimal(10, 2)
   notes      String?
+
+  @@index([sheetId, order])
+}
+
+// Atomic counter for quoteNumber generation, replaces racey findFirst+increment.
+// One row per year so reset happens naturally per calendar year.
+model QuoteCounter {
+  id     Int    @id @default(autoincrement())
+  prefix String
+  year   Int
+  value  Int    @default(0)
+
+  @@unique([prefix, year])
+}
+
+// Audit log for compliance: who did what, when, with before/after diff
+model AuditEvent {
+  id         BigInt   @id @default(autoincrement())
+  actorId    Int?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String   // "login.success" "quote.create" "quote.update" "quote.delete" "quote.approve" ...
+  resource   String?  // "quote" | "user" | ...
+  resourceId String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([resource, resourceId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+}
+
+// Track login attempts for rate-limiting + forensic analysis
+model LoginAttempt {
+  id        BigInt   @id @default(autoincrement())
+  username  String
+  ip        String?
+  userAgent String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt(sort: Desc)])
+  @@index([ip, createdAt(sort: Desc)])
 }

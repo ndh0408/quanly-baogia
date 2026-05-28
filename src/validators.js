@@ -1,0 +1,122 @@
+import { z } from "zod";
+import { config } from "./config.js";
+
+const pwd = z
+  .string()
+  .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)
+  .max(128, "Mật khẩu quá dài")
+  .refine((s) => /[A-Za-z]/.test(s) && /\d/.test(s), {
+    message: "Mật khẩu phải có cả chữ và số",
+  });
+
+const username = z
+  .string()
+  .min(3, "Username tối thiểu 3 ký tự")
+  .max(40, "Username quá dài")
+  .regex(/^[a-zA-Z0-9_.-]+$/, "Username chỉ chứa chữ, số, dấu . _ -");
+
+const displayName = z.string().min(1).max(120).trim();
+const phone = z.string().max(40).trim().optional().or(z.literal("").transform(() => undefined));
+const title = z.string().max(120).trim().optional().or(z.literal("").transform(() => undefined));
+
+export const LoginSchema = z.object({
+  username: z.string().min(1, "Thiếu username").max(80),
+  password: z.string().min(1, "Thiếu mật khẩu").max(128),
+});
+
+export const ChangePasswordSchema = z.object({
+  oldPassword: z.string().min(1),
+  newPassword: pwd,
+});
+
+export const UserCreateSchema = z.object({
+  username,
+  password: pwd,
+  displayName,
+  role: z.enum(["admin", "manager", "employee"]),
+  phone,
+  title,
+});
+
+export const UserUpdateSchema = z.object({
+  displayName: displayName.optional(),
+  role: z.enum(["admin", "manager", "employee"]).optional(),
+  phone,
+  title,
+  active: z.boolean().optional(),
+  password: pwd.optional(),
+});
+
+const itemSchema = z.object({
+  order: z.coerce.number().int().optional(),
+  name: z.string().max(2000).default(""),
+  detail: z.string().max(2000).optional().nullable(),
+  unit: z.string().max(40).optional().nullable(),
+  quantity: z.coerce.number().nonnegative().default(0),
+  unitPrice: z.coerce.number().nonnegative().default(0),
+  days: z.coerce.number().nonnegative().optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+const sheetSchema = z.object({
+  templateId: z.coerce.number().int().positive(),
+  name: z.string().max(120).optional().nullable(),
+  order: z.coerce.number().int().optional(),
+  items: z.array(itemSchema).max(500).default([]),
+});
+
+export const QuoteCreateSchema = z.object({
+  // quoteNumber is server-generated; allow override but not required
+  quoteNumber: z.string().max(40).optional(),
+  title: z.string().min(1, "Thiếu tiêu đề").max(500),
+  toCompany: z.string().min(1, "Thiếu khách hàng").max(500),
+  toContact: z.string().max(200).optional().nullable(),
+  companyId: z.coerce.number().int().positive(),
+  fromContact: z.string().max(200).optional().default(""),
+  fromPhone: z.string().max(40).optional().nullable(),
+  fromTitle: z.string().max(120).optional().nullable(),
+  fromAddress: z.string().max(500).optional(),
+  city: z.string().max(120).optional(),
+  quoteDate: z.coerce.date().optional(),
+  greeting: z.string().max(2000).optional(),
+  vatPercent: z.coerce.number().min(0).max(100).default(8),
+  notes: z.string().max(4000).optional().nullable(),
+  sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20),
+});
+
+export const QuoteUpdateSchema = QuoteCreateSchema.partial().extend({
+  sheets: z.array(sheetSchema).max(20).optional(),
+});
+
+export const ListQuerySchema = z.object({
+  q: z.string().max(200).optional(),
+  status: z.enum(["draft", "pending", "approved", "rejected"]).optional(),
+  companyId: z.coerce.number().int().positive().optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(config.DEFAULT_PAGE_SIZE),
+  sort: z.enum(["createdAt", "quoteDate", "total", "quoteNumber"]).default("createdAt"),
+  order: z.enum(["asc", "desc"]).default("desc"),
+});
+
+/**
+ * Express middleware: parse body/query/params against a zod schema and replace
+ * the original with the parsed (typed) result. On failure, return 400 with details.
+ */
+export function validate(schemas) {
+  return (req, res, next) => {
+    try {
+      if (schemas.body) req.body = schemas.body.parse(req.body ?? {});
+      if (schemas.query) req.query = schemas.query.parse(req.query ?? {});
+      if (schemas.params) req.params = schemas.params.parse(req.params ?? {});
+      next();
+    } catch (e) {
+      const errors = (e.issues || []).map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      res.status(400).json({ error: "Dữ liệu không hợp lệ", details: errors });
+    }
+  };
+}

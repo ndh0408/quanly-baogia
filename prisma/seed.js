@@ -1,29 +1,58 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import { writeFileSync, existsSync, chmodSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const prisma = new PrismaClient();
+
+function generatePassword() {
+  // 16 chars URL-safe; mixes letters+numbers, enforces zod policy
+  return randomBytes(12).toString("base64url").replace(/[_-]/g, "x") + "A1";
+}
 
 async function main() {
   const adminUsername = process.env.ADMIN_USERNAME || "admin";
-  const adminPwd = process.env.ADMIN_PASSWORD || "admin123";
+  let adminPwd = process.env.ADMIN_PASSWORD;
+  let generated = false;
+  if (!adminPwd) {
+    adminPwd = generatePassword();
+    generated = true;
+  }
 
   const existingAdmin = await prisma.user.findUnique({ where: { username: adminUsername } });
   if (existingAdmin) {
-    console.log(`✓ Admin '${adminUsername}' đã tồn tại, bỏ qua.`);
+    console.log(`✓ Admin '${adminUsername}' đã tồn tại — bỏ qua tạo mới.`);
   } else {
     await prisma.user.create({
       data: {
         username: adminUsername,
-        passwordHash: await bcrypt.hash(adminPwd, 10),
+        passwordHash: await bcrypt.hash(adminPwd, Number(process.env.BCRYPT_COST || 12)),
         displayName: process.env.ADMIN_DISPLAY_NAME || "Quản trị viên",
         role: "admin",
       },
     });
-    console.log(`✓ Tạo admin: ${adminUsername} / ${adminPwd}`);
+
+    if (generated) {
+      // Write credentials to a gitignored local file instead of leaking to stdout / logs.
+      const credPath = path.join(__dirname, "..", ".admin-credentials.local");
+      const credContent =
+        `# Generated at seed time — DO NOT COMMIT\n` +
+        `# Read once, then change via /api/auth/change-password and delete this file.\n` +
+        `ADMIN_USERNAME=${adminUsername}\n` +
+        `ADMIN_PASSWORD=${adminPwd}\n`;
+      writeFileSync(credPath, credContent, { mode: 0o600, flag: "wx" });
+      try { chmodSync(credPath, 0o600); } catch {}
+      console.log(`✓ Admin tạo thành công. Mật khẩu lưu tại .admin-credentials.local (chmod 600).`);
+      console.log(`  Vui lòng đổi mật khẩu ngay và xóa file đó.`);
+    } else {
+      console.log(`✓ Admin '${adminUsername}' đã tạo theo ADMIN_PASSWORD từ env.`);
+    }
   }
 
-  // Companies
   const giaNguyen = await prisma.company.upsert({
     where: { code: "gia_nguyen" },
     create: {
@@ -38,7 +67,6 @@ async function main() {
   });
   console.log(`✓ Công ty: ${giaNguyen.name}`);
 
-  // Templates
   await prisma.quoteTemplate.upsert({
     where: { code: "marico_decor" },
     create: {

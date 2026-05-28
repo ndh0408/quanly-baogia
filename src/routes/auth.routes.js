@@ -1,70 +1,156 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../db.js";
+import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
+import { validate, LoginSchema, ChangePasswordSchema } from "../validators.js";
+import { audit } from "../audit.js";
+import { logger } from "../logger.js";
 
 const router = Router();
 
-router.post("/login", asyncHandler(async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: "Thiếu tên đăng nhập hoặc mật khẩu" });
-  }
-
-  const user = await prisma.user.findUnique({ where: { username } });
-  if (!user || !user.active) {
-    return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
-  }
-
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) {
-    return res.status(401).json({ error: "Sai mật khẩu" });
-  }
-
-  req.session.userId = user.id;
-  req.session.role = user.role;
-  req.session.displayName = user.displayName;
-  req.session.username = user.username;
-
-  res.json({
-    id: user.id,
-    username: user.username,
-    displayName: user.displayName,
-    role: user.role,
-    phone: user.phone,
-    title: user.title,
-  });
-}));
-
-router.post("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.clearCookie("connect.sid");
-    res.json({ ok: true });
-  });
+// Strict per-IP limit on login: blunt brute force at the network edge.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: config.RATE_LIMIT_LOGIN_PER_15M,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: "Quá nhiều lần đăng nhập sai, thử lại sau 15 phút" },
 });
 
-router.get("/me", requireAuth, asyncHandler(async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.session.userId },
-    select: { id: true, username: true, displayName: true, role: true, phone: true, title: true },
-  });
-  res.json(user);
-}));
+function clientIp(req) {
+  return (req.headers["x-forwarded-for"]?.split(",")[0]?.trim()) || req.ip || null;
+}
 
-router.post("/change-password", requireAuth, asyncHandler(async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-  if (!newPassword || newPassword.length < 4) {
-    return res.status(400).json({ error: "Mật khẩu mới tối thiểu 4 ký tự" });
-  }
-  const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
-  const ok = await bcrypt.compare(oldPassword || "", user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Mật khẩu cũ không đúng" });
+router.post(
+  "/login",
+  loginLimiter,
+  validate({ body: LoginSchema }),
+  asyncHandler(async (req, res) => {
+    const { username, password } = req.body;
+    const ip = clientIp(req);
+    const ua = req.headers["user-agent"] || null;
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, 10) },
-  });
+    const recordAttempt = (success, reason) =>
+      prisma.loginAttempt.create({ data: { username, ip, userAgent: ua, success, reason } }).catch(() => {});
+
+    const user = await prisma.user.findUnique({ where: { username } });
+
+    if (!user || !user.active) {
+      await recordAttempt(false, !user ? "no_such_user" : "inactive");
+      await audit(req, "login.failed", { resource: "user", resourceId: username, after: { reason: "no_such_user_or_inactive" } });
+      return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
+    }
+
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await recordAttempt(false, "locked");
+      await audit(req, "login.locked", { resource: "user", resourceId: user.id, actorId: user.id });
+      return res.status(423).json({
+        error: `Tài khoản tạm khóa đến ${user.lockedUntil.toISOString()}`,
+      });
+    }
+
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) {
+      const next = (user.failedAttempts || 0) + 1;
+      const shouldLock = next >= config.LOGIN_MAX_ATTEMPTS;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedAttempts: next,
+          lockedUntil: shouldLock
+            ? new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000)
+            : null,
+        },
+      });
+      await recordAttempt(false, "bad_password");
+      await audit(req, "login.failed", {
+        resource: "user",
+        resourceId: user.id,
+        actorId: user.id,
+        after: { failedAttempts: next, locked: shouldLock },
+      });
+      return res.status(401).json({
+        error: shouldLock
+          ? `Sai mật khẩu nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút`
+          : "Sai mật khẩu",
+      });
+    }
+
+    // Reset lockout counters + bookkeeping
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginIp: ip },
+    });
+
+    // Regenerate session ID to defeat session fixation
+    await new Promise((resolve, reject) =>
+      req.session.regenerate((err) => (err ? reject(err) : resolve()))
+    );
+    req.session.userId = user.id;
+    req.session.role = user.role;
+    req.session.displayName = user.displayName;
+    req.session.username = user.username;
+    await new Promise((resolve, reject) =>
+      req.session.save((err) => (err ? reject(err) : resolve()))
+    );
+
+    await recordAttempt(true, null);
+    await audit(req, "login.success", { resource: "user", resourceId: user.id, actorId: user.id });
+    logger.info({ userId: user.id, ip }, "login success");
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      role: user.role,
+      phone: user.phone,
+      title: user.title,
+    });
+  })
+);
+
+router.post("/logout", asyncHandler(async (req, res) => {
+  const userId = req.session?.userId;
+  await new Promise((resolve) => req.session.destroy(() => resolve()));
+  res.clearCookie("qly.sid");
+  if (userId) await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
   res.json({ ok: true });
 }));
+
+router.get(
+  "/me",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.session.userId },
+      select: { id: true, username: true, displayName: true, role: true, phone: true, title: true, lastLoginAt: true },
+    });
+    res.json(user);
+  })
+);
+
+router.post(
+  "/change-password",
+  requireAuth,
+  validate({ body: ChangePasswordSchema }),
+  asyncHandler(async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
+    const ok = await bcrypt.compare(oldPassword, user.passwordHash);
+    if (!ok) {
+      await audit(req, "password.change.failed", { resource: "user", resourceId: user.id, actorId: user.id });
+      return res.status(401).json({ error: "Mật khẩu cũ không đúng" });
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST) },
+    });
+    await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
+    res.json({ ok: true });
+  })
+);
 
 export default router;

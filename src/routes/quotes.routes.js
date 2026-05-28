@@ -1,30 +1,28 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
+import {
+  validate,
+  QuoteCreateSchema,
+  QuoteUpdateSchema,
+  ListQuerySchema,
+} from "../validators.js";
+import { computeQuoteTotals, totalsToJson, D } from "../money.js";
+import { nextQuoteNumber } from "../quoteNumber.js";
+import { audit } from "../audit.js";
 
 const router = Router();
 router.use(requireAuth);
 
+const idParam = z.object({ id: z.coerce.number().int().positive() });
+
 function canEdit(quote, session) {
   if (session.role === "admin" || session.role === "manager") return true;
-  return quote.createdById === session.userId && (quote.status === "draft" || quote.status === "rejected");
-}
-
-function computeQuoteTotals(quote) {
-  const vatPct = Number(quote.vatPercent) || 0;
-  const sheetTotals = (quote.sheets || []).map(sh => {
-    const subtotal = (sh.items || []).reduce((s, it) => {
-      const qty = Number(it.quantity) || 0;
-      const days = Number(it.days) || 1;
-      const price = Number(it.unitPrice) || 0;
-      // detect days-based multiplication if days is set
-      return s + (it.days != null ? price * qty * days : price * qty);
-    }, 0);
-    return { sheetId: sh.id, subtotal };
-  });
-  const subtotal = sheetTotals.reduce((s, x) => s + x.subtotal, 0);
-  const vat = subtotal * vatPct / 100;
-  return { subtotal, vat, total: subtotal + vat, sheetTotals };
+  return (
+    quote.createdById === session.userId &&
+    (quote.status === "draft" || quote.status === "rejected")
+  );
 }
 
 const QUOTE_INCLUDE = {
@@ -40,101 +38,143 @@ const QUOTE_INCLUDE = {
   approvedBy: { select: { id: true, username: true, displayName: true } },
 };
 
-router.get("/", asyncHandler(async (req, res) => {
-  const where = {};
-  if (req.session.role === "employee") where.createdById = req.session.userId;
-  if (req.query.status) where.status = String(req.query.status);
-  if (req.query.companyId) where.companyId = parseInt(req.query.companyId, 10);
-  if (req.query.q) {
-    where.OR = [
-      { quoteNumber: { contains: String(req.query.q), mode: "insensitive" } },
-      { title: { contains: String(req.query.q), mode: "insensitive" } },
-      { toCompany: { contains: String(req.query.q), mode: "insensitive" } },
-    ];
-  }
-  const quotes = await prisma.quote.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: QUOTE_INCLUDE,
-  });
-  res.json(quotes.map(q => ({ ...q, ...computeQuoteTotals(q) })));
-}));
-
-router.get("/next-number", asyncHandler(async (req, res) => {
-  const last = await prisma.quote.findFirst({
-    where: { quoteNumber: { startsWith: "GN" } },
-    orderBy: { id: "desc" },
-  });
-  let n = 1;
-  if (last) {
-    const m = last.quoteNumber.match(/GN(\d+)/);
-    if (m) n = parseInt(m[1], 10) + 1;
-  }
-  res.json({ quoteNumber: `GN${String(n).padStart(2, "0")}` });
-}));
-
-router.get("/:id", asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const quote = await prisma.quote.findUnique({
-    where: { id },
-    include: QUOTE_INCLUDE,
-  });
-  if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-  if (req.session.role === "employee" && quote.createdById !== req.session.userId) {
-    return res.status(403).json({ error: "Bạn không có quyền xem báo giá này" });
-  }
-  res.json({ ...quote, ...computeQuoteTotals(quote) });
-}));
-
-function stripNewlines(s) {
-  if (s == null) return s;
-  return String(s).replace(/[\r\n]+/g, " ").trim();
-}
-
-// For multi-line fields: keep \n but normalize \r\n → \n and trim
-function multiline(s) {
-  if (s == null) return s;
-  return String(s).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+/** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
+function presentQuote(q) {
+  const totals = computeQuoteTotals(q);
+  return {
+    ...q,
+    vatPercent: Number(q.vatPercent),
+    subtotal: Number(q.subtotal ?? totals.subtotal),
+    vat: Number(q.vat ?? totals.vat),
+    total: Number(q.total ?? totals.total),
+    sheets: (q.sheets || []).map((s) => ({
+      ...s,
+      items: (s.items || []).map((it) => ({
+        ...it,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+        days: it.days != null ? Number(it.days) : null,
+      })),
+    })),
+    ...totalsToJson(totals),
+  };
 }
 
 function buildSheetsCreate(sheets) {
   return (sheets || []).map((s, sIdx) => ({
     templateId: Number(s.templateId),
-    name: stripNewlines(s.name) || null,
+    name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
     order: s.order != null ? Number(s.order) : sIdx + 1,
     items: {
       create: (s.items || []).map((it, iIdx) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
-        name: multiline(it.name) || "",             // ALLOW newlines in Hạng Mục
-        detail: multiline(it.detail) || null,        // ALLOW newlines in Chi Tiết
-        unit: stripNewlines(it.unit) || null,
-        quantity: Number(it.quantity) || 0,
-        unitPrice: Number(it.unitPrice) || 0,
-        days: it.days != null && it.days !== "" ? Number(it.days) : null,
-        notes: multiline(it.notes) || null,          // ALLOW newlines in Notes
+        name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
+        detail: it.detail ? String(it.detail).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
+        unit: it.unit?.replace(/[\r\n]+/g, " ").trim() || null,
+        quantity: D(it.quantity),
+        unitPrice: D(it.unitPrice),
+        days: it.days != null ? D(it.days) : null,
+        notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
       })),
     },
   }));
 }
 
-router.post("/", asyncHandler(async (req, res) => {
-  const b = req.body;
-  if (!b.quoteNumber || !b.title || !b.toCompany || !b.companyId) {
-    return res.status(400).json({ error: "Thiếu số BG / tiêu đề / khách hàng / công ty" });
-  }
-  if (!Array.isArray(b.sheets) || b.sheets.length === 0) {
-    return res.status(400).json({ error: "Báo giá phải có ít nhất 1 sheet" });
-  }
-  const exists = await prisma.quote.findUnique({ where: { quoteNumber: b.quoteNumber } });
-  if (exists) return res.status(400).json({ error: "Số báo giá đã tồn tại" });
+// LIST
+router.get(
+  "/",
+  validate({ query: ListQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { q, status, companyId, from, to, page, size, sort, order } = req.query;
+    const where = {};
+    if (req.session.role === "employee") where.createdById = req.session.userId;
+    if (status) where.status = status;
+    if (companyId) where.companyId = companyId;
+    if (from || to) {
+      where.quoteDate = {};
+      if (from) where.quoteDate.gte = from;
+      if (to) where.quoteDate.lte = to;
+    }
+    if (q) {
+      where.OR = [
+        { quoteNumber: { contains: q, mode: "insensitive" } },
+        { title: { contains: q, mode: "insensitive" } },
+        { toCompany: { contains: q, mode: "insensitive" } },
+      ];
+    }
+    const [total, rows] = await Promise.all([
+      prisma.quote.count({ where }),
+      prisma.quote.findMany({
+        where,
+        orderBy: { [sort]: order },
+        include: QUOTE_INCLUDE,
+        skip: (page - 1) * size,
+        take: size,
+      }),
+    ]);
+    res.json({
+      data: rows.map(presentQuote),
+      meta: {
+        total,
+        page,
+        size,
+        pageCount: Math.ceil(total / size),
+        hasNext: page * size < total,
+      },
+    });
+  })
+);
 
-  // Look up company to inherit default From info if not provided
-  const company = await prisma.company.findUnique({ where: { id: Number(b.companyId) } });
-  if (!company) return res.status(400).json({ error: "Không tìm thấy công ty" });
+// NEXT NUMBER (preview only - real allocation happens at POST time)
+router.get(
+  "/next-number",
+  asyncHandler(async (_req, res) => {
+    // Show what the NEXT number WOULD be without actually consuming it.
+    const year = new Date().getFullYear();
+    const c = await prisma.quoteCounter.findUnique({
+      where: { prefix_year: { prefix: "GN", year } },
+    });
+    const yy = String(year).slice(-2);
+    const nn = String((c?.value ?? 0) + 1).padStart(3, "0");
+    res.json({ quoteNumber: `GN${yy}${nn}`, note: "Số thực sẽ cấp khi lưu" });
+  })
+);
 
-  const quote = await prisma.quote.create({
-    data: {
-      quoteNumber: b.quoteNumber,
+// GET ONE
+router.get(
+  "/:id",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
+    if (req.session.role === "employee" && quote.createdById !== req.session.userId) {
+      return res.status(403).json({ error: "Bạn không có quyền xem báo giá này" });
+    }
+    res.json(presentQuote(quote));
+  })
+);
+
+// CREATE
+router.post(
+  "/",
+  validate({ body: QuoteCreateSchema }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const company = await prisma.company.findFirst({ where: { id: b.companyId } });
+    if (!company) return res.status(400).json({ error: "Không tìm thấy công ty" });
+
+    // Auto-allocate quote number atomically if client didn't supply one
+    let quoteNumber = b.quoteNumber;
+    if (!quoteNumber) {
+      quoteNumber = await nextQuoteNumber("GN");
+    } else {
+      const dup = await prisma.quote.findUnique({ where: { quoteNumber } });
+      if (dup) return res.status(409).json({ error: "Số báo giá đã tồn tại" });
+    }
+
+    const draft = {
+      quoteNumber,
       title: b.title,
       toCompany: b.toCompany,
       toContact: b.toContact || null,
@@ -144,166 +184,245 @@ router.post("/", asyncHandler(async (req, res) => {
       fromTitle: b.fromTitle || null,
       fromAddress: b.fromAddress || company.address,
       city: b.city || company.city || "TP. Hồ Chí Minh",
-      quoteDate: b.quoteDate ? new Date(b.quoteDate) : new Date(),
+      quoteDate: b.quoteDate || new Date(),
       greeting: b.greeting || undefined,
-      vatPercent: b.vatPercent == null ? 8 : Number(b.vatPercent),
+      vatPercent: D(b.vatPercent),
       notes: b.notes || null,
       status: "draft",
       createdById: req.session.userId,
-      sheets: { create: buildSheetsCreate(b.sheets) },
-    },
-    include: QUOTE_INCLUDE,
-  });
-  res.status(201).json({ ...quote, ...computeQuoteTotals(quote) });
-}));
+    };
 
-router.put("/:id", asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = await prisma.quote.findUnique({ where: { id }, include: { sheets: true } });
-  if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-  if (!canEdit(existing, req.session)) {
-    return res.status(403).json({ error: "Bạn không thể sửa báo giá này" });
-  }
+    // Compute totals from sheets+items BEFORE writing so we store snapshot
+    const synthetic = { vatPercent: draft.vatPercent, sheets: b.sheets };
+    const t = computeQuoteTotals(synthetic);
+    draft.subtotal = t.subtotal;
+    draft.vat = t.vat;
+    draft.total = t.total;
 
-  const b = req.body;
-  const data = {};
-  const fields = ["title", "toCompany", "toContact", "fromContact",
-    "fromPhone", "fromTitle", "fromAddress", "city", "greeting", "notes"];
-  for (const f of fields) if (b[f] !== undefined) data[f] = b[f] || null;
-  if (b.quoteDate) data.quoteDate = new Date(b.quoteDate);
-  if (b.vatPercent !== undefined) data.vatPercent = Number(b.vatPercent);
-  if (b.companyId !== undefined) data.companyId = Number(b.companyId);
-  if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
-    const dup = await prisma.quote.findUnique({ where: { quoteNumber: b.quoteNumber } });
-    if (dup) return res.status(400).json({ error: "Số báo giá đã tồn tại" });
-    data.quoteNumber = b.quoteNumber;
-  }
+    const quote = await prisma.quote.create({
+      data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) } },
+      include: QUOTE_INCLUDE,
+    });
 
-  // Sheets full replace if provided
-  if (Array.isArray(b.sheets)) {
-    // Delete all existing sheets (cascade deletes items)
-    await prisma.quoteSheet.deleteMany({ where: { quoteId: id } });
-    data.sheets = { create: buildSheetsCreate(b.sheets) };
-  }
+    await audit(req, "quote.create", {
+      resource: "quote",
+      resourceId: quote.id,
+      after: { quoteNumber: quote.quoteNumber, total: Number(quote.total), status: quote.status },
+    });
 
-  const quote = await prisma.quote.update({
-    where: { id },
-    data,
-    include: QUOTE_INCLUDE,
-  });
-  res.json({ ...quote, ...computeQuoteTotals(quote) });
-}));
+    res.status(201).json(presentQuote(quote));
+  })
+);
 
-router.post("/:id/submit", asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-  if (req.session.role === "employee" && existing.createdById !== req.session.userId) {
-    return res.status(403).json({ error: "Không có quyền" });
-  }
-  if (!["draft", "rejected"].includes(existing.status)) {
-    return res.status(400).json({ error: "Chỉ trình duyệt được báo giá ở trạng thái Nháp hoặc Bị từ chối" });
-  }
-  const quote = await prisma.quote.update({
-    where: { id },
-    data: { status: "pending", approvedById: null },
-    include: QUOTE_INCLUDE,
-  });
-  res.json({ ...quote, ...computeQuoteTotals(quote) });
-}));
+// UPDATE
+router.put(
+  "/:id",
+  validate({ params: idParam, body: QuoteUpdateSchema }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
+    if (!canEdit(existing, req.session)) {
+      return res.status(403).json({ error: "Bạn không thể sửa báo giá này" });
+    }
 
-router.post("/:id/approve", requireRole("admin", "manager"), asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-  if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
-  const quote = await prisma.quote.update({
-    where: { id },
-    data: { status: "approved", approvedById: req.session.userId },
-    include: QUOTE_INCLUDE,
-  });
-  res.json({ ...quote, ...computeQuoteTotals(quote) });
-}));
+    const b = req.body;
+    const data = {};
+    for (const f of ["title", "toCompany", "toContact", "fromContact", "fromPhone", "fromTitle", "fromAddress", "city", "greeting", "notes"]) {
+      if (b[f] !== undefined) data[f] = b[f] || null;
+    }
+    if (b.quoteDate) data.quoteDate = b.quoteDate;
+    if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
+    if (b.companyId !== undefined) data.companyId = b.companyId;
+    if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
+      const dup = await prisma.quote.findUnique({ where: { quoteNumber: b.quoteNumber } });
+      if (dup) return res.status(409).json({ error: "Số báo giá đã tồn tại" });
+      data.quoteNumber = b.quoteNumber;
+    }
 
-router.post("/:id/reject", requireRole("admin", "manager"), asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-  if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
-  const quote = await prisma.quote.update({
-    where: { id },
-    data: { status: "rejected", approvedById: req.session.userId },
-    include: QUOTE_INCLUDE,
-  });
-  res.json({ ...quote, ...computeQuoteTotals(quote) });
-}));
+    // Sheets full replace + recompute snapshot totals
+    let updated;
+    if (Array.isArray(b.sheets)) {
+      const vatPct = data.vatPercent ?? existing.vatPercent;
+      const t = computeQuoteTotals({ vatPercent: vatPct, sheets: b.sheets });
+      data.subtotal = t.subtotal;
+      data.vat = t.vat;
+      data.total = t.total;
+      updated = await prisma.$transaction(async (tx) => {
+        await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
+        return tx.quote.update({
+          where: { id },
+          data: { ...data, sheets: { create: buildSheetsCreate(b.sheets) } },
+          include: QUOTE_INCLUDE,
+        });
+      });
+    } else {
+      // Only metadata changed; recompute totals if vatPercent changed
+      if (data.vatPercent !== undefined) {
+        const t = computeQuoteTotals({ vatPercent: data.vatPercent, sheets: existing.sheets });
+        data.subtotal = t.subtotal;
+        data.vat = t.vat;
+        data.total = t.total;
+      }
+      updated = await prisma.quote.update({
+        where: { id },
+        data,
+        include: QUOTE_INCLUDE,
+      });
+    }
 
-router.delete("/:id", asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-  const isOwnerDraft = existing.createdById === req.session.userId &&
-                       (existing.status === "draft" || existing.status === "rejected");
-  if (!isOwnerDraft && req.session.role !== "admin") {
-    return res.status(403).json({ error: "Chỉ admin hoặc người tạo (nháp/từ chối) mới được xóa" });
-  }
-  await prisma.quote.delete({ where: { id } });
-  res.json({ ok: true });
-}));
+    await audit(req, "quote.update", {
+      resource: "quote",
+      resourceId: id,
+      before: { total: Number(existing.total), status: existing.status },
+      after: { total: Number(updated.total), status: updated.status },
+    });
 
-router.post("/:id/duplicate", asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const src = await prisma.quote.findUnique({ where: { id }, include: QUOTE_INCLUDE });
-  if (!src) return res.status(404).json({ error: "Không tìm thấy" });
+    res.json(presentQuote(updated));
+  })
+);
 
-  const last = await prisma.quote.findFirst({
-    where: { quoteNumber: { startsWith: "GN" } },
-    orderBy: { id: "desc" },
-  });
-  let n = 1;
-  if (last) {
-    const m = last.quoteNumber.match(/GN(\d+)/);
-    if (m) n = parseInt(m[1], 10) + 1;
-  }
-  const newNumber = `GN${String(n).padStart(2, "0")}`;
+// SUBMIT for approval
+router.post(
+  "/:id/submit",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (req.session.role === "employee" && existing.createdById !== req.session.userId) {
+      return res.status(403).json({ error: "Không có quyền" });
+    }
+    if (!["draft", "rejected"].includes(existing.status)) {
+      return res.status(400).json({ error: "Chỉ trình duyệt được báo giá ở trạng thái Nháp hoặc Bị từ chối" });
+    }
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "pending", approvedById: null },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.submit", { resource: "quote", resourceId: id });
+    res.json(presentQuote(quote));
+  })
+);
 
-  const created = await prisma.quote.create({
-    data: {
-      quoteNumber: newNumber,
-      title: src.title + " (copy)",
-      toCompany: src.toCompany,
-      toContact: src.toContact,
-      companyId: src.companyId,
-      fromContact: src.fromContact,
-      fromPhone: src.fromPhone,
-      fromTitle: src.fromTitle,
-      fromAddress: src.fromAddress,
-      city: src.city,
-      quoteDate: new Date(),
-      greeting: src.greeting,
-      vatPercent: src.vatPercent,
-      notes: src.notes,
-      status: "draft",
-      createdById: req.session.userId,
-      sheets: {
-        create: src.sheets.map((s, sIdx) => ({
-          templateId: s.templateId,
-          name: s.name,
-          order: s.order != null ? s.order : sIdx + 1,
-          items: {
-            create: s.items.map((it, iIdx) => ({
-              order: it.order != null ? it.order : iIdx + 1,
-              name: it.name, detail: it.detail, unit: it.unit,
-              quantity: it.quantity, unitPrice: it.unitPrice,
-              days: it.days, notes: it.notes,
-            })),
-          },
-        })),
+router.post(
+  "/:id/approve",
+  requireRole("admin", "manager"),
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "approved", approvedById: req.session.userId },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.approve", { resource: "quote", resourceId: id });
+    res.json(presentQuote(quote));
+  })
+);
+
+router.post(
+  "/:id/reject",
+  requireRole("admin", "manager"),
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "rejected", approvedById: req.session.userId },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body?.reason || null } });
+    res.json(presentQuote(quote));
+  })
+);
+
+// SOFT DELETE
+router.delete(
+  "/:id",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    const isOwnerDraft =
+      existing.createdById === req.session.userId &&
+      (existing.status === "draft" || existing.status === "rejected");
+    if (!isOwnerDraft && req.session.role !== "admin") {
+      return res.status(403).json({ error: "Chỉ admin hoặc người tạo (nháp/từ chối) mới được xóa" });
+    }
+    await prisma.quote.delete({ where: { id } }); // soft delete via middleware
+    await audit(req, "quote.delete", { resource: "quote", resourceId: id, before: { status: existing.status } });
+    res.json({ ok: true });
+  })
+);
+
+// DUPLICATE
+router.post(
+  "/:id/duplicate",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const src = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    if (!src) return res.status(404).json({ error: "Không tìm thấy" });
+
+    const newNumber = await nextQuoteNumber("GN");
+    const synthetic = { vatPercent: src.vatPercent, sheets: src.sheets };
+    const t = computeQuoteTotals(synthetic);
+
+    const created = await prisma.quote.create({
+      data: {
+        quoteNumber: newNumber,
+        title: src.title + " (copy)",
+        toCompany: src.toCompany,
+        toContact: src.toContact,
+        companyId: src.companyId,
+        fromContact: src.fromContact,
+        fromPhone: src.fromPhone,
+        fromTitle: src.fromTitle,
+        fromAddress: src.fromAddress,
+        city: src.city,
+        quoteDate: new Date(),
+        greeting: src.greeting,
+        vatPercent: src.vatPercent,
+        notes: src.notes,
+        status: "draft",
+        subtotal: t.subtotal,
+        vat: t.vat,
+        total: t.total,
+        createdById: req.session.userId,
+        sheets: {
+          create: src.sheets.map((s, sIdx) => ({
+            templateId: s.templateId,
+            name: s.name,
+            order: s.order != null ? s.order : sIdx + 1,
+            items: {
+              create: s.items.map((it, iIdx) => ({
+                order: it.order != null ? it.order : iIdx + 1,
+                name: it.name,
+                detail: it.detail,
+                unit: it.unit,
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                days: it.days,
+                notes: it.notes,
+              })),
+            },
+          })),
+        },
       },
-    },
-    include: QUOTE_INCLUDE,
-  });
-  res.status(201).json({ ...created, ...computeQuoteTotals(created) });
-}));
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.duplicate", { resource: "quote", resourceId: created.id, after: { from: src.id, quoteNumber: created.quoteNumber } });
+    res.status(201).json(presentQuote(created));
+  })
+);
 
 export default router;
