@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger.js";
-import { requestId, notFound, errorHandler } from "./middleware.js";
+import { requestId, notFound, errorHandler, bearerAuth } from "./middleware.js";
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import quotesRoutes from "./routes/quotes.routes.js";
@@ -23,6 +23,12 @@ import notificationsRoutes from "./routes/notifications.routes.js";
 import mfaRoutes from "./routes/mfa.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
+import filesRoutes from "./routes/files.routes.js";
+import jobsRoutes from "./routes/jobs.routes.js";
+import streamRoutes from "./routes/stream.routes.js";
+import webhooksRoutes from "./routes/webhooks.routes.js";
+import apiKeysRoutes from "./routes/apiKeys.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
@@ -97,6 +103,9 @@ app.use(
   })
 );
 
+// Accept Bearer JWT as an alternative to session cookies on every API call.
+app.use("/api/", bearerAuth);
+
 // API-wide rate limit (DoS protection). Login route has its own stricter limit.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -120,10 +129,24 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/mfa", mfaRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/files", filesRoutes);
+app.use("/api", jobsRoutes); // mounts /api/quotes/:id/export and /api/jobs/:queue/:id
+app.use("/api/stream", streamRoutes);
+app.use("/api/webhooks", webhooksRoutes);
+app.use("/api/api-keys", apiKeysRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Health probes
+import { prisma as healthDb } from "./db.js";
 app.get("/livez", (_req, res) => res.json({ ok: true }));
-app.get("/readyz", (_req, res) => res.json({ ok: true })); // TODO: check DB ping
+app.get("/readyz", async (_req, res) => {
+  try {
+    await healthDb.$queryRawUnsafe("SELECT 1");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false, err: e.message });
+  }
+});
 app.get("/api/health", (_req, res) => res.json({ ok: true, t: new Date() }));
 
 app.use(notFound);

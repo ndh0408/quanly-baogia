@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quanly-config
+  namespace: quanly
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  BCRYPT_COST: "12"
+  PASSWORD_MIN_LENGTH: "8"
+  LOGIN_MAX_ATTEMPTS: "5"
+  LOGIN_LOCKOUT_MINUTES: "15"
+  RATE_LIMIT_LOGIN_PER_15M: "10"
+  RATE_LIMIT_API_PER_MIN: "120"
+  DEFAULT_PAGE_SIZE: "20"
+  MAX_PAGE_SIZE: "100"
+  JWT_ACCESS_TTL: "15m"
+  JWT_REFRESH_TTL_DAYS: "7"
+  S3_REGION: "auto"
+  S3_BUCKET: "quanly"
+  S3_FORCE_PATH_STYLE: "true"
+  TRUST_PROXY: "1"

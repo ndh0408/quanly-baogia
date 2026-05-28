@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quanly-worker
+  namespace: quanly
+  labels: { app: quanly, component: worker }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: quanly, component: worker }
+  template:
+    metadata:
+      labels: { app: quanly, component: worker }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: ghcr.io/ndh0408/quanly-baogia:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: quanly-config }
+            - secretRef: { name: quanly-secrets }
+          env:
+            - { name: WORKER_MODE, value: "true" }
+            - { name: WORKER_CONCURRENCY, value: "4" }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 1Gi }
+          command: ["node", "src/worker.js"]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: quanly-worker
+  namespace: quanly
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: quanly-worker
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

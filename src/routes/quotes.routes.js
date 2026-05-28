@@ -14,6 +14,7 @@ import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
 import { notify } from "../notifications.js";
+import { emit as emitWebhook } from "../webhooks.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -216,6 +217,7 @@ router.post(
       resourceId: quote.id,
       after: { quoteNumber: quote.quoteNumber, total: Number(quote.total), status: quote.status },
     });
+    emitWebhook("quote.created", { id: quote.id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
 
     res.status(201).json(presentQuote(quote));
   })
@@ -328,6 +330,7 @@ router.post(
     }
 
     await audit(req, "quote.submit", { resource: "quote", resourceId: id });
+    emitWebhook("quote.submitted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );
@@ -372,6 +375,7 @@ router.post(
     });
 
     await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { level: pending.level, complete } });
+    if (complete) emitWebhook("quote.approved", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );
@@ -408,6 +412,7 @@ router.post(
     });
 
     await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body.comment || null } });
+    emitWebhook("quote.rejected", { id, quoteNumber: quote.quoteNumber }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );
@@ -429,6 +434,7 @@ router.post(
       include: QUOTE_INCLUDE,
     });
     await audit(req, "quote.send", { resource: "quote", resourceId: id });
+    emitWebhook("quote.sent", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );
@@ -444,6 +450,7 @@ router.post(
       include: QUOTE_INCLUDE,
     });
     await audit(req, "quote.convert", { resource: "quote", resourceId: id });
+    emitWebhook("quote.converted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );

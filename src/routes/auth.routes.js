@@ -9,6 +9,7 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate, LoginSchema, ChangePasswordSchema } from "../validators.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
+import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllForUser } from "../jwt.js";
 
 const router = Router();
 
@@ -177,6 +178,100 @@ router.post(
       data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST) },
     });
     await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
+    res.json({ ok: true });
+  })
+);
+
+// === JWT API surface (for mobile / SDK / public API clients) ===
+
+router.post(
+  "/token",
+  loginLimiter,
+  validate({ body: LoginSchema.extend({ mfaToken: z.string().regex(/^\d{6,8}$/).optional() }) }),
+  asyncHandler(async (req, res) => {
+    // Same shape as /login but issues JWT pair instead of setting session.
+    const { username, password, mfaToken } = req.body;
+    const ip = clientIp(req);
+    const ua = req.headers["user-agent"] || null;
+
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user || !user.active) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      return res.status(423).json({ error: `Tài khoản tạm khóa đến ${user.lockedUntil.toISOString()}` });
+    }
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) {
+      const next = (user.failedAttempts || 0) + 1;
+      const lock = next >= config.LOGIN_MAX_ATTEMPTS;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedAttempts: next, lockedUntil: lock ? new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000) : null },
+      });
+      return res.status(401).json({ error: lock ? "Khoá tạm" : "Sai mật khẩu" });
+    }
+
+    if (user.mfaEnabled) {
+      if (!mfaToken) return res.status(401).json({ error: "Cần MFA", mfaRequired: true });
+      const okMfa = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: "base32", token: mfaToken, window: 1 })
+        || (user.mfaBackupCodes || []).includes(mfaToken.toUpperCase());
+      if (!okMfa) return res.status(401).json({ error: "MFA sai", mfaRequired: true });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginIp: ip },
+    });
+
+    const access = signAccessToken(user);
+    const refresh = await issueRefreshToken(user.id, { ip, userAgent: ua });
+    await audit(req, "login.token", { resource: "user", resourceId: user.id, actorId: user.id });
+    res.json({
+      tokenType: "Bearer",
+      accessToken: access,
+      refreshToken: refresh.token,
+      refreshExpiresAt: refresh.expiresAt,
+      user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+    });
+  })
+);
+
+router.post(
+  "/token/refresh",
+  validate({ body: z.object({ refreshToken: z.string().min(20) }) }),
+  asyncHandler(async (req, res) => {
+    try {
+      const { user, refresh } = await rotateRefreshToken(req.body.refreshToken, {
+        ip: clientIp(req),
+        userAgent: req.headers["user-agent"] || null,
+      });
+      const access = signAccessToken(user);
+      res.json({
+        tokenType: "Bearer",
+        accessToken: access,
+        refreshToken: refresh.token,
+        refreshExpiresAt: refresh.expiresAt,
+      });
+    } catch (e) {
+      res.status(e.status || 401).json({ error: e.message });
+    }
+  })
+);
+
+router.post(
+  "/token/revoke",
+  validate({ body: z.object({ refreshToken: z.string().min(20) }) }),
+  asyncHandler(async (req, res) => {
+    await revokeRefreshToken(req.body.refreshToken);
+    res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/token/revoke-all",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await revokeAllForUser(req.session.userId);
+    await audit(req, "token.revoke-all", { resource: "user", resourceId: req.session.userId });
     res.json({ ok: true });
   })
 );

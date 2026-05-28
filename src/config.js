@@ -22,6 +22,23 @@ const schema = z.object({
   CORS_ORIGINS: z.string().optional(),
   // Trust proxy (Nginx, Cloudflare). Set 1 (one hop) or true for any.
   TRUST_PROXY: z.string().optional(),
+  // JWT
+  JWT_SECRET: z.string().min(16).optional(),
+  JWT_ACCESS_TTL: z.string().default("15m"),
+  JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).default(7),
+  // Redis (BullMQ, rate-limit-redis, cache)
+  REDIS_URL: z.string().optional(),
+  // S3 / MinIO
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default("auto"),
+  S3_ACCESS_KEY: z.string().optional(),
+  S3_SECRET_KEY: z.string().optional(),
+  S3_BUCKET: z.string().default("quanly"),
+  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  // Telegram
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  // Webhook
+  WEBHOOK_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -46,5 +63,8 @@ if (
   console.error("❌ SESSION_SECRET unsafe in production (must be ≥ 32 chars and not a default).");
   process.exit(1);
 }
+
+// Derive JWT secret from SESSION_SECRET if not explicitly set (still keeps it private)
+if (!config.JWT_SECRET) config.JWT_SECRET = config.SESSION_SECRET;
 
 export const isProd = config.NODE_ENV === "production";

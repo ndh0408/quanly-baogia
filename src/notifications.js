@@ -1,5 +1,7 @@
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
+import { publish } from "./sse.js";
+import { runOrQueue, QUEUES } from "./queue.js";
 
 /**
  * Create an in-app notification row for a user. Best-effort; failure logged not thrown.
@@ -15,7 +17,7 @@ import { logger } from "./logger.js";
  */
 export async function notify(userId, notif) {
   try {
-    await prisma.notification.create({
+    const row = await prisma.notification.create({
       data: {
         userId,
         channel: notif.channel || "in_app",
@@ -26,6 +28,23 @@ export async function notify(userId, notif) {
         resourceId: notif.resourceId != null ? String(notif.resourceId) : null,
       },
     });
+
+    // Realtime push via SSE
+    publish(userId, "notification", {
+      id: row.id.toString(),
+      title: row.title,
+      body: row.body,
+      link: row.link,
+      createdAt: row.createdAt,
+    });
+
+    // Optional telegram broadcast (if user has a chat_id stored elsewhere — left as hook)
+    if (notif.telegramChatId) {
+      await runOrQueue(QUEUES.NOTIFY, "telegram", {
+        chatId: notif.telegramChatId,
+        text: `*${notif.title}*\n${notif.body}`,
+      });
+    }
   } catch (e) {
     logger.error({ err: e.message, userId }, "notify failed");
   }

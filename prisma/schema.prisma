@@ -403,6 +403,50 @@ model AuditEvent {
   @@index([action, createdAt(sort: Desc)])
 }
 
+// === Webhook out (integrations) ===
+model Webhook {
+  id        Int      @id @default(autoincrement())
+  url       String
+  events    String[] @default([])  // ["quote.approved", "quote.sent", ...]
+  secret    String              // HMAC signing secret
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  deliveries WebhookDelivery[]
+
+  @@index([active])
+}
+
+model WebhookDelivery {
+  id          BigInt   @id @default(autoincrement())
+  webhookId   Int
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event       String
+  payload     Json
+  responseStatus Int?
+  responseBody  String?
+  attempt     Int      @default(1)
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([webhookId, createdAt(sort: Desc)])
+}
+
+// === Public API keys ===
+model ApiKey {
+  id        Int      @id @default(autoincrement())
+  name      String
+  prefix    String   @unique             // first 8 chars, displayed
+  keyHash   String   @unique             // sha256(full key) for lookup
+  scopes    String[] @default([])        // ["quotes:read", "quotes:write", ...]
+  active    Boolean  @default(true)
+  lastUsedAt DateTime?
+  createdById Int?
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  @@index([active, expiresAt])
+}
+
 model LoginAttempt {
   id        BigInt   @id @default(autoincrement())
   username  String

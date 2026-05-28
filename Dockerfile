@@ -17,7 +17,7 @@ ENV NODE_ENV=production \
     NPM_CONFIG_PRODUCTION=true \
     PORT=3000
 
-RUN apk add --no-cache openssl libc6-compat tini \
+RUN apk add --no-cache openssl libc6-compat tini postgresql16-client \
  && addgroup -S app && adduser -S app -G app
 
 # Copy hoisted production deps + generated Prisma client

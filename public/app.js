@@ -82,7 +82,11 @@ async function loadMeta() {
 }
 
 function render() {
-  if (!state.user) return renderLogin();
+  if (!state.user) {
+    if (state._sse) { try { state._sse.close(); } catch {} state._sse = null; }
+    return renderLogin();
+  }
+  startSSE();
   renderShell();
 }
 
@@ -181,6 +185,25 @@ function renderShell() {
 
   // Refresh notification + approval queue badges
   refreshBadges();
+}
+
+// --- Realtime SSE listener ---
+function startSSE() {
+  if (state._sse) return; // already open
+  try {
+    const es = new EventSource("/api/stream/events");
+    es.addEventListener("notification", (e) => {
+      try {
+        const n = JSON.parse(e.data);
+        toast(`🔔 ${n.title}`, "info");
+        refreshBadges();
+      } catch {}
+    });
+    es.onerror = () => { /* retry handled by browser */ };
+    state._sse = es;
+  } catch (e) {
+    console.warn("SSE failed", e);
+  }
 }
 
 async function refreshBadges() {

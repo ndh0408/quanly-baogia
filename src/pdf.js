@@ -1,60 +1,89 @@
 import PDFDocument from "pdfkit";
-import { D } from "./money.js";
+import path from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { logger } from "./logger.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FONT_DIR = path.join(__dirname, "..", "fonts");
+
+const FONT_PATHS = {
+  regular: path.join(FONT_DIR, "Times.ttf"),
+  bold: path.join(FONT_DIR, "Times-Bold.ttf"),
+  italic: path.join(FONT_DIR, "Times-Italic.ttf"),
+};
+
+let hasUnicodeFont = null;
+function checkFontsOnce() {
+  if (hasUnicodeFont !== null) return hasUnicodeFont;
+  hasUnicodeFont = existsSync(FONT_PATHS.regular) && existsSync(FONT_PATHS.bold);
+  if (!hasUnicodeFont) {
+    logger.warn({ fontDir: FONT_DIR }, "PDF Unicode fonts missing — Vietnamese diacritics will not render. See fonts/README.md");
+  }
+  return hasUnicodeFont;
+}
 
 const fmt = (n) => Number(n).toLocaleString("vi-VN");
 
-/**
- * Render a quote to a PDF buffer. Single-tab summary layout — not pixel-for-pixel
- * the same as the Excel template (which is what xlsx export is for), but a clean
- * professional PDF the customer can read on phone.
- */
+function registerFonts(doc) {
+  if (checkFontsOnce()) {
+    doc.registerFont("body", FONT_PATHS.regular);
+    doc.registerFont("bold", FONT_PATHS.bold);
+    if (existsSync(FONT_PATHS.italic)) doc.registerFont("italic", FONT_PATHS.italic);
+    else doc.registerFont("italic", FONT_PATHS.regular);
+  } else {
+    // Built-in PDF Times — ASCII only
+    doc.registerFont("body", "Times-Roman");
+    doc.registerFont("bold", "Times-Bold");
+    doc.registerFont("italic", "Times-Italic");
+  }
+}
+
 export async function renderQuotePdf(quote) {
   return new Promise((resolve, reject) => {
     const buffers = [];
     const doc = new PDFDocument({ size: "A4", margin: 40 });
+    registerFonts(doc);
     doc.on("data", (b) => buffers.push(b));
     doc.on("end", () => resolve(Buffer.concat(buffers)));
     doc.on("error", reject);
 
-    // Header
-    doc.font("Times-Bold").fontSize(16);
-    doc.text("BẢNG BÁO GIÁ", { align: "center" });
+    doc.font("bold").fontSize(16).text("BẢNG BÁO GIÁ", { align: "center" });
     doc.moveDown(0.2);
-    doc.font("Times-Italic").fontSize(11);
-    doc.text(quote.title || "", { align: "center" });
+    doc.font("italic").fontSize(11).text(quote.title || "", { align: "center" });
     doc.moveDown(0.5);
 
-    doc.font("Times-Roman").fontSize(10);
+    doc.font("body").fontSize(10);
     doc.text(`Số: ${quote.quoteNumber}`, { continued: true });
     doc.text(`     Ngày: ${new Date(quote.quoteDate).toLocaleDateString("vi-VN")}`, { align: "right" });
     doc.moveDown(0.5);
 
-    // From / To block
     const startY = doc.y;
-    doc.font("Times-Bold").text("Bên gửi:", 40, startY);
-    doc.font("Times-Roman");
+    doc.font("bold").text("Bên gửi:", 40, startY);
+    doc.font("body");
     doc.text(quote.company?.name || "");
     doc.text(quote.fromAddress || "");
-    if (quote.fromContact) doc.text(`Liên hệ: ${quote.fromContact}${quote.fromPhone ? " — " + quote.fromPhone : ""}`);
+    if (quote.fromContact) {
+      doc.text(`Liên hệ: ${quote.fromContact}${quote.fromPhone ? " — " + quote.fromPhone : ""}`);
+    }
 
-    doc.font("Times-Bold").text("Bên nhận:", 320, startY);
-    doc.font("Times-Roman");
+    const rightY = doc.y;
+    doc.font("bold").text("Bên nhận:", 320, startY);
+    doc.font("body");
     doc.text(quote.toCompany || "", 320);
     if (quote.toContact) doc.text(`Người liên hệ: ${quote.toContact}`, 320);
-    doc.y = Math.max(doc.y, startY + 70);
-    doc.moveDown(0.5);
+    doc.y = Math.max(doc.y, rightY) + 6;
 
-    // Greeting
-    doc.font("Times-Italic").fontSize(10);
-    doc.text(quote.greeting || "", { align: "justify" });
-    doc.moveDown(0.5);
+    if (quote.greeting) {
+      doc.font("italic").fontSize(10).text(quote.greeting, { align: "justify" });
+      doc.moveDown(0.5);
+    }
 
-    // Items per sheet
     let runningIdx = 0;
     for (const sh of quote.sheets || []) {
       if (sh.name) {
         doc.moveDown(0.3);
-        doc.font("Times-Bold").fontSize(11).text(sh.name);
+        doc.font("bold").fontSize(11).text(sh.name);
       }
       drawItemsTable(doc, sh.items || [], runningIdx);
       runningIdx += (sh.items || []).length;
@@ -62,29 +91,27 @@ export async function renderQuotePdf(quote) {
 
     doc.moveDown(0.5);
 
-    // Totals box right-aligned
     const sub = Number(quote.subtotal ?? 0);
     const vat = Number(quote.vat ?? 0);
     const total = Number(quote.total ?? 0);
     const vatPct = Number(quote.vatPercent ?? 0);
 
-    doc.font("Times-Roman").fontSize(11);
+    doc.fontSize(11);
     const r = (label, val, bold = false) => {
-      doc.font(bold ? "Times-Bold" : "Times-Roman");
+      doc.font(bold ? "bold" : "body");
       doc.text(`${label}: ${fmt(val)} VND`, { align: "right" });
     };
     r("Tổng phụ", sub);
     r(`VAT (${vatPct}%)`, vat);
     r("Thành tiền", total, true);
 
-    doc.moveDown(1);
     if (quote.notes) {
-      doc.font("Times-Italic").fontSize(9);
-      doc.text("Ghi chú: " + quote.notes, { align: "left" });
+      doc.moveDown(0.6);
+      doc.font("italic").fontSize(9).text("Ghi chú: " + quote.notes);
     }
 
-    doc.moveDown(2);
-    doc.font("Times-Roman").fontSize(10);
+    doc.moveDown(1);
+    doc.font("body").fontSize(10);
     doc.text(`Trân trọng,`, { align: "right" });
     doc.text(quote.fromContact || "", { align: "right" });
 
@@ -103,10 +130,11 @@ function drawItemsTable(doc, items, baseIdx) {
   ];
   const startX = 40;
   const startY = doc.y + 4;
+  const tableW = cols.reduce((s, c) => s + c.w, 0);
   let x = startX;
 
-  doc.font("Times-Bold").fontSize(10);
-  doc.rect(startX, startY, cols.reduce((s, c) => s + c.w, 0), 18).fillAndStroke("#FFE4CC", "#888");
+  doc.font("bold").fontSize(10);
+  doc.rect(startX, startY, tableW, 18).fillAndStroke("#FFE4CC", "#888");
   doc.fillColor("black");
   for (const c of cols) {
     doc.text(c.label, x + 2, startY + 4, { width: c.w - 4, align: c.align });
@@ -114,25 +142,27 @@ function drawItemsTable(doc, items, baseIdx) {
   }
   let y = startY + 18;
 
-  doc.font("Times-Roman");
+  doc.font("body");
   items.forEach((it, idx) => {
     const qty = Number(it.quantity || 0);
     const price = Number(it.unitPrice || 0);
     const days = it.days != null ? Number(it.days) : null;
     const amount = days && days > 0 ? qty * days * price : qty * price;
-    const rowH = Math.max(18, Math.ceil(String(it.name || "").length / 50) * 14);
+    const text = (it.name || "") + (it.detail ? `\n  ${it.detail}` : "");
+    const lines = Math.max(1, text.split("\n").length);
+    const rowH = Math.max(18, 8 + lines * 12);
     x = startX;
-    doc.rect(startX, y, cols.reduce((s, c) => s + c.w, 0), rowH).stroke("#bbb");
+    doc.rect(startX, y, tableW, rowH).stroke("#bbb");
     const vals = [
       String(baseIdx + idx + 1),
-      it.name + (it.detail ? `\n  ${it.detail}` : ""),
+      text,
       it.unit || "",
       fmt(qty),
       fmt(price),
       fmt(amount),
     ];
     vals.forEach((v, i) => {
-      doc.text(String(v), x + 2, y + 3, { width: cols[i].w - 4, align: cols[i].align });
+      doc.text(String(v), x + 2, y + 4, { width: cols[i].w - 4, align: cols[i].align });
       x += cols[i].w;
     });
     y += rowH;

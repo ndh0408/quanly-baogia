@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quanly-app
+  namespace: quanly
+  labels: { app: quanly, component: api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: quanly, component: api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: quanly, component: api }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: ghcr.io/ndh0408/quanly-baogia:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 3000 }
+          envFrom:
+            - configMapRef: { name: quanly-config }
+            - secretRef: { name: quanly-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 1Gi }
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          # Run prisma migration before the container actually starts serving
+          command: ["/bin/sh", "-c"]
+          args: ["npx prisma db push --accept-data-loss && node src/server.js"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quanly-app
+  namespace: quanly
+spec:
+  type: ClusterIP
+  selector: { app: quanly, component: api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: quanly-app
+  namespace: quanly
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: quanly-app
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: 80 }

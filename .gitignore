@@ -2,6 +2,11 @@ node_modules/
 .env
 .env.local
 .admin-credentials.local
+
+# Local font copies (license-restricted; production deploy provides them via Dockerfile)
+fonts/*.ttf
+fonts/*.otf
+!fonts/.keep
 dist/
 *.log
 npm-debug.log*
@@ -16,6 +21,8 @@ test_*.pdf
 temp_*.xlsx
 c.txt
 cookies.txt
+tok.txt
+rtok.txt
 dump*.txt
 inspect_xls.py
 Marico_GN2505.xls

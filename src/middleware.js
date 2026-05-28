@@ -1,9 +1,33 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "./logger.js";
+import { verifyAccessToken } from "./jwt.js";
 
 export function requestId(req, res, next) {
   req.id = req.headers["x-request-id"] || randomUUID();
   res.setHeader("X-Request-Id", req.id);
+  next();
+}
+
+/**
+ * Try to populate req.session from a Bearer JWT if no cookie session is present.
+ * This lets the same route handlers serve browser (session) and API/mobile (JWT) clients.
+ */
+export function bearerAuth(req, _res, next) {
+  if (req.session?.userId) return next();
+  const h = req.headers.authorization || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  if (!m) return next();
+  try {
+    const payload = verifyAccessToken(m[1]);
+    // Synthesize a session-like object so downstream code stays identical.
+    req.session = req.session || {};
+    req.session.userId = payload.sub;
+    req.session.role = payload.role;
+    req.session.username = payload.username;
+    req.viaJwt = true;
+  } catch {
+    // invalid/expired token → just fall through; requireAuth will reject.
+  }
   next();
 }
 
