@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  manager
+  employee
+}
+
+enum QuoteStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  displayName  String
+  role         Role     @default(employee)
+  phone        String?
+  title        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdQuotes  Quote[] @relation("CreatedBy")
+  approvedQuotes Quote[] @relation("ApprovedBy")
+}
+
+model Company {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique          // "gia_nguyen", "clofull"
+  name      String                    // "Công ty Gia Nguyễn"
+  shortName String?                   // for short display
+  address   String
+  city      String   @default("TP. Hồ Chí Minh")
+  phone     String?
+  email     String?
+  logoPath  String?                   // path to logo image
+  active    Boolean  @default(true)
+  templates QuoteTemplate[]
+  quotes    Quote[]
+}
+
+model QuoteTemplate {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique          // "marico_decor", "unibenfood"
+  name      String                    // "Décor (Marico-style)"
+  companyId Int
+  company   Company  @relation(fields: [companyId], references: [id])
+  filePath  String                    // "templates/Marico_Decor.xlsx"
+  active    Boolean  @default(true)
+  sheets    QuoteSheet[]
+}
+
+model Quote {
+  id            Int         @id @default(autoincrement())
+  quoteNumber   String      @unique
+  title         String
+  toCompany     String
+  toContact     String?
+  companyId     Int
+  company       Company     @relation(fields: [companyId], references: [id])
+  fromContact   String
+  fromPhone     String?
+  fromTitle     String?
+  fromAddress   String                 // snapshot at creation time
+  city          String
+  quoteDate     DateTime
+  greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
+  vatPercent    Float       @default(8)
+  status        QuoteStatus @default(draft)
+  notes         String?
+
+  createdById   Int
+  createdBy     User        @relation("CreatedBy", fields: [createdById], references: [id])
+  approvedById  Int?
+  approvedBy    User?       @relation("ApprovedBy", fields: [approvedById], references: [id])
+
+  sheets        QuoteSheet[]
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model QuoteSheet {
+  id          Int           @id @default(autoincrement())
+  quoteId     Int
+  quote       Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  templateId  Int
+  template    QuoteTemplate @relation(fields: [templateId], references: [id])
+  order       Int                       // tab order (1, 2, 3...)
+  name        String?                   // optional sheet display name (e.g. "Décor", "Sampling")
+  items       QuoteItem[]
+}
+
+model QuoteItem {
+  id         Int     @id @default(autoincrement())
+  sheetId    Int
+  sheet      QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  order      Int
+  name       String
+  detail     String?
+  unit       String?
+  quantity   Float   @default(0)
+  unitPrice  Float   @default(0)
+  days       Float?                     // for templates needing day-count (Unibenfood)
+  notes      String?
+}

@@ -1,0 +1,545 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: #f5f6f8;
+  color: #222;
+}
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+input, textarea, select {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+/* ---------- Login ---------- */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4a6cf7 0%, #6b40c2 100%);
+}
+.login-card {
+  background: #fff;
+  padding: 36px 32px;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  width: 380px;
+}
+.login-card h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  color: #1a1a2e;
+}
+.login-card .sub {
+  margin: 0 0 24px;
+  color: #888;
+  font-size: 13px;
+}
+.login-card label {
+  display: block;
+  margin-bottom: 14px;
+}
+.login-card label span {
+  display: block;
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 4px;
+}
+.login-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d8dbe3;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.login-card input:focus {
+  border-color: #4a6cf7;
+}
+.login-card .btn-login {
+  width: 100%;
+  background: #4a6cf7;
+  color: #fff;
+  border: none;
+  padding: 11px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.login-card .btn-login:hover { background: #3957d6; }
+.login-card .err {
+  background: #ffeaea;
+  color: #c0392b;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* ---------- Layout ---------- */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+.sidebar {
+  background: #1a1a2e;
+  color: #d6d7e0;
+  padding: 18px 14px;
+}
+.sidebar h2 {
+  font-size: 16px;
+  margin: 0 0 4px;
+  color: #fff;
+}
+.sidebar .org {
+  font-size: 12px;
+  color: #8c8fa8;
+  margin-bottom: 22px;
+}
+.sidebar .menu a {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 6px;
+  color: #d6d7e0;
+  text-decoration: none;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.sidebar .menu a:hover { background: #25253d; }
+.sidebar .menu a.active { background: #4a6cf7; color: #fff; }
+.sidebar .who {
+  position: absolute;
+  bottom: 18px;
+  font-size: 13px;
+  color: #aab;
+}
+.sidebar .who strong { color: #fff; display: block; }
+.sidebar .role-pill {
+  display: inline-block;
+  background: #4a6cf7;
+  color: #fff;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.sidebar button.logout {
+  margin-top: 10px;
+  background: transparent;
+  border: 1px solid #555;
+  color: #ddd;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.sidebar { position: relative; }
+
+.main { padding: 24px 28px; }
+.main h1 { font-size: 22px; margin: 0 0 16px; }
+
+/* ---------- Toolbar ---------- */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.toolbar input, .toolbar select {
+  padding: 8px 10px;
+  border: 1px solid #d8dbe3;
+  border-radius: 6px;
+}
+.btn {
+  padding: 8px 14px;
+  border: 1px solid #d8dbe3;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.btn:hover { background: #f0f1f5; }
+.btn-primary {
+  background: #4a6cf7;
+  border-color: #4a6cf7;
+  color: #fff;
+}
+.btn-primary:hover { background: #3957d6; }
+.btn-danger {
+  background: #e74c3c;
+  border-color: #e74c3c;
+  color: #fff;
+}
+.btn-success {
+  background: #27ae60;
+  border-color: #27ae60;
+  color: #fff;
+}
+.btn-warn {
+  background: #f39c12;
+  border-color: #f39c12;
+  color: #fff;
+}
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* ---------- Tables ---------- */
+.list-table {
+  width: 100%;
+  background: #fff;
+  border-collapse: collapse;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+.list-table th, .list-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef0f3;
+  font-size: 14px;
+  text-align: left;
+}
+.list-table th {
+  background: #f3f4f8;
+  font-weight: 600;
+  color: #444;
+}
+.list-table tr:hover { background: #fafbff; }
+
+.status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.status.draft { background: #e3e6ed; color: #555; }
+.status.pending { background: #fff5d6; color: #b07b00; }
+.status.approved { background: #d8f5e3; color: #1c7a3f; }
+.status.rejected { background: #fbd8d4; color: #b03323; }
+
+/* ---------- Editor (Excel-like) ---------- */
+.editor {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.editor .meta-grid {
+  display: grid;
+  grid-template-columns: 80px 1fr 80px 1fr;
+  gap: 8px 12px;
+  margin-bottom: 18px;
+  align-items: center;
+}
+.editor .meta-grid label {
+  font-size: 13px;
+  color: #555;
+  text-align: right;
+}
+.editor .meta-grid input,
+.editor .meta-grid textarea {
+  padding: 6px 10px;
+  border: 1px solid #d8dbe3;
+  border-radius: 6px;
+  width: 100%;
+}
+.editor .center-line {
+  text-align: center;
+  font-style: italic;
+  color: #555;
+  font-size: 14px;
+  margin: 10px 0 4px;
+}
+.editor .title-input {
+  width: 100%;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: "Times New Roman", serif;
+  border: 1px dashed transparent;
+  background: transparent;
+  padding: 6px;
+  margin: 6px 0 4px;
+  text-transform: uppercase;
+}
+.editor .title-input:hover, .editor .title-input:focus {
+  border-color: #c5c8d1;
+  outline: none;
+}
+.editor .quote-no {
+  text-align: center;
+  font-family: "Times New Roman", serif;
+  color: #555;
+  margin-bottom: 8px;
+}
+.editor .greeting {
+  font-family: "Times New Roman", serif;
+  font-style: italic;
+  color: #333;
+  margin: 12px 0 16px;
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+  background: transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  width: 100%;
+  resize: vertical;
+}
+
+.excel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Times New Roman", serif;
+  font-size: 14px;
+  margin-top: 8px;
+}
+.excel-table th, .excel-table td {
+  border: 1px solid #000;
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+.excel-table thead th {
+  background: #FFCC99;
+  font-weight: 700;
+  text-align: center;
+  font-size: 13px;
+  border: 2px solid #000;
+  white-space: pre-line;
+}
+.excel-table td input,
+.excel-table td textarea {
+  border: none;
+  width: 100%;
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+.excel-table td input:focus,
+.excel-table td textarea:focus {
+  background: #fffbe8;
+}
+.excel-table td textarea {
+  resize: none;
+  overflow: hidden;
+  min-height: 22px;
+  line-height: 1.3;
+  display: block;
+}
+.excel-table td.col-stt {
+  text-align: center;
+  font-weight: 700;
+  width: 50px;
+  color: #0066CC;
+  border-left: 2px solid #000;
+}
+.excel-table td.col-hangmuc input {
+  font-weight: 700;
+  color: #0066CC;
+}
+.excel-table td.col-detail input { font-style: italic; }
+.excel-table td.col-dvt { width: 80px; text-align: center; }
+.excel-table td.col-dvt input { font-style: italic; text-align: center; }
+.excel-table td.col-qty { width: 90px; }
+.excel-table td.col-price { width: 130px; }
+.excel-table td.col-amount {
+  width: 140px;
+  text-align: right;
+  background: #fff;
+}
+.excel-table td.col-notes { width: 150px; border-right: 2px solid #000; }
+.excel-table td.col-notes input { font-style: italic; text-align: center; }
+.excel-table td.col-qty input,
+.excel-table td.col-price input { text-align: right; }
+.excel-table tbody tr:last-child td { border-bottom: 2px solid #000; }
+.excel-table td.col-action {
+  width: 36px;
+  padding: 0;
+  text-align: center;
+  border: 1px dashed #ccc;
+  background: #fafafa;
+}
+.excel-table td.col-action button {
+  background: transparent;
+  border: none;
+  color: #c0392b;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.excel-table tfoot td {
+  font-weight: 700;
+  background: transparent;
+  border: none;
+}
+.excel-table tfoot td.label,
+.excel-table tfoot td.value {
+  background: #FFCC99;
+  border: 1px solid #000;
+}
+.excel-table tfoot tr:last-child td.label,
+.excel-table tfoot tr:last-child td.value {
+  border-bottom: 2px solid #000;
+}
+.excel-table tfoot td.label { text-align: center; }
+.excel-table tfoot td.value {
+  text-align: right;
+  color: #C00000;
+  border-right: 2px solid #000;
+}
+.excel-table tfoot td.empty-left { border-left: 2px solid #000; }
+.editor .actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.editor .from-block input { font-weight: 700; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  padding: 12px 18px;
+  background: #1a1a2e;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  z-index: 1000;
+}
+.toast.error { background: #c0392b; }
+.toast.success { background: #27ae60; }
+
+/* ---------- Modal ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+}
+.modal {
+  background: #fff;
+  width: 460px;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.3);
+}
+.modal h2 { margin: 0 0 14px; font-size: 18px; }
+.modal label { display: block; margin-bottom: 12px; font-size: 13px; color: #555; }
+.modal label input, .modal label select {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d8dbe3;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+.modal .actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.muted { color: #999; font-size: 12px; }
+.empty-state {
+  background: #fff;
+  border-radius: 10px;
+  padding: 60px 20px;
+  text-align: center;
+  color: #888;
+}
+
+/* ---------- Sheet tabs ---------- */
+.sheet-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 20px;
+  border-bottom: 2px solid #FFCC99;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.sheet-tab {
+  background: #f7f8fa;
+  border: 1px solid #d8dbe3;
+  border-bottom: none;
+  padding: 8px 14px 8px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+}
+.sheet-tab span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-tab.active {
+  background: #FFCC99;
+  border-color: #FFCC99;
+  font-weight: 700;
+}
+.sheet-tab .rm-tab {
+  color: #c0392b;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+.sheet-tab .rm-tab:hover { background: #fff; border-radius: 3px; }
+.add-sheet {
+  align-self: center;
+  margin-left: auto;
+}
+
+/* ---------- Quote summary ---------- */
+.quote-summary {
+  margin-top: 24px;
+  padding: 14px;
+  background: #fafbff;
+  border: 1px solid #e0e3eb;
+  border-radius: 8px;
+}
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Times New Roman", serif;
+  font-size: 14px;
+}
+.summary-table th, .summary-table td {
+  border: 1px solid #999;
+  padding: 6px 10px;
+}
+.summary-table thead th {
+  background: #FFCC99;
+  font-weight: 700;
+}
+.summary-table tfoot td {
+  background: #FFCC99;
+  font-weight: 700;
+}
+
+/* meta-grid select width */
+.editor .meta-grid select {
+  padding: 6px 10px;
+  border: 1px solid #d8dbe3;
+  border-radius: 6px;
+  width: 100%;
+  background: #fff;
+}

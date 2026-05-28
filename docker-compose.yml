@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quanly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quanly
+      POSTGRES_PASSWORD: quanly_pwd
+      POSTGRES_DB: quanly
+    ports:
+      - "5432:5432"
+    volumes:
+      - quanly-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quanly -d quanly"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  quanly-pgdata:

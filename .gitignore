@@ -1,0 +1,29 @@
+node_modules/
+.env
+.env.local
+dist/
+*.log
+npm-debug.log*
+
+# DB volume
+postgres-data/
+
+# Generated test artifacts
+test_*.xlsx
+*.tmp.xlsx
+temp_*.xlsx
+c.txt
+cookies.txt
+dump*.txt
+inspect_xls.py
+Marico_GN2505.xls
+m.xlsx
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
