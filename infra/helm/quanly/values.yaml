@@ -1,0 +1,133 @@
+# Default values for quanly-baogia chart.
+
+image:
+  repository: ghcr.io/ndh0408/quanly-baogia
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# === Replicas / autoscaling ===
+app:
+  replicaCount: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPU: 70
+    targetMemory: 80
+  # Run prisma db push before app starts. Disable when running migrations as a separate Job.
+  runMigration: true
+
+worker:
+  enabled: true
+  replicaCount: 2
+  concurrency: 4
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 6
+    targetCPU: 70
+
+# === Networking ===
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: baogia.example.com
+  tls:
+    enabled: true
+    secretName: quanly-tls
+    clusterIssuer: letsencrypt-prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+
+# === Embedded dependencies (turn off when using managed services) ===
+postgres:
+  enabled: true                 # set false to use external DB
+  image: postgres:16-alpine
+  storageSize: 20Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi }
+
+redis:
+  enabled: true                 # set false to use external Redis
+  image: redis:7-alpine
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+# === Application config (non-secret) ===
+config:
+  NODE_ENV: production
+  PORT: "3000"
+  LOG_LEVEL: info
+  BCRYPT_COST: "12"
+  PASSWORD_MIN_LENGTH: "8"
+  LOGIN_MAX_ATTEMPTS: "5"
+  LOGIN_LOCKOUT_MINUTES: "15"
+  RATE_LIMIT_LOGIN_PER_15M: "10"
+  RATE_LIMIT_API_PER_MIN: "120"
+  DEFAULT_PAGE_SIZE: "20"
+  MAX_PAGE_SIZE: "100"
+  JWT_ACCESS_TTL: "15m"
+  JWT_REFRESH_TTL_DAYS: "7"
+  S3_REGION: "auto"
+  S3_BUCKET: "quanly"
+  S3_FORCE_PATH_STYLE: "true"
+  TRUST_PROXY: "1"
+
+# === Secrets ===
+# Either fill these (chart creates the Secret) OR set existingSecret to use yours.
+existingSecret: ""              # name of an externally managed Secret with the same keys
+
+secrets:
+  DATABASE_URL: ""              # required if postgres.enabled=false
+  REDIS_URL: ""                 # required if redis.enabled=false
+  SESSION_SECRET: ""            # REQUIRED, ≥32 chars
+  JWT_SECRET: ""                # optional; defaults to SESSION_SECRET
+  S3_ENDPOINT: ""
+  S3_ACCESS_KEY: ""
+  S3_SECRET_KEY: ""
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_USER: ""
+  SMTP_PASS: ""
+  SMTP_FROM: ""
+  TELEGRAM_BOT_TOKEN: ""
+  SENTRY_DSN: ""
+  STRIPE_SECRET_KEY: ""
+  STRIPE_WEBHOOK_SECRET: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Metrics scraping
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false              # set true if you have prometheus-operator
+    interval: 30s

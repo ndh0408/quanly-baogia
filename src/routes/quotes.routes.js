@@ -326,6 +326,7 @@ router.post(
         link: `/#/quotes/${id}`,
         resource: "quote",
         resourceId: id,
+        important: true,
       });
     }
 
@@ -372,6 +373,7 @@ router.post(
       link: `/#/quotes/${id}`,
       resource: "quote",
       resourceId: id,
+      important: complete,
     });
 
     await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { level: pending.level, complete } });
@@ -409,6 +411,7 @@ router.post(
       link: `/#/quotes/${id}`,
       resource: "quote",
       resourceId: id,
+      important: true,
     });
 
     await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body.comment || null } });

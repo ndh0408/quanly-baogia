@@ -1,7 +1,15 @@
 // Minimal Server-Sent Events broker. In-memory subscribers keyed by userId.
 // For multi-instance setups, swap to Redis pub/sub later.
 
+import { sseClients } from "./observability.js";
+
 const subscribers = new Map(); // userId -> Set<res>
+
+function recountClients() {
+  let n = 0;
+  for (const s of subscribers.values()) n += s.size;
+  sseClients.set(n);
+}
 
 export function attach(req, res, userId) {
   res.setHeader("Content-Type", "text/event-stream");
@@ -14,6 +22,7 @@ export function attach(req, res, userId) {
   let set = subscribers.get(userId);
   if (!set) { set = new Set(); subscribers.set(userId, set); }
   set.add(res);
+  recountClients();
 
   // Keepalive every 25s
   const ka = setInterval(() => {
@@ -24,6 +33,7 @@ export function attach(req, res, userId) {
     clearInterval(ka);
     set.delete(res);
     if (set.size === 0) subscribers.delete(userId);
+    recountClients();
   });
 }
 

@@ -1,0 +1,47 @@
+{{- if .Values.postgres.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "quanly.fullname" . }}-postgres
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "quanly.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels: {{- include "quanly.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports: [{ containerPort: 5432 }]
+          env:
+            - { name: POSTGRES_USER, value: quanly }
+            - { name: POSTGRES_DB, value: quanly }
+            - { name: POSTGRES_PASSWORD, value: CHANGE_ME_INTERNAL }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "quanly"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.postgres.storageSize }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "quanly.fullname" . }}-postgres
+spec:
+  type: ClusterIP
+  selector: {{- include "quanly.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports: [{ port: 5432, targetPort: 5432 }]
+{{- end }}

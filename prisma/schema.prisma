@@ -403,6 +403,59 @@ model AuditEvent {
   @@index([action, createdAt(sort: Desc)])
 }
 
+// === Billing (Stripe scaffold — usage layer for SaaS) ===
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  incomplete
+}
+
+model Plan {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique          // "free", "starter", "pro", "enterprise"
+  name         String
+  priceMonth   Decimal  @default(0) @db.Decimal(18, 2)
+  priceYear    Decimal  @default(0) @db.Decimal(18, 2)
+  stripePriceId String? @unique
+  // Quota fields — null = unlimited
+  maxUsers     Int?
+  maxQuotesPerMonth Int?
+  maxCustomers Int?
+  maxStorageGB Int?
+  features     Json     @default("{}")   // {api: true, webhooks: true, mfa: true, ...}
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                String   @id @default(cuid())
+  planId            Int
+  plan              Plan     @relation(fields: [planId], references: [id])
+  stripeCustomerId  String?  @unique
+  stripeSubscriptionId String? @unique
+  status            SubscriptionStatus @default(trialing)
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean  @default(false)
+  trialEnd          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status, currentPeriodEnd])
+}
+
+model UsageRecord {
+  id        BigInt   @id @default(autoincrement())
+  metric    String   // "quotes.created", "exports.run", "storage.bytes"
+  value     BigInt   @default(1)
+  ts        DateTime @default(now())
+
+  @@index([metric, ts(sort: Desc)])
+}
+
 // === Webhook out (integrations) ===
 model Webhook {
   id        Int      @id @default(autoincrement())

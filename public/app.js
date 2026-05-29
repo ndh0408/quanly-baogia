@@ -146,6 +146,10 @@ function renderShell() {
           ${role === "admin" ? `<a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}">⚙️ Cài đặt</a>` : ""}
           <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
         </nav>
+        <div class="global-search" style="position:relative">
+          <input id="gs-input" placeholder="🔎 Tìm nhanh (Ctrl+K)" />
+          <div id="gs-results" class="global-search-results" style="display:none"></div>
+        </div>
         <div class="who">
           <strong>${escapeHtml(state.user.displayName)}</strong>
           <span>@${escapeHtml(state.user.username)}</span><br/>
@@ -163,6 +167,60 @@ function renderShell() {
       render();
     });
   });
+  // Global search
+  const gsInput = document.getElementById("gs-input");
+  const gsResults = document.getElementById("gs-results");
+  if (gsInput) {
+    gsInput.addEventListener("input", async () => {
+      const q = gsInput.value.trim();
+      if (!q) { gsResults.style.display = "none"; gsResults.innerHTML = ""; return; }
+      clearTimeout(window._gst);
+      window._gst = setTimeout(async () => {
+        try {
+          const r = await api(`/api/search?q=${encodeURIComponent(q)}&limit=8`);
+          const sections = [];
+          if (r.results.quotes?.length) sections.push(`
+            <div class="gs-section">Báo giá</div>
+            ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}">
+              <strong>${escapeHtml(q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${q.status}</span>
+            </div>`).join("")}`);
+          if (r.results.customers?.length) sections.push(`
+            <div class="gs-section">Khách hàng</div>
+            ${r.results.customers.map(c => `<div class="gs-row" data-go="customer">
+              <strong>${escapeHtml(c.code)}</strong> ${escapeHtml(c.name)}
+            </div>`).join("")}`);
+          if (r.results.products?.length) sections.push(`
+            <div class="gs-section">Sản phẩm</div>
+            ${r.results.products.map(p => `<div class="gs-row" data-go="product">
+              <strong>${escapeHtml(p.sku)}</strong> ${escapeHtml(p.name)}
+            </div>`).join("")}`);
+          gsResults.innerHTML = sections.join("") || "<div class='gs-section'>Không có kết quả</div>";
+          gsResults.style.display = "block";
+          gsResults.querySelectorAll(".gs-row").forEach(row => row.addEventListener("click", async () => {
+            const id = row.dataset.id;
+            if (row.dataset.go === "quote" && id) {
+              const q = await api(`/api/quotes/${id}`);
+              state.currentQuote = q; state.page = "edit"; render();
+            } else if (row.dataset.go === "customer") {
+              state.page = "customers"; render();
+            } else if (row.dataset.go === "product") {
+              state.page = "products"; render();
+            }
+            gsInput.value = "";
+            gsResults.style.display = "none";
+          }));
+        } catch {}
+      }, 200);
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); gsInput.focus(); gsInput.select(); }
+      else if (e.key === "Escape") { gsResults.style.display = "none"; gsInput.value = ""; }
+    });
+    document.addEventListener("click", (e) => {
+      if (!gsResults.contains(e.target) && e.target !== gsInput) gsResults.style.display = "none";
+    });
+  }
+
   document.querySelector(".logout").addEventListener("click", async () => {
     await api("/api/auth/logout", { method: "POST" });
     state.user = null;
@@ -438,7 +496,10 @@ function renderEditor(el, quote) {
           <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} />
 
           <label>To:</label>
-          <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên KH" ${!editable ? "disabled" : ""} />
+          <div style="display:flex;gap:4px">
+            <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên KH" ${!editable ? "disabled" : ""} style="flex:1"/>
+            ${editable ? `<button type="button" class="btn btn-sm" id="btn-pick-customer" title="Chọn từ CRM">🏢</button>` : ""}
+          </div>
           <label>From:</label>
           <input id="f-fromCompany-display" value="${escapeHtml(state.companies.find(c => c.id === q.companyId)?.name || "")}" disabled />
 
@@ -604,6 +665,21 @@ function renderEditor(el, quote) {
       });
     };
     bindField("f-toCompany", "toCompany");
+
+    const pickBtn = document.getElementById("btn-pick-customer");
+    if (pickBtn) {
+      pickBtn.addEventListener("click", async () => {
+        const c = await pickCustomer();
+        if (!c) return;
+        q.customerId = c.id;
+        q.toCompany = c.name;
+        q.toContact = c.contactName || q.toContact;
+        document.getElementById("f-toCompany").value = c.name;
+        const tc = document.getElementById("f-toContact");
+        if (tc && c.contactName) tc.value = c.contactName;
+        toast(`Đã gắn khách ${c.code}`, "success");
+      });
+    }
     bindField("f-toContact", "toContact");
     bindField("f-fromContact", "fromContact");
     bindField("f-fromPhone", "fromPhone");
@@ -1088,6 +1164,35 @@ async function renderCustomers(el) {
   document.getElementById("cust-status").addEventListener("change", (e) => { status = e.target.value; reload(); });
   document.getElementById("btn-new-cust").addEventListener("click", () => editCustomer(null));
   await reload();
+}
+
+/** Customer picker — used inside the quote editor. Returns selected customer or null. */
+async function pickCustomer() {
+  return new Promise((resolve) => {
+    const m = openModal("Chọn khách hàng", `
+      <input id="cp-q" placeholder="Tìm tên / mã / SĐT..." autofocus
+        style="width:100%;padding:8px;border:1px solid #d8dbe3;border-radius:6px;margin-bottom:10px"/>
+      <div id="cp-list" style="max-height:50vh;overflow:auto"></div>`);
+    const q = m.find("#cp-q");
+    const list = m.find("#cp-list");
+    const reload = async () => {
+      try {
+        const r = await api("/api/customers?size=30" + (q.value ? `&q=${encodeURIComponent(q.value)}` : ""));
+        list.innerHTML = r.data.length ? r.data.map(c => `
+          <div class="pick-row" data-id="${c.id}">
+            <div><strong>${escapeHtml(c.code)}</strong> — ${escapeHtml(c.name)}</div>
+            <div style="font-size:12px;color:#6b7280">${escapeHtml(c.phone || "")} ${escapeHtml(c.email || "")}</div>
+          </div>`).join("") : "<div class='empty-state' style='padding:20px'>Không tìm thấy</div>";
+        list.querySelectorAll(".pick-row").forEach(d => d.addEventListener("click", () => {
+          const sel = r.data.find(c => c.id === parseInt(d.dataset.id));
+          m.close(); resolve(sel);
+        }));
+      } catch (e) { toast(e.message, "error"); }
+    };
+    q.addEventListener("input", () => { clearTimeout(window._cpt); window._cpt = setTimeout(reload, 200); });
+    m.onSave(() => { m.close(); resolve(null); });
+    reload();
+  });
 }
 
 function editCustomer(id) {

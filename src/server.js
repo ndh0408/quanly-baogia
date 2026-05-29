@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger.js";
 import { requestId, notFound, errorHandler, bearerAuth } from "./middleware.js";
+import { initSentry, registry, metricsMiddleware, captureError } from "./observability.js";
+
+initSentry();
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import quotesRoutes from "./routes/quotes.routes.js";
@@ -29,6 +32,9 @@ import streamRoutes from "./routes/stream.routes.js";
 import webhooksRoutes from "./routes/webhooks.routes.js";
 import apiKeysRoutes from "./routes/apiKeys.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import gdprRoutes from "./routes/gdpr.routes.js";
+import searchRoutes from "./routes/search.routes.js";
+import billingRoutes, { webhookRouter as stripeWebhookRouter } from "./routes/billing.routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
@@ -78,6 +84,9 @@ app.use(
   })
 );
 
+// Stripe webhook needs RAW body for signature verify — mount BEFORE json parser.
+app.use("/api/webhooks/billing", stripeWebhookRouter);
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
@@ -102,6 +111,15 @@ app.use(
     },
   })
 );
+
+// Prometheus metrics middleware (records all requests).
+app.use(metricsMiddleware);
+
+// Metrics endpoint (no auth — protect at network level via NetworkPolicy/Nginx allowlist).
+app.get("/metrics", async (_req, res) => {
+  res.setHeader("Content-Type", registry.contentType);
+  res.end(await registry.metrics());
+});
 
 // Accept Bearer JWT as an alternative to session cookies on every API call.
 app.use("/api/", bearerAuth);
@@ -135,6 +153,9 @@ app.use("/api/stream", streamRoutes);
 app.use("/api/webhooks", webhooksRoutes);
 app.use("/api/api-keys", apiKeysRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/gdpr", gdprRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/billing", billingRoutes);
 
 // Health probes
 import { prisma as healthDb } from "./db.js";

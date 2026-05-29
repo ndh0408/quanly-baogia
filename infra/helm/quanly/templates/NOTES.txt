@@ -1,0 +1,27 @@
+{{ include "quanly.name" . }} đã deploy vào namespace {{ .Release.Namespace }}.
+
+1. Lấy URL truy cập:
+{{- if .Values.ingress.enabled }}
+   https://{{ .Values.ingress.host }}/
+{{- else }}
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "quanly.fullname" . }}-app {{ .Values.service.port }}:{{ .Values.service.port }}
+   Mở: http://localhost:{{ .Values.service.port }}/
+{{- end }}
+
+2. Kiểm tra trạng thái:
+   kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+3. Logs API:
+   kubectl --namespace {{ .Release.Namespace }} logs -f deploy/{{ include "quanly.fullname" . }}-app
+
+{{- if .Values.worker.enabled }}
+4. Logs worker:
+   kubectl --namespace {{ .Release.Namespace }} logs -f deploy/{{ include "quanly.fullname" . }}-worker
+{{- end }}
+
+⚠️  Production checklist:
+  - postgres.enabled=false + cấu hình DATABASE_URL trỏ tới managed DB
+  - redis.enabled=false + cấu hình REDIS_URL trỏ tới managed Redis
+  - secrets.SESSION_SECRET ≥ 32 ký tự ngẫu nhiên (không phải default)
+  - secrets.S3_* để export Excel/PDF lưu trên object store
+  - secrets.SMTP_* để approval/send notification

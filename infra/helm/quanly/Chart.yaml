@@ -1,0 +1,17 @@
+apiVersion: v2
+name: quanly
+description: Quote management platform — multi-sheet Excel/PDF export, CRM, approval workflow
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - quote
+  - crm
+  - erp
+  - approval
+maintainers:
+  - name: ndh0408
+home: https://github.com/ndh0408/quanly-baogia
+sources:
+  - https://github.com/ndh0408/quanly-baogia
+icon: ""

@@ -596,3 +596,15 @@ input, textarea, select {
 .status.prospect{background:#dbeafe;color:#1e40af}
 .status.active{background:#dcfce7;color:#166534}
 .status.inactive{background:#e5e7eb;color:#4b5563}
+
+/* Customer picker rows */
+.pick-row{padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px;cursor:pointer}
+.pick-row:hover{background:#eff6ff;border-color:#93c5fd}
+
+/* Search global box */
+.global-search{display:flex;gap:6px;padding:8px;border-bottom:1px solid #eee;background:#fafbff}
+.global-search input{flex:1;padding:7px 10px;border:1px solid #d8dbe3;border-radius:6px}
+.global-search-results{position:absolute;top:46px;left:8px;right:8px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.06);max-height:60vh;overflow:auto;z-index:50}
+.gs-section{padding:6px 10px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;background:#f5f6f8}
+.gs-row{padding:8px 10px;border-bottom:1px solid #eee;cursor:pointer}
+.gs-row:hover{background:#eff6ff}

@@ -17,6 +17,7 @@ postgres-data/
 # Generated test artifacts
 test_*.xlsx
 test_*.pdf
+gdpr.json
 *.tmp.xlsx
 temp_*.xlsx
 c.txt

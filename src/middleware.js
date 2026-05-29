@@ -62,13 +62,18 @@ export function notFound(req, res, next) {
 }
 
 export function errorHandler(err, req, res, _next) {
-  // Don't leak internals in production responses
   const status = err.status || err.statusCode || 500;
   const exposed = status < 500;
   logger.error(
     { reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack },
     "request failed"
   );
+  if (status >= 500) {
+    // Lazy import so this module stays loadable when observability isn't initialized.
+    import("./observability.js").then(({ captureError }) => {
+      captureError(err, { reqId: req.id, path: req.path, method: req.method, userId: req.session?.userId });
+    }).catch(() => {});
+  }
   if (res.headersSent) return;
   res.status(status).json({
     error: exposed ? err.message : "Lỗi server",
