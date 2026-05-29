@@ -137,13 +137,9 @@ function renderShell() {
           <a href="#" data-page="dashboard" class="${state.page === "dashboard" ? "active" : ""}">📊 Dashboard</a>
           <a href="#" data-page="list" class="${state.page === "list" ? "active" : ""}">📋 Danh sách báo giá</a>
           <a href="#" data-page="new" class="${state.page === "new" ? "active" : ""}">➕ Tạo báo giá mới</a>
-          <a href="#" data-page="customers" class="${state.page === "customers" ? "active" : ""}">🏢 Khách hàng (CRM)</a>
-          <a href="#" data-page="products" class="${state.page === "products" ? "active" : ""}">📦 Sản phẩm</a>
-          ${(role === "admin" || role === "manager") ? `<a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}">✅ Hàng chờ duyệt <span id="badge-pending" class="badge-num"></span></a>` : ""}
           <a href="#" data-page="notifications" class="${state.page === "notifications" ? "active" : ""}">🔔 Thông báo <span id="badge-notif" class="badge-num"></span></a>
           ${role === "admin" ? `<a href="#" data-page="users" class="${state.page === "users" ? "active" : ""}">👥 Quản lý nhân viên</a>` : ""}
           ${role === "admin" ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
-          ${role === "admin" ? `<a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}">⚙️ Cài đặt</a>` : ""}
           <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
         </nav>
         <div class="global-search" style="position:relative">
@@ -177,22 +173,12 @@ function renderShell() {
       clearTimeout(window._gst);
       window._gst = setTimeout(async () => {
         try {
-          const r = await api(`/api/search?q=${encodeURIComponent(q)}&limit=8`);
+          const r = await api(`/api/search?q=${encodeURIComponent(q)}&types=quote&limit=10`);
           const sections = [];
           if (r.results.quotes?.length) sections.push(`
             <div class="gs-section">Báo giá</div>
             ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}">
               <strong>${escapeHtml(q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${q.status}</span>
-            </div>`).join("")}`);
-          if (r.results.customers?.length) sections.push(`
-            <div class="gs-section">Khách hàng</div>
-            ${r.results.customers.map(c => `<div class="gs-row" data-go="customer">
-              <strong>${escapeHtml(c.code)}</strong> ${escapeHtml(c.name)}
-            </div>`).join("")}`);
-          if (r.results.products?.length) sections.push(`
-            <div class="gs-section">Sản phẩm</div>
-            ${r.results.products.map(p => `<div class="gs-row" data-go="product">
-              <strong>${escapeHtml(p.sku)}</strong> ${escapeHtml(p.name)}
             </div>`).join("")}`);
           gsResults.innerHTML = sections.join("") || "<div class='gs-section'>Không có kết quả</div>";
           gsResults.style.display = "block";
@@ -201,10 +187,6 @@ function renderShell() {
             if (row.dataset.go === "quote" && id) {
               const q = await api(`/api/quotes/${id}`);
               state.currentQuote = q; state.page = "edit"; render();
-            } else if (row.dataset.go === "customer") {
-              state.page = "customers"; render();
-            } else if (row.dataset.go === "product") {
-              state.page = "products"; render();
             }
             gsInput.value = "";
             gsResults.style.display = "none";
@@ -270,13 +252,6 @@ async function refreshBadges() {
     const badge = document.getElementById("badge-notif");
     if (badge) badge.textContent = n.count > 0 ? n.count : "";
   } catch {}
-  if (state.user && (state.user.role === "admin" || state.user.role === "manager")) {
-    try {
-      const q = await api("/api/approvals/queue");
-      const b = document.getElementById("badge-pending");
-      if (b) b.textContent = q.meta.total > 0 ? q.meta.total : "";
-    } catch {}
-  }
 }
 
 // ---------------- List ----------------
@@ -496,10 +471,7 @@ function renderEditor(el, quote) {
           <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} />
 
           <label>To:</label>
-          <div style="display:flex;gap:4px">
-            <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên KH" ${!editable ? "disabled" : ""} style="flex:1"/>
-            ${editable ? `<button type="button" class="btn btn-sm" id="btn-pick-customer" title="Chọn từ CRM">🏢</button>` : ""}
-          </div>
+          <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên KH" ${!editable ? "disabled" : ""} />
           <label>From:</label>
           <input id="f-fromCompany-display" value="${escapeHtml(state.companies.find(c => c.id === q.companyId)?.name || "")}" disabled />
 
@@ -665,21 +637,6 @@ function renderEditor(el, quote) {
       });
     };
     bindField("f-toCompany", "toCompany");
-
-    const pickBtn = document.getElementById("btn-pick-customer");
-    if (pickBtn) {
-      pickBtn.addEventListener("click", async () => {
-        const c = await pickCustomer();
-        if (!c) return;
-        q.customerId = c.id;
-        q.toCompany = c.name;
-        q.toContact = c.contactName || q.toContact;
-        document.getElementById("f-toCompany").value = c.name;
-        const tc = document.getElementById("f-toContact");
-        if (tc && c.contactName) tc.value = c.contactName;
-        toast(`Đã gắn khách ${c.code}`, "success");
-      });
-    }
     bindField("f-toContact", "toContact");
     bindField("f-fromContact", "fromContact");
     bindField("f-fromPhone", "fromPhone");

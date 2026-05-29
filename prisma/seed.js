@@ -96,6 +96,14 @@ async function main() {
     },
   });
   console.log(`✓ Templates: 2`);
+
+  // === Default notification channel preferences ===
+  await prisma.setting.upsert({
+    where: { key: "notif.channels" },
+    create: { key: "notif.channels", value: { email: "important", telegram: "off" } },
+    update: {},
+  });
+  console.log(`✓ Settings: notif.channels`);
 }
 
 main()

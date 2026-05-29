@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { z } from "zod";
 import { spawn } from "node:child_process";
 import { prisma } from "../db.js";
 import { asyncHandler, requireRole } from "../middleware.js";
+import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
 import { config } from "../config.js";
@@ -76,8 +78,9 @@ router.get(
 /** Hard-delete soft-deleted rows older than N days. */
 router.post(
   "/purge-soft-deleted",
+  validate({ body: z.object({ days: z.coerce.number().int().min(0).max(3650).default(30) }).default({}) }),
   asyncHandler(async (req, res) => {
-    const days = Number(req.body?.days ?? 30);
+    const { days } = req.body;
     const cutoff = new Date(Date.now() - days * 86_400_000);
     const result = {};
     for (const model of ["quote", "customer", "user", "company", "quoteTemplate"]) {

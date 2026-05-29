@@ -173,8 +173,15 @@ router.post(
     if (!quoteNumber) {
       quoteNumber = await nextQuoteNumber("GN");
     } else {
-      const dup = await prisma.quote.findUnique({ where: { quoteNumber } });
-      if (dup) return res.status(409).json({ error: "Số báo giá đã tồn tại" });
+      // includeDeleted: the unique constraint on quoteNumber covers soft-deleted rows too,
+      // so we must check across ALL rows — otherwise a number belonging to a soft-deleted
+      // quote passes the (soft-delete-filtered) check and then hits the DB constraint as a 500.
+      const dup = await prisma.quote.findFirst({ where: { quoteNumber }, includeDeleted: true });
+      if (dup) {
+        return res.status(409).json({
+          error: dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại",
+        });
+      }
     }
 
     const draft = {
@@ -244,8 +251,12 @@ router.put(
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
     if (b.companyId !== undefined) data.companyId = b.companyId;
     if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
-      const dup = await prisma.quote.findUnique({ where: { quoteNumber: b.quoteNumber } });
-      if (dup) return res.status(409).json({ error: "Số báo giá đã tồn tại" });
+      const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
+      if (dup) {
+        return res.status(409).json({
+          error: dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại",
+        });
+      }
       data.quoteNumber = b.quoteNumber;
     }
 
@@ -314,9 +325,10 @@ router.post(
     });
     await startApprovalChain(id, quote.currentVersion);
 
-    // Notify approvers
+    // Notify approvers (skip the creator if they happen to be an approver — they get
+    // their own confirmation below).
     const approvers = await prisma.user.findMany({
-      where: { active: true, role: { in: ["manager", "admin"] } },
+      where: { active: true, role: { in: ["manager", "admin"] }, id: { not: existing.createdById } },
       select: { id: true },
     });
     for (const u of approvers) {
@@ -329,6 +341,15 @@ router.post(
         important: true,
       });
     }
+
+    // Confirm to the creator that their quote is now pending.
+    await notify(existing.createdById, {
+      title: `Báo giá ${quote.quoteNumber} đã gửi duyệt`,
+      body: `Đang chờ duyệt. Bạn sẽ được báo khi có kết quả.`,
+      link: `/#/quotes/${id}`,
+      resource: "quote",
+      resourceId: id,
+    });
 
     await audit(req, "quote.submit", { resource: "quote", resourceId: id });
     emitWebhook("quote.submitted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
