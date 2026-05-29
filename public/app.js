@@ -39,6 +39,12 @@ function toast(msg, type = "info") {
   setTimeout(() => t.remove(), 2400);
 }
 
+// Skeleton loader markup — used while data is being fetched.
+function skeleton(rows = 5, tall = false) {
+  return `<div class="skeleton">${Array.from({ length: rows })
+    .map(() => `<div class="sk-line${tall ? " tall" : ""}"></div>`).join("")}</div>`;
+}
+
 function fmtMoney(n) {
   if (n == null || isNaN(n)) return "0";
   return Number(n).toLocaleString("vi-VN");
@@ -61,7 +67,22 @@ function escapeHtml(s) {
 const STATUS_LABEL = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối" };
 const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý", employee: "Nhân viên" };
 
+// Theme: persist in localStorage, default to OS preference on first visit.
+function initTheme() {
+  let t = localStorage.getItem("theme");
+  if (!t) {
+    t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+}
+
 async function boot() {
+  initTheme();
   try {
     const me = await api("/api/auth/me");
     state.user = me;
@@ -128,11 +149,30 @@ function renderLogin() {
 // ---------------- Shell ----------------
 function renderShell() {
   const role = state.user.role;
+  const themeIcon = (localStorage.getItem("theme") === "dark") ? "☀️" : "🌙";
   app.innerHTML = `
     <div class="shell">
-      <aside class="sidebar">
-        <h2>Báo Giá</h2>
-        <div class="org">Quản lý nội bộ</div>
+      <div class="mobile-topbar">
+        <button class="icon-btn" id="sb-toggle" aria-label="Mở menu">☰</button>
+        <span class="mt-title">Báo Giá</span>
+        <button class="icon-btn" id="theme-toggle-m" aria-label="Đổi giao diện">${themeIcon}</button>
+      </div>
+      <div class="sidebar-backdrop" id="sb-backdrop"></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="sb-head">
+          <div class="sb-brand">
+            <div class="sb-logo">GN</div>
+            <div>
+              <h2>Báo Giá</h2>
+              <div class="org">Gia Nguyễn · nội bộ</div>
+            </div>
+          </div>
+          <button class="icon-btn" id="theme-toggle" title="Đổi giao diện sáng/tối">${themeIcon}</button>
+        </div>
+        <div class="global-search">
+          <input id="gs-input" placeholder="🔎 Tìm nhanh (Ctrl+K)" />
+          <div id="gs-results" class="global-search-results" style="display:none"></div>
+        </div>
         <nav class="menu">
           <a href="#" data-page="dashboard" class="${state.page === "dashboard" ? "active" : ""}">📊 Dashboard</a>
           <a href="#" data-page="list" class="${state.page === "list" ? "active" : ""}">📋 Danh sách báo giá</a>
@@ -142,24 +182,40 @@ function renderShell() {
           ${role === "admin" ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
           <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
         </nav>
-        <div class="global-search" style="position:relative">
-          <input id="gs-input" placeholder="🔎 Tìm nhanh (Ctrl+K)" />
-          <div id="gs-results" class="global-search-results" style="display:none"></div>
-        </div>
         <div class="who">
           <strong>${escapeHtml(state.user.displayName)}</strong>
           <span>@${escapeHtml(state.user.username)}</span><br/>
-          <span class="role-pill">${ROLE_LABEL[role]}</span><br/>
+          <span class="role-pill">${ROLE_LABEL[role]}</span>
           <button class="logout">Đăng xuất</button>
         </div>
       </aside>
       <main class="main" id="main"></main>
     </div>`;
+
+  // Theme toggle (desktop + mobile)
+  const applyThemeIcon = () => {
+    const ic = (localStorage.getItem("theme") === "dark") ? "☀️" : "🌙";
+    ["theme-toggle", "theme-toggle-m"].forEach(id => { const b = document.getElementById(id); if (b) b.textContent = ic; });
+  };
+  ["theme-toggle", "theme-toggle-m"].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.addEventListener("click", () => { toggleTheme(); applyThemeIcon(); });
+  });
+
+  // Mobile sidebar toggle
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sb-backdrop");
+  const openSidebar = () => { sidebar.classList.add("open"); backdrop.classList.add("show"); };
+  const closeSidebar = () => { sidebar.classList.remove("open"); backdrop.classList.remove("show"); };
+  document.getElementById("sb-toggle")?.addEventListener("click", openSidebar);
+  backdrop?.addEventListener("click", closeSidebar);
+
   document.querySelectorAll("[data-page]").forEach(a => {
     a.addEventListener("click", (e) => {
       e.preventDefault();
       state.page = a.dataset.page;
       state.currentQuote = null;
+      closeSidebar();
       render();
     });
   });
@@ -269,7 +325,7 @@ async function renderList(el) {
       <button class="btn" id="btn-reload">🔄 Tải lại</button>
       <button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>
     </div>
-    <div id="list-body">Đang tải...</div>`;
+    <div id="list-body">${skeleton(6)}</div>`;
   document.getElementById("filter-status").value = state.filter.status;
 
   const reload = async () => {
@@ -952,7 +1008,7 @@ async function renderUsers(el) {
     <div class="toolbar">
       <button class="btn btn-primary" id="btn-new-user">+ Thêm nhân viên</button>
     </div>
-    <div id="users-body">Đang tải...</div>`;
+    <div id="users-body">${skeleton(5)}</div>`;
   document.getElementById("btn-new-user").addEventListener("click", () => openUserModal(null));
   await loadUsers();
 }
@@ -1112,7 +1168,7 @@ function renderProfile(el) {
 // ---------------- Dashboard ----------------
 async function renderDashboard(el) {
   el.innerHTML = `<h1>📊 Dashboard</h1>
-    <div id="dash-kpi" class="kpi-grid">Đang tải...</div>
+    <div id="dash-kpi" class="kpi-grid">${skeleton(5, true)}</div>
     <h3 style="margin-top:24px">Phễu báo giá</h3>
     <div id="dash-funnel" class="funnel"></div>
     <h3 style="margin-top:24px">Top nhân viên (theo doanh số duyệt)</h3>
@@ -1418,7 +1474,7 @@ async function renderApprovalQueue(el) {
 async function renderNotifications(el) {
   el.innerHTML = `<h1>🔔 Thông báo</h1>
     <div class="toolbar"><button class="btn" id="btn-read-all">Đánh dấu đã đọc tất cả</button></div>
-    <div id="n-body">Đang tải...</div>`;
+    <div id="n-body">${skeleton(4)}</div>`;
   document.getElementById("btn-read-all").addEventListener("click", async () => {
     await api("/api/notifications/read-all", { method: "POST" });
     renderNotifications(el);
@@ -1449,7 +1505,7 @@ async function renderAuditLog(el) {
       <input id="a-resource" placeholder="resource (vd: quote)"/>
       <button class="btn" id="a-reload">Tải</button>
     </div>
-    <div id="a-body">Đang tải...</div>`;
+    <div id="a-body">${skeleton(6)}</div>`;
   const reload = async () => {
     const params = new URLSearchParams();
     if (document.getElementById("a-action").value) params.set("action", document.getElementById("a-action").value);
