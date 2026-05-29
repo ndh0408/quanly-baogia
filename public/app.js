@@ -552,13 +552,17 @@ function renderEditor(el, quote) {
         </div>
 
         <div class="actions">
-          ${!isNew ? `<button class="btn" id="btn-excel">📥 Xuất Excel</button>` : ""}
           ${editable ? `<button class="btn btn-primary" id="btn-save">💾 Lưu</button>` : ""}
+          ${!isNew ? `<button class="btn" id="btn-excel">📥 Excel</button>` : ""}
+          ${!isNew ? `<button class="btn" id="btn-pdf">📄 PDF</button>` : ""}
+          ${!isNew ? `<button class="btn" id="btn-versions">🕘 Lịch sử</button>` : ""}
           ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">📨 Trình duyệt</button>` : ""}
           ${!isNew && q.status === "pending" && (state.user.role === "admin" || state.user.role === "manager") ? `
             <button class="btn btn-success" id="btn-approve">✅ Duyệt</button>
             <button class="btn btn-danger" id="btn-reject">❌ Từ chối</button>
           ` : ""}
+          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-primary" id="btn-send">📤 ${q.status === "sent" ? "Gửi lại KH" : "Gửi KH"}</button>` : ""}
+          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-success" id="btn-convert">🤝 Đã chốt</button>` : ""}
         </div>
       </div>`;
 
@@ -717,6 +721,79 @@ function bindActions(q, isNew) {
   if (excelBtn) excelBtn.addEventListener("click", () => {
     window.open(`/api/export/${q.id}.xlsx`, "_blank");
   });
+  const pdfBtn = document.getElementById("btn-pdf");
+  if (pdfBtn) pdfBtn.addEventListener("click", () => {
+    window.open(`/api/export/${q.id}.pdf`, "_blank");
+  });
+  const versionsBtn = document.getElementById("btn-versions");
+  if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
+  const sendBtn = document.getElementById("btn-send");
+  if (sendBtn) sendBtn.addEventListener("click", async () => {
+    try {
+      const updated = await api(`/api/quotes/${q.id}/send`, { method: "POST" });
+      state.currentQuote = updated;
+      toast("Đã đánh dấu Đã gửi khách", "success");
+      render();
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const convertBtn = document.getElementById("btn-convert");
+  if (convertBtn) convertBtn.addEventListener("click", async () => {
+    if (!confirm("Đánh dấu báo giá này là ĐÃ CHỐT (chuyển đơn)?")) return;
+    try {
+      const updated = await api(`/api/quotes/${q.id}/mark-converted`, { method: "POST" });
+      state.currentQuote = updated;
+      toast("Đã chốt 🎉", "success");
+      render();
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+/** Version history viewer with side-by-side diff between any two revisions. */
+async function showVersions(quoteId) {
+  const m = openModal("Lịch sử phiên bản", `<div id="ver-body">Đang tải...</div>`);
+  try {
+    const r = await api(`/api/quotes/${quoteId}/versions`);
+    const versions = r.data || [];
+    if (!versions.length) {
+      m.find("#ver-body").innerHTML = "<div class='empty-state'>Chưa có phiên bản</div>";
+      return;
+    }
+    m.find("#ver-body").innerHTML = `
+      <table class="list-table" style="margin-bottom:12px">
+        <thead><tr><th>Phiên bản</th><th>Thời gian</th><th style="text-align:right">Tổng (VNĐ)</th></tr></thead>
+        <tbody>${versions.map(v => `
+          <tr><td>v${v.versionNo}</td><td>${new Date(v.createdAt).toLocaleString("vi-VN")}</td>
+          <td style="text-align:right">${fmtMoney(v.total)}</td></tr>`).join("")}</tbody>
+      </table>
+      ${versions.length >= 2 ? `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <span style="font-size:13px">So sánh:</span>
+          <select id="ver-a">${versions.map(v => `<option value="${v.versionNo}">v${v.versionNo}</option>`).join("")}</select>
+          <span>→</span>
+          <select id="ver-b">${versions.map(v => `<option value="${v.versionNo}">v${v.versionNo}</option>`).join("")}</select>
+          <button class="btn btn-sm" id="ver-diff-btn">Xem khác biệt</button>
+        </div>
+        <div id="ver-diff"></div>` : ""}`;
+    if (versions.length >= 2) {
+      const selA = m.find("#ver-a"), selB = m.find("#ver-b");
+      selA.value = String(versions[1].versionNo);
+      selB.value = String(versions[0].versionNo);
+      m.find("#ver-diff-btn").addEventListener("click", async () => {
+        const a = selA.value, b = selB.value;
+        try {
+          const d = await api(`/api/quotes/${quoteId}/versions/${a}/diff/${b}`);
+          const box = m.find("#ver-diff");
+          if (!d.changes.length) { box.innerHTML = "<div class='empty-state'>Không có thay đổi</div>"; return; }
+          box.innerHTML = `<table class="list-table"><thead><tr><th>Trường</th><th>v${a}</th><th>v${b}</th></tr></thead>
+            <tbody>${d.changes.map(c => `<tr>
+              <td><code>${escapeHtml(c.key)}</code></td>
+              <td style="color:#b91c1c;max-width:240px;overflow:hidden">${escapeHtml(JSON.stringify(c.before)).slice(0,200)}</td>
+              <td style="color:#166534;max-width:240px;overflow:hidden">${escapeHtml(JSON.stringify(c.after)).slice(0,200)}</td>
+            </tr>`).join("")}</tbody></table>`;
+        } catch (e) { toast(e.message, "error"); }
+      });
+    }
+  } catch (e) { toast(e.message, "error"); }
 }
 
 function drawItems(q, activeSheet, editable, tplCode, usesDays) {

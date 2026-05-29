@@ -84,7 +84,27 @@ export const QuoteCreateSchema = z.object({
   sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20),
 });
 
-export const QuoteUpdateSchema = QuoteCreateSchema.partial().extend({
+// IMPORTANT: defined explicitly (NOT QuoteCreateSchema.partial()) because the
+// create schema's `.default("")` on optional fields would materialize empty
+// strings for absent keys on a partial update. The handler then does
+// `"" || null` → null and Prisma rejects required columns like fromContact.
+// Here every field is truly optional with NO default: absent => undefined =>
+// the handler skips it, so only fields the client actually sent get updated.
+export const QuoteUpdateSchema = z.object({
+  quoteNumber: z.string().max(40).optional(),
+  title: z.string().min(1).max(500).optional(),
+  toCompany: z.string().min(1).max(500).optional(),
+  toContact: z.string().max(200).optional().nullable(),
+  companyId: z.coerce.number().int().positive().optional(),
+  fromContact: z.string().max(200).optional(),
+  fromPhone: z.string().max(40).optional().nullable(),
+  fromTitle: z.string().max(120).optional().nullable(),
+  fromAddress: z.string().max(500).optional(),
+  city: z.string().max(120).optional(),
+  quoteDate: z.coerce.date().optional(),
+  greeting: z.string().max(2000).optional(),
+  vatPercent: z.coerce.number().min(0).max(100).optional(),
+  notes: z.string().max(4000).optional().nullable(),
   sheets: z.array(sheetSchema).max(20).optional(),
 });
 

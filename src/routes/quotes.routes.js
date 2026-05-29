@@ -244,7 +244,12 @@ router.put(
 
     const b = req.body;
     const data = {};
-    for (const f of ["title", "toCompany", "toContact", "fromContact", "fromPhone", "fromTitle", "fromAddress", "city", "greeting", "notes"]) {
+    // Required (non-null) columns: keep the value as-is; never coerce to null.
+    for (const f of ["title", "toCompany", "fromContact", "fromAddress", "city", "greeting"]) {
+      if (b[f] !== undefined && b[f] !== null) data[f] = b[f];
+    }
+    // Nullable columns: empty string clears them to null.
+    for (const f of ["toContact", "fromPhone", "fromTitle", "notes"]) {
       if (b[f] !== undefined) data[f] = b[f] || null;
     }
     if (b.quoteDate) data.quoteDate = b.quoteDate;
