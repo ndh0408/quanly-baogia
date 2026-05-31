@@ -103,6 +103,9 @@ export const TEMPLATE_CONFIGS = {
       toBlockCell: "F3",
       toBlockFormat: ({ company, contact }) =>
         `Kính gửi: ${company || "….."}${contact ? "  -  " + contact : ""}`,
+      // Customer logo replaces the "logo cty khách hàng" placeholder at C3.
+      customerLogoCell: "C3",
+      customerLogoExt: { width: 190, height: 80 },
     },
     items: {
       firstRow: 6,

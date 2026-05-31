@@ -39,6 +39,34 @@ function clean(s) {
   return String(s).replace(/[\r\n]+/g, " ").trim();
 }
 
+/** Parse "C3" → 0-based {col,row} anchor used by ExcelJS addImage. */
+function cellAnchor(ref) {
+  const m = /^([A-Z]+)(\d+)$/i.exec(ref || "");
+  if (!m) return { col: 0, row: 0 };
+  let col = 0;
+  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { col: col - 1, row: Number(m[2]) - 1 };
+}
+
+/** Insert a base64 data-URL image floating over the given cell; clears the cell text. */
+function insertCustomerLogo(ws, ref, dataUrl, ext) {
+  const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return;
+  let extension = m[1].toLowerCase();
+  if (extension === "jpg") extension = "jpeg";
+  try {
+    const buffer = Buffer.from(m[2], "base64");
+    const imageId = ws.workbook.addImage({ buffer, extension });
+    try { ws.getCell(ref).value = null; } catch {}
+    const a = cellAnchor(ref);
+    ws.addImage(imageId, {
+      tl: { col: a.col + 0.05, row: a.row + 0.05 },
+      ext: ext || { width: 170, height: 64 },
+      editAs: "oneCell",
+    });
+  } catch { /* ignore bad image */ }
+}
+
 function applyTemplateCleanup(ws, cfg) {
   const cleanup = cfg.cleanup || {};
 
@@ -121,6 +149,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(quote.quoteNumber) : (quote.quoteNumber || ""));
   }
   if (c.greeting) setCell(ws, c.greeting, quote.greeting || "");
+
+  // Customer logo: if the template has an anchor cell and the quote carries a
+  // base64 logo, drop the placeholder text and float the image over that cell.
+  if (c.customerLogoCell && quote.customerLogo) {
+    insertCustomerLogo(ws, c.customerLogoCell, quote.customerLogo, c.customerLogoExt);
+  }
 
   // Items
   const itemsCfg = cfg.items;

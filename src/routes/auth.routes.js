@@ -10,6 +10,7 @@ import { validate, LoginSchema, ChangePasswordSchema } from "../validators.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllForUser } from "../jwt.js";
+import { permissionsForRole } from "../permissions.js";
 
 const router = Router();
 
@@ -137,6 +138,7 @@ router.post(
       role: user.role,
       phone: user.phone,
       title: user.title,
+      permissions: permissionsForRole(user.role),
     });
   })
 );
@@ -157,7 +159,9 @@ router.get(
       where: { id: req.session.userId },
       select: { id: true, username: true, displayName: true, role: true, phone: true, title: true, lastLoginAt: true },
     });
-    res.json(user);
+    if (!user) return res.status(404).json({ error: "Không tìm thấy" });
+    // Ship the authoritative capability list so the SPA gates UI from the server catalog.
+    res.json({ ...user, permissions: permissionsForRole(user.role) });
   })
 );
 

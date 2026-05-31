@@ -15,18 +15,21 @@ import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
+import { can, canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
+// Editing rule: holders of quote:update:all may edit anything; owners may edit
+// their own only while it's still draft/rejected.
 function canEdit(quote, session) {
-  if (session.role === "admin" || session.role === "manager") return true;
-  return (
-    quote.createdById === session.userId &&
-    (quote.status === "draft" || quote.status === "rejected")
-  );
+  if (canOnQuote(session, "update", quote)) {
+    if (session.role === "admin" || session.role === "manager") return true;
+    return quote.status === "draft" || quote.status === "rejected";
+  }
+  return false;
 }
 
 const QUOTE_INCLUDE = {
@@ -43,9 +46,9 @@ const QUOTE_INCLUDE = {
 };
 
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
-function presentQuote(q) {
+function presentQuote(q, { includeLogo = false } = {}) {
   const totals = computeQuoteTotals(q);
-  return {
+  const out = {
     ...q,
     vatPercent: Number(q.vatPercent),
     subtotal: Number(q.subtotal ?? totals.subtotal),
@@ -62,6 +65,9 @@ function presentQuote(q) {
     })),
     ...totalsToJson(totals),
   };
+  // base64 logo is large — only ship it when explicitly needed (single quote fetch).
+  if (!includeLogo) delete out.customerLogo;
+  return out;
 }
 
 function buildSheetsCreate(sheets) {
@@ -91,7 +97,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const { q, status, companyId, from, to, page, size, sort, order } = req.query;
     const where = {};
-    if (req.session.role === "employee") where.createdById = req.session.userId;
+    // Users without "read all" only see quotes they created.
+    if (!can(req.session, P.QUOTE_READ_ALL)) where.createdById = req.session.userId;
     if (status) where.status = status;
     if (companyId) where.companyId = companyId;
     if (from || to) {
@@ -152,10 +159,10 @@ router.get(
     const { id } = req.params;
     const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (req.session.role === "employee" && quote.createdById !== req.session.userId) {
+    if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền xem báo giá này" });
     }
-    res.json(presentQuote(quote));
+    res.json(presentQuote(quote, { includeLogo: true }));
   })
 );
 
@@ -199,6 +206,7 @@ router.post(
       greeting: b.greeting || undefined,
       vatPercent: D(b.vatPercent),
       notes: b.notes || null,
+      customerLogo: b.customerLogo || null,
       status: "draft",
       createdById: req.session.userId,
     };
@@ -226,7 +234,7 @@ router.post(
     });
     emitWebhook("quote.created", { id: quote.id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
 
-    res.status(201).json(presentQuote(quote));
+    res.status(201).json(presentQuote(quote, { includeLogo: true }));
   })
 );
 
@@ -255,6 +263,7 @@ router.put(
     if (b.quoteDate) data.quoteDate = b.quoteDate;
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
     if (b.companyId !== undefined) data.companyId = b.companyId;
+    if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
     if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
       const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
       if (dup) {
@@ -305,7 +314,7 @@ router.put(
       after: { total: Number(updated.total), status: updated.status },
     });
 
-    res.json(presentQuote(updated));
+    res.json(presentQuote(updated, { includeLogo: true }));
   })
 );
 
@@ -317,7 +326,7 @@ router.post(
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-    if (req.session.role === "employee" && existing.createdById !== req.session.userId) {
+    if (!can(req.session, P.QUOTE_SUBMIT) || !canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền" });
     }
     if (!["draft", "rejected"].includes(existing.status)) {
@@ -364,7 +373,7 @@ router.post(
 
 router.post(
   "/:id/approve",
-  requireRole("admin", "manager"),
+  requirePermission(P.QUOTE_APPROVE),
   validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -410,7 +419,7 @@ router.post(
 
 router.post(
   "/:id/reject",
-  requireRole("admin", "manager"),
+  requirePermission(P.QUOTE_REJECT),
   validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -552,10 +561,10 @@ router.delete(
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-    const isOwnerDraft =
-      existing.createdById === req.session.userId &&
+    const ownerDraftDelete =
+      canOnQuote(req.session, "delete", existing) &&
       (existing.status === "draft" || existing.status === "rejected");
-    if (!isOwnerDraft && req.session.role !== "admin") {
+    if (!ownerDraftDelete && !can(req.session, P.QUOTE_DELETE_ALL)) {
       return res.status(403).json({ error: "Chỉ admin hoặc người tạo (nháp/từ chối) mới được xóa" });
     }
     await prisma.quote.delete({ where: { id } }); // soft delete via middleware

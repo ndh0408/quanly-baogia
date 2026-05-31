@@ -1,6 +1,22 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 const app = document.getElementById("app");
 
+// Client-side permission mirror of the server catalog (from /api/auth/me).
+// Only gates UI visibility — the server is always the source of truth.
+function can(perm) {
+  const perms = state.user?.permissions;
+  if (!perms) return false;
+  if (perms.includes(perm)) return true;
+  // ":own" is implied by ":all"
+  if (perm.endsWith(":own")) return perms.includes(perm.replace(/:own$/, ":all"));
+  return false;
+}
+function canOnQuote(action, q) {
+  if (can(`quote:${action}:all`)) return true;
+  if (can(`quote:${action}:own`)) return q && q.createdById === state.user?.id;
+  return false;
+}
+
 const state = {
   user: null,
   page: "list",
@@ -178,8 +194,9 @@ function renderShell() {
           <a href="#" data-page="list" class="${state.page === "list" ? "active" : ""}">📋 Danh sách báo giá</a>
           <a href="#" data-page="new" class="${state.page === "new" ? "active" : ""}">➕ Tạo báo giá mới</a>
           <a href="#" data-page="notifications" class="${state.page === "notifications" ? "active" : ""}">🔔 Thông báo <span id="badge-notif" class="badge-num"></span></a>
-          ${role === "admin" ? `<a href="#" data-page="users" class="${state.page === "users" ? "active" : ""}">👥 Quản lý nhân viên</a>` : ""}
-          ${role === "admin" ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
+          ${can("user:manage") ? `<a href="#" data-page="users" class="${state.page === "users" ? "active" : ""}">👥 Quản lý nhân viên</a>` : ""}
+          ${can("user:manage") ? `<a href="#" data-page="permissions" class="${state.page === "permissions" ? "active" : ""}">🛡️ Phân quyền</a>` : ""}
+          ${can("audit:view") ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
           <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
         </nav>
         <div class="who">
@@ -277,6 +294,7 @@ function renderShell() {
   else if (state.page === "approvals") renderApprovalQueue(mainEl);
   else if (state.page === "notifications") renderNotifications(mainEl);
   else if (state.page === "audit") renderAuditLog(mainEl);
+  else if (state.page === "permissions") renderPermissions(mainEl);
   else if (state.page === "settings") renderSettings(mainEl);
 
   // Refresh notification + approval queue badges
@@ -398,8 +416,8 @@ async function renderList(el) {
 }
 
 function canDelete(q) {
-  if (state.user.role === "admin") return true;
-  return q.createdById === state.user.id && (q.status === "draft" || q.status === "rejected");
+  if (can("quote:delete:all")) return true;
+  return canOnQuote("delete", q) && (q.status === "draft" || q.status === "rejected");
 }
 
 async function listAction(act, id) {
@@ -428,60 +446,178 @@ async function listAction(act, id) {
 }
 
 // ---------------- New Quote (wizard) ----------------
+// Renders a horizontal stepper. steps = [labels], current = 1-based index.
+function stepper(steps, current) {
+  return `<div class="stepper">${steps.map((s, i) => {
+    const n = i + 1;
+    const cls = n < current ? "done" : n === current ? "active" : "";
+    const dot = `<div class="step-dot ${cls}"><div class="num">${n < current ? "✓" : n}</div><div class="lbl">${escapeHtml(s)}</div></div>`;
+    const line = i < steps.length - 1 ? `<div class="step-line ${n < current ? "done" : ""}"></div>` : "";
+    return dot + line;
+  }).join("")}</div>`;
+}
+
+const WIZARD_STEPS = ["Công ty", "Mẫu báo giá", "Thông tin", "Hạng mục"];
+
 function renderNewQuote(el) {
+  if (!state._wizard) {
+    state._wizard = {
+      step: 1,
+      companyId: state.companies[0]?.id || null,
+      templateIds: [],
+      info: {
+        title: "", toCompany: "", toContact: "",
+        fromContact: state.user.displayName || "", fromPhone: state.user.phone || "",
+        fromTitle: state.user.title || "", fromAddress: "", city: "TP. Hồ Chí Minh",
+        quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 8, customerLogo: null,
+      },
+    };
+  }
+  const wz = state._wizard;
+  const company = state.companies.find(c => c.id === wz.companyId);
+  const templates = company?.templates || [];
+
+  let body = "";
+  if (wz.step === 1) {
+    body = `
+      <h2>Chọn công ty phát hành</h2>
+      <p class="hint">Báo giá sẽ dùng letterhead / mẫu của công ty này.</p>
+      <div class="pick-grid">
+        ${state.companies.map(c => `
+          <div class="pick-card ${c.id === wz.companyId ? "selected" : ""}" data-company="${c.id}">
+            <div class="pc-title">${escapeHtml(c.shortName || c.name)}</div>
+            <div class="pc-sub">${escapeHtml(c.name)}</div>
+            <div class="pc-sub">${(c.templates || []).length} mẫu</div>
+            <div class="pc-check">✓</div>
+          </div>`).join("")}
+      </div>`;
+  } else if (wz.step === 2) {
+    body = `
+      <h2>Chọn mẫu báo giá (mỗi mẫu = 1 sheet)</h2>
+      <p class="hint">Chọn 1 hoặc nhiều mẫu. Có thể đổi thứ tự / thêm sheet sau.</p>
+      <div class="pick-grid">
+        ${templates.map(t => `
+          <div class="pick-card ${wz.templateIds.includes(t.id) ? "selected" : ""}" data-template="${t.id}">
+            <div class="pc-title">${escapeHtml(t.name)}</div>
+            <div class="pc-sub">${escapeHtml(t.code)}</div>
+            <div class="pc-check">✓</div>
+          </div>`).join("")}
+      </div>
+      ${wz.templateIds.length ? `<div class="sheet-chips">${wz.templateIds.map((id, i) => {
+        const t = templates.find(x => x.id === id);
+        return `<span class="sheet-chip">${i + 1}. ${escapeHtml(t?.name || "")} <span class="x" data-rm="${id}">✕</span></span>`;
+      }).join("")}</div>` : ""}`;
+  } else if (wz.step === 3) {
+    const i = wz.info;
+    body = `
+      <h2>Thông tin báo giá</h2>
+      <p class="hint">Khách hàng, người gửi, VAT, ngày — và logo khách (chèn vào mẫu CLF).</p>
+      <div class="form-grid">
+        <label style="grid-column:1/-1">Tiêu đề báo giá <span class="req">*</span>
+          <input id="w-title" value="${escapeHtml(i.title)}" placeholder="VD: Décor Premiere Phim Thỏ Ơi"/></label>
+        <label>Khách hàng (To) <span class="req">*</span><input id="w-toCompany" value="${escapeHtml(i.toCompany)}"/></label>
+        <label>Người liên hệ KH<input id="w-toContact" value="${escapeHtml(i.toContact)}"/></label>
+        <label>Người gửi (From)<input id="w-fromContact" value="${escapeHtml(i.fromContact)}"/></label>
+        <label>Chức danh<input id="w-fromTitle" value="${escapeHtml(i.fromTitle)}"/></label>
+        <label>SĐT người gửi<input id="w-fromPhone" value="${escapeHtml(i.fromPhone)}"/></label>
+        <label>Địa chỉ<input id="w-fromAddress" value="${escapeHtml(i.fromAddress)}"/></label>
+        <label>VAT (%)<input id="w-vat" type="number" step="0.1" value="${i.vatPercent}"/></label>
+        <label>Ngày<input id="w-date" type="date" value="${i.quoteDate}"/></label>
+        <div style="grid-column:1/-1">
+          <div style="font-size:13px;color:var(--text-soft);font-weight:500;margin-bottom:5px">Logo khách hàng (tùy chọn)</div>
+          <div class="logo-drop ${i.customerLogo ? "has" : ""}" id="w-logo-drop">
+            ${i.customerLogo
+              ? `<img src="${i.customerLogo}"/><div class="logo-actions"><button class="btn btn-sm" id="w-logo-change">Đổi</button><button class="btn btn-sm btn-danger" id="w-logo-clear">Xóa</button></div>`
+              : `📁 Bấm để chọn ảnh logo (PNG/JPG, &lt; 2MB)`}
+          </div>
+          <input type="file" id="w-logo-file" accept="image/png,image/jpeg" style="display:none"/>
+        </div>
+      </div>`;
+  }
+
   el.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">
-      <h1>Tạo báo giá mới</h1>
-      <button class="btn" id="btn-cancel">← Hủy</button>
-    </div>
-    <div class="editor" style="max-width:540px">
-      <h3 style="margin-top:0">Bước 1: Chọn công ty + sheet đầu tiên</h3>
-      <label style="display:block; margin-bottom:12px"><span style="font-size:13px; color:#555">Công ty của bạn</span>
-        <select id="sel-company" style="width:100%; padding:8px; border:1px solid #d8dbe3; border-radius:6px; margin-top:4px">
-          ${state.companies.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}
-        </select>
-      </label>
-      <label style="display:block; margin-bottom:12px"><span style="font-size:13px; color:#555">Form/Template cho sheet đầu</span>
-        <select id="sel-template" style="width:100%; padding:8px; border:1px solid #d8dbe3; border-radius:6px; margin-top:4px"></select>
-      </label>
-      <div class="actions" style="justify-content:flex-end">
-        <button class="btn btn-primary" id="btn-create">Tạo & sửa →</button>
+    <div class="wizard">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+        <h1>Tạo báo giá mới</h1>
+        <button class="btn" id="btn-cancel">← Hủy</button>
+      </div>
+      ${stepper(WIZARD_STEPS, wz.step)}
+      <div class="wizard-card">
+        ${body}
+        <div class="wizard-foot">
+          <button class="btn" id="w-back" ${wz.step === 1 ? "disabled" : ""}>← Quay lại</button>
+          <button class="btn btn-primary" id="w-next">${wz.step === 3 ? "Nhập hạng mục →" : "Tiếp tục →"}</button>
+        </div>
       </div>
     </div>`;
 
-  const selC = document.getElementById("sel-company");
-  const selT = document.getElementById("sel-template");
-  const refreshTemplates = () => {
-    const companyId = parseInt(selC.value, 10);
-    const company = state.companies.find(c => c.id === companyId);
-    selT.innerHTML = (company?.templates || []).map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
-  };
-  refreshTemplates();
-  selC.addEventListener("change", refreshTemplates);
+  document.getElementById("btn-cancel").addEventListener("click", () => { state._wizard = null; state.page = "list"; render(); });
 
-  document.getElementById("btn-cancel").addEventListener("click", () => { state.page = "list"; render(); });
-  document.getElementById("btn-create").addEventListener("click", async () => {
+  // Step 1: company cards
+  el.querySelectorAll("[data-company]").forEach(c => c.addEventListener("click", () => {
+    wz.companyId = parseInt(c.dataset.company, 10);
+    wz.templateIds = []; // reset sheets when company changes
+    renderNewQuote(el);
+  }));
+  // Step 2: template cards (toggle)
+  el.querySelectorAll("[data-template]").forEach(c => c.addEventListener("click", () => {
+    const id = parseInt(c.dataset.template, 10);
+    if (wz.templateIds.includes(id)) wz.templateIds = wz.templateIds.filter(x => x !== id);
+    else wz.templateIds.push(id);
+    renderNewQuote(el);
+  }));
+  el.querySelectorAll("[data-rm]").forEach(x => x.addEventListener("click", (e) => {
+    e.stopPropagation();
+    wz.templateIds = wz.templateIds.filter(id => id !== parseInt(x.dataset.rm, 10));
+    renderNewQuote(el);
+  }));
+
+  // Step 3: bind info fields + logo
+  if (wz.step === 3) {
+    const bind = (id, key) => { const elx = document.getElementById(id); if (elx) elx.addEventListener("input", () => wz.info[key] = elx.value); };
+    bind("w-title", "title"); bind("w-toCompany", "toCompany"); bind("w-toContact", "toContact");
+    bind("w-fromContact", "fromContact"); bind("w-fromTitle", "fromTitle"); bind("w-fromPhone", "fromPhone");
+    bind("w-fromAddress", "fromAddress"); bind("w-vat", "vatPercent"); bind("w-date", "quoteDate");
+    const fileInput = document.getElementById("w-logo-file");
+    const drop = document.getElementById("w-logo-drop");
+    const pick = () => fileInput.click();
+    if (!wz.info.customerLogo) drop.addEventListener("click", pick);
+    document.getElementById("w-logo-change")?.addEventListener("click", pick);
+    document.getElementById("w-logo-clear")?.addEventListener("click", () => { wz.info.customerLogo = null; renderNewQuote(el); });
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files[0];
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { toast("Logo phải nhỏ hơn 2MB", "error"); return; }
+      const reader = new FileReader();
+      reader.onload = () => { wz.info.customerLogo = reader.result; renderNewQuote(el); };
+      reader.readAsDataURL(f);
+    });
+  }
+
+  document.getElementById("w-back").addEventListener("click", () => { if (wz.step > 1) { wz.step--; renderNewQuote(el); } });
+  document.getElementById("w-next").addEventListener("click", async () => {
+    if (wz.step === 1) {
+      if (!wz.companyId) { toast("Chọn công ty", "error"); return; }
+      wz.step = 2; return renderNewQuote(el);
+    }
+    if (wz.step === 2) {
+      if (!wz.templateIds.length) { toast("Chọn ít nhất 1 mẫu", "error"); return; }
+      wz.step = 3; return renderNewQuote(el);
+    }
+    // step 3 → build draft + open editor for items
+    if (!wz.info.title.trim()) { toast("Nhập tiêu đề báo giá", "error"); return; }
+    if (!wz.info.toCompany.trim()) { toast("Nhập tên khách hàng", "error"); return; }
     try {
-      const companyId = parseInt(selC.value, 10);
-      const templateId = parseInt(selT.value, 10);
-      if (!companyId || !templateId) { toast("Chọn công ty & template", "error"); return; }
       const { quoteNumber } = await api("/api/quotes/next-number");
-      const template = state.templates.find(t => t.id === templateId);
-      const draft = {
-        quoteNumber, title: "", toCompany: "", toContact: "",
-        companyId,
-        fromContact: state.user.displayName || "",
-        fromPhone: state.user.phone || "",
-        fromTitle: state.user.title || "",
-        fromAddress: "", city: "TP. Hồ Chí Minh",
-        quoteDate: new Date().toISOString().slice(0, 10),
-        vatPercent: 8,
-        sheets: [{
-          templateId, name: template.name,
-          items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }],
-        }],
+      const sheets = wz.templateIds.map(tid => {
+        const t = state.templates.find(x => x.id === tid);
+        return { templateId: tid, name: t?.name || "Sheet", items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] };
+      });
+      state.currentQuote = {
+        quoteNumber, ...wz.info, companyId: wz.companyId,
+        customerLogo: wz.info.customerLogo, sheets, _new: true,
       };
-      state.currentQuote = { ...draft, _new: true };
+      state._wizard = null;
       state.page = "edit";
       render();
     } catch (e) { toast(e.message, "error"); }
@@ -613,7 +749,7 @@ function renderEditor(el, quote) {
           ${!isNew ? `<button class="btn" id="btn-pdf">📄 PDF</button>` : ""}
           ${!isNew ? `<button class="btn" id="btn-versions">🕘 Lịch sử</button>` : ""}
           ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">📨 Trình duyệt</button>` : ""}
-          ${!isNew && q.status === "pending" && (state.user.role === "admin" || state.user.role === "manager") ? `
+          ${!isNew && q.status === "pending" && can("quote:approve") ? `
             <button class="btn btn-success" id="btn-approve">✅ Duyệt</button>
             <button class="btn btn-danger" id="btn-reject">❌ Từ chối</button>
           ` : ""}
@@ -1606,6 +1742,58 @@ function openModal(title, bodyHtml) {
     close,
     onSave: (cb) => d.querySelector("[data-save]").addEventListener("click", cb),
   };
+}
+
+// ---------------- Permissions (Phân quyền) ----------------
+async function renderPermissions(el) {
+  el.innerHTML = `<h1>🛡️ Phân quyền</h1>
+    <p class="muted">Vai trò → khả năng (cấu hình cố định, an toàn). Bên dưới: gán vai trò cho từng nhân viên.</p>
+    <div id="perm-matrix-wrap">${skeleton(6)}</div>
+    <h3 style="margin-top:26px">Gán vai trò nhân viên</h3>
+    <div id="perm-users">${skeleton(4)}</div>`;
+  try {
+    const cat = await api("/api/permissions/catalog");
+    const roles = cat.roles;
+    const rolePerms = Object.fromEntries(roles.map(r => [r.key, new Set(r.permissions)]));
+    const rows = cat.groups.map(g => `
+      <tr class="perm-group-row"><td colspan="${roles.length + 1}">${escapeHtml(g.label)}</td></tr>
+      ${g.perms.map(p => `
+        <tr>
+          <td class="col-perm">${escapeHtml(p.label)} <span class="muted">${escapeHtml(p.key)}</span></td>
+          ${roles.map(r => `<td class="col-role">${rolePerms[r.key].has(p.key) ? '<span class="perm-yes">✓</span>' : '<span class="perm-no">–</span>'}</td>`).join("")}
+        </tr>`).join("")}`).join("");
+    document.getElementById("perm-matrix-wrap").innerHTML = `
+      <table class="perm-matrix">
+        <thead><tr><th>Quyền</th>${roles.map(r => `<th><div class="role-head"><span>${escapeHtml(r.label)}</span><span class="rh-pill">${escapeHtml(r.key)}</span></div></th>`).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+    // User → role assignment
+    const users = await api("/api/users");
+    const roleOptions = roles.map(r => ({ key: r.key, label: r.label }));
+    document.getElementById("perm-users").innerHTML = `
+      <table class="list-table">
+        <thead><tr><th>Nhân viên</th><th>Username</th><th>Vai trò</th><th>Trạng thái</th></tr></thead>
+        <tbody>${users.map(u => `
+          <tr>
+            <td>${escapeHtml(u.displayName)}</td>
+            <td>${escapeHtml(u.username)}</td>
+            <td>
+              <select data-role-user="${u.id}" ${u.id === state.user.id ? "disabled title='Không thể đổi vai trò của chính bạn'" : ""}>
+                ${roleOptions.map(o => `<option value="${o.key}" ${o.key === u.role ? "selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
+              </select>
+            </td>
+            <td>${u.active ? '<span class="status approved">Hoạt động</span>' : '<span class="status rejected">Khóa</span>'}</td>
+          </tr>`).join("")}</tbody>
+      </table>`;
+    document.querySelectorAll("[data-role-user]").forEach(sel => sel.addEventListener("change", async () => {
+      const id = sel.dataset.roleUser;
+      try {
+        await api(`/api/users/${id}`, { method: "PUT", body: JSON.stringify({ role: sel.value }) });
+        toast("Đã cập nhật vai trò", "success");
+      } catch (e) { toast(e.message, "error"); renderPermissions(el); }
+    }));
+  } catch (e) { toast(e.message, "error"); }
 }
 
 boot();
