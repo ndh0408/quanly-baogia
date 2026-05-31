@@ -2,48 +2,109 @@
 // Each template defines: where header info goes, which columns hold item data,
 // where totals rows are, and what formulas to write.
 
+// Shared title formatter: prefix "BẢNG BÁO GIÁ - " unless the title already
+// starts with that phrase (diacritic-insensitive).
+function baoGiaTitle(title) {
+  const t = (title || "").trim();
+  if (!t) return "BẢNG BÁO GIÁ";
+  const ascii = t.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toUpperCase();
+  if (/^BANG\s*BAO\s*GIA/.test(ascii)) return t;
+  return `BẢNG BÁO GIÁ - ${t}`;
+}
+
 export const TEMPLATE_CONFIGS = {
+  // ===== Gia Nguyễn — không ngày (new GN.xls form) =====
+  // Columns: STT | Hạng Mục | ĐVT | Số Lượng | Đơn Giá | Thành Tiền | Ghi Chú
+  // (no separate "Chi Tiết" column; amount = Đơn Giá × Số Lượng)
   marico_decor: {
-    sheetName: "Décor",
-    filePath: "templates/Marico_Decor.xlsx",
+    sheetName: "GN",
+    filePath: "templates/GN_KhongNgay.xlsx",
     displayName: "GN (không ngày)",
     cleanup: {
-      // Extra cells with leftover content from original Marico file
-      extraCellsToClear: ["J16", "K16", "L16"],
-      // Keep images whose top-left is in row <= N (logo area). Drop the rest.
+      // Sample (CJ CGV) cells not overwritten by quote data — blank them so the
+      // template behaves like an empty shell.
+      extraCellsToClear: [
+        "C4", "C5",                                    // customer Tel / Add (no quote field for these)
+        "I12", "I13", "I14", "I15", "I16", "I17", "I18", // stray notes in far column
+        "H16", "C19", "C20", "C21",                    // sample note block + leftover note
+      ],
       keepImagesAboveRow: 5,
     },
-    // Cells where to write header text
     cells: {
       toCompany:   "C2",
       toContact:   "C3",
-      // From section: combined string into F3
       fromContactCell: "F3",
-      // fromContact format: "Hồng Tôn _ AccountTeam_0914291951"
-      fromContactFormat: ({ contact, title, phone }) =>
-        [contact, [title, phone].filter(Boolean).join("_")].filter(Boolean).join(" _ "),
-      fromAddress: "F4",
+      fromContactFormat: ({ contact }) => contact || "",
+      fromPhone:   "F4",
+      fromAddress: "F5",
       date:        "B6",
       title:       "B7",
-      titleFormat: (title) => {
-        const t = (title || "").trim();
-        if (!t) return "BẢNG BÁO GIÁ";
-        // Strip Vietnamese diacritics + special variants of "Đ"/"đ" then compare in upper-case.
-        const ascii = t
-          .normalize("NFD")
-          .replace(/[̀-ͯ]/g, "")
-          .replace(/đ/gi, "d")
-          .toUpperCase();
-        if (/^BANG\s*BAO\s*GIA/.test(ascii)) return t;
-        return `BẢNG BÁO GIÁ - ${t}`;
-      },
-      quoteNumber: "B8",
-      quoteNumberFormat: (qn) => `(Số://${qn || ""})`,
-      greeting:    "B9",
+      titleFormat: baoGiaTitle,
+      greeting:    "B8",
     },
     items: {
       firstRow: 12,
-      lastRow:  21,
+      lastRow:  18,
+      columns: {
+        stt:       "B",
+        name:      "C",
+        unit:      "D",
+        quantity:  "E",
+        unitPrice: "F",
+        amount:    "G",
+        notes:     "H",
+      },
+      amountFormula: (r) => `F${r}*E${r}`,
+    },
+    totals: {
+      subtotal: {
+        labelCells: [["D", "F"]],
+        labelText: () => "Cộng",
+        valueCell: "G",
+        rowOffset: 1,
+        formula: ({ first, last }) => `SUM(G${first}:G${last})`,
+      },
+      vat: {
+        labelCells: [["D", "F"]],
+        labelText: (vatPct) => `VAT ${vatPct}%`,
+        valueCell: "G",
+        rowOffset: 2,
+        formula: ({ subtotalRow, vatPct }) => `G${subtotalRow}*${vatPct}%`,
+      },
+      total: {
+        labelCells: [["D", "F"]],
+        labelText: () => "Thành Tiền",
+        valueCell: "G",
+        rowOffset: 3,
+        formula: ({ subtotalRow, vatRow }) => `G${subtotalRow}+G${vatRow}`,
+      },
+    },
+  },
+
+  // ===== Clofull — không ngày (new CLF.xls form) =====
+  // Columns: STT | Hạng Mục | Chi Tiết | ĐVT | SỐ LƯỢNG | ĐƠN GIÁ | THÀNH TIỀN | Ghi Chú
+  // Recipient info is a single combined "Kính gửi" block at F3.
+  clofull_decor: {
+    sheetName: "CLF",
+    filePath: "templates/CLF_KhongNgay.xlsx",
+    displayName: "CLF (không ngày)",
+    cleanup: {
+      // Sample grouped sub-items with vertical merges in STT / Hạng Mục / Chi Tiết —
+      // unmerge so every item row fills independently.
+      unmergeRanges: ["B7", "C7", "D7", "B10", "C10", "D10"],
+      extraCellsToClear: ["J6", "J7", "J8", "J9", "J10", "J11", "J12"],
+      keepImagesAboveRow: 3,
+    },
+    cells: {
+      title:       "B2",
+      titleFormat: baoGiaTitle,
+      toBlockCell: "F3",
+      toBlockFormat: ({ company, contact }) =>
+        `Kính gửi: ${company || "….."}${contact ? "  -  " + contact : ""}`,
+    },
+    items: {
+      firstRow: 6,
+      lastRow:  12,
       columns: {
         stt:       "B",
         name:      "C",
@@ -57,23 +118,23 @@ export const TEMPLATE_CONFIGS = {
       amountFormula: (r) => `G${r}*F${r}`,
     },
     totals: {
-      // rows are offsets from the last item row (or from firstRow + itemCount)
       subtotal: {
-        labelCells: [],                      // no label in Marico subtotal
+        labelCells: [["B", "G"]],
+        labelText: () => "Tổng Cộng",
         valueCell: "H",
         rowOffset: 1,
         formula: ({ first, last }) => `SUM(H${first}:H${last})`,
       },
       vat: {
-        labelCells: [["F", "G"]],            // F merged with G
-        labelText: (vatPct) => `VAT (${vatPct}%)`,
+        labelCells: [["B", "G"]],
+        labelText: (vatPct) => `VAT(${vatPct}%)`,
         valueCell: "H",
         rowOffset: 2,
         formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
       },
       total: {
-        labelCells: [["F", "G"]],
-        labelText: () => "Tổng Cộng",
+        labelCells: [["B", "G"]],
+        labelText: () => "Thành Tiền",
         valueCell: "H",
         rowOffset: 3,
         formula: ({ subtotalRow, vatRow }) => `H${subtotalRow}+H${vatRow}`,

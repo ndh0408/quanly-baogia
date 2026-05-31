@@ -42,6 +42,13 @@ function clean(s) {
 function applyTemplateCleanup(ws, cfg) {
   const cleanup = cfg.cleanup || {};
 
+  // Unmerge ranges left over from the sample (e.g. vertically-merged STT / Hạng Mục
+  // cells that grouped sub-items). Must run BEFORE filling items so each row writes
+  // independently. Accepts a master cell ("C7") or an explicit range ("C7:C9").
+  for (const ref of (cleanup.unmergeRanges || [])) {
+    try { ws.unMergeCells(ref); } catch {}
+  }
+
   // Clear leftover residual cells (uses original row positions)
   for (const ref of (cleanup.extraCellsToClear || [])) {
     try { ws.getCell(ref).value = null; } catch {}
@@ -90,6 +97,13 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   if (c.toCompany) setCell(ws, c.toCompany, clean(quote.toCompany));
   if (c.toContact) setCell(ws, c.toContact, clean(quote.toContact));
+  // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
+  if (c.toBlockCell) {
+    const txt = c.toBlockFormat
+      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact })
+      : (quote.toCompany || "");
+    setCell(ws, c.toBlockCell, clean(txt));
+  }
   if (c.fromContactCell) {
     const txt = c.fromContactFormat
       ? c.fromContactFormat({ contact: quote.fromContact, title: quote.fromTitle, phone: quote.fromPhone })

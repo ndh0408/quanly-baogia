@@ -73,12 +73,12 @@ async function main() {
       code: "marico_decor",
       name: "GN (không ngày)",
       companyId: giaNguyen.id,
-      filePath: "templates/Marico_Decor.xlsx",
+      filePath: "templates/GN_KhongNgay.xlsx",
     },
     update: {
       name: "GN (không ngày)",
       companyId: giaNguyen.id,
-      filePath: "templates/Marico_Decor.xlsx",
+      filePath: "templates/GN_KhongNgay.xlsx",
     },
   });
   await prisma.quoteTemplate.upsert({
@@ -95,7 +95,38 @@ async function main() {
       filePath: "templates/Unibenfood.xlsx",
     },
   });
-  console.log(`✓ Templates: 2`);
+  console.log(`✓ Templates GN: 2`);
+
+  // === Clofull company + its no-date template (new CLF.xls form) ===
+  const clofull = await prisma.company.upsert({
+    where: { code: "clofull" },
+    create: {
+      code: "clofull",
+      name: "Công ty TNHH Colorfull",
+      shortName: "Clofull",
+      address: "34 Đào Trí, P.Phú Thuận, Q.7 TP.HCM",
+      city: "TP. Hồ Chí Minh",
+      phone: "0914291951",
+    },
+    update: {},
+  });
+  console.log(`✓ Công ty: ${clofull.name}`);
+
+  await prisma.quoteTemplate.upsert({
+    where: { code: "clofull_decor" },
+    create: {
+      code: "clofull_decor",
+      name: "CLF (không ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_KhongNgay.xlsx",
+    },
+    update: {
+      name: "CLF (không ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_KhongNgay.xlsx",
+    },
+  });
+  console.log(`✓ Template CLF: 1`);
 
   // === Default notification channel preferences ===
   await prisma.setting.upsert({
