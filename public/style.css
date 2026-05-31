@@ -6,27 +6,27 @@
    ===================================================================== */
 
 :root {
-  /* Brand */
-  --brand-1: #5b6cf0;
-  --brand-2: #8b5cf6;
-  --accent: #ff7a45;          /* peach — ties to the Excel template */
+  /* Brand — Gia Nguyễn (orange #ff9900 forward + eco-green accent) */
+  --brand-1: #ff9a1f;         /* warm orange (≈ site #f90) */
+  --brand-2: #f97316;         /* deeper orange → gradient end */
+  --accent: #16b88f;          /* eco teal-green (sustainability nod) */
 
   /* Light theme tokens */
-  --bg: #eef1f6;
-  --bg-grad: radial-gradient(1200px 600px at 100% -10%, #e7ecff 0%, transparent 60%), #eef1f6;
+  --bg: #f4f1ec;
+  --bg-grad: radial-gradient(1200px 600px at 100% -10%, #ffeed8 0%, transparent 60%), #f4f1ec;
   --surface: #ffffff;
-  --surface-2: #f7f8fb;
-  --surface-hover: #f2f4f9;
-  --text: #1b2034;
-  --text-soft: #4a5067;
-  --text-muted: #858aa0;
-  --border: #e4e7ef;
-  --border-strong: #d3d8e4;
-  --primary: #5b6cf0;
-  --primary-hover: #4757e0;
-  --primary-soft: #eef0fe;
+  --surface-2: #faf7f2;
+  --surface-hover: #f6f1e9;
+  --text: #211c17;
+  --text-soft: #50473d;
+  --text-muted: #8c8377;
+  --border: #ece6dc;
+  --border-strong: #ddd5c7;
+  --primary: #e0700c;
+  --primary-hover: #c5610a;
+  --primary-soft: #fff3e3;
   --on-primary: #ffffff;
-  --ring: rgba(91,108,240,.35);
+  --ring: rgba(224,112,12,.32);
   --shadow-sm: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.05);
   --shadow-md: 0 4px 12px rgba(16,24,40,.08);
   --shadow-lg: 0 18px 50px rgba(16,24,40,.18);
@@ -42,21 +42,21 @@
 }
 
 [data-theme="dark"] {
-  --bg: #0e1117;
-  --bg-grad: radial-gradient(1200px 600px at 100% -10%, #1a2030 0%, transparent 55%), #0e1117;
-  --surface: #171b24;
-  --surface-2: #1d222d;
-  --surface-hover: #222837;
-  --text: #e7eaf2;
-  --text-soft: #b6bccd;
-  --text-muted: #828aa0;
-  --border: #262c39;
-  --border-strong: #333b4b;
-  --primary: #7c8aff;
-  --primary-hover: #93a0ff;
-  --primary-soft: #1c2236;
-  --on-primary: #0e1117;
-  --ring: rgba(124,138,255,.4);
+  --bg: #16130f;
+  --bg-grad: radial-gradient(1200px 600px at 100% -10%, #2a1f12 0%, transparent 55%), #16130f;
+  --surface: #1f1b16;
+  --surface-2: #262019;
+  --surface-hover: #2e271e;
+  --text: #efe9e0;
+  --text-soft: #c9c0b2;
+  --text-muted: #918878;
+  --border: #322a20;
+  --border-strong: #43392c;
+  --primary: #ff9f3a;
+  --primary-hover: #ffb05c;
+  --primary-soft: #2a1c0e;
+  --on-primary: #16130f;
+  --ring: rgba(255,159,58,.38);
   --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
   --shadow-md: 0 6px 18px rgba(0,0,0,.45);
   --shadow-lg: 0 24px 60px rgba(0,0,0,.6);
@@ -150,37 +150,37 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .sidebar-backdrop { display: none; }
 
 .sidebar {
-  background: linear-gradient(180deg, #1b2030 0%, #14182400 100%), #161a26;
-  color: #c7cbdb;
+  background: linear-gradient(180deg, #26211b 0%, #1a16110 100%), #1b1712;
+  color: #d8cfc2;
   padding: 16px 14px;
   display: flex; flex-direction: column; gap: 12px;
   position: sticky; top: 0; height: 100vh;
-  border-right: 1px solid rgba(255,255,255,.05);
+  border-right: 1px solid rgba(255,255,255,.06);
 }
-[data-theme="dark"] .sidebar { background: linear-gradient(180deg,#11151e,#0c0f16); }
+[data-theme="dark"] .sidebar { background: linear-gradient(180deg,#161209,#0c0a07); }
 .sb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sb-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sb-logo {
   width: 38px; height: 38px; flex: none; border-radius: 11px;
   background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
   display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 14px;
-  box-shadow: 0 6px 16px rgba(91,108,240,.45);
+  box-shadow: 0 6px 16px rgba(224,112,12,.5);
 }
 .sidebar h2 { font-size: 15px; margin: 0; color: #fff; line-height: 1.1; letter-spacing: -.01em; }
-.sidebar .org { font-size: 11.5px; color: #8990ab; }
-.sidebar .sb-head .icon-btn { color: #c7cbdb; }
+.sidebar .org { font-size: 11.5px; color: #b3a48f; }
+.sidebar .sb-head .icon-btn { color: #d8cfc2; }
 
 .sidebar .menu { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; margin: 4px -4px; padding: 0 4px; }
 .sidebar .menu a {
   display: flex; align-items: center; gap: 4px;
   padding: 10px 12px; border-radius: 10px;
-  color: #c7cbdb; text-decoration: none; font-size: 14px; font-weight: 500;
+  color: #d8cfc2; text-decoration: none; font-size: 14px; font-weight: 500;
   position: relative; transition: background .14s, color .14s;
 }
-.sidebar .menu a:hover { background: rgba(255,255,255,.06); color: #fff; }
+.sidebar .menu a:hover { background: rgba(255,255,255,.07); color: #fff; }
 .sidebar .menu a.active {
   background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  color: #fff; box-shadow: 0 6px 16px rgba(91,108,240,.35);
+  color: #fff; box-shadow: 0 6px 16px rgba(224,112,12,.4);
 }
 .sidebar .menu a.active::before {
   content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 3px;
@@ -188,7 +188,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 }
 .sidebar .who {
   border-top: 1px solid rgba(255,255,255,.08);
-  padding-top: 12px; font-size: 13px; color: #aab0c6;
+  padding-top: 12px; font-size: 13px; color: #c2b7a6;
 }
 .sidebar .who strong { color: #fff; display: block; font-size: 13.5px; }
 .sidebar .role-pill {
@@ -284,7 +284,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 
 .funnel { display: flex; flex-direction: column; gap: 8px; background: var(--surface); padding: 16px; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .funnel-row { display: grid; grid-template-columns: 130px 1fr 50px; gap: 12px; align-items: center; }
-.funnel-bar { height: 20px; background: linear-gradient(90deg, var(--accent), #ff5e7a); border-radius: 6px; min-width: 10px; box-shadow: 0 2px 6px rgba(255,122,69,.3); }
+.funnel-bar { height: 20px; background: linear-gradient(90deg, var(--brand-1), var(--brand-2)); border-radius: 6px; min-width: 10px; box-shadow: 0 2px 6px rgba(224,112,12,.3); }
 
 /* ---------- Editor: "paper" surface (always light, document-like) ---------- */
 .editor {
