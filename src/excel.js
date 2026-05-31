@@ -124,6 +124,24 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   // Items
   const itemsCfg = cfg.items;
+
+  // Normalize item-row styling from a reference clean row. Some sample templates
+  // grouped sub-items via vertical merges; after unmerging, the formerly-merged
+  // sub-cells lose their borders/font. Copy a known-good item row's per-column
+  // style over the whole item range BEFORE any splice so every row matches.
+  if (itemsCfg.styleRow) {
+    const src = itemsCfg.styleRow;
+    for (const colLetter of Object.values(itemsCfg.columns)) {
+      const refStyle = ws.getCell(`${colLetter}${src}`).style;
+      if (!refStyle) continue;
+      const snap = JSON.parse(JSON.stringify(refStyle));
+      for (let r = itemsCfg.firstRow; r <= itemsCfg.lastRow; r++) {
+        if (r === src) continue;
+        ws.getCell(`${colLetter}${r}`).style = JSON.parse(JSON.stringify(snap));
+      }
+    }
+  }
+
   const skipRows = new Set(itemsCfg.skipRows || []);
   const templateRowCount = itemsCfg.lastRow - itemsCfg.firstRow + 1;
   // Available item slots = template rows EXCLUDING skipRows (e.g. section headers)

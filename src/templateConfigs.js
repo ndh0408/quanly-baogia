@@ -89,10 +89,12 @@ export const TEMPLATE_CONFIGS = {
     filePath: "templates/CLF_KhongNgay.xlsx",
     displayName: "CLF (không ngày)",
     cleanup: {
-      // Sample grouped sub-items with vertical merges in STT / Hạng Mục / Chi Tiết —
-      // unmerge so every item row fills independently.
-      unmergeRanges: ["B7", "C7", "D7", "B10", "C10", "D10"],
-      extraCellsToClear: ["J6", "J7", "J8", "J9", "J10", "J11", "J12"],
+      // Sample grouped sub-items with vertical merges in STT / Hạng Mục —
+      // unmerge so every item row fills independently. Borders/font are then
+      // restored uniformly via items.styleRow below.
+      unmergeRanges: ["B7", "C7", "B10", "C10"],
+      // NOTE: keep the coloured guide notes in column J (J5 "hàng này có hoặc ko
+      // tùy chương trình", J8 "tạo được những hàng con...") — the user wants them.
       keepImagesAboveRow: 3,
     },
     cells: {
@@ -105,6 +107,7 @@ export const TEMPLATE_CONFIGS = {
     items: {
       firstRow: 6,
       lastRow:  12,
+      styleRow: 6,            // copy this clean row's borders/fonts to every item row
       columns: {
         stt:       "B",
         name:      "C",
