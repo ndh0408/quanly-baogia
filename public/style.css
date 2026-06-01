@@ -584,3 +584,49 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .ds-paper-title { font: 700 18px/1.2 var(--font-paper); text-transform: uppercase; text-align: center; color: var(--paper-ink); }
 .ds-paper { font-family: var(--font-paper); color: var(--paper-ink); }
 .ds-mono { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+
+/* ============ Responsive — extended coverage (phones + tablets) ============ */
+/* Horizontal-scroll wrapper for the Excel "paper" table so it never overflows the viewport */
+.tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 920px) {
+  /* Quote editor: the Excel table keeps a readable width and scrolls inside its wrapper */
+  .excel-table { min-width: 640px; }
+  .quote-summary { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .summary-table { min-width: 520px; }
+  /* Permission matrix scrolls horizontally on tablets/phones */
+  .perm-matrix { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .perm-matrix th, .perm-matrix td { white-space: nowrap; }
+  /* Wizard cards fit small screens; dashboard funnel labels narrower */
+  .wizard-card { padding: 18px; }
+  .pick-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .funnel-row { grid-template-columns: 104px 1fr 40px; }
+}
+
+@media (max-width: 560px) {
+  /* Stepper: hide text labels, keep compact dots */
+  .step-dot .lbl { display: none; }
+  .step-dot .num { width: 30px; height: 30px; }
+  .step-line { margin-bottom: 0; }
+  .wizard-foot { flex-direction: column-reverse; gap: 8px; }
+  .wizard-foot .btn { width: 100%; justify-content: center; }
+  /* KPI two-up; smaller numerals */
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .kpi strong { font-size: 22px; }
+  /* Modals nearly full-screen */
+  .modal { width: 96vw; max-height: 92vh; }
+  .modal-foot { flex-wrap: wrap; }
+  /* Sheet tabs scroll instead of wrapping into many rows */
+  .sheet-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .add-sheet { margin-left: 8px; }
+  /* Editor action bar buttons go full-width-ish */
+  .editor .actions { gap: 8px; }
+  .main { padding: 14px 12px; }
+}
+
+@media (max-width: 380px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .btn { padding: 8px 11px; font-size: 13px; }
+  .login-card { padding: 26px 20px; }
+  .pick-grid { grid-template-columns: 1fr; }
+}

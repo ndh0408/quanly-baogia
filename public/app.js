@@ -718,6 +718,7 @@ function renderEditor(el, quote) {
           </label>
         </div>
 
+        <div class="tbl-scroll">
         <table class="excel-table" id="items-table">
           <thead>
             <tr>
@@ -736,6 +737,7 @@ function renderEditor(el, quote) {
           <tbody></tbody>
           <tfoot></tfoot>
         </table>
+        </div>
 
         ${editable ? `<button class="btn btn-sm" id="btn-add-item" style="margin-top:10px">+ Thêm dòng vào sheet này</button>` : ""}
 
