@@ -1,9 +1,22 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
+import { getConfig } from "../templateConfigs.js";
 
 const router = Router();
 router.use(requireAuth);
+
+// Expose each template's item-table shape so the on-screen editor renders the
+// SAME columns as the Excel form (e.g. CLF has "Chi Tiết", GN-có-ngày has "Số Ngày").
+function templateLayout(code) {
+  try {
+    const cols = getConfig(code).items.columns || {};
+    return { hasDetail: !!cols.detail, hasDays: !!cols.days };
+  } catch {
+    return { hasDetail: false, hasDays: false };
+  }
+}
+const withLayout = (t) => ({ ...t, layout: templateLayout(t.code) });
 
 router.get("/companies", asyncHandler(async (req, res) => {
   const companies = await prisma.company.findMany({
@@ -13,7 +26,7 @@ router.get("/companies", asyncHandler(async (req, res) => {
       templates: { where: { active: true }, orderBy: { name: "asc" } },
     },
   });
-  res.json(companies);
+  res.json(companies.map((c) => ({ ...c, templates: c.templates.map(withLayout) })));
 }));
 
 router.get("/templates", asyncHandler(async (req, res) => {
@@ -24,7 +37,7 @@ router.get("/templates", asyncHandler(async (req, res) => {
     orderBy: { name: "asc" },
     include: { company: true },
   });
-  res.json(templates);
+  res.json(templates.map(withLayout));
 }));
 
 export default router;

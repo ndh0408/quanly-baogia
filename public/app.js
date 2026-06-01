@@ -719,7 +719,10 @@ function renderEditor(el, quote) {
     const activeSheet = q.sheets[q._activeSheet];
     const template = state.templates.find(t => t.id === activeSheet.templateId);
     const tplCode = template?.code;
-    const usesDays = tplCode === "unibenfood";
+    // Column layout is driven by the template's own config (exposed via meta),
+    // so each form shows the same columns as its Excel sheet.
+    const usesDays = !!template?.layout?.hasDays;
+    const showDetail = !!template?.layout?.hasDetail;
 
     el.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
@@ -800,7 +803,7 @@ function renderEditor(el, quote) {
             <tr>
               <th scope="col" style="width:50px">STT</th>
               <th scope="col">Hạng Mục</th>
-              ${tplCode === "marico_decor" ? `<th scope="col">Chi Tiết</th>` : ""}
+              ${showDetail ? `<th scope="col">Chi Tiết</th>` : ""}
               <th scope="col" style="width:80px">ĐVT</th>
               <th scope="col" style="width:90px">SỐ LƯỢNG</th>
               ${usesDays ? `<th scope="col" style="width:80px">SỐ NGÀY</th>` : ""}
@@ -1071,7 +1074,7 @@ async function showVersions(quoteId) {
 
 function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   const tbody = document.querySelector("#items-table tbody");
-  const showDetail = tplCode === "marico_decor";
+  const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
   const multilineFields = new Set(["name", "detail", "notes"]);
 
@@ -1186,7 +1189,7 @@ function renderQuoteSummary(q) {
   let subtotalAll = 0;
   const rows = q.sheets.map((s, i) => {
     const tpl = state.templates.find(t => t.id === s.templateId);
-    const usesDays = tpl?.code === "unibenfood";
+    const usesDays = !!tpl?.layout?.hasDays;
     const sub = (s.items || []).reduce((sum, it) => {
       const qty = Number(it.quantity) || 0;
       const days = Number(it.days) || 1;
