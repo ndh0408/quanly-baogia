@@ -49,8 +49,10 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
           {{- if .Values.app.runMigration }}
+          # Versioned, non-destructive, advisory-locked migrations (safe across replicas).
+          # Do NOT use `prisma db push --accept-data-loss` — it can drop columns/data.
           command: ["/bin/sh", "-c"]
-          args: ["npx prisma db push --accept-data-loss && node src/server.js"]
+          args: ["npx prisma migrate deploy && node src/server.js"]
           {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

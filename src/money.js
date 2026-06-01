@@ -34,10 +34,19 @@ export function computeQuoteTotals(quote) {
     }, new Decimal(0));
     return { sheetId: sh.id, subtotal };
   });
-  const subtotal = sheetTotals.reduce((s, x) => s.plus(x.subtotal), new Decimal(0));
+  // Round subtotal to 0 dp too (VND has no fractional unit) so the stored
+  // subtotal column matches what we recompute on read — no sub-đồng drift.
+  const subtotal = sheetTotals
+    .reduce((s, x) => s.plus(x.subtotal), new Decimal(0))
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const vat = subtotal.times(vatPct).dividedBy(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  const total = subtotal.plus(vat).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  return { subtotal, vat, total, sheetTotals };
+  const gross = subtotal.plus(vat);
+  // Optional negotiated discount (giảm giá), in VNĐ, subtracted from the grand total.
+  // Clamped to the gross so the total never goes negative.
+  const discInput = D(quote.discount).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const discount = discInput.greaterThan(gross) ? gross : (discInput.lessThan(0) ? new Decimal(0) : discInput);
+  const total = gross.minus(discount).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  return { subtotal, vat, discount, total, sheetTotals };
 }
 
 /** Serialize Decimal fields as JS numbers for JSON response. Loses precision on huge numbers but UI-safe. */
@@ -45,6 +54,7 @@ export function totalsToJson(t) {
   return {
     subtotal: t.subtotal.toNumber(),
     vat: t.vat.toNumber(),
+    discount: (t.discount ?? new Decimal(0)).toNumber(),
     total: t.total.toNumber(),
     sheetTotals: t.sheetTotals.map((s) => ({ sheetId: s.sheetId, subtotal: s.subtotal.toNumber() })),
   };

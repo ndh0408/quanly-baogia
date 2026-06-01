@@ -6,9 +6,24 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
+import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
+
+/** Load a customer and 403 unless the caller may perform `action` (read|manage) on it. */
+async function loadAuthorizedCustomer(req, res, action) {
+  const customer = await prisma.customer.findFirst({ where: { id: req.params.id } });
+  if (!customer) {
+    res.status(404).json({ error: "Không tìm thấy" });
+    return null;
+  }
+  if (!canScoped(req.session, "customer", action, customer)) {
+    res.status(403).json({ error: "Bạn không có quyền với khách hàng này" });
+    return null;
+  }
+  return customer;
+}
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
@@ -54,7 +69,12 @@ router.get(
     const { q, status, tag, ownerId, page, size, sort, order } = req.query;
     const where = {};
     if (status) where.status = status;
-    if (ownerId) where.ownerId = ownerId;
+    // Data isolation: users without "read all" only ever see customers they own.
+    if (can(req.session, P.CUSTOMER_READ_ALL)) {
+      if (ownerId) where.ownerId = ownerId;
+    } else {
+      where.ownerId = req.session.userId;
+    }
     if (tag) where.tags = { has: tag };
     if (q) {
       where.OR = [
@@ -89,8 +109,12 @@ router.post(
       const dup = await prisma.customer.findUnique({ where: { code } });
       if (dup) return res.status(409).json({ error: "Mã khách hàng đã tồn tại" });
     }
+    const data = { ...req.body, code };
+    // Only privileged users may assign an owner other than themselves.
+    if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) data.ownerId = req.session.userId;
+    else if (data.ownerId == null) data.ownerId = req.session.userId;
     const customer = await prisma.customer.create({
-      data: { ...req.body, code },
+      data,
       include: { owner: { select: { id: true, displayName: true } } },
     });
     await audit(req, "customer.create", { resource: "customer", resourceId: customer.id, after: customer });
@@ -102,6 +126,7 @@ router.get(
   "/:id",
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedCustomer(req, res, "read"))) return;
     const customer = await prisma.customer.findFirst({
       where: { id: req.params.id },
       include: {
@@ -120,11 +145,14 @@ router.put(
   "/:id",
   validate({ params: idParam, body: CustomerUpdate }),
   asyncHandler(async (req, res) => {
-    const before = await prisma.customer.findFirst({ where: { id: req.params.id } });
-    if (!before) return res.status(404).json({ error: "Không tìm thấy" });
+    const before = await loadAuthorizedCustomer(req, res, "manage");
+    if (!before) return;
+    const data = { ...req.body };
+    // Only privileged users may reassign ownership; strip it otherwise.
+    if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) delete data.ownerId;
     const customer = await prisma.customer.update({
       where: { id: req.params.id },
-      data: req.body,
+      data,
     });
     await audit(req, "customer.update", { resource: "customer", resourceId: customer.id, before, after: customer });
     res.json(customer);
@@ -135,9 +163,9 @@ router.delete(
   "/:id",
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
-    const before = await prisma.customer.findFirst({ where: { id: req.params.id } });
-    if (!before) return res.status(404).json({ error: "Không tìm thấy" });
-    await prisma.customer.delete({ where: { id: req.params.id } }); // soft delete
+    const before = await loadAuthorizedCustomer(req, res, "manage");
+    if (!before) return;
+    await prisma.customer.delete({ where: { id: req.params.id } }); // soft delete (db.js middleware)
     await audit(req, "customer.delete", { resource: "customer", resourceId: req.params.id, before });
     res.json({ ok: true });
   })
@@ -148,6 +176,7 @@ router.post(
   "/:id/notes",
   validate({ params: idParam, body: NoteCreate }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedCustomer(req, res, "manage"))) return;
     const note = await prisma.customerNote.create({
       data: { customerId: req.params.id, body: req.body.body, authorId: req.session.userId },
     });
@@ -161,6 +190,7 @@ router.post(
   "/:id/follow-ups",
   validate({ params: idParam, body: FollowUpCreate }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedCustomer(req, res, "manage"))) return;
     const f = await prisma.followUp.create({
       data: {
         customerId: req.params.id,
@@ -177,6 +207,15 @@ router.post(
   "/follow-ups/:fid/done",
   validate({ params: z.object({ fid: z.coerce.number().int().positive() }) }),
   asyncHandler(async (req, res) => {
+    const f = await prisma.followUp.findUnique({
+      where: { id: req.params.fid },
+      include: { customer: { select: { ownerId: true } } },
+    });
+    if (!f) return res.status(404).json({ error: "Không tìm thấy" });
+    const owns =
+      f.assigneeId === req.session.userId ||
+      canScoped(req.session, "customer", "manage", f.customer);
+    if (!owns) return res.status(403).json({ error: "Không có quyền với công việc này" });
     const updated = await prisma.followUp.update({
       where: { id: req.params.fid },
       data: { doneAt: new Date() },

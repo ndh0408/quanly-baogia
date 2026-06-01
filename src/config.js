@@ -44,6 +44,8 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   // Sentry
   SENTRY_DSN: z.string().optional(),
+  // Optional bearer token to protect /metrics (defence-in-depth on top of network policy)
+  METRICS_TOKEN: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -69,7 +71,21 @@ if (
   process.exit(1);
 }
 
-// Derive JWT secret from SESSION_SECRET if not explicitly set (still keeps it private)
+// In production, require a dedicated JWT_SECRET (do NOT share with SESSION_SECRET:
+// a leak in either subsystem must not compromise the other, and they must rotate
+// independently).
+if (config.NODE_ENV === "production") {
+  if (!process.env.JWT_SECRET) {
+    console.error("❌ JWT_SECRET must be set explicitly in production (separate from SESSION_SECRET).");
+    process.exit(1);
+  }
+  if (config.JWT_SECRET.length < 32 || config.JWT_SECRET === config.SESSION_SECRET) {
+    console.error("❌ JWT_SECRET must be ≥ 32 chars and different from SESSION_SECRET in production.");
+    process.exit(1);
+  }
+}
+
+// Dev/test convenience: derive a JWT secret from SESSION_SECRET if not set.
 if (!config.JWT_SECRET) config.JWT_SECRET = config.SESSION_SECRET;
 
 export const isProd = config.NODE_ENV === "production";

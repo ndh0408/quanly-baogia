@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "./logger.js";
 import { verifyAccessToken } from "./jwt.js";
+import { prisma } from "./db.js";
 
 export function requestId(req, res, next) {
   req.id = req.headers["x-request-id"] || randomUUID();
@@ -12,18 +13,28 @@ export function requestId(req, res, next) {
  * Try to populate req.session from a Bearer JWT if no cookie session is present.
  * This lets the same route handlers serve browser (session) and API/mobile (JWT) clients.
  */
-export function bearerAuth(req, _res, next) {
+export async function bearerAuth(req, _res, next) {
   if (req.session?.userId) return next();
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
   if (!m) return next();
   try {
     const payload = verifyAccessToken(m[1]);
+    // SECURITY: never trust role/active from the token claim. Re-load the user on
+    // every request so a deactivated / demoted / locked account loses access
+    // immediately (within the access-token TTL the token is otherwise valid).
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, role: true, username: true, active: true, lockedUntil: true },
+    });
+    if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
+      return next(); // fall through unauthenticated → requireAuth/requireRole reject
+    }
     // Synthesize a session-like object so downstream code stays identical.
     req.session = req.session || {};
-    req.session.userId = payload.sub;
-    req.session.role = payload.role;
-    req.session.username = payload.username;
+    req.session.userId = user.id;
+    req.session.role = user.role; // authoritative role from DB, not the token
+    req.session.username = user.username;
     req.viaJwt = true;
   } catch {
     // invalid/expired token → just fall through; requireAuth will reject.
@@ -62,6 +73,20 @@ export function notFound(req, res, next) {
 }
 
 export function errorHandler(err, req, res, _next) {
+  // Map known Prisma errors to proper HTTP status codes instead of opaque 500s.
+  // (Avoids unique-constraint races / FK violations leaking as "Lỗi server".)
+  if (err && typeof err.code === "string" && /^P\d{4}$/.test(err.code) && !err.status) {
+    if (err.code === "P2002") {
+      err.status = 409;
+      err.message = "Dữ liệu đã tồn tại (trùng khóa duy nhất)";
+    } else if (err.code === "P2025") {
+      err.status = 404;
+      err.message = "Không tìm thấy bản ghi";
+    } else if (err.code === "P2003") {
+      err.status = 409;
+      err.message = "Vi phạm ràng buộc dữ liệu (bản ghi đang được tham chiếu)";
+    }
+  }
   const status = err.status || err.statusCode || 500;
   const exposed = status < 500;
   logger.error(

@@ -84,9 +84,8 @@ router.delete(
 router.get(
   "/queue",
   asyncHandler(async (req, res) => {
-    // Show pending approvals where the user's role matches the level's roles config.
-    // For simplicity: show all pending if user is admin/manager.
-    if (!["admin", "manager"].includes(req.session.role)) {
+    // Only the Director (admin) approves quotes, so only they see the queue.
+    if (req.session.role !== "admin") {
       return res.json({ data: [], meta: { total: 0 } });
     }
     const rows = await prisma.approval.findMany({

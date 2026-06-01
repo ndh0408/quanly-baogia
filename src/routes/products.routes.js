@@ -6,6 +6,7 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { D } from "../money.js";
+import { can, requirePermission, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -42,14 +43,22 @@ const ListQuery = z.object({
   order: z.enum(["asc", "desc"]).default("asc"),
 });
 
-function present(p) {
-  return {
+function present(p, { showCost = false } = {}) {
+  const out = {
     ...p,
-    costPrice: Number(p.costPrice),
     basePrice: Number(p.basePrice),
-    margin: p.basePrice && p.costPrice ? Number(((p.basePrice - p.costPrice) / p.basePrice * 100).toFixed(2)) : null,
     priceTiers: (p.priceTiers || []).map((t) => ({ ...t, price: Number(t.price) })),
   };
+  // Cost price & margin are confidential — only expose to product:read:cost holders.
+  if (showCost) {
+    out.costPrice = Number(p.costPrice);
+    out.margin = p.basePrice && p.costPrice
+      ? Number(((p.basePrice - p.costPrice) / p.basePrice * 100).toFixed(2))
+      : null;
+  } else {
+    delete out.costPrice;
+  }
+  return out;
 }
 
 router.get(
@@ -76,7 +85,8 @@ router.get(
         include: { priceTiers: { orderBy: { minQty: "asc" } } },
       }),
     ]);
-    res.json({ data: data.map(present), meta: { total, page, size, pageCount: Math.ceil(total / size) } });
+    const showCost = can(req.session, P.PRODUCT_READ_COST);
+    res.json({ data: data.map((p) => present(p, { showCost })), meta: { total, page, size, pageCount: Math.ceil(total / size) } });
   })
 );
 
@@ -91,6 +101,7 @@ router.get("/categories", asyncHandler(async (_req, res) => {
 
 router.post(
   "/",
+  requirePermission(P.PRODUCT_MANAGE),
   validate({ body: Create }),
   asyncHandler(async (req, res) => {
     const { priceTiers, ...rest } = req.body;
@@ -106,8 +117,8 @@ router.post(
       },
       include: { priceTiers: true },
     });
-    await audit(req, "product.create", { resource: "product", resourceId: product.id, after: present(product) });
-    res.status(201).json(present(product));
+    await audit(req, "product.create", { resource: "product", resourceId: product.id, after: present(product, { showCost: true }) });
+    res.status(201).json(present(product, { showCost: true }));
   })
 );
 
@@ -120,12 +131,13 @@ router.get(
       include: { priceTiers: { orderBy: { minQty: "asc" } } },
     });
     if (!p) return res.status(404).json({ error: "Không tìm thấy" });
-    res.json(present(p));
+    res.json(present(p, { showCost: can(req.session, P.PRODUCT_READ_COST) }));
   })
 );
 
 router.put(
   "/:id",
+  requirePermission(P.PRODUCT_MANAGE),
   validate({ params: idParam, body: Update }),
   asyncHandler(async (req, res) => {
     const { priceTiers, ...rest } = req.body;
@@ -152,17 +164,18 @@ router.put(
       });
     });
     await audit(req, "product.update", { resource: "product", resourceId: product.id });
-    res.json(present(product));
+    res.json(present(product, { showCost: true }));
   })
 );
 
 router.delete(
   "/:id",
+  requirePermission(P.PRODUCT_MANAGE),
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const before = await prisma.product.findFirst({ where: { id: req.params.id } });
     if (!before) return res.status(404).json({ error: "Không tìm thấy" });
-    await prisma.product.delete({ where: { id: req.params.id } }); // soft delete
+    await prisma.product.delete({ where: { id: req.params.id } }); // soft delete (db.js middleware)
     await audit(req, "product.delete", { resource: "product", resourceId: req.params.id });
     res.json({ ok: true });
   })

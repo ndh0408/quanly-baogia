@@ -14,8 +14,8 @@ prisma.$on("error", (e) => logger.error({ source: "prisma" }, e.message));
 // Global soft-delete middleware: turns `delete` into `update { deletedAt: now }`
 // and adds an automatic `where: { deletedAt: null }` filter on common queries.
 //
-// Applies to: User, Company, QuoteTemplate, Quote (any model with a deletedAt field).
-const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote"]);
+// Applies to every model that has a deletedAt field.
+const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product"]);
 
 prisma.$use(async (params, next) => {
   if (!SOFT_DELETE_MODELS.has(params.model)) return next(params);

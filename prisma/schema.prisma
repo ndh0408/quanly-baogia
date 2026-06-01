@@ -21,6 +21,7 @@ enum QuoteStatus {
   sent
   expired
   converted
+  lost
 }
 
 enum CustomerStatus {
@@ -47,11 +48,16 @@ model User {
   username     String   @unique
   passwordHash String
   displayName  String
-  email        String?
+  email        String?  @unique
   role         Role     @default(employee)
   phone        String?
   title        String?
   active       Boolean  @default(true)
+
+  // Email-invite onboarding: invited users are inactive until they accept,
+  // set their own password and fill in their details.
+  inviteTokenHash String?
+  inviteExpiresAt DateTime?
 
   failedAttempts Int       @default(0)
   lockedUntil    DateTime?
@@ -69,6 +75,7 @@ model User {
 
   createdQuotes  Quote[] @relation("CreatedBy")
   approvedQuotes Quote[] @relation("ApprovedBy")
+  memberQuotes   Quote[] @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
   ownedCustomers Customer[]
   auditEvents    AuditEvent[]
   notifications  Notification[]
@@ -99,6 +106,7 @@ model Company {
   code      String   @unique
   name      String
   shortName String?
+  quotePrefix String @default("GN") // số báo giá riêng theo công ty (VD: GN, CLF)
   address   String
   city      String   @default("TP. Hồ Chí Minh")
   phone     String?
@@ -219,6 +227,7 @@ model Quote {
   title         String
   toCompany     String              // legacy free-text; kept for backwards compat
   toContact     String?
+  toEmail       String?             // recipient email for the "Kính gửi" block
   customerId    Int?                // new: link to CRM Customer (optional during migration)
   customer      Customer?   @relation(fields: [customerId], references: [id])
   companyId     Int
@@ -235,10 +244,12 @@ model Quote {
   vatPercent    Decimal     @default(8) @db.Decimal(5, 2)
   status        QuoteStatus @default(draft)
   notes         String?
+  showTotals    Boolean     @default(true) // hiện/ẩn bảng Tổng cộng–VAT–Thành tiền (tuỳ template/báo giá)
   currentVersion Int        @default(1)
 
   subtotal      Decimal     @default(0) @db.Decimal(18, 2)
   vat           Decimal     @default(0) @db.Decimal(18, 2)
+  discount      Decimal     @default(0) @db.Decimal(18, 2)
   total         Decimal     @default(0) @db.Decimal(18, 2)
 
   createdById   Int
@@ -249,6 +260,7 @@ model Quote {
   sheets        QuoteSheet[]
   versions      QuoteVersion[]
   approvals     Approval[]
+  members       User[]      @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
 
   sentAt        DateTime?
   expiredAt     DateTime?
@@ -300,7 +312,8 @@ model QuoteItem {
   sheet      QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
   order      Int
   productId  Int?               // optional link to catalog
-  name       String
+  kind       String  @default("item")  // "item" = dòng hàng | "info" = dòng thông tin (ghi chú toàn hàng)
+  name       String                     // Hạng Mục (các dòng cùng name liên tiếp = 1 nhóm: gộp STT + ô Hạng Mục)
   detail     String?
   unit       String?
   quantity   Decimal @default(0) @db.Decimal(18, 4)
@@ -499,6 +512,16 @@ model ApiKey {
   expiresAt DateTime?
 
   @@index([active, expiresAt])
+}
+
+/// Session store table managed by connect-pg-simple (express-session).
+/// Declared here only so `prisma db push` adopts it instead of dropping it.
+model user_sessions {
+  sid    String   @id(map: "session_pkey") @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire], map: "IDX_session_expire")
 }
 
 model LoginAttempt {

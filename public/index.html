@@ -4,9 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="theme-color" content="#5b6cf0" />
+  <meta name="theme-color" content="#f5b400" />
   <title>Quản lý Báo Giá - Gia Nguyễn</title>
   <link rel="preload" href="/app.js" as="script" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
   <!-- Apply saved/OS theme before first paint to avoid a flash -->
   <script>
@@ -21,10 +24,11 @@
   <style>
     /* Instant boot splash so First Contentful Paint isn't blocked on the API */
     #boot { position: fixed; inset: 0; display: grid; place-items: center;
-      background: var(--bg, #eef1f6); color: var(--text-muted, #858aa0); }
-    #boot .gn { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
-      color: #fff; font-weight: 800; font-size: 20px; letter-spacing: .5px;
-      background: linear-gradient(135deg, #5b6cf0, #8b5cf6); box-shadow: 0 10px 30px rgba(91,108,240,.4);
+      background: var(--bg, #f5f6f8); color: var(--text-muted, #5b6575);
+      font-family: "Be Vietnam Pro", system-ui, "Segoe UI", Roboto, sans-serif; }
+    #boot .gn { width: 52px; height: 52px; border-radius: 13px; display: grid; place-items: center;
+      color: #1f2510; font-weight: 800; font-size: 19px; letter-spacing: .5px;
+      background: #f5b400;
       animation: bootpulse 1.1s ease-in-out infinite; }
     #boot p { margin-top: 14px; font-size: 13px; }
     @keyframes bootpulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(.92); opacity: .8 } }

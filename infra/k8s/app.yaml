@@ -42,9 +42,13 @@ spec:
             httpGet: { path: /livez, port: http }
             failureThreshold: 30
             periodSeconds: 2
-          # Run prisma migration before the container actually starts serving
+          # Apply versioned, non-destructive migrations before serving.
+          # NEVER use `prisma db push --accept-data-loss` here — it can drop columns/tables.
+          # `migrate deploy` is forward-only, advisory-locked (safe across replicas), and a
+          # no-op when there are no pending migrations. Ideally run this once per release as a
+          # Helm pre-upgrade Job / initContainer rather than in the steady-state command.
           command: ["/bin/sh", "-c"]
-          args: ["npx prisma db push --accept-data-loss && node src/server.js"]
+          args: ["npx prisma migrate deploy && node src/server.js"]
 ---
 apiVersion: v1
 kind: Service

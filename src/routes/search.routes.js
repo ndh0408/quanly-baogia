@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
+import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -29,16 +30,17 @@ router.get(
 
     const tasks = [];
     if (types.includes("quote")) {
-      const scope = req.session.role === "employee" ? { createdById: req.session.userId } : {};
       tasks.push((async () => {
         const rows = await prisma.quote.findMany({
           where: {
-            ...scope,
-            OR: [
-              { quoteNumber: { contains: q, mode: "insensitive" } },
-              { title: { contains: q, mode: "insensitive" } },
-              { toCompany: { contains: q, mode: "insensitive" } },
-              { toContact: { contains: q, mode: "insensitive" } },
+            AND: [
+              quoteScopeWhere(req.session),
+              { OR: [
+                { quoteNumber: { contains: q, mode: "insensitive" } },
+                { title: { contains: q, mode: "insensitive" } },
+                { toCompany: { contains: q, mode: "insensitive" } },
+                { toContact: { contains: q, mode: "insensitive" } },
+              ] },
             ],
           },
           select: { id: true, quoteNumber: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
@@ -49,16 +51,20 @@ router.get(
       })());
     }
     if (types.includes("customer")) {
+      const custScope = can(req.session, P.CUSTOMER_READ_ALL) ? {} : { ownerId: req.session.userId };
       tasks.push((async () => {
         const rows = await prisma.customer.findMany({
           where: {
-            OR: [
-              { code: { contains: q, mode: "insensitive" } },
-              { name: { contains: q, mode: "insensitive" } },
-              { phone: { contains: q } },
-              { email: { contains: q, mode: "insensitive" } },
-              { taxCode: { contains: q } },
-              { contactName: { contains: q, mode: "insensitive" } },
+            AND: [
+              custScope,
+              { OR: [
+                { code: { contains: q, mode: "insensitive" } },
+                { name: { contains: q, mode: "insensitive" } },
+                { phone: { contains: q } },
+                { email: { contains: q, mode: "insensitive" } },
+                { taxCode: { contains: q } },
+                { contactName: { contains: q, mode: "insensitive" } },
+              ] },
             ],
           },
           select: { id: true, code: true, name: true, phone: true, email: true, status: true },

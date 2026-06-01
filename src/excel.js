@@ -121,16 +121,29 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
-  const items = (sheet.items || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  let items = (sheet.items || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  // Templates with a dedicated "program info" banner (CLF B5) collect kind:"info"
+  // rows into that single cell instead of rendering them as item rows. The banner
+  // is CLEARED when the quote has no info line, so the placeholder dots never print
+  // — i.e. the line is opt-in per quote (the toggle the J5 guide note asked for).
+  if (c.infoBannerCell) {
+    const infoLines = items.filter((it) => it.kind === "info").map((it) => (it.name || "").trim()).filter(Boolean);
+    items = items.filter((it) => it.kind !== "info");
+    setCell(ws, c.infoBannerCell, infoLines.length ? `* Thông tin chương trình: ${infoLines.join("; ")}` : "");
+    ensureWrap(ws.getCell(c.infoBannerCell));
+  }
 
   if (c.toCompany) setCell(ws, c.toCompany, clean(quote.toCompany));
   if (c.toContact) setCell(ws, c.toContact, clean(quote.toContact));
   // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
   if (c.toBlockCell) {
     const txt = c.toBlockFormat
-      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact })
+      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail })
       : (quote.toCompany || "");
-    setCell(ws, c.toBlockCell, clean(txt));
+    // Keep newlines (multi-line recipient block) — don't collapse via clean().
+    setCell(ws, c.toBlockCell, (txt || "").trim());
+    ensureWrap(ws.getCell(c.toBlockCell));
   }
   if (c.fromContactCell) {
     const txt = c.fromContactFormat
@@ -231,11 +244,35 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     }
   }
 
+  // Group structure for "hàng con" (mirror the editor): a "sub" extends the current
+  // group only when the previous row was a head/sub, else it starts its own group.
+  const effKind = items.map(() => "head");
+  for (let i = 0; i < items.length; i++) {
+    const k = items[i]?.kind;
+    if (k === "info") effKind[i] = "info";
+    else if (k === "sub" && i > 0 && (effKind[i - 1] === "head" || effKind[i - 1] === "sub")) effKind[i] = "sub";
+    else effKind[i] = "head";
+  }
+
   let subtotal = 0;
+  let itemNo = 0;
   for (let i = 0; i < slotRows.length; i++) {
     const r = slotRows[i];
     const it = items[i];
-    if (it) {
+    if (it && effKind[i] === "info") {
+      // Program-info line: free text in the Hạng Mục cell, no STT / qty / price / amount.
+      if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null;
+      if (cols.name) { setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
+      for (const key of ["detail", "unit", "quantity", "days", "unitPrice", "amount"]) {
+        if (cols[key]) ws.getCell(`${cols[key]}${r}`).value = null;
+      }
+      if (cols.notes) { setCell(ws, `${cols.notes}${r}`, it.notes || ""); ensureWrap(ws.getCell(`${cols.notes}${r}`)); }
+      if (cols.name) {
+        const nameCell = ws.getCell(`${cols.name}${r}`);
+        nameCell.font = { ...(nameCell.font || {}), italic: true };
+      }
+    } else if (it) {
+      const isSub = effKind[i] === "sub";
       const qty = Number(it.quantity) || 0;
       const days = Number(it.days) || 1;
       const price = Number(it.unitPrice) || 0;
@@ -247,11 +284,19 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         amt = price * qty;
       }
       subtotal += amt;
-      if (cols.stt) setCell(ws, `${cols.stt}${r}`, i + 1);
-      // Multi-line text fields: keep newlines and enable wrapText
-      if (cols.name) {
-        setCell(ws, `${cols.name}${r}`, it.name || "");
-        ensureWrap(ws.getCell(`${cols.name}${r}`));
+      // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
+      // then get covered by the vertical merge applied after this loop.
+      if (isSub) {
+        if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null;
+        if (cols.name) ws.getCell(`${cols.name}${r}`).value = null;
+      } else {
+        itemNo++;
+        if (cols.stt) setCell(ws, `${cols.stt}${r}`, itemNo);
+        // Multi-line text fields: keep newlines and enable wrapText
+        if (cols.name) {
+          setCell(ws, `${cols.name}${r}`, it.name || "");
+          ensureWrap(ws.getCell(`${cols.name}${r}`));
+        }
       }
       if (cols.detail) {
         setCell(ws, `${cols.detail}${r}`, it.detail || "");
@@ -287,11 +332,28 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     }
   }
 
+  // Vertical merges for "hàng con" groups: STT + Hạng Mục span each head + its subs,
+  // reproducing the CLF template's grouped look. Done after the fill loop so slotRows
+  // hold final positions. Skipped if the surviving rows aren't contiguous.
+  for (let i = 0; i < items.length; i++) {
+    if (effKind[i] !== "head") continue;
+    let span = 1;
+    while (i + span < items.length && effKind[i + span] === "sub") span++;
+    if (span <= 1) continue;
+    const r1 = slotRows[i], r2 = slotRows[i + span - 1];
+    if (r1 == null || r2 == null || r2 - r1 !== span - 1) continue;
+    for (const col of [cols.stt, cols.name]) {
+      if (!col) continue;
+      safeMerge(ws, `${col}${r1}:${col}${r2}`);
+      const cell = ws.getCell(`${col}${r1}`);
+      cell.alignment = { ...(cell.alignment || {}), vertical: "middle" };
+    }
+  }
+
   // Totals — positions based on actual last row (changes only when we splice/duplicate)
   const t = cfg.totals;
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
   const vatRow = actualLastRow + t.vat.rowOffset;
-  const totalRow = actualLastRow + t.total.rowOffset;
 
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null,
@@ -303,11 +365,48 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     formula: t.vat.formula({ subtotalRow, vatPct }),
     result: subtotal * vatPct / 100,
   });
+
+  // Optional "Giảm Giá" row. Only rendered on a sheet when this is the sole sheet
+  // (the quote-level discount belongs on the grand total; multi-sheet exports show
+  // it on the summary sheet instead). Inserting it pushes the total + footer down 1.
+  const discount = Number(quote.discount) || 0;
+  const onlySheet = (quote.sheets || []).length === 1;
+  let discountRow = null;
+  let extraTotalsRows = 0;
+  if (discount > 0 && onlySheet && t.discount) {
+    discountRow = vatRow + 1;
+    ws.duplicateRow(vatRow, 1, true);   // clone VAT row's styling for the new Giảm Giá row
+    extraTotalsRows = 1;
+    applyTotalsRow(ws, t.discount, discountRow, {
+      text: t.discount.labelText ? t.discount.labelText(vatPct) : "Giảm Giá",
+      rawValue: discount,
+    });
+  }
+
+  const totalRow = actualLastRow + t.total.rowOffset + extraTotalsRows;
   applyTotalsRow(ws, t.total, totalRow, {
     text: t.total.labelText(vatPct),
-    formula: t.total.formula({ subtotalRow, vatRow }),
-    result: subtotal * (1 + vatPct / 100),
+    formula: t.total.formula({ subtotalRow, vatRow, discountRow }),
+    result: subtotal * (1 + vatPct / 100) - (discountRow ? discount : 0),
   });
+
+  // Footer merges (e.g. CLF "* Ghi chú" at C:D) ride the item splice/duplicate by
+  // `shift` rows. ExcelJS spliceRows drops these merges, leaving the text duplicated
+  // across both columns — recompute the shifted row, clear the secondary cells, re-merge.
+  if (cfg.footerMerges) {
+    const shift = (actualLastRow - originalLastItemRow) + extraTotalsRows;
+    for (const range of cfg.footerMerges) {
+      const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range);
+      if (!m) continue;
+      const newRow = parseInt(m[2], 10) + shift;
+      const startCol = m[1].charCodeAt(0), endCol = m[3].charCodeAt(0);
+      safeUnmerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
+      for (let cc = startCol + 1; cc <= endCol; cc++) {
+        try { ws.getCell(`${String.fromCharCode(cc)}${newRow}`).value = null; } catch {}
+      }
+      safeMerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
+    }
+  }
 
   return {
     subtotal,
@@ -316,7 +415,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   };
 }
 
-function applyTotalsRow(ws, rowCfg, row, { text, formula, result }) {
+function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }) {
   // Clear secondary cells in merge first (to avoid leftover duplicated values)
   for (const [colStart, colEnd] of (rowCfg.labelCells || [])) {
     if (colStart === colEnd) continue;
@@ -333,7 +432,8 @@ function applyTotalsRow(ws, rowCfg, row, { text, formula, result }) {
     ws.getCell(`${colStart}${row}`).value = text;
   }
   if (rowCfg.valueCell) {
-    ws.getCell(`${rowCfg.valueCell}${row}`).value = { formula, result };
+    if (formula != null) ws.getCell(`${rowCfg.valueCell}${row}`).value = { formula, result };
+    else if (rawValue != null) ws.getCell(`${rowCfg.valueCell}${row}`).value = rawValue;
   }
 }
 
@@ -527,11 +627,13 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
 
   const totalsStart = headerRow + 1 + sheetTotals.length;
   const vatVal = Math.round(subtotalAll * vatPct) / 100;
+  const discountVal = Number(quote.discount) || 0;
   const totalRows = [
     { label: "Tổng cộng", value: subtotalAll },
     { label: `VAT (${vatPct}%)`, value: vatVal },
-    { label: "Thành tiền", value: subtotalAll + vatVal },
   ];
+  if (discountVal > 0) totalRows.push({ label: "Giảm giá", value: discountVal });
+  totalRows.push({ label: "Thành tiền", value: subtotalAll + vatVal - (discountVal > 0 ? discountVal : 0) });
   totalRows.forEach((tr, i) => {
     const r = totalsStart + i;
     ws.mergeCells(r, 1, r, 2);
@@ -642,11 +744,13 @@ export async function buildQuoteBuffer(quote) {
     sheetTotals.push({ name: displayName, ...totals });
   }
 
-  // Summary sheet
-  const summaryName = uniq("Tổng Báo Giá");
-  const summaryBuf = await buildSummaryBuffer(sheetTotals, quote, vatPct);
-  sheetBuffers.push(summaryBuf);
-  sheetNames.push(summaryName);
+  // Cross-sheet summary worksheet — only when the quote opts to show totals.
+  if (quote.showTotals !== false) {
+    const summaryName = uniq("Tổng Báo Giá");
+    const summaryBuf = await buildSummaryBuffer(sheetTotals, quote, vatPct);
+    sheetBuffers.push(summaryBuf);
+    sheetNames.push(summaryName);
+  }
 
   // Stitch all into one xlsx
   return stitchXlsxBuffers(sheetBuffers, sheetNames);

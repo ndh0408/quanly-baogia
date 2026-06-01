@@ -50,6 +50,7 @@ async function api(path, opts = {}) {
     const err = new Error((body && body.error) || body || "Lỗi");
     if (body && body.details) err.details = body.details;
     err.status = res.status;
+    err.body = body; // expose full body (e.g. { mfaRequired: true }) to callers
     throw err;
   }
   return body;
@@ -101,10 +102,46 @@ function escapeHtml(s) {
 
 const STATUS_LABEL = {
   draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
-  sent: "Đã gửi", expired: "Hết hạn", converted: "Đã chốt",
+  sent: "Đã gửi", expired: "Hết hạn", converted: "Đã chốt", lost: "Không chốt",
 };
 const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
 const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý", employee: "Nhân viên" };
+const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Quản lý", employee: "Nhân viên" };
+const CUSTOMER_STATUS_LABEL = { lead: "Tiềm năng", prospect: "Đang trao đổi", active: "Đang giao dịch", inactive: "Ngừng" };
+const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—";
+const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
+
+// Friendly Vietnamese descriptions for audit action codes (no dev jargon for the boss).
+const ACTION_LABEL = {
+  "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.submit": "Trình duyệt báo giá",
+  "quote.approve": "Duyệt báo giá", "quote.reject": "Từ chối báo giá", "quote.send": "Gửi báo giá cho khách",
+  "quote.convert": "Chốt báo giá (thắng)", "quote.lost": "Đánh dấu không chốt", "quote.delete": "Xóa báo giá",
+  "quote.duplicate": "Nhân bản báo giá", "quote.reopened": "Mở lại để sửa",
+  "customer.create": "Thêm khách hàng", "customer.update": "Sửa khách hàng", "customer.delete": "Xóa khách hàng",
+  "customer.note.add": "Thêm ghi chú khách hàng",
+  "product.create": "Thêm sản phẩm", "product.update": "Sửa sản phẩm", "product.delete": "Xóa sản phẩm",
+  "user.create": "Thêm nhân viên", "user.update": "Cập nhật nhân viên",
+  "login.token": "Đăng nhập (ứng dụng)", "password.change.success": "Đổi mật khẩu",
+  "password.change.failed": "Đổi mật khẩu thất bại", "mfa.enable": "Bật bảo mật 2 lớp",
+  "mfa.disable": "Tắt bảo mật 2 lớp", "token.revoke-all": "Đăng xuất mọi thiết bị",
+  "webhook.create": "Thêm tích hợp", "webhook.update": "Sửa tích hợp", "webhook.delete": "Xóa tích hợp",
+};
+const actionLabel = (a) => ACTION_LABEL[a] || a || "—";
+const resourceLabel = (r) => RESOURCE_LABEL[r] || r || "";
+
+// Turn the approval-matrix levels JSON into a sentence a non-technical user understands.
+function describeApprovalLevels(levels) {
+  if (!Array.isArray(levels) || !levels.length) return "Quản lý hoặc Quản trị duyệt";
+  return levels
+    .slice()
+    .sort((a, b) => Number(a.level) - Number(b.level))
+    .map((l) => {
+      const who = (l.roles || []).map((r) => ROLE_LABEL_FULL[r] || r).join(" hoặc ") || "Quản lý";
+      const n = Number(l.any) || 1;
+      return `Cấp ${l.level}: ${who}${n > 1 ? ` — cần ${n} người duyệt` : ""}`;
+    })
+    .join("  →  ");
+}
 
 // Theme: persist in localStorage, default to OS preference on first visit.
 function initTheme() {
@@ -120,11 +157,26 @@ function toggleTheme() {
   localStorage.setItem("theme", next);
 }
 
+// Monochrome line icons (Lucide-style) for the sidebar — replaces childish emoji.
+const ICO = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const NAV_ICON = {
+  dashboard: ICO('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>'),
+  list: ICO('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h6"/>'),
+  new: ICO('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M12 12v6M9 15h6"/>'),
+  approvals: ICO('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
+  notifications: ICO('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
+  users: ICO('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'),
+  permissions: ICO('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>'),
+  audit: ICO('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  profile: ICO('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+};
+
 const ROUTE_PAGES = ["dashboard", "list", "new", "approvals", "notifications", "users", "permissions", "audit", "profile"];
 
 // Hash router: maps #/page and #/quotes/:id → app state, so pages are
 // bookmarkable, the back button works, and notification deep links resolve.
 async function routeFromHash() {
+  if (location.hash.startsWith("#/onboard")) { renderOnboard(); return; }
   if (!state.user) return;
   if (!location.hash.startsWith("#/")) return; // ignore #main (skip link) etc.
   const h = location.hash.slice(2); // strip "#/"
@@ -144,6 +196,8 @@ async function routeFromHash() {
 async function boot() {
   initTheme();
   if (!window._hashWired) { window.addEventListener("hashchange", routeFromHash); window._hashWired = true; }
+  // Public invite-accept page — reachable without logging in.
+  if (location.hash.startsWith("#/onboard")) { renderOnboard(); return; }
   try {
     const me = await api("/api/auth/me");
     state.user = me;
@@ -175,35 +229,94 @@ function render() {
 }
 
 // ---------------- Login ----------------
+// Public onboarding page: an invited employee sets their password + details.
+async function renderOnboard() {
+  const token = new URLSearchParams((location.hash.split("?")[1]) || "").get("token");
+  app.innerHTML = `<div class="login-wrap"><div class="login-card"><div id="ob-body">Đang kiểm tra lời mời…</div></div></div>`;
+  const body = document.getElementById("ob-body");
+  if (!token) { body.innerHTML = `<div class="err">Liên kết không hợp lệ.</div>`; return; }
+  let info;
+  try { info = await api(`/api/auth/invite/${encodeURIComponent(token)}`); }
+  catch (e) { body.innerHTML = `<div class="err">${escapeHtml(e.message)}</div><p class="login-hint">Liên hệ quản trị viên để được mời lại.</p>`; return; }
+  body.innerHTML = `
+    <h1>Hoàn tất tài khoản</h1>
+    <p class="sub">${escapeHtml(info.email)}</p>
+    <div id="ob-err" role="alert" aria-live="assertive"></div>
+    <form id="ob-form">
+      <label><span>Họ tên</span><input name="displayName" value="${escapeHtml(info.displayName || "")}" required /></label>
+      <label><span>Số điện thoại</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="09xx xxx xxx" /></label>
+      <label><span>Mật khẩu</span><input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" required /></label>
+      <label><span>Nhập lại mật khẩu</span><input name="password2" type="password" autocomplete="new-password" required /></label>
+      <button type="submit" class="btn-login">Kích hoạt & đăng nhập</button>
+    </form>`;
+  document.getElementById("ob-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const err = document.getElementById("ob-err");
+    err.innerHTML = "";
+    if (fd.get("password") !== fd.get("password2")) { err.innerHTML = `<div class="err">Mật khẩu nhập lại không khớp.</div>`; return; }
+    try {
+      const me = await api("/api/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, displayName: fd.get("displayName"), phone: fd.get("phone"), password: fd.get("password") }) });
+      state.user = me;
+      location.hash = "#/list";
+      state.page = "list";
+      await loadMeta();
+      render();
+      toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
+    } catch (e2) { err.innerHTML = `<div class="err">${escapeHtml(e2.message)}</div>`; }
+  });
+}
+
 function renderLogin() {
   app.innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
         <h1>Quản Lý Báo Giá</h1>
         <p class="sub">Gia Nguyễn — Hệ thống nội bộ</p>
-        <div id="login-err"></div>
+        <div id="login-err" role="alert" aria-live="assertive"></div>
         <form id="login-form">
-          <label><span>Tên đăng nhập</span><input name="username" autocomplete="username" required /></label>
+          <label><span>Email hoặc tên đăng nhập</span><input name="username" autocomplete="username" required /></label>
           <label><span>Mật khẩu</span><input type="password" name="password" autocomplete="current-password" required /></label>
+          <label id="mfa-field" style="display:none"><span>Mã xác thực (MFA)</span><input name="mfaToken" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9A-Za-z]{6,8}" placeholder="6 chữ số" /></label>
           <button type="submit" class="btn-login">Đăng nhập</button>
         </form>
+        <p class="login-hint"><a href="#" id="forgot-link">Quên mật khẩu?</a></p>
       </div>
     </div>`;
+  document.getElementById("forgot-link")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const email = await promptModal("Quên mật khẩu", "Nhập email tài khoản của bạn — chúng tôi sẽ gửi liên kết đặt lại mật khẩu:", { placeholder: "ten@congty.com" });
+    if (!email) return;
+    try {
+      await api("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: email.trim() }) });
+      toast("Nếu email tồn tại, liên kết đặt lại đã được gửi. Vui lòng kiểm tra hộp thư.", "success");
+    } catch (err) { toast(err.message, "error"); }
+  });
   document.getElementById("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const errEl = document.getElementById("login-err");
+    const mfaField = document.getElementById("mfa-field");
     errEl.innerHTML = "";
+    const payload = { username: fd.get("username"), password: fd.get("password") };
+    const mfaToken = (fd.get("mfaToken") || "").toString().trim();
+    if (mfaToken) payload.mfaToken = mfaToken;
     try {
-      const me = await api("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }),
-      });
+      const me = await api("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
       state.user = me;
       state.page = "list";
       await loadMeta();
       render();
     } catch (err) {
+      // Server asks for a second factor → reveal the MFA field and let the user retry.
+      if (err.body && err.body.mfaRequired) {
+        mfaField.style.display = "";
+        const mfaInput = mfaField.querySelector("input");
+        mfaInput.required = true;
+        mfaInput.focus();
+        errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản bật MFA — nhập mã xác thực."}</div>`;
+        return;
+      }
       errEl.innerHTML = `<div class="err">${err.message}</div>`;
     }
   });
@@ -241,15 +354,15 @@ function renderShell() {
           <div id="gs-results" class="global-search-results" style="display:none"></div>
         </div>
         <nav class="menu" aria-label="Điều hướng chính">
-          ${nav("dashboard", "📊 Dashboard")}
-          ${nav("list", "📋 Danh sách báo giá")}
-          ${nav("new", "➕ Tạo báo giá mới")}
-          ${can("quote:approve") ? nav("approvals", "✅ Hàng chờ duyệt", ` <span id="badge-pending" class="badge-num"></span>`) : ""}
-          ${nav("notifications", "🔔 Thông báo", ` <span id="badge-notif" class="badge-num"></span>`)}
-          ${can("user:manage") ? nav("users", "👥 Quản lý nhân viên") : ""}
-          ${can("user:manage") ? nav("permissions", "🛡️ Phân quyền") : ""}
-          ${can("audit:view") ? nav("audit", "📜 Audit log") : ""}
-          ${nav("profile", "🔒 Tài khoản")}
+          ${nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>")}
+          ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
+          ${nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>")}
+          ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num"></span>`) : ""}
+          ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num"></span>`)}
+          ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
+          ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
+          ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}
+          ${nav("profile", NAV_ICON.profile + "<span>Tài khoản</span>")}
         </nav>
         <div class="who">
           <strong>${escapeHtml(state.user.displayName)}</strong>
@@ -305,7 +418,7 @@ function renderShell() {
           if (r.results.quotes?.length) sections.push(`
             <div class="gs-section">Báo giá</div>
             ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}">
-              <strong>${escapeHtml(q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${q.status}</span>
+              <strong>${escapeHtml(q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${statusLabel(q.status)}</span>
             </div>`).join("")}`);
           gsResults.innerHTML = sections.join("") || "<div class='gs-section'>Không có kết quả</div>";
           gsResults.style.display = "block";
@@ -343,13 +456,10 @@ function renderShell() {
   else if (state.page === "users") renderUsers(mainEl);
   else if (state.page === "profile") renderProfile(mainEl);
   else if (state.page === "dashboard") renderDashboard(mainEl);
-  else if (state.page === "customers") renderCustomers(mainEl);
-  else if (state.page === "products") renderProducts(mainEl);
   else if (state.page === "approvals") renderApprovalQueue(mainEl);
   else if (state.page === "notifications") renderNotifications(mainEl);
   else if (state.page === "audit") renderAuditLog(mainEl);
   else if (state.page === "permissions") renderPermissions(mainEl);
-  else if (state.page === "settings") renderSettings(mainEl);
 
   // Refresh notification + approval queue badges
   refreshBadges();
@@ -398,38 +508,38 @@ async function renderList(el) {
       <label for="filter-status" class="sr-only">Lọc theo trạng thái</label>
       <select id="filter-status">
         <option value="">— Tất cả trạng thái —</option>
-        <option value="draft">Nháp</option>
-        <option value="pending">Chờ duyệt</option>
-        <option value="approved">Đã duyệt</option>
-        <option value="rejected">Bị từ chối</option>
-        <option value="sent">Đã gửi</option>
-        <option value="converted">Đã chốt</option>
-        <option value="expired">Hết hạn</option>
+        ${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
       </select>
-      <button class="btn" id="btn-reload">🔄 Tải lại</button>
+      <button class="btn" id="btn-reload">Tải lại</button>
       <button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>
     </div>
     <div id="list-body">${skeleton(6)}</div>`;
   document.getElementById("filter-status").value = state.filter.status;
 
+  const PAGE_SIZE = 20;
   const reload = async () => {
     const params = new URLSearchParams();
     if (state.filter.q) params.set("q", state.filter.q);
     if (state.filter.status) params.set("status", state.filter.status);
+    params.set("page", state.filter.page || 1);
+    params.set("size", PAGE_SIZE);
     try {
       const r = await api("/api/quotes?" + params.toString());
       state.quoteList = Array.isArray(r) ? r : (r.data || []);
+      state.quoteMeta = (r && r.meta) || { total: state.quoteList.length, page: 1, pageCount: 1 };
       drawList();
     } catch (e) { toast(e.message, "error"); }
   };
 
   document.getElementById("filter-q").addEventListener("input", (e) => {
     state.filter.q = e.target.value;
+    state.filter.page = 1;
     clearTimeout(window._fto);
     window._fto = setTimeout(reload, 300);
   });
   document.getElementById("filter-status").addEventListener("change", (e) => {
     state.filter.status = e.target.value;
+    state.filter.page = 1;
     reload();
   });
   document.getElementById("btn-reload").addEventListener("click", reload);
@@ -440,11 +550,15 @@ async function renderList(el) {
 
   function drawList() {
     const body = document.getElementById("list-body");
+    const m = state.quoteMeta || { total: 0, page: 1, pageCount: 1 };
     if (!state.quoteList.length) {
-      body.innerHTML = `<div class="empty-state">Chưa có báo giá nào.</div>`;
+      body.innerHTML = `<div class="empty-state">${state.filter.q || state.filter.status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}</div>`;
       return;
     }
+    const start = (m.page - 1) * PAGE_SIZE + 1;
+    const end = (m.page - 1) * PAGE_SIZE + state.quoteList.length;
     body.innerHTML = `
+      <div class="tbl-scroll">
       <table class="list-table">
         <thead>
           <tr>
@@ -473,10 +587,20 @@ async function renderList(el) {
             </tr>
           `).join("")}
         </tbody>
-      </table>`;
+      </table></div>
+      <div class="pager">
+        <span class="muted">Hiển thị ${start}–${end} / ${m.total} báo giá</span>
+        <div class="pager-btns">
+          <button class="btn btn-sm" id="pg-prev" ${m.page <= 1 ? "disabled" : ""}>← Trước</button>
+          <span class="muted" style="padding:0 6px">Trang ${m.page}/${m.pageCount || 1}</span>
+          <button class="btn btn-sm" id="pg-next" ${m.page >= (m.pageCount || 1) ? "disabled" : ""}>Sau →</button>
+        </div>
+      </div>`;
     body.querySelectorAll("button[data-act]").forEach(b => {
       b.addEventListener("click", () => listAction(b.dataset.act, parseInt(b.dataset.id, 10)));
     });
+    document.getElementById("pg-prev")?.addEventListener("click", () => { state.filter.page = Math.max(1, (state.filter.page || 1) - 1); reload(); });
+    document.getElementById("pg-next")?.addEventListener("click", () => { state.filter.page = (state.filter.page || 1) + 1; reload(); });
   }
   await reload();
 }
@@ -502,7 +626,8 @@ async function listAction(act, id) {
       toast("Đã nhân bản. Bạn đang sửa bản mới.", "success");
       render();
     } else if (act === "del") {
-      if (!confirm("Xóa báo giá?")) return;
+      const dq = (state.quoteList || []).find(x => String(x.id) === String(id));
+      if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${dq ? dq.quoteNumber : ""}? Hành động không thể hoàn tác.`, { danger: true }))) return;
       await api(`/api/quotes/${id}`, { method: "DELETE" });
       toast("Đã xóa", "success");
       state.page = "list";
@@ -534,6 +659,7 @@ function renderNewQuote(el) {
       step: 1,
       companyId: state.companies[0]?.id || null,
       templateIds: [],
+      managerId: null,
       info: {
         title: "", toCompany: "", toContact: "",
         fromContact: state.user.displayName || "", fromPhone: state.user.phone || "",
@@ -545,6 +671,13 @@ function renderNewQuote(el) {
   const wz = state._wizard;
   const company = state.companies.find(c => c.id === wz.companyId);
   const templates = company?.templates || [];
+  // Employees must assign an overseeing manager — load the picklist once.
+  if (state.user.role === "employee" && state._managers === undefined) {
+    state._managers = null; // loading
+    api("/api/quotes/assignable-users")
+      .then(r => { state._managers = (r.data || []).filter(u => ["manager", "admin"].includes(u.role)); renderNewQuote(el); })
+      .catch(() => { state._managers = []; });
+  }
 
   let body = "";
   if (wz.step === 1) {
@@ -584,6 +717,12 @@ function renderNewQuote(el) {
       <div class="form-grid">
         <label style="grid-column:1/-1">Tiêu đề báo giá <span class="req">*</span>
           <input id="w-title" value="${escapeHtml(i.title)}" placeholder="VD: Décor Premiere Phim Thỏ Ơi"/></label>
+        ${state.user.role === "employee" ? `<label style="grid-column:1/-1">Quản lý phụ trách <span class="req">*</span>
+          <select id="w-manager">
+            <option value="">${state._managers === null ? "Đang tải…" : "— Chọn quản lý —"}</option>
+            ${(state._managers || []).map(m => `<option value="${m.id}" ${wz.managerId === m.id ? "selected" : ""}>${escapeHtml(m.displayName)} (${ROLE_LABEL[m.role] || m.role})</option>`).join("")}
+          </select>
+          <span class="muted" style="font-size:12px">Quản lý này sẽ theo dõi & nắm báo giá của bạn.</span></label>` : ""}
         <label>Khách hàng (To) <span class="req">*</span><input id="w-toCompany" value="${escapeHtml(i.toCompany)}"/></label>
         <label>Người liên hệ KH<input id="w-toContact" value="${escapeHtml(i.toContact)}"/></label>
         <label>Người gửi (From)<input id="w-fromContact" value="${escapeHtml(i.fromContact)}"/></label>
@@ -647,6 +786,8 @@ function renderNewQuote(el) {
     bind("w-title", "title"); bind("w-toCompany", "toCompany"); bind("w-toContact", "toContact");
     bind("w-fromContact", "fromContact"); bind("w-fromTitle", "fromTitle"); bind("w-fromPhone", "fromPhone");
     bind("w-fromAddress", "fromAddress"); bind("w-vat", "vatPercent"); bind("w-date", "quoteDate");
+    const mgrSel = document.getElementById("w-manager");
+    if (mgrSel) mgrSel.addEventListener("change", () => wz.managerId = parseInt(mgrSel.value, 10) || null);
     const fileInput = document.getElementById("w-logo-file");
     const drop = document.getElementById("w-logo-drop");
     const pick = () => fileInput.click();
@@ -683,14 +824,16 @@ function renderNewQuote(el) {
     // step 3 → build draft + open editor for items
     if (!wz.info.title.trim()) { toast("Nhập tiêu đề báo giá", "error"); return; }
     if (!wz.info.toCompany.trim()) { toast("Nhập tên khách hàng", "error"); return; }
+    if (state.user.role === "employee" && !wz.managerId) { toast("Vui lòng chọn quản lý phụ trách", "error"); return; }
     try {
-      const { quoteNumber } = await api("/api/quotes/next-number");
+      // No client-side number — the server allocates it atomically per company
+      // (each company has its own prefix + sequence, e.g. GN…, CLF…).
       const sheets = wz.templateIds.map(tid => {
         const t = state.templates.find(x => x.id === tid);
         return { templateId: tid, name: t?.name || "Sheet", items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] };
       });
       state.currentQuote = {
-        quoteNumber, ...wz.info, companyId: wz.companyId,
+        ...wz.info, companyId: wz.companyId, managerId: wz.managerId,
         customerLogo: wz.info.customerLogo, sheets, _new: true,
       };
       state._wizard = null;
@@ -710,10 +853,12 @@ function renderEditor(el, quote) {
   }
   q._activeSheet = 0;
 
+  // Mirror the server rule: admin edits all; manager edits only own; employee
+  // edits own or quotes they're a member of (and only while draft/rejected).
+  const isMember = (q.members || []).some(m => m.id === state.user.id);
+  const canUpdate = state.user.role === "admin" || q.createdById === state.user.id || isMember;
   const editable = isNew
-    || state.user.role === "admin"
-    || state.user.role === "manager"
-    || (q.createdById === state.user.id && (q.status === "draft" || q.status === "rejected"));
+    || (canUpdate && ((state.user.role === "admin" || state.user.role === "manager") || q.status === "draft" || q.status === "rejected"));
 
   const draw = () => {
     const activeSheet = q.sheets[q._activeSheet];
@@ -733,40 +878,39 @@ function renderEditor(el, quote) {
         <button class="btn" id="btn-back">← Quay lại</button>
       </div>
       <div class="editor">
-        <div class="meta-grid">
-          <label>Công ty:</label>
-          <select id="f-companyId" ${!editable ? "disabled" : ""}>
-            ${state.companies.map(c => `<option value="${c.id}" ${c.id === q.companyId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
-          </select>
-          <label>VAT (%):</label>
-          <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} />
-
-          <label>To:</label>
-          <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên KH" ${!editable ? "disabled" : ""} />
-          <label>From:</label>
-          <input id="f-fromCompany-display" value="${escapeHtml(state.companies.find(c => c.id === q.companyId)?.name || "")}" disabled />
-
-          <label>Ms./Mr.</label>
-          <input id="f-toContact" value="${escapeHtml(q.toContact || "")}" placeholder="Người KH" ${!editable ? "disabled" : ""} />
-          <label>Ms./Mr.</label>
-          <input id="f-fromContact" value="${escapeHtml(q.fromContact || "")}" placeholder="Người ta" ${!editable ? "disabled" : ""} />
-
-          <label></label><label></label>
-          <label>Title:</label>
-          <input id="f-fromTitle" value="${escapeHtml(q.fromTitle || "")}" placeholder="Account Team..." ${!editable ? "disabled" : ""} />
-
-          <label></label><label></label>
-          <label>Phone:</label>
-          <input id="f-fromPhone" value="${escapeHtml(q.fromPhone || "")}" placeholder="SĐT" ${!editable ? "disabled" : ""} />
-
-          <label></label><label></label>
-          <label>Add:</label>
-          <input id="f-fromAddress" value="${escapeHtml(q.fromAddress || "")}" ${!editable ? "disabled" : ""} />
-
-          <label>Số BG:</label>
-          <input id="f-quoteNumber" value="${escapeHtml(q.quoteNumber)}" ${!editable ? "disabled" : ""} />
-          <label>Ngày:</label>
-          <input type="date" id="f-quoteDate" value="${q.quoteDate}" ${!editable ? "disabled" : ""} />
+        <div class="meta-2col">
+          <fieldset class="meta-col">
+            <legend>Bên nhận · Khách hàng</legend>
+            <label>Tên khách hàng
+              <input id="f-toCompany" value="${escapeHtml(q.toCompany || "")}" placeholder="Tên công ty khách" ${!editable ? "disabled" : ""} /></label>
+            <label>Người liên hệ
+              <input id="f-toContact" value="${escapeHtml(q.toContact || "")}" placeholder="Người liên hệ phía KH" ${!editable ? "disabled" : ""} /></label>
+            <label>Email
+              <input id="f-toEmail" type="email" value="${escapeHtml(q.toEmail || "")}" placeholder="Email khách (hiện ở 'Kính gửi')" ${!editable ? "disabled" : ""} /></label>
+          </fieldset>
+          <fieldset class="meta-col">
+            <legend>Bên gửi · Công ty báo giá</legend>
+            <label>Công ty
+              <select id="f-companyId" ${!editable ? "disabled" : ""}>
+                ${state.companies.map(c => `<option value="${c.id}" ${c.id === q.companyId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
+              </select></label>
+            <label>Người gửi
+              <input id="f-fromContact" value="${escapeHtml(q.fromContact || "")}" placeholder="Người phụ trách" ${!editable ? "disabled" : ""} /></label>
+            <label>Chức danh
+              <input id="f-fromTitle" value="${escapeHtml(q.fromTitle || "")}" placeholder="VD: Trưởng phòng KD" ${!editable ? "disabled" : ""} /></label>
+            <label>Điện thoại
+              <input id="f-fromPhone" value="${escapeHtml(q.fromPhone || "")}" placeholder="SĐT người gửi" ${!editable ? "disabled" : ""} /></label>
+            <label>Địa chỉ
+              <input id="f-fromAddress" value="${escapeHtml(q.fromAddress || "")}" ${!editable ? "disabled" : ""} /></label>
+          </fieldset>
+        </div>
+        <div class="meta-row">
+          <label>Số báo giá
+            <input id="f-quoteNumber" value="${escapeHtml(q.quoteNumber || "")}" placeholder="${isNew ? "Tự động cấp khi lưu" : ""}" readonly ${!editable ? "disabled" : ""} /></label>
+          <label>Ngày báo giá
+            <input type="date" id="f-quoteDate" value="${q.quoteDate}" ${!editable ? "disabled" : ""} /></label>
+          <label>VAT (%)
+            <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} /></label>
         </div>
 
         <div class="center-line" id="date-preview">${vnDateText(q.quoteDate, q.city)}</div>
@@ -788,7 +932,7 @@ function renderEditor(el, quote) {
 
         <div class="sheet-meta" style="display:flex; gap:14px; margin: 8px 0; align-items:center; flex-wrap:wrap">
           <label style="font-size:13px">Tên sheet:
-            <input id="f-sheet-name" value="${escapeHtml(activeSheet.name || "")}" style="padding:4px 8px; border:1px solid #d8dbe3; border-radius:6px" ${!editable ? "disabled" : ""} />
+            <input id="f-sheet-name" value="${escapeHtml(activeSheet.name || "")}" style="padding:6px 10px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface)" ${!editable ? "disabled" : ""} />
           </label>
           <label style="font-size:13px">Template:
             <select id="f-sheet-template" ${!editable ? "disabled" : ""}>
@@ -809,7 +953,7 @@ function renderEditor(el, quote) {
               ${usesDays ? `<th scope="col" style="width:80px">SỐ NGÀY</th>` : ""}
               <th scope="col" style="width:130px">ĐƠN GIÁ&#10;(VNĐ)</th>
               <th scope="col" style="width:140px">THÀNH TIỀN&#10;(VNĐ)</th>
-              <th scope="col" style="width:150px">Notes</th>
+              <th scope="col" style="width:150px">GHI CHÚ</th>
               ${editable ? `<th scope="col" style="width:36px"></th>` : ""}
             </tr>
           </thead>
@@ -818,28 +962,60 @@ function renderEditor(el, quote) {
         </table>
         </div>
 
-        ${editable ? `<button class="btn btn-sm" id="btn-add-item" style="margin-top:10px">+ Thêm dòng vào sheet này</button>` : ""}
-
-        <div class="quote-summary">
+        ${editable ? `<label class="toggle-totals" style="display:inline-flex;align-items:center;gap:8px;margin:16px 0 6px;font-size:13.5px;cursor:pointer">
+          <input type="checkbox" id="f-showTotals" ${q.showTotals !== false ? "checked" : ""}/>
+          <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả trên màn hình lẫn file Excel/PDF xuất ra)</span>
+        </label>` : ""}
+        ${editable ? `<div class="muted" style="margin:4px 0 6px;font-size:12.5px">Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung (vd “Giảm giá khách quen”) rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>` : ""}
+        <div class="quote-summary" style="${q.showTotals === false ? "display:none" : ""}">
           ${renderQuoteSummary(q)}
         </div>
 
         <div class="actions">
-          ${editable ? `<button class="btn btn-primary" id="btn-save">💾 Lưu</button>` : ""}
-          ${!isNew ? `<button class="btn" id="btn-excel">📥 Excel</button>` : ""}
-          ${!isNew ? `<button class="btn" id="btn-pdf">📄 PDF</button>` : ""}
-          ${!isNew ? `<button class="btn" id="btn-versions">🕘 Lịch sử</button>` : ""}
-          ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">📨 Trình duyệt</button>` : ""}
+          ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
+          ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">Trình duyệt</button>` : ""}
           ${!isNew && q.status === "pending" && can("quote:approve") ? `
-            <button class="btn btn-success" id="btn-approve">✅ Duyệt</button>
-            <button class="btn btn-danger" id="btn-reject">❌ Từ chối</button>
+            <button class="btn btn-success" id="btn-approve">Duyệt</button>
+            <button class="btn btn-danger" id="btn-reject">Từ chối</button>
           ` : ""}
-          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-primary" id="btn-send">📤 ${q.status === "sent" ? "Gửi lại KH" : "Gửi KH"}</button>` : ""}
-          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-success" id="btn-convert">🤝 Đã chốt</button>` : ""}
+          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-primary" id="btn-send">${q.status === "sent" ? "Gửi lại khách" : "Gửi khách"}</button>` : ""}
+          ${!isNew ? `<div class="kebab-wrap">
+            <button class="btn kebab-btn" id="btn-more" aria-haspopup="true" aria-expanded="false" title="Thêm thao tác">⋯</button>
+            <div class="kebab-menu" id="more-menu" hidden role="menu">
+              <button id="btn-excel" role="menuitem">Tải file Excel</button>
+              <button id="btn-pdf" role="menuitem">Tải file PDF</button>
+              <button id="btn-versions" role="menuitem">Lịch sử chỉnh sửa</button>
+              ${(state.user.role === "admin" || q.createdById === state.user.id) ? `<button id="btn-members" role="menuitem">Thành viên phụ trách</button>` : ""}
+              ${(q.status === "approved" || q.status === "sent") ? `
+                <div class="kebab-sep"></div>
+                <button id="btn-convert" role="menuitem">Đánh dấu đã chốt</button>
+                <button id="btn-lost" role="menuitem" class="danger">Đánh dấu không chốt</button>
+              ` : ""}
+            </div>
+          </div>` : ""}
         </div>
       </div>`;
 
     document.getElementById("btn-back").addEventListener("click", () => { state.page = "list"; render(); });
+
+    // Kebab "⋯" overflow menu. Self-contained to the wrapper element (no
+    // document-level listeners) so it can't leak across draw() re-renders.
+    const moreBtn = document.getElementById("btn-more");
+    if (moreBtn) {
+      const wrap = moreBtn.closest(".kebab-wrap");
+      const menu = document.getElementById("more-menu");
+      const closeMenu = () => { menu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); };
+      moreBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const willOpen = menu.hidden;
+        menu.hidden = !willOpen;
+        moreBtn.setAttribute("aria-expanded", String(willOpen));
+      });
+      // Close when focus leaves the cluster (outside click, item chosen, Esc-blur).
+      wrap.addEventListener("focusout", (e) => { if (!wrap.contains(e.relatedTarget)) closeMenu(); });
+      menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenu(); moreBtn.focus(); } });
+      menu.querySelectorAll("button").forEach(b => b.addEventListener("click", closeMenu));
+    }
 
     // Sheet tab switching
     document.querySelectorAll(".sheet-tab").forEach(t => {
@@ -850,9 +1026,9 @@ function renderEditor(el, quote) {
       });
     });
     document.querySelectorAll("[data-rm-tab]").forEach(b => {
-      b.addEventListener("click", (e) => {
+      b.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!confirm("Xóa sheet này khỏi báo giá?")) return;
+        if (!(await confirmModal("Xóa sheet", "Xóa sheet này khỏi báo giá?", { danger: true }))) return;
         const i = parseInt(b.dataset.rmTab, 10);
         q.sheets.splice(i, 1);
         if (q._activeSheet >= q.sheets.length) q._activeSheet = q.sheets.length - 1;
@@ -915,6 +1091,7 @@ function renderEditor(el, quote) {
     };
     bindField("f-toCompany", "toCompany");
     bindField("f-toContact", "toContact");
+    bindField("f-toEmail", "toEmail");
     bindField("f-fromContact", "fromContact");
     bindField("f-fromPhone", "fromPhone");
     bindField("f-fromTitle", "fromTitle");
@@ -924,13 +1101,7 @@ function renderEditor(el, quote) {
     bindField("f-vatPercent", "vatPercent");
     bindField("f-title", "title");
     bindField("f-greeting", "greeting");
-
-    const addBtn = document.getElementById("btn-add-item");
-    if (addBtn) addBtn.addEventListener("click", () => {
-      activeSheet.items.push({ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
-      drawItems(q, activeSheet, editable, tplCode, usesDays);
-      updateSummary(q);
-    });
+    // (Add-row is handled inside drawItems' footer "+ Thêm hàng" — Excel-style.)
 
     bindActions(q, isNew);
   };
@@ -939,8 +1110,18 @@ function renderEditor(el, quote) {
 }
 
 function bindActions(q, isNew) {
+  const showTotalsBox = document.getElementById("f-showTotals");
+  if (showTotalsBox) showTotalsBox.addEventListener("change", () => {
+    q.showTotals = showTotalsBox.checked;
+    const sum = document.querySelector(".quote-summary");
+    if (sum) sum.style.display = q.showTotals ? "" : "none";
+  });
   const saveBtn = document.getElementById("btn-save");
   if (saveBtn) saveBtn.addEventListener("click", async () => {
+    if (saveBtn.disabled) return;                 // guard against double-click → double POST
+    saveBtn.disabled = true;
+    const label = saveBtn.textContent;
+    saveBtn.textContent = "Đang lưu…";
     try {
       const payload = {
         ...q,
@@ -953,6 +1134,8 @@ function bindActions(q, isNew) {
       };
       delete payload._new;
       delete payload._activeSheet;
+      // For a new quote, let the server assign the per-company number (GN…/CLF…).
+      if (isNew) delete payload.quoteNumber;
       let saved;
       if (isNew) saved = await api("/api/quotes", { method: "POST", body: JSON.stringify(payload) });
       else saved = await api(`/api/quotes/${q.id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -960,14 +1143,18 @@ function bindActions(q, isNew) {
       state.page = "edit";
       toast("Đã lưu", "success");
       render();
-    } catch (e) { toast(e.message, "error"); }
+    } catch (e) {
+      toast(e.message, "error");
+      saveBtn.disabled = false;
+      saveBtn.textContent = label;
+    }
   });
   const submitBtn = document.getElementById("btn-submit");
   if (submitBtn) submitBtn.addEventListener("click", async () => {
     if (isNew) { toast("Vui lòng Lưu trước khi trình duyệt", "error"); return; }
     // Guard against submitting an empty/zero-value quote (all prices still 0).
     const tot = Number(q.total || 0);
-    if (tot <= 0 && !confirm("Tổng báo giá đang là 0 (chưa nhập đơn giá). Vẫn trình duyệt?")) return;
+    if (tot <= 0 && !(await confirmModal("Tổng đang là 0", "Tổng báo giá đang là 0 (chưa nhập đơn giá). Vẫn trình duyệt?"))) return;
     try {
       const updated = await api(`/api/quotes/${q.id}/submit`, { method: "POST" });
       state.currentQuote = updated;
@@ -1003,6 +1190,8 @@ function bindActions(q, isNew) {
   });
   const versionsBtn = document.getElementById("btn-versions");
   if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
+  const membersBtn = document.getElementById("btn-members");
+  if (membersBtn) membersBtn.addEventListener("click", () => openMembersModal(q));
   const sendBtn = document.getElementById("btn-send");
   if (sendBtn) sendBtn.addEventListener("click", async () => {
     try {
@@ -1014,7 +1203,7 @@ function bindActions(q, isNew) {
   });
   const convertBtn = document.getElementById("btn-convert");
   if (convertBtn) convertBtn.addEventListener("click", async () => {
-    if (!confirm("Đánh dấu báo giá này là ĐÃ CHỐT (chuyển đơn)?")) return;
+    if (!(await confirmModal("Chốt báo giá", "Đánh dấu báo giá này là ĐÃ CHỐT (đã ký hợp đồng)?", { confirmText: "Đã chốt" }))) return;
     try {
       const updated = await api(`/api/quotes/${q.id}/mark-converted`, { method: "POST" });
       state.currentQuote = updated;
@@ -1022,6 +1211,49 @@ function bindActions(q, isNew) {
       render();
     } catch (e) { toast(e.message, "error"); }
   });
+  const lostBtn = document.getElementById("btn-lost");
+  if (lostBtn) lostBtn.addEventListener("click", async () => {
+    const reason = await promptModal("Không chốt được đơn này", "Lý do (không bắt buộc):", { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" });
+    if (reason === null) return; // cancelled
+    try {
+      const updated = await api(`/api/quotes/${q.id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) });
+      state.currentQuote = updated;
+      toast("Đã đánh dấu không chốt", "success");
+      render();
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+/** Manage which employees can view & edit this quote (creator/admin only). */
+async function openMembersModal(quote) {
+  const m = openModal("Thành viên báo giá", `<div id="mem-body">${skeleton(4)}</div>`);
+  try {
+    const { data: users } = await api("/api/quotes/assignable-users");
+    const currentIds = new Set((quote.members || []).map(u => u.id));
+    const creatorId = quote.createdById;
+    const body = m.find("#mem-body");
+    body.innerHTML = `
+      <p class="muted" style="margin-top:0">Chọn nhân viên được phép xem & sửa báo giá này. Người tạo luôn là thành viên.</p>
+      <div style="max-height:50vh;overflow:auto">
+        ${users.map(u => `
+          <label style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+            <input type="checkbox" data-uid="${u.id}" ${currentIds.has(u.id) ? "checked" : ""} ${u.id === creatorId ? "checked disabled" : ""}/>
+            <span>${escapeHtml(u.displayName)} <span class="muted">(${ROLE_LABEL_FULL[u.role] || u.role})</span>${u.id === creatorId ? ' <span class="muted">— người tạo</span>' : ""}</span>
+          </label>`).join("")}
+      </div>`;
+    m.onSave(async () => {
+      const memberIds = Array.from(body.querySelectorAll("[data-uid]"))
+        .filter(c => c.checked && !c.disabled)
+        .map(c => Number(c.dataset.uid));
+      try {
+        await api(`/api/quotes/${quote.id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) });
+        toast("Đã cập nhật thành viên", "success");
+        m.close();
+        const fresh = await api(`/api/quotes/${quote.id}`);
+        state.currentQuote = fresh; render();
+      } catch (e) { toast(e.message, "error"); }
+    });
+  } catch (e) { toast(e.message, "error"); m.close(); }
 }
 
 /** Version history viewer with side-by-side diff between any two revisions. */
@@ -1078,25 +1310,83 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   // Fields that allow multi-line (Shift+Enter or paste with \n)
   const multilineFields = new Set(["name", "detail", "notes"]);
 
+  // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
+  // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
+  const fmtNumCell = (v) => { const n = Number(v); return (!n || isNaN(n)) ? "" : n.toLocaleString("vi-VN"); };
+  // Parse a VN-formatted string ("1.234.567" / "12,5" / "-5.000") back to a number.
+  const parseVN = (s) => {
+    s = String(s).replace(/[^\d.,-]/g, "");
+    if (!s || s === "-") return 0;
+    const neg = s.startsWith("-");
+    s = s.replace(/-/g, "").replace(/\./g, "");           // strip sign + thousand dots
+    const parts = s.split(",");
+    const num = parts.length > 1 ? Number(parts[0] + "." + parts.slice(1).join("")) : Number(parts[0]);
+    return (neg ? -1 : 1) * (num || 0);
+  };
+  // Live thousand-grouping that tolerates an in-progress decimal (comma).
+  const liveFormat = (raw) => {
+    let s = String(raw).replace(/[^\d.,-]/g, "");
+    const neg = s.startsWith("-");
+    s = s.replace(/-/g, "").replace(/\./g, "");
+    let [intp, ...rest] = s.split(",");
+    intp = intp.replace(/^0+(?=\d)/, "");
+    const grouped = intp ? Number(intp).toLocaleString("vi-VN") : "";
+    let out = rest.length ? (grouped || "0") + "," + rest.join("") : grouped;
+    return (neg ? "-" : "") + out;
+  };
+
+  // Group structure for "hàng con" (sub-items): an "item" head spans itself + the
+  // following consecutive "sub" rows; STT + Hạng Mục cells merge (rowspan) across
+  // the group, exactly like the CLF template. "info" rows are standalone program
+  // notes (no STT / price). STT is numbered per group head only.
+  const dis = !editable ? "disabled" : "";
+  const rowKind = activeSheet.items.map(() => "head");
+  for (let i = 0; i < activeSheet.items.length; i++) {
+    const k = activeSheet.items[i].kind;
+    if (k === "info") rowKind[i] = "info";
+    else if (k === "sub" && i > 0 && (rowKind[i - 1] === "head" || rowKind[i - 1] === "sub")) rowKind[i] = "sub";
+    else rowKind[i] = "head";
+  }
+  const rowspanOf = (i) => { let s = 1, j = i + 1; while (j < activeSheet.items.length && rowKind[j] === "sub") { s++; j++; } return s; };
+
+  // Cells shared by head + sub rows (everything except STT + Hạng Mục).
+  const dataCells = (it, i, amt) => `
+        ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
+        <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
+        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+        <td class="col-amount">${fmtNumCell(amt)}</td>
+        <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
+        ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
+
+  let sttNo = 0;
+  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tbody.innerHTML = activeSheet.items.map((it, i) => {
+    if (rowKind[i] === "info") {
+      return `
+      <tr data-row="${i}" class="info-row">
+        <td class="col-stt"></td>
+        <td class="col-info" colspan="${infoColspan}"><textarea data-f="name" rows="1" placeholder="Dòng thông tin chương trình (không tính tiền)" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+        ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa">✕</button></td>` : ""}
+      </tr>`;
+    }
     const qty = Number(it.quantity) || 0;
     const days = Number(it.days) || 1;
     const price = Number(it.unitPrice) || 0;
     const amt = usesDays ? qty * days * price : qty * price;
+    if (rowKind[i] === "sub") {
+      // Sub-row: STT + Hạng Mục covered by the head's rowspan, so omit those cells.
+      return `<tr data-row="${i}" class="sub-row">${dataCells(it, i, amt)}</tr>`;
+    }
+    sttNo++;
+    const span = rowspanOf(i);
     return `
-      <tr data-row="${i}">
-        <td class="col-stt">${i + 1}</td>
-        <td class="col-hangmuc"><textarea data-f="name" rows="1" ${!editable ? "disabled" : ""}>${escapeHtml(it.name || "")}</textarea></td>
-        ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${!editable ? "disabled" : ""}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
-        <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${!editable ? "disabled" : ""} /></td>
-        <td class="col-qty"><input data-f="quantity" type="number" step="0.01" value="${it.quantity ?? 0}" ${!editable ? "disabled" : ""} /></td>
-        ${usesDays ? `<td class="col-qty"><input data-f="days" type="number" step="1" value="${it.days ?? 1}" ${!editable ? "disabled" : ""} /></td>` : ""}
-        <td class="col-price"><input data-f="unitPrice" type="number" step="1" value="${it.unitPrice ?? 0}" ${!editable ? "disabled" : ""} /></td>
-        <td class="col-amount">${fmtMoney(amt)}</td>
-        <td class="col-notes"><textarea data-f="notes" rows="1" ${!editable ? "disabled" : ""}>${escapeHtml(it.notes || "")}</textarea></td>
-        ${editable ? `<td class="col-action"><button data-rm="${i}" title="Xóa">✕</button></td>` : ""}
-      </tr>
-    `;
+      <tr data-row="${i}" class="grp-head${span > 1 ? " has-subs" : ""}">
+        <td class="col-stt" rowspan="${span}">${sttNo}</td>
+        <td class="col-hangmuc" rowspan="${span}"><textarea data-f="name" rows="1" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+        ${dataCells(it, i, amt)}
+      </tr>`;
   }).join("");
 
   // Auto-grow textareas to fit content
@@ -1109,72 +1399,133 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
     ta.addEventListener("input", grow);
   });
 
-  // Handle BOTH input and textarea cells
-  tbody.querySelectorAll("input, textarea").forEach(inp => {
+  // ---- Excel-style grid helpers ----
+  // Editable columns left→right (drives keyboard nav + multi-cell paste).
+  const FIELDS = ["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes"].filter(Boolean);
+  const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+  const blank = () => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
+  const blankInfo = () => ({ kind: "info", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
+  const blankSub = () => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
+  // Parse a pasted Excel number ("1.000.000", "1,000,000", "12,5"…) into a real number.
+  const numLoose = (s) => {
+    s = String(s).trim().replace(/[^\d.,-]/g, "");
+    if (!s) return 0;
+    if (s.includes(",") && s.includes(".")) {
+      s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+    } else if (s.includes(",")) {
+      const p = s.split(","); s = (p.length === 2 && p[1].length <= 2) ? p[0] + "." + p[1] : s.replace(/,/g, "");
+    } else if ((s.match(/\./g) || []).length > 1) { s = s.replace(/\./g, ""); }
+    return Number(s) || 0;
+  };
+  const redraw = () => { drawItems(q, activeSheet, editable, tplCode, usesDays); updateSummary(q); };
+  const focusCell = (row, field) => {
+    const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
+    if (cell) { cell.focus(); if (cell.select) cell.select(); }
+  };
+  const addRow = (field) => { activeSheet.items.push(blank()); redraw(); focusCell(activeSheet.items.length - 1, field || "name"); };
+  const addInfo = () => { activeSheet.items.push(blankInfo()); redraw(); focusCell(activeSheet.items.length - 1, "name"); };
+  // Insert a "hàng con" (sub-item) right below row i — stays inside i's group.
+  const addSubAfter = (i) => { activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+
+  tbody.querySelectorAll("input, textarea").forEach((inp) => {
     const f = inp.dataset.f;
     const isMultiline = multilineFields.has(f);
 
     inp.addEventListener("input", (e) => {
       const tr = e.target.closest("tr");
       const i = parseInt(tr.dataset.row, 10);
-      let v = e.target.value;
-      // For single-line fields, strip any newlines that sneaked in (e.g. paste)
-      if (!isMultiline && typeof v === "string") {
-        if (/[\r\n]/.test(v)) {
-          v = v.replace(/[\r\n]+/g, " ");
-          e.target.value = v;
-        }
+      if (NUMERIC.has(f)) {
+        // Live thousand-dot formatting with caret preservation (count digits left of caret).
+        const el2 = e.target;
+        const digitsBefore = el2.value.slice(0, el2.selectionStart || 0).replace(/[^\d]/g, "").length;
+        const formatted = liveFormat(el2.value);
+        el2.value = formatted;
+        let pos = 0, seen = 0;
+        while (pos < formatted.length && seen < digitsBefore) { if (/\d/.test(formatted[pos])) seen++; pos++; }
+        if (el2.setSelectionRange) { try { el2.setSelectionRange(pos, pos); } catch {} }
+        activeSheet.items[i][f] = parseVN(formatted);
+      } else {
+        let v = e.target.value;
+        if (!isMultiline && typeof v === "string" && /[\r\n]/.test(v)) { v = v.replace(/[\r\n]+/g, " "); e.target.value = v; }
+        activeSheet.items[i][f] = v;
       }
-      if (f === "quantity" || f === "unitPrice" || f === "days") v = Number(v) || 0;
-      activeSheet.items[i][f] = v;
       const it = activeSheet.items[i];
-      const qty = Number(it.quantity) || 0;
-      const days = Number(it.days) || 1;
-      const price = Number(it.unitPrice) || 0;
-      const amt = usesDays ? qty * days * price : qty * price;
-      tr.querySelector(".col-amount").textContent = fmtMoney(amt);
+      const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+                           : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+      const amtCell = tr.querySelector(".col-amount");   // info rows have no amount cell
+      if (amtCell) amtCell.textContent = fmtNumCell(amt);
       updateSummary(q);
     });
 
-    // For non-multiline inputs: block Enter and strip newlines on paste
-    if (!isMultiline) {
-      inp.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") e.preventDefault();
-      });
-      inp.addEventListener("paste", (e) => {
-        const text = (e.clipboardData || window.clipboardData).getData("text");
-        if (/[\r\n]/.test(text)) {
-          e.preventDefault();
-          const cleaned = text.replace(/[\r\n]+/g, " ");
-          const tgt = e.target;
-          const start = tgt.selectionStart || 0;
-          const end = tgt.selectionEnd || 0;
-          tgt.value = tgt.value.substring(0, start) + cleaned + tgt.value.substring(end);
-          tgt.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-      });
-    }
+    // Enter = commit + move down (adds a row at the end). Shift+Enter = newline (multiline only).
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !(isMultiline && e.shiftKey)) {
+        e.preventDefault();
+        const i = parseInt(inp.closest("tr").dataset.row, 10);
+        if (i >= activeSheet.items.length - 1) addRow(f);
+        else focusCell(i + 1, f);
+      }
+    });
+
+    // Paste a block copied from Excel → fills the grid from this cell, creating rows as needed.
+    inp.addEventListener("paste", (e) => {
+      const text = ((e.clipboardData || window.clipboardData).getData("text") || "").replace(/\r/g, "");
+      const isGrid = /\t/.test(text) || /\n.*\S/.test(text.replace(/\n+$/, ""));
+      if (isGrid) {
+        e.preventDefault();
+        const lines = text.replace(/\n+$/, "").split("\n");
+        const startRow = parseInt(inp.closest("tr").dataset.row, 10);
+        const startCol = FIELDS.indexOf(f);
+        lines.forEach((line, r) => {
+          const ri = startRow + r;
+          while (activeSheet.items.length <= ri) activeSheet.items.push(blank());
+          line.split("\t").forEach((cell, c) => {
+            const field = FIELDS[startCol + c];
+            if (!field) return;
+            const raw = cell.trim();
+            activeSheet.items[ri][field] = NUMERIC.has(field) ? numLoose(raw)
+              : (multilineFields.has(field) ? raw : raw.replace(/\s+/g, " "));
+          });
+        });
+        redraw();
+        focusCell(startRow, f);
+      } else if (!isMultiline && /[\r\n]/.test(text)) {
+        e.preventDefault();
+        const cleaned = text.replace(/[\r\n]+/g, " ");
+        const t = e.target, s = t.selectionStart || 0, en = t.selectionEnd || 0;
+        t.value = t.value.substring(0, s) + cleaned + t.value.substring(en);
+        t.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
   });
-  tbody.querySelectorAll("button[data-rm]").forEach(b => {
+
+  tbody.querySelectorAll("button[data-rm]").forEach((b) => {
     b.addEventListener("click", () => {
       const i = parseInt(b.dataset.rm, 10);
       activeSheet.items.splice(i, 1);
-      if (!activeSheet.items.length) activeSheet.items.push({ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
-      drawItems(q, activeSheet, editable, tplCode, usesDays);
-      updateSummary(q);
+      if (!activeSheet.items.length) activeSheet.items.push(blank());
+      redraw();
     });
   });
 
-  // Render footer (per-sheet subtotal)
+  // "↳" — add a hàng con (sub-item) under this row's group.
+  tbody.querySelectorAll("button[data-sub]").forEach((b) => {
+    b.addEventListener("click", () => addSubAfter(parseInt(b.dataset.sub, 10)));
+  });
+
+  // Footer: "+ Thêm hàng" control + per-sheet subtotal.
   const tfoot = document.querySelector("#items-table tfoot");
-  const sheetSubtotal = activeSheet.items.reduce((s, it) => {
-    const qty = Number(it.quantity) || 0;
-    const days = Number(it.days) || 1;
-    const price = Number(it.unitPrice) || 0;
-    return s + (usesDays ? qty * days * price : qty * price);
-  }, 0);
+  const sheetSubtotal = activeSheet.items.reduce((s, it) => s + (usesDays
+    ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+    : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)), 0);
+  const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
+    ${editable ? `<tr class="add-row-tr"><td colspan="${totalCols}">
+      <button type="button" class="btn btn-sm" id="btn-add-item">+ Thêm hàng</button>
+      <button type="button" class="btn btn-sm" id="btn-add-info">+ Thêm dòng thông tin</button>
+      <span class="muted">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
+    </td></tr>` : ""}
     <tr>
       <td colspan="${colSpanLeft}"></td>
       <td colspan="2" class="empty-left label">Tổng sheet</td>
@@ -1182,6 +1533,10 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
       <td></td>
       ${editable ? "<td></td>" : ""}
     </tr>`;
+  if (editable) {
+    document.getElementById("btn-add-item")?.addEventListener("click", () => addRow("name"));
+    document.getElementById("btn-add-info")?.addEventListener("click", addInfo);
+  }
 }
 
 function renderQuoteSummary(q) {
@@ -1211,7 +1566,7 @@ function renderQuoteSummary(q) {
       <tfoot>
         <tr><td colspan="2">Tổng cộng</td><td style="text-align:right" id="sum-subtotal">${fmtMoney(subtotalAll)}</td></tr>
         <tr><td colspan="2">VAT (${vatPct}%)</td><td style="text-align:right" id="sum-vat">${fmtMoney(vat)}</td></tr>
-        <tr><td colspan="2"><strong>Thành tiền</strong></td><td style="text-align:right; color:#C00000"><strong id="sum-total">${fmtMoney(total)}</strong></td></tr>
+        <tr><td colspan="2"><strong>Thành tiền</strong></td><td style="text-align:right; color:var(--danger)"><strong id="sum-total">${fmtMoney(total)}</strong></td></tr>
       </tfoot>
     </table>`;
 }
@@ -1244,29 +1599,36 @@ async function loadUsers() {
 function drawUsers() {
   const body = document.getElementById("users-body");
   if (!body) return;
+  const dash = '<span class="muted">—</span>';
   body.innerHTML = `
-    <table class="list-table">
-      <thead><tr><th scope="col">Username</th><th scope="col">Họ tên</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Chức vụ</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead>
+    <div class="tbl-scroll"><table class="list-table">
+      <thead><tr><th scope="col">Tên đăng nhập</th><th scope="col">Họ tên</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Trạng thái</th><th scope="col" style="text-align:right">Thao tác</th></tr></thead>
       <tbody>
         ${state.users.map(u => `
           <tr>
             <td>${escapeHtml(u.username)}</td>
             <td>${escapeHtml(u.displayName)}</td>
             <td><span class="status ${u.role === "admin" ? "approved" : u.role === "manager" ? "pending" : "draft"}">${ROLE_LABEL[u.role]}</span></td>
-            <td>${escapeHtml(u.phone || "")}</td>
-            <td>${escapeHtml(u.title || "")}</td>
-            <td>${u.active ? "✅ Hoạt động" : "🔒 Khóa"}</td>
-            <td>
-              <button class="btn btn-sm" data-edit="${u.id}">Sửa</button>
-              <button class="btn btn-sm" data-pw="${u.id}">Đổi MK</button>
-              <button class="btn btn-sm ${u.active ? "btn-warn" : "btn-success"}" data-toggle="${u.id}">${u.active ? "Khóa" : "Mở khóa"}</button>
+            <td>${u.phone ? escapeHtml(u.phone) : dash}</td>
+            <td>${u.pending ? '<span class="status pending">Chờ kích hoạt</span>' : `<span class="status ${u.active ? "approved" : "rejected"}">${u.active ? "Hoạt động" : "Đã khóa"}</span>`}</td>
+            <td style="text-align:right; white-space:nowrap">
+              ${u.pending
+                ? `<button class="btn btn-sm" data-resend="${u.id}">Gửi lại lời mời</button>`
+                : `<button class="btn btn-sm" data-edit="${u.id}">Sửa</button>
+                   <button class="btn btn-sm" data-pw="${u.id}">Đổi MK</button>
+                   <button class="btn btn-sm ${u.active ? "btn-warn" : "btn-success"}" data-toggle="${u.id}">${u.active ? "Khóa" : "Mở khóa"}</button>`}
               ${u.id !== state.user.id ? `<button class="btn btn-sm btn-danger" data-del="${u.id}">Xóa</button>` : ""}
             </td>
           </tr>
         `).join("")}
       </tbody>
-    </table>`;
+    </table></div>`;
   body.querySelectorAll("button[data-edit]").forEach(b => b.addEventListener("click", () => openUserModal(state.users.find(u => u.id === parseInt(b.dataset.edit, 10)))));
+  body.querySelectorAll("button[data-resend]").forEach(b => b.addEventListener("click", async () => {
+    const u = state.users.find(x => x.id === parseInt(b.dataset.resend, 10));
+    try { const r = await api(`/api/users/${b.dataset.resend}/resend-invite`, { method: "POST" }); showInviteResult({ ...r, user: { email: u?.email || "" } }); }
+    catch (e) { toast(e.message, "error"); }
+  }));
   body.querySelectorAll("button[data-pw]").forEach(b => b.addEventListener("click", () => openPasswordModal(state.users.find(u => u.id === parseInt(b.dataset.pw, 10)))));
   body.querySelectorAll("button[data-toggle]").forEach(b => b.addEventListener("click", async () => {
     const u = state.users.find(x => x.id === parseInt(b.dataset.toggle, 10));
@@ -1277,7 +1639,7 @@ function drawUsers() {
     } catch (e) { toast(e.message, "error"); }
   }));
   body.querySelectorAll("button[data-del]").forEach(b => b.addEventListener("click", async () => {
-    if (!confirm("Xóa user này?")) return;
+    if (!(await confirmModal("Xóa nhân viên", "Xóa nhân viên này? Hành động không thể hoàn tác.", { danger: true }))) return;
     try {
       await api(`/api/users/${b.dataset.del}`, { method: "DELETE" });
       toast("Đã xóa", "success");
@@ -1286,15 +1648,64 @@ function drawUsers() {
   }));
 }
 
+// Invite a new employee by email (they self-onboard).
+function openInviteModal() {
+  const m = openModal("Mời nhân viên", `
+    <p class="muted" style="margin-top:0">Nhập email nhân viên — hệ thống gửi lời mời, họ tự đặt mật khẩu và điền SĐT.</p>
+    <div class="form-grid">
+      <label style="grid-column:1/-1">Họ tên <span class="req">*</span><input id="iv-name" placeholder="VD: Nguyễn Văn A" /></label>
+      <label style="grid-column:1/-1">Email công ty <span class="req">*</span><input id="iv-email" type="email" inputmode="email" placeholder="ten@congty.com" /></label>
+      <label style="grid-column:1/-1">Quyền
+        <select id="iv-role">
+          <option value="employee">Nhân viên</option>
+          <option value="manager">Quản lý</option>
+          <option value="admin">Quản trị viên</option>
+        </select>
+      </label>
+    </div>`);
+  m.onSave(async () => {
+    const displayName = m.find("#iv-name").value.trim();
+    const email = m.find("#iv-email").value.trim();
+    if (!displayName || !email) { toast("Vui lòng nhập họ tên và email", "error"); return; }
+    try {
+      const r = await api("/api/users/invite", { method: "POST", body: JSON.stringify({ email, displayName, role: m.find("#iv-role").value }) });
+      m.close();
+      showInviteResult(r);
+      loadUsers();
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const sb = m.find("[data-save]"); if (sb) sb.textContent = "Gửi lời mời";
+  setTimeout(() => m.find("#iv-name")?.focus(), 40);
+}
+
+function showInviteResult(r) {
+  const sent = r.emailSent;
+  const m = openModal("Đã tạo lời mời", `
+    <p>${sent ? `Đã gửi email lời mời tới <b>${escapeHtml(r.user.email)}</b>.` : `Email chưa được cấu hình trên hệ thống — hãy gửi <b>liên kết mời</b> này cho nhân viên:`}</p>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="iv-link" value="${escapeHtml(r.inviteUrl)}" readonly style="flex:1" />
+      <button class="btn" id="iv-copy" type="button">Sao chép</button>
+    </div>
+    <p class="muted" style="margin-top:10px">Nhân viên mở liên kết → đặt mật khẩu + điền SĐT → đăng nhập bằng <b>email</b>. Lời mời hết hạn sau 7 ngày.</p>`);
+  m.find("#iv-copy")?.addEventListener("click", () => {
+    const inp = m.find("#iv-link"); inp.select();
+    try { navigator.clipboard?.writeText(inp.value); } catch (e) {}
+    toast("Đã sao chép liên kết", "success");
+  });
+  const sb = m.find("[data-save]"); if (sb) sb.style.display = "none";
+  const cb = m.find("[data-cancel]"); if (cb) cb.textContent = "Đóng";
+}
+
 function openUserModal(u) {
   const isNew = !u;
+  if (isNew) return openInviteModal();
   const mask = document.createElement("div");
   mask.className = "modal-mask";
   mask.innerHTML = `
     <div class="modal">
       <h2>${isNew ? "Thêm nhân viên" : "Sửa: " + escapeHtml(u.username)}</h2>
       <label>Tên đăng nhập<input name="username" value="${escapeHtml(u?.username || "")}" ${isNew ? "" : "disabled"} /></label>
-      ${isNew ? `<label>Mật khẩu khởi tạo<input name="password" type="text" value="123456" /></label>` : ""}
+      ${isNew ? `<label>Mật khẩu khởi tạo<input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" /></label>` : ""}
       <label>Họ tên<input name="displayName" value="${escapeHtml(u?.displayName || "")}" /></label>
       <label>Quyền
         <select name="role">
@@ -1303,8 +1714,7 @@ function openUserModal(u) {
           <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
         </select>
       </label>
-      <label>SĐT<input name="phone" value="${escapeHtml(u?.phone || "")}" /></label>
-      <label>Chức vụ<input name="title" placeholder="Account Team..." value="${escapeHtml(u?.title || "")}" /></label>
+      <label>SĐT<input name="phone" type="tel" inputmode="tel" value="${escapeHtml(u?.phone || "")}" /></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Lưu</button>
@@ -1316,7 +1726,7 @@ function openUserModal(u) {
     const get = n => mask.querySelector(`[name=${n}]`).value;
     const payload = {
       username: get("username"), displayName: get("displayName"),
-      role: get("role"), phone: get("phone"), title: get("title"),
+      role: get("role"), phone: get("phone"),
     };
     if (isNew) payload.password = get("password");
     try {
@@ -1353,27 +1763,105 @@ function openPasswordModal(u) {
   });
 }
 
+function renderMfaBox() {
+  const box = document.getElementById("mfa-box");
+  if (!box) return;
+  if (state.user.mfaEnabled) {
+    box.innerHTML = `<p>Trạng thái: <span class="status approved">Đang bật</span></p>
+      <button class="btn btn-danger" id="mfa-disable">Tắt bảo mật 2 lớp</button>`;
+    document.getElementById("mfa-disable").addEventListener("click", async () => {
+      const token = await promptModal("Tắt bảo mật 2 lớp", "Nhập mã 6 số từ ứng dụng xác thực để xác nhận:", { placeholder: "123456" });
+      if (!token) return;
+      try { await api("/api/mfa/disable", { method: "POST", body: JSON.stringify({ token: token.trim() }) }); state.user.mfaEnabled = false; toast("Đã tắt MFA", "success"); renderMfaBox(); }
+      catch (e) { toast(e.message, "error"); }
+    });
+  } else {
+    box.innerHTML = `<p>Trạng thái: <span class="status draft">Chưa bật</span></p>
+      <p class="muted">Yêu cầu mã từ ứng dụng (Google Authenticator, Authy…) mỗi lần đăng nhập — tăng bảo mật cho tài khoản.</p>
+      <button class="btn btn-primary" id="mfa-enable">Bật bảo mật 2 lớp</button>`;
+    document.getElementById("mfa-enable").addEventListener("click", startMfaSetup);
+  }
+}
+
+async function startMfaSetup() {
+  let s;
+  try { s = await api("/api/mfa/setup", { method: "POST" }); } catch (e) { toast(e.message, "error"); return; }
+  const m = openModal("Bật bảo mật 2 lớp", `
+    <p><b>1.</b> Quét mã QR bằng app xác thực (Google Authenticator, Authy…):</p>
+    <div style="text-align:center"><img src="${s.qr}" alt="Mã QR MFA" style="width:184px;height:184px;border:1px solid var(--border);border-radius:8px"/></div>
+    <p class="muted" style="word-break:break-all">Hoặc nhập tay khóa: <b>${escapeHtml(s.secret)}</b></p>
+    <label style="display:block"><b>2.</b> Nhập mã 6 số đang hiện trên app:
+      <input id="mfa-token" inputmode="numeric" maxlength="6" placeholder="123456" style="width:100%;margin-top:6px"/></label>
+    <div id="mfa-codes"></div>`);
+  m.onSave(async () => {
+    const token = (m.find("#mfa-token").value || "").trim();
+    if (!/^\d{6}$/.test(token)) { toast("Nhập đúng mã 6 số", "error"); return; }
+    try {
+      const r = await api("/api/mfa/enable", { method: "POST", body: JSON.stringify({ secret: s.secret, token }) });
+      state.user.mfaEnabled = true;
+      m.find("#mfa-codes").innerHTML = `<div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:8px">
+        <b>Mã dự phòng</b> — lưu lại nơi an toàn, mỗi mã dùng 1 lần khi không có điện thoại:
+        <div style="font-family:var(--font-mono);margin-top:8px;columns:2;gap:8px">${(r.backupCodes || []).map(c => `<div>${escapeHtml(c)}</div>`).join("")}</div></div>`;
+      toast("Đã bật MFA", "success");
+      const sb = m.find("[data-save]"); if (sb) sb.style.display = "none";
+      const cb = m.find("[data-cancel]"); if (cb) cb.textContent = "Xong";
+      renderMfaBox();
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const sb = m.find("[data-save]"); if (sb) sb.textContent = "Xác nhận bật";
+  setTimeout(() => m.find("#mfa-token")?.focus(), 40);
+}
+
 function renderProfile(el) {
+  const u = state.user;
   el.innerHTML = `
     <h1>Tài khoản</h1>
-    <form class="editor" id="pw-form" style="max-width:440px" autocomplete="off">
-      <p class="ds-small" style="margin-top:0">Đổi mật khẩu. Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số.</p>
-      <label for="old-pw" style="display:block; margin-bottom:14px"><span>Mật khẩu cũ</span>
-        <input type="password" id="old-pw" autocomplete="current-password" required
-          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
-      </label>
-      <label for="new-pw" style="display:block; margin-bottom:6px"><span>Mật khẩu mới</span>
-        <input type="password" id="new-pw" autocomplete="new-password" required minlength="8" maxlength="128"
-          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
-      </label>
-      <div class="pw-meter" aria-hidden="true"><i id="pw-bar"></i></div>
-      <div class="pw-hint" id="pw-hint">Độ mạnh: —</div>
-      <label for="new-pw2" style="display:block; margin:14px 0"><span>Nhập lại mật khẩu mới</span>
-        <input type="password" id="new-pw2" autocomplete="new-password" required minlength="8" maxlength="128"
-          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
-      </label>
-      <button class="btn btn-primary" type="submit">💾 Đổi mật khẩu</button>
-    </form>`;
+    <div class="account-grid">
+      <section class="card-section">
+        <h3>Hồ sơ</h3>
+        <form id="profile-form" class="form-grid">
+          <label style="grid-column:1/-1">Họ tên <span class="req">*</span><input id="pf-name" value="${escapeHtml(u.displayName || "")}" required /></label>
+          <label>Số điện thoại<input id="pf-phone" type="tel" inputmode="tel" value="${escapeHtml(u.phone || "")}" /></label>
+          <label>Email<input value="${escapeHtml(u.email || "—")}" disabled /></label>
+          <label>Vai trò<input value="${escapeHtml(ROLE_LABEL[u.role] || u.role)}" disabled /></label>
+          <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Lưu hồ sơ</button></div>
+        </form>
+      </section>
+      <section class="card-section">
+        <h3>Bảo mật 2 lớp (MFA)</h3>
+        <div id="mfa-box"></div>
+      </section>
+      <section class="card-section">
+        <h3>Đổi mật khẩu</h3>
+        <form id="pw-form" autocomplete="off">
+          <p class="muted" style="margin-top:0">Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số.</p>
+          <label for="old-pw" style="display:block; margin-bottom:14px"><span>Mật khẩu cũ</span>
+            <input type="password" id="old-pw" autocomplete="current-password" required
+              style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--text)" /></label>
+          <label for="new-pw" style="display:block; margin-bottom:6px"><span>Mật khẩu mới</span>
+            <input type="password" id="new-pw" autocomplete="new-password" required minlength="8" maxlength="128"
+              style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--text)" /></label>
+          <div class="pw-meter" aria-hidden="true"><i id="pw-bar"></i></div>
+          <div class="pw-hint" id="pw-hint">Độ mạnh: —</div>
+          <label for="new-pw2" style="display:block; margin:14px 0"><span>Nhập lại mật khẩu mới</span>
+            <input type="password" id="new-pw2" autocomplete="new-password" required minlength="8" maxlength="128"
+              style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--text)" /></label>
+          <button class="btn btn-primary" type="submit">Đổi mật khẩu</button>
+        </form>
+      </section>
+    </div>`;
+
+  document.getElementById("profile-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const me = await api("/api/auth/profile", { method: "POST", body: JSON.stringify({ displayName: document.getElementById("pf-name").value, phone: document.getElementById("pf-phone").value }) });
+      state.user = { ...state.user, ...me };
+      toast("Đã lưu hồ sơ", "success");
+      renderShell();
+    } catch (err) { toast(err.message, "error"); }
+  });
+
+  renderMfaBox();
 
   const np = document.getElementById("new-pw");
   const bar = document.getElementById("pw-bar");
@@ -1421,12 +1909,13 @@ function renderProfile(el) {
 
 // ---------------- Dashboard ----------------
 async function renderDashboard(el) {
-  el.innerHTML = `<h1>📊 Dashboard</h1>
-    <div id="dash-kpi" class="kpi-grid">${skeleton(5, true)}</div>
-    <h3 style="margin-top:24px">Phễu báo giá</h3>
-    <div id="dash-funnel" class="funnel"></div>
-    <h3 style="margin-top:24px">Top nhân viên (theo doanh số duyệt)</h3>
-    <div id="dash-top"></div>`;
+  el.innerHTML = `<h1>Tổng quan</h1>
+    <p class="muted" style="margin:-8px 0 16px">Số liệu 30 ngày gần nhất</p>
+    <div id="dash-kpi" class="kpi-grid">${skeleton(4, true)}</div>
+    <div class="dash-cols">
+      <section><h3>Phễu báo giá</h3><div id="dash-funnel" class="funnel"></div></section>
+      <section><h3>Top nhân viên (doanh số đã duyệt)</h3><div id="dash-top"></div></section>
+    </div>`;
   try {
     const [overview, funnel, top] = await Promise.all([
       api("/api/analytics/overview"),
@@ -1435,25 +1924,25 @@ async function renderDashboard(el) {
     ]);
     const k = overview.kpi;
     document.getElementById("dash-kpi").innerHTML = `
-      <div class="kpi"><span>Tổng báo giá 30d</span><strong>${k.totalQuotes}</strong></div>
-      <div class="kpi"><span>Doanh số duyệt</span><strong>${fmtMoney(k.approvedAmount)}</strong></div>
-      <div class="kpi"><span>TB / báo giá</span><strong>${fmtMoney(Math.round(k.avgDealSize))}</strong></div>
-      <div class="kpi"><span>Tỷ lệ chốt</span><strong>${k.conversionRate}%</strong></div>
-      <div class="kpi"><span>Sắp hết hạn (≤7d)</span><strong>${k.expiringSoon}</strong></div>`;
+      <div class="kpi"><span>Báo giá (30 ngày)</span><strong>${k.totalQuotes}</strong></div>
+      <div class="kpi"><span>Doanh số đã duyệt</span><strong>${fmtMoney(k.approvedAmount)} đ</strong></div>
+      <div class="kpi"><span>Trung bình / báo giá</span><strong>${fmtMoney(Math.round(k.avgDealSize))} đ</strong></div>
+      <div class="kpi"><span>Tỷ lệ chốt</span><strong>${k.conversionRate}%</strong></div>`;
+    const maxCount = Math.max(1, ...funnel.data.map(s => s.count));
     document.getElementById("dash-funnel").innerHTML = funnel.data.map(s => `
       <div class="funnel-row">
         <span class="status ${s.status}">${statusLabel(s.status)}</span>
-        <div class="funnel-bar" style="width:${Math.min(100, s.count * 8)}%"></div>
+        <div class="funnel-track"><div class="funnel-bar" style="width:${s.count ? Math.max(5, Math.round(s.count / maxCount * 100)) : 0}%"></div></div>
         <strong>${s.count}</strong>
       </div>
     `).join("") || "<div class='empty-state'>Không có dữ liệu</div>";
     document.getElementById("dash-top").innerHTML = top.data.length ? `
-      <table class="list-table">
-        <thead><tr><th scope="col">#</th><th scope="col">Nhân viên</th><th scope="col">Số BG</th><th scope="col" style="text-align:right">Doanh số</th></tr></thead>
+      <div class="tbl-scroll"><table class="list-table">
+        <thead><tr><th scope="col">#</th><th scope="col">Nhân viên</th><th scope="col" style="text-align:right">Số BG</th><th scope="col" style="text-align:right">Doanh số (đ)</th></tr></thead>
         <tbody>${top.data.map((t, i) => `
-          <tr><td>${i + 1}</td><td>${escapeHtml(t.user?.displayName || "—")}</td><td>${t.count}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>
+          <tr><td>${i + 1}</td><td>${escapeHtml(t.user?.displayName || "—")}</td><td style="text-align:right">${t.count}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>
         `).join("")}</tbody>
-      </table>` : "<div class='empty-state'>Chưa có doanh số duyệt</div>";
+      </table></div>` : "<div class='empty-state'>Chưa có doanh số đã duyệt</div>";
   } catch (e) { toast(e.message, "error"); }
 }
 
@@ -1683,40 +2172,40 @@ function editProduct(id) {
 
 // ---------------- Approval queue ----------------
 async function renderApprovalQueue(el) {
-  el.innerHTML = `<h1>✅ Hàng chờ duyệt</h1><div id="aq-body">Đang tải...</div>`;
+  el.innerHTML = `<h1>Hàng chờ duyệt</h1><div id="aq-body">${skeleton(4)}</div>`;
   try {
     const r = await api("/api/approvals/queue");
     const body = document.getElementById("aq-body");
     if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
-    body.innerHTML = `<table class="list-table">
-      <thead><tr><th scope="col">Số BG</th><th scope="col">Tiêu đề</th><th scope="col">Khách</th><th scope="col">Level</th>
-        <th scope="col" style="text-align:right">Tổng</th><th scope="col">Người tạo</th><th scope="col"></th></tr></thead>
+    body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
+      <thead><tr><th scope="col">Số báo giá</th><th scope="col">Tiêu đề</th><th scope="col">Khách hàng</th>
+        <th scope="col" style="text-align:right">Tổng tiền</th><th scope="col">Người tạo</th><th scope="col">Thao tác</th></tr></thead>
       <tbody>${r.data.map(a => `
         <tr>
           <td><strong>${escapeHtml(a.quote?.quoteNumber)}</strong></td>
           <td>${escapeHtml(a.quote?.title || "")}</td>
           <td>${escapeHtml(a.quote?.toCompany || "")}</td>
-          <td>L${a.level}</td>
-          <td style="text-align:right">${fmtMoney(a.quote?.total)}</td>
+          <td style="text-align:right">${fmtMoney(a.quote?.total)} đ</td>
           <td>${escapeHtml(a.quote?.createdBy?.displayName || "")}</td>
-          <td>
+          <td style="white-space:nowrap">
             <button class="btn btn-sm" data-open="${a.quote?.id}">Xem</button>
             <button class="btn btn-sm btn-primary" data-approve="${a.quote?.id}">✓ Duyệt</button>
             <button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>
           </td>
-        </tr>`).join("")}</tbody></table>`;
+        </tr>`).join("")}</tbody></table></div>`;
     body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", async () => {
       const q = await api(`/api/quotes/${b.dataset.open}`); state.currentQuote = q; state.page = "edit"; render();
     }));
     body.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", async () => {
-      const comment = prompt("Comment duyệt (tuỳ chọn):") ?? "";
+      const comment = await promptModal("Duyệt báo giá", "Ghi chú khi duyệt (không bắt buộc):", { placeholder: "VD: Đồng ý mức giá này" });
+      if (comment === null) return;
       try { await api(`/api/quotes/${b.dataset.approve}/approve`, { method: "POST", body: JSON.stringify({ comment }) });
         toast("Đã duyệt", "success"); renderApprovalQueue(el);
       } catch (e) { toast(e.message, "error"); }
     }));
     body.querySelectorAll("[data-reject]").forEach(b => b.addEventListener("click", async () => {
-      const comment = prompt("Lý do từ chối:") ?? "";
-      if (!comment.trim()) return;
+      const comment = await promptModal("Từ chối báo giá", "Lý do từ chối (bắt buộc):", { required: true, min: 5, requiredMsg: "Vui lòng nhập lý do (ít nhất 5 ký tự)", placeholder: "VD: Giá cao hơn ngân sách, cần giảm 10%" });
+      if (!comment) return;
       try { await api(`/api/quotes/${b.dataset.reject}/reject`, { method: "POST", body: JSON.stringify({ comment }) });
         toast("Đã từ chối", "success"); renderApprovalQueue(el);
       } catch (e) { toast(e.message, "error"); }
@@ -1726,7 +2215,7 @@ async function renderApprovalQueue(el) {
 
 // ---------------- Notifications ----------------
 async function renderNotifications(el) {
-  el.innerHTML = `<h1>🔔 Thông báo</h1>
+  el.innerHTML = `<h1>Thông báo</h1>
     <div class="toolbar"><button class="btn" id="btn-read-all">Đánh dấu đã đọc tất cả</button></div>
     <div id="n-body">${skeleton(4)}</div>`;
   document.getElementById("btn-read-all").addEventListener("click", async () => {
@@ -1753,89 +2242,152 @@ async function renderNotifications(el) {
 
 // ---------------- Audit log (admin) ----------------
 async function renderAuditLog(el) {
-  el.innerHTML = `<h1>📜 Audit log</h1>
+  const actionOpts = Object.entries(ACTION_LABEL).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+  const resOpts = Object.entries(RESOURCE_LABEL).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+  el.innerHTML = `<h1>Nhật ký hoạt động</h1>
+    <p class="muted">Lịch sử ai đã làm gì trong hệ thống.</p>
     <div class="toolbar">
-      <input id="a-action" placeholder="action (vd: quote.create)"/>
-      <input id="a-resource" placeholder="resource (vd: quote)"/>
-      <button class="btn" id="a-reload">Tải</button>
+      <label for="a-action" class="sr-only">Lọc theo hoạt động</label>
+      <select id="a-action"><option value="">Tất cả hoạt động</option>${actionOpts}</select>
+      <label for="a-resource" class="sr-only">Lọc theo đối tượng</label>
+      <select id="a-resource"><option value="">Tất cả đối tượng</option>${resOpts}</select>
     </div>
     <div id="a-body">${skeleton(6)}</div>`;
   const reload = async () => {
     const params = new URLSearchParams();
-    if (document.getElementById("a-action").value) params.set("action", document.getElementById("a-action").value);
-    if (document.getElementById("a-resource").value) params.set("resource", document.getElementById("a-resource").value);
+    const av = document.getElementById("a-action").value;
+    const rv = document.getElementById("a-resource").value;
+    if (av) params.set("action", av);
+    if (rv) params.set("resource", rv);
     params.set("size", "100");
     try {
       const r = await api("/api/audit?" + params);
       const body = document.getElementById("a-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có sự kiện</div>"; return; }
-      body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">Thời gian</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">IP</th></tr></thead>
+      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có hoạt động nào</div>"; return; }
+      body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
+        <thead><tr><th scope="col">Thời gian</th><th scope="col">Người thực hiện</th><th scope="col">Hoạt động</th><th scope="col">Đối tượng</th></tr></thead>
         <tbody>${r.data.map(e => `
           <tr>
             <td>${new Date(e.createdAt).toLocaleString("vi-VN")}</td>
-            <td>${escapeHtml(e.actor?.username || "—")}</td>
-            <td><code>${escapeHtml(e.action)}</code></td>
-            <td>${escapeHtml(e.resource || "")}/${escapeHtml(e.resourceId || "")}</td>
-            <td>${escapeHtml(e.ip || "")}</td>
-          </tr>`).join("")}</tbody></table>`;
+            <td>${escapeHtml(e.actor?.displayName || e.actor?.username || "Hệ thống")}</td>
+            <td>${escapeHtml(actionLabel(e.action))}</td>
+            <td>${escapeHtml(resourceLabel(e.resource))}${e.resourceId ? " #" + escapeHtml(e.resourceId) : ""}</td>
+          </tr>`).join("")}</tbody></table></div>`;
     } catch (e) { toast(e.message, "error"); }
   };
-  document.getElementById("a-reload").addEventListener("click", reload);
+  document.getElementById("a-action").addEventListener("change", reload);
+  document.getElementById("a-resource").addEventListener("change", reload);
   await reload();
 }
 
 // ---------------- Settings (admin) ----------------
+// One editable "approval level" row in the friendly builder (no JSON for the boss).
+function matrixLevelRow(idx, lvl) {
+  lvl = lvl || {};
+  const roles = lvl.roles || ["manager", "admin"];
+  const any = Number(lvl.any) || 1;
+  return `<div class="lvl-row" data-lvl style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;background:var(--surface-2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong>Cấp duyệt ${idx}</strong>
+      <button type="button" class="btn btn-sm btn-danger" data-rm-lvl>Bỏ cấp này</button>
+    </div>
+    <div style="margin-bottom:8px">Ai được duyệt ở cấp này:
+      <label style="margin-left:8px"><input type="checkbox" data-role="manager" ${roles.includes("manager") ? "checked" : ""}/> Quản lý</label>
+      <label style="margin-left:14px"><input type="checkbox" data-role="admin" ${roles.includes("admin") ? "checked" : ""}/> Quản trị (Giám đốc)</label>
+    </div>
+    <label>Số người cần duyệt ở cấp này:
+      <input type="number" min="1" max="5" value="${any}" data-any style="width:72px"/></label>
+  </div>`;
+}
+
+function openMatrixBuilder(existing, onDone) {
+  const isEdit = !!existing;
+  const startLevels = (existing && existing.levels && existing.levels.length) ? existing.levels : [{ level: 1, roles: ["manager", "admin"], any: 1 }];
+  const m = openModal(isEdit ? "Sửa quy tắc duyệt" : "Thêm quy tắc duyệt", `
+    <p class="muted" style="margin-top:0">Quy tắc quyết định <strong>ai phải duyệt</strong> một báo giá dựa trên <strong>giá trị</strong> của nó. Ví dụ: báo giá trên 100 triệu thì Giám đốc phải duyệt.</p>
+    <div class="form-grid">
+      <label style="grid-column:1/-1">Tên quy tắc<input id="m-name" value="${escapeHtml(existing && existing.name || "Báo giá thường")}" placeholder="VD: Báo giá giá trị lớn"/></label>
+      <label>Áp dụng cho báo giá từ (đồng)<input id="m-min" type="number" min="0" value="${existing ? Number(existing.minAmount) : 0}"/></label>
+      <label>Đến (đồng) — để trống = trở lên<input id="m-max" type="number" min="0" value="${existing && existing.maxAmount != null ? Number(existing.maxAmount) : ""}"/></label>
+    </div>
+    <div style="margin-top:14px">
+      <strong>Các cấp duyệt (theo thứ tự)</strong>
+      <div id="lvl-list" style="margin-top:8px"></div>
+      <button type="button" class="btn btn-sm" id="add-lvl">+ Thêm một cấp duyệt</button>
+    </div>`);
+  const list = m.find("#lvl-list");
+  const collect = () => Array.from(list.querySelectorAll("[data-lvl]")).map((row, i) => ({
+    level: i + 1,
+    roles: Array.from(row.querySelectorAll("[data-role]")).filter(c => c.checked).map(c => c.dataset.role),
+    any: Math.max(1, Number(row.querySelector("[data-any]").value) || 1),
+  }));
+  const renderLevels = (lvls) => {
+    list.innerHTML = lvls.map((l, i) => matrixLevelRow(i + 1, l)).join("");
+    list.querySelectorAll("[data-rm-lvl]").forEach((b, i) => b.addEventListener("click", () => {
+      const cur = collect(); cur.splice(i, 1);
+      renderLevels(cur.length ? cur : [{ level: 1, roles: ["manager", "admin"], any: 1 }]);
+    }));
+  };
+  renderLevels(startLevels);
+  m.find("#add-lvl").addEventListener("click", () => {
+    const cur = collect(); cur.push({ level: cur.length + 1, roles: ["manager", "admin"], any: 1 });
+    renderLevels(cur);
+  });
+  m.onSave(async () => {
+    const built = collect();
+    for (const l of built) if (!l.roles.length) { toast(`Cấp ${l.level} chưa chọn ai được duyệt`, "error"); return; }
+    const payload = {
+      name: m.find("#m-name").value.trim() || "Báo giá thường",
+      minAmount: Number(m.find("#m-min").value) || 0,
+      maxAmount: m.find("#m-max").value ? Number(m.find("#m-max").value) : null,
+      levels: built,
+    };
+    try {
+      if (isEdit) await api(`/api/approvals/matrix/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
+      else await api("/api/approvals/matrix", { method: "POST", body: JSON.stringify(payload) });
+      toast("Đã lưu quy tắc duyệt", "success"); m.close(); onDone();
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
 async function renderSettings(el) {
   el.innerHTML = `<h1>⚙️ Cài đặt hệ thống</h1>
-    <p>Quản lý approval matrix, key/value settings tổ chức.</p>
-    <h3>Approval matrix</h3>
-    <div id="s-matrix-body">Đang tải...</div>
-    <button class="btn btn-primary" id="btn-add-matrix">+ Thêm matrix</button>`;
+    <h3 style="margin-top:8px">Quy tắc duyệt báo giá</h3>
+    <p class="muted">Thiết lập <strong>ai phải duyệt</strong> báo giá tùy theo <strong>giá trị</strong>. Khi nhân viên trình duyệt, hệ thống tự chọn quy tắc khớp với tổng tiền của báo giá.</p>
+    <div id="s-matrix-body">${skeleton(3)}</div>
+    <button class="btn btn-primary" id="btn-add-matrix" style="margin-top:10px">+ Thêm quy tắc duyệt</button>`;
 
   const reload = async () => {
     try {
       const rows = await api("/api/approvals/matrix");
+      window._matrixRows = rows;
       document.getElementById("s-matrix-body").innerHTML = rows.length ? `
-        <table class="list-table">
-          <thead><tr><th scope="col">Tên</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Levels</th><th scope="col">Active</th><th scope="col"></th></tr></thead>
+        <div class="tbl-scroll"><table class="list-table">
+          <thead><tr><th scope="col">Tên quy tắc</th><th scope="col">Giá trị báo giá</th><th scope="col">Cần ai duyệt</th><th scope="col">Đang dùng</th><th scope="col"></th></tr></thead>
           <tbody>${rows.map(r => `
             <tr>
-              <td>${escapeHtml(r.name)}</td>
-              <td>${fmtMoney(r.minAmount)}</td>
-              <td>${r.maxAmount != null ? fmtMoney(r.maxAmount) : "∞"}</td>
-              <td><code style="font-size:11px">${escapeHtml(JSON.stringify(r.levels))}</code></td>
-              <td>${r.active ? "✓" : "✗"}</td>
-              <td><button class="btn btn-sm btn-danger" data-del="${r.id}">Xóa</button></td>
+              <td><strong>${escapeHtml(r.name)}</strong></td>
+              <td>${fmtMoney(r.minAmount)}${r.maxAmount != null ? " – " + fmtMoney(r.maxAmount) : " trở lên"} đ</td>
+              <td>${escapeHtml(describeApprovalLevels(r.levels))}</td>
+              <td>${r.active ? "✅" : "—"}</td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm" data-edit="${r.id}">Sửa</button>
+                <button class="btn btn-sm btn-danger" data-del="${r.id}">Xóa</button>
+              </td>
             </tr>`).join("")}</tbody>
-        </table>` : "<div class='empty-state'>Chưa có matrix</div>";
+        </table></div>` : "<div class='empty-state'>Chưa có quy tắc — đang dùng mặc định: Quản lý hoặc Giám đốc duyệt</div>";
       document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!confirm("Xóa matrix?")) return;
-        await api(`/api/approvals/matrix/${b.dataset.del}`, { method: "DELETE" });
-        reload();
+        if (!confirm("Xóa quy tắc duyệt này?")) return;
+        try { await api(`/api/approvals/matrix/${b.dataset.del}`, { method: "DELETE" }); reload(); }
+        catch (e) { toast(e.message, "error"); }
+      }));
+      document.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => {
+        const row = (window._matrixRows || []).find(x => String(x.id) === b.dataset.edit);
+        openMatrixBuilder(row, reload);
       }));
     } catch (e) { toast(e.message, "error"); }
   };
-  document.getElementById("btn-add-matrix").addEventListener("click", () => {
-    const m = openModal("Thêm approval matrix", `
-      <div class="form-grid">
-        <label>Tên<input id="m-name" value="Default"/></label>
-        <label>Min amount<input id="m-min" type="number" value="0"/></label>
-        <label>Max amount (để trống = ∞)<input id="m-max" type="number"/></label>
-        <label style="grid-column:1/-1">Levels (JSON)<textarea id="m-lvl" rows="4">[{"level":1,"roles":["manager","admin"],"any":1}]</textarea></label>
-      </div>`);
-    m.onSave(async () => {
-      try {
-        await api("/api/approvals/matrix", { method: "POST", body: JSON.stringify({
-          name: m.find("#m-name").value || "Default",
-          minAmount: Number(m.find("#m-min").value) || 0,
-          maxAmount: m.find("#m-max").value ? Number(m.find("#m-max").value) : null,
-          levels: JSON.parse(m.find("#m-lvl").value),
-        })});
-        toast("Đã lưu", "success"); m.close(); reload();
-      } catch (e) { toast(e.message, "error"); }
-    });
-  });
+  document.getElementById("btn-add-matrix").addEventListener("click", () => openMatrixBuilder(null, reload));
   await reload();
 }
 
@@ -1854,8 +2406,25 @@ function openModal(title, bodyHtml) {
     </div>
   </div>`;
   document.body.appendChild(d);
-  const close = () => { d.remove(); document.removeEventListener("keydown", onKey); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const prevFocus = document.activeElement; // restore focus on close (a11y)
+  const closeHandlers = [];
+  let saved = false;
+  const close = () => {
+    d.remove();
+    document.removeEventListener("keydown", onKey);
+    if (prevFocus && prevFocus.focus) try { prevFocus.focus(); } catch (e) {}
+    closeHandlers.forEach((cb) => cb(saved));
+  };
+  // Focus trap: keep Tab within the dialog.
+  const focusables = () => Array.from(d.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
+  const onKey = (e) => {
+    if (e.key === "Escape") { close(); return; }
+    if (e.key !== "Tab") return;
+    const f = focusables(); if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
   document.addEventListener("keydown", onKey);
   d.querySelector(".modal-x").addEventListener("click", close);
   d.querySelector("[data-cancel]").addEventListener("click", close);
@@ -1863,14 +2432,47 @@ function openModal(title, bodyHtml) {
   setTimeout(() => d.querySelector("input,select,textarea,button")?.focus(), 30);
   return {
     find: (sel) => d.querySelector(sel),
-    close,
+    close: () => { saved = true; close(); }, // programmatic close = a save/confirm
     onSave: (cb) => d.querySelector("[data-save]").addEventListener("click", cb),
+    onClose: (cb) => closeHandlers.push(cb),
   };
+}
+
+/** Styled replacement for window.prompt — returns the entered text, or null if cancelled. */
+function promptModal(title, label, opts = {}) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const m = openModal(title, `<label style="display:block">${escapeHtml(label)}
+      <textarea id="pm-input" rows="3" placeholder="${escapeHtml(opts.placeholder || "")}" style="width:100%;margin-top:6px"></textarea></label>`);
+    m.onSave(() => {
+      const v = (m.find("#pm-input").value || "").trim();
+      if (opts.required && v.length < (opts.min || 1)) { toast(opts.requiredMsg || "Vui lòng nhập nội dung", "error"); return; }
+      resolved = true; resolve(v); m.close();
+    });
+    m.onClose((wasSaved) => { if (!resolved) resolve(wasSaved ? "" : null); });
+  });
+}
+
+/** Styled yes/no confirmation (replaces window.confirm). Returns true if confirmed. */
+function confirmModal(title, message, opts = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const m = openModal(title, `<p style="margin:0;line-height:1.55">${escapeHtml(message)}</p>`);
+    const saveBtn = m.find("[data-save]");
+    if (saveBtn) {
+      saveBtn.textContent = opts.confirmText || "Xác nhận";
+      if (opts.danger) { saveBtn.classList.remove("btn-primary"); saveBtn.classList.add("btn-danger"); }
+    }
+    const cancelBtn = m.find("[data-cancel]");
+    if (cancelBtn) cancelBtn.textContent = opts.cancelText || "Hủy";
+    m.onSave(() => { done = true; resolve(true); m.close(); });
+    m.onClose(() => { if (!done) resolve(false); });
+  });
 }
 
 // ---------------- Permissions (Phân quyền) ----------------
 async function renderPermissions(el) {
-  el.innerHTML = `<h1>🛡️ Phân quyền</h1>
+  el.innerHTML = `<h1>Phân quyền</h1>
     <p class="muted">Vai trò → khả năng (cấu hình cố định, an toàn). Bên dưới: gán vai trò cho từng nhân viên.</p>
     <div id="perm-matrix-wrap">${skeleton(6)}</div>
     <h3 style="margin-top:26px">Gán vai trò nhân viên</h3>

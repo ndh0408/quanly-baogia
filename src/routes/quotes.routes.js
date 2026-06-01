@@ -15,7 +15,7 @@ import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
-import { can, canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, requirePermission, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -32,6 +32,23 @@ function canEdit(quote, session) {
   return false;
 }
 
+/** Load a quote by :id and 403 unless the caller may `action` it. Used by sub-resources. */
+async function loadAuthorizedQuote(req, res, action = "read") {
+  const quote = await prisma.quote.findFirst({
+    where: { id: req.params.id },
+    include: { members: { select: { id: true } } },
+  });
+  if (!quote) {
+    res.status(404).json({ error: "Không tìm thấy báo giá" });
+    return null;
+  }
+  if (!canOnQuote(req.session, action, quote)) {
+    res.status(403).json({ error: "Bạn không có quyền với báo giá này" });
+    return null;
+  }
+  return quote;
+}
+
 const QUOTE_INCLUDE = {
   company: true,
   sheets: {
@@ -43,6 +60,7 @@ const QUOTE_INCLUDE = {
   },
   createdBy: { select: { id: true, username: true, displayName: true } },
   approvedBy: { select: { id: true, username: true, displayName: true } },
+  members: { select: { id: true, username: true, displayName: true } },
 };
 
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
@@ -70,6 +88,17 @@ function presentQuote(q, { includeLogo = false } = {}) {
   return out;
 }
 
+/** True if every sheet's templateId is an active template belonging to companyId. */
+async function templatesBelongToCompany(sheets, companyId) {
+  const ids = [...new Set((sheets || []).map((s) => Number(s.templateId)).filter(Boolean))];
+  if (!ids.length) return true;
+  const found = await prisma.quoteTemplate.findMany({
+    where: { id: { in: ids }, companyId, active: true },
+    select: { id: true },
+  });
+  return found.length === ids.length;
+}
+
 function buildSheetsCreate(sheets) {
   return (sheets || []).map((s, sIdx) => ({
     templateId: Number(s.templateId),
@@ -78,6 +107,7 @@ function buildSheetsCreate(sheets) {
     items: {
       create: (s.items || []).map((it, iIdx) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
+        kind: ["info", "sub"].includes(it.kind) ? it.kind : "item",
         name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
         detail: it.detail ? String(it.detail).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         unit: it.unit?.replace(/[\r\n]+/g, " ").trim() || null,
@@ -96,23 +126,25 @@ router.get(
   validate({ query: ListQuerySchema }),
   asyncHandler(async (req, res) => {
     const { q, status, companyId, from, to, page, size, sort, order } = req.query;
-    const where = {};
-    // Users without "read all" only see quotes they created.
-    if (!can(req.session, P.QUOTE_READ_ALL)) where.createdById = req.session.userId;
-    if (status) where.status = status;
-    if (companyId) where.companyId = companyId;
+    // Visibility scope (admin=all, manager=own, employee=member) combined with
+    // the user's filters via AND so a scope-OR doesn't clash with the search-OR.
+    const filters = [quoteScopeWhere(req.session)];
+    if (status) filters.push({ status });
+    if (companyId) filters.push({ companyId });
     if (from || to) {
-      where.quoteDate = {};
-      if (from) where.quoteDate.gte = from;
-      if (to) where.quoteDate.lte = to;
+      const range = {};
+      if (from) range.gte = from;
+      if (to) range.lte = to;
+      filters.push({ quoteDate: range });
     }
     if (q) {
-      where.OR = [
+      filters.push({ OR: [
         { quoteNumber: { contains: q, mode: "insensitive" } },
         { title: { contains: q, mode: "insensitive" } },
         { toCompany: { contains: q, mode: "insensitive" } },
-      ];
+      ] });
     }
+    const where = { AND: filters };
     const [total, rows] = await Promise.all([
       prisma.quote.count({ where }),
       prisma.quote.findMany({
@@ -139,15 +171,37 @@ router.get(
 // NEXT NUMBER (preview only - real allocation happens at POST time)
 router.get(
   "/next-number",
-  asyncHandler(async (_req, res) => {
+  validate({ query: z.object({ companyId: z.coerce.number().int().positive().optional() }) }),
+  asyncHandler(async (req, res) => {
     // Show what the NEXT number WOULD be without actually consuming it.
+    // Prefix is per-company (GN…, CLF…) so the preview matches the chosen company.
+    let prefix = "GN";
+    if (req.query.companyId) {
+      const company = await prisma.company.findFirst({ where: { id: req.query.companyId } });
+      if (company) prefix = company.quotePrefix || "GN";
+    }
     const year = new Date().getFullYear();
     const c = await prisma.quoteCounter.findUnique({
-      where: { prefix_year: { prefix: "GN", year } },
+      where: { prefix_year: { prefix, year } },
     });
     const yy = String(year).slice(-2);
     const nn = String((c?.value ?? 0) + 1).padStart(3, "0");
-    res.json({ quoteNumber: `GN${yy}${nn}`, note: "Số thực sẽ cấp khi lưu" });
+    res.json({ quoteNumber: `${prefix}${yy}${nn}`, prefix, note: "Số thực sẽ cấp khi lưu" });
+  })
+);
+
+// Active users that can be added as members of a quote.
+// Any authenticated user can read this (it only powers the "add members" picker
+// on quotes they own); it returns names/roles only.
+router.get(
+  "/assignable-users",
+  asyncHandler(async (req, res) => {
+    const users = await prisma.user.findMany({
+      where: { active: true },
+      select: { id: true, displayName: true, username: true, role: true },
+      orderBy: { displayName: "asc" },
+    });
+    res.json({ data: users });
   })
 );
 
@@ -174,11 +228,26 @@ router.post(
     const b = req.body;
     const company = await prisma.company.findFirst({ where: { id: b.companyId } });
     if (!company) return res.status(400).json({ error: "Không tìm thấy công ty" });
+    if (!(await templatesBelongToCompany(b.sheets, company.id))) {
+      return res.status(400).json({ error: "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)" });
+    }
 
-    // Auto-allocate quote number atomically if client didn't supply one
+    // An employee must assign a manager to oversee the quote (so a manager is in the loop).
+    const memberConnect = [{ id: req.session.userId }];
+    if (req.session.role === "employee") {
+      if (!b.managerId) return res.status(400).json({ error: "Nhân viên phải chọn 1 quản lý phụ trách báo giá" });
+      const mgr = await prisma.user.findFirst({ where: { id: b.managerId, active: true } });
+      if (!mgr || !["manager", "admin"].includes(mgr.role)) {
+        return res.status(400).json({ error: "Quản lý phụ trách không hợp lệ" });
+      }
+      memberConnect.push({ id: mgr.id });
+    }
+
+    // Auto-allocate quote number atomically if client didn't supply one.
+    // Each issuing company has its own prefix + sequence (GN…, CLF…).
     let quoteNumber = b.quoteNumber;
     if (!quoteNumber) {
-      quoteNumber = await nextQuoteNumber("GN");
+      quoteNumber = await nextQuoteNumber(company.quotePrefix || "GN");
     } else {
       // includeDeleted: the unique constraint on quoteNumber covers soft-deleted rows too,
       // so we must check across ALL rows — otherwise a number belonging to a soft-deleted
@@ -196,6 +265,7 @@ router.post(
       title: b.title,
       toCompany: b.toCompany,
       toContact: b.toContact || null,
+      toEmail: b.toEmail || null,
       companyId: company.id,
       fromContact: b.fromContact || "",
       fromPhone: b.fromPhone || company.phone || null,
@@ -203,8 +273,12 @@ router.post(
       fromAddress: b.fromAddress || company.address,
       city: b.city || company.city || "TP. Hồ Chí Minh",
       quoteDate: b.quoteDate || new Date(),
+      validUntil: b.validUntil || null,
+      customerId: b.customerId ?? null,
       greeting: b.greeting || undefined,
       vatPercent: D(b.vatPercent),
+      discount: D(b.discount || 0),
+      showTotals: b.showTotals !== false,
       notes: b.notes || null,
       customerLogo: b.customerLogo || null,
       status: "draft",
@@ -212,15 +286,17 @@ router.post(
     };
 
     // Compute totals from sheets+items BEFORE writing so we store snapshot
-    const synthetic = { vatPercent: draft.vatPercent, sheets: b.sheets };
+    const synthetic = { vatPercent: draft.vatPercent, discount: draft.discount, sheets: b.sheets };
     const t = computeQuoteTotals(synthetic);
     draft.subtotal = t.subtotal;
     draft.vat = t.vat;
+    draft.discount = t.discount;
     draft.total = t.total;
 
     const quote = await prisma.$transaction(async (tx) => {
       const created = await tx.quote.create({
-        data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) } },
+        // Creator (+ overseeing manager for employee-created quotes) are members.
+        data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: memberConnect } },
         include: QUOTE_INCLUDE,
       });
       await snapshotQuoteVersion(tx, created.id, req.session.userId, "create");
@@ -251,6 +327,12 @@ router.put(
     }
 
     const b = req.body;
+    if (Array.isArray(b.sheets)) {
+      const targetCompany = b.companyId ?? existing.companyId;
+      if (!(await templatesBelongToCompany(b.sheets, targetCompany))) {
+        return res.status(400).json({ error: "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)" });
+      }
+    }
     const data = {};
     // Required (non-null) columns: keep the value as-is; never coerce to null.
     for (const f of ["title", "toCompany", "fromContact", "fromAddress", "city", "greeting"]) {
@@ -261,7 +343,10 @@ router.put(
       if (b[f] !== undefined) data[f] = b[f] || null;
     }
     if (b.quoteDate) data.quoteDate = b.quoteDate;
+    if (b.validUntil !== undefined) data.validUntil = b.validUntil || null;
+    if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
+    if (b.showTotals !== undefined) data.showTotals = b.showTotals;
     if (b.companyId !== undefined) data.companyId = b.companyId;
     if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
     if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
@@ -276,12 +361,25 @@ router.put(
 
     // Sheets full replace + recompute snapshot totals + bump version
     data.currentVersion = (existing.currentVersion ?? 1) + 1;
+
+    // If a price-affecting change is made to a quote that was already in the
+    // approval pipeline (pending/approved/sent), the prior approval no longer
+    // reflects the content — send it back to draft and clear the approval.
+    const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined || data.discount !== undefined;
+    const wasLocked = ["pending", "approved", "sent"].includes(existing.status);
+    const reopened = wasLocked && priceAffecting;
+    if (reopened) {
+      data.status = "draft";
+      data.approvedById = null;
+    }
+
     let updated;
     if (Array.isArray(b.sheets)) {
       const vatPct = data.vatPercent ?? existing.vatPercent;
-      const t = computeQuoteTotals({ vatPercent: vatPct, sheets: b.sheets });
+      const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
       data.subtotal = t.subtotal;
       data.vat = t.vat;
+      data.discount = t.discount;
       data.total = t.total;
       updated = await prisma.$transaction(async (tx) => {
         await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
@@ -294,10 +392,12 @@ router.put(
         return u;
       });
     } else {
-      if (data.vatPercent !== undefined) {
-        const t = computeQuoteTotals({ vatPercent: data.vatPercent, sheets: existing.sheets });
+      // Recompute totals if VAT or discount changed (either shifts the grand total).
+      if (data.vatPercent !== undefined || data.discount !== undefined) {
+        const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, discount: data.discount ?? existing.discount, sheets: existing.sheets });
         data.subtotal = t.subtotal;
         data.vat = t.vat;
+        data.discount = t.discount;
         data.total = t.total;
       }
       updated = await prisma.$transaction(async (tx) => {
@@ -311,8 +411,19 @@ router.put(
       resource: "quote",
       resourceId: id,
       before: { total: Number(existing.total), status: existing.status },
-      after: { total: Number(updated.total), status: updated.status },
+      after: { total: Number(updated.total), status: updated.status, reopened },
     });
+    if (reopened) {
+      await audit(req, "quote.reopened", { resource: "quote", resourceId: id });
+      await notify(existing.createdById, {
+        title: `Báo giá ${updated.quoteNumber} cần duyệt lại`,
+        body: "Báo giá đã được chỉnh sửa nên quay về trạng thái Nháp, cần trình duyệt lại.",
+        link: `/#/quotes/${id}`,
+        resource: "quote",
+        resourceId: id,
+        important: true,
+      }).catch(() => {});
+    }
 
     res.json(presentQuote(updated, { includeLogo: true }));
   })
@@ -324,7 +435,7 @@ router.post(
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id } });
+    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
     if (!can(req.session, P.QUOTE_SUBMIT) || !canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền" });
@@ -381,6 +492,13 @@ router.post(
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
 
+    // Segregation of duties: the creator may not approve their own quote.
+    // (Admins are allowed as a last-resort override, but it is flagged in the audit trail.)
+    const isCreator = existing.createdById === req.session.userId;
+    if (isCreator && req.session.role !== "admin") {
+      return res.status(403).json({ error: "Người tạo không được tự duyệt báo giá của mình" });
+    }
+
     const pending = await nextPendingLevel(id, existing.currentVersion);
     if (!pending) return res.status(400).json({ error: "Không có level chờ duyệt" });
     if (await hasEarlierPending(id, existing.currentVersion, pending.level)) {
@@ -403,15 +521,15 @@ router.post(
     });
 
     await notify(existing.createdById, {
-      title: `Báo giá ${quote.quoteNumber} ${complete ? "đã được duyệt" : `level ${pending.level} đã duyệt`}`,
-      body: complete ? "Có thể gửi cho khách." : "Đang chờ level tiếp theo.",
+      title: `Báo giá ${quote.quoteNumber} đã được duyệt`,
+      body: "Có thể gửi cho khách.",
       link: `/#/quotes/${id}`,
       resource: "quote",
       resourceId: id,
-      important: complete,
+      important: true,
     });
 
-    await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { level: pending.level, complete } });
+    await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { complete, selfApproved: isCreator } });
     if (complete) emitWebhook("quote.approved", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
@@ -420,7 +538,7 @@ router.post(
 router.post(
   "/:id/reject",
   requirePermission(P.QUOTE_REJECT),
-  validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
+  validate({ params: idParam, body: z.object({ comment: z.string().min(5, "Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)").max(2000) }) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
@@ -458,11 +576,15 @@ router.post(
 // SEND quote to customer (after approval)
 router.post(
   "/:id/send",
+  requirePermission(P.QUOTE_SEND),
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id } });
+    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!canOnQuote(req.session, "read", existing)) {
+      return res.status(403).json({ error: "Bạn không có quyền gửi báo giá này" });
+    }
     if (existing.status !== "approved" && existing.status !== "sent") {
       return res.status(400).json({ error: "Chỉ gửi được sau khi duyệt" });
     }
@@ -482,7 +604,7 @@ router.post(
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id } });
+    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
     // Only the owner (or an all-scope editor) may convert, and only an already
     // approved/sent quote can be marked won.
@@ -503,12 +625,37 @@ router.post(
   })
 );
 
+// MARK LOST — customer declined. Records a reason for win/loss reporting.
+router.post(
+  "/:id/mark-lost",
+  validate({ params: idParam, body: z.object({ reason: z.string().max(2000).optional() }).default({}) }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!canOnQuote(req.session, "update", existing)) {
+      return res.status(403).json({ error: "Không có quyền cập nhật báo giá này" });
+    }
+    if (existing.status === "converted") {
+      return res.status(400).json({ error: "Báo giá đã chốt, không thể đánh dấu thua" });
+    }
+    const quote = await prisma.quote.update({
+      where: { id },
+      data: { status: "lost", notes: req.body.reason ? `[Lý do không chốt] ${req.body.reason}\n${existing.notes || ""}`.slice(0, 4000) : existing.notes },
+      include: QUOTE_INCLUDE,
+    });
+    await audit(req, "quote.lost", { resource: "quote", resourceId: id, after: { reason: req.body.reason || null } });
+    res.json(presentQuote(quote));
+  })
+);
+
 // VERSIONS
 router.get(
   "/:id/versions",
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    if (!(await loadAuthorizedQuote(req, res, "read"))) return;
     const versions = await prisma.quoteVersion.findMany({
       where: { quoteId: id },
       orderBy: { versionNo: "desc" },
@@ -524,6 +671,7 @@ router.get(
   "/:id/versions/:v",
   validate({ params: z.object({ id: z.coerce.number().int().positive(), v: z.coerce.number().int().min(0) }) }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedQuote(req, res, "read"))) return;
     const ver = await prisma.quoteVersion.findUnique({
       where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.v } },
     });
@@ -540,6 +688,7 @@ router.get(
     b: z.coerce.number().int().min(0),
   }) }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedQuote(req, res, "read"))) return;
     const [va, vb] = await Promise.all([
       prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.a } } }),
       prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.b } } }),
@@ -554,12 +703,40 @@ router.get(
   "/:id/approvals",
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
+    if (!(await loadAuthorizedQuote(req, res, "read"))) return;
     const rows = await prisma.approval.findMany({
       where: { quoteId: req.params.id },
       orderBy: [{ versionNo: "asc" }, { level: "asc" }],
       include: { approver: { select: { id: true, username: true, displayName: true } } },
     });
     res.json({ data: rows });
+  })
+);
+
+// MEMBERS — add/remove the employees who may view & edit this quote.
+// Only the creator (or an admin) may manage the member list.
+router.put(
+  "/:id/members",
+  validate({ params: idParam, body: z.object({ memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]) }) }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const quote = await prisma.quote.findFirst({ where: { id } });
+    if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
+    if (quote.createdById !== req.session.userId && !can(req.session, P.QUOTE_UPDATE_ALL)) {
+      return res.status(403).json({ error: "Chỉ người tạo hoặc Giám đốc mới quản lý được thành viên" });
+    }
+    // The creator is always kept as a member.
+    const ids = [...new Set([quote.createdById, ...req.body.memberIds])];
+    await prisma.quote.update({
+      where: { id },
+      data: { members: { set: ids.map((uid) => ({ id: uid })) } },
+    });
+    await audit(req, "quote.members.update", { resource: "quote", resourceId: id, after: { members: ids } });
+    const updated = await prisma.quote.findFirst({
+      where: { id },
+      include: { members: { select: { id: true, username: true, displayName: true, role: true } } },
+    });
+    res.json({ members: updated.members });
   })
 );
 
@@ -595,9 +772,16 @@ router.post(
     const { id } = req.params;
     const src = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
     if (!src) return res.status(404).json({ error: "Không tìm thấy" });
+    // Must be allowed to read the source AND to create quotes.
+    if (!canOnQuote(req.session, "read", src)) {
+      return res.status(403).json({ error: "Bạn không có quyền sao chép báo giá này" });
+    }
+    if (!can(req.session, P.QUOTE_CREATE)) {
+      return res.status(403).json({ error: "Không có quyền tạo báo giá" });
+    }
 
-    const newNumber = await nextQuoteNumber("GN");
-    const synthetic = { vatPercent: src.vatPercent, sheets: src.sheets };
+    const newNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN");
+    const synthetic = { vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets };
     const t = computeQuoteTotals(synthetic);
 
     const created = await prisma.quote.create({
@@ -615,12 +799,16 @@ router.post(
         quoteDate: new Date(),
         greeting: src.greeting,
         vatPercent: src.vatPercent,
+        discount: src.discount,
+        toEmail: src.toEmail,
         notes: src.notes,
         status: "draft",
         subtotal: t.subtotal,
         vat: t.vat,
+        discount: t.discount,
         total: t.total,
         createdById: req.session.userId,
+        members: { connect: [{ id: req.session.userId }] },
         sheets: {
           create: src.sheets.map((s, sIdx) => ({
             templateId: s.templateId,
@@ -629,6 +817,7 @@ router.post(
             items: {
               create: s.items.map((it, iIdx) => ({
                 order: it.order != null ? it.order : iIdx + 1,
+                kind: it.kind || "item",
                 name: it.name,
                 detail: it.detail,
                 unit: it.unit,

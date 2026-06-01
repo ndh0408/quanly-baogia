@@ -29,6 +29,20 @@ export const ChangePasswordSchema = z.object({
   newPassword: pwd,
 });
 
+// Admin invites an employee by email; they self-onboard.
+export const UserInviteSchema = z.object({
+  email: z.string().email("Email không hợp lệ").max(160),
+  displayName,
+  role: z.enum(["admin", "manager", "employee"]).default("employee"),
+});
+
+export const AcceptInviteSchema = z.object({
+  token: z.string().min(10).max(200),
+  displayName: displayName.optional(),
+  phone,
+  password: pwd,
+});
+
 export const UserCreateSchema = z.object({
   username,
   password: pwd,
@@ -49,11 +63,13 @@ export const UserUpdateSchema = z.object({
 
 const itemSchema = z.object({
   order: z.coerce.number().int().optional(),
+  kind: z.enum(["item", "info", "sub"]).default("item"),
   name: z.string().max(2000).default(""),
   detail: z.string().max(2000).optional().nullable(),
   unit: z.string().max(40).optional().nullable(),
-  quantity: z.coerce.number().nonnegative().default(0),
-  unitPrice: z.coerce.number().nonnegative().default(0),
+  // Allow negatives so a row can act as a discount line (vd "Giảm giá" với đơn giá âm).
+  quantity: z.coerce.number().gte(-1e12).lte(1e12).default(0),
+  unitPrice: z.coerce.number().gte(-1e12).lte(1e12).default(0),
   days: z.coerce.number().nonnegative().optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
 });
@@ -71,15 +87,23 @@ export const QuoteCreateSchema = z.object({
   title: z.string().min(1, "Thiếu tiêu đề").max(500),
   toCompany: z.string().min(1, "Thiếu khách hàng").max(500),
   toContact: z.string().max(200).optional().nullable(),
+  toEmail: z.string().max(200).optional().nullable(),
   companyId: z.coerce.number().int().positive(),
   fromContact: z.string().max(200).optional().default(""),
   fromPhone: z.string().max(40).optional().nullable(),
   fromTitle: z.string().max(120).optional().nullable(),
   fromAddress: z.string().max(500).optional(),
   city: z.string().max(120).optional(),
-  quoteDate: z.coerce.date().optional(),
+  quoteDate: z.coerce.date()
+    .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
+    .optional(),
+  validUntil: z.coerce.date().optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
+  managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).default(8),
+  discount: z.coerce.number().min(0).max(1e12).optional(),
+  showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
   // base64 data URL of the customer logo (~3MB cap to bound payload size)
   customerLogo: z.string().max(3_500_000)
@@ -99,15 +123,22 @@ export const QuoteUpdateSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   toCompany: z.string().min(1).max(500).optional(),
   toContact: z.string().max(200).optional().nullable(),
+  toEmail: z.string().max(200).optional().nullable(),
   companyId: z.coerce.number().int().positive().optional(),
   fromContact: z.string().max(200).optional(),
   fromPhone: z.string().max(40).optional().nullable(),
   fromTitle: z.string().max(120).optional().nullable(),
   fromAddress: z.string().max(500).optional(),
   city: z.string().max(120).optional(),
-  quoteDate: z.coerce.date().optional(),
+  quoteDate: z.coerce.date()
+    .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
+    .optional(),
+  validUntil: z.coerce.date().optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),
+  discount: z.coerce.number().min(0).max(1e12).optional(),
+  showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: z.string().max(3_500_000)
     .refine((s) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s), "Logo phải là ảnh PNG/JPG/GIF/WEBP")

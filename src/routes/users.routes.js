@@ -1,11 +1,13 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { randomBytes, createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler, requireRole } from "../middleware.js";
-import { validate, UserCreateSchema, UserUpdateSchema } from "../validators.js";
+import { validate, UserCreateSchema, UserUpdateSchema, UserInviteSchema } from "../validators.js";
 import { audit, diff } from "../audit.js";
+import { sendEmail } from "../email.js";
 
 const router = Router();
 router.use(requireRole("admin"));
@@ -14,20 +16,85 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 const USER_SELECT = {
   id: true,
   username: true,
+  email: true,
   displayName: true,
   role: true,
   phone: true,
-  title: true,
   active: true,
   lastLoginAt: true,
   createdAt: true,
 };
 
+const hashInvite = (t) => createHash("sha256").update(String(t)).digest("hex");
+const escHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function inviteLink(req, token) {
+  const base = req.headers.origin || `${req.protocol}://${req.get("host")}`;
+  return `${base}/#/onboard?token=${token}`;
+}
+async function sendInviteEmail(to, displayName, url) {
+  return sendEmail({
+    to,
+    subject: "Lời mời tham gia hệ thống Báo Giá – Gia Nguyễn",
+    text: `Chào ${displayName}, bạn được mời tham gia hệ thống Quản lý Báo Giá. Mở liên kết để đặt mật khẩu và hoàn tất thông tin (hết hạn sau 7 ngày): ${url}`,
+    html: `<p>Chào ${escHtml(displayName)},</p><p>Bạn được mời tham gia hệ thống <b>Quản lý Báo Giá – Gia Nguyễn</b>. Nhấn liên kết bên dưới để đặt mật khẩu và hoàn tất thông tin của bạn:</p><p><a href="${escHtml(url)}">${escHtml(url)}</a></p><p>Liên kết hết hạn sau 7 ngày.</p>`,
+  });
+}
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: USER_SELECT });
-    res.json(users);
+    const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: { ...USER_SELECT, inviteTokenHash: true } });
+    res.json(users.map(({ inviteTokenHash, ...u }) => ({ ...u, pending: !u.active && !!inviteTokenHash })));
+  })
+);
+
+// Invite an employee by email — they self-onboard (set password + fill details).
+router.post(
+  "/invite",
+  validate({ body: UserInviteSchema }),
+  asyncHandler(async (req, res) => {
+    const { email, displayName, role } = req.body;
+    const exists = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
+    if (exists) return res.status(409).json({ error: "Email này đã có tài khoản" });
+    const token = randomBytes(24).toString("hex");
+    const user = await prisma.user.create({
+      data: {
+        username: email,
+        email,
+        displayName,
+        role,
+        active: false,
+        passwordHash: await bcrypt.hash(randomBytes(18).toString("hex"), config.BCRYPT_COST), // unusable until accept
+        inviteTokenHash: hashInvite(token),
+        inviteExpiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+      },
+      select: { id: true, email: true, displayName: true, role: true },
+    });
+    const url = inviteLink(req, token);
+    const mail = await sendInviteEmail(email, displayName, url);
+    await audit(req, "user.invite", { resource: "user", resourceId: user.id, after: { email, role } });
+    res.status(201).json({ user, inviteUrl: url, emailSent: !mail.skipped && !mail.error });
+  })
+);
+
+// Re-send an invite (new token) for a still-pending user.
+router.post(
+  "/:id/resend-invite",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const u = await prisma.user.findFirst({ where: { id: req.params.id } });
+    if (!u) return res.status(404).json({ error: "Không tìm thấy" });
+    if (u.active) return res.status(400).json({ error: "Tài khoản đã kích hoạt" });
+    if (!u.email) return res.status(400).json({ error: "Tài khoản không có email" });
+    const token = randomBytes(24).toString("hex");
+    await prisma.user.update({
+      where: { id: u.id },
+      data: { inviteTokenHash: hashInvite(token), inviteExpiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+    });
+    const url = inviteLink(req, token);
+    const mail = await sendInviteEmail(u.email, u.displayName, url);
+    await audit(req, "user.invite.resend", { resource: "user", resourceId: u.id });
+    res.json({ inviteUrl: url, emailSent: !mail.skipped && !mail.error });
   })
 );
 

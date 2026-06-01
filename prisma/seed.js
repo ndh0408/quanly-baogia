@@ -59,11 +59,12 @@ async function main() {
       code: "gia_nguyen",
       name: "Công ty Gia Nguyễn",
       shortName: "Gia Nguyễn",
+      quotePrefix: "GN",
       address: "34 Đào Trí, P.Phú Thuận, Q.7 TP.HCM",
       city: "TP. Hồ Chí Minh",
       phone: "0914291951",
     },
-    update: {},
+    update: { quotePrefix: "GN" },
   });
   console.log(`✓ Công ty: ${giaNguyen.name}`);
 
@@ -103,12 +104,13 @@ async function main() {
     create: {
       code: "clofull",
       name: "Công ty TNHH Colorfull",
-      shortName: "Clofull",
+      shortName: "Colorfull",
+      quotePrefix: "CLF",
       address: "34 Đào Trí, P.Phú Thuận, Q.7 TP.HCM",
       city: "TP. Hồ Chí Minh",
       phone: "0914291951",
     },
-    update: {},
+    update: { quotePrefix: "CLF", shortName: "Colorfull" },
   });
   console.log(`✓ Công ty: ${clofull.name}`);
 

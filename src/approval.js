@@ -28,44 +28,22 @@ export async function findMatrixForAmount(total) {
   return null;
 }
 
-/** Initialize the approval chain for a quote based on its current total. */
+/**
+ * Initialize the approval for a quote.
+ *
+ * Workflow is intentionally simple: ONE step, the Director (admin) approves or
+ * rejects. No tiers/levels, no amount matrix.
+ */
 export async function startApprovalChain(quoteId, versionNo) {
-  const quote = await prisma.quote.findFirst({ where: { id: quoteId } });
-  if (!quote) throw new Error("Quote not found");
-  const matrix = await findMatrixForAmount(quote.total);
-
-  // Reset any prior approvals for this version
   await prisma.approval.deleteMany({ where: { quoteId, versionNo } });
-
-  const levels = matrix?.levels ?? defaultLevels();
-  if (!Array.isArray(levels) || levels.length === 0) {
-    // No matrix → single manager approval default
-    await prisma.approval.create({
-      data: { quoteId, versionNo, level: 1, decision: "pending" },
-    });
-    return;
-  }
-  for (const lvl of levels) {
-    await prisma.approval.create({
-      data: { quoteId, versionNo, level: Number(lvl.level), decision: "pending" },
-    });
-  }
+  await prisma.approval.create({
+    data: { quoteId, versionNo, level: 1, decision: "pending" },
+  });
 }
 
-function defaultLevels() {
-  return [{ level: 1, roles: ["manager", "admin"], any: 1 }];
-}
-
-/** True if the given user can act on this level (based on matrix roles config). */
-export async function canApproveLevel(quoteId, versionNo, level, userRole) {
-  const quote = await prisma.quote.findFirst({ where: { id: quoteId } });
-  if (!quote) return false;
-  const matrix = await findMatrixForAmount(quote.total);
-  const levels = matrix?.levels ?? defaultLevels();
-  const lvl = levels.find((l) => Number(l.level) === Number(level));
-  if (!lvl) return userRole === "admin"; // fallback
-  const roles = Array.isArray(lvl.roles) ? lvl.roles : ["manager", "admin"];
-  return roles.includes(userRole);
+/** Only the Director (admin) may approve. */
+export async function canApproveLevel(_quoteId, _versionNo, _level, userRole) {
+  return userRole === "admin";
 }
 
 /** Find the next pending level for this version. Returns Approval row or null. */

@@ -20,6 +20,15 @@ export const PERMISSIONS = {
   QUOTE_REJECT:       "quote:reject",
   QUOTE_SEND:         "quote:send",
   QUOTE_EXPORT:       "quote:export",
+  // Customers (CRM)
+  CUSTOMER_READ_OWN:   "customer:read:own",
+  CUSTOMER_READ_ALL:   "customer:read:all",
+  CUSTOMER_MANAGE_OWN: "customer:manage:own",
+  CUSTOMER_MANAGE_ALL: "customer:manage:all",
+  // Products / price book
+  PRODUCT_READ:        "product:read",
+  PRODUCT_READ_COST:   "product:read:cost", // see costPrice / margin
+  PRODUCT_MANAGE:      "product:manage",
   // Admin / management
   USER_MANAGE:        "user:manage",
   ROLE_ASSIGN:        "role:assign",
@@ -46,6 +55,13 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_REJECT]:     "Từ chối báo giá",
   [P.QUOTE_SEND]:       "Gửi cho khách",
   [P.QUOTE_EXPORT]:     "Xuất Excel/PDF",
+  [P.CUSTOMER_READ_OWN]:   "Xem KH của mình",
+  [P.CUSTOMER_READ_ALL]:   "Xem mọi khách hàng",
+  [P.CUSTOMER_MANAGE_OWN]: "Quản lý KH của mình",
+  [P.CUSTOMER_MANAGE_ALL]: "Quản lý mọi khách hàng",
+  [P.PRODUCT_READ]:        "Xem sản phẩm",
+  [P.PRODUCT_READ_COST]:   "Xem giá vốn / biên LN",
+  [P.PRODUCT_MANAGE]:      "Quản lý sản phẩm",
   [P.USER_MANAGE]:      "Quản lý nhân viên",
   [P.ROLE_ASSIGN]:      "Phân vai trò",
   [P.TEMPLATE_MANAGE]:  "Quản lý mẫu",
@@ -62,6 +78,12 @@ export const PERMISSION_GROUPS = [
     P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL, P.QUOTE_SUBMIT, P.QUOTE_APPROVE, P.QUOTE_REJECT,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
   ] },
+  { key: "customer", label: "Khách hàng", perms: [
+    P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.CUSTOMER_MANAGE_ALL,
+  ] },
+  { key: "product", label: "Sản phẩm", perms: [
+    P.PRODUCT_READ, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
+  ] },
   { key: "admin", label: "Quản trị", perms: [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
     P.AUDIT_VIEW, P.SETTINGS_MANAGE, P.APPROVAL_MATRIX,
@@ -71,18 +93,24 @@ export const PERMISSION_GROUPS = [
 const EMPLOYEE = [
   P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_UPDATE_OWN, P.QUOTE_DELETE_OWN,
   P.QUOTE_SUBMIT, P.QUOTE_EXPORT,
+  // CRM: a salesperson sees & manages their own customers; product catalog is read-only (selling price, no cost).
+  P.CUSTOMER_READ_OWN, P.CUSTOMER_MANAGE_OWN, P.PRODUCT_READ,
 ];
 
 const MANAGER = [
   ...EMPLOYEE,
-  P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL,
-  P.QUOTE_APPROVE, P.QUOTE_REJECT, P.QUOTE_SEND,
+  // Manager sees/edits only the quotes THEY created (not everyone's).
+  P.QUOTE_SEND,
   P.AUDIT_VIEW,
+  // Manager sees all customers and the cost/margin, and owns the product catalog.
+  P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
 ];
 
 const ADMIN = [
   ...MANAGER,
-  P.QUOTE_DELETE_ALL,
+  // Director sees & edits & deletes ALL quotes, and is the only approver.
+  P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
+  P.QUOTE_APPROVE, P.QUOTE_REJECT,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE, P.APPROVAL_MATRIX,
 ];
@@ -120,11 +148,43 @@ export function can(session, permission) {
  * Resource-scoped check. For an action like "quote:update", returns true if the
  * role has ":all", OR has ":own" and owns the resource (createdById === userId).
  */
+// Actions a non-admin gets on a quote merely by being a MEMBER (added to it).
+// (Membership grants view + edit + submit, but NOT delete.)
+const QUOTE_MEMBER_ACTIONS = new Set(["read", "update", "submit"]);
+
 export function canOnQuote(session, action, quote) {
   const role = session?.role;
-  if (roleCan(role, `quote:${action}:all`)) return true;
+  if (roleCan(role, `quote:${action}:all`)) return true; // admin
   if (roleCan(role, `quote:${action}:own`)) {
-    return quote && quote.createdById === session.userId;
+    if (!quote) return false;
+    if (quote.createdById === session.userId) return true;
+    // Managers AND employees also reach quotes they were added to as members.
+    if (QUOTE_MEMBER_ACTIONS.has(action) && Array.isArray(quote.members)) {
+      return quote.members.some((m) => (m.id ?? m) === session.userId);
+    }
+  }
+  return false;
+}
+
+/**
+ * Prisma `where` fragment limiting quotes to what the caller may SEE:
+ *   admin             → all
+ *   manager/employee  → quotes they created OR were added to as a member
+ */
+export function quoteScopeWhere(session) {
+  if (roleCan(session?.role, "quote:read:all")) return {}; // admin (director)
+  return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
+}
+
+/**
+ * Generic resource-scoped check (e.g. customers). Returns true if the role has
+ * `<resource>:<action>:all`, OR has `:own` and owns the row via `ownerField`.
+ */
+export function canScoped(session, resource, action, row, ownerField = "ownerId") {
+  const role = session?.role;
+  if (roleCan(role, `${resource}:${action}:all`)) return true;
+  if (roleCan(role, `${resource}:${action}:own`)) {
+    return row && row[ownerField] != null && row[ownerField] === session?.userId;
   }
   return false;
 }

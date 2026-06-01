@@ -93,20 +93,38 @@ export const TEMPLATE_CONFIGS = {
       // unmerge so every item row fills independently. Borders/font are then
       // restored uniformly via items.styleRow below.
       unmergeRanges: ["B7", "C7", "B10", "C10"],
-      // NOTE: keep the coloured guide notes in column J (J5 "hàng này có hoặc ko
-      // tùy chương trình", J8 "tạo được những hàng con...") — the user wants them.
+      // J5/J8 were coloured guide notes left for the developer ("hàng này có hoặc ko
+      // tùy chương trình", "tạo được những hàng con…"). They are NOT part of a real
+      // quote — strip them so they never print. The program-info line is now an
+      // optional editor row (kind:"info") the user can add/remove per quote.
+      extraCellsToClear: ["J5", "J8"],
       keepImagesAboveRow: 3,
     },
     cells: {
       title:       "B2",
       titleFormat: baoGiaTitle,
       toBlockCell: "F3",
-      toBlockFormat: ({ company, contact }) =>
-        `Kính gửi: ${company || "….."}${contact ? "  -  " + contact : ""}`,
+      // 3-line recipient block matching the template (Cty / người liên hệ / Email).
+      // Only lines with data are emitted, so it never prints empty "…" placeholders.
+      toBlockFormat: ({ company, contact, email }) => {
+        const lines = [`Kính gửi: ${company || "….."}`];
+        if (contact) lines.push(contact);
+        if (email) lines.push(`Email: ${email}`);
+        return lines.join("\n");
+      },
+      // "TP.HCM , ngày …" footer date — written from the quote's date (was a
+      // hard-coded 05/07/2018 in the template, never updated before).
+      date:        "G17",
+      // "* Thông tin chương trình" banner (B5:I5). Filled from the quote's optional
+      // info row(s); cleared when there are none so the "….." placeholder never prints.
+      infoBannerCell: "B5",
       // Customer logo replaces the "logo cty khách hàng" placeholder at C3.
       customerLogoCell: "C3",
       customerLogoExt: { width: 190, height: 80 },
     },
+    // Footer "* Ghi chú" is a C:D merged cell that rides the item splice/duplicate;
+    // re-merge it afterwards so the text doesn't duplicate across both columns.
+    footerMerges: ["C17:D17"],
     items: {
       firstRow: 6,
       lastRow:  12,
@@ -138,12 +156,20 @@ export const TEMPLATE_CONFIGS = {
         rowOffset: 2,
         formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
       },
+      // Optional "Giảm Giá" row, inserted between VAT and Thành Tiền only when the
+      // quote has a discount. Total then subtracts it.
+      discount: {
+        labelCells: [["B", "G"]],
+        labelText: () => "Giảm Giá",
+        valueCell: "H",
+      },
       total: {
         labelCells: [["B", "G"]],
         labelText: () => "Thành Tiền",
         valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow }) => `H${subtotalRow}+H${vatRow}`,
+        formula: ({ subtotalRow, vatRow, discountRow }) =>
+          discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
   },
@@ -229,12 +255,18 @@ export const TEMPLATE_CONFIGS = {
         rowOffset: 2,
         formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
       },
+      discount: {
+        labelCells: [["B", "G"]],
+        labelText: () => "Giảm Giá",
+        valueCell: "H",
+      },
       total: {
         labelCells: [["B", "G"]],
         labelText: () => "Thành tiền",
         valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow }) => `H${subtotalRow}+H${vatRow}`,
+        formula: ({ subtotalRow, vatRow, discountRow }) =>
+          discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
   },

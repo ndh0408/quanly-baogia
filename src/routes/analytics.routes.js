@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
+import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -27,7 +28,7 @@ router.get(
   validate({ query: PeriodQuery }),
   asyncHandler(async (req, res) => {
     const { from, to } = defaultRange(req.query);
-    const scope = req.session.role === "employee" ? { createdById: req.session.userId } : {};
+    const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
 
     const where = { createdAt: { gte: from, lte: to }, ...scope };
 
@@ -80,8 +81,10 @@ router.get(
   validate({ query: PeriodQuery }),
   asyncHandler(async (req, res) => {
     const { from, to } = defaultRange(req.query);
-    const scope = req.session.role === "employee" ? "AND \"createdById\" = $3" : "";
-    const params = req.session.role === "employee" ? [from, to, req.session.userId] : [from, to];
+    // admin sees all; manager/employee scoped to their own created quotes for this chart.
+    const allScope = can(req.session, P.QUOTE_READ_ALL);
+    const scope = allScope ? "" : 'AND "createdById" = $3';
+    const params = allScope ? [from, to] : [from, to, req.session.userId];
 
     const rows = await prisma.$queryRawUnsafe(
       `SELECT DATE("createdAt") AS d, COALESCE(SUM("total"), 0)::float AS amount, COUNT(*)::int AS n
@@ -103,9 +106,11 @@ router.get(
   validate({ query: PeriodQuery.extend({ limit: z.coerce.number().int().min(1).max(50).default(10) }) }),
   asyncHandler(async (req, res) => {
     const { from, to, limit } = { ...defaultRange(req.query), limit: req.query.limit };
+    // Only admin sees the company-wide leaderboard; others see just their own row.
+    const taScope = can(req.session, P.QUOTE_READ_ALL) ? {} : { createdById: req.session.userId };
     const rows = await prisma.quote.groupBy({
       by: ["createdById"],
-      where: { createdAt: { gte: from, lte: to }, status: { in: ["approved", "sent", "converted"] } },
+      where: { ...taScope, createdAt: { gte: from, lte: to }, status: { in: ["approved", "sent", "converted"] } },
       _sum: { total: true },
       _count: { _all: true },
       orderBy: { _sum: { total: "desc" } },
@@ -132,13 +137,13 @@ router.get(
 router.get(
   "/funnel",
   asyncHandler(async (req, res) => {
-    const scope = req.session.role === "employee" ? { createdById: req.session.userId } : {};
+    const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
     const rows = await prisma.quote.groupBy({
       by: ["status"],
       where: scope,
       _count: { _all: true },
     });
-    const order = ["draft", "pending", "approved", "sent", "converted", "rejected", "expired"];
+    const order = ["draft", "pending", "approved", "sent", "converted", "rejected", "expired", "lost"];
     const map = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
     res.json({ data: order.map((s) => ({ status: s, count: map[s] || 0 })) });
   })

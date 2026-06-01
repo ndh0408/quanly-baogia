@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
+import { canOnQuote } from "../permissions.js";
 import { validate } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
@@ -21,6 +22,7 @@ router.get(
       where: { id },
       include: {
         company: true,
+        members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
           include: {
@@ -31,7 +33,7 @@ router.get(
       },
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (req.session.role === "employee" && quote.createdById !== req.session.userId) {
+    if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Không có quyền" });
     }
 
@@ -55,6 +57,7 @@ router.get(
       where: { id },
       include: {
         company: true,
+        members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
           include: { template: true, items: { orderBy: { order: "asc" } } },
@@ -62,7 +65,7 @@ router.get(
       },
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (req.session.role === "employee" && quote.createdById !== req.session.userId) {
+    if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Không có quyền" });
     }
 

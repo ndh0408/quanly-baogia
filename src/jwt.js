@@ -22,16 +22,25 @@ function ttlSeconds(s) {
   return { s: n, m: n * 60, h: n * 3600, d: n * 86400 }[m[2]];
 }
 
+const JWT_ISSUER = "quanly";
+const JWT_AUDIENCE = "quanly-api";
+
 export function signAccessToken(user) {
   return jwt.sign(
     { sub: user.id, role: user.role, username: user.username },
     config.JWT_SECRET,
-    { expiresIn: config.JWT_ACCESS_TTL }
+    { expiresIn: config.JWT_ACCESS_TTL, algorithm: "HS256", issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
   );
 }
 
 export function verifyAccessToken(token) {
-  return jwt.verify(token, config.JWT_SECRET);
+  // Pin the algorithm (defence-in-depth against alg-confusion / alg:none) and
+  // bind issuer/audience.
+  return jwt.verify(token, config.JWT_SECRET, {
+    algorithms: ["HS256"],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  });
 }
 
 function hashToken(plain) {

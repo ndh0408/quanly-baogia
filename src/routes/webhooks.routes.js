@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
-import { EVENTS } from "../webhooks.js";
+import { EVENTS, assertPublicHttpUrl } from "../webhooks.js";
 
 const router = Router();
 router.use(requireRole("admin"));
@@ -30,6 +30,7 @@ router.post(
   "/",
   validate({ body: Create }),
   asyncHandler(async (req, res) => {
+    await assertPublicHttpUrl(req.body.url); // reject internal/private targets up front
     const secret = req.body.secret || randomBytes(24).toString("hex");
     const row = await prisma.webhook.create({ data: { ...req.body, secret } });
     await audit(req, "webhook.create", { resource: "webhook", resourceId: row.id });
@@ -41,6 +42,7 @@ router.put(
   "/:id",
   validate({ params: idParam, body: Create.partial() }),
   asyncHandler(async (req, res) => {
+    if (req.body.url) await assertPublicHttpUrl(req.body.url);
     const row = await prisma.webhook.update({ where: { id: req.params.id }, data: req.body });
     await audit(req, "webhook.update", { resource: "webhook", resourceId: row.id });
     res.json(row);

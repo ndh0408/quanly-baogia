@@ -1,6 +1,7 @@
 import { config, isProd } from "./config.js";
 import express from "express";
 import helmet from "helmet";
+import compression from "compression";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import rateLimit from "express-rate-limit";
@@ -57,7 +58,8 @@ app.use(
       directives: {
         "default-src": ["'self'"],
         "script-src": ["'self'", "'unsafe-inline'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
         "img-src": ["'self'", "data:"],
         "connect-src": ["'self'"],
         "object-src": ["'none'"],
@@ -67,6 +69,9 @@ app.use(
     crossOriginEmbedderPolicy: false,
   })
 );
+
+// gzip/deflate text responses (JS/CSS/JSON). ~70-80% smaller over the wire.
+app.use(compression());
 
 app.use(requestId);
 app.use(
@@ -116,8 +121,12 @@ app.use(
 // Prometheus metrics middleware (records all requests).
 app.use(metricsMiddleware);
 
-// Metrics endpoint (no auth — protect at network level via NetworkPolicy/Nginx allowlist).
-app.get("/metrics", async (_req, res) => {
+// Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
+// AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
+app.get("/metrics", async (req, res) => {
+  if (config.METRICS_TOKEN && req.headers.authorization !== `Bearer ${config.METRICS_TOKEN}`) {
+    return res.status(401).end();
+  }
   res.setHeader("Content-Type", registry.contentType);
   res.end(await registry.metrics());
 });
@@ -161,6 +170,23 @@ app.use("/api/billing", billingRoutes);
 
 // Health probes
 import { prisma as healthDb } from "./db.js";
+
+// Periodic sweep: move approved/sent quotes past their validity date to "expired".
+async function expireStaleQuotes() {
+  try {
+    const r = await healthDb.quote.updateMany({
+      where: { deletedAt: null, status: { in: ["approved", "sent"] }, validUntil: { lt: new Date() } },
+      data: { status: "expired", expiredAt: new Date() },
+    });
+    if (r.count) logger.info({ count: r.count }, "expired stale quotes");
+  } catch (e) {
+    logger.error({ err: e.message }, "expire sweep failed");
+  }
+}
+if (config.NODE_ENV !== "test") {
+  setTimeout(expireStaleQuotes, 30_000).unref();              // shortly after boot
+  setInterval(expireStaleQuotes, 6 * 60 * 60 * 1000).unref(); // every 6h
+}
 app.get("/livez", (_req, res) => res.json({ ok: true }));
 app.get("/readyz", async (_req, res) => {
   try {
