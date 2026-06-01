@@ -34,15 +34,18 @@ async function api(path, opts = {}) {
     credentials: "same-origin",
     ...opts,
   });
-  if (res.status === 401) {
-    state.user = null;
-    render();
-    throw new Error("Chưa đăng nhập");
-  }
   let body;
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) body = await res.json();
   else body = await res.text();
+  // A 401 while already logged in = session expired → bounce to login.
+  // But NOT during the login attempt itself (state.user is null), so the login
+  // form can surface the real message ("Sai mật khẩu" / "Tài khoản bị khóa"…).
+  if (res.status === 401 && state.user) {
+    state.user = null;
+    render();
+    throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn");
+  }
   if (!res.ok) throw new Error((body && body.error) || body || "Lỗi");
   return body;
 }
@@ -80,7 +83,11 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 
-const STATUS_LABEL = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối" };
+const STATUS_LABEL = {
+  draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
+  sent: "Đã gửi", expired: "Hết hạn", converted: "Đã chốt",
+};
+const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
 const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý", employee: "Nhân viên" };
 
 // Theme: persist in localStorage, default to OS preference on first visit.
@@ -339,6 +346,9 @@ async function renderList(el) {
         <option value="pending">Chờ duyệt</option>
         <option value="approved">Đã duyệt</option>
         <option value="rejected">Bị từ chối</option>
+        <option value="sent">Đã gửi</option>
+        <option value="converted">Đã chốt</option>
+        <option value="expired">Hết hạn</option>
       </select>
       <button class="btn" id="btn-reload">🔄 Tải lại</button>
       <button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>
@@ -397,7 +407,7 @@ async function renderList(el) {
               <td style="text-align:center">${q.sheets?.length || 0}</td>
               <td>${fmtDate(q.quoteDate)}</td>
               <td style="text-align:right">${fmtMoney(q.total)}</td>
-              <td><span class="status ${q.status}">${STATUS_LABEL[q.status]}</span></td>
+              <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
               <td>
                 <button class="btn btn-sm" data-act="open" data-id="${q.id}">Mở</button>
                 <button class="btn btn-sm" data-act="excel" data-id="${q.id}">📥 Excel</button>
@@ -649,7 +659,7 @@ function renderEditor(el, quote) {
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
         <h1>
           ${isNew ? "Tạo báo giá mới" : "Báo giá " + escapeHtml(q.quoteNumber)}
-          ${!isNew ? `<span class="status ${q.status}" style="margin-left:10px">${STATUS_LABEL[q.status]}</span>` : ""}
+          ${!isNew ? `<span class="status ${q.status}" style="margin-left:10px">${statusLabel(q.status)}</span>` : ""}
         </h1>
         <button class="btn" id="btn-back">← Quay lại</button>
       </div>
@@ -886,6 +896,9 @@ function bindActions(q, isNew) {
   const submitBtn = document.getElementById("btn-submit");
   if (submitBtn) submitBtn.addEventListener("click", async () => {
     if (isNew) { toast("Vui lòng Lưu trước khi trình duyệt", "error"); return; }
+    // Guard against submitting an empty/zero-value quote (all prices still 0).
+    const tot = Number(q.total || 0);
+    if (tot <= 0 && !confirm("Tổng báo giá đang là 0 (chưa nhập đơn giá). Vẫn trình duyệt?")) return;
     try {
       const updated = await api(`/api/quotes/${q.id}/submit`, { method: "POST" });
       state.currentQuote = updated;
@@ -1326,7 +1339,7 @@ async function renderDashboard(el) {
       <div class="kpi"><span>Sắp hết hạn (≤7d)</span><strong>${k.expiringSoon}</strong></div>`;
     document.getElementById("dash-funnel").innerHTML = funnel.data.map(s => `
       <div class="funnel-row">
-        <span class="status ${s.status}">${STATUS_LABEL[s.status] || s.status}</span>
+        <span class="status ${s.status}">${statusLabel(s.status)}</span>
         <div class="funnel-bar" style="width:${Math.min(100, s.count * 8)}%"></div>
         <strong>${s.count}</strong>
       </div>
