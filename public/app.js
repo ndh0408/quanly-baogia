@@ -46,15 +46,31 @@ async function api(path, opts = {}) {
     render();
     throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn");
   }
-  if (!res.ok) throw new Error((body && body.error) || body || "Lỗi");
+  if (!res.ok) {
+    const err = new Error((body && body.error) || body || "Lỗi");
+    if (body && body.details) err.details = body.details;
+    err.status = res.status;
+    throw err;
+  }
   return body;
 }
 
 function toast(msg, type = "info") {
+  // Persistent live region so screen readers announce toasts (errors = assertive).
+  let region = document.getElementById("toast-region");
+  if (!region) {
+    region = document.createElement("div");
+    region.id = "toast-region";
+    region.setAttribute("aria-live", "polite");
+    region.setAttribute("aria-atomic", "true");
+    document.body.appendChild(region);
+  }
+  region.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
   const t = document.createElement("div");
   t.className = "toast " + type;
+  t.setAttribute("role", type === "error" ? "alert" : "status");
   t.textContent = msg;
-  document.body.appendChild(t);
+  region.appendChild(t);
   setTimeout(() => t.remove(), 2400);
 }
 
@@ -104,8 +120,30 @@ function toggleTheme() {
   localStorage.setItem("theme", next);
 }
 
+const ROUTE_PAGES = ["dashboard", "list", "new", "approvals", "notifications", "users", "permissions", "audit", "profile"];
+
+// Hash router: maps #/page and #/quotes/:id → app state, so pages are
+// bookmarkable, the back button works, and notification deep links resolve.
+async function routeFromHash() {
+  if (!state.user) return;
+  if (!location.hash.startsWith("#/")) return; // ignore #main (skip link) etc.
+  const h = location.hash.slice(2); // strip "#/"
+  const m = h.match(/^quotes\/(\d+)$/);
+  if (m) {
+    try {
+      const q = await api(`/api/quotes/${m[1]}`);
+      state.currentQuote = q; state.page = "edit"; render();
+    } catch (e) { toast(e.message, "error"); }
+    return;
+  }
+  state.page = ROUTE_PAGES.includes(h) ? h : "list";
+  state.currentQuote = null;
+  render();
+}
+
 async function boot() {
   initTheme();
+  if (!window._hashWired) { window.addEventListener("hashchange", routeFromHash); window._hashWired = true; }
   try {
     const me = await api("/api/auth/me");
     state.user = me;
@@ -113,7 +151,8 @@ async function boot() {
   } catch {
     state.user = null;
   }
-  render();
+  if (state.user && location.hash.startsWith("#/")) routeFromHash();
+  else render();
 }
 
 async function loadMeta() {
@@ -126,6 +165,7 @@ async function loadMeta() {
 }
 
 function render() {
+  document.getElementById("boot")?.remove(); // drop the instant-paint splash
   if (!state.user) {
     if (state._sse) { try { state._sse.close(); } catch {} state._sse = null; }
     return renderLogin();
@@ -173,38 +213,43 @@ function renderLogin() {
 function renderShell() {
   const role = state.user.role;
   const themeIcon = (localStorage.getItem("theme") === "dark") ? "☀️" : "🌙";
+  const nav = (id, label, badge = "") =>
+    `<a href="#/${id}" data-page="${id}" class="${state.page === id ? "active" : ""}"${state.page === id ? ' aria-current="page"' : ""}>${label}${badge}</a>`;
   app.innerHTML = `
+    <a href="#main" class="skip-link">Bỏ qua tới nội dung</a>
     <div class="shell">
-      <div class="mobile-topbar">
-        <button class="icon-btn" id="sb-toggle" aria-label="Mở menu">☰</button>
+      <header class="mobile-topbar" role="banner">
+        <button class="icon-btn" id="sb-toggle" aria-label="Mở menu" aria-controls="sidebar" aria-expanded="false">☰</button>
         <span class="mt-title">Báo Giá</span>
-        <button class="icon-btn" id="theme-toggle-m" aria-label="Đổi giao diện">${themeIcon}</button>
-      </div>
+        <button class="icon-btn" id="theme-toggle-m" aria-label="Đổi giao diện sáng/tối">${themeIcon}</button>
+      </header>
       <div class="sidebar-backdrop" id="sb-backdrop"></div>
       <aside class="sidebar" id="sidebar">
         <div class="sb-head">
           <div class="sb-brand">
-            <div class="sb-logo">GN</div>
+            <div class="sb-logo" aria-hidden="true">GN</div>
             <div>
               <h2>Báo Giá</h2>
               <div class="org">Gia Nguyễn · nội bộ</div>
             </div>
           </div>
-          <button class="icon-btn" id="theme-toggle" title="Đổi giao diện sáng/tối">${themeIcon}</button>
+          <button class="icon-btn" id="theme-toggle" aria-label="Đổi giao diện sáng/tối" title="Đổi giao diện sáng/tối">${themeIcon}</button>
         </div>
         <div class="global-search">
+          <label for="gs-input" class="sr-only">Tìm nhanh báo giá</label>
           <input id="gs-input" placeholder="🔎 Tìm nhanh (Ctrl+K)" />
           <div id="gs-results" class="global-search-results" style="display:none"></div>
         </div>
-        <nav class="menu">
-          <a href="#" data-page="dashboard" class="${state.page === "dashboard" ? "active" : ""}">📊 Dashboard</a>
-          <a href="#" data-page="list" class="${state.page === "list" ? "active" : ""}">📋 Danh sách báo giá</a>
-          <a href="#" data-page="new" class="${state.page === "new" ? "active" : ""}">➕ Tạo báo giá mới</a>
-          <a href="#" data-page="notifications" class="${state.page === "notifications" ? "active" : ""}">🔔 Thông báo <span id="badge-notif" class="badge-num"></span></a>
-          ${can("user:manage") ? `<a href="#" data-page="users" class="${state.page === "users" ? "active" : ""}">👥 Quản lý nhân viên</a>` : ""}
-          ${can("user:manage") ? `<a href="#" data-page="permissions" class="${state.page === "permissions" ? "active" : ""}">🛡️ Phân quyền</a>` : ""}
-          ${can("audit:view") ? `<a href="#" data-page="audit" class="${state.page === "audit" ? "active" : ""}">📜 Audit log</a>` : ""}
-          <a href="#" data-page="profile" class="${state.page === "profile" ? "active" : ""}">🔒 Tài khoản</a>
+        <nav class="menu" aria-label="Điều hướng chính">
+          ${nav("dashboard", "📊 Dashboard")}
+          ${nav("list", "📋 Danh sách báo giá")}
+          ${nav("new", "➕ Tạo báo giá mới")}
+          ${can("quote:approve") ? nav("approvals", "✅ Hàng chờ duyệt", ` <span id="badge-pending" class="badge-num"></span>`) : ""}
+          ${nav("notifications", "🔔 Thông báo", ` <span id="badge-notif" class="badge-num"></span>`)}
+          ${can("user:manage") ? nav("users", "👥 Quản lý nhân viên") : ""}
+          ${can("user:manage") ? nav("permissions", "🛡️ Phân quyền") : ""}
+          ${can("audit:view") ? nav("audit", "📜 Audit log") : ""}
+          ${nav("profile", "🔒 Tài khoản")}
         </nav>
         <div class="who">
           <strong>${escapeHtml(state.user.displayName)}</strong>
@@ -213,7 +258,7 @@ function renderShell() {
           <button class="logout">Đăng xuất</button>
         </div>
       </aside>
-      <main class="main" id="main"></main>
+      <main class="main" id="main" tabindex="-1"></main>
     </div>`;
 
   // Theme toggle (desktop + mobile)
@@ -234,15 +279,17 @@ function renderShell() {
   document.getElementById("sb-toggle")?.addEventListener("click", openSidebar);
   backdrop?.addEventListener("click", closeSidebar);
 
+  // Nav links carry href="#/page"; navigation is driven by the hash router so
+  // pages are bookmarkable + the back button works. The click only closes the
+  // mobile drawer; the browser updates the hash → hashchange → routeFromHash.
   document.querySelectorAll("[data-page]").forEach(a => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      state.page = a.dataset.page;
-      state.currentQuote = null;
-      closeSidebar();
-      render();
-    });
+    a.addEventListener("click", () => closeSidebar());
   });
+  // Update the hamburger's expanded state for screen readers.
+  const sbToggle = document.getElementById("sb-toggle");
+  const syncExpanded = () => sbToggle?.setAttribute("aria-expanded", sidebar.classList.contains("open") ? "true" : "false");
+  document.getElementById("sb-toggle")?.addEventListener("click", syncExpanded);
+  backdrop?.addEventListener("click", syncExpanded);
   // Global search
   const gsInput = document.getElementById("gs-input");
   const gsResults = document.getElementById("gs-results");
@@ -333,13 +380,22 @@ async function refreshBadges() {
     const badge = document.getElementById("badge-notif");
     if (badge) badge.textContent = n.count > 0 ? n.count : "";
   } catch {}
+  if (can("quote:approve")) {
+    try {
+      const q = await api("/api/approvals/queue");
+      const b = document.getElementById("badge-pending");
+      if (b) b.textContent = q.meta.total > 0 ? q.meta.total : "";
+    } catch {}
+  }
 }
 
 // ---------------- List ----------------
 async function renderList(el) {
   el.innerHTML = `<h1>Danh sách báo giá</h1>
     <div class="toolbar">
+      <label for="filter-q" class="sr-only">Tìm báo giá</label>
       <input id="filter-q" placeholder="Tìm theo số, tiêu đề, khách..." value="${state.filter.q}" />
+      <label for="filter-status" class="sr-only">Lọc theo trạng thái</label>
       <select id="filter-status">
         <option value="">— Tất cả trạng thái —</option>
         <option value="draft">Nháp</option>
@@ -392,9 +448,9 @@ async function renderList(el) {
       <table class="list-table">
         <thead>
           <tr>
-            <th>Số BG</th><th>Tiêu đề</th><th>Công ty</th><th>Khách</th>
-            <th>Sheet</th><th>Ngày</th><th style="text-align:right">Tổng (VNĐ)</th>
-            <th>Trạng thái</th><th>Thao tác</th>
+            <th scope="col">Số BG</th><th scope="col">Tiêu đề</th><th scope="col">Công ty</th><th scope="col">Khách</th>
+            <th scope="col">Sheet</th><th scope="col">Ngày</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th>
+            <th scope="col">Trạng thái</th><th scope="col">Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -460,9 +516,12 @@ async function listAction(act, id) {
 function stepper(steps, current) {
   return `<div class="stepper">${steps.map((s, i) => {
     const n = i + 1;
-    const cls = n < current ? "done" : n === current ? "active" : "";
-    const dot = `<div class="step-dot ${cls}"><div class="num">${n < current ? "✓" : n}</div><div class="lbl">${escapeHtml(s)}</div></div>`;
-    const line = i < steps.length - 1 ? `<div class="step-line ${n < current ? "done" : ""}"></div>` : "";
+    const done = n < current;
+    const cls = done ? "done clickable" : n === current ? "active" : "";
+    // Completed steps are clickable to jump back.
+    const attrs = done ? ` role="button" tabindex="0" data-step="${n}" aria-label="Quay lại bước ${n}: ${escapeHtml(s)}"` : "";
+    const dot = `<div class="step-dot ${cls}"${attrs}><div class="num">${done ? "✓" : n}</div><div class="lbl">${escapeHtml(s)}</div></div>`;
+    const line = i < steps.length - 1 ? `<div class="step-line ${done ? "done" : ""}"></div>` : "";
     return dot + line;
   }).join("")}</div>`;
 }
@@ -604,6 +663,13 @@ function renderNewQuote(el) {
     });
   }
 
+  // Clickable completed step dots (jump back)
+  el.querySelectorAll(".step-dot[data-step]").forEach(dot => {
+    const go = () => { wz.step = parseInt(dot.dataset.step, 10); renderNewQuote(el); };
+    dot.addEventListener("click", go);
+    dot.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+
   document.getElementById("w-back").addEventListener("click", () => { if (wz.step > 1) { wz.step--; renderNewQuote(el); } });
   document.getElementById("w-next").addEventListener("click", async () => {
     if (wz.step === 1) {
@@ -732,16 +798,16 @@ function renderEditor(el, quote) {
         <table class="excel-table" id="items-table">
           <thead>
             <tr>
-              <th style="width:50px">STT</th>
-              <th>Hạng Mục</th>
-              ${tplCode === "marico_decor" ? `<th>Chi Tiết</th>` : ""}
-              <th style="width:80px">ĐVT</th>
-              <th style="width:90px">SỐ LƯỢNG</th>
-              ${usesDays ? `<th style="width:80px">SỐ NGÀY</th>` : ""}
-              <th style="width:130px">ĐƠN GIÁ&#10;(VNĐ)</th>
-              <th style="width:140px">THÀNH TIỀN&#10;(VNĐ)</th>
-              <th style="width:150px">Notes</th>
-              ${editable ? `<th style="width:36px"></th>` : ""}
+              <th scope="col" style="width:50px">STT</th>
+              <th scope="col">Hạng Mục</th>
+              ${tplCode === "marico_decor" ? `<th scope="col">Chi Tiết</th>` : ""}
+              <th scope="col" style="width:80px">ĐVT</th>
+              <th scope="col" style="width:90px">SỐ LƯỢNG</th>
+              ${usesDays ? `<th scope="col" style="width:80px">SỐ NGÀY</th>` : ""}
+              <th scope="col" style="width:130px">ĐƠN GIÁ&#10;(VNĐ)</th>
+              <th scope="col" style="width:140px">THÀNH TIỀN&#10;(VNĐ)</th>
+              <th scope="col" style="width:150px">Notes</th>
+              ${editable ? `<th scope="col" style="width:36px"></th>` : ""}
             </tr>
           </thead>
           <tbody></tbody>
@@ -967,7 +1033,7 @@ async function showVersions(quoteId) {
     }
     m.find("#ver-body").innerHTML = `
       <table class="list-table" style="margin-bottom:12px">
-        <thead><tr><th>Phiên bản</th><th>Thời gian</th><th style="text-align:right">Tổng (VNĐ)</th></tr></thead>
+        <thead><tr><th scope="col">Phiên bản</th><th scope="col">Thời gian</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th></tr></thead>
         <tbody>${versions.map(v => `
           <tr><td>v${v.versionNo}</td><td>${new Date(v.createdAt).toLocaleString("vi-VN")}</td>
           <td style="text-align:right">${fmtMoney(v.total)}</td></tr>`).join("")}</tbody>
@@ -991,7 +1057,7 @@ async function showVersions(quoteId) {
           const d = await api(`/api/quotes/${quoteId}/versions/${a}/diff/${b}`);
           const box = m.find("#ver-diff");
           if (!d.changes.length) { box.innerHTML = "<div class='empty-state'>Không có thay đổi</div>"; return; }
-          box.innerHTML = `<table class="list-table"><thead><tr><th>Trường</th><th>v${a}</th><th>v${b}</th></tr></thead>
+          box.innerHTML = `<table class="list-table"><thead><tr><th scope="col">Trường</th><th scope="col">v${a}</th><th scope="col">v${b}</th></tr></thead>
             <tbody>${d.changes.map(c => `<tr>
               <td><code>${escapeHtml(c.key)}</code></td>
               <td style="color:#b91c1c;max-width:240px;overflow:hidden">${escapeHtml(JSON.stringify(c.before)).slice(0,200)}</td>
@@ -1135,7 +1201,7 @@ function renderQuoteSummary(q) {
   return `
     <h3 style="margin: 18px 0 6px">Tổng báo giá (${q.sheets.length} sheet)</h3>
     <table class="summary-table" id="summary-table">
-      <thead><tr><th>STT</th><th>Sheet</th><th style="text-align:right">Tổng (VNĐ)</th></tr></thead>
+      <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th></tr></thead>
       <tbody>
         ${rows.map(r => `<tr><td style="text-align:center">${r.idx}</td><td>${escapeHtml(r.name)}</td><td style="text-align:right" data-sub="${r.idx-1}">${fmtMoney(r.subtotal)}</td></tr>`).join("")}
       </tbody>
@@ -1177,7 +1243,7 @@ function drawUsers() {
   if (!body) return;
   body.innerHTML = `
     <table class="list-table">
-      <thead><tr><th>Username</th><th>Họ tên</th><th>Quyền</th><th>SĐT</th><th>Chức vụ</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      <thead><tr><th scope="col">Username</th><th scope="col">Họ tên</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Chức vụ</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead>
       <tbody>
         ${state.users.map(u => `
           <tr>
@@ -1286,29 +1352,63 @@ function openPasswordModal(u) {
 
 function renderProfile(el) {
   el.innerHTML = `
-    <h1>Đổi mật khẩu</h1>
-    <div class="editor" style="max-width:420px">
-      <label style="display:block; margin-bottom:14px"><span>Mật khẩu cũ</span>
-        <input type="password" id="old-pw" style="width:100%; padding:8px; border:1px solid #d8dbe3; border-radius:6px" />
+    <h1>Tài khoản</h1>
+    <form class="editor" id="pw-form" style="max-width:440px" autocomplete="off">
+      <p class="ds-small" style="margin-top:0">Đổi mật khẩu. Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số.</p>
+      <label for="old-pw" style="display:block; margin-bottom:14px"><span>Mật khẩu cũ</span>
+        <input type="password" id="old-pw" autocomplete="current-password" required
+          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
       </label>
-      <label style="display:block; margin-bottom:14px"><span>Mật khẩu mới</span>
-        <input type="password" id="new-pw" style="width:100%; padding:8px; border:1px solid #d8dbe3; border-radius:6px" />
+      <label for="new-pw" style="display:block; margin-bottom:6px"><span>Mật khẩu mới</span>
+        <input type="password" id="new-pw" autocomplete="new-password" required minlength="8" maxlength="128"
+          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
       </label>
-      <button class="btn btn-primary" id="btn-change-pw">Đổi mật khẩu</button>
-    </div>`;
-  document.getElementById("btn-change-pw").addEventListener("click", async () => {
+      <div class="pw-meter" aria-hidden="true"><i id="pw-bar"></i></div>
+      <div class="pw-hint" id="pw-hint">Độ mạnh: —</div>
+      <label for="new-pw2" style="display:block; margin:14px 0"><span>Nhập lại mật khẩu mới</span>
+        <input type="password" id="new-pw2" autocomplete="new-password" required minlength="8" maxlength="128"
+          style="width:100%; padding:9px 11px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); color:var(--text)" />
+      </label>
+      <button class="btn btn-primary" type="submit">💾 Đổi mật khẩu</button>
+    </form>`;
+
+  const np = document.getElementById("new-pw");
+  const bar = document.getElementById("pw-bar");
+  const hint = document.getElementById("pw-hint");
+  const score = (s) => {
+    let n = 0;
+    if (s.length >= 8) n++;
+    if (/[a-z]/.test(s) && /[A-Z]/.test(s)) n++;
+    if (/\d/.test(s)) n++;
+    if (/[^A-Za-z0-9]/.test(s)) n++;
+    if (s.length >= 12) n++;
+    return Math.min(n, 4);
+  };
+  np.addEventListener("input", () => {
+    const sc = score(np.value);
+    const pct = [6, 28, 55, 80, 100][sc];
+    const col = ["var(--danger)", "var(--danger)", "var(--warn)", "var(--success)", "var(--success)"][sc];
+    const lbl = ["Rất yếu", "Yếu", "Trung bình", "Mạnh", "Rất mạnh"][sc];
+    bar.style.width = pct + "%"; bar.style.background = col;
+    hint.textContent = "Độ mạnh: " + (np.value ? lbl : "—");
+  });
+
+  document.getElementById("pw-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const oldPassword = document.getElementById("old-pw").value;
+    const newPassword = np.value;
+    const confirm2 = document.getElementById("new-pw2").value;
+    if (newPassword !== confirm2) { toast("Mật khẩu nhập lại không khớp", "error"); return; }
     try {
-      await api("/api/auth/change-password", {
-        method: "POST",
-        body: JSON.stringify({
-          oldPassword: document.getElementById("old-pw").value,
-          newPassword: document.getElementById("new-pw").value,
-        }),
-      });
+      await api("/api/auth/change-password", { method: "POST", body: JSON.stringify({ oldPassword, newPassword }) });
       toast("Đã đổi mật khẩu", "success");
-      document.getElementById("old-pw").value = "";
-      document.getElementById("new-pw").value = "";
-    } catch (e) { toast(e.message, "error"); }
+      e.target.reset();
+      bar.style.width = "0"; hint.textContent = "Độ mạnh: —";
+    } catch (err) {
+      // Surface server validation details if present
+      const d = err.details?.map?.(x => x.message).join("; ");
+      toast(d || err.message, "error");
+    }
   });
 }
 
@@ -1346,7 +1446,7 @@ async function renderDashboard(el) {
     `).join("") || "<div class='empty-state'>Không có dữ liệu</div>";
     document.getElementById("dash-top").innerHTML = top.data.length ? `
       <table class="list-table">
-        <thead><tr><th>#</th><th>Nhân viên</th><th>Số BG</th><th style="text-align:right">Doanh số</th></tr></thead>
+        <thead><tr><th scope="col">#</th><th scope="col">Nhân viên</th><th scope="col">Số BG</th><th scope="col" style="text-align:right">Doanh số</th></tr></thead>
         <tbody>${top.data.map((t, i) => `
           <tr><td>${i + 1}</td><td>${escapeHtml(t.user?.displayName || "—")}</td><td>${t.count}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>
         `).join("")}</tbody>
@@ -1377,7 +1477,7 @@ async function renderCustomers(el) {
       const body = document.getElementById("cust-body");
       if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có khách hàng</div>"; return; }
       body.innerHTML = `<table class="list-table">
-        <thead><tr><th>Mã</th><th>Tên</th><th>SĐT</th><th>Email</th><th>Trạng thái</th><th>Tags</th><th>Phụ trách</th><th></th></tr></thead>
+        <thead><tr><th scope="col">Mã</th><th scope="col">Tên</th><th scope="col">SĐT</th><th scope="col">Email</th><th scope="col">Trạng thái</th><th scope="col">Tags</th><th scope="col">Phụ trách</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(c => `
           <tr>
             <td><strong>${escapeHtml(c.code)}</strong></td>
@@ -1507,9 +1607,9 @@ async function renderProducts(el) {
       const body = document.getElementById("p-body");
       if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có sản phẩm</div>"; return; }
       body.innerHTML = `<table class="list-table">
-        <thead><tr><th>SKU</th><th>Tên</th><th>Loại</th><th>ĐVT</th>
-          <th style="text-align:right">Giá vốn</th><th style="text-align:right">Giá bán</th>
-          <th style="text-align:right">Margin</th><th></th></tr></thead>
+        <thead><tr><th scope="col">SKU</th><th scope="col">Tên</th><th scope="col">Loại</th><th scope="col">ĐVT</th>
+          <th scope="col" style="text-align:right">Giá vốn</th><th scope="col" style="text-align:right">Giá bán</th>
+          <th scope="col" style="text-align:right">Margin</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(p => `
           <tr>
             <td><strong>${escapeHtml(p.sku)}</strong></td>
@@ -1586,8 +1686,8 @@ async function renderApprovalQueue(el) {
     const body = document.getElementById("aq-body");
     if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
     body.innerHTML = `<table class="list-table">
-      <thead><tr><th>Số BG</th><th>Tiêu đề</th><th>Khách</th><th>Level</th>
-        <th style="text-align:right">Tổng</th><th>Người tạo</th><th></th></tr></thead>
+      <thead><tr><th scope="col">Số BG</th><th scope="col">Tiêu đề</th><th scope="col">Khách</th><th scope="col">Level</th>
+        <th scope="col" style="text-align:right">Tổng</th><th scope="col">Người tạo</th><th scope="col"></th></tr></thead>
       <tbody>${r.data.map(a => `
         <tr>
           <td><strong>${escapeHtml(a.quote?.quoteNumber)}</strong></td>
@@ -1667,7 +1767,7 @@ async function renderAuditLog(el) {
       const body = document.getElementById("a-body");
       if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có sự kiện</div>"; return; }
       body.innerHTML = `<table class="list-table">
-        <thead><tr><th>Thời gian</th><th>Actor</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead>
+        <thead><tr><th scope="col">Thời gian</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">IP</th></tr></thead>
         <tbody>${r.data.map(e => `
           <tr>
             <td>${new Date(e.createdAt).toLocaleString("vi-VN")}</td>
@@ -1695,7 +1795,7 @@ async function renderSettings(el) {
       const rows = await api("/api/approvals/matrix");
       document.getElementById("s-matrix-body").innerHTML = rows.length ? `
         <table class="list-table">
-          <thead><tr><th>Tên</th><th>Min</th><th>Max</th><th>Levels</th><th>Active</th><th></th></tr></thead>
+          <thead><tr><th scope="col">Tên</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Levels</th><th scope="col">Active</th><th scope="col"></th></tr></thead>
           <tbody>${rows.map(r => `
             <tr>
               <td>${escapeHtml(r.name)}</td>
@@ -1737,11 +1837,13 @@ async function renderSettings(el) {
 }
 
 // ---------------- Modal helper ----------------
+let _modalSeq = 0;
 function openModal(title, bodyHtml) {
+  const titleId = `modal-title-${++_modalSeq}`;
   const d = document.createElement("div");
   d.className = "modal-backdrop";
-  d.innerHTML = `<div class="modal">
-    <div class="modal-head"><h3>${escapeHtml(title)}</h3><button class="modal-x">×</button></div>
+  d.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+    <div class="modal-head"><h3 id="${titleId}">${escapeHtml(title)}</h3><button class="modal-x" aria-label="Đóng">×</button></div>
     <div class="modal-body">${bodyHtml}</div>
     <div class="modal-foot">
       <button class="btn" data-cancel>Hủy</button>
@@ -1749,9 +1851,13 @@ function openModal(title, bodyHtml) {
     </div>
   </div>`;
   document.body.appendChild(d);
-  const close = () => d.remove();
+  const close = () => { d.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
   d.querySelector(".modal-x").addEventListener("click", close);
   d.querySelector("[data-cancel]").addEventListener("click", close);
+  // focus the first field for keyboard users
+  setTimeout(() => d.querySelector("input,select,textarea,button")?.focus(), 30);
   return {
     find: (sel) => d.querySelector(sel),
     close,
@@ -1779,7 +1885,7 @@ async function renderPermissions(el) {
         </tr>`).join("")}`).join("");
     document.getElementById("perm-matrix-wrap").innerHTML = `
       <table class="perm-matrix">
-        <thead><tr><th>Quyền</th>${roles.map(r => `<th><div class="role-head"><span>${escapeHtml(r.label)}</span><span class="rh-pill">${escapeHtml(r.key)}</span></div></th>`).join("")}</tr></thead>
+        <thead><tr><th scope="col">Quyền</th>${roles.map(r => `<th scope="col"><div class="role-head"><span>${escapeHtml(r.label)}</span><span class="rh-pill">${escapeHtml(r.key)}</span></div></th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
 
@@ -1788,7 +1894,7 @@ async function renderPermissions(el) {
     const roleOptions = roles.map(r => ({ key: r.key, label: r.label }));
     document.getElementById("perm-users").innerHTML = `
       <table class="list-table">
-        <thead><tr><th>Nhân viên</th><th>Username</th><th>Vai trò</th><th>Trạng thái</th></tr></thead>
+        <thead><tr><th scope="col">Nhân viên</th><th scope="col">Username</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th></tr></thead>
         <tbody>${users.map(u => `
           <tr>
             <td>${escapeHtml(u.displayName)}</td>

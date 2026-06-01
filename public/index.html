@@ -3,10 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#5b6cf0" />
   <title>Quản lý Báo Giá - Gia Nguyễn</title>
+  <link rel="preload" href="/app.js" as="script" crossorigin />
   <link rel="stylesheet" href="/style.css" />
+  <!-- Apply saved/OS theme before first paint to avoid a flash -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("theme") ||
+          (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    /* Instant boot splash so First Contentful Paint isn't blocked on the API */
+    #boot { position: fixed; inset: 0; display: grid; place-items: center;
+      background: var(--bg, #eef1f6); color: var(--text-muted, #858aa0); }
+    #boot .gn { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
+      color: #fff; font-weight: 800; font-size: 20px; letter-spacing: .5px;
+      background: linear-gradient(135deg, #5b6cf0, #8b5cf6); box-shadow: 0 10px 30px rgba(91,108,240,.4);
+      animation: bootpulse 1.1s ease-in-out infinite; }
+    #boot p { margin-top: 14px; font-size: 13px; }
+    @keyframes bootpulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(.92); opacity: .8 } }
+  </style>
 </head>
 <body>
+  <div id="boot"><div style="text-align:center"><div class="gn">GN</div><p>Đang tải…</p></div></div>
   <div id="app"></div>
   <script type="module" src="/app.js"></script>
 </body>
