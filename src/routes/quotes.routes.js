@@ -482,6 +482,16 @@ router.post(
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const existing = await prisma.quote.findFirst({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    // Only the owner (or an all-scope editor) may convert, and only an already
+    // approved/sent quote can be marked won.
+    if (!canOnQuote(req.session, "update", existing)) {
+      return res.status(403).json({ error: "Không có quyền chốt báo giá này" });
+    }
+    if (!["approved", "sent"].includes(existing.status)) {
+      return res.status(400).json({ error: "Chỉ chốt được báo giá đã duyệt hoặc đã gửi" });
+    }
     const quote = await prisma.quote.update({
       where: { id },
       data: { status: "converted", convertedAt: new Date() },
@@ -561,6 +571,10 @@ router.delete(
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    // A won deal is terminal — nobody (not even delete:all) may remove it.
+    if (existing.status === "converted") {
+      return res.status(400).json({ error: "Không thể xóa báo giá đã chốt" });
+    }
     const ownerDraftDelete =
       canOnQuote(req.session, "delete", existing) &&
       (existing.status === "draft" || existing.status === "rejected");

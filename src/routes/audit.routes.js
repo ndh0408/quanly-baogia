@@ -2,11 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
-import { asyncHandler, requireRole } from "../middleware.js";
+import { asyncHandler } from "../middleware.js";
 import { validate } from "../validators.js";
+import { requirePermission, PERMISSIONS } from "../permissions.js";
 
 const router = Router();
-router.use(requireRole("admin"));
+// Honour the permission map (manager holds audit:view) instead of admin-only,
+// so the nav gate (can('audit:view')) and the route agree.
+router.use(requirePermission(PERMISSIONS.AUDIT_VIEW));
 
 const Query = z.object({
   actorId: z.coerce.number().int().positive().optional(),

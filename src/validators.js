@@ -82,7 +82,9 @@ export const QuoteCreateSchema = z.object({
   vatPercent: z.coerce.number().min(0).max(100).default(8),
   notes: z.string().max(4000).optional().nullable(),
   // base64 data URL of the customer logo (~3MB cap to bound payload size)
-  customerLogo: z.string().max(3_500_000).optional().nullable(),
+  customerLogo: z.string().max(3_500_000)
+    .refine((s) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s), "Logo phải là ảnh PNG/JPG/GIF/WEBP")
+    .optional().nullable(),
   sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20),
 });
 
@@ -107,7 +109,9 @@ export const QuoteUpdateSchema = z.object({
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),
   notes: z.string().max(4000).optional().nullable(),
-  customerLogo: z.string().max(3_500_000).optional().nullable(),
+  customerLogo: z.string().max(3_500_000)
+    .refine((s) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s), "Logo phải là ảnh PNG/JPG/GIF/WEBP")
+    .optional().nullable(),
   sheets: z.array(sheetSchema).max(20).optional(),
 });
 
