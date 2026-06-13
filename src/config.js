@@ -39,7 +39,9 @@ const schema = z.object({
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
   S3_BUCKET: z.string().default("quanly"),
-  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  // z.coerce.boolean() treats the STRING "false" as truthy (non-empty) → true.
+  // Parse explicitly so S3_FORCE_PATH_STYLE=false actually means false.
+  S3_FORCE_PATH_STYLE: z.preprocess((v) => (typeof v === "string" ? !/^(false|0|no)$/i.test(v) : v), z.boolean()).default(true),
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   // Webhook

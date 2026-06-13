@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import ExcelJS from "exceljs";
 import { buildQuoteBuffer } from "../src/excel.js";
 import { runExportJob } from "../src/exportQueue.js";
 
@@ -40,6 +41,23 @@ describe("buildQuoteBuffer (export generation)", () => {
     const q = makeQuote("clofull_decor");
     q.discount = 100_000;
     expect(isXlsx(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))))).toBe(true);
+  });
+
+  // Money correctness: the summary sheet must show the quote STORED totals exactly
+  // (whole VND), not a separately-rounded recompute. Reads the buffer back.
+  it("summary sheet shows the stored grand total (consistent rounding)", async () => {
+    const q = makeQuote();
+    q.subtotal = 2_500_000; q.vat = 200_000; q.discount = 0; q.total = 2_700_000;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(q));
+    const ws = wb.getWorksheet("Tổng Báo Giá") || wb.worksheets[wb.worksheets.length - 1];
+    let foundTotal = false, foundVat = false;
+    ws.eachRow((row) => row.eachCell((c) => {
+      if (Number(c.value) === 2_700_000) foundTotal = true;
+      if (Number(c.value) === 200_000) foundVat = true;
+    }));
+    expect(foundTotal).toBe(true);   // grand total = stored quote.total
+    expect(foundVat).toBe(true);     // VAT = stored quote.vat (no fractional recompute)
   });
 
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in

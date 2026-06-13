@@ -724,14 +724,20 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   });
 
   const totalsStart = headerRow + 1 + sheetTotals.length;
-  const vatVal = Math.round(subtotalAll * vatPct) / 100;
+  // Use the quote's STORED totals (computed by money.js — rounded to 0 dp, VND has
+  // no fractional unit) so the Excel summary matches the app/DB exactly. The old
+  // code recomputed VAT as Math.round(subtotalAll*vatPct)/100, which produced a
+  // fractional VAT and a grand total off by sub-đồng vs what the customer saw in-app.
+  const subtotalVal = quote.subtotal != null ? Number(quote.subtotal) : subtotalAll;
+  const vatVal = quote.vat != null ? Number(quote.vat) : Math.round(subtotalAll * vatPct / 100);
   const discountVal = Number(quote.discount) || 0;
+  const grandTotal = quote.total != null ? Number(quote.total) : (subtotalVal + vatVal - discountVal);
   const totalRows = [
-    { label: "Tổng cộng", value: subtotalAll },
+    { label: "Tổng cộng", value: subtotalVal },
     { label: `VAT (${vatPct}%)`, value: vatVal },
   ];
   if (discountVal > 0) totalRows.push({ label: "Giảm giá", value: discountVal });
-  totalRows.push({ label: "Thành tiền", value: subtotalAll + vatVal - (discountVal > 0 ? discountVal : 0) });
+  totalRows.push({ label: "Thành tiền", value: grandTotal });
   totalRows.forEach((tr, i) => {
     const r = totalsStart + i;
     ws.mergeCells(r, 1, r, 2);

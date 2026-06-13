@@ -1,32 +1,11 @@
 import { prisma } from "./db.js";
-import { D } from "./money.js";
 
 /**
- * Approval matrix engine.
- *
- * Matrix rows define amount bands and the per-level requirements:
- *   { name, minAmount, maxAmount, levels: [{level, roles, any}] }
- *
- * `levels[i].roles` = array of role codes that can sign at this level
- * `levels[i].any`   = number of roles needed to mark the level as approved (default 1)
- *
- * When a quote is submitted, we look up the band by `total` and create one
- * `Approval` row per level with decision=pending. Each level must be approved
- * before the next can act. Final approval flips Quote.status to "approved".
+ * Approval workflow — intentionally ONE step: the Director (admin) approves or
+ * rejects a submitted quote. No tiers/levels, no amount matrix. (The
+ * ApprovalMatrix model + an amount-band engine were scaffolded but never wired;
+ * the dead lookup was removed to avoid accidental re-activation.)
  */
-
-export async function findMatrixForAmount(total) {
-  const amount = D(total);
-  const rows = await prisma.approvalMatrix.findMany({
-    where: { active: true, minAmount: { lte: amount } },
-    orderBy: { minAmount: "desc" },
-  });
-  // First row whose maxAmount is either null (open-ended) or >= amount
-  for (const row of rows) {
-    if (row.maxAmount == null || D(row.maxAmount).gte(amount)) return row;
-  }
-  return null;
-}
 
 /**
  * Initialize the approval for a quote.

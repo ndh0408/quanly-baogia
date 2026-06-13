@@ -10,13 +10,16 @@ async function main() {
   });
   let fixed = 0;
   for (const q of quotes) {
-    const t = computeQuoteTotals({ vatPercent: q.vatPercent, sheets: q.sheets });
+    // Must pass the existing discount so total = subtotal + vat − discount is
+    // correct AND the clamped discount is persisted (omitting it computed total
+    // without discount and would overwrite the discount column with 0).
+    const t = computeQuoteTotals({ vatPercent: q.vatPercent, discount: q.discount, sheets: q.sheets });
     const same =
-      q.subtotal.equals(t.subtotal) && q.vat.equals(t.vat) && q.total.equals(t.total);
+      q.subtotal.equals(t.subtotal) && q.vat.equals(t.vat) && q.discount.equals(t.discount) && q.total.equals(t.total);
     if (same) continue;
     await prisma.quote.update({
       where: { id: q.id },
-      data: { subtotal: t.subtotal, vat: t.vat, total: t.total },
+      data: { subtotal: t.subtotal, vat: t.vat, discount: t.discount, total: t.total },
     });
     fixed++;
     console.log(`  ${q.quoteNumber}: total ${q.total} -> ${t.total}`);

@@ -8,9 +8,15 @@ import { audit } from "../audit.js";
 const router = Router();
 router.use(requireAuth);
 
-// Public read: any logged-in user can read settings (UI tunables)
+// Settings can hold sensitive integration config (tokens, channels). Only a small
+// allowlist of UI-tunable keys is readable by non-admins; the full dump + any other
+// key is admin-only — prevents leaking config to every logged-in user.
+const PUBLIC_SETTING_KEYS = new Set(["notif.channels"]);
+
+// Full dump = admin only.
 router.get(
   "/",
+  requireRole("admin"),
   asyncHandler(async (_req, res) => {
     const rows = await prisma.setting.findMany();
     res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
@@ -21,6 +27,9 @@ router.get(
   "/:key",
   validate({ params: z.object({ key: z.string().min(1).max(80) }) }),
   asyncHandler(async (req, res) => {
+    if (!PUBLIC_SETTING_KEYS.has(req.params.key) && req.session.role !== "admin") {
+      return res.status(403).json({ error: "Không có quyền đọc cấu hình này" });
+    }
     const row = await prisma.setting.findUnique({ where: { key: req.params.key } });
     if (!row) return res.status(404).json({ error: "Not found" });
     res.json(row.value);

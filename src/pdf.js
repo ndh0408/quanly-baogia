@@ -129,20 +129,21 @@ function drawItemsTable(doc, items, baseIdx) {
     { w: 95, label: "Thành tiền", align: "right" },
   ];
   const startX = 40;
-  const startY = doc.y + 4;
   const tableW = cols.reduce((s, c) => s + c.w, 0);
-  let x = startX;
+  const pageBottom = () => doc.page.height - doc.page.margins.bottom;
 
-  doc.font("bold").fontSize(10);
-  doc.rect(startX, startY, tableW, 18).fillAndStroke("#FFE4CC", "#888");
-  doc.fillColor("black");
-  for (const c of cols) {
-    doc.text(c.label, x + 2, startY + 4, { width: c.w - 4, align: c.align });
-    x += c.w;
-  }
-  let y = startY + 18;
+  // Draw the orange header row at y, return the y below it.
+  const drawHeader = (atY) => {
+    let x = startX;
+    doc.font("bold").fontSize(10);
+    doc.rect(startX, atY, tableW, 18).fillAndStroke("#FFE4CC", "#888");
+    doc.fillColor("black");
+    for (const c of cols) { doc.text(c.label, x + 2, atY + 4, { width: c.w - 4, align: c.align }); x += c.w; }
+    doc.font("body");
+    return atY + 18;
+  };
 
-  doc.font("body");
+  let y = drawHeader(doc.y + 4);
   items.forEach((it, idx) => {
     const qty = Number(it.quantity || 0);
     const price = Number(it.unitPrice || 0);
@@ -151,16 +152,15 @@ function drawItemsTable(doc, items, baseIdx) {
     const text = (it.name || "") + (it.detail ? `\n  ${it.detail}` : "");
     const lines = Math.max(1, text.split("\n").length);
     const rowH = Math.max(18, 8 + lines * 12);
-    x = startX;
+    // Page-break: if this row would overflow the page, start a new page + re-draw
+    // the table header so long quotes don't get clipped/overlapped.
+    if (y + rowH > pageBottom()) {
+      doc.addPage();
+      y = drawHeader(doc.page.margins.top);
+    }
+    let x = startX;
     doc.rect(startX, y, tableW, rowH).stroke("#bbb");
-    const vals = [
-      String(baseIdx + idx + 1),
-      text,
-      it.unit || "",
-      fmt(qty),
-      fmt(price),
-      fmt(amount),
-    ];
+    const vals = [String(baseIdx + idx + 1), text, it.unit || "", fmt(qty), fmt(price), fmt(amount)];
     vals.forEach((v, i) => {
       doc.text(String(v), x + 2, y + 4, { width: cols[i].w - 4, align: cols[i].align });
       x += cols[i].w;

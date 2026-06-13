@@ -3,9 +3,8 @@ import { logger } from "./logger.js";
 import { isProd } from "./config.js";
 
 export const prisma = new PrismaClient({
-  log: isProd
-    ? [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }]
-    : [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
+  // warn+error events in all environments (the two branches were identical).
+  log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
 });
 
 prisma.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));

@@ -2616,7 +2616,7 @@ function openPasswordModal(u) {
   mask.innerHTML = `
     <div class="modal">
       <h2>Đổi mật khẩu: ${escapeHtml(u.username)}</h2>
-      <label>Mật khẩu mới<input name="password" type="text" /></label>
+      <label>Mật khẩu mới<input name="password" type="password" autocomplete="new-password" /></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Đổi</button>
