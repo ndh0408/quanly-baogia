@@ -438,6 +438,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .xlsx-page thead th { border: 2px solid #333; }
 .xlsx-band { background: #D9E1F2; font-weight: 700; }
 .xlsx-band-grey { background: #E7E6E6; font-weight: 700; }
+/* Section (nhóm A/B/C) band — matches the export fill FFDDEBF7 (light blue) + bold. */
+.xlsx-page tr.xlsx-section td { background: #DDEBF7; font-weight: 700; }
+.xlsx-page tr.xlsx-section .xlsx-stt { color: #0066CC; }
 .xlsx-num { text-align: right; font-variant-numeric: tabular-nums; }
 .xlsx-center { text-align: center; }
 .xlsx-stt { text-align: center; font-weight: 700; color: #0066CC; }

@@ -51,7 +51,7 @@ async function api(path, opts = {}) {
   if (res.status === 401 && state.user) {
     state.user = null;
     render();
-    throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn");
+    throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
   }
   if (!res.ok) {
     // Build a human-readable message. Validation errors arrive as a generic
@@ -200,16 +200,6 @@ function safeLogoSrc(s) {
 
 // ---- Live-preview helpers (mirror drawItems + src/excel.js so the preview matches the file) ----
 // kind grouping: byte-for-byte mirror of drawItems' rowKind logic.
-function pvRowKinds(items) {
-  const rk = items.map(() => "head");
-  for (let i = 0; i < items.length; i++) {
-    const k = items[i].kind;
-    if (k === "info") rk[i] = "info";
-    else if (k === "sub" && i > 0 && (rk[i - 1] === "head" || rk[i - 1] === "sub")) rk[i] = "sub";
-    else rk[i] = "head";
-  }
-  return rk;
-}
 function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
 function pvAmount(it, usesDays) {
   const qy = Number(it.quantity) || 0, d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
@@ -217,6 +207,41 @@ function pvAmount(it, usesDays) {
 }
 function pvMoney(n) { return (!n || isNaN(Number(n))) ? "" : Number(n).toLocaleString("vi-VN"); }
 function nl2br(s) { return escapeHtml(s || "").replace(/\n/g, "<br>"); }
+// Per-row preview descriptors mirroring src/excel.js EXACTLY: section (nhóm A/B/C) bands
+// with letter + per-group subtotal + ×SL multiplier, "hàng con" merges, restarting item
+// numbers. Without this the preview rendered sections as plain items (wrong STT, wrong
+// totals) so it didn't match the exported file. Returns { rows, eff } (eff = effKind[]).
+function pvRows(items, usesDays, groupSubtotal) {
+  items = items || [];
+  const eff = items.map(() => "head");
+  for (let i = 0; i < items.length; i++) {
+    const k = items[i] && items[i].kind;
+    if (k === "info") eff[i] = "info";
+    else if (k === "section") eff[i] = "section";
+    else if (k === "sub" && i > 0 && (eff[i - 1] === "head" || eff[i - 1] === "sub")) eff[i] = "sub";
+    else eff[i] = "head";
+  }
+  // Per-section sum of child amounts (per-unit, before ×SL) — same as the export.
+  const sectionSum = {};
+  let cur = -1;
+  for (let i = 0; i < items.length; i++) {
+    if (eff[i] === "section") { cur = i; sectionSum[i] = 0; }
+    else if ((eff[i] === "head" || eff[i] === "sub") && cur >= 0) sectionSum[cur] += pvAmount(items[i], usesDays);
+  }
+  let itemNo = 0, sectionIdx = -1, mult = 1;
+  const rows = items.map((it, i) => {
+    const kind = eff[i];
+    if (kind === "section") {
+      sectionIdx++; itemNo = 0;
+      const gmult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+      mult = gmult;
+      return { kind, it, letter: (it.label && String(it.label).trim()) || groupLetter(sectionIdx), groupSum: sectionSum[i] || 0, gmult, groupSubtotal };
+    }
+    if (kind === "info") return { kind, it };
+    return { kind, it, stt: kind === "head" ? ++itemNo : null, amt: pvAmount(it, usesDays), mult };
+  });
+  return { rows, eff };
+}
 // Mirror of src/templateConfigs.js baoGiaTitle (app.js is no-build; keep this copy in sync).
 function baoGiaTitleJS(t) {
   t = (t || "").trim();
@@ -453,7 +478,7 @@ function renderLogin() {
         const mfaInput = mfaField.querySelector("input");
         mfaInput.required = true;
         mfaInput.focus();
-        errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản bật MFA — nhập mã xác thực."}</div>`;
+        errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản đã bật MFA — vui lòng nhập mã xác thực."}</div>`;
         return;
       }
       errEl.innerHTML = `<div class="err">${escapeHtml(err.message)}</div>`;
@@ -770,7 +795,7 @@ async function renderList(el) {
   el.innerHTML = `<h1>Danh sách báo giá</h1>
     <div class="toolbar">
       <label for="filter-q" class="sr-only">Tìm báo giá</label>
-      <input id="filter-q" placeholder="Tìm theo số, tiêu đề, khách..." value="${escapeHtml(state.filter.q || "")}" />
+      <input id="filter-q" placeholder="Tìm theo số, tiêu đề, khách…" value="${escapeHtml(state.filter.q || "")}" />
       <label for="filter-status" class="sr-only">Lọc theo trạng thái</label>
       <select id="filter-status">
         <option value="">— Tất cả trạng thái —</option>
@@ -1143,7 +1168,7 @@ function renderNewQuote(el) {
     if (!wz.info.title.trim()) { toast("Nhập tiêu đề báo giá", "error"); return; }
     if (!wz.customerId) { toast("Chọn mã khách hàng (bấm 'Chọn khách hàng')", "error"); return; }
     if (!wz.info.toCompany.trim()) { toast("Nhập tên khách hàng", "error"); return; }
-    if (state.user.role === "employee" && !wz.managerId) { toast("Vui lòng chọn quản lý phụ trách", "error"); return; }
+    if (state.user.role === "employee" && !wz.managerId) { toast("Chọn quản lý phụ trách", "error"); return; }
     try {
       // No client-side number — the server allocates it atomically per company
       // (each company has its own prefix + sequence, e.g. GN…, CLF…).
@@ -1259,7 +1284,7 @@ function renderEditor(el, quote) {
 
         <div class="center-line" id="date-preview">${vnDateText(q.quoteDate, q.city)}</div>
         <input class="title-input" id="f-title" value="${escapeHtml(q.title || "")}" placeholder="Tên báo giá (chung cho mọi sheet)" ${!editable ? "disabled" : ""} />
-        <div class="quote-no" id="qno-preview">(Số://${escapeHtml(q.quoteNumber)})</div>
+        <div class="quote-no" id="qno-preview">(Số: ${escapeHtml(q.quoteNumber)})</div>
 
         <textarea class="greeting" id="f-greeting" rows="2" ${!editable ? "disabled" : ""}>${escapeHtml(q.greeting || "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")}</textarea>
 
@@ -1335,7 +1360,7 @@ function renderEditor(el, quote) {
             <div class="kebab-menu" id="more-menu" hidden role="menu">
               <button id="btn-excel" role="menuitem">Tải file Excel</button>
               <button id="btn-pdf" role="menuitem">Tải file PDF</button>
-              <button id="btn-versions" role="menuitem">Lịch sử chỉnh sửa</button>
+              <button id="btn-versions" role="menuitem">Lịch sử phiên bản</button>
               ${(state.user.role === "admin" || q.createdById === state.user.id) ? `<button id="btn-members" role="menuitem">Thành viên phụ trách</button>` : ""}
               ${(q.status === "approved" || q.status === "sent") ? `
                 <div class="kebab-sep"></div>
@@ -1441,7 +1466,7 @@ function renderEditor(el, quote) {
         let v = e.target.value;
         if (prop === "vatPercent") v = Number(v);
         q[prop] = v;
-        if (prop === "quoteNumber") document.getElementById("qno-preview").textContent = `(Số://${q.quoteNumber})`;
+        if (prop === "quoteNumber") document.getElementById("qno-preview").textContent = `(Số: ${q.quoteNumber})`;
         if (prop === "quoteDate" || prop === "city") {
           document.getElementById("date-preview").textContent = vnDateText(q.quoteDate, q.city);
         }
@@ -1577,7 +1602,7 @@ function bindActions(q, isNew) {
     try {
       const updated = await api(`/api/quotes/${q.id}/send`, { method: "POST" });
       state.currentQuote = updated;
-      toast("Đã đánh dấu Đã gửi khách", "success");
+      toast("Đã đánh dấu là đã gửi khách", "success");
       render();
     } catch (e) { toast(e.message, "error"); }
   });
@@ -1587,7 +1612,7 @@ function bindActions(q, isNew) {
     try {
       const updated = await api(`/api/quotes/${q.id}/mark-converted`, { method: "POST" });
       state.currentQuote = updated;
-      toast("Đã chốt 🎉", "success");
+      toast("Đã chốt báo giá", "success");
       render();
     } catch (e) { toast(e.message, "error"); }
   });
@@ -1638,7 +1663,7 @@ async function openMembersModal(quote) {
 
 /** Version history viewer with side-by-side diff between any two revisions. */
 async function showVersions(quoteId) {
-  const m = openModal("Lịch sử phiên bản", `<div id="ver-body">Đang tải...</div>`);
+  const m = openModal("Lịch sử phiên bản", `<div id="ver-body">Đang tải…</div>`);
   try {
     const r = await api(`/api/quotes/${quoteId}/versions`);
     const versions = r.data || [];
@@ -2448,22 +2473,26 @@ function pvCompanyBanner(q) {
 }
 function previewCLF(q, s) {
   const items = s.items || [];
-  const rk = pvRowKinds(items);
-  let n = 0; const sttFor = rk.map(k => k === "head" ? ++n : null);
+  const { rows, eff } = pvRows(items, false, !!s.groupSubtotal);
   const vatPct = Number(q.vatPercent) || 0;
   const infoLines = items.filter(it => it.kind === "info").map(it => (it.name || "").trim()).filter(Boolean);
-  let subtotal = 0;
-  const body = items.map((it, i) => {
-    if (rk[i] === "info") return "";   // CLF folds info into the banner
-    const amt = pvAmount(it, false); subtotal += amt;
+  const body = rows.map((row, i) => {
+    if (row.kind === "info") return "";   // CLF folds info into the banner
+    if (row.kind === "section") {
+      const it = row.it;
+      const amtCell = row.groupSubtotal ? pvMoney(row.groupSum * row.gmult) : "";
+      return `<tr class="xlsx-section"><td class="xlsx-stt">${escapeHtml(row.letter)}</td><td style="font-weight:700">${nl2br(it.name)}</td><td></td><td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td><td class="xlsx-num">${pvMoney(row.groupSum)}</td><td class="xlsx-num">${amtCell}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
+    }
+    const it = row.it, amt = row.amt;
     const neg = amt < 0 ? " xlsx-neg" : "";
     let head = "";
-    if (rk[i] === "head") {
-      const span = pvRowspan(rk, i);
-      head = `<td class="xlsx-stt" rowspan="${span}">${sttFor[i]}</td><td rowspan="${span}" style="font-weight:700">${nl2br(it.name)}</td>`;
+    if (row.kind === "head") {
+      const span = pvRowspan(eff, i);
+      head = `<td class="xlsx-stt" rowspan="${span}">${row.stt}</td><td rowspan="${span}" style="font-weight:700">${nl2br(it.name)}</td>`;
     }
     return `<tr>${head}<td class="xlsx-italic">${nl2br(it.detail)}</td><td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td><td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
   }).join("");
+  const subtotal = sheetSubtotalGrouped(items, false, !!s.groupSubtotal);
   const vat = subtotal * vatPct / 100;
   const kg = [`Kính gửi: ${escapeHtml(q.toCompany || "…..")}`];
   if (q.toContact) kg.push(escapeHtml(q.toContact));
@@ -2490,23 +2519,28 @@ function previewGN(q, s, tpl) {
   const wide = NC;                      // colspan for full-width chrome rows
   const lblSpan = NC - 2;               // totals label spans up to the price column
   const items = s.items || [];
-  const rk = pvRowKinds(items);
-  let n = 0; const sttFor = rk.map(k => k === "head" ? ++n : null);
+  const { rows, eff } = pvRows(items, usesDays, !!s.groupSubtotal);
   const vatPct = Number(q.vatPercent) || 0;
-  let subtotal = 0;
   const daysHead = usesDays ? `<td>SỐ NGÀY</td>` : "";
-  const body = items.map((it, i) => {
-    if (rk[i] === "info") return `<tr><td></td><td class="xlsx-italic" colspan="${NC - 1}">${nl2br(it.name)}</td></tr>`;
-    const amt = pvAmount(it, usesDays); subtotal += amt;
+  const body = rows.map((row, i) => {
+    if (row.kind === "info") return `<tr><td></td><td class="xlsx-italic" colspan="${NC - 1}">${nl2br(row.it.name)}</td></tr>`;
+    if (row.kind === "section") {
+      const it = row.it;
+      const daysCell = usesDays ? `<td></td>` : "";
+      const amtCell = row.groupSubtotal ? pvMoney(row.groupSum * row.gmult) : "";
+      return `<tr class="xlsx-section"><td class="xlsx-stt">${escapeHtml(row.letter)}</td><td style="font-weight:700">${nl2br(it.name)}</td><td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td>${daysCell}<td class="xlsx-num">${pvMoney(row.groupSum)}</td><td class="xlsx-num">${amtCell}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
+    }
+    const it = row.it, amt = row.amt;
     const neg = amt < 0 ? " xlsx-neg" : "";
     let head = "";
-    if (rk[i] === "head") {
-      const span = pvRowspan(rk, i);
-      head = `<td class="xlsx-stt" rowspan="${span}">${sttFor[i]}</td><td class="xlsx-italic" rowspan="${span}">${nl2br(it.name)}</td>`;
+    if (row.kind === "head") {
+      const span = pvRowspan(eff, i);
+      head = `<td class="xlsx-stt" rowspan="${span}">${row.stt}</td><td class="xlsx-italic" rowspan="${span}">${nl2br(it.name)}</td>`;
     }
     const daysCell = usesDays ? `<td class="xlsx-center">${pvMoney(it.days)}</td>` : "";
     return `<tr>${head}<td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td>${daysCell}<td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
   }).join("");
+  const subtotal = sheetSubtotalGrouped(items, usesDays, !!s.groupSubtotal);
   const vat = subtotal * vatPct / 100;
   const fromName = state.companies.find(c => c.id === q.companyId)?.name || "";
   return `<table class="xlsx-page xlsx-gn">
@@ -2530,7 +2564,7 @@ function previewSummary(q) {
   const rows = (q.sheets || []).map((s, i) => {
     const tpl = state.templates.find(t => t.id === s.templateId);
     const usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
-    const sub = (s.items || []).reduce((a, it) => a + pvAmount(it, usesDays), 0);
+    const sub = sheetSubtotalGrouped(s.items, usesDays, !!s.groupSubtotal);
     subtotalAll += sub;
     return { idx: i + 1, name: s.name || (tpl && tpl.name) || ("Sheet " + (i + 1)), sub };
   });
@@ -2605,7 +2639,7 @@ function drawUsers() {
     const u = state.users.find(x => x.id === parseInt(b.dataset.toggle, 10));
     try {
       await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ active: !u.active }) });
-      toast("Đã cập nhật", "success");
+      toast(u.active ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản", "success");
       loadUsers();
     } catch (e) { toast(e.message, "error"); }
   }));
@@ -2931,10 +2965,10 @@ async function renderDashboard(el) {
 async function renderCustomers(el) {
   el.innerHTML = `<h1>Mã khách hàng</h1>
     <div class="toolbar">
-      <input id="cust-q" placeholder="Tìm theo mã hoặc tên công ty..." style="flex:1; min-width:240px"/>
+      <input id="cust-q" placeholder="Tìm theo mã hoặc tên công ty…" style="flex:1; min-width:240px"/>
       <button class="btn btn-primary" id="btn-new-cust">+ Khách mới</button>
     </div>
-    <div id="cust-body">Đang tải...</div>`;
+    <div id="cust-body">Đang tải…</div>`;
   let q = "";
   const reload = async () => {
     const qs = "size=100" + (q ? `&q=${encodeURIComponent(q)}` : "");
@@ -2971,7 +3005,7 @@ async function renderCustomers(el) {
 async function pickCustomer() {
   return new Promise((resolve) => {
     const m = openModal("Chọn khách hàng", `
-      <input id="cp-q" placeholder="Tìm tên / mã / SĐT..." autofocus
+      <input id="cp-q" placeholder="Tìm theo tên / mã / SĐT…" autofocus
         style="width:100%;padding:8px;border:1px solid #d8dbe3;border-radius:6px;margin-bottom:10px"/>
       <div id="cp-list" style="max-height:50vh;overflow:auto"></div>`);
     const q = m.find("#cp-q");
@@ -3030,10 +3064,10 @@ function editCustomer(id) {
 async function renderProducts(el) {
   el.innerHTML = `<h1>Sản phẩm / Dịch vụ</h1>
     <div class="toolbar">
-      <input id="p-q" placeholder="Tìm theo SKU hoặc tên..." style="flex:1"/>
+      <input id="p-q" placeholder="Tìm theo SKU hoặc tên…" style="flex:1"/>
       <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
     </div>
-    <div id="p-body">Đang tải...</div>`;
+    <div id="p-body">Đang tải…</div>`;
   let q = "";
   const reload = async () => {
     try {
@@ -3102,7 +3136,7 @@ function editProduct(id) {
       basePrice: Number(m.find("#pf-base").value) || 0,
       description: m.find("#pf-desc").value.trim() || null,
     };
-    if (!body.sku || !body.name) { toast("Thiếu SKU hoặc tên", "error"); return; }
+    if (!body.sku || !body.name) { toast("Vui lòng nhập SKU và tên sản phẩm", "error"); return; }
     try {
       if (isNew) await api("/api/products", { method: "POST", body: JSON.stringify(body) });
       else await api(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(body) });
