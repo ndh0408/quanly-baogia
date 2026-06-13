@@ -89,8 +89,8 @@ router.post(
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const u = await prisma.user.findFirst({ where: { id: req.params.id } });
-    if (!u) return res.status(404).json({ error: "Không tìm thấy" });
-    if (u.active) return res.status(400).json({ error: "Tài khoản đã kích hoạt" });
+    if (!u) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
+    if (u.active) return res.status(400).json({ error: "Tài khoản đã được kích hoạt, không cần gửi lại lời mời" });
     if (!u.email) return res.status(400).json({ error: "Tài khoản không có email" });
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
@@ -112,7 +112,7 @@ router.post(
     // includeDeleted: username is unique across soft-deleted rows too — a plain
     // check would miss a deleted holder and surface the DB constraint as a 500.
     const exists = await prisma.user.findFirst({ where: { username }, includeDeleted: true });
-    if (exists) return res.status(409).json({ error: exists.deletedAt ? "Username thuộc tài khoản đã xoá" : "Username đã tồn tại" });
+    if (exists) return res.status(409).json({ error: exists.deletedAt ? "Tên đăng nhập thuộc về một tài khoản đã xóa" : "Tên đăng nhập đã tồn tại" });
 
     const user = await prisma.user.create({
       data: {
@@ -136,7 +136,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const before = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
-    if (!before) return res.status(404).json({ error: "Không tìm thấy user" });
+    if (!before) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
 
     const { password, ...rest } = req.body;
     const data = { ...rest };
@@ -197,7 +197,7 @@ router.delete(
     if (count > 0) {
       // Soft-delete still allowed via active=false, but block to preserve audit trail.
       return res.status(409).json({
-        error: `User đang gắn với ${count} báo giá. Hãy khóa (active=false) thay vì xóa.`,
+        error: `Tài khoản đang gắn với ${count} báo giá. Hãy khóa tài khoản thay vì xóa.`,
       });
     }
     const before = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });

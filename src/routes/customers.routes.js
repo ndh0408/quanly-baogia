@@ -15,7 +15,7 @@ router.use(requireAuth);
 async function loadAuthorizedCustomer(req, res, action) {
   const customer = await prisma.customer.findFirst({ where: { id: req.params.id } });
   if (!customer) {
-    res.status(404).json({ error: "Không tìm thấy" });
+    res.status(404).json({ error: "Không tìm thấy khách hàng" });
     return null;
   }
   if (!canScoped(req.session, "customer", action, customer)) {
@@ -28,10 +28,10 @@ async function loadAuthorizedCustomer(req, res, action) {
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 const CustomerCreate = z.object({
-  code: z.string().max(40).optional(),
-  name: z.string().min(1, "Thiếu tên").max(200),
+  code: z.string().max(40, "Mã khách hàng tối đa 40 ký tự").optional(),
+  name: z.string().min(1, "Vui lòng nhập tên khách hàng").max(200, "Tên khách hàng tối đa 200 ký tự"),
   taxCode: z.string().max(40).optional().nullable(),
-  email: z.string().email().max(120).optional().nullable().or(z.literal("").transform(() => null)),
+  email: z.string().email("Email không hợp lệ").max(120, "Email tối đa 120 ký tự").optional().nullable().or(z.literal("").transform(() => null)),
   phone: z.string().max(40).optional().nullable(),
   address: z.string().max(500).optional().nullable(),
   city: z.string().max(120).optional().nullable(),
@@ -55,10 +55,10 @@ const ListQuery = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
 });
 
-const NoteCreate = z.object({ body: z.string().min(1).max(4000) });
+const NoteCreate = z.object({ body: z.string().min(1, "Vui lòng nhập nội dung ghi chú").max(4000, "Ghi chú tối đa 4000 ký tự") });
 const FollowUpCreate = z.object({
-  dueAt: z.coerce.date(),
-  note: z.string().min(1).max(1000),
+  dueAt: z.coerce.date({ error: "Vui lòng chọn ngày nhắc" }),
+  note: z.string().min(1, "Vui lòng nhập nội dung nhắc").max(1000, "Nội dung tối đa 1000 ký tự"),
   assigneeId: z.coerce.number().int().positive().optional().nullable(),
 });
 
@@ -145,7 +145,7 @@ router.get(
         followUps: { orderBy: { dueAt: "asc" }, take: 50 },
       },
     });
-    if (!customer) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!customer) return res.status(404).json({ error: "Không tìm thấy khách hàng" });
     const quoteCount = await prisma.quote.count({ where: { customerId: customer.id } });
     res.json({ ...customer, quoteCount });
   })
@@ -221,7 +221,7 @@ router.post(
       where: { id: req.params.fid },
       include: { customer: { select: { ownerId: true } } },
     });
-    if (!f) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!f) return res.status(404).json({ error: "Không tìm thấy công việc cần theo dõi" });
     const owns =
       f.assigneeId === req.session.userId ||
       canScoped(req.session, "customer", "manage", f.customer);

@@ -13,13 +13,13 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 // === Matrix management (admin) ===
 const MatrixCreate = z.object({
-  name: z.string().min(1).max(80),
-  minAmount: z.coerce.number().nonnegative(),
+  name: z.string().min(1, "Vui lòng nhập tên ma trận duyệt").max(80, "Tên tối đa 80 ký tự"),
+  minAmount: z.coerce.number({ error: "Giá trị tối thiểu phải là số" }).nonnegative("Giá trị tối thiểu không được âm"),
   maxAmount: z.coerce.number().nonnegative().optional().nullable(),
   levels: z.array(
     z.object({
       level: z.coerce.number().int().min(1),
-      roles: z.array(z.enum(["admin", "manager", "employee"])).min(1),
+      roles: z.array(z.enum(["admin", "manager", "employee"])).min(1, "Mỗi cấp duyệt phải có ít nhất 1 vai trò"),
       any: z.coerce.number().int().min(1).default(1),
     })
   ).min(1),

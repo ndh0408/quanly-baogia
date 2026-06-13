@@ -224,7 +224,7 @@ router.get(
     });
     const yy = String(year).slice(-2);
     const nn = String((c?.value ?? 0) + 1).padStart(3, "0");
-    res.json({ quoteNumber: `${prefix}${yy}${nn}`, prefix, note: "Số thực sẽ cấp khi lưu" });
+    res.json({ quoteNumber: `${prefix}${yy}${nn}`, prefix, note: "Số chính thức sẽ được cấp khi lưu" });
   })
 );
 
@@ -497,9 +497,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!can(req.session, P.QUOTE_SUBMIT) || !canOnQuote(req.session, "update", existing)) {
-      return res.status(403).json({ error: "Không có quyền" });
+      return res.status(403).json({ error: "Bạn không có quyền trình duyệt báo giá này" });
     }
     if (!["draft", "rejected"].includes(existing.status)) {
       return res.status(400).json({ error: "Chỉ trình duyệt được báo giá ở trạng thái Nháp hoặc Bị từ chối" });
@@ -555,7 +555,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
 
     // Segregation of duties: the creator may not approve their own quote.
@@ -566,12 +566,12 @@ router.post(
     }
 
     const pending = await nextPendingLevel(id, existing.currentVersion);
-    if (!pending) return res.status(400).json({ error: "Không có level chờ duyệt" });
+    if (!pending) return res.status(400).json({ error: "Không có cấp duyệt nào đang chờ" });
     if (await hasEarlierPending(id, existing.currentVersion, pending.level)) {
-      return res.status(400).json({ error: "Có level trước chưa duyệt" });
+      return res.status(400).json({ error: "Còn cấp duyệt trước đó chưa được duyệt" });
     }
     if (!(await canApproveLevel(id, existing.currentVersion, pending.level, req.session.role))) {
-      return res.status(403).json({ error: "Vai trò không được duyệt level này" });
+      return res.status(403).json({ error: "Vai trò của bạn không được phép duyệt cấp này" });
     }
 
     // One transaction with optimistic guards: the approval row must still be
@@ -620,11 +620,11 @@ router.post(
 router.post(
   "/:id/reject",
   requirePermission(P.QUOTE_REJECT),
-  validate({ params: idParam, body: z.object({ comment: z.string().min(5, "Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)").max(2000) }) }),
+  validate({ params: idParam, body: z.object({ comment: z.string().min(5, "Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)").max(2000, "Lý do tối đa 2000 ký tự") }) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
 
     const pending = await nextPendingLevel(id, existing.currentVersion);
@@ -676,7 +676,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", existing)) {
       return res.status(403).json({ error: "Bạn không có quyền gửi báo giá này" });
     }
@@ -704,7 +704,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền chốt báo giá này" });
     }
@@ -729,7 +729,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền cập nhật báo giá này" });
     }
@@ -772,7 +772,7 @@ router.get(
     const ver = await prisma.quoteVersion.findUnique({
       where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.v } },
     });
-    if (!ver) return res.status(404).json({ error: "Không tìm thấy version" });
+    if (!ver) return res.status(404).json({ error: "Không tìm thấy phiên bản" });
     res.json({ ...ver, id: ver.id.toString(), total: Number(ver.total) });
   })
 );
@@ -790,7 +790,7 @@ router.get(
       prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.a } } }),
       prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.b } } }),
     ]);
-    if (!va || !vb) return res.status(404).json({ error: "Version không tồn tại" });
+    if (!va || !vb) return res.status(404).json({ error: "Phiên bản không tồn tại" });
     res.json({ from: req.params.a, to: req.params.b, changes: diffVersions(va.payload, vb.payload) });
   })
 );
@@ -820,7 +820,7 @@ router.put(
     const quote = await prisma.quote.findFirst({ where: { id } });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (quote.createdById !== req.session.userId && !can(req.session, P.QUOTE_UPDATE_ALL)) {
-      return res.status(403).json({ error: "Chỉ người tạo hoặc Giám đốc mới quản lý được thành viên" });
+      return res.status(403).json({ error: "Chỉ người tạo hoặc Quản trị mới quản lý được thành viên" });
     }
     // The creator is always kept as a member.
     const ids = [...new Set([quote.createdById, ...req.body.memberIds])];
@@ -844,7 +844,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     // A won deal is terminal — nobody (not even delete:all) may remove it.
     if (existing.status === "converted") {
       return res.status(400).json({ error: "Không thể xóa báo giá đã chốt" });
@@ -853,7 +853,7 @@ router.delete(
       canOnQuote(req.session, "delete", existing) &&
       (existing.status === "draft" || existing.status === "rejected");
     if (!ownerDraftDelete && !can(req.session, P.QUOTE_DELETE_ALL)) {
-      return res.status(403).json({ error: "Chỉ admin hoặc người tạo (nháp/từ chối) mới được xóa" });
+      return res.status(403).json({ error: "Chỉ Quản trị hoặc người tạo (báo giá ở trạng thái Nháp/Bị từ chối) mới được xóa" });
     }
     await prisma.quote.delete({ where: { id } }); // soft delete via middleware
     await audit(req, "quote.delete", { resource: "quote", resourceId: id, before: { status: existing.status } });
@@ -868,7 +868,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const src = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
-    if (!src) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!src) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     // Must be allowed to read the source AND to create quotes.
     if (!canOnQuote(req.session, "read", src)) {
       return res.status(403).json({ error: "Bạn không có quyền sao chép báo giá này" });

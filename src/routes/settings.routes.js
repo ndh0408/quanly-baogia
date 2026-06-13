@@ -31,7 +31,7 @@ router.get(
       return res.status(403).json({ error: "Không có quyền đọc cấu hình này" });
     }
     const row = await prisma.setting.findUnique({ where: { key: req.params.key } });
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return res.status(404).json({ error: "Không tìm thấy cấu hình" });
     res.json(row.value);
   })
 );

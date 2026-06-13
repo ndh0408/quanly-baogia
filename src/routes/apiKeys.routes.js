@@ -17,8 +17,8 @@ const SCOPES = [
 ];
 
 const Create = z.object({
-  name: z.string().min(1).max(80),
-  scopes: z.array(z.enum(SCOPES)).min(1),
+  name: z.string().min(1, "Vui lòng nhập tên khóa API").max(80, "Tên tối đa 80 ký tự"),
+  scopes: z.array(z.enum(SCOPES)).min(1, "Vui lòng chọn ít nhất 1 quyền"),
   expiresAt: z.coerce.date().optional().nullable(),
 });
 

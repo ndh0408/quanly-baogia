@@ -27,7 +27,7 @@ export const processors = {
           },
         },
       });
-      if (!quote) throw new Error("Quote not found");
+      if (!quote) throw new Error("Không tìm thấy báo giá");
       const buf = await buildQuoteBuffer(quote);
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
@@ -50,7 +50,7 @@ export const processors = {
           sheets: { orderBy: { order: "asc" }, include: { template: true, items: { orderBy: { order: "asc" } } } },
         },
       });
-      if (!quote) throw new Error("Quote not found");
+      if (!quote) throw new Error("Không tìm thấy báo giá");
       const buf = await renderQuotePdf({
         ...quote,
         subtotal: Number(quote.subtotal),
@@ -97,7 +97,7 @@ if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\", "/")}` || pr
   for (const [queueName, jobs] of Object.entries(processors)) {
     const w = createWorker(queueName, async (job) => {
       const handler = jobs[job.name];
-      if (!handler) throw new Error(`no handler for ${queueName}/${job.name}`);
+      if (!handler) throw new Error(`Không xử lý được công việc (${queueName}/${job.name})`);
       return handler(job);
     }, Number(process.env.WORKER_CONCURRENCY || 4));
     if (w) workers.push(w);

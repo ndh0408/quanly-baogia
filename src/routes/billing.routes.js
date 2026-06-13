@@ -97,15 +97,15 @@ router.post(
   "/checkout",
   requireAuth, requireRole("admin"),
   validate({ body: z.object({
-    planCode: z.string().min(1),
-    successUrl: z.string().url(),
-    cancelUrl: z.string().url(),
+    planCode: z.string().min(1, "Vui lòng chọn gói dịch vụ"),
+    successUrl: z.string().url("Địa chỉ URL không hợp lệ"),
+    cancelUrl: z.string().url("Địa chỉ URL không hợp lệ"),
   })}),
   asyncHandler(async (req, res) => {
     const stripe = getStripe();
-    if (!stripe) return res.status(503).json({ error: "Stripe chưa cấu hình" });
+    if (!stripe) return res.status(503).json({ error: "Chưa cấu hình Stripe. Vui lòng thiết lập khóa Stripe trước khi thanh toán." });
     const plan = await prisma.plan.findUnique({ where: { code: req.body.planCode } });
-    if (!plan || !plan.stripePriceId) return res.status(400).json({ error: "Plan không có stripePriceId" });
+    if (!plan || !plan.stripePriceId) return res.status(400).json({ error: "Gói cước này chưa được liên kết với giá Stripe (thiếu Stripe Price ID)" });
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -128,7 +128,7 @@ webhookRouter.post(
   asyncHandler(async (req, res) => {
     const stripe = getStripe();
     if (!stripe || !config.STRIPE_WEBHOOK_SECRET) {
-      return res.status(503).json({ error: "Stripe webhook chưa cấu hình" });
+      return res.status(503).json({ error: "Chưa cấu hình Stripe webhook (thiếu STRIPE_WEBHOOK_SECRET)." });
     }
     let event;
     try {

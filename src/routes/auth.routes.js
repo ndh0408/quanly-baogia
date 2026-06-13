@@ -88,7 +88,7 @@ router.get(
       where: { id: req.session.userId },
       select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, mfaEnabled: true, lastLoginAt: true },
     });
-    if (!user) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!user) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
     // Ship the authoritative capability list so the SPA gates UI from the server catalog.
     res.json({ ...user, permissions: permissionsForRole(user.role) });
   })
@@ -99,10 +99,10 @@ router.post(
   "/profile",
   requireAuth,
   validate({ body: z.object({
-    displayName: z.string().min(1).max(120).trim(),
-    phone: z.string().max(40).trim().optional().or(z.literal("").transform(() => null)),
-    title: z.string().max(120).trim().optional().or(z.literal("").transform(() => null)),
-    senderName: z.string().max(120).trim().optional().or(z.literal("").transform(() => null)),
+    displayName: z.string().min(1, "Vui lòng nhập họ tên").max(120, "Họ tên tối đa 120 ký tự").trim(),
+    phone: z.string().max(40, "Số điện thoại tối đa 40 ký tự").trim().optional().or(z.literal("").transform(() => null)),
+    title: z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
+    senderName: z.string().max(120, "Tên người gửi tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
   }) }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.update({
@@ -181,7 +181,7 @@ router.post(
 
 router.post(
   "/token/refresh",
-  validate({ body: z.object({ refreshToken: z.string().min(20) }) }),
+  validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req, res) => {
     try {
       const { user, refresh } = await rotateRefreshToken(req.body.refreshToken, {
@@ -203,7 +203,7 @@ router.post(
 
 router.post(
   "/token/revoke",
-  validate({ body: z.object({ refreshToken: z.string().min(20) }) }),
+  validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req, res) => {
     await revokeRefreshToken(req.body.refreshToken);
     res.json({ ok: true });
@@ -235,7 +235,7 @@ async function findInvitee(token) {
 // Forgot password: email a reset link (same onboarding page). Always 200 (no enumeration).
 router.post(
   "/forgot-password",
-  validate({ body: z.object({ email: z.string().email().max(160) }) }),
+  validate({ body: z.object({ email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự") }) }),
   asyncHandler(async (req, res) => {
     const email = req.body.email.trim();
     // Respond immediately and identically for every email so neither the status

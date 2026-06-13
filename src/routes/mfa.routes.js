@@ -24,7 +24,7 @@ router.post(
   "/setup",
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
-    if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã bật" });
+    if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
 
     const secret = speakeasy.generateSecret({
       length: 20,
@@ -42,10 +42,10 @@ router.post(
  */
 router.post(
   "/enable",
-  validate({ body: z.object({ secret: z.string().min(8), token: z.string().regex(/^\d{6}$/) }) }),
+  validate({ body: z.object({ secret: z.string().min(8, "Mã thiết lập không hợp lệ"), token: z.string().regex(/^\d{6}$/, "Mã xác thực phải gồm 6 chữ số") }) }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
-    if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã bật" });
+    if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
 
     const ok = speakeasy.totp.verify({
       secret: req.body.secret,
@@ -53,7 +53,7 @@ router.post(
       token: req.body.token,
       window: 1,
     });
-    if (!ok) return res.status(401).json({ error: "Mã không đúng" });
+    if (!ok) return res.status(401).json({ error: "Mã xác thực không đúng" });
 
     // Store the TOTP secret encrypted and only the HASHES of backup codes.
     // The plaintext codes are returned to the user exactly once, here.
@@ -72,14 +72,14 @@ router.post(
   validate({ body: DisableBody }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
-    if (!user.mfaEnabled) return res.status(400).json({ error: "MFA chưa bật" });
+    if (!user.mfaEnabled) return res.status(400).json({ error: "MFA chưa được bật" });
     const secret = decryptSecret(user.mfaSecret);
     const totpOk = /^\d{6}$/.test(req.body.token)
       && !!secret
       && speakeasy.totp.verify({ secret, encoding: "base32", token: req.body.token, window: 1 });
     // Backup code works even when the secret can't be decrypted (key rotation).
     const backupOk = !totpOk && !!consumeBackupCode(user.mfaBackupCodes, req.body.token);
-    if (!totpOk && !backupOk) return res.status(401).json({ error: "Mã không đúng" });
+    if (!totpOk && !backupOk) return res.status(401).json({ error: "Mã xác thực hoặc mã dự phòng không đúng" });
     await prisma.user.update({
       where: { id: user.id },
       data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [] },

@@ -1353,6 +1353,13 @@ function renderEditor(el, quote) {
           <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả trên màn hình lẫn file Excel/PDF xuất ra)</span>
         </label>` : ""}
         ${editable ? `<div class="muted" style="margin:4px 0 6px;font-size:12.5px">Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung (vd “Giảm giá khách quen”) rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>` : ""}
+        ${editable ? `<label class="toggle-totals" style="display:inline-flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13.5px;cursor:pointer">
+          <input type="checkbox" id="f-hasNote" ${q.notes ? "checked" : ""}/>
+          <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
+        </label>
+        <div id="note-wrap" style="${q.notes ? "" : "display:none"};margin:0 0 10px">
+          <textarea id="f-notes" rows="2" placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical">${escapeHtml(q.notes || "")}</textarea>
+        </div>` : (q.notes ? `<div class="muted" style="margin:8px 0"><strong>Ghi chú:</strong> ${escapeHtml(q.notes)}</div>` : "")}
         <div class="quote-summary" style="${q.showTotals === false ? "display:none" : ""}">
           ${renderQuoteSummary(q)}
         </div>
@@ -1533,6 +1540,17 @@ function bindActions(q, isNew) {
     if (sum) sum.style.display = q.showTotals ? "" : "none";
     refreshPreview(q);
   });
+  // Ghi chú cuối báo giá (quote.notes): bật/tắt ô nhập; tắt → xoá nội dung.
+  const noteBox = document.getElementById("f-hasNote");
+  const noteWrap = document.getElementById("note-wrap");
+  const noteInput = document.getElementById("f-notes");
+  if (noteBox) noteBox.addEventListener("change", () => {
+    if (noteWrap) noteWrap.style.display = noteBox.checked ? "" : "none";
+    if (!noteBox.checked) { q.notes = ""; if (noteInput) noteInput.value = ""; }
+    else if (noteInput) noteInput.focus();
+    refreshPreview(q);
+  });
+  if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; refreshPreview(q); });
   const saveBtn = document.getElementById("btn-save");
   if (saveBtn) saveBtn.addEventListener("click", async () => {
     if (saveBtn.disabled) return;                 // guard against double-click → double POST
@@ -2595,6 +2613,7 @@ function previewGN(q, s, tpl) {
     <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">VAT ${vatPct}%</td><td class="xlsx-num">${pvMoney(tt.vat)}</td><td></td></tr>
     ${tt.discount > 0 ? `<tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Giảm giá</td><td class="xlsx-num">-${pvMoney(tt.discount)}</td><td></td></tr>` : ""}
     <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Thành tiền</td><td class="xlsx-num">${pvMoney(tt.total)}</td><td></td></tr>
+    ${q.notes ? `<tr><td colspan="${wide}" class="xlsx-italic" style="white-space:pre-wrap">Ghi chú: ${nl2br(q.notes)}</td></tr>` : ""}
   </table>`;
 }
 function previewSummary(q) {

@@ -67,7 +67,7 @@ export async function notify(userId, notif) {
       await runOrQueue(QUEUES.EMAIL, "send", {
         to: user.email,
         subject: notif.title,
-        text: `${notif.body}\n\n${notif.link ? `Link: ${notif.link}\n\n` : ""}— QuanLyBaoGia`,
+        text: `${notif.body}\n\n${notif.link ? `Link: ${notif.link}\n\n` : ""}— Quản lý Báo Giá`,
         html: `<p><strong>${escapeHtml(notif.title)}</strong></p><p>${escapeHtml(notif.body)}</p>${
           notif.link ? `<p><a href="${escapeHtml(notif.link)}">Mở</a></p>` : ""
         }`,

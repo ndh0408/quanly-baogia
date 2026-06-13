@@ -13,9 +13,9 @@ router.use(requireRole("admin"));
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 const Create = z.object({
-  url: z.string().url(),
-  events: z.array(z.enum(EVENTS)).min(1),
-  secret: z.string().min(16).optional(),
+  url: z.string().url("Địa chỉ URL không hợp lệ"),
+  events: z.array(z.enum(EVENTS)).min(1, "Vui lòng chọn ít nhất 1 sự kiện"),
+  secret: z.string().min(16, "Khóa bí mật phải có ít nhất 16 ký tự").optional(),
   active: z.boolean().default(true),
 });
 

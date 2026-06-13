@@ -26,7 +26,9 @@ export const TEMPLATE_CONFIGS = {
       extraCellsToClear: [
         "C4", "C5",                                    // customer Tel / Add (no quote field for these)
         "I12", "I13", "I14", "I15", "I16", "I17", "I18", // stray notes in far column
-        "H16", "C19", "C20", "C21",                    // sample note block + leftover note
+        "H16", "F5",                                    // leftover sample note + địa chỉ From cũ (đã dời lên F4)
+        // NB: C19:C21 (vùng "* Ghi chú:" cạnh phần tổng) KHÔNG xóa ở đây nữa —
+        // nó được ghi đè bằng quote.notes (hoặc clear) trong applyPalette().
       ],
       keepImagesAboveRow: 5,
     },
@@ -36,9 +38,11 @@ export const TEMPLATE_CONFIGS = {
       toPhone:     "C4",
       toAddress:   "C5",
       fromContactCell: "F3",
-      fromContactFormat: ({ contact, title }) => [contact, title].filter(Boolean).join(" _ "),
-      fromPhone:   "F4",
-      fromAddress: "F5",
+      // Gộp 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951" (tên _ chức danh_SĐT)
+      fromContactFormat: ({ contact, title, phone }) =>
+        [[contact, title].filter(Boolean).join(" _ "), phone].filter(Boolean).join("_"),
+      // SĐT đã gộp vào dòng trên → địa chỉ lên F4 (F5 mẫu cũ được clear trong cleanup)
+      fromAddress: "F4",
       date:        "B6",
       title:       "B7",
       titleFormat: baoGiaTitle,
@@ -80,6 +84,19 @@ export const TEMPLATE_CONFIGS = {
         rowOffset: 3,
         formula: ({ subtotalRow, vatRow }) => `G${subtotalRow}+G${vatRow}`,
       },
+    },
+    // ===== Bảng màu GN (khớp mẫu Marico_Decor: peach + xanh lá + tên xanh dương) =====
+    // Template gốc GN_KhongNgay.xlsx có header/tổng màu nâu đậm (accent6 darker 50%,
+    // chữ trắng) — đè lại thành peach (accent6 lighter 80%) + chữ đen, nhóm thành xanh
+    // lá, STT/Hạng Mục xanh dương, số tiền tổng đỏ. Áp trong applyPalette() (excel.js).
+    palette: {
+      headerRows:  [10, 11],     // hàng tiêu đề cột (đứng yên vì nằm trên firstRow)
+      headerFill:  "FFFDEADA",   // peach (cam accent6 sáng 80%)
+      sectionFill: "FFE2EFDA",   // xanh lá nhạt — hàng nhóm A/B/C
+      totalsFill:  "FFFDEADA",   // peach — 3 dòng Cộng/VAT/Thành Tiền (nhãn + số đều đen đậm)
+      nameColor:   "FF0070C0",   // xanh dương đậm — STT + Hạng Mục
+      noteCol:     "C",          // cột "Ghi chú" merged cạnh phần tổng (C19:C21)
+      noteColor:   "FF843C0C",   // nâu đỏ — dòng "Ghi chú:"
     },
   },
 

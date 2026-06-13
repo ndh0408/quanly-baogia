@@ -14,18 +14,18 @@ router.use(requireAuth);
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 const PriceTier = z.object({
-  name: z.string().min(1).max(40),
+  name: z.string().min(1, "Vui lòng nhập tên bậc giá").max(40, "Tên bậc giá tối đa 40 ký tự"),
   minQty: z.coerce.number().int().min(0).default(0),
-  price: z.coerce.number().nonnegative(),
+  price: z.coerce.number({ error: "Giá phải là số" }).nonnegative("Giá không được âm"),
 });
 
 const Create = z.object({
-  sku: z.string().min(1).max(60),
-  name: z.string().min(1).max(200),
+  sku: z.string().min(1, "Vui lòng nhập mã SKU").max(60, "Mã SKU tối đa 60 ký tự"),
+  name: z.string().min(1, "Vui lòng nhập tên sản phẩm").max(200, "Tên sản phẩm tối đa 200 ký tự"),
   category: z.string().max(80).optional().nullable(),
   unit: z.string().max(40).optional().nullable(),
-  costPrice: z.coerce.number().nonnegative().default(0),
-  basePrice: z.coerce.number().nonnegative().default(0),
+  costPrice: z.coerce.number({ error: "Giá vốn phải là số" }).nonnegative("Giá vốn không được âm").default(0),
+  basePrice: z.coerce.number({ error: "Giá bán phải là số" }).nonnegative("Giá bán không được âm").default(0),
   description: z.string().max(2000).optional().nullable(),
   active: z.boolean().default(true),
   priceTiers: z.array(PriceTier).max(10).default([]),
@@ -132,7 +132,7 @@ router.get(
       where: { id: req.params.id },
       include: { priceTiers: { orderBy: { minQty: "asc" } } },
     });
-    if (!p) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!p) return res.status(404).json({ error: "Không tìm thấy sản phẩm" });
     res.json(present(p, { showCost: can(req.session, P.PRODUCT_READ_COST) }));
   })
 );
@@ -144,7 +144,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const { priceTiers, ...rest } = req.body;
     const before = await prisma.product.findFirst({ where: { id: req.params.id } });
-    if (!before) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!before) return res.status(404).json({ error: "Không tìm thấy sản phẩm" });
 
     const data = { ...rest };
     if (rest.costPrice !== undefined) data.costPrice = D(rest.costPrice);
@@ -176,7 +176,7 @@ router.delete(
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const before = await prisma.product.findFirst({ where: { id: req.params.id } });
-    if (!before) return res.status(404).json({ error: "Không tìm thấy" });
+    if (!before) return res.status(404).json({ error: "Không tìm thấy sản phẩm" });
     await prisma.product.delete({ where: { id: req.params.id } }); // soft delete (db.js middleware)
     await audit(req, "product.delete", { resource: "product", resourceId: req.params.id });
     res.json({ ok: true });

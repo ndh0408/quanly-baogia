@@ -48,7 +48,7 @@ export async function authenticateCredentials(req, { username, password, mfaToke
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     await recordAttempt(false, "locked");
     await audit(req, "login.locked", { resource: "user", resourceId: user.id, actorId: user.id, after: { flow } });
-    return { ok: false, status: 423, error: `Tài khoản tạm khóa đến ${user.lockedUntil.toISOString()}` };
+    return { ok: false, status: 423, error: `Tài khoản đang tạm khóa, vui lòng thử lại sau ${config.LOGIN_LOCKOUT_MINUTES} phút` };
   }
 
   if (!passwordOk) {

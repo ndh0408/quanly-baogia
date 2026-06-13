@@ -53,6 +53,26 @@ function ensureWrap(cell) {
   cell.alignment = align;
 }
 
+/**
+ * Set a cell's fill and/or font color WITHOUT leaking the change to sibling cells.
+ * ExcelJS shares one style object across every cell that has identical styling
+ * (very common in template-loaded sheets where whole item ranges are styled the
+ * same). Mutating a property via `cell.fill = …` / `cell.font = …` mutates that
+ * SHARED object, so the colour bleeds onto neighbouring cells (e.g. a green group
+ * row tinting the plain item rows around it). Cloning the cell's style into a fresh
+ * per-cell object first isolates the change to this one cell.
+ */
+function paintCell(cell, { fill, fontColor, bold } = {}) {
+  const style = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+  if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+  if (fontColor != null || bold != null) {
+    style.font = { ...(style.font || {}) };
+    if (fontColor != null) style.font.color = { argb: fontColor };
+    if (bold != null) style.font.bold = bold;
+  }
+  cell.style = style;
+}
+
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
 function clean(s) {
   if (s == null) return "";
@@ -148,6 +168,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
+  const pal = cfg.palette || null;   // bảng màu tuỳ template (GN: peach/xanh lá/xanh dương)
   let items = (sheet.items || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
 
   // Templates with a dedicated "program info" banner (CLF B5) collect kind:"info"
@@ -347,11 +368,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (cols.unitPrice) ws.getCell(`${cols.unitPrice}${r}`).value = sectionSum[i] || null;
       if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
       if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
-      const fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDEBF7" } };
       for (const col of Object.values(cols)) {
-        const cell = ws.getCell(`${col}${r}`);
-        cell.font = { ...(cell.font || {}), bold: true };
-        cell.fill = fill;
+        paintCell(ws.getCell(`${col}${r}`), {
+          fill: pal?.sectionFill || "FFDDEBF7",
+          bold: true,
+          ...(pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {}),
+        });
       }
     } else if (it && effKind[i] === "info") {
       // Program-info line: free text in the Hạng Mục cell, no STT / qty / price / amount.
@@ -503,6 +525,79 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         try { ws.getCell(`${String.fromCharCode(cc)}${newRow}`).value = null; } catch {}
       }
       safeMerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
+    }
+  }
+
+  // === Áp bảng màu mới + Ghi chú (chỉ template khai báo cfg.palette, vd GN) ===
+  // GN_KhongNgay.xlsx mặc định header/tổng màu nâu đậm (chữ trắng) + nhóm xanh dương —
+  // đè lại cho khớp mẫu: header/tổng peach, nhóm xanh lá, STT/Hạng Mục xanh dương, số
+  // tiền tổng đen đậm, và in "Ghi chú" (quote.notes) vào ô cạnh phần tổng.
+  if (pal) {
+    const colVals = Object.values(cols);
+    const valueCol = t.total.valueCell;
+
+    // (a) Hàng tiêu đề cột → nền peach + chữ đen đậm (thay nền nâu/chữ trắng của mẫu).
+    if (pal.headerFill && pal.headerRows) {
+      for (const hr of pal.headerRows) {
+        for (const col of colVals) {
+          paintCell(ws.getCell(`${col}${hr}`), { fill: pal.headerFill, fontColor: "FF000000", bold: true });
+        }
+      }
+    }
+
+    // (b) STT + Hạng Mục của các hàng item (đầu nhóm) → chữ xanh dương đậm.
+    if (pal.nameColor) {
+      for (let i = 0; i < slotRows.length; i++) {
+        if (!items[i] || effKind[i] !== "head") continue;
+        for (const col of [cols.stt, cols.name]) {
+          if (!col) continue;
+          paintCell(ws.getCell(`${col}${slotRows[i]}`), { fontColor: pal.nameColor, bold: true });
+        }
+      }
+    }
+
+    // (c) 3 dòng tổng (Cộng/VAT/Thành Tiền + Giảm Giá nếu có) → nền peach, chữ đen đậm.
+    if (pal.totalsFill || pal.totalsValueColor) {
+      const totalRows = [subtotalRow, vatRow, totalRow];
+      if (discountRow) totalRows.push(discountRow);
+      // chỉ tô các cột thuộc khối tổng (nhãn + giá trị) để không đè ô Ghi chú bên trái
+      const tCols = new Set();
+      for (const grp of [t.subtotal, t.vat, t.total]) {
+        for (const [a, b] of (grp.labelCells || [])) {
+          for (let cc = a.charCodeAt(0); cc <= b.charCodeAt(0); cc++) tCols.add(String.fromCharCode(cc));
+        }
+        if (grp.valueCell) tCols.add(grp.valueCell);
+      }
+      for (const tr of totalRows) {
+        if (pal.totalsFill) {
+          for (const col of tCols) {
+            paintCell(ws.getCell(`${col}${tr}`), { fill: pal.totalsFill, fontColor: "FF000000", bold: true });
+          }
+        }
+        if (pal.totalsValueColor) {
+          paintCell(ws.getCell(`${valueCol}${tr}`), { fontColor: pal.totalsValueColor, bold: true });
+        }
+      }
+    }
+
+    // (d) Ghi chú: in quote.notes vào ô merged ở cột noteCol cạnh phần tổng (vd C19:C21).
+    //     Có ghi chú → "Ghi chú: <nội dung>" (nâu đỏ); không có → để trống.
+    if (pal.noteCol) {
+      const c1 = `${pal.noteCol}${subtotalRow}`, c2 = `${pal.noteCol}${totalRow}`;
+      safeUnmerge(ws, `${c1}:${c2}`);
+      safeMerge(ws, `${c1}:${c2}`);
+      const ncell = ws.getCell(c1);
+      const note = (quote.notes == null ? "" : String(quote.notes)).trim();
+      if (note) {
+        const nf = { name: "Times New Roman", family: 1, size: 11, color: { argb: pal.noteColor || "FF843C0C" } };
+        ncell.value = { richText: [
+          { text: "Ghi chú: ", font: { ...nf, bold: true } },
+          { text: note, font: { ...nf } },
+        ] };
+        ncell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+      } else {
+        ncell.value = null;
+      }
     }
   }
 

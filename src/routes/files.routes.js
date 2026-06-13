@@ -76,8 +76,8 @@ router.post(
   "/",
   upload.single("file"),
   asyncHandler(async (req, res) => {
-    if (!isStorageEnabled()) return res.status(503).json({ error: "Storage chưa cấu hình" });
-    if (!req.file) return res.status(400).json({ error: "Thiếu file" });
+    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
+    if (!req.file) return res.status(400).json({ error: "Vui lòng chọn tệp để tải lên" });
     // Verify content by magic bytes — never trust the client MIME/extension.
     const sniffed = sniffType(req.file.buffer, req.file.mimetype);
     if (!sniffed) {
@@ -102,7 +102,7 @@ router.get(
   "/sign-download",
   validate({ query: z.object({ key: z.string().min(1).max(500), expires: z.coerce.number().int().min(60).max(86400).default(3600) }) }),
   asyncHandler(async (req, res) => {
-    if (!isStorageEnabled()) return res.status(503).json({ error: "Storage chưa cấu hình" });
+    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     if (!(await canAccessKey(req.session, req.query.key))) {
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
@@ -120,11 +120,11 @@ router.post(
   "/sign-upload",
   validate({ body: z.object({
     // Only allowlisted, display-safe content types — never text/html or svg.
-    contentType: z.enum(ALLOWED_MIME_VALUES),
+    contentType: z.enum(ALLOWED_MIME_VALUES, { error: "Định dạng tệp không được hỗ trợ" }),
     expires: z.coerce.number().int().min(60).max(3600).default(900),
   }) }),
   asyncHandler(async (req, res) => {
-    if (!isStorageEnabled()) return res.status(503).json({ error: "Storage chưa cấu hình" });
+    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     const ext = ALLOWED_TYPES.get(req.body.contentType).ext;
     const key = userUploadKey(req.session, ext);
     const url = await presignUpload({ key, contentType: req.body.contentType, expiresIn: req.body.expires });

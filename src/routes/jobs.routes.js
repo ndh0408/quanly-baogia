@@ -31,7 +31,7 @@ router.post(
       return res.status(403).json({ error: "Bạn không có quyền xuất báo giá này" });
     }
     const q = getQueue(QUEUES.EXPORT);
-    if (!q) return res.status(503).json({ error: "Queue chưa cấu hình (REDIS_URL trống). Dùng /api/export/:id.xlsx đồng bộ." });
+    if (!q) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình. Vui lòng dùng chức năng xuất file trực tiếp." });
     const job = await q.add(req.body.format, { quoteId: req.params.id, requestedBy: req.session.userId });
     res.status(202).json({ jobId: job.id, queue: QUEUES.EXPORT, format: req.body.format });
   })
@@ -42,16 +42,16 @@ router.get(
   requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req, res) => {
-    if (!isQueueEnabled()) return res.status(503).json({ error: "Queue chưa cấu hình" });
+    if (!isQueueEnabled()) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình" });
     const q = getQueue(req.params.queue);
-    if (!q) return res.status(404).json({ error: "Queue không tồn tại" });
+    if (!q) return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
     const job = await q.getJob(req.params.id);
-    if (!job) return res.status(404).json({ error: "Job không tồn tại" });
+    if (!job) return res.status(404).json({ error: "Không tìm thấy tác vụ" });
     // Only the user who requested the job (or a read-all holder) may read its
     // result — job.returnvalue contains a presigned download URL / document.
     const requestedBy = job.data?.requestedBy;
     if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_READ_ALL)) {
-      return res.status(403).json({ error: "Không có quyền xem job này" });
+      return res.status(403).json({ error: "Bạn không có quyền xem tác vụ này" });
     }
     const state = await job.getState();
     res.json({

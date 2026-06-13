@@ -13,7 +13,7 @@ const router = Router();
 router.use(requireAuth);
 
 const Query = z.object({
-  q: z.string().min(1).max(200),
+  q: z.string().min(1, "Vui lòng nhập từ khóa tìm kiếm").max(200, "Từ khóa tối đa 200 ký tự"),
   types: z.string().max(120).optional(),     // csv: quote,customer,product
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });

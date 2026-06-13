@@ -41,7 +41,7 @@ router.get(
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", quote)) {
-      return res.status(403).json({ error: "Không có quyền" });
+      return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
     }
 
     const buf = await runExportJob("xlsx", plain(quote), () => buildQuoteBuffer(quote));
@@ -73,7 +73,7 @@ router.get(
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", quote)) {
-      return res.status(403).json({ error: "Không có quyền" });
+      return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
     }
 
     const pdfQuote = {

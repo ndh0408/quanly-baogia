@@ -96,7 +96,7 @@ export function asyncHandler(fn) {
 
 export function notFound(req, res, next) {
   if (req.path.startsWith("/api/")) {
-    return res.status(404).json({ error: "Not found" });
+    return res.status(404).json({ error: "Không tìm thấy tài nguyên" });
   }
   next();
 }

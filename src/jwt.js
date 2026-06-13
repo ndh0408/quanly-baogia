@@ -64,10 +64,10 @@ export async function issueRefreshToken(userId, { ip, userAgent, family }) {
  * entire family — this is a replay attack signal.
  */
 export async function rotateRefreshToken(plain, { ip, userAgent }) {
-  if (!plain) throw Object.assign(new Error("Missing refresh token"), { status: 401 });
+  if (!plain) throw Object.assign(new Error("Thiếu refresh token"), { status: 401 });
   const tokenHash = hashToken(plain);
   const row = await prisma.refreshToken.findUnique({ where: { tokenHash } });
-  if (!row) throw Object.assign(new Error("Invalid refresh token"), { status: 401 });
+  if (!row) throw Object.assign(new Error("Refresh token không hợp lệ"), { status: 401 });
 
   if (row.revokedAt) {
     // Replay! Burn the entire family.
@@ -75,11 +75,11 @@ export async function rotateRefreshToken(plain, { ip, userAgent }) {
       where: { family: row.family, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    throw Object.assign(new Error("Refresh token replay detected — family revoked"), { status: 401 });
+    throw Object.assign(new Error("Refresh token không còn hợp lệ, vui lòng đăng nhập lại"), { status: 401 });
   }
   if (row.expiresAt < new Date()) {
     await prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-    throw Object.assign(new Error("Refresh token expired"), { status: 401 });
+    throw Object.assign(new Error("Refresh token đã hết hạn, vui lòng đăng nhập lại"), { status: 401 });
   }
 
   // Mark used, issue new
@@ -87,7 +87,7 @@ export async function rotateRefreshToken(plain, { ip, userAgent }) {
   const newPair = await issueRefreshToken(row.userId, { ip, userAgent, family: row.family });
   const user = await prisma.user.findUnique({ where: { id: row.userId } });
   if (!user || !user.active) {
-    throw Object.assign(new Error("User inactive"), { status: 401 });
+    throw Object.assign(new Error("Tài khoản đã bị khóa"), { status: 401 });
   }
   return { user, refresh: newPair };
 }

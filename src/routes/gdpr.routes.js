@@ -93,7 +93,7 @@ router.get(
  */
 router.post(
   "/me/delete",
-  validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT") }) }),
+  validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }) }) }),
   asyncHandler(async (req, res) => {
     const id = req.session.userId;
     await prisma.$transaction([
@@ -118,7 +118,7 @@ router.post(
     await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
     await new Promise((resolve) => req.session.destroy(() => resolve()));
     res.clearCookie("qly.sid");
-    res.json({ ok: true, message: "Tài khoản đã được xoá. Audit log lưu lại theo nghĩa vụ pháp lý." });
+    res.json({ ok: true, message: "Tài khoản đã được xóa. Nhật ký kiểm toán được giữ lại theo nghĩa vụ pháp lý." });
   })
 );
 
@@ -127,11 +127,11 @@ router.post(
   requireRole("admin"),
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
-    body: z.object({ confirm: z.literal("DELETE-USER") }),
+    body: z.object({ confirm: z.literal("DELETE-USER", { error: "Vui lòng nhập chính xác DELETE-USER để xác nhận" }) }),
   }),
   asyncHandler(async (req, res) => {
     if (req.params.id === req.session.userId) {
-      return res.status(400).json({ error: "Dùng /api/gdpr/me/delete để xoá chính bạn" });
+      return res.status(400).json({ error: "Không thể tự xóa chính mình ở đây. Vui lòng dùng chức năng \"Xóa tài khoản của tôi\"." });
     }
     await prisma.$transaction([
       prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revokedAt: new Date() } }),
