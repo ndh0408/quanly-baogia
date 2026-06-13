@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { config } from "./config.js";
+import { viZodErrorMap } from "./zodErrorMap.js";
+
+// Global Vietnamese fallback for any rule without its own message. Runs here (module
+// body, after imports) so config.js env parsing above keeps its operator-facing text,
+// while every request-time validation below resolves to Vietnamese.
+z.config({ customError: viZodErrorMap });
 
 const pwd = z
   .string()
@@ -11,34 +17,34 @@ const pwd = z
 
 const username = z
   .string()
-  .min(3, "Username tối thiểu 3 ký tự")
-  .max(40, "Username quá dài")
-  .regex(/^[a-zA-Z0-9_.-]+$/, "Username chỉ chứa chữ, số, dấu . _ -");
+  .min(3, "Tên đăng nhập tối thiểu 3 ký tự")
+  .max(40, "Tên đăng nhập tối đa 40 ký tự")
+  .regex(/^[a-zA-Z0-9_.-]+$/, "Tên đăng nhập chỉ được chứa chữ, số và các ký tự . _ -");
 
-const displayName = z.string().min(1).max(120).trim();
-const phone = z.string().max(40).trim().optional().or(z.literal("").transform(() => undefined));
-const title = z.string().max(120).trim().optional().or(z.literal("").transform(() => undefined));
+const displayName = z.string().min(1, "Vui lòng nhập họ tên").max(120, "Họ tên tối đa 120 ký tự").trim();
+const phone = z.string().max(40, "Số điện thoại tối đa 40 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
+const title = z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
 
 export const LoginSchema = z.object({
-  username: z.string().min(1, "Thiếu username").max(80),
-  password: z.string().min(1, "Thiếu mật khẩu").max(128),
+  username: z.string().min(1, "Vui lòng nhập tên đăng nhập").max(80, "Tên đăng nhập tối đa 80 ký tự"),
+  password: z.string().min(1, "Vui lòng nhập mật khẩu").max(128, "Mật khẩu tối đa 128 ký tự"),
 });
 
 export const ChangePasswordSchema = z.object({
-  oldPassword: z.string().min(1),
+  oldPassword: z.string().min(1, "Vui lòng nhập mật khẩu cũ"),
   newPassword: pwd,
 });
 
 // Admin invites an employee by email; they self-onboard.
 export const UserInviteSchema = z.object({
-  email: z.string().email("Email không hợp lệ").max(160),
+  email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự"),
   displayName,
   role: z.enum(["admin", "manager", "employee"]).default("employee"),
-  projectCode: z.string().max(40).optional().nullable(),
+  projectCode: z.string().max(40, "Mã dự án tối đa 40 ký tự").optional().nullable(),
 });
 
 export const AcceptInviteSchema = z.object({
-  token: z.string().min(10).max(200),
+  token: z.string().min(10, "Mã lời mời không hợp lệ").max(200, "Mã lời mời không hợp lệ"),
   displayName: displayName.optional(),
   phone,
   title,
@@ -62,7 +68,7 @@ export const UserUpdateSchema = z.object({
   title,
   active: z.boolean().optional(),
   password: pwd.optional(),
-  projectCode: z.string().max(40).optional().nullable(),
+  projectCode: z.string().max(40, "Mã dự án tối đa 40 ký tự").optional().nullable(),
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).
@@ -87,14 +93,19 @@ const itemSchema = z.object({
   detail: z.string().max(2000).optional().nullable(),
   unit: z.string().max(40).optional().nullable(),
   // Allow negatives so a row can act as a discount line (vd "Giảm giá" với đơn giá âm).
-  quantity: z.coerce.number().gte(-1e12).lte(1e12).default(0),
-  unitPrice: z.coerce.number().gte(-1e12).lte(1e12).default(0),
-  days: z.coerce.number().nonnegative().optional().nullable(),
+  quantity: z.coerce.number({ error: "Số lượng phải là số" }).gte(-1e12, "Số lượng không hợp lệ").lte(1e12, "Số lượng không hợp lệ").default(0),
+  unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
+  days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
+  // Raw Excel-style formulas per numeric field (editor metadata only, e.g.
+  // {"unitPrice":"=2000+3000"}). Declared so Zod KEEPS it instead of stripping it
+  // (unknown keys are dropped by default), otherwise the "remember formula" feature
+  // dies on save. Never used in totals/export — buildSheetsCreate re-validates shape.
+  formulas: z.record(z.string().max(40), z.string().max(2000)).optional().nullable(),
 });
 
 const sheetSchema = z.object({
-  templateId: z.coerce.number().int().positive(),
+  templateId: z.coerce.number({ error: "Vui lòng chọn mẫu báo giá" }).int("Mẫu báo giá không hợp lệ").positive("Vui lòng chọn mẫu báo giá"),
   name: z.string().max(120).optional().nullable(),
   order: z.coerce.number().int().optional(),
   groupSubtotal: z.boolean().optional(),
@@ -104,31 +115,31 @@ const sheetSchema = z.object({
 export const QuoteCreateSchema = z.object({
   // quoteNumber is server-generated; allow override but not required
   quoteNumber: z.string().max(40).optional(),
-  title: z.string().min(1, "Thiếu tiêu đề").max(500),
-  toCompany: z.string().min(1, "Thiếu khách hàng").max(500),
+  title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự"),
+  toCompany: z.string().min(1, "Vui lòng nhập tên khách hàng").max(500, "Tên khách hàng tối đa 500 ký tự"),
   toContact: z.string().max(200).optional().nullable(),
   toEmail: z.string().max(200).optional().nullable(),
   toPhone: z.string().max(200).optional().nullable(),
   toAddress: z.string().max(500).optional().nullable(),
-  companyId: z.coerce.number().int().positive(),
+  companyId: z.coerce.number({ error: "Vui lòng chọn công ty phát hành" }).int("Công ty phát hành không hợp lệ").positive("Vui lòng chọn công ty phát hành"),
   fromContact: z.string().max(200).optional().default(""),
   fromPhone: z.string().max(40).optional().nullable(),
   fromTitle: z.string().max(120).optional().nullable(),
   fromAddress: z.string().max(500).optional(),
   city: z.string().max(120).optional(),
-  quoteDate: z.coerce.date()
+  quoteDate: z.coerce.date({ error: "Ngày báo giá không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
     .optional(),
   validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
   greeting: z.string().max(2000).optional(),
-  vatPercent: z.coerce.number().min(0).max(100).default(8),
-  discount: z.coerce.number().min(0).max(1e12).optional(),
+  vatPercent: z.coerce.number({ error: "VAT phải là số" }).min(0, "VAT không được nhỏ hơn 0%").max(100, "VAT không được vượt quá 100%").default(8),
+  discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20),
+  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá"),
 });
 
 // IMPORTANT: defined explicitly (NOT QuoteCreateSchema.partial()) because the
@@ -139,8 +150,8 @@ export const QuoteCreateSchema = z.object({
 // the handler skips it, so only fields the client actually sent get updated.
 export const QuoteUpdateSchema = z.object({
   quoteNumber: z.string().max(40).optional(),
-  title: z.string().min(1).max(500).optional(),
-  toCompany: z.string().min(1).max(500).optional(),
+  title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự").optional(),
+  toCompany: z.string().min(1, "Vui lòng nhập tên khách hàng").max(500, "Tên khách hàng tối đa 500 ký tự").optional(),
   toContact: z.string().max(200).optional().nullable(),
   toEmail: z.string().max(200).optional().nullable(),
   toPhone: z.string().max(200).optional().nullable(),
@@ -151,18 +162,18 @@ export const QuoteUpdateSchema = z.object({
   fromTitle: z.string().max(120).optional().nullable(),
   fromAddress: z.string().max(500).optional(),
   city: z.string().max(120).optional(),
-  quoteDate: z.coerce.date()
+  quoteDate: z.coerce.date({ error: "Ngày báo giá không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
     .optional(),
   validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),
-  discount: z.coerce.number().min(0).max(1e12).optional(),
+  discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20).optional(),
+  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá").optional(),
 });
 
 export const ListQuerySchema = z.object({

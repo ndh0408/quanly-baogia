@@ -198,3 +198,30 @@ describe("computeQuoteTotals — section rows & groupSubtotal", () => {
     expect(t.subtotal.toNumber()).toBe(100);
   });
 });
+
+describe("computeQuoteTotals — info rows", () => {
+  it("info rows never contribute to the subtotal, even with stray qty/price", () => {
+    // Excel folds info into a banner and excludes it; money.js + the client must agree
+    // so a stray qty/price (via import/paste/API) can't silently inflate the stored total.
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ items: [
+        { kind: "info", name: "Thông tin chương trình", quantity: 9, unitPrice: 9999 },
+        { quantity: 1, unitPrice: 100 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(100);
+  });
+
+  it("info row inside a group does not get the section multiplier", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: true, items: [
+        { kind: "section", quantity: 3 },
+        { kind: "info", quantity: 5, unitPrice: 1000 },
+        { quantity: 1, unitPrice: 100 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(300); // 100 × 3 only; info excluded
+  });
+});

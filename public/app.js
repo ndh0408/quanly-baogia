@@ -178,6 +178,20 @@ function fmtMoney(n) {
   if (n == null || isNaN(n)) return "0";
   return Number(n).toLocaleString("vi-VN");
 }
+// Round to whole VND (half-up) — VND has no fractional unit. Mirrors src/money.js so the
+// on-screen totals equal the DB-stored totals AND the exported Excel (no sub-đồng drift).
+function roundVnd(n) { return Math.round(Number(n) || 0); }
+// Authoritative client-side total, byte-identical to computeQuoteTotals (src/money.js):
+// round subtotal, VAT from the rounded subtotal, clamp the discount to [0, gross].
+function quoteTotals(subtotalRaw, vatPct, discountRaw) {
+  const subtotal = roundVnd(subtotalRaw);
+  const vat = roundVnd(subtotal * (Number(vatPct) || 0) / 100);
+  const gross = subtotal + vat;
+  let discount = roundVnd(discountRaw);
+  if (discount < 0) discount = 0;
+  if (discount > gross) discount = gross;
+  return { subtotal, vat, discount, total: gross - discount };
+}
 function fmtDate(d) {
   if (!d) return "";
   const dt = new Date(d);
@@ -965,7 +979,7 @@ function renderNewQuote(el) {
         title: "", toCompany: "", toContact: "",
         fromContact: state.user.senderName || state.user.displayName || "", fromPhone: state.user.phone || "",
         fromTitle: state.user.title || "", fromAddress: state.companies[0]?.address || "", city: "TP. Hồ Chí Minh",
-        quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 8, customerLogo: null,
+        quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 8, discount: 0, customerLogo: null,
       },
     };
   }
@@ -1280,6 +1294,8 @@ function renderEditor(el, quote) {
             <input type="date" id="f-quoteDate" value="${q.quoteDate}" ${!editable ? "disabled" : ""} /></label>
           <label>VAT (%)
             <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} /></label>
+          <label>Giảm giá (VNĐ) <span class="muted" style="font-size:11px">(trừ vào tổng)</span>
+            <input type="number" step="1000" min="0" id="f-discount" value="${Number(q.discount) || 0}" ${!editable ? "disabled" : ""} /></label>
         </div>
 
         <div class="center-line" id="date-preview">${vnDateText(q.quoteDate, q.city)}</div>
@@ -1436,6 +1452,7 @@ function renderEditor(el, quote) {
     const sheetTplSel = document.getElementById("f-sheet-template");
     if (sheetTplSel) sheetTplSel.addEventListener("change", e => {
       activeSheet.templateId = parseInt(e.target.value, 10);
+      clearDaysIfUnused(activeSheet);   // new template has no Số Ngày column → drop stale days
       draw();
     });
 
@@ -1450,6 +1467,7 @@ function renderEditor(el, quote) {
       if (tpls.length) {
         q.sheets.forEach(s => {
           if (!tpls.find(t => t.id === s.templateId)) s.templateId = tpls[0].id;
+          clearDaysIfUnused(s);   // reassigned template may have no Số Ngày column
         });
       }
       draw();
@@ -1464,13 +1482,13 @@ function renderEditor(el, quote) {
       if (!e2) return;
       e2.addEventListener("input", (e) => {
         let v = e.target.value;
-        if (prop === "vatPercent") v = Number(v);
+        if (prop === "vatPercent" || prop === "discount") v = Number(v);
         q[prop] = v;
         if (prop === "quoteNumber") document.getElementById("qno-preview").textContent = `(Số: ${q.quoteNumber})`;
         if (prop === "quoteDate" || prop === "city") {
           document.getElementById("date-preview").textContent = vnDateText(q.quoteDate, q.city);
         }
-        if (prop === "vatPercent") updateSummary(q);
+        if (prop === "vatPercent" || prop === "discount") updateSummary(q);
         refreshPreview(q);   // header fields (Kính gửi, title, date…) feed the live preview
       });
     };
@@ -1486,6 +1504,7 @@ function renderEditor(el, quote) {
     bindField("f-quoteNumber", "quoteNumber");
     bindField("f-quoteDate", "quoteDate");
     bindField("f-vatPercent", "vatPercent");
+    bindField("f-discount", "discount");
     bindField("f-title", "title");
     bindField("f-greeting", "greeting");
 
@@ -1523,13 +1542,16 @@ function bindActions(q, isNew) {
     try {
       const payload = {
         ...q,
-        sheets: q.sheets.map((s, i) => ({
-          templateId: s.templateId,
-          name: s.name,
-          order: i + 1,
-          groupSubtotal: !!s.groupSubtotal,
-          items: (s.items || []).map((it, j) => ({ ...it, order: j + 1 })),
-        })),
+        sheets: q.sheets.map((s, i) => {
+          const usesDays = sheetUsesDays(s);   // no Số Ngày column → never persist days (else money.js inflates the stored total)
+          return {
+            templateId: s.templateId,
+            name: s.name,
+            order: i + 1,
+            groupSubtotal: !!s.groupSubtotal,
+            items: (s.items || []).map((it, j) => ({ ...it, order: j + 1, days: usesDays ? it.days : null })),
+          };
+        }),
       };
       delete payload._new;
       delete payload._activeSheet;
@@ -1803,10 +1825,23 @@ function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   let mult = 1, sum = 0;
   for (const it of (items || [])) {
     if (it.kind === "section") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
     const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
     sum += (usesDays ? qty * days * price : qty * price) * mult;
   }
   return sum;
+}
+
+function sheetUsesDays(sheet) {
+  const tpl = state.templates.find(t => t.id === sheet.templateId);
+  return !!(tpl && tpl.layout && tpl.layout.hasDays);
+}
+// A template WITHOUT a Số Ngày column must not carry per-item `days`: the grid and the
+// Excel export both ignore it, but src/money.js would still multiply qty×days×price and
+// inflate the STORED total. Clear stale days (e.g. after switching template) so all paths
+// agree. Returns sheets with days nulled where the template has no days column.
+function clearDaysIfUnused(sheet) {
+  if (!sheetUsesDays(sheet)) (sheet.items || []).forEach(it => { if (it.days != null) it.days = null; });
 }
 
 function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
@@ -2419,8 +2454,7 @@ function renderQuoteSummary(q) {
     subtotalAll += sub;
     return { idx: i + 1, name: s.name || tpl?.name || `Sheet ${i + 1}`, subtotal: sub };
   });
-  const vat = subtotalAll * vatPct / 100;
-  const total = subtotalAll + vat;
+  const tt = quoteTotals(subtotalAll, vatPct, q.discount);   // mirror src/money.js: round + clamp discount
   return `
     <h3 style="margin: 18px 0 6px">Tổng báo giá (${q.sheets.length} sheet)</h3>
     <table class="summary-table" id="summary-table">
@@ -2429,9 +2463,10 @@ function renderQuoteSummary(q) {
         ${rows.map(r => `<tr><td style="text-align:center">${r.idx}</td><td>${escapeHtml(r.name)}</td><td style="text-align:right" data-sub="${r.idx-1}">${fmtMoney(r.subtotal)}</td></tr>`).join("")}
       </tbody>
       <tfoot>
-        <tr><td colspan="2">Tổng cộng</td><td style="text-align:right" id="sum-subtotal">${fmtMoney(subtotalAll)}</td></tr>
-        <tr><td colspan="2">VAT (${vatPct}%)</td><td style="text-align:right" id="sum-vat">${fmtMoney(vat)}</td></tr>
-        <tr><td colspan="2"><strong>Thành tiền</strong></td><td style="text-align:right; color:var(--danger)"><strong id="sum-total">${fmtMoney(total)}</strong></td></tr>
+        <tr><td colspan="2">Tổng cộng</td><td style="text-align:right" id="sum-subtotal">${fmtMoney(tt.subtotal)}</td></tr>
+        <tr><td colspan="2">VAT (${vatPct}%)</td><td style="text-align:right" id="sum-vat">${fmtMoney(tt.vat)}</td></tr>
+        ${tt.discount > 0 ? `<tr><td colspan="2">Giảm giá</td><td style="text-align:right" id="sum-discount">-${fmtMoney(tt.discount)}</td></tr>` : ""}
+        <tr><td colspan="2"><strong>Thành tiền</strong></td><td style="text-align:right; color:var(--danger)"><strong id="sum-total">${fmtMoney(tt.total)}</strong></td></tr>
       </tfoot>
     </table>`;
 }
@@ -2493,7 +2528,9 @@ function previewCLF(q, s) {
     return `<tr>${head}<td class="xlsx-italic">${nl2br(it.detail)}</td><td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td><td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
   }).join("");
   const subtotal = sheetSubtotalGrouped(items, false, !!s.groupSubtotal);
-  const vat = subtotal * vatPct / 100;
+  // The quote-level discount sits on the grand total; a single-sheet export shows it on
+  // the sheet itself (excel.js onlySheet), multi-sheet shows it on the summary sheet.
+  const tt = quoteTotals(subtotal, vatPct, (q.sheets || []).length === 1 ? q.discount : 0);
   const kg = [`Kính gửi: ${escapeHtml(q.toCompany || "…..")}`];
   if (q.toContact) kg.push(escapeHtml(q.toContact));
   if (q.toEmail) kg.push("Email: " + escapeHtml(q.toEmail));
@@ -2506,9 +2543,10 @@ function previewCLF(q, s) {
     <tr class="xlsx-band xlsx-center"><td>STT</td><td>Hạng Mục</td><td>Chi Tiết</td><td>ĐVT</td><td>SỐ LƯỢNG</td><td>ĐƠN GIÁ</td><td>THÀNH TIỀN</td><td>Ghi Chú</td></tr>
     ${infoLines.length ? `<tr><td colspan="8" class="xlsx-band" style="font-weight:600">* Thông tin chương trình: ${infoLines.map(escapeHtml).join("; ")}</td></tr>` : ""}
     ${body}
-    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Tổng Cộng</td><td class="xlsx-num">${pvMoney(subtotal)}</td><td></td></tr>
-    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">VAT(${vatPct}%)</td><td class="xlsx-num">${pvMoney(vat)}</td><td></td></tr>
-    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Thành Tiền</td><td class="xlsx-num">${pvMoney(subtotal + vat)}</td><td></td></tr>
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Tổng Cộng</td><td class="xlsx-num">${pvMoney(tt.subtotal)}</td><td></td></tr>
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">VAT(${vatPct}%)</td><td class="xlsx-num">${pvMoney(tt.vat)}</td><td></td></tr>
+    ${tt.discount > 0 ? `<tr class="xlsx-band"><td colspan="6" class="xlsx-center">Giảm Giá</td><td class="xlsx-num">-${pvMoney(tt.discount)}</td><td></td></tr>` : ""}
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Thành Tiền</td><td class="xlsx-num">${pvMoney(tt.total)}</td><td></td></tr>
     <tr><td colspan="4" style="white-space:pre-wrap">* Ghi chú: \n- Tất cả các hạng mục trên là cho thuê, Colofull thu hồi sau khi tháo dỡ</td><td colspan="4" class="xlsx-center">${escapeHtml(vnDateText(q.quoteDate, q.city))}</td></tr>
     <tr><td colspan="4">XÁC NHẬN ĐỒNG Ý ĐẶT HÀNG</td><td colspan="4" class="xlsx-center" style="font-weight:700">Công Ty TNHH Colorfull</td></tr>
   </table>`;
@@ -2541,7 +2579,7 @@ function previewGN(q, s, tpl) {
     return `<tr>${head}<td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td>${daysCell}<td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
   }).join("");
   const subtotal = sheetSubtotalGrouped(items, usesDays, !!s.groupSubtotal);
-  const vat = subtotal * vatPct / 100;
+  const tt = quoteTotals(subtotal, vatPct, (q.sheets || []).length === 1 ? q.discount : 0);   // discount only on a single-sheet export (excel.js)
   const fromName = state.companies.find(c => c.id === q.companyId)?.name || "";
   return `<table class="xlsx-page xlsx-gn">
     <tr><td colspan="2">To: <b class="xlsx-green">${escapeHtml(q.toCompany || "")}</b></td><td colspan="${wide - 2}">From: ${escapeHtml(fromName)}</td></tr>
@@ -2553,9 +2591,10 @@ function previewGN(q, s, tpl) {
     <tr><td colspan="${wide}" class="xlsx-italic">${nl2br(q.greeting)}</td></tr>
     <tr class="xlsx-band xlsx-center"><td>STT</td><td>Hạng Mục</td><td>ĐVT</td><td>SỐ LƯỢNG</td>${daysHead}<td>ĐƠN GIÁ</td><td>THÀNH TIỀN</td><td>Ghi Chú</td></tr>
     ${body}
-    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(subtotal)}</td><td></td></tr>
-    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">VAT ${vatPct}%</td><td class="xlsx-num">${pvMoney(vat)}</td><td></td></tr>
-    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Thành tiền</td><td class="xlsx-num">${pvMoney(subtotal + vat)}</td><td></td></tr>
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(tt.subtotal)}</td><td></td></tr>
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">VAT ${vatPct}%</td><td class="xlsx-num">${pvMoney(tt.vat)}</td><td></td></tr>
+    ${tt.discount > 0 ? `<tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Giảm giá</td><td class="xlsx-num">-${pvMoney(tt.discount)}</td><td></td></tr>` : ""}
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Thành tiền</td><td class="xlsx-num">${pvMoney(tt.total)}</td><td></td></tr>
   </table>`;
 }
 function previewSummary(q) {
@@ -2568,16 +2607,17 @@ function previewSummary(q) {
     subtotalAll += sub;
     return { idx: i + 1, name: s.name || (tpl && tpl.name) || ("Sheet " + (i + 1)), sub };
   });
-  const vat = subtotalAll * vatPct / 100;
+  const tt = quoteTotals(subtotalAll, vatPct, q.discount);   // grand total carries the discount (mirror excel.js summary sheet)
   return `<table class="xlsx-page xlsx-summary">
     <colgroup><col style="width:50px"><col style="width:330px"><col style="width:160px"></colgroup>
     <tr><td colspan="3" class="xlsx-title">TỔNG BÁO GIÁ ${escapeHtml(q.quoteNumber || "")}</td></tr>
     <tr><td colspan="3" class="xlsx-center xlsx-italic">${escapeHtml(q.title || "")}</td></tr>
     <thead><tr><th>STT</th><th>Hạng mục</th><th>Thành tiền (VNĐ)</th></tr></thead>
     ${rows.map(r => `<tr><td class="xlsx-center">${r.idx}</td><td>${escapeHtml(r.name)}</td><td class="xlsx-num">${pvMoney(r.sub)}</td></tr>`).join("")}
-    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(subtotalAll)}</td></tr>
-    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">VAT (${vatPct}%)</td><td class="xlsx-num">${pvMoney(vat)}</td></tr>
-    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Thành tiền</td><td class="total-val">${pvMoney(subtotalAll + vat)}</td></tr>
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(tt.subtotal)}</td></tr>
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">VAT (${vatPct}%)</td><td class="xlsx-num">${pvMoney(tt.vat)}</td></tr>
+    ${tt.discount > 0 ? `<tr class="xlsx-band"><td colspan="2" class="xlsx-center">Giảm giá</td><td class="xlsx-num">-${pvMoney(tt.discount)}</td></tr>` : ""}
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Thành tiền</td><td class="total-val">${pvMoney(tt.total)}</td></tr>
   </table>`;
 }
 

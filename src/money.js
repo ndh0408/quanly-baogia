@@ -31,6 +31,7 @@ export function computeQuoteTotals(quote) {
         mult = sh.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
         return acc;
       }
+      if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)
       const qty = D(it.quantity);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
