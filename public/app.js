@@ -1540,14 +1540,21 @@ function bindActions(q, isNew) {
     if (sum) sum.style.display = q.showTotals ? "" : "none";
     refreshPreview(q);
   });
-  // Ghi chú cuối báo giá (quote.notes): bật/tắt ô nhập; tắt → xoá nội dung.
+  // Ghi chú cuối báo giá (quote.notes): bật/tắt ô nhập.
+  // Tick "có" → tự điền sẵn câu chuẩn (nếu đang trống), sửa/xoá tuỳ ý. Bỏ tick → ẩn + xoá.
+  const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ";
   const noteBox = document.getElementById("f-hasNote");
   const noteWrap = document.getElementById("note-wrap");
   const noteInput = document.getElementById("f-notes");
   if (noteBox) noteBox.addEventListener("change", () => {
-    if (noteWrap) noteWrap.style.display = noteBox.checked ? "" : "none";
-    if (!noteBox.checked) { q.notes = ""; if (noteInput) noteInput.value = ""; }
-    else if (noteInput) noteInput.focus();
+    if (noteBox.checked) {
+      if (!(q.notes || "").trim()) { q.notes = DEFAULT_NOTE; if (noteInput) noteInput.value = DEFAULT_NOTE; }
+      if (noteWrap) noteWrap.style.display = "";
+      if (noteInput) { noteInput.focus(); noteInput.select(); }
+    } else {
+      q.notes = ""; if (noteInput) noteInput.value = "";
+      if (noteWrap) noteWrap.style.display = "none";
+    }
     refreshPreview(q);
   });
   if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; refreshPreview(q); });

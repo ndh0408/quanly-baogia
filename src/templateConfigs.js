@@ -13,90 +13,96 @@ function baoGiaTitle(title) {
 }
 
 export const TEMPLATE_CONFIGS = {
-  // ===== Gia Nguyễn — không ngày (new GN.xls form) =====
-  // Columns: STT | Hạng Mục | ĐVT | Số Lượng | Đơn Giá | Thành Tiền | Ghi Chú
-  // (no separate "Chi Tiết" column; amount = Đơn Giá × Số Lượng)
+  // ===== Gia Nguyễn — không ngày (bố cục Marico_Decor: CÓ cột Chi Tiết) =====
+  // Cột: STT | Hạng Mục | Chi Tiết | ĐVT | Số Lượng | Đơn Giá | Thành Tiền | Notes
+  // Dùng chính file Marico_Decor.xlsx — đã baked sẵn: header/tổng peach, tên xanh
+  // #0070C0, Chi Tiết nghiêng, khối From có nhãn "From: / Ms. / Add:" + logo GIA NGUYỄN.
+  // Code chỉ: đổ dữ liệu, tô xanh hàng nhóm A/B, đổi số tiền tổng sang đen, in "Ghi chú".
   marico_decor: {
-    sheetName: "GN",
-    filePath: "templates/GN_KhongNgay.xlsx",
+    sheetName: "Décor",
+    filePath: "templates/Marico_Decor.xlsx",
     displayName: "GN (không ngày)",
     cleanup: {
-      // Sample (CJ CGV) cells not overwritten by quote data — blank them so the
-      // template behaves like an empty shell.
       extraCellsToClear: [
-        "C4", "C5",                                    // customer Tel / Add (no quote field for these)
-        "I12", "I13", "I14", "I15", "I16", "I17", "I18", // stray notes in far column
-        "H16", "F5",                                    // leftover sample note + địa chỉ From cũ (đã dời lên F4)
-        // NB: C19:C21 (vùng "* Ghi chú:" cạnh phần tổng) KHÔNG xóa ở đây nữa —
-        // nó được ghi đè bằng quote.notes (hoặc clear) trong applyPalette().
+        "J16",   // ghi chú lạc ở cột xa (mẫu Marico) — không thuộc bảng báo giá
       ],
-      keepImagesAboveRow: 5,
+      keepImagesAboveRow: 11,   // giữ logo GIA NGUYỄN (F2); bỏ ảnh khác dưới header (nếu có)
     },
     cells: {
-      toCompany:   "C2",
+      toCompany:   "C2",        // nhãn "To:" (B2) + "Ms." (B3) đã có sẵn trong template
       toContact:   "C3",
-      toPhone:     "C4",
-      toAddress:   "C5",
       fromContactCell: "F3",
-      // Gộp 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951" (tên _ chức danh_SĐT)
+      // 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951" (nhãn "Ms." có sẵn ở E3)
       fromContactFormat: ({ contact, title, phone }) =>
         [[contact, title].filter(Boolean).join(" _ "), phone].filter(Boolean).join("_"),
-      // SĐT đã gộp vào dòng trên → địa chỉ lên F4 (F5 mẫu cũ được clear trong cleanup)
-      fromAddress: "F4",
+      fromAddress: "F4",        // nhãn "Add:" đã có sẵn ở E4; nhãn "From:" ở E2 + logo F2
       date:        "B6",
       title:       "B7",
       titleFormat: baoGiaTitle,
-      greeting:    "B8",
+      quoteNumber: "B8",
+      quoteNumberFormat: (n) => (n ? `(Số://${n})` : ""),
+      greeting:    "B9",
     },
     items: {
       firstRow: 12,
-      lastRow:  18,
+      lastRow:  21,
+      styleRow: 12,              // copy style hàng 12 (tên xanh, Chi Tiết nghiêng, viền) ra mọi hàng
+      italicColumns: ["D"],      // Chi Tiết in nghiêng
       columns: {
         stt:       "B",
         name:      "C",
-        unit:      "D",
-        quantity:  "E",
-        unitPrice: "F",
-        amount:    "G",
-        notes:     "H",
+        detail:    "D",
+        unit:      "E",
+        quantity:  "F",
+        unitPrice: "G",
+        amount:    "H",
+        notes:     "I",
       },
-      amountFormula: (r) => `F${r}*E${r}`,
+      amountFormula: (r) => `G${r}*F${r}`,
     },
     totals: {
       subtotal: {
-        labelCells: [["D", "F"]],
-        labelText: () => "Cộng",
-        valueCell: "G",
+        labelCells: [["F", "G"]],
+        labelText: () => "Tổng Cộng",
+        valueCell: "H",
         rowOffset: 1,
-        formula: ({ first, last }) => `SUM(G${first}:G${last})`,
+        formula: ({ first, last }) => `SUM(H${first}:H${last})`,
       },
       vat: {
-        labelCells: [["D", "F"]],
-        labelText: (vatPct) => `VAT ${vatPct}%`,
-        valueCell: "G",
+        labelCells: [["F", "G"]],
+        labelText: (vatPct) => `VAT (${vatPct}%)`,
+        valueCell: "H",
         rowOffset: 2,
-        formula: ({ subtotalRow, vatPct }) => `G${subtotalRow}*${vatPct}%`,
+        formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
+      },
+      discount: {
+        labelCells: [["F", "G"]],
+        labelText: () => "Giảm Giá",
+        valueCell: "H",
       },
       total: {
-        labelCells: [["D", "F"]],
+        labelCells: [["F", "G"]],
         labelText: () => "Thành Tiền",
-        valueCell: "G",
+        valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow }) => `G${subtotalRow}+G${vatRow}`,
+        formula: ({ subtotalRow, vatRow, discountRow }) =>
+          discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
-    // ===== Bảng màu GN (khớp mẫu Marico_Decor: peach + xanh lá + tên xanh dương) =====
-    // Template gốc GN_KhongNgay.xlsx có header/tổng màu nâu đậm (accent6 darker 50%,
-    // chữ trắng) — đè lại thành peach (accent6 lighter 80%) + chữ đen, nhóm thành xanh
-    // lá, STT/Hạng Mục xanh dương, số tiền tổng đỏ. Áp trong applyPalette() (excel.js).
+    // Header/tổng/tên đã baked sẵn màu trong template → chỉ cần: tô xanh hàng nhóm,
+    // đổi số tiền tổng sang đen (mẫu gốc để đỏ), và in "Ghi chú" 1 dòng dưới phần tổng.
     palette: {
-      headerRows:  [10, 11],     // hàng tiêu đề cột (đứng yên vì nằm trên firstRow)
-      headerFill:  "FFFDEADA",   // peach (cam accent6 sáng 80%)
-      sectionFill: "FFE2EFDA",   // xanh lá nhạt — hàng nhóm A/B/C
-      totalsFill:  "FFFDEADA",   // peach — 3 dòng Cộng/VAT/Thành Tiền (nhãn + số đều đen đậm)
-      nameColor:   "FF0070C0",   // xanh dương đậm — STT + Hạng Mục
-      noteCol:     "C",          // cột "Ghi chú" merged cạnh phần tổng (C19:C21)
-      noteColor:   "FF843C0C",   // nâu đỏ — dòng "Ghi chú:"
+      sectionFill:      "FFE2EFDA",   // xanh lá nhạt — hàng nhóm A/B/C
+      sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
+      totalsValueColor: "FF000000",   // số tiền tổng: đen
+      note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" ngay dưới tổng
+      // Dòng đóng cuối báo giá (khôi phục từ bản GN cũ), nằm DƯỚI dòng Ghi chú.
+      footer: {
+        rowOffset: 2,           // dòng đầu footer = totalRow + 2 (Ghi chú ở +1)
+        leftCol: "B", rightCol: "G",
+        lines: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
+        right: "Ý Kiến Khách Hàng",
+      },
     },
   },
 

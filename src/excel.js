@@ -580,23 +580,44 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       }
     }
 
-    // (d) Ghi chú: in quote.notes vào ô merged ở cột noteCol cạnh phần tổng (vd C19:C21).
+    // (d) Ghi chú: in quote.notes thành 1 dòng dưới phần tổng (merge ngang colFrom→colTo).
     //     Có ghi chú → "Ghi chú: <nội dung>" (nâu đỏ); không có → để trống.
-    if (pal.noteCol) {
-      const c1 = `${pal.noteCol}${subtotalRow}`, c2 = `${pal.noteCol}${totalRow}`;
+    if (pal.note) {
+      const nr = totalRow + (pal.note.rowOffset || 1);
+      const c1 = `${pal.note.colFrom}${nr}`, c2 = `${pal.note.colTo}${nr}`;
       safeUnmerge(ws, `${c1}:${c2}`);
       safeMerge(ws, `${c1}:${c2}`);
       const ncell = ws.getCell(c1);
       const note = (quote.notes == null ? "" : String(quote.notes)).trim();
       if (note) {
-        const nf = { name: "Times New Roman", family: 1, size: 11, color: { argb: pal.noteColor || "FF843C0C" } };
+        const nf = { name: "Times New Roman", family: 1, size: 11, color: { argb: pal.note.color || "FF843C0C" } };
         ncell.value = { richText: [
           { text: "Ghi chú: ", font: { ...nf, bold: true } },
           { text: note, font: { ...nf } },
         ] };
-        ncell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+        ncell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+        ws.getRow(nr).height = Math.max(ws.getRow(nr).height || 0, 20);
       } else {
         ncell.value = null;
+      }
+    }
+
+    // (e) Dòng đóng cuối báo giá (Rất mong… / Trân trọng + Ý Kiến Khách Hàng) — dưới Ghi chú.
+    if (pal.footer) {
+      const f = pal.footer;
+      const fr = totalRow + (f.rowOffset || 2);
+      const ff = { name: "Times New Roman", family: 1, size: 11 };
+      (f.lines || []).forEach((line, idx) => {
+        const cell = ws.getCell(`${f.leftCol || "B"}${fr + idx}`);
+        cell.value = line;
+        cell.font = { ...ff };
+        cell.alignment = { horizontal: "left", vertical: "middle" };
+      });
+      if (f.right) {
+        const rc = ws.getCell(`${f.rightCol || "G"}${fr}`);
+        rc.value = f.right;
+        rc.font = { ...ff };
+        rc.alignment = { horizontal: "left", vertical: "middle" };
       }
     }
   }
