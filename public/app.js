@@ -54,7 +54,15 @@ async function api(path, opts = {}) {
     throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn");
   }
   if (!res.ok) {
-    const err = new Error((body && body.error) || body || "Lỗi");
+    // Build a human-readable message. Validation errors arrive as a generic
+    // `error` ("Dữ liệu không hợp lệ") plus field-level `details`; prefer the
+    // concrete reasons so the user sees exactly what failed and how to fix it.
+    let msg = (body && body.error) || body || "Lỗi";
+    if (body && Array.isArray(body.details) && body.details.length) {
+      const reasons = body.details.map((d) => d.message).filter(Boolean).join(". ");
+      if (reasons) msg = reasons;
+    }
+    const err = new Error(msg);
     if (body && body.details) err.details = body.details;
     err.status = res.status;
     err.body = body; // expose full body (e.g. { mfaRequired: true }) to callers
@@ -387,7 +395,13 @@ async function renderOnboard() {
       await loadMeta();
       render();
       toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
-    } catch (e2) { err.innerHTML = `<div class="err">${escapeHtml(e2.message)}</div>`; }
+    } catch (e2) {
+      // Surface the specific reason(s) instead of the generic "Dữ liệu không hợp lệ":
+      // the server sends field-level details (e.g. "Mật khẩu tối thiểu 8 ký tự").
+      const detail = e2.details?.map?.((d) => d.message).join(". ");
+      err.innerHTML = `<div class="err">${escapeHtml(detail || e2.message)}</div>`;
+      applyFieldErrors(e2); // highlight + focus the offending field (password, …)
+    }
   });
 }
 
@@ -1292,6 +1306,7 @@ function renderEditor(el, quote) {
           <tfoot></tfoot>
         </table>
         </div>
+        <div id="grid-stat" class="grid-stat hidden"></div>
 
         ${editable ? `<label class="toggle-totals" style="display:inline-flex;align-items:center;gap:8px;margin:16px 0 6px;font-size:13.5px;cursor:pointer">
           <input type="checkbox" id="f-showTotals" ${q.showTotals !== false ? "checked" : ""}/>
@@ -1674,8 +1689,10 @@ async function showVersions(quoteId) {
 // Supports + - * / and parentheses; "x"/"×" mean multiply; "," is a decimal point.
 // CSP blocks eval()/Function(), so this is a tiny hand-written recursive-descent parser.
 // Returns a finite Number, or null if the expression is malformed.
-function evalFormula(input) {
-  let s = String(input).replace(/^=/, "").replace(/[×xX]/g, "*").replace(/,/g, ".").replace(/\s+/g, "");
+// Pure arithmetic evaluator: + - * / ( ), unary +/-, VN decimals (comma → dot).
+// Returns a number or null if invalid.
+function evalArith(input) {
+  let s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];
@@ -1701,6 +1718,52 @@ function evalFormula(input) {
   const result = expr();
   if (pos !== s.length || result === null || !isFinite(result)) return null;
   return result;
+}
+
+// Excel-style formula for a cell. Supports arithmetic + ( ) + ×, percent (8% → 0.08),
+// and functions SUM/AVERAGE/AVG/PRODUCT/MIN/MAX/ROUND/ROUNDUP/ROUNDDOWN/INT/ABS/
+// CEILING/FLOOR. Args separated by ";" (VN Excel), "," is the decimal separator.
+// e.g. =SUM(1.000.000; 500.000)*1,1   =ROUND(123456*8%; 0)   =MAX(10;20)+5
+const FORMULA_FNS = {
+  SUM: (a) => a.reduce((x, y) => x + y, 0),
+  PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
+  AVERAGE: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
+  AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
+  MIN: (a) => (a.length ? Math.min(...a) : 0),
+  MAX: (a) => (a.length ? Math.max(...a) : 0),
+  ROUND: (a) => { const p = 10 ** (a[1] || 0); return Math.round((a[0] || 0) * p) / p; },
+  ROUNDUP: (a) => { const p = 10 ** (a[1] || 0); return Math.ceil((a[0] || 0) * p) / p; },
+  ROUNDDOWN: (a) => { const p = 10 ** (a[1] || 0); return Math.trunc((a[0] || 0) * p) / p; },
+  INT: (a) => Math.floor(a[0] || 0),
+  ABS: (a) => Math.abs(a[0] || 0),
+  CEILING: (a) => Math.ceil(a[0] || 0),
+  FLOOR: (a) => Math.floor(a[0] || 0),
+};
+function evalFormula(input) {
+  let s = String(input).trim().replace(/^=/, "");
+  if (!s) return null;
+  // "×" is always multiply; "x"/"X" only BETWEEN digits (so it doesn't eat the
+  // X in function names like MAX). Lookahead keeps chained "2x3x4" working.
+  s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  // percent: 8% → 0.08 (bare number; parens would block function matching below)
+  s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(n.replace(",", ".")) / 100));
+  // Resolve function calls innermost-first until none remain. Results inline as
+  // BARE numbers so nested calls SUM(MAX(..);..) + trailing arithmetic both work.
+  let guard = 0;
+  while (/[A-Za-z]+\s*\(/.test(s)) {
+    if (guard++ > 100) return null;
+    let changed = false;
+    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m, name, args) => {
+      changed = true;
+      const fn = FORMULA_FNS[name.toUpperCase()];
+      if (!fn) return "NaN";
+      const vals = args.split(";").map((a) => evalArith(a)).filter((v) => v !== null && isFinite(v));
+      const r = fn(vals);
+      return (r === null || !isFinite(r)) ? "NaN" : String(r);
+    });
+    if (!changed) return null;
+  }
+  return evalArith(s);
 }
 
 // 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows.
@@ -1772,9 +1835,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const dataCells = (it, i, amt) => `
         ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Nhập số, hoặc công thức vd =5x3" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Số hoặc công thức Excel: =5*3, =SUM(10;20), =ROUND(x;0), 8%" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
-        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Nhập số, hoặc công thức vd =5x3" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =5*3, =SUM(10;20), =1000000*8%, =MAX(a;b)" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
@@ -1801,16 +1864,16 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const letter = groupLetter(sectionIdx);
       const subAmt = sectionSum[i] || 0;
       return `
-      <tr data-row="${i}" class="section-row" style="background:#eaf1fb">
-        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="Chữ nhóm (để trống = tự ${letter})" ${dis} style="width:34px;text-align:center;font-weight:700;color:#1f4e79;background:transparent" /></td>
-        <td class="col-hangmuc"><input data-f="name" value="${escapeHtml(it.name || "")}" placeholder="Tên nhóm (vd: Wallsticker)" ${dis} style="font-weight:700;color:#1f4e79;background:transparent" /></td>
+      <tr data-row="${i}" class="section-row">
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="Chữ nhóm (để trống = tự ${letter})" ${dis} style="width:34px;text-align:center" /></td>
+        <td class="col-hangmuc"><input data-f="name" value="${escapeHtml(it.name || "")}" placeholder="Tên nhóm (vd: Wallsticker)" ${dis} /></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
-        <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} style="background:transparent" /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} style="background:transparent" /></td>
+        <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"></td>` : ""}
-        <td class="col-price" style="text-align:right;font-weight:700;color:#1f4e79">${fmtNumCell(subAmt)}</td>
-        <td class="col-amount" style="text-align:right;font-weight:700;color:#1f4e79">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
-        <td class="col-notes"></td>
+        <td class="col-price">${fmtNumCell(subAmt)}</td>
+        <td class="col-amount">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+        <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa nhóm">✕</button></td>` : ""}
       </tr>`;
     }
@@ -1949,6 +2012,24 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
           document.addEventListener("mouseup", onUp);
         });
         td.appendChild(h);
+      }
+    }
+    // Excel-style selection summary bar: Sum / Average / Count of selected numeric cells.
+    const stat = document.getElementById("grid-stat");
+    if (stat) {
+      let sum = 0, cnt = 0;
+      if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
+        const f = FIELDS[c];
+        if (!NUMERIC.has(f)) continue;
+        const v = Number(activeSheet.items[r]?.[f]);
+        if (v) { sum += v; cnt++; }
+      }
+      if (cnt >= 1) {
+        stat.classList.remove("hidden");
+        stat.innerHTML = `Đếm: <b>${cnt}</b> &nbsp;·&nbsp; TB: <b>${fmtNumCell(Math.round(sum / cnt))}</b> &nbsp;·&nbsp; Tổng: <b>${fmtNumCell(sum)}</b>`;
+      } else {
+        stat.classList.add("hidden");
+        stat.textContent = "";
       }
     }
   };
