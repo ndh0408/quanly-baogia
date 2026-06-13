@@ -6,8 +6,14 @@ import { canOnQuote } from "../permissions.js";
 import { validate } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
-import { runExport } from "../exportQueue.js";
+import { runExportJob } from "../exportQueue.js";
 import { audit } from "../audit.js";
+
+// JSON-safe copy of the quote for the worker thread (normalizes Prisma Decimals →
+// strings and Dates → ISO; buildQuoteBuffer/renderQuotePdf read these via Number()
+// and new Date(), proven by tests/excel.test.js). Used for the worker payload; the
+// inline fallback uses the original quote object.
+const plain = (q) => JSON.parse(JSON.stringify(q));
 
 const router = Router();
 router.use(requireAuth);
@@ -38,7 +44,7 @@ router.get(
       return res.status(403).json({ error: "Không có quyền" });
     }
 
-    const buf = await runExport(() => buildQuoteBuffer(quote));
+    const buf = await runExportJob("xlsx", plain(quote), () => buildQuoteBuffer(quote));
     const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.xlsx"`);
@@ -70,13 +76,14 @@ router.get(
       return res.status(403).json({ error: "Không có quyền" });
     }
 
-    const buf = await runExport(() => renderQuotePdf({
+    const pdfQuote = {
       ...quote,
       subtotal: Number(quote.subtotal),
       vat: Number(quote.vat),
       total: Number(quote.total),
       vatPercent: Number(quote.vatPercent),
-    }));
+    };
+    const buf = await runExportJob("pdf", plain(pdfQuote), () => renderQuotePdf(pdfQuote));
     const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.pdf"`);
