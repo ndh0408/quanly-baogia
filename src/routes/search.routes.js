@@ -37,13 +37,14 @@ router.get(
               quoteScopeWhere(req.session),
               { OR: [
                 { quoteNumber: { contains: q, mode: "insensitive" } },
+                { projectCode: { contains: q, mode: "insensitive" } },
                 { title: { contains: q, mode: "insensitive" } },
                 { toCompany: { contains: q, mode: "insensitive" } },
                 { toContact: { contains: q, mode: "insensitive" } },
               ] },
             ],
           },
-          select: { id: true, quoteNumber: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
+          select: { id: true, quoteNumber: true, projectCode: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
           orderBy: { createdAt: "desc" },
           take: limit,
         });

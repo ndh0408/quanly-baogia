@@ -46,8 +46,8 @@ const CustomerUpdate = CustomerCreate.partial();
 
 const ListQuery = z.object({
   q: z.string().max(200).optional(),
-  status: z.enum(["lead", "prospect", "active", "inactive"]).optional(),
-  tag: z.string().max(40).optional(),
+  status: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["lead", "prospect", "active", "inactive"]).optional()),
+  tag: z.preprocess((v) => (v === "" ? undefined : v), z.string().max(40).optional()),
   ownerId: z.coerce.number().int().positive().optional(),
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(20),
@@ -106,10 +106,20 @@ router.post(
     let code = req.body.code;
     if (!code) code = await nextCustomerCode("KH");
     else {
-      const dup = await prisma.customer.findUnique({ where: { code } });
-      if (dup) return res.status(409).json({ error: "Mã khách hàng đã tồn tại" });
+      // includeDeleted: the unique constraint on `code` covers soft-deleted rows,
+      // so a plain (soft-delete-filtered) check would miss a deleted holder and
+      // then hit the DB constraint as a 500. Check across ALL rows for a clean 409.
+      const dup = await prisma.customer.findFirst({ where: { code }, includeDeleted: true });
+      if (dup) return res.status(409).json({ error: dup.deletedAt ? "Mã thuộc khách hàng đã xoá" : "Mã khách hàng đã tồn tại" });
+    }
+    // De-dup by tax code: the same company (same MST) entered twice fragments
+    // revenue/follow-ups across records. Warn (409) instead of silently duplicating.
+    if (req.body.taxCode) {
+      const dupTax = await prisma.customer.findFirst({ where: { taxCode: req.body.taxCode.trim() } });
+      if (dupTax) return res.status(409).json({ error: `Mã số thuế đã thuộc khách hàng ${dupTax.code} — ${dupTax.name}` });
     }
     const data = { ...req.body, code };
+    if (data.taxCode) data.taxCode = data.taxCode.trim();
     // Only privileged users may assign an owner other than themselves.
     if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) data.ownerId = req.session.userId;
     else if (data.ownerId == null) data.ownerId = req.session.userId;

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
@@ -83,19 +84,17 @@ router.get(
     const { from, to } = defaultRange(req.query);
     // admin sees all; manager/employee scoped to their own created quotes for this chart.
     const allScope = can(req.session, P.QUOTE_READ_ALL);
-    const scope = allScope ? "" : 'AND "createdById" = $3';
-    const params = allScope ? [from, to] : [from, to, req.session.userId];
+    // Conditional fragment via Prisma.sql so the value stays parameterized.
+    const scope = allScope ? Prisma.empty : Prisma.sql`AND "createdById" = ${req.session.userId}`;
 
-    const rows = await prisma.$queryRawUnsafe(
-      `SELECT DATE("createdAt") AS d, COALESCE(SUM("total"), 0)::float AS amount, COUNT(*)::int AS n
-       FROM "Quote"
-       WHERE "createdAt" >= $1 AND "createdAt" <= $2
-         AND "status" IN ('approved','sent','converted')
-         AND "deletedAt" IS NULL ${scope}
-       GROUP BY 1
-       ORDER BY 1 ASC`,
-      ...params
-    );
+    const rows = await prisma.$queryRaw`
+      SELECT DATE("createdAt") AS d, COALESCE(SUM("total"), 0)::float AS amount, COUNT(*)::int AS n
+      FROM "Quote"
+      WHERE "createdAt" >= ${from} AND "createdAt" <= ${to}
+        AND "status" IN ('approved','sent','converted')
+        AND "deletedAt" IS NULL ${scope}
+      GROUP BY 1
+      ORDER BY 1 ASC`;
     res.json({ data: rows });
   })
 );

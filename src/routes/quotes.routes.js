@@ -9,7 +9,7 @@ import {
   ListQuerySchema,
 } from "../validators.js";
 import { computeQuoteTotals, totalsToJson, D } from "../money.js";
-import { nextQuoteNumber } from "../quoteNumber.js";
+import { nextQuoteNumber, nextProjectCode } from "../quoteNumber.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
@@ -24,7 +24,10 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected.
+// `converted`/`lost` are terminal: closed deals feed revenue reports, so they are
+// immutable for everyone — duplicate the quote to make a new revision instead.
 function canEdit(quote, session) {
+  if (quote.status === "converted" || quote.status === "lost") return false;
   if (canOnQuote(session, "update", quote)) {
     if (session.role === "admin" || session.role === "manager") return true;
     return quote.status === "draft" || quote.status === "rejected";
@@ -51,6 +54,7 @@ async function loadAuthorizedQuote(req, res, action = "read") {
 
 const QUOTE_INCLUDE = {
   company: true,
+  customer: { select: { code: true, name: true } },
   sheets: {
     orderBy: { order: "asc" },
     include: {
@@ -72,6 +76,8 @@ function presentQuote(q, { includeLogo = false } = {}) {
     subtotal: Number(q.subtotal ?? totals.subtotal),
     vat: Number(q.vat ?? totals.vat),
     total: Number(q.total ?? totals.total),
+    customerCode: q.customer?.code ?? null,
+    customerName: q.customer?.name ?? null,
     sheets: (q.sheets || []).map((s) => ({
       ...s,
       items: (s.items || []).map((it) => ({
@@ -86,6 +92,35 @@ function presentQuote(q, { includeLogo = false } = {}) {
   // base64 logo is large — only ship it when explicitly needed (single quote fetch).
   if (!includeLogo) delete out.customerLogo;
   return out;
+}
+
+// Lightweight projection for the LIST view: NO customerLogo (base64, bloats the
+// row/TOAST) and NO sheets/items (the list only needs a sheet COUNT). Uses the
+// stored snapshot totals — no per-row recompute. This is the hot, frequently
+// refetched query, so it must stay slim.
+const QUOTE_LIST_SELECT = {
+  id: true, quoteNumber: true, projectCode: true, projectVersion: true,
+  title: true, toCompany: true, status: true, quoteDate: true, validUntil: true,
+  subtotal: true, vat: true, discount: true, total: true, vatPercent: true,
+  createdAt: true, createdById: true,
+  company: { select: { id: true, name: true, shortName: true } },
+  customer: { select: { code: true, name: true } },
+  createdBy: { select: { id: true, displayName: true } },
+  _count: { select: { sheets: true } },
+};
+
+function presentQuoteRow(q) {
+  return {
+    ...q,
+    vatPercent: Number(q.vatPercent),
+    subtotal: Number(q.subtotal),
+    vat: Number(q.vat),
+    discount: Number(q.discount),
+    total: Number(q.total),
+    customerCode: q.customer?.code ?? null,
+    customerName: q.customer?.name ?? null,
+    sheetCount: q._count?.sheets ?? 0,
+  };
 }
 
 /** True if every sheet's templateId is an active template belonging to companyId. */
@@ -104,10 +139,12 @@ function buildSheetsCreate(sheets) {
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
     order: s.order != null ? Number(s.order) : sIdx + 1,
+    groupSubtotal: !!s.groupSubtotal,
     items: {
       create: (s.items || []).map((it, iIdx) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
-        kind: ["info", "sub"].includes(it.kind) ? it.kind : "item",
+        kind: ["info", "sub", "section"].includes(it.kind) ? it.kind : "item",
+        label: it.label ? String(it.label).replace(/[\r\n]+/g, " ").trim().slice(0, 12) : null,
         name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
         detail: it.detail ? String(it.detail).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         unit: it.unit?.replace(/[\r\n]+/g, " ").trim() || null,
@@ -150,13 +187,13 @@ router.get(
       prisma.quote.findMany({
         where,
         orderBy: { [sort]: order },
-        include: QUOTE_INCLUDE,
+        select: QUOTE_LIST_SELECT,   // slim projection — no logo, no sheets/items
         skip: (page - 1) * size,
         take: size,
       }),
     ]);
     res.json({
-      data: rows.map(presentQuote),
+      data: rows.map(presentQuoteRow),
       meta: {
         total,
         page,
@@ -196,9 +233,11 @@ router.get(
 router.get(
   "/assignable-users",
   asyncHandler(async (req, res) => {
+    // Minimal fields for the member/sender picker only. Do NOT leak the login
+    // identifier (username) or phone of every employee to all authenticated users.
     const users = await prisma.user.findMany({
       where: { active: true },
-      select: { id: true, displayName: true, username: true, role: true },
+      select: { id: true, displayName: true, role: true, title: true, senderName: true },
       orderBy: { displayName: "asc" },
     });
     res.json({ data: users });
@@ -243,16 +282,10 @@ router.post(
       memberConnect.push({ id: mgr.id });
     }
 
-    // Auto-allocate quote number atomically if client didn't supply one.
-    // Each issuing company has its own prefix + sequence (GN…, CLF…).
-    let quoteNumber = b.quoteNumber;
-    if (!quoteNumber) {
-      quoteNumber = await nextQuoteNumber(company.quotePrefix || "GN");
-    } else {
-      // includeDeleted: the unique constraint on quoteNumber covers soft-deleted rows too,
-      // so we must check across ALL rows — otherwise a number belonging to a soft-deleted
-      // quote passes the (soft-delete-filtered) check and then hits the DB constraint as a 500.
-      const dup = await prisma.quote.findFirst({ where: { quoteNumber }, includeDeleted: true });
+    // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted,
+    // since the unique constraint covers them) BEFORE the write to return a clean 409.
+    if (b.quoteNumber) {
+      const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
       if (dup) {
         return res.status(409).json({
           error: dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại",
@@ -260,12 +293,14 @@ router.post(
       }
     }
 
+    const creator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
     const draft = {
-      quoteNumber,
       title: b.title,
       toCompany: b.toCompany,
       toContact: b.toContact || null,
       toEmail: b.toEmail || null,
+      toPhone: b.toPhone || null,
+      toAddress: b.toAddress || null,
       companyId: company.id,
       fromContact: b.fromContact || "",
       fromPhone: b.fromPhone || company.phone || null,
@@ -293,15 +328,35 @@ router.post(
     draft.discount = t.discount;
     draft.total = t.total;
 
-    const quote = await prisma.$transaction(async (tx) => {
-      const created = await tx.quote.create({
-        // Creator (+ overseeing manager for employee-created quotes) are members.
-        data: { ...draft, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: memberConnect } },
+    // Allocate the quote number (and per-employee project code) INSIDE the create
+    // transaction so a failed insert rolls the counter back too — no burned/gap
+    // numbers. Auto-allocated numbers retry on the rare P2002 (collision with a
+    // soft-deleted number) by drawing the next value.
+    const prefix = company.quotePrefix || "GN";
+    const runCreate = (tx, quoteNumber) =>
+      tx.quote.create({
+        data: { ...draft, quoteNumber, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: memberConnect } },
         include: QUOTE_INCLUDE,
       });
-      await snapshotQuoteVersion(tx, created.id, req.session.userId, "create");
-      return created;
-    });
+
+    let quote;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        quote = await prisma.$transaction(async (tx) => {
+          const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx);
+          if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx);
+          const created = await runCreate(tx, quoteNumber);
+          await snapshotQuoteVersion(tx, created.id, req.session.userId, "create");
+          return created;
+        });
+        break;
+      } catch (e) {
+        // Retry only auto-allocated collisions; a client-supplied dup was already 409'd above.
+        if (e.code === "P2002" && !b.quoteNumber && attempt < 3) continue;
+        if (e.code === "P2002") return res.status(409).json({ error: "Số báo giá bị trùng, vui lòng thử lại" });
+        throw e;
+      }
+    }
 
     await audit(req, "quote.create", {
       resource: "quote",
@@ -339,13 +394,17 @@ router.put(
       if (b[f] !== undefined && b[f] !== null) data[f] = b[f];
     }
     // Nullable columns: empty string clears them to null.
-    for (const f of ["toContact", "fromPhone", "fromTitle", "notes"]) {
+    for (const f of ["toContact", "toEmail", "toPhone", "toAddress", "fromPhone", "fromTitle", "notes"]) {
       if (b[f] !== undefined) data[f] = b[f] || null;
     }
     if (b.quoteDate) data.quoteDate = b.quoteDate;
     if (b.validUntil !== undefined) data.validUntil = b.validUntil || null;
     if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
+    // Quote-level discount: must be read here or a discount-only change is silently
+    // dropped AND the priceAffecting/reopen logic below (which checks data.discount)
+    // never fires for it.
+    if (b.discount !== undefined) data.discount = D(b.discount);
     if (b.showTotals !== undefined) data.showTotals = b.showTotals;
     if (b.companyId !== undefined) data.companyId = b.companyId;
     if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
@@ -359,13 +418,14 @@ router.put(
       data.quoteNumber = b.quoteNumber;
     }
 
-    // Sheets full replace + recompute snapshot totals + bump version
-    data.currentVersion = (existing.currentVersion ?? 1) + 1;
-
     // If a price-affecting change is made to a quote that was already in the
     // approval pipeline (pending/approved/sent), the prior approval no longer
     // reflects the content — send it back to draft and clear the approval.
     const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined || data.discount !== undefined;
+    // Only price-affecting edits start a new revision. Cosmetic edits (title,
+    // contacts, notes...) keep the current versionNo so pending Approval rows —
+    // which are keyed by versionNo — remain valid and the quote can't get stuck.
+    if (priceAffecting) data.currentVersion = (existing.currentVersion ?? 1) + 1;
     const wasLocked = ["pending", "approved", "sent"].includes(existing.status);
     const reopened = wasLocked && priceAffecting;
     if (reopened) {
@@ -443,12 +503,17 @@ router.post(
     if (!["draft", "rejected"].includes(existing.status)) {
       return res.status(400).json({ error: "Chỉ trình duyệt được báo giá ở trạng thái Nháp hoặc Bị từ chối" });
     }
-    const quote = await prisma.quote.update({
-      where: { id },
-      data: { status: "pending", approvedById: null },
-      include: QUOTE_INCLUDE,
+    // Flip status and (re)create the pending Approval row atomically — a failure
+    // between the two would leave a pending quote no one can approve.
+    const quote = await prisma.$transaction(async (tx) => {
+      const q = await tx.quote.update({
+        where: { id },
+        data: { status: "pending", approvedById: null },
+        include: QUOTE_INCLUDE,
+      });
+      await startApprovalChain(id, q.currentVersion, tx);
+      return q;
     });
-    await startApprovalChain(id, quote.currentVersion);
 
     // Notify approvers (skip the creator if they happen to be an approver — they get
     // their own confirmation below).
@@ -508,17 +573,33 @@ router.post(
       return res.status(403).json({ error: "Vai trò không được duyệt level này" });
     }
 
-    await prisma.approval.update({
-      where: { id: pending.id },
-      data: { decision: "approved", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
-    });
+    // One transaction with optimistic guards: the approval row must still be
+    // pending (no double-approve) and the quote must still be the same pending
+    // revision the approver looked at (no race with a concurrent edit). Any
+    // conflict rolls everything back so Approval and Quote never drift apart.
+    let complete = false;
+    try {
+      await prisma.$transaction(async (tx) => {
+        const ap = await tx.approval.updateMany({
+          where: { id: pending.id, decision: "pending" },
+          data: { decision: "approved", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
+        });
+        if (!ap.count) throw new Error("APPROVAL_CONFLICT");
 
-    const complete = await isChainComplete(id, existing.currentVersion);
-    const quote = await prisma.quote.update({
-      where: { id },
-      data: complete ? { status: "approved", approvedById: req.session.userId } : {},
-      include: QUOTE_INCLUDE,
-    });
+        complete = await isChainComplete(id, existing.currentVersion, tx);
+        const qu = await tx.quote.updateMany({
+          where: { id, status: "pending", currentVersion: existing.currentVersion },
+          data: complete ? { status: "approved", approvedById: req.session.userId } : { approvedById: existing.approvedById },
+        });
+        if (!qu.count) throw new Error("APPROVAL_CONFLICT");
+      });
+    } catch (e) {
+      if (e.message === "APPROVAL_CONFLICT") {
+        return res.status(409).json({ error: "Báo giá vừa thay đổi hoặc đã được người khác xử lý — vui lòng tải lại" });
+      }
+      throw e;
+    }
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
 
     await notify(existing.createdById, {
       title: `Báo giá ${quote.quoteNumber} đã được duyệt`,
@@ -546,17 +627,30 @@ router.post(
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
 
     const pending = await nextPendingLevel(id, existing.currentVersion);
-    if (pending) {
-      await prisma.approval.update({
-        where: { id: pending.id },
-        data: { decision: "rejected", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
+    // Same transactional guard as approve: reject the row and the quote together,
+    // or not at all.
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (pending) {
+          const ap = await tx.approval.updateMany({
+            where: { id: pending.id, decision: "pending" },
+            data: { decision: "rejected", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
+          });
+          if (!ap.count) throw new Error("APPROVAL_CONFLICT");
+        }
+        const qu = await tx.quote.updateMany({
+          where: { id, status: "pending" },
+          data: { status: "rejected", approvedById: req.session.userId },
+        });
+        if (!qu.count) throw new Error("APPROVAL_CONFLICT");
       });
+    } catch (e) {
+      if (e.message === "APPROVAL_CONFLICT") {
+        return res.status(409).json({ error: "Báo giá vừa thay đổi hoặc đã được người khác xử lý — vui lòng tải lại" });
+      }
+      throw e;
     }
-    const quote = await prisma.quote.update({
-      where: { id },
-      data: { status: "rejected", approvedById: req.session.userId },
-      include: QUOTE_INCLUDE,
-    });
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
 
     await notify(existing.createdById, {
       title: `Báo giá ${quote.quoteNumber} bị từ chối`,
@@ -601,13 +695,15 @@ router.post(
 
 router.post(
   "/:id/mark-converted",
+  // Segregation of duties: marking a deal WON is terminal, immutable and feeds
+  // revenue/leaderboard KPIs — require QUOTE_SEND authority (manager/admin) so the
+  // salesperson who benefits from the KPI can't self-close their own quote.
+  requirePermission(P.QUOTE_SEND),
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
     if (!existing) return res.status(404).json({ error: "Không tìm thấy" });
-    // Only the owner (or an all-scope editor) may convert, and only an already
-    // approved/sent quote can be marked won.
     if (!canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền chốt báo giá này" });
     }
@@ -767,7 +863,7 @@ router.delete(
 // DUPLICATE
 router.post(
   "/:id/duplicate",
-  validate({ params: idParam }),
+  validate({ params: idParam, body: z.object({ sameProject: z.coerce.boolean().optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const src = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
@@ -780,14 +876,31 @@ router.post(
       return res.status(403).json({ error: "Không có quyền tạo báo giá" });
     }
 
+    const sameProject = req.body.sameProject === true;
     const newNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN");
+    let newProjectCode;
+    let newVersion = 1;
+    let newTitle = src.title + " (copy)";
+    if (sameProject) {
+      // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode, đánh số version tiếp theo.
+      const base = src.projectCode || src.quoteNumber;
+      newProjectCode = base;
+      const agg = await prisma.quote.aggregate({ where: { projectCode: base }, _max: { projectVersion: true } });
+      newVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
+      newTitle = src.title; // giữ nguyên tiêu đề; phân biệt bằng nhãn v{n}
+    } else {
+      const dupCreator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
+      newProjectCode = dupCreator?.projectCode ? await nextProjectCode(dupCreator.projectCode) : null;
+    }
     const synthetic = { vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets };
     const t = computeQuoteTotals(synthetic);
 
     const created = await prisma.quote.create({
       data: {
         quoteNumber: newNumber,
-        title: src.title + " (copy)",
+        projectCode: newProjectCode,
+        projectVersion: newVersion,
+        title: newTitle,
         toCompany: src.toCompany,
         toContact: src.toContact,
         companyId: src.companyId,
@@ -799,8 +912,9 @@ router.post(
         quoteDate: new Date(),
         greeting: src.greeting,
         vatPercent: src.vatPercent,
-        discount: src.discount,
         toEmail: src.toEmail,
+        toPhone: src.toPhone,
+        toAddress: src.toAddress,
         notes: src.notes,
         status: "draft",
         subtotal: t.subtotal,
@@ -814,10 +928,12 @@ router.post(
             templateId: s.templateId,
             name: s.name,
             order: s.order != null ? s.order : sIdx + 1,
+            groupSubtotal: s.groupSubtotal,
             items: {
               create: s.items.map((it, iIdx) => ({
                 order: it.order != null ? it.order : iIdx + 1,
                 kind: it.kind || "item",
+                label: it.label,
                 name: it.name,
                 detail: it.detail,
                 unit: it.unit,

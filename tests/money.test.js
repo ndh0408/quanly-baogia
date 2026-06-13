@@ -99,3 +99,102 @@ describe("computeQuoteTotals", () => {
     expect(j.total).toBe(1080);
   });
 });
+
+describe("computeQuoteTotals — discount", () => {
+  const oneItem = (discount) => ({
+    vatPercent: 0,
+    discount,
+    sheets: [{ items: [{ quantity: 1, unitPrice: 1000 }] }],
+  });
+
+  it("subtracts a normal discount from the grand total", () => {
+    const t = computeQuoteTotals(oneItem(300));
+    expect(t.discount.toNumber()).toBe(300);
+    expect(t.total.toNumber()).toBe(700);
+  });
+
+  it("clamps discount to gross — total never goes negative", () => {
+    const t = computeQuoteTotals(oneItem(999999));
+    expect(t.discount.toNumber()).toBe(1000);
+    expect(t.total.toNumber()).toBe(0);
+  });
+
+  it("negative discount is treated as zero", () => {
+    const t = computeQuoteTotals(oneItem(-500));
+    expect(t.discount.toNumber()).toBe(0);
+    expect(t.total.toNumber()).toBe(1000);
+  });
+
+  it("discount applies after VAT (current policy: VAT on full subtotal)", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 10,
+      discount: 100,
+      sheets: [{ items: [{ quantity: 1, unitPrice: 1000 }] }],
+    });
+    expect(t.vat.toNumber()).toBe(100);   // 10% of 1000 — NOT of (1000 - 100)
+    expect(t.total.toNumber()).toBe(1000); // 1000 + 100 - 100
+  });
+});
+
+describe("computeQuoteTotals — negative (discount) lines", () => {
+  it("a negative-price line subtracts from the subtotal", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ items: [
+        { quantity: 1, unitPrice: 1000 },
+        { quantity: 1, unitPrice: -200 }, // "Giảm giá" line
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(800);
+    expect(t.total.toNumber()).toBe(800);
+  });
+});
+
+describe("computeQuoteTotals — section rows & groupSubtotal", () => {
+  it("section row contributes nothing by itself", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ items: [
+        { kind: "section", quantity: 5, unitPrice: 999 },
+        { quantity: 1, unitPrice: 100 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(100);
+  });
+
+  it("groupSubtotal multiplies following items by the section quantity", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: true, items: [
+        { kind: "section", quantity: 2 },
+        { quantity: 1, unitPrice: 100 },
+        { quantity: 3, unitPrice: 10 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(260); // (100 + 30) × 2
+  });
+
+  it("a later section row resets the multiplier", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: true, items: [
+        { kind: "section", quantity: 2 },
+        { quantity: 1, unitPrice: 100 }, // ×2 = 200
+        { kind: "section", quantity: 1 },
+        { quantity: 1, unitPrice: 50 },  // ×1 = 50
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(250);
+  });
+
+  it("without groupSubtotal the section quantity is ignored", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: false, items: [
+        { kind: "section", quantity: 2 },
+        { quantity: 1, unitPrice: 100 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(100);
+  });
+});

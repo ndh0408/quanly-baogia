@@ -31,12 +31,12 @@ export async function recordUsage(metric, value = 1) {
 
 /** Aggregate usage for a metric over a window (returns Number). */
 export async function usageSum(metric, { from, to } = {}) {
-  const result = await prisma.$queryRawUnsafe(
-    `SELECT COALESCE(SUM("value"), 0)::bigint AS s FROM "UsageRecord" WHERE metric = $1 AND ts >= $2 AND ts <= $3`,
-    metric,
-    from ?? new Date(Date.now() - 30 * 86400_000),
-    to ?? new Date()
-  );
+  const fromTs = from ?? new Date(Date.now() - 30 * 86400_000);
+  const toTs = to ?? new Date();
+  const result = await prisma.$queryRaw`
+    SELECT COALESCE(SUM("value"), 0)::bigint AS s
+    FROM "UsageRecord"
+    WHERE metric = ${metric} AND ts >= ${fromTs} AND ts <= ${toTs}`;
   return Number(result[0]?.s ?? 0);
 }
 

@@ -2,7 +2,6 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "node:crypto";
 import rateLimit from "express-rate-limit";
-import speakeasy from "speakeasy";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
@@ -11,6 +10,11 @@ import { validate, LoginSchema, ChangePasswordSchema, AcceptInviteSchema } from 
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllForUser } from "../jwt.js";
+import { destroyAllSessions } from "../sessions.js";
+import { authenticateCredentials, clientIp } from "../authCore.js";
+
+// MFA token: 6-digit TOTP OR a 10-char hex backup code.
+const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/).optional();
 import { permissionsForRole } from "../permissions.js";
 import { sendEmail } from "../email.js";
 
@@ -26,98 +30,19 @@ const loginLimiter = rateLimit({
   message: { error: "Quá nhiều lần đăng nhập sai, thử lại sau 15 phút" },
 });
 
-function clientIp(req) {
-  return (req.headers["x-forwarded-for"]?.split(",")[0]?.trim()) || req.ip || null;
-}
-
 router.post(
   "/login",
   loginLimiter,
-  validate({ body: LoginSchema.extend({ mfaToken: z.string().regex(/^\d{6,8}$/).optional() }) }),
+  validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
   asyncHandler(async (req, res) => {
     const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
-    const ua = req.headers["user-agent"] || null;
 
-    const recordAttempt = (success, reason) =>
-      prisma.loginAttempt.create({ data: { username, ip, userAgent: ua, success, reason } }).catch(() => {});
-
-    // Login by email OR username (employees invited by email log in with their email).
-    const loginId = (username || "").trim();
-    const user = await prisma.user.findFirst({ where: { OR: [{ username: loginId }, { email: loginId }] } });
-
-    if (!user || !user.active) {
-      await recordAttempt(false, !user ? "no_such_user" : "inactive");
-      await audit(req, "login.failed", { resource: "user", resourceId: username, after: { reason: "no_such_user_or_inactive" } });
-      return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
+    const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "login" });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
-
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      await recordAttempt(false, "locked");
-      await audit(req, "login.locked", { resource: "user", resourceId: user.id, actorId: user.id });
-      return res.status(423).json({
-        error: `Tài khoản tạm khóa đến ${user.lockedUntil.toISOString()}`,
-      });
-    }
-
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      const next = (user.failedAttempts || 0) + 1;
-      const shouldLock = next >= config.LOGIN_MAX_ATTEMPTS;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedAttempts: next,
-          lockedUntil: shouldLock
-            ? new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000)
-            : null,
-        },
-      });
-      await recordAttempt(false, "bad_password");
-      await audit(req, "login.failed", {
-        resource: "user",
-        resourceId: user.id,
-        actorId: user.id,
-        after: { failedAttempts: next, locked: shouldLock },
-      });
-      return res.status(401).json({
-        error: shouldLock
-          ? `Sai mật khẩu nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút`
-          : "Sai mật khẩu",
-      });
-    }
-
-    // MFA gate: if enabled, require valid TOTP or backup code before issuing session
-    if (user.mfaEnabled) {
-      if (!mfaToken) {
-        return res.status(401).json({ error: "Cần mã MFA", mfaRequired: true });
-      }
-      // 6 digits = TOTP, 10 hex chars = backup code
-      const isTotp = /^\d{6}$/.test(mfaToken);
-      let mfaOk = false;
-      if (isTotp) {
-        mfaOk = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: "base32", token: mfaToken, window: 1 });
-      } else {
-        const idx = (user.mfaBackupCodes || []).indexOf(mfaToken.toUpperCase());
-        if (idx >= 0) {
-          const remaining = [...user.mfaBackupCodes];
-          remaining.splice(idx, 1);
-          await prisma.user.update({ where: { id: user.id }, data: { mfaBackupCodes: remaining } });
-          mfaOk = true;
-        }
-      }
-      if (!mfaOk) {
-        await recordAttempt(false, "bad_mfa");
-        await audit(req, "login.mfa.failed", { resource: "user", resourceId: user.id, actorId: user.id });
-        return res.status(401).json({ error: "Mã MFA không đúng", mfaRequired: true });
-      }
-    }
-
-    // Reset lockout counters + bookkeeping
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginIp: ip },
-    });
+    const user = result.user;
 
     // Regenerate session ID to defeat session fixation
     await new Promise((resolve, reject) =>
@@ -131,7 +56,6 @@ router.post(
       req.session.save((err) => (err ? reject(err) : resolve()))
     );
 
-    await recordAttempt(true, null);
     await audit(req, "login.success", { resource: "user", resourceId: user.id, actorId: user.id });
     logger.info({ userId: user.id, ip }, "login success");
 
@@ -142,6 +66,7 @@ router.post(
       role: user.role,
       phone: user.phone,
       title: user.title,
+      senderName: user.senderName,
       permissions: permissionsForRole(user.role),
     });
   })
@@ -161,7 +86,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, mfaEnabled: true, lastLoginAt: true },
+      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, mfaEnabled: true, lastLoginAt: true },
     });
     if (!user) return res.status(404).json({ error: "Không tìm thấy" });
     // Ship the authoritative capability list so the SPA gates UI from the server catalog.
@@ -176,12 +101,19 @@ router.post(
   validate({ body: z.object({
     displayName: z.string().min(1).max(120).trim(),
     phone: z.string().max(40).trim().optional().or(z.literal("").transform(() => null)),
+    title: z.string().max(120).trim().optional().or(z.literal("").transform(() => null)),
+    senderName: z.string().max(120).trim().optional().or(z.literal("").transform(() => null)),
   }) }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.update({
       where: { id: req.session.userId },
-      data: { displayName: req.body.displayName, phone: req.body.phone || null },
-      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, mfaEnabled: true },
+      data: {
+        displayName: req.body.displayName,
+        phone: req.body.phone || null,
+        ...(req.body.title !== undefined ? { title: req.body.title } : {}),
+        ...(req.body.senderName !== undefined ? { senderName: req.body.senderName } : {}),
+      },
+      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, mfaEnabled: true },
     });
     req.session.displayName = user.displayName;
     await audit(req, "user.profile.update", { resource: "user", resourceId: user.id, actorId: user.id });
@@ -205,9 +137,11 @@ router.post(
       where: { id: user.id },
       data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST) },
     });
-    // Invalidate outstanding refresh tokens so a stolen token can't survive a
-    // password change (containment for the "I think I'm compromised" case).
+    // Invalidate outstanding refresh tokens AND every other cookie session so a
+    // stolen credential can't survive a password change (containment for the
+    // "I think I'm compromised" case). The caller's own session stays alive.
     await revokeAllForUser(user.id);
+    await destroyAllSessions(user.id, req.sessionID);
     await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
     res.json({ ok: true });
   })
@@ -218,40 +152,19 @@ router.post(
 router.post(
   "/token",
   loginLimiter,
-  validate({ body: LoginSchema.extend({ mfaToken: z.string().regex(/^\d{6,8}$/).optional() }) }),
+  validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
   asyncHandler(async (req, res) => {
-    // Same shape as /login but issues JWT pair instead of setting session.
+    // Same credentials path as /login (shared authCore — same lockout, telemetry,
+    // single-use backup codes) but issues a JWT pair instead of a cookie session.
     const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
     const ua = req.headers["user-agent"] || null;
 
-    const user = await prisma.user.findFirst({ where: { OR: [{ username: (username || "").trim() }, { email: (username || "").trim() }] } });
-    if (!user || !user.active) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return res.status(423).json({ error: `Tài khoản tạm khóa đến ${user.lockedUntil.toISOString()}` });
+    const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "token" });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      const next = (user.failedAttempts || 0) + 1;
-      const lock = next >= config.LOGIN_MAX_ATTEMPTS;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { failedAttempts: next, lockedUntil: lock ? new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000) : null },
-      });
-      return res.status(401).json({ error: lock ? "Khoá tạm" : "Sai mật khẩu" });
-    }
-
-    if (user.mfaEnabled) {
-      if (!mfaToken) return res.status(401).json({ error: "Cần MFA", mfaRequired: true });
-      const okMfa = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: "base32", token: mfaToken, window: 1 })
-        || (user.mfaBackupCodes || []).includes(mfaToken.toUpperCase());
-      if (!okMfa) return res.status(401).json({ error: "MFA sai", mfaRequired: true });
-    }
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginIp: ip },
-    });
+    const user = result.user;
 
     const access = signAccessToken(user);
     const refresh = await issueRefreshToken(user.id, { ip, userAgent: ua });
@@ -325,15 +238,22 @@ router.post(
   validate({ body: z.object({ email: z.string().email().max(160) }) }),
   asyncHandler(async (req, res) => {
     const email = req.body.email.trim();
-    const user = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
-    if (user && user.active) {
+    // Respond immediately and identically for every email so neither the status
+    // nor the RESPONSE TIME reveals whether the account exists (the DB write +
+    // SMTP send below would otherwise leak existence via a timing oracle).
+    res.json({ ok: true });
+
+    (async () => {
+      const user = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
+      if (!user || !user.active) return;
       const token = randomBytes(24).toString("hex");
       await prisma.user.update({
         where: { id: user.id },
         data: { inviteTokenHash: hashInvite(token), inviteExpiresAt: new Date(Date.now() + 2 * 3600 * 1000) },
       });
-      const base = req.headers.origin || `${req.protocol}://${req.get("host")}`;
-      const url = `${base}/#/onboard?token=${token}`;
+      // Link base comes from configuration only — Origin/Host headers are
+      // client-controlled and would allow reset-link poisoning (ATO).
+      const url = `${config.APP_BASE_URL}/#/onboard?token=${token}`;
       await sendEmail({
         to: user.email || email,
         subject: "Đặt lại mật khẩu – Báo Giá Gia Nguyễn",
@@ -341,8 +261,7 @@ router.post(
         html: `<p>Bạn yêu cầu đặt lại mật khẩu cho hệ thống Báo Giá. Nhấn liên kết bên dưới (hết hạn sau 2 giờ):</p><p><a href="${url}">${url}</a></p><p>Nếu không phải bạn, hãy bỏ qua email này.</p>`,
       });
       await audit(req, "password.forgot", { resource: "user", resourceId: user.id });
-    }
-    res.json({ ok: true });
+    })().catch((e) => logger.error({ err: e.message }, "forgot-password background task failed"));
   })
 );
 
@@ -361,7 +280,7 @@ router.post(
   "/accept-invite",
   validate({ body: AcceptInviteSchema }),
   asyncHandler(async (req, res) => {
-    const { token, displayName, phone, password } = req.body;
+    const { token, displayName, phone, title, senderName, password } = req.body;
     const user = await findInvitee(token);
     if (!user) return res.status(404).json({ error: "Lời mời không hợp lệ hoặc đã hết hạn" });
 
@@ -372,11 +291,18 @@ router.post(
         active: true,
         displayName: displayName?.trim() || user.displayName,
         phone: phone?.trim() || null,
+        title: title?.trim() || null,
+        senderName: senderName?.trim() || null,
         inviteTokenHash: null,
         inviteExpiresAt: null,
       },
     });
     await audit(req, "user.invite.accept", { resource: "user", resourceId: user.id, actorId: user.id });
+
+    // This endpoint also serves password resets: the password just rotated, so
+    // kill every pre-existing session/refresh token before issuing a new one.
+    await revokeAllForUser(user.id);
+    await destroyAllSessions(user.id);
 
     // Log the new user in immediately.
     await new Promise((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
@@ -386,7 +312,7 @@ router.post(
     req.session.username = updated.username;
     await new Promise((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
 
-    res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, permissions: permissionsForRole(updated.role) });
+    res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, senderName: updated.senderName, permissions: permissionsForRole(updated.role) });
   })
 );
 

@@ -13,12 +13,18 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio",
-    "setup": "prisma db push && node prisma/seed.js",
+    "setup": "prisma migrate deploy && node prisma/seed.js",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "node --check src/server.js && echo lint-ok"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true,
+  "license": "UNLICENSED",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1055.0",
     "@aws-sdk/s3-request-presigner": "^3.1055.0",
@@ -53,7 +59,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.1.7",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
     "prisma": "^5.22.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.7"

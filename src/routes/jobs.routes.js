@@ -7,11 +7,14 @@ import { getQueue, QUEUES, isQueueEnabled } from "../queue.js";
 import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
-router.use(requireAuth);
+// requireAuth is applied PER ROUTE, not router-wide: this router is mounted at
+// the /api root, so a router-wide guard would swallow every unmatched /api/*
+// path (incl. /api/health and the 404 handler) with a 401.
 
 /** Async export: returns a jobId; client polls /api/jobs/:queue/:id */
 router.post(
   "/quotes/:id/export",
+  requireAuth,
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ format: z.enum(["xlsx", "pdf"]).default("xlsx") }).default({}),
@@ -36,6 +39,7 @@ router.post(
 
 router.get(
   "/jobs/:queue/:id",
+  requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req, res) => {
     if (!isQueueEnabled()) return res.status(503).json({ error: "Queue chưa cấu hình" });

@@ -25,11 +25,16 @@ export function D(v) {
 export function computeQuoteTotals(quote) {
   const vatPct = D(quote.vatPercent);
   const sheetTotals = (quote.sheets || []).map((sh) => {
+    let mult = 1;
     const subtotal = (sh.items || []).reduce((acc, it) => {
+      if (it.kind === "section") {   // nhóm: ×Số Lượng chỉ khi bật groupSubtotal; dòng nhóm không tự cộng
+        mult = sh.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+        return acc;
+      }
       const qty = D(it.quantity);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
-      const line = days && days.gt(0) ? qty.times(days).times(price) : qty.times(price);
+      const line = (days && days.gt(0) ? qty.times(days).times(price) : qty.times(price)).times(mult);
       return acc.plus(line);
     }, new Decimal(0));
     return { sheetId: sh.id, subtotal };

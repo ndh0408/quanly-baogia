@@ -8,6 +8,9 @@ import { asyncHandler, requireRole } from "../middleware.js";
 import { validate, UserCreateSchema, UserUpdateSchema, UserInviteSchema } from "../validators.js";
 import { audit, diff } from "../audit.js";
 import { sendEmail } from "../email.js";
+import { revokeSession, refreshSession } from "../sse.js";
+import { revokeAllForUser } from "../jwt.js";
+import { destroyAllSessions } from "../sessions.js";
 
 const router = Router();
 router.use(requireRole("admin"));
@@ -20,6 +23,7 @@ const USER_SELECT = {
   displayName: true,
   role: true,
   phone: true,
+  projectCode: true,
   active: true,
   lastLoginAt: true,
   createdAt: true,
@@ -27,9 +31,10 @@ const USER_SELECT = {
 
 const hashInvite = (t) => createHash("sha256").update(String(t)).digest("hex");
 const escHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-function inviteLink(req, token) {
-  const base = req.headers.origin || `${req.protocol}://${req.get("host")}`;
-  return `${base}/#/onboard?token=${token}`;
+function inviteLink(token) {
+  // Configuration only — Origin/Host headers are client-controlled and would
+  // allow invite-link poisoning.
+  return `${config.APP_BASE_URL}/#/onboard?token=${token}`;
 }
 async function sendInviteEmail(to, displayName, url) {
   return sendEmail({
@@ -53,7 +58,7 @@ router.post(
   "/invite",
   validate({ body: UserInviteSchema }),
   asyncHandler(async (req, res) => {
-    const { email, displayName, role } = req.body;
+    const { email, displayName, role, projectCode } = req.body;
     const exists = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
     if (exists) return res.status(409).json({ error: "Email này đã có tài khoản" });
     const token = randomBytes(24).toString("hex");
@@ -63,6 +68,7 @@ router.post(
         email,
         displayName,
         role,
+        projectCode: projectCode ? String(projectCode).trim() : null,
         active: false,
         passwordHash: await bcrypt.hash(randomBytes(18).toString("hex"), config.BCRYPT_COST), // unusable until accept
         inviteTokenHash: hashInvite(token),
@@ -70,7 +76,7 @@ router.post(
       },
       select: { id: true, email: true, displayName: true, role: true },
     });
-    const url = inviteLink(req, token);
+    const url = inviteLink(token);
     const mail = await sendInviteEmail(email, displayName, url);
     await audit(req, "user.invite", { resource: "user", resourceId: user.id, after: { email, role } });
     res.status(201).json({ user, inviteUrl: url, emailSent: !mail.skipped && !mail.error });
@@ -91,7 +97,7 @@ router.post(
       where: { id: u.id },
       data: { inviteTokenHash: hashInvite(token), inviteExpiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
     });
-    const url = inviteLink(req, token);
+    const url = inviteLink(token);
     const mail = await sendInviteEmail(u.email, u.displayName, url);
     await audit(req, "user.invite.resend", { resource: "user", resourceId: u.id });
     res.json({ inviteUrl: url, emailSent: !mail.skipped && !mail.error });
@@ -103,8 +109,10 @@ router.post(
   validate({ body: UserCreateSchema }),
   asyncHandler(async (req, res) => {
     const { username, password, displayName, role, phone, title } = req.body;
-    const exists = await prisma.user.findUnique({ where: { username } });
-    if (exists) return res.status(409).json({ error: "Username đã tồn tại" });
+    // includeDeleted: username is unique across soft-deleted rows too — a plain
+    // check would miss a deleted holder and surface the DB constraint as a 500.
+    const exists = await prisma.user.findFirst({ where: { username }, includeDeleted: true });
+    if (exists) return res.status(409).json({ error: exists.deletedAt ? "Username thuộc tài khoản đã xoá" : "Username đã tồn tại" });
 
     const user = await prisma.user.create({
       data: {
@@ -133,8 +141,34 @@ router.put(
     const { password, ...rest } = req.body;
     const data = { ...rest };
     if (password) data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
+    // Deactivating an account must also burn any live invite/reset token —
+    // otherwise the locked-out user could re-activate themselves through the
+    // onboarding link (accept-invite sets active: true).
+    if (rest.active === false) {
+      data.inviteTokenHash = null;
+      data.inviteExpiresAt = null;
+    }
 
     const user = await prisma.user.update({ where: { id }, data, select: USER_SELECT });
+    // Credential rotation containment: an admin password reset invalidates every
+    // existing session and refresh token of the target account.
+    if (password) {
+      await revokeAllForUser(id);
+      await destroyAllSessions(id);
+    }
+    // Off-boarding: a deactivated user must not linger in _QuoteMembers (it would
+    // keep stale references and, on a later hard-purge, drop silently via cascade).
+    // Drop their quote memberships explicitly + audit.
+    if (before.active && user.active === false) {
+      revokeSession(user.id, "deactivated");
+      const dropped = await prisma.quote.findMany({ where: { members: { some: { id } } }, select: { id: true } });
+      if (dropped.length) {
+        await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });
+        await audit(req, "user.memberships.cleared", { resource: "user", resourceId: id, after: { quoteIds: dropped.map((q) => q.id) } });
+      }
+    } else if (before.role !== user.role) {
+      refreshSession(user.id);
+    }
     await audit(req, "user.update", {
       resource: "user",
       resourceId: id,
@@ -167,7 +201,11 @@ router.delete(
       });
     }
     const before = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
+    // Drop quote memberships before removing the user so the M2M carries no stale
+    // reference (and a later hard-purge can't drop it silently via cascade).
+    await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });
     await prisma.user.delete({ where: { id } }); // soft-delete via middleware
+    revokeSession(id, "deleted");
     await audit(req, "user.delete", { resource: "user", resourceId: id, before });
     res.json({ ok: true });
   })

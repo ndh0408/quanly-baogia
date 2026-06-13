@@ -61,6 +61,35 @@ export function requireRole(...roles) {
   };
 }
 
+/**
+ * Reload the caller's account state from the DB on each request (cookie-session path).
+ * Rejects locked / deactivated / deleted accounts immediately and refreshes the
+ * authoritative role — so an admin's lock/ban/role change takes effect on the user's
+ * NEXT request instead of being stuck until they re-login. The Bearer path
+ * (bearerAuth) already re-loads from the DB, so JWT requests are skipped here.
+ */
+export async function enforceActiveUser(req, res, next) {
+  if (!req.session?.userId || req.viaJwt) return next();
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.session.userId },
+      select: { role: true, active: true, lockedUntil: true },
+    });
+    if (!user || user.active === false || (user.lockedUntil && user.lockedUntil > new Date())) {
+      return req.session.destroy(() =>
+        res.status(401).json({
+          error: "Phiên đã kết thúc — tài khoản bị khóa hoặc vô hiệu hóa",
+          code: "session_revoked",
+        })
+      );
+    }
+    if (req.session.role !== user.role) req.session.role = user.role; // authoritative role
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
 export function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -73,6 +102,12 @@ export function notFound(req, res, next) {
 }
 
 export function errorHandler(err, req, res, _next) {
+  // Multer upload errors (file too large / too many files / unexpected field) are
+  // client errors, not 500s. Map them so observability isn't spammed with fake errors.
+  if (err && err.name === "MulterError" && !err.status) {
+    err.status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    err.message = err.code === "LIMIT_FILE_SIZE" ? "File quá lớn (tối đa 10MB)" : "Tải file không hợp lệ";
+  }
   // Map known Prisma errors to proper HTTP status codes instead of opaque 500s.
   // (Avoids unique-constraint races / FK violations leaking as "Lỗi server".)
   if (err && typeof err.code === "string" && /^P\d{4}$/.test(err.code) && !err.status) {

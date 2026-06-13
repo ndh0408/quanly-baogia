@@ -52,6 +52,8 @@ model User {
   role         Role     @default(employee)
   phone        String?
   title        String?
+  senderName   String?  // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
+  projectCode  String?  // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
   active       Boolean  @default(true)
 
   // Email-invite onboarding: invited users are inactive until they accept,
@@ -81,6 +83,11 @@ model User {
   notifications  Notification[]
   approvals      Approval[]
   refreshTokens  RefreshToken[]
+  // Back-relations for previously-bare Int references (now real FKs, onDelete: SetNull).
+  authoredNotes     CustomerNote[]  @relation("NoteAuthor")
+  assignedFollowUps FollowUp[]      @relation("FollowupAssignee")
+  authoredVersions  QuoteVersion[]  @relation("VersionAuthor")
+  createdApiKeys    ApiKey[]        @relation("ApiKeyAuthor")
 
   @@index([deletedAt, active])
 }
@@ -114,6 +121,8 @@ model Company {
   taxCode   String?
   logoPath  String?
   active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   deletedAt DateTime?
   templates QuoteTemplate[]
   quotes    Quote[]
@@ -129,6 +138,8 @@ model QuoteTemplate {
   company   Company  @relation(fields: [companyId], references: [id])
   filePath  String
   active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   deletedAt DateTime?
   sheets    QuoteSheet[]
 
@@ -169,9 +180,11 @@ model CustomerNote {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   body       String
   authorId   Int?
+  author     User?    @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([customerId, createdAt(sort: Desc)])
+  @@index([authorId])
 }
 
 model FollowUp {
@@ -182,6 +195,7 @@ model FollowUp {
   doneAt     DateTime?
   note       String
   assigneeId Int?
+  assignee   User?    @relation("FollowupAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([customerId, dueAt])
@@ -200,6 +214,7 @@ model Product {
   description String?
   active     Boolean  @default(true)
   priceTiers ProductPriceTier[]
+  quoteItems QuoteItem[]
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   deletedAt  DateTime?
@@ -224,10 +239,14 @@ model ProductPriceTier {
 model Quote {
   id            Int         @id @default(autoincrement())
   quoteNumber   String      @unique
+  projectCode   String?              // mã dự án theo nhân viên (FE_A26_001…); hiển thị trong app, KHÔNG vào Excel
+  projectVersion Int        @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
   title         String
   toCompany     String              // legacy free-text; kept for backwards compat
   toContact     String?
   toEmail       String?             // recipient email for the "Kính gửi" block
+  toPhone       String?             // recipient phone (To · Tel)
+  toAddress     String?             // recipient address (To · Add)
   customerId    Int?                // new: link to CRM Customer (optional during migration)
   customer      Customer?   @relation(fields: [customerId], references: [id])
   companyId     Int
@@ -287,10 +306,12 @@ model QuoteVersion {
   payload    Json     // full snapshot of fields + sheets + items at this revision
   total      Decimal  @db.Decimal(18, 2)
   createdById Int?
+  createdBy   User?    @relation("VersionAuthor", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@unique([quoteId, versionNo])
   @@index([quoteId, versionNo(sort: Desc)])
+  @@index([createdById])
 }
 
 model QuoteSheet {
@@ -301,6 +322,7 @@ model QuoteSheet {
   template    QuoteTemplate @relation(fields: [templateId], references: [id])
   order       Int
   name        String?
+  groupSubtotal Boolean     @default(false)  // hiện tổng tiền theo từng nhóm A/B/C
   items       QuoteItem[]
 
   @@index([quoteId, order])
@@ -312,7 +334,9 @@ model QuoteItem {
   sheet      QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
   order      Int
   productId  Int?               // optional link to catalog
-  kind       String  @default("item")  // "item" = dòng hàng | "info" = dòng thông tin (ghi chú toàn hàng)
+  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  kind       String  @default("item")  // "item" | "sub" | "info" | "section" (nhóm A/B/C)
+  label      String?                    // chữ nhóm tự đặt cho kind=section (A/B/C…); rỗng = tự đánh theo thứ tự
   name       String                     // Hạng Mục (các dòng cùng name liên tiếp = 1 nhóm: gộp STT + ô Hạng Mục)
   detail     String?
   unit       String?
@@ -334,6 +358,7 @@ model ApprovalMatrix {
   levels    Json     // [{level: 1, roles: ["manager"], any: 1}, {level: 2, roles: ["admin"], any: 1}]
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([active, minAmount])
 }
@@ -478,6 +503,7 @@ model Webhook {
   secret    String              // HMAC signing secret
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   deliveries WebhookDelivery[]
 
   @@index([active])
@@ -508,10 +534,12 @@ model ApiKey {
   active    Boolean  @default(true)
   lastUsedAt DateTime?
   createdById Int?
+  createdBy  User?    @relation("ApiKeyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   expiresAt DateTime?
 
   @@index([active, expiresAt])
+  @@index([createdById])
 }
 
 /// Session store table managed by connect-pg-simple (express-session).

@@ -57,10 +57,19 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
       })),
     })),
   };
-  return tx.quoteVersion.create({
-    data: {
+  // Upsert: cosmetic edits don't bump currentVersion, so the same versionNo may be
+  // snapshotted again — refresh that revision's snapshot instead of violating the
+  // (quoteId, versionNo) unique constraint.
+  return tx.quoteVersion.upsert({
+    where: { quoteId_versionNo: { quoteId, versionNo } },
+    create: {
       quoteId,
       versionNo,
+      payload,
+      total: q.total,
+      createdById: actorId ?? null,
+    },
+    update: {
       payload,
       total: q.total,
       createdById: actorId ?? null,

@@ -18,6 +18,11 @@ const schema = z.object({
   // Pagination defaults
   DEFAULT_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(20),
   MAX_PAGE_SIZE: z.coerce.number().int().min(10).max(500).default(100),
+  // Public base URL of the app (e.g. https://gianguyen.cloud). Used to build
+  // links in outgoing emails (password reset, invites). NEVER derived from
+  // request headers — Origin/Host are client-controlled and would let an
+  // attacker poison reset links (account takeover).
+  APP_BASE_URL: z.string().url("APP_BASE_URL phải là URL đầy đủ, vd https://gianguyen.cloud").optional(),
   // CORS
   CORS_ORIGINS: z.string().optional(),
   // Trust proxy (Nginx, Cloudflare). Set 1 (one hop) or true for any.
@@ -46,6 +51,9 @@ const schema = z.object({
   SENTRY_DSN: z.string().optional(),
   // Optional bearer token to protect /metrics (defence-in-depth on top of network policy)
   METRICS_TOKEN: z.string().optional(),
+  // Key used to encrypt MFA TOTP secrets at rest (AES-256-GCM). Strongly recommended
+  // in production; if absent, secrets fall back to plaintext (legacy) with a warning.
+  MFA_ENC_KEY: z.string().min(16).optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -87,5 +95,13 @@ if (config.NODE_ENV === "production") {
 
 // Dev/test convenience: derive a JWT secret from SESSION_SECRET if not set.
 if (!config.JWT_SECRET) config.JWT_SECRET = config.SESSION_SECRET;
+
+// Email links must come from configuration, not from request headers.
+if (config.NODE_ENV === "production" && !config.APP_BASE_URL) {
+  console.error("❌ APP_BASE_URL must be set in production (e.g. https://gianguyen.cloud) — email links are built from it.");
+  process.exit(1);
+}
+if (!config.APP_BASE_URL) config.APP_BASE_URL = `http://localhost:${config.PORT}`;
+config.APP_BASE_URL = config.APP_BASE_URL.replace(/\/+$/, "");
 
 export const isProd = config.NODE_ENV === "production";

@@ -49,8 +49,20 @@ router.get(
       }),
     ]);
 
-    // BigInt ids cannot be JSON-serialized directly
-    const data = rows.map((r) => ({ ...r, id: r.id.toString() }));
+    // Least-privilege: the before/after snapshots (and IP/UA) can contain full PII
+    // of other users/customers. Only admins see the raw payload; managers get the
+    // who/what/when trail with PII stripped.
+    const isAdmin = req.session.role === "admin";
+    const data = rows.map((r) => {
+      const out = { ...r, id: r.id.toString() }; // BigInt id → string for JSON
+      if (!isAdmin) {
+        delete out.before;
+        delete out.after;
+        delete out.ip;
+        delete out.userAgent;
+      }
+      return out;
+    });
     res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) } });
   })
 );

@@ -34,9 +34,9 @@ export async function findMatrixForAmount(total) {
  * Workflow is intentionally simple: ONE step, the Director (admin) approves or
  * rejects. No tiers/levels, no amount matrix.
  */
-export async function startApprovalChain(quoteId, versionNo) {
-  await prisma.approval.deleteMany({ where: { quoteId, versionNo } });
-  await prisma.approval.create({
+export async function startApprovalChain(quoteId, versionNo, db = prisma) {
+  await db.approval.deleteMany({ where: { quoteId, versionNo } });
+  await db.approval.create({
     data: { quoteId, versionNo, level: 1, decision: "pending" },
   });
 }
@@ -63,8 +63,8 @@ export async function hasEarlierPending(quoteId, versionNo, level) {
 }
 
 /** All levels for this version approved? */
-export async function isChainComplete(quoteId, versionNo) {
-  const remaining = await prisma.approval.count({
+export async function isChainComplete(quoteId, versionNo, db = prisma) {
+  const remaining = await db.approval.count({
     where: { quoteId, versionNo, decision: { not: "approved" } },
   });
   return remaining === 0;

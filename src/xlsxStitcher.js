@@ -475,7 +475,7 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
     }
     // Ensure workbook.xml.rels has a sharedStrings rel
     if (!/Target="sharedStrings\.xml"/.test(baseWbRelsXml)) {
-      const sstRId = `rId${++baseMaxRId}`;
+      const sstRId = `rId${baseMaxRId + 1}`;
       baseWbRelsXml = addRelationship(baseWbRelsXml, sstRId, "sharedStrings.xml",
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings");
     }

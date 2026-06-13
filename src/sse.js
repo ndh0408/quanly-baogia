@@ -56,3 +56,22 @@ export function broadcast(event, data) {
     }
   }
 }
+
+/**
+ * Broadcast a data-change hint so every connected client refreshes the relevant
+ * list view without a manual reload. The client re-fetches through the normal
+ * (permission-scoped) API, so broadcasting to everyone is safe.
+ */
+export function emitChange(entity, action, id) {
+  broadcast("changed", { entity, action, id: id != null ? String(id) : null });
+}
+
+/** Tell one user their session is no longer valid (locked/deactivated/deleted) → client logs out. */
+export function revokeSession(userId, reason) {
+  publish(userId, "session:revoked", { reason: reason || "revoked" });
+}
+
+/** Tell one user to re-pull their capabilities (role changed) → client re-renders. */
+export function refreshSession(userId) {
+  publish(userId, "session:refresh", {});
+}

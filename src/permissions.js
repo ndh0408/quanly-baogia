@@ -93,8 +93,10 @@ export const PERMISSION_GROUPS = [
 const EMPLOYEE = [
   P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_UPDATE_OWN, P.QUOTE_DELETE_OWN,
   P.QUOTE_SUBMIT, P.QUOTE_EXPORT,
-  // CRM: a salesperson sees & manages their own customers; product catalog is read-only (selling price, no cost).
-  P.CUSTOMER_READ_OWN, P.CUSTOMER_MANAGE_OWN, P.PRODUCT_READ,
+  // CRM: the customer-code list is a SHARED company directory — everyone can read/select any
+  // customer code when making a quote; a salesperson still only manages (create/edit/delete)
+  // the ones they own. Product catalog is read-only (selling price, no cost).
+  P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.PRODUCT_READ,
 ];
 
 const MANAGER = [

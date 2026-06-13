@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import net from "node:net";
 import dns from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
 import { isProd } from "./config.js";
@@ -41,7 +43,13 @@ function isBlockedIp(ip) {
   return true; // not a valid IP literal → treat as unsafe
 }
 
-/** Throw (status 400) unless urlStr is a public http(s) endpoint. */
+/**
+ * Throw (status 400) unless urlStr is a public http(s) endpoint.
+ * Returns { url, address } where `address` is the validated IP to connect to.
+ * The caller MUST connect to that exact IP (not re-resolve) — otherwise a
+ * malicious DNS can return a public IP here and an internal IP at fetch time
+ * (DNS rebinding / TOCTOU).
+ */
 export async function assertPublicHttpUrl(urlStr) {
   let u;
   try { u = new URL(urlStr); } catch { throw Object.assign(new Error("URL webhook không hợp lệ"), { status: 400 }); }
@@ -54,7 +62,7 @@ export async function assertPublicHttpUrl(urlStr) {
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (net.isIP(host)) {
     if (isBlockedIp(host)) throw Object.assign(new Error("Webhook trỏ tới địa chỉ nội bộ — bị chặn"), { status: 400 });
-    return;
+    return { url: u, address: host };
   }
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) {
     throw Object.assign(new Error("Hostname webhook bị chặn"), { status: 400 });
@@ -66,6 +74,39 @@ export async function assertPublicHttpUrl(urlStr) {
   if (!addrs.length || addrs.some((a) => isBlockedIp(a.address))) {
     throw Object.assign(new Error("Webhook phân giải tới địa chỉ nội bộ — bị chặn"), { status: 400 });
   }
+  return { url: u, address: addrs[0].address };
+}
+
+/**
+ * POST to a webhook by connecting DIRECTLY to a pre-validated IP (no second DNS
+ * lookup), with the original Host header and TLS servername so cert validation
+ * still works. Closes the rebinding window. Does NOT follow redirects.
+ */
+function postToPinnedIp({ url, address }, body, headers) {
+  const isHttps = url.protocol === "https:";
+  const lib = isHttps ? https : http;
+  const port = url.port || (isHttps ? 443 : 80);
+  return new Promise((resolve, reject) => {
+    const req = lib.request(
+      {
+        host: address,                                  // connect to the validated IP
+        port,
+        path: (url.pathname || "/") + (url.search || ""),
+        method: "POST",
+        headers: { ...headers, Host: url.host },        // preserve virtual host
+        servername: isHttps ? url.hostname : undefined, // SNI + cert checked vs hostname
+        timeout: 15_000,
+      },
+      (res) => {
+        let len = 0;
+        res.on("data", (c) => { len += c.length; });    // count only — never buffer/echo body
+        res.on("end", () => resolve({ status: res.statusCode, len }));
+      }
+    );
+    req.on("timeout", () => req.destroy(Object.assign(new Error("webhook timeout"), { status: 0 })));
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 /**
@@ -112,25 +153,24 @@ export async function deliverWebhook({ webhookId, event, payload }) {
   const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
   const sig = sign(body, h.secret);
 
-  let status = 0, text = "";
+  let status, text;
   try {
-    await assertPublicHttpUrl(h.url); // SSRF guard (re-resolves at delivery time)
-    const res = await fetch(h.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-QLY-Event": event,
-        "X-QLY-Signature": sig,
-      },
-      body,
-      redirect: "error", // don't follow redirects into internal space
-      signal: AbortSignal.timeout(15_000),
+    // Validate AND pin the IP, then connect to that exact IP at delivery time so
+    // a rebinding DNS can't swap in an internal address between check and fetch.
+    const pinned = await assertPublicHttpUrl(h.url);
+    const res = await postToPinnedIp(pinned, body, {
+      "Content-Type": "application/json",
+      "X-QLY-Event": event,
+      "X-QLY-Signature": sig,
     });
     status = res.status;
+    if (status >= 300 && status < 400) {
+      // Never follow redirects into internal space.
+      throw Object.assign(new Error(`webhook redirect ${status} blocked`), { status });
+    }
     // Do NOT persist/echo the raw response body — that would turn any SSRF into a
     // read primitive via the deliveries log. Record only its length.
-    const raw = await res.text();
-    text = `len=${raw.length}`;
+    text = `len=${res.len}`;
   } catch (e) {
     status = 0;
     text = e.message;

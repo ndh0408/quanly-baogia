@@ -37,3 +37,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Untracked junk (audit): old code backups + one-off recon scripts
+backups/
+deploy/windows/_recon*.ps1

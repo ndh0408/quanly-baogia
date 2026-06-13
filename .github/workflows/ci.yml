@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, main, develop]
+    branches: [master, main, develop, "harden/**", "feat/**", "fix/**"]
   pull_request:
     branches: [master, main, develop]
 
@@ -55,13 +55,20 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Prisma generate + push
+      - name: Lint
+        run: npm run lint
+
+      - name: Prisma generate + migrate
         run: |
           npx prisma generate
-          npx prisma db push --accept-data-loss
+          npx prisma migrate deploy
 
       - name: Unit + integration tests
-        run: npm test -- --run
+        run: RUN_DB_TESTS=1 npm test -- --run
+
+      - name: Dependency audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
 
   build-image:
     name: Build Docker image

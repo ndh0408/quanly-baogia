@@ -2,7 +2,12 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { prisma } from "../src/db.js";
 import { nextQuoteNumber } from "../src/quoteNumber.js";
 
-const isDbAvailable = !!process.env.DATABASE_URL;
+// Probe the actual connection — DATABASE_URL is always set by tests/setup.js,
+// so checking the env var alone made this guard useless (suite went red on any
+// machine without a local Postgres instead of skipping).
+const isDbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "QuoteCounter" LIMIT 1')
+  .then(() => true)
+  .catch(() => false);
 
 describe.runIf(isDbAvailable)("nextQuoteNumber (DB-backed atomic counter)", () => {
   beforeAll(async () => {

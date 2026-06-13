@@ -43,11 +43,14 @@ export async function ensureBucket(bucket = config.S3_BUCKET) {
  * Upload an object. Key is deterministic from caller (e.g. `logos/${companyId}.png`).
  * Returns { key, bucket }.
  */
-export async function putObject({ key, body, contentType, bucket = config.S3_BUCKET, metadata }) {
+export async function putObject({ key, body, contentType, bucket = config.S3_BUCKET, metadata, contentDisposition }) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
   await c.send(new PutObjectCommand({
     Bucket: bucket, Key: key, Body: body, ContentType: contentType, Metadata: metadata,
+    // Default to attachment so a mis-stored text/html object can never be rendered
+    // inline by the browser (stored-XSS defence).
+    ContentDisposition: contentDisposition || "attachment",
   }));
   return { key, bucket };
 }
@@ -69,11 +72,25 @@ export async function objectExists(key, bucket = config.S3_BUCKET) {
   }
 }
 
-/** Generate a time-limited signed URL clients can download the object from directly. */
-export async function presignDownload(key, { expiresIn = 3600, bucket = config.S3_BUCKET } = {}) {
+/**
+ * Generate a time-limited signed URL clients can download the object from directly.
+ * Always forces an `attachment` disposition (sanitized filename) so the object is
+ * downloaded, never rendered inline — even if it was stored with a risky
+ * Content-Type. Pass `inline:true` only for trusted, display-safe assets.
+ */
+export async function presignDownload(key, { expiresIn = 3600, bucket = config.S3_BUCKET, filename, inline = false } = {}) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
-  return getSignedUrl(c, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });
+  const safeName = String(filename || key.split("/").pop() || "download").replace(/[^A-Za-z0-9._-]/g, "_");
+  return getSignedUrl(
+    c,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ResponseContentDisposition: `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
+    }),
+    { expiresIn }
+  );
 }
 
 export async function presignUpload({ key, contentType, expiresIn = 3600, bucket = config.S3_BUCKET }) {

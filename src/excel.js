@@ -12,9 +12,18 @@ function vnDateText(d, city) {
   return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
 }
 
+// Neutralize spreadsheet formula injection: a text cell whose value starts with
+// = + - @ (or a leading tab/CR) is interpreted as a formula by Excel/Sheets when
+// the exported file is opened. Prefix a zero-width-safe apostrophe so the value
+// is shown literally. Only applied to plain strings (numbers/dates untouched).
+function neutralizeFormula(value) {
+  if (typeof value !== "string" || value.length === 0) return value;
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 function setCell(ws, ref, value) {
   if (!ref) return;
-  ws.getCell(ref).value = value;
+  ws.getCell(ref).value = neutralizeFormula(value);
 }
 
 function safeMerge(ws, range) {
@@ -37,6 +46,13 @@ function ensureWrap(cell) {
 function clean(s) {
   if (s == null) return "";
   return String(s).replace(/[\r\n]+/g, " ").trim();
+}
+
+/** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows. */
+function sectionLetter(n) {
+  let s = "", x = n + 1;
+  while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
+  return s;
 }
 
 /** Parse "C3" → 0-based {col,row} anchor used by ExcelJS addImage. */
@@ -136,10 +152,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   if (c.toCompany) setCell(ws, c.toCompany, clean(quote.toCompany));
   if (c.toContact) setCell(ws, c.toContact, clean(quote.toContact));
+  if (c.toPhone) setCell(ws, c.toPhone, clean(quote.toPhone));
+  if (c.toAddress) setCell(ws, c.toAddress, clean(quote.toAddress));
   // Combined recipient block (e.g. CLF "Kính gửi: Cty X  Mr/Ms Y  Email: Z")
   if (c.toBlockCell) {
     const txt = c.toBlockFormat
-      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail })
+      ? c.toBlockFormat({ company: quote.toCompany, contact: quote.toContact, email: quote.toEmail, phone: quote.toPhone, address: quote.toAddress })
       : (quote.toCompany || "");
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
     setCell(ws, c.toBlockCell, (txt || "").trim());
@@ -150,6 +168,20 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       ? c.fromContactFormat({ contact: quote.fromContact, title: quote.fromTitle, phone: quote.fromPhone })
       : (quote.fromContact || "");
     setCell(ws, c.fromContactCell, clean(txt));
+  }
+  // Combined sender letterhead block (e.g. CLF F1: company / address / contact - title - phone).
+  if (c.fromBlockCell) {
+    const txt = c.fromBlockFormat
+      ? c.fromBlockFormat({
+          companyName: quote.company?.name,
+          contact: quote.fromContact,
+          title: quote.fromTitle,
+          phone: quote.fromPhone,
+          address: quote.fromAddress,
+        })
+      : (quote.fromContact || "");
+    setCell(ws, c.fromBlockCell, (txt || "").trim());
+    ensureWrap(ws.getCell(c.fromBlockCell));
   }
   if (c.fromPhone) setCell(ws, c.fromPhone, clean(quote.fromPhone));
   if (c.fromAddress) setCell(ws, c.fromAddress, clean(quote.fromAddress));
@@ -237,11 +269,18 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   const cols = itemsCfg.columns;
 
-  // Apply uniform row height for all item rows if configured
-  if (itemsCfg.rowHeight) {
-    for (const r of slotRows) {
-      ws.getRow(r).height = itemsCfg.rowHeight;
+  // Row heights: use the configured uniform height; otherwise size each row to fit its
+  // content so the tall sample heights baked into the template don't carry over (fixes
+  // "hàng bị to" khi số mục ít hơn slot mẫu).
+  for (let hi = 0; hi < slotRows.length; hi++) {
+    const r = slotRows[hi];
+    if (itemsCfg.rowHeight) { ws.getRow(r).height = itemsCfg.rowHeight; continue; }
+    const it = items[hi];
+    let lines = 1;
+    if (it) for (const t of [it.name, it.detail, it.notes]) {
+      if (t) lines = Math.max(lines, String(t).split(/\r?\n/).length);
     }
+    ws.getRow(r).height = Math.max(18, lines * 15 + 3);
   }
 
   // Group structure for "hàng con" (mirror the editor): a "sub" extends the current
@@ -250,16 +289,60 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   for (let i = 0; i < items.length; i++) {
     const k = items[i]?.kind;
     if (k === "info") effKind[i] = "info";
+    else if (k === "section") effKind[i] = "section";
     else if (k === "sub" && i > 0 && (effKind[i - 1] === "head" || effKind[i - 1] === "sub")) effKind[i] = "sub";
     else effKind[i] = "head";
   }
 
+  // Per-section subtotal = sum of item/sub amounts until the next section. Shown only
+  // when sheet.groupSubtotal is on. Section rows are letter-coded (A,B,C…) and never
+  // count toward the grand subtotal (their qty/price are 0).
+  const showGroupSub = !!(sheet && sheet.groupSubtotal);
+  const sectionSum = {};
+  {
+    let cur = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (effKind[i] === "section") { cur = i; sectionSum[i] = 0; }
+      else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i] && cur >= 0) {
+        const it = items[i];
+        const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
+        sectionSum[cur] += cols.days ? qty * days * price : qty * price;
+      }
+    }
+  }
+
   let subtotal = 0;
   let itemNo = 0;
+  let sectionIdx = -1;
+  let mult = 1;
   for (let i = 0; i < slotRows.length; i++) {
     const r = slotRows[i];
     const it = items[i];
-    if (it && effKind[i] === "info") {
+    if (it && effKind[i] === "section") {
+      // Section header (nhóm A/B/C): letter in STT (manual label wins), name in Hạng Mục,
+      // optional section subtotal in Thành Tiền, light-blue fill + bold. No qty/price.
+      sectionIdx++;
+      itemNo = 0; // item numbering restarts under each section
+      const letter = (it.label && String(it.label).trim()) || sectionLetter(sectionIdx);
+      if (cols.stt) setCell(ws, `${cols.stt}${r}`, letter);
+      if (cols.name) { setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
+      if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
+      if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
+      if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
+      if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (Number(it.quantity) || 0) || null;
+      const gmult = showGroupSub ? Math.max(1, Number(it.quantity) || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
+      mult = gmult;
+      // Đơn Giá nhóm = tổng các mục con (luôn hiện). Thành Tiền nhóm = Đơn Giá × Số Lượng (chỉ khi bật).
+      if (cols.unitPrice) ws.getCell(`${cols.unitPrice}${r}`).value = sectionSum[i] || null;
+      if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
+      if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
+      const fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDEBF7" } };
+      for (const col of Object.values(cols)) {
+        const cell = ws.getCell(`${col}${r}`);
+        cell.font = { ...(cell.font || {}), bold: true };
+        cell.fill = fill;
+      }
+    } else if (it && effKind[i] === "info") {
       // Program-info line: free text in the Hạng Mục cell, no STT / qty / price / amount.
       if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null;
       if (cols.name) { setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
@@ -283,7 +366,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       } else {
         amt = price * qty;
       }
-      subtotal += amt;
+      subtotal += amt * mult;
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.
       if (isSub) {
@@ -355,10 +438,14 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
   const vatRow = actualLastRow + t.vat.rowOffset;
 
+  // When sections are present, a simple SUM(column) double-counts (mục con per-unit +
+  // thành tiền nhóm), so write the computed value instead of a SUM formula.
+  const hasSections = items.some((it) => it && it.kind === "section");
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null,
-    formula: t.subtotal.formula({ first: itemsCfg.firstRow, last: actualLastRow, subtotalRow }),
+    formula: hasSections ? null : t.subtotal.formula({ first: itemsCfg.firstRow, last: actualLastRow, subtotalRow }),
     result: subtotal,
+    rawValue: hasSections ? subtotal : null,
   });
   applyTotalsRow(ws, t.vat, vatRow, {
     text: t.vat.labelText(vatPct),
@@ -438,7 +525,7 @@ function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }) {
 }
 
 function uniqueSheetName(wb, name) {
-  let base = (name || "Sheet").replace(/[\[\]\/\\?*:]/g, "").substring(0, 31);
+  let base = (name || "Sheet").replace(/[[\]/\\?*:]/g, "").substring(0, 31);
   if (!base) base = "Sheet";
   let candidate = base;
   let i = 2;

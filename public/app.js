@@ -99,6 +99,38 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, ch =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
+// Only ever put a logo in an <img src> when it's a pure base64 image data-URL —
+// anything else (markup smuggled into the value) renders nothing instead.
+function safeLogoSrc(s) {
+  return typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
+}
+
+// ---- Live-preview helpers (mirror drawItems + src/excel.js so the preview matches the file) ----
+// kind grouping: byte-for-byte mirror of drawItems' rowKind logic.
+function pvRowKinds(items) {
+  const rk = items.map(() => "head");
+  for (let i = 0; i < items.length; i++) {
+    const k = items[i].kind;
+    if (k === "info") rk[i] = "info";
+    else if (k === "sub" && i > 0 && (rk[i - 1] === "head" || rk[i - 1] === "sub")) rk[i] = "sub";
+    else rk[i] = "head";
+  }
+  return rk;
+}
+function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
+function pvAmount(it, usesDays) {
+  const qy = Number(it.quantity) || 0, d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
+  return usesDays ? qy * d * p : qy * p;
+}
+function pvMoney(n) { return (!n || isNaN(Number(n))) ? "" : Number(n).toLocaleString("vi-VN"); }
+function nl2br(s) { return escapeHtml(s || "").replace(/\n/g, "<br>"); }
+// Mirror of src/templateConfigs.js baoGiaTitle (app.js is no-build; keep this copy in sync).
+function baoGiaTitleJS(t) {
+  t = (t || "").trim();
+  if (!t) return "BẢNG BÁO GIÁ";
+  const ascii = t.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toUpperCase();
+  return /^BANG\s*BAO\s*GIA/.test(ascii) ? t : "BẢNG BÁO GIÁ - " + t;
+}
 
 const STATUS_LABEL = {
   draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
@@ -166,12 +198,13 @@ const NAV_ICON = {
   approvals: ICO('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
   notifications: ICO('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
   users: ICO('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'),
+  customers: ICO('<path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5"/>'),
   permissions: ICO('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>'),
   audit: ICO('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
   profile: ICO('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
 };
 
-const ROUTE_PAGES = ["dashboard", "list", "new", "approvals", "notifications", "users", "permissions", "audit", "profile"];
+const ROUTE_PAGES = ["dashboard", "list", "new", "customers", "approvals", "notifications", "users", "permissions", "audit", "profile"];
 
 // Hash router: maps #/page and #/quotes/:id → app state, so pages are
 // bookmarkable, the back button works, and notification deep links resolve.
@@ -244,7 +277,9 @@ async function renderOnboard() {
     <div id="ob-err" role="alert" aria-live="assertive"></div>
     <form id="ob-form">
       <label><span>Họ tên</span><input name="displayName" value="${escapeHtml(info.displayName || "")}" required /></label>
+      <label><span>Tên người gửi trên báo giá</span><input name="senderName" placeholder="Để trống = dùng Họ tên" /></label>
       <label><span>Số điện thoại</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="09xx xxx xxx" /></label>
+      <label><span>Chức danh</span><input name="title" placeholder="VD: Account, Sale, Giám đốc…" /></label>
       <label><span>Mật khẩu</span><input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" required /></label>
       <label><span>Nhập lại mật khẩu</span><input name="password2" type="password" autocomplete="new-password" required /></label>
       <button type="submit" class="btn-login">Kích hoạt & đăng nhập</button>
@@ -256,7 +291,7 @@ async function renderOnboard() {
     err.innerHTML = "";
     if (fd.get("password") !== fd.get("password2")) { err.innerHTML = `<div class="err">Mật khẩu nhập lại không khớp.</div>`; return; }
     try {
-      const me = await api("/api/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, displayName: fd.get("displayName"), phone: fd.get("phone"), password: fd.get("password") }) });
+      const me = await api("/api/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, displayName: fd.get("displayName"), senderName: fd.get("senderName"), phone: fd.get("phone"), title: fd.get("title"), password: fd.get("password") }) });
       state.user = me;
       location.hash = "#/list";
       state.page = "list";
@@ -317,7 +352,7 @@ function renderLogin() {
         errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản bật MFA — nhập mã xác thực."}</div>`;
         return;
       }
-      errEl.innerHTML = `<div class="err">${err.message}</div>`;
+      errEl.innerHTML = `<div class="err">${escapeHtml(err.message)}</div>`;
     }
   });
 }
@@ -357,6 +392,7 @@ function renderShell() {
           ${nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>")}
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
           ${nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>")}
+          ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
           ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num"></span>`)}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
@@ -418,7 +454,7 @@ function renderShell() {
           if (r.results.quotes?.length) sections.push(`
             <div class="gs-section">Báo giá</div>
             ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}">
-              <strong>${escapeHtml(q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${statusLabel(q.status)}</span>
+              <strong>${escapeHtml(q.projectCode || q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${statusLabel(q.status)}</span>
             </div>`).join("")}`);
           gsResults.innerHTML = sections.join("") || "<div class='gs-section'>Không có kết quả</div>";
           gsResults.style.display = "block";
@@ -453,6 +489,7 @@ function renderShell() {
   if (state.page === "list") renderList(mainEl);
   else if (state.page === "new") renderNewQuote(mainEl);
   else if (state.page === "edit") renderEditor(mainEl, state.currentQuote);
+  else if (state.page === "customers") renderCustomers(mainEl);
   else if (state.page === "users") renderUsers(mainEl);
   else if (state.page === "profile") renderProfile(mainEl);
   else if (state.page === "dashboard") renderDashboard(mainEl);
@@ -475,13 +512,80 @@ function startSSE() {
         const n = JSON.parse(e.data);
         toast(`🔔 ${n.title}`, "info");
         refreshBadges();
+        if (state.page === "notifications") scheduleMainRefresh();
       } catch {}
     });
-    es.onerror = () => { /* retry handled by browser */ };
+    // Any data change anywhere (báo giá / khách hàng / nhân viên) → refresh the
+    // relevant list live. Re-fetch goes through the normal permission-scoped API.
+    es.addEventListener("changed", (e) => {
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      onRealtimeChange(d);
+    });
+    // Your role/permissions changed → re-pull capabilities and re-render shell+page.
+    es.addEventListener("session:refresh", async () => {
+      try {
+        const me = await api("/api/auth/me");
+        state.user = me; // keep capabilities current even if we defer the repaint
+        toast("Quyền của bạn vừa được cập nhật.", "info");
+        // Don't blow away an open editor/wizard/modal; the shell repaints on next nav.
+        if (state.page !== "edit" && state.page !== "new" && !document.querySelector(".modal-mask")) render();
+      } catch {}
+    });
+    // You were locked / deactivated / deleted → log out immediately.
+    es.addEventListener("session:revoked", (e) => {
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      forceLogout(d.reason);
+    });
+    es.onopen = () => {
+      // Reconnected after a drop — we may have missed events; resync now.
+      if (state._sseDown) { state._sseDown = false; refreshBadges(); scheduleMainRefresh(); }
+    };
+    es.onerror = () => { state._sseDown = true; };
     state._sse = es;
   } catch (e) {
     console.warn("SSE failed", e);
   }
+}
+
+// Decide whether the current page cares about this change, then refresh it.
+function onRealtimeChange(d) {
+  refreshBadges();
+  const PAGES_FOR = {
+    quote: ["list", "dashboard", "approvals", "notifications"],
+    customer: ["customers"],
+    user: ["users"],
+  };
+  const pages = PAGES_FOR[d.entity] || ["list", "dashboard", "approvals", "customers", "users", "notifications"];
+  if (pages.includes(state.page)) scheduleMainRefresh();
+}
+
+// Debounced, non-disruptive refresh of the current page's content.
+function scheduleMainRefresh() {
+  clearTimeout(state._rtTimer);
+  state._rtTimer = setTimeout(doMainRefresh, 500);
+}
+function doMainRefresh() {
+  // Never blow away an in-progress editor / wizard.
+  if (state.page === "edit" || state.page === "new") return;
+  // Don't interrupt active typing or an open modal — retry once the user is idle.
+  const ae = document.activeElement;
+  const busy = (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) || document.querySelector(".modal-mask");
+  if (busy) { clearTimeout(state._rtTimer); state._rtTimer = setTimeout(doMainRefresh, 2500); return; }
+  render();
+}
+
+// Hard logout triggered by the server (account locked/deactivated/deleted).
+async function forceLogout(reason) {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch {}
+  if (state._sse) { try { state._sse.close(); } catch {} state._sse = null; }
+  state.user = null;
+  render();
+  toast(
+    reason === "deleted"
+      ? "Tài khoản của bạn đã bị xóa. Bạn đã được đăng xuất."
+      : "Tài khoản của bạn đã bị khóa. Bạn đã được đăng xuất.",
+    "error"
+  );
 }
 
 async function refreshBadges() {
@@ -500,11 +604,23 @@ async function refreshBadges() {
 }
 
 // ---------------- List ----------------
+// Hide the boilerplate "BẢNG BÁO GIÁ" prefix in the LIST only — the stored title
+// (editor + Excel/PDF export) keeps the full text.
+function shortTitle(t) {
+  const s = String(t || "");
+  const r = s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim();
+  return r || s;
+}
+// Mã dự án + nhãn phiên bản (v2/v3…) cho các bản nhân bản cùng mã dự án.
+function codeLabel(q) {
+  const c = q.projectCode || q.quoteNumber || "";
+  return (q.projectVersion && q.projectVersion > 1) ? `${c}_v${q.projectVersion}` : c;
+}
 async function renderList(el) {
   el.innerHTML = `<h1>Danh sách báo giá</h1>
     <div class="toolbar">
       <label for="filter-q" class="sr-only">Tìm báo giá</label>
-      <input id="filter-q" placeholder="Tìm theo số, tiêu đề, khách..." value="${state.filter.q}" />
+      <input id="filter-q" placeholder="Tìm theo số, tiêu đề, khách..." value="${escapeHtml(state.filter.q || "")}" />
       <label for="filter-status" class="sr-only">Lọc theo trạng thái</label>
       <select id="filter-status">
         <option value="">— Tất cả trạng thái —</option>
@@ -559,30 +675,35 @@ async function renderList(el) {
     const end = (m.page - 1) * PAGE_SIZE + state.quoteList.length;
     body.innerHTML = `
       <div class="tbl-scroll">
-      <table class="list-table">
+      <table class="list-table cards-sm">
         <thead>
           <tr>
-            <th scope="col">Số BG</th><th scope="col">Tiêu đề</th><th scope="col">Công ty</th><th scope="col">Khách</th>
-            <th scope="col">Sheet</th><th scope="col">Ngày</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th>
+            <th scope="col">Mã dự án</th><th scope="col">Tiêu đề</th>
+            <th scope="col">Ngày</th><th scope="col">Sheet</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th>
+            <th scope="col">Công ty</th><th scope="col">Khách</th><th scope="col">Mã KH</th>
             <th scope="col">Trạng thái</th><th scope="col">Thao tác</th>
           </tr>
         </thead>
         <tbody>
           ${state.quoteList.map(q => `
             <tr>
-              <td><strong>${escapeHtml(q.quoteNumber)}</strong></td>
-              <td>${escapeHtml(q.title)}</td>
-              <td>${escapeHtml(q.company?.shortName || q.company?.name || "")}</td>
-              <td>${escapeHtml(q.toCompany)}</td>
-              <td style="text-align:center">${q.sheets?.length || 0}</td>
-              <td>${fmtDate(q.quoteDate)}</td>
-              <td style="text-align:right">${fmtMoney(q.total)}</td>
-              <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
-              <td>
-                <button class="btn btn-sm" data-act="open" data-id="${q.id}">Mở</button>
-                <button class="btn btn-sm" data-act="excel" data-id="${q.id}">📥 Excel</button>
-                <button class="btn btn-sm" data-act="dup" data-id="${q.id}">Nhân bản</button>
-                ${canDelete(q) ? `<button class="btn btn-sm btn-danger" data-act="del" data-id="${q.id}">Xóa</button>` : ""}
+              <td data-label="Mã dự án"><strong>${escapeHtml(codeLabel(q))}</strong></td>
+              <td data-label="Tiêu đề" title="${escapeHtml(q.title)}">${escapeHtml(shortTitle(q.title))}</td>
+              <td data-label="Ngày">${fmtDate(q.quoteDate)}</td>
+              <td data-label="Sheet" style="text-align:center">${q.sheetCount ?? (q.sheets?.length || 0)}</td>
+              <td data-label="Tổng (VNĐ)" style="text-align:right">${fmtMoney(q.total)}</td>
+              <td data-label="Công ty">${escapeHtml(q.company?.shortName || q.company?.name || "")}</td>
+              <td data-label="Khách">${escapeHtml(q.toCompany)}</td>
+              <td data-label="Mã KH">${q.customerCode ? `<strong>${escapeHtml(q.customerCode)}</strong>` : "—"}</td>
+              <td data-label="Trạng thái"><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
+              <td class="cell-actions">
+                <div class="row-actions">
+                  <button class="btn btn-sm" data-act="open" data-id="${q.id}">Mở</button>
+                  <button class="btn btn-sm" data-act="excel" data-id="${q.id}">📥 Excel</button>
+                  <button class="btn btn-sm" data-act="dup" data-id="${q.id}">Nhân bản</button>
+                  <button class="btn btn-sm" data-act="revise" data-id="${q.id}" title="Tạo bản mới CÙNG mã dự án (v2, v3…) để gửi khách">+ Bản v…</button>
+                  ${canDelete(q) ? `<button class="btn btn-sm btn-danger" data-act="del" data-id="${q.id}">Xóa</button>` : ""}
+                </div>
               </td>
             </tr>
           `).join("")}
@@ -625,9 +746,15 @@ async function listAction(act, id) {
       state.page = "edit";
       toast("Đã nhân bản. Bạn đang sửa bản mới.", "success");
       render();
+    } else if (act === "revise") {
+      const q = await api(`/api/quotes/${id}/duplicate`, { method: "POST", body: JSON.stringify({ sameProject: true }) });
+      state.currentQuote = q;
+      state.page = "edit";
+      toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(q)}). Bạn đang sửa bản này.`, "success");
+      render();
     } else if (act === "del") {
       const dq = (state.quoteList || []).find(x => String(x.id) === String(id));
-      if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${dq ? dq.quoteNumber : ""}? Hành động không thể hoàn tác.`, { danger: true }))) return;
+      if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${dq ? (dq.projectCode || dq.quoteNumber) : ""}? Hành động không thể hoàn tác.`, { danger: true }))) return;
       await api(`/api/quotes/${id}`, { method: "DELETE" });
       toast("Đã xóa", "success");
       state.page = "list";
@@ -660,10 +787,13 @@ function renderNewQuote(el) {
       companyId: state.companies[0]?.id || null,
       templateIds: [],
       managerId: null,
+      customerId: null,
+      customerCode: "",
+      customerName: "",
       info: {
         title: "", toCompany: "", toContact: "",
-        fromContact: state.user.displayName || "", fromPhone: state.user.phone || "",
-        fromTitle: state.user.title || "", fromAddress: "", city: "TP. Hồ Chí Minh",
+        fromContact: state.user.senderName || state.user.displayName || "", fromPhone: state.user.phone || "",
+        fromTitle: state.user.title || "", fromAddress: state.companies[0]?.address || "", city: "TP. Hồ Chí Minh",
         quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 8, customerLogo: null,
       },
     };
@@ -671,11 +801,18 @@ function renderNewQuote(el) {
   const wz = state._wizard;
   const company = state.companies.find(c => c.id === wz.companyId);
   const templates = company?.templates || [];
-  // Employees must assign an overseeing manager — load the picklist once.
-  if (state.user.role === "employee" && state._managers === undefined) {
+  // Sender address is locked to the company letterhead address.
+  if (company && company.address) wz.info.fromAddress = company.address;
+  // Load the people picklist once: employees pick an overseeing manager, and
+  // everyone can pick a different "Người gửi" (themselves or a manager/admin).
+  if (state._managers === undefined) {
     state._managers = null; // loading
     api("/api/quotes/assignable-users")
-      .then(r => { state._managers = (r.data || []).filter(u => ["manager", "admin"].includes(u.role)); renderNewQuote(el); })
+      .then(r => {
+        // Nhân viên tạo báo giá phải chọn người phụ trách: Quản lý HOẶC Quản trị viên (1 trong 2).
+        state._managers = (r.data || []).filter(u => ["manager", "admin"].includes(u.role));
+        renderNewQuote(el);
+      })
       .catch(() => { state._managers = []; });
   }
 
@@ -723,19 +860,30 @@ function renderNewQuote(el) {
             ${(state._managers || []).map(m => `<option value="${m.id}" ${wz.managerId === m.id ? "selected" : ""}>${escapeHtml(m.displayName)} (${ROLE_LABEL[m.role] || m.role})</option>`).join("")}
           </select>
           <span class="muted" style="font-size:12px">Quản lý này sẽ theo dõi & nắm báo giá của bạn.</span></label>` : ""}
+        <label style="grid-column:1/-1">Mã khách hàng <span class="req">*</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="w-customer-disp" value="${wz.customerId ? escapeHtml((wz.customerCode || "") + " — " + (wz.customerName || "")) : ""}" placeholder="Chưa chọn — bấm nút bên phải" readonly style="flex:1" />
+            <button type="button" class="btn btn-sm btn-primary" id="w-pick-customer">Chọn khách hàng</button>
+          </div></label>
         <label>Khách hàng (To) <span class="req">*</span><input id="w-toCompany" value="${escapeHtml(i.toCompany)}"/></label>
         <label>Người liên hệ KH<input id="w-toContact" value="${escapeHtml(i.toContact)}"/></label>
+        <label style="grid-column:1/-1">Người gửi — chọn nhanh
+          <select id="w-sender">
+            <option value="__me">Bạn — ${escapeHtml(state.user.senderName || state.user.displayName)}${state.user.title ? " · " + escapeHtml(state.user.title) : ""}</option>
+            ${(state._managers || []).filter(m => m.id !== state.user.id).map(m => `<option value="${m.id}">${escapeHtml(m.senderName || m.displayName)} (${ROLE_LABEL[m.role] || m.role}${m.title ? " · " + escapeHtml(m.title) : ""})</option>`).join("")}
+          </select>
+          <span class="muted" style="font-size:12px">Tự điền Tên + Chức danh + SĐT người gửi — vẫn sửa tay được bên dưới.</span></label>
         <label>Người gửi (From)<input id="w-fromContact" value="${escapeHtml(i.fromContact)}"/></label>
         <label>Chức danh<input id="w-fromTitle" value="${escapeHtml(i.fromTitle)}"/></label>
         <label>SĐT người gửi<input id="w-fromPhone" value="${escapeHtml(i.fromPhone)}"/></label>
-        <label>Địa chỉ<input id="w-fromAddress" value="${escapeHtml(i.fromAddress)}"/></label>
+        <label>Địa chỉ (tự theo công ty)<input id="w-fromAddress" value="${escapeHtml(i.fromAddress)}" readonly title="Tự lấy theo Công ty bên gửi"/></label>
         <label>VAT (%)<input id="w-vat" type="number" step="0.1" value="${i.vatPercent}"/></label>
         <label>Ngày<input id="w-date" type="date" value="${i.quoteDate}"/></label>
         <div style="grid-column:1/-1">
           <div style="font-size:13px;color:var(--text-soft);font-weight:500;margin-bottom:5px">Logo khách hàng (tùy chọn)</div>
           <div class="logo-drop ${i.customerLogo ? "has" : ""}" id="w-logo-drop">
             ${i.customerLogo
-              ? `<img src="${i.customerLogo}"/><div class="logo-actions"><button class="btn btn-sm" id="w-logo-change">Đổi</button><button class="btn btn-sm btn-danger" id="w-logo-clear">Xóa</button></div>`
+              ? `<img src="${safeLogoSrc(i.customerLogo)}"/><div class="logo-actions"><button class="btn btn-sm" id="w-logo-change">Đổi</button><button class="btn btn-sm btn-danger" id="w-logo-clear">Xóa</button></div>`
               : `📁 Bấm để chọn ảnh logo (PNG/JPG, &lt; 2MB)`}
           </div>
           <input type="file" id="w-logo-file" accept="image/png,image/jpeg" style="display:none"/>
@@ -765,6 +913,9 @@ function renderNewQuote(el) {
   el.querySelectorAll("[data-company]").forEach(c => c.addEventListener("click", () => {
     wz.companyId = parseInt(c.dataset.company, 10);
     wz.templateIds = []; // reset sheets when company changes
+    // Sender address defaults to the issuing company's letterhead address.
+    const _co = state.companies.find(x => x.id === wz.companyId);
+    if (_co) wz.info.fromAddress = _co.address || "";
     renderNewQuote(el);
   }));
   // Step 2: template cards (toggle)
@@ -788,6 +939,28 @@ function renderNewQuote(el) {
     bind("w-fromAddress", "fromAddress"); bind("w-vat", "vatPercent"); bind("w-date", "quoteDate");
     const mgrSel = document.getElementById("w-manager");
     if (mgrSel) mgrSel.addEventListener("change", () => wz.managerId = parseInt(mgrSel.value, 10) || null);
+    // Người gửi chọn nhanh → tự điền Tên + Chức danh + SĐT (vẫn cho sửa tay sau đó).
+    const senderSel = document.getElementById("w-sender");
+    if (senderSel) senderSel.addEventListener("change", () => {
+      const p = senderSel.value === "__me"
+        ? { senderName: state.user.senderName, displayName: state.user.displayName, title: state.user.title, phone: state.user.phone }
+        : (state._managers || []).find(m => String(m.id) === senderSel.value);
+      if (!p) return;
+      wz.info.fromContact = (p.senderName || p.displayName) || "";
+      wz.info.fromTitle = p.title || "";
+      wz.info.fromPhone = p.phone || "";
+      const setv = (id, v) => { const x = document.getElementById(id); if (x) x.value = v; };
+      setv("w-fromContact", wz.info.fromContact);
+      setv("w-fromTitle", wz.info.fromTitle);
+      setv("w-fromPhone", wz.info.fromPhone);
+    });
+    document.getElementById("w-pick-customer")?.addEventListener("click", async () => {
+      const c = await pickCustomer();
+      if (!c) return;
+      // Mã khách hàng chỉ là nhãn quản lý — KHÔNG tự điền ô "Khách hàng (To)" (điền riêng).
+      wz.customerId = c.id; wz.customerCode = c.code; wz.customerName = c.name || "";
+      renderNewQuote(el);
+    });
     const fileInput = document.getElementById("w-logo-file");
     const drop = document.getElementById("w-logo-drop");
     const pick = () => fileInput.click();
@@ -823,6 +996,7 @@ function renderNewQuote(el) {
     }
     // step 3 → build draft + open editor for items
     if (!wz.info.title.trim()) { toast("Nhập tiêu đề báo giá", "error"); return; }
+    if (!wz.customerId) { toast("Chọn mã khách hàng (bấm 'Chọn khách hàng')", "error"); return; }
     if (!wz.info.toCompany.trim()) { toast("Nhập tên khách hàng", "error"); return; }
     if (state.user.role === "employee" && !wz.managerId) { toast("Vui lòng chọn quản lý phụ trách", "error"); return; }
     try {
@@ -833,7 +1007,7 @@ function renderNewQuote(el) {
         return { templateId: tid, name: t?.name || "Sheet", items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] };
       });
       state.currentQuote = {
-        ...wz.info, companyId: wz.companyId, managerId: wz.managerId,
+        ...wz.info, companyId: wz.companyId, managerId: wz.managerId, customerId: wz.customerId,
         customerLogo: wz.info.customerLogo, sheets, _new: true,
       };
       state._wizard = null;
@@ -853,6 +1027,11 @@ function renderEditor(el, quote) {
   }
   q._activeSheet = 0;
 
+  // Excel-grid session state (selection rectangle, undo/redo stacks, clipboard buffer,
+  // preview flag) — lives in THIS closure, never on DOM nodes, so it survives the
+  // tbody.innerHTML re-renders inside drawItems and resets when render() rebuilds the editor.
+  const grid = { sel: null, selSheet: 0, copyBuf: null, undo: [], redo: [], previewOpen: false, focusSnap: null, _dirty: false, requestDraw: null };
+
   // Mirror the server rule: admin edits all; manager edits only own; employee
   // edits own or quotes they're a member of (and only while draft/rejected).
   const isMember = (q.members || []).some(m => m.id === state.user.id);
@@ -862,17 +1041,24 @@ function renderEditor(el, quote) {
 
   const draw = () => {
     const activeSheet = q.sheets[q._activeSheet];
+    // Sheet/template switch: a selection rectangle from another sheet is meaningless
+    // (FIELDS differ), so drop it — but KEEP copyBuf (cross-sheet paste) + undo/redo.
+    if (grid.sel && grid.selSheet !== q._activeSheet) grid.sel = null;
+    grid.selSheet = q._activeSheet;
     const template = state.templates.find(t => t.id === activeSheet.templateId);
     const tplCode = template?.code;
     // Column layout is driven by the template's own config (exposed via meta),
     // so each form shows the same columns as its Excel sheet.
     const usesDays = !!template?.layout?.hasDays;
+    // Sender address is locked to the issuing company's letterhead address (read-only field).
+    const _senderCo = state.companies.find(c => c.id === q.companyId);
+    if (_senderCo && _senderCo.address) q.fromAddress = _senderCo.address;
     const showDetail = !!template?.layout?.hasDetail;
 
     el.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
         <h1>
-          ${isNew ? "Tạo báo giá mới" : "Báo giá " + escapeHtml(q.quoteNumber)}
+          ${isNew ? "Tạo báo giá mới" : "Báo giá " + escapeHtml(codeLabel(q))}
           ${!isNew ? `<span class="status ${q.status}" style="margin-left:10px">${statusLabel(q.status)}</span>` : ""}
         </h1>
         <button class="btn" id="btn-back">← Quay lại</button>
@@ -887,11 +1073,15 @@ function renderEditor(el, quote) {
               <input id="f-toContact" value="${escapeHtml(q.toContact || "")}" placeholder="Người liên hệ phía KH" ${!editable ? "disabled" : ""} /></label>
             <label>Email
               <input id="f-toEmail" type="email" value="${escapeHtml(q.toEmail || "")}" placeholder="Email khách (hiện ở 'Kính gửi')" ${!editable ? "disabled" : ""} /></label>
+            <label>Điện thoại
+              <input id="f-toPhone" value="${escapeHtml(q.toPhone || "")}" placeholder="SĐT khách hàng" ${!editable ? "disabled" : ""} /></label>
+            <label>Địa chỉ
+              <input id="f-toAddress" value="${escapeHtml(q.toAddress || "")}" placeholder="Địa chỉ khách hàng" ${!editable ? "disabled" : ""} /></label>
           </fieldset>
           <fieldset class="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
-            <label>Công ty
-              <select id="f-companyId" ${!editable ? "disabled" : ""}>
+            <label>Công ty <span class="muted" style="font-size:11px">(đã chọn lúc tạo)</span>
+              <select id="f-companyId" disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">
                 ${state.companies.map(c => `<option value="${c.id}" ${c.id === q.companyId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
               </select></label>
             <label>Người gửi
@@ -900,12 +1090,12 @@ function renderEditor(el, quote) {
               <input id="f-fromTitle" value="${escapeHtml(q.fromTitle || "")}" placeholder="VD: Trưởng phòng KD" ${!editable ? "disabled" : ""} /></label>
             <label>Điện thoại
               <input id="f-fromPhone" value="${escapeHtml(q.fromPhone || "")}" placeholder="SĐT người gửi" ${!editable ? "disabled" : ""} /></label>
-            <label>Địa chỉ
-              <input id="f-fromAddress" value="${escapeHtml(q.fromAddress || "")}" ${!editable ? "disabled" : ""} /></label>
+            <label>Địa chỉ <span class="muted" style="font-size:11px">(tự theo công ty)</span>
+              <input id="f-fromAddress" value="${escapeHtml(q.fromAddress || "")}" readonly title="Tự lấy theo Công ty bên gửi — không cần sửa" ${!editable ? "disabled" : ""} /></label>
           </fieldset>
         </div>
         <div class="meta-row">
-          <label>Số báo giá
+          <label>Số xuất Excel <span class="muted" style="font-size:11px">(GN…)</span>
             <input id="f-quoteNumber" value="${escapeHtml(q.quoteNumber || "")}" placeholder="${isNew ? "Tự động cấp khi lưu" : ""}" readonly ${!editable ? "disabled" : ""} /></label>
           <label>Ngày báo giá
             <input type="date" id="f-quoteDate" value="${q.quoteDate}" ${!editable ? "disabled" : ""} /></label>
@@ -971,6 +1161,12 @@ function renderEditor(el, quote) {
           ${renderQuoteSummary(q)}
         </div>
 
+        <div class="xlsx-preview-wrap">
+          <label class="toggle-preview"><input type="checkbox" id="f-show-preview" ${grid.previewOpen ? "checked" : ""}/>
+            <span>Xem trước bản in (giống file Excel xuất ra)</span></label>
+          <div class="xlsx-preview" id="xlsx-preview" ${grid.previewOpen ? "" : "hidden"}></div>
+        </div>
+
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
           ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">Trình duyệt</button>` : ""}
@@ -988,7 +1184,7 @@ function renderEditor(el, quote) {
               ${(state.user.role === "admin" || q.createdById === state.user.id) ? `<button id="btn-members" role="menuitem">Thành viên phụ trách</button>` : ""}
               ${(q.status === "approved" || q.status === "sent") ? `
                 <div class="kebab-sep"></div>
-                <button id="btn-convert" role="menuitem">Đánh dấu đã chốt</button>
+                ${can("quote:send") ? `<button id="btn-convert" role="menuitem">Đánh dấu đã chốt</button>` : ""}
                 <button id="btn-lost" role="menuitem" class="danger">Đánh dấu không chốt</button>
               ` : ""}
             </div>
@@ -1061,6 +1257,9 @@ function renderEditor(el, quote) {
     // Company change
     document.getElementById("f-companyId").addEventListener("change", e => {
       q.companyId = parseInt(e.target.value, 10);
+      // Sender address follows the issuing company's letterhead address.
+      const _co = state.companies.find(c => c.id === q.companyId);
+      if (_co) q.fromAddress = _co.address || "";
       // Reset all sheets' templates to first available template of new company
       const tpls = state.templates.filter(t => t.companyId === q.companyId);
       if (tpls.length) {
@@ -1072,7 +1271,7 @@ function renderEditor(el, quote) {
     });
 
     // Items
-    drawItems(q, activeSheet, editable, tplCode, usesDays);
+    drawItems(q, activeSheet, editable, tplCode, usesDays, grid);
 
     // Header field bindings
     const bindField = (id, prop) => {
@@ -1087,11 +1286,14 @@ function renderEditor(el, quote) {
           document.getElementById("date-preview").textContent = vnDateText(q.quoteDate, q.city);
         }
         if (prop === "vatPercent") updateSummary(q);
+        refreshPreview(q);   // header fields (Kính gửi, title, date…) feed the live preview
       });
     };
     bindField("f-toCompany", "toCompany");
     bindField("f-toContact", "toContact");
     bindField("f-toEmail", "toEmail");
+    bindField("f-toPhone", "toPhone");
+    bindField("f-toAddress", "toAddress");
     bindField("f-fromContact", "fromContact");
     bindField("f-fromPhone", "fromPhone");
     bindField("f-fromTitle", "fromTitle");
@@ -1101,11 +1303,21 @@ function renderEditor(el, quote) {
     bindField("f-vatPercent", "vatPercent");
     bindField("f-title", "title");
     bindField("f-greeting", "greeting");
+
+    // Live xlsx preview toggle (grid.previewOpen persists across redraws).
+    const pv = document.getElementById("f-show-preview");
+    if (pv) pv.addEventListener("change", () => {
+      grid.previewOpen = pv.checked;
+      const box = document.getElementById("xlsx-preview");
+      if (box) { box.hidden = !pv.checked; if (pv.checked) renderPreview(q); }
+    });
+    if (grid.previewOpen) renderPreview(q);   // re-render after a redraw if it was open
     // (Add-row is handled inside drawItems' footer "+ Thêm hàng" — Excel-style.)
 
     bindActions(q, isNew);
   };
 
+  grid.requestDraw = draw;   // undo/redo of a cross-sheet snapshot routes through the heavy draw()
   draw();
 }
 
@@ -1115,6 +1327,7 @@ function bindActions(q, isNew) {
     q.showTotals = showTotalsBox.checked;
     const sum = document.querySelector(".quote-summary");
     if (sum) sum.style.display = q.showTotals ? "" : "none";
+    refreshPreview(q);
   });
   const saveBtn = document.getElementById("btn-save");
   if (saveBtn) saveBtn.addEventListener("click", async () => {
@@ -1129,6 +1342,7 @@ function bindActions(q, isNew) {
           templateId: s.templateId,
           name: s.name,
           order: i + 1,
+          groupSubtotal: !!s.groupSubtotal,
           items: (s.items || []).map((it, j) => ({ ...it, order: j + 1 })),
         })),
       };
@@ -1304,7 +1518,59 @@ async function showVersions(quoteId) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-function drawItems(q, activeSheet, editable, tplCode, usesDays) {
+// Evaluate a simple arithmetic formula typed into a numeric cell (Excel-style).
+// Supports + - * / and parentheses; "x"/"×" mean multiply; "," is a decimal point.
+// CSP blocks eval()/Function(), so this is a tiny hand-written recursive-descent parser.
+// Returns a finite Number, or null if the expression is malformed.
+function evalFormula(input) {
+  let s = String(input).replace(/^=/, "").replace(/[×xX]/g, "*").replace(/,/g, ".").replace(/\s+/g, "");
+  if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
+  let pos = 0;
+  const peek = () => s[pos];
+  function expr() {
+    let v = term();
+    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; }
+    return v;
+  }
+  function term() {
+    let v = factor();
+    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; }
+    return v;
+  }
+  function factor() {
+    if (peek() === "(") { pos++; const v = expr(); if (peek() !== ")") return null; pos++; return v; }
+    if (peek() === "-") { pos++; const v = factor(); return v === null ? null : -v; }
+    if (peek() === "+") { pos++; return factor(); }
+    let num = "";
+    while (pos < s.length && /[0-9.]/.test(s[pos])) num += s[pos++];
+    if (!num || isNaN(Number(num))) return null;
+    return Number(num);
+  }
+  const result = expr();
+  if (pos !== s.length || result === null || !isFinite(result)) return null;
+  return result;
+}
+
+// 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows.
+function groupLetter(n) {
+  let s = "", x = n + 1;
+  while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
+  return s;
+}
+
+// Sheet subtotal honoring section (nhóm) multipliers: a section's Số Lượng multiplies the
+// amounts of the items under it (until the next section). Section rows contribute 0 themselves.
+function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
+  let mult = 1, sum = 0;
+  for (const it of (items || [])) {
+    if (it.kind === "section") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
+    sum += (usesDays ? qty * days * price : qty * price) * mult;
+  }
+  return sum;
+}
+
+function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const tbody = document.querySelector("#items-table tbody");
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
@@ -1344,6 +1610,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   for (let i = 0; i < activeSheet.items.length; i++) {
     const k = activeSheet.items[i].kind;
     if (k === "info") rowKind[i] = "info";
+    else if (k === "section") rowKind[i] = "section";
     else if (k === "sub" && i > 0 && (rowKind[i - 1] === "head" || rowKind[i - 1] === "sub")) rowKind[i] = "sub";
     else rowKind[i] = "head";
   }
@@ -1353,16 +1620,48 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   const dataCells = (it, i, amt) => `
         ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Nhập số, hoặc công thức vd =5x3" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
-        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Nhập số, hoặc công thức vd =5x3" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
 
   let sttNo = 0;
+  let sectionIdx = -1;
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
+  const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
+  // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
+  const sectionSum = {};
+  { let cur = -1;
+    for (let s2 = 0; s2 < activeSheet.items.length; s2++) {
+      if (rowKind[s2] === "section") { cur = s2; sectionSum[s2] = 0; }
+      else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
+        const x = activeSheet.items[s2];
+        sectionSum[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
+                                    : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+      }
+    }
+  }
   tbody.innerHTML = activeSheet.items.map((it, i) => {
+    if (rowKind[i] === "section") {
+      sectionIdx++; sttNo = 0;
+      const letter = groupLetter(sectionIdx);
+      const subAmt = sectionSum[i] || 0;
+      return `
+      <tr data-row="${i}" class="section-row" style="background:#eaf1fb">
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="Chữ nhóm (để trống = tự ${letter})" ${dis} style="width:34px;text-align:center;font-weight:700;color:#1f4e79;background:transparent" /></td>
+        <td class="col-hangmuc"><input data-f="name" value="${escapeHtml(it.name || "")}" placeholder="Tên nhóm (vd: Wallsticker)" ${dis} style="font-weight:700;color:#1f4e79;background:transparent" /></td>
+        ${showDetail ? `<td class="col-detail"></td>` : ""}
+        <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} style="background:transparent" /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} style="background:transparent" /></td>
+        ${usesDays ? `<td class="col-qty"></td>` : ""}
+        <td class="col-price" style="text-align:right;font-weight:700;color:#1f4e79">${fmtNumCell(subAmt)}</td>
+        <td class="col-amount" style="text-align:right;font-weight:700;color:#1f4e79">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+        <td class="col-notes"></td>
+        ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa nhóm">✕</button></td>` : ""}
+      </tr>`;
+    }
     if (rowKind[i] === "info") {
       return `
       <tr data-row="${i}" class="info-row">
@@ -1406,6 +1705,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   const blank = () => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
   const blankInfo = () => ({ kind: "info", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   const blankSub = () => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
+  const blankSection = () => ({ kind: "section", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   // Parse a pasted Excel number ("1.000.000", "1,000,000", "12,5"…) into a real number.
   const numLoose = (s) => {
     s = String(s).trim().replace(/[^\d.,-]/g, "");
@@ -1417,15 +1717,180 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
     } else if ((s.match(/\./g) || []).length > 1) { s = s.replace(/\./g, ""); }
     return Number(s) || 0;
   };
-  const redraw = () => { drawItems(q, activeSheet, editable, tplCode, usesDays); updateSummary(q); };
-  const focusCell = (row, field) => {
-    const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
-    if (cell) { cell.focus(); if (cell.select) cell.select(); }
+  const redraw = () => { drawItems(q, activeSheet, editable, tplCode, usesDays, grid); updateSummary(q); };
+  // Live-refresh each section row's "Đơn Giá" (luôn) + "Thành Tiền" (khi bật toggle) as
+  // item values change — without a full redraw, so the group total stays current while typing.
+  const updateSectionSubtotals = () => {
+    const sums = {}; let cur = -1;
+    for (let s2 = 0; s2 < activeSheet.items.length; s2++) {
+      if (rowKind[s2] === "section") { cur = s2; sums[s2] = 0; }
+      else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
+        const x = activeSheet.items[s2];
+        sums[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
+                              : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+      }
+    }
+    for (const idx in sums) {
+      const trS = tbody.querySelector(`tr[data-row="${idx}"]`);
+      if (!trS) continue;
+      const sq = Math.max(1, Number(activeSheet.items[idx].quantity) || 1);
+      const pc = trS.querySelector(".col-price"); if (pc) pc.textContent = fmtNumCell(sums[idx]);
+      const ac = trS.querySelector(".col-amount"); if (ac) ac.textContent = activeSheet.groupSubtotal ? fmtNumCell(sums[idx] * sq) : "";
+    }
   };
-  const addRow = (field) => { activeSheet.items.push(blank()); redraw(); focusCell(activeSheet.items.length - 1, field || "name"); };
-  const addInfo = () => { activeSheet.items.push(blankInfo()); redraw(); focusCell(activeSheet.items.length - 1, "name"); };
+  const focusCell = (row, field, noSelect) => {
+    const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
+    if (cell) { cell.focus(); if (!noSelect && cell.select) cell.select(); }
+  };
+  // Commit an Excel-style formula in a numeric cell: evaluate "=…", store the number,
+  // reformat the cell, and refresh the row amount + totals. No-op for plain numbers.
+  const commitNumericFormula = (inp2, i2, f2) => {
+    if (!NUMERIC.has(f2) || !inp2) return;
+    const raw = (inp2.value || "").trim();
+    if (!raw.startsWith("=")) return;
+    const val = evalFormula(raw);
+    const num = (val === null) ? (Number(activeSheet.items[i2][f2]) || 0) : val;
+    activeSheet.items[i2][f2] = num;
+    inp2.value = fmtNumCell(num);
+    const tr2 = inp2.closest("tr"); const it2 = activeSheet.items[i2];
+    const amt2 = usesDays ? (Number(it2.quantity) || 0) * (Number(it2.days) || 1) * (Number(it2.unitPrice) || 0)
+                          : (Number(it2.quantity) || 0) * (Number(it2.unitPrice) || 0);
+    const amtCell2 = tr2 && tr2.querySelector(".col-amount"); if (amtCell2) amtCell2.textContent = fmtNumCell(amt2);
+    updateSummary(q);
+  };
+
+  // ---- Excel-grid: selection / clipboard / undo (state on `grid`, survives redraw) ----
+  const fieldIdx = (f) => FIELDS.indexOf(f);
+  const cellEl = (row, field) => tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
+  const rectOf = (sel) => {
+    if (!sel) return null;
+    const a = fieldIdx(sel.anchor.field), b = fieldIdx(sel.focus.field);
+    return { r0: Math.min(sel.anchor.row, sel.focus.row), r1: Math.max(sel.anchor.row, sel.focus.row), c0: Math.min(a, b), c1: Math.max(a, b) };
+  };
+  // THE survive-redraw mechanism: highlight is re-derived from grid.sel on every draw.
+  const paintSel = () => {
+    tbody.querySelectorAll("td.cell-selected, td.cell-anchor").forEach(td => td.classList.remove("cell-selected", "cell-anchor"));
+    tbody.querySelectorAll(".fill-handle").forEach(h => h.remove());
+    const rc = rectOf(grid.sel);
+    if (!rc) return;
+    for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
+      const el = cellEl(r, FIELDS[c]); if (el) el.closest("td").classList.add("cell-selected");
+    }
+    const ae = cellEl(grid.sel.anchor.row, grid.sel.anchor.field); if (ae) ae.closest("td").classList.add("cell-anchor");
+    // Fill-handle on the bottom-right cell (drag to copy the value down the rows).
+    if (editable) {
+      const td = cellEl(rc.r1, FIELDS[rc.c1])?.closest("td");
+      if (td) {
+        const h = document.createElement("div");
+        h.className = "fill-handle";
+        h.addEventListener("mousedown", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const start = rectOf(grid.sel); if (!start) return;
+          const onMove = (mv) => {
+            const cellTd = mv.target.closest && mv.target.closest("[data-row]");
+            if (!cellTd) return;
+            grid.sel = { anchor: grid.sel.anchor, focus: { row: parseInt(cellTd.dataset.row, 10), field: FIELDS[start.c1] } };
+            paintSel();
+          };
+          const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); fillDown(); };
+          document.addEventListener("mousemove", onMove);
+          document.addEventListener("mouseup", onUp);
+        });
+        td.appendChild(h);
+      }
+    }
+  };
+  const setSel = (anchor, focus) => { grid.sel = { anchor, focus }; grid.selSheet = q._activeSheet; paintSel(); };
+  const clearSel = () => { grid.sel = null; paintSel(); };
+  const clampSel = () => {
+    if (!grid.sel) return;
+    const max = activeSheet.items.length - 1;
+    if (max < 0) { grid.sel = null; return; }
+    grid.sel.anchor.row = Math.min(grid.sel.anchor.row, max);
+    grid.sel.focus.row = Math.min(grid.sel.focus.row, max);
+  };
+  // Move to (row,field); if that row lacks the field (sub→no STT/name, info→only name)
+  // scan outward for the nearest present column so nav never lands on a missing cell.
+  const moveTo = (row, field, extend) => {
+    row = Math.max(0, Math.min(activeSheet.items.length - 1, row));
+    let ci = Math.max(0, Math.min(FIELDS.length - 1, fieldIdx(field)));
+    let f2 = FIELDS[ci];
+    if (!cellEl(row, f2)) {
+      let found = null;
+      for (let d = 1; d < FIELDS.length; d++) {
+        if (cellEl(row, FIELDS[ci - d])) { found = FIELDS[ci - d]; break; }
+        if (cellEl(row, FIELDS[ci + d])) { found = FIELDS[ci + d]; break; }
+      }
+      f2 = found || "name";
+    }
+    if (extend && grid.sel) grid.sel = { anchor: grid.sel.anchor, focus: { row, field: f2 } };
+    else grid.sel = { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+    grid.selSheet = q._activeSheet;
+    grid._navigating = true;       // tell the focus listener not to collapse the range
+    focusCell(row, f2, extend);    // don't select text while extending a range
+    grid._navigating = false;
+    paintSel();
+  };
+  // Undo/redo: sheet-tagged JSON snapshots (matches the clone at renderEditor).
+  const snap = () => ({ sheet: q._activeSheet, items: JSON.parse(JSON.stringify(activeSheet.items)) });
+  // Commit a pending in-cell edit (the pre-edit snapshot captured on focus) as ONE undo
+  // boundary. Called before every structural op / undo / redo AND on blur — and it clears
+  // the dirty flags so the synchronous blur fired by redraw()'s tbody.innerHTML is a no-op
+  // (otherwise that stray blur pushes a second, out-of-order snapshot → corrupt history).
+  const commitPending = () => {
+    if (grid._dirty && grid.focusSnap) { grid.undo.push(grid.focusSnap); if (grid.undo.length > 100) grid.undo.shift(); grid.redo.length = 0; }
+    grid._dirty = false; grid.focusSnap = null;
+  };
+  const pushUndo = () => { commitPending(); grid.undo.push(snap()); if (grid.undo.length > 100) grid.undo.shift(); grid.redo.length = 0; };
+  const restoreSnap = (s, fromStack, toStack) => {
+    grid._dirty = false; grid.focusSnap = null;
+    toStack.push(snap());
+    if (s.sheet !== q._activeSheet) { q._activeSheet = s.sheet; q.sheets[s.sheet].items = s.items; grid.requestDraw(); return; }
+    activeSheet.items = s.items; redraw(); clampSel(); paintSel();
+  };
+  const doUndo = () => { commitPending(); if (grid.undo.length) restoreSnap(grid.undo.pop(), grid.undo, grid.redo); };
+  const doRedo = () => { commitPending(); if (grid.redo.length) restoreSnap(grid.redo.pop(), grid.redo, grid.undo); };
+  const serializeRect = (rc) => {
+    const out = [];
+    for (let r = rc.r0; r <= rc.r1; r++) {
+      const row = [];
+      for (let c = rc.c0; c <= rc.c1; c++) {
+        const f2 = FIELDS[c]; const v = activeSheet.items[r][f2];
+        row.push(NUMERIC.has(f2) ? String(Number(v) || 0) : String(v ?? "").replace(/[\t\n]/g, " "));
+      }
+      out.push(row.join("\t"));
+    }
+    return out.join("\n");
+  };
+  const fillDown = () => {
+    if (!editable) return;
+    const rc = rectOf(grid.sel); if (!rc || rc.r1 <= rc.r0) return;
+    pushUndo();
+    for (let c = rc.c0; c <= rc.c1; c++) {
+      const f2 = FIELDS[c]; const src = activeSheet.items[rc.r0][f2];
+      for (let r = rc.r0 + 1; r <= rc.r1; r++) {
+        const it = activeSheet.items[r];
+        if (it.kind === "info" && f2 !== "name") continue;   // never write price onto an info row
+        it[f2] = NUMERIC.has(f2) ? (Number(src) || 0) : src;
+      }
+    }
+    redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
+  };
+
+  // New rows go right below the selected row (Excel-style); only when nothing on
+  // this sheet is selected do they fall back to the end of the list.
+  const insertIndex = () => {
+    if (grid.sel && grid.selSheet === q._activeSheet) {
+      const r = Math.max(grid.sel.anchor.row, grid.sel.focus.row);
+      if (r >= 0 && r < activeSheet.items.length) return r + 1;
+    }
+    return activeSheet.items.length;
+  };
+  const addRow = (field) => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blank()); redraw(); focusCell(at, field || "name"); };
+  const addInfo = () => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blankInfo()); redraw(); focusCell(at, "name"); };
+  const addSection = () => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blankSection()); redraw(); focusCell(at, "name"); };
   // Insert a "hàng con" (sub-item) right below row i — stays inside i's group.
-  const addSubAfter = (i) => { activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+  const addSubAfter = (i) => { pushUndo(); activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
 
   tbody.querySelectorAll("input, textarea").forEach((inp) => {
     const f = inp.dataset.f;
@@ -1435,6 +1900,27 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
       const tr = e.target.closest("tr");
       const i = parseInt(tr.dataset.row, 10);
       if (NUMERIC.has(f)) {
+        // Excel-style formula: if the cell starts with "=", let the user type the
+        // expression freely (no live thousand-grouping). Keep the raw text, but
+        // live-evaluate so the row amount + totals + section subtotals + preview
+        // update AS YOU TYPE; the cell reformats to the final number on commit.
+        if (e.target.value.trim().startsWith("=")) {
+          grid._dirty = true;
+          const live = evalFormula(e.target.value.trim());
+          if (live !== null) {
+            activeSheet.items[i][f] = live;
+            const it = activeSheet.items[i];
+            if (it.kind !== "section") {
+              const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+                                   : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+              const amtCell = tr.querySelector(".col-amount");
+              if (amtCell) amtCell.textContent = fmtNumCell(amt);
+            }
+            updateSummary(q);
+            updateSectionSubtotals();
+          }
+          return;
+        }
         // Live thousand-dot formatting with caret preservation (count digits left of caret).
         const el2 = e.target;
         const digitsBefore = el2.value.slice(0, el2.selectionStart || 0).replace(/[^\d]/g, "").length;
@@ -1449,21 +1935,110 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
         if (!isMultiline && typeof v === "string" && /[\r\n]/.test(v)) { v = v.replace(/[\r\n]+/g, " "); e.target.value = v; }
         activeSheet.items[i][f] = v;
       }
+      grid._dirty = true;   // mark this cell dirty so blur commits one undo snapshot
       const it = activeSheet.items[i];
-      const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                           : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
-      const amtCell = tr.querySelector(".col-amount");   // info rows have no amount cell
-      if (amtCell) amtCell.textContent = fmtNumCell(amt);
+      if (it.kind !== "section") {
+        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const amtCell = tr.querySelector(".col-amount");   // info/section rows: skip
+        if (amtCell) amtCell.textContent = fmtNumCell(amt);
+      }
       updateSummary(q);
+      updateSectionSubtotals();
     });
 
-    // Enter = commit + move down (adds a row at the end). Shift+Enter = newline (multiline only).
+    // Focus a cell → single-cell selection (unless mid-navigation) + capture pre-edit snapshot.
+    inp.addEventListener("focus", () => {
+      if (!grid._navigating) {
+        const tr = inp.closest("tr"); const i = tr ? parseInt(tr.dataset.row, 10) : 0;
+        if (!grid.sel || grid.sel.anchor.row !== i || grid.sel.anchor.field !== f) {
+          grid.sel = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
+          grid.selSheet = q._activeSheet; paintSel();
+        }
+      }
+      grid.focusSnap = snap();
+    });
+    // Blur → commit the pending in-cell edit as one undo boundary.
+    inp.addEventListener("blur", () => {
+      if (NUMERIC.has(f)) { const tr = inp.closest("tr"); if (tr) commitNumericFormula(inp, parseInt(tr.dataset.row, 10), f); }
+      commitPending();
+    });
+
+    // Mouse drag to select a range. Transient listeners are removed on mouseup → no leak.
+    inp.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      const tr = inp.closest("tr"); const r0 = parseInt(tr.dataset.row, 10);
+      grid.sel = { anchor: { row: r0, field: f }, focus: { row: r0, field: f } };
+      grid.selSheet = q._activeSheet;
+      const onOver = (ov) => {
+        const c2 = ov.target.closest && ov.target.closest("[data-f]");
+        if (!c2) return;
+        grid.sel.focus = { row: parseInt(c2.closest("tr").dataset.row, 10), field: c2.dataset.f };
+        paintSel();
+      };
+      const onUp = () => { tbody.removeEventListener("mouseover", onOver); document.removeEventListener("mouseup", onUp); };
+      tbody.addEventListener("mouseover", onOver);
+      document.addEventListener("mouseup", onUp);
+    });
+
+    // Keyboard: Enter (move down), arrows/Tab nav, Ctrl+C/X/D, Ctrl+Z/Y, Esc.
     inp.addEventListener("keydown", (e) => {
+      const tr = inp.closest("tr"); const i = parseInt(tr.dataset.row, 10);
+      const ci = FIELDS.indexOf(f);
+      const ctrl = e.ctrlKey || e.metaKey;
+      const atStart = inp.selectionStart === 0 && inp.selectionEnd === 0;
+      const atEnd = inp.selectionStart === (inp.value || "").length && inp.selectionEnd === (inp.value || "").length;
+
       if (e.key === "Enter" && !(isMultiline && e.shiftKey)) {
-        e.preventDefault();
-        const i = parseInt(inp.closest("tr").dataset.row, 10);
-        if (i >= activeSheet.items.length - 1) addRow(f);
-        else focusCell(i + 1, f);
+        e.preventDefault(); e.stopPropagation();
+        if (NUMERIC.has(f)) commitNumericFormula(inp, i, f);
+        if (i >= activeSheet.items.length - 1) { addRow(f); moveTo(activeSheet.items.length - 1, f, false); }
+        else moveTo(i + 1, f, false);
+        return;
+      }
+      if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
+      if (ctrl && ((e.key === "y" || e.key === "Y") || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); e.stopPropagation(); if (editable) doRedo(); return; }
+      if (ctrl && (e.key === "d" || e.key === "D")) { e.preventDefault(); e.stopPropagation(); fillDown(); return; }
+      if (ctrl && (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X")) {
+        const rc = rectOf(grid.sel);
+        if (!rc || (rc.r0 === rc.r1 && rc.c0 === rc.c1)) return;   // single cell → native copy/cut
+        e.preventDefault(); e.stopPropagation();
+        const tsv = serializeRect(rc);
+        const kinds = []; for (let r = rc.r0; r <= rc.r1; r++) kinds.push(activeSheet.items[r].kind || "item");
+        grid.copyBuf = { tsv, kinds, cols: rc.c1 - rc.c0 + 1 };
+        try { navigator.clipboard?.writeText(tsv); } catch {}
+        if ((e.key === "x" || e.key === "X") && editable) {
+          pushUndo();
+          for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
+            const f2 = FIELDS[c]; const it = activeSheet.items[r];
+            if (it.kind === "info" && f2 !== "name") continue;
+            it[f2] = NUMERIC.has(f2) ? 0 : "";
+          }
+          redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
+        }
+        return;
+      }
+      if (e.key === "Escape" && grid.sel) { e.stopPropagation(); clearSel(); return; }
+      if (e.key === "Tab") {
+        if (!e.shiftKey && (ci < FIELDS.length - 1 || i < activeSheet.items.length - 1)) {
+          e.preventDefault(); e.stopPropagation();
+          if (ci < FIELDS.length - 1) moveTo(i, FIELDS[ci + 1], false); else moveTo(i + 1, FIELDS[0], false);
+        } else if (e.shiftKey && (ci > 0 || i > 0)) {
+          e.preventDefault(); e.stopPropagation();
+          if (ci > 0) moveTo(i, FIELDS[ci - 1], false); else moveTo(i - 1, FIELDS[FIELDS.length - 1], false);
+        }
+        return;   // at the grid boundary, let Tab fall through to footer buttons
+      }
+      if (e.key.indexOf("Arrow") === 0) {
+        const up = e.key === "ArrowUp", down = e.key === "ArrowDown", left = e.key === "ArrowLeft", right = e.key === "ArrowRight";
+        // A fully-selected cell (just navigated into) counts as both edges, so the first
+        // arrow navigates instead of being swallowed moving the caret inside the selection.
+        const whole = (inp.value || "").length > 0 && inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
+        if (isMultiline) { if ((up || left) && !atStart && !whole) return; if ((down || right) && !atEnd && !whole) return; }
+        else { if (left && !atStart && !whole) return; if (right && !atEnd && !whole) return; }
+        e.preventDefault(); e.stopPropagation();
+        moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey);
+        return;
       }
     });
 
@@ -1473,22 +2048,30 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
       const isGrid = /\t/.test(text) || /\n.*\S/.test(text.replace(/\n+$/, ""));
       if (isGrid) {
         e.preventDefault();
+        pushUndo();
         const lines = text.replace(/\n+$/, "").split("\n");
         const startRow = parseInt(inp.closest("tr").dataset.row, 10);
         const startCol = FIELDS.indexOf(f);
+        // If this is an internal copy of our own block, restore the original row kinds
+        // (so copying sub/info rows pastes them back as sub/info, not all heads).
+        const sameBlock = grid.copyBuf && grid.copyBuf.tsv === text;
         lines.forEach((line, r) => {
           const ri = startRow + r;
           while (activeSheet.items.length <= ri) activeSheet.items.push(blank());
+          if (sameBlock && grid.copyBuf.kinds[r]) activeSheet.items[ri].kind = grid.copyBuf.kinds[r];
+          const tgt = activeSheet.items[ri];
           line.split("\t").forEach((cell, c) => {
             const field = FIELDS[startCol + c];
             if (!field) return;
+            if (tgt.kind === "info" && field !== "name") return;   // never paste price onto an info row
             const raw = cell.trim();
-            activeSheet.items[ri][field] = NUMERIC.has(field) ? numLoose(raw)
+            tgt[field] = NUMERIC.has(field) ? numLoose(raw)
               : (multilineFields.has(field) ? raw : raw.replace(/\s+/g, " "));
           });
         });
         redraw();
-        focusCell(startRow, f);
+        const maxCols = Math.max(...lines.map(l => l.split("\t").length));
+        setSel({ row: startRow, field: f }, { row: startRow + lines.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
       } else if (!isMultiline && /[\r\n]/.test(text)) {
         e.preventDefault();
         const cleaned = text.replace(/[\r\n]+/g, " ");
@@ -1502,8 +2085,10 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
   tbody.querySelectorAll("button[data-rm]").forEach((b) => {
     b.addEventListener("click", () => {
       const i = parseInt(b.dataset.rm, 10);
+      pushUndo();
       activeSheet.items.splice(i, 1);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
+      clampSel();
       redraw();
     });
   });
@@ -1515,15 +2100,15 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
 
   // Footer: "+ Thêm hàng" control + per-sheet subtotal.
   const tfoot = document.querySelector("#items-table tfoot");
-  const sheetSubtotal = activeSheet.items.reduce((s, it) => s + (usesDays
-    ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-    : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)), 0);
+  const sheetSubtotal = sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
   const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
     ${editable ? `<tr class="add-row-tr"><td colspan="${totalCols}">
       <button type="button" class="btn btn-sm" id="btn-add-item">+ Thêm hàng</button>
+      <button type="button" class="btn btn-sm" id="btn-add-section">+ Thêm nhóm (A,B…)</button>
       <button type="button" class="btn btn-sm" id="btn-add-info">+ Thêm dòng thông tin</button>
+      <label style="font-size:12.5px;margin-left:8px;cursor:pointer"><input type="checkbox" id="chk-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm (Đơn giá × SL)</label>
       <span class="muted">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
     </td></tr>` : ""}
     <tr>
@@ -1535,8 +2120,13 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays) {
     </tr>`;
   if (editable) {
     document.getElementById("btn-add-item")?.addEventListener("click", () => addRow("name"));
+    document.getElementById("btn-add-section")?.addEventListener("click", addSection);
     document.getElementById("btn-add-info")?.addEventListener("click", addInfo);
+    document.getElementById("chk-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
   }
+
+  // Re-derive the selection highlight from grid.sel — survives this innerHTML rebuild.
+  paintSel();
 }
 
 function renderQuoteSummary(q) {
@@ -1545,12 +2135,7 @@ function renderQuoteSummary(q) {
   const rows = q.sheets.map((s, i) => {
     const tpl = state.templates.find(t => t.id === s.templateId);
     const usesDays = !!tpl?.layout?.hasDays;
-    const sub = (s.items || []).reduce((sum, it) => {
-      const qty = Number(it.quantity) || 0;
-      const days = Number(it.days) || 1;
-      const price = Number(it.unitPrice) || 0;
-      return sum + (usesDays ? qty * days * price : qty * price);
-    }, 0);
+    const sub = sheetSubtotalGrouped(s.items, usesDays, s.groupSubtotal);
     subtotalAll += sub;
     return { idx: i + 1, name: s.name || tpl?.name || `Sheet ${i + 1}`, subtotal: sub };
   });
@@ -1573,8 +2158,138 @@ function renderQuoteSummary(q) {
 
 function updateSummary(q) {
   const wrap = document.querySelector(".quote-summary");
-  if (!wrap) return;
-  wrap.innerHTML = renderQuoteSummary(q);
+  if (wrap) wrap.innerHTML = renderQuoteSummary(q);
+  refreshPreview(q);   // keep the live xlsx preview in sync (no-op when closed)
+}
+
+// ===== Live xlsx-faithful preview (approximates the src/excel.js export layout) =====
+let _pvTimer = null;
+function refreshPreview(q) {
+  const box = document.getElementById("xlsx-preview");
+  if (!box || box.hidden) return;
+  clearTimeout(_pvTimer);
+  _pvTimer = setTimeout(() => renderPreview(q), 80);
+}
+function renderPreview(q) {
+  const box = document.getElementById("xlsx-preview");
+  if (!box || box.hidden) return;
+  const parts = (q.sheets || []).map(s => {
+    const tpl = state.templates.find(t => t.id === s.templateId);
+    // Route by layout shape (same flags the editor grid uses): a "Chi Tiết" column
+    // means the CLF form; otherwise it's a GN form (with or without a Số ngày column).
+    return (tpl && tpl.layout && tpl.layout.hasDetail) ? previewCLF(q, s, tpl) : previewGN(q, s, tpl);
+  });
+  if (q.showTotals !== false) parts.push(previewSummary(q));   // mirror the export summary sheet
+  box.innerHTML = parts.join('<div class="xlsx-page-gap"></div>');
+}
+function pvCompanyBanner(q) {
+  const co = state.companies.find(c => c.id === q.companyId) || {};
+  return [
+    co.name ? `<b>${escapeHtml(co.name)}</b>` : "",
+    escapeHtml(co.address || ""),
+    co.phone ? "ĐT: " + escapeHtml(co.phone) : "",
+    co.email ? "Email: " + escapeHtml(co.email) : "",
+  ].filter(Boolean).join("<br>");
+}
+function previewCLF(q, s) {
+  const items = s.items || [];
+  const rk = pvRowKinds(items);
+  let n = 0; const sttFor = rk.map(k => k === "head" ? ++n : null);
+  const vatPct = Number(q.vatPercent) || 0;
+  const infoLines = items.filter(it => it.kind === "info").map(it => (it.name || "").trim()).filter(Boolean);
+  let subtotal = 0;
+  const body = items.map((it, i) => {
+    if (rk[i] === "info") return "";   // CLF folds info into the banner
+    const amt = pvAmount(it, false); subtotal += amt;
+    const neg = amt < 0 ? " xlsx-neg" : "";
+    let head = "";
+    if (rk[i] === "head") {
+      const span = pvRowspan(rk, i);
+      head = `<td class="xlsx-stt" rowspan="${span}">${sttFor[i]}</td><td rowspan="${span}" style="font-weight:700">${nl2br(it.name)}</td>`;
+    }
+    return `<tr>${head}<td class="xlsx-italic">${nl2br(it.detail)}</td><td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td><td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
+  }).join("");
+  const vat = subtotal * vatPct / 100;
+  const kg = [`Kính gửi: ${escapeHtml(q.toCompany || "…..")}`];
+  if (q.toContact) kg.push(escapeHtml(q.toContact));
+  if (q.toEmail) kg.push("Email: " + escapeHtml(q.toEmail));
+  const logoCell = safeLogoSrc(q.customerLogo) ? `<img class="cust-logo" src="${safeLogoSrc(q.customerLogo)}">` : `<span class="logo-ph">logo cty khách hàng</span>`;
+  return `<table class="xlsx-page xlsx-clf">
+    <colgroup><col style="width:50px"><col style="width:132px"><col style="width:240px"><col style="width:55px"><col style="width:78px"><col style="width:96px"><col style="width:108px"><col style="width:100px"></colgroup>
+    <tr><td colspan="3"></td><td colspan="5" class="xlsx-center" style="white-space:pre-wrap">${pvCompanyBanner(q)}</td></tr>
+    <tr><td colspan="8" class="xlsx-band xlsx-title">${escapeHtml(baoGiaTitleJS(q.title))}</td></tr>
+    <tr><td colspan="3" class="xlsx-center">${logoCell}</td><td colspan="5" class="xlsx-center" style="white-space:pre-wrap">${kg.join("<br>")}</td></tr>
+    <tr class="xlsx-band xlsx-center"><td>STT</td><td>Hạng Mục</td><td>Chi Tiết</td><td>ĐVT</td><td>SỐ LƯỢNG</td><td>ĐƠN GIÁ</td><td>THÀNH TIỀN</td><td>Ghi Chú</td></tr>
+    ${infoLines.length ? `<tr><td colspan="8" class="xlsx-band" style="font-weight:600">* Thông tin chương trình: ${infoLines.map(escapeHtml).join("; ")}</td></tr>` : ""}
+    ${body}
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Tổng Cộng</td><td class="xlsx-num">${pvMoney(subtotal)}</td><td></td></tr>
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">VAT(${vatPct}%)</td><td class="xlsx-num">${pvMoney(vat)}</td><td></td></tr>
+    <tr class="xlsx-band"><td colspan="6" class="xlsx-center">Thành Tiền</td><td class="xlsx-num">${pvMoney(subtotal + vat)}</td><td></td></tr>
+    <tr><td colspan="4" style="white-space:pre-wrap">* Ghi chú: \n- Tất cả các hạng mục trên là cho thuê, Colofull thu hồi sau khi tháo dỡ</td><td colspan="4" class="xlsx-center">${escapeHtml(vnDateText(q.quoteDate, q.city))}</td></tr>
+    <tr><td colspan="4">XÁC NHẬN ĐỒNG Ý ĐẶT HÀNG</td><td colspan="4" class="xlsx-center" style="font-weight:700">Công Ty TNHH Colorfull</td></tr>
+  </table>`;
+}
+function previewGN(q, s, tpl) {
+  const usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
+  const NC = usesDays ? 8 : 7;          // total columns
+  const wide = NC;                      // colspan for full-width chrome rows
+  const lblSpan = NC - 2;               // totals label spans up to the price column
+  const items = s.items || [];
+  const rk = pvRowKinds(items);
+  let n = 0; const sttFor = rk.map(k => k === "head" ? ++n : null);
+  const vatPct = Number(q.vatPercent) || 0;
+  let subtotal = 0;
+  const daysHead = usesDays ? `<td>SỐ NGÀY</td>` : "";
+  const body = items.map((it, i) => {
+    if (rk[i] === "info") return `<tr><td></td><td class="xlsx-italic" colspan="${NC - 1}">${nl2br(it.name)}</td></tr>`;
+    const amt = pvAmount(it, usesDays); subtotal += amt;
+    const neg = amt < 0 ? " xlsx-neg" : "";
+    let head = "";
+    if (rk[i] === "head") {
+      const span = pvRowspan(rk, i);
+      head = `<td class="xlsx-stt" rowspan="${span}">${sttFor[i]}</td><td class="xlsx-italic" rowspan="${span}">${nl2br(it.name)}</td>`;
+    }
+    const daysCell = usesDays ? `<td class="xlsx-center">${pvMoney(it.days)}</td>` : "";
+    return `<tr>${head}<td class="xlsx-center">${escapeHtml(it.unit || "")}</td><td class="xlsx-center">${pvMoney(it.quantity)}</td>${daysCell}<td class="xlsx-num${neg}">${pvMoney(it.unitPrice)}</td><td class="xlsx-num${neg}">${pvMoney(amt)}</td><td class="xlsx-center xlsx-italic">${nl2br(it.notes)}</td></tr>`;
+  }).join("");
+  const vat = subtotal * vatPct / 100;
+  const fromName = state.companies.find(c => c.id === q.companyId)?.name || "";
+  return `<table class="xlsx-page xlsx-gn">
+    <tr><td colspan="2">To: <b class="xlsx-green">${escapeHtml(q.toCompany || "")}</b></td><td colspan="${wide - 2}">From: ${escapeHtml(fromName)}</td></tr>
+    <tr><td colspan="2">${escapeHtml(q.toContact || "")}</td><td colspan="${wide - 2}">${escapeHtml(q.fromContact || "")}${q.fromTitle ? " _ " + escapeHtml(q.fromTitle) : ""}</td></tr>
+    <tr><td colspan="2"></td><td colspan="${wide - 2}">Tel: ${escapeHtml(q.fromPhone || "")}</td></tr>
+    <tr><td colspan="2"></td><td colspan="${wide - 2}">Add: ${escapeHtml(q.fromAddress || "")}</td></tr>
+    <tr><td colspan="${wide}" class="xlsx-center">${escapeHtml(vnDateText(q.quoteDate, q.city))}</td></tr>
+    <tr><td colspan="${wide}" class="xlsx-band xlsx-title">${escapeHtml(baoGiaTitleJS(q.title))}</td></tr>
+    <tr><td colspan="${wide}" class="xlsx-italic">${nl2br(q.greeting)}</td></tr>
+    <tr class="xlsx-band xlsx-center"><td>STT</td><td>Hạng Mục</td><td>ĐVT</td><td>SỐ LƯỢNG</td>${daysHead}<td>ĐƠN GIÁ</td><td>THÀNH TIỀN</td><td>Ghi Chú</td></tr>
+    ${body}
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(subtotal)}</td><td></td></tr>
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">VAT ${vatPct}%</td><td class="xlsx-num">${pvMoney(vat)}</td><td></td></tr>
+    <tr class="xlsx-band-grey"><td colspan="${lblSpan}" class="xlsx-center">Thành tiền</td><td class="xlsx-num">${pvMoney(subtotal + vat)}</td><td></td></tr>
+  </table>`;
+}
+function previewSummary(q) {
+  const vatPct = Number(q.vatPercent) || 0;
+  let subtotalAll = 0;
+  const rows = (q.sheets || []).map((s, i) => {
+    const tpl = state.templates.find(t => t.id === s.templateId);
+    const usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
+    const sub = (s.items || []).reduce((a, it) => a + pvAmount(it, usesDays), 0);
+    subtotalAll += sub;
+    return { idx: i + 1, name: s.name || (tpl && tpl.name) || ("Sheet " + (i + 1)), sub };
+  });
+  const vat = subtotalAll * vatPct / 100;
+  return `<table class="xlsx-page xlsx-summary">
+    <colgroup><col style="width:50px"><col style="width:330px"><col style="width:160px"></colgroup>
+    <tr><td colspan="3" class="xlsx-title">TỔNG BÁO GIÁ ${escapeHtml(q.quoteNumber || "")}</td></tr>
+    <tr><td colspan="3" class="xlsx-center xlsx-italic">${escapeHtml(q.title || "")}</td></tr>
+    <thead><tr><th>STT</th><th>Hạng mục</th><th>Thành tiền (VNĐ)</th></tr></thead>
+    ${rows.map(r => `<tr><td class="xlsx-center">${r.idx}</td><td>${escapeHtml(r.name)}</td><td class="xlsx-num">${pvMoney(r.sub)}</td></tr>`).join("")}
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Tổng cộng</td><td class="xlsx-num">${pvMoney(subtotalAll)}</td></tr>
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">VAT (${vatPct}%)</td><td class="xlsx-num">${pvMoney(vat)}</td></tr>
+    <tr class="xlsx-band"><td colspan="2" class="xlsx-center">Thành tiền</td><td class="total-val">${pvMoney(subtotalAll + vat)}</td></tr>
+  </table>`;
 }
 
 // ---------------- Users (Admin) ----------------
@@ -1602,12 +2317,13 @@ function drawUsers() {
   const dash = '<span class="muted">—</span>';
   body.innerHTML = `
     <div class="tbl-scroll"><table class="list-table">
-      <thead><tr><th scope="col">Tên đăng nhập</th><th scope="col">Họ tên</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Trạng thái</th><th scope="col" style="text-align:right">Thao tác</th></tr></thead>
+      <thead><tr><th scope="col">Tên đăng nhập</th><th scope="col">Họ tên</th><th scope="col">Mã dự án</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Trạng thái</th><th scope="col" style="text-align:right">Thao tác</th></tr></thead>
       <tbody>
         ${state.users.map(u => `
           <tr>
             <td>${escapeHtml(u.username)}</td>
             <td>${escapeHtml(u.displayName)}</td>
+            <td>${u.projectCode ? `<strong>${escapeHtml(u.projectCode)}</strong>` : dash}</td>
             <td><span class="status ${u.role === "admin" ? "approved" : u.role === "manager" ? "pending" : "draft"}">${ROLE_LABEL[u.role]}</span></td>
             <td>${u.phone ? escapeHtml(u.phone) : dash}</td>
             <td>${u.pending ? '<span class="status pending">Chờ kích hoạt</span>' : `<span class="status ${u.active ? "approved" : "rejected"}">${u.active ? "Hoạt động" : "Đã khóa"}</span>`}</td>
@@ -1654,7 +2370,7 @@ function openInviteModal() {
     <p class="muted" style="margin-top:0">Nhập email nhân viên — hệ thống gửi lời mời, họ tự đặt mật khẩu và điền SĐT.</p>
     <div class="form-grid">
       <label style="grid-column:1/-1">Họ tên <span class="req">*</span><input id="iv-name" placeholder="VD: Nguyễn Văn A" /></label>
-      <label style="grid-column:1/-1">Email công ty <span class="req">*</span><input id="iv-email" type="email" inputmode="email" placeholder="ten@congty.com" /></label>
+      <label style="grid-column:1/-1">Email cá nhân <span class="req">*</span><input id="iv-email" type="email" inputmode="email" placeholder="email cá nhân của nhân viên" /></label>
       <label style="grid-column:1/-1">Quyền
         <select id="iv-role">
           <option value="employee">Nhân viên</option>
@@ -1662,13 +2378,14 @@ function openInviteModal() {
           <option value="admin">Quản trị viên</option>
         </select>
       </label>
+      <label style="grid-column:1/-1">Mã dự án <span class="muted" style="font-weight:400;font-size:12px">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001, _002…)</span><input id="iv-projectcode" placeholder="VD: FE_A26" /></label>
     </div>`);
   m.onSave(async () => {
     const displayName = m.find("#iv-name").value.trim();
     const email = m.find("#iv-email").value.trim();
     if (!displayName || !email) { toast("Vui lòng nhập họ tên và email", "error"); return; }
     try {
-      const r = await api("/api/users/invite", { method: "POST", body: JSON.stringify({ email, displayName, role: m.find("#iv-role").value }) });
+      const r = await api("/api/users/invite", { method: "POST", body: JSON.stringify({ email, displayName, role: m.find("#iv-role").value, projectCode: m.find("#iv-projectcode").value.trim() || null }) });
       m.close();
       showInviteResult(r);
       loadUsers();
@@ -1715,6 +2432,7 @@ function openUserModal(u) {
         </select>
       </label>
       <label>SĐT<input name="phone" type="tel" inputmode="tel" value="${escapeHtml(u?.phone || "")}" /></label>
+      <label>Mã dự án <span class="muted" style="font-size:11px">(vd FE_A26 — báo giá user này tạo sẽ là FE_A26_001…)</span><input name="projectCode" value="${escapeHtml(u?.projectCode || "")}" placeholder="VD: FE_A26" /></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Lưu</button>
@@ -1727,6 +2445,7 @@ function openUserModal(u) {
     const payload = {
       username: get("username"), displayName: get("displayName"),
       role: get("role"), phone: get("phone"),
+      projectCode: get("projectCode").trim() || null,
     };
     if (isNew) payload.password = get("password");
     try {
@@ -1821,7 +2540,9 @@ function renderProfile(el) {
         <h3>Hồ sơ</h3>
         <form id="profile-form" class="form-grid">
           <label style="grid-column:1/-1">Họ tên <span class="req">*</span><input id="pf-name" value="${escapeHtml(u.displayName || "")}" required /></label>
+          <label style="grid-column:1/-1">Tên người gửi trên báo giá<input id="pf-sender" value="${escapeHtml(u.senderName || "")}" placeholder="Để trống = dùng Họ tên" /></label>
           <label>Số điện thoại<input id="pf-phone" type="tel" inputmode="tel" value="${escapeHtml(u.phone || "")}" /></label>
+          <label>Chức danh<input id="pf-title" value="${escapeHtml(u.title || "")}" placeholder="VD: Account, Sale, Giám đốc…" /></label>
           <label>Email<input value="${escapeHtml(u.email || "—")}" disabled /></label>
           <label>Vai trò<input value="${escapeHtml(ROLE_LABEL[u.role] || u.role)}" disabled /></label>
           <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit">Lưu hồ sơ</button></div>
@@ -1854,7 +2575,7 @@ function renderProfile(el) {
   document.getElementById("profile-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const me = await api("/api/auth/profile", { method: "POST", body: JSON.stringify({ displayName: document.getElementById("pf-name").value, phone: document.getElementById("pf-phone").value }) });
+      const me = await api("/api/auth/profile", { method: "POST", body: JSON.stringify({ displayName: document.getElementById("pf-name").value, senderName: document.getElementById("pf-sender").value, phone: document.getElementById("pf-phone").value, title: document.getElementById("pf-title").value }) });
       state.user = { ...state.user, ...me };
       toast("Đã lưu hồ sơ", "success");
       renderShell();
@@ -1948,37 +2669,25 @@ async function renderDashboard(el) {
 
 // ---------------- Customers (CRM) ----------------
 async function renderCustomers(el) {
-  el.innerHTML = `<h1>🏢 Khách hàng (CRM)</h1>
+  el.innerHTML = `<h1>Mã khách hàng</h1>
     <div class="toolbar">
-      <input id="cust-q" placeholder="Tìm theo tên, mã, SĐT, email..." style="flex:1; min-width:240px"/>
-      <select id="cust-status">
-        <option value="">Tất cả</option>
-        <option value="lead">Lead</option>
-        <option value="prospect">Prospect</option>
-        <option value="active">Đang giao dịch</option>
-        <option value="inactive">Ngưng</option>
-      </select>
+      <input id="cust-q" placeholder="Tìm theo mã hoặc tên công ty..." style="flex:1; min-width:240px"/>
       <button class="btn btn-primary" id="btn-new-cust">+ Khách mới</button>
     </div>
     <div id="cust-body">Đang tải...</div>`;
-  let q = "", status = "";
+  let q = "";
   const reload = async () => {
-    const params = new URLSearchParams({ q, status, size: "50" });
+    const qs = "size=100" + (q ? `&q=${encodeURIComponent(q)}` : "");
     try {
-      const r = await api("/api/customers?" + params);
+      const r = await api("/api/customers?" + qs);
       const body = document.getElementById("cust-body");
       if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có khách hàng</div>"; return; }
       body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">Mã</th><th scope="col">Tên</th><th scope="col">SĐT</th><th scope="col">Email</th><th scope="col">Trạng thái</th><th scope="col">Tags</th><th scope="col">Phụ trách</th><th scope="col"></th></tr></thead>
+        <thead><tr><th scope="col">Mã khách hàng</th><th scope="col">Tên công ty</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(c => `
           <tr>
             <td><strong>${escapeHtml(c.code)}</strong></td>
             <td>${escapeHtml(c.name)}</td>
-            <td>${escapeHtml(c.phone || "")}</td>
-            <td>${escapeHtml(c.email || "")}</td>
-            <td><span class="status ${c.status}">${c.status}</span></td>
-            <td>${(c.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</td>
-            <td>${escapeHtml(c.owner?.displayName || "")}</td>
             <td>
               <button class="btn btn-sm" data-edit="${c.id}">Sửa</button>
               <button class="btn btn-sm btn-danger" data-del="${c.id}">Xóa</button>
@@ -1994,7 +2703,6 @@ async function renderCustomers(el) {
     } catch (e) { toast(e.message, "error"); }
   };
   document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
-  document.getElementById("cust-status").addEventListener("change", (e) => { status = e.target.value; reload(); });
   document.getElementById("btn-new-cust").addEventListener("click", () => editCustomer(null));
   await reload();
 }
@@ -2032,48 +2740,22 @@ function editCustomer(id) {
   const isNew = id == null;
   const m = openModal(isNew ? "Tạo khách hàng" : "Sửa khách hàng", `
     <div class="form-grid">
-      <label>Tên <span class="req">*</span><input id="cf-name" required/></label>
-      <label>Mã số thuế<input id="cf-tax"/></label>
-      <label>Điện thoại<input id="cf-phone"/></label>
-      <label>Email<input id="cf-email" type="email"/></label>
-      <label>Người liên hệ<input id="cf-contact"/></label>
-      <label>Chức vụ<input id="cf-title"/></label>
-      <label style="grid-column:1/-1">Địa chỉ<input id="cf-addr"/></label>
-      <label>Thành phố<input id="cf-city"/></label>
-      <label>Trạng thái<select id="cf-status">
-        <option value="lead">Lead</option><option value="prospect">Prospect</option>
-        <option value="active">Đang giao dịch</option><option value="inactive">Ngưng</option>
-      </select></label>
-      <label style="grid-column:1/-1">Tags (phân tách dấu phẩy)<input id="cf-tags" placeholder="hot, vip"/></label>
+      <label style="grid-column:1/-1">Mã khách hàng${isNew ? ' <span class="muted" style="font-size:11px">(để trống = tự cấp KH…)</span>' : ''}
+        <input id="cf-code" placeholder="VD: CGV, KH001…" ${isNew ? "" : "readonly"}/></label>
+      <label style="grid-column:1/-1">Tên công ty <span class="req">*</span><input id="cf-name" required/></label>
     </div>`);
   if (!isNew) {
     api(`/api/customers/${id}`).then(c => {
+      m.find("#cf-code").value = c.code || "";
       m.find("#cf-name").value = c.name || "";
-      m.find("#cf-tax").value = c.taxCode || "";
-      m.find("#cf-phone").value = c.phone || "";
-      m.find("#cf-email").value = c.email || "";
-      m.find("#cf-contact").value = c.contactName || "";
-      m.find("#cf-title").value = c.contactTitle || "";
-      m.find("#cf-addr").value = c.address || "";
-      m.find("#cf-city").value = c.city || "";
-      m.find("#cf-status").value = c.status || "lead";
-      m.find("#cf-tags").value = (c.tags || []).join(", ");
     });
   }
   m.onSave(async () => {
-    const body = {
-      name: m.find("#cf-name").value.trim(),
-      taxCode: m.find("#cf-tax").value.trim() || null,
-      phone: m.find("#cf-phone").value.trim() || null,
-      email: m.find("#cf-email").value.trim() || null,
-      contactName: m.find("#cf-contact").value.trim() || null,
-      contactTitle: m.find("#cf-title").value.trim() || null,
-      address: m.find("#cf-addr").value.trim() || null,
-      city: m.find("#cf-city").value.trim() || null,
-      status: m.find("#cf-status").value,
-      tags: m.find("#cf-tags").value.split(",").map(s => s.trim()).filter(Boolean),
-    };
-    if (!body.name) { toast("Thiếu tên", "error"); return; }
+    const name = m.find("#cf-name").value.trim();
+    const code = m.find("#cf-code").value.trim();
+    if (!name) { toast("Nhập tên công ty", "error"); return; }
+    const body = { name };
+    if (isNew && code) body.code = code;
     try {
       if (isNew) await api("/api/customers", { method: "POST", body: JSON.stringify(body) });
       else await api(`/api/customers/${id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -2178,11 +2860,11 @@ async function renderApprovalQueue(el) {
     const body = document.getElementById("aq-body");
     if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
     body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
-      <thead><tr><th scope="col">Số báo giá</th><th scope="col">Tiêu đề</th><th scope="col">Khách hàng</th>
+      <thead><tr><th scope="col">Mã dự án</th><th scope="col">Tiêu đề</th><th scope="col">Khách hàng</th>
         <th scope="col" style="text-align:right">Tổng tiền</th><th scope="col">Người tạo</th><th scope="col">Thao tác</th></tr></thead>
       <tbody>${r.data.map(a => `
         <tr>
-          <td><strong>${escapeHtml(a.quote?.quoteNumber)}</strong></td>
+          <td><strong>${escapeHtml(a.quote?.projectCode || a.quote?.quoteNumber)}</strong></td>
           <td>${escapeHtml(a.quote?.title || "")}</td>
           <td>${escapeHtml(a.quote?.toCompany || "")}</td>
           <td style="text-align:right">${fmtMoney(a.quote?.total)} đ</td>

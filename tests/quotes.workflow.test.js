@@ -1,0 +1,230 @@
+// Integration tests for the quote lifecycle (create → submit → approve) and the
+// RBAC / terminal-state guards around it. Drives the REAL app via supertest —
+// requires a Postgres with the app schema (CI provides one; locally the suite
+// skips itself when the DB or schema is missing).
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import request from "supertest";
+import bcrypt from "bcryptjs";
+import { prisma } from "../src/db.js";
+
+// Probe BOTH connectivity and schema so a dev machine without Postgres (or with
+// an empty test DB) skips cleanly instead of failing 20 tests with P1001 noise.
+const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "User" LIMIT 1')
+  .then(() => true)
+  .catch(() => false);
+
+const TAG = `wf${Date.now()}`;
+const PASSWORD = "Test1234!a";
+
+describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
+  let app;
+  let company, template;
+  let adminU, managerU, employeeU;
+  let admin, employee; // supertest agents (cookie sessions)
+
+  async function makeUser(role) {
+    return prisma.user.create({
+      data: {
+        username: `${TAG}-${role}`,
+        displayName: `${TAG} ${role}`,
+        role,
+        passwordHash: await bcrypt.hash(PASSWORD, 4), // low cost: test speed
+      },
+    });
+  }
+  async function login(agent, user) {
+    const res = await agent.post("/api/auth/login").send({ username: user.username, password: PASSWORD });
+    expect(res.status).toBe(200);
+    return res;
+  }
+  function quotePayload(overrides = {}) {
+    return {
+      title: `${TAG} báo giá test`,
+      toCompany: "Khách Test",
+      companyId: company.id,
+      vatPercent: 8,
+      sheets: [{ templateId: template.id, items: [{ name: "Hạng mục A", quantity: 2, unitPrice: 1_000_000 }] }],
+      ...overrides,
+    };
+  }
+
+  beforeAll(async () => {
+    const { createApp } = await import("../src/app.js");
+    app = createApp();
+
+    company = await prisma.company.create({
+      data: { code: `${TAG}-co`, name: `${TAG} Co`, address: "1 Test St", quotePrefix: "TS" },
+    });
+    template = await prisma.quoteTemplate.create({
+      data: { code: `${TAG}-tpl`, name: `${TAG} Template`, companyId: company.id, filePath: "templates/Unibenfood.xlsx" },
+    });
+    [adminU, managerU, employeeU] = await Promise.all([makeUser("admin"), makeUser("manager"), makeUser("employee")]);
+
+    admin = request.agent(app);
+    employee = request.agent(app);
+    await login(admin, adminU);
+    await login(employee, employeeU);
+  });
+
+  afterAll(async () => {
+    const quotes = await prisma.quote.findMany({
+      where: { title: { startsWith: TAG } },
+      includeDeleted: true,
+      select: { id: true },
+    });
+    const qIds = quotes.map((q) => q.id);
+    const uIds = [adminU, managerU, employeeU].filter(Boolean).map((u) => u.id);
+    await prisma.approval.deleteMany({ where: { quoteId: { in: qIds } } });
+    await prisma.notification.deleteMany({ where: { userId: { in: uIds } } });
+    await prisma.loginAttempt.deleteMany({ where: { username: { startsWith: TAG } } });
+    await prisma.quote.deleteMany({ where: { id: { in: qIds } }, hardDelete: true });
+    await prisma.user.deleteMany({ where: { username: { startsWith: TAG } }, hardDelete: true });
+    await prisma.quoteTemplate.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true });
+    await prisma.company.deleteMany({ where: { code: { startsWith: TAG } }, hardDelete: true });
+  });
+
+  it("rejects a wrong password with 401", async () => {
+    const res = await request(app).post("/api/auth/login").send({ username: adminU.username, password: "wrong-pass-1" });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects unauthenticated API access", async () => {
+    const res = await request(app).get("/api/quotes");
+    expect(res.status).toBe(401);
+  });
+
+  describe("lifecycle: create → submit → approve", () => {
+    let quoteId;
+
+    it("employee must assign a manager when creating", async () => {
+      const res = await employee.post("/api/quotes").send(quotePayload());
+      expect(res.status).toBe(400);
+    });
+
+    it("employee creates a quote (with manager) → 201 with computed totals", async () => {
+      const res = await employee.post("/api/quotes").send(quotePayload({ managerId: managerU.id }));
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("draft");
+      expect(res.body.subtotal).toBe(2_000_000);
+      expect(res.body.vat).toBe(160_000);
+      expect(res.body.total).toBe(2_160_000);
+      quoteId = res.body.id;
+    });
+
+    it("employee cannot approve (no quote:approve permission)", async () => {
+      const res = await employee.post(`/api/quotes/${quoteId}/approve`).send({});
+      expect(res.status).toBe(403);
+    });
+
+    it("approve before submit → 400 (not pending)", async () => {
+      const res = await admin.post(`/api/quotes/${quoteId}/approve`).send({});
+      expect(res.status).toBe(400);
+    });
+
+    it("employee submits → pending with an Approval row", async () => {
+      const res = await employee.post(`/api/quotes/${quoteId}/submit`);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("pending");
+      const ap = await prisma.approval.findFirst({ where: { quoteId, decision: "pending" } });
+      expect(ap).toBeTruthy();
+    });
+
+    it("REGRESSION: cosmetic edit while pending does NOT orphan the approval", async () => {
+      // Before the fix, ANY edit bumped currentVersion, the pending Approval row
+      // (keyed by versionNo) became unreachable and approve always returned 400.
+      const before = await prisma.quote.findFirst({ where: { id: quoteId } });
+      const res = await admin.put(`/api/quotes/${quoteId}`).send({ title: `${TAG} báo giá test (đổi tiêu đề)` });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("pending"); // cosmetic edit doesn't reopen
+      const after = await prisma.quote.findFirst({ where: { id: quoteId } });
+      expect(after.currentVersion).toBe(before.currentVersion); // no version bump
+    });
+
+    it("admin approves → approved", async () => {
+      const res = await admin.post(`/api/quotes/${quoteId}/approve`).send({ comment: "ok" });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("approved");
+    });
+
+    it("price-affecting edit on an approved quote reopens it to draft", async () => {
+      const res = await admin.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("draft");
+      expect(res.body.total).toBe(540_000);
+    });
+
+    it("REGRESSION: a discount-only PUT actually changes the total", async () => {
+      // Quote is now draft with total 540,000 (500,000 + 8% VAT).
+      const res = await admin.put(`/api/quotes/${quoteId}`).send({ discount: 40_000 });
+      expect(res.status).toBe(200);
+      expect(res.body.discount).toBe(40_000);
+      expect(res.body.total).toBe(500_000); // 540,000 − 40,000
+    });
+  });
+
+  describe("terminal state: converted is immutable", () => {
+    let quoteId;
+
+    beforeAll(async () => {
+      const res = await admin.post("/api/quotes").send(quotePayload({ title: `${TAG} deal đã chốt` }));
+      expect(res.status).toBe(201);
+      quoteId = res.body.id;
+      await prisma.quote.update({ where: { id: quoteId }, data: { status: "converted" } });
+    });
+
+    it("REGRESSION: even admin cannot edit a converted quote", async () => {
+      const res = await admin.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, items: [{ name: "Sửa giá deal đã chốt", quantity: 1, unitPrice: 9_999_999 }] }],
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("converted quote cannot be deleted", async () => {
+      const res = await admin.delete(`/api/quotes/${quoteId}`);
+      expect(res.status).toBeGreaterThanOrEqual(400);
+    });
+  });
+
+  describe("RBAC scoping", () => {
+    let adminQuoteId;
+
+    beforeAll(async () => {
+      const res = await admin.post("/api/quotes").send(quotePayload({ title: `${TAG} của admin` }));
+      adminQuoteId = res.body.id;
+    });
+
+    it("employee cannot read a quote they don't own / aren't a member of", async () => {
+      const res = await employee.get(`/api/quotes/${adminQuoteId}`);
+      expect(res.status).toBe(403);
+    });
+
+    it("employee list only shows their own quotes", async () => {
+      const res = await employee.get("/api/quotes").query({ q: TAG });
+      expect(res.status).toBe(200);
+      for (const row of res.body.data) {
+        const mine =
+          row.createdById === employeeU.id ||
+          (row.members || []).some((m) => (m.id ?? m) === employeeU.id);
+        expect(mine).toBe(true);
+      }
+    });
+  });
+
+  describe("REGRESSION: list filter accepts every real status", () => {
+    it.each(["draft", "pending", "approved", "rejected", "sent", "expired", "converted", "lost"])(
+      "GET /api/quotes?status=%s → 200",
+      async (status) => {
+        const res = await admin.get("/api/quotes").query({ status });
+        expect(res.status).toBe(200);
+      }
+    );
+
+    it("filter actually matches the converted fixture", async () => {
+      const res = await admin.get("/api/quotes").query({ status: "converted", q: TAG });
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});

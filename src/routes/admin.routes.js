@@ -65,7 +65,7 @@ router.get(
       prisma.quote.count(),
       prisma.quoteItem.count(),
       prisma.auditEvent.count(),
-      prisma.$queryRawUnsafe(`SELECT COUNT(*)::int AS n FROM user_sessions`).catch(() => [{ n: 0 }]),
+      prisma.$queryRaw`SELECT COUNT(*)::int AS n FROM user_sessions`.catch(() => [{ n: 0 }]),
     ]);
     res.json({
       users, customers, products, quotes, items,
@@ -82,16 +82,28 @@ router.post(
   asyncHandler(async (req, res) => {
     const { days } = req.body;
     const cutoff = new Date(Date.now() - days * 86_400_000);
+    const base = { deletedAt: { lt: cutoff } };
+
+    // Purge in FK-dependency order, and ONLY hard-delete rows that are no longer
+    // referenced by any LIVE row. The relation `none` guards prevent two failure
+    // modes the old loop had: (1) hard-deleting a soft-deleted Customer/Company/
+    // User still referenced by a live Quote would SET NULL / RESTRICT, silently
+    // corrupting or failing; (2) errors were swallowed into the result string so
+    // a blocked purge looked successful. Quotes cascade (sheets/items/versions/
+    // approvals) so they go first and free up the downstream references.
     const result = {};
-    for (const model of ["quote", "customer", "user", "company", "quoteTemplate"]) {
-      try {
-        const r = await prisma[model].deleteMany({
-          where: { deletedAt: { lt: cutoff }, includeDeleted: true },
-        }).catch(() => prisma[model].deleteMany({ where: { deletedAt: { lt: cutoff } } }));
-        result[model] = r?.count ?? 0;
-      } catch (e) {
-        result[model] = `error: ${e.message}`;
-      }
+    const steps = [
+      ["quote", base],
+      ["quoteTemplate", { ...base, sheets: { none: {} } }],
+      ["customer", { ...base, quotes: { none: {} } }],
+      ["company", { ...base, quotes: { none: {} }, templates: { none: {} } }],
+      ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} } }],
+    ];
+    for (const [model, where] of steps) {
+      // Let errors propagate to the global handler (500 + logged) instead of being
+      // hidden — a failed purge must be visible, not reported as "done".
+      const r = await prisma[model].deleteMany({ where, hardDelete: true });
+      result[model] = r?.count ?? 0;
     }
     await audit(req, "admin.purge", { resource: "system", after: { cutoff, result } });
     res.json({ cutoff, result });

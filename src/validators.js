@@ -34,12 +34,15 @@ export const UserInviteSchema = z.object({
   email: z.string().email("Email không hợp lệ").max(160),
   displayName,
   role: z.enum(["admin", "manager", "employee"]).default("employee"),
+  projectCode: z.string().max(40).optional().nullable(),
 });
 
 export const AcceptInviteSchema = z.object({
   token: z.string().min(10).max(200),
   displayName: displayName.optional(),
   phone,
+  title,
+  senderName: title,
   password: pwd,
 });
 
@@ -59,11 +62,27 @@ export const UserUpdateSchema = z.object({
   title,
   active: z.boolean().optional(),
   password: pwd.optional(),
+  projectCode: z.string().max(40).optional().nullable(),
 });
+
+// Every status a quote can actually hold (mirror of prisma QuoteStatus enum).
+// Used by the list filter; the UI dropdown offers all of these.
+export const QUOTE_STATUSES = ["draft", "pending", "approved", "rejected", "sent", "expired", "converted", "lost"];
+
+// base64 data URL of the customer logo (~3MB cap to bound payload size).
+// The WHOLE string must be valid base64 — a prefix-only check would let markup
+// ride along and end up in an <img src> attribute (stored XSS).
+const customerLogoSchema = z.string().max(3_500_000)
+  .refine(
+    (s) => /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s),
+    "Logo phải là ảnh PNG/JPG/GIF/WEBP (base64)"
+  )
+  .optional().nullable();
 
 const itemSchema = z.object({
   order: z.coerce.number().int().optional(),
-  kind: z.enum(["item", "info", "sub"]).default("item"),
+  kind: z.enum(["item", "info", "sub", "section"]).default("item"),
+  label: z.string().max(12).optional().nullable(),
   name: z.string().max(2000).default(""),
   detail: z.string().max(2000).optional().nullable(),
   unit: z.string().max(40).optional().nullable(),
@@ -78,6 +97,7 @@ const sheetSchema = z.object({
   templateId: z.coerce.number().int().positive(),
   name: z.string().max(120).optional().nullable(),
   order: z.coerce.number().int().optional(),
+  groupSubtotal: z.boolean().optional(),
   items: z.array(itemSchema).max(500).default([]),
 });
 
@@ -88,6 +108,8 @@ export const QuoteCreateSchema = z.object({
   toCompany: z.string().min(1, "Thiếu khách hàng").max(500),
   toContact: z.string().max(200).optional().nullable(),
   toEmail: z.string().max(200).optional().nullable(),
+  toPhone: z.string().max(200).optional().nullable(),
+  toAddress: z.string().max(500).optional().nullable(),
   companyId: z.coerce.number().int().positive(),
   fromContact: z.string().max(200).optional().default(""),
   fromPhone: z.string().max(40).optional().nullable(),
@@ -105,10 +127,7 @@ export const QuoteCreateSchema = z.object({
   discount: z.coerce.number().min(0).max(1e12).optional(),
   showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
-  // base64 data URL of the customer logo (~3MB cap to bound payload size)
-  customerLogo: z.string().max(3_500_000)
-    .refine((s) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s), "Logo phải là ảnh PNG/JPG/GIF/WEBP")
-    .optional().nullable(),
+  customerLogo: customerLogoSchema,
   sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20),
 });
 
@@ -124,6 +143,8 @@ export const QuoteUpdateSchema = z.object({
   toCompany: z.string().min(1).max(500).optional(),
   toContact: z.string().max(200).optional().nullable(),
   toEmail: z.string().max(200).optional().nullable(),
+  toPhone: z.string().max(200).optional().nullable(),
+  toAddress: z.string().max(500).optional().nullable(),
   companyId: z.coerce.number().int().positive().optional(),
   fromContact: z.string().max(200).optional(),
   fromPhone: z.string().max(40).optional().nullable(),
@@ -140,15 +161,13 @@ export const QuoteUpdateSchema = z.object({
   discount: z.coerce.number().min(0).max(1e12).optional(),
   showTotals: z.coerce.boolean().optional(),
   notes: z.string().max(4000).optional().nullable(),
-  customerLogo: z.string().max(3_500_000)
-    .refine((s) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s), "Logo phải là ảnh PNG/JPG/GIF/WEBP")
-    .optional().nullable(),
-  sheets: z.array(sheetSchema).max(20).optional(),
+  customerLogo: customerLogoSchema,
+  sheets: z.array(sheetSchema).min(1, "Phải có ít nhất 1 sheet").max(20).optional(),
 });
 
 export const ListQuerySchema = z.object({
   q: z.string().max(200).optional(),
-  status: z.enum(["draft", "pending", "approved", "rejected"]).optional(),
+  status: z.enum(QUOTE_STATUSES).optional(),
   companyId: z.coerce.number().int().positive().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),

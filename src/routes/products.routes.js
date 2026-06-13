@@ -105,8 +105,10 @@ router.post(
   validate({ body: Create }),
   asyncHandler(async (req, res) => {
     const { priceTiers, ...rest } = req.body;
-    const dup = await prisma.product.findUnique({ where: { sku: rest.sku } });
-    if (dup) return res.status(409).json({ error: "SKU đã tồn tại" });
+    // includeDeleted: sku is unique across soft-deleted rows too, so a plain check
+    // would miss a deleted holder and surface the DB constraint as a 500.
+    const dup = await prisma.product.findFirst({ where: { sku: rest.sku }, includeDeleted: true });
+    if (dup) return res.status(409).json({ error: dup.deletedAt ? "SKU thuộc sản phẩm đã xoá" : "SKU đã tồn tại" });
 
     const product = await prisma.product.create({
       data: {

@@ -33,8 +33,10 @@ export const TEMPLATE_CONFIGS = {
     cells: {
       toCompany:   "C2",
       toContact:   "C3",
+      toPhone:     "C4",
+      toAddress:   "C5",
       fromContactCell: "F3",
-      fromContactFormat: ({ contact }) => contact || "",
+      fromContactFormat: ({ contact, title }) => [contact, title].filter(Boolean).join(" _ "),
       fromPhone:   "F4",
       fromAddress: "F5",
       date:        "B6",
@@ -106,9 +108,11 @@ export const TEMPLATE_CONFIGS = {
       toBlockCell: "F3",
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
-      toBlockFormat: ({ company, contact, email }) => {
+      toBlockFormat: ({ company, contact, email, phone, address }) => {
         const lines = [`Kính gửi: ${company || "….."}`];
         if (contact) lines.push(contact);
+        if (phone) lines.push(`ĐT: ${phone}`);
+        if (address) lines.push(`Đ/c: ${address}`);
         if (email) lines.push(`Email: ${email}`);
         return lines.join("\n");
       },
@@ -121,6 +125,18 @@ export const TEMPLATE_CONFIGS = {
       // Customer logo replaces the "logo cty khách hàng" placeholder at C3.
       customerLogoCell: "C3",
       customerLogoExt: { width: 190, height: 80 },
+      // Sender letterhead block (top-right, merged F1:I1). Was a hard-coded Colorfull
+      // sample; now filled from the quote's company + sender fields so edits show up.
+      fromBlockCell: "F1",
+      fromBlockFormat: ({ companyName, contact, title, phone, address }) => {
+        const lines = [];
+        if (companyName) lines.push(String(companyName).toUpperCase());
+        if (address) lines.push(address);
+        const person = [contact, title].filter(Boolean).join(" - ");
+        const personLine = [person, phone].filter(Boolean).join(" - ");
+        if (personLine) lines.push(personLine);
+        return lines.join("\n");
+      },
     },
     // Footer "* Ghi chú" is a C:D merged cell that rides the item splice/duplicate;
     // re-merge it afterwards so the text doesn't duplicate across both columns.
@@ -198,6 +214,8 @@ export const TEMPLATE_CONFIGS = {
     cells: {
       toCompany:   "C1",
       toContact:   "C2",
+      toPhone:     "C3",
+      toAddress:   "C4",
       fromContactCell: "E2",
       fromContactFormat: ({ contact, title }) =>
         [contact, title].filter(Boolean).join(" _ "),
