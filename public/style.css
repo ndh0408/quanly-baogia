@@ -57,15 +57,17 @@
   --font-paper: "Times New Roman", Times, serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --fs-root: 14px;
-  --fs-h1: 24px;  --lh-h1: 1.2;   --fw-h1: 750;
-  --fs-h2: 18px;  --lh-h2: 1.25;  --fw-h2: 700;
-  --fs-h3: 16px;  --lh-h3: 1.3;   --fw-h3: 700;
-  --fs-body: 14px; --lh-body: 1.5; --fw-body: 400;
-  --fs-small: 13px; --lh-small: 1.45;
+  /* Clean enterprise type scale — real font weights (Be Vietnam Pro: 400/500/600/700/800),
+     tightened tracking on large sizes, generous line-height for readability. */
+  --fs-h1: 21px;  --lh-h1: 1.3;   --fw-h1: 700;
+  --fs-h2: 16px;  --lh-h2: 1.35;  --fw-h2: 700;
+  --fs-h3: 14.5px; --lh-h3: 1.4;  --fw-h3: 600;
+  --fs-body: 14px; --lh-body: 1.55; --fw-body: 400;
+  --fs-small: 13px; --lh-small: 1.5;
   --fs-micro: 11.5px;
-  --fs-kpi: 26px; --fw-kpi: 750;
-  --tracking-tight: -.02em;
-  --tracking-caps: .03em;
+  --fs-kpi: 26px; --fw-kpi: 700;
+  --tracking-tight: -.018em;
+  --tracking-caps: .04em;
 }
 
 [data-theme="dark"] {
@@ -105,6 +107,17 @@ html, body {
 }
 a { color: var(--primary); }
 button { cursor: pointer; font-family: inherit; }
+
+/* Global heading hierarchy — every h1/h2/h3 is consistent regardless of context
+   (previously unstyled headings fell back to random browser-default sizes, which
+   read as amateurish). Page-specific rules below only adjust margins, not size. */
+h1, h2, h3, h4 { font-family: var(--font-ui); color: var(--text); margin: 0; }
+h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); font-weight: var(--fw-h1); letter-spacing: var(--tracking-tight); }
+h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); font-weight: var(--fw-h2); letter-spacing: -.01em; }
+h3 { font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: var(--fw-h3); }
+h4 { font-size: var(--fs-small); line-height: 1.4; font-weight: 600; }
+p { line-height: var(--lh-body); }
+.hint, .muted, .sub { line-height: var(--lh-small); }
 input, textarea, select { font-family: inherit; font-size: 14px; color: var(--text); }
 ::selection { background: var(--ring); }
 *:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -240,7 +253,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .sidebar button.logout:hover { background: rgba(229,72,77,.85); border-color: transparent; }
 
 .main { padding: 26px 30px; min-width: 0; }
-.main h1 { font-size: 24px; margin: 0 0 18px; letter-spacing: -.02em; font-weight: 750; }
+.main h1 { margin: 0 0 18px; }  /* size/weight/tracking from the global h1 token */
 
 /* ---------- Toolbar / buttons ---------- */
 .toolbar { display: flex; gap: 10px; margin-bottom: 18px; align-items: center; flex-wrap: wrap; }
@@ -468,7 +481,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
   animation: modalIn .2s cubic-bezier(.2,.9,.3,1);
 }
 @keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
-.modal h2 { margin: 0 0 14px; font-size: 18px; }
+.modal h2 { margin: 0 0 14px; }
 .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .modal-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
 .modal-x { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-muted); line-height: 1; }
@@ -611,7 +624,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .step-line.done { background: var(--success); }
 
 .wizard-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); }
-.wizard-card h2 { margin: 0 0 4px; font-size: 18px; }
+.wizard-card h2 { margin: 0 0 4px; }
 .wizard-card .hint { color: var(--text-muted); font-size: 13px; margin: 0 0 18px; }
 .wizard-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 22px; }
 
@@ -781,7 +794,7 @@ input:disabled, select:disabled, textarea:disabled {
 /* Account page: card sections */
 .account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; align-items: start; }
 .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
-.card-section h3 { margin: 0 0 14px; font-size: 16px; }
+.card-section h3 { margin: 0 0 14px; }
 
 /* Dashboard two-column layout + proportional funnel track */
 .dash-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 8px; }

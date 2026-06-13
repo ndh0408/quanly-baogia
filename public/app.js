@@ -2917,7 +2917,7 @@ function editCustomer(id) {
 
 // ---------------- Products ----------------
 async function renderProducts(el) {
-  el.innerHTML = `<h1>📦 Sản phẩm / Dịch vụ</h1>
+  el.innerHTML = `<h1>Sản phẩm / Dịch vụ</h1>
     <div class="toolbar">
       <input id="p-q" placeholder="Tìm theo SKU hoặc tên..." style="flex:1"/>
       <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
@@ -3187,7 +3187,7 @@ function openMatrixBuilder(existing, onDone) {
 }
 
 async function renderSettings(el) {
-  el.innerHTML = `<h1>⚙️ Cài đặt hệ thống</h1>
+  el.innerHTML = `<h1>Cài đặt hệ thống</h1>
     <h3 style="margin-top:8px">Quy tắc duyệt báo giá</h3>
     <p class="muted">Thiết lập <strong>ai phải duyệt</strong> báo giá tùy theo <strong>giá trị</strong>. Khi nhân viên trình duyệt, hệ thống tự chọn quy tắc khớp với tổng tiền của báo giá.</p>
     <div id="s-matrix-body">${skeleton(3)}</div>
