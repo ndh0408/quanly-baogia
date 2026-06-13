@@ -585,8 +585,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     if (pal.note) {
       const nr = totalRow + (pal.note.rowOffset || 1);
       const c1 = `${pal.note.colFrom}${nr}`, c2 = `${pal.note.colTo}${nr}`;
+      // KHÔNG merge: ExcelJS reset ô richText-đã-merge về canh giữa khi lưu. Để chữ tràn
+      // trái tự nhiên (các ô C..I dòng này trống) → "Ghi chú:" canh trái đúng như mẫu.
       safeUnmerge(ws, `${c1}:${c2}`);
-      safeMerge(ws, `${c1}:${c2}`);
       const ncell = ws.getCell(c1);
       const note = (quote.notes == null ? "" : String(quote.notes)).trim();
       if (note) {
@@ -595,29 +596,38 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
           { text: "Ghi chú: ", font: { ...nf, bold: true } },
           { text: note, font: { ...nf } },
         ] };
-        ncell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+        // Ép canh trái qua style (cell.alignment đơn lẻ không "ăn" với ô richText).
+        const st = ncell.style ? JSON.parse(JSON.stringify(ncell.style)) : {};
+        st.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
+        ncell.style = st;
         ws.getRow(nr).height = Math.max(ws.getRow(nr).height || 0, 20);
       } else {
         ncell.value = null;
       }
     }
 
-    // (e) Dòng đóng cuối báo giá (Rất mong… / Trân trọng + Ý Kiến Khách Hàng) — dưới Ghi chú.
+    // (e) Dòng đóng cuối báo giá (Rất mong… / Trân trọng) CANH GIỮA + Ý Kiến KH canh phải.
     if (pal.footer) {
       const f = pal.footer;
       const fr = totalRow + (f.rowOffset || 2);
       const ff = { name: "Times New Roman", family: 1, size: 11 };
-      (f.lines || []).forEach((line, idx) => {
-        const cell = ws.getCell(`${f.leftCol || "B"}${fr + idx}`);
+      (f.center || f.lines || []).forEach((line, idx) => {
+        const r = fr + idx;
+        const a = `${f.mergeFrom || "B"}${r}`, b = `${f.mergeTo || "I"}${r}`;
+        safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
+        const cell = ws.getCell(a);
         cell.value = line;
         cell.font = { ...ff };
-        cell.alignment = { horizontal: "left", vertical: "middle" };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
       });
       if (f.right) {
-        const rc = ws.getCell(`${f.rightCol || "G"}${fr}`);
+        const rr = totalRow + (f.rightRowOffset || 5);
+        const a = `${f.rightFrom || "G"}${rr}`, b = `${f.rightTo || "I"}${rr}`;
+        safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
+        const rc = ws.getCell(a);
         rc.value = f.right;
         rc.font = { ...ff };
-        rc.alignment = { horizontal: "left", vertical: "middle" };
+        rc.alignment = { horizontal: "center", vertical: "middle" };
       }
     }
   }
