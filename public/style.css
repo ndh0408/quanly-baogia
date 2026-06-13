@@ -8,9 +8,9 @@
 :root {
   /* Brand — Gia Nguyễn: vàng/gold là màu chủ đạo (fills). Chữ trên nền vàng dùng màu tối. */
   --brand-1: #f5b400;          /* gold — màu thương hiệu */
-  --brand-2: #f5b400;          /* same value → any "gradient" renders flat */
+  --brand-2: #e0a200;          /* darker gold → real two-stop gradient */
   --accent: #f5b400;
-  --brand-gradient: #f5b400;
+  --brand-gradient: linear-gradient(135deg, #f5b400, #e0a200);
 
   /* Document / Excel "paper" (theme-independent) */
   --paper: #ffffff;
@@ -30,6 +30,7 @@
   --text-soft: #475569;        /* slate-600 */
   --text-muted: #5b6575;       /* AA on white & --bg */
   --border: #e6e8ec;
+  --border-soft: #eef0f3;        /* lighter hairline (mobile card separators) */
   --border-strong: #d4d8df;
   --primary: #a16207;          /* dark gold — for link text / focus (đọc rõ trên nền sáng) */
   --primary-hover: #854d0e;
@@ -77,8 +78,9 @@
   --text-soft: #aab2c2;
   --text-muted: #9aa3b3;
   --border: #232a36;
+  --border-soft: #1c2330;
   --border-strong: #313a48;
-  --brand-1: #fbbf24; --brand-2: #fbbf24; --accent: #fbbf24; --brand-gradient: #fbbf24;
+  --brand-1: #fbbf24; --brand-2: #d99e1f; --accent: #fbbf24; --brand-gradient: linear-gradient(135deg, #fbbf24, #d99e1f);
   --primary: #fbbf24;
   --primary-hover: #fcd34d;
   --primary-soft: #2a2310;
@@ -198,6 +200,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .sidebar .sb-head .icon-btn { color: #c7cbdb; }
 
 .sidebar .menu { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; margin: 4px -4px; padding: 0 4px; }
+.sidebar .menu .nav-group-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: #6b7488; padding: 12px 12px 4px; margin-top: 2px;
+}
+.sidebar .menu .nav-group-label:first-child { margin-top: 0; padding-top: 4px; }
 .sidebar .menu a {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 12px; border-radius: 8px;
@@ -785,6 +792,32 @@ input:disabled, select:disabled, textarea:disabled {
 /* Pagination footer under list tables */
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .pager-btns { display: flex; align-items: center; gap: 6px; }
+
+/* Touch ergonomics: comfortable tap targets + horizontal-scroll affordance for
+   the wide Excel-like quote grid on phones (WCAG 2.5.5 target size). */
+@media (max-width: 560px) {
+  .btn, .icon-btn, .sidebar .menu a, [data-kbd] { min-height: 40px; }
+  .row-actions .btn { min-height: 36px; }
+  .tbl-scroll { -webkit-overflow-scrolling: touch; }
+  .editor .tbl-scroll::after {
+    content: "← vuốt ngang để xem đủ cột →";
+    display: block; text-align: center; font-size: 11px; color: var(--text-muted);
+    padding: 4px 0 2px;
+  }
+}
+
+/* Inline form validation (replaces toast-only errors) */
+.field-err { color: var(--danger); font-size: 12.5px; margin: 4px 0 2px; font-weight: 500; }
+[aria-invalid="true"] { border-color: var(--danger) !important; box-shadow: 0 0 0 3px var(--danger-soft) !important; }
+
+/* Reusable error state with a retry button (replaces the "stuck skeleton") */
+.error-state { display: grid; place-items: center; gap: 12px; padding: 40px 20px; text-align: center; color: var(--text-muted); }
+.error-state .es-icon { font-size: 32px; }
+.error-state .es-msg { font-size: 14px; max-width: 420px; }
+
+/* Keyboard-operable non-button elements show the same focus ring as buttons */
+[data-kbd] { cursor: pointer; }
+[data-kbd]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* Respect the OS "reduce motion" setting (WCAG 2.3.3 / vestibular safety). */
 @media (prefers-reduced-motion: reduce) {

@@ -17,6 +17,13 @@ function canOnQuote(action, q) {
   return false;
 }
 
+// Role-appropriate landing page when no specific route is requested: managers/
+// admins get the overview dashboard; salespeople go straight to their list.
+function landingPage() {
+  const r = state.user?.role;
+  return (r === "admin" || r === "manager") ? "dashboard" : "list";
+}
+
 const state = {
   user: null,
   page: "list",
@@ -79,6 +86,84 @@ function toast(msg, type = "info") {
 function skeleton(rows = 5, tall = false) {
   return `<div class="skeleton">${Array.from({ length: rows })
     .map(() => `<div class="sk-line${tall ? " tall" : ""}"></div>`).join("")}</div>`;
+}
+
+// Attribute string that makes a non-button element keyboard-operable. Add it to
+// any clickable <div>/<span> and they become focusable + Enter/Space activatable
+// (WCAG 2.1.1). One delegated handler (installKeyActivation) does the activation,
+// so this survives re-renders without per-element wiring.
+const KBD = 'role="button" tabindex="0" data-kbd';
+function installKeyActivation() {
+  if (window._keyActivationWired) return;
+  window._keyActivationWired = true;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    if (["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(e.target.tagName)) return;
+    const el = e.target.closest("[data-kbd]");
+    if (!el) return;
+    e.preventDefault();
+    el.click();
+  });
+  // Native guard: warns on tab-close / refresh / external nav while the quote
+  // editor has unsaved changes (window._editorDirty). In-app navigation is guarded
+  // separately by leaveEditorGuard().
+  window.addEventListener("beforeunload", (e) => {
+    if (window._editorDirty) { e.preventDefault(); e.returnValue = ""; }
+  });
+}
+
+// Ask before leaving the editor with unsaved changes. Returns true if it's safe
+// to proceed (no changes, or the user confirmed discarding them).
+async function leaveEditorGuard() {
+  if (!window._editorDirty) return true;
+  const ok = await confirmModal(
+    "Rời khỏi báo giá?",
+    "Bạn có thay đổi CHƯA LƯU. Rời đi sẽ mất các thay đổi này.",
+    { danger: true, confirmText: "Rời đi (bỏ thay đổi)" }
+  );
+  if (ok) window._editorDirty = false;
+  return ok;
+}
+
+// Standard error state for a page whose data failed to load — replaces the
+// "stuck skeleton" anti-pattern with a clear message + a retry button.
+function errorState(message, onRetry) {
+  const id = "err-retry-" + Math.random().toString(36).slice(2);
+  setTimeout(() => { const b = document.getElementById(id); if (b && onRetry) b.addEventListener("click", onRetry); }, 0);
+  return `<div class="error-state" role="alert">
+    <div class="es-icon">⚠️</div>
+    <div class="es-msg">${escapeHtml(message || "Không tải được dữ liệu")}</div>
+    <button class="btn btn-primary" id="${id}">Thử lại</button>
+  </div>`;
+}
+
+// Navigate to a quote via the hash router so Back/F5/bookmark/deep-links work.
+function goToQuote(id) { location.hash = "#/quotes/" + id; }
+
+// Map server validation details ([{path,message}]) to INLINE field errors instead
+// of a disappearing toast. Finds an input by id f-<path> / w-<path> or name=<path>,
+// sets aria-invalid, shows a .field-err message, and focuses the first bad field.
+// Returns true if at least one field was matched.
+function applyFieldErrors(err) {
+  const details = err && err.details;
+  if (!Array.isArray(details) || !details.length) return false;
+  document.querySelectorAll("[aria-invalid='true']").forEach((el) => el.removeAttribute("aria-invalid"));
+  document.querySelectorAll(".field-err").forEach((el) => el.remove());
+  let firstBad = null;
+  for (const d of details) {
+    const top = String(d.path || "").split(".")[0];
+    if (!top || !/^[\w-]+$/.test(top)) continue; // skip non-identifier paths (selector-injection safe)
+    const field = document.getElementById("f-" + top) || document.getElementById("w-" + top) || document.querySelector(`[name="${top}"]`);
+    if (!field) continue;
+    field.setAttribute("aria-invalid", "true");
+    const msg = document.createElement("div");
+    msg.className = "field-err";
+    msg.textContent = d.message;
+    (field.closest("label") || field).insertAdjacentElement("afterend", msg);
+    if (!firstBad) firstBad = field;
+  }
+  if (firstBad) { firstBad.focus(); return true; }
+  return false;
 }
 
 function fmtMoney(n) {
@@ -223,11 +308,15 @@ async function routeFromHash() {
   }
   state.page = ROUTE_PAGES.includes(h) ? h : "list";
   state.currentQuote = null;
+  // Remember the last non-quote page so the editor's "Quay lại" returns HERE
+  // (list / approvals / search) instead of history.back() — which could exit the app.
+  window._returnHash = location.hash;
   render();
 }
 
 async function boot() {
   initTheme();
+  installKeyActivation();
   if (!window._hashWired) { window.addEventListener("hashchange", routeFromHash); window._hashWired = true; }
   // Public invite-accept page — reachable without logging in.
   if (location.hash.startsWith("#/onboard")) { renderOnboard(); return; }
@@ -239,7 +328,7 @@ async function boot() {
     state.user = null;
   }
   if (state.user && location.hash.startsWith("#/")) routeFromHash();
-  else render();
+  else { if (state.user) state.page = landingPage(); render(); }
 }
 
 async function loadMeta() {
@@ -339,9 +428,11 @@ function renderLogin() {
     try {
       const me = await api("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
       state.user = me;
-      state.page = "list";
       await loadMeta();
-      render();
+      // Honor a deep link the user followed before logging in (e.g. an email link
+      // to a specific quote); otherwise land on the list.
+      if (location.hash.startsWith("#/") && !location.hash.startsWith("#/onboard")) routeFromHash();
+      else { state.page = landingPage(); render(); }
     } catch (err) {
       // Server asks for a second factor → reveal the MFA field and let the user retry.
       if (err.body && err.body.mfaRequired) {
@@ -359,6 +450,8 @@ function renderLogin() {
 
 // ---------------- Shell ----------------
 function renderShell() {
+  // Any non-editor page clears the unsaved flag (covers browser-back out of editor).
+  if (state.page !== "edit") window._editorDirty = false;
   const role = state.user.role;
   const themeIcon = (localStorage.getItem("theme") === "dark") ? "☀️" : "🌙";
   const nav = (id, label, badge = "") =>
@@ -389,15 +482,18 @@ function renderShell() {
           <div id="gs-results" class="global-search-results" style="display:none"></div>
         </div>
         <nav class="menu" aria-label="Điều hướng chính">
+          <div class="nav-group-label" role="presentation">Công việc</div>
           ${nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>")}
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
           ${nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>")}
           ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
-          ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num"></span>`) : ""}
-          ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num"></span>`)}
+          ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
+          ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
+          ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
           ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
           ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}
+          <div class="nav-group-label" role="presentation">Tài khoản</div>
           ${nav("profile", NAV_ICON.profile + "<span>Tài khoản</span>")}
         </nav>
         <div class="who">
@@ -423,16 +519,42 @@ function renderShell() {
   // Mobile sidebar toggle
   const sidebar = document.getElementById("sidebar");
   const backdrop = document.getElementById("sb-backdrop");
-  const openSidebar = () => { sidebar.classList.add("open"); backdrop.classList.add("show"); };
-  const closeSidebar = () => { sidebar.classList.remove("open"); backdrop.classList.remove("show"); };
-  document.getElementById("sb-toggle")?.addEventListener("click", openSidebar);
+  const sbToggleBtn = document.getElementById("sb-toggle");
+  // Focus trap for the mobile drawer: while open, Tab cycles within the sidebar
+  // and Escape closes it + returns focus to the hamburger (WCAG 2.4.3 / 2.1.2).
+  const trapTab = (e) => {
+    if (e.key === "Escape") { closeSidebar(); sbToggleBtn?.focus(); return; }
+    if (e.key !== "Tab") return;
+    const f = sidebar.querySelectorAll('a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])');
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  const openSidebar = () => {
+    sidebar.classList.add("open"); backdrop.classList.add("show");
+    sidebar.addEventListener("keydown", trapTab);
+    sidebar.querySelector('a[href], button')?.focus();
+  };
+  const closeSidebar = () => {
+    sidebar.classList.remove("open"); backdrop.classList.remove("show");
+    sidebar.removeEventListener("keydown", trapTab);
+  };
+  sbToggleBtn?.addEventListener("click", openSidebar);
   backdrop?.addEventListener("click", closeSidebar);
 
   // Nav links carry href="#/page"; navigation is driven by the hash router so
-  // pages are bookmarkable + the back button works. The click only closes the
-  // mobile drawer; the browser updates the hash → hashchange → routeFromHash.
+  // pages are bookmarkable + the back button works. The click closes the mobile
+  // drawer; if leaving the editor with unsaved changes, confirm first (the link's
+  // default hash nav is cancelled and re-issued only after the user confirms).
   document.querySelectorAll("[data-page]").forEach(a => {
-    a.addEventListener("click", () => closeSidebar());
+    a.addEventListener("click", async (e) => {
+      closeSidebar();
+      if (state.page === "edit" && window._editorDirty) {
+        e.preventDefault();
+        if (await leaveEditorGuard()) location.hash = a.getAttribute("href");
+      }
+    });
   });
   // Update the hamburger's expanded state for screen readers.
   const sbToggle = document.getElementById("sb-toggle");
@@ -453,30 +575,37 @@ function renderShell() {
           const sections = [];
           if (r.results.quotes?.length) sections.push(`
             <div class="gs-section">Báo giá</div>
-            ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}">
+            ${r.results.quotes.map(q => `<div class="gs-row" data-go="quote" data-id="${q.id}" ${KBD}>
               <strong>${escapeHtml(q.projectCode || q.quoteNumber)}</strong> — ${escapeHtml(q.title)} <span class="status ${q.status}">${statusLabel(q.status)}</span>
             </div>`).join("")}`);
           gsResults.innerHTML = sections.join("") || "<div class='gs-section'>Không có kết quả</div>";
           gsResults.style.display = "block";
-          gsResults.querySelectorAll(".gs-row").forEach(row => row.addEventListener("click", async () => {
+          gsResults.querySelectorAll(".gs-row").forEach(row => row.addEventListener("click", () => {
             const id = row.dataset.id;
-            if (row.dataset.go === "quote" && id) {
-              const q = await api(`/api/quotes/${id}`);
-              state.currentQuote = q; state.page = "edit"; render();
-            }
             gsInput.value = "";
             gsResults.style.display = "none";
+            if (row.dataset.go === "quote" && id) goToQuote(id); // hash router fetches + renders
           }));
         } catch {}
       }, 200);
     });
-    document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); gsInput.focus(); gsInput.select(); }
-      else if (e.key === "Escape") { gsResults.style.display = "none"; gsInput.value = ""; }
-    });
-    document.addEventListener("click", (e) => {
-      if (!gsResults.contains(e.target) && e.target !== gsInput) gsResults.style.display = "none";
-    });
+    // Install the global search keyboard/click handlers ONCE (not per render) and
+    // resolve elements at runtime, so re-renders don't pile up stale listeners.
+    if (!window._gsKeysWired) {
+      window._gsKeysWired = true;
+      document.addEventListener("keydown", (e) => {
+        const inp = document.getElementById("gs-input"); const out = document.getElementById("gs-results");
+        if (!inp) return;
+        if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); inp.focus(); inp.select(); }
+        // Only clear search on Escape when it's actually in use (focused or showing
+        // results) — don't hijack Escape from unrelated fields/dialogs.
+        else if (e.key === "Escape" && out && (document.activeElement === inp || out.style.display !== "none")) { out.style.display = "none"; inp.value = ""; }
+      });
+      document.addEventListener("click", (e) => {
+        const inp = document.getElementById("gs-input"); const out = document.getElementById("gs-results");
+        if (out && inp && !out.contains(e.target) && e.target !== inp) out.style.display = "none";
+      });
+    }
   }
 
   document.querySelector(".logout").addEventListener("click", async () => {
@@ -644,7 +773,10 @@ async function renderList(el) {
       state.quoteList = Array.isArray(r) ? r : (r.data || []);
       state.quoteMeta = (r && r.meta) || { total: state.quoteList.length, page: 1, pageCount: 1 };
       drawList();
-    } catch (e) { toast(e.message, "error"); }
+    } catch (e) {
+      const body = document.getElementById("list-body");
+      if (body) body.innerHTML = errorState(e.message, reload);
+    }
   };
 
   document.getElementById("filter-q").addEventListener("input", (e) => {
@@ -734,24 +866,17 @@ function canDelete(q) {
 async function listAction(act, id) {
   try {
     if (act === "open") {
-      const q = await api(`/api/quotes/${id}`);
-      state.currentQuote = q;
-      state.page = "edit";
-      render();
+      goToQuote(id); // deep-link via hash router (Back/F5/bookmark work)
     } else if (act === "excel") {
       window.open(`/api/export/${id}.xlsx`, "_blank");
     } else if (act === "dup") {
       const q = await api(`/api/quotes/${id}/duplicate`, { method: "POST" });
-      state.currentQuote = q;
-      state.page = "edit";
       toast("Đã nhân bản. Bạn đang sửa bản mới.", "success");
-      render();
+      goToQuote(q.id);
     } else if (act === "revise") {
       const q = await api(`/api/quotes/${id}/duplicate`, { method: "POST", body: JSON.stringify({ sameProject: true }) });
-      state.currentQuote = q;
-      state.page = "edit";
       toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(q)}). Bạn đang sửa bản này.`, "success");
-      render();
+      goToQuote(q.id);
     } else if (act === "del") {
       const dq = (state.quoteList || []).find(x => String(x.id) === String(id));
       if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${dq ? (dq.projectCode || dq.quoteNumber) : ""}? Hành động không thể hoàn tác.`, { danger: true }))) return;
@@ -771,7 +896,7 @@ function stepper(steps, current) {
     const done = n < current;
     const cls = done ? "done clickable" : n === current ? "active" : "";
     // Completed steps are clickable to jump back.
-    const attrs = done ? ` role="button" tabindex="0" data-step="${n}" aria-label="Quay lại bước ${n}: ${escapeHtml(s)}"` : "";
+    const attrs = done ? ` ${KBD} data-step="${n}" aria-label="Quay lại bước ${n}: ${escapeHtml(s)}"` : "";
     const dot = `<div class="step-dot ${cls}"${attrs}><div class="num">${done ? "✓" : n}</div><div class="lbl">${escapeHtml(s)}</div></div>`;
     const line = i < steps.length - 1 ? `<div class="step-line ${done ? "done" : ""}"></div>` : "";
     return dot + line;
@@ -823,7 +948,7 @@ function renderNewQuote(el) {
       <p class="hint">Báo giá sẽ dùng letterhead / mẫu của công ty này.</p>
       <div class="pick-grid">
         ${state.companies.map(c => `
-          <div class="pick-card ${c.id === wz.companyId ? "selected" : ""}" data-company="${c.id}">
+          <div class="pick-card ${c.id === wz.companyId ? "selected" : ""}" data-company="${c.id}" ${KBD} aria-pressed="${c.id === wz.companyId}" aria-label="Chọn công ty ${escapeHtml(c.shortName || c.name)}">
             <div class="pc-title">${escapeHtml(c.shortName || c.name)}</div>
             <div class="pc-sub">${escapeHtml(c.name)}</div>
             <div class="pc-sub">${(c.templates || []).length} mẫu</div>
@@ -836,7 +961,7 @@ function renderNewQuote(el) {
       <p class="hint">Chọn 1 hoặc nhiều mẫu. Có thể đổi thứ tự / thêm sheet sau.</p>
       <div class="pick-grid">
         ${templates.map(t => `
-          <div class="pick-card ${wz.templateIds.includes(t.id) ? "selected" : ""}" data-template="${t.id}">
+          <div class="pick-card ${wz.templateIds.includes(t.id) ? "selected" : ""}" data-template="${t.id}" ${KBD} aria-pressed="${wz.templateIds.includes(t.id)}" aria-label="Chọn mẫu ${escapeHtml(t.name)}">
             <div class="pc-title">${escapeHtml(t.name)}</div>
             <div class="pc-sub">${escapeHtml(t.code)}</div>
             <div class="pc-check">✓</div>
@@ -844,7 +969,7 @@ function renderNewQuote(el) {
       </div>
       ${wz.templateIds.length ? `<div class="sheet-chips">${wz.templateIds.map((id, i) => {
         const t = templates.find(x => x.id === id);
-        return `<span class="sheet-chip">${i + 1}. ${escapeHtml(t?.name || "")} <span class="x" data-rm="${id}">✕</span></span>`;
+        return `<span class="sheet-chip">${i + 1}. ${escapeHtml(t?.name || "")} <span class="x" data-rm="${id}" ${KBD} aria-label="Bỏ mẫu ${escapeHtml(t?.name || "")}">✕</span></span>`;
       }).join("")}</div>` : ""}`;
   } else if (wz.step === 3) {
     const i = wz.info;
@@ -883,7 +1008,7 @@ function renderNewQuote(el) {
           <div style="font-size:13px;color:var(--text-soft);font-weight:500;margin-bottom:5px">Logo khách hàng (tùy chọn)</div>
           <div class="logo-drop ${i.customerLogo ? "has" : ""}" id="w-logo-drop">
             ${i.customerLogo
-              ? `<img src="${safeLogoSrc(i.customerLogo)}"/><div class="logo-actions"><button class="btn btn-sm" id="w-logo-change">Đổi</button><button class="btn btn-sm btn-danger" id="w-logo-clear">Xóa</button></div>`
+              ? `<img src="${safeLogoSrc(i.customerLogo)}" alt="Logo khách hàng đã chọn"/><div class="logo-actions"><button class="btn btn-sm" id="w-logo-change">Đổi</button><button class="btn btn-sm btn-danger" id="w-logo-clear">Xóa</button></div>`
               : `📁 Bấm để chọn ảnh logo (PNG/JPG, &lt; 2MB)`}
           </div>
           <input type="file" id="w-logo-file" accept="image/png,image/jpeg" style="display:none"/>
@@ -979,9 +1104,8 @@ function renderNewQuote(el) {
 
   // Clickable completed step dots (jump back)
   el.querySelectorAll(".step-dot[data-step]").forEach(dot => {
-    const go = () => { wz.step = parseInt(dot.dataset.step, 10); renderNewQuote(el); };
-    dot.addEventListener("click", go);
-    dot.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    // Keyboard activation is handled globally via the data-kbd delegation (KBD).
+    dot.addEventListener("click", () => { wz.step = parseInt(dot.dataset.step, 10); renderNewQuote(el); });
   });
 
   document.getElementById("w-back").addEventListener("click", () => { if (wz.step > 1) { wz.step--; renderNewQuote(el); } });
@@ -1031,6 +1155,15 @@ function renderEditor(el, quote) {
   // preview flag) — lives in THIS closure, never on DOM nodes, so it survives the
   // tbody.innerHTML re-renders inside drawItems and resets when render() rebuilds the editor.
   const grid = { sel: null, selSheet: 0, copyBuf: null, undo: [], redo: [], previewOpen: false, focusSnap: null, _dirty: false, requestDraw: null };
+
+  // Unsaved-changes tracking for the leave-guard. Fresh open = clean; any input/
+  // change bubbling out of the editor marks it dirty (idempotent property handler,
+  // survives the draw() innerHTML re-renders). Cleared on successful save below.
+  // Gate on state.page so this handler (the #main node is reused by other views)
+  // can't mark dirty once we've navigated away from the editor.
+  window._editorDirty = false;
+  el.oninput = () => { if (state.page === "edit") window._editorDirty = true; };
+  el.onchange = () => { if (state.page === "edit") window._editorDirty = true; };
 
   // Mirror the server rule: admin edits all; manager edits only own; employee
   // edits own or quotes they're a member of (and only while draft/rejected).
@@ -1112,9 +1245,9 @@ function renderEditor(el, quote) {
         <!-- Sheet tabs -->
         <div class="sheet-tabs">
           ${q.sheets.map((s, i) => `
-            <div class="sheet-tab ${i === q._activeSheet ? "active" : ""}" data-tab="${i}">
+            <div class="sheet-tab ${i === q._activeSheet ? "active" : ""}" data-tab="${i}" ${KBD} aria-pressed="${i === q._activeSheet}">
               <span>${escapeHtml(s.name || state.templates.find(t => t.id === s.templateId)?.name || "Sheet " + (i + 1))}</span>
-              ${editable && q.sheets.length > 1 ? `<span class="rm-tab" data-rm-tab="${i}" title="Xóa sheet">✕</span>` : ""}
+              ${editable && q.sheets.length > 1 ? `<span class="rm-tab" data-rm-tab="${i}" title="Xóa sheet" ${KBD} aria-label="Xóa sheet ${i + 1}">✕</span>` : ""}
             </div>
           `).join("")}
           ${editable ? `<button class="btn btn-sm add-sheet" id="btn-add-sheet">+ Thêm sheet</button>` : ""}
@@ -1192,7 +1325,12 @@ function renderEditor(el, quote) {
         </div>
       </div>`;
 
-    document.getElementById("btn-back").addEventListener("click", () => { state.page = "list"; render(); });
+    document.getElementById("btn-back").addEventListener("click", async () => {
+      if (!(await leaveEditorGuard())) return;
+      // Return to the last in-app page the user was on (never history.back(), which
+      // could navigate out of the app on a deep-linked/refreshed editor).
+      location.hash = window._returnHash || "#/list";
+    });
 
     // Kebab "⋯" overflow menu. Self-contained to the wrapper element (no
     // document-level listeners) so it can't leak across draw() re-renders.
@@ -1355,9 +1493,15 @@ function bindActions(q, isNew) {
       else saved = await api(`/api/quotes/${q.id}`, { method: "PUT", body: JSON.stringify(payload) });
       state.currentQuote = saved;
       state.page = "edit";
+      window._editorDirty = false;     // saved → no unsaved changes
+      // Point the URL at the now-persisted quote so F5/back/bookmark resolve to it
+      // (replaceState avoids a redundant hashchange → double-fetch).
+      history.replaceState(null, "", "#/quotes/" + saved.id);
       toast("Đã lưu", "success");
       render();
     } catch (e) {
+      // Map server field errors (err.details) to inline messages where possible.
+      applyFieldErrors(e);
       toast(e.message, "error");
       saveBtn.disabled = false;
       saveBtn.textContent = label;
@@ -2213,7 +2357,7 @@ function previewCLF(q, s) {
   const kg = [`Kính gửi: ${escapeHtml(q.toCompany || "…..")}`];
   if (q.toContact) kg.push(escapeHtml(q.toContact));
   if (q.toEmail) kg.push("Email: " + escapeHtml(q.toEmail));
-  const logoCell = safeLogoSrc(q.customerLogo) ? `<img class="cust-logo" src="${safeLogoSrc(q.customerLogo)}">` : `<span class="logo-ph">logo cty khách hàng</span>`;
+  const logoCell = safeLogoSrc(q.customerLogo) ? `<img class="cust-logo" src="${safeLogoSrc(q.customerLogo)}" alt="Logo ${escapeHtml(q.toCompany || "khách hàng")}">` : `<span class="logo-ph">logo cty khách hàng</span>`;
   return `<table class="xlsx-page xlsx-clf">
     <colgroup><col style="width:50px"><col style="width:132px"><col style="width:240px"><col style="width:55px"><col style="width:78px"><col style="width:96px"><col style="width:108px"><col style="width:100px"></colgroup>
     <tr><td colspan="3"></td><td colspan="5" class="xlsx-center" style="white-space:pre-wrap">${pvCompanyBanner(q)}</td></tr>
@@ -2651,12 +2795,17 @@ async function renderDashboard(el) {
       <div class="kpi"><span>Tỷ lệ chốt</span><strong>${k.conversionRate}%</strong></div>`;
     const maxCount = Math.max(1, ...funnel.data.map(s => s.count));
     document.getElementById("dash-funnel").innerHTML = funnel.data.map(s => `
-      <div class="funnel-row">
+      <div class="funnel-row" data-status="${s.status}" ${KBD} aria-label="Lọc danh sách: ${statusLabel(s.status)} (${s.count})">
         <span class="status ${s.status}">${statusLabel(s.status)}</span>
         <div class="funnel-track"><div class="funnel-bar" style="width:${s.count ? Math.max(5, Math.round(s.count / maxCount * 100)) : 0}%"></div></div>
         <strong>${s.count}</strong>
       </div>
     `).join("") || "<div class='empty-state'>Không có dữ liệu</div>";
+    // Funnel rows are actionable: click → open the list filtered by that status.
+    document.querySelectorAll("#dash-funnel .funnel-row").forEach(r => r.addEventListener("click", () => {
+      state.filter = { q: "", status: r.dataset.status, page: 1 };
+      location.hash = "#/list";
+    }));
     document.getElementById("dash-top").innerHTML = top.data.length ? `
       <div class="tbl-scroll"><table class="list-table">
         <thead><tr><th scope="col">#</th><th scope="col">Nhân viên</th><th scope="col" style="text-align:right">Số BG</th><th scope="col" style="text-align:right">Doanh số (đ)</th></tr></thead>
@@ -2696,7 +2845,7 @@ async function renderCustomers(el) {
       </table>`;
       body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editCustomer(parseInt(b.dataset.edit))));
       body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!confirm("Xóa khách hàng?")) return;
+        if (!(await confirmModal("Xóa khách hàng", "Xóa khách hàng này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/customers/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
@@ -2720,9 +2869,9 @@ async function pickCustomer() {
       try {
         const r = await api("/api/customers?size=30" + (q.value ? `&q=${encodeURIComponent(q.value)}` : ""));
         list.innerHTML = r.data.length ? r.data.map(c => `
-          <div class="pick-row" data-id="${c.id}">
+          <div class="pick-row" data-id="${c.id}" ${KBD} aria-label="Chọn ${escapeHtml(c.code)} ${escapeHtml(c.name)}">
             <div><strong>${escapeHtml(c.code)}</strong> — ${escapeHtml(c.name)}</div>
-            <div style="font-size:12px;color:#6b7280">${escapeHtml(c.phone || "")} ${escapeHtml(c.email || "")}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(c.phone || "")} ${escapeHtml(c.email || "")}</div>
           </div>`).join("") : "<div class='empty-state' style='padding:20px'>Không tìm thấy</div>";
         list.querySelectorAll(".pick-row").forEach(d => d.addEventListener("click", () => {
           const sel = r.data.find(c => c.id === parseInt(d.dataset.id));
@@ -2798,7 +2947,7 @@ async function renderProducts(el) {
           </tr>`).join("")}</tbody></table>`;
       body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editProduct(parseInt(b.dataset.edit))));
       body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!confirm("Xóa sản phẩm?")) return;
+        if (!(await confirmModal("Xóa sản phẩm", "Xóa sản phẩm này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/products/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
@@ -2875,8 +3024,8 @@ async function renderApprovalQueue(el) {
             <button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>
           </td>
         </tr>`).join("")}</tbody></table></div>`;
-    body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", async () => {
-      const q = await api(`/api/quotes/${b.dataset.open}`); state.currentQuote = q; state.page = "edit"; render();
+    body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
+      goToQuote(b.dataset.open); // deep-link; routeFromHash fetches + renders, back returns here
     }));
     body.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", async () => {
       const comment = await promptModal("Duyệt báo giá", "Ghi chú khi duyệt (không bắt buộc):", { placeholder: "VD: Đồng ý mức giá này" });
@@ -2909,15 +3058,20 @@ async function renderNotifications(el) {
     const body = document.getElementById("n-body");
     if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có thông báo</div>"; return; }
     body.innerHTML = r.data.map(n => `
-      <div class="notif ${n.readAt ? "" : "unread"}" data-id="${n.id}">
+      <div class="notif ${n.readAt ? "" : "unread"}" data-id="${n.id}" data-resource="${escapeHtml(n.resource || "")}" data-rid="${escapeHtml(n.resourceId || "")}" ${KBD}>
         <div class="notif-title">${escapeHtml(n.title)}</div>
         <div class="notif-body">${escapeHtml(n.body)}</div>
         <div class="notif-meta">${fmtDate(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
       </div>`).join("");
-    body.querySelectorAll(".notif.unread").forEach(d => d.addEventListener("click", async () => {
-      await api(`/api/notifications/${d.dataset.id}/read`, { method: "POST" });
-      d.classList.remove("unread");
-      refreshBadges();
+    // Every notification is clickable: mark read (if unread) AND deep-link to the
+    // referenced quote so the alert leads somewhere instead of dead-ending.
+    body.querySelectorAll(".notif").forEach(d => d.addEventListener("click", async () => {
+      if (d.classList.contains("unread")) {
+        try { await api(`/api/notifications/${d.dataset.id}/read`, { method: "POST" }); } catch {}
+        d.classList.remove("unread");
+        refreshBadges();
+      }
+      if (d.dataset.resource === "quote" && d.dataset.rid) goToQuote(d.dataset.rid);
     }));
   } catch (e) { toast(e.message, "error"); }
 }
@@ -3059,7 +3213,7 @@ async function renderSettings(el) {
             </tr>`).join("")}</tbody>
         </table></div>` : "<div class='empty-state'>Chưa có quy tắc — đang dùng mặc định: Quản lý hoặc Giám đốc duyệt</div>";
       document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!confirm("Xóa quy tắc duyệt này?")) return;
+        if (!(await confirmModal("Xóa quy tắc duyệt", "Xóa quy tắc duyệt này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/approvals/matrix/${b.dataset.del}`, { method: "DELETE" }); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
