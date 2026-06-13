@@ -521,25 +521,25 @@ router.post(
       where: { active: true, role: { in: ["manager", "admin"] }, id: { not: existing.createdById } },
       select: { id: true },
     });
-    for (const u of approvers) {
-      await notify(u.id, {
+    // Notify every approver + confirm to the creator — all in parallel (was a
+    // sequential await-loop = O(N) round-trips before responding).
+    await Promise.all([
+      ...approvers.map((u) => notify(u.id, {
         title: `Báo giá ${quote.quoteNumber} chờ duyệt`,
         body: `${quote.title} • Tổng ${Number(quote.total).toLocaleString("vi-VN")} VND`,
         link: `/#/quotes/${id}`,
         resource: "quote",
         resourceId: id,
         important: true,
-      });
-    }
-
-    // Confirm to the creator that their quote is now pending.
-    await notify(existing.createdById, {
-      title: `Báo giá ${quote.quoteNumber} đã gửi duyệt`,
-      body: `Đang chờ duyệt. Bạn sẽ được báo khi có kết quả.`,
-      link: `/#/quotes/${id}`,
-      resource: "quote",
-      resourceId: id,
-    });
+      })),
+      notify(existing.createdById, {
+        title: `Báo giá ${quote.quoteNumber} đã gửi duyệt`,
+        body: `Đang chờ duyệt. Bạn sẽ được báo khi có kết quả.`,
+        link: `/#/quotes/${id}`,
+        resource: "quote",
+        resourceId: id,
+      }),
+    ]);
 
     await audit(req, "quote.submit", { resource: "quote", resourceId: id });
     emitWebhook("quote.submitted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});

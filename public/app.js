@@ -614,18 +614,7 @@ function renderShell() {
     render();
   });
 
-  const mainEl = document.getElementById("main");
-  if (state.page === "list") renderList(mainEl);
-  else if (state.page === "new") renderNewQuote(mainEl);
-  else if (state.page === "edit") renderEditor(mainEl, state.currentQuote);
-  else if (state.page === "customers") renderCustomers(mainEl);
-  else if (state.page === "users") renderUsers(mainEl);
-  else if (state.page === "profile") renderProfile(mainEl);
-  else if (state.page === "dashboard") renderDashboard(mainEl);
-  else if (state.page === "approvals") renderApprovalQueue(mainEl);
-  else if (state.page === "notifications") renderNotifications(mainEl);
-  else if (state.page === "audit") renderAuditLog(mainEl);
-  else if (state.page === "permissions") renderPermissions(mainEl);
+  renderMain();
 
   // Refresh notification + approval queue badges
   refreshBadges();
@@ -676,6 +665,25 @@ function startSSE() {
   }
 }
 
+// Render ONLY the current page's main content (no shell rebuild). Used by the
+// initial shell render and by realtime refreshes so an SSE event doesn't tear
+// down + rebuild the whole sidebar/nav (cheaper, no focus/scroll loss).
+function renderMain() {
+  const mainEl = document.getElementById("main");
+  if (!mainEl) return;
+  if (state.page === "list") renderList(mainEl);
+  else if (state.page === "new") renderNewQuote(mainEl);
+  else if (state.page === "edit") renderEditor(mainEl, state.currentQuote);
+  else if (state.page === "customers") renderCustomers(mainEl);
+  else if (state.page === "users") renderUsers(mainEl);
+  else if (state.page === "profile") renderProfile(mainEl);
+  else if (state.page === "dashboard") renderDashboard(mainEl);
+  else if (state.page === "approvals") renderApprovalQueue(mainEl);
+  else if (state.page === "notifications") renderNotifications(mainEl);
+  else if (state.page === "audit") renderAuditLog(mainEl);
+  else if (state.page === "permissions") renderPermissions(mainEl);
+}
+
 // Decide whether the current page cares about this change, then refresh it.
 function onRealtimeChange(d) {
   refreshBadges();
@@ -700,7 +708,7 @@ function doMainRefresh() {
   const ae = document.activeElement;
   const busy = (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) || document.querySelector(".modal-mask");
   if (busy) { clearTimeout(state._rtTimer); state._rtTimer = setTimeout(doMainRefresh, 2500); return; }
-  render();
+  renderMain();   // only re-render the page content, not the whole shell
 }
 
 // Hard logout triggered by the server (account locked/deactivated/deleted).

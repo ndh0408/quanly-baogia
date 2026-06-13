@@ -1,11 +1,22 @@
 import ExcelJS from "exceljs";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
+
+// Template .xlsx files never change at runtime — read each from disk ONCE and
+// cache the bytes in RAM. Every export then loads from the cached Buffer instead
+// of re-reading ~170-207 KB/sheet off disk (big win on the inline export path).
+const _templateCache = new Map();
+function templateBuffer(filePath) {
+  let buf = _templateCache.get(filePath);
+  if (!buf) { buf = readFileSync(path.join(ROOT, filePath)); _templateCache.set(filePath, buf); }
+  return buf;
+}
 
 function vnDateText(d, city) {
   const dt = d instanceof Date ? d : new Date(d);
@@ -816,7 +827,7 @@ export async function buildQuoteBuffer(quote) {
     const cfg = getConfig(tplCode);
 
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(path.join(ROOT, cfg.filePath));
+    await wb.xlsx.load(templateBuffer(cfg.filePath));   // cached bytes, no disk IO
     scrubWorkbook(wb);
     const ws = wb.getWorksheet(cfg.sheetName) || wb.worksheets[0];
 

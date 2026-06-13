@@ -6,6 +6,7 @@ import { canOnQuote } from "../permissions.js";
 import { validate } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
+import { runExport } from "../exportQueue.js";
 import { audit } from "../audit.js";
 
 const router = Router();
@@ -37,7 +38,7 @@ router.get(
       return res.status(403).json({ error: "Không có quyền" });
     }
 
-    const buf = await buildQuoteBuffer(quote);
+    const buf = await runExport(() => buildQuoteBuffer(quote));
     const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.xlsx"`);
@@ -69,13 +70,13 @@ router.get(
       return res.status(403).json({ error: "Không có quyền" });
     }
 
-    const buf = await renderQuotePdf({
+    const buf = await runExport(() => renderQuotePdf({
       ...quote,
       subtotal: Number(quote.subtotal),
       vat: Number(quote.vat),
       total: Number(quote.total),
       vatPercent: Number(quote.vatPercent),
-    });
+    }));
     const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.pdf"`);

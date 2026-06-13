@@ -136,13 +136,12 @@ export async function emit(event, payload) {
   }
   const hooks = await prisma.webhook.findMany({ where: { active: true } });
   const targets = hooks.filter((h) => h.events.includes(event));
-  for (const h of targets) {
-    await runOrQueue(QUEUES.WEBHOOK, "deliver", {
-      webhookId: h.id,
-      event,
-      payload,
-    }, { attempts: 5, backoff: { type: "exponential", delay: 5_000 } });
-  }
+  // Dispatch all matching webhooks in parallel (was sequential await per hook).
+  await Promise.all(targets.map((h) => runOrQueue(QUEUES.WEBHOOK, "deliver", {
+    webhookId: h.id,
+    event,
+    payload,
+  }, { attempts: 5, backoff: { type: "exponential", delay: 5_000 } })));
 }
 
 /** Delivery handler invoked by worker (or inline if no Redis). */

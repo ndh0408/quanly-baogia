@@ -254,9 +254,16 @@ export function createApp() {
 
   app.use(notFound);
 
-  // Static frontend (after API routes so /api/* doesn't fallthrough)
-  app.use(express.static(path.join(__dirname, "..", "public")));
+  // Static frontend (after API routes so /api/* doesn't fallthrough).
+  // Assets are immutable + cached 1 year because the SPA busts them via ?v=...;
+  // index.html itself is served no-cache (below) so a new ?v= is always seen.
+  app.use(express.static(path.join(__dirname, "..", "public"), {
+    index: false,                 // let the SPA fallback serve index.html (no-cache)
+    maxAge: "1y",
+    immutable: true,
+  }));
   app.get("*", (req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(__dirname, "..", "public", "index.html"));
   });
 
