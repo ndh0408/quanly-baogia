@@ -408,6 +408,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .excel-table td.cell-selected { background: #d7e8ff; }
 .excel-table td.cell-selected input, .excel-table td.cell-selected textarea { background: transparent; }
 .excel-table td.cell-anchor { box-shadow: inset 0 0 0 2px #1769d6; background: #c2dbff; }
+/* Cell holding a formula: small green corner marker (like Excel/Sheets). */
+.excel-table td.has-formula::after { content: ""; position: absolute; top: 0; right: 0;
+  border-width: 0 5px 5px 0; border-style: solid; border-color: transparent #1f7a3d transparent transparent; }
 
 /* Section (nhóm A/B/C) row — ONE uniform colour across the whole row, including the
    "Thành Tiền" cell (which is hard-coded white above). Bold blue text for the group. */

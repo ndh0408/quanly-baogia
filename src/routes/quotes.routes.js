@@ -152,6 +152,7 @@ function buildSheetsCreate(sheets) {
         unitPrice: D(it.unitPrice),
         days: it.days != null ? D(it.days) : null,
         notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
+        formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
       })),
     },
   }));

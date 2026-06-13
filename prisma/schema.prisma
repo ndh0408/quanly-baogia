@@ -344,6 +344,7 @@ model QuoteItem {
   unitPrice  Decimal @default(0) @db.Decimal(18, 4)
   days       Decimal? @db.Decimal(10, 2)
   notes      String?
+  formulas   Json?              // raw Excel-style formulas per numeric field, e.g. {"unitPrice":"=2000+3000"} — editor metadata, not used in totals/export
 
   @@index([sheetId, order])
   @@index([productId])

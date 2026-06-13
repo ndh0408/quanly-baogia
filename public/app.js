@@ -396,11 +396,10 @@ async function renderOnboard() {
       render();
       toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
     } catch (e2) {
-      // Surface the specific reason(s) instead of the generic "Dữ liệu không hợp lệ":
-      // the server sends field-level details (e.g. "Mật khẩu tối thiểu 8 ký tự").
-      const detail = e2.details?.map?.((d) => d.message).join(". ");
-      err.innerHTML = `<div class="err">${escapeHtml(detail || e2.message)}</div>`;
-      applyFieldErrors(e2); // highlight + focus the offending field (password, …)
+      // e2.message already carries the specific reason(s) (built in api()).
+      // Show it in the alert box AND pinpoint the offending field inline.
+      err.innerHTML = `<div class="err">${escapeHtml(e2.message)}</div>`;
+      applyFieldErrors(e2); // highlight + focus the bad field (password, …)
     }
   });
 }
@@ -1913,6 +1912,15 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     ta.addEventListener("input", grow);
   });
 
+  // Mark cells that hold a formula (hover shows it; a small fx corner marker).
+  activeSheet.items.forEach((it, i) => {
+    if (!it.formulas) return;
+    for (const f in it.formulas) {
+      const cell = tbody.querySelector(`tr[data-row="${i}"] [data-f="${f}"]`);
+      if (cell) { cell.title = "Công thức: " + it.formulas[f]; cell.closest("td")?.classList.add("has-formula"); }
+    }
+  });
+
   // ---- Excel-style grid helpers ----
   // Editable columns left→right (drives keyboard nav + multi-cell paste).
   const FIELDS = ["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes"].filter(Boolean);
@@ -1966,6 +1974,8 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     const val = evalFormula(raw);
     const num = (val === null) ? (Number(activeSheet.items[i2][f2]) || 0) : val;
     activeSheet.items[i2][f2] = num;
+    // Persist the formula text so re-focusing the cell shows it again.
+    activeSheet.items[i2].formulas = { ...(activeSheet.items[i2].formulas || {}), [f2]: raw };
     inp2.value = fmtNumCell(num);
     const tr2 = inp2.closest("tr"); const it2 = activeSheet.items[i2];
     const amt2 = usesDays ? (Number(it2.quantity) || 0) * (Number(it2.days) || 1) * (Number(it2.unitPrice) || 0)
@@ -2139,10 +2149,14 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         // update AS YOU TYPE; the cell reformats to the final number on commit.
         if (e.target.value.trim().startsWith("=")) {
           grid._dirty = true;
+          const it = activeSheet.items[i];
+          // Remember the raw formula so the cell can show it again when re-focused
+          // (Excel behaviour: cell shows the result, click → shows "=2000+3000").
+          it.formulas = it.formulas || {};
+          it.formulas[f] = e.target.value.trim();
           const live = evalFormula(e.target.value.trim());
           if (live !== null) {
-            activeSheet.items[i][f] = live;
-            const it = activeSheet.items[i];
+            it[f] = live;
             if (it.kind !== "section") {
               const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
                                    : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
@@ -2163,6 +2177,8 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         while (pos < formatted.length && seen < digitsBefore) { if (/\d/.test(formatted[pos])) seen++; pos++; }
         if (el2.setSelectionRange) { try { el2.setSelectionRange(pos, pos); } catch {} }
         activeSheet.items[i][f] = parseVN(formatted);
+        // Typed a plain number → this cell no longer has a formula.
+        if (activeSheet.items[i].formulas) delete activeSheet.items[i].formulas[f];
       } else {
         let v = e.target.value;
         if (!isMultiline && typeof v === "string" && /[\r\n]/.test(v)) { v = v.replace(/[\r\n]+/g, " "); e.target.value = v; }
@@ -2182,12 +2198,18 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
 
     // Focus a cell → single-cell selection (unless mid-navigation) + capture pre-edit snapshot.
     inp.addEventListener("focus", () => {
+      const tr = inp.closest("tr"); const i = tr ? parseInt(tr.dataset.row, 10) : 0;
       if (!grid._navigating) {
-        const tr = inp.closest("tr"); const i = tr ? parseInt(tr.dataset.row, 10) : 0;
         if (!grid.sel || grid.sel.anchor.row !== i || grid.sel.anchor.field !== f) {
           grid.sel = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
           grid.selSheet = q._activeSheet; paintSel();
         }
+      }
+      // Excel/Sheets behaviour: clicking a numeric cell that holds a formula shows
+      // the FORMULA for editing (the cell otherwise displays the computed result).
+      if (NUMERIC.has(f)) {
+        const fx = activeSheet.items[i]?.formulas?.[f];
+        if (fx) inp.value = fx;
       }
       grid.focusSnap = snap();
     });
