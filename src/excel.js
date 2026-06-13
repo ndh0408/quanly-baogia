@@ -592,14 +592,15 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const note = (quote.notes == null ? "" : String(quote.notes)).trim();
       if (note) {
         const nf = { name: "Times New Roman", family: 1, size: 11, color: { argb: pal.note.color || "FF843C0C" } };
+        // Ép canh trái qua style TRƯỚC (cell.alignment đơn lẻ bị reset center với ô richText),
+        // rồi mới set richText — nếu gán style SAU sẽ đè mất màu nâu của các run chữ.
+        const st = ncell.style ? JSON.parse(JSON.stringify(ncell.style)) : {};
+        st.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
+        ncell.style = st;
         ncell.value = { richText: [
           { text: "Ghi chú: ", font: { ...nf, bold: true } },
           { text: note, font: { ...nf } },
         ] };
-        // Ép canh trái qua style (cell.alignment đơn lẻ không "ăn" với ô richText).
-        const st = ncell.style ? JSON.parse(JSON.stringify(ncell.style)) : {};
-        st.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
-        ncell.style = st;
         ws.getRow(nr).height = Math.max(ws.getRow(nr).height || 0, 20);
       } else {
         ncell.value = null;
