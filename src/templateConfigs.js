@@ -103,7 +103,9 @@ export const TEMPLATE_CONFIGS = {
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
         mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
         // Chữ ký người gửi (canh giữa): tên (đậm) / chức danh / SĐT — lấy từ Người gửi báo giá.
-        signature: { rowOffset: 5, namePrefix: "Ms. " },
+        // Tiền tố (Ms./Mr.) KHÔNG hardcode — đọc từ ô "Ms." của khối From (E3) để theo đúng
+        // người gửi; sửa E3 trong template là chữ ký tự đổi theo.
+        signature: { rowOffset: 5, courtesyCell: "E3" },
         right: "Ý Kiến Khách Hàng",
         rightFrom: "G", rightTo: "I", rightRowOffset: 9,
       },

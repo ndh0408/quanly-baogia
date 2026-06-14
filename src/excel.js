@@ -629,7 +629,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (f.signature) {
         const sig = f.signature;
         const sr = totalRow + (sig.rowOffset || 5);
-        const name = [sig.namePrefix || "", clean(quote.fromContact)].join("").trim();
+        // Tiền tố lấy từ ô courtesy của khối From (vd E3="Ms.") — không hardcode trong code.
+        const courtesy = sig.courtesyCell ? clean(ws.getCell(sig.courtesyCell).value) : "";
+        const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
         const sigLines = [
           { v: name, bold: true },
           { v: clean(quote.fromTitle), bold: false },
