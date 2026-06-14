@@ -96,17 +96,16 @@ export const TEMPLATE_CONFIGS = {
       sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" ngay dưới tổng
-      // Cuối báo giá (theo mẫu): Lời chào CANH GIỮA → "Ý Kiến Khách Hàng" (phải) →
-      //   CHỪA khoảng trống để ký + đóng dấu → chữ ký Người gửi CANH GIỮA: tên (đậm) /
-      //   chức danh / SĐT. Tiền tố Ms./Mr. đọc từ ô From (E3), không hardcode.
+      // Cuối báo giá (theo mẫu): Lời chào CANH GIỮA → CHỪA khoảng trống để ký + đóng dấu
+      //   → chữ ký Người gửi CANH GIỮA: tên (đậm) / chức danh / SĐT. (Mẫu KHÔNG có dòng
+      //   "Ý Kiến Khách Hàng".) Tiền tố Ms./Mr. đọc từ ô From (E3), không hardcode.
       footer: {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
         mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
-        customer: { text: "Ý Kiến Khách Hàng", from: "G", to: "I", rowOffset: 4 },
         sign: {
           courtesyCell: "E3",
-          gapRowOffset: 5, gapRows: 4, gapRowHeight: 20,  // chừa chỗ ký + đóng dấu (phía TRÊN tên)
+          gapRowOffset: 4, gapRows: 4, gapRowHeight: 20,  // chừa chỗ ký + đóng dấu (phía TRÊN tên)
           // tên/chức danh/SĐT canh giữa toàn bảng, ngay DƯỚI khoảng trống
         },
       },
