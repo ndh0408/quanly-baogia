@@ -102,12 +102,12 @@ export const TEMPLATE_CONFIGS = {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
         mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
-        // Chữ ký người gửi (canh giữa): tên (đậm) / chức danh / SĐT — lấy từ Người gửi báo giá.
-        // Tiền tố (Ms./Mr.) KHÔNG hardcode — đọc từ ô "Ms." của khối From (E3) để theo đúng
-        // người gửi; sửa E3 trong template là chữ ký tự đổi theo.
-        signature: { rowOffset: 5, courtesyCell: "E3" },
+        // 2 cột cùng hàng: chữ ký Người gửi (TRÁI, B:D) — Ý Kiến Khách Hàng (PHẢI, F:I).
+        // Chữ ký: tên (đậm) / chức danh / SĐT, lấy từ Người gửi. Tiền tố (Ms./Mr.) KHÔNG
+        // hardcode — đọc từ ô "Ms." của khối From (E3); sửa E3 trong template là tự đổi theo.
+        signature: { rowOffset: 5, courtesyCell: "E3", mergeFrom: "B", mergeTo: "D" },
         right: "Ý Kiến Khách Hàng",
-        rightFrom: "G", rightTo: "I", rightRowOffset: 9,
+        rightFrom: "F", rightTo: "I", rightRowOffset: 5,
       },
     },
   },
