@@ -96,23 +96,18 @@ export const TEMPLATE_CONFIGS = {
       sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" ngay dưới tổng
-      // Cuối báo giá: Lời chào CANH GIỮA, rồi vùng chữ ký 2 cột kiểu công văn:
-      //   tiêu đề ("Đại Diện Công Ty" | "Ý Kiến Khách Hàng") → "(Ký tên, đóng dấu)"
-      //   → CHỪA ~5 dòng trống để ký + đóng con dấu → tên (đậm) + chức danh ở DƯỚI.
+      // Cuối báo giá (theo mẫu): Lời chào CANH GIỮA → "Ý Kiến Khách Hàng" (phải) →
+      //   CHỪA khoảng trống để ký + đóng dấu → chữ ký Người gửi CANH GIỮA: tên (đậm) /
+      //   chức danh / SĐT. Tiền tố Ms./Mr. đọc từ ô From (E3), không hardcode.
       footer: {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
-        mergeFrom: "B", mergeTo: "I",       // lời chào canh giữa toàn bảng
+        mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
+        customer: { text: "Ý Kiến Khách Hàng", from: "G", to: "I", rowOffset: 4 },
         sign: {
-          headerRowOffset: 5,               // hàng tiêu đề chữ ký = totalRow + 5
-          left:  { from: "B", to: "D" },    // cột Người gửi (trái)
-          right: { from: "F", to: "I" },    // cột Khách hàng (phải)
-          senderHeader:   "Đại Diện Công Ty",
-          senderSub:      "(Ký tên, đóng dấu)",
-          customerHeader: "Ý Kiến Khách Hàng",
-          customerSub:    "(Ký, ghi rõ họ tên)",
-          stampRows: 5, stampRowHeight: 20, // chừa chỗ ký + đóng dấu
-          courtesyCell: "E3",               // tiền tố Ms./Mr. lấy từ khối From (không hardcode)
+          courtesyCell: "E3",
+          gapRowOffset: 5, gapRows: 4, gapRowHeight: 20,  // chừa chỗ ký + đóng dấu (phía TRÊN tên)
+          // tên/chức danh/SĐT canh giữa toàn bảng, ngay DƯỚI khoảng trống
         },
       },
     },

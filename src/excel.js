@@ -627,28 +627,25 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       // Lời chào canh giữa toàn bảng (B:I)
       (f.center || []).forEach((line, idx) => writeMerged(fr + idx, line));
 
-      // Vùng chữ ký 2 cột: tiêu đề → "(Ký tên, đóng dấu)" → CHỪA chỗ ký+dấu → tên/chức danh.
+      // "Ý Kiến Khách Hàng" — nhãn khách bên PHẢI, ngay dưới lời chào.
+      if (f.customer) {
+        writeMerged(totalRow + (f.customer.rowOffset || 4), f.customer.text,
+          { from: f.customer.from || "G", to: f.customer.to || "I" });
+      }
+
+      // Chữ ký người gửi CANH GIỮA: chừa khoảng trống (ký + đóng dấu) → tên (đậm)/chức danh/SĐT.
       const s = f.sign;
       if (s) {
-        const hr = totalRow + (s.headerRowOffset || 5);
-        const L = s.left || { from: "B", to: "D" };
-        const R = s.right || { from: "F", to: "I" };
-        // Tiêu đề 2 cột
-        if (s.senderHeader)   writeMerged(hr, s.senderHeader,   { bold: true, from: L.from, to: L.to });
-        if (s.customerHeader) writeMerged(hr, s.customerHeader, { bold: true, from: R.from, to: R.to });
-        // Dòng "(Ký tên, đóng dấu)" / "(Ký, ghi rõ họ tên)"
-        if (s.senderSub)   writeMerged(hr + 1, s.senderSub,   { italic: true, from: L.from, to: L.to });
-        if (s.customerSub) writeMerged(hr + 1, s.customerSub, { italic: true, from: R.from, to: R.to });
-        // Chừa chỗ ký + đóng dấu (các dòng trống có chiều cao)
-        const stampRows = s.stampRows || 5;
-        const stampStart = hr + 2;
-        for (let i = 0; i < stampRows; i++) ws.getRow(stampStart + i).height = s.stampRowHeight || 20;
-        // Tên (đậm) + chức danh ở DƯỚI cùng (cột trái). Tiền tố Ms./Mr. lấy từ ô From (E3).
+        const gapRows = s.gapRows || 4;
+        const gapStart = totalRow + (s.gapRowOffset || 5);
+        for (let i = 0; i < gapRows; i++) ws.getRow(gapStart + i).height = s.gapRowHeight || 20;
+        // Tiền tố Ms./Mr. lấy từ ô From (E3) — không hardcode.
         const courtesy = s.courtesyCell ? clean(ws.getCell(s.courtesyCell).value) : "";
         const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
-        let nr = stampStart + stampRows;
-        if (name) { writeMerged(nr++, name, { bold: true, from: L.from, to: L.to }); }
-        if (clean(quote.fromTitle)) { writeMerged(nr, clean(quote.fromTitle), { from: L.from, to: L.to }); }
+        let nr = gapStart + gapRows;
+        if (name) writeMerged(nr++, name, { bold: true });
+        if (clean(quote.fromTitle)) writeMerged(nr++, clean(quote.fromTitle));
+        if (clean(quote.fromPhone)) writeMerged(nr, clean(quote.fromPhone));
       }
     }
   }
