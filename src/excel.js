@@ -607,45 +607,48 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       }
     }
 
-    // (e) Dòng đóng cuối báo giá (Rất mong… / Trân trọng) CANH GIỮA + Ý Kiến KH canh phải.
+    // (e) Lời chào CANH GIỮA + vùng chữ ký 2 cột kiểu công văn (chừa chỗ ký + đóng dấu).
     if (pal.footer) {
       const f = pal.footer;
       const fr = totalRow + (f.rowOffset || 2);
       const ff = { name: "Times New Roman", family: 1, size: 11 };
-      // Ghi 1 dòng canh giữa trong dải [fromCol..toCol] (merge ngang). Gán font/căn-lề qua
-      // style TRƯỚC value vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
-      const centerLine = (r, value, bold, fromCol, toCol) => {
-        const a = `${fromCol || f.mergeFrom || "B"}${r}`, b = `${toCol || f.mergeTo || "I"}${r}`;
+      // Ghi 1 dòng canh giữa trong dải [from..to] (merge ngang). Gán font/căn-lề qua style
+      // TRƯỚC value vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
+      const writeMerged = (r, value, { bold, italic, from, to } = {}) => {
+        const a = `${from || f.mergeFrom || "B"}${r}`, b = `${to || f.mergeTo || "I"}${r}`;
         safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
         const cell = ws.getCell(a);
         const st = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
-        st.font = { ...ff, bold: !!bold };
+        st.font = { ...ff, bold: !!bold, italic: !!italic };
         st.alignment = { horizontal: "center", vertical: "middle" };
         cell.style = st;
         cell.value = value;
       };
       // Lời chào canh giữa toàn bảng (B:I)
-      (f.center || f.lines || []).forEach((line, idx) => centerLine(fr + idx, line, false));
+      (f.center || []).forEach((line, idx) => writeMerged(fr + idx, line));
 
-      // Chữ ký người gửi — CỘT TRÁI (vd B:D): tên (đậm) / chức danh / SĐT, từ Người gửi báo giá.
-      if (f.signature) {
-        const sig = f.signature;
-        const sr = totalRow + (sig.rowOffset || 5);
-        // Tiền tố (Ms./Mr.) lấy từ ô courtesy của khối From (vd E3) — không hardcode.
-        const courtesy = sig.courtesyCell ? clean(ws.getCell(sig.courtesyCell).value) : "";
+      // Vùng chữ ký 2 cột: tiêu đề → "(Ký tên, đóng dấu)" → CHỪA chỗ ký+dấu → tên/chức danh.
+      const s = f.sign;
+      if (s) {
+        const hr = totalRow + (s.headerRowOffset || 5);
+        const L = s.left || { from: "B", to: "D" };
+        const R = s.right || { from: "F", to: "I" };
+        // Tiêu đề 2 cột
+        if (s.senderHeader)   writeMerged(hr, s.senderHeader,   { bold: true, from: L.from, to: L.to });
+        if (s.customerHeader) writeMerged(hr, s.customerHeader, { bold: true, from: R.from, to: R.to });
+        // Dòng "(Ký tên, đóng dấu)" / "(Ký, ghi rõ họ tên)"
+        if (s.senderSub)   writeMerged(hr + 1, s.senderSub,   { italic: true, from: L.from, to: L.to });
+        if (s.customerSub) writeMerged(hr + 1, s.customerSub, { italic: true, from: R.from, to: R.to });
+        // Chừa chỗ ký + đóng dấu (các dòng trống có chiều cao)
+        const stampRows = s.stampRows || 5;
+        const stampStart = hr + 2;
+        for (let i = 0; i < stampRows; i++) ws.getRow(stampStart + i).height = s.stampRowHeight || 20;
+        // Tên (đậm) + chức danh ở DƯỚI cùng (cột trái). Tiền tố Ms./Mr. lấy từ ô From (E3).
+        const courtesy = s.courtesyCell ? clean(ws.getCell(s.courtesyCell).value) : "";
         const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
-        const sigLines = [
-          { v: name, bold: true },
-          { v: clean(quote.fromTitle), bold: false },
-          { v: clean(quote.fromPhone), bold: false },
-        ].filter((x) => x.v);
-        sigLines.forEach((x, idx) => centerLine(sr + idx, x.v, x.bold, sig.mergeFrom, sig.mergeTo));
-      }
-
-      // "Ý Kiến Khách Hàng" — CỘT PHẢI (vd F:I), CÙNG hàng với chữ ký người gửi.
-      if (f.right) {
-        const rr = totalRow + (f.rightRowOffset || 5);
-        centerLine(rr, f.right, false, f.rightFrom, f.rightTo);
+        let nr = stampStart + stampRows;
+        if (name) { writeMerged(nr++, name, { bold: true, from: L.from, to: L.to }); }
+        if (clean(quote.fromTitle)) { writeMerged(nr, clean(quote.fromTitle), { from: L.from, to: L.to }); }
       }
     }
   }

@@ -96,18 +96,24 @@ export const TEMPLATE_CONFIGS = {
       sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" ngay dưới tổng
-      // Dòng đóng cuối báo giá (khôi phục từ bản GN cũ), nằm DƯỚI dòng Ghi chú.
-      // Lời chào + chữ ký người gửi CANH GIỮA (merge ngang); "Ý Kiến KH" canh phải dưới.
+      // Cuối báo giá: Lời chào CANH GIỮA, rồi vùng chữ ký 2 cột kiểu công văn:
+      //   tiêu đề ("Đại Diện Công Ty" | "Ý Kiến Khách Hàng") → "(Ký tên, đóng dấu)"
+      //   → CHỪA ~5 dòng trống để ký + đóng con dấu → tên (đậm) + chức danh ở DƯỚI.
       footer: {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
-        mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
-        // 2 cột cùng hàng: chữ ký Người gửi (TRÁI, B:D) — Ý Kiến Khách Hàng (PHẢI, F:I).
-        // Chữ ký: tên (đậm) / chức danh / SĐT, lấy từ Người gửi. Tiền tố (Ms./Mr.) KHÔNG
-        // hardcode — đọc từ ô "Ms." của khối From (E3); sửa E3 trong template là tự đổi theo.
-        signature: { rowOffset: 5, courtesyCell: "E3", mergeFrom: "B", mergeTo: "D" },
-        right: "Ý Kiến Khách Hàng",
-        rightFrom: "F", rightTo: "I", rightRowOffset: 5,
+        mergeFrom: "B", mergeTo: "I",       // lời chào canh giữa toàn bảng
+        sign: {
+          headerRowOffset: 5,               // hàng tiêu đề chữ ký = totalRow + 5
+          left:  { from: "B", to: "D" },    // cột Người gửi (trái)
+          right: { from: "F", to: "I" },    // cột Khách hàng (phải)
+          senderHeader:   "Đại Diện Công Ty",
+          senderSub:      "(Ký tên, đóng dấu)",
+          customerHeader: "Ý Kiến Khách Hàng",
+          customerSub:    "(Ký, ghi rõ họ tên)",
+          stampRows: 5, stampRowHeight: 20, // chừa chỗ ký + đóng dấu
+          courtesyCell: "E3",               // tiền tố Ms./Mr. lấy từ khối From (không hardcode)
+        },
       },
     },
   },
