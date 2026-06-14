@@ -25,6 +25,21 @@ const displayName = z.string().min(1, "Vui lòng nhập họ tên").max(120, "H�
 const phone = z.string().max(40, "Số điện thoại tối đa 40 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
 const title = z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
 
+// A user's "Mã dự án" is each person's OWN unique PREFIX (vd FP_D26); the system then
+// auto-appends the per-quote sequence _001, _002… (nextProjectCode). So the prefix must
+// NOT itself end in a sequence — otherwise you get FP_D26_001_001. Strip any trailing
+// _NNN the admin accidentally typed (repeat to undo a pasted already-allocated code).
+const projectCode = z
+  .string()
+  .max(40, "Mã dự án tối đa 40 ký tự")
+  .transform((s) => {
+    let v = (s || "").trim();
+    while (/_\d{3}$/.test(v)) v = v.replace(/_\d{3}$/, "");   // _NNN = the auto sequence (exactly 3 digits)
+    return v.length ? v : null;
+  })
+  .nullable()
+  .optional();
+
 export const LoginSchema = z.object({
   username: z.string().min(1, "Vui lòng nhập tên đăng nhập").max(80, "Tên đăng nhập tối đa 80 ký tự"),
   password: z.string().min(1, "Vui lòng nhập mật khẩu").max(128, "Mật khẩu tối đa 128 ký tự"),
@@ -40,7 +55,7 @@ export const UserInviteSchema = z.object({
   email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự"),
   displayName,
   role: z.enum(["admin", "manager", "employee"]).default("employee"),
-  projectCode: z.string().max(40, "Mã dự án tối đa 40 ký tự").optional().nullable(),
+  projectCode,
 });
 
 export const AcceptInviteSchema = z.object({
@@ -68,7 +83,7 @@ export const UserUpdateSchema = z.object({
   title,
   active: z.boolean().optional(),
   password: pwd.optional(),
-  projectCode: z.string().max(40, "Mã dự án tối đa 40 ký tự").optional().nullable(),
+  projectCode,
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).
