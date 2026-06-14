@@ -97,13 +97,15 @@ export const TEMPLATE_CONFIGS = {
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" ngay dưới tổng
       // Dòng đóng cuối báo giá (khôi phục từ bản GN cũ), nằm DƯỚI dòng Ghi chú.
-      // Lời chào CANH GIỮA (merge ngang); "Ý Kiến Khách Hàng" xuống dưới, canh phải.
+      // Lời chào + chữ ký người gửi CANH GIỮA (merge ngang); "Ý Kiến KH" canh phải dưới.
       footer: {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
         center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
         mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
+        // Chữ ký người gửi (canh giữa): tên (đậm) / chức danh / SĐT — lấy từ Người gửi báo giá.
+        signature: { rowOffset: 5, namePrefix: "Ms. " },
         right: "Ý Kiến Khách Hàng",
-        rightFrom: "G", rightTo: "I", rightRowOffset: 5,
+        rightFrom: "G", rightTo: "I", rightRowOffset: 9,
       },
     },
   },

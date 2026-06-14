@@ -612,15 +612,32 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const f = pal.footer;
       const fr = totalRow + (f.rowOffset || 2);
       const ff = { name: "Times New Roman", family: 1, size: 11 };
-      (f.center || f.lines || []).forEach((line, idx) => {
-        const r = fr + idx;
+      const centerLine = (r, value, bold) => {
         const a = `${f.mergeFrom || "B"}${r}`, b = `${f.mergeTo || "I"}${r}`;
         safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
         const cell = ws.getCell(a);
-        cell.value = line;
-        cell.font = { ...ff };
-        cell.alignment = { horizontal: "center", vertical: "middle" };
-      });
+        // Gán font/căn-lề qua style TRƯỚC value (font/alignment đơn lẻ không "ăn" trên ô merge).
+        const st = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+        st.font = { ...ff, bold: !!bold };
+        st.alignment = { horizontal: "center", vertical: "middle" };
+        cell.style = st;
+        cell.value = value;
+      };
+      (f.center || f.lines || []).forEach((line, idx) => centerLine(fr + idx, line, false));
+
+      // Chữ ký người gửi (canh giữa): tên (đậm) / chức danh / SĐT — từ Người gửi báo giá.
+      if (f.signature) {
+        const sig = f.signature;
+        const sr = totalRow + (sig.rowOffset || 5);
+        const name = [sig.namePrefix || "", clean(quote.fromContact)].join("").trim();
+        const sigLines = [
+          { v: name, bold: true },
+          { v: clean(quote.fromTitle), bold: false },
+          { v: clean(quote.fromPhone), bold: false },
+        ].filter((x) => x.v);
+        sigLines.forEach((x, idx) => centerLine(sr + idx, x.v, x.bold));
+      }
+
       if (f.right) {
         const rr = totalRow + (f.rightRowOffset || 5);
         const a = `${f.rightFrom || "G"}${rr}`, b = `${f.rightTo || "I"}${rr}`;
