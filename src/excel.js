@@ -604,44 +604,43 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       }
     }
 
-    // (e) Lời chào CANH GIỮA + vùng chữ ký 2 cột kiểu công văn (chừa chỗ ký + đóng dấu).
+    // (e) Cuối báo giá (cân đối kiểu GN gốc): lời chào canh TRÁI (cột B:F) + "Ý Kiến Khách
+    //     Hàng" canh giữa cột PHẢI (G:I) CÙNG hàng → chừa chỗ ký + đóng dấu.
     if (pal.footer) {
       const f = pal.footer;
-      const fr = totalRow + (f.rowOffset || 2);
       const ff = { name: "Times New Roman", family: 1, size: 11 };
-      // Ghi 1 dòng canh giữa trong dải [from..to] (merge ngang). Gán font/căn-lề qua style
-      // TRƯỚC value vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
-      const writeMerged = (r, value, { bold, italic, from, to } = {}) => {
-        const a = `${from || f.mergeFrom || "B"}${r}`, b = `${to || f.mergeTo || "I"}${r}`;
+      // Ghi 1 dòng vào dải [from..to] (merge ngang). Gán font/căn-lề qua style TRƯỚC value
+      // vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
+      const writeMerged = (r, value, { bold, from, to, align } = {}) => {
+        const a = `${from || "B"}${r}`, b = `${to || "I"}${r}`;
         safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
         const cell = ws.getCell(a);
         const st = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
-        st.font = { ...ff, bold: !!bold, italic: !!italic };
-        st.alignment = { horizontal: "center", vertical: "middle" };
+        st.font = { ...ff, bold: !!bold };
+        st.alignment = { horizontal: align || "center", vertical: "middle" };
         cell.style = st;
         cell.value = value;
       };
-      // Lời chào canh giữa toàn bảng (B:I)
-      (f.center || []).forEach((line, idx) => writeMerged(fr + idx, line));
-
-      // "Ý Kiến Khách Hàng" — nhãn khách bên PHẢI, ngay dưới lời chào.
-      if (f.customer) {
-        writeMerged(totalRow + (f.customer.rowOffset || 4), f.customer.text,
-          { from: f.customer.from || "G", to: f.customer.to || "I" });
+      // Lời chào canh TRÁI (cột trái)
+      if (f.left) {
+        const lr = totalRow + (f.rowOffset || 2);
+        (f.left.lines || []).forEach((line, idx) =>
+          writeMerged(lr + idx, line, { from: f.left.from, to: f.left.to, align: "left" }));
       }
-
-      // Chừa khoảng trống để ký + đóng dấu. Chữ ký người gửi (tên/chức danh/SĐT) chỉ in
-      // khi sign.showSender !== false (mặc định KHÔNG in cho GN — trùng với khối From ở trên).
+      // "Ý Kiến Khách Hàng" canh giữa cột PHẢI, CÙNG hàng dòng lời chào đầu
+      if (f.customer) {
+        writeMerged(totalRow + (f.customer.rowOffset || 2), f.customer.text,
+          { from: f.customer.from, to: f.customer.to, align: "center" });
+      }
+      // Chừa khoảng trống ký + đóng dấu (tên người gửi chỉ in khi sign.showSender)
       const s = f.sign;
       if (s) {
-        const gapRows = s.gapRows || 4;
-        const gapStart = totalRow + (s.gapRowOffset || 5);
-        for (let i = 0; i < gapRows; i++) ws.getRow(gapStart + i).height = s.gapRowHeight || 20;
+        const gapStart = totalRow + (s.gapRowOffset || 4);
+        for (let i = 0; i < (s.gapRows || 4); i++) ws.getRow(gapStart + i).height = s.gapRowHeight || 20;
         if (s.showSender) {
-          // Tiền tố Ms./Mr. lấy từ ô From (E3) — không hardcode.
           const courtesy = s.courtesyCell ? clean(ws.getCell(s.courtesyCell).value) : "";
           const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
-          let nr = gapStart + gapRows;
+          let nr = gapStart + (s.gapRows || 4);
           if (name) writeMerged(nr++, name, { bold: true });
           if (clean(quote.fromTitle)) writeMerged(nr++, clean(quote.fromTitle));
           if (clean(quote.fromPhone)) writeMerged(nr, clean(quote.fromPhone));

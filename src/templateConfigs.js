@@ -96,15 +96,17 @@ export const TEMPLATE_CONFIGS = {
       sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" nâu (font nền → hiện ngay)
-      // Cuối báo giá: Lời chào CANH GIỮA → "Ý Kiến Khách Hàng" (PHẢI) → CHỪA khoảng trống
-      //   để ký + đóng dấu. KHÔNG in khối chữ ký người gửi (đã có ở khối From phía trên).
+      // Cuối báo giá (cân đối kiểu GN gốc): lời chào canh TRÁI (cột B:F) + "Ý Kiến Khách
+      //   Hàng" canh giữa cột PHẢI (G:I) CÙNG hàng → 2 cột cân đối; rồi CHỪA chỗ ký+đóng dấu.
       footer: {
         rowOffset: 2,                       // "Rất mong" = totalRow + 2 (Ghi chú ở +1)
-        center: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
-        mergeFrom: "B", mergeTo: "I",       // canh giữa toàn bảng
-        customer: { text: "Ý Kiến Khách Hàng", from: "G", to: "I", rowOffset: 4 },  // PHẢI
+        left: {
+          lines: ["Rất mong nhận được sự phúc đáp sớm từ Quí công ty", "Trân trọng kính chào"],
+          from: "B", to: "F",               // lời chào: cột trái, canh trái
+        },
+        customer: { text: "Ý Kiến Khách Hàng", from: "G", to: "I", rowOffset: 2 },  // phải, cùng hàng
         sign: {
-          gapRowOffset: 5, gapRows: 4, gapRowHeight: 20,  // chừa chỗ ký + đóng dấu (dưới Ý Kiến)
+          gapRowOffset: 4, gapRows: 4, gapRowHeight: 20,  // chừa chỗ ký + đóng dấu
           showSender: false,                              // KHÔNG in tên người gửi
         },
       },
