@@ -1372,12 +1372,6 @@ function renderEditor(el, quote) {
           ${renderQuoteSummary(q)}
         </div>
 
-        <div class="xlsx-preview-wrap">
-          <label class="toggle-preview"><input type="checkbox" id="f-show-preview" ${grid.previewOpen ? "checked" : ""}/>
-            <span>Xem trước bản in (giống file Excel xuất ra)</span></label>
-          <div class="xlsx-preview" id="xlsx-preview" ${grid.previewOpen ? "" : "hidden"}></div>
-        </div>
-
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
           ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">Trình duyệt</button>` : ""}
@@ -1522,16 +1516,7 @@ function renderEditor(el, quote) {
     bindField("f-discount", "discount");
     bindField("f-title", "title");
     bindField("f-greeting", "greeting");
-
-    // Live xlsx preview toggle (grid.previewOpen persists across redraws).
-    const pv = document.getElementById("f-show-preview");
-    if (pv) pv.addEventListener("change", () => {
-      grid.previewOpen = pv.checked;
-      const box = document.getElementById("xlsx-preview");
-      if (box) { box.hidden = !pv.checked; if (pv.checked) renderPreview(q); }
-    });
-    if (grid.previewOpen) renderPreview(q);   // re-render after a redraw if it was open
-    // (Add-row is handled inside drawItems' footer "+ Thêm hàng" — Excel-style.)
+    // (Đã bỏ "Xem trước bản in". Add-row xử lý trong footer "+ Thêm hàng".)
 
     bindActions(q, isNew);
   };
@@ -2453,11 +2438,13 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
     ${editable ? `<tr class="add-row-tr"><td colspan="${totalCols}">
-      <button type="button" class="btn btn-sm" id="btn-add-item">+ Thêm hàng</button>
-      <button type="button" class="btn btn-sm" id="btn-add-section">+ Thêm nhóm (A,B…)</button>
-      <button type="button" class="btn btn-sm" id="btn-add-info">+ Thêm dòng thông tin</button>
-      <label style="font-size:12.5px;margin-left:8px;cursor:pointer"><input type="checkbox" id="chk-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm (Đơn giá × SL)</label>
-      <span class="muted">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
+      <div class="grid-foot-tools">
+        <button type="button" class="btn btn-sm" id="btn-add-item">+ Thêm hàng</button>
+        <button type="button" class="btn btn-sm" id="btn-add-section">+ Thêm nhóm (A,B…)</button>
+        <button type="button" class="btn btn-sm" id="btn-add-info">+ Thêm dòng thông tin</button>
+        <label class="grid-foot-toggle"><input type="checkbox" id="chk-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm <span class="muted">(Đơn giá × SL)</span></label>
+        <span class="muted grid-foot-hint">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
+      </div>
     </td></tr>` : ""}
     <tr>
       <td colspan="${colSpanLeft}"></td>

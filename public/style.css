@@ -501,6 +501,12 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
   color: var(--text); background: var(--surface-hover);
 }
 
+/* Hàng nút chân lưới: xếp 1 hàng flex, không bị vỡ ô tick "Hiện Thành Tiền nhóm" */
+.grid-foot-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 4px 0; }
+.grid-foot-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.grid-foot-toggle input { margin: 0; }
+.grid-foot-hint { font-size: 12px; }
+
 /* Sheet tabs */
 .sheet-tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 2px solid #FFCC99; align-items: flex-end; flex-wrap: wrap; }
 .sheet-tab { background: #f7f8fa; border: 1px solid #d8dbe3; border-bottom: none; padding: 8px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 8px; max-width: 220px; color:#1b2034; }
