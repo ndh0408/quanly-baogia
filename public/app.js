@@ -3824,7 +3824,7 @@ async function renderProjects(el) {
         <td>${dash}</td><td>${dash}</td>
         <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
         <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
-        <td>${dash}</td><td>${dash}</td>${kyCell}<td>${dash}</td>
+        <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
       </tr>`;
     }).join("")}</tbody>
   </table></div>`;
