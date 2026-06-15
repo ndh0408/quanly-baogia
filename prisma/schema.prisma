@@ -10,7 +10,6 @@ datasource db {
 enum Role {
   admin
   manager
-  employee // DEPRECATED 2026-06-15: không còn gán được (chỉ admin + manager). Giữ giá trị enum vì Postgres không xoá enum value an toàn; user cũ đã đổi sang manager + default cột là manager.
 }
 
 enum QuoteStatus {

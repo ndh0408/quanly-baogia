@@ -999,8 +999,7 @@ function renderNewQuote(el) {
   const templates = company?.templates || [];
   // Sender address is locked to the company letterhead address.
   if (company && company.address) wz.info.fromAddress = company.address;
-  // Load the people picklist once: employees pick an overseeing manager, and
-  // everyone can pick a different "Người gửi" (themselves or a manager/admin).
+  // Load the people picklist once: everyone can pick a "Người gửi" (themselves or another manager/admin).
   if (state._managers === undefined) {
     state._managers = null; // loading
     api("/api/quotes/assignable-users")
@@ -1050,12 +1049,6 @@ function renderNewQuote(el) {
       <div class="form-grid">
         <label style="grid-column:1/-1">Tiêu đề báo giá <span class="req">*</span>
           <input id="w-title" value="${escapeHtml(i.title)}" placeholder="VD: Décor Premiere Phim Thỏ Ơi"/></label>
-        ${state.user.role === "employee" ? `<label style="grid-column:1/-1">Quản lý phụ trách <span class="req">*</span>
-          <select id="w-manager">
-            <option value="">${state._managers === null ? "Đang tải…" : "— Chọn quản lý —"}</option>
-            ${(state._managers || []).map(m => `<option value="${m.id}" ${wz.managerId === m.id ? "selected" : ""}>${escapeHtml(m.displayName)} (${ROLE_LABEL[m.role] || m.role})</option>`).join("")}
-          </select>
-          <span class="muted" style="font-size:12px">Quản lý này sẽ theo dõi & nắm báo giá của bạn.</span></label>` : ""}
         <label style="grid-column:1/-1">Mã khách hàng <span class="req">*</span>
           <div style="display:flex;gap:8px;align-items:center">
             <input id="w-customer-disp" value="${wz.customerId ? escapeHtml((wz.customerCode || "") + " — " + (wz.customerName || "")) : ""}" placeholder="Chưa chọn — bấm nút bên phải" readonly style="flex:1" />
@@ -1193,7 +1186,6 @@ function renderNewQuote(el) {
     if (!wz.info.title.trim()) { toast("Nhập tiêu đề báo giá", "error"); return; }
     if (!wz.customerId) { toast("Chọn mã khách hàng (bấm 'Chọn khách hàng')", "error"); return; }
     if (!wz.info.toCompany.trim()) { toast("Nhập tên khách hàng", "error"); return; }
-    if (state.user.role === "employee" && !wz.managerId) { toast("Chọn quản lý phụ trách", "error"); return; }
     try {
       // No client-side number — the server allocates it atomically per company
       // (each company has its own prefix + sequence, e.g. GN…, CLF…).

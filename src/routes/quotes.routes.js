@@ -324,16 +324,9 @@ router.post(
       return res.status(400).json({ error: "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)" });
     }
 
-    // An employee must assign a manager to oversee the quote (so a manager is in the loop).
+    // Người tạo luôn là member của báo giá. (Trước đây nhân viên phải gán 1 quản lý
+    // phụ trách — vai trò "nhân viên" đã bỏ hẳn nên không còn ràng buộc đó.)
     const memberConnect = [{ id: req.session.userId }];
-    if (req.session.role === "employee") {
-      if (!b.managerId) return res.status(400).json({ error: "Nhân viên phải chọn 1 quản lý phụ trách báo giá" });
-      const mgr = await prisma.user.findFirst({ where: { id: b.managerId, active: true } });
-      if (!mgr || !["manager", "admin"].includes(mgr.role)) {
-        return res.status(400).json({ error: "Quản lý phụ trách không hợp lệ" });
-      }
-      memberConnect.push({ id: mgr.id });
-    }
 
     // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted,
     // since the unique constraint covers them) BEFORE the write to return a clean 409.
