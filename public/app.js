@@ -333,10 +333,11 @@ const NAV_ICON = {
   customers: ICO('<path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5"/>'),
   permissions: ICO('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>'),
   audit: ICO('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  projects: ICO('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13v3M13 11v5M17 13v3"/>'),
   profile: ICO('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
 };
 
-const ROUTE_PAGES = ["dashboard", "list", "new", "customers", "approvals", "notifications", "users", "permissions", "audit", "profile"];
+const ROUTE_PAGES = ["dashboard", "list", "new", "customers", "approvals", "notifications", "projects", "users", "permissions", "audit", "profile"];
 
 // Hash router: maps #/page and #/quotes/:id → app state, so pages are
 // bookmarkable, the back button works, and notification deep links resolve.
@@ -542,6 +543,7 @@ function renderShell() {
           ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
+          ${can("user:manage") ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
           ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
           ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}
@@ -734,6 +736,7 @@ function renderMain() {
   else if (state.page === "notifications") renderNotifications(mainEl);
   else if (state.page === "audit") renderAuditLog(mainEl);
   else if (state.page === "permissions") renderPermissions(mainEl);
+  else if (state.page === "projects") renderProjects(mainEl);
 }
 
 // Decide whether the current page cares about this change, then refresh it.
@@ -1334,9 +1337,20 @@ function renderEditor(el, quote) {
           </label>
         </div>
 
+        ${editable ? `<div class="fx-bar" id="fx-bar">
+          <span class="fx-addr" id="fx-addr" title="Ô đang chọn">—</span>
+          <span class="fx-fx" title="Công thức">fx</span>
+          <input type="text" id="fx-input" autocomplete="off" spellcheck="false" placeholder="Công thức… vd =SUM(H3:H8) · =G3*E3 — bấm/kéo ô để chèn tham chiếu" />
+        </div>` : ""}
         <div class="tbl-scroll">
         <table class="excel-table" id="items-table">
           <thead>
+            <tr class="col-letters" aria-hidden="true">
+              ${(() => {
+                const cols = ["STT", "Hạng Mục", showDetail ? "Chi Tiết" : null, "ĐVT", "SỐ LƯỢNG", usesDays ? "SỐ NGÀY" : null, "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"].filter(Boolean);
+                return cols.map((_, i) => `<th class="col-letter">${groupLetter(i)}</th>`).join("") + (editable ? `<th class="col-letter"></th>` : "");
+              })()}
+            </tr>
             <tr>
               <th scope="col" style="width:50px">STT</th>
               <th scope="col">Hạng Mục</th>
@@ -1803,12 +1817,25 @@ const FORMULA_FNS = {
   CEILING: (a) => Math.ceil(a[0] || 0),
   FLOOR: (a) => Math.floor(a[0] || 0),
 };
-function evalFormula(input) {
+function evalFormula(input, refs) {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
   // "×" is always multiply; "x"/"X" only BETWEEN digits (so it doesn't eat the
-  // X in function names like MAX). Lookahead keeps chained "2x3x4" working.
+  // X in function names like MAX or a column ref like X3). Lookahead keeps "2x3x4".
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  // Resolve A1-style cell/range references to values (BEFORE % so "G3" → number first).
+  // Ranges (H3:H8) become a ";"-joined list so SUM(H3:H8) works; single refs (G3) → a
+  // bare number. `refs` is supplied only by the grid; absent (export/tests) = old behaviour.
+  if (refs) {
+    s = s.replace(/([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g, (_m, a, b) => {
+      const list = refs.range(a, b);
+      return (list && list.length) ? list.join(";") : "0";
+    });
+    s = s.replace(/(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g, (_m, a) => {
+      const v = refs.cell(a);
+      return (v === null || v === undefined || isNaN(v)) ? "0" : String(v);
+    });
+  }
   // percent: 8% → 0.08 (bare number; parens would block function matching below)
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(n.replace(",", ".")) / 100));
   // Resolve function calls innermost-first until none remain. Results inline as
@@ -1912,9 +1939,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const dataCells = (it, i, amt) => `
         ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Số hoặc công thức Excel: =5*3, =SUM(10;20), =ROUND(x;0), 8%" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
-        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =5*3, =SUM(10;20), =1000000*8%, =MAX(a;b)" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
@@ -2003,6 +2030,98 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   // Editable columns left→right (drives keyboard nav + multi-cell paste).
   const FIELDS = ["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes"].filter(Boolean);
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+
+  // ===== Excel A1-style cell addressing =====
+  // Columns in the SAME visible order as the <thead>, each gets a letter A,B,C…
+  // _stt (STT) and _amount (Thành Tiền) are read-only/computed but referenceable.
+  const ADDR_COLS = [
+    { field: "_stt", ro: true },
+    { field: "name" },
+    ...(showDetail ? [{ field: "detail" }] : []),
+    { field: "unit" },
+    { field: "quantity" },
+    ...(usesDays ? [{ field: "days" }] : []),
+    { field: "unitPrice" },
+    { field: "_amount", ro: true },
+    { field: "notes" },
+  ];
+  ADDR_COLS.forEach((c, i) => { c.L = groupLetter(i); });
+  const letterToCol = {}; ADDR_COLS.forEach((c) => { letterToCol[c.L] = c; });
+  const fieldToLetter = {}; ADDR_COLS.forEach((c) => { fieldToLetter[c.field] = c.L; });
+  const colIndexOfLetter = (L) => ADDR_COLS.findIndex((c) => c.L === L);
+  const addrOf = (row, field) => (fieldToLetter[field] || "") + (row + 1);
+  const parseAddr = (a) => {
+    const m = /^([A-Za-z]+)(\d+)$/.exec(String(a).trim());
+    if (!m) return null;
+    const col = letterToCol[m[1].toUpperCase()]; if (!col) return null;
+    const row = parseInt(m[2], 10) - 1;
+    if (row < 0 || row >= activeSheet.items.length) return null;
+    return { row, field: col.field, col, L: col.L };
+  };
+  // Numeric value of any cell, for use inside a formula (amount computed live; a text
+  // cell is parsed for a number if it looks like one, else 0 — like Excel).
+  const cellNumByAddr = (a) => {
+    const p = parseAddr(a); if (!p) return 0;
+    const it = activeSheet.items[p.row]; if (!it) return 0;
+    if (p.field === "_amount") {
+      if (it.kind === "section" || it.kind === "info") return 0;
+      return usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+                      : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+    }
+    if (p.field === "_stt") return 0;
+    if (NUMERIC.has(p.field)) return Number(it[p.field]) || 0;
+    return parseVN(it[p.field] || "");   // text column → number-ish
+  };
+  // Resolver handed to evalFormula so "=G3", "=SUM(H3:H8)" resolve against this sheet.
+  const formulaRefs = {
+    cell: (a) => cellNumByAddr(a),
+    range: (a, b) => {
+      const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null;
+      const ca = colIndexOfLetter(pa.L), cb = colIndexOfLetter(pb.L);
+      const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb);
+      const r0 = Math.min(pa.row, pb.row), r1 = Math.max(pa.row, pb.row);
+      const out = [];
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellNumByAddr(ADDR_COLS[c].L + (r + 1)));
+      return out;
+    },
+  };
+  const sheetHasFormulas = () => activeSheet.items.some((it) => it.formulas && Object.keys(it.formulas).length);
+  // Re-evaluate every stored formula against current cell values, a few passes so
+  // chains (a cell referencing another formula cell) settle. Grid is small → cheap.
+  const recomputeAll = () => {
+    if (!sheetHasFormulas()) return;
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false;
+      for (const it of activeSheet.items) {
+        if (!it.formulas) continue;
+        for (const f in it.formulas) {
+          const v = evalFormula(it.formulas[f], formulaRefs);
+          if (v === null) continue;
+          if (NUMERIC.has(f)) { if (it[f] !== v) { it[f] = v; changed = true; } }
+          else { const sv = fmtNumCell(v); if (it[f] !== sv) { it[f] = sv; changed = true; } }
+        }
+      }
+      if (!changed) break;
+    }
+  };
+  // Repaint computed displays (amounts + every formula cell that isn't being typed in)
+  // without rebuilding the table, so dependent cells update live like Excel.
+  const paintComputedValues = () => {
+    activeSheet.items.forEach((it, i) => {
+      const tr = tbody.querySelector(`tr[data-row="${i}"]`); if (!tr) return;
+      if (it.kind !== "section" && it.kind !== "info") {
+        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
+                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const ac = tr.querySelector(".col-amount"); if (ac) ac.textContent = fmtNumCell(amt);
+      }
+      if (it.formulas) for (const f in it.formulas) {
+        const el = tr.querySelector(`[data-f="${f}"]`);
+        if (el && document.activeElement !== el) el.value = NUMERIC.has(f) ? fmtNumCell(it[f]) : (it[f] ?? "");
+      }
+    });
+    updateSummary(q); updateSectionSubtotals();
+  };
+
   const blank = () => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
   const blankInfo = () => ({ kind: "info", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   const blankSub = () => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
@@ -2043,23 +2162,28 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
     if (cell) { cell.focus(); if (!noSelect && cell.select) cell.select(); }
   };
-  // Commit an Excel-style formula in a numeric cell: evaluate "=…", store the number,
-  // reformat the cell, and refresh the row amount + totals. No-op for plain numbers.
-  const commitNumericFormula = (inp2, i2, f2) => {
-    if (!NUMERIC.has(f2) || !inp2) return;
+  // Commit an Excel-style formula in ANY cell: evaluate "=…" (with cell/range refs),
+  // store the result, reformat, then recompute dependents + totals. No-op for plain text.
+  const commitFormula = (inp2, i2, f2) => {
+    if (!inp2) return;
     const raw = (inp2.value || "").trim();
+    const it2 = activeSheet.items[i2]; if (!it2) return;
+    // Not a formula → nothing to commit. Crucially do NOT delete it2.formulas here: a
+    // committed formula cell DISPLAYS its computed result, so the blur fired by moving away
+    // would see a plain number and wrongly wipe the formula (→ "click lại không hiện"). The
+    // input handler already drops the formula when the user truly types a plain value over it.
     if (!raw.startsWith("=")) return;
-    const val = evalFormula(raw);
-    const num = (val === null) ? (Number(activeSheet.items[i2][f2]) || 0) : val;
-    activeSheet.items[i2][f2] = num;
-    // Persist the formula text so re-focusing the cell shows it again.
-    activeSheet.items[i2].formulas = { ...(activeSheet.items[i2].formulas || {}), [f2]: raw };
-    inp2.value = fmtNumCell(num);
-    const tr2 = inp2.closest("tr"); const it2 = activeSheet.items[i2];
-    const amt2 = usesDays ? (Number(it2.quantity) || 0) * (Number(it2.days) || 1) * (Number(it2.unitPrice) || 0)
-                          : (Number(it2.quantity) || 0) * (Number(it2.unitPrice) || 0);
-    const amtCell2 = tr2 && tr2.querySelector(".col-amount"); if (amtCell2) amtCell2.textContent = fmtNumCell(amt2);
-    updateSummary(q);
+    const val = evalFormula(raw, formulaRefs);
+    if (NUMERIC.has(f2)) {
+      const num = (val === null) ? (Number(it2[f2]) || 0) : val;
+      it2[f2] = num; inp2.value = fmtNumCell(num);
+    } else {
+      const out = (val === null) ? (it2[f2] || "") : fmtNumCell(val);
+      it2[f2] = out; inp2.value = out;
+    }
+    // Persist the formula text so re-focusing the cell shows it again (Excel behaviour).
+    it2.formulas = { ...(it2.formulas || {}), [f2]: raw };
+    recomputeAll(); paintComputedValues();
   };
 
   // ---- Excel-grid: selection / clipboard / undo (state on `grid`, survives redraw) ----
@@ -2120,6 +2244,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         stat.textContent = "";
       }
     }
+    if (grid._fxSync) grid._fxSync();   // keep the formula bar in sync with the active cell
   };
   const setSel = (anchor, focus) => { grid.sel = { anchor, focus }; grid.selSheet = q._activeSheet; paintSel(); };
   const clearSel = () => { grid.sel = null; paintSel(); };
@@ -2213,6 +2338,202 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   // Insert a "hàng con" (sub-item) right below row i — stays inside i's group.
   const addSubAfter = (i) => { pushUndo(); activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
 
+  // ===== Excel formula UX: point-and-click refs, function autocomplete, formula bar =====
+  // The <td> backing a (row, field) — including the computed STT / Thành Tiền columns.
+  const tdOf = (row, field) => {
+    const tr = tbody.querySelector(`tr[data-row="${row}"]`); if (!tr) return null;
+    if (field === "_amount") return tr.querySelector(".col-amount");
+    if (field === "_stt") return tr.querySelector(".col-stt");
+    const inp = tr.querySelector(`[data-f="${field}"]`); return inp ? inp.closest("td") : null;
+  };
+  // Which cell is under a mouse event → {row, field, L, addr} (null if not a grid cell).
+  const cellAddrFromEvent = (ev) => {
+    const td = ev.target.closest && ev.target.closest("td");
+    const tr = ev.target.closest && ev.target.closest("tr[data-row]");
+    if (!td || !tr) return null;
+    const row = parseInt(tr.dataset.row, 10);
+    const inp = td.querySelector("[data-f]");
+    let field = inp ? inp.dataset.f : null;
+    if (!field) {
+      if (td.classList.contains("col-amount")) field = "_amount";
+      else if (td.classList.contains("col-stt")) field = "_stt";
+      else return null;
+    }
+    const L = fieldToLetter[field]; if (!L) return null;
+    return { row, field, L, addr: L + (row + 1) };
+  };
+  const rangeAddr = (a, b) => {
+    const ca = colIndexOfLetter(a.L), cb = colIndexOfLetter(b.L);
+    const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
+    const tl = ADDR_COLS[c0].L + (r0 + 1), br = ADDR_COLS[c1].L + (r1 + 1);
+    return tl === br ? tl : tl + ":" + br;
+  };
+  const clearRefPick = () => tbody.querySelectorAll("td.cell-ref-pick").forEach((t) => t.classList.remove("cell-ref-pick"));
+  const paintRefPick = (a, b) => {
+    clearRefPick();
+    const ca = colIndexOfLetter(a.L), cb = colIndexOfLetter(b.L);
+    const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const td = tdOf(r, ADDR_COLS[c].field); if (td) td.classList.add("cell-ref-pick"); }
+  };
+  // PERSISTENT highlight of every cell a formula references (Excel's coloured boxes) — shown
+  // while a formula cell is focused / being edited, so you can see what it points to.
+  // Green shades only — so the referenced cells (xanh lá) never clash with the blue
+  // selection/anchor box (xanh dương). Multiple distinct refs get slightly different greens.
+  const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
+  const clearActiveRefs = () => tbody.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); t.style.removeProperty("--ref-color"); });
+  const highlightActiveFormulaRefs = (text) => {
+    clearActiveRefs();
+    if (!text || !String(text).trim().startsWith("=")) return;
+    const body = String(text).replace(/^=/, "");
+    let ci = 0;
+    const paint = (td) => { if (td) { td.classList.add("cell-ref-active"); td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]); } };
+    const rangeRe = /([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g;
+    let m;
+    while ((m = rangeRe.exec(body))) {
+      const a = parseAddr(m[1]), b = parseAddr(m[2]); if (!a || !b) continue;
+      const c0 = Math.min(colIndexOfLetter(a.L), colIndexOfLetter(b.L)), c1 = Math.max(colIndexOfLetter(a.L), colIndexOfLetter(b.L));
+      const r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) paint(tdOf(r, ADDR_COLS[c].field));
+      ci++;
+    }
+    const noRanges = body.replace(rangeRe, (mm) => " ".repeat(mm.length));   // don't double-count range ends
+    const singleRe = /(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g;
+    while ((m = singleRe.exec(noRanges))) { const p = parseAddr(m[1]); if (p) { paint(tdOf(p.row, p.field)); ci++; } }
+  };
+  grid._fxHighlight = highlightActiveFormulaRefs;
+  grid._fxClearRefs = clearActiveRefs;
+  // While editing a formula, mousedown on another cell inserts its address (drag → a range)
+  // INSTEAD of moving focus — so the half-typed formula is never lost (Excel "point mode").
+  const startPointDrag = (fxInput, startInfo) => {
+    const caret = fxInput.selectionStart == null ? fxInput.value.length : fxInput.selectionStart;
+    const after = fxInput.value.slice(caret);
+    // Strip a trailing ref/range token so re-dragging replaces it (not append).
+    const baseLeft = fxInput.value.slice(0, caret).replace(/[A-Za-z]+\d+(?::[A-Za-z]+\d+)?$/, "");
+    let curInfo = startInfo;
+    const apply = (info2) => {
+      curInfo = info2;
+      const ref = rangeAddr(startInfo, info2);
+      fxInput.value = baseLeft + ref + after;
+      const pos = (baseLeft + ref).length;
+      try { fxInput.setSelectionRange(pos, pos); } catch {}
+      paintRefPick(startInfo, info2);
+      fxInput.dispatchEvent(new Event("input", { bubbles: true }));   // live re-evaluate
+    };
+    grid._fxPicking = true;
+    document.body.classList.add("fx-picking");
+    apply(startInfo);
+    const onMove = (mv) => { const info2 = cellAddrFromEvent(mv); if (info2) apply(info2); };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove, true);
+      document.removeEventListener("mouseup", onUp, true);
+      grid._fxPicking = false; document.body.classList.remove("fx-picking"); clearRefPick(); fxInput.focus();
+      const pos = (baseLeft + rangeAddr(startInfo, curInfo)).length;
+      try { fxInput.setSelectionRange(pos, pos); } catch {}
+    };
+    document.addEventListener("mousemove", onMove, true);
+    document.addEventListener("mouseup", onUp, true);
+  };
+  const onPointMouseDown = (ev) => {
+    if (ev.button !== 0) return;
+    const ae = document.activeElement;
+    if (!ae || !ae.dataset || ae.dataset.f == null) return;
+    if (!(ae.value || "").trim().startsWith("=")) return;               // not editing a formula
+    const start = cellAddrFromEvent(ev); if (!start) return;            // clicked outside the grid
+    const aeTr = ae.closest && ae.closest("tr[data-row]");
+    const aeRow = aeTr ? parseInt(aeTr.dataset.row, 10) : -1;
+    if (start.row === aeRow && start.field === ae.dataset.f) return;    // clicked its own cell → normal caret
+    ev.preventDefault(); ev.stopPropagation();                         // keep focus → don't lose formula
+    startPointDrag(ae, start);
+  };
+  grid._fx = { onPointMouseDown };
+
+  // --- Function-name autocomplete (=SU → SUM/… dropdown) ---
+  const FN_LIST = Object.keys(FORMULA_FNS);
+  const ensureFxAuto = () => {
+    if (grid._fxAutoEl && document.body.contains(grid._fxAutoEl)) return grid._fxAutoEl;
+    let d = document.querySelector(".fx-auto");   // reuse across editor re-opens (no leak)
+    if (!d) { d = document.createElement("div"); d.className = "fx-auto hidden"; document.body.appendChild(d); }
+    grid._fxAutoEl = d; return d;
+  };
+  const closeFxAuto = () => { grid._fxAuto = null; if (grid._fxAutoEl) grid._fxAutoEl.classList.add("hidden"); };
+  const renderFxAuto = () => {
+    const a = grid._fxAuto; if (!a) return; const el = ensureFxAuto();
+    el.innerHTML = a.items.map((n, k) => `<div class="fx-auto-item${k === a.idx ? " active" : ""}" data-k="${k}">${n}<span>( )</span></div>`).join("");
+    el.querySelectorAll(".fx-auto-item").forEach((node) => {
+      node.addEventListener("mousedown", (e) => { e.preventDefault(); grid._fxAuto.idx = parseInt(node.dataset.k, 10); acceptFxAuto(); });
+    });
+  };
+  const fxAutocomplete = (input, i, f) => {
+    const val = input.value || "";
+    const caret = input.selectionStart == null ? val.length : input.selectionStart;
+    const left = val.slice(0, caret);
+    if (!left.trim().startsWith("=")) { closeFxAuto(); return; }
+    const m = /([A-Za-z]+)$/.exec(left); if (!m) { closeFxAuto(); return; }
+    const tok = m[1].toUpperCase();
+    const matches = FN_LIST.filter((n) => n.startsWith(tok) && n !== tok);
+    if (!matches.length) { closeFxAuto(); return; }
+    grid._fxAuto = { input, i, f, items: matches, idx: 0 };
+    const el = ensureFxAuto(); renderFxAuto();
+    const r = input.getBoundingClientRect();
+    el.style.left = r.left + "px"; el.style.top = (r.bottom + 2) + "px"; el.style.minWidth = Math.max(120, r.width) + "px";
+    el.classList.remove("hidden");
+  };
+  const acceptFxAuto = () => {
+    const a = grid._fxAuto; if (!a) return;
+    const name = a.items[a.idx], input = a.input, val = input.value;
+    const caret = input.selectionStart == null ? val.length : input.selectionStart;
+    const newLeft = val.slice(0, caret).replace(/([A-Za-z]+)$/, name + "(");
+    input.value = newLeft + val.slice(caret);
+    const pos = newLeft.length; try { input.setSelectionRange(pos, pos); } catch {}
+    closeFxAuto(); input.focus();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const moveFxAuto = (delta) => { const a = grid._fxAuto; if (!a) return; a.idx = (a.idx + delta + a.items.length) % a.items.length; renderFxAuto(); };
+
+  // --- Formula bar (shows the active cell address + its formula; Enter applies) ---
+  const syncFxBar = () => {
+    const addrEl = document.getElementById("fx-addr"), inEl = document.getElementById("fx-input");
+    if (!addrEl || !inEl) return;
+    const sel = grid.sel;
+    if (!sel || grid.selSheet !== q._activeSheet) { addrEl.textContent = "—"; if (document.activeElement !== inEl) inEl.value = ""; return; }
+    const { row, field } = sel.anchor;
+    addrEl.textContent = addrOf(row, field) || "—";
+    if (document.activeElement === inEl) return;   // don't clobber while typing in the bar
+    const it = activeSheet.items[row];
+    const fx = it && it.formulas && it.formulas[field];
+    inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? fmtNumCell(it[field]) : (it[field] || ""));
+    inEl.readOnly = !editable || field === "_amount" || field === "_stt";
+  };
+  grid._fxSync = syncFxBar;
+  const applyFxBar = (move) => {
+    const inEl = document.getElementById("fx-input"); if (!inEl) return;
+    const sel = grid.sel; if (!sel) return;
+    const { row, field } = sel.anchor;
+    if (!editable || field === "_amount" || field === "_stt") return;
+    const cell = cellEl(row, field); if (!cell) return;
+    cell.focus(); cell.value = inEl.value;
+    cell.dispatchEvent(new Event("input", { bubbles: true }));
+    commitFormula(cell, row, field); commitPending();
+    if (move) moveTo(row + 1, field, false);
+  };
+  grid._fxApplyBar = applyFxBar;
+  closeFxAuto();   // drop any stale autocomplete pointing at now-removed inputs
+  // Bind listeners ONCE per element. draw() rebuilds el.innerHTML (new tbody + fx-input),
+  // so the guard lives on the ELEMENT — survives redraw() (same nodes) yet rebinds after a
+  // full draw(). The handlers read grid._fx*/grid._fxSync, refreshed above each drawItems.
+  const fxInEl = document.getElementById("fx-input");
+  if (fxInEl && !fxInEl._fxBound) {
+    fxInEl._fxBound = true;
+    fxInEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); grid._fxApplyBar && grid._fxApplyBar(true); }
+      else if (e.key === "Escape") { e.preventDefault(); if (grid._fxSync) grid._fxSync(); fxInEl.blur(); }
+    });
+  }
+  if (tbody && !tbody._fxBound) {
+    tbody._fxBound = true;
+    tbody.addEventListener("mousedown", (ev) => { if (grid._fx && grid._fx.onPointMouseDown) grid._fx.onPointMouseDown(ev); }, true);
+  }
+
   tbody.querySelectorAll("input, textarea").forEach((inp) => {
     const f = inp.dataset.f;
     const isMultiline = multilineFields.has(f);
@@ -2232,18 +2553,12 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
           // (Excel behaviour: cell shows the result, click → shows "=2000+3000").
           it.formulas = it.formulas || {};
           it.formulas[f] = e.target.value.trim();
-          const live = evalFormula(e.target.value.trim());
-          if (live !== null) {
-            it[f] = live;
-            if (it.kind !== "section") {
-              const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                                   : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
-              const amtCell = tr.querySelector(".col-amount");
-              if (amtCell) amtCell.textContent = fmtNumCell(amt);
-            }
-            updateSummary(q);
-            updateSectionSubtotals();
-          }
+          const live = evalFormula(e.target.value.trim(), formulaRefs);
+          if (live !== null) it[f] = live;
+          recomputeAll(); paintComputedValues();
+          fxAutocomplete(e.target, i, f);
+          highlightActiveFormulaRefs(e.target.value);
+          if (grid._fxSync) grid._fxSync();
           return;
         }
         // Live thousand-dot formatting with caret preservation (count digits left of caret).
@@ -2261,6 +2576,10 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         let v = e.target.value;
         if (!isMultiline && typeof v === "string" && /[\r\n]/.test(v)) { v = v.replace(/[\r\n]+/g, " "); e.target.value = v; }
         activeSheet.items[i][f] = v;
+        // A text cell can also hold a formula (=H3, ="…"): remember it for commit + suggest.
+        const it0 = activeSheet.items[i];
+        if (v.trim().startsWith("=")) { it0.formulas = it0.formulas || {}; it0.formulas[f] = v.trim(); fxAutocomplete(e.target, i, f); }
+        else { if (it0.formulas && it0.formulas[f]) { delete it0.formulas[f]; if (!Object.keys(it0.formulas).length) delete it0.formulas; } closeFxAuto(); }
       }
       grid._dirty = true;   // mark this cell dirty so blur commits one undo snapshot
       const it = activeSheet.items[i];
@@ -2272,6 +2591,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       }
       updateSummary(q);
       updateSectionSubtotals();
+      if (sheetHasFormulas()) { recomputeAll(); paintComputedValues(); }   // refresh dependents live
+      highlightActiveFormulaRefs(e.target.value);   // glow the cells this formula points at
+      if (grid._fxSync) grid._fxSync();   // mirror what's typed into the formula bar
     });
 
     // Focus a cell → single-cell selection (unless mid-navigation) + capture pre-edit snapshot.
@@ -2283,18 +2605,20 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
           grid.selSheet = q._activeSheet; paintSel();
         }
       }
-      // Excel/Sheets behaviour: clicking a numeric cell that holds a formula shows
-      // the FORMULA for editing (the cell otherwise displays the computed result).
-      if (NUMERIC.has(f)) {
-        const fx = activeSheet.items[i]?.formulas?.[f];
-        if (fx) inp.value = fx;
-      }
+      // Excel/Sheets behaviour: clicking a cell that holds a formula shows the FORMULA
+      // for editing (the cell otherwise displays the computed result) — any column.
+      const fx = activeSheet.items[i]?.formulas?.[f];
+      if (fx) inp.value = fx;
+      highlightActiveFormulaRefs(inp.value);   // entering a formula cell → glow its refs
       grid.focusSnap = snap();
     });
-    // Blur → commit the pending in-cell edit as one undo boundary.
+    // Blur → commit the formula (any column) + the pending edit as one undo boundary.
     inp.addEventListener("blur", () => {
-      if (NUMERIC.has(f)) { const tr = inp.closest("tr"); if (tr) commitNumericFormula(inp, parseInt(tr.dataset.row, 10), f); }
+      if (grid._fxPicking) return;   // mid point-pick: focus is retained, don't commit yet
+      const tr = inp.closest("tr"); if (tr) commitFormula(inp, parseInt(tr.dataset.row, 10), f);
       commitPending();
+      clearActiveRefs();   // left the formula cell → drop the ref glow
+      setTimeout(closeFxAuto, 150);   // let a click on a suggestion land first
     });
 
     // Mouse drag to select a range. Transient listeners are removed on mouseup → no leak.
@@ -2322,9 +2646,19 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const atStart = inp.selectionStart === 0 && inp.selectionEnd === 0;
       const atEnd = inp.selectionStart === (inp.value || "").length && inp.selectionEnd === (inp.value || "").length;
 
+      // Function-name autocomplete: only Arrow + Tab steer it. Enter must NOT be hijacked —
+      // it always commits the formula + moves down như cũ (just close the dropdown first).
+      if (grid._fxAuto) {
+        if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveFxAuto(1); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveFxAuto(-1); return; }
+        if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); acceptFxAuto(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFxAuto(); return; }
+        if (e.key === "Enter") closeFxAuto();   // don't swallow Enter — fall through to commit
+      }
+
       if (e.key === "Enter" && !(isMultiline && e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
-        if (NUMERIC.has(f)) commitNumericFormula(inp, i, f);
+        commitFormula(inp, i, f);
         if (i >= activeSheet.items.length - 1) { addRow(f); moveTo(activeSheet.items.length - 1, f, false); }
         else moveTo(i + 1, f, false);
         return;
@@ -3280,6 +3614,22 @@ async function renderNotifications(el) {
       if (d.dataset.resource === "quote" && d.dataset.rid) goToQuote(d.dataset.rid);
     }));
   } catch (e) { toast(e.message, "error"); }
+}
+
+// ---------------- Quản lý dự án (admin) ----------------
+// Placeholder: nơi hiển thị các dự án đã được duyệt từ báo giá.
+// Chi tiết (gom theo mã dự án, danh sách, trạng thái…) sẽ bổ sung sau.
+async function renderProjects(el) {
+  if (!can("user:manage")) {
+    el.innerHTML = `<h1>Quản lý dự án</h1><p class="muted">Bạn không có quyền xem mục này.</p>`;
+    return;
+  }
+  el.innerHTML = `<h1>Quản lý dự án</h1>
+    <p class="muted">Nơi quản lý các dự án đã được duyệt bên báo giá.</p>
+    <div class="card-section" style="text-align:center;color:var(--text-muted)">
+      <p style="margin:0 0 6px;font-weight:600">Đang phát triển</p>
+      <p style="margin:0">Tính năng sẽ sớm hiển thị các dự án được duyệt từ báo giá tại đây.</p>
+    </div>`;
 }
 
 // ---------------- Audit log (admin) ----------------

@@ -16,7 +16,7 @@ import { authenticateCredentials, clientIp } from "../authCore.js";
 // MFA token: 6-digit TOTP OR a 10-char hex backup code.
 const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/).optional();
 import { permissionsForRole } from "../permissions.js";
-import { sendEmail } from "../email.js";
+import { sendEmail, brandedEmailHtml } from "../email.js";
 
 const router = Router();
 
@@ -257,8 +257,16 @@ router.post(
       await sendEmail({
         to: user.email || email,
         subject: "Đặt lại mật khẩu – Báo Giá Gia Nguyễn",
-        text: `Bạn yêu cầu đặt lại mật khẩu. Mở liên kết (hết hạn sau 2 giờ): ${url}`,
-        html: `<p>Bạn yêu cầu đặt lại mật khẩu cho hệ thống Báo Giá. Nhấn liên kết bên dưới (hết hạn sau 2 giờ):</p><p><a href="${url}">${url}</a></p><p>Nếu không phải bạn, hãy bỏ qua email này.</p>`,
+        text: `Chào ${user.displayName || ""},\n\nBạn vừa yêu cầu đặt lại mật khẩu cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để tạo mật khẩu mới (hết hạn sau 2 giờ):\n${url}\n\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`,
+        html: brandedEmailHtml({
+          name: user.displayName,
+          paragraphs: [
+            "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới.",
+            "Nếu không phải bạn yêu cầu, hãy bỏ qua email này — mật khẩu hiện tại vẫn an toàn.",
+          ],
+          button: { label: "Đặt lại mật khẩu", url },
+          note: "⏳ Liên kết hết hạn sau <b>2 giờ</b>.",
+        }),
       });
       await audit(req, "password.forgot", { resource: "user", resourceId: user.id });
     })().catch((e) => logger.error({ err: e.message }, "forgot-password background task failed"));
