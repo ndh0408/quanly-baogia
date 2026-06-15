@@ -37,6 +37,7 @@ const USER_SELECT = {
   phone: true,
   projectCode: true,
   active: true,
+  canSign: true,
   lastLoginAt: true,
   createdAt: true,
 };

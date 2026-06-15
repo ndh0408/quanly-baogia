@@ -74,6 +74,7 @@ export const UserCreateSchema = z.object({
   role: z.enum(["admin", "manager"]),
   phone,
   title,
+  canSign: z.coerce.boolean().optional(),
 });
 
 export const UserUpdateSchema = z.object({
@@ -84,6 +85,7 @@ export const UserUpdateSchema = z.object({
   active: z.boolean().optional(),
   password: pwd.optional(),
   projectCode,
+  canSign: z.coerce.boolean().optional(),
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).

@@ -285,8 +285,13 @@ router.get(
 // Xuất thêm _1/_2…, Hạng Mục = tên sheet. Đặt TRƯỚC "/:id" để không bị nuốt vào param.
 router.get(
   "/projects",
-  requirePermission(P.USER_MANAGE),
   asyncHandler(async (req, res) => {
+    // Admin (user:manage) HOẶC người được ký (canSign — vd Lan Anh) mới xem được trang
+    // Quản lý dự án (để ký chứng từ). Người khác → 403.
+    const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true } });
+    if (!can(req.session, P.USER_MANAGE) && !me?.canSign) {
+      return res.status(403).json({ error: "Bạn không có quyền xem trang Quản lý dự án" });
+    }
     const quotes = await prisma.quote.findMany({
       where: { status: "approved", deletedAt: null },
       orderBy: [{ quoteDate: "desc" }, { id: "desc" }],
@@ -301,6 +306,7 @@ router.get(
           orderBy: { order: "asc" },
           select: {
             id: true, order: true, name: true, groupSubtotal: true, extraTables: true,
+            signedAt: true, signedByName: true,
             template: { select: { company: { select: { shortName: true, name: true } } } },
             items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
           },
@@ -330,17 +336,48 @@ router.get(
           const ex = Array.isArray(sh.extraTables) ? sh.extraTables : [];
           const sumCat = (cat) => ex.filter((t) => t && t.category === cat).reduce((acc, t) => acc + extraTableSum(t), 0);
           return {
+            id: sh.id,
             name: sh.name || null,
             subtotal: byId.get(sh.id) ?? 0,
             hcm: sumCat("hcm"),
             hanoi: sumCat("hanoi"),
             khach: sumCat("khach"),
             cty: sh.template?.company?.shortName || sh.template?.company?.name || null,
+            signedAt: sh.signedAt,
+            signedByName: sh.signedByName,
           };
         }),
       };
     });
     res.json({ data });
+  })
+);
+
+// SIGN documents for ONE sheet (Ký Chứng từ) — admin HOẶC người có canSign. Theo từng sheet.
+// Chỉ quản lý nội bộ; không ảnh hưởng Excel/tổng. Đặt TRƯỚC "/:id".
+router.post(
+  "/sheets/:sheetId/sign",
+  validate({
+    params: z.object({ sheetId: z.coerce.number().int().positive() }),
+    body: z.object({ signed: z.coerce.boolean().default(true) }).default({}),
+  }),
+  asyncHandler(async (req, res) => {
+    const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
+    if (!can(req.session, P.USER_MANAGE) && !me?.canSign) {
+      return res.status(403).json({ error: "Bạn không có quyền ký chứng từ" });
+    }
+    const sheet = await prisma.quoteSheet.findUnique({ where: { id: req.params.sheetId }, select: { id: true, quoteId: true } });
+    if (!sheet) return res.status(404).json({ error: "Không tìm thấy sheet" });
+    const signed = req.body.signed !== false;
+    const updated = await prisma.quoteSheet.update({
+      where: { id: sheet.id },
+      data: signed
+        ? { signedAt: new Date(), signedById: req.session.userId, signedByName: me?.displayName || null }
+        : { signedAt: null, signedById: null, signedByName: null },
+      select: { id: true, signedAt: true, signedByName: true },
+    });
+    await audit(req, signed ? "quote.sign" : "quote.unsign", { resource: "quote", resourceId: sheet.quoteId });
+    res.json({ id: updated.id, signedAt: updated.signedAt, signedByName: updated.signedByName });
   })
 );
 

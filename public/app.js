@@ -543,7 +543,7 @@ function renderShell() {
           ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
-          ${can("user:manage") ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
+          ${(can("user:manage") || state.user?.canSign) ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
           ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
           ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}
@@ -3227,6 +3227,7 @@ function openUserModal(u) {
       </label>
       <label>SĐT<input name="phone" type="tel" inputmode="tel" value="${escapeHtml(u?.phone || "")}" /></label>
       <label>Mã dự án <span class="muted" style="font-size:11px">(vd FE_A26 — báo giá user này tạo sẽ là FE_A26_001…)</span><input name="projectCode" value="${escapeHtml(u?.projectCode || "")}" placeholder="VD: FE_A26" /></label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="canSign" ${u?.canSign ? "checked" : ""} /> <span>Được <strong>Ký Chứng từ</strong> ở trang Quản lý dự án <span class="muted" style="font-size:11px">(admin luôn được; bật cho nhân viên cần ký)</span></span></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Lưu</button>
@@ -3240,6 +3241,7 @@ function openUserModal(u) {
       username: get("username"), displayName: get("displayName"),
       role: get("role"), phone: get("phone"),
       projectCode: get("projectCode").trim() || null,
+      canSign: !!mask.querySelector("[name=canSign]")?.checked,
     };
     if (isNew) payload.password = get("password");
     try {
@@ -3732,10 +3734,11 @@ async function renderNotifications(el) {
 // hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
 // sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
 async function renderProjects(el) {
-  if (!can("user:manage")) {
+  if (!can("user:manage") && !state.user?.canSign) {
     el.innerHTML = `<h1>Quản lý dự án</h1><p class="muted">Bạn không có quyền xem mục này.</p>`;
     return;
   }
+  const canSignNow = can("user:manage") || !!state.user?.canSign;
   el.innerHTML = `<h1>Quản lý dự án</h1>
     <p class="muted">Dự án = báo giá <b>đã duyệt</b>. Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Giai đoạn 1: chỉ hiển thị — cột hoá đơn/thanh toán/chứng từ (—) sẽ cho nhập sau. Bấm vào dòng để mở báo giá.</p>
     <div id="proj-summary"></div>
@@ -3770,6 +3773,9 @@ async function renderProjects(el) {
         hanoi: Number(sh.hanoi) || 0,
         khach: Number(sh.khach) || 0,
         cty: sh.cty || null,
+        sheetId: sh.id || null,
+        signedAt: sh.signedAt || null,
+        signedByName: sh.signedByName || null,
       });
     });
   }
@@ -3801,6 +3807,9 @@ async function renderProjects(el) {
     <tbody>${rows.map(r => {
       const q = r.q;
       const cty = q.company?.shortName || q.company?.name || "";
+      const kyCell = r.signedAt
+        ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
+        : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
       return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
         <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
         <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
@@ -3815,13 +3824,23 @@ async function renderProjects(el) {
         <td>${dash}</td><td>${dash}</td>
         <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
         <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
-        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td>${dash}</td><td>${dash}</td>${kyCell}<td>${dash}</td>
       </tr>`;
     }).join("")}</tbody>
   </table></div>`;
   body.querySelectorAll("tr.qrow").forEach(tr => {
     tr.addEventListener("click", (e) => { if (e.target.closest("button,a")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
   });
+  body.querySelectorAll(".ky-btn, .ky-undo").forEach(b => b.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const sheetId = b.dataset.sheet;
+    const signed = b.classList.contains("ky-btn");   // ky-btn = ký; ky-undo = bỏ ký
+    try {
+      await api(`/api/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) });
+      toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success");
+      renderProjects(el);
+    } catch (err) { toast(err.message, "error"); }
+  }));
 }
 
 // ---------------- Audit log (admin) ----------------

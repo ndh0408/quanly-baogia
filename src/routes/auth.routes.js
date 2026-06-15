@@ -86,7 +86,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, mfaEnabled: true, lastLoginAt: true },
+      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, canSign: true, mfaEnabled: true, lastLoginAt: true },
     });
     if (!user) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
     // Ship the authoritative capability list so the SPA gates UI from the server catalog.

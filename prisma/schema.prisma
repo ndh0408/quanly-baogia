@@ -54,6 +54,7 @@ model User {
   senderName   String?  // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
   projectCode  String?  // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
   active       Boolean  @default(true)
+  canSign      Boolean  @default(false) // được phép "Ký Chứng từ" ở trang Quản lý dự án (admin luôn được)
 
   // Email-invite onboarding: invited users are inactive until they accept,
   // set their own password and fill in their details.
@@ -328,6 +329,10 @@ model QuoteSheet {
   // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
   // Tổng theo từng loại đổ vào cột Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng ở trang Quản lý dự án.
   extraTables Json?
+  // Ký chứng từ theo từng sheet (chỉ quản lý — admin/người có canSign mới ký).
+  signedAt     DateTime?
+  signedById   Int?
+  signedByName String?
 
   @@index([quoteId, order])
 }
