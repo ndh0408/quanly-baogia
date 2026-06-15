@@ -865,12 +865,13 @@ async function renderList(el) {
     }
     const start = (m.page - 1) * PAGE_SIZE + 1;
     const end = (m.page - 1) * PAGE_SIZE + state.quoteList.length;
+    const isAdmin = state.user?.role === "admin";   // cột "Người tạo" chỉ hiện cho admin
     body.innerHTML = `
       <div class="tbl-scroll">
       <table class="list-table cards-sm">
         <thead>
           <tr>
-            <th scope="col">Mã dự án</th><th scope="col">Tiêu đề</th>
+            <th scope="col">Mã dự án</th>${isAdmin ? `<th scope="col">Người tạo</th>` : ""}<th scope="col">Tiêu đề</th>
             <th scope="col">Ngày</th><th scope="col">Sheet</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th>
             <th scope="col">Công ty</th><th scope="col">Khách</th><th scope="col">Mã KH</th>
             <th scope="col">Trạng thái</th><th scope="col">Thao tác</th>
@@ -880,6 +881,7 @@ async function renderList(el) {
           ${state.quoteList.map(q => `
             <tr>
               <td data-label="Mã dự án"><strong>${escapeHtml(codeLabel(q))}</strong></td>
+              ${isAdmin ? `<td data-label="Người tạo">${escapeHtml(q.createdBy?.displayName || "")}</td>` : ""}
               <td data-label="Tiêu đề" title="${escapeHtml(q.title)}">${escapeHtml(shortTitle(q.title))}</td>
               <td data-label="Ngày">${fmtDate(q.quoteDate)}</td>
               <td data-label="Sheet" style="text-align:center">${q.sheetCount ?? (q.sheets?.length || 0)}</td>
