@@ -20,6 +20,8 @@ test_*.pdf
 gdpr.json
 *.tmp.xlsx
 temp_*.xlsx
+_*.xlsx
+_*.mjs
 c.txt
 cookies.txt
 tok.txt
