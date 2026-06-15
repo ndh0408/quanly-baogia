@@ -3617,19 +3617,81 @@ async function renderNotifications(el) {
 }
 
 // ---------------- Quản lý dự án (admin) ----------------
-// Placeholder: nơi hiển thị các dự án đã được duyệt từ báo giá.
-// Chi tiết (gom theo mã dự án, danh sách, trạng thái…) sẽ bổ sung sau.
+// GIAI ĐOẠN 1 (chỉ hiển thị): liệt kê báo giá ĐÃ DUYỆT theo bố cục bảng theo dõi
+// dự án/hoá đơn. Cột nào lấy được từ báo giá thì điền (Status, Phim, Báo Giá, Mã Sản
+// Xuất, Cty, Thành Tiền VAT); các cột hoá đơn/thanh toán/chứng từ để trống ("—") và
+// sẽ cho nhập ở Giai đoạn 2 (cần bảng dữ liệu riêng). Nguồn: /api/quotes?status=approved.
 async function renderProjects(el) {
   if (!can("user:manage")) {
     el.innerHTML = `<h1>Quản lý dự án</h1><p class="muted">Bạn không có quyền xem mục này.</p>`;
     return;
   }
   el.innerHTML = `<h1>Quản lý dự án</h1>
-    <p class="muted">Nơi quản lý các dự án đã được duyệt bên báo giá.</p>
-    <div class="card-section" style="text-align:center;color:var(--text-muted)">
-      <p style="margin:0 0 6px;font-weight:600">Đang phát triển</p>
-      <p style="margin:0">Tính năng sẽ sớm hiển thị các dự án được duyệt từ báo giá tại đây.</p>
-    </div>`;
+    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. Giai đoạn 1: chỉ hiển thị thông tin lấy từ báo giá — các cột hoá đơn / thanh toán / chứng từ (—) sẽ cho nhập ở giai đoạn sau. Bấm vào dòng để mở báo giá.</p>
+    <div id="proj-summary"></div>
+    <div id="proj-body">${skeleton(6)}</div>`;
+
+  // Gộp tất cả báo giá đã duyệt (nhiều trang) — nội bộ vài trăm dòng nên an toàn.
+  let rows = [];
+  try {
+    for (let page = 1; page <= 50; page++) {
+      const r = await api(`/api/quotes?status=approved&size=100&page=${page}&sort=quoteDate&order=desc`);
+      const data = Array.isArray(r) ? r : (r.data || []);
+      rows = rows.concat(data);
+      const meta = (r && r.meta) || {};
+      if (!meta.hasNext || !data.length) break;
+    }
+  } catch (e) {
+    const b = document.getElementById("proj-body");
+    if (b) b.innerHTML = errorState(e.message, () => renderProjects(el));
+    return;
+  }
+
+  // --- Ô tổng đầu bảng ---
+  const sumBaoGia = rows.reduce((s, q) => s + (Number(q.subtotal) || 0), 0);
+  const sumVAT = rows.reduce((s, q) => s + (Number(q.total) || 0), 0);
+  const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:170px;padding:12px 16px">
+      <div class="muted" style="font-size:12px">${label}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
+  const summ = document.getElementById("proj-summary");
+  if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
+    ${stat("Số dự án đã duyệt", rows.length)}
+    ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
+    ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
+
+  // --- Bảng ~27 cột (đúng bố cục sheet theo dõi) ---
+  const body = document.getElementById("proj-body");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty-state">Chưa có báo giá nào ở trạng thái "Đã duyệt".</div>`;
+    return;
+  }
+  const dash = '<span class="muted">—</span>';
+  const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Total", "Q.7", "T.Phú", "HN", "Ngày Thi Công", "Ngày Tháo dỡ", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
+  body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">
+    <thead><tr>${headers.map(h => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(q => {
+      const cty = q.company?.shortName || q.company?.name || "";
+      return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
+        <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
+        <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
+        <td>${dash}</td>
+        <td style="text-align:right">${fmtMoney(q.subtotal)}</td>
+        <td>${dash}</td><td>${dash}</td>
+        <td><strong>${escapeHtml(codeLabel(q))}</strong></td>
+        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td>${cty ? escapeHtml(cty) : dash}</td>
+        <td>${dash}</td><td>${dash}</td>
+        <td style="text-align:right">${fmtMoney(q.total)}</td>
+        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+      </tr>`;
+    }).join("")}</tbody>
+  </table></div>`;
+  body.querySelectorAll("tr.qrow").forEach(tr => {
+    tr.addEventListener("click", (e) => { if (e.target.closest("button,a")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
+  });
 }
 
 // ---------------- Audit log (admin) ----------------

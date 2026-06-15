@@ -489,6 +489,10 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .fx-auto-item span { color: #aab2bd; font-weight: 400; font-size: 12px; }
 .fx-auto-item.active, .fx-auto-item:hover { background: #e7f0ff; }
 
+/* ===== Quản lý dự án — bảng theo dõi rộng (nhiều cột, mỗi cột 1 dòng cho giống sheet) ===== */
+.proj-table th, .proj-table td { white-space: nowrap; }
+.proj-table tr.qrow { cursor: pointer; }
+
 /* ===== Live xlsx preview (mirrors the exported sheet chrome) ===== */
 .xlsx-preview-wrap { margin: 16px 0; }
 .toggle-preview { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
