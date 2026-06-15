@@ -359,15 +359,24 @@ router.post(
   "/sheets/:sheetId/sign",
   validate({
     params: z.object({ sheetId: z.coerce.number().int().positive() }),
-    body: z.object({ signed: z.coerce.boolean().default(true) }).default({}),
+    // z.boolean (KHÔNG coerce): tránh chuỗi "false" bị coerce thành true → ký nhầm.
+    body: z.object({ signed: z.boolean().default(true) }).default({}),
   }),
   asyncHandler(async (req, res) => {
     const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
     if (!can(req.session, P.USER_MANAGE) && !me?.canSign) {
       return res.status(403).json({ error: "Bạn không có quyền ký chứng từ" });
     }
-    const sheet = await prisma.quoteSheet.findUnique({ where: { id: req.params.sheetId }, select: { id: true, quoteId: true } });
+    const sheet = await prisma.quoteSheet.findUnique({
+      where: { id: req.params.sheetId },
+      select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true } } },
+    });
     if (!sheet) return res.status(404).json({ error: "Không tìm thấy sheet" });
+    // CHỐNG IDOR: chỉ cho ký sheet của báo giá ĐÃ DUYỆT & chưa xoá (trang Quản lý dự án chỉ
+    // hiện dự án đã duyệt). Không cho ký theo sheetId tuỳ ý (id tuần tự → dễ dò).
+    if (sheet.quote?.status !== "approved" || sheet.quote?.deletedAt) {
+      return res.status(403).json({ error: "Chỉ ký được chứng từ của báo giá đã duyệt" });
+    }
     const signed = req.body.signed !== false;
     const updated = await prisma.quoteSheet.update({
       where: { id: sheet.id },

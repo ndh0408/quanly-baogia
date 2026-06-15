@@ -1,5 +1,5 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260615w";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260615y";
 
 const app = document.getElementById("app");
 

@@ -143,7 +143,10 @@ export function looksLikeExportPaste(matrix, startCol, fieldCount) {
   if (startCol !== 0 || !matrix.length) return false;
   const col0Ok = matrix.every((r) => { const c = (r[0] || "").trim(); return c === "" || /^[A-Za-z]{1,2}$/.test(c) || /^\d+$/.test(c); });
   if (!col0Ok) return false;
-  const hasGroupLetter = matrix.some((r) => /^[A-Za-z]{1,2}$/.test((r[0] || "").trim()));
+  // Chữ nhóm A/B/C là 1 ký tự HOA (loại tiêu đề 2 chữ như "TT"/"KL"/"ID" của bảng ngoài).
+  const hasGroupLetter = matrix.some((r) => /^[A-Z]$/.test((r[0] || "").trim()));
   const maxCols = Math.max(...matrix.map((r) => r.length));
-  return hasGroupLetter || maxCols > fieldCount;
+  // PHẢI vừa có chữ nhóm VỪA rộng hơn số cột nhập (tức có thêm cột STT) → đúng bảng app xuất ra.
+  // Dùng AND (không phải OR) để bảng Excel ngoài bị dán nhầm không bị hiểu sai thành nhóm.
+  return hasGroupLetter && maxCols > fieldCount;
 }

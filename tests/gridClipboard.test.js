@@ -70,6 +70,15 @@ describe("looksLikeExportPaste", () => {
   it("ignores a paste that does not start at column 0", () => {
     expect(looksLikeExportPaste([["A", "x"]], 2, 6)).toBe(false);
   });
+  it("ignores an external table whose col-0 header is a 2-letter word (TT/KL/ID)", () => {
+    // bảng ngoài: cột đầu là "TT" (thứ tự) — KHÔNG được hiểu nhầm thành nhóm
+    const m = [["TT", "Tên", "SL", "Đơn giá"], ["1", "Vách", "2", "95000"], ["2", "Sàn", "1", "65000"]];
+    expect(looksLikeExportPaste(m, 0, 6)).toBe(false);
+  });
+  it("requires the extra STT column (not just a group letter)", () => {
+    // có chữ nhóm "A" nhưng chỉ đúng số cột nhập (không có cột STT thừa) → không kích hoạt
+    expect(looksLikeExportPaste([["A", "x", "", "m2", "1", "100"]], 0, 6)).toBe(false);
+  });
 });
 
 describe("parseClipboardTSV", () => {

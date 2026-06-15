@@ -1,6 +1,25 @@
-# Code Review — Toàn bộ source (73 file)
+# Code Review — Toàn bộ source (74 file)
 
 _Tự động review per-file (đã tính tới các fix/hardening trong phiên). Điểm /100._
+
+## Cập nhật review — phiên 2026-06-15 (copy/paste + nhóm con + trang Quản lý dự án)
+
+Review lại bằng nhiều luồng (3 reviewer song song) cho phần code mới/đổi của phiên. **Lỗi đã tìm thấy & ĐÃ SỬA:**
+
+| # | Mức | File | Vấn đề | Đã sửa |
+|---|---|---|---|---|
+| 1 | **Bảo mật (IDOR)** | `src/routes/quotes.routes.js` — `POST /sheets/:sheetId/sign` | Người có `canSign` có thể ký BẤT KỲ sheetId (id tuần tự, kể cả báo giá nháp/đã xoá) — không kiểm tra phạm vi. | Thêm guard: chỉ ký được sheet của báo giá **đã duyệt & chưa xoá**. |
+| 2 | Bảo mật (nhẹ) | `quotes.routes.js` — body `signed` | `z.coerce.boolean` biến chuỗi `"false"` → `true` (ký nhầm). | Đổi sang `z.boolean()` (không coerce). |
+| 3 | Đúng/Hỏng dữ liệu | `public/grid-clipboard.js` — `looksLikeExportPaste` | Dùng OR → dán bảng Excel ngoài có tiêu đề cột 1 là 1–2 chữ ("TT"/"KL") bị hiểu nhầm thành nhóm → hỏng cấu trúc. | Đổi sang AND + chữ nhóm phải là **1 ký tự HOA** + phải có cột STT thừa. Thêm 2 unit test chặn. |
+| 4 | Đúng (Excel) | `src/excel.js` — `wrapLines` | Chiều cao hàng không chặn trên → vượt giới hạn 409 pt của Excel (file out-of-spec, hàng vẫn bị cắt). | Chặn `Math.min(409, …)`. |
+| 5 | Đúng (Excel) | `src/excel.js` — vòng đo chiều cao | Hàng con (sub) tính chiều cao theo ô tên (đã bị gộp lên dòng cha, không hiện) → hàng cao vô ích. | Tính `effKind` trước, bỏ qua tên với hàng `sub`. |
+
+**Đã xem xét & GIỮ NGUYÊN (đúng thiết kế, không phải lỗi):**
+- Tổng nhóm chính KHÔNG gồm các mục của nhóm con (reviewer tưởng là lỗi) — đây đúng yêu cầu "nhóm con không cộng vào nhóm chính" và **khớp đúng màn hình editor**.
+- `canSign` cho xem TẤT CẢ dự án đã duyệt — đúng yêu cầu (admin + người ký xem hết, quản lý thường chỉ xem của mình).
+- Lọc/ô chọn ở trang dự án có `escapeHtml` đầy đủ — không có XSS; cổng client chỉ là hiển thị, server mới là nguồn quyết định.
+
+Kết quả sau sửa: **lint 0 lỗi · test 128 pass** (gồm test parser RFC-4180, dựng lại nhóm, và chặn nhận nhầm bảng ngoài).
 
 ## Bảng tổng
 
@@ -64,6 +83,7 @@ _Tự động review per-file (đã tính tới các fix/hardening trong phiên)
 | src/telegram.js | 84 | 90 | 86 | 84 |
 | src/billing.js | 82 | 88 | 78 | 80 |
 | C:\Users\Admin\Desktop\QuanLY\public\app.js | 84 | 88 | 72 | 78 |
+| public/grid-clipboard.js | 92 | 90 | 93 | 90 |
 | public/theme-init.js | 92 | 95 | 90 | 88 |
 | prisma/schema.prisma | 88 | 84 | 87 | 85 |
 | prisma/seed.js | 84 | 78 | 85 | 80 |
@@ -1397,6 +1417,26 @@ Scores → Quality 82 · Security 88 · Maintainability 78 · Enterprise 80
 - Quyết định dứt khoát với renderProducts/renderSettings/openMatrixBuilder: thêm route+nav (kèm can()) hoặc xóa để giảm dead code và mặt tấn công.
 
 Scores → Quality 84 · Security 88 · Maintainability 72 · Enterprise 78
+
+---
+
+### `public/grid-clipboard.js`  — Clean Code 92/100
+
+Module THUẦN (không DOM, không side-effect) tách riêng để unit-test phần khó của copy/paste lưới.
+
+**Tốt:**
+- `parseClipboardTSV` là máy trạng thái RFC-4180 đầy đủ (field có dấu ngoặc kép, xuống dòng/tab nhúng, `""` escape, CRLF/CR/LF, bỏ BOM, bỏ dòng trống cuối) → dán đúng ô nhiều dòng của Excel/Sheets.
+- `parseLooseNumber` xử lý cả định dạng VN lẫn US, có bản vá lỗi tiền `1.234`→1234 (nghìn VN, không phải 1.234).
+- `reconstructExportRows` dựng lại nhóm/nhóm con/hàng con/dòng-thông-tin từ bảng app xuất ra theo đúng quy luật export; `looksLikeExportPaste` chỉ kích hoạt khi chắc chắn (chữ nhóm 1 ký tự HOA + có cột STT thừa, dán từ cột đầu) → tránh nhận nhầm bảng ngoài.
+- Có 27+ unit test (tests/gridClipboard.test.js) phủ parser, serialize round-trip, số VN/US, dựng lại nhóm với đúng dữ liệu thật, và chặn false-positive.
+
+**Security:**
+- `cellsToHTML` có `htmlEsc` (& < >) cho nội dung `<td>`; chỉ dùng cho `clipboardData.setData("text/html")` (copy ra ngoài), KHÔNG đẩy vào innerHTML → không có XSS.
+
+**Refactor (nhỏ):**
+- `reconstructExportRows`: dòng gán lại `it.quantity` cho section/subsection là dư (đã gán trong vòng `roles.forEach`) — vô hại, có thể bỏ cho gọn.
+
+Scores → Quality 92 · Security 90 · Maintainability 93 · Enterprise 90
 
 ---
 

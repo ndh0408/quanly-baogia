@@ -315,19 +315,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     for (const seg of String(text).split(/\r?\n/)) total += Math.max(1, Math.ceil((seg.length || 1) / perLine));
     return Math.max(1, total);
   };
-  for (let hi = 0; hi < slotRows.length; hi++) {
-    const r = slotRows[hi];
-    if (itemsCfg.rowHeight) { ws.getRow(r).height = itemsCfg.rowHeight; continue; }
-    const it = items[hi];
-    let lines = 1;
-    if (it) for (const [t, letter] of [[it.name, cols.name], [it.detail, cols.detail], [it.notes, cols.notes]]) {
-      if (t && letter) lines = Math.max(lines, wrapLines(t, letter));
-    }
-    ws.getRow(r).height = Math.max(18, lines * 15 + 3);
-  }
-
   // Group structure for "hàng con" (mirror the editor): a "sub" extends the current
   // group only when the previous row was a head/sub, else it starts its own group.
+  // Tính TRƯỚC vòng đo chiều cao để biết hàng nào là "sub" (ô tên bị gộp, không hiện).
   const effKind = items.map(() => "head");
   for (let i = 0; i < items.length; i++) {
     const k = items[i]?.kind;
@@ -335,6 +325,23 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     else if (k === "section" || k === "subsection") effKind[i] = "section";
     else if (k === "sub" && i > 0 && (effKind[i - 1] === "head" || effKind[i - 1] === "sub")) effKind[i] = "sub";
     else effKind[i] = "head";
+  }
+
+  for (let hi = 0; hi < slotRows.length; hi++) {
+    const r = slotRows[hi];
+    if (itemsCfg.rowHeight) { ws.getRow(r).height = itemsCfg.rowHeight; continue; }
+    const it = items[hi];
+    let lines = 1;
+    if (it) {
+      // Hàng con (sub): ô STT + Hạng Mục gộp lên dòng cha → tên KHÔNG hiện ở dòng này, nên
+      // không đo chiều cao theo tên (tránh hàng cao vô ích).
+      const nameForHeight = effKind[hi] === "sub" ? null : it.name;
+      for (const [t, letter] of [[nameForHeight, cols.name], [it.detail, cols.detail], [it.notes, cols.notes]]) {
+        if (t && letter) lines = Math.max(lines, wrapLines(t, letter));
+      }
+    }
+    // Chặn trên 409 pt (giới hạn chiều cao hàng của Excel) để file không out-of-spec.
+    ws.getRow(r).height = Math.min(409, Math.max(18, lines * 15 + 3));
   }
 
   // Per-section subtotal = sum of item/sub amounts until the next section. Shown only
