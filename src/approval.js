@@ -20,9 +20,13 @@ export async function startApprovalChain(quoteId, versionNo, db = prisma) {
   });
 }
 
-/** Only the Director (admin) may approve. */
+/**
+ * Vai trò được phép duyệt 1 cấp: admin (mọi báo giá) HOẶC manager. Việc manager chỉ
+ * được duyệt báo giá DO CHÍNH MÌNH tạo được route /approve siết riêng (kiểm tra isCreator)
+ * — ở đây chỉ chặn theo vai trò (nhân viên không bao giờ được duyệt).
+ */
 export async function canApproveLevel(_quoteId, _versionNo, _level, userRole) {
-  return userRole === "admin";
+  return userRole === "admin" || userRole === "manager";
 }
 
 /** Find the next pending level for this version. Returns Approval row or null. */

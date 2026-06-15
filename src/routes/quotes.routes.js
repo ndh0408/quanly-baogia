@@ -604,7 +604,9 @@ router.post(
 
 router.post(
   "/:id/approve",
-  requirePermission(P.QUOTE_APPROVE),
+  // Quyền duyệt được kiểm INLINE bên dưới: admin (quote:approve) duyệt mọi báo giá,
+  // manager (quote:approve:own) chỉ duyệt báo giá DO MÌNH tạo. (Không dùng requirePermission
+  // 1-quyền vì cần OR 2 quyền + ràng buộc "của mình".)
   validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -612,11 +614,15 @@ router.post(
     if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
 
-    // Segregation of duties: the creator may not approve their own quote.
-    // (Admins are allowed as a last-resort override, but it is flagged in the audit trail.)
+    // Phân quyền duyệt: admin (quote:approve) duyệt MỌI báo giá; manager (quote:approve:own)
+    // CHỈ được duyệt báo giá DO CHÍNH MÌNH tạo — đây là quy tắc "manager tự duyệt dự án của
+    // mình, không cần admin". Nhân viên không có quyền nào → không duyệt được. (selfApproved
+    // vẫn được ghi vào nhật ký bên dưới.)
     const isCreator = existing.createdById === req.session.userId;
-    if (isCreator && req.session.role !== "admin") {
-      return res.status(403).json({ error: "Người tạo không được tự duyệt báo giá của mình" });
+    const canApproveAll = can(req.session, P.QUOTE_APPROVE);
+    const canApproveOwn = can(req.session, P.QUOTE_APPROVE_OWN);
+    if (!canApproveAll && !(canApproveOwn && isCreator)) {
+      return res.status(403).json({ error: "Bạn không có quyền duyệt báo giá này" });
     }
 
     const pending = await nextPendingLevel(id, existing.currentVersion);
@@ -656,14 +662,17 @@ router.post(
     }
     const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
 
-    await notify(existing.createdById, {
-      title: `Báo giá ${quote.quoteNumber} đã được duyệt`,
-      body: "Có thể gửi cho khách.",
-      link: `/#/quotes/${id}`,
-      resource: "quote",
-      resourceId: id,
-      important: true,
-    });
+    // Báo cho người tạo (bỏ qua nếu họ chính là người vừa tự duyệt — manager self-approve).
+    if (existing.createdById !== req.session.userId) {
+      await notify(existing.createdById, {
+        title: `Báo giá ${quote.quoteNumber} đã được duyệt`,
+        body: "Có thể gửi cho khách.",
+        link: `/#/quotes/${id}`,
+        resource: "quote",
+        resourceId: id,
+        important: true,
+      });
+    }
 
     await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { complete, selfApproved: isCreator } });
     if (complete) emitWebhook("quote.approved", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});

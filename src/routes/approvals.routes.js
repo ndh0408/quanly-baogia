@@ -19,7 +19,7 @@ const MatrixCreate = z.object({
   levels: z.array(
     z.object({
       level: z.coerce.number().int().min(1),
-      roles: z.array(z.enum(["admin", "manager", "employee"])).min(1, "Mỗi cấp duyệt phải có ít nhất 1 vai trò"),
+      roles: z.array(z.enum(["admin", "manager"])).min(1, "Mỗi cấp duyệt phải có ít nhất 1 vai trò"),
       any: z.coerce.number().int().min(1).default(1),
     })
   ).min(1),
@@ -84,12 +84,15 @@ router.delete(
 router.get(
   "/queue",
   asyncHandler(async (req, res) => {
-    // Only the Director (admin) approves quotes, so only they see the queue.
-    if (req.session.role !== "admin") {
-      return res.json({ data: [], meta: { total: 0 } });
-    }
+    // Admin (Director) thấy MỌI báo giá chờ duyệt; manager chỉ thấy báo giá chờ duyệt
+    // DO CHÍNH MÌNH tạo (họ được tự duyệt). Nhân viên không thấy hàng chờ duyệt.
+    const role = req.session.role;
+    let where;
+    if (role === "admin") where = { decision: "pending" };
+    else if (role === "manager") where = { decision: "pending", quote: { createdById: req.session.userId } };
+    else return res.json({ data: [], meta: { total: 0 } });
     const rows = await prisma.approval.findMany({
-      where: { decision: "pending" },
+      where,
       orderBy: [{ quoteId: "asc" }, { level: "asc" }],
       take: 100,
       include: { quote: { include: { company: true, createdBy: { select: { displayName: true } } } } },

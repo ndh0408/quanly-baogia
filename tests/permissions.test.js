@@ -14,39 +14,30 @@ import {
 // a silent RBAC regression here means cross-salesperson data leaks.
 describe("roleCan — role × permission matrix", () => {
   it.each([
-    // employee
-    ["employee", P.QUOTE_CREATE, true],
-    ["employee", P.QUOTE_READ_OWN, true],
-    ["employee", P.QUOTE_READ_ALL, false],
-    ["employee", P.QUOTE_UPDATE_OWN, true],
-    ["employee", P.QUOTE_UPDATE_ALL, false],
-    ["employee", P.QUOTE_DELETE_ALL, false],
-    ["employee", P.QUOTE_SUBMIT, true],
-    ["employee", P.QUOTE_APPROVE, false],
-    ["employee", P.QUOTE_REJECT, false],
-    ["employee", P.QUOTE_SEND, false],
-    ["employee", P.CUSTOMER_READ_ALL, true],   // shared customer directory
-    ["employee", P.CUSTOMER_MANAGE_ALL, false],
-    ["employee", P.PRODUCT_READ, true],
-    ["employee", P.PRODUCT_READ_COST, false],
-    ["employee", P.USER_MANAGE, false],
-    ["employee", P.SETTINGS_MANAGE, false],
-    ["employee", P.AUDIT_VIEW, false],
-    // manager
+    // 'employee' role REMOVED (2026-06-15) — it now grants NOTHING (fails closed).
+    ["employee", P.QUOTE_CREATE, false],
+    ["employee", P.QUOTE_READ_OWN, false],
+    // manager (regular non-admin: creates/edits/sends OWN quotes; SELF-APPROVES own)
+    ["manager", P.QUOTE_CREATE, true],
+    ["manager", P.QUOTE_READ_OWN, true],
+    ["manager", P.QUOTE_UPDATE_OWN, true],
+    ["manager", P.QUOTE_SUBMIT, true],
     ["manager", P.QUOTE_READ_ALL, false],      // managers see only their own quotes
     ["manager", P.QUOTE_UPDATE_ALL, false],
-    ["manager", P.QUOTE_APPROVE, false],       // only the director approves
+    ["manager", P.QUOTE_APPROVE, false],       // no blanket approve (can't approve others')
+    ["manager", P.QUOTE_APPROVE_OWN, true],    // CAN self-approve their OWN quote
     ["manager", P.QUOTE_SEND, true],
     ["manager", P.CUSTOMER_MANAGE_ALL, true],
     ["manager", P.PRODUCT_MANAGE, true],
     ["manager", P.PRODUCT_READ_COST, true],
     ["manager", P.AUDIT_VIEW, true],
     ["manager", P.USER_MANAGE, false],
-    // admin (director)
+    // admin (director) — approves everything, incl. own
     ["admin", P.QUOTE_READ_ALL, true],
     ["admin", P.QUOTE_UPDATE_ALL, true],
     ["admin", P.QUOTE_DELETE_ALL, true],
     ["admin", P.QUOTE_APPROVE, true],
+    ["admin", P.QUOTE_APPROVE_OWN, true],      // inherits via ...MANAGER
     ["admin", P.QUOTE_REJECT, true],
     ["admin", P.USER_MANAGE, true],
     ["admin", P.SETTINGS_MANAGE, true],
@@ -69,9 +60,9 @@ describe("roleCan — role × permission matrix", () => {
 });
 
 describe("canOnQuote — ownership & membership", () => {
-  const owner = { userId: 1, role: "employee" };
-  const member = { userId: 2, role: "employee" };
-  const stranger = { userId: 3, role: "employee" };
+  const owner = { userId: 1, role: "manager" };
+  const member = { userId: 2, role: "manager" };
+  const stranger = { userId: 3, role: "manager" };
   const admin = { userId: 9, role: "admin" };
   const quote = { createdById: 1, members: [{ id: 2 }] };
 
@@ -115,24 +106,20 @@ describe("quoteScopeWhere — list visibility", () => {
   it("admin sees everything (empty where)", () => {
     expect(quoteScopeWhere({ userId: 9, role: "admin" })).toEqual({});
   });
-  it("employee/manager restricted to created OR member quotes", () => {
-    for (const role of ["employee", "manager"]) {
-      expect(quoteScopeWhere({ userId: 7, role })).toEqual({
-        OR: [{ createdById: 7 }, { members: { some: { id: 7 } } }],
-      });
-    }
+  it("manager restricted to created OR member quotes", () => {
+    expect(quoteScopeWhere({ userId: 7, role: "manager" })).toEqual({
+      OR: [{ createdById: 7 }, { members: { some: { id: 7 } } }],
+    });
   });
 });
 
 describe("canScoped — generic resource scoping (customers)", () => {
-  it("manager manages any customer, employee only their own", () => {
-    const row = { ownerId: 5 };
-    expect(canScoped({ userId: 1, role: "manager" }, "customer", "manage", row)).toBe(true);
-    expect(canScoped({ userId: 5, role: "employee" }, "customer", "manage", row)).toBe(true);
-    expect(canScoped({ userId: 6, role: "employee" }, "customer", "manage", row)).toBe(false);
+  it("manager (customer:manage:all) manages any customer regardless of owner", () => {
+    expect(canScoped({ userId: 1, role: "manager" }, "customer", "manage", { ownerId: 5 })).toBe(true);
+    expect(canScoped({ userId: 1, role: "manager" }, "customer", "manage", { ownerId: null })).toBe(true);
   });
-  it("ownerless row is not 'own'", () => {
-    expect(canScoped({ userId: 5, role: "employee" }, "customer", "manage", { ownerId: null })).toBe(false);
+  it("unknown role manages nothing", () => {
+    expect(canScoped({ userId: 5, role: "nope" }, "customer", "manage", { ownerId: 5 })).toBe(false);
   });
 });
 

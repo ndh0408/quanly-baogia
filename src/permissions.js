@@ -16,7 +16,8 @@ export const PERMISSIONS = {
   QUOTE_DELETE_OWN:   "quote:delete:own",
   QUOTE_DELETE_ALL:   "quote:delete:all",
   QUOTE_SUBMIT:       "quote:submit",
-  QUOTE_APPROVE:      "quote:approve",
+  QUOTE_APPROVE:      "quote:approve",       // duyệt MỌI báo giá (admin)
+  QUOTE_APPROVE_OWN:  "quote:approve:own",   // tự duyệt báo giá DO MÌNH tạo (manager)
   QUOTE_REJECT:       "quote:reject",
   QUOTE_SEND:         "quote:send",
   QUOTE_EXPORT:       "quote:export",
@@ -51,7 +52,8 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_DELETE_OWN]: "Xóa báo giá của mình",
   [P.QUOTE_DELETE_ALL]: "Xóa mọi báo giá",
   [P.QUOTE_SUBMIT]:     "Trình duyệt",
-  [P.QUOTE_APPROVE]:    "Duyệt báo giá",
+  [P.QUOTE_APPROVE]:    "Duyệt mọi báo giá",
+  [P.QUOTE_APPROVE_OWN]: "Tự duyệt báo giá của mình",
   [P.QUOTE_REJECT]:     "Từ chối báo giá",
   [P.QUOTE_SEND]:       "Gửi cho khách",
   [P.QUOTE_EXPORT]:     "Xuất Excel/PDF",
@@ -75,7 +77,7 @@ export const PERMISSION_LABELS = {
 export const PERMISSION_GROUPS = [
   { key: "quote", label: "Báo giá", perms: [
     P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_READ_ALL, P.QUOTE_UPDATE_OWN, P.QUOTE_UPDATE_ALL,
-    P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL, P.QUOTE_SUBMIT, P.QUOTE_APPROVE, P.QUOTE_REJECT,
+    P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL, P.QUOTE_SUBMIT, P.QUOTE_APPROVE, P.QUOTE_APPROVE_OWN, P.QUOTE_REJECT,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
   ] },
   { key: "customer", label: "Khách hàng", perms: [
@@ -103,6 +105,7 @@ const MANAGER = [
   ...EMPLOYEE,
   // Manager sees/edits only the quotes THEY created (not everyone's).
   P.QUOTE_SEND,
+  P.QUOTE_APPROVE_OWN,   // tự duyệt báo giá DO MÌNH tạo — không cần admin (vẫn KHÔNG duyệt được của người khác)
   P.AUDIT_VIEW,
   // Manager sees all customers and the cost/margin, and owns the product catalog.
   P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
@@ -120,13 +123,13 @@ const ADMIN = [
 export const ROLE_PERMISSIONS = {
   admin: new Set(ADMIN),
   manager: new Set(MANAGER),
-  employee: new Set(EMPLOYEE),
+  // 'employee' role bỏ từ 2026-06-15 (chỉ còn admin + manager). EMPLOYEE vẫn giữ làm
+  // danh sách quyền NỀN mà MANAGER kế thừa (`...EMPLOYEE`), không phải 1 vai trò gán được.
 };
 
 export const ROLE_LABELS = {
   admin: "Quản trị viên",
   manager: "Quản lý",
-  employee: "Nhân viên",
 };
 
 /** Does this role hold the given permission? (`:all` implies `:own`.) */

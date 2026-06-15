@@ -269,8 +269,8 @@ const STATUS_LABEL = {
   sent: "Đã gửi", expired: "Hết hạn", converted: "Đã chốt", lost: "Không chốt",
 };
 const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
-const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý", employee: "Nhân viên" };
-const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Quản lý", employee: "Nhân viên" };
+const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý" };
+const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Quản lý" };
 const CUSTOMER_STATUS_LABEL = { lead: "Tiềm năng", prospect: "Đang trao đổi", active: "Đang giao dịch", inactive: "Ngừng" };
 const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—";
 const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
@@ -540,7 +540,7 @@ function renderShell() {
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
           ${nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>")}
           ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
-          ${can("quote:approve") ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
+          ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
           ${can("user:manage") ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
@@ -786,7 +786,7 @@ async function refreshBadges() {
     const badge = document.getElementById("badge-notif");
     if (badge) badge.textContent = n.count > 0 ? n.count : "";
   } catch {}
-  if (can("quote:approve")) {
+  if (can("quote:approve") || can("quote:approve:own")) {
     try {
       const q = await api("/api/approvals/queue");
       const b = document.getElementById("badge-pending");
@@ -1392,8 +1392,9 @@ function renderEditor(el, quote) {
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
           ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">Trình duyệt</button>` : ""}
+          ${!isNew && q.status === "pending" && (can("quote:approve") || (can("quote:approve:own") && q.createdById === state.user?.id)) ? `
+            <button class="btn btn-success" id="btn-approve">Duyệt</button>` : ""}
           ${!isNew && q.status === "pending" && can("quote:approve") ? `
-            <button class="btn btn-success" id="btn-approve">Duyệt</button>
             <button class="btn btn-danger" id="btn-reject">Từ chối</button>
           ` : ""}
           ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-primary" id="btn-send">${q.status === "sent" ? "Gửi lại khách" : "Gửi khách"}</button>` : ""}
@@ -3061,7 +3062,6 @@ function openInviteModal() {
       <label style="grid-column:1/-1">Email cá nhân <span class="req">*</span><input id="iv-email" type="email" inputmode="email" placeholder="email cá nhân của nhân viên" /></label>
       <label style="grid-column:1/-1">Quyền
         <select id="iv-role">
-          <option value="employee">Nhân viên</option>
           <option value="manager">Quản lý</option>
           <option value="admin">Quản trị viên</option>
         </select>
@@ -3114,8 +3114,7 @@ function openUserModal(u) {
       <label>Họ tên<input name="displayName" value="${escapeHtml(u?.displayName || "")}" /></label>
       <label>Quyền
         <select name="role">
-          <option value="employee" ${u?.role === "employee" ? "selected" : ""}>Nhân viên</option>
-          <option value="manager" ${u?.role === "manager" ? "selected" : ""}>Quản lý</option>
+          <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Quản lý</option>
           <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
         </select>
       </label>
@@ -3565,7 +3564,7 @@ async function renderApprovalQueue(el) {
           <td style="white-space:nowrap">
             <button class="btn btn-sm" data-open="${a.quote?.id}">Xem</button>
             <button class="btn btn-sm btn-primary" data-approve="${a.quote?.id}">✓ Duyệt</button>
-            <button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>
+            ${can("quote:approve") ? `<button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>` : ""}
           </td>
         </tr>`).join("")}</tbody></table></div>`;
     body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {

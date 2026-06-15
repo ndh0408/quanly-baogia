@@ -19,14 +19,14 @@ const PASSWORD = "Test1234!a";
 describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
   let app;
   let company, template;
-  let adminU, managerU, employeeU;
-  let admin, employee; // supertest agents (cookie sessions)
+  let adminU, managerU, manager2U;
+  let admin, manager, manager2; // supertest agents (cookie sessions)
 
-  async function makeUser(role) {
+  async function makeUser(role, label = role) {
     return prisma.user.create({
       data: {
-        username: `${TAG}-${role}`,
-        displayName: `${TAG} ${role}`,
+        username: `${TAG}-${label}`,
+        displayName: `${TAG} ${label}`,
         role,
         passwordHash: await bcrypt.hash(PASSWORD, 4), // low cost: test speed
       },
@@ -58,12 +58,18 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
     template = await prisma.quoteTemplate.create({
       data: { code: `${TAG}-tpl`, name: `${TAG} Template`, companyId: company.id, filePath: "templates/Unibenfood.xlsx" },
     });
-    [adminU, managerU, employeeU] = await Promise.all([makeUser("admin"), makeUser("manager"), makeUser("employee")]);
+    // 'employee' role removed — the regular non-admin actor is now a MANAGER.
+    // manager2 is a second manager, used to prove cross-user approval/read is denied.
+    [adminU, managerU, manager2U] = await Promise.all([
+      makeUser("admin"), makeUser("manager", "manager"), makeUser("manager", "manager2"),
+    ]);
 
     admin = request.agent(app);
-    employee = request.agent(app);
+    manager = request.agent(app);
+    manager2 = request.agent(app);
     await login(admin, adminU);
-    await login(employee, employeeU);
+    await login(manager, managerU);
+    await login(manager2, manager2U);
   });
 
   afterAll(async () => {
@@ -73,7 +79,7 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       select: { id: true },
     });
     const qIds = quotes.map((q) => q.id);
-    const uIds = [adminU, managerU, employeeU].filter(Boolean).map((u) => u.id);
+    const uIds = [adminU, managerU, manager2U].filter(Boolean).map((u) => u.id);
     await prisma.approval.deleteMany({ where: { quoteId: { in: qIds } } });
     await prisma.notification.deleteMany({ where: { userId: { in: uIds } } });
     await prisma.loginAttempt.deleteMany({ where: { username: { startsWith: TAG } } });
@@ -96,13 +102,8 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
   describe("lifecycle: create → submit → approve", () => {
     let quoteId;
 
-    it("employee must assign a manager when creating", async () => {
-      const res = await employee.post("/api/quotes").send(quotePayload());
-      expect(res.status).toBe(400);
-    });
-
-    it("employee creates a quote (with manager) → 201 with computed totals", async () => {
-      const res = await employee.post("/api/quotes").send(quotePayload({ managerId: managerU.id }));
+    it("manager creates a quote (no overseeing manager needed) → 201 with totals", async () => {
+      const res = await manager.post("/api/quotes").send(quotePayload());
       expect(res.status).toBe(201);
       expect(res.body.status).toBe("draft");
       expect(res.body.subtotal).toBe(2_000_000);
@@ -111,22 +112,22 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       quoteId = res.body.id;
     });
 
-    it("employee cannot approve (no quote:approve permission)", async () => {
-      const res = await employee.post(`/api/quotes/${quoteId}/approve`).send({});
-      expect(res.status).toBe(403);
-    });
-
     it("approve before submit → 400 (not pending)", async () => {
       const res = await admin.post(`/api/quotes/${quoteId}/approve`).send({});
       expect(res.status).toBe(400);
     });
 
-    it("employee submits → pending with an Approval row", async () => {
-      const res = await employee.post(`/api/quotes/${quoteId}/submit`);
+    it("manager submits their own → pending with an Approval row", async () => {
+      const res = await manager.post(`/api/quotes/${quoteId}/submit`);
       expect(res.status).toBe(200);
       expect(res.body.status).toBe("pending");
       const ap = await prisma.approval.findFirst({ where: { quoteId, decision: "pending" } });
       expect(ap).toBeTruthy();
+    });
+
+    it("a DIFFERENT manager cannot approve someone else's quote → 403", async () => {
+      const res = await manager2.post(`/api/quotes/${quoteId}/approve`).send({});
+      expect(res.status).toBe(403);
     });
 
     it("REGRESSION: cosmetic edit while pending does NOT orphan the approval", async () => {
@@ -140,8 +141,8 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       expect(after.currentVersion).toBe(before.currentVersion); // no version bump
     });
 
-    it("admin approves → approved", async () => {
-      const res = await admin.post(`/api/quotes/${quoteId}/approve`).send({ comment: "ok" });
+    it("manager SELF-APPROVES their own quote → approved (no admin needed)", async () => {
+      const res = await manager.post(`/api/quotes/${quoteId}/approve`).send({ comment: "tự duyệt" });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe("approved");
     });
@@ -195,18 +196,18 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       adminQuoteId = res.body.id;
     });
 
-    it("employee cannot read a quote they don't own / aren't a member of", async () => {
-      const res = await employee.get(`/api/quotes/${adminQuoteId}`);
+    it("a manager cannot read a quote they don't own / aren't a member of", async () => {
+      const res = await manager2.get(`/api/quotes/${adminQuoteId}`);
       expect(res.status).toBe(403);
     });
 
-    it("employee list only shows their own quotes", async () => {
-      const res = await employee.get("/api/quotes").query({ q: TAG });
+    it("manager list only shows their own quotes", async () => {
+      const res = await manager2.get("/api/quotes").query({ q: TAG });
       expect(res.status).toBe(200);
       for (const row of res.body.data) {
         const mine =
-          row.createdById === employeeU.id ||
-          (row.members || []).some((m) => (m.id ?? m) === employeeU.id);
+          row.createdById === manager2U.id ||
+          (row.members || []).some((m) => (m.id ?? m) === manager2U.id);
         expect(mine).toBe(true);
       }
     });

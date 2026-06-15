@@ -54,7 +54,7 @@ export const ChangePasswordSchema = z.object({
 export const UserInviteSchema = z.object({
   email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự"),
   displayName,
-  role: z.enum(["admin", "manager", "employee"]).default("employee"),
+  role: z.enum(["admin", "manager"]).default("manager"),
   projectCode,
 });
 
@@ -71,14 +71,14 @@ export const UserCreateSchema = z.object({
   username,
   password: pwd,
   displayName,
-  role: z.enum(["admin", "manager", "employee"]),
+  role: z.enum(["admin", "manager"]),
   phone,
   title,
 });
 
 export const UserUpdateSchema = z.object({
   displayName: displayName.optional(),
-  role: z.enum(["admin", "manager", "employee"]).optional(),
+  role: z.enum(["admin", "manager"]).optional(),
   phone,
   title,
   active: z.boolean().optional(),
