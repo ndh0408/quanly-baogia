@@ -351,13 +351,20 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     const r = slotRows[i];
     const it = items[i];
     if (it && effKind[i] === "section") {
-      // Section header (nhóm A/B/C): letter in STT (manual label wins), name in Hạng Mục,
-      // optional section subtotal in Thành Tiền, light-blue fill + bold. No qty/price.
-      sectionIdx++;
+      // Section header. NHÓM CHÍNH (kind="section"): tự cấp chữ A/B/C. NHÓM CON
+      // (kind="subsection"): KHÔNG chiếm chữ cái (giống hệt trên màn hình), thụt lề tên
+      // bằng "↳ ", nền nhạt hơn — để xuất Excel khớp với editor, không lệch thứ tự nhóm.
+      const isSubSection = it.kind === "subsection";
+      let letter;
+      if (isSubSection) {
+        letter = (it.label && String(it.label).trim()) || "";   // nhóm con không tự đánh chữ
+      } else {
+        sectionIdx++;
+        letter = (it.label && String(it.label).trim()) || sectionLetter(sectionIdx);
+      }
       itemNo = 0; // item numbering restarts under each section
-      const letter = (it.label && String(it.label).trim()) || sectionLetter(sectionIdx);
       if (cols.stt) setCell(ws, `${cols.stt}${r}`, letter);
-      if (cols.name) { setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
+      if (cols.name) { setCell(ws, `${cols.name}${r}`, (isSubSection ? "↳ " : "") + (it.name || "")); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
@@ -370,7 +377,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
       for (const col of Object.values(cols)) {
         paintCell(ws.getCell(`${col}${r}`), {
-          fill: pal?.sectionFill || "FFDDEBF7",
+          fill: isSubSection ? "FFEAF1FB" : (pal?.sectionFill || "FFDDEBF7"),   // nhóm con nền nhạt hơn
           bold: true,
           ...(pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {}),
         });

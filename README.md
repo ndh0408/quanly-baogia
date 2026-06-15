@@ -2,22 +2,39 @@
 
 Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia Nguyễn & Colorfull).
 
-- 3 cấp tài khoản: **Admin (Giám đốc)** / **Quản lý** / **Nhân viên**
-- Tạo / sửa / nhân bản báo giá nhiều sheet, tự tính VAT + Tổng cộng
-- Quy trình duyệt 1 cấp: Nhân viên tạo nháp → trình duyệt → **Admin** duyệt
-- **Xuất Excel** giống y hệt mẫu công ty (GN không ngày / GN có ngày / CLF) — giữ logo, font, viền, ô gộp
+- **2 cấp tài khoản: Admin (Giám đốc) / Quản lý** — vai trò "Nhân viên" đã bỏ từ 2026-06-15.
+- Tạo / sửa / nhân bản báo giá nhiều sheet, tự tính VAT + Tổng cộng (**cập nhật realtime** khi gõ).
+- **Duyệt:** Admin duyệt **mọi** báo giá; **Quản lý tự duyệt báo giá của chính mình** (không cần Admin).
+- **Xuất Excel** giống y hệt mẫu công ty (GN không ngày / GN có ngày / CLF) — giữ logo, font, viền, ô gộp.
+- **Trang Quản lý dự án** (mới): theo dõi báo giá đã duyệt theo bố cục sheet/hoá đơn — chi tiết bên dưới.
 
 ## Tính năng nổi bật (editor báo giá)
 
-- **Nhập công thức kiểu Excel** ở ô *Số lượng* / *Đơn giá*: gõ `=5x3` → 15 (hỗ trợ `+ - * / x ( )`, số thập phân `,`).
+- **Công thức kiểu Excel** ở ô số: `=5x3`, **`=SUM(H3:H8)`**, **tham chiếu ô `=G3*E3`** — bấm/kéo ô để chèn tham chiếu, có **thanh công thức (fx)** + gợi ý tên hàm. (Gõ tiếng Việt bằng bộ gõ OpenKey/Unikey: nhấn Enter để chốt từ **không** làm nhảy ô.) Ô có công thức hiện **dấu `ƒ` ở góc trên‑phải**; **bấm vào `ƒ` để xem công thức đã nhập + kết quả — ai cũng xem được, kể cả tài khoản chỉ‑xem và trên điện thoại** (phục vụ kiểm tra/quản lý "họ đánh gì").
 - **Bên gửi tự theo Công ty:**
   - Ô **Công ty** bị khoá ở màn sửa (đã chọn lúc tạo báo giá).
   - Ô **Địa chỉ bên gửi** chỉ-đọc, luôn tự lấy theo địa chỉ Công ty.
   - Người gửi / Chức danh / Điện thoại bên gửi: nhập tay, chảy thẳng vào Excel.
 - **Bên nhận (khách hàng)** có đủ: Tên KH, Người liên hệ, Email, **Điện thoại**, **Địa chỉ** — tất cả ra Excel.
-- **Hàng con + dòng thông tin**: nút `↳` thêm hàng con trong 1 hạng mục; "+ Thêm dòng thông tin" cho dòng ghi chú chương trình (không tính tiền). Giảm giá = nhập đơn giá **âm**.
-- **Lưới kiểu Excel**: chọn vùng, copy/paste từ Excel, Ctrl+Z/Y, fill-down.
+- **Nhóm / Nhóm con / Hàng con / Dòng thông tin**:
+  - "+ Thêm nhóm (A,B…)": nhóm chính, có Thành Tiền nhóm (×Số Lượng nếu bật).
+  - **"+ Thêm nhóm con"**: tổng riêng, **KHÔNG cộng vào nhóm chính**, nhưng **vẫn vào Tổng cộng** báo giá (thụt lề + dấu ↳). Dùng để quản lý chi phí/biến thể trong 1 nhóm. **Khi xuất Excel:** nhóm con hiển thị **giống hệt trên màn hình** — **không chiếm chữ A/B/C** của nhóm chính, có dấu ↳ + nền nhạt hơn (thứ tự chữ nhóm không bị lệch).
+  - Nút `↳` thêm **hàng con** trong 1 hạng mục; "+ Thêm dòng thông tin" cho dòng ghi chú (không tính tiền). Giảm giá = nhập đơn giá **âm**.
+- **Bảng nội bộ theo sheet** (Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng): lưới riêng để quản lý chi phí — **KHÔNG xuất Excel**, tổng đổ sang trang Quản lý dự án.
+- **Ngày thi công**: ô chọn ngày, **chỉ quản lý nội bộ — KHÔNG xuất Excel** (hiện ở trang Quản lý dự án).
+- **Lưới kiểu Excel**: chọn vùng, **copy/paste từ Excel** (dán khi đang ở dòng nhóm/nhóm con sẽ chèn item ngay dưới), Ctrl+Z/Y, fill-down. Chữ dài tự **xuống hàng** để dễ đọc (không vào Excel).
 - Nhiều **sheet** trong 1 báo giá; mỗi sheet 1 template; xuất ra 1 file Excel nhiều sheet (ghép bằng XML/zip, xem [src/xlsxStitcher.js](src/xlsxStitcher.js)).
+- **Responsive**: dùng tốt trên điện thoại / máy tính bảng / desktop.
+
+## Trang Quản lý dự án (admin + người được "Ký chứng từ")
+
+Theo dõi các báo giá **đã duyệt** theo bố cục bảng sản xuất/hoá đơn:
+
+- Mỗi **sheet** của báo giá = 1 dòng; báo giá nhiều sheet → Mã Sản Xuất thêm hậu tố `_1/_2…`, Hạng Mục = tên sheet.
+- Cột tự lấy từ báo giá: **Báo Giá** (trước VAT) · **Thành Tiền VAT** · **Mã Sản Xuất** (projectCode) · **Cty Xuất Hoá Đơn** (theo công ty của template sheet) · **Ngày Thi Công** · **Team client** (mã KH) · **Account** (người tạo).
+- **Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng** = TỔNG các *bảng nội bộ* cùng loại của sheet đó.
+- **Ký Chứng từ** (theo từng sheet): Admin **hoặc** user được bật **"Được ký chứng từ"** (cột `User.canSign`) mới thấy nút Ký; ký xong hiện "✓ Đã Ký" (kèm tên + ngày).
+- Cột hoá đơn/thanh toán/chứng từ còn lại để "—" (giai đoạn sau cho nhập).
 
 ## Stack
 - **Backend:** Node.js + Express + Prisma + PostgreSQL
@@ -106,13 +123,12 @@ npm start                 # http://localhost:3000
 
 ## Phân quyền
 
-| Quyền | Tạo BG | Sửa BG mình/được thêm | Sửa BG người khác | Duyệt | Quản lý user |
+| Quyền | Tạo BG | Sửa BG của mình | Sửa BG người khác | Duyệt | Quản lý user |
 |---|---|---|---|---|---|
-| Nhân viên | ✅ | ✅ (khi nháp/từ chối) | ❌ | ❌ | ❌ |
-| Quản lý | ✅ | ✅ | chỉ BG được thêm | ❌ | ❌ |
-| Admin (Giám đốc) | ✅ | ✅ | ✅ (tất cả) | ✅ | ✅ |
+| Quản lý | ✅ | ✅ | ❌ (chỉ BG được thêm làm thành viên) | **chỉ BG của mình** (`quote:approve:own`) | ❌ |
+| Admin (Giám đốc) | ✅ | ✅ | ✅ (tất cả) | ✅ (mọi BG) | ✅ |
 
-> Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`). Admin thấy tất cả. Duyệt là **1 cấp, chỉ Admin**.
+> Vai trò **"Nhân viên" đã bỏ hẳn** (chỉ còn Admin + Quản lý — xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Duyệt:** Admin duyệt mọi báo giá; **Quản lý tự duyệt báo giá của chính mình**. Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) ký chứng từ + xem trang Quản lý dự án.
 
 ## Trạng thái báo giá
 **Nháp → Chờ duyệt → Đã duyệt** (có thể *Đã gửi* / *Đã chốt* / *Không chốt* / *Hết hạn*); **Bị từ chối** → sửa rồi trình lại.

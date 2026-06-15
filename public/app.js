@@ -2001,6 +2001,38 @@ function drawExtraTables(q, activeSheet, editable) {
   });
 }
 
+// ===== Xem công thức (formula peek) — dùng chung cho mọi ô/mọi quyền/mọi thiết bị =====
+// Một popover nổi (gắn vào <body>) hiện công thức đã nhập + kết quả. Bấm ra ngoài / Esc / cuộn = đóng.
+function ensureFxPeek() {
+  let el = document.getElementById("fx-peek");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "fx-peek"; el.className = "fx-peek hidden";
+    document.body.appendChild(el);
+    document.addEventListener("mousedown", (e) => {
+      if (el.classList.contains("hidden")) return;
+      if (e.target.closest && (e.target.closest("#fx-peek") || e.target.closest(".fx-peek-badge"))) return;
+      el.classList.add("hidden");
+    }, true);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") el.classList.add("hidden"); });
+    window.addEventListener("scroll", () => el.classList.add("hidden"), true);
+  }
+  return el;
+}
+function showFxPeek(td) {
+  const el = ensureFxPeek();
+  const fx = td.dataset.fx || "";
+  const val = td.dataset.fxVal || "";
+  el.innerHTML = `<div class="fx-peek-h">ƒ Công thức ô này</div>` +
+    `<div class="fx-peek-f">${escapeHtml(fx)}</div>` +
+    (val !== "" ? `<div class="fx-peek-v">= ${escapeHtml(val)}</div>` : "");
+  el.classList.remove("hidden");
+  const r = td.getBoundingClientRect();
+  const w = el.offsetWidth || 240;
+  el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 10)) + "px";
+  el.style.top = Math.min(r.bottom + 4, window.innerHeight - el.offsetHeight - 8) + "px";
+}
+
 function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const tbody = document.querySelector("#items-table tbody");
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
@@ -2131,14 +2163,40 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     ta.addEventListener("input", grow);
   });
 
-  // Mark cells that hold a formula (hover shows it; a small fx corner marker).
+  // Mark cells that hold a formula. AI CŨNG XEM ĐƯỢC CÔNG THỨC: ngoài tooltip khi rê
+  // chuột (chỉ máy tính), gắn 1 nút "ƒ" THẬT (clickable) ở góc ô để MỌI người — kể cả
+  // người chỉ-xem (ô bị disabled, không bắt được click/hover) và trên điện thoại — chỉ
+  // cần BẤM là thấy đúng công thức đã nhập + kết quả, phục vụ quản lý/kiểm tra.
   activeSheet.items.forEach((it, i) => {
     if (!it.formulas) return;
     for (const f in it.formulas) {
+      const fx = it.formulas[f]; if (!fx) continue;
       const cell = tbody.querySelector(`tr[data-row="${i}"] [data-f="${f}"]`);
-      if (cell) { cell.title = "Công thức: " + it.formulas[f]; cell.closest("td")?.classList.add("has-formula"); }
+      const td = cell?.closest("td"); if (!td) continue;
+      const raw = it[f];
+      const valTxt = (typeof raw === "number") ? (raw ? raw.toLocaleString("vi-VN") : "0") : (raw == null ? "" : String(raw));
+      td.classList.add("has-formula");
+      td.dataset.fx = fx;
+      td.dataset.fxVal = valTxt;
+      if (cell) cell.title = "Công thức: " + fx + " — bấm ƒ để xem";
+      if (!td.querySelector(".fx-peek-badge")) {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "fx-peek-badge"; b.textContent = "ƒ";
+        b.title = "Xem công thức"; b.setAttribute("aria-label", "Xem công thức ô này");
+        td.appendChild(b);
+      }
     }
   });
+  // Bind ONCE: bấm badge "ƒ" (bất kỳ ô nào, bất kỳ tài khoản/quyền nào) → hiện công thức.
+  if (tbody && !tbody._fxPeekBound) {
+    tbody._fxPeekBound = true;
+    tbody.addEventListener("click", (ev) => {
+      const badge = ev.target.closest && ev.target.closest(".fx-peek-badge");
+      if (!badge) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const td = badge.closest("td"); if (td) showFxPeek(td);
+    });
+  }
 
   // ---- Excel-style grid helpers ----
   // Editable columns left→right (drives keyboard nav + multi-cell paste).
