@@ -3617,45 +3617,59 @@ async function renderNotifications(el) {
 }
 
 // ---------------- Quản lý dự án (admin) ----------------
-// GIAI ĐOẠN 1 (chỉ hiển thị): liệt kê báo giá ĐÃ DUYỆT theo bố cục bảng theo dõi
-// dự án/hoá đơn. Cột nào lấy được từ báo giá thì điền (Status, Phim, Báo Giá, Mã Sản
-// Xuất, Cty, Thành Tiền VAT); các cột hoá đơn/thanh toán/chứng từ để trống ("—") và
-// sẽ cho nhập ở Giai đoạn 2 (cần bảng dữ liệu riêng). Nguồn: /api/quotes?status=approved.
+// GIAI ĐOẠN 1 (chỉ hiển thị): liệt kê báo giá ĐÃ DUYỆT theo bố cục bảng theo dõi dự
+// án/hoá đơn. Báo giá NHIỀU SHEET được tách mỗi sheet thành 1 dòng: Mã Sản Xuất thêm
+// hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
+// sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
 async function renderProjects(el) {
   if (!can("user:manage")) {
     el.innerHTML = `<h1>Quản lý dự án</h1><p class="muted">Bạn không có quyền xem mục này.</p>`;
     return;
   }
   el.innerHTML = `<h1>Quản lý dự án</h1>
-    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. Giai đoạn 1: chỉ hiển thị thông tin lấy từ báo giá — các cột hoá đơn / thanh toán / chứng từ (—) sẽ cho nhập ở giai đoạn sau. Bấm vào dòng để mở báo giá.</p>
+    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Giai đoạn 1: chỉ hiển thị — cột hoá đơn/thanh toán/chứng từ (—) sẽ cho nhập sau. Bấm vào dòng để mở báo giá.</p>
     <div id="proj-summary"></div>
     <div id="proj-body">${skeleton(6)}</div>`;
 
-  // Gộp tất cả báo giá đã duyệt (nhiều trang) — nội bộ vài trăm dòng nên an toàn.
-  let rows = [];
+  let quotes;
   try {
-    for (let page = 1; page <= 50; page++) {
-      const r = await api(`/api/quotes?status=approved&size=100&page=${page}&sort=quoteDate&order=desc`);
-      const data = Array.isArray(r) ? r : (r.data || []);
-      rows = rows.concat(data);
-      const meta = (r && r.meta) || {};
-      if (!meta.hasNext || !data.length) break;
-    }
+    const r = await api("/api/quotes/projects");
+    quotes = (r && r.data) || [];
   } catch (e) {
     const b = document.getElementById("proj-body");
     if (b) b.innerHTML = errorState(e.message, () => renderProjects(el));
     return;
   }
 
-  // --- Ô tổng đầu bảng ---
-  const sumBaoGia = rows.reduce((s, q) => s + (Number(q.subtotal) || 0), 0);
-  const sumVAT = rows.reduce((s, q) => s + (Number(q.total) || 0), 0);
-  const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:170px;padding:12px 16px">
+  // Tách mỗi sheet thành 1 dòng. >1 sheet → Mã SX thêm _1/_2…; Hạng Mục = tên sheet.
+  const rows = [];
+  for (const q of quotes) {
+    const base = codeLabel(q);
+    const sheets = (q.sheets && q.sheets.length) ? q.sheets : [{ name: null, subtotal: q.subtotal }];
+    const multi = sheets.length > 1;
+    sheets.forEach((sh, i) => {
+      const baoGia = Number(sh.subtotal) || 0;
+      const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
+      rows.push({
+        q,
+        code: base + (multi ? `_${i + 1}` : ""),
+        hangMuc: sh.name || (multi ? `Sheet ${i + 1}` : ""),
+        baoGia,
+        thanhTienVAT: baoGia + vat,
+      });
+    });
+  }
+
+  // --- Ô tổng đầu bảng (cộng theo dòng/sheet) ---
+  const sumBaoGia = rows.reduce((s, r) => s + r.baoGia, 0);
+  const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
+  const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
       <div class="muted" style="font-size:12px">${label}</div>
       <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
   const summ = document.getElementById("proj-summary");
   if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
-    ${stat("Số dự án đã duyệt", rows.length)}
+    ${stat("Số dự án đã duyệt", quotes.length)}
+    ${stat("Số dòng (theo sheet)", rows.length)}
     ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
     ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
 
@@ -3667,23 +3681,23 @@ async function renderProjects(el) {
     return;
   }
   const dash = '<span class="muted">—</span>';
-  const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Total", "Q.7", "T.Phú", "HN", "Ngày Thi Công", "Ngày Tháo dỡ", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
+  const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
   body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">
     <thead><tr>${headers.map(h => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(q => {
+    <tbody>${rows.map(r => {
+      const q = r.q;
       const cty = q.company?.shortName || q.company?.name || "";
       return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
         <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
         <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
-        <td>${dash}</td>
-        <td style="text-align:right">${fmtMoney(q.subtotal)}</td>
+        <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
+        <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
         <td>${dash}</td><td>${dash}</td>
-        <td><strong>${escapeHtml(codeLabel(q))}</strong></td>
-        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
-        <td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td><strong>${escapeHtml(r.code)}</strong></td>
+        <td>${dash}</td><td>${dash}</td>
         <td>${cty ? escapeHtml(cty) : dash}</td>
         <td>${dash}</td><td>${dash}</td>
-        <td style="text-align:right">${fmtMoney(q.total)}</td>
+        <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
         <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
         <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
       </tr>`;

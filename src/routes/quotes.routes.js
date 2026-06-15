@@ -245,6 +245,57 @@ router.get(
   })
 );
 
+// PROJECTS (admin) — báo giá ĐÃ DUYỆT cho trang "Quản lý dự án", kèm breakdown theo
+// từng sheet (tên + subtotal). Client tách mỗi sheet thành 1 dòng: >1 sheet thì Mã Sản
+// Xuất thêm _1/_2…, Hạng Mục = tên sheet. Đặt TRƯỚC "/:id" để không bị nuốt vào param.
+router.get(
+  "/projects",
+  requirePermission(P.USER_MANAGE),
+  asyncHandler(async (req, res) => {
+    const quotes = await prisma.quote.findMany({
+      where: { status: "approved", deletedAt: null },
+      orderBy: [{ quoteDate: "desc" }, { id: "desc" }],
+      select: {
+        id: true, quoteNumber: true, projectCode: true, projectVersion: true,
+        title: true, status: true, quoteDate: true, vatPercent: true,
+        subtotal: true, total: true, discount: true,
+        company: { select: { name: true, shortName: true } },
+        customer: { select: { code: true, name: true } },
+        createdBy: { select: { displayName: true } },
+        sheets: {
+          orderBy: { order: "asc" },
+          select: {
+            id: true, order: true, name: true, groupSubtotal: true,
+            items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
+          },
+        },
+      },
+    });
+    const data = quotes.map((q) => {
+      const { sheetTotals } = computeQuoteTotals(q);   // subtotal theo từng sheet
+      const byId = new Map(sheetTotals.map((s) => [s.sheetId, Number(s.subtotal)]));
+      return {
+        id: q.id,
+        quoteNumber: q.quoteNumber,
+        projectCode: q.projectCode,
+        projectVersion: q.projectVersion,
+        title: q.title,
+        status: q.status,
+        quoteDate: q.quoteDate,
+        vatPercent: Number(q.vatPercent),
+        subtotal: Number(q.subtotal),
+        total: Number(q.total),
+        company: q.company,
+        customerCode: q.customer?.code ?? null,
+        customerName: q.customer?.name ?? null,
+        createdBy: q.createdBy,
+        sheets: q.sheets.map((sh) => ({ name: sh.name || null, subtotal: byId.get(sh.id) ?? 0 })),
+      };
+    });
+    res.json({ data });
+  })
+);
+
 // GET ONE
 router.get(
   "/:id",
