@@ -633,19 +633,22 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
           { from: f.customer.from || "G", to: f.customer.to || "I" });
       }
 
-      // Chữ ký người gửi CANH GIỮA: chừa khoảng trống (ký + đóng dấu) → tên (đậm)/chức danh/SĐT.
+      // Chừa khoảng trống để ký + đóng dấu. Chữ ký người gửi (tên/chức danh/SĐT) chỉ in
+      // khi sign.showSender !== false (mặc định KHÔNG in cho GN — trùng với khối From ở trên).
       const s = f.sign;
       if (s) {
         const gapRows = s.gapRows || 4;
         const gapStart = totalRow + (s.gapRowOffset || 5);
         for (let i = 0; i < gapRows; i++) ws.getRow(gapStart + i).height = s.gapRowHeight || 20;
-        // Tiền tố Ms./Mr. lấy từ ô From (E3) — không hardcode.
-        const courtesy = s.courtesyCell ? clean(ws.getCell(s.courtesyCell).value) : "";
-        const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
-        let nr = gapStart + gapRows;
-        if (name) writeMerged(nr++, name, { bold: true });
-        if (clean(quote.fromTitle)) writeMerged(nr++, clean(quote.fromTitle));
-        if (clean(quote.fromPhone)) writeMerged(nr, clean(quote.fromPhone));
+        if (s.showSender) {
+          // Tiền tố Ms./Mr. lấy từ ô From (E3) — không hardcode.
+          const courtesy = s.courtesyCell ? clean(ws.getCell(s.courtesyCell).value) : "";
+          const name = [courtesy, clean(quote.fromContact)].filter(Boolean).join(" ");
+          let nr = gapStart + gapRows;
+          if (name) writeMerged(nr++, name, { bold: true });
+          if (clean(quote.fromTitle)) writeMerged(nr++, clean(quote.fromTitle));
+          if (clean(quote.fromPhone)) writeMerged(nr, clean(quote.fromPhone));
+        }
       }
     }
   }
