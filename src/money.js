@@ -27,7 +27,7 @@ export function computeQuoteTotals(quote) {
   const sheetTotals = (quote.sheets || []).map((sh) => {
     let mult = 1;
     const subtotal = (sh.items || []).reduce((acc, it) => {
-      if (it.kind === "section") {   // nhóm: ×Số Lượng chỉ khi bật groupSubtotal; dòng nhóm không tự cộng
+      if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
         mult = sh.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
         return acc;
       }

@@ -231,7 +231,7 @@ function pvRows(items, usesDays, groupSubtotal) {
   for (let i = 0; i < items.length; i++) {
     const k = items[i] && items[i].kind;
     if (k === "info") eff[i] = "info";
-    else if (k === "section") eff[i] = "section";
+    else if (k === "section" || k === "subsection") eff[i] = "section";
     else if (k === "sub" && i > 0 && (eff[i - 1] === "head" || eff[i - 1] === "sub")) eff[i] = "sub";
     else eff[i] = "head";
   }
@@ -1872,7 +1872,7 @@ function groupLetter(n) {
 function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   let mult = 1, sum = 0;
   for (const it of (items || [])) {
-    if (it.kind === "section") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
     if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
     const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
     sum += (usesDays ? qty * days * price : qty * price) * mult;
@@ -2041,7 +2041,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   for (let i = 0; i < activeSheet.items.length; i++) {
     const k = activeSheet.items[i].kind;
     if (k === "info") rowKind[i] = "info";
-    else if (k === "section") rowKind[i] = "section";
+    else if (k === "section" || k === "subsection") rowKind[i] = "section";
     else if (k === "sub" && i > 0 && (rowKind[i - 1] === "head" || rowKind[i - 1] === "sub")) rowKind[i] = "sub";
     else rowKind[i] = "head";
   }
@@ -2076,13 +2076,15 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   }
   tbody.innerHTML = activeSheet.items.map((it, i) => {
     if (rowKind[i] === "section") {
-      sectionIdx++; sttNo = 0;
-      const letter = groupLetter(sectionIdx);
+      const isSub = it.kind === "subsection";       // nhóm con: tổng riêng, KHÔNG cộng vào nhóm chính, VẪN vào tổng cộng
+      let letter = "";
+      if (!isSub) { sectionIdx++; letter = groupLetter(sectionIdx); }   // nhóm con không chiếm chữ cái A/B/C
+      sttNo = 0;
       const subAmt = sectionSum[i] || 0;
       return `
-      <tr data-row="${i}" class="section-row">
-        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="Chữ nhóm (để trống = tự ${letter})" ${dis} style="width:34px;text-align:center" /></td>
-        <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="Tên nhóm (vd: Wallsticker)" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+      <tr data-row="${i}" class="section-row${isSub ? " subgroup-row" : ""}">
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${isSub ? "↳" : letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
+        <td class="col-hangmuc">${isSub ? `<span class="subgroup-caret" aria-hidden="true">↳ </span>` : ""}<textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
@@ -2090,7 +2092,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         <td class="col-price">${fmtNumCell(subAmt)}</td>
         <td class="col-amount">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
-        ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa nhóm">✕</button></td>` : ""}
+        ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="${isSub ? "Xóa nhóm con" : "Xóa nhóm"}">✕</button></td>` : ""}
       </tr>`;
     }
     if (rowKind[i] === "info") {
@@ -2176,7 +2178,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     const p = parseAddr(a); if (!p) return 0;
     const it = activeSheet.items[p.row]; if (!it) return 0;
     if (p.field === "_amount") {
-      if (it.kind === "section" || it.kind === "info") return 0;
+      if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
       return usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
                       : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
     }
@@ -2221,7 +2223,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const paintComputedValues = () => {
     activeSheet.items.forEach((it, i) => {
       const tr = tbody.querySelector(`tr[data-row="${i}"]`); if (!tr) return;
-      if (it.kind !== "section" && it.kind !== "info") {
+      if (it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info") {
         const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
                              : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
         const ac = tr.querySelector(".col-amount"); if (ac) ac.textContent = fmtNumCell(amt);
@@ -2238,6 +2240,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const blankInfo = () => ({ kind: "info", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   const blankSub = () => ({ kind: "sub", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: usesDays ? 1 : null, notes: "" });
   const blankSection = () => ({ kind: "section", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
+  const blankSubSection = () => ({ kind: "subsection", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   // Parse a pasted Excel number ("1.000.000", "1,000,000", "12,5"…) into a real number.
   const numLoose = (s) => {
     s = String(s).trim().replace(/[^\d.,-]/g, "");
@@ -2447,6 +2450,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const addRow = (field) => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blank()); redraw(); focusCell(at, field || "name"); };
   const addInfo = () => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blankInfo()); redraw(); focusCell(at, "name"); };
   const addSection = () => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blankSection()); redraw(); focusCell(at, "name"); };
+  const addSubSection = () => { pushUndo(); const at = insertIndex(); activeSheet.items.splice(at, 0, blankSubSection()); redraw(); focusCell(at, "name"); };
   // Insert a "hàng con" (sub-item) right below row i — stays inside i's group.
   const addSubAfter = (i) => { pushUndo(); activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
 
@@ -2696,7 +2700,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       }
       grid._dirty = true;   // mark this cell dirty so blur commits one undo snapshot
       const it = activeSheet.items[i];
-      if (it.kind !== "section") {
+      if (it.kind !== "section" && it.kind !== "subsection") {
         const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
                              : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
         const amtCell = tr.querySelector(".col-amount");   // info/section rows: skip
@@ -2893,6 +2897,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       <div class="grid-foot-tools">
         <button type="button" class="btn btn-sm" id="btn-add-item">+ Thêm hàng</button>
         <button type="button" class="btn btn-sm" id="btn-add-section">+ Thêm nhóm (A,B…)</button>
+        <button type="button" class="btn btn-sm" id="btn-add-subsection" title="Nhóm con: có tổng riêng, KHÔNG cộng vào nhóm chính, vẫn vào Tổng cộng">+ Thêm nhóm con</button>
         <button type="button" class="btn btn-sm" id="btn-add-info">+ Thêm dòng thông tin</button>
         <label class="grid-foot-toggle"><input type="checkbox" id="chk-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm <span class="muted">(Đơn giá × SL)</span></label>
         <span class="muted grid-foot-hint">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
@@ -2908,6 +2913,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   if (editable) {
     document.getElementById("btn-add-item")?.addEventListener("click", () => addRow("name"));
     document.getElementById("btn-add-section")?.addEventListener("click", addSection);
+    document.getElementById("btn-add-subsection")?.addEventListener("click", addSubSection);
     document.getElementById("btn-add-info")?.addEventListener("click", addInfo);
     document.getElementById("chk-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
   }

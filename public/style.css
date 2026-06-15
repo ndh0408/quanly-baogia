@@ -445,6 +445,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .excel-table tr.section-row td.col-price,
 .excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #1f4e79; }
 .excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #1f4e79; }
+/* Nhóm con (subsection): thụt lề + nền nhạt hơn nhóm chính — tổng riêng, không cộng vào nhóm chính */
+.excel-table tr.subgroup-row td { background: #f1f6fc; }
+.excel-table tr.subgroup-row td.col-hangmuc { padding-left: 20px; }
+.excel-table tr.subgroup-row .subgroup-caret { color: #5a7aa8; font-weight: 700; }
+.excel-table tr.subgroup-row input, .excel-table tr.subgroup-row td.col-hangmuc textarea { color: #3a6098; }
 
 /* Excel-style selection summary bar (Sum / Count / Average of selected cells) */
 .grid-stat { display: flex; gap: 16px; justify-content: flex-end; align-items: center;

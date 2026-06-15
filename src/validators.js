@@ -104,7 +104,7 @@ const customerLogoSchema = z.string().max(3_500_000)
 
 const itemSchema = z.object({
   order: z.coerce.number().int().optional(),
-  kind: z.enum(["item", "info", "sub", "section"]).default("item"),
+  kind: z.enum(["item", "info", "sub", "section", "subsection"]).default("item"),
   label: z.string().max(12).optional().nullable(),
   name: z.string().max(2000).default(""),
   detail: z.string().max(2000).optional().nullable(),

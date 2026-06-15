@@ -321,7 +321,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   for (let i = 0; i < items.length; i++) {
     const k = items[i]?.kind;
     if (k === "info") effKind[i] = "info";
-    else if (k === "section") effKind[i] = "section";
+    else if (k === "section" || k === "subsection") effKind[i] = "section";
     else if (k === "sub" && i > 0 && (effKind[i - 1] === "head" || effKind[i - 1] === "sub")) effKind[i] = "sub";
     else effKind[i] = "head";
   }
@@ -473,7 +473,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   // When sections are present, a simple SUM(column) double-counts (mục con per-unit +
   // thành tiền nhóm), so write the computed value instead of a SUM formula.
-  const hasSections = items.some((it) => it && it.kind === "section");
+  const hasSections = items.some((it) => it && (it.kind === "section" || it.kind === "subsection"));
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null,
     formula: hasSections ? null : t.subtotal.formula({ first: itemsCfg.firstRow, last: actualLastRow, subtotalRow }),

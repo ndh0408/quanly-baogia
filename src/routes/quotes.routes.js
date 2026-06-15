@@ -143,7 +143,7 @@ function sanitizeExtraTables(tables) {
     category: t.category,
     name: t.name ? String(t.name).replace(/[\r\n]+/g, " ").trim().slice(0, 120) : null,
     items: (t.items || []).map((it) => ({
-      kind: ["info", "sub", "section"].includes(it.kind) ? it.kind : "item",
+      kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
       name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
       detail: it.detail ? String(it.detail).trim() : null,
       unit: it.unit ? String(it.unit).replace(/[\r\n]+/g, " ").trim() : null,
@@ -177,7 +177,7 @@ function buildSheetsCreate(sheets) {
     items: {
       create: (s.items || []).map((it, iIdx) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
-        kind: ["info", "sub", "section"].includes(it.kind) ? it.kind : "item",
+        kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
         label: it.label ? String(it.label).replace(/[\r\n]+/g, " ").trim().slice(0, 12) : null,
         name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
         detail: it.detail ? String(it.detail).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
