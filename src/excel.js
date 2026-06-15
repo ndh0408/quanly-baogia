@@ -621,12 +621,11 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         cell.style = st;
         cell.value = value;
       };
-      // Lời chào: dòng đầu ("Rất mong…") canh TRÁI, các dòng sau ("Trân trọng…") canh GIỮA
-      // (nằm giữa dòng trên) — trong cùng cột trái.
+      // Lời chào ("Rất mong…" / "Trân trọng…") canh GIỮA trong cột trái (B:F) → cân đối.
       if (f.left) {
         const lr = totalRow + (f.rowOffset || 2);
         (f.left.lines || []).forEach((line, idx) =>
-          writeMerged(lr + idx, line, { from: f.left.from, to: f.left.to, align: idx === 0 ? "left" : "center" }));
+          writeMerged(lr + idx, line, { from: f.left.from, to: f.left.to, align: "center" }));
       }
       // "Ý Kiến Khách Hàng" canh giữa cột PHẢI, CÙNG hàng dòng lời chào đầu
       if (f.customer) {
