@@ -3676,7 +3676,7 @@ async function renderProjects(el) {
     return;
   }
   const dash = '<span class="muted">—</span>';
-  const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
+  const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Chi Phí HCM", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
   body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">
     <thead><tr>${headers.map(h => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
     <tbody>${rows.map(r => {
@@ -3687,7 +3687,7 @@ async function renderProjects(el) {
         <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
         <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
         <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
-        <td>${dash}</td><td>${dash}</td>
+        <td>${dash}</td><td>${dash}</td><td>${dash}</td>
         <td><strong>${escapeHtml(r.code)}</strong></td>
         <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
         <td>${cty ? escapeHtml(cty) : dash}</td>
