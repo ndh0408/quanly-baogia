@@ -134,6 +134,40 @@ async function templatesBelongToCompany(sheets, companyId) {
   return found.length === ids.length;
 }
 
+// Làm sạch "bảng nội bộ" (extraTables) → JSON thuần cho cột Json của QuoteSheet.
+// KHÔNG tạo QuoteItem nên KHÔNG vào Excel/tổng báo giá. Trả undefined nếu rỗng.
+function sanitizeExtraTables(tables) {
+  if (!Array.isArray(tables) || !tables.length) return undefined;
+  const VALID = new Set(["hcm", "hanoi", "khach"]);
+  const out = tables.filter((t) => t && VALID.has(t.category)).map((t) => ({
+    category: t.category,
+    name: t.name ? String(t.name).replace(/[\r\n]+/g, " ").trim().slice(0, 120) : null,
+    items: (t.items || []).map((it) => ({
+      kind: ["info", "sub", "section"].includes(it.kind) ? it.kind : "item",
+      name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
+      detail: it.detail ? String(it.detail).trim() : null,
+      unit: it.unit ? String(it.unit).replace(/[\r\n]+/g, " ").trim() : null,
+      quantity: Number(it.quantity) || 0,
+      unitPrice: Number(it.unitPrice) || 0,
+      days: it.days != null ? Number(it.days) : null,
+      notes: it.notes ? String(it.notes).trim() : null,
+      formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
+    })),
+  }));
+  return out.length ? out : undefined;
+}
+
+// Tổng tiền 1 bảng nội bộ (cùng quy tắc với item báo giá; section/info không cộng).
+function extraTableSum(t) {
+  return (t?.items || []).reduce((acc, it) => {
+    if (it.kind === "section" || it.kind === "info") return acc;
+    const qty = Number(it.quantity) || 0;
+    const price = Number(it.unitPrice) || 0;
+    const days = it.days != null ? Number(it.days) : null;
+    return acc + (days && days > 0 ? qty * days * price : qty * price);
+  }, 0);
+}
+
 function buildSheetsCreate(sheets) {
   return (sheets || []).map((s, sIdx) => ({
     templateId: Number(s.templateId),
@@ -155,6 +189,7 @@ function buildSheetsCreate(sheets) {
         formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
       })),
     },
+    extraTables: sanitizeExtraTables(s.extraTables),
   }));
 }
 
@@ -265,7 +300,8 @@ router.get(
         sheets: {
           orderBy: { order: "asc" },
           select: {
-            id: true, order: true, name: true, groupSubtotal: true,
+            id: true, order: true, name: true, groupSubtotal: true, extraTables: true,
+            template: { select: { company: { select: { shortName: true, name: true } } } },
             items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
           },
         },
@@ -290,7 +326,18 @@ router.get(
         customerCode: q.customer?.code ?? null,
         customerName: q.customer?.name ?? null,
         createdBy: q.createdBy,
-        sheets: q.sheets.map((sh) => ({ name: sh.name || null, subtotal: byId.get(sh.id) ?? 0 })),
+        sheets: q.sheets.map((sh) => {
+          const ex = Array.isArray(sh.extraTables) ? sh.extraTables : [];
+          const sumCat = (cat) => ex.filter((t) => t && t.category === cat).reduce((acc, t) => acc + extraTableSum(t), 0);
+          return {
+            name: sh.name || null,
+            subtotal: byId.get(sh.id) ?? 0,
+            hcm: sumCat("hcm"),
+            hanoi: sumCat("hanoi"),
+            khach: sumCat("khach"),
+            cty: sh.template?.company?.shortName || sh.template?.company?.name || null,
+          };
+        }),
       };
     });
     res.json({ data });
@@ -1000,6 +1047,7 @@ router.post(
                 notes: it.notes,
               })),
             },
+            extraTables: s.extraTables ?? undefined,
           })),
         },
       },

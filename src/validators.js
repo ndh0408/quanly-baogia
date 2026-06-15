@@ -119,12 +119,20 @@ const itemSchema = z.object({
   formulas: z.record(z.string().max(40), z.string().max(2000)).optional().nullable(),
 });
 
+// Bảng nội bộ (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
+const extraTableSchema = z.object({
+  category: z.enum(["hcm", "hanoi", "khach"]),
+  name: z.string().max(120).optional().nullable(),
+  items: z.array(itemSchema).max(500).default([]),
+});
+
 const sheetSchema = z.object({
   templateId: z.coerce.number({ error: "Vui lòng chọn mẫu báo giá" }).int("Mẫu báo giá không hợp lệ").positive("Vui lòng chọn mẫu báo giá"),
   name: z.string().max(120).optional().nullable(),
   order: z.coerce.number().int().optional(),
   groupSubtotal: z.boolean().optional(),
   items: z.array(itemSchema).max(500).default([]),
+  extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });
 
 export const QuoteCreateSchema = z.object({

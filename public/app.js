@@ -1214,6 +1214,7 @@ function renderEditor(el, quote) {
     q.sheets = [{ templateId: state.templates[0]?.id, items: [] }];
   }
   q._activeSheet = 0;
+  q.sheets.forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
 
   // Excel-grid session state (selection rectangle, undo/redo stacks, clipboard buffer,
   // preview flag) — lives in THIS closure, never on DOM nodes, so it survives the
@@ -1370,6 +1371,8 @@ function renderEditor(el, quote) {
           <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả trên màn hình lẫn file Excel/PDF xuất ra)</span>
         </label>` : ""}
         ${editable ? `<div class="muted" style="margin:4px 0 6px;font-size:12.5px">Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung (vd “Giảm giá khách quen”) rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>` : ""}
+
+        <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
         ${editable ? `<label class="toggle-totals" style="display:inline-flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13.5px;cursor:pointer">
           <input type="checkbox" id="f-hasNote" ${q.notes ? "checked" : ""}/>
           <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
@@ -1494,6 +1497,8 @@ function renderEditor(el, quote) {
 
     // Items
     drawItems(q, activeSheet, editable, tplCode, usesDays, grid);
+    // Bảng nội bộ (chỉ quản lý — KHÔNG xuất Excel), lưới riêng độc lập với lưới báo giá
+    drawExtraTables(q, activeSheet, editable);
 
     // Header field bindings
     const bindField = (id, prop) => {
@@ -1579,6 +1584,7 @@ function bindActions(q, isNew) {
             order: i + 1,
             groupSubtotal: !!s.groupSubtotal,
             items: (s.items || []).map((it, j) => ({ ...it, order: j + 1, days: usesDays ? it.days : null })),
+            extraTables: Array.isArray(s.extraTables) ? s.extraTables : [],
           };
         }),
       };
@@ -1884,6 +1890,115 @@ function sheetUsesDays(sheet) {
 // agree. Returns sheets with days nulled where the template has no days column.
 function clearDaysIfUnused(sheet) {
   if (!sheetUsesDays(sheet)) (sheet.items || []).forEach(it => { if (it.days != null) it.days = null; });
+}
+
+// ===== Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel) =====
+// Lưới RIÊNG, độc lập hoàn toàn với lưới báo giá chính (drawItems) → không ảnh hưởng
+// tính tổng/xuất Excel. Mỗi bảng gắn 1 loại; tổng theo loại đổ sang trang Quản lý dự án.
+const EXTRA_CATS = [["hcm", "Chi Phí HCM"], ["hanoi", "Báo Giá Hà Nội"], ["khach", "Phí Khách Hàng"]];
+function extraCatLabel(c) { return ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà Nội", khach: "Phí Khách Hàng" })[c] || c; }
+function extraItemAmount(it) { return (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0); }
+function extraTableTotalLocal(t) {
+  return (t.items || []).reduce((a, it) => (it.kind === "section" || it.kind === "info") ? a : a + extraItemAmount(it), 0);
+}
+function drawExtraTables(q, activeSheet, editable) {
+  const wrap = document.getElementById("extra-tables-wrap");
+  if (!wrap) return;
+  if (!Array.isArray(activeSheet.extraTables)) activeSheet.extraTables = [];
+  const tables = activeSheet.extraTables;
+  const dis = editable ? "" : "disabled";
+  const blankRow = () => ({ kind: "item", name: "", unit: "", quantity: 0, unitPrice: 0, notes: "" });
+  // Bản local (fmtNumCell/parseVN gốc nằm trong drawItems — không truy cập được từ đây).
+  const fmtNumCell = (v) => { const n = Number(v); return (!n || isNaN(n)) ? "" : n.toLocaleString("vi-VN"); };
+  const parseVN = (s) => {
+    s = String(s).replace(/[^\d.,-]/g, "");
+    if (!s || s === "-") return 0;
+    const neg = s.startsWith("-");
+    s = s.replace(/-/g, "").replace(/\./g, "");
+    const parts = s.split(",");
+    const num = parts.length > 1 ? Number(parts[0] + "." + parts.slice(1).join("")) : Number(parts[0]);
+    return (neg ? -1 : 1) * (num || 0);
+  };
+
+  wrap.innerHTML = `
+    <div class="extra-head">
+      <div><strong>Bảng nội bộ</strong> <span class="muted" style="font-weight:400;font-size:12px">— chỉ để xem &amp; quản lý, KHÔNG xuất Excel. Tổng theo loại đổ vào cột tương ứng ở trang Quản lý dự án.</span></div>
+      ${editable ? `<div class="extra-add">
+        <select id="extra-add-cat" class="extra-add-cat">${EXTRA_CATS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
+        <button type="button" class="btn btn-sm" id="extra-add-btn">+ Thêm bảng</button>
+      </div>` : ""}
+    </div>
+    ${tables.length ? tables.map((t, ti) => `
+      <div class="extra-table" data-ti="${ti}">
+        <div class="extra-table-head">
+          <span class="extra-cat-badge cat-${escapeHtml(t.category)}">${escapeHtml(extraCatLabel(t.category))}</span>
+          <input class="extra-name" data-ti="${ti}" value="${escapeHtml(t.name || "")}" placeholder="Tên bảng (tuỳ chọn)" ${dis} />
+          ${editable ? `<button type="button" class="extra-del-table" data-ti="${ti}" title="Xoá bảng này">✕ Xoá bảng</button>` : ""}
+        </div>
+        <div class="tbl-scroll"><table class="excel-table extra-grid">
+          <thead><tr>
+            <th style="width:46px">STT</th><th>Hạng Mục</th><th style="width:74px">ĐVT</th>
+            <th style="width:92px">SỐ LƯỢNG</th><th style="width:130px">ĐƠN GIÁ</th>
+            <th style="width:140px">THÀNH TIỀN</th><th style="width:150px">GHI CHÚ</th>${editable ? `<th style="width:34px"></th>` : ""}
+          </tr></thead>
+          <tbody>
+            ${(t.items || []).map((it, ii) => `
+              <tr data-ti="${ti}" data-ii="${ii}">
+                <td class="ex-stt" style="text-align:center">${ii + 1}</td>
+                <td><input data-f="name" data-ti="${ti}" data-ii="${ii}" value="${escapeHtml(it.name || "")}" ${dis} /></td>
+                <td><input data-f="unit" data-ti="${ti}" data-ii="${ii}" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
+                <td><input class="ex-num" data-f="quantity" data-ti="${ti}" data-ii="${ii}" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+                <td><input class="ex-num" data-f="unitPrice" data-ti="${ti}" data-ii="${ii}" inputmode="numeric" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+                <td class="ex-amount" style="text-align:right">${fmtNumCell(extraItemAmount(it))}</td>
+                <td><input data-f="notes" data-ti="${ti}" data-ii="${ii}" value="${escapeHtml(it.notes || "")}" ${dis} /></td>
+                ${editable ? `<td style="text-align:center"><button type="button" class="ex-rm-row" data-ti="${ti}" data-ii="${ii}" title="Xoá hàng">✕</button></td>` : ""}
+              </tr>`).join("")}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="5" style="text-align:right;font-weight:600">Tổng bảng (VNĐ)</td>
+            <td class="ex-total" style="text-align:right;font-weight:700">${fmtNumCell(extraTableTotalLocal(t))}</td>
+            <td colspan="${editable ? 2 : 1}"></td>
+          </tr></tfoot>
+        </table></div>
+        ${editable ? `<button type="button" class="btn btn-sm ex-add-row" data-ti="${ti}">+ Thêm hàng</button>` : ""}
+      </div>`).join("") : `<div class="muted" style="padding:6px 0 2px">Chưa có bảng nội bộ.${editable ? ' Chọn loại rồi bấm “+ Thêm bảng”.' : ""}</div>`}
+  `;
+
+  // Read-only: no listeners. Editable: bind ONCE per wrap element (wrap is rebuilt each
+  // draw(); re-invocations on the SAME wrap skip re-binding via _exBound).
+  if (!editable) return;
+  if (wrap._exBound) return;
+  wrap._exBound = true;
+
+  wrap.addEventListener("input", (e) => {
+    const t2 = e.target;
+    if (t2.classList.contains("extra-name")) { const ti = +t2.dataset.ti; if (tables[ti]) tables[ti].name = t2.value; return; }
+    const f = t2.dataset.f; if (!f) return;
+    const it = tables[+t2.dataset.ti] && tables[+t2.dataset.ti].items[+t2.dataset.ii]; if (!it) return;
+    if (f === "quantity" || f === "unitPrice") {
+      it[f] = parseVN(t2.value);
+      const tr = t2.closest("tr"); const amt = tr && tr.querySelector(".ex-amount");
+      if (amt) amt.textContent = fmtNumCell(extraItemAmount(it));
+      const tot = wrap.querySelector(`.extra-table[data-ti="${t2.dataset.ti}"] .ex-total`);
+      if (tot) tot.textContent = fmtNumCell(extraTableTotalLocal(tables[+t2.dataset.ti]));
+    } else { it[f] = t2.value; }
+  });
+  wrap.addEventListener("blur", (e) => {
+    const t2 = e.target;
+    if (t2.classList && t2.classList.contains("ex-num")) t2.value = fmtNumCell(parseVN(t2.value));
+  }, true);
+  wrap.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.id === "extra-add-btn") {
+      const cat = (document.getElementById("extra-add-cat") || {}).value || "hcm";
+      tables.push({ category: cat, name: "", items: [blankRow()] });
+      window._editorDirty = true; drawExtraTables(q, activeSheet, editable); return;
+    }
+    const ti = +b.dataset.ti; if (!tables[ti]) return;
+    if (b.classList.contains("ex-add-row")) { (tables[ti].items = tables[ti].items || []).push(blankRow()); window._editorDirty = true; drawExtraTables(q, activeSheet, editable); }
+    else if (b.classList.contains("ex-rm-row")) { tables[ti].items.splice(+b.dataset.ii, 1); window._editorDirty = true; drawExtraTables(q, activeSheet, editable); }
+    else if (b.classList.contains("extra-del-table")) { tables.splice(ti, 1); window._editorDirty = true; drawExtraTables(q, activeSheet, editable); }
+  });
 }
 
 function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
@@ -3651,6 +3766,10 @@ async function renderProjects(el) {
         hangMuc: sh.name || (multi ? `Sheet ${i + 1}` : ""),
         baoGia,
         thanhTienVAT: baoGia + vat,
+        hcm: Number(sh.hcm) || 0,
+        hanoi: Number(sh.hanoi) || 0,
+        khach: Number(sh.khach) || 0,
+        cty: sh.cty || null,
       });
     });
   }
@@ -3687,10 +3806,12 @@ async function renderProjects(el) {
         <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
         <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
         <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
-        <td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        <td style="text-align:right">${r.hcm ? fmtMoney(r.hcm) : dash}</td>
+        <td style="text-align:right">${r.hanoi ? fmtMoney(r.hanoi) : dash}</td>
+        <td style="text-align:right">${r.khach ? fmtMoney(r.khach) : dash}</td>
         <td><strong>${escapeHtml(r.code)}</strong></td>
         <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
-        <td>${cty ? escapeHtml(cty) : dash}</td>
+        <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
         <td>${dash}</td><td>${dash}</td>
         <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
         <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>

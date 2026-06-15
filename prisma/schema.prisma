@@ -324,6 +324,10 @@ model QuoteSheet {
   name        String?
   groupSubtotal Boolean     @default(false)  // hiện tổng tiền theo từng nhóm A/B/C
   items       QuoteItem[]
+  // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
+  // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
+  // Tổng theo từng loại đổ vào cột Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng ở trang Quản lý dự án.
+  extraTables Json?
 
   @@index([quoteId, order])
 }

@@ -493,6 +493,24 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .proj-table th, .proj-table td { white-space: nowrap; }
 .proj-table tr.qrow { cursor: pointer; }
 
+/* ===== Bảng nội bộ trong editor (chỉ quản lý — không xuất Excel) ===== */
+.extra-tables-wrap { margin: 18px 0 4px; padding-top: 14px; border-top: 2px dashed var(--border, #d9dee6); }
+.extra-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.extra-add { display: flex; gap: 8px; align-items: center; }
+.extra-add-cat { padding: 6px 10px; border: 1px solid var(--border-strong, #b9c0cb); border-radius: 6px; background: var(--surface, #fff); font: inherit; }
+.extra-table { margin: 12px 0 16px; border: 1px solid var(--border, #d9dee6); border-radius: 8px; padding: 10px 12px; background: var(--surface, #fff); }
+.extra-table-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.extra-name { flex: 1; min-width: 160px; padding: 6px 10px; border: 1px solid var(--border, #ccc); border-radius: 6px; font: inherit; background: var(--surface, #fff); }
+.extra-del-table { margin-left: auto; border: 1px solid #e2b4b4; color: #c0392b; background: #fff; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; }
+.extra-del-table:hover { background: #fdecea; }
+.extra-cat-badge { font-weight: 700; font-size: 12.5px; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
+.extra-cat-badge.cat-hcm { background: #e7f0ff; color: #1f4e79; }
+.extra-cat-badge.cat-hanoi { background: #e3f5e8; color: #1f7a3d; }
+.extra-cat-badge.cat-khach { background: #fff3d6; color: #8a5a00; }
+.extra-grid .ex-amount, .extra-grid .ex-total { font-variant-numeric: tabular-nums; }
+.ex-rm-row { border: none; background: transparent; color: #c0392b; cursor: pointer; font-size: 14px; line-height: 1; }
+.ex-add-row { margin-top: 8px; }
+
 /* ===== Live xlsx preview (mirrors the exported sheet chrome) ===== */
 .xlsx-preview-wrap { margin: 16px 0; }
 .toggle-preview { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
