@@ -2788,6 +2788,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const fx = activeSheet.items[i]?.formulas?.[f];
       if (fx) inp.value = fx;
       highlightActiveFormulaRefs(inp.value);   // entering a formula cell → glow its refs
+      if (grid._fxSync) grid._fxSync();   // thanh công thức (fx) bám theo ô vừa bấm — như Excel
       grid.focusSnap = snap();
     });
     // Blur → commit the formula (any column) + the pending edit as one undo boundary.
@@ -2805,6 +2806,10 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const tr = inp.closest("tr"); const r0 = parseInt(tr.dataset.row, 10);
       grid.sel = { anchor: { row: r0, field: f }, focus: { row: r0, field: f } };
       grid.selSheet = q._activeSheet;
+      // QUAN TRỌNG: bấm chuột phải VẼ LẠI vùng chọn NGAY (như Excel). Trước đây chỉ set
+      // grid.sel mà không paint; handler focus lại bỏ qua paint vì sel đã khớp ô vừa bấm
+      // → khung tô màu KẸT ở ô cũ, chỉ nhảy khi bấm phím. Gọi paintSel() để khung theo chuột.
+      paintSel();
       const onOver = (ov) => {
         const c2 = ov.target.closest && ov.target.closest("[data-f]");
         if (!c2) return;
