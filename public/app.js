@@ -2272,6 +2272,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const pc = trS.querySelector(".col-price"); if (pc) pc.textContent = fmtNumCell(sums[idx]);
       const ac = trS.querySelector(".col-amount"); if (ac) ac.textContent = activeSheet.groupSubtotal ? fmtNumCell(sums[idx] * sq) : "";
     }
+    // Cập nhật "Tổng sheet" ở chân lưới REALTIME (trước đây chỉ đổi khi redraw).
+    const stEl = document.getElementById("sheet-subtotal-val");
+    if (stEl) stEl.textContent = fmtMoney(sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal));
   };
   const focusCell = (row, field, noSelect) => {
     const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
@@ -2906,7 +2909,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     <tr>
       <td colspan="${colSpanLeft}"></td>
       <td colspan="2" class="empty-left label">Tổng sheet</td>
-      <td class="value">${fmtMoney(sheetSubtotal)}</td>
+      <td class="value" id="sheet-subtotal-val">${fmtMoney(sheetSubtotal)}</td>
       <td></td>
       ${editable ? "<td></td>" : ""}
     </tr>`;
