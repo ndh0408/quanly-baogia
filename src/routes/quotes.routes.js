@@ -286,14 +286,14 @@ router.get(
 router.get(
   "/projects",
   asyncHandler(async (req, res) => {
-    // Admin (user:manage) HOẶC người được ký (canSign — vd Lan Anh) mới xem được trang
-    // Quản lý dự án (để ký chứng từ). Người khác → 403.
+    // Admin (user:manage) HOẶC người được ký (canSign — vd Lan Anh) → xem TẤT CẢ dự án đã
+    // duyệt. Quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo (chỉ xem, không thao tác).
     const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true } });
-    if (!can(req.session, P.USER_MANAGE) && !me?.canSign) {
-      return res.status(403).json({ error: "Bạn không có quyền xem trang Quản lý dự án" });
-    }
+    const seeAll = can(req.session, P.USER_MANAGE) || !!me?.canSign;
+    const where = { status: "approved", deletedAt: null };
+    if (!seeAll) where.createdById = req.session.userId;
     const quotes = await prisma.quote.findMany({
-      where: { status: "approved", deletedAt: null },
+      where,
       orderBy: [{ quoteDate: "desc" }, { id: "desc" }],
       select: {
         id: true, quoteNumber: true, projectCode: true, projectVersion: true,

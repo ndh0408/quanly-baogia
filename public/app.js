@@ -545,7 +545,7 @@ function renderShell() {
           ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
-          ${(can("user:manage") || state.user?.canSign) ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
+          ${nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>")}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
           ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
           ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}
@@ -3889,13 +3889,12 @@ async function renderNotifications(el) {
 // hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
 // sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
 async function renderProjects(el) {
-  if (!can("user:manage") && !state.user?.canSign) {
-    el.innerHTML = `<h1>Quản lý dự án</h1><p class="muted">Bạn không có quyền xem mục này.</p>`;
-    return;
-  }
+  // Ai cũng vào được: admin / người được ký xem TẤT CẢ; quản lý thường CHỈ XEM dự án của
+  // mình (server đã lọc theo người tạo). canSignNow = được thao tác Ký; quản lý thường = chỉ xem.
   const canSignNow = can("user:manage") || !!state.user?.canSign;
   el.innerHTML = `<h1>Quản lý dự án</h1>
-    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Giai đoạn 1: chỉ hiển thị — cột hoá đơn/thanh toán/chứng từ (—) sẽ cho nhập sau. Bấm vào dòng để mở báo giá.</p>
+    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. ${canSignNow ? "" : "<b>Bạn chỉ xem được dự án do mình tạo.</b> "}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
+    <div id="proj-toolbar"></div>
     <div id="proj-summary"></div>
     <div id="proj-body">${skeleton(6)}</div>`;
 
@@ -3910,7 +3909,7 @@ async function renderProjects(el) {
   }
 
   // Tách mỗi sheet thành 1 dòng. >1 sheet → Mã SX thêm _1/_2…; Hạng Mục = tên sheet.
-  const rows = [];
+  const allRows = [];
   for (const q of quotes) {
     const base = codeLabel(q);
     const sheets = (q.sheets && q.sheets.length) ? q.sheets : [{ name: null, subtotal: q.subtotal }];
@@ -3918,7 +3917,7 @@ async function renderProjects(el) {
     sheets.forEach((sh, i) => {
       const baoGia = Number(sh.subtotal) || 0;
       const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
-      rows.push({
+      allRows.push({
         q,
         code: base + (multi ? `_${i + 1}` : ""),
         hangMuc: sh.name || (multi ? `Sheet ${i + 1}` : ""),
@@ -3935,67 +3934,107 @@ async function renderProjects(el) {
     });
   }
 
-  // --- Ô tổng đầu bảng (cộng theo dòng/sheet) ---
-  const sumBaoGia = rows.reduce((s, r) => s + r.baoGia, 0);
-  const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
+  // --- Bộ lọc: Account (người tạo) + Mã khách hàng + ô tìm kiếm tự do ---
+  const accounts = [...new Set(quotes.map(q => q.createdBy?.displayName).filter(Boolean))].sort((a, b) => a.localeCompare(b, "vi"));
+  const customers = [...new Set(quotes.map(q => q.customerCode).filter(Boolean))].sort((a, b) => a.localeCompare(b, "vi"));
+  const flt = { q: "", account: "", customer: "" };
+  const norm = (s) => (s == null ? "" : String(s)).toLowerCase();
+  const matchRow = (r) => {
+    if (flt.account && (r.q.createdBy?.displayName || "") !== flt.account) return false;
+    if (flt.customer && (r.q.customerCode || "") !== flt.customer) return false;
+    if (flt.q) {
+      const hay = [r.q.title, r.code, r.hangMuc, r.q.customerCode, r.q.createdBy?.displayName].map(norm).join(" ");
+      if (!hay.includes(norm(flt.q))) return false;
+    }
+    return true;
+  };
+
   const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
       <div class="muted" style="font-size:12px">${label}</div>
       <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
-  const summ = document.getElementById("proj-summary");
-  if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
-    ${stat("Số dự án đã duyệt", quotes.length)}
-    ${stat("Số dòng (theo sheet)", rows.length)}
-    ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
-    ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
-
-  // --- Bảng ~27 cột (đúng bố cục sheet theo dõi) ---
-  const body = document.getElementById("proj-body");
-  if (!body) return;
-  if (!rows.length) {
-    body.innerHTML = `<div class="empty-state">Chưa có báo giá nào ở trạng thái "Đã duyệt".</div>`;
-    return;
-  }
   const dash = '<span class="muted">—</span>';
   const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Chi Phí HCM", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
-  body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">
-    <thead><tr>${headers.map(h => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(r => {
-      const q = r.q;
-      const cty = q.company?.shortName || q.company?.name || "";
-      const kyCell = r.signedAt
-        ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
-        : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
-      return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
-        <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
-        <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
-        <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
-        <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
-        <td style="text-align:right">${r.hcm ? fmtMoney(r.hcm) : dash}</td>
-        <td style="text-align:right">${r.hanoi ? fmtMoney(r.hanoi) : dash}</td>
-        <td style="text-align:right">${r.khach ? fmtMoney(r.khach) : dash}</td>
-        <td><strong>${escapeHtml(r.code)}</strong></td>
-        <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
-        <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
-        <td>${dash}</td><td>${dash}</td>
-        <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
-        <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
-        <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
-      </tr>`;
-    }).join("")}</tbody>
-  </table></div>`;
-  body.querySelectorAll("tr.qrow").forEach(tr => {
-    tr.addEventListener("click", (e) => { if (e.target.closest("button,a")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
-  });
-  body.querySelectorAll(".ky-btn, .ky-undo").forEach(b => b.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    const sheetId = b.dataset.sheet;
-    const signed = b.classList.contains("ky-btn");   // ky-btn = ký; ky-undo = bỏ ký
-    try {
-      await api(`/api/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) });
-      toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success");
-      renderProjects(el);
-    } catch (err) { toast(err.message, "error"); }
-  }));
+
+  const renderSummary = (rows) => {
+    const sumBaoGia = rows.reduce((s, r) => s + r.baoGia, 0);
+    const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
+    const summ = document.getElementById("proj-summary");
+    if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
+      ${stat("Số dự án đã duyệt", new Set(rows.map(r => r.q.id)).size)}
+      ${stat("Số dòng (theo sheet)", rows.length)}
+      ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
+      ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
+  };
+
+  const renderTable = (rows) => {
+    const body = document.getElementById("proj-body");
+    if (!body) return;
+    if (!rows.length) {
+      body.innerHTML = `<div class="empty-state">${allRows.length ? "Không có dự án khớp tìm kiếm/bộ lọc." : 'Chưa có báo giá nào ở trạng thái "Đã duyệt".'}</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">
+      <thead><tr>${headers.map(h => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r => {
+        const q = r.q;
+        const cty = q.company?.shortName || q.company?.name || "";
+        const kyCell = r.signedAt
+          ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
+          : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
+        return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
+          <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
+          <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
+          <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
+          <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
+          <td style="text-align:right">${r.hcm ? fmtMoney(r.hcm) : dash}</td>
+          <td style="text-align:right">${r.hanoi ? fmtMoney(r.hanoi) : dash}</td>
+          <td style="text-align:right">${r.khach ? fmtMoney(r.khach) : dash}</td>
+          <td><strong>${escapeHtml(r.code)}</strong></td>
+          <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
+          <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
+          <td>${dash}</td><td>${dash}</td>
+          <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
+          <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+          <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+    body.querySelectorAll("tr.qrow").forEach(tr => {
+      tr.addEventListener("click", (e) => { if (e.target.closest("button,a")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
+    });
+    body.querySelectorAll(".ky-btn, .ky-undo").forEach(b => b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const sheetId = b.dataset.sheet;
+      const signed = b.classList.contains("ky-btn");   // ky-btn = ký; ky-undo = bỏ ký
+      try {
+        await api(`/api/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) });
+        toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success");
+        renderProjects(el);
+      } catch (err) { toast(err.message, "error"); }
+    }));
+  };
+
+  const refresh = () => { const rows = allRows.filter(matchRow); renderSummary(rows); renderTable(rows); };
+
+  // Thanh tìm kiếm + bộ lọc
+  const tb = document.getElementById("proj-toolbar");
+  if (tb) {
+    tb.innerHTML = `<div class="toolbar" style="margin:4px 0 6px">
+      <label for="proj-search" class="sr-only">Tìm kiếm dự án</label>
+      <input id="proj-search" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" style="min-width:220px;flex:1" />
+      <label for="proj-f-account" class="sr-only">Lọc theo Account</label>
+      <select id="proj-f-account"><option value="">Account: Tất cả</option>${accounts.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("")}</select>
+      <label for="proj-f-customer" class="sr-only">Lọc theo Mã khách hàng</label>
+      <select id="proj-f-customer"><option value="">Mã KH: Tất cả</option>${customers.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>
+      <button id="proj-clear" class="btn btn-sm btn-ghost" type="button">Xóa lọc</button>
+    </div>`;
+    const si = tb.querySelector("#proj-search"), fa = tb.querySelector("#proj-f-account"), fc = tb.querySelector("#proj-f-customer");
+    si.addEventListener("input", (e) => { flt.q = e.target.value; refresh(); });
+    fa.addEventListener("change", (e) => { flt.account = e.target.value; refresh(); });
+    fc.addEventListener("change", (e) => { flt.customer = e.target.value; refresh(); });
+    tb.querySelector("#proj-clear").addEventListener("click", () => { flt.q = flt.account = flt.customer = ""; si.value = ""; fa.value = ""; fc.value = ""; refresh(); });
+  }
+  refresh();
 }
 
 // ---------------- Audit log (admin) ----------------

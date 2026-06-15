@@ -516,6 +516,21 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .proj-table th, .proj-table td { white-space: nowrap; }
 .proj-table tr.qrow { cursor: pointer; }
 
+/* KHÓA CỐ ĐỊNH 4 cột đầu (Status, Phim, Hạng Mục, Báo Giá) — cuộn ngang KHÔNG mất, để dễ
+   đối chiếu. .list-table có overflow:hidden (bo góc) sẽ phá position:sticky → cho proj-table
+   overflow:visible (vùng cuộn là .tbl-scroll bao ngoài). Mốc `left` cộng dồn = bề rộng cố định. */
+.proj-table { overflow: visible; }
+.proj-table th:nth-child(1), .proj-table td:nth-child(1) { width: 92px;  min-width: 92px;  max-width: 92px;  left: 0; }
+.proj-table th:nth-child(2), .proj-table td:nth-child(2) { width: 168px; min-width: 168px; max-width: 168px; left: 92px; }
+.proj-table th:nth-child(3), .proj-table td:nth-child(3) { width: 150px; min-width: 150px; max-width: 150px; left: 260px; }
+.proj-table th:nth-child(4), .proj-table td:nth-child(4) { width: 116px; min-width: 116px; max-width: 116px; left: 410px; }
+.proj-table th:nth-child(-n+4), .proj-table td:nth-child(-n+4) { position: sticky; overflow: hidden; text-overflow: ellipsis; }
+.proj-table td:nth-child(-n+4) { background: var(--surface); z-index: 2; }
+.proj-table tbody tr.qrow:hover td:nth-child(-n+4) { background: var(--surface-hover); }
+.proj-table thead th { z-index: 3; }                              /* header (sticky top) trên các ô body dính trái */
+.proj-table thead th:nth-child(-n+4) { background: var(--surface-2); z-index: 5; }   /* góc trái-trên: trên cùng */
+.proj-table th:nth-child(4), .proj-table td:nth-child(4) { box-shadow: 2px 0 5px -2px rgba(20,30,50,.25); }   /* ranh giới vùng khóa */
+
 /* ===== Bảng nội bộ trong editor (chỉ quản lý — không xuất Excel) ===== */
 .extra-tables-wrap { margin: 18px 0 4px; padding-top: 14px; border-top: 2px dashed var(--border, #d9dee6); }
 .extra-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
