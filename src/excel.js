@@ -303,14 +303,25 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   // Row heights: use the configured uniform height; otherwise size each row to fit its
   // content so the tall sample heights baked into the template don't carry over (fixes
-  // "hàng bị to" khi số mục ít hơn slot mẫu).
+  // "hàng bị to" khi số mục ít hơn slot mẫu). TỰ CĂN CHỈNH theo chữ như Excel: ước lượng
+  // số dòng SAU KHI XUỐNG HÀNG (wrap) theo ĐỘ RỘNG CỘT — không chỉ đếm \n — nên tên nhóm
+  // / hạng mục dài (vd "Booth backdrop … (thay AW booth có sẵn)") không bị cắt mất chữ.
+  const colWidthOf = (letter) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
+  const wrapLines = (text, letter) => {
+    if (text == null || text === "") return 1;
+    const cw = colWidthOf(letter) || 12;
+    const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
+    let total = 0;
+    for (const seg of String(text).split(/\r?\n/)) total += Math.max(1, Math.ceil((seg.length || 1) / perLine));
+    return Math.max(1, total);
+  };
   for (let hi = 0; hi < slotRows.length; hi++) {
     const r = slotRows[hi];
     if (itemsCfg.rowHeight) { ws.getRow(r).height = itemsCfg.rowHeight; continue; }
     const it = items[hi];
     let lines = 1;
-    if (it) for (const t of [it.name, it.detail, it.notes]) {
-      if (t) lines = Math.max(lines, String(t).split(/\r?\n/).length);
+    if (it) for (const [t, letter] of [[it.name, cols.name], [it.detail, cols.detail], [it.notes, cols.notes]]) {
+      if (t && letter) lines = Math.max(lines, wrapLines(t, letter));
     }
     ws.getRow(r).height = Math.max(18, lines * 15 + 3);
   }
@@ -352,19 +363,24 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     const it = items[i];
     if (it && effKind[i] === "section") {
       // Section header. NHÓM CHÍNH (kind="section"): tự cấp chữ A/B/C. NHÓM CON
-      // (kind="subsection"): KHÔNG chiếm chữ cái (giống hệt trên màn hình), thụt lề tên
-      // bằng "↳ ", nền nhạt hơn — để xuất Excel khớp với editor, không lệch thứ tự nhóm.
+      // (kind="subsection"): TUYỆT ĐỐI KHÔNG có chữ A/B/C (cột STT để TRỐNG), KHÔNG thêm
+      // ký tự "↳" nào vào tên — chỉ khác bằng NỀN nhạt hơn + thụt lề (căn lề, không ký tự),
+      // khớp đúng yêu cầu "nhóm con không có chữ gì hết". Không làm lệch thứ tự A/B/C nhóm chính.
       const isSubSection = it.kind === "subsection";
       let letter;
       if (isSubSection) {
-        letter = (it.label && String(it.label).trim()) || "";   // nhóm con không tự đánh chữ
+        letter = (it.label && String(it.label).trim()) || "";   // nhóm con KHÔNG có chữ A/B/C
       } else {
         sectionIdx++;
         letter = (it.label && String(it.label).trim()) || sectionLetter(sectionIdx);
       }
       itemNo = 0; // item numbering restarts under each section
-      if (cols.stt) setCell(ws, `${cols.stt}${r}`, letter);
-      if (cols.name) { setCell(ws, `${cols.name}${r}`, (isSubSection ? "↳ " : "") + (it.name || "")); ensureWrap(ws.getCell(`${cols.name}${r}`)); }
+      if (cols.stt) setCell(ws, `${cols.stt}${r}`, letter || null);   // nhóm con: STT TRỐNG hẳn (không A/B/C)
+      if (cols.name) {
+        const nameCell = ws.getCell(`${cols.name}${r}`);
+        setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(nameCell);
+        if (isSubSection) nameCell.alignment = { ...(nameCell.alignment || {}), indent: 1 };   // thụt lề, KHÔNG dùng ký tự
+      }
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
@@ -377,7 +393,8 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
       for (const col of Object.values(cols)) {
         paintCell(ws.getCell(`${col}${r}`), {
-          fill: isSubSection ? "FFEAF1FB" : (pal?.sectionFill || "FFDDEBF7"),   // nhóm con nền nhạt hơn
+          // nhóm con: nền NHẠT HƠN nhóm chính (cùng tông xanh lá của mẫu GN), để phân biệt mà không cần chữ
+          fill: isSubSection ? "FFF2F8EC" : (pal?.sectionFill || "FFDDEBF7"),
           bold: true,
           ...(pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {}),
         });
