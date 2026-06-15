@@ -302,6 +302,24 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .list-table tbody tr:last-child td { border-bottom: none; }
 .list-table code { font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
 
+/* Hàng bấm-để-mở (Danh sách báo giá) */
+.list-table tbody tr.qrow { cursor: pointer; }
+.list-table tbody tr.qrow:hover { background: var(--surface-hover); box-shadow: inset 3px 0 0 var(--brand, #f5b400); }
+
+/* Nút thao tác trong bảng — gọn, rõ chức năng, có gợi ý màu khi rê chuột */
+.act-btn {
+  padding: 5px 11px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-soft); border-radius: 8px; font-size: 12.5px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s, transform .08s, box-shadow .12s;
+}
+.act-btn:hover { background: var(--surface-hover); border-color: var(--text-muted); color: var(--text); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.act-btn:active { transform: translateY(0); }
+.act-btn.act-excel { color: var(--success); }
+.act-btn.act-excel:hover { background: var(--success); border-color: var(--success); color: #fff; }
+.act-btn.act-del { color: var(--danger); }
+.act-btn.act-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+
 .status {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 11px; border-radius: 20px; font-size: 12px; font-weight: 650; line-height: 1.4;

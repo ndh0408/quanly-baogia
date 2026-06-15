@@ -879,7 +879,7 @@ async function renderList(el) {
         </thead>
         <tbody>
           ${state.quoteList.map(q => `
-            <tr>
+            <tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
               <td data-label="Mã dự án"><strong>${escapeHtml(codeLabel(q))}</strong></td>
               ${isAdmin ? `<td data-label="Người tạo">${escapeHtml(q.createdBy?.displayName || "")}</td>` : ""}
               <td data-label="Tiêu đề" title="${escapeHtml(q.title)}">${escapeHtml(shortTitle(q.title))}</td>
@@ -892,11 +892,10 @@ async function renderList(el) {
               <td data-label="Trạng thái"><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
               <td class="cell-actions">
                 <div class="row-actions">
-                  <button class="btn btn-sm" data-act="open" data-id="${q.id}">Mở</button>
-                  <button class="btn btn-sm" data-act="excel" data-id="${q.id}">📥 Excel</button>
-                  <button class="btn btn-sm" data-act="dup" data-id="${q.id}">Nhân bản</button>
-                  <button class="btn btn-sm" data-act="revise" data-id="${q.id}" title="Tạo bản mới CÙNG mã dự án (v2, v3…) để gửi khách">+ Bản v…</button>
-                  ${canDelete(q) ? `<button class="btn btn-sm btn-danger" data-act="del" data-id="${q.id}">Xóa</button>` : ""}
+                  <button class="act-btn act-excel" data-act="excel" data-id="${q.id}" title="Tải file Excel">📥 Excel</button>
+                  <button class="act-btn" data-act="dup" data-id="${q.id}" title="Nhân bản thành báo giá mới">📋 Nhân bản</button>
+                  <button class="act-btn" data-act="revise" data-id="${q.id}" title="Tạo bản mới CÙNG mã dự án (v2, v3…) để gửi khách">➕ Bản mới</button>
+                  ${canDelete(q) ? `<button class="act-btn act-del" data-act="del" data-id="${q.id}" title="Xóa báo giá">🗑 Xóa</button>` : ""}
                 </div>
               </td>
             </tr>
@@ -912,7 +911,14 @@ async function renderList(el) {
         </div>
       </div>`;
     body.querySelectorAll("button[data-act]").forEach(b => {
-      b.addEventListener("click", () => listAction(b.dataset.act, parseInt(b.dataset.id, 10)));
+      b.addEventListener("click", (e) => { e.stopPropagation(); listAction(b.dataset.act, parseInt(b.dataset.id, 10)); });
+    });
+    // Bấm vào DÒNG để mở báo giá (trừ khi bấm trúng nút thao tác).
+    body.querySelectorAll("tr.qrow").forEach(tr => {
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("button, a")) return;
+        listAction("open", parseInt(tr.dataset.id, 10));
+      });
     });
     document.getElementById("pg-prev")?.addEventListener("click", () => { state.filter.page = Math.max(1, (state.filter.page || 1) - 1); reload(); });
     document.getElementById("pg-next")?.addEventListener("click", () => { state.filter.page = (state.filter.page || 1) + 1; reload(); });
