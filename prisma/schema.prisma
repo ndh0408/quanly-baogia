@@ -258,6 +258,7 @@ model Quote {
   city          String
   quoteDate     DateTime
   validUntil    DateTime?
+  executionDate DateTime?            // ngày thi công (lắp đặt) — CHỈ hiển thị trong app + trang Quản lý dự án, KHÔNG xuất Excel
   customerLogo  String?     @db.Text   // base64 data URL of customer logo (inserted into templates that have a logo anchor)
   greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
   vatPercent    Decimal     @default(8) @db.Decimal(5, 2)

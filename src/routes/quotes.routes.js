@@ -257,7 +257,7 @@ router.get(
       orderBy: [{ quoteDate: "desc" }, { id: "desc" }],
       select: {
         id: true, quoteNumber: true, projectCode: true, projectVersion: true,
-        title: true, status: true, quoteDate: true, vatPercent: true,
+        title: true, status: true, quoteDate: true, executionDate: true, vatPercent: true,
         subtotal: true, total: true, discount: true,
         company: { select: { name: true, shortName: true } },
         customer: { select: { code: true, name: true } },
@@ -282,6 +282,7 @@ router.get(
         title: q.title,
         status: q.status,
         quoteDate: q.quoteDate,
+        executionDate: q.executionDate,
         vatPercent: Number(q.vatPercent),
         subtotal: Number(q.subtotal),
         total: Number(q.total),
@@ -360,6 +361,7 @@ router.post(
       fromAddress: b.fromAddress || company.address,
       city: b.city || company.city || "TP. Hồ Chí Minh",
       quoteDate: b.quoteDate || new Date(),
+      executionDate: b.executionDate || null,
       validUntil: b.validUntil || null,
       customerId: b.customerId ?? null,
       greeting: b.greeting || undefined,
@@ -450,6 +452,7 @@ router.put(
       if (b[f] !== undefined) data[f] = b[f] || null;
     }
     if (b.quoteDate) data.quoteDate = b.quoteDate;
+    if (b.executionDate !== undefined) data.executionDate = b.executionDate || null;
     if (b.validUntil !== undefined) data.validUntil = b.validUntil || null;
     if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);

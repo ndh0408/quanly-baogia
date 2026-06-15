@@ -145,6 +145,11 @@ export const QuoteCreateSchema = z.object({
   quoteDate: z.coerce.date({ error: "Ngày báo giá không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
     .optional(),
+  // Ngày thi công (lắp đặt) — CHỈ quản lý nội bộ, KHÔNG xuất Excel. Có thể ở tương lai
+  // nên không chặn cận trên như quoteDate; "" (xoá ngày) → route quy về null.
+  executionDate: z.coerce.date({ error: "Ngày thi công không hợp lệ" })
+    .refine((d) => d.getFullYear() >= 2015 && d.getFullYear() <= 2100, "Ngày thi công không hợp lệ")
+    .nullable().optional().or(z.literal("")),
   validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
@@ -180,6 +185,11 @@ export const QuoteUpdateSchema = z.object({
   quoteDate: z.coerce.date({ error: "Ngày báo giá không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getTime() <= Date.now() + 86_400_000, "Ngày báo giá không hợp lệ")
     .optional(),
+  // Ngày thi công (lắp đặt) — CHỈ quản lý nội bộ, KHÔNG xuất Excel. Có thể ở tương lai
+  // nên không chặn cận trên như quoteDate; "" (xoá ngày) → route quy về null.
+  executionDate: z.coerce.date({ error: "Ngày thi công không hợp lệ" })
+    .refine((d) => d.getFullYear() >= 2015 && d.getFullYear() <= 2100, "Ngày thi công không hợp lệ")
+    .nullable().optional().or(z.literal("")),
   validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   greeting: z.string().max(2000).optional(),

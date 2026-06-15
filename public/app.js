@@ -1217,6 +1217,7 @@ function renderEditor(el, quote) {
   const isNew = !!quote._new;
   const q = JSON.parse(JSON.stringify(quote));
   if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = q.quoteDate.slice(0, 10);
+  if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
   if (!q.sheets || !q.sheets.length) {
     q.sheets = [{ templateId: state.templates[0]?.id, items: [] }];
   }
@@ -1303,6 +1304,8 @@ function renderEditor(el, quote) {
             <input id="f-quoteNumber" value="${escapeHtml(q.quoteNumber || "")}" placeholder="${isNew ? "Tự động cấp khi lưu" : ""}" readonly ${!editable ? "disabled" : ""} /></label>
           <label>Ngày báo giá
             <input type="date" id="f-quoteDate" value="${q.quoteDate}" ${!editable ? "disabled" : ""} /></label>
+          <label>Ngày thi công <span class="muted" style="font-size:11px">(lắp đặt — chỉ quản lý nội bộ, không xuất Excel)</span>
+            <input type="date" id="f-executionDate" value="${q.executionDate || ""}" ${!editable ? "disabled" : ""} /></label>
           <label>VAT (%)
             <input type="number" step="0.1" id="f-vatPercent" value="${q.vatPercent}" ${!editable ? "disabled" : ""} /></label>
           <label>Giảm giá (VNĐ) <span class="muted" style="font-size:11px">(trừ vào tổng)</span>
@@ -1526,6 +1529,7 @@ function renderEditor(el, quote) {
     bindField("f-fromAddress", "fromAddress");
     bindField("f-quoteNumber", "quoteNumber");
     bindField("f-quoteDate", "quoteDate");
+    bindField("f-executionDate", "executionDate");
     bindField("f-vatPercent", "vatPercent");
     bindField("f-discount", "discount");
     bindField("f-title", "title");
@@ -3694,7 +3698,7 @@ async function renderProjects(el) {
         <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
         <td>${dash}</td><td>${dash}</td>
         <td><strong>${escapeHtml(r.code)}</strong></td>
-        <td>${dash}</td><td>${dash}</td>
+        <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
         <td>${cty ? escapeHtml(cty) : dash}</td>
         <td>${dash}</td><td>${dash}</td>
         <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
