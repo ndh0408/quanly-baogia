@@ -2082,7 +2082,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       return `
       <tr data-row="${i}" class="section-row">
         <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="Chữ nhóm (để trống = tự ${letter})" ${dis} style="width:34px;text-align:center" /></td>
-        <td class="col-hangmuc"><input data-f="name" value="${escapeHtml(it.name || "")}" placeholder="Tên nhóm (vd: Wallsticker)" ${dis} /></td>
+        <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="Tên nhóm (vd: Wallsticker)" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>

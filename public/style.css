@@ -855,6 +855,29 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
   .pick-grid { grid-template-columns: 1fr; }
 }
 
+/* ===== Responsive polish — phần mới (bảng nội bộ + Quản lý dự án + thanh nút editor) ===== */
+.extra-grid { min-width: 600px; }            /* bảng nội bộ ít cột hơn lưới chính → hẹp hơn, vẫn cuộn trong .tbl-scroll */
+.proj-table { min-width: 1080px; }           /* nhiều cột → cuộn ngang gọn trong .tbl-scroll thay vì bóp méo */
+@media (max-width: 920px) {
+  /* Khu "+ Thêm bảng" của bảng nội bộ xếp dọc cho dễ bấm trên mobile */
+  .extra-head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .extra-add { display: flex; gap: 8px; }
+  .extra-add-cat, .extra-add .btn { flex: 1; }
+  /* Ô tổng trang Quản lý dự án co gọn */
+  #proj-summary .card-section { min-width: 130px; }
+}
+@media (max-width: 560px) {
+  /* Thanh nút Lưu/Trình duyệt/Duyệt/Gửi… xuống hàng, đủ rộng để bấm */
+  .editor .actions { flex-wrap: wrap; }
+  .editor .actions .btn { flex: 1 1 42%; justify-content: center; }
+  .extra-table { padding: 8px 10px; }
+  .extra-table-head { gap: 6px; }
+  .extra-del-table { margin-left: 0; }
+  /* Thanh công thức (fx) không tràn */
+  .fx-bar { flex-wrap: wrap; }
+  #fx-input { min-width: 60%; }
+}
+
 /* ============ Accessibility helpers ============ */
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
