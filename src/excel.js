@@ -591,16 +591,13 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const ncell = ws.getCell(c1);
       const note = (quote.notes == null ? "" : String(quote.notes)).trim();
       if (note) {
-        const nf = { name: "Times New Roman", family: 1, size: 11, color: { argb: pal.note.color || "FF843C0C" } };
-        // Ép canh trái qua style TRƯỚC (cell.alignment đơn lẻ bị reset center với ô richText),
-        // rồi mới set richText — nếu gán style SAU sẽ đè mất màu nâu của các run chữ.
+        // Chuỗi THƯỜNG + font nền nâu đậm (KHÔNG richText). RichText bị Excel render ĐEN
+        // cho tới khi click vào ô; gán màu vào FONT NỀN của ô thì hiện nâu ngay khi mở file.
         const st = ncell.style ? JSON.parse(JSON.stringify(ncell.style)) : {};
+        st.font = { name: "Times New Roman", family: 1, size: 11, bold: true, color: { argb: pal.note.color || "FF843C0C" } };
         st.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
         ncell.style = st;
-        ncell.value = { richText: [
-          { text: "Ghi chú: ", font: { ...nf, bold: true } },
-          { text: note, font: { ...nf } },
-        ] };
+        ncell.value = `Ghi chú: ${note}`;
         ws.getRow(nr).height = Math.max(ws.getRow(nr).height || 0, 20);
       } else {
         ncell.value = null;
