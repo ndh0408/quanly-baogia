@@ -1,4 +1,6 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber } from "./grid-clipboard.js?v=20260615v";
+
 const app = document.getElementById("app");
 
 // Client-side permission mirror of the server catalog (from /api/auth/me).
@@ -1219,7 +1221,7 @@ function renderEditor(el, quote) {
   // Excel-grid session state (selection rectangle, undo/redo stacks, clipboard buffer,
   // preview flag) — lives in THIS closure, never on DOM nodes, so it survives the
   // tbody.innerHTML re-renders inside drawItems and resets when render() rebuilds the editor.
-  const grid = { sel: null, selSheet: 0, copyBuf: null, undo: [], redo: [], previewOpen: false, focusSnap: null, _dirty: false, requestDraw: null };
+  const grid = { sel: null, selSheet: 0, copyBuf: null, _copyToken: 0, undo: [], redo: [], previewOpen: false, focusSnap: null, _dirty: false, requestDraw: null };
 
   // Unsaved-changes tracking for the leave-guard. Fresh open = clean; any input/
   // change bubbling out of the editor marks it dirty (idempotent property handler,
@@ -2068,7 +2070,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   // following consecutive "sub" rows; STT + Hạng Mục cells merge (rowspan) across
   // the group, exactly like the CLF template. "info" rows are standalone program
   // notes (no STT / price). STT is numbered per group head only.
-  const dis = !editable ? "disabled" : "";
+  // VIEW-ONLY: dùng `readonly` (KHÔNG `disabled`) để người chỉ-xem vẫn CHỌN + COPY được ô
+  // (disabled thì không focus/bôi/copy được). Sửa/cắt/dán vẫn bị chặn theo `editable`.
+  const dis = !editable ? "readonly" : "";
   const rowKind = activeSheet.items.map(() => "head");
   for (let i = 0; i < activeSheet.items.length; i++) {
     const k = activeSheet.items[i].kind;
@@ -2300,16 +2304,8 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   const blankSection = () => ({ kind: "section", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   const blankSubSection = () => ({ kind: "subsection", label: "", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
   // Parse a pasted Excel number ("1.000.000", "1,000,000", "12,5"…) into a real number.
-  const numLoose = (s) => {
-    s = String(s).trim().replace(/[^\d.,-]/g, "");
-    if (!s) return 0;
-    if (s.includes(",") && s.includes(".")) {
-      s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
-    } else if (s.includes(",")) {
-      const p = s.split(","); s = (p.length === 2 && p[1].length <= 2) ? p[0] + "." + p[1] : s.replace(/,/g, "");
-    } else if ((s.match(/\./g) || []).length > 1) { s = s.replace(/\./g, ""); }
-    return Number(s) || 0;
-  };
+  // Dùng helper thuần (đã unit-test) — gồm bản vá lỗi "1.234" (nghìn VN) bị đọc thành 1.234.
+  const numLoose = (s) => parseLooseNumber(s);
   const redraw = () => { drawItems(q, activeSheet, editable, tplCode, usesDays, grid); updateSummary(q); };
   // Live-refresh each section row's "Đơn Giá" (luôn) + "Thành Tiền" (khi bật toggle) as
   // item values change — without a full redraw, so the group total stays current while typing.
@@ -2472,17 +2468,21 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   };
   const doUndo = () => { commitPending(); if (grid.undo.length) restoreSnap(grid.undo.pop(), grid.undo, grid.redo); };
   const doRedo = () => { commitPending(); if (grid.redo.length) restoreSnap(grid.redo.pop(), grid.redo, grid.undo); };
-  const serializeRect = (rc) => {
-    const out = [];
+  // Build a string matrix of the selected rect. NUMERIC cells → raw US value (blank stays
+  // blank, never "0"); text cells → raw value (newlines/tabs PRESERVED — the serializer
+  // quotes them per RFC-4180 so multi-line "Hạng Mục" round-trips with Excel).
+  const rectToMatrix = (rc) => {
+    const m = [];
     for (let r = rc.r0; r <= rc.r1; r++) {
       const row = [];
       for (let c = rc.c0; c <= rc.c1; c++) {
         const f2 = FIELDS[c]; const v = activeSheet.items[r][f2];
-        row.push(NUMERIC.has(f2) ? String(Number(v) || 0) : String(v ?? "").replace(/[\t\n]/g, " "));
+        if (NUMERIC.has(f2)) { const n = Number(v); row.push((v === "" || v == null || isNaN(n)) ? "" : String(n)); }
+        else row.push(String(v ?? ""));
       }
-      out.push(row.join("\t"));
+      m.push(row);
     }
-    return out.join("\n");
+    return m;
   };
   const fillDown = () => {
     if (!editable) return;
@@ -2826,8 +2826,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       // BỘ GÕ TIẾNG VIỆT (IME): khi đang gõ dấu, phím Enter dùng để XÁC NHẬN từ — phải BỎ
       // QUA, đừng để lưới "ăn" nó (commit + xuống dòng/thêm hàng) khiến nội dung bị đùn/nhân
       // xuống ô trống bên dưới. Lỗi rõ trên Mac (IME tiếng Việt). isComposing / keyCode 229
-      // = đang soạn IME (cũng chặn Arrow/Tab/Esc lúc đang gõ — đúng hành vi).
-      if (e.isComposing || e.keyCode === 229 || e.key === "Process") return;
+      // = đang soạn IME (cũng chặn Arrow/Tab/Esc lúc đang gõ — đúng hành vi). NHƯNG cho
+      // Ctrl/Cmd (Z/Y/D…) đi qua kể cả khi đang gõ (copy/cut đã chuyển sang sự kiện riêng).
+      if (!(e.ctrlKey || e.metaKey) && (e.isComposing || e.keyCode === 229 || e.key === "Process")) return;
       const tr = inp.closest("tr"); const i = parseInt(tr.dataset.row, 10);
       const ci = FIELDS.indexOf(f);
       const ctrl = e.ctrlKey || e.metaKey;
@@ -2854,25 +2855,10 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
       if (ctrl && ((e.key === "y" || e.key === "Y") || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); e.stopPropagation(); if (editable) doRedo(); return; }
       if (ctrl && (e.key === "d" || e.key === "D")) { e.preventDefault(); e.stopPropagation(); fillDown(); return; }
-      if (ctrl && (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X")) {
-        const rc = rectOf(grid.sel);
-        if (!rc || (rc.r0 === rc.r1 && rc.c0 === rc.c1)) return;   // single cell → native copy/cut
-        e.preventDefault(); e.stopPropagation();
-        const tsv = serializeRect(rc);
-        const kinds = []; for (let r = rc.r0; r <= rc.r1; r++) kinds.push(activeSheet.items[r].kind || "item");
-        grid.copyBuf = { tsv, kinds, cols: rc.c1 - rc.c0 + 1 };
-        try { navigator.clipboard?.writeText(tsv); } catch {}
-        if ((e.key === "x" || e.key === "X") && editable) {
-          pushUndo();
-          for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
-            const f2 = FIELDS[c]; const it = activeSheet.items[r];
-            if (it.kind === "info" && f2 !== "name") continue;
-            it[f2] = NUMERIC.has(f2) ? 0 : "";
-          }
-          redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
-        }
-        return;
-      }
+      // COPY/CUT (Ctrl/Cmd+C/X): KHÔNG bắt ở keydown nữa. Đã chuyển sang sự kiện
+      // 'copy'/'cut' chuẩn của trình duyệt (xem grid._clip) — chạy ĐỒNG BỘ đúng lúc, hoạt
+      // động ổn trên macOS/Safari/Firefox + chuột phải + cảm ứng + http LAN. Ctrl+C/X rơi
+      // xuống đây sẽ kích hoạt sự kiện copy/cut tương ứng, nên ở đây bỏ qua (không chặn).
       if (e.key === "Escape" && grid.sel) { e.stopPropagation(); clearSel(); return; }
       if (e.key === "Tab") {
         if (!e.shiftKey && (ci < FIELDS.length - 1 || i < activeSheet.items.length - 1)) {
@@ -2897,54 +2883,113 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       }
     });
 
-    // Paste a block copied from Excel → fills the grid from this cell, creating rows as needed.
-    inp.addEventListener("paste", (e) => {
-      const text = ((e.clipboardData || window.clipboardData).getData("text") || "").replace(/\r/g, "");
-      const isGrid = /\t/.test(text) || /\n.*\S/.test(text.replace(/\n+$/, ""));
-      if (isGrid) {
-        e.preventDefault();
-        pushUndo();
-        const lines = text.replace(/\n+$/, "").split("\n");
-        let startRow = parseInt(inp.closest("tr").dataset.row, 10);
-        let startCol = FIELDS.indexOf(f);
-        // Dán khi đang đứng ở DÒNG NHÓM / NHÓM CON (header): chèn cả khối thành các hàng
-        // item NGAY DƯỚI header (giữ nguyên header) + canh từ cột Hạng Mục — thay vì ghi
-        // đè lên chính dòng nhóm/nhóm con.
-        const startKind = activeSheet.items[startRow]?.kind;
-        const intoGroup = (startKind === "section" || startKind === "subsection");
-        if (intoGroup) {
-          activeSheet.items.splice(startRow + 1, 0, ...lines.map(() => blank()));
-          startRow += 1; startCol = 0;
-        }
-        // If this is an internal copy of our own block, restore the original row kinds
-        // (so copying sub/info rows pastes them back as sub/info, not all heads).
-        const sameBlock = !intoGroup && grid.copyBuf && grid.copyBuf.tsv === text;
-        lines.forEach((line, r) => {
-          const ri = startRow + r;
-          while (activeSheet.items.length <= ri) activeSheet.items.push(blank());
-          if (sameBlock && grid.copyBuf.kinds[r]) activeSheet.items[ri].kind = grid.copyBuf.kinds[r];
-          const tgt = activeSheet.items[ri];
-          line.split("\t").forEach((cell, c) => {
-            const field = FIELDS[startCol + c];
-            if (!field) return;
-            if (tgt.kind === "info" && field !== "name") return;   // never paste price onto an info row
-            const raw = cell.trim();
-            tgt[field] = NUMERIC.has(field) ? numLoose(raw)
-              : (multilineFields.has(field) ? raw : raw.replace(/\s+/g, " "));
-          });
-        });
-        redraw();
-        const maxCols = Math.max(...lines.map(l => l.split("\t").length));
-        setSel({ row: startRow, field: FIELDS[startCol] }, { row: startRow + lines.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
-      } else if (!isMultiline && /[\r\n]/.test(text)) {
-        e.preventDefault();
-        const cleaned = text.replace(/[\r\n]+/g, " ");
-        const t = e.target, s = t.selectionStart || 0, en = t.selectionEnd || 0;
-        t.value = t.value.substring(0, s) + cleaned + t.value.substring(en);
-        t.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
+    // PASTE: xử lý ở cấp tbody (grid._clip.onPaste) — bắt được cả dán bằng chuột phải /
+    // menu / cảm ứng, và đọc đúng ô nhiều dòng của Excel (RFC-4180). Xem bên dưới.
   });
+
+  // ===== COPY / CUT / PASTE chuẩn (sự kiện trình duyệt, đồng bộ — chạy ổn mọi nền tảng) =====
+  // Bắt ở 'copy'/'cut'/'paste' (không phải keydown) nên Cmd trên macOS/Safari, Firefox,
+  // chuột phải, cảm ứng và http LAN đều hoạt động; clipboardData.setData ghi ĐỒNG BỘ nên
+  // không còn ghi clipboard kiểu bất đồng bộ nuốt lỗi. Khối được nạp lại mỗi lần drawItems
+  // (closure mới: activeSheet/FIELDS…), nhưng listener gắn trên tbody chỉ MỘT lần.
+  const onCopyCut = (e) => {
+    if (!grid.sel || grid.selSheet !== q._activeSheet) return;   // không phải lưới này → để mặc định
+    const rc = rectOf(grid.sel); if (!rc) return;
+    const isCut = e.type === "cut";
+    const single = rc.r0 === rc.r1 && rc.c0 === rc.c1;
+    const ae = cellEl(grid.sel.anchor.row, grid.sel.anchor.field);
+    // 1 ô đang bôi đen 1 phần chữ trong ô → để trình duyệt copy đoạn chữ đó (như Excel)
+    if (single && ae && document.activeElement === ae && ae.selectionStart !== ae.selectionEnd) {
+      grid.copyBuf = null; return;
+    }
+    if (isCut && !editable) return;   // người chỉ-xem được copy, KHÔNG được cắt
+    e.preventDefault();
+    const matrix = rectToMatrix(rc);
+    const tsv = cellsToTSV(matrix);
+    const kinds = []; for (let r = rc.r0; r <= rc.r1; r++) kinds.push(activeSheet.items[r].kind || "item");
+    const cols = rc.c1 - rc.c0 + 1;
+    const token = ++grid._copyToken;
+    if (e.clipboardData) {
+      e.clipboardData.setData("text/plain", tsv);
+      try { e.clipboardData.setData("text/html", cellsToHTML(matrix)); } catch {}
+      try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, cols, tsv })); } catch {}
+    }
+    grid.copyBuf = { tsv, kinds, cols, token };
+    if (isCut && editable) {
+      pushUndo();
+      for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
+        const f2 = FIELDS[c]; const it = activeSheet.items[r];
+        if (!it || (it.kind === "info" && f2 !== "name")) continue;
+        it[f2] = NUMERIC.has(f2) ? 0 : "";
+      }
+      redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
+    }
+  };
+  const pasteCellVal = (it, field, cell) => {
+    if (!it || (it.kind === "info" && field !== "name")) return;   // không dán giá vào dòng thông tin
+    it[field] = NUMERIC.has(field) ? (cell.trim() === "" ? 0 : numLoose(cell))
+      : (multilineFields.has(field) ? cell : cell.trim().replace(/\s+/g, " "));   // giữ xuống hàng cho ô nhiều dòng
+  };
+  const onPaste = (e) => {
+    if (!editable) return;                       // người chỉ-xem không dán
+    const cd = e.clipboardData; if (!cd) return;
+    const tgtInput = (e.target && e.target.dataset && e.target.dataset.f != null) ? e.target : document.activeElement;
+    let startRow, startCol;
+    if (grid.sel && grid.selSheet === q._activeSheet) { const rc0 = rectOf(grid.sel); startRow = rc0.r0; startCol = rc0.c0; }
+    else if (tgtInput && tgtInput.dataset && tgtInput.dataset.f != null) { startRow = parseInt(tgtInput.closest("tr").dataset.row, 10); startCol = FIELDS.indexOf(tgtInput.dataset.f); }
+    else return;                                 // không ở trong lưới → để mặc định
+    let internal = null;
+    try { const rawIn = cd.getData("application/x-quanly-grid"); if (rawIn) internal = JSON.parse(rawIn); } catch {}
+    const text = cd.getData("text/plain") || cd.getData("text") || "";
+    if (!text && !internal) return;
+    const rows = parseClipboardTSV(internal ? internal.tsv : text);
+    const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
+
+    // 1 giá trị đơn lẻ
+    if (!isGrid) {
+      const val = rows[0][0];
+      const rcSel = (grid.sel && grid.selSheet === q._activeSheet) ? rectOf(grid.sel) : null;
+      const multiCell = rcSel && (rcSel.r0 !== rcSel.r1 || rcSel.c0 !== rcSel.c1);
+      if (multiCell) {   // Excel: điền 1 giá trị ra TOÀN vùng đang chọn
+        e.preventDefault(); pushUndo();
+        for (let r = rcSel.r0; r <= rcSel.r1; r++) for (let c = rcSel.c0; c <= rcSel.c1; c++) pasteCellVal(activeSheet.items[r], FIELDS[c], val);
+        redraw(); setSel({ row: rcSel.r0, field: FIELDS[rcSel.c0] }, { row: rcSel.r1, field: FIELDS[rcSel.c1] });
+        return;
+      }
+      if (tgtInput && tgtInput.dataset && tgtInput.dataset.f != null) {   // 1 ô → chèn tại con trỏ
+        e.preventDefault();
+        const ins = multilineFields.has(tgtInput.dataset.f) ? val : val.replace(/[\r\n]+/g, " ");
+        const s = tgtInput.selectionStart || 0, en = tgtInput.selectionEnd || 0;
+        tgtInput.value = tgtInput.value.substring(0, s) + ins + tgtInput.value.substring(en);
+        tgtInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return;
+    }
+
+    // Khối nhiều ô
+    e.preventDefault(); pushUndo();
+    const startKind = activeSheet.items[startRow]?.kind;
+    const intoGroup = (startKind === "section" || startKind === "subsection");
+    if (intoGroup) { activeSheet.items.splice(startRow + 1, 0, ...rows.map(() => blank())); startRow += 1; startCol = 0; }
+    const sameBlock = !intoGroup && internal && grid.copyBuf && internal.token === grid.copyBuf.token;
+    rows.forEach((cells, r) => {
+      const ri = startRow + r;
+      while (activeSheet.items.length <= ri) activeSheet.items.push(blank());
+      if (sameBlock && internal.kinds && internal.kinds[r]) activeSheet.items[ri].kind = internal.kinds[r];
+      const tgt = activeSheet.items[ri];
+      cells.forEach((cell, c) => { const field = FIELDS[startCol + c]; if (field) pasteCellVal(tgt, field, cell); });
+    });
+    redraw();
+    const maxCols = Math.max(...rows.map(rr => rr.length));
+    setSel({ row: startRow, field: FIELDS[startCol] }, { row: startRow + rows.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
+  };
+  grid._clip = { onCopyCut, onPaste };
+  if (tbody && !tbody._clipBound) {
+    tbody._clipBound = true;
+    tbody.addEventListener("copy", (e) => { if (grid._clip) grid._clip.onCopyCut(e); });
+    tbody.addEventListener("cut", (e) => { if (grid._clip) grid._clip.onCopyCut(e); });
+    tbody.addEventListener("paste", (e) => { if (grid._clip) grid._clip.onPaste(e); });
+  }
 
   tbody.querySelectorAll("button[data-rm]").forEach((b) => {
     b.addEventListener("click", () => {
@@ -3286,10 +3331,12 @@ function showInviteResult(r) {
       <button class="btn" id="iv-copy" type="button">Sao chép</button>
     </div>
     <p class="muted" style="margin-top:10px">Nhân viên mở liên kết → đặt mật khẩu + điền SĐT → đăng nhập bằng <b>email</b>. Lời mời hết hạn sau 7 ngày.</p>`);
-  m.find("#iv-copy")?.addEventListener("click", () => {
+  m.find("#iv-copy")?.addEventListener("click", async () => {
     const inp = m.find("#iv-link"); inp.select();
-    try { navigator.clipboard?.writeText(inp.value); } catch (e) {}
-    toast("Đã sao chép liên kết", "success");
+    let ok = false;
+    try { if (navigator.clipboard) { await navigator.clipboard.writeText(inp.value); ok = true; } } catch { ok = false; }
+    if (!ok) { try { ok = document.execCommand("copy"); } catch { ok = false; } }   // fallback http/insecure
+    toast(ok ? "Đã sao chép liên kết" : "Chưa sao chép được — hãy chọn rồi nhấn Ctrl/Cmd+C", ok ? "success" : "error");
   });
   const sb = m.find("[data-save]"); if (sb) sb.style.display = "none";
   const cb = m.find("[data-cancel]"); if (cb) cb.textContent = "Đóng";

@@ -6,13 +6,14 @@
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#f5b400" />
   <title>Quản lý Báo Giá - Gia Nguyễn</title>
-  <link rel="modulepreload" href="/app.js?v=20260615u" />
+  <link rel="modulepreload" href="/app.js?v=20260615v" />
+  <link rel="modulepreload" href="/grid-clipboard.js?v=20260615v" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css?v=20260615u" />
+  <link rel="stylesheet" href="/style.css?v=20260615v" />
   <!-- Apply saved/OS theme before first paint (external so CSP can drop script unsafe-inline) -->
-  <script src="/theme-init.js?v=20260615u"></script>
+  <script src="/theme-init.js?v=20260615v"></script>
   <style>
     /* Instant boot splash so First Contentful Paint isn't blocked on the API */
     #boot { position: fixed; inset: 0; display: grid; place-items: center;
@@ -29,8 +30,8 @@
 <body>
   <div id="boot"><div style="text-align:center"><div class="gn">GN</div><p>Đang tải…</p></div></div>
   <div id="app"></div>
-  <script type="module" src="/app.js?v=20260615u"></script>
-  <!-- v=20260615u: ai cũng bấm "ƒ" xem được công thức đã nhập (mọi quyền/mọi máy, kể cả chỉ-xem); nhóm con xuất Excel khớp editor (không chiếm chữ A/B/C, thụt lề ↳, nền nhạt); FIX bấm chuột → khung chọn + thanh fx nhảy theo ngay (như Excel, không còn kẹt ô cũ chờ phím) -->
+  <script type="module" src="/app.js?v=20260615v"></script>
+  <!-- v=20260615v: COPY/PASTE chuẩn như Excel trên MỌI thiết bị/bộ gõ — chuyển sang sự kiện copy/cut/paste của trình duyệt (chạy ổn macOS/Safari/Firefox + chuột phải + cảm ứng + http LAN), parser RFC-4180 (đọc đúng ô nhiều dòng), điền 1 giá trị ra cả vùng chọn, sửa lỗi số "1.234"→1234, người chỉ-xem copy được (readonly), copy ra Excel/Word kèm bảng HTML -->
 
 </body>
 </html>

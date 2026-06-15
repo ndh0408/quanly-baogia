@@ -935,6 +935,12 @@ input:disabled, select:disabled, textarea:disabled {
   background: var(--surface-2); color: var(--text-muted); cursor: not-allowed;
   -webkit-text-fill-color: var(--text-muted); /* keep readable on iOS */
 }
+/* VIEW-ONLY báo giá: ô lưới dùng `readonly` (để người xem CHỌN + COPY được) — cho nó
+   trông y như trạng thái khoá (xám), nhưng con trỏ là text để bôi/copy. */
+.excel-table td input[readonly], .excel-table td textarea[readonly] {
+  background: var(--surface-2); color: var(--text-muted); cursor: text;
+  -webkit-text-fill-color: var(--text-muted);
+}
 
 /* Program-info rows inside the items table (kind:"info") */
 .excel-table tr.info-row { background: var(--surface-2); }
