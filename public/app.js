@@ -1371,8 +1371,6 @@ function renderEditor(el, quote) {
           <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả trên màn hình lẫn file Excel/PDF xuất ra)</span>
         </label>` : ""}
         ${editable ? `<div class="muted" style="margin:4px 0 6px;font-size:12.5px">Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung (vd “Giảm giá khách quen”) rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>` : ""}
-
-        <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
         ${editable ? `<label class="toggle-totals" style="display:inline-flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13.5px;cursor:pointer">
           <input type="checkbox" id="f-hasNote" ${q.notes ? "checked" : ""}/>
           <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
@@ -1383,6 +1381,8 @@ function renderEditor(el, quote) {
         <div class="quote-summary" style="${q.showTotals === false ? "display:none" : ""}">
           ${renderQuoteSummary(q)}
         </div>
+
+        <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
 
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
