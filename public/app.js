@@ -2842,11 +2842,20 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         e.preventDefault();
         pushUndo();
         const lines = text.replace(/\n+$/, "").split("\n");
-        const startRow = parseInt(inp.closest("tr").dataset.row, 10);
-        const startCol = FIELDS.indexOf(f);
+        let startRow = parseInt(inp.closest("tr").dataset.row, 10);
+        let startCol = FIELDS.indexOf(f);
+        // Dán khi đang đứng ở DÒNG NHÓM / NHÓM CON (header): chèn cả khối thành các hàng
+        // item NGAY DƯỚI header (giữ nguyên header) + canh từ cột Hạng Mục — thay vì ghi
+        // đè lên chính dòng nhóm/nhóm con.
+        const startKind = activeSheet.items[startRow]?.kind;
+        const intoGroup = (startKind === "section" || startKind === "subsection");
+        if (intoGroup) {
+          activeSheet.items.splice(startRow + 1, 0, ...lines.map(() => blank()));
+          startRow += 1; startCol = 0;
+        }
         // If this is an internal copy of our own block, restore the original row kinds
         // (so copying sub/info rows pastes them back as sub/info, not all heads).
-        const sameBlock = grid.copyBuf && grid.copyBuf.tsv === text;
+        const sameBlock = !intoGroup && grid.copyBuf && grid.copyBuf.tsv === text;
         lines.forEach((line, r) => {
           const ri = startRow + r;
           while (activeSheet.items.length <= ri) activeSheet.items.push(blank());
@@ -2863,7 +2872,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         });
         redraw();
         const maxCols = Math.max(...lines.map(l => l.split("\t").length));
-        setSel({ row: startRow, field: f }, { row: startRow + lines.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
+        setSel({ row: startRow, field: FIELDS[startCol] }, { row: startRow + lines.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
       } else if (!isMultiline && /[\r\n]/.test(text)) {
         e.preventDefault();
         const cleaned = text.replace(/[\r\n]+/g, " ");
