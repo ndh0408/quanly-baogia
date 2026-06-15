@@ -2637,6 +2637,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   if (fxInEl && !fxInEl._fxBound) {
     fxInEl._fxBound = true;
     fxInEl.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229 || e.key === "Process") return;   // đang gõ IME → Enter là xác nhận từ, bỏ qua
       if (e.key === "Enter") { e.preventDefault(); grid._fxApplyBar && grid._fxApplyBar(true); }
       else if (e.key === "Escape") { e.preventDefault(); if (grid._fxSync) grid._fxSync(); fxInEl.blur(); }
     });
@@ -2752,6 +2753,11 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
 
     // Keyboard: Enter (move down), arrows/Tab nav, Ctrl+C/X/D, Ctrl+Z/Y, Esc.
     inp.addEventListener("keydown", (e) => {
+      // BỘ GÕ TIẾNG VIỆT (IME): khi đang gõ dấu, phím Enter dùng để XÁC NHẬN từ — phải BỎ
+      // QUA, đừng để lưới "ăn" nó (commit + xuống dòng/thêm hàng) khiến nội dung bị đùn/nhân
+      // xuống ô trống bên dưới. Lỗi rõ trên Mac (IME tiếng Việt). isComposing / keyCode 229
+      // = đang soạn IME (cũng chặn Arrow/Tab/Esc lúc đang gõ — đúng hành vi).
+      if (e.isComposing || e.keyCode === 229 || e.key === "Process") return;
       const tr = inp.closest("tr"); const i = parseInt(tr.dataset.row, 10);
       const ci = FIELDS.indexOf(f);
       const ctrl = e.ctrlKey || e.metaKey;
