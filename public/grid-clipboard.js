@@ -90,3 +90,60 @@ export function parseLooseNumber(s) {
   }
   return Number(s) || 0;
 }
+
+// ---- Reconstruct a quote table copied from the app's OWN Excel export -----------------
+// Khi người dùng copy NGUYÊN bảng báo giá từ file app xuất ra (gồm cả cột STT) rồi dán vào
+// lưới, hàm này DỰNG LẠI đúng cấu trúc: nhóm lớn (A/B/C) / nhóm con / hàng con / dòng thông
+// tin / item — dựa trên đúng quy luật export:
+//   • STT là CHỮ (A,B,…)                         → nhóm chính (section)
+//   • STT trống + KHÔNG có tên + có ĐVT/SL/giá   → hàng con (sub)  [STT+tên bị gộp ô với dòng cha]
+//   • STT trống + CÓ tên + KHÔNG ĐVT/SL + có giá → nhóm con (subsection)  [giá = tổng nhóm]
+//   • STT trống + CÓ tên + KHÔNG giá             → dòng thông tin (info)
+//   • còn lại (STT số)                           → item
+// `roles` = thứ tự field của từng cột dán vào (vd ["_stt","name","detail","unit","quantity",
+// "unitPrice","_amount","notes"]); cột "_stt"/"_amount" là tính toán, KHÔNG nhập.
+export function reconstructExportRows(matrix, roles, numericRoles) {
+  const numSet = numericRoles instanceof Set ? numericRoles : new Set(numericRoles || ["quantity", "unitPrice", "days"]);
+  const idx = (role) => roles.indexOf(role);
+  const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
+  const cell = (row, i) => (i >= 0 && i < row.length && row[i] != null ? String(row[i]) : "");
+  const out = [];
+  for (const row of matrix) {
+    const stt = cell(row, sttI).trim();
+    const name = cell(row, nameI);
+    const hasItemData = cell(row, unitI).trim() !== "" || cell(row, qtyI).trim() !== "";
+    const priceRaw = cell(row, priceI).trim();
+    const hasPrice = priceRaw !== "" && parseLooseNumber(priceRaw) !== 0;
+    let kind;
+    if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
+    else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";
+    else if (stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";
+    else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
+    else kind = "item";
+    const it = { kind };
+    roles.forEach((role, i) => {
+      if (!role || role === "_stt" || role === "_amount") return;
+      const v = cell(row, i);
+      if (numSet.has(role)) it[role] = parseLooseNumber(v);
+      else if (role === "detail" || role === "notes" || role === "name" || role === "label") it[role] = v;
+      else it[role] = v.trim();
+    });
+    // Nhóm/nhóm con: ô "Đơn Giá" trong export là TỔNG nhóm (tính tự động) → không phải đơn giá thật.
+    if (kind === "section" || kind === "subsection") { it.unitPrice = 0; it.quantity = parseLooseNumber(cell(row, qtyI)); }
+    if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; }
+    out.push(it);
+  }
+  return out;
+}
+
+// Có nên coi khối dán là "bảng báo giá app xuất ra" (gồm cột STT) để dựng lại cấu trúc?
+// An toàn: chỉ khi dán từ cột đầu, cột STT toàn dạng STT (chữ đơn / số / trống) và hoặc có
+// chữ nhóm (A/B) hoặc khối rộng hơn số cột nhập (tức có thêm cột STT). fieldCount = số FIELDS.
+export function looksLikeExportPaste(matrix, startCol, fieldCount) {
+  if (startCol !== 0 || !matrix.length) return false;
+  const col0Ok = matrix.every((r) => { const c = (r[0] || "").trim(); return c === "" || /^[A-Za-z]{1,2}$/.test(c) || /^\d+$/.test(c); });
+  if (!col0Ok) return false;
+  const hasGroupLetter = matrix.some((r) => /^[A-Za-z]{1,2}$/.test((r[0] || "").trim()));
+  const maxCols = Math.max(...matrix.map((r) => r.length));
+  return hasGroupLetter || maxCols > fieldCount;
+}

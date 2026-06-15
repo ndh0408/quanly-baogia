@@ -1,5 +1,5 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber } from "./grid-clipboard.js?v=20260615v";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260615w";
 
 const app = document.getElementById("app");
 
@@ -2497,6 +2497,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       }
     }
     redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
+    focusCell(rc.r0, FIELDS[rc.c0], true);   // giữ focus để Ctrl+Z hoạt động sau fill-down
   };
 
   // New rows go right below the selected row (Excel-style); only when nothing on
@@ -2923,6 +2924,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         it[f2] = NUMERIC.has(f2) ? 0 : "";
       }
       redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
+      focusCell(rc.r0, FIELDS[rc.c0], true);   // giữ focus để Ctrl+Z hoàn tác được ngay sau khi cắt
     }
   };
   const pasteCellVal = (it, field, cell) => {
@@ -2954,6 +2956,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         e.preventDefault(); pushUndo();
         for (let r = rcSel.r0; r <= rcSel.r1; r++) for (let c = rcSel.c0; c <= rcSel.c1; c++) pasteCellVal(activeSheet.items[r], FIELDS[c], val);
         redraw(); setSel({ row: rcSel.r0, field: FIELDS[rcSel.c0] }, { row: rcSel.r1, field: FIELDS[rcSel.c1] });
+        focusCell(rcSel.r0, FIELDS[rcSel.c0], true);
         return;
       }
       if (tgtInput && tgtInput.dataset && tgtInput.dataset.f != null) {   // 1 ô → chèn tại con trỏ
@@ -2963,6 +2966,23 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
         tgtInput.value = tgtInput.value.substring(0, s) + ins + tgtInput.value.substring(en);
         tgtInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
+      return;
+    }
+
+    // DÁN NGUYÊN BÁO GIÁ từ Excel (file app xuất ra, có cột STT) → DỰNG LẠI nhóm lớn /
+    // nhóm con / hàng con / dòng thông tin / item cho đúng (không lệch cột, nhận diện nhóm).
+    // Chỉ khi KHÔNG phải copy nội bộ (copy nội bộ đã có token khôi phục kind chính xác hơn).
+    if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
+      e.preventDefault(); pushUndo();
+      const roles = ADDR_COLS.map((c) => c.field);
+      const built = reconstructExportRows(rows, roles, NUMERIC).map((it) => ({ ...blank(), ...it }));
+      activeSheet.items.splice(startRow, rows.length, ...built);
+      if (!activeSheet.items.length) activeSheet.items.push(blank());
+      redraw();
+      setSel({ row: startRow, field: FIELDS[0] }, { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] });
+      focusCell(startRow, FIELDS[0], true);
+      const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
       return;
     }
 
@@ -2982,6 +3002,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
     redraw();
     const maxCols = Math.max(...rows.map(rr => rr.length));
     setSel({ row: startRow, field: FIELDS[startCol] }, { row: startRow + rows.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
+    focusCell(startRow, FIELDS[startCol], true);   // giữ focus để Ctrl+Z hoạt động ngay sau khi dán
   };
   grid._clip = { onCopyCut, onPaste };
   if (tbody && !tbody._clipBound) {
