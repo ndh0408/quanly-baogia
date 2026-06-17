@@ -64,7 +64,8 @@ function ensureWrap(cell) {
  */
 function paintCell(cell, { fill, fontColor, bold } = {}) {
   const style = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
-  if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+  if (fill === "none") style.fill = { type: "pattern", pattern: "none" };   // xoá nền (để ô trắng)
+  else if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
   if (fontColor != null || bold != null) {
     style.font = { ...(style.font || {}) };
     if (fontColor != null) style.font.color = { argb: fontColor };
@@ -404,9 +405,11 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
       if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
       for (const col of Object.values(cols)) {
+        // Nhóm con: 2 ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa, theo yêu cầu.
+        const bareSubCell = isSubSection && (col === cols.stt || col === cols.notes);
         paintCell(ws.getCell(`${col}${r}`), {
           // nhóm con: nền NHẠT HƠN nhóm chính (cùng tông xanh lá của mẫu GN), để phân biệt mà không cần chữ
-          fill: isSubSection ? "FFF2F8EC" : (pal?.sectionFill || "FFDDEBF7"),
+          fill: bareSubCell ? "none" : (isSubSection ? "FFF2F8EC" : (pal?.sectionFill || "FFDDEBF7")),
           bold: true,
           ...(pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {}),
         });

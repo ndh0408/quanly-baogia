@@ -60,6 +60,29 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(foundVat).toBe(true);     // VAT = stored quote.vat (no fractional recompute)
   });
 
+  // Nhóm con (subsection): 2 ô STT + Ghi Chú phải để TRẮNG (không tô nền) — chỉ tô dải
+  // giữa. Khoá đúng yêu cầu "bỏ màu 2 ô đó của nhóm con".
+  it("nhóm con: ô STT và Ghi Chú KHÔNG tô nền, dải giữa vẫn tô", async () => {
+    const q = makeQuote("marico_decor");   // stt=B, name=C, notes=I
+    q.sheets[0].items = [
+      { kind: "subsection", name: "NHÓM CON KIỂM THỬ", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "Hạng mục con", detail: "", unit: "cái", quantity: 1, unitPrice: 100_000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    let subRow = null;
+    ws.eachRow((row, rn) => {
+      const v = row.getCell("C").value;
+      if (v && String(v).includes("NHÓM CON KIỂM THỬ")) subRow = rn;
+    });
+    expect(subRow).not.toBeNull();
+    const pattern = (addr) => { const f = ws.getCell(addr).fill; return f && f.pattern; };
+    expect(pattern(`C${subRow}`)).toBe("solid");      // tên nhóm con: vẫn tô nền
+    expect(pattern(`B${subRow}`)).not.toBe("solid");  // STT: không nền
+    expect(pattern(`I${subRow}`)).not.toBe("solid");  // Ghi Chú: không nền
+  });
+
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in
   // worker → transfer buffer back → validate). Proves the worker plumbing works.
   it("runExportJob generates a valid xlsx via the worker thread", async () => {

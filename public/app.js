@@ -1068,7 +1068,7 @@ function renderNewQuote(el) {
       // (each company has its own prefix + sequence, e.g. GN…, CLF…).
       const sheets = wz.templateIds.map(tid => {
         const t = state.templates.find(x => x.id === tid);
-        return { templateId: tid, name: t?.name || "Sheet", items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] };
+        return { templateId: tid, name: t?.name || "Sheet", groupSubtotal: true, items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] };
       });
       state.currentQuote = {
         ...wz.info, companyId: wz.companyId, managerId: wz.managerId, customerId: wz.customerId,
@@ -1088,7 +1088,7 @@ function renderEditor(el, quote) {
   if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = q.quoteDate.slice(0, 10);
   if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
   if (!q.sheets || !q.sheets.length) {
-    q.sheets = [{ templateId: state.templates[0]?.id, items: [] }];
+    q.sheets = [{ templateId: state.templates[0]?.id, groupSubtotal: true, items: [] }];
   }
   q._activeSheet = 0;
   q.sheets.forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
@@ -1338,6 +1338,7 @@ function renderEditor(el, quote) {
         q.sheets.push({
           templateId: tpl.id,
           name: tpl.name,
+          groupSubtotal: true,
           items: [{ name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }],
         });
         q._activeSheet = q.sheets.length - 1;
