@@ -8,7 +8,7 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
 } from "../validators.js";
-import { computeQuoteTotals, D } from "../money.js";
+import { computeQuoteTotals } from "../money.js";
 import { nextQuoteNumber, nextProjectCode } from "../quoteNumber.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
@@ -17,15 +17,13 @@ import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
 import { can, canOnQuote, requirePermission, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 import {
-  canEdit,
   QUOTE_INCLUDE,
   QUOTE_LIST_SELECT,
   presentQuote,
   presentQuoteRow,
-  templatesBelongToCompany,
   extraTableSum,
-  buildSheetsCreate,
 } from "../quoteUtils.js";
+import { createQuote, updateQuote } from "../quoteService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -270,100 +268,7 @@ router.post(
   "/",
   validate({ body: QuoteCreateSchema }),
   asyncHandler(async (req, res) => {
-    const b = req.body;
-    const company = await prisma.company.findFirst({ where: { id: b.companyId } });
-    if (!company) return res.status(400).json({ error: "Không tìm thấy công ty" });
-    if (!(await templatesBelongToCompany(b.sheets, company.id))) {
-      return res.status(400).json({ error: "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)" });
-    }
-
-    // Người tạo luôn là member của báo giá. (Trước đây nhân viên phải gán 1 quản lý
-    // phụ trách — vai trò "nhân viên" đã bỏ hẳn nên không còn ràng buộc đó.)
-    const memberConnect = [{ id: req.session.userId }];
-
-    // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted,
-    // since the unique constraint covers them) BEFORE the write to return a clean 409.
-    if (b.quoteNumber) {
-      const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
-      if (dup) {
-        return res.status(409).json({
-          error: dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại",
-        });
-      }
-    }
-
-    const creator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
-    const draft = {
-      title: b.title,
-      toCompany: b.toCompany,
-      toContact: b.toContact || null,
-      toEmail: b.toEmail || null,
-      toPhone: b.toPhone || null,
-      toAddress: b.toAddress || null,
-      companyId: company.id,
-      fromContact: b.fromContact || "",
-      fromPhone: b.fromPhone || company.phone || null,
-      fromTitle: b.fromTitle || null,
-      fromAddress: b.fromAddress || company.address,
-      city: b.city || company.city || "TP. Hồ Chí Minh",
-      quoteDate: b.quoteDate || new Date(),
-      executionDate: b.executionDate || null,
-      customerId: b.customerId ?? null,
-      greeting: b.greeting || undefined,
-      vatPercent: D(b.vatPercent),
-      discount: D(b.discount || 0),
-      showTotals: b.showTotals !== false,
-      notes: b.notes || null,
-      customerLogo: b.customerLogo || null,
-      status: "draft",
-      createdById: req.session.userId,
-    };
-
-    // Compute totals from sheets+items BEFORE writing so we store snapshot
-    const synthetic = { vatPercent: draft.vatPercent, discount: draft.discount, sheets: b.sheets };
-    const t = computeQuoteTotals(synthetic);
-    draft.subtotal = t.subtotal;
-    draft.vat = t.vat;
-    draft.discount = t.discount;
-    draft.total = t.total;
-
-    // Allocate the quote number (and per-employee project code) INSIDE the create
-    // transaction so a failed insert rolls the counter back too — no burned/gap
-    // numbers. Auto-allocated numbers retry on the rare P2002 (collision with a
-    // soft-deleted number) by drawing the next value.
-    const prefix = company.quotePrefix || "GN";
-    const runCreate = (tx, quoteNumber) =>
-      tx.quote.create({
-        data: { ...draft, quoteNumber, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: memberConnect } },
-        include: QUOTE_INCLUDE,
-      });
-
-    let quote;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        quote = await prisma.$transaction(async (tx) => {
-          const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx);
-          if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx);
-          const created = await runCreate(tx, quoteNumber);
-          await snapshotQuoteVersion(tx, created.id, req.session.userId, "create");
-          return created;
-        });
-        break;
-      } catch (e) {
-        // Retry only auto-allocated collisions; a client-supplied dup was already 409'd above.
-        if (e.code === "P2002" && !b.quoteNumber && attempt < 3) continue;
-        if (e.code === "P2002") return res.status(409).json({ error: "Số báo giá bị trùng, vui lòng thử lại" });
-        throw e;
-      }
-    }
-
-    await audit(req, "quote.create", {
-      resource: "quote",
-      resourceId: quote.id,
-      after: { quoteNumber: quote.quoteNumber, total: Number(quote.total), status: quote.status },
-    });
-    emitWebhook("quote.created", { id: quote.id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
-
+    const quote = await createQuote(req);
     res.status(201).json(presentQuote(quote, { includeLogo: true }));
   })
 );
@@ -373,117 +278,7 @@ router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (!canEdit(existing, req.session)) {
-      return res.status(403).json({ error: "Bạn không thể sửa báo giá này" });
-    }
-
-    const b = req.body;
-    if (Array.isArray(b.sheets)) {
-      const targetCompany = b.companyId ?? existing.companyId;
-      if (!(await templatesBelongToCompany(b.sheets, targetCompany))) {
-        return res.status(400).json({ error: "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)" });
-      }
-    }
-    const data = {};
-    // Required (non-null) columns: keep the value as-is; never coerce to null.
-    for (const f of ["title", "toCompany", "fromContact", "fromAddress", "city", "greeting"]) {
-      if (b[f] !== undefined && b[f] !== null) data[f] = b[f];
-    }
-    // Nullable columns: empty string clears them to null.
-    for (const f of ["toContact", "toEmail", "toPhone", "toAddress", "fromPhone", "fromTitle", "notes"]) {
-      if (b[f] !== undefined) data[f] = b[f] || null;
-    }
-    if (b.quoteDate) data.quoteDate = b.quoteDate;
-    if (b.executionDate !== undefined) data.executionDate = b.executionDate || null;
-    if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
-    if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
-    // Quote-level discount: must be read here or a discount-only change is silently
-    // dropped AND the priceAffecting/reopen logic below (which checks data.discount)
-    // never fires for it.
-    if (b.discount !== undefined) data.discount = D(b.discount);
-    if (b.showTotals !== undefined) data.showTotals = b.showTotals;
-    if (b.companyId !== undefined) data.companyId = b.companyId;
-    if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
-    if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
-      const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
-      if (dup) {
-        return res.status(409).json({
-          error: dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại",
-        });
-      }
-      data.quoteNumber = b.quoteNumber;
-    }
-
-    // If a price-affecting change is made to a quote that was already in the
-    // approval pipeline (pending/approved/sent), the prior approval no longer
-    // reflects the content — send it back to draft and clear the approval.
-    const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined || data.discount !== undefined;
-    // Only price-affecting edits start a new revision. Cosmetic edits (title,
-    // contacts, notes...) keep the current versionNo so pending Approval rows —
-    // which are keyed by versionNo — remain valid and the quote can't get stuck.
-    if (priceAffecting) data.currentVersion = (existing.currentVersion ?? 1) + 1;
-    const wasLocked = ["pending", "approved", "sent"].includes(existing.status);
-    const reopened = wasLocked && priceAffecting;
-    if (reopened) {
-      data.status = "draft";
-      data.approvedById = null;
-    }
-
-    let updated;
-    if (Array.isArray(b.sheets)) {
-      const vatPct = data.vatPercent ?? existing.vatPercent;
-      const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
-      data.subtotal = t.subtotal;
-      data.vat = t.vat;
-      data.discount = t.discount;
-      data.total = t.total;
-      updated = await prisma.$transaction(async (tx) => {
-        await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
-        const u = await tx.quote.update({
-          where: { id },
-          data: { ...data, sheets: { create: buildSheetsCreate(b.sheets) } },
-          include: QUOTE_INCLUDE,
-        });
-        await snapshotQuoteVersion(tx, id, req.session.userId, "update");
-        return u;
-      });
-    } else {
-      // Recompute totals if VAT or discount changed (either shifts the grand total).
-      if (data.vatPercent !== undefined || data.discount !== undefined) {
-        const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, discount: data.discount ?? existing.discount, sheets: existing.sheets });
-        data.subtotal = t.subtotal;
-        data.vat = t.vat;
-        data.discount = t.discount;
-        data.total = t.total;
-      }
-      updated = await prisma.$transaction(async (tx) => {
-        const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE });
-        await snapshotQuoteVersion(tx, id, req.session.userId, "update");
-        return u;
-      });
-    }
-
-    await audit(req, "quote.update", {
-      resource: "quote",
-      resourceId: id,
-      before: { total: Number(existing.total), status: existing.status },
-      after: { total: Number(updated.total), status: updated.status, reopened },
-    });
-    if (reopened) {
-      await audit(req, "quote.reopened", { resource: "quote", resourceId: id });
-      await notify(existing.createdById, {
-        title: `Báo giá ${updated.quoteNumber} cần duyệt lại`,
-        body: "Báo giá đã được chỉnh sửa nên quay về trạng thái Nháp, cần trình duyệt lại.",
-        link: `/#/quotes/${id}`,
-        resource: "quote",
-        resourceId: id,
-        important: true,
-      }).catch(() => {});
-    }
-
+    const updated = await updateQuote(req);
     res.json(presentQuote(updated, { includeLogo: true }));
   })
 );
