@@ -2801,8 +2801,20 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
   };
   const pasteCellVal = (it, field, cell) => {
     if (!it || (it.kind === "info" && field !== "name")) return;   // không dán giá vào dòng thông tin
-    it[field] = NUMERIC.has(field) ? (cell.trim() === "" ? 0 : numLoose(cell))
-      : (multilineFields.has(field) ? cell : cell.trim().replace(/\s+/g, " "));   // giữ xuống hàng cho ô nhiều dòng
+    const raw = cell == null ? "" : String(cell);
+    // Excel-style công thức dán dưới dạng text ("=G3*E3", "=2000+3000", "=1000000*8%"):
+    // giữ thành CÔNG THỨC thật (có nút ƒ, sửa lại được) thay vì bị numLoose biến thành số sai.
+    // (Excel copy thường chỉ đưa kết quả; bấm Ctrl+` để hiện công thức rồi copy thì text mới có "=".)
+    if (raw.trim().startsWith("=")) {
+      it.formulas = it.formulas || {};
+      it.formulas[field] = raw.trim();
+      if (NUMERIC.has(field)) { const live = evalFormula(raw.trim(), formulaRefs); it[field] = live !== null ? live : 0; }
+      else it[field] = raw.trim();
+      return;
+    }
+    if (it.formulas && it.formulas[field]) { delete it.formulas[field]; if (!Object.keys(it.formulas).length) delete it.formulas; }
+    it[field] = NUMERIC.has(field) ? (raw.trim() === "" ? 0 : numLoose(raw))
+      : (multilineFields.has(field) ? raw : raw.trim().replace(/\s+/g, " "));   // giữ xuống hàng cho ô nhiều dòng
   };
   const onPaste = (e) => {
     if (!editable) return;                       // người chỉ-xem không dán
@@ -2827,6 +2839,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       if (multiCell) {   // Excel: điền 1 giá trị ra TOÀN vùng đang chọn
         e.preventDefault(); pushUndo();
         for (let r = rcSel.r0; r <= rcSel.r1; r++) for (let c = rcSel.c0; c <= rcSel.c1; c++) pasteCellVal(activeSheet.items[r], FIELDS[c], val);
+        if (sheetHasFormulas()) recomputeAll();
         redraw(); setSel({ row: rcSel.r0, field: FIELDS[rcSel.c0] }, { row: rcSel.r1, field: FIELDS[rcSel.c1] });
         focusCell(rcSel.r0, FIELDS[rcSel.c0], true);
         return;
@@ -2871,6 +2884,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const tgt = activeSheet.items[ri];
       cells.forEach((cell, c) => { const field = FIELDS[startCol + c]; if (field) pasteCellVal(tgt, field, cell); });
     });
+    if (sheetHasFormulas()) recomputeAll();   // công thức vừa dán (có tham chiếu) settle trước khi vẽ
     redraw();
     const maxCols = Math.max(...rows.map(rr => rr.length));
     setSel({ row: startRow, field: FIELDS[startCol] }, { row: startRow + rows.length - 1, field: FIELDS[Math.min(startCol + maxCols - 1, FIELDS.length - 1)] });
