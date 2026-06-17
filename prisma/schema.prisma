@@ -360,20 +360,7 @@ model QuoteItem {
   @@index([productId])
 }
 
-// === Approval matrix + workflow ===
-model ApprovalMatrix {
-  id        Int      @id @default(autoincrement())
-  name      String
-  minAmount Decimal  @db.Decimal(18, 2)
-  maxAmount Decimal? @db.Decimal(18, 2)
-  levels    Json     // [{level: 1, roles: ["manager"], any: 1}, {level: 2, roles: ["admin"], any: 1}]
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([active, minAmount])
-}
-
+// === Approval workflow ===
 model Approval {
   id         Int      @id @default(autoincrement())
   quoteId    Int

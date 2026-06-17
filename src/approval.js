@@ -2,9 +2,10 @@ import { prisma } from "./db.js";
 
 /**
  * Approval workflow — intentionally ONE step: the Director (admin) approves or
- * rejects a submitted quote. No tiers/levels, no amount matrix. (The
- * ApprovalMatrix model + an amount-band engine were scaffolded but never wired;
- * the dead lookup was removed to avoid accidental re-activation.)
+ * rejects a submitted quote. No tiers/levels, no amount matrix. (An amount-band
+ * ApprovalMatrix — model, CRUD API and builder UI — was scaffolded but never
+ * wired into the engine and has since been removed entirely; see migration
+ * 20260617000003_drop_approval_matrix.)
  */
 
 /**

@@ -41,7 +41,6 @@ describe("roleCan — role × permission matrix", () => {
     ["admin", P.QUOTE_REJECT, true],
     ["admin", P.USER_MANAGE, true],
     ["admin", P.SETTINGS_MANAGE, true],
-    ["admin", P.APPROVAL_MATRIX, true],
   ])("roleCan(%s, %s) → %s", (role, perm, want) => {
     expect(roleCan(role, perm)).toBe(want);
   });

@@ -12,6 +12,7 @@ export default [
       "deploy/**",
       "coverage/**",
       "prisma/migrations/**",
+      "e2e-*.mjs", // local Playwright/fetch verification harnesses (need a running app, not part of CI lint)
     ],
   },
   js.configs.recommended,

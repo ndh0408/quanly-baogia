@@ -1,5 +1,11 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260615y";
+import {
+  fmtMoney, quoteTotals, fmtDate, vnDateText, escapeHtml, safeLogoSrc,
+  pvRowspan, pvMoney, nl2br, groupLetter, pvRows, baoGiaTitleJS,
+  STATUS_LABEL, statusLabel, ROLE_LABEL, ROLE_LABEL_FULL,
+  RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
+} from "./js/util.js?v=20260617";
 
 const app = document.getElementById("app");
 
@@ -176,138 +182,7 @@ function applyFieldErrors(err) {
   return false;
 }
 
-function fmtMoney(n) {
-  if (n == null || isNaN(n)) return "0";
-  return Number(n).toLocaleString("vi-VN");
-}
-// Round to whole VND (half-up) — VND has no fractional unit. Mirrors src/money.js so the
-// on-screen totals equal the DB-stored totals AND the exported Excel (no sub-đồng drift).
-function roundVnd(n) { return Math.round(Number(n) || 0); }
-// Authoritative client-side total, byte-identical to computeQuoteTotals (src/money.js):
-// round subtotal, VAT from the rounded subtotal, clamp the discount to [0, gross].
-function quoteTotals(subtotalRaw, vatPct, discountRaw) {
-  const subtotal = roundVnd(subtotalRaw);
-  const vat = roundVnd(subtotal * (Number(vatPct) || 0) / 100);
-  const gross = subtotal + vat;
-  let discount = roundVnd(discountRaw);
-  if (discount < 0) discount = 0;
-  if (discount > gross) discount = gross;
-  return { subtotal, vat, discount, total: gross - discount };
-}
-function fmtDate(d) {
-  if (!d) return "";
-  const dt = new Date(d);
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
-}
-function vnDateText(d, city) {
-  const dt = d instanceof Date ? d : new Date(d);
-  return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
-}
-function escapeHtml(s) {
-  if (s == null) return "";
-  return String(s).replace(/[&<>"']/g, ch =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-}
-// Only ever put a logo in an <img src> when it's a pure base64 image data-URL —
-// anything else (markup smuggled into the value) renders nothing instead.
-function safeLogoSrc(s) {
-  return typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
-}
-
-// ---- Live-preview helpers (mirror drawItems + src/excel.js so the preview matches the file) ----
-// kind grouping: byte-for-byte mirror of drawItems' rowKind logic.
-function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
-function pvAmount(it, usesDays) {
-  const qy = Number(it.quantity) || 0, d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
-  return usesDays ? qy * d * p : qy * p;
-}
-function pvMoney(n) { return (!n || isNaN(Number(n))) ? "" : Number(n).toLocaleString("vi-VN"); }
-function nl2br(s) { return escapeHtml(s || "").replace(/\n/g, "<br>"); }
-// Per-row preview descriptors mirroring src/excel.js EXACTLY: section (nhóm A/B/C) bands
-// with letter + per-group subtotal + ×SL multiplier, "hàng con" merges, restarting item
-// numbers. Without this the preview rendered sections as plain items (wrong STT, wrong
-// totals) so it didn't match the exported file. Returns { rows, eff } (eff = effKind[]).
-function pvRows(items, usesDays, groupSubtotal) {
-  items = items || [];
-  const eff = items.map(() => "head");
-  for (let i = 0; i < items.length; i++) {
-    const k = items[i] && items[i].kind;
-    if (k === "info") eff[i] = "info";
-    else if (k === "section" || k === "subsection") eff[i] = "section";
-    else if (k === "sub" && i > 0 && (eff[i - 1] === "head" || eff[i - 1] === "sub")) eff[i] = "sub";
-    else eff[i] = "head";
-  }
-  // Per-section sum of child amounts (per-unit, before ×SL) — same as the export.
-  const sectionSum = {};
-  let cur = -1;
-  for (let i = 0; i < items.length; i++) {
-    if (eff[i] === "section") { cur = i; sectionSum[i] = 0; }
-    else if ((eff[i] === "head" || eff[i] === "sub") && cur >= 0) sectionSum[cur] += pvAmount(items[i], usesDays);
-  }
-  let itemNo = 0, sectionIdx = -1, mult = 1;
-  const rows = items.map((it, i) => {
-    const kind = eff[i];
-    if (kind === "section") {
-      sectionIdx++; itemNo = 0;
-      const gmult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
-      mult = gmult;
-      return { kind, it, letter: (it.label && String(it.label).trim()) || groupLetter(sectionIdx), groupSum: sectionSum[i] || 0, gmult, groupSubtotal };
-    }
-    if (kind === "info") return { kind, it };
-    return { kind, it, stt: kind === "head" ? ++itemNo : null, amt: pvAmount(it, usesDays), mult };
-  });
-  return { rows, eff };
-}
-// Mirror of src/templateConfigs.js baoGiaTitle (app.js is no-build; keep this copy in sync).
-function baoGiaTitleJS(t) {
-  t = (t || "").trim();
-  if (!t) return "BẢNG BÁO GIÁ";
-  const ascii = t.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toUpperCase();
-  return /^BANG\s*BAO\s*GIA/.test(ascii) ? t : "BẢNG BÁO GIÁ - " + t;
-}
-
-const STATUS_LABEL = {
-  draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
-  sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt",
-};
-const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
-const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý" };
-const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Quản lý" };
-const CUSTOMER_STATUS_LABEL = { lead: "Tiềm năng", prospect: "Đang trao đổi", active: "Đang giao dịch", inactive: "Ngừng" };
-const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—";
-const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
-
-// Friendly Vietnamese descriptions for audit action codes (no dev jargon for the boss).
-const ACTION_LABEL = {
-  "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.submit": "Trình duyệt báo giá",
-  "quote.approve": "Duyệt báo giá", "quote.reject": "Từ chối báo giá", "quote.send": "Gửi báo giá cho khách",
-  "quote.convert": "Chốt báo giá (thắng)", "quote.lost": "Đánh dấu không chốt", "quote.delete": "Xóa báo giá",
-  "quote.duplicate": "Nhân bản báo giá", "quote.reopened": "Mở lại để sửa",
-  "customer.create": "Thêm khách hàng", "customer.update": "Sửa khách hàng", "customer.delete": "Xóa khách hàng",
-  "customer.note.add": "Thêm ghi chú khách hàng",
-  "product.create": "Thêm sản phẩm", "product.update": "Sửa sản phẩm", "product.delete": "Xóa sản phẩm",
-  "user.create": "Thêm nhân viên", "user.update": "Cập nhật nhân viên",
-  "login.token": "Đăng nhập (ứng dụng)", "password.change.success": "Đổi mật khẩu",
-  "password.change.failed": "Đổi mật khẩu thất bại", "mfa.enable": "Bật bảo mật 2 lớp",
-  "mfa.disable": "Tắt bảo mật 2 lớp", "token.revoke-all": "Đăng xuất mọi thiết bị",
-  "webhook.create": "Thêm tích hợp", "webhook.update": "Sửa tích hợp", "webhook.delete": "Xóa tích hợp",
-};
-const actionLabel = (a) => ACTION_LABEL[a] || a || "—";
-const resourceLabel = (r) => RESOURCE_LABEL[r] || r || "";
-
-// Turn the approval-matrix levels JSON into a sentence a non-technical user understands.
-function describeApprovalLevels(levels) {
-  if (!Array.isArray(levels) || !levels.length) return "Quản lý hoặc Quản trị duyệt";
-  return levels
-    .slice()
-    .sort((a, b) => Number(a.level) - Number(b.level))
-    .map((l) => {
-      const who = (l.roles || []).map((r) => ROLE_LABEL_FULL[r] || r).join(" hoặc ") || "Quản lý";
-      const n = Number(l.any) || 1;
-      return `Cấp ${l.level}: ${who}${n > 1 ? ` — cần ${n} người duyệt` : ""}`;
-    })
-    .join("  →  ");
-}
+// Pure format/label/preview helpers + groupLetter -> moved to ./js/util.js (imported at top).
 
 // Theme: persist in localStorage, default to OS preference on first visit.
 function initTheme() {
@@ -1863,11 +1738,7 @@ function evalFormula(input, refs) {
 }
 
 // 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows.
-function groupLetter(n) {
-  let s = "", x = n + 1;
-  while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
-  return s;
-}
+// groupLetter -> moved to ./js/util.js
 
 // Sheet subtotal honoring section (nhóm) multipliers: a section's Số Lượng multiplies the
 // amounts of the items under it (until the next section). Section rows contribute 0 themselves.
@@ -4079,116 +3950,6 @@ async function renderAuditLog(el) {
   await reload();
 }
 
-// ---------------- Settings (admin) ----------------
-// One editable "approval level" row in the friendly builder (no JSON for the boss).
-function matrixLevelRow(idx, lvl) {
-  lvl = lvl || {};
-  const roles = lvl.roles || ["manager", "admin"];
-  const any = Number(lvl.any) || 1;
-  return `<div class="lvl-row" data-lvl style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;background:var(--surface-2)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <strong>Cấp duyệt ${idx}</strong>
-      <button type="button" class="btn btn-sm btn-danger" data-rm-lvl>Bỏ cấp này</button>
-    </div>
-    <div style="margin-bottom:8px">Ai được duyệt ở cấp này:
-      <label style="margin-left:8px"><input type="checkbox" data-role="manager" ${roles.includes("manager") ? "checked" : ""}/> Quản lý</label>
-      <label style="margin-left:14px"><input type="checkbox" data-role="admin" ${roles.includes("admin") ? "checked" : ""}/> Quản trị (Giám đốc)</label>
-    </div>
-    <label>Số người cần duyệt ở cấp này:
-      <input type="number" min="1" max="5" value="${any}" data-any style="width:72px"/></label>
-  </div>`;
-}
-
-function openMatrixBuilder(existing, onDone) {
-  const isEdit = !!existing;
-  const startLevels = (existing && existing.levels && existing.levels.length) ? existing.levels : [{ level: 1, roles: ["manager", "admin"], any: 1 }];
-  const m = openModal(isEdit ? "Sửa quy tắc duyệt" : "Thêm quy tắc duyệt", `
-    <p class="muted" style="margin-top:0">Quy tắc quyết định <strong>ai phải duyệt</strong> một báo giá dựa trên <strong>giá trị</strong> của nó. Ví dụ: báo giá trên 100 triệu thì Giám đốc phải duyệt.</p>
-    <div class="form-grid">
-      <label style="grid-column:1/-1">Tên quy tắc<input id="m-name" value="${escapeHtml(existing && existing.name || "Báo giá thường")}" placeholder="VD: Báo giá giá trị lớn"/></label>
-      <label>Áp dụng cho báo giá từ (đồng)<input id="m-min" type="number" min="0" value="${existing ? Number(existing.minAmount) : 0}"/></label>
-      <label>Đến (đồng) — để trống = trở lên<input id="m-max" type="number" min="0" value="${existing && existing.maxAmount != null ? Number(existing.maxAmount) : ""}"/></label>
-    </div>
-    <div style="margin-top:14px">
-      <strong>Các cấp duyệt (theo thứ tự)</strong>
-      <div id="lvl-list" style="margin-top:8px"></div>
-      <button type="button" class="btn btn-sm" id="add-lvl">+ Thêm một cấp duyệt</button>
-    </div>`);
-  const list = m.find("#lvl-list");
-  const collect = () => Array.from(list.querySelectorAll("[data-lvl]")).map((row, i) => ({
-    level: i + 1,
-    roles: Array.from(row.querySelectorAll("[data-role]")).filter(c => c.checked).map(c => c.dataset.role),
-    any: Math.max(1, Number(row.querySelector("[data-any]").value) || 1),
-  }));
-  const renderLevels = (lvls) => {
-    list.innerHTML = lvls.map((l, i) => matrixLevelRow(i + 1, l)).join("");
-    list.querySelectorAll("[data-rm-lvl]").forEach((b, i) => b.addEventListener("click", () => {
-      const cur = collect(); cur.splice(i, 1);
-      renderLevels(cur.length ? cur : [{ level: 1, roles: ["manager", "admin"], any: 1 }]);
-    }));
-  };
-  renderLevels(startLevels);
-  m.find("#add-lvl").addEventListener("click", () => {
-    const cur = collect(); cur.push({ level: cur.length + 1, roles: ["manager", "admin"], any: 1 });
-    renderLevels(cur);
-  });
-  m.onSave(async () => {
-    const built = collect();
-    for (const l of built) if (!l.roles.length) { toast(`Cấp ${l.level} chưa chọn ai được duyệt`, "error"); return; }
-    const payload = {
-      name: m.find("#m-name").value.trim() || "Báo giá thường",
-      minAmount: Number(m.find("#m-min").value) || 0,
-      maxAmount: m.find("#m-max").value ? Number(m.find("#m-max").value) : null,
-      levels: built,
-    };
-    try {
-      if (isEdit) await api(`/api/approvals/matrix/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      else await api("/api/approvals/matrix", { method: "POST", body: JSON.stringify(payload) });
-      toast("Đã lưu quy tắc duyệt", "success"); m.close(); onDone();
-    } catch (e) { toast(e.message, "error"); }
-  });
-}
-
-async function renderSettings(el) {
-  el.innerHTML = `<h1>Cài đặt hệ thống</h1>
-    <h3 style="margin-top:8px">Quy tắc duyệt báo giá</h3>
-    <p class="muted">Thiết lập <strong>ai phải duyệt</strong> báo giá tùy theo <strong>giá trị</strong>. Khi nhân viên trình duyệt, hệ thống tự chọn quy tắc khớp với tổng tiền của báo giá.</p>
-    <div id="s-matrix-body">${skeleton(3)}</div>
-    <button class="btn btn-primary" id="btn-add-matrix" style="margin-top:10px">+ Thêm quy tắc duyệt</button>`;
-
-  const reload = async () => {
-    try {
-      const rows = await api("/api/approvals/matrix");
-      window._matrixRows = rows;
-      document.getElementById("s-matrix-body").innerHTML = rows.length ? `
-        <div class="tbl-scroll"><table class="list-table">
-          <thead><tr><th scope="col">Tên quy tắc</th><th scope="col">Giá trị báo giá</th><th scope="col">Cần ai duyệt</th><th scope="col">Đang dùng</th><th scope="col"></th></tr></thead>
-          <tbody>${rows.map(r => `
-            <tr>
-              <td><strong>${escapeHtml(r.name)}</strong></td>
-              <td>${fmtMoney(r.minAmount)}${r.maxAmount != null ? " – " + fmtMoney(r.maxAmount) : " trở lên"} đ</td>
-              <td>${escapeHtml(describeApprovalLevels(r.levels))}</td>
-              <td>${r.active ? "✅" : "—"}</td>
-              <td style="white-space:nowrap">
-                <button class="btn btn-sm" data-edit="${r.id}">Sửa</button>
-                <button class="btn btn-sm btn-danger" data-del="${r.id}">Xóa</button>
-              </td>
-            </tr>`).join("")}</tbody>
-        </table></div>` : "<div class='empty-state'>Chưa có quy tắc — đang dùng mặc định: Quản lý hoặc Giám đốc duyệt</div>";
-      document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!(await confirmModal("Xóa quy tắc duyệt", "Xóa quy tắc duyệt này?", { danger: true, confirmText: "Xóa" }))) return;
-        try { await api(`/api/approvals/matrix/${b.dataset.del}`, { method: "DELETE" }); reload(); }
-        catch (e) { toast(e.message, "error"); }
-      }));
-      document.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => {
-        const row = (window._matrixRows || []).find(x => String(x.id) === b.dataset.edit);
-        openMatrixBuilder(row, reload);
-      }));
-    } catch (e) { toast(e.message, "error"); }
-  };
-  document.getElementById("btn-add-matrix").addEventListener("click", () => openMatrixBuilder(null, reload));
-  await reload();
-}
 
 // ---------------- Modal helper ----------------
 let _modalSeq = 0;

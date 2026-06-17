@@ -37,7 +37,6 @@ export const PERMISSIONS = {
   COMPANY_MANAGE:     "company:manage",
   AUDIT_VIEW:         "audit:view",
   SETTINGS_MANAGE:    "settings:manage",
-  APPROVAL_MATRIX:    "approval:matrix",
 };
 
 const P = PERMISSIONS;
@@ -70,7 +69,6 @@ export const PERMISSION_LABELS = {
   [P.COMPANY_MANAGE]:   "Quản lý công ty",
   [P.AUDIT_VIEW]:       "Xem nhật ký",
   [P.SETTINGS_MANAGE]:  "Cài đặt hệ thống",
-  [P.APPROVAL_MATRIX]:  "Cấu hình duyệt",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -88,7 +86,7 @@ export const PERMISSION_GROUPS = [
   ] },
   { key: "admin", label: "Quản trị", perms: [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
-    P.AUDIT_VIEW, P.SETTINGS_MANAGE, P.APPROVAL_MATRIX,
+    P.AUDIT_VIEW, P.SETTINGS_MANAGE,
   ] },
 ];
 
@@ -117,7 +115,7 @@ const ADMIN = [
   P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
   P.QUOTE_APPROVE, P.QUOTE_REJECT,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
-  P.SETTINGS_MANAGE, P.APPROVAL_MATRIX,
+  P.SETTINGS_MANAGE,
 ];
 
 export const ROLE_PERMISSIONS = {
