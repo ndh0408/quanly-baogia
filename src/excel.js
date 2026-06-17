@@ -80,33 +80,6 @@ function clean(s) {
   return String(s).replace(/[\r\n]+/g, " ").trim();
 }
 
-/** "A"→1, "I"→9, "AA"→27 — column letter to 1-based number. */
-function colLetterToNum(letter) {
-  return String(letter || "").toUpperCase().split("").reduce((a, c) => a * 26 + (c.charCodeAt(0) - 64), 0);
-}
-
-/**
- * Strip leftover template styling/values in every column to the RIGHT of the table.
- * The sample templates (e.g. Marico) ship empty-but-STYLED cells beyond the A:Notes
- * range (J16, L9, K22…). They are harmless on a single sheet, but the multi-sheet
- * stitcher remaps style indices via regex, and any leftover styled cell out there is
- * a latent mis-render risk (stray "khung"/nền from sheet 2 onward). Clearing them so
- * nothing styled lives past the table makes the export bulletproof.
- */
-function clearBeyondTable(ws, cfg) {
-  const cols = (cfg.items && cfg.items.columns) || {};
-  const lastCol = Math.max(0, ...Object.values(cols).map(colLetterToNum));
-  if (!lastCol) return;
-  ws.eachRow({ includeEmpty: true }, (row) => {
-    const last = row.cellCount;   // highest cell (value OR style) defined in this row
-    for (let c = lastCol + 1; c <= last; c++) {
-      const cell = row.getCell(c);
-      cell.value = null;
-      cell.style = {};            // reset to default xf — no border/fill/font
-    }
-  });
-}
-
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows. */
 function sectionLetter(n) {
   let s = "", x = n + 1;
@@ -1047,7 +1020,6 @@ export async function buildQuoteBuffer(quote) {
     const ws = wb.getWorksheet(cfg.sheetName) || wb.worksheets[0];
 
     const totals = fillSheetData(ws, cfg, quote, sheet, vatPct);
-    clearBeyondTable(ws, cfg);   // dọn ô rỗng-có-style ngoài bảng (tránh "khung" lạc khi stitch nhiều sheet)
 
     const displayName = uniq(sheet.name || cfg.sheetName || `Sheet ${idx + 1}`);
     ws.name = displayName;

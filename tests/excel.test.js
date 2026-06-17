@@ -83,33 +83,35 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(pattern(`I${subRow}`)).not.toBe("solid");  // Ghi Chú: không nền
   });
 
-  // Multi-sheet: no leftover template styling beyond the table (col I). The sample
-  // templates ship empty-but-styled cells in J+; after stitching they could misrender
-  // as stray "khung"/nền from sheet 2 onward. clearBeyondTable must wipe them.
-  it("multi-sheet export has NO styled cells beyond the table column (I)", async () => {
+  // Multi-sheet stitch must not leak a stray "khung"/nền grid right of the table from sheet 2
+  // onward. Root cause was the stitcher remapping cell s= but NOT row/col default styles, so a
+  // stitched sheet's row style pointed at the BASE sheet's (bordered) xf. A FEW-item non-first
+  // sheet exposes it (a many-item sheet overwrites the band). Assert no BODY row carries a
+  // decorated (border/fill) ROW-level style on any sheet.
+  it("multi-sheet stitch leaves no decorated row-style past the table (sheet 2+)", async () => {
     const q = makeQuote("marico_decor");
+    const fewItems = [
+      { kind: "section", name: "Nhóm A", quantity: 0, unitPrice: 0, days: null },
+      { kind: "item", name: "Mục", unit: "m2", quantity: 2, unitPrice: 100000, days: null, notes: "" },
+    ];
     q.sheets = [
       { ...q.sheets[0], name: "Sheet 1" },
-      { order: 2, name: "Sheet 2", groupSubtotal: true, template: { code: "marico_decor" }, items: [
-        { kind: "section", name: "Nhóm A", quantity: 0, unitPrice: 0, days: null },
-        { kind: "item", name: "Mục", unit: "m2", quantity: 2, unitPrice: 100000, days: null, notes: "" },
-        { kind: "subsection", name: "Chi phí vận chuyển", quantity: 0, unitPrice: 0, days: null },
-        { kind: "item", name: "Mục con", unit: "bộ", quantity: 1, unitPrice: 50000, days: null, notes: "" },
-      ] },
+      { order: 2, name: "Sheet 2 (few)", groupSubtotal: true, template: { code: "marico_decor" }, items: fewItems },
+      { order: 3, name: "Sheet 3 (few)", groupSubtotal: true, template: { code: "marico_decor" }, items: fewItems },
     ];
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
-    let dirty = 0;
+    const decorated = (st) => {
+      const b = st && st.border, f = st && st.fill;
+      const hasB = b && ["top", "bottom", "left", "right"].some((s) => b[s] && b[s].style);
+      const hasF = f && f.type === "pattern" && f.pattern && f.pattern !== "none";
+      return !!(hasB || hasF);
+    };
+    let bad = 0;
     for (const ws of wb.worksheets) {
-      ws.eachRow({ includeEmpty: true }, (row) => row.eachCell({ includeEmpty: true }, (cell, cn) => {
-        if (cn <= 9) return;   // beyond column I = outside the quote table
-        const f = cell.fill, b = cell.border;
-        const hasFill = f && f.type === "pattern" && f.pattern && f.pattern !== "none";
-        const hasBorder = b && ["top", "bottom", "left", "right"].some((s) => b[s] && b[s].style);
-        if (hasFill || hasBorder || cell.value != null) dirty++;
-      }));
+      for (let r = 12; r <= 60; r++) if (decorated(ws.getRow(r).style)) bad++;
     }
-    expect(dirty).toBe(0);
+    expect(bad).toBe(0);
   });
 
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in

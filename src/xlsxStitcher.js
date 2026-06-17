@@ -83,6 +83,15 @@ function remapSheetXml(sheetXml, xfOffset, sstOffset, numFmtMap) {
   // Cell style: <c r="A1" s="12" ...>  → s="12+xfOffset"
   out = out.replace(/(<c\b[^>]*\bs=")(\d+)(")/g, (_, p1, n, p3) => `${p1}${Number(n) + xfOffset}${p3}`);
 
+  // Row DEFAULT style: <row r="17" s="53" customFormat="1"> → s="53+xfOffset". Columns past
+  // the last filled cell inherit this, so if it isn't remapped the row points at the BASE
+  // sheet's xf 53 (often a bordered/filled style) → a stray "khung"/nền grid right of the
+  // table on stitched sheets. (Same class of bug as cell s=, just on row/col defaults.)
+  out = out.replace(/(<row\b[^>]*\bs=")(\d+)(")/g, (_, p1, n, p3) => `${p1}${Number(n) + xfOffset}${p3}`);
+
+  // Column DEFAULT style: <col min=".." max=".." style="N"/> → style="N+xfOffset".
+  out = out.replace(/(<col\b[^>]*\bstyle=")(\d+)(")/g, (_, p1, n, p3) => `${p1}${Number(n) + xfOffset}${p3}`);
+
   // Shared string refs: cells with t="s" reference index in <v>. The cell range
   // looks like <c r="A1" s="12" t="s"><v>5</v></c>. We bump the v.
   if (sstOffset !== 0) {
