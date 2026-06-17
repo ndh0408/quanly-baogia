@@ -59,6 +59,39 @@ describe("reconstructExportRows (re-import app's own export)", () => {
   });
 });
 
+describe("reconstructExportRows — công thức (dán bảng export có =…)", () => {
+  const NUM = new Set(["quantity", "unitPrice", "days"]);
+  it("giữ công thức Số Lượng thành it.formulas, KHÔNG nuốt thành số sai", () => {
+    // "=3.7*2.5" trước đây bị numLoose biến thành 3725 — nay phải giữ làm công thức.
+    const m = [["1", "Diecut", "", "m2", "=3.7*2.5", "740000", "2.756.500"]];
+    const [it] = reconstructExportRows(m, GN_ROLES, NUM);
+    expect(it.kind).toBe("item");
+    expect(it.formulas).toEqual({ quantity: "=3.7*2.5" });
+    expect(it.quantity).toBe(0);       // placeholder — app gọi recomputeAll() để ra 9.25
+    expect(it.unitPrice).toBe(740000); // giá thường vẫn parse số
+  });
+  it("giữ công thức Đơn Giá", () => {
+    const m = [["1", "x", "", "bộ", "1", "=1000000*8%", ""]];
+    const [it] = reconstructExportRows(m, GN_ROLES, NUM);
+    expect(it.formulas).toEqual({ unitPrice: "=1000000*8%" });
+    expect(it.quantity).toBe(1);
+  });
+  it("số thường vẫn parse như cũ (không có formulas)", () => {
+    const m = [["1", "x", "", "m2", "9,99", "95.000", ""]];
+    const [it] = reconstructExportRows(m, GN_ROLES, NUM);
+    expect(it.formulas).toBeUndefined();
+    expect(it.quantity).toBeCloseTo(9.99);
+    expect(it.unitPrice).toBe(95000);
+  });
+  it("nhóm chính KHÔNG nhận công thức đơn giá (Đơn Giá nhóm = tổng tự tính)", () => {
+    const m = [["A", "Nhóm", "", "", "", "=5000", ""]];
+    const [it] = reconstructExportRows(m, GN_ROLES, NUM);
+    expect(it.kind).toBe("section");
+    expect(it.unitPrice).toBe(0);
+    expect(it.formulas).toBeUndefined();
+  });
+});
+
 describe("looksLikeExportPaste", () => {
   it("detects an export block (has group letter, pasted at col 0)", () => {
     const m = [["A", "x", "", "", "", "100", "100"], ["1", "y", "", "m2", "2", "50", "100"]];

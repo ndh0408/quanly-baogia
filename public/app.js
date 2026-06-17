@@ -1,5 +1,5 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260615y";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./grid-clipboard.js?v=20260617d";
 import {
   fmtMoney, quoteTotals, fmtDate, vnDateText, escapeHtml, safeLogoSrc,
   pvRowspan, pvMoney, nl2br, groupLetter, pvRows, baoGiaTitleJS,
@@ -2863,11 +2863,13 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid) {
       const built = reconstructExportRows(rows, roles, NUMERIC).map((it) => ({ ...blank(), ...it }));
       activeSheet.items.splice(startRow, rows.length, ...built);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
+      if (sheetHasFormulas()) recomputeAll();   // đánh giá công thức "=…" vừa nhận từ bảng export
       redraw();
       setSel({ row: startRow, field: FIELDS[0] }, { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] });
       focusCell(startRow, FIELDS[0], true);
       const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
-      toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
+      const nFx = built.reduce((s, b) => s + (b.formulas ? Object.keys(b.formulas).length : 0), 0);
+      toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con${nFx ? `, ${nFx} công thức` : ""})`, "success");
       return;
     }
 

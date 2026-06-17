@@ -113,7 +113,8 @@ export function reconstructExportRows(matrix, roles, numericRoles) {
     const name = cell(row, nameI);
     const hasItemData = cell(row, unitI).trim() !== "" || cell(row, qtyI).trim() !== "";
     const priceRaw = cell(row, priceI).trim();
-    const hasPrice = priceRaw !== "" && parseLooseNumber(priceRaw) !== 0;
+    // Giá là công thức ("=…") cũng tính là CÓ giá (parseLooseNumber không đọc nổi công thức).
+    const hasPrice = priceRaw !== "" && (priceRaw.startsWith("=") || parseLooseNumber(priceRaw) !== 0);
     let kind;
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
     else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";
@@ -124,13 +125,24 @@ export function reconstructExportRows(matrix, roles, numericRoles) {
     roles.forEach((role, i) => {
       if (!role || role === "_stt" || role === "_amount") return;
       const v = cell(row, i);
-      if (numSet.has(role)) it[role] = parseLooseNumber(v);
+      if (numSet.has(role)) {
+        // Công thức Excel dán dưới dạng text ("=3.7*2.5", "=G3*F3"): giữ thành CÔNG THỨC
+        // (it.formulas[role]) để có nút ƒ + được tính lại; nếu không thì parse số như cũ.
+        // it[role]=0 chỉ là placeholder — caller gọi recomputeAll() để đánh giá công thức.
+        if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
+        else it[role] = parseLooseNumber(v);
+      }
       else if (role === "detail" || role === "notes" || role === "name" || role === "label") it[role] = v;
       else it[role] = v.trim();
     });
     // Nhóm/nhóm con: ô "Đơn Giá" trong export là TỔNG nhóm (tính tự động) → không phải đơn giá thật.
-    if (kind === "section" || kind === "subsection") { it.unitPrice = 0; it.quantity = parseLooseNumber(cell(row, qtyI)); }
-    if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; }
+    if (kind === "section" || kind === "subsection") {
+      it.unitPrice = 0;
+      if (it.formulas) delete it.formulas.unitPrice;   // nhóm không nhận công thức đơn giá
+      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseNumber(cell(row, qtyI));   // giữ công thức SL nếu có
+    }
+    if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; delete it.formulas; }   // dòng thông tin: không số/không công thức
+    if (it.formulas && !Object.keys(it.formulas).length) delete it.formulas;
     out.push(it);
   }
   return out;
