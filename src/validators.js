@@ -128,6 +128,8 @@ const itemSchema = z.object({
 const extraTableSchema = z.object({
   category: z.enum(["hcm", "hanoi", "khach"]),
   name: z.string().max(120).optional().nullable(),
+  templateId: z.coerce.number().int().positive().optional().nullable(),   // mẫu cột (GN/CLF có/không ngày)
+  groupSubtotal: z.boolean().optional(),
   items: z.array(itemSchema).max(500).default([]),
 });
 

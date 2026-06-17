@@ -109,6 +109,8 @@ export function sanitizeExtraTables(tables) {
   const out = tables.filter((t) => t && VALID.has(t.category)).map((t) => ({
     category: t.category,
     name: t.name ? String(t.name).replace(/[\r\n]+/g, " ").trim().slice(0, 120) : null,
+    templateId: t.templateId != null ? Number(t.templateId) : null,   // mẫu cột (GN/CLF có/không ngày)
+    groupSubtotal: !!t.groupSubtotal,
     items: (t.items || []).map((it) => ({
       kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
       name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
