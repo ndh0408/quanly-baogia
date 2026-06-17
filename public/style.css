@@ -545,6 +545,14 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .extra-cat-badge.cat-hcm { background: #e7f0ff; color: #1f4e79; }
 .extra-cat-badge.cat-hanoi { background: #e3f5e8; color: #1f7a3d; }
 .extra-cat-badge.cat-khach { background: #fff3d6; color: #8a5a00; }
+/* Bảng nội bộ: mỗi LOẠI (HCM/HN/Phí KH) tách riêng một nhóm — tổng từng loại đổ sang Quản lý dự án */
+.extra-cat-groups { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 14px; }
+.extra-cat-group { border: 1px solid var(--border, #e2e4ea); border-radius: 10px; padding: 9px 12px; background: var(--card-2, #fafbfc); }
+.extra-cat-grouphead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.extra-cat-total { font-size: 13px; color: var(--text, #1b2034); }
+.extra-cat-total strong { font-variant-numeric: tabular-nums; }
+.extra-cat-group .extra-sheet-tabs { margin-top: 8px; border-bottom: none; min-height: 0; }
+.extra-cat-group .sheet-tab { border-bottom: 1px solid #d8dbe3; }
 .extra-grid .ex-amount, .extra-grid .ex-total { font-variant-numeric: tabular-nums; }
 .extra-grid .ex-amount { text-align: right; }
 .extra-grid .ex-stt { text-align: center; }

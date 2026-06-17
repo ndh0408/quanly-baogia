@@ -113,6 +113,7 @@ export function sanitizeExtraTables(tables) {
     groupSubtotal: !!t.groupSubtotal,
     items: (t.items || []).map((it) => ({
       kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
+      label: it.label ? String(it.label).replace(/[\r\n]+/g, " ").trim().slice(0, 12) : null,   // nhãn nhóm tự gõ (A/B…) — đừng mất khi lưu
       name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
       detail: it.detail ? String(it.detail).trim() : null,
       unit: it.unit ? String(it.unit).replace(/[\r\n]+/g, " ").trim() : null,

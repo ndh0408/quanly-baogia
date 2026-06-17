@@ -1791,6 +1791,16 @@ function gridHeadHtml(showDetail, usesDays, editable) {
     </tr>
   </thead>`;
 }
+// Tổng 1 sheet nội bộ — KHỚP CHÍNH XÁC src/quoteUtils.js extraTableSum (số đổ sang
+// Quản lý dự án): bỏ section/subsection/info, qty×(days nếu>0)×price, KHÔNG hệ số nhóm.
+function extraTableSumLocal(t) {
+  return ((t && t.items) || []).reduce((acc, it) => {
+    if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
+    const qty = Number(it.quantity) || 0, price = Number(it.unitPrice) || 0;
+    const days = it.days != null ? Number(it.days) : null;
+    return acc + (days && days > 0 ? qty * days * price : qty * price);
+  }, 0);
+}
 function drawExtraTables(q, activeSheet, editable) {
   const wrap = document.getElementById("extra-tables-wrap");
   if (!wrap) return;
@@ -1803,7 +1813,17 @@ function drawExtraTables(q, activeSheet, editable) {
     const tplOf = (t) => state.templates.find(x => x.id === (t.templateId || defTplId)) || state.templates.find(x => x.id === activeSheet.templateId) || tplList[0];
     const blankItem = () => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" });
     const setGrid = (t) => { if (!t._grid) Object.defineProperty(t, "_grid", { value: newExtraGrid(), writable: true, configurable: true, enumerable: false }); };
-    // Sheet nội bộ đang mở (tab) — như báo giá chính, mỗi lúc xem 1 sheet.
+    // Null days CŨ cho bảng dùng template KHÔNG có cột Số Ngày (giống clearDaysIfUnused của
+    // lưới chính): extraTableSum tính theo per-item days nên days cũ (sau khi đổi has-days →
+    // no-days) sẽ làm PHỒNG tổng + lệch số đổ sang Quản lý dự án. Dọn để mọi đường khớp.
+    if (editable) {
+      let cleaned = false;
+      tables.forEach((x) => { const xt = tplOf(x); if (!(xt && xt.layout && xt.layout.hasDays)) (x.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } }); });
+      if (cleaned) window._editorDirty = true;
+    }
+    // Tổng từng LOẠI = đúng số đổ sang Quản lý dự án (Σ extraTableSum theo loại).
+    const catTotal = (cat) => tables.reduce((a, x) => a + (x && x.category === cat ? extraTableSumLocal(x) : 0), 0);
+    // Sheet nội bộ đang mở (1 lúc 1 sheet như Excel) — index toàn cục trong extraTables.
     let active = Number.isInteger(activeSheet._activeExtra) ? activeSheet._activeExtra : 0;
     if (active >= tables.length) active = tables.length - 1;
     if (active < 0) active = 0;
@@ -1812,41 +1832,52 @@ function drawExtraTables(q, activeSheet, editable) {
     const tpl = t ? tplOf(t) : null;
     const showDetail = !!(tpl && tpl.layout && tpl.layout.hasDetail), usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
 
+    // Mỗi LOẠI tách RIÊNG (HCM / HN / Phí KH) — vì tổng mỗi loại đổ riêng sang dự án.
+    const groupsHtml = EXTRA_CATS.map(([cat, label]) => {
+      const idxs = []; tables.forEach((x, i) => { if (x && x.category === cat) idxs.push(i); });
+      return `<div class="extra-cat-group">
+        <div class="extra-cat-grouphead">
+          <span class="extra-cat-badge cat-${cat}">${label}</span>
+          <span class="extra-cat-total" data-cat="${cat}">Tổng: <strong>${fmtMoney(catTotal(cat))}</strong> <span class="muted">→ Quản lý dự án</span></span>
+          ${editable ? `<button type="button" class="btn btn-sm extra-add-in" data-cat="${cat}">+ Thêm sheet</button>` : ""}
+          <span class="muted" style="font-size:11.5px">${idxs.length} sheet</span>
+        </div>
+        <div class="sheet-tabs extra-sheet-tabs">
+          ${idxs.length ? idxs.map((i) => `<div class="sheet-tab ${i === active ? "active" : ""}" data-extab="${i}" title="${escapeHtml(label)}">
+            <span>${escapeHtml(tables[i].name || ("Bảng " + (i + 1)))}</span>
+            ${editable ? `<span class="rm-tab" data-rm-extab="${i}" title="Xoá sheet nội bộ này">✕</span>` : ""}
+          </div>`).join("") : `<span class="muted" style="font-size:12px;padding:3px 2px">(chưa có — bấm “+ Thêm sheet”)</span>`}
+        </div>
+      </div>`;
+    }).join("");
+
     wrap.innerHTML = `
       <div class="extra-head">
-        <div><strong>Bảng nội bộ</strong> <span class="muted" style="font-weight:400;font-size:12px">— SHEET đầy đủ như báo giá (template · công thức · nhóm · copy/paste · Tổng sheet) nhưng KHÔNG xuất Excel. Tổng theo loại đổ sang Quản lý dự án.</span></div>
-        ${editable ? `<div class="extra-add">
-          <select id="extra-add-cat" class="extra-add-cat" title="Loại (đổ tổng sang Quản lý dự án)">${EXTRA_CATS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
-          <select id="extra-add-tpl" class="extra-add-cat" title="Mẫu cột (GN/CLF · có/không ngày)">${tplList.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select>
-          <button type="button" class="btn btn-sm" id="extra-add-btn">+ Thêm sheet nội bộ</button>
-        </div>` : ""}
+        <div><strong>Bảng nội bộ</strong> <span class="muted" style="font-weight:400;font-size:12px">— mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG; Tổng từng loại đổ riêng sang Quản lý dự án. SHEET đầy đủ như báo giá (template · công thức · nhóm · copy/paste) nhưng KHÔNG xuất Excel.</span></div>
+        ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px;white-space:nowrap">Mẫu khi thêm: <select id="extra-add-tpl" class="extra-add-cat">${tplList.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></label>` : ""}
       </div>
-      ${tables.length ? `
-        <div class="sheet-tabs extra-sheet-tabs">
-          ${tables.map((tt, ti) => `<div class="sheet-tab ${ti === active ? "active" : ""}" data-extab="${ti}" title="${escapeHtml(extraCatLabel(tt.category))}">
-            <span class="extra-cat-badge cat-${escapeHtml(tt.category)}" style="padding:1px 7px;font-size:11px">${escapeHtml(extraCatLabel(tt.category))}</span>
-            <span>${escapeHtml(tt.name || ("Bảng " + (ti + 1)))}</span>
-            ${editable ? `<span class="rm-tab" data-rm-extab="${ti}" title="Xoá sheet nội bộ này">✕</span>` : ""}
-          </div>`).join("")}
-        </div>
+      <div class="extra-cat-groups">${groupsHtml}</div>
+      ${t ? `
         <div class="extra-table">
           <div class="extra-table-head">
-            ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px">Loại: <select class="extra-cat-sel extra-add-cat">${EXTRA_CATS.map(([v, l]) => `<option value="${v}" ${t && v === t.category ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : `<span class="extra-cat-badge cat-${escapeHtml(t.category)}">${escapeHtml(extraCatLabel(t.category))}</span>`}
-            <input class="extra-name" value="${escapeHtml((t && t.name) || "")}" placeholder="Tên sheet (tuỳ chọn)" ${editable ? "" : "disabled"} />
+            <span class="extra-cat-badge cat-${escapeHtml(t.category)}">${escapeHtml(extraCatLabel(t.category))}</span>
+            ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px">Loại: <select class="extra-cat-sel extra-add-cat">${EXTRA_CATS.map(([v, l]) => `<option value="${v}" ${v === t.category ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
+            <input class="extra-name" value="${escapeHtml(t.name || "")}" placeholder="Tên sheet (tuỳ chọn)" ${editable ? "" : "disabled"} />
             ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px;white-space:nowrap">Mẫu: <select class="extra-tpl extra-add-cat">${tplList.map(x => `<option value="${x.id}" ${tpl && x.id === tpl.id ? "selected" : ""}>${escapeHtml(x.name)}</option>`).join("")}</select></label>` : ""}
           </div>
           <div class="tbl-scroll"><table class="excel-table" id="extra-grid-active">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>
         </div>
-      ` : `<div class="muted" style="padding:6px 0 2px">Chưa có sheet nội bộ.${editable ? ' Chọn loại + mẫu rồi bấm “+ Thêm sheet nội bộ”.' : ""}</div>`}
+      ` : `<div class="muted" style="padding:6px 0 2px">Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>`}
     `;
 
-    // Render SHEET đang mở bằng lưới ĐẦY ĐỦ (drawItems).
+    // Render SHEET đang mở bằng lưới ĐẦY ĐỦ (drawItems); cập nhật Tổng loại live khi sửa.
     if (t) {
       if (typeof t.groupSubtotal !== "boolean") t.groupSubtotal = true;
       if (!Array.isArray(t.items) || !t.items.length) t.items = [blankItem()];
       setGrid(t);
+      const updCatTotal = (cat) => { const el = wrap.querySelector(`.extra-cat-total[data-cat="${cat}"] strong`); if (el) el.textContent = fmtMoney(catTotal(cat)); };
       try {
-        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: "#extra-grid-active", fxBar: false, totalLabel: "sheet", onRedraw: () => { window._editorDirty = true; } });
+        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: "#extra-grid-active", fxBar: false, totalLabel: "sheet", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; updCatTotal(t.category); }, onCellInput: () => updCatTotal(t.category) });
       } catch (err) { console.error("[extra grid]", err); }
     }
 
@@ -1856,12 +1887,12 @@ function drawExtraTables(q, activeSheet, editable) {
     const cur = () => activeSheet._activeExtra;   // chỉ số sheet đang mở (đọc động, tránh stale-closure)
     wrap.addEventListener("click", (e) => {
       const rm = e.target.closest && e.target.closest(".rm-tab[data-rm-extab]");
-      if (rm) { e.stopPropagation(); const ti = +rm.dataset.rmExtab; tables.splice(ti, 1); if (activeSheet._activeExtra >= tables.length) activeSheet._activeExtra = tables.length - 1; window._editorDirty = true; drawExtraTables(q, activeSheet, editable); return; }
+      if (rm) { e.stopPropagation(); const ti = +rm.dataset.rmExtab; tables.splice(ti, 1); let a = activeSheet._activeExtra; if (a > ti) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0; activeSheet._activeExtra = a; window._editorDirty = true; drawExtraTables(q, activeSheet, editable); return; }
       const tab = e.target.closest && e.target.closest(".sheet-tab[data-extab]");
       if (tab) { activeSheet._activeExtra = +tab.dataset.extab; drawExtraTables(q, activeSheet, editable); return; }
-      const b = e.target.closest && e.target.closest("button");
-      if (b && b.id === "extra-add-btn") {
-        const cat = (document.getElementById("extra-add-cat") || {}).value || "hcm";
+      const add = e.target.closest && e.target.closest(".extra-add-in[data-cat]");
+      if (add) {
+        const cat = add.dataset.cat;
         const tplId = +((document.getElementById("extra-add-tpl") || {}).value) || defTplId;
         tables.push({ category: cat, templateId: tplId, name: "", groupSubtotal: true, items: [blankItem()] });
         activeSheet._activeExtra = tables.length - 1; window._editorDirty = true; drawExtraTables(q, activeSheet, editable); return;
@@ -1875,7 +1906,7 @@ function drawExtraTables(q, activeSheet, editable) {
     });
     wrap.addEventListener("input", (e) => {
       const s = e.target;
-      if (s.classList && s.classList.contains("extra-name") && s.dataset.f == null) { const a = cur(); if (tables[a]) { tables[a].name = s.value; window._editorDirty = true; const tabName = wrap.querySelector(`.sheet-tab[data-extab="${a}"] span:nth-child(2)`); if (tabName) tabName.textContent = s.value || ("Bảng " + (a + 1)); } }
+      if (s.classList && s.classList.contains("extra-name") && s.dataset.f == null) { const a = cur(); if (tables[a]) { tables[a].name = s.value; window._editorDirty = true; const tabName = wrap.querySelector(`.sheet-tab[data-extab="${a}"] span`); if (tabName) tabName.textContent = s.value || ("Bảng " + (a + 1)); } }
     });
   } catch (err) { console.error("[drawExtraTables]", err); }
 }
@@ -2209,7 +2240,8 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
     }
     // Cập nhật "Tổng sheet" ở chân lưới REALTIME (trước đây chỉ đổi khi redraw).
     const stEl = document.querySelector(`${tableSel} .gf-subtotal-val`);
-    if (stEl) stEl.textContent = fmtMoney(sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal));
+    if (stEl) stEl.textContent = fmtMoney(opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal));
+    if (opts.onCellInput) opts.onCellInput();   // bảng nội bộ: cập nhật Tổng-theo-loại live khi gõ
   };
   const focusCell = (row, field, noSelect) => {
     const cell = tbody.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`);
@@ -2927,7 +2959,9 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
 
   // Footer: "+ Thêm hàng" control + per-sheet subtotal.
   const tfoot = document.querySelector(`${tableSel} tfoot`);
-  const sheetSubtotal = sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
+  // opts.subtotalFn: bảng nội bộ dùng extraTableSumLocal để "Tổng sheet" KHỚP đúng số đổ
+  // sang Quản lý dự án (không hệ số nhóm) — tránh footer lệch Tổng-loại.
+  const sheetSubtotal = opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
   const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
