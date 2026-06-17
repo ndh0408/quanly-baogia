@@ -36,6 +36,14 @@ export function captureError(err, ctx) {
   } catch {}
 }
 
+/** Flush buffered Sentry events before the process exits (worker shutdown / crash). */
+export async function flushSentry(timeoutMs = 2000) {
+  if (!sentryReady) return;
+  try {
+    await Sentry.flush(timeoutMs);
+  } catch {}
+}
+
 // === Prometheus ===
 export const registry = new Registry();
 registry.setDefaultLabels({ app: "quanly-baogia", env: config.NODE_ENV });

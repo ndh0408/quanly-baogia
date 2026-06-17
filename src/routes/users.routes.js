@@ -6,7 +6,7 @@ import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler, requireRole } from "../middleware.js";
 import { validate, UserCreateSchema, UserUpdateSchema, UserInviteSchema } from "../validators.js";
-import { audit, diff } from "../audit.js";
+import { audit } from "../audit.js";
 import { sendEmail, brandedEmailHtml } from "../email.js";
 import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
@@ -43,7 +43,6 @@ const USER_SELECT = {
 };
 
 const hashInvite = (t) => createHash("sha256").update(String(t)).digest("hex");
-const escHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function inviteLink(token) {
   // Configuration only — Origin/Host headers are client-controlled and would
   // allow invite-link poisoning.
@@ -56,9 +55,9 @@ async function sendInviteEmail(to, displayName, url) {
     text: `Chào ${displayName},\n\nBạn được mời tham gia hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để đặt mật khẩu và hoàn tất thông tin của bạn (hết hạn sau 7 ngày):\n${url}\n`,
     html: brandedEmailHtml({
       name: displayName,
-      paragraphs: ["Bạn được mời tham gia hệ thống <b>Quản lý Báo Giá – Gia Nguyễn</b>. Nhấn nút bên dưới để <b>đặt mật khẩu</b> và hoàn tất thông tin tài khoản của bạn."],
+      paragraphs: [{ html: "Bạn được mời tham gia hệ thống <b>Quản lý Báo Giá – Gia Nguyễn</b>. Nhấn nút bên dưới để <b>đặt mật khẩu</b> và hoàn tất thông tin tài khoản của bạn." }],
       button: { label: "Đặt mật khẩu & kích hoạt", url },
-      note: "⏳ Liên kết hết hạn sau <b>7 ngày</b>.",
+      note: { html: "⏳ Liên kết hết hạn sau <b>7 ngày</b>." },
     }),
   });
 }

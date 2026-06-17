@@ -90,7 +90,7 @@ export const UserUpdateSchema = z.object({
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).
 // Used by the list filter; the UI dropdown offers all of these.
-export const QUOTE_STATUSES = ["draft", "pending", "approved", "rejected", "sent", "expired", "converted", "lost"];
+export const QUOTE_STATUSES = ["draft", "pending", "approved", "rejected", "sent", "converted", "lost"];
 
 // base64 data URL of the customer logo (~3MB cap to bound payload size).
 // The WHOLE string must be valid base64 — a prefix-only check would let markup
@@ -104,6 +104,9 @@ const customerLogoSchema = z.string().max(3_500_000)
 
 const itemSchema = z.object({
   order: z.coerce.number().int().optional(),
+  // Optional link to the catalog Product this row came from. Carried through so an
+  // edit (delete+recreate of sheets) doesn't drop the productId / catalog history.
+  productId: z.coerce.number().int().positive().optional().nullable(),
   kind: z.enum(["item", "info", "sub", "section", "subsection"]).default("item"),
   label: z.string().max(12).optional().nullable(),
   name: z.string().max(2000).default(""),
@@ -160,7 +163,6 @@ export const QuoteCreateSchema = z.object({
   executionDate: z.coerce.date({ error: "Ngày thi công không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getFullYear() <= 2100, "Ngày thi công không hợp lệ")
     .nullable().optional().or(z.literal("")),
-  validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
   greeting: z.string().max(2000).optional(),
@@ -200,7 +202,6 @@ export const QuoteUpdateSchema = z.object({
   executionDate: z.coerce.date({ error: "Ngày thi công không hợp lệ" })
     .refine((d) => d.getFullYear() >= 2015 && d.getFullYear() <= 2100, "Ngày thi công không hợp lệ")
     .nullable().optional().or(z.literal("")),
-  validUntil: z.coerce.date().optional().nullable(),
   customerId: z.coerce.number().int().positive().optional().nullable(),
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),

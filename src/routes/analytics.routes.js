@@ -33,7 +33,7 @@ router.get(
 
     const where = { createdAt: { gte: from, lte: to }, ...scope };
 
-    const [byStatus, totalsApproved, expiringSoon] = await Promise.all([
+    const [byStatus, totalsApproved] = await Promise.all([
       prisma.quote.groupBy({
         by: ["status"],
         where,
@@ -45,13 +45,6 @@ router.get(
         _sum: { total: true },
         _count: { _all: true },
         _avg: { total: true },
-      }),
-      prisma.quote.count({
-        where: {
-          ...scope,
-          status: { in: ["approved", "sent"] },
-          validUntil: { gte: new Date(), lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
-        },
       }),
     ]);
 
@@ -70,7 +63,6 @@ router.get(
         approvedAmount: Number(totalsApproved._sum.total ?? 0),
         avgDealSize: Number(totalsApproved._avg.total ?? 0),
         conversionRate,
-        expiringSoon,
       },
     });
   })
@@ -142,7 +134,7 @@ router.get(
       where: scope,
       _count: { _all: true },
     });
-    const order = ["draft", "pending", "approved", "sent", "converted", "rejected", "expired", "lost"];
+    const order = ["draft", "pending", "approved", "sent", "converted", "rejected", "lost"];
     const map = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
     res.json({ data: order.map((s) => ({ status: s, count: map[s] || 0 })) });
   })

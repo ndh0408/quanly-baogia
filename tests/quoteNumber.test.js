@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../src/db.js";
 import { nextQuoteNumber } from "../src/quoteNumber.js";
 
@@ -8,6 +8,12 @@ import { nextQuoteNumber } from "../src/quoteNumber.js";
 const isDbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "QuoteCounter" LIMIT 1')
   .then(() => true)
   .catch(() => false);
+
+// In CI we set REQUIRE_DB_TESTS=1 so a missing DB/schema FAILS loudly instead of
+// silently skipping — otherwise the atomic-counter guarantee could regress green.
+if (!isDbAvailable && process.env.REQUIRE_DB_TESTS === "1") {
+  throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres/schema — DB integration test không được phép skip trong CI");
+}
 
 describe.runIf(isDbAvailable)("nextQuoteNumber (DB-backed atomic counter)", () => {
   beforeAll(async () => {

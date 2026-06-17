@@ -7,12 +7,13 @@ import helmet from "helmet";
 import compression from "compression";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
-import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
+import { timingSafeEqual, createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger.js";
+import { createLimiter } from "./rateLimit.js";
 import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
 import { registry, metricsMiddleware } from "./observability.js";
 import { prisma } from "./db.js";
@@ -43,6 +44,17 @@ import billingRoutes, { webhookRouter as stripeWebhookRouter } from "./routes/bi
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
+
+// Constant-time compare of an "Authorization: Bearer <token>" header against the
+// expected secret. Plain !== short-circuits on the first differing byte (timing
+// oracle); timingSafeEqual on equal-length SHA-256 digests removes that.
+function bearerTokenMatches(authHeader, expected) {
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader || "");
+  if (!m) return false;
+  const a = createHash("sha256").update(m[1]).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 
 // Origins allowed to make state-changing cookie-session requests (CSRF allowlist).
 // Normalized to lowercase (scheme+host are case-insensitive) for robust matching.
@@ -183,7 +195,7 @@ export function createApp() {
   // Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
   // AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
   app.get("/metrics", async (req, res) => {
-    if (config.METRICS_TOKEN && req.headers.authorization !== `Bearer ${config.METRICS_TOKEN}`) {
+    if (config.METRICS_TOKEN && !bearerTokenMatches(req.headers.authorization, config.METRICS_TOKEN)) {
       return res.status(401).end();
     }
     res.setHeader("Content-Type", registry.contentType);
@@ -205,11 +217,10 @@ export function createApp() {
   app.use("/api/", csrfGuard);
 
   // API-wide rate limit (DoS protection). Login route has its own stricter limit.
-  const apiLimiter = rateLimit({
+  // Redis-backed when REDIS_URL is set so the limit is shared across instances.
+  const apiLimiter = createLimiter("api", {
     windowMs: 60 * 1000,
     max: config.RATE_LIMIT_API_PER_MIN,
-    standardHeaders: "draft-7",
-    legacyHeaders: false,
     message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
   });
   app.use("/api/", apiLimiter);

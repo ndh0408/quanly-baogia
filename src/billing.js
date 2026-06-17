@@ -53,20 +53,27 @@ export async function getActiveSubscription() {
  * Check whether a quota would be exceeded. Returns {ok, used, limit}.
  * Pass null for unlimited.
  */
+const QUOTA_COUNTERS = {
+  maxUsers: () => prisma.user.count(),
+  maxCustomers: () => prisma.customer.count(),
+  maxQuotesPerMonth: () =>
+    prisma.quote.count({ where: { createdAt: { gte: new Date(Date.now() - 30 * 86400_000) } } }),
+};
+
 export async function checkQuota(field) {
+  // FAIL CLOSED on an unknown field: previously any unrecognized field fell through
+  // to used=0 → ok:true, silently allowing the action. A typo'd/new quota name is a
+  // bug, not a free pass.
+  const counter = QUOTA_COUNTERS[field];
+  if (!counter) {
+    throw Object.assign(new Error(`Unknown quota field: ${field}`), { status: 500 });
+  }
   const sub = await getActiveSubscription();
+  // No subscription = billing not configured (single-tenant internal use) → unlimited.
   if (!sub) return { ok: true, used: 0, limit: null, plan: null };
   const limit = sub.plan?.[field];
   if (limit == null) return { ok: true, used: 0, limit: null, plan: sub.plan?.code };
-
-  let used = 0;
-  if (field === "maxUsers") used = await prisma.user.count();
-  else if (field === "maxCustomers") used = await prisma.customer.count();
-  else if (field === "maxQuotesPerMonth") {
-    used = await prisma.quote.count({
-      where: { createdAt: { gte: new Date(Date.now() - 30 * 86400_000) } },
-    });
-  }
+  const used = await counter();
   return { ok: used < limit, used, limit, plan: sub.plan?.code };
 }
 

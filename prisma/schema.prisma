@@ -18,7 +18,6 @@ enum QuoteStatus {
   approved
   rejected
   sent
-  expired
   converted
   lost
 }
@@ -88,6 +87,7 @@ model User {
   assignedFollowUps FollowUp[]      @relation("FollowupAssignee")
   authoredVersions  QuoteVersion[]  @relation("VersionAuthor")
   createdApiKeys    ApiKey[]        @relation("ApiKeyAuthor")
+  signedSheets      QuoteSheet[]    @relation("SheetSigner")
 
   @@index([deletedAt, active])
 }
@@ -257,7 +257,6 @@ model Quote {
   fromAddress   String
   city          String
   quoteDate     DateTime
-  validUntil    DateTime?
   executionDate DateTime?            // ngày thi công (lắp đặt) — CHỈ hiển thị trong app + trang Quản lý dự án, KHÔNG xuất Excel
   customerLogo  String?     @db.Text   // base64 data URL of customer logo (inserted into templates that have a logo anchor)
   greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
@@ -283,7 +282,6 @@ model Quote {
   members       User[]      @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
 
   sentAt        DateTime?
-  expiredAt     DateTime?
   convertedAt   DateTime?
 
   createdAt     DateTime    @default(now())
@@ -296,7 +294,6 @@ model Quote {
   @@index([createdById])
   @@index([approvedById])
   @@index([deletedAt])
-  @@index([validUntil])
 }
 
 model QuoteVersion {
@@ -332,9 +329,13 @@ model QuoteSheet {
   // Ký chứng từ theo từng sheet (chỉ quản lý — admin/người có canSign mới ký).
   signedAt     DateTime?
   signedById   Int?
+  // FK to the signer. onDelete: SetNull — if the user is deleted we keep the sheet
+  // and the snapshotted signedByName, just clear the link (audit-safe).
+  signedBy     User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
   signedByName String?
 
   @@index([quoteId, order])
+  @@index([signedById])
 }
 
 model QuoteItem {

@@ -52,6 +52,20 @@ function sniffType(buffer, declaredMime) {
  * inside the caller's own namespace, so no one can overwrite foreign objects.
  */
 async function canAccessKey(session, key) {
+  // Canonicalize-guard FIRST: a key like "logos/../uploads/u2/secret" would pass
+  // a naive startsWith("logos/") and leak another namespace. Reject any key with
+  // traversal/confusing segments before the prefix checks below.
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.startsWith("/") ||
+    key.includes("..") ||
+    key.includes("//") ||
+    key.includes("\\") ||
+    key.includes("\0")
+  ) {
+    return false;
+  }
   if (session.role === "admin") return true;
   if (key.startsWith("logos/")) return true;
   if (key.startsWith(`uploads/u${session.userId}/`)) return true;

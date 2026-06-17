@@ -268,7 +268,7 @@ function baoGiaTitleJS(t) {
 
 const STATUS_LABEL = {
   draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
-  sent: "Đã gửi", expired: "Hết hạn", converted: "Đã chốt", lost: "Không chốt",
+  sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt",
 };
 const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
 const ROLE_LABEL = { admin: "Quản trị", manager: "Quản lý" };
@@ -3440,9 +3440,11 @@ function renderMfaBox() {
     box.innerHTML = `<p>Trạng thái: <span class="status approved">Đang bật</span></p>
       <button class="btn btn-danger" id="mfa-disable">Tắt bảo mật 2 lớp</button>`;
     document.getElementById("mfa-disable").addEventListener("click", async () => {
-      const token = await promptModal("Tắt bảo mật 2 lớp", "Nhập mã 6 số từ ứng dụng xác thực để xác nhận:", { placeholder: "123456" });
+      const password = await promptModal("Tắt bảo mật 2 lớp", "Nhập MẬT KHẨU hiện tại để xác nhận:", { type: "password", placeholder: "Mật khẩu" });
+      if (!password) return;
+      const token = await promptModal("Tắt bảo mật 2 lớp", "Nhập mã 6 số từ ứng dụng xác thực (hoặc mã dự phòng):", { placeholder: "123456" });
       if (!token) return;
-      try { await api("/api/mfa/disable", { method: "POST", body: JSON.stringify({ token: token.trim() }) }); state.user.mfaEnabled = false; toast("Đã tắt MFA", "success"); renderMfaBox(); }
+      try { await api("/api/mfa/disable", { method: "POST", body: JSON.stringify({ password, token: token.trim() }) }); state.user.mfaEnabled = false; toast("Đã tắt MFA", "success"); renderMfaBox(); }
       catch (e) { toast(e.message, "error"); }
     });
   } else {
@@ -4239,8 +4241,13 @@ function openModal(title, bodyHtml) {
 function promptModal(title, label, opts = {}) {
   return new Promise((resolve) => {
     let resolved = false;
+    // opts.type (e.g. "password") renders a single-line input that masks/keeps the
+    // value on one line; otherwise a multi-line textarea (default).
+    const field = opts.type
+      ? `<input id="pm-input" type="${escapeHtml(opts.type)}" placeholder="${escapeHtml(opts.placeholder || "")}" style="width:100%;margin-top:6px"/>`
+      : `<textarea id="pm-input" rows="3" placeholder="${escapeHtml(opts.placeholder || "")}" style="width:100%;margin-top:6px"></textarea>`;
     const m = openModal(title, `<label style="display:block">${escapeHtml(label)}
-      <textarea id="pm-input" rows="3" placeholder="${escapeHtml(opts.placeholder || "")}" style="width:100%;margin-top:6px"></textarea></label>`);
+      ${field}</label>`);
     m.onSave(() => {
       const v = (m.find("#pm-input").value || "").trim();
       if (opts.required && v.length < (opts.min || 1)) { toast(opts.requiredMsg || "Vui lòng nhập nội dung", "error"); return; }

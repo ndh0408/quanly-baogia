@@ -13,6 +13,12 @@ const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "User" LIMIT 1')
   .then(() => true)
   .catch(() => false);
 
+// In CI we set REQUIRE_DB_TESTS=1 so the route-level authz/IDOR enforcement here
+// is ALWAYS exercised; a missing DB/schema must fail CI, not skip silently.
+if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") {
+  throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres/schema — integration test authz không được phép skip trong CI");
+}
+
 const TAG = `wf${Date.now()}`;
 const PASSWORD = "Test1234!a";
 
@@ -214,7 +220,7 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
   });
 
   describe("REGRESSION: list filter accepts every real status", () => {
-    it.each(["draft", "pending", "approved", "rejected", "sent", "expired", "converted", "lost"])(
+    it.each(["draft", "pending", "approved", "rejected", "sent", "converted", "lost"])(
       "GET /api/quotes?status=%s → 200",
       async (status) => {
         const res = await admin.get("/api/quotes").query({ status });

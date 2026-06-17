@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 import { randomBytes, createHash } from "node:crypto";
 import { prisma } from "./db.js";
 import { config } from "./config.js";
@@ -12,15 +11,6 @@ import { config } from "./config.js";
  *   Each refresh issues a NEW token + revokes the old one (rotation).
  *   If a revoked token is presented again, the WHOLE family is revoked (replay attack).
  */
-
-function ttlSeconds(s) {
-  // jsonwebtoken accepts string "15m" but we want consistent expiresAt for refresh too
-  if (typeof s !== "string") return Number(s);
-  const m = s.match(/^(\d+)([smhd])$/);
-  if (!m) return Number(s);
-  const n = Number(m[1]);
-  return { s: n, m: n * 60, h: n * 3600, d: n * 86400 }[m[2]];
-}
 
 const JWT_ISSUER = "quanly";
 const JWT_AUDIENCE = "quanly-api";
@@ -82,13 +72,30 @@ export async function rotateRefreshToken(plain, { ip, userAgent }) {
     throw Object.assign(new Error("Refresh token đã hết hạn, vui lòng đăng nhập lại"), { status: 401 });
   }
 
-  // Mark used, issue new
-  await prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-  const newPair = await issueRefreshToken(row.userId, { ip, userAgent, family: row.family });
+  // Atomic compare-and-set: flip revokedAt null -> now in a single statement.
+  // Only ONE concurrent request can win (count === 1). If two requests race the
+  // same valid token, the loser sees count === 0 — that is a double-spend/replay
+  // signal, so we burn the whole family and reject. (Replaces the previous
+  // non-atomic find-then-update which allowed both racers to rotate.)
+  const claimed = await prisma.refreshToken.updateMany({
+    where: { id: row.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  if (claimed.count !== 1) {
+    await prisma.refreshToken.updateMany({
+      where: { family: row.family, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    throw Object.assign(new Error("Refresh token không còn hợp lệ, vui lòng đăng nhập lại"), { status: 401 });
+  }
+
+  // Verify account state BEFORE issuing the new token so we never create an
+  // orphaned, still-valid refresh token for a locked/deleted account.
   const user = await prisma.user.findUnique({ where: { id: row.userId } });
   if (!user || !user.active) {
     throw Object.assign(new Error("Tài khoản đã bị khóa"), { status: 401 });
   }
+  const newPair = await issueRefreshToken(row.userId, { ip, userAgent, family: row.family });
   return { user, refresh: newPair };
 }
 

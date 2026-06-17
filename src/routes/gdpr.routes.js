@@ -16,6 +16,37 @@ function bigIntToString(obj) {
   return JSON.parse(JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
 }
 
+/**
+ * Prisma ops that erase a user's OWN personal data and lock the account.
+ * Returns an array to be passed to prisma.$transaction([...]) so token revocation
+ * and PII anonymization commit atomically. Shared by self-delete and admin-delete.
+ *
+ * Note: quotes/customers owned by the user are intentionally NOT touched here —
+ * they are business records (and customer rows are other people's personal data),
+ * so they are retained with their ownership link, not anonymized.
+ */
+function anonymizeUserOps(id) {
+  return [
+    prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: new Date() } }),
+    prisma.user.update({
+      where: { id },
+      data: {
+        username: `deleted-${id}-${Date.now()}`,
+        passwordHash: "DELETED",
+        displayName: "(deleted user)",
+        email: null,
+        phone: null,
+        title: null,
+        mfaSecret: null,
+        mfaBackupCodes: [],
+        mfaEnabled: false,
+        active: false,
+        deletedAt: new Date(),
+      },
+    }),
+  ];
+}
+
 async function exportUser(userId) {
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
@@ -86,35 +117,20 @@ router.get(
 );
 
 /**
- * POST /api/gdpr/me/delete — user requests account deletion.
- * Soft-deletes the user record, anonymizes PII, revokes all tokens.
- * Quotes / customers owned by the user are preserved (business records) but
- * stripped of personal identifiers.
+ * POST /api/gdpr/me/delete — user requests account deletion (right-to-erasure).
+ * In one transaction: revokes all refresh tokens and anonymizes the user's OWN
+ * PII (username/email/phone/title/MFA), then soft-deletes + deactivates the row.
+ * Quotes and customers owned by the user are RETAINED as business records with
+ * their ownership link intact — they are not the deleting user's personal data
+ * (customer rows belong to other data subjects). The audit log is also retained
+ * for legal obligation.
  */
 router.post(
   "/me/delete",
   validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }) }) }),
   asyncHandler(async (req, res) => {
     const id = req.session.userId;
-    await prisma.$transaction([
-      prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: new Date() } }),
-      prisma.user.update({
-        where: { id },
-        data: {
-          username: `deleted-${id}-${Date.now()}`,
-          passwordHash: "DELETED",
-          displayName: "(deleted user)",
-          email: null,
-          phone: null,
-          title: null,
-          mfaSecret: null,
-          mfaBackupCodes: [],
-          mfaEnabled: false,
-          active: false,
-          deletedAt: new Date(),
-        },
-      }),
-    ]);
+    await prisma.$transaction(anonymizeUserOps(id));
     await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
     await new Promise((resolve) => req.session.destroy(() => resolve()));
     res.clearCookie("qly.sid");
@@ -133,20 +149,9 @@ router.post(
     if (req.params.id === req.session.userId) {
       return res.status(400).json({ error: "Không thể tự xóa chính mình ở đây. Vui lòng dùng chức năng \"Xóa tài khoản của tôi\"." });
     }
-    await prisma.$transaction([
-      prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revokedAt: new Date() } }),
-      prisma.user.update({
-        where: { id: req.params.id },
-        data: {
-          username: `deleted-${req.params.id}-${Date.now()}`,
-          passwordHash: "DELETED",
-          displayName: "(deleted user)",
-          email: null, phone: null, title: null,
-          mfaSecret: null, mfaBackupCodes: [], mfaEnabled: false,
-          active: false, deletedAt: new Date(),
-        },
-      }),
-    ]);
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: "Không tìm thấy người dùng" });
+    await prisma.$transaction(anonymizeUserOps(req.params.id));
     await audit(req, "gdpr.delete.by_admin", { resource: "user", resourceId: req.params.id });
     res.json({ ok: true });
   })

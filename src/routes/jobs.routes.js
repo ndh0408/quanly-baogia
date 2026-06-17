@@ -43,6 +43,12 @@ router.get(
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req, res) => {
     if (!isQueueEnabled()) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình" });
+    // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
+    // carry recipient addresses, target URLs and secrets in job.data — never expose
+    // them here, even to QUOTE_READ_ALL/admin callers.
+    if (req.params.queue !== QUEUES.EXPORT) {
+      return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
+    }
     const q = getQueue(req.params.queue);
     if (!q) return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
     const job = await q.getJob(req.params.id);

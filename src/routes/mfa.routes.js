@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
+import { createLimiter } from "../rateLimit.js";
 import speakeasy from "speakeasy";
 import qrcode from "qrcode";
 import { prisma } from "../db.js";
@@ -11,9 +13,24 @@ import { encryptSecret, decryptSecret, generateBackupCodes, consumeBackupCode } 
 const router = Router();
 router.use(requireAuth);
 
-// Disable accepts a TOTP code OR a backup code — the backup code is the recovery
-// path if the TOTP secret can't be decrypted (e.g. MFA_ENC_KEY was rotated).
-const DisableBody = z.object({ token: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/, "Mã TOTP 6 số hoặc mã dự phòng") });
+// Per-account throttle for MFA mutations: caps online brute-force of the 6-digit
+// TOTP / backup space on enable+disable. Keyed by user id (requireAuth guarantees
+// it), so it's independent of IP. (In-memory; fine as a secondary control behind
+// the password re-auth below.)
+const mfaLimiter = createLimiter("mfa", {
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => `mfa:${req.session.userId}`,
+  message: { error: "Quá nhiều lần thử MFA, vui lòng thử lại sau ít phút" },
+});
+
+// Disable requires the account password (step-up: a stolen cookie alone must not
+// be able to strip 2FA) PLUS a TOTP code OR a backup code — the backup code is the
+// recovery path if the TOTP secret can't be decrypted (e.g. MFA_ENC_KEY rotated).
+const DisableBody = z.object({
+  password: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
+  token: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/, "Mã TOTP 6 số hoặc mã dự phòng"),
+});
 
 /**
  * Step 1: server generates a secret and returns it (along with a QR data URL).
@@ -22,8 +39,10 @@ const DisableBody = z.object({ token: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{1
  */
 router.post(
   "/setup",
+  mfaLimiter,
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
+    if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
 
     const secret = speakeasy.generateSecret({
@@ -42,9 +61,11 @@ router.post(
  */
 router.post(
   "/enable",
+  mfaLimiter,
   validate({ body: z.object({ secret: z.string().min(8, "Mã thiết lập không hợp lệ"), token: z.string().regex(/^\d{6}$/, "Mã xác thực phải gồm 6 chữ số") }) }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
+    if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
 
     const ok = speakeasy.totp.verify({
@@ -69,10 +90,15 @@ router.post(
 
 router.post(
   "/disable",
+  mfaLimiter,
   validate({ body: DisableBody }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
+    if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (!user.mfaEnabled) return res.status(400).json({ error: "MFA chưa được bật" });
+    // Step-up: require the account password before allowing 2FA removal.
+    const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
+    if (!pwOk) return res.status(401).json({ error: "Mật khẩu không đúng" });
     const secret = decryptSecret(user.mfaSecret);
     const totpOk = /^\d{6}$/.test(req.body.token)
       && !!secret

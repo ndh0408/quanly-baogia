@@ -96,11 +96,16 @@ function cellAnchor(ref) {
 }
 
 /** Insert a base64 data-URL image floating over the given cell; clears the cell text. */
+const MAX_LOGO_BYTES = 6 * 1024 * 1024; // hard cap on decoded logo size (DoS guard)
+
 function insertCustomerLogo(ws, ref, dataUrl, ext) {
   const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
   if (!m) return;
   let extension = m[1].toLowerCase();
   if (extension === "jpg") extension = "jpeg";
+  // Reject oversize logos up front (decoded size ≈ base64 length * 3/4) so a huge
+  // data-URL can't be buffered into memory during export.
+  if (Math.floor((m[2].length * 3) / 4) > MAX_LOGO_BYTES) return;
   try {
     const buffer = Buffer.from(m[2], "base64");
     const imageId = ws.workbook.addImage({ buffer, extension });

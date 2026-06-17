@@ -23,15 +23,37 @@ function init() {
   return transporter;
 }
 
-const _esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const _esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// Exported so call sites can escape user-controlled fragments when they DO need
+// to build trusted HTML themselves.
+export const escapeEmailHtml = _esc;
+
+/**
+ * Render one piece of email content SAFELY BY DEFAULT:
+ *   - a plain string            → ESCAPED (safe for user-controlled data)
+ *   - { text: "..." }           → ESCAPED
+ *   - { html: "..." }           → raw, trusted template HTML (author-controlled)
+ * This inverts the old "everything is trusted HTML" default so a caller that
+ * accidentally passes user input can no longer inject markup into outbound mail.
+ */
+function emailContent(p) {
+  if (p && typeof p === "object") {
+    if (typeof p.html === "string") return p.html;
+    if (typeof p.text === "string") return _esc(p.text);
+    return "";
+  }
+  return _esc(String(p ?? ""));
+}
 
 /**
  * Branded, email-client-safe HTML (table layout + inline styles). Renders the
  * Gia Nguyễn Ads header, body paragraphs, an optional CTA button, and a footer.
- * `paragraphs` are trusted HTML (caller escapes user input); `name`/button label/url are escaped here.
+ * `paragraphs`/`note` are ESCAPED by default; pass { html: "..." } for trusted
+ * template markup. `name`/button label/url are always escaped here.
  */
 export function brandedEmailHtml({ name, paragraphs = [], button, note } = {}) {
-  const body = paragraphs.map((p) => `<p style="margin:0 0 16px;">${p}</p>`).join("");
+  const body = paragraphs.map((p) => `<p style="margin:0 0 16px;">${emailContent(p)}</p>`).join("");
   const btn = button
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:10px 0 22px;"><tr>
            <td align="center" bgcolor="#f5b400" style="border-radius:10px;">
@@ -40,7 +62,7 @@ export function brandedEmailHtml({ name, paragraphs = [], button, note } = {}) {
          <p style="margin:0 0 4px;font-size:12.5px;color:#6b7280;">Nếu nút không bấm được, sao chép liên kết sau vào trình duyệt:</p>
          <p style="margin:0 0 18px;word-break:break-all;"><a href="${_esc(button.url)}" style="color:#1d4ed8;font-size:12.5px;">${_esc(button.url)}</a></p>`
     : "";
-  const noteHtml = note ? `<p style="margin:0;font-size:13px;color:#9ca3af;">${note}</p>` : "";
+  const noteHtml = note ? `<p style="margin:0;font-size:13px;color:#9ca3af;">${emailContent(note)}</p>` : "";
   return `<div style="background:#f4f5f7;margin:0;padding:24px 12px;font-family:Arial,'Segoe UI',Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #eceef1;">

@@ -15,7 +15,10 @@ import { logger } from "./logger.js";
  */
 export async function audit(ctx, action, opts = {}) {
   const actorId = opts.actorId ?? ctx?.session?.userId ?? null;
-  const ip = ctx?.ip || ctx?.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || null;
+  // req.ip is resolved by Express from the configured trust-proxy hop count; the
+  // raw X-Forwarded-For is client-controlled and must not be trusted for an
+  // immutable audit trail (it would let an attacker forge the source IP).
+  const ip = ctx?.ip || null;
   const ua = ctx?.headers?.["user-agent"] || null;
 
   try {

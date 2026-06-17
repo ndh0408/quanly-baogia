@@ -6,7 +6,7 @@ import { config } from "../config.js";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
-import { getStripe, getActiveSubscription, applyStripeSubscription, isBillingEnabled, usageSum, checkQuota } from "../billing.js";
+import { getStripe, getActiveSubscription, applyStripeSubscription, isBillingEnabled, usageSum } from "../billing.js";
 import { logger } from "../logger.js";
 
 const router = Router();

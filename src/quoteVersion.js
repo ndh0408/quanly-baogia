@@ -1,5 +1,3 @@
-import { prisma } from "./db.js";
-
 /**
  * Snapshot the current state of a quote (including sheets+items) into QuoteVersion.
  * Called after every mutating operation that changes price/structure.
@@ -23,6 +21,9 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
     title: q.title,
     toCompany: q.toCompany,
     toContact: q.toContact,
+    toEmail: q.toEmail,
+    toPhone: q.toPhone,
+    toAddress: q.toAddress,
     customerId: q.customerId,
     companyId: q.companyId,
     fromContact: q.fromContact,
@@ -31,21 +32,30 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
     fromAddress: q.fromAddress,
     city: q.city,
     quoteDate: q.quoteDate,
-    validUntil: q.validUntil,
+    executionDate: q.executionDate,
     greeting: q.greeting,
     vatPercent: q.vatPercent.toString(),
     notes: q.notes,
     status: q.status,
+    showTotals: q.showTotals,
     subtotal: q.subtotal.toString(),
     vat: q.vat.toString(),
+    // discount is price-affecting and triggers a version bump — it MUST be in the
+    // snapshot or diffVersions can never show a discount change, and stored
+    // subtotal+vat won't reconcile to total. (customerLogo is intentionally NOT
+    // snapshotted: it's a large base64 blob and would bloat every version row.)
+    discount: q.discount.toString(),
     total: q.total.toString(),
     sheets: q.sheets.map((s) => ({
       templateCode: s.template?.code,
       templateName: s.template?.name,
       name: s.name,
       order: s.order,
+      groupSubtotal: s.groupSubtotal,
+      extraTables: s.extraTables ?? null,
       items: s.items.map((it) => ({
         order: it.order,
+        kind: it.kind,
         productId: it.productId,
         name: it.name,
         detail: it.detail,

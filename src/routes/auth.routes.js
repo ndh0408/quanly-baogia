@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "node:crypto";
-import rateLimit from "express-rate-limit";
+import { createLimiter } from "../rateLimit.js";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
@@ -21,11 +21,10 @@ import { sendEmail, brandedEmailHtml } from "../email.js";
 const router = Router();
 
 // Strict per-IP limit on login: blunt brute force at the network edge.
-const loginLimiter = rateLimit({
+// Redis-backed when REDIS_URL is set so lockout holds across all instances.
+const loginLimiter = createLimiter("login", {
   windowMs: 15 * 60 * 1000,
   max: config.RATE_LIMIT_LOGIN_PER_15M,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
   skipSuccessfulRequests: true,
   message: { error: "Quá nhiều lần đăng nhập sai, thử lại sau 15 phút" },
 });
@@ -261,11 +260,11 @@ router.post(
         html: brandedEmailHtml({
           name: user.displayName,
           paragraphs: [
-            "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới.",
+            { html: "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới." },
             "Nếu không phải bạn yêu cầu, hãy bỏ qua email này — mật khẩu hiện tại vẫn an toàn.",
           ],
           button: { label: "Đặt lại mật khẩu", url },
-          note: "⏳ Liên kết hết hạn sau <b>2 giờ</b>.",
+          note: { html: "⏳ Liên kết hết hạn sau <b>2 giờ</b>." },
         }),
       });
       await audit(req, "password.forgot", { resource: "user", resourceId: user.id });

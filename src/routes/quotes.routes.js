@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
-import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
+import { asyncHandler, requireAuth } from "../middleware.js";
 import {
   validate,
   QuoteCreateSchema,
@@ -100,7 +100,7 @@ function presentQuote(q, { includeLogo = false } = {}) {
 // refetched query, so it must stay slim.
 const QUOTE_LIST_SELECT = {
   id: true, quoteNumber: true, projectCode: true, projectVersion: true,
-  title: true, toCompany: true, status: true, quoteDate: true, validUntil: true,
+  title: true, toCompany: true, status: true, quoteDate: true,
   subtotal: true, vat: true, discount: true, total: true, vatPercent: true,
   createdAt: true, createdById: true,
   company: { select: { id: true, name: true, shortName: true } },
@@ -177,6 +177,9 @@ function buildSheetsCreate(sheets) {
     items: {
       create: (s.items || []).map((it, iIdx) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
+        // Preserve the catalog link so an edit (which deletes+recreates sheets)
+        // doesn't lose productId and break product-level reporting/history.
+        productId: it.productId != null ? Number(it.productId) : null,
         kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
         label: it.label ? String(it.label).replace(/[\r\n]+/g, " ").trim().slice(0, 12) : null,
         name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
@@ -295,6 +298,10 @@ router.get(
     const quotes = await prisma.quote.findMany({
       where,
       orderBy: [{ quoteDate: "desc" }, { id: "desc" }],
+      // Safety cap: this endpoint pulls every sheet+item into memory to compute
+      // per-sheet subtotals. Bound it so a very large history can't blow up RAM
+      // (newest 2000 approved projects; raise + paginate if ever needed).
+      take: 2000,
       select: {
         id: true, quoteNumber: true, projectCode: true, projectVersion: true,
         title: true, status: true, quoteDate: true, executionDate: true, vatPercent: true,
@@ -448,7 +455,6 @@ router.post(
       city: b.city || company.city || "TP. Hồ Chí Minh",
       quoteDate: b.quoteDate || new Date(),
       executionDate: b.executionDate || null,
-      validUntil: b.validUntil || null,
       customerId: b.customerId ?? null,
       greeting: b.greeting || undefined,
       vatPercent: D(b.vatPercent),
@@ -539,7 +545,6 @@ router.put(
     }
     if (b.quoteDate) data.quoteDate = b.quoteDate;
     if (b.executionDate !== undefined) data.executionDate = b.executionDate || null;
-    if (b.validUntil !== undefined) data.validUntil = b.validUntil || null;
     if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
     if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
     // Quote-level discount: must be read here or a discount-only change is silently
@@ -832,12 +837,18 @@ router.post(
     if (existing.status !== "approved" && existing.status !== "sent") {
       return res.status(400).json({ error: "Chỉ gửi được sau khi duyệt" });
     }
-    const quote = await prisma.quote.update({
-      where: { id },
+    // Optimistic guard closes the TOCTOU between the read above and the write:
+    // only transition if the row is STILL approved/sent (a concurrent edit/reject
+    // could have moved it). count===0 → state changed under us → 409.
+    const upd = await prisma.quote.updateMany({
+      where: { id, status: { in: ["approved", "sent"] } },
       data: { status: "sent", sentAt: new Date() },
-      include: QUOTE_INCLUDE,
     });
-    await audit(req, "quote.send", { resource: "quote", resourceId: id });
+    if (!upd.count) {
+      return res.status(409).json({ error: "Báo giá vừa đổi trạng thái — vui lòng tải lại" });
+    }
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    await audit(req, "quote.send", { resource: "quote", resourceId: id, before: { status: existing.status } });
     emitWebhook("quote.sent", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
@@ -860,20 +871,28 @@ router.post(
     if (!["approved", "sent"].includes(existing.status)) {
       return res.status(400).json({ error: "Chỉ chốt được báo giá đã duyệt hoặc đã gửi" });
     }
-    const quote = await prisma.quote.update({
-      where: { id },
+    // Optimistic guard: only convert if still approved/sent — prevents a race with
+    // a concurrent mark-lost / edit from producing a wrong terminal transition.
+    const upd = await prisma.quote.updateMany({
+      where: { id, status: { in: ["approved", "sent"] } },
       data: { status: "converted", convertedAt: new Date() },
-      include: QUOTE_INCLUDE,
     });
-    await audit(req, "quote.convert", { resource: "quote", resourceId: id });
+    if (!upd.count) {
+      return res.status(409).json({ error: "Báo giá vừa đổi trạng thái — vui lòng tải lại" });
+    }
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    await audit(req, "quote.convert", { resource: "quote", resourceId: id, before: { status: existing.status } });
     emitWebhook("quote.converted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
     res.json(presentQuote(quote));
   })
 );
 
 // MARK LOST — customer declined. Records a reason for win/loss reporting.
+// Terminal + feeds win/loss KPIs → requires QUOTE_SEND authority (manager/admin),
+// matching mark-converted, so a plain member can't terminal-transition the deal.
 router.post(
   "/:id/mark-lost",
+  requirePermission(P.QUOTE_SEND),
   validate({ params: idParam, body: z.object({ reason: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -885,12 +904,23 @@ router.post(
     if (existing.status === "converted") {
       return res.status(400).json({ error: "Báo giá đã chốt, không thể đánh dấu thua" });
     }
-    const quote = await prisma.quote.update({
-      where: { id },
-      data: { status: "lost", notes: req.body.reason ? `[Lý do không chốt] ${req.body.reason}\n${existing.notes || ""}`.slice(0, 4000) : existing.notes },
-      include: QUOTE_INCLUDE,
+    if (existing.status === "lost") {
+      return res.status(400).json({ error: "Báo giá đã được đánh dấu thua" });
+    }
+    // Optimistic guard: only flip if still NOT terminal — also stops a re-mark from
+    // prepending the reason to notes twice under a race.
+    const newNotes = req.body.reason
+      ? `[Lý do không chốt] ${req.body.reason}\n${existing.notes || ""}`.slice(0, 4000)
+      : existing.notes;
+    const upd = await prisma.quote.updateMany({
+      where: { id, status: { notIn: ["converted", "lost"] } },
+      data: { status: "lost", notes: newNotes },
     });
-    await audit(req, "quote.lost", { resource: "quote", resourceId: id, after: { reason: req.body.reason || null } });
+    if (!upd.count) {
+      return res.status(409).json({ error: "Báo giá vừa đổi trạng thái — vui lòng tải lại" });
+    }
+    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+    await audit(req, "quote.lost", { resource: "quote", resourceId: id, before: { status: existing.status }, after: { reason: req.body.reason || null } });
     res.json(presentQuote(quote));
   })
 );
@@ -1027,78 +1057,101 @@ router.post(
     }
 
     const sameProject = req.body.sameProject === true;
-    const newNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN");
-    let newProjectCode;
+    const t = computeQuoteTotals({ vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets });
+
+    // Resolve project version / code base with read-only aggregates BEFORE the tx.
     let newVersion = 1;
     let newTitle = src.title + " (copy)";
+    let sameProjectCode = null;
+    let dupCreatorProjectCode = null;
     if (sameProject) {
       // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode, đánh số version tiếp theo.
       const base = src.projectCode || src.quoteNumber;
-      newProjectCode = base;
+      sameProjectCode = base;
       const agg = await prisma.quote.aggregate({ where: { projectCode: base }, _max: { projectVersion: true } });
       newVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
       newTitle = src.title; // giữ nguyên tiêu đề; phân biệt bằng nhãn v{n}
     } else {
       const dupCreator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
-      newProjectCode = dupCreator?.projectCode ? await nextProjectCode(dupCreator.projectCode) : null;
+      dupCreatorProjectCode = dupCreator?.projectCode || null;
     }
-    const synthetic = { vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets };
-    const t = computeQuoteTotals(synthetic);
 
-    const created = await prisma.quote.create({
-      data: {
-        quoteNumber: newNumber,
-        projectCode: newProjectCode,
-        projectVersion: newVersion,
-        title: newTitle,
-        toCompany: src.toCompany,
-        toContact: src.toContact,
-        companyId: src.companyId,
-        fromContact: src.fromContact,
-        fromPhone: src.fromPhone,
-        fromTitle: src.fromTitle,
-        fromAddress: src.fromAddress,
-        city: src.city,
-        quoteDate: new Date(),
-        greeting: src.greeting,
-        vatPercent: src.vatPercent,
-        toEmail: src.toEmail,
-        toPhone: src.toPhone,
-        toAddress: src.toAddress,
-        notes: src.notes,
-        status: "draft",
-        subtotal: t.subtotal,
-        vat: t.vat,
-        discount: t.discount,
-        total: t.total,
-        createdById: req.session.userId,
-        members: { connect: [{ id: req.session.userId }] },
-        sheets: {
-          create: src.sheets.map((s, sIdx) => ({
-            templateId: s.templateId,
-            name: s.name,
-            order: s.order != null ? s.order : sIdx + 1,
-            groupSubtotal: s.groupSubtotal,
-            items: {
-              create: s.items.map((it, iIdx) => ({
-                order: it.order != null ? it.order : iIdx + 1,
-                kind: it.kind || "item",
-                label: it.label,
-                name: it.name,
-                detail: it.detail,
-                unit: it.unit,
-                quantity: it.quantity,
-                unitPrice: it.unitPrice,
-                days: it.days,
-                notes: it.notes,
-              })),
-            },
-            extraTables: s.extraTables ?? undefined,
-          })),
-        },
+    const buildData = (quoteNumber, projectCode) => ({
+      quoteNumber,
+      projectCode,
+      projectVersion: newVersion,
+      title: newTitle,
+      toCompany: src.toCompany,
+      toContact: src.toContact,
+      companyId: src.companyId,
+      fromContact: src.fromContact,
+      fromPhone: src.fromPhone,
+      fromTitle: src.fromTitle,
+      fromAddress: src.fromAddress,
+      city: src.city,
+      quoteDate: new Date(),
+      greeting: src.greeting,
+      vatPercent: src.vatPercent,
+      toEmail: src.toEmail,
+      toPhone: src.toPhone,
+      toAddress: src.toAddress,
+      notes: src.notes,
+      status: "draft",
+      subtotal: t.subtotal,
+      vat: t.vat,
+      discount: t.discount,
+      total: t.total,
+      createdById: req.session.userId,
+      members: { connect: [{ id: req.session.userId }] },
+      sheets: {
+        create: src.sheets.map((s, sIdx) => ({
+          templateId: s.templateId,
+          name: s.name,
+          order: s.order != null ? s.order : sIdx + 1,
+          groupSubtotal: s.groupSubtotal,
+          items: {
+            create: s.items.map((it, iIdx) => ({
+              order: it.order != null ? it.order : iIdx + 1,
+              productId: it.productId ?? null,   // keep the catalog link on copy
+              kind: it.kind || "item",
+              label: it.label,
+              name: it.name,
+              detail: it.detail,
+              unit: it.unit,
+              quantity: it.quantity,
+              unitPrice: it.unitPrice,
+              days: it.days,
+              notes: it.notes,
+            })),
+          },
+          extraTables: s.extraTables ?? undefined,
+        })),
       },
-      include: QUOTE_INCLUDE,
     });
+
+    // Allocate the number (+ per-employee project code) and create + snapshot v1
+    // INSIDE one transaction with a P2002 retry — mirrors the main create path so a
+    // failed insert rolls the counter back (no burned numbers) and the copy always
+    // gets an initial QuoteVersion snapshot.
+    let created;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        created = await prisma.$transaction(async (tx) => {
+          const quoteNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN", tx);
+          const projectCode = sameProject
+            ? sameProjectCode
+            : (dupCreatorProjectCode ? await nextProjectCode(dupCreatorProjectCode, tx) : null);
+          const c = await tx.quote.create({ data: buildData(quoteNumber, projectCode), include: QUOTE_INCLUDE });
+          await snapshotQuoteVersion(tx, c.id, req.session.userId, "duplicate");
+          return c;
+        });
+        break;
+      } catch (e) {
+        if (e.code === "P2002" && attempt < 3) continue;
+        if (e.code === "P2002") return res.status(409).json({ error: "Số báo giá bị trùng, vui lòng thử lại" });
+        throw e;
+      }
+    }
     await audit(req, "quote.duplicate", { resource: "quote", resourceId: created.id, after: { from: src.id, quoteNumber: created.quoteNumber } });
     res.status(201).json(presentQuote(created));
   })

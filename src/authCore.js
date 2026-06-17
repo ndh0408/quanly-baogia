@@ -17,7 +17,11 @@ import { decryptSecret, consumeBackupCode } from "./mfa.js";
 const DUMMY_HASH = bcrypt.hashSync("timing-equalizer-not-a-real-password", config.BCRYPT_COST);
 
 export function clientIp(req) {
-  return (req.headers["x-forwarded-for"]?.split(",")[0]?.trim()) || req.ip || null;
+  // Use Express's trust-proxy-resolved req.ip. Do NOT read the raw X-Forwarded-For
+  // first hop — it is fully client-controlled and would let an attacker forge the
+  // source IP recorded in LoginAttempt telemetry / lastLoginIp. Configure the
+  // number of trusted proxies via TRUST_PROXY so req.ip is the real client.
+  return req.ip || null;
 }
 
 /**

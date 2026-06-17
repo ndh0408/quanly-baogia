@@ -12,6 +12,14 @@ router.use(requireRole("admin"));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
+// The HMAC signing secret must not be echoed back on reads. Show only a masked
+// hint (last 4 chars); the full secret is returned exactly once on create.
+function maskSecret(s) {
+  if (!s) return null;
+  return s.length <= 4 ? "••••" : "••••" + s.slice(-4);
+}
+const present = (w) => ({ ...w, secret: maskSecret(w.secret), secretSet: !!w.secret });
+
 const Create = z.object({
   url: z.string().url("Địa chỉ URL không hợp lệ"),
   events: z.array(z.enum(EVENTS)).min(1, "Vui lòng chọn ít nhất 1 sự kiện"),
@@ -23,7 +31,7 @@ router.get("/events", (_req, res) => res.json({ events: EVENTS }));
 
 router.get("/", asyncHandler(async (_req, res) => {
   const rows = await prisma.webhook.findMany({ orderBy: { id: "asc" } });
-  res.json(rows);
+  res.json(rows.map(present));
 }));
 
 router.post(
@@ -45,7 +53,7 @@ router.put(
     if (req.body.url) await assertPublicHttpUrl(req.body.url);
     const row = await prisma.webhook.update({ where: { id: req.params.id }, data: req.body });
     await audit(req, "webhook.update", { resource: "webhook", resourceId: row.id });
-    res.json(row);
+    res.json(present(row));
   })
 );
 

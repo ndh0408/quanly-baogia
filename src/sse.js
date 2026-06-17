@@ -1,14 +1,69 @@
-// Minimal Server-Sent Events broker. In-memory subscribers keyed by userId.
-// For multi-instance setups, swap to Redis pub/sub later.
+// Server-Sent Events broker. Local subscribers are kept in-memory keyed by userId.
+// When REDIS_URL is set, a Redis pub/sub backplane fans events out across ALL app
+// instances (pm2 cluster / multiple pods) so a publish on instance A reaches a
+// client connected to instance B — otherwise notifications and session-revoke
+// events are silently lost across processes. Without Redis it behaves exactly as
+// the previous single-process in-memory broker.
 
 import { sseClients } from "./observability.js";
+import { config } from "./config.js";
+import { logger } from "./logger.js";
 
 const subscribers = new Map(); // userId -> Set<res>
+const CHANNEL = "sse:events";
+let pub = null; // Redis publisher (null = in-memory only)
 
 function recountClients() {
   let n = 0;
   for (const s of subscribers.values()) n += s.size;
   sseClients.set(n);
+}
+
+// --- delivery to THIS process's connections only ---
+function localPublish(userId, event, data) {
+  const set = subscribers.get(userId);
+  if (!set || set.size === 0) return;
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
+  for (const res of set) {
+    try { res.write(payload); } catch { /* socket gone */ }
+  }
+}
+function localBroadcast(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
+  for (const set of subscribers.values()) {
+    for (const res of set) {
+      try { res.write(payload); } catch {}
+    }
+  }
+}
+
+// --- optional Redis backplane ---
+// On every instance: PUBLISH goes to Redis; a dedicated subscriber receives the
+// message (on this instance too) and delivers it to local connections. So publish
+// must NOT also deliver locally when Redis is active — the subscriber handles it.
+if (config.REDIS_URL) {
+  (async () => {
+    try {
+      const { default: IORedis } = await import("ioredis");
+      const opts = { maxRetriesPerRequest: null, enableReadyCheck: false };
+      pub = new IORedis(config.REDIS_URL, opts);
+      pub.on("error", (e) => logger.warn({ err: e.message }, "sse redis pub error"));
+      const sub = new IORedis(config.REDIS_URL, opts);
+      sub.on("error", (e) => logger.warn({ err: e.message }, "sse redis sub error"));
+      await sub.subscribe(CHANNEL);
+      sub.on("message", (_chan, raw) => {
+        try {
+          const m = JSON.parse(raw);
+          if (m.userId != null) localPublish(m.userId, m.event, m.data);
+          else localBroadcast(m.event, m.data);
+        } catch { /* ignore malformed */ }
+      });
+      logger.info("SSE Redis pub/sub backplane enabled");
+    } catch (e) {
+      pub = null;
+      logger.warn({ err: e.message }, "SSE Redis backplane init failed — falling back to in-memory");
+    }
+  })();
 }
 
 export function attach(req, res, userId) {
@@ -37,24 +92,22 @@ export function attach(req, res, userId) {
   });
 }
 
-/** Push an event to all open connections for a user. Safe to call from any handler. */
+/** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId, event, data) {
-  const set = subscribers.get(userId);
-  if (!set || set.size === 0) return;
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
-  for (const res of set) {
-    try { res.write(payload); } catch { /* socket gone */ }
+  if (pub) {
+    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch(() => {});
+    return;
   }
+  localPublish(userId, event, data);
 }
 
-/** Broadcast to everyone connected. */
+/** Broadcast to everyone connected (across instances when Redis is on). */
 export function broadcast(event, data) {
-  for (const set of subscribers.values()) {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
-    for (const res of set) {
-      try { res.write(payload); } catch {}
-    }
+  if (pub) {
+    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch(() => {});
+    return;
   }
+  localBroadcast(event, data);
 }
 
 /**
