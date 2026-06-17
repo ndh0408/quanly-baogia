@@ -546,8 +546,17 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .extra-cat-badge.cat-hanoi { background: #e3f5e8; color: #1f7a3d; }
 .extra-cat-badge.cat-khach { background: #fff3d6; color: #8a5a00; }
 .extra-grid .ex-amount, .extra-grid .ex-total { font-variant-numeric: tabular-nums; }
+.extra-grid .ex-amount { text-align: right; }
+.extra-grid .ex-stt { text-align: center; }
+.extra-grid .ex-numcell { position: relative; }       /* để nút ƒ neo góc ô */
+.extra-grid tr.sub-row td.ex-name { padding-left: 14px; }
+.extra-grid tr.section-row td.ex-stt, .extra-grid tr.subgroup-row td.ex-stt { font-weight: 700; color: #1f4e79; }
+.extra-grid .ex-act { text-align: center; }
 .ex-rm-row { border: none; background: transparent; color: #c0392b; cursor: pointer; font-size: 14px; line-height: 1; }
 .ex-add-row { margin-top: 8px; }
+.ex-foot-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.ex-copy { border: 1px solid var(--border, #ccc); background: var(--surface, #fff); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+.ex-copy:hover { background: var(--surface-2, #f3f5f8); }
 
 /* ===== Live xlsx preview (mirrors the exported sheet chrome) ===== */
 .xlsx-preview-wrap { margin: 16px 0; }

@@ -127,7 +127,7 @@ export function sanitizeExtraTables(tables) {
 // Tổng tiền 1 bảng nội bộ (cùng quy tắc với item báo giá; section/info không cộng).
 export function extraTableSum(t) {
   return (t?.items || []).reduce((acc, it) => {
-    if (it.kind === "section" || it.kind === "info") return acc;
+    if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
     const qty = Number(it.quantity) || 0;
     const price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;
