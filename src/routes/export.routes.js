@@ -49,6 +49,9 @@ router.get(
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.xlsx"`);
     res.setHeader("Content-Length", buf.length);
+    // Per-user, auth-gated download — must NOT be cached by the CDN (Cloudflare caches
+    // .xlsx by extension) or the browser, else stale/other-user files get served.
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
     res.end(buf);
 
     await audit(req, "quote.export", { resource: "quote", resourceId: id });
@@ -88,6 +91,7 @@ router.get(
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.pdf"`);
     res.setHeader("Content-Length", buf.length);
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");   // per-user — never cache at CDN/browser
     res.end(buf);
     await audit(req, "quote.export.pdf", { resource: "quote", resourceId: id });
   })

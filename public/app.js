@@ -816,7 +816,7 @@ async function listAction(act, id) {
     if (act === "open") {
       goToQuote(id); // deep-link via hash router (Back/F5/bookmark work)
     } else if (act === "excel") {
-      window.open(`/api/export/${id}.xlsx`, "_blank");
+      window.open(`/api/export/${id}.xlsx?t=${Date.now()}`, "_blank");   // cache-bust: tránh CDN trả file cũ
     } else if (act === "dup") {
       const q = await api(`/api/quotes/${id}/duplicate`, { method: "POST" });
       toast("Đã nhân bản. Bạn đang sửa bản mới.", "success");
@@ -1522,11 +1522,11 @@ function bindActions(q, isNew) {
   });
   const excelBtn = document.getElementById("btn-excel");
   if (excelBtn) excelBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.xlsx`, "_blank");
+    window.open(`/api/export/${q.id}.xlsx?t=${Date.now()}`, "_blank");   // cache-bust CDN
   });
   const pdfBtn = document.getElementById("btn-pdf");
   if (pdfBtn) pdfBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.pdf`, "_blank");
+    window.open(`/api/export/${q.id}.pdf?t=${Date.now()}`, "_blank");   // cache-bust CDN
   });
   const versionsBtn = document.getElementById("btn-versions");
   if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
