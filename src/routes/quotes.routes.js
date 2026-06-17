@@ -12,8 +12,6 @@ import { computeQuoteTotals } from "../money.js";
 import { nextQuoteNumber, nextProjectCode } from "../quoteNumber.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
-import { startApprovalChain, canApproveLevel, nextPendingLevel, hasEarlierPending, isChainComplete } from "../approval.js";
-import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
 import { can, canOnQuote, requirePermission, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 import {
@@ -23,7 +21,7 @@ import {
   presentQuoteRow,
   extraTableSum,
 } from "../quoteUtils.js";
-import { createQuote, updateQuote } from "../quoteService.js";
+import { createQuote, updateQuote, submitQuote, approveQuote, rejectQuote } from "../quoteService.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -283,138 +281,22 @@ router.put(
   })
 );
 
-// SUBMIT for approval (uses matrix engine: creates per-level Approval rows)
+// SUBMIT for approval
 router.post(
   "/:id/submit",
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (!can(req.session, P.QUOTE_SUBMIT) || !canOnQuote(req.session, "update", existing)) {
-      return res.status(403).json({ error: "Bạn không có quyền trình duyệt báo giá này" });
-    }
-    if (!["draft", "rejected"].includes(existing.status)) {
-      return res.status(400).json({ error: "Chỉ trình duyệt được báo giá ở trạng thái Nháp hoặc Bị từ chối" });
-    }
-    // Flip status and (re)create the pending Approval row atomically — a failure
-    // between the two would leave a pending quote no one can approve.
-    const quote = await prisma.$transaction(async (tx) => {
-      const q = await tx.quote.update({
-        where: { id },
-        data: { status: "pending", approvedById: null },
-        include: QUOTE_INCLUDE,
-      });
-      await startApprovalChain(id, q.currentVersion, tx);
-      return q;
-    });
-
-    // Notify approvers (skip the creator if they happen to be an approver — they get
-    // their own confirmation below).
-    const approvers = await prisma.user.findMany({
-      where: { active: true, role: { in: ["manager", "admin"] }, id: { not: existing.createdById } },
-      select: { id: true },
-    });
-    // Notify every approver + confirm to the creator — all in parallel (was a
-    // sequential await-loop = O(N) round-trips before responding).
-    await Promise.all([
-      ...approvers.map((u) => notify(u.id, {
-        title: `Báo giá ${quote.quoteNumber} chờ duyệt`,
-        body: `${quote.title} • Tổng ${Number(quote.total).toLocaleString("vi-VN")} VND`,
-        link: `/#/quotes/${id}`,
-        resource: "quote",
-        resourceId: id,
-        important: true,
-      })),
-      notify(existing.createdById, {
-        title: `Báo giá ${quote.quoteNumber} đã gửi duyệt`,
-        body: `Đang chờ duyệt. Bạn sẽ được báo khi có kết quả.`,
-        link: `/#/quotes/${id}`,
-        resource: "quote",
-        resourceId: id,
-      }),
-    ]);
-
-    await audit(req, "quote.submit", { resource: "quote", resourceId: id });
-    emitWebhook("quote.submitted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
+    const quote = await submitQuote(req);
     res.json(presentQuote(quote));
   })
 );
 
+// APPROVE — authz (admin any / manager own) enforced inside the service.
 router.post(
   "/:id/approve",
-  // Quyền duyệt được kiểm INLINE bên dưới: admin (quote:approve) duyệt mọi báo giá,
-  // manager (quote:approve:own) chỉ duyệt báo giá DO MÌNH tạo. (Không dùng requirePermission
-  // 1-quyền vì cần OR 2 quyền + ràng buộc "của mình".)
   validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
-
-    // Phân quyền duyệt: admin (quote:approve) duyệt MỌI báo giá; manager (quote:approve:own)
-    // CHỈ được duyệt báo giá DO CHÍNH MÌNH tạo — đây là quy tắc "manager tự duyệt dự án của
-    // mình, không cần admin". Nhân viên không có quyền nào → không duyệt được. (selfApproved
-    // vẫn được ghi vào nhật ký bên dưới.)
-    const isCreator = existing.createdById === req.session.userId;
-    const canApproveAll = can(req.session, P.QUOTE_APPROVE);
-    const canApproveOwn = can(req.session, P.QUOTE_APPROVE_OWN);
-    if (!canApproveAll && !(canApproveOwn && isCreator)) {
-      return res.status(403).json({ error: "Bạn không có quyền duyệt báo giá này" });
-    }
-
-    const pending = await nextPendingLevel(id, existing.currentVersion);
-    if (!pending) return res.status(400).json({ error: "Không có cấp duyệt nào đang chờ" });
-    if (await hasEarlierPending(id, existing.currentVersion, pending.level)) {
-      return res.status(400).json({ error: "Còn cấp duyệt trước đó chưa được duyệt" });
-    }
-    if (!(await canApproveLevel(id, existing.currentVersion, pending.level, req.session.role))) {
-      return res.status(403).json({ error: "Vai trò của bạn không được phép duyệt cấp này" });
-    }
-
-    // One transaction with optimistic guards: the approval row must still be
-    // pending (no double-approve) and the quote must still be the same pending
-    // revision the approver looked at (no race with a concurrent edit). Any
-    // conflict rolls everything back so Approval and Quote never drift apart.
-    let complete = false;
-    try {
-      await prisma.$transaction(async (tx) => {
-        const ap = await tx.approval.updateMany({
-          where: { id: pending.id, decision: "pending" },
-          data: { decision: "approved", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
-        });
-        if (!ap.count) throw new Error("APPROVAL_CONFLICT");
-
-        complete = await isChainComplete(id, existing.currentVersion, tx);
-        const qu = await tx.quote.updateMany({
-          where: { id, status: "pending", currentVersion: existing.currentVersion },
-          data: complete ? { status: "approved", approvedById: req.session.userId } : { approvedById: existing.approvedById },
-        });
-        if (!qu.count) throw new Error("APPROVAL_CONFLICT");
-      });
-    } catch (e) {
-      if (e.message === "APPROVAL_CONFLICT") {
-        return res.status(409).json({ error: "Báo giá vừa thay đổi hoặc đã được người khác xử lý — vui lòng tải lại" });
-      }
-      throw e;
-    }
-    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
-
-    // Báo cho người tạo (bỏ qua nếu họ chính là người vừa tự duyệt — manager self-approve).
-    if (existing.createdById !== req.session.userId) {
-      await notify(existing.createdById, {
-        title: `Báo giá ${quote.quoteNumber} đã được duyệt`,
-        body: "Có thể gửi cho khách.",
-        link: `/#/quotes/${id}`,
-        resource: "quote",
-        resourceId: id,
-        important: true,
-      });
-    }
-
-    await audit(req, "quote.approve", { resource: "quote", resourceId: id, after: { complete, selfApproved: isCreator } });
-    if (complete) emitWebhook("quote.approved", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
+    const quote = await approveQuote(req);
     res.json(presentQuote(quote));
   })
 );
@@ -424,48 +306,7 @@ router.post(
   requirePermission(P.QUOTE_REJECT),
   validate({ params: idParam, body: z.object({ comment: z.string().min(5, "Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)").max(2000, "Lý do tối đa 2000 ký tự") }) }),
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (existing.status !== "pending") return res.status(400).json({ error: "Báo giá chưa được trình duyệt" });
-
-    const pending = await nextPendingLevel(id, existing.currentVersion);
-    // Same transactional guard as approve: reject the row and the quote together,
-    // or not at all.
-    try {
-      await prisma.$transaction(async (tx) => {
-        if (pending) {
-          const ap = await tx.approval.updateMany({
-            where: { id: pending.id, decision: "pending" },
-            data: { decision: "rejected", approverId: req.session.userId, comment: req.body.comment || null, decidedAt: new Date() },
-          });
-          if (!ap.count) throw new Error("APPROVAL_CONFLICT");
-        }
-        const qu = await tx.quote.updateMany({
-          where: { id, status: "pending" },
-          data: { status: "rejected", approvedById: req.session.userId },
-        });
-        if (!qu.count) throw new Error("APPROVAL_CONFLICT");
-      });
-    } catch (e) {
-      if (e.message === "APPROVAL_CONFLICT") {
-        return res.status(409).json({ error: "Báo giá vừa thay đổi hoặc đã được người khác xử lý — vui lòng tải lại" });
-      }
-      throw e;
-    }
-    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
-
-    await notify(existing.createdById, {
-      title: `Báo giá ${quote.quoteNumber} bị từ chối`,
-      body: req.body.comment || "Vui lòng kiểm tra lại.",
-      link: `/#/quotes/${id}`,
-      resource: "quote",
-      resourceId: id,
-      important: true,
-    });
-
-    await audit(req, "quote.reject", { resource: "quote", resourceId: id, after: { reason: req.body.comment || null } });
-    emitWebhook("quote.rejected", { id, quoteNumber: quote.quoteNumber }).catch(() => {});
+    const quote = await rejectQuote(req);
     res.json(presentQuote(quote));
   })
 );
