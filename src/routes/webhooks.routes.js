@@ -6,6 +6,7 @@ import { asyncHandler, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { EVENTS, assertPublicHttpUrl } from "../webhooks.js";
+import { encryptValue } from "../secretbox.js";
 
 const router = Router();
 router.use(requireRole("admin"));
@@ -39,10 +40,11 @@ router.post(
   validate({ body: Create }),
   asyncHandler(async (req, res) => {
     await assertPublicHttpUrl(req.body.url); // reject internal/private targets up front
-    const secret = req.body.secret || randomBytes(24).toString("hex");
-    const row = await prisma.webhook.create({ data: { ...req.body, secret } });
+    const plaintextSecret = req.body.secret || randomBytes(24).toString("hex");
+    // Store the secret ENCRYPTED at rest; return the plaintext exactly once here.
+    const row = await prisma.webhook.create({ data: { ...req.body, secret: encryptValue(plaintextSecret) } });
     await audit(req, "webhook.create", { resource: "webhook", resourceId: row.id });
-    res.status(201).json(row);
+    res.status(201).json({ ...present(row), secret: plaintextSecret, secretSet: true });
   })
 );
 
@@ -51,7 +53,10 @@ router.put(
   validate({ params: idParam, body: Create.partial() }),
   asyncHandler(async (req, res) => {
     if (req.body.url) await assertPublicHttpUrl(req.body.url);
-    const row = await prisma.webhook.update({ where: { id: req.params.id }, data: req.body });
+    // Encrypt a rotated secret before storing.
+    const data = { ...req.body };
+    if (data.secret) data.secret = encryptValue(data.secret);
+    const row = await prisma.webhook.update({ where: { id: req.params.id }, data });
     await audit(req, "webhook.update", { resource: "webhook", resourceId: row.id });
     res.json(present(row));
   })

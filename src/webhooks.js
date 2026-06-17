@@ -7,6 +7,7 @@ import { prisma } from "./db.js";
 import { logger } from "./logger.js";
 import { isProd } from "./config.js";
 import { runOrQueue, QUEUES } from "./queue.js";
+import { decryptValue } from "./secretbox.js";
 
 // === SSRF guard ===========================================================
 // Webhook URLs are admin-configurable and fetched server-side. Without these
@@ -150,7 +151,9 @@ export async function deliverWebhook({ webhookId, event, payload }) {
   if (!h || !h.active) return { skipped: true };
 
   const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
-  const sig = sign(body, h.secret);
+  // Secret is stored encrypted at rest — decrypt before signing (legacy plaintext
+  // rows pass through unchanged).
+  const sig = sign(body, decryptValue(h.secret));
 
   let status, text;
   try {
