@@ -18,10 +18,21 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: app
           image: ghcr.io/ndh0408/quanly-baogia:latest
           imagePullPolicy: IfNotPresent
+          # Least-privilege container hardening: no privilege escalation, read-only
+          # root FS (writable /tmp mounted below for the Prisma engine), all Linux
+          # capabilities dropped.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - { name: http, containerPort: 3000 }
           envFrom:
@@ -49,6 +60,11 @@ spec:
           # Helm pre-upgrade Job / initContainer rather than in the steady-state command.
           command: ["/bin/sh", "-c"]
           args: ["npx prisma migrate deploy && node src/server.js"]
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

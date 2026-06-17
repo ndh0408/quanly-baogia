@@ -43,6 +43,10 @@ jobs:
       REDIS_URL: redis://localhost:6379
       SESSION_SECRET: ci-secret-must-be-long-enough-to-pass-the-zod-validator-yes
       NODE_ENV: test
+      # Force the DB-backed integration suites to RUN (and fail if the DB/schema
+      # is missing) instead of silently skipping — closes the "green but untested
+      # authz" gap.
+      REQUIRE_DB_TESTS: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -63,17 +67,40 @@ jobs:
           npx prisma generate
           npx prisma migrate deploy
 
-      - name: Unit + integration tests
-        run: RUN_DB_TESTS=1 npm test -- --run
+      - name: Unit + integration tests (with coverage)
+        run: npm run test:coverage
 
-      - name: Dependency audit (high+)
+      - name: Dependency audit (high+) — gate
         run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs full history to scan all commits
+
+      # Secret scanning across the whole git history (no org license needed via Docker).
+      - name: Secret scan (gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --redact --no-banner --exit-code 1
+
+      # Vulnerabilities + misconfig + secrets in the working tree.
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
   build-image:
     name: Build Docker image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, security]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
 
     permissions:

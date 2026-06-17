@@ -1,0 +1,68 @@
+# Daily PostgreSQL backup CronJob (k8s path). Dumps via pg_dump using the same
+# DATABASE_URL the app uses, to a PVC, and prunes dumps older than 14 days.
+# For managed databases prefer the provider's automated snapshots/PITR; this is a
+# portable fallback so there is ALWAYS a backup.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quanly-db-backups
+  namespace: quanly
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: quanly-db-backup
+  namespace: quanly
+spec:
+  schedule: "0 2 * * *" # 02:00 daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70 # postgres user in the alpine image
+            fsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: quanly-secrets
+                      key: DATABASE_URL
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  STAMP=$(date +%Y%m%d_%H%M%S)
+                  OUT="/backups/quanly_${STAMP}.dump"
+                  echo "Backing up to ${OUT}"
+                  pg_dump "$DATABASE_URL" -Fc -f "$OUT"
+                  echo "Pruning backups older than 14 days"
+                  find /backups -name '*.dump' -mtime +14 -delete
+                  echo "BACKUP_DONE"
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: quanly-db-backups

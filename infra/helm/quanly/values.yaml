@@ -117,9 +117,16 @@ serviceAccount:
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # readOnlyRootFilesystem: true   # enable after adding a writable /tmp emptyDir
+  #                                 # volume to the deployment template (Prisma engine)
 
 podSecurityContext:
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 nodeSelector: {}
 tolerations: []

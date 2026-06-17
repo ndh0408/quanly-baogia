@@ -9,3 +9,4 @@ resources:
   - app.yaml
   - worker.yaml
   - ingress.yaml
+  - backup-cronjob.yaml

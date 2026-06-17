@@ -1,12 +1,18 @@
 # syntax=docker/dockerfile:1.7
+# NOTE: pin the base image by digest in production for reproducible builds, e.g.
+#   FROM node:22-alpine@sha256:<digest> AS deps
+# (kept as a tag here so local builds don't break on an unknown digest).
 
-##### deps stage — install full deps including dev for prisma + build #####
+##### deps stage — PRODUCTION-ONLY deps + generated Prisma client #####
+# `prisma` (the migrate CLI) is a runtime dependency in this project because
+# k8s/helm/windows run `prisma migrate deploy` on startup, so --omit=dev keeps it
+# while dropping eslint/vitest/supertest/coverage from the image.
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 RUN apk add --no-cache openssl libc6-compat \
- && npm ci --include=dev \
+ && npm ci --omit=dev \
  && npx prisma generate
 
 ##### runtime stage — slim production image #####
@@ -14,13 +20,12 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    NPM_CONFIG_PRODUCTION=true \
     PORT=3000
 
 RUN apk add --no-cache openssl libc6-compat tini postgresql16-client \
  && addgroup -S app && adduser -S app -G app
 
-# Copy hoisted production deps + generated Prisma client
+# Copy production-only node_modules + generated Prisma client
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY package.json package-lock.json ./
