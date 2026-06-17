@@ -83,6 +83,35 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(pattern(`I${subRow}`)).not.toBe("solid");  // Ghi Chú: không nền
   });
 
+  // Multi-sheet: no leftover template styling beyond the table (col I). The sample
+  // templates ship empty-but-styled cells in J+; after stitching they could misrender
+  // as stray "khung"/nền from sheet 2 onward. clearBeyondTable must wipe them.
+  it("multi-sheet export has NO styled cells beyond the table column (I)", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets = [
+      { ...q.sheets[0], name: "Sheet 1" },
+      { order: 2, name: "Sheet 2", groupSubtotal: true, template: { code: "marico_decor" }, items: [
+        { kind: "section", name: "Nhóm A", quantity: 0, unitPrice: 0, days: null },
+        { kind: "item", name: "Mục", unit: "m2", quantity: 2, unitPrice: 100000, days: null, notes: "" },
+        { kind: "subsection", name: "Chi phí vận chuyển", quantity: 0, unitPrice: 0, days: null },
+        { kind: "item", name: "Mục con", unit: "bộ", quantity: 1, unitPrice: 50000, days: null, notes: "" },
+      ] },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    let dirty = 0;
+    for (const ws of wb.worksheets) {
+      ws.eachRow({ includeEmpty: true }, (row) => row.eachCell({ includeEmpty: true }, (cell, cn) => {
+        if (cn <= 9) return;   // beyond column I = outside the quote table
+        const f = cell.fill, b = cell.border;
+        const hasFill = f && f.type === "pattern" && f.pattern && f.pattern !== "none";
+        const hasBorder = b && ["top", "bottom", "left", "right"].some((s) => b[s] && b[s].style);
+        if (hasFill || hasBorder || cell.value != null) dirty++;
+      }));
+    }
+    expect(dirty).toBe(0);
+  });
+
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in
   // worker → transfer buffer back → validate). Proves the worker plumbing works.
   it("runExportJob generates a valid xlsx via the worker thread", async () => {
