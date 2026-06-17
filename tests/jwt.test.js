@@ -29,16 +29,17 @@ describe.runIf(dbAvailable)("rotateRefreshToken (rotation + replay + race)", () 
 
   const ctx = { ip: "127.0.0.1", userAgent: "vitest" };
 
-  it("rotates: old token is consumed, a new working token is issued", async () => {
-    const { token } = await issueRefreshToken(userId, ctx);
-    const { refresh } = await rotateRefreshToken(token, ctx);
-    expect(refresh.token).toBeTruthy();
-    expect(refresh.token).not.toBe(token);
-    // old token can no longer be rotated (it's revoked) → replay path throws
-    await expect(rotateRefreshToken(token, ctx)).rejects.toThrow();
-    // new token rotates fine
-    const again = await rotateRefreshToken(refresh.token, ctx);
-    expect(again.refresh.token).toBeTruthy();
+  it("rotates: chain works, then replaying a consumed token throws", async () => {
+    const { token: a } = await issueRefreshToken(userId, ctx);
+    const { refresh: b } = await rotateRefreshToken(a, ctx);
+    expect(b.token).toBeTruthy();
+    expect(b.token).not.toBe(a);
+    // the rotation chain keeps working (verify BEFORE triggering replay, which
+    // burns the whole family by design)
+    const { refresh: c } = await rotateRefreshToken(b.token, ctx);
+    expect(c.token).toBeTruthy();
+    // replaying the original (already-consumed) token is rejected
+    await expect(rotateRefreshToken(a, ctx)).rejects.toThrow();
   });
 
   it("replay of a revoked token burns the whole family", async () => {
