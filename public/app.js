@@ -5,7 +5,7 @@ import {
   pvRowspan, pvMoney, nl2br, groupLetter, pvRows, baoGiaTitleJS,
   STATUS_LABEL, statusLabel, ROLE_LABEL, ROLE_LABEL_FULL,
   RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "./js/util.js?v=20260617";
+} from "./js/util.js?v=20260618c";
 
 const app = document.getElementById("app");
 
@@ -3363,6 +3363,7 @@ function openInviteModal() {
         <select id="iv-role">
           <option value="manager">Quản lý</option>
           <option value="admin">Quản trị viên</option>
+          <option value="account_hn">Account Hà Nội</option>
         </select>
       </label>
       <label style="grid-column:1/-1">Mã dự án <span class="muted" style="font-weight:400;font-size:12px">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001, _002…)</span><input id="iv-projectcode" placeholder="VD: FE_A26" /></label>
@@ -3417,6 +3418,7 @@ function openUserModal(u) {
         <select name="role">
           <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Quản lý</option>
           <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
+          <option value="account_hn" ${u?.role === "account_hn" ? "selected" : ""}>Account Hà Nội</option>
         </select>
       </label>
       <label>SĐT<input name="phone" type="tel" inputmode="tel" value="${escapeHtml(u?.phone || "")}" /></label>
