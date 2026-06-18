@@ -404,6 +404,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .excel-table td.col-amount { width: 140px; text-align: right; background: #fff; }
 .excel-table td.col-notes { width: 150px; border-right: 2px solid #000; }
 .excel-table td.col-notes input { font-style: italic; text-align: center; }
+/* GHI CHÚ NỘI BỘ — tô kem nhạt để rõ "chỉ nội bộ, KHÔNG xuất Excel"; có ở lưới chính, không ở bảng nội bộ */
+.excel-table th.th-internal-note, .excel-table td.col-internal-note { background: #fff7ed; }
+.excel-table td.col-internal-note { width: 160px; border-right: 2px solid #000; }
+.excel-table td.col-internal-note textarea { font-style: italic; color: #8a5a00; }
 .excel-table td.col-qty input, .excel-table td.col-price input { text-align: right; }
 .excel-table tbody tr:last-child td { border-bottom: 2px solid #000; }
 .excel-table td.col-action { width: 64px; padding: 0 4px; text-align: center; border: 1px dashed #ccc; background: #fafafa; white-space: nowrap; }

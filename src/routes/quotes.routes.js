@@ -611,6 +611,7 @@ router.post(
               unitPrice: it.unitPrice,
               days: it.days,
               notes: it.notes,
+              internalNote: it.internalNote,
             })),
           },
           extraTables: s.extraTables ?? undefined,

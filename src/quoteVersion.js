@@ -64,6 +64,7 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
         unitPrice: it.unitPrice.toString(),
         days: it.days?.toString() ?? null,
         notes: it.notes,
+        internalNote: it.internalNote,
       })),
     })),
   };

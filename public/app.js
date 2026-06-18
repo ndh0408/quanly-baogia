@@ -1220,7 +1220,7 @@ function renderEditor(el, quote) {
           <thead>
             <tr class="col-letters" aria-hidden="true">
               ${(() => {
-                const cols = ["STT", "Hạng Mục", showDetail ? "Chi Tiết" : null, "ĐVT", "SỐ LƯỢNG", usesDays ? "SỐ NGÀY" : null, "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"].filter(Boolean);
+                const cols = ["STT", "Hạng Mục", showDetail ? "Chi Tiết" : null, "ĐVT", "SỐ LƯỢNG", usesDays ? "SỐ NGÀY" : null, "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ", "GHI CHÚ NỘI BỘ"].filter(Boolean);
                 return cols.map((_, i) => `<th class="col-letter">${groupLetter(i)}</th>`).join("") + (editable ? `<th class="col-letter"></th>` : "");
               })()}
             </tr>
@@ -1234,6 +1234,7 @@ function renderEditor(el, quote) {
               <th scope="col" style="width:130px">ĐƠN GIÁ&#10;(VNĐ)</th>
               <th scope="col" style="width:140px">THÀNH TIỀN&#10;(VNĐ)</th>
               <th scope="col" style="width:150px">GHI CHÚ</th>
+              <th scope="col" style="width:150px" class="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br><span style="font-weight:400;font-size:10px;opacity:.75">(không xuất Excel)</span></th>
               ${editable ? `<th scope="col" style="width:36px"></th>` : ""}
             </tr>
           </thead>
@@ -1374,7 +1375,7 @@ function renderEditor(el, quote) {
     });
 
     // Items
-    drawItems(q, activeSheet, editable, tplCode, usesDays, grid);
+    drawItems(q, activeSheet, editable, tplCode, usesDays, grid, { internalNote: true });   // lưới chính có cột "Ghi chú nội bộ" (KHÔNG xuất Excel)
     // Bảng nội bộ (chỉ quản lý — KHÔNG xuất Excel), lưới riêng độc lập với lưới báo giá
     drawExtraTables(q, activeSheet, editable);
 
@@ -1948,10 +1949,11 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
   // NỘI BỘ). opts.fxBar=false: bỏ thanh công thức (singleton — chỉ lưới chính dùng).
   // opts.onRedraw: thay updateSummary khi vẽ lại lưới nội bộ. → drawItems chạy được nhiều nơi.
   const tableSel = opts.tableSel || "#items-table";
+  const internalNoteCol = !!opts.internalNote;   // cột "Ghi chú nội bộ" — CHỈ lưới chính, KHÔNG xuất Excel (không có ở bảng nội bộ)
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
-  const multilineFields = new Set(["name", "detail", "notes"]);
+  const multilineFields = new Set(["name", "detail", "notes", "internalNote"]);
 
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
@@ -2004,11 +2006,12 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
         <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
+        ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
 
   let sttNo = 0;
   let sectionIdx = -1;
-  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
+  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0);
   const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
   const sectionSum = {};
@@ -2040,6 +2043,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
         <td class="col-price">${fmtNumCell(subAmt)}</td>
         <td class="col-amount">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
+        ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="${isSub ? "Xóa nhóm con" : "Xóa nhóm"}">✕</button></td>` : ""}
       </tr>`;
     }
@@ -2116,7 +2120,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
 
   // ---- Excel-style grid helpers ----
   // Editable columns left→right (drives keyboard nav + multi-cell paste).
-  const FIELDS = ["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes"].filter(Boolean);
+  const FIELDS = ["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNoteCol ? "internalNote" : null].filter(Boolean);
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
 
   // ===== Excel A1-style cell addressing =====
@@ -2132,6 +2136,7 @@ function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts = {})
     { field: "unitPrice" },
     { field: "_amount", ro: true },
     { field: "notes" },
+    ...(internalNoteCol ? [{ field: "internalNote" }] : []),
   ];
   ADDR_COLS.forEach((c, i) => { c.L = groupLetter(i); });
   const letterToCol = {}; ADDR_COLS.forEach((c) => { letterToCol[c.L] = c; });

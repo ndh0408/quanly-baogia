@@ -117,6 +117,7 @@ const itemSchema = z.object({
   unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
   days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
+  internalNote: z.string().max(2000).optional().nullable(),   // ghi chú nội bộ — KHÔNG xuất Excel
   // Raw Excel-style formulas per numeric field (editor metadata only, e.g.
   // {"unitPrice":"=2000+3000"}). Declared so Zod KEEPS it instead of stripping it
   // (unknown keys are dropped by default), otherwise the "remember formula" feature

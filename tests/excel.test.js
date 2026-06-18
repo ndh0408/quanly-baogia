@@ -43,6 +43,25 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(isXlsx(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))))).toBe(true);
   });
 
+  // GHI CHÚ NỘI BỘ (internalNote): hiện trong app cho mọi người NHƯNG tuyệt đối KHÔNG
+  // lọt vào file Excel xuất ra. notes (ghi chú công khai) thì VẪN xuất bình thường.
+  it("KHÔNG xuất internalNote ra Excel, nhưng notes thì CÓ", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets[0].items = [
+      { kind: "item", name: "Hạng mục", detail: "", unit: "cái", quantity: 1, unitPrice: 100_000, days: null, notes: "GHICHU_CONGKHAI_ABC", internalNote: "BIMAT_NOIBO_XYZ" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    let foundInternal = false, foundPublic = false;
+    wb.worksheets.forEach((ws) => ws.eachRow((row) => row.eachCell((c) => {
+      const v = String(c.value ?? "");
+      if (v.includes("BIMAT_NOIBO_XYZ")) foundInternal = true;
+      if (v.includes("GHICHU_CONGKHAI_ABC")) foundPublic = true;
+    })));
+    expect(foundInternal).toBe(false);   // ghi chú nội bộ KHÔNG có trong file Excel
+    expect(foundPublic).toBe(true);      // ghi chú công khai VẪN xuất (xác nhận test đúng hướng)
+  });
+
   // Money correctness: the summary sheet must show the quote STORED totals exactly
   // (whole VND), not a separately-rounded recompute. Reads the buffer back.
   it("summary sheet shows the stored grand total (consistent rounding)", async () => {
