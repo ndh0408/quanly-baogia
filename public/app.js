@@ -604,7 +604,7 @@ function renderMain() {
   if (!mainEl) return;
   if (state.page === "list") renderList(mainEl);
   else if (state.page === "new") renderNewQuote(mainEl);
-  else if (state.page === "edit") renderEditor(mainEl, state.currentQuote);
+  else if (state.page === "edit") (state.currentQuote && state.currentQuote._accountHnView ? renderAccountHnView(mainEl, state.currentQuote) : renderEditor(mainEl, state.currentQuote));
   else if (state.page === "customers") renderCustomers(mainEl);
   else if (state.page === "users") renderUsers(mainEl);
   else if (state.page === "profile") renderProfile(mainEl);
@@ -1082,6 +1082,106 @@ function renderNewQuote(el) {
 }
 
 // ---------------- Editor ----------------
+// ===== Màn ACCOUNT HÀ NỘI (role account_hn) — CHỈ phần HN, rút gọn =====
+// API trả _accountHnView (presentQuoteForAccountHn): chỉ định danh dự án + trạng thái +
+// hnSheets[{sheetId, hnTables:[bảng hanoi]}]. Account điền các bảng hanoi (lưới đầy đủ),
+// Lưu (PUT /:id/hn — server chỉ ghi hanoi), Gửi duyệt. Sửa được khi assigned/rejected.
+function blankHnItem() { return { kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" }; }
+function defaultHnTemplateId(q) {
+  const t = state.templates.find((x) => x.companyId === q.companyId) || state.templates[0];
+  return t ? t.id : null;
+}
+async function saveHnPart(q, thenSubmit) {
+  const payload = { hnSheets: (q.hnSheets || []).map((hs) => ({ sheetId: hs.sheetId, hnTables: hs.hnTables || [] })) };
+  try {
+    await api(`/api/quotes/${q.id}/hn`, { method: "PUT", body: JSON.stringify(payload) });
+    window._editorDirty = false;
+    if (thenSubmit) { await api(`/api/quotes/${q.id}/hn/submit`, { method: "POST" }); toast("Đã gửi duyệt phần Hà Nội", "success"); }
+    else toast("Đã lưu phần Hà Nội", "success");
+    const fresh = await api(`/api/quotes/${q.id}`);
+    state.currentQuote = fresh; render();
+  } catch (e) { toast(e.message || "Lỗi lưu phần HN", "error"); }
+}
+function renderAccountHnView(el, q) {
+  const editable = !q.hnStatus || ["assigned", "rejected"].includes(q.hnStatus);
+  const statusLabel = { assigned: "Đang làm", submitted: "Đã gửi — chờ quản lý duyệt", approved: "✓ Đã duyệt", rejected: "↩ Bị trả lại" }[q.hnStatus] || "Đang làm";
+  if (!Array.isArray(q.hnSheets) || !q.hnSheets.length) q.hnSheets = [{ sheetId: null, sheetName: null, hnTables: [] }];
+  el.innerHTML = `
+    <div class="account-hn-view">
+      <div class="ahn-head">
+        <div><h2 style="margin:0">Phần Giá Hà Nội</h2>
+          <div class="muted">${escapeHtml(q.projectCode || q.quoteNumber || "")}${q.title ? " · " + escapeHtml(q.title) : ""}${q.companyName ? " · " + escapeHtml(q.companyName) : ""}</div></div>
+        <span class="ahn-status ahn-${q.hnStatus || "assigned"}">${statusLabel}</span>
+      </div>
+      ${q.hnStatus === "rejected" && q.hnRejectNote ? `<div class="ahn-reject">↩ <strong>Quản lý trả lại:</strong> ${escapeHtml(q.hnRejectNote)}</div>` : ""}
+      <div class="muted" style="margin:8px 0 4px">Bạn chỉ điền <strong>giá Hà Nội</strong> (số nội bộ — KHÔNG xuất cho khách, không thấy phần báo giá khác).</div>
+      <div id="ahn-tables"></div>
+      <div class="ahn-actions" style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        ${editable ? `<button class="btn btn-sm" id="ahn-save">💾 Lưu</button><button class="btn btn-sm btn-primary" id="ahn-submit">✓ Gửi duyệt</button>` : `<span class="muted">${q.hnStatus === "submitted" ? "Đã gửi, chờ quản lý duyệt — không sửa được lúc này." : q.hnStatus === "approved" ? "Phần Hà Nội đã được duyệt." : ""}</span>`}
+      </div>
+    </div>`;
+  const host = el.querySelector("#ahn-tables");
+  q.hnSheets.forEach((hs, si) => {
+    if (!Array.isArray(hs.hnTables) || !hs.hnTables.length) hs.hnTables = [{ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] }];
+    hs.hnTables.forEach((t, ti) => {
+      if (!t.templateId) t.templateId = defaultHnTemplateId(q);
+      const tpl = state.templates.find((x) => x.id === t.templateId) || state.templates.find((x) => x.companyId === q.companyId) || state.templates[0];
+      const showDetail = !!(tpl && tpl.layout && tpl.layout.hasDetail), usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
+      const gid = `ahn-grid-${si}-${ti}`;
+      const div = document.createElement("div"); div.className = "extra-table"; div.style.marginTop = "10px";
+      div.innerHTML = `<div class="extra-table-head"><span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>${si > 0 || ti > 0 ? "" : ""}
+          <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên bảng (tuỳ chọn)" data-si="${si}" data-ti="${ti}" ${editable ? "" : "disabled"} /></div>
+        <div class="tbl-scroll"><table class="excel-table" id="${gid}">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>`;
+      host.appendChild(div);
+      if (typeof t.groupSubtotal !== "boolean") t.groupSubtotal = true;
+      if (!Array.isArray(t.items) || !t.items.length) t.items = [blankHnItem()];
+      if (!t._grid) Object.defineProperty(t, "_grid", { value: newExtraGrid(), writable: true, configurable: true, enumerable: false });
+      try {
+        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; } });
+      } catch (err) { console.error("[ahn grid]", err); }
+    });
+  });
+  if (!editable) return;
+  host.addEventListener("input", (e) => {
+    const s = e.target;
+    if (s.classList && s.classList.contains("ahn-name") && s.dataset.si != null) { const hs = q.hnSheets[+s.dataset.si]; if (hs && hs.hnTables[+s.dataset.ti]) { hs.hnTables[+s.dataset.ti].name = s.value; window._editorDirty = true; } }
+  });
+  el.querySelector("#ahn-save").addEventListener("click", () => saveHnPart(q, false));
+  el.querySelector("#ahn-submit").addEventListener("click", () => { if (confirm("Gửi duyệt phần Hà Nội? Sau khi gửi sẽ không sửa được cho tới khi quản lý duyệt/trả.")) saveHnPart(q, true); });
+}
+
+// Panel cho QUẢN LÝ trong renderEditor: giao phần HN cho Account, + duyệt/trả khi account gửi.
+function renderManagerHnPanel(q) {
+  const el = document.getElementById("hn-manager-panel");
+  if (!el) return;
+  const st = q.hnStatus;
+  const label = { assigned: "Account đang làm", submitted: "Account đã gửi — chờ bạn DUYỆT", approved: "✓ Đã duyệt", rejected: "↩ Đã trả lại" }[st] || "Chưa giao";
+  const canAssign = !st || st === "rejected" || st === "approved";
+  el.innerHTML = `<div class="hn-mgr-panel">
+    <span class="extra-cat-badge cat-hanoi">Phần Hà Nội (Account)</span>
+    <span class="ahn-status ahn-${st || "none"}">${label}</span>
+    ${st && q.hnAssigneeId ? `<span class="muted" style="font-size:12px">đã giao</span>` : ""}
+    ${canAssign ? `<select id="hn-acc-sel" class="extra-add-cat"><option value="">— chọn Account HN —</option></select><button type="button" class="btn btn-sm" id="hn-assign-btn">${st ? "Giao lại" : "Giao cho Account HN"}</button>` : ""}
+    ${st === "submitted" ? `<button type="button" class="btn btn-sm btn-primary" id="hn-approve-btn">✓ Duyệt</button><button type="button" class="btn btn-sm" id="hn-reject-btn">↩ Trả lại</button>` : ""}
+    ${st === "rejected" && q.hnRejectNote ? `<span class="muted" style="font-size:12px">lý do trả: ${escapeHtml(q.hnRejectNote)}</span>` : ""}
+  </div>`;
+  const reload = async () => { try { const fresh = await api(`/api/quotes/${q.id}`); state.currentQuote = fresh; render(); } catch {} };
+  const sel = document.getElementById("hn-acc-sel");
+  if (sel) api("/api/quotes/hn/accounts").then((r) => (r.data || []).forEach((a) => { const o = document.createElement("option"); o.value = a.id; o.textContent = a.displayName || a.username; sel.appendChild(o); })).catch(() => {});
+  document.getElementById("hn-assign-btn")?.addEventListener("click", async () => {
+    const accId = +(document.getElementById("hn-acc-sel") || {}).value;
+    if (!accId) return toast("Chọn Account HN trước", "error");
+    try { await api(`/api/quotes/${q.id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId: accId }) }); toast("Đã giao phần HN cho Account", "success"); reload(); } catch (e) { toast(e.message || "Lỗi giao", "error"); }
+  });
+  document.getElementById("hn-approve-btn")?.addEventListener("click", async () => {
+    try { await api(`/api/quotes/${q.id}/hn/review`, { method: "POST", body: JSON.stringify({ decision: "approve" }) }); toast("Đã duyệt phần HN", "success"); reload(); } catch (e) { toast(e.message || "Lỗi", "error"); }
+  });
+  document.getElementById("hn-reject-btn")?.addEventListener("click", async () => {
+    const note = prompt("Lý do trả lại phần HN (Account sẽ thấy):"); if (note === null) return;
+    try { await api(`/api/quotes/${q.id}/hn/review`, { method: "POST", body: JSON.stringify({ decision: "reject", note }) }); toast("Đã trả lại phần HN", "success"); reload(); } catch (e) { toast(e.message || "Lỗi", "error"); }
+  });
+}
+
 function renderEditor(el, quote) {
   const isNew = !!quote._new;
   const q = JSON.parse(JSON.stringify(quote));
@@ -1260,6 +1360,7 @@ function renderEditor(el, quote) {
           ${renderQuoteSummary(q)}
         </div>
 
+        <div id="hn-manager-panel"></div>
         <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
 
         <div class="actions">
@@ -1378,6 +1479,7 @@ function renderEditor(el, quote) {
     drawItems(q, activeSheet, editable, tplCode, usesDays, grid, { internalNote: true });   // lưới chính có cột "Ghi chú nội bộ" (KHÔNG xuất Excel)
     // Bảng nội bộ (chỉ quản lý — KHÔNG xuất Excel), lưới riêng độc lập với lưới báo giá
     drawExtraTables(q, activeSheet, editable);
+    renderManagerHnPanel(q);   // panel giao/duyệt phần HN cho Account
 
     // Header field bindings
     const bindField = (id, prop) => {

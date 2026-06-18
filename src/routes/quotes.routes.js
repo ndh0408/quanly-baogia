@@ -247,6 +247,16 @@ router.post(
   })
 );
 
+// Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.
+router.get(
+  "/hn/accounts",
+  asyncHandler(async (req, res) => {
+    if (!["admin", "manager"].includes(req.session.role)) return res.status(403).json({ error: "Không có quyền" });
+    const data = await prisma.user.findMany({ where: { role: "account_hn", active: true }, select: { id: true, displayName: true, username: true }, orderBy: { displayName: "asc" } });
+    res.json({ data });
+  })
+);
+
 // GET ONE
 router.get(
   "/:id",
