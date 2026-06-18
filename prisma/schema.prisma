@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   admin
   manager
+  account_hn // Account Hà Nội: CHỈ điền bảng nội bộ loại "hanoi" của báo giá được giao, không thấy gì khác
 }
 
 enum QuoteStatus {
@@ -42,18 +43,18 @@ enum NotificationChannel {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
+  id           Int     @id @default(autoincrement())
+  username     String  @unique
   passwordHash String
   displayName  String
-  email        String?  @unique
-  role         Role     @default(manager)
+  email        String? @unique
+  role         Role    @default(manager)
   phone        String?
   title        String?
-  senderName   String?  // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
-  projectCode  String?  // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
-  active       Boolean  @default(true)
-  canSign      Boolean  @default(false) // được phép "Ký Chứng từ" ở trang Quản lý dự án (admin luôn được)
+  senderName   String? // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
+  projectCode  String? // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
+  active       Boolean @default(true)
+  canSign      Boolean @default(false) // được phép "Ký Chứng từ" ở trang Quản lý dự án (admin luôn được)
 
   // Email-invite onboarding: invited users are inactive until they accept,
   // set their own password and fill in their details.
@@ -66,80 +67,80 @@ model User {
   lastLoginIp    String?
 
   // MFA TOTP
-  mfaEnabled   Boolean  @default(false)
-  mfaSecret    String?
+  mfaEnabled     Boolean  @default(false)
+  mfaSecret      String?
   mfaBackupCodes String[] @default([])
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  deletedAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  createdQuotes  Quote[] @relation("CreatedBy")
-  approvedQuotes Quote[] @relation("ApprovedBy")
-  memberQuotes   Quote[] @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
-  ownedCustomers Customer[]
-  auditEvents    AuditEvent[]
-  notifications  Notification[]
-  approvals      Approval[]
-  refreshTokens  RefreshToken[]
+  createdQuotes     Quote[]        @relation("CreatedBy")
+  approvedQuotes    Quote[]        @relation("ApprovedBy")
+  memberQuotes      Quote[]        @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
+  ownedCustomers    Customer[]
+  auditEvents       AuditEvent[]
+  notifications     Notification[]
+  approvals         Approval[]
+  refreshTokens     RefreshToken[]
   // Back-relations for previously-bare Int references (now real FKs, onDelete: SetNull).
-  authoredNotes     CustomerNote[]  @relation("NoteAuthor")
-  assignedFollowUps FollowUp[]      @relation("FollowupAssignee")
-  authoredVersions  QuoteVersion[]  @relation("VersionAuthor")
-  createdApiKeys    ApiKey[]        @relation("ApiKeyAuthor")
-  signedSheets      QuoteSheet[]    @relation("SheetSigner")
+  authoredNotes     CustomerNote[] @relation("NoteAuthor")
+  assignedFollowUps FollowUp[]     @relation("FollowupAssignee")
+  authoredVersions  QuoteVersion[] @relation("VersionAuthor")
+  createdApiKeys    ApiKey[]       @relation("ApiKeyAuthor")
+  signedSheets      QuoteSheet[]   @relation("SheetSigner")
 
   @@index([deletedAt, active])
 }
 
 model RefreshToken {
-  id        BigInt   @id @default(autoincrement())
+  id        BigInt    @id @default(autoincrement())
   userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String   @unique
-  family    String   // rotation family id; revoke whole family on reuse
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  family    String // rotation family id; revoke whole family on reuse
   ip        String?
   userAgent String?
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([userId, expiresAt])
   @@index([family])
 }
 
 model Company {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique
-  name      String
-  shortName String?
-  quotePrefix String @default("GN") // số báo giá riêng theo công ty (VD: GN, CLF)
-  address   String
-  city      String   @default("TP. Hồ Chí Minh")
-  phone     String?
-  email     String?
-  taxCode   String?
-  logoPath  String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
-  templates QuoteTemplate[]
-  quotes    Quote[]
+  id          Int             @id @default(autoincrement())
+  code        String          @unique
+  name        String
+  shortName   String?
+  quotePrefix String          @default("GN") // số báo giá riêng theo công ty (VD: GN, CLF)
+  address     String
+  city        String          @default("TP. Hồ Chí Minh")
+  phone       String?
+  email       String?
+  taxCode     String?
+  logoPath    String?
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+  templates   QuoteTemplate[]
+  quotes      Quote[]
 
   @@index([deletedAt, active])
 }
 
 model QuoteTemplate {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique
+  id        Int          @id @default(autoincrement())
+  code      String       @unique
   name      String
   companyId Int
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company      @relation(fields: [companyId], references: [id])
   filePath  String
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
   deletedAt DateTime?
   sheets    QuoteSheet[]
 
@@ -148,26 +149,26 @@ model QuoteTemplate {
 
 // === CRM ===
 model Customer {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique
-  name      String
-  taxCode   String?
-  email     String?
-  phone     String?
-  address   String?
-  city      String?
-  contactName String?
+  id           Int            @id @default(autoincrement())
+  code         String         @unique
+  name         String
+  taxCode      String?
+  email        String?
+  phone        String?
+  address      String?
+  city         String?
+  contactName  String?
   contactTitle String?
-  status    CustomerStatus @default(lead)
-  tags      String[] @default([])
-  ownerId   Int?
-  owner     User?    @relation(fields: [ownerId], references: [id])
-  notes     CustomerNote[]
-  followUps FollowUp[]
-  quotes    Quote[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  status       CustomerStatus @default(lead)
+  tags         String[]       @default([])
+  ownerId      Int?
+  owner        User?          @relation(fields: [ownerId], references: [id])
+  notes        CustomerNote[]
+  followUps    FollowUp[]
+  quotes       Quote[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  deletedAt    DateTime?
 
   @@index([deletedAt, status])
   @@index([ownerId])
@@ -188,15 +189,15 @@ model CustomerNote {
 }
 
 model FollowUp {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   customerId Int
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   dueAt      DateTime
   doneAt     DateTime?
   note       String
   assigneeId Int?
-  assignee   User?    @relation("FollowupAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
+  assignee   User?     @relation("FollowupAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
 
   @@index([customerId, dueAt])
   @@index([assigneeId, doneAt, dueAt])
@@ -204,20 +205,20 @@ model FollowUp {
 
 // === Product Catalog ===
 model Product {
-  id         Int      @id @default(autoincrement())
-  sku        String   @unique
-  name       String
-  category   String?
-  unit       String?
-  costPrice  Decimal  @default(0) @db.Decimal(18, 4)
-  basePrice  Decimal  @default(0) @db.Decimal(18, 4)
+  id          Int                @id @default(autoincrement())
+  sku         String             @unique
+  name        String
+  category    String?
+  unit        String?
+  costPrice   Decimal            @default(0) @db.Decimal(18, 4)
+  basePrice   Decimal            @default(0) @db.Decimal(18, 4)
   description String?
-  active     Boolean  @default(true)
-  priceTiers ProductPriceTier[]
-  quoteItems QuoteItem[]
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  deletedAt  DateTime?
+  active      Boolean            @default(true)
+  priceTiers  ProductPriceTier[]
+  quoteItems  QuoteItem[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
 
   @@index([deletedAt, active])
   @@index([category])
@@ -228,7 +229,7 @@ model ProductPriceTier {
   id        Int     @id @default(autoincrement())
   productId Int
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  name      String  // "Sỉ", "Lẻ", "VIP"
+  name      String // "Sỉ", "Lẻ", "VIP"
   minQty    Int     @default(0)
   price     Decimal @db.Decimal(18, 4)
 
@@ -237,56 +238,66 @@ model ProductPriceTier {
 
 // === Quote ===
 model Quote {
-  id            Int         @id @default(autoincrement())
-  quoteNumber   String      @unique
-  projectCode   String?              // mã dự án theo nhân viên (FE_A26_001…); hiển thị trong app, KHÔNG vào Excel
-  projectVersion Int        @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
-  title         String
-  toCompany     String              // legacy free-text; kept for backwards compat
-  toContact     String?
-  toEmail       String?             // recipient email for the "Kính gửi" block
-  toPhone       String?             // recipient phone (To · Tel)
-  toAddress     String?             // recipient address (To · Add)
-  customerId    Int?                // new: link to CRM Customer (optional during migration)
-  customer      Customer?   @relation(fields: [customerId], references: [id])
-  companyId     Int
-  company       Company     @relation(fields: [companyId], references: [id])
-  fromContact   String
-  fromPhone     String?
-  fromTitle     String?
-  fromAddress   String
-  city          String
-  quoteDate     DateTime
-  executionDate DateTime?            // ngày thi công (lắp đặt) — CHỈ hiển thị trong app + trang Quản lý dự án, KHÔNG xuất Excel
-  customerLogo  String?     @db.Text   // base64 data URL of customer logo (inserted into templates that have a logo anchor)
-  greeting      String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
-  vatPercent    Decimal     @default(8) @db.Decimal(5, 2)
-  status        QuoteStatus @default(draft)
-  notes         String?
-  showTotals    Boolean     @default(true) // hiện/ẩn bảng Tổng cộng–VAT–Thành tiền (tuỳ template/báo giá)
-  currentVersion Int        @default(1)
+  id             Int         @id @default(autoincrement())
+  quoteNumber    String      @unique
+  projectCode    String? // mã dự án theo nhân viên (FE_A26_001…); hiển thị trong app, KHÔNG vào Excel
+  projectVersion Int         @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
+  title          String
+  toCompany      String // legacy free-text; kept for backwards compat
+  toContact      String?
+  toEmail        String? // recipient email for the "Kính gửi" block
+  toPhone        String? // recipient phone (To · Tel)
+  toAddress      String? // recipient address (To · Add)
+  customerId     Int? // new: link to CRM Customer (optional during migration)
+  customer       Customer?   @relation(fields: [customerId], references: [id])
+  companyId      Int
+  company        Company     @relation(fields: [companyId], references: [id])
+  fromContact    String
+  fromPhone      String?
+  fromTitle      String?
+  fromAddress    String
+  city           String
+  quoteDate      DateTime
+  executionDate  DateTime? // ngày thi công (lắp đặt) — CHỈ hiển thị trong app + trang Quản lý dự án, KHÔNG xuất Excel
+  customerLogo   String?     @db.Text // base64 data URL of customer logo (inserted into templates that have a logo anchor)
+  greeting       String      @default("Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:")
+  vatPercent     Decimal     @default(8) @db.Decimal(5, 2)
+  status         QuoteStatus @default(draft)
+  notes          String?
+  showTotals     Boolean     @default(true) // hiện/ẩn bảng Tổng cộng–VAT–Thành tiền (tuỳ template/báo giá)
+  currentVersion Int         @default(1)
 
-  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
-  vat           Decimal     @default(0) @db.Decimal(18, 2)
-  discount      Decimal     @default(0) @db.Decimal(18, 2)
-  total         Decimal     @default(0) @db.Decimal(18, 2)
+  subtotal Decimal @default(0) @db.Decimal(18, 2)
+  vat      Decimal @default(0) @db.Decimal(18, 2)
+  discount Decimal @default(0) @db.Decimal(18, 2)
+  total    Decimal @default(0) @db.Decimal(18, 2)
 
-  createdById   Int
-  createdBy     User        @relation("CreatedBy", fields: [createdById], references: [id])
-  approvedById  Int?
-  approvedBy    User?       @relation("ApprovedBy", fields: [approvedById], references: [id])
+  createdById  Int
+  createdBy    User  @relation("CreatedBy", fields: [createdById], references: [id])
+  approvedById Int?
+  approvedBy   User? @relation("ApprovedBy", fields: [approvedById], references: [id])
 
-  sheets        QuoteSheet[]
-  versions      QuoteVersion[]
-  approvals     Approval[]
-  members       User[]      @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
+  sheets    QuoteSheet[]
+  versions  QuoteVersion[]
+  approvals Approval[]
+  members   User[]         @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
 
-  sentAt        DateTime?
-  convertedAt   DateTime?
+  sentAt      DateTime?
+  convertedAt DateTime?
 
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  deletedAt     DateTime?
+  // ===== Phần GIÁ HÀ NỘI (role account_hn) — luồng RIÊNG, tách khỏi `status` báo giá chính.
+  // Quản lý GIAO account điền bảng nội bộ loại "hanoi"; account chỉ thấy/sửa phần đó rồi
+  // GỬI DUYỆT; quản lý DUYỆT/TRẢ. =====
+  hnAssigneeId  Int? // account_hn được giao (cũng được thêm vào members để thấy báo giá)
+  hnStatus      String? // null=chưa giao · assigned · submitted · approved · rejected
+  hnSubmittedAt DateTime? // account bấm "Gửi duyệt"
+  hnReviewerId  Int? // quản lý duyệt/trả phần HN
+  hnReviewedAt  DateTime?
+  hnRejectNote  String? // lý do trả lại khi rejected
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([status, createdAt(sort: Desc)])
   @@index([companyId, status])
@@ -297,15 +308,15 @@ model Quote {
 }
 
 model QuoteVersion {
-  id         BigInt   @id @default(autoincrement())
-  quoteId    Int
-  quote      Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  versionNo  Int
-  payload    Json     // full snapshot of fields + sheets + items at this revision
-  total      Decimal  @db.Decimal(18, 2)
+  id          BigInt   @id @default(autoincrement())
+  quoteId     Int
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  versionNo   Int
+  payload     Json // full snapshot of fields + sheets + items at this revision
+  total       Decimal  @db.Decimal(18, 2)
   createdById Int?
   createdBy   User?    @relation("VersionAuthor", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   @@unique([quoteId, versionNo])
   @@index([quoteId, versionNo(sort: Desc)])
@@ -313,49 +324,49 @@ model QuoteVersion {
 }
 
 model QuoteSheet {
-  id          Int           @id @default(autoincrement())
-  quoteId     Int
-  quote       Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  templateId  Int
-  template    QuoteTemplate @relation(fields: [templateId], references: [id])
-  order       Int
-  name        String?
-  groupSubtotal Boolean     @default(false)  // hiện tổng tiền theo từng nhóm A/B/C
-  items       QuoteItem[]
+  id            Int           @id @default(autoincrement())
+  quoteId       Int
+  quote         Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  templateId    Int
+  template      QuoteTemplate @relation(fields: [templateId], references: [id])
+  order         Int
+  name          String?
+  groupSubtotal Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
+  items         QuoteItem[]
   // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
   // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
   // Tổng theo từng loại đổ vào cột Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng ở trang Quản lý dự án.
-  extraTables Json?
+  extraTables   Json?
   // Ký chứng từ theo từng sheet (chỉ quản lý — admin/người có canSign mới ký).
-  signedAt     DateTime?
-  signedById   Int?
+  signedAt      DateTime?
+  signedById    Int?
   // FK to the signer. onDelete: SetNull — if the user is deleted we keep the sheet
   // and the snapshotted signedByName, just clear the link (audit-safe).
-  signedBy     User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
-  signedByName String?
+  signedBy      User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
+  signedByName  String?
 
   @@index([quoteId, order])
   @@index([signedById])
 }
 
 model QuoteItem {
-  id         Int     @id @default(autoincrement())
-  sheetId    Int
-  sheet      QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  order      Int
-  productId  Int?               // optional link to catalog
-  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  kind       String  @default("item")  // "item" | "sub" | "info" | "section" (nhóm A/B/C)
-  label      String?                    // chữ nhóm tự đặt cho kind=section (A/B/C…); rỗng = tự đánh theo thứ tự
-  name       String                     // Hạng Mục (các dòng cùng name liên tiếp = 1 nhóm: gộp STT + ô Hạng Mục)
-  detail     String?
-  unit       String?
-  quantity   Decimal @default(0) @db.Decimal(18, 4)
-  unitPrice  Decimal @default(0) @db.Decimal(18, 4)
-  days       Decimal? @db.Decimal(10, 2)
-  notes      String?
-  internalNote String?          // ghi chú NỘI BỘ — chỉ xem/quản lý, KHÔNG xuất Excel/PDF (không có trong itemsCfg.columns)
-  formulas   Json?              // raw Excel-style formulas per numeric field, e.g. {"unitPrice":"=2000+3000"} — editor metadata, not used in totals/export
+  id           Int        @id @default(autoincrement())
+  sheetId      Int
+  sheet        QuoteSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  order        Int
+  productId    Int? // optional link to catalog
+  product      Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  kind         String     @default("item") // "item" | "sub" | "info" | "section" (nhóm A/B/C)
+  label        String? // chữ nhóm tự đặt cho kind=section (A/B/C…); rỗng = tự đánh theo thứ tự
+  name         String // Hạng Mục (các dòng cùng name liên tiếp = 1 nhóm: gộp STT + ô Hạng Mục)
+  detail       String?
+  unit         String?
+  quantity     Decimal    @default(0) @db.Decimal(18, 4)
+  unitPrice    Decimal    @default(0) @db.Decimal(18, 4)
+  days         Decimal?   @db.Decimal(10, 2)
+  notes        String?
+  internalNote String? // ghi chú NỘI BỘ — chỉ xem/quản lý, KHÔNG xuất Excel/PDF (không có trong itemsCfg.columns)
+  formulas     Json? // raw Excel-style formulas per numeric field, e.g. {"unitPrice":"=2000+3000"} — editor metadata, not used in totals/export
 
   @@index([sheetId, order])
   @@index([productId])
@@ -363,17 +374,17 @@ model QuoteItem {
 
 // === Approval workflow ===
 model Approval {
-  id         Int      @id @default(autoincrement())
+  id         Int              @id @default(autoincrement())
   quoteId    Int
-  quote      Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quote      Quote            @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   versionNo  Int
   level      Int
   approverId Int?
-  approver   User?    @relation(fields: [approverId], references: [id])
+  approver   User?            @relation(fields: [approverId], references: [id])
   decision   ApprovalDecision @default(pending)
   comment    String?
   decidedAt  DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime         @default(now())
 
   @@unique([quoteId, versionNo, level])
   @@index([approverId, decision])
@@ -381,17 +392,17 @@ model Approval {
 
 // === Notification ===
 model Notification {
-  id        BigInt   @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  channel   NotificationChannel @default(in_app)
-  title     String
-  body      String
-  link      String?
-  resource  String?
+  id         BigInt              @id @default(autoincrement())
+  userId     Int
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel    NotificationChannel @default(in_app)
+  title      String
+  body       String
+  link       String?
+  resource   String?
   resourceId String?
-  readAt    DateTime?
-  createdAt DateTime @default(now())
+  readAt     DateTime?
+  createdAt  DateTime            @default(now())
 
   @@index([userId, readAt, createdAt(sort: Desc)])
 }
@@ -451,91 +462,91 @@ enum SubscriptionStatus {
 }
 
 model Plan {
-  id           Int      @id @default(autoincrement())
-  code         String   @unique          // "free", "starter", "pro", "enterprise"
-  name         String
-  priceMonth   Decimal  @default(0) @db.Decimal(18, 2)
-  priceYear    Decimal  @default(0) @db.Decimal(18, 2)
-  stripePriceId String? @unique
+  id                Int      @id @default(autoincrement())
+  code              String   @unique // "free", "starter", "pro", "enterprise"
+  name              String
+  priceMonth        Decimal  @default(0) @db.Decimal(18, 2)
+  priceYear         Decimal  @default(0) @db.Decimal(18, 2)
+  stripePriceId     String?  @unique
   // Quota fields — null = unlimited
-  maxUsers     Int?
+  maxUsers          Int?
   maxQuotesPerMonth Int?
-  maxCustomers Int?
-  maxStorageGB Int?
-  features     Json     @default("{}")   // {api: true, webhooks: true, mfa: true, ...}
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  maxCustomers      Int?
+  maxStorageGB      Int?
+  features          Json     @default("{}") // {api: true, webhooks: true, mfa: true, ...}
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
 
   subscriptions Subscription[]
 }
 
 model Subscription {
-  id                String   @id @default(cuid())
-  planId            Int
-  plan              Plan     @relation(fields: [planId], references: [id])
-  stripeCustomerId  String?  @unique
-  stripeSubscriptionId String? @unique
-  status            SubscriptionStatus @default(trialing)
-  currentPeriodEnd  DateTime?
-  cancelAtPeriodEnd Boolean  @default(false)
-  trialEnd          DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                   String             @id @default(cuid())
+  planId               Int
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(trialing)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  trialEnd             DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   @@index([status, currentPeriodEnd])
 }
 
 model UsageRecord {
-  id        BigInt   @id @default(autoincrement())
-  metric    String   // "quotes.created", "exports.run", "storage.bytes"
-  value     BigInt   @default(1)
-  ts        DateTime @default(now())
+  id     BigInt   @id @default(autoincrement())
+  metric String // "quotes.created", "exports.run", "storage.bytes"
+  value  BigInt   @default(1)
+  ts     DateTime @default(now())
 
   @@index([metric, ts(sort: Desc)])
 }
 
 // === Webhook out (integrations) ===
 model Webhook {
-  id        Int      @id @default(autoincrement())
-  url       String
-  events    String[] @default([])  // ["quote.approved", "quote.sent", ...]
-  secret    String              // HMAC signing secret
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         Int               @id @default(autoincrement())
+  url        String
+  events     String[]          @default([]) // ["quote.approved", "quote.sent", ...]
+  secret     String // HMAC signing secret
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
   deliveries WebhookDelivery[]
 
   @@index([active])
 }
 
 model WebhookDelivery {
-  id          BigInt   @id @default(autoincrement())
-  webhookId   Int
-  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
-  event       String
-  payload     Json
+  id             BigInt    @id @default(autoincrement())
+  webhookId      Int
+  webhook        Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event          String
+  payload        Json
   responseStatus Int?
-  responseBody  String?
-  attempt     Int      @default(1)
-  deliveredAt DateTime?
-  createdAt   DateTime @default(now())
+  responseBody   String?
+  attempt        Int       @default(1)
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
 
   @@index([webhookId, createdAt(sort: Desc)])
 }
 
 // === Public API keys ===
 model ApiKey {
-  id        Int      @id @default(autoincrement())
-  name      String
-  prefix    String   @unique             // first 8 chars, displayed
-  keyHash   String   @unique             // sha256(full key) for lookup
-  scopes    String[] @default([])        // ["quotes:read", "quotes:write", ...]
-  active    Boolean  @default(true)
-  lastUsedAt DateTime?
+  id          Int       @id @default(autoincrement())
+  name        String
+  prefix      String    @unique // first 8 chars, displayed
+  keyHash     String    @unique // sha256(full key) for lookup
+  scopes      String[]  @default([]) // ["quotes:read", "quotes:write", ...]
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
   createdById Int?
-  createdBy  User?    @relation("ApiKeyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  expiresAt DateTime?
+  createdBy   User?     @relation("ApiKeyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
 
   @@index([active, expiresAt])
   @@index([createdById])

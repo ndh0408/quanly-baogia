@@ -118,16 +118,26 @@ const ADMIN = [
   P.SETTINGS_MANAGE,
 ];
 
+// Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
+// đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ
+// cho ghi đúng phần đó. KHÔNG tạo báo giá, KHÔNG thấy của người khác, KHÔNG export.
+const ACCOUNT_HN = [
+  P.QUOTE_READ_OWN,    // chỉ báo giá được giao (member); server lược chỉ còn phần HN
+  P.QUOTE_UPDATE_OWN,  // chỉ ghi được bảng hanoi (write-guard ở route)
+];
+
 export const ROLE_PERMISSIONS = {
   admin: new Set(ADMIN),
   manager: new Set(MANAGER),
-  // 'employee' role bỏ từ 2026-06-15 (chỉ còn admin + manager). EMPLOYEE vẫn giữ làm
-  // danh sách quyền NỀN mà MANAGER kế thừa (`...EMPLOYEE`), không phải 1 vai trò gán được.
+  account_hn: new Set(ACCOUNT_HN),
+  // 'employee' role bỏ từ 2026-06-15 (chỉ còn admin + manager + account_hn). EMPLOYEE vẫn
+  // giữ làm danh sách quyền NỀN mà MANAGER kế thừa (`...EMPLOYEE`), không phải vai trò gán được.
 };
 
 export const ROLE_LABELS = {
   admin: "Quản trị viên",
   manager: "Quản lý",
+  account_hn: "Account Hà Nội",
 };
 
 /** Does this role hold the given permission? (`:all` implies `:own`.) */

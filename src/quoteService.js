@@ -18,6 +18,7 @@ import {
   QUOTE_INCLUDE,
   templatesBelongToCompany,
   buildSheetsCreate,
+  sanitizeExtraTables,
 } from "./quoteUtils.js";
 
 export const httpError = (status, message) => Object.assign(new Error(message), { status });

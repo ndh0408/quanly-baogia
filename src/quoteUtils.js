@@ -35,8 +35,38 @@ export const QUOTE_INCLUDE = {
   members: { select: { id: true, username: true, displayName: true } },
 };
 
+// Account Hà Nội: CHỈ được thấy phần GIÁ HÀ NỘI. Trả về object TỐI GIẢN — KHÔNG có
+// sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
+// qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại
+// "hanoi" (kèm sheetId để map khi lưu).
+function presentQuoteForAccountHn(q) {
+  const hnSheets = (q.sheets || []).map((s) => ({
+    sheetId: s.id,
+    sheetName: s.name || null,
+    order: s.order,
+    hnTables: (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t) => t && t.category === "hanoi"),
+  }));
+  return {
+    id: q.id,
+    quoteNumber: q.quoteNumber,
+    projectCode: q.projectCode,
+    projectVersion: q.projectVersion,
+    title: q.title,
+    companyId: q.companyId,
+    companyName: q.company?.shortName || q.company?.name || null,
+    hnStatus: q.hnStatus || null,
+    hnAssigneeId: q.hnAssigneeId || null,
+    hnSubmittedAt: q.hnSubmittedAt || null,
+    hnReviewedAt: q.hnReviewedAt || null,
+    hnRejectNote: q.hnRejectNote || null,
+    hnSheets,
+    _accountHnView: true,
+  };
+}
+
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
-export function presentQuote(q, { includeLogo = false } = {}) {
+export function presentQuote(q, { includeLogo = false, viewerRole = null } = {}) {
+  if (viewerRole === "account_hn") return presentQuoteForAccountHn(q);   // 🔒 lược chỉ còn phần HN
   const totals = computeQuoteTotals(q);
   const out = {
     ...q,
@@ -69,14 +99,24 @@ export const QUOTE_LIST_SELECT = {
   id: true, quoteNumber: true, projectCode: true, projectVersion: true,
   title: true, toCompany: true, status: true, quoteDate: true,
   subtotal: true, vat: true, discount: true, total: true, vatPercent: true,
-  createdAt: true, createdById: true,
+  createdAt: true, createdById: true, hnStatus: true, hnAssigneeId: true,
   company: { select: { id: true, name: true, shortName: true } },
   customer: { select: { code: true, name: true } },
   createdBy: { select: { id: true, displayName: true } },
   _count: { select: { sheets: true } },
 };
 
-export function presentQuoteRow(q) {
+export function presentQuoteRow(q, { viewerRole = null } = {}) {
+  // 🔒 account_hn: danh sách CHỈ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
+  if (viewerRole === "account_hn") {
+    return {
+      id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
+      title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
+      company: q.company ? { id: q.company.id, name: q.company.name, shortName: q.company.shortName } : null,
+      hnStatus: q.hnStatus ?? null, sheetCount: q._count?.sheets ?? 0,
+      _accountHnRow: true,
+    };
+  }
   return {
     ...q,
     vatPercent: Number(q.vatPercent),

@@ -22,6 +22,7 @@ import {
   extraTableSum,
 } from "../quoteUtils.js";
 import { createQuote, updateQuote, submitQuote, approveQuote, rejectQuote } from "../quoteService.js";
+import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -81,7 +82,7 @@ router.get(
       }),
     ]);
     res.json({
-      data: rows.map(presentQuoteRow),
+      data: rows.map((r) => presentQuoteRow(r, { viewerRole: req.session.role })),
       meta: {
         total,
         page,
@@ -257,7 +258,8 @@ router.get(
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền xem báo giá này" });
     }
-    res.json(presentQuote(quote, { includeLogo: true }));
+    // 🔒 account_hn: presentQuote LƯỢC chỉ còn phần HN (không lộ nội dung báo giá khách).
+    res.json(presentQuote(quote, { includeLogo: true, viewerRole: req.session.role }));
   })
 );
 
@@ -276,8 +278,12 @@ router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
   asyncHandler(async (req, res) => {
+    // 🔒 account_hn KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
+    if (req.session.role === "account_hn") {
+      return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
+    }
     const updated = await updateQuote(req);
-    res.json(presentQuote(updated, { includeLogo: true }));
+    res.json(presentQuote(updated, { includeLogo: true, viewerRole: req.session.role }));
   })
 );
 
@@ -300,6 +306,17 @@ router.post(
     res.json(presentQuote(quote));
   })
 );
+
+// ===== Luồng GIÁ HÀ NỘI (role account_hn) — phân quyền + write-guard nằm TRONG service =====
+// Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
+router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
+  asyncHandler(async (req, res) => { const q = await assignHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+router.put("/:id/hn", validate({ params: idParam }),   // account lưu phần HN (chỉ ghi bảng hanoi)
+  asyncHandler(async (req, res) => { const q = await saveHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+router.post("/:id/hn/submit", validate({ params: idParam }),
+  asyncHandler(async (req, res) => { const q = await submitHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
+  asyncHandler(async (req, res) => { const q = await reviewHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 
 router.post(
   "/:id/reject",
