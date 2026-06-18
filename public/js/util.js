@@ -85,6 +85,19 @@ export function pvRows(items, usesDays, groupSubtotal) {
   });
   return { rows, eff };
 }
+// Sheet subtotal honoring section (nhóm) multipliers: a section's Số Lượng multiplies the
+// amounts of the items under it (until the next section). Section rows contribute 0 themselves.
+// Shared by the editor totals AND the live preview; mirrors src/money.js grouped logic.
+export function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
+  let mult = 1, sum = 0;
+  for (const it of (items || [])) {
+    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
+    const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
+    sum += (usesDays ? qty * days * price : qty * price) * mult;
+  }
+  return sum;
+}
 // Mirror of src/templateConfigs.js baoGiaTitle (app.js is no-build; keep this copy in sync).
 export function baoGiaTitleJS(t) {
   t = (t || "").trim();
