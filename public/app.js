@@ -6,42 +6,13 @@ import {
   STATUS_LABEL, statusLabel, ROLE_LABEL, ROLE_LABEL_FULL,
   RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
 } from "./js/util.js?v=20260618c";
+// Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
+// mutate `state.foo`, never reassign `state`. can/canOnQuote/landingPage gate UI only.
+import {
+  state, can, canOnQuote, landingPage, sheetUsesDays, clearDaysIfUnused,
+} from "./js/core/state.js?v=20260619";
 
 const app = document.getElementById("app");
-
-// Client-side permission mirror of the server catalog (from /api/auth/me).
-// Only gates UI visibility — the server is always the source of truth.
-function can(perm) {
-  const perms = state.user?.permissions;
-  if (!perms) return false;
-  if (perms.includes(perm)) return true;
-  // ":own" is implied by ":all"
-  if (perm.endsWith(":own")) return perms.includes(perm.replace(/:own$/, ":all"));
-  return false;
-}
-function canOnQuote(action, q) {
-  if (can(`quote:${action}:all`)) return true;
-  if (can(`quote:${action}:own`)) return q && q.createdById === state.user?.id;
-  return false;
-}
-
-// Role-appropriate landing page when no specific route is requested: managers/
-// admins get the overview dashboard; salespeople go straight to their list.
-function landingPage() {
-  const r = state.user?.role;
-  return (r === "admin" || r === "manager") ? "dashboard" : "list";
-}
-
-const state = {
-  user: null,
-  page: "list",
-  quoteList: [],
-  currentQuote: null,
-  filter: { q: "", status: "" },
-  users: [],
-  companies: [],   // [{ id, name, templates: [...] }]
-  templates: [],   // [{ id, code, name, companyId }]
-};
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -1861,17 +1832,7 @@ function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   return sum;
 }
 
-function sheetUsesDays(sheet) {
-  const tpl = state.templates.find(t => t.id === sheet.templateId);
-  return !!(tpl && tpl.layout && tpl.layout.hasDays);
-}
-// A template WITHOUT a Số Ngày column must not carry per-item `days`: the grid and the
-// Excel export both ignore it, but src/money.js would still multiply qty×days×price and
-// inflate the STORED total. Clear stale days (e.g. after switching template) so all paths
-// agree. Returns sheets with days nulled where the template has no days column.
-function clearDaysIfUnused(sheet) {
-  if (!sheetUsesDays(sheet)) (sheet.items || []).forEach(it => { if (it.days != null) it.days = null; });
-}
+// sheetUsesDays / clearDaysIfUnused → moved to ./js/core/state.js (step 2)
 
 // ===== Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel) =====
 // Mỗi bảng nội bộ là MỘT LƯỚI ĐẦY ĐỦ y hệt báo giá (tái dùng drawItems): chọn template
