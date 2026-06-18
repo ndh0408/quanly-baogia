@@ -1361,7 +1361,10 @@ function renderEditor(el, quote) {
         </div>
 
         <div id="hn-manager-panel"></div>
-        <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
+        <details id="extra-collapse" class="extra-collapse" ${state._extraOpen ? "open" : ""}>
+          <summary class="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span class="muted" id="extra-collapse-totals">(bấm để mở)</span></summary>
+          <div id="extra-tables-wrap" class="extra-tables-wrap"></div>
+        </details>
 
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
@@ -1480,6 +1483,7 @@ function renderEditor(el, quote) {
     // Bảng nội bộ (chỉ quản lý — KHÔNG xuất Excel), lưới riêng độc lập với lưới báo giá
     drawExtraTables(q, activeSheet, editable);
     renderManagerHnPanel(q);   // panel giao/duyệt phần HN cho Account
+    document.getElementById("extra-collapse")?.addEventListener("toggle", (e) => { state._extraOpen = e.target.open; });   // nhớ trạng thái mở/đóng khu bảng nội bộ
 
     // Header field bindings
     const bindField = (id, prop) => {
@@ -1983,6 +1987,10 @@ function drawExtraTables(q, activeSheet, editable) {
         drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: "#extra-grid-active", fxBar: false, totalLabel: "sheet", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; updCatTotal(t.category); }, onCellInput: () => updCatTotal(t.category) });
       } catch (err) { console.error("[extra grid]", err); }
     }
+
+    // Tóm tắt Tổng từng loại lên thanh THU GỌN (để thấy ngay khi đóng, khỏi mở ra).
+    const sumEl = document.getElementById("extra-collapse-totals");
+    if (sumEl) sumEl.textContent = `— HCM ${fmtMoney(catTotal("hcm"))} · HN ${fmtMoney(catTotal("hanoi"))} · KH ${fmtMoney(catTotal("khach"))} · ${tables.length} sheet`;
 
     if (!editable) return;
     if (wrap._exBound) return;

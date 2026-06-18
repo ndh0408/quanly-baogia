@@ -418,6 +418,14 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .ahn-status.ahn-rejected { background: #ffe2e2; color: #a3261f; }
 .ahn-reject { background: #ffe2e2; color: #a3261f; padding: 8px 12px; border-radius: 8px; margin: 8px 0; font-size: 13.5px; }
 .hn-mgr-panel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin: 12px 0; border: 1px dashed var(--border, #ccd); border-radius: 8px; background: var(--card-2, #fafbfc); }
+/* Khu BẢNG NỘI BỘ thu gọn được (đỡ rối màn quản lý) — mặc định đóng, summary hiện Tổng từng loại */
+.extra-collapse { margin: 12px 0; border: 1px solid var(--border, #e2e4ea); border-radius: 10px; background: var(--card-2, #fafbfc); }
+.extra-collapse > summary { cursor: pointer; padding: 10px 14px; list-style: none; font-size: 14px; user-select: none; }
+.extra-collapse > summary::-webkit-details-marker { display: none; }
+.extra-collapse > summary::before { content: "▸ "; color: var(--text-muted, #888); }
+.extra-collapse[open] > summary::before { content: "▾ "; }
+.extra-collapse > summary:hover { background: rgba(0, 0, 0, .03); }
+.extra-collapse > .extra-tables-wrap { padding: 2px 14px 12px; }
 .excel-table td.col-qty input, .excel-table td.col-price input { text-align: right; }
 .excel-table tbody tr:last-child td { border-bottom: 2px solid #000; }
 .excel-table td.col-action { width: 64px; padding: 0 4px; text-align: center; border: 1px dashed #ccc; background: #fafafa; white-space: nowrap; }
