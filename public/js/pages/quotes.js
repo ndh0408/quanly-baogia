@@ -122,7 +122,14 @@ export async function renderList(el) {
         </div>
       </div>`;
     body.querySelectorAll("button[data-act]").forEach(b => {
-      b.addEventListener("click", (e) => { e.stopPropagation(); listAction(b.dataset.act, parseInt(b.dataset.id, 10)); });
+      // Disable trong lúc gửi: chặn bấm đúp (vd "Bản mới" gửi 2 request → 2 bản cùng version).
+      b.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (b.disabled) return;
+        b.disabled = true;
+        try { await listAction(b.dataset.act, parseInt(b.dataset.id, 10)); }
+        finally { b.disabled = false; }
+      });
     });
     // Bấm vào DÒNG để mở báo giá (trừ khi bấm trúng nút thao tác).
     body.querySelectorAll("tr.qrow").forEach(tr => {

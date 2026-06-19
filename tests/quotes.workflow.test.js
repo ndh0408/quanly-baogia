@@ -115,6 +115,22 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
     expect(wrongPw.status).toBe(401); // wrong password → step-up rejects
   });
 
+  // Concurrent "Bản mới cùng mã dự án" must NOT both land on _v2 (race). The
+  // @@unique([projectCode, projectVersion]) + in-tx version recompute serialize them.
+  it("concurrent 'new version, same project' get distinct versions (no duplicate _v2)", async () => {
+    const srcRes = await manager.post("/api/quotes").send(quotePayload({ title: `${TAG} ver-race` }));
+    expect(srcRes.status).toBe(201);
+    const srcId = srcRes.body.id;
+    const [a, b] = await Promise.all([
+      manager.post(`/api/quotes/${srcId}/duplicate`).send({ sameProject: true }),
+      manager.post(`/api/quotes/${srcId}/duplicate`).send({ sameProject: true }),
+    ]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body.projectCode).toBe(b.body.projectCode);          // cùng mã dự án
+    expect([a.body.projectVersion, b.body.projectVersion].sort()).toEqual([2, 3]); // KHÔNG phải [2,2]
+  });
+
   describe("lifecycle: create → submit → approve", () => {
     let quoteId;
 

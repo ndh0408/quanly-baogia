@@ -576,27 +576,25 @@ router.post(
     const sameProject = req.body.sameProject === true;
     const t = computeQuoteTotals({ vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets });
 
-    // Resolve project version / code base with read-only aggregates BEFORE the tx.
-    let newVersion = 1;
+    // Resolve title + project-code base. The version number is computed INSIDE the tx
+    // (below) so a P2002 from the @@unique([projectCode, projectVersion]) constraint retries
+    // onto the next free version instead of two concurrent "Bản mới" both landing on _v2.
     let newTitle = src.title + " (copy)";
     let sameProjectCode = null;
     let dupCreatorProjectCode = null;
     if (sameProject) {
-      // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode, đánh số version tiếp theo.
-      const base = src.projectCode || src.quoteNumber;
-      sameProjectCode = base;
-      const agg = await prisma.quote.aggregate({ where: { projectCode: base }, _max: { projectVersion: true } });
-      newVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
+      // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode.
+      sameProjectCode = src.projectCode || src.quoteNumber;
       newTitle = src.title; // giữ nguyên tiêu đề; phân biệt bằng nhãn v{n}
     } else {
       const dupCreator = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { projectCode: true } });
       dupCreatorProjectCode = dupCreator?.projectCode || null;
     }
 
-    const buildData = (quoteNumber, projectCode) => ({
+    const buildData = (quoteNumber, projectCode, projectVersion) => ({
       quoteNumber,
       projectCode,
-      projectVersion: newVersion,
+      projectVersion,
       title: newTitle,
       toCompany: src.toCompany,
       toContact: src.toContact,
@@ -656,10 +654,18 @@ router.post(
       try {
         created = await prisma.$transaction(async (tx) => {
           const quoteNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN", tx);
-          const projectCode = sameProject
-            ? sameProjectCode
-            : (dupCreatorProjectCode ? await nextProjectCode(dupCreatorProjectCode, tx) : null);
-          const c = await tx.quote.create({ data: buildData(quoteNumber, projectCode), include: QUOTE_INCLUDE });
+          let projectCode, projectVersion;
+          if (sameProject) {
+            projectCode = sameProjectCode;
+            // Tính version trong tx + includeDeleted → đơn điệu, không tái dùng số của bản
+            // xóa-mềm; khi 2 request đua nhau, P2002 đẩy lần retry sang version kế tiếp.
+            const agg = await tx.quote.aggregate({ where: { projectCode: sameProjectCode }, _max: { projectVersion: true }, includeDeleted: true });
+            projectVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
+          } else {
+            projectCode = dupCreatorProjectCode ? await nextProjectCode(dupCreatorProjectCode, tx) : null;
+            projectVersion = 1;
+          }
+          const c = await tx.quote.create({ data: buildData(quoteNumber, projectCode, projectVersion), include: QUOTE_INCLUDE });
           await snapshotQuoteVersion(tx, c.id, req.session.userId, "duplicate");
           return c;
         });

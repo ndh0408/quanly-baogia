@@ -298,6 +298,10 @@ model Quote {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  // Mỗi mã dự án chỉ có 1 bản cho mỗi version (v1/v2/v3…). Chặn race "Bản mới cùng mã"
+  // tạo hai _v2 song song. projectCode null → Postgres coi NULL là khác nhau (quote không
+  // có mã không bị ảnh hưởng). Version tính gồm cả bản xóa-mềm nên không tái dùng số.
+  @@unique([projectCode, projectVersion])
   @@index([status, createdAt(sort: Desc)])
   @@index([companyId, status])
   @@index([customerId])
