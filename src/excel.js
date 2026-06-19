@@ -403,7 +403,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       // Đơn Giá nhóm = tổng các mục con (luôn hiện). Thành Tiền nhóm = Đơn Giá × Số Lượng (chỉ khi bật).
       if (cols.unitPrice) ws.getCell(`${cols.unitPrice}${r}`).value = sectionSum[i] || null;
       if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
-      if (cols.notes) ws.getCell(`${cols.notes}${r}`).value = it.notes || null;
+      if (cols.notes) setCell(ws, `${cols.notes}${r}`, it.notes || null);
       for (const col of Object.values(cols)) {
         // Nhóm con: 2 ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa, theo yêu cầu.
         const bareSubCell = isSubSection && (col === cols.stt || col === cols.notes);
@@ -866,7 +866,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   ws.getRow(1).height = 26;
 
   ws.mergeCells("A2:C2");
-  ws.getCell("A2").value = quote.title || "";
+  ws.getCell("A2").value = neutralizeFormula(quote.title || "");
   ws.getCell("A2").font = { name: "Times New Roman", family: 1, size: 11, italic: true };
   ws.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
 
@@ -889,7 +889,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   sheetTotals.forEach((st, idx) => {
     const r = headerRow + 1 + idx;
     ws.getCell(r, 1).value = idx + 1;
-    ws.getCell(r, 2).value = st.name;
+    ws.getCell(r, 2).value = neutralizeFormula(st.name);
     ws.getCell(r, 3).value = st.subtotal;
     ws.getCell(r, 3).numFmt = "#,##0";
     for (let c = 1; c <= 3; c++) {

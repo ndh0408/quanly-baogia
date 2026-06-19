@@ -63,6 +63,7 @@ function present(p, { showCost = false } = {}) {
 
 router.get(
   "/",
+  requirePermission(P.PRODUCT_READ),
   validate({ query: ListQuery }),
   asyncHandler(async (req, res) => {
     const { q, category, active, page, size, sort, order } = req.query;
@@ -90,7 +91,7 @@ router.get(
   })
 );
 
-router.get("/categories", asyncHandler(async (_req, res) => {
+router.get("/categories", requirePermission(P.PRODUCT_READ), asyncHandler(async (_req, res) => {
   const rows = await prisma.product.findMany({
     where: { category: { not: null } },
     select: { category: true },
@@ -126,6 +127,7 @@ router.post(
 
 router.get(
   "/:id",
+  requirePermission(P.PRODUCT_READ),
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
     const p = await prisma.product.findFirst({

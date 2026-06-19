@@ -35,13 +35,13 @@ Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia 
 
 Theo dõi các báo giá **đã duyệt** theo bố cục bảng sản xuất/hoá đơn:
 
-- **Phân quyền xem:** Admin **hoặc** người được **"Ký chứng từ"** (`User.canSign`) → xem **TẤT CẢ** dự án đã duyệt. **Quản lý thường** → **CHỈ XEM** dự án đã duyệt **do chính mình tạo** (lọc ở server theo người tạo), **không thao tác** gì (không có nút Ký). Menu hiện cho mọi người.
+- **Phân quyền xem:** **Chỉ Admin** → xem **TẤT CẢ** dự án đã duyệt. Người có **"Ký chứng từ"** (`User.canSign`, vd Lan Anh) **và Quản lý thường** → **CHỈ XEM** dự án đã duyệt **do chính mình tạo** (lọc ở server theo người tạo). Menu hiện cho mọi người.
 - Mỗi **sheet** của báo giá = 1 dòng; báo giá nhiều sheet → Mã Sản Xuất thêm hậu tố `_1/_2…`, Hạng Mục = tên sheet.
 - **Tìm kiếm + bộ lọc:** ô tìm (phim / mã sản xuất / khách / account) + lọc theo **Account** (người tạo) và **Mã khách hàng**; tổng + bảng cập nhật theo bộ lọc.
 - **Khóa cố định 4 cột đầu** (Status · Phim · Hạng Mục · Báo Giá): cuộn ngang xem các cột hoá đơn/thanh toán phía sau mà 4 cột này luôn hiển thị để đối chiếu.
 - Cột tự lấy từ báo giá: **Báo Giá** (trước VAT) · **Thành Tiền VAT** · **Mã Sản Xuất** (projectCode) · **Cty Xuất Hoá Đơn** (theo công ty của template sheet) · **Ngày Thi Công** · **Team client** (mã KH) · **Account** (người tạo).
 - **Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng** = TỔNG các *bảng nội bộ* cùng loại của sheet đó.
-- **Ký Chứng từ** (theo từng sheet): Admin **hoặc** user được bật **"Được ký chứng từ"** (cột `User.canSign`) mới thấy nút Ký; ký xong hiện "✓ Đã Ký" (kèm tên + ngày).
+- **Ký Chứng từ** (theo từng sheet): **Admin ký mọi dự án**; user được bật **"Được ký chứng từ"** (cột `User.canSign`) **chỉ ký dự án do mình tạo**; ký xong hiện "✓ Đã Ký" (kèm tên + ngày).
 - Cột hoá đơn/thanh toán/chứng từ còn lại để "—" (giai đoạn sau cho nhập).
 
 ## Stack
@@ -108,7 +108,7 @@ npm start                 # http://localhost:3000
 | Quản lý | ✅ | ✅ | ❌ (chỉ BG được thêm làm thành viên) | **chỉ BG của mình** (`quote:approve:own`) | ❌ |
 | Admin (Giám đốc) | ✅ | ✅ | ✅ (tất cả) | ✅ (mọi BG) | ✅ |
 
-> Vai trò **"Nhân viên" đã bỏ hẳn** (chỉ còn Admin + Quản lý — xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Duyệt:** Admin duyệt mọi báo giá; **Quản lý tự duyệt báo giá của chính mình**. Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) ký chứng từ + xem trang Quản lý dự án.
+> Vai trò **"Nhân viên" đã bỏ hẳn** (chỉ còn Admin + Quản lý — xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Duyệt:** Admin duyệt mọi báo giá; **Quản lý tự duyệt báo giá của chính mình**. Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) **ký + xem trang Quản lý dự án — nhưng chỉ với dự án do mình tạo** (chỉ Admin thấy/ký toàn bộ).
 
 ## Trạng thái báo giá
 **Nháp → Chờ duyệt → Đã duyệt** (có thể *Đã gửi* / *Đã chốt* / *Không chốt*); **Bị từ chối** → sửa rồi trình lại.
