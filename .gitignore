@@ -44,7 +44,6 @@ Thumbs.db
 
 # Untracked junk (audit): old code backups + one-off recon scripts
 backups/
-deploy/windows/_recon*.ps1
 
 # Internal audit reports — confidential, store off-repo (never commit)
 AUDIT_REPORT.md

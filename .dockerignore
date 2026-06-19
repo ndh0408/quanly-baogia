@@ -28,7 +28,6 @@ backups/
 prod-backup*
 
 # Recon scripts & audit junk
-deploy/windows/_recon*.ps1
 .audit-full.txt
 e2e*.mjs
 *playwright*.mjs

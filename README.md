@@ -46,68 +46,40 @@ Theo dõi các báo giá **đã duyệt** theo bố cục bảng sản xuất/ho
 
 ## Stack
 - **Backend:** Node.js + Express + Prisma + PostgreSQL
-- **Auth:** session (lưu trong DB) + bcrypt; có hỗ trợ JWT bearer cho API
+- **Auth:** session (lưu DB) + JWT (access + refresh, có xoay vòng & thu hồi cả họ token) + bcrypt; **MFA (TOTP)** + mã dự phòng dùng-một-lần
 - **Excel export:** ExcelJS (+ ghép nhiều sheet bằng zip XML)
 - **Frontend:** HTML/CSS/JS thuần (không cần build) — `public/`
 - **Hàng đợi nền (tuỳ chọn):** BullMQ + Redis (email/webhook/telegram chạy nền). Không có Redis thì xử lý inline.
 
 ---
 
-## 🚀 Production — đang chạy thật tại https://gianguyen.cloud
+## 🚀 Production — https://gianguyen.cloud
 
-Kiến trúc thực tế (KHÔNG phải IIS):
+Chạy bằng **Docker (docker-compose)** trên host do **Coolify** quản lý, sau **Cloudflare Tunnel** (TLS ở edge).
 
 ```
-Internet → Cloudflare (TLS) → cloudflared tunnel "gianguyen-tunnel" → 127.0.0.1:5000
-                                                                         │
-                                          Node (pm2: "quanly", src/server.js)
-                                                                         │
-                                          PostgreSQL 16 (db "quanly")
+Internet → Cloudflare (TLS) → cloudflared tunnel → quanly-app:3000  (container)
+                                                      ├─ quanly-worker    (BullMQ: export / email / webhook / telegram)
+                                                      ├─ quanly-postgres  (PostgreSQL 16)  ← chỉ mạng nội bộ
+                                                      └─ quanly-redis     (Redis 7)         ← chỉ mạng nội bộ
 ```
 
-- **Máy chủ:** Windows (truy cập qua SSH alias `ServerWindows`). App đặt tại `C:\Projects\quanly`.
-- **Tiến trình:** chạy bằng **pm2** (process tên `quanly`, port **5000**), tự khởi động lại sau reboot (`pm2 save` + pm2-windows-startup).
-- **Domain/SSL:** Cloudflare Tunnel lo hết — **không cần IIS, không cần cài SSL**. Ingress `gianguyen.cloud → 127.0.0.1:5000` (file `~/.cloudflared/config.yml` trên máy chủ).
-- **DB:** PostgreSQL 16 sẵn trên máy, database `quanly` + role `quanly` (riêng, không đụng app khác).
-- **Redis/worker:** tắt (chạy không cần). Bật sau nếu cần xử lý nền.
+- **Image:** build từ [`Dockerfile`](Dockerfile) (multi-stage, chạy **non-root**, `npm ci --omit=dev`); `app` và `worker` dùng chung image.
+- **Mạng:** Postgres/Redis **không expose ra ngoài** (chỉ docker network nội bộ); chỉ `app:3000` đi ra qua Cloudflare tunnel — không publish cổng nào lên host.
+- **Cache:** `public/app.js` & `style.css` phục vụ `immutable` → **BẮT BUỘC tăng `?v=`** trong `public/index.html` mỗi khi đổi nội dung (không tái dùng `?v=` cũ → kẹt cache).
+- **Migrations:** KHÔNG tự chạy (CMD = `node src/server.js`); chạy `prisma migrate deploy` riêng trong container dùng-rồi-bỏ. **Luôn `pg_dump` backup trước khi migrate** ([prisma/migrations/README.md](prisma/migrations/README.md)).
+- **Bí mật** (`.env`, `docker-compose.prod.yml`) chỉ nằm trên host — **không** commit vào repo.
 
-### Triển khai / cập nhật phiên bản mới
-
-Script provisioning lần đầu nằm ở [deploy/windows/](deploy/windows/) (`q0`→`q5`: đẩy code, tạo DB+`.env`, cài đặt, smoke-test, cutover, verify login).
-
-Cập nhật code về sau (chạy trên máy chủ, trong `C:\Projects\quanly`):
-
-```powershell
-# 1. Đưa code mới lên (scp/copy đè) hoặc git pull
-# 2. Cài deps + (nếu đổi schema) áp migration:
-npm ci --include=dev
-npx prisma migrate deploy  # áp migration mới (KHÔNG dùng db push)
-# 3. Khởi động lại web:
-pm2 restart quanly
-```
-
-> **Lần đầu chuyển DB prod (vốn tạo bằng `db push`) sang migrations**: chạy MỘT lần
-> `npx prisma migrate resolve --applied 0_init` để baseline, rồi `migrate deploy` mới chạy được.
-> Luôn `pg_dump` backup trước khi áp migration. Chi tiết: [prisma/migrations/README.md](prisma/migrations/README.md).
-
-> Đổi file **frontend** (`public/app.js`, `public/index.html`): chỉ cần copy đè, **không cần** `pm2 restart`. Nhớ **tăng `?v=` trong index.html** để vượt cache Cloudflare; người dùng **Ctrl+F5**.
-> Đổi file **template Excel** (`templates/*.xlsx`) hoặc `src/*.js`: copy đè; file template không cần restart, code `src/*.js` thì `pm2 restart quanly`.
-
-### Rollback (về app C# cũ)
-```powershell
-pm2 stop quanly
-Set-Service gianguyen -StartupType Automatic
-Start-Service gianguyen
-```
+> Quy trình deploy chi tiết (archive → ship → build → migrate → recreate → verify, kèm retag rollback) giữ trong **ops runbook nội bộ** (không đưa vào repo vì chứa địa chỉ máy chủ + bí mật).
 
 ---
 
 ## Chạy local (dev)
 
-Yêu cầu: Node.js 18+ và Postgres (dùng Docker cho nhanh).
+Yêu cầu: Node.js 20+ và Postgres (dùng Docker cho nhanh).
 
 ```powershell
-docker compose up -d      # Postgres + Redis + MinIO local
+docker compose up -d      # Postgres + Redis (dev local)
 npm install
 npm run setup             # prisma migrate deploy + seed admin
 npm start                 # http://localhost:3000
@@ -139,7 +111,7 @@ npm start                 # http://localhost:3000
 > Vai trò **"Nhân viên" đã bỏ hẳn** (chỉ còn Admin + Quản lý — xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Duyệt:** Admin duyệt mọi báo giá; **Quản lý tự duyệt báo giá của chính mình**. Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) ký chứng từ + xem trang Quản lý dự án.
 
 ## Trạng thái báo giá
-**Nháp → Chờ duyệt → Đã duyệt** (có thể *Đã gửi* / *Đã chốt* / *Không chốt* / *Hết hạn*); **Bị từ chối** → sửa rồi trình lại.
+**Nháp → Chờ duyệt → Đã duyệt** (có thể *Đã gửi* / *Đã chốt* / *Không chốt*); **Bị từ chối** → sửa rồi trình lại.
 
 ## Mẫu Excel & cấu hình template
 
@@ -163,23 +135,29 @@ Mỗi template ánh xạ field báo giá → ô Excel trong [src/templateConfigs
 ├── prisma/
 │   ├── schema.prisma         # Schema DB
 │   └── seed.js               # Seed admin + công ty + template
-├── public/                   # Frontend tĩnh (không build)
-│   ├── index.html            # nhúng app.js?v=… (bump version để vượt cache)
+├── public/                   # Frontend tĩnh (no-build, ES modules)
+│   ├── index.html            # nhúng app.js?v=… (bump ?v= để vượt cache)
 │   ├── style.css
-│   └── app.js                # toàn bộ SPA (editor, lưới Excel, công thức…)
+│   ├── app.js                # entry + hash-router + shell (mỏng)
+│   └── js/                   # SPA đã module hóa:
+│       ├── util.js               #   helper thuần (format, nhãn, totals)
+│       ├── core/{state,api}.js   #   state dùng chung + fetch wrapper
+│       ├── ui.js                 #   toast / modal / theme / skeleton
+│       ├── preview.js            #   xem trước xlsx
+│       ├── pages/{admin,quotes}.js  #  các trang
+│       └── editor.js             #   editor + lưới spreadsheet (drawItems)
 ├── src/
-│   ├── server.js             # Express entry (listen PORT, mặc định 5000 ở prod)
+│   ├── server.js             # Express entry (listen PORT, mặc định 3000)
+│   ├── app.js                # khởi tạo Express app (createApp)
 │   ├── config.js             # đọc + validate .env (zod)
-│   ├── db.js                 # Prisma client
+│   ├── db.js                 # Prisma client (+ soft-delete)
 │   ├── excel.js              # Xuất Excel (đổ dữ liệu vào template)
 │   ├── templateConfigs.js    # Map field → ô Excel cho từng template
 │   ├── xlsxStitcher.js       # Ghép nhiều sheet thành 1 file (zip XML)
 │   ├── validators.js         # zod schema cho API
 │   └── routes/               # auth, quotes, export, customers, products, …
 ├── templates/                # File .xlsx mẫu của công ty
-├── deploy/windows/           # Script provisioning + cập nhật cho máy chủ Windows
-│   ├── q0..q5*.ps1           # Quy trình deploy (pm2 + Cloudflare tunnel)
-│   └── DEPLOY.md             # (cũ — phương án IIS, KHÔNG dùng; xem mục Production ở trên)
-├── docker-compose.yml        # Postgres/Redis/MinIO cho dev local
-└── .env
+├── Dockerfile                # Image production (multi-stage, non-root)
+├── docker-compose.yml        # Postgres + Redis cho dev local
+└── .env                      # (không commit)
 ```
