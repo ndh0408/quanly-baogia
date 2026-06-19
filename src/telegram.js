@@ -2,7 +2,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 
 /** Send a Telegram message. No-op if TELEGRAM_BOT_TOKEN not set. */
-export async function sendTelegram({ chatId, text, parseMode = "Markdown" }) {
+export async function sendTelegram({ chatId, text, parseMode = "" }) {
   if (!config.TELEGRAM_BOT_TOKEN) {
     logger.info({ chatId, textLen: text?.length }, "telegram skipped (no token)");
     return { skipped: true };
@@ -11,7 +11,9 @@ export async function sendTelegram({ chatId, text, parseMode = "Markdown" }) {
     const r = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode, disable_web_page_preview: true }),
+      // parse_mode CHỈ gửi khi caller chỉ định rõ — mặc định plain text để nội dung người dùng
+      // (vd tiêu đề báo giá) không bị diễn giải thành link/định dạng (Markdown injection).
+      body: JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}), disable_web_page_preview: true }),
       signal: AbortSignal.timeout(8_000),
     });
     const body = await r.json().catch(() => ({}));

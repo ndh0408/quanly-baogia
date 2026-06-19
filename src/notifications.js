@@ -80,7 +80,9 @@ export async function notify(userId, notif) {
     if (tgChatId && shouldDeliver(prefs.telegram)) {
       await runOrQueue(QUEUES.NOTIFY, "telegram", {
         chatId: tgChatId,
-        text: `*${notif.title}*\n${notif.body}${notif.link ? `\n${notif.link}` : ""}`,
+        // Plain text (telegram.js mặc định không parse_mode): tiêu đề/nội dung do người dùng
+        // nhập → gửi thô, tránh inject Markdown (link giả / định dạng) vào kênh Telegram nội bộ.
+        text: `${notif.title}\n${notif.body}${notif.link ? `\n${notif.link}` : ""}`,
       });
     }
   } catch (e) {
