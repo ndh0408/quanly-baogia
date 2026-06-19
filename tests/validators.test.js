@@ -5,7 +5,34 @@ import {
   UserCreateSchema,
   QuoteCreateSchema,
   ListQuerySchema,
+  zbool,
 } from "../src/validators.js";
+
+describe("zbool (boolean coercion — regression for z.coerce.boolean gotcha)", () => {
+  it('parses the STRING "false"/"0"/"no" as false (NOT truthy)', () => {
+    expect(zbool.parse("false")).toBe(false);
+    expect(zbool.parse("0")).toBe(false);
+    expect(zbool.parse("no")).toBe(false);
+    expect(zbool.parse("FALSE")).toBe(false);
+    expect(zbool.parse(" false ")).toBe(false);
+    expect(zbool.parse("")).toBe(false);
+  });
+  it("parses truthy strings as true", () => {
+    expect(zbool.parse("true")).toBe(true);
+    expect(zbool.parse("1")).toBe(true);
+    expect(zbool.parse("yes")).toBe(true);
+  });
+  it("passes real booleans through unchanged", () => {
+    expect(zbool.parse(true)).toBe(true);
+    expect(zbool.parse(false)).toBe(false);
+  });
+  it('UserCreateSchema honors canSign "false" → false', () => {
+    const u = UserCreateSchema.parse({
+      username: "tester", password: "GoodPass1", displayName: "T", role: "manager", canSign: "false",
+    });
+    expect(u.canSign).toBe(false);
+  });
+});
 
 describe("LoginSchema", () => {
   it("accepts valid input", () => {

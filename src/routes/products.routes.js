@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { validate } from "../validators.js";
+import { validate, zbool } from "../validators.js";
 import { audit } from "../audit.js";
 import { D } from "../money.js";
 import { can, requirePermission, PERMISSIONS as P } from "../permissions.js";
@@ -36,7 +36,7 @@ const Update = Create.partial();
 const ListQuery = z.object({
   q: z.string().max(200).optional(),
   category: z.string().max(80).optional(),
-  active: z.coerce.boolean().optional(),
+  active: zbool.optional(),
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(20),
   sort: z.enum(["name", "sku", "createdAt", "basePrice"]).default("name"),

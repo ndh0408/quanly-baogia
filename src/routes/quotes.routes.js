@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import {
   validate,
+  zbool,
   QuoteCreateSchema,
   QuoteUpdateSchema,
   ListQuerySchema,
@@ -559,7 +560,7 @@ router.delete(
 // DUPLICATE
 router.post(
   "/:id/duplicate",
-  validate({ params: idParam, body: z.object({ sameProject: z.coerce.boolean().optional() }).default({}) }),
+  validate({ params: idParam, body: z.object({ sameProject: zbool.optional() }).default({}) }),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const src = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });

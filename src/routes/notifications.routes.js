@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { validate } from "../validators.js";
+import { validate, zbool } from "../validators.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -10,7 +10,7 @@ router.use(requireAuth);
 router.get(
   "/",
   validate({ query: z.object({
-    unread: z.coerce.boolean().optional(),
+    unread: zbool.optional(),
     page: z.coerce.number().int().min(1).default(1),
     size: z.coerce.number().int().min(1).max(100).default(20),
   })}),

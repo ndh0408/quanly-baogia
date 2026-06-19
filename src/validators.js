@@ -7,6 +7,15 @@ import { viZodErrorMap } from "./zodErrorMap.js";
 // while every request-time validation below resolves to Vietnamese.
 z.config({ customError: viZodErrorMap });
 
+// zbool treats the STRING "false" as truthy → true (JS gotcha: any non-empty
+// string is truthy). Parse the MEANING instead: "false"/"0"/"no"/"off"/"" → false, other
+// strings → true, real booleans pass through. Use for any boolean from a query/form value.
+// (Mirrors the fix config.js applies to S3_FORCE_PATH_STYLE.)
+export const zbool = z.preprocess(
+  (v) => (typeof v === "string" ? !/^(false|0|no|off|)$/i.test(v.trim()) : v),
+  z.boolean(),
+);
+
 const pwd = z
   .string()
   .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)
@@ -74,7 +83,7 @@ export const UserCreateSchema = z.object({
   role: z.enum(["admin", "manager", "account_hn"]),
   phone,
   title,
-  canSign: z.coerce.boolean().optional(),
+  canSign: zbool.optional(),
 });
 
 export const UserUpdateSchema = z.object({
@@ -85,7 +94,7 @@ export const UserUpdateSchema = z.object({
   active: z.boolean().optional(),
   password: pwd.optional(),
   projectCode,
-  canSign: z.coerce.boolean().optional(),
+  canSign: zbool.optional(),
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).
@@ -171,7 +180,7 @@ export const QuoteCreateSchema = z.object({
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number({ error: "VAT phải là số" }).min(0, "VAT không được nhỏ hơn 0%").max(100, "VAT không được vượt quá 100%").default(8),
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
-  showTotals: z.coerce.boolean().optional(),
+  showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
   sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá"),
@@ -209,7 +218,7 @@ export const QuoteUpdateSchema = z.object({
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
-  showTotals: z.coerce.boolean().optional(),
+  showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
   sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá").optional(),
