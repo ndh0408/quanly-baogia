@@ -16,3 +16,24 @@ dump*.txt
 .DS_Store
 Thumbs.db
 postgres-data
+
+# Backups / archives / dumps — never inflate the image
+backups/
+*.bak
+*.dump
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+prod-backup*
+
+# Recon scripts & audit junk
+deploy/windows/_recon*.ps1
+.audit-full.txt
+e2e*.mjs
+*playwright*.mjs
+
+# Logs & editor/CI cruft
+*.log
+.editorconfig
+.gitattributes

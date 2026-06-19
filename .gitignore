@@ -36,10 +36,27 @@ m.xlsx
 Thumbs.db
 
 # Editor
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.swp
 
 # Untracked junk (audit): old code backups + one-off recon scripts
 backups/
 deploy/windows/_recon*.ps1
+
+# Internal audit reports — confidential, store off-repo (never commit)
+AUDIT_REPORT.md
+.audit-full.txt
+audit*.md
+AUDIT_*.txt
+
+# UI/e2e test harnesses — contain dev creds, keep local only
+e2e-ui.mjs
+e2e*.mjs
+*playwright*.mjs
+
+# Scratch / planning notes — keep in Claude memory or internal wiki
+.spa-plan.md
+.*-plan.md

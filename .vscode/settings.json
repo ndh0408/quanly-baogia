@@ -1,0 +1,15 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.associations": {
+    "infra/helm/**/templates/*.yaml": "helm",
+    "infra/helm/**/templates/*.yml": "helm",
+    "infra/helm/**/templates/*.tpl": "helm",
+    "**/templates/NOTES.txt": "helm"
+  },
+  "yaml.schemas": {},
+  "[helm]": {
+    "editor.formatOnSave": false
+  }
+}
