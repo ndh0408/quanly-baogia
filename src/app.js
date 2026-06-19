@@ -40,7 +40,6 @@ import adminRoutes from "./routes/admin.routes.js";
 import permissionsRoutes from "./routes/permissions.routes.js";
 import gdprRoutes from "./routes/gdpr.routes.js";
 import searchRoutes from "./routes/search.routes.js";
-import billingRoutes, { webhookRouter as stripeWebhookRouter } from "./routes/billing.routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
@@ -157,8 +156,6 @@ export function createApp() {
     })
   );
 
-  // Stripe webhook needs RAW body for signature verify — mount BEFORE json parser.
-  app.use("/api/webhooks/billing", stripeWebhookRouter);
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
@@ -247,7 +244,6 @@ export function createApp() {
   app.use("/api/permissions", permissionsRoutes);
   app.use("/api/gdpr", gdprRoutes);
   app.use("/api/search", searchRoutes);
-  app.use("/api/billing", billingRoutes);
 
   // Health probes
   app.get("/livez", (_req, res) => res.json({ ok: true }));

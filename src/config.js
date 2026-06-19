@@ -46,9 +46,6 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   // Webhook
   WEBHOOK_SECRET: z.string().optional(),
-  // Stripe
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   // Sentry
   SENTRY_DSN: z.string().optional(),
   // Optional bearer token to protect /metrics (defence-in-depth on top of network policy)
