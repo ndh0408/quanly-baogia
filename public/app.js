@@ -20,7 +20,7 @@ import {
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderApprovalQueue, renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260619";
+} from "./js/pages/admin.js?v=20260619h";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,

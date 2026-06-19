@@ -243,12 +243,16 @@ async function startMfaSetup() {
     <p class="muted" style="word-break:break-all">Hoặc nhập tay khóa: <b>${escapeHtml(s.secret)}</b></p>
     <label style="display:block"><b>2.</b> Nhập mã 6 số đang hiện trên app:
       <input id="mfa-token" inputmode="numeric" maxlength="6" placeholder="123456" style="width:100%;margin-top:6px"/></label>
+    <label style="display:block;margin-top:10px"><b>3.</b> Nhập MẬT KHẨU tài khoản để xác nhận:
+      <input id="mfa-pass" type="password" placeholder="Mật khẩu" autocomplete="current-password" style="width:100%;margin-top:6px"/></label>
     <div id="mfa-codes"></div>`);
   m.onSave(async () => {
     const token = (m.find("#mfa-token").value || "").trim();
     if (!/^\d{6}$/.test(token)) { toast("Nhập đúng mã 6 số", "error"); return; }
+    const password = m.find("#mfa-pass").value || "";
+    if (!password) { toast("Vui lòng nhập mật khẩu", "error"); return; }
     try {
-      const r = await api("/api/mfa/enable", { method: "POST", body: JSON.stringify({ secret: s.secret, token }) });
+      const r = await api("/api/mfa/enable", { method: "POST", body: JSON.stringify({ secret: s.secret, token, password }) });
       state.user.mfaEnabled = true;
       m.find("#mfa-codes").innerHTML = `<div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:8px">
         <b>Mã dự phòng</b> — lưu lại nơi an toàn, mỗi mã dùng 1 lần khi không có điện thoại:

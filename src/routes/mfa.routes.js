@@ -62,11 +62,15 @@ router.post(
 router.post(
   "/enable",
   mfaLimiter,
-  validate({ body: z.object({ secret: z.string().min(8, "Mã thiết lập không hợp lệ"), token: z.string().regex(/^\d{6}$/, "Mã xác thực phải gồm 6 chữ số") }) }),
+  validate({ body: z.object({ password: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"), secret: z.string().min(8, "Mã thiết lập không hợp lệ"), token: z.string().regex(/^\d{6}$/, "Mã xác thực phải gồm 6 chữ số") }) }),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
     if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
+    // Step-up: a stolen cookie alone must not be able to ENABLE MFA either — otherwise an
+    // attacker could lock the victim out with an attacker-controlled secret. Mirror /disable.
+    const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
+    if (!pwOk) return res.status(401).json({ error: "Mật khẩu không đúng" });
 
     const ok = speakeasy.totp.verify({
       secret: req.body.secret,

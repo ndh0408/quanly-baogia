@@ -105,6 +105,16 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
     expect(res.status).toBe(401);
   });
 
+  // A stolen cookie alone must NOT be able to enable MFA (else an attacker locks the
+  // victim out with an attacker-controlled secret). /enable now requires a password step-up,
+  // symmetric with /disable. These paths reject BEFORE persisting any secret, so MFA stays off.
+  it("MFA /enable requires a password step-up", async () => {
+    const noPw = await admin.post("/api/mfa/enable").send({ secret: "JBSWY3DPEHPK3PXP", token: "123456" });
+    expect(noPw.status).toBe(400); // missing password → validation
+    const wrongPw = await admin.post("/api/mfa/enable").send({ password: "definitely-wrong", secret: "JBSWY3DPEHPK3PXP", token: "123456" });
+    expect(wrongPw.status).toBe(401); // wrong password → step-up rejects
+  });
+
   describe("lifecycle: create → submit → approve", () => {
     let quoteId;
 
