@@ -140,10 +140,9 @@ router.get(
 router.get(
   "/projects",
   asyncHandler(async (req, res) => {
-    // Admin (user:manage) HOẶC người được ký (canSign — vd Lan Anh) → xem TẤT CẢ dự án đã
-    // duyệt. Quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo (chỉ xem, không thao tác).
-    const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true } });
-    const seeAll = can(req.session, P.USER_MANAGE) || !!me?.canSign;
+    // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
+    // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
+    const seeAll = can(req.session, P.USER_MANAGE);
     const where = { status: "approved", deletedAt: null };
     if (!seeAll) where.createdById = req.session.userId;
     const quotes = await prisma.quote.findMany({
@@ -211,8 +210,8 @@ router.get(
   })
 );
 
-// SIGN documents for ONE sheet (Ký Chứng từ) — admin HOẶC người có canSign. Theo từng sheet.
-// Chỉ quản lý nội bộ; không ảnh hưởng Excel/tổng. Đặt TRƯỚC "/:id".
+// SIGN documents for ONE sheet (Ký Chứng từ). Admin ký MỌI dự án; người có canSign (vd Lan Anh)
+// chỉ ký dự án DO MÌNH TẠO. Chỉ quản lý nội bộ; không ảnh hưởng Excel/tổng. Đặt TRƯỚC "/:id".
 router.post(
   "/sheets/:sheetId/sign",
   validate({
@@ -222,18 +221,23 @@ router.post(
   }),
   asyncHandler(async (req, res) => {
     const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
-    if (!can(req.session, P.USER_MANAGE) && !me?.canSign) {
+    const isAdmin = can(req.session, P.USER_MANAGE);
+    if (!isAdmin && !me?.canSign) {
       return res.status(403).json({ error: "Bạn không có quyền ký chứng từ" });
     }
     const sheet = await prisma.quoteSheet.findUnique({
       where: { id: req.params.sheetId },
-      select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true } } },
+      select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true, createdById: true } } },
     });
     if (!sheet) return res.status(404).json({ error: "Không tìm thấy sheet" });
     // CHỐNG IDOR: chỉ cho ký sheet của báo giá ĐÃ DUYỆT & chưa xoá (trang Quản lý dự án chỉ
     // hiện dự án đã duyệt). Không cho ký theo sheetId tuỳ ý (id tuần tự → dễ dò).
     if (sheet.quote?.status !== "approved" || sheet.quote?.deletedAt) {
       return res.status(403).json({ error: "Chỉ ký được chứng từ của báo giá đã duyệt" });
+    }
+    // Admin ký mọi dự án; người có canSign (vd Lan Anh) CHỈ ký dự án DO MÌNH TẠO.
+    if (!isAdmin && sheet.quote?.createdById !== req.session.userId) {
+      return res.status(403).json({ error: "Bạn chỉ ký được chứng từ của dự án do mình tạo" });
     }
     const signed = req.body.signed !== false;
     const updated = await prisma.quoteSheet.update({

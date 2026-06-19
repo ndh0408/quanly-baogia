@@ -29,6 +29,15 @@ const loginLimiter = createLimiter("login", {
   message: { error: "Quá nhiều lần đăng nhập sai, thử lại sau 15 phút" },
 });
 
+// Per-IP cap on password-reset so the endpoint can't be abused to bomb a known
+// inbox / burn SMTP reputation. Keyed by IP (not email), so it never reveals
+// whether an account exists (anti-enumeration intact).
+const forgotLimiter = createLimiter("forgot", {
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: "Quá nhiều yêu cầu đặt lại mật khẩu, thử lại sau 15 phút" },
+});
+
 router.post(
   "/login",
   loginLimiter,
@@ -234,6 +243,7 @@ async function findInvitee(token) {
 // Forgot password: email a reset link (same onboarding page). Always 200 (no enumeration).
 router.post(
   "/forgot-password",
+  forgotLimiter,
   validate({ body: z.object({ email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự") }) }),
   asyncHandler(async (req, res) => {
     const email = req.body.email.trim();

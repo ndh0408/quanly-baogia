@@ -20,11 +20,11 @@ import {
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderApprovalQueue, renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260619h";
+} from "./js/pages/admin.js?v=20260619j";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260619i";
+} from "./js/pages/quotes.js?v=20260619j";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {

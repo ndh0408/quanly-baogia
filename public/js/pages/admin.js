@@ -674,11 +674,12 @@ export async function renderNotifications(el) {
 // hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
 // sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
 export async function renderProjects(el) {
-  // Ai cũng vào được: admin / người được ký xem TẤT CẢ; quản lý thường CHỈ XEM dự án của
-  // mình (server đã lọc theo người tạo). canSignNow = được thao tác Ký; quản lý thường = chỉ xem.
-  const canSignNow = can("user:manage") || !!state.user?.canSign;
+  // CHỈ admin xem TẤT CẢ dự án + ký mọi dự án. Người có canSign (vd Lan Anh): CHỈ xem + ký dự án
+  // DO MÌNH TẠO. Quản lý thường: chỉ xem dự án của mình, không ký. (server đã lọc theo người tạo)
+  const isAdmin = can("user:manage");
+  const canSignNow = isAdmin || !!state.user?.canSign;   // được thao tác Ký trên các dòng đang thấy
   el.innerHTML = `<h1>Quản lý dự án</h1>
-    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. ${canSignNow ? "" : "<b>Bạn chỉ xem được dự án do mình tạo.</b> "}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
+    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. ${isAdmin ? "" : "<b>Bạn chỉ xem được dự án do mình tạo.</b> "}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
     <div id="proj-toolbar"></div>
     <div id="proj-summary"></div>
     <div id="proj-body">${skeleton(6)}</div>`;
