@@ -35,7 +35,6 @@ import filesRoutes from "./routes/files.routes.js";
 import jobsRoutes from "./routes/jobs.routes.js";
 import streamRoutes from "./routes/stream.routes.js";
 import webhooksRoutes from "./routes/webhooks.routes.js";
-import apiKeysRoutes from "./routes/apiKeys.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import permissionsRoutes from "./routes/permissions.routes.js";
 import gdprRoutes from "./routes/gdpr.routes.js";
@@ -239,7 +238,6 @@ export function createApp() {
   app.use("/api", jobsRoutes); // mounts /api/quotes/:id/export and /api/jobs/:queue/:id
   app.use("/api/stream", streamRoutes);
   app.use("/api/webhooks", webhooksRoutes);
-  app.use("/api/api-keys", apiKeysRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/permissions", permissionsRoutes);
   app.use("/api/gdpr", gdprRoutes);

@@ -87,7 +87,6 @@ model User {
   authoredNotes     CustomerNote[] @relation("NoteAuthor")
   assignedFollowUps FollowUp[]     @relation("FollowupAssignee")
   authoredVersions  QuoteVersion[] @relation("VersionAuthor")
-  createdApiKeys    ApiKey[]       @relation("ApiKeyAuthor")
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
 
   @@index([deletedAt, active])
@@ -481,23 +480,6 @@ model WebhookDelivery {
   @@index([webhookId, createdAt(sort: Desc)])
 }
 
-// === Public API keys ===
-model ApiKey {
-  id          Int       @id @default(autoincrement())
-  name        String
-  prefix      String    @unique // first 8 chars, displayed
-  keyHash     String    @unique // sha256(full key) for lookup
-  scopes      String[]  @default([]) // ["quotes:read", "quotes:write", ...]
-  active      Boolean   @default(true)
-  lastUsedAt  DateTime?
-  createdById Int?
-  createdBy   User?     @relation("ApiKeyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
-  expiresAt   DateTime?
-
-  @@index([active, expiresAt])
-  @@index([createdById])
-}
 
 /// Session store table managed by connect-pg-simple (express-session).
 /// Declared here only so `prisma db push` adopts it instead of dropping it.
