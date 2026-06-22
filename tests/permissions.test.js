@@ -29,12 +29,32 @@ describe("roleCan — role × permission matrix", () => {
     ["manager", P.PRODUCT_READ_COST, true],
     ["manager", P.AUDIT_VIEW, true],
     ["manager", P.USER_MANAGE, false],
-    // admin (director) — full quote control
+    // manager (Account) — Nhân sự: TẠO + thấy/sửa CỦA MÌNH (không read:all/manage:all)
+    ["manager", P.PERSONNEL_CREATE, true],
+    ["manager", P.PERSONNEL_READ_OWN, true],
+    ["manager", P.PERSONNEL_MANAGE_OWN, true],
+    ["manager", P.PERSONNEL_READ_ALL, false],
+    ["manager", P.PERSONNEL_MANAGE_ALL, false],
+    // admin (director) — full quote control + toàn quyền Nhân sự
     ["admin", P.QUOTE_READ_ALL, true],
     ["admin", P.QUOTE_UPDATE_ALL, true],
     ["admin", P.QUOTE_DELETE_ALL, true],
     ["admin", P.USER_MANAGE, true],
     ["admin", P.SETTINGS_MANAGE, true],
+    ["admin", P.PERSONNEL_READ_ALL, true],
+    ["admin", P.PERSONNEL_MANAGE_ALL, true],
+    // hr (Nhân sự) — CHỈ xem mọi hồ sơ; KHÔNG tạo/sửa; KHÔNG đụng báo giá/khách
+    ["hr", P.PERSONNEL_READ_ALL, true],
+    ["hr", P.PERSONNEL_CREATE, false],
+    ["hr", P.PERSONNEL_MANAGE_ALL, false],
+    ["hr", P.QUOTE_READ_ALL, false],
+    ["hr", P.QUOTE_CREATE, false],
+    ["hr", P.CUSTOMER_READ_ALL, false],
+    // accountant (Kế toán) — CHỈ xem mọi hồ sơ; KHÔNG tạo/sửa
+    ["accountant", P.PERSONNEL_READ_ALL, true],
+    ["accountant", P.PERSONNEL_CREATE, false],
+    ["accountant", P.PERSONNEL_MANAGE_OWN, false],
+    ["accountant", P.QUOTE_READ_ALL, false],
   ])("roleCan(%s, %s) → %s", (role, perm, want) => {
     expect(roleCan(role, perm)).toBe(want);
   });

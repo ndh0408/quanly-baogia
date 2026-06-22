@@ -281,6 +281,12 @@ export function createApp() {
     maxAge: "1y",
     immutable: true,
   }));
+  // SPA MỚI (React + Vite + TypeScript) phục vụ tại /app2 — module Nhân sự là trang đầu tiên,
+  // mọc dần thay SPA cũ. Fallback route con về app2/index.html (assets do express.static ở trên lo).
+  app.get(["/app2", "/app2/*"], (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html"));
+  });
   app.get("*", (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(__dirname, "..", "public", "index.html"));

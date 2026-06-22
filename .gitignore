@@ -62,3 +62,7 @@ e2e*.mjs
 # Scratch / planning notes — keep in Claude memory or internal wiki
 .spa-plan.md
 .*-plan.md
+
+# Frontend mới (React/Vite) — build artifact + deps (off-repo, build trong Docker)
+/public/app2/
+web/node_modules/

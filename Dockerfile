@@ -15,6 +15,13 @@ RUN apk add --no-cache openssl libc6-compat \
  && npm ci --omit=dev \
  && npx prisma generate
 
+##### web build stage — frontend React + Vite + TypeScript → public/app2 #####
+FROM node:22-alpine AS webbuild
+WORKDIR /app
+COPY web ./web
+RUN cd web && npm ci && npm run build
+# vite outDir = ../public/app2 → ghi ra /app/public/app2
+
 ##### runtime stage — slim production image #####
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -33,6 +40,7 @@ COPY package.json package-lock.json ./
 # App sources
 COPY src ./src
 COPY public ./public
+COPY --from=webbuild /app/public/app2 ./public/app2
 COPY templates ./templates
 
 USER app
