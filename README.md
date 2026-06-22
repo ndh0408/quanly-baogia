@@ -2,11 +2,11 @@
 
 Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia Nguyễn & Colorfull).
 
-- **2 cấp tài khoản: Admin (Giám đốc) / Quản lý** — vai trò "Nhân viên" đã bỏ từ 2026-06-15.
+- **3 vai trò:** **Admin** (Giám đốc) · **Account** (làm báo giá — vai trò `manager`, nhãn đổi từ "Quản lý" → "Account" để khỏi nhầm "Quản trị") · **Account Hà Nội** (`account_hn` — chỉ điền giá Hà Nội). Vai trò "Nhân viên" đã bỏ từ 2026-06-15.
 - Tạo / sửa / nhân bản báo giá nhiều sheet, tự tính VAT + Tổng cộng (**cập nhật realtime** khi gõ).
-- **Duyệt:** Admin duyệt **mọi** báo giá; **Quản lý tự duyệt báo giá của chính mình** (không cần Admin).
+- **Vòng đời báo giá KHÔNG còn duyệt nội bộ** (bỏ Trình duyệt / Hàng chờ duyệt từ 2026-06-22). "Duyệt" thật = **quyết định của khách**: **Nháp → ✓ Khách chốt (Đã chốt) / ✗ Khách không chốt (Không chốt)**. Gửi cho khách = tải Excel/PDF.
 - **Xuất Excel** giống y hệt mẫu công ty (GN không ngày / GN có ngày / CLF) — giữ logo, font, viền, ô gộp.
-- **Trang Quản lý dự án** (mới): theo dõi báo giá đã duyệt theo bố cục sheet/hoá đơn — chi tiết bên dưới.
+- **Trang Quản lý dự án:** theo dõi báo giá **đã chốt** theo bố cục sheet/hoá đơn — chi tiết bên dưới.
 
 ## Tính năng nổi bật (editor báo giá)
 
@@ -21,6 +21,7 @@ Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia 
   - **"+ Thêm nhóm con"**: tổng riêng, **KHÔNG cộng vào nhóm chính**, nhưng **vẫn vào Tổng cộng** báo giá (thụt lề + dấu ↳). Dùng để quản lý chi phí/biến thể trong 1 nhóm. **Khi xuất Excel:** nhóm con hiển thị **giống hệt trên màn hình** — **không chiếm chữ A/B/C** của nhóm chính, có dấu ↳ + nền nhạt hơn (thứ tự chữ nhóm không bị lệch).
   - Nút `↳` thêm **hàng con** trong 1 hạng mục; "+ Thêm dòng thông tin" cho dòng ghi chú (không tính tiền). Giảm giá = nhập đơn giá **âm**.
 - **Bảng nội bộ theo sheet** (Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng): lưới riêng để quản lý chi phí — **KHÔNG xuất Excel**, tổng đổ sang trang Quản lý dự án.
+  - **Duyệt theo HÀNG** ở **Chi Phí HCM + Phí Khách Hàng**: mỗi hàng có ô "Duyệt" — **CHỈ Admin** tick được (Account chỉ xem). **Chỉ hàng đã duyệt mới cộng vào Tổng** (kèm ngày duyệt). Chặn ở **server** theo `rid` từng hàng + đóng dấu ngày/người duyệt — Account không thể tự duyệt qua API.
 - **Ngày thi công**: ô chọn ngày, **chỉ quản lý nội bộ — KHÔNG xuất Excel** (hiện ở trang Quản lý dự án).
 - **Lưới kiểu Excel — copy/paste chuẩn mọi thiết bị/bộ gõ:** dùng **sự kiện copy/cut/paste của trình duyệt** (không phải bắt phím) nên chạy ổn trên **macOS/Safari/Firefox, chuột phải, cảm ứng, và cả khi mở bằng IP nội bộ (http)**. Có:
   - **Dán hiểu ô nhiều dòng** của Excel (parser RFC‑4180, có unit test) — không vỡ hàng.
@@ -33,14 +34,14 @@ Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia 
 
 ## Trang Quản lý dự án
 
-Theo dõi các báo giá **đã duyệt** theo bố cục bảng sản xuất/hoá đơn:
+Theo dõi các báo giá **đã chốt** (`status = converted`) theo bố cục bảng sản xuất/hoá đơn:
 
-- **Phân quyền xem:** **Chỉ Admin** → xem **TẤT CẢ** dự án đã duyệt. Người có **"Ký chứng từ"** (`User.canSign`, vd Lan Anh) **và Quản lý thường** → **CHỈ XEM** dự án đã duyệt **do chính mình tạo** (lọc ở server theo người tạo). Menu hiện cho mọi người.
+- **Phân quyền xem:** **Chỉ Admin** → xem **TẤT CẢ** dự án đã chốt. **Account** (và user có **"Ký chứng từ"** `User.canSign`) → **CHỈ XEM** dự án đã chốt **do chính mình tạo** (lọc ở server theo người tạo). Menu hiện cho Admin + Account; **`account_hn` KHÔNG thấy** (cũng bị chặn route + API analytics).
 - Mỗi **sheet** của báo giá = 1 dòng; báo giá nhiều sheet → Mã Sản Xuất thêm hậu tố `_1/_2…`, Hạng Mục = tên sheet.
 - **Tìm kiếm + bộ lọc:** ô tìm (phim / mã sản xuất / khách / account) + lọc theo **Account** (người tạo) và **Mã khách hàng**; tổng + bảng cập nhật theo bộ lọc.
 - **Khóa cố định 4 cột đầu** (Status · Phim · Hạng Mục · Báo Giá): cuộn ngang xem các cột hoá đơn/thanh toán phía sau mà 4 cột này luôn hiển thị để đối chiếu.
 - Cột tự lấy từ báo giá: **Báo Giá** (trước VAT) · **Thành Tiền VAT** · **Mã Sản Xuất** (projectCode) · **Cty Xuất Hoá Đơn** (theo công ty của template sheet) · **Ngày Thi Công** · **Team client** (mã KH) · **Account** (người tạo).
-- **Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng** = TỔNG các *bảng nội bộ* cùng loại của sheet đó.
+- **Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng** = TỔNG các *bảng nội bộ* cùng loại của sheet đó. **HCM + Phí KH chỉ tính các hàng Admin đã DUYỆT**; Hà Nội tính tất cả.
 - **Ký Chứng từ** (theo từng sheet): **Admin ký mọi dự án**; user được bật **"Được ký chứng từ"** (cột `User.canSign`) **chỉ ký dự án do mình tạo**; ký xong hiện "✓ Đã Ký" (kèm tên + ngày).
 - Cột hoá đơn/thanh toán/chứng từ còn lại để "—" (giai đoạn sau cho nhập).
 
@@ -103,15 +104,26 @@ npm start                 # http://localhost:3000
 
 ## Phân quyền
 
-| Quyền | Tạo BG | Sửa BG của mình | Sửa BG người khác | Duyệt | Quản lý user |
+| Vai trò (role) | Tạo / sửa BG | Chốt khách (✓/✗) | Duyệt hàng HCM/Phí KH | Xem analytics + Quản lý dự án | Quản lý user |
 |---|---|---|---|---|---|
-| Quản lý | ✅ | ✅ | ❌ (chỉ BG được thêm làm thành viên) | **chỉ BG của mình** (`quote:approve:own`) | ❌ |
-| Admin (Giám đốc) | ✅ | ✅ | ✅ (tất cả) | ✅ (mọi BG) | ✅ |
+| **Account** (`manager`) | ✅ (của mình + BG được thêm thành viên) | ✅ | ❌ (chỉ xem) | ✅ (chỉ dự án của mình) | ❌ |
+| **Admin** (Giám đốc) | ✅ (tất cả) | ✅ | ✅ | ✅ (tất cả) | ✅ |
+| **Account Hà Nội** (`account_hn`) | ❌ — chỉ điền **giá Hà Nội** của BG được giao | ❌ | ❌ | ❌ (bị chặn) | ❌ |
 
-> Vai trò **"Nhân viên" đã bỏ hẳn** (chỉ còn Admin + Quản lý — xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Duyệt:** Admin duyệt mọi báo giá; **Quản lý tự duyệt báo giá của chính mình**. Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) **ký + xem trang Quản lý dự án — nhưng chỉ với dự án do mình tạo** (chỉ Admin thấy/ký toàn bộ).
+> Vai trò **"Nhân viên" đã bỏ** (xoá khỏi enum `Role`). Báo giá phạm vi theo **người tạo + thành viên** (`Quote.members`); Admin thấy tất cả. **Không còn duyệt nội bộ** — vòng đời chốt theo khách (xem dưới). **Duyệt theo hàng** (chi phí HCM/Phí KH) **chỉ Admin** (chặn ở server). Cờ `User.canSign` ("Được ký chứng từ") cho user (ngoài admin) **ký + xem Quản lý dự án — chỉ với dự án do mình tạo**.
 
 ## Trạng thái báo giá
-**Nháp → Chờ duyệt → Đã duyệt** (có thể *Đã gửi* / *Đã chốt* / *Không chốt*); **Bị từ chối** → sửa rồi trình lại.
+**Nháp** → **Đã chốt** (`converted` — khách đồng ý) **/ Không chốt** (`lost` — khách từ chối). Gửi cho khách = tải Excel/PDF (không phải 1 trạng thái). Dự án "đã chốt" mới hiện ở **Quản lý dự án** + tính **doanh số** + cho **ký chứng từ**.
+
+> Các trạng thái cũ `pending / approved / rejected / sent` đã **ngừng dùng** trong luồng (giữ trong enum `QuoteStatus` để khỏi migration DB — đừng tưởng là bug).
+
+## Account Hà Nội (`account_hn`) — luồng giá Hà Nội
+
+Quản lý **giao** 1 account Hà Nội điền phần **giá Hà Nội** (số nội bộ) của báo giá:
+
+- Account HN chỉ thấy **danh sách BG được giao** (ẩn tiền/khách báo giá chính, ẩn menu Tổng quan / Tạo BG / Quản lý dự án) — cột riêng: **Người giao · Số sheet HN · Tổng HN · trạng thái HN**.
+- Màn điền: nhiều **sheet Hà Nội** dạng tab ("+ Thêm sheet"), chọn **Mẫu** (có/không ngày) từng sheet, tổng gộp mọi sheet.
+- Luồng: **Được giao → điền → Gửi duyệt → Quản lý duyệt / trả lại** (`hnStatus`: assigned · submitted · approved · rejected). File: [src/hnWorkflow.js](src/hnWorkflow.js).
 
 ## Mẫu Excel & cấu hình template
 
