@@ -24,7 +24,7 @@ import {
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622b";
+} from "./js/pages/quotes.js?v=20260622c";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
@@ -96,7 +96,11 @@ async function routeFromHash() {
     } catch (e) { toast(e.message, "error"); }
     return;
   }
-  state.page = ROUTE_PAGES.includes(h) ? h : "list";
+  let target = ROUTE_PAGES.includes(h) ? h : "list";
+  // Trang chỉ dành cho người tạo/quản lý báo giá — account_hn (chỉ điền HN, không thấy
+  // tiền/khách) vào sẽ trống/lỗi 403, nên đẩy về danh sách.
+  if (!can("quote:create") && (target === "dashboard" || target === "projects" || target === "new")) target = "list";
+  state.page = target;
   state.currentQuote = null;
   // Remember the last non-quote page so the editor's "Quay lại" returns HERE
   // (list / approvals / search) instead of history.back() — which could exit the app.
@@ -278,14 +282,14 @@ export function renderShell() {
         </div>
         <nav class="menu" aria-label="Điều hướng chính">
           <div class="nav-group-label" role="presentation">Công việc</div>
-          ${nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>")}
+          ${can("quote:create") ? nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>") : ""}
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
           ${can("quote:create") ? nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>") : ""}
           ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
           ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
-          ${nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>")}
+          ${can("quote:create") ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
           ${can("user:manage") ? nav("users", NAV_ICON.users + "<span>Quản lý nhân viên</span>") : ""}
           ${can("user:manage") ? nav("permissions", NAV_ICON.permissions + "<span>Phân quyền</span>") : ""}
           ${can("audit:view") ? nav("audit", NAV_ICON.audit + "<span>Nhật ký hoạt động</span>") : ""}

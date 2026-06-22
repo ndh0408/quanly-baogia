@@ -4,10 +4,14 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
-import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
+import { can, quoteScopeWhere, requirePermission, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
 router.use(requireAuth);
+// 🔒 Chỉ người tạo/quản lý báo giá xem được số liệu kinh doanh. account_hn (chỉ điền giá HN)
+// KHÔNG được — quoteScopeWhere gồm cả báo giá account là member nên nếu mở sẽ lộ TỔNG TIỀN
+// (tiền khách) của các báo giá được giao. Chặn ở router cho mọi endpoint analytics.
+router.use(requirePermission(P.QUOTE_CREATE));
 
 const PeriodQuery = z.object({
   from: z.coerce.date().optional(),

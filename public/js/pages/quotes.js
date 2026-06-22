@@ -476,14 +476,19 @@ export function renderAccountHnView(el, q) {
   const host = el.querySelector("#ahn-tables");
   q.hnSheets.forEach((hs, si) => {
     if (!Array.isArray(hs.hnTables) || !hs.hnTables.length) hs.hnTables = [{ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] }];
+    if (q.hnSheets.length > 1) {   // nhiều sheet: ghi rõ bảng nào thuộc sheet nào để khỏi lẫn
+      const lab = document.createElement("div"); lab.className = "muted"; lab.style.cssText = "margin:14px 0 2px;font-weight:600";
+      lab.textContent = `Sheet: ${hs.sheetName || ("#" + (si + 1))}`;
+      host.appendChild(lab);
+    }
     hs.hnTables.forEach((t, ti) => {
       if (!t.templateId) t.templateId = defaultHnTemplateId(q);
       const tpl = state.templates.find((x) => x.id === t.templateId) || state.templates.find((x) => x.companyId === q.companyId) || state.templates[0];
       const showDetail = !!(tpl && tpl.layout && tpl.layout.hasDetail), usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
       const gid = `ahn-grid-${si}-${ti}`;
       const div = document.createElement("div"); div.className = "extra-table"; div.style.marginTop = "10px";
-      div.innerHTML = `<div class="extra-table-head"><span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>${si > 0 || ti > 0 ? "" : ""}
-          <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên bảng (tuỳ chọn)" data-si="${si}" data-ti="${ti}" ${editable ? "" : "disabled"} /></div>
+      div.innerHTML = `<div class="extra-table-head"><span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
+          <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên bảng (tuỳ chọn)" data-si="${si}" data-ti="${ti}" ${editable ? "" : "disabled"} />${editable && hs.hnTables.length > 1 ? `<button type="button" class="btn btn-sm ahn-rm-table" data-si="${si}" data-ti="${ti}" title="Xóa bảng này">✕ Xóa bảng</button>` : ""}</div>
         <div class="tbl-scroll"><table class="excel-table" id="${gid}">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>`;
       host.appendChild(div);
       if (typeof t.groupSubtotal !== "boolean") t.groupSubtotal = true;
@@ -493,11 +498,23 @@ export function renderAccountHnView(el, q) {
         drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; } });
       } catch (err) { console.error("[ahn grid]", err); }
     });
+    if (editable) {   // account tự thêm được nhiều "bảng Hà Nội" trong sheet (sheet chính là của quản lý)
+      const addWrap = document.createElement("div"); addWrap.style.cssText = "margin:8px 0 4px";
+      addWrap.innerHTML = `<button type="button" class="btn btn-sm ahn-add-table" data-si="${si}">+ Thêm bảng Hà Nội</button>`;
+      host.appendChild(addWrap);
+    }
   });
   if (!editable) return;
+  const newHnTable = () => ({ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] });
   host.addEventListener("input", (e) => {
     const s = e.target;
     if (s.classList && s.classList.contains("ahn-name") && s.dataset.si != null) { const hs = q.hnSheets[+s.dataset.si]; if (hs && hs.hnTables[+s.dataset.ti]) { hs.hnTables[+s.dataset.ti].name = s.value; window._editorDirty = true; } }
+  });
+  host.addEventListener("click", (e) => {
+    const add = e.target.closest && e.target.closest(".ahn-add-table");
+    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { (hs.hnTables = hs.hnTables || []).push(newHnTable()); window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    const rm = e.target.closest && e.target.closest(".ahn-rm-table");
+    if (rm) { const hs = q.hnSheets[+rm.dataset.si]; if (hs && Array.isArray(hs.hnTables) && hs.hnTables.length > 1) { hs.hnTables.splice(+rm.dataset.ti, 1); window._editorDirty = true; renderAccountHnView(el, q); } return; }
   });
   el.querySelector("#ahn-save").addEventListener("click", () => saveHnPart(q, false));
   el.querySelector("#ahn-submit").addEventListener("click", () => { if (confirm("Gửi duyệt phần Hà Nội? Sau khi gửi sẽ không sửa được cho tới khi quản lý duyệt/trả.")) saveHnPart(q, true); });
