@@ -72,12 +72,12 @@ export function Shell({ me }: { me: Me }) {
         <div className="sb-head">
           <div className="sb-brand">
             <div className="sb-logo">GN</div>
-            <div><h2>Quản lý</h2><div className="org">Gia Nguyễn · nội bộ</div></div>
+            <div><h2>Báo Giá</h2><div className="org">Gia Nguyễn · nội bộ</div></div>
           </div>
           <ThemeToggle />
         </div>
         <div className="global-search">
-          <input placeholder="🔎 Tìm nhanh hồ sơ…" value={query}
+          <input placeholder="🔎 Tìm nhanh (Ctrl+K)" value={query}
                  onChange={(e) => { setQuery(e.target.value); if (currentKey() !== "personnel") location.hash = "#/personnel"; }} />
         </div>
         <nav className="menu" aria-label="Điều hướng chính">

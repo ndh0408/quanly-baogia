@@ -67,8 +67,8 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
 
   return (
     <div>
+      <h1>Nhân sự</h1>
       <div className="toolbar">
-        <h2>Nhân sự</h2>
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
