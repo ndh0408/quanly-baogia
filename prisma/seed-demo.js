@@ -9,6 +9,8 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
+// Raw client (KHÔNG có extension soft-delete của app) → deleteMany là XOÁ THẬT, không cần
+// cờ hardDelete. Seed chỉ chạy ở DEV nên xoá cứng dữ liệu demo cũ là đúng ý.
 const prisma = new PrismaClient();
 const TAG = "[DEMO]";
 const PWD = process.env.DEMO_PASSWORD || "GiaNguyenDemo2026";
@@ -30,10 +32,11 @@ async function main() {
 
   const FROM = { fromContact: "Phòng Kinh Doanh", fromPhone: co.phone || "0914291951", fromAddress: co.address || "TP.HCM", city: co.city || "TP. Hồ Chí Minh" };
 
-  // ---------- Dọn dữ liệu demo cũ (FK: quote → user/customer) ----------
-  await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } }, hardDelete: true });
-  await prisma.user.deleteMany({ where: { username: { startsWith: "demo_" } }, hardDelete: true });
-  await prisma.customer.deleteMany({ where: { code: { startsWith: "DEMOKH" } }, hardDelete: true });
+  // ---------- Dọn dữ liệu demo cũ ----------
+  // Thứ tự theo FK: quote (createdById/customerId/members) → customer (ownerId → user) → user.
+  await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } } });
+  await prisma.customer.deleteMany({ where: { code: { startsWith: "DEMOKH" } } });
+  await prisma.user.deleteMany({ where: { username: { startsWith: "demo_" } } });
   console.log("✓ Đã dọn dữ liệu demo cũ");
 
   // ---------- Users ----------
