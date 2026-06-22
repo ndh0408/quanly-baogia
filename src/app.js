@@ -281,16 +281,19 @@ export function createApp() {
     maxAge: "1y",
     immutable: true,
   }));
-  // SPA MỚI (React + Vite + TypeScript) phục vụ tại /app2 — module Nhân sự là trang đầu tiên,
-  // mọc dần thay SPA cũ. Fallback route con về app2/index.html (assets do express.static ở trên lo).
-  app.get(["/app2", "/app2/*"], (_req, res) => {
-    res.setHeader("Cache-Control", "no-cache");
-    res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html"));
-  });
-  app.get("*", (req, res) => {
-    res.setHeader("Cache-Control", "no-cache");
-    res.sendFile(path.join(__dirname, "..", "public", "index.html"));
-  });
+  const sendOld = (res) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); };
+  const sendReact = (res) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
+  // App CŨ (vanilla) LUÔN truy cập được tại /app — để app React mở các mục CHƯA port + dùng song song.
+  app.get(["/app", "/app/*"], (_req, res) => sendOld(res));
+  // App MỚI (React/TS) tại /app2 (giữ tương thích/đường dẫn cũ).
+  app.get(["/app2", "/app2/*"], (_req, res) => sendReact(res));
+  // Gốc "/": trên DEV/STAGING phục vụ app React HỢP NHẤT (không cần /app2). PROD (gianguyen.cloud)
+  // GIỮ app cũ — gate theo hostname nên dù deploy CÙNG code, prod KHÔNG bị đổi sang React.
+  const isStagingHost = (req) => {
+    const h = String(req.headers["x-forwarded-host"] || req.hostname || "").toLowerCase();
+    return /^dev\.|staging|\.ts\.net$/.test(h);
+  };
+  app.get("*", (req, res) => (isStagingHost(req) ? sendReact(res) : sendOld(res)));
 
   app.use(errorHandler);
 
