@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622n";
-import { state, can } from "../core/state.js?v=20260622n";
-import { api } from "../core/api.js?v=20260622n";
+} from "../util.js?v=20260622o";
+import { state, can } from "../core/state.js?v=20260622o";
+import { api } from "../core/api.js?v=20260622o";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622n";
+} from "../ui.js?v=20260622o";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -702,9 +702,9 @@ export async function renderProjects(el) {
     return true;
   };
 
-  const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
+  const stat = (label, val, color) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
       <div class="muted" style="font-size:12px">${label}</div>
-      <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
+      <div style="font-size:20px;font-weight:700;margin-top:3px${color ? `;color:${color}` : ""}">${val}</div></div>`;
   const dash = '<span class="muted">—</span>';
   // Luồng hoá đơn (chỉ BG đã chốt): Hoá đơn → Thanh toán (có số HĐ) → Done (có ngày TT). Tái dùng màu .status.
   const INV = { invoice: { l: "Hoá đơn", c: "pending" }, payment: { l: "Thanh toán", c: "sent" }, done: { l: "Done", c: "approved" } };
@@ -714,12 +714,15 @@ export async function renderProjects(el) {
   const renderSummary = (rows) => {
     const sumBaoGia = rows.reduce((s, r) => s + r.baoGia, 0);
     const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
+    // Đã thanh toán = dòng có Ngày Thanh Toán; còn lại = chưa thu (theo Thành Tiền VAT).
+    const paid = rows.reduce((s, r) => s + (r.paidAt ? r.thanhTienVAT : 0), 0);
+    const unpaid = sumVAT - paid;
     const summ = document.getElementById("proj-summary");
     if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
-      ${stat("Số dự án đã chốt", new Set(rows.map(r => r.q.id)).size)}
-      ${stat("Số dòng (theo sheet)", rows.length)}
       ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
-      ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
+      ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}
+      ${stat("Đã thanh toán", fmtMoney(paid), "#0a7d28")}
+      ${stat("Chưa thanh toán", fmtMoney(unpaid), unpaid > 0 ? "#c0392b" : "")}</div>`;
   };
 
   const renderTable = (rows) => {
