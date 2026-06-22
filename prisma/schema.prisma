@@ -348,9 +348,15 @@ model QuoteSheet {
   signedBy      User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
   signedByName  String?
   // Luồng hoá đơn ở trang Quản lý dự án (CHỈ admin nhập). Trạng thái suy ra: đã chốt →
-  // "Hoá đơn"; có invoiceNo → "Thanh toán"; có paidAt → "Done".
+  // "Hoá đơn"; có invoiceNo → "Thanh toán"; có CẢ invoiceNo + paidAt → "Done".
   invoiceNo     String?  // Số hoá đơn / mã HĐ
   paidAt        DateTime? // Ngày khách thanh toán
+  // Theo dõi chứng từ ở Quản lý dự án (đèn đỏ = cần làm, trắng = đã xong). CHỈ admin nhập.
+  poNumber      String?   // Số PO/HĐ — có giá trị thì "kích hoạt" 4 việc chứng từ bên dưới
+  hnInvoiceNo   String?   // Số HĐ HN — đỏ khi báo giá Hà Nội đã DUYỆT mà chưa có số
+  invoiceLink   String?   // Link Hoá Đơn (URL bản scan/PDF)
+  docSentAt     DateTime? // Chứng từ gửi đi (ngày gửi)
+  docReturnedAt DateTime? // Chứng từ trả về (ngày nhận lại)
 
   @@index([quoteId, order])
   @@index([signedById])

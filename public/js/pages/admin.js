@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622m";
-import { state, can } from "../core/state.js?v=20260622m";
-import { api } from "../core/api.js?v=20260622m";
+} from "../util.js?v=20260622n";
+import { state, can } from "../core/state.js?v=20260622n";
+import { api } from "../core/api.js?v=20260622n";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622m";
+} from "../ui.js?v=20260622n";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -677,6 +677,12 @@ export async function renderProjects(el) {
         invoiceNo: sh.invoiceNo || null,
         paidAt: sh.paidAt || null,
         invStatus: sh.invStatus || "invoice",   // invoice | payment | done (suy từ server)
+        poNumber: sh.poNumber || null,
+        hnInvoiceNo: sh.hnInvoiceNo || null,
+        invoiceLink: sh.invoiceLink || null,
+        docSentAt: sh.docSentAt || null,
+        docReturnedAt: sh.docReturnedAt || null,
+        hnStatus: q.hnStatus || null,           // báo giá HN: assigned/submitted/approved/rejected
       });
     });
   }
@@ -728,22 +734,40 @@ export async function renderProjects(el) {
       <tbody>${rows.map(r => {
         const q = r.q;
         const cty = q.company?.shortName || q.company?.name || "";
+        // Số HĐ / Ngày TT / PO/HĐ / chứng từ / link / Số HĐ HN: admin nhập trực tiếp (dự án đã chốt).
+        const editable2 = canInv && r.sheetId && q.status === "converted";
+        // ĐÈN ĐỎ = việc CẦN làm; nhập/làm xong → TRẮNG lại. "Số PO/HĐ" có giá trị thì kích hoạt
+        // 4 việc: chứng từ gửi đi, chứng từ trả về, link hoá đơn, ký chứng từ.
+        const poFilled = !!r.poNumber;
+        const hnNeed = r.hnStatus === "approved" && r.hanoi > 0 && !r.hnInvoiceNo; // BG Hà Nội đã DUYỆT mà chưa có Số HĐ HN
+        const red = (need) => need ? ' style="background:#ffdede"' : '';
+        const txtCell = (cls, val, need, ph, w = 110) => editable2
+          ? `<td${red(need)}><input class="${cls}" data-sheet="${r.sheetId}" value="${escapeHtml(val || "")}" placeholder="${ph}" style="width:${w}px" /></td>`
+          : `<td${red(need)}>${val ? escapeHtml(val) : dash}</td>`;
+        const dateCell = (cls, val, need) => editable2
+          ? `<td${red(need)}><input type="date" class="${cls}" data-sheet="${r.sheetId}" value="${val ? new Date(val).toISOString().slice(0, 10) : ""}" style="width:140px" /></td>`
+          : `<td${red(need)}>${val ? fmtDate(val) : dash}</td>`;
+        // Ký Chứng từ: đỏ khi đã có Số PO/HĐ mà CHƯA ký; ký xong → trắng.
+        const kyRed = (poFilled && !r.signedAt) ? ' style="background:#ffdede"' : '';
         const kyCell = r.signedAt
           ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
-          : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
+          : (canSignNow && r.sheetId ? `<td${kyRed}><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td${kyRed}>${dash}</td>`);
         // Status: BG đã chốt → badge luồng hoá đơn (Hoá đơn/Thanh toán/Done); khác → status thường.
         const inv = INV[r.invStatus] || INV.invoice;
         const statusCell = q.status === "converted"
           ? `<td><span class="status ${inv.c}">${inv.l}</span></td>`
           : `<td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>`;
-        // Số Hoá Đơn + Ngày Thanh Toán: admin nhập trực tiếp (chỉ trên dự án đã chốt).
-        const editable2 = canInv && r.sheetId && q.status === "converted";
         const invNoCell = editable2
           ? `<td><input class="inv-no" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceNo || "")}" placeholder="Số HĐ" style="width:110px" /></td>`
           : `<td>${r.invoiceNo ? escapeHtml(r.invoiceNo) : dash}</td>`;
         const paidCell = editable2
           ? `<td><input type="date" class="inv-paid" data-sheet="${r.sheetId}" value="${r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : ""}" style="width:140px" /></td>`
           : `<td>${r.paidAt ? fmtDate(r.paidAt) : dash}</td>`;
+        // Link Hoá Đơn: đỏ khi có PO/HĐ mà chưa có link; đã nhập → hiện link bấm được (trắng).
+        const linkNeed = poFilled && !r.invoiceLink;
+        const linkCell = editable2
+          ? `<td${red(linkNeed)}><input class="inv-link" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceLink || "")}" placeholder="Link HĐ" style="width:120px" /></td>`
+          : `<td${red(linkNeed)}>${r.invoiceLink ? `<a href="${escapeHtml(r.invoiceLink)}" target="_blank" rel="noopener">Xem HĐ</a>` : dash}</td>`;
         return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
           ${statusCell}
           <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
@@ -753,11 +777,11 @@ export async function renderProjects(el) {
           <td style="text-align:right">${r.hanoi ? fmtMoney(r.hanoi) : dash}</td>
           <td style="text-align:right">${r.khach ? fmtMoney(r.khach) : dash}</td>
           <td><strong>${escapeHtml(r.code)}</strong></td>
-          <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
+          <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td>${txtCell("po-no", r.poNumber, false, "Số PO/HĐ")}
           <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
           ${invNoCell}<td>${dash}</td>
           <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
-          ${paidCell}<td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+          ${paidCell}${dateCell("doc-sent", r.docSentAt, poFilled && !r.docSentAt)}${dateCell("doc-ret", r.docReturnedAt, poFilled && !r.docReturnedAt)}${linkCell}${txtCell("hn-no", r.hnInvoiceNo, hnNeed, "Số HĐ HN")}
           <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
         </tr>`;
       }).join("")}</tbody>
@@ -775,13 +799,16 @@ export async function renderProjects(el) {
         renderProjects(el);
       } catch (err) { toast(err.message, "error"); }
     }));
-    // Admin nhập Số Hoá Đơn / Ngày Thanh Toán → lưu + vẽ lại để Status (Hoá đơn/Thanh toán/Done) cập nhật.
-    body.querySelectorAll(".inv-no, .inv-paid").forEach((inp) => inp.addEventListener("change", async (e) => {
+    // Admin nhập Số Hoá Đơn / Ngày TT / Số PO/HĐ / chứng từ / link / Số HĐ HN → lưu + vẽ lại
+    // để Status (Hoá đơn/Thanh toán/Done) + đèn đỏ-trắng cập nhật.
+    const FIELD_OF = { "inv-no": "invoiceNo", "inv-paid": "paidAt", "po-no": "poNumber", "hn-no": "hnInvoiceNo", "inv-link": "invoiceLink", "doc-sent": "docSentAt", "doc-ret": "docReturnedAt" };
+    body.querySelectorAll(".inv-no, .inv-paid, .po-no, .hn-no, .inv-link, .doc-sent, .doc-ret").forEach((inp) => inp.addEventListener("change", async (e) => {
       e.stopPropagation();
       const sheetId = inp.dataset.sheet;
-      const payload = inp.classList.contains("inv-no") ? { invoiceNo: inp.value.trim() } : { paidAt: inp.value || null };
+      const cls = Object.keys(FIELD_OF).find((c) => inp.classList.contains(c));
+      const val = inp.type === "date" ? (inp.value || null) : inp.value.trim();
       try {
-        await api(`/api/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify(payload) });
+        await api(`/api/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [FIELD_OF[cls]]: val }) });
         toast("Đã lưu", "success");
         renderProjects(el);
       } catch (err) { toast(err.message, "error"); }

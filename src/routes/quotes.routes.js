@@ -159,7 +159,7 @@ router.get(
       take: 2000,
       select: {
         id: true, quoteNumber: true, projectCode: true, projectVersion: true,
-        title: true, status: true, quoteDate: true, executionDate: true, vatPercent: true,
+        title: true, status: true, hnStatus: true, quoteDate: true, executionDate: true, vatPercent: true,
         subtotal: true, total: true, discount: true,
         company: { select: { name: true, shortName: true } },
         customer: { select: { code: true, name: true } },
@@ -169,6 +169,7 @@ router.get(
           select: {
             id: true, order: true, name: true, groupSubtotal: true, extraTables: true,
             signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
+            poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
             template: { select: { company: { select: { shortName: true, name: true } } } },
             items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
           },
@@ -185,6 +186,7 @@ router.get(
         projectVersion: q.projectVersion,
         title: q.title,
         status: q.status,
+        hnStatus: q.hnStatus || null,
         quoteDate: q.quoteDate,
         executionDate: q.executionDate,
         vatPercent: Number(q.vatPercent),
@@ -209,8 +211,13 @@ router.get(
             signedByName: sh.signedByName,
             invoiceNo: sh.invoiceNo || null,
             paidAt: sh.paidAt || null,
-            // Trạng thái luồng hoá đơn (suy ra): có ngày TT → done; có số HĐ → payment; chưa → invoice.
-            invStatus: sh.paidAt ? "done" : (sh.invoiceNo ? "payment" : "invoice"),
+            poNumber: sh.poNumber || null,
+            hnInvoiceNo: sh.hnInvoiceNo || null,
+            invoiceLink: sh.invoiceLink || null,
+            docSentAt: sh.docSentAt || null,
+            docReturnedAt: sh.docReturnedAt || null,
+            // Trạng thái luồng hoá đơn: "Done" CHỈ khi có CẢ số HĐ + ngày TT; có số HĐ → "Thanh toán"; chưa → "Hoá đơn".
+            invStatus: (sh.invoiceNo && sh.paidAt) ? "done" : (sh.invoiceNo ? "payment" : "invoice"),
           };
         }),
       };
@@ -270,6 +277,11 @@ router.put(
     body: z.object({
       invoiceNo: z.string().max(80).trim().optional().nullable(),
       paidAt: z.coerce.date().nullable().optional().or(z.literal("")),
+      poNumber: z.string().max(80).trim().optional().nullable(),
+      hnInvoiceNo: z.string().max(80).trim().optional().nullable(),
+      invoiceLink: z.string().max(1000).trim().optional().nullable(),
+      docSentAt: z.coerce.date().nullable().optional().or(z.literal("")),
+      docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
     }),
   }),
   requirePermission(P.USER_MANAGE),   // chỉ admin (USER_MANAGE) — kế toán/giám đốc nhập
@@ -283,14 +295,16 @@ router.put(
       return res.status(403).json({ error: "Chỉ nhập hoá đơn cho dự án đã chốt" });
     }
     const data = {};
-    if (req.body.invoiceNo !== undefined) data.invoiceNo = req.body.invoiceNo ? String(req.body.invoiceNo).trim() : null;
-    if (req.body.paidAt !== undefined) data.paidAt = req.body.paidAt ? new Date(req.body.paidAt) : null;
+    const setStr = (k) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? String(req.body[k]).trim() : null; };
+    const setDate = (k) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? new Date(req.body[k]) : null; };
+    setStr("invoiceNo"); setStr("poNumber"); setStr("hnInvoiceNo"); setStr("invoiceLink");
+    setDate("paidAt"); setDate("docSentAt"); setDate("docReturnedAt");
     const updated = await prisma.quoteSheet.update({
       where: { id: sheet.id }, data,
       select: { id: true, invoiceNo: true, paidAt: true },
     });
-    await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt } });
-    const invStatus = updated.paidAt ? "done" : (updated.invoiceNo ? "payment" : "invoice");
+    await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, ...data } });
+    const invStatus = (updated.invoiceNo && updated.paidAt) ? "done" : (updated.invoiceNo ? "payment" : "invoice");
     res.json({ id: updated.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt, invStatus });
   })
 );

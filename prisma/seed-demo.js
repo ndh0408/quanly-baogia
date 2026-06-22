@@ -1,0 +1,176 @@
+// Seed DỮ LIỆU DEMO phong phú cho môi trường DEV/STAGING — phủ MỌI workflow để review:
+// nháp / không chốt / đã chốt (Hoá đơn→Thanh toán→Done) / PO+chứng từ (đỏ↔trắng) /
+// Số HĐ HN (đỏ khi HN duyệt mà chưa có số) / luồng account Hà Nội (assigned/submitted/
+// approved/rejected) / báo giá nhiều sheet / bảng nội bộ HCM-HN-Khách có duyệt theo hàng.
+//
+// AN TOÀN: chỉ chạy khi ALLOW_DEMO_SEED=1 (tránh seed nhầm vào prod). Idempotent: xoá sạch
+// dữ liệu demo cũ (đánh dấu [DEMO] / demo_ / DEMOKH) rồi tạo lại.
+import "dotenv/config";
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+
+const prisma = new PrismaClient();
+const TAG = "[DEMO]";
+const PWD = process.env.DEMO_PASSWORD || "GiaNguyenDemo2026";
+const DAY = 86400000;
+const ago = (d) => new Date(Date.now() - d * DAY);
+
+async function main() {
+  if (process.env.ALLOW_DEMO_SEED !== "1") {
+    console.error("✗ Từ chối seed demo: cần ALLOW_DEMO_SEED=1 (chặn seed nhầm vào prod).");
+    process.exit(1);
+  }
+
+  const co = await prisma.company.findUnique({ where: { code: "gia_nguyen" } });
+  if (!co) { console.error("✗ Chưa có công ty gia_nguyen — chạy `npm run db:seed` trước."); process.exit(1); }
+  const tplDate = await prisma.quoteTemplate.findFirst({ where: { code: "unibenfood" } });   // có ngày
+  const tplNo = await prisma.quoteTemplate.findFirst({ where: { code: "marico_decor" } });    // không ngày
+  const tpl = tplDate || tplNo;
+  if (!tpl) { console.error("✗ Chưa có template — chạy `npm run db:seed` trước."); process.exit(1); }
+
+  const FROM = { fromContact: "Phòng Kinh Doanh", fromPhone: co.phone || "0914291951", fromAddress: co.address || "TP.HCM", city: co.city || "TP. Hồ Chí Minh" };
+
+  // ---------- Dọn dữ liệu demo cũ (FK: quote → user/customer) ----------
+  await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } }, hardDelete: true });
+  await prisma.user.deleteMany({ where: { username: { startsWith: "demo_" } }, hardDelete: true });
+  await prisma.customer.deleteMany({ where: { code: { startsWith: "DEMOKH" } }, hardDelete: true });
+  console.log("✓ Đã dọn dữ liệu demo cũ");
+
+  // ---------- Users ----------
+  const hash = await bcrypt.hash(PWD, 6);
+  const mkUser = (username, displayName, role, extra = {}) =>
+    prisma.user.create({ data: { username, displayName, role, passwordHash: hash, active: true, ...extra } });
+  const accA = await mkUser("demo_acc_a", "Account An", "manager", { projectCode: "DEMOA26" });
+  const accB = await mkUser("demo_acc_b", "Account Bình", "manager", { projectCode: "DEMOB26" });
+  const accSign = await mkUser("demo_acc_sign", "Account Lan (ký)", "manager", { projectCode: "DEMOL26", canSign: true });
+  const hn = await mkUser("demo_hn", "HN Hằng", "account_hn");
+  console.log("✓ 4 user demo (mật khẩu:", PWD, ")");
+
+  // ---------- Customers ----------
+  const mkCus = (code, name) => prisma.customer.create({ data: { code, name, status: "active", ownerId: accA.id } });
+  const kh1 = await mkCus("DEMOKH01", "Công ty Vinamilk");
+  const kh2 = await mkCus("DEMOKH02", "Sao Mai Group");
+  const kh3 = await mkCus("DEMOKH03", "Bến Thành Media");
+  console.log("✓ 3 khách hàng demo");
+
+  // ---------- Helpers ----------
+  let seq = 0;
+  const item = (name, quantity, unitPrice, days = 1, kind = "item") => ({ kind, name, quantity, unitPrice, days });
+  // Bảng nội bộ: rows = [{name, qty, price, approved}]. hcm/khach chỉ cộng hàng approved; hanoi cộng hết.
+  const xtable = (category, name, rows, sIdx) => ({
+    category, name,
+    items: rows.map((r, j) => ({
+      rid: `d${seq}_${sIdx}_${category}_${j}`, kind: "item", name: r.name,
+      quantity: r.qty, unitPrice: r.price, days: 1,
+      approved: !!r.approved, approvedAt: r.approved ? ago(2).toISOString() : null, approvedBy: r.approved ? 1 : null,
+    })),
+  });
+  const sumItems = (items) => items.filter((it) => ["item", "sub"].includes(it.kind))
+    .reduce((a, it) => a + Number(it.quantity) * Number(it.unitPrice) * Number(it.days || 1), 0);
+
+  async function makeQuote(o) {
+    seq++;
+    const num = `GN26D${String(seq).padStart(3, "0")}`;
+    const vatPercent = o.vatPercent ?? 8;
+    let subtotal = 0;
+    const sheetsCreate = (o.sheets || []).map((sh, i) => {
+      const items = (sh.items || []).map((it, j) => ({
+        kind: it.kind || "item", name: it.name || `Hạng mục ${j + 1}`,
+        quantity: it.quantity ?? 1, unitPrice: it.unitPrice ?? 0, days: it.days ?? 1, order: j,
+      }));
+      subtotal += sumItems(items);
+      return {
+        templateId: sh.templateId || tpl.id, order: i, name: sh.name || null, groupSubtotal: !!sh.groupSubtotal,
+        items: { create: items },
+        extraTables: sh.extraTables || undefined,
+        signedAt: sh.signedAt || null, signedById: sh.signedAt ? (sh.signedById || 1) : null, signedByName: sh.signedAt ? (sh.signedByName || "Quản trị") : null,
+        invoiceNo: sh.invoiceNo || null, paidAt: sh.paidAt || null,
+        poNumber: sh.poNumber || null, hnInvoiceNo: sh.hnInvoiceNo || null, invoiceLink: sh.invoiceLink || null,
+        docSentAt: sh.docSentAt || null, docReturnedAt: sh.docReturnedAt || null,
+      };
+    });
+    const vat = Math.round((subtotal * vatPercent) / 100);
+    const data = {
+      quoteNumber: num, projectCode: `${o.creator.projectCode || "DEMO"}_${String(seq).padStart(3, "0")}`, projectVersion: 1, currentVersion: 1,
+      title: `${TAG} ${o.title}`, toCompany: o.customer?.name || "Khách Demo", customerId: o.customer?.id || null,
+      companyId: co.id, createdById: o.creator.id, ...FROM,
+      quoteDate: ago(o.daysAgo ?? 12), executionDate: o.exec || null,
+      vatPercent, subtotal, vat, total: subtotal + vat, discount: 0,
+      status: o.status || "draft",
+      convertedAt: o.status === "converted" ? ago(o.daysAgo ? o.daysAgo - 2 : 5) : null,
+      notes: o.notes || null,
+      hnStatus: o.hnStatus || null, hnAssigneeId: o.hnAssignee?.id || null,
+      hnSubmittedAt: ["submitted", "approved", "rejected"].includes(o.hnStatus) ? ago(4) : null,
+      hnReviewedAt: ["approved", "rejected"].includes(o.hnStatus) ? ago(3) : null,
+      hnReviewerId: ["approved", "rejected"].includes(o.hnStatus) ? 1 : null,
+      hnRejectNote: o.hnStatus === "rejected" ? "Cần làm rõ đơn giá vách + bổ sung kích thước." : null,
+      sheets: { create: sheetsCreate },
+    };
+    if (o.hnAssignee) data.members = { connect: [{ id: o.hnAssignee.id }] };
+    return prisma.quote.create({ data });
+  }
+
+  const std = [item("Thi công sân khấu", 1, 15_000_000), item("Màn hình LED P3", 20, 450_000), item("Âm thanh ánh sáng", 1, 8_000_000)];
+
+  // ============ CÁC TRẠNG THÁI ============
+  // 1) Nháp đơn sheet
+  await makeQuote({ creator: accA, customer: kh1, title: "Sự kiện ra mắt — NHÁP", status: "draft", sheets: [{ items: std }] });
+  // 2) Nháp NHIỀU sheet
+  await makeQuote({ creator: accB, customer: kh2, title: "Hội nghị KH 2026 — NHÁP 2 sheet", status: "draft",
+    sheets: [{ name: "Khu vực chính", items: std }, { name: "Khu trải nghiệm", items: [item("Booth", 4, 6_000_000), item("Standee", 10, 350_000)] }] });
+  // 3) Không chốt (lost)
+  await makeQuote({ creator: accA, customer: kh3, title: "Roadshow Q1 — KHÔNG CHỐT", status: "lost", daysAgo: 20,
+    notes: "[Lý do không chốt] Khách chọn nhà cung cấp khác (giá thấp hơn 8%).", sheets: [{ items: std }] });
+
+  // 4) Đã chốt → "Hoá đơn" (chưa có số HĐ, chưa có PO → chứng từ CHƯA đỏ)
+  await makeQuote({ creator: accA, customer: kh1, title: "Gala Vinamilk — ĐÃ CHỐT (Hoá đơn)", status: "converted", exec: ago(2), sheets: [{ items: std }] });
+  // 5) Đã chốt → "Thanh toán" (có số HĐ, chưa thanh toán)
+  await makeQuote({ creator: accB, customer: kh2, title: "Year End Party — ĐÃ CHỐT (Thanh toán)", status: "converted", exec: ago(1),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0155" }] });
+  // 6) Đã chốt → "Done" (có CẢ số HĐ + ngày TT)
+  await makeQuote({ creator: accA, customer: kh3, title: "Khai trương CN — ĐÃ CHỐT (Done)", status: "converted", daysAgo: 30, exec: ago(15),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0102", paidAt: ago(5) }] });
+
+  // 7) Đã chốt + CÓ Số PO/HĐ nhưng chứng từ CHƯA làm → ĐỎ: chứng từ gửi/về + Link HĐ + Ký
+  await makeQuote({ creator: accSign, customer: kh1, title: "Triển lãm Ô tô — PO có, chứng từ ĐỎ", status: "converted", exec: ago(3),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0160", poNumber: "PO-VNM-7781" }] });
+  // 8) Đã chốt + PO + chứng từ ĐỦ → tất cả TRẮNG (đã gửi, đã về, có link, đã ký, Done)
+  await makeQuote({ creator: accSign, customer: kh2, title: "Lễ kỷ niệm 20 năm — PO + chứng từ ĐỦ", status: "converted", daysAgo: 25, exec: ago(10),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0099", paidAt: ago(6), poNumber: "PO-SM-3321",
+      docSentAt: ago(8), docReturnedAt: ago(4), invoiceLink: "https://drive.google.com/demo-hoadon-0099",
+      signedAt: ago(4), signedByName: "Account Lan (ký)" }] });
+
+  // 9) Đã chốt + Báo giá Hà Nội ĐÃ DUYỆT nhưng CHƯA có Số HĐ HN → ô Số HĐ HN ĐỎ
+  await makeQuote({ creator: accA, customer: kh3, title: "Sự kiện phía Bắc — Số HĐ HN ĐỎ", status: "converted", hnStatus: "approved", hnAssignee: hn, exec: ago(4),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0170",
+      extraTables: [xtable("hanoi", "Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 2, price: 4_500_000 }, { name: "Sàn gỗ", qty: 1, price: 7_605_000 }], 0)] }] });
+  // 10) Đã chốt + HN duyệt + ĐÃ có Số HĐ HN → TRẮNG
+  await makeQuote({ creator: accB, customer: kh1, title: "Sự kiện phía Bắc 2 — Số HĐ HN đủ", status: "converted", hnStatus: "approved", hnAssignee: hn, daysAgo: 22, exec: ago(9),
+    sheets: [{ items: std, invoiceNo: "HD-2026-0088", hnInvoiceNo: "HDHN-26-014",
+      extraTables: [xtable("hanoi", "Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 3, price: 4_500_000 }], 0)] }] });
+
+  // 11–13) Luồng ACCOUNT HÀ NỘI (xem ở view account_hn): assigned / submitted / rejected
+  await makeQuote({ creator: accA, customer: kh2, title: "Giao HN — ĐÃ GIAO (assigned)", status: "draft", hnStatus: "assigned", hnAssignee: hn,
+    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Khung backdrop", qty: 1, price: 5_000_000 }], 0)] }] });
+  await makeQuote({ creator: accA, customer: kh3, title: "Giao HN — ĐÃ GỬI DUYỆT (submitted)", status: "draft", hnStatus: "submitted", hnAssignee: hn,
+    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Vách", qty: 5, price: 1_200_000 }, { name: "Thảm", qty: 2, price: 900_000 }], 0)] }] });
+  await makeQuote({ creator: accB, customer: kh1, title: "Giao HN — BỊ TRẢ LẠI (rejected)", status: "draft", hnStatus: "rejected", hnAssignee: hn,
+    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "LED", qty: 10, price: 600_000 }], 0)] }] });
+
+  // 14) Đã chốt NHIỀU sheet + bảng nội bộ HCM/HN/Khách (có hàng DUYỆT, có hàng chưa) + ký 1 sheet
+  await makeQuote({ creator: accA, customer: kh2, title: "Đại nhạc hội — đủ chi phí nội bộ + nhiều sheet", status: "converted", daysAgo: 18, exec: ago(7),
+    sheets: [
+      { name: "Sân khấu", items: std, invoiceNo: "HD-2026-0201", poNumber: "PO-SM-9000", docSentAt: ago(6), signedAt: ago(5), signedByName: "Quản trị",
+        extraTables: [
+          xtable("hcm", "Chi phí HCM", [{ name: "Vận chuyển", qty: 1, price: 3_000_000, approved: true }, { name: "Phát sinh", qty: 1, price: 2_000_000, approved: false }], 0),
+          xtable("khach", "Phí khách hàng", [{ name: "Quản lý dự án", qty: 1, price: 5_000_000, approved: true }], 0),
+        ] },
+      { name: "Khu vực VIP", items: [item("Bàn ghế VIP", 30, 250_000), item("Hoa trang trí", 1, 4_000_000)],
+        extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Backdrop VIP", qty: 1, price: 6_000_000 }], 1)] },
+    ] });
+
+  const total = await prisma.quote.count({ where: { title: { startsWith: TAG } } });
+  console.log(`✓ Đã tạo ${total} báo giá demo (đủ trạng thái). Đăng nhập demo_acc_a / demo_hn… mật khẩu ${PWD}.`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());
