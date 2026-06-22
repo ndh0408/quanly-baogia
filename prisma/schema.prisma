@@ -347,6 +347,10 @@ model QuoteSheet {
   // and the snapshotted signedByName, just clear the link (audit-safe).
   signedBy      User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
   signedByName  String?
+  // Luồng hoá đơn ở trang Quản lý dự án (CHỈ admin nhập). Trạng thái suy ra: đã chốt →
+  // "Hoá đơn"; có invoiceNo → "Thanh toán"; có paidAt → "Done".
+  invoiceNo     String?  // Số hoá đơn / mã HĐ
+  paidAt        DateTime? // Ngày khách thanh toán
 
   @@index([quoteId, order])
   @@index([signedById])

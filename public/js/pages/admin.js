@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622k";
-import { state, can } from "../core/state.js?v=20260622k";
-import { api } from "../core/api.js?v=20260622k";
+} from "../util.js?v=20260622l";
+import { state, can } from "../core/state.js?v=20260622l";
+import { api } from "../core/api.js?v=20260622l";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622k";
+} from "../ui.js?v=20260622l";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -716,6 +716,9 @@ export async function renderProjects(el) {
         sheetId: sh.id || null,
         signedAt: sh.signedAt || null,
         signedByName: sh.signedByName || null,
+        invoiceNo: sh.invoiceNo || null,
+        paidAt: sh.paidAt || null,
+        invStatus: sh.invStatus || "invoice",   // invoice | payment | done (suy từ server)
       });
     });
   }
@@ -739,6 +742,9 @@ export async function renderProjects(el) {
       <div class="muted" style="font-size:12px">${label}</div>
       <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
   const dash = '<span class="muted">—</span>';
+  // Luồng hoá đơn (chỉ BG đã chốt): Hoá đơn → Thanh toán (có số HĐ) → Done (có ngày TT). Tái dùng màu .status.
+  const INV = { invoice: { l: "Hoá đơn", c: "pending" }, payment: { l: "Thanh toán", c: "sent" }, done: { l: "Done", c: "approved" } };
+  const canInv = state.user?.role === "admin";   // chỉ admin nhập số HĐ + ngày thanh toán
   const headers = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Chi Phí HCM", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
 
   const renderSummary = (rows) => {
@@ -767,8 +773,21 @@ export async function renderProjects(el) {
         const kyCell = r.signedAt
           ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
           : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
+        // Status: BG đã chốt → badge luồng hoá đơn (Hoá đơn/Thanh toán/Done); khác → status thường.
+        const inv = INV[r.invStatus] || INV.invoice;
+        const statusCell = q.status === "converted"
+          ? `<td><span class="status ${inv.c}">${inv.l}</span></td>`
+          : `<td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>`;
+        // Số Hoá Đơn + Ngày Thanh Toán: admin nhập trực tiếp (chỉ trên dự án đã chốt).
+        const editable2 = canInv && r.sheetId && q.status === "converted";
+        const invNoCell = editable2
+          ? `<td><input class="inv-no" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceNo || "")}" placeholder="Số HĐ" style="width:110px" /></td>`
+          : `<td>${r.invoiceNo ? escapeHtml(r.invoiceNo) : dash}</td>`;
+        const paidCell = editable2
+          ? `<td><input type="date" class="inv-paid" data-sheet="${r.sheetId}" value="${r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : ""}" style="width:140px" /></td>`
+          : `<td>${r.paidAt ? fmtDate(r.paidAt) : dash}</td>`;
         return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
-          <td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
+          ${statusCell}
           <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
           <td>${r.hangMuc ? escapeHtml(r.hangMuc) : dash}</td>
           <td style="text-align:right">${fmtMoney(r.baoGia)}</td>
@@ -778,15 +797,15 @@ export async function renderProjects(el) {
           <td><strong>${escapeHtml(r.code)}</strong></td>
           <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
           <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
-          <td>${dash}</td><td>${dash}</td>
+          ${invNoCell}<td>${dash}</td>
           <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
-          <td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+          ${paidCell}<td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
           <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
         </tr>`;
       }).join("")}</tbody>
     </table></div>`;
     body.querySelectorAll("tr.qrow").forEach(tr => {
-      tr.addEventListener("click", (e) => { if (e.target.closest("button,a")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
+      tr.addEventListener("click", (e) => { if (e.target.closest("button,a,input")) return; goToQuote(parseInt(tr.dataset.id, 10)); });
     });
     body.querySelectorAll(".ky-btn, .ky-undo").forEach(b => b.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -795,6 +814,17 @@ export async function renderProjects(el) {
       try {
         await api(`/api/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) });
         toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success");
+        renderProjects(el);
+      } catch (err) { toast(err.message, "error"); }
+    }));
+    // Admin nhập Số Hoá Đơn / Ngày Thanh Toán → lưu + vẽ lại để Status (Hoá đơn/Thanh toán/Done) cập nhật.
+    body.querySelectorAll(".inv-no, .inv-paid").forEach((inp) => inp.addEventListener("change", async (e) => {
+      e.stopPropagation();
+      const sheetId = inp.dataset.sheet;
+      const payload = inp.classList.contains("inv-no") ? { invoiceNo: inp.value.trim() } : { paidAt: inp.value || null };
+      try {
+        await api(`/api/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify(payload) });
+        toast("Đã lưu", "success");
         renderProjects(el);
       } catch (err) { toast(err.message, "error"); }
     }));

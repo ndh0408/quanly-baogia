@@ -168,7 +168,7 @@ router.get(
           orderBy: { order: "asc" },
           select: {
             id: true, order: true, name: true, groupSubtotal: true, extraTables: true,
-            signedAt: true, signedByName: true,
+            signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
             template: { select: { company: { select: { shortName: true, name: true } } } },
             items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
           },
@@ -207,6 +207,10 @@ router.get(
             cty: sh.template?.company?.shortName || sh.template?.company?.name || null,
             signedAt: sh.signedAt,
             signedByName: sh.signedByName,
+            invoiceNo: sh.invoiceNo || null,
+            paidAt: sh.paidAt || null,
+            // Trạng thái luồng hoá đơn (suy ra): có ngày TT → done; có số HĐ → payment; chưa → invoice.
+            invStatus: sh.paidAt ? "done" : (sh.invoiceNo ? "payment" : "invoice"),
           };
         }),
       };
@@ -254,6 +258,40 @@ router.post(
     });
     await audit(req, signed ? "quote.sign" : "quote.unsign", { resource: "quote", resourceId: sheet.quoteId });
     res.json({ id: updated.id, signedAt: updated.signedAt, signedByName: updated.signedByName });
+  })
+);
+
+// HOÁ ĐƠN / THANH TOÁN cho 1 sheet (Quản lý dự án). CHỈ ADMIN. Số HĐ → "Thanh toán"; ngày
+// thanh toán → "Done". Chỉ trên báo giá ĐÃ CHỐT. Đặt TRƯỚC "/:id".
+router.put(
+  "/sheets/:sheetId/invoice",
+  validate({
+    params: z.object({ sheetId: z.coerce.number().int().positive() }),
+    body: z.object({
+      invoiceNo: z.string().max(80).trim().optional().nullable(),
+      paidAt: z.coerce.date().nullable().optional().or(z.literal("")),
+    }),
+  }),
+  requirePermission(P.USER_MANAGE),   // chỉ admin (USER_MANAGE) — kế toán/giám đốc nhập
+  asyncHandler(async (req, res) => {
+    const sheet = await prisma.quoteSheet.findUnique({
+      where: { id: req.params.sheetId },
+      select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true } } },
+    });
+    if (!sheet) return res.status(404).json({ error: "Không tìm thấy sheet" });
+    if (sheet.quote?.status !== "converted" || sheet.quote?.deletedAt) {
+      return res.status(403).json({ error: "Chỉ nhập hoá đơn cho dự án đã chốt" });
+    }
+    const data = {};
+    if (req.body.invoiceNo !== undefined) data.invoiceNo = req.body.invoiceNo ? String(req.body.invoiceNo).trim() : null;
+    if (req.body.paidAt !== undefined) data.paidAt = req.body.paidAt ? new Date(req.body.paidAt) : null;
+    const updated = await prisma.quoteSheet.update({
+      where: { id: sheet.id }, data,
+      select: { id: true, invoiceNo: true, paidAt: true },
+    });
+    await audit(req, "quote.invoice", { resource: "quote", resourceId: sheet.quoteId, after: { sheetId: sheet.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt } });
+    const invStatus = updated.paidAt ? "done" : (updated.invoiceNo ? "payment" : "invoice");
+    res.json({ id: updated.id, invoiceNo: updated.invoiceNo, paidAt: updated.paidAt, invStatus });
   })
 );
 
