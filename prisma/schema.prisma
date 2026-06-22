@@ -11,6 +11,8 @@ enum Role {
   admin
   manager
   account_hn // Account Hà Nội: CHỈ điền bảng nội bộ loại "hanoi" của báo giá được giao, không thấy gì khác
+  hr         // Nhân sự: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
+  accountant // Kế toán: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
 }
 
 enum QuoteStatus {
@@ -88,8 +90,65 @@ model User {
   assignedFollowUps FollowUp[]     @relation("FollowupAssignee")
   authoredVersions  QuoteVersion[] @relation("VersionAuthor")
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
+  personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
 
   @@index([deletedAt, active])
+}
+
+// Hồ sơ NHÂN SỰ / chi phí nhân công theo dự án (trang "Nhân sự"). Account (manager) là
+// NGƯỜI TẠO + chỉ thấy/sửa của mình; hr + accountant XEM tất cả (read-only); admin toàn quyền.
+// Cột map theo file Excel chủ gửi (thông tin cá nhân + lương/thuế + dự án + hợp đồng + thanh toán).
+model PersonnelRecord {
+  id          Int   @id @default(autoincrement())
+  createdById Int // Account tạo dòng — owner để phân quyền "chỉ thấy của mình"
+  createdBy   User  @relation("PersonnelCreatedBy", fields: [createdById], references: [id])
+
+  // Thông tin cá nhân
+  fullName     String // HỌ & TÊN
+  taxCode      String? // MÃ SỐ THUẾ
+  birthYear    String? // NĂM SINH (giữ text: có thể là năm hoặc dd/mm/yyyy)
+  idCard       String? // Căn cước
+  idIssueDate  DateTime? // NGÀY CẤP
+  idIssuePlace String? // NƠI CẤP
+  address      String? // ĐỊA CHỈ
+  bankAccount  String? // STK
+  bankName     String? // NGÂN HÀNG
+  phone        String? // SỐ ĐIỆN THOẠI
+
+  // Lương / thuế
+  salary        Decimal? @db.Decimal(18, 2) // LƯƠNG
+  pit           Decimal? @db.Decimal(18, 2) // THUẾ TNCN
+  taxableIncome Decimal? @db.Decimal(18, 2) // THU NHẬP CHỊU THUẾ
+
+  // Thời gian + dự án
+  workStart    DateTime? // THỜI GIAN LÀM VIỆC (bắt đầu)
+  workEnd      DateTime? // THỜI GIAN LÀM VIỆC (kết thúc)
+  workLocation String? // ĐỊA ĐIỂM LÀM VIỆC
+  projectName  String? // TÊN DỰ ÁN
+  projectCode  String? // MÃ DỰ ÁN
+  teamNote     String? // TEAM GHI CHÚ
+  accountName  String? // ACCOUNT (tên account phụ trách — free text)
+  company      String? // CTY
+
+  // Hợp đồng
+  projectNameContract String? // TÊN DỰ ÁN (HĐ)
+  laborContractNo     String? // SỐ HĐ LĐ
+  laborContractDate   DateTime? // NGÀY HĐ LĐ
+  salesContractNo     String? // SỐ HĐ BÁN
+  salesContractDate   DateTime? // NGÀY HĐ BÁN
+  purchaseOrder       String? // ĐƠN ĐẶT HÀNG
+  preTaxAmount        Decimal?  @db.Decimal(18, 2) // TIỀN TRƯỚC THUẾ
+  accountingNote      String? // KẾ TOÁN GHI CHÚ
+  payment             String? // THANH TOÁN
+  confirmed           String? // Xác nhận
+  note                String? // Note
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([createdById])
+  @@index([deletedAt])
 }
 
 model RefreshToken {

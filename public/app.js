@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260622o";
+} from "./js/util.js?v=20260622p";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260622o";
+} from "./js/core/state.js?v=20260622p";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622o";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622p";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
   initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260622o";
+} from "./js/ui.js?v=20260622p";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260622o";
+} from "./js/pages/admin.js?v=20260622p";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622o";
+} from "./js/pages/quotes.js?v=20260622p";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260622o";
+} from "./js/editor.js?v=20260622p";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());

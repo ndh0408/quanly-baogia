@@ -40,4 +40,6 @@ EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -q -O - http://127.0.0.1:3000/livez || exit 1
-CMD ["node", "src/server.js"]
+# Chạy qua tsx: hỗ trợ .ts (backend đang chuyển dần sang TypeScript) lẫn .js cũ. tsx nằm
+# trong dependencies nên có trong image production (npm ci --omit=dev).
+CMD ["node", "--import", "tsx", "src/server.js"]

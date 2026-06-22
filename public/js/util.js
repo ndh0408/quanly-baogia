@@ -114,8 +114,8 @@ export const STATUS_LABEL = {
   sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt",
 };
 export const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
-export const ROLE_LABEL = { admin: "Quản trị", manager: "Account", account_hn: "Account HN" };
-export const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội" };
+export const ROLE_LABEL = { admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán" };
+export const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội", hr: "Nhân sự (HR)", accountant: "Kế toán" };
 export const CUSTOMER_STATUS_LABEL = { lead: "Tiềm năng", prospect: "Đang trao đổi", active: "Đang giao dịch", inactive: "Ngừng" };
 export const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—";
 export const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };

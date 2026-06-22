@@ -35,6 +35,12 @@ export const PERMISSIONS = {
   COMPANY_MANAGE:     "company:manage",
   AUDIT_VIEW:         "audit:view",
   SETTINGS_MANAGE:    "settings:manage",
+  // Nhân sự (hồ sơ nhân công — trang "Nhân sự"). Account tạo + sở hữu; hr/accountant chỉ đọc.
+  PERSONNEL_CREATE:     "personnel:create",
+  PERSONNEL_READ_OWN:   "personnel:read:own",
+  PERSONNEL_READ_ALL:   "personnel:read:all",
+  PERSONNEL_MANAGE_OWN: "personnel:manage:own",
+  PERSONNEL_MANAGE_ALL: "personnel:manage:all",
 };
 
 const P = PERMISSIONS;
@@ -63,6 +69,11 @@ export const PERMISSION_LABELS = {
   [P.COMPANY_MANAGE]:   "Quản lý công ty",
   [P.AUDIT_VIEW]:       "Xem nhật ký",
   [P.SETTINGS_MANAGE]:  "Cài đặt hệ thống",
+  [P.PERSONNEL_CREATE]:     "Tạo hồ sơ nhân sự",
+  [P.PERSONNEL_READ_OWN]:   "Xem hồ sơ mình tạo",
+  [P.PERSONNEL_READ_ALL]:   "Xem mọi hồ sơ nhân sự",
+  [P.PERSONNEL_MANAGE_OWN]: "Sửa/xóa hồ sơ mình tạo",
+  [P.PERSONNEL_MANAGE_ALL]: "Sửa/xóa mọi hồ sơ nhân sự",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -82,6 +93,9 @@ export const PERMISSION_GROUPS = [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
     P.AUDIT_VIEW, P.SETTINGS_MANAGE,
   ] },
+  { key: "personnel", label: "Nhân sự", perms: [
+    P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_OWN, P.PERSONNEL_MANAGE_ALL,
+  ] },
 ];
 
 const EMPLOYEE = [
@@ -100,6 +114,8 @@ const MANAGER = [
   P.AUDIT_VIEW,
   // Manager sees all customers and the cost/margin, and owns the product catalog.
   P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
+  // Nhân sự: Account TẠO hồ sơ + chỉ thấy/sửa của MÌNH (owner-scoped).
+  P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_MANAGE_OWN,
 ];
 
 const ADMIN = [
@@ -108,7 +124,14 @@ const ADMIN = [
   P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
+  // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ.
+  P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL,
 ];
+
+// Nhân sự (hr) + Kế toán (accountant): CHỈ XEM mọi hồ sơ nhân sự (read-only). Không tạo/sửa/xóa,
+// không thấy báo giá/khách/sản phẩm. (Kế toán cần xem lương/thuế/thanh toán; Nhân sự xem hồ sơ.)
+const HR = [P.PERSONNEL_READ_ALL];
+const ACCOUNTANT = [P.PERSONNEL_READ_ALL];
 
 // Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
 // đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ
@@ -122,6 +145,8 @@ export const ROLE_PERMISSIONS = {
   admin: new Set(ADMIN),
   manager: new Set(MANAGER),
   account_hn: new Set(ACCOUNT_HN),
+  hr: new Set(HR),
+  accountant: new Set(ACCOUNTANT),
   // 'employee' role bỏ từ 2026-06-15 (chỉ còn admin + manager + account_hn). EMPLOYEE vẫn
   // giữ làm danh sách quyền NỀN mà MANAGER kế thừa (`...EMPLOYEE`), không phải vai trò gán được.
 };
@@ -130,6 +155,8 @@ export const ROLE_LABELS = {
   admin: "Quản trị",
   manager: "Account",
   account_hn: "Account Hà Nội",
+  hr: "Nhân sự",
+  accountant: "Kế toán",
 };
 
 /** Does this role hold the given permission? (`:all` implies `:own`.) */
