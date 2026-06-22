@@ -1,4 +1,4 @@
-// Integration tests for the quote lifecycle (create → submit → approve) and the
+// Integration tests for the quote lifecycle (create → converted/lost) and the
 // RBAC / terminal-state guards around it. Drives the REAL app via supertest —
 // requires a Postgres with the app schema (CI provides one; locally the suite
 // skips itself when the DB or schema is missing).
@@ -131,10 +131,12 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
     expect([a.body.projectVersion, b.body.projectVersion].sort()).toEqual([2, 3]); // KHÔNG phải [2,2]
   });
 
-  describe("lifecycle: create → submit → approve", () => {
+  // Vòng đời mới (luồng duyệt nội bộ BỎ 2026-06-22): Nháp → Khách chốt (converted) /
+  // Không chốt (lost). "Gửi khách" chỉ là export, không đổi trạng thái.
+  describe("lifecycle: create → khách chốt", () => {
     let quoteId;
 
-    it("manager creates a quote (no overseeing manager needed) → 201 with totals", async () => {
+    it("manager creates a quote → 201 draft with totals", async () => {
       const res = await manager.post("/api/quotes").send(quotePayload());
       expect(res.status).toBe(201);
       expect(res.body.status).toBe("draft");
@@ -144,56 +146,38 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       quoteId = res.body.id;
     });
 
-    it("approve before submit → 400 (not pending)", async () => {
-      const res = await admin.post(`/api/quotes/${quoteId}/approve`).send({});
-      expect(res.status).toBe(400);
-    });
-
-    it("manager submits their own → pending with an Approval row", async () => {
-      const res = await manager.post(`/api/quotes/${quoteId}/submit`);
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe("pending");
-      const ap = await prisma.approval.findFirst({ where: { quoteId, decision: "pending" } });
-      expect(ap).toBeTruthy();
-    });
-
-    it("a DIFFERENT manager cannot approve someone else's quote → 403", async () => {
-      const res = await manager2.post(`/api/quotes/${quoteId}/approve`).send({});
-      expect(res.status).toBe(403);
-    });
-
-    it("REGRESSION: cosmetic edit while pending does NOT orphan the approval", async () => {
-      // Before the fix, ANY edit bumped currentVersion, the pending Approval row
-      // (keyed by versionNo) became unreachable and approve always returned 400.
-      const before = await prisma.quote.findFirst({ where: { id: quoteId } });
-      const res = await admin.put(`/api/quotes/${quoteId}`).send({ title: `${TAG} báo giá test (đổi tiêu đề)` });
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe("pending"); // cosmetic edit doesn't reopen
-      const after = await prisma.quote.findFirst({ where: { id: quoteId } });
-      expect(after.currentVersion).toBe(before.currentVersion); // no version bump
-    });
-
-    it("manager SELF-APPROVES their own quote → approved (no admin needed)", async () => {
-      const res = await manager.post(`/api/quotes/${quoteId}/approve`).send({ comment: "tự duyệt" });
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe("approved");
-    });
-
-    it("price-affecting edit on an approved quote reopens it to draft", async () => {
-      const res = await admin.put(`/api/quotes/${quoteId}`).send({
+    it("a price-affecting edit on a draft re-prices it", async () => {
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({
         sheets: [{ templateId: template.id, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
       });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe("draft");
-      expect(res.body.total).toBe(540_000);
+      expect(res.body.total).toBe(540_000); // 500,000 + 8% VAT
     });
 
     it("REGRESSION: a discount-only PUT actually changes the total", async () => {
       // Quote is now draft with total 540,000 (500,000 + 8% VAT).
-      const res = await admin.put(`/api/quotes/${quoteId}`).send({ discount: 40_000 });
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({ discount: 40_000 });
       expect(res.status).toBe(200);
       expect(res.body.discount).toBe(40_000);
       expect(res.body.total).toBe(500_000); // 540,000 − 40,000
+    });
+
+    it("a plain MEMBER (no quote:send) cannot terminal-close the deal → 403", async () => {
+      // manager2 isn't owner/member here; segregation of duties also blocks self-close.
+      const res = await manager2.post(`/api/quotes/${quoteId}/mark-converted`).send({});
+      expect(res.status).toBe(403);
+    });
+
+    it("owner marks Khách chốt (mark-converted) → converted", async () => {
+      const res = await manager.post(`/api/quotes/${quoteId}/mark-converted`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("converted");
+    });
+
+    it("converted is terminal — re-marking is rejected", async () => {
+      const res = await manager.post(`/api/quotes/${quoteId}/mark-converted`).send({});
+      expect(res.status).toBe(400);
     });
   });
 

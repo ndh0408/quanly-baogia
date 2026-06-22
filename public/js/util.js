@@ -106,6 +106,9 @@ export function baoGiaTitleJS(t) {
   return /^BANG\s*BAO\s*GIA/.test(ascii) ? t : "BẢNG BÁO GIÁ - " + t;
 }
 
+// Vòng đời hiện tại CHỈ dùng: draft / converted / lost.
+// pending/approved/rejected/sent là LEGACY (luồng duyệt nội bộ bỏ 2026-06-22) — giữ nhãn
+// để hiển thị đúng cho dữ liệu cũ (enum Prisma không migration), KHÔNG sinh mới nữa.
 export const STATUS_LABEL = {
   draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
   sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt",
@@ -118,6 +121,7 @@ export const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—"
 export const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
 
 // Friendly Vietnamese descriptions for audit action codes.
+// quote.submit/approve/reject là LEGACY (luồng duyệt bỏ 2026-06-22) — chỉ còn map nhật ký cũ.
 export const ACTION_LABEL = {
   "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.submit": "Trình duyệt báo giá",
   "quote.approve": "Duyệt báo giá", "quote.reject": "Từ chối báo giá", "quote.send": "Gửi báo giá cho khách",

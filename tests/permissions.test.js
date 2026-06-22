@@ -17,28 +17,22 @@ describe("roleCan — role × permission matrix", () => {
     // 'employee' role REMOVED (2026-06-15) — it now grants NOTHING (fails closed).
     ["employee", P.QUOTE_CREATE, false],
     ["employee", P.QUOTE_READ_OWN, false],
-    // manager (regular non-admin: creates/edits/sends OWN quotes; SELF-APPROVES own)
+    // manager (regular non-admin: creates/edits/sends OWN quotes)
     ["manager", P.QUOTE_CREATE, true],
     ["manager", P.QUOTE_READ_OWN, true],
     ["manager", P.QUOTE_UPDATE_OWN, true],
-    ["manager", P.QUOTE_SUBMIT, true],
     ["manager", P.QUOTE_READ_ALL, false],      // managers see only their own quotes
     ["manager", P.QUOTE_UPDATE_ALL, false],
-    ["manager", P.QUOTE_APPROVE, false],       // no blanket approve (can't approve others')
-    ["manager", P.QUOTE_APPROVE_OWN, true],    // CAN self-approve their OWN quote
     ["manager", P.QUOTE_SEND, true],
     ["manager", P.CUSTOMER_MANAGE_ALL, true],
     ["manager", P.PRODUCT_MANAGE, true],
     ["manager", P.PRODUCT_READ_COST, true],
     ["manager", P.AUDIT_VIEW, true],
     ["manager", P.USER_MANAGE, false],
-    // admin (director) — approves everything, incl. own
+    // admin (director) — full quote control
     ["admin", P.QUOTE_READ_ALL, true],
     ["admin", P.QUOTE_UPDATE_ALL, true],
     ["admin", P.QUOTE_DELETE_ALL, true],
-    ["admin", P.QUOTE_APPROVE, true],
-    ["admin", P.QUOTE_APPROVE_OWN, true],      // inherits via ...MANAGER
-    ["admin", P.QUOTE_REJECT, true],
     ["admin", P.USER_MANAGE, true],
     ["admin", P.SETTINGS_MANAGE, true],
   ])("roleCan(%s, %s) → %s", (role, perm, want) => {
@@ -65,9 +59,6 @@ describe("canOnQuote — ownership & membership", () => {
   const admin = { userId: 9, role: "admin" };
   const quote = { createdById: 1, members: [{ id: 2 }] };
 
-  // NOTE: "submit" is NOT decided by canOnQuote — routes enforce it as
-  // can(P.QUOTE_SUBMIT) && canOnQuote("update"), since no quote:submit:own
-  // permission exists in the catalog.
   it("owner can read/update/delete own quote", () => {
     for (const a of ["read", "update", "delete"]) {
       expect(canOnQuote(owner, a, quote)).toBe(true);

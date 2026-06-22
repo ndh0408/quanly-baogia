@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622l";
-import { state, can } from "../core/state.js?v=20260622l";
-import { api } from "../core/api.js?v=20260622l";
+} from "../util.js?v=20260622m";
+import { state, can } from "../core/state.js?v=20260622m";
+import { api } from "../core/api.js?v=20260622m";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622l";
+} from "../ui.js?v=20260622m";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -100,7 +100,7 @@ function openInviteModal() {
       <label style="grid-column:1/-1">Quyền
         <select id="iv-role">
           <option value="manager">Account</option>
-          <option value="admin">Quản trị viên</option>
+          <option value="admin">Quản trị</option>
           <option value="account_hn">Account Hà Nội</option>
         </select>
       </label>
@@ -155,7 +155,7 @@ function openUserModal(u) {
       <label>Quyền
         <select name="role">
           <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Account</option>
-          <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
+          <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị</option>
           <option value="account_hn" ${u?.role === "account_hn" ? "selected" : ""}>Account Hà Nội</option>
         </select>
       </label>
@@ -593,48 +593,6 @@ function editProduct(id) {
   });
 }
 
-// ---------------- Approval queue ----------------
-export async function renderApprovalQueue(el) {
-  el.innerHTML = `<h1>Hàng chờ duyệt</h1><div id="aq-body">${skeleton(4)}</div>`;
-  try {
-    const r = await api("/api/approvals/queue");
-    const body = document.getElementById("aq-body");
-    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
-    body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
-      <thead><tr><th scope="col">Mã dự án</th><th scope="col">Tiêu đề</th><th scope="col">Khách hàng</th>
-        <th scope="col" style="text-align:right">Tổng tiền</th><th scope="col">Người tạo</th><th scope="col">Thao tác</th></tr></thead>
-      <tbody>${r.data.map(a => `
-        <tr>
-          <td><strong>${escapeHtml(a.quote?.projectCode || a.quote?.quoteNumber)}</strong></td>
-          <td>${escapeHtml(a.quote?.title || "")}</td>
-          <td>${escapeHtml(a.quote?.toCompany || "")}</td>
-          <td style="text-align:right">${fmtMoney(a.quote?.total)} đ</td>
-          <td>${escapeHtml(a.quote?.createdBy?.displayName || "")}</td>
-          <td style="white-space:nowrap">
-            <button class="btn btn-sm" data-open="${a.quote?.id}">Xem</button>
-            <button class="btn btn-sm btn-primary" data-approve="${a.quote?.id}">✓ Duyệt</button>
-            ${can("quote:approve") ? `<button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>` : ""}
-          </td>
-        </tr>`).join("")}</tbody></table></div>`;
-    body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
-      goToQuote(b.dataset.open); // deep-link; routeFromHash fetches + renders, back returns here
-    }));
-    body.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", async () => {
-      const comment = await promptModal("Duyệt báo giá", "Ghi chú khi duyệt (không bắt buộc):", { placeholder: "VD: Đồng ý mức giá này" });
-      if (comment === null) return;
-      try { await api(`/api/quotes/${b.dataset.approve}/approve`, { method: "POST", body: JSON.stringify({ comment }) });
-        toast("Đã duyệt", "success"); renderApprovalQueue(el);
-      } catch (e) { toast(e.message, "error"); }
-    }));
-    body.querySelectorAll("[data-reject]").forEach(b => b.addEventListener("click", async () => {
-      const comment = await promptModal("Từ chối báo giá", "Lý do từ chối (bắt buộc):", { required: true, min: 5, requiredMsg: "Vui lòng nhập lý do (ít nhất 5 ký tự)", placeholder: "VD: Giá cao hơn ngân sách, cần giảm 10%" });
-      if (!comment) return;
-      try { await api(`/api/quotes/${b.dataset.reject}/reject`, { method: "POST", body: JSON.stringify({ comment }) });
-        toast("Đã từ chối", "success"); renderApprovalQueue(el);
-      } catch (e) { toast(e.message, "error"); }
-    }));
-  } catch (e) { toast(e.message, "error"); }
-}
 
 // ---------------- Notifications ----------------
 export async function renderNotifications(el) {
@@ -669,10 +627,10 @@ export async function renderNotifications(el) {
 }
 
 // ---------------- Quản lý dự án (admin) ----------------
-// GIAI ĐOẠN 1 (chỉ hiển thị): liệt kê báo giá ĐÃ DUYỆT theo bố cục bảng theo dõi dự
-// án/hoá đơn. Báo giá NHIỀU SHEET được tách mỗi sheet thành 1 dòng: Mã Sản Xuất thêm
-// hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
-// sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
+// Liệt kê báo giá ĐÃ CHỐT (converted) theo bố cục bảng theo dõi dự án/hoá đơn. Báo giá
+// NHIỀU SHEET được tách mỗi sheet thành 1 dòng: Mã Sản Xuất thêm hậu tố _1/_2… theo
+// sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng sheet. Luồng hoàn chỉnh:
+// Hoá đơn → Thanh toán → Done (admin nhập Số HĐ + Ngày TT). Nguồn: /api/quotes/projects.
 export async function renderProjects(el) {
   // CHỈ admin xem TẤT CẢ dự án + ký mọi dự án. Người có canSign (vd Lan Anh): CHỈ xem + ký dự án
   // DO MÌNH TẠO. Quản lý thường: chỉ xem dự án của mình, không ký. (server đã lọc theo người tạo)

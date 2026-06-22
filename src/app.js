@@ -26,7 +26,6 @@ import metaRoutes from "./routes/meta.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import customersRoutes from "./routes/customers.routes.js";
 import productsRoutes from "./routes/products.routes.js";
-import approvalsRoutes from "./routes/approvals.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import mfaRoutes from "./routes/mfa.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
@@ -229,7 +228,6 @@ export function createApp() {
   app.use("/api/audit", auditRoutes);
   app.use("/api/customers", customersRoutes);
   app.use("/api/products", productsRoutes);
-  app.use("/api/approvals", approvalsRoutes);
   app.use("/api/notifications", notificationsRoutes);
   app.use("/api/mfa", mfaRoutes);
   app.use("/api/analytics", analyticsRoutes);

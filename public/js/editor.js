@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622l";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622l";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622l";
-import { api } from "./core/api.js?v=20260622l";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622l";
-import { refreshPreview } from "./preview.js?v=20260622l";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622m";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622m";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622m";
+import { api } from "./core/api.js?v=20260622m";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622m";
+import { refreshPreview } from "./preview.js?v=20260622m";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -47,8 +47,8 @@ export function renderEditor(el, quote) {
   el.oninput = () => { if (state.page === "edit") window._editorDirty = true; };
   el.onchange = () => { if (state.page === "edit") window._editorDirty = true; };
 
-  // Mirror the server rule: admin edits all; manager edits only own; employee
-  // edits own or quotes they're a member of (and only while draft/rejected).
+  // Mirror the server rule: admin edits all; manager edits only own or quotes
+  // they're a member of — and only while NOT terminal (chưa converted/lost).
   const isMember = (q.members || []).some(m => m.id === state.user.id);
   const canUpdate = state.user.role === "admin" || q.createdById === state.user.id || isMember;
   const editable = isNew
@@ -426,37 +426,6 @@ function bindActions(q, isNew) {
       saveBtn.textContent = label;
     }
   });
-  const submitBtn = document.getElementById("btn-submit");
-  if (submitBtn) submitBtn.addEventListener("click", async () => {
-    if (isNew) { toast("Vui lòng Lưu trước khi trình duyệt", "error"); return; }
-    // Guard against submitting an empty/zero-value quote (all prices still 0).
-    const tot = Number(q.total || 0);
-    if (tot <= 0 && !(await confirmModal("Tổng đang là 0", "Tổng báo giá đang là 0 (chưa nhập đơn giá). Vẫn trình duyệt?"))) return;
-    try {
-      const updated = await api(`/api/quotes/${q.id}/submit`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã gửi duyệt", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
-  const approveBtn = document.getElementById("btn-approve");
-  if (approveBtn) approveBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/approve`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã duyệt", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
-  const rejectBtn = document.getElementById("btn-reject");
-  if (rejectBtn) rejectBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/reject`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã từ chối", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
   const excelBtn = document.getElementById("btn-excel");
   if (excelBtn) excelBtn.addEventListener("click", () => {
     window.open(`/api/export/${q.id}.xlsx?t=${Date.now()}`, "_blank");   // cache-bust CDN
@@ -469,15 +438,6 @@ function bindActions(q, isNew) {
   if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
   const membersBtn = document.getElementById("btn-members");
   if (membersBtn) membersBtn.addEventListener("click", () => openMembersModal(q));
-  const sendBtn = document.getElementById("btn-send");
-  if (sendBtn) sendBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/send`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã đánh dấu là đã gửi khách", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
   const convertBtn = document.getElementById("btn-convert");
   if (convertBtn) convertBtn.addEventListener("click", async () => {
     if (!(await confirmModal("Khách chốt", "Khách đã đồng ý — đánh dấu báo giá này ĐÃ CHỐT?", { confirmText: "Đã chốt" }))) return;

@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260622l";
+} from "./js/util.js?v=20260622m";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260622l";
+} from "./js/core/state.js?v=20260622m";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622l";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622m";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
   initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260622l";
+} from "./js/ui.js?v=20260622m";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
-  renderApprovalQueue, renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260622l";
+  renderNotifications, renderProjects, renderAuditLog, renderPermissions,
+} from "./js/pages/admin.js?v=20260622m";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622l";
+} from "./js/pages/quotes.js?v=20260622m";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260622l";
+} from "./js/editor.js?v=20260622m";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
@@ -477,7 +477,6 @@ function renderMain() {
   else if (state.page === "users") renderUsers(mainEl);
   else if (state.page === "profile") renderProfile(mainEl);
   else if (state.page === "dashboard") renderDashboard(mainEl);
-  else if (state.page === "approvals") renderApprovalQueue(mainEl);
   else if (state.page === "notifications") renderNotifications(mainEl);
   else if (state.page === "audit") renderAuditLog(mainEl);
   else if (state.page === "permissions") renderPermissions(mainEl);
@@ -488,11 +487,11 @@ function renderMain() {
 function onRealtimeChange(d) {
   refreshBadges();
   const PAGES_FOR = {
-    quote: ["list", "dashboard", "approvals", "notifications"],
+    quote: ["list", "dashboard", "notifications"],
     customer: ["customers"],
     user: ["users"],
   };
-  const pages = PAGES_FOR[d.entity] || ["list", "dashboard", "approvals", "customers", "users", "notifications"];
+  const pages = PAGES_FOR[d.entity] || ["list", "dashboard", "customers", "users", "notifications"];
   if (pages.includes(state.page)) scheduleMainRefresh();
 }
 

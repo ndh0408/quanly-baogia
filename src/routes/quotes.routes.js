@@ -22,7 +22,7 @@ import {
   presentQuoteRow,
   extraTableSum,
 } from "../quoteUtils.js";
-import { createQuote, updateQuote, submitQuote, approveQuote, rejectQuote } from "../quoteService.js";
+import { createQuote, updateQuote } from "../quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
 
 const router = Router();
@@ -345,26 +345,6 @@ router.put(
   })
 );
 
-// SUBMIT for approval
-router.post(
-  "/:id/submit",
-  validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
-    const quote = await submitQuote(req);
-    res.json(presentQuote(quote));
-  })
-);
-
-// APPROVE — authz (admin any / manager own) enforced inside the service.
-router.post(
-  "/:id/approve",
-  validate({ params: idParam, body: z.object({ comment: z.string().max(2000).optional() }).default({}) }),
-  asyncHandler(async (req, res) => {
-    const quote = await approveQuote(req);
-    res.json(presentQuote(quote));
-  })
-);
-
 // ===== Luồng GIÁ HÀ NỘI (role account_hn) — phân quyền + write-guard nằm TRONG service =====
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
@@ -375,48 +355,6 @@ router.post("/:id/hn/submit", validate({ params: idParam }),
   asyncHandler(async (req, res) => { const q = await submitHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
   asyncHandler(async (req, res) => { const q = await reviewHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
-
-router.post(
-  "/:id/reject",
-  requirePermission(P.QUOTE_REJECT),
-  validate({ params: idParam, body: z.object({ comment: z.string().min(5, "Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)").max(2000, "Lý do tối đa 2000 ký tự") }) }),
-  asyncHandler(async (req, res) => {
-    const quote = await rejectQuote(req);
-    res.json(presentQuote(quote));
-  })
-);
-
-// SEND quote to customer (after approval)
-router.post(
-  "/:id/send",
-  requirePermission(P.QUOTE_SEND),
-  validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
-    if (!existing) return res.status(404).json({ error: "Không tìm thấy báo giá" });
-    if (!canOnQuote(req.session, "read", existing)) {
-      return res.status(403).json({ error: "Bạn không có quyền gửi báo giá này" });
-    }
-    if (existing.status !== "approved" && existing.status !== "sent") {
-      return res.status(400).json({ error: "Chỉ gửi được sau khi duyệt" });
-    }
-    // Optimistic guard closes the TOCTOU between the read above and the write:
-    // only transition if the row is STILL approved/sent (a concurrent edit/reject
-    // could have moved it). count===0 → state changed under us → 409.
-    const upd = await prisma.quote.updateMany({
-      where: { id, status: { in: ["approved", "sent"] } },
-      data: { status: "sent", sentAt: new Date() },
-    });
-    if (!upd.count) {
-      return res.status(409).json({ error: "Báo giá vừa đổi trạng thái — vui lòng tải lại" });
-    }
-    const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
-    await audit(req, "quote.send", { resource: "quote", resourceId: id, before: { status: existing.status } });
-    emitWebhook("quote.sent", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
-    res.json(presentQuote(quote));
-  })
-);
 
 router.post(
   "/:id/mark-converted",

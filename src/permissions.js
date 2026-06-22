@@ -15,10 +15,8 @@ export const PERMISSIONS = {
   QUOTE_UPDATE_ALL:   "quote:update:all",
   QUOTE_DELETE_OWN:   "quote:delete:own",
   QUOTE_DELETE_ALL:   "quote:delete:all",
-  QUOTE_SUBMIT:       "quote:submit",
-  QUOTE_APPROVE:      "quote:approve",       // duyệt MỌI báo giá (admin)
-  QUOTE_APPROVE_OWN:  "quote:approve:own",   // tự duyệt báo giá DO MÌNH tạo (manager)
-  QUOTE_REJECT:       "quote:reject",
+  // Luồng duyệt nội bộ (quote:submit/approve/approve:own/reject) ĐÃ BỎ 2026-06-22:
+  // vòng đời mới draft → converted/lost; "duyệt" thật = quyết định của khách.
   QUOTE_SEND:         "quote:send",
   QUOTE_EXPORT:       "quote:export",
   // Customers (CRM)
@@ -50,10 +48,6 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_UPDATE_ALL]: "Sửa mọi báo giá",
   [P.QUOTE_DELETE_OWN]: "Xóa báo giá của mình",
   [P.QUOTE_DELETE_ALL]: "Xóa mọi báo giá",
-  [P.QUOTE_SUBMIT]:     "Trình duyệt",
-  [P.QUOTE_APPROVE]:    "Duyệt mọi báo giá",
-  [P.QUOTE_APPROVE_OWN]: "Tự duyệt báo giá của mình",
-  [P.QUOTE_REJECT]:     "Từ chối báo giá",
   [P.QUOTE_SEND]:       "Gửi cho khách",
   [P.QUOTE_EXPORT]:     "Xuất Excel/PDF",
   [P.CUSTOMER_READ_OWN]:   "Xem KH của mình",
@@ -75,7 +69,7 @@ export const PERMISSION_LABELS = {
 export const PERMISSION_GROUPS = [
   { key: "quote", label: "Báo giá", perms: [
     P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_READ_ALL, P.QUOTE_UPDATE_OWN, P.QUOTE_UPDATE_ALL,
-    P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL, P.QUOTE_SUBMIT, P.QUOTE_APPROVE, P.QUOTE_APPROVE_OWN, P.QUOTE_REJECT,
+    P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
   ] },
   { key: "customer", label: "Khách hàng", perms: [
@@ -92,7 +86,7 @@ export const PERMISSION_GROUPS = [
 
 const EMPLOYEE = [
   P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_UPDATE_OWN, P.QUOTE_DELETE_OWN,
-  P.QUOTE_SUBMIT, P.QUOTE_EXPORT,
+  P.QUOTE_EXPORT,
   // CRM: the customer-code list is a SHARED company directory — everyone can read/select any
   // customer code when making a quote; a salesperson still only manages (create/edit/delete)
   // the ones they own. Product catalog is read-only (selling price, no cost).
@@ -103,7 +97,6 @@ const MANAGER = [
   ...EMPLOYEE,
   // Manager sees/edits only the quotes THEY created (not everyone's).
   P.QUOTE_SEND,
-  P.QUOTE_APPROVE_OWN,   // tự duyệt báo giá DO MÌNH tạo — không cần admin (vẫn KHÔNG duyệt được của người khác)
   P.AUDIT_VIEW,
   // Manager sees all customers and the cost/margin, and owns the product catalog.
   P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
@@ -111,9 +104,8 @@ const MANAGER = [
 
 const ADMIN = [
   ...MANAGER,
-  // Director sees & edits & deletes ALL quotes, and is the only approver.
+  // Director sees & edits & deletes ALL quotes.
   P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
-  P.QUOTE_APPROVE, P.QUOTE_REJECT,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
 ];
@@ -135,7 +127,7 @@ export const ROLE_PERMISSIONS = {
 };
 
 export const ROLE_LABELS = {
-  admin: "Quản trị viên",
+  admin: "Quản trị",
   manager: "Account",
   account_hn: "Account Hà Nội",
 };
@@ -162,8 +154,8 @@ export function can(session, permission) {
  * role has ":all", OR has ":own" and owns the resource (createdById === userId).
  */
 // Actions a non-admin gets on a quote merely by being a MEMBER (added to it).
-// (Membership grants view + edit + submit, but NOT delete.)
-const QUOTE_MEMBER_ACTIONS = new Set(["read", "update", "submit"]);
+// (Membership grants view + edit, but NOT delete.)
+const QUOTE_MEMBER_ACTIONS = new Set(["read", "update"]);
 
 export function canOnQuote(session, action, quote) {
   const role = session?.role;
