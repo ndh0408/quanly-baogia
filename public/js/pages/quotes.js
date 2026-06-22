@@ -4,11 +4,11 @@
 // newExtraGrid, extraTableSumLocal) are INJECTED via setQuoteDeps at boot to avoid a circular
 // import with the entry module. Function bodies are an exact byte-for-byte copy of the former
 // app.js — zero behavior change.
-import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622i";
-import { state, can, canOnQuote } from "../core/state.js?v=20260622i";
-import { api } from "../core/api.js?v=20260622i";
-import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622i";
-import { pickCustomer } from "./admin.js?v=20260622i";
+import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622j";
+import { state, can, canOnQuote } from "../core/state.js?v=20260622j";
+import { api } from "../core/api.js?v=20260622j";
+import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622j";
+import { pickCustomer } from "./admin.js?v=20260622j";
 
 // Injected at boot (setQuoteDeps) — resolve to app.js's editor/shell functions (hoisted there).
 let render, goToQuote, codeLabel, shortTitle, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal;
@@ -98,7 +98,7 @@ export async function renderList(el) {
           <tr>
             <th scope="col">Mã dự án</th>${isAdmin ? `<th scope="col">Người tạo</th>` : ""}${isAccountHn ? `<th scope="col">Người giao</th>` : ""}<th scope="col">Tiêu đề</th>
             <th scope="col">Ngày</th><th scope="col">Sheet</th>${isAccountHn ? "" : `<th scope="col" style="text-align:right">Tổng (VNĐ)</th>`}
-            <th scope="col">Công ty</th>${isAccountHn ? "" : `<th scope="col">Khách</th><th scope="col">Mã KH</th>`}
+            <th scope="col">Công ty</th>${isAccountHn ? `<th scope="col" style="text-align:right">Tổng HN</th>` : `<th scope="col">Khách</th><th scope="col">Mã KH</th>`}
             <th scope="col">Trạng thái</th>${isAccountHn ? "" : `<th scope="col">Thao tác</th>`}
           </tr>
         </thead>
@@ -110,10 +110,10 @@ export async function renderList(el) {
               ${isAccountHn ? `<td data-label="Người giao">${escapeHtml(q.createdBy?.displayName || "—")}</td>` : ""}
               <td data-label="Tiêu đề" title="${escapeHtml(q.title)}">${escapeHtml(shortTitle(q.title))}</td>
               <td data-label="Ngày">${fmtDate(q.quoteDate)}</td>
-              <td data-label="Sheet" style="text-align:center">${q.sheetCount ?? (q.sheets?.length || 0)}</td>
+              <td data-label="Sheet" style="text-align:center">${isAccountHn ? (q.hnSheetCount ?? 0) : (q.sheetCount ?? (q.sheets?.length || 0))}</td>
               ${isAccountHn ? "" : `<td data-label="Tổng (VNĐ)" style="text-align:right">${fmtMoney(q.total)}</td>`}
               <td data-label="Công ty">${escapeHtml(q.company?.shortName || q.company?.name || "")}</td>
-              ${isAccountHn ? "" : `<td data-label="Khách">${escapeHtml(q.toCompany)}</td>
+              ${isAccountHn ? `<td data-label="Tổng HN" style="text-align:right">${fmtMoney(q.hnTotal)}</td>` : `<td data-label="Khách">${escapeHtml(q.toCompany)}</td>
               <td data-label="Mã KH">${q.customerCode ? `<strong>${escapeHtml(q.customerCode)}</strong>` : "—"}</td>`}
               <td data-label="Trạng thái">${isAccountHn ? hnListBadge(q.hnStatus) : `<span class="status ${q.status}">${statusLabel(q.status)}</span>`}</td>
               ${isAccountHn ? "" : `<td class="cell-actions">

@@ -66,12 +66,20 @@ describe("quoteUtils (extracted pure helpers)", () => {
         customer: { code: "KH26009", name: "Bí Mật" }, hnStatus: "assigned",
         company: { id: 2, name: "Gia Nguyễn", shortName: "GN" },
         createdBy: { id: 3, displayName: "Chị Quản Lý" }, _count: { sheets: 1 },
+        sheets: [{ extraTables: [
+          { category: "hcm", items: [{ kind: "item", quantity: 9, unitPrice: 9999 }] },   // KHÔNG tính vào HN
+          { category: "hanoi", items: [{ kind: "item", quantity: 2, unitPrice: 1000 }] },  // 2000
+          { category: "hanoi", items: [{ kind: "item", quantity: 1, unitPrice: 500, days: 3 }] }, // 1500
+        ] }],
       }, { viewerRole: "account_hn" });
       // Phải có: định danh + người giao + trạng thái HN
       expect(row._accountHnRow).toBe(true);
       expect(row.hnStatus).toBe("assigned");
       expect(row.createdBy).toEqual({ id: 3, displayName: "Chị Quản Lý" });
-      // TUYỆT ĐỐI không lộ tiền/khách cho account_hn
+      // Số sheet HN + tổng HN = đúng phần account tự làm (gộp bảng "hanoi", bỏ hcm)
+      expect(row.hnSheetCount).toBe(2);
+      expect(row.hnTotal).toBe(3500);
+      // TUYỆT ĐỐI không lộ tiền/khách báo giá chính cho account_hn
       expect(row.total).toBeUndefined();
       expect(row.toCompany).toBeUndefined();
       expect(row.customerCode).toBeUndefined();

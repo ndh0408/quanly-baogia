@@ -109,13 +109,19 @@ export const QUOTE_LIST_SELECT = {
 export function presentQuoteRow(q, { viewerRole = null } = {}) {
   // 🔒 account_hn: danh sách CHỈ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
   if (viewerRole === "account_hn") {
+    // Số SHEET HN + TỔNG HN = đúng phần account TỰ LÀM (gộp các bảng "hanoi" của mọi sheet).
+    // Đây là số NỘI BỘ của chính account → hiện cho họ OK; vẫn KHÔNG lộ tiền/khách báo giá chính.
+    const hanoi = (q.sheets || []).flatMap((s) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t) => t && t.category === "hanoi"));
     return {
       id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
       title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
       company: q.company ? { id: q.company.id, name: q.company.name, shortName: q.company.shortName } : null,
       // "Người giao" — để account biết báo giá này của ai / ai kêu mình làm. KHÔNG lộ tiền/khách.
       createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
-      hnStatus: q.hnStatus ?? null, sheetCount: q._count?.sheets ?? 0,
+      hnStatus: q.hnStatus ?? null,
+      hnSheetCount: hanoi.length,
+      hnTotal: hanoi.reduce((a, t) => a + extraTableSum(t), 0),
+      sheetCount: q._count?.sheets ?? 0,
       _accountHnRow: true,
     };
   }

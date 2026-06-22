@@ -72,12 +72,17 @@ router.get(
       ] });
     }
     const where = { AND: filters };
+    // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
+    // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.
+    const listSelect = req.session.role === "account_hn"
+      ? { ...QUOTE_LIST_SELECT, sheets: { select: { extraTables: true } } }
+      : QUOTE_LIST_SELECT;
     const [total, rows] = await Promise.all([
       prisma.quote.count({ where }),
       prisma.quote.findMany({
         where,
         orderBy: { [sort]: order },
-        select: QUOTE_LIST_SELECT,   // slim projection — no logo, no sheets/items
+        select: listSelect,   // slim projection (account_hn: +sheets.extraTables để tính Tổng HN)
         skip: (page - 1) * size,
         take: size,
       }),
