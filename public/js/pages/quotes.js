@@ -474,7 +474,20 @@ export function renderAccountHnView(el, q) {
       </div>
     </div>`;
   const host = el.querySelector("#ahn-tables");
-  const newHnSheet = () => ({ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] });
+  const newHnSheet = (tplId) => ({ category: "hanoi", name: "", templateId: tplId || defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] });
+  // Danh sách MẪU để account chọn (có ngày / không ngày…) — ưu tiên mẫu cùng công ty báo giá.
+  const tplList0 = state.templates.filter((x) => x.companyId === q.companyId);
+  const tplList = tplList0.length ? tplList0 : state.templates;
+  // Mẫu KHÔNG có cột Số Ngày → dọn days cũ (giống clearDaysIfUnused của lưới chính): extraTableSum
+  // tính theo per-item days nên days sót sẽ PHỒNG Tổng HN. Chỉ chạy khi account còn sửa được.
+  if (editable) {
+    let cleaned = false;
+    q.hnSheets.forEach((hs) => (hs.hnTables || []).forEach((t) => {
+      const tp = state.templates.find((x) => x.id === t.templateId);
+      if (!(tp && tp.layout && tp.layout.hasDays)) (t.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } });
+    }));
+    if (cleaned) window._editorDirty = true;
+  }
   // Mỗi sheet báo giá → 1 khối; trong khối là các SHEET Hà Nội dạng TAB (Bảng 1, 2…) Y HỆT
   // phần "Bảng nội bộ" của quản lý: "+ Thêm sheet" / "✕" xoá / bấm tab để chuyển; xem 1 sheet/lúc.
   q.hnSheets.forEach((hs, si) => {
@@ -506,6 +519,7 @@ export function renderAccountHnView(el, q) {
         <div class="extra-table-head">
           <span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
           <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên sheet (tuỳ chọn)" data-si="${si}" data-ti="${active}" ${editable ? "" : "disabled"} />
+          ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px;white-space:nowrap">Mẫu: <select class="ahn-tpl" data-si="${si}">${tplList.map((x) => `<option value="${x.id}" ${x.id === t.templateId ? "selected" : ""}>${escapeHtml(x.name)}</option>`).join("")}</select></label>` : ""}
         </div>
         <div class="tbl-scroll"><table class="excel-table" id="${gid}">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>
       </div>`;
@@ -524,7 +538,16 @@ export function renderAccountHnView(el, q) {
     const tab = e.target.closest && e.target.closest(".sheet-tab[data-si]");
     if (tab) { const hs = q.hnSheets[+tab.dataset.si]; if (hs) { hs._activeHn = +tab.dataset.ti; renderAccountHnView(el, q); } return; }
     const add = e.target.closest && e.target.closest(".ahn-add-sheet[data-si]");
-    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { (hs.hnTables = hs.hnTables || []).push(newHnSheet()); hs._activeHn = hs.hnTables.length - 1; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { const cur = hs.hnTables[hs._activeHn]; (hs.hnTables = hs.hnTables || []).push(newHnSheet(cur && cur.templateId)); hs._activeHn = hs.hnTables.length - 1; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+  });
+  host.addEventListener("change", (e) => {
+    const s = e.target;
+    if (s.classList && s.classList.contains("ahn-tpl") && s.dataset.si != null) {
+      const hs = q.hnSheets[+s.dataset.si]; if (!hs) return;
+      const t = hs.hnTables[hs._activeHn]; if (!t) return;
+      t.templateId = +s.value; t._grid = newExtraGrid();   // đổi mẫu (có ngày/không ngày) → lưới mới; days dọn ở lần vẽ lại
+      window._editorDirty = true; renderAccountHnView(el, q);
+    }
   });
   host.addEventListener("input", (e) => {
     const s = e.target;
