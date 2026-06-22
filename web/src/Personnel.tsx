@@ -8,11 +8,10 @@ const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("v
 const toInputDate = (v: unknown) => (v ? new Date(v as string).toISOString().slice(0, 10) : "");
 const PAGE_SIZE = 50;
 
-export function PersonnelPage({ me }: { me: Me }) {
+export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const [rows, setRows] = useState<Personnel[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
   const [summary, setSummary] = useState<Summary>({ salary: 0, pit: 0, taxableIncome: 0 });
-  const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
@@ -28,7 +27,7 @@ export function PersonnelPage({ me }: { me: Me }) {
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const res = await api.listPersonnel(q, page, PAGE_SIZE, sort, order);
+      const res = await api.listPersonnel(query, page, PAGE_SIZE, sort, order);
       setRows(res.data);
       setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
       setSummary(res.summary);
@@ -37,10 +36,10 @@ export function PersonnelPage({ me }: { me: Me }) {
     } finally {
       setLoading(false);
     }
-  }, [q, page, sort, order]);
+  }, [query, page, sort, order]);
 
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
-  useEffect(() => { setPage(1); }, [q, sort, order]); // đổi tìm kiếm/sắp xếp → về trang 1
+  useEffect(() => { const t = setTimeout(load, query ? 300 : 0); return () => clearTimeout(t); }, [load, query]);
+  useEffect(() => { setPage(1); }, [query, sort, order]);
 
   const onDelete = async (r: Personnel) => {
     if (!(await confirmModal("Xóa hồ sơ", `Xóa hồ sơ "${r.fullName}"? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
@@ -48,10 +47,10 @@ export function PersonnelPage({ me }: { me: Me }) {
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
   };
 
-  const toggleSort = (key: string) => {
-    if (!SORTABLE.has(key)) return;
-    if (sort === key) setOrder((o) => (o === "asc" ? "desc" : "asc"));
-    else { setSort(key); setOrder("asc"); }
+  const toggleSort = (k: string) => {
+    if (!SORTABLE.has(k)) return;
+    if (sort === k) setOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else { setSort(k); setOrder("asc"); }
   };
 
   const renderCell = (k: string, r: Personnel, first: boolean) => {
@@ -72,7 +71,6 @@ export function PersonnelPage({ me }: { me: Me }) {
         <h2>Nhân sự</h2>
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
-        <input className="search" placeholder="Tìm: tên, dự án, mã, MST, SĐT, CCCD…" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
       </div>
 
@@ -81,7 +79,7 @@ export function PersonnelPage({ me }: { me: Me }) {
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <div className="empty">{q ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}</div>
+        <div className="empty">{query ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}</div>
       ) : (
         <div className="tbl-wrap">
           <table>

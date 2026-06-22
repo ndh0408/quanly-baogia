@@ -4,11 +4,11 @@
 // newExtraGrid, extraTableSumLocal) are INJECTED via setQuoteDeps at boot to avoid a circular
 // import with the entry module. Function bodies are an exact byte-for-byte copy of the former
 // app.js — zero behavior change.
-import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622p";
-import { state, can, canOnQuote } from "../core/state.js?v=20260622p";
-import { api } from "../core/api.js?v=20260622p";
-import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622p";
-import { pickCustomer } from "./admin.js?v=20260622p";
+import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622q";
+import { state, can, canOnQuote } from "../core/state.js?v=20260622q";
+import { api } from "../core/api.js?v=20260622q";
+import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622q";
+import { pickCustomer } from "./admin.js?v=20260622q";
 
 // Injected at boot (setQuoteDeps) — resolve to app.js's editor/shell functions (hoisted there).
 let render, goToQuote, codeLabel, shortTitle, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal;

@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260622p";
+} from "./js/util.js?v=20260622q";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260622p";
+} from "./js/core/state.js?v=20260622q";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622p";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622q";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
   initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260622p";
+} from "./js/ui.js?v=20260622q";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260622p";
+} from "./js/pages/admin.js?v=20260622q";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622p";
+} from "./js/pages/quotes.js?v=20260622q";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260622p";
+} from "./js/editor.js?v=20260622q";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
@@ -251,6 +251,13 @@ function renderLogin() {
 export function renderShell() {
   // Any non-editor page clears the unsaved flag (covers browser-back out of editor).
   if (state.page !== "edit") window._editorDirty = false;
+  // CHẾ ĐỘ NHÚNG: app React mới (/) nhúng các trang chưa port qua iframe /app?embed=1 →
+  // ẩn sidebar/topbar của app cũ, chỉ render nội dung (#main) để không bị 2 sidebar.
+  if (new URLSearchParams(location.search).get("embed") === "1") {
+    document.body.classList.add("embedded");
+    app.innerHTML = `<main class="main main-embed" id="main" tabindex="-1"></main>`;
+    return;
+  }
   const role = state.user.role;
   const themeIcon = (localStorage.getItem("theme") === "dark") ? "☀️" : "🌙";
   const nav = (id, label, badge = "") =>
