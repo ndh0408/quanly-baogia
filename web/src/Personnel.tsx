@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type Me, type Personnel } from "./api";
-import { FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS } from "./fields";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { api, ApiError, type Me, type Personnel, type Summary } from "./api";
+import { FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass } from "./fields";
+import { toast, confirmModal } from "./ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
 const toInputDate = (v: unknown) => (v ? new Date(v as string).toISOString().slice(0, 10) : "");
+const PAGE_SIZE = 50;
 
 export function PersonnelPage({ me }: { me: Me }) {
   const [rows, setRows] = useState<Personnel[]>([]);
-  const [total, setTotal] = useState(0);
+  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
+  const [summary, setSummary] = useState<Summary>({ salary: 0, pit: 0, taxableIncome: 0 });
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState("createdAt");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  // undefined = đóng form; null = tạo mới; object = sửa/xem
   const [editing, setEditing] = useState<Personnel | null | undefined>(undefined);
 
   const canCreate = me.permissions.includes("personnel:create");
@@ -23,24 +28,42 @@ export function PersonnelPage({ me }: { me: Me }) {
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const res = await api.listPersonnel(q);
-      setRows(res.data); setTotal(res.meta.total);
+      const res = await api.listPersonnel(q, page, PAGE_SIZE, sort, order);
+      setRows(res.data);
+      setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
+      setSummary(res.summary);
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu");
     } finally {
       setLoading(false);
     }
-  }, [q]);
+  }, [q, page, sort, order]);
 
-  useEffect(() => {
-    const t = setTimeout(load, q ? 300 : 0); // debounce khi gõ tìm kiếm
-    return () => clearTimeout(t);
-  }, [load, q]);
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
+  useEffect(() => { setPage(1); }, [q, sort, order]); // đổi tìm kiếm/sắp xếp → về trang 1
 
   const onDelete = async (r: Personnel) => {
-    if (!confirm(`Xóa hồ sơ "${r.fullName}"?`)) return;
-    try { await api.deletePersonnel(r.id); load(); }
-    catch (ex) { alert(ex instanceof ApiError ? ex.message : "Xóa thất bại"); }
+    if (!(await confirmModal("Xóa hồ sơ", `Xóa hồ sơ "${r.fullName}"? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
+    try { await api.deletePersonnel(r.id); toast("Đã xóa hồ sơ", "success"); load(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
+  };
+
+  const toggleSort = (key: string) => {
+    if (!SORTABLE.has(key)) return;
+    if (sort === key) setOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else { setSort(key); setOrder("asc"); }
+  };
+
+  const renderCell = (k: string, r: Personnel, first: boolean) => {
+    const f = FIELD_BY_KEY[k];
+    const v = r[k];
+    const cls = first ? "sticky-col" : f?.type === "money" ? "num" : "";
+    let content: ReactNode;
+    if (f?.type === "money") content = fmtMoney(v);
+    else if (f?.type === "date") content = fmtDate(v);
+    else if (f?.type === "status") content = v ? <span className={`status ${statusClass(v)}`}>{String(v)}</span> : <span className="muted">—</span>;
+    else content = v == null || v === "" ? "" : String(v);
+    return <td key={k} className={cls}>{content}</td>;
   };
 
   return (
@@ -49,22 +72,32 @@ export function PersonnelPage({ me }: { me: Me }) {
         <h2>Nhân sự</h2>
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
-        <input className="search" placeholder="Tìm: tên, dự án, mã, MST, SĐT…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="search" placeholder="Tìm: tên, dự án, mã, MST, SĐT, CCCD…" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
       </div>
 
-      {err && <div className="err">{err}</div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
 
       {loading ? (
-        <div className="muted">Đang tải…</div>
+        <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <div className="empty">Chưa có hồ sơ nào.</div>
+        <div className="empty">{q ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}</div>
       ) : (
         <div className="tbl-wrap">
           <table>
             <thead>
               <tr>
-                {TABLE_COLS.map((k) => <th key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>{FIELD_BY_KEY[k]?.label ?? k}</th>)}
+                {TABLE_COLS.map((k, i) => {
+                  const f = FIELD_BY_KEY[k];
+                  const sortable = SORTABLE.has(k);
+                  const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
+                  return (
+                    <th key={k} className={`${i === 0 ? "sticky-col" : ""} ${f?.type === "money" ? "num" : ""} ${sortable ? "sortable" : ""}`}
+                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : undefined}>
+                      {f?.label ?? k}{arrow}
+                    </th>
+                  );
+                })}
                 <th>Người tạo</th>
                 <th />
               </tr>
@@ -72,12 +105,7 @@ export function PersonnelPage({ me }: { me: Me }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  {TABLE_COLS.map((k) => {
-                    const f = FIELD_BY_KEY[k];
-                    const v = r[k];
-                    const text = f?.type === "money" ? fmtMoney(v) : f?.type === "date" ? fmtDate(v) : (v == null ? "" : String(v));
-                    return <td key={k} className={f?.type === "money" ? "num" : ""}>{text}</td>;
-                  })}
+                  {TABLE_COLS.map((k, i) => renderCell(k, r, i === 0))}
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
                     <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
@@ -86,10 +114,33 @@ export function PersonnelPage({ me }: { me: Me }) {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="sum-row">
+                <td className="sticky-col"><strong>Tổng (toàn bộ lọc)</strong></td>
+                {TABLE_COLS.slice(1).map((k) => (
+                  <td key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>
+                    {k === "salary" ? <strong>{fmtMoney(summary.salary)}</strong>
+                      : k === "pit" ? <strong>{fmtMoney(summary.pit)}</strong>
+                      : ""}
+                  </td>
+                ))}
+                <td /><td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
-      <div className="muted total">Tổng: {total} hồ sơ</div>
+
+      <div className="list-foot">
+        <span className="muted">Tổng: {meta.total} hồ sơ · Lương: {fmtMoney(summary.salary)} đ · Thuế TNCN: {fmtMoney(summary.pit)} đ</span>
+        {meta.pageCount > 1 && (
+          <div className="pager">
+            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
+            <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
+            <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau ›</button>
+          </div>
+        )}
+      </div>
 
       {editing !== undefined && (
         <RecordForm
@@ -117,13 +168,22 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
   const [form, setForm] = useState<Record<string, string>>(buildInitial);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const firstRef = useRef<HTMLInputElement>(null);
   const set = (k: string, v: string) => setForm((s) => ({ ...s, [k]: v }));
+
+  useEffect(() => {
+    firstRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const save = async () => {
     setErr(""); setSaving(true);
     try {
       if (rec) await api.updatePersonnel(rec.id, form);
       else await api.createPersonnel(form);
+      toast(rec ? "Đã lưu thay đổi" : "Đã thêm hồ sơ", "success");
       onSaved();
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Lưu thất bại");
@@ -135,9 +195,9 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pf-title" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3>{title}</h3>
+          <h3 id="pf-title">{title}</h3>
           <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
@@ -145,24 +205,30 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
             <fieldset key={g}>
               <legend>{g}</legend>
               <div className="grid">
-                {FIELDS.filter((f) => f.group === g).map((f) => (
-                  <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
-                    <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}</span>
-                    {f.type === "textarea" ? (
-                      <textarea value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)} />
-                    ) : (
-                      <input
-                        type={f.type === "date" ? "date" : f.type === "money" || f.type === "number" ? "number" : "text"}
-                        value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)}
-                      />
-                    )}
-                  </label>
-                ))}
+                {FIELDS.filter((f) => f.group === g).map((f, idx) => {
+                  const isMoney = f.type === "money" || f.type === "number";
+                  const isFirst = g === GROUPS[0] && idx === 0;
+                  return (
+                    <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
+                      <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
+                      {f.type === "textarea" ? (
+                        <textarea value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)} />
+                      ) : (
+                        <input
+                          ref={isFirst ? firstRef : undefined}
+                          type={f.type === "date" ? "date" : isMoney ? "number" : "text"}
+                          {...(isMoney ? { min: "0", step: "1000", inputMode: "numeric" as const } : {})}
+                          value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
               </div>
             </fieldset>
           ))}
         </div>
-        {err && <div className="err">{err}</div>}
+        {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
           <button className="btn" onClick={onClose}>Đóng</button>
           {!readOnly && (

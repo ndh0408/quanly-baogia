@@ -13,6 +13,10 @@ export function App() {
 
   useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null)).finally(() => setLoading(false));
+    // Mất phiên giữa chừng (401 từ api.ts) → quay về đăng nhập.
+    const onExpired = () => setMe(null);
+    window.addEventListener("auth:expired", onExpired);
+    return () => window.removeEventListener("auth:expired", onExpired);
   }, []);
 
   if (loading) return <div className="center muted">Đang tải…</div>;

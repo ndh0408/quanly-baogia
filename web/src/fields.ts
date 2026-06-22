@@ -1,5 +1,5 @@
 // Metadata 1 nguồn cho cả FORM (đủ cột) lẫn BẢNG (cột rút gọn). Khớp model PersonnelRecord.
-export type FieldType = "text" | "number" | "money" | "date" | "textarea";
+export type FieldType = "text" | "number" | "money" | "date" | "textarea" | "status";
 export type Field = { key: string; label: string; type: FieldType; group: string };
 
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
@@ -39,12 +39,26 @@ export const FIELDS: Field[] = [
   { key: "preTaxAmount", label: "Tiền trước thuế", type: "money", group: "Hợp đồng" },
   // Thanh toán
   { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán" },
-  { key: "payment", label: "Thanh toán", type: "text", group: "Thanh toán" },
-  { key: "confirmed", label: "Xác nhận", type: "text", group: "Thanh toán" },
+  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán" },
+  { key: "confirmed", label: "Xác nhận", type: "status", group: "Thanh toán" },
   { key: "note", label: "Note", type: "textarea", group: "Thanh toán" },
 ];
 
-// Cột hiển thị trong bảng danh sách (rút gọn — phần còn lại xem trong form).
-export const TABLE_COLS = ["fullName", "projectName", "projectCode", "salary", "pit", "workStart", "payment", "confirmed"];
+// Cột hiển thị trong bảng danh sách (đủ cột quan trọng; cuộn ngang; cột đầu ghim).
+export const TABLE_COLS = [
+  "fullName", "idCard", "taxCode", "projectName", "projectCode", "company",
+  "salary", "pit", "preTaxAmount", "workStart", "workEnd", "payment", "confirmed",
+];
+// Backend chỉ cho sort theo các key này; trong bảng chỉ fullName hiển thị → cho click sort.
+export const SORTABLE = new Set(["fullName"]);
 
 export const FIELD_BY_KEY: Record<string, Field> = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
+
+// Giá trị cột trạng thái → class màu (.status.ok / .danger / .neutral).
+export function statusClass(v: unknown): "ok" | "danger" | "neutral" {
+  const s = String(v ?? "").toLowerCase().trim();
+  if (!s) return "neutral";
+  if (/(chưa|không|hủy|huỷ|trễ|nợ|fail)/.test(s)) return "danger";
+  if (/(đã|done|ok|xong|duyệt|ký|thanh ?toán|hoàn|đủ)/.test(s)) return "ok";
+  return "neutral";
+}

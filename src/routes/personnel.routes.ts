@@ -20,7 +20,7 @@ const str = (max = 1000) => z.preprocess((v) => (v === "" || v == null ? null : 
 const money = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.number().nonnegative().nullable());
 const date = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.date().nullable());
 
-const PersonnelCreate = z.object({
+const personnelShape = {
   fullName: z.string().min(1, "Vui lòng nhập Họ & Tên").max(200),
   taxCode: str(40), birthYear: str(40), idCard: str(40), idIssueDate: date, idIssuePlace: str(200),
   address: str(500), bankAccount: str(60), bankName: str(120), phone: str(40),
@@ -30,8 +30,18 @@ const PersonnelCreate = z.object({
   projectNameContract: str(300), laborContractNo: str(80), laborContractDate: date,
   salesContractNo: str(80), salesContractDate: date, purchaseOrder: str(120),
   preTaxAmount: money, accountingNote: str(1000), payment: str(200), confirmed: str(200), note: str(1000),
-});
-const PersonnelUpdate = PersonnelCreate.partial();
+};
+// Ràng buộc logic (chỉ kiểm khi field có mặt — dùng cho cả create lẫn update).
+const refineLogic = (v: Record<string, unknown>, ctx: z.RefinementCtx) => {
+  if (v.workStart && v.workEnd && new Date(v.workEnd as string) < new Date(v.workStart as string))
+    ctx.addIssue({ code: "custom", path: ["workEnd"], message: "Ngày kết thúc phải từ ngày bắt đầu trở đi" });
+  if (v.idIssueDate && new Date(v.idIssueDate as string) > new Date())
+    ctx.addIssue({ code: "custom", path: ["idIssueDate"], message: "Ngày cấp không thể ở tương lai" });
+  if (v.salary != null && v.pit != null && Number(v.pit) > Number(v.salary))
+    ctx.addIssue({ code: "custom", path: ["pit"], message: "Thuế TNCN không thể lớn hơn lương" });
+};
+const PersonnelCreate = z.object(personnelShape).superRefine(refineLogic);
+const PersonnelUpdate = z.object(personnelShape).partial().superRefine(refineLogic);
 
 const ListQuery = z.object({
   q: z.string().max(200).optional(),
@@ -57,6 +67,9 @@ const ownerSelect = { createdBy: { select: { id: true, displayName: true, userna
 
 router.get(
   "/",
+  // CỔNG QUYỀN: cần personnel:read:own (manager) — :all (hr/accountant/admin) tự bao :own.
+  // Role không có quyền nhân sự (vd account_hn) → 403 ngay, không lọt vào lọc dữ liệu.
+  requirePermission(P.PERSONNEL_READ_OWN),
   validate({ query: ListQuery }),
   asyncHandler(async (req: Request, res: Response) => {
     const { q, page, size, sort, order } = req.query as any;
@@ -73,13 +86,20 @@ router.get(
         { idCard: { contains: q } },
       ];
     }
-    const [total, data] = await Promise.all([
+    const [total, data, agg] = await Promise.all([
       prisma.personnelRecord.count({ where }),
       prisma.personnelRecord.findMany({
         where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       }),
+      prisma.personnelRecord.aggregate({ where, _sum: { salary: true, pit: true, taxableIncome: true } }),
     ]);
-    res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) } });
+    // Tổng lương/thuế/thu nhập của TOÀN bộ kết quả lọc (không chỉ trang hiện tại).
+    const summary = {
+      salary: Number(agg._sum.salary ?? 0),
+      pit: Number(agg._sum.pit ?? 0),
+      taxableIncome: Number(agg._sum.taxableIncome ?? 0),
+    };
+    res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary });
   })
 );
 
