@@ -474,47 +474,61 @@ export function renderAccountHnView(el, q) {
       </div>
     </div>`;
   const host = el.querySelector("#ahn-tables");
+  const newHnSheet = () => ({ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] });
+  // Mỗi sheet báo giá → 1 khối; trong khối là các SHEET Hà Nội dạng TAB (Bảng 1, 2…) Y HỆT
+  // phần "Bảng nội bộ" của quản lý: "+ Thêm sheet" / "✕" xoá / bấm tab để chuyển; xem 1 sheet/lúc.
   q.hnSheets.forEach((hs, si) => {
-    if (!Array.isArray(hs.hnTables) || !hs.hnTables.length) hs.hnTables = [{ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] }];
-    if (q.hnSheets.length > 1) {   // nhiều sheet: ghi rõ bảng nào thuộc sheet nào để khỏi lẫn
-      const lab = document.createElement("div"); lab.className = "muted"; lab.style.cssText = "margin:14px 0 2px;font-weight:600";
-      lab.textContent = `Sheet: ${hs.sheetName || ("#" + (si + 1))}`;
-      host.appendChild(lab);
-    }
-    hs.hnTables.forEach((t, ti) => {
-      if (!t.templateId) t.templateId = defaultHnTemplateId(q);
-      const tpl = state.templates.find((x) => x.id === t.templateId) || state.templates.find((x) => x.companyId === q.companyId) || state.templates[0];
-      const showDetail = !!(tpl && tpl.layout && tpl.layout.hasDetail), usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
-      const gid = `ahn-grid-${si}-${ti}`;
-      const div = document.createElement("div"); div.className = "extra-table"; div.style.marginTop = "10px";
-      div.innerHTML = `<div class="extra-table-head"><span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
-          <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên bảng (tuỳ chọn)" data-si="${si}" data-ti="${ti}" ${editable ? "" : "disabled"} />${editable && hs.hnTables.length > 1 ? `<button type="button" class="btn btn-sm ahn-rm-table" data-si="${si}" data-ti="${ti}" title="Xóa bảng này">✕ Xóa bảng</button>` : ""}</div>
-        <div class="tbl-scroll"><table class="excel-table" id="${gid}">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>`;
-      host.appendChild(div);
-      if (typeof t.groupSubtotal !== "boolean") t.groupSubtotal = true;
-      if (!Array.isArray(t.items) || !t.items.length) t.items = [blankHnItem()];
-      if (!t._grid) Object.defineProperty(t, "_grid", { value: newExtraGrid(), writable: true, configurable: true, enumerable: false });
-      try {
-        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; } });
-      } catch (err) { console.error("[ahn grid]", err); }
-    });
-    if (editable) {   // account tự thêm được nhiều "bảng Hà Nội" trong sheet (sheet chính là của quản lý)
-      const addWrap = document.createElement("div"); addWrap.style.cssText = "margin:8px 0 4px";
-      addWrap.innerHTML = `<button type="button" class="btn btn-sm ahn-add-table" data-si="${si}">+ Thêm bảng Hà Nội</button>`;
-      host.appendChild(addWrap);
-    }
+    if (!Array.isArray(hs.hnTables) || !hs.hnTables.length) hs.hnTables = [newHnSheet()];
+    let active = Number.isInteger(hs._activeHn) ? hs._activeHn : 0;
+    if (active >= hs.hnTables.length) active = hs.hnTables.length - 1;
+    if (active < 0) active = 0;
+    hs._activeHn = active;
+    const t = hs.hnTables[active];
+    if (!t.templateId) t.templateId = defaultHnTemplateId(q);
+    const tpl = state.templates.find((x) => x.id === t.templateId) || state.templates.find((x) => x.companyId === q.companyId) || state.templates[0];
+    const showDetail = !!(tpl && tpl.layout && tpl.layout.hasDetail), usesDays = !!(tpl && tpl.layout && tpl.layout.hasDays);
+    const gid = `ahn-grid-${si}`;
+    const block = document.createElement("div"); block.className = "extra-cat-group"; block.style.marginTop = "10px";
+    block.innerHTML = `
+      <div class="extra-cat-grouphead">
+        <span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
+        ${q.hnSheets.length > 1 ? `<span class="muted" style="font-size:12px">${escapeHtml(hs.sheetName || ("Sheet #" + (si + 1)))}</span>` : ""}
+        ${editable ? `<button type="button" class="btn btn-sm ahn-add-sheet" data-si="${si}">+ Thêm sheet</button>` : ""}
+        <span class="muted" style="font-size:11.5px">${hs.hnTables.length} sheet</span>
+      </div>
+      <div class="sheet-tabs extra-sheet-tabs">
+        ${hs.hnTables.map((tt, ti) => `<div class="sheet-tab ${ti === active ? "active" : ""}" data-si="${si}" data-ti="${ti}">
+          <span>${escapeHtml(tt.name || ("Bảng " + (ti + 1)))}</span>
+          ${editable && hs.hnTables.length > 1 ? `<span class="rm-tab" data-rm-si="${si}" data-rm-ti="${ti}" title="Xoá sheet này">✕</span>` : ""}
+        </div>`).join("")}
+      </div>
+      <div class="extra-table">
+        <div class="extra-table-head">
+          <span class="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
+          <input class="ahn-name" value="${escapeHtml(t.name || "")}" placeholder="Tên sheet (tuỳ chọn)" data-si="${si}" data-ti="${active}" ${editable ? "" : "disabled"} />
+        </div>
+        <div class="tbl-scroll"><table class="excel-table" id="${gid}">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>
+      </div>`;
+    host.appendChild(block);
+    if (typeof t.groupSubtotal !== "boolean") t.groupSubtotal = true;
+    if (!Array.isArray(t.items) || !t.items.length) t.items = [blankHnItem()];
+    if (!t._grid) Object.defineProperty(t, "_grid", { value: newExtraGrid(), writable: true, configurable: true, enumerable: false });
+    try {
+      drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; } });
+    } catch (err) { console.error("[ahn grid]", err); }
   });
   if (!editable) return;
-  const newHnTable = () => ({ category: "hanoi", name: "", templateId: defaultHnTemplateId(q), groupSubtotal: true, items: [blankHnItem()] });
+  host.addEventListener("click", (e) => {
+    const rm = e.target.closest && e.target.closest(".rm-tab[data-rm-si]");
+    if (rm) { e.stopPropagation(); const si = +rm.dataset.rmSi, ti = +rm.dataset.rmTi; const hs = q.hnSheets[si]; if (hs && Array.isArray(hs.hnTables) && hs.hnTables.length > 1) { hs.hnTables.splice(ti, 1); let a = hs._activeHn || 0; if (a > ti) a--; if (a >= hs.hnTables.length) a = hs.hnTables.length - 1; if (a < 0) a = 0; hs._activeHn = a; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    const tab = e.target.closest && e.target.closest(".sheet-tab[data-si]");
+    if (tab) { const hs = q.hnSheets[+tab.dataset.si]; if (hs) { hs._activeHn = +tab.dataset.ti; renderAccountHnView(el, q); } return; }
+    const add = e.target.closest && e.target.closest(".ahn-add-sheet[data-si]");
+    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { (hs.hnTables = hs.hnTables || []).push(newHnSheet()); hs._activeHn = hs.hnTables.length - 1; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+  });
   host.addEventListener("input", (e) => {
     const s = e.target;
-    if (s.classList && s.classList.contains("ahn-name") && s.dataset.si != null) { const hs = q.hnSheets[+s.dataset.si]; if (hs && hs.hnTables[+s.dataset.ti]) { hs.hnTables[+s.dataset.ti].name = s.value; window._editorDirty = true; } }
-  });
-  host.addEventListener("click", (e) => {
-    const add = e.target.closest && e.target.closest(".ahn-add-table");
-    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { (hs.hnTables = hs.hnTables || []).push(newHnTable()); window._editorDirty = true; renderAccountHnView(el, q); } return; }
-    const rm = e.target.closest && e.target.closest(".ahn-rm-table");
-    if (rm) { const hs = q.hnSheets[+rm.dataset.si]; if (hs && Array.isArray(hs.hnTables) && hs.hnTables.length > 1) { hs.hnTables.splice(+rm.dataset.ti, 1); window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    if (s.classList && s.classList.contains("ahn-name") && s.dataset.si != null) { const hs = q.hnSheets[+s.dataset.si]; if (hs && hs.hnTables[+s.dataset.ti]) { hs.hnTables[+s.dataset.ti].name = s.value; window._editorDirty = true; const tn = host.querySelector(`.sheet-tab[data-si="${s.dataset.si}"][data-ti="${s.dataset.ti}"] span`); if (tn) tn.textContent = s.value || ("Bảng " + (+s.dataset.ti + 1)); } }
   });
   el.querySelector("#ahn-save").addEventListener("click", () => saveHnPart(q, false));
   el.querySelector("#ahn-submit").addEventListener("click", () => { if (confirm("Gửi duyệt phần Hà Nội? Sau khi gửi sẽ không sửa được cho tới khi quản lý duyệt/trả.")) saveHnPart(q, true); });
