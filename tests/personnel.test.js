@@ -64,8 +64,8 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
 
   it("OWNER-SCOPING: manager A chỉ thấy của mình; manager B KHÔNG thấy hồ sơ của A", async () => {
     await mgrB.post("/api/personnel").send(payload({ fullName: `${TAG} B1` }));
-    const a = await mgrA.get("/api/personnel").query({ q: TAG, size: 200 });
-    const b = await mgrB.get("/api/personnel").query({ q: TAG, size: 200 });
+    const a = await mgrA.get("/api/personnel").query({ q: TAG });
+    const b = await mgrB.get("/api/personnel").query({ q: TAG });
     expect(a.body.data.every((r) => r.createdById === mgrAU.id)).toBe(true);
     expect(b.body.data.every((r) => r.createdById === mgrBU.id)).toBe(true);
     expect(a.body.data.some((r) => r.id === recAId)).toBe(true);
@@ -74,7 +74,7 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
 
   it("admin + hr + accountant thấy TẤT CẢ hồ sơ", async () => {
     for (const ag of [admin, hr, acct]) {
-      const r = await ag.get("/api/personnel").query({ q: TAG, size: 200 });
+      const r = await ag.get("/api/personnel").query({ q: TAG });
       expect(r.status).toBe(200);
       expect(r.body.data.map((x) => x.id)).toContain(recAId);
     }
@@ -125,7 +125,7 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
   it("manager A xóa hồ sơ của mình → 200, list KHÔNG còn (soft-delete ẩn)", async () => {
     const r = await mgrA.delete(`/api/personnel/${recAId}`);
     expect(r.status).toBe(200);
-    const a = await mgrA.get("/api/personnel").query({ q: TAG, size: 200 });
+    const a = await mgrA.get("/api/personnel").query({ q: TAG });
     expect(a.body.data.some((x) => x.id === recAId)).toBe(false);
   });
 
