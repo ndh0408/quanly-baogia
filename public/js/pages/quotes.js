@@ -478,6 +478,9 @@ export function renderAccountHnView(el, q) {
   // Danh sách MẪU để account chọn (có ngày / không ngày…) — ưu tiên mẫu cùng công ty báo giá.
   const tplList0 = state.templates.filter((x) => x.companyId === q.companyId);
   const tplList = tplList0.length ? tplList0 : state.templates;
+  // Tổng GỘP tất cả sheet Hà Nội (mọi tab) — để thấy tổng chung, khỏi bấm từng tab.
+  const grandTotal = () => q.hnSheets.reduce((a, hs) => a + (hs.hnTables || []).reduce((b, t) => b + extraTableSumLocal(t), 0), 0);
+  const totalSheets = () => q.hnSheets.reduce((a, hs) => a + (hs.hnTables || []).length, 0);
   // Mẫu KHÔNG có cột Số Ngày → dọn days cũ (giống clearDaysIfUnused của lưới chính): extraTableSum
   // tính theo per-item days nên days sót sẽ PHỒNG Tổng HN. Chỉ chạy khi account còn sửa được.
   if (editable) {
@@ -528,18 +531,27 @@ export function renderAccountHnView(el, q) {
     if (!Array.isArray(t.items) || !t.items.length) t.items = [blankHnItem()];
     if (!t._grid) Object.defineProperty(t, "_grid", { value: newExtraGrid(), writable: true, configurable: true, enumerable: false });
     try {
-      drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; } });
+      drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: `#${gid}`, fxBar: false, totalLabel: "HN", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; }, onCellInput: () => { window._editorDirty = true; const v = host.querySelector(".ahn-grand-val"); if (v) v.textContent = fmtMoney(grandTotal()); } });
     } catch (err) { console.error("[ahn grid]", err); }
   });
-  if (!editable) return;
+  // Tổng GỘP mọi sheet — chỉ hiện khi có >1 sheet (1 sheet đã có "Tổng HN" riêng), thấy cả khi đã gửi.
+  if (totalSheets() > 1) {
+    const gt = document.createElement("div"); gt.className = "ahn-grand-row";
+    gt.style.cssText = "margin-top:12px;display:flex;justify-content:flex-end;gap:10px;align-items:baseline;font-weight:700;font-size:14px";
+    gt.innerHTML = `Tổng tất cả ${totalSheets()} sheet Hà Nội: <span class="ahn-grand-val" style="color:var(--danger);font-size:16px">${fmtMoney(grandTotal())}</span>`;
+    host.appendChild(gt);
+  }
+  // 1 click handler: chuyển tab CHẠY CẢ KHI chỉ-xem (đã gửi/đã duyệt) để xem lại từng sheet;
+  // ✕ xoá + "+ Thêm sheet" CHỈ khi còn sửa được.
   host.addEventListener("click", (e) => {
     const rm = e.target.closest && e.target.closest(".rm-tab[data-rm-si]");
-    if (rm) { e.stopPropagation(); const si = +rm.dataset.rmSi, ti = +rm.dataset.rmTi; const hs = q.hnSheets[si]; if (hs && Array.isArray(hs.hnTables) && hs.hnTables.length > 1) { hs.hnTables.splice(ti, 1); let a = hs._activeHn || 0; if (a > ti) a--; if (a >= hs.hnTables.length) a = hs.hnTables.length - 1; if (a < 0) a = 0; hs._activeHn = a; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    if (rm) { if (!editable) return; e.stopPropagation(); const si = +rm.dataset.rmSi, ti = +rm.dataset.rmTi; const hs = q.hnSheets[si]; if (hs && Array.isArray(hs.hnTables) && hs.hnTables.length > 1) { hs.hnTables.splice(ti, 1); let a = hs._activeHn || 0; if (a > ti) a--; if (a >= hs.hnTables.length) a = hs.hnTables.length - 1; if (a < 0) a = 0; hs._activeHn = a; window._editorDirty = true; renderAccountHnView(el, q); } return; }
+    const add = e.target.closest && e.target.closest(".ahn-add-sheet[data-si]");
+    if (add) { if (!editable) return; const hs = q.hnSheets[+add.dataset.si]; if (hs) { const cur = hs.hnTables[hs._activeHn]; (hs.hnTables = hs.hnTables || []).push(newHnSheet(cur && cur.templateId)); hs._activeHn = hs.hnTables.length - 1; window._editorDirty = true; renderAccountHnView(el, q); } return; }
     const tab = e.target.closest && e.target.closest(".sheet-tab[data-si]");
     if (tab) { const hs = q.hnSheets[+tab.dataset.si]; if (hs) { hs._activeHn = +tab.dataset.ti; renderAccountHnView(el, q); } return; }
-    const add = e.target.closest && e.target.closest(".ahn-add-sheet[data-si]");
-    if (add) { const hs = q.hnSheets[+add.dataset.si]; if (hs) { const cur = hs.hnTables[hs._activeHn]; (hs.hnTables = hs.hnTables || []).push(newHnSheet(cur && cur.templateId)); hs._activeHn = hs.hnTables.length - 1; window._editorDirty = true; renderAccountHnView(el, q); } return; }
   });
+  if (!editable) return;
   host.addEventListener("change", (e) => {
     const s = e.target;
     if (s.classList && s.classList.contains("ahn-tpl") && s.dataset.si != null) {
