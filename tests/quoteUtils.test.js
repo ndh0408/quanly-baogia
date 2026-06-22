@@ -101,5 +101,28 @@ describe("quoteUtils (extracted pure helpers)", () => {
       expect(out).toHaveLength(1);
       expect(out[0].category).toBe("hcm");
     });
+    it("giữ MỌI sheet Hà Nội + dữ liệu (account thêm nhiều sheet, kể cả sheet trống, không mất)", () => {
+      const out = sanitizeExtraTables([
+        { category: "hanoi", name: "Bảng 1", templateId: 3, groupSubtotal: true, items: [
+          { kind: "item", name: "Vách", quantity: 2, unitPrice: 1000 },
+          { kind: "section", label: "A", name: "Nhóm A", quantity: 3 },
+        ] },
+        { category: "hanoi", name: "Bảng 2", templateId: 3, groupSubtotal: false, items: [
+          { kind: "item", name: "Sàn", quantity: 5, unitPrice: 200, days: 2 },
+        ] },
+        { category: "hanoi", name: "Bảng 3 trống", templateId: 3, items: [] }, // sheet trống vẫn phải giữ → tab không biến mất
+      ]);
+      expect(out).toHaveLength(3);                  // không rớt sheet nào
+      expect(out[0].name).toBe("Bảng 1");
+      expect(out[0].items).toHaveLength(2);         // giữ đủ item + dòng nhóm
+      expect(out[0].items[1].kind).toBe("section");
+      expect(out[0].items[1].label).toBe("A");
+      expect(out[1].name).toBe("Bảng 2");
+      expect(out[1].groupSubtotal).toBe(false);
+      expect(out[1].items[0].quantity).toBe(5);
+      expect(out[1].items[0].days).toBe(2);
+      expect(out[2].name).toBe("Bảng 3 trống");
+      expect(out[2].items).toHaveLength(0);         // sheet trống vẫn còn
+    });
   });
 });
