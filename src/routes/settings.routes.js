@@ -13,6 +13,13 @@ router.use(requireAuth);
 // key is admin-only — prevents leaking config to every logged-in user.
 const PUBLIC_SETTING_KEYS = new Set(["notif.channels"]);
 
+// Bound the stored value: any JSON shape, but reject blobs > 64KB (defence beyond the
+// 2MB body cap) so an admin can't stuff unbounded JSON into a settings row.
+const settingValue = z.unknown().refine(
+  (v) => { try { return JSON.stringify(v ?? null).length <= 65_536; } catch { return false; } },
+  { message: "Giá trị cấu hình quá lớn hoặc không hợp lệ (tối đa 64KB)" }
+);
+
 // Full dump = admin only.
 router.get(
   "/",
@@ -40,7 +47,7 @@ router.get(
 router.put(
   "/:key",
   requireRole("admin"),
-  validate({ params: z.object({ key: z.string().min(1).max(80) }), body: z.any() }),
+  validate({ params: z.object({ key: z.string().min(1).max(80) }), body: settingValue }),
   asyncHandler(async (req, res) => {
     const value = req.body;
     const row = await prisma.setting.upsert({

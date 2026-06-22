@@ -7,6 +7,7 @@ import { validate } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
 import { runExportJob } from "../exportQueue.js";
+import { createLimiter } from "../rateLimit.js";
 import { audit } from "../audit.js";
 
 // JSON-safe copy of the quote for the worker thread (normalizes Prisma Decimals →
@@ -23,8 +24,20 @@ router.use(requireAuth);
 // see ("KHÔNG export"). Gate both .xlsx and .pdf on the export permission; the
 // per-quote ownership check stays inside each handler to also stop IDOR.
 router.use(requirePermission(P.QUOTE_EXPORT));
+// Dedicated limiter + size guard: synchronous export generation is CPU/memory heavy
+// and is otherwise only covered by the generic api limiter. Oversized quotes must go
+// through the async BullMQ queue, not pin the event loop here.
+router.use(createLimiter("export", { windowMs: 60_000, max: 30 }));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
+
+const MAX_EXPORT_SHEETS = 100;
+const MAX_EXPORT_ITEMS = 20_000;
+function exportTooBig(quote) {
+  const sheets = quote.sheets?.length || 0;
+  const items = (quote.sheets || []).reduce((n, s) => n + (s.items?.length || 0), 0);
+  return sheets > MAX_EXPORT_SHEETS || items > MAX_EXPORT_ITEMS;
+}
 
 router.get(
   "/:id.xlsx",
@@ -48,6 +61,9 @@ router.get(
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
+    }
+    if (exportTooBig(quote)) {
+      return res.status(413).json({ error: "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng xuất nền (async)" });
     }
 
     const buf = await runExportJob("xlsx", plain(quote), () => buildQuoteBuffer(quote));
@@ -83,6 +99,9 @@ router.get(
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
+    }
+    if (exportTooBig(quote)) {
+      return res.status(413).json({ error: "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng xuất nền (async)" });
     }
 
     const pdfQuote = {

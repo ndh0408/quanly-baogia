@@ -119,6 +119,13 @@ export function createApp() {
     })
   );
 
+  // helmet 8 no longer emits Permissions-Policy; lock down powerful browser features
+  // the app never uses so an injected/embedded context can't request them.
+  app.use((_req, res, next) => {
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()");
+    next();
+  });
+
   // gzip/deflate text responses (JS/CSS/JSON). ~70-80% smaller over the wire.
   // IMPORTANT: never compress Server-Sent Events — the compressor buffers the stream
   // and delays/withholds realtime events (the classic "SSE works intermittently" bug).

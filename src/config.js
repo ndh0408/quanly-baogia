@@ -103,4 +103,11 @@ if (config.NODE_ENV === "production" && !config.APP_BASE_URL) {
 if (!config.APP_BASE_URL) config.APP_BASE_URL = `http://localhost:${config.PORT}`;
 config.APP_BASE_URL = config.APP_BASE_URL.replace(/\/+$/, "");
 
+// Rate limiters share their counters via Redis. Without REDIS_URL they silently fall
+// back to a per-process in-memory store, so on a multi-instance prod deploy the
+// login/API limits are multiplied per instance and brute-force lockout weakens.
+if (config.NODE_ENV === "production" && !config.REDIS_URL) {
+  console.warn("⚠️  REDIS_URL is not set in production — rate limiting falls back to a per-process store; set REDIS_URL if you run more than one app instance.");
+}
+
 export const isProd = config.NODE_ENV === "production";

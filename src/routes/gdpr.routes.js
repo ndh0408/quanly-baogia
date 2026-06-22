@@ -60,8 +60,9 @@ async function exportUser(userId) {
     prisma.quote.findMany({
       where: { createdById: userId },
       include: { sheets: { include: { items: true } } },
+      take: 1000,
     }),
-    prisma.customer.findMany({ where: { ownerId: userId } }),
+    prisma.customer.findMany({ where: { ownerId: userId }, take: 5000 }),
     prisma.auditEvent.findMany({
       where: { actorId: userId },
       orderBy: { createdAt: "desc" },
