@@ -113,6 +113,8 @@ export function presentQuoteRow(q, { viewerRole = null } = {}) {
       id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
       title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
       company: q.company ? { id: q.company.id, name: q.company.name, shortName: q.company.shortName } : null,
+      // "Người giao" — để account biết báo giá này của ai / ai kêu mình làm. KHÔNG lộ tiền/khách.
+      createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
       hnStatus: q.hnStatus ?? null, sheetCount: q._count?.sheets ?? 0,
       _accountHnRow: true,
     };

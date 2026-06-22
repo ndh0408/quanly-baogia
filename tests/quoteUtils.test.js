@@ -58,6 +58,25 @@ describe("quoteUtils (extracted pure helpers)", () => {
       expect(row.customerName).toBe("Acme");
       expect(row.sheetCount).toBe(3);
     });
+
+    it("account_hn row exposes assigner (createdBy) + hnStatus but NEVER leaks money/customer", () => {
+      const row = presentQuoteRow({
+        id: 7, quoteNumber: "GN26002", projectCode: "GN26002", title: "Nhà Mình",
+        status: "approved", total: "29404600", toCompany: "Khách Bí Mật",
+        customer: { code: "KH26009", name: "Bí Mật" }, hnStatus: "assigned",
+        company: { id: 2, name: "Gia Nguyễn", shortName: "GN" },
+        createdBy: { id: 3, displayName: "Chị Quản Lý" }, _count: { sheets: 1 },
+      }, { viewerRole: "account_hn" });
+      // Phải có: định danh + người giao + trạng thái HN
+      expect(row._accountHnRow).toBe(true);
+      expect(row.hnStatus).toBe("assigned");
+      expect(row.createdBy).toEqual({ id: 3, displayName: "Chị Quản Lý" });
+      // TUYỆT ĐỐI không lộ tiền/khách cho account_hn
+      expect(row.total).toBeUndefined();
+      expect(row.toCompany).toBeUndefined();
+      expect(row.customerCode).toBeUndefined();
+      expect(row.customerName).toBeUndefined();
+    });
   });
 
   describe("extraTableSum", () => {

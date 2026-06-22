@@ -24,7 +24,7 @@ import {
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260619j";
+} from "./js/pages/quotes.js?v=20260622b";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
@@ -280,7 +280,7 @@ export function renderShell() {
           <div class="nav-group-label" role="presentation">Công việc</div>
           ${nav("dashboard", NAV_ICON.dashboard + "<span>Tổng quan</span>")}
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
-          ${nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>")}
+          ${can("quote:create") ? nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>") : ""}
           ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
           ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}

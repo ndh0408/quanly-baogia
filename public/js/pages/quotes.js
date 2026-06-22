@@ -16,6 +16,19 @@ export function setQuoteDeps(d) {
   ({ render, goToQuote, codeLabel, shortTitle, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal } = d);
 }
 
+// account_hn: nhãn trạng thái LUỒNG HN cho danh sách (khác status báo giá khách). Tái dùng
+// màu .status có sẵn để khỏi thêm CSS.
+const HN_LIST_STATUS = {
+  assigned:  { label: "Đang làm", cls: "sent" },
+  submitted: { label: "Chờ duyệt", cls: "pending" },
+  approved:  { label: "Đã duyệt", cls: "approved" },
+  rejected:  { label: "Bị trả", cls: "rejected" },
+};
+function hnListBadge(st) {
+  const s = HN_LIST_STATUS[st] || { label: "Chưa giao", cls: "draft" };
+  return `<span class="status ${s.cls}">${s.label}</span>`;
+}
+
 export async function renderList(el) {
   el.innerHTML = `<h1>Danh sách báo giá</h1>
     <div class="toolbar">
@@ -27,7 +40,7 @@ export async function renderList(el) {
         ${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
       </select>
       <button class="btn" id="btn-reload">Tải lại</button>
-      <button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>
+      ${can("quote:create") ? `<button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>` : ""}
     </div>
     <div id="list-body">${skeleton(6)}</div>`;
   document.getElementById("filter-status").value = state.filter.status;
@@ -62,7 +75,7 @@ export async function renderList(el) {
     reload();
   });
   document.getElementById("btn-reload").addEventListener("click", reload);
-  document.getElementById("btn-new").addEventListener("click", () => {
+  document.getElementById("btn-new")?.addEventListener("click", () => {
     state.page = "new";
     render();
   });
@@ -77,15 +90,16 @@ export async function renderList(el) {
     const start = (m.page - 1) * PAGE_SIZE + 1;
     const end = (m.page - 1) * PAGE_SIZE + state.quoteList.length;
     const isAdmin = state.user?.role === "admin";   // cột "Người tạo" chỉ hiện cho admin
+    const isAccountHn = state.user?.role === "account_hn";   // account_hn: ẩn tiền/khách/thao tác, hiện "Người giao" + trạng thái HN
     body.innerHTML = `
       <div class="tbl-scroll">
       <table class="list-table cards-sm">
         <thead>
           <tr>
-            <th scope="col">Mã dự án</th>${isAdmin ? `<th scope="col">Người tạo</th>` : ""}<th scope="col">Tiêu đề</th>
-            <th scope="col">Ngày</th><th scope="col">Sheet</th><th scope="col" style="text-align:right">Tổng (VNĐ)</th>
-            <th scope="col">Công ty</th><th scope="col">Khách</th><th scope="col">Mã KH</th>
-            <th scope="col">Trạng thái</th><th scope="col">Thao tác</th>
+            <th scope="col">Mã dự án</th>${isAdmin ? `<th scope="col">Người tạo</th>` : ""}${isAccountHn ? `<th scope="col">Người giao</th>` : ""}<th scope="col">Tiêu đề</th>
+            <th scope="col">Ngày</th><th scope="col">Sheet</th>${isAccountHn ? "" : `<th scope="col" style="text-align:right">Tổng (VNĐ)</th>`}
+            <th scope="col">Công ty</th>${isAccountHn ? "" : `<th scope="col">Khách</th><th scope="col">Mã KH</th>`}
+            <th scope="col">Trạng thái</th>${isAccountHn ? "" : `<th scope="col">Thao tác</th>`}
           </tr>
         </thead>
         <tbody>
@@ -93,22 +107,23 @@ export async function renderList(el) {
             <tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
               <td data-label="Mã dự án"><strong>${escapeHtml(codeLabel(q))}</strong></td>
               ${isAdmin ? `<td data-label="Người tạo">${escapeHtml(q.createdBy?.displayName || "")}</td>` : ""}
+              ${isAccountHn ? `<td data-label="Người giao">${escapeHtml(q.createdBy?.displayName || "—")}</td>` : ""}
               <td data-label="Tiêu đề" title="${escapeHtml(q.title)}">${escapeHtml(shortTitle(q.title))}</td>
               <td data-label="Ngày">${fmtDate(q.quoteDate)}</td>
               <td data-label="Sheet" style="text-align:center">${q.sheetCount ?? (q.sheets?.length || 0)}</td>
-              <td data-label="Tổng (VNĐ)" style="text-align:right">${fmtMoney(q.total)}</td>
+              ${isAccountHn ? "" : `<td data-label="Tổng (VNĐ)" style="text-align:right">${fmtMoney(q.total)}</td>`}
               <td data-label="Công ty">${escapeHtml(q.company?.shortName || q.company?.name || "")}</td>
-              <td data-label="Khách">${escapeHtml(q.toCompany)}</td>
-              <td data-label="Mã KH">${q.customerCode ? `<strong>${escapeHtml(q.customerCode)}</strong>` : "—"}</td>
-              <td data-label="Trạng thái"><span class="status ${q.status}">${statusLabel(q.status)}</span></td>
-              <td class="cell-actions">
+              ${isAccountHn ? "" : `<td data-label="Khách">${escapeHtml(q.toCompany)}</td>
+              <td data-label="Mã KH">${q.customerCode ? `<strong>${escapeHtml(q.customerCode)}</strong>` : "—"}</td>`}
+              <td data-label="Trạng thái">${isAccountHn ? hnListBadge(q.hnStatus) : `<span class="status ${q.status}">${statusLabel(q.status)}</span>`}</td>
+              ${isAccountHn ? "" : `<td class="cell-actions">
                 <div class="row-actions">
                   <button class="act-btn act-excel" data-act="excel" data-id="${q.id}" title="Tải file Excel">📥 Excel</button>
                   <button class="act-btn" data-act="dup" data-id="${q.id}" title="Nhân bản thành báo giá mới">📋 Nhân bản</button>
                   <button class="act-btn" data-act="revise" data-id="${q.id}" title="Tạo bản mới CÙNG mã dự án (v2, v3…) để gửi khách">➕ Bản mới</button>
                   ${canDelete(q) ? `<button class="act-btn act-del" data-act="del" data-id="${q.id}" title="Xóa báo giá">🗑 Xóa</button>` : ""}
                 </div>
-              </td>
+              </td>`}
             </tr>
           `).join("")}
         </tbody>
