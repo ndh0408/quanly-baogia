@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260622q";
+} from "./js/util.js?v=20260622r";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260622q";
+} from "./js/core/state.js?v=20260622r";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622q";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622r";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
   initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260622q";
+} from "./js/ui.js?v=20260622r";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260622q";
+} from "./js/pages/admin.js?v=20260622r";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622q";
+} from "./js/pages/quotes.js?v=20260622r";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260622q";
+} from "./js/editor.js?v=20260622r";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
@@ -256,6 +256,7 @@ export function renderShell() {
   if (new URLSearchParams(location.search).get("embed") === "1") {
     document.body.classList.add("embedded");
     app.innerHTML = `<main class="main main-embed" id="main" tabindex="-1"></main>`;
+    renderMain(); // render nội dung trang vào #main (bỏ qua sidebar/topbar)
     return;
   }
   const role = state.user.role;

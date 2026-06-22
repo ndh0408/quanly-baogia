@@ -7,8 +7,8 @@
 import {
   escapeHtml, nl2br, safeLogoSrc, vnDateText, baoGiaTitleJS,
   pvRows, pvMoney, pvRowspan, quoteTotals, sheetSubtotalGrouped,
-} from "./util.js?v=20260622q";
-import { state } from "./core/state.js?v=20260622q";
+} from "./util.js?v=20260622r";
+import { state } from "./core/state.js?v=20260622r";
 
 let _pvTimer = null;
 // Debounced entry point the editor calls on every edit; a no-op while the preview
