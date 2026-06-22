@@ -1153,6 +1153,27 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // Dùng helper thuần (đã unit-test) — gồm bản vá lỗi "1.234" (nghìn VN) bị đọc thành 1.234.
   const numLoose = (s) => parseLooseNumber(s);
   const redraw = () => { drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opts); if (opts.onRedraw) opts.onRedraw(); else updateSummary(q); };
+  // Tự BẬT "Hiện Thành Tiền nhóm" khi user đặt Số Lượng > 1 cho 1 dòng NHÓM (section/subsection)
+  // trên LƯỚI CHÍNH. Số Lượng nhóm CHỈ nhân vào tổng khi cờ này bật (money.js/excel/preview đều
+  // theo cờ) → quên tick hay lỡ tay tắt sẽ làm TỔNG TIỀN ÂM THẦM SAI. Vì vậy hễ nhập SL nhóm >1
+  // là bật toggle luôn. Chỉ BẬT (không tự tắt) và chỉ chạy khi user THỰC SỰ sửa SL nhóm (không
+  // chạy lúc vẽ/load) → báo giá CŨ giữ nguyên cho tới khi đụng vào SL nhóm. Bỏ qua bảng nội bộ/HN
+  // (opts.subtotalFn): tổng các bảng đó KHÔNG dùng hệ số nhóm nên bật toggle sẽ gây lệch hiển thị.
+  const autoEnableGroupSub = (lo, hi) => {
+    if (!editable || opts.subtotalFn || activeSheet.groupSubtotal) return;
+    if (lo == null) { lo = 0; hi = activeSheet.items.length - 1; }
+    if (hi == null) hi = lo;
+    let hit = false;
+    for (let i = lo; i <= hi && !hit; i++) {
+      const it = activeSheet.items[i];
+      if (it && (it.kind === "section" || it.kind === "subsection") && (Number(it.quantity) || 0) > 1) hit = true;
+    }
+    if (!hit) return;
+    activeSheet.groupSubtotal = true;
+    const cb = document.querySelector(`${tableSel} .gf-group-sub`);
+    if (cb) cb.checked = true;
+    window._editorDirty = true;
+  };
   // Live-refresh each section row's "Đơn Giá" (luôn) + "Thành Tiền" (khi bật toggle) as
   // item values change — without a full redraw, so the group total stays current while typing.
   const updateSectionSubtotals = () => {
@@ -1343,6 +1364,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         it[f2] = NUMERIC.has(f2) ? (Number(src) || 0) : src;
       }
     }
+    autoEnableGroupSub(rc.r0, rc.r1);   // kéo fill-handle xuống SL nhóm > 1 → tự bật toggle
     redraw(); setSel({ row: rc.r0, field: FIELDS[rc.c0] }, { row: rc.r1, field: FIELDS[rc.c1] });
     focusCell(rc.r0, FIELDS[rc.c0], true);   // giữ focus để Ctrl+Z hoạt động sau fill-down
   };
@@ -1581,6 +1603,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
           it.formulas[f] = e.target.value.trim();
           const live = evalFormula(e.target.value.trim(), formulaRefs);
           if (live !== null) it[f] = live;
+          if (f === "quantity") autoEnableGroupSub(i);   // công thức cho SL nhóm > 1 cũng tự bật toggle
           recomputeAll(); paintComputedValues();
           fxAutocomplete(e.target, i, f);
           highlightActiveFormulaRefs(e.target.value);
@@ -1609,6 +1632,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       }
       grid._dirty = true;   // mark this cell dirty so blur commits one undo snapshot
       const it = activeSheet.items[i];
+      if (f === "quantity") autoEnableGroupSub(i);   // SL nhóm > 1 → tự bật "Hiện Thành Tiền nhóm" (kẻo tổng âm thầm sai)
       if (it.kind !== "section" && it.kind !== "subsection") {
         const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
                              : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
@@ -1814,6 +1838,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (multiCell) {   // Excel: điền 1 giá trị ra TOÀN vùng đang chọn
         e.preventDefault(); pushUndo();
         for (let r = rcSel.r0; r <= rcSel.r1; r++) for (let c = rcSel.c0; c <= rcSel.c1; c++) pasteCellVal(activeSheet.items[r], FIELDS[c], val);
+        autoEnableGroupSub(rcSel.r0, rcSel.r1);   // dán đè SL nhóm > 1 → tự bật toggle
         if (sheetHasFormulas()) recomputeAll();
         redraw(); setSel({ row: rcSel.r0, field: FIELDS[rcSel.c0] }, { row: rcSel.r1, field: FIELDS[rcSel.c1] });
         focusCell(rcSel.r0, FIELDS[rcSel.c0], true);
@@ -1838,6 +1863,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const built = reconstructExportRows(rows, roles, NUMERIC).map((it) => ({ ...blank(), ...it }));
       activeSheet.items.splice(startRow, rows.length, ...built);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
+      autoEnableGroupSub(startRow, startRow + built.length - 1);   // báo giá dán vào có SL nhóm > 1 → tự bật toggle
       if (sheetHasFormulas()) recomputeAll();   // đánh giá công thức "=…" vừa nhận từ bảng export
       redraw();
       setSel({ row: startRow, field: FIELDS[0] }, { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] });
@@ -1861,6 +1887,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const tgt = activeSheet.items[ri];
       cells.forEach((cell, c) => { const field = FIELDS[startCol + c]; if (field) pasteCellVal(tgt, field, cell); });
     });
+    autoEnableGroupSub(startRow, startRow + rows.length - 1);   // khối dán có SL nhóm > 1 → tự bật toggle
     if (sheetHasFormulas()) recomputeAll();   // công thức vừa dán (có tham chiếu) settle trước khi vẽ
     redraw();
     const maxCols = Math.max(...rows.map(rr => rr.length));

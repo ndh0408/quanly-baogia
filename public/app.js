@@ -29,7 +29,7 @@ import {
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260619";
+} from "./js/editor.js?v=20260622";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
