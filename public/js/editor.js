@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622h";
-import { fmtMoney, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622h";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622h";
-import { api } from "./core/api.js?v=20260622h";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622h";
-import { refreshPreview } from "./preview.js?v=20260622h";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622i";
+import { fmtMoney, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622i";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622i";
+import { api } from "./core/api.js?v=20260622i";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622i";
+import { refreshPreview } from "./preview.js?v=20260622i";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -208,25 +208,15 @@ export function renderEditor(el, quote) {
 
         <div class="actions">
           ${editable ? `<button class="btn btn-primary" id="btn-save">Lưu</button>` : ""}
-          ${editable && (isNew || q.status === "draft" || q.status === "rejected") ? `<button class="btn btn-warn" id="btn-submit">Trình duyệt</button>` : ""}
-          ${!isNew && q.status === "pending" && (can("quote:approve") || (can("quote:approve:own") && q.createdById === state.user?.id)) ? `
-            <button class="btn btn-success" id="btn-approve">Duyệt</button>` : ""}
-          ${!isNew && q.status === "pending" && can("quote:approve") ? `
-            <button class="btn btn-danger" id="btn-reject">Từ chối</button>
-          ` : ""}
-          ${!isNew && (q.status === "approved" || q.status === "sent") ? `<button class="btn btn-primary" id="btn-send">${q.status === "sent" ? "Gửi lại khách" : "Gửi khách"}</button>` : ""}
+          ${!isNew && !["converted", "lost"].includes(q.status) && can("quote:send") ? `<button class="btn btn-success" id="btn-convert">✓ Khách chốt</button>` : ""}
+          ${!isNew && !["converted", "lost"].includes(q.status) && can("quote:send") ? `<button class="btn btn-danger" id="btn-lost">✗ Khách không chốt</button>` : ""}
           ${!isNew ? `<div class="kebab-wrap">
             <button class="btn kebab-btn" id="btn-more" aria-haspopup="true" aria-expanded="false" title="Thêm thao tác">⋯</button>
             <div class="kebab-menu" id="more-menu" hidden role="menu">
-              <button id="btn-excel" role="menuitem">Tải file Excel</button>
-              <button id="btn-pdf" role="menuitem">Tải file PDF</button>
+              <button id="btn-excel" role="menuitem">Tải Excel gửi khách</button>
+              <button id="btn-pdf" role="menuitem">Tải PDF gửi khách</button>
               <button id="btn-versions" role="menuitem">Lịch sử phiên bản</button>
               ${(state.user.role === "admin" || q.createdById === state.user.id) ? `<button id="btn-members" role="menuitem">Thành viên phụ trách</button>` : ""}
-              ${(q.status === "approved" || q.status === "sent") ? `
-                <div class="kebab-sep"></div>
-                ${can("quote:send") ? `<button id="btn-convert" role="menuitem">Đánh dấu đã chốt</button>` : ""}
-                <button id="btn-lost" role="menuitem" class="danger">Đánh dấu không chốt</button>
-              ` : ""}
             </div>
           </div>` : ""}
         </div>
@@ -490,7 +480,7 @@ function bindActions(q, isNew) {
   });
   const convertBtn = document.getElementById("btn-convert");
   if (convertBtn) convertBtn.addEventListener("click", async () => {
-    if (!(await confirmModal("Chốt báo giá", "Đánh dấu báo giá này là ĐÃ CHỐT (đã ký hợp đồng)?", { confirmText: "Đã chốt" }))) return;
+    if (!(await confirmModal("Khách chốt", "Khách đã đồng ý — đánh dấu báo giá này ĐÃ CHỐT?", { confirmText: "Đã chốt" }))) return;
     try {
       const updated = await api(`/api/quotes/${q.id}/mark-converted`, { method: "POST" });
       state.currentQuote = updated;

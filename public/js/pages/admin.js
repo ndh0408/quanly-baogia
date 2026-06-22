@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622h";
-import { state, can } from "../core/state.js?v=20260622h";
-import { api } from "../core/api.js?v=20260622h";
+} from "../util.js?v=20260622i";
+import { state, can } from "../core/state.js?v=20260622i";
+import { api } from "../core/api.js?v=20260622i";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622h";
+} from "../ui.js?v=20260622i";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -371,7 +371,7 @@ export async function renderDashboard(el) {
     <div id="dash-kpi" class="kpi-grid">${skeleton(4, true)}</div>
     <div class="dash-cols">
       <section><h3>Phễu báo giá</h3><div id="dash-funnel" class="funnel"></div></section>
-      <section><h3>Top nhân viên (doanh số đã duyệt)</h3><div id="dash-top"></div></section>
+      <section><h3>Top nhân viên (doanh số đã chốt)</h3><div id="dash-top"></div></section>
     </div>`;
   try {
     const [overview, funnel, top] = await Promise.all([
@@ -382,7 +382,7 @@ export async function renderDashboard(el) {
     const k = overview.kpi;
     document.getElementById("dash-kpi").innerHTML = `
       <div class="kpi"><span>Báo giá (30 ngày)</span><strong>${k.totalQuotes}</strong></div>
-      <div class="kpi"><span>Doanh số đã duyệt</span><strong>${fmtMoney(k.approvedAmount)} đ</strong></div>
+      <div class="kpi"><span>Doanh số đã chốt</span><strong>${fmtMoney(k.approvedAmount)} đ</strong></div>
       <div class="kpi"><span>Trung bình / báo giá</span><strong>${fmtMoney(Math.round(k.avgDealSize))} đ</strong></div>
       <div class="kpi"><span>Tỷ lệ chốt</span><strong>${k.conversionRate}%</strong></div>`;
     const maxCount = Math.max(1, ...funnel.data.map(s => s.count));
@@ -404,7 +404,7 @@ export async function renderDashboard(el) {
         <tbody>${top.data.map((t, i) => `
           <tr><td>${i + 1}</td><td>${escapeHtml(t.user?.displayName || "—")}</td><td style="text-align:right">${t.count}</td><td style="text-align:right">${fmtMoney(t.amount)}</td></tr>
         `).join("")}</tbody>
-      </table></div>` : "<div class='empty-state'>Chưa có doanh số đã duyệt</div>";
+      </table></div>` : "<div class='empty-state'>Chưa có doanh số đã chốt</div>";
   } catch (e) { toast(e.message, "error"); }
 }
 
@@ -679,7 +679,7 @@ export async function renderProjects(el) {
   const isAdmin = can("user:manage");
   const canSignNow = isAdmin || !!state.user?.canSign;   // được thao tác Ký trên các dòng đang thấy
   el.innerHTML = `<h1>Quản lý dự án</h1>
-    <p class="muted">Dự án = báo giá <b>đã duyệt</b>. ${isAdmin ? "" : "<b>Bạn chỉ xem được dự án do mình tạo.</b> "}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
+    <p class="muted">Dự án = báo giá <b>đã chốt</b>. ${isAdmin ? "" : "<b>Bạn chỉ xem được dự án do mình tạo.</b> "}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
     <div id="proj-toolbar"></div>
     <div id="proj-summary"></div>
     <div id="proj-body">${skeleton(6)}</div>`;
@@ -746,7 +746,7 @@ export async function renderProjects(el) {
     const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
     const summ = document.getElementById("proj-summary");
     if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
-      ${stat("Số dự án đã duyệt", new Set(rows.map(r => r.q.id)).size)}
+      ${stat("Số dự án đã chốt", new Set(rows.map(r => r.q.id)).size)}
       ${stat("Số dòng (theo sheet)", rows.length)}
       ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
       ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
@@ -756,7 +756,7 @@ export async function renderProjects(el) {
     const body = document.getElementById("proj-body");
     if (!body) return;
     if (!rows.length) {
-      body.innerHTML = `<div class="empty-state">${allRows.length ? "Không có dự án khớp tìm kiếm/bộ lọc." : 'Chưa có báo giá nào ở trạng thái "Đã duyệt".'}</div>`;
+      body.innerHTML = `<div class="empty-state">${allRows.length ? "Không có dự án khớp tìm kiếm/bộ lọc." : 'Chưa có báo giá nào ở trạng thái "Đã chốt".'}</div>`;
       return;
     }
     body.innerHTML = `<div class="tbl-scroll"><table class="list-table proj-table">

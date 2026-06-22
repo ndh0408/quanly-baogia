@@ -143,7 +143,7 @@ router.get(
     // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
     // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
     const seeAll = can(req.session, P.USER_MANAGE);
-    const where = { status: "approved", deletedAt: null };
+    const where = { status: "converted", deletedAt: null };
     if (!seeAll) where.createdById = req.session.userId;
     const quotes = await prisma.quote.findMany({
       where,
@@ -232,8 +232,8 @@ router.post(
     if (!sheet) return res.status(404).json({ error: "Không tìm thấy sheet" });
     // CHỐNG IDOR: chỉ cho ký sheet của báo giá ĐÃ DUYỆT & chưa xoá (trang Quản lý dự án chỉ
     // hiện dự án đã duyệt). Không cho ký theo sheetId tuỳ ý (id tuần tự → dễ dò).
-    if (sheet.quote?.status !== "approved" || sheet.quote?.deletedAt) {
-      return res.status(403).json({ error: "Chỉ ký được chứng từ của báo giá đã duyệt" });
+    if (sheet.quote?.status !== "converted" || sheet.quote?.deletedAt) {
+      return res.status(403).json({ error: "Chỉ ký được chứng từ của báo giá đã chốt" });
     }
     // Admin ký mọi dự án; người có canSign (vd Lan Anh) CHỈ ký dự án DO MÌNH TẠO.
     if (!isAdmin && sheet.quote?.createdById !== req.session.userId) {
@@ -389,13 +389,13 @@ router.post(
     if (!canOnQuote(req.session, "update", existing)) {
       return res.status(403).json({ error: "Không có quyền chốt báo giá này" });
     }
-    if (!["approved", "sent"].includes(existing.status)) {
-      return res.status(400).json({ error: "Chỉ chốt được báo giá đã duyệt hoặc đã gửi" });
+    if (["converted", "lost"].includes(existing.status)) {
+      return res.status(400).json({ error: "Báo giá đã chốt / không chốt rồi" });
     }
-    // Optimistic guard: only convert if still approved/sent — prevents a race with
+    // Optimistic guard: only convert if not already terminal — prevents a race with
     // a concurrent mark-lost / edit from producing a wrong terminal transition.
     const upd = await prisma.quote.updateMany({
-      where: { id, status: { in: ["approved", "sent"] } },
+      where: { id, status: { notIn: ["converted", "lost"] } },
       data: { status: "converted", convertedAt: new Date() },
     });
     if (!upd.count) {

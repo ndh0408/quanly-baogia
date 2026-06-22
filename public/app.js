@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260622h";
+} from "./js/util.js?v=20260622i";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260622h";
+} from "./js/core/state.js?v=20260622i";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622h";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260622i";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
   initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260622h";
+} from "./js/ui.js?v=20260622i";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderApprovalQueue, renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260622h";
+} from "./js/pages/admin.js?v=20260622i";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260622h";
+} from "./js/pages/quotes.js?v=20260622i";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260622h";
+} from "./js/editor.js?v=20260622i";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
@@ -79,7 +79,7 @@ const NAV_ICON = {
   profile: ICO('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
 };
 
-const ROUTE_PAGES = ["dashboard", "list", "new", "customers", "approvals", "notifications", "projects", "users", "permissions", "audit", "profile"];
+const ROUTE_PAGES = ["dashboard", "list", "new", "customers", "notifications", "projects", "users", "permissions", "audit", "profile"];
 
 // Hash router: maps #/page and #/quotes/:id → app state, so pages are
 // bookmarkable, the back button works, and notification deep links resolve.
@@ -286,7 +286,6 @@ export function renderShell() {
           ${nav("list", NAV_ICON.list + "<span>Danh sách báo giá</span>")}
           ${can("quote:create") ? nav("new", NAV_ICON.new + "<span>Tạo báo giá mới</span>") : ""}
           ${can("customer:read:own") ? nav("customers", NAV_ICON.customers + "<span>Mã khách hàng</span>") : ""}
-          ${(can("quote:approve") || can("quote:approve:own")) ? nav("approvals", NAV_ICON.approvals + "<span>Hàng chờ duyệt</span>", ` <span id="badge-pending" class="badge-num" aria-live="polite"></span>`) : ""}
           ${nav("notifications", NAV_ICON.notifications + "<span>Thông báo</span>", ` <span id="badge-notif" class="badge-num" aria-live="polite"></span>`)}
           ${(can("user:manage") || can("audit:view")) ? `<div class="nav-group-label" role="presentation">Quản trị</div>` : ""}
           ${can("quote:create") ? nav("projects", NAV_ICON.projects + "<span>Quản lý dự án</span>") : ""}
@@ -532,13 +531,6 @@ export async function refreshBadges() {
     const badge = document.getElementById("badge-notif");
     if (badge) badge.textContent = n.count > 0 ? n.count : "";
   } catch {}
-  if (can("quote:approve") || can("quote:approve:own")) {
-    try {
-      const q = await api("/api/approvals/queue");
-      const b = document.getElementById("badge-pending");
-      if (b) b.textContent = q.meta.total > 0 ? q.meta.total : "";
-    } catch {}
-  }
 }
 
 // ---------------- List ----------------

@@ -45,7 +45,7 @@ router.get(
         _sum: { total: true },
       }),
       prisma.quote.aggregate({
-        where: { ...where, status: { in: ["approved", "sent", "converted"] } },
+        where: { ...where, status: { in: ["converted"] } },
         _sum: { total: true },
         _count: { _all: true },
         _avg: { total: true },
@@ -105,7 +105,7 @@ router.get(
     const taScope = can(req.session, P.QUOTE_READ_ALL) ? {} : { createdById: req.session.userId };
     const rows = await prisma.quote.groupBy({
       by: ["createdById"],
-      where: { ...taScope, createdAt: { gte: from, lte: to }, status: { in: ["approved", "sent", "converted"] } },
+      where: { ...taScope, createdAt: { gte: from, lte: to }, status: { in: ["converted"] } },
       _sum: { total: true },
       _count: { _all: true },
       orderBy: { _sum: { total: "desc" } },

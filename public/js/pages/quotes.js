@@ -4,11 +4,11 @@
 // newExtraGrid, extraTableSumLocal) are INJECTED via setQuoteDeps at boot to avoid a circular
 // import with the entry module. Function bodies are an exact byte-for-byte copy of the former
 // app.js — zero behavior change.
-import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, STATUS_LABEL, statusLabel, ROLE_LABEL } from "../util.js?v=20260622h";
-import { state, can, canOnQuote } from "../core/state.js?v=20260622h";
-import { api } from "../core/api.js?v=20260622h";
-import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622h";
-import { pickCustomer } from "./admin.js?v=20260622h";
+import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622i";
+import { state, can, canOnQuote } from "../core/state.js?v=20260622i";
+import { api } from "../core/api.js?v=20260622i";
+import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622i";
+import { pickCustomer } from "./admin.js?v=20260622i";
 
 // Injected at boot (setQuoteDeps) — resolve to app.js's editor/shell functions (hoisted there).
 let render, goToQuote, codeLabel, shortTitle, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal;
@@ -37,7 +37,7 @@ export async function renderList(el) {
       <label for="filter-status" class="sr-only">Lọc theo trạng thái</label>
       <select id="filter-status">
         <option value="">— Tất cả trạng thái —</option>
-        ${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
+        ${[["draft", "Nháp"], ["converted", "Đã chốt"], ["lost", "Không chốt"]].map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
       </select>
       <button class="btn" id="btn-reload">Tải lại</button>
       ${can("quote:create") ? `<button class="btn btn-primary" id="btn-new">+ Tạo báo giá</button>` : ""}
