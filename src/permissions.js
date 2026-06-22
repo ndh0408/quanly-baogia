@@ -136,7 +136,7 @@ export const ROLE_PERMISSIONS = {
 
 export const ROLE_LABELS = {
   admin: "Quản trị viên",
-  manager: "Quản lý",
+  manager: "Account",
   account_hn: "Account Hà Nội",
 };
 

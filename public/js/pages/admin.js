@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260619";
-import { state, can } from "../core/state.js?v=20260619";
-import { api } from "../core/api.js?v=20260619";
+} from "../util.js?v=20260622h";
+import { state, can } from "../core/state.js?v=20260622h";
+import { api } from "../core/api.js?v=20260622h";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260619";
+} from "../ui.js?v=20260622h";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -99,7 +99,7 @@ function openInviteModal() {
       <label style="grid-column:1/-1">Email cá nhân <span class="req">*</span><input id="iv-email" type="email" inputmode="email" placeholder="email cá nhân của nhân viên" /></label>
       <label style="grid-column:1/-1">Quyền
         <select id="iv-role">
-          <option value="manager">Quản lý</option>
+          <option value="manager">Account</option>
           <option value="admin">Quản trị viên</option>
           <option value="account_hn">Account Hà Nội</option>
         </select>
@@ -154,7 +154,7 @@ function openUserModal(u) {
       <label>Họ tên<input name="displayName" value="${escapeHtml(u?.displayName || "")}" /></label>
       <label>Quyền
         <select name="role">
-          <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Quản lý</option>
+          <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Account</option>
           <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
           <option value="account_hn" ${u?.role === "account_hn" ? "selected" : ""}>Account Hà Nội</option>
         </select>
