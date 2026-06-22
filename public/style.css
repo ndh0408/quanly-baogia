@@ -1139,3 +1139,11 @@ input:disabled, select:disabled, textarea:disabled {
   .ahn-grand-card { flex-direction: column; align-items: flex-start; gap: 6px; }
   .ahn-grand-val { font-size: 22px; }
 }
+
+/* ===== Duyệt theo hàng — bảng nội bộ Chi Phí HCM / Phí Khách Hàng (chỉ admin) ===== */
+.col-approve { white-space: nowrap; text-align: center; font-size: 12.5px; vertical-align: middle; }
+.col-approve .ap-wrap { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 600; }
+.col-approve .ap-check { width: 16px; height: 16px; cursor: pointer; accent-color: var(--brand-1, #f5b400); }
+.col-approve .ap-check:disabled { cursor: not-allowed; }
+.col-approve .ap-date { display: block; font-size: 11px; color: var(--approved-text, #1c6b3f); font-weight: 700; margin-top: 2px; }
+[data-theme="dark"] .col-approve .ap-date { color: #6dcf95; }

@@ -170,15 +170,25 @@ export function sanitizeExtraTables(tables) {
       days: it.days != null ? Number(it.days) : null,
       notes: it.notes ? String(it.notes).trim() : null,
       formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
+      // rid = id ỔN ĐỊNH cho từng hàng → server khớp được trạng thái DUYỆT khi non-admin lưu
+      // (chống tự duyệt qua payload). approved/approvedAt/approvedBy do reconcileExtraApprovals
+      // đặt TRƯỚC khi sanitize (chỉ admin được đổi) — ở đây chỉ persist nguyên trạng.
+      rid: (typeof it.rid === "string" && it.rid) ? it.rid : globalThis.crypto.randomUUID(),
+      approved: !!it.approved,
+      approvedAt: it.approvedAt || null,
+      approvedBy: it.approvedBy != null ? it.approvedBy : null,
     })),
   }));
   return out.length ? out : undefined;
 }
 
 // Tổng tiền 1 bảng nội bộ (cùng quy tắc với item báo giá; section/info không cộng).
+// CHI PHÍ HCM + PHÍ KHÁCH HÀNG: CHỈ cộng hàng ĐÃ DUYỆT (approved). Hà Nội: cộng tất cả (luồng riêng).
 export function extraTableSum(t) {
+  const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
+    if (approvedOnly && !it.approved) return acc;   // HCM/Phí KH: chưa duyệt → KHÔNG tính
     const qty = Number(it.quantity) || 0;
     const price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;

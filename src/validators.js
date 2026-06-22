@@ -132,6 +132,12 @@ const itemSchema = z.object({
   // (unknown keys are dropped by default), otherwise the "remember formula" feature
   // dies on save. Never used in totals/export — buildSheetsCreate re-validates shape.
   formulas: z.record(z.string().max(40), z.string().max(2000)).optional().nullable(),
+  // Duyệt theo HÀNG cho bảng nội bộ HCM/Khách. Khai báo để Zod KHÔNG strip; quyền đổi (chỉ
+  // admin) + đóng dấu ngày/người do server (reconcileExtraApprovals) quyết định, không tin client.
+  rid: z.string().max(64).optional().nullable(),
+  approved: z.boolean().optional(),
+  approvedAt: z.string().max(40).optional().nullable(),
+  approvedBy: z.coerce.number().int().positive().optional().nullable(),
 });
 
 // Bảng nội bộ (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.

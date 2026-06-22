@@ -97,6 +97,15 @@ describe("quoteUtils (extracted pure helpers)", () => {
       ] };
       expect(extraTableSum(t)).toBe(8000);
     });
+    it("HCM/Khách: CHỈ cộng hàng đã DUYỆT; Hà Nội cộng tất cả", () => {
+      const rows = [
+        { kind: "item", quantity: 2, unitPrice: 1000, approved: true },   // 2000
+        { kind: "item", quantity: 5, unitPrice: 1000, approved: false },  // chưa duyệt → bỏ (hcm/khach)
+      ];
+      expect(extraTableSum({ category: "hcm", items: rows })).toBe(2000);
+      expect(extraTableSum({ category: "khach", items: rows })).toBe(2000);
+      expect(extraTableSum({ category: "hanoi", items: rows })).toBe(7000);   // HN: cộng hết
+    });
   });
 
   describe("sanitizeExtraTables", () => {

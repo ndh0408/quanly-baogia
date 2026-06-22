@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622j";
-import { fmtMoney, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622j";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622j";
-import { api } from "./core/api.js?v=20260622j";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622j";
-import { refreshPreview } from "./preview.js?v=20260622j";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622k";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622k";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622k";
+import { api } from "./core/api.js?v=20260622k";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622k";
+import { refreshPreview } from "./preview.js?v=20260622k";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -693,16 +693,17 @@ function extraCatLabel(c) { return ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà
 // State lưới riêng cho mỗi bảng nội bộ (KHÔNG lưu vào DB — sẽ là non-enumerable).
 export function newExtraGrid() { return { sel: null, selSheet: 0, copyBuf: null, _copyToken: 0, undo: [], redo: [], previewOpen: false, focusSnap: null, _dirty: false, requestDraw: null }; }
 // <thead> theo template (giống renderEditor) — drawItems chỉ fill tbody/tfoot nên thead dựng riêng.
-export function gridHeadHtml(showDetail, usesDays, editable) {
+export function gridHeadHtml(showDetail, usesDays, editable, approveCol) {
   const labels = ["STT", "Hạng Mục", showDetail ? "Chi Tiết" : null, "ĐVT", "SỐ LƯỢNG", usesDays ? "SỐ NGÀY" : null, "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"].filter(Boolean);
   return `<thead>
-    <tr class="col-letters" aria-hidden="true">${labels.map((_, i) => `<th class="col-letter">${groupLetter(i)}</th>`).join("")}${editable ? `<th class="col-letter"></th>` : ""}</tr>
+    <tr class="col-letters" aria-hidden="true">${labels.map((_, i) => `<th class="col-letter">${groupLetter(i)}</th>`).join("")}${approveCol ? `<th class="col-letter"></th>` : ""}${editable ? `<th class="col-letter"></th>` : ""}</tr>
     <tr>
       <th style="width:50px">STT</th><th>Hạng Mục</th>
       ${showDetail ? `<th>Chi Tiết</th>` : ""}
       <th style="width:80px">ĐVT</th><th style="width:90px">SỐ LƯỢNG</th>
       ${usesDays ? `<th style="width:80px">SỐ NGÀY</th>` : ""}
       <th style="width:130px">ĐƠN GIÁ&#10;(VNĐ)</th><th style="width:140px">THÀNH TIỀN&#10;(VNĐ)</th><th style="width:150px">GHI CHÚ</th>
+      ${approveCol ? `<th style="width:120px">DUYỆT</th>` : ""}
       ${editable ? `<th style="width:36px"></th>` : ""}
     </tr>
   </thead>`;
@@ -710,8 +711,10 @@ export function gridHeadHtml(showDetail, usesDays, editable) {
 // Tổng 1 sheet nội bộ — KHỚP CHÍNH XÁC src/quoteUtils.js extraTableSum (số đổ sang
 // Quản lý dự án): bỏ section/subsection/info, qty×(days nếu>0)×price, KHÔNG hệ số nhóm.
 export function extraTableSumLocal(t) {
+  const approvedOnly = t && (t.category === "hcm" || t.category === "khach");   // HCM/Phí KH: chỉ cộng hàng đã DUYỆT
   return ((t && t.items) || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
+    if (approvedOnly && !it.approved) return acc;
     const qty = Number(it.quantity) || 0, price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;
     return acc + (days && days > 0 ? qty * days * price : qty * price);
@@ -781,7 +784,7 @@ function drawExtraTables(q, activeSheet, editable) {
             <input class="extra-name" value="${escapeHtml(t.name || "")}" placeholder="Tên sheet (tuỳ chọn)" ${editable ? "" : "disabled"} />
             ${editable ? `<label class="muted" style="font-size:12px;display:flex;align-items:center;gap:5px;white-space:nowrap">Mẫu: <select class="extra-tpl extra-add-cat">${tplList.map(x => `<option value="${x.id}" ${tpl && x.id === tpl.id ? "selected" : ""}>${escapeHtml(x.name)}</option>`).join("")}</select></label>` : ""}
           </div>
-          <div class="tbl-scroll"><table class="excel-table" id="extra-grid-active">${gridHeadHtml(showDetail, usesDays, editable)}<tbody></tbody><tfoot></tfoot></table></div>
+          <div class="tbl-scroll"><table class="excel-table" id="extra-grid-active">${gridHeadHtml(showDetail, usesDays, editable, t && (t.category === "hcm" || t.category === "khach"))}<tbody></tbody><tfoot></tfoot></table></div>
         </div>
       ` : `<div class="muted" style="padding:6px 0 2px">Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>`}
     `;
@@ -793,7 +796,7 @@ function drawExtraTables(q, activeSheet, editable) {
       setGrid(t);
       const updCatTotal = (cat) => { const el = wrap.querySelector(`.extra-cat-total[data-cat="${cat}"] strong`); if (el) el.textContent = fmtMoney(catTotal(cat)); };
       try {
-        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: "#extra-grid-active", fxBar: false, totalLabel: "sheet", subtotalFn: (sh) => extraTableSumLocal(sh), onRedraw: () => { window._editorDirty = true; updCatTotal(t.category); }, onCellInput: () => updCatTotal(t.category) });
+        drawItems(q, t, editable, tpl && tpl.code, usesDays, t._grid, { tableSel: "#extra-grid-active", fxBar: false, totalLabel: "sheet", subtotalFn: (sh) => extraTableSumLocal(sh), approveCol: t.category === "hcm" || t.category === "khach", onRedraw: () => { window._editorDirty = true; updCatTotal(t.category); }, onCellInput: () => updCatTotal(t.category) });
       } catch (err) { console.error("[extra grid]", err); }
     }
 
@@ -869,6 +872,14 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // opts.onRedraw: thay updateSummary khi vẽ lại lưới nội bộ. → drawItems chạy được nhiều nơi.
   const tableSel = opts.tableSel || "#items-table";
   const internalNoteCol = !!opts.internalNote;   // cột "Ghi chú nội bộ" — CHỈ lưới chính, KHÔNG xuất Excel (không có ở bảng nội bộ)
+  const approveCol = !!opts.approveCol;          // cột "Duyệt" theo hàng — CHỈ bảng nội bộ HCM/Phí KH
+  const canApprove = state.user?.role === "admin";   // CHỈ admin được tick duyệt (server cũng chặn)
+  // Ô "Duyệt" 1 hàng: checkbox (admin mới bấm được) + ngày đã duyệt. Tiền hàng vẫn hiện, nhưng
+  // chỉ cộng vào Tổng khi đã duyệt (extraTableSumLocal). Server đóng dấu ngày/người duyệt khi lưu.
+  const approveCellHtml = (it, i) => {
+    const dt = it.approved && it.approvedAt ? `<span class="ap-date">✓ ${escapeHtml(fmtDate(it.approvedAt))}</span>` : "";
+    return `<label class="ap-wrap"><input type="checkbox" class="ap-check" data-ap="${i}" ${it.approved ? "checked" : ""} ${canApprove ? "" : "disabled"} title="${canApprove ? "Duyệt hàng này" : "Chỉ admin được duyệt"}" /> Duyệt</label>${dt}`;
+  };
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
@@ -926,11 +937,12 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-amount">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
+        ${approveCol ? `<td class="col-approve">${approveCellHtml(it, i)}</td>` : ""}
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
 
   let sttNo = 0;
   let sectionIdx = -1;
-  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0);
+  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0) + (approveCol ? 1 : 0);
   const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
   const sectionSum = {};
@@ -963,6 +975,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-amount">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
+        ${approveCol ? `<td class="col-approve"></td>` : ""}
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="${isSub ? "Xóa nhóm con" : "Xóa nhóm"}">✕</button></td>` : ""}
       </tr>`;
     }
@@ -1001,6 +1014,28 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     grow();
     ta.addEventListener("input", grow);
   });
+
+  // "Duyệt" theo hàng (HCM/Phí KH) — CHỈ admin. Cập nhật model + ngày (optimistic; server đóng dấu
+  // lại khi lưu) + tính lại Tổng (extraTableSumLocal chỉ cộng hàng đã duyệt) + Tổng-loại live.
+  if (approveCol && canApprove) {
+    tbody.querySelectorAll(".ap-check").forEach((cb) => {
+      cb.addEventListener("change", (e) => {
+        const i = parseInt(e.target.dataset.ap, 10);
+        const it = activeSheet.items[i]; if (!it) return;
+        it.approved = e.target.checked;
+        it.approvedAt = it.approved ? new Date().toISOString() : null;
+        it.approvedBy = it.approved ? (state.user?.id ?? null) : null;
+        window._editorDirty = true;
+        const td = e.target.closest("td");
+        if (td) {
+          td.querySelector(".ap-date")?.remove();
+          if (it.approved) td.insertAdjacentHTML("beforeend", ` <span class="ap-date">✓ ${escapeHtml(fmtDate(it.approvedAt))}</span>`);
+        }
+        updateSectionSubtotals();
+        if (opts.onCellInput) opts.onCellInput();
+      });
+    });
+  }
 
   // Mark cells that hold a formula. AI CŨNG XEM ĐƯỢC CÔNG THỨC: ngoài tooltip khi rê
   // chuột (chỉ máy tính), gắn 1 nút "ƒ" THẬT (clickable) ở góc ô để MỌI người — kể cả
@@ -1572,7 +1607,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tbody.addEventListener("mousedown", (ev) => { if (grid._fx && grid._fx.onPointMouseDown) grid._fx.onPointMouseDown(ev); }, true);
   }
 
-  tbody.querySelectorAll("input, textarea").forEach((inp) => {
+  tbody.querySelectorAll("input[data-f], textarea[data-f]").forEach((inp) => {
     const f = inp.dataset.f;
     const isMultiline = multilineFields.has(f);
 
