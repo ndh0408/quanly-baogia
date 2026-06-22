@@ -190,6 +190,13 @@ export function createApp() {
   // Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
   // AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
   app.get("/metrics", async (req, res) => {
+    // Fail closed in production: if no METRICS_TOKEN is set, do NOT expose metrics.
+    // Otherwise an internet-reachable deployment (e.g. behind a tunnel where the
+    // network allowlist assumption doesn't hold) leaks route names, traffic volumes,
+    // error rates and resource usage to anyone. Set METRICS_TOKEN to enable scraping.
+    if (isProd && !config.METRICS_TOKEN) {
+      return res.status(404).end();
+    }
     if (config.METRICS_TOKEN && !bearerTokenMatches(req.headers.authorization, config.METRICS_TOKEN)) {
       return res.status(401).end();
     }

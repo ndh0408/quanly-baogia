@@ -102,9 +102,33 @@ export async function authenticateCredentials(req, { username, password, mfaToke
       }
     }
     if (!mfaOk) {
+      // Count wrong-MFA toward the SAME per-account lockout as wrong-password. The
+      // password was already correct here, so without this an attacker holding a
+      // leaked/reused password could brute the 6-digit TOTP space with only the
+      // per-IP limiter in the way (defeated by rotating source IPs). A correct MFA
+      // on success (below) resets failedAttempts, so legit fat-finger is forgiven.
+      const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: { failedAttempts: { increment: 1 } },
+        select: { failedAttempts: true },
+      });
+      const shouldLock = updated.failedAttempts >= config.LOGIN_MAX_ATTEMPTS;
+      if (shouldLock) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000) },
+        });
+      }
       await recordAttempt(false, "bad_mfa");
-      await audit(req, "login.mfa.failed", { resource: "user", resourceId: user.id, actorId: user.id, after: { flow } });
-      return { ok: false, status: 401, error: "Mã MFA không đúng", mfaRequired: true };
+      await audit(req, "login.mfa.failed", { resource: "user", resourceId: user.id, actorId: user.id, after: { failedAttempts: updated.failedAttempts, locked: shouldLock, flow } });
+      return {
+        ok: false,
+        status: shouldLock ? 423 : 401,
+        error: shouldLock
+          ? `Sai mã MFA nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút`
+          : "Mã MFA không đúng",
+        mfaRequired: !shouldLock,
+      };
     }
   }
 

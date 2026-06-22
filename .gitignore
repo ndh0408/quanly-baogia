@@ -45,6 +45,9 @@ Thumbs.db
 # Untracked junk (audit): old code backups + one-off recon scripts
 backups/
 
+# Security scan artifacts (tools, PG binaries, reports — confidential, off-repo)
+.scan/
+
 # Internal audit reports — confidential, store off-repo (never commit)
 AUDIT_REPORT.md
 .audit-full.txt

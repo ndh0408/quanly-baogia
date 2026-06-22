@@ -30,6 +30,11 @@ router.post(
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền xuất báo giá này" });
     }
+    // Export capability gate (mirrors the synchronous /api/export route): a reader
+    // who lacks quote:export (e.g. account_hn) must not exfiltrate full pricing.
+    if (!can(req.session, P.QUOTE_EXPORT)) {
+      return res.status(403).json({ error: "Bạn không có quyền xuất báo giá" });
+    }
     const q = getQueue(QUEUES.EXPORT);
     if (!q) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình. Vui lòng dùng chức năng xuất file trực tiếp." });
     const job = await q.add(req.body.format, { quoteId: req.params.id, requestedBy: req.session.userId });

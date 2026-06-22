@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { canOnQuote } from "../permissions.js";
+import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
 import { validate } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
@@ -17,6 +17,12 @@ const plain = (q) => JSON.parse(JSON.stringify(q));
 
 const router = Router();
 router.use(requireAuth);
+// Export is a distinct capability (quote:export), NOT implied by read access.
+// account_hn holds quote:read:own (as an assigned member) and would otherwise pass
+// the per-handler canOnQuote("read") check and download full pricing it must never
+// see ("KHÔNG export"). Gate both .xlsx and .pdf on the export permission; the
+// per-quote ownership check stays inside each handler to also stop IDOR.
+router.use(requirePermission(P.QUOTE_EXPORT));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 

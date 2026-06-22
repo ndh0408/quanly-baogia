@@ -29,12 +29,57 @@ function isPrivateIPv4(ip) {
   if (a >= 224) return true;                                  // multicast + reserved + broadcast
   return false;
 }
+// Parse an IPv6 literal into its 16 bytes (handles "::" compression and an
+// embedded dotted IPv4 tail). Returns null if unparseable.
+function ipv6ToBytes(ip) {
+  let s = ip.toLowerCase();
+  const lastColon = s.lastIndexOf(":");
+  const tail = s.slice(lastColon + 1);
+  if (tail.includes(".")) {                                    // embedded dotted IPv4 → two hex groups
+    const p = tail.split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
+    s = s.slice(0, lastColon + 1) +
+      (((p[0] << 8) | p[1]).toString(16)) + ":" + (((p[2] << 8) | p[3]).toString(16));
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  let groups;
+  if (halves.length === 2) {
+    const tg = halves[1] ? halves[1].split(":") : [];
+    const missing = 8 - head.length - tg.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill("0"), ...tg];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    const v = parseInt(groups[i] || "0", 16);
+    if (Number.isNaN(v) || v < 0 || v > 0xffff) return null;
+    bytes[i * 2] = v >> 8;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  return bytes;
+}
 function isPrivateIPv6(ip) {
   const x = ip.toLowerCase();
   if (x === "::1" || x === "::") return true;
   if (x.startsWith("fe80") || x.startsWith("fc") || x.startsWith("fd")) return true; // link-local + ULA
-  const m = x.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);          // IPv4-mapped
-  if (m) return isPrivateIPv4(m[1]);
+  const b = ipv6ToBytes(x);
+  if (!b) return true;                                         // unparseable → fail closed
+  // IPv4-mapped (::ffff:0:0/96) and NAT64 well-known prefix (64:ff9b::/96) embed a
+  // 32-bit IPv4 in the last 4 bytes. Extract and classify it with the IPv4 rules so
+  // loopback/metadata can't be smuggled in via hex spelling (new URL() normalizes
+  // embedded IPv4 to hex, which defeated the old dotted-decimal regex).
+  const zero0to9 = b.slice(0, 10).every((v) => v === 0);
+  const isMapped = zero0to9 && b[10] === 0xff && b[11] === 0xff;
+  const isNat64 = b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b &&
+    b.slice(4, 12).every((v) => v === 0);
+  if (isMapped || isNat64) {
+    return isPrivateIPv4(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
+  }
   return false;
 }
 function isBlockedIp(ip) {
