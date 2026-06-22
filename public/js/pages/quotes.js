@@ -460,16 +460,16 @@ export function renderAccountHnView(el, q) {
   const statusLabel = { assigned: "Đang làm", submitted: "Đã gửi — chờ quản lý duyệt", approved: "✓ Đã duyệt", rejected: "↩ Bị trả lại" }[q.hnStatus] || "Đang làm";
   if (!Array.isArray(q.hnSheets) || !q.hnSheets.length) q.hnSheets = [{ sheetId: null, sheetName: null, hnTables: [] }];
   el.innerHTML = `
-    <div class="account-hn-view">
+    <div class="account-hn-view ahn-card">
       <div class="ahn-head">
-        <div><h2 style="margin:0">Phần Giá Hà Nội</h2>
-          <div class="muted">${escapeHtml(q.projectCode || q.quoteNumber || "")}${q.title ? " · " + escapeHtml(q.title) : ""}${q.companyName ? " · " + escapeHtml(q.companyName) : ""}</div></div>
+        <div class="ahn-head-titles"><h2 class="ahn-title">Phần Giá Hà Nội</h2>
+          <div class="muted ahn-sub">${escapeHtml(q.projectCode || q.quoteNumber || "")}${q.title ? " · " + escapeHtml(q.title) : ""}${q.companyName ? " · " + escapeHtml(q.companyName) : ""}</div></div>
         <span class="ahn-status ahn-${q.hnStatus || "assigned"}">${statusLabel}</span>
       </div>
       ${q.hnStatus === "rejected" && q.hnRejectNote ? `<div class="ahn-reject">↩ <strong>Quản lý trả lại:</strong> ${escapeHtml(q.hnRejectNote)}</div>` : ""}
       <div class="muted" style="margin:8px 0 4px">Bạn chỉ điền <strong>giá Hà Nội</strong> (số nội bộ — KHÔNG xuất cho khách, không thấy phần báo giá khác).</div>
       <div id="ahn-tables"></div>
-      <div class="ahn-actions" style="margin-top:14px;display:flex;gap:10px;align-items:center">
+      <div class="ahn-actions">
         ${editable ? `<button class="btn btn-sm" id="ahn-save">💾 Lưu</button><button class="btn btn-sm btn-primary" id="ahn-submit">✓ Gửi duyệt</button>` : `<span class="muted">${q.hnStatus === "submitted" ? "Đã gửi, chờ quản lý duyệt — không sửa được lúc này." : q.hnStatus === "approved" ? "Phần Hà Nội đã được duyệt." : ""}</span>`}
       </div>
     </div>`;
@@ -536,9 +536,8 @@ export function renderAccountHnView(el, q) {
   });
   // Tổng GỘP mọi sheet — chỉ hiện khi có >1 sheet (1 sheet đã có "Tổng HN" riêng), thấy cả khi đã gửi.
   if (totalSheets() > 1) {
-    const gt = document.createElement("div"); gt.className = "ahn-grand-row";
-    gt.style.cssText = "margin-top:12px;display:flex;justify-content:flex-end;gap:10px;align-items:baseline;font-weight:700;font-size:14px";
-    gt.innerHTML = `Tổng tất cả ${totalSheets()} sheet Hà Nội: <span class="ahn-grand-val" style="color:var(--danger);font-size:16px">${fmtMoney(grandTotal())}</span>`;
+    const gt = document.createElement("div"); gt.className = "ahn-grand-card";
+    gt.innerHTML = `<span class="ahn-grand-label">Tổng tất cả ${totalSheets()} sheet Hà Nội</span><span class="ahn-grand-val">${fmtMoney(grandTotal())}</span>`;
     host.appendChild(gt);
   }
   // 1 click handler: chuyển tab CHẠY CẢ KHI chỉ-xem (đã gửi/đã duyệt) để xem lại từng sheet;
