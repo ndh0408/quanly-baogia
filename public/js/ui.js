@@ -4,7 +4,7 @@
 // is escapeHtml from util.js — NO state / api / render here, so these never pull the
 // app graph in and stay unit-friendly.
 
-import { escapeHtml } from "./util.js?v=20260623c";
+import { escapeHtml } from "./util.js?v=20260623d";
 
 export function toast(msg, type = "info") {
   // Persistent live region so screen readers announce toasts (errors = assertive).

@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623c";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623c";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623c";
-import { api } from "./core/api.js?v=20260623c";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623c";
-import { refreshPreview } from "./preview.js?v=20260623c";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623d";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623d";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623d";
+import { api } from "./core/api.js?v=20260623d";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623d";
+import { refreshPreview } from "./preview.js?v=20260623d";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -1908,6 +1908,42 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // opts.subtotalFn: bảng nội bộ dùng extraTableSumLocal để "Tổng sheet" KHỚP đúng số đổ
   // sang Quản lý dự án (không hệ số nhóm) — tránh footer lệch Tổng-loại.
   const sheetSubtotal = opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
+
+  // CHỈ HIỂN THỊ (không đổi cách tính): dựng bảng giải thích "Tổng sheet" — đi đúng theo
+  // logic sheetSubtotalGrouped (mục × Số Lượng nhóm; dòng nhóm không tự cộng; info bỏ qua)
+  // để user/khách soi từng bước. Tổng cuối ở đây = đúng số ở chân lưới.
+  const explainSheetTotal = () => {
+    const items = activeSheet.items || [];
+    let mult = 1, sum = 0, sectionIdx = -1;
+    const rows = [];
+    for (const it of items) {
+      if (it.kind === "section" || it.kind === "subsection") {
+        const isSub = it.kind === "subsection";
+        mult = activeSheet.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+        let head;
+        if (isSub) head = "↳ Nhóm con";
+        else { sectionIdx++; head = "Nhóm " + ((it.label && String(it.label).trim()) || groupLetter(sectionIdx)); }
+        const xnote = mult > 1 ? ` — mỗi mục bên dưới × ${mult} (Số Lượng nhóm)` : "";
+        rows.push(`<tr class="te-grp"><td colspan="2"><b>${escapeHtml(head)}</b>: ${escapeHtml(it.name || "")}<span class="muted">${xnote}</span></td><td></td></tr>`);
+        continue;
+      }
+      if (it.kind === "info") {
+        rows.push(`<tr class="te-info"><td colspan="3" class="muted">• (dòng thông tin — không tính tiền) ${escapeHtml(it.name || "")}</td></tr>`);
+        continue;
+      }
+      const amt = lineAmount(it, usesDays);
+      const contrib = amt * mult;
+      sum += contrib;
+      const dy = usesDays ? ` × ${fmtNumCell(it.days)} ngày` : "";
+      const xpart = mult > 1 ? ` <span class="muted">× ${mult}</span> = <b>${fmtMoney(contrib)}</b>` : "";
+      rows.push(`<tr><td>${escapeHtml(it.name || "(không tên)")}</td><td class="te-calc">${fmtNumCell(it.quantity)} × ${fmtMoney(it.unitPrice)}${dy} = ${fmtMoney(amt)}${xpart}</td><td class="te-run">${fmtMoney(sum)}</td></tr>`);
+    }
+    return `<div class="total-explain">
+      <p class="muted te-note">Cách cộng: mỗi <b>MỤC = Số Lượng × Đơn Giá</b> (đã làm tròn). Mục nằm trong nhóm thì nhân thêm <b>Số Lượng nhóm</b>. Dòng <b>NHÓM</b> không tự cộng (chỉ gộp sẵn các mục con); dòng thông tin bỏ qua. Cột phải = tổng cộng dồn.</p>
+      <table class="te-table"><thead><tr><th>Mục</th><th>Cách tính</th><th>Cộng dồn</th></tr></thead><tbody>${rows.join("") || `<tr><td colspan="3" class="muted">Chưa có mục nào.</td></tr>`}</tbody></table>
+      <div class="te-total">TỔNG ${escapeHtml((opts.totalLabel || "sheet").toUpperCase())} = <b>${fmtMoney(sum)}</b></div>
+    </div>`;
+  };
   const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
@@ -1923,7 +1959,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     </td></tr>` : ""}
     <tr>
       <td colspan="${colSpanLeft}"></td>
-      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}</td>
+      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}${!opts.subtotalFn ? ` <button type="button" class="link-btn gf-explain" title="Xem cách cộng ra số này">ⓘ giải thích</button>` : ""}</td>
       <td class="value gf-subtotal-val">${fmtMoney(sheetSubtotal)}</td>
       <td></td>
       ${editable ? "<td></td>" : ""}
@@ -1936,6 +1972,10 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tfoot.querySelector(".gf-add-info")?.addEventListener("click", addInfo);
     tfoot.querySelector(".gf-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
   }
+  // "Giải thích" mở được cả khi chỉ-xem (không nằm trong nhánh editable) — read-only.
+  tfoot?.querySelector(".gf-explain")?.addEventListener("click", () => {
+    openModal(`Giải thích Tổng ${opts.totalLabel || "sheet"}`, explainSheetTotal());
+  });
 
   // Re-derive the selection highlight from grid.sel — survives this innerHTML rebuild.
   paintSel();
