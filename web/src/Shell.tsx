@@ -88,7 +88,6 @@ export function Shell({ me }: { me: Me }) {
                 <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`}
                    onClick={(e) => { e.preventDefault(); location.hash = `#/${n.key}`; }}>
                   {ICON[n.key]}<span>{n.label}</span>
-                  {!n.ported && <span className="nav-ext" title="Đang chuyển sang React — vẫn dùng được">•</span>}
                 </a>
               ))}
             </div>

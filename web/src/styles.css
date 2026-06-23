@@ -63,8 +63,7 @@ a { color: var(--primary); }
 .menu a.active::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 3px; background: var(--gold); border-radius: 3px; }
 .menu a svg { width: 17px; height: 17px; flex: none; opacity: .85; }
 .menu a.active svg { opacity: 1; }
-.menu a > span:not(.nav-ext) { flex: 1; min-width: 0; }
-.menu a .nav-ext { color: var(--gold); font-size: 16px; line-height: 1; opacity: .8; }
+.menu a > span { flex: 1; min-width: 0; }
 .who { border-top: 1px solid rgba(255,255,255,.08); padding-top: 12px; font-size: 13px; color: #aab0c6; }
 .who strong { color: #fff; display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .role-pill { display: inline-block; background: rgba(255,255,255,.1); color: #dfe2ee; border-radius: 20px; padding: 2px 10px; font-size: 11px; margin-top: 6px; font-weight: 600; }
