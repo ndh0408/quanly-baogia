@@ -320,6 +320,16 @@ export const TEMPLATE_CONFIGS = {
   },
 };
 
+// ===== GN (không ngày) — bản BANNER =====
+// Y HỆT GN không ngày (cùng file GN_KhongNgay.xlsx, cùng cột/công thức/cách xuất), CHỈ khác
+// cách đánh STT: NHÓM CON đánh số 1,2,3… (reset theo từng nhóm chính), các MỤC bên dưới
+// nhóm con KHÔNG đánh số. Bật bằng cờ items.numberSubsections (excel.js + editor.js đọc cờ này).
+TEMPLATE_CONFIGS.gn_banner = {
+  ...TEMPLATE_CONFIGS.marico_decor,
+  displayName: "GN Banner (không ngày)",
+  items: { ...TEMPLATE_CONFIGS.marico_decor.items, numberSubsections: true },
+};
+
 export function getConfig(code) {
   const c = TEMPLATE_CONFIGS[code];
   if (!c) throw new Error(`Không có config cho template code: ${code}`);

@@ -406,6 +406,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   let itemNo = 0;
   let sectionIdx = -1;
   let mult = 1;
+  // Bản BANNER (gn_banner): NHÓM CON đánh số 1,2,3 (reset mỗi nhóm chính), MỤC bên dưới KHÔNG đánh số.
+  const numberSubs = !!itemsCfg.numberSubsections;
+  let subNo = 0;
   for (let i = 0; i < slotRows.length; i++) {
     const r = slotRows[i];
     const it = items[i];
@@ -417,10 +420,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const isSubSection = it.kind === "subsection";
       let letter;
       if (isSubSection) {
-        letter = (it.label && String(it.label).trim()) || "";   // nhóm con KHÔNG có chữ A/B/C
+        // Mặc định nhóm con KHÔNG có chữ A/B/C. Bản BANNER: đánh số 1,2,3 (theo thứ tự nhóm con).
+        letter = (it.label && String(it.label).trim()) || (numberSubs ? String(++subNo) : "");
       } else {
         sectionIdx++;
         letter = (it.label && String(it.label).trim()) || sectionLetter(sectionIdx);
+        subNo = 0;   // số nhóm con reset theo từng nhóm chính
       }
       itemNo = 0; // item numbering restarts under each section
       if (cols.stt) setCell(ws, `${cols.stt}${r}`, letter || null);   // nhóm con: STT TRỐNG hẳn (không A/B/C)
@@ -440,8 +445,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       if (cols.amount) ws.getCell(`${cols.amount}${r}`).value = showGroupSub ? ((sectionSum[i] * gmult) || null) : null;
       if (cols.notes) setCell(ws, `${cols.notes}${r}`, it.notes || null);
       for (const col of Object.values(cols)) {
-        // Nhóm con: 2 ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa, theo yêu cầu.
-        const bareSubCell = isSubSection && (col === cols.stt || col === cols.notes);
+        // Nhóm con: ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa. Bản BANNER có
+        // đánh SỐ vào ô STT nên ô STT ĐƯỢC tô nền (số nằm trên dải), chỉ Ghi Chú để trắng.
+        const bareSubCell = isSubSection && (col === cols.notes || (col === cols.stt && !numberSubs));
         paintCell(ws.getCell(`${col}${r}`), {
           // Nhóm chính A/B/C: nền KEM + chữ nâu. Nhóm con: nền XANH + chữ xanh. Khớp web,
           // theo yêu cầu khách (hoán đổi so với trước). STT/Ghi Chú của nhóm con để trắng.
@@ -482,8 +488,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null;
         if (cols.name) ws.getCell(`${cols.name}${r}`).value = null;
       } else {
-        itemNo++;
-        if (cols.stt) setCell(ws, `${cols.stt}${r}`, itemNo);
+        // Bản BANNER: MỤC dưới nhóm con KHÔNG đánh số (số dồn cho nhóm con). Mặc định: đánh 1,2,3.
+        if (numberSubs) { if (cols.stt) ws.getCell(`${cols.stt}${r}`).value = null; }
+        else { itemNo++; if (cols.stt) setCell(ws, `${cols.stt}${r}`, itemNo); }
         // Multi-line text fields: keep newlines and enable wrapText
         if (cols.name) {
           setCell(ws, `${cols.name}${r}`, it.name || "");

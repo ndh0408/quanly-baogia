@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260623e";
-import { state, can } from "../core/state.js?v=20260623e";
-import { api } from "../core/api.js?v=20260623e";
+} from "../util.js?v=20260623f";
+import { state, can } from "../core/state.js?v=20260623f";
+import { api } from "../core/api.js?v=20260623f";
 import {
   toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260623e";
+} from "../ui.js?v=20260623f";
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust

@@ -96,7 +96,23 @@ async function main() {
       filePath: "templates/Unibenfood.xlsx",
     },
   });
-  console.log(`✓ Templates GN: 2`);
+  // GN Banner (không ngày): cùng file/cách xuất GN không ngày, CHỈ khác cách đánh STT
+  // (nhóm con đánh số 1,2,3; mục bên dưới không đánh số) — config gn_banner ở templateConfigs.js.
+  await prisma.quoteTemplate.upsert({
+    where: { code: "gn_banner" },
+    create: {
+      code: "gn_banner",
+      name: "GN Banner (không ngày)",
+      companyId: giaNguyen.id,
+      filePath: "templates/GN_KhongNgay.xlsx",
+    },
+    update: {
+      name: "GN Banner (không ngày)",
+      companyId: giaNguyen.id,
+      filePath: "templates/GN_KhongNgay.xlsx",
+    },
+  });
+  console.log(`✓ Templates GN: 3`);
 
   // === Clofull company + its no-date template (new CLF.xls form) ===
   const clofull = await prisma.company.upsert({

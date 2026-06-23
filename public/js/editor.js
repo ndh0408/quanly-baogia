@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623e";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623e";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623e";
-import { api } from "./core/api.js?v=20260623e";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623e";
-import { refreshPreview } from "./preview.js?v=20260623e";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623f";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623f";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623f";
+import { api } from "./core/api.js?v=20260623f";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623f";
+import { refreshPreview } from "./preview.js?v=20260623f";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -842,6 +842,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   };
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
+  // Bản BANNER: nhóm con đánh số 1,2,3 (reset mỗi nhóm chính), mục bên dưới KHÔNG đánh số.
+  const numberSubs = !!state.templates.find(t => t.code === tplCode)?.layout?.numberSubsections;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
   const multilineFields = new Set(["name", "detail", "notes", "internalNote"]);
 
@@ -910,6 +912,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
 
   let sttNo = 0;
   let sectionIdx = -1;
+  let subNo = 0;   // bản BANNER: số thứ tự nhóm con (reset theo từng nhóm chính)
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0) + (approveCol ? 1 : 0);
   const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
@@ -927,12 +930,13 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (rowKind[i] === "section") {
       const isSub = it.kind === "subsection";       // nhóm con: tổng riêng, KHÔNG cộng vào nhóm chính, VẪN vào tổng cộng
       let letter = "";
-      if (!isSub) { sectionIdx++; letter = groupLetter(sectionIdx); }   // nhóm con không chiếm chữ cái A/B/C
+      if (!isSub) { sectionIdx++; letter = groupLetter(sectionIdx); subNo = 0; }   // nhóm con không chiếm chữ cái A/B/C
+      else if (numberSubs) { letter = String(++subNo); }   // bản BANNER: nhóm con đánh số 1,2,3
       sttNo = 0;
       const subAmt = sectionSum[i] || 0;
       return `
       <tr data-row="${i}" class="section-row${isSub ? " subgroup-row" : ""}">
-        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${isSub ? "" : letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
         <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
@@ -963,7 +967,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const span = rowspanOf(i);
     return `
       <tr data-row="${i}" class="grp-head${span > 1 ? " has-subs" : ""}">
-        <td class="col-stt" rowspan="${span}">${sttNo}</td>
+        <td class="col-stt" rowspan="${span}">${numberSubs ? "" : sttNo}</td>
         <td class="col-hangmuc" rowspan="${span}"><textarea data-f="name" rows="1" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${dataCells(it, i, amt)}
       </tr>`;

@@ -10,10 +10,11 @@ router.use(requireAuth);
 // SAME columns as the Excel form (e.g. CLF has "Chi Tiết", GN-có-ngày has "Số Ngày").
 function templateLayout(code) {
   try {
-    const cols = getConfig(code).items.columns || {};
-    return { hasDetail: !!cols.detail, hasDays: !!cols.days };
+    const items = getConfig(code).items || {};
+    const cols = items.columns || {};
+    return { hasDetail: !!cols.detail, hasDays: !!cols.days, numberSubsections: !!items.numberSubsections };
   } catch {
-    return { hasDetail: false, hasDays: false };
+    return { hasDetail: false, hasDays: false, numberSubsections: false };
   }
 }
 const withLayout = (t) => ({ ...t, layout: templateLayout(t.code) });

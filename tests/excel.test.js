@@ -235,6 +235,45 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(Number(ws.getCell("G12").value)).toBe(999_999);
   });
 
+  // gn_banner: y hệt GN không ngày, CHỈ khác đánh STT — nhóm con 1,2,3 (reset mỗi nhóm chính),
+  // mục bên dưới KHÔNG đánh số. marico/gn_banner: STT=cột B, Hạng Mục=cột C.
+  it("gn_banner: nhóm con đánh số 1,2,3; mục bên dưới không đánh số; nhóm chính giữ A/B/C", async () => {
+    const q = makeQuote("gn_banner");
+    q.sheets[0].items = [
+      { kind: "section", name: "HCM", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "subsection", name: "LM81", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "Vách giữa", detail: "", unit: "m2", quantity: 5, unitPrice: 95000, days: null, notes: "" },
+      { kind: "item", name: "Chi phí thi công A", detail: "", unit: "m2", quantity: 5, unitPrice: 65000, days: null, notes: "" },
+      { kind: "subsection", name: "SVH hallway", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "AW banner", detail: "", unit: "m2", quantity: 5, unitPrice: 95000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    const sttOf = (nameFrag) => { let v = undefined; ws.eachRow((row) => { if (String(row.getCell("C").value ?? "").includes(nameFrag)) v = row.getCell("B").value; }); return v; };
+    expect(String(sttOf("HCM"))).toBe("A");          // nhóm chính giữ chữ A/B/C
+    expect(String(sttOf("LM81"))).toBe("1");         // nhóm con → 1
+    expect(String(sttOf("SVH hallway"))).toBe("2");  // nhóm con → 2
+    expect(sttOf("Vách giữa") == null).toBe(true);   // mục bên dưới → KHÔNG đánh số
+    expect(sttOf("AW banner") == null).toBe(true);
+  });
+
+  // marico_decor (GN không ngày thường) GIỮ cách cũ: mục đánh 1,2; nhóm con không số.
+  it("marico_decor giữ cách cũ: mục đánh 1,2 (không phải nhóm con)", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets[0].items = [
+      { kind: "subsection", name: "LM81", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "Vách giữa", detail: "", unit: "m2", quantity: 5, unitPrice: 95000, days: null, notes: "" },
+      { kind: "item", name: "Chi phí thi công A", detail: "", unit: "m2", quantity: 5, unitPrice: 65000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    const sttOf = (nameFrag) => { let v = undefined; ws.eachRow((row) => { if (String(row.getCell("C").value ?? "").includes(nameFrag)) v = row.getCell("B").value; }); return v; };
+    expect(Number(sttOf("Vách giữa"))).toBe(1);      // GN thường: mục vẫn đánh số
+    expect(Number(sttOf("Chi phí thi công A"))).toBe(2);
+  });
+
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in
   // worker → transfer buffer back → validate). Proves the worker plumbing works.
   it("runExportJob generates a valid xlsx via the worker thread", async () => {
