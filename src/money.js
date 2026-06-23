@@ -12,6 +12,13 @@ export function D(v) {
   return new Decimal(v);
 }
 
+/** CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Cho code dùng number (quoteUtils/excel). */
+export function trunc2(x) {
+  const n = Number(x) || 0;
+  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT
+  return n < 0 ? -t : t;
+}
+
 /**
  * Recompute snapshot totals for a Quote (with sheets/items eager-loaded).
  * Returns { subtotal, vat, total, sheetTotals } all as Decimal — caller stores them.
@@ -32,11 +39,14 @@ export function computeQuoteTotals(quote) {
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)
-      const qty = D(it.quantity);
+      // Số Lượng CẮT còn 2 số (ROUND_DOWN = cắt, không làm tròn) — khớp hiển thị + Excel TRUNC.
+      const qty = D(it.quantity).toDecimalPlaces(2, Decimal.ROUND_DOWN);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
-      const line = (days && days.gt(0) ? qty.times(days).times(price) : qty.times(price)).times(mult);
-      return acc.plus(line);
+      // Thành Tiền 1 dòng làm tròn số nguyên (khớp hiển thị + Excel) RỒI mới nhân hệ số nhóm
+      // → dòng cộng lại đúng bằng tổng, không lệch sub-đồng.
+      const base = (days && days.gt(0) ? qty.times(days).times(price) : qty.times(price)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+      return acc.plus(base.times(mult));
     }, new Decimal(0));
     return { sheetId: sh.id, subtotal };
   });

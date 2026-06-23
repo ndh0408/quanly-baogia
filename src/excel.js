@@ -9,6 +9,13 @@ import { buildFormulaContext } from "./quoteFormula.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
+// CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Khớp util.js (web) + money.js (ROUND_DOWN).
+function trunc2(x) {
+  const n = Number(x) || 0;
+  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn)
+  return n < 0 ? -t : t;
+}
+
 // Template .xlsx files never change at runtime — read each from disk ONCE and
 // cache the bytes in RAM. Every export then loads from the cached Buffer instead
 // of re-reading ~170-207 KB/sheet off disk (big win on the inline export path).
@@ -366,7 +373,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i] && cur >= 0) {
         const it = items[i];
         const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        sectionSum[cur] += cols.days ? qty * days * price : qty * price;
+        sectionSum[cur] += Math.round(cols.days ? trunc2(qty) * days * price : trunc2(qty) * price);   // SL cắt 2 số, Thành Tiền làm tròn
       }
     }
   }
@@ -462,11 +469,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const price = Number(it.unitPrice) || 0;
       let amt;
       if (cols.days) {
-        amt = price * qty * days;
+        amt = price * trunc2(qty) * days;   // Số Lượng CẮT 2 số trước khi × giá
         putNum(it, r, "days", cols.days, days);
       } else {
-        amt = price * qty;
+        amt = price * trunc2(qty);
       }
+      amt = Math.round(amt);   // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng)
       subtotal += amt * mult;
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.
@@ -487,11 +495,21 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         ensureWrap(ws.getCell(`${cols.detail}${r}`));
       }
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
-      putNum(it, r, "quantity", cols.quantity, qty);
+      // Số Lượng: CẮT còn 2 số (TRUNC) — vẫn GIỮ công thức người dùng (bọc TRUNC) để khách thấy;
+      // số khớp Thành Tiền (=ROUND(SL×ĐG)). Số chẵn → không lẻ ("0"); có lẻ → đúng 2 số ("0.00").
+      if (cols.quantity) {
+        const qT = trunc2(qty);
+        const rawQ = it.formulas && it.formulas.quantity;
+        const fxQ = rawQ ? fctx.cellFormula(rawQ, qty) : null;
+        const qCell = ws.getCell(`${cols.quantity}${r}`);
+        if (fxQ) qCell.value = { formula: `TRUNC(${fxQ},2)`, result: qT };
+        else qCell.value = qT;
+        qCell.numFmt = Number.isInteger(qT) ? "0" : "0.00";
+      }
       putNum(it, r, "unitPrice", cols.unitPrice, price);
       if (cols.amount) {
         ws.getCell(`${cols.amount}${r}`).value = {
-          formula: itemsCfg.amountFormula(r),
+          formula: `ROUND(${itemsCfg.amountFormula(r)},0)`,   // Thành Tiền = làm tròn(SL×ĐG) số nguyên
           result: amt,
         };
       }
@@ -548,10 +566,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     result: subtotal,
     rawValue: hasSections ? subtotal : null,
   });
+  // VAT làm tròn số nguyên (khớp tổng đã chốt ở server) — bọc ROUND để Excel cũng tính ra số nguyên.
+  const vatAmt = Math.round(subtotal * vatPct / 100);
   applyTotalsRow(ws, t.vat, vatRow, {
     text: t.vat.labelText(vatPct),
-    formula: t.vat.formula({ subtotalRow, vatPct }),
-    result: subtotal * vatPct / 100,
+    formula: `ROUND(${t.vat.formula({ subtotalRow, vatPct })},0)`,
+    result: vatAmt,
   });
 
   // Optional "Giảm Giá" row. Only rendered on a sheet when this is the sole sheet
@@ -575,7 +595,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   applyTotalsRow(ws, t.total, totalRow, {
     text: t.total.labelText(vatPct),
     formula: t.total.formula({ subtotalRow, vatRow, discountRow }),
-    result: subtotal * (1 + vatPct / 100) - (discountRow ? discount : 0),
+    result: subtotal + vatAmt - (discountRow ? discount : 0),   // = Cộng + VAT(đã tròn) − Giảm Giá
   });
 
   // Footer merges (e.g. CLF "* Ghi chú" at C:D) ride the item splice/duplicate by
@@ -935,14 +955,14 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   });
 
   const totalsStart = headerRow + 1 + sheetTotals.length;
-  // Use the quote's STORED totals (computed by money.js — rounded to 0 dp, VND has
-  // no fractional unit) so the Excel summary matches the app/DB exactly. The old
-  // code recomputed VAT as Math.round(subtotalAll*vatPct)/100, which produced a
-  // fractional VAT and a grand total off by sub-đồng vs what the customer saw in-app.
-  const subtotalVal = quote.subtotal != null ? Number(quote.subtotal) : subtotalAll;
-  const vatVal = quote.vat != null ? Number(quote.vat) : Math.round(subtotalAll * vatPct / 100);
+  // LUÔN tính "Tổng cộng" từ tổng các sheet ĐANG hiển thị (subtotalAll = Σ subtotal từng sheet,
+  // đều đã cắt Số Lượng + làm tròn Thành Tiền) → khớp ĐÚNG tổng các dòng sheet ngay phía trên,
+  // tự nhất quán. money.js cũng cắt + làm tròn nên với báo giá đã lưu mới, số này == tổng đã lưu;
+  // báo giá CŨ (lưu theo Số Lượng chưa cắt) cũng không còn lệch dòng-vs-tổng trong file Excel.
   const discountVal = Number(quote.discount) || 0;
-  const grandTotal = quote.total != null ? Number(quote.total) : (subtotalVal + vatVal - discountVal);
+  const subtotalVal = subtotalAll;
+  const vatVal = Math.round(subtotalVal * vatPct / 100);
+  const grandTotal = subtotalVal + vatVal - discountVal;
   const totalRows = [
     { label: "Tổng cộng", value: subtotalVal },
     { label: `VAT (${vatPct}%)`, value: vatVal },

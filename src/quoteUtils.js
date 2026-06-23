@@ -4,7 +4,7 @@
 // objects / sessions.
 
 import { prisma } from "./db.js";
-import { computeQuoteTotals, totalsToJson, D } from "./money.js";
+import { computeQuoteTotals, totalsToJson, D, trunc2 } from "./money.js";
 import { canOnQuote } from "./permissions.js";
 
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
@@ -189,10 +189,10 @@ export function extraTableSum(t) {
   return (t?.items || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
     if (approvedOnly && !it.approved) return acc;   // HCM/Phí KH: chưa duyệt → KHÔNG tính
-    const qty = Number(it.quantity) || 0;
+    const qty = trunc2(it.quantity);   // Số Lượng CẮT 2 số — KHỚP CHÍNH XÁC extraTableSumLocal (client)
     const price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;
-    return acc + (days && days > 0 ? qty * days * price : qty * price);
+    return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
 }
 

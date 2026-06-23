@@ -157,8 +157,8 @@ describe("buildQuoteBuffer (export generation)", () => {
     // Ô không công thức → số thường (không phải formula cell)
     expect(ws.getCell("G14").formula).toBeUndefined();
     expect(Number(ws.getCell("G14").value)).toBe(333_000);
-    // Thành Tiền (cột H) vẫn là công thức =G*F như trước
-    expect(ws.getCell("H12").formula).toBe("G12*F12");
+    // Thành Tiền (cột H) là công thức làm tròn ROUND(=G*F, 0)
+    expect(ws.getCell("H12").formula).toBe("ROUND(G12*F12,0)");
   });
 
   // CLF lọc dòng "info" ra banner → lệch chỉ số mảng item. Công thức tham chiếu VƯỢT QUA
@@ -175,6 +175,50 @@ describe("buildQuoteBuffer (export generation)", () => {
     const ws = wb.worksheets[0];
     expect(ws.getCell("G7").formula).toBe("G6*1.1");   // trỏ về Mục A (G6), KHÔNG tự trỏ G7
     expect(Number(ws.getCell("G7").result)).toBe(1_100_000);
+  });
+
+  // Thành Tiền LÀM TRÒN số nguyên (bỏ ,50) + các dòng cộng lại ĐÚNG bằng Tổng Cộng.
+  it("Thành Tiền làm tròn số nguyên, dòng cộng = tổng", async () => {
+    const q = makeQuote("marico_decor");   // amountFormula G*F (G=ĐơnGiá, F=SốLượng), firstRow=12
+    q.sheets[0].items = [
+      { kind: "item", name: "A", detail: "", unit: "m2", quantity: 1.5, unitPrice: 95001, days: null, notes: "" }, // 142501.5 → 142502
+      { kind: "item", name: "B", detail: "", unit: "m2", quantity: 2.5, unitPrice: 95001, days: null, notes: "" }, // 237502.5 → 237503
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    const h12 = Number(ws.getCell("H12").result), h13 = Number(ws.getCell("H13").result);
+    expect(h12).toBe(142502);                    // làm tròn lên (HALF_UP), không còn ,50
+    expect(h13).toBe(237503);
+    expect(Number.isInteger(h12) && Number.isInteger(h13)).toBe(true);
+    expect(ws.getCell("H12").formula).toBe("ROUND(G12*F12,0)");
+    // Tổng Cộng = đúng tổng các dòng đã làm tròn (142502 + 237503 = 380005)
+    let foundSub = false;
+    ws.eachRow((row) => row.eachCell((c) => { if (Number(c.value?.result ?? c.value) === 380005) foundSub = true; }));
+    expect(foundSub).toBe(true);
+  });
+
+  // Số Lượng CẮT 2 số (TRUNC) trong Excel — vẫn GIỮ công thức (bọc TRUNC); Thành Tiền theo số đã cắt.
+  it("Số Lượng cắt 2 số (TRUNC) + giữ công thức + Thành Tiền theo số đã cắt", async () => {
+    const q = makeQuote("marico_decor");   // F=Số Lượng, G=Đơn Giá, H=Thành Tiền, firstRow=12
+    q.sheets[0].items = [
+      // qty có công thức =2.75*2.05 (=5.6375) → CẮT 5,63, ô GIỮ công thức (bọc TRUNC)
+      { kind: "item", name: "A", detail: "", unit: "m2", quantity: 5.6375, unitPrice: 100000, days: null, notes: "", formulas: { quantity: "=2.75*2.05" } },
+      // qty thường 7.621 → cắt 7,62 (không công thức)
+      { kind: "item", name: "B", detail: "", unit: "m2", quantity: 7.621, unitPrice: 100000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    // Số Lượng: ô có công thức → bọc TRUNC (vẫn hiện công thức), giá trị cắt còn 2 số
+    expect(ws.getCell("F12").formula).toBe("TRUNC(2.75*2.05,2)");
+    expect(Number(ws.getCell("F12").result)).toBe(5.63);
+    // Số Lượng thường → ghi thẳng số đã cắt, không phải công thức
+    expect(ws.getCell("F13").formula).toBeUndefined();
+    expect(Number(ws.getCell("F13").value)).toBe(7.62);
+    // Thành Tiền = ROUND(Đơn Giá × Số Lượng-đã-cắt): 100000×5,63=563000 ; 100000×7,62=762000
+    expect(Number(ws.getCell("H12").result)).toBe(563000);
+    expect(Number(ws.getCell("H13").result)).toBe(762000);
   });
 
   // AN TOÀN: nếu giá trị đã lưu LỆCH với công thức (vd dữ liệu cũ chưa tính lại) → ghi

@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623b";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623b";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623b";
-import { api } from "./core/api.js?v=20260623b";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623b";
-import { refreshPreview } from "./preview.js?v=20260623b";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623c";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623c";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623c";
+import { api } from "./core/api.js?v=20260623c";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623c";
+import { refreshPreview } from "./preview.js?v=20260623c";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -675,9 +675,9 @@ export function extraTableSumLocal(t) {
   return ((t && t.items) || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
-    const qty = Number(it.quantity) || 0, price = Number(it.unitPrice) || 0;
+    const qty = trunc2(it.quantity), price = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số (khớp hiển thị + server)
     const days = it.days != null ? Number(it.days) : null;
-    return acc + (days && days > 0 ? qty * days * price : qty * price);
+    return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
 }
 function drawExtraTables(q, activeSheet, editable) {
@@ -848,14 +848,13 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
   const fmtNumCell = (v) => {
-    const n = Number(v);
-    if (!n || isNaN(n)) return "";                       // 0 / rỗng → ô trống
-    if (Number.isInteger(n)) return n.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,00
-    // Có phần lẻ → hiện ĐÚNG 2 số, CẮT bớt chứ KHÔNG làm tròn: 5,997→5,99 · 3,2→3,20.
-    // toFixed(4) khử nhiễu float (giá trị gốc tối đa 4 lẻ), rồi lấy 2 số đầu của phần lẻ.
-    const [intp, dec] = Math.abs(n).toFixed(4).split(".");
-    const out = Number(intp).toLocaleString("vi-VN") + "," + dec.slice(0, 2);
-    return n < 0 ? "-" + out : out;
+    const t = trunc2(v);   // CẮT 2 số (cùng hàm với lúc tính tiền → hiển thị KHỚP giá trị dùng để tính)
+    if (!t || isNaN(t)) return "";                       // 0 / rỗng → ô trống
+    if (Number.isInteger(t)) return t.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,00
+    // Có phần lẻ → hiện ĐÚNG 2 số (pad): 5,997→5,99 · 3,2→3,20. t đã ≤2 lẻ nên toFixed(2) chính xác.
+    const [intp, dec] = Math.abs(t).toFixed(2).split(".");
+    const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
+    return t < 0 ? "-" + out : out;
   };
   // Parse a VN-formatted string ("1.234.567" / "12,5" / "-5.000") back to a number.
   const parseVN = (s) => {
@@ -920,8 +919,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (rowKind[s2] === "section") { cur = s2; sectionSum[s2] = 0; }
       else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
         const x = activeSheet.items[s2];
-        sectionSum[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
-                                    : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+        sectionSum[cur] += lineAmount(x, usesDays);
       }
     }
   }
@@ -956,10 +954,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa">✕</button></td>` : ""}
       </tr>`;
     }
-    const qty = Number(it.quantity) || 0;
-    const days = Number(it.days) || 1;
-    const price = Number(it.unitPrice) || 0;
-    const amt = usesDays ? qty * days * price : qty * price;
+    const amt = lineAmount(it, usesDays);
     if (rowKind[i] === "sub") {
       // Sub-row: STT + Hạng Mục covered by the head's rowspan, so omit those cells.
       return `<tr data-row="${i}" class="sub-row">${dataCells(it, i, amt)}</tr>`;
@@ -1081,8 +1076,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const it = activeSheet.items[p.row]; if (!it) return 0;
     if (p.field === "_amount") {
       if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
-      return usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                      : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+      return lineAmount(it, usesDays);
     }
     if (p.field === "_stt") return 0;
     if (NUMERIC.has(p.field)) return Number(it[p.field]) || 0;
@@ -1126,8 +1120,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     activeSheet.items.forEach((it, i) => {
       const tr = tbody.querySelector(`tr[data-row="${i}"]`); if (!tr) return;
       if (it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info") {
-        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const amt = lineAmount(it, usesDays);
         const ac = tr.querySelector(".col-amount"); if (ac) ac.textContent = fmtNumCell(amt);
       }
       if (it.formulas) for (const f in it.formulas) {
@@ -1176,8 +1169,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (rowKind[s2] === "section") { cur = s2; sums[s2] = 0; }
       else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
         const x = activeSheet.items[s2];
-        sums[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
-                              : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+        sums[cur] += lineAmount(x, usesDays);
       }
     }
     for (const idx in sums) {
@@ -1628,8 +1620,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const it = activeSheet.items[i];
       if (f === "quantity") autoEnableGroupSub(i);   // SL nhóm > 1 → tự bật "Hiện Thành Tiền nhóm" (kẻo tổng âm thầm sai)
       if (it.kind !== "section" && it.kind !== "subsection") {
-        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const amt = lineAmount(it, usesDays);
         const amtCell = tr.querySelector(".col-amount");   // info/section rows: skip
         if (amtCell) amtCell.textContent = fmtNumCell(amt);
       }

@@ -42,9 +42,21 @@ export function safeLogoSrc(s) {
 
 // ---- Live-preview helpers (mirror drawItems + src/excel.js so the preview matches the file) ----
 export function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
+// Thành Tiền 1 dòng = Số Lượng × (Số Ngày) × Đơn Giá, LÀM TRÒN về số nguyên (VNĐ không
+// có hào). 1 nguồn duy nhất để dòng/nhóm/tổng/Excel đều khớp (dòng cộng lại = tổng).
+// CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Chuỗi toFixed(4) khử nhiễu
+// float (giá trị gốc tối đa 4 lẻ). 1 nguồn cho cả hiển thị Số Lượng lẫn tính Thành Tiền.
+export function trunc2(x) {
+  const n = Number(x) || 0;
+  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn); khớp Decimal ROUND_DOWN
+  return n < 0 ? -t : t;
+}
+export function lineAmount(it, usesDays) {
+  const q = trunc2(it.quantity), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số rồi mới × giá
+  return Math.round(usesDays ? q * d * p : q * p);
+}
 export function pvAmount(it, usesDays) {
-  const qy = Number(it.quantity) || 0, d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
-  return usesDays ? qy * d * p : qy * p;
+  return lineAmount(it, usesDays);
 }
 export function pvMoney(n) { return (!n || isNaN(Number(n))) ? "" : Number(n).toLocaleString("vi-VN"); }
 export function nl2br(s) { return escapeHtml(s || "").replace(/\n/g, "<br>"); }
@@ -93,8 +105,7 @@ export function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   for (const it of (items || [])) {
     if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
     if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
-    const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-    sum += (usesDays ? qty * days * price : qty * price) * mult;
+    sum += lineAmount(it, usesDays) * mult;   // cộng Thành Tiền ĐÃ làm tròn từng dòng
   }
   return sum;
 }
