@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623a";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623a";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623a";
-import { api } from "./core/api.js?v=20260623a";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623a";
-import { refreshPreview } from "./preview.js?v=20260623a";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623b";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623b";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623b";
+import { api } from "./core/api.js?v=20260623b";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623b";
+import { refreshPreview } from "./preview.js?v=20260623b";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -934,8 +934,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const subAmt = sectionSum[i] || 0;
       return `
       <tr data-row="${i}" class="section-row${isSub ? " subgroup-row" : ""}">
-        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${isSub ? "↳" : letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
-        <td class="col-hangmuc">${isSub ? `<span class="subgroup-caret" aria-hidden="true">↳ </span>` : ""}<textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${isSub ? "" : letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
+        <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>

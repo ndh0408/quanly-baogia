@@ -404,9 +404,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .excel-table td.col-amount { width: 140px; text-align: right; background: #fff; }
 .excel-table td.col-notes { width: 150px; border-right: 2px solid #000; }
 .excel-table td.col-notes input { font-style: italic; text-align: center; }
-/* GHI CHÚ NỘI BỘ — tô kem nhạt để rõ "chỉ nội bộ, KHÔNG xuất Excel"; có ở lưới chính, không ở bảng nội bộ */
-.excel-table th.th-internal-note, .excel-table td.col-internal-note { background: #fff7ed; }
-.excel-table td.col-internal-note { width: 160px; border-right: 2px solid #000; }
+/* GHI CHÚ NỘI BỘ — cột "không xuất Excel": để TRẮNG (bỏ màu) theo yêu cầu khách; có ở lưới chính, không ở bảng nội bộ */
+.excel-table th.th-internal-note { background: #fff; }
+/* !important để LUÔN trắng kể cả ở hàng nhóm/nhóm con (đè nền màu của .section-row/.subgroup-row) */
+.excel-table td.col-internal-note { background: #fff !important; width: 160px; border-right: 2px solid #000; }
 .excel-table td.col-internal-note textarea { font-style: italic; color: #8a5a00; }
 /* ===== Account Hà Nội (role account_hn) — màn rút gọn + panel quản lý ===== */
 .account-hn-view { max-width: 1100px; margin: 0 auto; }
@@ -480,21 +481,21 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 
 /* Section (nhóm A/B/C) row — ONE uniform colour across the whole row, including the
    "Thành Tiền" cell (which is hard-coded white above). Bold blue text for the group. */
-.excel-table tr.section-row td { background: #eaf1fb; }
-.excel-table tr.section-row input { background: transparent; font-weight: 700; color: #1f4e79; }
+/* Nhóm chính A/B/C: nền KEM + chữ nâu (theo yêu cầu khách). */
+.excel-table tr.section-row td { background: #fcefdb; }
+.excel-table tr.section-row input { background: transparent; font-weight: 700; color: #9a5b14; }
 .excel-table tr.section-row td.col-price,
-.excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #1f4e79; }
-.excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #1f4e79; }
-/* Nhóm con (subsection): thụt lề + nền CAM NHẠT/chữ nâu — KHÁC HẲN nhóm chính (xanh dương)
-   cho dễ phân biệt bằng mắt. Tổng riêng, không cộng vào nhóm chính. */
-.excel-table tr.subgroup-row td { background: #fcefdb; }
+.excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #9a5b14; }
+.excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #9a5b14; }
+/* Nhóm con (subsection): nền XANH + chữ xanh — KHÁC nhóm chính (kem). Phân biệt bằng
+   màu + thụt lề (đã bỏ dấu ↳ cho đỡ rối). Tổng riêng, không cộng vào nhóm chính. */
+.excel-table tr.subgroup-row td { background: #eaf1fb; }
 .excel-table tr.subgroup-row td.col-hangmuc { padding-left: 20px; }
-.excel-table tr.subgroup-row .subgroup-caret { color: #b5792a; font-weight: 700; }
 .excel-table tr.subgroup-row input,
 .excel-table tr.subgroup-row td.col-hangmuc textarea,
 .excel-table tr.subgroup-row td.col-price,
 .excel-table tr.subgroup-row td.col-amount,
-.excel-table tr.subgroup-row td.col-notes textarea { color: #9a5b14; }
+.excel-table tr.subgroup-row td.col-notes textarea { color: #1f4e79; }
 
 /* Excel-style selection summary bar (Sum / Count / Average of selected cells) */
 .grid-stat { display: flex; gap: 16px; justify-content: flex-end; align-items: center;
