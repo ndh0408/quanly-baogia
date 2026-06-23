@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
+import { buildFormulaContext } from "./quoteFormula.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -176,6 +177,9 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   const c = cfg.cells;
   const pal = cfg.palette || null;   // bảng màu tuỳ template (GN: peach/xanh lá/xanh dương)
   let items = (sheet.items || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  // Thứ tự item THEO ĐÚNG EDITOR (trước khi lọc dòng "info" của CLF) — công thức người
+  // dùng đánh ref theo thứ tự này; giữ lại để dịch ref đúng dù `items` bị lọc bên dưới.
+  const editorItems = items.slice();
 
   // Templates with a dedicated "program info" banner (CLF B5) collect kind:"info"
   // rows into that single cell instead of rendering them as item rows. The banner
@@ -367,6 +371,30 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
     }
   }
 
+  // Công thức người dùng TỰ GÕ (it.formulas) → công thức Excel thật. Dựng bộ dịch theo
+  // sheet (slotRows đã chốt). Ô số nào dịch được + tự kiểm khớp thì ghi công thức; không
+  // thì ghi số như cũ (putNum bên dưới) — không bao giờ làm hỏng export.
+  // Bản đồ ĐỐI TƯỢNG item (item/sub đã đặt chỗ) → hàng Excel: tra theo địa chỉ đối tượng
+  // nên ref công thức dịch ĐÚNG bất kể CLF lọc dòng "info" làm lệch chỉ số mảng.
+  const rowByItem = new Map();
+  for (let j = 0; j < slotRows.length; j++) {
+    const it2 = items[j];
+    if (it2 && (it2.kind === "item" || it2.kind === "sub") && slotRows[j] != null) rowByItem.set(it2, slotRows[j]);
+  }
+  const fctx = buildFormulaContext({
+    cols,
+    items: editorItems,                                  // thứ tự editor (ref người dùng khớp)
+    rowToExcel: (idx0) => rowByItem.has(editorItems[idx0]) ? rowByItem.get(editorItems[idx0]) : null,
+  });
+  // Ghi 1 ô số: ưu tiên công thức người dùng (kết quả = giá trị đã tính), fallback ghi số.
+  const putNum = (it2, row, field, colX, value) => {
+    if (!colX) return;
+    const raw = it2 && it2.formulas && it2.formulas[field];
+    const fx = raw ? fctx.cellFormula(raw, value) : null;
+    if (fx) ws.getCell(`${colX}${row}`).value = { formula: fx, result: value };
+    else setCell(ws, `${colX}${row}`, value);
+  };
+
   let subtotal = 0;
   let itemNo = 0;
   let sectionIdx = -1;
@@ -434,7 +462,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       let amt;
       if (cols.days) {
         amt = price * qty * days;
-        setCell(ws, `${cols.days}${r}`, days);
+        putNum(it, r, "days", cols.days, days);
       } else {
         amt = price * qty;
       }
@@ -458,8 +486,8 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         ensureWrap(ws.getCell(`${cols.detail}${r}`));
       }
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
-      if (cols.quantity) setCell(ws, `${cols.quantity}${r}`, qty);
-      if (cols.unitPrice) setCell(ws, `${cols.unitPrice}${r}`, price);
+      putNum(it, r, "quantity", cols.quantity, qty);
+      putNum(it, r, "unitPrice", cols.unitPrice, price);
       if (cols.amount) {
         ws.getCell(`${cols.amount}${r}`).value = {
           formula: itemsCfg.amountFormula(r),

@@ -133,6 +133,64 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(bad).toBe(0);
   });
 
+  // CÔNG THỨC NGƯỜI DÙNG TỰ GÕ: ô Đơn Giá có it.formulas phải xuất ra CÔNG THỨC Excel
+  // (không chỉ con số). marico_decor: unitPrice=cột G, firstRow=12 → item#1 G12, item#2 G13.
+  it("xuất công thức người dùng (số học + tham chiếu) ra ô Excel", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets[0].items = [
+      // item#1: Đơn Giá nhập "=500000+500000" → 1.000.000
+      { kind: "item", name: "Mục 1", detail: "", unit: "cái", quantity: 2, unitPrice: 1_000_000, days: null, notes: "", formulas: { unitPrice: "=500000+500000" } },
+      // item#2: Đơn Giá nhập "=F1*0,5" (editor F=Đơn Giá, row1=item#1) → 500.000
+      { kind: "item", name: "Mục 2", detail: "", unit: "bộ", quantity: 1, unitPrice: 500_000, days: null, notes: "", formulas: { unitPrice: "=F1*0,5" } },
+      // item#3: KHÔNG có công thức → vẫn ghi số thường
+      { kind: "item", name: "Mục 3", detail: "", unit: "cái", quantity: 1, unitPrice: 333_000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    // Số học thuần → công thức + kết quả đúng
+    expect(ws.getCell("G12").formula).toBe("500000+500000");
+    expect(Number(ws.getCell("G12").result)).toBe(1_000_000);
+    // Tham chiếu → đổi toạ độ editor F1 → Excel G12, dấu thập phân ',' → '.'
+    expect(ws.getCell("G13").formula).toBe("G12*0.5");
+    expect(Number(ws.getCell("G13").result)).toBe(500_000);
+    // Ô không công thức → số thường (không phải formula cell)
+    expect(ws.getCell("G14").formula).toBeUndefined();
+    expect(Number(ws.getCell("G14").value)).toBe(333_000);
+    // Thành Tiền (cột H) vẫn là công thức =G*F như trước
+    expect(ws.getCell("H12").formula).toBe("G12*F12");
+  });
+
+  // CLF lọc dòng "info" ra banner → lệch chỉ số mảng item. Công thức tham chiếu VƯỢT QUA
+  // dòng info phải vẫn trỏ đúng ô (tra theo ĐỐI TƯỢNG item). CLF: firstRow=6, unitPrice=G.
+  it("CLF: ref công thức vượt qua dòng 'info' trỏ ĐÚNG ô (không lệch do lọc)", async () => {
+    const q = makeQuote("clofull_decor");
+    q.sheets[0].items = [
+      { kind: "info", name: "Thông tin chương trình", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },   // row editor 1 → banner
+      { kind: "item", name: "Mục A", detail: "", unit: "cái", quantity: 1, unitPrice: 1_000_000, days: null, notes: "" },              // row editor 2 → Excel G6
+      { kind: "item", name: "Mục B", detail: "", unit: "cái", quantity: 1, unitPrice: 1_100_000, days: null, notes: "", formulas: { unitPrice: "=F2*1,1" } }, // row editor 3 → Excel G7, ref F2=Mục A
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    expect(ws.getCell("G7").formula).toBe("G6*1.1");   // trỏ về Mục A (G6), KHÔNG tự trỏ G7
+    expect(Number(ws.getCell("G7").result)).toBe(1_100_000);
+  });
+
+  // AN TOÀN: nếu giá trị đã lưu LỆCH với công thức (vd dữ liệu cũ chưa tính lại) → ghi
+  // SỐ chứ không xuất công thức sai. Không bao giờ ship công thức cho ra số khác.
+  it("không xuất công thức khi kết quả lệch với giá trị đã lưu (fallback số)", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets[0].items = [
+      { kind: "item", name: "Mục", detail: "", unit: "cái", quantity: 1, unitPrice: 999_999, days: null, notes: "", formulas: { unitPrice: "=1000000*8%" } },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    expect(ws.getCell("G12").formula).toBeUndefined();
+    expect(Number(ws.getCell("G12").value)).toBe(999_999);
+  });
+
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in
   // worker → transfer buffer back → validate). Proves the worker plumbing works.
   it("runExportJob generates a valid xlsx via the worker thread", async () => {
