@@ -412,20 +412,34 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 /* "ⓘ giải thích" cạnh Tổng sheet + bảng giải thích cách cộng (CHỈ trên web, không xuất file) */
 .link-btn { background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px; padding: 0 2px; text-decoration: underline; font-weight: 500; }
 .link-btn:hover { color: #1d4ed8; }
-.total-explain .te-note { margin: 0 0 10px; line-height: 1.5; }
-.total-explain .te-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.total-explain .te-table th, .total-explain .te-table td { border: 1px solid #ddd; padding: 5px 8px; vertical-align: top; }
-.total-explain .te-table th { background: #f3f4f6; text-align: left; }
-.total-explain .te-table th:last-child, .total-explain .te-table td.te-run { text-align: right; white-space: nowrap; }
-.total-explain .te-calc { font-variant-numeric: tabular-nums; }
-.total-explain tr.te-grp td { background: #fcefdb; font-weight: 600; }
-.total-explain tr.te-info td { background: #fafafa; }
-.total-explain .te-total { margin-top: 12px; text-align: right; font-size: 16px; }
-.total-explain .te-total b { color: #b5792a; }
-[data-theme="dark"] .total-explain .te-table th, [data-theme="dark"] .total-explain .te-table td { border-color: #2a3343; }
-[data-theme="dark"] .total-explain .te-table th { background: #1a2030; }
-[data-theme="dark"] .total-explain tr.te-grp td { background: #3a2f1a; color: #e3b765; }
-[data-theme="dark"] .total-explain tr.te-info td { background: #161b26; }
+.modal.modal-wide { max-width: 680px; width: 94vw; }
+.total-explain { font-size: 13.5px; }
+.total-explain .te-note { margin: 0 0 14px; padding: 9px 12px; line-height: 1.55; color: #555; background: #f7f8fa; border-radius: 8px; }
+/* Mỗi nhóm = 1 thẻ: đầu thẻ (tên nhóm) + các dòng mục + dòng "Cộng nhóm" */
+.total-explain .te-block { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 11px; overflow: hidden; }
+.total-explain .te-bh { background: #fcefdb; color: #8a5a14; font-weight: 700; padding: 8px 13px; }
+.total-explain .te-bh-sub { background: #eaf1fb; color: #1f4e79; padding-left: 22px; }
+.total-explain .te-bh-loose { background: #f1f3f5; color: #444; }
+.total-explain .te-mult { font-weight: 600; font-size: 11px; background: rgba(0,0,0,.10); padding: 1px 7px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
+.total-explain .te-line { display: flex; align-items: baseline; gap: 12px; padding: 6px 13px; border-top: 1px solid #f1f1f1; }
+.total-explain .te-nm { flex: 1 1 auto; min-width: 0; }
+.total-explain .te-cl { flex: 0 1 auto; color: #6b7280; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.total-explain .te-x { color: #b5792a; font-weight: 600; }
+.total-explain .te-am { flex: 0 0 auto; min-width: 96px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.total-explain .te-line.te-info { color: #9aa0a6; font-style: italic; display: block; }
+.total-explain .te-sub { display: flex; justify-content: flex-end; align-items: baseline; gap: 10px; padding: 7px 13px; background: #fafafa; border-top: 1px solid #eee; color: #555; }
+.total-explain .te-sub b { font-size: 14.5px; color: #222; font-variant-numeric: tabular-nums; }
+.total-explain .te-grand { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding: 13px 16px; background: #fff7ec; border: 2px solid #b5792a; border-radius: 10px; font-weight: 700; }
+.total-explain .te-grand b { color: #b5792a; font-size: 20px; font-variant-numeric: tabular-nums; }
+[data-theme="dark"] .total-explain .te-note { background: #161b26; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-block { border-color: #2a3343; }
+[data-theme="dark"] .total-explain .te-bh { background: #3a2f1a; color: #e3b765; }
+[data-theme="dark"] .total-explain .te-bh-sub { background: #16243a; color: #8fb6f0; }
+[data-theme="dark"] .total-explain .te-bh-loose { background: #1a2030; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-line { border-color: #222a38; }
+[data-theme="dark"] .total-explain .te-sub { background: #141a26; border-color: #222a38; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-sub b { color: #e6e9ef; }
+[data-theme="dark"] .total-explain .te-grand { background: #2a2113; border-color: #b5792a; }
 
 /* ===== Account Hà Nội (role account_hn) — màn rút gọn + panel quản lý ===== */
 .account-hn-view { max-width: 1100px; margin: 0 auto; }
