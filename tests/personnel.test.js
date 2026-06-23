@@ -109,17 +109,33 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect(r.body.confirmed).toBe("admin duyệt");
   });
 
-  it("round-trip nhiều cột (cá nhân + lương/thuế + hợp đồng) lưu + đọc đúng", async () => {
+  it("round-trip cột nhập + CÔNG THỨC thuế (pit=Lương/9, thu nhập=Lương×10/9) + BỎ field tham chiếu", async () => {
     const r = await mgrA.post("/api/personnel").send(payload({
       fullName: `${TAG} Full`, taxCode: "8801234567", idCard: "079123", bankName: "ACB", bankAccount: "216110189",
-      salary: 20_000_000, pit: 2_000_000, taxableIncome: 18_000_000, laborContractNo: "HDLD-01",
-      purchaseOrder: "PO-9", preTaxAmount: 50_000_000, payment: "Đã TT", confirmed: "OK",
+      salary: 18_000_000, laborContractNo: "HDLD-01", confirmed: "OK",
+      // Field công thức/tham chiếu — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
+      pit: 999, taxableIncome: 999, payment: "BẬY", preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
     }));
     expect(r.status).toBe(201);
     expect(r.body.taxCode).toBe("8801234567");
-    expect(Number(r.body.pit)).toBe(2_000_000);
     expect(r.body.laborContractNo).toBe("HDLD-01");
     expect(r.body.bankName).toBe("ACB");
+    // 🔵 Thuế TNCN = round(Lương/9); Thu nhập chịu thuế = Lương + Thuế — KHÔNG theo giá trị client gửi.
+    expect(Number(r.body.pit)).toBe(Math.round(18_000_000 / 9)); // = 2.000.000
+    expect(Number(r.body.taxableIncome)).toBe(18_000_000 + Math.round(18_000_000 / 9));
+    // 🩷 Field tham chiếu Dự án — không có mã dự án khớp → null (KHÔNG nhận giá trị client gửi).
+    expect(r.body.payment ?? null).toBeNull();
+    expect(r.body.preTaxAmount ?? null).toBeNull();
+    expect(r.body.salesContractNo ?? null).toBeNull();
+    expect(r.body.projectNameContract ?? null).toBeNull();
+  });
+
+  it("TỔNG (summary) tính từ Lương: pit=ΣLương/9, taxableIncome=ΣLương×10/9", async () => {
+    const r = await admin.get("/api/personnel").query({ q: TAG });
+    expect(r.status).toBe(200);
+    const s = r.body.summary;
+    expect(s.pit).toBe(Math.round(s.salary / 9));
+    expect(s.taxableIncome).toBe(s.salary + Math.round(s.salary / 9));
   });
 
   it("manager A xóa hồ sơ của mình → 200, list KHÔNG còn (soft-delete ẩn)", async () => {

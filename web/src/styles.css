@@ -96,6 +96,19 @@ tbody tr:hover .sticky-col { background: var(--row-hover); }
 tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; }
 tfoot .sticky-col { background: var(--card-2); }
 
+/* Mã màu nguồn cột (khớp chú giải Excel): 🔵 công thức · 🩷 tham chiếu Dự án. Ô tô nhẹ, header đậm hơn. */
+td.col-formula { background: rgba(74,163,255,.07); }
+td.col-ref { background: rgba(232,93,154,.07); }
+th.col-formula { background: color-mix(in srgb, #4aa3ff 16%, var(--card-2)); }
+th.col-ref { background: color-mix(in srgb, #e85d9a 16%, var(--card-2)); }
+
+/* Chú giải nguồn dữ liệu */
+.src-legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+.src-legend .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card-2); color: var(--soft); }
+.src-legend .chip-input { border-color: color-mix(in srgb, #f5b400 50%, var(--line)); }
+.src-legend .chip-ref { border-color: color-mix(in srgb, #e85d9a 50%, var(--line)); }
+.src-legend .chip-formula { border-color: color-mix(in srgb, #4aa3ff 50%, var(--line)); }
+
 /* Status badge */
 .status { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; }
 .status.ok { background: var(--ok-bg); color: var(--ok); }

@@ -1,53 +1,64 @@
-// Metadata 1 nguồn cho cả FORM (đủ cột) lẫn BẢNG (cột rút gọn). Khớp model PersonnelRecord.
+// Metadata 1 nguồn cho cả FORM lẫn BẢNG. Khớp model PersonnelRecord + công thức/tham chiếu ở server.
 export type FieldType = "text" | "number" | "money" | "date" | "textarea" | "status";
-export type Field = { key: string; label: string; type: FieldType; group: string };
+// Nguồn dữ liệu (khớp chú giải màu Excel của chủ dự án):
+//   input       🟡 nhập tay  → hiện trong form, sửa được
+//   formula     🔵 công thức  → server tự tính (Thuế TNCN=Lương/9, Thu nhập chịu thuế=Lương×10/9), KHÔNG nhập
+//   ref-project 🩷 tham chiếu → server tự lấy từ Dự án theo Mã dự án, KHÔNG nhập
+export type FieldSource = "input" | "formula" | "ref-project";
+export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource };
 
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
 
 export const FIELDS: Field[] = [
-  // Cá nhân
-  { key: "fullName", label: "Họ & Tên", type: "text", group: "Cá nhân" },
-  { key: "taxCode", label: "Mã số thuế", type: "text", group: "Cá nhân" },
-  { key: "birthYear", label: "Năm sinh", type: "text", group: "Cá nhân" },
-  { key: "idCard", label: "Căn cước", type: "text", group: "Cá nhân" },
-  { key: "idIssueDate", label: "Ngày cấp", type: "date", group: "Cá nhân" },
-  { key: "idIssuePlace", label: "Nơi cấp", type: "text", group: "Cá nhân" },
-  { key: "address", label: "Địa chỉ", type: "text", group: "Cá nhân" },
-  { key: "bankAccount", label: "Số tài khoản", type: "text", group: "Cá nhân" },
-  { key: "bankName", label: "Ngân hàng", type: "text", group: "Cá nhân" },
-  { key: "phone", label: "Số điện thoại", type: "text", group: "Cá nhân" },
+  // Cá nhân (Stage 1: nhập tay — Stage 2 sẽ chuyển sang chọn từ Danh bạ nhân viên)
+  { key: "fullName", label: "Họ & Tên", type: "text", group: "Cá nhân", source: "input" },
+  { key: "taxCode", label: "Mã số thuế", type: "text", group: "Cá nhân", source: "input" },
+  { key: "birthYear", label: "Năm sinh", type: "text", group: "Cá nhân", source: "input" },
+  { key: "idCard", label: "Căn cước", type: "text", group: "Cá nhân", source: "input" },
+  { key: "idIssueDate", label: "Ngày cấp", type: "date", group: "Cá nhân", source: "input" },
+  { key: "idIssuePlace", label: "Nơi cấp", type: "text", group: "Cá nhân", source: "input" },
+  { key: "address", label: "Địa chỉ", type: "text", group: "Cá nhân", source: "input" },
+  { key: "bankAccount", label: "Số tài khoản", type: "text", group: "Cá nhân", source: "input" },
+  { key: "bankName", label: "Ngân hàng", type: "text", group: "Cá nhân", source: "input" },
+  { key: "phone", label: "Số điện thoại", type: "text", group: "Cá nhân", source: "input" },
   // Lương / Thuế
-  { key: "salary", label: "Lương", type: "money", group: "Lương / Thuế" },
-  { key: "pit", label: "Thuế TNCN", type: "money", group: "Lương / Thuế" },
-  { key: "taxableIncome", label: "Thu nhập chịu thuế", type: "money", group: "Lương / Thuế" },
+  { key: "salary", label: "Lương", type: "money", group: "Lương / Thuế", source: "input" },
+  { key: "pit", label: "Thuế TNCN", type: "money", group: "Lương / Thuế", source: "formula" },
+  { key: "taxableIncome", label: "Thu nhập chịu thuế", type: "money", group: "Lương / Thuế", source: "formula" },
   // Dự án
-  { key: "workStart", label: "Bắt đầu làm việc", type: "date", group: "Dự án" },
-  { key: "workEnd", label: "Kết thúc làm việc", type: "date", group: "Dự án" },
-  { key: "workLocation", label: "Địa điểm làm việc", type: "text", group: "Dự án" },
-  { key: "projectName", label: "Tên dự án", type: "text", group: "Dự án" },
-  { key: "projectCode", label: "Mã dự án", type: "text", group: "Dự án" },
-  { key: "teamNote", label: "Team ghi chú", type: "text", group: "Dự án" },
-  { key: "accountName", label: "Account", type: "text", group: "Dự án" },
-  { key: "company", label: "Công ty", type: "text", group: "Dự án" },
+  { key: "workStart", label: "Bắt đầu làm việc", type: "date", group: "Dự án", source: "input" },
+  { key: "workEnd", label: "Kết thúc làm việc", type: "date", group: "Dự án", source: "input" },
+  { key: "workLocation", label: "Địa điểm làm việc", type: "text", group: "Dự án", source: "input" },
+  { key: "projectName", label: "Tên dự án", type: "text", group: "Dự án", source: "input" },
+  { key: "projectCode", label: "Mã dự án", type: "text", group: "Dự án", source: "input" },
+  { key: "teamNote", label: "Team ghi chú", type: "text", group: "Dự án", source: "input" },
+  { key: "accountName", label: "Account", type: "text", group: "Dự án", source: "input" },
+  { key: "company", label: "Công ty", type: "text", group: "Dự án", source: "input" },
   // Hợp đồng
-  { key: "projectNameContract", label: "Tên dự án (HĐ)", type: "text", group: "Hợp đồng" },
-  { key: "laborContractNo", label: "Số HĐ LĐ", type: "text", group: "Hợp đồng" },
-  { key: "laborContractDate", label: "Ngày HĐ LĐ", type: "date", group: "Hợp đồng" },
-  { key: "salesContractNo", label: "Số HĐ bán", type: "text", group: "Hợp đồng" },
-  { key: "salesContractDate", label: "Ngày HĐ bán", type: "date", group: "Hợp đồng" },
-  { key: "purchaseOrder", label: "Đơn đặt hàng", type: "text", group: "Hợp đồng" },
-  { key: "preTaxAmount", label: "Tiền trước thuế", type: "money", group: "Hợp đồng" },
+  { key: "projectNameContract", label: "Tên dự án (HĐ)", type: "text", group: "Hợp đồng", source: "ref-project" },
+  { key: "laborContractNo", label: "Số HĐ LĐ", type: "text", group: "Hợp đồng", source: "input" },
+  { key: "laborContractDate", label: "Ngày HĐ LĐ", type: "date", group: "Hợp đồng", source: "input" },
+  { key: "salesContractNo", label: "Số HĐ bán", type: "text", group: "Hợp đồng", source: "ref-project" },
+  { key: "salesContractDate", label: "Ngày HĐ bán", type: "date", group: "Hợp đồng", source: "ref-project" },
+  { key: "purchaseOrder", label: "Đơn đặt hàng", type: "text", group: "Hợp đồng", source: "ref-project" },
+  { key: "preTaxAmount", label: "Tiền trước thuế", type: "money", group: "Hợp đồng", source: "ref-project" },
   // Thanh toán
-  { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán" },
-  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán" },
-  { key: "confirmed", label: "Xác nhận", type: "status", group: "Thanh toán" },
-  { key: "note", label: "Note", type: "textarea", group: "Thanh toán" },
+  { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "input" },
+  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "ref-project" },
+  { key: "confirmed", label: "Xác nhận", type: "status", group: "Thanh toán", source: "input" },
+  { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "input" },
 ];
 
-// Cột hiển thị trong bảng danh sách (đủ cột quan trọng; cuộn ngang; cột đầu ghim).
+// Chỉ field NHẬP TAY mới hiện trong form (công thức/tham chiếu là read-only).
+export const INPUT_FIELDS = FIELDS.filter((f) => f.source === "input");
+
+// Cột hiển thị trong bảng — đủ các nhóm để thấy rõ input/công thức/tham chiếu; cuộn ngang; cột đầu ghim.
 export const TABLE_COLS = [
-  "fullName", "idCard", "taxCode", "projectName", "projectCode", "company",
-  "salary", "pit", "preTaxAmount", "workStart", "workEnd", "payment", "confirmed",
+  "fullName", "idCard", "taxCode", "company",
+  "salary", "pit", "taxableIncome",
+  "workStart", "workEnd", "projectName", "projectCode",
+  "projectNameContract", "salesContractNo", "salesContractDate", "purchaseOrder", "preTaxAmount", "payment",
+  "confirmed",
 ];
 // Backend chỉ cho sort theo các key này; trong bảng chỉ fullName hiển thị → cho click sort.
 export const SORTABLE = new Set(["fullName"]);

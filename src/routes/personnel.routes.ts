@@ -6,6 +6,7 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { can, canScoped, requirePermission, PERMISSIONS as P } from "../permissions.js";
+import { buildProjectRef, computeTax, type ProjectRef } from "../services/projectRef.js";
 
 // Trang "Nhân sự": hồ sơ nhân công theo dự án. Account (manager) TẠO + chỉ thấy/sửa của MÌNH
 // (owner = createdById); hr + accountant XEM tất cả (read-only); admin toàn quyền.
@@ -20,16 +21,18 @@ const str = (max = 1000) => z.preprocess((v) => (v === "" || v == null ? null : 
 const money = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.number().nonnegative().nullable());
 const date = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.date().nullable());
 
+// CHỈ field NHẬP TAY (🟡) mới nằm trong shape → API bỏ qua mọi field công thức/tham chiếu nếu client gửi.
+// 🔵 Công thức (pit, taxableIncome) tính ở server. 🩷 Tham chiếu Dự án (projectNameContract,
+// salesContractNo/Date, purchaseOrder, preTaxAmount, payment) lookup khi đọc — KHÔNG lưu, KHÔNG nhập.
 const personnelShape = {
   fullName: z.string().min(1, "Vui lòng nhập Họ & Tên").max(200),
   taxCode: str(40), birthYear: str(40), idCard: str(40), idIssueDate: date, idIssuePlace: str(200),
   address: str(500), bankAccount: str(60), bankName: str(120), phone: str(40),
-  salary: money, pit: money, taxableIncome: money,
+  salary: money,
   workStart: date, workEnd: date, workLocation: str(200),
   projectName: str(300), projectCode: str(80), teamNote: str(500), accountName: str(120), company: str(120),
-  projectNameContract: str(300), laborContractNo: str(80), laborContractDate: date,
-  salesContractNo: str(80), salesContractDate: date, purchaseOrder: str(120),
-  preTaxAmount: money, accountingNote: str(1000), payment: str(200), confirmed: str(200), note: str(1000),
+  laborContractNo: str(80), laborContractDate: date,
+  accountingNote: str(1000), confirmed: str(200), note: str(1000),
 };
 // Ràng buộc logic (chỉ kiểm khi field có mặt — dùng cho cả create lẫn update).
 const refineLogic = (v: Record<string, unknown>, ctx: z.RefinementCtx) => {
@@ -37,8 +40,6 @@ const refineLogic = (v: Record<string, unknown>, ctx: z.RefinementCtx) => {
     ctx.addIssue({ code: "custom", path: ["workEnd"], message: "Ngày kết thúc phải từ ngày bắt đầu trở đi" });
   if (v.idIssueDate && new Date(v.idIssueDate as string) > new Date())
     ctx.addIssue({ code: "custom", path: ["idIssueDate"], message: "Ngày cấp không thể ở tương lai" });
-  if (v.salary != null && v.pit != null && Number(v.pit) > Number(v.salary))
-    ctx.addIssue({ code: "custom", path: ["pit"], message: "Thuế TNCN không thể lớn hơn lương" });
 };
 const PersonnelCreate = z.object(personnelShape).superRefine(refineLogic);
 const PersonnelUpdate = z.object(personnelShape).partial().superRefine(refineLogic);
@@ -64,6 +65,23 @@ async function loadAuthorized(req: Request, res: Response, action: Action) {
 }
 
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
+
+// 🔵 Gắn field công thức (pit, taxableIncome) + 🩷 field tham chiếu Dự án vào bản ghi khi TRẢ VỀ.
+// Các field này KHÔNG lưu DB — luôn tính/tra lúc đọc nên không bao giờ lệch với Lương/Dự án.
+function decorate<T extends { salary: unknown; projectCode: string | null }>(rec: T, refMap: Map<string, ProjectRef>) {
+  const { pit, taxableIncome } = computeTax(rec.salary == null ? null : Number(rec.salary));
+  const ref = refMap.get((rec.projectCode ?? "").toString().trim());
+  return {
+    ...rec,
+    pit, taxableIncome,
+    projectNameContract: ref?.projectNameContract ?? null,
+    salesContractNo: ref?.salesContractNo ?? null,
+    salesContractDate: ref?.salesContractDate ?? null,
+    purchaseOrder: ref?.purchaseOrder ?? null,
+    preTaxAmount: ref?.preTaxAmount ?? null,
+    payment: ref?.payment ?? null,
+  };
+}
 
 router.get(
   "/",
@@ -91,15 +109,16 @@ router.get(
       prisma.personnelRecord.findMany({
         where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       }),
-      prisma.personnelRecord.aggregate({ where, _sum: { salary: true, pit: true, taxableIncome: true } }),
+      prisma.personnelRecord.aggregate({ where, _sum: { salary: true } }),
     ]);
-    // Tổng lương/thuế/thu nhập của TOÀN bộ kết quả lọc (không chỉ trang hiện tại).
-    const summary = {
-      salary: Number(agg._sum.salary ?? 0),
-      pit: Number(agg._sum.pit ?? 0),
-      taxableIncome: Number(agg._sum.taxableIncome ?? 0),
-    };
-    res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary });
+    // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
+    const refMap = await buildProjectRef(data.map((r) => r.projectCode));
+    const decorated = data.map((r) => decorate(r, refMap));
+    // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
+    const salarySum = Number(agg._sum.salary ?? 0);
+    const tax = computeTax(salarySum);
+    const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
+    res.json({ data: decorated, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary });
   })
 );
 
@@ -113,7 +132,8 @@ router.post(
       include: ownerSelect,
     });
     await audit(req, "personnel.create", { resource: "personnel", resourceId: rec.id });
-    res.status(201).json(rec);
+    const refMap = await buildProjectRef([rec.projectCode]);
+    res.status(201).json(decorate(rec, refMap));
   })
 );
 
@@ -124,7 +144,9 @@ router.get(
     const rec = await loadAuthorized(req, res, "read");
     if (!rec) return;
     const full = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, include: ownerSelect });
-    res.json(full);
+    if (!full) { res.status(404).json({ error: "Không tìm thấy hồ sơ nhân sự" }); return; }
+    const refMap = await buildProjectRef([full.projectCode]);
+    res.json(decorate(full, refMap));
   })
 );
 
@@ -136,7 +158,8 @@ router.put(
     if (!before) return;
     const rec = await prisma.personnelRecord.update({ where: { id: (req.params as any).id }, data: req.body, include: ownerSelect });
     await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
-    res.json(rec);
+    const refMap = await buildProjectRef([rec.projectCode]);
+    res.json(decorate(rec, refMap));
   })
 );
 

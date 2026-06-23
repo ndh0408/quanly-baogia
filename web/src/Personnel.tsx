@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, type Me, type Personnel, type Summary } from "./api";
-import { FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass } from "./fields";
+import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
 import { toast, confirmModal } from "./ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
@@ -53,10 +53,12 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     else { setSort(k); setOrder("asc"); }
   };
 
+  const srcCls = (s?: FieldSource) => (s === "formula" ? "col-formula" : s === "ref-project" ? "col-ref" : "");
+
   const renderCell = (k: string, r: Personnel, first: boolean) => {
     const f = FIELD_BY_KEY[k];
     const v = r[k];
-    const cls = first ? "sticky-col" : f?.type === "money" ? "num" : "";
+    const cls = [first ? "sticky-col" : "", f?.type === "money" ? "num" : "", srcCls(f?.source)].filter(Boolean).join(" ");
     let content: ReactNode;
     if (f?.type === "money") content = fmtMoney(v);
     else if (f?.type === "date") content = fmtDate(v);
@@ -68,6 +70,11 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   return (
     <div>
       <h1>Nhân sự</h1>
+      <div className="src-legend">
+        <span className="chip chip-input">🟡 Nhập tay</span>
+        <span className="chip chip-ref">🩷 Tự lấy từ Dự án (theo Mã dự án)</span>
+        <span className="chip chip-formula">🔵 Tự tính (Thuế = Lương/9 · Thu nhập = Lương×10/9)</span>
+      </div>
       <div className="toolbar">
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
@@ -90,8 +97,8 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   const sortable = SORTABLE.has(k);
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
-                    <th key={k} className={`${i === 0 ? "sticky-col" : ""} ${f?.type === "money" ? "num" : ""} ${sortable ? "sortable" : ""}`}
-                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : undefined}>
+                    <th key={k} className={[i === 0 ? "sticky-col" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", srcCls(f?.source)].filter(Boolean).join(" ")}
+                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
                   );
@@ -157,7 +164,7 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
 }) {
   const buildInitial = () => {
     const init: Record<string, string> = {};
-    for (const f of FIELDS) {
+    for (const f of INPUT_FIELDS) {
       const v = rec ? rec[f.key] : "";
       init[f.key] = f.type === "date" ? toInputDate(v) : v == null ? "" : String(v);
     }
@@ -199,13 +206,13 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
           <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
-          {GROUPS.map((g) => (
+          {GROUPS.filter((g) => INPUT_FIELDS.some((f) => f.group === g)).map((g, gi) => (
             <fieldset key={g}>
               <legend>{g}</legend>
               <div className="grid">
-                {FIELDS.filter((f) => f.group === g).map((f, idx) => {
+                {INPUT_FIELDS.filter((f) => f.group === g).map((f, idx) => {
                   const isMoney = f.type === "money" || f.type === "number";
-                  const isFirst = g === GROUPS[0] && idx === 0;
+                  const isFirst = gi === 0 && idx === 0;
                   return (
                     <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                       <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
