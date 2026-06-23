@@ -53,30 +53,35 @@ async function main() {
   console.log("✓ 6 user demo (mật khẩu:", PWD, ") — gồm demo_hr (Nhân sự) + demo_acct (Kế toán)");
 
   // ---------- Hồ sơ NHÂN SỰ (trang Nhân sự) — accA + accB tạo (owner-scoped để demo RBAC) ----------
+  // 🟡 Chỉ seed field NHẬP TAY. 🔵 Thuế TNCN + Thu nhập chịu thuế server TỰ TÍNH (Lương/9, ×10/9).
+  // 🩷 Tên dự án (HĐ)/Số-Ngày HĐ bán/Đơn đặt hàng/Tiền trước thuế/Thanh toán → server TỰ LẤY từ Dự án
+  //    theo projectCode = "mã sản xuất" của báo giá ĐÃ CHỐT. Vì vậy code dưới trỏ vào DEMO*_NNN có thật.
   const hrRec = (creator, o) => prisma.personnelRecord.create({ data: {
     createdById: creator.id, fullName: `${TAG} ${o.name}`,
     taxCode: o.taxCode || null, birthYear: o.birthYear || null, idCard: o.idCard || null,
     address: o.address || null, bankAccount: o.stk || null, bankName: o.bank || "ACB", phone: o.phone || null,
-    salary: o.salary ?? null, pit: o.pit ?? null, taxableIncome: o.taxable ?? null,
+    salary: o.salary ?? null,
     workStart: o.start ? new Date(o.start) : null, workEnd: o.end ? new Date(o.end) : null,
     workLocation: o.loc || "HCM", projectName: o.project || null, projectCode: o.code || null,
     teamNote: o.team || null, accountName: creator.displayName, company: o.cty || "GN",
-    laborContractNo: o.hdld || null, purchaseOrder: o.po || null, preTaxAmount: o.pretax ?? null,
-    payment: o.payment || null, confirmed: o.confirmed || null, note: o.note || null,
+    laborContractNo: o.hdld || null, laborContractDate: o.hdldDate ? new Date(o.hdldDate) : null,
+    accountingNote: o.acctNote || null, confirmed: o.confirmed || null, note: o.note || null,
   } });
+  // code = mã sản xuất báo giá đã chốt (seq #4–#8 bên dưới) → cột HĐ/thanh toán tự kéo về, đủ các trạng thái.
   await hrRec(accA, { name: "Trần Thị Thương", taxCode: "8064192001670", birthYear: "1992", idCard: "064192001670",
     address: "180/33 Nguyễn Hữu Cảnh, P.Thạnh Mỹ Tây, TPHCM", stk: "216110189", bank: "ACB", phone: "0972629827",
-    salary: 10_000_000, pit: 1_111_111, taxable: 11_111_111, start: "2025-10-13", end: "2025-10-24",
-    project: "Sao Mai - Standee", code: "FP_D25_385", team: "CP team phim (trả lại Hà)", payment: "Chưa", confirmed: "đã ký" });
-  await hrRec(accA, { name: "Nguyễn Văn Bình", birthYear: "1990", salary: 12_000_000, pit: 1_333_333, taxable: 13_333_333,
-    start: "2025-11-11", end: "2025-11-20", project: "Bẫy Tiền - POSM", code: "FP_D25_386", payment: "Đã TT", confirmed: "OK" });
-  await hrRec(accA, { name: "Lê Thị Cúc", salary: 18_000_000, pit: 2_000_000, taxable: 20_000_000,
-    start: "2025-10-31", end: "2025-11-06", project: "Cái Mã - POSM", code: "FP_D25_385", payment: "Chưa" });
-  await hrRec(accB, { name: "Phạm Văn Dũng", salary: 15_000_000, pit: 1_500_000, taxable: 16_500_000,
-    project: "Year End Party", code: "FE_B26_010", hdld: "HDLD-2026-07", po: "PO-SM-3321", pretax: 30_000_000, payment: "Đã TT" });
-  await hrRec(accB, { name: "Võ Thị Em", salary: 9_000_000, pit: 900_000, taxable: 9_900_000,
-    project: "Triển lãm Ô tô", code: "FE_B26_011", payment: "Chưa", note: "Chờ chứng từ" });
-  console.log("✓ 5 hồ sơ nhân sự demo (accA 3 + accB 2)");
+    salary: 10_000_000, start: "2025-10-13", end: "2025-10-24",
+    project: "Lễ kỷ niệm 20 năm", code: "DEMOL26_008", team: "CP team phim (trả lại Hà)",
+    hdld: "HDLD-2026-01", hdldDate: "2025-10-01", confirmed: "đã ký" });   // có PO + đã thanh toán
+  await hrRec(accA, { name: "Nguyễn Văn Bình", birthYear: "1990", salary: 12_000_000,
+    start: "2025-11-11", end: "2025-11-20", project: "Triển lãm Ô tô", code: "DEMOL26_007", confirmed: "OK" }); // có PO + HĐ, chưa TT
+  await hrRec(accA, { name: "Lê Thị Cúc", salary: 18_000_000,
+    start: "2025-10-31", end: "2025-11-06", project: "Year End Party", code: "DEMOB26_005" });   // có số HĐ, chưa TT
+  await hrRec(accB, { name: "Phạm Văn Dũng", salary: 15_000_000,
+    project: "Khai trương CN", code: "DEMOA26_006", hdld: "HDLD-2026-07", acctNote: "Đã đối chiếu", confirmed: "đã ký" }); // Done (đã TT)
+  await hrRec(accB, { name: "Võ Thị Em", salary: 9_000_000,
+    project: "Gala Vinamilk", code: "DEMOA26_004", note: "Chờ chứng từ" });   // đã chốt, chưa có HĐ/PO
+  console.log("✓ 5 hồ sơ nhân sự demo (code trỏ báo giá đã chốt → cột HĐ/thanh toán tự kéo về)");
 
   // ---------- Customers ----------
   const mkCus = (code, name) => prisma.customer.create({ data: { code, name, status: "active", ownerId: accA.id } });
