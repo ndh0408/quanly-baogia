@@ -8,12 +8,12 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622r";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622r";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622r";
-import { api } from "./core/api.js?v=20260622r";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622r";
-import { refreshPreview } from "./preview.js?v=20260622r";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623a";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623a";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623a";
+import { api } from "./core/api.js?v=20260623a";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623a";
+import { refreshPreview } from "./preview.js?v=20260623a";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -847,7 +847,16 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
 
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
-  const fmtNumCell = (v) => { const n = Number(v); return (!n || isNaN(n)) ? "" : n.toLocaleString("vi-VN"); };
+  const fmtNumCell = (v) => {
+    const n = Number(v);
+    if (!n || isNaN(n)) return "";                       // 0 / rỗng → ô trống
+    if (Number.isInteger(n)) return n.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,00
+    // Có phần lẻ → hiện ĐÚNG 2 số, CẮT bớt chứ KHÔNG làm tròn: 5,997→5,99 · 3,2→3,20.
+    // toFixed(4) khử nhiễu float (giá trị gốc tối đa 4 lẻ), rồi lấy 2 số đầu của phần lẻ.
+    const [intp, dec] = Math.abs(n).toFixed(4).split(".");
+    const out = Number(intp).toLocaleString("vi-VN") + "," + dec.slice(0, 2);
+    return n < 0 ? "-" + out : out;
+  };
   // Parse a VN-formatted string ("1.234.567" / "12,5" / "-5.000") back to a number.
   const parseVN = (s) => {
     s = String(s).replace(/[^\d.,-]/g, "");

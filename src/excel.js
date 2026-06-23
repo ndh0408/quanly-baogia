@@ -436,10 +436,11 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         // Nhóm con: 2 ô STT + Ghi Chú để TRẮNG (không tô nền) — chỉ tô dải giữa, theo yêu cầu.
         const bareSubCell = isSubSection && (col === cols.stt || col === cols.notes);
         paintCell(ws.getCell(`${col}${r}`), {
-          // nhóm con: nền NHẠT HƠN nhóm chính (cùng tông xanh lá của mẫu GN), để phân biệt mà không cần chữ
-          fill: bareSubCell ? "none" : (isSubSection ? "FFF2F8EC" : (pal?.sectionFill || "FFDDEBF7")),
+          // Nhóm con: nền CAM NHẠT + chữ nâu — KHÁC HẲN nhóm chính (xanh) cho dễ phân biệt
+          // (khớp màu trên web). Nhóm chính giữ màu theo bảng màu template.
+          fill: bareSubCell ? "none" : (isSubSection ? "FFFCEFDB" : (pal?.sectionFill || "FFDDEBF7")),
           bold: true,
-          ...(pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {}),
+          ...(isSubSection ? { fontColor: "FF9A5B14" } : (pal?.sectionTextColor ? { fontColor: pal.sectionTextColor } : {})),
         });
       }
     } else if (it && effKind[i] === "info") {
