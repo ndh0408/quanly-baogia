@@ -511,7 +511,12 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
         const qCell = ws.getCell(`${cols.quantity}${r}`);
         if (fxQ) qCell.value = { formula: `TRUNC(${fxQ},2)`, result: qT };
         else qCell.value = qT;
-        qCell.numFmt = Number.isInteger(qT) ? "0" : "0.00";
+        // Định dạng hiển thị: số chẵn → "0" (không lẻ); có lẻ → "0.00" (đúng 2 số). PHẢI gán qua
+        // bản sao style (giống paintCell) — gán cell.numFmt trực tiếp KHÔNG "ăn" trên hàng được
+        // duplicateRow nhân bản (style dùng chung) → trước đây 7,70 in ra 8 ở các dòng phía sau.
+        const qSt = qCell.style ? JSON.parse(JSON.stringify(qCell.style)) : {};
+        qSt.numFmt = Number.isInteger(qT) ? "0" : "0.00";
+        qCell.style = qSt;
       }
       putNum(it, r, "unitPrice", cols.unitPrice, price);
       if (cols.amount) {

@@ -235,7 +235,24 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(Number(ws.getCell("G12").value)).toBe(999_999);
   });
 
-  // gn_banner: y hệt GN không ngày, CHỈ khác đánh STT — nhóm con 1,2,3 (reset mỗi nhóm chính),
+  // BUG cũ: Số Lượng lẻ (vd 7,70) ở hàng NHÂN BẢN (quá 10 mục → duplicateRow) bị in ra "8"
+  // vì numFmt "0.00" không "ăn" trên hàng nhân bản (style dùng chung). Phải vẫn là "0.00".
+  it("Số Lượng lẻ ở hàng nhân bản (>10 mục) vẫn định dạng 2 số (không làm tròn hiển thị)", async () => {
+    const q = makeQuote("marico_decor");
+    const items = [];
+    for (let i = 1; i <= 13; i++) items.push({ kind: "item", name: "MUC" + i, detail: "", unit: "m2", quantity: (i === 12 ? 7.7 : 3), unitPrice: 95000, days: null, notes: "" });
+    q.sheets[0].items = items;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    let rn = null; ws.eachRow((row, n) => { if (String(row.getCell("C").value ?? "").includes("MUC12")) rn = n; });
+    expect(rn).not.toBeNull();
+    expect(rn).toBeGreaterThan(21);                  // MUC12 nằm ở hàng nhân bản (sau slot mẫu 12–21)
+    expect(ws.getCell("F" + rn).numFmt).toBe("0.00"); // vẫn 2 số → hiện "7.70" chứ không "8"
+    expect(Number(ws.getCell("F" + rn).value)).toBe(7.7);
+  });
+
+  // gn_banner: y hệt GN không ngày, CHỉ khác đánh STT — nhóm con 1,2,3 (reset mỗi nhóm chính),
   // mục bên dưới KHÔNG đánh số. marico/gn_banner: STT=cột B, Hạng Mục=cột C.
   it("gn_banner: nhóm con đánh số 1,2,3; mục bên dưới không đánh số; nhóm chính giữ A/B/C", async () => {
     const q = makeQuote("gn_banner");
