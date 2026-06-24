@@ -102,6 +102,14 @@ td.col-ref { background: rgba(232,93,154,.07); }
 th.col-formula { background: color-mix(in srgb, #4aa3ff 16%, var(--card-2)); }
 th.col-ref { background: color-mix(in srgb, #e85d9a 16%, var(--card-2)); }
 
+/* Header tô màu THEO NHÓM CỘT — gần với file Excel gốc (mỗi nhóm 1 màu). Ô dữ liệu vẫn giữ
+   tô nhẹ theo NGUỒN (🔵 công thức · 🩷 tham chiếu) để thấy ô nào tự tính/tự lấy. */
+th.grp-personal { background: color-mix(in srgb, #e85d9a 13%, var(--card-2)); }
+th.grp-salary   { background: color-mix(in srgb, #f5b301 20%, var(--card-2)); }
+th.grp-project  { background: color-mix(in srgb, #16a085 16%, var(--card-2)); }
+th.grp-contract { background: color-mix(in srgb, #e67e22 17%, var(--card-2)); }
+th.grp-payment  { background: color-mix(in srgb, #8e7cc3 17%, var(--card-2)); }
+
 /* Chú giải nguồn dữ liệu */
 .src-legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
 .src-legend .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card-2); color: var(--soft); }

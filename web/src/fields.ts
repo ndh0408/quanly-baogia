@@ -18,7 +18,7 @@ export const FIELDS: Field[] = [
   { key: "idIssueDate", label: "Ngày cấp", type: "date", group: "Cá nhân", source: "input" },
   { key: "idIssuePlace", label: "Nơi cấp", type: "text", group: "Cá nhân", source: "input" },
   { key: "address", label: "Địa chỉ", type: "text", group: "Cá nhân", source: "input" },
-  { key: "bankAccount", label: "Số tài khoản", type: "text", group: "Cá nhân", source: "input" },
+  { key: "bankAccount", label: "STK", type: "text", group: "Cá nhân", source: "input" },
   { key: "bankName", label: "Ngân hàng", type: "text", group: "Cá nhân", source: "input" },
   { key: "phone", label: "Số điện thoại", type: "text", group: "Cá nhân", source: "input" },
   // Lương / Thuế
@@ -26,14 +26,14 @@ export const FIELDS: Field[] = [
   { key: "pit", label: "Thuế TNCN", type: "money", group: "Lương / Thuế", source: "formula" },
   { key: "taxableIncome", label: "Thu nhập chịu thuế", type: "money", group: "Lương / Thuế", source: "formula" },
   // Dự án
-  { key: "workStart", label: "Bắt đầu làm việc", type: "date", group: "Dự án", source: "input" },
-  { key: "workEnd", label: "Kết thúc làm việc", type: "date", group: "Dự án", source: "input" },
+  { key: "workStart", label: "Thời gian làm việc (ngày bắt đầu)", type: "date", group: "Dự án", source: "input" },
+  { key: "workEnd", label: "Thời gian làm việc (ngày kết thúc)", type: "date", group: "Dự án", source: "input" },
   { key: "workLocation", label: "Địa điểm làm việc", type: "text", group: "Dự án", source: "input" },
   { key: "projectName", label: "Tên dự án", type: "text", group: "Dự án", source: "input" },
   { key: "projectCode", label: "Mã dự án", type: "text", group: "Dự án", source: "input" },
   { key: "teamNote", label: "Team ghi chú", type: "text", group: "Dự án", source: "input" },
   { key: "accountName", label: "Account", type: "text", group: "Dự án", source: "input" },
-  { key: "company", label: "Công ty", type: "text", group: "Dự án", source: "input" },
+  { key: "company", label: "CTY", type: "text", group: "Dự án", source: "input" },
   // Hợp đồng
   { key: "projectNameContract", label: "Tên dự án (HĐ)", type: "text", group: "Hợp đồng", source: "ref-project" },
   { key: "laborContractNo", label: "Số HĐ LĐ", type: "text", group: "Hợp đồng", source: "input" },
@@ -45,21 +45,15 @@ export const FIELDS: Field[] = [
   // Thanh toán
   { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "input" },
   { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "ref-project" },
-  { key: "confirmed", label: "Xác nhận", type: "status", group: "Thanh toán", source: "input" },
+  { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "input" },
   { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "input" },
 ];
 
 // Chỉ field NHẬP TAY mới hiện trong form (công thức/tham chiếu là read-only).
 export const INPUT_FIELDS = FIELDS.filter((f) => f.source === "input");
 
-// Cột hiển thị trong bảng — đủ các nhóm để thấy rõ input/công thức/tham chiếu; cuộn ngang; cột đầu ghim.
-export const TABLE_COLS = [
-  "fullName", "idCard", "taxCode", "company",
-  "salary", "pit", "taxableIncome",
-  "workStart", "workEnd", "projectName", "projectCode",
-  "projectNameContract", "salesContractNo", "salesContractDate", "purchaseOrder", "preTaxAmount", "payment",
-  "confirmed",
-];
+// Bảng hiện ĐỦ MỌI CỘT theo đúng thứ tự file Excel gốc (= thứ tự FIELDS). Cuộn ngang; cột đầu ghim.
+export const TABLE_COLS = FIELDS.map((f) => f.key);
 // Backend chỉ cho sort theo các key này; trong bảng chỉ fullName hiển thị → cho click sort.
 export const SORTABLE = new Set(["fullName"]);
 

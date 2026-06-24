@@ -54,6 +54,10 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   };
 
   const srcCls = (s?: FieldSource) => (s === "formula" ? "col-formula" : s === "ref-project" ? "col-ref" : "");
+  // Màu header THEO NHÓM (giống file Excel gốc: nhóm cột tô màu khác nhau).
+  const grpCls = (g?: string) =>
+    g === "Cá nhân" ? "grp-personal" : g === "Lương / Thuế" ? "grp-salary" : g === "Dự án" ? "grp-project"
+      : g === "Hợp đồng" ? "grp-contract" : g === "Thanh toán" ? "grp-payment" : "";
 
   const renderCell = (k: string, r: Personnel, first: boolean) => {
     const f = FIELD_BY_KEY[k];
@@ -97,7 +101,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   const sortable = SORTABLE.has(k);
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
-                    <th key={k} className={[i === 0 ? "sticky-col" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", srcCls(f?.source)].filter(Boolean).join(" ")}
+                    <th key={k} className={[i === 0 ? "sticky-col" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", grpCls(f?.group)].filter(Boolean).join(" ")}
                         onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
@@ -126,6 +130,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   <td key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>
                     {k === "salary" ? <strong>{fmtMoney(summary.salary)}</strong>
                       : k === "pit" ? <strong>{fmtMoney(summary.pit)}</strong>
+                      : k === "taxableIncome" ? <strong>{fmtMoney(summary.taxableIncome)}</strong>
                       : ""}
                   </td>
                 ))}
