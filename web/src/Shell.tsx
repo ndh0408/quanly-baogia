@@ -9,6 +9,7 @@ import { PermissionsPage } from "./Permissions";
 import { ProfilePage } from "./Profile";
 import { NotificationsPage } from "./Notifications";
 import { DashboardPage } from "./Dashboard";
+import { QuoteListPage } from "./QuoteList";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -43,7 +44,7 @@ const NAV: Nav[] = [
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:read:own", ported: true },
-  { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
+  { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own", ported: true },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
@@ -54,7 +55,8 @@ const NAV: Nav[] = [
   { key: "profile", label: "Tài khoản", group: "Tài khoản", ported: true },
 ];
 
-const currentKey = () => location.hash.replace(/^#\/?/, "") || "personnel";
+// Strip ?query (filters) khi khớp nav key → #/list?status=… vẫn là trang "list".
+const currentKey = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "personnel";
 
 export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const [key, setKey] = useState(currentKey());
@@ -134,6 +136,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         {active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
             {key === "dashboard" ? <DashboardPage />
+              : key === "list" ? <QuoteListPage me={me} />
               : key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} />
               : key === "audit" ? <AuditPage />

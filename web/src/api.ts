@@ -59,6 +59,17 @@ export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page:
 // Thông báo (Notifications — increment 6).
 export type Notif = { id: number; title: string; body: string; resource?: string | null; resourceId?: string | null; readAt?: string | null; createdAt: string };
 
+// Danh sách báo giá (increment 8). Row linh hoạt (presentQuoteRow — thường + account_hn).
+export type QuoteRow = {
+  id: number; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
+  title: string; status: string; quoteDate: string; createdById?: number;
+  createdBy?: { id: number; displayName: string } | null;
+  company?: { id: number; name: string; shortName?: string } | null;
+  total?: number; toCompany?: string; customerCode?: string | null; sheetCount?: number;
+  hnStatus?: string | null; hnSheetCount?: number; hnTotal?: number; _accountHnRow?: boolean;
+};
+export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: number; size: number; pageCount: number } };
+
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
@@ -162,6 +173,18 @@ export const api = {
   analyticsOverview: () => req<{ kpi: { totalQuotes: number; approvedAmount: number; avgDealSize: number; conversionRate: number } }>("/analytics/overview"),
   analyticsFunnel: () => req<{ data: { status: string; count: number }[] }>("/analytics/funnel"),
   analyticsTopSales: () => req<{ data: { user?: { displayName?: string } | null; count: number; amount: number }[] }>("/analytics/top-sales?limit=10"),
+  // Danh sách báo giá (increment 8).
+  listQuotes: (p: { q?: string; status?: string; sort?: string; order?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (p.q) sp.set("q", p.q);
+    if (p.status) sp.set("status", p.status);
+    sp.set("sort", p.sort || "createdAt"); sp.set("order", p.order || "desc");
+    sp.set("page", String(p.page ?? 1)); sp.set("size", String(p.size ?? 20));
+    return req<QuoteListResult>(`/quotes?${sp}`);
+  },
+  duplicateQuote: (id: number, sameProject = false) =>
+    req<QuoteRow>(`/quotes/${id}/duplicate`, { method: "POST", body: JSON.stringify(sameProject ? { sameProject: true } : {}) }),
+  deleteQuote: (id: number) => req<{ ok: boolean }>(`/quotes/${id}`, { method: "DELETE" }),
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
