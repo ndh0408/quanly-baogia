@@ -67,7 +67,7 @@ router.get(
   validate({ query: ListQuery }),
   asyncHandler(async (req, res) => {
     const { q, status, tag, ownerId, page, size, sort, order } = req.query;
-    const where = {};
+    const where: Record<string, any> = {};
     if (status) where.status = status;
     // Data isolation: users without "read all" only ever see customers they own.
     if (can(req.session, P.CUSTOMER_READ_ALL)) {
@@ -109,7 +109,7 @@ router.post(
       // includeDeleted: the unique constraint on `code` covers soft-deleted rows,
       // so a plain (soft-delete-filtered) check would miss a deleted holder and
       // then hit the DB constraint as a 500. Check across ALL rows for a clean 409.
-      const dup = await prisma.customer.findFirst({ where: { code }, includeDeleted: true });
+      const dup = await prisma.customer.findFirst({ where: { code }, includeDeleted: true } as any);
       if (dup) return res.status(409).json({ error: dup.deletedAt ? "Mã thuộc khách hàng đã xoá" : "Mã khách hàng đã tồn tại" });
     }
     // De-dup by tax code: the same company (same MST) entered twice fragments

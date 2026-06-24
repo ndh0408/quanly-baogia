@@ -78,7 +78,7 @@ export async function objectExists(key, bucket = config.S3_BUCKET) {
  * downloaded, never rendered inline — even if it was stored with a risky
  * Content-Type. Pass `inline:true` only for trusted, display-safe assets.
  */
-export async function presignDownload(key, { expiresIn = 3600, bucket = config.S3_BUCKET, filename, inline = false } = {}) {
+export async function presignDownload(key, { expiresIn = 3600, bucket = config.S3_BUCKET, filename, inline = false }: { expiresIn?: number; bucket?: string; filename?: string; inline?: boolean } = {}) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
   const safeName = String(filename || key.split("/").pop() || "download").replace(/[^A-Za-z0-9._-]/g, "_");

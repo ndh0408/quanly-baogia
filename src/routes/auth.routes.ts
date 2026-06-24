@@ -53,14 +53,14 @@ router.post(
     const user = result.user;
 
     // Regenerate session ID to defeat session fixation
-    await new Promise((resolve, reject) =>
+    await new Promise<void>((resolve, reject) =>
       req.session.regenerate((err) => (err ? reject(err) : resolve()))
     );
     req.session.userId = user.id;
     req.session.role = user.role;
     req.session.displayName = user.displayName;
     req.session.username = user.username;
-    await new Promise((resolve, reject) =>
+    await new Promise<void>((resolve, reject) =>
       req.session.save((err) => (err ? reject(err) : resolve()))
     );
 
@@ -82,7 +82,7 @@ router.post(
 
 router.post("/logout", asyncHandler(async (req, res) => {
   const userId = req.session?.userId;
-  await new Promise((resolve) => req.session.destroy(() => resolve()));
+  await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
   res.clearCookie("qly.sid");
   if (userId) await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
   res.json({ ok: true });
@@ -175,7 +175,7 @@ router.post(
     const user = result.user;
 
     const access = signAccessToken(user);
-    const refresh = await issueRefreshToken(user.id, { ip, userAgent: ua });
+    const refresh = await issueRefreshToken(user.id, { ip, userAgent: ua } as any);
     await audit(req, "login.token", { resource: "user", resourceId: user.id, actorId: user.id });
     res.json({
       tokenType: "Bearer",
@@ -275,8 +275,8 @@ router.post(
           ],
           button: { label: "Đặt lại mật khẩu", url },
           note: { html: "⏳ Liên kết hết hạn sau <b>2 giờ</b>." },
-        }),
-      });
+        } as any),
+      } as any);
       await audit(req, "password.forgot", { resource: "user", resourceId: user.id });
     })().catch((e) => logger.error({ err: e.message }, "forgot-password background task failed"));
   })
@@ -322,12 +322,12 @@ router.post(
     await destroyAllSessions(user.id);
 
     // Log the new user in immediately.
-    await new Promise((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+    await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
     req.session.userId = updated.id;
     req.session.role = updated.role;
     req.session.displayName = updated.displayName;
     req.session.username = updated.username;
-    await new Promise((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
+    await new Promise<void>((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
 
     res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, senderName: updated.senderName, permissions: permissionsForRole(updated.role) });
   })

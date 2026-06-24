@@ -132,7 +132,7 @@ function postToPinnedIp({ url, address }, body, headers) {
   const isHttps = url.protocol === "https:";
   const lib = isHttps ? https : http;
   const port = url.port || (isHttps ? 443 : 80);
-  return new Promise((resolve, reject) => {
+  return new Promise<{ status: number; len: number }>((resolve, reject) => {
     const req = lib.request(
       {
         host: address,                                  // connect to the validated IP
@@ -146,7 +146,7 @@ function postToPinnedIp({ url, address }, body, headers) {
       (res) => {
         let len = 0;
         res.on("data", (c) => { len += c.length; });    // count only — never buffer/echo body
-        res.on("end", () => resolve({ status: res.statusCode, len }));
+        res.on("end", () => resolve({ status: res.statusCode as number, len }));
       }
     );
     req.on("timeout", () => req.destroy(Object.assign(new Error("webhook timeout"), { status: 0 })));

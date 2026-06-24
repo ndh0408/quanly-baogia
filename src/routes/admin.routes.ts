@@ -108,7 +108,7 @@ router.get(
 /** Hard-delete soft-deleted rows older than N days. */
 router.post(
   "/purge-soft-deleted",
-  validate({ body: z.object({ days: z.coerce.number().int().min(0).max(3650).default(30) }).default({}) }),
+  validate({ body: z.object({ days: z.coerce.number().int().min(0).max(3650).default(30) }).default({} as any) }),
   asyncHandler(async (req, res) => {
     const { days } = req.body;
     const cutoff = new Date(Date.now() - days * 86_400_000);
@@ -121,8 +121,8 @@ router.post(
     // corrupting or failing; (2) errors were swallowed into the result string so
     // a blocked purge looked successful. Quotes cascade (sheets/items/versions/
     // approvals) so they go first and free up the downstream references.
-    const result = {};
-    const steps = [
+    const result: Record<string, any> = {};
+    const steps: [string, any][] = [
       ["quote", base],
       ["quoteTemplate", { ...base, sheets: { none: {} } }],
       ["customer", { ...base, quotes: { none: {} } }],
@@ -132,7 +132,7 @@ router.post(
     for (const [model, where] of steps) {
       // Let errors propagate to the global handler (500 + logged) instead of being
       // hidden — a failed purge must be visible, not reported as "done".
-      const r = await prisma[model].deleteMany({ where, hardDelete: true });
+      const r = await (prisma as any)[model].deleteMany({ where, hardDelete: true });
       result[model] = r?.count ?? 0;
     }
     await audit(req, "admin.purge", { resource: "system", after: { cutoff, result } });

@@ -70,7 +70,7 @@ function ensureWrap(cell) {
  * row tinting the plain item rows around it). Cloning the cell's style into a fresh
  * per-cell object first isolates the change to this one cell.
  */
-function paintCell(cell, { fill, fontColor, bold } = {}) {
+function paintCell(cell, { fill, fontColor, bold }: { fill?: any; fontColor?: any; bold?: any } = {}) {
   const style = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
   if (fill === "none") style.fill = { type: "pattern", pattern: "none" };   // xoá nền (để ô trắng)
   else if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
@@ -711,7 +711,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const ff = { name: "Times New Roman", family: 1, size: 11 };
       // Ghi 1 dòng vào dải [from..to] (merge ngang). Gán font/căn-lề qua style TRƯỚC value
       // vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
-      const writeMerged = (r, value, { bold, from, to, align } = {}) => {
+      const writeMerged = (r, value, { bold, from, to, align }: { bold?: any; from?: any; to?: any; align?: any } = {}) => {
         const a = `${from || "B"}${r}`, b = `${to || "I"}${r}`;
         safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
         const cell = ws.getCell(a);
@@ -756,7 +756,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   };
 }
 
-function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }) {
+function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }: { text?: any; formula?: any; result?: any; rawValue?: any }) {
   // Clear secondary cells in merge first (to avoid leftover duplicated values)
   for (const [colStart, colEnd] of (rowCfg.labelCells || [])) {
     if (colStart === colEnd) continue;
@@ -817,7 +817,7 @@ function cloneFont(srcFont) {
     "name", "size", "bold", "italic", "underline", "strike",
     "color", "family", "scheme", "charset", "vertAlign", "outline", "shadow"
   ];
-  const out = {};
+  const out: Record<string, any> = {};
   for (const k of keys) {
     if (srcFont[k] !== undefined) {
       out[k] = (k === "color" && srcFont.color) ? { ...srcFont.color } : srcFont[k];

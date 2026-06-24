@@ -48,7 +48,7 @@ export async function saveHn(req) {
     for (const hs of hnSheets) {
       const sheet = existing.sheets.find((s) => s.id === Number(hs.sheetId));
       if (!sheet) continue;   // chỉ sheet thuộc báo giá này
-      const others = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []).filter((t) => t && t.category !== "hanoi");
+      const others = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []).filter((t: any) => t && t.category !== "hanoi");
       const hanoi = sanitizeExtraTables((hs.hnTables || []).map((t) => ({ ...t, category: "hanoi" }))) || [];
       await tx.quoteSheet.update({ where: { id: sheet.id }, data: { extraTables: [...others, ...hanoi] } });
     }

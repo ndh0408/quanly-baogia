@@ -79,14 +79,14 @@ export async function createQuote(req) {
   // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted)
   // BEFORE the write to return a clean 409.
   if (b.quoteNumber) {
-    const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
+    const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true } as any);
     if (dup) {
       throw httpError(409, dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại");
     }
   }
 
   const creator = await prisma.user.findUnique({ where: { id: userId }, select: { projectCode: true } });
-  const draft = {
+  const draft: Record<string, any> = {
     title: b.title,
     toCompany: b.toCompany,
     toContact: b.toContact || null,
@@ -124,11 +124,11 @@ export async function createQuote(req) {
   for (let attempt = 0; ; attempt++) {
     try {
       quote = await prisma.$transaction(async (tx) => {
-        const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx);
-        if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx);
+        const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx as any);
+        if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
         const created = await tx.quote.create({
-          data: { ...draft, quoteNumber, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: [{ id: userId }] } },
-          include: QUOTE_INCLUDE,
+          data: { ...draft, quoteNumber, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: [{ id: userId }] } } as any,
+          include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
         return created;
@@ -160,7 +160,7 @@ export async function updateQuote(req) {
   const userId = req.session.userId;
   const b = req.body;
 
-  const existing = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+  const existing: any = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE as any });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canEdit(existing, req.session)) throw httpError(403, "Bạn không thể sửa báo giá này");
 
@@ -179,7 +179,7 @@ export async function updateQuote(req) {
     }
   }
 
-  const data = {};
+  const data: Record<string, any> = {};
   for (const f of ["title", "toCompany", "fromContact", "fromAddress", "city", "greeting"]) {
     if (b[f] !== undefined && b[f] !== null) data[f] = b[f];
   }
@@ -195,7 +195,7 @@ export async function updateQuote(req) {
   if (b.companyId !== undefined) data.companyId = b.companyId;
   if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
   if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
-    const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true });
+    const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true } as any);
     if (dup) {
       throw httpError(409, dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại");
     }
@@ -227,7 +227,7 @@ export async function updateQuote(req) {
       const u = await tx.quote.update({
         where: { id },
         data: { ...data, sheets: { create: buildSheetsCreate(b.sheets) } },
-        include: QUOTE_INCLUDE,
+        include: QUOTE_INCLUDE as any,
       });
       await snapshotQuoteVersion(tx, id, userId, "update");
       return u;
@@ -241,7 +241,7 @@ export async function updateQuote(req) {
       data.total = t.total;
     }
     updated = await prisma.$transaction(async (tx) => {
-      const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE });
+      const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE as any });
       await snapshotQuoteVersion(tx, id, userId, "update");
       return u;
     });

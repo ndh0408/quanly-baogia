@@ -3,11 +3,11 @@ import IORedis from "ioredis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
-let connection = null;
+let connection: any = null;
 export function getRedis() {
   if (!config.REDIS_URL) return null;
   if (connection) return connection;
-  connection = new IORedis(config.REDIS_URL, {
+  connection = new (IORedis as any)(config.REDIS_URL, {
     maxRetriesPerRequest: null, // required by BullMQ
     enableReadyCheck: false,
   });

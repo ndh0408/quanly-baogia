@@ -14,7 +14,7 @@ import { logger } from "./logger.js";
  * @param {import("express-rate-limit").Options} options  Any express-rate-limit options.
  */
 export function createLimiter(prefix, options = {}) {
-  const opts = {
+  const opts: any = {
     standardHeaders: "draft-7",
     legacyHeaders: false,
     ...options,

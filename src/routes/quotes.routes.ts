@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -55,11 +56,11 @@ router.get(
     const { q, status, companyId, from, to, page, size, sort, order } = req.query;
     // Visibility scope (admin=all, manager=own, employee=member) combined with
     // the user's filters via AND so a scope-OR doesn't clash with the search-OR.
-    const filters = [quoteScopeWhere(req.session)];
+    const filters: Prisma.QuoteWhereInput[] = [quoteScopeWhere(req.session)];
     if (status) filters.push({ status });
     if (companyId) filters.push({ companyId });
     if (from || to) {
-      const range = {};
+      const range: Record<string, any> = {};
       if (from) range.gte = from;
       if (to) range.lte = to;
       filters.push({ quoteDate: range });
@@ -148,7 +149,7 @@ router.get(
     // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
     // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
     const seeAll = can(req.session, P.USER_MANAGE);
-    const where = { status: "converted", deletedAt: null };
+    const where: Record<string, any> = { status: "converted", deletedAt: null };
     if (!seeAll) where.createdById = req.session.userId;
     const quotes = await prisma.quote.findMany({
       where,
@@ -176,9 +177,9 @@ router.get(
         },
       },
     });
-    const data = quotes.map((q) => {
+    const data = quotes.map((q: any) => {
       const { sheetTotals } = computeQuoteTotals(q);   // subtotal theo từng sheet
-      const byId = new Map(sheetTotals.map((s) => [s.sheetId, Number(s.subtotal)]));
+      const byId = new Map(sheetTotals.map((s: any) => [s.sheetId, Number(s.subtotal)]));
       return {
         id: q.id,
         quoteNumber: q.quoteNumber,
@@ -196,9 +197,9 @@ router.get(
         customerCode: q.customer?.code ?? null,
         customerName: q.customer?.name ?? null,
         createdBy: q.createdBy,
-        sheets: q.sheets.map((sh) => {
+        sheets: q.sheets.map((sh: any) => {
           const ex = Array.isArray(sh.extraTables) ? sh.extraTables : [];
-          const sumCat = (cat) => ex.filter((t) => t && t.category === cat).reduce((acc, t) => acc + extraTableSum(t), 0);
+          const sumCat = (cat: string) => ex.filter((t: any) => t && t.category === cat).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
           return {
             id: sh.id,
             name: sh.name || null,
@@ -233,7 +234,7 @@ router.post(
   validate({
     params: z.object({ sheetId: z.coerce.number().int().positive() }),
     // z.boolean (KHÔNG coerce): tránh chuỗi "false" bị coerce thành true → ký nhầm.
-    body: z.object({ signed: z.boolean().default(true) }).default({}),
+    body: z.object({ signed: z.boolean().default(true) }).default({} as any),
   }),
   asyncHandler(async (req, res) => {
     const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
@@ -651,7 +652,7 @@ router.post(
     let created;
     for (let attempt = 0; ; attempt++) {
       try {
-        created = await prisma.$transaction(async (tx) => {
+        created = await prisma.$transaction(async (tx: any) => {
           const quoteNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN", tx);
           let projectCode, projectVersion;
           if (sameProject) {

@@ -13,7 +13,7 @@ import { logger } from "./logger.js";
  * @param {object} [opts.after]
  * @param {number} [opts.actorId]    override session.userId
  */
-export async function audit(ctx, action, opts = {}) {
+export async function audit(ctx, action, opts: Record<string, any> = {}) {
   const actorId = opts.actorId ?? ctx?.session?.userId ?? null;
   // req.ip is resolved by Express from the configured trust-proxy hop count; the
   // raw X-Forwarded-For is client-controlled and must not be trusted for an

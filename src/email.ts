@@ -52,7 +52,7 @@ function emailContent(p) {
  * `paragraphs`/`note` are ESCAPED by default; pass { html: "..." } for trusted
  * template markup. `name`/button label/url are always escaped here.
  */
-export function brandedEmailHtml({ name, paragraphs = [], button, note } = {}) {
+export function brandedEmailHtml({ name, paragraphs = [], button, note }: { name?: any; paragraphs?: any[]; button?: any; note?: any } = {}) {
   const body = paragraphs.map((p) => `<p style="margin:0 0 16px;">${emailContent(p)}</p>`).join("");
   const btn = button
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:10px 0 22px;"><tr>
@@ -88,7 +88,7 @@ export function brandedEmailHtml({ name, paragraphs = [], button, note } = {}) {
 /**
  * Send an email. No-op if SMTP_HOST not configured. Never throws — logs and continues.
  */
-export async function sendEmail({ to, subject, html, text, attachments }) {
+export async function sendEmail({ to, subject, html, text, attachments }: { to?: any; subject?: any; html?: any; text?: any; attachments?: any }) {
   const t = init();
   if (!t) {
     logger.info({ to, subject }, "email skipped (no SMTP)");

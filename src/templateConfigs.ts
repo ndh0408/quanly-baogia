@@ -12,7 +12,7 @@ function baoGiaTitle(title) {
   return `BẢNG BÁO GIÁ - ${t}`;
 }
 
-export const TEMPLATE_CONFIGS = {
+export const TEMPLATE_CONFIGS: Record<string, any> = {
   // ===== Gia Nguyễn — không ngày (bố cục Marico_Decor: CÓ cột Chi Tiết) =====
   // Cột: STT | Hạng Mục | Chi Tiết | ĐVT | Số Lượng | Đơn Giá | Thành Tiền | Notes
   // Dùng chính file Marico_Decor.xlsx — đã baked sẵn: header/tổng peach, tên xanh

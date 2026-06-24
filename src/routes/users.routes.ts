@@ -132,7 +132,7 @@ router.post(
     const { username, password, displayName, role, phone, title } = req.body;
     // includeDeleted: username is unique across soft-deleted rows too — a plain
     // check would miss a deleted holder and surface the DB constraint as a 500.
-    const exists = await prisma.user.findFirst({ where: { username }, includeDeleted: true });
+    const exists = await prisma.user.findFirst({ where: { username }, includeDeleted: true } as any);
     if (exists) return res.status(409).json({ error: exists.deletedAt ? "Tên đăng nhập thuộc về một tài khoản đã xóa" : "Tên đăng nhập đã tồn tại" });
 
     const user = await prisma.user.create({

@@ -49,7 +49,7 @@ export const processors = {
           key, body: buf,
           contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
-        });
+        } as any);
         const url = await presignDownload(key, { expiresIn: 24 * 3600 });
         return { key, url, size: buf.length };
       }
@@ -65,7 +65,7 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
-      const buf = await renderQuotePdf({
+      const buf: any = await renderQuotePdf({
         ...quote,
         subtotal: Number(quote.subtotal),
         vat: Number(quote.vat),
@@ -77,7 +77,7 @@ export const processors = {
         await putObject({
           key, body: buf, contentType: "application/pdf",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
-        });
+        } as any);
         const url = await presignDownload(key, { expiresIn: 24 * 3600 });
         return { key, url, size: buf.length };
       }

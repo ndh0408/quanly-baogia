@@ -3,6 +3,7 @@
 // pieces are unit-testable in isolation. No Express here — callers pass plain
 // objects / sessions.
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, trunc2 } from "./money.js";
 import { canOnQuote } from "./permissions.js";
@@ -33,7 +34,7 @@ export const QUOTE_INCLUDE = {
   createdBy: { select: { id: true, username: true, displayName: true } },
   approvedBy: { select: { id: true, username: true, displayName: true } },
   members: { select: { id: true, username: true, displayName: true } },
-};
+} satisfies Prisma.QuoteInclude;
 
 // Account Hà Nội: CHỈ được thấy phần GIÁ HÀ NỘI. Trả về object TỐI GIẢN — KHÔNG có
 // sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
@@ -140,7 +141,7 @@ export function presentQuoteRow(q, { viewerRole = null } = {}) {
 
 /** True if every sheet's templateId is an active template belonging to companyId. */
 export async function templatesBelongToCompany(sheets, companyId) {
-  const ids = [...new Set((sheets || []).map((s) => Number(s.templateId)).filter(Boolean))];
+  const ids: number[] = [...new Set((sheets || []).map((s) => Number(s.templateId)).filter(Boolean))] as number[];
   if (!ids.length) return true;
   const found = await prisma.quoteTemplate.findMany({
     where: { id: { in: ids }, companyId, active: true },

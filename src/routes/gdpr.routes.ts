@@ -133,7 +133,7 @@ router.post(
     const id = req.session.userId;
     await prisma.$transaction(anonymizeUserOps(id));
     await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
-    await new Promise((resolve) => req.session.destroy(() => resolve()));
+    await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
     res.clearCookie("qly.sid");
     res.json({ ok: true, message: "Tài khoản đã được xóa. Nhật ký kiểm toán được giữ lại theo nghĩa vụ pháp lý." });
   })

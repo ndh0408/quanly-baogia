@@ -27,7 +27,7 @@ router.get(
   validate({ query: Query }),
   asyncHandler(async (req, res) => {
     const { actorId, action, resource, resourceId, from, to, page, size } = req.query;
-    const where = {};
+    const where: Record<string, any> = {};
     if (actorId) where.actorId = actorId;
     if (action) where.action = action;
     if (resource) where.resource = resource;

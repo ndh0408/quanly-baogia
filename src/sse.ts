@@ -46,9 +46,9 @@ if (config.REDIS_URL) {
     try {
       const { default: IORedis } = await import("ioredis");
       const opts = { maxRetriesPerRequest: null, enableReadyCheck: false };
-      pub = new IORedis(config.REDIS_URL, opts);
-      pub.on("error", (e) => logger.warn({ err: e.message }, "sse redis pub error"));
-      const sub = new IORedis(config.REDIS_URL, opts);
+      pub = new (IORedis as any)(config.REDIS_URL, opts);
+      pub.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis pub error"));
+      const sub = new (IORedis as any)(config.REDIS_URL, opts);
       sub.on("error", (e) => logger.warn({ err: e.message }, "sse redis sub error"));
       await sub.subscribe(CHANNEL);
       sub.on("message", (_chan, raw) => {

@@ -15,7 +15,7 @@ router.get(
     size: z.coerce.number().int().min(1).max(100).default(20),
   })}),
   asyncHandler(async (req, res) => {
-    const where = { userId: req.session.userId };
+    const where: any = { userId: req.session.userId };
     if (req.query.unread) where.readAt = null;
     const [total, rows] = await Promise.all([
       prisma.notification.count({ where }),

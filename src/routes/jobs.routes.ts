@@ -17,7 +17,7 @@ router.post(
   requireAuth,
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
-    body: z.object({ format: z.enum(["xlsx", "pdf"]).default("xlsx") }).default({}),
+    body: z.object({ format: z.enum(["xlsx", "pdf"]).default("xlsx") }).default({} as any),
   }),
   asyncHandler(async (req, res) => {
     // Authorize the EXPORT by quote ownership before enqueuing — mirrors the

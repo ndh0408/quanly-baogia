@@ -16,7 +16,7 @@ export async function sendTelegram({ chatId, text, parseMode = "" }) {
       body: JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}), disable_web_page_preview: true }),
       signal: AbortSignal.timeout(8_000),
     });
-    const body = await r.json().catch(() => ({}));
+    const body: any = await r.json().catch(() => ({}));
     if (!r.ok) {
       logger.warn({ chatId, status: r.status, body }, "telegram non-ok");
       return { error: body.description || `status ${r.status}` };

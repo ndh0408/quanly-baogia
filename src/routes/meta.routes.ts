@@ -31,7 +31,7 @@ router.get("/companies", asyncHandler(async (req, res) => {
 }));
 
 router.get("/templates", asyncHandler(async (req, res) => {
-  const where = { active: true };
+  const where: any = { active: true };
   if (req.query.companyId) where.companyId = parseInt(req.query.companyId, 10);
   const templates = await prisma.quoteTemplate.findMany({
     where,

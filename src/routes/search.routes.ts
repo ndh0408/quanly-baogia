@@ -26,7 +26,7 @@ router.get(
     const types = (req.query.types || "quote,customer,product").split(",").map((s) => s.trim());
     const limit = req.query.limit;
 
-    const out = { query: q, results: {} };
+    const out: { query: string; results: Record<string, any> } = { query: q, results: {} };
 
     const tasks = [];
     if (types.includes("quote")) {
