@@ -95,16 +95,16 @@ export function CustomersPage({ me }: { me: Me }) {
         </div>
       )}
 
-      <div className="list-foot">
-        <span className="muted">Tổng: {meta.total} khách hàng</span>
-        {meta.pageCount > 1 && (
+      {/* SPA cũ KHÔNG có dòng "Tổng: …" — chỉ hiện pager khi có >1 trang. */}
+      {meta.pageCount > 1 && (
+        <div className="list-foot">
           <div className="pager">
             <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
             <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
             <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau ›</button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {editing !== undefined && (
         <CustomerForm rec={editing} readOnly={editing !== null && !canManage}
