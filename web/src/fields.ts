@@ -55,8 +55,9 @@ export const INPUT_FIELDS = FIELDS.filter((f) => f.source === "input");
 
 // Bảng hiện ĐỦ MỌI CỘT theo đúng thứ tự file Excel gốc (= thứ tự FIELDS). Cuộn ngang; cột đầu ghim.
 export const TABLE_COLS = FIELDS.map((f) => f.key);
-// Backend chỉ cho sort theo các key này; trong bảng chỉ fullName hiển thị → cho click sort.
-export const SORTABLE = new Set(["fullName"]);
+// Backend cho sort theo các cột THẬT này (khớp enum ở personnel.routes.ts). Cột nào có
+// trong set → header bấm sắp xếp được.
+export const SORTABLE = new Set(["fullName", "taxCode", "salary", "workStart", "workEnd"]);
 
 export const FIELD_BY_KEY: Record<string, Field> = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
 

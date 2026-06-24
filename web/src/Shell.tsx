@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { api, type Me } from "./api";
 import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
@@ -56,11 +56,21 @@ const currentKey = () => location.hash.replace(/^#\/?/, "") || "personnel";
 export function Shell({ me }: { me: Me }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!location.hash) location.hash = "#/personnel";
     const on = () => setKey(currentKey());
     window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
+    // Ctrl/Cmd+K focuses the search box (the placeholder advertises it — now it's real).
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("hashchange", on); window.removeEventListener("keydown", onKey); };
   }, []);
 
   const has = (perm?: string) =>
@@ -79,9 +89,9 @@ export function Shell({ me }: { me: Me }) {
           </div>
           <ThemeToggle />
         </div>
-        <div className="global-search">
-          <input placeholder="🔎 Tìm nhanh (Ctrl+K)" value={query}
-                 onChange={(e) => { setQuery(e.target.value); if (currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
+        <div className="global-search" role="search">
+          <input ref={searchRef} aria-label="Tìm nhân sự / danh bạ" placeholder="🔎 Tìm nhân sự, danh bạ… (Ctrl+K)" value={query}
+                 onChange={(e) => { const v = e.target.value; setQuery(v); if (v && currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
         </div>
         <nav className="menu" aria-label="Điều hướng chính">
           {groups.map((g, gi) => (

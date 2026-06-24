@@ -205,12 +205,19 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .pay-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
 /* Toast */
-#toast-host { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
-.toast { padding: 11px 16px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; max-width: 360px; animation: toast-in .22s ease; }
+#toast-host { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column-reverse; gap: 8px; z-index: 100; max-width: min(380px, 92vw); }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; animation: toast-in .22s ease; }
+.toast .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast .toast-x { background: none; border: none; color: rgba(255,255,255,.75); cursor: pointer; font-size: 17px; line-height: 1; padding: 0 2px; flex: none; }
+.toast .toast-x:hover { color: #fff; }
 .toast.out { opacity: 0; transform: translateY(8px); transition: .25s; }
 .toast-success { background: #138a3a; }
 .toast-error { background: #c0392b; }
 .toast-info { background: #334155; }
+
+/* Lỗi validation INLINE dưới từng ô (map từ details của server) */
+.field-err { color: #c0392b; font-size: 12px; margin-top: 4px; }
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392b !important; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* Mobile */

@@ -4,31 +4,75 @@
 // is escapeHtml from util.js — NO state / api / render here, so these never pull the
 // app graph in and stay unit-friendly.
 
-import { escapeHtml } from "./util.js?v=20260623f";
+import { escapeHtml } from "./util.js?v=20260624a";
 
 export function toast(msg, type = "info") {
-  // Persistent live region so screen readers announce toasts (errors = assertive).
+  // Persistent live region so screen readers announce toasts. aria-atomic=false so
+  // each new toast is announced on its own instead of re-reading the whole stack.
   let region = document.getElementById("toast-region");
   if (!region) {
     region = document.createElement("div");
     region.id = "toast-region";
-    region.setAttribute("aria-live", "polite");
-    region.setAttribute("aria-atomic", "true");
+    region.setAttribute("aria-atomic", "false");
     document.body.appendChild(region);
   }
   region.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
   const t = document.createElement("div");
   t.className = "toast " + type;
   t.setAttribute("role", type === "error" ? "alert" : "status");
-  t.textContent = msg;
+  const span = document.createElement("span");
+  span.className = "toast-msg";
+  span.textContent = msg;
+  const x = document.createElement("button");
+  x.className = "toast-x";
+  x.type = "button";
+  x.setAttribute("aria-label", "Đóng thông báo");
+  x.textContent = "×";
+  t.append(span, x);
   region.appendChild(t);
-  setTimeout(() => t.remove(), 2400);
+  // Errors stay longer (need reading/acting on); others auto-dismiss. Hover pauses
+  // the timer; the × closes immediately. Newest toast stacks at the bottom (CSS).
+  const ttl = type === "error" ? 6000 : 2800;
+  let timer = null;
+  const dismiss = () => { t.classList.add("toast-out"); setTimeout(() => t.remove(), 180); };
+  const arm = () => { timer = setTimeout(dismiss, ttl); };
+  const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  x.addEventListener("click", () => { disarm(); dismiss(); });
+  t.addEventListener("mouseenter", disarm);
+  t.addEventListener("mouseleave", arm);
+  arm();
 }
 
-// Skeleton loader markup — used while data is being fetched.
+// Run an async action while a button shows a busy state: disabled + aria-busy + a
+// "Đang…" label, restored in finally. Prevents double-submit and gives feedback on
+// slow networks. No-op (returns undefined) if the button is already busy.
+export async function withBtnBusy(btn, busyLabel, fn) {
+  if (!btn || btn.disabled) return;
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "true");
+  if (busyLabel) btn.textContent = busyLabel;
+  try { return await fn(); }
+  finally { btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = prev; }
+}
+
+// Skeleton loader markup — used while data is being fetched. role=status + aria-busy
+// so screen readers announce "loading" instead of staying silent on the placeholder.
 export function skeleton(rows = 5, tall = false) {
-  return `<div class="skeleton">${Array.from({ length: rows })
+  return `<div class="skeleton" role="status" aria-busy="true" aria-label="Đang tải…">${Array.from({ length: rows })
     .map(() => `<div class="sk-line${tall ? " tall" : ""}"></div>`).join("")}</div>`;
+}
+
+// Standard empty state — one primitive so every "chưa có dữ liệu" looks the same and
+// can carry a real call-to-action button (id = opts.ctaId) the caller wires up.
+export function emptyState(message, opts = {}) {
+  const { icon, ctaLabel, ctaId, hint } = opts;
+  return `<div class="empty-state" role="status">
+    ${icon ? `<div class="es-icon">${escapeHtml(icon)}</div>` : ""}
+    <div class="es-msg">${escapeHtml(message || "Chưa có dữ liệu")}</div>
+    ${hint ? `<div class="es-hint">${escapeHtml(hint)}</div>` : ""}
+    ${ctaLabel ? `<button type="button" class="btn btn-primary es-cta" id="${escapeHtml(ctaId || "")}">${escapeHtml(ctaLabel)}</button>` : ""}
+  </div>`;
 }
 
 // Attribute string that makes a non-button element keyboard-operable. Add it to
@@ -165,11 +209,14 @@ export function promptModal(title, label, opts = {}) {
       : `<textarea id="pm-input" rows="3" placeholder="${escapeHtml(opts.placeholder || "")}" style="width:100%;margin-top:6px"></textarea>`;
     const m = openModal(title, `<label style="display:block">${escapeHtml(label)}
       ${field}</label>`);
-    m.onSave(() => {
+    const submit = () => {
       const v = (m.find("#pm-input").value || "").trim();
       if (opts.required && v.length < (opts.min || 1)) { toast(opts.requiredMsg || "Vui lòng nhập nội dung", "error"); return; }
       resolved = true; resolve(v); m.close();
-    });
+    };
+    m.onSave(submit);
+    // Enter submits a single-line input (opts.type); a textarea keeps Enter for newlines.
+    if (opts.type) m.find("#pm-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
     m.onClose((wasSaved) => { if (!resolved) resolve(wasSaved ? "" : null); });
   });
 }
@@ -186,7 +233,10 @@ export function confirmModal(title, message, opts = {}) {
     }
     const cancelBtn = m.find("[data-cancel]");
     if (cancelBtn) cancelBtn.textContent = opts.cancelText || "Hủy";
-    m.onSave(() => { done = true; resolve(true); m.close(); });
+    const confirm = () => { done = true; resolve(true); m.close(); };
+    m.onSave(confirm);
+    // Enter confirms (no input to type into); focus the confirm button for clarity.
+    if (saveBtn) { setTimeout(() => saveBtn.focus(), 40); m.find(".modal")?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); confirm(); } }); }
     m.onClose(() => { if (!done) resolve(false); });
   });
 }

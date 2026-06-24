@@ -1,6 +1,26 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { Component, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type Me } from "./api";
 import { Shell } from "./Shell";
+
+// Bắt lỗi render để 1 lỗi không làm TRẮNG toàn app — hiện màn lỗi + nút tải lại.
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error("[ErrorBoundary]", error); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="center" style={{ flexDirection: "column", gap: 12, padding: 24, textAlign: "center" }}>
+          <div style={{ fontSize: 40 }}>⚠️</div>
+          <h2>Đã xảy ra lỗi hiển thị</h2>
+          <p className="muted">{this.state.error.message || "Lỗi không xác định"}</p>
+          <button className="btn btn-primary" onClick={() => location.reload()}>Tải lại trang</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -15,7 +35,7 @@ export function App() {
 
   if (loading) return <div className="center muted">Đang tải…</div>;
   if (!me) return <Login onLogin={setMe} />;
-  return <Shell me={me} />;
+  return <ErrorBoundary><Shell me={me} /></ErrorBoundary>;
 }
 
 function Login({ onLogin }: { onLogin: (m: Me) => void }) {

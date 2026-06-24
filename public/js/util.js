@@ -25,6 +25,12 @@ export function fmtDate(d) {
   const dt = new Date(d);
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
 }
+// Date + HH:mm — for logs/notifications where the time of day matters (audit, thông báo).
+export function fmtDateTime(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  return `${fmtDate(d)} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+}
 export function vnDateText(d, city) {
   const dt = d instanceof Date ? d : new Date(d);
   return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;

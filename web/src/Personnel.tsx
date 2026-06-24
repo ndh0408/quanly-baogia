@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "./api";
 import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
 import { EMP_FIELDS } from "./Employees";
-import { toast, confirmModal } from "./ui";
+import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
-const toInputDate = (v: unknown) => (v ? new Date(v as string).toISOString().slice(0, 10) : "");
+const toInputDate = toLocalInputDate;
 const PAGE_SIZE = 50;
 // Field LẤY TỪ DỰ ÁN — KHÔNG hiện ô nhập trong form, chỉ điền qua "Chọn dự án" (bắt buộc) rồi hiện "đã chọn".
 const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
@@ -193,6 +193,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
                     <th key={k} rowSpan={2} className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
+                        aria-sort={sortable ? (sort === k ? (order === "asc" ? "ascending" : "descending") : "none") : undefined}
                         onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : f?.source === "action" ? (k === "confirmed" ? "Admin bấm để xác nhận đã ký (có ngày)" : "Kế toán bấm để đánh dấu đã thanh toán (có ngày)") : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
@@ -201,10 +202,10 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                 <th rowSpan={2}>Người tạo</th>
                 <th rowSpan={2} />
               </tr>
-              {/* Hàng 2: chỉ 2 cột con của "THỜI GIAN LÀM VIỆC" */}
+              {/* Hàng 2: chỉ 2 cột con của "THỜI GIAN LÀM VIỆC" — sắp xếp được theo ngày */}
               <tr>
-                <th className={hdrCls("workStart")}>Ngày bắt đầu</th>
-                <th className={hdrCls("workEnd")}>Ngày kết thúc</th>
+                <th className={[hdrCls("workStart"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workStart" ? (order === "asc" ? "ascending" : "descending") : "none"} onClick={() => toggleSort("workStart")} title="Bấm để sắp xếp">Ngày bắt đầu{sort === "workStart" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
+                <th className={[hdrCls("workEnd"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workEnd" ? (order === "asc" ? "ascending" : "descending") : "none"} onClick={() => toggleSort("workEnd")} title="Bấm để sắp xếp">Ngày kết thúc{sort === "workEnd" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
               </tr>
             </thead>
             <tbody>
@@ -275,26 +276,37 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
   };
   const [form, setForm] = useState<Record<string, string>>(buildInitial);
   const [err, setErr] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
-  const set = (k: string, v: string) => setForm((s) => ({ ...s, [k]: v }));
+  const dirty = useRef(false);
+  const set = (k: string, v: string) => { dirty.current = true; setForm((s) => ({ ...s, [k]: v })); setFieldErrors((fe) => (fe[k] ? { ...fe, [k]: "" } : fe)); };
+
+  // Đóng có bảo vệ: nếu đã sửa mà chưa lưu → hỏi trước khi bỏ (chống mất dữ liệu khi
+  // bấm nền / Đóng / Escape).
+  const guardedClose = useCallback(async () => {
+    if (dirty.current && !readOnly && !(await confirmModal("Bỏ thay đổi?", "Bạn có thay đổi chưa lưu. Đóng và bỏ hết?", { danger: true, confirmText: "Đóng, bỏ thay đổi" }))) return;
+    onClose();
+  }, [readOnly, onClose]);
 
   useEffect(() => {
     firstRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") void guardedClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [guardedClose]);
 
   const save = async () => {
-    setErr(""); setSaving(true);
+    setErr(""); setFieldErrors({}); setSaving(true);
     try {
       if (rec) await api.updatePersonnel(rec.id, form);
       else await api.createPersonnel(form);
       toast(rec ? "Đã lưu thay đổi" : "Đã thêm hồ sơ", "success");
       onSaved();
     } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Lưu thất bại");
+      const fe = fieldErrorsFrom(ex);
+      setFieldErrors(fe);
+      setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lưu thất bại"));
       setSaving(false);
     }
   };
@@ -302,22 +314,23 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
   const title = rec ? (readOnly ? "Xem hồ sơ" : "Sửa hồ sơ") : "Thêm hồ sơ";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => void guardedClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pf-title" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3 id="pf-title">{title}</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
+          <button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
           {/* Chọn DỰ ÁN (BẮT BUỘC) — hiện cả khi tạo/sửa/xem. Chọn xong hiện "✓ đã chọn"; KHÔNG hiện ô riêng cho Tên/Mã dự án·Account·CTY (tự điền ngầm). */}
           <ProjectPicker
             selected={{ projectCode: form.projectCode, projectName: form.projectName, accountName: form.accountName, company: form.company }}
             readOnly={readOnly}
-            onPick={(p) => { setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company })); toast(`Đã chọn dự án "${p.projectCode}"`, "success"); }}
-            onClear={() => setForm((s) => ({ ...s, projectName: "", projectCode: "", accountName: "", company: "" }))}
+            onPick={(p) => { dirty.current = true; setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company })); toast(`Đã chọn dự án "${p.projectCode}"`, "success"); }}
+            onClear={() => { dirty.current = true; setForm((s) => ({ ...s, projectName: "", projectCode: "", accountName: "", company: "" })); }}
           />
           {!rec && !readOnly && (
             <EmployeePicker onPick={(emp) => {
+              dirty.current = true;
               setForm((s) => {
                 const next = { ...s };
                 for (const f of EMP_FIELDS) {
@@ -336,19 +349,23 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
                 {INPUT_FIELDS.filter((f) => f.group === g && !PROJECT_FIELDS.has(f.key)).map((f, idx) => {
                   const isMoney = f.type === "money" || f.type === "number";
                   const isFirst = gi === 0 && idx === 0;
+                  const fErr = fieldErrors[f.key];
+                  const moneyVal = isMoney && form[f.key] !== "" && !isNaN(Number(form[f.key])) ? Number(form[f.key]) : null;
                   return (
                     <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                       <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
                       {f.type === "textarea" ? (
-                        <textarea value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)} />
+                        <textarea value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
                       ) : (
                         <input
                           ref={isFirst ? firstRef : undefined}
                           type={f.type === "date" ? "date" : isMoney ? "number" : "text"}
                           {...(isMoney ? { min: "0", step: "1000", inputMode: "numeric" as const } : {})}
-                          value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)}
+                          value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
                         />
                       )}
+                      {moneyVal != null && <small className="muted">= {moneyVal.toLocaleString("vi-VN")} đ</small>}
+                      {fErr && <div className="field-err">{fErr}</div>}
                     </label>
                   );
                 })}
@@ -359,7 +376,7 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
           {!readOnly && !form.projectCode && <span className="foot-hint">⚠ Cần chọn dự án trước khi lưu</span>}
-          <button className="btn" onClick={onClose}>Đóng</button>
+          <button className="btn" onClick={() => void guardedClose()}>Đóng</button>
           {!readOnly && (
             <button className="btn btn-primary" disabled={saving || !form.fullName.trim() || !form.projectCode} onClick={save}>
               {saving ? "Đang lưu…" : "Lưu"}

@@ -50,7 +50,9 @@ const ListQuery = z.object({
   q: z.string().max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(50),
-  sort: z.enum(["createdAt", "fullName", "updatedAt"]).default("createdAt"),
+  // Cột sort: chỉ tên cột THẬT của PersonnelRecord (Prisma orderBy [sort]). UI cho phép
+  // bấm sort trên các cột hiển thị tương ứng (Họ tên, MST, Lương, ngày làm việc).
+  sort: z.enum(["createdAt", "fullName", "updatedAt", "salary", "taxCode", "workStart", "workEnd"]).default("createdAt"),
   order: z.enum(["asc", "desc"]).default("desc"),
 });
 

@@ -3,14 +3,34 @@
 // audit log, permissions. None of these touch the quote editor/grid, so they extract as a
 // clean leaf. Exact byte-for-byte copy of the former app.js bodies — zero behavior change.
 import {
-  fmtMoney, fmtDate, escapeHtml, statusLabel,
+  fmtMoney, fmtDate, fmtDateTime, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260623f";
-import { state, can } from "../core/state.js?v=20260623f";
-import { api } from "../core/api.js?v=20260623f";
+} from "../util.js?v=20260624a";
+import { state, can } from "../core/state.js?v=20260624a";
+import { api } from "../core/api.js?v=20260624a";
 import {
-  toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260623f";
+  toast, skeleton, KBD, errorState, emptyState, openModal, promptModal, confirmModal,
+} from "../ui.js?v=20260624a";
+
+// Pager dùng chung cho các bảng admin (khách/sản phẩm/nhật ký). state-less: caller giữ
+// page + truyền meta {total,page,size,pageCount}; bấm Prev/Next gọi goToPage(n).
+function pagerHtml(meta) {
+  const m = meta || { total: 0, page: 1, pageCount: 1, size: 20 };
+  const start = m.total ? (m.page - 1) * m.size + 1 : 0;
+  const end = Math.min(m.total, m.page * m.size);
+  return `<div class="pager">
+    <span class="muted">Hiển thị ${start}–${end} / ${m.total}</span>
+    <div class="pager-btns">
+      <button class="btn btn-sm" data-pg="prev" ${m.page <= 1 ? "disabled" : ""}>← Trước</button>
+      <span class="muted" style="padding:0 6px">Trang ${m.page}/${m.pageCount || 1}</span>
+      <button class="btn btn-sm" data-pg="next" ${m.page >= (m.pageCount || 1) ? "disabled" : ""}>Sau →</button>
+    </div>
+  </div>`;
+}
+function wirePager(root, meta, goToPage) {
+  root.querySelector('[data-pg="prev"]')?.addEventListener("click", () => goToPage(Math.max(1, (meta.page || 1) - 1)));
+  root.querySelector('[data-pg="next"]')?.addEventListener("click", () => goToPage((meta.page || 1) + 1));
+}
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -34,7 +54,11 @@ async function loadUsers() {
     const users = await api("/api/users");
     state.users = users;
     drawUsers();
-  } catch (e) { toast(e.message, "error"); }
+  } catch (e) {
+    const body = document.getElementById("users-body");
+    if (body) body.innerHTML = errorState(e.message, loadUsers);
+    else toast(e.message, "error");
+  }
 }
 
 function drawUsers() {
@@ -74,6 +98,8 @@ function drawUsers() {
   body.querySelectorAll("button[data-pw]").forEach(b => b.addEventListener("click", () => openPasswordModal(state.users.find(u => u.id === parseInt(b.dataset.pw, 10)))));
   body.querySelectorAll("button[data-toggle]").forEach(b => b.addEventListener("click", async () => {
     const u = state.users.find(x => x.id === parseInt(b.dataset.toggle, 10));
+    // Khóa = hành động ảnh hưởng (chặn đăng nhập) → xác nhận trước. Mở khóa thì không cần.
+    if (u.active && !(await confirmModal("Khóa tài khoản", `Khóa tài khoản "${u.displayName || u.username}"? Người này sẽ không đăng nhập được cho tới khi được mở khóa.`, { danger: true, confirmText: "Khóa" }))) return;
     try {
       await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ active: !u.active }) });
       toast(u.active ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản", "success");
@@ -149,7 +175,7 @@ function openUserModal(u) {
   const mask = document.createElement("div");
   mask.className = "modal-mask";
   mask.innerHTML = `
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${isNew ? "Thêm nhân viên" : "Sửa nhân viên " + escapeHtml(u.username)}">
       <h2>${isNew ? "Thêm nhân viên" : "Sửa: " + escapeHtml(u.username)}</h2>
       <label>Tên đăng nhập<input name="username" value="${escapeHtml(u?.username || "")}" ${isNew ? "" : "disabled"} /></label>
       ${isNew ? `<label>Mật khẩu khởi tạo<input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" /></label>` : ""}
@@ -172,7 +198,11 @@ function openUserModal(u) {
       </div>
     </div>`;
   document.body.appendChild(mask);
-  mask.querySelector("[data-act=cancel]").addEventListener("click", () => mask.remove());
+  const closeMask = () => { mask.remove(); document.removeEventListener("keydown", onMaskKey); };
+  const onMaskKey = (e) => { if (e.key === "Escape") closeMask(); };
+  document.addEventListener("keydown", onMaskKey);
+  setTimeout(() => mask.querySelector("input:not([disabled]),select")?.focus(), 30);
+  mask.querySelector("[data-act=cancel]").addEventListener("click", closeMask);
   mask.querySelector("[data-act=save]").addEventListener("click", async () => {
     const get = n => mask.querySelector(`[name=${n}]`).value;
     const payload = {
@@ -186,7 +216,7 @@ function openUserModal(u) {
       if (isNew) await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
       else await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify(payload) });
       toast("Đã lưu", "success");
-      mask.remove();
+      closeMask();
       loadUsers();
     } catch (e) { toast(e.message, "error"); }
   });
@@ -196,22 +226,26 @@ function openPasswordModal(u) {
   const mask = document.createElement("div");
   mask.className = "modal-mask";
   mask.innerHTML = `
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Đổi mật khẩu ${escapeHtml(u.username)}">
       <h2>Đổi mật khẩu: ${escapeHtml(u.username)}</h2>
-      <label>Mật khẩu mới<input name="password" type="password" autocomplete="new-password" /></label>
+      <label>Mật khẩu mới<input name="password" type="password" autocomplete="new-password" minlength="8" /></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Đổi</button>
       </div>
     </div>`;
   document.body.appendChild(mask);
-  mask.querySelector("[data-act=cancel]").addEventListener("click", () => mask.remove());
+  const closeMask = () => { mask.remove(); document.removeEventListener("keydown", onMaskKey); };
+  const onMaskKey = (e) => { if (e.key === "Escape") closeMask(); };
+  document.addEventListener("keydown", onMaskKey);
+  setTimeout(() => mask.querySelector("[name=password]")?.focus(), 30);
+  mask.querySelector("[data-act=cancel]").addEventListener("click", closeMask);
   mask.querySelector("[data-act=save]").addEventListener("click", async () => {
     const pw = mask.querySelector("[name=password]").value;
     try {
       await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ password: pw }) });
       toast("Đã đổi mật khẩu", "success");
-      mask.remove();
+      closeMask();
     } catch (e) { toast(e.message, "error"); }
   });
 }
@@ -419,16 +453,27 @@ export async function renderCustomers(el) {
       <input id="cust-q" placeholder="Tìm theo mã hoặc tên công ty…" style="flex:1; min-width:240px"/>
       <button class="btn btn-primary" id="btn-new-cust">+ Khách mới</button>
     </div>
-    <div id="cust-body">Đang tải…</div>`;
-  let q = "";
+    <div id="cust-body">${skeleton(6)}</div>`;
+  let q = "", page = 1, sort = "createdAt", order = "desc";
   const reload = async () => {
-    const qs = "size=100" + (q ? `&q=${encodeURIComponent(q)}` : "");
+    const body = document.getElementById("cust-body");
+    if (!body) return;
+    const params = new URLSearchParams({ size: "20", page: String(page), sort, order });
+    if (q) params.set("q", q);
     try {
-      const r = await api("/api/customers?" + qs);
-      const body = document.getElementById("cust-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có khách hàng</div>"; return; }
-      body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">Mã khách hàng</th><th scope="col">Tên công ty</th><th scope="col"></th></tr></thead>
+      const r = await api("/api/customers?" + params.toString());
+      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 20 };
+      if (!r.data.length) {
+        body.innerHTML = q
+          ? emptyState("Không tìm thấy khách hàng phù hợp.")
+          : emptyState("Chưa có khách hàng nào.", { ctaLabel: "+ Thêm khách hàng", ctaId: "es-new-cust" });
+        body.querySelector("#es-new-cust")?.addEventListener("click", () => editCustomer(null));
+        return;
+      }
+      const sArrow = sort === "name" ? (order === "asc" ? " ▲" : " ▼") : "";
+      const sAria = sort === "name" ? (order === "asc" ? "ascending" : "descending") : "none";
+      body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
+        <thead><tr><th scope="col">Mã khách hàng</th><th scope="col" class="sortable" data-sort="name" aria-sort="${sAria}" title="Bấm để sắp xếp">Tên công ty${sArrow}</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(c => `
           <tr>
             <td><strong>${escapeHtml(c.code)}</strong></td>
@@ -438,16 +483,21 @@ export async function renderCustomers(el) {
               <button class="btn btn-sm btn-danger" data-del="${c.id}">Xóa</button>
             </td>
           </tr>`).join("")}</tbody>
-      </table>`;
+      </table></div>${pagerHtml(meta)}`;
       body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editCustomer(parseInt(b.dataset.edit))));
       body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
         if (!(await confirmModal("Xóa khách hàng", "Xóa khách hàng này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/customers/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
-    } catch (e) { toast(e.message, "error"); }
+      body.querySelector('th[data-sort="name"]')?.addEventListener("click", () => {
+        if (sort === "name") order = order === "asc" ? "desc" : "asc"; else { sort = "name"; order = "asc"; }
+        page = 1; reload();
+      });
+      wirePager(body, meta, (n) => { page = n; reload(); });
+    } catch (e) { body.innerHTML = errorState(e.message, reload); }
   };
-  document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
+  document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; page = 1; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
   document.getElementById("btn-new-cust").addEventListener("click", () => editCustomer(null));
   await reload();
 }
@@ -518,16 +568,29 @@ async function renderProducts(el) {
       <input id="p-q" placeholder="Tìm theo SKU hoặc tên…" style="flex:1"/>
       <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
     </div>
-    <div id="p-body">Đang tải…</div>`;
-  let q = "";
+    <div id="p-body">${skeleton(6)}</div>`;
+  let q = "", page = 1, sort = "name", order = "asc";
   const reload = async () => {
+    const body = document.getElementById("p-body");
+    if (!body) return;
+    const params = new URLSearchParams({ size: "20", page: String(page), sort, order });
+    if (q) params.set("q", q);
     try {
-      const r = await api("/api/products?size=100" + (q ? `&q=${encodeURIComponent(q)}` : ""));
-      const body = document.getElementById("p-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có sản phẩm</div>"; return; }
-      body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">SKU</th><th scope="col">Tên</th><th scope="col">Loại</th><th scope="col">ĐVT</th>
-          <th scope="col" style="text-align:right">Giá vốn</th><th scope="col" style="text-align:right">Giá bán</th>
+      const r = await api("/api/products?" + params.toString());
+      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 20 };
+      if (!r.data.length) {
+        body.innerHTML = q
+          ? emptyState("Không tìm thấy sản phẩm phù hợp.")
+          : emptyState("Chưa có sản phẩm nào.", { ctaLabel: "+ Thêm sản phẩm", ctaId: "es-new-p" });
+        body.querySelector("#es-new-p")?.addEventListener("click", () => editProduct(null));
+        return;
+      }
+      const arrow = (f) => sort === f ? (order === "asc" ? " ▲" : " ▼") : "";
+      const aria = (f) => sort === f ? (order === "asc" ? "ascending" : "descending") : "none";
+      const sortTh = (f, label, style) => `<th scope="col" class="sortable" data-sort="${f}" aria-sort="${aria(f)}" title="Bấm để sắp xếp"${style ? ` style="${style}"` : ""}>${label}${arrow(f)}</th>`;
+      body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
+        <thead><tr>${sortTh("sku", "SKU")}${sortTh("name", "Tên")}<th scope="col">Loại</th><th scope="col">ĐVT</th>
+          <th scope="col" style="text-align:right">Giá vốn</th>${sortTh("basePrice", "Giá bán", "text-align:right")}
           <th scope="col" style="text-align:right">Margin</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(p => `
           <tr>
@@ -540,16 +603,22 @@ async function renderProducts(el) {
             <td style="text-align:right">${p.margin != null ? p.margin + "%" : "—"}</td>
             <td><button class="btn btn-sm" data-edit="${p.id}">Sửa</button>
                 <button class="btn btn-sm btn-danger" data-del="${p.id}">Xóa</button></td>
-          </tr>`).join("")}</tbody></table>`;
+          </tr>`).join("")}</tbody></table></div>${pagerHtml(meta)}`;
       body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editProduct(parseInt(b.dataset.edit))));
       body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
         if (!(await confirmModal("Xóa sản phẩm", "Xóa sản phẩm này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/products/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
-    } catch (e) { toast(e.message, "error"); }
+      body.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
+        const f = th.dataset.sort;
+        if (sort === f) order = order === "asc" ? "desc" : "asc"; else { sort = f; order = f === "basePrice" ? "desc" : "asc"; }
+        page = 1; reload();
+      }));
+      wirePager(body, meta, (n) => { page = n; reload(); });
+    } catch (e) { body.innerHTML = errorState(e.message, reload); }
   };
-  document.getElementById("p-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._pt); window._pt = setTimeout(reload, 300); });
+  document.getElementById("p-q").addEventListener("input", (e) => { q = e.target.value; page = 1; clearTimeout(window._pt); window._pt = setTimeout(reload, 300); });
   document.getElementById("btn-new-p").addEventListener("click", () => editProduct(null));
   await reload();
 }
@@ -604,18 +673,22 @@ export async function renderNotifications(el) {
     <div class="toolbar"><button class="btn" id="btn-read-all">Đánh dấu đã đọc tất cả</button></div>
     <div id="n-body">${skeleton(4)}</div>`;
   document.getElementById("btn-read-all").addEventListener("click", async () => {
-    await api("/api/notifications/read-all", { method: "POST" });
-    renderNotifications(el);
+    try {
+      await api("/api/notifications/read-all", { method: "POST" });
+      toast("Đã đánh dấu tất cả là đã đọc", "success");
+      refreshBadges();
+      renderNotifications(el);
+    } catch (e) { toast(e.message, "error"); }
   });
   try {
     const r = await api("/api/notifications?size=50");
     const body = document.getElementById("n-body");
-    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có thông báo</div>"; return; }
+    if (!r.data.length) { body.innerHTML = emptyState("Không có thông báo nào.", { icon: "🔔" }); return; }
     body.innerHTML = r.data.map(n => `
       <div class="notif ${n.readAt ? "" : "unread"}" data-id="${n.id}" data-resource="${escapeHtml(n.resource || "")}" data-rid="${escapeHtml(n.resourceId || "")}" ${KBD}>
         <div class="notif-title">${escapeHtml(n.title)}</div>
         <div class="notif-body">${escapeHtml(n.body)}</div>
-        <div class="notif-meta">${fmtDate(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
+        <div class="notif-meta">${fmtDateTime(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
       </div>`).join("");
     // Every notification is clickable: mark read (if unread) AND deep-link to the
     // referenced quote so the alert leads somewhere instead of dead-ending.
@@ -856,32 +929,51 @@ export async function renderAuditLog(el) {
       <select id="a-action"><option value="">Tất cả hoạt động</option>${actionOpts}</select>
       <label for="a-resource" class="sr-only">Lọc theo đối tượng</label>
       <select id="a-resource"><option value="">Tất cả đối tượng</option>${resOpts}</select>
+      <label class="inline-field">Từ <input id="a-from" type="date" /></label>
+      <label class="inline-field">Đến <input id="a-to" type="date" /></label>
+      <button class="btn btn-sm btn-ghost" id="a-clear" type="button">Xóa lọc</button>
     </div>
     <div id="a-body">${skeleton(6)}</div>`;
+  let page = 1;
   const reload = async () => {
+    const body = document.getElementById("a-body");
+    if (!body) return;
     const params = new URLSearchParams();
     const av = document.getElementById("a-action").value;
     const rv = document.getElementById("a-resource").value;
+    const from = document.getElementById("a-from").value;
+    const to = document.getElementById("a-to").value;
     if (av) params.set("action", av);
     if (rv) params.set("resource", rv);
-    params.set("size", "100");
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    params.set("page", String(page));
+    params.set("size", "50");
     try {
       const r = await api("/api/audit?" + params);
-      const body = document.getElementById("a-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có hoạt động nào</div>"; return; }
+      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 50 };
+      if (!r.data.length) { body.innerHTML = emptyState((av || rv || from || to) ? "Không có hoạt động khớp bộ lọc." : "Chưa có hoạt động nào.", { icon: "🕘" }); return; }
       body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
         <thead><tr><th scope="col">Thời gian</th><th scope="col">Người thực hiện</th><th scope="col">Hoạt động</th><th scope="col">Đối tượng</th></tr></thead>
         <tbody>${r.data.map(e => `
           <tr>
-            <td>${new Date(e.createdAt).toLocaleString("vi-VN")}</td>
+            <td>${fmtDateTime(e.createdAt)}</td>
             <td>${escapeHtml(e.actor?.displayName || e.actor?.username || "Hệ thống")}</td>
             <td>${escapeHtml(actionLabel(e.action))}</td>
             <td>${escapeHtml(resourceLabel(e.resource))}${e.resourceId ? " #" + escapeHtml(e.resourceId) : ""}</td>
-          </tr>`).join("")}</tbody></table></div>`;
-    } catch (e) { toast(e.message, "error"); }
+          </tr>`).join("")}</tbody></table></div>${pagerHtml(meta)}`;
+      wirePager(body, meta, (n) => { page = n; reload(); });
+    } catch (e) { body.innerHTML = errorState(e.message, reload); }
   };
-  document.getElementById("a-action").addEventListener("change", reload);
-  document.getElementById("a-resource").addEventListener("change", reload);
+  const onFilter = () => { page = 1; reload(); };
+  document.getElementById("a-action").addEventListener("change", onFilter);
+  document.getElementById("a-resource").addEventListener("change", onFilter);
+  document.getElementById("a-from").addEventListener("change", onFilter);
+  document.getElementById("a-to").addEventListener("change", onFilter);
+  document.getElementById("a-clear").addEventListener("click", () => {
+    ["a-action", "a-resource", "a-from", "a-to"].forEach(id => { const x = document.getElementById(id); if (x) x.value = ""; });
+    onFilter();
+  });
   await reload();
 }
 

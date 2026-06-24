@@ -1,35 +1,35 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260623f";
+} from "./js/util.js?v=20260624a";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
   state, can, landingPage,
-} from "./js/core/state.js?v=20260623f";
+} from "./js/core/state.js?v=20260624a";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260623f";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260624a";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,
-  initTheme, toggleTheme, promptModal, confirmModal,
-} from "./js/ui.js?v=20260623f";
+  initTheme, toggleTheme, promptModal, confirmModal, withBtnBusy,
+} from "./js/ui.js?v=20260624a";
 // 10 standalone admin pages (step 6). They live in their own module; the 5 shell/nav
 // helpers they need from here are injected via setAdminDeps (no circular import).
 import {
   setAdminDeps, renderUsers, renderProfile, renderDashboard, renderCustomers,
   renderNotifications, renderProjects, renderAuditLog, renderPermissions,
-} from "./js/pages/admin.js?v=20260623f";
+} from "./js/pages/admin.js?v=20260624a";
 // Quote list + new-quote wizard + Account-HN (step 7). Editor/shell helpers injected below.
 import {
   setQuoteDeps, renderList, renderNewQuote, renderAccountHnView, renderManagerHnPanel,
-} from "./js/pages/quotes.js?v=20260623f";
+} from "./js/pages/quotes.js?v=20260624a";
 // Editor + spreadsheet grid (step 8). drawItems & co. are re-exported here so the existing
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260623f";
+} from "./js/editor.js?v=20260624a";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());
@@ -87,7 +87,7 @@ async function routeFromHash() {
   if (location.hash.startsWith("#/onboard")) { renderOnboard(); return; }
   if (!state.user) return;
   if (!location.hash.startsWith("#/")) return; // ignore #main (skip link) etc.
-  const h = location.hash.slice(2); // strip "#/"
+  const h = location.hash.slice(2).split("?")[0]; // strip "#/" and any ?query (filters)
   const m = h.match(/^quotes\/(\d+)$/);
   if (m) {
     try {
@@ -111,6 +111,17 @@ async function routeFromHash() {
 async function boot() {
   initTheme();
   installKeyActivation();
+  // Ctrl/Cmd+S lưu báo giá khi đang ở màn nhập liệu (nút #btn-save chỉ tồn tại khi sửa được)
+  // — chặn hộp thoại "Save page" của trình duyệt. An toàn ở mọi trang khác (no-op nếu không có nút).
+  if (!window._saveKeyWired) {
+    window._saveKeyWired = true;
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        const btn = document.getElementById("btn-save");
+        if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+      }
+    });
+  }
   if (!window._hashWired) { window.addEventListener("hashchange", routeFromHash); window._hashWired = true; }
   // Public invite-accept page — reachable without logging in.
   if (location.hash.startsWith("#/onboard")) { renderOnboard(); return; }
@@ -145,6 +156,27 @@ function render() {
 }
 
 // ---------------- Login ----------------
+// Password input with an eye toggle. One delegated wirePwToggles() call activates all.
+function pwField(name, { autocomplete = "current-password", placeholder = "", minlength, required = true } = {}) {
+  return `<span class="pw-wrap">
+    <input type="password" name="${name}" autocomplete="${autocomplete}"${minlength ? ` minlength="${minlength}"` : ""}${required ? " required" : ""} placeholder="${escapeHtml(placeholder)}" />
+    <button type="button" class="pw-toggle" tabindex="-1" aria-label="Hiện mật khẩu" title="Hiện / ẩn mật khẩu">👁</button>
+  </span>`;
+}
+function wirePwToggles(root) {
+  (root || document).querySelectorAll(".pw-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const inp = btn.previousElementSibling;
+      if (!inp) return;
+      const show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+      btn.textContent = show ? "🙈" : "👁";
+      btn.setAttribute("aria-label", show ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+      inp.focus();
+    });
+  });
+}
+
 // Public onboarding page: an invited employee sets their password + details.
 async function renderOnboard() {
   const token = new URLSearchParams((location.hash.split("?")[1]) || "").get("token");
@@ -163,30 +195,39 @@ async function renderOnboard() {
       <label><span>Tên người gửi trên báo giá</span><input name="senderName" placeholder="Để trống = dùng Họ tên" /></label>
       <label><span>Số điện thoại</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="09xx xxx xxx" /></label>
       <label><span>Chức danh</span><input name="title" placeholder="VD: Account, Sale, Giám đốc…" /></label>
-      <label><span>Mật khẩu</span><input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" required /></label>
-      <label><span>Nhập lại mật khẩu</span><input name="password2" type="password" autocomplete="new-password" required /></label>
+      <label><span>Mật khẩu</span>${pwField("password", { autocomplete: "new-password", minlength: 8, placeholder: "Tối thiểu 8 ký tự, gồm chữ và số" })}</label>
+      <label><span>Nhập lại mật khẩu</span>${pwField("password2", { autocomplete: "new-password" })}</label>
       <button type="submit" class="btn-login">Kích hoạt & đăng nhập</button>
     </form>`;
+  wirePwToggles(body);
+  document.querySelector('#ob-form [name="displayName"]')?.focus();
   document.getElementById("ob-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const err = document.getElementById("ob-err");
     err.innerHTML = "";
-    if (fd.get("password") !== fd.get("password2")) { err.innerHTML = `<div class="err">Mật khẩu nhập lại không khớp.</div>`; return; }
-    try {
-      const me = await api("/api/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, displayName: fd.get("displayName"), senderName: fd.get("senderName"), phone: fd.get("phone"), title: fd.get("title"), password: fd.get("password") }) });
-      state.user = me;
-      location.hash = "#/list";
-      state.page = "list";
-      await loadMeta();
-      render();
-      toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
-    } catch (e2) {
-      // e2.message already carries the specific reason(s) (built in api()).
-      // Show it in the alert box AND pinpoint the offending field inline.
-      err.innerHTML = `<div class="err">${escapeHtml(e2.message)}</div>`;
-      applyFieldErrors(e2); // highlight + focus the bad field (password, …)
+    if (fd.get("password") !== fd.get("password2")) {
+      err.innerHTML = `<div class="err">Mật khẩu nhập lại không khớp.</div>`;
+      const p2 = e.target.querySelector('[name="password2"]');
+      if (p2) { p2.setAttribute("aria-invalid", "true"); p2.focus(); }
+      return;
     }
+    await withBtnBusy(e.target.querySelector('button[type="submit"]'), "Đang kích hoạt…", async () => {
+      try {
+        const me = await api("/api/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, displayName: fd.get("displayName"), senderName: fd.get("senderName"), phone: fd.get("phone"), title: fd.get("title"), password: fd.get("password") }) });
+        state.user = me;
+        location.hash = "#/list";
+        state.page = "list";
+        await loadMeta();
+        render();
+        toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
+      } catch (e2) {
+        // e2.message already carries the specific reason(s) (built in api()).
+        // Show it in the alert box AND pinpoint the offending field inline.
+        err.innerHTML = `<div class="err">${escapeHtml(e2.message)}</div>`;
+        applyFieldErrors(e2); // highlight + focus the bad field (password, …)
+      }
+    });
   });
 }
 
@@ -199,16 +240,18 @@ function renderLogin() {
         <div id="login-err" role="alert" aria-live="assertive"></div>
         <form id="login-form">
           <label><span>Email hoặc tên đăng nhập</span><input name="username" autocomplete="username" required /></label>
-          <label><span>Mật khẩu</span><input type="password" name="password" autocomplete="current-password" required /></label>
-          <label id="mfa-field" style="display:none"><span>Mã xác thực (MFA)</span><input name="mfaToken" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9A-Za-z]{6,8}" placeholder="6 chữ số" /></label>
+          <label><span>Mật khẩu</span>${pwField("password", { autocomplete: "current-password" })}</label>
+          <label id="mfa-field" style="display:none"><span>Mã xác thực (MFA)</span><input name="mfaToken" autocomplete="one-time-code" pattern="[0-9A-Za-z]{6,8}" placeholder="Mã 6 số hoặc mã dự phòng" /></label>
           <button type="submit" class="btn-login">Đăng nhập</button>
         </form>
         <p class="login-hint"><a href="#" id="forgot-link">Quên mật khẩu?</a></p>
       </div>
     </div>`;
+  wirePwToggles(app);
+  document.querySelector('#login-form [name="username"]')?.focus();
   document.getElementById("forgot-link")?.addEventListener("click", async (e) => {
     e.preventDefault();
-    const email = await promptModal("Quên mật khẩu", "Nhập email tài khoản của bạn — chúng tôi sẽ gửi liên kết đặt lại mật khẩu:", { placeholder: "ten@congty.com" });
+    const email = await promptModal("Quên mật khẩu", "Nhập email tài khoản của bạn — chúng tôi sẽ gửi liên kết đặt lại mật khẩu:", { type: "email", placeholder: "ten@congty.com" });
     if (!email) return;
     try {
       await api("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: email.trim() }) });
@@ -224,26 +267,28 @@ function renderLogin() {
     const payload = { username: fd.get("username"), password: fd.get("password") };
     const mfaToken = (fd.get("mfaToken") || "").toString().trim();
     if (mfaToken) payload.mfaToken = mfaToken;
-    try {
-      const me = await api("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
-      state.user = me;
-      await loadMeta();
-      // Honor a deep link the user followed before logging in (e.g. an email link
-      // to a specific quote); otherwise land on the list.
-      if (location.hash.startsWith("#/") && !location.hash.startsWith("#/onboard")) routeFromHash();
-      else { state.page = landingPage(); render(); }
-    } catch (err) {
-      // Server asks for a second factor → reveal the MFA field and let the user retry.
-      if (err.body && err.body.mfaRequired) {
-        mfaField.style.display = "";
-        const mfaInput = mfaField.querySelector("input");
-        mfaInput.required = true;
-        mfaInput.focus();
-        errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản đã bật MFA — vui lòng nhập mã xác thực."}</div>`;
-        return;
+    await withBtnBusy(e.target.querySelector('button[type="submit"]'), "Đang đăng nhập…", async () => {
+      try {
+        const me = await api("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
+        state.user = me;
+        await loadMeta();
+        // Honor a deep link the user followed before logging in (e.g. an email link
+        // to a specific quote); otherwise land on the list.
+        if (location.hash.startsWith("#/") && !location.hash.startsWith("#/onboard")) routeFromHash();
+        else { state.page = landingPage(); render(); }
+      } catch (err) {
+        // Server asks for a second factor → reveal the MFA field and let the user retry.
+        if (err.body && err.body.mfaRequired) {
+          mfaField.style.display = "";
+          const mfaInput = mfaField.querySelector("input");
+          mfaInput.required = true;
+          mfaInput.focus();
+          errEl.innerHTML = `<div class="err">${mfaToken ? "Mã MFA không đúng, thử lại." : "Tài khoản đã bật MFA — vui lòng nhập mã xác thực."}</div>`;
+          return;
+        }
+        errEl.innerHTML = `<div class="err">${escapeHtml(err.message)}</div>`;
       }
-      errEl.innerHTML = `<div class="err">${escapeHtml(err.message)}</div>`;
-    }
+    });
   });
 }
 
@@ -562,8 +607,7 @@ export function codeLabel(q) {
 // modals/summary + FORMULA_FNS/EXTRA_CATS) → moved to ./js/editor.js (step 8). It receives
 // render/leaveEditorGuard/codeLabel/renderManagerHnPanel via setEditorDeps (wired near the top).
 
-// Live xlsx-faithful preview (refreshPreview/renderPreview/previewCLF/previewGN/
-// previewSummary/pvCompanyBanner) → moved to ./js/preview.js (step 5)
+// (Đã GỠ BỎ module xem-trước "live xlsx preview" — không dùng nữa: 2026-06-24.)
 // 10 admin pages (users/profile/dashboard/customers/products/approvals/notifications/
 // projects/audit/permissions) → moved to ./js/pages/admin.js (step 6)
 

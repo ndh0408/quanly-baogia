@@ -8,12 +8,11 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260623f";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260623f";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260623f";
-import { api } from "./core/api.js?v=20260623f";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260623f";
-import { refreshPreview } from "./preview.js?v=20260623f";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260624a";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260624a";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624a";
+import { api } from "./core/api.js?v=20260624a";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624a";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -328,7 +327,6 @@ export function renderEditor(el, quote) {
           document.getElementById("date-preview").textContent = vnDateText(q.quoteDate, q.city);
         }
         if (prop === "vatPercent" || prop === "discount") updateSummary(q);
-        refreshPreview(q);   // header fields (Kính gửi, title, date…) feed the live preview
       });
     };
     bindField("f-toCompany", "toCompany");
@@ -362,7 +360,6 @@ function bindActions(q, isNew) {
     q.showTotals = showTotalsBox.checked;
     const sum = document.querySelector(".quote-summary");
     if (sum) sum.style.display = q.showTotals ? "" : "none";
-    refreshPreview(q);
   });
   // Ghi chú cuối báo giá (quote.notes): bật/tắt ô nhập.
   // Tick "có" → tự điền sẵn câu chuẩn (nếu đang trống), sửa/xoá tuỳ ý. Bỏ tick → ẩn + xoá.
@@ -379,9 +376,8 @@ function bindActions(q, isNew) {
       q.notes = ""; if (noteInput) noteInput.value = "";
       if (noteWrap) noteWrap.style.display = "none";
     }
-    refreshPreview(q);
   });
-  if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; refreshPreview(q); });
+  if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; });
   const saveBtn = document.getElementById("btn-save");
   if (saveBtn) saveBtn.addEventListener("click", async () => {
     if (saveBtn.disabled) return;                 // guard against double-click → double POST
@@ -426,14 +422,20 @@ function bindActions(q, isNew) {
       saveBtn.textContent = label;
     }
   });
+  // File tải về là BẢN ĐÃ LƯU trên server (theo q.id) — nếu đang có thay đổi chưa lưu,
+  // cảnh báo để người dùng không gửi khách file thiếu phần vừa sửa.
+  const exportGuarded = async (url) => {
+    if (window._editorDirty && !(await confirmModal(
+      "Có thay đổi chưa lưu",
+      "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi bạn vừa sửa. Hãy bấm Lưu trước rồi tải lại.",
+      { confirmText: "Vẫn tải bản cũ", cancelText: "Để tôi lưu trước" }
+    ))) return;
+    window.open(url, "_blank");
+  };
   const excelBtn = document.getElementById("btn-excel");
-  if (excelBtn) excelBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.xlsx?t=${Date.now()}`, "_blank");   // cache-bust CDN
-  });
+  if (excelBtn) excelBtn.addEventListener("click", () => exportGuarded(`/api/export/${q.id}.xlsx?t=${Date.now()}`));   // cache-bust CDN
   const pdfBtn = document.getElementById("btn-pdf");
-  if (pdfBtn) pdfBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.pdf?t=${Date.now()}`, "_blank");   // cache-bust CDN
-  });
+  if (pdfBtn) pdfBtn.addEventListener("click", () => exportGuarded(`/api/export/${q.id}.pdf?t=${Date.now()}`));   // cache-bust CDN
   const versionsBtn = document.getElementById("btn-versions");
   if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
   const membersBtn = document.getElementById("btn-members");
@@ -1899,6 +1901,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (!activeSheet.items.length) activeSheet.items.push(blank());
       clampSel();
       redraw();
+      toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info");
     });
   });
 
@@ -2031,5 +2034,4 @@ function renderQuoteSummary(q) {
 function updateSummary(q) {
   const wrap = document.querySelector(".quote-summary");
   if (wrap) wrap.innerHTML = renderQuoteSummary(q);
-  refreshPreview(q);   // keep the live xlsx preview in sync (no-op when closed)
 }

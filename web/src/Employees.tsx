@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type Me, type Employee } from "./api";
 import { FIELDS, type Field } from "./fields";
-import { toast, confirmModal } from "./ui";
+import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
 
 // Danh bạ = 10 trường nhóm "Cá nhân" của trang Nhân sự (1 nguồn, không lặp).
 export const EMP_FIELDS: Field[] = FIELDS.filter((f) => f.group === "Cá nhân");
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
-const toInputDate = (v: unknown) => (v ? new Date(v as string).toISOString().slice(0, 10) : "");
+const toInputDate = toLocalInputDate;
 const PAGE_SIZE = 50;
 
 export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   const [rows, setRows] = useState<Employee[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState("fullName");
+  const [order, setOrder] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [editing, setEditing] = useState<Employee | null | undefined>(undefined);
@@ -22,16 +24,23 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const res = await api.listEmployees(query, page, PAGE_SIZE);
+      const res = await api.listEmployees(query, page, PAGE_SIZE, sort, order);
       setRows(res.data);
       setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu");
     } finally { setLoading(false); }
-  }, [query, page]);
+  }, [query, page, sort, order]);
 
   useEffect(() => { const t = setTimeout(load, query ? 300 : 0); return () => clearTimeout(t); }, [load, query]);
-  useEffect(() => { setPage(1); }, [query]);
+  useEffect(() => { setPage(1); }, [query, sort, order]);
+
+  // Backend chỉ cho sort theo fullName (cột hiển thị) — bấm header "Họ & Tên" để đảo chiều.
+  const toggleSort = (k: string) => {
+    if (k !== "fullName") return;
+    if (sort === k) setOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else { setSort(k); setOrder("asc"); }
+  };
 
   const onDelete = async (r: Employee) => {
     if (!(await confirmModal("Xóa nhân viên", `Xóa "${r.fullName}" khỏi danh bạ? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
@@ -63,7 +72,19 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
             <thead>
               <tr>
                 <th className="sticky-1 hdr-stt">STT</th>
-                {EMP_FIELDS.map((f, i) => <th key={f.key} className={i === 0 ? "sticky-2" : ""}>{f.label}</th>)}
+                {EMP_FIELDS.map((f, i) => {
+                  const sortable = f.key === "fullName";
+                  const arrow = sortable && sort === f.key ? (order === "asc" ? " ▲" : " ▼") : "";
+                  return (
+                    <th key={f.key}
+                        className={[i === 0 ? "sticky-2" : "", sortable ? "sortable" : ""].filter(Boolean).join(" ")}
+                        aria-sort={sortable ? (sort === f.key ? (order === "asc" ? "ascending" : "descending") : "none") : undefined}
+                        onClick={sortable ? () => toggleSort(f.key) : undefined}
+                        title={sortable ? "Bấm để sắp xếp" : undefined}>
+                      {f.label}{arrow}
+                    </th>
+                  );
+                })}
                 <th>Người tạo</th>
                 <th />
               </tr>
@@ -120,26 +141,36 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
   };
   const [form, setForm] = useState<Record<string, string>>(buildInitial);
   const [err, setErr] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
-  const set = (k: string, v: string) => setForm((s) => ({ ...s, [k]: v }));
+  const dirty = useRef(false);
+  const set = (k: string, v: string) => { dirty.current = true; setForm((s) => ({ ...s, [k]: v })); setFieldErrors((fe) => (fe[k] ? { ...fe, [k]: "" } : fe)); };
+
+  // Đóng có bảo vệ: hỏi trước khi bỏ thay đổi chưa lưu (chống mất dữ liệu khi bấm nền / Đóng / Escape).
+  const guardedClose = useCallback(async () => {
+    if (dirty.current && !readOnly && !(await confirmModal("Bỏ thay đổi?", "Bạn có thay đổi chưa lưu. Đóng và bỏ hết?", { danger: true, confirmText: "Đóng, bỏ thay đổi" }))) return;
+    onClose();
+  }, [readOnly, onClose]);
 
   useEffect(() => {
     firstRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") void guardedClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [guardedClose]);
 
   const save = async () => {
-    setErr(""); setSaving(true);
+    setErr(""); setFieldErrors({}); setSaving(true);
     try {
       if (rec) await api.updateEmployee(rec.id, form);
       else await api.createEmployee(form);
       toast(rec ? "Đã lưu thay đổi" : "Đã thêm nhân viên", "success");
       onSaved();
     } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Lưu thất bại");
+      const fe = fieldErrorsFrom(ex);
+      setFieldErrors(fe);
+      setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lưu thất bại"));
       setSaving(false);
     }
   };
@@ -147,29 +178,33 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
   const title = rec ? (readOnly ? "Xem nhân viên" : "Sửa nhân viên") : "Thêm nhân viên";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => void guardedClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="ef-title" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3 id="ef-title">{title}</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
+          <button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
           <div className="grid">
-            {EMP_FIELDS.map((f, idx) => (
-              <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
-                <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}</span>
-                <input
-                  ref={idx === 0 ? firstRef : undefined}
-                  type={f.type === "date" ? "date" : "text"}
-                  value={form[f.key]} disabled={readOnly} onChange={(e) => set(f.key, e.target.value)}
-                />
-              </label>
-            ))}
+            {EMP_FIELDS.map((f, idx) => {
+              const fErr = fieldErrors[f.key];
+              return (
+                <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
+                  <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}</span>
+                  <input
+                    ref={idx === 0 ? firstRef : undefined}
+                    type={f.type === "date" ? "date" : "text"}
+                    value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
+                  />
+                  {fErr && <div className="field-err">{fErr}</div>}
+                </label>
+              );
+            })}
           </div>
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Đóng</button>
+          <button className="btn" onClick={() => void guardedClose()}>Đóng</button>
           {!readOnly && (
             <button className="btn btn-primary" disabled={saving || !form.fullName.trim()} onClick={save}>
               {saving ? "Đang lưu…" : "Lưu"}
