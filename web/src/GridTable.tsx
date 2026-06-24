@@ -325,6 +325,7 @@ export function GridTable(props: GridTableProps) {
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
         for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) pasteCellVal(r, FIELDS[c], val);
+        autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
         return;
       }
@@ -452,7 +453,16 @@ export function GridTable(props: GridTableProps) {
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
   const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
     const raw = el.value; const it = items[i] as Record<string, unknown>;
-    if (raw.trim().startsWith("=")) { if (it.formulas) delete (it.formulas as Record<string, string>)[f]; fxAutocomplete(el); highlightActiveFormulaRefs(raw); syncFxBar(); return; }
+    if (raw.trim().startsWith("=")) {
+      // Đang GÕ công thức: LƯU LIVE vào model + eval ngay (như SPA), KHÔNG xóa formula khi đang gõ.
+      if (!it.formulas) it.formulas = {};
+      (it.formulas as Record<string, string>)[f] = raw.trim();
+      const live = evalFormula(raw.trim(), refs);
+      if (live !== null) it[f] = NUMERIC.has(f) ? live : M.fmtNumCell(live);
+      fxAutocomplete(el); highlightActiveFormulaRefs(raw); syncFxBar();
+      recomputeAll(); onChange();   // re-eval ô tham chiếu chéo → lưu/hiển thị đúng
+      return;
+    }
     const before = el.selectionStart ?? raw.length;
     const digitsBefore = raw.slice(0, before).replace(/\D/g, "").length;
     const formatted = M.liveFormat(raw);
@@ -462,7 +472,8 @@ export function GridTable(props: GridTableProps) {
     const n = M.parseVN(formatted); it[f] = n;
     if (it.formulas) delete (it.formulas as Record<string, string>)[f];
     if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && n > 1 && !groupSubtotal) onGroupSubtotal?.(true);
-    closeAuto(); clearActiveRefs(); onChange();
+    closeAuto(); clearActiveRefs();
+    recomputeAll(); onChange();   // FIX: sửa 1 ô → ô CÔNG THỨC tham chiếu nó phải eval lại trước khi lưu/hiển thị
   };
   const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
     const it = items[i]; const fx = it.formulas?.[f]; const val = M.fmtNumCell(it[f] as number);
@@ -503,7 +514,14 @@ export function GridTable(props: GridTableProps) {
     if (focusPend.current && tableRef.current) {
       const { i, f } = focusPend.current; focusPend.current = null;
       const el = tableRef.current.querySelector(`tr[data-row="${i}"] [data-f="${f}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
-      if (el) { navigatingRef.current = true; el.focus(); try { el.select(); } catch { /* */ } navigatingRef.current = false; }
+      if (el) {
+        // Ô đích (paste/nav) có thể vừa là activeElement → paintCells đã SKIP nên còn giá trị CŨ.
+        // Đồng bộ về model trước khi focus (ô công thức để onGridFocus hiện =… lúc focus).
+        const rec = items[i] as Record<string, unknown>;
+        const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
+        if (!fx) { const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? ""); if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); } }
+        navigatingRef.current = true; el.focus(); try { el.select(); } catch { /* */ } navigatingRef.current = false;
+      }
     }
     paintSel();
   });

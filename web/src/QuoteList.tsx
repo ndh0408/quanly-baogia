@@ -21,7 +21,9 @@ export function QuoteListPage({ me }: { me: Me }) {
   const can = useCallback((perm: string) => me.permissions.includes(perm) || (perm.endsWith(":own") && me.permissions.includes(perm.replace(/:own$/, ":all"))), [me]);
   const isAdmin = me.role === "admin";
   const isAccountHn = me.role === "account_hn";
-  const canDelete = (q: QuoteRow) => can("quote:delete:all") || ((can("quote:delete:all") || (can("quote:delete:own") && q.createdById === me.id)) && (q.status === "draft" || q.status === "rejected"));
+  // KHỚP server (quotes.routes.js): 'converted' là TERMINAL → KHÔNG ai xóa; delete:all xóa mọi trạng thái khác;
+  // delete:own chỉ xóa báo giá CỦA MÌNH ở draft/rejected. (Trước đây short-circuit delete:all hiện nhầm nút trên 'Đã chốt'.)
+  const canDelete = (q: QuoteRow) => q.status !== "converted" && (can("quote:delete:all") || (can("quote:delete:own") && q.createdById === me.id && (q.status === "draft" || q.status === "rejected")));
 
   const sp0 = new URLSearchParams((location.hash.split("?")[1]) || "");
   const [q, setQ] = useState(sp0.get("q") || "");

@@ -127,7 +127,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // editable (mirror server + renderEditor): admin sửa tất; manager/member sửa khi chưa chốt/mất.
   const isMember = (q.members || []).some((m) => m.id === me.id);
   const canUpdate = me.role === "admin" || q.createdById === me.id || isMember || isNew;
-  const editable = isNew || (canUpdate && (me.role === "admin" || me.role === "manager" || q.status === "draft" || q.status === "rejected"));
+  // báo giá ĐÃ CHỐT/KHÔNG-CHỐT là TERMINAL — server (canEdit) chặn 403 mọi vai trò → khoá UI cho khớp, tránh "sửa được" giả.
+  const isTerminal = q.status === "converted" || q.status === "lost";
+  const editable = isNew || (!isTerminal && canUpdate && (me.role === "admin" || me.role === "manager" || q.status === "draft" || q.status === "rejected"));
   const hasPerm = (p: string) => me.permissions.includes(p) || me.permissions.includes(p.replace(/:own$/, ":all"));
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
