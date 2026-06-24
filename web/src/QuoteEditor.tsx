@@ -17,6 +17,8 @@ const stampKeys = (q: QuoteFull) => {
   (q.sheets as Sheet[] | undefined)?.forEach((s) => (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); }));
 };
 type Sheet = M.Sheet & { _k?: number };
+const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ";
+type WinDirty = Window & { __editorDirty?: boolean };
 
 let _companies: EditorCompany[] | null = null;
 let _templates: EditorTemplate[] | null = null;
@@ -39,9 +41,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
   const dirtyRef = useRef(false);
-  const mark = useCallback(() => { dirtyRef.current = true; }, []);
+  const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  const noteWrapRef = useRef<HTMLDivElement>(null);
+  const noteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell
+  // chặn điều hướng menu (giống leaveEditorGuard SPA). Dọn cờ khi rời editor.
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h);
+    return () => { window.removeEventListener("beforeunload", h); (window as WinDirty).__editorDirty = false; };
+  }, []);
 
   const templates = _templates || [];
   const companies = _companies || [];
@@ -139,14 +151,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           return {
             templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal,
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
-            extraTables: Array.isArray(s.extraTables) ? s.extraTables : [],
+            // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
+            extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
+              const xx = x as { templateId?: number; items?: ItemK[] } & Record<string, unknown>;
+              const xUsesDays = !!templates.find((t) => t.id === xx.templateId)?.layout?.hasDays;
+              return { ...xx, items: (xx.items || []).map((it) => { const o = { ...it, days: xUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }) };
+            }),
           };
         }),
       };
       delete payload._new; delete payload._activeSheet;
       if (isNew) delete payload.quoteNumber;
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
-      dirtyRef.current = false;
+      dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       toast("Đã lưu", "success");
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
@@ -229,7 +246,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redraw(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
-          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
         </div>
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
@@ -243,6 +260,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả màn hình lẫn Excel/PDF)</span>
           </label>
         )}
+        {editable ? (
+          <>
+            <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>
+            <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "8px 0 4px", fontSize: 13.5, cursor: "pointer" }}>
+              <input type="checkbox" defaultChecked={!!q.notes} onChange={(e) => {
+                if (e.target.checked) { if (!(q.notes || "").trim()) { setQ("notes", DEFAULT_NOTE); if (noteInputRef.current) noteInputRef.current.value = DEFAULT_NOTE; } if (noteWrapRef.current) noteWrapRef.current.style.display = ""; noteInputRef.current?.focus(); }
+                else { setQ("notes", ""); if (noteInputRef.current) noteInputRef.current.value = ""; if (noteWrapRef.current) noteWrapRef.current.style.display = "none"; }
+              }} />
+              <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
+            </label>
+            <div ref={noteWrapRef} style={{ display: q.notes ? "" : "none", margin: "0 0 10px" }}>
+              <textarea ref={noteInputRef} rows={2} defaultValue={q.notes || ""} placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid var(--border,#ccc)", borderRadius: 6, font: "inherit", resize: "vertical" }} onInput={(e) => setQ("notes", (e.target as HTMLTextAreaElement).value)} />
+            </div>
+          </>
+        ) : (q.notes ? <div className="muted" style={{ margin: "8px 0" }}><strong>Ghi chú:</strong> {q.notes}</div> : null)}
 
         {q.showTotals !== false && (
           <div className="quote-summary">

@@ -24,6 +24,13 @@ export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Cập nhật LIVE khi có thông báo mới (SSE qua Shell) hoặc quay lại tab.
+  useEffect(() => {
+    const on = () => load();
+    window.addEventListener("realtime:notification", on);
+    window.addEventListener("focus", on);
+    return () => { window.removeEventListener("realtime:notification", on); window.removeEventListener("focus", on); };
+  }, [load]);
 
   const markAll = async () => {
     try { await api.markAllNotifsRead(); toast("Đã đánh dấu tất cả là đã đọc", "success"); onBadge?.(); load(); }

@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { api, type Me } from "./api";
+import { confirmModal } from "./ui";
+
+// Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
+async function guardLeave(): Promise<boolean> {
+  const w = window as Window & { __editorDirty?: boolean };
+  if (!w.__editorDirty) return true;
+  const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
+  if (ok) w.__editorDirty = false;
+  return ok;
+}
 import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
 import { CustomersPage } from "./Customers";
@@ -84,6 +94,21 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
     return () => { window.removeEventListener("hashchange", on); window.removeEventListener("keydown", onKey); };
   }, []);
 
+  // SSE realtime (như SPA startSSE): thông báo→badge+refresh list; đổi quyền→pull /me; KHÓA/XÓA tài
+  // khoản→ép ĐĂNG XUẤT ngay (bảo mật phiên); thay đổi dữ liệu→bắn event cho trang đang mở.
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/stream/events");
+      es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
+      es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+      es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
+      es.addEventListener("session:revoked", async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); });
+    } catch { /* ignore */ }
+    return () => { es?.close(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const has = (perm?: string) =>
     !perm || me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
   const visible = NAV.filter((n) => has(n.perm));
@@ -129,7 +154,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
                 <div className={`nav-group-label ${gi === 0 ? "first" : ""}`}>{g}</div>
                 {visible.filter((n) => n.group === g).map((n) => (
                   <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`} {...(key === n.key ? { "aria-current": "page" as const } : {})}
-                     onClick={(e) => { e.preventDefault(); location.hash = `#/${n.key}`; }}>
+                     onClick={async (e) => { e.preventDefault(); if (await guardLeave()) location.hash = `#/${n.key}`; }}>
                     {ICON[n.key]}<span>{n.label}</span>
                     {n.key === "notifications" && unread > 0 && <span className="badge-num" aria-label={`${unread} chưa đọc`}>{unread}</span>}
                   </a>
@@ -141,7 +166,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-            <button className="logout" onClick={async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isEditor ? (

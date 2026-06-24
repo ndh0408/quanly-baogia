@@ -42,6 +42,12 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id || sheet.templateId;
   const tplOf = (t: ExtraTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
+  // Dọn 'days' cũ cho bảng có template KHÔNG có Số Ngày (giống drawExtraTables SPA) → tổng không phồng.
+  if (editable) {
+    let cleaned = false;
+    tables.forEach((x) => { if (!tplOf(x)?.layout?.hasDays) (x.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } }); });
+    if (cleaned) onMarkDirty();
+  }
   const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x) : 0), 0);
 
   let active = Number.isInteger(sheet._activeExtra) ? (sheet._activeExtra as number) : 0;

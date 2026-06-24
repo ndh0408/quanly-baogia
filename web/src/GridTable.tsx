@@ -3,6 +3,7 @@ import { toast } from "./ui";
 import * as M from "./quoteMath";
 import { evalFormula, type FormulaRefs } from "./formula";
 import { type ItemK, nextK, autoGrow } from "./gridShared";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./clipboard";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -42,7 +43,7 @@ export function GridTable(props: GridTableProps) {
   const selRef = useRef<Sel | null>(null);
   const navigatingRef = useRef(false);
   const pickingRef = useRef(false);
-  const copyBufRef = useRef<{ tsv: string; token: number } | null>(null);
+  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; c0?: number } | null>(null);
   const copyTokenRef = useRef(0);
   const autoRef = useRef<{ input: HTMLInputElement | HTMLTextAreaElement; items: string[]; idx: number } | null>(null);
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
@@ -247,17 +248,21 @@ export function GridTable(props: GridTableProps) {
   useEffect(() => () => closeAuto(), []);   // dọn dropdown khi gỡ lưới
 
   // ── copy / cut / fill ──────────────────────────────────────────────────────────
-  const cellRawForCopy = (i: number, f: string) => { const it = items[i] as Record<string, unknown>; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
+  // ô số copy giá trị THÔ (US, không gom nghìn) để Excel nhận; công thức copy nguyên "=…".
+  const cellRawForCopy = (i: number, f: string) => { const it = items[i] as Record<string, unknown>; const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
   const onCopyCut = (e: { clipboardData: DataTransfer; preventDefault(): void }, cut: boolean) => {
     const sel = selRef.current; const rc = rectOf(sel); if (!rc) return;
     const ae = document.activeElement as HTMLInputElement | null;
     if (rc.r0 === rc.r1 && rc.c0 === rc.c1 && ae && ae.selectionStart !== ae.selectionEnd) return;   // bôi-đen 1 phần chữ → mặc định
     e.preventDefault();
-    const matrix: string[][] = [];
-    for (let r = rc.r0; r <= rc.r1; r++) { const row: string[] = []; for (let c = rc.c0; c <= rc.c1; c++) row.push(cellRawForCopy(r, FIELDS[c])); matrix.push(row); }
-    const tsv = matrix.map((row) => row.join("\t")).join("\n");
+    const matrix: string[][] = []; const kinds: string[] = [];
+    for (let r = rc.r0; r <= rc.r1; r++) { const row: string[] = []; for (let c = rc.c0; c <= rc.c1; c++) row.push(cellRawForCopy(r, FIELDS[c])); matrix.push(row); kinds.push(items[r].kind || "item"); }
+    const tsv = cellsToTSV(matrix);   // RFC-4180: ô nhiều dòng được bọc "…" đúng chuẩn
     e.clipboardData.setData("text/plain", tsv);
-    copyBufRef.current = { tsv, token: ++copyTokenRef.current };
+    e.clipboardData.setData("text/html", cellsToHTML(matrix));   // dán sang Word/Sheets giữ bảng
+    const token = ++copyTokenRef.current;
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, cols: rc.c1 - rc.c0 + 1, c0: rc.c0 })); } catch { /* */ }
+    copyBufRef.current = { tsv, token, kinds, c0: rc.c0 };
     if (cut && editable) { pushUndo(); for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; const it = items[r] as Record<string, unknown>; it[f] = NUMERIC.has(f) ? 0 : ""; if (it.formulas) delete (it.formulas as Record<string, string>)[f]; } recomputeAll(); onChange(); }
   };
   const fillDown = () => {
@@ -267,36 +272,81 @@ export function GridTable(props: GridTableProps) {
     recomputeAll(); onChange();
   };
 
-  // ── row ops ──────────────────────────────────────────────────────────────────
-  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); items.push(it); onChange(); focusCell(items.length - 1, "name"); };
+  // ── row ops (CHÈN ngay dưới ô đang chọn — như Excel/SPA, không đẩy xuống cuối) ──
+  const insertIndex = () => { const sel = selRef.current; return sel ? Math.max(sel.anchor.row, sel.focus.row) + 1 : items.length; };
+  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); items.splice(at, 0, it); onChange(); focusCell(at, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
   const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); items.splice(i + 1, 0, it); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
-  const removeRow = (i: number) => { pushUndo(); items.splice(i, 1); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); };
+  const removeRow = (i: number) => { pushUndo(); items.splice(i, 1); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── undo/redo + dán Excel khối ─────────────────────────────────────────────────
   const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); };
   const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
   const doRedo = () => { if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
-  const parseTSV = (text: string) => text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").map((ln) => ln.split("\t"));
+  // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
+  const pasteCellVal = (i: number, f: string, val: string) => {
+    const it = items[i] as Record<string, unknown>;
+    if (val.trim().startsWith("=")) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = val.trim(); it[f] = NUMERIC.has(f) ? 0 : val.trim(); return; }
+    if (it.formulas && (it.formulas as Record<string, string>)[f]) delete (it.formulas as Record<string, string>)[f];
+    it[f] = NUMERIC.has(f) ? (val.trim() === "" ? 0 : parseLooseNumber(val)) : (MULTILINE.has(f) ? val : val.trim().replace(/\s+/g, " "));
+  };
   const onPaste = (e: { clipboardData: DataTransfer; target: EventTarget | null; preventDefault(): void }) => {
     if (!editable) return;
     const ae = document.activeElement as HTMLElement | null;
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
     const sel = selRef.current;
-    const startRow = sel ? rectOf(sel)!.r0 : (focusRef.current?.i ?? 0);
-    const startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : 0);
-    const text = e.clipboardData.getData("text/plain"); if (!text) return;
-    const rows = parseTSV(text);
-    if (rows.length <= 1 && (!rows[0] || rows[0].length <= 1)) return;
+    let startRow = sel ? rectOf(sel)!.r0 : (focusRef.current?.i ?? 0);
+    let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : 0);
+    let internal: { token: number; kinds?: string[]; cols?: number; c0?: number } | null = null;
+    try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
+    const text = e.clipboardData.getData("text/plain") || e.clipboardData.getData("text") || "";
+    if (!text && !internal) return;
+    const sameBlock = !!(internal && copyBufRef.current && internal.token === copyBufRef.current.token);
+    const rows = parseClipboardTSV(sameBlock ? copyBufRef.current!.tsv : text);
+    const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
+
+    // 1 giá trị đơn lẻ → fill ra TOÀN vùng đang chọn; nếu 1 ô thì để trình duyệt chèn tại con trỏ.
+    if (!isGrid) {
+      const rc = rectOf(sel);
+      if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {
+        e.preventDefault(); pushUndo();
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) pasteCellVal(r, FIELDS[c], rows[0][0]);
+        recomputeAll(); onChange(); paintSel();
+      }
+      return;
+    }
     e.preventDefault(); pushUndo();
+
+    // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
+    if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
+      const roles = ADDR.map((c) => c.f);
+      const built = reconstructExportRows(rows, roles, NUMERIC).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
+      items.splice(startRow, rows.length, ...built);
+      if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
+      recomputeAll(); onChange();
+      selRef.current = { anchor: { row: startRow, field: FIELDS[0] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
+      focusCell(startRow, FIELDS[0]);
+      const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
+      return;
+    }
+
+    // Khối nhiều ô. Dán vào hàng NHÓM → chèn hàng mới phía dưới (không đè nhóm).
+    const startKind = items[startRow]?.kind;
+    if (startKind === "section" || startKind === "subsection") {
+      rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
+      startRow += 1; startCol = 0;
+    }
+    const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? copyBufRef.current!.kinds : null;
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       if (ri >= items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       const it = items[ri] as Record<string, unknown>;
-      cells.forEach((val, c) => { const f = FIELDS[startCol + c]; if (!f) return; if (NUMERIC.has(f)) it[f] = val.trim() === "" ? 0 : M.parseVN(val); else it[f] = MULTILINE.has(f) ? val : val.trim().replace(/\s+/g, " "); if (it.formulas) delete (it.formulas as Record<string, string>)[f]; });
+      if (kinds && kinds[r]) it.kind = kinds[r];
+      cells.forEach((val, c) => { const f = FIELDS[startCol + c]; if (f) pasteCellVal(ri, f, val); });
     });
     recomputeAll(); onChange();
     selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
