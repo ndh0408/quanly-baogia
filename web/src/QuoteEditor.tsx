@@ -232,7 +232,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
         </div>
 
-        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]}
+        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
           usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           onChange={() => { mark(); redraw(); }} />
