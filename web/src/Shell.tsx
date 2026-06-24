@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { api, type Me } from "./api";
 import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
+import { CustomersPage } from "./Customers";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -42,7 +43,7 @@ const NAV: Nav[] = [
   { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:read:own" },
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
-  { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own" },
+  { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc" },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own" },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage" },
@@ -115,7 +116,9 @@ export function Shell({ me }: { me: Me }) {
       </aside>
       {active?.ported ? (
         <main className="content">
-          {key === "employees" ? <EmployeesPage me={me} query={query} /> : <PersonnelPage me={me} query={query} />}
+          {key === "customers" ? <CustomersPage me={me} />
+            : key === "employees" ? <EmployeesPage me={me} query={query} />
+            : <PersonnelPage me={me} query={query} />}
         </main>
       ) : (
         <div className="embed-host">

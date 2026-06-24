@@ -25,6 +25,7 @@ body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif;
 .center { display: grid; place-items: center; min-height: 60vh; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
+.toolbar .grow { flex: 1 1 220px; min-width: 180px; }
 h1 { font-size: 24px; font-weight: 700; margin: 0 0 18px; letter-spacing: -.01em; }
 h2 { font-size: 20px; margin: 0; }
 a { color: var(--primary); }
