@@ -5,6 +5,7 @@ import { EmployeesPage } from "./Employees";
 import { CustomersPage } from "./Customers";
 import { UsersPage } from "./Users";
 import { AuditPage } from "./Audit";
+import { PermissionsPage } from "./Permissions";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -45,7 +46,7 @@ const NAV: Nav[] = [
   { key: "notifications", label: "Thông báo", group: "Công việc" },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own" },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
-  { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage" },
+  { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
   { key: "profile", label: "Tài khoản", group: "Tài khoản" },
 ];
@@ -127,6 +128,7 @@ export function Shell({ me }: { me: Me }) {
             {key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} />
               : key === "audit" ? <AuditPage />
+              : key === "permissions" ? <PermissionsPage me={me} />
               : key === "employees" ? <EmployeesPage me={me} query={query} />
               : <PersonnelPage me={me} query={query} />}
           </main>

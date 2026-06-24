@@ -50,6 +50,12 @@ export type InviteResult = { user: { email: string }; inviteUrl: string; emailSe
 export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null };
 export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
+// Phân quyền (Permissions — increment 4).
+export type PermCatalog = {
+  groups: { label: string; perms: { key: string; label: string }[] }[];
+  roles: { key: string; label: string; permissions: string[] }[];
+};
+
 export type Summary = { salary: number; pit: number; taxableIncome: number };
 export type ListResult = {
   data: Personnel[];
@@ -131,4 +137,6 @@ export const api = {
     sp.set("size", String(p.size ?? 50));
     return req<AuditListResult>(`/audit?${sp}`);
   },
+  // Phân quyền (increment 4) — gate user:manage.
+  permissionsCatalog: () => req<PermCatalog>("/permissions/catalog"),
 };
