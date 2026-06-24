@@ -89,12 +89,14 @@ th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--primary); }
 tbody tr:hover { background: var(--row-hover); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.sticky-col { position: sticky; left: 0; background: var(--card); z-index: 2; box-shadow: 1px 0 0 var(--line); font-weight: 600; }
-th.sticky-col { z-index: 4; background: var(--card-2); }
-tbody tr:hover .sticky-col { background: var(--row-hover); }
+/* 2 cột ghim: STT (44px) + Họ & Tên — luôn thấy khi cuộn ngang (như freeze panes trong Excel) */
+.sticky-1 { position: sticky; left: 0; width: 44px; min-width: 44px; background: var(--card); z-index: 2; box-shadow: 1px 0 0 var(--line); text-align: center; }
+.sticky-2 { position: sticky; left: 44px; background: var(--card); z-index: 2; box-shadow: 1px 0 0 var(--line); font-weight: 600; }
+th.sticky-1, th.sticky-2 { z-index: 4; background: var(--card-2); }
+tbody tr:hover .sticky-1, tbody tr:hover .sticky-2 { background: var(--row-hover); }
 .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; }
-tfoot .sticky-col { background: var(--card-2); }
+tfoot .sticky-1, tfoot .sticky-2 { background: var(--card-2); }
 
 /* Mã màu nguồn cột (khớp chú giải Excel): 🔵 công thức · 🩷 tham chiếu Dự án. Ô tô nhẹ, header đậm hơn. */
 td.col-formula { background: rgba(74,163,255,.07); }
@@ -102,13 +104,14 @@ td.col-ref { background: rgba(232,93,154,.07); }
 th.col-formula { background: color-mix(in srgb, #4aa3ff 16%, var(--card-2)); }
 th.col-ref { background: color-mix(in srgb, #e85d9a 16%, var(--card-2)); }
 
-/* Header tô màu THEO NHÓM CỘT — gần với file Excel gốc (mỗi nhóm 1 màu). Ô dữ liệu vẫn giữ
-   tô nhẹ theo NGUỒN (🔵 công thức · 🩷 tham chiếu) để thấy ô nào tự tính/tự lấy. */
-th.grp-personal { background: color-mix(in srgb, #e85d9a 13%, var(--card-2)); }
-th.grp-salary   { background: color-mix(in srgb, #f5b301 20%, var(--card-2)); }
-th.grp-project  { background: color-mix(in srgb, #16a085 16%, var(--card-2)); }
-th.grp-contract { background: color-mix(in srgb, #e67e22 17%, var(--card-2)); }
-th.grp-payment  { background: color-mix(in srgb, #8e7cc3 17%, var(--card-2)); }
+/* Header tô màu TỪNG CỘT — khớp y file Excel gốc (hồng / vàng; cột còn lại để trắng).
+   Ô dữ liệu vẫn tô nhẹ theo NGUỒN (🔵 công thức · 🩷 tham chiếu) để thấy ô nào tự tính/tự lấy. */
+th.hdr-pink   { background: color-mix(in srgb, #ef6fa3 30%, var(--card-2)); color: var(--text); }
+th.hdr-yellow { background: color-mix(in srgb, #ffd21a 40%, var(--card-2)); color: var(--text); }
+th.hdr-stt { text-align: center; }
+/* Ô gộp "THỜI GIAN LÀM VIỆC" trùm 2 cột con + hàng tiêu đề thứ 2 (sub-label) dính ngay dưới hàng 1 */
+th.merged { text-align: center; vertical-align: middle; }
+thead tr:nth-child(2) th { top: 38px; }
 
 /* Chú giải nguồn dữ liệu */
 .src-legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }

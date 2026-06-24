@@ -54,15 +54,25 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   };
 
   const srcCls = (s?: FieldSource) => (s === "formula" ? "col-formula" : s === "ref-project" ? "col-ref" : "");
-  // Màu header THEO NHÓM (giống file Excel gốc: nhóm cột tô màu khác nhau).
-  const grpCls = (g?: string) =>
-    g === "Cá nhân" ? "grp-personal" : g === "Lương / Thuế" ? "grp-salary" : g === "Dự án" ? "grp-project"
-      : g === "Hợp đồng" ? "grp-contract" : g === "Thanh toán" ? "grp-payment" : "";
+  // Màu header TỪNG CỘT — khớp y file Excel gốc (hồng/vàng; các cột còn lại để trắng).
+  const HDR_COLOR: Record<string, "pink" | "yellow"> = {
+    taxCode: "pink", birthYear: "pink", idCard: "pink", idIssueDate: "pink", idIssuePlace: "pink",
+    address: "pink", bankAccount: "pink", bankName: "pink", phone: "pink",
+    salary: "yellow", pit: "yellow", taxableIncome: "yellow",
+    workStart: "yellow", workEnd: "yellow", workLocation: "yellow", projectName: "yellow",
+    projectCode: "yellow", teamNote: "yellow", accountName: "yellow", company: "yellow",
+    projectNameContract: "yellow",
+    laborContractNo: "pink", laborContractDate: "pink", salesContractNo: "pink",
+    salesContractDate: "pink", purchaseOrder: "pink", preTaxAmount: "pink", accountingNote: "pink",
+    payment: "yellow", confirmed: "yellow",
+  };
+  const hdrCls = (k: string) => (HDR_COLOR[k] ? `hdr-${HDR_COLOR[k]}` : "");
+  const STT_OF = (idx: number) => (meta.page - 1) * PAGE_SIZE + idx + 1;
 
   const renderCell = (k: string, r: Personnel, first: boolean) => {
     const f = FIELD_BY_KEY[k];
     const v = r[k];
-    const cls = [first ? "sticky-col" : "", f?.type === "money" ? "num" : "", srcCls(f?.source)].filter(Boolean).join(" ");
+    const cls = [first ? "sticky-2" : "", f?.type === "money" ? "num" : "", srcCls(f?.source)].filter(Boolean).join(" ");
     let content: ReactNode;
     if (f?.type === "money") content = fmtMoney(v);
     else if (f?.type === "date") content = fmtDate(v);
@@ -95,25 +105,38 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         <div className="tbl-wrap">
           <table>
             <thead>
+              {/* Hàng 1: STT + các cột (cột 15+16 gộp dưới 1 ô "THỜI GIAN LÀM VIỆC") */}
               <tr>
+                <th rowSpan={2} className="sticky-1 hdr-stt">STT</th>
                 {TABLE_COLS.map((k, i) => {
+                  if (k === "workEnd") return null;   // nằm dưới ô gộp "THỜI GIAN LÀM VIỆC" (xử lý ở workStart)
                   const f = FIELD_BY_KEY[k];
+                  const color = hdrCls(k);
+                  if (k === "workStart") {
+                    return <th key="tglv" colSpan={2} className={["merged", color].filter(Boolean).join(" ")}>THỜI GIAN LÀM VIỆC</th>;
+                  }
                   const sortable = SORTABLE.has(k);
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
-                    <th key={k} className={[i === 0 ? "sticky-col" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", grpCls(f?.group)].filter(Boolean).join(" ")}
+                    <th key={k} rowSpan={2} className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
                         onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
                   );
                 })}
-                <th>Người tạo</th>
-                <th />
+                <th rowSpan={2}>Người tạo</th>
+                <th rowSpan={2} />
+              </tr>
+              {/* Hàng 2: chỉ 2 cột con của "THỜI GIAN LÀM VIỆC" */}
+              <tr>
+                <th className={hdrCls("workStart")}>Ngày bắt đầu</th>
+                <th className={hdrCls("workEnd")}>Ngày kết thúc</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((r, idx) => (
                 <tr key={r.id}>
+                  <td className="sticky-1 num">{STT_OF(idx)}</td>
                   {TABLE_COLS.map((k, i) => renderCell(k, r, i === 0))}
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
@@ -125,7 +148,8 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
             </tbody>
             <tfoot>
               <tr className="sum-row">
-                <td className="sticky-col"><strong>Tổng (toàn bộ lọc)</strong></td>
+                <td className="sticky-1" />
+                <td className="sticky-2"><strong>Tổng (toàn bộ lọc)</strong></td>
                 {TABLE_COLS.slice(1).map((k) => (
                   <td key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>
                     {k === "salary" ? <strong>{fmtMoney(summary.salary)}</strong>
