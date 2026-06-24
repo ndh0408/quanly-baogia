@@ -66,3 +66,11 @@ e2e*.mjs
 # Frontend mới (React/Vite) — build artifact + deps (off-repo, build trong Docker)
 /public/app2/
 web/node_modules/
+
+# e2e screenshot outputs (test artifacts)
+cmp-*.png
+cust-*.png
+customers-*.png
+v-*.png
+s2-*.png
+spa-smoke.png
