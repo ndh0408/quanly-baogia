@@ -4,21 +4,42 @@ import { api, ApiError, type AuditEntry } from "./api";
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.
 // Bảo mật: gate audit:view (Shell nav + /api/audit server).
+// ĐẦY ĐỦ mọi mã action thực tế (quét từ src/ — gồm cả HR/quote-HN/gdpr/login mà util.js SPA còn thiếu).
 const ACTION_LABEL: Record<string, string> = {
-  "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.submit": "Trình duyệt báo giá",
-  "quote.approve": "Duyệt báo giá", "quote.reject": "Từ chối báo giá", "quote.send": "Gửi báo giá cho khách",
-  "quote.convert": "Chốt báo giá (thắng)", "quote.lost": "Đánh dấu không chốt", "quote.delete": "Xóa báo giá",
-  "quote.duplicate": "Nhân bản báo giá", "quote.reopened": "Mở lại để sửa",
+  // Báo giá
+  "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.delete": "Xóa báo giá",
+  "quote.convert": "Chốt báo giá (thắng)", "quote.lost": "Đánh dấu không chốt", "quote.duplicate": "Nhân bản báo giá",
+  "quote.reopened": "Mở lại để sửa", "quote.export": "Xuất Excel báo giá", "quote.export.pdf": "Xuất PDF báo giá",
+  "quote.invoice": "Cập nhật hóa đơn / thanh toán", "quote.members.update": "Cập nhật thành viên phụ trách",
+  "quote.hn.assign": "Giao phần Hà Nội", "quote.hn.submit": "Gửi duyệt phần Hà Nội", "quote.hn.review": "Duyệt / trả phần Hà Nội",
+  // Khách hàng
   "customer.create": "Thêm khách hàng", "customer.update": "Sửa khách hàng", "customer.delete": "Xóa khách hàng",
   "customer.note.add": "Thêm ghi chú khách hàng",
-  "user.create": "Thêm nhân viên", "user.update": "Cập nhật nhân viên", "user.invite": "Mời nhân viên",
-  "user.invite.resend": "Gửi lại lời mời", "user.delete": "Xóa nhân viên",
-  "login.token": "Đăng nhập (ứng dụng)", "password.change.success": "Đổi mật khẩu",
-  "password.change.failed": "Đổi mật khẩu thất bại", "mfa.enable": "Bật bảo mật 2 lớp",
-  "mfa.disable": "Tắt bảo mật 2 lớp", "token.revoke-all": "Đăng xuất mọi thiết bị",
+  // Nhân viên (tài khoản)
+  "user.create": "Thêm nhân viên", "user.update": "Cập nhật nhân viên", "user.delete": "Xóa nhân viên",
+  "user.invite": "Mời nhân viên", "user.invite.resend": "Gửi lại lời mời", "user.invite.accept": "Kích hoạt tài khoản (lời mời)",
+  "user.profile.update": "Cập nhật hồ sơ cá nhân", "user.memberships.cleared": "Xóa phân công thành viên",
+  // Nhân sự (hồ sơ) + Danh bạ
+  "personnel.create": "Thêm hồ sơ nhân sự", "personnel.update": "Sửa hồ sơ nhân sự", "personnel.delete": "Xóa hồ sơ nhân sự",
+  "employee.create": "Thêm danh bạ nhân viên", "employee.update": "Sửa danh bạ nhân viên", "employee.delete": "Xóa danh bạ nhân viên",
+  // Đăng nhập / bảo mật
+  "login.success": "Đăng nhập", "login.token": "Đăng nhập (ứng dụng)", "login.failed": "Đăng nhập thất bại",
+  "login.locked": "Tài khoản bị khóa (đăng nhập)", "login.mfa.failed": "Nhập sai mã MFA", "logout": "Đăng xuất",
+  "password.change.success": "Đổi mật khẩu", "password.change.failed": "Đổi mật khẩu thất bại",
+  "password.forgot": "Yêu cầu quên mật khẩu", "password.reset.by_admin": "Đặt lại mật khẩu (admin)",
+  "mfa.enable": "Bật bảo mật 2 lớp", "mfa.disable": "Tắt bảo mật 2 lớp", "token.revoke-all": "Đăng xuất mọi thiết bị",
+  // Tệp / tích hợp / hệ thống / GDPR
+  "file.upload": "Tải tệp lên", "file.delete": "Xóa tệp",
   "webhook.create": "Thêm tích hợp", "webhook.update": "Sửa tích hợp", "webhook.delete": "Xóa tích hợp",
+  "settings.update": "Cập nhật cấu hình", "settings.delete": "Xóa cấu hình",
+  "admin.backup": "Sao lưu dữ liệu", "admin.purge": "Dọn dữ liệu",
+  "gdpr.export": "Xuất dữ liệu cá nhân", "gdpr.export.by_admin": "Xuất dữ liệu cá nhân (admin)",
+  "gdpr.delete.self": "Tự xóa dữ liệu cá nhân", "gdpr.delete.by_admin": "Xóa dữ liệu cá nhân (admin)",
 };
-const RESOURCE_LABEL: Record<string, string> = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
+const RESOURCE_LABEL: Record<string, string> = {
+  quote: "Báo giá", customer: "Khách hàng", user: "Nhân viên", personnel: "Hồ sơ nhân sự",
+  employee: "Danh bạ nhân viên", file: "Tệp", webhook: "Webhook", setting: "Cấu hình", system: "Hệ thống", token: "Phiên đăng nhập",
+};
 const actionLabel = (a: string) => ACTION_LABEL[a] ?? a;
 const resourceLabel = (r: string) => RESOURCE_LABEL[r] ?? r;
 const fmtDateTime = (v: string) => {
