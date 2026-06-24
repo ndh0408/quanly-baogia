@@ -44,8 +44,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const noteWrapRef = useRef<HTMLDivElement>(null);
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Kebab ⋯: đóng khi bấm ngoài cụm hoặc nhấn Esc (như SPA more-menu).
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDoc = (e: MouseEvent) => { if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false); };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setMoreOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); };
+  }, [moreOpen]);
 
   // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell
   // chặn điều hướng menu (giống leaveEditorGuard SPA). Dọn cờ khi rời editor.
@@ -306,12 +317,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-success" onClick={convert}>✓ Khách chốt</button>}
           {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-danger" onClick={lost}>✗ Khách không chốt</button>}
           {!isNew && (
-            <>
-              <button className="btn" onClick={() => exportFile("xlsx")}>Tải Excel</button>
-              <button className="btn" onClick={() => exportFile("pdf")}>Tải PDF</button>
-              <button className="btn" onClick={async () => { try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); } }}>Lịch sử phiên bản</button>
-              {(me.role === "admin" || q.createdById === me.id) && <button className="btn" onClick={() => setMembersOpen(true)}>Thành viên phụ trách</button>}
-            </>
+            <div className="kebab-wrap" ref={moreRef} style={{ position: "relative" }}>
+              <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
+              {moreOpen && (
+                <div className="kebab-menu" role="menu">
+                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>Tải Excel gửi khách</button>
+                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>Tải PDF gửi khách</button>
+                  <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
+                  {(me.role === "admin" || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

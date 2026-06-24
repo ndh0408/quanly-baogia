@@ -140,10 +140,12 @@ async function main() {
     const vatPercent = o.vatPercent ?? 8;
     let subtotal = 0;
     const sheetsCreate = (o.sheets || []).map((sh, i) => {
-      const items = (sh.items || []).map((it, j) => ({
-        kind: it.kind || "item", name: it.name || `Hạng mục ${j + 1}`,
-        quantity: it.quantity ?? 1, unitPrice: it.unitPrice ?? 0, days: it.days ?? 1, order: j,
-      }));
+      const items = (sh.items || []).map((it, j) => {
+        const b = { kind: it.kind || "item", name: it.name || `Hạng mục ${j + 1}`, quantity: it.quantity ?? 1, unitPrice: it.unitPrice ?? 0, days: it.days ?? 1, order: j };
+        // DEMO công thức: item ĐẦU sheet đầu → đơn giá thành công thức =<giá>*1,1 (minh hoạ badge ƒ + xuất Excel ra công thức thật).
+        if (i === 0 && j === 0 && b.kind === "item" && b.unitPrice > 0) { b.formulas = { unitPrice: `=${b.unitPrice}*1,1` }; b.unitPrice = Math.round(b.unitPrice * 1.1); }
+        return b;
+      });
       subtotal += sumItems(items);
       return {
         templateId: sh.templateId || tpl.id, order: i, name: sh.name || null, groupSubtotal: !!sh.groupSubtotal,

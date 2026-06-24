@@ -580,6 +580,11 @@ export function GridTable(props: GridTableProps) {
         </table>
       </div>
       <div className="grid-stat hidden" ref={statRef} />
+      {fxBar && (
+        <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
+          Tổng sheet: <span style={{ color: "var(--danger)" }}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
+        </div>
+      )}
 
       {editable && (
         <div className="grid-add-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
