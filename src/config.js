@@ -103,6 +103,14 @@ if (config.NODE_ENV === "production" && !config.APP_BASE_URL) {
 if (!config.APP_BASE_URL) config.APP_BASE_URL = `http://localhost:${config.PORT}`;
 config.APP_BASE_URL = config.APP_BASE_URL.replace(/\/+$/, "");
 
+// In production, require MFA_ENC_KEY so TOTP secrets are ENCRYPTED at-rest (AES-256-GCM).
+// Without it, mfa.js falls back to PLAINTEXT — a single DB dump would expose every user's
+// 2FA secret, defeating MFA entirely. (Dev/test still allow the plaintext fallback.)
+if (config.NODE_ENV === "production" && !config.MFA_ENC_KEY) {
+  console.error("❌ MFA_ENC_KEY must be set in production (encrypts TOTP secrets at-rest; ≥ 16 chars).");
+  process.exit(1);
+}
+
 // Rate limiters share their counters via Redis. Without REDIS_URL they silently fall
 // back to a per-process in-memory store, so on a multi-instance prod deploy the
 // login/API limits are multiplied per instance and brute-force lockout weakens.

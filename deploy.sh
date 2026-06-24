@@ -30,21 +30,27 @@ esac
 SHA=$(git rev-parse --verify "$REF^{commit}")
 echo "▶ Deploy $SHA ($REF) → $TARGET  [$SSH]"
 
-echo "▶ [1/5] Backup DB + tag :rollback"
+echo "▶ [1/6] Backup DB + tag :rollback"
 ssh "$SSH" "mkdir -p ~/quanly-backups && \
   docker exec quanly-postgres pg_dump -U quanly -d quanly | gzip > ~/quanly-backups/predeploy-\$(date +%F-%H%M%S).sql.gz && \
   docker tag $IMAGE ${IMAGE%%:*}:rollback 2>/dev/null || true"
 
-echo "▶ [2/5] Ship tracked files"
+echo "▶ [2/6] Ship tracked files"
 git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
 
-echo "▶ [3/5] Build image"
+echo "▶ [3/6] Build image"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE build app"
 
-echo "▶ [4/5] Recreate app + worker"
+# Chạy migration TRƯỚC khi recreate (schema thêm cột/bảng → code mới mới dùng được). prisma nằm
+# trong dependencies nên có trong image; migrate deploy tự lấy advisory-lock (an toàn nhiều instance).
+# Nếu FAIL → set -e dừng deploy TẠI ĐÂY, app cũ vẫn chạy (không kẹt nửa-vời).
+echo "▶ [4/6] DB migrate (prisma migrate deploy)"
+ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate deploy"
+
+echo "▶ [5/6] Recreate app + worker"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
 
-echo "▶ [5/5] Verify /livez"
+echo "▶ [6/6] Verify /livez"
 ssh "$SSH" "for i in \$(seq 1 20); do s=\$(docker inspect -f '{{.State.Health.Status}}' quanly-app 2>/dev/null); [ \"\$s\" = healthy ] && break; sleep 3; done; \
   echo -n 'livez: '; docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez || echo FAILED"
 echo
