@@ -30,14 +30,15 @@ h1 { font-size: 24px; font-weight: 700; margin: 0 0 18px; letter-spacing: -.01em
 h2 { font-size: 20px; margin: 0; }
 a { color: var(--primary); }
 
-/* Buttons */
-.btn { border: 1px solid var(--line-strong); background: var(--card); color: var(--text); padding: 7px 13px; border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1.2; transition: background .12s, border-color .12s, filter .12s; }
-.btn:hover { background: var(--card-2); }
+/* Buttons — CHÉP ĐÚNG app cũ (public/style.css .btn) để nút giống y SPA */
+.btn { border: 1px solid var(--line-strong); background: var(--card); color: var(--text); padding: 9px 15px; border-radius: 7px; cursor: pointer; font-size: 14px; font-weight: 600; line-height: 1.2; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: background .14s, border-color .14s, filter .12s, transform .06s; }
+.btn:hover { background: var(--row-hover); border-color: var(--muted); }
+.btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.btn-sm { padding: 4px 9px; font-size: 13px; }
-.btn-primary { background: linear-gradient(135deg, var(--gold), var(--gold-d)); border-color: var(--gold-d); color: var(--gold-ink); font-weight: 600; }
-.btn-primary:hover { filter: brightness(1.05); }
+.btn-sm { padding: 5px 11px; font-size: 12.5px; box-shadow: none; }
+.btn-primary { background: linear-gradient(135deg, var(--gold), var(--gold-d)); border-color: transparent; color: var(--gold-ink); font-weight: 700; }
+.btn-primary:hover { filter: brightness(.96); }
 .btn-danger { background: var(--danger); border-color: transparent; color: #fff; }
 .btn-danger:hover { filter: brightness(1.07); background: var(--danger); }
 
@@ -110,6 +111,17 @@ tfoot .sticky-1, tfoot .sticky-2 { background: var(--card-2); }
 /* Mã màu nguồn cột: 🔵 công thức · 🩷 tham chiếu Dự án (ô tô nhẹ) */
 td.col-formula { background: rgba(74,163,255,.07); }
 td.col-ref { background: rgba(232,93,154,.07); }
+
+/* ===== .list-table — bảng SẠCH cho danh sách ÍT cột (Khách hàng, …): GIỐNG Y .list-table
+   của SPA cũ (chỉ kẻ ngang, bo góc, KHÔNG kẻ dọc / zebra như bảng HR nhiều cột). ===== */
+.list-wrap { overflow-x: auto; }
+.list-table { width: 100%; background: var(--card); border-collapse: separate; border-spacing: 0; border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04); border: 1px solid var(--line); white-space: normal; }
+.list-table th, .list-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); border-right: none; font-size: 14px; text-align: left; }
+.list-table th { background: var(--card-2); font-weight: 650; color: var(--soft); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+.list-table tbody tr td { background: var(--card); transition: background .12s; }   /* tắt zebra */
+.list-table tbody tr:hover td { background: var(--row-hover); }
+.list-table tbody tr:last-child td { border-bottom: none; }
+.list-table .row-actions { justify-content: flex-end; }
 
 /* Header tô màu TỪNG CỘT — khớp file Excel (hồng / vàng) nhưng DỊU cho nhã; cột còn lại để trắng.
    Ô dữ liệu vẫn tô nhẹ theo NGUỒN (🔵/🩷) để thấy ô nào tự tính/tự lấy. */

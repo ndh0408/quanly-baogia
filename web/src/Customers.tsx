@@ -70,8 +70,8 @@ export function CustomersPage({ me }: { me: Me }) {
           {!q && canManage && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm khách hàng</button></div>}
         </div>
       ) : (
-        <div className="tbl-wrap">
-          <table>
+        <div className="list-wrap">
+          <table className="list-table">
             <thead>
               <tr>
                 <th>Mã khách hàng</th>
