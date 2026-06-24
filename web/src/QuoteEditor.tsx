@@ -274,8 +274,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     if (e.key !== "Enter" || e.shiftKey) return;   // Shift+Enter = xuống dòng trong ô nhiều dòng
     const fc = focusRef.current; if (!fc || !FIELDS.includes(fc.f)) return;
     e.preventDefault();
-    if (fc.i + 1 >= activeSheet.items.length) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = _kSeq++; activeSheet.items.push(nit); redraw(); }
+    if (fc.i + 1 >= activeSheet.items.length) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = _kSeq++; activeSheet.items.push(nit); }
     focusCell(fc.i + 1, fc.f);
+    redraw();   // luôn vẽ lại để effect focus ô đích chạy (kể cả khi không tạo hàng mới)
   };
   const onGridFocus = (e: { target: EventTarget | null }) => {
     const el = e.target as HTMLElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
