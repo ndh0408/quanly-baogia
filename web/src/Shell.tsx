@@ -4,6 +4,7 @@ import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
 import { CustomersPage } from "./Customers";
 import { UsersPage } from "./Users";
+import { AuditPage } from "./Audit";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -45,7 +46,7 @@ const NAV: Nav[] = [
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own" },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage" },
-  { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view" },
+  { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
   { key: "profile", label: "Tài khoản", group: "Tài khoản" },
 ];
 
@@ -125,6 +126,7 @@ export function Shell({ me }: { me: Me }) {
           <main className="main" id="main" tabIndex={-1}>
             {key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} />
+              : key === "audit" ? <AuditPage />
               : key === "employees" ? <EmployeesPage me={me} query={query} />
               : <PersonnelPage me={me} query={query} />}
           </main>

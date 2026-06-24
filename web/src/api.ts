@@ -46,6 +46,10 @@ export type User = {
 };
 export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean };
 
+// Nhật ký hoạt động (Audit — increment 3).
+export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null };
+export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page: number; size: number; pageCount: number } };
+
 export type Summary = { salary: number; pit: number; taxableIncome: number };
 export type ListResult = {
   data: Personnel[];
@@ -116,4 +120,15 @@ export const api = {
   resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean }>(`/users/${id}/resend-invite`, { method: "POST" }),
   updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: "DELETE" }),
+  // Nhật ký hoạt động (increment 3) — gate audit:view (Shell nav + server).
+  listAudit: (p: { action?: string; resource?: string; from?: string; to?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (p.action) sp.set("action", p.action);
+    if (p.resource) sp.set("resource", p.resource);
+    if (p.from) sp.set("from", p.from);
+    if (p.to) sp.set("to", p.to);
+    sp.set("page", String(p.page ?? 1));
+    sp.set("size", String(p.size ?? 50));
+    return req<AuditListResult>(`/audit?${sp}`);
+  },
 };
