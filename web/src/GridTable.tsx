@@ -434,7 +434,18 @@ export function GridTable(props: GridTableProps) {
   const onGridBlur = (e: { target: EventTarget | null }) => {
     if (pickingRef.current) return;   // đang point-pick → giữ focus, chưa commit
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
-    if (f && tr && el) { const i = parseInt(tr.getAttribute("data-row") || "0", 10); const before = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]); commitCell(i, f, el.value); const after = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]); if (before !== after) { recomputeAll(); onChange(); } }
+    if (f && tr && el) {
+      const i = parseInt(tr.getAttribute("data-row") || "0", 10);
+      const before = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
+      commitCell(i, f, el.value);
+      const after = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
+      if (before !== after) { recomputeAll(); onChange(); }
+      // RỜI focus → vẽ ô về GIÁ TRỊ HIỂN THỊ (kết quả nếu là công thức, hoặc số gom nghìn) — vì onGridFocus
+      // đã set =… lúc focus; nếu dữ liệu không đổi sẽ không re-render nên phải tự set lại el.value ở đây.
+      const rec = items[i] as Record<string, unknown>;
+      const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? "");
+      if (el.value !== want) el.value = want;
+    }
     clearActiveRefs(); setTimeout(closeAuto, 150);
   };
 
