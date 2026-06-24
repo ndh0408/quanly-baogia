@@ -41,7 +41,8 @@ const refineLogic = (v: Record<string, unknown>, ctx: z.RefinementCtx) => {
   if (v.idIssueDate && new Date(v.idIssueDate as string) > new Date())
     ctx.addIssue({ code: "custom", path: ["idIssueDate"], message: "Ngày cấp không thể ở tương lai" });
 };
-const PersonnelCreate = z.object(personnelShape).superRefine(refineLogic);
+// Tạo mới: BẮT BUỘC chọn Dự án (Mã dự án) — UI khoá nút Lưu khi chưa chọn; server chặn cứng để khỏi lách.
+const PersonnelCreate = z.object({ ...personnelShape, projectCode: z.string().min(1, "Vui lòng chọn dự án (bắt buộc)").max(80) }).superRefine(refineLogic);
 const PersonnelUpdate = z.object(personnelShape).partial().superRefine(refineLogic);
 
 const ListQuery = z.object({

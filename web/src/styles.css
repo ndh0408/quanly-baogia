@@ -187,6 +187,16 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .emp-picker-item .muted { font-size: 12px; }
 .emp-picker-empty { padding: 8px 4px; font-size: 13px; }
 
+/* Chọn dự án (BẮT BUỘC) — thẻ "đã chọn" + trạng thái bắt buộc */
+.proj-fs-required { border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); background: var(--danger-bg); }
+.proj-fs-required legend { color: var(--danger); }
+.proj-chosen { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--ok-bg); border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line)); border-radius: 8px; }
+.proj-chosen-info { line-height: 1.5; }
+.proj-chosen-badge { display: inline-block; margin-right: 8px; padding: 1px 9px; border-radius: 999px; background: var(--ok); color: #fff; font-size: 12px; font-weight: 700; }
+.proj-chosen-info strong { color: var(--text); }
+.proj-chosen-info .muted { font-size: 12.5px; margin-top: 1px; }
+.foot-hint { margin-right: auto; color: var(--danger); font-size: 13px; align-self: center; }
+
 /* Toast */
 #toast-host { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
 .toast { padding: 11px 16px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; max-width: 360px; animation: toast-in .22s ease; }

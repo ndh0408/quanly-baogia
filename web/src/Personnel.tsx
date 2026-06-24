@@ -8,6 +8,8 @@ const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocal
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
 const toInputDate = (v: unknown) => (v ? new Date(v as string).toISOString().slice(0, 10) : "");
 const PAGE_SIZE = 50;
+// Field LẤY TỪ DỰ ÁN — KHÔNG hiện ô nhập trong form, chỉ điền qua "Chọn dự án" (bắt buộc) rồi hiện "đã chọn".
+const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
 
 export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const [rows, setRows] = useState<Personnel[]>([]);
@@ -236,6 +238,13 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
           <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
+          {/* Chọn DỰ ÁN (BẮT BUỘC) — hiện cả khi tạo/sửa/xem. Chọn xong hiện "✓ đã chọn"; KHÔNG hiện ô riêng cho Tên/Mã dự án·Account·CTY (tự điền ngầm). */}
+          <ProjectPicker
+            selected={{ projectCode: form.projectCode, projectName: form.projectName, accountName: form.accountName, company: form.company }}
+            readOnly={readOnly}
+            onPick={(p) => { setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company })); toast(`Đã chọn dự án "${p.projectCode}"`, "success"); }}
+            onClear={() => setForm((s) => ({ ...s, projectName: "", projectCode: "", accountName: "", company: "" }))}
+          />
           {!rec && !readOnly && (
             <EmployeePicker onPick={(emp) => {
               setForm((s) => {
@@ -249,18 +258,11 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
               toast(`Đã điền thông tin của "${emp.fullName}"`, "success");
             }} />
           )}
-          {!rec && !readOnly && (
-            <ProjectPicker onPick={(p) => {
-              // Điền các ô NHẬP TAY; "Tên dự án (HĐ)" + các cột HĐ tự hiện theo Mã dự án khi xem.
-              setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company }));
-              toast(`Đã lấy dự án "${p.projectCode}"`, "success");
-            }} />
-          )}
-          {GROUPS.filter((g) => INPUT_FIELDS.some((f) => f.group === g)).map((g, gi) => (
+          {GROUPS.filter((g) => INPUT_FIELDS.some((f) => f.group === g && !PROJECT_FIELDS.has(f.key))).map((g, gi) => (
             <fieldset key={g}>
               <legend>{g}</legend>
               <div className="grid">
-                {INPUT_FIELDS.filter((f) => f.group === g).map((f, idx) => {
+                {INPUT_FIELDS.filter((f) => f.group === g && !PROJECT_FIELDS.has(f.key)).map((f, idx) => {
                   const isMoney = f.type === "money" || f.type === "number";
                   const isFirst = gi === 0 && idx === 0;
                   return (
@@ -285,9 +287,10 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
+          {!readOnly && !form.projectCode && <span className="foot-hint">⚠ Cần chọn dự án trước khi lưu</span>}
           <button className="btn" onClick={onClose}>Đóng</button>
           {!readOnly && (
-            <button className="btn btn-primary" disabled={saving || !form.fullName.trim()} onClick={save}>
+            <button className="btn btn-primary" disabled={saving || !form.fullName.trim() || !form.projectCode} onClick={save}>
               {saving ? "Đang lưu…" : "Lưu"}
             </button>
           )}
@@ -332,22 +335,56 @@ function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
   );
 }
 
-// Ô tìm + chọn DỰ ÁN đã chốt (của mình) → tự điền Tên dự án · Mã dự án · Account · CTY.
-// "Tên dự án (HĐ)" + các cột HĐ (số HĐ bán, thanh toán…) tự hiện theo Mã dự án khi xem bảng.
-function ProjectPicker({ onPick }: { onPick: (p: Project) => void }) {
+// Chọn DỰ ÁN đã chốt (BẮT BUỘC). Chọn xong → hiện "✓ đã chọn"; Tên dự án (HĐ) + các cột HĐ tự hiện
+// theo Mã dự án khi xem bảng → KHÔNG cần ô riêng cho Tên/Mã dự án · Account · CTY (đỡ rối form).
+function ProjectPicker({ selected, onPick, onClear, readOnly }: {
+  selected: { projectCode: string; projectName: string; accountName: string; company: string };
+  onPick: (p: Project) => void; onClear: () => void; readOnly: boolean;
+}) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Project[]>([]);
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const has = !!selected.projectCode;
   useEffect(() => {
+    if (has) return;   // đã chọn rồi thì không cần tải danh sách
     const t = setTimeout(async () => {
       try { const res = await api.listProjects(q); setResults(res.data); setLoaded(true); } catch { /* ignore */ }
     }, q ? 250 : 0);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, has]);
+
+  // ĐÃ CHỌN → hiện thẻ xác nhận (không có ô nhập nào cho dự án).
+  if (has) {
+    return (
+      <fieldset className="emp-picker-fs proj-fs">
+        <legend>Dự án {!readOnly && <b className="req">*</b>}</legend>
+        <div className="proj-chosen">
+          <div className="proj-chosen-info">
+            <span className="proj-chosen-badge">✓ Đã chọn</span>
+            <strong>{selected.projectCode}</strong>{selected.projectName ? ` — ${selected.projectName}` : ""}
+            {(selected.accountName || selected.company) && (
+              <div className="muted">{[selected.accountName, selected.company].filter(Boolean).join(" · ")}</div>
+            )}
+          </div>
+          {!readOnly && <button type="button" className="btn btn-sm" onClick={onClear}>Đổi dự án</button>}
+        </div>
+      </fieldset>
+    );
+  }
+  // CHƯA CHỌN + xem (readOnly) → không có dự án.
+  if (readOnly) {
+    return (
+      <fieldset className="emp-picker-fs proj-fs">
+        <legend>Dự án</legend>
+        <div className="muted" style={{ padding: "4px 2px" }}>(chưa gắn dự án)</div>
+      </fieldset>
+    );
+  }
+  // CHƯA CHỌN + tạo/sửa → ô tìm (bắt buộc chọn).
   return (
-    <fieldset className="emp-picker-fs">
-      <legend>Chọn dự án đã chốt (tự điền Tên/Mã dự án · Account · CTY)</legend>
+    <fieldset className="emp-picker-fs proj-fs proj-fs-required">
+      <legend>Chọn dự án đã chốt <b className="req">* bắt buộc</b></legend>
       <div className="emp-picker">
         <input placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
                onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)} />

@@ -28,7 +28,8 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     const r = await agent.post("/api/auth/login").send({ username: user.username, password: PASSWORD });
     expect(r.status).toBe(200);
   };
-  const payload = (o = {}) => ({ fullName: `${TAG} Nhân viên`, salary: 10_000_000, projectName: "Dự án X", ...o });
+  // projectCode BẮT BUỘC khi tạo (gắn dự án đã chốt) → payload mặc định có sẵn.
+  const payload = (o = {}) => ({ fullName: `${TAG} Nhân viên`, salary: 10_000_000, projectName: "Dự án X", projectCode: "PRJ-X", ...o });
 
   beforeAll(async () => {
     const { createApp } = await import("../src/app.js");
@@ -59,6 +60,12 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
 
   it("thiếu Họ&Tên → 400 (validate)", async () => {
     const r = await mgrA.post("/api/personnel").send({ salary: 5 });
+    expect(r.status).toBe(400);
+  });
+
+  it("thiếu Dự án (projectCode) → 400 (bắt buộc chọn dự án)", async () => {
+    const { projectCode, ...noProject } = payload({ fullName: `${TAG} NoProj` });
+    const r = await mgrA.post("/api/personnel").send(noProject);
     expect(r.status).toBe(400);
   });
 
