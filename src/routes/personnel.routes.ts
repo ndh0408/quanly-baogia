@@ -6,7 +6,7 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { can, canScoped, requirePermission, PERMISSIONS as P } from "../permissions.js";
-import { buildProjectRef, computeTax, type ProjectRef } from "../services/projectRef.js";
+import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "../services/projectRef.js";
 
 // Trang "Nhân sự": hồ sơ nhân công theo dự án. Account (manager) TẠO + chỉ thấy/sửa của MÌNH
 // (owner = createdById); hr + accountant XEM tất cả (read-only); admin toàn quyền.
@@ -119,6 +119,53 @@ router.get(
     const tax = computeTax(salarySum);
     const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
     res.json({ data: decorated, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary });
+  })
+);
+
+// Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
+// Account / CTY / Tên dự án (HĐ). Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
+// người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
+// PHẢI khai báo TRƯỚC "/:id" (kẻo "projects" lọt vào route :id).
+const ProjectsQuery = z.object({ q: z.string().max(200).optional() });
+router.get(
+  "/projects",
+  requirePermission(P.PERSONNEL_CREATE),
+  validate({ query: ProjectsQuery }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { q } = req.query as any;
+    const where: Record<string, any> = { status: "converted", deletedAt: null };
+    if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;   // Account: chỉ dự án của mình
+    if (q) where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { projectCode: { contains: q, mode: "insensitive" } },
+      { quoteNumber: { contains: q, mode: "insensitive" } },
+    ];
+    const quotes = await prisma.quote.findMany({
+      where, take: 300, orderBy: { createdAt: "desc" },
+      select: {
+        quoteNumber: true, projectCode: true, projectVersion: true, title: true,
+        company: { select: { name: true } },
+        createdBy: { select: { displayName: true } },
+        sheets: { orderBy: { order: "asc" }, select: { id: true, name: true } },
+      },
+    });
+    const data: Array<Record<string, string>> = [];
+    for (const qt of quotes) {
+      const base = codeLabel(qt);
+      const sheets = qt.sheets.length ? qt.sheets : [{ id: -1, name: "" } as any];
+      const multi = sheets.length > 1;
+      sheets.forEach((sh: any, i: number) => {
+        data.push({
+          projectCode: base + (multi ? `_${i + 1}` : ""),   // = mã sản xuất (khớp tra cứu cột HĐ)
+          projectName: qt.title || "",                       // Tên dự án
+          projectNameContract: qt.title || "",               // Tên dự án (HĐ)
+          accountName: qt.createdBy?.displayName || "",       // Account (người tạo báo giá)
+          company: qt.company?.name || "",                   // CTY
+          sheetName: sh.name || "",                           // Hạng Mục (gợi ý khi nhiều sheet)
+        });
+      });
+    }
+    res.json({ data });
   })
 );
 

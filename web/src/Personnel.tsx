@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, type Me, type Personnel, type Summary, type Employee } from "./api";
+import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "./api";
 import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
 import { EMP_FIELDS } from "./Employees";
 import { toast, confirmModal } from "./ui";
@@ -249,6 +249,13 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
               toast(`Đã điền thông tin của "${emp.fullName}"`, "success");
             }} />
           )}
+          {!rec && !readOnly && (
+            <ProjectPicker onPick={(p) => {
+              // Điền các ô NHẬP TAY; "Tên dự án (HĐ)" + các cột HĐ tự hiện theo Mã dự án khi xem.
+              setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company }));
+              toast(`Đã lấy dự án "${p.projectCode}"`, "success");
+            }} />
+          )}
           {GROUPS.filter((g) => INPUT_FIELDS.some((f) => f.group === g)).map((g, gi) => (
             <fieldset key={g}>
               <legend>{g}</legend>
@@ -320,6 +327,42 @@ function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
           </div>
         )}
         {q.trim() && open && results.length === 0 && <div className="emp-picker-empty muted">Không có ai khớp — cứ nhập tay bên dưới.</div>}
+      </div>
+    </fieldset>
+  );
+}
+
+// Ô tìm + chọn DỰ ÁN đã chốt (của mình) → tự điền Tên dự án · Mã dự án · Account · CTY.
+// "Tên dự án (HĐ)" + các cột HĐ (số HĐ bán, thanh toán…) tự hiện theo Mã dự án khi xem bảng.
+function ProjectPicker({ onPick }: { onPick: (p: Project) => void }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Project[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try { const res = await api.listProjects(q); setResults(res.data); setLoaded(true); } catch { /* ignore */ }
+    }, q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <fieldset className="emp-picker-fs">
+      <legend>Chọn dự án đã chốt (tự điền Tên/Mã dự án · Account · CTY)</legend>
+      <div className="emp-picker">
+        <input placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
+               onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)} />
+        {open && results.length > 0 && (
+          <div className="emp-picker-list">
+            {results.map((p, i) => (
+              <button type="button" key={p.projectCode + "#" + i} className="emp-picker-item"
+                      onClick={() => { onPick(p); setQ(""); setOpen(false); }}>
+                <strong>{p.projectCode} — {p.projectName || "(không tên)"}</strong>
+                <span className="muted">{[p.sheetName, p.company, p.accountName].filter(Boolean).join(" · ")}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {open && loaded && results.length === 0 && <div className="emp-picker-empty muted">Chưa có dự án đã chốt nào của bạn khớp.</div>}
       </div>
     </fieldset>
   );

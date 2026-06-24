@@ -28,6 +28,12 @@ export type EmployeeListResult = {
   meta: { total: number; page: number; size: number; pageCount: number };
 };
 
+// Dự án ĐÃ CHỐT để chọn khi tạo hồ sơ Nhân sự (tự điền Tên dự án / Mã dự án / Account / CTY).
+export type Project = {
+  projectCode: string; projectName: string; projectNameContract: string;
+  accountName: string; company: string; sheetName: string;
+};
+
 export type Summary = { salary: number; pit: number; taxableIncome: number };
 export type ListResult = {
   data: Personnel[];
@@ -78,4 +84,6 @@ export const api = {
   createEmployee: (data: Record<string, unknown>) => req<Employee>("/employees", { method: "POST", body: JSON.stringify(data) }),
   updateEmployee: (id: number, data: Record<string, unknown>) => req<Employee>(`/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteEmployee: (id: number) => req<{ ok: boolean }>(`/employees/${id}`, { method: "DELETE" }),
+  // Dự án đã chốt (của mình) — để chọn khi tạo hồ sơ Nhân sự
+  listProjects: (q = "") => req<{ data: Project[] }>(`/personnel/projects?${new URLSearchParams({ q })}`),
 };
