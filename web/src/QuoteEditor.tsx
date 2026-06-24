@@ -316,7 +316,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         </div>
       </div>
 
-      {versions && <VersionsModal versions={versions} onClose={() => setVersions(null)} />}
+      {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
       {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
     </div>
   );
@@ -355,7 +355,15 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   );
 }
 
-function VersionsModal({ versions, onClose }: { versions: QuoteVersion[]; onClose: () => void }) {
+const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Giảm giá", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng" };
+const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
+function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
+  const sorted = [...versions].sort((a, b) => a.versionNo - b.versionNo);
+  const [a, setA] = useState(sorted[0]?.versionNo ?? 0);
+  const [b, setB] = useState(sorted[sorted.length - 1]?.versionNo ?? 0);
+  const [changes, setChanges] = useState<{ key: string; before: unknown; after: unknown }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const doDiff = async () => { setBusy(true); try { const r = await api.versionDiff(quoteId, a, b); setChanges(r.changes); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); } finally { setBusy(false); } };
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Lịch sử phiên bản">
@@ -363,7 +371,22 @@ function VersionsModal({ versions, onClose }: { versions: QuoteVersion[]; onClos
         <div className="modal-body">
           {versions.length === 0 ? <p className="muted">Chưa có phiên bản nào.</p> : (
             <table className="list-table"><thead><tr><th>Phiên bản</th><th>Thời gian</th><th style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
-              <tbody>{versions.map((v) => <tr key={v.id}><td>#{v.versionNo}</td><td>{M.fmtDate(v.createdAt)}</td><td style={{ textAlign: "right" }}>{M.fmtMoney(v.total)}</td></tr>)}</tbody></table>
+              <tbody>{sorted.map((v) => <tr key={v.id}><td>#{v.versionNo}</td><td>{M.fmtDate(v.createdAt)}</td><td style={{ textAlign: "right" }}>{M.fmtMoney(v.total)}</td></tr>)}</tbody></table>
+          )}
+          {versions.length >= 2 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <strong>So sánh:</strong>
+                <select value={a} onChange={(e) => setA(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
+                <span>→</span>
+                <select value={b} onChange={(e) => setB(Number(e.target.value))}>{sorted.map((v) => <option key={v.versionNo} value={v.versionNo}>#{v.versionNo}</option>)}</select>
+                <button className="btn btn-sm btn-primary" onClick={doDiff} disabled={busy || a === b}>{busy ? "Đang xem…" : "Xem khác biệt"}</button>
+              </div>
+              {changes && (changes.length === 0 ? <p className="muted" style={{ marginTop: 8 }}>Hai phiên bản giống nhau.</p> : (
+                <table className="list-table" style={{ marginTop: 8 }}><thead><tr><th>Trường</th><th>#{a}</th><th>#{b}</th></tr></thead>
+                  <tbody>{changes.map((c) => <tr key={c.key}><td>{FIELD_VN[c.key] || c.key}</td><td style={{ color: "var(--danger)" }}>{diffVal(c.before)}</td><td style={{ color: "#0a7d28" }}>{diffVal(c.after)}</td></tr>)}</tbody></table>
+              ))}
+            </div>
           )}
         </div>
         <div className="modal-foot"><button className="btn btn-primary" onClick={onClose}>Đóng</button></div>

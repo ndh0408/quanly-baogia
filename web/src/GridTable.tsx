@@ -308,15 +308,25 @@ export function GridTable(props: GridTableProps) {
     const rows = parseClipboardTSV(sameBlock ? copyBufRef.current!.tsv : text);
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
 
-    // 1 giá trị đơn lẻ → fill ra TOÀN vùng đang chọn; nếu 1 ô thì để trình duyệt chèn tại con trỏ.
+    // 1 giá trị đơn lẻ.
     if (!isGrid) {
+      const val = rows[0][0];
       const rc = rectOf(sel);
-      if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {
+      if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
-        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) pasteCellVal(r, FIELDS[c], rows[0][0]);
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) pasteCellVal(r, FIELDS[c], val);
         recomputeAll(); onChange(); paintSel();
+        return;
       }
-      return;
+      // 1 ô SỐ → parseLooseNumber (US/VN an toàn), KHÔNG để trình duyệt+onNumInput đọc sai (1,000,000→1.0).
+      if (f0 && NUMERIC.has(f0)) {
+        e.preventDefault(); pushUndo();
+        const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
+        pasteCellVal(i0, f0, val); recomputeAll(); onChange();
+        const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = M.fmtNumCell((items[i0] as Record<string, unknown>)[f0] as number);
+        return;
+      }
+      return;   // 1 ô CHỮ → để trình duyệt chèn tại con trỏ (dán vào giữa đoạn text)
     }
     e.preventDefault(); pushUndo();
 

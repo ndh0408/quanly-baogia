@@ -235,6 +235,7 @@ export const api = {
   markConverted: (id: number) => req<QuoteFull>(`/quotes/${id}/mark-converted`, { method: "POST" }),
   markLost: (id: number, reason: string) => req<QuoteFull>(`/quotes/${id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) }),
   quoteVersions: (id: number) => req<{ data: QuoteVersion[] }>(`/quotes/${id}/versions`),
+  versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),
   assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),
   setMembers: (id: number, memberIds: number[]) => req<unknown>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) }),
   // Luồng HN (giao/duyệt phần Hà Nội cho Account HN) — increment 10 stage 5.

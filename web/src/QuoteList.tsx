@@ -103,7 +103,7 @@ export function QuoteListPage({ me }: { me: Me }) {
         <div className="empty">{q || status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}</div>
       ) : (
         <div className="list-wrap">
-          <table className="list-table">
+          <table className="list-table cards-sm">
             <thead>
               <tr>
                 <SortTh f="quoteNumber" label="Mã dự án" />
@@ -122,17 +122,17 @@ export function QuoteListPage({ me }: { me: Me }) {
               {rows.map((r) => (
                 <tr key={r.id} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
-                  <td><strong>{codeLabel(r)}</strong></td>
-                  {isAdmin && <td>{r.createdBy?.displayName || ""}</td>}{isAccountHn && <td>{r.createdBy?.displayName || "—"}</td>}
-                  <td title={r.title}>{shortTitle(r.title)}</td>
-                  <td>{fmtDate(r.quoteDate)}</td>
-                  <td style={{ textAlign: "center" }}>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
-                  {!isAccountHn && <td style={{ textAlign: "right" }}>{fmtMoney(r.total)}</td>}
-                  <td>{r.company?.shortName || r.company?.name || ""}</td>
-                  {isAccountHn ? <td style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : <><td>{r.toCompany}</td><td>{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
-                  <td>{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
+                  <td data-label="Mã dự án"><strong>{codeLabel(r)}</strong></td>
+                  {isAdmin && <td data-label="Người tạo">{r.createdBy?.displayName || ""}</td>}{isAccountHn && <td data-label="Người giao">{r.createdBy?.displayName || "—"}</td>}
+                  <td data-label="Tiêu đề" title={r.title}>{shortTitle(r.title)}</td>
+                  <td data-label="Ngày">{fmtDate(r.quoteDate)}</td>
+                  <td data-label="Sheet" style={{ textAlign: "center" }}>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
+                  {!isAccountHn && <td data-label="Tổng (VNĐ)" style={{ textAlign: "right" }}>{fmtMoney(r.total)}</td>}
+                  <td data-label="Công ty">{r.company?.shortName || r.company?.name || ""}</td>
+                  {isAccountHn ? <td data-label="Tổng HN" style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : <><td data-label="Khách">{r.toCompany}</td><td data-label="Mã KH">{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
+                  <td data-label="Trạng thái">{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
                   {!isAccountHn && (
-                    <td className="row-actions" style={{ whiteSpace: "nowrap" }}>
+                    <td className="row-actions" data-label="Thao tác" style={{ whiteSpace: "nowrap" }}>
                       <button className="btn btn-sm" title="Tải file Excel" onClick={(e) => act("excel", r, e)}>📥 Excel</button>
                       <button className="btn btn-sm" title="Nhân bản thành báo giá mới" onClick={(e) => act("dup", r, e)}>📋 Nhân bản</button>
                       <button className="btn btn-sm" title="Tạo bản mới CÙNG mã dự án (v2, v3…)" onClick={(e) => act("revise", r, e)}>➕ Bản mới</button>
