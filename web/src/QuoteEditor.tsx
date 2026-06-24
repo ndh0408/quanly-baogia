@@ -45,6 +45,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const mark = useCallback(() => { dirtyRef.current = true; }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  // Stage 3: undo/redo (snapshot items) + ô đang focus + ô cần focus sau redraw.
+  const undoRef = useRef<string[]>([]);
+  const redoRef = useRef<string[]>([]);
+  const focusRef = useRef<{ i: number; f: string } | null>(null);
+  const focusPend = useRef<{ i: number; f: string } | null>(null);
+  const kbdRef = useRef<(e: KeyboardEvent) => void>(() => {});
+
+  // Ctrl+Z/Y toàn editor (gọi handler mới nhất qua ref) + focus ô sau redraw (paste/nav/undo).
+  useEffect(() => { const h = (e: KeyboardEvent) => kbdRef.current(e); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, []);
+  useEffect(() => {
+    if (!focusPend.current) return;
+    const { i, f } = focusPend.current; focusPend.current = null;
+    const el = document.querySelector(`.excel-table tr[data-row="${i}"] [data-f="${f}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
+    if (el) { el.focus(); try { const n = el.value.length; el.setSelectionRange(n, n); } catch { /* ignore */ } }
+  });
 
   const templates = _templates || [];
   const companies = _companies || [];
@@ -115,6 +130,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const setQ = (k: string, v: unknown) => { (q as Record<string, unknown>)[k] = v; mark(); };
   const setItem = (i: number, f: string, v: unknown) => { (activeSheet.items[i] as Record<string, unknown>)[f] = v; mark(); };
 
+  // ── undo/redo (snapshot items) + focus điều hướng (Stage 3) ──────────────────
+  const FIELDS = (["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", "internalNote"].filter(Boolean)) as string[];
+  const snap = () => JSON.stringify(activeSheet.items);
+  const pushUndo = () => { undoRef.current.push(snap()); if (undoRef.current.length > 100) undoRef.current.shift(); redoRef.current.length = 0; };
+  const focusCell = (i: number, f: string) => { focusPend.current = { i, f }; };
+
   // ── sheet ops ──────────────────────────────────────────────────────────────
   const switchSheet = (i: number) => { q._activeSheet = i; redraw(); };
   const addSheet = () => {
@@ -130,14 +151,14 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     mark(); redraw();
   };
 
-  // ── row ops ────────────────────────────────────────────────────────────────
-  const pushItem = (it: ItemK) => { it._k = _kSeq++; activeSheet.items.push(it); mark(); redraw(); };
+  // ── row ops (đều pushUndo để Ctrl+Z hoàn tác) ────────────────────────────────
+  const pushItem = (it: ItemK) => { pushUndo(); it._k = _kSeq++; activeSheet.items.push(it); mark(); redraw(); focusCell(activeSheet.items.length - 1, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const addSubAfter = (i: number) => { const it = M.blankSub(usesDays) as ItemK; it._k = _kSeq++; activeSheet.items.splice(i + 1, 0, it); mark(); redraw(); };
-  const removeRow = (i: number) => { activeSheet.items.splice(i, 1); mark(); redraw(); };
+  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = _kSeq++; activeSheet.items.splice(i + 1, 0, it); mark(); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+  const removeRow = (i: number) => { pushUndo(); activeSheet.items.splice(i, 1); mark(); redraw(); };
 
   // ── save ───────────────────────────────────────────────────────────────────
   const save = async () => {
@@ -214,6 +235,52 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     }
   };
   const peekFx = (fx: string, val: string) => toast(`Công thức: ${fx}  =  ${val}`, "info");
+
+  // ── undo/redo + dán Excel + Enter-nav (Stage 3) ──────────────────────────────
+  const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = _kSeq++; }); activeSheet.items = arr; mark(); recomputeAll(); redraw(); };
+  const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
+  const doRedo = () => { if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
+  kbdRef.current = (e: KeyboardEvent) => {
+    if (!editable) return;
+    const z = e.key.toLowerCase() === "z", y = e.key.toLowerCase() === "y";
+    if ((e.ctrlKey || e.metaKey) && z && !e.shiftKey) { e.preventDefault(); doUndo(); }
+    else if ((e.ctrlKey || e.metaKey) && (y || (z && e.shiftKey))) { e.preventDefault(); doRedo(); }
+  };
+  const parseTSV = (text: string) => text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").map((ln) => ln.split("\t"));
+  const onPaste = (e: { clipboardData: DataTransfer; target: EventTarget | null; preventDefault(): void }) => {
+    if (!editable) return;
+    const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f"); if (!f0 || !FIELDS.includes(f0)) return;
+    const text = e.clipboardData.getData("text/plain"); if (!text) return;
+    const rows = parseTSV(text);
+    if (rows.length <= 1 && (!rows[0] || rows[0].length <= 1)) return;   // 1 ô đơn → để trình duyệt dán
+    e.preventDefault(); pushUndo();
+    const i0 = focusRef.current?.i ?? 0;
+    const c0 = Math.max(0, FIELDS.indexOf(f0));
+    rows.forEach((cells, r) => {
+      const ri = i0 + r;
+      if (ri >= activeSheet.items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = _kSeq++; activeSheet.items.push(nit); }
+      const it = activeSheet.items[ri] as Record<string, unknown>;
+      cells.forEach((val, c) => {
+        const f = FIELDS[c0 + c]; if (!f) return;
+        if (NUMERIC.has(f)) it[f] = val.trim() === "" ? 0 : M.parseVN(val);
+        else it[f] = (f === "name" || f === "detail" || f === "notes" || f === "internalNote") ? val : val.trim().replace(/\s+/g, " ");
+        if (it.formulas) delete (it.formulas as Record<string, string>)[f];
+      });
+    });
+    recomputeAll(); mark(); redraw(); focusCell(i0, f0);
+    toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
+  };
+  const onGridKeyDown = (e: { key: string; shiftKey: boolean; target: EventTarget | null; preventDefault(): void }) => {
+    if (e.key !== "Enter" || e.shiftKey) return;   // Shift+Enter = xuống dòng trong ô nhiều dòng
+    const fc = focusRef.current; if (!fc || !FIELDS.includes(fc.f)) return;
+    e.preventDefault();
+    if (fc.i + 1 >= activeSheet.items.length) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = _kSeq++; activeSheet.items.push(nit); redraw(); }
+    focusCell(fc.i + 1, fc.f);
+  };
+  const onGridFocus = (e: { target: EventTarget | null }) => {
+    const el = e.target as HTMLElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
+    if (f && tr) focusRef.current = { i: parseInt(tr.getAttribute("data-row") || "0", 10), f };
+  };
 
   // Ô SỐ: hỗ trợ công thức (=…) + gom nghìn LIVE (giữ con trỏ theo số chữ số) + ƒ badge xem công thức.
   const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
@@ -333,7 +400,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         </div>
 
         <div className="tbl-scroll">
-          <table className="excel-table">
+          <table className="excel-table" onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus}>
             <thead>
               <tr>
                 <th scope="col" style={{ width: 50 }}>STT</th>
@@ -359,7 +426,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                   sttNo = 0;
                   const subAmt = sectionSum[i] || 0;
                   return (
-                    <tr key={it._k ?? i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
+                    <tr key={it._k ?? i} data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                       <td className="col-stt"><input data-f="label" defaultValue={it.label || ""} placeholder={letter} disabled={!editable} style={{ width: 34, textAlign: "center" }} onInput={(e) => setItem(i, "label", (e.target as HTMLInputElement).value)} /></td>
                       <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { setItem(i, "name", (e.target as HTMLTextAreaElement).value); autoGrow(e.target as HTMLTextAreaElement); }} /></td>
                       {showDetail && <td className="col-detail" />}
@@ -376,18 +443,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                 }
                 if (rk[i] === "info") {
                   return (
-                    <tr key={it._k ?? i} className="info-row">
+                    <tr key={it._k ?? i} data-row={i} className="info-row">
                       <td className="col-stt" />
                       <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} onInput={(e) => { setItem(i, "name", (e.target as HTMLTextAreaElement).value); autoGrow(e.target as HTMLTextAreaElement); }} /></td>
                       {editable && <td className="col-action"><button className="rm-row" title="Xóa" onClick={() => removeRow(i)}>✕</button></td>}
                     </tr>
                   );
                 }
-                if (rk[i] === "sub") return <tr key={it._k ?? i} className="sub-row">{dataCells(i)}</tr>;
+                if (rk[i] === "sub") return <tr key={it._k ?? i} data-row={i} className="sub-row">{dataCells(i)}</tr>;
                 sttNo++;
                 const span = M.rowspanOf(rk, i);
                 return (
-                  <tr key={it._k ?? i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
+                  <tr key={it._k ?? i} data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                     <td className="col-stt" rowSpan={span}>{numberSubs ? "" : sttNo}</td>
                     <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { setItem(i, "name", (e.target as HTMLTextAreaElement).value); autoGrow(e.target as HTMLTextAreaElement); }} /></td>
                     {dataCells(i)}
