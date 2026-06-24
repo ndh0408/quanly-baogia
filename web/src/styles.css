@@ -148,6 +148,12 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .toast-info { background: #334155; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
+/* Ô form Đổi mật khẩu (trang Tài khoản) — label block + input full-width */
+.pf-field { display: block; margin-bottom: 14px; }
+.pf-field span { display: block; font-size: 13px; color: var(--soft); margin-bottom: 6px; font-weight: 500; }
+.pf-field input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--field-bg); color: var(--text); }
+.pf-field input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+
 /* Lỗi validation INLINE dưới từng ô (map từ details server) */
 .field-err { color: #c0392b; font-size: 12px; margin-top: 4px; }
 input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392b !important; }

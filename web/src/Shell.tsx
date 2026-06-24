@@ -6,6 +6,7 @@ import { CustomersPage } from "./Customers";
 import { UsersPage } from "./Users";
 import { AuditPage } from "./Audit";
 import { PermissionsPage } from "./Permissions";
+import { ProfilePage } from "./Profile";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -48,12 +49,12 @@ const NAV: Nav[] = [
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
-  { key: "profile", label: "Tài khoản", group: "Tài khoản" },
+  { key: "profile", label: "Tài khoản", group: "Tài khoản", ported: true },
 ];
 
 const currentKey = () => location.hash.replace(/^#\/?/, "") || "personnel";
 
-export function Shell({ me }: { me: Me }) {
+export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(themeIcon());
@@ -129,6 +130,7 @@ export function Shell({ me }: { me: Me }) {
               : key === "users" ? <UsersPage me={me} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />
+              : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
               : key === "employees" ? <EmployeesPage me={me} query={query} />
               : <PersonnelPage me={me} query={query} />}
           </main>

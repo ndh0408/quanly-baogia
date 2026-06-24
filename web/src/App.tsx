@@ -35,7 +35,7 @@ export function App() {
 
   if (loading) return <div className="center muted">Đang tải…</div>;
   if (!me) return <Login onLogin={setMe} />;
-  return <ErrorBoundary><Shell me={me} /></ErrorBoundary>;
+  return <ErrorBoundary><Shell me={me} onMe={setMe} /></ErrorBoundary>;
 }
 
 // Login — DÙNG class SPA (.login-wrap/.login-card/#login-form/.btn-login) → giống Y màn đăng nhập app cũ.

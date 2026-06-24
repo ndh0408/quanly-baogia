@@ -5,6 +5,12 @@ export type Me = {
   displayName: string;
   role: string;
   permissions: string[];
+  email?: string;
+  phone?: string | null;
+  title?: string | null;
+  senderName?: string | null;
+  mfaEnabled?: boolean;
+  canSign?: boolean;
 };
 
 export type Personnel = {
@@ -139,4 +145,14 @@ export const api = {
   },
   // Phân quyền (increment 4) — gate user:manage.
   permissionsCatalog: () => req<PermCatalog>("/permissions/catalog"),
+  // Tài khoản (Profile — increment 5).
+  updateProfile: (data: { displayName: string; senderName: string; phone: string; title: string }) =>
+    req<Me>("/auth/profile", { method: "POST", body: JSON.stringify(data) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    req<unknown>("/auth/change-password", { method: "POST", body: JSON.stringify({ oldPassword, newPassword }) }),
+  mfaSetup: () => req<{ qr: string; secret: string }>("/mfa/setup", { method: "POST" }),
+  mfaEnable: (data: { secret: string; token: string; password: string }) =>
+    req<{ backupCodes: string[] }>("/mfa/enable", { method: "POST", body: JSON.stringify(data) }),
+  mfaDisable: (data: { password: string; token: string }) =>
+    req<unknown>("/mfa/disable", { method: "POST", body: JSON.stringify(data) }),
 };
