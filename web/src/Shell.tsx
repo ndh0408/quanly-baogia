@@ -8,6 +8,7 @@ import { AuditPage } from "./Audit";
 import { PermissionsPage } from "./Permissions";
 import { ProfilePage } from "./Profile";
 import { NotificationsPage } from "./Notifications";
+import { DashboardPage } from "./Dashboard";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -41,7 +42,7 @@ type Nav = { key: string; label: string; group: string; perm?: string; ported?: 
 const NAV: Nav[] = [
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
-  { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:read:own" },
+  { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:read:own", ported: true },
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
@@ -132,7 +133,8 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         </aside>
         {active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
-            {key === "customers" ? <CustomersPage me={me} />
+            {key === "dashboard" ? <DashboardPage />
+              : key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />

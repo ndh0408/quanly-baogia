@@ -158,6 +158,10 @@ export const api = {
     req<{ backupCodes: string[] }>("/mfa/enable", { method: "POST", body: JSON.stringify(data) }),
   mfaDisable: (data: { password: string; token: string }) =>
     req<unknown>("/mfa/disable", { method: "POST", body: JSON.stringify(data) }),
+  // Tổng quan / Analytics (increment 7).
+  analyticsOverview: () => req<{ kpi: { totalQuotes: number; approvedAmount: number; avgDealSize: number; conversionRate: number } }>("/analytics/overview"),
+  analyticsFunnel: () => req<{ data: { status: string; count: number }[] }>("/analytics/funnel"),
+  analyticsTopSales: () => req<{ data: { user?: { displayName?: string } | null; count: number; amount: number }[] }>("/analytics/top-sales?limit=10"),
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
