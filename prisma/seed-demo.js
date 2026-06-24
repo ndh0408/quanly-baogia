@@ -36,6 +36,7 @@ async function main() {
   // Thứ tự theo FK: quote (createdById/customerId/members) → customer (ownerId → user) → user.
   await prisma.quote.deleteMany({ where: { title: { startsWith: TAG } } });
   await prisma.personnelRecord.deleteMany({ where: { fullName: { startsWith: TAG } } });
+  await prisma.employee.deleteMany({ where: { createdBy: { username: { startsWith: "demo_" } } } }); // trước khi xóa user (FK)
   await prisma.customer.deleteMany({ where: { code: { startsWith: "DEMOKH" } } });
   await prisma.user.deleteMany({ where: { username: { startsWith: "demo_" } } });
   console.log("✓ Đã dọn dữ liệu demo cũ");
@@ -52,14 +53,37 @@ async function main() {
   const acctUser = await mkUser("demo_acct", "Kế toán Hồng", "accountant");
   console.log("✓ 6 user demo (mật khẩu:", PWD, ") — gồm demo_hr (Nhân sự) + demo_acct (Kế toán)");
 
-  // ---------- Hồ sơ NHÂN SỰ (trang Nhân sự) — accA + accB tạo (owner-scoped để demo RBAC) ----------
-  // 🟡 Chỉ seed field NHẬP TAY. 🔵 Thuế TNCN + Thu nhập chịu thuế server TỰ TÍNH (Lương/9, ×10/9).
-  // 🩷 Tên dự án (HĐ)/Số-Ngày HĐ bán/Đơn đặt hàng/Tiền trước thuế/Thanh toán → server TỰ LẤY từ Dự án
-  //    theo projectCode = "mã sản xuất" của báo giá ĐÃ CHỐT. Vì vậy code dưới trỏ vào DEMO*_NNN có thật.
-  const hrRec = (creator, o) => prisma.personnelRecord.create({ data: {
-    createdById: creator.id, fullName: `${TAG} ${o.name}`,
-    taxCode: o.taxCode || null, birthYear: o.birthYear || null, idCard: o.idCard || null,
-    address: o.address || null, bankAccount: o.stk || null, bankName: o.bank || "ACB", phone: o.phone || null,
+  // ---------- DANH BẠ NHÂN VIÊN (kho cá nhân dùng chung) + HỒ SƠ NHÂN SỰ ----------
+  // 7 người (đủ MST/căn cước/STK…) vào Danh bạ để CHỌN khi tạo hồ sơ. 5 người được lập hồ sơ;
+  // MỖI hồ sơ trỏ DỰ ÁN ĐÃ CHỐT CỦA CHÍNH ACCOUNT đó (đúng luật "account chỉ dự án của mình")
+  // → Account + cột HĐ/thanh toán (🩷) tự khớp. 2 người còn lại để demo "chọn người mới".
+  const P = {
+    thuong: { name: "Trần Thị Thương", taxCode: "8064192001670", birthYear: "1992", idCard: "064192001670", idDate: "2021-03-15", idPlace: "Cục CSQLHC về TTXH", address: "180/33 Nguyễn Hữu Cảnh, P.Thạnh Mỹ Tây, TPHCM", stk: "216110189", bank: "ACB", phone: "0972629827" },
+    binh:   { name: "Nguyễn Văn Bình", taxCode: "8071234509", birthYear: "1990", idCard: "079090001234", idDate: "2019-06-20", idPlace: "Cục CSQLHC về TTXH", address: "45 Lê Văn Việt, TP. Thủ Đức, TPHCM", stk: "190234567", bank: "Techcombank", phone: "0905123456" },
+    cuc:    { name: "Lê Thị Cúc", taxCode: "8085551122", birthYear: "1995", idCard: "079195005678", idDate: "2020-09-10", idPlace: "Cục CSQLHC về TTXH", address: "12 Phan Xích Long, Q.Phú Nhuận, TPHCM", stk: "060078945", bank: "Sacombank", phone: "0938777888" },
+    dung:   { name: "Phạm Văn Dũng", taxCode: "8093334455", birthYear: "1988", idCard: "079088009012", idDate: "2018-02-05", idPlace: "Cục CSQLHC về TTXH", address: "78 Cách Mạng Tháng 8, Q.3, TPHCM", stk: "071190345", bank: "Vietcombank", phone: "0912345678" },
+    em:     { name: "Võ Thị Em", taxCode: "8076667788", birthYear: "1997", idCard: "079197003456", idDate: "2022-01-12", idPlace: "Cục CSQLHC về TTXH", address: "234 Nguyễn Trãi, Q.5, TPHCM", stk: "020045678", bank: "ACB", phone: "0977888999" },
+    phuc:   { name: "Hoàng Minh Phúc", taxCode: "8081119900", birthYear: "1993", idCard: "079093007788", idDate: "2021-11-03", idPlace: "Cục CSQLHC về TTXH", address: "56 Võ Văn Tần, Q.3, TPHCM", stk: "088112233", bank: "BIDV", phone: "0909001122" },
+    ha:     { name: "Đặng Thị Hồng Hà", taxCode: "8082228811", birthYear: "1996", idCard: "079196004455", idDate: "2020-05-18", idPlace: "Cục CSQLHC về TTXH", address: "9 Hai Bà Trưng, Q.1, TPHCM", stk: "033445566", bank: "MB Bank", phone: "0988112233" },
+  };
+  const mkEmp = (creator, p) => prisma.employee.create({ data: {
+    createdById: creator.id, fullName: p.name, taxCode: p.taxCode, birthYear: p.birthYear,
+    idCard: p.idCard, idIssueDate: p.idDate ? new Date(p.idDate) : null, idIssuePlace: p.idPlace,
+    address: p.address, bankAccount: p.stk, bankName: p.bank, phone: p.phone,
+  } });
+  await Promise.all([
+    mkEmp(accSign, P.thuong), mkEmp(accSign, P.binh), mkEmp(accB, P.cuc),
+    mkEmp(accA, P.dung), mkEmp(accA, P.em), mkEmp(accA, P.phuc), mkEmp(accB, P.ha),
+  ]);
+  console.log("✓ 7 nhân viên trong Danh bạ (đủ MST/căn cước/STK… để chọn khi tạo hồ sơ)");
+
+  // 🟡 field nhập tay. 🔵 Thuế TNCN/Thu nhập chịu thuế server tự tính. 🩷 cột HĐ/thanh toán tự LẤY
+  // từ Dự án theo projectCode = "mã sản xuất" báo giá ĐÃ CHỐT. accountName = account tạo (= chủ dự án).
+  const hrRec = (creator, p, o) => prisma.personnelRecord.create({ data: {
+    createdById: creator.id, fullName: `${TAG} ${p.name}`,
+    taxCode: p.taxCode, birthYear: p.birthYear, idCard: p.idCard,
+    idIssueDate: p.idDate ? new Date(p.idDate) : null, idIssuePlace: p.idPlace,
+    address: p.address, bankAccount: p.stk, bankName: p.bank, phone: p.phone,
     salary: o.salary ?? null,
     workStart: o.start ? new Date(o.start) : null, workEnd: o.end ? new Date(o.end) : null,
     workLocation: o.loc || "HCM", projectName: o.project || null, projectCode: o.code || null,
@@ -67,21 +91,19 @@ async function main() {
     laborContractNo: o.hdld || null, laborContractDate: o.hdldDate ? new Date(o.hdldDate) : null,
     accountingNote: o.acctNote || null, confirmed: o.confirmed || null, note: o.note || null,
   } });
-  // code = mã sản xuất báo giá đã chốt (seq #4–#8 bên dưới) → cột HĐ/thanh toán tự kéo về, đủ các trạng thái.
-  await hrRec(accA, { name: "Trần Thị Thương", taxCode: "8064192001670", birthYear: "1992", idCard: "064192001670",
-    address: "180/33 Nguyễn Hữu Cảnh, P.Thạnh Mỹ Tây, TPHCM", stk: "216110189", bank: "ACB", phone: "0972629827",
-    salary: 10_000_000, start: "2025-10-13", end: "2025-10-24",
+  // creator = CHỦ DỰ ÁN của code (DEMOL26→accSign, DEMOB26→accB, DEMOA26→accA); đủ các trạng thái HĐ.
+  await hrRec(accSign, P.thuong, { salary: 10_000_000, start: "2025-10-13", end: "2025-10-24",
     project: "Lễ kỷ niệm 20 năm", code: "DEMOL26_008", team: "CP team phim (trả lại Hà)",
-    hdld: "HDLD-2026-01", hdldDate: "2025-10-01", confirmed: "đã ký" });   // có PO + đã thanh toán
-  await hrRec(accA, { name: "Nguyễn Văn Bình", birthYear: "1990", salary: 12_000_000,
-    start: "2025-11-11", end: "2025-11-20", project: "Triển lãm Ô tô", code: "DEMOL26_007", confirmed: "OK" }); // có PO + HĐ, chưa TT
-  await hrRec(accA, { name: "Lê Thị Cúc", salary: 18_000_000,
-    start: "2025-10-31", end: "2025-11-06", project: "Year End Party", code: "DEMOB26_005" });   // có số HĐ, chưa TT
-  await hrRec(accB, { name: "Phạm Văn Dũng", salary: 15_000_000,
-    project: "Khai trương CN", code: "DEMOA26_006", hdld: "HDLD-2026-07", acctNote: "Đã đối chiếu", confirmed: "đã ký" }); // Done (đã TT)
-  await hrRec(accB, { name: "Võ Thị Em", salary: 9_000_000,
-    project: "Gala Vinamilk", code: "DEMOA26_004", note: "Chờ chứng từ" });   // đã chốt, chưa có HĐ/PO
-  console.log("✓ 5 hồ sơ nhân sự demo (code trỏ báo giá đã chốt → cột HĐ/thanh toán tự kéo về)");
+    hdld: "HDLD-2026-01", hdldDate: "2025-10-01", confirmed: "đã ký" });   // PO + đã TT + chứng từ đủ
+  await hrRec(accSign, P.binh, { salary: 12_000_000, start: "2025-11-11", end: "2025-11-20",
+    project: "Triển lãm Ô tô", code: "DEMOL26_007", confirmed: "OK" });    // có PO + số HĐ, chưa TT
+  await hrRec(accB, P.cuc, { salary: 18_000_000, start: "2025-10-31", end: "2025-11-06",
+    project: "Year End Party", code: "DEMOB26_005" });                      // có số HĐ, chưa TT
+  await hrRec(accA, P.dung, { salary: 15_000_000, project: "Khai trương CN", code: "DEMOA26_006",
+    hdld: "HDLD-2026-07", acctNote: "Đã đối chiếu", confirmed: "đã ký" });  // Done (đã TT)
+  await hrRec(accA, P.em, { salary: 9_000_000, project: "Gala Vinamilk", code: "DEMOA26_004",
+    note: "Chờ chứng từ" });                                                // đã chốt, chưa HĐ/PO
+  console.log("✓ 5 hồ sơ nhân sự (mỗi hồ sơ trỏ dự án ĐÃ CHỐT CỦA CHÍNH account — Account + cột HĐ tự khớp)");
 
   // ---------- Customers ----------
   const mkCus = (code, name) => prisma.customer.create({ data: { code, name, status: "active", ownerId: accA.id } });
