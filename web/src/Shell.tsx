@@ -26,6 +26,8 @@ import { QuoteEditorPage } from "./QuoteEditor";
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
 };
+const QSTATUS: Record<string, string> = { draft: "Nháp", converted: "Đã chốt", lost: "Không chốt", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi" };
+type QuoteHit = { id: number; quoteNumber?: string; projectCode?: string | null; title: string; status: string };
 
 const S = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const ICON: Record<string, ReactNode> = {
@@ -76,12 +78,25 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const [theme, setTheme] = useState(themeIcon());
   const [sbOpen, setSbOpen] = useState(false); // drawer mobile
   const [unread, setUnread] = useState(0);
+  const [quoteHits, setQuoteHits] = useState<QuoteHit[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Tìm BÁO GIÁ toàn cục (song song lọc nhân sự) → dropdown deep-link #/quotes/:id.
+  useEffect(() => {
+    if (!query || query.trim().length < 2) { setQuoteHits([]); return; }
+    const t = setTimeout(() => { api.searchQuotes(query.trim()).then((r) => setQuoteHits(r.results.quotes || [])).catch(() => setQuoteHits([])); }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
 
   const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
   useEffect(() => {
-    if (!location.hash) location.hash = "#/personnel";
+    // Trang đích theo vai trò (giống landingPage SPA): admin/Account→Tổng quan; còn lại→nav đầu có quyền.
+    if (!location.hash) {
+      const canQuote = me.permissions.includes("quote:read:own") || me.permissions.includes("quote:read:all");
+      const first = NAV.find((n) => has(n.perm));
+      location.hash = "#/" + (((me.role === "admin" || me.role === "manager") && canQuote) ? "dashboard" : (first?.key || "personnel"));
+    }
     refreshBadge();
     const on = () => { setKey(currentKey()); setSbOpen(false); refreshBadge(); };
     window.addEventListener("hashchange", on);
@@ -143,10 +158,21 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             </div>
             <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" title="Sáng / Tối" onClick={onTheme}>{theme}</button>
           </div>
-          <div className="global-search" role="search">
-            <label htmlFor="gs-input" className="sr-only">Tìm nhân sự / danh bạ</label>
-            <input id="gs-input" ref={searchRef} placeholder="🔎 Tìm nhân sự, danh bạ… (Ctrl+K)" value={query}
+          <div className="global-search" role="search" style={{ position: "relative" }}>
+            <label htmlFor="gs-input" className="sr-only">Tìm nhân sự / báo giá</label>
+            <input id="gs-input" ref={searchRef} placeholder="🔎 Tìm nhân sự, báo giá… (Ctrl+K)" value={query} autoComplete="off"
                    onChange={(e) => { const v = e.target.value; setQuery(v); if (v && currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
+            {quoteHits.length > 0 && (
+              <div className="gs-results" style={{ display: "block" }}>
+                <div className="gs-section">Báo giá</div>
+                {quoteHits.map((h) => (
+                  <div key={h.id} className="gs-row" role="button" tabIndex={0}
+                       onClick={async () => { if (await guardLeave()) { setQuery(""); setQuoteHits([]); location.hash = "#/quotes/" + h.id; } }}>
+                    <strong>{h.projectCode || h.quoteNumber}</strong> — {h.title} <span className={`status ${h.status}`}>{QSTATUS[h.status] || h.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <nav className="menu" aria-label="Điều hướng chính">
             {groups.map((g, gi) => (

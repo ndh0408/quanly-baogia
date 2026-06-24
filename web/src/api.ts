@@ -139,8 +139,12 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 export const api = {
   me: () => req<Me>("/auth/me"),
-  login: (username: string, password: string) => req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  login: (username: string, password: string, mfaToken?: string) => req<Me>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, ...(mfaToken ? { mfaToken } : {}) }) }),
   logout: () => req("/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) => req<unknown>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+  getInvite: (token: string) => req<{ email: string; displayName?: string }>(`/auth/invite/${encodeURIComponent(token)}`),
+  acceptInvite: (data: { token: string; displayName: string; senderName?: string; phone?: string; title?: string; password: string }) => req<Me>("/auth/accept-invite", { method: "POST", body: JSON.stringify(data) }),
+  searchQuotes: (q: string) => req<{ results: { quotes?: { id: number; quoteNumber?: string; projectCode?: string | null; title: string; status: string }[] } }>(`/search?q=${encodeURIComponent(q)}&types=quote&limit=8`),
   listPersonnel: (q = "", page = 1, size = 50, sort = "createdAt", order: "asc" | "desc" = "desc") =>
     req<ListResult>(`/personnel?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
   createPersonnel: (data: Record<string, unknown>) => req<Personnel>("/personnel", { method: "POST", body: JSON.stringify(data) }),

@@ -317,7 +317,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       </div>
 
       {versions && <VersionsModal versions={versions} onClose={() => setVersions(null)} />}
-      {membersOpen && <MembersModal quoteId={q.id} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
+      {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
     </div>
   );
 }
@@ -372,21 +372,26 @@ function VersionsModal({ versions, onClose }: { versions: QuoteVersion[]; onClos
   );
 }
 
-function MembersModal({ quoteId, current, onClose, onSaved }: { quoteId: number; current: number[]; onClose: () => void; onSaved: (ids: number[]) => void }) {
+const ROLE_LABEL_FULL: Record<string, string> = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội", hr: "Nhân sự (HR)", accountant: "Kế toán" };
+function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quoteId: number; createdById?: number; current: number[]; onClose: () => void; onSaved: (ids: number[]) => void }) {
   const [users, setUsers] = useState<AssignableUser[] | null>(null);
   const [sel, setSel] = useState<number[]>(current);
   const [saving, setSaving] = useState(false);
   useEffect(() => { api.assignableUsers().then((r) => setUsers(r.data)).catch(() => setUsers([])); }, []);
-  const toggle = (id: number) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
-  const save = async () => { setSaving(true); try { await api.setMembers(quoteId, sel); toast("Đã lưu thành viên", "success"); onSaved(sel); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); } };
+  const toggle = (id: number) => { if (id === createdById) return; setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); };
+  const save = async () => { setSaving(true); try { await api.setMembers(quoteId, sel.filter((id) => id !== createdById)); toast("Đã lưu thành viên", "success"); onSaved([...new Set([...(createdById ? [createdById] : []), ...sel])]); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); } };
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Thành viên phụ trách">
         <div className="modal-head"><h3>Thành viên phụ trách</h3><button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
-          <p className="muted" style={{ marginTop: 0 }}>Cho phép xem & sửa báo giá này.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Cho phép xem & sửa báo giá này. Người tạo luôn là thành viên.</p>
           {!users ? <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div> : (
-            <div className="list-wrap">{users.map((u) => <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: "pointer" }}><input type="checkbox" checked={sel.includes(u.id)} onChange={() => toggle(u.id)} /><span>{u.displayName}{u.title ? <span className="muted"> · {u.title}</span> : ""}</span></label>)}</div>
+            <div className="list-wrap">{users.map((u) => { const isCreator = u.id === createdById; return (
+              <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: isCreator ? "default" : "pointer" }}>
+                <input type="checkbox" checked={isCreator || sel.includes(u.id)} disabled={isCreator} onChange={() => toggle(u.id)} />
+                <span>{u.displayName}<span className="muted"> · {ROLE_LABEL_FULL[u.role || ""] || u.role}{u.title ? " · " + u.title : ""}{isCreator ? " — người tạo" : ""}</span></span>
+              </label>); })}</div>
           )}
         </div>
         <div className="modal-foot"><button className="btn" onClick={onClose}>Hủy</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button></div>
