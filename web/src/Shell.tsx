@@ -23,6 +23,7 @@ import { QuoteListPage } from "./QuoteList";
 import { ProjectsPage } from "./Projects";
 import { QuoteEditorPage } from "./QuoteEditor";
 import { NewQuoteWizard } from "./NewQuoteWizard";
+import { AccountHnView } from "./AccountHnView";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -142,6 +143,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const editId = reditM ? Number(reditM[1]) : (quotesM && !isAccountHn ? Number(quotesM[1]) : undefined);
   const isEditor = isNewEditor || editId !== undefined;
   const isWizard = key === "new" && !isAccountHn;   // Tạo báo giá mới → wizard React (account_hn không tạo BG)
+  const hnEditId = isAccountHn && quotesM ? Number(quotesM[1]) : undefined;   // account_hn mở BG → view điền HN React
 
   return (
     <>
@@ -200,6 +202,8 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         </aside>
         {isWizard ? (
           <main className="main" id="main" tabIndex={-1}><NewQuoteWizard me={me} /></main>
+        ) : hnEditId !== undefined ? (
+          <main className="main" id="main" tabIndex={-1}><AccountHnView quoteId={hnEditId} /></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
             <QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} />

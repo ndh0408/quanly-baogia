@@ -242,4 +242,6 @@ export const api = {
   hnAccounts: () => req<{ data: { id: number; displayName?: string; username?: string }[] }>("/quotes/hn/accounts"),
   hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),
   hnReview: (id: number, decision: "approve" | "reject", note?: string) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
+  saveHn: (id: number, hnSheets: unknown[]) => req<unknown>(`/quotes/${id}/hn`, { method: "PUT", body: JSON.stringify({ hnSheets }) }),
+  submitHn: (id: number) => req<unknown>(`/quotes/${id}/hn/submit`, { method: "POST" }),
 };
