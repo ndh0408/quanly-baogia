@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { api, type Me } from "./api";
 import { PersonnelPage } from "./Personnel";
+import { EmployeesPage } from "./Employees";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -9,6 +10,7 @@ const ROLE_LABEL: Record<string, string> = {
 const S = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const ICON: Record<string, ReactNode> = {
   personnel: <svg {...S}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2a3 3 0 0 1 0 5.6" /><path d="M17.5 20a5.5 5.5 0 0 0-3-4.9" /></svg>,
+  employees: <svg {...S}><rect x="3" y="4.5" width="18" height="15" rx="2" /><circle cx="9" cy="10" r="2.1" /><path d="M5.6 16.5a3.4 3.4 0 0 1 6.8 0" /><line x1="14.5" y1="9" x2="18.5" y2="9" /><line x1="14.5" y1="13" x2="18.5" y2="13" /></svg>,
   dashboard: <svg {...S}><rect x="3" y="3" width="7" height="8" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="11" width="7" height="10" rx="1.5" /></svg>,
   list: <svg {...S}><line x1="8" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="8" y1="18" x2="20" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>,
   new: <svg {...S}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><line x1="12" y1="12" x2="12" y2="18" /><line x1="9" y1="15" x2="15" y2="15" /></svg>,
@@ -36,6 +38,7 @@ function ThemeToggle() {
 type Nav = { key: string; label: string; group: string; perm?: string; ported?: boolean };
 const NAV: Nav[] = [
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
+  { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:read:own" },
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
@@ -78,7 +81,7 @@ export function Shell({ me }: { me: Me }) {
         </div>
         <div className="global-search">
           <input placeholder="🔎 Tìm nhanh (Ctrl+K)" value={query}
-                 onChange={(e) => { setQuery(e.target.value); if (currentKey() !== "personnel") location.hash = "#/personnel"; }} />
+                 onChange={(e) => { setQuery(e.target.value); if (currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
         </div>
         <nav className="menu" aria-label="Điều hướng chính">
           {groups.map((g, gi) => (
@@ -101,7 +104,9 @@ export function Shell({ me }: { me: Me }) {
         </div>
       </aside>
       {active?.ported ? (
-        <main className="content"><PersonnelPage me={me} query={query} /></main>
+        <main className="content">
+          {key === "employees" ? <EmployeesPage me={me} query={query} /> : <PersonnelPage me={me} query={query} />}
+        </main>
       ) : (
         <div className="embed-host">
           <iframe key={key} title={active?.label ?? "Trang"} src={`/app?embed=1#/${key}`} />

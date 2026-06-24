@@ -14,7 +14,7 @@ prisma.$on("error", (e) => logger.error({ source: "prisma" }, e.message));
 // and adds an automatic `where: { deletedAt: null }` filter on common queries.
 //
 // Applies to every model that has a deletedAt field.
-const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord"]);
+const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord", "Employee"]);
 
 prisma.$use(async (params, next) => {
   if (!SOFT_DELETE_MODELS.has(params.model)) return next(params);

@@ -174,6 +174,19 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .grid textarea { min-height: 60px; resize: vertical; }
 .req { color: var(--danger); }
 
+/* Chọn từ danh bạ (trong form Nhân sự) — ô tìm + dropdown kết quả */
+.emp-picker-fs { border-color: color-mix(in srgb, var(--gold) 40%, var(--line)); background: var(--primary-soft); }
+.emp-picker-fs legend { color: var(--primary); }
+.emp-picker { position: relative; }
+.emp-picker > input { width: 100%; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 14px; background: var(--field-bg); color: var(--text); }
+.emp-picker > input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+.emp-picker-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 10; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow); max-height: 260px; overflow: auto; }
+.emp-picker-item { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 8px 12px; background: none; border: none; border-bottom: 1px solid var(--line); cursor: pointer; color: var(--text); }
+.emp-picker-item:last-child { border-bottom: none; }
+.emp-picker-item:hover { background: var(--row-hover); }
+.emp-picker-item .muted { font-size: 12px; }
+.emp-picker-empty { padding: 8px 4px; font-size: 13px; }
+
 /* Toast */
 #toast-host { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
 .toast { padding: 11px 16px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; max-width: 360px; animation: toast-in .22s ease; }

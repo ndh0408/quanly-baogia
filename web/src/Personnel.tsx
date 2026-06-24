@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, type Me, type Personnel, type Summary } from "./api";
+import { api, ApiError, type Me, type Personnel, type Summary, type Employee } from "./api";
 import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
+import { EMP_FIELDS } from "./Employees";
 import { toast, confirmModal } from "./ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
@@ -235,6 +236,19 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
           <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
+          {!rec && !readOnly && (
+            <EmployeePicker onPick={(emp) => {
+              setForm((s) => {
+                const next = { ...s };
+                for (const f of EMP_FIELDS) {
+                  const v = emp[f.key];
+                  next[f.key] = f.type === "date" ? toInputDate(v) : (v == null ? "" : String(v));
+                }
+                return next;
+              });
+              toast(`Đã điền thông tin của "${emp.fullName}"`, "success");
+            }} />
+          )}
           {GROUPS.filter((g) => INPUT_FIELDS.some((f) => f.group === g)).map((g, gi) => (
             <fieldset key={g}>
               <legend>{g}</legend>
@@ -273,5 +287,40 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
         </div>
       </div>
     </div>
+  );
+}
+
+// Ô tìm + chọn người từ Danh bạ nhân viên → tự điền 10 trường cá nhân vào form (chỉ khi THÊM mới).
+function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Employee[]>([]);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); setOpen(false); return; }
+    const t = setTimeout(async () => {
+      try { const res = await api.listEmployees(q, 1, 8); setResults(res.data); setOpen(true); } catch { /* ignore */ }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <fieldset className="emp-picker-fs">
+      <legend>Chọn từ danh bạ (tự điền)</legend>
+      <div className="emp-picker">
+        <input placeholder="🔎 Gõ tên / MST / SĐT để chọn người có sẵn…" value={q}
+               onChange={(e) => setQ(e.target.value)} onFocus={() => results.length > 0 && setOpen(true)} />
+        {open && results.length > 0 && (
+          <div className="emp-picker-list">
+            {results.map((e) => (
+              <button type="button" key={e.id} className="emp-picker-item"
+                      onClick={() => { onPick(e); setQ(""); setResults([]); setOpen(false); }}>
+                <strong>{e.fullName}</strong>
+                <span className="muted">{[e.taxCode, e.phone, e.idCard].filter(Boolean).join(" · ")}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {q.trim() && open && results.length === 0 && <div className="emp-picker-empty muted">Không có ai khớp — cứ nhập tay bên dưới.</div>}
+      </div>
+    </fieldset>
   );
 }

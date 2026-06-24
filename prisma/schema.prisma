@@ -91,6 +91,7 @@ model User {
   authoredVersions  QuoteVersion[] @relation("VersionAuthor")
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
   personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
+  employees         Employee[]        @relation("EmployeeCreatedBy")
 
   @@index([deletedAt, active])
 }
@@ -142,6 +143,32 @@ model PersonnelRecord {
   payment             String? // THANH TOÁN
   confirmed           String? // Xác nhận
   note                String? // Note
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([createdById])
+  @@index([deletedAt])
+}
+
+// Danh bạ NHÂN VIÊN — kho thông tin cá nhân tái dùng. Khi tạo hồ sơ Nhân sự, chọn 1 người
+// ở đây để TỰ ĐIỀN các ô cá nhân (họ tên, MST, căn cước, STK, ngân hàng, SĐT…). CRUD riêng.
+model Employee {
+  id          Int   @id @default(autoincrement())
+  createdById Int
+  createdBy   User  @relation("EmployeeCreatedBy", fields: [createdById], references: [id])
+
+  fullName     String // HỌ & TÊN
+  taxCode      String? // MÃ SỐ THUẾ
+  birthYear    String? // NĂM SINH
+  idCard       String? // Căn cước
+  idIssueDate  DateTime? // NGÀY CẤP
+  idIssuePlace String? // NƠI CẤP
+  address      String? // ĐỊA CHỈ
+  bankAccount  String? // STK
+  bankName     String? // NGÂN HÀNG
+  phone        String? // SỐ ĐIỆN THOẠI
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

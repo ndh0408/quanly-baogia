@@ -15,6 +15,19 @@ export type Personnel = {
   [key: string]: unknown;
 };
 
+// Danh bạ nhân viên (10 trường cá nhân) — chọn khi tạo hồ sơ Nhân sự để tự điền.
+export type Employee = {
+  id: number;
+  createdById: number;
+  fullName: string;
+  createdBy?: { id: number; displayName: string; username?: string };
+  [key: string]: unknown;
+};
+export type EmployeeListResult = {
+  data: Employee[];
+  meta: { total: number; page: number; size: number; pageCount: number };
+};
+
 export type Summary = { salary: number; pit: number; taxableIncome: number };
 export type ListResult = {
   data: Personnel[];
@@ -59,4 +72,10 @@ export const api = {
   createPersonnel: (data: Record<string, unknown>) => req<Personnel>("/personnel", { method: "POST", body: JSON.stringify(data) }),
   updatePersonnel: (id: number, data: Record<string, unknown>) => req<Personnel>(`/personnel/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deletePersonnel: (id: number) => req<{ ok: boolean }>(`/personnel/${id}`, { method: "DELETE" }),
+  // Danh bạ nhân viên
+  listEmployees: (q = "", page = 1, size = 50, sort = "fullName", order: "asc" | "desc" = "asc") =>
+    req<EmployeeListResult>(`/employees?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
+  createEmployee: (data: Record<string, unknown>) => req<Employee>("/employees", { method: "POST", body: JSON.stringify(data) }),
+  updateEmployee: (id: number, data: Record<string, unknown>) => req<Employee>(`/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteEmployee: (id: number) => req<{ ok: boolean }>(`/employees/${id}`, { method: "DELETE" }),
 };
