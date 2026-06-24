@@ -5,12 +5,12 @@
 import {
   fmtMoney, fmtDate, fmtDateTime, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260624a";
-import { state, can } from "../core/state.js?v=20260624a";
-import { api } from "../core/api.js?v=20260624a";
+} from "../util.js?v=20260624b";
+import { state, can } from "../core/state.js?v=20260624b";
+import { api } from "../core/api.js?v=20260624b";
 import {
   toast, skeleton, KBD, errorState, emptyState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260624a";
+} from "../ui.js?v=20260624b";
 
 // Pager dùng chung cho các bảng admin (khách/sản phẩm/nhật ký). state-less: caller giữ
 // page + truyền meta {total,page,size,pageCount}; bấm Prev/Next gọi goToPage(n).
@@ -557,111 +557,6 @@ function editCustomer(id) {
       toast("Đã lưu", "success");
       m.close();
       renderCustomers(document.getElementById("main"));
-    } catch (e) { toast(e.message, "error"); }
-  });
-}
-
-// ---------------- Products ----------------
-async function renderProducts(el) {
-  el.innerHTML = `<h1>Sản phẩm / Dịch vụ</h1>
-    <div class="toolbar">
-      <input id="p-q" placeholder="Tìm theo SKU hoặc tên…" style="flex:1"/>
-      <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
-    </div>
-    <div id="p-body">${skeleton(6)}</div>`;
-  let q = "", page = 1, sort = "name", order = "asc";
-  const reload = async () => {
-    const body = document.getElementById("p-body");
-    if (!body) return;
-    const params = new URLSearchParams({ size: "20", page: String(page), sort, order });
-    if (q) params.set("q", q);
-    try {
-      const r = await api("/api/products?" + params.toString());
-      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 20 };
-      if (!r.data.length) {
-        body.innerHTML = q
-          ? emptyState("Không tìm thấy sản phẩm phù hợp.")
-          : emptyState("Chưa có sản phẩm nào.", { ctaLabel: "+ Thêm sản phẩm", ctaId: "es-new-p" });
-        body.querySelector("#es-new-p")?.addEventListener("click", () => editProduct(null));
-        return;
-      }
-      const arrow = (f) => sort === f ? (order === "asc" ? " ▲" : " ▼") : "";
-      const aria = (f) => sort === f ? (order === "asc" ? "ascending" : "descending") : "none";
-      const sortTh = (f, label, style) => `<th scope="col" class="sortable" data-sort="${f}" aria-sort="${aria(f)}" title="Bấm để sắp xếp"${style ? ` style="${style}"` : ""}>${label}${arrow(f)}</th>`;
-      body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
-        <thead><tr>${sortTh("sku", "SKU")}${sortTh("name", "Tên")}<th scope="col">Loại</th><th scope="col">ĐVT</th>
-          <th scope="col" style="text-align:right">Giá vốn</th>${sortTh("basePrice", "Giá bán", "text-align:right")}
-          <th scope="col" style="text-align:right">Margin</th><th scope="col"></th></tr></thead>
-        <tbody>${r.data.map(p => `
-          <tr>
-            <td><strong>${escapeHtml(p.sku)}</strong></td>
-            <td>${escapeHtml(p.name)}</td>
-            <td>${escapeHtml(p.category || "")}</td>
-            <td>${escapeHtml(p.unit || "")}</td>
-            <td style="text-align:right">${fmtMoney(p.costPrice)}</td>
-            <td style="text-align:right">${fmtMoney(p.basePrice)}</td>
-            <td style="text-align:right">${p.margin != null ? p.margin + "%" : "—"}</td>
-            <td><button class="btn btn-sm" data-edit="${p.id}">Sửa</button>
-                <button class="btn btn-sm btn-danger" data-del="${p.id}">Xóa</button></td>
-          </tr>`).join("")}</tbody></table></div>${pagerHtml(meta)}`;
-      body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editProduct(parseInt(b.dataset.edit))));
-      body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!(await confirmModal("Xóa sản phẩm", "Xóa sản phẩm này?", { danger: true, confirmText: "Xóa" }))) return;
-        try { await api(`/api/products/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
-        catch (e) { toast(e.message, "error"); }
-      }));
-      body.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
-        const f = th.dataset.sort;
-        if (sort === f) order = order === "asc" ? "desc" : "asc"; else { sort = f; order = f === "basePrice" ? "desc" : "asc"; }
-        page = 1; reload();
-      }));
-      wirePager(body, meta, (n) => { page = n; reload(); });
-    } catch (e) { body.innerHTML = errorState(e.message, reload); }
-  };
-  document.getElementById("p-q").addEventListener("input", (e) => { q = e.target.value; page = 1; clearTimeout(window._pt); window._pt = setTimeout(reload, 300); });
-  document.getElementById("btn-new-p").addEventListener("click", () => editProduct(null));
-  await reload();
-}
-
-function editProduct(id) {
-  const isNew = id == null;
-  const m = openModal(isNew ? "Tạo sản phẩm" : "Sửa sản phẩm", `
-    <div class="form-grid">
-      <label>SKU <span class="req">*</span><input id="pf-sku" required ${isNew ? "" : "disabled"}/></label>
-      <label>Tên <span class="req">*</span><input id="pf-name" required/></label>
-      <label>Loại<input id="pf-cat"/></label>
-      <label>ĐVT<input id="pf-unit"/></label>
-      <label>Giá vốn<input id="pf-cost" type="number" min="0" step="1" value="0"/></label>
-      <label>Giá bán<input id="pf-base" type="number" min="0" step="1" value="0"/></label>
-      <label style="grid-column:1/-1">Mô tả<textarea id="pf-desc" rows="2"></textarea></label>
-    </div>`);
-  if (!isNew) {
-    api(`/api/products/${id}`).then(p => {
-      m.find("#pf-sku").value = p.sku || "";
-      m.find("#pf-name").value = p.name || "";
-      m.find("#pf-cat").value = p.category || "";
-      m.find("#pf-unit").value = p.unit || "";
-      m.find("#pf-cost").value = p.costPrice || 0;
-      m.find("#pf-base").value = p.basePrice || 0;
-      m.find("#pf-desc").value = p.description || "";
-    });
-  }
-  m.onSave(async () => {
-    const body = {
-      sku: m.find("#pf-sku").value.trim(),
-      name: m.find("#pf-name").value.trim(),
-      category: m.find("#pf-cat").value.trim() || null,
-      unit: m.find("#pf-unit").value.trim() || null,
-      costPrice: Number(m.find("#pf-cost").value) || 0,
-      basePrice: Number(m.find("#pf-base").value) || 0,
-      description: m.find("#pf-desc").value.trim() || null,
-    };
-    if (!body.sku || !body.name) { toast("Vui lòng nhập SKU và tên sản phẩm", "error"); return; }
-    try {
-      if (isNew) await api("/api/products", { method: "POST", body: JSON.stringify(body) });
-      else await api(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(body) });
-      toast("Đã lưu", "success"); m.close();
-      renderProducts(document.getElementById("main"));
     } catch (e) { toast(e.message, "error"); }
   });
 }
