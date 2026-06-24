@@ -24,6 +24,16 @@ const autoGrow = (el: HTMLTextAreaElement | null) => { if (!el) return; el.style
 let _companies: EditorCompany[] | null = null;
 let _templates: EditorTemplate[] | null = null;
 
+// Lấy thông báo lỗi CỤ THỂ (vd "Vui lòng nhập tên khách hàng") từ details[] thay vì "Dữ liệu không hợp lệ".
+const errText = (ex: unknown): string => {
+  if (ex instanceof ApiError) {
+    const d = (ex.body as { details?: { message?: string }[] } | undefined)?.details;
+    if (Array.isArray(d) && d[0]?.message) return d[0].message;
+    return ex.message;
+  }
+  return "Có lỗi xảy ra";
+};
+
 export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: number; isNew: boolean }) {
   const qRef = useRef<QuoteFull | null>(null);
   const [, setTick] = useState(0);
@@ -155,7 +165,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) location.hash = "#/redit/" + saved.id;
       else { qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); }
     } catch (ex) {
-      toast(ex instanceof ApiError ? ex.message : "Lỗi lưu", "error");
+      toast(errText(ex), "error");
     } finally { setSaving(false); }
   };
   const convert = async () => {
