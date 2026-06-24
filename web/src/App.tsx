@@ -38,9 +38,11 @@ export function App() {
   return <ErrorBoundary><Shell me={me} /></ErrorBoundary>;
 }
 
+// Login — DÙNG class SPA (.login-wrap/.login-card/#login-form/.btn-login) → giống Y màn đăng nhập app cũ.
 function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -57,16 +59,25 @@ function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   };
 
   return (
-    <form className="login" onSubmit={submit}>
-      <div className="brand" style={{ border: "none", padding: 0, marginBottom: 6 }}>
-        <span className="brand-logo">GN</span><strong>Quản lý · Gia Nguyễn</strong>
+    <div className="login-wrap">
+      <div className="login-card">
+        <h1>Quản Lý</h1>
+        <p className="sub">Gia Nguyễn — Hệ thống nội bộ</p>
+        {err && <div className="err" role="alert">{err}</div>}
+        <form id="login-form" onSubmit={submit}>
+          <label><span>Email hoặc tên đăng nhập</span>
+            <input name="username" autoComplete="username" required autoFocus value={username} onChange={(e) => setUsername(e.target.value)} /></label>
+          <label><span>Mật khẩu</span>
+            <span className="pw-wrap">
+              <input type={showPw ? "text" : "password"} name="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
+            </span>
+          </label>
+          <button type="submit" className="btn-login" disabled={busy || !username || !password} aria-busy={busy}>
+            {busy ? "Đang đăng nhập…" : "Đăng nhập"}
+          </button>
+        </form>
       </div>
-      <input placeholder="Tên đăng nhập" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
-      <input placeholder="Mật khẩu" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-      {err && <div className="err">⚠ {err}</div>}
-      <button className="btn btn-primary" type="submit" disabled={busy || !username || !password}>
-        {busy ? "Đang đăng nhập…" : "Đăng nhập"}
-      </button>
-    </form>
+    </div>
   );
 }

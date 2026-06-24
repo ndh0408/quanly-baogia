@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Quản lý · Gia Nguyễn</title>
+    <!-- DÙNG CHUNG design-system của SPA cũ: nạp thẳng /style.css + font → React giống Y app cũ,
+         khỏi lệch khi convert. web/src/styles.css (Vite) nạp SAU, chỉ bổ sung phần riêng HR. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css?v=20260624a" />
   </head>
   <body>
     <div id="root"></div>

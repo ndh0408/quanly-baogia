@@ -235,7 +235,7 @@ function renderLogin() {
   app.innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
-        <h1>Quản Lý Báo Giá</h1>
+        <h1>Quản Lý</h1>
         <p class="sub">Gia Nguyễn — Hệ thống nội bộ</p>
         <div id="login-err" role="alert" aria-live="assertive"></div>
         <form id="login-form">
@@ -313,7 +313,7 @@ export function renderShell() {
     <div class="shell">
       <header class="mobile-topbar" role="banner">
         <button class="icon-btn" id="sb-toggle" aria-label="Mở menu" aria-controls="sidebar" aria-expanded="false">☰</button>
-        <span class="mt-title">Báo Giá</span>
+        <span class="mt-title">Quản Lý</span>
         <button class="icon-btn" id="theme-toggle-m" aria-label="Đổi giao diện sáng/tối">${themeIcon}</button>
       </header>
       <div class="sidebar-backdrop" id="sb-backdrop"></div>
@@ -322,7 +322,7 @@ export function renderShell() {
           <div class="sb-brand">
             <div class="sb-logo" aria-hidden="true">GN</div>
             <div>
-              <h2>Báo Giá</h2>
+              <h2>Quản Lý</h2>
               <div class="org">Gia Nguyễn · nội bộ</div>
             </div>
           </div>

@@ -24,15 +24,11 @@ const ICON: Record<string, ReactNode> = {
   profile: <svg {...S}><circle cx="12" cy="8" r="3.4" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>,
 };
 
-function ThemeToggle() {
-  const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
-  const toggle = () => {
-    const next = !dark;
-    setDark(next);
-    document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
-    try { localStorage.setItem("theme", next ? "dark" : "light"); } catch { /* ignore */ }
-  };
-  return <button className="theme-toggle" onClick={toggle} title="Sáng / Tối" aria-label="Đổi giao diện sáng tối">{dark ? "☀" : "🌙"}</button>;
+const themeIcon = () => (localStorage.getItem("theme") === "dark" ? "☀️" : "🌙");
+function toggleTheme() {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("theme", next); } catch { /* ignore */ }
 }
 
 // ported=true → trang React thật; còn lại NHÚNG app cũ (/app?embed=1) — dùng được ngay, không tách rời.
@@ -57,18 +53,18 @@ const currentKey = () => location.hash.replace(/^#\/?/, "") || "personnel";
 export function Shell({ me }: { me: Me }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
+  const [theme, setTheme] = useState(themeIcon());
+  const [sbOpen, setSbOpen] = useState(false); // drawer mobile
   const searchRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!location.hash) location.hash = "#/personnel";
-    const on = () => setKey(currentKey());
+    const on = () => { setKey(currentKey()); setSbOpen(false); };
     window.addEventListener("hashchange", on);
-    // Ctrl/Cmd+K focuses the search box (the placeholder advertises it — now it's real).
+    // Ctrl/Cmd+K focuses the search box (placeholder advertises it — giờ là thật).
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); }
+      if (e.key === "Escape") setSbOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("hashchange", on); window.removeEventListener("keydown", onKey); };
@@ -79,52 +75,63 @@ export function Shell({ me }: { me: Me }) {
   const visible = NAV.filter((n) => has(n.perm));
   const groups = [...new Set(visible.map((n) => n.group))];
   const active = NAV.find((n) => n.key === key);
+  const onTheme = () => { toggleTheme(); setTheme(themeIcon()); };
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="sb-head">
-          <div className="sb-brand">
-            <div className="sb-logo">GN</div>
-            <div><h2>Báo Giá</h2><div className="org">Gia Nguyễn · nội bộ</div></div>
-          </div>
-          <ThemeToggle />
-        </div>
-        <div className="global-search" role="search">
-          <input ref={searchRef} aria-label="Tìm nhân sự / danh bạ" placeholder="🔎 Tìm nhân sự, danh bạ… (Ctrl+K)" value={query}
-                 onChange={(e) => { const v = e.target.value; setQuery(v); if (v && currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
-        </div>
-        <nav className="menu" aria-label="Điều hướng chính">
-          {groups.map((g, gi) => (
-            <div key={g}>
-              <div className={`nav-group-label ${gi === 0 ? "first" : ""}`}>{g}</div>
-              {visible.filter((n) => n.group === g).map((n) => (
-                <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`}
-                   onClick={(e) => { e.preventDefault(); location.hash = `#/${n.key}`; }}>
-                  {ICON[n.key]}<span>{n.label}</span>
-                </a>
-              ))}
+    <>
+      <a href="#main" className="skip-link">Bỏ qua tới nội dung</a>
+      <div className="shell">
+        <header className="mobile-topbar" role="banner">
+          <button className="icon-btn" aria-label="Mở menu" aria-expanded={sbOpen} onClick={() => setSbOpen(true)}>☰</button>
+          <span className="mt-title">{active?.label ?? "Quản Lý"}</span>
+          <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" onClick={onTheme}>{theme}</button>
+        </header>
+        <div className={`sidebar-backdrop${sbOpen ? " show" : ""}`} onClick={() => setSbOpen(false)} />
+        <aside className={`sidebar${sbOpen ? " open" : ""}`} id="sidebar">
+          <div className="sb-head">
+            <div className="sb-brand">
+              <div className="sb-logo" aria-hidden="true">GN</div>
+              <div><h2>Quản Lý</h2><div className="org">Gia Nguyễn · nội bộ</div></div>
             </div>
-          ))}
-        </nav>
-        <div className="who">
-          <strong>{me.displayName}</strong>
-          <span>@{me.username}</span><br />
-          <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-          <button className="logout" onClick={async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
-        </div>
-      </aside>
-      {active?.ported ? (
-        <main className="content">
-          {key === "customers" ? <CustomersPage me={me} />
-            : key === "employees" ? <EmployeesPage me={me} query={query} />
-            : <PersonnelPage me={me} query={query} />}
-        </main>
-      ) : (
-        <div className="embed-host">
-          <iframe key={key} title={active?.label ?? "Trang"} src={`/app?embed=1#/${key}`} />
-        </div>
-      )}
-    </div>
+            <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" title="Sáng / Tối" onClick={onTheme}>{theme}</button>
+          </div>
+          <div className="global-search" role="search">
+            <label htmlFor="gs-input" className="sr-only">Tìm nhân sự / danh bạ</label>
+            <input id="gs-input" ref={searchRef} placeholder="🔎 Tìm nhân sự, danh bạ… (Ctrl+K)" value={query}
+                   onChange={(e) => { const v = e.target.value; setQuery(v); if (v && currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
+          </div>
+          <nav className="menu" aria-label="Điều hướng chính">
+            {groups.map((g, gi) => (
+              <div key={g}>
+                <div className={`nav-group-label ${gi === 0 ? "first" : ""}`}>{g}</div>
+                {visible.filter((n) => n.group === g).map((n) => (
+                  <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`} {...(key === n.key ? { "aria-current": "page" as const } : {})}
+                     onClick={(e) => { e.preventDefault(); location.hash = `#/${n.key}`; }}>
+                    {ICON[n.key]}<span>{n.label}</span>
+                  </a>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <div className="who">
+            <strong>{me.displayName}</strong>
+            <span>@{me.username}</span><br />
+            <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
+            <button className="logout" onClick={async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
+          </div>
+        </aside>
+        {active?.ported ? (
+          <main className="main" id="main" tabIndex={-1}>
+            {key === "customers" ? <CustomersPage me={me} />
+              : key === "employees" ? <EmployeesPage me={me} query={query} />
+              : <PersonnelPage me={me} query={query} />}
+          </main>
+        ) : (
+          <div className="embed-host" id="main">
+            <iframe key={key} title={active?.label ?? "Trang"} src={`/app?embed=1#/${key}`} />
+          </div>
+        )}
+      </div>
+    </>
   );
 }
