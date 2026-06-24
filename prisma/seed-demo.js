@@ -90,17 +90,18 @@ async function main() {
     teamNote: o.team || null, accountName: creator.displayName, company: o.cty || "GN",
     laborContractNo: o.hdld || null, laborContractDate: o.hdldDate ? new Date(o.hdldDate) : null,
     accountingNote: o.acctNote || null, confirmed: o.confirmed || null, note: o.note || null,
+    paidAt: o.paid ? ago(o.paidAgo ?? 3) : null, paidById: o.paid ? acctUser.id : null, // KẾ TOÁN đã đánh dấu
   } });
   // creator = CHỦ DỰ ÁN của code (DEMOL26→accSign, DEMOB26→accB, DEMOA26→accA); đủ các trạng thái HĐ.
   await hrRec(accSign, P.thuong, { salary: 10_000_000, start: "2025-10-13", end: "2025-10-24",
     project: "Lễ kỷ niệm 20 năm", code: "DEMOL26_008", team: "CP team phim (trả lại Hà)",
-    hdld: "HDLD-2026-01", hdldDate: "2025-10-01", confirmed: "đã ký" });   // PO + đã TT + chứng từ đủ
+    hdld: "HDLD-2026-01", hdldDate: "2025-10-01", confirmed: "đã ký", paid: true, paidAgo: 2 });   // kế toán ĐÃ đánh dấu TT
   await hrRec(accSign, P.binh, { salary: 12_000_000, start: "2025-11-11", end: "2025-11-20",
     project: "Triển lãm Ô tô", code: "DEMOL26_007", confirmed: "OK" });    // có PO + số HĐ, chưa TT
   await hrRec(accB, P.cuc, { salary: 18_000_000, start: "2025-10-31", end: "2025-11-06",
     project: "Year End Party", code: "DEMOB26_005" });                      // có số HĐ, chưa TT
   await hrRec(accA, P.dung, { salary: 15_000_000, project: "Khai trương CN", code: "DEMOA26_006",
-    hdld: "HDLD-2026-07", acctNote: "Đã đối chiếu", confirmed: "đã ký" });  // Done (đã TT)
+    hdld: "HDLD-2026-07", acctNote: "Đã đối chiếu", confirmed: "đã ký", paid: true, paidAgo: 5 });  // kế toán ĐÃ đánh dấu TT
   await hrRec(accA, P.em, { salary: 9_000_000, project: "Gala Vinamilk", code: "DEMOA26_004",
     note: "Chờ chứng từ" });                                                // đã chốt, chưa HĐ/PO
   console.log("✓ 5 hồ sơ nhân sự (mỗi hồ sơ trỏ dự án ĐÃ CHỐT CỦA CHÍNH account — Account + cột HĐ tự khớp)");

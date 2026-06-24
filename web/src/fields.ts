@@ -4,7 +4,8 @@ export type FieldType = "text" | "number" | "money" | "date" | "textarea" | "sta
 //   input       🟡 nhập tay  → hiện trong form, sửa được
 //   formula     🔵 công thức  → server tự tính (Thuế TNCN=Lương/9, Thu nhập chịu thuế=Lương×10/9), KHÔNG nhập
 //   ref-project 🩷 tham chiếu → server tự lấy từ Dự án theo Mã dự án, KHÔNG nhập
-export type FieldSource = "input" | "formula" | "ref-project";
+//   action      🟢 hành động  → KẾ TOÁN bấm đánh dấu (vd Thanh toán), KHÔNG nhập tay trong form
+export type FieldSource = "input" | "formula" | "ref-project" | "action";
 export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource };
 
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
@@ -44,7 +45,7 @@ export const FIELDS: Field[] = [
   { key: "preTaxAmount", label: "Tiền trước thuế", type: "money", group: "Hợp đồng", source: "ref-project" },
   // Thanh toán
   { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "input" },
-  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "ref-project" },
+  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "action" },
   { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "input" },
   { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "input" },
 ];

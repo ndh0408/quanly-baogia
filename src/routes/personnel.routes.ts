@@ -69,7 +69,7 @@ const ownerSelect = { createdBy: { select: { id: true, displayName: true, userna
 
 // 🔵 Gắn field công thức (pit, taxableIncome) + 🩷 field tham chiếu Dự án vào bản ghi khi TRẢ VỀ.
 // Các field này KHÔNG lưu DB — luôn tính/tra lúc đọc nên không bao giờ lệch với Lương/Dự án.
-function decorate<T extends { salary: unknown; projectCode: string | null }>(rec: T, refMap: Map<string, ProjectRef>) {
+function decorate<T extends { salary: unknown; projectCode: string | null; paidAt?: Date | null }>(rec: T, refMap: Map<string, ProjectRef>) {
   const { pit, taxableIncome } = computeTax(rec.salary == null ? null : Number(rec.salary));
   const ref = refMap.get((rec.projectCode ?? "").toString().trim());
   return {
@@ -80,7 +80,8 @@ function decorate<T extends { salary: unknown; projectCode: string | null }>(rec
     salesContractDate: ref?.salesContractDate ?? null,
     purchaseOrder: ref?.purchaseOrder ?? null,
     preTaxAmount: ref?.preTaxAmount ?? null,
-    payment: ref?.payment ?? null,
+    // THANH TOÁN: KẾ TOÁN bấm đánh dấu (rec.paidAt). paidAt đi kèm (qua ...rec) để FE hiện ngày.
+    payment: rec.paidAt ? "Đã thanh toán" : "Chưa thanh toán",
   };
 }
 
@@ -220,6 +221,29 @@ router.delete(
     await prisma.personnelRecord.delete({ where: { id: (req.params as any).id } });   // soft delete (db.js middleware)
     await audit(req, "personnel.delete", { resource: "personnel", resourceId: (req.params as any).id });
     res.json({ ok: true });
+  })
+);
+
+// KẾ TOÁN (hoặc admin) đánh dấu ĐÃ / BỎ thanh toán cho 1 hồ sơ — lưu NGÀY + người đánh dấu.
+// Quyền RIÊNG personnel:pay (KHÔNG cần manage, KHÔNG owner-scope → kế toán đánh dấu mọi hồ sơ).
+const PaymentBody = z.object({ paid: z.boolean() });
+router.post(
+  "/:id/payment",
+  requirePermission(P.PERSONNEL_MARK_PAYMENT),
+  validate({ params: idParam, body: PaymentBody }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = (req.params as any).id;
+    const exists = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true } });
+    if (!exists) { res.status(404).json({ error: "Không tìm thấy hồ sơ nhân sự" }); return; }
+    const paid = (req.body as any).paid as boolean;
+    const rec = await prisma.personnelRecord.update({
+      where: { id },
+      data: paid ? { paidAt: new Date(), paidById: req.session.userId } : { paidAt: null, paidById: null },
+      include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
+    });
+    await audit(req, paid ? "personnel.pay" : "personnel.unpay", { resource: "personnel", resourceId: id });
+    const refMap = await buildProjectRef([rec.projectCode]);
+    res.json(decorate(rec, refMap));
   })
 );
 

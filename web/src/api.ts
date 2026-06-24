@@ -78,6 +78,8 @@ export const api = {
   createPersonnel: (data: Record<string, unknown>) => req<Personnel>("/personnel", { method: "POST", body: JSON.stringify(data) }),
   updatePersonnel: (id: number, data: Record<string, unknown>) => req<Personnel>(`/personnel/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deletePersonnel: (id: number) => req<{ ok: boolean }>(`/personnel/${id}`, { method: "DELETE" }),
+  // Kế toán đánh dấu đã/chưa thanh toán (lưu ngày)
+  markPayment: (id: number, paid: boolean) => req<Personnel>(`/personnel/${id}/payment`, { method: "POST", body: JSON.stringify({ paid }) }),
   // Danh bạ nhân viên
   listEmployees: (q = "", page = 1, size = 50, sort = "fullName", order: "asc" | "desc" = "asc") =>
     req<EmployeeListResult>(`/employees?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),

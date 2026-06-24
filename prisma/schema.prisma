@@ -91,6 +91,7 @@ model User {
   authoredVersions  QuoteVersion[] @relation("VersionAuthor")
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
   personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
+  personnelPaid     PersonnelRecord[] @relation("PersonnelPaidBy")
   employees         Employee[]        @relation("EmployeeCreatedBy")
 
   @@index([deletedAt, active])
@@ -140,7 +141,10 @@ model PersonnelRecord {
   purchaseOrder       String? // ĐƠN ĐẶT HÀNG
   preTaxAmount        Decimal?  @db.Decimal(18, 2) // TIỀN TRƯỚC THUẾ
   accountingNote      String? // KẾ TOÁN GHI CHÚ
-  payment             String? // THANH TOÁN
+  payment             String? // THANH TOÁN (cột cũ — nay suy từ paidAt; giữ để tương thích, KHÔNG dùng)
+  paidAt              DateTime? // NGÀY thanh toán — KẾ TOÁN bấm đánh dấu (có ngày)
+  paidById            Int? //     Kế toán đã đánh dấu thanh toán
+  paidBy              User?     @relation("PersonnelPaidBy", fields: [paidById], references: [id])
   confirmed           String? // Xác nhận
   note                String? // Note
 
@@ -149,6 +153,7 @@ model PersonnelRecord {
   deletedAt DateTime?
 
   @@index([createdById])
+  @@index([paidById])
   @@index([deletedAt])
 }
 

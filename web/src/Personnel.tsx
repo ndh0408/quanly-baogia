@@ -26,6 +26,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const canManageAll = me.permissions.includes("personnel:manage:all");
   const canManageOwn = me.permissions.includes("personnel:manage:own");
   const canEditRow = (r: Personnel) => canManageAll || (canManageOwn && r.createdById === me.id);
+  const canPay = me.permissions.includes("personnel:pay"); // kế toán + admin: bấm đánh dấu thanh toán
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -48,6 +49,20 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     if (!(await confirmModal("Xóa hồ sơ", `Xóa hồ sơ "${r.fullName}"? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
     try { await api.deletePersonnel(r.id); toast("Đã xóa hồ sơ", "success"); load(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
+  };
+
+  // KẾ TOÁN bấm cột "Thanh toán" → đánh dấu đã/chưa (lưu ngày hôm nay).
+  const onTogglePay = async (r: Personnel) => {
+    const paid = !!r.paidAt;
+    const ok = await confirmModal(
+      paid ? "Bỏ đánh dấu thanh toán" : "Xác nhận đã thanh toán",
+      paid ? `Bỏ đánh dấu đã thanh toán cho "${r.fullName}"?`
+           : `Đánh dấu ĐÃ THANH TOÁN cho "${r.fullName}" (ghi ngày hôm nay)?`,
+      { confirmText: paid ? "Bỏ đánh dấu" : "Đã thanh toán", danger: paid },
+    );
+    if (!ok) return;
+    try { await api.markPayment(r.id, !paid); toast(paid ? "Đã bỏ đánh dấu thanh toán" : "Đã đánh dấu thanh toán", "success"); load(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
   };
 
   const toggleSort = (k: string) => {
@@ -76,6 +91,27 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     const f = FIELD_BY_KEY[k];
     const v = r[k];
     const cls = [first ? "sticky-2" : "", f?.type === "money" ? "num" : "", srcCls(f?.source)].filter(Boolean).join(" ");
+
+    // THANH TOÁN: nút cho KẾ TOÁN (canPay) bấm → đánh dấu đã/chưa (kèm ngày). Người khác chỉ xem badge.
+    if (k === "payment") {
+      const paid = !!r.paidAt;
+      const dateStr = paid ? fmtDate(r.paidAt) : "";
+      const by = (r.paidBy as { displayName?: string } | undefined)?.displayName;
+      const title = paid
+        ? `Đã thanh toán ${dateStr}${by ? ` · ${by}` : ""}${canPay ? " — bấm để bỏ đánh dấu" : ""}`
+        : (canPay ? "Bấm để đánh dấu đã thanh toán" : "Chưa thanh toán");
+      const inner = paid
+        ? <><span className="status ok">Đã thanh toán</span>{dateStr && <span className="pay-date">{dateStr}</span>}</>
+        : <span className="status danger">Chưa thanh toán</span>;
+      return (
+        <td key={k} className={`pay-cell ${cls}`}>
+          {canPay
+            ? <button type="button" className="pay-btn" onClick={() => onTogglePay(r)} title={title}>{inner}</button>
+            : <span title={title}>{inner}</span>}
+        </td>
+      );
+    }
+
     let content: ReactNode;
     if (f?.type === "money") content = fmtMoney(v);
     else if (f?.type === "date") content = fmtDate(v);
@@ -122,7 +158,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
                     <th key={k} rowSpan={2} className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
-                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : undefined}>
+                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : f?.source === "action" ? "Kế toán bấm để đánh dấu đã thanh toán (có ngày)" : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
                   );

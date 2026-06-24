@@ -41,6 +41,7 @@ export const PERMISSIONS = {
   PERSONNEL_READ_ALL:   "personnel:read:all",
   PERSONNEL_MANAGE_OWN: "personnel:manage:own",
   PERSONNEL_MANAGE_ALL: "personnel:manage:all",
+  PERSONNEL_MARK_PAYMENT: "personnel:pay", // Kế toán bấm "đã thanh toán" (có ngày) — KHÔNG sửa hồ sơ
 };
 
 const P = PERMISSIONS;
@@ -74,6 +75,7 @@ export const PERMISSION_LABELS = {
   [P.PERSONNEL_READ_ALL]:   "Xem mọi hồ sơ nhân sự",
   [P.PERSONNEL_MANAGE_OWN]: "Sửa/xóa hồ sơ mình tạo",
   [P.PERSONNEL_MANAGE_ALL]: "Sửa/xóa mọi hồ sơ nhân sự",
+  [P.PERSONNEL_MARK_PAYMENT]: "Đánh dấu đã thanh toán",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -95,6 +97,7 @@ export const PERMISSION_GROUPS = [
   ] },
   { key: "personnel", label: "Nhân sự", perms: [
     P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_OWN, P.PERSONNEL_MANAGE_ALL,
+    P.PERSONNEL_MARK_PAYMENT,
   ] },
 ];
 
@@ -124,14 +127,15 @@ const ADMIN = [
   P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
-  // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ.
-  P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL,
+  // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ + đánh dấu thanh toán.
+  P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL, P.PERSONNEL_MARK_PAYMENT,
 ];
 
 // Nhân sự (hr) + Kế toán (accountant): CHỈ XEM mọi hồ sơ nhân sự (read-only). Không tạo/sửa/xóa,
 // không thấy báo giá/khách/sản phẩm. (Kế toán cần xem lương/thuế/thanh toán; Nhân sự xem hồ sơ.)
 const HR = [P.PERSONNEL_READ_ALL];
-const ACCOUNTANT = [P.PERSONNEL_READ_ALL];
+// Kế toán: xem mọi hồ sơ + ĐÁNH DẤU đã thanh toán (có ngày). KHÔNG sửa nội dung hồ sơ.
+const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT];
 
 // Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
 // đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ

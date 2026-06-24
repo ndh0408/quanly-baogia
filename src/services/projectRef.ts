@@ -20,7 +20,7 @@ export type ProjectRef = {
   salesContractDate: Date | null;     // Ngày HĐ bán  ← QuoteSheet.signedAt
   purchaseOrder: string | null;       // Đơn đặt hàng ← QuoteSheet.poNumber
   preTaxAmount: number | null;        // Tiền trước thuế ← subtotal theo sheet
-  payment: string | null;            // Thanh toán   ← suy từ QuoteSheet.paidAt
+  // (Thanh toán KHÔNG còn suy từ dự án — nay là hành động của KẾ TOÁN trên từng hồ sơ: PersonnelRecord.paidAt)
 };
 
 /**
@@ -81,7 +81,6 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
         salesContractDate: sh.signedAt ?? null,
         purchaseOrder: sh.poNumber ?? null,
         preTaxAmount: baoGia,
-        payment: sh.paidAt ? "Đã thanh toán" : "Chưa thanh toán",
       });
     });
   }

@@ -120,8 +120,8 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     const r = await mgrA.post("/api/personnel").send(payload({
       fullName: `${TAG} Full`, taxCode: "8801234567", idCard: "079123", bankName: "ACB", bankAccount: "216110189",
       salary: 18_000_000, laborContractNo: "HDLD-01", confirmed: "OK",
-      // Field công thức/tham chiếu — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
-      pit: 999, taxableIncome: 999, payment: "BẬY", preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
+      // Field công thức/tham chiếu/thanh toán — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
+      pit: 999, taxableIncome: 999, payment: "BẬY", paidAt: "2020-01-01", preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
     }));
     expect(r.status).toBe(201);
     expect(r.body.taxCode).toBe("8801234567");
@@ -131,10 +131,30 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect(Number(r.body.pit)).toBe(Math.round(18_000_000 / 9)); // = 2.000.000
     expect(Number(r.body.taxableIncome)).toBe(18_000_000 + Math.round(18_000_000 / 9));
     // 🩷 Field tham chiếu Dự án — không có mã dự án khớp → null (KHÔNG nhận giá trị client gửi).
-    expect(r.body.payment ?? null).toBeNull();
     expect(r.body.preTaxAmount ?? null).toBeNull();
     expect(r.body.salesContractNo ?? null).toBeNull();
     expect(r.body.projectNameContract ?? null).toBeNull();
+    // 🟢 THANH TOÁN: hồ sơ mới luôn "Chưa thanh toán"; client KHÔNG set được paidAt qua create.
+    expect(r.body.paidAt ?? null).toBeNull();
+    expect(r.body.payment).toBe("Chưa thanh toán");
+  });
+
+  it("KẾ TOÁN đánh dấu thanh toán → paidAt + payment; manager/hr KHÔNG được (chỉ personnel:pay)", async () => {
+    const c = await mgrA.post("/api/personnel").send(payload({ fullName: `${TAG} Pay` }));
+    const id = c.body.id;
+    // manager (account) + hr KHÔNG có personnel:pay → 403
+    expect((await mgrA.post(`/api/personnel/${id}/payment`).send({ paid: true })).status).toBe(403);
+    expect((await hr.post(`/api/personnel/${id}/payment`).send({ paid: true })).status).toBe(403);
+    // kế toán → 200: đánh dấu đã thanh toán (lưu ngày + người)
+    const r = await acct.post(`/api/personnel/${id}/payment`).send({ paid: true });
+    expect(r.status).toBe(200);
+    expect(r.body.payment).toBe("Đã thanh toán");
+    expect(r.body.paidAt).toBeTruthy();
+    expect(r.body.paidById).toBe(acctU.id);
+    // bỏ đánh dấu → về "Chưa thanh toán", paidAt null
+    const r2 = await acct.post(`/api/personnel/${id}/payment`).send({ paid: false });
+    expect(r2.body.payment).toBe("Chưa thanh toán");
+    expect(r2.body.paidAt ?? null).toBeNull();
   });
 
   it("TỔNG (summary) tính từ Lương: pit=ΣLương/9, taxableIncome=ΣLương×10/9", async () => {
