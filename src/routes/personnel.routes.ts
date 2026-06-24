@@ -32,7 +32,8 @@ const personnelShape = {
   workStart: date, workEnd: date, workLocation: str(200),
   projectName: str(300), projectCode: str(80), teamNote: str(500), accountName: str(120), company: str(120),
   laborContractNo: str(80), laborContractDate: date,
-  accountingNote: str(1000), confirmed: str(200), note: str(1000),
+  accountingNote: str(1000), note: str(1000),
+  // payment/paidAt (kế toán) + confirmed/confirmedAt (admin) KHÔNG nhập qua đây — set bằng endpoint riêng.
 };
 // Ràng buộc logic (chỉ kiểm khi field có mặt — dùng cho cả create lẫn update).
 const refineLogic = (v: Record<string, unknown>, ctx: z.RefinementCtx) => {
@@ -69,7 +70,7 @@ const ownerSelect = { createdBy: { select: { id: true, displayName: true, userna
 
 // 🔵 Gắn field công thức (pit, taxableIncome) + 🩷 field tham chiếu Dự án vào bản ghi khi TRẢ VỀ.
 // Các field này KHÔNG lưu DB — luôn tính/tra lúc đọc nên không bao giờ lệch với Lương/Dự án.
-function decorate<T extends { salary: unknown; projectCode: string | null; paidAt?: Date | null }>(rec: T, refMap: Map<string, ProjectRef>) {
+function decorate<T extends { salary: unknown; projectCode: string | null; paidAt?: Date | null; confirmedAt?: Date | null }>(rec: T, refMap: Map<string, ProjectRef>) {
   const { pit, taxableIncome } = computeTax(rec.salary == null ? null : Number(rec.salary));
   const ref = refMap.get((rec.projectCode ?? "").toString().trim());
   return {
@@ -80,8 +81,10 @@ function decorate<T extends { salary: unknown; projectCode: string | null; paidA
     salesContractDate: ref?.salesContractDate ?? null,
     purchaseOrder: ref?.purchaseOrder ?? null,
     preTaxAmount: ref?.preTaxAmount ?? null,
-    // THANH TOÁN: KẾ TOÁN bấm đánh dấu (rec.paidAt). paidAt đi kèm (qua ...rec) để FE hiện ngày.
+    // THANH TOÁN: KẾ TOÁN bấm (rec.paidAt). XÁC NHẬN: ADMIN bấm (rec.confirmedAt → "Đã ký").
+    // paidAt/confirmedAt đi kèm (qua ...rec) để FE hiện ngày.
     payment: rec.paidAt ? "Đã thanh toán" : "Chưa thanh toán",
+    confirmed: rec.confirmedAt ? "Đã ký" : null,
   };
 }
 
@@ -242,6 +245,28 @@ router.post(
       include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
     });
     await audit(req, paid ? "personnel.pay" : "personnel.unpay", { resource: "personnel", resourceId: id });
+    const refMap = await buildProjectRef([rec.projectCode]);
+    res.json(decorate(rec, refMap));
+  })
+);
+
+// ADMIN xác nhận "đã ký" / BỎ xác nhận cho 1 hồ sơ — lưu NGÀY + người. Quyền RIÊNG personnel:confirm (CHỈ admin).
+const ConfirmBody = z.object({ confirmed: z.boolean() });
+router.post(
+  "/:id/confirm",
+  requirePermission(P.PERSONNEL_CONFIRM),
+  validate({ params: idParam, body: ConfirmBody }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = (req.params as any).id;
+    const exists = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true } });
+    if (!exists) { res.status(404).json({ error: "Không tìm thấy hồ sơ nhân sự" }); return; }
+    const confirmed = (req.body as any).confirmed as boolean;
+    const rec = await prisma.personnelRecord.update({
+      where: { id },
+      data: confirmed ? { confirmedAt: new Date(), confirmedById: req.session.userId } : { confirmedAt: null, confirmedById: null },
+      include: { ...ownerSelect, confirmedBy: { select: { id: true, displayName: true } } },
+    });
+    await audit(req, confirmed ? "personnel.confirm" : "personnel.unconfirm", { resource: "personnel", resourceId: id });
     const refMap = await buildProjectRef([rec.projectCode]);
     res.json(decorate(rec, refMap));
   })

@@ -27,6 +27,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const canManageOwn = me.permissions.includes("personnel:manage:own");
   const canEditRow = (r: Personnel) => canManageAll || (canManageOwn && r.createdById === me.id);
   const canPay = me.permissions.includes("personnel:pay"); // kế toán + admin: bấm đánh dấu thanh toán
+  const canConfirm = me.permissions.includes("personnel:confirm"); // CHỈ admin: bấm xác nhận đã ký
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -62,6 +63,20 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     );
     if (!ok) return;
     try { await api.markPayment(r.id, !paid); toast(paid ? "Đã bỏ đánh dấu thanh toán" : "Đã đánh dấu thanh toán", "success"); load(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
+  };
+
+  // ADMIN bấm cột "Xác nhận (C.Hồng)" → xác nhận đã ký / bỏ (lưu ngày hôm nay).
+  const onToggleConfirm = async (r: Personnel) => {
+    const signed = !!r.confirmedAt;
+    const ok = await confirmModal(
+      signed ? "Bỏ xác nhận đã ký" : "Xác nhận đã ký",
+      signed ? `Bỏ xác nhận "đã ký" cho "${r.fullName}"?`
+             : `Xác nhận ĐÃ KÝ cho "${r.fullName}" (ghi ngày hôm nay)?`,
+      { confirmText: signed ? "Bỏ xác nhận" : "Đã ký", danger: signed },
+    );
+    if (!ok) return;
+    try { await api.markConfirm(r.id, !signed); toast(signed ? "Đã bỏ xác nhận" : "Đã xác nhận đã ký", "success"); load(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
   };
 
@@ -107,6 +122,26 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         <td key={k} className={`pay-cell ${cls}`}>
           {canPay
             ? <button type="button" className="pay-btn" onClick={() => onTogglePay(r)} title={title}>{inner}</button>
+            : <span title={title}>{inner}</span>}
+        </td>
+      );
+    }
+
+    // XÁC NHẬN (C.Hồng): nút CHỈ cho ADMIN (canConfirm) bấm → đã ký / bỏ (kèm ngày). Người khác chỉ xem.
+    if (k === "confirmed") {
+      const signed = !!r.confirmedAt;
+      const dateStr = signed ? fmtDate(r.confirmedAt) : "";
+      const by = (r.confirmedBy as { displayName?: string } | undefined)?.displayName;
+      const title = signed
+        ? `Đã ký ${dateStr}${by ? ` · ${by}` : ""}${canConfirm ? " — bấm để bỏ" : ""}`
+        : (canConfirm ? "Bấm để xác nhận đã ký" : "Chưa ký");
+      const inner = signed
+        ? <><span className="status ok">Đã ký</span>{dateStr && <span className="pay-date">{dateStr}</span>}</>
+        : (canConfirm ? <span className="status neutral">Xác nhận đã ký</span> : <span className="muted">—</span>);
+      return (
+        <td key={k} className={`pay-cell ${cls}`}>
+          {canConfirm
+            ? <button type="button" className="pay-btn" onClick={() => onToggleConfirm(r)} title={title}>{inner}</button>
             : <span title={title}>{inner}</span>}
         </td>
       );
@@ -158,7 +193,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
                     <th key={k} rowSpan={2} className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
-                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : f?.source === "action" ? "Kế toán bấm để đánh dấu đã thanh toán (có ngày)" : undefined}>
+                        onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : f?.source === "action" ? (k === "confirmed" ? "Admin bấm để xác nhận đã ký (có ngày)" : "Kế toán bấm để đánh dấu đã thanh toán (có ngày)") : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
                   );

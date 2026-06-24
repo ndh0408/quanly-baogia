@@ -77,8 +77,11 @@ async function main() {
   ]);
   console.log("✓ 7 nhân viên trong Danh bạ (đủ MST/căn cước/STK… để chọn khi tạo hồ sơ)");
 
-  // 🟡 field nhập tay. 🔵 Thuế TNCN/Thu nhập chịu thuế server tự tính. 🩷 cột HĐ/thanh toán tự LẤY
-  // từ Dự án theo projectCode = "mã sản xuất" báo giá ĐÃ CHỐT. accountName = account tạo (= chủ dự án).
+  // ADMIN (xác nhận "đã ký") — dùng admin nền (KHÔNG phải demo_*); có thể null nếu chưa seed admin.
+  const adminUser = await prisma.user.findFirst({ where: { role: "admin" }, select: { id: true } });
+
+  // 🟡 field nhập tay. 🔵 Thuế TNCN/Thu nhập chịu thuế server tự tính. 🩷 cột HĐ tự LẤY từ Dự án.
+  // THANH TOÁN: kế toán bấm (paidAt). XÁC NHẬN "đã ký": admin bấm (confirmedAt).
   const hrRec = (creator, p, o) => prisma.personnelRecord.create({ data: {
     createdById: creator.id, fullName: `${TAG} ${p.name}`,
     taxCode: p.taxCode, birthYear: p.birthYear, idCard: p.idCard,
@@ -89,8 +92,11 @@ async function main() {
     workLocation: o.loc || "HCM", projectName: o.project || null, projectCode: o.code || null,
     teamNote: o.team || null, accountName: creator.displayName, company: o.cty || "GN",
     laborContractNo: o.hdld || null, laborContractDate: o.hdldDate ? new Date(o.hdldDate) : null,
-    accountingNote: o.acctNote || null, confirmed: o.confirmed || null, note: o.note || null,
-    paidAt: o.paid ? ago(o.paidAgo ?? 3) : null, paidById: o.paid ? acctUser.id : null, // KẾ TOÁN đã đánh dấu
+    accountingNote: o.acctNote || null, note: o.note || null,
+    paidAt: o.paid ? ago(o.paidAgo ?? 3) : null, paidById: o.paid ? acctUser.id : null, // KẾ TOÁN đã đánh dấu TT
+    // ADMIN đã xác nhận "đã ký" (o.confirmed truthy = đã ký); confirmed string cũ KHÔNG dùng nữa.
+    confirmedAt: o.confirmed && adminUser ? ago(o.confirmedAgo ?? 4) : null,
+    confirmedById: o.confirmed && adminUser ? adminUser.id : null,
   } });
   // creator = CHỦ DỰ ÁN của code (DEMOL26→accSign, DEMOB26→accB, DEMOA26→accA); đủ các trạng thái HĐ.
   await hrRec(accSign, P.thuong, { salary: 10_000_000, start: "2025-10-13", end: "2025-10-24",

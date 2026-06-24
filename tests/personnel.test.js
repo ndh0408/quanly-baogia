@@ -111,17 +111,18 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
   });
 
   it("admin sửa hồ sơ của BẤT KỲ ai → 200", async () => {
-    const r = await admin.put(`/api/personnel/${recAId}`).send({ confirmed: "admin duyệt" });
+    const r = await admin.put(`/api/personnel/${recAId}`).send({ accountingNote: "admin duyệt" });
     expect(r.status).toBe(200);
-    expect(r.body.confirmed).toBe("admin duyệt");
+    expect(r.body.accountingNote).toBe("admin duyệt");
   });
 
   it("round-trip cột nhập + CÔNG THỨC thuế (pit=Lương/9, thu nhập=Lương×10/9) + BỎ field tham chiếu", async () => {
     const r = await mgrA.post("/api/personnel").send(payload({
       fullName: `${TAG} Full`, taxCode: "8801234567", idCard: "079123", bankName: "ACB", bankAccount: "216110189",
-      salary: 18_000_000, laborContractNo: "HDLD-01", confirmed: "OK",
-      // Field công thức/tham chiếu/thanh toán — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
-      pit: 999, taxableIncome: 999, payment: "BẬY", paidAt: "2020-01-01", preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
+      salary: 18_000_000, laborContractNo: "HDLD-01",
+      // Field công thức/tham chiếu/thanh toán/xác nhận — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
+      pit: 999, taxableIncome: 999, payment: "BẬY", paidAt: "2020-01-01", confirmed: "OK", confirmedAt: "2020-01-01",
+      preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
     }));
     expect(r.status).toBe(201);
     expect(r.body.taxCode).toBe("8801234567");
@@ -134,9 +135,11 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect(r.body.preTaxAmount ?? null).toBeNull();
     expect(r.body.salesContractNo ?? null).toBeNull();
     expect(r.body.projectNameContract ?? null).toBeNull();
-    // 🟢 THANH TOÁN: hồ sơ mới luôn "Chưa thanh toán"; client KHÔNG set được paidAt qua create.
+    // 🟢 THANH TOÁN + XÁC NHẬN: hồ sơ mới chưa TT/chưa ký; client KHÔNG set được paidAt/confirmedAt qua create.
     expect(r.body.paidAt ?? null).toBeNull();
     expect(r.body.payment).toBe("Chưa thanh toán");
+    expect(r.body.confirmedAt ?? null).toBeNull();
+    expect(r.body.confirmed ?? null).toBeNull();
   });
 
   it("KẾ TOÁN đánh dấu thanh toán → paidAt + payment; manager/hr KHÔNG được (chỉ personnel:pay)", async () => {
@@ -155,6 +158,24 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     const r2 = await acct.post(`/api/personnel/${id}/payment`).send({ paid: false });
     expect(r2.body.payment).toBe("Chưa thanh toán");
     expect(r2.body.paidAt ?? null).toBeNull();
+  });
+
+  it("ADMIN xác nhận đã ký → confirmedAt + 'Đã ký'; kế toán/manager KHÔNG được (chỉ personnel:confirm)", async () => {
+    const c = await mgrA.post("/api/personnel").send(payload({ fullName: `${TAG} Sign` }));
+    const id = c.body.id;
+    // kế toán + manager KHÔNG có personnel:confirm → 403 (chỉ admin)
+    expect((await acct.post(`/api/personnel/${id}/confirm`).send({ confirmed: true })).status).toBe(403);
+    expect((await mgrA.post(`/api/personnel/${id}/confirm`).send({ confirmed: true })).status).toBe(403);
+    // admin → 200: xác nhận đã ký (lưu ngày + người)
+    const r = await admin.post(`/api/personnel/${id}/confirm`).send({ confirmed: true });
+    expect(r.status).toBe(200);
+    expect(r.body.confirmed).toBe("Đã ký");
+    expect(r.body.confirmedAt).toBeTruthy();
+    expect(r.body.confirmedById).toBe(adminU.id);
+    // bỏ xác nhận → confirmed null
+    const r2 = await admin.post(`/api/personnel/${id}/confirm`).send({ confirmed: false });
+    expect(r2.body.confirmed ?? null).toBeNull();
+    expect(r2.body.confirmedAt ?? null).toBeNull();
   });
 
   it("TỔNG (summary) tính từ Lương: pit=ΣLương/9, taxableIncome=ΣLương×10/9", async () => {

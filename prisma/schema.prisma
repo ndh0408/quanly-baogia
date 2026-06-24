@@ -92,6 +92,7 @@ model User {
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
   personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
   personnelPaid     PersonnelRecord[] @relation("PersonnelPaidBy")
+  personnelConfirmed PersonnelRecord[] @relation("PersonnelConfirmedBy")
   employees         Employee[]        @relation("EmployeeCreatedBy")
 
   @@index([deletedAt, active])
@@ -145,7 +146,10 @@ model PersonnelRecord {
   paidAt              DateTime? // NGÀY thanh toán — KẾ TOÁN bấm đánh dấu (có ngày)
   paidById            Int? //     Kế toán đã đánh dấu thanh toán
   paidBy              User?     @relation("PersonnelPaidBy", fields: [paidById], references: [id])
-  confirmed           String? // Xác nhận
+  confirmed           String? // XÁC NHẬN (cột cũ — nay suy từ confirmedAt; giữ để tương thích, KHÔNG dùng)
+  confirmedAt         DateTime? // NGÀY ADMIN xác nhận "đã ký" (có ngày)
+  confirmedById       Int? //     Admin đã xác nhận
+  confirmedBy         User?     @relation("PersonnelConfirmedBy", fields: [confirmedById], references: [id])
   note                String? // Note
 
   createdAt DateTime  @default(now())
@@ -154,6 +158,7 @@ model PersonnelRecord {
 
   @@index([createdById])
   @@index([paidById])
+  @@index([confirmedById])
   @@index([deletedAt])
 }
 

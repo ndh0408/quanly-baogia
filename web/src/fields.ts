@@ -46,7 +46,7 @@ export const FIELDS: Field[] = [
   // Thanh toán
   { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "input" },
   { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "action" },
-  { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "input" },
+  { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "action" },
   { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "input" },
 ];
 
