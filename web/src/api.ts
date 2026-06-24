@@ -70,6 +70,19 @@ export type QuoteRow = {
 };
 export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
+// Quản lý dự án (increment 9) — báo giá đã chốt, mỗi sheet 1 dòng theo dõi hoá đơn.
+export type ProjectSheet = {
+  id?: number; name?: string | null; subtotal?: number; hcm?: number; hanoi?: number; khach?: number; cty?: string | null;
+  signedAt?: string | null; signedByName?: string | null; invoiceNo?: string | null; paidAt?: string | null;
+  invStatus?: string; poNumber?: string | null; hnInvoiceNo?: string | null; invoiceLink?: string | null;
+  docSentAt?: string | null; docReturnedAt?: string | null;
+};
+export type ProjectQuote = {
+  id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
+  quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; hnStatus?: string | null;
+  company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];
+};
+
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
@@ -185,6 +198,12 @@ export const api = {
   duplicateQuote: (id: number, sameProject = false) =>
     req<QuoteRow>(`/quotes/${id}/duplicate`, { method: "POST", body: JSON.stringify(sameProject ? { sameProject: true } : {}) }),
   deleteQuote: (id: number) => req<{ ok: boolean }>(`/quotes/${id}`, { method: "DELETE" }),
+  // Quản lý dự án (increment 9) — báo giá đã chốt + theo dõi hoá đơn/ký.
+  quoteProjects: () => req<{ data: ProjectQuote[] }>("/quotes/projects"),
+  updateSheetInvoice: (sheetId: number, field: string, val: string | null) =>
+    req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
+  signSheet: (sheetId: number, signed: boolean) =>
+    req<unknown>(`/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) }),
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),

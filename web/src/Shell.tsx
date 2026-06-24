@@ -10,6 +10,7 @@ import { ProfilePage } from "./Profile";
 import { NotificationsPage } from "./Notifications";
 import { DashboardPage } from "./Dashboard";
 import { QuoteListPage } from "./QuoteList";
+import { ProjectsPage } from "./Projects";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -48,7 +49,7 @@ const NAV: Nav[] = [
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
-  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own" },
+  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own", ported: true },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
@@ -141,6 +142,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
               : key === "users" ? <UsersPage me={me} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />
+              : key === "projects" ? <ProjectsPage me={me} />
               : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} />
