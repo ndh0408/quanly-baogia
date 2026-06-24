@@ -91,11 +91,12 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
   useEffect(() => {
-    // Trang đích theo vai trò (giống landingPage SPA): admin/Account→Tổng quan; còn lại→nav đầu có quyền.
+    // Trang đích: GIỮ Nhân sự làm cửa vào (chủ đích HR-first của app "Quản Lý") cho ai CÓ quyền HR;
+    // ai KHÔNG có (vd account_hn) thì rơi về nav đầu tiên có quyền → không bị ép vào trang 403.
     if (!location.hash) {
-      const canQuote = me.permissions.includes("quote:read:own") || me.permissions.includes("quote:read:all");
+      const canHr = me.permissions.includes("personnel:read:own") || me.permissions.includes("personnel:read:all");
       const first = NAV.find((n) => has(n.perm));
-      location.hash = "#/" + (((me.role === "admin" || me.role === "manager") && canQuote) ? "dashboard" : (first?.key || "personnel"));
+      location.hash = "#/" + (canHr ? "personnel" : (first?.key || "list"));
     }
     refreshBadge();
     const on = () => { setKey(currentKey()); setSbOpen(false); refreshBadge(); };
