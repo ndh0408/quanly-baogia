@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "./api";
 import { toast, confirmModal, promptModal } from "./ui";
 import * as M from "./quoteMath";
+import { evalFormula, type FormulaRefs } from "./formula";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor + drawItems) sang React.
@@ -179,11 +180,61 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const sectionSum: Record<number, number> = {};
   { let cur = -1; for (let i = 0; i < items.length; i++) { if (rk[i] === "section") { cur = i; sectionSum[i] = 0; } else if ((rk[i] === "head" || rk[i] === "sub") && cur >= 0) sectionSum[cur] += M.lineAmount(items[i], usesDays); } }
 
-  const numInput = (i: number, f: "quantity" | "unitPrice" | "days", w?: number) => (
-    <input data-f={f} inputMode="decimal" defaultValue={M.fmtNumCell(items[i][f] as number)} disabled={!editable} style={w ? { width: w } : undefined}
-      onInput={(e) => { const it = items[i]; const n = M.parseVN((e.target as HTMLInputElement).value); (it as Record<string, unknown>)[f] = n; mark(); if (it.kind === "section" && f === "quantity" && n > 1 && !activeSheet.groupSubtotal) { activeSheet.groupSubtotal = true; } redraw(); }}
-      onBlur={(e) => { (e.target as HTMLInputElement).value = M.fmtNumCell(items[i][f] as number); }} />
-  );
+  // ── A1 addressing + công thức Excel (Stage 2) ───────────────────────────────
+  const ADDR: { f: string; ro?: boolean; L: string }[] = [
+    { f: "_stt", ro: true, L: "" }, { f: "name", L: "" },
+    ...(showDetail ? [{ f: "detail", L: "" }] : []),
+    { f: "unit", L: "" }, { f: "quantity", L: "" },
+    ...(usesDays ? [{ f: "days", L: "" }] : []),
+    { f: "unitPrice", L: "" }, { f: "_amount", ro: true, L: "" }, { f: "notes", L: "" }, { f: "internalNote", L: "" },
+  ];
+  ADDR.forEach((c, i) => { c.L = M.groupLetter(i); });
+  const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+  const colByL: Record<string, { f: string }> = {}; ADDR.forEach((c) => { colByL[c.L] = c; });
+  const idxOfL = (L: string) => ADDR.findIndex((c) => c.L === L);
+  const parseAddr = (a: string) => { const m = /^([A-Za-z]+)(\d+)$/.exec(a.trim()); if (!m) return null; const L = m[1].toUpperCase(); const col = colByL[L]; if (!col) return null; const row = parseInt(m[2], 10) - 1; if (row < 0 || row >= items.length) return null; return { row, f: col.f, L }; };
+  const cellNum = (a: string): number => { const p = parseAddr(a); if (!p) return 0; const it = items[p.row] as Record<string, unknown>; if (!it) return 0; if (p.f === "_amount") return (items[p.row].kind === "section" || items[p.row].kind === "subsection" || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0; if (NUMERIC.has(p.f)) return Number(it[p.f]) || 0; return M.parseVN((it[p.f] as string) || ""); };
+  const refs: FormulaRefs = { cell: cellNum, range: (a, b) => { const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null; const ca = idxOfL(pa.L), cb = idxOfL(pb.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(pa.row, pb.row), r1 = Math.max(pa.row, pb.row); const out: number[] = []; for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellNum(ADDR[c].L + (r + 1))); return out; } };
+  const recomputeAll = () => {
+    if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
+    for (let pass = 0; pass < 8; pass++) {
+      let ch = false;
+      for (const it of items) { if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { const v = evalFormula(it.formulas[f], refs); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      if (!ch) break;
+    }
+  };
+  const peekFx = (fx: string, val: string) => toast(`Công thức: ${fx}  =  ${val}`, "info");
+
+  // Ô SỐ: hỗ trợ công thức (=…) + gom nghìn LIVE (giữ con trỏ theo số chữ số) + ƒ badge xem công thức.
+  const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
+    const raw = el.value; const it = items[i] as Record<string, unknown>;
+    if (raw.trim().startsWith("=")) { mark(); return; }   // đang gõ công thức → để nguyên, xử lý ở blur
+    const before = el.selectionStart ?? raw.length;
+    const digitsBefore = raw.slice(0, before).replace(/\D/g, "").length;
+    const formatted = M.liveFormat(raw);
+    el.value = formatted;
+    let pos = 0, seen = 0; while (pos < formatted.length && seen < digitsBefore) { if (/\d/.test(formatted[pos])) seen++; pos++; }
+    try { el.setSelectionRange(pos, pos); } catch { /* ignore */ }
+    const n = M.parseVN(formatted); it[f] = n;
+    if (it.formulas) delete (it.formulas as Record<string, string>)[f];
+    if (items[i].kind === "section" && f === "quantity" && n > 1 && !activeSheet.groupSubtotal) activeSheet.groupSubtotal = true;
+    mark(); redraw();
+  };
+  const onNumBlur = (i: number, f: string, el: HTMLInputElement) => {
+    const raw = el.value.trim(); const it = items[i] as Record<string, unknown>;
+    if (raw.startsWith("=")) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = raw; const v = evalFormula(raw, refs); it[f] = v ?? 0; }
+    else { if (it.formulas) delete (it.formulas as Record<string, string>)[f]; it[f] = M.parseVN(raw); }
+    mark(); recomputeAll(); redraw();
+  };
+  const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
+    const it = items[i]; const fx = it.formulas?.[f]; const val = M.fmtNumCell(it[f] as number);
+    return (<>
+      <input key={fx ? `f-${it._k}-${f}-${val}` : `${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
+        title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — tự tính kết quả"
+        onInput={(e) => onNumInput(i, f, e.target as HTMLInputElement)} onBlur={(e) => onNumBlur(i, f, e.target as HTMLInputElement)} />
+      {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} onClick={() => peekFx(fx, val)}>ƒ</button>}
+    </>);
+  };
   const txtInput = (i: number, f: string, ph?: string) => (
     <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable} onInput={(e) => setItem(i, f, (e.target as HTMLInputElement).value)} />
   );
@@ -191,22 +242,24 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       ref={autoGrow} onInput={(e) => { setItem(i, f, (e.target as HTMLTextAreaElement).value); autoGrow(e.target as HTMLTextAreaElement); }} />
   );
+  const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "");
 
-  // dataCells: chung cho head + sub (mọi cột trừ STT + Hạng Mục)
+  // dataCells: chung cho head + sub (mọi cột trừ STT + Hạng Mục). Có cột "Ghi chú nội bộ" (không xuất Excel).
   const dataCells = (i: number) => (
     <>
       {showDetail && <td className="col-detail">{taInput(i, "detail")}</td>}
       <td className="col-dvt">{txtInput(i, "unit")}</td>
-      <td className="col-qty">{numInput(i, "quantity")}</td>
-      {usesDays && <td className="col-qty">{numInput(i, "days")}</td>}
-      <td className="col-price">{numInput(i, "unitPrice")}</td>
+      <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
+      {usesDays && <td className={fcls(i, "days", "col-qty")} style={{ position: "relative" }}>{numInput(i, "days")}</td>}
+      <td className={fcls(i, "unitPrice", "col-price")} style={{ position: "relative" }}>{numInput(i, "unitPrice")}</td>
       <td className="col-amount">{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
+      <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>
       {editable && <td className="col-action"><button className="add-sub" title="Thêm hàng con" onClick={() => addSubAfter(i)}>↳</button><button className="rm-row" title="Xóa hàng" onClick={() => removeRow(i)}>✕</button></td>}
     </>
   );
 
-  const infoColspan = 5 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
+  const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + 1;
   let sttNo = 0, sectionIdx = -1, subNo = 0;
 
   const subtotalAll = sheets.reduce((acc, s) => { const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0);
@@ -282,6 +335,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                 <th scope="col" style={{ width: 130 }}>ĐƠN GIÁ</th>
                 <th scope="col" style={{ width: 140 }}>THÀNH TIỀN</th>
                 <th scope="col" style={{ width: 150 }}>GHI CHÚ</th>
+                <th scope="col" style={{ width: 150 }} className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>
                 {editable && <th scope="col" style={{ width: 36 }} />}
               </tr>
             </thead>
@@ -300,11 +354,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                       <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { setItem(i, "name", (e.target as HTMLTextAreaElement).value); autoGrow(e.target as HTMLTextAreaElement); }} /></td>
                       {showDetail && <td className="col-detail" />}
                       <td className="col-dvt">{txtInput(i, "unit")}</td>
-                      <td className="col-qty">{numInput(i, "quantity")}</td>
+                      <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
                       {usesDays && <td className="col-qty" />}
                       <td className="col-price">{M.fmtNumCell(subAmt)}</td>
                       <td className="col-amount">{activeSheet.groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
                       <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
+                      <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>
                       {editable && <td className="col-action"><button className="rm-row" title={isSub ? "Xóa nhóm con" : "Xóa nhóm"} onClick={() => removeRow(i)}>✕</button></td>}
                     </tr>
                   );
@@ -329,7 +384,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                   </tr>
                 );
               })}
-              {items.length === 0 && <tr><td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>Chưa có hàng nào — bấm “+ Thêm hàng” bên dưới.</td></tr>}
+              {items.length === 0 && <tr><td colSpan={12} className="muted" style={{ textAlign: "center", padding: 18 }}>Chưa có hàng nào — bấm “+ Thêm hàng” bên dưới.</td></tr>}
             </tbody>
           </table>
         </div>
