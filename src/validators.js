@@ -228,6 +228,8 @@ export const QuoteUpdateSchema = z.object({
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
   sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá").optional(),
+  // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
+  baseUpdatedAt: z.coerce.date().optional(),
 });
 
 export const ListQuerySchema = z.object({

@@ -164,6 +164,14 @@ export async function updateQuote(req) {
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canEdit(existing, req.session)) throw httpError(403, "Bạn không thể sửa báo giá này");
 
+  // KHÓA LẠC QUAN (chống MẤT DỮ LIỆU): nếu client gửi mốc updatedAt đã tải mà DB đã thay đổi
+  // (người khác lưu xen vào giữa lúc đang mở editor) → 409, KHÔNG ghi đè im lặng. Client cũ
+  // không gửi baseUpdatedAt → bỏ qua (tương thích ngược, không tệ hơn trước).
+  if (b.baseUpdatedAt && existing.updatedAt &&
+      new Date(b.baseUpdatedAt).getTime() !== new Date(existing.updatedAt).getTime()) {
+    throw httpError(409, "Báo giá vừa được người khác cập nhật. Vui lòng tải lại để không ghi đè thay đổi của họ.");
+  }
+
   if (Array.isArray(b.sheets)) {
     const targetCompany = b.companyId ?? existing.companyId;
     if (!(await templatesBelongToCompany(b.sheets, targetCompany))) {

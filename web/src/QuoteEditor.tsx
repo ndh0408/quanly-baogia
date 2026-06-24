@@ -180,7 +180,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         }),
       };
       delete payload._new; delete payload._activeSheet;
-      if (isNew) delete payload.quoteNumber;
+      // Khóa lạc quan: gửi mốc updatedAt đã tải → server chặn ghi đè nếu người khác vừa lưu (409).
+      // Sau khi lưu, q được refresh từ `saved` (bên dưới) nên base luôn mới cho lần lưu kế.
+      payload.baseUpdatedAt = (q as { updatedAt?: string }).updatedAt;
+      if (isNew) { delete payload.quoteNumber; delete payload.baseUpdatedAt; }
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       toast("Đã lưu", "success");
