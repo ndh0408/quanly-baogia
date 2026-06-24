@@ -92,3 +92,30 @@ export function confirmModal(
     (back.querySelector("[data-yes]") as HTMLElement | null)?.focus();
   });
 }
+
+// Hỏi 1 dòng văn bản (vd lý do "không chốt"). resolve(null) khi hủy.
+export function promptModal(
+  title: string,
+  message: string,
+  opts: { placeholder?: string; confirmText?: string } = {}
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "modal-backdrop";
+    back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="modal-head"><h3>${esc(title)}</h3></div>
+      <div class="modal-body"><p style="margin:0 0 8px">${esc(message)}</p>
+        <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
+      <div class="modal-foot"><button class="btn" data-no>Hủy</button><button class="btn btn-primary" data-yes>${esc(opts.confirmText ?? "Xác nhận")}</button></div></div>`;
+    const input = back.querySelector(".pm-input") as HTMLTextAreaElement;
+    const cleanup = () => { back.remove(); document.removeEventListener("keydown", onKey); };
+    const done = (v: string | null) => { cleanup(); resolve(v); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") done(null); };
+    back.addEventListener("click", (e) => { if (e.target === back) done(null); });
+    back.querySelector("[data-no]")?.addEventListener("click", () => done(null));
+    back.querySelector("[data-yes]")?.addEventListener("click", () => done(input.value.trim()));
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(back);
+    input.focus();
+  });
+}

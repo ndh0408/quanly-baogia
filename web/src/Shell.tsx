@@ -11,6 +11,7 @@ import { NotificationsPage } from "./Notifications";
 import { DashboardPage } from "./Dashboard";
 import { QuoteListPage } from "./QuoteList";
 import { ProjectsPage } from "./Projects";
+import { QuoteEditorPage } from "./QuoteEditor";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -89,6 +90,9 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const groups = [...new Set(visible.map((n) => n.group))];
   const active = NAV.find((n) => n.key === key);
   const onTheme = () => { toggleTheme(); setTheme(themeIcon()); };
+  // Editor React (đang port) tại hash ẨN tạm để test — #/quotes/:id + #/new vẫn iframe (live).
+  const editMatch = key.match(/^redit\/(\d+)$/);
+  const isEditor = key === "rnew" || !!editMatch;
 
   return (
     <>
@@ -134,7 +138,11 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             <button className="logout" onClick={async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
-        {active?.ported ? (
+        {isEditor ? (
+          <main className="main" id="main" tabIndex={-1}>
+            <QuoteEditorPage me={me} isNew={key === "rnew"} quoteId={editMatch ? Number(editMatch[1]) : undefined} />
+          </main>
+        ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
             {key === "dashboard" ? <DashboardPage />
               : key === "list" ? <QuoteListPage me={me} />

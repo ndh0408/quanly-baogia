@@ -83,6 +83,19 @@ export type ProjectQuote = {
   company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];
 };
 
+// Editor báo giá (increment 10).
+export type EditorCompany = { id: number; name: string; shortName?: string; address?: string };
+export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean } };
+export type QuoteFull = {
+  id: number; _new?: boolean; status: string; title?: string; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
+  companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;
+  greeting?: string; notes?: string; toCompany?: string; toContact?: string; toEmail?: string; toPhone?: string; toAddress?: string;
+  fromContact?: string; fromTitle?: string; fromPhone?: string; fromAddress?: string; createdById?: number;
+  members?: { id: number; displayName?: string }[]; sheets?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
+};
+export type QuoteVersion = { id: string; versionNo: number; total: number; createdAt: string; createdById?: number | null };
+export type AssignableUser = { id: number; displayName: string; role?: string; title?: string | null; senderName?: string | null };
+
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
@@ -209,4 +222,15 @@ export const api = {
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
   markAllNotifsRead: () => req<unknown>("/notifications/read-all", { method: "POST" }),
   unreadCount: () => req<{ count: number }>("/notifications/unread-count").catch(() => ({ count: 0 })),
+  // Editor báo giá (increment 10) — catalog + CRUD + chuyển trạng thái + phiên bản + thành viên.
+  metaCompanies: () => req<EditorCompany[]>("/meta/companies"),
+  metaTemplates: () => req<EditorTemplate[]>("/meta/templates"),
+  getQuote: (id: number) => req<QuoteFull>(`/quotes/${id}`),
+  createQuote: (payload: unknown) => req<QuoteFull>("/quotes", { method: "POST", body: JSON.stringify(payload) }),
+  updateQuote: (id: number, payload: unknown) => req<QuoteFull>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  markConverted: (id: number) => req<QuoteFull>(`/quotes/${id}/mark-converted`, { method: "POST" }),
+  markLost: (id: number, reason: string) => req<QuoteFull>(`/quotes/${id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) }),
+  quoteVersions: (id: number) => req<{ data: QuoteVersion[] }>(`/quotes/${id}/versions`),
+  assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),
+  setMembers: (id: number, memberIds: number[]) => req<unknown>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) }),
 };
