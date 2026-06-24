@@ -19,6 +19,8 @@ RUN apk add --no-cache openssl libc6-compat \
 FROM node:22-alpine AS webbuild
 WORKDIR /app
 COPY web ./web
+COPY shared ./shared
+# web/ import gói shared/ ngoài root (../../shared) → phải có mặt khi build, nếu không Vite/tsc fail.
 RUN cd web && npm ci && npm run build
 # vite outDir = ../public/app2 → ghi ra /app/public/app2
 

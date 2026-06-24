@@ -10,6 +10,7 @@
     "worker": "tsx src/worker.js",
     "typecheck": "tsc --noEmit",
     "web:build": "npm --prefix web ci && npm --prefix web run build",
+    "web:test": "npm --prefix web run test",
     "e2e:hr": "node e2e-hr.mjs",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

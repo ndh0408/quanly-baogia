@@ -72,6 +72,10 @@ jobs:
       - name: Typecheck + build web (React)
         run: npm run web:build
 
+      # Test đơn vị frontend (Vitest) — gồm vector vàng toán tiền (shared/quote-math).
+      - name: Web unit tests (Vitest)
+        run: npm run web:test
+
       - name: Prisma generate + migrate
         run: |
           npx prisma generate
