@@ -95,7 +95,7 @@ export function GridTable(props: GridTableProps) {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }
       it[f] = NUMERIC.has(f) ? (raw.trim() === "" ? 0 : M.parseVN(raw)) : (MULTILINE.has(f) ? raw : raw.trim().replace(/\s+/g, " "));
     }
-    if (items[i].kind === "section" && f === "quantity" && (Number(it[f]) || 0) > 1 && !groupSubtotal) onGroupSubtotal?.(true);
+    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && (Number(it[f]) || 0) > 1 && !groupSubtotal) onGroupSubtotal?.(true);
   };
 
   // ── selection rectangle (sống qua redraw: tô lại từ selRef ở effect mỗi render) ─
@@ -265,10 +265,20 @@ export function GridTable(props: GridTableProps) {
     copyBufRef.current = { tsv, token, kinds, c0: rc.c0 };
     if (cut && editable) { pushUndo(); for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; const it = items[r] as Record<string, unknown>; it[f] = NUMERIC.has(f) ? 0 : ""; if (it.formulas) delete (it.formulas as Record<string, string>)[f]; } recomputeAll(); onChange(); }
   };
+  // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
+  // sheetSubtotalGrouped ép mult=1 → MẤT hệ số ×N → tổng ÂM THẦM SAI (như SPA autoEnableGroupSub).
+  const autoEnableGroupSub = (lo: number, hi: number) => {
+    if (groupSubtotal) return;
+    for (let i = Math.max(0, lo); i <= hi && i < items.length; i++) {
+      const it = items[i];
+      if ((it.kind === "section" || it.kind === "subsection") && (Number(it.quantity) || 0) > 1) { onGroupSubtotal?.(true); return; }
+    }
+  };
   const fillDown = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.r1 <= rc.r0) return;
     pushUndo();
     for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; const top = items[rc.r0] as Record<string, unknown>; for (let r = rc.r0 + 1; r <= rc.r1; r++) { if (items[r].kind === "info") continue; const it = items[r] as Record<string, unknown>; it[f] = top[f]; const tfx = top.formulas as Record<string, string> | undefined; if (tfx && tfx[f]) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = tfx[f]; } else if (it.formulas) delete (it.formulas as Record<string, string>)[f]; } }
+    autoEnableGroupSub(rc.r0, rc.r1);
     recomputeAll(); onChange();
   };
 
@@ -336,6 +346,7 @@ export function GridTable(props: GridTableProps) {
       const built = reconstructExportRows(rows, roles, NUMERIC).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
       items.splice(startRow, rows.length, ...built);
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
+      autoEnableGroupSub(startRow, startRow + built.length - 1);
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[0] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
       focusCell(startRow, FIELDS[0]);
@@ -358,6 +369,7 @@ export function GridTable(props: GridTableProps) {
       if (kinds && kinds[r]) it.kind = kinds[r];
       cells.forEach((val, c) => { const f = FIELDS[startCol + c]; if (f) pasteCellVal(ri, f, val); });
     });
+    autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
     selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
     focusCell(startRow, FIELDS[startCol]);
@@ -438,13 +450,15 @@ export function GridTable(props: GridTableProps) {
     try { el.setSelectionRange(pos, pos); } catch { /* */ }
     const n = M.parseVN(formatted); it[f] = n;
     if (it.formulas) delete (it.formulas as Record<string, string>)[f];
-    if (items[i].kind === "section" && f === "quantity" && n > 1 && !groupSubtotal) onGroupSubtotal?.(true);
+    if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && n > 1 && !groupSubtotal) onGroupSubtotal?.(true);
     closeAuto(); clearActiveRefs(); onChange();
   };
   const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
     const it = items[i]; const fx = it.formulas?.[f]; const val = M.fmtNumCell(it[f] as number);
+    // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
+    // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
     return (<>
-      <input key={fx ? `f-${it._k}-${f}-${val}` : `${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
+      <input key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
         title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — bấm/kéo ô để chèn tham chiếu"
         onInput={(e) => onNumInput(i, f, e.target as HTMLInputElement)} />
       {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} onClick={() => peekFx(fx, val)}>ƒ</button>}
@@ -461,8 +475,20 @@ export function GridTable(props: GridTableProps) {
   const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "");
   const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
 
-  // Focus ô đích sau redraw (paste / Enter-nav / undo) + TÔ LẠI vùng chọn & ref từ selRef (survive redraw).
+  // Sau mỗi render: (1) ĐỒNG BỘ mọi ô KHÔNG-focus về model (như SPA redraw — dán/undo/recompute hiển
+  // thị đúng mà KHÔNG remount → không mất focus); (2) focus ô đích (paste/nav/undo); (3) tô lại vùng chọn.
   useEffect(() => {
+    const tb = tableRef.current;
+    if (tb) {
+      tb.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-f]").forEach((el) => {
+        if (document.activeElement === el) return;   // ô đang gõ → để yên
+        const tr = el.closest("tr[data-row]"); if (!tr) return;
+        const i = parseInt(tr.getAttribute("data-row") || "-1", 10); if (i < 0 || i >= items.length) return;
+        const f = el.getAttribute("data-f") as string; const rec = items[i] as Record<string, unknown>;
+        const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? "");
+        if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
+      });
+    }
     if (focusPend.current && tableRef.current) {
       const { i, f } = focusPend.current; focusPend.current = null;
       const el = tableRef.current.querySelector(`tr[data-row="${i}"] [data-f="${f}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
@@ -593,6 +619,12 @@ export function GridTable(props: GridTableProps) {
           <button className="btn btn-sm" onClick={addSubSection}>+ Nhóm con</button>
           <button className="btn btn-sm" onClick={addInfo}>+ Dòng thông tin</button>
         </div>
+      )}
+      {editable && onGroupSubtotal && (
+        <label className="toggle-totals gf-group-sub" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: "pointer" }}>
+          <input type="checkbox" checked={groupSubtotal} onChange={(e) => onGroupSubtotal(e.target.checked)} />
+          <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
+        </label>
       )}
     </>
   );
