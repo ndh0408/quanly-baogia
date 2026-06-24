@@ -103,9 +103,9 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .grid label.full { grid-column: 1 / -1; }
 .grid label span { color: var(--soft); font-weight: 500; }
 .grid .unit { color: var(--muted); font-style: normal; font-weight: 400; }
-.grid input, .grid textarea { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; font-size: 14px; font-family: inherit; background: var(--field-bg); color: var(--text); }
-.grid input:focus-visible, .grid textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
-.grid input:disabled, .grid textarea:disabled { background: var(--field-disabled); color: var(--muted); }
+.grid input, .grid textarea, .grid select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; font-size: 14px; font-family: inherit; background: var(--field-bg); color: var(--text); }
+.grid input:focus-visible, .grid textarea:focus-visible, .grid select:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+.grid input:disabled, .grid textarea:disabled, .grid select:disabled { background: var(--field-disabled); color: var(--muted); }
 .grid textarea { min-height: 60px; resize: vertical; }
 
 /* Picker "Chọn từ danh bạ" + "Chọn dự án" (form Nhân sự) */

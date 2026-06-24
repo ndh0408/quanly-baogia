@@ -38,6 +38,14 @@ export type Project = {
 export type Customer = { id: number; code: string; name: string; phone?: string | null; email?: string | null; [k: string]: unknown };
 export type CustomerListResult = { data: Customer[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
+// Người dùng (Quản lý nhân viên — increment 2). /api/users trả MẢNG (không phân trang).
+export type User = {
+  id: number; username: string; displayName: string; role: string;
+  phone?: string | null; projectCode?: string | null; email?: string | null;
+  active: boolean; pending: boolean; canSign?: boolean;
+};
+export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean };
+
 export type Summary = { salary: number; pit: number; taxableIncome: number };
 export type ListResult = {
   data: Personnel[];
@@ -101,4 +109,11 @@ export const api = {
   createCustomer: (data: { name: string; code?: string }) => req<Customer>("/customers", { method: "POST", body: JSON.stringify(data) }),
   updateCustomer: (id: number, data: { name: string }) => req<Customer>(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCustomer: (id: number) => req<{ ok: boolean }>(`/customers/${id}`, { method: "DELETE" }),
+  // Quản lý nhân viên (increment 2) — gate user:manage (Shell nav đã lọc).
+  listUsers: () => req<User[]>("/users"),
+  inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null }) =>
+    req<InviteResult>("/users/invite", { method: "POST", body: JSON.stringify(data) }),
+  resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean }>(`/users/${id}/resend-invite`, { method: "POST" }),
+  updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: "DELETE" }),
 };
