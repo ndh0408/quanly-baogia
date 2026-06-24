@@ -5,6 +5,7 @@ import * as M from "./quoteMath";
 import { type ItemK, nextK } from "./gridShared";
 import { GridTable } from "./GridTable";
 import { ExtraTables } from "./ExtraTables";
+import { takePendingNewQuote } from "./pendingQuote";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor) sang React. Form (KH/người gửi/meta) +
@@ -80,13 +81,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         }
         let q: QuoteFull;
         if (isNew) {
-          const firstTpl = _templates![0];
-          q = {
-            id: 0, _new: true, status: "draft", title: "", quoteNumber: "", companyId: firstTpl?.companyId,
-            city: "TP. Hồ Chí Minh", quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 0, discount: 0, showTotals: true,
-            greeting: "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:",
-            sheets: [{ templateId: firstTpl?.id, groupSubtotal: true, items: [], extraTables: [] }],
-          };
+          // Draft từ Wizard Tạo-mới (công ty/mẫu/khách/logo đã chọn); nếu vào thẳng #/rnew thì dựng mặc định.
+          const pend = takePendingNewQuote();
+          if (pend) { q = pend; }
+          else {
+            const firstTpl = _templates![0];
+            q = {
+              id: 0, _new: true, status: "draft", title: "", quoteNumber: "", companyId: firstTpl?.companyId,
+              city: "TP. Hồ Chí Minh", quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 0, discount: 0, showTotals: true,
+              greeting: "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:",
+              sheets: [{ templateId: firstTpl?.id, groupSubtotal: true, items: [], extraTables: [] }],
+            };
+          }
         } else {
           q = await api.getQuote(quoteId!);
         }
