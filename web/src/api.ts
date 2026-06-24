@@ -56,6 +56,9 @@ export type InviteResult = { user: { email: string }; inviteUrl: string; emailSe
 export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null };
 export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
+// Thông báo (Notifications — increment 6).
+export type Notif = { id: number; title: string; body: string; resource?: string | null; resourceId?: string | null; readAt?: string | null; createdAt: string };
+
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
@@ -155,4 +158,9 @@ export const api = {
     req<{ backupCodes: string[] }>("/mfa/enable", { method: "POST", body: JSON.stringify(data) }),
   mfaDisable: (data: { password: string; token: string }) =>
     req<unknown>("/mfa/disable", { method: "POST", body: JSON.stringify(data) }),
+  // Thông báo (increment 6).
+  listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
+  markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
+  markAllNotifsRead: () => req<unknown>("/notifications/read-all", { method: "POST" }),
+  unreadCount: () => req<{ count: number }>("/notifications/unread-count").catch(() => ({ count: 0 })),
 };

@@ -7,6 +7,7 @@ import { UsersPage } from "./Users";
 import { AuditPage } from "./Audit";
 import { PermissionsPage } from "./Permissions";
 import { ProfilePage } from "./Profile";
+import { NotificationsPage } from "./Notifications";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -44,7 +45,7 @@ const NAV: Nav[] = [
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
-  { key: "notifications", label: "Thông báo", group: "Công việc" },
+  { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:read:own" },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
@@ -59,11 +60,15 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(themeIcon());
   const [sbOpen, setSbOpen] = useState(false); // drawer mobile
+  const [unread, setUnread] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
   useEffect(() => {
     if (!location.hash) location.hash = "#/personnel";
-    const on = () => { setKey(currentKey()); setSbOpen(false); };
+    refreshBadge();
+    const on = () => { setKey(currentKey()); setSbOpen(false); refreshBadge(); };
     window.addEventListener("hashchange", on);
     // Ctrl/Cmd+K focuses the search box (placeholder advertises it — giờ là thật).
     const onKey = (e: KeyboardEvent) => {
@@ -112,6 +117,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
                   <a key={n.key} className={key === n.key ? "active" : ""} href={`#/${n.key}`} {...(key === n.key ? { "aria-current": "page" as const } : {})}
                      onClick={(e) => { e.preventDefault(); location.hash = `#/${n.key}`; }}>
                     {ICON[n.key]}<span>{n.label}</span>
+                    {n.key === "notifications" && unread > 0 && <span className="badge-num" aria-label={`${unread} chưa đọc`}>{unread}</span>}
                   </a>
                 ))}
               </div>
@@ -131,6 +137,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />
               : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
+              : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} />
               : <PersonnelPage me={me} query={query} />}
           </main>
