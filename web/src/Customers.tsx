@@ -95,13 +95,14 @@ export function CustomersPage({ me }: { me: Me }) {
         </div>
       )}
 
-      {/* SPA cũ KHÔNG có dòng "Tổng: …" — chỉ hiện pager khi có >1 trang. */}
-      {meta.pageCount > 1 && (
+      {/* Footer pager — GIỐNG Y SPA (admin pagerHtml): "Hiển thị x–y / total" + Trước/Trang/Sau, luôn hiện khi có dữ liệu. */}
+      {rows.length > 0 && (
         <div className="list-foot">
+          <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total}</span>
           <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
-            <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau ›</button>
+            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Trước</button>
+            <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
+            <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => setPage((p) => p + 1)}>Sau →</button>
           </div>
         </div>
       )}
