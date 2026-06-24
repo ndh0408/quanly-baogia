@@ -148,8 +148,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
       dirtyRef.current = false;
       toast("Đã lưu", "success");
-      // chuyển sang chế độ sửa bản đã lưu (hash → #/redit/:id) — F5/back resolve đúng.
-      if (isNew) location.hash = "#/redit/" + saved.id;
+      // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
+      if (isNew) location.hash = "#/quotes/" + saved.id;
       else { qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); }
     } catch (ex) {
       toast(errText(ex), "error");
@@ -262,6 +262,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           </div>
         )}
 
+        {!isNew && (me.role === "admin" || me.role === "manager") && (
+          <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
+            onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
+        )}
+
         <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={me.role === "admin"} onMarkDirty={mark} />
 
         <div className="actions">
@@ -281,6 +286,39 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
       {versions && <VersionsModal versions={versions} onClose={() => setVersions(null)} />}
       {membersOpen && <MembersModal quoteId={q.id} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
+    </div>
+  );
+}
+
+// Port renderManagerHnPanel — manager/admin GIAO phần Hà Nội cho Account HN + DUYỆT/TRẢ LẠI khi gửi.
+function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId: number; hnStatus?: string | null; hnRejectNote?: string | null; onReload: () => void }) {
+  const [accounts, setAccounts] = useState<{ id: number; displayName?: string; username?: string }[]>([]);
+  const [accId, setAccId] = useState("");
+  const st = hnStatus || "";
+  const label = ({ assigned: "Account đang làm", submitted: "Account đã gửi — chờ bạn DUYỆT", approved: "✓ Đã duyệt", rejected: "↩ Đã trả lại" } as Record<string, string>)[st] || "Chưa giao";
+  const canAssign = !st || st === "rejected" || st === "approved";
+  useEffect(() => { if (canAssign) api.hnAccounts().then((r) => setAccounts(r.data || [])).catch(() => {}); }, [canAssign]);
+  const assign = async () => {
+    if (!accId) return toast("Chọn Account HN trước", "error");
+    try { await api.hnAssign(quoteId, Number(accId)); toast("Đã giao phần HN cho Account", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi giao", "error"); }
+  };
+  const review = async (decision: "approve" | "reject") => {
+    let note: string | undefined;
+    if (decision === "reject") { const n = await promptModal("Trả lại phần Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư mục 3…" }); if (n === null) return; note = n; }
+    try { await api.hnReview(quoteId, decision, note); toast(decision === "approve" ? "Đã duyệt phần HN" : "Đã trả lại phần HN", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+  };
+  return (
+    <div className="hn-mgr-panel" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "12px 0" }}>
+      <span className="extra-cat-badge cat-hanoi">Phần Hà Nội (Account)</span>
+      <span className={`ahn-status ahn-${st || "none"}`}>{label}</span>
+      {canAssign && (
+        <>
+          <select className="extra-add-cat" value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— chọn Account HN —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName || a.username}</option>)}</select>
+          <button type="button" className="btn btn-sm" onClick={assign}>{st ? "Giao lại" : "Giao cho Account HN"}</button>
+        </>
+      )}
+      {st === "submitted" && <><button type="button" className="btn btn-sm btn-primary" onClick={() => review("approve")}>✓ Duyệt</button><button type="button" className="btn btn-sm" onClick={() => review("reject")}>↩ Trả lại</button></>}
+      {st === "rejected" && hnRejectNote && <span className="muted" style={{ fontSize: 12 }}>lý do trả: {hnRejectNote}</span>}
     </div>
   );
 }

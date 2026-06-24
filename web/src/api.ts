@@ -233,4 +233,8 @@ export const api = {
   quoteVersions: (id: number) => req<{ data: QuoteVersion[] }>(`/quotes/${id}/versions`),
   assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),
   setMembers: (id: number, memberIds: number[]) => req<unknown>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) }),
+  // Luồng HN (giao/duyệt phần Hà Nội cho Account HN) — increment 10 stage 5.
+  hnAccounts: () => req<{ data: { id: number; displayName?: string; username?: string }[] }>("/quotes/hn/accounts"),
+  hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),
+  hnReview: (id: number, decision: "approve" | "reject", note?: string) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
 };

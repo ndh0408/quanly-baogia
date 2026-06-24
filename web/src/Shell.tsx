@@ -90,9 +90,15 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const groups = [...new Set(visible.map((n) => n.group))];
   const active = NAV.find((n) => n.key === key);
   const onTheme = () => { toggleTheme(); setTheme(themeIcon()); };
-  // Editor React (đang port) tại hash ẨN tạm để test — #/quotes/:id + #/new vẫn iframe (live).
-  const editMatch = key.match(/^redit\/(\d+)$/);
-  const isEditor = key === "rnew" || !!editMatch;
+  // FLIP: #/quotes/:id (SỬA báo giá đã có) giờ dùng React editor. NGOẠI LỆ: account_hn giữ view
+  // fill-HN của SPA qua iframe. #/new (TẠO mới) tạm giữ wizard SPA (chọn công ty/mẫu/khách) — sẽ port
+  // sau. #/redit + #/rnew là alias test → luôn React.
+  const isAccountHn = me.role === "account_hn";
+  const reditM = key.match(/^redit\/(\d+)$/);
+  const quotesM = key.match(/^quotes\/(\d+)$/);
+  const isNewEditor = key === "rnew";
+  const editId = reditM ? Number(reditM[1]) : (quotesM && !isAccountHn ? Number(quotesM[1]) : undefined);
+  const isEditor = isNewEditor || editId !== undefined;
 
   return (
     <>
@@ -140,7 +146,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
         </aside>
         {isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            <QuoteEditorPage me={me} isNew={key === "rnew"} quoteId={editMatch ? Number(editMatch[1]) : undefined} />
+            <QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} />
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
