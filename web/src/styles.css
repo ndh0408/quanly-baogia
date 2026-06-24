@@ -83,35 +83,41 @@ a { color: var(--primary); }
 /* Table */
 .tbl-wrap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); max-height: calc(100vh - 200px); }
 table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; }
-th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
-th { background: var(--card-2); font-size: 12px; letter-spacing: .03em; color: var(--soft); font-weight: 650; text-transform: uppercase; position: sticky; top: 0; z-index: 3; }
+/* Kẻ lưới dọc + ngang nhẹ như Excel → bảng nhiều cột nhìn gọn, không dính chữ vào nhau */
+th, td { padding: 9px 13px; text-align: left; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); font-size: 13.5px; }
+th { background: var(--card-2); font-size: 11.5px; letter-spacing: .02em; color: var(--soft); font-weight: 700; text-transform: uppercase; position: sticky; top: 0; z-index: 3; border-bottom: 1px solid var(--line-strong); }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--primary); }
-tbody tr:hover { background: var(--row-hover); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-/* 2 cột ghim: STT (44px) + Họ & Tên — luôn thấy khi cuộn ngang (như freeze panes trong Excel) */
-.sticky-1 { position: sticky; left: 0; width: 44px; min-width: 44px; background: var(--card); z-index: 2; box-shadow: 1px 0 0 var(--line); text-align: center; }
-.sticky-2 { position: sticky; left: 44px; background: var(--card); z-index: 2; box-shadow: 1px 0 0 var(--line); font-weight: 600; }
+
+/* Ngựa vằn (zebra) cho dễ dò theo hàng — ô tô nguồn 🔵/🩷 vẫn giữ màu riêng */
+tbody tr:nth-child(2n) td { background: color-mix(in srgb, var(--card-2) 55%, var(--card)); }
+tbody tr:nth-child(2n) td.col-formula { background: rgba(74,163,255,.08); }
+tbody tr:nth-child(2n) td.col-ref { background: rgba(232,93,154,.08); }
+tbody tr:hover td { background: var(--row-hover); }
+
+/* 2 cột ghim: STT (44px) + Họ & Tên — luôn thấy khi cuộn ngang (như freeze panes Excel) */
+.sticky-1 { position: sticky; left: 0; width: 44px; min-width: 44px; background: var(--card); z-index: 2; box-shadow: 3px 0 6px -3px rgba(15,23,42,.18); text-align: center; }
+.sticky-2 { position: sticky; left: 44px; background: var(--card); z-index: 2; box-shadow: 3px 0 6px -3px rgba(15,23,42,.18); font-weight: 600; }
 th.sticky-1, th.sticky-2 { z-index: 4; background: var(--card-2); }
+tbody tr:nth-child(2n) .sticky-1, tbody tr:nth-child(2n) .sticky-2 { background: color-mix(in srgb, var(--card-2) 55%, var(--card)); }
 tbody tr:hover .sticky-1, tbody tr:hover .sticky-2 { background: var(--row-hover); }
 .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
-tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; }
+tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; font-size: 13px; }
 tfoot .sticky-1, tfoot .sticky-2 { background: var(--card-2); }
 
-/* Mã màu nguồn cột (khớp chú giải Excel): 🔵 công thức · 🩷 tham chiếu Dự án. Ô tô nhẹ, header đậm hơn. */
+/* Mã màu nguồn cột: 🔵 công thức · 🩷 tham chiếu Dự án (ô tô nhẹ) */
 td.col-formula { background: rgba(74,163,255,.07); }
 td.col-ref { background: rgba(232,93,154,.07); }
-th.col-formula { background: color-mix(in srgb, #4aa3ff 16%, var(--card-2)); }
-th.col-ref { background: color-mix(in srgb, #e85d9a 16%, var(--card-2)); }
 
-/* Header tô màu TỪNG CỘT — khớp y file Excel gốc (hồng / vàng; cột còn lại để trắng).
-   Ô dữ liệu vẫn tô nhẹ theo NGUỒN (🔵 công thức · 🩷 tham chiếu) để thấy ô nào tự tính/tự lấy. */
-th.hdr-pink   { background: color-mix(in srgb, #ef6fa3 30%, var(--card-2)); color: var(--text); }
-th.hdr-yellow { background: color-mix(in srgb, #ffd21a 40%, var(--card-2)); color: var(--text); }
+/* Header tô màu TỪNG CỘT — khớp file Excel (hồng / vàng) nhưng DỊU cho nhã; cột còn lại để trắng.
+   Ô dữ liệu vẫn tô nhẹ theo NGUỒN (🔵/🩷) để thấy ô nào tự tính/tự lấy. */
+th.hdr-pink   { background: color-mix(in srgb, #e36b96 20%, var(--card-2)); color: var(--text); }
+th.hdr-yellow { background: color-mix(in srgb, #eab308 22%, var(--card-2)); color: var(--text); }
 th.hdr-stt { text-align: center; }
-/* Ô gộp "THỜI GIAN LÀM VIỆC" trùm 2 cột con + hàng tiêu đề thứ 2 (sub-label) dính ngay dưới hàng 1 */
+/* Ô gộp "THỜI GIAN LÀM VIỆC" trùm 2 cột con + hàng tiêu đề thứ 2 (sub-label) dính dưới hàng 1 */
 th.merged { text-align: center; vertical-align: middle; }
-thead tr:nth-child(2) th { top: 38px; }
+thead tr:nth-child(2) th { top: 32px; }
 
 /* Chú giải nguồn dữ liệu */
 .src-legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
