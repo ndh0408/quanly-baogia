@@ -46,6 +46,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
   const moreRef = useRef<HTMLDivElement>(null);
   const noteWrapRef = useRef<HTMLDivElement>(null);
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
@@ -66,6 +67,26 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     window.addEventListener("beforeunload", h);
     return () => { window.removeEventListener("beforeunload", h); (window as WinDirty).__editorDirty = false; };
   }, []);
+
+  // PRESENCE: báo "tôi đang mở báo giá này" + nghe ai khác đang sửa → hiện banner. Chỉ báo giá ĐÃ LƯU.
+  useEffect(() => {
+    if (isNew || !quoteId) return;
+    let alive = true;
+    const sync = (list: { id: number; name: string }[]) => { if (alive) setOthersEditing(list.filter((u) => u.id !== me.id)); };
+    api.presence(quoteId, "open").then((r) => sync(r.editing)).catch(() => { /* presence không critical */ });
+    const hb = setInterval(() => { api.presence(quoteId, "heartbeat").catch(() => {}); }, 30_000);
+    const onPresence = (e: Event) => {
+      const d = (e as CustomEvent).detail as { quoteId?: number; editing?: { id: number; name: string }[] };
+      if (d?.quoteId === quoteId) sync(d.editing || []);
+    };
+    window.addEventListener("realtime:presence", onPresence);
+    return () => {
+      alive = false;
+      clearInterval(hb);
+      window.removeEventListener("realtime:presence", onPresence);
+      api.presence(quoteId, "close").catch(() => {});
+    };
+  }, [quoteId, isNew, me.id]);
 
   const templates = _templates || [];
   const companies = _companies || [];
@@ -191,7 +212,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else { qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); }
     } catch (ex) {
-      toast(errText(ex), "error");
+      // Khóa lạc quan: server trả 409 khi NGƯỜI KHÁC vừa lưu báo giá này (baseUpdatedAt lệch) →
+      // KHÔNG ghi đè ngầm. Hỏi rõ + cho TẢI LẠI bản mới (reload đảm bảo nạp đúng toàn bộ luồng load).
+      if (ex instanceof ApiError && ex.status === 409) {
+        const reload = await confirmModal(
+          "Báo giá đã bị người khác sửa",
+          "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất — hãy chép phần cần giữ trước. Tải lại ngay?",
+          { danger: true, confirmText: "Tải lại bản mới" }
+        );
+        if (reload) { dirtyRef.current = false; (window as WinDirty).__editorDirty = false; location.reload(); }
+        // Hủy → giữ nguyên màn hình + thay đổi của bạn (chưa lưu) để bạn tự xem/chép rồi tải lại sau.
+      } else {
+        toast(errText(ex), "error");
+      }
     } finally { setSaving(false); }
   };
   const convert = async () => {
@@ -220,6 +253,14 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <h1>{isNew ? "Tạo báo giá mới" : "Báo giá " + M.codeLabel(q)}{!isNew && <span className={`status ${q.status}`} style={{ marginLeft: 10 }}>{M.statusLabel(q.status)}</span>}</h1>
         <button className="btn" onClick={back}>← Quay lại</button>
       </div>
+
+      {othersEditing.length > 0 && (
+        <div role="status" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 12,
+          background: "var(--warn-bg, #fff7e6)", border: "1px solid var(--warn-border, #ffd591)", borderRadius: "var(--radius-sm)", fontSize: 13 }}>
+          <span aria-hidden>👤</span>
+          <span><b>{othersEditing.map((u) => u.name).join(", ")}</b> đang mở báo giá này — cẩn thận tránh ghi đè lên nhau (lưu sau sẽ được cảnh báo).</span>
+        </div>
+      )}
 
       <div className="editor">
         <div className="meta-2col">

@@ -90,7 +90,7 @@ export function attach(req: Request, res: Response, userId: number) {
   req.on("close", () => {
     clearInterval(ka);
     set.delete(res);
-    if (set.size === 0) subscribers.delete(userId);
+    if (set.size === 0) { subscribers.delete(userId); clearUserPresence(userId); } // đóng hết tab → gỡ presence
     recountClients();
   });
 }
@@ -131,3 +131,60 @@ export function revokeSession(userId: number, reason?: string) {
 export function refreshSession(userId: number) {
   publish(userId, "session:refresh", {});
 }
+
+// ── PRESENCE ("ai đang MỞ editor báo giá nào") ────────────────────────────────
+// Tạm thời, in-memory, KHÔNG lưu DB (mất khi restart = chấp nhận được, F5 reset). quoteId → (userId
+// → {name, at}). Tab đóng đột ngột → hết hạn sau PRESENCE_TTL; sweep + ngắt-SSE dọn để báo người khác.
+type EditorPresence = { name: string; at: number };
+const editing = new Map<number, Map<number, EditorPresence>>();
+const PRESENCE_TTL = 70_000; // 70s — heartbeat client mỗi 30s, chịu được 2 nhịp lỡ
+
+// Lọc bỏ editor hết hạn + trả danh sách hiện tại của 1 báo giá.
+function freshPresence(quoteId: number): { id: number; name: string }[] {
+  const m = editing.get(quoteId);
+  if (!m) return [];
+  const now = Date.now();
+  const out: { id: number; name: string }[] = [];
+  for (const [uid, v] of m) {
+    if (now - v.at > PRESENCE_TTL) m.delete(uid);
+    else out.push({ id: uid, name: v.name });
+  }
+  if (m.size === 0) editing.delete(quoteId);
+  return out;
+}
+
+/** open/heartbeat/close 1 editor báo giá. Trả danh sách người ĐANG sửa (đã lọc hết hạn). */
+export function setPresence(quoteId: number, userId: number, name: string, action: "open" | "heartbeat" | "close"): { id: number; name: string }[] {
+  let m = editing.get(quoteId);
+  if (action === "close") {
+    if (m) { m.delete(userId); if (m.size === 0) editing.delete(quoteId); }
+  } else if (action === "heartbeat") {
+    const cur = m?.get(userId);
+    if (cur) cur.at = Date.now();
+    else { if (!m) { m = new Map(); editing.set(quoteId, m); } m.set(userId, { name, at: Date.now() }); }
+  } else { // open
+    if (!m) { m = new Map(); editing.set(quoteId, m); }
+    m.set(userId, { name, at: Date.now() });
+  }
+  const list = freshPresence(quoteId);
+  // heartbeat KHÔNG đổi danh sách → khỏi broadcast (giảm nhiễu); open/close thì báo người khác.
+  if (action !== "heartbeat") broadcast("presence", { quoteId, editing: list });
+  return list;
+}
+
+// Gỡ user khỏi MỌI báo giá khi họ ngắt kết nối SSE hẳn (đóng hết tab) → báo người khác ngay.
+function clearUserPresence(userId: number) {
+  for (const quoteId of [...editing.keys()]) {
+    if (editing.get(quoteId)?.delete(userId)) broadcast("presence", { quoteId, editing: freshPresence(quoteId) });
+  }
+}
+
+// Sweep dọn editor hết hạn (tab đóng đột ngột không kịp "close") + báo lại nếu danh sách đổi.
+const _presenceSweep = setInterval(() => {
+  for (const quoteId of [...editing.keys()]) {
+    const before = editing.get(quoteId)?.size ?? 0;
+    const list = freshPresence(quoteId);
+    if (list.length !== before) broadcast("presence", { quoteId, editing: list });
+  }
+}, 35_000);
+(_presenceSweep as { unref?: () => void }).unref?.();

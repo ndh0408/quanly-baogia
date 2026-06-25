@@ -149,6 +149,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
       es = new EventSource("/api/stream/events");
       es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
       es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+      es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
       es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
       es.addEventListener("session:revoked", async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); });
     } catch { /* ignore */ }
