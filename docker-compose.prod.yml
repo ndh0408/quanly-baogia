@@ -1,0 +1,78 @@
+# Compose PROD (gianguyen.cloud, VM coolify, sau Cloudflare tunnel qua network `edge` external).
+# BÍ MẬT đọc từ .env (gitignored) qua ${VAR} — KHÔNG hardcode. .env phải có: POSTGRES_PASSWORD,
+# REDIS_PASSWORD + toàn bộ env app (SESSION_SECRET, JWT_SECRET, MFA_ENC_KEY, APP_BASE_URL, S3/SMTP…).
+# deploy.sh ship file NÀY (đã tracked). ⚠️ TRƯỚC khi deploy prod lần đầu sau modernization: đảm bảo
+# prod .env có POSTGRES_PASSWORD + REDIS_PASSWORD (kẻo ${VAR} rỗng → app/redis vỡ).
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quanly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quanly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: quanly
+    volumes:
+      - quanly-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quanly -d quanly"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+  redis:
+    image: redis:7-alpine
+    container_name: quanly-redis
+    restart: unless-stopped
+    command: ["redis-server","--requirepass","${REDIS_PASSWORD}","--maxmemory","256mb","--maxmemory-policy","noeviction","--save","60","1"]
+    volumes:
+      - quanly-redisdata:/data
+    healthcheck:
+      test: ["CMD","redis-cli","-a","${REDIS_PASSWORD}","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quanly-app:prod
+    container_name: quanly-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [internal, edge]
+  worker:
+    image: quanly-app:prod
+    container_name: quanly-worker
+    restart: unless-stopped
+    # PHẢI có `--import tsx` (worker là .ts) + trỏ worker.ts. Bản host cũ là ["node","src/worker.js"]
+    # → SẼ VỠ sau modernization (deploy.sh dọn worker.js cũ + node thường không load .ts). Đã sửa ở đây.
+    command: ["node","--import","tsx","src/worker.ts"]
+    # Worker nền (không HTTP) → tắt healthcheck HTTP kế thừa Dockerfile (luôn fail = unhealthy giả).
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [internal]
+volumes:
+  quanly-pgdata:
+  quanly-redisdata:
+networks:
+  internal:
+  edge:
+    external: true
