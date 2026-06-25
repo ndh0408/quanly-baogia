@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Customer } from "./api";
+import { useDebouncedValue } from "./query";
 import { toast, confirmModal, fieldErrorsFrom } from "./ui";
 
 // Port 1:1 màn "Mã khách hàng" của SPA cũ (renderCustomers/editCustomer) sang React.
@@ -9,33 +11,30 @@ import { toast, confirmModal, fieldErrorsFrom } from "./ui";
 const PAGE_SIZE = 20;
 
 export function CustomersPage({ me }: { me: Me }) {
-  const [rows, setRows] = useState<Customer[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const [editing, setEditing] = useState<Customer | null | undefined>(undefined);
 
   // Quyền GHI = customer:manage (own/all) — đúng guard server (loadAuthorizedCustomer "manage").
   // Người chỉ có read:own thấy "Xem", không thấy Sửa/Xóa/+ Khách mới.
   const canManage = me.permissions.includes("customer:manage:own") || me.permissions.includes("customer:manage:all");
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
-      const res = await api.listCustomers(q, page, PAGE_SIZE, sort, order);
-      setRows(res.data);
-      setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
-    } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu");
-    } finally { setLoading(false); }
-  }, [q, page, sort, order]);
-
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
-  useEffect(() => { setPage(1); }, [q, sort, order]);
+  // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
+  const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
+  useEffect(() => { setPage(1); }, [debouncedQ, sort, order]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["customers", { q: debouncedQ, page, sort, order }],
+    queryFn: () => api.listCustomers(debouncedQ, page, PAGE_SIZE, sort, order),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.data ?? [];
+  const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const reload = () => { qc.invalidateQueries({ queryKey: ["customers"] }); };
 
   const toggleSort = (k: string) => {
     if (k !== "name") return;
@@ -45,7 +44,7 @@ export function CustomersPage({ me }: { me: Me }) {
 
   const onDelete = async (c: Customer) => {
     if (!(await confirmModal("Xóa khách hàng", `Xóa khách hàng "${c.code} — ${c.name}"?`, { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deleteCustomer(c.id); toast("Đã xóa", "success"); load(); }
+    try { await api.deleteCustomer(c.id); toast("Đã xóa", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
   };
 
@@ -60,7 +59,7 @@ export function CustomersPage({ me }: { me: Me }) {
         {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button>}
       </div>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
@@ -109,7 +108,7 @@ export function CustomersPage({ me }: { me: Me }) {
 
       {editing !== undefined && (
         <CustomerForm rec={editing} readOnly={editing !== null && !canManage}
-          onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load(); }} />
+          onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
       )}
     </div>
   );
