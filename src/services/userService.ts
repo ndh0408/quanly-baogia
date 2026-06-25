@@ -12,7 +12,7 @@ import { sendEmail, brandedEmailHtml } from "../email.js";
 import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
 
 // Accounts hidden from every user listing (developer/maintenance account).
 // The account still works for login — it just never shows in the admin user list

@@ -31,6 +31,17 @@ async function main() {
     });
   }
   console.log(`✓ backfill searchText: ${quotes.length} quotes`);
+
+  const personnel = await prisma.personnelRecord.findMany({
+    select: { id: true, fullName: true, projectName: true, projectCode: true, taxCode: true, phone: true, idCard: true },
+  });
+  for (const p of personnel) {
+    await prisma.personnelRecord.update({
+      where: { id: p.id },
+      data: { searchText: normalizeSearch(p.fullName, p.projectName, p.projectCode, p.taxCode, p.phone, p.idCard) },
+    });
+  }
+  console.log(`✓ backfill searchText: ${personnel.length} personnel`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());

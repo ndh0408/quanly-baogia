@@ -7,9 +7,14 @@ import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./projectRef.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
+import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
 type Action = "read" | "manage";
+
+// Các trường được dò khi tìm kiếm hồ sơ Nhân sự → gộp vào cột searchText (chuẩn-hóa bỏ dấu).
+const personnelSearchText = (r: Record<string, any>) =>
+  normalizeSearch(r.fullName, r.projectName, r.projectCode, r.taxCode, r.phone, r.idCard);
 
 // Tải bản ghi + 403 nếu caller không được làm `action` (read|manage) với nó (owner = createdById).
 async function loadAuthorized(req: Request, action: Action) {
@@ -48,16 +53,8 @@ export async function listPersonnel(req: Request) {
   const where: Record<string, any> = {};
   // Phân quyền dữ liệu: ai KHÔNG có read:all (manager) chỉ thấy hồ sơ MÌNH tạo.
   if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;
-  if (q) {
-    where.OR = [
-      { fullName: { contains: q, mode: "insensitive" } },
-      { projectName: { contains: q, mode: "insensitive" } },
-      { projectCode: { contains: q, mode: "insensitive" } },
-      { taxCode: { contains: q } },
-      { phone: { contains: q } },
-      { idCard: { contains: q } },
-    ];
-  }
+  // Tìm KHÔNG dấu / sai dấu trên cột searchText (fullName+projectName+projectCode+taxCode+phone+idCard).
+  if (q) where.searchText = searchTextFilter(q);
   const [total, data, agg] = await Promise.all([
     prisma.personnelRecord.count({ where }),
     prisma.personnelRecord.findMany({
@@ -117,7 +114,7 @@ export async function listProjects(req: Request) {
 
 export async function createPersonnel(req: Request) {
   const rec = await prisma.personnelRecord.create({
-    data: { ...req.body, createdById: req.session.userId },   // người tạo = chủ sở hữu
+    data: { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) },   // người tạo = chủ sở hữu
     include: ownerSelect,
   });
   await audit(req, "personnel.create", { resource: "personnel", resourceId: rec.id });
@@ -134,8 +131,14 @@ export async function getPersonnel(req: Request) {
 }
 
 export async function updatePersonnel(req: Request) {
-  await loadAuthorized(req, "manage");   // hr/accountant không có manage → 403
-  const rec = await prisma.personnelRecord.update({ where: { id: (req.params as any).id }, data: req.body, include: ownerSelect });
+  const before = await loadAuthorized(req, "manage");   // hr/accountant không có manage → 403
+  // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
+  const merged = { ...before, ...req.body };
+  const rec = await prisma.personnelRecord.update({
+    where: { id: (req.params as any).id },
+    data: { ...req.body, searchText: personnelSearchText(merged) },
+    include: ownerSelect,
+  });
   await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(rec, refMap);
@@ -151,15 +154,20 @@ export async function deletePersonnel(req: Request) {
 // KẾ TOÁN (hoặc admin) đánh dấu ĐÃ / BỎ thanh toán cho 1 hồ sơ — lưu NGÀY + người đánh dấu.
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
-  const exists = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true } });
-  if (!exists) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  // Lấy TRẠNG THÁI CŨ (paidAt/paidById) để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true } });
+  if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const paid = (req.body as any).paid as boolean;
   const rec = await prisma.personnelRecord.update({
     where: { id },
     data: paid ? { paidAt: new Date(), paidById: req.session.userId } : { paidAt: null, paidById: null },
     include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
   });
-  await audit(req, paid ? "personnel.pay" : "personnel.unpay", { resource: "personnel", resourceId: id });
+  await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
+    resource: "personnel", resourceId: id,
+    before: { paidAt: before.paidAt, paidById: before.paidById },
+    after: { paidAt: rec.paidAt, paidById: rec.paidById },
+  });
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(rec, refMap);
 }
@@ -167,15 +175,20 @@ export async function markPayment(req: Request) {
 // ADMIN xác nhận "đã ký" / BỎ xác nhận cho 1 hồ sơ — lưu NGÀY + người.
 export async function markConfirm(req: Request) {
   const id = (req.params as any).id;
-  const exists = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true } });
-  if (!exists) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  // Lấy TRẠNG THÁI CŨ (confirmedAt/confirmedById) để ghi before/after vào audit — thao tác ký/xác-nhận cần truy vết.
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, confirmedAt: true, confirmedById: true } });
+  if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const confirmed = (req.body as any).confirmed as boolean;
   const rec = await prisma.personnelRecord.update({
     where: { id },
     data: confirmed ? { confirmedAt: new Date(), confirmedById: req.session.userId } : { confirmedAt: null, confirmedById: null },
     include: { ...ownerSelect, confirmedBy: { select: { id: true, displayName: true } } },
   });
-  await audit(req, confirmed ? "personnel.confirm" : "personnel.unconfirm", { resource: "personnel", resourceId: id });
+  await audit(req, confirmed ? "personnel.confirm" : "personnel.unconfirm", {
+    resource: "personnel", resourceId: id,
+    before: { confirmedAt: before.confirmedAt, confirmedById: before.confirmedById },
+    after: { confirmedAt: rec.confirmedAt, confirmedById: rec.confirmedById },
+  });
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(rec, refMap);
 }

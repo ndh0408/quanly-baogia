@@ -40,6 +40,7 @@ export const QUEUES = {
   EMAIL: "email",
   WEBHOOK: "webhook",
   NOTIFY: "notify",
+  MAINTENANCE: "maintenance", // repeatable: prune bảng append-only (retention)
 };
 
 /** Run a job synchronously if the queue isn't available; otherwise enqueue it. */

@@ -5,7 +5,7 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
 
 function bigIntToString(obj: unknown) {
   return JSON.parse(JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));

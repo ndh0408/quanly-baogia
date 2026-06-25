@@ -153,6 +153,8 @@ model PersonnelRecord {
   confirmedBy         User?     @relation("PersonnelConfirmedBy", fields: [confirmedById], references: [id])
   note                String? // Note
 
+  searchText String @default("") // chuẩn-hóa bỏ dấu (fullName+projectName+projectCode+taxCode+phone+idCard) → tìm không dấu; GIN trgm index
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?

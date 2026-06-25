@@ -6,7 +6,7 @@ import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
 type Action = "read" | "manage";

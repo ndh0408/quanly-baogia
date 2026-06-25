@@ -4,7 +4,7 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
 
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 

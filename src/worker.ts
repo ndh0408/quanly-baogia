@@ -5,7 +5,8 @@ import type { Worker, Job } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
-import { createWorker, QUEUES, isQueueEnabled } from "./queue.js";
+import { createWorker, getQueue, QUEUES, isQueueEnabled } from "./queue.js";
+import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
@@ -98,6 +99,9 @@ export const processors = {
   [QUEUES.NOTIFY]: {
     "telegram": async (job: any) => sendTelegram(job.data),
   },
+  [QUEUES.MAINTENANCE]: {
+    "prune": async () => pruneOldRecords(),
+  },
 };
 
 // === Standalone worker mode: spin up processors against Redis-backed queues
@@ -134,6 +138,16 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
     if (w) workers.push(w);
     logger.info({ queue: queueName, jobs: Object.keys(jobs) }, "worker registered");
   }
+
+  // Đăng ký job retention LẶP LẠI hằng ngày 03:00 (prune bảng append-only). Repeatable dedupe theo pattern
+  // nên gọi lại lúc khởi động worker là idempotent (không tạo trùng).
+  (async () => {
+    const mq = getQueue(QUEUES.MAINTENANCE);
+    if (mq) {
+      await mq.add("prune", {}, { repeat: { pattern: "0 3 * * *" } });
+      logger.info("retention prune scheduled (daily 03:00)");
+    }
+  })().catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "không đăng ký được prune lặp"));
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Worker shutting down");

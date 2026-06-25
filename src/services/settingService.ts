@@ -4,7 +4,7 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
-import { httpError } from "../quoteService.js";
+import { httpError } from "../httpError.js";
 
 // Settings can hold sensitive integration config (tokens, channels). Only a small
 // allowlist of UI-tunable keys is readable by non-admins; the full dump + any other

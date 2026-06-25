@@ -25,8 +25,7 @@ import {
   sanitizeExtraTables,
   extraTableSum,
 } from "./quoteUtils.js";
-
-export const httpError = (status: number, message: string) => Object.assign(new Error(message), { status });
+import { httpError } from "./httpError.js";
 
 /** Tải báo giá theo :id và THROW 403/404 nếu caller không được `action`. Dùng cho sub-resource. */
 async function loadAuthorizedQuote(req: Request, action: string = "read") {
