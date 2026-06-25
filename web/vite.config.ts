@@ -1,15 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import legacy from "@vitejs/plugin-legacy";
 import { VitePWA } from "vite-plugin-pwa";
 
 // App React phục vụ tại /app2 (Express serve thư mục public/app2). Dev proxy /api → :3000.
 export default defineConfig({
+  // Hỗ trợ máy/ĐT đời cũ qua build.target THẤP (es2017: phủ Chrome 58+/Safari 11+ ~2017+), KHÔNG dùng
+  // @vitejs/plugin-legacy: plugin đó chèn inline + data: script (dò trình duyệt) → VI PHẠM CSP `script-src 'self'`
+  // của app (chặn nên React không mount). Hi sinh trình duyệt tiền-ESM (gần như tuyệt chủng) để giữ CSP bảo mật.
+  build: { target: "es2017", outDir: "../public/app2", emptyOutDir: true },
   plugins: [
     react(),
-    // Hỗ trợ máy/điện thoại ĐỜI CŨ: sinh bundle legacy + polyfill cho trình duyệt không hỗ trợ ESM
-    // (bỏ IE11 đã chết để khỏi phình vô ích).
-    legacy({ targets: ["defaults", "not IE 11"] }),
     // PWA: cài như app + tải app-shell nhanh (offline được phần tĩnh). KHÔNG cache /api (data động).
     VitePWA({
       registerType: "autoUpdate",
@@ -49,10 +49,6 @@ export default defineConfig({
     }),
   ],
   base: "/app2/",
-  build: {
-    outDir: "../public/app2",
-    emptyOutDir: true,
-  },
   server: {
     port: 5173,
     proxy: { "/api": "http://localhost:3000" },
