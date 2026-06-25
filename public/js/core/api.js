@@ -4,7 +4,7 @@
 // re-render to login" UI action is INJECTED (setUnauthorizedHandler) so this leaf
 // module never has to import the router/render — no import cycle.
 
-import { state } from "./state.js?v=20260622l";
+import { state } from "./state.js?v=20260624b";
 
 // app.js wires this to render() at boot. Default is a no-op so api() is usable
 // (e.g. in unit tests) before any handler is set.

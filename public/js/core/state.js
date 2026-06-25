@@ -9,7 +9,7 @@ export const state = {
   page: "list",
   quoteList: [],
   currentQuote: null,
-  filter: { q: "", status: "" },
+  filter: { q: "", status: "", page: 1, sort: "createdAt", order: "desc" },
   users: [],
   companies: [],   // [{ id, name, templates: [...] }]
   templates: [],   // [{ id, code, name, companyId }]

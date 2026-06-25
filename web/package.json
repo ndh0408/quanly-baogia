@@ -1,0 +1,26 @@
+{
+  "name": "quanly-web",
+  "private": true,
+  "type": "module",
+  "description": "Frontend mới (React + Vite + TypeScript) — bắt đầu từ module Nhân sự, mọc dần thay SPA cũ",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^5.7.2",
+    "vite": "^8.1.0",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.9"
+  }
+}

@@ -1,0 +1,165 @@
+/* ===== React-ONLY add-ons. Khung/sidebar/menu/login/nút/bảng-list/modal NỀN do /style.css
+   (design-system SPA, nạp ở index.html) lo → React giống Y app cũ. File này chỉ thêm phần
+   RIÊNG của các trang React (bảng HR nhiều cột + sticky, màu nguồn cột, picker, toast React…).
+   Token (--card/--line/--soft…) = CHÉP ĐÚNG giá trị app cũ (trùng --surface/--border của SPA). ===== */
+:root {
+  --gold: #f5b400; --gold-d: #e0a200; --gold-ink: #1f2510;
+  --primary-soft: #fdf6e3;
+  --card: #ffffff; --card-2: #f6f7f9; --row-hover: #f1f3f6;
+  --line: #e6e8ec; --line-strong: #d4d8df;
+  --soft: #475569; --muted: #5b6575;
+  --ok: #0a7d28; --ok-bg: #e7f3ec; --danger-bg: #fdecea; --neutral-bg: #eef0f3;
+  --field-bg: #fff; --field-disabled: #f5f6f9;
+  --radius: 10px; --shadow: 0 2px 8px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
+  --ring: rgba(245,180,0,.28);
+}
+[data-theme="dark"] {
+  --gold: #fbbf24; --gold-d: #d99e1f; --gold-ink: #1a1505;
+  --primary-soft: #2a2310;
+  --card: #141821; --card-2: #1a1f2a; --row-hover: #202634;
+  --line: #232a36; --line-strong: #313a48;
+  --soft: #aab2c2; --muted: #9aa3b3;
+  --ok: #6dcf95; --ok-bg: #16271d; --danger-bg: #2a1a1a; --neutral-bg: #222936;
+  --field-bg: #0f1626; --field-disabled: #161b27;
+  --ring: rgba(251,191,36,.28); --shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+
+/* Khung nhúng SPA cũ (trang chưa port) — ô lưới thứ 2 của .shell (sidebar | 1fr) */
+.embed-host { min-width: 0; height: 100vh; }
+.embed-host iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+
+/* Tiện ích nhỏ + ô tìm grow trong toolbar */
+.center { display: grid; place-items: center; min-height: 60vh; }
+.spacer { flex: 1; }
+.toolbar .grow { flex: 1 1 220px; min-width: 180px; }
+.badge { background: var(--primary-soft); color: var(--primary); border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent); padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+/* ===== Bảng HR NHIỀU CỘT (Nhân sự/Danh bạ) — cuộn ngang + ghim cột, kẻ lưới như Excel.
+   (Bảng list ÍT cột dùng .list-table của SPA; phần này chỉ cho bảng <table> trần trong .tbl-wrap.) ===== */
+.tbl-wrap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); max-height: calc(100vh - 200px); }
+.tbl-wrap table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; }
+.tbl-wrap th, .tbl-wrap td { padding: 9px 13px; text-align: left; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); font-size: 13.5px; }
+.tbl-wrap th { background: var(--card-2); font-size: 11.5px; letter-spacing: .02em; color: var(--soft); font-weight: 700; text-transform: uppercase; position: sticky; top: 0; z-index: 3; border-bottom: 1px solid var(--line-strong); }
+.tbl-wrap th.sortable { cursor: pointer; user-select: none; }
+.tbl-wrap th.sortable:hover { color: var(--primary); }
+.tbl-wrap td.num, .tbl-wrap th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl-wrap tbody tr:nth-child(2n) td { background: color-mix(in srgb, var(--card-2) 55%, var(--card)); }
+.tbl-wrap tbody tr:nth-child(2n) td.col-formula { background: rgba(74,163,255,.08); }
+.tbl-wrap tbody tr:nth-child(2n) td.col-ref { background: rgba(232,93,154,.08); }
+.tbl-wrap tbody tr:hover td { background: var(--row-hover); }
+.sticky-1 { position: sticky; left: 0; width: 44px; min-width: 44px; background: var(--card); z-index: 2; box-shadow: 3px 0 6px -3px rgba(15,23,42,.18); text-align: center; }
+.sticky-2 { position: sticky; left: 44px; background: var(--card); z-index: 2; box-shadow: 3px 0 6px -3px rgba(15,23,42,.18); font-weight: 600; }
+.tbl-wrap th.sticky-1, .tbl-wrap th.sticky-2 { z-index: 4; background: var(--card-2); }
+.tbl-wrap tbody tr:nth-child(2n) .sticky-1, .tbl-wrap tbody tr:nth-child(2n) .sticky-2 { background: color-mix(in srgb, var(--card-2) 55%, var(--card)); }
+.tbl-wrap tbody tr:hover .sticky-1, .tbl-wrap tbody tr:hover .sticky-2 { background: var(--row-hover); }
+.tbl-wrap .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.tbl-wrap tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; font-size: 13px; }
+.tbl-wrap tfoot .sticky-1, .tbl-wrap tfoot .sticky-2 { background: var(--card-2); }
+.tbl-wrap td.col-formula { background: rgba(74,163,255,.07); }
+.tbl-wrap td.col-ref { background: rgba(232,93,154,.07); }
+.tbl-wrap th.hdr-pink   { background: color-mix(in srgb, #e36b96 20%, var(--card-2)); color: var(--text); }
+.tbl-wrap th.hdr-yellow { background: color-mix(in srgb, #eab308 22%, var(--card-2)); color: var(--text); }
+.tbl-wrap th.hdr-stt { text-align: center; }
+.tbl-wrap th.merged { text-align: center; vertical-align: middle; }
+.tbl-wrap thead tr:nth-child(2) th { top: 32px; }
+
+/* Chú giải nguồn dữ liệu (Nhân sự) */
+.src-legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+.src-legend .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card-2); color: var(--soft); }
+.src-legend .chip-input { border-color: color-mix(in srgb, #f5b400 50%, var(--line)); }
+.src-legend .chip-ref { border-color: color-mix(in srgb, #e85d9a 50%, var(--line)); }
+.src-legend .chip-formula { border-color: color-mix(in srgb, #4aa3ff 50%, var(--line)); }
+
+/* Status badge HR (đã/chưa thanh toán, đã ký…) */
+.status.ok { background: var(--ok-bg); color: var(--ok); }
+.status.danger { background: var(--danger-bg); color: var(--danger); }
+.status.neutral { background: var(--neutral-bg); color: var(--muted); }
+
+/* Footer + pager (trang React) */
+.list-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+
+/* States (trang React) */
+.err { background: var(--danger-bg); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); padding: 9px 13px; border-radius: 8px; margin: 10px 0; display: flex; align-items: center; gap: 10px; }
+.empty { padding: 44px; text-align: center; color: var(--muted); background: var(--card); border: 1px dashed var(--line-strong); border-radius: var(--radius); }
+.skeleton-wrap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.skeleton-row { height: 42px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, var(--card-2) 25%, var(--bg) 37%, var(--card-2) 63%); background-size: 400% 100%; animation: sk 1.3s ease infinite; }
+@keyframes sk { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* Modal form (Nhân sự/Danh bạ/Khách hàng) — dialog cuộn nội dung */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(8,12,22,.55); display: grid; place-items: center; padding: 20px; z-index: 50; }
+.modal { background: var(--card); border-radius: 12px; width: min(940px, 100%); max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+.modal-sm { width: min(420px, 100%); }
+.modal-head, .modal-foot { display: flex; align-items: center; padding: 14px 20px; }
+.modal-head { border-bottom: 1px solid var(--line); }
+.modal-foot { border-top: 1px solid var(--line); justify-content: flex-end; gap: 10px; }
+.modal-head h3 { margin: 0; font-size: 18px; }
+.modal-head .x { margin-left: auto; border: none; background: none; font-size: 18px; cursor: pointer; color: var(--muted); border-radius: 6px; padding: 2px 8px; }
+.modal-head .x:hover { background: var(--card-2); }
+.modal-body { padding: 16px 20px; overflow: auto; }
+fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0 0 16px; padding: 10px 16px 16px; }
+legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.grid label.full { grid-column: 1 / -1; }
+.grid label span { color: var(--soft); font-weight: 500; }
+.grid .unit { color: var(--muted); font-style: normal; font-weight: 400; }
+.grid input, .grid textarea, .grid select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; font-size: 14px; font-family: inherit; background: var(--field-bg); color: var(--text); }
+.grid input:focus-visible, .grid textarea:focus-visible, .grid select:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+.grid input:disabled, .grid textarea:disabled, .grid select:disabled { background: var(--field-disabled); color: var(--muted); }
+.grid textarea { min-height: 60px; resize: vertical; }
+
+/* Picker "Chọn từ danh bạ" + "Chọn dự án" (form Nhân sự) */
+.emp-picker-fs { border-color: color-mix(in srgb, var(--gold) 40%, var(--line)); background: var(--primary-soft); }
+.emp-picker-fs legend { color: var(--primary); }
+.emp-picker { position: relative; }
+.emp-picker > input { width: 100%; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 14px; background: var(--field-bg); color: var(--text); }
+.emp-picker > input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+.emp-picker-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 10; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow); max-height: 260px; overflow: auto; }
+.emp-picker-item { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 8px 12px; background: none; border: none; border-bottom: 1px solid var(--line); cursor: pointer; color: var(--text); }
+.emp-picker-item:last-child { border-bottom: none; }
+.emp-picker-item:hover { background: var(--row-hover); }
+.emp-picker-item .muted { font-size: 12px; }
+.emp-picker-empty { padding: 8px 4px; font-size: 13px; }
+.proj-fs-required { border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); background: var(--danger-bg); }
+.proj-fs-required legend { color: var(--danger); }
+.proj-chosen { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--ok-bg); border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line)); border-radius: 8px; }
+.proj-chosen-info { line-height: 1.5; }
+.proj-chosen-badge { display: inline-block; margin-right: 8px; padding: 1px 9px; border-radius: 999px; background: var(--ok); color: #fff; font-size: 12px; font-weight: 700; }
+.proj-chosen-info strong { color: var(--text); }
+.proj-chosen-info .muted { font-size: 12.5px; margin-top: 1px; }
+.foot-hint { margin-right: auto; color: var(--danger); font-size: 13px; align-self: center; }
+
+/* Cột THANH TOÁN / XÁC NHẬN — nút bấm kèm ngày */
+.pay-cell { white-space: nowrap; }
+.pay-date { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.pay-btn { display: inline-flex; flex-direction: column; align-items: center; gap: 0; background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; cursor: pointer; font: inherit; }
+.pay-btn:hover { background: var(--row-hover); border-color: var(--line-strong); }
+.pay-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* Toast React (riêng app2) */
+#toast-host { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column-reverse; gap: 8px; z-index: 100; max-width: min(380px, 92vw); }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; animation: toast-in .22s ease; }
+.toast .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast .toast-x { background: none; border: none; color: rgba(255,255,255,.75); cursor: pointer; font-size: 17px; line-height: 1; padding: 0 2px; flex: none; }
+.toast .toast-x:hover { color: #fff; }
+.toast.out { opacity: 0; transform: translateY(8px); transition: .25s; }
+.toast-success { background: #138a3a; }
+.toast-error { background: #c0392b; }
+.toast-info { background: #334155; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* Ô form Đổi mật khẩu (trang Tài khoản) — label block + input full-width */
+.pf-field { display: block; margin-bottom: 14px; }
+.pf-field span { display: block; font-size: 13px; color: var(--soft); margin-bottom: 6px; font-weight: 500; }
+.pf-field input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--field-bg); color: var(--text); }
+.pf-field input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
+
+/* Lỗi validation INLINE dưới từng ô (map từ details server) */
+.field-err { color: #c0392b; font-size: 12px; margin-top: 4px; }
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392b !important; }
+
+@media (max-width: 760px) {
+  .tbl-wrap { max-height: none; }
+  .grid { grid-template-columns: 1fr; }
+  .modal { max-height: 96vh; }
+}

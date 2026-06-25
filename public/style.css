@@ -177,6 +177,17 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
   padding: 9px 12px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px;
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
 }
+.btn-login[aria-busy="true"] { opacity: .7; cursor: progress; }
+
+/* Password field with show/hide eye toggle (login, onboard, change-password) */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 40px !important; }
+.pw-toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 16px; line-height: 1;
+  padding: 4px 6px; opacity: .65; border-radius: 6px;
+}
+.pw-toggle:hover { opacity: 1; }
 
 /* ---------- Shell / layout ---------- */
 .shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
@@ -262,6 +273,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
   background: var(--surface); transition: border-color .15s, box-shadow .15s;
 }
 .toolbar input:focus, .toolbar select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--ring); outline: none; }
+.toolbar .inline-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-soft); }
+.toolbar .inline-field input { margin: 0; }
 
 .btn {
   padding: 9px 15px; border: 1px solid var(--border-strong);
@@ -297,6 +310,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
   font-size: 12px; text-transform: uppercase; letter-spacing: .03em;
   position: sticky; top: 0;
 }
+/* Sortable column headers (list báo giá, admin tables): clickable + hover + arrow */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); background: var(--surface-hover); }
+th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color: var(--primary); }
 .list-table tbody tr { transition: background .12s; }
 .list-table tbody tr:hover { background: var(--surface-hover); }
 .list-table tbody tr:last-child td { border-bottom: none; }
@@ -404,10 +421,43 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .excel-table td.col-amount { width: 140px; text-align: right; background: #fff; }
 .excel-table td.col-notes { width: 150px; border-right: 2px solid #000; }
 .excel-table td.col-notes input { font-style: italic; text-align: center; }
-/* GHI CHÚ NỘI BỘ — tô kem nhạt để rõ "chỉ nội bộ, KHÔNG xuất Excel"; có ở lưới chính, không ở bảng nội bộ */
-.excel-table th.th-internal-note, .excel-table td.col-internal-note { background: #fff7ed; }
+/* GHI CHÚ NỘI BỘ — cột "không xuất Excel": ĐỒNG MÀU THEO HÀNG (không ép màu riêng) —
+   hàng nhóm = kem, nhóm con = xanh, hàng thường = trắng. Nền lấy từ .section-row/.subgroup-row. */
 .excel-table td.col-internal-note { width: 160px; border-right: 2px solid #000; }
-.excel-table td.col-internal-note textarea { font-style: italic; color: #8a5a00; }
+.excel-table td.col-internal-note textarea { font-style: italic; color: #8a5a00; background: transparent; }
+
+/* "ⓘ giải thích" cạnh Tổng sheet + bảng giải thích cách cộng (CHỈ trên web, không xuất file) */
+.link-btn { background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px; padding: 0 2px; text-decoration: underline; font-weight: 500; }
+.link-btn:hover { color: #1d4ed8; }
+.modal.modal-wide { max-width: 680px; width: 94vw; }
+.total-explain { font-size: 13.5px; }
+.total-explain .te-note { margin: 0 0 14px; padding: 9px 12px; line-height: 1.55; color: #555; background: #f7f8fa; border-radius: 8px; }
+/* Mỗi nhóm = 1 thẻ: đầu thẻ (tên nhóm) + các dòng mục + dòng "Cộng nhóm" */
+.total-explain .te-block { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 11px; overflow: hidden; }
+.total-explain .te-bh { background: #fcefdb; color: #8a5a14; font-weight: 700; padding: 8px 13px; }
+.total-explain .te-bh-sub { background: #eaf1fb; color: #1f4e79; padding-left: 22px; }
+.total-explain .te-bh-loose { background: #f1f3f5; color: #444; }
+.total-explain .te-mult { font-weight: 600; font-size: 11px; background: rgba(0,0,0,.10); padding: 1px 7px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
+.total-explain .te-line { display: flex; align-items: baseline; gap: 12px; padding: 6px 13px; border-top: 1px solid #f1f1f1; }
+.total-explain .te-nm { flex: 1 1 auto; min-width: 0; }
+.total-explain .te-cl { flex: 0 1 auto; color: #6b7280; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.total-explain .te-x { color: #b5792a; font-weight: 600; }
+.total-explain .te-am { flex: 0 0 auto; min-width: 96px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.total-explain .te-line.te-info { color: #9aa0a6; font-style: italic; display: block; }
+.total-explain .te-sub { display: flex; justify-content: flex-end; align-items: baseline; gap: 10px; padding: 7px 13px; background: #fafafa; border-top: 1px solid #eee; color: #555; }
+.total-explain .te-sub b { font-size: 14.5px; color: #222; font-variant-numeric: tabular-nums; }
+.total-explain .te-grand { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding: 13px 16px; background: #fff7ec; border: 2px solid #b5792a; border-radius: 10px; font-weight: 700; }
+.total-explain .te-grand b { color: #b5792a; font-size: 20px; font-variant-numeric: tabular-nums; }
+[data-theme="dark"] .total-explain .te-note { background: #161b26; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-block { border-color: #2a3343; }
+[data-theme="dark"] .total-explain .te-bh { background: #3a2f1a; color: #e3b765; }
+[data-theme="dark"] .total-explain .te-bh-sub { background: #16243a; color: #8fb6f0; }
+[data-theme="dark"] .total-explain .te-bh-loose { background: #1a2030; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-line { border-color: #222a38; }
+[data-theme="dark"] .total-explain .te-sub { background: #141a26; border-color: #222a38; color: #aab2c7; }
+[data-theme="dark"] .total-explain .te-sub b { color: #e6e9ef; }
+[data-theme="dark"] .total-explain .te-grand { background: #2a2113; border-color: #b5792a; }
+
 /* ===== Account Hà Nội (role account_hn) — màn rút gọn + panel quản lý ===== */
 .account-hn-view { max-width: 1100px; margin: 0 auto; }
 .ahn-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -480,16 +530,21 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 
 /* Section (nhóm A/B/C) row — ONE uniform colour across the whole row, including the
    "Thành Tiền" cell (which is hard-coded white above). Bold blue text for the group. */
-.excel-table tr.section-row td { background: #eaf1fb; }
-.excel-table tr.section-row input { background: transparent; font-weight: 700; color: #1f4e79; }
+/* Nhóm chính A/B/C: nền KEM + chữ nâu (theo yêu cầu khách). */
+.excel-table tr.section-row td { background: #fcefdb; }
+.excel-table tr.section-row input { background: transparent; font-weight: 700; color: #9a5b14; }
 .excel-table tr.section-row td.col-price,
-.excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #1f4e79; }
-.excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #1f4e79; }
-/* Nhóm con (subsection): thụt lề + nền nhạt hơn nhóm chính — tổng riêng, không cộng vào nhóm chính */
-.excel-table tr.subgroup-row td { background: #f1f6fc; }
+.excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #9a5b14; }
+.excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #9a5b14; }
+/* Nhóm con (subsection): nền XANH + chữ xanh — KHÁC nhóm chính (kem). Phân biệt bằng
+   màu + thụt lề (đã bỏ dấu ↳ cho đỡ rối). Tổng riêng, không cộng vào nhóm chính. */
+.excel-table tr.subgroup-row td { background: #eaf1fb; }
 .excel-table tr.subgroup-row td.col-hangmuc { padding-left: 20px; }
-.excel-table tr.subgroup-row .subgroup-caret { color: #5a7aa8; font-weight: 700; }
-.excel-table tr.subgroup-row input, .excel-table tr.subgroup-row td.col-hangmuc textarea { color: #3a6098; }
+.excel-table tr.subgroup-row input,
+.excel-table tr.subgroup-row td.col-hangmuc textarea,
+.excel-table tr.subgroup-row td.col-price,
+.excel-table tr.subgroup-row td.col-amount,
+.excel-table tr.subgroup-row td.col-notes textarea { color: #1f4e79; }
 
 /* Excel-style selection summary bar (Sum / Count / Average of selected cells) */
 .grid-stat { display: flex; gap: 16px; justify-content: flex-end; align-items: center;
@@ -588,32 +643,6 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .ex-copy { border: 1px solid var(--border, #ccc); background: var(--surface, #fff); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
 .ex-copy:hover { background: var(--surface-2, #f3f5f8); }
 
-/* ===== Live xlsx preview (mirrors the exported sheet chrome) ===== */
-.xlsx-preview-wrap { margin: 16px 0; }
-.toggle-preview { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
-.xlsx-preview { overflow: auto; background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 8px; }
-.xlsx-preview[hidden] { display: none; }
-.xlsx-page { border-collapse: collapse; table-layout: fixed; font-family: "Times New Roman", serif; font-size: 13px; color: #000; margin: 0 auto 8px; }
-.xlsx-page td, .xlsx-page th { border: 1px solid #bbb; padding: 4px 6px; vertical-align: middle; white-space: pre-wrap; overflow-wrap: anywhere; }
-.xlsx-page thead th { border: 2px solid #333; }
-.xlsx-band { background: #D9E1F2; font-weight: 700; }
-.xlsx-band-grey { background: #E7E6E6; font-weight: 700; }
-/* Section (nhóm A/B/C) band — matches the export fill FFDDEBF7 (light blue) + bold. */
-.xlsx-page tr.xlsx-section td { background: #DDEBF7; font-weight: 700; }
-.xlsx-page tr.xlsx-section .xlsx-stt { color: #0066CC; }
-.xlsx-num { text-align: right; font-variant-numeric: tabular-nums; }
-.xlsx-center { text-align: center; }
-.xlsx-stt { text-align: center; font-weight: 700; color: #0066CC; }
-.xlsx-italic { font-style: italic; }
-.xlsx-neg { color: #C00000; }
-.xlsx-green { color: #00B050; font-weight: 700; }
-.xlsx-title { font-size: 17px; font-weight: 700; text-align: center; text-transform: uppercase; }
-.xlsx-page-gap { height: 24px; }
-.xlsx-page img.cust-logo { max-width: 190px; max-height: 80px; object-fit: contain; }
-.xlsx-page .logo-ph { color: #c0392b; font-style: italic; }
-.xlsx-summary thead th { background: #FFCC99; font-weight: 700; text-align: center; }
-.xlsx-summary td.total-val { color: #C00000; font-weight: 700; text-align: right; }
-
 .editor .from-block input { font-weight: 700; }
 .editor .actions {
   margin-top: 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
@@ -658,15 +687,30 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .summary-table tfoot td { background: #FFCC99; font-weight: 700; }
 
 /* ---------- Toast ---------- */
+/* The REGION is the fixed anchor; toasts stack vertically inside it (newest at the
+   bottom via column-reverse) instead of every toast being fixed at the same corner. */
+#toast-region {
+  position: fixed; bottom: 24px; right: 24px; z-index: 1200;
+  display: flex; flex-direction: column-reverse; gap: 10px;
+  max-width: min(420px, 92vw); pointer-events: none;
+}
 .toast {
-  position: fixed; bottom: 24px; right: 24px; padding: 13px 18px;
+  pointer-events: auto; padding: 13px 16px;
   background: #1b2034; color: #fff; border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg); font-size: 14px; z-index: 1200; font-weight: 500;
-  display: flex; align-items: center; gap: 8px;
+  box-shadow: var(--shadow-lg); font-size: 14px; font-weight: 500;
+  display: flex; align-items: flex-start; gap: 10px;
   animation: toastIn .25s cubic-bezier(.2,.9,.3,1);
   border-left: 4px solid var(--primary);
 }
+.toast.toast-out { animation: toastOut .18s ease forwards; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(16px); } }
+.toast .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast .toast-x {
+  background: none; border: none; color: rgba(255,255,255,.7); cursor: pointer;
+  font-size: 18px; line-height: 1; padding: 0 2px; margin: -1px -2px 0 0; flex: none;
+}
+.toast .toast-x:hover { color: #fff; }
 .toast.error { border-left-color: var(--danger); }
 .toast.success { border-left-color: var(--success); }
 
@@ -731,6 +775,11 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
   padding: 56px 20px; text-align: center; color: var(--text-muted); font-size: 14px;
 }
 .empty-state::before { content: "📭"; display: block; font-size: 34px; margin-bottom: 10px; opacity: .8; }
+.empty-state:has(.es-icon)::before { content: none; }
+.empty-state .es-icon { font-size: 34px; margin-bottom: 10px; opacity: .85; }
+.empty-state .es-msg { font-size: 14px; }
+.empty-state .es-hint { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; }
+.empty-state .es-cta { margin-top: 16px; }
 
 /* Customer picker */
 .pick-row { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 6px; cursor: pointer; background: var(--surface); transition: border-color .12s, background .12s; }
@@ -1147,3 +1196,9 @@ input:disabled, select:disabled, textarea:disabled {
 .col-approve .ap-check:disabled { cursor: not-allowed; }
 .col-approve .ap-date { display: block; font-size: 11px; color: var(--approved-text, #1c6b3f); font-weight: 700; margin-top: 2px; }
 [data-theme="dark"] .col-approve .ap-date { color: #6dcf95; }
+
+/* Chế độ NHÚNG (app React mới mount /app?embed=1 trong iframe): ẩn shell, chỉ render nội dung
+   full khung iframe — không có sidebar/topbar (đã chặn ở renderShell). */
+body.embedded { background: var(--bg); }
+body.embedded .main-embed { height: 100vh; overflow: auto; padding: 18px 22px; }
+body.embedded .main-embed > * { max-width: none; }

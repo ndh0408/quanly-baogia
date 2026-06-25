@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, main, develop, "harden/**", "feat/**", "fix/**"]
+    branches: [master, main, develop, "harden/**", "feat/**", "fix/**", "chore/**"]
   pull_request:
     branches: [master, main, develop]
 
@@ -61,6 +61,20 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # Gác KIỂU: backend (.js + .ts trộn) chạy tsx runtime nên lỗi type chỉ lộ lúc deploy.
+      # tsc --noEmit chặn .ts sai kiểu trước khi merge. (Script "typecheck" đã có sẵn.)
+      - name: Typecheck (backend)
+        run: npm run typecheck
+
+      # Gác BUILD frontend React (web/): tsc --noEmit + vite build. Trước đây không chạy ở CI
+      # nên app React có thể vỡ build mà PR vẫn xanh.
+      - name: Typecheck + build web (React)
+        run: npm run web:build
+
+      # Test đơn vị frontend (Vitest) — gồm vector vàng toán tiền (shared/quote-math).
+      - name: Web unit tests (Vitest)
+        run: npm run web:test
 
       - name: Prisma generate + migrate
         run: |

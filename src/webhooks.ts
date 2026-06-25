@@ -1,0 +1,235 @@
+import { createHmac } from "node:crypto";
+import net from "node:net";
+import dns from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
+import { prisma } from "./db.js";
+import { logger } from "./logger.js";
+import { isProd } from "./config.js";
+import { runOrQueue, QUEUES } from "./queue.js";
+import { decryptValue } from "./secretbox.js";
+
+// === SSRF guard ===========================================================
+// Webhook URLs are admin-configurable and fetched server-side. Without these
+// checks an attacker could target cloud metadata (169.254.169.254), localhost
+// admin panels or internal services and read the response back via the
+// deliveries log. We block private/reserved address space and re-resolve the
+// hostname at delivery time to mitigate DNS rebinding.
+function isPrivateIPv4(ip: string) {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+  const [a, b] = p;
+  if (a === 0 || a === 10 || a === 127) return true;          // this-net, RFC1918, loopback
+  if (a === 169 && b === 254) return true;                    // link-local (cloud metadata)
+  if (a === 172 && b >= 16 && b <= 31) return true;           // RFC1918
+  if (a === 192 && b === 168) return true;                    // RFC1918
+  if (a === 100 && b >= 64 && b <= 127) return true;          // CGNAT
+  if (a === 192 && b === 0) return true;                      // 192.0.0.0/24, 192.0.2.0/24
+  if (a === 198 && (b === 18 || b === 19)) return true;       // benchmarking
+  if (a >= 224) return true;                                  // multicast + reserved + broadcast
+  return false;
+}
+// Parse an IPv6 literal into its 16 bytes (handles "::" compression and an
+// embedded dotted IPv4 tail). Returns null if unparseable.
+function ipv6ToBytes(ip: string) {
+  let s = ip.toLowerCase();
+  const lastColon = s.lastIndexOf(":");
+  const tail = s.slice(lastColon + 1);
+  if (tail.includes(".")) {                                    // embedded dotted IPv4 → two hex groups
+    const p = tail.split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
+    s = s.slice(0, lastColon + 1) +
+      (((p[0] << 8) | p[1]).toString(16)) + ":" + (((p[2] << 8) | p[3]).toString(16));
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  let groups;
+  if (halves.length === 2) {
+    const tg = halves[1] ? halves[1].split(":") : [];
+    const missing = 8 - head.length - tg.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill("0"), ...tg];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    const v = parseInt(groups[i] || "0", 16);
+    if (Number.isNaN(v) || v < 0 || v > 0xffff) return null;
+    bytes[i * 2] = v >> 8;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  return bytes;
+}
+function isPrivateIPv6(ip: string) {
+  const x = ip.toLowerCase();
+  if (x === "::1" || x === "::") return true;
+  if (x.startsWith("fe80") || x.startsWith("fc") || x.startsWith("fd")) return true; // link-local + ULA
+  const b = ipv6ToBytes(x);
+  if (!b) return true;                                         // unparseable → fail closed
+  // IPv4-mapped (::ffff:0:0/96) and NAT64 well-known prefix (64:ff9b::/96) embed a
+  // 32-bit IPv4 in the last 4 bytes. Extract and classify it with the IPv4 rules so
+  // loopback/metadata can't be smuggled in via hex spelling (new URL() normalizes
+  // embedded IPv4 to hex, which defeated the old dotted-decimal regex).
+  const zero0to9 = b.slice(0, 10).every((v) => v === 0);
+  const isMapped = zero0to9 && b[10] === 0xff && b[11] === 0xff;
+  const isNat64 = b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b &&
+    b.slice(4, 12).every((v) => v === 0);
+  if (isMapped || isNat64) {
+    return isPrivateIPv4(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
+  }
+  return false;
+}
+function isBlockedIp(ip: string) {
+  const fam = net.isIP(ip);
+  if (fam === 4) return isPrivateIPv4(ip);
+  if (fam === 6) return isPrivateIPv6(ip);
+  return true; // not a valid IP literal → treat as unsafe
+}
+
+/**
+ * Throw (status 400) unless urlStr is a public http(s) endpoint.
+ * Returns { url, address } where `address` is the validated IP to connect to.
+ * The caller MUST connect to that exact IP (not re-resolve) — otherwise a
+ * malicious DNS can return a public IP here and an internal IP at fetch time
+ * (DNS rebinding / TOCTOU).
+ */
+export async function assertPublicHttpUrl(urlStr: string) {
+  let u;
+  try { u = new URL(urlStr); } catch { throw Object.assign(new Error("URL webhook không hợp lệ"), { status: 400 }); }
+  if (u.protocol !== "https:" && u.protocol !== "http:") {
+    throw Object.assign(new Error("Webhook chỉ chấp nhận http/https"), { status: 400 });
+  }
+  if (isProd && u.protocol !== "https:") {
+    throw Object.assign(new Error("Webhook phải dùng https ở môi trường production"), { status: 400 });
+  }
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(host)) {
+    if (isBlockedIp(host)) throw Object.assign(new Error("Webhook trỏ tới địa chỉ nội bộ — bị chặn"), { status: 400 });
+    return { url: u, address: host };
+  }
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) {
+    throw Object.assign(new Error("Hostname webhook bị chặn"), { status: 400 });
+  }
+  let addrs;
+  try { addrs = await dns.lookup(host, { all: true }); } catch {
+    throw Object.assign(new Error("Không phân giải được hostname webhook"), { status: 400 });
+  }
+  if (!addrs.length || addrs.some((a) => isBlockedIp(a.address))) {
+    throw Object.assign(new Error("Webhook phân giải tới địa chỉ nội bộ — bị chặn"), { status: 400 });
+  }
+  return { url: u, address: addrs[0].address };
+}
+
+/**
+ * POST to a webhook by connecting DIRECTLY to a pre-validated IP (no second DNS
+ * lookup), with the original Host header and TLS servername so cert validation
+ * still works. Closes the rebinding window. Does NOT follow redirects.
+ */
+function postToPinnedIp({ url, address }: { url: URL; address: string }, body: string, headers: http.OutgoingHttpHeaders) {
+  const isHttps = url.protocol === "https:";
+  const lib = isHttps ? https : http;
+  const port = url.port || (isHttps ? 443 : 80);
+  return new Promise<{ status: number; len: number }>((resolve, reject) => {
+    const req = lib.request(
+      {
+        host: address,                                  // connect to the validated IP
+        port,
+        path: (url.pathname || "/") + (url.search || ""),
+        method: "POST",
+        headers: { ...headers, Host: url.host },        // preserve virtual host
+        servername: isHttps ? url.hostname : undefined, // SNI + cert checked vs hostname
+        timeout: 15_000,
+      },
+      (res) => {
+        let len = 0;
+        res.on("data", (c) => { len += c.length; });    // count only — never buffer/echo body
+        res.on("end", () => resolve({ status: res.statusCode as number, len }));
+      }
+    );
+    req.on("timeout", () => req.destroy(Object.assign(new Error("webhook timeout"), { status: 0 })));
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+/**
+ * Public domain events emitted by the app. Listed here so admins can wire
+ * webhooks UI and we can statically validate event names.
+ */
+export const EVENTS = [
+  "quote.created",
+  "quote.updated",
+  "quote.submitted",
+  "quote.approved",
+  "quote.rejected",
+  "quote.sent",
+  "quote.converted",
+  "customer.created",
+  "customer.updated",
+];
+
+function sign(payload: string, secret: string) {
+  return "sha256=" + createHmac("sha256", secret).update(payload).digest("hex");
+}
+
+/** Emit an event: queues delivery for every matching active webhook. */
+export async function emit(event: string, payload: any) {
+  if (!EVENTS.includes(event)) {
+    logger.warn({ event }, "unknown event emitted");
+  }
+  const hooks = await prisma.webhook.findMany({ where: { active: true } });
+  const targets = hooks.filter((h) => h.events.includes(event));
+  // Dispatch all matching webhooks in parallel (was sequential await per hook).
+  await Promise.all(targets.map((h) => runOrQueue(QUEUES.WEBHOOK, "deliver", {
+    webhookId: h.id,
+    event,
+    payload,
+  }, { attempts: 5, backoff: { type: "exponential", delay: 5_000 } })));
+}
+
+/** Delivery handler invoked by worker (or inline if no Redis). */
+export async function deliverWebhook({ webhookId, event, payload }: { webhookId: number; event: string; payload: any }) {
+  const h = await prisma.webhook.findUnique({ where: { id: webhookId } });
+  if (!h || !h.active) return { skipped: true };
+
+  const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
+  // Secret is stored encrypted at rest — decrypt before signing (legacy plaintext
+  // rows pass through unchanged).
+  const sig = sign(body, decryptValue(h.secret) as string);
+
+  let status, text;
+  try {
+    // Validate AND pin the IP, then connect to that exact IP at delivery time so
+    // a rebinding DNS can't swap in an internal address between check and fetch.
+    const pinned = await assertPublicHttpUrl(h.url);
+    const res = await postToPinnedIp(pinned, body, {
+      "Content-Type": "application/json",
+      "X-QLY-Event": event,
+      "X-QLY-Signature": sig,
+    });
+    status = res.status;
+    if (status >= 300 && status < 400) {
+      // Never follow redirects into internal space.
+      throw Object.assign(new Error(`webhook redirect ${status} blocked`), { status });
+    }
+    // Do NOT persist/echo the raw response body — that would turn any SSRF into a
+    // read primitive via the deliveries log. Record only its length.
+    text = `len=${res.len}`;
+  } catch (e) {
+    status = 0;
+    text = e instanceof Error ? e.message : String(e);
+  }
+
+  await prisma.webhookDelivery.create({
+    data: {
+      webhookId, event, payload,
+      responseStatus: status, responseBody: text,
+      deliveredAt: status >= 200 && status < 300 ? new Date() : null,
+    },
+  });
+  if (status < 200 || status >= 300) throw new Error(`webhook ${webhookId} returned ${status}`);
+  return { status };
+}

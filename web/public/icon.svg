@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Icon nguồn PWA — thương hiệu Gia Nguyễn: nền navy + monogram GN vàng gold.
+       Vùng an toàn maskable: giữ nội dung trong ~80% trung tâm. -->
+  <rect width="512" height="512" rx="96" fill="#1b2034"/>
+  <text x="50%" y="52%" dominant-baseline="central" text-anchor="middle"
+        font-family="'Be Vietnam Pro', Arial, sans-serif" font-weight="800"
+        font-size="232" fill="#f5b400" letter-spacing="-6">GN</text>
+</svg>

@@ -25,6 +25,12 @@ export function fmtDate(d) {
   const dt = new Date(d);
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
 }
+// Date + HH:mm — for logs/notifications where the time of day matters (audit, thông báo).
+export function fmtDateTime(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  return `${fmtDate(d)} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+}
 export function vnDateText(d, city) {
   const dt = d instanceof Date ? d : new Date(d);
   return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
@@ -42,9 +48,21 @@ export function safeLogoSrc(s) {
 
 // ---- Live-preview helpers (mirror drawItems + src/excel.js so the preview matches the file) ----
 export function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
+// Thành Tiền 1 dòng = Số Lượng × (Số Ngày) × Đơn Giá, LÀM TRÒN về số nguyên (VNĐ không
+// có hào). 1 nguồn duy nhất để dòng/nhóm/tổng/Excel đều khớp (dòng cộng lại = tổng).
+// CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Chuỗi toFixed(4) khử nhiễu
+// float (giá trị gốc tối đa 4 lẻ). 1 nguồn cho cả hiển thị Số Lượng lẫn tính Thành Tiền.
+export function trunc2(x) {
+  const n = Number(x) || 0;
+  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn); khớp Decimal ROUND_DOWN
+  return n < 0 ? -t : t;
+}
+export function lineAmount(it, usesDays) {
+  const q = trunc2(it.quantity), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số rồi mới × giá
+  return Math.round(usesDays ? q * d * p : q * p);
+}
 export function pvAmount(it, usesDays) {
-  const qy = Number(it.quantity) || 0, d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
-  return usesDays ? qy * d * p : qy * p;
+  return lineAmount(it, usesDays);
 }
 export function pvMoney(n) { return (!n || isNaN(Number(n))) ? "" : Number(n).toLocaleString("vi-VN"); }
 export function nl2br(s) { return escapeHtml(s || "").replace(/\n/g, "<br>"); }
@@ -93,8 +111,7 @@ export function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   for (const it of (items || [])) {
     if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
     if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
-    const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-    sum += (usesDays ? qty * days * price : qty * price) * mult;
+    sum += lineAmount(it, usesDays) * mult;   // cộng Thành Tiền ĐÃ làm tròn từng dòng
   }
   return sum;
 }
@@ -106,18 +123,22 @@ export function baoGiaTitleJS(t) {
   return /^BANG\s*BAO\s*GIA/.test(ascii) ? t : "BẢNG BÁO GIÁ - " + t;
 }
 
+// Vòng đời hiện tại CHỈ dùng: draft / converted / lost.
+// pending/approved/rejected/sent là LEGACY (luồng duyệt nội bộ bỏ 2026-06-22) — giữ nhãn
+// để hiển thị đúng cho dữ liệu cũ (enum Prisma không migration), KHÔNG sinh mới nữa.
 export const STATUS_LABEL = {
   draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối",
   sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt",
 };
 export const statusLabel = (s) => STATUS_LABEL[s] || s || "—";
-export const ROLE_LABEL = { admin: "Quản trị", manager: "Account", account_hn: "Account HN" };
-export const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội" };
+export const ROLE_LABEL = { admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán" };
+export const ROLE_LABEL_FULL = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội", hr: "Nhân sự (HR)", accountant: "Kế toán" };
 export const CUSTOMER_STATUS_LABEL = { lead: "Tiềm năng", prospect: "Đang trao đổi", active: "Đang giao dịch", inactive: "Ngừng" };
 export const customerStatusLabel = (s) => CUSTOMER_STATUS_LABEL[s] || s || "—";
 export const RESOURCE_LABEL = { quote: "Báo giá", customer: "Khách hàng", product: "Sản phẩm", user: "Nhân viên", webhook: "Webhook", token: "Phiên đăng nhập" };
 
 // Friendly Vietnamese descriptions for audit action codes.
+// quote.submit/approve/reject là LEGACY (luồng duyệt bỏ 2026-06-22) — chỉ còn map nhật ký cũ.
 export const ACTION_LABEL = {
   "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.submit": "Trình duyệt báo giá",
   "quote.approve": "Duyệt báo giá", "quote.reject": "Từ chối báo giá", "quote.send": "Gửi báo giá cho khách",

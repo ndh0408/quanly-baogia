@@ -8,12 +8,11 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260622l";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260622l";
-import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260622l";
-import { api } from "./core/api.js?v=20260622l";
-import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260622l";
-import { refreshPreview } from "./preview.js?v=20260622l";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260624b";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260624b";
+import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
+import { api } from "./core/api.js?v=20260624b";
+import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -47,8 +46,8 @@ export function renderEditor(el, quote) {
   el.oninput = () => { if (state.page === "edit") window._editorDirty = true; };
   el.onchange = () => { if (state.page === "edit") window._editorDirty = true; };
 
-  // Mirror the server rule: admin edits all; manager edits only own; employee
-  // edits own or quotes they're a member of (and only while draft/rejected).
+  // Mirror the server rule: admin edits all; manager edits only own or quotes
+  // they're a member of — and only while NOT terminal (chưa converted/lost).
   const isMember = (q.members || []).some(m => m.id === state.user.id);
   const canUpdate = state.user.role === "admin" || q.createdById === state.user.id || isMember;
   const editable = isNew
@@ -328,7 +327,6 @@ export function renderEditor(el, quote) {
           document.getElementById("date-preview").textContent = vnDateText(q.quoteDate, q.city);
         }
         if (prop === "vatPercent" || prop === "discount") updateSummary(q);
-        refreshPreview(q);   // header fields (Kính gửi, title, date…) feed the live preview
       });
     };
     bindField("f-toCompany", "toCompany");
@@ -362,7 +360,6 @@ function bindActions(q, isNew) {
     q.showTotals = showTotalsBox.checked;
     const sum = document.querySelector(".quote-summary");
     if (sum) sum.style.display = q.showTotals ? "" : "none";
-    refreshPreview(q);
   });
   // Ghi chú cuối báo giá (quote.notes): bật/tắt ô nhập.
   // Tick "có" → tự điền sẵn câu chuẩn (nếu đang trống), sửa/xoá tuỳ ý. Bỏ tick → ẩn + xoá.
@@ -379,9 +376,8 @@ function bindActions(q, isNew) {
       q.notes = ""; if (noteInput) noteInput.value = "";
       if (noteWrap) noteWrap.style.display = "none";
     }
-    refreshPreview(q);
   });
-  if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; refreshPreview(q); });
+  if (noteInput) noteInput.addEventListener("input", () => { q.notes = noteInput.value; });
   const saveBtn = document.getElementById("btn-save");
   if (saveBtn) saveBtn.addEventListener("click", async () => {
     if (saveBtn.disabled) return;                 // guard against double-click → double POST
@@ -426,58 +422,24 @@ function bindActions(q, isNew) {
       saveBtn.textContent = label;
     }
   });
-  const submitBtn = document.getElementById("btn-submit");
-  if (submitBtn) submitBtn.addEventListener("click", async () => {
-    if (isNew) { toast("Vui lòng Lưu trước khi trình duyệt", "error"); return; }
-    // Guard against submitting an empty/zero-value quote (all prices still 0).
-    const tot = Number(q.total || 0);
-    if (tot <= 0 && !(await confirmModal("Tổng đang là 0", "Tổng báo giá đang là 0 (chưa nhập đơn giá). Vẫn trình duyệt?"))) return;
-    try {
-      const updated = await api(`/api/quotes/${q.id}/submit`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã gửi duyệt", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
-  const approveBtn = document.getElementById("btn-approve");
-  if (approveBtn) approveBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/approve`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã duyệt", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
-  const rejectBtn = document.getElementById("btn-reject");
-  if (rejectBtn) rejectBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/reject`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã từ chối", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
+  // File tải về là BẢN ĐÃ LƯU trên server (theo q.id) — nếu đang có thay đổi chưa lưu,
+  // cảnh báo để người dùng không gửi khách file thiếu phần vừa sửa.
+  const exportGuarded = async (url) => {
+    if (window._editorDirty && !(await confirmModal(
+      "Có thay đổi chưa lưu",
+      "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi bạn vừa sửa. Hãy bấm Lưu trước rồi tải lại.",
+      { confirmText: "Vẫn tải bản cũ", cancelText: "Để tôi lưu trước" }
+    ))) return;
+    window.open(url, "_blank");
+  };
   const excelBtn = document.getElementById("btn-excel");
-  if (excelBtn) excelBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.xlsx?t=${Date.now()}`, "_blank");   // cache-bust CDN
-  });
+  if (excelBtn) excelBtn.addEventListener("click", () => exportGuarded(`/api/export/${q.id}.xlsx?t=${Date.now()}`));   // cache-bust CDN
   const pdfBtn = document.getElementById("btn-pdf");
-  if (pdfBtn) pdfBtn.addEventListener("click", () => {
-    window.open(`/api/export/${q.id}.pdf?t=${Date.now()}`, "_blank");   // cache-bust CDN
-  });
+  if (pdfBtn) pdfBtn.addEventListener("click", () => exportGuarded(`/api/export/${q.id}.pdf?t=${Date.now()}`));   // cache-bust CDN
   const versionsBtn = document.getElementById("btn-versions");
   if (versionsBtn) versionsBtn.addEventListener("click", () => showVersions(q.id));
   const membersBtn = document.getElementById("btn-members");
   if (membersBtn) membersBtn.addEventListener("click", () => openMembersModal(q));
-  const sendBtn = document.getElementById("btn-send");
-  if (sendBtn) sendBtn.addEventListener("click", async () => {
-    try {
-      const updated = await api(`/api/quotes/${q.id}/send`, { method: "POST" });
-      state.currentQuote = updated;
-      toast("Đã đánh dấu là đã gửi khách", "success");
-      render();
-    } catch (e) { toast(e.message, "error"); }
-  });
   const convertBtn = document.getElementById("btn-convert");
   if (convertBtn) convertBtn.addEventListener("click", async () => {
     if (!(await confirmModal("Khách chốt", "Khách đã đồng ý — đánh dấu báo giá này ĐÃ CHỐT?", { confirmText: "Đã chốt" }))) return;
@@ -715,9 +677,9 @@ export function extraTableSumLocal(t) {
   return ((t && t.items) || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
-    const qty = Number(it.quantity) || 0, price = Number(it.unitPrice) || 0;
+    const qty = trunc2(it.quantity), price = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số (khớp hiển thị + server)
     const days = it.days != null ? Number(it.days) : null;
-    return acc + (days && days > 0 ? qty * days * price : qty * price);
+    return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
 }
 function drawExtraTables(q, activeSheet, editable) {
@@ -882,12 +844,22 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   };
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
+  // Bản BANNER: nhóm con đánh số 1,2,3 (reset mỗi nhóm chính), mục bên dưới KHÔNG đánh số.
+  const numberSubs = !!state.templates.find(t => t.code === tplCode)?.layout?.numberSubsections;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
   const multilineFields = new Set(["name", "detail", "notes", "internalNote"]);
 
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
-  const fmtNumCell = (v) => { const n = Number(v); return (!n || isNaN(n)) ? "" : n.toLocaleString("vi-VN"); };
+  const fmtNumCell = (v) => {
+    const t = trunc2(v);   // CẮT 2 số (cùng hàm với lúc tính tiền → hiển thị KHỚP giá trị dùng để tính)
+    if (!t || isNaN(t)) return "";                       // 0 / rỗng → ô trống
+    if (Number.isInteger(t)) return t.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,00
+    // Có phần lẻ → hiện ĐÚNG 2 số (pad): 5,997→5,99 · 3,2→3,20. t đã ≤2 lẻ nên toFixed(2) chính xác.
+    const [intp, dec] = Math.abs(t).toFixed(2).split(".");
+    const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
+    return t < 0 ? "-" + out : out;
+  };
   // Parse a VN-formatted string ("1.234.567" / "12,5" / "-5.000") back to a number.
   const parseVN = (s) => {
     s = String(s).replace(/[^\d.,-]/g, "");
@@ -942,6 +914,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
 
   let sttNo = 0;
   let sectionIdx = -1;
+  let subNo = 0;   // bản BANNER: số thứ tự nhóm con (reset theo từng nhóm chính)
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0) + (approveCol ? 1 : 0);
   const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
@@ -951,8 +924,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (rowKind[s2] === "section") { cur = s2; sectionSum[s2] = 0; }
       else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
         const x = activeSheet.items[s2];
-        sectionSum[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
-                                    : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+        sectionSum[cur] += lineAmount(x, usesDays);
       }
     }
   }
@@ -960,13 +932,14 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (rowKind[i] === "section") {
       const isSub = it.kind === "subsection";       // nhóm con: tổng riêng, KHÔNG cộng vào nhóm chính, VẪN vào tổng cộng
       let letter = "";
-      if (!isSub) { sectionIdx++; letter = groupLetter(sectionIdx); }   // nhóm con không chiếm chữ cái A/B/C
+      if (!isSub) { sectionIdx++; letter = groupLetter(sectionIdx); subNo = 0; }   // nhóm con không chiếm chữ cái A/B/C
+      else if (numberSubs) { letter = String(++subNo); }   // bản BANNER: nhóm con đánh số 1,2,3
       sttNo = 0;
       const subAmt = sectionSum[i] || 0;
       return `
       <tr data-row="${i}" class="section-row${isSub ? " subgroup-row" : ""}">
-        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${isSub ? "↳" : letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
-        <td class="col-hangmuc">${isSub ? `<span class="subgroup-caret" aria-hidden="true">↳ </span>` : ""}<textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+        <td class="col-stt"><input data-f="label" value="${escapeHtml(it.label || "")}" placeholder="${letter}" title="${isSub ? "Nhãn nhóm con (tuỳ chọn)" : `Chữ nhóm (để trống = tự ${letter})`}" ${dis} style="width:34px;text-align:center" /></td>
+        <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
@@ -987,10 +960,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa">✕</button></td>` : ""}
       </tr>`;
     }
-    const qty = Number(it.quantity) || 0;
-    const days = Number(it.days) || 1;
-    const price = Number(it.unitPrice) || 0;
-    const amt = usesDays ? qty * days * price : qty * price;
+    const amt = lineAmount(it, usesDays);
     if (rowKind[i] === "sub") {
       // Sub-row: STT + Hạng Mục covered by the head's rowspan, so omit those cells.
       return `<tr data-row="${i}" class="sub-row">${dataCells(it, i, amt)}</tr>`;
@@ -999,7 +969,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const span = rowspanOf(i);
     return `
       <tr data-row="${i}" class="grp-head${span > 1 ? " has-subs" : ""}">
-        <td class="col-stt" rowspan="${span}">${sttNo}</td>
+        <td class="col-stt" rowspan="${span}">${numberSubs ? "" : sttNo}</td>
         <td class="col-hangmuc" rowspan="${span}"><textarea data-f="name" rows="1" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${dataCells(it, i, amt)}
       </tr>`;
@@ -1112,8 +1082,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const it = activeSheet.items[p.row]; if (!it) return 0;
     if (p.field === "_amount") {
       if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
-      return usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                      : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+      return lineAmount(it, usesDays);
     }
     if (p.field === "_stt") return 0;
     if (NUMERIC.has(p.field)) return Number(it[p.field]) || 0;
@@ -1157,8 +1126,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     activeSheet.items.forEach((it, i) => {
       const tr = tbody.querySelector(`tr[data-row="${i}"]`); if (!tr) return;
       if (it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info") {
-        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const amt = lineAmount(it, usesDays);
         const ac = tr.querySelector(".col-amount"); if (ac) ac.textContent = fmtNumCell(amt);
       }
       if (it.formulas) for (const f in it.formulas) {
@@ -1207,8 +1175,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (rowKind[s2] === "section") { cur = s2; sums[s2] = 0; }
       else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
         const x = activeSheet.items[s2];
-        sums[cur] += usesDays ? (Number(x.quantity) || 0) * (Number(x.days) || 1) * (Number(x.unitPrice) || 0)
-                              : (Number(x.quantity) || 0) * (Number(x.unitPrice) || 0);
+        sums[cur] += lineAmount(x, usesDays);
       }
     }
     for (const idx in sums) {
@@ -1659,8 +1626,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const it = activeSheet.items[i];
       if (f === "quantity") autoEnableGroupSub(i);   // SL nhóm > 1 → tự bật "Hiện Thành Tiền nhóm" (kẻo tổng âm thầm sai)
       if (it.kind !== "section" && it.kind !== "subsection") {
-        const amt = usesDays ? (Number(it.quantity) || 0) * (Number(it.days) || 1) * (Number(it.unitPrice) || 0)
-                             : (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0);
+        const amt = lineAmount(it, usesDays);
         const amtCell = tr.querySelector(".col-amount");   // info/section rows: skip
         if (amtCell) amtCell.textContent = fmtNumCell(amt);
       }
@@ -1935,6 +1901,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (!activeSheet.items.length) activeSheet.items.push(blank());
       clampSel();
       redraw();
+      toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info");
     });
   });
 
@@ -1948,6 +1915,55 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // opts.subtotalFn: bảng nội bộ dùng extraTableSumLocal để "Tổng sheet" KHỚP đúng số đổ
   // sang Quản lý dự án (không hệ số nhóm) — tránh footer lệch Tổng-loại.
   const sheetSubtotal = opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
+
+  // CHỈ HIỂN THỊ (không đổi cách tính): dựng bảng giải thích "Tổng sheet" — đi đúng theo
+  // logic sheetSubtotalGrouped (mục × Số Lượng nhóm; dòng nhóm không tự cộng; info bỏ qua)
+  // để user/khách soi từng bước. Tổng cuối ở đây = đúng số ở chân lưới.
+  const explainSheetTotal = () => {
+    const items = activeSheet.items || [];
+    // Gom thành từng "khối" (nhóm / nhóm con / mục lẻ) — mỗi khối có tổng riêng; Tổng sheet = cộng các khối.
+    const blocks = [];
+    let cur = { title: null, sub: false, mult: 1, lines: [], subtotal: 0 };
+    let sectionIdx = -1;
+    const flush = () => { if (cur.title || cur.lines.length) blocks.push(cur); };
+    for (const it of items) {
+      if (it.kind === "section" || it.kind === "subsection") {
+        flush();
+        const isSub = it.kind === "subsection";
+        const mult = activeSheet.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+        let title;
+        if (isSub) title = "Nhóm con" + (it.name ? " — " + it.name : "");
+        else { sectionIdx++; title = "Nhóm " + ((it.label && String(it.label).trim()) || groupLetter(sectionIdx)) + (it.name ? " — " + it.name : ""); }
+        cur = { title, sub: isSub, mult, lines: [], subtotal: 0 };
+        continue;
+      }
+      if (it.kind === "info") { cur.lines.push({ info: true, name: it.name || "" }); continue; }
+      const contrib = lineAmount(it, usesDays) * cur.mult;
+      cur.subtotal += contrib;
+      cur.lines.push({ name: it.name || "(không tên)", qty: it.quantity, price: it.unitPrice, days: it.days, contrib });
+    }
+    flush();
+    const total = blocks.reduce((s, b) => s + b.subtotal, 0);
+    const renderBlock = (b) => {
+      const lines = b.lines.map((ln) => {
+        if (ln.info) return `<div class="te-line te-info">${escapeHtml(ln.name)} — (dòng thông tin, không tính tiền)</div>`;
+        const dy = usesDays ? ` × ${fmtNumCell(ln.days)}n` : "";
+        const xm = b.mult > 1 ? ` <span class="te-x">× ${b.mult}</span>` : "";
+        return `<div class="te-line"><span class="te-nm">${escapeHtml(ln.name)}</span><span class="te-cl">${fmtNumCell(ln.qty)} × ${fmtMoney(ln.price)}${dy}${xm}</span><span class="te-am">${fmtMoney(ln.contrib)}</span></div>`;
+      }).join("");
+      const head = b.title
+        ? `<div class="te-bh${b.sub ? " te-bh-sub" : ""}">${b.sub ? "↳ " : ""}${escapeHtml(b.title)}${b.mult > 1 ? ` <span class="te-mult">mỗi mục × ${b.mult}</span>` : ""}</div>`
+        : `<div class="te-bh te-bh-loose">Mục lẻ (không thuộc nhóm)</div>`;
+      const subLabel = !b.title ? "Cộng mục lẻ" : (b.sub ? "Cộng nhóm con" : "Cộng nhóm");
+      return `<div class="te-block">${head}${lines}<div class="te-sub">${subLabel} <b>${fmtMoney(b.subtotal)}</b></div></div>`;
+    };
+    const body = blocks.length ? blocks.map(renderBlock).join("") : `<p class="muted" style="text-align:center;padding:20px">Chưa có mục nào.</p>`;
+    return `<div class="total-explain">
+      <p class="te-note"><b>Mỗi mục</b> = Số Lượng × Đơn Giá (đã làm tròn) — mục trong nhóm thì × Số Lượng nhóm. <b>Tổng sheet</b> = cộng tổng các nhóm bên dưới.</p>
+      ${body}
+      <div class="te-grand"><span>TỔNG ${escapeHtml((opts.totalLabel || "sheet").toUpperCase())}</span><b>${fmtMoney(total)}</b></div>
+    </div>`;
+  };
   const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
@@ -1963,7 +1979,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     </td></tr>` : ""}
     <tr>
       <td colspan="${colSpanLeft}"></td>
-      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}</td>
+      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}${!opts.subtotalFn ? ` <button type="button" class="link-btn gf-explain" title="Xem cách cộng ra số này">ⓘ giải thích</button>` : ""}</td>
       <td class="value gf-subtotal-val">${fmtMoney(sheetSubtotal)}</td>
       <td></td>
       ${editable ? "<td></td>" : ""}
@@ -1976,6 +1992,13 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tfoot.querySelector(".gf-add-info")?.addEventListener("click", addInfo);
     tfoot.querySelector(".gf-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
   }
+  // "Giải thích" mở được cả khi chỉ-xem (không nằm trong nhánh editable) — read-only.
+  tfoot?.querySelector(".gf-explain")?.addEventListener("click", () => {
+    const m = openModal(`Giải thích Tổng ${opts.totalLabel || "sheet"}`, explainSheetTotal());
+    m.find(".modal")?.classList.add("modal-wide");
+    m.find("[data-save]")?.remove();                                   // bảng chỉ để XEM → bỏ nút "Lưu"
+    const c = m.find("[data-cancel]"); if (c) c.textContent = "Đóng";  // "Hủy" → "Đóng"
+  });
 
   // Re-derive the selection highlight from grid.sel — survives this innerHTML rebuild.
   paintSel();
@@ -2011,5 +2034,4 @@ function renderQuoteSummary(q) {
 function updateSummary(q) {
   const wrap = document.querySelector(".quote-summary");
   if (wrap) wrap.innerHTML = renderQuoteSummary(q);
-  refreshPreview(q);   // keep the live xlsx preview in sync (no-op when closed)
 }

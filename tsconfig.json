@@ -1,0 +1,23 @@
+{
+  // Backend TypeScript. Chạy bằng tsx (esbuild strip types — KHÔNG cần build). tsc chỉ để
+  // `npm run typecheck` (noEmit). allowJs=true → vài file .js cũ (exportWorker) chạy chung.
+  // strict=true ĐẦY ĐỦ (gồm noImplicitAny) — siết null/undefined/unknown + mọi param phải có kiểu.
+  // req.* tùy biến + session khai ở src/types/express.d.ts. allowJs cho vài .js cũ (exportWorker).
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"],
+  "exclude": ["node_modules", "web", "public", "tests", "prisma/seed*.js"]
+}

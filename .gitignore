@@ -45,6 +45,9 @@ Thumbs.db
 # Untracked junk (audit): old code backups + one-off recon scripts
 backups/
 
+# Security scan artifacts (tools, PG binaries, reports — confidential, off-repo)
+.scan/
+
 # Internal audit reports — confidential, store off-repo (never commit)
 AUDIT_REPORT.md
 .audit-full.txt
@@ -59,3 +62,15 @@ e2e*.mjs
 # Scratch / planning notes — keep in Claude memory or internal wiki
 .spa-plan.md
 .*-plan.md
+
+# Frontend mới (React/Vite) — build artifact + deps (off-repo, build trong Docker)
+/public/app2/
+web/node_modules/
+
+# e2e screenshot outputs (test artifacts)
+cmp-*.png
+cust-*.png
+customers-*.png
+v-*.png
+s2-*.png
+spa-smoke.png

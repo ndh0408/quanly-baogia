@@ -3,14 +3,34 @@
 // audit log, permissions. None of these touch the quote editor/grid, so they extract as a
 // clean leaf. Exact byte-for-byte copy of the former app.js bodies — zero behavior change.
 import {
-  fmtMoney, fmtDate, escapeHtml, statusLabel,
+  fmtMoney, fmtDate, fmtDateTime, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260622l";
-import { state, can } from "../core/state.js?v=20260622l";
-import { api } from "../core/api.js?v=20260622l";
+} from "../util.js?v=20260624b";
+import { state, can } from "../core/state.js?v=20260624b";
+import { api } from "../core/api.js?v=20260624b";
 import {
-  toast, skeleton, KBD, errorState, openModal, promptModal, confirmModal,
-} from "../ui.js?v=20260622l";
+  toast, skeleton, KBD, errorState, emptyState, openModal, promptModal, confirmModal,
+} from "../ui.js?v=20260624b";
+
+// Pager dùng chung cho các bảng admin (khách/sản phẩm/nhật ký). state-less: caller giữ
+// page + truyền meta {total,page,size,pageCount}; bấm Prev/Next gọi goToPage(n).
+function pagerHtml(meta) {
+  const m = meta || { total: 0, page: 1, pageCount: 1, size: 20 };
+  const start = m.total ? (m.page - 1) * m.size + 1 : 0;
+  const end = Math.min(m.total, m.page * m.size);
+  return `<div class="pager">
+    <span class="muted">Hiển thị ${start}–${end} / ${m.total}</span>
+    <div class="pager-btns">
+      <button class="btn btn-sm" data-pg="prev" ${m.page <= 1 ? "disabled" : ""}>← Trước</button>
+      <span class="muted" style="padding:0 6px">Trang ${m.page}/${m.pageCount || 1}</span>
+      <button class="btn btn-sm" data-pg="next" ${m.page >= (m.pageCount || 1) ? "disabled" : ""}>Sau →</button>
+    </div>
+  </div>`;
+}
+function wirePager(root, meta, goToPage) {
+  root.querySelector('[data-pg="prev"]')?.addEventListener("click", () => goToPage(Math.max(1, (meta.page || 1) - 1)));
+  root.querySelector('[data-pg="next"]')?.addEventListener("click", () => goToPage((meta.page || 1) + 1));
+}
 
 // The 5 shell/nav helpers that stay in app.js are INJECTED at boot (setAdminDeps) rather
 // than imported, to avoid a circular import with the entry module — which under cache-bust
@@ -34,7 +54,11 @@ async function loadUsers() {
     const users = await api("/api/users");
     state.users = users;
     drawUsers();
-  } catch (e) { toast(e.message, "error"); }
+  } catch (e) {
+    const body = document.getElementById("users-body");
+    if (body) body.innerHTML = errorState(e.message, loadUsers);
+    else toast(e.message, "error");
+  }
 }
 
 function drawUsers() {
@@ -74,6 +98,8 @@ function drawUsers() {
   body.querySelectorAll("button[data-pw]").forEach(b => b.addEventListener("click", () => openPasswordModal(state.users.find(u => u.id === parseInt(b.dataset.pw, 10)))));
   body.querySelectorAll("button[data-toggle]").forEach(b => b.addEventListener("click", async () => {
     const u = state.users.find(x => x.id === parseInt(b.dataset.toggle, 10));
+    // Khóa = hành động ảnh hưởng (chặn đăng nhập) → xác nhận trước. Mở khóa thì không cần.
+    if (u.active && !(await confirmModal("Khóa tài khoản", `Khóa tài khoản "${u.displayName || u.username}"? Người này sẽ không đăng nhập được cho tới khi được mở khóa.`, { danger: true, confirmText: "Khóa" }))) return;
     try {
       await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ active: !u.active }) });
       toast(u.active ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản", "success");
@@ -100,8 +126,10 @@ function openInviteModal() {
       <label style="grid-column:1/-1">Quyền
         <select id="iv-role">
           <option value="manager">Account</option>
-          <option value="admin">Quản trị viên</option>
+          <option value="admin">Quản trị</option>
           <option value="account_hn">Account Hà Nội</option>
+          <option value="hr">Nhân sự</option>
+          <option value="accountant">Kế toán</option>
         </select>
       </label>
       <label style="grid-column:1/-1">Mã dự án <span class="muted" style="font-weight:400;font-size:12px">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001, _002…)</span><input id="iv-projectcode" placeholder="VD: FE_A26" /></label>
@@ -147,7 +175,7 @@ function openUserModal(u) {
   const mask = document.createElement("div");
   mask.className = "modal-mask";
   mask.innerHTML = `
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${isNew ? "Thêm nhân viên" : "Sửa nhân viên " + escapeHtml(u.username)}">
       <h2>${isNew ? "Thêm nhân viên" : "Sửa: " + escapeHtml(u.username)}</h2>
       <label>Tên đăng nhập<input name="username" value="${escapeHtml(u?.username || "")}" ${isNew ? "" : "disabled"} /></label>
       ${isNew ? `<label>Mật khẩu khởi tạo<input name="password" type="password" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" /></label>` : ""}
@@ -155,8 +183,10 @@ function openUserModal(u) {
       <label>Quyền
         <select name="role">
           <option value="manager" ${u?.role === "manager" || !u?.role ? "selected" : ""}>Account</option>
-          <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị viên</option>
+          <option value="admin" ${u?.role === "admin" ? "selected" : ""}>Quản trị</option>
           <option value="account_hn" ${u?.role === "account_hn" ? "selected" : ""}>Account Hà Nội</option>
+          <option value="hr" ${u?.role === "hr" ? "selected" : ""}>Nhân sự</option>
+          <option value="accountant" ${u?.role === "accountant" ? "selected" : ""}>Kế toán</option>
         </select>
       </label>
       <label>SĐT<input name="phone" type="tel" inputmode="tel" value="${escapeHtml(u?.phone || "")}" /></label>
@@ -168,7 +198,11 @@ function openUserModal(u) {
       </div>
     </div>`;
   document.body.appendChild(mask);
-  mask.querySelector("[data-act=cancel]").addEventListener("click", () => mask.remove());
+  const closeMask = () => { mask.remove(); document.removeEventListener("keydown", onMaskKey); };
+  const onMaskKey = (e) => { if (e.key === "Escape") closeMask(); };
+  document.addEventListener("keydown", onMaskKey);
+  setTimeout(() => mask.querySelector("input:not([disabled]),select")?.focus(), 30);
+  mask.querySelector("[data-act=cancel]").addEventListener("click", closeMask);
   mask.querySelector("[data-act=save]").addEventListener("click", async () => {
     const get = n => mask.querySelector(`[name=${n}]`).value;
     const payload = {
@@ -182,7 +216,7 @@ function openUserModal(u) {
       if (isNew) await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
       else await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify(payload) });
       toast("Đã lưu", "success");
-      mask.remove();
+      closeMask();
       loadUsers();
     } catch (e) { toast(e.message, "error"); }
   });
@@ -192,22 +226,26 @@ function openPasswordModal(u) {
   const mask = document.createElement("div");
   mask.className = "modal-mask";
   mask.innerHTML = `
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Đổi mật khẩu ${escapeHtml(u.username)}">
       <h2>Đổi mật khẩu: ${escapeHtml(u.username)}</h2>
-      <label>Mật khẩu mới<input name="password" type="password" autocomplete="new-password" /></label>
+      <label>Mật khẩu mới<input name="password" type="password" autocomplete="new-password" minlength="8" /></label>
       <div class="actions">
         <button class="btn" data-act="cancel">Hủy</button>
         <button class="btn btn-primary" data-act="save">Đổi</button>
       </div>
     </div>`;
   document.body.appendChild(mask);
-  mask.querySelector("[data-act=cancel]").addEventListener("click", () => mask.remove());
+  const closeMask = () => { mask.remove(); document.removeEventListener("keydown", onMaskKey); };
+  const onMaskKey = (e) => { if (e.key === "Escape") closeMask(); };
+  document.addEventListener("keydown", onMaskKey);
+  setTimeout(() => mask.querySelector("[name=password]")?.focus(), 30);
+  mask.querySelector("[data-act=cancel]").addEventListener("click", closeMask);
   mask.querySelector("[data-act=save]").addEventListener("click", async () => {
     const pw = mask.querySelector("[name=password]").value;
     try {
       await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ password: pw }) });
       toast("Đã đổi mật khẩu", "success");
-      mask.remove();
+      closeMask();
     } catch (e) { toast(e.message, "error"); }
   });
 }
@@ -415,16 +453,27 @@ export async function renderCustomers(el) {
       <input id="cust-q" placeholder="Tìm theo mã hoặc tên công ty…" style="flex:1; min-width:240px"/>
       <button class="btn btn-primary" id="btn-new-cust">+ Khách mới</button>
     </div>
-    <div id="cust-body">Đang tải…</div>`;
-  let q = "";
+    <div id="cust-body">${skeleton(6)}</div>`;
+  let q = "", page = 1, sort = "createdAt", order = "desc";
   const reload = async () => {
-    const qs = "size=100" + (q ? `&q=${encodeURIComponent(q)}` : "");
+    const body = document.getElementById("cust-body");
+    if (!body) return;
+    const params = new URLSearchParams({ size: "20", page: String(page), sort, order });
+    if (q) params.set("q", q);
     try {
-      const r = await api("/api/customers?" + qs);
-      const body = document.getElementById("cust-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có khách hàng</div>"; return; }
-      body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">Mã khách hàng</th><th scope="col">Tên công ty</th><th scope="col"></th></tr></thead>
+      const r = await api("/api/customers?" + params.toString());
+      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 20 };
+      if (!r.data.length) {
+        body.innerHTML = q
+          ? emptyState("Không tìm thấy khách hàng phù hợp.")
+          : emptyState("Chưa có khách hàng nào.", { ctaLabel: "+ Thêm khách hàng", ctaId: "es-new-cust" });
+        body.querySelector("#es-new-cust")?.addEventListener("click", () => editCustomer(null));
+        return;
+      }
+      const sArrow = sort === "name" ? (order === "asc" ? " ▲" : " ▼") : "";
+      const sAria = sort === "name" ? (order === "asc" ? "ascending" : "descending") : "none";
+      body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
+        <thead><tr><th scope="col">Mã khách hàng</th><th scope="col" class="sortable" data-sort="name" aria-sort="${sAria}" title="Bấm để sắp xếp">Tên công ty${sArrow}</th><th scope="col"></th></tr></thead>
         <tbody>${r.data.map(c => `
           <tr>
             <td><strong>${escapeHtml(c.code)}</strong></td>
@@ -434,16 +483,21 @@ export async function renderCustomers(el) {
               <button class="btn btn-sm btn-danger" data-del="${c.id}">Xóa</button>
             </td>
           </tr>`).join("")}</tbody>
-      </table>`;
+      </table></div>${pagerHtml(meta)}`;
       body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editCustomer(parseInt(b.dataset.edit))));
       body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
         if (!(await confirmModal("Xóa khách hàng", "Xóa khách hàng này?", { danger: true, confirmText: "Xóa" }))) return;
         try { await api(`/api/customers/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
         catch (e) { toast(e.message, "error"); }
       }));
-    } catch (e) { toast(e.message, "error"); }
+      body.querySelector('th[data-sort="name"]')?.addEventListener("click", () => {
+        if (sort === "name") order = order === "asc" ? "desc" : "asc"; else { sort = "name"; order = "asc"; }
+        page = 1; reload();
+      });
+      wirePager(body, meta, (n) => { page = n; reload(); });
+    } catch (e) { body.innerHTML = errorState(e.message, reload); }
   };
-  document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
+  document.getElementById("cust-q").addEventListener("input", (e) => { q = e.target.value; page = 1; clearTimeout(window._ct); window._ct = setTimeout(reload, 300); });
   document.getElementById("btn-new-cust").addEventListener("click", () => editCustomer(null));
   await reload();
 }
@@ -507,134 +561,6 @@ function editCustomer(id) {
   });
 }
 
-// ---------------- Products ----------------
-async function renderProducts(el) {
-  el.innerHTML = `<h1>Sản phẩm / Dịch vụ</h1>
-    <div class="toolbar">
-      <input id="p-q" placeholder="Tìm theo SKU hoặc tên…" style="flex:1"/>
-      <button class="btn btn-primary" id="btn-new-p">+ Sản phẩm mới</button>
-    </div>
-    <div id="p-body">Đang tải…</div>`;
-  let q = "";
-  const reload = async () => {
-    try {
-      const r = await api("/api/products?size=100" + (q ? `&q=${encodeURIComponent(q)}` : ""));
-      const body = document.getElementById("p-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có sản phẩm</div>"; return; }
-      body.innerHTML = `<table class="list-table">
-        <thead><tr><th scope="col">SKU</th><th scope="col">Tên</th><th scope="col">Loại</th><th scope="col">ĐVT</th>
-          <th scope="col" style="text-align:right">Giá vốn</th><th scope="col" style="text-align:right">Giá bán</th>
-          <th scope="col" style="text-align:right">Margin</th><th scope="col"></th></tr></thead>
-        <tbody>${r.data.map(p => `
-          <tr>
-            <td><strong>${escapeHtml(p.sku)}</strong></td>
-            <td>${escapeHtml(p.name)}</td>
-            <td>${escapeHtml(p.category || "")}</td>
-            <td>${escapeHtml(p.unit || "")}</td>
-            <td style="text-align:right">${fmtMoney(p.costPrice)}</td>
-            <td style="text-align:right">${fmtMoney(p.basePrice)}</td>
-            <td style="text-align:right">${p.margin != null ? p.margin + "%" : "—"}</td>
-            <td><button class="btn btn-sm" data-edit="${p.id}">Sửa</button>
-                <button class="btn btn-sm btn-danger" data-del="${p.id}">Xóa</button></td>
-          </tr>`).join("")}</tbody></table>`;
-      body.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editProduct(parseInt(b.dataset.edit))));
-      body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-        if (!(await confirmModal("Xóa sản phẩm", "Xóa sản phẩm này?", { danger: true, confirmText: "Xóa" }))) return;
-        try { await api(`/api/products/${b.dataset.del}`, { method: "DELETE" }); toast("Đã xóa", "success"); reload(); }
-        catch (e) { toast(e.message, "error"); }
-      }));
-    } catch (e) { toast(e.message, "error"); }
-  };
-  document.getElementById("p-q").addEventListener("input", (e) => { q = e.target.value; clearTimeout(window._pt); window._pt = setTimeout(reload, 300); });
-  document.getElementById("btn-new-p").addEventListener("click", () => editProduct(null));
-  await reload();
-}
-
-function editProduct(id) {
-  const isNew = id == null;
-  const m = openModal(isNew ? "Tạo sản phẩm" : "Sửa sản phẩm", `
-    <div class="form-grid">
-      <label>SKU <span class="req">*</span><input id="pf-sku" required ${isNew ? "" : "disabled"}/></label>
-      <label>Tên <span class="req">*</span><input id="pf-name" required/></label>
-      <label>Loại<input id="pf-cat"/></label>
-      <label>ĐVT<input id="pf-unit"/></label>
-      <label>Giá vốn<input id="pf-cost" type="number" min="0" step="1" value="0"/></label>
-      <label>Giá bán<input id="pf-base" type="number" min="0" step="1" value="0"/></label>
-      <label style="grid-column:1/-1">Mô tả<textarea id="pf-desc" rows="2"></textarea></label>
-    </div>`);
-  if (!isNew) {
-    api(`/api/products/${id}`).then(p => {
-      m.find("#pf-sku").value = p.sku || "";
-      m.find("#pf-name").value = p.name || "";
-      m.find("#pf-cat").value = p.category || "";
-      m.find("#pf-unit").value = p.unit || "";
-      m.find("#pf-cost").value = p.costPrice || 0;
-      m.find("#pf-base").value = p.basePrice || 0;
-      m.find("#pf-desc").value = p.description || "";
-    });
-  }
-  m.onSave(async () => {
-    const body = {
-      sku: m.find("#pf-sku").value.trim(),
-      name: m.find("#pf-name").value.trim(),
-      category: m.find("#pf-cat").value.trim() || null,
-      unit: m.find("#pf-unit").value.trim() || null,
-      costPrice: Number(m.find("#pf-cost").value) || 0,
-      basePrice: Number(m.find("#pf-base").value) || 0,
-      description: m.find("#pf-desc").value.trim() || null,
-    };
-    if (!body.sku || !body.name) { toast("Vui lòng nhập SKU và tên sản phẩm", "error"); return; }
-    try {
-      if (isNew) await api("/api/products", { method: "POST", body: JSON.stringify(body) });
-      else await api(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(body) });
-      toast("Đã lưu", "success"); m.close();
-      renderProducts(document.getElementById("main"));
-    } catch (e) { toast(e.message, "error"); }
-  });
-}
-
-// ---------------- Approval queue ----------------
-export async function renderApprovalQueue(el) {
-  el.innerHTML = `<h1>Hàng chờ duyệt</h1><div id="aq-body">${skeleton(4)}</div>`;
-  try {
-    const r = await api("/api/approvals/queue");
-    const body = document.getElementById("aq-body");
-    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có báo giá chờ duyệt</div>"; return; }
-    body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
-      <thead><tr><th scope="col">Mã dự án</th><th scope="col">Tiêu đề</th><th scope="col">Khách hàng</th>
-        <th scope="col" style="text-align:right">Tổng tiền</th><th scope="col">Người tạo</th><th scope="col">Thao tác</th></tr></thead>
-      <tbody>${r.data.map(a => `
-        <tr>
-          <td><strong>${escapeHtml(a.quote?.projectCode || a.quote?.quoteNumber)}</strong></td>
-          <td>${escapeHtml(a.quote?.title || "")}</td>
-          <td>${escapeHtml(a.quote?.toCompany || "")}</td>
-          <td style="text-align:right">${fmtMoney(a.quote?.total)} đ</td>
-          <td>${escapeHtml(a.quote?.createdBy?.displayName || "")}</td>
-          <td style="white-space:nowrap">
-            <button class="btn btn-sm" data-open="${a.quote?.id}">Xem</button>
-            <button class="btn btn-sm btn-primary" data-approve="${a.quote?.id}">✓ Duyệt</button>
-            ${can("quote:approve") ? `<button class="btn btn-sm btn-danger" data-reject="${a.quote?.id}">✗ Từ chối</button>` : ""}
-          </td>
-        </tr>`).join("")}</tbody></table></div>`;
-    body.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
-      goToQuote(b.dataset.open); // deep-link; routeFromHash fetches + renders, back returns here
-    }));
-    body.querySelectorAll("[data-approve]").forEach(b => b.addEventListener("click", async () => {
-      const comment = await promptModal("Duyệt báo giá", "Ghi chú khi duyệt (không bắt buộc):", { placeholder: "VD: Đồng ý mức giá này" });
-      if (comment === null) return;
-      try { await api(`/api/quotes/${b.dataset.approve}/approve`, { method: "POST", body: JSON.stringify({ comment }) });
-        toast("Đã duyệt", "success"); renderApprovalQueue(el);
-      } catch (e) { toast(e.message, "error"); }
-    }));
-    body.querySelectorAll("[data-reject]").forEach(b => b.addEventListener("click", async () => {
-      const comment = await promptModal("Từ chối báo giá", "Lý do từ chối (bắt buộc):", { required: true, min: 5, requiredMsg: "Vui lòng nhập lý do (ít nhất 5 ký tự)", placeholder: "VD: Giá cao hơn ngân sách, cần giảm 10%" });
-      if (!comment) return;
-      try { await api(`/api/quotes/${b.dataset.reject}/reject`, { method: "POST", body: JSON.stringify({ comment }) });
-        toast("Đã từ chối", "success"); renderApprovalQueue(el);
-      } catch (e) { toast(e.message, "error"); }
-    }));
-  } catch (e) { toast(e.message, "error"); }
-}
 
 // ---------------- Notifications ----------------
 export async function renderNotifications(el) {
@@ -642,18 +568,22 @@ export async function renderNotifications(el) {
     <div class="toolbar"><button class="btn" id="btn-read-all">Đánh dấu đã đọc tất cả</button></div>
     <div id="n-body">${skeleton(4)}</div>`;
   document.getElementById("btn-read-all").addEventListener("click", async () => {
-    await api("/api/notifications/read-all", { method: "POST" });
-    renderNotifications(el);
+    try {
+      await api("/api/notifications/read-all", { method: "POST" });
+      toast("Đã đánh dấu tất cả là đã đọc", "success");
+      refreshBadges();
+      renderNotifications(el);
+    } catch (e) { toast(e.message, "error"); }
   });
   try {
     const r = await api("/api/notifications?size=50");
     const body = document.getElementById("n-body");
-    if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Không có thông báo</div>"; return; }
+    if (!r.data.length) { body.innerHTML = emptyState("Không có thông báo nào.", { icon: "🔔" }); return; }
     body.innerHTML = r.data.map(n => `
       <div class="notif ${n.readAt ? "" : "unread"}" data-id="${n.id}" data-resource="${escapeHtml(n.resource || "")}" data-rid="${escapeHtml(n.resourceId || "")}" ${KBD}>
         <div class="notif-title">${escapeHtml(n.title)}</div>
         <div class="notif-body">${escapeHtml(n.body)}</div>
-        <div class="notif-meta">${fmtDate(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
+        <div class="notif-meta">${fmtDateTime(n.createdAt)} ${escapeHtml(n.resource || "")}</div>
       </div>`).join("");
     // Every notification is clickable: mark read (if unread) AND deep-link to the
     // referenced quote so the alert leads somewhere instead of dead-ending.
@@ -669,10 +599,10 @@ export async function renderNotifications(el) {
 }
 
 // ---------------- Quản lý dự án (admin) ----------------
-// GIAI ĐOẠN 1 (chỉ hiển thị): liệt kê báo giá ĐÃ DUYỆT theo bố cục bảng theo dõi dự
-// án/hoá đơn. Báo giá NHIỀU SHEET được tách mỗi sheet thành 1 dòng: Mã Sản Xuất thêm
-// hậu tố _1/_2… theo sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng
-// sheet. Cột hoá đơn/thanh toán/chứng từ để "—" (Giai đoạn 2). Nguồn: /api/quotes/projects.
+// Liệt kê báo giá ĐÃ CHỐT (converted) theo bố cục bảng theo dõi dự án/hoá đơn. Báo giá
+// NHIỀU SHEET được tách mỗi sheet thành 1 dòng: Mã Sản Xuất thêm hậu tố _1/_2… theo
+// sheet, Hạng Mục = tên sheet, Báo Giá/Thành Tiền VAT theo từng sheet. Luồng hoàn chỉnh:
+// Hoá đơn → Thanh toán → Done (admin nhập Số HĐ + Ngày TT). Nguồn: /api/quotes/projects.
 export async function renderProjects(el) {
   // CHỈ admin xem TẤT CẢ dự án + ký mọi dự án. Người có canSign (vd Lan Anh): CHỈ xem + ký dự án
   // DO MÌNH TẠO. Quản lý thường: chỉ xem dự án của mình, không ký. (server đã lọc theo người tạo)
@@ -719,6 +649,12 @@ export async function renderProjects(el) {
         invoiceNo: sh.invoiceNo || null,
         paidAt: sh.paidAt || null,
         invStatus: sh.invStatus || "invoice",   // invoice | payment | done (suy từ server)
+        poNumber: sh.poNumber || null,
+        hnInvoiceNo: sh.hnInvoiceNo || null,
+        invoiceLink: sh.invoiceLink || null,
+        docSentAt: sh.docSentAt || null,
+        docReturnedAt: sh.docReturnedAt || null,
+        hnStatus: q.hnStatus || null,           // báo giá HN: assigned/submitted/approved/rejected
       });
     });
   }
@@ -738,9 +674,9 @@ export async function renderProjects(el) {
     return true;
   };
 
-  const stat = (label, val) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
+  const stat = (label, val, color) => `<div class="card-section" style="flex:1;min-width:160px;padding:12px 16px">
       <div class="muted" style="font-size:12px">${label}</div>
-      <div style="font-size:20px;font-weight:700;margin-top:3px">${val}</div></div>`;
+      <div style="font-size:20px;font-weight:700;margin-top:3px${color ? `;color:${color}` : ""}">${val}</div></div>`;
   const dash = '<span class="muted">—</span>';
   // Luồng hoá đơn (chỉ BG đã chốt): Hoá đơn → Thanh toán (có số HĐ) → Done (có ngày TT). Tái dùng màu .status.
   const INV = { invoice: { l: "Hoá đơn", c: "pending" }, payment: { l: "Thanh toán", c: "sent" }, done: { l: "Done", c: "approved" } };
@@ -750,12 +686,15 @@ export async function renderProjects(el) {
   const renderSummary = (rows) => {
     const sumBaoGia = rows.reduce((s, r) => s + r.baoGia, 0);
     const sumVAT = rows.reduce((s, r) => s + r.thanhTienVAT, 0);
+    // Đã thanh toán = dòng có Ngày Thanh Toán; còn lại = chưa thu (theo Thành Tiền VAT).
+    const paid = rows.reduce((s, r) => s + (r.paidAt ? r.thanhTienVAT : 0), 0);
+    const unpaid = sumVAT - paid;
     const summ = document.getElementById("proj-summary");
     if (summ) summ.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
-      ${stat("Số dự án đã chốt", new Set(rows.map(r => r.q.id)).size)}
-      ${stat("Số dòng (theo sheet)", rows.length)}
       ${stat("Tổng Báo Giá (trước VAT)", fmtMoney(sumBaoGia))}
-      ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}</div>`;
+      ${stat("Tổng Thành Tiền VAT", fmtMoney(sumVAT))}
+      ${stat("Đã thanh toán", fmtMoney(paid), "#0a7d28")}
+      ${stat("Chưa thanh toán", fmtMoney(unpaid), unpaid > 0 ? "#c0392b" : "")}</div>`;
   };
 
   const renderTable = (rows) => {
@@ -770,22 +709,40 @@ export async function renderProjects(el) {
       <tbody>${rows.map(r => {
         const q = r.q;
         const cty = q.company?.shortName || q.company?.name || "";
+        // Số HĐ / Ngày TT / PO/HĐ / chứng từ / link / Số HĐ HN: admin nhập trực tiếp (dự án đã chốt).
+        const editable2 = canInv && r.sheetId && q.status === "converted";
+        // ĐÈN ĐỎ = việc CẦN làm; nhập/làm xong → TRẮNG lại. "Số PO/HĐ" có giá trị thì kích hoạt
+        // 4 việc: chứng từ gửi đi, chứng từ trả về, link hoá đơn, ký chứng từ.
+        const poFilled = !!r.poNumber;
+        const hnNeed = r.hnStatus === "approved" && r.hanoi > 0 && !r.hnInvoiceNo; // BG Hà Nội đã DUYỆT mà chưa có Số HĐ HN
+        const red = (need) => need ? ' style="background:#ffdede"' : '';
+        const txtCell = (cls, val, need, ph, w = 110) => editable2
+          ? `<td${red(need)}><input class="${cls}" data-sheet="${r.sheetId}" value="${escapeHtml(val || "")}" placeholder="${ph}" style="width:${w}px" /></td>`
+          : `<td${red(need)}>${val ? escapeHtml(val) : dash}</td>`;
+        const dateCell = (cls, val, need) => editable2
+          ? `<td${red(need)}><input type="date" class="${cls}" data-sheet="${r.sheetId}" value="${val ? new Date(val).toISOString().slice(0, 10) : ""}" style="width:140px" /></td>`
+          : `<td${red(need)}>${val ? fmtDate(val) : dash}</td>`;
+        // Ký Chứng từ: đỏ khi đã có Số PO/HĐ mà CHƯA ký; ký xong → trắng.
+        const kyRed = (poFilled && !r.signedAt) ? ' style="background:#ffdede"' : '';
         const kyCell = r.signedAt
           ? `<td title="${escapeHtml((r.signedByName || "Đã ký") + " · " + fmtDate(r.signedAt))}"><span class="status approved">✓ Đã Ký</span>${canSignNow && r.sheetId ? ` <button class="ky-undo" data-sheet="${r.sheetId}" title="Bỏ ký">✕</button>` : ""}</td>`
-          : (canSignNow && r.sheetId ? `<td><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td>${dash}</td>`);
+          : (canSignNow && r.sheetId ? `<td${kyRed}><button class="btn btn-sm ky-btn" data-sheet="${r.sheetId}">Ký</button></td>` : `<td${kyRed}>${dash}</td>`);
         // Status: BG đã chốt → badge luồng hoá đơn (Hoá đơn/Thanh toán/Done); khác → status thường.
         const inv = INV[r.invStatus] || INV.invoice;
         const statusCell = q.status === "converted"
           ? `<td><span class="status ${inv.c}">${inv.l}</span></td>`
           : `<td><span class="status ${q.status}">${statusLabel(q.status)}</span></td>`;
-        // Số Hoá Đơn + Ngày Thanh Toán: admin nhập trực tiếp (chỉ trên dự án đã chốt).
-        const editable2 = canInv && r.sheetId && q.status === "converted";
         const invNoCell = editable2
           ? `<td><input class="inv-no" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceNo || "")}" placeholder="Số HĐ" style="width:110px" /></td>`
           : `<td>${r.invoiceNo ? escapeHtml(r.invoiceNo) : dash}</td>`;
         const paidCell = editable2
           ? `<td><input type="date" class="inv-paid" data-sheet="${r.sheetId}" value="${r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : ""}" style="width:140px" /></td>`
           : `<td>${r.paidAt ? fmtDate(r.paidAt) : dash}</td>`;
+        // Link Hoá Đơn: đỏ khi có PO/HĐ mà chưa có link; đã nhập → hiện link bấm được (trắng).
+        const linkNeed = poFilled && !r.invoiceLink;
+        const linkCell = editable2
+          ? `<td${red(linkNeed)}><input class="inv-link" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceLink || "")}" placeholder="Link HĐ" style="width:120px" /></td>`
+          : `<td${red(linkNeed)}>${r.invoiceLink ? `<a href="${escapeHtml(r.invoiceLink)}" target="_blank" rel="noopener">Xem HĐ</a>` : dash}</td>`;
         return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
           ${statusCell}
           <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>
@@ -795,11 +752,11 @@ export async function renderProjects(el) {
           <td style="text-align:right">${r.hanoi ? fmtMoney(r.hanoi) : dash}</td>
           <td style="text-align:right">${r.khach ? fmtMoney(r.khach) : dash}</td>
           <td><strong>${escapeHtml(r.code)}</strong></td>
-          <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td><td>${dash}</td>
+          <td>${q.executionDate ? fmtDate(q.executionDate) : dash}</td>${txtCell("po-no", r.poNumber, false, "Số PO/HĐ")}
           <td>${(r.cty || cty) ? escapeHtml(r.cty || cty) : dash}</td>
           ${invNoCell}<td>${dash}</td>
           <td style="text-align:right">${fmtMoney(r.thanhTienVAT)}</td>
-          ${paidCell}<td>${dash}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+          ${paidCell}${dateCell("doc-sent", r.docSentAt, poFilled && !r.docSentAt)}${dateCell("doc-ret", r.docReturnedAt, poFilled && !r.docReturnedAt)}${linkCell}${txtCell("hn-no", r.hnInvoiceNo, hnNeed, "Số HĐ HN")}
           <td>${q.customerCode ? escapeHtml(q.customerCode) : dash}</td><td>${q.createdBy?.displayName ? escapeHtml(q.createdBy.displayName) : dash}</td>${kyCell}<td>${dash}</td>
         </tr>`;
       }).join("")}</tbody>
@@ -817,13 +774,16 @@ export async function renderProjects(el) {
         renderProjects(el);
       } catch (err) { toast(err.message, "error"); }
     }));
-    // Admin nhập Số Hoá Đơn / Ngày Thanh Toán → lưu + vẽ lại để Status (Hoá đơn/Thanh toán/Done) cập nhật.
-    body.querySelectorAll(".inv-no, .inv-paid").forEach((inp) => inp.addEventListener("change", async (e) => {
+    // Admin nhập Số Hoá Đơn / Ngày TT / Số PO/HĐ / chứng từ / link / Số HĐ HN → lưu + vẽ lại
+    // để Status (Hoá đơn/Thanh toán/Done) + đèn đỏ-trắng cập nhật.
+    const FIELD_OF = { "inv-no": "invoiceNo", "inv-paid": "paidAt", "po-no": "poNumber", "hn-no": "hnInvoiceNo", "inv-link": "invoiceLink", "doc-sent": "docSentAt", "doc-ret": "docReturnedAt" };
+    body.querySelectorAll(".inv-no, .inv-paid, .po-no, .hn-no, .inv-link, .doc-sent, .doc-ret").forEach((inp) => inp.addEventListener("change", async (e) => {
       e.stopPropagation();
       const sheetId = inp.dataset.sheet;
-      const payload = inp.classList.contains("inv-no") ? { invoiceNo: inp.value.trim() } : { paidAt: inp.value || null };
+      const cls = Object.keys(FIELD_OF).find((c) => inp.classList.contains(c));
+      const val = inp.type === "date" ? (inp.value || null) : inp.value.trim();
       try {
-        await api(`/api/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify(payload) });
+        await api(`/api/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [FIELD_OF[cls]]: val }) });
         toast("Đã lưu", "success");
         renderProjects(el);
       } catch (err) { toast(err.message, "error"); }
@@ -864,32 +824,51 @@ export async function renderAuditLog(el) {
       <select id="a-action"><option value="">Tất cả hoạt động</option>${actionOpts}</select>
       <label for="a-resource" class="sr-only">Lọc theo đối tượng</label>
       <select id="a-resource"><option value="">Tất cả đối tượng</option>${resOpts}</select>
+      <label class="inline-field">Từ <input id="a-from" type="date" /></label>
+      <label class="inline-field">Đến <input id="a-to" type="date" /></label>
+      <button class="btn btn-sm btn-ghost" id="a-clear" type="button">Xóa lọc</button>
     </div>
     <div id="a-body">${skeleton(6)}</div>`;
+  let page = 1;
   const reload = async () => {
+    const body = document.getElementById("a-body");
+    if (!body) return;
     const params = new URLSearchParams();
     const av = document.getElementById("a-action").value;
     const rv = document.getElementById("a-resource").value;
+    const from = document.getElementById("a-from").value;
+    const to = document.getElementById("a-to").value;
     if (av) params.set("action", av);
     if (rv) params.set("resource", rv);
-    params.set("size", "100");
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    params.set("page", String(page));
+    params.set("size", "50");
     try {
       const r = await api("/api/audit?" + params);
-      const body = document.getElementById("a-body");
-      if (!r.data.length) { body.innerHTML = "<div class='empty-state'>Chưa có hoạt động nào</div>"; return; }
+      const meta = r.meta || { total: r.data.length, page: 1, pageCount: 1, size: 50 };
+      if (!r.data.length) { body.innerHTML = emptyState((av || rv || from || to) ? "Không có hoạt động khớp bộ lọc." : "Chưa có hoạt động nào.", { icon: "🕘" }); return; }
       body.innerHTML = `<div class="tbl-scroll"><table class="list-table">
         <thead><tr><th scope="col">Thời gian</th><th scope="col">Người thực hiện</th><th scope="col">Hoạt động</th><th scope="col">Đối tượng</th></tr></thead>
         <tbody>${r.data.map(e => `
           <tr>
-            <td>${new Date(e.createdAt).toLocaleString("vi-VN")}</td>
+            <td>${fmtDateTime(e.createdAt)}</td>
             <td>${escapeHtml(e.actor?.displayName || e.actor?.username || "Hệ thống")}</td>
             <td>${escapeHtml(actionLabel(e.action))}</td>
             <td>${escapeHtml(resourceLabel(e.resource))}${e.resourceId ? " #" + escapeHtml(e.resourceId) : ""}</td>
-          </tr>`).join("")}</tbody></table></div>`;
-    } catch (e) { toast(e.message, "error"); }
+          </tr>`).join("")}</tbody></table></div>${pagerHtml(meta)}`;
+      wirePager(body, meta, (n) => { page = n; reload(); });
+    } catch (e) { body.innerHTML = errorState(e.message, reload); }
   };
-  document.getElementById("a-action").addEventListener("change", reload);
-  document.getElementById("a-resource").addEventListener("change", reload);
+  const onFilter = () => { page = 1; reload(); };
+  document.getElementById("a-action").addEventListener("change", onFilter);
+  document.getElementById("a-resource").addEventListener("change", onFilter);
+  document.getElementById("a-from").addEventListener("change", onFilter);
+  document.getElementById("a-to").addEventListener("change", onFilter);
+  document.getElementById("a-clear").addEventListener("click", () => {
+    ["a-action", "a-resource", "a-from", "a-to"].forEach(id => { const x = document.getElementById(id); if (x) x.value = ""; });
+    onFilter();
+  });
   await reload();
 }
 

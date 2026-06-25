@@ -4,11 +4,11 @@
 // newExtraGrid, extraTableSumLocal) are INJECTED via setQuoteDeps at boot to avoid a circular
 // import with the entry module. Function bodies are an exact byte-for-byte copy of the former
 // app.js — zero behavior change.
-import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260622l";
-import { state, can, canOnQuote } from "../core/state.js?v=20260622l";
-import { api } from "../core/api.js?v=20260622l";
-import { toast, skeleton, KBD, errorState, confirmModal } from "../ui.js?v=20260622l";
-import { pickCustomer } from "./admin.js?v=20260622l";
+import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260624b";
+import { state, can, canOnQuote } from "../core/state.js?v=20260624b";
+import { api } from "../core/api.js?v=20260624b";
+import { toast, skeleton, KBD, errorState, confirmModal, promptModal } from "../ui.js?v=20260624b";
+import { pickCustomer } from "./admin.js?v=20260624b";
 
 // Injected at boot (setQuoteDeps) — resolve to app.js's editor/shell functions (hoisted there).
 let render, goToQuote, codeLabel, shortTitle, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal;
@@ -29,7 +29,21 @@ function hnListBadge(st) {
   return `<span class="status ${s.cls}">${s.label}</span>`;
 }
 
+// Cột sắp xếp được — phải khớp enum sort của backend (ListQuerySchema).
+const QUOTE_SORTS = ["createdAt", "quoteDate", "total", "quoteNumber"];
+
 export async function renderList(el) {
+  // Hydrate bộ lọc từ URL (#/list?q=&status=&sort=&order=&page=) → F5 / chia sẻ link
+  // khôi phục đúng khung nhìn. Không có query thì giữ state.filter hiện tại.
+  const sp = new URLSearchParams((location.hash.split("?")[1]) || "");
+  if (sp.toString()) {
+    state.filter.q = sp.get("q") || "";
+    state.filter.status = sp.get("status") || "";
+    state.filter.sort = QUOTE_SORTS.includes(sp.get("sort")) ? sp.get("sort") : "createdAt";
+    state.filter.order = sp.get("order") === "asc" ? "asc" : "desc";
+    state.filter.page = Math.max(1, parseInt(sp.get("page") || "1", 10) || 1);
+  }
+
   el.innerHTML = `<h1>Danh sách báo giá</h1>
     <div class="toolbar">
       <label for="filter-q" class="sr-only">Tìm báo giá</label>
@@ -46,10 +60,24 @@ export async function renderList(el) {
   document.getElementById("filter-status").value = state.filter.status;
 
   const PAGE_SIZE = 20;
+  // Ghi bộ lọc lên URL bằng replaceState (KHÔNG bắn hashchange → không re-route/giật focus).
+  const syncFilterUrl = () => {
+    const p = new URLSearchParams();
+    if (state.filter.q) p.set("q", state.filter.q);
+    if (state.filter.status) p.set("status", state.filter.status);
+    if (state.filter.sort && state.filter.sort !== "createdAt") p.set("sort", state.filter.sort);
+    if (state.filter.order && state.filter.order !== "desc") p.set("order", state.filter.order);
+    if ((state.filter.page || 1) > 1) p.set("page", state.filter.page);
+    const qs = p.toString();
+    try { history.replaceState(null, "", "#/list" + (qs ? "?" + qs : "")); } catch { /* ignore */ }
+  };
   const reload = async () => {
+    syncFilterUrl();
     const params = new URLSearchParams();
     if (state.filter.q) params.set("q", state.filter.q);
     if (state.filter.status) params.set("status", state.filter.status);
+    params.set("sort", state.filter.sort || "createdAt");
+    params.set("order", state.filter.order || "desc");
     params.set("page", state.filter.page || 1);
     params.set("size", PAGE_SIZE);
     try {
@@ -91,13 +119,17 @@ export async function renderList(el) {
     const end = (m.page - 1) * PAGE_SIZE + state.quoteList.length;
     const isAdmin = state.user?.role === "admin";   // cột "Người tạo" chỉ hiện cho admin
     const isAccountHn = state.user?.role === "account_hn";   // account_hn: ẩn tiền/khách/thao tác, hiện "Người giao" + trạng thái HN
+    // Header sắp-xếp-được (chỉ cột backend hỗ trợ): bấm để đổi cột/đảo chiều; có mũi tên + aria-sort.
+    const sArrow = (f) => state.filter.sort === f ? (state.filter.order === "asc" ? " ▲" : " ▼") : "";
+    const sAria = (f) => state.filter.sort === f ? (state.filter.order === "asc" ? "ascending" : "descending") : "none";
+    const sortTh = (f, label, style) => `<th scope="col" class="sortable" data-sort="${f}" aria-sort="${sAria(f)}" title="Bấm để sắp xếp"${style ? ` style="${style}"` : ""}>${label}${sArrow(f)}</th>`;
     body.innerHTML = `
       <div class="tbl-scroll">
       <table class="list-table cards-sm">
         <thead>
           <tr>
-            <th scope="col">Mã dự án</th>${isAdmin ? `<th scope="col">Người tạo</th>` : ""}${isAccountHn ? `<th scope="col">Người giao</th>` : ""}<th scope="col">Tiêu đề</th>
-            <th scope="col">Ngày</th><th scope="col">Sheet</th>${isAccountHn ? "" : `<th scope="col" style="text-align:right">Tổng (VNĐ)</th>`}
+            ${sortTh("quoteNumber", "Mã dự án")}${isAdmin ? `<th scope="col">Người tạo</th>` : ""}${isAccountHn ? `<th scope="col">Người giao</th>` : ""}<th scope="col">Tiêu đề</th>
+            ${sortTh("quoteDate", "Ngày")}<th scope="col">Sheet</th>${isAccountHn ? "" : sortTh("total", "Tổng (VNĐ)", "text-align:right")}
             <th scope="col">Công ty</th>${isAccountHn ? `<th scope="col" style="text-align:right">Tổng HN</th>` : `<th scope="col">Khách</th><th scope="col">Mã KH</th>`}
             <th scope="col">Trạng thái</th>${isAccountHn ? "" : `<th scope="col">Thao tác</th>`}
           </tr>
@@ -155,6 +187,14 @@ export async function renderList(el) {
     });
     document.getElementById("pg-prev")?.addEventListener("click", () => { state.filter.page = Math.max(1, (state.filter.page || 1) - 1); reload(); });
     document.getElementById("pg-next")?.addEventListener("click", () => { state.filter.page = (state.filter.page || 1) + 1; reload(); });
+    // Sắp xếp: bấm cùng cột → đảo chiều; cột khác → chọn cột (ngày/tổng mặc định giảm dần, mã tăng dần).
+    body.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
+      const f = th.dataset.sort;
+      if (state.filter.sort === f) state.filter.order = state.filter.order === "asc" ? "desc" : "asc";
+      else { state.filter.sort = f; state.filter.order = (f === "quoteDate" || f === "total") ? "desc" : "asc"; }
+      state.filter.page = 1;
+      reload();
+    }));
   }
   await reload();
 }
@@ -565,7 +605,9 @@ export function renderAccountHnView(el, q) {
     if (s.classList && s.classList.contains("ahn-name") && s.dataset.si != null) { const hs = q.hnSheets[+s.dataset.si]; if (hs && hs.hnTables[+s.dataset.ti]) { hs.hnTables[+s.dataset.ti].name = s.value; window._editorDirty = true; const tn = host.querySelector(`.sheet-tab[data-si="${s.dataset.si}"][data-ti="${s.dataset.ti}"] span`); if (tn) tn.textContent = s.value || ("Bảng " + (+s.dataset.ti + 1)); } }
   });
   el.querySelector("#ahn-save").addEventListener("click", () => saveHnPart(q, false));
-  el.querySelector("#ahn-submit").addEventListener("click", () => { if (confirm("Gửi duyệt phần Hà Nội? Sau khi gửi sẽ không sửa được cho tới khi quản lý duyệt/trả.")) saveHnPart(q, true); });
+  el.querySelector("#ahn-submit").addEventListener("click", async () => {
+    if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) saveHnPart(q, true);
+  });
 }
 
 // Panel cho QUẢN LÝ trong renderEditor: giao phần HN cho Account, + duyệt/trả khi account gửi.
@@ -595,7 +637,8 @@ export function renderManagerHnPanel(q) {
     try { await api(`/api/quotes/${q.id}/hn/review`, { method: "POST", body: JSON.stringify({ decision: "approve" }) }); toast("Đã duyệt phần HN", "success"); reload(); } catch (e) { toast(e.message || "Lỗi", "error"); }
   });
   document.getElementById("hn-reject-btn")?.addEventListener("click", async () => {
-    const note = prompt("Lý do trả lại phần HN (Account sẽ thấy):"); if (note === null) return;
+    const note = await promptModal("Trả lại phần Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư mục 3…" });
+    if (note === null) return;
     try { await api(`/api/quotes/${q.id}/hn/review`, { method: "POST", body: JSON.stringify({ decision: "reject", note }) }); toast("Đã trả lại phần HN", "success"); reload(); } catch (e) { toast(e.message || "Lỗi", "error"); }
   });
 }
