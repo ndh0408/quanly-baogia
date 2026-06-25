@@ -5,8 +5,10 @@
 // store when Redis isn't configured (single-process / local dev).
 
 import rateLimit from "express-rate-limit";
+import type { Request, Response, NextFunction } from "express";
 import { RedisStore } from "rate-limit-redis";
 import { getRedis, isQueueEnabled } from "./queue.js";
+import { config } from "./config.js";
 import { logger } from "./logger.js";
 
 /**
@@ -14,6 +16,9 @@ import { logger } from "./logger.js";
  * @param {import("express-rate-limit").Options} options  Any express-rate-limit options.
  */
 export function createLimiter(prefix: string, options: Partial<import("express-rate-limit").Options> = {}) {
+  // Trong TEST: bỏ qua rate-limit. Limiter Redis dùng CHUNG mọi test process (vitest chạy song song)
+  // → bộ đếm tích lũy vượt ngưỡng gây 429 GIẢ ở test không liên quan. Không test nào kiểm 429. Prod giữ nguyên.
+  if (config.NODE_ENV === "test") return (_req: Request, _res: Response, next: NextFunction) => next();
   const opts: any = {
     standardHeaders: "draft-7",
     legacyHeaders: false,
