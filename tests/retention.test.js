@@ -8,6 +8,7 @@
 // 800 ngày + 1 quote cố-tình tạo >100 version). Quote/audit của test khác (đều "mới" + <100 version)
 // KHÔNG bị ảnh hưởng → không gây fail giả.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 import { pruneOldRecords } from "../src/retention.js";
 
@@ -25,9 +26,13 @@ const TAG = `ret${Date.now()}`;
 
 describe.runIf(dbAvailable)("retention pruneOldRecords (integration)", () => {
   let oldAuditId, newAuditId;
-  let company, quote;
+  let user, company, quote;
 
   beforeAll(async () => {
+    // quanly_test SẠCH (chỉ migrations) → chưa có user; Quote.createdById BẮT BUỘC nên tạo 1 user.
+    user = await prisma.user.create({
+      data: { username: `${TAG}-u`, displayName: `${TAG} user`, role: "admin", passwordHash: await bcrypt.hash("x", 4) },
+    });
     // --- AuditEvent: 1 CŨ (set createdAt ~800 ngày trước > ngưỡng 730) + 1 MỚI (default now()). ---
     // action là field BẮT BUỘC (String); resource/resourceId là tham chiếu để cô lập + dọn.
     const oldA = await prisma.auditEvent.create({ data: { action: `${TAG}.old`, resource: "RetentionTest", resourceId: TAG } });
@@ -42,7 +47,7 @@ describe.runIf(dbAvailable)("retention pruneOldRecords (integration)", () => {
     quote = await prisma.quote.create({
       data: {
         quoteNumber: `${TAG}-q1`, title: `${TAG} quote`, toCompany: "Khách Retention",
-        companyId: company.id, fromContact: "Người gửi", fromAddress: "1 Test St", city: "TP. HCM", quoteDate: new Date(),
+        companyId: company.id, createdById: user.id, fromContact: "Người gửi", fromAddress: "1 Test St", city: "TP. HCM", quoteDate: new Date(),
       },
     });
     const total = VERSION_KEEP + EXTRA; // 103
@@ -57,6 +62,7 @@ describe.runIf(dbAvailable)("retention pruneOldRecords (integration)", () => {
     if (quote) await prisma.quoteVersion.deleteMany({ where: { quoteId: quote.id } });
     if (quote) await prisma.quote.deleteMany({ where: { id: quote.id }, hardDelete: true });
     if (company) await prisma.company.deleteMany({ where: { id: company.id }, hardDelete: true });
+    if (user) await prisma.user.deleteMany({ where: { id: user.id }, hardDelete: true });
   });
 
   it("AuditEvent: prune XOÁ bản cũ (>730 ngày), GIỮ bản mới", async () => {
