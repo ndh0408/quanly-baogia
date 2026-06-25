@@ -167,12 +167,39 @@ export const ROLE_LABELS = {
   accountant: "Kế toán",
 };
 
+// ── PHÂN QUYỀN ĐỘNG (override từ DB) ──────────────────────────────────────────
+// Cache trong tiến trình: role → tập quyền GHI ĐÈ. Nạp lúc khởi động + sau mỗi lần admin sửa
+// (src/roleOverrides.ts). KHÔNG có override cho 1 role → dùng mặc định ROLE_PERMISSIONS (hành vi cũ).
+const roleOverrides = new Map<string, Set<string>>();
+
+// Vai trò admin LUÔN dùng mặc định (full) — chống tự khóa, KHÔNG cho ghi đè.
+function effectiveRoleSet(role: string | undefined): Set<string> | undefined {
+  if (role === "admin") return ROLE_PERMISSIONS.admin;
+  return roleOverrides.get(role as string) ?? ROLE_PERMISSIONS[role as string];
+}
+
+/** Nạp TOÀN BỘ override từ DB vào cache (thay sạch). Bỏ qua 'admin' + role không tồn tại. */
+export function loadRoleOverrides(rows: { role: string; permissions: string[] }[]) {
+  roleOverrides.clear();
+  for (const r of rows) if (r.role !== "admin" && ROLE_PERMISSIONS[r.role]) roleOverrides.set(r.role, new Set(r.permissions));
+}
+/** Cập nhật cache 1 role sau khi lưu/đặt lại. permissions=null → xóa override (về mặc định). */
+export function setRoleOverrideCache(role: string, permissions: string[] | null) {
+  if (role === "admin") return;
+  if (permissions === null) roleOverrides.delete(role);
+  else roleOverrides.set(role, new Set(permissions));
+}
+/** Role này có đang dùng override (khác mặc định) không. */
+export function hasRoleOverride(role: string) { return roleOverrides.has(role); }
+/** Vai trò ĐƯỢC PHÉP sửa quyền (mọi role trừ admin). */
+export const EDITABLE_ROLES = Object.keys(ROLE_PERMISSIONS).filter((r) => r !== "admin");
+
 // Hình dạng tối thiểu của req.session mà các hàm phân quyền cần (userId + role).
 type SessionLike = { userId?: number; role?: string };
 
 /** Does this role hold the given permission? (`:all` implies `:own`.) */
 export function roleCan(role: string | undefined, permission: string) {
-  const set = ROLE_PERMISSIONS[role as string];
+  const set = effectiveRoleSet(role);
   if (!set) return false;
   if (set.has(permission)) return true;
   // ":all" grants the matching ":own"
@@ -249,7 +276,7 @@ export function requirePermission(permission: string) {
 
 /** Flat list of permissions a role holds (expanding :all → also :own) for the client matrix. */
 export function permissionsForRole(role: string) {
-  const set = ROLE_PERMISSIONS[role] || new Set();
+  const set = effectiveRoleSet(role) || new Set();
   const out = new Set(set);
   for (const p of set) {
     if (p.endsWith(":all")) out.add(p.replace(/:all$/, ":own"));

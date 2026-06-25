@@ -16,6 +16,16 @@ enum Role {
   accountant // Kế toán: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
 }
 
+// PHÂN QUYỀN ĐỘNG: quyền GHI ĐÈ cho từng vai trò. Có row cho 1 role → dùng tập quyền này thay cho
+// mặc định hard-code (src/permissions.ts ROLE_PERMISSIONS). KHÔNG có row → dùng mặc định (hành vi Y HỆT cũ).
+// 'admin' KHÔNG ghi đè được (luôn full — chống tự khóa). Chỉ admin (USER_MANAGE) sửa qua trang Phân quyền.
+model RolePermission {
+  role        String   @id // khóa vai trò: manager/hr/accountant/account_hn
+  permissions String[]     // tập quyền (key trong PERMISSIONS) thay cho mặc định
+  updatedAt   DateTime @updatedAt
+  updatedById Int?
+}
+
 enum QuoteStatus {
   draft
   pending

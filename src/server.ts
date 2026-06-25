@@ -6,6 +6,7 @@ import { logger } from "./logger.js";
 import { initSentry } from "./observability.js";
 import { prisma } from "./db.js";
 import { createApp } from "./app.js";
+import { reloadRoleOverrides } from "./roleOverrides.js";
 
 initSentry();
 
@@ -17,6 +18,7 @@ const app = createApp();
 
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, `🚀 Server chạy tại http://localhost:${config.PORT}`);
+  void reloadRoleOverrides(); // phân quyền động: nạp quyền ghi-đè vai trò từ DB (lỗi → dùng mặc định)
 });
 
 function shutdown(sig: string) {

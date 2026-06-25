@@ -99,7 +99,8 @@ export type AssignableUser = { id: number; displayName: string; role?: string; t
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
-  roles: { key: string; label: string; permissions: string[] }[];
+  editableRoles: string[];
+  roles: { key: string; label: string; permissions: string[]; overridden?: boolean; editable?: boolean }[];
 };
 
 export type Summary = { salary: number; pit: number; taxableIncome: number };
@@ -189,6 +190,11 @@ export const api = {
   },
   // Phân quyền (increment 4) — gate user:manage.
   permissionsCatalog: () => req<PermCatalog>("/permissions/catalog"),
+  // Phân quyền động: đặt/đặt-lại quyền cho 1 vai trò (admin only; 'admin' không sửa được).
+  setRolePermissions: (role: string, permissions: string[]) =>
+    req<{ role: string; permissions: string[]; overridden: boolean }>(`/permissions/roles/${encodeURIComponent(role)}`, { method: "PUT", body: JSON.stringify({ permissions }) }),
+  resetRolePermissions: (role: string) =>
+    req<{ role: string; permissions: string[]; overridden: boolean }>(`/permissions/roles/${encodeURIComponent(role)}`, { method: "DELETE" }),
   // Tài khoản (Profile — increment 5).
   updateProfile: (data: { displayName: string; senderName: string; phone: string; title: string }) =>
     req<Me>("/auth/profile", { method: "POST", body: JSON.stringify(data) }),
