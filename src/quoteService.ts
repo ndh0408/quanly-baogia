@@ -754,6 +754,7 @@ export async function duplicateQuote(req: Request) {
     quoteNumber,
     projectCode,
     projectVersion,
+    searchText: normalizeSearch(quoteNumber, projectCode, newTitle, src.toCompany, src.toContact),
     title: newTitle,
     toCompany: src.toCompany,
     toContact: src.toContact,
