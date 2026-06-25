@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: clf 1`] = `
+{
+  "clf": "68a3a48e66480b36",
+}
+`;
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: discount 1`] = `
+{
+  "discount": "5dfd1e1dedba7034",
+}
+`;
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: gn-nodate-simple 1`] = `
+{
+  "gn-nodate-simple": "c9bdea2e964a5bcc",
+}
+`;
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: gn-withdate 1`] = `
+{
+  "gn-withdate": "7075973b4a0c93e3",
+}
+`;
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: groups 1`] = `
+{
+  "groups": "6131e1a6012a3b5f",
+}
+`;
