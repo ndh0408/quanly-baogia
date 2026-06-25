@@ -13,7 +13,9 @@ COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
 RUN apk add --no-cache openssl libc6-compat \
  && npm ci --omit=dev \
- && npx prisma generate
+ # Prisma 7: prisma.config.ts dùng env("DATABASE_URL") (throw nếu thiếu). `generate` KHÔNG kết nối DB
+ # nên cấp URL GIẢ cho qua; runtime + migrate dùng DATABASE_URL THẬT (compose env).
+ && DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
 
 ##### web build stage — frontend React + Vite + TypeScript → public/app2 #####
 FROM node:22-alpine AS webbuild
