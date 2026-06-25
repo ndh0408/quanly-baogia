@@ -47,12 +47,12 @@ Theo dõi các báo giá **đã chốt** (`status = converted`) theo bố cục 
 - Cột hoá đơn/thanh toán/chứng từ còn lại để "—" (giai đoạn sau cho nhập).
 
 ## Stack
-- **Backend:** Node.js (chạy bằng `tsx`) + Express + Prisma + PostgreSQL. **Đang chuyển dần sang TypeScript** — một số route đã là `.ts` (`src/routes/personnel.routes.ts`, `employees.routes.ts`); phần còn lại `.js`.
+- **Backend:** **TypeScript 100%** (chạy bằng `tsx`, không cần build) + Express + Prisma + PostgreSQL. **Kiến trúc tầng**: routes MỎNG (validate → service → res) → services (`src/services/*` + `src/quoteService.ts`: logic nghiệp vụ + phân quyền + audit + prisma). Handler thao tác I/O (export stream, pg_dump, cookie) giữ ở route.
 - **Auth:** session (lưu DB) + JWT (access + refresh, có xoay vòng & thu hồi cả họ token) + bcrypt; **MFA (TOTP)** + mã dự phòng dùng-một-lần
 - **Excel export:** ExcelJS (+ ghép nhiều sheet bằng zip XML)
 - **Frontend — 2 lớp** (xem mục [Frontend: SPA cũ → React](#frontend-spa-cũ--react-đã-port-100)):
   - **SPA cũ:** HTML/CSS/JS thuần, **không cần build** — `public/` (vẫn phục vụ trên production `gianguyen.cloud`).
-  - **App React mới:** **React 19 + Vite + TypeScript** trong `web/`, build ra `public/app2/`. **Đã port xong 100%** mọi màn (gồm editor báo giá kiểu Excel) — chạy ở `/` trên DEV/staging, không còn iframe.
+  - **App React mới:** **React 19 + Vite + TypeScript** trong `web/`, build ra `public/app2/`. **Đã port xong 100%** mọi màn (gồm editor báo giá kiểu Excel) — chạy ở `/` trên DEV/staging, không còn iframe. Dùng **TanStack Query** (cache + realtime qua SSE invalidate) + **code-split** (lazy-load editor/wizard → bundle chính nhẹ).
 - **Hàng đợi nền (tuỳ chọn):** BullMQ + Redis (email/webhook/telegram chạy nền). Không có Redis thì xử lý inline.
 
 ## Frontend: SPA cũ → React (đã port 100%)
@@ -68,7 +68,7 @@ App đang chạy **song song 2 frontend** trên cùng 1 server Express, để ch
 - **Định tuyến** ([src/app.js](src/app.js)): `/app2/*` luôn trả app React; `"/"` trả React nếu host là DEV/staging (`isStagingHost`: khớp `dev.` / `staging` / `*.ts.net`), ngược lại trả SPA cũ. → **Production vẫn là SPA**, DEV/staging chạy React để kiểm thử trước khi flip.
 - **Design-system dùng chung:** React nạp thẳng `/style.css` của SPA + font Be Vietnam Pro → giao diện **giống y** app cũ. Money-math (`web/src/quoteMath.ts`) **byte-identical** với `src/money.js` → tổng trên màn = DB = Excel.
 - **Build:** `public/app2/` là **artifact build, KHÔNG commit** (gitignored) — sinh lại bằng `npm run web:build` (hoặc `cd web && npm run build`, có `tsc --noEmit` chặn lỗi type). Mã nguồn React nằm ở **`web/src/`** (đã commit đầy đủ).
-- **Kế tiếp:** sau khi React 100% (đã xong), bước sau là chuyển **backend → 100% TypeScript + kiến trúc tầng** (routes → services → repositories).
+- **Hiện-đại-hóa (nhánh `chore/modernization`):** backend → **100% TypeScript + kiến trúc tầng**; gói **`shared/quote-math.ts`** (1 nguồn toán tiền dùng chung BE↔FE); frontend **TanStack Query** + **code-split**; CI gác `typecheck`/`web:build`/`web:test`; **optimistic-lock** chống mất dữ liệu khi 2 người sửa; `prisma migrate deploy` vào `deploy.sh`. Verify: **268 integration + ~50 e2e** (chạy `bash test-on-dev.sh`). *(Nâng Prisma 5→7 để đợt riêng — soft-delete trong transaction cần thư viện chuyên.)*
 
 ---
 
