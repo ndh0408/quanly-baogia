@@ -100,7 +100,11 @@ export const processors = {
 };
 
 // === Standalone worker mode: spin up processors against Redis-backed queues
-if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\", "/")}` || process.env.WORKER_MODE === "true") {
+// ROBUST entry-check: tsx nạp worker.TS dù lệnh trỏ worker.JS (resolve .js→.ts) → so sánh phải BỎ
+// đuôi .js/.ts, nếu không khối worker bị SKIP → thoát ngay, không nghe job. (Hoặc ép WORKER_MODE=true.)
+const _entryUrl = process.argv[1] ? `file://${process.argv[1].replaceAll("\\", "/")}` : "";
+const _stripExt = (s) => s.replace(/\.[cm]?[jt]s$/, "");
+if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MODE === "true") {
   // Worker errors were previously invisible — initialize Sentry here too so a
   // failing export/email/webhook/telegram job is reported, not just logged.
   initSentry();
