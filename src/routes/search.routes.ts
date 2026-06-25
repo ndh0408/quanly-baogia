@@ -1,6 +1,5 @@
-// Cross-entity search using Postgres ILIKE + simple_unaccent normalization.
-// For larger scale, swap to Meilisearch / Postgres tsvector with GIN index;
-// this module is the API contract that those backends would implement.
+// Cross-entity search KHÔNG dấu / sai dấu: khớp trên cột searchText (chuẩn-hóa bởi normalizeSearch)
+// có GIN trigram index (pg_trgm) → nhanh ở quy mô lớn. Product vẫn ILIKE (chưa có cột searchText).
 
 import { Router } from "express";
 import type { Request, Response } from "express";
@@ -9,6 +8,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
+import { normalizeSearch } from "../searchText.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -36,13 +36,7 @@ router.get(
           where: {
             AND: [
               quoteScopeWhere(req.session),
-              { OR: [
-                { quoteNumber: { contains: q, mode: "insensitive" } },
-                { projectCode: { contains: q, mode: "insensitive" } },
-                { title: { contains: q, mode: "insensitive" } },
-                { toCompany: { contains: q, mode: "insensitive" } },
-                { toContact: { contains: q, mode: "insensitive" } },
-              ] },
+              { searchText: { contains: normalizeSearch(q) } },
             ],
           },
           select: { id: true, quoteNumber: true, projectCode: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
@@ -59,14 +53,7 @@ router.get(
           where: {
             AND: [
               custScope,
-              { OR: [
-                { code: { contains: q, mode: "insensitive" } },
-                { name: { contains: q, mode: "insensitive" } },
-                { phone: { contains: q } },
-                { email: { contains: q, mode: "insensitive" } },
-                { taxCode: { contains: q } },
-                { contactName: { contains: q, mode: "insensitive" } },
-              ] },
+              { searchText: { contains: normalizeSearch(q) } },
             ],
           },
           select: { id: true, code: true, name: true, phone: true, email: true, status: true },

@@ -10,6 +10,7 @@ import { prisma } from "./db.js";
 import { config } from "./config.js";
 import { computeQuoteTotals, D } from "./money.js";
 import { nextQuoteNumber, nextProjectCode } from "./quoteNumber.js";
+import { normalizeSearch } from "./searchText.js";
 import { audit } from "./audit.js";
 import { snapshotQuoteVersion, diffVersions } from "./quoteVersion.js";
 import { notify } from "./notifications.js";
@@ -145,8 +146,9 @@ export async function createQuote(req: Request) {
       quote = await prisma.$transaction(async (tx) => {
         const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx as any);
         if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
+        const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
         const created = await tx.quote.create({
-          data: { ...draft, quoteNumber, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: [{ id: userId }] } } as any,
+          data: { ...draft, quoteNumber, searchText, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: [{ id: userId }] } } as any,
           include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
@@ -232,6 +234,12 @@ export async function updateQuote(req: Request) {
     data.status = "draft";
     data.approvedById = null;
   }
+
+  // Cập nhật searchText (bỏ dấu) theo giá trị MỚI nếu có, ngược lại giữ giá trị cũ.
+  data.searchText = normalizeSearch(
+    data.quoteNumber ?? existing.quoteNumber, existing.projectCode,
+    data.title ?? existing.title, data.toCompany ?? existing.toCompany, data.toContact ?? existing.toContact
+  );
 
   let updated;
   if (Array.isArray(b.sheets)) {
@@ -325,13 +333,8 @@ export async function listQuotes(req: Request) {
     if (to) range.lte = to;
     filters.push({ quoteDate: range });
   }
-  if (q) {
-    filters.push({ OR: [
-      { quoteNumber: { contains: q, mode: "insensitive" } },
-      { title: { contains: q, mode: "insensitive" } },
-      { toCompany: { contains: q, mode: "insensitive" } },
-    ] });
-  }
+  // Tìm KHÔNG dấu / sai dấu trên cột searchText chuẩn-hóa (quoteNumber+projectCode+title+toCompany+toContact).
+  if (q) filters.push({ searchText: { contains: normalizeSearch(String(q)) } });
   const where = { AND: filters };
   // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
   // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.

@@ -257,6 +257,7 @@ model Customer {
   contactTitle String?
   status       CustomerStatus @default(lead)
   tags         String[]       @default([])
+  searchText   String         @default("") // chuẩn-hóa bỏ dấu (normalizeSearch) → tìm không dấu/sai dấu; GIN trgm index
   ownerId      Int?
   owner        User?          @relation(fields: [ownerId], references: [id])
   notes        CustomerNote[]
@@ -362,6 +363,7 @@ model Quote {
   notes          String?
   showTotals     Boolean     @default(true) // hiện/ẩn bảng Tổng cộng–VAT–Thành tiền (tuỳ template/báo giá)
   currentVersion Int         @default(1)
+  searchText     String      @default("") // chuẩn-hóa bỏ dấu (normalizeSearch) → tìm không dấu/sai dấu; GIN trgm index
 
   subtotal Decimal @default(0) @db.Decimal(18, 2)
   vat      Decimal @default(0) @db.Decimal(18, 2)

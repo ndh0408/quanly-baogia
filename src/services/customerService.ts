@@ -7,6 +7,7 @@ import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../quoteService.js";
+import { normalizeSearch } from "../searchText.js";
 
 type Action = "read" | "manage";
 
@@ -29,15 +30,8 @@ export async function listCustomers(req: Request) {
     where.ownerId = req.session.userId;
   }
   if (tag) where.tags = { has: tag };
-  if (q) {
-    where.OR = [
-      { name: { contains: q, mode: "insensitive" } },
-      { code: { contains: q, mode: "insensitive" } },
-      { phone: { contains: q } },
-      { email: { contains: q, mode: "insensitive" } },
-      { taxCode: { contains: q } },
-    ];
-  }
+  // Tìm KHÔNG dấu / sai dấu: khớp trên cột searchText đã chuẩn-hóa (gồm name+code+phone+email+taxCode+contactName).
+  if (q) where.searchText = { contains: normalizeSearch(q) };
   const [total, data] = await Promise.all([
     prisma.customer.count({ where }),
     prisma.customer.findMany({
@@ -69,6 +63,7 @@ export async function createCustomer(req: Request) {
   // Chỉ user đặc quyền mới gán owner khác mình.
   if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) data.ownerId = req.session.userId;
   else if (data.ownerId == null) data.ownerId = req.session.userId;
+  data.searchText = normalizeSearch(data.name, data.code, data.phone, data.email, data.taxCode, data.contactName);
   const customer = await prisma.customer.create({
     data,
     include: { owner: { select: { id: true, displayName: true } } },
@@ -97,6 +92,10 @@ export async function updateCustomer(req: Request) {
   const data = { ...req.body };
   // Chỉ user đặc quyền mới đổi chủ sở hữu; còn lại strip.
   if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) delete data.ownerId;
+  data.searchText = normalizeSearch(
+    data.name ?? before.name, data.code ?? before.code, data.phone ?? before.phone,
+    data.email ?? before.email, data.taxCode ?? before.taxCode, data.contactName ?? before.contactName
+  );
   const customer = await prisma.customer.update({ where: { id: (req.params as any).id }, data });
   await audit(req, "customer.update", { resource: "customer", resourceId: customer.id, before, after: customer });
   return customer;
