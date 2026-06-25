@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type PermCatalog, type User } from "./api";
 import { toast } from "./ui";
 
@@ -6,27 +7,30 @@ import { toast } from "./ui";
 // cấu hình cố định) + (2) gán vai trò cho từng nhân viên (đổi dropdown → PUT role). Dùng class
 // .perm-matrix/.list-table của SPA. Bảo mật: gate user:manage; không đổi vai trò của chính mình.
 export function PermissionsPage({ me }: { me: Me }) {
-  const [cat, setCat] = useState<PermCatalog | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
+  const qc = useQueryClient();
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["permissions"],
+    queryFn: async () => {
       const [c, u] = await Promise.all([api.permissionsCatalog(), api.listUsers()]);
-      setCat(c); setUsers(u);
-    } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+      return { cat: c, users: u };
+    },
+  });
+  const cat = data?.cat ?? null;
+  const users = data?.users ?? [];
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
   const onChangeRole = async (u: User, role: string) => {
-    try { await api.updateUser(u.id, { role }); toast("Đã cập nhật vai trò", "success"); setUsers((us) => us.map((x) => x.id === u.id ? { ...x, role } : x)); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
+    try {
+      await api.updateUser(u.id, { role });
+      toast("Đã cập nhật vai trò", "success");
+      qc.setQueryData(["permissions"], (old: { cat: PermCatalog; users: User[] } | undefined) =>
+        old ? { ...old, users: old.users.map((x) => x.id === u.id ? { ...x, role } : x) } : old);
+    }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); qc.invalidateQueries({ queryKey: ["permissions"] }); }
   };
 
-  if (err) return <div><h1>Phân quyền</h1><div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div></div>;
+  if (err) return <div><h1>Phân quyền</h1><div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div></div>;
   if (loading || !cat) return <div><h1>Phân quyền</h1><div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div></div>;
 
   const rolePerms = Object.fromEntries(cat.roles.map((r) => [r.key, new Set(r.permissions)]));

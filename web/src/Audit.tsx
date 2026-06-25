@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type AuditEntry } from "./api";
+import { useEffect, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { api, ApiError } from "./api";
 
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.
@@ -54,27 +55,22 @@ const RESOURCE_OPTS = Object.entries(RESOURCE_LABEL);
 const PAGE_SIZE = 50;
 
 export function AuditPage() {
-  const [rows, setRows] = useState<AuditEntry[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
-      const r = await api.listAudit({ action, resource, from, to, page, size: PAGE_SIZE });
-      setRows(r.data);
-      setMeta({ total: r.meta.total, page: r.meta.page, pageCount: r.meta.pageCount });
-    } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, [action, resource, from, to, page]);
-  useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [action, resource, from, to]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["audit", { action, resource, from, to, page }],
+    queryFn: () => api.listAudit({ action, resource, from, to, page, size: PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.data ?? [];
+  const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
   const hasFilter = !!(action || resource || from || to);
   const clear = () => { setAction(""); setResource(""); setFrom(""); setTo(""); };
@@ -97,7 +93,7 @@ export function AuditPage() {
         <button className="btn btn-sm btn-ghost" type="button" onClick={clear}>Xóa lọc</button>
       </div>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Employee } from "./api";
 import { FIELDS, type Field } from "./fields";
+import { useDebouncedValue } from "./query";
 import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
 
 // Danh bạ = 10 trường nhóm "Cá nhân" của trang Nhân sự (1 nguồn, không lặp).
@@ -10,30 +12,27 @@ const toInputDate = toLocalInputDate;
 const PAGE_SIZE = 50;
 
 export function EmployeesPage({ me, query }: { me: Me; query: string }) {
-  const [rows, setRows] = useState<Employee[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("fullName");
   const [order, setOrder] = useState<"asc" | "desc">("asc");
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const [editing, setEditing] = useState<Employee | null | undefined>(undefined);
 
   const canManage = me.permissions.includes("personnel:create");
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
-      const res = await api.listEmployees(query, page, PAGE_SIZE, sort, order);
-      setRows(res.data);
-      setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
-    } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu");
-    } finally { setLoading(false); }
-  }, [query, page, sort, order]);
-
-  useEffect(() => { const t = setTimeout(load, query ? 300 : 0); return () => clearTimeout(t); }, [load, query]);
-  useEffect(() => { setPage(1); }, [query, sort, order]);
+  // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
+  const debouncedQ = useDebouncedValue(query, query ? 300 : 0);
+  useEffect(() => { setPage(1); }, [debouncedQ, sort, order]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["employees", { q: debouncedQ, page, sort, order }],
+    queryFn: () => api.listEmployees(debouncedQ, page, PAGE_SIZE, sort, order),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.data ?? [];
+  const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const reload = () => { qc.invalidateQueries({ queryKey: ["employees"] }); };
 
   // Backend chỉ cho sort theo fullName (cột hiển thị) — bấm header "Họ & Tên" để đảo chiều.
   const toggleSort = (k: string) => {
@@ -44,7 +43,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
 
   const onDelete = async (r: Employee) => {
     if (!(await confirmModal("Xóa nhân viên", `Xóa "${r.fullName}" khỏi danh bạ? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deleteEmployee(r.id); toast("Đã xóa", "success"); load(); }
+    try { await api.deleteEmployee(r.id); toast("Đã xóa", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
   };
 
@@ -60,7 +59,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
         {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm nhân viên</button>}
       </div>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
@@ -122,7 +121,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
       </div>
 
       {editing !== undefined && (
-        <EmployeeForm rec={editing} readOnly={editing !== null && !canManage} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load(); }} />
+        <EmployeeForm rec={editing} readOnly={editing !== null && !canManage} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
       )}
     </div>
   );

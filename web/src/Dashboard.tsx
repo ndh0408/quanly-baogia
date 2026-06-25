@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "./api";
 
 // Port "Tổng quan" (renderDashboard) — bê ĐẦY ĐỦ: 4 KPI (30 ngày) + Phễu báo giá (bấm → lọc
@@ -13,21 +13,20 @@ type FunnelRow = { status: string; count: number };
 type TopRow = { user?: { displayName?: string } | null; count: number; amount: number };
 
 export function DashboardPage() {
-  const [kpi, setKpi] = useState<Kpi | null>(null);
-  const [funnel, setFunnel] = useState<FunnelRow[]>([]);
-  const [top, setTop] = useState<TopRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
+  // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Gộp 3 lời gọi như Promise.all cũ
+  // → 1 query: cùng 1 trạng thái loading/error chung (giữ nguyên hành vi).
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: async () => {
       const [o, f, t] = await Promise.all([api.analyticsOverview(), api.analyticsFunnel(), api.analyticsTopSales()]);
-      setKpi(o.kpi); setFunnel(f.data); setTop(t.data);
-    } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+      return { kpi: o.kpi as Kpi, funnel: f.data as FunnelRow[], top: t.data as TopRow[] };
+    },
+  });
+  const kpi = data?.kpi ?? null;
+  const funnel = data?.funnel ?? [];
+  const top = data?.top ?? [];
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
   // Bấm 1 mức phễu → mở Danh sách báo giá đã LỌC theo trạng thái (SPA list hydrate từ URL query).
   const openFiltered = (status: string) => { location.hash = `#/list?status=${status}`; };
@@ -39,7 +38,7 @@ export function DashboardPage() {
       <h1>Tổng quan</h1>
       <p className="muted" style={{ margin: "-8px 0 16px" }}>Số liệu 30 ngày gần nhất</p>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>

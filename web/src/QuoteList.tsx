@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type QuoteRow } from "./api";
+import { useDebouncedValue } from "./query";
 import { toast, confirmModal } from "./ui";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
@@ -18,6 +20,7 @@ const QUOTE_SORTS = ["createdAt", "quoteDate", "total", "quoteNumber"];
 const PAGE_SIZE = 20;
 
 export function QuoteListPage({ me }: { me: Me }) {
+  const qc = useQueryClient();
   const can = useCallback((perm: string) => me.permissions.includes(perm) || (perm.endsWith(":own") && me.permissions.includes(perm.replace(/:own$/, ":all"))), [me]);
   const isAdmin = me.role === "admin";
   const isAccountHn = me.role === "account_hn";
@@ -31,10 +34,6 @@ export function QuoteListPage({ me }: { me: Me }) {
   const [sort, setSort] = useState(QUOTE_SORTS.includes(sp0.get("sort") || "") ? sp0.get("sort")! : "createdAt");
   const [order, setOrder] = useState<"asc" | "desc">(sp0.get("order") === "asc" ? "asc" : "desc");
   const [page, setPage] = useState(Math.max(1, parseInt(sp0.get("page") || "1", 10) || 1));
-  const [rows, setRows] = useState<QuoteRow[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const busy = useRef(false);
 
   // Ghi filter lên URL bằng replaceState (không bắn hashchange → React shell không re-route).
@@ -49,14 +48,19 @@ export function QuoteListPage({ me }: { me: Me }) {
     try { history.replaceState(null, "", "#/list" + (qs ? "?" + qs : "")); } catch { /* ignore */ }
   }, [q, status, sort, order, page]);
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try { const r = await api.listQuotes({ q, status, sort, order, page, size: PAGE_SIZE }); setRows(r.data); setMeta({ total: r.meta.total, page: r.meta.page, pageCount: r.meta.pageCount }); }
-    catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, [q, status, sort, order, page]);
-  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
-  useEffect(() => { setPage(1); }, [q, status, sort, order]);
+  // Tải qua TanStack Query. Ô tìm debounce 300ms như cũ (chỉ debounce theo q).
+  const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
+  useEffect(() => { setPage(1); }, [debouncedQ, status, sort, order]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["quotes", { q: debouncedQ, status, sort, order, page }],
+    queryFn: () => api.listQuotes({ q: debouncedQ, status, sort, order, page, size: PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.data ?? [];
+  const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const reload = () => { qc.invalidateQueries({ queryKey: ["quotes"] }); };
 
   const toggleSort = (f: string) => {
     if (sort === f) setOrder((o) => (o === "asc" ? "desc" : "asc"));
@@ -72,7 +76,7 @@ export function QuoteListPage({ me }: { me: Me }) {
       else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(nq)}).`, "success"); open(nq.id); }
       else if (a === "del") {
         if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${qr.projectCode || qr.quoteNumber}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
-        await api.deleteQuote(qr.id); toast("Đã xóa", "success"); load();
+        await api.deleteQuote(qr.id); toast("Đã xóa", "success"); reload();
       }
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
     finally { busy.current = false; }
@@ -93,11 +97,11 @@ export function QuoteListPage({ me }: { me: Me }) {
           <option value="">— Tất cả trạng thái —</option>
           <option value="draft">Nháp</option><option value="converted">Đã chốt</option><option value="lost">Không chốt</option>
         </select>
-        <button className="btn" onClick={load}>Tải lại</button>
+        <button className="btn" onClick={() => refetch()}>Tải lại</button>
         {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
       </div>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>

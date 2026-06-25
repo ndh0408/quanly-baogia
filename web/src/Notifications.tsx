@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Notif } from "./api";
 import { toast } from "./ui";
 
@@ -13,33 +14,32 @@ const fmtDateTime = (v: string) => {
 };
 
 export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
-  const [rows, setRows] = useState<Notif[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const qc = useQueryClient();
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => api.listNotifications(),
+  });
+  const rows = data?.data ?? [];
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try { const r = await api.listNotifications(); setRows(r.data); }
-    catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
   // Cập nhật LIVE khi có thông báo mới (SSE qua Shell) hoặc quay lại tab.
   useEffect(() => {
-    const on = () => load();
+    const on = () => { qc.invalidateQueries({ queryKey: ["notifications"] }); };
     window.addEventListener("realtime:notification", on);
     window.addEventListener("focus", on);
     return () => { window.removeEventListener("realtime:notification", on); window.removeEventListener("focus", on); };
-  }, [load]);
+  }, [qc]);
 
   const markAll = async () => {
-    try { await api.markAllNotifsRead(); toast("Đã đánh dấu tất cả là đã đọc", "success"); onBadge?.(); load(); }
+    try { await api.markAllNotifsRead(); toast("Đã đánh dấu tất cả là đã đọc", "success"); onBadge?.(); qc.invalidateQueries({ queryKey: ["notifications"] }); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   const onClick = async (n: Notif) => {
     if (!n.readAt) {
       try { await api.markNotifRead(n.id); } catch { /* ignore */ }
-      setRows((rs) => rs.map((x) => x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x));
+      qc.setQueryData<{ data: Notif[] }>(["notifications"], (old) =>
+        old ? { ...old, data: old.data.map((x) => x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x) } : old);
       onBadge?.();
     }
     if (n.resource === "quote" && n.resourceId) location.hash = "#/quotes/" + n.resourceId;
@@ -49,7 +49,7 @@ export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
     <div>
       <h1>Thông báo</h1>
       <div className="toolbar"><button className="btn" onClick={markAll}>Đánh dấu đã đọc tất cả</button></div>
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (

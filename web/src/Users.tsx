@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type User, type InviteResult } from "./api";
 import { toast, confirmModal, fieldErrorsFrom } from "./ui";
 
@@ -14,18 +15,17 @@ const roleCls = (r: string) => (r === "admin" ? "approved" : r === "manager" ? "
 type Modal = { t: "invite" } | { t: "edit"; user: User } | { t: "password"; user: User } | { t: "result"; result: InviteResult };
 
 export function UsersPage({ me }: { me: Me }) {
-  const [rows, setRows] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const qc = useQueryClient();
   const [modal, setModal] = useState<Modal | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try { setRows(await api.listUsers()); }
-    catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["users"],
+    queryFn: () => api.listUsers(),
+  });
+  const rows = data ?? [];
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const load = useCallback(() => { qc.invalidateQueries({ queryKey: ["users"] }); }, [qc]);
 
   const onResend = async (u: User) => {
     try { const r = await api.resendInvite(u.id); setModal({ t: "result", result: { ...r, user: { email: u.email || "" } } }); }
@@ -50,7 +50,7 @@ export function UsersPage({ me }: { me: Me }) {
       <div className="toolbar">
         <button className="btn btn-primary" onClick={() => setModal({ t: "invite" })}>+ Thêm nhân viên</button>
       </div>
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : (

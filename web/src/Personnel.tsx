@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "./api";
 import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
 import { EMP_FIELDS } from "./Employees";
+import { useDebouncedValue } from "./query";
 import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
@@ -12,14 +14,10 @@ const PAGE_SIZE = 50;
 const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
 
 export function PersonnelPage({ me, query }: { me: Me; query: string }) {
-  const [rows, setRows] = useState<Personnel[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageCount: 1 });
-  const [summary, setSummary] = useState<Summary>({ salary: 0, pit: 0, taxableIncome: 0 });
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
   const [editing, setEditing] = useState<Personnel | null | undefined>(undefined);
 
   const canCreate = me.permissions.includes("personnel:create");
@@ -29,26 +27,24 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const canPay = me.permissions.includes("personnel:pay"); // kế toán + admin: bấm đánh dấu thanh toán
   const canConfirm = me.permissions.includes("personnel:confirm"); // CHỈ admin: bấm xác nhận đã ký
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try {
-      const res = await api.listPersonnel(query, page, PAGE_SIZE, sort, order);
-      setRows(res.data);
-      setMeta({ total: res.meta.total, page: res.meta.page, pageCount: res.meta.pageCount });
-      setSummary(res.summary);
-    } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu");
-    } finally {
-      setLoading(false);
-    }
-  }, [query, page, sort, order]);
-
-  useEffect(() => { const t = setTimeout(load, query ? 300 : 0); return () => clearTimeout(t); }, [load, query]);
-  useEffect(() => { setPage(1); }, [query, sort, order]);
+  // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
+  const debouncedQ = useDebouncedValue(query, query ? 300 : 0);
+  useEffect(() => { setPage(1); }, [debouncedQ, sort, order]);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["personnel", { q: debouncedQ, page, sort, order }],
+    queryFn: () => api.listPersonnel(debouncedQ, page, PAGE_SIZE, sort, order),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.data ?? [];
+  const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  const summary: Summary = data?.summary ?? { salary: 0, pit: 0, taxableIncome: 0 };
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const reload = () => { qc.invalidateQueries({ queryKey: ["personnel"] }); };
 
   const onDelete = async (r: Personnel) => {
     if (!(await confirmModal("Xóa hồ sơ", `Xóa hồ sơ "${r.fullName}"? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deletePersonnel(r.id); toast("Đã xóa hồ sơ", "success"); load(); }
+    try { await api.deletePersonnel(r.id); toast("Đã xóa hồ sơ", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
   };
 
@@ -62,7 +58,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
       { confirmText: paid ? "Bỏ đánh dấu" : "Đã thanh toán", danger: paid },
     );
     if (!ok) return;
-    try { await api.markPayment(r.id, !paid); toast(paid ? "Đã bỏ đánh dấu thanh toán" : "Đã đánh dấu thanh toán", "success"); load(); }
+    try { await api.markPayment(r.id, !paid); toast(paid ? "Đã bỏ đánh dấu thanh toán" : "Đã đánh dấu thanh toán", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
   };
 
@@ -76,7 +72,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
       { confirmText: signed ? "Bỏ xác nhận" : "Đã ký", danger: signed },
     );
     if (!ok) return;
-    try { await api.markConfirm(r.id, !signed); toast(signed ? "Đã bỏ xác nhận" : "Đã xác nhận đã ký", "success"); load(); }
+    try { await api.markConfirm(r.id, !signed); toast(signed ? "Đã bỏ xác nhận" : "Đã xác nhận đã ký", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
   };
 
@@ -169,7 +165,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
       </div>
 
-      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
 
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
@@ -256,7 +252,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
           rec={editing}
           readOnly={editing !== null && !canEditRow(editing)}
           onClose={() => setEditing(undefined)}
-          onSaved={() => { setEditing(undefined); load(); }}
+          onSaved={() => { setEditing(undefined); reload(); }}
         />
       )}
     </div>

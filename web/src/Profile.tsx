@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Me } from "./api";
 import { toast } from "./ui";
 
@@ -110,17 +111,23 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
 }
 
 function MfaSetupModal({ onClose, onEnabled }: { onClose: () => void; onEnabled: () => void }) {
-  const [setup, setSetup] = useState<{ qr: string; secret: string } | null>(null);
-  const [err, setErr] = useState("");
   const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
 
+  // Tải mã QR/secret qua TanStack Query (thay api.mfaSetup().then(...) thủ công). Giữ nguyên hiển thị
+  // "Đang tạo mã…" / lỗi "Lỗi tạo mã".
+  const { data: setup, error } = useQuery({
+    queryKey: ["mfaSetup"],
+    queryFn: () => api.mfaSetup(),
+    gcTime: 0,
+  });
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tạo mã") : "";
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !codes) onClose(); };
     document.addEventListener("keydown", onKey);
-    api.mfaSetup().then(setSetup).catch((ex) => setErr(ex instanceof ApiError ? ex.message : "Lỗi tạo mã"));
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose, codes]);
 

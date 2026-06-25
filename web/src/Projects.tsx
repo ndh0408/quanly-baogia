@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "./api";
 import { toast } from "./ui";
 
@@ -53,20 +54,22 @@ export function ProjectsPage({ me }: { me: Me }) {
   const isAdmin = me.permissions.includes("user:manage");
   const canSignNow = isAdmin || !!me.canSign;
   const canInv = me.role === "admin";
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [account, setAccount] = useState("");
   const [customer, setCustomer] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
-    try { const r = await api.quoteProjects(); setRows(buildRows(r.data || [])); }
-    catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải dữ liệu"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  // Tải qua TanStack Query. CHỈ đổi cơ chế lấy dữ liệu; sửa-tại-ô vẫn cập nhật cục bộ (rows state)
+  // để không re-render cả trang / mất focus. Đồng bộ rows từ cache khi data đổi.
+  const { data, isPending, error } = useQuery({
+    queryKey: ["quoteProjects"],
+    queryFn: () => api.quoteProjects(),
+  });
+  const [rows, setRows] = useState<Row[]>([]);
+  useEffect(() => { if (data) setRows(buildRows(data.data || [])); }, [data]);
+  const loading = isPending;
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
   const accounts = useMemo(() => [...new Set(rows.map((r) => r.q.createdBy?.displayName).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "vi")), [rows]);
   const customers = useMemo(() => [...new Set(rows.map((r) => r.q.customerCode).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "vi")), [rows]);
