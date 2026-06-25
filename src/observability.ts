@@ -2,6 +2,7 @@
 // so the app boots cleanly in dev without any external services.
 
 import * as Sentry from "@sentry/node";
+import type { Request, Response, NextFunction } from "express";
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -29,7 +30,7 @@ export function initSentry() {
   return true;
 }
 
-export function captureError(err, ctx) {
+export function captureError(err: unknown, ctx?: Record<string, unknown>) {
   if (!sentryReady) return;
   try {
     Sentry.captureException(err, ctx ? { extra: ctx } : undefined);
@@ -84,7 +85,7 @@ export const sseClients = new Gauge({
  * Express middleware that records request latency. Mount AFTER routing so that
  * req.route is populated; for routes that don't match any handler we tag as "unknown".
  */
-export function metricsMiddleware(req, res, next) {
+export function metricsMiddleware(req: Request, res: Response, next: NextFunction) {
   const start = process.hrtime.bigint();
   res.on("finish", () => {
     const dur = Number(process.hrtime.bigint() - start) / 1e9;

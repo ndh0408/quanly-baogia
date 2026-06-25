@@ -2,11 +2,12 @@
 // LƯU Ý: handler `/backup.dump` GIỮ TRỌN ở route — nó spawn pg_dump + setHeader + pipe stream vào res
 // (controller HTTP I/O, không phải logic thuần) nên KHÔNG tách. Service chỉ lo phần trả-dữ-liệu thuần.
 // Mẫu theo customerService.ts.
+import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 
 /** Thống kê dung lượng — đếm theo từng bảng. Hữu ích cho hoạch định dung lượng. */
-export async function storageStats(_req) {
+export async function storageStats(_req: Request) {
   const [users, customers, products, quotes, items, audits, sessions] = await Promise.all([
     prisma.user.count(),
     prisma.customer.count(),
@@ -24,7 +25,7 @@ export async function storageStats(_req) {
 }
 
 /** Hard-delete các bản xoá-mềm cũ hơn N ngày. */
-export async function purgeSoftDeleted(req) {
+export async function purgeSoftDeleted(req: Request) {
   const { days } = req.body;
   const cutoff = new Date(Date.now() - days * 86_400_000);
   const base = { deletedAt: { lt: cutoff } };

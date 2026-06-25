@@ -13,7 +13,7 @@ import { logger } from "./logger.js";
  * @param {string} prefix  Redis key namespace for this limiter (e.g. "login").
  * @param {import("express-rate-limit").Options} options  Any express-rate-limit options.
  */
-export function createLimiter(prefix, options = {}) {
+export function createLimiter(prefix: string, options: Partial<import("express-rate-limit").Options> = {}) {
   const opts: any = {
     standardHeaders: "draft-7",
     legacyHeaders: false,
@@ -24,7 +24,7 @@ export function createLimiter(prefix, options = {}) {
       const client = getRedis();
       if (client) {
         opts.store = new RedisStore({
-          sendCommand: (...args) => client.call(...args),
+          sendCommand: (...args: string[]) => client.call(...args),
           prefix: `rl:${prefix}:`,
         });
       }

@@ -19,7 +19,7 @@ const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, `🚀 Server chạy tại http://localhost:${config.PORT}`);
 });
 
-function shutdown(sig) {
+function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
   server.close(async () => {
     await prisma.$disconnect().catch(() => {});

@@ -30,7 +30,7 @@ export async function nextQuoteNumber(prefix = "GN", db = prisma) {
  * Uses the same atomic counter table keyed by (prefix, year=0) so each employee's
  * project code increments independently of the company quote-number sequence.
  */
-export async function nextProjectCode(prefix, db = prisma) {
+export async function nextProjectCode(prefix: string, db = prisma) {
   const counter = await db.quoteCounter.upsert({
     where: { prefix_year: { prefix, year: 0 } },
     create: { prefix, year: 0, value: 1 },

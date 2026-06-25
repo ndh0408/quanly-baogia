@@ -15,7 +15,7 @@ import { decryptValue } from "./secretbox.js";
 // admin panels or internal services and read the response back via the
 // deliveries log. We block private/reserved address space and re-resolve the
 // hostname at delivery time to mitigate DNS rebinding.
-function isPrivateIPv4(ip) {
+function isPrivateIPv4(ip: string) {
   const p = ip.split(".").map(Number);
   if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
   const [a, b] = p;
@@ -31,7 +31,7 @@ function isPrivateIPv4(ip) {
 }
 // Parse an IPv6 literal into its 16 bytes (handles "::" compression and an
 // embedded dotted IPv4 tail). Returns null if unparseable.
-function ipv6ToBytes(ip) {
+function ipv6ToBytes(ip: string) {
   let s = ip.toLowerCase();
   const lastColon = s.lastIndexOf(":");
   const tail = s.slice(lastColon + 1);
@@ -63,7 +63,7 @@ function ipv6ToBytes(ip) {
   }
   return bytes;
 }
-function isPrivateIPv6(ip) {
+function isPrivateIPv6(ip: string) {
   const x = ip.toLowerCase();
   if (x === "::1" || x === "::") return true;
   if (x.startsWith("fe80") || x.startsWith("fc") || x.startsWith("fd")) return true; // link-local + ULA
@@ -82,7 +82,7 @@ function isPrivateIPv6(ip) {
   }
   return false;
 }
-function isBlockedIp(ip) {
+function isBlockedIp(ip: string) {
   const fam = net.isIP(ip);
   if (fam === 4) return isPrivateIPv4(ip);
   if (fam === 6) return isPrivateIPv6(ip);
@@ -96,7 +96,7 @@ function isBlockedIp(ip) {
  * malicious DNS can return a public IP here and an internal IP at fetch time
  * (DNS rebinding / TOCTOU).
  */
-export async function assertPublicHttpUrl(urlStr) {
+export async function assertPublicHttpUrl(urlStr: string) {
   let u;
   try { u = new URL(urlStr); } catch { throw Object.assign(new Error("URL webhook không hợp lệ"), { status: 400 }); }
   if (u.protocol !== "https:" && u.protocol !== "http:") {
@@ -128,7 +128,7 @@ export async function assertPublicHttpUrl(urlStr) {
  * lookup), with the original Host header and TLS servername so cert validation
  * still works. Closes the rebinding window. Does NOT follow redirects.
  */
-function postToPinnedIp({ url, address }, body, headers) {
+function postToPinnedIp({ url, address }: { url: URL; address: string }, body: string, headers: http.OutgoingHttpHeaders) {
   const isHttps = url.protocol === "https:";
   const lib = isHttps ? https : http;
   const port = url.port || (isHttps ? 443 : 80);
@@ -171,12 +171,12 @@ export const EVENTS = [
   "customer.updated",
 ];
 
-function sign(payload, secret) {
+function sign(payload: string, secret: string) {
   return "sha256=" + createHmac("sha256", secret).update(payload).digest("hex");
 }
 
 /** Emit an event: queues delivery for every matching active webhook. */
-export async function emit(event, payload) {
+export async function emit(event: string, payload: any) {
   if (!EVENTS.includes(event)) {
     logger.warn({ event }, "unknown event emitted");
   }
@@ -191,14 +191,14 @@ export async function emit(event, payload) {
 }
 
 /** Delivery handler invoked by worker (or inline if no Redis). */
-export async function deliverWebhook({ webhookId, event, payload }) {
+export async function deliverWebhook({ webhookId, event, payload }: { webhookId: number; event: string; payload: any }) {
   const h = await prisma.webhook.findUnique({ where: { id: webhookId } });
   if (!h || !h.active) return { skipped: true };
 
   const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
   // Secret is stored encrypted at rest — decrypt before signing (legacy plaintext
   // rows pass through unchanged).
-  const sig = sign(body, decryptValue(h.secret));
+  const sig = sign(body, decryptValue(h.secret) as string);
 
   let status, text;
   try {

@@ -2,19 +2,20 @@
 // Quản lý GIAO account điền bảng nội bộ loại "hanoi"; account CHỈ thấy/sửa phần đó
 // (presentQuoteForAccountHn lược hết phần khác) rồi GỬI DUYỆT; quản lý DUYỆT/TRẢ.
 // Tiền HN là NỘI BỘ — nằm trong extraTables nên KHÔNG bao giờ vào Excel.
+import type { Request } from "express";
 import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
 import { canOnQuote } from "./permissions.js";
 import { QUOTE_INCLUDE, sanitizeExtraTables } from "./quoteUtils.js";
 
-const httpError = (status, message) => Object.assign(new Error(message), { status });
-const isManagerLike = (role) => role === "admin" || role === "manager";
+const httpError = (status: number, message: string) => Object.assign(new Error(message), { status });
+const isManagerLike = (role: string | null | undefined) => role === "admin" || role === "manager";
 
 /** Manager GIAO 1 account_hn điền phần HN. Thêm account làm member (để thấy báo giá) +
  *  đặt hnStatus=assigned + thông báo. */
-export async function assignHn(req) {
-  const id = req.params.id;
+export async function assignHn(req: Request) {
+  const id = (req.params as any).id;
   const accountId = Number(req.body?.accountId);
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
@@ -37,8 +38,8 @@ export async function assignHn(req) {
 
 /** Account_hn LƯU phần HN: CHỈ ghi bảng "hanoi" của từng sheet, GIỮ NGUYÊN mọi thứ khác
  *  (hcm/khach + items/giá báo giá chính không hề bị account đụng tới). */
-export async function saveHn(req) {
-  const id = req.params.id;
+export async function saveHn(req: Request) {
+  const id = (req.params as any).id;
   const existing = await prisma.quote.findFirst({ where: { id }, include: { sheets: { select: { id: true, extraTables: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (req.session.role !== "account_hn" || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Chỉ Account Hà Nội được giao mới điền được phần này");
@@ -49,7 +50,7 @@ export async function saveHn(req) {
       const sheet = existing.sheets.find((s) => s.id === Number(hs.sheetId));
       if (!sheet) continue;   // chỉ sheet thuộc báo giá này
       const others = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []).filter((t: any) => t && t.category !== "hanoi");
-      const hanoi = sanitizeExtraTables((hs.hnTables || []).map((t) => ({ ...t, category: "hanoi" }))) || [];
+      const hanoi = sanitizeExtraTables((hs.hnTables || []).map((t: any) => ({ ...t, category: "hanoi" }))) || [];
       await tx.quoteSheet.update({ where: { id: sheet.id }, data: { extraTables: [...others, ...hanoi] } });
     }
     if (existing.hnStatus === "rejected") await tx.quote.update({ where: { id }, data: { hnStatus: "assigned", hnRejectNote: null } });
@@ -58,8 +59,8 @@ export async function saveHn(req) {
 }
 
 /** Account_hn GỬI DUYỆT phần HN → thông báo quản lý (người tạo báo giá). */
-export async function submitHn(req) {
-  const id = req.params.id;
+export async function submitHn(req: Request) {
+  const id = (req.params as any).id;
   const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, quoteNumber: true, title: true, hnAssigneeId: true, hnStatus: true, createdById: true } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (req.session.role !== "account_hn" || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Không có quyền gửi duyệt phần này");
@@ -71,8 +72,8 @@ export async function submitHn(req) {
 }
 
 /** Manager DUYỆT / TRẢ phần HN → thông báo account. */
-export async function reviewHn(req) {
-  const id = req.params.id;
+export async function reviewHn(req: Request) {
+  const id = (req.params as any).id;
   const decision = req.body?.decision;   // "approve" | "reject"
   const note = req.body?.note ? String(req.body.note).slice(0, 500) : null;
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });

@@ -11,7 +11,7 @@
 // then, so boot-time env errors keep their original (operator-facing) text.
 //
 // Returning undefined for an unhandled code lets Zod use its own default.
-export function viZodErrorMap(issue) {
+export function viZodErrorMap(issue: import("zod").core.$ZodRawIssue) {
   switch (issue.code) {
     case "invalid_type": {
       const exp = issue.expected;

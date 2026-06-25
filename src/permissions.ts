@@ -6,6 +6,8 @@
 //   scope "all"  → any resource
 // A role granted "quote:update:all" implicitly also has "own".
 
+import type { Request, Response, NextFunction } from "express";
+
 export const PERMISSIONS = {
   // Quotes
   QUOTE_CREATE:       "quote:create",
@@ -147,7 +149,7 @@ const ACCOUNT_HN = [
   P.QUOTE_UPDATE_OWN,  // chỉ ghi được bảng hanoi (write-guard ở route)
 ];
 
-export const ROLE_PERMISSIONS = {
+export const ROLE_PERMISSIONS: Record<string, Set<string>> = {
   admin: new Set(ADMIN),
   manager: new Set(MANAGER),
   account_hn: new Set(ACCOUNT_HN),
@@ -165,9 +167,12 @@ export const ROLE_LABELS = {
   accountant: "Kế toán",
 };
 
+// Hình dạng tối thiểu của req.session mà các hàm phân quyền cần (userId + role).
+type SessionLike = { userId?: number; role?: string };
+
 /** Does this role hold the given permission? (`:all` implies `:own`.) */
-export function roleCan(role, permission) {
-  const set = ROLE_PERMISSIONS[role];
+export function roleCan(role: string | undefined, permission: string) {
+  const set = ROLE_PERMISSIONS[role as string];
   if (!set) return false;
   if (set.has(permission)) return true;
   // ":all" grants the matching ":own"
@@ -178,7 +183,7 @@ export function roleCan(role, permission) {
 }
 
 /** can(session, permission) — session is req.session ({ role }). */
-export function can(session, permission) {
+export function can(session: SessionLike, permission: string) {
   return roleCan(session?.role, permission);
 }
 
@@ -190,7 +195,11 @@ export function can(session, permission) {
 // (Membership grants view + edit, but NOT delete.)
 const QUOTE_MEMBER_ACTIONS = new Set(["read", "update"]);
 
-export function canOnQuote(session, action, quote) {
+export function canOnQuote(
+  session: SessionLike,
+  action: string,
+  quote: { createdById?: number; members?: any[] } | null | undefined,
+) {
   const role = session?.role;
   if (roleCan(role, `quote:${action}:all`)) return true; // admin
   if (roleCan(role, `quote:${action}:own`)) {
@@ -198,7 +207,7 @@ export function canOnQuote(session, action, quote) {
     if (quote.createdById === session.userId) return true;
     // Managers AND employees also reach quotes they were added to as members.
     if (QUOTE_MEMBER_ACTIONS.has(action) && Array.isArray(quote.members)) {
-      return quote.members.some((m) => (m.id ?? m) === session.userId);
+      return quote.members.some((m: any) => (m.id ?? m) === session.userId);
     }
   }
   return false;
@@ -209,7 +218,7 @@ export function canOnQuote(session, action, quote) {
  *   admin             → all
  *   manager/employee  → quotes they created OR were added to as a member
  */
-export function quoteScopeWhere(session) {
+export function quoteScopeWhere(session: SessionLike) {
   if (roleCan(session?.role, "quote:read:all")) return {}; // admin (director)
   return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
 }
@@ -218,7 +227,7 @@ export function quoteScopeWhere(session) {
  * Generic resource-scoped check (e.g. customers). Returns true if the role has
  * `<resource>:<action>:all`, OR has `:own` and owns the row via `ownerField`.
  */
-export function canScoped(session, resource, action, row, ownerField = "ownerId") {
+export function canScoped(session: SessionLike, resource: string, action: string, row: Record<string, any> | null | undefined, ownerField = "ownerId") {
   const role = session?.role;
   if (roleCan(role, `${resource}:${action}:all`)) return true;
   if (roleCan(role, `${resource}:${action}:own`)) {
@@ -228,8 +237,8 @@ export function canScoped(session, resource, action, row, ownerField = "ownerId"
 }
 
 /** Express middleware factory: 403 unless the session holds the permission. */
-export function requirePermission(permission) {
-  return (req, res, next) => {
+export function requirePermission(permission: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.session?.userId) return res.status(401).json({ error: "Chưa đăng nhập" });
     if (!can(req.session, permission)) {
       return res.status(403).json({ error: "Không có quyền thực hiện thao tác này" });
@@ -239,7 +248,7 @@ export function requirePermission(permission) {
 }
 
 /** Flat list of permissions a role holds (expanding :all → also :own) for the client matrix. */
-export function permissionsForRole(role) {
+export function permissionsForRole(role: string) {
   const set = ROLE_PERMISSIONS[role] || new Set();
   const out = new Set(set);
   for (const p of set) {

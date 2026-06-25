@@ -18,7 +18,7 @@ function encKey() {
 }
 
 /** Encrypt a TOTP secret for storage. Falls back to plaintext if no key configured. */
-export function encryptSecret(plain) {
+export function encryptSecret(plain: string | null | undefined) {
   if (plain == null) return plain;
   const key = encKey();
   if (!key) {
@@ -38,7 +38,7 @@ export function encryptSecret(plain) {
  * ciphertext is corrupt — so a TOTP check just fails instead of 500-ing the
  * login/disable handlers. Recovery is via a backup code.
  */
-export function decryptSecret(stored) {
+export function decryptSecret(stored: string | null | undefined) {
   if (stored == null || !String(stored).startsWith(ENC_PREFIX)) return stored;
   const key = encKey();
   if (!key) return null;
@@ -56,7 +56,7 @@ export function decryptSecret(stored) {
   }
 }
 
-const sha256 = (s) => createHash("sha256").update(String(s)).digest("hex");
+const sha256 = (s: string) => createHash("sha256").update(String(s)).digest("hex");
 
 /** Generate N single-use backup codes; returns { plain[], hashed[] }. Show plain ONCE. */
 export function generateBackupCodes(n = 8) {
@@ -64,7 +64,7 @@ export function generateBackupCodes(n = 8) {
   return { plain, hashed: plain.map(sha256) };
 }
 
-function eq(a, b) {
+function eq(a: string, b: string) {
   const ba = Buffer.from(a), bb = Buffer.from(b);
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
@@ -74,7 +74,7 @@ function eq(a, b) {
  * Returns { matched, remaining } where `matched` is the exact stored entry (used as
  * an optimistic-lock guard so consumption is atomic), or null if no match.
  */
-export function consumeBackupCode(storedList, submitted) {
+export function consumeBackupCode(storedList: string[] | null | undefined, submitted: string) {
   const code = String(submitted || "").toUpperCase();
   const list = storedList || [];
   const target = sha256(code);

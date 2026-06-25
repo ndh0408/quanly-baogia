@@ -28,7 +28,19 @@ import { sendTelegram } from "./telegram.js";
  *
  * notif.important=true forces delivery even on "important" preference.
  */
-export async function notify(userId, notif) {
+export async function notify(
+  userId: number,
+  notif: {
+    title: string;
+    body: string;
+    link?: string | null;
+    resource?: string | null;
+    resourceId?: string | number | null;
+    channel?: "in_app" | "email" | "telegram";
+    important?: boolean;
+    telegramChatId?: unknown;
+  },
+) {
   try {
     const row = await prisma.notification.create({
       data: {
@@ -61,11 +73,11 @@ export async function notify(userId, notif) {
     ]);
 
     const prefs = channelPrefs?.value || { email: "important", telegram: "off" };
-    const shouldDeliver = (pref) => pref === "always" || (pref === "important" && notif.important);
+    const shouldDeliver = (pref: unknown) => pref === "always" || (pref === "important" && notif.important);
     // Setting.value là Json (union string|number|bool|object|array). Đọc 1 khoá kênh: nếu là
     // object thì lấy thuộc tính, ngược lại undefined — Y HỆT cách JS đọc `prefs.x` khi prefs là
     // primitive (trả undefined, không ném). Giữ nguyên hành vi, chỉ tường minh hoá kiểu.
-    const prefOf = (key) =>
+    const prefOf = (key: string) =>
       (prefs && typeof prefs === "object" && !Array.isArray(prefs))
         ? (prefs as Record<string, unknown>)[key]
         : undefined;
@@ -97,7 +109,7 @@ export async function notify(userId, notif) {
   }
 }
 
-function escapeHtml(s) {
+function escapeHtml(s: unknown) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

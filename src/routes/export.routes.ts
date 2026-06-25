@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -14,7 +15,7 @@ import { audit } from "../audit.js";
 // strings and Dates → ISO; buildQuoteBuffer/renderQuotePdf read these via Number()
 // and new Date(), proven by tests/excel.test.js). Used for the worker payload; the
 // inline fallback uses the original quote object.
-const plain = (q) => JSON.parse(JSON.stringify(q));
+const plain = (q: any) => JSON.parse(JSON.stringify(q));
 
 const router = Router();
 router.use(requireAuth);
@@ -33,19 +34,19 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 const MAX_EXPORT_SHEETS = 100;
 const MAX_EXPORT_ITEMS = 20_000;
-function exportTooBig(quote) {
+function exportTooBig(quote: any) {
   const sheets = quote.sheets?.length || 0;
-  const items = (quote.sheets || []).reduce((n, s) => n + (s.items?.length || 0), 0);
+  const items = (quote.sheets || []).reduce((n: number, s: any) => n + (s.items?.length || 0), 0);
   return sheets > MAX_EXPORT_SHEETS || items > MAX_EXPORT_ITEMS;
 }
 
 router.get(
   "/:id.xlsx",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const quote = await prisma.quote.findFirst({
-      where: { id },
+      where: { id: id as unknown as number },
       include: {
         company: true,
         members: { select: { id: true } },
@@ -83,10 +84,10 @@ router.get(
 router.get(
   "/:id.pdf",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const quote = await prisma.quote.findFirst({
-      where: { id },
+      where: { id: id as unknown as number },
       include: {
         company: true,
         members: { select: { id: true } },

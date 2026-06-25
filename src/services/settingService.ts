@@ -1,6 +1,7 @@
 // Tầng SERVICE cho domain Cấu hình hệ thống (settings). Bê NGUYÊN logic từ settings.routes.ts
 // (giữ hành vi y hệt): allowlist key công khai cho non-admin (còn lại 403), đọc/ghi/xoá + audit.
 // Route giữ requireRole("admin") cho dump/ghi/xoá + giữ validator; service chỉ trả dữ liệu / throw httpError.
+import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../quoteService.js";
@@ -10,12 +11,12 @@ import { httpError } from "../quoteService.js";
 // key is admin-only — prevents leaking config to every logged-in user.
 const PUBLIC_SETTING_KEYS = new Set(["notif.channels"]);
 
-export async function getAllSettings(_req) {
+export async function getAllSettings(_req: Request) {
   const rows = await prisma.setting.findMany();
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-export async function getSetting(req) {
+export async function getSetting(req: Request) {
   if (!PUBLIC_SETTING_KEYS.has(req.params.key) && req.session.role !== "admin") {
     throw httpError(403, "Không có quyền đọc cấu hình này");
   }
@@ -24,7 +25,7 @@ export async function getSetting(req) {
   return row.value;
 }
 
-export async function upsertSetting(req) {
+export async function upsertSetting(req: Request) {
   const value = req.body;
   const row = await prisma.setting.upsert({
     where: { key: req.params.key },
@@ -35,7 +36,7 @@ export async function upsertSetting(req) {
   return row.value;
 }
 
-export async function deleteSetting(req) {
+export async function deleteSetting(req: Request) {
   await prisma.setting.delete({ where: { key: req.params.key } }).catch(() => {});
   await audit(req, "settings.delete", { resource: "setting", resourceId: req.params.key });
   return { ok: true };

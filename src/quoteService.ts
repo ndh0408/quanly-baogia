@@ -5,7 +5,9 @@
 // errorHandler maps err.status<500 to that HTTP status + message.
 
 import { Prisma } from "@prisma/client";
+import type { Request } from "express";
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import { computeQuoteTotals, D } from "./money.js";
 import { nextQuoteNumber, nextProjectCode } from "./quoteNumber.js";
 import { audit } from "./audit.js";
@@ -23,12 +25,13 @@ import {
   extraTableSum,
 } from "./quoteUtils.js";
 
-export const httpError = (status, message) => Object.assign(new Error(message), { status });
+export const httpError = (status: number, message: string) => Object.assign(new Error(message), { status });
 
 /** Tải báo giá theo :id và THROW 403/404 nếu caller không được `action`. Dùng cho sub-resource. */
-async function loadAuthorizedQuote(req, action = "read") {
+async function loadAuthorizedQuote(req: Request, action: string = "read") {
+  const id = Number(req.params.id);
   const quote = await prisma.quote.findFirst({
-    where: { id: req.params.id },
+    where: { id },
     include: { members: { select: { id: true } } },
   });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
@@ -39,7 +42,7 @@ async function loadAuthorizedQuote(req, action = "read") {
 // Duyệt theo HÀNG cho bảng nội bộ "hcm"/"khach": CHỈ ADMIN được đặt approved. Gọi TRƯỚC khi
 // lưu (buildSheetsCreate) để: non-admin → GIỮ NGUYÊN trạng thái duyệt cũ theo `rid` (chống tự
 // duyệt qua payload); admin → honor + đóng dấu approvedAt/approvedBy khi mới duyệt. Mutate sheets.
-export function reconcileExtraApprovals(sheets, existingSheets, isAdmin, approverId) {
+export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], isAdmin: boolean, approverId: number) {
   if (!Array.isArray(sheets)) return;
   const prior = new Map();   // rid -> { approved, approvedAt, approvedBy }
   for (const s of (existingSheets || [])) {
@@ -79,9 +82,10 @@ export function reconcileExtraApprovals(sheets, existingSheets, isAdmin, approve
  * rolls the counter back — no burned numbers), retrying the rare P2002 collision.
  * Returns the created quote (QUOTE_INCLUDE).
  */
-export async function createQuote(req) {
+export async function createQuote(req: Request) {
   const b = req.body;
   const userId = req.session.userId;
+  if (userId === undefined) throw httpError(401, "Chưa đăng nhập");
 
   const company = await prisma.company.findFirst({ where: { id: b.companyId } });
   if (!company) throw httpError(400, "Không tìm thấy công ty");
@@ -171,9 +175,10 @@ export async function createQuote(req) {
  * price-affecting edit to a quote already in the approval pipeline reopens it to
  * draft (clears approval, bumps version, notifies creator). Returns the updated quote.
  */
-export async function updateQuote(req) {
-  const id = req.params.id;
+export async function updateQuote(req: Request) {
+  const id = Number(req.params.id);
   const userId = req.session.userId;
+  if (userId === undefined) throw httpError(401, "Chưa đăng nhập");
   const b = req.body;
 
   const existing: any = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE as any });
@@ -295,12 +300,24 @@ export async function updateQuote(req) {
  * LIST báo giá theo phạm vi (admin=all, manager=own, employee=member) + filter của user.
  * Trả về { rows, total, page, size } — route map qua presentQuoteRow + dựng meta.
  */
-export async function listQuotes(req) {
-  const { q, status, companyId, from, to, page, size, sort, order } = req.query;
+export async function listQuotes(req: Request) {
+  // validate(ListQuerySchema) đã coerce: q/status/from/to/sort/order là chuỗi/Date,
+  // companyId/page/size là number (có default page=1/size=DEFAULT). TS chỉ thấy ParsedQs
+  // string → đọc lại với coercion tương đương runtime (Number của number = chính nó).
+  const qy = req.query as Record<string, any>;
+  const q: string | undefined = qy.q;
+  const status: string | undefined = qy.status;
+  const companyId = qy.companyId !== undefined ? Number(qy.companyId) : undefined;
+  const from = qy.from;
+  const to = qy.to;
+  const page = Number(qy.page) || 1;
+  const size = Number(qy.size) || config.DEFAULT_PAGE_SIZE;
+  const sort = String(qy.sort);
+  const order = qy.order;
   // Visibility scope (admin=all, manager=own, employee=member) combined with
   // the user's filters via AND so a scope-OR doesn't clash with the search-OR.
   const filters: Prisma.QuoteWhereInput[] = [quoteScopeWhere(req.session)];
-  if (status) filters.push({ status });
+  if (status) filters.push({ status: status as Prisma.QuoteWhereInput["status"] });
   if (companyId) filters.push({ companyId });
   if (from || to) {
     const range: Record<string, any> = {};
@@ -335,12 +352,12 @@ export async function listQuotes(req) {
 }
 
 /** Xem trước SỐ báo giá KẾ TIẾP (không tiêu thụ counter). Prefix theo công ty đã chọn. */
-export async function previewNextNumber(req) {
+export async function previewNextNumber(req: Request) {
   // Show what the NEXT number WOULD be without actually consuming it.
   // Prefix is per-company (GN…, CLF…) so the preview matches the chosen company.
   let prefix = "GN";
   if (req.query.companyId) {
-    const company = await prisma.company.findFirst({ where: { id: req.query.companyId } });
+    const company = await prisma.company.findFirst({ where: { id: Number(req.query.companyId) } });
     if (company) prefix = company.quotePrefix || "GN";
   }
   const year = new Date().getFullYear();
@@ -353,7 +370,7 @@ export async function previewNextNumber(req) {
 }
 
 /** Người dùng active có thể thêm làm thành viên/người gửi của báo giá. Chỉ trả tên/vai trò. */
-export async function listAssignableUsers(req) {
+export async function listAssignableUsers(req: Request) {
   // Minimal fields for the member/sender picker only. Do NOT leak the login
   // identifier (username) or phone of every employee to all authenticated users.
   const users = await prisma.user.findMany({
@@ -365,15 +382,15 @@ export async function listAssignableUsers(req) {
 }
 
 /** Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). */
-export async function listHnAccounts(req) {
-  if (!["admin", "manager"].includes(req.session.role)) throw httpError(403, "Không có quyền");
+export async function listHnAccounts(req: Request) {
+  if (!["admin", "manager"].includes(req.session.role ?? "")) throw httpError(403, "Không có quyền");
   const data = await prisma.user.findMany({ where: { role: "account_hn", active: true }, select: { id: true, displayName: true, username: true }, orderBy: { displayName: "asc" } });
   return { data };
 }
 
 /** GET ONE — báo giá đầy đủ (QUOTE_INCLUDE) + 403 nếu không được read. Route present. */
-export async function getQuote(req) {
-  const { id } = req.params;
+export async function getQuote(req: Request) {
+  const id = Number(req.params.id);
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "read", quote)) {
@@ -390,7 +407,7 @@ export async function getQuote(req) {
  * PROJECTS (admin) — báo giá ĐÃ DUYỆT cho trang "Quản lý dự án", kèm breakdown theo
  * từng sheet (tên + subtotal). ⚠️ GIỮ NGUYÊN take:2000 (chỉ DI CHUYỂN, không đổi).
  */
-export async function listProjects(req) {
+export async function listProjects(req: Request) {
   // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
   // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
   const seeAll = can(req.session, P.USER_MANAGE);
@@ -475,14 +492,14 @@ export async function listProjects(req) {
  * SIGN documents for ONE sheet (Ký Chứng từ). Admin ký MỌI dự án; người có canSign (vd Lan Anh)
  * chỉ ký dự án DO MÌNH TẠO. Chỉ quản lý nội bộ; không ảnh hưởng Excel/tổng.
  */
-export async function signSheet(req) {
+export async function signSheet(req: Request) {
   const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
   const isAdmin = can(req.session, P.USER_MANAGE);
   if (!isAdmin && !me?.canSign) {
     throw httpError(403, "Bạn không có quyền ký chứng từ");
   }
   const sheet = await prisma.quoteSheet.findUnique({
-    where: { id: req.params.sheetId },
+    where: { id: Number(req.params.sheetId) },
     select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true, createdById: true } } },
   });
   if (!sheet) throw httpError(404, "Không tìm thấy sheet");
@@ -511,18 +528,18 @@ export async function signSheet(req) {
  * HOÁ ĐƠN / THANH TOÁN cho 1 sheet (Quản lý dự án). CHỈ ADMIN (quyền gác ở route).
  * Số HĐ → "Thanh toán"; ngày thanh toán → "Done". Chỉ trên báo giá ĐÃ CHỐT.
  */
-export async function updateSheetInvoice(req) {
+export async function updateSheetInvoice(req: Request) {
   const sheet = await prisma.quoteSheet.findUnique({
-    where: { id: req.params.sheetId },
+    where: { id: Number(req.params.sheetId) },
     select: { id: true, quoteId: true, quote: { select: { status: true, deletedAt: true } } },
   });
   if (!sheet) throw httpError(404, "Không tìm thấy sheet");
   if (sheet.quote?.status !== "converted" || sheet.quote?.deletedAt) {
     throw httpError(403, "Chỉ nhập hoá đơn cho dự án đã chốt");
   }
-  const data = {};
-  const setStr = (k) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? String(req.body[k]).trim() : null; };
-  const setDate = (k) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? new Date(req.body[k]) : null; };
+  const data: Record<string, any> = {};
+  const setStr = (k: string) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? String(req.body[k]).trim() : null; };
+  const setDate = (k: string) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? new Date(req.body[k]) : null; };
   setStr("invoiceNo"); setStr("poNumber"); setStr("hnInvoiceNo"); setStr("invoiceLink");
   setDate("paidAt"); setDate("docSentAt"); setDate("docReturnedAt");
   const updated = await prisma.quoteSheet.update({
@@ -539,8 +556,8 @@ export async function updateSheetInvoice(req) {
 // ============================================================================
 
 /** Đánh dấu báo giá ĐÃ CHỐT (won) — terminal, immutable, feed KPI. Route present. */
-export async function markConverted(req) {
-  const { id } = req.params;
+export async function markConverted(req: Request) {
+  const id = Number(req.params.id);
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "update", existing)) {
@@ -566,8 +583,8 @@ export async function markConverted(req) {
 }
 
 /** MARK LOST — khách từ chối; ghi lý do cho báo cáo win/loss. Route present. */
-export async function markLost(req) {
-  const { id } = req.params;
+export async function markLost(req: Request) {
+  const id = Number(req.params.id);
   const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "update", existing)) {
@@ -601,8 +618,8 @@ export async function markLost(req) {
 // ============================================================================
 
 /** Danh sách phiên bản của báo giá (đã 403/404 qua loadAuthorizedQuote). */
-export async function listVersions(req) {
-  const { id } = req.params;
+export async function listVersions(req: Request) {
+  const id = Number(req.params.id);
   await loadAuthorizedQuote(req, "read");
   const versions = await prisma.quoteVersion.findMany({
     where: { quoteId: id },
@@ -615,31 +632,34 @@ export async function listVersions(req) {
 }
 
 /** Lấy 1 phiên bản theo versionNo. */
-export async function getVersion(req) {
+export async function getVersion(req: Request) {
   await loadAuthorizedQuote(req, "read");
   const ver = await prisma.quoteVersion.findUnique({
-    where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.v } },
+    where: { quoteId_versionNo: { quoteId: Number(req.params.id), versionNo: Number(req.params.v) } },
   });
   if (!ver) throw httpError(404, "Không tìm thấy phiên bản");
   return { ...ver, id: ver.id.toString(), total: Number(ver.total) };
 }
 
 /** Diff 2 phiên bản (a→b). */
-export async function diffVersionsService(req) {
+export async function diffVersionsService(req: Request) {
   await loadAuthorizedQuote(req, "read");
+  const id = Number(req.params.id);
+  const a = Number(req.params.a);
+  const b = Number(req.params.b);
   const [va, vb] = await Promise.all([
-    prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.a } } }),
-    prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: req.params.id, versionNo: req.params.b } } }),
+    prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: id, versionNo: a } } }),
+    prisma.quoteVersion.findUnique({ where: { quoteId_versionNo: { quoteId: id, versionNo: b } } }),
   ]);
   if (!va || !vb) throw httpError(404, "Phiên bản không tồn tại");
-  return { from: req.params.a, to: req.params.b, changes: diffVersions(va.payload, vb.payload) };
+  return { from: a, to: b, changes: diffVersions(va.payload, vb.payload) };
 }
 
 /** APPROVAL trail của báo giá. */
-export async function listApprovals(req) {
+export async function listApprovals(req: Request) {
   await loadAuthorizedQuote(req, "read");
   const rows = await prisma.approval.findMany({
-    where: { quoteId: req.params.id },
+    where: { quoteId: Number(req.params.id) },
     orderBy: [{ versionNo: "asc" }, { level: "asc" }],
     include: { approver: { select: { id: true, username: true, displayName: true } } },
   });
@@ -650,8 +670,8 @@ export async function listApprovals(req) {
  * MEMBERS — add/remove employees who may view & edit this quote.
  * Chỉ người tạo (hoặc admin) mới quản lý được danh sách thành viên.
  */
-export async function updateMembers(req) {
-  const { id } = req.params;
+export async function updateMembers(req: Request) {
+  const id = Number(req.params.id);
   const quote = await prisma.quote.findFirst({ where: { id } });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (quote.createdById !== req.session.userId && !can(req.session, P.QUOTE_UPDATE_ALL)) {
@@ -673,8 +693,8 @@ export async function updateMembers(req) {
 }
 
 /** SOFT DELETE báo giá (db middleware). Won deal terminal — không ai xoá được. */
-export async function deleteQuote(req) {
-  const { id } = req.params;
+export async function deleteQuote(req: Request) {
+  const id = Number(req.params.id);
   const existing = await prisma.quote.findFirst({ where: { id } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   // A won deal is terminal — nobody (not even delete:all) may remove it.
@@ -697,8 +717,8 @@ export async function deleteQuote(req) {
  * → mã dự án mới theo người tạo. Cấp số + tạo + snapshot v1 trong 1 transaction, retry P2002.
  * Route present (presentQuote) kết quả.
  */
-export async function duplicateQuote(req) {
-  const { id } = req.params;
+export async function duplicateQuote(req: Request) {
+  const id = Number(req.params.id);
   const src: any = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!src) throw httpError(404, "Không tìm thấy báo giá");
   // Must be allowed to read the source AND to create quotes.
@@ -727,7 +747,7 @@ export async function duplicateQuote(req) {
     dupCreatorProjectCode = dupCreator?.projectCode || null;
   }
 
-  const buildData = (quoteNumber, projectCode, projectVersion) => ({
+  const buildData = (quoteNumber: string, projectCode: string | null, projectVersion: number) => ({
     quoteNumber,
     projectCode,
     projectVersion,
@@ -755,13 +775,13 @@ export async function duplicateQuote(req) {
     createdById: req.session.userId,
     members: { connect: [{ id: req.session.userId }] },
     sheets: {
-      create: src.sheets.map((s, sIdx) => ({
+      create: src.sheets.map((s: any, sIdx: number) => ({
         templateId: s.templateId,
         name: s.name,
         order: s.order != null ? s.order : sIdx + 1,
         groupSubtotal: s.groupSubtotal,
         items: {
-          create: s.items.map((it, iIdx) => ({
+          create: s.items.map((it: any, iIdx: number) => ({
             order: it.order != null ? it.order : iIdx + 1,
             productId: it.productId ?? null,   // keep the catalog link on copy
             kind: it.kind || "item",

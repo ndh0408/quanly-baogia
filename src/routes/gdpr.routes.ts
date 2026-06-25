@@ -8,6 +8,7 @@
 // audit nằm ở src/services/gdprService.ts.
 
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
@@ -20,8 +21,8 @@ router.use(requireAuth);
 /** GET /api/gdpr/me/export — user exports their own data. */
 router.get(
   "/me/export",
-  asyncHandler(async (req, res) => {
-    const data = await svc.exportUser(req.session.userId);
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = await svc.exportUser((req.session as any).userId);
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="user-${req.session.userId}-export.json"`);
     res.end(JSON.stringify(data, null, 2));
@@ -34,8 +35,8 @@ router.get(
   "/users/:id/export",
   requireRole("admin"),
   validate({ params: z.object({ id: z.coerce.number().int().positive() }) }),
-  asyncHandler(async (req, res) => {
-    const data = await svc.exportUser(req.params.id);
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = await svc.exportUser((req.params as any).id);
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="user-${req.params.id}-export.json"`);
     res.end(JSON.stringify(data, null, 2));
@@ -55,7 +56,7 @@ router.get(
 router.post(
   "/me/delete",
   validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }) }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     await svc.deleteSelf(req);
     await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
     res.clearCookie("qly.sid");
@@ -70,7 +71,7 @@ router.post(
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ confirm: z.literal("DELETE-USER", { error: "Vui lòng nhập chính xác DELETE-USER để xác nhận" }) }),
   }),
-  asyncHandler(async (req, res) => res.json(await svc.deleteByAdmin(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteByAdmin(req)))
 );
 
 export default router;

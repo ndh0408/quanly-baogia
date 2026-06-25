@@ -1,7 +1,7 @@
 // Worker process. Run via `npm run worker` in its own container.
 // Pulls jobs from BullMQ queues and executes them off the request thread.
 
-import type { Worker } from "bullmq";
+import type { Worker, Job } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
@@ -15,7 +15,7 @@ import { initSentry, captureError, flushSentry, exportJobsTotal } from "./observ
 
 // Increment the export_jobs_total metric around a generator (counts both the
 // worker path and the inline fallback path in queue.js, so the metric is real).
-async function withExportMetric(format, fn) {
+async function withExportMetric(format: string, fn: () => Promise<any>) {
   try {
     const result = await fn();
     exportJobsTotal.inc({ format, status: "success" });
@@ -30,7 +30,7 @@ async function withExportMetric(format, fn) {
 // fallback in queue.js when REDIS_URL is not set (local dev).
 export const processors = {
   [QUEUES.EXPORT]: {
-    "xlsx": (job) => withExportMetric("xlsx", async () => {
+    "xlsx": (job: any) => withExportMetric("xlsx", async () => {
       const { quoteId, requestedBy } = job.data;
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
@@ -56,7 +56,7 @@ export const processors = {
       }
       return { size: buf.length, inline: buf.toString("base64") };
     }),
-    "pdf": (job) => withExportMetric("pdf", async () => {
+    "pdf": (job: any) => withExportMetric("pdf", async () => {
       const { quoteId, requestedBy } = job.data;
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
@@ -86,17 +86,17 @@ export const processors = {
     }),
   },
   [QUEUES.EMAIL]: {
-    "send": async (job) => sendEmail(job.data),
+    "send": async (job: any) => sendEmail(job.data),
   },
   [QUEUES.WEBHOOK]: {
-    "deliver": async (job) => {
+    "deliver": async (job: any) => {
       // Lazy import to avoid worker boot dependency cycles
       const { deliverWebhook } = await import("./webhooks.js");
       return deliverWebhook(job.data);
     },
   },
   [QUEUES.NOTIFY]: {
-    "telegram": async (job) => sendTelegram(job.data),
+    "telegram": async (job: any) => sendTelegram(job.data),
   },
 };
 
@@ -104,7 +104,7 @@ export const processors = {
 // ROBUST entry-check: tsx nạp worker.TS dù lệnh trỏ worker.JS (resolve .js→.ts) → so sánh phải BỎ
 // đuôi .js/.ts, nếu không khối worker bị SKIP → thoát ngay, không nghe job. (Hoặc ép WORKER_MODE=true.)
 const _entryUrl = process.argv[1] ? `file://${process.argv[1].replaceAll("\\", "/")}` : "";
-const _stripExt = (s) => s.replace(/\.[cm]?[jt]s$/, "");
+const _stripExt = (s: string) => s.replace(/\.[cm]?[jt]s$/, "");
 if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MODE === "true") {
   // Worker errors were previously invisible — initialize Sentry here too so a
   // failing export/email/webhook/telegram job is reported, not just logged.
@@ -118,8 +118,8 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
 
   const workers: Worker[] = [];
   for (const [queueName, jobs] of Object.entries(processors)) {
-    const w = createWorker(queueName, async (job) => {
-      const handler = jobs[job.name];
+    const w = createWorker(queueName, async (job: Job) => {
+      const handler = (jobs as unknown as Record<string, (job: any) => any>)[job.name];
       if (!handler) throw new Error(`Không xử lý được công việc (${queueName}/${job.name})`);
       try {
         return await handler(job);
@@ -135,7 +135,7 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
     logger.info({ queue: queueName, jobs: Object.keys(jobs) }, "worker registered");
   }
 
-  const shutdown = async (signal) => {
+  const shutdown = async (signal: string) => {
     logger.info({ signal }, "Worker shutting down");
     try {
       await Promise.all(workers.map((w) => w.close()));

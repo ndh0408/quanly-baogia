@@ -1,8 +1,10 @@
+import type { TxClient } from "./db.js";
+
 /**
  * Snapshot the current state of a quote (including sheets+items) into QuoteVersion.
  * Called after every mutating operation that changes price/structure.
  */
-export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
+export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorId: number | null | undefined, reason: string | null) {
   const q = await tx.quote.findFirst({
     where: { id: quoteId },
     include: {
@@ -89,7 +91,7 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
 }
 
 /** Compute a shallow diff between two version payloads. Returns array of changed keys with old/new. */
-export function diffVersions(a, b) {
+export function diffVersions(a: any, b: any) {
   const out: { key: string; before: unknown; after: unknown }[] = [];
   const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
   for (const k of keys) {

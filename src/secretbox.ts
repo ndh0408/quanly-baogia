@@ -22,7 +22,7 @@ function key() {
 }
 
 /** Encrypt a string for storage. Returns the prefixed ciphertext, or the value unchanged if null/empty. */
-export function encryptValue(plain) {
+export function encryptValue(plain: string | null | undefined) {
   if (plain == null || plain === "") return plain;
   const iv = randomBytes(IV_LEN);
   const c = createCipheriv("aes-256-gcm", key(), iv);
@@ -32,7 +32,7 @@ export function encryptValue(plain) {
 }
 
 /** Decrypt a stored value. Plaintext (no prefix) is returned as-is; failures return null. */
-export function decryptValue(value) {
+export function decryptValue(value: string | null) {
   if (value == null) return value;
   if (typeof value !== "string" || !value.startsWith(PREFIX)) return value; // legacy plaintext
   try {
@@ -50,6 +50,6 @@ export function decryptValue(value) {
 }
 
 /** True if a stored value is already encrypted. */
-export function isEncrypted(value) {
+export function isEncrypted(value: unknown) {
   return typeof value === "string" && value.startsWith(PREFIX);
 }

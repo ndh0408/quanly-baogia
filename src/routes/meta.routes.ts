@@ -1,4 +1,6 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
+import type { QuoteTemplate } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { getConfig } from "../templateConfigs.js";
@@ -8,7 +10,7 @@ router.use(requireAuth);
 
 // Expose each template's item-table shape so the on-screen editor renders the
 // SAME columns as the Excel form (e.g. CLF has "Chi Tiết", GN-có-ngày has "Số Ngày").
-function templateLayout(code) {
+function templateLayout(code: string) {
   try {
     const items = getConfig(code).items || {};
     const cols = items.columns || {};
@@ -17,9 +19,9 @@ function templateLayout(code) {
     return { hasDetail: false, hasDays: false, numberSubsections: false };
   }
 }
-const withLayout = (t) => ({ ...t, layout: templateLayout(t.code) });
+const withLayout = (t: QuoteTemplate) => ({ ...t, layout: templateLayout(t.code) });
 
-router.get("/companies", asyncHandler(async (req, res) => {
+router.get("/companies", asyncHandler(async (req: Request, res: Response) => {
   const companies = await prisma.company.findMany({
     where: { active: true },
     orderBy: { name: "asc" },
@@ -30,9 +32,9 @@ router.get("/companies", asyncHandler(async (req, res) => {
   res.json(companies.map((c) => ({ ...c, templates: c.templates.map(withLayout) })));
 }));
 
-router.get("/templates", asyncHandler(async (req, res) => {
+router.get("/templates", asyncHandler(async (req: Request, res: Response) => {
   const where: any = { active: true };
-  if (req.query.companyId) where.companyId = parseInt(req.query.companyId, 10);
+  if (req.query.companyId) where.companyId = parseInt(req.query.companyId as string, 10);
   const templates = await prisma.quoteTemplate.findMany({
     where,
     orderBy: { name: "asc" },

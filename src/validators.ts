@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
 import { viZodErrorMap } from "./zodErrorMap.js";
 
@@ -248,12 +249,12 @@ export const ListQuerySchema = z.object({
  * Express middleware: parse body/query/params against a zod schema and replace
  * the original with the parsed (typed) result. On failure, return 400 with details.
  */
-export function validate(schemas) {
-  return (req, res, next) => {
+export function validate(schemas: { body?: z.ZodType; query?: z.ZodType; params?: z.ZodType }) {
+  return (req: Request, res: Response, next: NextFunction) => {
     try {
       if (schemas.body) req.body = schemas.body.parse(req.body ?? {});
-      if (schemas.query) req.query = schemas.query.parse(req.query ?? {});
-      if (schemas.params) req.params = schemas.params.parse(req.params ?? {});
+      if (schemas.query) req.query = schemas.query.parse(req.query ?? {}) as any;
+      if (schemas.params) req.params = schemas.params.parse(req.params ?? {}) as any;
       next();
     } catch (e) {
       const issues = e instanceof z.ZodError ? e.issues : [];

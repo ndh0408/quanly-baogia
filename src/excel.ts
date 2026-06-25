@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
 // CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Khớp util.js (web) + money.js (ROUND_DOWN).
-function trunc2(x) {
+function trunc2(x: any) {
   const n = Number(x) || 0;
   const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn)
   return n < 0 ? -t : t;
@@ -20,13 +20,13 @@ function trunc2(x) {
 // cache the bytes in RAM. Every export then loads from the cached Buffer instead
 // of re-reading ~170-207 KB/sheet off disk (big win on the inline export path).
 const _templateCache = new Map();
-function templateBuffer(filePath) {
+function templateBuffer(filePath: string) {
   let buf = _templateCache.get(filePath);
   if (!buf) { buf = readFileSync(path.join(ROOT, filePath)); _templateCache.set(filePath, buf); }
   return buf;
 }
 
-function vnDateText(d, city) {
+function vnDateText(d: any, city: any) {
   const dt = d instanceof Date ? d : new Date(d);
   return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
 }
@@ -35,26 +35,26 @@ function vnDateText(d, city) {
 // = + - @ (or a leading tab/CR) is interpreted as a formula by Excel/Sheets when
 // the exported file is opened. Prefix a zero-width-safe apostrophe so the value
 // is shown literally. Only applied to plain strings (numbers/dates untouched).
-function neutralizeFormula(value) {
+function neutralizeFormula(value: any) {
   if (typeof value !== "string" || value.length === 0) return value;
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
-function setCell(ws, ref, value) {
+function setCell(ws: any, ref: any, value: any) {
   if (!ref) return;
   ws.getCell(ref).value = neutralizeFormula(value);
 }
 
-function safeMerge(ws, range) {
+function safeMerge(ws: any, range: any) {
   try { ws.mergeCells(range); } catch {}
 }
 
-function safeUnmerge(ws, range) {
+function safeUnmerge(ws: any, range: any) {
   try { ws.unMergeCells(range); } catch {}
 }
 
 /** Ensure a cell has wrapText alignment so multi-line content displays correctly */
-function ensureWrap(cell) {
+function ensureWrap(cell: any) {
   const align = cell.alignment ? { ...cell.alignment } : {};
   align.wrapText = true;
   if (!align.vertical) align.vertical = "middle";
@@ -70,7 +70,7 @@ function ensureWrap(cell) {
  * row tinting the plain item rows around it). Cloning the cell's style into a fresh
  * per-cell object first isolates the change to this one cell.
  */
-function paintCell(cell, { fill, fontColor, bold }: { fill?: any; fontColor?: any; bold?: any } = {}) {
+function paintCell(cell: any, { fill, fontColor, bold }: { fill?: any; fontColor?: any; bold?: any } = {}) {
   const style = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
   if (fill === "none") style.fill = { type: "pattern", pattern: "none" };   // xoá nền (để ô trắng)
   else if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
@@ -83,20 +83,20 @@ function paintCell(cell, { fill, fontColor, bold }: { fill?: any; fontColor?: an
 }
 
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
-function clean(s) {
+function clean(s: any) {
   if (s == null) return "";
   return String(s).replace(/[\r\n]+/g, " ").trim();
 }
 
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Auto letter for section (nhóm) rows. */
-function sectionLetter(n) {
+function sectionLetter(n: number) {
   let s = "", x = n + 1;
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
   return s;
 }
 
 /** Parse "C3" → 0-based {col,row} anchor used by ExcelJS addImage. */
-function cellAnchor(ref) {
+function cellAnchor(ref: any) {
   const m = /^([A-Z]+)(\d+)$/i.exec(ref || "");
   if (!m) return { col: 0, row: 0 };
   let col = 0;
@@ -107,7 +107,7 @@ function cellAnchor(ref) {
 /** Insert a base64 data-URL image floating over the given cell; clears the cell text. */
 const MAX_LOGO_BYTES = 6 * 1024 * 1024; // hard cap on decoded logo size (DoS guard)
 
-function insertCustomerLogo(ws, ref, dataUrl, ext) {
+function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
   const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
   if (!m) return;
   let extension = m[1].toLowerCase();
@@ -128,7 +128,7 @@ function insertCustomerLogo(ws, ref, dataUrl, ext) {
   } catch { /* ignore bad image */ }
 }
 
-function applyTemplateCleanup(ws, cfg) {
+function applyTemplateCleanup(ws: any, cfg: any) {
   const cleanup = cfg.cleanup || {};
 
   // Unmerge ranges left over from the sample (e.g. vertically-merged STT / Hạng Mục
@@ -146,7 +146,7 @@ function applyTemplateCleanup(ws, cfg) {
   // Remove all images outside the header area (keep only logo)
   if (cleanup.keepImagesAboveRow != null && Array.isArray(ws._media)) {
     const keep = cleanup.keepImagesAboveRow;
-    ws._media = ws._media.filter(m => {
+    ws._media = ws._media.filter((m: any) => {
       const top = m.range?.tl?.nativeRow ?? 99;
       return top < keep;
     });
@@ -154,13 +154,13 @@ function applyTemplateCleanup(ws, cfg) {
 
   // Remove specific rows entirely (do this LAST, in reverse order to keep indices valid)
   // ExcelJS spliceRows has a batch-count bug — splice 1 row at a time.
-  const toRemove = (cleanup.removeRows || []).slice().sort((a, b) => b - a);
+  const toRemove = (cleanup.removeRows || []).slice().sort((a: any, b: any) => b - a);
   for (const r of toRemove) {
     try { ws.spliceRows(r, 1); } catch {}
   }
 }
 
-function unmergeTotals(ws, cfg, lastItemRow) {
+function unmergeTotals(ws: any, cfg: any, lastItemRow: any) {
   // Unmerge each totals row's label cells BEFORE splicing,
   // so ExcelJS doesn't carry stale merge references after splice.
   const t = cfg.totals;
@@ -178,12 +178,12 @@ function unmergeTotals(ws, cfg, lastItemRow) {
 }
 
 /** Fill data for one sheet using its template config. Returns totals. */
-function fillSheetData(ws, cfg, quote, sheet, vatPct) {
+function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any) {
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
   const pal = cfg.palette || null;   // bảng màu tuỳ template (GN: peach/xanh lá/xanh dương)
-  let items = (sheet.items || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  let items = (sheet.items || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   // Thứ tự item THEO ĐÚNG EDITOR (trước khi lọc dòng "info" của CLF) — công thức người
   // dùng đánh ref theo thứ tự này; giữ lại để dịch ref đúng dù `items` bị lọc bên dưới.
   const editorItems = items.slice();
@@ -193,8 +193,8 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   // is CLEARED when the quote has no info line, so the placeholder dots never print
   // — i.e. the line is opt-in per quote (the toggle the J5 guide note asked for).
   if (c.infoBannerCell) {
-    const infoLines = items.filter((it) => it.kind === "info").map((it) => (it.name || "").trim()).filter(Boolean);
-    items = items.filter((it) => it.kind !== "info");
+    const infoLines = items.filter((it: any) => it.kind === "info").map((it: any) => (it.name || "").trim()).filter(Boolean);
+    items = items.filter((it: any) => it.kind !== "info");
     setCell(ws, c.infoBannerCell, infoLines.length ? `* Thông tin chương trình: ${infoLines.join("; ")}` : "");
     ensureWrap(ws.getCell(c.infoBannerCell));
   }
@@ -323,8 +323,8 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   // "hàng bị to" khi số mục ít hơn slot mẫu). TỰ CĂN CHỈNH theo chữ như Excel: ước lượng
   // số dòng SAU KHI XUỐNG HÀNG (wrap) theo ĐỘ RỘNG CỘT — không chỉ đếm \n — nên tên nhóm
   // / hạng mục dài (vd "Booth backdrop … (thay AW booth có sẵn)") không bị cắt mất chữ.
-  const colWidthOf = (letter) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
-  const wrapLines = (text, letter) => {
+  const colWidthOf = (letter: any) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
+  const wrapLines = (text: any, letter: any) => {
     if (text == null || text === "") return 1;
     const cw = colWidthOf(letter) || 12;
     const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
@@ -365,7 +365,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   // when sheet.groupSubtotal is on. Section rows are letter-coded (A,B,C…) and never
   // count toward the grand subtotal (their qty/price are 0).
   const showGroupSub = !!(sheet && sheet.groupSubtotal);
-  const sectionSum = {};
+  const sectionSum: Record<number, number> = {};
   {
     let cur = -1;
     for (let i = 0; i < items.length; i++) {
@@ -391,10 +391,10 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   const fctx = buildFormulaContext({
     cols,
     items: editorItems,                                  // thứ tự editor (ref người dùng khớp)
-    rowToExcel: (idx0) => rowByItem.has(editorItems[idx0]) ? rowByItem.get(editorItems[idx0]) : null,
+    rowToExcel: (idx0: any) => rowByItem.has(editorItems[idx0]) ? rowByItem.get(editorItems[idx0]) : null,
   });
   // Ghi 1 ô số: ưu tiên công thức người dùng (kết quả = giá trị đã tính), fallback ghi số.
-  const putNum = (it2, row, field, colX, value) => {
+  const putNum = (it2: any, row: any, field: any, colX: any, value: any) => {
     if (!colX) return;
     const raw = it2 && it2.formulas && it2.formulas[field];
     const fx = raw ? fctx.cellFormula(raw, value) : null;
@@ -571,7 +571,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
 
   // When sections are present, a simple SUM(column) double-counts (mục con per-unit +
   // thành tiền nhóm), so write the computed value instead of a SUM formula.
-  const hasSections = items.some((it) => it && (it.kind === "section" || it.kind === "subsection"));
+  const hasSections = items.some((it: any) => it && (it.kind === "section" || it.kind === "subsection"));
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null,
     formula: hasSections ? null : t.subtotal.formula({ first: itemsCfg.firstRow, last: actualLastRow, subtotalRow }),
@@ -711,7 +711,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       const ff = { name: "Times New Roman", family: 1, size: 11 };
       // Ghi 1 dòng vào dải [from..to] (merge ngang). Gán font/căn-lề qua style TRƯỚC value
       // vì font/alignment đơn lẻ không "ăn" trên ô đã merge.
-      const writeMerged = (r, value, { bold, from, to, align }: { bold?: any; from?: any; to?: any; align?: any } = {}) => {
+      const writeMerged = (r: any, value: any, { bold, from, to, align }: { bold?: any; from?: any; to?: any; align?: any } = {}) => {
         const a = `${from || "B"}${r}`, b = `${to || "I"}${r}`;
         safeUnmerge(ws, `${a}:${b}`); safeMerge(ws, `${a}:${b}`);
         const cell = ws.getCell(a);
@@ -724,7 +724,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
       // Lời chào ("Rất mong…" / "Trân trọng…") canh GIỮA trong cột trái (B:F) → cân đối.
       if (f.left) {
         const lr = totalRow + (f.rowOffset || 2);
-        (f.left.lines || []).forEach((line, idx) =>
+        (f.left.lines || []).forEach((line: any, idx: any) =>
           writeMerged(lr + idx, line, { from: f.left.from, to: f.left.to, align: "center" }));
       }
       // "Ý Kiến Khách Hàng" canh giữa cột PHẢI, CÙNG hàng dòng lời chào đầu
@@ -756,7 +756,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   };
 }
 
-function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }: { text?: any; formula?: any; result?: any; rawValue?: any }) {
+function applyTotalsRow(ws: any, rowCfg: any, row: any, { text, formula, result, rawValue }: { text?: any; formula?: any; result?: any; rawValue?: any }) {
   // Clear secondary cells in merge first (to avoid leftover duplicated values)
   for (const [colStart, colEnd] of (rowCfg.labelCells || [])) {
     if (colStart === colEnd) continue;
@@ -778,7 +778,7 @@ function applyTotalsRow(ws, rowCfg, row, { text, formula, result, rawValue }: { 
   }
 }
 
-function uniqueSheetName(wb, name) {
+function uniqueSheetName(wb: any, name: any) {
   let base = (name || "Sheet").replace(/[[\]/\\?*:]/g, "").substring(0, 31);
   if (!base) base = "Sheet";
   let candidate = base;
@@ -791,7 +791,7 @@ function uniqueSheetName(wb, name) {
   return candidate;
 }
 
-function colLetter(n) {
+function colLetter(n: number) {
   let s = "";
   while (n > 0) {
     const r = (n - 1) % 26;
@@ -801,7 +801,7 @@ function colLetter(n) {
   return s;
 }
 
-function deepClone(o) {
+function deepClone(o: any) {
   if (o == null) return o;
   return JSON.parse(JSON.stringify(o));
 }
@@ -811,7 +811,7 @@ function deepClone(o) {
  * Plain JSON clone misses properties exposed only via getters; this enumerates
  * the well-known keys so attributes like `family` and `scheme` survive cross-workbook copy.
  */
-function cloneFont(srcFont) {
+function cloneFont(srcFont: any) {
   if (!srcFont) return undefined;
   const keys = [
     "name", "size", "bold", "italic", "underline", "strike",
@@ -829,7 +829,7 @@ function cloneFont(srcFont) {
   return out;
 }
 
-function copyWorksheetToWorkbook(srcWs, dstWb, newName) {
+function copyWorksheetToWorkbook(srcWs: any, dstWb: any, newName: any) {
   const dstWs = dstWb.addWorksheet(newName);
 
   // Column widths + styles
@@ -843,11 +843,11 @@ function copyWorksheetToWorkbook(srcWs, dstWb, newName) {
   }
 
   // Rows + cells
-  srcWs.eachRow({ includeEmpty: true }, (srcRow, rowNum) => {
+  srcWs.eachRow({ includeEmpty: true }, (srcRow: any, rowNum: any) => {
     const dstRow = dstWs.getRow(rowNum);
     if (srcRow.height) dstRow.height = srcRow.height;
     if (srcRow.hidden) dstRow.hidden = true;
-    srcRow.eachCell({ includeEmpty: true }, (srcCell, colNum) => {
+    srcRow.eachCell({ includeEmpty: true }, (srcCell: any, colNum: any) => {
       const dstCell = dstRow.getCell(colNum);
       // VALUE: preserve formulas + plain values + rich text
       if (srcCell.value != null) {
@@ -906,13 +906,13 @@ function copyWorksheetToWorkbook(srcWs, dstWb, newName) {
   return dstWs;
 }
 
-async function buildSummaryBuffer(sheetTotals, quote, vatPct) {
+async function buildSummaryBuffer(sheetTotals: any, quote: any, vatPct: any) {
   const wb = new ExcelJS.Workbook();
   addSummarySheet(wb, sheetTotals, quote, vatPct);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-function addSummarySheet(wb, sheetTotals, quote, vatPct) {
+function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
   const ws = wb.addWorksheet("Tổng Báo Giá");
   ws.columns = [
     { width: 6 },
@@ -933,7 +933,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
 
   const headerRow = 4;
   const headers = ["STT", "Hạng mục", "Thành tiền (VNĐ)"];
-  headers.forEach((h, i) => {
+  headers.forEach((h: any, i: any) => {
     const cell = ws.getCell(headerRow, i + 1);
     cell.value = h;
     cell.font = { name: "Times New Roman", family: 1, size: 11, bold: true };
@@ -947,7 +947,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   });
 
   let subtotalAll = 0;
-  sheetTotals.forEach((st, idx) => {
+  sheetTotals.forEach((st: any, idx: any) => {
     const r = headerRow + 1 + idx;
     ws.getCell(r, 1).value = idx + 1;
     ws.getCell(r, 2).value = neutralizeFormula(st.name);
@@ -981,7 +981,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
   ];
   if (discountVal > 0) totalRows.push({ label: "Giảm giá", value: discountVal });
   totalRows.push({ label: "Thành tiền", value: grandTotal });
-  totalRows.forEach((tr, i) => {
+  totalRows.forEach((tr, i: any) => {
     const r = totalsStart + i;
     ws.mergeCells(r, 1, r, 2);
     const lblCell = ws.getCell(r, 1);
@@ -1014,7 +1014,7 @@ function addSummarySheet(wb, sheetTotals, quote, vatPct) {
  *  - Leftover external link references in `_workbook.definedNames`
  *  - Stale calculation chain etc.
  */
-function scrubWorkbook(wb) {
+function scrubWorkbook(wb: any) {
   // ExcelJS stores defined names in NameManager. Its `.model` getter/setter accepts an
   // array of {name, ranges}. We filter out any name whose ranges include external-file
   // markers like '[4]DATA'!$I$12:$I$318 — those are leftover references from the original
@@ -1024,9 +1024,9 @@ function scrubWorkbook(wb) {
     const dn = wb.definedNames;
     if (dn) {
       const model = Array.isArray(dn.model) ? dn.model : [];
-      const cleaned = model.filter(d => {
+      const cleaned = model.filter((d: any) => {
         const ranges = d?.ranges || [];
-        return !ranges.some(r => typeof r === "string" && /\[\d+\]/.test(r));
+        return !ranges.some((r: any) => typeof r === "string" && /\[\d+\]/.test(r));
       });
       if (cleaned.length !== model.length) {
         dn.model = cleaned;
@@ -1040,8 +1040,8 @@ function scrubWorkbook(wb) {
  * Renumber worksheet sheetIds sequentially (1..N) to match their position order.
  * Excel flags out-of-order sheetIds (e.g. 69, 1, 2 after cross-workbook copy) as needing repair.
  */
-function renumberSheetIds(wb) {
-  wb.worksheets.forEach((ws, i) => {
+function renumberSheetIds(wb: any) {
+  wb.worksheets.forEach((ws: any, i: any) => {
     try { ws.id = i + 1; } catch {}
   });
 }
@@ -1051,8 +1051,8 @@ function renumberSheetIds(wb) {
  * at the OOXML/zip level. This preserves each template's original styling perfectly,
  * which cell-by-cell cross-workbook copying in ExcelJS does not.
  */
-export async function buildQuoteBuffer(quote) {
-  const sheets = (quote.sheets || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+export async function buildQuoteBuffer(quote: any) {
+  const sheets = (quote.sheets || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   if (sheets.length === 0) {
     throw new Error("Báo giá phải có ít nhất 1 sheet");
   }
@@ -1062,7 +1062,7 @@ export async function buildQuoteBuffer(quote) {
   const sheetNames: string[] = [];
   const sheetTotals: { name: string; subtotal: number; vat: number; total: number }[] = [];
   const usedNames = new Set();
-  const uniq = (name) => {
+  const uniq = (name: any) => {
     let n = name, i = 2;
     while (usedNames.has(n)) n = `${name} (${i++})`;
     usedNames.add(n);

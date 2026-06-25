@@ -3,6 +3,7 @@
 // this module is the API contract that those backends would implement.
 
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -21,10 +22,10 @@ const Query = z.object({
 router.get(
   "/",
   validate({ query: Query }),
-  asyncHandler(async (req, res) => {
-    const q = req.query.q.trim();
-    const types = (req.query.types || "quote,customer,product").split(",").map((s) => s.trim());
-    const limit = req.query.limit;
+  asyncHandler(async (req: Request, res: Response) => {
+    const q = (req.query as unknown as z.infer<typeof Query>).q.trim();
+    const types = ((req.query as unknown as z.infer<typeof Query>).types || "quote,customer,product").split(",").map((s: string) => s.trim());
+    const limit = (req.query as unknown as z.infer<typeof Query>).limit;
 
     const out: { query: string; results: Record<string, any> } = { query: q, results: {} };
 

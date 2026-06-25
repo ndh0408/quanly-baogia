@@ -23,7 +23,7 @@ function init() {
   return transporter;
 }
 
-const _esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c: string) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
+const _esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c: string) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
 
 // Exported so call sites can escape user-controlled fragments when they DO need
 // to build trusted HTML themselves.
@@ -37,7 +37,7 @@ export const escapeEmailHtml = _esc;
  * This inverts the old "everything is trusted HTML" default so a caller that
  * accidentally passes user input can no longer inject markup into outbound mail.
  */
-function emailContent(p) {
+function emailContent(p: string | { html?: string; text?: string } | null | undefined) {
   if (p && typeof p === "object") {
     if (typeof p.html === "string") return p.html;
     if (typeof p.text === "string") return _esc(p.text);

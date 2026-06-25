@@ -10,7 +10,7 @@ let chain = Promise.resolve();
 let pending = 0;
 const MAX_PENDING = 8;
 
-export async function runExport(fn) {
+export async function runExport(fn: () => any) {
   if (pending >= MAX_PENDING) {
     throw Object.assign(new Error("Hệ thống đang bận xuất file, vui lòng thử lại sau"), { status: 429 });
   }
@@ -36,11 +36,11 @@ function acquireWorkerSlot() {
 }
 function releaseWorkerSlot() { activeWorkers--; const w = workerWaiters.shift(); if (w) w(); }
 
-function generateInWorker(kind, quote, timeoutMs = 30_000) {
-  return new Promise((resolve, reject) => {
+function generateInWorker(kind: string, quote: any, timeoutMs = 30_000) {
+  return new Promise<any>((resolve, reject) => {
     let done = false;
     const w = new Worker(WORKER_URL, { workerData: { kind, quote } });
-    const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); fn(arg); };
+    const finish = (fn: (arg: any) => void, arg: any) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); fn(arg); };
     const timer = setTimeout(() => finish(reject, new Error("export worker timeout")), timeoutMs);
     w.once("message", (m) => (m && m.ok) ? finish(resolve, Buffer.from(m.buffer)) : finish(reject, new Error((m && m.error) || "worker error")));
     w.once("error", (e) => finish(reject, e));
@@ -49,7 +49,7 @@ function generateInWorker(kind, quote, timeoutMs = 30_000) {
 }
 
 // Sanity-check the worker output before trusting it (xlsx = PK zip, pdf = %PDF-).
-const looksValid = (kind, buf) =>
+const looksValid = (kind: string, buf: any) =>
   Buffer.isBuffer(buf) && buf.length > 500 &&
   (kind === "pdf" ? buf.toString("latin1", 0, 5) === "%PDF-" : (buf[0] === 0x50 && buf[1] === 0x4b));
 
@@ -60,7 +60,7 @@ const looksValid = (kind, buf) =>
  * `inlineFn`, so exports never break — the worker is a perf optimization, not a
  * correctness dependency.
  */
-export async function runExportJob(kind, plainQuote, inlineFn) {
+export async function runExportJob(kind: string, plainQuote: any, inlineFn: () => any) {
   try {
     await acquireWorkerSlot();
     let buf;

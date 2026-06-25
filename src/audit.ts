@@ -1,3 +1,4 @@
+import type { Request } from "express";
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
 
@@ -13,7 +14,7 @@ import { logger } from "./logger.js";
  * @param {object} [opts.after]
  * @param {number} [opts.actorId]    override session.userId
  */
-export async function audit(ctx, action, opts: Record<string, any> = {}) {
+export async function audit(ctx: Request | null, action: string, opts: Record<string, any> = {}) {
   const actorId = opts.actorId ?? ctx?.session?.userId ?? null;
   // req.ip is resolved by Express from the configured trust-proxy hop count; the
   // raw X-Forwarded-For is client-controlled and must not be trusted for an
@@ -40,8 +41,8 @@ export async function audit(ctx, action, opts: Record<string, any> = {}) {
 }
 
 /** Shallow diff of two objects, returning {field: [before, after]} for changed scalar fields. */
-export function diff(before, after, fields) {
-  const out = {};
+export function diff(before: Record<string, unknown> | null | undefined, after: Record<string, unknown> | null | undefined, fields: string[]) {
+  const out: Record<string, [unknown, unknown]> = {};
   for (const f of fields) {
     const a = before?.[f];
     const b = after?.[f];

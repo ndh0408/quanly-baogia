@@ -6,11 +6,12 @@
 // the previous single-process in-memory broker.
 
 import type { Redis } from "ioredis";
+import type { Request, Response } from "express";
 import { sseClients } from "./observability.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
-const subscribers = new Map(); // userId -> Set<res>
+const subscribers = new Map<number, Set<Response>>(); // userId -> Set<res>
 const CHANNEL = "sse:events";
 let pub: Redis | null = null; // Redis publisher (null = in-memory only)
 
@@ -21,7 +22,7 @@ function recountClients() {
 }
 
 // --- delivery to THIS process's connections only ---
-function localPublish(userId, event, data) {
+function localPublish(userId: number, event: string, data: unknown) {
   const set = subscribers.get(userId);
   if (!set || set.size === 0) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
@@ -29,7 +30,7 @@ function localPublish(userId, event, data) {
     try { res.write(payload); } catch { /* socket gone */ }
   }
 }
-function localBroadcast(event, data) {
+function localBroadcast(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
   for (const set of subscribers.values()) {
     for (const res of set) {
@@ -51,9 +52,9 @@ if (config.REDIS_URL) {
       pub = pubClient;
       pubClient.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis pub error"));
       const sub = new (IORedis as any)(config.REDIS_URL, opts);
-      sub.on("error", (e) => logger.warn({ err: e.message }, "sse redis sub error"));
+      sub.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis sub error"));
       await sub.subscribe(CHANNEL);
-      sub.on("message", (_chan, raw) => {
+      sub.on("message", (_chan: string, raw: string) => {
         try {
           const m = JSON.parse(raw);
           if (m.userId != null) localPublish(m.userId, m.event, m.data);
@@ -68,7 +69,7 @@ if (config.REDIS_URL) {
   })();
 }
 
-export function attach(req, res, userId) {
+export function attach(req: Request, res: Response, userId: number) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -95,7 +96,7 @@ export function attach(req, res, userId) {
 }
 
 /** Push an event to all open connections for a user (across instances when Redis is on). */
-export function publish(userId, event, data) {
+export function publish(userId: number, event: string, data: unknown) {
   if (pub) {
     pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch(() => {});
     return;
@@ -104,7 +105,7 @@ export function publish(userId, event, data) {
 }
 
 /** Broadcast to everyone connected (across instances when Redis is on). */
-export function broadcast(event, data) {
+export function broadcast(event: string, data: unknown) {
   if (pub) {
     pub.publish(CHANNEL, JSON.stringify({ event, data })).catch(() => {});
     return;
@@ -117,16 +118,16 @@ export function broadcast(event, data) {
  * list view without a manual reload. The client re-fetches through the normal
  * (permission-scoped) API, so broadcasting to everyone is safe.
  */
-export function emitChange(entity, action, id) {
+export function emitChange(entity: string, action: string, id?: number | string | null) {
   broadcast("changed", { entity, action, id: id != null ? String(id) : null });
 }
 
 /** Tell one user their session is no longer valid (locked/deactivated/deleted) → client logs out. */
-export function revokeSession(userId, reason) {
+export function revokeSession(userId: number, reason?: string) {
   publish(userId, "session:revoked", { reason: reason || "revoked" });
 }
 
 /** Tell one user to re-pull their capabilities (role changed) → client re-renders. */
-export function refreshSession(userId) {
+export function refreshSession(userId: number) {
   publish(userId, "session:refresh", {});
 }

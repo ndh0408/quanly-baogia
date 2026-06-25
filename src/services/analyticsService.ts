@@ -1,11 +1,12 @@
 // Tầng SERVICE cho domain Analytics (KPI báo giá). Bê NGUYÊN logic từ analytics.routes.ts ra đây:
 // phạm vi quyền (quoteScopeWhere / QUOTE_READ_ALL), groupBy/aggregate/$queryRaw, gom map kết quả.
 // Route chỉ còn: requirePermission (ở router) + validate → gọi service → res.json. Mẫu theo quoteService.ts.
+import type { Request } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
 
-function defaultRange(q) {
+function defaultRange(q: { from?: Date; to?: Date }) {
   const to = q.to || new Date();
   const from = q.from || new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
   return { from, to };
@@ -15,7 +16,7 @@ function defaultRange(q) {
  * Overview KPIs: total amount of approved+sent+converted, count by status,
  * conversion rate, average deal size, expiring soon, top performers.
  */
-export async function overview(req) {
+export async function overview(req: Request) {
   const { from, to } = defaultRange(req.query);
   const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
 
@@ -56,7 +57,7 @@ export async function overview(req) {
 }
 
 /** Revenue (approved+sent+converted) by day for chart. */
-export async function revenueByDay(req) {
+export async function revenueByDay(req: Request) {
   const { from, to } = defaultRange(req.query);
   // admin sees all; manager/employee scoped to their own created quotes for this chart.
   const allScope = can(req.session, P.QUOTE_READ_ALL);
@@ -75,8 +76,8 @@ export async function revenueByDay(req) {
 }
 
 /** Top sales by approved amount. */
-export async function topSales(req) {
-  const { from, to, limit } = { ...defaultRange(req.query), limit: req.query.limit };
+export async function topSales(req: Request) {
+  const { from, to, limit } = { ...defaultRange(req.query), limit: (req.query as any).limit };
   // Only admin sees the company-wide leaderboard; others see just their own row.
   const taScope = can(req.session, P.QUOTE_READ_ALL) ? {} : { createdById: req.session.userId };
   const rows = await prisma.quote.groupBy({
@@ -104,7 +105,7 @@ export async function topSales(req) {
 }
 
 /** Funnel: count of quotes at each status. */
-export async function funnel(req) {
+export async function funnel(req: Request) {
   const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
   const rows = await prisma.quote.groupBy({
     by: ["status"],

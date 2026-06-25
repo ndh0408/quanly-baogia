@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
@@ -25,8 +26,12 @@ const Query = z.object({
 router.get(
   "/",
   validate({ query: Query }),
-  asyncHandler(async (req, res) => {
-    const { actorId, action, resource, resourceId, from, to, page, size } = req.query;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { actorId, action, resource, resourceId, from, to } = req.query;
+    // page/size đã được validate() coerce sang number runtime (z.coerce.number().default).
+    // Number() giữ nguyên giá trị + giữ default cũ (1 / 50) nếu thiếu.
+    const page = Number(req.query.page) || 1;
+    const size = Number(req.query.size) || 50;
     const where: Record<string, any> = {};
     if (actorId) where.actorId = actorId;
     if (action) where.action = action;

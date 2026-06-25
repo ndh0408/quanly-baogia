@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -46,13 +47,13 @@ const FollowUpCreate = z.object({
 });
 
 // Route MỎNG: chỉ validate + gọi tầng service (logic/quyền/audit ở customerService.ts).
-router.get("/", validate({ query: ListQuery }), asyncHandler(async (req, res) => res.json(await svc.listCustomers(req))));
-router.post("/", validate({ body: CustomerCreate }), asyncHandler(async (req, res) => res.status(201).json(await svc.createCustomer(req))));
-router.get("/:id", validate({ params: idParam }), asyncHandler(async (req, res) => res.json(await svc.getCustomer(req))));
-router.put("/:id", validate({ params: idParam, body: CustomerUpdate }), asyncHandler(async (req, res) => res.json(await svc.updateCustomer(req))));
-router.delete("/:id", validate({ params: idParam }), asyncHandler(async (req, res) => res.json(await svc.deleteCustomer(req))));
-router.post("/:id/notes", validate({ params: idParam, body: NoteCreate }), asyncHandler(async (req, res) => res.status(201).json(await svc.addNote(req))));
-router.post("/:id/follow-ups", validate({ params: idParam, body: FollowUpCreate }), asyncHandler(async (req, res) => res.status(201).json(await svc.addFollowUp(req))));
-router.post("/follow-ups/:fid/done", validate({ params: z.object({ fid: z.coerce.number().int().positive() }) }), asyncHandler(async (req, res) => res.json(await svc.markFollowUpDone(req))));
+router.get("/", validate({ query: ListQuery }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.listCustomers(req))));
+router.post("/", validate({ body: CustomerCreate }), asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.createCustomer(req))));
+router.get("/:id", validate({ params: idParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.getCustomer(req))));
+router.put("/:id", validate({ params: idParam, body: CustomerUpdate }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateCustomer(req))));
+router.delete("/:id", validate({ params: idParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteCustomer(req))));
+router.post("/:id/notes", validate({ params: idParam, body: NoteCreate }), asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.addNote(req))));
+router.post("/:id/follow-ups", validate({ params: idParam, body: FollowUpCreate }), asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.addFollowUp(req))));
+router.post("/follow-ups/:fid/done", validate({ params: z.object({ fid: z.coerce.number().int().positive() }) }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.markFollowUpDone(req))));
 
 export default router;

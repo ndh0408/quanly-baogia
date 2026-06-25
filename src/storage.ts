@@ -45,7 +45,7 @@ export async function ensureBucket(bucket = config.S3_BUCKET) {
  * Upload an object. Key is deterministic from caller (e.g. `logos/${companyId}.png`).
  * Returns { key, bucket }.
  */
-export async function putObject({ key, body, contentType, bucket = config.S3_BUCKET, metadata, contentDisposition }) {
+export async function putObject({ key, body, contentType, bucket = config.S3_BUCKET, metadata, contentDisposition }: { key: string; body: Buffer | Uint8Array | string; contentType?: string; bucket?: string; metadata?: Record<string, string>; contentDisposition?: string }) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
   await c.send(new PutObjectCommand({
@@ -57,13 +57,13 @@ export async function putObject({ key, body, contentType, bucket = config.S3_BUC
   return { key, bucket };
 }
 
-export async function deleteObject(key, bucket = config.S3_BUCKET) {
+export async function deleteObject(key: string, bucket = config.S3_BUCKET) {
   const c = getClient();
   if (!c) return;
   await c.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
-export async function objectExists(key, bucket = config.S3_BUCKET) {
+export async function objectExists(key: string, bucket = config.S3_BUCKET) {
   const c = getClient();
   if (!c) return false;
   try {
@@ -80,7 +80,7 @@ export async function objectExists(key, bucket = config.S3_BUCKET) {
  * downloaded, never rendered inline — even if it was stored with a risky
  * Content-Type. Pass `inline:true` only for trusted, display-safe assets.
  */
-export async function presignDownload(key, { expiresIn = 3600, bucket = config.S3_BUCKET, filename, inline = false }: { expiresIn?: number; bucket?: string; filename?: string; inline?: boolean } = {}) {
+export async function presignDownload(key: string, { expiresIn = 3600, bucket = config.S3_BUCKET, filename, inline = false }: { expiresIn?: number; bucket?: string; filename?: string; inline?: boolean } = {}) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
   const safeName = String(filename || key.split("/").pop() || "download").replace(/[^A-Za-z0-9._-]/g, "_");
@@ -95,7 +95,7 @@ export async function presignDownload(key, { expiresIn = 3600, bucket = config.S
   );
 }
 
-export async function presignUpload({ key, contentType, expiresIn = 3600, bucket = config.S3_BUCKET }) {
+export async function presignUpload({ key, contentType, expiresIn = 3600, bucket = config.S3_BUCKET }: { key: string; contentType?: string; expiresIn?: number; bucket?: string }) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
   return getSignedUrl(c, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), { expiresIn });

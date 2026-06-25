@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { requirePermission } from "../permissions.js";
 import {
@@ -16,7 +17,7 @@ router.use(requireAuth);
 router.get(
   "/catalog",
   requirePermission(PERMISSIONS.USER_MANAGE),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     const roles = Object.keys(ROLE_PERMISSIONS);
     res.json({
       groups: PERMISSION_GROUPS.map((g) => ({
@@ -26,7 +27,7 @@ router.get(
       })),
       roles: roles.map((r) => ({
         key: r,
-        label: ROLE_LABELS[r] || r,
+        label: ROLE_LABELS[r as keyof typeof ROLE_LABELS] || r,
         permissions: permissionsForRole(r),
       })),
     });
@@ -36,8 +37,8 @@ router.get(
 /** The caller's own effective permissions (handy for the SPA to refresh). */
 router.get(
   "/me",
-  asyncHandler(async (req, res) => {
-    res.json({ role: req.session.role, permissions: permissionsForRole(req.session.role) });
+  asyncHandler(async (req: Request, res: Response) => {
+    res.json({ role: req.session.role, permissions: permissionsForRole(req.session.role!) });
   })
 );
 

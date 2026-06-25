@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
+import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "./logger.js";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./db.js";
 
-export function requestId(req, res, next) {
-  req.id = req.headers["x-request-id"] || randomUUID();
+export function requestId(req: Request, res: Response, next: NextFunction) {
+  // x-request-id header có thể là string | string[] (header trùng lặp) | undefined.
+  // Chuẩn hoá về 1 string: header trùng → lấy phần tử đầu; thiếu → sinh UUID.
+  const hdr = req.headers["x-request-id"];
+  req.id = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID();
   res.setHeader("X-Request-Id", req.id);
   next();
 }
@@ -13,18 +17,21 @@ export function requestId(req, res, next) {
  * Try to populate req.session from a Bearer JWT if no cookie session is present.
  * This lets the same route handlers serve browser (session) and API/mobile (JWT) clients.
  */
-export async function bearerAuth(req, _res, next) {
+export async function bearerAuth(req: Request, _res: Response, next: NextFunction) {
   if (req.session?.userId) return next();
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
   if (!m) return next();
   try {
     const payload = verifyAccessToken(m[1]);
+    // payload là JwtPayload (verify có options) — sub được sign từ user.id (number).
+    // Number() trả số ↔ chính nó; bám đúng giá trị id runtime để Prisma where nhận number.
+    const sub = typeof payload === "string" ? payload : payload.sub;
     // SECURITY: never trust role/active from the token claim. Re-load the user on
     // every request so a deactivated / demoted / locked account loses access
     // immediately (within the access-token TTL the token is otherwise valid).
     const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
+      where: { id: Number(sub) },
       select: { id: true, role: true, username: true, active: true, lockedUntil: true },
     });
     if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
@@ -42,19 +49,20 @@ export async function bearerAuth(req, _res, next) {
   next();
 }
 
-export function requireAuth(req, res, next) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.userId) {
     return res.status(401).json({ error: "Chưa đăng nhập" });
   }
   next();
 }
 
-export function requireRole(...roles) {
-  return (req, res, next) => {
+export function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.session?.userId) {
       return res.status(401).json({ error: "Chưa đăng nhập" });
     }
-    if (!roles.includes(req.session.role)) {
+    // role có thể undefined trong type; "" không khớp role hợp lệ nào → cùng kết quả 403.
+    if (!roles.includes(req.session.role ?? "")) {
       return res.status(403).json({ error: "Không có quyền truy cập" });
     }
     next();
@@ -68,7 +76,7 @@ export function requireRole(...roles) {
  * NEXT request instead of being stuck until they re-login. The Bearer path
  * (bearerAuth) already re-loads from the DB, so JWT requests are skipped here.
  */
-export async function enforceActiveUser(req, res, next) {
+export async function enforceActiveUser(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.userId || req.viaJwt) return next();
   try {
     const user = await prisma.user.findUnique({
@@ -90,18 +98,18 @@ export async function enforceActiveUser(req, res, next) {
   }
 }
 
-export function asyncHandler(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+export function asyncHandler(fn: RequestHandler) {
+  return (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-export function notFound(req, res, next) {
+export function notFound(req: Request, res: Response, next: NextFunction) {
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({ error: "Không tìm thấy tài nguyên" });
   }
   next();
 }
 
-export function errorHandler(err, req, res, _next) {
+export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   // Multer upload errors (file too large / too many files / unexpected field) are
   // client errors, not 500s. Map them so observability isn't spammed with fake errors.
   if (err && err.name === "MulterError" && !err.status) {

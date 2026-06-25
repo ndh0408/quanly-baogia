@@ -3,6 +3,7 @@
 // createApp() and drive it with supertest without binding a port.
 import { config, isProd } from "./config.js";
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import compression from "compression";
 import session from "express-session";
@@ -46,7 +47,7 @@ const PgSession = connectPgSimple(session);
 // Constant-time compare of an "Authorization: Bearer <token>" header against the
 // expected secret. Plain !== short-circuits on the first differing byte (timing
 // oracle); timingSafeEqual on equal-length SHA-256 digests removes that.
-function bearerTokenMatches(authHeader, expected) {
+function bearerTokenMatches(authHeader: string | undefined, expected: string) {
   const m = /^Bearer\s+(.+)$/i.exec(authHeader || "");
   if (!m) return false;
   const a = createHash("sha256").update(m[1]).digest();
@@ -68,7 +69,7 @@ if (config.CORS_ORIGINS) {
   }
 }
 
-function csrfGuard(req, res, next) {
+function csrfGuard(req: Request, res: Response, next: NextFunction) {
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
   if (req.viaJwt) return next(); // Bearer tokens are not auto-sent by browsers → not CSRF-able
   const origin = req.headers.origin;
@@ -153,15 +154,15 @@ export function createApp() {
   app.use(
     (pinoHttp as any)({
       logger,
-      customLogLevel: (_req, res, err) => {
+      customLogLevel: (_req: Request, res: Response, err: Error | undefined) => {
         if (err || res.statusCode >= 500) return "error";
         if (res.statusCode >= 400) return "warn";
         return "info";
       },
-      customProps: (req) => ({ reqId: req.id, userId: req.session?.userId }),
+      customProps: (req: Request) => ({ reqId: req.id, userId: req.session?.userId }),
       serializers: {
-        req: (req) => ({ method: req.method, url: req.url, id: req.id }),
-        res: (res) => ({ status: res.statusCode }),
+        req: (req: Request) => ({ method: req.method, url: req.url, id: req.id }),
+        res: (res: Response) => ({ status: res.statusCode }),
       },
     })
   );
@@ -285,15 +286,15 @@ export function createApp() {
     maxAge: "1y",
     immutable: true,
   }));
-  const sendOld = (res) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); };
-  const sendReact = (res) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
+  const sendOld = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); };
+  const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
   // App CŨ (vanilla) LUÔN truy cập được tại /app — để app React mở các mục CHƯA port + dùng song song.
   app.get(["/app", "/app/*"], (_req, res) => sendOld(res));
   // App MỚI (React/TS) tại /app2 (giữ tương thích/đường dẫn cũ).
   app.get(["/app2", "/app2/*"], (_req, res) => sendReact(res));
   // Gốc "/": trên DEV/STAGING phục vụ app React HỢP NHẤT (không cần /app2). PROD (gianguyen.cloud)
   // GIỮ app cũ — gate theo hostname nên dù deploy CÙNG code, prod KHÔNG bị đổi sang React.
-  const isStagingHost = (req) => {
+  const isStagingHost = (req: Request) => {
     const h = String(req.headers["x-forwarded-host"] || req.hostname || "").toLowerCase();
     return /^dev\.|staging|\.ts\.net$/.test(h);
   };

@@ -4,7 +4,7 @@
 
 // Shared title formatter: prefix "BẢNG BÁO GIÁ - " unless the title already
 // starts with that phrase (diacritic-insensitive).
-function baoGiaTitle(title) {
+function baoGiaTitle(title: string | null | undefined) {
   const t = (title || "").trim();
   if (!t) return "BẢNG BÁO GIÁ";
   const ascii = t.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toUpperCase();
@@ -33,14 +33,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       toContact:   "C3",
       fromContactCell: "F3",
       // 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951" (nhãn "Ms." có sẵn ở E3)
-      fromContactFormat: ({ contact, title, phone }) =>
+      fromContactFormat: ({ contact, title, phone }: { contact: string | null | undefined; title: string | null | undefined; phone: string | null | undefined }) =>
         [[contact, title].filter(Boolean).join(" _ "), phone].filter(Boolean).join("_"),
       fromAddress: "F4",        // nhãn "Add:" đã có sẵn ở E4; nhãn "From:" ở E2 + logo F2
       date:        "B6",
       title:       "B7",
       titleFormat: baoGiaTitle,
       quoteNumber: "B8",
-      quoteNumberFormat: (n) => (n ? `(Số://${n})` : ""),
+      quoteNumberFormat: (n: string | null | undefined) => (n ? `(Số://${n})` : ""),
       greeting:    "B9",
     },
     items: {
@@ -58,7 +58,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         amount:    "H",
         notes:     "I",
       },
-      amountFormula: (r) => `G${r}*F${r}`,
+      amountFormula: (r: number) => `G${r}*F${r}`,
     },
     totals: {
       subtotal: {
@@ -66,14 +66,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => "Tổng Cộng",
         valueCell: "H",
         rowOffset: 1,
-        formula: ({ first, last }) => `SUM(H${first}:H${last})`,
+        formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
       },
       vat: {
         labelCells: [["F", "G"]],
-        labelText: (vatPct) => `VAT (${vatPct}%)`,
+        labelText: (vatPct: number) => `VAT (${vatPct}%)`,
         valueCell: "H",
         rowOffset: 2,
-        formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
+        formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `H${subtotalRow}*${vatPct}%`,
       },
       discount: {
         labelCells: [["F", "G"]],
@@ -85,7 +85,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => "Thành Tiền",
         valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow, discountRow }) =>
+        formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
           discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
@@ -138,7 +138,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       toBlockCell: "F3",
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
-      toBlockFormat: ({ company, contact, email, phone, address }) => {
+      toBlockFormat: ({ company, contact, email, phone, address }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined }) => {
         const lines = [`Kính gửi: ${company || "….."}`];
         if (contact) lines.push(contact);
         if (phone) lines.push(`ĐT: ${phone}`);
@@ -158,7 +158,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // Sender letterhead block (top-right, merged F1:I1). Was a hard-coded Colorfull
       // sample; now filled from the quote's company + sender fields so edits show up.
       fromBlockCell: "F1",
-      fromBlockFormat: ({ companyName, contact, title, phone, address }) => {
+      fromBlockFormat: ({ companyName, contact, title, phone, address }: { companyName: string | null | undefined; contact: string | null | undefined; title: string | null | undefined; phone: string | null | undefined; address: string | null | undefined }) => {
         const lines: string[] = [];
         if (companyName) lines.push(String(companyName).toUpperCase());
         if (address) lines.push(address);
@@ -185,7 +185,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         amount:    "H",
         notes:     "I",
       },
-      amountFormula: (r) => `G${r}*F${r}`,
+      amountFormula: (r: number) => `G${r}*F${r}`,
     },
     totals: {
       subtotal: {
@@ -193,14 +193,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => "Tổng Cộng",
         valueCell: "H",
         rowOffset: 1,
-        formula: ({ first, last }) => `SUM(H${first}:H${last})`,
+        formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
       },
       vat: {
         labelCells: [["B", "G"]],
-        labelText: (vatPct) => `VAT(${vatPct}%)`,
+        labelText: (vatPct: number) => `VAT(${vatPct}%)`,
         valueCell: "H",
         rowOffset: 2,
-        formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
+        formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `H${subtotalRow}*${vatPct}%`,
       },
       // Optional "Giảm Giá" row, inserted between VAT and Thành Tiền only when the
       // quote has a discount. Total then subtracts it.
@@ -214,7 +214,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => "Thành Tiền",
         valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow, discountRow }) =>
+        formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
           discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
@@ -247,13 +247,13 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       toPhone:     "C3",
       toAddress:   "C4",
       fromContactCell: "E2",
-      fromContactFormat: ({ contact, title }) =>
+      fromContactFormat: ({ contact, title }: { contact: string | null | undefined; title: string | null | undefined }) =>
         [contact, title].filter(Boolean).join(" _ "),
       fromPhone:   "E3",
       fromAddress: "E4",
       date:        "B5",
       title:       "B6",
-      titleFormat: (title) => {
+      titleFormat: (title: string | null | undefined) => {
         const t = (title || "").trim();
         if (!t) return "BẢNG BÁO GIÁ";
         // Strip Vietnamese diacritics + special variants of "Đ"/"đ" then compare in upper-case.
@@ -286,7 +286,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         notes:     "I",
       },
       // Amount = quantity × days × unit price (this is the only real difference from Décor)
-      amountFormula: (r) => `G${r}*E${r}*F${r}`,
+      amountFormula: (r: number) => `G${r}*E${r}*F${r}`,
     },
     totals: {
       subtotal: {
@@ -294,14 +294,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => " Tổng",
         valueCell: "H",
         rowOffset: 1,
-        formula: ({ first, last }) => `SUM(H${first}:H${last})`,
+        formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
       },
       vat: {
         labelCells: [["B", "G"]],
-        labelText: (vatPct) => `VAT ${vatPct}%`,
+        labelText: (vatPct: number) => `VAT ${vatPct}%`,
         valueCell: "H",
         rowOffset: 2,
-        formula: ({ subtotalRow, vatPct }) => `H${subtotalRow}*${vatPct}%`,
+        formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `H${subtotalRow}*${vatPct}%`,
       },
       discount: {
         labelCells: [["B", "G"]],
@@ -313,7 +313,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         labelText: () => "Thành tiền",
         valueCell: "H",
         rowOffset: 3,
-        formula: ({ subtotalRow, vatRow, discountRow }) =>
+        formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
           discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
@@ -330,7 +330,7 @@ TEMPLATE_CONFIGS.gn_banner = {
   items: { ...TEMPLATE_CONFIGS.marico_decor.items, numberSubsections: true },
 };
 
-export function getConfig(code) {
+export function getConfig(code: string) {
   const c = TEMPLATE_CONFIGS[code];
   if (!c) throw new Error(`Không có config cho template code: ${code}`);
   return c;

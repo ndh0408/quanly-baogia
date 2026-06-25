@@ -2,6 +2,7 @@
 // (giữ hành vi y hệt): chống trùng, mời/onboard, đổi mật khẩu→thu hồi session, bảo vệ admin cuối,
 // off-boarding xoá membership + audit. Route chỉ còn: requireRole("admin") + validate → gọi service → res.
 // Các handler thao tác res trực tiếp (set-cookie/stream) — KHÔNG có ở đây; tất cả đều thuần trả dữ liệu.
+import type { Request } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes, createHash } from "node:crypto";
 import { prisma } from "../db.js";
@@ -22,7 +23,7 @@ const HIDDEN_USER_EMAILS = new Set(
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
 );
-const isHiddenUser = (u) => HIDDEN_USER_EMAILS.has(String(u.email || "").toLowerCase());
+const isHiddenUser = (u: { email?: string | null }) => HIDDEN_USER_EMAILS.has(String(u.email || "").toLowerCase());
 
 const USER_SELECT = {
   id: true,
@@ -38,13 +39,13 @@ const USER_SELECT = {
   createdAt: true,
 };
 
-const hashInvite = (t) => createHash("sha256").update(String(t)).digest("hex");
-function inviteLink(token) {
+const hashInvite = (t: string) => createHash("sha256").update(String(t)).digest("hex");
+function inviteLink(token: string) {
   // Configuration only — Origin/Host headers are client-controlled and would
   // allow invite-link poisoning.
   return `${config.APP_BASE_URL}/#/onboard?token=${token}`;
 }
-async function sendInviteEmail(to, displayName, url) {
+async function sendInviteEmail(to: string, displayName: string, url: string) {
   return sendEmail({
     to,
     subject: "Lời mời tham gia hệ thống Báo Giá – Gia Nguyễn",
@@ -58,7 +59,7 @@ async function sendInviteEmail(to, displayName, url) {
   });
 }
 
-export async function listUsers(_req) {
+export async function listUsers(_req: Request) {
   const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: { ...USER_SELECT, inviteTokenHash: true } });
   return users
     .filter((u) => !isHiddenUser(u))
@@ -66,7 +67,7 @@ export async function listUsers(_req) {
 }
 
 // Invite an employee by email — they self-onboard (set password + fill details).
-export async function inviteUser(req) {
+export async function inviteUser(req: Request) {
   const { email, displayName, role, projectCode } = req.body;
   const exists = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
   if (exists) throw httpError(409, "Email này đã có tài khoản");
@@ -92,8 +93,9 @@ export async function inviteUser(req) {
 }
 
 // Re-send an invite (new token) for a still-pending user.
-export async function resendInvite(req) {
-  const u = await prisma.user.findFirst({ where: { id: req.params.id } });
+export async function resendInvite(req: Request) {
+  const id = Number(req.params.id);
+  const u = await prisma.user.findFirst({ where: { id } });
   if (!u) throw httpError(404, "Không tìm thấy tài khoản");
   if (u.active) throw httpError(400, "Tài khoản đã được kích hoạt, không cần gửi lại lời mời");
   if (!u.email) throw httpError(400, "Tài khoản không có email");
@@ -108,7 +110,7 @@ export async function resendInvite(req) {
   return { inviteUrl: url, emailSent: !mail.skipped && !mail.error };
 }
 
-export async function createUser(req) {
+export async function createUser(req: Request) {
   const { username, password, displayName, role, phone, title } = req.body;
   // includeDeleted: username is unique across soft-deleted rows too — a plain
   // check would miss a deleted holder and surface the DB constraint as a 500.
@@ -130,8 +132,8 @@ export async function createUser(req) {
   return user;
 }
 
-export async function updateUser(req) {
-  const { id } = req.params;
+export async function updateUser(req: Request) {
+  const id = Number(req.params.id);
   const before = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
   if (!before) throw httpError(404, "Không tìm thấy tài khoản");
 
@@ -203,8 +205,8 @@ export async function updateUser(req) {
   return user;
 }
 
-export async function deleteUser(req) {
-  const { id } = req.params;
+export async function deleteUser(req: Request) {
+  const id = Number(req.params.id);
   if (id === req.session.userId) {
     throw httpError(400, "Không thể xóa chính bạn");
   }

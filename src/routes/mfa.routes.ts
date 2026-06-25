@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { createLimiter } from "../rateLimit.js";
@@ -20,7 +21,7 @@ router.use(requireAuth);
 const mfaLimiter = createLimiter("mfa", {
   windowMs: 15 * 60 * 1000,
   max: 10,
-  keyGenerator: (req) => `mfa:${req.session.userId}`,
+  keyGenerator: (req: Request) => `mfa:${req.session.userId}`,
   message: { error: "Quá nhiều lần thử MFA, vui lòng thử lại sau ít phút" },
 });
 
@@ -40,7 +41,7 @@ const DisableBody = z.object({
 router.post(
   "/setup",
   mfaLimiter,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
     if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
@@ -50,6 +51,9 @@ router.post(
       name: `QuanLyBaoGia (${user.username})`,
       issuer: "QuanLyBaoGia",
     });
+    // otpauth_url là string|undefined trong type nhưng luôn có khi truyền `name`.
+    // Guard để chắc chắn truyền string vào qrcode (không bao giờ chạy ở runtime).
+    if (!secret.otpauth_url) return res.status(500).json({ error: "Không tạo được mã QR MFA" });
     const qr = await qrcode.toDataURL(secret.otpauth_url);
     res.json({ secret: secret.base32, otpauth: secret.otpauth_url, qr });
   })
@@ -63,7 +67,7 @@ router.post(
   "/enable",
   mfaLimiter,
   validate({ body: z.object({ password: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"), secret: z.string().min(8, "Mã thiết lập không hợp lệ"), token: z.string().regex(/^\d{6}$/, "Mã xác thực phải gồm 6 chữ số") }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
     if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (user.mfaEnabled) return res.status(400).json({ error: "MFA đã được bật" });
@@ -96,7 +100,7 @@ router.post(
   "/disable",
   mfaLimiter,
   validate({ body: DisableBody }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
     if (!user) return res.status(401).json({ error: "Phiên không hợp lệ" });
     if (!user.mfaEnabled) return res.status(400).json({ error: "MFA chưa được bật" });

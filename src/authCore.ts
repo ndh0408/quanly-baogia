@@ -5,6 +5,7 @@
 //   - atomic failedAttempts increment (no lockout bypass under concurrency)
 //   - consistent LoginAttempt telemetry + audit on every branch
 //   - single-use MFA backup codes consumed on success
+import type { Request } from "express";
 import bcrypt from "bcryptjs";
 import speakeasy from "speakeasy";
 import { prisma } from "./db.js";
@@ -16,7 +17,7 @@ import { decryptSecret, consumeBackupCode } from "./mfa.js";
 // response time matches the real path (defeats username enumeration by timing).
 const DUMMY_HASH = bcrypt.hashSync("timing-equalizer-not-a-real-password", config.BCRYPT_COST);
 
-export function clientIp(req) {
+export function clientIp(req: Request) {
   // Use Express's trust-proxy-resolved req.ip. Do NOT read the raw X-Forwarded-For
   // first hop — it is fully client-controlled and would let an attacker forge the
   // source IP recorded in LoginAttempt telemetry / lastLoginIp. Configure the
@@ -29,12 +30,15 @@ export function clientIp(req) {
  * Returns { ok:true, user } on success, or { ok:false, status, error, mfaRequired? }.
  * Records LoginAttempt + audit internally so callers stay thin.
  */
-export async function authenticateCredentials(req, { username, password, mfaToken, flow }) {
+export async function authenticateCredentials(
+  req: Request,
+  { username, password, mfaToken, flow }: { username: string; password: string; mfaToken?: string; flow: string }
+) {
   const ip = clientIp(req);
   const ua = req.headers["user-agent"] || null;
   const loginId = (username || "").trim();
 
-  const recordAttempt = (success, reason) =>
+  const recordAttempt = (success: boolean, reason: string | null) =>
     prisma.loginAttempt.create({ data: { username: loginId, ip, userAgent: ua, success, reason } }).catch(() => {});
 
   const user = await prisma.user.findFirst({ where: { OR: [{ username: loginId }, { email: loginId }] } });
@@ -87,7 +91,10 @@ export async function authenticateCredentials(req, { username, password, mfaToke
     const isTotp = /^\d{6}$/.test(mfaToken);
     let mfaOk = false;
     if (isTotp) {
-      mfaOk = speakeasy.totp.verify({ secret: decryptSecret(user.mfaSecret), encoding: "base32", token: mfaToken, window: 1 });
+      // decryptSecret trả null khi không giải mã được (vd MFA_ENC_KEY xoay vòng); speakeasy
+      // với secret rỗng/null đều cho false → !!secret giữ NGUYÊN kết quả runtime, chỉ thoả TS.
+      const secret = decryptSecret(user.mfaSecret);
+      mfaOk = !!secret && speakeasy.totp.verify({ secret, encoding: "base32", token: mfaToken, window: 1 });
     } else {
       const hit = consumeBackupCode(user.mfaBackupCodes, mfaToken);
       if (hit) {

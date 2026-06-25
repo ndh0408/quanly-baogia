@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "node:crypto";
 import { createLimiter } from "../rateLimit.js";
@@ -42,27 +43,29 @@ router.post(
   "/login",
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
 
     const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "login" });
     if (!result.ok) {
-      return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
+      // status luôn được set ở mọi nhánh ok:false của authenticateCredentials; ?? 401
+      // chỉ để TS hài lòng (union làm status thành number|undefined), không bao giờ chạy.
+      return res.status(result.status ?? 401).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
     if (!user) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
 
     // Regenerate session ID to defeat session fixation
     await new Promise<void>((resolve, reject) =>
-      req.session.regenerate((err) => (err ? reject(err) : resolve()))
+      req.session.regenerate((err: unknown) => (err ? reject(err) : resolve()))
     );
     req.session.userId = user.id;
     req.session.role = user.role;
     req.session.displayName = user.displayName;
     req.session.username = user.username;
     await new Promise<void>((resolve, reject) =>
-      req.session.save((err) => (err ? reject(err) : resolve()))
+      req.session.save((err: unknown) => (err ? reject(err) : resolve()))
     );
 
     await audit(req, "login.success", { resource: "user", resourceId: user.id, actorId: user.id });
@@ -81,7 +84,7 @@ router.post(
   })
 );
 
-router.post("/logout", asyncHandler(async (req, res) => {
+router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
   const userId = req.session?.userId;
   await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
   res.clearCookie("qly.sid");
@@ -92,7 +95,7 @@ router.post("/logout", asyncHandler(async (req, res) => {
 router.get(
   "/me",
   requireAuth,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
       select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, canSign: true, mfaEnabled: true, lastLoginAt: true },
@@ -113,7 +116,7 @@ router.post(
     title: z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
     senderName: z.string().max(120, "Tên người gửi tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
   }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.update({
       where: { id: req.session.userId },
       data: {
@@ -134,7 +137,7 @@ router.post(
   "/change-password",
   requireAuth,
   validate({ body: ChangePasswordSchema }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { oldPassword, newPassword } = req.body;
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
     if (!user) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
@@ -163,7 +166,7 @@ router.post(
   "/token",
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     // Same credentials path as /login (shared authCore — same lockout, telemetry,
     // single-use backup codes) but issues a JWT pair instead of a cookie session.
     const { username, password, mfaToken } = req.body;
@@ -172,7 +175,8 @@ router.post(
 
     const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "token" });
     if (!result.ok) {
-      return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
+      // status luôn được set ở mọi nhánh ok:false; ?? 401 chỉ thỏa TS, không chạy runtime.
+      return res.status(result.status ?? 401).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
     if (!user) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
@@ -193,7 +197,7 @@ router.post(
 router.post(
   "/token/refresh",
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { user, refresh } = await rotateRefreshToken(req.body.refreshToken, {
         ip: clientIp(req),
@@ -216,7 +220,7 @@ router.post(
 router.post(
   "/token/revoke",
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     await revokeRefreshToken(req.body.refreshToken);
     res.json({ ok: true });
   })
@@ -225,17 +229,20 @@ router.post(
 router.post(
   "/token/revoke-all",
   requireAuth,
-  asyncHandler(async (req, res) => {
-    await revokeAllForUser(req.session.userId);
-    await audit(req, "token.revoke-all", { resource: "user", resourceId: req.session.userId });
+  asyncHandler(async (req: Request, res: Response) => {
+    // Route nằm sau requireAuth nên userId chắc chắn có; guard khớp đúng 401 của requireAuth.
+    const userId = req.session.userId;
+    if (userId === undefined) return res.status(401).json({ error: "Chưa đăng nhập" });
+    await revokeAllForUser(userId);
+    await audit(req, "token.revoke-all", { resource: "user", resourceId: userId });
     res.json({ ok: true });
   })
 );
 
 // === Email-invite onboarding (public) ===
-const hashInvite = (t) => createHash("sha256").update(String(t)).digest("hex");
+const hashInvite = (t: string) => createHash("sha256").update(String(t)).digest("hex");
 
-async function findInvitee(token) {
+async function findInvitee(token: string) {
   if (!token) return null;
   // Same token mechanism powers both new-user invites and password resets.
   const user = await prisma.user.findFirst({ where: { inviteTokenHash: hashInvite(token) } });
@@ -249,7 +256,7 @@ router.post(
   "/forgot-password",
   forgotLimiter,
   validate({ body: z.object({ email: z.string().email("Email không hợp lệ").max(160, "Email tối đa 160 ký tự") }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const email = req.body.email.trim();
     // Respond immediately and identically for every email so neither the status
     // nor the RESPONSE TIME reveals whether the account exists (the DB write +
@@ -289,7 +296,7 @@ router.post(
 // Validate an invite link and return prefill info for the onboarding form.
 router.get(
   "/invite/:token",
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const user = await findInvitee(req.params.token);
     if (!user) return res.status(404).json({ error: "Lời mời không hợp lệ hoặc đã hết hạn" });
     res.json({ email: user.email, displayName: user.displayName, role: user.role });
@@ -300,7 +307,7 @@ router.get(
 router.post(
   "/accept-invite",
   validate({ body: AcceptInviteSchema }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { token, displayName, phone, title, senderName, password } = req.body;
     const user = await findInvitee(token);
     if (!user) return res.status(404).json({ error: "Lời mời không hợp lệ hoặc đã hết hạn" });
@@ -326,12 +333,12 @@ router.post(
     await destroyAllSessions(user.id);
 
     // Log the new user in immediately.
-    await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+    await new Promise<void>((resolve, reject) => req.session.regenerate((e: unknown) => (e ? reject(e) : resolve())));
     req.session.userId = updated.id;
     req.session.role = updated.role;
     req.session.displayName = updated.displayName;
     req.session.username = updated.username;
-    await new Promise<void>((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
+    await new Promise<void>((resolve, reject) => req.session.save((e: unknown) => (e ? reject(e) : resolve())));
 
     res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, senderName: updated.senderName, permissions: permissionsForRole(updated.role) });
   })

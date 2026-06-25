@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -36,7 +37,7 @@ const backupLimiter = createLimiter("backup", { windowMs: 15 * 60 * 1000, max: 5
 router.get(
   "/backup.dump",
   backupLimiter,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const url = new URL(config.DATABASE_URL);
     const dbName = url.pathname.replace(/^\//, "");
     const env = {
@@ -85,13 +86,13 @@ router.get(
 );
 
 /** Storage stats — counts per table. Useful for capacity planning. */
-router.get("/stats", asyncHandler(async (req, res) => res.json(await svc.storageStats(req))));
+router.get("/stats", asyncHandler(async (req: Request, res: Response) => res.json(await svc.storageStats(req))));
 
 /** Hard-delete soft-deleted rows older than N days. */
 router.post(
   "/purge-soft-deleted",
   validate({ body: z.object({ days: z.coerce.number().int().min(0).max(3650).default(30) }).default({} as any) }),
-  asyncHandler(async (req, res) => res.json(await svc.purgeSoftDeleted(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.purgeSoftDeleted(req)))
 );
 
 export default router;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate, zbool } from "../validators.js";
@@ -15,23 +16,23 @@ router.get(
     page: z.coerce.number().int().min(1).default(1),
     size: z.coerce.number().int().min(1).max(100).default(20),
   })}),
-  asyncHandler(async (req, res) => res.json(await svc.listNotifications(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.listNotifications(req)))
 );
 
 router.get(
   "/unread-count",
-  asyncHandler(async (req, res) => res.json(await svc.unreadCount(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.unreadCount(req)))
 );
 
 router.post(
   "/:id/read",
   validate({ params: z.object({ id: z.coerce.bigint() }) }),
-  asyncHandler(async (req, res) => res.json(await svc.markRead(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.markRead(req)))
 );
 
 router.post(
   "/read-all",
-  asyncHandler(async (req, res) => res.json(await svc.markAllRead(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.markAllRead(req)))
 );
 
 export default router;

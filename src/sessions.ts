@@ -8,7 +8,7 @@ import { logger } from "./logger.js";
  *
  * `keepSid` preserves the caller's own (just re-authenticated) session.
  */
-export async function destroyAllSessions(userId, keepSid = null) {
+export async function destroyAllSessions(userId: number, keepSid: string | null = null) {
   try {
     await prisma.$executeRaw`
       DELETE FROM user_sessions

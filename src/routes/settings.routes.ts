@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
@@ -18,10 +19,10 @@ const settingValue = z.unknown().refine(
 
 // Route MỎNG: requireRole/validate ở route (hợp đồng API + quyền HTTP) → gọi service → res.
 // Full dump = admin only.
-router.get("/", requireRole("admin"), asyncHandler(async (req, res) => res.json(await svc.getAllSettings(req))));
-router.get("/:key", validate({ params: keyParam }), asyncHandler(async (req, res) => res.json(await svc.getSetting(req))));
+router.get("/", requireRole("admin"), asyncHandler(async (req: Request, res: Response) => res.json(await svc.getAllSettings(req))));
+router.get("/:key", validate({ params: keyParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.getSetting(req))));
 // Write: admin only
-router.put("/:key", requireRole("admin"), validate({ params: keyParam, body: settingValue }), asyncHandler(async (req, res) => res.json(await svc.upsertSetting(req))));
-router.delete("/:key", requireRole("admin"), validate({ params: keyParam }), asyncHandler(async (req, res) => res.json(await svc.deleteSetting(req))));
+router.put("/:key", requireRole("admin"), validate({ params: keyParam, body: settingValue }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.upsertSetting(req))));
+router.delete("/:key", requireRole("admin"), validate({ params: keyParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteSetting(req))));
 
 export default router;

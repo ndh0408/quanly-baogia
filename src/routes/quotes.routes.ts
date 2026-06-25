@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import {
@@ -42,8 +43,12 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 router.get(
   "/",
   validate({ query: ListQuerySchema }),
-  asyncHandler(async (req, res) => {
-    const { rows, total, page, size } = await listQuotes(req);
+  asyncHandler(async (req: Request, res: Response) => {
+    const { rows, total, page: rawPage, size: rawSize } = await listQuotes(req);
+    // page/size đã được coerce sang number runtime trong listQuotes (ListQuerySchema
+    // dùng z.coerce.number()); Number() ở đây chỉ làm TS thấy đúng kiểu, giữ nguyên giá trị.
+    const page = Number(rawPage);
+    const size = Number(rawSize);
     res.json({
       data: rows.map((r) => presentQuoteRow(r, { viewerRole: req.session.role })),
       meta: {
@@ -61,7 +66,7 @@ router.get(
 router.get(
   "/next-number",
   validate({ query: z.object({ companyId: z.coerce.number().int().positive().optional() }) }),
-  asyncHandler(async (req, res) => res.json(await previewNextNumber(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await previewNextNumber(req)))
 );
 
 // Active users that can be added as members of a quote.
@@ -69,7 +74,7 @@ router.get(
 // on quotes they own); it returns names/roles only.
 router.get(
   "/assignable-users",
-  asyncHandler(async (req, res) => res.json(await listAssignableUsers(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await listAssignableUsers(req)))
 );
 
 // PROJECTS (admin) — báo giá ĐÃ DUYỆT cho trang "Quản lý dự án", kèm breakdown theo
@@ -77,7 +82,7 @@ router.get(
 // Xuất thêm _1/_2…, Hạng Mục = tên sheet. Đặt TRƯỚC "/:id" để không bị nuốt vào param.
 router.get(
   "/projects",
-  asyncHandler(async (req, res) => res.json(await listProjects(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await listProjects(req)))
 );
 
 // SIGN documents for ONE sheet (Ký Chứng từ). Admin ký MỌI dự án; người có canSign (vd Lan Anh)
@@ -89,7 +94,7 @@ router.post(
     // z.boolean (KHÔNG coerce): tránh chuỗi "false" bị coerce thành true → ký nhầm.
     body: z.object({ signed: z.boolean().default(true) }).default({} as any),
   }),
-  asyncHandler(async (req, res) => res.json(await signSheet(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await signSheet(req)))
 );
 
 // HOÁ ĐƠN / THANH TOÁN cho 1 sheet (Quản lý dự án). CHỈ ADMIN. Số HĐ → "Thanh toán"; ngày
@@ -109,13 +114,13 @@ router.put(
     }),
   }),
   requirePermission(P.USER_MANAGE),   // chỉ admin (USER_MANAGE) — kế toán/giám đốc nhập
-  asyncHandler(async (req, res) => res.json(await updateSheetInvoice(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
 );
 
 // Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.
 router.get(
   "/hn/accounts",
-  asyncHandler(async (req, res) => res.json(await listHnAccounts(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await listHnAccounts(req)))
 );
 
 // GET ONE
@@ -123,7 +128,7 @@ router.get(
 router.get(
   "/:id",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
     res.json(presentQuote(quote, { includeLogo: true, viewerRole: req.session.role }));
   })
@@ -133,7 +138,7 @@ router.get(
 router.post(
   "/",
   validate({ body: QuoteCreateSchema }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const quote = await createQuote(req);
     res.status(201).json(presentQuote(quote, { includeLogo: true }));
   })
@@ -143,7 +148,7 @@ router.post(
 router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     // 🔒 account_hn KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
     if (req.session.role === "account_hn") {
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
@@ -156,13 +161,13 @@ router.put(
 // ===== Luồng GIÁ HÀ NỘI (role account_hn) — phân quyền + write-guard nằm TRONG service =====
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
-  asyncHandler(async (req, res) => { const q = await assignHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 router.put("/:id/hn", validate({ params: idParam }),   // account lưu phần HN (chỉ ghi bảng hanoi)
-  asyncHandler(async (req, res) => { const q = await saveHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 router.post("/:id/hn/submit", validate({ params: idParam }),
-  asyncHandler(async (req, res) => { const q = await submitHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
-  asyncHandler(async (req, res) => { const q = await reviewHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
 
 // MARK CONVERTED — chốt deal (won).
 // Segregation of duties: marking a deal WON is terminal, immutable and feeds
@@ -172,7 +177,7 @@ router.post(
   "/:id/mark-converted",
   requirePermission(P.QUOTE_SEND),
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const quote = await markConverted(req);
     res.json(presentQuote(quote));
   })
@@ -185,7 +190,7 @@ router.post(
   "/:id/mark-lost",
   requirePermission(P.QUOTE_SEND),
   validate({ params: idParam, body: z.object({ reason: z.string().max(2000).optional() }).default({}) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const quote = await markLost(req);
     res.json(presentQuote(quote));
   })
@@ -195,13 +200,13 @@ router.post(
 router.get(
   "/:id/versions",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => res.json(await listVersions(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await listVersions(req)))
 );
 
 router.get(
   "/:id/versions/:v",
   validate({ params: z.object({ id: z.coerce.number().int().positive(), v: z.coerce.number().int().min(0) }) }),
-  asyncHandler(async (req, res) => res.json(await getVersion(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await getVersion(req)))
 );
 
 router.get(
@@ -211,14 +216,14 @@ router.get(
     a: z.coerce.number().int().min(0),
     b: z.coerce.number().int().min(0),
   }) }),
-  asyncHandler(async (req, res) => res.json(await diffVersionsService(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await diffVersionsService(req)))
 );
 
 // APPROVAL trail for a quote
 router.get(
   "/:id/approvals",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => res.json(await listApprovals(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await listApprovals(req)))
 );
 
 // MEMBERS — add/remove the employees who may view & edit this quote.
@@ -226,21 +231,21 @@ router.get(
 router.put(
   "/:id/members",
   validate({ params: idParam, body: z.object({ memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]) }) }),
-  asyncHandler(async (req, res) => res.json(await updateMembers(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await updateMembers(req)))
 );
 
 // SOFT DELETE
 router.delete(
   "/:id",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => res.json(await deleteQuote(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await deleteQuote(req)))
 );
 
 // DUPLICATE
 router.post(
   "/:id/duplicate",
   validate({ params: idParam, body: z.object({ sameProject: zbool.optional() }).default({}) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const created = await duplicateQuote(req);
     res.status(201).json(presentQuote(created));
   })

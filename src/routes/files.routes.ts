@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
 import { randomBytes } from "node:crypto";
@@ -15,12 +16,12 @@ router.use(requireAuth);
 // Allowlist of accepted upload types. The client-supplied MIME/extension is NOT
 // trusted — we verify the file's magic bytes and derive a safe extension here.
 const ALLOWED_TYPES = new Map([
-  ["image/png", { ext: ".png", sniff: (b) => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 }],
-  ["image/jpeg", { ext: ".jpg", sniff: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff }],
-  ["image/webp", { ext: ".webp", sniff: (b) => b.length > 12 && b.toString("ascii", 0, 4) === "RIFF" && b.toString("ascii", 8, 12) === "WEBP" }],
-  ["application/pdf", { ext: ".pdf", sniff: (b) => b.length > 4 && b.toString("ascii", 0, 5) === "%PDF-" }],
+  ["image/png", { ext: ".png", sniff: (b: Buffer) => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 }],
+  ["image/jpeg", { ext: ".jpg", sniff: (b: Buffer) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff }],
+  ["image/webp", { ext: ".webp", sniff: (b: Buffer) => b.length > 12 && b.toString("ascii", 0, 4) === "RIFF" && b.toString("ascii", 8, 12) === "WEBP" }],
+  ["application/pdf", { ext: ".pdf", sniff: (b: Buffer) => b.length > 4 && b.toString("ascii", 0, 5) === "%PDF-" }],
   // xlsx/docx are zip containers (PK\x03\x04)
-  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", { ext: ".xlsx", sniff: (b) => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 }],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", { ext: ".xlsx", sniff: (b: Buffer) => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 }],
 ]);
 const ALLOWED_MIME_VALUES = [...ALLOWED_TYPES.keys()];
 
@@ -31,7 +32,7 @@ const upload = multer({
 });
 
 /** Resolve the real type by magic bytes; returns the allowlisted MIME+ext or null. */
-function sniffType(buffer, declaredMime) {
+function sniffType(buffer: Buffer, declaredMime: string) {
   const spec = ALLOWED_TYPES.get(declaredMime);
   if (spec && spec.sniff(buffer)) return { mime: declaredMime, ext: spec.ext };
   // declared type didn't match content — try every allowlisted sniffer
@@ -51,7 +52,7 @@ function sniffType(buffer, declaredMime) {
  * Uploads are NEVER signed for arbitrary keys: the server generates the key
  * inside the caller's own namespace, so no one can overwrite foreign objects.
  */
-async function canAccessKey(session, key) {
+async function canAccessKey(session: Request["session"], key: unknown) {
   // Canonicalize-guard FIRST: a key like "logos/../uploads/u2/secret" would pass
   // a naive startsWith("logos/") and leak another namespace. Reject any key with
   // traversal/confusing segments before the prefix checks below.
@@ -81,7 +82,7 @@ async function canAccessKey(session, key) {
   return false;
 }
 
-function userUploadKey(session, ext = "") {
+function userUploadKey(session: Request["session"], ext = "") {
   return `uploads/u${session.userId}/${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
 }
 
@@ -89,7 +90,7 @@ function userUploadKey(session, ext = "") {
 router.post(
   "/",
   upload.single("file"),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     if (!req.file) return res.status(400).json({ error: "Vui lòng chọn tệp để tải lên" });
     // Verify content by magic bytes — never trust the client MIME/extension.
@@ -115,12 +116,12 @@ router.post(
 router.get(
   "/sign-download",
   validate({ query: z.object({ key: z.string().min(1).max(500), expires: z.coerce.number().int().min(60).max(86400).default(3600) }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     if (!(await canAccessKey(req.session, req.query.key))) {
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
-    const url = await presignDownload(req.query.key, { expiresIn: req.query.expires });
+    const url = await presignDownload(req.query.key as string, { expiresIn: (req.query as any).expires });
     res.json({ url, expiresIn: req.query.expires });
   })
 );
@@ -137,7 +138,7 @@ router.post(
     contentType: z.enum(ALLOWED_MIME_VALUES, { error: "Định dạng tệp không được hỗ trợ" }),
     expires: z.coerce.number().int().min(60).max(3600).default(900),
   }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     const spec = ALLOWED_TYPES.get(req.body.contentType);
     if (!spec) return res.status(400).json({ error: "Định dạng tệp không được hỗ trợ" });
@@ -152,8 +153,8 @@ router.delete(
   "/",
   requireRole("admin"),
   validate({ query: z.object({ key: z.string().min(1).max(500) }) }),
-  asyncHandler(async (req, res) => {
-    await deleteObject(req.query.key);
+  asyncHandler(async (req: Request, res: Response) => {
+    await deleteObject(req.query.key as string);
     await audit(req, "file.delete", { resource: "file", resourceId: req.query.key });
     res.json({ ok: true });
   })

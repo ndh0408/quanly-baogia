@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
@@ -18,13 +19,13 @@ const PeriodQuery = z.object({
 });
 
 // Route MỎNG: validate + gọi tầng service (logic/quyền/tính toán ở analyticsService.ts).
-router.get("/overview", validate({ query: PeriodQuery }), asyncHandler(async (req, res) => res.json(await svc.overview(req))));
-router.get("/revenue-by-day", validate({ query: PeriodQuery }), asyncHandler(async (req, res) => res.json(await svc.revenueByDay(req))));
+router.get("/overview", validate({ query: PeriodQuery }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.overview(req))));
+router.get("/revenue-by-day", validate({ query: PeriodQuery }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.revenueByDay(req))));
 router.get(
   "/top-sales",
   validate({ query: PeriodQuery.extend({ limit: z.coerce.number().int().min(1).max(50).default(10) }) }),
-  asyncHandler(async (req, res) => res.json(await svc.topSales(req)))
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.topSales(req)))
 );
-router.get("/funnel", asyncHandler(async (req, res) => res.json(await svc.funnel(req))));
+router.get("/funnel", asyncHandler(async (req: Request, res: Response) => res.json(await svc.funnel(req))));
 
 export default router;

@@ -11,7 +11,7 @@ import { canOnQuote } from "./permissions.js";
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected. converted/lost are terminal
 // (immutable for everyone — duplicate to make a new revision instead).
-export function canEdit(quote, session) {
+export function canEdit(quote: any, session: { role?: string; userId?: number }): boolean {
   if (quote.status === "converted" || quote.status === "lost") return false;
   if (canOnQuote(session, "update", quote)) {
     if (session.role === "admin" || session.role === "manager") return true;
@@ -40,12 +40,12 @@ export const QUOTE_INCLUDE = {
 // sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
 // qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại
 // "hanoi" (kèm sheetId để map khi lưu).
-function presentQuoteForAccountHn(q) {
-  const hnSheets = (q.sheets || []).map((s) => ({
+function presentQuoteForAccountHn(q: any) {
+  const hnSheets = (q.sheets || []).map((s: any) => ({
     sheetId: s.id,
     sheetName: s.name || null,
     order: s.order,
-    hnTables: (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t) => t && t.category === "hanoi"),
+    hnTables: (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"),
   }));
   return {
     id: q.id,
@@ -66,7 +66,7 @@ function presentQuoteForAccountHn(q) {
 }
 
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
-export function presentQuote(q, { includeLogo = false, viewerRole = null } = {}) {
+export function presentQuote(q: any, { includeLogo = false, viewerRole = null }: { includeLogo?: boolean; viewerRole?: string | null } = {}) {
   if (viewerRole === "account_hn") return presentQuoteForAccountHn(q);   // 🔒 lược chỉ còn phần HN
   const totals = computeQuoteTotals(q);
   const out = {
@@ -76,9 +76,9 @@ export function presentQuote(q, { includeLogo = false, viewerRole = null } = {})
     // lại ở đây vì sẽ bị spread cuối ghi đè (giá trị cuối = totals đã tính lại, y hệt hành vi cũ).
     customerCode: q.customer?.code ?? null,
     customerName: q.customer?.name ?? null,
-    sheets: (q.sheets || []).map((s) => ({
+    sheets: (q.sheets || []).map((s: any) => ({
       ...s,
-      items: (s.items || []).map((it) => ({
+      items: (s.items || []).map((it: any) => ({
         ...it,
         quantity: Number(it.quantity),
         unitPrice: Number(it.unitPrice),
@@ -106,12 +106,12 @@ export const QUOTE_LIST_SELECT = {
   _count: { select: { sheets: true } },
 };
 
-export function presentQuoteRow(q, { viewerRole = null } = {}) {
+export function presentQuoteRow(q: any, { viewerRole = null }: { viewerRole?: string | null } = {}) {
   // 🔒 account_hn: danh sách CHỈ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
   if (viewerRole === "account_hn") {
     // Số SHEET HN + TỔNG HN = đúng phần account TỰ LÀM (gộp các bảng "hanoi" của mọi sheet).
     // Đây là số NỘI BỘ của chính account → hiện cho họ OK; vẫn KHÔNG lộ tiền/khách báo giá chính.
-    const hanoi = (q.sheets || []).flatMap((s) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t) => t && t.category === "hanoi"));
+    const hanoi = (q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"));
     return {
       id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
       title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
@@ -120,7 +120,7 @@ export function presentQuoteRow(q, { viewerRole = null } = {}) {
       createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
       hnStatus: q.hnStatus ?? null,
       hnSheetCount: hanoi.length,
-      hnTotal: hanoi.reduce((a, t) => a + extraTableSum(t), 0),
+      hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t), 0),
       sheetCount: q._count?.sheets ?? 0,
       _accountHnRow: true,
     };
@@ -139,8 +139,8 @@ export function presentQuoteRow(q, { viewerRole = null } = {}) {
 }
 
 /** True if every sheet's templateId is an active template belonging to companyId. */
-export async function templatesBelongToCompany(sheets, companyId) {
-  const ids: number[] = [...new Set((sheets || []).map((s) => Number(s.templateId)).filter(Boolean))] as number[];
+export async function templatesBelongToCompany(sheets: any[], companyId: number) {
+  const ids: number[] = [...new Set((sheets || []).map((s: any) => Number(s.templateId)).filter(Boolean))] as number[];
   if (!ids.length) return true;
   const found = await prisma.quoteTemplate.findMany({
     where: { id: { in: ids }, companyId, active: true },
@@ -151,15 +151,15 @@ export async function templatesBelongToCompany(sheets, companyId) {
 
 // Làm sạch "bảng nội bộ" (extraTables) → JSON thuần cho cột Json của QuoteSheet.
 // KHÔNG tạo QuoteItem nên KHÔNG vào Excel/tổng báo giá. Trả undefined nếu rỗng.
-export function sanitizeExtraTables(tables) {
+export function sanitizeExtraTables(tables: any) {
   if (!Array.isArray(tables) || !tables.length) return undefined;
   const VALID = new Set(["hcm", "hanoi", "khach"]);
-  const out = tables.filter((t) => t && VALID.has(t.category)).map((t) => ({
+  const out = tables.filter((t: any) => t && VALID.has(t.category)).map((t: any) => ({
     category: t.category,
     name: t.name ? String(t.name).replace(/[\r\n]+/g, " ").trim().slice(0, 120) : null,
     templateId: t.templateId != null ? Number(t.templateId) : null,   // mẫu cột (GN/CLF có/không ngày)
     groupSubtotal: !!t.groupSubtotal,
-    items: (t.items || []).map((it) => ({
+    items: (t.items || []).map((it: any) => ({
       kind: ["info", "sub", "section", "subsection"].includes(it.kind) ? it.kind : "item",
       label: it.label ? String(it.label).replace(/[\r\n]+/g, " ").trim().slice(0, 12) : null,   // nhãn nhóm tự gõ (A/B…) — đừng mất khi lưu
       name: (it.name || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
@@ -184,9 +184,9 @@ export function sanitizeExtraTables(tables) {
 
 // Tổng tiền 1 bảng nội bộ (cùng quy tắc với item báo giá; section/info không cộng).
 // CHI PHÍ HCM + PHÍ KHÁCH HÀNG: CHỈ cộng hàng ĐÃ DUYỆT (approved). Hà Nội: cộng tất cả (luồng riêng).
-export function extraTableSum(t) {
+export function extraTableSum(t: any) {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
-  return (t?.items || []).reduce((acc, it) => {
+  return (t?.items || []).reduce((acc: number, it: any) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
     if (approvedOnly && !it.approved) return acc;   // HCM/Phí KH: chưa duyệt → KHÔNG tính
     const qty = trunc2(it.quantity);   // Số Lượng CẮT 2 số — KHỚP CHÍNH XÁC extraTableSumLocal (client)
@@ -196,14 +196,14 @@ export function extraTableSum(t) {
   }, 0);
 }
 
-export function buildSheetsCreate(sheets) {
-  return (sheets || []).map((s, sIdx) => ({
+export function buildSheetsCreate(sheets: any) {
+  return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
     order: s.order != null ? Number(s.order) : sIdx + 1,
     groupSubtotal: !!s.groupSubtotal,
     items: {
-      create: (s.items || []).map((it, iIdx) => ({
+      create: (s.items || []).map((it: any, iIdx: number) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
         // Preserve the catalog link so an edit (which deletes+recreates sheets)
         // doesn't lose productId and break product-level reporting/history.

@@ -21,10 +21,10 @@
 // CEILING/FLOOR bị LOẠI: editor coi là ceil/floor 1 đối số, còn Excel BẮT BUỘC có
 // đối số "significance" → xuất ra sẽ lỗi ô. Công thức như vậy quay về ghi số.
 const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS"]);
-const FN_ALIAS = { AVG: "AVERAGE" };
+const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE" };
 
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Cột editor (giống groupLetter ở frontend). */
-export function colLetter(n) {
+export function colLetter(n: number) {
   let s = "", x = n + 1;
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
   return s;
@@ -33,22 +33,22 @@ export function colLetter(n) {
 // ===== Bộ eval công thức editor — PORT TRUNG THÀNH từ public/js/editor.js =====
 // CHỈ dùng để TỰ KIỂM: công thức dịch xong có còn cho ra đúng giá trị đã lưu không.
 // Phải giữ khớp với frontend; có test ghim. (Nếu lệch → tự kiểm trượt → ghi số: an toàn.)
-function evalArith(input) {
+function evalArith(input: string) {
   let s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];
-  function expr() {
+  function expr(): number | null {
     let v = term();
     while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; }
     return v;
   }
-  function term() {
+  function term(): number | null {
     let v = factor();
     while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; }
     return v;
   }
-  function factor() {
+  function factor(): number | null {
     if (peek() === "(") { pos++; const v = expr(); if (peek() !== ")") return null; pos++; return v; }
     if (peek() === "-") { pos++; const v = factor(); return v === null ? null : -v; }
     if (peek() === "+") { pos++; return factor(); }
@@ -62,7 +62,7 @@ function evalArith(input) {
   return result;
 }
 
-const FORMULA_FNS = {
+const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   SUM: (a) => a.reduce((x, y) => x + y, 0),
   PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
   AVERAGE: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
@@ -78,8 +78,14 @@ const FORMULA_FNS = {
   FLOOR: (a) => Math.floor(a[0] || 0),
 };
 
+/** Giải tham chiếu ô theo HỆ TOẠ ĐỘ EDITOR (cho bộ tự kiểm). */
+type EditorRefs = {
+  cell: (addr: string) => number;
+  range: (a: string, b: string) => number[];
+};
+
 /** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân). refs giải tham chiếu ô. */
-export function evalEditorFormula(input, refs) {
+export function evalEditorFormula(input: string, refs?: EditorRefs) {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
@@ -98,11 +104,11 @@ export function evalEditorFormula(input, refs) {
   while (/[A-Za-z]+\s*\(/.test(s)) {
     if (guard++ > 100) return null;
     let changed = false;
-    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m, name, args) => {
+    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m: string, name: string, args: string) => {
       changed = true;
       const fn = FORMULA_FNS[name.toUpperCase()];
       if (!fn) return "NaN";
-      const vals = args.split(";").map((a) => evalArith(a)).filter((v) => v !== null && isFinite(v));
+      const vals = args.split(";").map((a: string) => evalArith(a)).filter((v: number | null): v is number => v !== null && isFinite(v));
       const r = fn(vals);
       return (r === null || !isFinite(r)) ? "NaN" : String(r);
     });
@@ -110,6 +116,15 @@ export function evalEditorFormula(input, refs) {
   }
   return evalArith(s);
 }
+
+/** Bộ toạ độ + kiểm hợp lệ để dịch công thức editor → Excel cho MỘT sheet. */
+type FormulaContext = {
+  colToField: Record<string, string>;             // cột editor (A,B,…) → tên field
+  fieldToCol: Record<string, string | undefined>; // tên field → cột Excel (có thể thiếu)
+  allowedRef: Set<string>;                         // field được phép tham chiếu
+  rowToExcel: (editorRow: number) => number | null;
+  rangeOk: (editorRow1: number, editorRow2: number) => boolean;
+};
 
 /**
  * Dịch MỘT công thức editor sang chuỗi công thức Excel (KHÔNG có dấu "=" đầu, hợp với
@@ -122,7 +137,7 @@ export function evalEditorFormula(input, refs) {
  *   rowToExcel  : (editorRow:number) → excelRow:number | null   (null nếu hàng không hợp lệ)
  *   rangeOk     : (editorRow1, editorRow2) → bool   (Excel có liền mạch & toàn hàng item không)
  */
-export function translateFormula(raw, ctx) {
+export function translateFormula(raw: string | null | undefined, ctx: FormulaContext) {
   if (raw == null) return null;
   let s = String(raw).trim().replace(/^=/, "");
   if (!s) return null;
@@ -166,7 +181,7 @@ export function translateFormula(raw, ctx) {
   return s;
 }
 
-function mapRef(ctx, colLetters, rowDigits) {
+function mapRef(ctx: FormulaContext, colLetters: string, rowDigits: string) {
   const field = ctx.colToField[colLetters.toUpperCase()];
   if (!field || !ctx.allowedRef.has(field)) return null;   // ref chữ/_stt/cột không có → bỏ
   const col = ctx.fieldToCol[field];
@@ -175,6 +190,15 @@ function mapRef(ctx, colLetters, rowDigits) {
   if (row == null) return null;
   return { field, col, row };
 }
+
+/** Item báo giá theo HỆ TOẠ ĐỘ EDITOR (giá trị từ DB/JSON → có thể là số hoặc chuỗi). */
+type EditorItem = {
+  kind?: string;
+  quantity?: number | string | null;
+  unitPrice?: number | string | null;
+  days?: number | string | null;
+  formulas?: Record<string, string | undefined>;
+};
 
 /**
  * Dựng "bộ dịch công thức" cho MỘT sheet khi xuất Excel. Khép kín toàn bộ logic toạ độ
@@ -188,7 +212,13 @@ function mapRef(ctx, colLetters, rowDigits) {
  *                (item/sub đã đặt chỗ), ngược lại null. Tra theo ĐỊA CHỈ ĐỐI TƯỢNG item nên
  *                không lệ thuộc việc lọc/đổi chỉ số (xem cách dựng ở excel.js).
  */
-export function buildFormulaContext({ cols, items, rowToExcel }) {
+export function buildFormulaContext(
+  { cols, items, rowToExcel }: {
+    cols: Record<string, string | undefined>;            // field → cột Excel của template
+    items: EditorItem[];                                 // item theo thứ tự editor (ref = index+1)
+    rowToExcel: (editorIndex0: number) => number | null;
+  },
+) {
   const usesDays = !!cols.days;
 
   // Sơ đồ cột EDITOR (khớp ADDR_COLS): _stt, name, [detail], unit, quantity, [days],
@@ -199,9 +229,9 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
   if (usesDays) editorFields.push("days");
   editorFields.push("unitPrice", "_amount", "notes");
 
-  const colToField = {};
+  const colToField: Record<string, string> = {};
   editorFields.forEach((f, i) => { colToField[colLetter(i)] = f; });
-  const fieldToColIndex = {};
+  const fieldToColIndex: Record<string, number> = {};
   editorFields.forEach((f, i) => { fieldToColIndex[f] = i; });
 
   const fieldToCol = { ...cols, _stt: cols.stt, _amount: cols.amount };
@@ -213,10 +243,10 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
 
   const ctx = {
     colToField, fieldToCol, allowedRef,
-    rowToExcel: (n) => rowToExcel(n - 1),
-    rangeOk: (n1, n2) => {
+    rowToExcel: (n: number) => rowToExcel(n - 1),
+    rangeOk: (n1: number, n2: number) => {
       const a = Math.min(n1, n2) - 1, b = Math.max(n1, n2) - 1;
-      let prev = null;
+      let prev: number | null = null;
       for (let k = a; k <= b; k++) {
         const r = rowToExcel(k);              // section/info/blank/ngoài-bảng trong dải → bỏ
         if (r == null) return false;
@@ -228,12 +258,12 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
   };
 
   // Giá trị 1 ô theo HỆ TOẠ ĐỘ EDITOR (để tự kiểm) — mô phỏng cellNumByAddr ở frontend.
-  const amountOf = (it) => {
+  const amountOf = (it: EditorItem | undefined) => {
     if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
     const q = Number(it.quantity) || 0, p = Number(it.unitPrice) || 0;
     return usesDays ? q * (Number(it.days) || 1) * p : q * p;
   };
-  const editorCellNum = (addr) => {
+  const editorCellNum = (addr: string) => {
     const m = /^([A-Za-z]+)(\d+)$/.exec(String(addr).trim());
     if (!m) return 0;
     const field = colToField[m[1].toUpperCase()];
@@ -243,9 +273,9 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
     if (field === "quantity" || field === "unitPrice" || field === "days") return Number(it[field]) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
-  const editorRefs = {
+  const editorRefs: EditorRefs = {
     cell: editorCellNum,
-    range: (a, b) => {
+    range: (a: string, b: string) => {
       const pa = /^([A-Za-z]+)(\d+)$/.exec(a), pb = /^([A-Za-z]+)(\d+)$/.exec(b);
       if (!pa || !pb) return [];
       const c0 = Math.min(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
@@ -263,7 +293,7 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
      * computedValue; ngược lại null (nơi gọi ghi số như cũ). Không cần biết chỉ số ô đang
      * ghi — ref trong công thức tự mang số hàng editor, dịch qua rowToExcel.
      */
-    cellFormula(raw, computedValue) {
+    cellFormula(raw: string | null | undefined, computedValue: number) {
       if (!raw) return null;
       const ex = translateFormula(raw, ctx);
       if (!ex) return null;

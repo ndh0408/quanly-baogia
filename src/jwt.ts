@@ -1,5 +1,7 @@
 import jwt from "jsonwebtoken";
+import type { Secret, SignOptions } from "jsonwebtoken";
 import { randomBytes, createHash } from "node:crypto";
+import type { User } from "@prisma/client";
 import { prisma } from "./db.js";
 import { config } from "./config.js";
 
@@ -15,29 +17,44 @@ import { config } from "./config.js";
 const JWT_ISSUER = "quanly";
 const JWT_AUDIENCE = "quanly-api";
 
-export function signAccessToken(user) {
+// config.JWT_SECRET là string|undefined trong type (zod .optional()) nhưng LUÔN được
+// đặt ở runtime (config.ts:96 fallback về SESSION_SECRET). Secret cast chỉ thu hẹp kiểu.
+const JWT_SECRET = config.JWT_SECRET as Secret;
+
+export function signAccessToken(user: User) {
+  // expiresIn nhận StringValue|number trong @types/jsonwebtoken v9; "15m" hợp lệ runtime
+  // nhưng string thường không khớp StringValue → ép cả options sang SignOptions.
+  const opts: SignOptions = {
+    expiresIn: config.JWT_ACCESS_TTL as SignOptions["expiresIn"],
+    algorithm: "HS256",
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  };
   return jwt.sign(
     { sub: user.id, role: user.role, username: user.username },
-    config.JWT_SECRET,
-    { expiresIn: config.JWT_ACCESS_TTL, algorithm: "HS256", issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
+    JWT_SECRET,
+    opts
   );
 }
 
-export function verifyAccessToken(token) {
+export function verifyAccessToken(token: string) {
   // Pin the algorithm (defence-in-depth against alg-confusion / alg:none) and
   // bind issuer/audience.
-  return jwt.verify(token, config.JWT_SECRET, {
+  return jwt.verify(token, JWT_SECRET, {
     algorithms: ["HS256"],
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
   });
 }
 
-function hashToken(plain) {
+function hashToken(plain: string) {
   return createHash("sha256").update(plain).digest("hex");
 }
 
-export async function issueRefreshToken(userId, { ip, userAgent, family }) {
+export async function issueRefreshToken(
+  userId: number,
+  { ip, userAgent, family }: { ip?: string | null; userAgent?: string | null; family?: string | null }
+) {
   const plain = randomBytes(32).toString("hex");
   const tokenHash = hashToken(plain);
   const fam = family || randomBytes(8).toString("hex");
@@ -53,7 +70,10 @@ export async function issueRefreshToken(userId, { ip, userAgent, family }) {
  * and return new pair. If the token is already revoked but valid, revoke the
  * entire family — this is a replay attack signal.
  */
-export async function rotateRefreshToken(plain, { ip, userAgent }) {
+export async function rotateRefreshToken(
+  plain: string,
+  { ip, userAgent }: { ip?: string | null; userAgent?: string | null }
+) {
   if (!plain) throw Object.assign(new Error("Thiếu refresh token"), { status: 401 });
   const tokenHash = hashToken(plain);
   const row = await prisma.refreshToken.findUnique({ where: { tokenHash } });
@@ -99,7 +119,7 @@ export async function rotateRefreshToken(plain, { ip, userAgent }) {
   return { user, refresh: newPair };
 }
 
-export async function revokeRefreshToken(plain) {
+export async function revokeRefreshToken(plain: string) {
   if (!plain) return;
   const tokenHash = hashToken(plain);
   await prisma.refreshToken.updateMany({
@@ -108,7 +128,7 @@ export async function revokeRefreshToken(plain) {
   }).catch(() => {});
 }
 
-export async function revokeAllForUser(userId) {
+export async function revokeAllForUser(userId: number) {
   await prisma.refreshToken.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },

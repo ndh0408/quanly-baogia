@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
@@ -19,11 +20,11 @@ router.post(
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ format: z.enum(["xlsx", "pdf"]).default("xlsx") }).default({} as any),
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     // Authorize the EXPORT by quote ownership before enqueuing — mirrors the
     // synchronous /api/export/:id route so this path is not an IDOR bypass.
     const quote = await prisma.quote.findFirst({
-      where: { id: req.params.id },
+      where: { id: req.params.id as unknown as number },
       include: { members: { select: { id: true } } },
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
@@ -46,7 +47,7 @@ router.get(
   "/jobs/:queue/:id",
   requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     if (!isQueueEnabled()) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình" });
     // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
     // carry recipient addresses, target URLs and secrets in job.data — never expose

@@ -79,6 +79,13 @@ export const prisma = base.$extends({
   },
 });
 
+// Transaction-client type for the EXTENDED prisma above. The $extends client's
+// interactive-transaction callback receives a client whose type is a structural
+// superset of Prisma.TransactionClient but is NOT assignable to it (Prisma v7
+// DynamicClientExtensionThis). Helpers that run inside prisma.$transaction should
+// accept THIS type so the inferred `tx` flows through without `as any`.
+export type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
 process.on("beforeExit", async () => {
   await base.$disconnect();
 });

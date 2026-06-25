@@ -2,7 +2,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 
 /** Send a Telegram message. No-op if TELEGRAM_BOT_TOKEN not set. */
-export async function sendTelegram({ chatId, text, parseMode = "" }) {
+export async function sendTelegram({ chatId, text, parseMode = "" }: { chatId: string | number; text: string; parseMode?: string }) {
   if (!config.TELEGRAM_BOT_TOKEN) {
     logger.info({ chatId, textLen: text?.length }, "telegram skipped (no token)");
     return { skipped: true };

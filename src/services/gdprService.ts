@@ -2,11 +2,12 @@
 // gdpr.routes.ts: truy vấn tổng hợp dữ liệu cá nhân, sinh các prisma-op vô danh hoá + thu hồi token.
 // LƯU Ý: thao tác res (setHeader/end/clearCookie) và session.destroy GIỮ trong route — đó là controller
 // HTTP, không phải logic thuần. Service chỉ trả DỮ LIỆU / thực thi transaction + audit. Mẫu theo customerService.ts.
+import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../quoteService.js";
 
-function bigIntToString(obj) {
+function bigIntToString(obj: unknown) {
   return JSON.parse(JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
 }
 
@@ -19,7 +20,7 @@ function bigIntToString(obj) {
  * they are business records (and customer rows are other people's personal data),
  * so they are retained with their ownership link, not anonymized.
  */
-function anonymizeUserOps(id) {
+function anonymizeUserOps(id: number) {
   return [
     prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: new Date() } }),
     prisma.user.update({
@@ -42,7 +43,7 @@ function anonymizeUserOps(id) {
 }
 
 /** Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu (đã chuyển bigint→string). */
-export async function exportUser(userId) {
+export async function exportUser(userId: number) {
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -90,20 +91,20 @@ export async function exportUser(userId) {
  * Xoá tài khoản của CHÍNH user (right-to-erasure) — phần LOGIC THUẦN: transaction vô danh hoá + audit.
  * Việc destroy session + clearCookie GIỮ ở route (controller HTTP) vì thao tác res/session.
  */
-export async function deleteSelf(req) {
-  const id = req.session.userId;
+export async function deleteSelf(req: Request) {
+  const id = (req.session as any).userId;
   await prisma.$transaction(anonymizeUserOps(id));
   await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
 }
 
 /** Admin xoá tài khoản người dùng khác: chặn tự-xoá, 404 nếu không có, rồi transaction + audit. */
-export async function deleteByAdmin(req) {
-  if (req.params.id === req.session.userId) {
+export async function deleteByAdmin(req: Request) {
+  if ((req.params as any).id === req.session.userId) {
     throw httpError(400, "Không thể tự xóa chính mình ở đây. Vui lòng dùng chức năng \"Xóa tài khoản của tôi\".");
   }
-  const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  const target = await prisma.user.findUnique({ where: { id: (req.params as any).id }, select: { id: true } });
   if (!target) throw httpError(404, "Không tìm thấy người dùng");
-  await prisma.$transaction(anonymizeUserOps(req.params.id));
-  await audit(req, "gdpr.delete.by_admin", { resource: "user", resourceId: req.params.id });
+  await prisma.$transaction(anonymizeUserOps((req.params as any).id));
+  await audit(req, "gdpr.delete.by_admin", { resource: "user", resourceId: (req.params as any).id });
   return { ok: true };
 }

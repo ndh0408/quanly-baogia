@@ -23,9 +23,9 @@ function checkFontsOnce() {
   return hasUnicodeFont;
 }
 
-const fmt = (n) => Number(n).toLocaleString("vi-VN");
+const fmt = (n: number) => Number(n).toLocaleString("vi-VN");
 
-function registerFonts(doc) {
+function registerFonts(doc: PDFKit.PDFDocument) {
   if (checkFontsOnce()) {
     doc.registerFont("body", FONT_PATHS.regular);
     doc.registerFont("bold", FONT_PATHS.bold);
@@ -39,7 +39,7 @@ function registerFonts(doc) {
   }
 }
 
-export async function renderQuotePdf(quote) {
+export async function renderQuotePdf(quote: any) {
   return new Promise((resolve, reject) => {
     const buffers: Buffer[] = [];
     const doc = new PDFDocument({ size: "A4", margin: 40 });
@@ -97,7 +97,7 @@ export async function renderQuotePdf(quote) {
     const vatPct = Number(quote.vatPercent ?? 0);
 
     doc.fontSize(11);
-    const r = (label, val, bold = false) => {
+    const r = (label: string, val: number, bold = false) => {
       doc.font(bold ? "bold" : "body");
       doc.text(`${label}: ${fmt(val)} VND`, { align: "right" });
     };
@@ -119,8 +119,8 @@ export async function renderQuotePdf(quote) {
   });
 }
 
-function drawItemsTable(doc, items, baseIdx) {
-  const cols = [
+function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number) {
+  const cols: { w: number; label: string; align: "left" | "center" | "right" | "justify" }[] = [
     { w: 30, label: "STT", align: "center" },
     { w: 200, label: "Hạng mục", align: "left" },
     { w: 50, label: "ĐVT", align: "center" },
@@ -133,7 +133,7 @@ function drawItemsTable(doc, items, baseIdx) {
   const pageBottom = () => doc.page.height - doc.page.margins.bottom;
 
   // Draw the orange header row at y, return the y below it.
-  const drawHeader = (atY) => {
+  const drawHeader = (atY: number) => {
     let x = startX;
     doc.font("bold").fontSize(10);
     doc.rect(startX, atY, tableW, 18).fillAndStroke("#FFE4CC", "#888");
