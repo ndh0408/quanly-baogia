@@ -147,7 +147,7 @@ export async function createQuote(req: Request) {
         if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
         const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
         const created = await tx.quote.create({
-          data: { ...draft, quoteNumber, searchText, sheets: { create: buildSheetsCreate(b.sheets) }, members: { connect: [{ id: userId }] } } as any,
+          data: { ...draft, quoteNumber, searchText, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals) }, members: { connect: [{ id: userId }] } } as any,
           include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
@@ -256,7 +256,7 @@ export async function updateQuote(req: Request) {
       await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
       const u = await tx.quote.update({
         where: { id },
-        data: { ...data, sheets: { create: buildSheetsCreate(b.sheets) } },
+        data: { ...data, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals) } },
         include: QUOTE_INCLUDE as any,
       });
       await snapshotQuoteVersion(tx, id, userId, "update");
@@ -434,18 +434,16 @@ export async function listProjects(req: Request) {
       sheets: {
         orderBy: { order: "asc" },
         select: {
-          id: true, order: true, name: true, groupSubtotal: true, extraTables: true,
+          id: true, order: true, name: true, subtotal: true, extraTables: true,
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
           template: { select: { company: { select: { shortName: true, name: true } } } },
-          items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
         },
       },
     },
   });
   const data = quotes.map((q: any) => {
-    const { sheetTotals } = computeQuoteTotals(q);   // subtotal theo từng sheet
-    const byId = new Map(sheetTotals.map((s: any) => [s.sheetId, Number(s.subtotal)]));
+    // subtotal/sheet ĐÃ materialized (ghi lúc save) → KHÔNG kéo items + computeQuoteTotals nữa (perf).
     return {
       id: q.id,
       quoteNumber: q.quoteNumber,
@@ -469,7 +467,7 @@ export async function listProjects(req: Request) {
         return {
           id: sh.id,
           name: sh.name || null,
-          subtotal: byId.get(sh.id) ?? 0,
+          subtotal: Number(sh.subtotal),
           hcm: sumCat("hcm"),
           hanoi: sumCat("hanoi"),
           khach: sumCat("khach"),
@@ -785,6 +783,7 @@ export async function duplicateQuote(req: Request) {
         name: s.name,
         order: s.order != null ? s.order : sIdx + 1,
         groupSubtotal: s.groupSubtotal,
+        subtotal: t.sheetTotals[sIdx]?.subtotal ?? D(0),   // materialized (= subtotal nguồn)
         items: {
           create: s.items.map((it: any, iIdx: number) => ({
             order: it.order != null ? it.order : iIdx + 1,

@@ -196,12 +196,14 @@ export function extraTableSum(t: any) {
   }, 0);
 }
 
-export function buildSheetsCreate(sheets: any) {
+// sheetTotals (theo ĐÚNG thứ tự sheets, từ computeQuoteTotals) → lưu materialized subtotal/sheet.
+export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
   return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
     order: s.order != null ? Number(s.order) : sIdx + 1,
     groupSubtotal: !!s.groupSubtotal,
+    subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),
     items: {
       create: (s.items || []).map((it: any, iIdx: number) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,

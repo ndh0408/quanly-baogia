@@ -436,6 +436,7 @@ model QuoteSheet {
   order         Int
   name          String?
   groupSubtotal Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
+  subtotal      Decimal       @default(0) @db.Decimal(18, 2) // materialized: tổng sheet (= computeQuoteTotals.sheetTotals), ghi lúc save → trang Dự án không phải kéo items vào RAM
   items         QuoteItem[]
   // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
   // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
