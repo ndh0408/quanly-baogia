@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, lazy, Suspense, type ReactNode } from "react";
 import { api, type Me } from "./api";
 import { confirmModal } from "./ui";
 
@@ -9,6 +9,11 @@ async function guardLeave(): Promise<boolean> {
   const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
   if (ok) w.__editorDirty = false;
   return ok;
+}
+
+// Hiển thị trong lúc tải chunk lazy (editor/wizard/HN) — skeleton giống các trang khác.
+function PageFallback() {
+  return <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
 }
 import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
@@ -21,9 +26,11 @@ import { NotificationsPage } from "./Notifications";
 import { DashboardPage } from "./Dashboard";
 import { QuoteListPage } from "./QuoteList";
 import { ProjectsPage } from "./Projects";
-import { QuoteEditorPage } from "./QuoteEditor";
-import { NewQuoteWizard } from "./NewQuoteWizard";
-import { AccountHnView } from "./AccountHnView";
+// Lazy-load các trang NẶNG/route-riêng (editor + lưới + công thức/clipboard, wizard, view HN) → tách
+// thành chunk riêng, KHÔNG vào bundle chính: HR/Account-list không phải tải editor mới mở app.
+const QuoteEditorPage = lazy(() => import("./QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
+const NewQuoteWizard = lazy(() => import("./NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
+const AccountHnView = lazy(() => import("./AccountHnView").then((m) => ({ default: m.AccountHnView })));
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -201,12 +208,12 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
           </div>
         </aside>
         {isWizard ? (
-          <main className="main" id="main" tabIndex={-1}><NewQuoteWizard me={me} /></main>
+          <main className="main" id="main" tabIndex={-1}><Suspense fallback={<PageFallback />}><NewQuoteWizard me={me} /></Suspense></main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><AccountHnView quoteId={hnEditId} /></main>
+          <main className="main" id="main" tabIndex={-1}><Suspense fallback={<PageFallback />}><AccountHnView quoteId={hnEditId} /></Suspense></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            <QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} />
+            <Suspense fallback={<PageFallback />}><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></Suspense>
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
