@@ -1,4 +1,6 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { logger } from "./logger.js";
 
 // Soft-delete + realtime-feed nay dùng Client Extensions ($extends) thay cho $use (đã DEPRECATED,
@@ -17,7 +19,11 @@ const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upse
 
 const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 
+// Prisma 7: kết nối qua driver adapter @prisma/adapter-pg (pg Pool) — engine TS, không còn engine Rust.
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
 const base = new PrismaClient({
+  adapter,
   log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
 });
 base.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));

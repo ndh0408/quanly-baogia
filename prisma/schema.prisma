@@ -4,7 +4,8 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Prisma 7: URL chuyển sang prisma.config.ts (cho Migrate) + driver adapter @prisma/adapter-pg
+  // (cho runtime, xem src/db.ts). Không còn `url` ở đây.
 }
 
 enum Role {
