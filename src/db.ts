@@ -1,93 +1,78 @@
 import { PrismaClient } from "@prisma/client";
 import { logger } from "./logger.js";
-import { isProd } from "./config.js";
 
-export const prisma = new PrismaClient({
-  // warn+error events in all environments (the two branches were identical).
-  log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
-});
-
-prisma.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));
-prisma.$on("error", (e) => logger.error({ source: "prisma" }, e.message));
-
-// Global soft-delete middleware: turns `delete` into `update { deletedAt: now }`
-// and adds an automatic `where: { deletedAt: null }` filter on common queries.
-//
-// Applies to every model that has a deletedAt field.
+// Soft-delete + realtime-feed nay dùng Client Extensions ($extends) thay cho $use (đã DEPRECATED,
+// bị gỡ ở Prisma 6+). HÀNH VI GIỮ Y HỆT bản $use cũ:
+//  • delete/deleteMany trên model soft-delete → update deletedAt (trừ `hardDelete: true`).
+//  • find*/count/aggregate/groupBy → tự thêm where.deletedAt:null (trừ `includeDeleted: true`);
+//    findUnique→findFirst để gắn được filter.
+//  • sau mỗi WRITE vào Quote/Customer/User → bắn SSE để client tự refresh list.
+// LƯU Ý: chuyển delete→update gọi `base.<model>.update()` (vì $extends không đổi được op qua query()).
+// AN TOÀN vì codebase KHÔNG soft-delete BÊN TRONG $transaction (đã kiểm: chỉ dùng prisma.x.delete
+// top-level). NẾU sau này cần soft-delete trong transaction → phải xử khác (dùng thư viện chuyên).
 const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord", "Employee"]);
-
-prisma.$use(async (params, next) => {
-  if (!SOFT_DELETE_MODELS.has(params.model)) return next(params);
-
-  // Intercept hard deletes → soft delete.
-  // Caller can pass `hardDelete: true` (top-level, next to `where`) to really delete —
-  // used by the admin purge endpoint to remove soft-deleted rows for good.
-  if (params.action === "delete" || params.action === "deleteMany") {
-    if (params.args?.hardDelete === true) {
-      delete params.args.hardDelete;
-      return next(params);
-    }
-    if (params.action === "delete") {
-      params.action = "update";
-      params.args.data = { ...(params.args.data || {}), deletedAt: new Date() };
-    } else {
-      params.action = "updateMany";
-      params.args = params.args || {};
-      params.args.data = { ...(params.args.data || {}), deletedAt: new Date() };
-    }
-  }
-
-  // Auto-filter deletedAt = null for find*, unless caller explicitly opts in.
-  // Caller can pass `includeDeleted: true` outside `where` to bypass.
-  if (
-    (params.action === "findUnique" || params.action === "findFirst" || params.action === "findMany" ||
-     params.action === "findUniqueOrThrow" || params.action === "findFirstOrThrow" ||
-     params.action === "count" || params.action === "aggregate" || params.action === "groupBy") &&
-    params.args?.includeDeleted !== true
-  ) {
-    params.args = params.args || {};
-    // findUnique requires a unique where; convert to findFirst to attach deletedAt filter.
-    if (params.action === "findUnique") {
-      params.action = "findFirst";
-    } else if (params.action === "findUniqueOrThrow") {
-      params.action = "findFirstOrThrow";
-    }
-    const where = params.args.where || {};
-    if (where.deletedAt === undefined) {
-      params.args.where = { ...where, deletedAt: null };
-    }
-  }
-
-  if (params.args && params.args.includeDeleted !== undefined) {
-    delete params.args.includeDeleted;
-  }
-  // Strip our control flag unconditionally so a stray hardDelete on a non-delete
-  // action is never forwarded to Prisma (which rejects unknown top-level args).
-  if (params.args && params.args.hardDelete !== undefined) {
-    delete params.args.hardDelete;
-  }
-
-  return next(params);
-});
-
-// Realtime change feed: after any write to a user-facing model, broadcast a hint
-// so every connected client refreshes its lists live (no manual page reload).
-// Registered AFTER soft-delete so a `delete` already appears here as `update`.
-const RT_ENTITY = { Quote: "quote", Customer: "customer", User: "user" };
+const READS = new Set(["findUnique", "findFirst", "findMany", "findUniqueOrThrow", "findFirstOrThrow", "count", "aggregate", "groupBy"]);
+const RT_ENTITY: Record<string, string> = { Quote: "quote", Customer: "customer", User: "user" };
 const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"]);
 
-prisma.$use(async (params, next) => {
-  const result = await next(params);
-  const entity = RT_ENTITY[params.model];
-  if (entity && RT_WRITES.has(params.action)) {
-    // Lazy import avoids a static db <-> sse import cycle.
-    import("./sse.js")
-      .then(({ emitChange }) => emitChange(entity, params.action, result?.id))
-      .catch(() => {});
-  }
-  return result;
+const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
+
+const base = new PrismaClient({
+  log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
+});
+base.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));
+base.$on("error", (e) => logger.error({ source: "prisma" }, e.message));
+
+export const prisma = base.$extends({
+  name: "soft-delete+realtime",
+  query: {
+    $allModels: {
+      async $allOperations({ model, operation, args, query }) {
+        const soft = SOFT_DELETE_MODELS.has(model);
+        const a: any = args || {};
+        let action: string = operation;
+        let result: any;
+
+        if (soft && (operation === "delete" || operation === "deleteMany")) {
+          // delete → soft-delete (update deletedAt), trừ khi hardDelete: true.
+          const aa = { ...a };
+          delete aa.hardDelete; delete aa.includeDeleted;
+          if (a.hardDelete === true) {
+            result = await (base as any)[lc(model)][operation](aa); // xoá thật
+          } else {
+            action = operation === "delete" ? "update" : "updateMany";
+            const data = { ...(aa.data || {}), deletedAt: new Date() };
+            result = await (base as any)[lc(model)][action]({ where: aa.where, data });
+          }
+        } else if (soft && READS.has(operation) && a.includeDeleted !== true) {
+          // đọc: tự thêm filter deletedAt:null (findUnique→findFirst để gắn được).
+          const aa = { ...a };
+          delete aa.includeDeleted;
+          const where = aa.where || {};
+          if (where.deletedAt === undefined) aa.where = { ...where, deletedAt: null };
+          if (operation === "findUnique") result = await (base as any)[lc(model)].findFirst(aa);
+          else if (operation === "findUniqueOrThrow") result = await (base as any)[lc(model)].findFirstOrThrow(aa);
+          else result = await query(aa);
+        } else {
+          // op khác: strip cờ điều khiển còn sót (chỉ cho model soft-delete, như bản cũ) rồi chạy.
+          let aa = a;
+          if (soft && (a.includeDeleted !== undefined || a.hardDelete !== undefined)) {
+            aa = { ...a }; delete aa.includeDeleted; delete aa.hardDelete;
+          }
+          result = await query(aa);
+        }
+
+        // Realtime: sau WRITE vào Quote/Customer/User → bắn SSE (soft-delete đã thành 'update').
+        const entity = RT_ENTITY[model];
+        if (entity && RT_WRITES.has(action)) {
+          import("./sse.js").then(({ emitChange }) => emitChange(entity, action, result?.id)).catch(() => {});
+        }
+        return result;
+      },
+    },
+  },
 });
 
 process.on("beforeExit", async () => {
-  await prisma.$disconnect();
+  await base.$disconnect();
 });
