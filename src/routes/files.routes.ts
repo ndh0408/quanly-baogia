@@ -139,7 +139,9 @@ router.post(
   }) }),
   asyncHandler(async (req, res) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
-    const ext = ALLOWED_TYPES.get(req.body.contentType).ext;
+    const spec = ALLOWED_TYPES.get(req.body.contentType);
+    if (!spec) return res.status(400).json({ error: "Định dạng tệp không được hỗ trợ" });
+    const ext = spec.ext;
     const key = userUploadKey(req.session, ext);
     const url = await presignUpload({ key, contentType: req.body.contentType, expiresIn: req.body.expires });
     res.json({ key, url, expiresIn: req.body.expires });

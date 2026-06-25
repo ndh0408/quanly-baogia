@@ -72,9 +72,8 @@ export function presentQuote(q, { includeLogo = false, viewerRole = null } = {})
   const out = {
     ...q,
     vatPercent: Number(q.vatPercent),
-    subtotal: Number(q.subtotal ?? totals.subtotal),
-    vat: Number(q.vat ?? totals.vat),
-    total: Number(q.total ?? totals.total),
+    // subtotal/vat/total đến từ ...totalsToJson(totals) ở cuối object (ghi đè ...q) — KHÔNG đặt
+    // lại ở đây vì sẽ bị spread cuối ghi đè (giá trị cuối = totals đã tính lại, y hệt hành vi cũ).
     customerCode: q.customer?.code ?? null,
     customerName: q.customer?.name ?? null,
     sheets: (q.sheets || []).map((s) => ({

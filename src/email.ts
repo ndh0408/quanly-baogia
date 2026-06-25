@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
 
-let transporter = null;
+let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let configured = false;
 
 function init() {
@@ -23,7 +23,7 @@ function init() {
   return transporter;
 }
 
-const _esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const _esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c: string) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
 
 // Exported so call sites can escape user-controlled fragments when they DO need
 // to build trusted HTML themselves.
@@ -105,7 +105,8 @@ export async function sendEmail({ to, subject, html, text, attachments }: { to?:
     });
     return { messageId: info.messageId };
   } catch (e) {
-    logger.error({ err: e.message, to, subject }, "email send failed");
-    return { error: e.message };
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error({ err: msg, to, subject }, "email send failed");
+    return { error: msg };
   }
 }

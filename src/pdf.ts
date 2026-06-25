@@ -13,7 +13,7 @@ const FONT_PATHS = {
   italic: path.join(FONT_DIR, "Times-Italic.ttf"),
 };
 
-let hasUnicodeFont = null;
+let hasUnicodeFont: boolean | null = null;
 function checkFontsOnce() {
   if (hasUnicodeFont !== null) return hasUnicodeFont;
   hasUnicodeFont = existsSync(FONT_PATHS.regular) && existsSync(FONT_PATHS.bold);
@@ -41,7 +41,7 @@ function registerFonts(doc) {
 
 export async function renderQuotePdf(quote) {
   return new Promise((resolve, reject) => {
-    const buffers = [];
+    const buffers: Buffer[] = [];
     const doc = new PDFDocument({ size: "A4", margin: 40 });
     registerFonts(doc);
     doc.on("data", (b) => buffers.push(b));

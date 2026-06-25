@@ -35,7 +35,7 @@ export async function audit(ctx, action, opts: Record<string, any> = {}) {
       },
     });
   } catch (e) {
-    logger.error({ err: e.message, action }, "audit write failed");
+    logger.error({ err: e instanceof Error ? e.message : String(e), action }, "audit write failed");
   }
 }
 

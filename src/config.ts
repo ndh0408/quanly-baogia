@@ -82,7 +82,7 @@ if (
 // a leak in either subsystem must not compromise the other, and they must rotate
 // independently).
 if (config.NODE_ENV === "production") {
-  if (!process.env.JWT_SECRET) {
+  if (!process.env.JWT_SECRET || !config.JWT_SECRET) {
     console.error("❌ JWT_SECRET must be set explicitly in production (separate from SESSION_SECRET).");
     process.exit(1);
   }

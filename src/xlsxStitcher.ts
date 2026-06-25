@@ -11,47 +11,53 @@ import JSZip from "jszip";
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 
-async function readStr(zip, p) {
+interface Rel {
+  id: string | undefined;
+  type: string | undefined;
+  target: string | undefined;
+}
+
+async function readStr(zip: JSZip, p: string): Promise<string | null> {
   const f = zip.file(p);
   return f ? await f.async("string") : null;
 }
 
 /** Parse the COUNTED list children inside a styles.xml section like <fonts count="N">...</fonts>. */
-function extractSection(xml, tag) {
+function extractSection(xml: string, tag: string) {
   const m = xml.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`));
   if (!m) return { full: "", inner: "", count: 0, attrs: "" };
   const open = m[0].match(new RegExp(`<${tag}\\b([^>]*)>`));
   const attrs = open ? open[1] : "";
   return { full: m[0], inner: m[1], attrs, count: parseCount(attrs) };
 }
-function parseCount(attrs) {
+function parseCount(attrs: string) {
   const m = attrs.match(/count="(\d+)"/);
   return m ? Number(m[1]) : 0;
 }
 
 /** Split a section's inner XML into top-level child elements (e.g. each <font>...</font>). */
-function splitChildren(inner, childTag) {
+function splitChildren(inner: string, childTag: string): string[] {
   if (!inner) return [];
-  const out = [];
+  const out: string[] = [];
   const re = new RegExp(`<${childTag}\\b(?:[^>]*\\/>|[^>]*>[\\s\\S]*?<\\/${childTag}>)`, "g");
   let m;
   while ((m = re.exec(inner)) !== null) out.push(m[0]);
   return out;
 }
 
-function buildSection(tag, children, extraAttrs = "") {
+function buildSection(tag: string, children: string[], extraAttrs = "") {
   const attr = extraAttrs ? ` ${extraAttrs.trim()}` : "";
   return `<${tag} count="${children.length}"${attr}>${children.join("")}</${tag}>`;
 }
 
-function replaceSection(xml, tag, newSectionXml) {
+function replaceSection(xml: string, tag: string, newSectionXml: string) {
   const re = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`);
   if (re.test(xml)) return xml.replace(re, newSectionXml);
   // No existing section — inject before </styleSheet>
   return xml.replace("</styleSheet>", `${newSectionXml}</styleSheet>`);
 }
 
-function ensureXmlDecl(xml) {
+function ensureXmlDecl(xml: string) {
   return xml.startsWith("<?xml") ? xml : XML_DECL + xml;
 }
 
@@ -59,7 +65,7 @@ function ensureXmlDecl(xml) {
  * Remap an <xf .../> element's fontId, fillId, borderId, numFmtId by the given offsets.
  * Leaves built-in numFmtIds (< 164) alone.
  */
-function remapXf(xfXml, fontOff, fillOff, borderOff, numFmtMap) {
+function remapXf(xfXml: string, fontOff: number, fillOff: number, borderOff: number, numFmtMap: Map<number, number>) {
   let out = xfXml;
   out = out.replace(/fontId="(\d+)"/, (_, n) => `fontId="${Number(n) + fontOff}"`);
   out = out.replace(/fillId="(\d+)"/, (_, n) => `fillId="${Number(n) + fillOff}"`);
@@ -77,7 +83,7 @@ function remapXf(xfXml, fontOff, fillOff, borderOff, numFmtMap) {
  * Rewrite a sheet XML so its cell style refs (s="N") and shared-string refs
  * (<c t="s"><v>N</v></c>) point to the new indices in the merged workbook.
  */
-function remapSheetXml(sheetXml, xfOffset, sstOffset, numFmtMap) {
+function remapSheetXml(sheetXml: string, xfOffset: number, sstOffset: number, numFmtMap: Map<number, number>) {
   let out = sheetXml;
 
   // Cell style: <c r="A1" s="12" ...>  → s="12+xfOffset"
@@ -105,7 +111,7 @@ function remapSheetXml(sheetXml, xfOffset, sstOffset, numFmtMap) {
 }
 
 /** Update <sheets> in workbook.xml: append a new <sheet/> entry. */
-function addSheetEntry(wbXml, sheetName, sheetId, rId) {
+function addSheetEntry(wbXml: string, sheetName: string, sheetId: number, rId: string) {
   const entry = `<sheet name="${escapeXmlAttr(sheetName)}" sheetId="${sheetId}" r:id="${rId}"/>`;
   if (/<sheets\s*\/>/.test(wbXml)) {
     return wbXml.replace(/<sheets\s*\/>/, `<sheets>${entry}</sheets>`);
@@ -114,7 +120,7 @@ function addSheetEntry(wbXml, sheetName, sheetId, rId) {
 }
 
 /** Rename existing sheet entry by 1-based index */
-function renameSheet(wbXml, idx, newName) {
+function renameSheet(wbXml: string, idx: number, newName: string) {
   let i = 0;
   return wbXml.replace(/<sheet\b([\s\S]*?)\/>/g, (m, attrs) => {
     i++;
@@ -125,19 +131,19 @@ function renameSheet(wbXml, idx, newName) {
 }
 
 /** Append a relationship to workbook.xml.rels */
-function addRelationship(relsXml, rId, target, type) {
+function addRelationship(relsXml: string, rId: string, target: string, type: string) {
   const rel = `<Relationship Id="${rId}" Type="${type}" Target="${target}"/>`;
   return relsXml.replace(/(<\/Relationships>)/, `${rel}$1`);
 }
 
 /** Append an override to [Content_Types].xml */
-function addOverride(ctXml, partName, contentType) {
+function addOverride(ctXml: string, partName: string, contentType: string) {
   if (ctXml.includes(`PartName="${partName}"`)) return ctXml;
   const ov = `<Override PartName="${partName}" ContentType="${contentType}"/>`;
   return ctXml.replace(/(<\/Types>)/, `${ov}$1`);
 }
 
-function escapeXmlAttr(s) {
+function escapeXmlAttr(s: unknown) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -146,7 +152,7 @@ function escapeXmlAttr(s) {
     .replace(/'/g, "&apos;");
 }
 
-function maxNumberInPath(zipNames, dir, prefix, ext) {
+function maxNumberInPath(zipNames: string[], dir: string, prefix: string, ext: string) {
   let max = 0;
   for (const n of zipNames) {
     const m = n.match(new RegExp(`^${dir}/${prefix}(\\d+)\\.${ext}$`));
@@ -155,9 +161,9 @@ function maxNumberInPath(zipNames, dir, prefix, ext) {
   return max;
 }
 
-function parseRels(relsXml) {
+function parseRels(relsXml: string | null): Rel[] {
   if (!relsXml) return [];
-  const rels = [];
+  const rels: Rel[] = [];
   // Match <Relationship ... /> non-greedily up to the self-closing />
   const re = /<Relationship\b([\s\S]*?)\/>/g;
   let m;
@@ -182,7 +188,7 @@ function parseRels(relsXml) {
  *   - Sheet XML references drawing via r:id (e.g. <drawing r:id="rId1"/>) — those rIds are
  *     local to the sheet's own rels file, which we recreate fresh for the new sheet.
  */
-async function copyDrawingsAndImages(srcZip, baseZip, newSheetNum, baseDrawingOffset, baseImageOffset, srcSheetRelsPath) {
+async function copyDrawingsAndImages(srcZip: JSZip, baseZip: JSZip, newSheetNum: number, baseDrawingOffset: number, baseImageOffset: number, srcSheetRelsPath: string) {
   const srcNames = Object.keys(srcZip.files);
 
   // Sheet rels (drawing reference)
@@ -207,7 +213,7 @@ async function copyDrawingsAndImages(srcZip, baseZip, newSheetNum, baseDrawingOf
   if (!drXml) return null;
 
   // Build image remap
-  const imageRemap = new Map(); // oldImgNum -> newImgNum
+  const imageRemap = new Map<number, { newNum: number; ext: string }>(); // oldImgNum -> newImgNum
   if (drRels) {
     const parsed = parseRels(drRels);
     for (const r of parsed) {
@@ -252,7 +258,7 @@ async function copyDrawingsAndImages(srcZip, baseZip, newSheetNum, baseDrawingOf
 }
 
 /** Stitch buffers together. First is base. */
-export async function stitchXlsxBuffers(buffers, sheetNames) {
+export async function stitchXlsxBuffers(buffers: Buffer[], sheetNames: string[]): Promise<Buffer> {
   if (buffers.length === 0) throw new Error("Cần ít nhất 1 buffer");
   if (buffers.length === 1) {
     // Single sheet: just rename and return
@@ -276,6 +282,12 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
   let baseWbXml = await readStr(baseZip, "xl/workbook.xml");
   let baseWbRelsXml = await readStr(baseZip, "xl/_rels/workbook.xml.rels");
   let baseCtXml = await readStr(baseZip, "[Content_Types].xml");
+
+  // These parts are mandatory in any valid xlsx; absence means a malformed base buffer.
+  // (Previously these were assumed present and would throw a TypeError when used.)
+  if (baseWbXml == null) throw new Error("Base xlsx thiếu xl/workbook.xml");
+  if (baseWbRelsXml == null) throw new Error("Base xlsx thiếu xl/_rels/workbook.xml.rels");
+  if (baseCtXml == null) throw new Error("Base xlsx thiếu [Content_Types].xml");
 
   // Rename base's first sheet
   if (sheetNames[0]) baseWbXml = renameSheet(baseWbXml, 1, sheetNames[0]);
@@ -301,7 +313,7 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
   }
 
   // Sharedstrings: parse
-  let baseStrings = [];
+  let baseStrings: string[] = [];
   if (baseSstXml) {
     const inner = baseSstXml.match(/<sst\b[^>]*>([\s\S]*?)<\/sst>/);
     if (inner) {
@@ -332,13 +344,13 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
     // Locate the actual file from workbook.xml.rels.
     const srcWbRels = await readStr(srcZip, "xl/_rels/workbook.xml.rels") || "";
     const srcSheetRel = parseRels(srcWbRels).find(r => r.type?.includes("/worksheet"));
-    const srcSheetPath = srcSheetRel
+    const srcSheetPath: string | null = srcSheetRel && srcSheetRel.target != null
       ? `xl/${srcSheetRel.target.replace(/^\/?/, "")}`
       : null;
     const srcSheetXml = srcSheetPath ? await readStr(srcZip, srcSheetPath) : null;
-    if (!srcSheetXml) continue;
+    if (!srcSheetXml || !srcSheetPath) continue;
     // Locate sheet rels file for drawing references
-    const srcSheetBase = srcSheetPath.split("/").pop().replace(/\.xml$/, "");
+    const srcSheetBase = (srcSheetPath.split("/").pop() ?? srcSheetPath).replace(/\.xml$/, "");
     const srcSheetRelsPath = `xl/worksheets/_rels/${srcSheetBase}.xml.rels`;
 
     const srcFonts = splitChildren(extractSection(srcStylesXml, "fonts").inner, "font");
@@ -376,7 +388,7 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
     }
 
     // Source sharedStrings
-    let srcStrings = [];
+    let srcStrings: string[] = [];
     if (srcSstXml) {
       const inner = srcSstXml.match(/<sst\b[^>]*>([\s\S]*?)<\/sst>/);
       if (inner) srcStrings = inner[1].match(/<si\b[\s\S]*?<\/si>/g) || [];
@@ -396,7 +408,7 @@ export async function stitchXlsxBuffers(buffers, sheetNames) {
 
     // Drawings/images
     const drInfo = await copyDrawingsAndImages(srcZip, baseZip, newSheetNum, baseDrawingMax, baseImageMax, srcSheetRelsPath);
-    let newSheetRelsXml = null;
+    let newSheetRelsXml: string | null = null;
     if (drInfo) {
       // Bump global counters by source's max so further sheets don't collide
       const srcMaxDr = maxNumberInPath(Object.keys(srcZip.files), "xl/drawings", "drawing", "xml");

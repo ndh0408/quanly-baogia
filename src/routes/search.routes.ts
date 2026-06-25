@@ -28,7 +28,7 @@ router.get(
 
     const out: { query: string; results: Record<string, any> } = { query: q, results: {} };
 
-    const tasks = [];
+    const tasks: Promise<void>[] = [];
     if (types.includes("quote")) {
       tasks.push((async () => {
         const rows = await prisma.quote.findMany({

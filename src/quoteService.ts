@@ -150,8 +150,9 @@ export async function createQuote(req) {
       });
       break;
     } catch (e) {
-      if (e.code === "P2002" && !b.quoteNumber && attempt < 3) continue;
-      if (e.code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
+      const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
+      if (code === "P2002" && !b.quoteNumber && attempt < 3) continue;
+      if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
       throw e;
     }
   }
@@ -558,6 +559,7 @@ export async function markConverted(req) {
     throw httpError(409, "Báo giá vừa đổi trạng thái — vui lòng tải lại");
   }
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+  if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   await audit(req, "quote.convert", { resource: "quote", resourceId: id, before: { status: existing.status } });
   emitWebhook("quote.converted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
   return quote;
@@ -666,6 +668,7 @@ export async function updateMembers(req) {
     where: { id },
     include: { members: { select: { id: true, username: true, displayName: true, role: true } } },
   });
+  if (!updated) throw httpError(404, "Không tìm thấy báo giá");
   return { members: updated.members };
 }
 
@@ -714,7 +717,7 @@ export async function duplicateQuote(req) {
   // onto the next free version instead of two concurrent "Bản mới" both landing on _v2.
   let newTitle = src.title + " (copy)";
   let sameProjectCode = null;
-  let dupCreatorProjectCode = null;
+  let dupCreatorProjectCode: string | null = null;
   if (sameProject) {
     // Bản mới CÙNG mã dự án (v2, v3…) để gửi khách — giữ projectCode.
     sameProjectCode = src.projectCode || src.quoteNumber;
@@ -804,8 +807,9 @@ export async function duplicateQuote(req) {
       });
       break;
     } catch (e) {
-      if (e.code === "P2002" && attempt < 3) continue;
-      if (e.code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
+      const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
+      if (code === "P2002" && attempt < 3) continue;
+      if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
       throw e;
     }
   }

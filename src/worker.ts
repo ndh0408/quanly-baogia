@@ -1,6 +1,7 @@
 // Worker process. Run via `npm run worker` in its own container.
 // Pulls jobs from BullMQ queues and executes them off the request thread.
 
+import type { Worker } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
@@ -115,7 +116,7 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   }
   logger.info({ env: config.NODE_ENV }, "Worker starting");
 
-  const workers = [];
+  const workers: Worker[] = [];
   for (const [queueName, jobs] of Object.entries(processors)) {
     const w = createWorker(queueName, async (job) => {
       const handler = jobs[job.name];
@@ -126,7 +127,7 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
         // Report the failure to Sentry with job context, then rethrow so BullMQ
         // marks the job failed and applies its retry/backoff policy.
         captureError(err, { queue: queueName, jobName: job.name, jobId: job.id, data: job.data });
-        logger.error({ queue: queueName, jobName: job.name, jobId: job.id, err: err.message }, "job failed");
+        logger.error({ queue: queueName, jobName: job.name, jobId: job.id, err: err instanceof Error ? err.message : String(err) }, "job failed");
         throw err;
       }
     }, Number(process.env.WORKER_CONCURRENCY || 4));

@@ -256,7 +256,8 @@ export function validate(schemas) {
       if (schemas.params) req.params = schemas.params.parse(req.params ?? {});
       next();
     } catch (e) {
-      const errors = (e.issues || []).map((i) => ({
+      const issues = e instanceof z.ZodError ? e.issues : [];
+      const errors = issues.map((i) => ({
         path: i.path.join("."),
         message: i.message,
       }));

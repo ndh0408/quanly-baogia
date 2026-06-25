@@ -29,7 +29,7 @@ export function createLimiter(prefix, options = {}) {
         });
       }
     } catch (e) {
-      logger.warn({ err: e.message, prefix }, "rate limiter falling back to in-memory store");
+      logger.warn({ err: e instanceof Error ? e.message : String(e), prefix }, "rate limiter falling back to in-memory store");
     }
   }
   return rateLimit(opts);

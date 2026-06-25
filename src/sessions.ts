@@ -17,6 +17,6 @@ export async function destroyAllSessions(userId, keepSid = null) {
   } catch (e) {
     // Session table missing (tests without the PG store) or transient DB issue —
     // log loudly: this is a security control, not a best-effort cleanup.
-    logger.error({ err: e.message, userId }, "destroyAllSessions failed");
+    logger.error({ err: e instanceof Error ? e.message : String(e), userId }, "destroyAllSessions failed");
   }
 }

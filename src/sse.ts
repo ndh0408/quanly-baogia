@@ -5,13 +5,14 @@
 // events are silently lost across processes. Without Redis it behaves exactly as
 // the previous single-process in-memory broker.
 
+import type { Redis } from "ioredis";
 import { sseClients } from "./observability.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
 const subscribers = new Map(); // userId -> Set<res>
 const CHANNEL = "sse:events";
-let pub = null; // Redis publisher (null = in-memory only)
+let pub: Redis | null = null; // Redis publisher (null = in-memory only)
 
 function recountClients() {
   let n = 0;
@@ -46,8 +47,9 @@ if (config.REDIS_URL) {
     try {
       const { default: IORedis } = await import("ioredis");
       const opts = { maxRetriesPerRequest: null, enableReadyCheck: false };
-      pub = new (IORedis as any)(config.REDIS_URL, opts);
-      pub.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis pub error"));
+      const pubClient: Redis = new (IORedis as any)(config.REDIS_URL, opts);
+      pub = pubClient;
+      pubClient.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis pub error"));
       const sub = new (IORedis as any)(config.REDIS_URL, opts);
       sub.on("error", (e) => logger.warn({ err: e.message }, "sse redis sub error"));
       await sub.subscribe(CHANNEL);
@@ -61,7 +63,7 @@ if (config.REDIS_URL) {
       logger.info("SSE Redis pub/sub backplane enabled");
     } catch (e) {
       pub = null;
-      logger.warn({ err: e.message }, "SSE Redis backplane init failed — falling back to in-memory");
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "SSE Redis backplane init failed — falling back to in-memory");
     }
   })();
 }

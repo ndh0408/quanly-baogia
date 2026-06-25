@@ -51,6 +51,7 @@ router.post(
       return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
+    if (!user) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
 
     // Regenerate session ID to defeat session fixation
     await new Promise<void>((resolve, reject) =>
@@ -136,6 +137,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
+    if (!user) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
     const ok = await bcrypt.compare(oldPassword, user.passwordHash);
     if (!ok) {
       await audit(req, "password.change.failed", { resource: "user", resourceId: user.id, actorId: user.id });
@@ -173,6 +175,7 @@ router.post(
       return res.status(result.status).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
+    if (!user) return res.status(401).json({ error: "Tài khoản không tồn tại hoặc đã bị khóa" });
 
     const access = signAccessToken(user);
     const refresh = await issueRefreshToken(user.id, { ip, userAgent: ua } as any);
@@ -204,7 +207,8 @@ router.post(
         refreshExpiresAt: refresh.expiresAt,
       });
     } catch (e) {
-      res.status(e.status || 401).json({ error: e.message });
+      const status = typeof e === "object" && e !== null && "status" in e && typeof e.status === "number" ? e.status : 0;
+      res.status(status || 401).json({ error: e instanceof Error ? e.message : String(e) });
     }
   })
 );

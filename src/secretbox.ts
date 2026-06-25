@@ -44,7 +44,7 @@ export function decryptValue(value) {
     d.setAuthTag(tag);
     return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
   } catch (e) {
-    logger.warn({ err: e.message }, "secretbox decrypt failed");
+    logger.warn({ err: e instanceof Error ? e.message : String(e) }, "secretbox decrypt failed");
     return null;
   }
 }

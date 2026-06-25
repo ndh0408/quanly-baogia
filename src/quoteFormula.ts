@@ -251,7 +251,7 @@ export function buildFormulaContext({ cols, items, rowToExcel }) {
       const c0 = Math.min(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
       const c1 = Math.max(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
       const r0 = Math.min(Number(pa[2]), Number(pb[2])), r1 = Math.max(Number(pa[2]), Number(pb[2]));
-      const out = [];
+      const out: number[] = [];
       for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(editorCellNum(colLetter(c) + r));
       return out;
     },

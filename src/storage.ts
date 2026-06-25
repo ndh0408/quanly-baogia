@@ -3,7 +3,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
-let client = null;
+let client: S3Client | null = null;
 
 export function isStorageEnabled() {
   return !!(config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY);
@@ -12,11 +12,13 @@ export function isStorageEnabled() {
 export function getClient() {
   if (!isStorageEnabled()) return null;
   if (client) return client;
+  const { S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY } = config;
+  if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) return null;
   client = new S3Client({
-    endpoint: config.S3_ENDPOINT,
+    endpoint: S3_ENDPOINT,
     region: config.S3_REGION,
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
-    credentials: { accessKeyId: config.S3_ACCESS_KEY, secretAccessKey: config.S3_SECRET_KEY },
+    credentials: { accessKeyId: S3_ACCESS_KEY, secretAccessKey: S3_SECRET_KEY },
   });
   return client;
 }
@@ -33,7 +35,7 @@ export async function ensureBucket(bucket = config.S3_BUCKET) {
       logger.info({ bucket }, "S3 bucket created");
       return true;
     } catch (e) {
-      logger.error({ err: e.message, bucket }, "S3 bucket create failed");
+      logger.error({ err: e instanceof Error ? e.message : String(e), bucket }, "S3 bucket create failed");
       return false;
     }
   }

@@ -62,8 +62,15 @@ export async function notify(userId, notif) {
 
     const prefs = channelPrefs?.value || { email: "important", telegram: "off" };
     const shouldDeliver = (pref) => pref === "always" || (pref === "important" && notif.important);
+    // Setting.value là Json (union string|number|bool|object|array). Đọc 1 khoá kênh: nếu là
+    // object thì lấy thuộc tính, ngược lại undefined — Y HỆT cách JS đọc `prefs.x` khi prefs là
+    // primitive (trả undefined, không ném). Giữ nguyên hành vi, chỉ tường minh hoá kiểu.
+    const prefOf = (key) =>
+      (prefs && typeof prefs === "object" && !Array.isArray(prefs))
+        ? (prefs as Record<string, unknown>)[key]
+        : undefined;
 
-    if (user?.email && shouldDeliver(prefs.email)) {
+    if (user?.email && shouldDeliver(prefOf("email"))) {
       await runOrQueue(QUEUES.EMAIL, "send", {
         to: user.email,
         subject: notif.title,
@@ -77,7 +84,7 @@ export async function notify(userId, notif) {
     // Telegram: user-level chatId via Setting `telegram.user.<id>` OR per-call override
     const tgChatId = notif.telegramChatId
       ?? (await prisma.setting.findUnique({ where: { key: `telegram.user.${userId}` } }))?.value;
-    if (tgChatId && shouldDeliver(prefs.telegram)) {
+    if (tgChatId && shouldDeliver(prefOf("telegram"))) {
       await runOrQueue(QUEUES.NOTIFY, "telegram", {
         chatId: tgChatId,
         // Plain text (telegram.js mặc định không parse_mode): tiêu đề/nội dung do người dùng
@@ -86,7 +93,7 @@ export async function notify(userId, notif) {
       });
     }
   } catch (e) {
-    logger.error({ err: e.message, userId }, "notify failed");
+    logger.error({ err: e instanceof Error ? e.message : String(e), userId }, "notify failed");
   }
 }
 

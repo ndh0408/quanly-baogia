@@ -56,7 +56,11 @@ function bearerTokenMatches(authHeader, expected) {
 
 // Origins allowed to make state-changing cookie-session requests (CSRF allowlist).
 // Normalized to lowercase (scheme+host are case-insensitive) for robust matching.
-const ALLOWED_ORIGINS = new Set([config.APP_BASE_URL.toLowerCase()]);
+// config.ts đảm bảo APP_BASE_URL luôn được đặt (fallback http://localhost:PORT) trước khi tới đây,
+// nhưng kiểu khai báo là string|undefined → narrow bằng guard để TS biết chắc là string.
+const baseOrigin = config.APP_BASE_URL;
+if (!baseOrigin) throw new Error("APP_BASE_URL chưa được cấu hình (config.ts phải đặt fallback)");
+const ALLOWED_ORIGINS = new Set([baseOrigin.toLowerCase()]);
 if (config.CORS_ORIGINS) {
   for (const o of config.CORS_ORIGINS.split(",")) {
     const v = o.trim().replace(/\/+$/, "").toLowerCase();
@@ -77,7 +81,7 @@ function csrfGuard(req, res, next) {
   // No Origin (some clients omit it) — fall back to Referer when present.
   const ref = req.headers.referer;
   if (ref) {
-    let refOrigin = null;
+    let refOrigin: string | null = null;
     try { refOrigin = new URL(ref).origin.toLowerCase(); } catch { /* malformed */ }
     if (!refOrigin || !ALLOWED_ORIGINS.has(refOrigin)) {
       return res.status(403).json({ error: "Yêu cầu bị chặn (CSRF: referer không hợp lệ)", code: "csrf_referer" });
@@ -265,7 +269,7 @@ export function createApp() {
       res.json({ ok: true });
     } catch (e) {
       // Never leak DB error details on an unauthenticated endpoint.
-      logger.error({ err: e.message }, "readyz failed");
+      logger.error({ err: e instanceof Error ? e.message : String(e) }, "readyz failed");
       res.status(503).json({ ok: false });
     }
   });

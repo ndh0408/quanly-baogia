@@ -159,7 +159,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // sample; now filled from the quote's company + sender fields so edits show up.
       fromBlockCell: "F1",
       fromBlockFormat: ({ companyName, contact, title, phone, address }) => {
-        const lines = [];
+        const lines: string[] = [];
         if (companyName) lines.push(String(companyName).toUpperCase());
         if (address) lines.push(address);
         const person = [contact, title].filter(Boolean).join(" - ");

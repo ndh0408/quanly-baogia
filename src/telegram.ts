@@ -23,7 +23,8 @@ export async function sendTelegram({ chatId, text, parseMode = "" }) {
     }
     return { ok: true, messageId: body.result?.message_id };
   } catch (e) {
-    logger.error({ err: e.message, chatId }, "telegram send failed");
-    return { error: e.message };
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error({ err: msg, chatId }, "telegram send failed");
+    return { error: msg };
   }
 }

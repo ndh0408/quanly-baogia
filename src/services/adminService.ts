@@ -14,7 +14,7 @@ export async function storageStats(_req) {
     prisma.quote.count(),
     prisma.quoteItem.count(),
     prisma.auditEvent.count(),
-    prisma.$queryRaw`SELECT COUNT(*)::int AS n FROM user_sessions`.catch(() => [{ n: 0 }]),
+    prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM user_sessions`.catch(() => [{ n: 0 }]),
   ]);
   return {
     users, customers, products, quotes, items,

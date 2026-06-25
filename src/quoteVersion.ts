@@ -90,7 +90,7 @@ export async function snapshotQuoteVersion(tx, quoteId, actorId, reason) {
 
 /** Compute a shallow diff between two version payloads. Returns array of changed keys with old/new. */
 export function diffVersions(a, b) {
-  const out = [];
+  const out: { key: string; before: unknown; after: unknown }[] = [];
   const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
   for (const k of keys) {
     if (JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k])) {

@@ -51,7 +51,7 @@ export function decryptSecret(stored) {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
   } catch (e) {
-    logger.error({ err: e.message }, "MFA secret decrypt failed (wrong/rotated key or corrupt data)");
+    logger.error({ err: e instanceof Error ? e.message : String(e) }, "MFA secret decrypt failed (wrong/rotated key or corrupt data)");
     return null;
   }
 }

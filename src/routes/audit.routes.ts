@@ -54,14 +54,13 @@ router.get(
     // who/what/when trail with PII stripped.
     const isAdmin = req.session.role === "admin";
     const data = rows.map((r) => {
-      const out = { ...r, id: r.id.toString() }; // BigInt id → string for JSON
       if (!isAdmin) {
-        delete out.before;
-        delete out.after;
-        delete out.ip;
-        delete out.userAgent;
+        // Strip PII-bearing fields for non-admins via destructuring (these props
+        // are required on the row type, so `delete` is not permitted under strict).
+        const { before, after, ip, userAgent, ...rest } = r;
+        return { ...rest, id: r.id.toString() }; // BigInt id → string for JSON
       }
-      return out;
+      return { ...r, id: r.id.toString() }; // BigInt id → string for JSON
     });
     res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) } });
   })

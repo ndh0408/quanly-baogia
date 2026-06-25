@@ -273,7 +273,7 @@ function fillSheetData(ws, cfg, quote, sheet, vatPct) {
   const skipRows = new Set(itemsCfg.skipRows || []);
   const templateRowCount = itemsCfg.lastRow - itemsCfg.firstRow + 1;
   // Available item slots = template rows EXCLUDING skipRows (e.g. section headers)
-  const slotRows = [];
+  const slotRows: number[] = [];
   for (let r = itemsCfg.firstRow; r <= itemsCfg.lastRow; r++) {
     if (!skipRows.has(r)) slotRows.push(r);
   }
@@ -1058,9 +1058,9 @@ export async function buildQuoteBuffer(quote) {
   }
   const vatPct = Number(quote.vatPercent) || 0;
 
-  const sheetBuffers = [];
-  const sheetNames = [];
-  const sheetTotals = [];
+  const sheetBuffers: Buffer[] = [];
+  const sheetNames: string[] = [];
+  const sheetTotals: { name: string; subtotal: number; vat: number; total: number }[] = [];
   const usedNames = new Set();
   const uniq = (name) => {
     let n = name, i = 2;

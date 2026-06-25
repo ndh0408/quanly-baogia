@@ -29,10 +29,10 @@ export async function runExport(fn) {
 const WORKER_URL = new URL("./exportWorker.js", import.meta.url);
 const MAX_WORKERS = 3;            // bound concurrent workers (memory + CPU on shared box)
 let activeWorkers = 0;
-const workerWaiters = [];
+const workerWaiters: Array<() => void> = [];
 function acquireWorkerSlot() {
   if (activeWorkers < MAX_WORKERS) { activeWorkers++; return Promise.resolve(); }
-  return new Promise((res) => workerWaiters.push(res)).then(() => { activeWorkers++; });
+  return new Promise<void>((res) => workerWaiters.push(res)).then(() => { activeWorkers++; });
 }
 function releaseWorkerSlot() { activeWorkers--; const w = workerWaiters.shift(); if (w) w(); }
 
@@ -69,7 +69,7 @@ export async function runExportJob(kind, plainQuote, inlineFn) {
     if (looksValid(kind, buf)) return buf;
     logger.warn({ kind }, "export worker returned invalid buffer — falling back to inline");
   } catch (e) {
-    logger.warn({ kind, err: e?.message }, "export worker failed — falling back to inline");
+    logger.warn({ kind, err: e instanceof Error ? e.message : String(e) }, "export worker failed — falling back to inline");
   }
   return runExport(inlineFn);
 }

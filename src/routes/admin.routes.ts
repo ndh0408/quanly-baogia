@@ -59,7 +59,7 @@ router.get(
     // Resolve with the exit code only after BOTH pg_dump closed AND the temp file
     // flushed; resolve -1 on any spawn/write error.
     const code = await new Promise((resolve) => {
-      let exit = null, closed = false, flushed = false;
+      let exit: number | null = null, closed = false, flushed = false;
       const settle = () => { if (closed && flushed) resolve(exit); };
       proc.on("close", (c) => { exit = c; closed = true; settle(); });
       proc.on("error", (e) => { err = err || e.message; resolve(-1); });

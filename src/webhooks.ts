@@ -220,7 +220,7 @@ export async function deliverWebhook({ webhookId, event, payload }) {
     text = `len=${res.len}`;
   } catch (e) {
     status = 0;
-    text = e.message;
+    text = e instanceof Error ? e.message : String(e);
   }
 
   await prisma.webhookDelivery.create({

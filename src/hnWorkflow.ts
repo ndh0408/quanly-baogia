@@ -42,7 +42,7 @@ export async function saveHn(req) {
   const existing = await prisma.quote.findFirst({ where: { id }, include: { sheets: { select: { id: true, extraTables: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (req.session.role !== "account_hn" || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Chỉ Account Hà Nội được giao mới điền được phần này");
-  if (["submitted", "approved"].includes(existing.hnStatus)) throw httpError(400, "Phần HN đã gửi duyệt/đã duyệt — không sửa được");
+  if (["submitted", "approved"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN đã gửi duyệt/đã duyệt — không sửa được");
   const hnSheets = Array.isArray(req.body?.hnSheets) ? req.body.hnSheets : [];
   await prisma.$transaction(async (tx) => {
     for (const hs of hnSheets) {
@@ -63,7 +63,7 @@ export async function submitHn(req) {
   const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, quoteNumber: true, title: true, hnAssigneeId: true, hnStatus: true, createdById: true } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (req.session.role !== "account_hn" || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Không có quyền gửi duyệt phần này");
-  if (!["assigned", "rejected"].includes(existing.hnStatus)) throw httpError(400, "Phần HN không ở trạng thái có thể gửi duyệt");
+  if (!["assigned", "rejected"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN không ở trạng thái có thể gửi duyệt");
   const quote = await prisma.quote.update({ where: { id }, data: { hnStatus: "submitted", hnSubmittedAt: new Date(), hnRejectNote: null }, include: QUOTE_INCLUDE });
   await notify(existing.createdById, { title: `Phần Hà Nội chờ duyệt: ${quote.quoteNumber}`, body: `${quote.title} — Account đã gửi giá HN, mở để duyệt/trả.`, link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true });
   await audit(req, "quote.hn.submit", { resource: "quote", resourceId: id });
