@@ -1,0 +1,49 @@
+# Dependabot — tự mở PR cập nhật thư viện (native GitHub, miễn phí, không cần cài app).
+# Gom minor/patch thành 1 PR/tuần (ít ồn); major tự tách thành PR RIÊNG từng cái để review kỹ.
+# Bật ở: GitHub repo > Settings > Code security > Dependabot version updates (nếu chưa auto).
+version: 2
+updates:
+  # === Backend (root package.json) ===
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Ho_Chi_Minh"
+    open-pull-requests-limit: 8
+    labels: ["dependencies", "backend"]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      backend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # Major KHÔNG nằm trong group trên nên tự thành PR riêng (vd express 5, prisma 8) — review tay.
+
+  # === Frontend (web/package.json) ===
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Ho_Chi_Minh"
+    open-pull-requests-limit: 8
+    labels: ["dependencies", "frontend"]
+    commit-message:
+      prefix: "chore(deps-web)"
+    groups:
+      web-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # === GitHub Actions (workflow .yml) ===
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["ci"]
+    commit-message:
+      prefix: "chore(ci)"
