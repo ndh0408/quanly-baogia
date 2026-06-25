@@ -1,12 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomBytes } from "node:crypto";
-import { prisma } from "../db.js";
 import { asyncHandler, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
-import { audit } from "../audit.js";
-import { EVENTS, assertPublicHttpUrl } from "../webhooks.js";
-import { encryptValue } from "../secretbox.js";
+import { EVENTS } from "../webhooks.js";
+import * as svc from "../services/webhookService.js";
 
 const router = Router();
 router.use(requireRole("admin"));
@@ -30,8 +27,9 @@ const Create = z.object({
 
 router.get("/events", (_req, res) => res.json({ events: EVENTS }));
 
-router.get("/", asyncHandler(async (_req, res) => {
-  const rows = await prisma.webhook.findMany({ orderBy: { id: "asc" } });
+// Route MỎNG: validate + gọi service; GIỮ lại ở đây phần che/đính secret (tạo hình response).
+router.get("/", asyncHandler(async (req, res) => {
+  const rows = await svc.listWebhooks(req);
   res.json(rows.map(present));
 }));
 
@@ -39,11 +37,8 @@ router.post(
   "/",
   validate({ body: Create }),
   asyncHandler(async (req, res) => {
-    await assertPublicHttpUrl(req.body.url); // reject internal/private targets up front
-    const plaintextSecret = req.body.secret || randomBytes(24).toString("hex");
-    // Store the secret ENCRYPTED at rest; return the plaintext exactly once here.
-    const row = await prisma.webhook.create({ data: { ...req.body, secret: encryptValue(plaintextSecret) } });
-    await audit(req, "webhook.create", { resource: "webhook", resourceId: row.id });
+    const { row, plaintextSecret } = await svc.createWebhook(req);
+    // Return the plaintext secret exactly once here.
     res.status(201).json({ ...present(row), secret: plaintextSecret, secretSet: true });
   })
 );
@@ -52,12 +47,7 @@ router.put(
   "/:id",
   validate({ params: idParam, body: Create.partial() }),
   asyncHandler(async (req, res) => {
-    if (req.body.url) await assertPublicHttpUrl(req.body.url);
-    // Encrypt a rotated secret before storing.
-    const data = { ...req.body };
-    if (data.secret) data.secret = encryptValue(data.secret);
-    const row = await prisma.webhook.update({ where: { id: req.params.id }, data });
-    await audit(req, "webhook.update", { resource: "webhook", resourceId: row.id });
+    const row = await svc.updateWebhook(req);
     res.json(present(row));
   })
 );
@@ -65,24 +55,13 @@ router.put(
 router.delete(
   "/:id",
   validate({ params: idParam }),
-  asyncHandler(async (req, res) => {
-    await prisma.webhook.delete({ where: { id: req.params.id } });
-    await audit(req, "webhook.delete", { resource: "webhook", resourceId: req.params.id });
-    res.json({ ok: true });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.deleteWebhook(req)))
 );
 
 router.get(
   "/:id/deliveries",
   validate({ params: idParam, query: z.object({ size: z.coerce.number().int().min(1).max(200).default(50) }) }),
-  asyncHandler(async (req, res) => {
-    const rows = await prisma.webhookDelivery.findMany({
-      where: { webhookId: req.params.id },
-      orderBy: { createdAt: "desc" },
-      take: req.query.size,
-    });
-    res.json({ data: rows.map((r) => ({ ...r, id: r.id.toString() })) });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.listDeliveries(req)))
 );
 
 export default router;

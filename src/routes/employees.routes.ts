@@ -1,11 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
-import { audit } from "../audit.js";
 import { requirePermission, PERMISSIONS as P } from "../permissions.js";
+import * as svc from "../services/employeeService.js";
 
 // Danh bạ NHÂN VIÊN — kho thông tin cá nhân DÙNG CHUNG (không phân quyền theo owner): ai có
 // quyền XEM nhân sự thì xem được cả danh bạ (để chọn khi tạo hồ sơ); ai TẠO được nhân sự thì
@@ -33,67 +32,33 @@ const ListQuery = z.object({
   order: z.enum(["asc", "desc"]).default("asc"),
 });
 
-const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
-
+// Route MỎNG: cổng quyền + validate → gọi tầng service (prisma + audit ở employeeService.ts).
 router.get(
   "/",
   requirePermission(P.PERSONNEL_READ_OWN),   // ai xem được Nhân sự thì xem được danh bạ (để chọn)
   validate({ query: ListQuery }),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { q, page, size, sort, order } = req.query as any;
-    const where: Record<string, any> = {};
-    if (q) {
-      where.OR = [
-        { fullName: { contains: q, mode: "insensitive" } },
-        { taxCode: { contains: q } },
-        { phone: { contains: q } },
-        { idCard: { contains: q } },
-        { bankAccount: { contains: q } },
-      ];
-    }
-    const [total, data] = await Promise.all([
-      prisma.employee.count({ where }),
-      prisma.employee.findMany({ where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect }),
-    ]);
-    res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) } });
-  })
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.listEmployees(req)))
 );
 
 router.post(
   "/",
   requirePermission(P.PERSONNEL_CREATE),
   validate({ body: EmployeeCreate }),
-  asyncHandler(async (req: Request, res: Response) => {
-    const rec = await prisma.employee.create({ data: { ...req.body, createdById: req.session.userId }, include: ownerSelect });
-    await audit(req, "employee.create", { resource: "employee", resourceId: rec.id });
-    res.status(201).json(rec);
-  })
+  asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.createEmployee(req)))
 );
 
 router.put(
   "/:id",
   requirePermission(P.PERSONNEL_CREATE),
   validate({ params: idParam, body: EmployeeUpdate }),
-  asyncHandler(async (req: Request, res: Response) => {
-    const before = await prisma.employee.findFirst({ where: { id: (req.params as any).id } });
-    if (!before) { res.status(404).json({ error: "Không tìm thấy nhân viên" }); return; }
-    const rec = await prisma.employee.update({ where: { id: (req.params as any).id }, data: req.body, include: ownerSelect });
-    await audit(req, "employee.update", { resource: "employee", resourceId: rec.id });
-    res.json(rec);
-  })
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateEmployee(req)))
 );
 
 router.delete(
   "/:id",
   requirePermission(P.PERSONNEL_CREATE),
   validate({ params: idParam }),
-  asyncHandler(async (req: Request, res: Response) => {
-    const before = await prisma.employee.findFirst({ where: { id: (req.params as any).id } });
-    if (!before) { res.status(404).json({ error: "Không tìm thấy nhân viên" }); return; }
-    await prisma.employee.delete({ where: { id: (req.params as any).id } });   // soft delete (db.js)
-    await audit(req, "employee.delete", { resource: "employee", resourceId: (req.params as any).id });
-    res.json({ ok: true });
-  })
+  asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteEmployee(req)))
 );
 
 export default router;

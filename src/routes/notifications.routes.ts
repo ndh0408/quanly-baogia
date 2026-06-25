@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate, zbool } from "../validators.js";
+import * as svc from "../services/notificationService.js";
 
 const router = Router();
 router.use(requireAuth);
 
+// Route MỎNG: chỉ validate + gọi tầng service (logic truy vấn/cô lập theo user ở notificationService.ts).
 router.get(
   "/",
   validate({ query: z.object({
@@ -14,54 +15,23 @@ router.get(
     page: z.coerce.number().int().min(1).default(1),
     size: z.coerce.number().int().min(1).max(100).default(20),
   })}),
-  asyncHandler(async (req, res) => {
-    const where: any = { userId: req.session.userId };
-    if (req.query.unread) where.readAt = null;
-    const [total, rows] = await Promise.all([
-      prisma.notification.count({ where }),
-      prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (req.query.page - 1) * req.query.size,
-        take: req.query.size,
-      }),
-    ]);
-    res.json({
-      data: rows.map((r) => ({ ...r, id: r.id.toString() })),
-      meta: { total, page: req.query.page, size: req.query.size, pageCount: Math.ceil(total / req.query.size) },
-    });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.listNotifications(req)))
 );
 
 router.get(
   "/unread-count",
-  asyncHandler(async (req, res) => {
-    const count = await prisma.notification.count({ where: { userId: req.session.userId, readAt: null } });
-    res.json({ count });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.unreadCount(req)))
 );
 
 router.post(
   "/:id/read",
   validate({ params: z.object({ id: z.coerce.bigint() }) }),
-  asyncHandler(async (req, res) => {
-    await prisma.notification.updateMany({
-      where: { id: req.params.id, userId: req.session.userId },
-      data: { readAt: new Date() },
-    });
-    res.json({ ok: true });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.markRead(req)))
 );
 
 router.post(
   "/read-all",
-  asyncHandler(async (req, res) => {
-    await prisma.notification.updateMany({
-      where: { userId: req.session.userId, readAt: null },
-      data: { readAt: new Date() },
-    });
-    res.json({ ok: true });
-  })
+  asyncHandler(async (req, res) => res.json(await svc.markAllRead(req)))
 );
 
 export default router;
