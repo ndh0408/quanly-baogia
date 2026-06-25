@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense, type ReactNode } from "react";
+import { useState, useEffect, useRef, lazy, Suspense, Component, type ReactNode } from "react";
 import { api, type Me } from "./api";
 import { confirmModal } from "./ui";
 
@@ -14,6 +14,28 @@ async function guardLeave(): Promise<boolean> {
 // Hiển thị trong lúc tải chunk lazy (editor/wizard/HN) — skeleton giống các trang khác.
 function PageFallback() {
   return <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
+}
+
+// LazyBoundary = ErrorBoundary + Suspense. Khi deploy bản mới lúc user đang mở app cũ rồi mở route lazy,
+// chunk-hash CŨ đã bị xóa (emptyOutDir) → ChunkLoadError. Tự reload 1 lần (chặn loop qua mốc thời gian)
+// để lấy bundle mới thay vì để trang hỏng. (Lỗi cố hữu của SPA code-split, không riêng PWA.)
+class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: unknown) {
+    const msg = String((err as { message?: string })?.message || err);
+    if (/ChunkLoadError|Loading chunk|dynamically imported module|Failed to fetch/i.test(msg)) {
+      const last = Number(sessionStorage.getItem("chunkReloadAt") || 0);
+      if (Date.now() - last > 10000) { // chỉ reload nếu lần trước >10s → tránh lặp vô hạn
+        sessionStorage.setItem("chunkReloadAt", String(Date.now()));
+        location.reload();
+      }
+    }
+  }
+  render() {
+    if (this.state.failed) return <PageFallback />;
+    return <Suspense fallback={<PageFallback />}>{this.props.children}</Suspense>;
+  }
 }
 import { PersonnelPage } from "./Personnel";
 import { EmployeesPage } from "./Employees";
@@ -208,12 +230,12 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
           </div>
         </aside>
         {isWizard ? (
-          <main className="main" id="main" tabIndex={-1}><Suspense fallback={<PageFallback />}><NewQuoteWizard me={me} /></Suspense></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary></main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><Suspense fallback={<PageFallback />}><AccountHnView quoteId={hnEditId} /></Suspense></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            <Suspense fallback={<PageFallback />}><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></Suspense>
+            <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>

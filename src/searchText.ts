@@ -14,3 +14,15 @@ export function normalizeSearch(...parts: (string | null | undefined)[]): string
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// Token KHÔNG BAO GIỜ có trong searchText (cột chỉ chứa [a-z0-9 ]) — dùng khi q chuẩn-hóa ra RỖNG.
+const NO_MATCH = "~no~match~";
+
+/**
+ * Prisma StringFilter cho cột searchText từ từ khóa q. Nếu q chuẩn-hóa ra rỗng (q chỉ gồm ký tự đặc
+ * biệt/khoảng trắng) → trả token-không-khớp để ra 0 kết quả (NHƯ CŨ), tránh `contains:""` = LIKE '%%'
+ * nuốt CẢ danh sách trong phạm vi quyền.
+ */
+export function searchTextFilter(q: string | null | undefined): { contains: string } {
+  return { contains: normalizeSearch(q ?? "") || NO_MATCH };
+}

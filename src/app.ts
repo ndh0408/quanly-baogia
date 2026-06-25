@@ -285,6 +285,13 @@ export function createApp() {
     index: false,                 // let the SPA fallback serve index.html (no-cache)
     maxAge: "1y",
     immutable: true,
+    setHeaders: (res: import("node:http").ServerResponse, filePath: string) => {
+      // PWA sw.js/registerSW.js/manifest KHÔNG content-hash + tham chiếu unversioned → KHÔNG được
+      // long-cache/immutable (kẻo đổi nội dung mà client kẹt bản cũ tới hết hạn cache). Cho revalidate.
+      if (/(?:sw|registerSW)\.js$|manifest\.webmanifest$/.test(filePath)) {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    },
   }));
   const sendOld = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); };
   const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };

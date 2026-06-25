@@ -7,7 +7,7 @@ import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../quoteService.js";
-import { normalizeSearch } from "../searchText.js";
+import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
 type Action = "read" | "manage";
 
@@ -31,7 +31,7 @@ export async function listCustomers(req: Request) {
   }
   if (tag) where.tags = { has: tag };
   // Tìm KHÔNG dấu / sai dấu: khớp trên cột searchText đã chuẩn-hóa (gồm name+code+phone+email+taxCode+contactName).
-  if (q) where.searchText = { contains: normalizeSearch(q) };
+  if (q) where.searchText = searchTextFilter(q);
   const [total, data] = await Promise.all([
     prisma.customer.count({ where }),
     prisma.customer.findMany({
@@ -92,10 +92,10 @@ export async function updateCustomer(req: Request) {
   const data = { ...req.body };
   // Chỉ user đặc quyền mới đổi chủ sở hữu; còn lại strip.
   if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) delete data.ownerId;
-  data.searchText = normalizeSearch(
-    data.name ?? before.name, data.code ?? before.code, data.phone ?? before.phone,
-    data.email ?? before.email, data.taxCode ?? before.taxCode, data.contactName ?? before.contactName
-  );
+  // Tính lại searchText theo giá trị SẼ ghi: field có trong payload thì dùng nó (KỂ CẢ null = xóa),
+  // không thì giữ giá trị cũ. Dùng `k in data` thay `?? before` để xóa-rỗng phản ánh đúng (không stale).
+  const pick = (k: string) => (k in data ? data[k] : (before as any)[k]);
+  data.searchText = normalizeSearch(pick("name"), pick("code"), pick("phone"), pick("email"), pick("taxCode"), pick("contactName"));
   const customer = await prisma.customer.update({ where: { id: (req.params as any).id }, data });
   await audit(req, "customer.update", { resource: "customer", resourceId: customer.id, before, after: customer });
   return customer;

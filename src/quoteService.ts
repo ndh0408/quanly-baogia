@@ -10,7 +10,7 @@ import { prisma } from "./db.js";
 import { config } from "./config.js";
 import { computeQuoteTotals, D } from "./money.js";
 import { nextQuoteNumber, nextProjectCode } from "./quoteNumber.js";
-import { normalizeSearch } from "./searchText.js";
+import { normalizeSearch, searchTextFilter } from "./searchText.js";
 import { audit } from "./audit.js";
 import { snapshotQuoteVersion, diffVersions } from "./quoteVersion.js";
 import { notify } from "./notifications.js";
@@ -235,10 +235,12 @@ export async function updateQuote(req: Request) {
     data.approvedById = null;
   }
 
-  // Cập nhật searchText (bỏ dấu) theo giá trị MỚI nếu có, ngược lại giữ giá trị cũ.
+  // Cập nhật searchText: field có trong payload thì dùng nó (KỂ CẢ null = xóa, vd toContact), không thì
+  // giữ cũ. Dùng `k in data` thay `?? existing` để xóa-rỗng phản ánh đúng vào index (không stale).
+  const pick = (k: string, old: any) => (k in data ? (data as any)[k] : old);
   data.searchText = normalizeSearch(
-    data.quoteNumber ?? existing.quoteNumber, existing.projectCode,
-    data.title ?? existing.title, data.toCompany ?? existing.toCompany, data.toContact ?? existing.toContact
+    pick("quoteNumber", existing.quoteNumber), existing.projectCode,
+    pick("title", existing.title), pick("toCompany", existing.toCompany), pick("toContact", existing.toContact)
   );
 
   let updated;
@@ -334,7 +336,7 @@ export async function listQuotes(req: Request) {
     filters.push({ quoteDate: range });
   }
   // Tìm KHÔNG dấu / sai dấu trên cột searchText chuẩn-hóa (quoteNumber+projectCode+title+toCompany+toContact).
-  if (q) filters.push({ searchText: { contains: normalizeSearch(String(q)) } });
+  if (q) filters.push({ searchText: searchTextFilter(String(q)) });
   const where = { AND: filters };
   // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
   // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.

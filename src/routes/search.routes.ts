@@ -8,7 +8,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
-import { normalizeSearch } from "../searchText.js";
+import { searchTextFilter } from "../searchText.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -36,7 +36,7 @@ router.get(
           where: {
             AND: [
               quoteScopeWhere(req.session),
-              { searchText: { contains: normalizeSearch(q) } },
+              { searchText: searchTextFilter(q) },
             ],
           },
           select: { id: true, quoteNumber: true, projectCode: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
@@ -53,7 +53,7 @@ router.get(
           where: {
             AND: [
               custScope,
-              { searchText: { contains: normalizeSearch(q) } },
+              { searchText: searchTextFilter(q) },
             ],
           },
           select: { id: true, code: true, name: true, phone: true, email: true, status: true },
