@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { writeFileSync, existsSync, chmodSync } from "node:fs";
@@ -7,7 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const prisma = new PrismaClient();
+// Prisma 7: bắt buộc driver adapter (như src/db.ts). PrismaPg nhận connectionString (tự tạo pool).
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
 function generatePassword() {
   // 16 chars URL-safe; mixes letters+numbers, enforces zod policy

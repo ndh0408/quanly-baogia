@@ -7,11 +7,13 @@
 // dữ liệu demo cũ (đánh dấu [DEMO] / demo_ / DEMOKH) rồi tạo lại.
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
 // Raw client (KHÔNG có extension soft-delete của app) → deleteMany là XOÁ THẬT, không cần
 // cờ hardDelete. Seed chỉ chạy ở DEV nên xoá cứng dữ liệu demo cũ là đúng ý.
-const prisma = new PrismaClient();
+// Prisma 7: vẫn cần driver adapter (chỉ KHÔNG gắn $extends soft-delete → giữ "raw").
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 const TAG = "[DEMO]";
 const PWD = process.env.DEMO_PASSWORD || "GiaNguyenDemo2026";
 const DAY = 86400000;
