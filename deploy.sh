@@ -37,6 +37,10 @@ ssh "$SSH" "mkdir -p ~/quanly-backups && \
 
 echo "▶ [2/6] Ship tracked files"
 git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
+# tar KHÔNG xóa file cũ. Sau khi migrate .js→.ts (git mv), các .js cũ từ deploy trước CÒN SÓT trên
+# $DIR và SHADOW .ts (import './x.js' resolve vào file .js thật nếu tồn tại) → app chạy code CŨ.
+# Dọn mọi .js có .ts cùng tên (trong src/ + shared/) để .ts mới thực sự được dùng.
+ssh "$SSH" "cd $DIR && find src shared -name '*.js' 2>/dev/null | while read f; do [ -f \"\${f%.js}.ts\" ] && rm -f \"\$f\" && echo \"  gỡ stale \$f\"; done; true"
 
 echo "▶ [3/6] Build image"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE build app"
