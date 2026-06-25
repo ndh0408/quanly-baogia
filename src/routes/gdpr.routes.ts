@@ -13,14 +13,24 @@ import { z } from "zod";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
+import { createLimiter } from "../rateLimit.js";
 import * as svc from "../services/gdprService.js";
 
 const router = Router();
+
+// Self-service GDPR (export TOÀN BỘ PII / xóa tài khoản) chỉ dùng vài lần đời người → siết 8 lần/giờ để
+// một cookie bị đánh cắp KHÔNG kéo được full-PII hàng loạt hay spam xóa. KHÔNG ảnh hưởng dùng hợp lệ.
+const gdprSelfLimiter = createLimiter("gdpr-self", {
+  windowMs: 60 * 60 * 1000,
+  max: 8,
+  message: { error: "Thao tác GDPR bị giới hạn tần suất, vui lòng thử lại sau." },
+});
 router.use(requireAuth);
 
 /** GET /api/gdpr/me/export — user exports their own data. */
 router.get(
   "/me/export",
+  gdprSelfLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.session as any).userId);
     res.setHeader("Content-Type", "application/json");
@@ -55,6 +65,7 @@ router.get(
  */
 router.post(
   "/me/delete",
+  gdprSelfLimiter,
   validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }) }) }),
   asyncHandler(async (req: Request, res: Response) => {
     await svc.deleteSelf(req);

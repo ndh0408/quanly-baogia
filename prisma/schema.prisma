@@ -459,6 +459,7 @@ model QuoteSheet {
 
   @@index([quoteId, order])
   @@index([signedById])
+  @@index([templateId]) // FK tới QuoteTemplate (RESTRICT) — index để kiểm "template còn sheet tham chiếu?" không seq-scan
 }
 
 model QuoteItem {

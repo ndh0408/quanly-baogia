@@ -70,10 +70,12 @@ router.get(
 );
 
 // Active users that can be added as members of a quote.
-// Any authenticated user can read this (it only powers the "add members" picker
-// on quotes they own); it returns names/roles only.
+// CHỈ powers picker "thêm thành viên" trong luồng TẠO/SỬA báo giá (NewQuoteWizard, QuoteEditor) → gate
+// theo QUOTE_CREATE để chặn liệt-kê-danh-bạ-nhân-viên (org-chart enumeration) bởi role không tạo BG
+// (account_hn/hr/accountant). KHÔNG phá luồng nào: chỉ role tạo/sửa BG mới mở picker này.
 router.get(
   "/assignable-users",
+  requirePermission(P.QUOTE_CREATE),
   asyncHandler(async (req: Request, res: Response) => res.json(await listAssignableUsers(req)))
 );
 

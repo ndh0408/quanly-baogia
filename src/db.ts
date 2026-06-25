@@ -20,7 +20,9 @@ const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upse
 const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 
 // Prisma 7: kết nối qua driver adapter @prisma/adapter-pg (pg Pool) — engine TS, không còn engine Rust.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// max: nâng trần kết nối từ mặc định 10/process (dễ thành nút thắt concurrency khi đông user) lên cấu-hình-được
+// qua DB_POOL_MAX (mặc định 20). CHỈ đổi capacity hạ tầng, KHÔNG đổi hành vi nghiệp vụ.
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.DB_POOL_MAX) || 20 });
 const adapter = new PrismaPg(pool);
 const base = new PrismaClient({
   adapter,

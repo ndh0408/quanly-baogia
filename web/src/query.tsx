@@ -32,9 +32,21 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
 export function RealtimeBridge() {
   const qc = useQueryClient();
   useEffect(() => {
-    const on = () => { qc.invalidateQueries(); };
+    // THROTTLE leading-edge (giữ hành vi): sự kiện ĐƠN LẺ → invalidate TỨC THÌ như cũ; khi nhiều client
+    // cùng đổi trong ~800ms (burst) → GOM thành 1 lần refetch thay vì mỗi client dội 1 lần lên server
+    // (chống thundering-herd). KHÔNG làm chậm trường hợp thường, KHÔNG đổi dữ liệu hiển thị.
+    let last = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const WINDOW = 800;
+    const on = () => {
+      const now = Date.now();
+      if (now - last >= WINDOW) { last = now; qc.invalidateQueries(); }
+      else if (!timer) {
+        timer = setTimeout(() => { timer = undefined; last = Date.now(); qc.invalidateQueries(); }, WINDOW - (now - last));
+      }
+    };
     window.addEventListener("realtime:changed", on);
-    return () => window.removeEventListener("realtime:changed", on);
+    return () => { window.removeEventListener("realtime:changed", on); if (timer) clearTimeout(timer); };
   }, [qc]);
   return null;
 }
