@@ -148,7 +148,35 @@ function PermMatrix({ cat, isAdmin, value, onChange }: { cat: PermCatalog; isAdm
   );
 }
 
-// Hàng "Toàn quyền quản trị" + ma trận — dùng chung cho Mời & Sửa.
+// Trang nào hiện theo quyền nào (khớp NAV ở Shell) — để PREVIEW "tài khoản này thấy trang gì".
+const PAGE_PERMS: { label: string; perm: string[] }[] = [
+  { label: "Tổng quan", perm: ["quote:create"] },
+  { label: "Danh sách báo giá", perm: ["quote:read:own"] },
+  { label: "Tạo báo giá", perm: ["quote:create"] },
+  { label: "Mã khách hàng", perm: ["customer:read:own"] },
+  { label: "Nhân sự", perm: ["personnel:read:own"] },
+  { label: "Danh bạ nhân sự", perm: ["personnel:read:own"] },
+  { label: "Quản lý dự án", perm: ["quote:create", "invoice:read"] },
+  { label: "Quản lý nhân viên", perm: ["user:manage"] },
+  { label: "Phân quyền", perm: ["user:manage"] },
+  { label: "Nhật ký hoạt động", perm: ["audit:view"] },
+];
+
+// XEM TRƯỚC: tích quyền xong → tài khoản này SẼ THẤY TRANG GÌ + LÀM ĐƯỢC GÌ (cập nhật trực tiếp).
+function PermPreview({ cat, isAdmin, perms }: { cat?: PermCatalog; isAdmin: boolean; perms: Set<string> }) {
+  const hasP = (k: string) => perms.has(k) || perms.has(k.replace(/:own$/, ":all"));
+  const pages = isAdmin ? PAGE_PERMS.map((p) => p.label) : PAGE_PERMS.filter((p) => p.perm.some(hasP)).map((p) => p.label);
+  const caps = isAdmin ? ["Toàn quyền"] : (cat ? cat.groups.flatMap((g) => g.perms).filter((p) => perms.has(p.key)).map((p) => p.label) : []);
+  return (
+    <div className="perm-preview">
+      <div className="perm-preview-h">👁 Cấp xong, tài khoản này sẽ:</div>
+      <div className="perm-preview-row"><b>Thấy menu:</b> {pages.length ? pages.join(" · ") : <span className="muted">(không trang nào)</span>}</div>
+      <div className="perm-preview-row"><b>Làm được:</b> {caps.length ? caps.join(" · ") : <span className="muted">(chưa tích quyền nào)</span>}</div>
+    </div>
+  );
+}
+
+// Hàng "Toàn quyền quản trị" + ma trận + XEM TRƯỚC — dùng chung cho Mời & Sửa.
 function PermSection({ cat, isAdmin, setAdmin, perms, setPerms }: { cat?: PermCatalog; isAdmin: boolean; setAdmin: (v: boolean) => void; perms: Set<string>; setPerms: (s: Set<string>) => void; }) {
   return (
     <div className="perm-section">
@@ -156,6 +184,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms }: { cat?: PermCa
         <input type="checkbox" checked={isAdmin} onChange={(e) => setAdmin(e.target.checked)} />
         <span><strong>Toàn quyền quản trị</strong> <span className="muted" style={{ fontSize: 11 }}>(thấy & làm mọi thứ; quản lý tài khoản/cấu hình)</span></span>
       </label>
+      <PermPreview cat={cat} isAdmin={isAdmin} perms={perms} />
       {cat ? <PermMatrix cat={cat} isAdmin={isAdmin} value={perms} onChange={setPerms} />
         : <p className="muted">Đang tải danh mục quyền…</p>}
     </div>
