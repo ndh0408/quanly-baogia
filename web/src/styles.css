@@ -164,6 +164,99 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
   .modal { max-height: 96vh; }
 }
 
+/* ============================================================
+   ===== TỔNG QUAN (Dashboard) — header, kỳ, KPI xu-hướng, biểu đồ, pipeline, xếp hạng, cần xử lý =====
+   Dùng token SPA (surface, border, text, accent, success, danger, warn) — theme-aware sẵn.
+   ============================================================ */
+.dash-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.dash-header h1 { margin: 0; }
+.dash-sub { margin: 2px 0 0; }
+.dash-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash > section, .dash > .dash-cols, .dash > .kpi-grid { margin-top: 16px; }
+
+/* Bộ chọn kỳ (segmented) */
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-pill, 999px); padding: 3px; gap: 2px; }
+.seg-btn { border: none; background: none; color: var(--text-soft); font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: background .14s, color .14s; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--brand-gradient, var(--accent)); color: var(--on-primary, #1f2510); box-shadow: var(--shadow-sm); }
+
+/* KPI có xu hướng */
+.dash-kpi .kpi strong { font-variant-numeric: tabular-nums; }
+.trend { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; width: fit-content; }
+.trend-up { background: var(--success-soft, #e2f6e9); color: var(--success, #2fa85a); }
+.trend-down { background: var(--danger-soft, #fde8e8); color: var(--danger, #e5484d); }
+.trend-flat { background: var(--surface-2); color: var(--text-muted); }
+
+/* Biểu đồ doanh số theo ngày (SVG) */
+.dash-chart .chart-caption { margin: -4px 0 8px; }
+.chart-wrap { position: relative; }
+.rev-chart { width: 100%; height: auto; display: block; overflow: visible; }
+.rev-chart .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 4; }
+.rev-chart .axis-label { fill: var(--text-muted); font-size: 11px; font-family: var(--font-ui, inherit); }
+.rev-chart .rev-line { stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.rev-chart .hover-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; opacity: .7; }
+.rev-chart .hover-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2.4; }
+.chart-tip { position: absolute; top: 2px; transform: translateX(-50%); background: var(--text); color: var(--surface); padding: 6px 10px; border-radius: 8px; box-shadow: var(--shadow-md); font-size: 12px; pointer-events: none; white-space: nowrap; display: flex; flex-direction: column; gap: 1px; z-index: 5; }
+.chart-tip strong { font-size: 13px; }
+.chart-tip span { opacity: .85; }
+
+/* Pipeline (phễu báo giá theo kỳ + tỷ lệ thắng) */
+.pipeline { display: flex; flex-direction: column; gap: 10px; }
+.winrate { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; background: var(--success-soft, #e2f6e9); border-radius: var(--radius); margin-bottom: 2px; }
+.winrate-pct { font-size: 24px; font-weight: 800; color: var(--success, #2fa85a); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.pipe-row { display: grid; grid-template-columns: minmax(118px, 150px) 1fr minmax(96px, auto); gap: 12px; align-items: center; cursor: pointer; padding: 4px; border-radius: 8px; transition: background .12s; }
+.pipe-row:hover { background: var(--surface-hover); }
+.pipe-row:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pipe-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pipe-head strong { font-variant-numeric: tabular-nums; }
+.pipe-val { text-align: right; font-size: 13px; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+
+/* Xếp hạng nhân viên */
+.lead-list { display: flex; flex-direction: column; gap: 10px; }
+.lead-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; }
+.lead-rank { font-size: 16px; text-align: center; font-weight: 700; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.lead-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.lead-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.lead-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-amt { font-size: 13px; color: var(--text-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lead-cnt { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+/* Cần xử lý (action items) */
+.act-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.act-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; }
+.act-card.act-rejected { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.act-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.act-count { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.act-total { font-size: 15px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.act-items { display: flex; flex-direction: column; gap: 2px; }
+.act-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; width: 100%; text-align: left; background: none; border: none; border-radius: 7px; padding: 6px 8px; cursor: pointer; color: var(--text); font: inherit; }
+.act-item:hover { background: var(--surface-hover); }
+.act-code { font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+.act-cust { color: var(--text-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-amt { font-size: 12.5px; color: var(--text-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.act-more { background: none; border: none; color: var(--primary); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; padding: 4px 8px; }
+.act-more:hover { text-decoration: underline; }
+
+@media (max-width: 560px) {
+  .dash-controls { width: 100%; }
+  .seg { flex-wrap: wrap; }
+}
+
+/* ============================================================
+   ===== TÌM KIẾM TOÀN CỤC (command palette) — bổ sung cho .global-search-results (public/style.css)
+   ============================================================ */
+.gs-row { display: flex; align-items: center; gap: 8px; }
+.gs-row.active { background: var(--primary-soft); }
+.gs-row .gs-ico { display: inline-flex; flex: none; color: var(--text-muted); }
+.gs-row .gs-ico svg { width: 16px; height: 16px; }
+.gs-code { flex: none; font-size: 13px; }
+.gs-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-sub { flex: none; color: var(--text-muted); font-size: 12px; }
+.gs-tag { flex: none; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); background: var(--surface-2); border-radius: 5px; padding: 1px 6px; }
+.gs-empty { color: var(--text-muted); cursor: default; }
+.gs-foot { display: flex; gap: 14px; padding: 7px 12px; background: var(--surface-2); border-top: 1px solid var(--border); position: sticky; bottom: 0; }
+.gs-foot span { font-size: 11px; color: var(--text-muted); }
+
 /* ── Nhân sự: sửa-tại-chỗ theo quyền + ảnh chứng từ + thẻ (mobile) ── */
 .inline-edit { cursor: text; display: inline-block; min-width: 44px; min-height: 1.25em; padding: 1px 4px; border-radius: 4px; }
 .inline-edit:hover, .inline-edit:focus-visible { background: var(--warn-bg, #fff7e6); outline: 1px dashed var(--warn-border, #ffd591); }

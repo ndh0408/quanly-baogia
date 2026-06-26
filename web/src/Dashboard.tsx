@@ -55,6 +55,11 @@ function delta(cur: number, prev: number): { pct: number; up: boolean; isNew?: b
   if (Math.abs(pct) < 0.5) return { pct: 0, up: true };
   return { pct, up: pct >= 0 };
 }
+// Chênh lệch theo ĐIỂM phần trăm (cho Tỷ lệ chốt) — KHÔNG phải % tương đối.
+function ppDelta(cur: number, prev: number): { pct: number; up: boolean } | null {
+  if (cur === 0 && prev === 0) return null;
+  return { pct: cur - prev, up: cur >= prev };
+}
 
 function TrendChip({ d, goodWhenUp = true, suffix }: { d: { pct: number; up: boolean; isNew?: boolean } | null; goodWhenUp?: boolean; suffix?: string }) {
   if (!d) return <span className="trend trend-flat" title="Không có dữ liệu kỳ trước để so sánh">—</span>;
@@ -98,7 +103,7 @@ function RevenueChart({ points }: { points: ChartPoint[] }) {
   return (
     <div className="chart-wrap" onMouseLeave={() => setHi(null)}>
       <div className="chart-caption muted">Tổng kỳ: <strong>{fmtMoney(total)} đ</strong> · {deals} hợp đồng chốt</div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="rev-chart" preserveAspectRatio="none" role="img" aria-label={`Biểu đồ doanh số theo ngày, tổng ${fmtMoney(total)} đồng`}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="rev-chart" role="img" aria-label={`Biểu đồ doanh số theo ngày, tổng ${fmtMoney(total)} đồng`}>
         <defs>
           <linearGradient id="revfill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.30" />
@@ -123,7 +128,7 @@ function RevenueChart({ points }: { points: ChartPoint[] }) {
           </g>
         )}
         {/* vùng bắt hover theo từng ngày */}
-        {points.map((p, i) => (
+        {points.map((_p, i) => (
           <rect key={i} x={x(i) - step / 2} y={padT} width={step} height={innerH} fill="transparent"
                 onMouseEnter={() => setHi(i)} />
         ))}
@@ -323,7 +328,7 @@ export function DashboardPage({ me }: { me: Me }) {
           <div className="kpi-grid dash-kpi">
             <div className="kpi"><span>Báo giá tạo</span><strong>{k.totalQuotes}</strong><TrendChip d={delta(k.totalQuotes, pk.totalQuotes)} /></div>
             <div className="kpi"><span>Doanh số đã chốt</span><strong>{fmtMoney(k.approvedAmount)} đ</strong><TrendChip d={delta(k.approvedAmount, pk.approvedAmount)} /></div>
-            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{k.conversionRate}%</strong><TrendChip d={delta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
+            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{k.conversionRate}%</strong><TrendChip d={ppDelta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
             <div className="kpi"><span>Deal trung bình</span><strong>{fmtMoney(Math.round(k.avgDealSize))} đ</strong><TrendChip d={delta(k.avgDealSize, pk.avgDealSize)} /></div>
             <div className="kpi"><span>Đang chào · {data.cur.counts.draft || 0} BG</span><strong>{fmtMoney(data.cur.sums.draft)} đ</strong><TrendChip d={delta(data.cur.sums.draft || 0, data.prev.sums.draft || 0)} /></div>
           </div>

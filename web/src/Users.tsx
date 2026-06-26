@@ -3,16 +3,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type User, type InviteResult } from "./api";
 import { toast, confirmModal, fieldErrorsFrom } from "./ui";
 
-// Port "Quản lý nhân viên" (renderUsers) sang React — bê ĐẦY ĐỦ: bảng + Mời (invite email) +
-// Sửa + Đổi MK + Kết-quả-mời (link+copy) + Khóa/Mở khóa (confirm) + Xóa (confirm) + Gửi-lại-lời-mời.
-// Bảo mật: trang đã gate user:manage (Shell nav); server enforce mọi action.
+// "Quản lý nhân viên": bảng + Mời (invite email) + Sửa + Khóa/Mở khóa + Gửi-lại / Hủy lời mời.
+// CHÍNH SÁCH: KHÔNG đổi mật khẩu hộ (đã có "Quên mật khẩu") và KHÔNG xóa tài-khoản đã kích hoạt
+// — nghỉ việc thì KHÓA. Chỉ lời-mời CHƯA kích hoạt mới hủy được. Bảo mật: gate user:manage + server.
 const ROLES: [string, string][] = [
   ["manager", "Account"], ["admin", "Quản trị"], ["account_hn", "Account Hà Nội"], ["hr", "Nhân sự"], ["accountant", "Kế toán"],
 ];
 const ROLE_LABEL: Record<string, string> = Object.fromEntries(ROLES);
 const roleCls = (r: string) => (r === "admin" ? "approved" : r === "manager" ? "pending" : "draft");
 
-type Modal = { t: "invite" } | { t: "edit"; user: User } | { t: "password"; user: User } | { t: "result"; result: InviteResult };
+type Modal = { t: "invite" } | { t: "edit"; user: User } | { t: "result"; result: InviteResult };
 
 export function UsersPage({ me }: { me: Me }) {
   const qc = useQueryClient();
@@ -36,9 +36,10 @@ export function UsersPage({ me }: { me: Me }) {
     try { await api.updateUser(u.id, { active: !u.active }); toast(u.active ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản", "success"); load(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
-  const onDelete = async (u: User) => {
-    if (!(await confirmModal("Xóa nhân viên", "Xóa nhân viên này? Hành động không thể hoàn tác.", { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deleteUser(u.id); toast("Đã xóa", "success"); load(); }
+  // Chỉ HỦY được LỜI MỜI chưa kích hoạt (chưa thành tài-khoản thật). Tài-khoản đã kích hoạt → dùng Khóa.
+  const onCancelInvite = async (u: User) => {
+    if (!(await confirmModal("Hủy lời mời", `Hủy lời mời tới "${u.email || u.displayName || u.username}"? Lời mời chưa kích hoạt sẽ bị gỡ.`, { danger: true, confirmText: "Hủy lời mời" }))) return;
+    try { await api.deleteUser(u.id); toast("Đã hủy lời mời", "success"); load(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
 
@@ -70,15 +71,16 @@ export function UsersPage({ me }: { me: Me }) {
                   <td>{u.pending ? <span className="status pending">Chờ kích hoạt</span> : <span className={`status ${u.active ? "approved" : "rejected"}`}>{u.active ? "Hoạt động" : "Đã khóa"}</span>}</td>
                   <td className="row-actions" style={{ whiteSpace: "nowrap" }}>
                     {u.pending ? (
-                      <button className="btn btn-sm" onClick={() => onResend(u)}>Gửi lại lời mời</button>
+                      <>
+                        <button className="btn btn-sm" onClick={() => onResend(u)}>Gửi lại lời mời</button>
+                        {u.id !== me.id && <button className="btn btn-sm btn-danger" onClick={() => onCancelInvite(u)}>Hủy lời mời</button>}
+                      </>
                     ) : (
                       <>
                         <button className="btn btn-sm" onClick={() => setModal({ t: "edit", user: u })}>Sửa</button>
-                        <button className="btn btn-sm" onClick={() => setModal({ t: "password", user: u })}>Đổi MK</button>
                         <button className={`btn btn-sm ${u.active ? "btn-warn" : "btn-success"}`} onClick={() => onToggleLock(u)}>{u.active ? "Khóa" : "Mở khóa"}</button>
                       </>
                     )}
-                    {u.id !== me.id && <button className="btn btn-sm btn-danger" onClick={() => onDelete(u)}>Xóa</button>}
                   </td>
                 </tr>
               ))}
@@ -89,7 +91,6 @@ export function UsersPage({ me }: { me: Me }) {
 
       {modal?.t === "invite" && <InviteModal onClose={() => setModal(null)} onInvited={(r) => { setModal({ t: "result", result: r }); load(); }} />}
       {modal?.t === "edit" && <EditUserModal user={modal.user} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
-      {modal?.t === "password" && <PasswordModal user={modal.user} onClose={() => setModal(null)} />}
       {modal?.t === "result" && <InviteResultModal result={modal.result} onClose={() => setModal(null)} />}
     </div>
   );
@@ -195,42 +196,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: User; onClose: () => 
         <div className="modal-foot">
           <button className="btn" onClick={() => void guardedClose()}>Hủy</button>
           <button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? "Đang lưu…" : "Lưu"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PasswordModal({ user, onClose }: { user: User; onClose: () => void }) {
-  const [pw, setPw] = useState("");
-  const [showPw, setShowPw] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
-  useEscClose(onClose);
-  const save = async () => {
-    if (pw.length < 8) { toast("Mật khẩu tối thiểu 8 ký tự", "error"); return; }
-    setSaving(true);
-    try { await api.updateUser(user.id, { password: pw }); toast("Đã đổi mật khẩu", "success"); onClose(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); }
-  };
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label={`Đổi mật khẩu ${user.username}`} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Đổi mật khẩu: {user.username}</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
-        <div className="modal-body">
-          <div className="grid">
-            <label className="full"><span>Mật khẩu mới <em className="unit">(tối thiểu 8 ký tự)</em></span>
-              <span className="pw-wrap">
-                <input ref={ref} type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} value={pw} onChange={(e) => setPw(e.target.value)} />
-                <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
-              </span>
-            </label>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
-          <button className="btn btn-primary" disabled={saving || pw.length < 8} onClick={save}>{saving ? "Đang đổi…" : "Đổi"}</button>
         </div>
       </div>
     </div>

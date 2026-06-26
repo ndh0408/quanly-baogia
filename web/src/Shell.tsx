@@ -86,13 +86,15 @@ function toggleTheme() {
 
 // ported=true → trang React thật; còn lại NHÚNG app cũ (/app?embed=1) — dùng được ngay, không tách rời.
 type Nav = { key: string; label: string; group: string; perm?: string; ported?: boolean };
+// Nhóm theo công việc: Tổng quan dẫn đầu (tổng-quan trước), rồi cụm Báo giá, rồi cụm Nhân sự, rồi
+// Thông báo. KHÔNG đổi trang đích (Shell vẫn ép HR-first cho ai có quyền HR) — chỉ sắp xếp menu.
 const NAV: Nav[] = [
-  { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
-  { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:create", ported: true },
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own", ported: true },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
+  { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
+  { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:create", ported: true },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
@@ -104,21 +106,140 @@ const NAV: Nav[] = [
 // Strip ?query (filters) khi khớp nav key → #/list?status=… vẫn là trang "list".
 const currentKey = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "personnel";
 
+// ===== Tìm kiếm TOÀN CỤC thông minh (command palette) =====
+// Đa thực thể: Trang (đi tới nhanh) + Báo giá + Khách hàng + Nhân sự — đã phân quyền ở server.
+// Bàn phím: ↑↓ chọn · ↵ mở · Esc đóng · Ctrl/⌘+K focus. Bỏ qua kết quả cũ (reqId) → nhanh, không nhấp nháy.
+type Hit =
+  | { kind: "page"; id: string; label: string; nav: string }
+  | { kind: "quote"; id: number; code: string; title: string; status: string }
+  | { kind: "customer"; id: number; code: string; name: string; sub: string }
+  | { kind: "personnel"; id: number; name: string; sub: string };
+
+function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string; setQuery: (v: string) => void; navItems: Nav[] }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [res, setRes] = useState<{ quotes: Hit[]; customers: Hit[]; personnel: Hit[] }>({ quotes: [], customers: [], personnel: [] });
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const reqId = useRef(0);
+  const blurT = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const has = (perm?: string) => !perm || me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
+  const canQuote = has("quote:read:own"), canCust = has("customer:read:own"), canPers = has("personnel:read:own");
+
+  // Trang khớp (đi tới nhanh) — tức thì, không cần mạng. Chỉ các trang user thấy được.
+  const pageHits: Hit[] = useMemo(() => {
+    const nq = norm(query);
+    if (nq.length < 1) return [];
+    return navItems.filter((n) => norm(n.label).includes(nq)).slice(0, 4).map((n) => ({ kind: "page" as const, id: n.key, label: n.label, nav: n.key }));
+  }, [query, navItems]);
+
+  // Ctrl/⌘+K → focus + mở.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); inputRef.current?.focus(); inputRef.current?.select(); setOpen(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Gọi tìm đa thực thể (debounce 200ms). reqId chặn race; cleanup huỷ timer.
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 2) { setRes({ quotes: [], customers: [], personnel: [] }); setLoading(false); return; }
+    setLoading(true);
+    const id = ++reqId.current;
+    const t = setTimeout(async () => {
+      try {
+        const types = [canQuote ? "quote" : "", canCust ? "customer" : ""].filter(Boolean).join(",");
+        const empty = { query: q, results: {} } as Awaited<ReturnType<typeof api.search>>;
+        const [s, pers] = await Promise.all([
+          types ? api.search(q, types, 6) : Promise.resolve(empty),
+          canPers ? api.listPersonnel(q, 1, 5).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (id !== reqId.current) return;
+        const quotes: Hit[] = (s.results.quotes || []).map((x) => ({ kind: "quote", id: x.id, code: x.projectCode || x.quoteNumber || "—", title: x.title, status: x.status }));
+        const customers: Hit[] = (s.results.customers || []).map((x) => ({ kind: "customer", id: x.id, code: x.code, name: x.name, sub: x.phone || x.email || "" }));
+        const personnel: Hit[] = (pers?.data || []).slice(0, 5).map((x) => ({ kind: "personnel", id: Number(x.id), name: String(x.fullName), sub: [(x as Record<string, unknown>).projectName, (x as Record<string, unknown>).projectCode].filter(Boolean).join(" · ") }));
+        setRes({ quotes, customers, personnel });
+        setActive(0);
+      } catch { if (id === reqId.current) setRes({ quotes: [], customers: [], personnel: [] }); }
+      finally { if (id === reqId.current) setLoading(false); }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [query, open, canQuote, canCust, canPers]);
+
+  const groups = [
+    { title: "Đi tới trang", items: pageHits },
+    { title: "Báo giá", items: res.quotes },
+    { title: "Khách hàng", items: res.customers },
+    { title: "Nhân sự", items: res.personnel },
+  ].filter((g) => g.items.length > 0);
+  const flat: Hit[] = groups.flatMap((g) => g.items);
+  // ≥2 ký tự: luôn mở (kết quả / đang tìm / "không tìm thấy"). 1 ký tự: chỉ mở nếu có trang khớp.
+  const showDrop = open && (query.trim().length >= 2 || flat.length > 0);
+
+  const activate = async (h: Hit) => {
+    if (!(await guardLeave())) return;
+    setOpen(false);
+    if (h.kind === "personnel") { setQuery(h.name); location.hash = "#/personnel"; return; }   // giữ query → trang Nhân sự tự lọc
+    setQuery("");
+    if (h.kind === "page") location.hash = `#/${h.nav}`;
+    else if (h.kind === "quote") location.hash = `#/quotes/${h.id}`;
+    else if (h.kind === "customer") location.hash = "#/customers";
+  };
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive((a) => Math.min(Math.max(0, flat.length - 1), a + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
+    else if (e.key === "Enter") { if (flat[active]) { e.preventDefault(); activate(flat[active]); } }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+  };
+
+  const renderHit = (h: Hit) => {
+    if (h.kind === "page") return <><span className="gs-ico" aria-hidden="true">{ICON[h.nav]}</span><span className="gs-label">{h.label}</span><span className="gs-tag">Trang</span></>;
+    if (h.kind === "quote") return <><strong className="gs-code">{h.code}</strong><span className="gs-label">{h.title}</span><span className={`status ${h.status}`}>{QSTATUS[h.status] || h.status}</span></>;
+    if (h.kind === "customer") return <><strong className="gs-code">{h.code}</strong><span className="gs-label">{h.name}</span>{h.sub && <span className="gs-sub">{h.sub}</span>}</>;
+    return <><span className="gs-label"><strong>{h.name}</strong></span>{h.sub && <span className="gs-sub">{h.sub}</span>}</>;
+  };
+
+  let gi = -1;
+  return (
+    <div className="global-search" role="search" style={{ position: "relative" }}
+         onBlur={() => { blurT.current = setTimeout(() => setOpen(false), 130); }}
+         onFocus={() => { if (blurT.current) clearTimeout(blurT.current); if (query.trim().length >= 1) setOpen(true); }}>
+      <label htmlFor="gs-input" className="sr-only">Tìm trang, nhân sự, báo giá, khách hàng</label>
+      <input id="gs-input" ref={inputRef} placeholder="🔎 Tìm mọi thứ… (Ctrl+K)" value={query} autoComplete="off"
+             role="combobox" aria-expanded={showDrop} aria-controls="gs-listbox"
+             onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onKeyDown={onKeyDown} />
+      {showDrop && (
+        <div className="global-search-results" id="gs-listbox" role="listbox" onMouseDown={(e) => e.preventDefault()}>
+          {flat.length === 0 && loading && <div className="gs-row gs-empty">Đang tìm…</div>}
+          {flat.length === 0 && !loading && <div className="gs-row gs-empty">Không tìm thấy “{query.trim()}”.</div>}
+          {groups.map((g) => (
+            <div key={g.title}>
+              <div className="gs-section">{g.title}</div>
+              {g.items.map((h) => {
+                gi++; const i = gi; const on = i === active;
+                return (
+                  <div key={`${h.kind}-${"id" in h ? h.id : ""}-${i}`} className={`gs-row ${on ? "active" : ""}`} role="option" aria-selected={on}
+                       onMouseEnter={() => setActive(i)} onClick={() => activate(h)}>{renderHit(h)}</div>
+                );
+              })}
+            </div>
+          ))}
+          <div className="gs-foot"><span>↑↓ chọn</span><span>↵ mở</span><span>esc đóng</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(themeIcon());
   const [sbOpen, setSbOpen] = useState(false); // drawer mobile
   const [unread, setUnread] = useState(0);
-  const [quoteHits, setQuoteHits] = useState<QuoteHit[]>([]);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  // Tìm BÁO GIÁ toàn cục (song song lọc nhân sự) → dropdown deep-link #/quotes/:id.
-  useEffect(() => {
-    if (!query || query.trim().length < 2) { setQuoteHits([]); return; }
-    const t = setTimeout(() => { api.searchQuotes(query.trim()).then((r) => setQuoteHits(r.results.quotes || [])).catch(() => setQuoteHits([])); }, 250);
-    return () => clearTimeout(t);
-  }, [query]);
 
   const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
@@ -133,11 +254,8 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
     refreshBadge();
     const on = () => { setKey(currentKey()); setSbOpen(false); refreshBadge(); };
     window.addEventListener("hashchange", on);
-    // Ctrl/Cmd+K focuses the search box (placeholder advertises it — giờ là thật).
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); }
-      if (e.key === "Escape") setSbOpen(false);
-    };
+    // Esc đóng drawer mobile (Ctrl/⌘+K focus ô tìm do GlobalSearch tự xử lý).
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSbOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("hashchange", on); window.removeEventListener("keydown", onKey); };
   }, []);
@@ -194,22 +312,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             </div>
             <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" title="Sáng / Tối" onClick={onTheme}>{theme}</button>
           </div>
-          <div className="global-search" role="search" style={{ position: "relative" }}>
-            <label htmlFor="gs-input" className="sr-only">Tìm nhân sự / báo giá</label>
-            <input id="gs-input" ref={searchRef} placeholder="🔎 Tìm nhân sự, báo giá… (Ctrl+K)" value={query} autoComplete="off"
-                   onChange={(e) => { const v = e.target.value; setQuery(v); if (v && currentKey() !== "personnel" && currentKey() !== "employees") location.hash = "#/personnel"; }} />
-            {quoteHits.length > 0 && (
-              <div className="gs-results" style={{ display: "block" }}>
-                <div className="gs-section">Báo giá</div>
-                {quoteHits.map((h) => (
-                  <div key={h.id} className="gs-row" role="button" tabIndex={0}
-                       onClick={async () => { if (await guardLeave()) { setQuery(""); setQuoteHits([]); location.hash = "#/quotes/" + h.id; } }}>
-                    <strong>{h.projectCode || h.quoteNumber}</strong> — {h.title} <span className={`status ${h.status}`}>{QSTATUS[h.status] || h.status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <GlobalSearch me={me} query={query} setQuery={setQuery} navItems={visible} />
           <nav className="menu" aria-label="Điều hướng chính">
             {groups.map((g, gi) => (
               <div key={g}>
@@ -241,7 +344,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
-            {key === "dashboard" ? <DashboardPage />
+            {key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
               : key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} />
