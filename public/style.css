@@ -811,11 +811,11 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 
 /* ---------- Responsive ---------- */
 @media (max-width: 920px) {
-  /* FIX layout menu mobile: grid 1 cột + topbar = auto, nội dung = 1fr. KHÔNG đặt rows → align-content
-     mặc định KÉO GIÃN hàng topbar lấp 100vh khi trang NGẮN (topbar cao bất thường ~270px; trang dài thì không
-     → "nhiều trang bị nhiều trang không"). auto/1fr cho topbar đúng cao + main lấp phần còn lại. */
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .mobile-topbar { display: flex; }
+  /* FIX layout menu mobile: dùng FLEX column thay grid. Grid (auto 1fr) bị quirk → khi trang NGẮN, hàng
+     topbar bị KÉO GIÃN lấp 100vh (topbar cao ~270px; trang dài thì không → "nhiều trang bị nhiều không").
+     Flex column: topbar = đúng chiều cao nội dung; .main { flex:1 } lấp phần còn lại — chắc chắn, mọi trang. */
+  .shell { display: flex; flex-direction: column; }
+  .mobile-topbar { display: flex; flex: 0 0 auto; }
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: 280px; z-index: 70;
     transform: translateX(-105%); transition: transform .22s cubic-bezier(.2,.8,.2,1);
@@ -824,7 +824,7 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
   .sidebar.open { transform: translateX(0); }
   .sidebar-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 65; opacity: 0; pointer-events: none; transition: opacity .2s; }
   .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
-  .main { padding: 18px 16px; }
+  .main { padding: 18px 16px; flex: 1 1 auto; min-width: 0; }
   .editor { padding: 16px; }
   .form-grid { grid-template-columns: 1fr; }
   .list-table:not(.cards-sm) { display: block; overflow-x: auto; white-space: nowrap; }
