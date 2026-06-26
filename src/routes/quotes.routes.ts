@@ -22,6 +22,8 @@ import {
   listProjects,
   signSheet,
   updateSheetInvoice,
+  markExtraTableRowPayment,
+  getExtraTableRowProof,
   markConverted,
   markLost,
   listVersions,
@@ -117,6 +119,23 @@ router.put(
   }),
   requirePermission(P.INVOICE_READ),   // vào được trang/endpoint; quyền SỬA vs THANH TOÁN check theo field trong service
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
+);
+
+// THANH TOÁN 1 HÀNG bảng nội bộ (quyền quote:internal:pay) — tích/bỏ + ảnh chứng từ. Đặt TRƯỚC /:id.
+router.post(
+  "/:id/extra/:sheetId/:rid/pay",
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
+    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(/^data:image\/(png|jpe?g|webp);base64,/).optional() }),
+  }),
+  requirePermission(P.QUOTE_INTERNAL_PAY),
+  asyncHandler(async (req: Request, res: Response) => res.json(await markExtraTableRowPayment(req)))
+);
+// Ảnh chứng từ 1 hàng nội bộ (on-demand) — quyền check trong service (internal:view|pay).
+router.get(
+  "/:id/extra/:sheetId/:rid/proof",
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await getExtraTableRowProof(req)))
 );
 
 // Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.

@@ -66,9 +66,45 @@ function presentQuoteForAccountHn(q: any) {
   };
 }
 
+// Lược ẢNH chứng từ thanh toán (base64 nặng) khỏi extraTables khi gửi client → chỉ gửi cờ hasPaidProof;
+// ảnh tải on-demand qua route riêng (như personnelRecord.paymentProof).
+function stripExtraProofs(extraTables: any): any {
+  if (!Array.isArray(extraTables)) return extraTables;
+  return extraTables.map((t: any) => ({
+    ...t,
+    items: (t?.items || []).map((it: any) => {
+      if (!it) return it;
+      const { paidProof, ...rest } = it;
+      return { ...rest, hasPaidProof: !!paidProof };
+    }),
+  }));
+}
+
+// CHỈ XEM NỘI BỘ (quyền quote:internal:view): trả định danh dự án + CÁC BẢNG NỘI BỘ (mọi loại) — KHÔNG lộ
+// giá/khách/subtotal/items báo giá chính. Ảnh chứng từ lược (hasPaidProof), tải on-demand.
+function presentQuoteForInternal(q: any) {
+  return {
+    id: q.id,
+    quoteNumber: q.quoteNumber,
+    projectCode: q.projectCode,
+    projectVersion: q.projectVersion,
+    title: q.title,
+    status: q.status,
+    companyId: q.companyId,
+    companyName: q.company?.shortName || q.company?.name || null,
+    createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
+    internalSheets: (q.sheets || []).map((s: any) => ({
+      sheetId: s.id, sheetName: s.name || null, order: s.order,
+      tables: stripExtraProofs(Array.isArray(s.extraTables) ? s.extraTables : []),
+    })),
+    _internalView: true,
+  };
+}
+
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
-export function presentQuote(q: any, { includeLogo = false, hnOnly = false }: { includeLogo?: boolean; hnOnly?: boolean } = {}) {
+export function presentQuote(q: any, { includeLogo = false, hnOnly = false, internalOnly = false }: { includeLogo?: boolean; hnOnly?: boolean; internalOnly?: boolean } = {}) {
   if (hnOnly) return presentQuoteForAccountHn(q);   // 🔒 quyền quote:hn:fill → lược chỉ còn phần HN
+  if (internalOnly) return presentQuoteForInternal(q); // 🔒 quyền quote:internal:view → CHỈ bảng nội bộ
   const totals = computeQuoteTotals(q);
   const out = {
     ...q,
@@ -79,6 +115,7 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false }: { 
     customerName: q.customer?.name ?? null,
     sheets: (q.sheets || []).map((s: any) => ({
       ...s,
+      extraTables: stripExtraProofs(s.extraTables),   // lược ảnh chứng từ thanh toán (gửi hasPaidProof)
       items: (s.items || []).map((it: any) => ({
         ...it,
         quantity: Number(it.quantity),
@@ -178,6 +215,12 @@ export function sanitizeExtraTables(tables: any) {
       approved: !!it.approved,
       approvedAt: it.approvedAt || null,
       approvedBy: it.approvedBy != null ? it.approvedBy : null,
+      // THANH TOÁN per-hàng — reconcileExtraPayments đặt TRƯỚC sanitize; persist nguyên trạng (ảnh giữ trong DB,
+      // presentQuote strip khi gửi client). Chỉ route /pay mới đổi paid/ảnh; quote-save không sửa được (chống giả).
+      paid: !!it.paid,
+      paidAt: it.paidAt || null,
+      paidById: it.paidById != null ? it.paidById : null,
+      paidProof: typeof it.paidProof === "string" ? it.paidProof : null,
     })),
   }));
   return out.length ? out : undefined;

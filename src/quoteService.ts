@@ -76,6 +76,42 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
   }
 }
 
+// THANH TOÁN theo HÀNG bảng nội bộ (mọi loại): CHỈ người có quote:internal:pay được đặt `paid`. Gọi TRƯỚC
+// khi lưu để: không-quyền → GIỮ trạng thái thanh toán cũ theo `rid` (chống tự đánh dấu qua payload);
+// có-quyền → honor + đóng dấu paidAt/paidById. ẢNH (paidProof) LUÔN theo DB ở đây — chỉ route /pay ghi ảnh.
+export function reconcileExtraPayments(sheets: any[], existingSheets: any[], canPay: boolean, payerId: number) {
+  if (!Array.isArray(sheets)) return;
+  const prior = new Map();   // rid -> { paid, paidAt, paidById, paidProof }
+  for (const s of (existingSheets || [])) {
+    for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
+      for (const it of (t?.items || [])) {
+        if (it && it.rid) prior.set(it.rid, { paid: !!it.paid, paidAt: it.paidAt || null, paidById: it.paidById ?? null, paidProof: it.paidProof ?? null });
+      }
+    }
+  }
+  const now = new Date().toISOString();
+  for (const s of sheets) {
+    for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
+      for (const it of (t?.items || [])) {
+        if (!it) continue;
+        const p = it.rid ? prior.get(it.rid) : null;
+        it.paidProof = p ? p.paidProof : null;  // ảnh không đi qua quote-save (chống base64 chảy + giả mạo)
+        if (!canPay) {
+          it.paid = p ? p.paid : false;
+          it.paidAt = p ? p.paidAt : null;
+          it.paidById = p ? p.paidById : null;
+        } else {
+          const want = !!it.paid;
+          if (want && (!p || !p.paid)) { it.paidAt = now; it.paidById = payerId; }
+          else if (want) { it.paidAt = p.paidAt || now; it.paidById = p.paidById ?? payerId; }
+          else { it.paidAt = null; it.paidById = null; }
+          it.paid = want;
+        }
+      }
+    }
+  }
+}
+
 /**
  * Create a quote from a validated body (req.body). Allocates the quote number +
  * per-employee project code and snapshots v1 INSIDE one transaction (failed insert
@@ -94,6 +130,7 @@ export async function createQuote(req: Request) {
   }
   // Duyệt hàng (HCM/Khách) — tạo mới: ai KHÔNG có quyền duyệt nội bộ thì mọi hàng CHƯA duyệt; có quyền tick thì đóng dấu.
   reconcileExtraApprovals(b.sheets, [], can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
+  reconcileExtraPayments(b.sheets, [], can(req.session, P.QUOTE_INTERNAL_PAY), userId);
 
   // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted)
   // BEFORE the write to return a clean 409.
@@ -246,6 +283,7 @@ export async function updateQuote(req: Request) {
   if (Array.isArray(b.sheets)) {
     // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
     reconcileExtraApprovals(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
+    reconcileExtraPayments(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
     const vatPct = data.vatPercent ?? existing.vatPercent;
     const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
     data.subtotal = t.subtotal;
@@ -528,6 +566,46 @@ export async function signSheet(req: Request) {
   });
   await audit(req, signed ? "quote.sign" : "quote.unsign", { resource: "quote", resourceId: sheet.quoteId });
   return { id: updated.id, signedAt: updated.signedAt, signedByName: updated.signedByName };
+}
+
+// THANH TOÁN 1 HÀNG bảng nội bộ (quyền quote:internal:pay) — tích/bỏ paid + ảnh chứng từ, KHÔNG cần lưu cả
+// báo giá (tài khoản chi phí chỉ đụng được phần này). Khớp hàng theo `rid` (id ổn định).
+export async function markExtraTableRowPayment(req: Request) {
+  const quoteId = Number(req.params.id);
+  const sheetId = Number(req.params.sheetId);
+  const rid = String((req.params as any).rid);
+  const paid = req.body.paid !== false;
+  const proof = typeof req.body.paidProof === "string" ? req.body.paidProof : undefined;
+  const sheet = await prisma.quoteSheet.findFirst({ where: { id: sheetId, quoteId }, select: { id: true, extraTables: true } });
+  if (!sheet) throw httpError(404, "Không tìm thấy sheet");
+  const tables = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[];
+  let found = false;
+  for (const t of tables) for (const it of (t?.items || [])) {
+    if (it && it.rid === rid) {
+      found = true;
+      if (paid) {
+        if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
+        it.paid = true;
+        if (proof !== undefined) it.paidProof = proof || null;   // gửi "" = xóa ảnh; bỏ qua = giữ ảnh cũ
+      } else { it.paid = false; it.paidAt = null; it.paidById = null; it.paidProof = null; }
+    }
+  }
+  if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
+  await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
+  await audit(req, paid ? "quote.internal.pay" : "quote.internal.unpay", { resource: "quote", resourceId: quoteId, after: { sheetId, rid, hasProof: proof !== undefined ? !!proof : undefined } });
+  return { ok: true, rid, paid };
+}
+
+// Lấy ẢNH chứng từ 1 hàng nội bộ (on-demand) — quyền internal:view HOẶC internal:pay.
+export async function getExtraTableRowProof(req: Request) {
+  if (!can(req.session, P.QUOTE_INTERNAL_VIEW) && !can(req.session, P.QUOTE_INTERNAL_PAY)) throw httpError(403, "Không có quyền");
+  const sheet = await prisma.quoteSheet.findFirst({ where: { id: Number(req.params.sheetId), quoteId: Number(req.params.id) }, select: { extraTables: true } });
+  if (!sheet) throw httpError(404, "Không tìm thấy");
+  const rid = String((req.params as any).rid);
+  for (const t of (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[]) for (const it of (t?.items || [])) {
+    if (it && it.rid === rid) return { paidProof: it.paidProof || null };
+  }
+  throw httpError(404, "Không tìm thấy dòng");
 }
 
 /**

@@ -24,7 +24,9 @@ describe("roleCan — role × permission matrix", () => {
     ["manager", P.QUOTE_READ_ALL, false],      // managers see only their own quotes
     ["manager", P.QUOTE_UPDATE_ALL, false],
     ["manager", P.QUOTE_SEND, true],
-    ["manager", P.CUSTOMER_MANAGE_ALL, true],
+    ["manager", P.CUSTOMER_EDIT_ALL, true],
+    ["manager", P.CUSTOMER_DELETE_ALL, true],
+    ["manager", P.CUSTOMER_CREATE, true],
     ["manager", P.PRODUCT_MANAGE, true],
     ["manager", P.PRODUCT_READ_COST, true],
     ["manager", P.AUDIT_VIEW, true],
