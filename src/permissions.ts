@@ -153,9 +153,9 @@ export const PERMISSION_GROUPS = [
   { key: "customer", label: "Khách hàng", perms: [
     P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.CUSTOMER_MANAGE_ALL,
   ] },
-  { key: "product", label: "Sản phẩm", perms: [
-    P.PRODUCT_READ, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
-  ] },
+  // Nhóm "Sản phẩm" ĐÃ BỎ khỏi ma trận: app KHÔNG có tính năng sản phẩm (price book chưa làm) — quyền
+  // product:* là tàn dư RBAC gốc, không route/trang/check nào dùng → ẩn cho khỏi rối giám đốc.
+  // (Hằng số quyền + role default vẫn giữ để không vỡ test/SPA cũ; chỉ bỏ HIỂN THỊ.)
   { key: "admin", label: "Quản trị", perms: [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
     P.AUDIT_VIEW, P.AUDIT_VIEW_FULL, P.SETTINGS_MANAGE,

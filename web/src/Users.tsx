@@ -110,10 +110,11 @@ function useEscClose(onClose: () => void) {
 function PermMatrix({ cat, isAdmin, value, onChange }: { cat: PermCatalog; isAdmin: boolean; value: Set<string>; onChange: (s: Set<string>) => void; }) {
   if (isAdmin) return <p className="muted perm-admin-note">✅ Tài khoản <b>Quản trị</b> có <b>TOÀN QUYỀN</b> — không cần tích.</p>;
   const adminOnly = new Set(cat.adminOnlyPermissions);
+  const inMatrix = new Set(cat.groups.flatMap((g) => g.perms.map((p) => p.key))); // chỉ quyền CÓ trong ma trận
   const toggle = (k: string) => { const n = new Set(value); n.has(k) ? n.delete(k) : n.add(k); onChange(n); };
   const applyPreset = (roleKey: string) => {
     const r = cat.roles.find((x) => x.key === roleKey);
-    if (r) onChange(new Set(r.permissions.filter((p) => !adminOnly.has(p))));
+    if (r) onChange(new Set(r.permissions.filter((p) => inMatrix.has(p) && !adminOnly.has(p)))); // bỏ quyền ẩn (vd product:*)
   };
   return (
     <div className="perm-pick">
