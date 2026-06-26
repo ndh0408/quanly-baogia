@@ -56,7 +56,9 @@ export async function overview(req: Request) {
   };
 }
 
-/** Revenue (approved+sent+converted) by day for chart. */
+/** Doanh số ĐÃ CHỐT (converted) theo ngày — cho biểu đồ Tổng quan. Chỉ tính status='converted'
+ *  để KHỚP với KPI "Doanh số đã chốt" của overview (approvedAmount = aggregate converted). Trước đây
+ *  cộng cả approved/sent (enum cũ đã chết theo luồng rút gọn 2026-06-22) → lệch số với KPI. */
 export async function revenueByDay(req: Request) {
   const { from, to } = defaultRange(req.query);
   // admin sees all; manager/employee scoped to their own created quotes for this chart.
@@ -68,7 +70,7 @@ export async function revenueByDay(req: Request) {
       SELECT DATE("createdAt") AS d, COALESCE(SUM("total"), 0)::float AS amount, COUNT(*)::int AS n
       FROM "Quote"
       WHERE "createdAt" >= ${from} AND "createdAt" <= ${to}
-        AND "status" IN ('approved','sent','converted')
+        AND "status" = 'converted'
         AND "deletedAt" IS NULL ${scope}
       GROUP BY 1
       ORDER BY 1 ASC`;

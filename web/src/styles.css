@@ -163,3 +163,26 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
   .grid { grid-template-columns: 1fr; }
   .modal { max-height: 96vh; }
 }
+
+/* ── Nhân sự: sửa-tại-chỗ theo quyền + ảnh chứng từ + thẻ (mobile) ── */
+.inline-edit { cursor: text; display: inline-block; min-width: 44px; min-height: 1.25em; padding: 1px 4px; border-radius: 4px; }
+.inline-edit:hover, .inline-edit:focus-visible { background: var(--warn-bg, #fff7e6); outline: 1px dashed var(--warn-border, #ffd591); }
+.inline-edit .ie-add { font-style: italic; opacity: .55; }
+.inline-edit-input { width: 100%; min-width: 90px; padding: 2px 5px; border: 1px solid var(--border-strong, #ffb84d); border-radius: 4px; font: inherit; background: var(--surface, #fff); color: inherit; resize: vertical; }
+.pay-proof { margin-top: 10px; text-align: center; }
+.pay-proof img { max-width: 100%; max-height: 50vh; border-radius: 8px; border: 1px solid var(--border, #e5e7eb); }
+
+.prs-cards { display: flex; flex-direction: column; gap: 12px; }
+.prs-card { border: 1px solid var(--border, #e5e7eb); border-radius: 12px; background: var(--surface, #fff); overflow: hidden; }
+.prs-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface-2, #f8fafc); border-bottom: 1px solid var(--border, #e5e7eb); }
+.prs-card-head strong { font-size: 15px; }
+.prs-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.prs-card-body { margin: 0; padding: 6px 12px 10px; }
+.prs-crow { display: grid; grid-template-columns: 42% 58%; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border-weak, #f1f5f9); font-size: 13.5px; }
+.prs-crow:last-child { border-bottom: 0; }
+.prs-crow dt { color: var(--muted, #64748b); font-weight: 500; }
+.prs-crow dd { margin: 0; min-width: 0; word-break: break-word; }
+.prs-crow .inline-edit { display: block; min-width: 100%; }
+
+.prs-total { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin: 12px 0 4px; padding: 10px 14px; background: var(--surface-2, #f8fafc); border: 1px solid var(--border, #e5e7eb); border-radius: 10px; font-size: 13.5px; }
+.prs-total b { font-weight: 700; }

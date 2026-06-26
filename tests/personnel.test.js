@@ -103,17 +103,17 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect((await mgrB.delete(`/api/personnel/${recAId}`)).status).toBe(403);
   });
 
-  it("manager A sửa hồ sơ CỦA MÌNH → 200", async () => {
-    const r = await mgrA.put(`/api/personnel/${recAId}`).send({ note: "đã cập nhật", salary: 12_000_000 });
+  it("manager A sửa hồ sơ CỦA MÌNH → 200 (teamNote là field hồ sơ; note/accountingNote nay qua endpoint riêng)", async () => {
+    const r = await mgrA.put(`/api/personnel/${recAId}`).send({ teamNote: "đã cập nhật", salary: 12_000_000 });
     expect(r.status).toBe(200);
-    expect(r.body.note).toBe("đã cập nhật");
+    expect(r.body.teamNote).toBe("đã cập nhật");
     expect(Number(r.body.salary)).toBe(12_000_000);
   });
 
   it("admin sửa hồ sơ của BẤT KỲ ai → 200", async () => {
-    const r = await admin.put(`/api/personnel/${recAId}`).send({ accountingNote: "admin duyệt" });
+    const r = await admin.put(`/api/personnel/${recAId}`).send({ teamNote: "admin sửa" });
     expect(r.status).toBe(200);
-    expect(r.body.accountingNote).toBe("admin duyệt");
+    expect(r.body.teamNote).toBe("admin sửa");
   });
 
   it("round-trip cột nhập + CÔNG THỨC thuế (pit=Lương/9, thu nhập=Lương×10/9) + BỎ field tham chiếu", async () => {

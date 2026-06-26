@@ -162,6 +162,7 @@ model PersonnelRecord {
   confirmedById       Int? //     Admin đã xác nhận
   confirmedBy         User?     @relation("PersonnelConfirmedBy", fields: [confirmedById], references: [id])
   note                String? // Note
+  paymentProof        String? // Ảnh chứng từ thanh toán (base64 data URL, nén client) — kế toán up khi đánh dấu thanh toán. KHÔNG select ở list (nặng).
 
   searchText String @default("") // chuẩn-hóa bỏ dấu (fullName+projectName+projectCode+taxCode+phone+idCard) → tìm không dấu; GIN trgm index
 

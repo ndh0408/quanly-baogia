@@ -6,7 +6,10 @@ export type FieldType = "text" | "number" | "money" | "date" | "textarea" | "sta
 //   ref-project 🩷 tham chiếu → server tự lấy từ Dự án theo Mã dự án, KHÔNG nhập
 //   action      🟢 hành động  → KẾ TOÁN bấm đánh dấu (vd Thanh toán), KHÔNG nhập tay trong form
 export type FieldSource = "input" | "formula" | "ref-project" | "action";
-export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource };
+// AI được sửa-tại-chỗ ô này (khớp endpoint + quyền backend): owner=Account chủ dòng · accounting=Kế toán ·
+// admin=Admin · pay=đánh dấu thanh toán (Kế toán) · confirm=xác nhận đã ký (Admin). Không có = read-only ở bảng.
+export type FieldEdit = "owner" | "accounting" | "admin" | "pay" | "confirm";
+export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource; edit?: FieldEdit };
 
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
 
@@ -32,7 +35,7 @@ export const FIELDS: Field[] = [
   { key: "workLocation", label: "Địa điểm làm việc", type: "text", group: "Dự án", source: "input" },
   { key: "projectName", label: "Tên dự án", type: "text", group: "Dự án", source: "input" },
   { key: "projectCode", label: "Mã dự án", type: "text", group: "Dự án", source: "input" },
-  { key: "teamNote", label: "Team ghi chú", type: "text", group: "Dự án", source: "input" },
+  { key: "teamNote", label: "Team ghi chú", type: "text", group: "Dự án", source: "input", edit: "owner" },
   { key: "accountName", label: "Account", type: "text", group: "Dự án", source: "input" },
   { key: "company", label: "CTY", type: "text", group: "Dự án", source: "input" },
   // Hợp đồng
@@ -43,11 +46,11 @@ export const FIELDS: Field[] = [
   { key: "salesContractDate", label: "Ngày HĐ bán", type: "date", group: "Hợp đồng", source: "ref-project" },
   { key: "purchaseOrder", label: "Đơn đặt hàng", type: "text", group: "Hợp đồng", source: "ref-project" },
   { key: "preTaxAmount", label: "Tiền trước thuế", type: "money", group: "Hợp đồng", source: "ref-project" },
-  // Thanh toán
-  { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "input" },
-  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "action" },
-  { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "action" },
-  { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "input" },
+  // Thanh toán — KHÔNG nằm trong form chung; mỗi cột sửa-tại-chỗ theo đúng quyền (edit).
+  { key: "accountingNote", label: "Kế toán ghi chú", type: "textarea", group: "Thanh toán", source: "action", edit: "accounting" },
+  { key: "payment", label: "Thanh toán", type: "status", group: "Thanh toán", source: "action", edit: "pay" },
+  { key: "confirmed", label: "Xác nhận (C.Hồng)", type: "status", group: "Thanh toán", source: "action", edit: "confirm" },
+  { key: "note", label: "Note", type: "textarea", group: "Thanh toán", source: "action", edit: "admin" },
 ];
 
 // Chỉ field NHẬP TAY mới hiện trong form (công thức/tham chiếu là read-only).

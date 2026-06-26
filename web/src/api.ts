@@ -79,7 +79,7 @@ export type ProjectSheet = {
 };
 export type ProjectQuote = {
   id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
-  quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; hnStatus?: string | null;
+  quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; customerName?: string | null; hnStatus?: string | null;
   company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];
 };
 
@@ -102,6 +102,27 @@ export type PermCatalog = {
   editableRoles: string[];
   adminOnlyPermissions: string[]; // quyền chỉ-admin: ma trận khóa (cấp cho non-admin vô tác dụng)
   roles: { key: string; label: string; permissions: string[]; overridden?: boolean; editable?: boolean }[];
+};
+
+// Tổng quan / Analytics. overview trả counts/sums theo từng trạng thái trong KỲ → đủ dựng phễu
+// + so sánh kỳ trước (gọi 2 lần). kpi.approvedAmount = ΣTotal của 'converted' (đã chốt).
+export type OverviewResp = {
+  period: { from: string; to: string };
+  counts: Record<string, number>;   // số báo giá theo trạng thái (trong kỳ, đã phân quyền)
+  sums: Record<string, number>;     // ΣTotal theo trạng thái (trong kỳ)
+  kpi: { totalQuotes: number; approvedAmount: number; avgDealSize: number; conversionRate: number };
+};
+export type RevenuePoint = { d: string; amount: number; n: number };   // doanh số chốt theo ngày
+export type TopSaleRow = { userId: number; user: { id: number; username: string; displayName: string } | null; amount: number; count: number };
+
+// Tìm kiếm toàn cục đa thực thể (đã phân quyền ở server). KHÔNG có total báo giá ở đây (tránh lộ tiền).
+export type SearchResp = {
+  query: string;
+  results: {
+    quotes?: { id: number; quoteNumber?: string; projectCode?: string | null; title: string; toCompany?: string; status: string }[];
+    customers?: { id: number; code: string; name: string; phone?: string | null; email?: string | null; status: string }[];
+    products?: { id: number; sku: string; name: string; category?: string | null; basePrice: number; unit?: string | null }[];
+  };
 };
 
 export type Summary = { salary: number; pit: number; taxableIncome: number };
@@ -139,6 +160,15 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+// Ghép ?from=&to=(&extra) từ các tham số ISO không bắt buộc — dùng cho mọi endpoint analytics theo kỳ.
+function periodQS(from?: string, to?: string, extra?: Record<string, string>): string {
+  const sp = new URLSearchParams(extra);
+  if (from) sp.set("from", from);
+  if (to) sp.set("to", to);
+  const s = sp.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
   me: () => req<Me>("/auth/me"),
   login: (username: string, password: string, mfaToken?: string) => req<Me>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, ...(mfaToken ? { mfaToken } : {}) }) }),
@@ -152,10 +182,16 @@ export const api = {
   createPersonnel: (data: Record<string, unknown>) => req<Personnel>("/personnel", { method: "POST", body: JSON.stringify(data) }),
   updatePersonnel: (id: number, data: Record<string, unknown>) => req<Personnel>(`/personnel/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deletePersonnel: (id: number) => req<{ ok: boolean }>(`/personnel/${id}`, { method: "DELETE" }),
-  // Kế toán đánh dấu đã/chưa thanh toán (lưu ngày)
-  markPayment: (id: number, paid: boolean) => req<Personnel>(`/personnel/${id}/payment`, { method: "POST", body: JSON.stringify({ paid }) }),
+  // Kế toán đánh dấu đã/chưa thanh toán (lưu ngày) + ẢNH chứng từ (base64 data URL, tùy chọn).
+  markPayment: (id: number, paid: boolean, paymentProof?: string) =>
+    req<Personnel>(`/personnel/${id}/payment`, { method: "POST", body: JSON.stringify({ paid, ...(paymentProof ? { paymentProof } : {}) }) }),
   // Admin xác nhận đã/chưa ký (lưu ngày)
   markConfirm: (id: number, confirmed: boolean) => req<Personnel>(`/personnel/${id}/confirm`, { method: "POST", body: JSON.stringify({ confirmed }) }),
+  // Sửa-tại-chỗ 1 cột theo QUYỀN (mỗi cái 1 endpoint gác đúng role).
+  setTeamNote: (id: number, value: string | null) => req<Personnel>(`/personnel/${id}/team-note`, { method: "POST", body: JSON.stringify({ value }) }),
+  setAccountingNote: (id: number, value: string | null) => req<Personnel>(`/personnel/${id}/accounting-note`, { method: "POST", body: JSON.stringify({ value }) }),
+  setPersonnelNote: (id: number, value: string | null) => req<Personnel>(`/personnel/${id}/note`, { method: "POST", body: JSON.stringify({ value }) }),
+  getPaymentProof: (id: number) => req<{ paymentProof: string }>(`/personnel/${id}/payment-proof`),
   // Danh bạ nhân viên
   listEmployees: (q = "", page = 1, size = 50, sort = "fullName", order: "asc" | "desc" = "asc") =>
     req<EmployeeListResult>(`/employees?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
@@ -206,10 +242,14 @@ export const api = {
     req<{ backupCodes: string[] }>("/mfa/enable", { method: "POST", body: JSON.stringify(data) }),
   mfaDisable: (data: { password: string; token: string }) =>
     req<unknown>("/mfa/disable", { method: "POST", body: JSON.stringify(data) }),
-  // Tổng quan / Analytics (increment 7).
-  analyticsOverview: () => req<{ kpi: { totalQuotes: number; approvedAmount: number; avgDealSize: number; conversionRate: number } }>("/analytics/overview"),
-  analyticsFunnel: () => req<{ data: { status: string; count: number }[] }>("/analytics/funnel"),
-  analyticsTopSales: () => req<{ data: { user?: { displayName?: string } | null; count: number; amount: number }[] }>("/analytics/top-sales?limit=10"),
+  // Tổng quan / Analytics (increment 7) — đều nhận from/to (ISO) theo kỳ đã chọn.
+  analyticsOverview: (from?: string, to?: string) => req<OverviewResp>(`/analytics/overview${periodQS(from, to)}`),
+  analyticsFunnel: (from?: string, to?: string) => req<{ data: { status: string; count: number }[] }>(`/analytics/funnel${periodQS(from, to)}`),
+  analyticsRevenueByDay: (from?: string, to?: string) => req<{ data: RevenuePoint[] }>(`/analytics/revenue-by-day${periodQS(from, to)}`),
+  analyticsTopSales: (limit = 10, from?: string, to?: string) => req<{ data: TopSaleRow[] }>(`/analytics/top-sales${periodQS(from, to, { limit: String(limit) })}`),
+  // Tìm kiếm toàn cục đa thực thể (báo giá + khách hàng + …) — KHÔNG dấu, đã phân quyền ở server.
+  search: (q: string, types = "quote,customer", limit = 6) =>
+    req<SearchResp>(`/search?${new URLSearchParams({ q, types, limit: String(limit) })}`),
   // Danh sách báo giá (increment 8).
   listQuotes: (p: { q?: string; status?: string; sort?: string; order?: string; page?: number; size?: number }) => {
     const sp = new URLSearchParams();

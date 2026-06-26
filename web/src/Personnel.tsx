@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "./api";
-import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource } from "./fields";
+import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource, type FieldEdit } from "./fields";
 import { EMP_FIELDS } from "./Employees";
 import { useDebouncedValue } from "./query";
 import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
@@ -26,6 +26,32 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const canEditRow = (r: Personnel) => canManageAll || (canManageOwn && r.createdById === me.id);
   const canPay = me.permissions.includes("personnel:pay"); // kế toán + admin: bấm đánh dấu thanh toán
   const canConfirm = me.permissions.includes("personnel:confirm"); // CHỈ admin: bấm xác nhận đã ký
+  const canAccountingNote = me.permissions.includes("personnel:accounting-note"); // kế toán + admin: ghi "Kế toán ghi chú"
+  // AI được SỬA-TẠI-CHỖ field này trên hồ sơ r (khớp đúng endpoint+quyền backend).
+  const canEditField = (edit: FieldEdit | undefined, r: Personnel): boolean =>
+    edit === "owner" ? (canManageAll || (canManageOwn && r.createdById === me.id))
+    : edit === "accounting" ? canAccountingNote
+    : edit === "admin" ? canManageAll
+    : edit === "pay" ? canPay
+    : edit === "confirm" ? canConfirm
+    : false;
+  const isMobile = useIsMobile();
+  const [editCell, setEditCell] = useState<{ id: number; field: string } | null>(null);
+  const [payFor, setPayFor] = useState<Personnel | null>(null);   // hồ sơ đang mở dialog thanh toán (+ảnh)
+
+  // Lưu 1 cột sửa-tại-chỗ qua đúng endpoint theo quyền.
+  const saveField = async (r: Personnel, field: string, value: string) => {
+    setEditCell(null);
+    const cur = String(r[field] ?? "");
+    if (value === cur) return;            // không đổi → bỏ qua
+    const v = value.trim() === "" ? null : value;
+    try {
+      if (field === "teamNote") await api.setTeamNote(r.id, v);
+      else if (field === "accountingNote") await api.setAccountingNote(r.id, v);
+      else if (field === "note") await api.setPersonnelNote(r.id, v);
+      toast("Đã lưu", "success"); reload();
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lưu thất bại", "error"); }
+  };
 
   // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
   const debouncedQ = useDebouncedValue(query, query ? 300 : 0);
@@ -46,20 +72,6 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     if (!(await confirmModal("Xóa hồ sơ", `Xóa hồ sơ "${r.fullName}"? Hành động này không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
     try { await api.deletePersonnel(r.id); toast("Đã xóa hồ sơ", "success"); reload(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
-  };
-
-  // KẾ TOÁN bấm cột "Thanh toán" → đánh dấu đã/chưa (lưu ngày hôm nay).
-  const onTogglePay = async (r: Personnel) => {
-    const paid = !!r.paidAt;
-    const ok = await confirmModal(
-      paid ? "Bỏ đánh dấu thanh toán" : "Xác nhận đã thanh toán",
-      paid ? `Bỏ đánh dấu đã thanh toán cho "${r.fullName}"?`
-           : `Đánh dấu ĐÃ THANH TOÁN cho "${r.fullName}" (ghi ngày hôm nay)?`,
-      { confirmText: paid ? "Bỏ đánh dấu" : "Đã thanh toán", danger: paid },
-    );
-    if (!ok) return;
-    try { await api.markPayment(r.id, !paid); toast(paid ? "Đã bỏ đánh dấu thanh toán" : "Đã đánh dấu thanh toán", "success"); reload(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
   };
 
   // ADMIN bấm cột "Xác nhận (C.Hồng)" → xác nhận đã ký / bỏ (lưu ngày hôm nay).
@@ -103,21 +115,19 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
     const v = r[k];
     const cls = [first ? "sticky-2" : "", f?.type === "money" ? "num" : "", srcCls(f?.source)].filter(Boolean).join(" ");
 
-    // THANH TOÁN: nút cho KẾ TOÁN (canPay) bấm → đánh dấu đã/chưa (kèm ngày). Người khác chỉ xem badge.
+    // THANH TOÁN: KẾ TOÁN (canPay) bấm → mở dialog đánh dấu + UP ẢNH chứng từ. Người khác chỉ xem badge.
     if (k === "payment") {
       const paid = !!r.paidAt;
       const dateStr = paid ? fmtDate(r.paidAt) : "";
       const by = (r.paidBy as { displayName?: string } | undefined)?.displayName;
-      const title = paid
-        ? `Đã thanh toán ${dateStr}${by ? ` · ${by}` : ""}${canPay ? " — bấm để bỏ đánh dấu" : ""}`
-        : (canPay ? "Bấm để đánh dấu đã thanh toán" : "Chưa thanh toán");
+      const title = paid ? `Đã thanh toán ${dateStr}${by ? ` · ${by}` : ""}${canPay ? " — bấm để xem/sửa + ảnh" : ""}` : (canPay ? "Bấm để đánh dấu + đính ảnh chứng từ" : "Chưa thanh toán");
       const inner = paid
-        ? <><span className="status ok">Đã thanh toán</span>{dateStr && <span className="pay-date">{dateStr}</span>}</>
+        ? <><span className="status ok">Đã thanh toán</span>{dateStr && <span className="pay-date">{dateStr}</span>}{r.hasPaymentProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</>
         : <span className="status danger">Chưa thanh toán</span>;
       return (
         <td key={k} className={`pay-cell ${cls}`}>
           {canPay
-            ? <button type="button" className="pay-btn" onClick={() => onTogglePay(r)} title={title}>{inner}</button>
+            ? <button type="button" className="pay-btn" onClick={() => setPayFor(r)} title={title}>{inner}</button>
             : <span title={title}>{inner}</span>}
         </td>
       );
@@ -143,12 +153,55 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
       );
     }
 
+    // SỬA-TẠI-CHỖ theo QUYỀN: Team ghi chú (account chủ dòng) · Kế toán ghi chú (kế toán) · Note (admin).
+    if (f && (f.edit === "owner" || f.edit === "accounting" || f.edit === "admin")) {
+      const editable = canEditField(f.edit, r);
+      const text = v == null || v === "" ? "" : String(v);
+      if (editCell?.id === r.id && editCell.field === k) {
+        return <td key={k} className={cls}><InlineInput initial={text} multiline={f.type === "textarea"} onDone={(val) => saveField(r, k, val)} onCancel={() => setEditCell(null)} /></td>;
+      }
+      return (
+        <td key={k} className={cls}>
+          {editable
+            ? <span className="inline-edit" role="button" tabIndex={0} title="Bấm để sửa" onClick={() => setEditCell({ id: r.id, field: k })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditCell({ id: r.id, field: k }); } }}>{text || <span className="muted ie-add">+ ghi…</span>}</span>
+            : (text || <span className="muted">—</span>)}
+        </td>
+      );
+    }
+
     let content: ReactNode;
     if (f?.type === "money") content = fmtMoney(v);
     else if (f?.type === "date") content = fmtDate(v);
     else if (f?.type === "status") content = v ? <span className={`status ${statusClass(v)}`}>{String(v)}</span> : <span className="muted">—</span>;
     else content = v == null || v === "" ? "" : String(v);
     return <td key={k} className={cls}>{content}</td>;
+  };
+
+  // GIÁ TRỊ 1 cột cho THẺ (mobile) — tái dùng đúng logic sửa-tại-chỗ/thanh toán/xác nhận theo quyền.
+  const cardValue = (k: string, r: Personnel): ReactNode => {
+    const f = FIELD_BY_KEY[k];
+    const v = r[k];
+    if (k === "payment") {
+      const paid = !!r.paidAt;
+      const badge = paid ? <span className="status ok">Đã TT{r.paidAt ? ` ${fmtDate(r.paidAt)}` : ""}{r.hasPaymentProof ? " 📎" : ""}</span> : <span className="status danger">Chưa TT</span>;
+      return canPay ? <button type="button" className="pay-btn" onClick={() => setPayFor(r)}>{badge}</button> : badge;
+    }
+    if (k === "confirmed") {
+      const signed = !!r.confirmedAt;
+      const badge = signed ? <span className="status ok">Đã ký</span> : (canConfirm ? <span className="status neutral">Xác nhận ký</span> : <span className="muted">—</span>);
+      return canConfirm ? <button type="button" className="pay-btn" onClick={() => onToggleConfirm(r)}>{badge}</button> : badge;
+    }
+    if (f && (f.edit === "owner" || f.edit === "accounting" || f.edit === "admin")) {
+      const editable = canEditField(f.edit, r);
+      const text = v == null || v === "" ? "" : String(v);
+      if (editCell?.id === r.id && editCell.field === k) return <InlineInput initial={text} multiline={f.type === "textarea"} onDone={(val) => saveField(r, k, val)} onCancel={() => setEditCell(null)} />;
+      return editable
+        ? <span className="inline-edit" role="button" tabIndex={0} title="Bấm để sửa" onClick={() => setEditCell({ id: r.id, field: k })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditCell({ id: r.id, field: k }); } }}>{text || <span className="muted ie-add">+ ghi…</span>}</span>
+        : (text || <span className="muted">—</span>);
+    }
+    if (f?.type === "money") return v ? fmtMoney(v) + " đ" : <span className="muted">—</span>;
+    if (f?.type === "date") return fmtDate(v) || <span className="muted">—</span>;
+    return v == null || v === "" ? <span className="muted">—</span> : String(v);
   };
 
   return (
@@ -171,6 +224,27 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
         <div className="empty">{query ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}</div>
+      ) : isMobile ? (
+        /* MOBILE: mỗi hồ sơ 1 THẺ (label : value), sửa-tại-chỗ đúng ô theo role — không phải cuộn bảng rộng. */
+        <div className="prs-cards">
+          {rows.map((r, idx) => (
+            <div className="prs-card" key={r.id}>
+              <div className="prs-card-head">
+                <strong>{STT_OF(idx)}. {r.fullName}</strong>
+                <span className="prs-card-actions">
+                  <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
+                  {canEditRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
+                </span>
+              </div>
+              <dl className="prs-card-body">
+                {TABLE_COLS.filter((k) => k !== "fullName").map((k) => (
+                  <div className="prs-crow" key={k}><dt>{FIELD_BY_KEY[k]?.label ?? k}</dt><dd>{cardValue(k, r)}</dd></div>
+                ))}
+                <div className="prs-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName ?? "—"}</dd></div>
+              </dl>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="tbl-wrap">
           <table>
@@ -236,8 +310,14 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         </div>
       )}
 
+      {/* TỔNG (toàn bộ lọc) — luôn hiện rõ DƯỚI bảng/thẻ, không bị cuộn ngang che như dòng tổng trong bảng. */}
+      <div className="prs-total" role="status">
+        <span><b>{meta.total}</b> hồ sơ</span>
+        <span>Σ Lương: <b>{fmtMoney(summary.salary)} đ</b></span>
+        <span>Σ Thuế TNCN: <b>{fmtMoney(summary.pit)} đ</b></span>
+        <span>Σ Thu nhập chịu thuế: <b>{fmtMoney(summary.taxableIncome)} đ</b></span>
+      </div>
       <div className="list-foot">
-        <span className="muted">Tổng: {meta.total} hồ sơ · Lương: {fmtMoney(summary.salary)} đ · Thuế TNCN: {fmtMoney(summary.pit)} đ</span>
         {meta.pageCount > 1 && (
           <div className="pager">
             <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
@@ -255,6 +335,93 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
           onSaved={() => { setEditing(undefined); reload(); }}
         />
       )}
+
+      {payFor && <PaymentDialog rec={payFor} onClose={() => setPayFor(null)} onDone={() => { setPayFor(null); reload(); }} />}
+    </div>
+  );
+}
+
+// Theo dõi màn hình hẹp (≤ 820px) → đổi sang dạng THẺ (responsive).
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const on = () => setM(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return m;
+}
+
+// Ô nhập sửa-tại-chỗ: tự focus, Enter/blur = lưu, Escape = hủy (textarea: Ctrl/Cmd+Enter = lưu).
+function InlineInput({ initial, multiline, onDone, onCancel }: { initial: string; multiline?: boolean; onDone: (v: string) => void; onCancel: () => void }) {
+  const [v, setV] = useState(initial);
+  const ref = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select?.(); }, []);
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+    else if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) { e.preventDefault(); onDone(v); }
+  };
+  return multiline
+    ? <textarea ref={ref as Ref<HTMLTextAreaElement>} className="inline-edit-input" rows={2} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />
+    : <input ref={ref as Ref<HTMLInputElement>} className="inline-edit-input" type="text" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={onKeyDown} />;
+}
+
+// Nén ảnh phía client: resize ≤ 1280px + JPEG 0.7 → data URL nhỏ (~50–200KB) để lưu base64 (S3 chưa bật).
+function compressImage(file: File, maxDim = 1280, quality = 0.7): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (Math.max(width, height) > maxDim) { const s = maxDim / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s); }
+      const c = document.createElement("canvas"); c.width = width; c.height = height;
+      const ctx = c.getContext("2d");
+      if (!ctx) return reject(new Error("canvas"));
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(c.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Ảnh không đọc được")); };
+    img.src = url;
+  });
+}
+
+// Dialog THANH TOÁN: kế toán đánh dấu đã/bỏ + đính/xem ẢNH chứng từ (nén client, lưu base64).
+function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () => void; onDone: () => void }) {
+  const paid = !!rec.paidAt;
+  const [proof, setProof] = useState<string | null>(null);     // ảnh MỚI chọn (base64)
+  const [existing, setExisting] = useState<string | null>(null); // ảnh ĐÃ CÓ (tải on-demand)
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (rec.hasPaymentProof) api.getPaymentProof(rec.id).then((r) => setExisting(r.paymentProof)).catch(() => { /* ignore */ }); }, [rec]);
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    if (!file.type.startsWith("image/")) { toast("Chỉ chọn ảnh (png/jpg/webp)", "error"); return; }
+    try { setProof(await compressImage(file)); } catch { toast("Ảnh không hợp lệ", "error"); }
+  };
+  const mark = async (markPaid: boolean) => {
+    setBusy(true);
+    try { await api.markPayment(rec.id, markPaid, markPaid ? (proof || undefined) : undefined); toast(markPaid ? "Đã đánh dấu thanh toán" : "Đã bỏ đánh dấu", "success"); onDone(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); setBusy(false); }
+  };
+  const shown = proof || existing;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Thanh toán" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Thanh toán — {rec.fullName}</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
+        <div className="modal-body">
+          <p className="muted" style={{ marginTop: 0 }}>{paid ? `Trạng thái: ĐÃ thanh toán${(rec.paidBy as { displayName?: string } | undefined)?.displayName ? ` · ${(rec.paidBy as { displayName?: string }).displayName}` : ""}.` : "Trạng thái: CHƯA thanh toán."}</p>
+          {!paid && <label className="full"><span>Ảnh chứng từ (tùy chọn — sẽ nén tự động)</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} /></label>}
+          {shown && <div className="pay-proof"><img src={shown} alt="ảnh chứng từ thanh toán" /></div>}
+          {paid && !shown && <p className="muted">Chưa có ảnh chứng từ.</p>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>Đóng</button>
+          {paid
+            ? <button className="btn btn-danger" disabled={busy} onClick={() => mark(false)}>{busy ? "…" : "Bỏ đánh dấu"}</button>
+            : <button className="btn btn-primary" disabled={busy} onClick={() => mark(true)}>{busy ? "Đang lưu…" : "Đánh dấu đã thanh toán"}</button>}
+        </div>
+      </div>
     </div>
   );
 }

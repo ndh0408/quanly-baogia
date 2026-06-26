@@ -59,12 +59,17 @@ export async function listPersonnel(req: Request) {
     prisma.personnelRecord.count({ where }),
     prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
+      omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
     prisma.personnelRecord.aggregate({ where, _sum: { salary: true } }),
   ]);
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
-  const decorated = data.map((r) => decorate(r, refMap));
+  // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
+  const proofIds = new Set((await prisma.personnelRecord.findMany({
+    where: { id: { in: data.map((r) => r.id) }, paymentProof: { not: null } }, select: { id: true },
+  })).map((r) => r.id));
+  const decorated = data.map((r) => ({ ...decorate(r, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
   const salarySum = Number(agg._sum.salary ?? 0);
   const tax = computeTax(salarySum);
@@ -154,20 +159,60 @@ export async function deletePersonnel(req: Request) {
 // KẾ TOÁN (hoặc admin) đánh dấu ĐÃ / BỎ thanh toán cho 1 hồ sơ — lưu NGÀY + người đánh dấu.
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
-  // Lấy TRẠNG THÁI CŨ (paidAt/paidById) để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true } });
+  // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true, paymentProof: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const paid = (req.body as any).paid as boolean;
+  // Ảnh chứng từ (base64 data URL, tùy chọn). paid + có ảnh → lưu; bỏ thanh toán → XÓA ảnh.
+  const proof = (req.body as any).paymentProof as string | undefined;
+  const data: Record<string, unknown> = paid
+    ? { paidAt: new Date(), paidById: req.session.userId, ...(proof !== undefined ? { paymentProof: proof || null } : {}) }
+    : { paidAt: null, paidById: null, paymentProof: null };
   const rec = await prisma.personnelRecord.update({
-    where: { id },
-    data: paid ? { paidAt: new Date(), paidById: req.session.userId } : { paidAt: null, paidById: null },
+    where: { id }, data,
     include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
+    omit: { paymentProof: true },   // không trả base64 về client
   });
+  const newProof = paid ? (proof !== undefined ? (proof || null) : before.paymentProof) : null;
   await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
     resource: "personnel", resourceId: id,
-    before: { paidAt: before.paidAt, paidById: before.paidById },
-    after: { paidAt: rec.paidAt, paidById: rec.paidById },
+    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
+    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
   });
+  const refMap = await buildProjectRef([rec.projectCode]);
+  return { ...decorate(rec, refMap), hasPaymentProof: !!newProof };
+}
+
+// Lấy ảnh chứng từ thanh toán (base64) on-demand — gác theo quyền XEM hồ sơ (read own/all).
+export async function getPaymentProof(req: Request) {
+  await loadAuthorized(req, "read");
+  const rec = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, select: { paymentProof: true } });
+  if (!rec?.paymentProof) throw httpError(404, "Chưa có ảnh chứng từ");
+  return { paymentProof: rec.paymentProof };
+}
+
+// ── SỬA-TẠI-CHỖ 1 cột theo QUYỀN (ô trên bảng/thẻ). authz: route gác quyền; teamNote thêm owner-check. ──
+const oneFieldValue = (req: Request) => (((req.body as any).value ?? null) as string | null);
+
+// TEAM GHI CHÚ — chỉ ACCOUNT sở hữu dòng (hoặc admin). loadAuthorized 'manage' = owner/admin check.
+export async function writeTeamNote(req: Request) {
+  const before = await loadAuthorized(req, "manage");
+  const value = oneFieldValue(req);
+  const rec = await prisma.personnelRecord.update({ where: { id: before.id }, data: { teamNote: value }, include: ownerSelect, omit: { paymentProof: true } });
+  await audit(req, "personnel.team-note", { resource: "personnel", resourceId: rec.id, before: { teamNote: before.teamNote }, after: { teamNote: value } });
+  const refMap = await buildProjectRef([rec.projectCode]);
+  return decorate(rec, refMap);
+}
+// KẾ TOÁN GHI CHÚ (route gác personnel:accounting-note) + NOTE (route gác personnel:manage:all = admin).
+export async function writeAccountingNote(req: Request) { return writeNoteField(req, "accountingNote", "personnel.accounting-note"); }
+export async function writeNote(req: Request) { return writeNoteField(req, "note", "personnel.note"); }
+async function writeNoteField(req: Request, field: "accountingNote" | "note", action: string) {
+  const id = (req.params as any).id;
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, accountingNote: true, note: true } });
+  if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  const value = oneFieldValue(req);
+  const rec = await prisma.personnelRecord.update({ where: { id }, data: { [field]: value }, include: ownerSelect, omit: { paymentProof: true } });
+  await audit(req, action, { resource: "personnel", resourceId: id, before: { [field]: before[field] }, after: { [field]: value } });
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(rec, refMap);
 }
