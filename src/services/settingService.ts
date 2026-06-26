@@ -5,6 +5,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
+import { can, PERMISSIONS as P } from "../permissions.js";
 
 // Settings can hold sensitive integration config (tokens, channels). Only a small
 // allowlist of UI-tunable keys is readable by non-admins; the full dump + any other
@@ -17,7 +18,7 @@ export async function getAllSettings(_req: Request) {
 }
 
 export async function getSetting(req: Request) {
-  if (!PUBLIC_SETTING_KEYS.has(req.params.key) && req.session.role !== "admin") {
+  if (!PUBLIC_SETTING_KEYS.has(req.params.key) && !can(req.session, P.SETTINGS_MANAGE)) {
     throw httpError(403, "Không có quyền đọc cấu hình này");
   }
   const row = await prisma.setting.findUnique({ where: { key: req.params.key } });

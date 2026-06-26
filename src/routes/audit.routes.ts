@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { asyncHandler } from "../middleware.js";
 import { validate } from "../validators.js";
-import { requirePermission, PERMISSIONS } from "../permissions.js";
+import { requirePermission, can, PERMISSIONS } from "../permissions.js";
 
 const router = Router();
 // Honour the permission map (manager holds audit:view) instead of admin-only,
@@ -84,13 +84,12 @@ router.get(
     // Least-privilege: the before/after snapshots (and IP/UA) can contain full PII
     // of other users/customers. Only admins see the raw payload; managers get the
     // who/what/when trail with PII stripped.
-    const isAdmin = req.session.role === "admin";
-    // Tên thật cho cột "Đối tượng" — CHỈ admin (cùng nhóm bị strip với before/after/ip). Lý do: tên
-    // hồ sơ/khách/báo giá là PII; manager bị owner-scoping (không thấy hồ sơ người khác) nên KHÔNG được
-    // lộ tên chéo qua nhật ký → manager giữ '#id'. Bỏ luôn truy vấn resolve cho non-admin (đỡ tải).
-    const targets = isAdmin ? await resolveTargetLabels(rows) : null;
+    // Quyền XEM CHI TIẾT (tên đối tượng + before/after + IP) = audit:view:full (mặc định admin). Ai chỉ có
+    // audit:view (vd account) → bản LƯỢC PII (giữ owner-scoping: tên hồ sơ/khách/báo giá là PII).
+    const isFull = can(req.session, PERMISSIONS.AUDIT_VIEW_FULL);
+    const targets = isFull ? await resolveTargetLabels(rows) : null;
     const data = rows.map((r) => {
-      if (!isAdmin) {
+      if (!isFull) {
         // Strip PII-bearing fields for non-admins via destructuring (these props
         // are required on the row type, so `delete` is not permitted under strict).
         const { before, after, ip, userAgent, ...rest } = r;

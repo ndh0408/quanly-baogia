@@ -71,7 +71,7 @@ describe("quoteUtils (extracted pure helpers)", () => {
           { category: "hanoi", items: [{ kind: "item", quantity: 2, unitPrice: 1000 }] },  // 2000
           { category: "hanoi", items: [{ kind: "item", quantity: 1, unitPrice: 500, days: 3 }] }, // 1500
         ] }],
-      }, { viewerRole: "account_hn" });
+      }, { hnOnly: true });
       // Phải có: định danh + người giao + trạng thái HN
       expect(row._accountHnRow).toBe(true);
       expect(row.hnStatus).toBe("assigned");

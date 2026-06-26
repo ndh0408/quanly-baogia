@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { asyncHandler, requireRole } from "../middleware.js";
+import { asyncHandler } from "../middleware.js";
+import { requirePermission, PERMISSIONS } from "../permissions.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
@@ -14,7 +15,8 @@ import { createLimiter } from "../rateLimit.js";
 import * as svc from "../services/adminService.js";
 
 const router = Router();
-router.use(requireRole("admin"));
+// Sao lưu/dọn dữ liệu (thao tác hệ thống nhạy cảm) = quyền settings:manage (per-user; admin luôn có).
+router.use(requirePermission(PERMISSIONS.SETTINGS_MANAGE));
 
 // Tight limiter on the full-DB dump — expensive + highly sensitive, kept separate
 // from the generic API limiter (a stolen admin session shouldn't be able to pull

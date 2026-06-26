@@ -10,7 +10,8 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
+import { asyncHandler, requireAuth } from "../middleware.js";
+import { requirePermission, PERMISSIONS } from "../permissions.js";
 import { validate } from "../validators.js";
 import { audit } from "../audit.js";
 import { createLimiter } from "../rateLimit.js";
@@ -43,7 +44,7 @@ router.get(
 /** GET /api/gdpr/users/:id/export — admin exports another user's data. */
 router.get(
   "/users/:id/export",
-  requireRole("admin"),
+  requirePermission(PERMISSIONS.USER_MANAGE),
   validate({ params: z.object({ id: z.coerce.number().int().positive() }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.params as any).id);
@@ -77,7 +78,7 @@ router.post(
 
 router.post(
   "/users/:id/delete",
-  requireRole("admin"),
+  requirePermission(PERMISSIONS.USER_MANAGE),
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ confirm: z.literal("DELETE-USER", { error: "Vui lòng nhập chính xác DELETE-USER để xác nhận" }) }),

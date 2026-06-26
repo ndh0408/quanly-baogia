@@ -92,8 +92,8 @@ export async function createQuote(req: Request) {
   if (!(await templatesBelongToCompany(b.sheets, company.id))) {
     throw httpError(400, "Có mẫu báo giá không thuộc công ty đã chọn (hoặc đã ngừng dùng)");
   }
-  // Duyệt hàng (HCM/Khách) — tạo mới: non-admin thì mọi hàng CHƯA duyệt; admin tick thì đóng dấu.
-  reconcileExtraApprovals(b.sheets, [], req.session.role === "admin", userId);
+  // Duyệt hàng (HCM/Khách) — tạo mới: ai KHÔNG có quyền duyệt nội bộ thì mọi hàng CHƯA duyệt; có quyền tick thì đóng dấu.
+  reconcileExtraApprovals(b.sheets, [], can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
 
   // Client-supplied number: validate uniqueness across ALL rows (incl. soft-deleted)
   // BEFORE the write to return a clean 409.
@@ -244,8 +244,8 @@ export async function updateQuote(req: Request) {
 
   let updated;
   if (Array.isArray(b.sheets)) {
-    // CHỈ ADMIN được đổi trạng thái duyệt hàng (HCM/Khách); non-admin giữ nguyên theo DB.
-    reconcileExtraApprovals(b.sheets, existing.sheets, req.session.role === "admin", userId);
+    // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
+    reconcileExtraApprovals(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
     const vatPct = data.vatPercent ?? existing.vatPercent;
     const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
     data.subtotal = t.subtotal;
@@ -339,7 +339,7 @@ export async function listQuotes(req: Request) {
   const where = { AND: filters };
   // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
   // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.
-  const listSelect = req.session.role === "account_hn"
+  const listSelect = can(req.session, P.QUOTE_HN_FILL)
     ? { ...QUOTE_LIST_SELECT, sheets: { select: { extraTables: true } } }
     : QUOTE_LIST_SELECT;
   const [total, rows] = await Promise.all([
@@ -387,8 +387,9 @@ export async function listAssignableUsers(req: Request) {
 
 /** Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). */
 export async function listHnAccounts(req: Request) {
-  if (!["admin", "manager"].includes(req.session.role ?? "")) throw httpError(403, "Không có quyền");
-  const data = await prisma.user.findMany({ where: { role: "account_hn", active: true }, select: { id: true, displayName: true, username: true }, orderBy: { displayName: "asc" } });
+  if (!can(req.session, P.QUOTE_HN_MANAGE)) throw httpError(403, "Không có quyền");
+  // Tài khoản điền HN = ai có quyền quote:hn:fill (role account_hn mặc định HOẶC cấp riêng per-user).
+  const data = await prisma.user.findMany({ where: { active: true, OR: [{ role: "account_hn" }, { permissions: { has: P.QUOTE_HN_FILL } }] }, select: { id: true, displayName: true, username: true }, orderBy: { displayName: "asc" } });
   return { data };
 }
 

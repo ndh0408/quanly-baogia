@@ -46,6 +46,11 @@ export const PERMISSIONS = {
   PERSONNEL_MARK_PAYMENT: "personnel:pay", // Kế toán bấm "đã thanh toán" (có ngày) — KHÔNG sửa hồ sơ
   PERSONNEL_CONFIRM:      "personnel:confirm", // ADMIN bấm xác nhận "đã ký" (có ngày) — chỉ admin
   PERSONNEL_ACCOUNTING_NOTE: "personnel:accounting-note", // Kế toán ghi cột "KẾ TOÁN GHI CHÚ" (chỉ kế toán/admin)
+  // Báo giá — nâng cao: thay các check ROLE CỨNG (account_hn / admin) bằng quyền gán được per-user.
+  QUOTE_HN_FILL:          "quote:hn:fill",     // điền/gửi phần Hà Nội — CHỈ thấy bảng HN (lược phần khác)
+  QUOTE_HN_MANAGE:        "quote:hn:manage",   // giao/duyệt phần Hà Nội + danh sách account HN
+  QUOTE_INTERNAL_APPROVE: "quote:internal:approve", // duyệt dòng bảng nội bộ (HCM/khách)
+  AUDIT_VIEW_FULL:        "audit:view:full",   // xem CHI TIẾT nhật ký (tên đối tượng + before/after + IP)
 };
 
 const P = PERMISSIONS;
@@ -82,6 +87,10 @@ export const PERMISSION_LABELS = {
   [P.PERSONNEL_MARK_PAYMENT]: "Đánh dấu đã thanh toán",
   [P.PERSONNEL_CONFIRM]: "Xác nhận đã ký",
   [P.PERSONNEL_ACCOUNTING_NOTE]: "Ghi 'Kế toán ghi chú'",
+  [P.QUOTE_HN_FILL]:   "Điền phần Hà Nội (chỉ bảng HN)",
+  [P.QUOTE_HN_MANAGE]: "Giao / duyệt phần Hà Nội",
+  [P.QUOTE_INTERNAL_APPROVE]: "Duyệt dòng bảng nội bộ",
+  [P.AUDIT_VIEW_FULL]: "Xem chi tiết nhật ký (tên + thay đổi)",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -90,6 +99,7 @@ export const PERMISSION_GROUPS = [
     P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_READ_ALL, P.QUOTE_UPDATE_OWN, P.QUOTE_UPDATE_ALL,
     P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
+    P.QUOTE_HN_FILL, P.QUOTE_HN_MANAGE, P.QUOTE_INTERNAL_APPROVE,
   ] },
   { key: "customer", label: "Khách hàng", perms: [
     P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.CUSTOMER_MANAGE_ALL,
@@ -99,7 +109,7 @@ export const PERMISSION_GROUPS = [
   ] },
   { key: "admin", label: "Quản trị", perms: [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
-    P.AUDIT_VIEW, P.SETTINGS_MANAGE,
+    P.AUDIT_VIEW, P.AUDIT_VIEW_FULL, P.SETTINGS_MANAGE,
   ] },
   { key: "personnel", label: "Nhân sự", perms: [
     P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_OWN, P.PERSONNEL_MANAGE_ALL,
@@ -120,6 +130,7 @@ const MANAGER = [
   ...EMPLOYEE,
   // Manager sees/edits only the quotes THEY created (not everyone's).
   P.QUOTE_SEND,
+  P.QUOTE_HN_MANAGE, // giao/duyệt phần Hà Nội (trước là check role admin||manager)
   P.AUDIT_VIEW,
   // Manager sees all customers and the cost/margin, and owns the product catalog.
   P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
@@ -133,6 +144,8 @@ const ADMIN = [
   P.QUOTE_READ_ALL, P.QUOTE_UPDATE_ALL, P.QUOTE_DELETE_ALL,
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
+  P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
+  P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
   // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
   P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
 ];
@@ -149,6 +162,7 @@ const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_
 const ACCOUNT_HN = [
   P.QUOTE_READ_OWN,    // chỉ báo giá được giao (member); server lược chỉ còn phần HN
   P.QUOTE_UPDATE_OWN,  // chỉ ghi được bảng hanoi (write-guard ở route)
+  P.QUOTE_HN_FILL,     // điền/gửi phần HN — đây là cờ kích hoạt LƯỢC view (presentQuote hnOnly)
 ];
 
 export const ROLE_PERMISSIONS: Record<string, Set<string>> = {

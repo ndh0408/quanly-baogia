@@ -9,7 +9,7 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
 } from "../validators.js";
-import { requirePermission, PERMISSIONS as P } from "../permissions.js";
+import { requirePermission, can, PERMISSIONS as P } from "../permissions.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
 import {
   createQuote,
@@ -50,7 +50,7 @@ router.get(
     const page = Number(rawPage);
     const size = Number(rawSize);
     res.json({
-      data: rows.map((r) => presentQuoteRow(r, { viewerRole: req.session.role })),
+      data: rows.map((r) => presentQuoteRow(r, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })),
       meta: {
         total,
         page,
@@ -132,7 +132,7 @@ router.get(
   validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
-    res.json(presentQuote(quote, { includeLogo: true, viewerRole: req.session.role }));
+    res.json(presentQuote(quote, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
   })
 );
 
@@ -156,20 +156,20 @@ router.put(
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
     }
     const updated = await updateQuote(req);
-    res.json(presentQuote(updated, { includeLogo: true, viewerRole: req.session.role }));
+    res.json(presentQuote(updated, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
   })
 );
 
 // ===== Luồng GIÁ HÀ NỘI (role account_hn) — phân quyền + write-guard nằm TRONG service =====
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.put("/:id/hn", validate({ params: idParam }),   // account lưu phần HN (chỉ ghi bảng hanoi)
-  asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/submit", validate({ params: idParam }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/review", validate({ params: idParam, body: z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(500).optional() }) }),
-  asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(presentQuote(q, { viewerRole: req.session.role })); }));
+  asyncHandler(async (req: Request, res: Response) => { const q = await reviewHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 
 // MARK CONVERTED — chốt deal (won).
 // Segregation of duties: marking a deal WON is terminal, immutable and feeds

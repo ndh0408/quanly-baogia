@@ -6,15 +6,16 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, trunc2 } from "./money.js";
-import { canOnQuote } from "./permissions.js";
+import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected. converted/lost are terminal
 // (immutable for everyone — duplicate to make a new revision instead).
-export function canEdit(quote: any, session: { role?: string; userId?: number }): boolean {
+export function canEdit(quote: any, session: { role?: string; userId?: number; permissions?: string[] }): boolean {
   if (quote.status === "converted" || quote.status === "lost") return false;
   if (canOnQuote(session, "update", quote)) {
-    if (session.role === "admin" || session.role === "manager") return true;
+    // Người có quyền "gửi khách" (admin/account mặc định) sửa được mọi trạng thái; còn lại chỉ nháp/trả lại.
+    if (can(session, PERMISSIONS.QUOTE_SEND)) return true;
     return quote.status === "draft" || quote.status === "rejected";
   }
   return false;
@@ -66,8 +67,8 @@ function presentQuoteForAccountHn(q: any) {
 }
 
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
-export function presentQuote(q: any, { includeLogo = false, viewerRole = null }: { includeLogo?: boolean; viewerRole?: string | null } = {}) {
-  if (viewerRole === "account_hn") return presentQuoteForAccountHn(q);   // 🔒 lược chỉ còn phần HN
+export function presentQuote(q: any, { includeLogo = false, hnOnly = false }: { includeLogo?: boolean; hnOnly?: boolean } = {}) {
+  if (hnOnly) return presentQuoteForAccountHn(q);   // 🔒 quyền quote:hn:fill → lược chỉ còn phần HN
   const totals = computeQuoteTotals(q);
   const out = {
     ...q,
@@ -106,9 +107,9 @@ export const QUOTE_LIST_SELECT = {
   _count: { select: { sheets: true } },
 };
 
-export function presentQuoteRow(q: any, { viewerRole = null }: { viewerRole?: string | null } = {}) {
-  // 🔒 account_hn: danh sách CHỈ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
-  if (viewerRole === "account_hn") {
+export function presentQuoteRow(q: any, { hnOnly = false }: { hnOnly?: boolean } = {}) {
+  // 🔒 quote:hn:fill: danh sách CHỉ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
+  if (hnOnly) {
     // Số SHEET HN + TỔNG HN = đúng phần account TỰ LÀM (gộp các bảng "hanoi" của mọi sheet).
     // Đây là số NỘI BỘ của chính account → hiện cho họ OK; vẫn KHÔNG lộ tiền/khách báo giá chính.
     const hanoi = (q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"));

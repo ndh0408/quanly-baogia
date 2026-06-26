@@ -1,13 +1,15 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { asyncHandler, requireRole } from "../middleware.js";
+import { asyncHandler } from "../middleware.js";
+import { requirePermission, PERMISSIONS } from "../permissions.js";
 import { validate } from "../validators.js";
 import { EVENTS } from "../webhooks.js";
 import * as svc from "../services/webhookService.js";
 import type { Webhook } from "@prisma/client";
 
 const router = Router();
-router.use(requireRole("admin"));
+// Tích hợp/webhook = cấu hình hệ thống → quyền settings:manage (per-user; admin luôn có).
+router.use(requirePermission(PERMISSIONS.SETTINGS_MANAGE));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 

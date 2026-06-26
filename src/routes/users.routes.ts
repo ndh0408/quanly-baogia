@@ -1,12 +1,14 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { asyncHandler, requireRole } from "../middleware.js";
+import { asyncHandler } from "../middleware.js";
+import { requirePermission, PERMISSIONS } from "../permissions.js";
 import { validate, UserCreateSchema, UserUpdateSchema, UserInviteSchema } from "../validators.js";
 import * as svc from "../services/userService.js";
 
 const router = Router();
-router.use(requireRole("admin"));
+// Quản lý tài khoản = quyền user:manage (per-user; admin luôn có). Không còn cứng theo role admin.
+router.use(requirePermission(PERMISSIONS.USER_MANAGE));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
