@@ -54,7 +54,9 @@ export function ProjectsPage({ me }: { me: Me }) {
   const isAdmin = me.permissions.includes("user:manage");
   // Ký chứng từ theo QUYỀN: sign:all (mọi dự án) hoặc sign:own (chỉ dự án mình tạo — server chặn owner).
   const canSignNow = me.permissions.includes("quote:sign:all") || me.permissions.includes("quote:sign:own");
-  const canInv = me.permissions.includes("invoice:manage"); // sửa hóa đơn/thanh toán (admin + kế toán)
+  // Tách: sửa thông tin hóa đơn (invoice:edit) vs ĐÁNH DẤU thanh toán (invoice:pay) — RIÊNG từng người.
+  const canEdit = me.permissions.includes("invoice:edit");
+  const canPay = me.permissions.includes("invoice:pay");
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [account, setAccount] = useState("");
@@ -108,15 +110,16 @@ export function ProjectsPage({ me }: { me: Me }) {
 
   // Ô text/date sửa được (admin, converted, có sheetId). HÀM trả JSX (KHÔNG phải component lồng
   // — nếu là component lồng sẽ remount input mỗi lần gõ → mất focus). Lưu khi blur(text)/change(date).
-  const editable = (r: Row) => canInv && r.sheetId && r.q.status === "converted";
+  // Ô "paidAt" (đánh dấu thanh toán) sửa được khi có invoice:pay; field hóa đơn khác khi có invoice:edit.
+  const editable = (r: Row, field?: keyof Row) => (field === "paidAt" ? canPay : canEdit) && r.sheetId && r.q.status === "converted";
   const redStyle = (need: boolean) => need ? { background: "#ffdede" } : undefined;
   const textCell = (r: Row, field: keyof Row, ph: string, need = false, w = 110) =>
-    editable(r) ? (
+    editable(r, field) ? (
       <td style={redStyle(need)}><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }}
         onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field, e.target.value.trim() || null)} /></td>
     ) : <td style={redStyle(need)}>{(r[field] as string) || dash}</td>;
   const dateCell = (r: Row, field: keyof Row, need = false) =>
-    editable(r) ? (
+    editable(r, field) ? (
       <td style={redStyle(need)}><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140 }}
         onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field, e.target.value || null); }} /></td>
     ) : <td style={redStyle(need)}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;

@@ -51,9 +51,12 @@ export const PERMISSIONS = {
   QUOTE_HN_MANAGE:        "quote:hn:manage",   // giao/duyệt phần Hà Nội + danh sách account HN
   QUOTE_INTERNAL_APPROVE: "quote:internal:approve", // duyệt dòng bảng nội bộ (HCM/khách)
   AUDIT_VIEW_FULL:        "audit:view:full",   // xem CHI TIẾT nhật ký (tên đối tượng + before/after + IP)
-  // Hóa đơn / Quản lý dự án (cho Kế toán): xem TOÀN BỘ trang dự án + sửa hóa đơn/đánh dấu thanh toán.
+  // Hóa đơn / Quản lý dự án. TÁCH NGUYÊN TỬ: xem / sửa-thông-tin / đánh-dấu-thanh-toán RIÊNG —
+  // để phân "người này sửa hóa đơn, người kia đánh dấu thanh toán" (thanh toán per-trang, không gộp).
   INVOICE_READ:           "invoice:read",      // xem trang "Quản lý dự án" (mọi dự án + tình trạng hóa đơn)
-  INVOICE_MANAGE:         "invoice:manage",    // nhập số HĐ/PO/link + đánh dấu đã thanh toán
+  INVOICE_EDIT:           "invoice:edit",      // nhập số HĐ/PO/link + ngày gửi/nhận chứng từ
+  INVOICE_PAY:            "invoice:pay",        // ĐÁNH DẤU đã thanh toán hóa đơn (ngày thanh toán)
+  INVOICE_MANAGE:         "invoice:manage",    // [CŨ] gộp sửa+thanh toán — giữ để bắc cầu → edit+pay
   // Ký chứng từ (trang Quản lý dự án) — TÁCH cờ canSign cũ thành quyền gán được, có phạm vi rõ.
   QUOTE_SIGN_OWN:         "quote:sign:own",    // ký chứng từ dự án DO MÌNH TẠO
   QUOTE_SIGN_ALL:         "quote:sign:all",    // ký chứng từ MỌI dự án (admin/giám đốc)
@@ -98,6 +101,8 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_INTERNAL_APPROVE]: "Duyệt dòng bảng nội bộ",
   [P.AUDIT_VIEW_FULL]: "Xem chi tiết nhật ký (tên + thay đổi)",
   [P.INVOICE_READ]:   "Xem trang Quản lý dự án (hóa đơn)",
+  [P.INVOICE_EDIT]:   "Sửa hóa đơn (số HĐ/PO/ngày)",
+  [P.INVOICE_PAY]:    "Đánh dấu thanh toán (Quản lý dự án)",
   [P.INVOICE_MANAGE]: "Sửa hóa đơn / đánh dấu thanh toán",
   [P.QUOTE_SIGN_OWN]: "Ký chứng từ — dự án của mình",
   [P.QUOTE_SIGN_ALL]: "Ký chứng từ — mọi dự án",
@@ -135,7 +140,8 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.PERSONNEL_CONFIRM]:      "Trang Nhân sự: xác nhận 'đã ký' (admin).",
   [P.PERSONNEL_ACCOUNTING_NOTE]: "Trang Nhân sự: ghi cột 'Kế toán ghi chú'.",
   [P.INVOICE_READ]:   "Mở trang Quản lý dự án, xem hóa đơn MỌI dự án.",
-  [P.INVOICE_MANAGE]: "Nhập số HĐ/PO/link + đánh dấu đã thanh toán hóa đơn.",
+  [P.INVOICE_EDIT]:   "Nhập số hóa đơn / PO / link / ngày gửi-nhận chứng từ (KHÔNG gồm đánh dấu thanh toán).",
+  [P.INVOICE_PAY]:    "CHỈ đánh dấu 'đã thanh toán' hóa đơn ở trang Quản lý dự án (riêng trang này — không phải trang khác).",
   [P.USER_MANAGE]:      "Mời/khóa tài khoản + TÍCH QUYỀN cho người khác.",
   [P.AUDIT_VIEW]:       "Xem nhật ký (tóm tắt: ai-làm-gì-khi-nào).",
   [P.AUDIT_VIEW_FULL]:  "Xem nhật ký CHI TIẾT (tên đối tượng + nội dung thay đổi + IP).",
@@ -165,7 +171,7 @@ export const PERMISSION_GROUPS = [
     P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
   ] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
-    P.INVOICE_READ, P.INVOICE_MANAGE, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
+    P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
   ] },
 ];
 
@@ -198,7 +204,7 @@ const ADMIN = [
   P.SETTINGS_MANAGE,
   P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
   P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
-  P.INVOICE_READ, P.INVOICE_MANAGE, P.QUOTE_SIGN_ALL, // trang Quản lý dự án + sửa hóa đơn + ký mọi dự án
+  P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // trang Quản lý dự án + sửa hóa đơn + thanh toán + ký mọi dự án
   // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
   P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
 ];
@@ -208,7 +214,7 @@ const ADMIN = [
 const HR = [P.PERSONNEL_READ_ALL];
 // Kế toán: xem mọi hồ sơ + ĐÁNH DẤU đã thanh toán (có ngày) + ghi cột "KẾ TOÁN GHI CHÚ". KHÔNG sửa hồ sơ khác.
 // Kế toán: + XEM TOÀN BỘ trang Quản lý dự án + SỬA hóa đơn / đánh dấu thanh toán (yêu cầu mới).
-const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_READ, P.INVOICE_MANAGE];
+const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY];
 
 // Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
 // đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ
@@ -300,6 +306,8 @@ export function resolveUserPermissions(role: string | undefined, userPerms?: str
   if (role === "admin") return [...ROLE_PERMISSIONS.admin];
   const set = new Set<string>(userPerms && userPerms.length ? userPerms : [...(effectiveRoleSet(role) ?? [])]);
   if (canSign) set.add(PERMISSIONS.QUOTE_SIGN_OWN);
+  // Bắc cầu quyền GỘP cũ → quyền nguyên tử (tương thích user đã lưu quyền cũ).
+  if (set.has(PERMISSIONS.INVOICE_MANAGE)) { set.add(PERMISSIONS.INVOICE_EDIT); set.add(PERMISSIONS.INVOICE_PAY); }
   return [...set];
 }
 

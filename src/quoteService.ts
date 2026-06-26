@@ -543,6 +543,12 @@ export async function updateSheetInvoice(req: Request) {
   if (sheet.quote?.status !== "converted" || sheet.quote?.deletedAt) {
     throw httpError(403, "Chỉ nhập hoá đơn cho dự án đã chốt");
   }
+  // PHÂN QUYỀN NGUYÊN TỬ: đánh dấu thanh toán (paidAt) cần invoice:pay; sửa field hóa đơn khác cần invoice:edit.
+  // → cho phép "kế toán A chỉ đánh dấu thanh toán, kế toán B chỉ nhập số HĐ" v.v.
+  const touchesPaid = req.body.paidAt !== undefined;
+  const touchesEdit = ["invoiceNo", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt"].some((k) => req.body[k] !== undefined);
+  if (touchesPaid && !can(req.session, P.INVOICE_PAY)) throw httpError(403, "Bạn không có quyền đánh dấu thanh toán hóa đơn");
+  if (touchesEdit && !can(req.session, P.INVOICE_EDIT)) throw httpError(403, "Bạn không có quyền sửa thông tin hóa đơn");
   const data: Record<string, any> = {};
   const setStr = (k: string) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? String(req.body[k]).trim() : null; };
   const setDate = (k: string) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? new Date(req.body[k]) : null; };

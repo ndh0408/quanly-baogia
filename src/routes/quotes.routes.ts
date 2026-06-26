@@ -115,7 +115,7 @@ router.put(
       docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
     }),
   }),
-  requirePermission(P.INVOICE_MANAGE),   // sửa hóa đơn/đánh dấu thanh toán (admin + kế toán có invoice:manage)
+  requirePermission(P.INVOICE_READ),   // vào được trang/endpoint; quyền SỬA vs THANH TOÁN check theo field trong service
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
 );
 
