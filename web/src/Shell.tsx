@@ -94,7 +94,7 @@ const NAV: Nav[] = [
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
-  { key: "employees", label: "Danh bạ nhân viên", group: "Công việc", perm: "personnel:read:own", ported: true },
+  { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
   { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:create", ported: true },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },

@@ -21,7 +21,7 @@ export type Personnel = {
   [key: string]: unknown;
 };
 
-// Danh bạ nhân viên (10 trường cá nhân) — chọn khi tạo hồ sơ Nhân sự để tự điền.
+// Danh bạ nhân sự (10 trường cá nhân) — chọn khi tạo hồ sơ Nhân sự để tự điền.
 export type Employee = {
   id: number;
   createdById: number;
@@ -53,7 +53,7 @@ export type User = {
 export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean };
 
 // Nhật ký hoạt động (Audit — increment 3).
-export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null };
+export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null; targetLabel?: string | null; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null };
 export type AuditListResult = { data: AuditEntry[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
 // Thông báo (Notifications — increment 6).
@@ -192,7 +192,7 @@ export const api = {
   setAccountingNote: (id: number, value: string | null) => req<Personnel>(`/personnel/${id}/accounting-note`, { method: "POST", body: JSON.stringify({ value }) }),
   setPersonnelNote: (id: number, value: string | null) => req<Personnel>(`/personnel/${id}/note`, { method: "POST", body: JSON.stringify({ value }) }),
   getPaymentProof: (id: number) => req<{ paymentProof: string }>(`/personnel/${id}/payment-proof`),
-  // Danh bạ nhân viên
+  // Danh bạ nhân sự
   listEmployees: (q = "", page = 1, size = 50, sort = "fullName", order: "asc" | "desc" = "asc") =>
     req<EmployeeListResult>(`/employees?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
   createEmployee: (data: Record<string, unknown>) => req<Employee>("/employees", { method: "POST", body: JSON.stringify(data) }),

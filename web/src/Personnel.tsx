@@ -551,7 +551,7 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
   );
 }
 
-// Ô tìm + chọn người từ Danh bạ nhân viên → tự điền 10 trường cá nhân vào form (chỉ khi THÊM mới).
+// Ô tìm + chọn người từ Danh bạ nhân sự → tự điền 10 trường cá nhân vào form (chỉ khi THÊM mới).
 function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Employee[]>([]);

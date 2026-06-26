@@ -14,7 +14,7 @@ export type Field = { key: string; label: string; type: FieldType; group: string
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
 
 export const FIELDS: Field[] = [
-  // Cá nhân (Stage 1: nhập tay — Stage 2 sẽ chuyển sang chọn từ Danh bạ nhân viên)
+  // Cá nhân (Stage 1: nhập tay — Stage 2 sẽ chuyển sang chọn từ Danh bạ nhân sự)
   { key: "fullName", label: "Họ & Tên", type: "text", group: "Cá nhân", source: "input" },
   { key: "taxCode", label: "Mã số thuế", type: "text", group: "Cá nhân", source: "input" },
   { key: "birthYear", label: "Năm sinh", type: "text", group: "Cá nhân", source: "input" },

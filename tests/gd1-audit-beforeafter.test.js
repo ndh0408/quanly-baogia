@@ -132,4 +132,48 @@ describe.runIf(dbAvailable)("GĐ1 #3 — audit before/after pay/confirm (integra
     expect(ev.after.paidAt ?? null).toBeNull();
     expect(ev.after.paidById ?? null).toBeNull();
   });
+
+  it("GET /api/audit → cột Đối tượng có targetLabel = TÊN hồ sơ (admin thấy tên, KHÔNG phải '#id')", async () => {
+    const name = `${TAG} Tên Hiện`;
+    const c = await mgr.post("/api/personnel").send(payload({ fullName: name }));
+    const id = c.body.id;
+    createdRecIds.push(id);
+    await acct.post(`/api/personnel/${id}/payment`).send({ paid: true }); // chắc chắn có 1 event personnel.pay
+
+    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 200 });
+    expect(r.status).toBe(200);
+    const row = r.body.data.find((x) => x.resourceId === String(id));
+    expect(row).toBeTruthy();
+    expect(row.targetLabel).toBe(name); // TÊN thật (resolve resourceId→fullName), không phải #id
+  });
+
+  it("targetLabel CÒN cho hồ sơ ĐÃ XÓA (includeDeleted) → action 'Xóa' admin vẫn biết xóa AI", async () => {
+    const name = `${TAG} Sẽ Xóa`;
+    const c = await mgr.post("/api/personnel").send(payload({ fullName: name }));
+    const id = c.body.id;
+    createdRecIds.push(id);
+    const d = await mgr.delete(`/api/personnel/${id}`); // soft-delete
+    expect(d.status).toBe(200);
+
+    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 200 });
+    const row = r.body.data.find((x) => x.resourceId === String(id));
+    expect(row).toBeTruthy();
+    expect(row.targetLabel).toBe(name); // dù đã soft-delete, vẫn tra được tên qua includeDeleted
+  });
+
+  it("BẢO MẬT: manager KHÔNG nhận targetLabel (chống lộ tên chéo qua nhật ký; chỉ admin) + vẫn strip before/after", async () => {
+    const name = `${TAG} Ẩn Với Mgr`;
+    const c = await mgr.post("/api/personnel").send(payload({ fullName: name }));
+    const id = c.body.id;
+    createdRecIds.push(id);
+    await acct.post(`/api/personnel/${id}/payment`).send({ paid: true });
+
+    const r = await mgr.get("/api/audit").query({ resource: "personnel", size: 200 });
+    expect(r.status).toBe(200); // manager có audit:view
+    const row = r.body.data.find((x) => x.resourceId === String(id));
+    expect(row).toBeTruthy();
+    expect(row.targetLabel ?? null).toBeNull();   // KHÔNG lộ tên cho manager
+    expect(row.before ?? null).toBeNull();        // least-privilege cũ giữ nguyên (PII strip)
+    expect(row.after ?? null).toBeNull();
+  });
 });

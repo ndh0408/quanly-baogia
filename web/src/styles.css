@@ -307,3 +307,24 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
      Ép flex tự nhiên → ô tìm cao bình thường, full-rộng. */
   .toolbar .grow { flex: 0 0 auto; }
 }
+
+/* ── Nhật ký hoạt động: tên thật + CHI TIẾT thay đổi (trước → sau) + thẻ mobile ── */
+.audit-table .au-clickable:hover { background: var(--row-hover, #f1f3f6); }
+.audit-table .au-clickable:focus-visible { outline: 2px solid var(--gold-d, #e0a200); outline-offset: -2px; }
+.audit-table .au-toggle { color: var(--soft, #475569); font-size: 12.5px; white-space: nowrap; text-align: right; }
+.au-detail td { background: var(--card-2, #f6f7f9); padding: 0 !important; }
+.au-changes { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px; }
+.au-change { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
+.au-cl { font-weight: 600; color: var(--soft, #475569); min-width: 120px; }
+.au-from { color: var(--muted, #64748b); text-decoration: line-through; }
+.au-arrow { color: var(--muted, #64748b); }
+.au-to { font-weight: 600; }
+
+.au-cards { display: flex; flex-direction: column; gap: 10px; }
+.au-card { border: 1px solid var(--line, #e6e8ec); border-radius: 12px; background: var(--card, #fff); padding: 12px 14px; }
+.au-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.au-card-top strong { font-size: 14.5px; }
+.au-card-meta { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 13px; color: var(--soft, #475569); }
+.au-card-meta span { word-break: break-word; }
+.au-more { margin-top: 8px; padding: 0; background: none; border: none; color: var(--gold-d, #e0a200); cursor: pointer; font-weight: 600; }
+.au-card .au-changes { padding: 8px 0 0; }

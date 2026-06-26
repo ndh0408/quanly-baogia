@@ -23,6 +23,33 @@ const Query = z.object({
   size: z.coerce.number().int().min(1).max(config.MAX_PAGE_SIZE).default(50),
 });
 
+// Resolve resourceId → TÊN người-đọc-được (admin không phải dân code → cần thấy "Báo giá GN26043 — Đại
+// nhạc hội" thay vì "#114"; "Nhân sự: Nguyễn Văn A" thay vì "#1"). Gộp truy vấn theo loại;
+// includeDeleted để lấy tên cả bản ghi ĐÃ XÓA (vd action "Xóa báo giá").
+async function resolveTargetLabels(rows: { resource: string | null; resourceId: string | null }[]) {
+  const ids: Record<string, Set<number>> = { quote: new Set(), personnel: new Set(), user: new Set(), customer: new Set(), employee: new Set() };
+  for (const r of rows) {
+    if (!r.resource || !r.resourceId || !(r.resource in ids)) continue;
+    const n = Number(r.resourceId);
+    if (Number.isInteger(n) && n > 0) ids[r.resource]!.add(n);
+  }
+  const map = new Map<string, string>();
+  const inc = { includeDeleted: true };
+  await Promise.all(([
+    ids.quote.size && prisma.quote.findMany({ where: { id: { in: [...ids.quote] } }, select: { id: true, projectCode: true, quoteNumber: true, title: true }, ...inc } as any)
+      .then((qs: any[]) => qs.forEach((q) => map.set(`quote:${q.id}`, `${q.projectCode || q.quoteNumber || "#" + q.id}${q.title ? " — " + q.title : ""}`))),
+    ids.personnel.size && prisma.personnelRecord.findMany({ where: { id: { in: [...ids.personnel] } }, select: { id: true, fullName: true }, ...inc } as any)
+      .then((ps: any[]) => ps.forEach((p) => map.set(`personnel:${p.id}`, p.fullName))),
+    ids.user.size && prisma.user.findMany({ where: { id: { in: [...ids.user] } }, select: { id: true, displayName: true, username: true }, ...inc } as any)
+      .then((us: any[]) => us.forEach((u) => map.set(`user:${u.id}`, u.displayName || u.username))),
+    ids.customer.size && prisma.customer.findMany({ where: { id: { in: [...ids.customer] } }, select: { id: true, code: true, name: true }, ...inc } as any)
+      .then((cs: any[]) => cs.forEach((c) => map.set(`customer:${c.id}`, `${c.code} — ${c.name}`))),
+    ids.employee.size && prisma.employee.findMany({ where: { id: { in: [...ids.employee] } }, select: { id: true, fullName: true }, ...inc } as any)
+      .then((es: any[]) => es.forEach((e) => map.set(`employee:${e.id}`, e.fullName))),
+  ].filter(Boolean)) as Promise<void>[]);
+  return map;
+}
+
 router.get(
   "/",
   validate({ query: Query }),
@@ -58,14 +85,19 @@ router.get(
     // of other users/customers. Only admins see the raw payload; managers get the
     // who/what/when trail with PII stripped.
     const isAdmin = req.session.role === "admin";
+    // Tên thật cho cột "Đối tượng" — CHỈ admin (cùng nhóm bị strip với before/after/ip). Lý do: tên
+    // hồ sơ/khách/báo giá là PII; manager bị owner-scoping (không thấy hồ sơ người khác) nên KHÔNG được
+    // lộ tên chéo qua nhật ký → manager giữ '#id'. Bỏ luôn truy vấn resolve cho non-admin (đỡ tải).
+    const targets = isAdmin ? await resolveTargetLabels(rows) : null;
     const data = rows.map((r) => {
       if (!isAdmin) {
         // Strip PII-bearing fields for non-admins via destructuring (these props
         // are required on the row type, so `delete` is not permitted under strict).
         const { before, after, ip, userAgent, ...rest } = r;
-        return { ...rest, id: r.id.toString() }; // BigInt id → string for JSON
+        return { ...rest, id: r.id.toString(), targetLabel: null }; // BigInt id → string for JSON
       }
-      return { ...r, id: r.id.toString() }; // BigInt id → string for JSON
+      const targetLabel = r.resource && r.resourceId ? (targets!.get(`${r.resource}:${r.resourceId}`) ?? null) : null;
+      return { ...r, id: r.id.toString(), targetLabel }; // BigInt id → string for JSON
     });
     res.json({ data, meta: { total, page, size, pageCount: Math.ceil(total / size) } });
   })

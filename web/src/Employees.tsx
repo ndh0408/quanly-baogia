@@ -51,7 +51,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
 
   return (
     <div>
-      <h1>Danh bạ nhân viên</h1>
+      <h1>Danh bạ nhân sự</h1>
       <p className="muted" style={{ margin: "-10px 0 16px" }}>Kho thông tin cá nhân dùng chung — khi tạo hồ sơ Nhân sự có thể chọn từ đây để tự điền.</p>
       <div className="toolbar">
         {!canManage && <span className="badge">Chỉ xem</span>}
