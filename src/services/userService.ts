@@ -74,8 +74,8 @@ export async function listUsers(_req: Request) {
     .map(({ inviteTokenHash, ...u }) => ({
       ...u,
       pending: !u.active && !!inviteTokenHash,
-      // Quyền HIỆU LỰC để pre-fill ma trận (per-user nếu có, else theo role); permCustom = đã tùy biến.
-      effectivePermissions: permissionsForUser(u.role, u.permissions),
+      // Quyền HIỆU LỰC để pre-fill ma trận (per-user nếu có, else theo role; +ký nếu canSign); permCustom = đã tùy biến.
+      effectivePermissions: permissionsForUser(u.role, u.permissions, u.canSign),
       permCustom: (u.permissions?.length ?? 0) > 0,
     }));
 }
@@ -156,7 +156,11 @@ export async function updateUser(req: Request) {
   const data = { ...rest };
   if (password) data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
   // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
-  if (data.permissions !== undefined) data.permissions = sanitizePerms(data.permissions);
+  if (data.permissions !== undefined) {
+    data.permissions = sanitizePerms(data.permissions);
+    // "Ký chứng từ" giờ là ô trong ma trận (quote:sign:own) → đồng bộ cờ canSign cũ cho khớp (legacy reads).
+    if (data.canSign === undefined) data.canSign = data.permissions.includes(PERMISSIONS.QUOTE_SIGN_OWN);
+  }
   // Deactivating an account must also burn any live invite/reset token —
   // otherwise the locked-out user could re-activate themselves through the
   // onboarding link (accept-invite sets active: true).

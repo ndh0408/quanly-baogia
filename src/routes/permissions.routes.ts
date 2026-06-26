@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import {
-  PERMISSION_GROUPS, PERMISSION_LABELS, ROLE_LABELS, ROLE_PERMISSIONS,
+  PERMISSION_GROUPS, PERMISSION_LABELS, PERMISSION_DESC, ROLE_LABELS, ROLE_PERMISSIONS,
   permissionsForRole, PERMISSIONS, requirePermission, EDITABLE_ROLES, hasRoleOverride, ADMIN_ONLY_PERMISSIONS,
 } from "../permissions.js";
 import { saveRoleOverride, resetRoleOverride } from "../roleOverrides.js";
@@ -38,7 +38,7 @@ router.get(
       groups: PERMISSION_GROUPS.map((g) => ({
         key: g.key,
         label: g.label,
-        perms: g.perms.map((p) => ({ key: p, label: PERMISSION_LABELS[p] || p })),
+        perms: g.perms.map((p) => ({ key: p, label: PERMISSION_LABELS[p] || p, desc: PERMISSION_DESC[p] || "" })),
       })),
       editableRoles: EDITABLE_ROLES,
       adminOnlyPermissions: [...ADMIN_ONLY_PERMISSIONS], // quyền chỉ-admin: ma trận KHÓA (cấp cho non-admin vô tác dụng)

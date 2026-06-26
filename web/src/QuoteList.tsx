@@ -22,8 +22,9 @@ const PAGE_SIZE = 20;
 export function QuoteListPage({ me }: { me: Me }) {
   const qc = useQueryClient();
   const can = useCallback((perm: string) => me.permissions.includes(perm) || (perm.endsWith(":own") && me.permissions.includes(perm.replace(/:own$/, ":all"))), [me]);
-  const isAdmin = me.role === "admin";
-  const isAccountHn = me.role === "account_hn";
+  // Theo QUYỀN (không theo role cứng): thấy mọi báo giá → hiện cột "Người tạo"; người điền HN → bản lược HN.
+  const isAdmin = me.permissions.includes("quote:read:all");
+  const isAccountHn = me.permissions.includes("quote:hn:fill");
   const isMobile = useIsMobile();
   // KHỚP server (quotes.routes.js): 'converted' là TERMINAL → KHÔNG ai xóa; delete:all xóa mọi trạng thái khác;
   // delete:own chỉ xóa báo giá CỦA MÌNH ở draft/rejected. (Trước đây short-circuit delete:all hiện nhầm nút trên 'Đã chốt'.)

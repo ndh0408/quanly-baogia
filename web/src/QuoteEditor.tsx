@@ -147,11 +147,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
   // editable (mirror server + renderEditor): admin sửa tất; manager/member sửa khi chưa chốt/mất.
   const isMember = (q.members || []).some((m) => m.id === me.id);
-  const canUpdate = me.role === "admin" || q.createdById === me.id || isMember || isNew;
-  // báo giá ĐÃ CHỐT/KHÔNG-CHỐT là TERMINAL — server (canEdit) chặn 403 mọi vai trò → khoá UI cho khớp, tránh "sửa được" giả.
-  const isTerminal = q.status === "converted" || q.status === "lost";
-  const editable = isNew || (!isTerminal && canUpdate && (me.role === "admin" || me.role === "manager" || q.status === "draft" || q.status === "rejected"));
   const hasPerm = (p: string) => me.permissions.includes(p) || me.permissions.includes(p.replace(/:own$/, ":all"));
+  const canUpdate = hasPerm("quote:update:all") || q.createdById === me.id || isMember || isNew;
+  // báo giá ĐÃ CHỐT/KHÔNG-CHỐT là TERMINAL — server (canEdit) chặn 403 → khoá UI cho khớp, tránh "sửa được" giả.
+  const isTerminal = q.status === "converted" || q.status === "lost";
+  // Ai có quyền "gửi khách" (admin/account) sửa được mọi trạng thái; còn lại chỉ nháp/trả-lại (khớp canEdit server).
+  const editable = isNew || (!isTerminal && canUpdate && (hasPerm("quote:send") || q.status === "draft" || q.status === "rejected"));
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
 
@@ -357,12 +358,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           </div>
         )}
 
-        {!isNew && (me.role === "admin" || me.role === "manager") && (
+        {!isNew && hasPerm("quote:hn:manage") && (
           <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
             onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
         )}
 
-        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={me.role === "admin"} onMarkDirty={mark} />
+        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={hasPerm("quote:internal:approve")} onMarkDirty={mark} />
 
         <div className="actions">
           {editable && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
@@ -376,7 +377,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                   <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>Tải Excel gửi khách</button>
                   <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>Tải PDF gửi khách</button>
                   <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
-                  {(me.role === "admin" || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
+                  {(hasPerm("quote:update:all") || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
                 </div>
               )}
             </div>

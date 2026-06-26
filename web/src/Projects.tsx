@@ -52,8 +52,9 @@ function buildRows(quotes: ProjectQuote[]): Row[] {
 
 export function ProjectsPage({ me }: { me: Me }) {
   const isAdmin = me.permissions.includes("user:manage");
-  const canSignNow = isAdmin || !!me.canSign;
-  const canInv = me.role === "admin";
+  // Ký chứng từ theo QUYỀN: sign:all (mọi dự án) hoặc sign:own (chỉ dự án mình tạo — server chặn owner).
+  const canSignNow = me.permissions.includes("quote:sign:all") || me.permissions.includes("quote:sign:own");
+  const canInv = me.permissions.includes("invoice:manage"); // sửa hóa đơn/thanh toán (admin + kế toán)
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [account, setAccount] = useState("");

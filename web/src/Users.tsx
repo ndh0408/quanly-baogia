@@ -131,9 +131,12 @@ function PermMatrix({ cat, isAdmin, value, onChange }: { cat: PermCatalog; isAdm
             {g.perms.map((p) => {
               const locked = adminOnly.has(p.key);
               return (
-                <label key={p.key} className={`perm-item${locked ? " locked" : ""}`} title={locked ? "Chỉ tài khoản Quản trị mới có" : p.key}>
+                <label key={p.key} className={`perm-item${locked ? " locked" : ""}`} title={locked ? "Chỉ tài khoản Quản trị mới có" : (p.desc || p.key)}>
                   <input type="checkbox" disabled={locked} checked={!locked && value.has(p.key)} onChange={() => toggle(p.key)} />
-                  <span>{p.label}{locked && " 🔒"}</span>
+                  <span className="perm-item-txt">
+                    <span className="perm-item-label">{p.label}{locked && " 🔒"}</span>
+                    {p.desc && <span className="perm-item-desc">{p.desc}</span>}
+                  </span>
                 </label>
               );
             })}
@@ -216,7 +219,6 @@ function EditUserModal({ user, cat, onClose, onSaved }: { user: User; cat?: Perm
   const [displayName, setDisplayName] = useState(user.displayName || "");
   const [phone, setPhone] = useState(user.phone || "");
   const [projectCode, setProjectCode] = useState(user.projectCode || "");
-  const [canSign, setCanSign] = useState(!!user.canSign);
   const [isAdmin, setIsAdmin] = useState(user.role === "admin");
   // Pre-fill ma trận từ quyền HIỆU LỰC hiện tại (per-user nếu có, else theo role mặc định).
   const [perms, setPerms] = useState<Set<string>>(new Set(user.effectivePermissions ?? user.permissions ?? []));
@@ -236,9 +238,9 @@ function EditUserModal({ user, cat, onClose, onSaved }: { user: User; cat?: Perm
     setErr(""); setFieldErrors({}); setSaving(true);
     try {
       await api.updateUser(user.id, {
-        username: user.username, displayName, phone, projectCode: projectCode.trim() || null, canSign,
+        username: user.username, displayName, phone, projectCode: projectCode.trim() || null,
         role: isAdmin ? "admin" : "manager",
-        permissions: isAdmin ? [] : [...perms],
+        permissions: isAdmin ? [] : [...perms], // backend tự đồng bộ cờ canSign từ quote:sign:own
       });
       toast("Đã lưu", "success"); onSaved();
     } catch (ex) { const fe = fieldErrorsFrom(ex); setFieldErrors(fe); setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lỗi")); setSaving(false); }
@@ -254,10 +256,6 @@ function EditUserModal({ user, cat, onClose, onSaved }: { user: User; cat?: Perm
             <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá user này tạo sẽ là FE_A26_001…)</em></span><input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
-            <input type="checkbox" checked={canSign} onChange={(e) => mark(setCanSign)(e.target.checked)} />
-            <span>Được <strong>Ký Chứng từ</strong> ở trang Quản lý dự án <span className="muted" style={{ fontSize: 11 }}>(quản trị luôn được; bật cho nhân viên cần ký)</span></span>
-          </label>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} />
         </div>
         {err && <div className="err">⚠ {err}</div>}

@@ -85,7 +85,7 @@ function toggleTheme() {
 }
 
 // ported=true → trang React thật; còn lại NHÚNG app cũ (/app?embed=1) — dùng được ngay, không tách rời.
-type Nav = { key: string; label: string; group: string; perm?: string; ported?: boolean };
+type Nav = { key: string; label: string; group: string; perm?: string | string[]; ported?: boolean };
 // Nhóm theo công việc: Tổng quan dẫn đầu (tổng-quan trước), rồi cụm Báo giá, rồi cụm Nhân sự, rồi
 // Thông báo. KHÔNG đổi trang đích (Shell vẫn ép HR-first cho ai có quyền HR) — chỉ sắp xếp menu.
 const NAV: Nav[] = [
@@ -96,7 +96,7 @@ const NAV: Nav[] = [
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
-  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: "quote:create", ported: true },
+  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: ["quote:create", "invoice:read"], ported: true },
   { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
   { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
@@ -123,7 +123,9 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
   const inputRef = useRef<HTMLInputElement>(null);
   const reqId = useRef(0);
   const blurT = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const has = (perm?: string) => !perm || me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
+  const hasOne = (perm: string) => me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
+  // perm có thể là 1 quyền HOẶC mảng (hiện nav nếu CÓ BẤT KỲ quyền nào) — vd Quản lý dự án: quote:create | invoice:read.
+  const has = (perm?: string | string[]) => !perm || (Array.isArray(perm) ? perm.some(hasOne) : hasOne(perm));
   const canQuote = has("quote:read:own"), canCust = has("customer:read:own"), canPers = has("personnel:read:own");
 
   // Trang khớp (đi tới nhanh) — tức thì, không cần mạng. Chỉ các trang user thấy được.
@@ -276,8 +278,8 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const has = (perm?: string) =>
-    !perm || me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
+  const hasOne = (perm: string) => me.permissions.includes(perm) || me.permissions.includes(perm.replace(/:own$/, ":all"));
+  const has = (perm?: string | string[]) => !perm || (Array.isArray(perm) ? perm.some(hasOne) : hasOne(perm));
   const visible = NAV.filter((n) => has(n.perm));
   const groups = [...new Set(visible.map((n) => n.group))];
   const active = NAV.find((n) => n.key === key);
@@ -285,7 +287,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   // FLIP: #/quotes/:id (SỬA báo giá đã có) giờ dùng React editor. NGOẠI LỆ: account_hn giữ view
   // fill-HN của SPA qua iframe. #/new (TẠO mới) tạm giữ wizard SPA (chọn công ty/mẫu/khách) — sẽ port
   // sau. #/redit + #/rnew là alias test → luôn React.
-  const isAccountHn = me.role === "account_hn";
+  const isAccountHn = me.permissions.includes("quote:hn:fill"); // người ĐIỀN HN (theo quyền, không role cứng) → view lược HN
   const reditM = key.match(/^redit\/(\d+)$/);
   const quotesM = key.match(/^quotes\/(\d+)$/);
   const isNewEditor = key === "rnew";

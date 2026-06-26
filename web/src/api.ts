@@ -101,7 +101,7 @@ export type AssignableUser = { id: number; displayName: string; role?: string; t
 
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
-  groups: { key: string; label: string; perms: { key: string; label: string }[] }[];
+  groups: { key: string; label: string; perms: { key: string; label: string; desc?: string }[] }[];
   editableRoles: string[];
   adminOnlyPermissions: string[]; // quyền chỉ-admin: ma trận khóa (cấp cho non-admin vô tác dụng)
   roles: { key: string; label: string; permissions: string[]; overridden?: boolean; editable?: boolean }[];

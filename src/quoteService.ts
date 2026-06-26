@@ -415,7 +415,7 @@ export async function getQuote(req: Request) {
 export async function listProjects(req: Request) {
   // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
   // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
-  const seeAll = can(req.session, P.USER_MANAGE);
+  const seeAll = can(req.session, P.USER_MANAGE) || can(req.session, P.INVOICE_READ); // admin HOẶC kế toán (xem mọi hóa đơn)
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!seeAll) where.createdById = req.session.userId;
   const quotes = await prisma.quote.findMany({
@@ -496,9 +496,12 @@ export async function listProjects(req: Request) {
  * chỉ ký dự án DO MÌNH TẠO. Chỉ quản lý nội bộ; không ảnh hưởng Excel/tổng.
  */
 export async function signSheet(req: Request) {
-  const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { canSign: true, displayName: true } });
-  const isAdmin = can(req.session, P.USER_MANAGE);
-  if (!isAdmin && !me?.canSign) {
+  const me = await prisma.user.findUnique({ where: { id: req.session.userId }, select: { displayName: true } });
+  // Quyền KÝ giờ là quote:sign:all (mọi dự án) / quote:sign:own (chỉ dự án mình tạo). Cờ canSign cũ đã
+  // được bắc cầu thành quote:sign:own ở middleware → tương thích ngược.
+  const signAll = can(req.session, P.QUOTE_SIGN_ALL);
+  const signOwn = can(req.session, P.QUOTE_SIGN_OWN);
+  if (!signAll && !signOwn) {
     throw httpError(403, "Bạn không có quyền ký chứng từ");
   }
   const sheet = await prisma.quoteSheet.findUnique({
@@ -511,8 +514,8 @@ export async function signSheet(req: Request) {
   if (sheet.quote?.status !== "converted" || sheet.quote?.deletedAt) {
     throw httpError(403, "Chỉ ký được chứng từ của báo giá đã chốt");
   }
-  // Admin ký mọi dự án; người có canSign (vd Lan Anh) CHỈ ký dự án DO MÌNH TẠO.
-  if (!isAdmin && sheet.quote?.createdById !== req.session.userId) {
+  // sign:all ký mọi dự án; sign:own CHỈ ký dự án DO MÌNH TẠO.
+  if (!signAll && sheet.quote?.createdById !== req.session.userId) {
     throw httpError(403, "Bạn chỉ ký được chứng từ của dự án do mình tạo");
   }
   const signed = req.body.signed !== false;

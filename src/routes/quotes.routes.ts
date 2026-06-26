@@ -115,7 +115,7 @@ router.put(
       docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
     }),
   }),
-  requirePermission(P.USER_MANAGE),   // chỉ admin (USER_MANAGE) — kế toán/giám đốc nhập
+  requirePermission(P.INVOICE_MANAGE),   // sửa hóa đơn/đánh dấu thanh toán (admin + kế toán có invoice:manage)
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
 );
 
