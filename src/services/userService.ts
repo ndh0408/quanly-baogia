@@ -13,6 +13,13 @@ import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
 import { httpError } from "../httpError.js";
+import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, permissionsForUser } from "../permissions.js";
+
+// Tích quyền PER-USER: chỉ nhận quyền HỢP LỆ (trong catalog) + KHÓA nhóm admin-tier (user:manage,
+// settings:manage…) — chống leo thang đặc quyền (nhóm này chỉ vai trò admin/master mới có).
+const KNOWN_PERMS = new Set<string>(Object.values(PERMISSIONS));
+const sanitizePerms = (arr: unknown): string[] =>
+  Array.isArray(arr) ? [...new Set(arr.filter((p): p is string => typeof p === "string" && KNOWN_PERMS.has(p) && !ADMIN_ONLY_PERMISSIONS.has(p)))] : [];
 
 // Accounts hidden from every user listing (developer/maintenance account).
 // The account still works for login — it just never shows in the admin user list
@@ -35,6 +42,7 @@ const USER_SELECT = {
   projectCode: true,
   active: true,
   canSign: true,
+  permissions: true,
   lastLoginAt: true,
   createdAt: true,
 };
@@ -63,12 +71,18 @@ export async function listUsers(_req: Request) {
   const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: { ...USER_SELECT, inviteTokenHash: true } });
   return users
     .filter((u) => !isHiddenUser(u))
-    .map(({ inviteTokenHash, ...u }) => ({ ...u, pending: !u.active && !!inviteTokenHash }));
+    .map(({ inviteTokenHash, ...u }) => ({
+      ...u,
+      pending: !u.active && !!inviteTokenHash,
+      // Quyền HIỆU LỰC để pre-fill ma trận (per-user nếu có, else theo role); permCustom = đã tùy biến.
+      effectivePermissions: permissionsForUser(u.role, u.permissions),
+      permCustom: (u.permissions?.length ?? 0) > 0,
+    }));
 }
 
 // Invite an employee by email — they self-onboard (set password + fill details).
 export async function inviteUser(req: Request) {
-  const { email, displayName, role, projectCode } = req.body;
+  const { email, displayName, role, projectCode, permissions } = req.body;
   const exists = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
   if (exists) throw httpError(409, "Email này đã có tài khoản");
   const token = randomBytes(24).toString("hex");
@@ -78,6 +92,7 @@ export async function inviteUser(req: Request) {
       email,
       displayName,
       role,
+      permissions: sanitizePerms(permissions), // tích quyền per-user lúc mời ([] = theo role)
       projectCode: projectCode ? String(projectCode).trim() : null,
       active: false,
       passwordHash: await bcrypt.hash(randomBytes(18).toString("hex"), config.BCRYPT_COST), // unusable until accept
@@ -140,6 +155,8 @@ export async function updateUser(req: Request) {
   const { password, ...rest } = req.body;
   const data = { ...rest };
   if (password) data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
+  // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
+  if (data.permissions !== undefined) data.permissions = sanitizePerms(data.permissions);
   // Deactivating an account must also burn any live invite/reset token —
   // otherwise the locked-out user could re-activate themselves through the
   // onboarding link (accept-invite sets active: true).
@@ -189,7 +206,9 @@ export async function updateUser(req: Request) {
       await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });
       await audit(req, "user.memberships.cleared", { resource: "user", resourceId: id, after: { quoteIds: dropped.map((q) => q.id) } });
     }
-  } else if (before.role !== user.role) {
+  } else if (before.role !== user.role || JSON.stringify(before.permissions) !== JSON.stringify(user.permissions)) {
+    // Đổi vai trò HOẶC tích quyền per-user → đẩy SSE để client tải lại /me, cập nhật ẩn/hiện ngay (server đã
+    // áp dụng từ request kế nhờ middleware resolve mỗi request — cái này chỉ để UI mượt).
     refreshSession(user.id);
   }
   await audit(req, "user.update", {

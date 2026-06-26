@@ -70,4 +70,20 @@ describe.runIf(dbAvailable)("phân quyền PER-USER ghi đè role (integration)"
     expect(me.body.permissions).toContain("personnel:create");     // quyền được cấp
     expect(me.body.permissions).not.toContain("personnel:read:all"); // KHÔNG có cái của role HR mặc định
   });
+
+  it("admin PUT /users/:id { permissions } → set quyền per-user + LỌC nhóm admin-tier + key rác (chống leo thang)", async () => {
+    const target = await mk("manager", "target", []);
+    const r = await adminMinA.put(`/api/users/${target.id}`).send({
+      permissions: ["personnel:read:all", "quote:read:all", "user:manage", "settings:manage", "garbage:fake"],
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.permissions).toEqual(expect.arrayContaining(["personnel:read:all", "quote:read:all"]));
+    expect(r.body.permissions).not.toContain("user:manage");    // admin-tier bị lọc
+    expect(r.body.permissions).not.toContain("settings:manage"); // admin-tier bị lọc
+    expect(r.body.permissions).not.toContain("garbage:fake");   // key không hợp lệ bị lọc
+    // GET /api/users cũng trả effectivePermissions để pre-fill ma trận
+    const list = await adminMinA.get("/api/users");
+    const row = list.body.find((u) => u.id === target.id);
+    expect(row.effectivePermissions).toContain("personnel:read:all");
+  });
 });

@@ -66,6 +66,7 @@ export const UserInviteSchema = z.object({
   displayName,
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]).default("manager"),
   projectCode,
+  permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user lúc mời
 });
 
 export const AcceptInviteSchema = z.object({
@@ -96,6 +97,7 @@ export const UserUpdateSchema = z.object({
   password: pwd.optional(),
   projectCode,
   canSign: zbool.optional(),
+  permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user (tập đầy đủ; [] = theo role)
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).

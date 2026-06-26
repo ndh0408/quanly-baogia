@@ -49,6 +49,9 @@ export type User = {
   id: number; username: string; displayName: string; role: string;
   phone?: string | null; projectCode?: string | null; email?: string | null;
   active: boolean; pending: boolean; canSign?: boolean;
+  permissions?: string[];          // tích quyền per-user thô ([] = theo role mặc định)
+  effectivePermissions?: string[]; // quyền HIỆU LỰC (để pre-fill ma trận)
+  permCustom?: boolean;            // đã tùy biến quyền riêng (khác mặc định role)
 };
 export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean };
 
@@ -98,7 +101,7 @@ export type AssignableUser = { id: number; displayName: string; role?: string; t
 
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
-  groups: { label: string; perms: { key: string; label: string }[] }[];
+  groups: { key: string; label: string; perms: { key: string; label: string }[] }[];
   editableRoles: string[];
   adminOnlyPermissions: string[]; // quyền chỉ-admin: ma trận khóa (cấp cho non-admin vô tác dụng)
   roles: { key: string; label: string; permissions: string[]; overridden?: boolean; editable?: boolean }[];
@@ -209,7 +212,7 @@ export const api = {
   deleteCustomer: (id: number) => req<{ ok: boolean }>(`/customers/${id}`, { method: "DELETE" }),
   // Quản lý nhân viên (increment 2) — gate user:manage (Shell nav đã lọc).
   listUsers: () => req<User[]>("/users"),
-  inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null }) =>
+  inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; permissions?: string[] }) =>
     req<InviteResult>("/users/invite", { method: "POST", body: JSON.stringify(data) }),
   resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean }>(`/users/${id}/resend-invite`, { method: "POST" }),
   updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
