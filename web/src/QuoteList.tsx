@@ -24,6 +24,7 @@ export function QuoteListPage({ me }: { me: Me }) {
   const can = useCallback((perm: string) => me.permissions.includes(perm) || (perm.endsWith(":own") && me.permissions.includes(perm.replace(/:own$/, ":all"))), [me]);
   const isAdmin = me.role === "admin";
   const isAccountHn = me.role === "account_hn";
+  const isMobile = useIsMobile();
   // KHỚP server (quotes.routes.js): 'converted' là TERMINAL → KHÔNG ai xóa; delete:all xóa mọi trạng thái khác;
   // delete:own chỉ xóa báo giá CỦA MÌNH ở draft/rejected. (Trước đây short-circuit delete:all hiện nhầm nút trên 'Đã chốt'.)
   const canDelete = (q: QuoteRow) => q.status !== "converted" && (can("quote:delete:all") || (can("quote:delete:own") && q.createdById === me.id && (q.status === "draft" || q.status === "rejected")));
@@ -107,9 +108,41 @@ export function QuoteListPage({ me }: { me: Me }) {
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
         <div className="empty">{q || status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}</div>
+      ) : isMobile ? (
+        /* MOBILE: thẻ React (không cuộn bảng rộng) — giữ nguyên cột/nút theo ROLE. */
+        <div className="ql-cards">
+          {rows.map((r) => (
+            <div className="ql-card" key={r.id} onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
+              <div className="ql-card-head">
+                <strong>{codeLabel(r)}</strong>
+                {isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}
+              </div>
+              {r.title && <div className="ql-card-title">{shortTitle(r.title)}</div>}
+              <dl className="ql-card-body">
+                {isAdmin && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
+                {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
+                <div className="ql-crow"><dt>Ngày</dt><dd>{fmtDate(r.quoteDate) || "—"}</dd></div>
+                <div className="ql-crow"><dt>Sheet</dt><dd>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</dd></div>
+                {isAccountHn
+                  ? <div className="ql-crow"><dt>Tổng HN</dt><dd><b>{fmtMoney(r.hnTotal) || "—"}</b></dd></div>
+                  : <div className="ql-crow"><dt>Tổng (VNĐ)</dt><dd><b>{fmtMoney(r.total) || "—"}</b></dd></div>}
+                <div className="ql-crow"><dt>Công ty</dt><dd>{r.company?.shortName || r.company?.name || "—"}</dd></div>
+                {!isAccountHn && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || "—"}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
+              </dl>
+              {!isAccountHn && (
+                <div className="ql-card-actions">
+                  <button className="qa-btn" title="Tải file Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
+                  <button className="qa-btn" title="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>
+                  <button className="qa-btn" title="Bản mới cùng mã dự án" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>
+                  {canDelete(r) && <button className="qa-btn qa-danger" title="Xóa" onClick={(e) => act("del", r, e)}><span className="qa-ico">🗑</span><span className="qa-label">Xóa</span></button>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="list-wrap">
-          <table className="list-table cards-sm">
+          <table className="list-table">
             <thead>
               <tr>
                 <SortTh f="quoteNumber" label="Mã dự án" />
@@ -138,11 +171,11 @@ export function QuoteListPage({ me }: { me: Me }) {
                   {isAccountHn ? <td data-label="Tổng HN" style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : <><td data-label="Khách">{r.toCompany}</td><td data-label="Mã KH">{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
                   <td data-label="Trạng thái">{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
                   {!isAccountHn && (
-                    <td className="row-actions" data-label="Thao tác" style={{ whiteSpace: "nowrap" }}>
-                      <button className="btn btn-sm" title="Tải file Excel" onClick={(e) => act("excel", r, e)}>📥 Excel</button>
-                      <button className="btn btn-sm" title="Nhân bản thành báo giá mới" onClick={(e) => act("dup", r, e)}>📋 Nhân bản</button>
-                      <button className="btn btn-sm" title="Tạo bản mới CÙNG mã dự án (v2, v3…)" onClick={(e) => act("revise", r, e)}>➕ Bản mới</button>
-                      {canDelete(r) && <button className="btn btn-sm btn-danger" title="Xóa báo giá" onClick={(e) => act("del", r, e)}>🗑 Xóa</button>}
+                    <td className="row-actions qa-cell" data-label="Thao tác">
+                      <button className="qa-btn" title="Tải file Excel" aria-label="Tải Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
+                      <button className="qa-btn" title="Nhân bản thành báo giá mới" aria-label="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>
+                      <button className="qa-btn" title="Tạo bản mới CÙNG mã dự án (v2, v3…)" aria-label="Bản mới" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>
+                      {canDelete(r) && <button className="qa-btn qa-danger" title="Xóa báo giá" aria-label="Xóa" onClick={(e) => act("del", r, e)}><span className="qa-ico">🗑</span><span className="qa-label">Xóa</span></button>}
                     </td>
                   )}
                 </tr>
@@ -164,4 +197,16 @@ export function QuoteListPage({ me }: { me: Me }) {
       )}
     </div>
   );
+}
+
+// Màn hình hẹp (≤ 820px) → đổi sang dạng THẺ React (responsive, không cuộn bảng rộng).
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const on = () => setM(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return m;
 }
