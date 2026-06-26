@@ -811,7 +811,10 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 
 /* ---------- Responsive ---------- */
 @media (max-width: 920px) {
-  .shell { grid-template-columns: 1fr; }
+  /* FIX layout menu mobile: grid 1 cột + topbar = auto, nội dung = 1fr. KHÔNG đặt rows → align-content
+     mặc định KÉO GIÃN hàng topbar lấp 100vh khi trang NGẮN (topbar cao bất thường ~270px; trang dài thì không
+     → "nhiều trang bị nhiều trang không"). auto/1fr cho topbar đúng cao + main lấp phần còn lại. */
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .mobile-topbar { display: flex; }
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: 280px; z-index: 70;
