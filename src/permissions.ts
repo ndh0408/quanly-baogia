@@ -273,6 +273,7 @@ const ADMIN = [
   P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
   P.SETTINGS_MANAGE,
   P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
+  P.QUOTE_INTERNAL_PAY,     // admin đánh dấu thanh toán hàng nội bộ (KHÔNG thêm internal:view — admin xem FULL)
   P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
   P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // trang Quản lý dự án + sửa hóa đơn + thanh toán + ký mọi dự án
   // Nhân sự + Danh bạ: admin sửa/xóa MỌI + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
