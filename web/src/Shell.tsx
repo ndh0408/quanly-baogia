@@ -53,6 +53,7 @@ import { ProjectsPage } from "./Projects";
 const QuoteEditorPage = lazy(() => import("./QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
 const NewQuoteWizard = lazy(() => import("./NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
 const AccountHnView = lazy(() => import("./AccountHnView").then((m) => ({ default: m.AccountHnView })));
+const InternalQuoteView = lazy(() => import("./InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
@@ -288,13 +289,16 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
   // fill-HN của SPA qua iframe. #/new (TẠO mới) tạm giữ wizard SPA (chọn công ty/mẫu/khách) — sẽ port
   // sau. #/redit + #/rnew là alias test → luôn React.
   const isAccountHn = me.permissions.includes("quote:hn:fill"); // người ĐIỀN HN (theo quyền, không role cứng) → view lược HN
+  // Tài khoản "chi phí" (quote:internal:view) → mở báo giá CHỈ thấy bảng nội bộ (server lược). account_hn ưu tiên.
+  const isInternalViewer = me.permissions.includes("quote:internal:view") && !isAccountHn;
   const reditM = key.match(/^redit\/(\d+)$/);
   const quotesM = key.match(/^quotes\/(\d+)$/);
   const isNewEditor = key === "rnew";
-  const editId = reditM ? Number(reditM[1]) : (quotesM && !isAccountHn ? Number(quotesM[1]) : undefined);
+  const editId = reditM ? Number(reditM[1]) : (quotesM && !isAccountHn && !isInternalViewer ? Number(quotesM[1]) : undefined);
   const isEditor = isNewEditor || editId !== undefined;
-  const isWizard = key === "new" && !isAccountHn;   // Tạo báo giá mới → wizard React (account_hn không tạo BG)
+  const isWizard = key === "new" && !isAccountHn && !isInternalViewer;   // Tạo báo giá mới → wizard React
   const hnEditId = isAccountHn && quotesM ? Number(quotesM[1]) : undefined;   // account_hn mở BG → view điền HN React
+  const internalViewId = isInternalViewer && quotesM ? Number(quotesM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
 
   return (
     <>
@@ -340,6 +344,8 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
           <main className="main" id="main" tabIndex={-1}><LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary></main>
         ) : hnEditId !== undefined ? (
           <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
+        ) : internalViewId !== undefined ? (
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
             <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>

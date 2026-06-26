@@ -25,6 +25,9 @@ export function QuoteListPage({ me }: { me: Me }) {
   // Theo QUYỀN (không theo role cứng): thấy mọi báo giá → hiện cột "Người tạo"; người điền HN → bản lược HN.
   const isAdmin = me.permissions.includes("quote:read:all");
   const isAccountHn = me.permissions.includes("quote:hn:fill");
+  const isInternalViewer = !isAccountHn && me.permissions.includes("quote:internal:view"); // chi phí: chỉ thấy nội bộ
+  const stripped = isAccountHn || isInternalViewer; // ẩn giá/khách/nút (bản lược)
+  const payProg = (r: { internalPaidRows?: number; internalRows?: number }) => r.internalRows ? `${r.internalPaidRows ?? 0}/${r.internalRows}` : "—";
   const isMobile = useIsMobile();
   // KHỚP server (quotes.routes.js): 'converted' là TERMINAL → KHÔNG ai xóa; delete:all xóa mọi trạng thái khác;
   // delete:own chỉ xóa báo giá CỦA MÌNH ở draft/rejected. (Trước đây short-circuit delete:all hiện nhầm nút trên 'Đã chốt'.)
@@ -120,17 +123,19 @@ export function QuoteListPage({ me }: { me: Me }) {
               </div>
               {r.title && <div className="ql-card-title">{shortTitle(r.title)}</div>}
               <dl className="ql-card-body">
-                {isAdmin && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
+                {(isAdmin || isInternalViewer) && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
                 {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
                 <div className="ql-crow"><dt>Ngày</dt><dd>{fmtDate(r.quoteDate) || "—"}</dd></div>
                 <div className="ql-crow"><dt>Sheet</dt><dd>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</dd></div>
                 {isAccountHn
                   ? <div className="ql-crow"><dt>Tổng HN</dt><dd><b>{fmtMoney(r.hnTotal) || "—"}</b></dd></div>
+                  : isInternalViewer
+                  ? <div className="ql-crow"><dt>Đã thanh toán</dt><dd><b>{payProg(r)} hàng</b></dd></div>
                   : <div className="ql-crow"><dt>Tổng (VNĐ)</dt><dd><b>{fmtMoney(r.total) || "—"}</b></dd></div>}
                 <div className="ql-crow"><dt>Công ty</dt><dd>{r.company?.shortName || r.company?.name || "—"}</dd></div>
-                {!isAccountHn && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || "—"}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
+                {!stripped && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || "—"}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
               </dl>
-              {!isAccountHn && (
+              {!stripped && (
                 <div className="ql-card-actions">
                   <button className="qa-btn" title="Tải file Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
                   <button className="qa-btn" title="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>
@@ -147,15 +152,15 @@ export function QuoteListPage({ me }: { me: Me }) {
             <thead>
               <tr>
                 <SortTh f="quoteNumber" label="Mã dự án" />
-                {isAdmin && <th>Người tạo</th>}{isAccountHn && <th>Người giao</th>}
+                {(isAdmin || isInternalViewer) && <th>Người tạo</th>}{isAccountHn && <th>Người giao</th>}
                 <th>Tiêu đề</th>
                 <SortTh f="quoteDate" label="Ngày" />
                 <th>Sheet</th>
-                {!isAccountHn && <SortTh f="total" label="Tổng (VNĐ)" right />}
+                {!stripped && <SortTh f="total" label="Tổng (VNĐ)" right />}
                 <th>Công ty</th>
-                {isAccountHn ? <th style={{ textAlign: "right" }}>Tổng HN</th> : <><th>Khách</th><th>Mã KH</th></>}
+                {isAccountHn ? <th style={{ textAlign: "right" }}>Tổng HN</th> : isInternalViewer ? <th style={{ textAlign: "right" }}>Đã TT</th> : <><th>Khách</th><th>Mã KH</th></>}
                 <th>Trạng thái</th>
-                {!isAccountHn && <th>Thao tác</th>}
+                {!stripped && <th>Thao tác</th>}
               </tr>
             </thead>
             <tbody>
@@ -163,15 +168,15 @@ export function QuoteListPage({ me }: { me: Me }) {
                 <tr key={r.id} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
                   <td data-label="Mã dự án"><strong>{codeLabel(r)}</strong></td>
-                  {isAdmin && <td data-label="Người tạo">{r.createdBy?.displayName || ""}</td>}{isAccountHn && <td data-label="Người giao">{r.createdBy?.displayName || "—"}</td>}
+                  {(isAdmin || isInternalViewer) && <td data-label="Người tạo">{r.createdBy?.displayName || ""}</td>}{isAccountHn && <td data-label="Người giao">{r.createdBy?.displayName || "—"}</td>}
                   <td data-label="Tiêu đề" title={r.title}>{shortTitle(r.title)}</td>
                   <td data-label="Ngày">{fmtDate(r.quoteDate)}</td>
                   <td data-label="Sheet" style={{ textAlign: "center" }}>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
-                  {!isAccountHn && <td data-label="Tổng (VNĐ)" style={{ textAlign: "right" }}>{fmtMoney(r.total)}</td>}
+                  {!stripped && <td data-label="Tổng (VNĐ)" style={{ textAlign: "right" }}>{fmtMoney(r.total)}</td>}
                   <td data-label="Công ty">{r.company?.shortName || r.company?.name || ""}</td>
-                  {isAccountHn ? <td data-label="Tổng HN" style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : <><td data-label="Khách">{r.toCompany}</td><td data-label="Mã KH">{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
+                  {isAccountHn ? <td data-label="Tổng HN" style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : isInternalViewer ? <td data-label="Đã TT" style={{ textAlign: "right" }}>{payProg(r)} hàng</td> : <><td data-label="Khách">{r.toCompany}</td><td data-label="Mã KH">{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
                   <td data-label="Trạng thái">{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
-                  {!isAccountHn && (
+                  {!stripped && (
                     <td className="row-actions qa-cell" data-label="Thao tác">
                       <button className="qa-btn" title="Tải file Excel" aria-label="Tải Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
                       <button className="qa-btn" title="Nhân bản thành báo giá mới" aria-label="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>

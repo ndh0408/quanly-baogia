@@ -52,7 +52,7 @@ router.get(
     const page = Number(rawPage);
     const size = Number(rawSize);
     res.json({
-      data: rows.map((r) => presentQuoteRow(r, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })),
+      data: rows.map((r) => presentQuoteRow(r, { hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) })),
       meta: {
         total,
         page,
@@ -151,7 +151,7 @@ router.get(
   validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
-    res.json(presentQuote(quote, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
+    res.json(presentQuote(quote, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));
   })
 );
 

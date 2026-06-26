@@ -144,7 +144,22 @@ export const QUOTE_LIST_SELECT = {
   _count: { select: { sheets: true } },
 };
 
-export function presentQuoteRow(q: any, { hnOnly = false }: { hnOnly?: boolean } = {}) {
+export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }: { hnOnly?: boolean; internalOnly?: boolean } = {}) {
+  // 🔒 quote:internal:view: danh sách CHỈ để chọn dự án quản thanh toán nội bộ — KHÔNG lộ giá/khách báo giá chính.
+  if (internalOnly) {
+    const allItems = (q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).flatMap((t: any) => t?.items || []));
+    const rows = allItems.filter((it: any) => it && it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info");
+    return {
+      id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
+      title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
+      company: q.company ? { id: q.company.id, name: q.company.name, shortName: q.company.shortName } : null,
+      createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
+      internalRows: rows.length,
+      internalPaidRows: rows.filter((it: any) => it.paid).length,
+      sheetCount: q._count?.sheets ?? 0,
+      _internalRow: true,
+    };
+  }
   // 🔒 quote:hn:fill: danh sách CHỉ để biết có báo giá nào được giao — KHÔNG lộ tổng tiền/khách.
   if (hnOnly) {
     // Số SHEET HN + TỔNG HN = đúng phần account TỰ LÀM (gộp các bảng "hanoi" của mọi sheet).

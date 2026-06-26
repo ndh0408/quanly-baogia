@@ -377,7 +377,7 @@ export async function listQuotes(req: Request) {
   const where = { AND: filters };
   // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
   // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.
-  const listSelect = can(req.session, P.QUOTE_HN_FILL)
+  const listSelect = (can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW))
     ? { ...QUOTE_LIST_SELECT, sheets: { select: { extraTables: true } } }
     : QUOTE_LIST_SELECT;
   const [total, rows] = await Promise.all([

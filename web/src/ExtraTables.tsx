@@ -129,7 +129,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
 }
 
 // Dialog tích "đã thanh toán" + up ẢNH chứng từ cho 1 HÀNG nội bộ (gọi API /pay — không lưu cả báo giá).
-function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
+export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
   quoteId: number; sheetId: number; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
 }) {
   const it = item as Record<string, unknown>;

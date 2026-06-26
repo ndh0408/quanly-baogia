@@ -70,6 +70,7 @@ export type QuoteRow = {
   company?: { id: number; name: string; shortName?: string } | null;
   total?: number; toCompany?: string; customerCode?: string | null; sheetCount?: number;
   hnStatus?: string | null; hnSheetCount?: number; hnTotal?: number; _accountHnRow?: boolean;
+  internalRows?: number; internalPaidRows?: number; _internalRow?: boolean; // chi phí: tiến độ thanh toán nội bộ
 };
 export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
