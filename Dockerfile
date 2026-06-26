@@ -22,7 +22,9 @@ FROM node:22-alpine AS webbuild
 WORKDIR /app
 COPY web ./web
 COPY shared ./shared
-# web/ import gói shared/ ngoài root (../../shared) → phải có mặt khi build, nếu không Vite/tsc fail.
+# web/ import NGOÀI root → phải có mặt khi build (nếu không Vite/tsc fail):
+#   ../../shared (gói dùng chung) + ../../public/style.css (design-system import vào bundle để Vite tự hash).
+COPY public/style.css ./public/style.css
 RUN cd web && npm ci && npm run build
 # vite outDir = ../public/app2 → ghi ra /app/public/app2
 
