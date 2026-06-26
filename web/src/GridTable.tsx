@@ -21,6 +21,9 @@ export type GridTableProps = {
   internalNote: boolean;
   approveCol?: boolean;
   canApprove?: boolean;
+  payCol?: boolean;                // cột THANH TOÁN nội bộ per-hàng (bảng nội bộ)
+  canPay?: boolean;                // có quyền quote:internal:pay → bấm được
+  onPayRow?: (item: ItemK) => void; // mở dialog tích thanh toán + ảnh cho 1 hàng
   groupSubtotal: boolean;
   onGroupSubtotal?: (v: boolean) => void;
   onChange: () => void;
@@ -34,7 +37,7 @@ const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROU
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
 
 export function GridTable(props: GridTableProps) {
-  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, groupSubtotal, onGroupSubtotal, onChange, fxBar } = props;
+  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, onChange, fxBar } = props;
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
   const focusRef = useRef<{ i: number; f: string } | null>(null);
@@ -530,7 +533,7 @@ export function GridTable(props: GridTableProps) {
   const rk = M.computeRowKinds(items);
   const sectionSum: Record<number, number> = {};
   { let cur = -1; for (let i = 0; i < items.length; i++) { if (rk[i] === "section") { cur = i; sectionSum[i] = 0; } else if ((rk[i] === "head" || rk[i] === "sub") && cur >= 0) sectionSum[cur] += M.lineAmount(items[i], usesDays); } }
-  const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0);
+  const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   let sttNo = 0, sectionIdx = -1, subNo = 0;
 
@@ -545,6 +548,11 @@ export function GridTable(props: GridTableProps) {
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} onChange={(e) => toggleApprove(i, e.target.checked)} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {payCol && <td className="col-pay">{canPay
+        ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} onClick={() => onPayRow?.(items[i])}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
+        : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
+        {(items[i] as Record<string, unknown>).paid && (items[i] as Record<string, unknown>).paidAt ? <span className="ap-date"> {M.fmtDate(String((items[i] as Record<string, unknown>).paidAt))}</span> : null}
+        {(items[i] as Record<string, unknown>).hasPaidProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</td>}
       {editable && <td className="col-action"><button className="add-sub" title="Thêm hàng con" onClick={() => addSubAfter(i)}>↳</button><button className="rm-row" title="Xóa hàng" onClick={() => removeRow(i)}>✕</button></td>}
     </>
   );
@@ -581,6 +589,7 @@ export function GridTable(props: GridTableProps) {
               <th scope="col" style={{ width: 150 }}>GHI CHÚ</th>
               {internalNote && <th scope="col" style={{ width: 150 }} className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
               {approveCol && <th scope="col" style={{ width: 120 }}>DUYỆT</th>}
+              {payCol && <th scope="col" style={{ width: 140 }}>THANH TOÁN</th>}
               {editable && <th scope="col" style={{ width: 36 }} />}
             </tr>
           </thead>
@@ -606,6 +615,7 @@ export function GridTable(props: GridTableProps) {
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
                     {approveCol && <td className="col-approve" />}
+                    {payCol && <td className="col-pay" />}
                     {editable && <td className="col-action"><button className="rm-row" title={isSub ? "Xóa nhóm con" : "Xóa nhóm"} onClick={() => removeRow(i)}>✕</button></td>}
                   </tr>
                 );

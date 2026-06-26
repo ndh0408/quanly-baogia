@@ -1199,6 +1199,9 @@ input:disabled, select:disabled, textarea:disabled {
 .col-approve .ap-check:disabled { cursor: not-allowed; }
 .col-approve .ap-date { display: block; font-size: 11px; color: var(--approved-text, #1c6b3f); font-weight: 700; margin-top: 2px; }
 [data-theme="dark"] .col-approve .ap-date { color: #6dcf95; }
+.col-pay { white-space: nowrap; text-align: center; font-size: 12.5px; vertical-align: middle; }
+.col-pay .ap-date { display: inline; font-size: 11px; color: var(--approved-text, #1c6b3f); font-weight: 700; }
+[data-theme="dark"] .col-pay .ap-date { color: #6dcf95; }
 
 /* Chế độ NHÚNG (app React mới mount /app?embed=1 trong iframe): ẩn shell, chỉ render nội dung
    full khung iframe — không có sidebar/topbar (đã chặn ở renderShell). */

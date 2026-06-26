@@ -271,6 +271,11 @@ export const api = {
     req<unknown>(`/quotes/sheets/${sheetId}/invoice`, { method: "PUT", body: JSON.stringify({ [field]: val }) }),
   signSheet: (sheetId: number, signed: boolean) =>
     req<unknown>(`/quotes/sheets/${sheetId}/sign`, { method: "POST", body: JSON.stringify({ signed }) }),
+  // Bảng nội bộ — thanh toán 1 HÀNG (tích + ảnh) + lấy ảnh on-demand.
+  markExtraPay: (quoteId: number, sheetId: number, rid: string, paid: boolean, paidProof?: string) =>
+    req<{ ok: boolean; rid: string; paid: boolean }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/pay`, { method: "POST", body: JSON.stringify(paidProof !== undefined ? { paid, paidProof } : { paid }) }),
+  getExtraProof: (quoteId: number, sheetId: number, rid: string) =>
+    req<{ paidProof: string | null }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/proof`),
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
