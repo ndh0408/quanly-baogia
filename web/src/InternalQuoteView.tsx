@@ -25,7 +25,8 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
   if (isPending) return <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
   if (error || !data) return <div className="err">⚠ Không tải được. <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>;
   const q = data as Record<string, any>;
-  const sheets: any[] = q.internalSheets || [];
+  // internalSheets = bản server đã lược (tài khoản chi phí thật). Khi XEM THỬ (admin), data đầy đủ → lấy từ sheets.extraTables.
+  const sheets: any[] = q.internalSheets || (q.sheets || []).map((s: any) => ({ sheetId: s.id, sheetName: s.name || null, order: s.order, tables: Array.isArray(s.extraTables) ? s.extraTables : [] }));
   const tables = sheets.flatMap((s) => (s.tables || []).map((t: any) => ({ s, t })));
 
   return (

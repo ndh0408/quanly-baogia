@@ -13,7 +13,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 type Modal = { t: "invite" } | { t: "edit"; user: User } | { t: "result"; result: InviteResult };
 
-export function UsersPage({ me }: { me: Me }) {
+export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: string[], label: string) => void }) {
   const qc = useQueryClient();
   const [modal, setModal] = useState<Modal | null>(null);
 
@@ -90,8 +90,8 @@ export function UsersPage({ me }: { me: Me }) {
         </div>
       )}
 
-      {modal?.t === "invite" && <InviteModal cat={cat} onClose={() => setModal(null)} onInvited={(r) => { setModal({ t: "result", result: r }); load(); }} />}
-      {modal?.t === "edit" && <EditUserModal user={modal.user} cat={cat} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
+      {modal?.t === "invite" && <InviteModal cat={cat} onPreview={onPreview} onClose={() => setModal(null)} onInvited={(r) => { setModal({ t: "result", result: r }); load(); }} />}
+      {modal?.t === "edit" && <EditUserModal user={modal.user} cat={cat} onPreview={onPreview} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
       {modal?.t === "result" && <InviteResultModal result={modal.result} onClose={() => setModal(null)} />}
     </div>
   );
@@ -189,7 +189,12 @@ function PermPreview({ cat, isAdmin, perms }: { cat?: PermCatalog; isAdmin: bool
 }
 
 // Hàng "Toàn quyền quản trị" + ma trận + XEM TRƯỚC — dùng chung cho Mời & Sửa.
-function PermSection({ cat, isAdmin, setAdmin, perms, setPerms }: { cat?: PermCatalog; isAdmin: boolean; setAdmin: (v: boolean) => void; perms: Set<string>; setPerms: (s: Set<string>) => void; }) {
+function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label }: { cat?: PermCatalog; isAdmin: boolean; setAdmin: (v: boolean) => void; perms: Set<string>; setPerms: (s: Set<string>) => void; onPreview?: (perms: string[], label: string) => void; label?: string; }) {
+  const tryIt = () => {
+    if (!onPreview) return;
+    const eff = isAdmin ? (cat?.roles.find((r) => r.key === "admin")?.permissions ?? []) : [...perms];
+    onPreview(eff, label || "tài khoản này");
+  };
   return (
     <div className="perm-section">
       <label className="perm-admin-toggle">
@@ -197,6 +202,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms }: { cat?: PermCa
         <span><strong>Toàn quyền quản trị</strong> <span className="muted" style={{ fontSize: 11 }}>(thấy & làm mọi thứ; quản lý tài khoản/cấu hình)</span></span>
       </label>
       <PermPreview cat={cat} isAdmin={isAdmin} perms={perms} />
+      {onPreview && <button type="button" className="btn btn-sm btn-preview" onClick={tryIt}>👁 Xem thử app với quyền này (chạy thử, không lưu thật)</button>}
       {cat ? <PermMatrix cat={cat} isAdmin={isAdmin} value={perms} onChange={setPerms} />
         : <p className="muted">Đang tải danh mục quyền…</p>}
     </div>
@@ -204,7 +210,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms }: { cat?: PermCa
 }
 
 // Mời nhân viên qua email (họ tự onboard) — kèm tích quyền.
-function InviteModal({ cat, onClose, onInvited }: { cat?: PermCatalog; onClose: () => void; onInvited: (r: InviteResult) => void }) {
+function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog; onClose: () => void; onInvited: (r: InviteResult) => void; onPreview?: (perms: string[], label: string) => void }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [projectCode, setProjectCode] = useState("");
@@ -245,7 +251,7 @@ function InviteModal({ cat, onClose, onInvited }: { cat?: PermCatalog; onClose: 
             <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001…)</em></span>
               <input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => setProjectCode(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={setIsAdmin} perms={perms} setPerms={setPerms} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={setIsAdmin} perms={perms} setPerms={setPerms} onPreview={onPreview} label={displayName.trim() || "tài khoản mới"} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
@@ -257,7 +263,7 @@ function InviteModal({ cat, onClose, onInvited }: { cat?: PermCatalog; onClose: 
   );
 }
 
-function EditUserModal({ user, cat, onClose, onSaved }: { user: User; cat?: PermCatalog; onClose: () => void; onSaved: () => void }) {
+function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User; cat?: PermCatalog; onClose: () => void; onSaved: () => void; onPreview?: (perms: string[], label: string) => void }) {
   const [displayName, setDisplayName] = useState(user.displayName || "");
   const [phone, setPhone] = useState(user.phone || "");
   const [projectCode, setProjectCode] = useState(user.projectCode || "");
@@ -298,7 +304,7 @@ function EditUserModal({ user, cat, onClose, onSaved }: { user: User; cat?: Perm
             <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá user này tạo sẽ là FE_A26_001…)</em></span><input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={user.displayName || user.username} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">

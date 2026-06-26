@@ -1,7 +1,9 @@
 import { Component, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { api, ApiError, type Me } from "./api";
+import { api, ApiError, setPreviewMode, type Me } from "./api";
 import { Shell } from "./Shell";
 import { promptModal, toast } from "./ui";
+
+export type PreviewState = { perms: string[]; label: string };
 
 // Bắt lỗi render để 1 lỗi không làm TRẮNG toàn app — hiện màn lỗi + nút tải lại.
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -27,21 +29,43 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [hash, setHash] = useState(location.hash);
+  const [preview, setPreview] = useState<PreviewState | null>(null); // đang XEM THỬ quyền của 1 tài khoản
 
   useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null)).finally(() => setLoading(false));
     const onExpired = () => setMe(null); // mất phiên 401 → về đăng nhập
     const onHash = () => setHash(location.hash);
+    // Xem thử: mỗi thao tác GHI (giả) → nhắc nhẹ (throttle) rằng không lưu thật.
+    let last = 0;
+    const onPreviewWrite = () => { const now = Date.now(); if (now - last > 2500) { last = now; toast("🔍 Xem thử — thao tác chạy thử, KHÔNG lưu thật", "info"); } };
     window.addEventListener("auth:expired", onExpired);
     window.addEventListener("hashchange", onHash);
-    return () => { window.removeEventListener("auth:expired", onExpired); window.removeEventListener("hashchange", onHash); };
+    window.addEventListener("preview:write", onPreviewWrite);
+    return () => { window.removeEventListener("auth:expired", onExpired); window.removeEventListener("hashchange", onHash); window.removeEventListener("preview:write", onPreviewWrite); };
   }, []);
+
+  const enterPreview = (perms: string[], label: string) => { setPreview({ perms, label }); setPreviewMode(true); location.hash = "#/dashboard"; window.scrollTo(0, 0); };
+  const exitPreview = () => { setPreviewMode(false); setPreview(null); };
 
   // Onboard (kích hoạt tài khoản mời) — hiện cả khi chưa đăng nhập; server gửi link tới /#/onboard?token=
   if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={setMe} />;
   if (loading) return <div className="center muted">Đang tải…</div>;
   if (!me) return <Login onLogin={setMe} />;
-  return <ErrorBoundary><Shell me={me} onMe={setMe} /></ErrorBoundary>;
+  // Khi xem thử: GIỮ identity admin (server) nhưng ĐỔI permissions sang tài khoản đang xem → UI hiện đúng quyền đó.
+  const shellMe: Me = preview ? { ...me, permissions: preview.perms } : me;
+  return (
+    <ErrorBoundary>
+      {preview && (
+        <div className="preview-banner">
+          <span>🔍 ĐANG XEM THỬ với quyền của <b>{preview.label}</b> — mọi thao tác chỉ chạy thử, <b>KHÔNG lưu thật</b>.</span>
+          <button className="btn btn-sm" onClick={exitPreview}>✕ Thoát xem thử</button>
+        </div>
+      )}
+      <div className={preview ? "has-preview-banner" : undefined}>
+        <Shell me={shellMe} onMe={setMe} onPreview={enterPreview} previewing={!!preview} />
+      </div>
+    </ErrorBoundary>
+  );
 }
 
 // Login — class SPA + MFA (lộ ô mã khi server yêu cầu) + Quên mật khẩu.

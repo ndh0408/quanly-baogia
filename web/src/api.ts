@@ -147,7 +147,21 @@ export class ApiError extends Error {
   }
 }
 
+// CHẾ ĐỘ XEM THỬ (sandbox): admin trải nghiệm app với quyền của 1 tài khoản. Mọi GHI bị chặn → KHÔNG đụng data thật.
+let __preview = false;
+export function setPreviewMode(on: boolean) { __preview = on; }
+export function isPreviewMode() { return __preview; }
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const method = (opts.method || "GET").toUpperCase();
+  if (__preview && method !== "GET" && method !== "HEAD") {
+    // XEM THỬ (sandbox): KHÔNG gửi lên server → trả "thành công giả" để thao tác chạy mượt, lưu TẠM ở client,
+    // KHÔNG đụng dữ liệu thật. Thoát xem thử là mất hết. Echo body + id giả cho UI hiển thị như đã lưu.
+    window.dispatchEvent(new Event("preview:write"));
+    let payload: Record<string, unknown> = {};
+    try { payload = opts.body ? JSON.parse(opts.body as string) : {}; } catch { /* ignore */ }
+    return { ok: true, id: 900000000 + Math.floor(Math.random() * 1e8), _preview: true, ...payload } as T;
+  }
   const res = await fetch("/api" + path, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts.headers ?? {}) },

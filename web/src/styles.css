@@ -357,3 +357,11 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
 .perm-preview-caps > b { color: var(--soft); }
 .perm-preview-cap { padding: 1px 0 1px 12px; }
 .perm-preview-cap-g { font-weight: 600; color: var(--soft); }
+.btn-preview { background: color-mix(in srgb, var(--gold) 16%, var(--card)); border: 1px solid var(--gold-d); color: var(--text); margin: 10px 0 4px; width: 100%; font-weight: 600; }
+.btn-preview:hover { background: color-mix(in srgb, var(--gold) 26%, var(--card)); }
+
+/* Banner ĐANG XEM THỬ (sandbox) */
+.preview-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; background: var(--gold-d, #e0a200); color: #1a1505; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 8px 16px; font-size: 13.5px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+.preview-banner .btn { background: #1a1505; color: var(--gold, #fbbf24); border: none; font-weight: 700; }
+.preview-banner .btn:hover { background: #2a230a; }
+.has-preview-banner { padding-top: 42px; }

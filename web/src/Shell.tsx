@@ -237,7 +237,7 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
   );
 }
 
-export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
+export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; onPreview?: (perms: string[], label: string) => void; previewing?: boolean }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(themeIcon());
@@ -355,7 +355,7 @@ export function Shell({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             {key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
               : key === "customers" ? <CustomersPage me={me} />
-              : key === "users" ? <UsersPage me={me} />
+              : key === "users" ? <UsersPage me={me} onPreview={onPreview} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />
               : key === "projects" ? <ProjectsPage me={me} />
