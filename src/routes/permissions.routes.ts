@@ -4,7 +4,7 @@ import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import {
   PERMISSION_GROUPS, PERMISSION_LABELS, ROLE_LABELS, ROLE_PERMISSIONS,
-  permissionsForRole, PERMISSIONS, requirePermission, EDITABLE_ROLES, hasRoleOverride,
+  permissionsForRole, PERMISSIONS, requirePermission, EDITABLE_ROLES, hasRoleOverride, ADMIN_ONLY_PERMISSIONS,
 } from "../permissions.js";
 import { saveRoleOverride, resetRoleOverride } from "../roleOverrides.js";
 import { audit } from "../audit.js";
@@ -41,6 +41,7 @@ router.get(
         perms: g.perms.map((p) => ({ key: p, label: PERMISSION_LABELS[p] || p })),
       })),
       editableRoles: EDITABLE_ROLES,
+      adminOnlyPermissions: [...ADMIN_ONLY_PERMISSIONS], // quyền chỉ-admin: ma trận KHÓA (cấp cho non-admin vô tác dụng)
       roles: roles.map((r) => ({
         key: r,
         label: ROLE_LABELS[r as keyof typeof ROLE_LABELS] || r,
@@ -66,8 +67,9 @@ router.put(
     const parsed = RoleBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Dữ liệu quyền không hợp lệ" });
     const wanted = [...new Set(parsed.data.permissions)];
-    const perms = wanted.filter((p) => VALID_PERMS.has(p));
-    if (perms.length !== wanted.length) return res.status(400).json({ error: "Có quyền không tồn tại trong danh mục" });
+    if (wanted.some((p) => !VALID_PERMS.has(p))) return res.status(400).json({ error: "Có quyền không tồn tại trong danh mục" });
+    // Lọc bỏ quyền cấp-QUẢN-TRỊ chỉ-admin (không cấp động được cho non-admin) — kể cả request cố tình gửi.
+    const perms = wanted.filter((p) => !ADMIN_ONLY_PERMISSIONS.has(p));
 
     const before = permissionsForRole(role);
     await saveRoleOverride(role, perms, req.session.userId);

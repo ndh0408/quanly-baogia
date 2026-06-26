@@ -100,6 +100,7 @@ export type AssignableUser = { id: number; displayName: string; role?: string; t
 export type PermCatalog = {
   groups: { label: string; perms: { key: string; label: string }[] }[];
   editableRoles: string[];
+  adminOnlyPermissions: string[]; // quyền chỉ-admin: ma trận khóa (cấp cho non-admin vô tác dụng)
   roles: { key: string; label: string; permissions: string[]; overridden?: boolean; editable?: boolean }[];
 };
 

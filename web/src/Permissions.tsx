@@ -28,8 +28,9 @@ export function PermissionsPage({ me }: { me: Me }) {
   }, [cat]);
 
   const editableSet = new Set(cat?.editableRoles ?? []);
+  const adminOnly = new Set(cat?.adminOnlyPermissions ?? []); // quyền chỉ-admin: KHÓA, không tick được
   const toggle = (role: string, perm: string) => {
-    if (!editableSet.has(role)) return;
+    if (!editableSet.has(role) || adminOnly.has(perm)) return;
     setDraft((d) => {
       const s = new Set(d[role] ?? []);
       if (s.has(perm)) s.delete(perm); else s.add(perm);
@@ -105,9 +106,9 @@ export function PermissionsPage({ me }: { me: Me }) {
                 <tr className="perm-group-row"><td colSpan={cat.roles.length + 1}>{g.label}</td></tr>
                 {g.perms.map((p) => (
                   <tr key={p.key}>
-                    <td className="col-perm">{p.label} <span className="muted">{p.key}</span></td>
+                    <td className="col-perm">{p.label} <span className="muted">{p.key}</span>{adminOnly.has(p.key) && <span className="muted" title="Chỉ admin — không cấp động được cho vai trò khác"> 🔒</span>}</td>
                     {cat.roles.map((r) => {
-                      const editable = editableSet.has(r.key);
+                      const editable = editableSet.has(r.key) && !adminOnly.has(p.key); // admin-only → khóa
                       const checked = (draft[r.key] ?? new Set()).has(p.key);
                       return (
                         <td className="col-role" key={r.key}>

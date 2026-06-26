@@ -194,6 +194,15 @@ export function hasRoleOverride(role: string) { return roleOverrides.has(role); 
 /** Vai trò ĐƯỢC PHÉP sửa quyền (mọi role trừ admin). */
 export const EDITABLE_ROLES = Object.keys(ROLE_PERMISSIONS).filter((r) => r !== "admin");
 
+// Quyền cấp-QUẢN-TRỊ chỉ-admin: KHÔNG cấp động được cho vai trò khác (enforce bằng requireRole("admin")
+// cứng — user/settings — hoặc CHƯA enforce ở đâu — role:assign/template/company). Tick cho non-admin sẽ
+// VÔ TÁC DỤNG → ma trận KHÓA, PUT lọc bỏ. Admin vẫn có (luôn full). LƯU Ý: audit:view KHÔNG nằm đây
+// (nó cấp động được — manager mặc định có, đã test). Nếu sau enforce 1 quyền ở đây bằng can() thì BỎ nó ra.
+export const ADMIN_ONLY_PERMISSIONS = new Set<string>([
+  PERMISSIONS.USER_MANAGE, PERMISSIONS.ROLE_ASSIGN, PERMISSIONS.SETTINGS_MANAGE,
+  PERMISSIONS.TEMPLATE_MANAGE, PERMISSIONS.COMPANY_MANAGE,
+]);
+
 // Hình dạng tối thiểu của req.session mà các hàm phân quyền cần (userId + role).
 type SessionLike = { userId?: number; role?: string };
 

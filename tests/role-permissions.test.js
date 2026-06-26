@@ -83,6 +83,16 @@ describe.runIf(dbAvailable)("phân quyền động — role permission override 
     expect((await admin.put("/api/permissions/roles/khong_co_role").send({ permissions: [] })).status).toBe(400);
   });
 
+  it("KHÓA quyền admin-tier: cấp settings:manage/user:manage cho manager → bị LỌC BỎ (không cấp động được)", async () => {
+    const m = await managerRole();
+    const r = await admin.put("/api/permissions/roles/manager").send({ permissions: [...m.permissions, "settings:manage", "user:manage"] });
+    expect(r.status).toBe(200);
+    expect(r.body.permissions).not.toContain("settings:manage"); // bị lọc
+    expect(r.body.permissions).not.toContain("user:manage");
+    const cat = (await admin.get("/api/permissions/catalog")).body;
+    expect(cat.adminOnlyPermissions).toEqual(expect.arrayContaining(["settings:manage", "user:manage", "role:assign", "template:manage", "company:manage"]));
+  });
+
   it("BẢO MẬT: non-admin (manager) KHÔNG sửa được quyền + KHÔNG xem được catalog (403)", async () => {
     expect((await mgr.put("/api/permissions/roles/hr").send({ permissions: [] })).status).toBe(403);
     expect((await mgr.delete("/api/permissions/roles/hr")).status).toBe(403);
