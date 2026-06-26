@@ -164,14 +164,26 @@ const PAGE_PERMS: { label: string; perm: string[] }[] = [
 
 // XEM TRƯỚC: tích quyền xong → tài khoản này SẼ THẤY TRANG GÌ + LÀM ĐƯỢC GÌ (cập nhật trực tiếp).
 function PermPreview({ cat, isAdmin, perms }: { cat?: PermCatalog; isAdmin: boolean; perms: Set<string> }) {
+  if (isAdmin) return (
+    <div className="perm-preview">
+      <div className="perm-preview-h">👁 Tài khoản này sẽ làm được:</div>
+      <div className="perm-preview-row"><b style={{ color: "var(--gold-d)" }}>TOÀN QUYỀN</b> — thấy mọi menu & làm mọi thứ (kể cả quản lý tài khoản, cấu hình).</div>
+    </div>
+  );
   const hasP = (k: string) => perms.has(k) || perms.has(k.replace(/:own$/, ":all"));
-  const pages = isAdmin ? PAGE_PERMS.map((p) => p.label) : PAGE_PERMS.filter((p) => p.perm.some(hasP)).map((p) => p.label);
-  const caps = isAdmin ? ["Toàn quyền"] : (cat ? cat.groups.flatMap((g) => g.perms).filter((p) => perms.has(p.key)).map((p) => p.label) : []);
+  const pages = PAGE_PERMS.filter((p) => p.perm.some(hasP)).map((p) => p.label);
+  // Gom năng lực theo NHÓM (Báo giá / Khách hàng / …) — dễ đọc hơn 1 danh sách phẳng.
+  const groups = cat ? cat.groups.map((g) => ({ label: g.label, items: g.perms.filter((p) => perms.has(p.key)).map((p) => p.label) })).filter((g) => g.items.length) : [];
+  const total = groups.reduce((a, g) => a + g.items.length, 0);
   return (
     <div className="perm-preview">
-      <div className="perm-preview-h">👁 Cấp xong, tài khoản này sẽ:</div>
+      <div className="perm-preview-h">👁 Cấp xong, tài khoản này sẽ: <span className="perm-preview-count">{total} quyền</span></div>
       <div className="perm-preview-row"><b>Thấy menu:</b> {pages.length ? pages.join(" · ") : <span className="muted">(không trang nào)</span>}</div>
-      <div className="perm-preview-row"><b>Làm được:</b> {caps.length ? caps.join(" · ") : <span className="muted">(chưa tích quyền nào)</span>}</div>
+      {total === 0
+        ? <div className="perm-preview-row muted">Chưa tích quyền nào — tài khoản chưa làm được gì.</div>
+        : <div className="perm-preview-caps"><b>Làm được:</b>{groups.map((g) => (
+            <div className="perm-preview-cap" key={g.label}><span className="perm-preview-cap-g">{g.label}:</span> {g.items.join(", ")}</div>
+          ))}</div>}
     </div>
   );
 }

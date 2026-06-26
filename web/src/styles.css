@@ -348,7 +348,12 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
 @media (max-width: 820px) { .perm-grp-items { grid-template-columns: 1fr; } }
 
 /* Xem trước "tài khoản này thấy/làm được gì" */
-.perm-preview { margin: 10px 0; padding: 10px 12px; background: color-mix(in srgb, var(--gold) 9%, var(--card-2)); border: 1px solid color-mix(in srgb, var(--gold) 32%, var(--line)); border-radius: 9px; font-size: 12.5px; }
-.perm-preview-h { font-weight: 700; margin-bottom: 5px; }
+.perm-preview { margin: 10px 0; padding: 11px 13px; background: color-mix(in srgb, var(--gold) 11%, var(--card-2)); border: 1.5px solid color-mix(in srgb, var(--gold) 40%, var(--line)); border-radius: 10px; font-size: 12.5px; }
+.perm-preview-h { font-weight: 700; margin-bottom: 6px; font-size: 13px; }
+.perm-preview-count { font-weight: 700; color: var(--gold-d); font-size: 11.5px; background: color-mix(in srgb, var(--gold) 22%, transparent); padding: 1px 7px; border-radius: 999px; }
 .perm-preview-row { line-height: 1.55; }
 .perm-preview-row b { color: var(--soft); }
+.perm-preview-caps { margin-top: 5px; line-height: 1.5; }
+.perm-preview-caps > b { color: var(--soft); }
+.perm-preview-cap { padding: 1px 0 1px 12px; }
+.perm-preview-cap-g { font-weight: 600; color: var(--soft); }
