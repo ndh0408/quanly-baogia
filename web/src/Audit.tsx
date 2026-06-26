@@ -59,10 +59,18 @@ const targetText = (e: AuditEntry) =>
 
 // CHI TIẾT thay đổi (trước → sau) — nhãn field tiếng Việt; bỏ id kỹ thuật.
 const FIELD_LABEL: Record<string, string> = {
+  // Tài chính / thanh toán / chứng từ
   paidAt: "Thanh toán", confirmedAt: "Xác nhận đã ký", invoiceNo: "Số hóa đơn", hnInvoiceNo: "Số HĐ (Hà Nội)",
   poNumber: "Số PO", invoiceLink: "Link hóa đơn", docSentAt: "Gửi chứng từ", docReturnedAt: "Nhận lại chứng từ",
-  hasProof: "Có ảnh chứng từ", teamNote: "Team ghi chú", accountingNote: "Kế toán ghi chú", note: "Ghi chú",
-  permissions: "Quyền", title: "Tiêu đề", salary: "Lương", status: "Trạng thái", role: "Vai trò",
+  hasProof: "Có ảnh chứng từ", salary: "Lương",
+  // Ghi chú / phân quyền / báo giá
+  teamNote: "Team ghi chú", accountingNote: "Kế toán ghi chú", note: "Ghi chú",
+  permissions: "Quyền", title: "Tiêu đề", status: "Trạng thái", role: "Vai trò",
+  // Tài khoản / hồ sơ nhân sự / danh bạ (hay gặp ở user.*, personnel.*, employee.*)
+  fullName: "Họ tên", displayName: "Tên hiển thị", username: "Tên đăng nhập", email: "Email", phone: "Điện thoại",
+  active: "Kích hoạt", company: "Công ty", projectName: "Tên dự án", projectCode: "Mã dự án",
+  taxCode: "Mã số thuế", idCard: "CCCD", bankName: "Ngân hàng", bankAccount: "Số tài khoản",
+  laborContractNo: "Số HĐ lao động", position: "Chức vụ", department: "Phòng ban",
 };
 const fmtVal = (v: unknown): string => {
   if (v == null || v === "") return "(trống)";

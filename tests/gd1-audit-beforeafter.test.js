@@ -140,7 +140,7 @@ describe.runIf(dbAvailable)("GĐ1 #3 — audit before/after pay/confirm (integra
     createdRecIds.push(id);
     await acct.post(`/api/personnel/${id}/payment`).send({ paid: true }); // chắc chắn có 1 event personnel.pay
 
-    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 200 });
+    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 100 });
     expect(r.status).toBe(200);
     const row = r.body.data.find((x) => x.resourceId === String(id));
     expect(row).toBeTruthy();
@@ -155,7 +155,7 @@ describe.runIf(dbAvailable)("GĐ1 #3 — audit before/after pay/confirm (integra
     const d = await mgr.delete(`/api/personnel/${id}`); // soft-delete
     expect(d.status).toBe(200);
 
-    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 200 });
+    const r = await admin.get("/api/audit").query({ resource: "personnel", size: 100 });
     const row = r.body.data.find((x) => x.resourceId === String(id));
     expect(row).toBeTruthy();
     expect(row.targetLabel).toBe(name); // dù đã soft-delete, vẫn tra được tên qua includeDeleted
@@ -168,7 +168,7 @@ describe.runIf(dbAvailable)("GĐ1 #3 — audit before/after pay/confirm (integra
     createdRecIds.push(id);
     await acct.post(`/api/personnel/${id}/payment`).send({ paid: true });
 
-    const r = await mgr.get("/api/audit").query({ resource: "personnel", size: 200 });
+    const r = await mgr.get("/api/audit").query({ resource: "personnel", size: 100 });
     expect(r.status).toBe(200); // manager có audit:view
     const row = r.body.data.find((x) => x.resourceId === String(id));
     expect(row).toBeTruthy();
