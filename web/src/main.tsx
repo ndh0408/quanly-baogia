@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { queryClient, RealtimeBridge } from "./query";
+// Design-system dùng-chung (app cũ vẫn nạp tĩnh file này) — IMPORT vào bundle để VITE TỰ hash/cache-bust
+// → KHÔNG còn phải bump ?v= tay khi sửa CSS chung. Phải đứng TRƯỚC styles.css (React override thắng).
+import "../../public/style.css";
 import "./styles.css";
 
 // Đặt theme NGAY (module script — qua được CSP, khác inline script bị chặn). Đọc cùng key "theme"

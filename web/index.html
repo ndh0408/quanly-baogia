@@ -7,12 +7,11 @@
     <meta name="theme-color" content="#1b2034" />
     <link rel="apple-touch-icon" href="/app2/apple-touch-icon.png" />
     <title>Quản lý · Gia Nguyễn</title>
-    <!-- DÙNG CHUNG design-system của SPA cũ: nạp thẳng /style.css + font → React giống Y app cũ,
-         khỏi lệch khi convert. web/src/styles.css (Vite) nạp SAU, chỉ bổ sung phần riêng HR. -->
+    <!-- Font dùng-chung. Design-system (/style.css) GIỜ import qua Vite (main.tsx) → tự hash/cache-bust,
+         KHÔNG còn <link ?v=> gõ tay. web/src/styles.css nạp SAU, bổ sung phần riêng. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/style.css?v=20260626c" />
   </head>
   <body>
     <div id="root"></div>
