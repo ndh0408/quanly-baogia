@@ -68,6 +68,9 @@ model User {
   projectCode  String? // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
   active       Boolean @default(true)
   canSign      Boolean @default(false) // được "Ký Chứng từ" dự án DO MÌNH TẠO ở trang Quản lý dự án (admin ký + thấy toàn bộ)
+  // PHÂN QUYỀN PER-USER: tập quyền (key trong PERMISSIONS) tài khoản này được phép. TRỐNG = chưa tùy biến
+  // → dùng quyền mặc định theo `role` (tương thích ngược). Có = nguồn quyền (không suy từ role nữa).
+  permissions  String[] @default([])
 
   // Email-invite onboarding: invited users are inactive until they accept,
   // set their own password and fill in their details.

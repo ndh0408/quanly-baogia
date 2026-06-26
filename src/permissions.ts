@@ -205,24 +205,43 @@ export const ADMIN_ONLY_PERMISSIONS = new Set<string>([
   PERMISSIONS.TEMPLATE_MANAGE, PERMISSIONS.COMPANY_MANAGE,
 ]);
 
-// Hình dạng tối thiểu của req.session mà các hàm phân quyền cần (userId + role).
-type SessionLike = { userId?: number; role?: string };
+// Hình dạng tối thiểu của req.session mà các hàm phân quyền cần.
+// `permissions` = TẬP QUYỀN HIỆU LỰC CỦA TÀI KHOẢN (resolve ở middleware mỗi request từ User.permissions,
+// fallback quyền role khi user chưa tùy biến). Đây là NGUỒN phân quyền per-user — không còn suy từ role.
+type SessionLike = { userId?: number; role?: string; permissions?: string[] };
 
-/** Does this role hold the given permission? (`:all` implies `:own`.) */
-export function roleCan(role: string | undefined, permission: string) {
-  const set = effectiveRoleSet(role);
-  if (!set) return false;
+/** Tập có chứa quyền này không? (`:all` ngầm bao `:own`.) */
+function permHas(set: Set<string>, permission: string): boolean {
   if (set.has(permission)) return true;
-  // ":all" grants the matching ":own"
-  if (permission.endsWith(":own")) {
-    return set.has(permission.replace(/:own$/, ":all"));
-  }
+  if (permission.endsWith(":own")) return set.has(permission.replace(/:own$/, ":all"));
   return false;
 }
 
-/** can(session, permission) — session is req.session ({ role }). */
+/** Tập quyền HIỆU LỰC của 1 phiên: ưu tiên session.permissions (per-user, do middleware resolve);
+ *  fallback quyền role cho các đường chỉ set role (test/biên). admin LUÔN full (chống tự khóa). */
+function sessionPermSet(session: SessionLike): Set<string> {
+  if (Array.isArray(session?.permissions)) return new Set(session.permissions);
+  if (session?.role === "admin") return ROLE_PERMISSIONS.admin;
+  return effectiveRoleSet(session?.role) ?? new Set();
+}
+
+/** Resolve tập quyền của 1 TÀI KHOẢN để nạp vào session (gọi ở middleware mỗi request).
+ *  admin → luôn full (chống tự khóa). Có quyền-riêng-user → dùng đúng tập đó. Chưa có → quyền role mặc định. */
+export function resolveUserPermissions(role: string | undefined, userPerms?: string[] | null): string[] {
+  if (role === "admin") return [...ROLE_PERMISSIONS.admin];
+  if (userPerms && userPerms.length) return [...new Set(userPerms)];
+  return [...(effectiveRoleSet(role) ?? new Set())];
+}
+
+/** Does this role hold the given permission? (`:all` implies `:own`.) Giữ cho các đường chỉ có role. */
+export function roleCan(role: string | undefined, permission: string) {
+  const set = effectiveRoleSet(role);
+  return set ? permHas(set, permission) : false;
+}
+
+/** can(session, permission) — đọc TẬP QUYỀN PER-USER của phiên (không còn cứng theo role). */
 export function can(session: SessionLike, permission: string) {
-  return roleCan(session?.role, permission);
+  return permHas(sessionPermSet(session), permission);
 }
 
 /**
@@ -238,12 +257,11 @@ export function canOnQuote(
   action: string,
   quote: { createdById?: number; members?: any[] } | null | undefined,
 ) {
-  const role = session?.role;
-  if (roleCan(role, `quote:${action}:all`)) return true; // admin
-  if (roleCan(role, `quote:${action}:own`)) {
+  if (can(session, `quote:${action}:all`)) return true; // quyền xem/sửa MỌI báo giá
+  if (can(session, `quote:${action}:own`)) {
     if (!quote) return false;
     if (quote.createdById === session.userId) return true;
-    // Managers AND employees also reach quotes they were added to as members.
+    // Ai được thêm làm THÀNH VIÊN cũng với tới được (read/update).
     if (QUOTE_MEMBER_ACTIONS.has(action) && Array.isArray(quote.members)) {
       return quote.members.some((m: any) => (m.id ?? m) === session.userId);
     }
@@ -257,7 +275,7 @@ export function canOnQuote(
  *   manager/employee  → quotes they created OR were added to as a member
  */
 export function quoteScopeWhere(session: SessionLike) {
-  if (roleCan(session?.role, "quote:read:all")) return {}; // admin (director)
+  if (can(session, "quote:read:all")) return {}; // xem mọi báo giá
   return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
 }
 
@@ -266,9 +284,8 @@ export function quoteScopeWhere(session: SessionLike) {
  * `<resource>:<action>:all`, OR has `:own` and owns the row via `ownerField`.
  */
 export function canScoped(session: SessionLike, resource: string, action: string, row: Record<string, any> | null | undefined, ownerField = "ownerId") {
-  const role = session?.role;
-  if (roleCan(role, `${resource}:${action}:all`)) return true;
-  if (roleCan(role, `${resource}:${action}:own`)) {
+  if (can(session, `${resource}:${action}:all`)) return true;
+  if (can(session, `${resource}:${action}:own`)) {
     return row && row[ownerField] != null && row[ownerField] === session?.userId;
   }
   return false;
@@ -292,5 +309,14 @@ export function permissionsForRole(role: string) {
   for (const p of set) {
     if (p.endsWith(":all")) out.add(p.replace(/:all$/, ":own"));
   }
+  return [...out];
+}
+
+/** Tập quyền HIỆU LỰC của 1 TÀI KHOẢN cho client (/me): per-user nếu có, else role; mở rộng :all→:own.
+ *  admin luôn full. Đây là cái frontend dùng để ẩn/hiện (me.permissions). */
+export function permissionsForUser(role: string | undefined, userPerms?: string[] | null) {
+  const base = resolveUserPermissions(role, userPerms);
+  const out = new Set(base);
+  for (const p of base) if (p.endsWith(":all")) out.add(p.replace(/:all$/, ":own"));
   return [...out];
 }

@@ -8,5 +8,6 @@ declare module "express-session" {
     role: string;
     displayName?: string;
     username?: string;
+    permissions?: string[]; // tập quyền HIỆU LỰC per-user (resolve mỗi request) — nguồn phân quyền
   }
 }

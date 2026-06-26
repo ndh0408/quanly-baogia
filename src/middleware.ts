@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "./logger.js";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./db.js";
+import { resolveUserPermissions } from "./permissions.js";
 
 export function requestId(req: Request, res: Response, next: NextFunction) {
   // x-request-id header có thể là string | string[] (header trùng lặp) | undefined.
@@ -32,7 +33,7 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
     // immediately (within the access-token TTL the token is otherwise valid).
     const user = await prisma.user.findUnique({
       where: { id: Number(sub) },
-      select: { id: true, role: true, username: true, active: true, lockedUntil: true },
+      select: { id: true, role: true, username: true, active: true, lockedUntil: true, permissions: true },
     });
     if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
       return next(); // fall through unauthenticated → requireAuth/requireRole reject
@@ -42,6 +43,8 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
     req.session.userId = user.id;
     req.session.role = user.role; // authoritative role from DB, not the token
     req.session.username = user.username;
+    // TẬP QUYỀN HIỆU LỰC per-user (nguồn phân quyền). Resolve mỗi request → admin đổi quyền là áp dụng NGAY.
+    req.session.permissions = resolveUserPermissions(user.role, user.permissions);
     req.viaJwt = true;
   } catch {
     // invalid/expired token → just fall through; requireAuth will reject.
@@ -81,7 +84,7 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { role: true, active: true, lockedUntil: true },
+      select: { role: true, active: true, lockedUntil: true, permissions: true },
     });
     if (!user || user.active === false || (user.lockedUntil && user.lockedUntil > new Date())) {
       return req.session.destroy(() =>
@@ -92,6 +95,8 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
       );
     }
     if (req.session.role !== user.role) req.session.role = user.role; // authoritative role
+    // Resolve quyền per-user MỖI request (cookie path) → admin đổi quyền user là hiệu lực ngay request kế.
+    req.session.permissions = resolveUserPermissions(user.role, user.permissions);
     next();
   } catch (e) {
     next(e);

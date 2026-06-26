@@ -16,7 +16,7 @@ import { authenticateCredentials, clientIp } from "../authCore.js";
 
 // MFA token: 6-digit TOTP OR a 10-char hex backup code.
 const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/).optional();
-import { permissionsForRole } from "../permissions.js";
+import { permissionsForUser, resolveUserPermissions } from "../permissions.js";
 import { sendEmail, brandedEmailHtml } from "../email.js";
 
 const router = Router();
@@ -64,6 +64,7 @@ router.post(
     req.session.role = user.role;
     req.session.displayName = user.displayName;
     req.session.username = user.username;
+    req.session.permissions = resolveUserPermissions(user.role, (user as { permissions?: string[] }).permissions);
     await new Promise<void>((resolve, reject) =>
       req.session.save((err: unknown) => (err ? reject(err) : resolve()))
     );
@@ -79,7 +80,7 @@ router.post(
       phone: user.phone,
       title: user.title,
       senderName: user.senderName,
-      permissions: permissionsForRole(user.role),
+      permissions: permissionsForUser(user.role, (user as { permissions?: string[] }).permissions),
     });
   })
 );
@@ -98,11 +99,11 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, canSign: true, mfaEnabled: true, lastLoginAt: true },
+      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, canSign: true, mfaEnabled: true, lastLoginAt: true, permissions: true },
     });
     if (!user) return res.status(404).json({ error: "Không tìm thấy tài khoản" });
     // Ship the authoritative capability list so the SPA gates UI from the server catalog.
-    res.json({ ...user, permissions: permissionsForRole(user.role) });
+    res.json({ ...user, permissions: permissionsForUser(user.role, user.permissions) });
   })
 );
 
@@ -125,11 +126,11 @@ router.post(
         ...(req.body.title !== undefined ? { title: req.body.title } : {}),
         ...(req.body.senderName !== undefined ? { senderName: req.body.senderName } : {}),
       },
-      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, mfaEnabled: true },
+      select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, mfaEnabled: true, permissions: true },
     });
     req.session.displayName = user.displayName;
     await audit(req, "user.profile.update", { resource: "user", resourceId: user.id, actorId: user.id });
-    res.json({ ...user, permissions: permissionsForRole(user.role) });
+    res.json({ ...user, permissions: permissionsForUser(user.role, user.permissions) });
   })
 );
 
@@ -338,9 +339,10 @@ router.post(
     req.session.role = updated.role;
     req.session.displayName = updated.displayName;
     req.session.username = updated.username;
+    req.session.permissions = resolveUserPermissions(updated.role, (updated as { permissions?: string[] }).permissions);
     await new Promise<void>((resolve, reject) => req.session.save((e: unknown) => (e ? reject(e) : resolve())));
 
-    res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, senderName: updated.senderName, permissions: permissionsForRole(updated.role) });
+    res.json({ id: updated.id, username: updated.username, displayName: updated.displayName, role: updated.role, senderName: updated.senderName, permissions: permissionsForUser(updated.role, (updated as { permissions?: string[] }).permissions) });
   })
 );
 
