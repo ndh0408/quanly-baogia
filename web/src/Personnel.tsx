@@ -21,17 +21,21 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   const [editing, setEditing] = useState<Personnel | null | undefined>(undefined);
 
   const canCreate = me.permissions.includes("personnel:create");
-  const canManageAll = me.permissions.includes("personnel:manage:all");
-  const canManageOwn = me.permissions.includes("personnel:manage:own");
-  const canEditRow = (r: Personnel) => canManageAll || (canManageOwn && r.createdById === me.id);
+  // NGUYÊN TỬ: sửa / xóa RIÊNG (trước gộp "manage").
+  const canEditAll = me.permissions.includes("personnel:edit:all");
+  const canEditOwn = me.permissions.includes("personnel:edit:own");
+  const canDeleteAll = me.permissions.includes("personnel:delete:all");
+  const canDeleteOwn = me.permissions.includes("personnel:delete:own");
+  const canEditRow = (r: Personnel) => canEditAll || (canEditOwn && r.createdById === me.id);
+  const canDeleteRow = (r: Personnel) => canDeleteAll || (canDeleteOwn && r.createdById === me.id);
   const canPay = me.permissions.includes("personnel:pay"); // kế toán + admin: bấm đánh dấu thanh toán
   const canConfirm = me.permissions.includes("personnel:confirm"); // CHỈ admin: bấm xác nhận đã ký
   const canAccountingNote = me.permissions.includes("personnel:accounting-note"); // kế toán + admin: ghi "Kế toán ghi chú"
   // AI được SỬA-TẠI-CHỖ field này trên hồ sơ r (khớp đúng endpoint+quyền backend).
   const canEditField = (edit: FieldEdit | undefined, r: Personnel): boolean =>
-    edit === "owner" ? (canManageAll || (canManageOwn && r.createdById === me.id))
+    edit === "owner" ? (canEditAll || (canEditOwn && r.createdById === me.id))
     : edit === "accounting" ? canAccountingNote
-    : edit === "admin" ? canManageAll
+    : edit === "admin" ? canEditAll
     : edit === "pay" ? canPay
     : edit === "confirm" ? canConfirm
     : false;
@@ -233,7 +237,7 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                 <strong>{STT_OF(idx)}. {r.fullName}</strong>
                 <span className="prs-card-actions">
                   <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
-                  {canEditRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
+                  {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                 </span>
               </div>
               <dl className="prs-card-body">

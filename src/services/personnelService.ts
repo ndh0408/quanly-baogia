@@ -10,7 +10,7 @@ import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./proje
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
-type Action = "read" | "manage";
+type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
 // Các trường được dò khi tìm kiếm hồ sơ Nhân sự → gộp vào cột searchText (chuẩn-hóa bỏ dấu).
 const personnelSearchText = (r: Record<string, any>) =>
@@ -136,7 +136,7 @@ export async function getPersonnel(req: Request) {
 }
 
 export async function updatePersonnel(req: Request) {
-  const before = await loadAuthorized(req, "manage");   // hr/accountant không có manage → 403
+  const before = await loadAuthorized(req, "edit");   // hr/accountant không có edit → 403
   // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
   const merged = { ...before, ...req.body };
   const rec = await prisma.personnelRecord.update({
@@ -150,7 +150,7 @@ export async function updatePersonnel(req: Request) {
 }
 
 export async function deletePersonnel(req: Request) {
-  await loadAuthorized(req, "manage");
+  await loadAuthorized(req, "delete");
   await prisma.personnelRecord.delete({ where: { id: (req.params as any).id } });   // soft delete (db.js middleware)
   await audit(req, "personnel.delete", { resource: "personnel", resourceId: (req.params as any).id });
   return { ok: true };
@@ -194,9 +194,9 @@ export async function getPaymentProof(req: Request) {
 // ── SỬA-TẠI-CHỖ 1 cột theo QUYỀN (ô trên bảng/thẻ). authz: route gác quyền; teamNote thêm owner-check. ──
 const oneFieldValue = (req: Request) => (((req.body as any).value ?? null) as string | null);
 
-// TEAM GHI CHÚ — chỉ ACCOUNT sở hữu dòng (hoặc admin). loadAuthorized 'manage' = owner/admin check.
+// TEAM GHI CHÚ — chỉ ACCOUNT sở hữu dòng (hoặc admin). loadAuthorized 'edit' = owner/admin (edit:own/all).
 export async function writeTeamNote(req: Request) {
-  const before = await loadAuthorized(req, "manage");
+  const before = await loadAuthorized(req, "edit");
   const value = oneFieldValue(req);
   const rec = await prisma.personnelRecord.update({ where: { id: before.id }, data: { teamNote: value }, include: ownerSelect, omit: { paymentProof: true } });
   await audit(req, "personnel.team-note", { resource: "personnel", resourceId: rec.id, before: { teamNote: before.teamNote }, after: { teamNote: value } });

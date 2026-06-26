@@ -32,31 +32,32 @@ const ListQuery = z.object({
   order: z.enum(["asc", "desc"]).default("asc"),
 });
 
-// Route MỎNG: cổng quyền + validate → gọi tầng service (prisma + audit ở employeeService.ts).
+// QUYỀN RIÊNG cho Danh bạ (employee:*) — tách khỏi personnel:* (trước mượn nhờ). Kho DÙNG CHUNG nên
+// :own ở đây = thao tác trên cả danh bạ (service không owner-scope) — GIỮ NGUYÊN logic, chỉ đổi KEY quyền.
 router.get(
   "/",
-  requirePermission(P.PERSONNEL_READ_OWN),   // ai xem được Nhân sự thì xem được danh bạ (để chọn)
+  requirePermission(P.EMPLOYEE_READ_OWN),
   validate({ query: ListQuery }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.listEmployees(req)))
 );
 
 router.post(
   "/",
-  requirePermission(P.PERSONNEL_CREATE),
+  requirePermission(P.EMPLOYEE_CREATE),
   validate({ body: EmployeeCreate }),
   asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.createEmployee(req)))
 );
 
 router.put(
   "/:id",
-  requirePermission(P.PERSONNEL_CREATE),
+  requirePermission(P.EMPLOYEE_EDIT_OWN),
   validate({ params: idParam, body: EmployeeUpdate }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateEmployee(req)))
 );
 
 router.delete(
   "/:id",
-  requirePermission(P.PERSONNEL_CREATE),
+  requirePermission(P.EMPLOYEE_DELETE_OWN),
   validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteEmployee(req)))
 );

@@ -18,7 +18,12 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   const [order, setOrder] = useState<"asc" | "desc">("asc");
   const [editing, setEditing] = useState<Employee | null | undefined>(undefined);
 
-  const canManage = me.permissions.includes("personnel:create");
+  // Quyền RIÊNG của Danh bạ (employee:*) — tách khỏi personnel:*. Kho dùng chung nên :own = thao tác cả danh bạ.
+  const has = (p: string) => me.permissions.includes(p);
+  const canCreate = has("employee:create");
+  const canEdit = has("employee:edit:own") || has("employee:edit:all");
+  const canDelete = has("employee:delete:own") || has("employee:delete:all");
+  const canManage = canCreate || canEdit || canDelete; // có bất kỳ quyền ghi → không phải "chỉ xem"
 
   // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
   const debouncedQ = useDebouncedValue(query, query ? 300 : 0);
@@ -54,9 +59,9 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
       <h1>Danh bạ nhân sự</h1>
       <p className="muted" style={{ margin: "-10px 0 16px" }}>Kho thông tin cá nhân dùng chung — khi tạo hồ sơ Nhân sự có thể chọn từ đây để tự điền.</p>
       <div className="toolbar">
-        {!canManage && <span className="badge">Chỉ xem</span>}
+        {!canManage && <span className="badge">Chỉ xem</span>}{/* không có quyền ghi danh bạ nào */}
         <span className="spacer" />
-        {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm nhân viên</button>}
+        {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm nhân viên</button>}
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
@@ -99,8 +104,8 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
                   ))}
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
-                    <button className="btn btn-sm" onClick={() => setEditing(r)}>{canManage ? "Sửa" : "Xem"}</button>
-                    {canManage && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
+                    <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEdit ? "Sửa" : "Xem"}</button>
+                    {canDelete && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                   </td>
                 </tr>
               ))}
@@ -121,7 +126,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
       </div>
 
       {editing !== undefined && (
-        <EmployeeForm rec={editing} readOnly={editing !== null && !canManage} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
+        <EmployeeForm rec={editing} readOnly={editing !== null && !canEdit} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
       )}
     </div>
   );

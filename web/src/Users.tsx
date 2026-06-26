@@ -155,7 +155,7 @@ const PAGE_PERMS: { label: string; perm: string[] }[] = [
   { label: "Tạo báo giá", perm: ["quote:create"] },
   { label: "Mã khách hàng", perm: ["customer:read:own"] },
   { label: "Nhân sự", perm: ["personnel:read:own"] },
-  { label: "Danh bạ nhân sự", perm: ["personnel:read:own"] },
+  { label: "Danh bạ nhân sự", perm: ["employee:read:own"] },
   { label: "Quản lý dự án", perm: ["quote:create", "invoice:read"] },
   { label: "Quản lý nhân viên", perm: ["user:manage"] },
   { label: "Phân quyền", perm: ["user:manage"] },

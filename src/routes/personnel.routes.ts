@@ -106,13 +106,13 @@ router.delete(
 // SỬA-TẠI-CHỖ 1 cột theo QUYỀN: { value: string|null }.
 const FieldBody = z.object({ value: str(1000) });
 // TEAM GHI CHÚ — chỉ ACCOUNT sở hữu dòng (manage:own; service thêm owner-check) + admin.
-router.post("/:id/team-note", requirePermission(P.PERSONNEL_MANAGE_OWN), validate({ params: idParam, body: FieldBody }),
+router.post("/:id/team-note", requirePermission(P.PERSONNEL_EDIT_OWN), validate({ params: idParam, body: FieldBody }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.writeTeamNote(req))));
 // KẾ TOÁN GHI CHÚ — chỉ kế toán (+ admin) qua quyền personnel:accounting-note.
 router.post("/:id/accounting-note", requirePermission(P.PERSONNEL_ACCOUNTING_NOTE), validate({ params: idParam, body: FieldBody }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.writeAccountingNote(req))));
-// NOTE — chỉ ADMIN qua quyền personnel:manage:all.
-router.post("/:id/note", requirePermission(P.PERSONNEL_MANAGE_ALL), validate({ params: idParam, body: FieldBody }),
+// NOTE — chỉ người sửa-được-mọi-hồ-sơ (admin) qua quyền personnel:edit:all.
+router.post("/:id/note", requirePermission(P.PERSONNEL_EDIT_ALL), validate({ params: idParam, body: FieldBody }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.writeNote(req))));
 
 // Lấy ảnh chứng từ thanh toán (base64) on-demand — gác theo quyền XEM hồ sơ (service: loadAuthorized read).

@@ -60,6 +60,31 @@ export const PERMISSIONS = {
   // Ký chứng từ (trang Quản lý dự án) — TÁCH cờ canSign cũ thành quyền gán được, có phạm vi rõ.
   QUOTE_SIGN_OWN:         "quote:sign:own",    // ký chứng từ dự án DO MÌNH TẠO
   QUOTE_SIGN_ALL:         "quote:sign:all",    // ký chứng từ MỌI dự án (admin/giám đốc)
+  // (KHÔNG thêm quote:duplicate / quote:members — nhân bản đã kiểm create+đọc-nguồn; members đã đúng
+  //  chủ-báo-giá/admin. Thêm scope là sai logic + thừa — bỏ theo phản hồi chủ dự án.)
+  // Bảng nội bộ (HCM/HN/Phí KH) — tài khoản "chi phí": CHỈ xem nội bộ + thanh toán per-hàng.
+  QUOTE_INTERNAL_VIEW:    "quote:internal:view", // CHỈ thấy bảng nội bộ — ẩn báo giá/giá/khách
+  QUOTE_INTERNAL_PAY:     "quote:internal:pay",  // tích "đã thanh toán" + ảnh cho TỪNG HÀNG nội bộ
+  // Khách hàng — TÁCH manage gộp → create/edit/delete nguyên tử + ghi chú.
+  CUSTOMER_CREATE:        "customer:create",
+  CUSTOMER_EDIT_OWN:      "customer:edit:own",
+  CUSTOMER_EDIT_ALL:      "customer:edit:all",
+  CUSTOMER_DELETE_OWN:    "customer:delete:own",
+  CUSTOMER_DELETE_ALL:    "customer:delete:all",
+  CUSTOMER_NOTE_ADD:      "customer:note:add",   // thêm ghi chú / theo dõi khách hàng
+  // Nhân sự — TÁCH manage gộp → edit/delete nguyên tử.
+  PERSONNEL_EDIT_OWN:     "personnel:edit:own",
+  PERSONNEL_EDIT_ALL:     "personnel:edit:all",
+  PERSONNEL_DELETE_OWN:   "personnel:delete:own",
+  PERSONNEL_DELETE_ALL:   "personnel:delete:all",
+  // Danh bạ nhân sự (Employee) — DOMAIN RIÊNG (trước mượn personnel:create).
+  EMPLOYEE_READ_OWN:      "employee:read:own",
+  EMPLOYEE_READ_ALL:      "employee:read:all",
+  EMPLOYEE_CREATE:        "employee:create",
+  EMPLOYEE_EDIT_OWN:      "employee:edit:own",
+  EMPLOYEE_EDIT_ALL:      "employee:edit:all",
+  EMPLOYEE_DELETE_OWN:    "employee:delete:own",
+  EMPLOYEE_DELETE_ALL:    "employee:delete:all",
 };
 
 const P = PERMISSIONS;
@@ -106,6 +131,25 @@ export const PERMISSION_LABELS = {
   [P.INVOICE_MANAGE]: "Sửa hóa đơn / đánh dấu thanh toán",
   [P.QUOTE_SIGN_OWN]: "Ký chứng từ — dự án của mình",
   [P.QUOTE_SIGN_ALL]: "Ký chứng từ — mọi dự án",
+  [P.QUOTE_INTERNAL_VIEW]: "Xem CHỈ bảng nội bộ (ẩn báo giá)",
+  [P.QUOTE_INTERNAL_PAY]:  "Thanh toán từng dòng nội bộ (tích + ảnh)",
+  [P.CUSTOMER_CREATE]:     "Tạo khách hàng",
+  [P.CUSTOMER_EDIT_OWN]:   "Sửa KH của mình",
+  [P.CUSTOMER_EDIT_ALL]:   "Sửa mọi khách hàng",
+  [P.CUSTOMER_DELETE_OWN]: "Xóa KH của mình",
+  [P.CUSTOMER_DELETE_ALL]: "Xóa mọi khách hàng",
+  [P.CUSTOMER_NOTE_ADD]:   "Thêm ghi chú khách hàng",
+  [P.PERSONNEL_EDIT_OWN]:   "Sửa hồ sơ của mình",
+  [P.PERSONNEL_EDIT_ALL]:   "Sửa mọi hồ sơ nhân sự",
+  [P.PERSONNEL_DELETE_OWN]: "Xóa hồ sơ của mình",
+  [P.PERSONNEL_DELETE_ALL]: "Xóa mọi hồ sơ nhân sự",
+  [P.EMPLOYEE_READ_OWN]:    "Xem danh bạ của mình",
+  [P.EMPLOYEE_READ_ALL]:    "Xem cả danh bạ nhân sự",
+  [P.EMPLOYEE_CREATE]:      "Thêm vào danh bạ",
+  [P.EMPLOYEE_EDIT_OWN]:    "Sửa danh bạ của mình",
+  [P.EMPLOYEE_EDIT_ALL]:    "Sửa cả danh bạ",
+  [P.EMPLOYEE_DELETE_OWN]:  "Xóa danh bạ của mình",
+  [P.EMPLOYEE_DELETE_ALL]:  "Xóa cả danh bạ",
 };
 
 // Mô tả 1 dòng "nghĩa là gì + phạm vi" cho GIÁM ĐỐC đọc hiểu khi cấp quyền (hiện dưới mỗi ô + tooltip).
@@ -146,6 +190,25 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.AUDIT_VIEW]:       "Xem nhật ký (tóm tắt: ai-làm-gì-khi-nào).",
   [P.AUDIT_VIEW_FULL]:  "Xem nhật ký CHI TIẾT (tên đối tượng + nội dung thay đổi + IP).",
   [P.SETTINGS_MANAGE]:  "Cài đặt hệ thống (email, sao lưu, tích hợp).",
+  [P.QUOTE_INTERNAL_VIEW]: "CHỈ thấy các bảng nội bộ (HCM/HN/Phí KH) của báo giá — KHÔNG lộ báo giá chính (giá/khách/tổng). Dành tài khoản 'chi phí'.",
+  [P.QUOTE_INTERNAL_PAY]:  "Tích 'đã thanh toán' + up ẢNH chứng từ cho TỪNG HÀNG bảng nội bộ (thanh toán nội bộ, riêng trang này).",
+  [P.CUSTOMER_CREATE]:     "Thêm mã khách hàng mới.",
+  [P.CUSTOMER_EDIT_OWN]:   "Sửa khách hàng mình phụ trách.",
+  [P.CUSTOMER_EDIT_ALL]:   "Sửa BẤT KỲ khách hàng nào.",
+  [P.CUSTOMER_DELETE_OWN]: "Xóa khách hàng mình phụ trách.",
+  [P.CUSTOMER_DELETE_ALL]: "Xóa BẤT KỲ khách hàng nào.",
+  [P.CUSTOMER_NOTE_ADD]:   "Thêm ghi chú / lịch theo dõi cho khách hàng.",
+  [P.PERSONNEL_EDIT_OWN]:   "Sửa hồ sơ nhân sự mình tạo (lương/ngày/ghi chú…).",
+  [P.PERSONNEL_EDIT_ALL]:   "Sửa BẤT KỲ hồ sơ nhân sự nào.",
+  [P.PERSONNEL_DELETE_OWN]: "Xóa hồ sơ nhân sự mình tạo.",
+  [P.PERSONNEL_DELETE_ALL]: "Xóa BẤT KỲ hồ sơ nhân sự nào.",
+  [P.EMPLOYEE_READ_OWN]:    "Xem danh bạ nhân sự MÌNH thêm.",
+  [P.EMPLOYEE_READ_ALL]:    "Xem TOÀN BỘ danh bạ nhân sự (mọi người).",
+  [P.EMPLOYEE_CREATE]:      "Thêm người vào danh bạ nhân sự.",
+  [P.EMPLOYEE_EDIT_OWN]:    "Sửa mục danh bạ MÌNH thêm.",
+  [P.EMPLOYEE_EDIT_ALL]:    "Sửa BẤT KỲ mục danh bạ nào.",
+  [P.EMPLOYEE_DELETE_OWN]:  "Xóa mục danh bạ MÌNH thêm.",
+  [P.EMPLOYEE_DELETE_ALL]:  "Xóa BẤT KỲ mục danh bạ nào.",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -155,9 +218,11 @@ export const PERMISSION_GROUPS = [
     P.QUOTE_DELETE_OWN, P.QUOTE_DELETE_ALL,
     P.QUOTE_SEND, P.QUOTE_EXPORT,
     P.QUOTE_HN_FILL, P.QUOTE_HN_MANAGE, P.QUOTE_INTERNAL_APPROVE,
+    P.QUOTE_INTERNAL_VIEW, P.QUOTE_INTERNAL_PAY,
   ] },
   { key: "customer", label: "Khách hàng", perms: [
-    P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.CUSTOMER_MANAGE_ALL,
+    P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_CREATE,
+    P.CUSTOMER_EDIT_OWN, P.CUSTOMER_EDIT_ALL, P.CUSTOMER_DELETE_OWN, P.CUSTOMER_DELETE_ALL, P.CUSTOMER_NOTE_ADD,
   ] },
   // Nhóm "Sản phẩm" ĐÃ BỎ khỏi ma trận: app KHÔNG có tính năng sản phẩm (price book chưa làm) — quyền
   // product:* là tàn dư RBAC gốc, không route/trang/check nào dùng → ẩn cho khỏi rối giám đốc.
@@ -166,9 +231,14 @@ export const PERMISSION_GROUPS = [
     P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
     P.AUDIT_VIEW, P.AUDIT_VIEW_FULL, P.SETTINGS_MANAGE,
   ] },
-  { key: "personnel", label: "Nhân sự", perms: [
-    P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_OWN, P.PERSONNEL_MANAGE_ALL,
+  { key: "personnel", label: "Nhân sự (hồ sơ)", perms: [
+    P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_READ_ALL,
+    P.PERSONNEL_EDIT_OWN, P.PERSONNEL_EDIT_ALL, P.PERSONNEL_DELETE_OWN, P.PERSONNEL_DELETE_ALL,
     P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
+  ] },
+  { key: "employee", label: "Danh bạ nhân sự", perms: [
+    P.EMPLOYEE_READ_OWN, P.EMPLOYEE_READ_ALL, P.EMPLOYEE_CREATE,
+    P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_OWN, P.EMPLOYEE_DELETE_ALL,
   ] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
     P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
@@ -178,22 +248,22 @@ export const PERMISSION_GROUPS = [
 const EMPLOYEE = [
   P.QUOTE_CREATE, P.QUOTE_READ_OWN, P.QUOTE_UPDATE_OWN, P.QUOTE_DELETE_OWN,
   P.QUOTE_EXPORT,
-  // CRM: the customer-code list is a SHARED company directory — everyone can read/select any
-  // customer code when making a quote; a salesperson still only manages (create/edit/delete)
-  // the ones they own. Product catalog is read-only (selling price, no cost).
-  P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_OWN, P.PRODUCT_READ,
+  // CRM: danh bạ mã KH là DANH BẠ CHUNG — ai cũng đọc/chọn được; salesperson chỉ tạo/sửa/xóa của MÌNH.
+  P.CUSTOMER_READ_OWN, P.CUSTOMER_READ_ALL, P.CUSTOMER_CREATE, P.CUSTOMER_EDIT_OWN, P.CUSTOMER_DELETE_OWN, P.CUSTOMER_NOTE_ADD,
+  // Danh bạ nhân sự: xem cả danh bạ + thêm + sửa/xóa của mình.
+  P.EMPLOYEE_READ_ALL, P.EMPLOYEE_CREATE, P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_DELETE_OWN,
+  P.PRODUCT_READ,
 ];
 
 const MANAGER = [
   ...EMPLOYEE,
-  // Manager sees/edits only the quotes THEY created (not everyone's).
   P.QUOTE_SEND,
   P.QUOTE_HN_MANAGE, // giao/duyệt phần Hà Nội (trước là check role admin||manager)
   P.AUDIT_VIEW,
-  // Manager sees all customers and the cost/margin, and owns the product catalog.
-  P.CUSTOMER_READ_ALL, P.CUSTOMER_MANAGE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
-  // Nhân sự: Account TẠO hồ sơ + chỉ thấy/sửa của MÌNH (owner-scoped).
-  P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_MANAGE_OWN,
+  // Manager thấy + sửa/xóa MỌI khách hàng + giá vốn + quản sản phẩm (ẩn).
+  P.CUSTOMER_READ_ALL, P.CUSTOMER_EDIT_ALL, P.CUSTOMER_DELETE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
+  // Nhân sự: Account TẠO hồ sơ + chỉ thấy/sửa/xóa của MÌNH (owner-scoped).
+  P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_EDIT_OWN, P.PERSONNEL_DELETE_OWN,
 ];
 
 const ADMIN = [
@@ -205,8 +275,9 @@ const ADMIN = [
   P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
   P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
   P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // trang Quản lý dự án + sửa hóa đơn + thanh toán + ký mọi dự án
-  // Nhân sự: admin xem + sửa/xóa MỌI hồ sơ + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
-  P.PERSONNEL_READ_ALL, P.PERSONNEL_MANAGE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
+  // Nhân sự + Danh bạ: admin sửa/xóa MỌI + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
+  P.PERSONNEL_READ_ALL, P.PERSONNEL_EDIT_ALL, P.PERSONNEL_DELETE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
+  P.EMPLOYEE_READ_ALL, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_ALL,
 ];
 
 // Nhân sự (hr) + Kế toán (accountant): CHỈ XEM mọi hồ sơ nhân sự (read-only). Không tạo/sửa/xóa,
@@ -306,8 +377,13 @@ export function resolveUserPermissions(role: string | undefined, userPerms?: str
   if (role === "admin") return [...ROLE_PERMISSIONS.admin];
   const set = new Set<string>(userPerms && userPerms.length ? userPerms : [...(effectiveRoleSet(role) ?? [])]);
   if (canSign) set.add(PERMISSIONS.QUOTE_SIGN_OWN);
-  // Bắc cầu quyền GỘP cũ → quyền nguyên tử (tương thích user đã lưu quyền cũ).
-  if (set.has(PERMISSIONS.INVOICE_MANAGE)) { set.add(PERMISSIONS.INVOICE_EDIT); set.add(PERMISSIONS.INVOICE_PAY); }
+  // Bắc cầu quyền GỘP cũ → quyền nguyên tử (tương thích user đã lưu quyền cũ trước khi tách).
+  const Pm = PERMISSIONS;
+  if (set.has(Pm.INVOICE_MANAGE)) { set.add(Pm.INVOICE_EDIT); set.add(Pm.INVOICE_PAY); }
+  if (set.has(Pm.CUSTOMER_MANAGE_OWN)) { set.add(Pm.CUSTOMER_CREATE); set.add(Pm.CUSTOMER_EDIT_OWN); set.add(Pm.CUSTOMER_DELETE_OWN); set.add(Pm.CUSTOMER_NOTE_ADD); }
+  if (set.has(Pm.CUSTOMER_MANAGE_ALL)) { set.add(Pm.CUSTOMER_CREATE); set.add(Pm.CUSTOMER_EDIT_ALL); set.add(Pm.CUSTOMER_DELETE_ALL); set.add(Pm.CUSTOMER_NOTE_ADD); }
+  if (set.has(Pm.PERSONNEL_MANAGE_OWN)) { set.add(Pm.PERSONNEL_EDIT_OWN); set.add(Pm.PERSONNEL_DELETE_OWN); }
+  if (set.has(Pm.PERSONNEL_MANAGE_ALL)) { set.add(Pm.PERSONNEL_EDIT_ALL); set.add(Pm.PERSONNEL_DELETE_ALL); }
   return [...set];
 }
 

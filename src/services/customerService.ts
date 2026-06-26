@@ -9,9 +9,9 @@ import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
-type Action = "read" | "manage";
+type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
-// Tải khách hàng + 403 nếu caller không được làm `action` (read|manage) với nó.
+// Tải khách hàng + 403 nếu caller không được làm `action` (read|edit|delete) với nó.
 async function loadAuthorized(req: Request, action: Action) {
   const customer = await prisma.customer.findFirst({ where: { id: (req.params as any).id } });
   if (!customer) throw httpError(404, "Không tìm thấy khách hàng");
@@ -46,6 +46,7 @@ export async function listCustomers(req: Request) {
 }
 
 export async function createCustomer(req: Request) {
+  if (!can(req.session, P.CUSTOMER_CREATE)) throw httpError(403, "Bạn không có quyền tạo khách hàng");
   let code = req.body.code;
   if (!code) code = await nextCustomerCode("KH");
   else {
@@ -60,8 +61,8 @@ export async function createCustomer(req: Request) {
   }
   const data = { ...req.body, code };
   if (data.taxCode) data.taxCode = data.taxCode.trim();
-  // Chỉ user đặc quyền mới gán owner khác mình.
-  if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) data.ownerId = req.session.userId;
+  // Chỉ user sửa-được-mọi-KH mới gán owner khác mình.
+  if (!can(req.session, P.CUSTOMER_EDIT_ALL)) data.ownerId = req.session.userId;
   else if (data.ownerId == null) data.ownerId = req.session.userId;
   data.searchText = normalizeSearch(data.name, data.code, data.phone, data.email, data.taxCode, data.contactName);
   const customer = await prisma.customer.create({
@@ -88,10 +89,10 @@ export async function getCustomer(req: Request) {
 }
 
 export async function updateCustomer(req: Request) {
-  const before = await loadAuthorized(req, "manage");
+  const before = await loadAuthorized(req, "edit");
   const data = { ...req.body };
-  // Chỉ user đặc quyền mới đổi chủ sở hữu; còn lại strip.
-  if (!can(req.session, P.CUSTOMER_MANAGE_ALL)) delete data.ownerId;
+  // Chỉ user sửa-được-mọi-KH mới đổi chủ sở hữu; còn lại strip.
+  if (!can(req.session, P.CUSTOMER_EDIT_ALL)) delete data.ownerId;
   // Tính lại searchText theo giá trị SẼ ghi: field có trong payload thì dùng nó (KỂ CẢ null = xóa),
   // không thì giữ giá trị cũ. Dùng `k in data` thay `?? before` để xóa-rỗng phản ánh đúng (không stale).
   const pick = (k: string) => (k in data ? data[k] : (before as any)[k]);
@@ -102,14 +103,15 @@ export async function updateCustomer(req: Request) {
 }
 
 export async function deleteCustomer(req: Request) {
-  const before = await loadAuthorized(req, "manage");
+  const before = await loadAuthorized(req, "delete");
   await prisma.customer.delete({ where: { id: (req.params as any).id } }); // soft delete (db middleware)
   await audit(req, "customer.delete", { resource: "customer", resourceId: (req.params as any).id, before });
   return { ok: true };
 }
 
 export async function addNote(req: Request) {
-  await loadAuthorized(req, "manage");
+  await loadAuthorized(req, "read");
+  if (!can(req.session, P.CUSTOMER_NOTE_ADD)) throw httpError(403, "Bạn không có quyền ghi chú khách hàng");
   const note = await prisma.customerNote.create({
     data: { customerId: (req.params as any).id, body: req.body.body, authorId: req.session.userId },
   });
@@ -118,7 +120,8 @@ export async function addNote(req: Request) {
 }
 
 export async function addFollowUp(req: Request) {
-  await loadAuthorized(req, "manage");
+  await loadAuthorized(req, "read");
+  if (!can(req.session, P.CUSTOMER_NOTE_ADD)) throw httpError(403, "Bạn không có quyền thêm việc theo dõi");
   return prisma.followUp.create({
     data: {
       customerId: (req.params as any).id,
@@ -135,7 +138,7 @@ export async function markFollowUpDone(req: Request) {
     include: { customer: { select: { ownerId: true } } },
   });
   if (!f) throw httpError(404, "Không tìm thấy công việc cần theo dõi");
-  const owns = f.assigneeId === req.session.userId || canScoped(req.session, "customer", "manage", f.customer);
+  const owns = f.assigneeId === req.session.userId || canScoped(req.session, "customer", "edit", f.customer);
   if (!owns) throw httpError(403, "Không có quyền với công việc này");
   return prisma.followUp.update({ where: { id: (req.params as any).fid }, data: { doneAt: new Date() } });
 }

@@ -18,9 +18,11 @@ export function CustomersPage({ me }: { me: Me }) {
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [editing, setEditing] = useState<Customer | null | undefined>(undefined);
 
-  // Quyền GHI = customer:manage (own/all) — đúng guard server (loadAuthorizedCustomer "manage").
-  // Người chỉ có read:own thấy "Xem", không thấy Sửa/Xóa/+ Khách mới.
-  const canManage = me.permissions.includes("customer:manage:own") || me.permissions.includes("customer:manage:all");
+  // Quyền NGUYÊN TỬ: tạo / sửa / xóa RIÊNG (đúng guard server). read:own thấy "Xem", không nút ghi.
+  const has = (p: string) => me.permissions.includes(p);
+  const canCreate = has("customer:create");
+  const canEdit = has("customer:edit:own") || has("customer:edit:all");
+  const canDelete = has("customer:delete:own") || has("customer:delete:all");
 
   // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
   const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
@@ -56,7 +58,7 @@ export function CustomersPage({ me }: { me: Me }) {
       <h1>Mã khách hàng</h1>
       <div className="toolbar">
         <input className="grow" placeholder="Tìm theo mã hoặc tên công ty…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm khách hàng" />
-        {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button>}
+        {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button>}
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
@@ -66,7 +68,7 @@ export function CustomersPage({ me }: { me: Me }) {
       ) : rows.length === 0 ? (
         <div className="empty">
           {q ? "Không tìm thấy khách hàng phù hợp." : "Chưa có khách hàng nào."}
-          {!q && canManage && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm khách hàng</button></div>}
+          {!q && canCreate && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm khách hàng</button></div>}
         </div>
       ) : (
         <div className="list-wrap">
@@ -84,8 +86,8 @@ export function CustomersPage({ me }: { me: Me }) {
                   <td><strong>{c.code}</strong></td>
                   <td>{c.name}</td>
                   <td className="row-actions">
-                    <button className="btn btn-sm" onClick={() => setEditing(c)}>{canManage ? "Sửa" : "Xem"}</button>
-                    {canManage && <button className="btn btn-sm btn-danger" onClick={() => onDelete(c)}>Xóa</button>}
+                    <button className="btn btn-sm" onClick={() => setEditing(c)}>{canEdit ? "Sửa" : "Xem"}</button>
+                    {canDelete && <button className="btn btn-sm btn-danger" onClick={() => onDelete(c)}>Xóa</button>}
                   </td>
                 </tr>
               ))}
@@ -107,7 +109,7 @@ export function CustomersPage({ me }: { me: Me }) {
       )}
 
       {editing !== undefined && (
-        <CustomerForm rec={editing} readOnly={editing !== null && !canManage}
+        <CustomerForm rec={editing} readOnly={editing !== null && !canEdit}
           onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
       )}
     </div>
