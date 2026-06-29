@@ -131,7 +131,7 @@ export function renderEditor(el, quote) {
         <div class="sheet-tabs">
           ${q.sheets.map((s, i) => `
             <div class="sheet-tab ${i === q._activeSheet ? "active" : ""}" data-tab="${i}" ${KBD} aria-pressed="${i === q._activeSheet}">
-              <span>${escapeHtml(s.name || state.templates.find(t => t.id === s.templateId)?.name || "Sheet " + (i + 1))}</span>
+              <span>${q.sheets.length > 1 ? `${i + 1}. ` : ""}${escapeHtml(s.name || state.templates.find(t => t.id === s.templateId)?.name || "Sheet " + (i + 1))}</span>
               ${editable && q.sheets.length > 1 ? `<span class="rm-tab" data-rm-tab="${i}" title="Xóa sheet" ${KBD} aria-label="Xóa sheet ${i + 1}">✕</span>` : ""}
             </div>
           `).join("")}

@@ -32,6 +32,13 @@ const CASES = {
     { kind: "info", name: "Dòng thông tin (không tính tiền)" },
   ], { groupSubtotal: true })] }),
   "discount": q({ discount: 150000, sheets: [sheet([item({ name: "X", quantity: 2, unitPrice: 2000000 })])] }),
+  // Nhiều sheet: tab Excel đánh số "1. …/2. …" + tiêu đề mỗi sheet nối tên sheet ("… - Banner").
+  "multi-sheet": q({ sheets: [
+    sheet([item({ name: "Banner item" })], { name: "Banner" }),
+    sheet([item({ name: "Standee item", quantity: 2, unitPrice: 500000 })], { order: 2, name: "Standee" }),
+  ] }),
+  // 1 sheet KHÔNG đặt tên: tiêu đề KHÔNG nối tên sheet (giữ logic gốc).
+  "single-noname": q({ sheets: [sheet([item({ name: "X" })], { name: "" })] }),
 };
 
 async function snapshot(quote) {

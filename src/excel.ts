@@ -177,8 +177,9 @@ function unmergeTotals(ws: any, cfg: any, lastItemRow: any) {
   });
 }
 
-/** Fill data for one sheet using its template config. Returns totals. */
-function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any) {
+/** Fill data for one sheet using its template config. Returns totals.
+ *  sheetLabel: khi báo giá có NHIỀU sheet, tên sheet được nối vào tiêu đề ("… - Banner"). */
+function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, sheetLabel?: string) {
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
@@ -236,7 +237,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any) {
   if (c.fromAddress) setCell(ws, c.fromAddress, clean(quote.fromAddress));
   if (c.date) setCell(ws, c.date, vnDateText(quote.quoteDate, quote.city));
   if (c.title) {
-    const title = c.titleFormat ? c.titleFormat(quote.title) : (quote.title || "");
+    let title = c.titleFormat ? c.titleFormat(quote.title) : (quote.title || "");
+    // Báo giá nhiều sheet: nối tên sheet vào tiêu đề ("BẢNG BÁO GIÁ - MOANA - POSM - Banner").
+    const lbl = (sheetLabel || "").trim();
+    if (lbl) title = `${title} - ${lbl}`;
     setCell(ws, c.title, clean(title));
   }
   if (c.quoteNumber) {
@@ -1080,9 +1084,13 @@ export async function buildQuoteBuffer(quote: any) {
     scrubWorkbook(wb);
     const ws = wb.getWorksheet(cfg.sheetName) || wb.worksheets[0];
 
-    const totals = fillSheetData(ws, cfg, quote, sheet, vatPct);
+    // Tiêu đề từng sheet nối tên sheet ("… - Banner") — áp dụng CẢ khi chỉ 1 sheet.
+    const totals = fillSheetData(ws, cfg, quote, sheet, vatPct, (sheet.name || "").trim());
 
-    const displayName = uniq(sheet.name || cfg.sheetName || `Sheet ${idx + 1}`);
+    // Tên tab Excel: chỉ đánh số "N. …" khi báo giá có NHIỀU sheet (1 sheet giữ nguyên).
+    const baseName = sheet.name || cfg.sheetName || `Sheet ${idx + 1}`;
+    const labeled = sheets.length > 1 ? `${idx + 1}. ${baseName}`.replace(/[[\]/\\?*:]/g, "").substring(0, 31) : baseName;
+    const displayName = uniq(labeled);
     ws.name = displayName;
 
     const buf = Buffer.from(await wb.xlsx.writeBuffer());
