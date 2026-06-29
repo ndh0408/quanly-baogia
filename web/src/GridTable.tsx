@@ -537,6 +537,52 @@ export function GridTable(props: GridTableProps) {
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   let sttNo = 0, sectionIdx = -1, subNo = 0;
 
+  // ── XEM CÔNG THỨC ô KHÓA (như Excel) ────────────────────────────────────────
+  // Double-click ô khóa (Thành Tiền / Đơn giá nhóm / Thành tiền nhóm / Tổng sheet) → hiện công
+  // thức (chỉ đọc) ở thanh fx + sáng ô tham chiếu. Chỉ minh bạch cách tính, không sửa được.
+  const Lq = letterOf("quantity"), Lp = letterOf("unitPrice"), Ld = letterOf("days"), La = letterOf("_amount");
+  const childAmountRange = (si: number): [number, number] | null => {
+    let first: number | null = null, last = 0;
+    for (let j = si + 1; j < items.length; j++) {
+      const k = items[j].kind;
+      if (k === "section" || k === "subsection") break;
+      if (k === "info") continue;
+      if (first == null) first = j; last = j;
+    }
+    return first == null ? null : [first + 1, last + 1];
+  };
+  const showFx = (addr: string, formula: string) => {
+    if (!fxBar) return;
+    if (fxAddrRef.current) fxAddrRef.current.textContent = addr;
+    if (fxInputRef.current) { fxInputRef.current.value = formula; fxInputRef.current.readOnly = true; }
+    highlightActiveFormulaRefs(formula);
+  };
+  const revealAmount = (i: number) => {
+    const it = items[i]; if (!it) return;
+    if (it.kind === "section" || it.kind === "subsection") {
+      if (!groupSubtotal) return;
+      const rng = childAmountRange(i); if (!rng) return;
+      showFx(`${La}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`);   // Thành tiền nhóm = (Σ con) × SL nhóm
+    } else if (it.kind === "item" || it.kind === "sub") {
+      showFx(`${La}${i + 1}`, usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`);  // SL × ĐG (× Ngày)
+    }
+  };
+  const revealSectionPrice = (i: number) => {
+    const rng = childAmountRange(i); if (!rng) return;
+    showFx(`${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);   // Đơn giá nhóm = Σ Thành Tiền mục con
+  };
+  const revealSheetTotal = () => {
+    const rows: number[] = [];
+    if (groupSubtotal) {
+      let inGroup = false;
+      for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "section" || k === "subsection") { rows.push(i); inGroup = true; } else if ((k === "item" || k === "sub") && !inGroup) rows.push(i); }
+    } else {
+      for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "item" || k === "sub") rows.push(i); }
+    }
+    if (rows.length) showFx("Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
+  };
+  const fxTitle = fxBar ? "Bấm đúp để xem công thức (như Excel)" : undefined;
+
   const dataCells = (i: number) => (
     <>
       {showDetail && <td className="col-detail">{taInput(i, "detail")}</td>}
@@ -544,7 +590,7 @@ export function GridTable(props: GridTableProps) {
       <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
       {usesDays && <td className={fcls(i, "days", "col-qty")} style={{ position: "relative" }}>{numInput(i, "days")}</td>}
       <td className={fcls(i, "unitPrice", "col-price")} style={{ position: "relative" }}>{numInput(i, "unitPrice")}</td>
-      <td className="col-amount">{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
+      <td className="col-amount" title={fxTitle} onDoubleClick={() => revealAmount(i)}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} onChange={(e) => toggleApprove(i, e.target.checked)} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
@@ -610,8 +656,8 @@ export function GridTable(props: GridTableProps) {
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
                     {usesDays && <td className="col-qty" />}
-                    <td className="col-price">{M.fmtNumCell(subAmt)}</td>
-                    <td className="col-amount">{groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+                    <td className="col-price" title={fxTitle} onDoubleClick={() => revealSectionPrice(i)}>{M.fmtNumCell(subAmt)}</td>
+                    <td className="col-amount" title={fxTitle} onDoubleClick={() => revealAmount(i)}>{groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
                     {approveCol && <td className="col-approve" />}
@@ -647,7 +693,7 @@ export function GridTable(props: GridTableProps) {
       <div className="grid-stat hidden" ref={statRef} />
       {fxBar && (
         <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
-          Tổng sheet: <span style={{ color: "var(--danger)" }}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
+          Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={revealSheetTotal}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
         </div>
       )}
 

@@ -906,7 +906,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
         <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
-        <td class="col-amount">${fmtNumCell(amt)}</td>
+        <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
         ${approveCol ? `<td class="col-approve">${approveCellHtml(it, i)}</td>` : ""}
@@ -944,8 +944,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"></td>` : ""}
-        <td class="col-price">${fmtNumCell(subAmt)}</td>
-        <td class="col-amount">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+        <td class="col-price" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(subAmt)}</td>
+        <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
         ${approveCol ? `<td class="col-approve"></td>` : ""}
@@ -1486,6 +1486,70 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   };
   grid._fx = { onPointMouseDown };
 
+  // ===== XEM CÔNG THỨC ô KHÓA (như Excel) =====
+  // Double-click ô bị khóa (Thành Tiền / Đơn giá nhóm / Thành tiền nhóm / Tổng sheet) → hiện
+  // CÔNG THỨC (chỉ đọc) trên thanh fx + SÁNG các ô được tham chiếu, để soi cách tính có đúng không.
+  // Không sửa được gì — chỉ minh bạch. Tái dùng cơ chế highlight refs sẵn có.
+  const Lq = fieldToLetter.quantity, Lp = fieldToLetter.unitPrice, Ld = fieldToLetter.days, La = fieldToLetter._amount;
+  // [hàng đầu, hàng cuối] (1-based) các mục (item/sub) thuộc nhóm tại index si — dừng ở nhóm/nhóm con kế.
+  const childAmountRange = (si) => {
+    let first = null, last = null;
+    for (let j = si + 1; j < activeSheet.items.length; j++) {
+      const k = activeSheet.items[j].kind;
+      if (k === "section" || k === "subsection") break;
+      if (k === "info") continue;
+      if (first == null) first = j; last = j;
+    }
+    return first == null ? null : [first + 1, last + 1];
+  };
+  const showFx = (addr, formula) => {
+    const addrEl = document.getElementById("fx-addr"), inEl = document.getElementById("fx-input");
+    if (addrEl) addrEl.textContent = addr;
+    if (inEl) { inEl.value = formula; inEl.readOnly = true; }
+    highlightActiveFormulaRefs(formula);
+  };
+  grid._revealLockedFormula = (td) => {
+    const tr = td.closest("tr[data-row]"); if (!tr) return;
+    const i = parseInt(tr.dataset.row, 10); const it = activeSheet.items[i]; if (!it) return;
+    const isSection = it.kind === "section" || it.kind === "subsection";
+    const isPrice = td.classList.contains("col-price");
+    if (isSection) {
+      const rng = childAmountRange(i); if (!rng) return;
+      if (isPrice) showFx(`${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);                            // Đơn giá nhóm = Σ Thành Tiền mục con
+      else if (activeSheet.groupSubtotal) showFx(`${La}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`); // Thành tiền nhóm = (Σ con) × SL nhóm
+    } else if ((it.kind === "item" || it.kind === "sub") && td.classList.contains("col-amount")) {
+      const f = usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`;       // Thành Tiền = SL × ĐG (× Ngày)
+      showFx(`${La}${i + 1}`, f);
+    }
+  };
+  // Tổng sheet (chỉ lưới chính): cộng các dòng NHÓM (đã ×SL) + mục lẻ; hoặc Σ mọi mục khi không bật nhóm.
+  grid._revealSheetTotal = () => {
+    if (opts.subtotalFn) return;   // bảng nội bộ tính tổng kiểu khác — bỏ qua
+    const items = activeSheet.items, rows = [];
+    if (activeSheet.groupSubtotal) {
+      let inGroup = false;
+      for (let i = 0; i < items.length; i++) {
+        const k = items[i].kind;
+        if (k === "section" || k === "subsection") { rows.push(i); inGroup = true; }
+        else if ((k === "item" || k === "sub") && !inGroup) rows.push(i);   // mục lẻ trước nhóm đầu tiên
+      }
+    } else {
+      for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "item" || k === "sub") rows.push(i); }
+    }
+    if (!rows.length) return;
+    showFx("Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
+  };
+  const tableEl = document.querySelector(tableSel);
+  if (tableEl && !tableEl._dblFxBound) {
+    tableEl._dblFxBound = true;     // gắn 1 lần / bảng (tbody+tfoot giữ nguyên qua redraw) — gọi grid._reveal* (luôn bản mới)
+    tableEl.addEventListener("dblclick", (ev) => {
+      const sub = ev.target.closest && ev.target.closest(".gf-subtotal-val");
+      if (sub) { grid._revealSheetTotal && grid._revealSheetTotal(); return; }
+      const cell = ev.target.closest && ev.target.closest("td.col-amount, td.col-price");
+      if (cell && grid._revealLockedFormula) grid._revealLockedFormula(cell);
+    });
+  }
+
   // --- Function-name autocomplete (=SU → SUM/… dropdown) ---
   const FN_LIST = Object.keys(FORMULA_FNS);
   const ensureFxAuto = () => {
@@ -1916,54 +1980,6 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // sang Quản lý dự án (không hệ số nhóm) — tránh footer lệch Tổng-loại.
   const sheetSubtotal = opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
 
-  // CHỈ HIỂN THỊ (không đổi cách tính): dựng bảng giải thích "Tổng sheet" — đi đúng theo
-  // logic sheetSubtotalGrouped (mục × Số Lượng nhóm; dòng nhóm không tự cộng; info bỏ qua)
-  // để user/khách soi từng bước. Tổng cuối ở đây = đúng số ở chân lưới.
-  const explainSheetTotal = () => {
-    const items = activeSheet.items || [];
-    // Gom thành từng "khối" (nhóm / nhóm con / mục lẻ) — mỗi khối có tổng riêng; Tổng sheet = cộng các khối.
-    const blocks = [];
-    let cur = { title: null, sub: false, mult: 1, lines: [], subtotal: 0 };
-    let sectionIdx = -1;
-    const flush = () => { if (cur.title || cur.lines.length) blocks.push(cur); };
-    for (const it of items) {
-      if (it.kind === "section" || it.kind === "subsection") {
-        flush();
-        const isSub = it.kind === "subsection";
-        const mult = activeSheet.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
-        let title;
-        if (isSub) title = "Nhóm con" + (it.name ? " — " + it.name : "");
-        else { sectionIdx++; title = "Nhóm " + ((it.label && String(it.label).trim()) || groupLetter(sectionIdx)) + (it.name ? " — " + it.name : ""); }
-        cur = { title, sub: isSub, mult, lines: [], subtotal: 0 };
-        continue;
-      }
-      if (it.kind === "info") { cur.lines.push({ info: true, name: it.name || "" }); continue; }
-      const contrib = lineAmount(it, usesDays) * cur.mult;
-      cur.subtotal += contrib;
-      cur.lines.push({ name: it.name || "(không tên)", qty: it.quantity, price: it.unitPrice, days: it.days, contrib });
-    }
-    flush();
-    const total = blocks.reduce((s, b) => s + b.subtotal, 0);
-    const renderBlock = (b) => {
-      const lines = b.lines.map((ln) => {
-        if (ln.info) return `<div class="te-line te-info">${escapeHtml(ln.name)} — (dòng thông tin, không tính tiền)</div>`;
-        const dy = usesDays ? ` × ${fmtNumCell(ln.days)}n` : "";
-        const xm = b.mult > 1 ? ` <span class="te-x">× ${b.mult}</span>` : "";
-        return `<div class="te-line"><span class="te-nm">${escapeHtml(ln.name)}</span><span class="te-cl">${fmtNumCell(ln.qty)} × ${fmtMoney(ln.price)}${dy}${xm}</span><span class="te-am">${fmtMoney(ln.contrib)}</span></div>`;
-      }).join("");
-      const head = b.title
-        ? `<div class="te-bh${b.sub ? " te-bh-sub" : ""}">${b.sub ? "↳ " : ""}${escapeHtml(b.title)}${b.mult > 1 ? ` <span class="te-mult">mỗi mục × ${b.mult}</span>` : ""}</div>`
-        : `<div class="te-bh te-bh-loose">Mục lẻ (không thuộc nhóm)</div>`;
-      const subLabel = !b.title ? "Cộng mục lẻ" : (b.sub ? "Cộng nhóm con" : "Cộng nhóm");
-      return `<div class="te-block">${head}${lines}<div class="te-sub">${subLabel} <b>${fmtMoney(b.subtotal)}</b></div></div>`;
-    };
-    const body = blocks.length ? blocks.map(renderBlock).join("") : `<p class="muted" style="text-align:center;padding:20px">Chưa có mục nào.</p>`;
-    return `<div class="total-explain">
-      <p class="te-note"><b>Mỗi mục</b> = Số Lượng × Đơn Giá (đã làm tròn) — mục trong nhóm thì × Số Lượng nhóm. <b>Tổng sheet</b> = cộng tổng các nhóm bên dưới.</p>
-      ${body}
-      <div class="te-grand"><span>TỔNG ${escapeHtml((opts.totalLabel || "sheet").toUpperCase())}</span><b>${fmtMoney(total)}</b></div>
-    </div>`;
-  };
   const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
@@ -1979,8 +1995,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     </td></tr>` : ""}
     <tr>
       <td colspan="${colSpanLeft}"></td>
-      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}${!opts.subtotalFn ? ` <button type="button" class="link-btn gf-explain" title="Xem cách cộng ra số này">ⓘ giải thích</button>` : ""}</td>
-      <td class="value gf-subtotal-val">${fmtMoney(sheetSubtotal)}</td>
+      <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}</td>
+      <td class="value gf-subtotal-val"${!opts.subtotalFn ? ` title="Bấm đúp để xem công thức (như Excel)"` : ""}>${fmtMoney(sheetSubtotal)}</td>
       <td></td>
       ${editable ? "<td></td>" : ""}
     </tr>`;
@@ -1992,13 +2008,6 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tfoot.querySelector(".gf-add-info")?.addEventListener("click", addInfo);
     tfoot.querySelector(".gf-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
   }
-  // "Giải thích" mở được cả khi chỉ-xem (không nằm trong nhánh editable) — read-only.
-  tfoot?.querySelector(".gf-explain")?.addEventListener("click", () => {
-    const m = openModal(`Giải thích Tổng ${opts.totalLabel || "sheet"}`, explainSheetTotal());
-    m.find(".modal")?.classList.add("modal-wide");
-    m.find("[data-save]")?.remove();                                   // bảng chỉ để XEM → bỏ nút "Lưu"
-    const c = m.find("[data-cancel]"); if (c) c.textContent = "Đóng";  // "Hủy" → "Đóng"
-  });
 
   // Re-derive the selection highlight from grid.sel — survives this innerHTML rebuild.
   paintSel();
