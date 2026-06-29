@@ -298,3 +298,45 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(isXlsx(buf)).toBe(true);
   }, 20_000);
 });
+
+// Khách sửa Số Lượng/Đơn Giá 1 mục trong file Excel → đơn giá nhóm, thành tiền nhóm, Tổng Cộng,
+// VAT, Thành Tiền PHẢI tự tính lại (công thức SỐNG, không phải ô tổng "chết").
+describe("Excel — công thức SỐNG cho nhóm", () => {
+  const item = (n, q, p) => ({ kind: "item", name: n, unit: "cái", quantity: q, unitPrice: p, days: null });
+  const grouped = () => ({
+    quoteNumber: "GN26GRP", title: "T", toCompany: "KH", vatPercent: 8, discount: 0, showTotals: false,
+    city: "TP. Hồ Chí Minh", quoteDate: new Date("2026-06-13"),
+    sheets: [{ order: 1, name: "S1", groupSubtotal: true, template: { code: "marico_decor" }, items: [
+      { kind: "section", name: "Nhóm A", quantity: 2 }, item("A1", 1, 100000), item("A2", 3, 50000),
+      { kind: "section", name: "Nhóm B", quantity: 1 }, item("B1", 2, 200000),
+    ] }],
+  });
+  const load = async (q) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await buildQuoteBuffer(q)); return wb.worksheets[0]; };
+  const fx = (ws, a) => { const v = ws.getCell(a).value; return v && typeof v === "object" ? v.formula : null; };
+  const res = (ws, a) => { const v = ws.getCell(a).value; return v && typeof v === "object" ? v.result : v; };
+
+  it("đơn giá nhóm = SUM mục con; thành tiền nhóm = đơn giá × SL nhóm", async () => {
+    const ws = await load(grouped());
+    expect(fx(ws, "G12")).toBe("SUM(H13:H14)");   // Nhóm A: đơn giá = tổng Thành Tiền mục con
+    expect(fx(ws, "H12")).toBe("G12*F12");          // Thành tiền nhóm A = đơn giá × SL(2)
+    expect(res(ws, "H12")).toBe(500000);
+    expect(fx(ws, "G15")).toBe("SUM(H16:H16)");   // Nhóm B
+    expect(fx(ws, "H15")).toBe("G15");              // SL nhóm B = 1 → = đơn giá nhóm
+    expect(res(ws, "H15")).toBe(400000);
+  });
+
+  it("subtotal có nhóm = cộng dòng NHÓM (không double-count mục con)", async () => {
+    const ws = await load(grouped());
+    let subRow = null;
+    for (let r = 16; r < 30; r++) { if (fx(ws, `H${r}`) === "H12+H15") { subRow = r; break; } }
+    expect(subRow).not.toBeNull();
+    expect(res(ws, `H${subRow}`)).toBe(900000);             // 500k + 400k, KHÔNG cộng H13/H14/H16
+    expect(fx(ws, `H${subRow + 1}`)).toMatch(/H\d+\*8%/);   // VAT trỏ về ô subtotal
+  });
+
+  it("không nhóm: subtotal vẫn là SUM cột Thành Tiền (sống)", async () => {
+    const ws = await load(makeQuote());   // groupSubtotal:false
+    let f = null; for (let r = 12; r < 30; r++) { const ff = fx(ws, `H${r}`); if (ff && /^SUM\(H\d+:H\d+\)$/.test(ff)) f = ff; }
+    expect(f).toMatch(/^SUM\(H\d+:H\d+\)$/);
+  });
+});
