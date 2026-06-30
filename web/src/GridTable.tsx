@@ -320,6 +320,7 @@ export function GridTable(props: GridTableProps) {
     if (!text && !internal) return;
     const sameBlock = !!(internal && copyBufRef.current && internal.token === copyBufRef.current.token);
     const rows = parseClipboardTSV(sameBlock ? copyBufRef.current!.tsv : text);
+    if (rows.length > 1 && String(rows[0]?.[0] ?? "").trim().toUpperCase() === "STT") rows.splice(0, 1);   // user copy LUÔN hàng tiêu đề cột ("STT|Hạng Mục|…") → bỏ, kẻo lệch
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
 
     // 1 giá trị đơn lẻ.
