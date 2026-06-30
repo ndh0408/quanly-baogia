@@ -5,6 +5,7 @@ import {
   cellsToTSV,
   cellsToHTML,
   parseLooseNumber,
+  parseLooseDecimal,
   reconstructExportRows,
   looksLikeExportPaste,
   isHeaderRow,
@@ -264,5 +265,19 @@ describe("Mac Excel — copy KHÔNG header, bỏ cột rỗng cuối (maxCols ==
   });
   it("KHÔNG nhận nhầm 1 dòng đơn (giữ guard cũ)", () => {
     expect(looksLikeExportPaste([["A", "x", "", "m2", "1", "100"]], 0, 6)).toBe(false);
+  });
+});
+
+describe("parseLooseDecimal — cột SỐ LƯỢNG/SỐ NGÀY (số đo, KHÔNG đoán nghìn)", () => {
+  it("'13.524' → 13.524 (không phải 13524 — bug cộng sai gấp ngàn lần)", () => expect(parseLooseDecimal("13.524")).toBeCloseTo(13.524));
+  it("'6.4428' → 6.4428", () => expect(parseLooseDecimal("6.4428")).toBeCloseTo(6.4428));
+  it("'1,5' → 1.5 (phẩy = thập phân)", () => expect(parseLooseDecimal("1,5")).toBeCloseTo(1.5));
+  it("'1.234.567' → 1234567 (NHIỀU dấu = ngăn nghìn)", () => expect(parseLooseDecimal("1.234.567")).toBe(1234567));
+  it("'3' → 3; '' → 0", () => { expect(parseLooseDecimal("3")).toBe(3); expect(parseLooseDecimal("")).toBe(0); });
+  it("reconstructExportRows: SL '13.524' vào quantity = 13.524 (không phồng)", () => {
+    const r = [["", "Banner", "Hiflex", "m2", "13.524", "65000", "879060"]];
+    const [it] = reconstructExportRows(r, ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"], new Set(["quantity", "unitPrice", "days"]));
+    expect(it.quantity).toBeCloseTo(13.524);
+    expect(it.unitPrice).toBe(65000);
   });
 });

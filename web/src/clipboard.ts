@@ -57,6 +57,24 @@ export function parseLooseNumber(s: string): number {
   return Number(s) || 0;
 }
 
+// Riêng cột SỐ LƯỢNG / SỐ NGÀY: là SỐ ĐO NHỎ (vd 13.524 m2). 1 dấu "." hoặc "," → THẬP PHÂN
+// (KHÔNG đoán "nghìn" như parseLooseNumber); NHIỀU dấu → ngăn nghìn. Tránh "13.524"→13524.
+export function parseLooseDecimal(s: string): number {
+  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (!str || str === "-") return 0;
+  const neg = str.startsWith("-"); str = str.replace(/-/g, "");
+  const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
+  if (dots && commas) {
+    str = str.lastIndexOf(",") > str.lastIndexOf(".") ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  } else if (dots + commas > 1) {
+    str = str.replace(/[.,]/g, "");   // nhiều dấu cùng loại (1.234.567 / 1,234,567) = ngăn nghìn
+  } else {
+    str = str.replace(",", ".");      // đúng 1 dấu = thập phân
+  }
+  const n = Number(str) || 0;
+  return neg ? -n : n;
+}
+
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
 export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
@@ -84,14 +102,14 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
       const v = cell(row, i);
       if (numSet.has(role)) {
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
-        else it[role] = parseLooseNumber(v);
+        else it[role] = (role === "quantity" || role === "days") ? parseLooseDecimal(v) : parseLooseNumber(v);   // SL/Ngày = số đo → thập phân
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
       else it[role] = v.trim();
     });
     if (kind === "section" || kind === "subsection") {
       it.unitPrice = 0;
       if (it.formulas) delete it.formulas.unitPrice;
-      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseNumber(cell(row, qtyI));
+      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseDecimal(cell(row, qtyI));
     }
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; delete it.formulas; }
     if (it.formulas && !Object.keys(it.formulas).length) delete it.formulas;

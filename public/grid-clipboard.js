@@ -91,6 +91,24 @@ export function parseLooseNumber(s) {
   return Number(s) || 0;
 }
 
+// Riêng cột SỐ LƯỢNG / SỐ NGÀY: là SỐ ĐO NHỎ (vd 13.524 m2). 1 dấu "." hoặc "," → THẬP PHÂN
+// (KHÔNG đoán "nghìn"); NHIỀU dấu → ngăn nghìn. Tránh "13.524"→13524 làm tổng sai gấp ngàn lần.
+export function parseLooseDecimal(s) {
+  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (!str || str === "-") return 0;
+  const neg = str.startsWith("-"); str = str.replace(/-/g, "");
+  const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
+  if (dots && commas) {
+    str = str.lastIndexOf(",") > str.lastIndexOf(".") ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  } else if (dots + commas > 1) {
+    str = str.replace(/[.,]/g, "");
+  } else {
+    str = str.replace(",", ".");
+  }
+  const n = Number(str) || 0;
+  return neg ? -n : n;
+}
+
 // ---- Reconstruct a quote table copied from the app's OWN Excel export -----------------
 // Khi người dùng copy NGUYÊN bảng báo giá từ file app xuất ra (gồm cả cột STT) rồi dán vào
 // lưới, hàm này DỰNG LẠI đúng cấu trúc: nhóm lớn (A/B/C) / nhóm con / hàng con / dòng thông
@@ -132,7 +150,7 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
         // (it.formulas[role]) để có nút ƒ + được tính lại; nếu không thì parse số như cũ.
         // it[role]=0 chỉ là placeholder — caller gọi recomputeAll() để đánh giá công thức.
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
-        else it[role] = parseLooseNumber(v);
+        else it[role] = (role === "quantity" || role === "days") ? parseLooseDecimal(v) : parseLooseNumber(v);   // SL/Ngày = số đo → thập phân
       }
       else if (role === "detail" || role === "notes" || role === "name" || role === "label") it[role] = v;
       else it[role] = v.trim();
@@ -141,7 +159,7 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
     if (kind === "section" || kind === "subsection") {
       it.unitPrice = 0;
       if (it.formulas) delete it.formulas.unitPrice;   // nhóm không nhận công thức đơn giá
-      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseNumber(cell(row, qtyI));   // giữ công thức SL nếu có
+      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseDecimal(cell(row, qtyI));   // giữ công thức SL nếu có; số → thập phân
     }
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; delete it.formulas; }   // dòng thông tin: không số/không công thức
     if (it.formulas && !Object.keys(it.formulas).length) delete it.formulas;
