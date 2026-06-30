@@ -28,6 +28,7 @@ export type GridTableProps = {
   onGroupSubtotal?: (v: boolean) => void;
   onChange: () => void;
   fxBar?: boolean;                 // chỉ lưới chính bật thanh công thức
+  clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
 };
 
 type Sel = { anchor: { row: number; field: string }; focus: { row: number; field: string } };
@@ -37,7 +38,7 @@ const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROU
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
 
 export function GridTable(props: GridTableProps) {
-  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, onChange, fxBar } = props;
+  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, onChange, fxBar, clfTheme } = props;
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
   const focusRef = useRef<{ i: number; f: string } | null>(null);
@@ -657,7 +658,7 @@ export function GridTable(props: GridTableProps) {
         </div>
       )}
       <div className="tbl-scroll">
-        <table className="excel-table" ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
+        <table className={`excel-table${clfTheme ? " clf-theme" : ""}`} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
           onMouseDownCapture={onPointMouseDown} onMouseDown={onSelDragStart}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
           <thead>

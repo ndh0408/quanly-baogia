@@ -155,7 +155,7 @@ export function renderEditor(el, quote) {
           <input type="text" id="fx-input" autocomplete="off" spellcheck="false" placeholder="Công thức… vd =SUM(H3:H8) · =G3*E3 — bấm/kéo ô để chèn tham chiếu" />
         </div>` : ""}
         <div class="tbl-scroll">
-        <table class="excel-table" id="items-table">
+        <table class="excel-table ${tplCode && tplCode.startsWith("clofull") ? "clf-theme" : ""}" id="items-table">
           <thead>
             <tr class="col-letters" aria-hidden="true">
               ${(() => {

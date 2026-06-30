@@ -545,6 +545,10 @@ th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color:
 .excel-table tr.subgroup-row td.col-price,
 .excel-table tr.subgroup-row td.col-amount,
 .excel-table tr.subgroup-row td.col-notes textarea { color: #1f4e79; }
+/* Colorfull (template clofull): lưới web GIỮ MÀU CŨ — màu mới chỉ của Gia Nguyễn (khớp Excel). */
+.excel-table.clf-theme thead th { background: #FFCC99; }
+.excel-table.clf-theme tr.section-row td { background: #fcefdb; }
+.excel-table.clf-theme tr.subgroup-row td { background: #eaf1fb; }
 
 /* Excel-style selection summary bar (Sum / Count / Average of selected cells) */
 .grid-stat { display: flex; gap: 16px; justify-content: flex-end; align-items: center;

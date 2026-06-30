@@ -314,6 +314,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         </div>
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
+          clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           onChange={() => { mark(); redraw(); }} />
