@@ -598,6 +598,28 @@ export function GridTable(props: GridTableProps) {
     if (rows.length) toggleCellFormula(td, "Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
   };
   const fxTitle = fxBar ? "Bấm đúp để xem công thức (như Excel)" : undefined;
+  // Như Excel: bấm sang chỗ khác → ô đang hiện công thức TỰ về số. Gắn 1 lần toàn cục.
+  useEffect(() => {
+    if (document.body.dataset.fxRevertBound) return;
+    document.body.dataset.fxRevertBound = "1";
+    const onDown = (ev: MouseEvent) => {
+      const shown = document.querySelectorAll<HTMLElement>("[data-fx-shown]");
+      if (!shown.length) return;
+      const target = ev.target as Node;
+      shown.forEach((td) => {
+        if (td === target || td.contains(target)) return;   // bấm trong chính ô đó → giữ
+        td.textContent = td.getAttribute("data-fx-val") || "";
+        td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+        td.removeAttribute("data-fx-shown"); td.removeAttribute("data-fx-val"); td.removeAttribute("title");
+      });
+      if (!document.querySelector("[data-fx-shown]")) {
+        const inEl = document.getElementById("fx-input") as HTMLInputElement | null; if (inEl && inEl.readOnly) inEl.value = "";
+        const addrEl = document.getElementById("fx-addr"); if (addrEl) addrEl.textContent = "—";
+        document.querySelectorAll<HTMLElement>("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); t.style.removeProperty("--ref-color"); });
+      }
+    };
+    document.addEventListener("mousedown", onDown, true);
+  }, []);
 
   const dataCells = (i: number) => (
     <>

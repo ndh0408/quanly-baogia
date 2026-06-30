@@ -1562,6 +1562,25 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const cell = ev.target.closest && ev.target.closest("td.col-amount, td.col-price");
       if (cell && grid._revealLockedFormula) grid._revealLockedFormula(cell);
     });
+    // Như Excel: bấm sang chỗ khác → ô đang hiện công thức TỰ về số. Gắn 1 lần toàn cục.
+    if (!document.body.dataset.fxRevertBound) {
+      document.body.dataset.fxRevertBound = "1";
+      document.addEventListener("mousedown", (ev) => {
+        const shown = document.querySelectorAll("[data-fx-shown]");
+        if (!shown.length) return;
+        shown.forEach((td) => {
+          if (td === ev.target || td.contains(ev.target)) return;   // bấm trong chính ô đó → giữ
+          td.textContent = td.getAttribute("data-fx-val") || "";
+          td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+          td.removeAttribute("data-fx-shown"); td.removeAttribute("data-fx-val"); td.removeAttribute("title");
+        });
+        if (!document.querySelector("[data-fx-shown]")) {
+          const inEl = document.getElementById("fx-input"); if (inEl && inEl.readOnly) inEl.value = "";
+          const addrEl = document.getElementById("fx-addr"); if (addrEl) addrEl.textContent = "—";
+          document.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); t.style.removeProperty("--ref-color"); });
+        }
+      }, true);
+    }
   }
 
   // --- Function-name autocomplete (=SU → SUM/… dropdown) ---
