@@ -26,7 +26,7 @@ exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGU
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: groups 1`] = `
 {
-  "groups": "e289c00c1751a514",
+  "groups": "3dd39c5a546a033a",
 }
 `;
 

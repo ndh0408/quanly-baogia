@@ -488,7 +488,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         paintCell(ws.getCell(`${col}${r}`), {
           // Nhóm chính A/B/C: nền KEM + chữ nâu. Nhóm con: nền XANH + chữ xanh. Khớp web,
           // theo yêu cầu khách (hoán đổi so với trước). STT/Ghi Chú của nhóm con để trắng.
-          fill: bareSubCell ? "none" : (isSubSection ? "FFEAF1FB" : "FFFCEFDB"),
+          fill: bareSubCell ? "none" : (isSubSection ? "FFC9D9EF" : "FFFAE9DB"),
           bold: true,
           fontColor: isSubSection ? "FF1F4E79" : "FF9A5B14",
         });

@@ -531,14 +531,14 @@ th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color:
 /* Section (nhóm A/B/C) row — ONE uniform colour across the whole row, including the
    "Thành Tiền" cell (which is hard-coded white above). Bold blue text for the group. */
 /* Nhóm chính A/B/C: nền KEM + chữ nâu (theo yêu cầu khách). */
-.excel-table tr.section-row td { background: #fcefdb; }
+.excel-table tr.section-row td { background: #fae9db; }
 .excel-table tr.section-row input { background: transparent; font-weight: 700; color: #9a5b14; }
 .excel-table tr.section-row td.col-price,
 .excel-table tr.section-row td.col-amount { text-align: right; font-weight: 700; color: #9a5b14; }
 .excel-table tr.section-row td.col-notes textarea { background: transparent; font-style: italic; color: #9a5b14; }
 /* Nhóm con (subsection): nền XANH + chữ xanh — KHÁC nhóm chính (kem). Phân biệt bằng
    màu + thụt lề (đã bỏ dấu ↳ cho đỡ rối). Tổng riêng, không cộng vào nhóm chính. */
-.excel-table tr.subgroup-row td { background: #eaf1fb; }
+.excel-table tr.subgroup-row td { background: #c9d9ef; }
 .excel-table tr.subgroup-row td.col-hangmuc { padding-left: 20px; }
 .excel-table tr.subgroup-row input,
 .excel-table tr.subgroup-row td.col-hangmuc textarea,
