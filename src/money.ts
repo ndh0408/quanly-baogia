@@ -12,10 +12,10 @@ export function D(v: Prisma.Decimal.Value | null | undefined) {
   return new Decimal(v);
 }
 
-/** CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Cho code dùng number (quoteUtils/excel). */
-export function trunc2(x: unknown) {
+/** LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). Cho code dùng number (quoteUtils/excel). */
+export function qtyRound(x: unknown) {
   const n = Number(x) || 0;
-  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT
+  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số, khớp ROUND_HALF_UP
   return n < 0 ? -t : t;
 }
 
@@ -58,8 +58,8 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)
-      // Số Lượng CẮT còn 2 số (ROUND_DOWN = cắt, không làm tròn) — khớp hiển thị + Excel TRUNC.
-      const qty = D(it.quantity).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+      // Số Lượng LÀM TRÒN còn 1 số (ROUND_HALF_UP) — khớp hiển thị + Excel ROUND + client qtyRound.
+      const qty = D(it.quantity).toDecimalPlaces(1, Decimal.ROUND_HALF_UP);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
       // Thành Tiền 1 dòng làm tròn số nguyên (khớp hiển thị + Excel) RỒI mới nhân hệ số nhóm

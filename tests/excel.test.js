@@ -198,27 +198,27 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(foundSub).toBe(true);
   });
 
-  // Số Lượng CẮT 2 số (TRUNC) trong Excel — vẫn GIỮ công thức (bọc TRUNC); Thành Tiền theo số đã cắt.
-  it("Số Lượng cắt 2 số (TRUNC) + giữ công thức + Thành Tiền theo số đã cắt", async () => {
+  // Số Lượng LÀM TRÒN 1 số (ROUND) trong Excel — vẫn GIỮ công thức (bọc ROUND); Thành Tiền theo số đã tròn.
+  it("Số Lượng làm tròn 1 số (ROUND) + giữ công thức + Thành Tiền theo số đã tròn", async () => {
     const q = makeQuote("marico_decor");   // F=Số Lượng, G=Đơn Giá, H=Thành Tiền, firstRow=12
     q.sheets[0].items = [
-      // qty có công thức =2.75*2.05 (=5.6375) → CẮT 5,63, ô GIỮ công thức (bọc TRUNC)
+      // qty có công thức =2.75*2.05 (=5.6375) → làm tròn 5,6, ô GIỮ công thức (bọc ROUND)
       { kind: "item", name: "A", detail: "", unit: "m2", quantity: 5.6375, unitPrice: 100000, days: null, notes: "", formulas: { quantity: "=2.75*2.05" } },
-      // qty thường 7.621 → cắt 7,62 (không công thức)
+      // qty thường 7.621 → làm tròn 7,6 (không công thức)
       { kind: "item", name: "B", detail: "", unit: "m2", quantity: 7.621, unitPrice: 100000, days: null, notes: "" },
     ];
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
     const ws = wb.worksheets[0];
-    // Số Lượng: ô có công thức → bọc TRUNC (vẫn hiện công thức), giá trị cắt còn 2 số
-    expect(ws.getCell("F12").formula).toBe("TRUNC(2.75*2.05,2)");
-    expect(Number(ws.getCell("F12").result)).toBe(5.63);
-    // Số Lượng thường → ghi thẳng số đã cắt, không phải công thức
+    // Số Lượng: ô có công thức → bọc ROUND (vẫn hiện công thức), giá trị làm tròn 1 số
+    expect(ws.getCell("F12").formula).toBe("ROUND(2.75*2.05,1)");
+    expect(Number(ws.getCell("F12").result)).toBe(5.6);
+    // Số Lượng thường → ghi thẳng số đã làm tròn, không phải công thức
     expect(ws.getCell("F13").formula).toBeUndefined();
-    expect(Number(ws.getCell("F13").value)).toBe(7.62);
-    // Thành Tiền = ROUND(Đơn Giá × Số Lượng-đã-cắt): 100000×5,63=563000 ; 100000×7,62=762000
-    expect(Number(ws.getCell("H12").result)).toBe(563000);
-    expect(Number(ws.getCell("H13").result)).toBe(762000);
+    expect(Number(ws.getCell("F13").value)).toBe(7.6);
+    // Thành Tiền = ROUND(Đơn Giá × Số Lượng-đã-tròn): 100000×5,6=560000 ; 100000×7,6=760000
+    expect(Number(ws.getCell("H12").result)).toBe(560000);
+    expect(Number(ws.getCell("H13").result)).toBe(760000);
   });
 
   // AN TOÀN: nếu giá trị đã lưu LỆCH với công thức (vd dữ liệu cũ chưa tính lại) → ghi
@@ -235,9 +235,9 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(Number(ws.getCell("G12").value)).toBe(999_999);
   });
 
-  // BUG cũ: Số Lượng lẻ (vd 7,70) ở hàng NHÂN BẢN (quá 10 mục → duplicateRow) bị in ra "8"
-  // vì numFmt "0.00" không "ăn" trên hàng nhân bản (style dùng chung). Phải vẫn là "0.00".
-  it("Số Lượng lẻ ở hàng nhân bản (>10 mục) vẫn định dạng 2 số (không làm tròn hiển thị)", async () => {
+  // BUG cũ: Số Lượng lẻ (vd 7,7) ở hàng NHÂN BẢN (quá 10 mục → duplicateRow) bị in ra "8"
+  // vì numFmt không "ăn" trên hàng nhân bản (style dùng chung). Phải vẫn là "0.0" (1 số lẻ).
+  it("Số Lượng lẻ ở hàng nhân bản (>10 mục) vẫn định dạng 1 số (không làm tròn lên nguyên)", async () => {
     const q = makeQuote("marico_decor");
     const items = [];
     for (let i = 1; i <= 13; i++) items.push({ kind: "item", name: "MUC" + i, detail: "", unit: "m2", quantity: (i === 12 ? 7.7 : 3), unitPrice: 95000, days: null, notes: "" });
@@ -248,7 +248,7 @@ describe("buildQuoteBuffer (export generation)", () => {
     let rn = null; ws.eachRow((row, n) => { if (String(row.getCell("C").value ?? "").includes("MUC12")) rn = n; });
     expect(rn).not.toBeNull();
     expect(rn).toBeGreaterThan(21);                  // MUC12 nằm ở hàng nhân bản (sau slot mẫu 12–21)
-    expect(ws.getCell("F" + rn).numFmt).toBe("0.00"); // vẫn 2 số → hiện "7.70" chứ không "8"
+    expect(ws.getCell("F" + rn).numFmt).toBe("0.0"); // vẫn 1 số → hiện "7.7" chứ không "8"
     expect(Number(ws.getCell("F" + rn).value)).toBe(7.7);
   });
 

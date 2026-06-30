@@ -21,7 +21,7 @@ export function extraTableSum(t: ExtraTable): number {
   return (t?.items || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
-    const qty = M.trunc2(it.quantity || 0), price = Number(it.unitPrice) || 0;
+    const qty = M.qtyRound(it.quantity || 0), price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);
   }, 0);

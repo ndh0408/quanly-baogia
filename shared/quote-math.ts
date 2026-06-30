@@ -20,15 +20,16 @@ export type Company = { id: number; name: string; shortName?: string; address?: 
 export const fmtMoney = (n?: number | null) => (n == null || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("vi-VN"));
 export const roundVnd = (n: number) => Math.round(Number(n) || 0);
 
-// CẮT 2 số thập phân (KHÔNG làm tròn) — khớp Decimal ROUND_DOWN của server.
-export function trunc2(x: number) {
+// LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). +1e-6 khử nhiễu float để 5,65→5,7
+// khớp Decimal ROUND_HALF_UP(1) của server. 1 nguồn cho hiển thị Số Lượng lẫn tính Thành Tiền.
+export function qtyRound(x: number) {
   const n = Number(x) || 0;
-  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;
+  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
   return n < 0 ? -t : t;
 }
-// Thành Tiền 1 dòng = SL(cắt2) × (Ngày) × Đơn Giá, làm tròn VNĐ. 1 nguồn cho dòng/nhóm/tổng/Excel.
+// Thành Tiền 1 dòng = SL(làm tròn 1 số) × (Ngày) × Đơn Giá, làm tròn VNĐ. 1 nguồn cho dòng/nhóm/tổng/Excel.
 export function lineAmount(it: Item, usesDays: boolean) {
-  const q = trunc2(it.quantity || 0), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
+  const q = qtyRound(it.quantity || 0), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
   return Math.round(usesDays ? q * d * p : q * p);
 }
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
@@ -57,12 +58,12 @@ export function groupLetter(n: number) {
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
   return s;
 }
-// Ô số: dấu chấm nghìn VN, RỖNG khi 0 (tránh ô đầy "0"); phần lẻ hiện đúng 2 số.
+// Ô số: dấu chấm nghìn VN, RỖNG khi 0 (tránh ô đầy "0"); Số Lượng làm tròn 1 chữ số thập phân (7,4).
 export function fmtNumCell(v?: number | string) {
-  const t = trunc2(Number(v) || 0);
+  const t = qtyRound(Number(v) || 0);
   if (!t || isNaN(t)) return "";
   if (Number.isInteger(t)) return t.toLocaleString("vi-VN");
-  const [intp, dec] = Math.abs(t).toFixed(2).split(".");
+  const [intp, dec] = Math.abs(t).toFixed(1).split(".");
   const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
   return t < 0 ? "-" + out : out;
 }

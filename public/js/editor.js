@@ -9,7 +9,7 @@
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles } from "../grid-clipboard.js?v=20260630j";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260624b";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630k";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
@@ -677,7 +677,7 @@ export function extraTableSumLocal(t) {
   return ((t && t.items) || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
-    const qty = trunc2(it.quantity), price = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số (khớp hiển thị + server)
+    const qty = qtyRound(it.quantity), price = Number(it.unitPrice) || 0;   // Số Lượng làm tròn 1 số (khớp hiển thị + server)
     const days = it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
@@ -852,11 +852,11 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
   const fmtNumCell = (v) => {
-    const t = trunc2(v);   // CẮT 2 số (cùng hàm với lúc tính tiền → hiển thị KHỚP giá trị dùng để tính)
+    const t = qtyRound(v);   // làm tròn 1 số (cùng hàm với lúc tính tiền → hiển thị KHỚP giá trị dùng để tính)
     if (!t || isNaN(t)) return "";                       // 0 / rỗng → ô trống
-    if (Number.isInteger(t)) return t.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,00
-    // Có phần lẻ → hiện ĐÚNG 2 số (pad): 5,997→5,99 · 3,2→3,20. t đã ≤2 lẻ nên toFixed(2) chính xác.
-    const [intp, dec] = Math.abs(t).toFixed(2).split(".");
+    if (Number.isInteger(t)) return t.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,0
+    // Có phần lẻ → hiện ĐÚNG 1 số: 7,378→7,4 · 6,42→6,4. t đã làm tròn 1 lẻ nên toFixed(1) chính xác.
+    const [intp, dec] = Math.abs(t).toFixed(1).split(".");
     const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
     return t < 0 ? "-" + out : out;
   };

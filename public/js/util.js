@@ -50,15 +50,15 @@ export function safeLogoSrc(s) {
 export function pvRowspan(rk, i) { let s = 1, j = i + 1; while (j < rk.length && rk[j] === "sub") { s++; j++; } return s; }
 // Thành Tiền 1 dòng = Số Lượng × (Số Ngày) × Đơn Giá, LÀM TRÒN về số nguyên (VNĐ không
 // có hào). 1 nguồn duy nhất để dòng/nhóm/tổng/Excel đều khớp (dòng cộng lại = tổng).
-// CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Chuỗi toFixed(4) khử nhiễu
-// float (giá trị gốc tối đa 4 lẻ). 1 nguồn cho cả hiển thị Số Lượng lẫn tính Thành Tiền.
-export function trunc2(x) {
+// LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). +1e-6 khử nhiễu float (5,65→5,7)
+// khớp Decimal ROUND_HALF_UP(1) của server. 1 nguồn cho cả hiển thị Số Lượng lẫn tính Thành Tiền.
+export function qtyRound(x) {
   const n = Number(x) || 0;
-  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn); khớp Decimal ROUND_DOWN
+  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số, khớp ROUND_HALF_UP server
   return n < 0 ? -t : t;
 }
 export function lineAmount(it, usesDays) {
-  const q = trunc2(it.quantity), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;   // Số Lượng CẮT 2 số rồi mới × giá
+  const q = qtyRound(it.quantity), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;   // Số Lượng làm tròn 1 số rồi mới × giá
   return Math.round(usesDays ? q * d * p : q * p);
 }
 export function pvAmount(it, usesDays) {

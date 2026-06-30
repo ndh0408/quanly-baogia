@@ -1,7 +1,7 @@
 // SPA quản lý báo giá - multi-sheet, multi-template
 import {
   escapeHtml, statusLabel, ROLE_LABEL,
-} from "./js/util.js?v=20260624b";
+} from "./js/util.js?v=20260630k";
 // Shared state + state-core helpers (step 2): `state` is a live-binding singleton —
 // mutate `state.foo`, never reassign `state`. can/landingPage gate UI only.
 import {
@@ -29,7 +29,7 @@ import {
 // setQuoteDeps call keeps feeding them to quotes.js; shell helpers injected via setEditorDeps.
 import {
   setEditorDeps, renderEditor, drawItems, gridHeadHtml, newExtraGrid, extraTableSumLocal,
-} from "./js/editor.js?v=20260630j";
+} from "./js/editor.js?v=20260630k";
 
 const app = document.getElementById("app");
 setUnauthorizedHandler(() => render());

@@ -5,7 +5,7 @@
 import {
   fmtMoney, fmtDate, fmtDateTime, escapeHtml, statusLabel,
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
-} from "../util.js?v=20260624b";
+} from "../util.js?v=20260630k";
 import { state, can } from "../core/state.js?v=20260624b";
 import { api } from "../core/api.js?v=20260624b";
 import {

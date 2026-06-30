@@ -9,10 +9,10 @@ import { buildFormulaContext } from "./quoteFormula.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
-// CẮT số về 2 chữ số thập phân — KHÔNG làm tròn (5,6375→5,63). Khớp util.js (web) + money.js (ROUND_DOWN).
-function trunc2(x: any) {
+// LÀM TRÒN Số Lượng về 1 chữ số thập phân (7,378→7,4; 6,42→6,4). Khớp util.js (web) + money.js (ROUND_HALF_UP).
+function qtyRound(x: any) {
   const n = Number(x) || 0;
-  const t = Math.trunc(Math.abs(n) * 100 + 1e-6) / 100;   // +1e-6 khử nhiễu float, vẫn CẮT (không làm tròn)
+  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số
   return n < 0 ? -t : t;
 }
 
@@ -382,7 +382,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i] && cur >= 0) {
         const it = items[i];
         const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        sectionSum[cur] += Math.round(cols.days ? trunc2(qty) * days * price : trunc2(qty) * price);   // SL cắt 2 số, Thành Tiền làm tròn
+        sectionSum[cur] += Math.round(cols.days ? qtyRound(qty) * days * price : qtyRound(qty) * price);   // SL làm tròn 1 số, Thành Tiền làm tròn
       }
     }
   }
@@ -518,10 +518,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const price = Number(it.unitPrice) || 0;
       let amt;
       if (cols.days) {
-        amt = price * trunc2(qty) * days;   // Số Lượng CẮT 2 số trước khi × giá
+        amt = price * qtyRound(qty) * days;   // Số Lượng làm tròn 1 số trước khi × giá
         putNum(it, r, "days", cols.days, days);
       } else {
-        amt = price * trunc2(qty);
+        amt = price * qtyRound(qty);
       }
       amt = Math.round(amt);   // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng)
       subtotal += amt * mult;
@@ -545,20 +545,20 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         ensureWrap(ws.getCell(`${cols.detail}${r}`));
       }
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
-      // Số Lượng: CẮT còn 2 số (TRUNC) — vẫn GIỮ công thức người dùng (bọc TRUNC) để khách thấy;
-      // số khớp Thành Tiền (=ROUND(SL×ĐG)). Số chẵn → không lẻ ("0"); có lẻ → đúng 2 số ("0.00").
+      // Số Lượng: LÀM TRÒN còn 1 số (ROUND) — vẫn GIỮ công thức người dùng (bọc ROUND) để khách thấy;
+      // số khớp Thành Tiền (=ROUND(SL×ĐG)). Số chẵn → không lẻ ("0"); có lẻ → đúng 1 số ("0.0").
       if (cols.quantity) {
-        const qT = trunc2(qty);
+        const qT = qtyRound(qty);
         const rawQ = it.formulas && it.formulas.quantity;
         const fxQ = rawQ ? fctx.cellFormula(rawQ, qty) : null;
         const qCell = ws.getCell(`${cols.quantity}${r}`);
-        if (fxQ) qCell.value = { formula: `TRUNC(${fxQ},2)`, result: qT };
+        if (fxQ) qCell.value = { formula: `ROUND(${fxQ},1)`, result: qT };
         else qCell.value = qT;
-        // Định dạng hiển thị: số chẵn → "0" (không lẻ); có lẻ → "0.00" (đúng 2 số). PHẢI gán qua
+        // Định dạng hiển thị: số chẵn → "0" (không lẻ); có lẻ → "0.0" (đúng 1 số). PHẢI gán qua
         // bản sao style (giống paintCell) — gán cell.numFmt trực tiếp KHÔNG "ăn" trên hàng được
         // duplicateRow nhân bản (style dùng chung) → trước đây 7,70 in ra 8 ở các dòng phía sau.
         const qSt = qCell.style ? JSON.parse(JSON.stringify(qCell.style)) : {};
-        qSt.numFmt = Number.isInteger(qT) ? "0" : "0.00";
+        qSt.numFmt = Number.isInteger(qT) ? "0" : "0.0";
         qCell.style = qSt;
       }
       putNum(it, r, "unitPrice", cols.unitPrice, price);
