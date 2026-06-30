@@ -634,6 +634,10 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .extra-cat-total strong { font-variant-numeric: tabular-nums; }
 .extra-cat-group .extra-sheet-tabs { margin-top: 8px; border-bottom: none; min-height: 0; }
 .extra-cat-group .sheet-tab { border-bottom: 1px solid #d8dbe3; }
+/* Loại ĐANG CHỌN (chứa sheet đang sửa) nổi bật + lưới nằm NGAY trong loại → rõ "đang ở đâu". */
+.extra-cat-group.is-active { border-color: #f5b400; box-shadow: 0 0 0 1px #f5b400, 0 3px 14px rgba(245, 180, 0, .16); background: var(--surface, #fff); }
+.extra-table-inline { border: none; background: transparent; padding: 0; margin: 8px 0 2px; border-top: 1px dashed #f0c674; padding-top: 10px; }
+.extra-here { font-size: 12px; font-weight: 700; color: #8a5a00; background: #fff3d6; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
 .extra-grid .ex-amount, .extra-grid .ex-total { font-variant-numeric: tabular-nums; }
 .extra-grid .ex-amount { text-align: right; }
 .extra-grid .ex-stt { text-align: center; }

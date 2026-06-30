@@ -10,7 +10,6 @@ import { toast } from "./ui";
 // nhưng KHÔNG xuất Excel. Tổng từng loại đổ riêng sang "Quản lý dự án" (HCM/Phí-KH chỉ cộng hàng ĐÃ DUYỆT).
 
 const EXTRA_CATS: [string, string][] = [["hcm", "Chi Phí HCM"], ["hanoi", "Báo Giá Hà Nội"], ["khach", "Phí Khách Hàng"]];
-const extraCatLabel = (c: string) => ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà Nội", khach: "Phí Khách Hàng" } as Record<string, string>)[c] || c;
 
 export type ExtraTable = { category: string; templateId?: number; name?: string; groupSubtotal?: boolean; items: ItemK[]; _k?: number };
 type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; templateId?: number };
@@ -81,43 +80,47 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
         <div className="extra-cat-groups">
           {EXTRA_CATS.map(([cat, label]) => {
             const idxs: number[] = []; tables.forEach((x, i) => { if (x?.category === cat) idxs.push(i); });
+            const hasActive = t != null && idxs.includes(active);   // sheet ĐANG sửa thuộc loại này?
             return (
-              <div key={cat} className="extra-cat-group">
+              <div key={cat} className={`extra-cat-group${hasActive ? " is-active" : ""}`}>
                 <div className="extra-cat-grouphead">
                   <span className={`extra-cat-badge cat-${cat}`}>{label}</span>
                   <span className="extra-cat-total" data-cat={cat}>Tổng: <strong>{M.fmtMoney(catTotal(cat))}</strong> <span className="muted">→ Quản lý dự án</span></span>
                   {editable && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
                   <span className="muted" style={{ fontSize: 11.5 }}>{idxs.length} sheet</span>
                 </div>
-                <div className="sheet-tabs extra-sheet-tabs">
-                  {idxs.length ? idxs.map((i) => (
-                    <div key={tables[i]._k ?? i} className={`sheet-tab ${i === active ? "active" : ""}`} title={label} onClick={() => { sheet._activeExtra = i; redraw(); }}>
-                      <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
-                      {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); removeTable(i); }}>✕</span>}
+                {idxs.length > 0 && (
+                  <div className="sheet-tabs extra-sheet-tabs">
+                    {idxs.map((i) => (
+                      <div key={tables[i]._k ?? i} className={`sheet-tab ${i === active ? "active" : ""}`} title={label} onClick={() => { sheet._activeExtra = i; redraw(); }}>
+                        <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
+                        {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); removeTable(i); }}>✕</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Lưới nằm NGAY TRONG loại đang chọn (dưới tab của nó) → rõ "đang ở đâu". */}
+                {hasActive && t && (
+                  <div className="extra-table extra-table-inline">
+                    <div className="extra-table-head">
+                      <span className="extra-here">✎ Đang sửa sheet này</span>
+                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
+                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
-                  )) : <span className="muted" style={{ fontSize: 12, padding: "3px 2px" }}>(chưa có — bấm “+ Thêm sheet”)</span>}
-                </div>
+                    <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
+                      usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
+                      approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
+                      payCol canPay={!!canPay && !!quoteId}
+                      onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
+                      groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-
-        {t ? (
-          <div className="extra-table">
-            <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
-              <span className={`extra-cat-badge cat-${t.category}`}>{extraCatLabel(t.category)}</span>
-              {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
-              <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 180 }} />
-              {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
-            </div>
-            <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
-              usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
-              approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
-              payCol canPay={!!canPay && !!quoteId}
-              onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
-              groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
-          </div>
-        ) : <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>}
+        {tables.length === 0 && <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>}
       </div>
       {payRow && quoteId && sheet.id != null && (
         <ExtraPayDialog quoteId={quoteId} sheetId={sheet.id} item={payRow}
