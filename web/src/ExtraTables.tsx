@@ -103,7 +103,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                 {hasActive && t && (
                   <div className="extra-table extra-table-inline">
                     <div className="extra-table-head">
-                      <span className="extra-here">✎ Đang sửa sheet này</span>
+                      <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
                       <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
                       {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
                       {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}

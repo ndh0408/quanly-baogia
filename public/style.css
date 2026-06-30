@@ -636,8 +636,14 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 .extra-cat-group .sheet-tab { border-bottom: 1px solid #d8dbe3; }
 /* Loại ĐANG CHỌN (chứa sheet đang sửa) nổi bật + lưới nằm NGAY trong loại → rõ "đang ở đâu". */
 .extra-cat-group.is-active { border-color: #f5b400; box-shadow: 0 0 0 1px #f5b400, 0 3px 14px rgba(245, 180, 0, .16); background: var(--surface, #fff); }
+/* Loại ĐANG CHỌN: badge tên loại TO + ĐẬM + bóng → đập vào mắt biết đang ở phần nào. */
+.extra-cat-group.is-active .extra-cat-grouphead .extra-cat-badge { font-size: 14.5px; padding: 6px 16px; box-shadow: 0 1px 6px rgba(0, 0, 0, .14); }
 .extra-table-inline { border: none; background: transparent; padding: 0; margin: 8px 0 2px; border-top: 1px dashed #f0c674; padding-top: 10px; }
-.extra-here { font-size: 12px; font-weight: 700; color: #8a5a00; background: #fff3d6; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
+/* Nhãn "Đang ở: <loại>" đầu lưới — tô màu THEO loại (xanh HCM / lá HN / vàng KH). */
+.extra-here { font-size: 13px; font-weight: 800; padding: 4px 13px; border-radius: 999px; white-space: nowrap; letter-spacing: .2px; }
+.extra-here.cat-hcm { background: #e7f0ff; color: #1f4e79; }
+.extra-here.cat-hanoi { background: #e3f5e8; color: #1f7a3d; }
+.extra-here.cat-khach { background: #fff3d6; color: #8a5a00; }
 .extra-grid .ex-amount, .extra-grid .ex-total { font-variant-numeric: tabular-nums; }
 .extra-grid .ex-amount { text-align: right; }
 .extra-grid .ex-stt { text-align: center; }
