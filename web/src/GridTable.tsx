@@ -3,7 +3,7 @@ import { toast } from "./ui";
 import * as M from "./quoteMath";
 import { evalFormula, type FormulaRefs } from "./formula";
 import { type ItemK, nextK, autoGrow } from "./gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "./clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles } from "./clipboard";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -320,7 +320,10 @@ export function GridTable(props: GridTableProps) {
     if (!text && !internal) return;
     const sameBlock = !!(internal && copyBufRef.current && internal.token === copyBufRef.current.token);
     const rows = parseClipboardTSV(sameBlock ? copyBufRef.current!.tsv : text);
-    if (rows.length > 1 && String(rows[0]?.[0] ?? "").trim().toUpperCase() === "STT") rows.splice(0, 1);   // user copy LUÔN hàng tiêu đề cột ("STT|Hạng Mục|…") → bỏ, kẻo lệch
+    // Nếu user copy LUÔN hàng tiêu đề ("STT|Hạng Mục|…") → đọc nó để MAP cột theo file nguồn (dán
+    // đúng dù sheet đích khác template, vd nguồn KHÔNG ngày dán vào sheet CÓ ngày), rồi bỏ hàng đó.
+    let hdrRoles: string[] | null = null;
+    if (rows.length > 1 && isHeaderRow(rows[0])) { hdrRoles = headerToRoles(rows[0]); rows.splice(0, 1); }
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
 
     // 1 giá trị đơn lẻ.
@@ -347,8 +350,8 @@ export function GridTable(props: GridTableProps) {
     e.preventDefault(); pushUndo();
 
     // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
-    if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
-      const roles = ADDR.map((c) => c.f);
+    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, FIELDS.length))) {
+      const roles = hdrRoles || ADDR.map((c) => c.f);
       const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
       items.splice(startRow, rows.length, ...built);
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }

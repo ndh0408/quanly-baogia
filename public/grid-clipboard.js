@@ -112,14 +112,15 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
     const stt = cell(row, sttI).trim();
     const name = cell(row, nameI);
     const hasItemData = cell(row, unitI).trim() !== "" || cell(row, qtyI).trim() !== "";
+    const hasUnit = cell(row, unitI).trim() !== "";
     const priceRaw = cell(row, priceI).trim();
     // Giá là công thức ("=…") cũng tính là CÓ giá (parseLooseNumber không đọc nổi công thức).
     const hasPrice = priceRaw !== "" && (priceRaw.startsWith("=") || parseLooseNumber(priceRaw) !== 0);
     let kind;
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
-    else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER: nhóm con đánh SỐ (1,2,3)
-    else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";
-    else if (!numberSubs && stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";   // mẫu thường: nhóm con STT rỗng
+    else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER (template đích=banner): nhóm con đánh SỐ
+    else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";   // hàng con (nối, không tên)
+    else if (name.trim() !== "" && !hasUnit && hasPrice) kind = "subsection";   // NHÓM CON theo DATA: có TÊN + GIÁ nhưng KHÔNG ĐVT — bắt được dù dán vào template đích khác
     else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
     else kind = "item";
     const it = { kind };
@@ -148,6 +149,21 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
   }
   return out;
 }
+
+// Map cột THEO HÀNG TIÊU ĐỀ file Excel nguồn (STT|Hạng Mục|…) → dán đúng dù sheet đích khác template
+// (vd nguồn KHÔNG ngày, đích CÓ ngày): cột "Đơn Giá" vẫn vào unitPrice, không lệch sang "Số Ngày".
+const HEADER_ROLE = {
+  "STT": "_stt", "HANG MUC": "name", "CHI TIET": "detail", "DVT": "unit",
+  "SO LUONG": "quantity", "SO NGAY": "days", "DON GIA": "unitPrice",
+  "THANH TIEN": "_amount", "GHI CHU": "notes", "NOTES": "notes", "GHI CHU NOI BO": "internalNote",
+};
+function normHdr(s) {
+  return String(s || "").replace(/\([^)]*\)/g, " ").replace(/[\r\n]+/g, " ")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d")
+    .toUpperCase().replace(/[^A-Z ]/g, "").replace(/\s+/g, " ").trim();
+}
+export function isHeaderRow(row) { return !!row && normHdr(row[0] || "") === "STT"; }
+export function headerToRoles(row) { return row.map((h) => HEADER_ROLE[normHdr(h)] || ""); }
 
 // Có nên coi khối dán là "bảng báo giá app xuất ra" (gồm cột STT) để dựng lại cấu trúc?
 // An toàn: chỉ khi dán từ cột đầu, cột STT toàn dạng STT (chữ đơn / số / trống) và hoặc có

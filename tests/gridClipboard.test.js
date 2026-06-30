@@ -7,6 +7,8 @@ import {
   parseLooseNumber,
   reconstructExportRows,
   looksLikeExportPaste,
+  isHeaderRow,
+  headerToRoles,
 } from "../public/grid-clipboard.js";
 
 // GN template export columns (no days, has Chi Tiết), as copied B:H (STT..Thành Tiền)
@@ -225,5 +227,27 @@ describe("parseLooseNumber", () => {
     expect(parseLooseNumber(" 95.000 ₫ ")).toBe(95000);
     expect(parseLooseNumber("")).toBe(0);
     expect(parseLooseNumber("abc")).toBe(0);
+  });
+});
+
+describe("header-based mapping — copy CÓ hàng tiêu đề, dán vào template KHÁC cột", () => {
+  const header = ["STT", "Hạng Mục", "Chi Tiết", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ (VNĐ)", "THÀNH TIỀN (VNĐ)", "Notes"];
+  it("isHeaderRow nhận hàng tiêu đề; headerToRoles map đúng cột", () => {
+    expect(isHeaderRow(header)).toBe(true);
+    expect(headerToRoles(header)).toEqual(["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount", "notes"]);
+    expect(isHeaderRow(["A", "HCM"])).toBe(false);
+  });
+  it("dựng đúng dù dán banner (không ngày) — đơn giá KHÔNG lệch + nhóm con nhận theo data", () => {
+    const rows = [
+      ["A", "HCM", "", "", "", "549375", "", ""],
+      ["1", "CGV Kim Cúc", "", "", "", "549375", "549375", ""],   // STT số, KHÔNG ĐVT → nhóm con (data-driven)
+      ["", "Decal", "Decal in KTS", "m2", "1.89", "105000", "198450", ""],
+    ];
+    const built = reconstructExportRows(rows, headerToRoles(header), new Set(["quantity", "unitPrice", "days"]));
+    expect(built[0].kind).toBe("section");
+    expect(built[1].kind).toBe("subsection");   // nhận đúng dù KHÔNG truyền numberSubs
+    expect(built[2].kind).toBe("item");
+    expect(built[2].unitPrice).toBe(105000);    // ĐƠN GIÁ → unitPrice, không lệch sang cột khác
+    expect(built[2].quantity).toBeCloseTo(1.89);
   });
 });

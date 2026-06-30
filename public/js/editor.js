@@ -8,7 +8,7 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260630e";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles } from "../grid-clipboard.js?v=20260630h";
 import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260624b";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
@@ -1916,7 +1916,10 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const text = cd.getData("text/plain") || cd.getData("text") || "";
     if (!text && !internal) return;
     const rows = parseClipboardTSV(internal ? internal.tsv : text);
-    if (rows.length > 1 && String((rows[0] && rows[0][0]) || "").trim().toUpperCase() === "STT") rows.splice(0, 1);   // user copy LUÔN hàng tiêu đề cột ("STT|Hạng Mục|…") → bỏ, kẻo lệch
+    // User copy LUÔN hàng tiêu đề ("STT|Hạng Mục|…") → đọc nó để MAP cột theo file nguồn (dán đúng dù
+    // sheet đích khác template), rồi bỏ hàng đó.
+    let hdrRoles = null;
+    if (rows.length > 1 && isHeaderRow(rows[0])) { hdrRoles = headerToRoles(rows[0]); rows.splice(0, 1); }
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
 
     // 1 giá trị đơn lẻ
@@ -1946,9 +1949,9 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     // DÁN NGUYÊN BÁO GIÁ từ Excel (file app xuất ra, có cột STT) → DỰNG LẠI nhóm lớn /
     // nhóm con / hàng con / dòng thông tin / item cho đúng (không lệch cột, nhận diện nhóm).
     // Chỉ khi KHÔNG phải copy nội bộ (copy nội bộ đã có token khôi phục kind chính xác hơn).
-    if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
+    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, FIELDS.length))) {
       e.preventDefault(); pushUndo();
-      const roles = ADDR_COLS.map((c) => c.field);
+      const roles = hdrRoles || ADDR_COLS.map((c) => c.field);
       const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((it) => ({ ...blank(), ...it }));
       activeSheet.items.splice(startRow, rows.length, ...built);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
