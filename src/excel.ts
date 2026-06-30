@@ -493,7 +493,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         paintCell(ws.getCell(`${col}${r}`), {
           // Nhóm chính A/B/C: nền KEM + chữ nâu. Nhóm con: nền XANH + chữ xanh. Khớp web,
           // theo yêu cầu khách (hoán đổi so với trước). STT/Ghi Chú của nhóm con để trắng.
-          fill: bareSubCell ? "none" : (isSubSection ? "FFC9D9EF" : "FFFAE9DB"),
+          fill: bareSubCell ? "none" : (isSubSection ? (itemsCfg.subFill || "FFC9D9EF") : (itemsCfg.sectionFill || "FFFAE9DB")),
           bold: true,
           fontColor: isSubSection ? "FF1F4E79" : "FF9A5B14",
         });
@@ -983,6 +983,9 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
   ws.getCell("A2").font = { name: "Times New Roman", family: 1, size: 11, italic: true };
   ws.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
 
+  // Màu header sheet Tổng theo công ty: Gia Nguyễn = #f3c9a1 (mới); Colorfull (clofull) = peach cũ.
+  const isClf = (quote.sheets || []).some((s: any) => String(s.template?.code || s.templateCode || "").startsWith("clofull"));
+  const sumHeaderFill = isClf ? "FFFFCC99" : "FFF3C9A1";
   const headerRow = 4;
   const headers = ["STT", "Hạng mục", "Thành tiền (VNĐ)"];
   headers.forEach((h: any, i: any) => {
@@ -990,7 +993,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     cell.value = h;
     cell.font = { name: "Times New Roman", family: 1, size: 11, bold: true };
     cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: sumHeaderFill } };
     cell.border = {
       top: { style: "medium" }, bottom: { style: "thin" },
       left: { style: i === 0 ? "medium" : "thin" },
@@ -1040,7 +1043,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     lblCell.value = tr.label;
     lblCell.font = { name: "Times New Roman", family: 1, size: 11, bold: true };
     lblCell.alignment = { horizontal: "center", vertical: "middle" };
-    lblCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
+    lblCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: sumHeaderFill } };
     lblCell.border = {
       top: { style: "thin" },
       bottom: { style: i === totalRows.length - 1 ? "medium" : "thin" },
@@ -1051,7 +1054,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     valCell.numFmt = "#,##0";
     valCell.font = { name: "Times New Roman", family: 1, size: 11, bold: true, color: { argb: "FFC00000" } };
     valCell.alignment = { horizontal: "right", vertical: "middle" };
-    valCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
+    valCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: sumHeaderFill } };
     valCell.border = {
       top: { style: "thin" },
       bottom: { style: i === totalRows.length - 1 ? "medium" : "thin" },

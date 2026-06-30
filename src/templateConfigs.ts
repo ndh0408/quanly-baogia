@@ -174,7 +174,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     footerMerges: ["C17:D17"],
     items: {
       firstRow: 6,
-      headerRow: 4,    // hàng tiêu đề cột → đổi nền qua code
+      // Colorfull (CLF): GIỮ màu cũ — KHÔNG dùng màu Gia Nguyễn. Header để baked (không repaint),
+      // nền nhóm dùng màu cũ #fcefdb/#eaf1fb.
+      sectionFill: "FFFCEFDB", subFill: "FFEAF1FB",
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
       columns: {
