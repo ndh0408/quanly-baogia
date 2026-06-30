@@ -536,8 +536,22 @@ export function GridTable(props: GridTableProps) {
 
   // ── derived ───────────────────────────────────────────────────────────────────
   const rk = M.computeRowKinds(items);
+  // Tổng theo nhóm. Nhóm con = Σ mục con. Bản BANNER (numberSubs): nhóm CHA = Σ TẤT CẢ mục con (cuộn
+  // qua các nhóm con) → "đơn giá hàng cha = tổng hàng con". Mẫu khác giữ cũ (nhóm con tổng riêng).
   const sectionSum: Record<number, number> = {};
-  { let cur = -1; for (let i = 0; i < items.length; i++) { if (rk[i] === "section") { cur = i; sectionSum[i] = 0; } else if ((rk[i] === "head" || rk[i] === "sub") && cur >= 0) sectionSum[cur] += M.lineAmount(items[i], usesDays); } }
+  { let curSection = -1, curSub = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (rk[i] === "section") {
+        if (items[i].kind === "subsection") { curSub = i; sectionSum[i] = 0; }
+        else { curSection = i; curSub = -1; sectionSum[i] = 0; }
+      } else if (rk[i] === "head" || rk[i] === "sub") {
+        const amt = M.lineAmount(items[i], usesDays);
+        const parent = curSub >= 0 ? curSub : curSection;
+        if (parent >= 0) sectionSum[parent] += amt;
+        if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
+      }
+    }
+  }
   const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   let sttNo = 0, sectionIdx = -1, subNo = 0;

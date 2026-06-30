@@ -918,13 +918,19 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + (internalNoteCol ? 1 : 0) + (approveCol ? 1 : 0);
   const sectionColspan = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   // Per-section subtotals (for the "Tổng theo nhóm" display in the editor).
+  // Nhóm con = Σ mục con. Bản BANNER (numberSubs): nhóm CHA = Σ TẤT CẢ mục con (cuộn qua nhóm con)
+  // → "đơn giá hàng cha = tổng hàng con". Mẫu khác giữ cũ (nhóm con tổng riêng, không dồn lên cha).
   const sectionSum = {};
-  { let cur = -1;
+  { let curSection = -1, curSub = -1;
     for (let s2 = 0; s2 < activeSheet.items.length; s2++) {
-      if (rowKind[s2] === "section") { cur = s2; sectionSum[s2] = 0; }
-      else if ((rowKind[s2] === "head" || rowKind[s2] === "sub") && cur >= 0) {
-        const x = activeSheet.items[s2];
-        sectionSum[cur] += lineAmount(x, usesDays);
+      if (rowKind[s2] === "section") {
+        if (activeSheet.items[s2].kind === "subsection") { curSub = s2; sectionSum[s2] = 0; }
+        else { curSection = s2; curSub = -1; sectionSum[s2] = 0; }
+      } else if (rowKind[s2] === "head" || rowKind[s2] === "sub") {
+        const amt = lineAmount(activeSheet.items[s2], usesDays);
+        const parent = curSub >= 0 ? curSub : curSection;
+        if (parent >= 0) sectionSum[parent] += amt;
+        if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
       }
     }
   }

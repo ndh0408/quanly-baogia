@@ -374,15 +374,24 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // when sheet.groupSubtotal is on. Section rows are letter-coded (A,B,C…) and never
   // count toward the grand subtotal (their qty/price are 0).
   const showGroupSub = !!(sheet && sheet.groupSubtotal);
+  // Bản BANNER (gn_banner): NHÓM CON đánh số 1,2,3; MỤC bên dưới KHÔNG đánh số.
+  const numberSubs = !!itemsCfg.numberSubsections;
+  // Tổng nhóm. Nhóm con = Σ mục con. Bản BANNER: nhóm CHA = Σ TẤT CẢ mục con (cuộn qua nhóm con)
+  // → khớp web "đơn giá hàng cha = tổng hàng con". Mẫu khác giữ cũ (nhóm con tổng riêng).
   const sectionSum: Record<number, number> = {};
   {
-    let cur = -1;
+    let curSection = -1, curSub = -1;
     for (let i = 0; i < items.length; i++) {
-      if (effKind[i] === "section") { cur = i; sectionSum[i] = 0; }
-      else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i] && cur >= 0) {
+      if (effKind[i] === "section") {
+        if (items[i] && items[i].kind === "subsection") { curSub = i; sectionSum[i] = 0; }
+        else { curSection = i; curSub = -1; sectionSum[i] = 0; }
+      } else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i]) {
         const it = items[i];
         const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        sectionSum[cur] += Math.round(cols.days ? qtyRound(qty) * days * price : qtyRound(qty) * price);   // SL làm tròn 1 số, Thành Tiền làm tròn
+        const amt = Math.round(cols.days ? qtyRound(qty) * days * price : qtyRound(qty) * price);   // SL làm tròn 1 số, Thành Tiền làm tròn
+        const parent = curSub >= 0 ? curSub : curSection;
+        if (parent >= 0) sectionSum[parent] += amt;
+        if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
       }
     }
   }
@@ -415,8 +424,6 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   let itemNo = 0;
   let sectionIdx = -1;
   let mult = 1;
-  // Bản BANNER (gn_banner): NHÓM CON đánh số 1,2,3 (reset mỗi nhóm chính), MỤC bên dưới KHÔNG đánh số.
-  const numberSubs = !!itemsCfg.numberSubsections;
   let subNo = 0;
   // ===== Công thức SỐNG cho dòng NHÓM + subtotal =====
   // Mục tiêu: khách sửa Số Lượng/Đơn Giá 1 mục trong Excel → Đơn giá nhóm, Thành tiền nhóm,
@@ -433,6 +440,18 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (first == null) first = rr; last = rr;
     }
     return first == null ? null : [first, last as number];
+  };
+  // Bản BANNER: nhóm CHA = Σ ĐƠN GIÁ các NHÓM CON dưới nó (mỗi nhóm con đã = Σ mục của nó) →
+  // KHÔNG trùng (mục con đã gộp trong đơn giá nhóm con). Trả ô đơn giá nhóm con (rời nhau → SUM(a,b,c)).
+  const subUnitPriceCells = (si: number): string[] => {
+    const refs: string[] = [];
+    for (let j = si + 1; j < items.length; j++) {
+      if (effKind[j] === "section") {
+        if (items[j] && items[j].kind === "subsection") { const rr = slotRows[j]; if (rr != null && cols.unitPrice) refs.push(`${cols.unitPrice}${rr}`); }
+        else break;   // nhóm chính kế → dừng
+      }
+    }
+    return refs;
   };
   const groupAmtRows: number[] = [];   // hàng nhóm/nhóm con có Thành Tiền nhóm (khi bật ×SL)
   const looseAmtRows: number[] = [];   // hàng mục KHÔNG thuộc nhóm nào (trước nhóm đầu tiên)
@@ -473,12 +492,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
       // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
       const childRng = childExcelRange(i);
+      // Bản BANNER + nhóm CHÍNH có nhóm con → Đơn Giá = Σ đơn giá nhóm con (rời ô). Còn lại: Σ Thành Tiền mục con.
+      const subCells = (numberSubs && !isSubSection) ? subUnitPriceCells(i) : [];
+      const hasGroupBody = subCells.length > 0 || !!(childRng && sectionSum[i]);
       if (cols.unitPrice) {
-        if (childRng && sectionSum[i]) ws.getCell(`${cols.unitPrice}${r}`).value = { formula: `SUM(${cols.amount}${childRng[0]}:${cols.amount}${childRng[1]})`, result: sectionSum[i] };
+        if (subCells.length) ws.getCell(`${cols.unitPrice}${r}`).value = { formula: `SUM(${subCells.join(",")})`, result: sectionSum[i] };
+        else if (childRng && sectionSum[i]) ws.getCell(`${cols.unitPrice}${r}`).value = { formula: `SUM(${cols.amount}${childRng[0]}:${cols.amount}${childRng[1]})`, result: sectionSum[i] };
         else ws.getCell(`${cols.unitPrice}${r}`).value = sectionSum[i] || null;
       }
       if (cols.amount) {
-        if (showGroupSub && childRng && sectionSum[i]) {
+        if (showGroupSub && hasGroupBody) {
           const fAmt = gmult > 1 ? `${cols.unitPrice}${r}*${cols.quantity}${r}` : `${cols.unitPrice}${r}`;   // ×SL khi SL>1; SL≤1 → = đơn giá nhóm
           ws.getCell(`${cols.amount}${r}`).value = { formula: fAmt, result: sectionSum[i] * gmult };
         } else {

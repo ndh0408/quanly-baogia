@@ -291,6 +291,32 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(Number(sttOf("Chi phí thi công A"))).toBe(2);
   });
 
+  // BANNER: ĐƠN GIÁ nhóm CHA = Σ ĐƠN GIÁ các nhóm con (mỗi nhóm con = Σ Thành Tiền mục) — KHÔNG trùng.
+  it("gn_banner: đơn giá nhóm cha = SUM đơn giá nhóm con (live, không double-count)", async () => {
+    const q = makeQuote("gn_banner");
+    q.sheets[0].groupSubtotal = false;
+    q.sheets[0].items = [
+      { kind: "section", name: "HCM", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "subsection", name: "LM81", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "A", detail: "", unit: "m2", quantity: 7.4, unitPrice: 95000, days: null, notes: "" },   // 703.000
+      { kind: "item", name: "B", detail: "", unit: "m2", quantity: 7.4, unitPrice: 65000, days: null, notes: "" },   // 481.000
+      { kind: "subsection", name: "BHD", label: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "" },
+      { kind: "item", name: "C", detail: "", unit: "m2", quantity: 3.2, unitPrice: 110000, days: null, notes: "" },   // 352.000
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    const rowOf = (nm) => { let r = null; ws.eachRow((row, n) => { if (String(row.getCell("C").value ?? "").trim() === nm) r = n; }); return r; };
+    const rHCM = rowOf("HCM"), rLM = rowOf("LM81"), rBHD = rowOf("BHD");
+    // Nhóm con = Σ Thành Tiền (H) mục con
+    expect(ws.getCell(`G${rLM}`).formula).toMatch(/^SUM\(H\d+:H\d+\)$/);
+    expect(Number(ws.getCell(`G${rLM}`).result)).toBe(1_184_000);   // 703.000 + 481.000
+    expect(Number(ws.getCell(`G${rBHD}`).result)).toBe(352_000);
+    // Nhóm CHA = Σ ĐƠN GIÁ (G) các nhóm con (rời ô) — KHÔNG cộng lại từng mục (tránh double-count)
+    expect(ws.getCell(`G${rHCM}`).formula).toBe(`SUM(G${rLM},G${rBHD})`);
+    expect(Number(ws.getCell(`G${rHCM}`).result)).toBe(1_536_000);  // 1.184.000 + 352.000
+  });
+
   // Exercises the REAL worker-thread path end-to-end (spawn worker → build in
   // worker → transfer buffer back → validate). Proves the worker plumbing works.
   it("runExportJob generates a valid xlsx via the worker thread", async () => {
