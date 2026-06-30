@@ -125,5 +125,8 @@ export function looksLikeExportPaste(matrix: string[][], startCol: number, field
   if (!col0Ok) return false;
   const hasGroupLetter = matrix.some((r) => /^[A-Z]$/.test((r[0] || "").trim()));
   const maxCols = Math.max(...matrix.map((r) => r.length));
-  return hasGroupLetter && maxCols > fieldCount;
+  // maxCols > fieldCount: có cột STT thừa (Windows giữ cột rỗng cuối). NHƯNG Excel cho Mac hay BỎ
+  // cột rỗng cuối → maxCols == fieldCount; khi đó dựa vào: khối NHIỀU DÒNG + có chữ nhóm A/B (rất khó
+  // trùng với dán dữ liệu thường) → vẫn coi là báo giá app xuất ra.
+  return hasGroupLetter && (maxCols > fieldCount || matrix.length > 1);
 }

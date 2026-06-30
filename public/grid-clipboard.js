@@ -177,5 +177,8 @@ export function looksLikeExportPaste(matrix, startCol, fieldCount) {
   const maxCols = Math.max(...matrix.map((r) => r.length));
   // PHẢI vừa có chữ nhóm VỪA rộng hơn số cột nhập (tức có thêm cột STT) → đúng bảng app xuất ra.
   // Dùng AND (không phải OR) để bảng Excel ngoài bị dán nhầm không bị hiểu sai thành nhóm.
-  return hasGroupLetter && maxCols > fieldCount;
+  // maxCols > fieldCount: có cột STT thừa (Windows giữ cột rỗng cuối). NHƯNG Excel cho Mac hay BỎ
+  // cột rỗng cuối → maxCols == fieldCount; khi đó dựa vào: khối NHIỀU DÒNG + có chữ nhóm A/B (rất khó
+  // trùng với dán dữ liệu thường) → vẫn coi là báo giá app xuất ra.
+  return hasGroupLetter && (maxCols > fieldCount || matrix.length > 1);
 }

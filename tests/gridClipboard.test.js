@@ -251,3 +251,18 @@ describe("header-based mapping — copy CÓ hàng tiêu đề, dán vào templat
     expect(built[2].quantity).toBeCloseTo(1.89);
   });
 });
+
+describe("Mac Excel — copy KHÔNG header, bỏ cột rỗng cuối (maxCols == fieldCount)", () => {
+  it("vẫn nhận là export khi NHIỀU DÒNG + có chữ nhóm A/B", () => {
+    const mac = [
+      ["A", "HCM", "", "", "", "549375", ""],
+      ["1", "CGV Kim Cúc", "", "", "", "549375", "549375"],
+      ["", "Decal", "Decal in", "m2", "1.89", "105000", "198450"],
+      ["B", "Tỉnh", "", "", "", "1401640", ""],
+    ];
+    expect(looksLikeExportPaste(mac, 0, 7)).toBe(true);   // 7 cột = fieldCount banner, nhưng nhiều dòng + A/B
+  });
+  it("KHÔNG nhận nhầm 1 dòng đơn (giữ guard cũ)", () => {
+    expect(looksLikeExportPaste([["A", "x", "", "m2", "1", "100"]], 0, 6)).toBe(false);
+  });
+});
