@@ -58,7 +58,7 @@ export function parseLooseNumber(s: string): number {
 }
 
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
-export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>): RebuiltItem[] {
+export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
   const idx = (role: string) => roles.indexOf(role);
   const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
@@ -72,8 +72,9 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
     const hasPrice = priceRaw !== "" && (priceRaw.startsWith("=") || parseLooseNumber(priceRaw) !== 0);
     let kind: string;
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
+    else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER: nhóm con đánh SỐ (1,2,3)
     else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";
-    else if (stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";
+    else if (!numberSubs && stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";   // mẫu thường: nhóm con STT rỗng
     else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
     else kind = "item";
     const it: RebuiltItem = { kind };

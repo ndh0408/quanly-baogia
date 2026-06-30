@@ -102,7 +102,7 @@ export function parseLooseNumber(s) {
 //   • còn lại (STT số)                           → item
 // `roles` = thứ tự field của từng cột dán vào (vd ["_stt","name","detail","unit","quantity",
 // "unitPrice","_amount","notes"]); cột "_stt"/"_amount" là tính toán, KHÔNG nhập.
-export function reconstructExportRows(matrix, roles, numericRoles) {
+export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = false) {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(numericRoles || ["quantity", "unitPrice", "days"]);
   const idx = (role) => roles.indexOf(role);
   const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
@@ -117,8 +117,9 @@ export function reconstructExportRows(matrix, roles, numericRoles) {
     const hasPrice = priceRaw !== "" && (priceRaw.startsWith("=") || parseLooseNumber(priceRaw) !== 0);
     let kind;
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
+    else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER: nhóm con đánh SỐ (1,2,3)
     else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";
-    else if (stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";
+    else if (!numberSubs && stt === "" && name.trim() !== "" && !hasItemData && hasPrice) kind = "subsection";   // mẫu thường: nhóm con STT rỗng
     else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
     else kind = "item";
     const it = { kind };

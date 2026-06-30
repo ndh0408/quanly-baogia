@@ -59,6 +59,40 @@ describe("reconstructExportRows (re-import app's own export)", () => {
   });
 });
 
+describe("reconstructExportRows — BANNER (nhóm con đánh SỐ, numberSubs=true)", () => {
+  // Banner: nhóm chính = chữ A/B; nhóm con = SỐ 1,2,3; mục = STT TRỐNG.
+  const matrix = [
+    ["A", "HCM", "", "", "", "", ""],
+    ["1", "LM81: khu chờ cạnh màn hình LED", "", "", "1", "1219200", "1219200"],
+    ["", "Vách giữa 2m92W x 1m46H", ". PP in KTS", "m2", "7,62", "95.000", "723.900"],
+    ["", "Chi phí thi công", "", "m2", "7,62", "65.000", "495.300"],
+  ];
+  const items = reconstructExportRows(matrix, GN_ROLES, new Set(["quantity", "unitPrice", "days"]), true);
+  it("nhóm chính (A) → section", () => expect(items[0].kind).toBe("section"));
+  it("nhóm con đánh SỐ (1) → subsection (KHÔNG phải item)", () => {
+    expect(items[1].kind).toBe("subsection");
+    expect(items[1].name).toContain("LM81");
+    expect(items[1].unitPrice).toBe(0);
+  });
+  it("mục dưới nhóm con (STT trống) → item", () => {
+    expect(items[2].kind).toBe("item");
+    expect(items[2].unit).toBe("m2");
+    expect(items[2].unitPrice).toBe(95000);
+    expect(items[3].kind).toBe("item");
+  });
+});
+
+describe("backward-compat: mẫu thường numberSubs=false — STT số vẫn = item", () => {
+  const matrix = [
+    ["A", "Nhóm", "", "", "", "", ""],
+    ["", "Nhóm con", "", "", "", "1000000", "1000000"],  // STT trống + tên + giá = nhóm con
+    ["1", "Mục đánh số", "", "m2", "2", "95000", "190000"],  // STT số = mục
+  ];
+  const items = reconstructExportRows(matrix, GN_ROLES, new Set(["quantity", "unitPrice", "days"]), false);
+  it("nhóm con STT trống → subsection", () => expect(items[1].kind).toBe("subsection"));
+  it("mục STT số → item (không bị nhận nhầm nhóm con)", () => expect(items[2].kind).toBe("item"));
+});
+
 describe("reconstructExportRows — công thức (dán bảng export có =…)", () => {
   const NUM = new Set(["quantity", "unitPrice", "days"]);
   it("giữ công thức Số Lượng thành it.formulas, KHÔNG nuốt thành số sai", () => {

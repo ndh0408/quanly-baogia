@@ -8,7 +8,7 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260624b";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste } from "../grid-clipboard.js?v=20260630e";
 import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, trunc2, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260624b";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
@@ -1948,7 +1948,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
       e.preventDefault(); pushUndo();
       const roles = ADDR_COLS.map((c) => c.field);
-      const built = reconstructExportRows(rows, roles, NUMERIC).map((it) => ({ ...blank(), ...it }));
+      const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((it) => ({ ...blank(), ...it }));
       activeSheet.items.splice(startRow, rows.length, ...built);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
       autoEnableGroupSub(startRow, startRow + built.length - 1);   // báo giá dán vào có SL nhóm > 1 → tự bật toggle

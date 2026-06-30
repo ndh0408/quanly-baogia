@@ -347,7 +347,7 @@ export function GridTable(props: GridTableProps) {
     // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
     if (!internal && looksLikeExportPaste(rows, startCol, FIELDS.length)) {
       const roles = ADDR.map((c) => c.f);
-      const built = reconstructExportRows(rows, roles, NUMERIC).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
+      const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
       items.splice(startRow, rows.length, ...built);
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       autoEnableGroupSub(startRow, startRow + built.length - 1);
