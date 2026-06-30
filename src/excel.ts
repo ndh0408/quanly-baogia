@@ -321,6 +321,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
 
   const cols = itemsCfg.columns;
+  // Đổi NỀN hàng tiêu đề cột (STT/Hạng Mục…) → f3c9a1 cho MỌI mẫu — chỉ đổi nền + chữ đen đậm,
+  // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
+  if (itemsCfg.headerRow) {
+    for (const col of Object.values(cols)) paintCell(ws.getCell(`${col}${itemsCfg.headerRow}`), { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+  }
 
   // Row heights: use the configured uniform height; otherwise size each row to fit its
   // content so the tall sample heights baked into the template don't carry over (fixes
@@ -985,7 +990,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     cell.value = h;
     cell.font = { name: "Times New Roman", family: 1, size: 11, bold: true };
     cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCC99" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
     cell.border = {
       top: { style: "medium" }, bottom: { style: "thin" },
       left: { style: i === 0 ? "medium" : "thin" },
@@ -1035,7 +1040,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     lblCell.value = tr.label;
     lblCell.font = { name: "Times New Roman", family: 1, size: 11, bold: true };
     lblCell.alignment = { horizontal: "center", vertical: "middle" };
-    lblCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCC99" } };
+    lblCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
     lblCell.border = {
       top: { style: "thin" },
       bottom: { style: i === totalRows.length - 1 ? "medium" : "thin" },
@@ -1046,7 +1051,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     valCell.numFmt = "#,##0";
     valCell.font = { name: "Times New Roman", family: 1, size: 11, bold: true, color: { argb: "FFC00000" } };
     valCell.alignment = { horizontal: "right", vertical: "middle" };
-    valCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCC99" } };
+    valCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3C9A1" } };
     valCell.border = {
       top: { style: "thin" },
       bottom: { style: i === totalRows.length - 1 ? "medium" : "thin" },

@@ -45,6 +45,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     },
     items: {
       firstRow: 12,
+      headerRow: 11,   // hàng tiêu đề cột (STT/Hạng Mục…) → đổi nền qua code
       lastRow:  21,
       styleRow: 12,              // copy style hàng 12 (tên xanh, Chi Tiết nghiêng, viền) ra mọi hàng
       italicColumns: ["D"],      // Chi Tiết in nghiêng
@@ -173,6 +174,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     footerMerges: ["C17:D17"],
     items: {
       firstRow: 6,
+      headerRow: 4,    // hàng tiêu đề cột → đổi nền qua code
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
       columns: {
@@ -271,6 +273,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // After removing 4 Marico-specific rows, 10 uniform item slots remain at rows 12-21.
       // Same splice/duplicate behavior as Décor (compact output, no empty trailing rows).
       firstRow: 12,
+      headerRow: 11,   // hàng tiêu đề cột → đổi nền qua code
       lastRow:  21,
       rowHeight: 30,
       // Description column (C) is shown in italic, matching the original Unibenfood template style
