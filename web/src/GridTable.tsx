@@ -551,27 +551,43 @@ export function GridTable(props: GridTableProps) {
     }
     return first == null ? null : [first + 1, last + 1];
   };
-  const showFx = (addr: string, formula: string) => {
+  const setFxBar = (addr: string | null, formula: string | null) => {
     if (!fxBar) return;
-    if (fxAddrRef.current) fxAddrRef.current.textContent = addr;
-    if (fxInputRef.current) { fxInputRef.current.value = formula; fxInputRef.current.readOnly = true; }
-    highlightActiveFormulaRefs(formula);
+    if (fxAddrRef.current) fxAddrRef.current.textContent = addr || "—";
+    if (fxInputRef.current) { fxInputRef.current.value = formula || ""; fxInputRef.current.readOnly = true; }
+    highlightActiveFormulaRefs(formula || "");
   };
-  const revealAmount = (i: number) => {
+  // Toggle: bấm đúp → hiện CÔNG THỨC ngay TRONG ô (chữ xanh, mono); bấm đúp lần nữa → về số.
+  const toggleCellFormula = (td: HTMLElement, addr: string, formula: string) => {
+    if (td.dataset.fxShown) {
+      td.textContent = td.dataset.fxVal || "";
+      td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+      delete td.dataset.fxShown; delete td.dataset.fxVal; td.removeAttribute("title");
+      setFxBar(null, null);
+    } else {
+      td.dataset.fxVal = td.textContent || ""; td.dataset.fxShown = "1";
+      td.textContent = formula; td.title = formula;
+      td.style.color = "#15803d"; td.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace"; td.style.fontWeight = "600"; td.style.fontSize = "11.5px"; td.style.whiteSpace = "nowrap";
+      setFxBar(addr, formula);
+    }
+  };
+  const revealAmount = (i: number, td: HTMLElement) => {
     const it = items[i]; if (!it) return;
+    let addr: string | null = null, formula: string | null = null;
     if (it.kind === "section" || it.kind === "subsection") {
       if (!groupSubtotal) return;
       const rng = childAmountRange(i); if (!rng) return;
-      showFx(`${La}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`);   // Thành tiền nhóm = (Σ con) × SL nhóm
+      addr = `${La}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`;   // Thành tiền nhóm = (Σ con) × SL nhóm
     } else if (it.kind === "item" || it.kind === "sub") {
-      showFx(`${La}${i + 1}`, usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`);  // SL × ĐG (× Ngày)
+      addr = `${La}${i + 1}`; formula = usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`;  // SL × ĐG (× Ngày)
     }
+    if (formula) toggleCellFormula(td, addr as string, formula);
   };
-  const revealSectionPrice = (i: number) => {
+  const revealSectionPrice = (i: number, td: HTMLElement) => {
     const rng = childAmountRange(i); if (!rng) return;
-    showFx(`${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);   // Đơn giá nhóm = Σ Thành Tiền mục con
+    toggleCellFormula(td, `${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);   // Đơn giá nhóm = Σ Thành Tiền mục con
   };
-  const revealSheetTotal = () => {
+  const revealSheetTotal = (td: HTMLElement) => {
     const rows: number[] = [];
     if (groupSubtotal) {
       let inGroup = false;
@@ -579,7 +595,7 @@ export function GridTable(props: GridTableProps) {
     } else {
       for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "item" || k === "sub") rows.push(i); }
     }
-    if (rows.length) showFx("Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
+    if (rows.length) toggleCellFormula(td, "Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
   };
   const fxTitle = fxBar ? "Bấm đúp để xem công thức (như Excel)" : undefined;
 
@@ -590,7 +606,7 @@ export function GridTable(props: GridTableProps) {
       <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
       {usesDays && <td className={fcls(i, "days", "col-qty")} style={{ position: "relative" }}>{numInput(i, "days")}</td>}
       <td className={fcls(i, "unitPrice", "col-price")} style={{ position: "relative" }}>{numInput(i, "unitPrice")}</td>
-      <td className="col-amount" title={fxTitle} onDoubleClick={() => revealAmount(i)}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
+      <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} onChange={(e) => toggleApprove(i, e.target.checked)} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
@@ -656,8 +672,8 @@ export function GridTable(props: GridTableProps) {
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
                     {usesDays && <td className="col-qty" />}
-                    <td className="col-price" title={fxTitle} onDoubleClick={() => revealSectionPrice(i)}>{M.fmtNumCell(subAmt)}</td>
-                    <td className="col-amount" title={fxTitle} onDoubleClick={() => revealAmount(i)}>{groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+                    <td className="col-price" title={fxTitle} onDoubleClick={(e) => revealSectionPrice(i, e.currentTarget)}>{M.fmtNumCell(subAmt)}</td>
+                    <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
                     {approveCol && <td className="col-approve" />}
@@ -693,7 +709,7 @@ export function GridTable(props: GridTableProps) {
       <div className="grid-stat hidden" ref={statRef} />
       {fxBar && (
         <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
-          Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={revealSheetTotal}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
+          Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={(e) => revealSheetTotal(e.currentTarget)}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
         </div>
       )}
 

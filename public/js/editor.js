@@ -1502,29 +1502,44 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     }
     return first == null ? null : [first + 1, last + 1];
   };
-  const showFx = (addr, formula) => {
+  const setFxBar = (addr, formula) => {
     const addrEl = document.getElementById("fx-addr"), inEl = document.getElementById("fx-input");
-    if (addrEl) addrEl.textContent = addr;
-    if (inEl) { inEl.value = formula; inEl.readOnly = true; }
-    highlightActiveFormulaRefs(formula);
+    if (addrEl) addrEl.textContent = addr || "—";
+    if (inEl) { inEl.value = formula || ""; inEl.readOnly = true; }
+    highlightActiveFormulaRefs(formula || "");
+  };
+  // Toggle: bấm đúp → hiện CÔNG THỨC ngay TRONG ô (chữ xanh, mono); bấm đúp lần nữa → về số.
+  const toggleCellFormula = (td, addr, formula) => {
+    if (td.dataset.fxShown) {
+      td.textContent = td.dataset.fxVal || "";
+      td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+      delete td.dataset.fxShown; delete td.dataset.fxVal; td.removeAttribute("title");
+      setFxBar(null, null);
+    } else {
+      td.dataset.fxVal = td.textContent; td.dataset.fxShown = "1";
+      td.textContent = formula; td.title = formula;
+      td.style.color = "#15803d"; td.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace"; td.style.fontWeight = "600"; td.style.fontSize = "11.5px"; td.style.whiteSpace = "nowrap";
+      setFxBar(addr, formula);
+    }
   };
   grid._revealLockedFormula = (td) => {
     const tr = td.closest("tr[data-row]"); if (!tr) return;
     const i = parseInt(tr.dataset.row, 10); const it = activeSheet.items[i]; if (!it) return;
     const isSection = it.kind === "section" || it.kind === "subsection";
     const isPrice = td.classList.contains("col-price");
+    let addr = null, formula = null;
     if (isSection) {
       const rng = childAmountRange(i); if (!rng) return;
-      if (isPrice) showFx(`${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);                            // Đơn giá nhóm = Σ Thành Tiền mục con
-      else if (activeSheet.groupSubtotal) showFx(`${La}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`); // Thành tiền nhóm = (Σ con) × SL nhóm
+      if (isPrice) { addr = `${Lp}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})`; }                         // Đơn giá nhóm = Σ Thành Tiền mục con
+      else if (activeSheet.groupSubtotal) { addr = `${La}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`; } // Thành tiền nhóm = (Σ con) × SL nhóm
     } else if ((it.kind === "item" || it.kind === "sub") && td.classList.contains("col-amount")) {
-      const f = usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`;       // Thành Tiền = SL × ĐG (× Ngày)
-      showFx(`${La}${i + 1}`, f);
+      addr = `${La}${i + 1}`; formula = usesDays ? `=${Lq}${i + 1}*${Ld}${i + 1}*${Lp}${i + 1}` : `=${Lq}${i + 1}*${Lp}${i + 1}`;   // Thành Tiền = SL × ĐG (× Ngày)
     }
+    if (formula) toggleCellFormula(td, addr, formula);
   };
   // Tổng sheet (chỉ lưới chính): cộng các dòng NHÓM (đã ×SL) + mục lẻ; hoặc Σ mọi mục khi không bật nhóm.
-  grid._revealSheetTotal = () => {
-    if (opts.subtotalFn) return;   // bảng nội bộ tính tổng kiểu khác — bỏ qua
+  grid._revealSheetTotal = (td) => {
+    if (opts.subtotalFn || !td) return;   // bảng nội bộ tính tổng kiểu khác — bỏ qua
     const items = activeSheet.items, rows = [];
     if (activeSheet.groupSubtotal) {
       let inGroup = false;
@@ -1536,15 +1551,14 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     } else {
       for (let i = 0; i < items.length; i++) { const k = items[i].kind; if (k === "item" || k === "sub") rows.push(i); }
     }
-    if (!rows.length) return;
-    showFx("Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
+    if (rows.length) toggleCellFormula(td, "Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
   };
   const tableEl = document.querySelector(tableSel);
   if (tableEl && !tableEl._dblFxBound) {
     tableEl._dblFxBound = true;     // gắn 1 lần / bảng (tbody+tfoot giữ nguyên qua redraw) — gọi grid._reveal* (luôn bản mới)
     tableEl.addEventListener("dblclick", (ev) => {
       const sub = ev.target.closest && ev.target.closest(".gf-subtotal-val");
-      if (sub) { grid._revealSheetTotal && grid._revealSheetTotal(); return; }
+      if (sub) { grid._revealSheetTotal && grid._revealSheetTotal(sub); return; }
       const cell = ev.target.closest && ev.target.closest("td.col-amount, td.col-price");
       if (cell && grid._revealLockedFormula) grid._revealLockedFormula(cell);
     });
