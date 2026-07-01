@@ -1535,6 +1535,12 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const isPrice = td.classList.contains("col-price");
     let addr = null, formula = null;
     if (isSection) {
+      // Banner nhóm CHA (section chứa nhóm con, không có mục trực tiếp): Đơn giá = SUM(đơn giá các NHÓM CON).
+      if (isPrice && numberSubs && it.kind === "section") {
+        const cells = [];
+        for (let j = i + 1; j < activeSheet.items.length; j++) { const k = activeSheet.items[j].kind; if (k === "section") break; if (k === "subsection") cells.push(`${Lp}${j + 1}`); }
+        if (cells.length) { toggleCellFormula(td, `${Lp}${i + 1}`, `=SUM(${cells.join(",")})`); return; }
+      }
       const rng = childAmountRange(i); if (!rng) return;
       if (isPrice) { addr = `${Lp}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})`; }                         // Đơn giá nhóm = Σ Thành Tiền mục con
       else if (activeSheet.groupSubtotal) { addr = `${La}${i + 1}`; formula = `=SUM(${La}${rng[0]}:${La}${rng[1]})*${Lq}${i + 1}`; } // Thành tiền nhóm = (Σ con) × SL nhóm

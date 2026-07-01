@@ -603,6 +603,13 @@ export function GridTable(props: GridTableProps) {
     if (formula) toggleCellFormula(td, addr as string, formula);
   };
   const revealSectionPrice = (i: number, td: HTMLElement) => {
+    const it = items[i];
+    // Banner nhóm CHA (section chứa nhóm con, không có mục trực tiếp): Đơn giá = SUM(đơn giá các NHÓM CON).
+    if (numberSubs && it && it.kind === "section") {
+      const cells: string[] = [];
+      for (let j = i + 1; j < items.length; j++) { const k = items[j].kind; if (k === "section") break; if (k === "subsection") cells.push(`${Lp}${j + 1}`); }
+      if (cells.length) { toggleCellFormula(td, `${Lp}${i + 1}`, `=SUM(${cells.join(",")})`); return; }
+    }
     const rng = childAmountRange(i); if (!rng) return;
     toggleCellFormula(td, `${Lp}${i + 1}`, `=SUM(${La}${rng[0]}:${La}${rng[1]})`);   // Đơn giá nhóm = Σ Thành Tiền mục con
   };
