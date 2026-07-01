@@ -125,6 +125,9 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
   const idx = (role) => roles.indexOf(role);
   const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
   const cell = (row, i) => (i >= 0 && i < row.length && row[i] != null ? String(row[i]) : "");
+  // BANNER xuất ra có NHÓM CON đánh SỐ + KHÔNG ĐVT (vd "1  CGV Kim Cúc"). Data có kiểu đó → nguồn banner
+  // → hàng STT-trống là MỤC. Không có → nguồn GN-không-ngày → STT-trống + tên = NHÓM CON.
+  const hasNumberedSub = matrix.some((r) => /^\d+$/.test(cell(r, sttI).trim()) && cell(r, nameI).trim() !== "" && cell(r, unitI).trim() === "" && cell(r, priceI).trim() !== "");
   const out = [];
   for (const row of matrix) {
     const stt = cell(row, sttI).trim();
@@ -138,8 +141,9 @@ export function reconstructExportRows(matrix, roles, numericRoles, numberSubs = 
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
     else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER (template đích=banner): nhóm con đánh SỐ
     else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";   // hàng con (nối, không tên)
+    else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";   // dòng thông tin: STT trống + TÊN, KHÔNG đo/giá
+    else if (!numberSubs && !hasNumberedSub && stt === "" && name.trim() !== "") kind = "subsection";   // GN KHÔNG NGÀY: nhóm con = STT TRỐNG + có TÊN (KỂ CẢ có ĐVT/giá, vd "Chi phí vận chuyển"). CHỈ khi data KHÔNG có nhóm-con-đánh-số (banner).
     else if (name.trim() !== "" && !hasUnit && hasPrice) kind = "subsection";   // NHÓM CON theo DATA: có TÊN + GIÁ nhưng KHÔNG ĐVT — bắt được dù dán vào template đích khác
-    else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
     else kind = "item";
     const it = { kind };
     roles.forEach((role, i) => {

@@ -81,6 +81,10 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
   const idx = (role: string) => roles.indexOf(role);
   const sttI = idx("_stt"), nameI = idx("name"), unitI = idx("unit"), qtyI = idx("quantity"), priceI = idx("unitPrice");
   const cell = (row: string[], i: number) => (i >= 0 && i < row.length && row[i] != null ? String(row[i]) : "");
+  // BANNER xuất ra có NHÓM CON đánh SỐ + KHÔNG ĐVT (vd "1  CGV Kim Cúc"). Nếu DATA có kiểu đó → nguồn là
+  // banner → hàng STT-trống là MỤC (không phải nhóm con). Nếu KHÔNG có → nguồn là GN-không-ngày → hàng
+  // STT-trống + có tên = NHÓM CON (vd "Chi phí vận chuyển"). Phân biệt để mỗi template hiểu đúng paste.
+  const hasNumberedSub = matrix.some((r) => /^\d+$/.test(cell(r, sttI).trim()) && cell(r, nameI).trim() !== "" && cell(r, unitI).trim() === "" && cell(r, priceI).trim() !== "");
   const out: RebuiltItem[] = [];
   for (const row of matrix) {
     const stt = cell(row, sttI).trim();
@@ -93,8 +97,9 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
     if (/^[A-Za-z]{1,2}$/.test(stt)) kind = "section";
     else if (numberSubs && /^\d+$/.test(stt) && name.trim() !== "") kind = "subsection";   // BANNER (template đích=banner): nhóm con đánh SỐ
     else if (stt === "" && name.trim() === "" && (hasItemData || hasPrice)) kind = "sub";   // hàng con (nối, không tên)
+    else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";   // dòng thông tin: STT trống + TÊN, KHÔNG đo/giá
+    else if (!numberSubs && !hasNumberedSub && stt === "" && name.trim() !== "") kind = "subsection";   // GN KHÔNG NGÀY: nhóm con = STT TRỐNG + có TÊN (KỂ CẢ có ĐVT/giá, vd "Chi phí vận chuyển"). CHỈ khi data KHÔNG có nhóm-con-đánh-số (banner).
     else if (name.trim() !== "" && !hasUnit && hasPrice) kind = "subsection";   // NHÓM CON theo DATA: có TÊN + GIÁ nhưng KHÔNG ĐVT — bắt được dù dán vào template đích khác
-    else if (stt === "" && name.trim() !== "" && !hasItemData && !hasPrice) kind = "info";
     else kind = "item";
     const it: RebuiltItem = { kind };
     roles.forEach((role, i) => {

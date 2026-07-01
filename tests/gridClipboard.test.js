@@ -275,9 +275,39 @@ describe("parseLooseDecimal — cột SỐ LƯỢNG/SỐ NGÀY (số đo, KHÔNG
   it("'1.234.567' → 1234567 (NHIỀU dấu = ngăn nghìn)", () => expect(parseLooseDecimal("1.234.567")).toBe(1234567));
   it("'3' → 3; '' → 0", () => { expect(parseLooseDecimal("3")).toBe(3); expect(parseLooseDecimal("")).toBe(0); });
   it("reconstructExportRows: SL '13.524' vào quantity = 13.524 (không phồng)", () => {
-    const r = [["", "Banner", "Hiflex", "m2", "13.524", "65000", "879060"]];
+    const r = [["1", "Banner", "Hiflex", "m2", "13.524", "65000", "879060"]];
     const [it] = reconstructExportRows(r, ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"], new Set(["quantity", "unitPrice", "days"]));
     expect(it.quantity).toBeCloseTo(13.524);
     expect(it.unitPrice).toBe(65000);
+  });
+});
+
+describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {
+  const GN = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+  const NUM = new Set(["quantity", "unitPrice", "days"]);
+  it("Booth GN: 'Chi phí vận chuyển' (STT trống + ĐVT + giá) = NHÓM CON, không gộp vào nhóm A", () => {
+    const rows = [
+      ["A", "Booth", "", "bộ", "5", "18398860", "91994300"],
+      ["1", "Vách", "", "m2", "15.93", "630000", "10035900"],
+      ["6", "Đèn", "", "bộ", "3", "365000", "1095000"],
+      ["", "Chi phí vận chuyển, lắp đặt, tháo dỡ", "", "bộ", "1", "8400000", "8400000"],
+      ["1", "HCM: SVH", "", "địa điểm", "2", "2500000", "5000000"],
+    ];
+    const b = reconstructExportRows(rows, GN, NUM, false);
+    expect(b[0].kind).toBe("section");
+    expect(b[1].kind).toBe("item");
+    expect(b[3].kind).toBe("subsection");   // "Chi phí vận chuyển" = nhóm con (STT trống), KHÔNG phải mục
+    expect(b[4].kind).toBe("item");         // HCM = mục dưới nhóm con
+  });
+  it("Banner dán vào không-ngày: có nhóm-con-đánh-SỐ (không ĐVT) → hàng STT-trống VẪN là MỤC", () => {
+    const rows = [
+      ["A", "HCM", "", "", "", "549375", ""],
+      ["1", "CGV Kim Cúc", "", "", "", "549375", "549375"],   // numbered + KHÔNG ĐVT → nhóm con banner
+      ["", "Decal", "Decal in KTS", "m2", "1.89", "105000", "198450"],   // STT trống nhưng KHÔNG bị nhận nhầm nhóm con
+    ];
+    const b = reconstructExportRows(rows, GN, NUM, false);
+    expect(b[1].kind).toBe("subsection");
+    expect(b[2].kind).toBe("item");
+    expect(b[2].unitPrice).toBe(105000);
   });
 });
