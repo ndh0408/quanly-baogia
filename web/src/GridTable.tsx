@@ -109,7 +109,12 @@ export function GridTable(props: GridTableProps) {
     const tr = tableRef.current?.querySelector(`tr[data-row="${row}"]`); if (!tr) return null;
     if (field === "_amount") return tr.querySelector(".col-amount");
     if (field === "_stt") return tr.querySelector(".col-stt");
-    const inp = tr.querySelector(`[data-f="${field}"]`); return inp ? (inp.closest("td") as HTMLElement) : null;
+    const inp = tr.querySelector(`[data-f="${field}"]`);
+    if (inp) return inp.closest("td") as HTMLElement;
+    // Hàng NHÓM/NHÓM CON: ĐƠN GIÁ (và vài cột) là ô TÍNH — không có input data-f → dò theo CLASS cột
+    // để công thức nhóm cha =SUM(F2,F5) vẫn SÁNG được ô đơn giá các nhóm con.
+    const cls = ({ unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" } as Record<string, string>)[field];
+    return cls ? (tr.querySelector(cls) as HTMLElement | null) : null;
   };
   const rectOf = (sel: Sel | null) => { if (!sel) return null; const a = fieldIdx(sel.anchor.field), b = fieldIdx(sel.focus.field); if (a < 0 || b < 0) return null; return { r0: Math.min(sel.anchor.row, sel.focus.row), r1: Math.max(sel.anchor.row, sel.focus.row), c0: Math.min(a, b), c1: Math.max(a, b) }; };
   const onFillHandleDown = (e: MouseEvent) => {
