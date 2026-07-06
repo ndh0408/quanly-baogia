@@ -96,8 +96,14 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             <p className="muted" style={{ marginTop: 0 }}>Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số.</p>
             <label className="pf-field"><span>Mật khẩu cũ</span><input type="password" autoComplete="current-password" required value={oldPw} onChange={(e) => setOldPw(e.target.value)} /></label>
             <label className="pf-field"><span>Mật khẩu mới</span><input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw} onChange={(e) => setNewPw(e.target.value)} /></label>
-            <div className="pw-meter" aria-hidden="true"><i style={{ width: newPw ? pct + "%" : "0", background: col }} /></div>
-            <div className="pw-hint">Độ mạnh: {newPw ? lbl : "—"}</div>
+            {/* Thanh độ mạnh CHỈ hiện khi đã gõ — trước đây thanh rỗng luôn hiện thành vạch xám (divider lạc chỗ)
+                và "Độ mạnh: —" dính vào label kế. Bọc nhóm + margin tách rõ khỏi ô "Nhập lại". */}
+            {newPw && (
+              <div className="pw-strength">
+                <div className="pw-meter" aria-hidden="true"><i style={{ width: pct + "%", background: col }} /></div>
+                <div className="pw-hint">Độ mạnh: <b style={{ color: col }}>{lbl}</b></div>
+              </div>
+            )}
             <label className="pf-field"><span>Nhập lại mật khẩu mới</span><input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={newPw2} onChange={(e) => setNewPw2(e.target.value)} /></label>
             <button className="btn btn-primary" type="submit" disabled={savingPw}>{savingPw ? "Đang đổi…" : "Đổi mật khẩu"}</button>
           </form>

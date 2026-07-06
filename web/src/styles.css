@@ -159,6 +159,8 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 
 /* Ô form Đổi mật khẩu (trang Tài khoản) — label block + input full-width */
 .pf-field { display: block; margin-bottom: 14px; }
+/* Nhóm thanh độ mạnh (thuộc ô "Mật khẩu mới" ngay trên) — tách rõ khỏi ô "Nhập lại" bên dưới. */
+.pw-strength { margin: 2px 0 14px; }
 .pf-field span { display: block; font-size: 13px; color: var(--soft); margin-bottom: 6px; font-weight: 500; }
 .pf-field input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--field-bg); color: var(--text); }
 .pf-field input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }
