@@ -261,8 +261,8 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
       }
     }
   }
-  const tryFit = (x0: number, r0: number, apply: boolean): number => {
-    let okCount = 0;
+  const tryFit = (x0: number, r0: number, apply: boolean): { ok: number; dist: number } => {
+    let okCount = 0, dist = 0;
     for (const { k, f, raw } of fxList) {
       // Dịch ref → địa chỉ WEB; fail ref nào → bỏ ô này (đánh đỏ khi apply).
       let good = true;
@@ -305,18 +305,25 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
       const predicted = Math.round(qR * (isFinite(days) ? days : 1) * price);
       if (Math.abs(predicted - amt) > Math.max(2, Math.abs(amt) * 0.005)) { if (apply) markWarn(k, f); continue; }
       okCount++;
+      // Khoảng cách ref → dòng chứa công thức: tie-break khi dữ liệu TUẦN HOÀN khiến nhiều (X0,R0)
+      // cùng verify OK — công thức thật luôn tham chiếu hàng GẦN nó, chọn diễn giải gần nhất.
+      { let mD: RegExpExecArray | null; refRe.lastIndex = 0; while ((mD = refRe.exec(raw))) { dist += Math.abs((+mD[2] - r0) - k); if (mD[4]) dist += Math.abs((+mD[4] - r0) - k); } }
       if (apply) {
         const it = built[k] as RebuiltItem & Record<string, unknown>;
         (it.formulas as Record<string, string>)[f] = "=" + rendered;
         it[f] = fxVal;
       }
     }
-    return okCount;
+    return { ok: okCount, dist };
   };
-  // Chọn ứng viên (X0,R0) verify PASS nhiều nhất (thử tối đa 8, ưu tiên X0=1 — app xuất từ cột B).
+  // Chọn ứng viên (X0,R0): verify PASS nhiều nhất → tie-break tổng-khoảng-cách-ref NHỎ nhất
+  // (ưu tiên X0=1 — app xuất từ cột B). Quét tối đa 12 ứng viên điểm cao.
   best.sort((a, b) => ((a.x0 === 1 ? -1 : 0) - (b.x0 === 1 ? -1 : 0)) || a.r0 - b.r0);
-  let win: { x0: number; r0: number } | null = null, winOk = -1;
-  for (const c of best.slice(0, 8)) { const ok = tryFit(c.x0, c.r0, false); if (ok > winOk) { winOk = ok; win = c; } }
+  let win: { x0: number; r0: number } | null = null, winOk = -1, winDist = Infinity;
+  for (const c of best.slice(0, 12)) {
+    const { ok, dist } = tryFit(c.x0, c.r0, false);
+    if (ok > winOk || (ok === winOk && dist < winDist)) { winOk = ok; winDist = dist; win = c; }
+  }
   if (win && winOk > 0) tryFit(win.x0, win.r0, true);
   else for (const { k, f } of fxList) markWarn(k, f);   // không khớp được gì → giữ công thức gốc + ô ĐỎ hết
 }

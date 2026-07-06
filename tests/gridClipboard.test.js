@@ -366,3 +366,22 @@ describe("retargetPastedFormulas — TỰ DỊCH công thức Excel trong khối
     expect(b[0]._fxWarn).toBeUndefined();
   });
 });
+
+describe("retarget — dữ liệu TUẦN HOÀN: tie-break khoảng-cách-ref chọn đúng diễn giải", () => {
+  it("SL lặp chu kỳ (1..5): công thức vẫn trỏ ĐÚNG hàng ngay trước nó (không lệch chu kỳ)", () => {
+    const ROLES = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+    const web = (r) => ({ quantity: "E", unitPrice: "F", _amount: "G" })[r] || null;
+    const m = []; const qtyAt = [];
+    for (let i = 0; i < 30; i++) {
+      let q;
+      if (i === 10 || i === 20) { q = qtyAt[i - 1] + 1; m.push([String(i + 1), "hfx" + i, "", "m2", "=F" + (12 + i - 1) + "+1", "10.000", (q * 10000).toLocaleString("vi-VN")]); }
+      else { q = (i % 5) + 1; m.push([String(i + 1), "h" + i, "", "m2", String(q), "10.000", (q * 10000).toLocaleString("vi-VN")]); }
+      qtyAt.push(q);
+    }
+    const b = reconstructExportRows(m, ROLES, new Set(["quantity", "unitPrice", "days"]), false);
+    retargetPastedFormulas(b, m, ROLES, { webLetter: web, baseRow: 0 });
+    expect(b[10].formulas.quantity).toBe("=E10+1");   // trỏ hàng NGAY TRƯỚC, không lệch sang hàng cùng-giá-trị khác
+    expect(b[20].formulas.quantity).toBe("=E20+1");
+    expect(b[10]._fxWarn).toBeUndefined();
+  });
+});
