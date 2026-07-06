@@ -90,8 +90,12 @@ export function InvoicesPage({ me }: { me: Me }) {
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const saveField = async (row: Row, field: string, val: string | null) => {
     if (!row.sheetId) return;
-    try { await api.updateSheetInvoice(row.sheetId, field, val); toast("Đã lưu", "success"); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
+    try {
+      await api.updateSheetInvoice(row.sheetId, field, val);
+      toast("Đã lưu", "success");
+      // Đồng bộ cache cho trang Quản lý dự án / Dashboard (tham chiếu cùng nguồn) thấy ngay giá trị mới.
+      qc.invalidateQueries({ queryKey: ["quoteProjects"] });
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
 
   const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
