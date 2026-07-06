@@ -11,8 +11,9 @@ export type Item = {
   quantity?: number; days?: number | null; unitPrice?: number; notes?: string; internalNote?: string;
   approved?: boolean; approvedAt?: string | null; approvedBy?: number | null;
   formulas?: Record<string, string>; order?: number;
+  images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
 };
-export type Sheet = { id?: number; templateId?: number; name?: string | null; groupSubtotal?: boolean; order?: number; items: Item[]; extraTables?: unknown[] };
+export type Sheet = { id?: number; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; order?: number; items: Item[]; extraTables?: unknown[] };
 export type TemplateLayout = { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean };
 export type Template = { id: number; code?: string; name: string; companyId?: number; layout?: TemplateLayout };
 export type Company = { id: number; name: string; shortName?: string; address?: string };

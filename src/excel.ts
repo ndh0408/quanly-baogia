@@ -128,6 +128,59 @@ function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
   } catch { /* ignore bad image */ }
 }
 
+// ===== Cột "HÌNH ẢNH" theo TỪNG HẠNG MỤC (sheet.showImages) =====
+// "A"→0, "Z"→25, "AA"→26 và ngược lại — tính chữ cột KẾ TIẾP sau cột cuối của template.
+function colLetterToIdx(L: string) { let n = 0; for (const ch of String(L).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
+function idxToColLetter(n: number) { let s = ""; n = n + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+// Đọc kích thước ảnh từ buffer (PNG/JPEG/GIF) để nhúng GIỮ TỈ LỆ — không cần thư viện ngoài.
+function imgDims(buf: Buffer, ext: string): { w: number; h: number } | null {
+  try {
+    if (ext === "png" && buf.length > 24) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    if (ext === "gif" && buf.length > 10) return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+    if (ext === "jpeg") {   // scan các marker SOF0..SOF15 (trừ DHT/DAC/RST)
+      let i = 2;
+      while (i + 9 < buf.length) {
+        if (buf[i] !== 0xff) { i++; continue; }
+        const m = buf[i + 1];
+        if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+        i += 2 + buf.readUInt16BE(i + 2);
+      }
+    }
+  } catch { /* fallthrough */ }
+  return null;
+}
+// Nhúng NHIỀU ảnh của 1 hạng mục vào Ô cột ảnh: lưới 2 ảnh/hàng, mỗi ảnh fit khung 62×62px giữ tỉ lệ;
+// tự nâng chiều cao hàng đủ chứa. editAs oneCell → ảnh đi theo ô khi khách chèn/xoá hàng phía trên.
+const IMG_BOX = 62;               // khung mỗi ảnh (px)
+const MAX_ITEM_IMG_BYTES = 3 * 1024 * 1024;   // cap ảnh/hạng mục (client đã nén ~JPEG 1400px)
+function insertItemImages(ws: any, colLetter: string, rowNum: number, images: any) {
+  const list = (Array.isArray(images) ? images : []).filter((s) => typeof s === "string").slice(0, 10);
+  if (!list.length) return;
+  const gridRows = Math.ceil(list.length / 2);
+  const rowPx = gridRows * (IMG_BOX + 6);
+  const row = ws.getRow(rowNum);
+  row.height = Math.max(row.height || 0, rowPx * 0.75);   // px → pt (1pt = 4/3px)
+  const c0 = colLetterToIdx(colLetter);
+  for (let k = 0; k < list.length; k++) {
+    const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(list[k]);
+    if (!m) continue;
+    let extension = m[1].toLowerCase(); if (extension === "jpg") extension = "jpeg";
+    if (Math.floor((m[2].length * 3) / 4) > MAX_ITEM_IMG_BYTES) continue;   // DoS guard như logo
+    try {
+      const buffer = Buffer.from(m[2], "base64");
+      const d = imgDims(buffer, extension);
+      let w = IMG_BOX, h = IMG_BOX;
+      if (d && d.w > 0 && d.h > 0) { const s = Math.min(IMG_BOX / d.w, IMG_BOX / d.h); w = Math.max(8, Math.round(d.w * s)); h = Math.max(8, Math.round(d.h * s)); }
+      const imageId = ws.workbook.addImage({ buffer, extension });
+      ws.addImage(imageId, {
+        tl: { col: c0 + (k % 2) * 0.5 + 0.03, row: rowNum - 1 + Math.floor(k / 2) / gridRows + 0.02 },
+        ext: { width: w, height: h },
+        editAs: "oneCell",
+      });
+    } catch { /* bỏ ảnh hỏng, không phá export */ }
+  }
+}
+
 function applyTemplateCleanup(ws: any, cfg: any) {
   const cleanup = cfg.cleanup || {};
 
@@ -325,6 +378,19 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
   if (itemsCfg.headerRow) {
     for (const col of Object.values(cols)) paintCell(ws.getCell(`${col}${itemsCfg.headerRow}`), { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+  }
+  // Cột "HÌNH ẢNH" (bật theo sheet): nằm NGAY SAU cột cuối của template — không dịch cột nào,
+  // không đụng công thức. Header + width chỉ thêm khi bật (mặc định tắt → file y như cũ).
+  const imgCol: string | null = sheet?.showImages
+    ? idxToColLetter(Math.max(...Object.values(cols).map((L: any) => colLetterToIdx(String(L)))) + 1)
+    : null;
+  if (imgCol && itemsCfg.headerRow) {
+    const hcell = ws.getCell(`${imgCol}${itemsCfg.headerRow}`);
+    hcell.value = "HÌNH ẢNH";
+    hcell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    hcell.border = { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "medium" } };
+    paintCell(hcell, { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+    try { ws.getColumn(imgCol).width = 19; } catch { /* giữ mặc định */ }
   }
 
   // Row heights: use the configured uniform height; otherwise size each row to fit its
@@ -609,6 +675,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       for (const col of Object.values(cols)) {
         ws.getCell(`${col}${r}`).value = null;
       }
+    }
+    // Cột "HÌNH ẢNH": kẻ khung ô cho MỌI hàng trong bảng + nhúng ảnh của hạng mục (nếu có).
+    // Hàng nhóm/nhóm con tô nền đồng bộ dải màu; ảnh giữ tỉ lệ, lưới 2 ảnh/hàng, editAs oneCell.
+    if (imgCol && r != null) {
+      const icell = ws.getCell(`${imgCol}${r}`);
+      icell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "medium" } };
+      if (it && effKind[i] === "section") {
+        paintCell(icell, { fill: it.kind === "subsection" ? (itemsCfg.subFill || "FFC9D9EF") : (itemsCfg.sectionFill || "FFFAE9DB") });
+      }
+      if (it && Array.isArray(it.images) && it.images.length) insertItemImages(ws, imgCol, r, it.images);
     }
   }
 

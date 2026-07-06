@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "./ui";
 import * as M from "./quoteMath";
 import { evalFormula, type FormulaRefs } from "./formula";
@@ -26,6 +26,8 @@ export type GridTableProps = {
   onPayRow?: (item: ItemK) => void; // mở dialog tích thanh toán + ảnh cho 1 hàng
   groupSubtotal: boolean;
   onGroupSubtotal?: (v: boolean) => void;
+  showImages?: boolean;            // BẬT cột "Hình ảnh" (ảnh mỗi hạng mục, xuất Excel)
+  onShowImages?: (v: boolean) => void;
   onChange: () => void;
   fxBar?: boolean;                 // chỉ lưới chính bật thanh công thức
   clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
@@ -38,7 +40,7 @@ const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROU
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
 
 export function GridTable(props: GridTableProps) {
-  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, onChange, fxBar, clfTheme } = props;
+  const { items, usesDays, showDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
   const undoRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
   const focusRef = useRef<{ i: number; f: string } | null>(null);
@@ -53,6 +55,7 @@ export function GridTable(props: GridTableProps) {
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
+  const [, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
 
   const FIELDS = (["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
@@ -417,7 +420,19 @@ export function GridTable(props: GridTableProps) {
     if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
     if (ctrl && ((e.key === "y" || e.key === "Y") || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); e.stopPropagation(); if (editable) doRedo(); return; }
     if (ctrl && (e.key === "d" || e.key === "D")) { e.preventDefault(); e.stopPropagation(); if (editable) fillDown(); return; }
-    if (e.key === "Escape" && selRef.current) { e.stopPropagation(); clearSel(); return; }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      // Chọn VÙNG nhiều ô → ESC bỏ chọn (giữ hành vi cũ). Đang SỬA 1 Ô → HỦY thay đổi
+      // (khôi phục giá trị lúc vào ô — lưu ở dataset.escVal khi focus) + THOÁT ô, như Excel.
+      const sel = selRef.current;
+      if (sel && (sel.anchor.row !== sel.focus.row || sel.anchor.field !== sel.focus.field)) { clearSel(); return; }
+      e.preventDefault();
+      clearSel();
+      const esc = e.target as (HTMLInputElement | HTMLTextAreaElement) | null;
+      if (esc && esc.dataset && esc.dataset.escVal != null) esc.value = esc.dataset.escVal;   // hủy nội dung đang gõ
+      if (esc && typeof esc.blur === "function") esc.blur();   // thoát ô — blur commit lại giá trị đã khôi phục
+      return;
+    }
     if (e.key === "Tab") {
       if (!e.shiftKey && (ci < FIELDS.length - 1 || i < items.length - 1)) { e.preventDefault(); e.stopPropagation(); if (ci < FIELDS.length - 1) moveTo(i, FIELDS[ci + 1], false); else moveTo(i + 1, FIELDS[0], false); }
       else if (e.shiftKey && (ci > 0 || i > 0)) { e.preventDefault(); e.stopPropagation(); if (ci > 0) moveTo(i, FIELDS[ci - 1], false); else moveTo(i - 1, FIELDS[FIELDS.length - 1], false); }
@@ -443,6 +458,7 @@ export function GridTable(props: GridTableProps) {
     focusRef.current = { i, f };
     if (!navigatingRef.current) { const sel = selRef.current; if (!sel || sel.anchor.row !== i || sel.anchor.field !== f) { selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); } }
     const fx = items[i]?.formulas?.[f]; if (fx && el) el.value = fx;   // ô có công thức → hiện =… để sửa
+    if (el) el.dataset.escVal = el.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
   const onGridBlur = (e: { target: EventTarget | null }) => {
@@ -628,6 +644,60 @@ export function GridTable(props: GridTableProps) {
     }
     if (rows.length) toggleCellFormula(td, "Tổng", "=" + rows.map((r) => `${La}${r + 1}`).join("+"));
   };
+  // ── Cột "Hình ảnh": chèn NHIỀU ảnh/ô, tự NÉN nhỏ (canvas → JPEG ~0.82, cạnh tối đa 1400px) trước
+  //    khi lưu để đỡ nặng DB; nền trắng để PNG trong suốt không bị đen. Tối đa 10 ảnh/ô. ──
+  const IMG_MAX_DIM = 1400, IMG_MAX = 10;
+  const fileToImg = (file: File): Promise<string | null> => new Promise((resolve) => {
+    if (!file.type.startsWith("image/")) return resolve(null);
+    const r = new FileReader();
+    r.onerror = () => resolve(null);
+    r.onload = () => {
+      const im = new Image();
+      im.onerror = () => resolve(null);
+      im.onload = () => {
+        let w = im.width, h = im.height;
+        if (Math.max(w, h) > IMG_MAX_DIM) { const s = IMG_MAX_DIM / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const ctx = cv.getContext("2d"); if (!ctx) return resolve(String(r.result));
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(im, 0, 0, w, h);
+        try { resolve(cv.toDataURL("image/jpeg", 0.82)); } catch { resolve(String(r.result)); }
+      };
+      im.src = String(r.result);
+    };
+    r.readAsDataURL(file);
+  });
+  const addImages = async (i: number, files: FileList | null) => {
+    if (!editable || !files || !files.length) return;
+    const cur = (items[i].images || []) as string[];
+    const room = IMG_MAX - cur.length;
+    if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
+    const out: string[] = [];
+    for (const f of Array.from(files).slice(0, room)) { const d = await fileToImg(f); if (d) out.push(d); }
+    if (out.length) { pushUndo(); (items[i] as Record<string, unknown>).images = [...cur, ...out]; onChange(); setImgVer((v) => v + 1); }
+  };
+  const removeImage = (i: number, k: number) => {
+    if (!editable) return;
+    const cur = (items[i].images || []) as string[];
+    pushUndo(); (items[i] as Record<string, unknown>).images = cur.filter((_, idx) => idx !== k); onChange(); setImgVer((v) => v + 1);
+  };
+  const imagesCell = (i: number) => {
+    const imgs = (items[i].images || []) as string[];
+    return (
+      <div className="cell-images">
+        {imgs.map((src, k) => (
+          <span className="cell-img" key={k}>
+            <img src={src} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => window.open(src, "_blank")} />
+            {editable && <button type="button" className="img-rm" title="Xoá ảnh" onClick={() => removeImage(i, k)}>✕</button>}
+          </span>
+        ))}
+        {editable && imgs.length < IMG_MAX && (
+          <label className="img-add" title="Thêm ảnh (chọn 1 hoặc nhiều)">＋
+            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { addImages(i, e.target.files); (e.target as HTMLInputElement).value = ""; }} />
+          </label>
+        )}
+      </div>
+    );
+  };
   const fxTitle = fxBar ? "Bấm đúp để xem công thức (như Excel)" : undefined;
   // Như Excel: bấm sang chỗ khác → ô đang hiện công thức TỰ về số. Gắn 1 lần toàn cục.
   useEffect(() => {
@@ -662,6 +732,7 @@ export function GridTable(props: GridTableProps) {
       <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
+      {showImages && <td className="col-images">{imagesCell(i)}</td>}
       {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} onChange={(e) => toggleApprove(i, e.target.checked)} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
         ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} onClick={() => onPayRow?.(items[i])}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
@@ -703,6 +774,7 @@ export function GridTable(props: GridTableProps) {
               <th scope="col" style={{ width: 140 }}>THÀNH TIỀN</th>
               <th scope="col" style={{ width: 150 }}>GHI CHÚ</th>
               {internalNote && <th scope="col" style={{ width: 150 }} className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
+              {showImages && <th scope="col" style={{ width: 150 }} className="th-images">HÌNH ẢNH<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(có xuất Excel)</span></th>}
               {approveCol && <th scope="col" style={{ width: 120 }}>DUYỆT</th>}
               {payCol && <th scope="col" style={{ width: 140 }}>THANH TOÁN</th>}
               {editable && <th scope="col" style={{ width: 36 }} />}
@@ -729,6 +801,7 @@ export function GridTable(props: GridTableProps) {
                     <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{groupSubtotal ? M.fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
+                    {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {approveCol && <td className="col-approve" />}
                     {payCol && <td className="col-pay" />}
                     {editable && <td className="col-action"><button className="rm-row" title={isSub ? "Xóa nhóm con" : "Xóa nhóm"} onClick={() => removeRow(i)}>✕</button></td>}
@@ -740,6 +813,7 @@ export function GridTable(props: GridTableProps) {
                   <tr key={it._k ?? i} data-row={i} className="info-row">
                     <td className="col-stt" />
                     <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChange(); }} /></td>
+                    {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {editable && <td className="col-action"><button className="rm-row" title="Xóa" onClick={() => removeRow(i)}>✕</button></td>}
                   </tr>
                 );
@@ -778,6 +852,12 @@ export function GridTable(props: GridTableProps) {
         <label className="toggle-totals gf-group-sub" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px", fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={groupSubtotal} onChange={(e) => onGroupSubtotal(e.target.checked)} />
           <span>Hiện <strong>Thành Tiền nhóm</strong> (Số Lượng nhóm × tổng các mục trong nhóm)</span>
+        </label>
+      )}
+      {editable && onShowImages && (
+        <label className="toggle-totals gf-show-images" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "2px 0 8px 16px", fontSize: 13, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
+          <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
       )}
     </>

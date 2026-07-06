@@ -135,6 +135,9 @@ const itemSchema = z.object({
   // (unknown keys are dropped by default), otherwise the "remember formula" feature
   // dies on save. Never used in totals/export — buildSheetsCreate re-validates shape.
   formulas: z.record(z.string().max(40), z.string().max(2000)).optional().nullable(),
+  // MẢNG ảnh base64 data-URL cho cột "Hình ảnh" (chỉ hiện khi sheet.showImages). Client tự NÉN nhỏ
+  // trước khi gửi. Cap mỗi ảnh ~2MB + tối đa 10 ảnh/hạng mục (chặn payload phình). Nhúng thật vào Excel.
+  images: z.array(z.string().max(2_800_000)).max(10).optional().nullable(),
   // Duyệt theo HÀNG cho bảng nội bộ HCM/Khách. Khai báo để Zod KHÔNG strip; quyền đổi (chỉ
   // admin) + đóng dấu ngày/người do server (reconcileExtraApprovals) quyết định, không tin client.
   rid: z.string().max(64).optional().nullable(),
@@ -157,6 +160,7 @@ const sheetSchema = z.object({
   name: z.string().max(120).optional().nullable(),
   order: z.coerce.number().int().optional(),
   groupSubtotal: z.boolean().optional(),
+  showImages: z.boolean().optional(),   // BẬT cột "Hình ảnh" cho sheet này
   items: z.array(itemSchema).max(500).default([]),
   extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });

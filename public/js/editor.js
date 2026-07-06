@@ -394,6 +394,7 @@ function bindActions(q, isNew) {
             name: s.name,
             order: i + 1,
             groupSubtotal: !!s.groupSubtotal,
+            showImages: !!s.showImages,   // công tắc cột "Hình ảnh" theo sheet
             items: (s.items || []).map((it, j) => ({ ...it, order: j + 1, days: usesDays ? it.days : null })),
             extraTables: Array.isArray(s.extraTables) ? s.extraTables : [],
           };
@@ -834,6 +835,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // opts.onRedraw: thay updateSummary khi vẽ lại lưới nội bộ. → drawItems chạy được nhiều nơi.
   const tableSel = opts.tableSel || "#items-table";
   const internalNoteCol = !!opts.internalNote;   // cột "Ghi chú nội bộ" — CHỈ lưới chính, KHÔNG xuất Excel (không có ở bảng nội bộ)
+  const showImagesCol = tableSel === "#items-table" && !!activeSheet.showImages;   // cột "Hình ảnh" — CHỈ lưới chính + khi sheet bật (CÓ xuất Excel)
   const approveCol = !!opts.approveCol;          // cột "Duyệt" theo hàng — CHỈ bảng nội bộ HCM/Phí KH
   const canApprove = state.user?.role === "admin";   // CHỈ admin được tick duyệt (server cũng chặn)
   // Ô "Duyệt" 1 hàng: checkbox (admin mới bấm được) + ngày đã duyệt. Tiền hàng vẫn hiện, nhưng
@@ -841,6 +843,15 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const approveCellHtml = (it, i) => {
     const dt = it.approved && it.approvedAt ? `<span class="ap-date">✓ ${escapeHtml(fmtDate(it.approvedAt))}</span>` : "";
     return `<label class="ap-wrap"><input type="checkbox" class="ap-check" data-ap="${i}" ${it.approved ? "checked" : ""} ${canApprove ? "" : "disabled"} title="${canApprove ? "Duyệt hàng này" : "Chỉ admin được duyệt"}" /> Duyệt</label>${dt}`;
+  };
+  // Ô "Hình ảnh": nhiều thumbnail + nút thêm/xoá (tối đa 10 ảnh/ô). src là data-URL do chính app
+  // tạo (đã lọc data:image) — không phải HTML người dùng → an toàn khi chèn thẳng.
+  const IMG_MAX = 10;
+  const imagesCellHtml = (it, i) => {
+    const imgs = Array.isArray(it.images) ? it.images : [];
+    const thumbs = imgs.map((src, k) => `<span class="cell-img"><img src="${src}" alt="" loading="lazy" title="Bấm để xem lớn" data-imgview="${i}:${k}" />${editable ? `<button type="button" class="img-rm" data-imgrm="${i}:${k}" title="Xoá ảnh">✕</button>` : ""}</span>`).join("");
+    const add = (editable && imgs.length < IMG_MAX) ? `<label class="img-add" title="Thêm ảnh (chọn 1 hoặc nhiều)">＋<input type="file" class="img-file" data-imgadd="${i}" accept="image/*" multiple style="display:none" /></label>` : "";
+    return `<div class="cell-images">${thumbs}${add}</div>`;
   };
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
@@ -909,6 +920,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
+        ${showImagesCol ? `<td class="col-images">${imagesCellHtml(it, i)}</td>` : ""}
         ${approveCol ? `<td class="col-approve">${approveCellHtml(it, i)}</td>` : ""}
         ${editable ? `<td class="col-action"><button class="add-sub" data-sub="${i}" title="Thêm hàng con">↳</button><button class="rm-row" data-rm="${i}" title="Xóa hàng">✕</button></td>` : ""}`;
 
@@ -954,6 +966,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
+        ${showImagesCol ? `<td class="col-images">${imagesCellHtml(it, i)}</td>` : ""}
         ${approveCol ? `<td class="col-approve"></td>` : ""}
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="${isSub ? "Xóa nhóm con" : "Xóa nhóm"}">✕</button></td>` : ""}
       </tr>`;
@@ -963,6 +976,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       <tr data-row="${i}" class="info-row">
         <td class="col-stt"></td>
         <td class="col-info" colspan="${infoColspan}"><textarea data-f="name" rows="1" placeholder="Dòng thông tin chương trình (không tính tiền)" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
+        ${showImagesCol ? `<td class="col-images">${imagesCellHtml(it, i)}</td>` : ""}
         ${editable ? `<td class="col-action"><button class="rm-row" data-rm="${i}" title="Xóa">✕</button></td>` : ""}
       </tr>`;
     }
@@ -1764,6 +1778,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       // for editing (the cell otherwise displays the computed result) — any column.
       const fx = activeSheet.items[i]?.formulas?.[f];
       if (fx) inp.value = fx;
+      inp.dataset.escVal = inp.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
       highlightActiveFormulaRefs(inp.value);   // entering a formula cell → glow its refs
       if (grid._fxSync) grid._fxSync();   // thanh công thức (fx) bám theo ô vừa bấm — như Excel
       grid.focusSnap = snap();
@@ -1836,7 +1851,22 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       // 'copy'/'cut' chuẩn của trình duyệt (xem grid._clip) — chạy ĐỒNG BỘ đúng lúc, hoạt
       // động ổn trên macOS/Safari/Firefox + chuột phải + cảm ứng + http LAN. Ctrl+C/X rơi
       // xuống đây sẽ kích hoạt sự kiện copy/cut tương ứng, nên ở đây bỏ qua (không chặn).
-      if (e.key === "Escape" && grid.sel) { e.stopPropagation(); clearSel(); return; }
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        // Chọn VÙNG nhiều ô → ESC bỏ chọn (giữ hành vi cũ). Đang SỬA 1 Ô → HỦY thay đổi
+        // (khôi phục giá trị lúc vào ô — dataset.escVal đặt ở focusin) + THOÁT ô, như Excel.
+        const s = grid.sel;
+        if (s && (s.anchor.row !== s.focus.row || s.anchor.field !== s.focus.field)) { clearSel(); return; }
+        e.preventDefault();
+        if (grid.sel) clearSel();
+        const esc = e.target;
+        if (esc && esc.dataset && esc.dataset.escVal != null && esc.value !== esc.dataset.escVal) {
+          esc.value = esc.dataset.escVal;   // hủy nội dung đang gõ
+          esc.dispatchEvent(new Event("input", { bubbles: true }));   // chạy lại pipeline để state/pending khớp giá trị gốc
+        }
+        if (esc && typeof esc.blur === "function") esc.blur();   // thoát ô — blur commit giá trị đã khôi phục
+        return;
+      }
       if (e.key === "Tab") {
         if (!e.shiftKey && (ci < FIELDS.length - 1 || i < activeSheet.items.length - 1)) {
           e.preventDefault(); e.stopPropagation();
@@ -2011,6 +2041,68 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tbody.addEventListener("paste", (e) => { if (grid._clip) grid._clip.onPaste(e); });
   }
 
+  // ── Cột "HÌNH ẢNH": đồng bộ THEAD (thead render 1 lần ở renderEditor — patch khi bật/tắt) + bind
+  //    sự kiện thêm/xoá/xem ảnh. Ảnh NÉN nhỏ (canvas → JPEG 0.82, cạnh ≤1400px) trước khi giữ. ──
+  {
+    const thead = document.querySelector(`${tableSel} thead`);
+    const hdrRow = thead ? thead.querySelector("tr:not(.col-letters)") : null;
+    const exist = hdrRow ? hdrRow.querySelector(".th-images") : null;
+    if (showImagesCol && hdrRow && !exist) {
+      const th = document.createElement("th");
+      th.className = "th-images"; th.scope = "col"; th.style.width = "150px";
+      th.innerHTML = `HÌNH ẢNH<br><span style="font-weight:400;font-size:10px;opacity:.75">(có xuất Excel)</span>`;
+      hdrRow.insertBefore(th, editable ? hdrRow.lastElementChild : null);
+      const lr = thead.querySelector("tr.col-letters");
+      if (lr) { const lth = document.createElement("th"); lth.className = "col-letter th-images-letter"; lr.insertBefore(lth, editable ? lr.lastElementChild : null); }
+    } else if (!showImagesCol && exist) {
+      exist.remove();
+      thead.querySelector(".th-images-letter")?.remove();
+    }
+  }
+  if (showImagesCol) {
+    const IMG_DIM = 1400;
+    const fileToImg = (file) => new Promise((resolve) => {
+      if (!file.type.startsWith("image/")) return resolve(null);
+      const r = new FileReader();
+      r.onerror = () => resolve(null);
+      r.onload = () => {
+        const im = new Image();
+        im.onerror = () => resolve(null);
+        im.onload = () => {
+          let w = im.width, h = im.height;
+          if (Math.max(w, h) > IMG_DIM) { const s = IMG_DIM / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+          const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+          const ctx = cv.getContext("2d"); if (!ctx) return resolve(String(r.result));
+          ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(im, 0, 0, w, h);   // nền trắng cho PNG trong suốt
+          try { resolve(cv.toDataURL("image/jpeg", 0.82)); } catch { resolve(String(r.result)); }
+        };
+        im.src = String(r.result);
+      };
+      r.readAsDataURL(file);
+    });
+    tbody.querySelectorAll("input.img-file").forEach((inp) => inp.addEventListener("change", async () => {
+      const i = parseInt(inp.dataset.imgadd, 10);
+      const it = activeSheet.items[i]; if (!it || !inp.files || !inp.files.length) return;
+      const cur = Array.isArray(it.images) ? it.images : [];
+      const room = IMG_MAX - cur.length;
+      if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
+      const out = [];
+      for (const f of Array.from(inp.files).slice(0, room)) { const d = await fileToImg(f); if (d) out.push(d); }
+      inp.value = "";
+      if (out.length) { pushUndo(); it.images = [...cur, ...out]; window._editorDirty = true; redraw(); }
+    }));
+    tbody.querySelectorAll("button[data-imgrm]").forEach((b) => b.addEventListener("click", () => {
+      const [i, k] = b.dataset.imgrm.split(":").map(Number);
+      const it = activeSheet.items[i]; if (!it || !Array.isArray(it.images)) return;
+      pushUndo(); it.images = it.images.filter((_, idx) => idx !== k); window._editorDirty = true; redraw();
+      toast("Đã xoá ảnh — nhấn Ctrl+Z để hoàn tác", "info");
+    }));
+    tbody.querySelectorAll("img[data-imgview]").forEach((im) => im.addEventListener("click", () => {
+      const [i, k] = im.dataset.imgview.split(":").map(Number);
+      const src = activeSheet.items[i]?.images?.[k]; if (src) window.open(src, "_blank");
+    }));
+  }
+
   tbody.querySelectorAll("button[data-rm]").forEach((b) => {
     b.addEventListener("click", () => {
       const i = parseInt(b.dataset.rm, 10);
@@ -2034,7 +2126,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // sang Quản lý dự án (không hệ số nhóm) — tránh footer lệch Tổng-loại.
   const sheetSubtotal = opts.subtotalFn ? opts.subtotalFn(activeSheet) : sheetSubtotalGrouped(activeSheet.items, usesDays, activeSheet.groupSubtotal);
 
-  const totalCols = FIELDS.length + 2 + (editable ? 1 : 0); // STT + fields + amount (+ action)
+  const totalCols = FIELDS.length + 2 + (showImagesCol ? 1 : 0) + (editable ? 1 : 0); // STT + fields + amount (+ ảnh) (+ action)
   const colSpanLeft = 4 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0);
   tfoot.innerHTML = `
     ${editable ? `<tr class="add-row-tr"><td colspan="${totalCols}">
@@ -2044,6 +2136,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <button type="button" class="btn btn-sm gf-add-subsection" title="Nhóm con: có tổng riêng, KHÔNG cộng vào nhóm chính, vẫn vào Tổng cộng">+ Thêm nhóm con</button>
         <button type="button" class="btn btn-sm gf-add-info">+ Thêm dòng thông tin</button>
         <label class="grid-foot-toggle"><input type="checkbox" class="gf-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm <span class="muted">(Đơn giá × SL)</span></label>
+        ${!opts.subtotalFn ? `<label class="grid-foot-toggle"><input type="checkbox" class="gf-show-images" ${activeSheet.showImages ? "checked" : ""} /> Hiện cột <strong>Hình ảnh</strong> <span class="muted">(chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span></label>` : ""}
         <span class="muted grid-foot-hint">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
       </div>
     </td></tr>` : ""}
@@ -2052,6 +2145,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       <td colspan="2" class="empty-left label">Tổng ${opts.totalLabel || "sheet"}</td>
       <td class="value gf-subtotal-val"${!opts.subtotalFn ? ` title="Bấm đúp để xem công thức (như Excel)"` : ""}>${fmtMoney(sheetSubtotal)}</td>
       <td></td>
+      ${showImagesCol ? "<td></td>" : ""}
       ${editable ? "<td></td>" : ""}
     </tr>`;
   if (editable && tfoot) {
@@ -2061,6 +2155,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tfoot.querySelector(".gf-add-subsection")?.addEventListener("click", addSubSection);
     tfoot.querySelector(".gf-add-info")?.addEventListener("click", addInfo);
     tfoot.querySelector(".gf-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
+    tfoot.querySelector(".gf-show-images")?.addEventListener("change", (e) => { activeSheet.showImages = e.target.checked; window._editorDirty = true; redraw(); });
   }
 
   // Re-derive the selection highlight from grid.sel — survives this innerHTML rebuild.

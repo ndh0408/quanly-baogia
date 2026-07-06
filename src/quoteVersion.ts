@@ -54,6 +54,9 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
       name: s.name,
       order: s.order,
       groupSubtotal: s.groupSubtotal,
+      showImages: s.showImages,
+      // KHÔNG chép item.images vào snapshot phiên bản: ảnh base64 nặng, mỗi lần lưu tạo snapshot →
+      // phình DB. Phiên bản chỉ lưu cấu trúc/giá để đối chiếu; ảnh sống ở bản HIỆN TẠI của báo giá.
       extraTables: s.extraTables ?? null,
       items: s.items.map((it) => ({
         order: it.order,

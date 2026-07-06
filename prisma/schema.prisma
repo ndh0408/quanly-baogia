@@ -450,6 +450,7 @@ model QuoteSheet {
   order         Int
   name          String?
   groupSubtotal Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
+  showImages    Boolean       @default(false) // BẬT cột "Hình ảnh" cho sheet này (ảnh mỗi hạng mục, xuất Excel)
   subtotal      Decimal       @default(0) @db.Decimal(18, 2) // materialized: tổng sheet (= computeQuoteTotals.sheetTotals), ghi lúc save → trang Dự án không phải kéo items vào RAM
   items         QuoteItem[]
   // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
@@ -497,6 +498,7 @@ model QuoteItem {
   notes        String?
   internalNote String? // ghi chú NỘI BỘ — chỉ xem/quản lý, KHÔNG xuất Excel/PDF (không có trong itemsCfg.columns)
   formulas     Json? // raw Excel-style formulas per numeric field, e.g. {"unitPrice":"=2000+3000"} — editor metadata, not used in totals/export
+  images       Json? // MẢNG ảnh base64 data-URL cho cột "Hình ảnh" (chỉ khi sheet.showImages). Nhúng thật vào Excel; không cộng tổng.
 
   @@index([sheetId, order])
   @@index([productId])

@@ -262,6 +262,7 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
     order: s.order != null ? Number(s.order) : sIdx + 1,
     groupSubtotal: !!s.groupSubtotal,
+    showImages: !!s.showImages,   // BẬT cột "Hình ảnh" cho sheet
     subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),
     items: {
       create: (s.items || []).map((it: any, iIdx: number) => ({
@@ -280,6 +281,8 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
         notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         internalNote: it.internalNote ? String(it.internalNote).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,   // ghi chú nội bộ — KHÔNG xuất Excel
         formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
+        // Cột "Hình ảnh": chỉ giữ chuỗi data:image hợp lệ, tối đa 10 ảnh/hạng mục. Rỗng → undefined (cột NULL).
+        images: (Array.isArray(it.images) && it.images.length) ? it.images.filter((x: any) => typeof x === "string" && x.startsWith("data:image/")).slice(0, 10) : undefined,
       })),
     },
     extraTables: sanitizeExtraTables(s.extraTables),

@@ -190,7 +190,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           const stpl = templates.find((t) => t.id === s.templateId);
           const sUsesDays = !!stpl?.layout?.hasDays;
           return {
-            templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal,
+            templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
@@ -317,6 +317,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
+          showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
           onChange={() => { mark(); redraw(); }} />
 
         {editable && (

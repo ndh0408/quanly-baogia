@@ -426,6 +426,16 @@ th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color:
 .excel-table td.col-internal-note { width: 160px; border-right: 2px solid #000; }
 .excel-table td.col-internal-note textarea { font-style: italic; color: #8a5a00; background: transparent; }
 
+/* Cột "HÌNH ẢNH": nhiều ảnh/ô — thumbnail vuông + nút thêm/xoá. CÓ xuất Excel (nhúng ảnh thật). */
+.excel-table td.col-images { width: 150px; border-right: 2px solid #000; vertical-align: top; padding: 4px; }
+.cell-images { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; }
+.cell-img { position: relative; display: inline-flex; line-height: 0; }
+.cell-img img { width: 46px; height: 46px; object-fit: cover; border: 1px solid #c9ccd4; border-radius: 4px; cursor: zoom-in; background: #fff; }
+.cell-img .img-rm { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; line-height: 14px; text-align: center; border-radius: 50%; border: none; background: #c0392b; color: #fff; font-size: 10px; cursor: pointer; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.cell-img .img-rm:hover { background: #a93226; }
+.img-add { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px dashed #b0b6c0; border-radius: 4px; color: #6b7280; font-size: 22px; font-weight: 400; cursor: pointer; background: #fafbfc; user-select: none; }
+.img-add:hover { border-color: #1769d6; color: #1769d6; background: #f0f6ff; }
+
 /* "ⓘ giải thích" cạnh Tổng sheet + bảng giải thích cách cộng (CHỈ trên web, không xuất file) */
 .link-btn { background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px; padding: 0 2px; text-decoration: underline; font-weight: 500; }
 .link-btn:hover { color: #1d4ed8; }

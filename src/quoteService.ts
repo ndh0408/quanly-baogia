@@ -871,6 +871,7 @@ export async function duplicateQuote(req: Request) {
         name: s.name,
         order: s.order != null ? s.order : sIdx + 1,
         groupSubtotal: s.groupSubtotal,
+        showImages: !!s.showImages,
         subtotal: t.sheetTotals[sIdx]?.subtotal ?? D(0),   // materialized (= subtotal nguồn)
         items: {
           create: s.items.map((it: any, iIdx: number) => ({
@@ -886,6 +887,7 @@ export async function duplicateQuote(req: Request) {
             days: it.days,
             notes: it.notes,
             internalNote: it.internalNote,
+            images: (Array.isArray(it.images) && it.images.length) ? it.images : undefined,
           })),
         },
         extraTables: s.extraTables ?? undefined,
