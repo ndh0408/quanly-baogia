@@ -67,7 +67,7 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
             <label style={{ gridColumn: "1/-1" }}>Họ tên <b className="req">*</b><input value={displayName} required onChange={(e) => setDisplayName(e.target.value)} /></label>
             <label style={{ gridColumn: "1/-1" }}>Tên người gửi trên báo giá<input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => setSenderName(e.target.value)} /></label>
             <label>Số điện thoại<input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
-            <label>Chức danh<input value={title} placeholder="VD: Account, Sale, Giám đốc…" onChange={(e) => setTitle(e.target.value)} /></label>
+            <label>Chức danh<input value={title} placeholder="VD: Account, Sale…" onChange={(e) => setTitle(e.target.value)} /></label>
             <label>Email<input value={me.email || "—"} disabled /></label>
             <label>Vai trò<input value={ROLE_LABEL[me.role] || me.role} disabled /></label>
             <div style={{ gridColumn: "1/-1" }}><button className="btn btn-primary" type="submit" disabled={savingP}>{savingP ? "Đang lưu…" : "Lưu hồ sơ"}</button></div>

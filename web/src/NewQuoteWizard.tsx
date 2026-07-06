@@ -147,7 +147,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
                 </select>
                 <span className="muted" style={{ fontSize: 12 }}>Tự điền Tên + Chức danh + SĐT người gửi — vẫn sửa tay được bên dưới.</span></label>
               <label>Người gửi (From)<input value={info.fromContact} onChange={(e) => set("fromContact", e.target.value)} /></label>
-              <label>Chức danh<input value={info.fromTitle} onChange={(e) => set("fromTitle", e.target.value)} /></label>
+              <label>Chức danh<input value={info.fromTitle} placeholder="VD: Account, Sale…" onChange={(e) => set("fromTitle", e.target.value)} /></label>
               <label>SĐT người gửi<input value={info.fromPhone} onChange={(e) => set("fromPhone", e.target.value)} /></label>
               <label>Địa chỉ (tự theo công ty)<input value={info.fromAddress} readOnly title="Tự lấy theo Công ty bên gửi" /></label>
               <label>VAT (%)<input type="number" step="0.1" value={info.vatPercent} onChange={(e) => set("vatPercent", e.target.value)} /></label>

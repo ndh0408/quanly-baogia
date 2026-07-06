@@ -175,7 +175,7 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
               <label><span>Họ tên</span><input required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
               <label><span>Tên người gửi trên báo giá</span><input placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
               <label><span>Số điện thoại</span><input type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
-              <label><span>Chức danh</span><input placeholder="VD: Account, Sale, Giám đốc…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
+              <label><span>Chức danh</span><input placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
               <label><span>Mật khẩu</span>
                 <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
                   <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
