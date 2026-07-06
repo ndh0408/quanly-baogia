@@ -10,7 +10,6 @@ import { toast } from "./ui";
 // đó (không re-render cả trang như SPA → không mất focus/cuộn).
 const fmtMoney = (v?: number) => Number(v || 0).toLocaleString("vi-VN");
 const fmtDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
-const toInputDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 const STATUS_LABEL: Record<string, string> = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt" };
 const statusLabel = (s: string) => STATUS_LABEL[s] || s || "—";
 const shortTitle = (t: string) => { const s = String(t || ""); return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s; };
@@ -18,7 +17,6 @@ const codeLabel = (q: ProjectQuote) => { const c = q.projectCode || q.quoteNumbe
 const INV: Record<string, { l: string; c: string }> = { invoice: { l: "Hoá đơn", c: "pending" }, payment: { l: "Thanh toán", c: "sent" }, done: { l: "Done", c: "approved" } };
 const HEADERS = ["Status", "Phim", "Hạng Mục", "Báo Giá", "Chi Phí HCM", "Báo Giá Hà Nội", "Phí Khách Hàng", "Mã Sản Xuất", "Ngày Thi Công", "Số PO/HĐ", "Cty Xuất Hoá Đơn", "Số Hoá Đơn", "Ngày Xuất Hoá Đơn", "Thành Tiền VAT", "Thanh Toán", "Chứng từ gửi đi", "Chứng từ trả về", "Link Hoá Đơn", "Số HĐ HN", "Team client", "Account", "Ký Chứng từ", "Check"];
 const dash = <span className="muted">—</span>;
-const FIELD_OF: Record<string, string> = { invoiceNo: "invoiceNo", paidAt: "paidAt", poNumber: "poNumber", hnInvoiceNo: "hnInvoiceNo", invoiceLink: "invoiceLink", docSentAt: "docSentAt", docReturnedAt: "docReturnedAt" };
 
 type Row = {
   key: string; q: ProjectQuote; code: string; hangMuc: string; baoGia: number; thanhTienVAT: number;
@@ -26,6 +24,7 @@ type Row = {
   signedAt: string | null; signedByName: string | null; invoiceNo: string | null; paidAt: string | null;
   invStatus: string; poNumber: string | null; hnInvoiceNo: string | null; invoiceLink: string | null;
   docSentAt: string | null; docReturnedAt: string | null; hnStatus: string | null;
+  invoiceDate: string | null; invoiceCompany: string | null;   // tham chiếu từ trang Hóa đơn
 };
 
 function buildRows(quotes: ProjectQuote[]): Row[] {
@@ -44,6 +43,7 @@ function buildRows(quotes: ProjectQuote[]): Row[] {
         invoiceNo: sh.invoiceNo || null, paidAt: sh.paidAt || null, invStatus: sh.invStatus || "invoice", poNumber: sh.poNumber || null,
         hnInvoiceNo: sh.hnInvoiceNo || null, invoiceLink: sh.invoiceLink || null, docSentAt: sh.docSentAt || null,
         docReturnedAt: sh.docReturnedAt || null, hnStatus: q.hnStatus || null,
+        invoiceDate: sh.invoiceDate || null, invoiceCompany: sh.invoiceCompany || null,
       });
     });
   }
@@ -54,9 +54,7 @@ export function ProjectsPage({ me }: { me: Me }) {
   const isAdmin = me.permissions.includes("user:manage");
   // Ký chứng từ theo QUYỀN: sign:all (mọi dự án) hoặc sign:own (chỉ dự án mình tạo — server chặn owner).
   const canSignNow = me.permissions.includes("quote:sign:all") || me.permissions.includes("quote:sign:own");
-  // Tách: sửa thông tin hóa đơn (invoice:edit) vs ĐÁNH DẤU thanh toán (invoice:pay) — RIÊNG từng người.
-  const canEdit = me.permissions.includes("invoice:edit");
-  const canPay = me.permissions.includes("invoice:pay");
+  // (2026-07-06: hết sửa hóa đơn ở trang này — dữ liệu THAM CHIẾU từ trang Hóa đơn; chỉ còn nút Ký.)
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [account, setAccount] = useState("");
@@ -89,11 +87,6 @@ export function ProjectsPage({ me }: { me: Me }) {
   const paid = shown.reduce((s, r) => s + (r.paidAt ? r.thanhTienVAT : 0), 0);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => r.key === key ? { ...r, ...p } : r));
-  const saveField = async (row: Row, field: keyof Row, val: string | null) => {
-    if (!row.sheetId) return;
-    try { await api.updateSheetInvoice(row.sheetId, FIELD_OF[field as string] || (field as string), val); toast("Đã lưu", "success"); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
-  };
   const sign = async (row: Row, signed: boolean) => {
     if (!row.sheetId) return;
     try { await api.signSheet(row.sheetId, signed); toast(signed ? "Đã ký chứng từ" : "Đã bỏ ký", "success"); patch(row.key, signed ? { signedAt: new Date().toISOString(), signedByName: me.displayName } : { signedAt: null, signedByName: null }); }
@@ -108,26 +101,18 @@ export function ProjectsPage({ me }: { me: Me }) {
     </div>
   );
 
-  // Ô text/date sửa được (admin, converted, có sheetId). HÀM trả JSX (KHÔNG phải component lồng
-  // — nếu là component lồng sẽ remount input mỗi lần gõ → mất focus). Lưu khi blur(text)/change(date).
-  // Ô "paidAt" (đánh dấu thanh toán) sửa được khi có invoice:pay; field hóa đơn khác khi có invoice:edit.
-  const editable = (r: Row, field?: keyof Row) => (field === "paidAt" ? canPay : canEdit) && r.sheetId && r.q.status === "converted";
+  // 2026-07-06: trang Dự án CHỈ THAM CHIẾU dữ liệu hóa đơn (nhập ở trang HÓA ĐƠN) — mọi ô hóa
+  // đơn read-only, giữ nguyên ĐÈN ĐỎ "việc cần làm" để nhắc. Nút Ký chứng từ vẫn là hành động ở đây.
   const redStyle = (need: boolean) => need ? { background: "#ffdede" } : undefined;
-  const textCell = (r: Row, field: keyof Row, ph: string, need = false, w = 110) =>
-    editable(r, field) ? (
-      <td style={redStyle(need)}><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }}
-        onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field, e.target.value.trim() || null)} /></td>
-    ) : <td style={redStyle(need)}>{(r[field] as string) || dash}</td>;
+  const textCell = (r: Row, field: keyof Row, _ph: string, need = false) =>
+    <td style={redStyle(need)}>{(r[field] as string) || dash}</td>;
   const dateCell = (r: Row, field: keyof Row, need = false) =>
-    editable(r, field) ? (
-      <td style={redStyle(need)}><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140 }}
-        onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field, e.target.value || null); }} /></td>
-    ) : <td style={redStyle(need)}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
+    <td style={redStyle(need)}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
 
   return (
     <div>
       <h1>Quản lý dự án</h1>
-      <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Bấm vào dòng để mở báo giá.</p>
+      <p className="muted">Dự án = báo giá <b>đã chốt</b>. {!isAdmin && <b>Bạn chỉ xem được dự án do mình tạo. </b>}Báo giá nhiều sheet được tách mỗi sheet 1 dòng (Mã Sản Xuất thêm <b>_1, _2…</b>; Hạng Mục = tên sheet). Dữ liệu hóa đơn (Số HĐ, PO, ngày, chứng từ…) là <b>tham chiếu từ trang Hóa đơn</b> — kế toán nhập bên đó. Bấm vào dòng để mở báo giá.</p>
 
       <div className="toolbar" style={{ margin: "4px 0 6px" }}>
         <input className="grow" type="search" placeholder="Tìm: phim, mã sản xuất, khách hàng, account…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm kiếm dự án" />
@@ -159,7 +144,7 @@ export function ProjectsPage({ me }: { me: Me }) {
                   {shown.map((r) => {
                     const poFilled = !!r.poNumber;
                     const inv = INV[r.invStatus] || INV.invoice;
-                    const cty = r.cty || r.q.company?.shortName || r.q.company?.name || "";
+                    const cty = r.invoiceCompany || r.cty || r.q.company?.shortName || r.q.company?.name || "";
                     const hnNeed = r.hnStatus === "approved" && r.hanoi > 0 && !r.hnInvoiceNo;
                     return (
                       <tr key={r.key} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
@@ -176,14 +161,12 @@ export function ProjectsPage({ me }: { me: Me }) {
                         {textCell(r, "poNumber", "Số PO/HĐ")}
                         <td>{cty || dash}</td>
                         {textCell(r, "invoiceNo", "Số HĐ")}
-                        <td>{dash}</td>
+                        {dateCell(r, "invoiceDate")}
                         <td style={{ textAlign: "right" }}>{fmtMoney(r.thanhTienVAT)}</td>
                         {dateCell(r, "paidAt")}
                         {dateCell(r, "docSentAt", poFilled && !r.docSentAt)}
                         {dateCell(r, "docReturnedAt", poFilled && !r.docReturnedAt)}
-                        {editable(r)
-                          ? <td style={redStyle(poFilled && !r.invoiceLink)}><input value={r.invoiceLink || ""} placeholder="Link HĐ" style={{ width: 120 }} onChange={(e) => patch(r.key, { invoiceLink: e.target.value })} onBlur={(e) => saveField(r, "invoiceLink", e.target.value.trim() || null)} /></td>
-                          : <td style={redStyle(poFilled && !r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
+                        <td style={redStyle(poFilled && !r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>
                         {textCell(r, "hnInvoiceNo", "Số HĐ HN", hnNeed)}
                         <td>{r.q.customerCode || dash}</td>
                         <td>{r.q.createdBy?.displayName || dash}</td>

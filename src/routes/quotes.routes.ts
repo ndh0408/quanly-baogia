@@ -9,7 +9,7 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
 } from "../validators.js";
-import { requirePermission, can, PERMISSIONS as P } from "../permissions.js";
+import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
 import {
   createQuote,
@@ -115,9 +115,19 @@ router.put(
       invoiceLink: z.string().max(1000).trim().optional().nullable(),
       docSentAt: z.coerce.date().nullable().optional().or(z.literal("")),
       docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
+      // Trang Hóa đơn (kế toán nhập)
+      invoiceDate: z.coerce.date().nullable().optional().or(z.literal("")),
+      paymentMethod: z.string().max(40).trim().optional().nullable(),
+      orderClosedAt: z.coerce.date().nullable().optional().or(z.literal("")),
+      invoiceYear: z.coerce.number().int().min(2000).max(2100).optional().nullable().or(z.literal("")),
+      invoiceCompany: z.enum(["GN", "SM", "CLF"]).optional().nullable().or(z.literal("")),
+      invoiceDesc: z.string().max(2000).trim().optional().nullable(),
+      invoiceNote: z.string().max(2000).trim().optional().nullable(),
     }),
   }),
-  requirePermission(P.INVOICE_READ),   // vào được trang/endpoint; quyền SỬA vs THANH TOÁN check theo field trong service
+  // Vào endpoint: người xem QLDA (invoice:read) HOẶC KẾ TOÁN trang Hóa đơn (invoice:page);
+  // quyền SỬA vs THANH TOÁN check theo field trong service (invoice:edit / invoice:pay).
+  requireAnyPermission(P.INVOICE_READ, P.INVOICE_PAGE),
   asyncHandler(async (req: Request, res: Response) => res.json(await updateSheetInvoice(req)))
 );
 

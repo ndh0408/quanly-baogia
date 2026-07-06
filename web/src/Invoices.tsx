@@ -1,0 +1,194 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError, type Me, type ProjectQuote } from "./api";
+import { toast } from "./ui";
+
+// Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
+// (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
+// - Tình trạng HĐ: TỰ ĐỘNG "Done" khi có Số HĐơn + Ngày HĐơn (không nhập tay).
+// - Kế toán nhập: Hạng mục, PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
+//   Link HĐ, Ngày thu tiền (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
+// - Tự động: Khách hàng, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX).
+
+const fmtMoney = (v?: number) => Number(v || 0).toLocaleString("vi-VN");
+const fmtDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
+const toInputDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+const shortTitle = (t: string) => { const s = String(t || ""); return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s; };
+const codeLabel = (q: ProjectQuote) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
+const dash = <span className="muted">—</span>;
+
+const HEADERS = ["Khách hàng", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thu tiền", "Chứng từ gửi đi", "Chứng từ trả về", "Năm", "Note"];
+const COMPANIES = ["GN", "SM", "CLF"];
+const PAY_METHODS = ["CK", "TM"];
+
+type Row = {
+  key: string; q: ProjectQuote; code: string; sheetId: number | null; amount: number;
+  invoiceDesc: string | null; poNumber: string | null; invoiceCompany: string | null;
+  invoiceNo: string | null; invoiceDate: string | null; paymentMethod: string | null;
+  orderClosedAt: string | null; invoiceLink: string | null; paidAt: string | null;
+  docSentAt: string | null; docReturnedAt: string | null; invoiceYear: number | null; invoiceNote: string | null;
+};
+
+function buildRows(quotes: ProjectQuote[]): Row[] {
+  const out: Row[] = [];
+  for (const q of quotes) {
+    if (q.status !== "converted") continue;   // hóa đơn chỉ theo dự án ĐÃ CHỐT
+    const base = codeLabel(q);
+    const sheets = q.sheets && q.sheets.length ? q.sheets : [];
+    const multi = sheets.length > 1;
+    sheets.forEach((sh, i) => {
+      const baoGia = Number(sh.subtotal) || 0;
+      const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
+      out.push({
+        key: `${q.id}-${i}`, q, code: base + (multi ? `_${i + 1}` : ""), sheetId: sh.id || null,
+        amount: baoGia + vat,
+        invoiceDesc: sh.invoiceDesc || null, poNumber: sh.poNumber || null,
+        invoiceCompany: sh.invoiceCompany || null, invoiceNo: sh.invoiceNo || null,
+        invoiceDate: sh.invoiceDate || null, paymentMethod: sh.paymentMethod || null,
+        orderClosedAt: sh.orderClosedAt || null, invoiceLink: sh.invoiceLink || null,
+        paidAt: sh.paidAt || null, docSentAt: sh.docSentAt || null, docReturnedAt: sh.docReturnedAt || null,
+        invoiceYear: sh.invoiceYear ?? null, invoiceNote: sh.invoiceNote || null,
+      });
+    });
+  }
+  return out;
+}
+
+// Mặc định CTy theo công ty của báo giá (Gia Nguyễn → GN, Colorfull → CLF) khi kế toán chưa chọn.
+const defaultCty = (q: ProjectQuote) => {
+  const s = (q.company?.shortName || q.company?.name || "").toLowerCase();
+  if (s.includes("color") || s.includes("clf")) return "CLF";
+  return "GN";
+};
+
+export function InvoicesPage({ me }: { me: Me }) {
+  const canEdit = me.permissions.includes("invoice:edit");
+  const canPay = me.permissions.includes("invoice:pay");
+  const qc = useQueryClient();
+  const [q, setQ] = useState("");
+  const [year, setYear] = useState("");
+  const [cty, setCty] = useState("");
+
+  const { data, isPending, error } = useQuery({ queryKey: ["quoteProjects"], queryFn: api.quoteProjects });
+  const [rows, setRows] = useState<Row[]>([]);
+  useEffect(() => { if (data) setRows(buildRows(data.data || [])); }, [data]);
+  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
+
+  const years = useMemo(() => [...new Set(rows.map((r) => r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null)).filter(Boolean))].sort() as number[], [rows]);
+  const norm = (s: unknown) => (s == null ? "" : String(s)).toLowerCase();
+  const shown = rows.filter((r) => {
+    if (year && String(r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : "")) !== year) return false;
+    if (cty && (r.invoiceCompany || defaultCty(r.q)) !== cty) return false;
+    if (q && ![r.q.customerName, r.q.customerCode, r.q.title, r.code, r.invoiceDesc, r.invoiceNo, r.poNumber, r.q.createdBy?.displayName].map(norm).join(" ").includes(norm(q))) return false;
+    return true;
+  });
+
+  const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
+  const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
+
+  const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
+  const saveField = async (row: Row, field: string, val: string | null) => {
+    if (!row.sheetId) return;
+    try { await api.updateSheetInvoice(row.sheetId, field, val); toast("Đã lưu", "success"); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
+  };
+
+  const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
+  const textCell = (r: Row, field: keyof Row, ph: string, w = 110) =>
+    editable(r, field as string) ? (
+      <td><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }}
+        onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field as string, e.target.value.trim() || null)} /></td>
+    ) : <td>{(r[field] as string) || dash}</td>;
+  const dateCell = (r: Row, field: keyof Row) =>
+    editable(r, field as string) ? (
+      <td><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140 }}
+        onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }} /></td>
+    ) : <td>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
+  const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") =>
+    editable(r, field as string) ? (
+      <td><select value={(r[field] as string) || defVal} style={{ width: 74 }}
+        onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }}>
+        {!defVal && <option value="">—</option>}
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select></td>
+    ) : <td>{(r[field] as string) || defVal || dash}</td>;
+
+  const stat = (label: string, val: string, color?: string) => (
+    <div className="card-section" style={{ flex: 1, minWidth: 160, padding: "12px 16px" }}>
+      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3, color }}>{val}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h1>Hóa đơn</h1>
+      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Nhập ở đây — trang Quản lý dự án <b>tham chiếu</b> tự động. Tình trạng HĐ tự <b>Done</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+
+      <div className="toolbar" style={{ margin: "4px 0 6px" }}>
+        <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
+        <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+        <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+        <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
+      </div>
+
+      {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
+
+      {isPending ? (
+        <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "8px 0 16px" }}>
+            {stat("Tổng số tiền (VAT)", fmtMoney(sumAmount))}
+            {stat("Đã thu", fmtMoney(collected), "#0a7d28")}
+            {stat("Chưa thu", fmtMoney(sumAmount - collected), sumAmount - collected > 0 ? "#c0392b" : undefined)}
+            {stat("Số hóa đơn", String(shown.length))}
+          </div>
+
+          {shown.length === 0 ? (
+            <div className="empty">{rows.length ? "Không có hóa đơn khớp bộ lọc." : 'Chưa có dự án nào ở trạng thái "Đã chốt".'}</div>
+          ) : (
+            <div className="tbl-scroll">
+              <table className="list-table inv-table">
+                <thead><tr>{HEADERS.map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
+                <tbody>
+                  {shown.map((r) => {
+                    const done = !!(r.invoiceNo && r.invoiceDate);   // TỰ ĐỘNG Done khi có Số HĐ + Ngày HĐ
+                    return (
+                      <tr key={r.key} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
+                          onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}>
+                        <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
+                        <td><strong>{r.code}</strong></td>
+                        {textCell(r, "invoiceDesc", "Hạng mục…", 210)}
+                        <td>{done ? <span className="status approved">Done</span> : <span className="status pending">Chưa đủ</span>}</td>
+                        {textCell(r, "poNumber", "PO/HĐ", 90)}
+                        {selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q))}
+                        {textCell(r, "invoiceNo", "Số HĐ", 90)}
+                        {dateCell(r, "invoiceDate")}
+                        <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.amount)}</td>
+                        {selectCell(r, "paymentMethod", PAY_METHODS)}
+                        {dateCell(r, "orderClosedAt")}
+                        <td>{r.q.createdBy?.displayName || dash}</td>
+                        {editable(r)
+                          ? <td><input value={r.invoiceLink || ""} placeholder="Link HĐ" style={{ width: 120 }} onChange={(e) => patch(r.key, { invoiceLink: e.target.value })} onBlur={(e) => saveField(r, "invoiceLink", e.target.value.trim() || null)} /></td>
+                          : <td>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
+                        {dateCell(r, "paidAt")}
+                        {dateCell(r, "docSentAt")}
+                        {dateCell(r, "docReturnedAt")}
+                        {editable(r)
+                          ? <td><input inputMode="numeric" value={r.invoiceYear ?? ""} placeholder="Năm" style={{ width: 64 }} onChange={(e) => patch(r.key, { invoiceYear: e.target.value ? Number(e.target.value) : null })} onBlur={(e) => saveField(r, "invoiceYear", e.target.value.trim() || null)} /></td>
+                          : <td>{r.invoiceYear ?? dash}</td>}
+                        {textCell(r, "invoiceNote", "Note…", 130)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

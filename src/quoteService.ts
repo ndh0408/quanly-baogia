@@ -453,7 +453,7 @@ export async function getQuote(req: Request) {
 export async function listProjects(req: Request) {
   // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
   // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
-  const seeAll = can(req.session, P.USER_MANAGE) || can(req.session, P.INVOICE_READ); // admin HOẶC kế toán (xem mọi hóa đơn)
+  const seeAll = can(req.session, P.USER_MANAGE) || can(req.session, P.INVOICE_READ) || can(req.session, P.INVOICE_PAGE); // admin / người xem QLDA / KẾ TOÁN (trang Hóa đơn — cùng nguồn dữ liệu)
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!seeAll) where.createdById = req.session.userId;
   const quotes = await prisma.quote.findMany({
@@ -476,6 +476,7 @@ export async function listProjects(req: Request) {
           id: true, order: true, name: true, subtotal: true, extraTables: true,
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
+          invoiceDate: true, paymentMethod: true, orderClosedAt: true, invoiceYear: true, invoiceCompany: true, invoiceDesc: true, invoiceNote: true,
           template: { select: { company: { select: { shortName: true, name: true } } } },
         },
       },
@@ -520,6 +521,14 @@ export async function listProjects(req: Request) {
           invoiceLink: sh.invoiceLink || null,
           docSentAt: sh.docSentAt || null,
           docReturnedAt: sh.docReturnedAt || null,
+          // Trang Hóa đơn (kế toán nhập — QLDA chỉ tham chiếu)
+          invoiceDate: sh.invoiceDate || null,
+          paymentMethod: sh.paymentMethod || null,
+          orderClosedAt: sh.orderClosedAt || null,
+          invoiceYear: sh.invoiceYear ?? null,
+          invoiceCompany: sh.invoiceCompany || null,
+          invoiceDesc: sh.invoiceDesc || null,
+          invoiceNote: sh.invoiceNote || null,
           // Trạng thái luồng hoá đơn: "Done" CHỈ khi có CẢ số HĐ + ngày TT; có số HĐ → "Thanh toán"; chưa → "Hoá đơn".
           invStatus: (sh.invoiceNo && sh.paidAt) ? "done" : (sh.invoiceNo ? "payment" : "invoice"),
         };
@@ -624,7 +633,8 @@ export async function updateSheetInvoice(req: Request) {
   // PHÂN QUYỀN NGUYÊN TỬ: đánh dấu thanh toán (paidAt) cần invoice:pay; sửa field hóa đơn khác cần invoice:edit.
   // → cho phép "kế toán A chỉ đánh dấu thanh toán, kế toán B chỉ nhập số HĐ" v.v.
   const touchesPaid = req.body.paidAt !== undefined;
-  const touchesEdit = ["invoiceNo", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt"].some((k) => req.body[k] !== undefined);
+  const touchesEdit = ["invoiceNo", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt",
+    "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceYear", "invoiceCompany", "invoiceDesc", "invoiceNote"].some((k) => req.body[k] !== undefined);
   if (touchesPaid && !can(req.session, P.INVOICE_PAY)) throw httpError(403, "Bạn không có quyền đánh dấu thanh toán hóa đơn");
   if (touchesEdit && !can(req.session, P.INVOICE_EDIT)) throw httpError(403, "Bạn không có quyền sửa thông tin hóa đơn");
   const data: Record<string, any> = {};
@@ -632,6 +642,10 @@ export async function updateSheetInvoice(req: Request) {
   const setDate = (k: string) => { if (req.body[k] !== undefined) data[k] = req.body[k] ? new Date(req.body[k]) : null; };
   setStr("invoiceNo"); setStr("poNumber"); setStr("hnInvoiceNo"); setStr("invoiceLink");
   setDate("paidAt"); setDate("docSentAt"); setDate("docReturnedAt");
+  // Trang Hóa đơn (kế toán nhập)
+  setStr("paymentMethod"); setStr("invoiceCompany"); setStr("invoiceDesc"); setStr("invoiceNote");
+  setDate("invoiceDate"); setDate("orderClosedAt");
+  if (req.body.invoiceYear !== undefined) data.invoiceYear = req.body.invoiceYear ? Number(req.body.invoiceYear) : null;
   const updated = await prisma.quoteSheet.update({
     where: { id: sheet.id }, data,
     select: { id: true, invoiceNo: true, paidAt: true },

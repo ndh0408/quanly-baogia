@@ -474,6 +474,15 @@ model QuoteSheet {
   invoiceLink   String?   // Link Hoá Đơn (URL bản scan/PDF)
   docSentAt     DateTime? // Chứng từ gửi đi (ngày gửi)
   docReturnedAt DateTime? // Chứng từ trả về (ngày nhận lại)
+  // ===== Trang HÓA ĐƠN (kế toán, 2026-07-06) — cùng nguồn dữ liệu với Quản lý dự án (nhập 1 nơi
+  // hiện cả 2). Tình trạng HĐ auto "Done" khi có invoiceNo + invoiceDate.
+  invoiceDate    DateTime? // Ngày HĐơn (kế toán nhập)
+  paymentMethod  String?   // Hình thức thanh toán (CK/TM…)
+  orderClosedAt  DateTime? // Ngày đóng đơn hàng
+  invoiceYear    Int?      // Năm (kế toán nhập)
+  invoiceCompany String?   // CTy XUẤT hóa đơn: GN | SM | CLF (nhãn pháp nhân, không phải FK)
+  invoiceDesc    String?   // "Hạng mục" trên trang Hóa đơn (kế toán nhập mô tả)
+  invoiceNote    String?   // Note (kế toán nhập)
 
   @@index([quoteId, order])
   @@index([signedById])

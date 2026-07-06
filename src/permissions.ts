@@ -54,8 +54,9 @@ export const PERMISSIONS = {
   // Hóa đơn / Quản lý dự án. TÁCH NGUYÊN TỬ: xem / sửa-thông-tin / đánh-dấu-thanh-toán RIÊNG —
   // để phân "người này sửa hóa đơn, người kia đánh dấu thanh toán" (thanh toán per-trang, không gộp).
   INVOICE_READ:           "invoice:read",      // xem trang "Quản lý dự án" (mọi dự án + tình trạng hóa đơn)
-  INVOICE_EDIT:           "invoice:edit",      // nhập số HĐ/PO/link + ngày gửi/nhận chứng từ
-  INVOICE_PAY:            "invoice:pay",        // ĐÁNH DẤU đã thanh toán hóa đơn (ngày thanh toán)
+  INVOICE_PAGE:           "invoice:page",      // xem trang "HÓA ĐƠN" (kế toán) — nơi NHẬP mọi thông tin hóa đơn
+  INVOICE_EDIT:           "invoice:edit",      // nhập số HĐ/PO/link + ngày gửi/nhận chứng từ (trang Hóa đơn)
+  INVOICE_PAY:            "invoice:pay",        // ĐÁNH DẤU đã thanh toán hóa đơn (ngày thu tiền)
   INVOICE_MANAGE:         "invoice:manage",    // [CŨ] gộp sửa+thanh toán — giữ để bắc cầu → edit+pay
   // Ký chứng từ (trang Quản lý dự án) — TÁCH cờ canSign cũ thành quyền gán được, có phạm vi rõ.
   QUOTE_SIGN_OWN:         "quote:sign:own",    // ký chứng từ dự án DO MÌNH TẠO
@@ -126,8 +127,9 @@ export const PERMISSION_LABELS = {
   [P.QUOTE_INTERNAL_APPROVE]: "Duyệt dòng bảng nội bộ",
   [P.AUDIT_VIEW_FULL]: "Xem chi tiết nhật ký (tên + thay đổi)",
   [P.INVOICE_READ]:   "Xem trang Quản lý dự án (hóa đơn)",
+  [P.INVOICE_PAGE]:   "Xem trang Hóa đơn (kế toán)",
   [P.INVOICE_EDIT]:   "Sửa hóa đơn (số HĐ/PO/ngày)",
-  [P.INVOICE_PAY]:    "Đánh dấu thanh toán (Quản lý dự án)",
+  [P.INVOICE_PAY]:    "Đánh dấu thanh toán (ngày thu tiền)",
   [P.INVOICE_MANAGE]: "Sửa hóa đơn / đánh dấu thanh toán",
   [P.QUOTE_SIGN_OWN]: "Ký chứng từ — dự án của mình",
   [P.QUOTE_SIGN_ALL]: "Ký chứng từ — mọi dự án",
@@ -183,9 +185,10 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.PERSONNEL_MARK_PAYMENT]: "Trang Nhân sự: tích 'đã thanh toán' + up ảnh (kế toán).",
   [P.PERSONNEL_CONFIRM]:      "Trang Nhân sự: xác nhận 'đã ký' (admin).",
   [P.PERSONNEL_ACCOUNTING_NOTE]: "Trang Nhân sự: ghi cột 'Kế toán ghi chú'.",
-  [P.INVOICE_READ]:   "Mở trang Quản lý dự án, xem hóa đơn MỌI dự án.",
-  [P.INVOICE_EDIT]:   "Nhập số hóa đơn / PO / link / ngày gửi-nhận chứng từ (KHÔNG gồm đánh dấu thanh toán).",
-  [P.INVOICE_PAY]:    "CHỈ đánh dấu 'đã thanh toán' hóa đơn ở trang Quản lý dự án (riêng trang này — không phải trang khác).",
+  [P.INVOICE_READ]:   "Mở trang Quản lý dự án (THAM CHIẾU — dữ liệu hóa đơn chỉ xem, nhập ở trang Hóa đơn).",
+  [P.INVOICE_PAGE]:   "Mở trang HÓA ĐƠN (kế toán) — nơi NHẬP mọi thông tin hóa đơn; xem MỌI dự án đã chốt.",
+  [P.INVOICE_EDIT]:   "Nhập thông tin hóa đơn ở trang Hóa đơn: số HĐ, ngày HĐ, PO, CTy, hình thức TT, chứng từ, link… (KHÔNG gồm ngày thu tiền).",
+  [P.INVOICE_PAY]:    "CHỈ nhập 'Ngày thu tiền' (đánh dấu đã thanh toán) ở trang Hóa đơn.",
   [P.USER_MANAGE]:      "Mời/khóa tài khoản + TÍCH QUYỀN cho người khác.",
   [P.AUDIT_VIEW]:       "Xem nhật ký (tóm tắt: ai-làm-gì-khi-nào).",
   [P.AUDIT_VIEW_FULL]:  "Xem nhật ký CHI TIẾT (tên đối tượng + nội dung thay đổi + IP).",
@@ -241,7 +244,7 @@ export const PERMISSION_GROUPS = [
     P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_OWN, P.EMPLOYEE_DELETE_ALL,
   ] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
-    P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
+    P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
   ] },
 ];
 
@@ -275,7 +278,7 @@ const ADMIN = [
   P.QUOTE_INTERNAL_APPROVE, // duyệt dòng bảng nội bộ (trước là check role===admin)
   P.QUOTE_INTERNAL_PAY,     // admin đánh dấu thanh toán hàng nội bộ (KHÔNG thêm internal:view — admin xem FULL)
   P.AUDIT_VIEW_FULL,        // xem chi tiết nhật ký (trước là check role===admin strip PII)
-  P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // trang Quản lý dự án + sửa hóa đơn + thanh toán + ký mọi dự án
+  P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_ALL, // Quản lý dự án + trang Hóa đơn + sửa/thanh toán + ký mọi dự án
   // Nhân sự + Danh bạ: admin sửa/xóa MỌI + đánh dấu thanh toán + xác nhận đã ký + ghi kế toán ghi chú.
   P.PERSONNEL_READ_ALL, P.PERSONNEL_EDIT_ALL, P.PERSONNEL_DELETE_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_CONFIRM, P.PERSONNEL_ACCOUNTING_NOTE,
   P.EMPLOYEE_READ_ALL, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_ALL,
@@ -285,8 +288,8 @@ const ADMIN = [
 // không thấy báo giá/khách/sản phẩm. (Kế toán cần xem lương/thuế/thanh toán; Nhân sự xem hồ sơ.)
 const HR = [P.PERSONNEL_READ_ALL];
 // Kế toán: xem mọi hồ sơ + ĐÁNH DẤU đã thanh toán (có ngày) + ghi cột "KẾ TOÁN GHI CHÚ". KHÔNG sửa hồ sơ khác.
-// Kế toán: + XEM TOÀN BỘ trang Quản lý dự án + SỬA hóa đơn / đánh dấu thanh toán (yêu cầu mới).
-const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_READ, P.INVOICE_EDIT, P.INVOICE_PAY];
+// 2026-07-06: kế toán chuyển sang trang HÓA ĐƠN (invoice:page) — KHÔNG còn xem Quản lý dự án (invoice:read).
+const ACCOUNTANT = [P.PERSONNEL_READ_ALL, P.PERSONNEL_MARK_PAYMENT, P.PERSONNEL_ACCOUNTING_NOTE, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY];
 
 // Account Hà Nội: quyền TỐI THIỂU. Chỉ với tay tới báo giá ĐƯỢC GIAO (là member) để
 // đọc/sửa — nhưng presentQuote LƯỢC chỉ còn bảng nội bộ "hanoi" + route write-guard chỉ
@@ -451,6 +454,17 @@ export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.session?.userId) return res.status(401).json({ error: "Chưa đăng nhập" });
     if (!can(req.session, permission)) {
+      return res.status(403).json({ error: "Không có quyền thực hiện thao tác này" });
+    }
+    next();
+  };
+}
+
+/** 403 unless the session holds ÍT NHẤT MỘT trong các quyền (vd invoice:read HOẶC invoice:page). */
+export function requireAnyPermission(...permissions: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Chưa đăng nhập" });
+    if (!permissions.some((p) => can(req.session, p))) {
       return res.status(403).json({ error: "Không có quyền thực hiện thao tác này" });
     }
     next();

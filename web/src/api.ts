@@ -80,6 +80,9 @@ export type ProjectSheet = {
   signedAt?: string | null; signedByName?: string | null; invoiceNo?: string | null; paidAt?: string | null;
   invStatus?: string; poNumber?: string | null; hnInvoiceNo?: string | null; invoiceLink?: string | null;
   docSentAt?: string | null; docReturnedAt?: string | null;
+  // Trang Hóa đơn (kế toán nhập — Quản lý dự án chỉ tham chiếu)
+  invoiceDate?: string | null; paymentMethod?: string | null; orderClosedAt?: string | null;
+  invoiceYear?: number | null; invoiceCompany?: string | null; invoiceDesc?: string | null; invoiceNote?: string | null;
 };
 export type ProjectQuote = {
   id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
