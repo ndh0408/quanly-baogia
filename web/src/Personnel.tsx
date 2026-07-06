@@ -298,7 +298,11 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
             <tfoot>
               <tr className="sum-row">
                 <td className="sticky-1" />
-                <td className="sticky-2"><strong>Tổng (toàn bộ lọc)</strong></td>
+                {/* GHIM tổng vào ô sticky (luôn hiện) — vì cột Lương/Thuế/TN nằm xa phải, cuộn ngang mới thấy. */}
+                <td className="sticky-2 sum-label">
+                  <strong>Tổng (toàn bộ lọc)</strong>
+                  <span className="sum-inline">Σ Lương {fmtMoney(summary.salary)} · Thuế {fmtMoney(summary.pit)} · TNCT {fmtMoney(summary.taxableIncome)}</span>
+                </td>
                 {TABLE_COLS.slice(1).map((k) => (
                   <td key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>
                     {k === "salary" ? <strong>{fmtMoney(summary.salary)}</strong>

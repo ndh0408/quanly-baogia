@@ -55,6 +55,15 @@
 .tbl-wrap .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .tbl-wrap tfoot .sum-row td { background: var(--card-2); border-top: 2px solid var(--line-strong); position: sticky; bottom: 0; font-size: 13px; }
 .tbl-wrap tfoot .sticky-1, .tbl-wrap tfoot .sticky-2 { background: var(--card-2); }
+/* Dòng TỔNG: ghim Σ Lương/Thuế/TNCT vào ô sticky "Tổng" (LUÔN hiện) — vì các cột đó nằm xa phải,
+   phải cuộn ngang mới thấy → nhìn từ trái tưởng trống. position:absolute nên KHÔNG nới rộng cột
+   Họ&Tên; nổi bên phải nhãn, trên các ô cá nhân (không có tổng), không chạm cột Lương ở xa. */
+.tbl-wrap tfoot .sum-label { position: relative; overflow: visible; z-index: 3; }
+.tbl-wrap tfoot .sum-label strong { white-space: nowrap; }
+.tbl-wrap tfoot .sum-label .sum-inline {
+  position: absolute; left: calc(100% + 16px); top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-size: 12.5px; font-weight: 700; color: var(--soft); pointer-events: none;
+}
 .tbl-wrap td.col-formula { background: rgba(74,163,255,.07); }
 .tbl-wrap td.col-ref { background: rgba(232,93,154,.07); }
 .tbl-wrap th.hdr-pink   { background: color-mix(in srgb, #e36b96 20%, var(--card-2)); color: var(--text); }
