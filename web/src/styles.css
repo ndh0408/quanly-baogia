@@ -161,6 +161,10 @@ legend { font-weight: 700; font-size: 13px; color: var(--primary); padding: 0 6p
 .pf-field { display: block; margin-bottom: 14px; }
 /* Nhóm thanh độ mạnh (thuộc ô "Mật khẩu mới" ngay trên) — tách rõ khỏi ô "Nhập lại" bên dưới. */
 .pw-strength { margin: 2px 0 14px; }
+
+/* Thông báo: nhãn loại thân thiện (thay token thô "quote") ở cuối mỗi dòng. */
+.notif-tag { display: inline-block; margin-left: 8px; vertical-align: middle; font-size: 10.5px; font-weight: 700;
+  color: var(--soft); background: var(--card-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
 .pf-field span { display: block; font-size: 13px; color: var(--soft); margin-bottom: 6px; font-weight: 500; }
 .pf-field input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--field-bg); color: var(--text); }
 .pf-field input:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-color: var(--gold-d); }

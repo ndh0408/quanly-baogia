@@ -12,6 +12,23 @@ const fmtDateTime = (v: string) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
+// Nhãn thân thiện thay token thô ("quote"…) ở cuối mỗi dòng. Loại không map → ẩn (không hiện token thô).
+const RESOURCE_LABEL: Record<string, string> = {
+  quote: "Báo giá", customer: "Khách hàng", personnel: "Nhân sự", employee: "Danh bạ nhân sự", user: "Tài khoản",
+};
+// Khử TRÙNG LẶP: cùng resource+resourceId+title+body → chỉ giữ bản mới nhất (list đã sắp mới→cũ).
+// Chặn tận gốc ở backend (notify() bỏ qua bản giống chưa đọc <5'), đây là lưới an toàn cho bản cũ đã lỡ tạo.
+function dedupNotifs(list: Notif[]): Notif[] {
+  const seen = new Set<string>();
+  const out: Notif[] = [];
+  for (const n of list) {
+    const key = `${n.resource ?? ""}|${n.resourceId ?? ""}|${n.title}|${n.body}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(n);
+  }
+  return out;
+}
 
 export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
   const qc = useQueryClient();
@@ -19,7 +36,7 @@ export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
     queryKey: ["notifications"],
     queryFn: () => api.listNotifications(),
   });
-  const rows = data?.data ?? [];
+  const rows = dedupNotifs(data?.data ?? []);
   const loading = isPending;
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
@@ -60,7 +77,10 @@ export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
                onClick={() => onClick(n)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(n); } }}>
             <div className="notif-title">{n.title}</div>
             <div className="notif-body">{n.body}</div>
-            <div className="notif-meta">{fmtDateTime(n.createdAt)} {n.resource || ""}</div>
+            <div className="notif-meta">
+              <span>{fmtDateTime(n.createdAt)}</span>
+              {n.resource && RESOURCE_LABEL[n.resource] && <span className="notif-tag">{RESOURCE_LABEL[n.resource]}</span>}
+            </div>
           </div>
         ))
       )}

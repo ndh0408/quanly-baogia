@@ -42,6 +42,19 @@ export async function notify(
   },
 ) {
   try {
+    const resourceId = notif.resourceId != null ? String(notif.resourceId) : null;
+    // CHỐNG TRÙNG: nếu vừa có 1 thông báo Y HỆT (cùng người/loại/đối-tượng/tiêu-đề) còn CHƯA đọc
+    // trong ~5 phút gần đây → bỏ qua, tránh 2 dòng giống nhau khi 1 thao tác lỡ chạy 2 lần
+    // (vd giao HN 2 lần / lưu lại làm reopen 2 lần). Thông báo khác tiêu đề / cũ hơn / đã đọc vẫn tạo bình thường.
+    const dup = await prisma.notification.findFirst({
+      where: {
+        userId, resource: notif.resource || null, resourceId, title: notif.title,
+        readAt: null, createdAt: { gte: new Date(Date.now() - 5 * 60_000) },
+      },
+      select: { id: true },
+    });
+    if (dup) return;
+
     const row = await prisma.notification.create({
       data: {
         userId,
@@ -50,7 +63,7 @@ export async function notify(
         body: notif.body,
         link: notif.link || null,
         resource: notif.resource || null,
-        resourceId: notif.resourceId != null ? String(notif.resourceId) : null,
+        resourceId,
       },
     });
 
