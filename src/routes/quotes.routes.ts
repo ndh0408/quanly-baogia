@@ -33,7 +33,7 @@ import {
   updateMembers,
   deleteQuote,
   duplicateQuote,
-} from "../quoteService.js";
+} from "../services/quoteService.js";
 import { assignHn, saveHn, submitHn, reviewHn } from "../hnWorkflow.js";
 
 const router = Router();

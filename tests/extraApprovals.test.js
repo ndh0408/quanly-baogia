@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileExtraApprovals } from "../src/quoteService.js";
+import { reconcileExtraApprovals } from "../src/services/quoteService.js";
 
 // Duyệt theo HÀNG (bảng nội bộ HCM/Phí KH): CHỈ admin được đặt approved. Server phải chặn
 // non-admin tự duyệt qua payload, và giữ nguyên trạng thái duyệt cũ theo rid.
