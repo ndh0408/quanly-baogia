@@ -34,7 +34,7 @@ export function colLetter(n: number) {
 // CHỈ dùng để TỰ KIỂM: công thức dịch xong có còn cho ra đúng giá trị đã lưu không.
 // Phải giữ khớp với frontend; có test ghim. (Nếu lệch → tự kiểm trượt → ghi số: an toàn.)
 function evalArith(input: string) {
-  let s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
+  const s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];

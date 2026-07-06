@@ -1,0 +1,17 @@
+# Generated / vendor / data — không format
+node_modules
+web/node_modules
+public/app2
+package-lock.json
+web/package-lock.json
+backups
+coverage
+prisma/migrations
+fonts
+templates
+.scan
+
+# Code cũ (SPA vanilla) + Markdown báo cáo: giữ nguyên định dạng tay, tránh churn diff
+public/js
+public/*.js
+*.md

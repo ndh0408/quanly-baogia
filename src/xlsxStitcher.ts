@@ -208,7 +208,7 @@ async function copyDrawingsAndImages(srcZip: JSZip, baseZip: JSZip, newSheetNum:
   // Read drawing xml and its rels
   const oldDrPath = `xl/drawings/drawing${oldDrNum}.xml`;
   const oldDrRelsPath = `xl/drawings/_rels/drawing${oldDrNum}.xml.rels`;
-  let drXml = await readStr(srcZip, oldDrPath);
+  const drXml = await readStr(srcZip, oldDrPath);
   let drRels = await readStr(srcZip, oldDrRelsPath);
   if (!drXml) return null;
 
@@ -277,8 +277,8 @@ export async function stitchXlsxBuffers(buffers: Buffer[], sheetNames: string[])
   const baseZip = await JSZip.loadAsync(buffers[0]);
 
   // Read base XML parts
-  let baseStylesXml = ensureXmlDecl(await readStr(baseZip, "xl/styles.xml") || "");
-  let baseSstXml = await readStr(baseZip, "xl/sharedStrings.xml");
+  const baseStylesXml = ensureXmlDecl(await readStr(baseZip, "xl/styles.xml") || "");
+  const baseSstXml = await readStr(baseZip, "xl/sharedStrings.xml");
   let baseWbXml = await readStr(baseZip, "xl/workbook.xml");
   let baseWbRelsXml = await readStr(baseZip, "xl/_rels/workbook.xml.rels");
   let baseCtXml = await readStr(baseZip, "[Content_Types].xml");

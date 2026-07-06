@@ -4,7 +4,7 @@
 
 export function parseClipboardTSV(text: string | null): string[][] {
   if (text == null) return [[""]];
-  text = String(text).replace(/^﻿/, "");
+  text = String(text).replace(/^\uFEFF/, ""); // strip BOM (escape thay ký tự trần — lint no-irregular-whitespace)
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";

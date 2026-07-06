@@ -74,7 +74,8 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
     sheets.forEach((sh: any, i: number) => {
       const code = base + (multi ? `_${i + 1}` : "");
       if (!wanted.has(code)) return; // chỉ giữ mã đang cần — khớp đúng 1 mã sản xuất
-      const baoGia = byId.get(sh.id) ?? Number(q.subtotal) ?? 0;
+      // `|| 0` (không phải ??): Number() trả NaN chứ không bao giờ nullish — subtotal thiếu/hỏng phải về 0.
+      const baoGia = byId.get(sh.id) ?? (Number(q.subtotal) || 0);
       out.set(code, {
         projectNameContract: q.title ?? null,
         salesContractNo: sh.invoiceNo ?? null,

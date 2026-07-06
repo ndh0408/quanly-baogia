@@ -22,7 +22,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "prepare": "husky",
+    "format": "prettier --write ."
   },
   "engines": {
     "node": ">=22"
@@ -80,10 +82,15 @@
     "@types/speakeasy": "^2.0.10",
     "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^10.4.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
     "playwright": "^1.61.0",
+    "prettier": "^3.9.4",
     "supertest": "^7.2.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.62.1",
     "vitest": "^4.1.7"
   },
   "overrides": {

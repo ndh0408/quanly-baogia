@@ -111,7 +111,7 @@ function PermMatrix({ cat, isAdmin, value, onChange }: { cat: PermCatalog; isAdm
   if (isAdmin) return <p className="muted perm-admin-note">✅ Tài khoản <b>Quản trị</b> có <b>TOÀN QUYỀN</b> — không cần tích.</p>;
   const adminOnly = new Set(cat.adminOnlyPermissions);
   const inMatrix = new Set(cat.groups.flatMap((g) => g.perms.map((p) => p.key))); // chỉ quyền CÓ trong ma trận
-  const toggle = (k: string) => { const n = new Set(value); n.has(k) ? n.delete(k) : n.add(k); onChange(n); };
+  const toggle = (k: string) => { const n = new Set(value); if (n.has(k)) n.delete(k); else n.add(k); onChange(n); };
   const applyPreset = (roleKey: string) => {
     const r = cat.roles.find((x) => x.key === roleKey);
     if (r) onChange(new Set(r.permissions.filter((p) => inMatrix.has(p) && !adminOnly.has(p)))); // bỏ quyền ẩn (vd product:*)
@@ -222,7 +222,7 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
   const firstRef = useRef<HTMLInputElement>(null);
   useEffect(() => { firstRef.current?.focus(); }, []);
   // Mặc định điền sẵn preset "Account" cho tài khoản mới (admin chỉnh lại tùy ý).
-  useEffect(() => { if (cat && perms.size === 0 && !isAdmin) { const m = cat.roles.find((r) => r.key === "manager"); if (m) setPerms(new Set(m.permissions.filter((p) => !cat.adminOnlyPermissions.includes(p)))); } /* eslint-disable-next-line */ }, [cat]);
+  useEffect(() => { if (cat && perms.size === 0 && !isAdmin) { const m = cat.roles.find((r) => r.key === "manager"); if (m) setPerms(new Set(m.permissions.filter((p) => !cat.adminOnlyPermissions.includes(p)))); }   }, [cat]);
   useEscClose(onClose);
   const save = async () => {
     if (!displayName.trim() || !email.trim()) { setErr("Vui lòng nhập họ tên và email"); return; }
