@@ -325,13 +325,17 @@ export function DashboardPage({ me }: { me: Me }) {
         <div className="skeleton-wrap" style={{ marginTop: 14 }}>{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : data && k && pk ? (
         <>
+          {/* Kỳ TRƯỚC rỗng (chưa có báo giá nào) → KHÔNG có gì để so → hiện "—" thay vì "▲ mới" tràn lan
+              (mọi KPI nhảy từ 0). Nếu kỳ trước CÓ dữ liệu mà 1 chỉ số =0 thì "▲ mới" vẫn giữ (có ý nghĩa). */}
+          {(() => { const prevEmpty = (pk.totalQuotes ?? 0) === 0; const cmp = (d: ReturnType<typeof delta>) => prevEmpty ? null : d; return (
           <div className="kpi-grid dash-kpi">
-            <div className="kpi"><span>Báo giá tạo</span><strong>{k.totalQuotes}</strong><TrendChip d={delta(k.totalQuotes, pk.totalQuotes)} /></div>
-            <div className="kpi"><span>Doanh số đã chốt</span><strong>{fmtMoney(k.approvedAmount)} đ</strong><TrendChip d={delta(k.approvedAmount, pk.approvedAmount)} /></div>
-            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{k.conversionRate}%</strong><TrendChip d={ppDelta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
-            <div className="kpi"><span>Deal trung bình</span><strong>{fmtMoney(Math.round(k.avgDealSize))} đ</strong><TrendChip d={delta(k.avgDealSize, pk.avgDealSize)} /></div>
-            <div className="kpi"><span>Đang chào · {data.cur.counts.draft || 0} BG</span><strong>{fmtMoney(data.cur.sums.draft)} đ</strong><TrendChip d={delta(data.cur.sums.draft || 0, data.prev.sums.draft || 0)} /></div>
+            <div className="kpi"><span>Báo giá tạo</span><strong>{k.totalQuotes}</strong><TrendChip d={cmp(delta(k.totalQuotes, pk.totalQuotes))} /></div>
+            <div className="kpi"><span>Doanh số đã chốt</span><strong>{fmtMoney(k.approvedAmount)} đ</strong><TrendChip d={cmp(delta(k.approvedAmount, pk.approvedAmount))} /></div>
+            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{k.conversionRate}%</strong><TrendChip d={prevEmpty ? null : ppDelta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
+            <div className="kpi"><span>Deal trung bình</span><strong>{fmtMoney(Math.round(k.avgDealSize))} đ</strong><TrendChip d={cmp(delta(k.avgDealSize, pk.avgDealSize))} /></div>
+            <div className="kpi"><span>Đang chào · {data.cur.counts.draft || 0} BG</span><strong>{fmtMoney(data.cur.sums.draft)} đ</strong><TrendChip d={cmp(delta(data.cur.sums.draft || 0, data.prev.sums.draft || 0))} /></div>
           </div>
+          ); })()}
 
           <section className="card-section dash-chart">
             <h3>Doanh số đã chốt theo ngày</h3>
