@@ -16,6 +16,20 @@ function PageFallback() {
   return <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
 }
 
+// CHẶN Ở FRONTEND (defense-in-depth): trang chứa dữ liệu nhạy cảm (Nhân sự/Danh bạ: căn cước, MST,
+// STK…) đã được API gác quyền, nhưng nếu gõ thẳng #/personnel không quyền thì KHÔNG được render page
+// rồi mới lỗi API — hiện thẳng màn "không có quyền". Áp cho MỌI trang nav có `perm`.
+function AccessDenied() {
+  return (
+    <div className="center" style={{ flexDirection: "column", gap: 10, padding: 40, textAlign: "center" }}>
+      <div style={{ fontSize: 40 }}>🔒</div>
+      <h2>Không có quyền truy cập</h2>
+      <p className="muted">Tài khoản của bạn không được cấp quyền xem trang này. Liên hệ quản trị viên nếu cần.</p>
+      <a className="btn btn-primary" href="#/">Về trang chính</a>
+    </div>
+  );
+}
+
 // LazyBoundary = ErrorBoundary + Suspense. Khi deploy bản mới lúc user đang mở app cũ rồi mở route lazy,
 // chunk-hash CŨ đã bị xóa (emptyOutDir) → ChunkLoadError. Tự reload 1 lần (chặn loop qua mốc thời gian)
 // để lấy bundle mới thay vì để trang hỏng. (Lỗi cố hữu của SPA code-split, không riêng PWA.)
@@ -284,6 +298,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   const visible = NAV.filter((n) => has(n.perm));
   const groups = [...new Set(visible.map((n) => n.group))];
   const active = NAV.find((n) => n.key === key);
+  // Trang nav có `perm` mà tài khoản KHÔNG có → chặn render (dù gõ thẳng hash). API vẫn là chốt chặn cuối.
+  const denied = !!(active?.perm && !has(active.perm));
   const onTheme = () => { toggleTheme(); setTheme(themeIcon()); };
   // FLIP: #/quotes/:id (SỬA báo giá đã có) giờ dùng React editor. NGOẠI LỆ: account_hn giữ view
   // fill-HN của SPA qua iframe. #/new (TẠO mới) tạm giữ wizard SPA (chọn công ty/mẫu/khách) — sẽ port
@@ -352,7 +368,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
-            {key === "dashboard" ? <DashboardPage me={me} />
+            {denied ? <AccessDenied />
+              : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
               : key === "customers" ? <CustomersPage me={me} />
               : key === "users" ? <UsersPage me={me} onPreview={onPreview} />

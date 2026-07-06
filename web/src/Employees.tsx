@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Employee } from "./api";
 import { FIELDS, type Field } from "./fields";
@@ -10,6 +10,23 @@ export const EMP_FIELDS: Field[] = FIELDS.filter((f) => f.group === "Cá nhân")
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
 const toInputDate = toLocalInputDate;
 const PAGE_SIZE = 50;
+
+// Màn hình hẹp (≤ 820px) → dạng THẺ thay bảng nhiều cột (giống trang Nhân sự) — không phải cuộn bảng rộng.
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const on = () => setM(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return m;
+}
+const empCell = (f: Field, r: Employee): ReactNode => {
+  const v = r[f.key];
+  if (f.type === "date") return fmtDate(v) || <span className="muted">—</span>;
+  return v == null || v === "" ? <span className="muted">—</span> : String(v);
+};
 
 export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   const qc = useQueryClient();
@@ -24,6 +41,7 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   const canEdit = has("employee:edit:own") || has("employee:edit:all");
   const canDelete = has("employee:delete:own") || has("employee:delete:all");
   const canManage = canCreate || canEdit || canDelete; // có bất kỳ quyền ghi → không phải "chỉ xem"
+  const isMobile = useIsMobile();
 
   // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
   const debouncedQ = useDebouncedValue(query, query ? 300 : 0);
@@ -70,6 +88,27 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
         <div className="empty">{query ? "Không tìm thấy nhân viên khớp." : "Chưa có nhân viên nào. Bấm “+ Thêm nhân viên”."}</div>
+      ) : isMobile ? (
+        /* MOBILE: mỗi người 1 THẺ (label : value) — không phải cuộn bảng nhiều cột. */
+        <div className="prs-cards">
+          {rows.map((r, i) => (
+            <div className="prs-card" key={r.id}>
+              <div className="prs-card-head">
+                <strong>{stt(i)}. {r.fullName}</strong>
+                <span className="prs-card-actions">
+                  <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEdit ? "Sửa" : "Xem"}</button>
+                  {canDelete && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
+                </span>
+              </div>
+              <dl className="prs-card-body">
+                {EMP_FIELDS.filter((f) => f.key !== "fullName").map((f) => (
+                  <div className="prs-crow" key={f.key}><dt>{f.label}</dt><dd>{empCell(f, r)}</dd></div>
+                ))}
+                <div className="prs-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName ?? "—"}</dd></div>
+              </dl>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="tbl-wrap">
           <table>
