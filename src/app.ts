@@ -299,13 +299,10 @@ export function createApp() {
   app.get(["/app", "/app/*"], (_req, res) => sendOld(res));
   // App MỚI (React/TS) tại /app2 (giữ tương thích/đường dẫn cũ).
   app.get(["/app2", "/app2/*"], (_req, res) => sendReact(res));
-  // Gốc "/": trên DEV/STAGING phục vụ app React HỢP NHẤT (không cần /app2). PROD (gianguyen.cloud)
-  // GIỮ app cũ — gate theo hostname nên dù deploy CÙNG code, prod KHÔNG bị đổi sang React.
-  const isStagingHost = (req: Request) => {
-    const h = String(req.headers["x-forwarded-host"] || req.hostname || "").toLowerCase();
-    return /^dev\.|staging|\.ts\.net$/.test(h);
-  };
-  app.get("*", (req, res) => (isStagingHost(req) ? sendReact(res) : sendOld(res)));
+  // Gốc "/": phục vụ app REACT cho MỌI môi trường (2026-07-06 — chuyển đổi công nghệ chính thức:
+  // React đã port đầy đủ tính năng, duyệt kỹ trên staging, bỏ gate hostname). App CŨ (vanilla SPA)
+  // vẫn truy cập được tại /app làm đường lui — không xoá gì, chỉ đổi mặc định.
+  app.get("*", (_req, res) => sendReact(res));
 
   app.use(errorHandler);
 
