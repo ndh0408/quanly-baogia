@@ -3,7 +3,7 @@ import { toast } from "./ui";
 import * as M from "./quoteMath";
 import { evalFormula, type FormulaRefs } from "./formula";
 import { type ItemK, nextK, autoGrow } from "./gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles } from "./clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "./clipboard";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -93,6 +93,9 @@ export function GridTable(props: GridTableProps) {
   // commitCell: áp "=" → công thức cho MỌI cột; số/chữ thường ngược lại. Tự bật toggle nhóm khi SL nhóm>1.
   const commitCell = (i: number, f: string, raw: string) => {
     const it = items[i] as Record<string, unknown>; raw = String(raw);
+    // Người dùng đã sửa ô → bỏ cờ "công thức Excel chưa dịch được" (ô đỏ) của ô này.
+    const fw = it._fxWarn as Record<string, boolean> | undefined;
+    if (fw && fw[f]) { delete fw[f]; if (!Object.keys(fw).length) delete it._fxWarn; }
     if (raw.trim().startsWith("=")) {
       if (!it.formulas) it.formulas = {};
       (it.formulas as Record<string, string>)[f] = raw.trim();
@@ -360,7 +363,11 @@ export function GridTable(props: GridTableProps) {
     // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
     if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, FIELDS.length))) {
       const roles = hdrRoles || ADDR.map((c) => c.f);
-      const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
+      const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
+      // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
+      // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).
+      retargetPastedFormulas(rebuilt, rows, roles, { webLetter: (role) => letterOf(role) || null, baseRow: startRow });
+      const built = rebuilt.map((b) => ({ ...M.blankItem(usesDays), ...b, _k: nextK() } as ItemK));
       items.splice(startRow, rows.length, ...built);
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       autoEnableGroupSub(startRow, startRow + built.length - 1);
@@ -368,7 +375,9 @@ export function GridTable(props: GridTableProps) {
       selRef.current = { anchor: { row: startRow, field: FIELDS[0] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
       focusCell(startRow, FIELDS[0]);
       const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
+      if (nWarn) toast(`⚠️ ${nWarn} ô công thức KHÔNG tự dịch được từ Excel — ô viền ĐỎ, bấm vào kiểm tra/sửa tay`, "error");
       return;
     }
 
@@ -523,7 +532,7 @@ export function GridTable(props: GridTableProps) {
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
       ref={autoGrow} onInput={(e) => { const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChange(); }} />
   );
-  const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "");
+  const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "") + ((items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> })._fxWarn?.[f] ? " cell-fx-error" : "");
   const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
 
   // Sau mỗi render: (1) ĐỒNG BỘ mọi ô KHÔNG-focus về model (như SPA redraw — dán/undo/recompute hiển

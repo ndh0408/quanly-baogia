@@ -153,3 +153,170 @@ export function looksLikeExportPaste(matrix: string[][], startCol: number, field
   // trùng với dán dữ liệu thường) → vẫn coi là báo giá app xuất ra.
   return hasGroupLetter && (maxCols > fieldCount || matrix.length > 1);
 }
+
+// ===== TỰ DỊCH công thức Excel trong khối DÁN → toạ độ WEB (retarget) =====
+// Ô paste chứa "=…" mang địa chỉ Ô THEO FILE EXCEL (vd "=G12*F12") — lệch hẳn hệ cột/hàng web.
+// Chiến lược: (1) DÒ khối bắt đầu từ cột X0/hàng R0 nào của file nguồn (quét, chấm điểm theo số
+// tham chiếu rơi gọn vào khối); (2) DỊCH từng ref sang (role, dòng-trong-khối); (3) TỰ KIỂM bằng
+// cột THÀNH TIỀN của dòng đó trong khối (SL×ĐG≈TT). Khớp → tự sửa công thức theo địa chỉ web +
+// điền giá trị. Không chắc → GIỮ công thức gốc + cờ _fxWarn (ô ĐỎ, người dùng sửa tay).
+const RT_FNS: Record<string, (a: number[]) => number> = {
+  SUM: (a) => a.reduce((x, y) => x + y, 0), PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
+  AVERAGE: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0), AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
+  MIN: (a) => (a.length ? Math.min(...a) : 0), MAX: (a) => (a.length ? Math.max(...a) : 0),
+  ROUND: (a) => { const p = 10 ** (a[1] || 0); return Math.round((a[0] || 0) * p) / p; },
+  ROUNDUP: (a) => { const p = 10 ** (a[1] || 0); return Math.ceil((a[0] || 0) * p) / p; },
+  ROUNDDOWN: (a) => { const p = 10 ** (a[1] || 0); return Math.trunc((a[0] || 0) * p) / p; },
+  INT: (a) => Math.floor(a[0] || 0), ABS: (a) => Math.abs(a[0] || 0),
+};
+function rtArith(input: string): number | null {
+  const s = String(input).replace(/\s+/g, "");
+  if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
+  let pos = 0;
+  const peek = () => s[pos];
+  const fac = (): number | null => {
+    if (peek() === "(") { pos++; const v = expr(); if (peek() !== ")") return null; pos++; return v; }
+    if (peek() === "-") { pos++; const v = fac(); return v === null ? null : -v; }
+    if (peek() === "+") { pos++; return fac(); }
+    let num = ""; while (pos < s.length && /[0-9.]/.test(s[pos])) num += s[pos++];
+    return num && !isNaN(Number(num)) ? Number(num) : null;
+  };
+  const term = (): number | null => { let v = fac(); while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = fac(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; } return v; };
+  const expr = (): number | null => { let v = term(); while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; } return v; };
+  const r = expr();
+  return pos === s.length && r !== null && isFinite(r) ? r : null;
+}
+// Đánh giá công thức đã thay ref bằng SỐ (còn hàm SUM/ROUND…, "%", ";" đối số, "," thập phân).
+function rtEval(input: string): number | null {
+  let s = String(input).trim().replace(/^=/, "").replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, nn) => String(Number(String(nn).replace(",", ".")) / 100));
+  s = s.replace(/,/g, ".");
+  let guard = 0;
+  while (/[A-Za-z]+\s*\(/.test(s)) {
+    if (guard++ > 60) return null;
+    let changed = false;
+    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m, name, args) => {
+      changed = true;
+      const fn = RT_FNS[String(name).toUpperCase()];
+      if (!fn) return "NaN";
+      const vals = String(args).split(";").map((a) => rtArith(a)).filter((v): v is number => v !== null && isFinite(v));
+      const r = fn(vals);
+      return r == null || !isFinite(r) ? "NaN" : String(r);
+    });
+    if (!changed) return null;
+  }
+  return rtArith(s);
+}
+const rtColIdx = (L: string) => { let nn = 0; for (const ch of L.toUpperCase()) nn = nn * 26 + (ch.charCodeAt(0) - 64); return nn - 1; };
+
+export type RetargetOpts = {
+  webLetter: (role: string) => string | null;   // role → chữ cột WEB của lưới đích (quantity/unitPrice/days/_amount)
+  baseRow: number;                              // hàng web (0-based) của dòng ĐẦU khối sau khi dán
+};
+export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][], roles: string[], opts: RetargetOpts) {
+  const n = built.length;
+  const amtI = roles.indexOf("_amount"), dayI = roles.indexOf("days");
+  const NUMOK = new Set(["quantity", "unitPrice", "days", "_amount"]);
+  const cellRaw = (k: number, i: number) => (i >= 0 && matrix[k] && matrix[k][i] != null ? String(matrix[k][i]) : "");
+  // Giá trị 1 ô của KHỐI theo (role, dòng k) — _amount đọc từ matrix; ô công thức → NaN (chưa biết).
+  const valOf = (role: string, k: number): number => {
+    const it = built[k];
+    if (!it || it.kind === "info") return NaN;
+    if (role === "_amount") { const s = cellRaw(k, amtI).trim(); return s && !s.startsWith("=") ? parseLooseNumber(s) : NaN; }
+    if (it.formulas && it.formulas[role] != null) return NaN;
+    const v = (it as Record<string, unknown>)[role];
+    return v == null ? NaN : Number(v);
+  };
+  // Gom mọi ref (đơn + dải) của mọi công thức trong khối.
+  const refRe = /([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g;
+  const allRefs: { col: number; row: number }[] = [];
+  const fxList: { k: number; f: string; raw: string }[] = [];
+  built.forEach((it, k) => {
+    if (!it.formulas) return;
+    for (const f in it.formulas) {
+      const raw = String(it.formulas[f] || "");
+      if (!/[A-Za-z]+\d+/.test(raw)) continue;   // không tham chiếu ô → số học thuần, giữ nguyên vẫn đúng
+      fxList.push({ k, f, raw });
+      let m: RegExpExecArray | null; refRe.lastIndex = 0;
+      while ((m = refRe.exec(raw))) {
+        allRefs.push({ col: rtColIdx(m[1]), row: +m[2] });
+        if (m[3] && m[4]) allRefs.push({ col: rtColIdx(m[3]), row: +m[4] });
+      }
+    }
+  });
+  if (!fxList.length) return;
+  const markWarn = (k: number, f: string) => { const it = built[k] as RebuiltItem & { _fxWarn?: Record<string, boolean> }; (it._fxWarn || (it._fxWarn = {}))[f] = true; };
+  // DÒ (X0, R0): cột/hàng Excel ĐẦU của khối — chấm điểm theo số ref rơi gọn vào khối + đúng cột số.
+  let best: { x0: number; r0: number; score: number }[] = [];
+  for (let x0 = 0; x0 <= 6; x0++) {
+    for (let r0 = 1; r0 <= 500; r0++) {
+      let score = 0;
+      for (const rf of allRefs) {
+        const role = roles[rf.col - x0];
+        if (role && NUMOK.has(role) && rf.row - r0 >= 0 && rf.row - r0 < n) score++;
+      }
+      if (score > 0) {
+        if (!best.length || score > best[0].score) best = [{ x0, r0, score }];
+        else if (score === best[0].score) best.push({ x0, r0, score });
+      }
+    }
+  }
+  const tryFit = (x0: number, r0: number, apply: boolean): number => {
+    let okCount = 0;
+    for (const { k, f, raw } of fxList) {
+      // Dịch ref → địa chỉ WEB; fail ref nào → bỏ ô này (đánh đỏ khi apply).
+      let good = true;
+      const rendered = raw.replace(/^=/, "").replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (mm, c1, r1, c2, r2) => {
+        if (!good) return mm;
+        const roleA = roles[rtColIdx(c1) - x0]; const ka = +r1 - r0;
+        if (!roleA || !NUMOK.has(roleA) || ka < 0 || ka >= n) { good = false; return mm; }
+        const La = opts.webLetter(roleA); if (!La) { good = false; return mm; }
+        if (c2 && r2) {
+          const roleB = roles[rtColIdx(c2) - x0]; const kb = +r2 - r0;
+          if (roleB !== roleA || kb < 0 || kb >= n) { good = false; return mm; }
+          return La + (opts.baseRow + Math.min(ka, kb) + 1) + ":" + La + (opts.baseRow + Math.max(ka, kb) + 1);
+        }
+        return La + (opts.baseRow + ka + 1);
+      });
+      if (!good) { if (apply) markWarn(k, f); continue; }
+      // Eval theo giá trị KHỐI: thay ref bằng SỐ.
+      let evalable = true;
+      const numeric = raw.replace(/^=/, "").replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (mm, c1, r1, c2, r2) => {
+        if (!evalable) return mm;
+        const roleA = roles[rtColIdx(c1) - x0]; const ka = +r1 - r0;
+        if (c2 && r2) {
+          const kb = +r2 - r0; const vals: number[] = [];
+          for (let kk = Math.min(ka, kb); kk <= Math.max(ka, kb); kk++) { const v = valOf(roleA, kk); if (!isFinite(v)) { evalable = false; return mm; } vals.push(v); }
+          return vals.join(";");
+        }
+        const v = valOf(roleA, ka); if (!isFinite(v)) { evalable = false; return mm; }
+        return String(v);
+      });
+      const fxVal = evalable ? rtEval(numeric) : null;
+      if (fxVal == null || !isFinite(fxVal)) { if (apply) markWarn(k, f); continue; }
+      // TỰ KIỂM bằng THÀNH TIỀN dòng k của khối: fx là 1 vế của SL×(Ngày×)ĐG.
+      const amtS = cellRaw(k, amtI).trim();
+      const amt = amtS && !amtS.startsWith("=") ? parseLooseNumber(amtS) : NaN;
+      const qty = f === "quantity" ? fxVal : valOf("quantity", k);
+      const price = f === "unitPrice" ? fxVal : valOf("unitPrice", k);
+      const days = dayI >= 0 ? (f === "days" ? fxVal : (valOf("days", k) || 1)) : 1;
+      if (!isFinite(amt) || amt === 0 || !isFinite(qty) || !isFinite(price)) { if (apply) markWarn(k, f); continue; }
+      const qR = (() => { const t = Math.round(Math.abs(qty) * 10 + 1e-6) / 10; return qty < 0 ? -t : t; })();   // SL làm tròn 1 số như app
+      const predicted = Math.round(qR * (isFinite(days) ? days : 1) * price);
+      if (Math.abs(predicted - amt) > Math.max(2, Math.abs(amt) * 0.005)) { if (apply) markWarn(k, f); continue; }
+      okCount++;
+      if (apply) {
+        const it = built[k] as RebuiltItem & Record<string, unknown>;
+        (it.formulas as Record<string, string>)[f] = "=" + rendered;
+        it[f] = fxVal;
+      }
+    }
+    return okCount;
+  };
+  // Chọn ứng viên (X0,R0) verify PASS nhiều nhất (thử tối đa 8, ưu tiên X0=1 — app xuất từ cột B).
+  best.sort((a, b) => ((a.x0 === 1 ? -1 : 0) - (b.x0 === 1 ? -1 : 0)) || a.r0 - b.r0);
+  let win: { x0: number; r0: number } | null = null, winOk = -1;
+  for (const c of best.slice(0, 8)) { const ok = tryFit(c.x0, c.r0, false); if (ok > winOk) { winOk = ok; win = c; } }
+  if (win && winOk > 0) tryFit(win.x0, win.r0, true);
+  else for (const { k, f } of fxList) markWarn(k, f);   // không khớp được gì → giữ công thức gốc + ô ĐỎ hết
+}

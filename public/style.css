@@ -436,6 +436,11 @@ th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color:
 .img-add { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px dashed #b0b6c0; border-radius: 4px; color: #6b7280; font-size: 22px; font-weight: 400; cursor: pointer; background: #fafbfc; user-select: none; }
 .img-add:hover { border-color: #1769d6; color: #1769d6; background: #f0f6ff; }
 
+/* Ô công thức dán từ Excel KHÔNG tự dịch được tham chiếu → viền + nền ĐỎ, người dùng sửa tay. */
+.excel-table td.cell-fx-error { box-shadow: inset 0 0 0 2px #dc2626; }
+.excel-table td.cell-fx-error input { background: #fee2e2; color: #991b1b; font-weight: 600; }
+.excel-table td.cell-fx-error input:focus { background: #fff5f5; }
+
 /* "ⓘ giải thích" cạnh Tổng sheet + bảng giải thích cách cộng (CHỈ trên web, không xuất file) */
 .link-btn { background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px; padding: 0 2px; text-decoration: underline; font-weight: 500; }
 .link-btn:hover { color: #1d4ed8; }

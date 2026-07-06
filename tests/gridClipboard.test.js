@@ -10,6 +10,7 @@ import {
   looksLikeExportPaste,
   isHeaderRow,
   headerToRoles,
+  retargetPastedFormulas,
 } from "../public/grid-clipboard.js";
 
 // GN template export columns (no days, has Chi Tiết), as copied B:H (STT..Thành Tiền)
@@ -309,5 +310,59 @@ describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); B
     expect(b[1].kind).toBe("subsection");
     expect(b[2].kind).toBe("item");
     expect(b[2].unitPrice).toBe(105000);
+  });
+});
+
+describe("retargetPastedFormulas — TỰ DỊCH công thức Excel trong khối dán → toạ độ web", () => {
+  // File nguồn dạng app xuất: B stt, C name, D detail, E dvt, F SL, G ĐG, H TT (x0=1, data từ hàng 12)
+  const ROLES = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+  const NUM = new Set(["quantity", "unitPrice", "days"]);
+  // web GN (không ngày): E=quantity, F=unitPrice, G=_amount
+  const webLetter = (role) => ({ quantity: "E", unitPrice: "F", _amount: "G" })[role] || null;
+  const mk = (matrix, baseRow = 0) => {
+    const built = reconstructExportRows(matrix, ROLES, NUM, false);
+    retargetPastedFormulas(built, matrix, ROLES, { webLetter, baseRow });
+    return built;
+  };
+  it("SL '=F12+F13' → tự dịch '=E1+E2' + điền giá trị + KHÔNG cờ đỏ (verify khớp Thành Tiền)", () => {
+    const b = mk([
+      ["1", "hang1", "", "m2", "2", "100,000", "200,000"],
+      ["2", "hang2", "", "m2", "3", "100,000", "300,000"],
+      ["3", "hang3", "", "m2", "=F12+F13", "50,000", "250,000"],   // SL = 2+3 = 5 → TT 250k ✓
+    ]);
+    expect(b[2].formulas.quantity).toBe("=E1+E2");
+    expect(b[2].quantity).toBe(5);
+    expect(b[2]._fxWarn).toBeUndefined();
+  });
+  it("ĐƠN GIÁ '=SUM(H12:H13)' (ref dải cột THÀNH TIỀN) → '=SUM(G1:G2)'", () => {
+    const b = mk([
+      ["1", "hang1", "", "m2", "2", "100,000", "200,000"],
+      ["2", "hang2", "", "m2", "1", "300,000", "300,000"],
+      ["3", "tong", "", "bộ", "1", "=SUM(H12:H13)", "500,000"],   // ĐG = 200k+300k → TT 500k ✓
+    ]);
+    expect(b[2].formulas.unitPrice).toBe("=SUM(G1:G2)");
+    expect(b[2].unitPrice).toBe(500000);
+    expect(b[2]._fxWarn).toBeUndefined();
+  });
+  it("dán vào GIỮA bảng (baseRow=4) → hàng web lệch đúng (=E5+E6)", () => {
+    const b = mk([
+      ["1", "hang1", "", "m2", "2", "100,000", "200,000"],
+      ["2", "hang2", "", "m2", "3", "100,000", "300,000"],
+      ["3", "hang3", "", "m2", "=F12+F13", "50,000", "250,000"],
+    ], 4);
+    expect(b[2].formulas.quantity).toBe("=E5+E6");
+  });
+  it("công thức MÂU THUẪN Thành Tiền (không cách hiểu nào khớp) → GIỮ gốc + cờ _fxWarn (ô đỏ)", () => {
+    const b = mk([
+      ["1", "hang1", "", "m2", "2", "100,000", "200,000"],
+      ["2", "hang2", "", "m2", "3", "=F12*7", "600,000"],   // mọi diễn giải F12×7 đều không cho TT=600k → mâu thuẫn
+    ]);
+    expect(b[1].formulas.unitPrice).toBe("=F12*7");   // giữ nguyên để user xem
+    expect(b[1]._fxWarn).toEqual({ unitPrice: true });
+  });
+  it("công thức SỐ HỌC THUẦN (không ref ô) → giữ nguyên, không đỏ", () => {
+    const b = mk([["1", "hang1", "", "m2", "=1.2*2.4", "100,000", "290,000"]]);
+    expect(b[0].formulas.quantity).toBe("=1.2*2.4");
+    expect(b[0]._fxWarn).toBeUndefined();
   });
 });

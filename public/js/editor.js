@@ -8,7 +8,7 @@
 // Shell/quotes helpers it calls back (render/leaveEditorGuard/codeLabel from app.js,
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles } from "../grid-clipboard.js?v=20260701a";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../grid-clipboard.js?v=20260706b";
 import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630k";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
@@ -914,9 +914,9 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const dataCells = (it, i, amt) => `
         ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" title="Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
-        ${usesDays ? `<td class="col-qty"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
-        <td class="col-price"><input data-f="unitPrice" inputmode="numeric" title="Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
+        <td class="col-qty${it._fxWarn && it._fxWarn.quantity ? " cell-fx-error" : ""}"><input data-f="quantity" inputmode="decimal" title="${it._fxWarn && it._fxWarn.quantity ? "⚠️ Công thức dán từ Excel tham chiếu ô KHÔNG dịch được — kiểm tra/sửa lại tham chiếu" : "Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu"}" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        ${usesDays ? `<td class="col-qty${it._fxWarn && it._fxWarn.days ? " cell-fx-error" : ""}"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
+        <td class="col-price${it._fxWarn && it._fxWarn.unitPrice ? " cell-fx-error" : ""}"><input data-f="unitPrice" inputmode="numeric" title="${it._fxWarn && it._fxWarn.unitPrice ? "⚠️ Công thức dán từ Excel tham chiếu ô KHÔNG dịch được — kiểm tra/sửa lại tham chiếu" : "Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu"}" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(amt)}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
@@ -1220,6 +1220,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (!inp2) return;
     const raw = (inp2.value || "").trim();
     const it2 = activeSheet.items[i2]; if (!it2) return;
+    // Người dùng đã đụng vào ô → bỏ cờ "công thức Excel chưa dịch được" (ô đỏ) của ô này.
+    if (it2._fxWarn && it2._fxWarn[f2]) { delete it2._fxWarn[f2]; if (!Object.keys(it2._fxWarn).length) delete it2._fxWarn; }
     // Not a formula → nothing to commit. Crucially do NOT delete it2.formulas here: a
     // committed formula cell DISPLAYS its computed result, so the blur fired by moving away
     // would see a plain number and wrongly wipe the formula (→ "click lại không hiện"). The
@@ -1999,7 +2001,11 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, FIELDS.length))) {
       e.preventDefault(); pushUndo();
       const roles = hdrRoles || ADDR_COLS.map((c) => c.field);
-      const built = reconstructExportRows(rows, roles, NUMERIC, numberSubs).map((it) => ({ ...blank(), ...it }));
+      const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
+      // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
+      // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).
+      retargetPastedFormulas(rebuilt, rows, roles, { webLetter: (role) => fieldToLetter[role] || null, baseRow: startRow });
+      const built = rebuilt.map((it) => ({ ...blank(), ...it }));
       activeSheet.items.splice(startRow, rows.length, ...built);
       if (!activeSheet.items.length) activeSheet.items.push(blank());
       autoEnableGroupSub(startRow, startRow + built.length - 1);   // báo giá dán vào có SL nhóm > 1 → tự bật toggle
@@ -2010,6 +2016,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nFx = built.reduce((s, b) => s + (b.formulas ? Object.keys(b.formulas).length : 0), 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con${nFx ? `, ${nFx} công thức` : ""})`, "success");
+      const nWarn = built.reduce((s, b) => s + (b._fxWarn ? Object.keys(b._fxWarn).length : 0), 0);
+      if (nWarn) toast(`⚠️ ${nWarn} ô công thức KHÔNG tự dịch được từ Excel — ô viền ĐỎ, bấm vào kiểm tra/sửa tay`, "error");
       return;
     }
 
