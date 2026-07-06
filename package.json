@@ -23,7 +23,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prepare": "husky",
+    "prepare": "husky || true",
     "format": "prettier --write ."
   },
   "engines": {
