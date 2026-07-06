@@ -6,6 +6,7 @@ resources:
   - configmap.yaml
   - postgres.yaml
   - redis.yaml
+  - networkpolicy.yaml
   - app.yaml
   - worker.yaml
   - ingress.yaml

@@ -9,7 +9,7 @@
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../grid-clipboard.js?v=20260706c";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630k";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630k";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
@@ -844,12 +844,13 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     const dt = it.approved && it.approvedAt ? `<span class="ap-date">✓ ${escapeHtml(fmtDate(it.approvedAt))}</span>` : "";
     return `<label class="ap-wrap"><input type="checkbox" class="ap-check" data-ap="${i}" ${it.approved ? "checked" : ""} ${canApprove ? "" : "disabled"} title="${canApprove ? "Duyệt hàng này" : "Chỉ admin được duyệt"}" /> Duyệt</label>${dt}`;
   };
-  // Ô "Hình ảnh": nhiều thumbnail + nút thêm/xoá (tối đa 10 ảnh/ô). src là data-URL do chính app
-  // tạo (đã lọc data:image) — không phải HTML người dùng → an toàn khi chèn thẳng.
+  // Ô "Hình ảnh": nhiều thumbnail + nút thêm/xoá (tối đa 10 ảnh/ô). src PHẢI qua safeLogoSrc: chỉ nhận
+  // data-URL ảnh base64 hợp lệ TOÀN CHUỖI, mọi giá trị khác → "" (rỗng). Dữ liệu ảnh tải lại từ server nên
+  // KHÔNG tin tuyệt đối — chèn thẳng chuỗi thô vào src="" cho phép thoát thuộc tính → chèn HTML ở lưới.
   const IMG_MAX = 10;
   const imagesCellHtml = (it, i) => {
     const imgs = Array.isArray(it.images) ? it.images : [];
-    const thumbs = imgs.map((src, k) => `<span class="cell-img"><img src="${src}" alt="" loading="lazy" title="Bấm để xem lớn" data-imgview="${i}:${k}" />${editable ? `<button type="button" class="img-rm" data-imgrm="${i}:${k}" title="Xoá ảnh">✕</button>` : ""}</span>`).join("");
+    const thumbs = imgs.map((src, k) => `<span class="cell-img"><img src="${safeLogoSrc(src)}" alt="" loading="lazy" title="Bấm để xem lớn" data-imgview="${i}:${k}" />${editable ? `<button type="button" class="img-rm" data-imgrm="${i}:${k}" title="Xoá ảnh">✕</button>` : ""}</span>`).join("");
     const add = (editable && imgs.length < IMG_MAX) ? `<label class="img-add" title="Thêm ảnh (chọn 1 hoặc nhiều)">＋<input type="file" class="img-file" data-imgadd="${i}" accept="image/*" multiple style="display:none" /></label>` : "";
     return `<div class="cell-images">${thumbs}${add}</div>`;
   };

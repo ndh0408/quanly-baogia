@@ -585,22 +585,30 @@ export async function markExtraTableRowPayment(req: Request) {
   const rid = String((req.params as any).rid);
   const paid = req.body.paid !== false;
   const proof = typeof req.body.paidProof === "string" ? req.body.paidProof : undefined;
-  const sheet = await prisma.quoteSheet.findFirst({ where: { id: sheetId, quoteId }, select: { id: true, extraTables: true } });
-  if (!sheet) throw httpError(404, "Không tìm thấy sheet");
-  const tables = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[];
-  let found = false;
-  for (const t of tables) for (const it of (t?.items || [])) {
-    if (it && it.rid === rid) {
-      found = true;
-      if (paid) {
-        if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
-        it.paid = true;
-        if (proof !== undefined) it.paidProof = proof || null;   // gửi "" = xóa ảnh; bỏ qua = giữ ảnh cũ
-      } else { it.paid = false; it.paidAt = null; it.paidById = null; it.paidProof = null; }
+  // TUẦN TỰ HÓA read-modify-write khối JSON extraTables: khóa HÀNG sheet (SELECT … FOR UPDATE) trong
+  // 1 transaction để 2 request đánh dấu 2 HÀNG KHÁC NHAU của CÙNG sheet không cùng đọc 1 snapshot rồi
+  // ghi đè mất bản ghi thanh toán (+ ảnh chứng từ) của nhau. Ngoài ra "chạm" báo giá cha để bump
+  // updatedAt → khóa lạc quan của updateQuote phát hiện được thay đổi này (chống lost-update chéo).
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE id = ${sheetId} AND "quoteId" = ${quoteId} FOR UPDATE`;
+    const sheet = await tx.quoteSheet.findFirst({ where: { id: sheetId, quoteId }, select: { id: true, extraTables: true } });
+    if (!sheet) throw httpError(404, "Không tìm thấy sheet");
+    const tables = (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[];
+    let found = false;
+    for (const t of tables) for (const it of (t?.items || [])) {
+      if (it && it.rid === rid) {
+        found = true;
+        if (paid) {
+          if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
+          it.paid = true;
+          if (proof !== undefined) it.paidProof = proof || null;   // gửi "" = xóa ảnh; bỏ qua = giữ ảnh cũ
+        } else { it.paid = false; it.paidAt = null; it.paidById = null; it.paidProof = null; }
+      }
     }
-  }
-  if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
-  await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
+    if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
+    await tx.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
+    await tx.quote.update({ where: { id: quoteId }, data: {} }); // bump Quote.updatedAt (khóa lạc quan)
+  });
   await audit(req, paid ? "quote.internal.pay" : "quote.internal.unpay", { resource: "quote", resourceId: quoteId, after: { sheetId, rid, hasProof: proof !== undefined ? !!proof : undefined } });
   return { ok: true, rid, paid };
 }

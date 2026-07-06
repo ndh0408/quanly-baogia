@@ -742,7 +742,7 @@ export async function renderProjects(el) {
         const linkNeed = poFilled && !r.invoiceLink;
         const linkCell = editable2
           ? `<td${red(linkNeed)}><input class="inv-link" data-sheet="${r.sheetId}" value="${escapeHtml(r.invoiceLink || "")}" placeholder="Link HĐ" style="width:120px" /></td>`
-          : `<td${red(linkNeed)}>${r.invoiceLink ? `<a href="${escapeHtml(r.invoiceLink)}" target="_blank" rel="noopener">Xem HĐ</a>` : dash}</td>`;
+          : `<td${red(linkNeed)}>${(r.invoiceLink && /^https?:\/\//i.test(r.invoiceLink)) ? `<a href="${escapeHtml(r.invoiceLink)}" target="_blank" rel="noopener">Xem HĐ</a>` : (r.invoiceLink ? escapeHtml(r.invoiceLink) : dash)}</td>`;
         return `<tr class="qrow" data-id="${q.id}" title="Bấm để mở báo giá">
           ${statusCell}
           <td title="${escapeHtml(q.title)}"><strong>${escapeHtml(shortTitle(q.title))}</strong></td>

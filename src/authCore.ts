@@ -92,9 +92,20 @@ export async function authenticateCredentials(
     let mfaOk = false;
     if (isTotp) {
       // decryptSecret trả null khi không giải mã được (vd MFA_ENC_KEY xoay vòng); speakeasy
-      // với secret rỗng/null đều cho false → !!secret giữ NGUYÊN kết quả runtime, chỉ thoả TS.
+      // với secret rỗng/null đều cho false → guard !!secret trước khi verify.
       const secret = decryptSecret(user.mfaSecret);
-      mfaOk = !!secret && speakeasy.totp.verify({ secret, encoding: "base32", token: mfaToken, window: 1 });
+      // CHỐNG REPLAY TRONG CỬA SỔ: verifyDelta cho biết mã khớp ở step nào (−1/0/+1 quanh hiện tại). Chỉ chấp
+      // nhận nếu step đó MỚI HƠN mfaLastStep đã dùng, và ghi lại step bằng updateMany có điều kiện (nguyên tử)
+      // → 2 request cùng trình lại 1 mã: chỉ 1 thắng, request sau thấy step ≤ mfaLastStep → trượt (không tái dùng).
+      const delta = secret ? speakeasy.totp.verifyDelta({ secret, encoding: "base32", token: mfaToken, window: 1 }) : null;
+      if (delta) {
+        const step = Math.floor(Date.now() / 1000 / 30) + delta.delta;
+        const claimed = await prisma.user.updateMany({
+          where: { id: user.id, OR: [{ mfaLastStep: null }, { mfaLastStep: { lt: step } }] },
+          data: { mfaLastStep: step },
+        });
+        mfaOk = claimed.count > 0;
+      }
     } else {
       const hit = consumeBackupCode(user.mfaBackupCodes, mfaToken);
       if (hit) {

@@ -112,7 +112,9 @@ router.put(
       paidAt: z.coerce.date().nullable().optional().or(z.literal("")),
       poNumber: z.string().max(80).trim().optional().nullable(),
       hnInvoiceNo: z.string().max(80).trim().optional().nullable(),
-      invoiceLink: z.string().max(1000).trim().optional().nullable(),
+      // CHỈ cho http/https: chặn lưu javascript:/data: … (khi render vào <a href> chỉ escapeHtml không
+      // lọc scheme → href sống). Rỗng/null vẫn hợp lệ (xóa link).
+      invoiceLink: z.string().max(1000).trim().refine((s) => !s || /^https?:\/\//i.test(s), "Link hóa đơn phải bắt đầu bằng http:// hoặc https://").optional().nullable(),
       docSentAt: z.coerce.date().nullable().optional().or(z.literal("")),
       docReturnedAt: z.coerce.date().nullable().optional().or(z.literal("")),
       // Trang Hóa đơn (kế toán nhập)

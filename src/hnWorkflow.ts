@@ -55,7 +55,13 @@ export async function saveHn(req: Request) {
       const hanoi = sanitizeExtraTables((hs.hnTables || []).map((t: any) => ({ ...t, category: "hanoi" }))) || [];
       await tx.quoteSheet.update({ where: { id: sheet.id }, data: { extraTables: [...others, ...hanoi] } });
     }
-    if (existing.hnStatus === "rejected") await tx.quote.update({ where: { id }, data: { hnStatus: "assigned", hnRejectNote: null } });
+    // LUÔN "chạm" báo giá cha để bump Quote.updatedAt. Ghi bảng HN là ghi hàng CON (QuoteSheet) nên KHÔNG
+    // tự bump updatedAt của Quote → nếu không làm, khóa lạc quan (baseUpdatedAt) của updateQuote sẽ không
+    // phát hiện phần HN vừa lưu và deleteMany+recreate của manager sẽ ghi đè im lặng. Bump ở đây → 409 đúng lúc.
+    await tx.quote.update({
+      where: { id },
+      data: existing.hnStatus === "rejected" ? { hnStatus: "assigned", hnRejectNote: null } : {},
+    });
   });
   return prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
 }

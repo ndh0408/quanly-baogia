@@ -11,7 +11,7 @@ app:
   replicaCount: 2
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1,    memory: 1Gi }
+    limits: { cpu: 1, memory: 1Gi }
   autoscaling:
     enabled: true
     minReplicas: 2
@@ -27,7 +27,7 @@ worker:
   concurrency: 4
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1,    memory: 1Gi }
+    limits: { cpu: 1, memory: 1Gi }
   autoscaling:
     enabled: true
     minReplicas: 1
@@ -54,19 +54,25 @@ ingress:
 
 # === Embedded dependencies (turn off when using managed services) ===
 postgres:
-  enabled: true                 # set false to use external DB
+  enabled: true # set false to use external DB
   image: postgres:16-alpine
   storageSize: 20Gi
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1,    memory: 1Gi }
+    limits: { cpu: 1, memory: 1Gi }
 
 redis:
-  enabled: true                 # set false to use external Redis
+  enabled: true # set false to use external Redis
   image: redis:7-alpine
+  # Mật khẩu Redis nội bộ (dùng cho --requirepass + nhúng vào REDIS_URL). ĐỔI ở production.
+  password: CHANGE_ME_INTERNAL_REDIS
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits:   { cpu: 500m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# NetworkPolicy: chặn mọi pod khác (không thuộc release này) kết nối Postgres/Redis. Cần CNI hỗ trợ.
+networkPolicy:
+  enabled: true
 
 # === Application config (non-secret) ===
 config:
@@ -90,13 +96,13 @@ config:
 
 # === Secrets ===
 # Either fill these (chart creates the Secret) OR set existingSecret to use yours.
-existingSecret: ""              # name of an externally managed Secret with the same keys
+existingSecret: "" # name of an externally managed Secret with the same keys
 
 secrets:
-  DATABASE_URL: ""              # required if postgres.enabled=false
-  REDIS_URL: ""                 # required if redis.enabled=false
-  SESSION_SECRET: ""            # REQUIRED, ≥32 chars
-  JWT_SECRET: ""                # optional; defaults to SESSION_SECRET
+  DATABASE_URL: "" # required if postgres.enabled=false
+  REDIS_URL: "" # required if redis.enabled=false
+  SESSION_SECRET: "" # REQUIRED, ≥32 chars
+  JWT_SECRET: "" # optional; defaults to SESSION_SECRET
   S3_ENDPOINT: ""
   S3_ACCESS_KEY: ""
   S3_SECRET_KEY: ""
@@ -136,5 +142,5 @@ affinity: {}
 metrics:
   enabled: true
   serviceMonitor:
-    enabled: false              # set true if you have prometheus-operator
+    enabled: false # set true if you have prometheus-operator
     interval: 30s

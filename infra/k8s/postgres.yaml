@@ -32,8 +32,10 @@ spec:
           env:
             - { name: POSTGRES_USER, value: quanly }
             - { name: POSTGRES_DB, value: quanly }
+            # FAIL-CLOSED: KHÔNG optional. Thiếu key DATABASE_PASSWORD → pod không khởi động (thay vì chạy
+            # với mật khẩu rỗng). secret.example.yaml đã định nghĩa sẵn key này.
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: quanly-secrets, key: DATABASE_PASSWORD, optional: true } }
+              valueFrom: { secretKeyRef: { name: quanly-secrets, key: DATABASE_PASSWORD } }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
           readinessProbe:

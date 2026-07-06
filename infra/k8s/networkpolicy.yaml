@@ -1,0 +1,34 @@
+# Giới hạn truy cập datastore: CHỈ pod ứng dụng (app=quanly: api + worker) mới kết nối được
+# Postgres (5432) và Redis (6379). Không có policy này, MỌI pod trong namespace đọc/ghi được DB +
+# session/hàng đợi. (Cần CNI hỗ trợ NetworkPolicy: Calico/Cilium/Weave… — kube-proxy thuần không đủ.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-allow-app-only
+  namespace: quanly
+spec:
+  podSelector:
+    matchLabels: { app: postgres }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: quanly }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-app-only
+  namespace: quanly
+spec:
+  podSelector:
+    matchLabels: { app: redis }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: quanly }
+      ports:
+        - { protocol: TCP, port: 6379 }

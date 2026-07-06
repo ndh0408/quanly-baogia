@@ -21,6 +21,10 @@ const pwd = z
   .string()
   .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)
   .max(128, "Mật khẩu quá dài")
+  // bcrypt (bcryptjs) BỎ IM LẶNG mọi byte sau byte thứ 72. Mật khẩu tiếng Việt (đa byte UTF-8) chạm 72
+  // byte chỉ sau ~24–36 ký tự nhìn thấy → phần đuôi vô tác dụng mà không báo. Chặn ngay lúc ĐẶT mật khẩu
+  // để chính sách khớp thực tế (login vẫn nhận tối đa 128 để tài khoản cũ có mật khẩu dài vẫn đăng nhập).
+  .refine((s) => Buffer.byteLength(s, "utf8") <= 72, "Mật khẩu quá dài (tối đa 72 byte; tiếng Việt có dấu tính ~2–3 byte mỗi ký tự)")
   .refine((s) => /[A-Za-z]/.test(s) && /\d/.test(s), {
     message: "Mật khẩu phải có cả chữ và số",
   });
@@ -137,7 +141,11 @@ const itemSchema = z.object({
   formulas: z.record(z.string().max(40), z.string().max(2000)).optional().nullable(),
   // MẢNG ảnh base64 data-URL cho cột "Hình ảnh" (chỉ hiện khi sheet.showImages). Client tự NÉN nhỏ
   // trước khi gửi. Cap mỗi ảnh ~2MB + tối đa 10 ảnh/hạng mục (chặn payload phình). Nhúng thật vào Excel.
-  images: z.array(z.string().max(2_800_000)).max(10).optional().nullable(),
+  // BẢO MẬT: kiểm TOÀN BỘ chuỗi là data-URL ảnh base64 hợp lệ (KHÔNG chỉ tiền tố) — giống customerLogo.
+  // Kiểm tiền tố (startsWith) để lọt markup như `data:image/png"><a …>` → thoát thuộc tính src="" (chèn HTML).
+  images: z.array(
+    z.string().max(2_800_000).regex(/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i, "Ảnh không hợp lệ")
+  ).max(10).optional().nullable(),
   // Duyệt theo HÀNG cho bảng nội bộ HCM/Khách. Khai báo để Zod KHÔNG strip; quyền đổi (chỉ
   // admin) + đóng dấu ngày/người do server (reconcileExtraApprovals) quyết định, không tin client.
   rid: z.string().max(64).optional().nullable(),

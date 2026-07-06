@@ -49,7 +49,7 @@ postgresql://quanly:CHANGE_ME_INTERNAL@{{ include "quanly.fullname" . }}-postgre
 
 {{- define "quanly.redisUrl" -}}
 {{- if .Values.redis.enabled -}}
-redis://{{ include "quanly.fullname" . }}-redis:6379
+redis://:{{ .Values.redis.password }}@{{ include "quanly.fullname" . }}-redis:6379
 {{- else -}}
 {{ .Values.secrets.REDIS_URL }}
 {{- end -}}

@@ -1,0 +1,41 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.postgres.enabled }}
+# CHỈ pod thuộc release này (name+instance) mới kết nối được Postgres 5432. Cần CNI hỗ trợ NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "quanly.fullname" . }}-postgres-allow-app
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "quanly.selectorLabels" . | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 5432 }
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+# CHỈ pod thuộc release này mới kết nối được Redis 6379.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "quanly.fullname" . }}-redis-allow-app
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "quanly.selectorLabels" . | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 6379 }
+{{- end }}
+{{- end }}

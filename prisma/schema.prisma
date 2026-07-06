@@ -86,6 +86,9 @@ model User {
   mfaEnabled     Boolean  @default(false)
   mfaSecret      String?
   mfaBackupCodes String[] @default([])
+  // Chống replay TOTP trong cửa sổ ±30s: mốc thời gian 30s (step) của mã đã dùng gần nhất. Login chỉ
+  // chấp nhận mã có step MỚI HƠN → mã đã dùng không thể trình lại lần 2 dù còn trong hạn.
+  mfaLastStep    Int?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

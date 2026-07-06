@@ -16,6 +16,11 @@ export async function globalSearch(req: Request) {
 
   const tasks: Promise<void>[] = [];
   if (types.includes("quote")) {
+    // PHÂN QUYỀN THEO PROJECTION: các vai trò "chỉ nội bộ" (account_hn qua quote:hn:fill, tài khoản
+    // chi phí qua quote:internal:view) TUYỆT ĐỐI không được thấy tên khách (toCompany) + giá bán (total).
+    // Mọi route đọc quote khác đã lược 2 trường này qua presentQuote/presentQuoteRow; search PHẢI khớp,
+    // nếu không sẽ rò đúng dữ liệu thương mại mà presentQuoteForAccountHn được xây để che.
+    const hnOrInternal = can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW);
     tasks.push((async () => {
       const rows = await prisma.quote.findMany({
         where: {
@@ -24,11 +29,13 @@ export async function globalSearch(req: Request) {
             { searchText: searchTextFilter(q) },
           ],
         },
-        select: { id: true, quoteNumber: true, projectCode: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
+        select: hnOrInternal
+          ? { id: true, quoteNumber: true, projectCode: true, title: true, status: true, createdAt: true }
+          : { id: true, quoteNumber: true, projectCode: true, title: true, toCompany: true, status: true, total: true, createdAt: true },
         orderBy: { createdAt: "desc" },
         take: limit,
       });
-      out.results.quotes = rows.map((r) => ({ ...r, total: Number(r.total) }));
+      out.results.quotes = rows.map((r) => ("total" in r ? { ...r, total: Number(r.total) } : r));
     })());
   }
   if (types.includes("customer")) {

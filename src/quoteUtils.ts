@@ -8,6 +8,10 @@ import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, qtyRound } from "./money.js";
 import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 
+// Data-URL ảnh base64 hợp lệ TOÀN CHUỖI (không chỉ tiền tố). Dùng để lọc cột "Hình ảnh" khi lưu —
+// khớp validators.customerLogo/itemSchema.images. Kiểm tiền tố sẽ lọt markup thoát thuộc tính src="".
+const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected. converted/lost are terminal
 // (immutable for everyone — duplicate to make a new revision instead).
@@ -281,8 +285,9 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
         notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         internalNote: it.internalNote ? String(it.internalNote).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,   // ghi chú nội bộ — KHÔNG xuất Excel
         formulas: (it.formulas && typeof it.formulas === "object" && Object.keys(it.formulas).length) ? it.formulas : undefined,
-        // Cột "Hình ảnh": chỉ giữ chuỗi data:image hợp lệ, tối đa 10 ảnh/hạng mục. Rỗng → undefined (cột NULL).
-        images: (Array.isArray(it.images) && it.images.length) ? it.images.filter((x: any) => typeof x === "string" && x.startsWith("data:image/")).slice(0, 10) : undefined,
+        // Cột "Hình ảnh": chỉ giữ data-URL ảnh base64 HỢP LỆ TOÀN CHUỖI (không chỉ tiền tố — kiểm tiền tố
+        // để lọt markup thoát thuộc tính src="" → chèn HTML ở lưới editor). Tối đa 10 ảnh/hạng mục.
+        images: (Array.isArray(it.images) && it.images.length) ? it.images.filter((x: any) => typeof x === "string" && IMAGE_DATA_URL_RE.test(x)).slice(0, 10) : undefined,
       })),
     },
     extraTables: sanitizeExtraTables(s.extraTables),

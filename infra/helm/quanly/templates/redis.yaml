@@ -17,7 +17,9 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.redis.image }}
-          args: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          # XÁC THỰC BẮT BUỘC: --requirepass (khớp mật khẩu nhúng trong quanly.redisUrl). Không có nó thì mọi
+          # pod trong cluster đọc/ghi được session + hàng đợi. Đổi mặc định qua .Values.redis.password.
+          args: ["redis-server", "--requirepass", {{ .Values.redis.password | quote }}, "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
           ports: [{ containerPort: 6379 }]
           resources: {{- toYaml .Values.redis.resources | nindent 12 }}
           readinessProbe:

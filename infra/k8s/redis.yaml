@@ -14,7 +14,24 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          # XÁC THỰC BẮT BUỘC: --requirepass từ secret (khớp đường docker-compose prod). Không có nó thì bất kỳ
+          # pod nào trong cluster cũng đọc/ghi được session + hàng đợi job. $(REDIS_PASSWORD) expand từ env dưới.
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: quanly-secrets, key: REDIS_PASSWORD } }
+          args:
+            [
+              "redis-server",
+              "--requirepass",
+              "$(REDIS_PASSWORD)",
+              "--save",
+              "60",
+              "1",
+              "--maxmemory",
+              "256mb",
+              "--maxmemory-policy",
+              "allkeys-lru",
+            ]
           ports: [{ containerPort: 6379 }]
           readinessProbe:
             tcpSocket: { port: 6379 }
