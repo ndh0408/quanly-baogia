@@ -338,7 +338,7 @@ th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color:
 .act-btn.act-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 .status {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   padding: 3px 11px; border-radius: 20px; font-size: 12px; font-weight: 650; line-height: 1.4;
 }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
@@ -616,11 +616,13 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
    đối chiếu. .list-table có overflow:hidden (bo góc) sẽ phá position:sticky → cho proj-table
    overflow:visible (vùng cuộn là .tbl-scroll bao ngoài). Mốc `left` cộng dồn = bề rộng cố định. */
 .proj-table { overflow: visible; }
-.proj-table th:nth-child(1), .proj-table td:nth-child(1) { width: 92px;  min-width: 92px;  max-width: 92px;  left: 0; }
-.proj-table th:nth-child(2), .proj-table td:nth-child(2) { width: 168px; min-width: 168px; max-width: 168px; left: 92px; }
-.proj-table th:nth-child(3), .proj-table td:nth-child(3) { width: 150px; min-width: 150px; max-width: 150px; left: 260px; }
-.proj-table th:nth-child(4), .proj-table td:nth-child(4) { width: 116px; min-width: 116px; max-width: 116px; left: 410px; }
+.proj-table th:nth-child(1), .proj-table td:nth-child(1) { width: 132px; min-width: 132px; max-width: 132px; left: 0; }
+.proj-table th:nth-child(2), .proj-table td:nth-child(2) { width: 168px; min-width: 168px; max-width: 168px; left: 132px; }
+.proj-table th:nth-child(3), .proj-table td:nth-child(3) { width: 150px; min-width: 150px; max-width: 150px; left: 300px; }
+.proj-table th:nth-child(4), .proj-table td:nth-child(4) { width: 116px; min-width: 116px; max-width: 116px; left: 450px; }
 .proj-table th:nth-child(-n+4), .proj-table td:nth-child(-n+4) { position: sticky; overflow: hidden; text-overflow: ellipsis; }
+/* Cột STATUS (1) chứa "pill" ngắn (vd "Thanh toán") — cho tràn hiện đủ, KHÔNG cắt chữ. */
+.proj-table th:nth-child(1), .proj-table td:nth-child(1) { overflow: visible; }
 .proj-table td:nth-child(-n+4) { background: var(--surface); z-index: 2; }
 .proj-table tbody tr.qrow:hover td:nth-child(-n+4) { background: var(--surface-hover); }
 .proj-table thead th { z-index: 3; }                              /* header (sticky top) trên các ô body dính trái */
@@ -1015,7 +1017,7 @@ body.fx-picking { user-select: none; cursor: cell; }   /* dragging cells into a 
 
 /* ===== Responsive polish — phần mới (bảng nội bộ + Quản lý dự án + thanh nút editor) ===== */
 .extra-grid { min-width: 600px; }            /* bảng nội bộ ít cột hơn lưới chính → hẹp hơn, vẫn cuộn trong .tbl-scroll */
-.proj-table { min-width: 1080px; }           /* nhiều cột → cuộn ngang gọn trong .tbl-scroll thay vì bóp méo */
+.proj-table { min-width: 1120px; }           /* nhiều cột → cuộn ngang gọn trong .tbl-scroll thay vì bóp méo */
 @media (max-width: 920px) {
   /* Khu "+ Thêm bảng" của bảng nội bộ xếp dọc cho dễ bấm trên mobile */
   .extra-head { flex-direction: column; align-items: stretch; gap: 8px; }
