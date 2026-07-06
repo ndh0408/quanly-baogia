@@ -235,11 +235,11 @@ export function buildFormulaContext(
   editorFields.forEach((f, i) => { fieldToColIndex[f] = i; });
 
   const fieldToCol = { ...cols, _stt: cols.stt, _amount: cols.amount };
-  // CHỈ cho tham chiếu các ô NHẬP LIỆU (Số Lượng / Đơn Giá / Số Ngày). KHÔNG cho tham
-  // chiếu cột Thành Tiền (_amount): Thành Tiền = Đơn Giá × Số Lượng, nên một công thức ở
-  // ô Đơn Giá/Số Lượng trỏ vào Thành Tiền sẽ tạo VÒNG LẶP (circular ref) trong Excel mà
-  // bộ tự-kiểm tĩnh KHÔNG phát hiện được. Gặp ref như vậy → quay về ghi số (an toàn).
-  const allowedRef = new Set(["quantity", "unitPrice", "days"]);
+  // Cho tham chiếu ô NHẬP LIỆU (Số Lượng / Đơn Giá / Số Ngày) VÀ cột THÀNH TIỀN (_amount) —
+  // web cho chọn ô Thành Tiền (vd "=G3*E3", "=SUM(H3:H8)") nên Excel phải xuất được y hệt.
+  // VÒNG LẶP (formula ở SL/ĐG trỏ vào Thành Tiền của CHÍNH nó, trực tiếp hay gián tiếp) được
+  // chặn bằng ĐỒ THỊ PHỤ THUỘC (hasCycle bên dưới) — chỉ chặn đúng công thức tạo vòng.
+  const allowedRef = new Set(["quantity", "unitPrice", "days", "_amount"]);
 
   const ctx = {
     colToField, fieldToCol, allowedRef,
@@ -258,10 +258,13 @@ export function buildFormulaContext(
   };
 
   // Giá trị 1 ô theo HỆ TOẠ ĐỘ EDITOR (để tự kiểm) — mô phỏng cellNumByAddr ở frontend.
+  // Thành Tiền PHẢI khớp lineAmount của web: SL làm tròn 1 số (qtyRound) rồi × giá, tròn VNĐ —
+  // nếu tính raw sẽ lệch với web + Excel (ô SL trong Excel đã ROUND(...,1)).
+  const qtyRound1 = (x: unknown) => { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; };
   const amountOf = (it: EditorItem | undefined) => {
     if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
-    const q = Number(it.quantity) || 0, p = Number(it.unitPrice) || 0;
-    return usesDays ? q * (Number(it.days) || 1) * p : q * p;
+    const q = qtyRound1(it.quantity), p = Number(it.unitPrice) || 0;
+    return Math.round(usesDays ? q * (Number(it.days) || 1) * p : q * p);
   };
   const editorCellNum = (addr: string) => {
     const m = /^([A-Za-z]+)(\d+)$/.exec(String(addr).trim());
@@ -287,14 +290,62 @@ export function buildFormulaContext(
     },
   };
 
+  // ===== ĐỒ THỊ PHỤ THUỘC — chặn VÒNG LẶP khi cho ref cột Thành Tiền =====
+  // Node (rowIdx0, field). Cạnh: công thức tại (r,f) → các ref của nó; riêng _amount(r) LUÔN
+  // phụ thuộc quantity/unitPrice/days của CHÍNH hàng r (ô Excel Thành Tiền = ROUND(SL×ĐG)).
+  const refsInFormula = (raw: string): { row: number; field: string }[] => {
+    const out: { row: number; field: string }[] = [];
+    const re = /([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(String(raw)))) {
+      const f1 = colToField[m[1].toUpperCase()];
+      if (m[3] && m[4]) {
+        const f2 = colToField[m[3].toUpperCase()];
+        const r0 = Math.min(+m[2], +m[4]) - 1, r1 = Math.max(+m[2], +m[4]) - 1;
+        for (let r = r0; r <= r1; r++) { if (f1) out.push({ row: r, field: f1 }); if (f2 && f2 !== f1) out.push({ row: r, field: f2 }); }
+      } else if (f1) out.push({ row: +m[2] - 1, field: f1 });
+    }
+    return out;
+  };
+  const depsOf = (row: number, field: string): { row: number; field: string }[] => {
+    if (field === "_amount") {
+      const base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
+      if (usesDays) base.push({ row, field: "days" });
+      return base;
+    }
+    const raw = items[row]?.formulas?.[field];
+    return raw ? refsInFormula(raw) : [];
+  };
+  const hasCycle = (row: number, field: string, raw: string) => {
+    const start = `${row}|${field}`;
+    const seen = new Set<string>();
+    const stack = refsInFormula(raw);
+    let guard = 0;
+    while (stack.length) {
+      if (guard++ > 5000) return true;   // đồ thị quá lớn/bất thường → coi như vòng (an toàn)
+      const n = stack.pop()!;
+      const key = `${n.row}|${n.field}`;
+      if (key === start) return true;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stack.push(...depsOf(n.row, n.field));
+    }
+    return false;
+  };
+
   return {
     /**
      * Trả công thức Excel cho ô có công thức gốc `raw` nếu DỊCH ĐƯỢC và TỰ KIỂM khớp
-     * computedValue; ngược lại null (nơi gọi ghi số như cũ). Không cần biết chỉ số ô đang
-     * ghi — ref trong công thức tự mang số hàng editor, dịch qua rowToExcel.
+     * computedValue; ngược lại null (nơi gọi ghi số như cũ). `self` (item đang ghi + field)
+     * để chặn VÒNG khi công thức tham chiếu cột Thành Tiền — thiếu self thì ref _amount bị từ chối.
      */
-    cellFormula(raw: string | null | undefined, computedValue: number) {
+    cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
+      const usesAmount = /[A-Za-z]+\d+/.test(String(raw)) && refsInFormula(String(raw)).some((r) => r.field === "_amount");
+      if (usesAmount) {
+        const selfRow = self ? items.indexOf(self.item) : -1;
+        if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw))) return null;   // vòng lặp / không rõ ô → ghi số
+      }
       const ex = translateFormula(raw, ctx);
       if (!ex) return null;
       // Tự kiểm: công thức (theo hệ editor) phải cho ra đúng giá trị đã tính.

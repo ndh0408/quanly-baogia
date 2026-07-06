@@ -486,7 +486,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const putNum = (it2: any, row: any, field: any, colX: any, value: any) => {
     if (!colX) return;
     const raw = it2 && it2.formulas && it2.formulas[field];
-    const fx = raw ? fctx.cellFormula(raw, value) : null;
+    const fx = raw ? fctx.cellFormula(raw, value, { item: it2, field }) : null;   // self → chặn vòng khi ref Thành Tiền
     if (fx) ws.getCell(`${colX}${row}`).value = { formula: fx, result: value };
     else setCell(ws, `${colX}${row}`, value);
   };
@@ -644,7 +644,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.quantity) {
         const qT = qtyRound(qty);
         const rawQ = it.formulas && it.formulas.quantity;
-        const fxQ = rawQ ? fctx.cellFormula(rawQ, qty) : null;
+        const fxQ = rawQ ? fctx.cellFormula(rawQ, qty, { item: it, field: "quantity" }) : null;
         const qCell = ws.getCell(`${cols.quantity}${r}`);
         if (fxQ) qCell.value = { formula: `ROUND(${fxQ},1)`, result: qT };
         else qCell.value = qT;

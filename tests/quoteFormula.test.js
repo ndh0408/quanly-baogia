@@ -134,3 +134,54 @@ describe("colLetter", () => {
     expect(colLetter(26)).toBe("AA");
   });
 });
+
+describe("ref cột THÀNH TIỀN (_amount) — xuất được, CHẶN VÒNG bằng đồ thị phụ thuộc", () => {
+  // GN không ngày: editor G=_amount → Excel H. Items ở hàng Excel 12,13,14.
+  it("đơn giá ref Thành Tiền HÀNG KHÁC → xuất công thức (G3 → H14... đây G2→H13)", () => {
+    const items = [
+      { kind: "item", quantity: 2, unitPrice: 100000 },                                  // amount=200000 (H12)
+      { kind: "item", quantity: 1, unitPrice: 200000, formulas: { unitPrice: "=G1" } },  // = amount item#1
+    ];
+    const fc = fcFor(GN_COLS, items, [12, 13]);
+    expect(fc.cellFormula("=G1", 200000, { item: items[1], field: "unitPrice" })).toBe("H12");
+  });
+  it("SUM dải Thành Tiền các hàng khác → xuất được (=SUM(G1:G2) → SUM(H12:H13))", () => {
+    const items = [
+      { kind: "item", quantity: 2, unitPrice: 100000 },   // 200000
+      { kind: "item", quantity: 1, unitPrice: 300000 },   // 300000
+      { kind: "item", quantity: 1, unitPrice: 500000, formulas: { unitPrice: "=SUM(G1:G2)" } },
+    ];
+    const fc = fcFor(GN_COLS, items, [12, 13, 14]);
+    expect(fc.cellFormula("=SUM(G1:G2)", 500000, { item: items[2], field: "unitPrice" })).toBe("SUM(H12:H13)");
+  });
+  it("VÒNG TRỰC TIẾP: đơn giá ref Thành Tiền CHÍNH HÀNG ĐÓ → null (ghi số)", () => {
+    const items = [{ kind: "item", quantity: 2, unitPrice: 100, formulas: { unitPrice: "=G1" } }];
+    const fc = fcFor(GN_COLS, items, [12]);
+    expect(fc.cellFormula("=G1", 200, { item: items[0], field: "unitPrice" })).toBeNull();
+  });
+  it("VÒNG GIÁN TIẾP: A.đơn giá ref amount(B), B.đơn giá ref amount(A) → null cả hai", () => {
+    const items = [
+      { kind: "item", quantity: 1, unitPrice: 0, formulas: { unitPrice: "=G2" } },
+      { kind: "item", quantity: 1, unitPrice: 0, formulas: { unitPrice: "=G1" } },
+    ];
+    const fc = fcFor(GN_COLS, items, [12, 13]);
+    expect(fc.cellFormula("=G2", 0, { item: items[0], field: "unitPrice" })).toBeNull();
+    expect(fc.cellFormula("=G1", 0, { item: items[1], field: "unitPrice" })).toBeNull();
+  });
+  it("thiếu self (không rõ ô đang ghi) mà ref _amount → null (an toàn)", () => {
+    const items = [
+      { kind: "item", quantity: 2, unitPrice: 100000 },
+      { kind: "item", quantity: 1, unitPrice: 200000, formulas: { unitPrice: "=G1" } },
+    ];
+    const fc = fcFor(GN_COLS, items, [12, 13]);
+    expect(fc.cellFormula("=G1", 200000)).toBeNull();
+  });
+  it("tự kiểm Thành Tiền dùng SL đã LÀM TRÒN 1 số (khớp web + Excel): qty 2.88→2.9", () => {
+    const items = [
+      { kind: "item", quantity: 2.88, unitPrice: 100000 },                                   // web amount = 2.9×100000 = 290000
+      { kind: "item", quantity: 1, unitPrice: 290000, formulas: { unitPrice: "=G1" } },
+    ];
+    const fc = fcFor(GN_COLS, items, [12, 13]);
+    expect(fc.cellFormula("=G1", 290000, { item: items[1], field: "unitPrice" })).toBe("H12");
+  });
+});
