@@ -149,19 +149,22 @@ function imgDims(buf: Buffer, ext: string): { w: number; h: number } | null {
   } catch { /* fallthrough */ }
   return null;
 }
-// Nhúng NHIỀU ảnh của 1 hạng mục vào Ô cột ảnh: lưới 2 ảnh/hàng, mỗi ảnh fit khung 62×62px giữ tỉ lệ;
-// tự nâng chiều cao hàng đủ chứa. editAs oneCell → ảnh đi theo ô khi khách chèn/xoá hàng phía trên.
-const IMG_BOX = 62;               // khung mỗi ảnh (px)
+// Nhúng NHIỀU ảnh của 1 hạng mục vào Ô cột ảnh: xếp DỌC 1 ảnh/tầng — vị trí CHỈ phụ thuộc chiều
+// cao hàng (do chính mình đặt) nên KHÔNG BAO GIỜ đè nhau, bất kể bề rộng cột thực tế. Ảnh fit
+// khung giữ tỉ lệ; editAs oneCell → ảnh đi theo ô khi khách chèn/xoá hàng phía trên.
+const IMG_BOX = 74;               // khung mỗi ảnh (px)
+const MAX_ROW_PX = 540;           // Excel giới hạn hàng 409pt ≈ 545px — nhiều ảnh thì thu khung lại
 const MAX_ITEM_IMG_BYTES = 3 * 1024 * 1024;   // cap ảnh/hạng mục (client đã nén ~JPEG 1400px)
 function insertItemImages(ws: any, colLetter: string, rowNum: number, images: any) {
   const list = (Array.isArray(images) ? images : []).filter((s) => typeof s === "string").slice(0, 10);
   if (!list.length) return;
-  const gridRows = Math.ceil(list.length / 2);
-  const rowPx = gridRows * (IMG_BOX + 6);
+  const n = list.length;
+  const box = Math.min(IMG_BOX, Math.floor(MAX_ROW_PX / n) - 6);   // n ảnh vẫn nằm gọn dưới trần 409pt
+  const rowPx = n * (box + 6);
   const row = ws.getRow(rowNum);
   row.height = Math.max(row.height || 0, rowPx * 0.75);   // px → pt (1pt = 4/3px)
   const c0 = colLetterToIdx(colLetter);
-  for (let k = 0; k < list.length; k++) {
+  for (let k = 0; k < n; k++) {
     const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(list[k]);
     if (!m) continue;
     let extension = m[1].toLowerCase(); if (extension === "jpg") extension = "jpeg";
@@ -169,11 +172,13 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
     try {
       const buffer = Buffer.from(m[2], "base64");
       const d = imgDims(buffer, extension);
-      let w = IMG_BOX, h = IMG_BOX;
-      if (d && d.w > 0 && d.h > 0) { const s = Math.min(IMG_BOX / d.w, IMG_BOX / d.h); w = Math.max(8, Math.round(d.w * s)); h = Math.max(8, Math.round(d.h * s)); }
+      let w = box, h = box;
+      if (d && d.w > 0 && d.h > 0) { const s = Math.min(box / d.w, box / d.h); w = Math.max(8, Math.round(d.w * s)); h = Math.max(8, Math.round(d.h * s)); }
       const imageId = ws.workbook.addImage({ buffer, extension });
+      // tl.row: tầng k trên n tầng — fraction của CHIỀU CAO HÀNG THẬT (≥ rowPx vì Math.max ở trên)
+      // → mỗi tầng ≥ box+6 px, ảnh cao ≤ box → không chạm nhau. tl.col cố định (không offset ngang).
       ws.addImage(imageId, {
-        tl: { col: c0 + (k % 2) * 0.5 + 0.03, row: rowNum - 1 + Math.floor(k / 2) / gridRows + 0.02 },
+        tl: { col: c0 + 0.05, row: rowNum - 1 + k / n + 0.015 },
         ext: { width: w, height: h },
         editAs: "oneCell",
       });
