@@ -119,7 +119,21 @@ const NAV: Nav[] = [
 ];
 
 // Strip ?query (filters) khi khớp nav key → #/list?status=… vẫn là trang "list".
-const currentKey = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "personnel";
+// Resolve alias namespace báo giá ngay tại đây → render đúng trang cả trước khi normalizeHash nắn URL (khỏi nháy).
+const currentKey = () => {
+  const raw = location.hash.replace(/^#\/?/, "").split("?")[0] || "personnel";
+  return raw === "quotes/new" ? "new" : raw === "quotes" ? "list" : raw;
+};
+
+// THỐNG NHẤT namespace báo giá + redirect URL cũ/đoán về route thật (khớp #/quotes/:id = editor):
+//   #/quotes/new → #/new (tạo mới) · #/quotes (không id) → #/list (danh sách).
+// Trước đây #/quotes/new không khớp route nào → rơi về nhúng SPA/danh sách. Giữ ?query khi redirect.
+function normalizeHash(): boolean {
+  const [path, qs] = location.hash.replace(/^#\/?/, "").split("?");
+  const target = path === "quotes/new" ? "new" : path === "quotes" ? "list" : null;
+  if (target) { location.hash = `#/${target}${qs ? "?" + qs : ""}`; return true; }
+  return false;
+}
 
 // ===== Tìm kiếm TOÀN CỤC thông minh (command palette) =====
 // Đa thực thể: Trang (đi tới nhanh) + Báo giá + Khách hàng + Nhân sự — đã phân quyền ở server.
@@ -267,9 +281,10 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
       const canHr = me.permissions.includes("personnel:read:own") || me.permissions.includes("personnel:read:all");
       const first = NAV.find((n) => has(n.perm));
       location.hash = "#/" + (canHr ? "personnel" : (first?.key || "list"));
-    }
+    } else { normalizeHash(); }   // URL ban đầu là #/quotes/new… → nắn về route thật ngay khi mở
     refreshBadge();
-    const on = () => { setKey(currentKey()); setSbOpen(false); refreshBadge(); };
+    // Redirect (normalizeHash) sẽ bắn hashchange lần nữa → lần đó path đã chuẩn, chạy tiếp setKey.
+    const on = () => { if (normalizeHash()) return; setKey(currentKey()); setSbOpen(false); refreshBadge(); };
     window.addEventListener("hashchange", on);
     // Esc đóng drawer mobile (Ctrl/⌘+K focus ô tìm do GlobalSearch tự xử lý).
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSbOpen(false); };
