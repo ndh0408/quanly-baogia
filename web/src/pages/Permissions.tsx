@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, type Me, type PermCatalog, type User } from "./api";
-import { toast, confirmModal } from "./ui";
+import { api, ApiError, type Me, type PermCatalog, type User } from "../lib/api";
+import { toast, confirmModal } from "../lib/ui";
 
 // "Phân quyền" — (1) ma trận Vai trò × Khả năng SỬA ĐƯỢC (phân quyền ĐỘNG): admin tick/bỏ quyền cho
 // từng vai trò rồi Lưu; 'admin' KHÓA (luôn đủ quyền). (2) gán vai trò cho từng nhân viên.

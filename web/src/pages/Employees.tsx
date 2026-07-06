@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type Employee } from "./api";
-import { FIELDS, type Field } from "./fields";
-import { useDebouncedValue } from "./query";
-import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
+import { api, ApiError, type Me, type Employee } from "../lib/api";
+import { FIELDS, type Field } from "../lib/fields";
+import { useDebouncedValue } from "../lib/query";
+import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "../lib/ui";
 
 // Danh bạ = 10 trường nhóm "Cá nhân" của trang Nhân sự (1 nguồn, không lặp).
 export const EMP_FIELDS: Field[] = FIELDS.filter((f) => f.group === "Cá nhân");

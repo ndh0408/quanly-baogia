@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type AuditEntry } from "./api";
+import { api, ApiError, type AuditEntry } from "../lib/api";
 
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.

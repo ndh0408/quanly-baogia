@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, type Me, type ProjectQuote } from "./api";
-import { toast } from "./ui";
+import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
+import { toast } from "../lib/ui";
 
 // Port "Quản lý dự án" (renderProjects) — bê ĐẦY ĐỦ: báo giá ĐÃ CHỐT, mỗi sheet 1 dòng, bảng 23
 // cột theo dõi hoá đơn (Status: Hoá đơn→Thanh toán→Done) + sửa-tại-ô (admin: Số HĐ/Ngày TT/PO/

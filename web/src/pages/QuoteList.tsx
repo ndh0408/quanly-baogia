@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type QuoteRow } from "./api";
-import { useDebouncedValue } from "./query";
-import { toast, confirmModal } from "./ui";
+import { api, ApiError, type Me, type QuoteRow } from "../lib/api";
+import { useDebouncedValue } from "../lib/query";
+import { toast, confirmModal } from "../lib/ui";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
 // + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·

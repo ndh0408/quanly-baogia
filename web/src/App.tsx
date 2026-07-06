@@ -1,7 +1,7 @@
 import { Component, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { api, ApiError, setPreviewMode, type Me } from "./api";
-import { Shell } from "./Shell";
-import { promptModal, toast } from "./ui";
+import { api, ApiError, setPreviewMode, type Me } from "./lib/api";
+import { Shell } from "./components/Shell";
+import { promptModal, toast } from "./lib/ui";
 
 export type PreviewState = { perms: string[]; label: string };
 

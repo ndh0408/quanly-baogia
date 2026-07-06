@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type EditorTemplate, type QuoteFull } from "./api";
-import { toast, confirmModal } from "./ui";
-import * as M from "./quoteMath";
-import { type ItemK, nextK } from "./gridShared";
-import { GridTable } from "./GridTable";
-import { extraTableSum, type ExtraTable } from "./ExtraTables";
+import { api, ApiError, type EditorTemplate, type QuoteFull } from "../lib/api";
+import { toast, confirmModal } from "../lib/ui";
+import * as M from "../lib/quoteMath";
+import { type ItemK, nextK } from "../lib/gridShared";
+import { GridTable } from "../components/GridTable";
+import { extraTableSum, type ExtraTable } from "../components/ExtraTables";
 
 // Port "renderAccountHnView" — vai trò account_hn CHỈ điền giá Hà Nội (số nội bộ, không thấy báo giá khách).
 // Mỗi sheet báo giá → 1 khối; trong khối là các bảng HN dạng tab (tái dùng GridTable, category=hanoi).

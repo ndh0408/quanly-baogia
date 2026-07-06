@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type Customer } from "./api";
-import { useDebouncedValue } from "./query";
-import { toast, confirmModal, fieldErrorsFrom } from "./ui";
+import { api, ApiError, type Me, type Customer } from "../lib/api";
+import { useDebouncedValue } from "../lib/query";
+import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
 
 // Port 1:1 màn "Mã khách hàng" của SPA cũ (renderCustomers/editCustomer) sang React.
 // Giữ nguyên: toolbar (tìm + "+ Khách mới"), bảng [Mã KH | Tên công ty | Sửa/Xóa],

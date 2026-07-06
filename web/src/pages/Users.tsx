@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, type Me, type User, type InviteResult, type PermCatalog } from "./api";
-import { toast, confirmModal, fieldErrorsFrom } from "./ui";
+import { api, ApiError, type Me, type User, type InviteResult, type PermCatalog } from "../lib/api";
+import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
 
 // "Quản lý nhân viên": bảng + Mời (invite email) + Sửa + Khóa/Mở khóa + Gửi-lại / Hủy lời mời.
 // PHÂN QUYỀN PER-USER: KHÔNG còn chọn "vai trò" — admin TÍCH QUYỀN cho từng tài khoản (preset điền nhanh).

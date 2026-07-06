@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "./api";
-import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource, type FieldEdit } from "./fields";
+import { api, ApiError, type Me, type Personnel, type Summary, type Employee, type Project } from "../lib/api";
+import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource, type FieldEdit } from "../lib/fields";
 import { EMP_FIELDS } from "./Employees";
-import { useDebouncedValue } from "./query";
-import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "./ui";
+import { useDebouncedValue } from "../lib/query";
+import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "../lib/ui";
 
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
 const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError, type Me } from "./api";
-import { toast } from "./ui";
+import { api, ApiError, type Me } from "../lib/api";
+import { toast } from "../lib/ui";
 
 // Port "Tài khoản" (renderProfile) — bê ĐẦY ĐỦ 3 phần: Hồ sơ (họ tên/tên gửi/SĐT/chức danh,
 // email+vai trò read-only) + Bảo mật 2 lớp MFA (bật QR/xác nhận/mã dự phòng · tắt password+token)

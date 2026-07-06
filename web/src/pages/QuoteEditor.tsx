@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "./api";
-import { toast, confirmModal, promptModal } from "./ui";
-import * as M from "./quoteMath";
-import { type ItemK, nextK } from "./gridShared";
-import { GridTable } from "./GridTable";
-import { ExtraTables } from "./ExtraTables";
-import { takePendingNewQuote } from "./pendingQuote";
+import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "../lib/api";
+import { toast, confirmModal, promptModal } from "../lib/ui";
+import * as M from "../lib/quoteMath";
+import { type ItemK, nextK } from "../lib/gridShared";
+import { GridTable } from "../components/GridTable";
+import { ExtraTables } from "../components/ExtraTables";
+import { takePendingNewQuote } from "../lib/pendingQuote";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor) sang React. Form (KH/người gửi/meta) +

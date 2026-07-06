@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type Me } from "./api";
-import type { ItemK } from "./gridShared";
-import * as M from "./quoteMath";
-import { ExtraPayDialog } from "./ExtraTables";
+import { api, type Me } from "../lib/api";
+import type { ItemK } from "../lib/gridShared";
+import * as M from "../lib/quoteMath";
+import { ExtraPayDialog } from "../components/ExtraTables";
 
 // Màn hình CHỈ XEM BẢNG NỘI BỘ (quyền quote:internal:view) — tài khoản "chi phí": thấy các bảng nội bộ của
 // 1 báo giá + đánh dấu THANH TOÁN từng hàng (+ ảnh). KHÔNG lộ giá/khách/báo giá chính (server đã lược).

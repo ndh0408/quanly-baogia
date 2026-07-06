@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { toast } from "./ui";
-import * as M from "./quoteMath";
-import { evalFormula, type FormulaRefs } from "./formula";
-import { type ItemK, nextK, autoGrow } from "./gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "./clipboard";
+import { toast } from "../lib/ui";
+import * as M from "../lib/quoteMath";
+import { evalFormula, type FormulaRefs } from "../lib/formula";
+import { type ItemK, nextK, autoGrow } from "../lib/gridShared";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../lib/clipboard";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG

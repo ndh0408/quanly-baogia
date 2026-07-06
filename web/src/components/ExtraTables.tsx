@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import * as M from "./quoteMath";
-import { type ItemK, nextK } from "./gridShared";
+import * as M from "../lib/quoteMath";
+import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
-import { api, ApiError, type EditorTemplate } from "./api";
-import { toast } from "./ui";
+import { api, ApiError, type EditorTemplate } from "../lib/api";
+import { toast } from "../lib/ui";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)

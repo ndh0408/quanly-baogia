@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { api, type Me } from "./api";
-import { confirmModal } from "./ui";
+import { api, type Me } from "../lib/api";
+import { confirmModal } from "../lib/ui";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
 async function guardLeave(): Promise<boolean> {
@@ -51,24 +51,24 @@ class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean 
     return <Suspense fallback={<PageFallback />}>{this.props.children}</Suspense>;
   }
 }
-import { PersonnelPage } from "./Personnel";
-import { EmployeesPage } from "./Employees";
-import { CustomersPage } from "./Customers";
-import { UsersPage } from "./Users";
-import { AuditPage } from "./Audit";
-import { PermissionsPage } from "./Permissions";
-import { ProfilePage } from "./Profile";
-import { NotificationsPage } from "./Notifications";
-import { DashboardPage } from "./Dashboard";
-import { QuoteListPage } from "./QuoteList";
-import { ProjectsPage } from "./Projects";
-import { InvoicesPage } from "./Invoices";
+import { PersonnelPage } from "../pages/Personnel";
+import { EmployeesPage } from "../pages/Employees";
+import { CustomersPage } from "../pages/Customers";
+import { UsersPage } from "../pages/Users";
+import { AuditPage } from "../pages/Audit";
+import { PermissionsPage } from "../pages/Permissions";
+import { ProfilePage } from "../pages/Profile";
+import { NotificationsPage } from "../pages/Notifications";
+import { DashboardPage } from "../pages/Dashboard";
+import { QuoteListPage } from "../pages/QuoteList";
+import { ProjectsPage } from "../pages/Projects";
+import { InvoicesPage } from "../pages/Invoices";
 // Lazy-load các trang NẶNG/route-riêng (editor + lưới + công thức/clipboard, wizard, view HN) → tách
 // thành chunk riêng, KHÔNG vào bundle chính: HR/Account-list không phải tải editor mới mở app.
-const QuoteEditorPage = lazy(() => import("./QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
-const NewQuoteWizard = lazy(() => import("./NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
-const AccountHnView = lazy(() => import("./AccountHnView").then((m) => ({ default: m.AccountHnView })));
-const InternalQuoteView = lazy(() => import("./InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
+const QuoteEditorPage = lazy(() => import("../pages/QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
+const NewQuoteWizard = lazy(() => import("../pages/NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
+const AccountHnView = lazy(() => import("../pages/AccountHnView").then((m) => ({ default: m.AccountHnView })));
+const InternalQuoteView = lazy(() => import("../pages/InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "./api";
-import { toast } from "./ui";
-import { setPendingNewQuote } from "./pendingQuote";
+import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "../lib/api";
+import { toast } from "../lib/ui";
+import { setPendingNewQuote } from "../lib/pendingQuote";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
 // thông tin (tiêu đề/khách/người-gửi/VAT/ngày/logo). KHÔNG tạo ngay: dựng draft _new + mở editor #/rnew

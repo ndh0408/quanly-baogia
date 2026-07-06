@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, type Notif } from "./api";
-import { toast } from "./ui";
+import { api, ApiError, type Notif } from "../lib/api";
+import { toast } from "../lib/ui";
 
 // Port "Thông báo" (renderNotifications) — bê ĐẦY ĐỦ: danh sách thẻ thông báo (đã/chưa đọc) +
 // "Đánh dấu đã đọc tất cả" + bấm 1 thông báo → đánh dấu đã đọc + deep-link sang báo giá
