@@ -11,6 +11,14 @@ const STEPS = ["Công ty phát hành", "Mẫu báo giá", "Thông tin"];
 const ROLE_LABEL: Record<string, string> = { admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán" };
 const DEFAULT_GREETING = "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:";
 const safeLogo = (s: string) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s) ? s : "";
+// Mô tả thân thiện 1 mẫu theo cấu trúc (thay cho codename nội bộ). Rỗng → chỉ hiện tên mẫu.
+const tplDesc = (t: EditorTemplate) => {
+  const p: string[] = [];
+  if (t.layout?.hasDetail) p.push("có cột Chi Tiết");
+  if (t.layout?.hasDays) p.push("có Số Ngày");
+  if (t.layout?.numberSubsections) p.push("nhóm con đánh số");
+  return p.join(" · ");
+};
 
 export function NewQuoteWizard({ me }: { me: Me }) {
   const [companies, setCompanies] = useState<EditorCompany[]>([]);
@@ -110,13 +118,14 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <h2>Chọn mẫu báo giá (mỗi mẫu = 1 sheet)</h2>
             <p className="hint">Chọn 1 hoặc nhiều mẫu. Có thể đổi thứ tự / thêm sheet sau.</p>
             <div className="pick-grid">
-              {coTemplates.map((t) => (
+              {coTemplates.map((t) => { const desc = tplDesc(t); return (
                 <div key={t.id} className={`pick-card ${templateIds.includes(t.id) ? "selected" : ""}`} role="button" tabIndex={0} aria-pressed={templateIds.includes(t.id)} onClick={() => toggleTpl(t.id)}>
                   <div className="pc-title">{t.name}</div>
-                  <div className="pc-sub">{t.code}</div>
+                  {/* Mô tả thân thiện theo cấu trúc mẫu — thay codename nội bộ (unibenfood/marico_decor…). */}
+                  {desc && <div className="pc-sub">{desc}</div>}
                   <div className="pc-check">✓</div>
                 </div>
-              ))}
+              ); })}
             </div>
             {templateIds.length > 0 && (
               <div className="sheet-chips">
