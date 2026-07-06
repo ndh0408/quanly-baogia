@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type QuoteRow } from "./api";
 import { useDebouncedValue } from "./query";
@@ -178,10 +179,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                   <td data-label="Trạng thái">{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
                   {!stripped && (
                     <td className="row-actions qa-cell" data-label="Thao tác">
-                      <button className="qa-btn" title="Tải file Excel" aria-label="Tải Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
-                      <button className="qa-btn" title="Nhân bản thành báo giá mới" aria-label="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>
-                      <button className="qa-btn" title="Tạo bản mới CÙNG mã dự án (v2, v3…)" aria-label="Bản mới" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>
-                      {canDelete(r) && <button className="qa-btn qa-danger" title="Xóa báo giá" aria-label="Xóa" onClick={(e) => act("del", r, e)}><span className="qa-ico">🗑</span><span className="qa-label">Xóa</span></button>}
+                      <RowMenu r={r} act={act} canDelete={canDelete(r)} />
                     </td>
                   )}
                 </tr>
@@ -194,14 +192,52 @@ export function QuoteListPage({ me }: { me: Me }) {
       {rows.length > 0 && (
         <div className="list-foot">
           <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total} báo giá</span>
-          <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
-            <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => setPage((p) => p + 1)}>Sau →</button>
-          </div>
+          {(meta.pageCount || 1) > 1 && (
+            <div className="pager">
+              <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Trước</button>
+              <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
+              <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => setPage((p) => p + 1)}>Sau →</button>
+            </div>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+// Thao tác 1 dòng (desktop): giữ Excel hiện sẵn (hay dùng), gộp Nhân bản/Bản mới/Xóa vào menu "⋯".
+// Menu render qua portal + position:fixed → KHÔNG bị .list-table overflow:hidden cắt mất.
+function RowMenu({ r, act, canDelete }: { r: QuoteRow; act: (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => void; canDelete: boolean }) {
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const open = pos != null;
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setPos(null);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("scroll", close, true); window.removeEventListener("resize", close); };
+  }, [open]);
+  const toggle = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    if (open || !btnRef.current) { setPos(null); return; }
+    const rc = btnRef.current.getBoundingClientRect();
+    setPos({ top: rc.bottom + 3, right: Math.max(8, window.innerWidth - rc.right) });
+  };
+  const run = (a: string) => (e: { stopPropagation: () => void }) => { e.stopPropagation(); setPos(null); act(a, r, e); };
+  return (
+    <>
+      <button className="qa-btn" title="Tải file Excel" aria-label="Tải Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
+      <button ref={btnRef} className="qa-btn" title="Thao tác khác" aria-label="Thao tác khác" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><span className="qa-ico" aria-hidden="true">⋯</span></button>
+      {open && pos && createPortal(
+        <div className="qa-menu" role="menu" style={{ top: pos.top, right: pos.right }}
+             onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+          <button role="menuitem" onClick={run("dup")}>📋 Nhân bản</button>
+          <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng mã dự án</button>
+          {canDelete && <button role="menuitem" className="qa-menu-danger" onClick={run("del")}>🗑 Xóa</button>}
+        </div>, document.body)}
+    </>
   );
 }
 

@@ -184,7 +184,8 @@ export function AuditPage() {
                       <td>{e.actor?.displayName || e.actor?.username || "Hệ thống"}</td>
                       <td>{actionLabel(e.action)}</td>
                       <td>{targetText(e)}</td>
-                      <td className="au-toggle">{canOpen ? (open ? "▾" : "▸ Chi tiết") : ""}</td>
+                      {/* Dòng có thay đổi → link mở/đóng; dòng không có chi tiết → "—" muted cho cột đều, không trống lỗ chỗ. */}
+                      <td className="au-toggle">{canOpen ? (open ? "▾ Ẩn" : "▸ Chi tiết") : <span className="muted">—</span>}</td>
                     </tr>
                     {open && canOpen && (
                       <tr className="au-detail"><td colSpan={5}>
@@ -204,11 +205,13 @@ export function AuditPage() {
       {rows.length > 0 && (
         <div className="list-foot">
           <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total}</span>
-          <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => { setOpenId(null); setPage((p) => p - 1); }}>← Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
-            <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => { setOpenId(null); setPage((p) => p + 1); }}>Sau →</button>
-          </div>
+          {(meta.pageCount || 1) > 1 && (
+            <div className="pager">
+              <button className="btn btn-sm" disabled={page <= 1} onClick={() => { setOpenId(null); setPage((p) => p - 1); }}>← Trước</button>
+              <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
+              <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => { setOpenId(null); setPage((p) => p + 1); }}>Sau →</button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -100,11 +100,14 @@ export function CustomersPage({ me }: { me: Me }) {
       {rows.length > 0 && (
         <div className="list-foot">
           <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total}</span>
-          <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
-            <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => setPage((p) => p + 1)}>Sau →</button>
-          </div>
+          {/* Chỉ hiện nút phân trang khi CÓ nhiều hơn 1 trang — ẩn "Trang 1/1" vô nghĩa. */}
+          {(meta.pageCount || 1) > 1 && (
+            <div className="pager">
+              <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Trước</button>
+              <span className="muted">Trang {meta.page}/{meta.pageCount || 1}</span>
+              <button className="btn btn-sm" disabled={page >= (meta.pageCount || 1)} onClick={() => setPage((p) => p + 1)}>Sau →</button>
+            </div>
+          )}
         </div>
       )}
 
