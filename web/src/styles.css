@@ -208,9 +208,9 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #c0392
 .rev-chart { width: 100%; height: auto; display: block; overflow: visible; }
 .rev-chart .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 4; }
 .rev-chart .axis-label { fill: var(--text-muted); font-size: 11px; font-family: var(--font-ui, inherit); }
-.rev-chart .rev-line { stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
-.rev-chart .hover-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; opacity: .7; }
-.rev-chart .hover-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2.4; }
+/* Cột doanh số (thay đường line cũ) — dễ đọc khi dữ liệu rải rác theo tuần/tháng. */
+.rev-chart .rev-bar { fill: var(--accent); opacity: .82; transition: opacity .12s; }
+.rev-chart .rev-bar:hover, .rev-chart .rev-bar.hi { opacity: 1; }
 .chart-tip { position: absolute; top: 2px; transform: translateX(-50%); background: var(--text); color: var(--surface); padding: 6px 10px; border-radius: 8px; box-shadow: var(--shadow-md); font-size: 12px; pointer-events: none; white-space: nowrap; display: flex; flex-direction: column; gap: 1px; z-index: 5; }
 .chart-tip strong { font-size: 13px; }
 .chart-tip span { opacity: .85; }

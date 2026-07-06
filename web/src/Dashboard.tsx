@@ -73,70 +73,82 @@ function TrendChip({ d, goodWhenUp = true, suffix }: { d: { pct: number; up: boo
   );
 }
 
-// ===== Biểu đồ doanh số theo ngày (SVG thuần — KHÔNG thư viện) =====
+// ===== Biểu đồ doanh số (SVG thuần — KHÔNG thư viện). CỘT theo ngày/tuần/tháng tùy kỳ. =====
 type ChartPoint = { key: string; label: string; amount: number; n: number };
-function RevenueChart({ points }: { points: ChartPoint[] }) {
+type Gran = "day" | "week" | "month";
+const granOf = (period: PeriodKey): Gran => (period === "7" ? "day" : period === "year" ? "month" : "week");
+const GRAN_LABEL: Record<Gran, string> = { day: "ngày", week: "tuần", month: "tháng" };
+// Gộp các điểm NGÀY (liên tục từ đầu kỳ) thành CỘT theo tuần (chunk 7 ngày) hoặc tháng.
+// Kỳ dài mà rải rác vài deal → cột tuần/tháng gom lại thành cột cao, có nghĩa (thay vì đường phẳng 1 spike).
+function bucketPoints(daily: ChartPoint[], gran: Gran): ChartPoint[] {
+  if (gran === "day") return daily;
+  const out: ChartPoint[] = [];
+  const idx = new Map<string, number>();
+  daily.forEach((p, i) => {
+    const [, mRaw] = p.key.split("-");
+    const bkey = gran === "month" ? p.key.slice(0, 7) : `w${Math.floor(i / 7)}`;
+    let at = idx.get(bkey);
+    if (at == null) {
+      at = out.length; idx.set(bkey, at);
+      out.push({ key: bkey, label: gran === "month" ? `Th${Number(mRaw)}` : p.label, amount: 0, n: 0 });
+    }
+    out[at].amount += p.amount;
+    out[at].n += p.n;
+  });
+  return out;
+}
+function RevenueChart({ points, unit }: { points: ChartPoint[]; unit: string }) {
   const [hi, setHi] = useState<number | null>(null);
   const total = points.reduce((s, p) => s + p.amount, 0);
   const deals = points.reduce((s, p) => s + p.n, 0);
   const max = Math.max(1, ...points.map((p) => p.amount));
-  const W = 820, H = 260, padL = 58, padR = 14, padT = 16, padB = 28;
+  const W = 820, H = 260, padL = 58, padR = 14, padT = 16, padB = 30;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const n = points.length;
-  const x = (i: number) => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const y = (v: number) => padT + innerH - (v / max) * innerH;
-  const step = n > 1 ? innerW / (n - 1) : innerW;
   const baseY = padT + innerH;
+  const band = innerW / Math.max(1, n);
+  const cx = (i: number) => padL + band * (i + 0.5);
+  const barW = Math.min(46, band * 0.64);
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
 
   if (total <= 0) {
     return <div className="empty" style={{ padding: 36 }}>Chưa có doanh số đã chốt trong kỳ này.</div>;
   }
 
-  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.amount).toFixed(1)}`).join(" ");
-  const area = `${line} L${x(n - 1).toFixed(1)},${baseY.toFixed(1)} L${x(0).toFixed(1)},${baseY.toFixed(1)} Z`;
   const gridVals = [0, max / 2, max];
-  // Nhãn trục X: ~6 mốc đều nhau.
-  const tickIdx = n <= 1 ? [0] : Array.from(new Set([0, ...[1, 2, 3, 4].map((k) => Math.round((k / 5) * (n - 1))), n - 1]));
+  // Nhãn trục X: thưa bớt khi nhiều cột (~8 mốc), luôn có cột cuối.
+  const everyX = Math.max(1, Math.ceil(n / 8));
   const hp = hi != null ? points[hi] : null;
-  const leftPct = hi != null ? Math.min(92, Math.max(8, (x(hi) / W) * 100)) : 0;
+  const leftPct = hi != null ? Math.min(92, Math.max(8, (cx(hi) / W) * 100)) : 0;
 
   return (
     <div className="chart-wrap" onMouseLeave={() => setHi(null)}>
-      <div className="chart-caption muted">Tổng kỳ: <strong>{fmtMoney(total)} đ</strong> · {deals} hợp đồng chốt</div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="rev-chart" role="img" aria-label={`Biểu đồ doanh số theo ngày, tổng ${fmtMoney(total)} đồng`}>
-        <defs>
-          <linearGradient id="revfill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.30" />
-            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
+      <div className="chart-caption muted">Tổng kỳ: <strong>{fmtMoney(total)} đ</strong> · {deals} hợp đồng chốt · theo {unit}</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="rev-chart" role="img" aria-label={`Biểu đồ doanh số theo ${unit}, tổng ${fmtMoney(total)} đồng`}>
         {gridVals.map((g, i) => (
           <g key={i}>
             <line x1={padL} y1={y(g)} x2={W - padR} y2={y(g)} className="grid-line" />
             <text x={padL - 8} y={y(g) + 4} className="axis-label" textAnchor="end">{compactMoney(g)}</text>
           </g>
         ))}
-        <path d={area} fill="url(#revfill)" />
-        <path d={line} className="rev-line" fill="none" />
-        {tickIdx.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} className="axis-label" textAnchor="middle">{points[i].label}</text>
-        ))}
-        {hp && (
-          <g>
-            <line x1={x(hi!)} y1={padT} x2={x(hi!)} y2={baseY} className="hover-line" />
-            <circle cx={x(hi!)} cy={y(hp.amount)} r={4.5} className="hover-dot" />
-          </g>
-        )}
-        {/* vùng bắt hover theo từng ngày */}
+        {points.map((p, i) => {
+          const bh = Math.max(0, (p.amount / max) * innerH);
+          return <rect key={"b" + i} x={cx(i) - barW / 2} y={baseY - bh} width={barW} height={bh} rx={3}
+                       className={`rev-bar ${hi === i ? "hi" : ""}`} onMouseEnter={() => setHi(i)} />;
+        })}
+        {points.map((p, i) => (i % everyX === 0 || i === n - 1) ? (
+          <text key={"t" + i} x={cx(i)} y={H - 9} className="axis-label" textAnchor="middle">{p.label}</text>
+        ) : null)}
+        {/* vùng bắt hover rộng theo cả band (dễ trỏ hơn cột hẹp) */}
         {points.map((_p, i) => (
-          <rect key={i} x={x(i) - step / 2} y={padT} width={step} height={innerH} fill="transparent"
+          <rect key={"h" + i} x={padL + band * i} y={padT} width={band} height={innerH} fill="transparent"
                 onMouseEnter={() => setHi(i)} />
         ))}
       </svg>
       {hp && (
         <div className="chart-tip" style={{ left: `${leftPct}%` }}>
           <strong>{fmtMoney(hp.amount)} đ</strong>
-          <span>{hp.key.split("-").reverse().join("/")} · {hp.n} hợp đồng</span>
+          <span>{hp.label} · {hp.n} hợp đồng</span>
         </div>
       )}
     </div>
@@ -296,6 +308,10 @@ export function DashboardPage({ me }: { me: Me }) {
     return days;
   }, [data?.rev, range.from, range.to]);
 
+  // Gộp ngày → cột theo tuần/tháng tùy kỳ (kỳ ngắn 7d giữ theo ngày) → biểu đồ có nghĩa, không phẳng-1-spike.
+  const gran = useMemo(() => granOf(period), [period]);
+  const bucketed = useMemo(() => bucketPoints(chartPoints, gran), [chartPoints, gran]);
+
   const onPeriod = (p: PeriodKey) => { setPeriod(p); try { localStorage.setItem("dash.period", p); } catch { /* ignore */ } };
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
 
@@ -338,8 +354,8 @@ export function DashboardPage({ me }: { me: Me }) {
           ); })()}
 
           <section className="card-section dash-chart">
-            <h3>Doanh số đã chốt theo ngày</h3>
-            <RevenueChart points={chartPoints} />
+            <h3>Doanh số đã chốt theo {GRAN_LABEL[gran]}</h3>
+            <RevenueChart points={bucketed} unit={GRAN_LABEL[gran]} />
           </section>
 
           {isAdmin ? (
