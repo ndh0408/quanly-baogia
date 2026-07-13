@@ -214,7 +214,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                         {dateCell(r, "docReturnedAt")}
                         <td style={{ whiteSpace: "nowrap" }}>
                           {r.signedAt
-                            ? <span className="status approved" title={`Ký ngày ${fmtDate(r.signedAt)}`}>✓ {r.signedByName || "Đã ký"}</span>
+                            ? <span className="status approved" style={{ whiteSpace: "nowrap" }}>✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>
                             : <span className="muted">Chưa ký</span>}
                         </td>
                         {editable(r)

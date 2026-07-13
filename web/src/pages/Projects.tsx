@@ -172,7 +172,7 @@ export function ProjectsPage({ me }: { me: Me }) {
                         <td>{r.q.createdBy?.displayName || dash}</td>
                         <td style={redStyle(poFilled && !r.signedAt)}>
                           {r.signedAt
-                            ? <><span className="status approved" title={`Ký ngày ${fmtDate(r.signedAt)}`} style={{ whiteSpace: "nowrap" }}>✓ {r.signedByName || "Đã Ký"}</span>{canSignNow && r.sheetId && <button className="ky-undo" title="Bỏ ký" style={{ marginLeft: 6 }} onClick={(e) => { e.stopPropagation(); sign(r, false); }}>✕</button>}</>
+                            ? <><span className="status approved" style={{ whiteSpace: "nowrap" }}>✓ {r.signedByName || "Đã Ký"} · {fmtDate(r.signedAt)}</span>{canSignNow && r.sheetId && <button className="ky-undo" title="Bỏ ký" style={{ marginLeft: 6 }} onClick={(e) => { e.stopPropagation(); sign(r, false); }}>✕</button>}</>
                             : (canSignNow && r.sheetId ? <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); sign(r, true); }}>Ký</button> : dash)}
                         </td>
                         <td>{dash}</td>
