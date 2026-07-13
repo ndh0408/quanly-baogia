@@ -74,3 +74,6 @@ customers-*.png
 v-*.png
 s2-*.png
 spa-smoke.png
+
+/inv-v2.png
+/e2e-invoice-v2.mjs
