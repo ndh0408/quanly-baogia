@@ -7,8 +7,11 @@ import { toast } from "../lib/ui";
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
 // - Tình trạng HĐ: TỰ ĐỘNG "Done" khi có Số HĐơn + Ngày HĐơn (không nhập tay).
 // - Kế toán nhập: Hạng mục, PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
-//   Link HĐ, Ngày thu tiền (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
-// - Tự động: Khách hàng, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX).
+//   Link HĐ, Ngày thanh toán (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
+// - Tự động: Khách hàng, Mã KH, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX),
+//   Công nợ (số ngày từ Ngày HĐơn khi chưa thanh toán — ĐỎ nếu quá ngưỡng, ngưỡng chỉnh được ở toolbar),
+//   Ký chứng từ (tham chiếu từ trang Quản lý dự án — hiện AI ký + ngày ký).
+// - Ô ngày CHƯA điền tô HỒNG để kế toán thấy còn thiếu.
 
 const fmtMoney = (v?: number) => Number(v || 0).toLocaleString("vi-VN");
 const fmtDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
@@ -17,7 +20,7 @@ const shortTitle = (t: string) => { const s = String(t || ""); return s.replace(
 const codeLabel = (q: ProjectQuote) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
 const dash = <span className="muted">—</span>;
 
-const HEADERS = ["Khách hàng", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thu tiền", "Chứng từ gửi đi", "Chứng từ trả về", "Năm", "Note"];
+const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
 const COMPANIES = ["GN", "SM", "CLF"];
 const PAY_METHODS = ["CK", "TM"];
 
@@ -27,6 +30,7 @@ type Row = {
   invoiceNo: string | null; invoiceDate: string | null; paymentMethod: string | null;
   orderClosedAt: string | null; invoiceLink: string | null; paidAt: string | null;
   docSentAt: string | null; docReturnedAt: string | null; invoiceYear: number | null; invoiceNote: string | null;
+  signedAt: string | null; signedByName: string | null;   // Ký chứng từ — hành động ở trang Quản lý dự án
 };
 
 function buildRows(quotes: ProjectQuote[]): Row[] {
@@ -48,6 +52,7 @@ function buildRows(quotes: ProjectQuote[]): Row[] {
         orderClosedAt: sh.orderClosedAt || null, invoiceLink: sh.invoiceLink || null,
         paidAt: sh.paidAt || null, docSentAt: sh.docSentAt || null, docReturnedAt: sh.docReturnedAt || null,
         invoiceYear: sh.invoiceYear ?? null, invoiceNote: sh.invoiceNote || null,
+        signedAt: sh.signedAt || null, signedByName: sh.signedByName || null,
       });
     });
   }
@@ -61,6 +66,13 @@ const defaultCty = (q: ProjectQuote) => {
   return "GN";
 };
 
+// Công nợ = số ngày từ Ngày HĐơn đến hôm nay khi CHƯA thanh toán (đã thanh toán/chưa xuất HĐ → không nợ).
+const debtDays = (r: Row): number | null => {
+  if (!r.invoiceDate || r.paidAt) return null;
+  const d = new Date(r.invoiceDate); if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+};
+
 export function InvoicesPage({ me }: { me: Me }) {
   const canEdit = me.permissions.includes("invoice:edit");
   const canPay = me.permissions.includes("invoice:pay");
@@ -68,6 +80,9 @@ export function InvoicesPage({ me }: { me: Me }) {
   const [q, setQ] = useState("");
   const [year, setYear] = useState("");
   const [cty, setCty] = useState("");
+  // Ngưỡng báo công nợ (ngày) — kế toán tự đặt, nhớ theo máy.
+  const [debtLimit, setDebtLimit] = useState(() => { const n = Number(localStorage.getItem("inv_debt_days")); return n > 0 ? n : 30; });
+  const setLimit = (v: string) => { const n = Math.max(1, Math.min(999, Number(v) || 0)) || 30; setDebtLimit(n); localStorage.setItem("inv_debt_days", String(n)); };
 
   const { data, isPending, error } = useQuery({ queryKey: ["quoteProjects"], queryFn: api.quoteProjects });
   const [rows, setRows] = useState<Row[]>([]);
@@ -86,6 +101,8 @@ export function InvoicesPage({ me }: { me: Me }) {
 
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
+  const overdue = shown.filter((r) => { const d = debtDays(r); return d != null && d > debtLimit; });
+  const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const saveField = async (row: Row, field: string, val: string | null) => {
@@ -104,11 +121,13 @@ export function InvoicesPage({ me }: { me: Me }) {
       <td><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }}
         onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field as string, e.target.value.trim() || null)} /></td>
     ) : <td>{(r[field] as string) || dash}</td>;
+  // Ô ngày CHƯA điền → nền HỒNG (nhắc kế toán còn thiếu), điền xong tự hết.
+  const pinkIfEmpty = (v: unknown) => (v ? undefined : { background: "#ffe0ee" });
   const dateCell = (r: Row, field: keyof Row) =>
     editable(r, field as string) ? (
-      <td><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140 }}
+      <td style={pinkIfEmpty(r[field])}><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140, background: "transparent" }}
         onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }} /></td>
-    ) : <td>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
+    ) : <td style={pinkIfEmpty(r[field])}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
   const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") =>
     editable(r, field as string) ? (
       <td><select value={(r[field] as string) || defVal} style={{ width: 74 }}
@@ -134,6 +153,11 @@ export function InvoicesPage({ me }: { me: Me }) {
         <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
         <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }} title="Chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ để đi đòi">
+          <span className="muted" style={{ fontSize: 13 }}>Báo nợ quá</span>
+          <input inputMode="numeric" value={debtLimit} onChange={(e) => setLimit(e.target.value)} style={{ width: 52, textAlign: "center" }} aria-label="Ngưỡng báo công nợ (ngày)" />
+          <span className="muted" style={{ fontSize: 13 }}>ngày</span>
+        </label>
         <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
       </div>
 
@@ -147,6 +171,7 @@ export function InvoicesPage({ me }: { me: Me }) {
             {stat("Tổng số tiền (VAT)", fmtMoney(sumAmount))}
             {stat("Đã thu", fmtMoney(collected), "#0a7d28")}
             {stat("Chưa thu", fmtMoney(sumAmount - collected), sumAmount - collected > 0 ? "#c0392b" : undefined)}
+            {stat(`Nợ quá ${debtLimit} ngày`, overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0", overdue.length ? "#c0392b" : "#0a7d28")}
             {stat("Số hóa đơn", String(shown.length))}
           </div>
 
@@ -159,10 +184,13 @@ export function InvoicesPage({ me }: { me: Me }) {
                 <tbody>
                   {shown.map((r) => {
                     const done = !!(r.invoiceNo && r.invoiceDate);   // TỰ ĐỘNG Done khi có Số HĐ + Ngày HĐ
+                    const nDays = debtDays(r);                        // null = đã thanh toán / chưa có Ngày HĐơn
+                    const over = nDays != null && nDays > debtLimit;  // quá ngưỡng → ĐỎ (đi đòi nợ)
                     return (
                       <tr key={r.key} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
                           onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}>
                         <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
+                        <td>{r.q.customerCode || dash}</td>
                         <td><strong>{r.code}</strong></td>
                         {textCell(r, "invoiceDesc", "Hạng mục…", 210)}
                         <td>{done ? <span className="status approved">Done</span> : <span className="status pending">Chưa đủ</span>}</td>
@@ -171,6 +199,10 @@ export function InvoicesPage({ me }: { me: Me }) {
                         {textCell(r, "invoiceNo", "Số HĐ", 90)}
                         {dateCell(r, "invoiceDate")}
                         <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.amount)}</td>
+                        <td style={over ? { background: "#ffd6d6", color: "#b91c1c", fontWeight: 700, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
+                            title={over ? `Quá ${debtLimit} ngày chưa thanh toán (từ Ngày HĐơn ${fmtDate(r.invoiceDate)}) — cần đi đòi` : undefined}>
+                          {r.paidAt ? <span style={{ color: "#0a7d28" }}>✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays} ngày</>}
+                        </td>
                         {selectCell(r, "paymentMethod", PAY_METHODS)}
                         {dateCell(r, "orderClosedAt")}
                         <td>{r.q.createdBy?.displayName || dash}</td>
@@ -180,6 +212,11 @@ export function InvoicesPage({ me }: { me: Me }) {
                         {dateCell(r, "paidAt")}
                         {dateCell(r, "docSentAt")}
                         {dateCell(r, "docReturnedAt")}
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {r.signedAt
+                            ? <span className="status approved" title={`Ký ngày ${fmtDate(r.signedAt)}`}>✓ {r.signedByName || "Đã ký"}</span>
+                            : <span className="muted">Chưa ký</span>}
+                        </td>
                         {editable(r)
                           ? <td><input inputMode="numeric" value={r.invoiceYear ?? ""} placeholder="Năm" style={{ width: 64 }} onChange={(e) => patch(r.key, { invoiceYear: e.target.value ? Number(e.target.value) : null })} onBlur={(e) => saveField(r, "invoiceYear", e.target.value.trim() || null)} /></td>
                           : <td>{r.invoiceYear ?? dash}</td>}
