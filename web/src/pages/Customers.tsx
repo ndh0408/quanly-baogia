@@ -77,6 +77,7 @@ export function CustomersPage({ me }: { me: Me }) {
               <tr>
                 <th>Mã khách hàng</th>
                 <th className="sortable" aria-sort={nameAria} onClick={() => toggleSort("name")} title="Bấm để sắp xếp">Tên công ty{nameArrow}</th>
+                <th title="Hạn công nợ riêng từng công ty: quá số ngày này sau Ngày HĐơn mà chưa thanh toán → trang Hóa đơn báo ĐỎ">Công nợ</th>
                 <th />
               </tr>
             </thead>
@@ -85,6 +86,7 @@ export function CustomersPage({ me }: { me: Me }) {
                 <tr key={c.id}>
                   <td><strong>{c.code}</strong></td>
                   <td>{c.name}</td>
+                  <td>{c.debtDays != null ? `${c.debtDays} ngày` : <span className="muted">Mặc định</span>}</td>
                   <td className="row-actions">
                     <button className="btn btn-sm" onClick={() => setEditing(c)}>{canEdit ? "Sửa" : "Xem"}</button>
                     {canDelete && <button className="btn btn-sm btn-danger" onClick={() => onDelete(c)}>Xóa</button>}
@@ -125,6 +127,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
   const isNew = !rec;
   const [code, setCode] = useState(rec?.code ?? "");
   const [name, setName] = useState(rec?.name ?? "");
+  const [debtDays, setDebtDays] = useState<string>(rec?.debtDays != null ? String(rec.debtDays) : "");
   const [err, setErr] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -135,7 +138,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
   // Sửa: nạp đủ chi tiết (đề phòng list trả thiếu) — giống SPA gọi GET /customers/:id.
   useEffect(() => {
     if (isNew) return;
-    api.getCustomer(rec!.id).then((c) => { setCode(c.code || ""); setName(c.name || ""); setLoaded(true); }).catch(() => setLoaded(true));
+    api.getCustomer(rec!.id).then((c) => { setCode(c.code || ""); setName(c.name || ""); setDebtDays(c.debtDays != null ? String(c.debtDays) : ""); setLoaded(true); }).catch(() => setLoaded(true));
   }, [isNew, rec]);
 
   const guardedClose = useCallback(async () => {
@@ -154,8 +157,9 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
     if (!name.trim()) { setFieldErrors({ name: "Vui lòng nhập tên công ty" }); return; }
     setErr(""); setFieldErrors({}); setSaving(true);
     try {
-      if (isNew) await api.createCustomer({ name: name.trim(), ...(code.trim() ? { code: code.trim() } : {}) });
-      else await api.updateCustomer(rec!.id, { name: name.trim() });
+      const dd = debtDays.trim() === "" ? null : Number(debtDays);
+      if (isNew) await api.createCustomer({ name: name.trim(), debtDays: dd, ...(code.trim() ? { code: code.trim() } : {}) });
+      else await api.updateCustomer(rec!.id, { name: name.trim(), debtDays: dd });
       toast("Đã lưu", "success");
       onSaved();
     } catch (ex) {
@@ -191,6 +195,15 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
                 aria-invalid={fieldErrors.name ? true : undefined}
                 onChange={(e) => { dirty.current = true; setName(e.target.value); setFieldErrors((fe) => (fe.name ? { ...fe, name: "" } : fe)); }} />
               {fieldErrors.name && <div className="field-err">{fieldErrors.name}</div>}
+            </label>
+            <label className="full">
+              <span>Hạn công nợ <em className="unit">(ngày — để trống = dùng mặc định trang Hóa đơn)</em></span>
+              <input inputMode="numeric" value={debtDays} disabled={readOnly}
+                placeholder="VD: 30"
+                aria-invalid={fieldErrors.debtDays ? true : undefined}
+                onChange={(e) => { dirty.current = true; setDebtDays(e.target.value.replace(/[^\d]/g, "")); setFieldErrors((fe) => (fe.debtDays ? { ...fe, debtDays: "" } : fe)); }} />
+              <em className="unit">Chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → trang Hóa đơn báo <b style={{ color: "#b91c1c" }}>ĐỎ</b> để đi đòi.</em>
+              {fieldErrors.debtDays && <div className="field-err">{fieldErrors.debtDays}</div>}
             </label>
           </div>
           {!loaded && <div className="muted" style={{ marginTop: 8 }}>Đang tải…</div>}

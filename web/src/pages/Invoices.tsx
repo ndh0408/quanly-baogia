@@ -9,7 +9,8 @@ import { toast } from "../lib/ui";
 // - Kế toán nhập: Hạng mục, PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
 //   Link HĐ, Ngày thanh toán (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
 // - Tự động: Khách hàng, Mã KH, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX),
-//   Công nợ (số ngày từ Ngày HĐơn khi chưa thanh toán — ĐỎ nếu quá ngưỡng, ngưỡng chỉnh được ở toolbar),
+//   Công nợ (số ngày từ Ngày HĐơn khi chưa thanh toán — ĐỎ nếu quá HẠN CÔNG NỢ RIÊNG của khách
+//   (đặt ở trang Mã khách hàng); khách chưa đặt thì dùng ngưỡng mặc định chỉnh được ở toolbar),
 //   Ký chứng từ (tham chiếu từ trang Quản lý dự án — hiện AI ký + ngày ký).
 // - Ô ngày CHƯA điền tô HỒNG để kế toán thấy còn thiếu.
 
@@ -101,7 +102,9 @@ export function InvoicesPage({ me }: { me: Me }) {
 
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
-  const overdue = shown.filter((r) => { const d = debtDays(r); return d != null && d > debtLimit; });
+  // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → mặc định toolbar.
+  const rowLimit = (r: Row) => r.q.customerDebtDays ?? debtLimit;
+  const overdue = shown.filter((r) => { const d = debtDays(r); return d != null && d > rowLimit(r); });
   const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
@@ -153,10 +156,10 @@ export function InvoicesPage({ me }: { me: Me }) {
         <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
         <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }} title="Chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ để đi đòi">
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }} title="Ngưỡng MẶC ĐỊNH: chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ. Muốn hạn RIÊNG từng công ty → đặt ở trang Mã khách hàng (nút Sửa).">
           <span className="muted" style={{ fontSize: 13 }}>Báo nợ quá</span>
           <input inputMode="numeric" value={debtLimit} onChange={(e) => setLimit(e.target.value)} style={{ width: 52, textAlign: "center" }} aria-label="Ngưỡng báo công nợ (ngày)" />
-          <span className="muted" style={{ fontSize: 13 }}>ngày</span>
+          <span className="muted" style={{ fontSize: 13 }}>ngày (mặc định)</span>
         </label>
         <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
       </div>
@@ -171,7 +174,7 @@ export function InvoicesPage({ me }: { me: Me }) {
             {stat("Tổng số tiền (VAT)", fmtMoney(sumAmount))}
             {stat("Đã thu", fmtMoney(collected), "#0a7d28")}
             {stat("Chưa thu", fmtMoney(sumAmount - collected), sumAmount - collected > 0 ? "#c0392b" : undefined)}
-            {stat(`Nợ quá ${debtLimit} ngày`, overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0", overdue.length ? "#c0392b" : "#0a7d28")}
+            {stat("Nợ quá hạn", overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0", overdue.length ? "#c0392b" : "#0a7d28")}
             {stat("Số hóa đơn", String(shown.length))}
           </div>
 
@@ -185,7 +188,8 @@ export function InvoicesPage({ me }: { me: Me }) {
                   {shown.map((r) => {
                     const done = !!(r.invoiceNo && r.invoiceDate);   // TỰ ĐỘNG Done khi có Số HĐ + Ngày HĐ
                     const nDays = debtDays(r);                        // null = đã thanh toán / chưa có Ngày HĐơn
-                    const over = nDays != null && nDays > debtLimit;  // quá ngưỡng → ĐỎ (đi đòi nợ)
+                    const limit = rowLimit(r);                        // hạn riêng của khách ?? mặc định toolbar
+                    const over = nDays != null && nDays > limit;      // quá hạn → ĐỎ (đi đòi nợ)
                     return (
                       <tr key={r.key} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
                           onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}>
@@ -200,8 +204,8 @@ export function InvoicesPage({ me }: { me: Me }) {
                         {dateCell(r, "invoiceDate")}
                         <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.amount)}</td>
                         <td style={over ? { background: "#ffd6d6", color: "#b91c1c", fontWeight: 700, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
-                            title={over ? `Quá ${debtLimit} ngày chưa thanh toán (từ Ngày HĐơn ${fmtDate(r.invoiceDate)}) — cần đi đòi` : undefined}>
-                          {r.paidAt ? <span style={{ color: "#0a7d28" }}>✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays} ngày</>}
+                            title={nDays == null ? undefined : `Hạn công nợ ${limit} ngày (${r.q.customerDebtDays != null ? "riêng khách này — đặt ở Mã khách hàng" : "mặc định"})${over ? ` — QUÁ HẠN, từ Ngày HĐơn ${fmtDate(r.invoiceDate)}, cần báo thanh toán` : ""}`}>
+                          {r.paidAt ? <span style={{ color: "#0a7d28" }}>✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays}/{limit} ngày</>}
                         </td>
                         {selectCell(r, "paymentMethod", PAY_METHODS)}
                         {dateCell(r, "orderClosedAt")}

@@ -468,7 +468,7 @@ export async function listProjects(req: Request) {
       title: true, status: true, hnStatus: true, quoteDate: true, executionDate: true, vatPercent: true,
       subtotal: true, total: true, discount: true,
       company: { select: { name: true, shortName: true } },
-      customer: { select: { code: true, name: true } },
+      customer: { select: { code: true, name: true, debtDays: true } },
       createdBy: { select: { displayName: true } },
       sheets: {
         orderBy: { order: "asc" },
@@ -500,6 +500,7 @@ export async function listProjects(req: Request) {
       company: q.company,
       customerCode: q.customer?.code ?? null,
       customerName: q.customer?.name ?? null,
+      customerDebtDays: q.customer?.debtDays ?? null,   // hạn công nợ riêng của khách (trang Hóa đơn)
       createdBy: q.createdBy,
       sheets: q.sheets.map((sh: any) => {
         const ex = Array.isArray(sh.extraTables) ? sh.extraTables : [];

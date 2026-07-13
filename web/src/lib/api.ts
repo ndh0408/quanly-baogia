@@ -41,7 +41,7 @@ export type Project = {
 };
 
 // Khách hàng (đang port admin sang React — increment 1).
-export type Customer = { id: number; code: string; name: string; phone?: string | null; email?: string | null; [k: string]: unknown };
+export type Customer = { id: number; code: string; name: string; phone?: string | null; email?: string | null; debtDays?: number | null; [k: string]: unknown };
 export type CustomerListResult = { data: Customer[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
 // Người dùng (Quản lý nhân viên — increment 2). /api/users trả MẢNG (không phân trang).
@@ -86,7 +86,7 @@ export type ProjectSheet = {
 };
 export type ProjectQuote = {
   id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
-  quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; customerName?: string | null; hnStatus?: string | null;
+  quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; customerName?: string | null; customerDebtDays?: number | null; hnStatus?: string | null;
   company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];
 };
 
@@ -225,8 +225,8 @@ export const api = {
   listCustomers: (q = "", page = 1, size = 20, sort = "createdAt", order: "asc" | "desc" = "desc") =>
     req<CustomerListResult>(`/customers?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
   getCustomer: (id: number) => req<Customer>(`/customers/${id}`),
-  createCustomer: (data: { name: string; code?: string }) => req<Customer>("/customers", { method: "POST", body: JSON.stringify(data) }),
-  updateCustomer: (id: number, data: { name: string }) => req<Customer>(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  createCustomer: (data: { name: string; code?: string; debtDays?: number | null }) => req<Customer>("/customers", { method: "POST", body: JSON.stringify(data) }),
+  updateCustomer: (id: number, data: { name: string; debtDays?: number | null }) => req<Customer>(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCustomer: (id: number) => req<{ ok: boolean }>(`/customers/${id}`, { method: "DELETE" }),
   // Quản lý nhân viên (increment 2) — gate user:manage (Shell nav đã lọc).
   listUsers: () => req<User[]>("/users"),

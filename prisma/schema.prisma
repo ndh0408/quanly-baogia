@@ -276,6 +276,7 @@ model Customer {
   contactTitle String?
   status       CustomerStatus @default(lead)
   tags         String[]       @default([])
+  debtDays     Int?           // Hạn công nợ RIÊNG từng khách (ngày sau Ngày HĐơn) — trang Hóa đơn báo ĐỎ khi quá; null = dùng mặc định
   searchText   String         @default("") // chuẩn-hóa bỏ dấu (normalizeSearch) → tìm không dấu/sai dấu; GIN trgm index
   ownerId      Int?
   owner        User?          @relation(fields: [ownerId], references: [id])

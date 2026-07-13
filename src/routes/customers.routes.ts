@@ -23,6 +23,10 @@ const CustomerCreate = z.object({
   contactTitle: z.string().max(120).optional().nullable(),
   status: z.enum(["lead", "prospect", "active", "inactive"]).default("lead"),
   tags: z.array(z.string().max(40)).max(20).default([]),
+  // Hạn công nợ riêng từng khách (ngày sau Ngày HĐơn) — trống/null = dùng mặc định trang Hóa đơn.
+  debtDays: z.preprocess((v) => (v === "" || v == null ? null : v),
+    z.coerce.number({ error: "Hạn công nợ phải là số ngày" }).int({ error: "Hạn công nợ phải là số nguyên" })
+      .min(1, { error: "Hạn công nợ tối thiểu 1 ngày" }).max(999, { error: "Hạn công nợ tối đa 999 ngày" }).nullable()).optional(),
   ownerId: z.coerce.number().int().positive().optional().nullable(),
 });
 
