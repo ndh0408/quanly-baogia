@@ -18,6 +18,7 @@ import { fmtMoney, fmtDate, toInputDate, shortTitle, codeLabel, dash, Stat } fro
 const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
 const COMPANIES = ["GN", "SM", "CLF"];
 const PAY_METHODS = ["CK", "TM"];
+const DEBT_DEFAULT = 30;   // hạn công nợ (ngày) cho khách CHƯA đặt hạn riêng ở trang Mã khách hàng
 
 // Cột sort được (kế toán cần sắp theo ngày/tiền/nợ để đòi nợ) + cột SỐ (căn phải, tabular-nums qua .num).
 type SortKey = "invoiceDate" | "amount" | "debt";
@@ -98,12 +99,11 @@ export function InvoicesPage({ me }: { me: Me }) {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [year, setYear] = useState("");
+  const [month, setMonth] = useState("");   // lọc theo THÁNG của Ngày HĐơn
   const [cty, setCty] = useState("");
-  // Ngưỡng báo công nợ (ngày) — kế toán tự đặt, nhớ theo máy. limitRaw giữ CHUỖI đang gõ
-  // (cho xóa trắng/gõ lại tự nhiên), chỉ clamp khi có số hợp lệ hoặc khi blur.
-  const [debtLimit, setDebtLimit] = useState(() => { const n = Number(localStorage.getItem("inv_debt_days")); return n > 0 ? n : 30; });
-  const [limitRaw, setLimitRaw] = useState(String(debtLimit));
-  const applyLimit = (v: string) => { const n = Math.max(1, Math.min(999, Number(v) || 0)) || 30; setDebtLimit(n); localStorage.setItem("inv_debt_days", String(n)); return n; };
+  // Hạn công nợ đặt RIÊNG TỪNG CÔNG TY ở trang Mã khách hàng (nút Sửa) — khách chưa đặt
+  // thì dùng mặc định cố định 30 ngày. (2026-07-16: bỏ ô chỉnh "mặc định" trên toolbar theo
+  // yêu cầu — thừa khi đã có hạn riêng từng khách.)
 
   const { data, isPending, error } = useQuery({ queryKey: ["quoteProjects"], queryFn: api.quoteProjects });
   const [rows, setRows] = useState<Row[]>([]);
@@ -128,6 +128,7 @@ export function InvoicesPage({ me }: { me: Me }) {
   const norm = (s: unknown) => (s == null ? "" : String(s)).toLowerCase();
   const shown = rows.filter((r) => {
     if (year && String(r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : "")) !== year) return false;
+    if (month && String(r.invoiceDate ? new Date(r.invoiceDate).getMonth() + 1 : "") !== month) return false;
     if (cty && (r.invoiceCompany || defaultCty(r.q)) !== cty) return false;
     if (q && ![r.q.customerName, r.q.customerCode, r.q.title, r.code, r.invoiceDesc, r.invoiceNo, r.poNumber, r.q.createdBy?.displayName].map(norm).join(" ").includes(norm(q))) return false;
     return true;
@@ -154,8 +155,8 @@ export function InvoicesPage({ me }: { me: Me }) {
 
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
-  // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → mặc định toolbar.
-  const rowLimit = (r: Row) => r.q.customerDebtDays ?? debtLimit;
+  // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → 30 ngày.
+  const rowLimit = (r: Row) => r.q.customerDebtDays ?? DEBT_DEFAULT;
   const overdue = shown.filter((r) => { const d = debtDays(r); return d != null && d > rowLimit(r); });
   const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
 
@@ -205,15 +206,11 @@ export function InvoicesPage({ me }: { me: Me }) {
         <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
         <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
-        <label className="inline-field nowrap" title="Ngưỡng MẶC ĐỊNH: chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ. Muốn hạn RIÊNG từng công ty → đặt ở trang Mã khách hàng (nút Sửa).">
-          <span className="muted">Báo nợ quá</span>
-          <input inputMode="numeric" value={limitRaw}
-            onChange={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); setLimitRaw(v); if (v) applyLimit(v); }}
-            onBlur={() => { if (!limitRaw) { setLimitRaw(String(debtLimit)); return; } setLimitRaw(String(applyLimit(limitRaw))); }}
-            style={{ width: 52, textAlign: "center" }} aria-label="Ngưỡng báo công nợ (ngày)" />
-          <span className="muted">ngày (mặc định)</span>
-        </label>
-        <button className="btn btn-sm btn-ghost" type="button" disabled={!q && !year && !cty} onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
+        <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
+          <option value="">Tháng: Tất cả</option>
+          {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>Tháng {i + 1}</option>)}
+        </select>
+        <button className="btn btn-sm btn-ghost" type="button" disabled={!q && !year && !month && !cty} onClick={() => { setQ(""); setYear(""); setMonth(""); setCty(""); }}>Xóa lọc</button>
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
