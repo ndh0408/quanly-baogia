@@ -1857,6 +1857,79 @@ textarea[aria-invalid="true"] {
 .inv-table {
   min-width: 1400px;
 }
+
+/* ĐÓNG BĂNG 5 cột đầu (Khách hàng → Tình trạng HĐ) như Excel freeze panes — lăn ngang vẫn thấy
+   danh tính dòng, GẠCH DỌC ranh giới (giống 4 cột khóa của .proj-table). Mốc `left` cộng dồn
+   = bề rộng cố định từng cột; .list-table overflow:hidden phá sticky → cho inv-table visible
+   (vùng cuộn là .tbl-scroll bao ngoài). */
+.inv-table {
+  overflow: visible;
+}
+.inv-table th:nth-child(1),
+.inv-table td:nth-child(1) {
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  left: 0;
+}
+.inv-table th:nth-child(2),
+.inv-table td:nth-child(2) {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+  left: 150px;
+}
+.inv-table th:nth-child(3),
+.inv-table td:nth-child(3) {
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
+  left: 260px;
+}
+.inv-table th:nth-child(4),
+.inv-table td:nth-child(4) {
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  left: 400px;
+}
+.inv-table th:nth-child(5),
+.inv-table td:nth-child(5) {
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+  left: 640px;
+}
+.inv-table th:nth-child(-n + 5),
+.inv-table td:nth-child(-n + 5) {
+  position: sticky;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inv-table td:nth-child(-n + 5) {
+  background: var(--surface);
+  z-index: 2;
+}
+.inv-table tbody tr.qrow:hover td:nth-child(-n + 5) {
+  background: var(--surface-hover);
+}
+.inv-table thead th {
+  z-index: 3;
+}
+.inv-table thead th:nth-child(-n + 5) {
+  background: var(--surface-2);
+  z-index: 5;
+}
+/* Gạch dọc + bóng nhẹ ở mép vùng khóa — báo còn cột phía sau */
+.inv-table th:nth-child(5),
+.inv-table td:nth-child(5) {
+  border-right: 2px solid var(--border-strong);
+  box-shadow: 2px 0 5px -2px rgba(20, 30, 50, 0.15);
+}
+[data-theme="dark"] .inv-table th:nth-child(5),
+[data-theme="dark"] .inv-table td:nth-child(5) {
+  box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.55);
+}
 .inv-table td input,
 .inv-table td select {
   border: 1px solid var(--line-strong);
