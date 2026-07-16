@@ -77,3 +77,5 @@ spa-smoke.png
 
 /inv-v2.png
 /e2e-invoice-v2.mjs
+/e2e-verify-ui.mjs
+/ui-shots-after/
