@@ -1895,9 +1895,9 @@ textarea[aria-invalid="true"] {
 }
 .inv-table th:nth-child(5),
 .inv-table td:nth-child(5) {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  width: 132px;
+  min-width: 132px;
+  max-width: 132px;
   left: 640px;
 }
 .inv-table th:nth-child(-n + 5),
