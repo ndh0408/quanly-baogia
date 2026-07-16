@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type Me } from "../lib/api";
 import { confirmModal } from "../lib/ui";
+import { statusLabel, ROLE_LABEL } from "../lib/format";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
 async function guardLeave(): Promise<boolean> {
@@ -21,8 +22,8 @@ function PageFallback() {
 // rồi mới lỗi API — hiện thẳng màn "không có quyền". Áp cho MỌI trang nav có `perm`.
 function AccessDenied() {
   return (
-    <div className="center" style={{ flexDirection: "column", gap: 10, padding: 40, textAlign: "center" }}>
-      <div style={{ fontSize: 40 }}>🔒</div>
+    <div className="access-denied">
+      <div className="ad-ico" aria-hidden="true">🔒</div>
       <h2>Không có quyền truy cập</h2>
       <p className="muted">Tài khoản của bạn không được cấp quyền xem trang này. Liên hệ quản trị viên nếu cần.</p>
       <a className="btn btn-primary" href="#/">Về trang chính</a>
@@ -47,7 +48,15 @@ class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean 
     }
   }
   render() {
-    if (this.state.failed) return <PageFallback />;
+    // Không phải lỗi chunk (crash runtime) / reload bị throttle → báo lỗi THẬT + nút thử lại,
+    // đừng để user nhìn skeleton nhấp nháy vô hạn.
+    if (this.state.failed) {
+      return (
+        <div className="err">⚠ Không tải được trang.
+          <button className="btn btn-sm" onClick={() => location.reload()}>Thử lại</button>
+        </div>
+      );
+    }
     return <Suspense fallback={<PageFallback />}>{this.props.children}</Suspense>;
   }
 }
@@ -70,10 +79,7 @@ const NewQuoteWizard = lazy(() => import("../pages/NewQuoteWizard").then((m) => 
 const AccountHnView = lazy(() => import("../pages/AccountHnView").then((m) => ({ default: m.AccountHnView })));
 const InternalQuoteView = lazy(() => import("../pages/InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán",
-};
-const QSTATUS: Record<string, string> = { draft: "Nháp", converted: "Đã chốt", lost: "Không chốt", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi" };
+// Nhãn role + trạng thái báo giá: dùng bản CHUNG ở lib/format (hết mỗi trang 1 bản dịch lệch nhau).
 // Bỏ dấu + đ→d → khớp tìm KHÔNG dấu / sai dấu cho "đi tới trang".
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase().trim();
 
@@ -94,7 +100,9 @@ const ICON: Record<string, ReactNode> = {
   profile: <svg {...S}><circle cx="12" cy="8" r="3.4" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>,
 };
 
-const themeIcon = () => (localStorage.getItem("theme") === "dark" ? "☀️" : "🌙");
+// Đọc DOM (main.tsx đã set data-theme cả khi theo OS) — trước đây đọc localStorage nên user
+// dark-theo-OS thấy icon sai và bấm lần đầu bị chuyển ngược.
+const themeIcon = () => (document.documentElement.getAttribute("data-theme") === "dark" ? "☀️" : "🌙");
 function toggleTheme() {
   const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", next);
@@ -216,10 +224,10 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
     if (!(await guardLeave())) return;
     setOpen(false);
     if (h.kind === "personnel") { setQuery(h.name); location.hash = "#/personnel"; return; }   // giữ query → trang Nhân sự tự lọc
+    if (h.kind === "customer") { setQuery(h.code); location.hash = "#/customers"; return; }    // giữ query → trang Mã KH tự lọc theo mã
     setQuery("");
     if (h.kind === "page") location.hash = `#/${h.nav}`;
     else if (h.kind === "quote") location.hash = `#/quotes/${h.id}`;
-    else if (h.kind === "customer") location.hash = "#/customers";
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -231,19 +239,20 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
 
   const renderHit = (h: Hit) => {
     if (h.kind === "page") return <><span className="gs-ico" aria-hidden="true">{ICON[h.nav]}</span><span className="gs-label">{h.label}</span><span className="gs-tag">Trang</span></>;
-    if (h.kind === "quote") return <><strong className="gs-code">{h.code}</strong><span className="gs-label">{h.title}</span><span className={`status ${h.status}`}>{QSTATUS[h.status] || h.status}</span></>;
+    if (h.kind === "quote") return <><strong className="gs-code">{h.code}</strong><span className="gs-label">{h.title}</span><span className={`status ${h.status}`}>{statusLabel(h.status)}</span></>;
     if (h.kind === "customer") return <><strong className="gs-code">{h.code}</strong><span className="gs-label">{h.name}</span>{h.sub && <span className="gs-sub">{h.sub}</span>}</>;
     return <><span className="gs-label"><strong>{h.name}</strong></span>{h.sub && <span className="gs-sub">{h.sub}</span>}</>;
   };
 
   let gi = -1;
   return (
-    <div className="global-search" role="search" style={{ position: "relative" }}
+    <div className="global-search" role="search"
          onBlur={() => { blurT.current = setTimeout(() => setOpen(false), 130); }}
          onFocus={() => { if (blurT.current) clearTimeout(blurT.current); if (query.trim().length >= 1) setOpen(true); }}>
       <label htmlFor="gs-input" className="sr-only">Tìm trang, nhân sự, báo giá, khách hàng</label>
       <input id="gs-input" ref={inputRef} placeholder="🔎 Tìm mọi thứ… (Ctrl+K)" value={query} autoComplete="off"
-             role="combobox" aria-expanded={showDrop} aria-controls="gs-listbox"
+             role="combobox" aria-expanded={showDrop} aria-controls="gs-listbox" aria-autocomplete="list"
+             aria-activedescendant={showDrop && flat[active] ? `gs-opt-${active}` : undefined}
              onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onKeyDown={onKeyDown} />
       {showDrop && (
         <div className="global-search-results" id="gs-listbox" role="listbox" onMouseDown={(e) => e.preventDefault()}>
@@ -255,7 +264,7 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
               {g.items.map((h) => {
                 gi++; const i = gi; const on = i === active;
                 return (
-                  <div key={`${h.kind}-${"id" in h ? h.id : ""}-${i}`} className={`gs-row ${on ? "active" : ""}`} role="option" aria-selected={on}
+                  <div key={`${h.kind}-${"id" in h ? h.id : ""}-${i}`} id={`gs-opt-${i}`} className={`gs-row ${on ? "active" : ""}`} role="option" aria-selected={on}
                        onMouseEnter={() => setActive(i)} onClick={() => activate(h)}>{renderHit(h)}</div>
                 );
               })}
@@ -268,12 +277,19 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
   );
 }
 
-export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; onPreview?: (perms: string[], label: string) => void; previewing?: boolean }) {
+export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; onPreview?: (perms: string[], label: string) => void }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(themeIcon());
   const [sbOpen, setSbOpen] = useState(false); // drawer mobile
   const [unread, setUnread] = useState(0);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const drawerWasOpen = useRef(false);
+  // Drawer mobile: mở → focus ô tìm trong sidebar; đóng → trả focus về nút ☰ (không cướp focus lúc mount).
+  useEffect(() => {
+    if (sbOpen) { drawerWasOpen.current = true; document.getElementById("gs-input")?.focus(); }
+    else if (drawerWasOpen.current) { drawerWasOpen.current = false; menuBtnRef.current?.focus(); }
+  }, [sbOpen]);
 
   const refreshBadge = () => { api.unreadCount().then((r) => setUnread(r.count || 0)).catch(() => {}); };
 
@@ -287,7 +303,18 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
     } else { normalizeHash(); }   // URL ban đầu là #/quotes/new… → nắn về route thật ngay khi mở
     refreshBadge();
     // Redirect (normalizeHash) sẽ bắn hashchange lần nữa → lần đó path đã chuẩn, chạy tiếp setKey.
-    const on = () => { if (normalizeHash()) return; setKey(currentKey()); setSbOpen(false); refreshBadge(); };
+    // GUARD back/forward trình duyệt: hash đổi khi editor còn dirty → hỏi; từ chối thì trả hash cũ
+    // (lần hashchange do trả-lại có hash === prevHash nên không hỏi lặp).
+    const prevHash = { v: location.hash };
+    const on = async () => {
+      const w = window as Window & { __editorDirty?: boolean };
+      if (w.__editorDirty && location.hash !== prevHash.v) {
+        const back = prevHash.v;
+        if (!(await guardLeave())) { location.hash = back; return; }
+      }
+      prevHash.v = location.hash;
+      if (normalizeHash()) return; setKey(currentKey()); setSbOpen(false); refreshBadge();
+    };
     window.addEventListener("hashchange", on);
     // Esc đóng drawer mobile (Ctrl/⌘+K focus ô tìm do GlobalSearch tự xử lý).
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSbOpen(false); };
@@ -339,8 +366,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
       <a href="#main" className="skip-link">Bỏ qua tới nội dung</a>
       <div className="shell">
         <header className="mobile-topbar" role="banner">
-          <button className="icon-btn" aria-label="Mở menu" aria-expanded={sbOpen} onClick={() => setSbOpen(true)}>☰</button>
-          <span className="mt-title">{active?.label ?? "Quản Lý"}</span>
+          <button ref={menuBtnRef} className="icon-btn" aria-label="Mở menu" aria-expanded={sbOpen} onClick={() => setSbOpen(true)}>☰</button>
+          <span className="mt-title">{active?.label ?? (isEditor || quotesM ? "Báo giá" : "Quản Lý")}</span>
           <button className="icon-btn" aria-label="Đổi giao diện sáng/tối" onClick={onTheme}>{theme}</button>
         </header>
         <div className={`sidebar-backdrop${sbOpen ? " show" : ""}`} onClick={() => setSbOpen(false)} />
@@ -375,7 +402,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
           </div>
         </aside>
         {isWizard ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary></main>
+          // Chặn quyền CẢ nhánh wizard (trước đây gõ thẳng #/new không có quote:create vẫn render rồi mới lỗi API).
+          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary>}</main>
         ) : hnEditId !== undefined ? (
           <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
         ) : internalViewId !== undefined ? (
@@ -389,7 +417,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             {denied ? <AccessDenied />
               : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
-              : key === "customers" ? <CustomersPage me={me} />
+              : key === "customers" ? <CustomersPage me={me} query={query} />
               : key === "users" ? <UsersPage me={me} onPreview={onPreview} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />
@@ -397,8 +425,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "invoices" ? <InvoicesPage me={me} />
               : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
-              : key === "employees" ? <EmployeesPage me={me} query={query} />
-              : <PersonnelPage me={me} query={query} />}
+              : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />
+              : <PersonnelPage me={me} query={query} onQuery={setQuery} />}
           </main>
         ) : (
           <div className="embed-host" id="main">

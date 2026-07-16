@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type Customer } from "../lib/api";
+import { api, type Me, type Customer } from "../lib/api";
+import { errMsg } from "../lib/format";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
 
@@ -10,13 +11,16 @@ import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
 // Bảo mật: server tự cô lập theo ownerId (CUSTOMER_READ_ALL) — UI không nới lỏng gì.
 const PAGE_SIZE = 20;
 
-export function CustomersPage({ me }: { me: Me }) {
+export function CustomersPage({ me, query }: { me: Me; query?: string }) {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [editing, setEditing] = useState<Customer | null | undefined>(undefined);
+
+  // Ô tìm toàn cục (Shell) chọn mã khách → đổ vào bộ lọc của trang để bảng tự lọc theo mã đó.
+  useEffect(() => { if (query) setQ(query); }, [query]);
 
   // Quyền NGUYÊN TỬ: tạo / sửa / xóa RIÊNG (đúng guard server). read:own thấy "Xem", không nút ghi.
   const has = (p: string) => me.permissions.includes(p);
@@ -35,7 +39,7 @@ export function CustomersPage({ me }: { me: Me }) {
   const rows = data?.data ?? [];
   const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
   const loading = isPending;
-  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const err = error ? errMsg(error) : "";
   const reload = () => { qc.invalidateQueries({ queryKey: ["customers"] }); };
 
   const toggleSort = (k: string) => {
@@ -47,7 +51,7 @@ export function CustomersPage({ me }: { me: Me }) {
   const onDelete = async (c: Customer) => {
     if (!(await confirmModal("Xóa khách hàng", `Xóa khách hàng "${c.code} — ${c.name}"?`, { danger: true, confirmText: "Xóa" }))) return;
     try { await api.deleteCustomer(c.id); toast("Đã xóa", "success"); reload(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
+    catch (ex) { toast(errMsg(ex, "Xóa thất bại"), "error"); }
   };
 
   const nameArrow = sort === "name" ? (order === "asc" ? " ▲" : " ▼") : "";
@@ -56,8 +60,9 @@ export function CustomersPage({ me }: { me: Me }) {
   return (
     <div>
       <h1>Mã khách hàng</h1>
+      <p className="muted page-sub">Danh mục khách hàng. Cột <b>Công nợ</b> = hạn thanh toán riêng từng công ty — quá hạn, trang Hóa đơn báo đỏ; để trống dùng ngưỡng mặc định.</p>
       <div className="toolbar">
-        <input className="grow" placeholder="Tìm theo mã hoặc tên công ty…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm khách hàng" />
+        <input type="search" className="grow" placeholder="Tìm theo mã hoặc tên công ty…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm khách hàng" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button>}
       </div>
 
@@ -68,17 +73,20 @@ export function CustomersPage({ me }: { me: Me }) {
       ) : rows.length === 0 ? (
         <div className="empty">
           {q ? "Không tìm thấy khách hàng phù hợp." : "Chưa có khách hàng nào."}
-          {!q && canCreate && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm khách hàng</button></div>}
+          {!q && canCreate && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Khách mới</button></div>}
         </div>
       ) : (
         <div className="list-wrap">
           <table className="list-table">
             <thead>
               <tr>
-                <th>Mã khách hàng</th>
-                <th className="sortable" aria-sort={nameAria} onClick={() => toggleSort("name")} title="Bấm để sắp xếp">Tên công ty{nameArrow}</th>
-                <th title="Hạn công nợ riêng từng công ty: quá số ngày này sau Ngày HĐơn mà chưa thanh toán → trang Hóa đơn báo ĐỎ">Công nợ</th>
-                <th />
+                <th scope="col">Mã khách hàng</th>
+                <th scope="col" className="sortable" aria-sort={nameAria} tabIndex={0}
+                  onClick={() => toggleSort("name")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort("name"); } }}
+                  title="Bấm để sắp xếp">Tên công ty{nameArrow}</th>
+                <th scope="col" title="Hạn công nợ riêng từng công ty: quá số ngày này sau Ngày HĐơn mà chưa thanh toán → trang Hóa đơn báo ĐỎ">Công nợ</th>
+                <th scope="col" className="actions" aria-label="Thao tác" />
               </tr>
             </thead>
             <tbody>
@@ -138,7 +146,8 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
   // Sửa: nạp đủ chi tiết (đề phòng list trả thiếu) — giống SPA gọi GET /customers/:id.
   useEffect(() => {
     if (isNew) return;
-    api.getCustomer(rec!.id).then((c) => { setCode(c.code || ""); setName(c.name || ""); setDebtDays(c.debtDays != null ? String(c.debtDays) : ""); setLoaded(true); }).catch(() => setLoaded(true));
+    api.getCustomer(rec!.id).then((c) => { setCode(c.code || ""); setName(c.name || ""); setDebtDays(c.debtDays != null ? String(c.debtDays) : ""); setLoaded(true); })
+      .catch((ex) => { toast(errMsg(ex, "Không tải được chi tiết khách hàng"), "error"); setLoaded(true); });
   }, [isNew, rec]);
 
   const guardedClose = useCallback(async () => {
@@ -165,7 +174,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
     } catch (ex) {
       const fe = fieldErrorsFrom(ex);
       setFieldErrors(fe);
-      setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lưu thất bại"));
+      setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : errMsg(ex, "Lưu thất bại"));
       setSaving(false);
     }
   };
@@ -202,7 +211,7 @@ function CustomerForm({ rec, readOnly, onClose, onSaved }: {
                 placeholder="VD: 30"
                 aria-invalid={fieldErrors.debtDays ? true : undefined}
                 onChange={(e) => { dirty.current = true; setDebtDays(e.target.value.replace(/[^\d]/g, "")); setFieldErrors((fe) => (fe.debtDays ? { ...fe, debtDays: "" } : fe)); }} />
-              <em className="unit">Chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → trang Hóa đơn báo <b style={{ color: "#b91c1c" }}>ĐỎ</b> để đi đòi.</em>
+              <em className="unit">Chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → trang Hóa đơn báo <b className="txt-danger">ĐỎ</b> để đi đòi.</em>
               {fieldErrors.debtDays && <div className="field-err">{fieldErrors.debtDays}</div>}
             </label>
           </div>

@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, ApiError, type Me, type OverviewResp, type RevenuePoint, type TopSaleRow, type ProjectQuote, type ProjectSheet } from "../lib/api";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { api, type Me, type OverviewResp, type RevenuePoint, type TopSaleRow, type ProjectQuote, type ProjectSheet } from "../lib/api";
+import { fmtMoney, fmtPct, statusLabel, errMsg } from "../lib/format";
 
 // "Tổng quan" THÔNG MINH: chọn kỳ (7/30/90 ngày · quý · năm) → KPI có xu hướng so kỳ trước,
 // biểu đồ doanh số theo ngày (SVG), phễu/pipeline theo kỳ kèm tỷ lệ thắng, "Cần xử lý" (AR/chứng từ
 // rút từ Quản lý dự án), bảng xếp hạng (chỉ admin). Dùng design-system SPA (.kpi/.card-section/.status…).
+// fmtMoney/fmtPct/statusLabel dùng bản CHUNG ở lib/format (nhãn rejected = "Bị từ chối" thống nhất toàn app).
 
-const fmtMoney = (v: number | undefined) => Number(v || 0).toLocaleString("vi-VN");
 // Rút gọn tiền cho trục biểu đồ / nơi chật: 1,2 tỷ · 350 tr · 12k.
 const compactMoney = (v: number | undefined) => {
   const n = Number(v || 0);
@@ -15,9 +16,7 @@ const compactMoney = (v: number | undefined) => {
   if (n >= 1e3) return Math.round(n / 1e3) + "k";
   return String(Math.round(n));
 };
-const STATUS_LABEL: Record<string, string> = { draft: "Nháp", converted: "Đã chốt", lost: "Không chốt", pending: "Chờ duyệt", approved: "Đã duyệt", sent: "Đã gửi", rejected: "Bị trả" };
-const statusLabel = (s: string) => STATUS_LABEL[s] ?? s;
-const PIPE_ORDER = ["draft", "pending", "approved", "sent", "converted", "lost", "rejected"];
+const PIPE_ORDER = ["draft", "pending", "approved", "sent", "converted", "lost", "rejected", "expired"];
 
 type PeriodKey = "7" | "30" | "90" | "quarter" | "year";
 const PERIODS: { key: PeriodKey; label: string }[] = [
@@ -25,8 +24,11 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: "quarter", label: "Quý này" }, { key: "year", label: "Năm nay" },
 ];
 const loadPeriod = (): PeriodKey => {
-  const v = (typeof localStorage !== "undefined" && localStorage.getItem("dash.period")) as PeriodKey | null;
-  return PERIODS.some((p) => p.key === v) ? (v as PeriodKey) : "30";
+  // try/catch đối xứng với onPeriod: trình duyệt chặn site-data → localStorage throw ngay khi ĐỌC.
+  try {
+    const v = (typeof localStorage !== "undefined" && localStorage.getItem("dash.period")) as PeriodKey | null;
+    return PERIODS.some((p) => p.key === v) ? (v as PeriodKey) : "30";
+  } catch { return "30"; }
 };
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -68,7 +70,7 @@ function TrendChip({ d, goodWhenUp = true, suffix }: { d: { pct: number; up: boo
   const good = d.up === goodWhenUp;
   return (
     <span className={`trend ${good ? "trend-up" : "trend-down"}`} title="So với kỳ trước liền kề">
-      {d.up ? "▲" : "▼"} {Math.abs(d.pct).toFixed(Math.abs(d.pct) >= 10 ? 0 : 1)}{suffix ?? "%"}
+      {d.up ? "▲" : "▼"} {Math.abs(d.pct).toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(d.pct) >= 10 ? 0 : 1 })}{suffix ?? "%"}
     </span>
   );
 }
@@ -145,8 +147,9 @@ function RevenueChart({ points, unit }: { points: ChartPoint[]; unit: string }) 
                 onMouseEnter={() => setHi(i)} />
         ))}
       </svg>
+      {/* Tooltip CHỈ hiện khi hover; đẩy xuống dưới dòng caption (top:30) để không đè chữ "Tổng kỳ…". */}
       {hp && (
-        <div className="chart-tip" style={{ left: `${leftPct}%` }}>
+        <div className="chart-tip" style={{ left: `${leftPct}%`, top: 30 }}>
           <strong>{fmtMoney(hp.amount)} đ</strong>
           <span>{hp.label} · {hp.n} hợp đồng</span>
         </div>
@@ -254,7 +257,8 @@ function ActionItems({ projects }: { projects: ProjectQuote[] }) {
             <span className={`status ${c.cls}`}>{c.title}</span>
             <span className="act-count">{c.items.length}</span>
           </div>
-          {c.showAmount && <div className="act-total">{fmtMoney(c.total)} đ</div>}
+          {/* Card không có tổng tiền vẫn chừa dòng cùng chiều cao → list mã 3 card thẳng hàng nhau. */}
+          <div className="act-total">{c.showAmount ? `${fmtMoney(c.total)} đ` : "\u00A0"}</div>
           <div className="act-items">
             {c.items.slice(0, 5).map((it, idx) => (
               <button key={idx} className="act-item" onClick={() => open(it.quoteId)} title="Mở báo giá">
@@ -289,6 +293,9 @@ export function DashboardPage({ me }: { me: Me }) {
       ]);
       return { cur, prev, rev: rev.data, top: top.data };
     },
+    // Đổi kỳ giữ số liệu cũ thay vì nhấp nháy về skeleton (đồng bộ UX với Customers/Invoices);
+    // nút "↻ Làm mới" đã hiện isFetching nên vẫn rõ đang tải.
+    placeholderData: keepPreviousData,
   });
 
   // "Cần xử lý" dùng query riêng (KHÔNG theo kỳ) — dùng chung cache với trang Quản lý dự án.
@@ -313,7 +320,7 @@ export function DashboardPage({ me }: { me: Me }) {
   const bucketed = useMemo(() => bucketPoints(chartPoints, gran), [chartPoints, gran]);
 
   const onPeriod = (p: PeriodKey) => { setPeriod(p); try { localStorage.setItem("dash.period", p); } catch { /* ignore */ } };
-  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const err = error ? errMsg(error) : "";
 
   const k = data?.cur.kpi, pk = data?.prev.kpi;
 
@@ -325,9 +332,10 @@ export function DashboardPage({ me }: { me: Me }) {
           <p className="muted dash-sub">{ddmmyyyy(range.from)} – {ddmmyyyy(range.to)} · so với kỳ trước liền kề</p>
         </div>
         <div className="dash-controls">
-          <div className="seg" role="tablist" aria-label="Chọn kỳ">
+          {/* role=group + aria-pressed (KHÔNG dùng tablist — không có tabpanel/điều hướng mũi tên theo ARIA tabs) */}
+          <div className="seg" role="group" aria-label="Chọn kỳ">
             {PERIODS.map((p) => (
-              <button key={p.key} role="tab" aria-selected={period === p.key}
+              <button key={p.key} aria-pressed={period === p.key}
                       className={`seg-btn ${period === p.key ? "active" : ""}`} onClick={() => onPeriod(p.key)}>{p.label}</button>
             ))}
           </div>
@@ -347,9 +355,15 @@ export function DashboardPage({ me }: { me: Me }) {
           <div className="kpi-grid dash-kpi">
             <div className="kpi"><span>Báo giá tạo</span><strong>{k.totalQuotes}</strong><TrendChip d={cmp(delta(k.totalQuotes, pk.totalQuotes))} /></div>
             <div className="kpi"><span>Doanh số đã chốt</span><strong>{fmtMoney(k.approvedAmount)} đ</strong><TrendChip d={cmp(delta(k.approvedAmount, pk.approvedAmount))} /></div>
-            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{k.conversionRate}%</strong><TrendChip d={prevEmpty ? null : ppDelta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
+            <div className="kpi"><span>Tỷ lệ chốt</span><strong>{fmtPct(k.conversionRate)}</strong><TrendChip d={prevEmpty ? null : ppDelta(k.conversionRate, pk.conversionRate)} suffix=" điểm" /></div>
             <div className="kpi"><span>Deal trung bình</span><strong>{fmtMoney(Math.round(k.avgDealSize))} đ</strong><TrendChip d={cmp(delta(k.avgDealSize, pk.avgDealSize))} /></div>
-            <div className="kpi"><span>Đang chào · {data.cur.counts.draft || 0} BG</span><strong>{fmtMoney(data.cur.sums.draft)} đ</strong><TrendChip d={cmp(delta(data.cur.sums.draft || 0, data.prev.sums.draft || 0))} /></div>
+            {/* Nhãn thuần như 4 card kia; số đếm BG chuyển xuống dòng phụ cạnh chip xu hướng. */}
+            <div className="kpi"><span>Đang chào</span><strong>{fmtMoney(data.cur.sums.draft)} đ</strong>
+              <div className="kpi-foot" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <TrendChip d={cmp(delta(data.cur.sums.draft || 0, data.prev.sums.draft || 0))} />
+                <span className="muted">{data.cur.counts.draft || 0} BG</span>
+              </div>
+            </div>
           </div>
           ); })()}
 
@@ -360,15 +374,15 @@ export function DashboardPage({ me }: { me: Me }) {
 
           {isAdmin ? (
             <div className="dash-cols">
-              <section className="card-section"><h3>Pipeline báo giá <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(bấm để lọc)</span></h3><Pipeline ov={data.cur} /></section>
+              <section className="card-section"><h3>Pipeline báo giá <span className="muted">(bấm để lọc)</span></h3><Pipeline ov={data.cur} /></section>
               <section className="card-section"><h3>Top nhân viên · doanh số chốt</h3><Leaderboard rows={data.top} /></section>
             </div>
           ) : (
-            <section className="card-section"><h3>Pipeline báo giá <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(bấm để lọc)</span></h3><Pipeline ov={data.cur} /></section>
+            <section className="card-section"><h3>Pipeline báo giá <span className="muted">(bấm để lọc)</span></h3><Pipeline ov={data.cur} /></section>
           )}
 
           <section className="card-section">
-            <h3>Cần xử lý <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· hợp đồng đang theo dõi (không theo kỳ)</span></h3>
+            <h3>Cần xử lý <span className="muted">· hợp đồng đang theo dõi (không theo kỳ)</span></h3>
             {proj.isPending ? <div className="skeleton-wrap">{Array.from({ length: 2 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
               : proj.error ? <div className="err">Không tải được danh sách dự án. <button className="btn btn-sm" onClick={() => proj.refetch()}>Thử lại</button></div>
               : <ActionItems projects={proj.data?.data ?? []} />}

@@ -2,33 +2,23 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Employee } from "../lib/api";
 import { FIELDS, type Field } from "../lib/fields";
+import { dash, fmtDate } from "../lib/format";
 import { useDebouncedValue } from "../lib/query";
-import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "../lib/ui";
+import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom, useIsMobile } from "../lib/ui";
 
 // Danh bạ = 10 trường nhóm "Cá nhân" của trang Nhân sự (1 nguồn, không lặp).
 export const EMP_FIELDS: Field[] = FIELDS.filter((f) => f.group === "Cá nhân");
-const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
 const toInputDate = toLocalInputDate;
 const PAGE_SIZE = 50;
 
-// Màn hình hẹp (≤ 820px) → dạng THẺ thay bảng nhiều cột (giống trang Nhân sự) — không phải cuộn bảng rộng.
-function useIsMobile() {
-  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 820px)");
-    const on = () => setM(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return m;
-}
+// Ô trống thống nhất hiện "—" mờ (dash) — dùng chung cho cả thẻ mobile lẫn bảng desktop.
 const empCell = (f: Field, r: Employee): ReactNode => {
   const v = r[f.key];
-  if (f.type === "date") return fmtDate(v) || <span className="muted">—</span>;
-  return v == null || v === "" ? <span className="muted">—</span> : String(v);
+  if (f.type === "date") return fmtDate(v as string | null) || dash;
+  return v == null || v === "" ? dash : String(v);
 };
 
-export function EmployeesPage({ me, query }: { me: Me; query: string }) {
+export function EmployeesPage({ me, query, onQuery }: { me: Me; query: string; onQuery?: (v: string) => void }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("fullName");
@@ -75,9 +65,16 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
   return (
     <div>
       <h1>Danh bạ nhân sự</h1>
-      <p className="muted" style={{ margin: "-10px 0 16px" }}>Kho thông tin cá nhân dùng chung — khi tạo hồ sơ Nhân sự có thể chọn từ đây để tự điền.</p>
+      <p className="muted page-sub">Kho thông tin cá nhân dùng chung — khi tạo hồ sơ Nhân sự có thể chọn từ đây để tự điền.</p>
       <div className="toolbar">
         {!canManage && <span className="badge">Chỉ xem</span>}{/* không có quyền ghi danh bạ nào */}
+        {/* Trang lọc theo ô tìm TOÀN CỤC trên header — hiện chip báo để khỏi tưởng thiếu dữ liệu. */}
+        {query && (
+          <span className="badge" title="Kết quả đang lọc theo ô tìm kiếm trên đầu trang">
+            Đang lọc: “{query}”
+            {onQuery && <button type="button" className="ky-undo" aria-label="Xóa lọc" style={{ marginLeft: 4 }} onClick={() => onQuery("")}>✕</button>}
+          </span>
+        )}
         <span className="spacer" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm nhân viên</button>}
       </div>
@@ -87,7 +84,10 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <div className="empty">{query ? "Không tìm thấy nhân viên khớp." : "Chưa có nhân viên nào. Bấm “+ Thêm nhân viên”."}</div>
+        <div className="empty">
+          {query ? "Không tìm thấy nhân viên khớp." : "Chưa có nhân viên nào."}
+          {!query && canCreate && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm nhân viên</button></div>}
+        </div>
       ) : isMobile ? (
         /* MOBILE: mỗi người 1 THẺ (label : value) — không phải cuộn bảng nhiều cột. */
         <div className="prs-cards">
@@ -114,34 +114,43 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
           <table>
             <thead>
               <tr>
-                <th className="sticky-1 hdr-stt">STT</th>
+                <th scope="col" className="sticky-1 hdr-stt">STT</th>
                 {EMP_FIELDS.map((f, i) => {
                   const sortable = f.key === "fullName";
                   const arrow = sortable && sort === f.key ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
                     <th key={f.key}
+                        scope="col"
                         className={[i === 0 ? "sticky-2" : "", sortable ? "sortable" : ""].filter(Boolean).join(" ")}
                         aria-sort={sortable ? (sort === f.key ? (order === "asc" ? "ascending" : "descending") : "none") : undefined}
+                        tabIndex={sortable ? 0 : undefined}
                         onClick={sortable ? () => toggleSort(f.key) : undefined}
+                        onKeyDown={sortable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(f.key); } } : undefined}
                         title={sortable ? "Bấm để sắp xếp" : undefined}>
                       {f.label}{arrow}
                     </th>
                   );
                 })}
-                <th>Người tạo</th>
-                <th />
+                <th scope="col">Người tạo</th>
+                <th scope="col" className="actions" aria-label="Thao tác" />
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id}>
                   <td className="sticky-1 num">{stt(i)}</td>
-                  {EMP_FIELDS.map((f, ci) => (
-                    <td key={f.key} className={ci === 0 ? "sticky-2" : ""}>
-                      {f.type === "date" ? fmtDate(r[f.key]) : (r[f.key] == null || r[f.key] === "" ? "" : String(r[f.key]))}
-                    </td>
-                  ))}
-                  <td className="muted">{r.createdBy?.displayName ?? ""}</td>
+                  {EMP_FIELDS.map((f, ci) => {
+                    const v = r[f.key];
+                    const clip = f.key === "address"; // Địa chỉ dài → cắt chữ, xem đủ qua title
+                    return (
+                      <td key={f.key}
+                          className={[ci === 0 ? "sticky-2" : "", clip ? "cell-clip" : ""].filter(Boolean).join(" ")}
+                          title={clip && v != null && v !== "" ? String(v) : undefined}>
+                        {empCell(f, r)}
+                      </td>
+                    );
+                  })}
+                  <td className="muted">{r.createdBy?.displayName ?? "—"}</td>
                   <td className="row-actions">
                     <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEdit ? "Sửa" : "Xem"}</button>
                     {canDelete && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
@@ -153,16 +162,18 @@ export function EmployeesPage({ me, query }: { me: Me; query: string }) {
         </div>
       )}
 
-      <div className="list-foot">
-        <span className="muted">Tổng: {meta.total} nhân viên</span>
-        {meta.pageCount > 1 && (
-          <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
-            <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau ›</button>
-          </div>
-        )}
-      </div>
+      {rows.length > 0 && (
+        <div className="list-foot">
+          <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total}</span>
+          {meta.pageCount > 1 && (
+            <div className="pager">
+              <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Trước</button>
+              <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
+              <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau →</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {editing !== undefined && (
         <EmployeeForm rec={editing} readOnly={editing !== null && !canEdit} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); reload(); }} />
@@ -234,11 +245,17 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
               return (
                 <label key={f.key} className={f.type === "textarea" ? "full" : ""}>
                   <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}</span>
-                  <input
-                    ref={idx === 0 ? firstRef : undefined}
-                    type={f.type === "date" ? "date" : "text"}
-                    value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
-                  />
+                  {f.type === "textarea" ? (
+                    <textarea
+                      value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
+                    />
+                  ) : (
+                    <input
+                      ref={idx === 0 ? firstRef : undefined}
+                      type={f.type === "date" ? "date" : "text"}
+                      value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
+                    />
+                  )}
                   {fErr && <div className="field-err">{fErr}</div>}
                 </label>
               );

@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { api, ApiError, type Me, type QuoteRow } from "../lib/api";
+import { api, type Me, type QuoteRow } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
-import { toast, confirmModal } from "../lib/ui";
+import { toast, confirmModal, useEscClose } from "../lib/ui";
+import { statusLabel, fmtMoney, fmtDate, codeLabel, shortTitle, errMsg, dash } from "../lib/format";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
 // + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·
 // Excel · Nhân bản · Bản mới · Xóa) + cột theo vai trò (admin: Người tạo; account_hn: rút gọn HN)
 // + empty/error. "Tạo báo giá" → wizard (#/new iframe); mở/nhân-bản → editor (#/quotes/:id iframe).
-const STATUS_LABEL: Record<string, string> = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt" };
-const statusLabel = (s: string) => STATUS_LABEL[s] || s || "—";
+// Định dạng chung (tiền/ngày/mã/tiêu đề/trạng thái) dùng ../lib/format — KHÔNG tự chế lại ở đây.
 const HN_LIST_STATUS: Record<string, { label: string; cls: string }> = { assigned: { label: "Đang làm", cls: "sent" }, submitted: { label: "Chờ duyệt", cls: "pending" }, approved: { label: "Đã duyệt", cls: "approved" }, rejected: { label: "Bị trả", cls: "rejected" } };
 const hnBadge = (st?: string | null) => HN_LIST_STATUS[st || ""] || { label: "Chưa giao", cls: "draft" };
-const fmtMoney = (v?: number) => (v == null ? "" : Number(v).toLocaleString("vi-VN"));
-const fmtDate = (v: string) => { const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
-const codeLabel = (q: QuoteRow) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
-const shortTitle = (t: string) => { const s = String(t || ""); return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s; };
 const QUOTE_SORTS = ["createdAt", "quoteDate", "total", "quoteNumber"];
 const PAGE_SIZE = 20;
 
@@ -65,7 +61,7 @@ export function QuoteListPage({ me }: { me: Me }) {
   const rows = data?.data ?? [];
   const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
   const loading = isPending;
-  const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
+  const err = error ? errMsg(error) : "";
   const reload = () => { qc.invalidateQueries({ queryKey: ["quotes"] }); };
 
   const toggleSort = (f: string) => {
@@ -84,26 +80,32 @@ export function QuoteListPage({ me }: { me: Me }) {
         if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${qr.projectCode || qr.quoteNumber}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;
         await api.deleteQuote(qr.id); toast("Đã xóa", "success"); reload();
       }
-    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+    } catch (ex) { toast(errMsg(ex, "Lỗi"), "error"); }
     finally { busy.current = false; }
   };
 
   const arrow = (f: string) => sort === f ? (order === "asc" ? " ▲" : " ▼") : "";
   const aria = (f: string): "ascending" | "descending" | "none" => sort === f ? (order === "asc" ? "ascending" : "descending") : "none";
   const SortTh = ({ f, label, right }: { f: string; label: string; right?: boolean }) => (
-    <th className="sortable" aria-sort={aria(f)} title="Bấm để sắp xếp" style={right ? { textAlign: "right" } : undefined} onClick={() => toggleSort(f)}>{label}{arrow(f)}</th>
+    <th scope="col" className={`sortable${right ? " num" : ""}`} aria-sort={aria(f)} title="Bấm để sắp xếp" tabIndex={0}
+        onClick={() => toggleSort(f)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(f); } }}>{label}{arrow(f)}</th>
   );
 
   return (
     <div>
       <h1>Danh sách báo giá</h1>
+      <p className="muted page-sub">Tìm, lọc và mở báo giá — báo giá Đã chốt sẽ chuyển sang Quản lý dự án.</p>
       <div className="toolbar">
-        <input className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm báo giá" />
+        <input type="search" className="grow" placeholder="Tìm theo số, tiêu đề, khách…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm báo giá" />
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Lọc theo trạng thái">
           <option value="">— Tất cả trạng thái —</option>
           <option value="draft">Nháp</option><option value="converted">Đã chốt</option><option value="lost">Không chốt</option>
+          {/* Deep-link từ Pipeline Dashboard (#/list?status=pending…): trạng thái ngoài bộ chuẩn vẫn phải
+              hiện trong select — không thì ô trống, user không biết đang lọc gì. */}
+          {status && !["draft", "converted", "lost"].includes(status) && <option value={status}>{statusLabel(status)}</option>}
         </select>
-        <button className="btn" onClick={() => refetch()}>Tải lại</button>
+        <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setStatus(""); }} disabled={!q && !status}>Xóa lọc</button>
         {can("quote:create") && <button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button>}
       </div>
 
@@ -112,7 +114,10 @@ export function QuoteListPage({ me }: { me: Me }) {
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <div className="empty">{q || status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}</div>
+        <div className="empty">
+          {q || status ? "Không tìm thấy báo giá phù hợp." : "Chưa có báo giá nào."}
+          {!q && !status && can("quote:create") && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => { location.hash = "#/new"; }}>+ Tạo báo giá</button></div>}
+        </div>
       ) : isMobile ? (
         /* MOBILE: thẻ React (không cuộn bảng rộng) — giữ nguyên cột/nút theo ROLE. */
         <div className="ql-cards">
@@ -124,17 +129,17 @@ export function QuoteListPage({ me }: { me: Me }) {
               </div>
               {r.title && <div className="ql-card-title">{shortTitle(r.title)}</div>}
               <dl className="ql-card-body">
-                {(isAdmin || isInternalViewer) && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
-                {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || "—"}</dd></div>}
-                <div className="ql-crow"><dt>Ngày</dt><dd>{fmtDate(r.quoteDate) || "—"}</dd></div>
+                {(isAdmin || isInternalViewer) && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
+                {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
+                <div className="ql-crow"><dt>Ngày</dt><dd>{fmtDate(r.quoteDate) || dash}</dd></div>
                 <div className="ql-crow"><dt>Sheet</dt><dd>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</dd></div>
                 {isAccountHn
-                  ? <div className="ql-crow"><dt>Tổng HN</dt><dd><b>{fmtMoney(r.hnTotal) || "—"}</b></dd></div>
+                  ? <div className="ql-crow"><dt>Tổng HN</dt><dd>{r.hnTotal == null ? dash : <b>{fmtMoney(r.hnTotal)}</b>}</dd></div>
                   : isInternalViewer
                   ? <div className="ql-crow"><dt>Đã thanh toán</dt><dd><b>{payProg(r)} hàng</b></dd></div>
-                  : <div className="ql-crow"><dt>Tổng (VNĐ)</dt><dd><b>{fmtMoney(r.total) || "—"}</b></dd></div>}
-                <div className="ql-crow"><dt>Công ty</dt><dd>{r.company?.shortName || r.company?.name || "—"}</dd></div>
-                {!stripped && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || "—"}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
+                  : <div className="ql-crow"><dt>Tổng (VNĐ)</dt><dd>{r.total == null ? dash : <b>{fmtMoney(r.total)}</b>}</dd></div>}
+                <div className="ql-crow"><dt>Công ty</dt><dd>{r.company?.shortName || r.company?.name || dash}</dd></div>
+                {!stripped && <div className="ql-crow"><dt>Khách</dt><dd>{r.toCompany || dash}{r.customerCode ? ` · ${r.customerCode}` : ""}</dd></div>}
               </dl>
               {!stripped && (
                 <div className="ql-card-actions">
@@ -153,32 +158,32 @@ export function QuoteListPage({ me }: { me: Me }) {
             <thead>
               <tr>
                 <SortTh f="quoteNumber" label="Mã dự án" />
-                {(isAdmin || isInternalViewer) && <th>Người tạo</th>}{isAccountHn && <th>Người giao</th>}
-                <th>Tiêu đề</th>
+                {(isAdmin || isInternalViewer) && <th scope="col">Người tạo</th>}{isAccountHn && <th scope="col">Người giao</th>}
+                <th scope="col">Tiêu đề</th>
                 <SortTh f="quoteDate" label="Ngày" />
-                <th>Sheet</th>
+                <th scope="col" className="num">Sheet</th>
                 {!stripped && <SortTh f="total" label="Tổng (VNĐ)" right />}
-                <th>Công ty</th>
-                {isAccountHn ? <th style={{ textAlign: "right" }}>Tổng HN</th> : isInternalViewer ? <th style={{ textAlign: "right" }}>Đã TT</th> : <><th>Khách</th><th>Mã KH</th></>}
-                <th>Trạng thái</th>
-                {!stripped && <th>Thao tác</th>}
+                <th scope="col">Công ty</th>
+                {isAccountHn ? <th scope="col" className="num">Tổng HN</th> : isInternalViewer ? <th scope="col" className="num">Đã TT</th> : <><th scope="col">Khách</th><th scope="col">Mã KH</th></>}
+                <th scope="col">Trạng thái</th>
+                {!stripped && <th scope="col" className="actions" aria-label="Thao tác" />}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
+                <tr key={r.id} className="qrow" title="Bấm để mở báo giá"
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
-                  <td data-label="Mã dự án"><strong>{codeLabel(r)}</strong></td>
-                  {(isAdmin || isInternalViewer) && <td data-label="Người tạo">{r.createdBy?.displayName || ""}</td>}{isAccountHn && <td data-label="Người giao">{r.createdBy?.displayName || "—"}</td>}
-                  <td data-label="Tiêu đề" title={r.title}>{shortTitle(r.title)}</td>
-                  <td data-label="Ngày">{fmtDate(r.quoteDate)}</td>
-                  <td data-label="Sheet" style={{ textAlign: "center" }}>{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
-                  {!stripped && <td data-label="Tổng (VNĐ)" style={{ textAlign: "right" }}>{fmtMoney(r.total)}</td>}
-                  <td data-label="Công ty">{r.company?.shortName || r.company?.name || ""}</td>
-                  {isAccountHn ? <td data-label="Tổng HN" style={{ textAlign: "right" }}>{fmtMoney(r.hnTotal)}</td> : isInternalViewer ? <td data-label="Đã TT" style={{ textAlign: "right" }}>{payProg(r)} hàng</td> : <><td data-label="Khách">{r.toCompany}</td><td data-label="Mã KH">{r.customerCode ? <strong>{r.customerCode}</strong> : "—"}</td></>}
-                  <td data-label="Trạng thái">{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
+                  <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a></td>
+                  {(isAdmin || isInternalViewer) && <td>{r.createdBy?.displayName || dash}</td>}{isAccountHn && <td>{r.createdBy?.displayName || dash}</td>}
+                  <td title={r.title}>{shortTitle(r.title)}</td>
+                  <td>{fmtDate(r.quoteDate) || dash}</td>
+                  <td className="num">{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
+                  {!stripped && <td className="num">{r.total == null ? dash : fmtMoney(r.total)}</td>}
+                  <td>{r.company?.shortName || r.company?.name || dash}</td>
+                  {isAccountHn ? <td className="num">{r.hnTotal == null ? dash : fmtMoney(r.hnTotal)}</td> : isInternalViewer ? <td className="num">{payProg(r)} hàng</td> : <><td>{r.toCompany || dash}</td><td>{r.customerCode ? <strong>{r.customerCode}</strong> : dash}</td></>}
+                  <td>{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
                   {!stripped && (
-                    <td className="row-actions qa-cell" data-label="Thao tác">
+                    <td className="row-actions qa-cell">
                       <RowMenu r={r} act={act} canDelete={canDelete(r)} />
                     </td>
                   )}
@@ -211,6 +216,8 @@ function RowMenu({ r, act, canDelete }: { r: QuoteRow; act: (a: string, qr: Quot
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const open = pos != null;
+  // Escape → đóng menu + TRẢ FOCUS về nút "⋯" (a11y — role=menu chuẩn).
+  useEscClose(() => { setPos(null); btnRef.current?.focus(); }, open);
   useEffect(() => {
     if (!open) return;
     const close = () => setPos(null);

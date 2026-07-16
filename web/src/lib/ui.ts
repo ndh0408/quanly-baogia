@@ -1,5 +1,28 @@
 // Toast + confirm modal (DOM-based) — thay confirm()/alert() trình duyệt cho đồng bộ + đẹp.
+import { useEffect, useState } from "react";
 import { ApiError } from "./api";
+
+/* Hook đóng modal bằng ESC — trước đây mỗi modal tự copy addEventListener (Profile/Users/Customers…). */
+export function useEscClose(onClose: () => void, enabled = true) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, enabled]);
+}
+
+/* Hook mobile (breakpoint 820 khớp CSS) — trước đây copy-paste ở 4 trang (Audit/QuoteList/Personnel/Employees). */
+export function useIsMobile(bp = 820) {
+  const [mobile, setMobile] = useState(() => window.matchMedia(`(max-width: ${bp}px)`).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${bp}px)`);
+    const on = () => setMobile(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [bp]);
+  return mobile;
+}
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);

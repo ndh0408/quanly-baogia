@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
+import { fmtMoney, fmtDate, toInputDate, shortTitle, codeLabel, dash, Stat } from "../lib/format";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
-// - Tình trạng HĐ: TỰ ĐỘNG "Done" khi có Số HĐơn + Ngày HĐơn (không nhập tay).
+// - Tình trạng HĐ: TỰ ĐỘNG "Hoàn tất" khi có Số HĐơn + Ngày HĐơn (không nhập tay).
 // - Kế toán nhập: Hạng mục, PO/HĐ, CTy (GN/SM/CLF), Số HĐơn, Ngày HĐơn, Hình thức TT, Ngày đóng ĐH,
 //   Link HĐ, Ngày thanh toán (quyền invoice:pay riêng), Chứng từ gửi/trả, Năm, Note.
 // - Tự động: Khách hàng, Mã KH, Mã sản xuất, Số tiền (thành tiền VAT), Acc (người tạo — suy từ MSX),
@@ -14,16 +15,26 @@ import { toast } from "../lib/ui";
 //   Ký chứng từ (tham chiếu từ trang Quản lý dự án — hiện AI ký + ngày ký).
 // - Ô ngày CHƯA điền tô HỒNG để kế toán thấy còn thiếu.
 
-const fmtMoney = (v?: number) => Number(v || 0).toLocaleString("vi-VN");
-const fmtDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
-const toInputDate = (v?: string | null) => { if (!v) return ""; const d = new Date(v); if (isNaN(d.getTime())) return ""; const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
-const shortTitle = (t: string) => { const s = String(t || ""); return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s; };
-const codeLabel = (q: ProjectQuote) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
-const dash = <span className="muted">—</span>;
-
 const HEADERS = ["Khách hàng", "Mã KH", "Mã sản xuất", "Hạng mục", "Tình trạng HĐ", "PO/HĐ", "CTy", "Số HĐơn", "Ngày HĐơn", "Số tiền", "Công nợ", "Hình thức TT", "Ngày đóng ĐH", "Acc", "Link HĐ", "Ngày thanh toán", "Chứng từ gửi đi", "Chứng từ trả về", "Ký chứng từ", "Năm", "Note"];
 const COMPANIES = ["GN", "SM", "CLF"];
 const PAY_METHODS = ["CK", "TM"];
+
+// Cột sort được (kế toán cần sắp theo ngày/tiền/nợ để đòi nợ) + cột SỐ (căn phải, tabular-nums qua .num).
+type SortKey = "invoiceDate" | "amount" | "debt";
+const SORT_COLS: Record<string, SortKey> = { "Ngày HĐơn": "invoiceDate", "Số tiền": "amount", "Công nợ": "debt" };
+const NUM_COLS = new Set(["Số tiền", "Công nợ"]);
+
+// Nhãn cột cho aria-label từng ô nhập trong bảng (screen reader): vd "Số HĐơn — GN2607_2".
+const FIELD_LABEL: Record<string, string> = {
+  invoiceDesc: "Hạng mục", poNumber: "PO/HĐ", invoiceCompany: "CTy", invoiceNo: "Số HĐơn",
+  invoiceDate: "Ngày HĐơn", paymentMethod: "Hình thức TT", orderClosedAt: "Ngày đóng ĐH",
+  invoiceLink: "Link HĐ", paidAt: "Ngày thanh toán", docSentAt: "Chứng từ gửi đi",
+  docReturnedAt: "Chứng từ trả về", invoiceYear: "Năm", invoiceNote: "Note",
+};
+
+// Field kế toán lưu qua saveField + field kiểu NGÀY (chuẩn hoá về yyyy-mm-dd như input khi so sánh).
+const SAVE_FIELDS = ["invoiceDesc", "poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "invoiceYear", "invoiceNote"] as const;
+const DATE_FIELDS = new Set(["invoiceDate", "orderClosedAt", "paidAt", "docSentAt", "docReturnedAt"]);
 
 type Row = {
   key: string; q: ProjectQuote; code: string; sheetId: number | null; amount: number;
@@ -60,6 +71,13 @@ function buildRows(quotes: ProjectQuote[]): Row[] {
   return out;
 }
 
+// Giá trị "đã lưu trên server" chuẩn hoá để so sánh trước khi gọi API (ngày → yyyy-mm-dd giống input).
+const savedVal = (r: Row, f: string): string | null => {
+  const v = r[f as keyof Row];
+  if (v == null || v === "") return null;
+  return DATE_FIELDS.has(f) ? (toInputDate(String(v)) || null) : String(v);
+};
+
 // Mặc định CTy theo công ty của báo giá (Gia Nguyễn → GN, Colorfull → CLF) khi kế toán chưa chọn.
 const defaultCty = (q: ProjectQuote) => {
   const s = (q.company?.shortName || q.company?.name || "").toLowerCase();
@@ -81,13 +99,28 @@ export function InvoicesPage({ me }: { me: Me }) {
   const [q, setQ] = useState("");
   const [year, setYear] = useState("");
   const [cty, setCty] = useState("");
-  // Ngưỡng báo công nợ (ngày) — kế toán tự đặt, nhớ theo máy.
+  // Ngưỡng báo công nợ (ngày) — kế toán tự đặt, nhớ theo máy. limitRaw giữ CHUỖI đang gõ
+  // (cho xóa trắng/gõ lại tự nhiên), chỉ clamp khi có số hợp lệ hoặc khi blur.
   const [debtLimit, setDebtLimit] = useState(() => { const n = Number(localStorage.getItem("inv_debt_days")); return n > 0 ? n : 30; });
-  const setLimit = (v: string) => { const n = Math.max(1, Math.min(999, Number(v) || 0)) || 30; setDebtLimit(n); localStorage.setItem("inv_debt_days", String(n)); };
+  const [limitRaw, setLimitRaw] = useState(String(debtLimit));
+  const applyLimit = (v: string) => { const n = Math.max(1, Math.min(999, Number(v) || 0)) || 30; setDebtLimit(n); localStorage.setItem("inv_debt_days", String(n)); return n; };
 
   const { data, isPending, error } = useQuery({ queryKey: ["quoteProjects"], queryFn: api.quoteProjects });
   const [rows, setRows] = useState<Row[]>([]);
-  useEffect(() => { if (data) setRows(buildRows(data.data || [])); }, [data]);
+  // Snapshot giá trị ĐÃ LƯU từng ô (key:field) — để saveField bỏ qua khi giá trị không đổi.
+  const savedRef = useRef<Record<string, string | null>>({});
+  useEffect(() => {
+    if (!data) return;
+    const built = buildRows(data.data || []);
+    const snap: Record<string, string | null> = {};
+    for (const r of built) for (const f of SAVE_FIELDS) snap[`${r.key}:${f}`] = savedVal(r, f);
+    savedRef.current = snap;
+    // Đang gõ dở trong bảng (input/select focus trong .inv-table) → BỎ QUA, không ghi đè ô đang nhập
+    // (refetch sau khi lưu ô khác sẽ reset controlled input về giá trị server → mất chữ đang gõ).
+    const ae = document.activeElement;
+    if (ae instanceof HTMLElement && (ae.tagName === "INPUT" || ae.tagName === "SELECT") && ae.closest(".inv-table")) return;
+    setRows(built);
+  }, [data]);
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
   const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
@@ -100,6 +133,25 @@ export function InvoicesPage({ me }: { me: Me }) {
     return true;
   });
 
+  // Sort client 3 cột chính (Ngày HĐơn / Số tiền / Công nợ) — pattern th.sortable + aria-sort như trang Mã khách hàng.
+  const [sortKey, setSortKey] = useState<SortKey | "">("");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const toggleSort = (k: SortKey) => { if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1)); else { setSortKey(k); setSortDir(1); } };
+  const sortVal = (r: Row, k: SortKey): number | null => {
+    if (k === "amount") return r.amount;
+    if (k === "invoiceDate") { if (!r.invoiceDate) return null; const t = new Date(r.invoiceDate).getTime(); return isNaN(t) ? null : t; }
+    return debtDays(r);
+  };
+  const sorted = sortKey
+    ? [...shown].sort((a, b) => {
+        const va = sortVal(a, sortKey), vb = sortVal(b, sortKey);
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;         // ô trống luôn xuống cuối
+        if (vb == null) return -1;
+        return (va - vb) * sortDir;
+      })
+    : shown;
+
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
   // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → mặc định toolbar.
@@ -110,127 +162,149 @@ export function InvoicesPage({ me }: { me: Me }) {
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const saveField = async (row: Row, field: string, val: string | null) => {
     if (!row.sheetId) return;
+    const k = `${row.key}:${field}`;
+    if ((val ?? null) === (savedRef.current[k] ?? null)) return;   // giá trị KHÔNG đổi → khỏi gọi API/toast/refetch
     try {
       await api.updateSheetInvoice(row.sheetId, field, val);
+      savedRef.current[k] = val ?? null;
       toast("Đã lưu", "success");
       // Đồng bộ cache cho trang Quản lý dự án / Dashboard (tham chiếu cùng nguồn) thấy ngay giá trị mới.
       qc.invalidateQueries({ queryKey: ["quoteProjects"] });
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); load(); }
   };
 
+  const fieldLabel = (f: string, r: Row) => `${FIELD_LABEL[f] || f} — ${r.code}`;
   const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
   const textCell = (r: Row, field: keyof Row, ph: string, w = 110) =>
     editable(r, field as string) ? (
-      <td><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }}
+      <td><input value={(r[field] as string) || ""} placeholder={ph} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
         onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field as string, e.target.value.trim() || null)} /></td>
     ) : <td>{(r[field] as string) || dash}</td>;
-  // Ô ngày CHƯA điền → nền HỒNG (nhắc kế toán còn thiếu), điền xong tự hết.
-  const pinkIfEmpty = (v: unknown) => (v ? undefined : { background: "#ffe0ee" });
+  // Ô ngày CHƯA điền → nền HỒNG .cell-miss (theme-aware, nhắc kế toán còn thiếu), điền xong tự hết.
+  const missCls = (v: unknown) => (v ? undefined : "cell-miss");
   const dateCell = (r: Row, field: keyof Row) =>
     editable(r, field as string) ? (
-      <td style={pinkIfEmpty(r[field])}><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140, background: "transparent" }}
+      <td className={missCls(r[field])}><input type="date" value={toInputDate(r[field] as string)} style={{ width: 140, background: "transparent" }} aria-label={fieldLabel(field as string, r)}
         onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }} /></td>
-    ) : <td style={pinkIfEmpty(r[field])}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
+    ) : <td className={missCls(r[field])}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
   const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") =>
     editable(r, field as string) ? (
-      <td><select value={(r[field] as string) || defVal} style={{ width: 74 }}
+      <td><select value={(r[field] as string) || defVal} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
         onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }}>
         {!defVal && <option value="">—</option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select></td>
     ) : <td>{(r[field] as string) || defVal || dash}</td>;
 
-  const stat = (label: string, val: string, color?: string) => (
-    <div className="card-section" style={{ flex: 1, minWidth: 160, padding: "12px 16px" }}>
-      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3, color }}>{val}</div>
-    </div>
-  );
-
   return (
     <div>
       <h1>Hóa đơn</h1>
-      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Nhập ở đây — trang Quản lý dự án <b>tham chiếu</b> tự động. Tình trạng HĐ tự <b>Done</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Nhập ở đây — trang Quản lý dự án <b>tham chiếu</b> tự động. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
 
       <div className="toolbar" style={{ margin: "4px 0 6px" }}>
         <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
         <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }} title="Ngưỡng MẶC ĐỊNH: chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ. Muốn hạn RIÊNG từng công ty → đặt ở trang Mã khách hàng (nút Sửa).">
-          <span className="muted" style={{ fontSize: 13 }}>Báo nợ quá</span>
-          <input inputMode="numeric" value={debtLimit} onChange={(e) => setLimit(e.target.value)} style={{ width: 52, textAlign: "center" }} aria-label="Ngưỡng báo công nợ (ngày)" />
-          <span className="muted" style={{ fontSize: 13 }}>ngày (mặc định)</span>
+        <label className="inline-field nowrap" title="Ngưỡng MẶC ĐỊNH: chưa thanh toán quá số ngày này (tính từ Ngày HĐơn) → cột Công nợ báo ĐỎ. Muốn hạn RIÊNG từng công ty → đặt ở trang Mã khách hàng (nút Sửa).">
+          <span className="muted">Báo nợ quá</span>
+          <input inputMode="numeric" value={limitRaw}
+            onChange={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); setLimitRaw(v); if (v) applyLimit(v); }}
+            onBlur={() => { if (!limitRaw) { setLimitRaw(String(debtLimit)); return; } setLimitRaw(String(applyLimit(limitRaw))); }}
+            style={{ width: 52, textAlign: "center" }} aria-label="Ngưỡng báo công nợ (ngày)" />
+          <span className="muted">ngày (mặc định)</span>
         </label>
-        <button className="btn btn-sm btn-ghost" type="button" onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
+        <button className="btn btn-sm btn-ghost" type="button" disabled={!q && !year && !cty} onClick={() => { setQ(""); setYear(""); setCty(""); }}>Xóa lọc</button>
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
 
       {isPending ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
-      ) : (
+      ) : err && !data ? null : (   /* lỗi tải mà CHƯA có dữ liệu → chỉ hiện banner lỗi, không hiện stat 0 gây hiểu nhầm */
         <>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "8px 0 16px" }}>
-            {stat("Tổng số tiền (VAT)", fmtMoney(sumAmount))}
-            {stat("Đã thu", fmtMoney(collected), "#0a7d28")}
-            {stat("Chưa thu", fmtMoney(sumAmount - collected), sumAmount - collected > 0 ? "#c0392b" : undefined)}
-            {stat("Nợ quá hạn", overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0", overdue.length ? "#c0392b" : "#0a7d28")}
-            {stat("Số hóa đơn", String(shown.length))}
+          <div className="stat-row">
+            <Stat label="Tổng số tiền (VAT)" value={fmtMoney(sumAmount)} />
+            <Stat label="Đã thu" value={fmtMoney(collected)} tone="ok" />
+            <Stat label="Chưa thu" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} />
+            <Stat label="Nợ quá hạn" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} />
+            <Stat label="Số hóa đơn" value={String(shown.length)} />
           </div>
 
           {shown.length === 0 ? (
             <div className="empty">{rows.length ? "Không có hóa đơn khớp bộ lọc." : 'Chưa có dự án nào ở trạng thái "Đã chốt".'}</div>
           ) : (
-            <div className="tbl-scroll">
-              <table className="list-table inv-table">
-                <thead><tr>{HEADERS.map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
-                <tbody>
-                  {shown.map((r) => {
-                    const done = !!(r.invoiceNo && r.invoiceDate);   // TỰ ĐỘNG Done khi có Số HĐ + Ngày HĐ
-                    const nDays = debtDays(r);                        // null = đã thanh toán / chưa có Ngày HĐơn
-                    const limit = rowLimit(r);                        // hạn riêng của khách ?? mặc định toolbar
-                    const over = nDays != null && nDays > limit;      // quá hạn → ĐỎ (đi đòi nợ)
+            <>
+              <div className="tbl-scroll">
+                <table className="list-table inv-table">
+                  <thead><tr>{HEADERS.map((h) => {
+                    const sk = SORT_COLS[h];
+                    const cls = [NUM_COLS.has(h) ? "num" : "", sk ? "sortable" : ""].filter(Boolean).join(" ") || undefined;
+                    if (!sk) return <th key={h} scope="col" className={cls}>{h}</th>;
+                    const active = sortKey === sk;
                     return (
-                      <tr key={r.key} className="qrow" title="Bấm để mở báo giá" style={{ cursor: "pointer" }}
-                          onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}>
-                        <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
-                        <td>{r.q.customerCode || dash}</td>
-                        <td><strong>{r.code}</strong></td>
-                        {textCell(r, "invoiceDesc", "Hạng mục…", 210)}
-                        <td>{done ? <span className="status approved">Done</span> : <span className="status pending">Chưa đủ</span>}</td>
-                        {textCell(r, "poNumber", "PO/HĐ", 90)}
-                        {selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q))}
-                        {textCell(r, "invoiceNo", "Số HĐ", 90)}
-                        {dateCell(r, "invoiceDate")}
-                        <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.amount)}</td>
-                        <td style={over ? { background: "#ffd6d6", color: "#b91c1c", fontWeight: 700, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
-                            title={nDays == null ? undefined : `Hạn công nợ ${limit} ngày (${r.q.customerDebtDays != null ? "riêng khách này — đặt ở Mã khách hàng" : "mặc định"})${over ? ` — QUÁ HẠN, từ Ngày HĐơn ${fmtDate(r.invoiceDate)}, cần báo thanh toán` : ""}`}>
-                          {r.paidAt ? <span style={{ color: "#0a7d28" }}>✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays}/{limit} ngày</>}
-                        </td>
-                        {selectCell(r, "paymentMethod", PAY_METHODS)}
-                        {dateCell(r, "orderClosedAt")}
-                        <td>{r.q.createdBy?.displayName || dash}</td>
-                        {editable(r)
-                          ? <td><input value={r.invoiceLink || ""} placeholder="Link HĐ" style={{ width: 120 }} onChange={(e) => patch(r.key, { invoiceLink: e.target.value })} onBlur={(e) => saveField(r, "invoiceLink", e.target.value.trim() || null)} /></td>
-                          : <td>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
-                        {dateCell(r, "paidAt")}
-                        {dateCell(r, "docSentAt")}
-                        {dateCell(r, "docReturnedAt")}
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {r.signedAt
-                            ? <span className="status approved" style={{ whiteSpace: "nowrap" }}>✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>
-                            : <span className="muted">Chưa ký</span>}
-                        </td>
-                        {editable(r)
-                          ? <td><input inputMode="numeric" value={r.invoiceYear ?? ""} placeholder="Năm" style={{ width: 64 }} onChange={(e) => patch(r.key, { invoiceYear: e.target.value ? Number(e.target.value) : null })} onBlur={(e) => saveField(r, "invoiceYear", e.target.value.trim() || null)} /></td>
-                          : <td>{r.invoiceYear ?? dash}</td>}
-                        {textCell(r, "invoiceNote", "Note…", 130)}
-                      </tr>
+                      <th key={h} scope="col" className={cls} tabIndex={0} title="Bấm để sắp xếp"
+                          aria-sort={active ? (sortDir === 1 ? "ascending" : "descending") : "none"}
+                          onClick={() => toggleSort(sk)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(sk); } }}>
+                        {h}{active ? (sortDir === 1 ? " ▲" : " ▼") : ""}
+                      </th>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  })}</tr></thead>
+                  <tbody>
+                    {sorted.map((r) => {
+                      const done = !!(r.invoiceNo && r.invoiceDate);   // TỰ ĐỘNG Hoàn tất khi có Số HĐ + Ngày HĐ
+                      const nDays = debtDays(r);                        // null = đã thanh toán / chưa có Ngày HĐơn
+                      const limit = rowLimit(r);                        // hạn riêng của khách ?? mặc định toolbar
+                      const over = nDays != null && nDays > limit;      // quá hạn → ĐỎ (đi đòi nợ)
+                      return (
+                        <tr key={r.key} className="qrow" title="Bấm để mở báo giá" tabIndex={0}
+                            onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}
+                            onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
+                          <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
+                          <td>{r.q.customerCode || dash}</td>
+                          <td><strong>{r.code}</strong></td>
+                          {textCell(r, "invoiceDesc", "Hạng mục…", 210)}
+                          <td>{done ? <span className="status approved">Hoàn tất</span> : <span className="status pending">Chưa đủ</span>}</td>
+                          {textCell(r, "poNumber", "PO/HĐ", 90)}
+                          {selectCell(r, "invoiceCompany", COMPANIES, defaultCty(r.q))}
+                          {textCell(r, "invoiceNo", "Số HĐ", 90)}
+                          {dateCell(r, "invoiceDate")}
+                          <td className="num"><strong>{fmtMoney(r.amount)}</strong></td>
+                          <td className={"num nowrap" + (over ? " cell-over" : "")}
+                              title={nDays == null ? undefined : `Hạn công nợ ${limit} ngày (${r.q.customerDebtDays != null ? "riêng khách này — đặt ở Mã khách hàng" : "mặc định"})${over ? ` — QUÁ HẠN, từ Ngày HĐơn ${fmtDate(r.invoiceDate)}, cần báo thanh toán` : ""}`}>
+                            {r.paidAt ? <span className="txt-ok">✓ Đã TT</span> : nDays == null ? dash : <>{over ? "⚠ " : ""}{nDays}/{limit} ngày</>}
+                          </td>
+                          {selectCell(r, "paymentMethod", PAY_METHODS)}
+                          {dateCell(r, "orderClosedAt")}
+                          <td>{r.q.createdBy?.displayName || dash}</td>
+                          {editable(r)
+                            ? <td className="nowrap">
+                                <input value={r.invoiceLink || ""} placeholder="Link HĐ" style={{ width: 120 }} aria-label={fieldLabel("invoiceLink", r)} onChange={(e) => patch(r.key, { invoiceLink: e.target.value })} onBlur={(e) => saveField(r, "invoiceLink", e.target.value.trim() || null)} />
+                                {r.invoiceLink && /^https?:\/\//i.test(r.invoiceLink) && <a href={r.invoiceLink} target="_blank" rel="noopener" title="Mở link HĐ" style={{ marginLeft: 4 }} onClick={(e) => e.stopPropagation()}>↗</a>}
+                              </td>
+                            : <td>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
+                          {dateCell(r, "paidAt")}
+                          {dateCell(r, "docSentAt")}
+                          {dateCell(r, "docReturnedAt")}
+                          <td className="nowrap">
+                            {r.signedAt
+                              ? <span className="status approved nowrap">✓ {r.signedByName || "Đã ký"} · {fmtDate(r.signedAt)}</span>
+                              : <span className="muted">Chưa ký</span>}
+                          </td>
+                          {editable(r)
+                            ? <td><input inputMode="numeric" value={r.invoiceYear ?? ""} placeholder="Năm" style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
+                                onChange={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); patch(r.key, { invoiceYear: v ? Number(v) : null }); }}
+                                onBlur={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
+                            : <td>{r.invoiceYear ?? dash}</td>}
+                          {textCell(r, "invoiceNote", "Note…", 130)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn</span></div>
+            </>
           )}
         </>
       )}

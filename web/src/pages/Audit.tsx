@@ -1,43 +1,53 @@
 import { Fragment, useEffect, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type AuditEntry } from "../lib/api";
+import { dash, fmtDateTime } from "../lib/format";
+import { useIsMobile } from "../lib/ui";
 
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.
 // Bảo mật: gate audit:view (Shell nav + /api/audit server).
 // ĐẦY ĐỦ mọi mã action thực tế (quét từ src/ — gồm cả HR/quote-HN/gdpr/login mà util.js SPA còn thiếu).
-const ACTION_LABEL: Record<string, string> = {
-  // Báo giá
-  "quote.create": "Tạo báo giá", "quote.update": "Sửa báo giá", "quote.delete": "Xóa báo giá",
-  "quote.convert": "Chốt báo giá (thắng)", "quote.lost": "Đánh dấu không chốt", "quote.duplicate": "Nhân bản báo giá",
-  "quote.reopened": "Mở lại để sửa", "quote.export": "Xuất Excel báo giá", "quote.export.pdf": "Xuất PDF báo giá",
-  "quote.invoice": "Cập nhật hóa đơn / thanh toán", "quote.members.update": "Cập nhật thành viên phụ trách",
-  "quote.hn.assign": "Giao phần Hà Nội", "quote.hn.submit": "Gửi duyệt phần Hà Nội", "quote.hn.review": "Duyệt / trả phần Hà Nội",
-  // Khách hàng
-  "customer.create": "Thêm khách hàng", "customer.update": "Sửa khách hàng", "customer.delete": "Xóa khách hàng",
-  "customer.note.add": "Thêm ghi chú khách hàng",
-  // Nhân viên (tài khoản)
-  "user.create": "Thêm nhân viên", "user.update": "Cập nhật nhân viên", "user.delete": "Xóa nhân viên",
-  "user.invite": "Mời nhân viên", "user.invite.resend": "Gửi lại lời mời", "user.invite.accept": "Kích hoạt tài khoản (lời mời)",
-  "user.profile.update": "Cập nhật hồ sơ cá nhân", "user.memberships.cleared": "Xóa phân công thành viên",
-  // Nhân sự (hồ sơ) + Danh bạ
-  "personnel.create": "Thêm hồ sơ nhân sự", "personnel.update": "Sửa hồ sơ nhân sự", "personnel.delete": "Xóa hồ sơ nhân sự",
-  "employee.create": "Thêm danh bạ nhân sự", "employee.update": "Sửa danh bạ nhân sự", "employee.delete": "Xóa danh bạ nhân sự",
-  // Đăng nhập / bảo mật
-  "login.success": "Đăng nhập", "login.token": "Đăng nhập (ứng dụng)", "login.failed": "Đăng nhập thất bại",
-  "login.locked": "Tài khoản bị khóa (đăng nhập)", "login.mfa.failed": "Nhập sai mã MFA", "logout": "Đăng xuất",
-  "password.change.success": "Đổi mật khẩu", "password.change.failed": "Đổi mật khẩu thất bại",
-  "password.forgot": "Yêu cầu quên mật khẩu", "password.reset.by_admin": "Đặt lại mật khẩu (admin)",
-  "mfa.enable": "Bật bảo mật 2 lớp", "mfa.disable": "Tắt bảo mật 2 lớp", "token.revoke-all": "Đăng xuất mọi thiết bị",
-  // Tệp / tích hợp / hệ thống / GDPR
-  "file.upload": "Tải tệp lên", "file.delete": "Xóa tệp",
-  "webhook.create": "Thêm tích hợp", "webhook.update": "Sửa tích hợp", "webhook.delete": "Xóa tích hợp",
-  "settings.update": "Cập nhật cấu hình", "settings.delete": "Xóa cấu hình",
-  "role.permissions.update": "Cập nhật quyền vai trò", "role.permissions.reset": "Đặt lại quyền vai trò",
-  "admin.backup": "Sao lưu dữ liệu", "admin.purge": "Dọn dữ liệu",
-  "gdpr.export": "Xuất dữ liệu cá nhân", "gdpr.export.by_admin": "Xuất dữ liệu cá nhân (admin)",
-  "gdpr.delete.self": "Tự xóa dữ liệu cá nhân", "gdpr.delete.by_admin": "Xóa dữ liệu cá nhân (admin)",
-};
+// Nhóm sẵn để dropdown render <optgroup> (dò trong ~60 mã dễ hơn); ACTION_LABEL phẳng suy ra từ đây (1 nguồn).
+const ACTION_GROUPS: [string, [string, string][]][] = [
+  ["Báo giá", [
+    ["quote.create", "Tạo báo giá"], ["quote.update", "Sửa báo giá"], ["quote.delete", "Xóa báo giá"],
+    ["quote.convert", "Chốt báo giá (thắng)"], ["quote.lost", "Đánh dấu không chốt"], ["quote.duplicate", "Nhân bản báo giá"],
+    ["quote.reopened", "Mở lại để sửa"], ["quote.export", "Xuất Excel báo giá"], ["quote.export.pdf", "Xuất PDF báo giá"],
+    ["quote.invoice", "Cập nhật hóa đơn / thanh toán"], ["quote.members.update", "Cập nhật thành viên phụ trách"],
+    ["quote.hn.assign", "Giao phần Hà Nội"], ["quote.hn.submit", "Gửi duyệt phần Hà Nội"], ["quote.hn.review", "Duyệt / trả phần Hà Nội"],
+  ]],
+  ["Khách hàng", [
+    ["customer.create", "Thêm khách hàng"], ["customer.update", "Sửa khách hàng"], ["customer.delete", "Xóa khách hàng"],
+    ["customer.note.add", "Thêm ghi chú khách hàng"],
+  ]],
+  ["Nhân viên (tài khoản)", [
+    ["user.create", "Thêm nhân viên"], ["user.update", "Cập nhật nhân viên"], ["user.delete", "Xóa nhân viên"],
+    ["user.invite", "Mời nhân viên"], ["user.invite.resend", "Gửi lại lời mời"], ["user.invite.accept", "Kích hoạt tài khoản (lời mời)"],
+    ["user.profile.update", "Cập nhật hồ sơ cá nhân"], ["user.memberships.cleared", "Xóa phân công thành viên"],
+  ]],
+  ["Nhân sự (hồ sơ) & danh bạ", [
+    ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
+    ["employee.create", "Thêm danh bạ nhân sự"], ["employee.update", "Sửa danh bạ nhân sự"], ["employee.delete", "Xóa danh bạ nhân sự"],
+  ]],
+  ["Đăng nhập / bảo mật", [
+    ["login.success", "Đăng nhập"], ["login.token", "Đăng nhập (ứng dụng)"], ["login.failed", "Đăng nhập thất bại"],
+    ["login.locked", "Tài khoản bị khóa (đăng nhập)"], ["login.mfa.failed", "Nhập sai mã MFA"], ["logout", "Đăng xuất"],
+    ["password.change.success", "Đổi mật khẩu"], ["password.change.failed", "Đổi mật khẩu thất bại"],
+    ["password.forgot", "Yêu cầu quên mật khẩu"], ["password.reset.by_admin", "Đặt lại mật khẩu (admin)"],
+    ["mfa.enable", "Bật bảo mật 2 lớp"], ["mfa.disable", "Tắt bảo mật 2 lớp"], ["token.revoke-all", "Đăng xuất mọi thiết bị"],
+  ]],
+  ["Tệp / tích hợp / hệ thống / GDPR", [
+    ["file.upload", "Tải tệp lên"], ["file.delete", "Xóa tệp"],
+    ["webhook.create", "Thêm tích hợp"], ["webhook.update", "Sửa tích hợp"], ["webhook.delete", "Xóa tích hợp"],
+    ["settings.update", "Cập nhật cấu hình"], ["settings.delete", "Xóa cấu hình"],
+    ["role.permissions.update", "Cập nhật quyền vai trò"], ["role.permissions.reset", "Đặt lại quyền vai trò"],
+    ["admin.backup", "Sao lưu dữ liệu"], ["admin.purge", "Dọn dữ liệu"],
+    ["gdpr.export", "Xuất dữ liệu cá nhân"], ["gdpr.export.by_admin", "Xuất dữ liệu cá nhân (admin)"],
+    ["gdpr.delete.self", "Tự xóa dữ liệu cá nhân"], ["gdpr.delete.by_admin", "Xóa dữ liệu cá nhân (admin)"],
+  ]],
+];
+const ACTION_LABEL: Record<string, string> = Object.fromEntries(ACTION_GROUPS.flatMap(([, opts]) => opts));
 const RESOURCE_LABEL: Record<string, string> = {
   quote: "Báo giá", customer: "Khách hàng", user: "Nhân viên", personnel: "Hồ sơ nhân sự",
   employee: "Danh bạ nhân sự", file: "Tệp", webhook: "Webhook", setting: "Cấu hình", system: "Hệ thống",
@@ -45,12 +55,6 @@ const RESOURCE_LABEL: Record<string, string> = {
 };
 const actionLabel = (a: string) => ACTION_LABEL[a] ?? a;
 const resourceLabel = (r: string) => RESOURCE_LABEL[r] ?? r;
-const fmtDateTime = (v: string) => {
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
 // "Đối tượng" đọc-được: "Báo giá: GN26043 — …" / "Nhân sự: Nguyễn Văn A". Fallback khi không có tên:
 // id số → "#225" (báo giá/hồ sơ đã xóa-cứng); id chữ → ": manager" (vd vai trò) cho gọn, không "#manager".
 const targetText = (e: AuditEntry) =>
@@ -94,9 +98,21 @@ function diffRows(before?: Record<string, unknown> | null, after?: Record<string
   }
   return out;
 }
+// Danh sách thay đổi "label: trước → sau" — dùng chung cho thẻ mobile lẫn dòng chi tiết desktop.
+function ChangeList({ changes }: { changes: ReturnType<typeof diffRows> }) {
+  return (
+    <div className="au-changes">
+      {changes.map((c, i) => (
+        <div className="au-change" key={i}>
+          <span className="au-cl">{c.label}</span><span className="au-from">{c.from}</span>
+          <span className="au-arrow">→</span><span className="au-to">{c.to}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-// Dropdown options = mọi nhãn (như SPA build từ ACTION_LABEL/RESOURCE_LABEL).
-const ACTION_OPTS = Object.entries(ACTION_LABEL);
+// Dropdown options = mọi nhãn (như SPA build từ ACTION_LABEL/RESOURCE_LABEL); hoạt động render theo nhóm.
 const RESOURCE_OPTS = Object.entries(RESOURCE_LABEL);
 const PAGE_SIZE = 50;
 
@@ -126,11 +142,15 @@ export function AuditPage() {
   return (
     <div>
       <h1>Nhật ký hoạt động</h1>
-      <p className="muted" style={{ margin: "-8px 0 16px" }}>Lịch sử ai đã làm gì trong hệ thống.</p>
+      <p className="muted page-sub">Lịch sử ai đã làm gì trong hệ thống.</p>
       <div className="toolbar">
         <select aria-label="Lọc theo hoạt động" value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">Tất cả hoạt động</option>
-          {ACTION_OPTS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {ACTION_GROUPS.map(([g, opts]) => (
+            <optgroup key={g} label={g}>
+              {opts.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </optgroup>
+          ))}
         </select>
         <select aria-label="Lọc theo đối tượng" value={resource} onChange={(e) => setResource(e.target.value)}>
           <option value="">Tất cả đối tượng</option>
@@ -138,7 +158,7 @@ export function AuditPage() {
         </select>
         <label className="inline-field">Từ <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="inline-field">Đến <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        <button className="btn btn-sm btn-ghost" type="button" onClick={clear}>Xóa lọc</button>
+        <button className="btn btn-sm btn-ghost" type="button" onClick={clear} disabled={!hasFilter}>Xóa lọc</button>
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
@@ -158,8 +178,8 @@ export function AuditPage() {
                 <div className="au-card-top"><strong>{actionLabel(e.action)}</strong><span className="muted">{fmtDateTime(e.createdAt)}</span></div>
                 <div className="au-card-meta"><span>👤 {e.actor?.displayName || e.actor?.username || "Hệ thống"}</span><span>🎯 {targetText(e)}</span></div>
                 {changes.length > 0 && (<>
-                  <button className="btn btn-sm btn-ghost au-more" onClick={() => setOpenId(open ? null : e.id)}>{open ? "▾ Ẩn chi tiết" : "▸ Xem chi tiết"}</button>
-                  {open && <div className="au-changes">{changes.map((c, i) => <div className="au-change" key={i}><span className="au-cl">{c.label}</span><span className="au-from">{c.from}</span><span className="au-arrow">→</span><span className="au-to">{c.to}</span></div>)}</div>}
+                  <button className="btn btn-sm btn-ghost au-more" type="button" aria-expanded={open} onClick={() => setOpenId(open ? null : e.id)}>{open ? "▾ Ẩn chi tiết" : "▸ Xem chi tiết"}</button>
+                  {open && <ChangeList changes={changes} />}
                 </>)}
               </div>
             );
@@ -168,7 +188,7 @@ export function AuditPage() {
       ) : (
         <div className="list-wrap">
           <table className="list-table audit-table">
-            <thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hoạt động</th><th>Đối tượng</th><th aria-label="Chi tiết" /></tr></thead>
+            <thead><tr><th scope="col">Thời gian</th><th scope="col">Người thực hiện</th><th scope="col">Hoạt động</th><th scope="col">Đối tượng</th><th scope="col" aria-label="Chi tiết" /></tr></thead>
             <tbody>
               {rows.map((e) => {
                 const changes = diffRows(e.before, e.after);
@@ -176,22 +196,27 @@ export function AuditPage() {
                 const open = openId === e.id;
                 return (
                   <Fragment key={e.id}>
-                    <tr className={canOpen ? "au-clickable" : undefined} style={canOpen ? { cursor: "pointer" } : undefined}
-                      role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-expanded={canOpen ? open : undefined}
-                      onClick={() => canOpen && setOpenId(open ? null : e.id)}
-                      onKeyDown={canOpen ? (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setOpenId(open ? null : e.id); } } : undefined}>
-                      <td>{fmtDateTime(e.createdAt)}</td>
+                    {/* a11y: <tr> giữ nguyên role=row (KHÔNG role=button — phá ngữ nghĩa bảng với screen reader);
+                        chuột vẫn bấm cả dòng (onClick), bàn phím/SR dùng <button> thật ở cột cuối. */}
+                    <tr className={canOpen ? "au-clickable" : undefined}
+                      onClick={() => canOpen && setOpenId(open ? null : e.id)}>
+                      <td className="au-time">{fmtDateTime(e.createdAt)}</td>
                       <td>{e.actor?.displayName || e.actor?.username || "Hệ thống"}</td>
                       <td>{actionLabel(e.action)}</td>
                       <td>{targetText(e)}</td>
-                      {/* Dòng có thay đổi → link mở/đóng; dòng không có chi tiết → "—" muted cho cột đều, không trống lỗ chỗ. */}
-                      <td className="au-toggle">{canOpen ? (open ? "▾ Ẩn" : "▸ Chi tiết") : <span className="muted">—</span>}</td>
+                      {/* Dòng có thay đổi → nút mở/đóng; dòng không có chi tiết → "—" muted cho cột đều, không trống lỗ chỗ. */}
+                      <td className="au-toggle">
+                        {canOpen ? (
+                          <button className="btn btn-sm btn-ghost" type="button" aria-expanded={open}
+                            onClick={(ev) => { ev.stopPropagation(); setOpenId(open ? null : e.id); }}>
+                            {open ? "▾ Ẩn" : "▸ Chi tiết"}
+                          </button>
+                        ) : dash}
+                      </td>
                     </tr>
                     {open && canOpen && (
                       <tr className="au-detail"><td colSpan={5}>
-                        <div className="au-changes">
-                          {changes.map((c, i) => <div className="au-change" key={i}><span className="au-cl">{c.label}</span><span className="au-from">{c.from}</span><span className="au-arrow">→</span><span className="au-to">{c.to}</span></div>)}
-                        </div>
+                        <ChangeList changes={changes} />
                       </td></tr>
                     )}
                   </Fragment>
@@ -216,16 +241,4 @@ export function AuditPage() {
       )}
     </div>
   );
-}
-
-// Màn hình hẹp (≤ 820px) → đổi sang dạng THẺ.
-function useIsMobile() {
-  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 820px)");
-    const on = () => setM(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return m;
 }

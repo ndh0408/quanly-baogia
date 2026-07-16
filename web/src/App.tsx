@@ -62,7 +62,7 @@ export function App() {
         </div>
       )}
       <div className={preview ? "has-preview-banner" : undefined}>
-        <Shell me={shellMe} onMe={setMe} onPreview={enterPreview} previewing={!!preview} />
+        <Shell me={shellMe} onMe={setMe} onPreview={enterPreview} />
       </div>
     </ErrorBoundary>
   );

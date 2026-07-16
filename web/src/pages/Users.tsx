@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type User, type InviteResult, type PermCatalog } from "../lib/api";
-import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
+import { dash } from "../lib/format";
+import { toast, confirmModal, fieldErrorsFrom, useEscClose } from "../lib/ui";
 
 // "Quản lý nhân viên": bảng + Mời (invite email) + Sửa + Khóa/Mở khóa + Gửi-lại / Hủy lời mời.
 // PHÂN QUYỀN PER-USER: KHÔNG còn chọn "vai trò" — admin TÍCH QUYỀN cho từng tài khoản (preset điền nhanh).
@@ -16,6 +17,9 @@ type Modal = { t: "invite" } | { t: "edit"; user: User } | { t: "result"; result
 export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: string[], label: string) => void }) {
   const qc = useQueryClient();
   const [modal, setModal] = useState<Modal | null>(null);
+  // Lọc client-side (danh sách nhân viên nhỏ, không cần API): ô tìm + trạng thái.
+  const [q, setQ] = useState("");
+  const [fStatus, setFStatus] = useState(""); // "" | active | pending | locked
 
   const { data, isPending, error, refetch } = useQuery({ queryKey: ["users"], queryFn: () => api.listUsers() });
   const { data: cat } = useQuery({ queryKey: ["perm-catalog"], queryFn: () => api.permissionsCatalog() });
@@ -23,6 +27,22 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
   const loading = isPending;
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
   const load = useCallback(() => { qc.invalidateQueries({ queryKey: ["users"] }); }, [qc]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return rows.filter((u) => {
+      if (needle) {
+        const hay = [u.username, u.displayName, u.email, u.phone, u.projectCode].filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      if (fStatus === "active") return !u.pending && u.active;
+      if (fStatus === "pending") return !!u.pending;
+      if (fStatus === "locked") return !u.pending && !u.active;
+      return true;
+    });
+  }, [rows, q, fStatus]);
+  const hasFilter = !!q || !!fStatus;
+  const clearFilters = () => { setQ(""); setFStatus(""); };
 
   const onResend = async (u: User) => {
     try { const r = await api.resendInvite(u.id); setModal({ t: "result", result: { ...r, user: { email: u.email || "" } } }); }
@@ -39,30 +59,46 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
 
-  const dash = <span className="muted">—</span>;
   // Nhãn cột "Quyền": admin = Quản trị; đã tùy biến = Tùy chỉnh; còn lại = preset gốc.
+  // Preset gốc dùng .neutral (xám) — vàng .pending dành riêng cho "Chờ kích hoạt" ở cột Trạng thái.
   const permLabel = (u: User) =>
     u.role === "admin" ? <span className="status approved">Quản trị</span>
     : u.permCustom ? <span className="status draft">Tùy chỉnh</span>
-    : <span className="status pending">{ROLE_LABEL[u.role] ?? "Nhân viên"}</span>;
+    : <span className="status neutral">{ROLE_LABEL[u.role] ?? "Nhân viên"}</span>;
 
   return (
     <div>
       <h1>Quản lý nhân viên</h1>
+      <p className="muted page-sub">Mời qua email — nhân viên tự đặt mật khẩu rồi đăng nhập bằng email. Nhân viên nghỉ việc thì <b>Khóa</b> tài khoản (không xóa).</p>
       <div className="toolbar">
+        <input type="search" className="grow" placeholder="Tìm theo tên, tên đăng nhập, email, SĐT…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm nhân viên" />
+        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Lọc theo trạng thái">
+          <option value="">Tất cả trạng thái</option>
+          <option value="active">Hoạt động</option>
+          <option value="pending">Chờ kích hoạt</option>
+          <option value="locked">Đã khóa</option>
+        </select>
+        <button className="btn btn-sm btn-ghost" disabled={!hasFilter} onClick={clearFilters}>Xóa lọc</button>
         <button className="btn btn-primary" onClick={() => setModal({ t: "invite" })}>+ Thêm nhân viên</button>
       </div>
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="empty">
+          {rows.length === 0
+            ? <>Chưa có nhân viên nào. <button className="btn btn-primary" onClick={() => setModal({ t: "invite" })}>+ Thêm nhân viên</button></>
+            : <>Không có nhân viên nào khớp bộ lọc. <button className="btn btn-sm btn-ghost" onClick={clearFilters}>Xóa lọc</button></>}
+        </div>
       ) : (
+        <>
         <div className="list-wrap">
           <table className="list-table">
             <thead><tr>
-              <th>Tên đăng nhập</th><th>Họ tên</th><th>Mã dự án</th><th>Quyền</th><th>SĐT</th><th>Trạng thái</th><th style={{ textAlign: "right" }}>Thao tác</th>
+              <th scope="col">Tên đăng nhập</th><th scope="col">Họ tên</th><th scope="col">Mã dự án</th><th scope="col">Quyền</th><th scope="col">SĐT</th><th scope="col">Trạng thái</th><th scope="col" className="actions" aria-label="Thao tác" />
             </tr></thead>
             <tbody>
-              {rows.map((u) => (
+              {filtered.map((u) => (
                 <tr key={u.id}>
                   <td>{u.username}</td>
                   <td>{u.displayName}</td>
@@ -70,7 +106,7 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
                   <td>{permLabel(u)}</td>
                   <td>{u.phone || dash}</td>
                   <td>{u.pending ? <span className="status pending">Chờ kích hoạt</span> : <span className={`status ${u.active ? "approved" : "rejected"}`}>{u.active ? "Hoạt động" : "Đã khóa"}</span>}</td>
-                  <td className="row-actions" style={{ whiteSpace: "nowrap" }}>
+                  <td className="row-actions">
                     {u.pending ? (
                       <>
                         <button className="btn btn-sm" onClick={() => onResend(u)}>Gửi lại lời mời</button>
@@ -88,6 +124,10 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
             </tbody>
           </table>
         </div>
+        <div className="list-foot">
+          <span className="muted">Hiển thị {filtered.length}{hasFilter ? ` / ${rows.length}` : ""} nhân viên</span>
+        </div>
+        </>
       )}
 
       {modal?.t === "invite" && <InviteModal cat={cat} onPreview={onPreview} onClose={() => setModal(null)} onInvited={(r) => { setModal({ t: "result", result: r }); load(); }} />}
@@ -95,14 +135,6 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
       {modal?.t === "result" && <InviteResultModal result={modal.result} onClose={() => setModal(null)} />}
     </div>
   );
-}
-
-function useEscClose(onClose: () => void) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 }
 
 // Ma trận TÍCH QUYỀN per-user. Preset = điền nhanh theo mẫu (Account/Kế toán/…). Nhóm admin-tier bị KHÓA
@@ -219,11 +251,18 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
   const [err, setErr] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const dirty = useRef(false);
   const firstRef = useRef<HTMLInputElement>(null);
   useEffect(() => { firstRef.current?.focus(); }, []);
-  // Mặc định điền sẵn preset "Account" cho tài khoản mới (admin chỉnh lại tùy ý).
+  // Mặc định điền sẵn preset "Account" cho tài khoản mới (admin chỉnh lại tùy ý) — KHÔNG tính là "dirty".
   useEffect(() => { if (cat && perms.size === 0 && !isAdmin) { const m = cat.roles.find((r) => r.key === "manager"); if (m) setPerms(new Set(m.permissions.filter((p) => !cat.adminOnlyPermissions.includes(p)))); }   }, [cat]);
-  useEscClose(onClose);
+  // Guard "bỏ thay đổi" — y hệt EditUserModal: ESC / click backdrop / ✕ / Hủy không vứt form đã gõ.
+  const guardedClose = useCallback(async () => {
+    if (dirty.current && !(await confirmModal("Bỏ thay đổi?", "Bạn có thay đổi chưa lưu. Đóng và bỏ hết?", { danger: true, confirmText: "Đóng, bỏ thay đổi" }))) return;
+    onClose();
+  }, [onClose]);
+  useEscClose(() => void guardedClose());
+  const mark = <T,>(setter: (v: T) => void) => (v: T) => { dirty.current = true; setter(v); };
   const save = async () => {
     if (!displayName.trim() || !email.trim()) { setErr("Vui lòng nhập họ tên và email"); return; }
     setErr(""); setFieldErrors({}); setSaving(true);
@@ -236,26 +275,26 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
     } catch (ex) { const fe = fieldErrorsFrom(ex); setFieldErrors(fe); setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lỗi")); setSaving(false); }
   };
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => void guardedClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Mời nhân viên" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Mời nhân viên</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
+        <div className="modal-head"><h3>Mời nhân viên</h3><button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <p className="muted" style={{ marginTop: 0 }}>Nhập email — hệ thống gửi lời mời, họ tự đặt mật khẩu. Tích các quyền tài khoản này được phép.</p>
           <div className="grid">
             <label className="full"><span>Họ tên <b className="req">*</b></span>
-              <input ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => setDisplayName(e.target.value)} />
+              <input ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
               {fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             <label className="full"><span>Email cá nhân <b className="req">*</b></span>
-              <input type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => setEmail(e.target.value)} />
+              <input type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001…)</em></span>
-              <input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => setProjectCode(e.target.value)} /></label>
+              <input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={setIsAdmin} perms={perms} setPerms={setPerms} onPreview={onPreview} label={displayName.trim() || "tài khoản mới"} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={displayName.trim() || "tài khoản mới"} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
+          <button className="btn" onClick={() => void guardedClose()}>Hủy</button>
           <button className="btn btn-primary" disabled={saving || !displayName.trim() || !email.trim()} onClick={save}>{saving ? "Đang gửi…" : "Gửi lời mời"}</button>
         </div>
       </div>
@@ -335,8 +374,8 @@ function InviteResultModal({ result, onClose }: { result: InviteResult; onClose:
           <p style={{ marginTop: 0 }}>{result.emailSent
             ? <>Đã gửi email lời mời tới <b>{result.user.email}</b>.</>
             : <>Email chưa được cấu hình trên hệ thống — hãy gửi <b>liên kết mời</b> này cho nhân viên:</>}</p>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <input ref={ref} value={result.inviteUrl} readOnly style={{ flex: 1, padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 7, background: "var(--field-bg)", color: "var(--text)" }} />
+          <div className="copy-row" style={{ marginTop: 8 }}>
+            <input ref={ref} value={result.inviteUrl} readOnly aria-label="Liên kết mời" />
             <button className="btn" type="button" onClick={copy}>Sao chép</button>
           </div>
           <p className="muted" style={{ marginTop: 10 }}>Nhân viên mở liên kết → đặt mật khẩu + điền SĐT → đăng nhập bằng <b>email</b>. Lời mời hết hạn sau 7 ngày.</p>

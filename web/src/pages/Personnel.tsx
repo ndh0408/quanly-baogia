@@ -4,16 +4,18 @@ import { api, ApiError, type Me, type Personnel, type Summary, type Employee, ty
 import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, type FieldSource, type FieldEdit } from "../lib/fields";
 import { EMP_FIELDS } from "./Employees";
 import { useDebouncedValue } from "../lib/query";
-import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom } from "../lib/ui";
+import { toast, confirmModal, fieldErrorsFrom, useEscClose } from "../lib/ui";
+import { fmtMoney as fmtMoneyLib, fmtDate as fmtDateLib, toInputDate as toInputDateLib } from "../lib/format";
 
-const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : Number(v).toLocaleString("vi-VN"));
-const fmtDate = (v: unknown) => (v ? new Date(v as string).toLocaleDateString("vi-VN") : "");
-const toInputDate = toLocalInputDate;
+// Wrapper quanh lib/format: bảng này cần Ô TRỐNG khi null (fmtMoney lib trả "0") + nhận unknown từ r[k].
+const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : fmtMoneyLib(Number(v)));
+const fmtDate = (v: unknown) => fmtDateLib(v == null ? null : String(v));
+const toInputDate = (v: unknown) => toInputDateLib(v == null ? null : String(v));
 const PAGE_SIZE = 50;
 // Field LẤY TỪ DỰ ÁN — KHÔNG hiện ô nhập trong form, chỉ điền qua "Chọn dự án" (bắt buộc) rồi hiện "đã chọn".
 const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
 
-export function PersonnelPage({ me, query }: { me: Me; query: string }) {
+export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; onQuery?: (v: string) => void }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("createdAt");
@@ -211,12 +213,15 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
   return (
     <div>
       <h1>Nhân sự</h1>
+      <p className="muted page-sub">Hồ sơ nhân sự theo dự án đã chốt — lương, thuế TNCN, thanh toán và ký chứng từ.</p>
       <div className="src-legend">
         <span className="chip chip-input">🟡 Nhập tay</span>
         <span className="chip chip-ref">🩷 Tự lấy từ Dự án (theo Mã dự án)</span>
         <span className="chip chip-formula">🔵 Tự tính (Thuế = Lương/9 · Thu nhập = Lương×10/9)</span>
       </div>
       <div className="toolbar">
+        {/* Ô tìm dùng CHUNG state query với ô tìm sidebar (GlobalSearch) — gõ ở đâu cũng lọc như nhau. */}
+        <input className="grow" type="search" aria-label="Tìm hồ sơ" placeholder="Tìm theo tên, MST, dự án…" value={query} onChange={(e) => onQuery?.(e.target.value)} />
         {!canCreate && <span className="badge">Chỉ xem</span>}
         <span className="spacer" />
         {canCreate && <button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button>}
@@ -227,7 +232,10 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
       {loading ? (
         <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <div className="empty">{query ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}</div>
+        <div className="empty">
+          {query ? "Không tìm thấy hồ sơ khớp." : "Chưa có hồ sơ nào."}
+          {!query && canCreate && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditing(null)}>+ Thêm hồ sơ</button></div>}
+        </div>
       ) : isMobile ? (
         /* MOBILE: mỗi hồ sơ 1 THẺ (label : value), sửa-tại-chỗ đúng ô theo role — không phải cuộn bảng rộng. */
         <div className="prs-cards">
@@ -255,31 +263,33 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
             <thead>
               {/* Hàng 1: STT + các cột (cột 15+16 gộp dưới 1 ô "THỜI GIAN LÀM VIỆC") */}
               <tr>
-                <th rowSpan={2} className="sticky-1 hdr-stt">STT</th>
+                <th rowSpan={2} scope="col" className="sticky-1 hdr-stt">STT</th>
                 {TABLE_COLS.map((k, i) => {
                   if (k === "workEnd") return null;   // nằm dưới ô gộp "THỜI GIAN LÀM VIỆC" (xử lý ở workStart)
                   const f = FIELD_BY_KEY[k];
                   const color = hdrCls(k);
                   if (k === "workStart") {
-                    return <th key="tglv" colSpan={2} className={["merged", color].filter(Boolean).join(" ")}>THỜI GIAN LÀM VIỆC</th>;
+                    return <th key="tglv" colSpan={2} scope="colgroup" className={["merged", color].filter(Boolean).join(" ")}>THỜI GIAN LÀM VIỆC</th>;
                   }
                   const sortable = SORTABLE.has(k);
                   const arrow = sort === k ? (order === "asc" ? " ▲" : " ▼") : "";
                   return (
-                    <th key={k} rowSpan={2} className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
+                    <th key={k} rowSpan={2} scope="col" className={[i === 0 ? "sticky-2" : "", f?.type === "money" ? "num" : "", sortable ? "sortable" : "", color].filter(Boolean).join(" ")}
                         aria-sort={sortable ? (sort === k ? (order === "asc" ? "ascending" : "descending") : "none") : undefined}
+                        tabIndex={sortable ? 0 : undefined}
+                        onKeyDown={sortable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(k); } } : undefined}
                         onClick={() => toggleSort(k)} title={sortable ? "Bấm để sắp xếp" : f?.source === "ref-project" ? "Tự lấy từ Dự án theo Mã dự án" : f?.source === "formula" ? "Tự tính từ Lương" : f?.source === "action" ? (k === "confirmed" ? "Admin bấm để xác nhận đã ký (có ngày)" : "Kế toán bấm để đánh dấu đã thanh toán (có ngày)") : undefined}>
                       {f?.label ?? k}{arrow}
                     </th>
                   );
                 })}
-                <th rowSpan={2}>Người tạo</th>
-                <th rowSpan={2} />
+                <th rowSpan={2} scope="col">Người tạo</th>
+                <th rowSpan={2} scope="col" className="actions" aria-label="Thao tác" />
               </tr>
               {/* Hàng 2: chỉ 2 cột con của "THỜI GIAN LÀM VIỆC" — sắp xếp được theo ngày */}
               <tr>
-                <th className={[hdrCls("workStart"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workStart" ? (order === "asc" ? "ascending" : "descending") : "none"} onClick={() => toggleSort("workStart")} title="Bấm để sắp xếp">Ngày bắt đầu{sort === "workStart" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
-                <th className={[hdrCls("workEnd"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workEnd" ? (order === "asc" ? "ascending" : "descending") : "none"} onClick={() => toggleSort("workEnd")} title="Bấm để sắp xếp">Ngày kết thúc{sort === "workEnd" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
+                <th scope="col" className={[hdrCls("workStart"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workStart" ? (order === "asc" ? "ascending" : "descending") : "none"} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort("workStart"); } }} onClick={() => toggleSort("workStart")} title="Bấm để sắp xếp">Ngày bắt đầu{sort === "workStart" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
+                <th scope="col" className={[hdrCls("workEnd"), "sortable"].filter(Boolean).join(" ")} aria-sort={sort === "workEnd" ? (order === "asc" ? "ascending" : "descending") : "none"} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort("workEnd"); } }} onClick={() => toggleSort("workEnd")} title="Bấm để sắp xếp">Ngày kết thúc{sort === "workEnd" ? (order === "asc" ? " ▲" : " ▼") : ""}</th>
               </tr>
             </thead>
             <tbody>
@@ -290,7 +300,8 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
                     <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
-                    {canEditRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
+                    {/* Xóa theo quyền DELETE (khớp thẻ mobile + backend) — không dùng quyền edit. */}
+                    {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                   </td>
                 </tr>
               ))}
@@ -318,22 +329,26 @@ export function PersonnelPage({ me, query }: { me: Me; query: string }) {
         </div>
       )}
 
-      {/* TỔNG (toàn bộ lọc) — luôn hiện rõ DƯỚI bảng/thẻ, không bị cuộn ngang che như dòng tổng trong bảng. */}
+      {/* TỔNG (toàn bộ lọc) — luôn hiện rõ DƯỚI bảng/thẻ, không bị cuộn ngang che như dòng tổng trong bảng.
+          CHỐT pattern: .prs-total là "tổng-CUỐI-bảng" của trang này (khác .stat-row/<Stat> đầu trang ở Hóa đơn) — cố ý giữ, đừng đổi sang stat-card. */}
       <div className="prs-total" role="status">
         <span><b>{meta.total}</b> hồ sơ</span>
         <span>Σ Lương: <b>{fmtMoney(summary.salary)} đ</b></span>
         <span>Σ Thuế TNCN: <b>{fmtMoney(summary.pit)} đ</b></span>
         <span>Σ Thu nhập chịu thuế: <b>{fmtMoney(summary.taxableIncome)} đ</b></span>
       </div>
-      <div className="list-foot">
-        {meta.pageCount > 1 && (
-          <div className="pager">
-            <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Trước</button>
-            <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
-            <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau ›</button>
-          </div>
-        )}
-      </div>
+      {rows.length > 0 && (
+        <div className="list-foot">
+          <span className="muted">Hiển thị {(meta.page - 1) * PAGE_SIZE + 1}–{(meta.page - 1) * PAGE_SIZE + rows.length} / {meta.total}</span>
+          {meta.pageCount > 1 && (
+            <div className="pager">
+              <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Trước</button>
+              <span className="muted">Trang {meta.page}/{meta.pageCount}</span>
+              <button className="btn btn-sm" disabled={page >= meta.pageCount} onClick={() => setPage((p) => p + 1)}>Sau →</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {editing !== undefined && (
         <RecordForm
@@ -401,6 +416,7 @@ function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () =
   const [proof, setProof] = useState<string | null>(null);     // ảnh MỚI chọn (base64)
   const [existing, setExisting] = useState<string | null>(null); // ảnh ĐÃ CÓ (tải on-demand)
   const [busy, setBusy] = useState(false);
+  useEscClose(onClose); // ESC đóng — đồng bộ hành xử với RecordForm
   useEffect(() => { if (rec.hasPaymentProof) api.getPaymentProof(rec.id).then((r) => setExisting(r.paymentProof)).catch(() => { /* ignore */ }); }, [rec]);
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -575,8 +591,10 @@ function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
     <fieldset className="emp-picker-fs">
       <legend>Chọn từ danh bạ (tự điền)</legend>
       <div className="emp-picker">
-        <input placeholder="🔎 Gõ tên / MST / SĐT để chọn người có sẵn…" value={q}
-               onChange={(e) => setQ(e.target.value)} onFocus={() => results.length > 0 && setOpen(true)} />
+        <input type="search" aria-label="Tìm người trong danh bạ" placeholder="🔎 Gõ tên / MST / SĐT để chọn người có sẵn…" value={q}
+               onChange={(e) => setQ(e.target.value)} onFocus={() => results.length > 0 && setOpen(true)}
+               onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+               onBlur={() => { window.setTimeout(() => setOpen(false), 150); }} />
         {open && results.length > 0 && (
           <div className="emp-picker-list">
             {results.map((e) => (
@@ -645,8 +663,10 @@ function ProjectPicker({ selected, onPick, onClear, readOnly }: {
     <fieldset className="emp-picker-fs proj-fs proj-fs-required">
       <legend>Chọn dự án đã chốt <b className="req">* bắt buộc</b></legend>
       <div className="emp-picker">
-        <input placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
-               onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)} />
+        <input type="search" aria-label="Tìm dự án đã chốt" placeholder="🔎 Gõ tên / mã dự án để chọn (chỉ dự án đã chốt của bạn)…" value={q}
+               onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)}
+               onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+               onBlur={() => { window.setTimeout(() => setOpen(false), 150); }} />
         {open && results.length > 0 && (
           <div className="emp-picker-list">
             {results.map((p, i) => (
