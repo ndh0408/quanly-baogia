@@ -103,11 +103,12 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect((await mgrB.delete(`/api/personnel/${recAId}`)).status).toBe(403);
   });
 
-  it("manager A sửa hồ sơ CỦA MÌNH → 200 (teamNote là field hồ sơ; note/accountingNote nay qua endpoint riêng)", async () => {
-    const r = await mgrA.put(`/api/personnel/${recAId}`).send({ teamNote: "đã cập nhật", salary: 12_000_000 });
+  it("manager A sửa hồ sơ CỦA MÌNH → 200 (gồm tên hợp đồng tùy ý)", async () => {
+    const r = await mgrA.put(`/api/personnel/${recAId}`).send({ teamNote: "đã cập nhật", salary: 12_000_000, projectNameContract: "Hợp đồng sự kiện A" });
     expect(r.status).toBe(200);
     expect(r.body.teamNote).toBe("đã cập nhật");
     expect(Number(r.body.salary)).toBe(12_000_000);
+    expect(r.body.projectNameContract).toBe("Hợp đồng sự kiện A");
   });
 
   it("admin sửa hồ sơ của BẤT KỲ ai → 200", async () => {
@@ -116,13 +117,13 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     expect(r.body.teamNote).toBe("admin sửa");
   });
 
-  it("round-trip cột nhập + CÔNG THỨC thuế (pit=Lương/9, thu nhập=Lương×10/9) + BỎ field tham chiếu", async () => {
+  it("round-trip cột nhập (gồm Tên hợp đồng) + CÔNG THỨC thuế + BỎ field tham chiếu", async () => {
     const r = await mgrA.post("/api/personnel").send(payload({
       fullName: `${TAG} Full`, taxCode: "8801234567", idCard: "079123", bankName: "ACB", bankAccount: "216110189",
       salary: 18_000_000, laborContractNo: "HDLD-01",
       // Field công thức/tham chiếu/thanh toán/xác nhận — nếu client cố gửi PHẢI bị bỏ qua (không lưu, không tin):
       pit: 999, taxableIncome: 999, payment: "BẬY", paidAt: "2020-01-01", confirmed: "OK", confirmedAt: "2020-01-01",
-      preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "BẬY",
+      preTaxAmount: 123, salesContractNo: "BẬY", projectNameContract: "Hợp đồng tùy chọn",
     }));
     expect(r.status).toBe(201);
     expect(r.body.taxCode).toBe("8801234567");
@@ -131,10 +132,11 @@ describe.runIf(dbAvailable)("personnel module + RBAC (integration)", () => {
     // 🔵 Thuế TNCN = round(Lương/9); Thu nhập chịu thuế = Lương + Thuế — KHÔNG theo giá trị client gửi.
     expect(Number(r.body.pit)).toBe(Math.round(18_000_000 / 9)); // = 2.000.000
     expect(Number(r.body.taxableIncome)).toBe(18_000_000 + Math.round(18_000_000 / 9));
+    // Tên hợp đồng là field nhập tay và được lưu độc lập với tên dự án.
+    expect(r.body.projectNameContract).toBe("Hợp đồng tùy chọn");
     // 🩷 Field tham chiếu Dự án — không có mã dự án khớp → null (KHÔNG nhận giá trị client gửi).
     expect(r.body.preTaxAmount ?? null).toBeNull();
     expect(r.body.salesContractNo ?? null).toBeNull();
-    expect(r.body.projectNameContract ?? null).toBeNull();
     // 🟢 THANH TOÁN + XÁC NHẬN: hồ sơ mới chưa TT/chưa ký; client KHÔNG set được paidAt/confirmedAt qua create.
     expect(r.body.paidAt ?? null).toBeNull();
     expect(r.body.payment).toBe("Chưa thanh toán");

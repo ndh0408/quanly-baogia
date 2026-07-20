@@ -151,7 +151,7 @@ model PersonnelRecord {
   company      String? // CTY
 
   // Hợp đồng
-  projectNameContract String? // TÊN DỰ ÁN (HĐ)
+  projectNameContract String? // TÊN HỢP ĐỒNG (nhập tay, mặc định theo tên dự án khi chọn)
   laborContractNo     String? // SỐ HĐ LĐ
   laborContractDate   DateTime? // NGÀY HĐ LĐ
   salesContractNo     String? // SỐ HĐ BÁN

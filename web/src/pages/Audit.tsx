@@ -72,7 +72,7 @@ const FIELD_LABEL: Record<string, string> = {
   permissions: "Quyền", title: "Tiêu đề", status: "Trạng thái", role: "Vai trò",
   // Tài khoản / hồ sơ nhân sự / danh bạ (hay gặp ở user.*, personnel.*, employee.*)
   fullName: "Họ tên", displayName: "Tên hiển thị", username: "Tên đăng nhập", email: "Email", phone: "Điện thoại",
-  active: "Kích hoạt", company: "Công ty", projectName: "Tên dự án", projectCode: "Mã dự án",
+  active: "Kích hoạt", company: "Công ty", projectName: "Tên dự án", projectNameContract: "Tên hợp đồng", projectCode: "Mã dự án",
   taxCode: "Mã số thuế", idCard: "CCCD", bankName: "Ngân hàng", bankAccount: "Số tài khoản",
   laborContractNo: "Số HĐ lao động", position: "Chức vụ", department: "Phòng ban",
 };

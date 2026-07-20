@@ -39,7 +39,7 @@ export const FIELDS: Field[] = [
   { key: "accountName", label: "Account", type: "text", group: "Dự án", source: "input" },
   { key: "company", label: "CTY", type: "text", group: "Dự án", source: "input" },
   // Hợp đồng
-  { key: "projectNameContract", label: "Tên dự án (HĐ)", type: "text", group: "Hợp đồng", source: "ref-project" },
+  { key: "projectNameContract", label: "Tên hợp đồng", type: "text", group: "Hợp đồng", source: "input" },
   { key: "laborContractNo", label: "Số HĐ LĐ", type: "text", group: "Hợp đồng", source: "input" },
   { key: "laborContractDate", label: "Ngày HĐ LĐ", type: "date", group: "Hợp đồng", source: "input" },
   { key: "salesContractNo", label: "Số HĐ bán", type: "text", group: "Hợp đồng", source: "ref-project" },

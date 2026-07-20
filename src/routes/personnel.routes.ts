@@ -20,8 +20,8 @@ const money = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.n
 const date = z.preprocess((v) => (v === "" || v == null ? null : v), z.coerce.date().nullable());
 
 // CHỈ field NHẬP TAY (🟡) mới nằm trong shape → API bỏ qua mọi field công thức/tham chiếu nếu client gửi.
-// 🔵 Công thức (pit, taxableIncome) tính ở server. 🩷 Tham chiếu Dự án (projectNameContract,
-// salesContractNo/Date, purchaseOrder, preTaxAmount, payment) lookup khi đọc — KHÔNG lưu, KHÔNG nhập.
+// 🔵 Công thức (pit, taxableIncome) tính ở server. 🩷 Tham chiếu Dự án (salesContractNo/Date,
+// purchaseOrder, preTaxAmount, payment) lookup khi đọc — KHÔNG lưu, KHÔNG nhập.
 const personnelShape = {
   fullName: z.string().min(1, "Vui lòng nhập Họ & Tên").max(200),
   taxCode: str(40), birthYear: str(40), idCard: str(40), idIssueDate: date, idIssuePlace: str(200),
@@ -29,6 +29,7 @@ const personnelShape = {
   salary: money,
   workStart: date, workEnd: date, workLocation: str(200),
   projectName: str(300), projectCode: str(80), teamNote: str(500), accountName: str(120), company: str(120),
+  projectNameContract: str(300),
   laborContractNo: str(80), laborContractDate: date,
   // accountingNote (kế toán) / note (admin) / payment / confirmed KHÔNG nhập qua form chung — mỗi cái có
   // ENDPOINT RIÊNG gác đúng quyền (sửa-tại-chỗ). Form chỉ ghi field "hồ sơ" của Account sở hữu.
@@ -67,7 +68,7 @@ router.get(
 );
 
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
-// Account / CTY / Tên dự án (HĐ). Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
+// Account / CTY. Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
 // người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
 // PHẢI khai báo TRƯỚC "/:id" (kẻo "projects" lọt vào route :id).
 const ProjectsQuery = z.object({ q: z.string().max(200).optional() });

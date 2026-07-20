@@ -512,8 +512,8 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
           <ProjectPicker
             selected={{ projectCode: form.projectCode, projectName: form.projectName, accountName: form.accountName, company: form.company }}
             readOnly={readOnly}
-            onPick={(p) => { dirty.current = true; setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company })); toast(`Đã chọn dự án "${p.projectCode}"`, "success"); }}
-            onClear={() => { dirty.current = true; setForm((s) => ({ ...s, projectName: "", projectCode: "", accountName: "", company: "" })); }}
+            onPick={(p) => { dirty.current = true; setForm((s) => ({ ...s, projectName: p.projectName, projectCode: p.projectCode, accountName: p.accountName, company: p.company, projectNameContract: p.projectName })); toast(`Đã chọn dự án "${p.projectCode}"`, "success"); }}
+            onClear={() => { dirty.current = true; setForm((s) => ({ ...s, projectName: "", projectCode: "", accountName: "", company: "", projectNameContract: "" })); }}
           />
           {!rec && !readOnly && (
             <EmployeePicker onPick={(emp) => {
@@ -612,8 +612,8 @@ function EmployeePicker({ onPick }: { onPick: (emp: Employee) => void }) {
   );
 }
 
-// Chọn DỰ ÁN đã chốt (BẮT BUỘC). Chọn xong → hiện "✓ đã chọn"; Tên dự án (HĐ) + các cột HĐ tự hiện
-// theo Mã dự án khi xem bảng → KHÔNG cần ô riêng cho Tên/Mã dự án · Account · CTY (đỡ rối form).
+// Chọn DỰ ÁN đã chốt (BẮT BUỘC). Chọn xong → hiện "✓ đã chọn" và lấy tên dự án làm
+// tên hợp đồng BAN ĐẦU; người dùng vẫn sửa tên hợp đồng tùy ý trong nhóm Hợp đồng.
 function ProjectPicker({ selected, onPick, onClear, readOnly }: {
   selected: { projectCode: string; projectName: string; accountName: string; company: string };
   onPick: (p: Project) => void; onClear: () => void; readOnly: boolean;

@@ -14,7 +14,7 @@ type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (t
 
 // Các trường được dò khi tìm kiếm hồ sơ Nhân sự → gộp vào cột searchText (chuẩn-hóa bỏ dấu).
 const personnelSearchText = (r: Record<string, any>) =>
-  normalizeSearch(r.fullName, r.projectName, r.projectCode, r.taxCode, r.phone, r.idCard);
+  normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone, r.idCard);
 
 // Tải bản ghi + 403 nếu caller không được làm `action` (read|manage) với nó (owner = createdById).
 async function loadAuthorized(req: Request, action: Action) {
@@ -36,7 +36,6 @@ function decorate<T extends { salary: unknown; projectCode: string | null; paidA
   return {
     ...rec,
     pit, taxableIncome,
-    projectNameContract: ref?.projectNameContract ?? null,
     salesContractNo: ref?.salesContractNo ?? null,
     salesContractDate: ref?.salesContractDate ?? null,
     purchaseOrder: ref?.purchaseOrder ?? null,
@@ -78,7 +77,7 @@ export async function listPersonnel(req: Request) {
 }
 
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
-// Account / CTY / Tên dự án (HĐ). Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
+// Account / CTY. Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
 // người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
 export async function listProjects(req: Request) {
   const { q } = req.query as any;
@@ -107,7 +106,6 @@ export async function listProjects(req: Request) {
       data.push({
         projectCode: base + (multi ? `_${i + 1}` : ""),   // = mã sản xuất (khớp tra cứu cột HĐ)
         projectName: qt.title || "",                       // Tên dự án
-        projectNameContract: qt.title || "",               // Tên dự án (HĐ)
         accountName: qt.createdBy?.displayName || "",       // Account (người tạo báo giá)
         company: qt.company?.name || "",                   // CTY
         sheetName: sh.name || "",                           // Hạng Mục (gợi ý khi nhiều sheet)

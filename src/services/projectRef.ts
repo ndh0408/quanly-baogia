@@ -15,7 +15,6 @@ export function codeLabel(q: { projectCode?: string | null; quoteNumber?: string
 }
 
 export type ProjectRef = {
-  projectNameContract: string | null; // Tên dự án (HĐ) ← Quote.title
   salesContractNo: string | null;     // Số HĐ bán    ← QuoteSheet.invoiceNo
   salesContractDate: Date | null;     // Ngày HĐ bán  ← QuoteSheet.signedAt
   purchaseOrder: string | null;       // Đơn đặt hàng ← QuoteSheet.poNumber
@@ -51,7 +50,7 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
     where: { status: "converted", deletedAt: null, OR: [{ projectCode: { in: arr } }, { quoteNumber: { in: arr } }] },
     take: 1000,
     select: {
-      quoteNumber: true, projectCode: true, projectVersion: true, title: true,
+      quoteNumber: true, projectCode: true, projectVersion: true,
       vatPercent: true, discount: true, subtotal: true,
       sheets: {
         orderBy: { order: "asc" },
@@ -77,7 +76,6 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
       // `|| 0` (không phải ??): Number() trả NaN chứ không bao giờ nullish — subtotal thiếu/hỏng phải về 0.
       const baoGia = byId.get(sh.id) ?? (Number(q.subtotal) || 0);
       out.set(code, {
-        projectNameContract: q.title ?? null,
         salesContractNo: sh.invoiceNo ?? null,
         salesContractDate: sh.signedAt ?? null,
         purchaseOrder: sh.poNumber ?? null,

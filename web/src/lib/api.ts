@@ -36,7 +36,7 @@ export type EmployeeListResult = {
 
 // Dự án ĐÃ CHỐT để chọn khi tạo hồ sơ Nhân sự (tự điền Tên dự án / Mã dự án / Account / CTY).
 export type Project = {
-  projectCode: string; projectName: string; projectNameContract: string;
+  projectCode: string; projectName: string;
   accountName: string; company: string; sheetName: string;
 };
 

@@ -30,7 +30,14 @@ describe.runIf(dbAvailable)("personnel search KHÔNG dấu (integration)", () =>
     expect(r.status).toBe(200);
   };
   // projectCode BẮT BUỘC khi tạo (gắn dự án đã chốt) → payload mặc định có sẵn.
-  const payload = (o = {}) => ({ fullName: FULL_NAME, salary: 10_000_000, projectName: "Dự án X", projectCode: "PRJ-X", ...o });
+  const payload = (o = {}) => ({
+    fullName: FULL_NAME,
+    salary: 10_000_000,
+    projectName: "Dự án X",
+    projectNameContract: `${TAG} Hợp đồng Ánh Dương`,
+    projectCode: "PRJ-X",
+    ...o,
+  });
 
   let recId;
 
@@ -83,6 +90,12 @@ describe.runIf(dbAvailable)("personnel search KHÔNG dấu (integration)", () =>
 
   it("(3b) sai dấu / HOA-thường lẫn lộn 'NGUYEN VAN DUC' → vẫn THẤY", async () => {
     const r = await mgr.get("/api/personnel").query({ q: `${TAG} NGUYEN VAN DUC` });
+    expect(r.status).toBe(200);
+    expect(r.body.data.some((x) => x.id === recId)).toBe(true);
+  });
+
+  it("(3c) tìm theo Tên hợp đồng tùy chỉnh, không dấu → THẤY hồ sơ", async () => {
+    const r = await mgr.get("/api/personnel").query({ q: `${TAG.toLowerCase()} hop dong anh duong` });
     expect(r.status).toBe(200);
     expect(r.body.data.some((x) => x.id === recId)).toBe(true);
   });
