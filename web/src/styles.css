@@ -1693,7 +1693,7 @@ textarea[aria-invalid="true"] {
 }
 .cell-miss {
   background: #ffe9f3 !important;
-} /* HỒNG: ngày chưa điền */
+} /* HỒNG: ô nhập tay chưa điền */
 [data-theme="dark"] .cell-miss {
   background: #2c1722 !important;
 }
@@ -1946,8 +1946,14 @@ textarea[aria-invalid="true"] {
   outline-offset: 0;
   border-color: var(--gold-d);
 }
-.inv-table td.cell-miss input {
+.inv-table td.cell-miss input,
+.inv-table td.cell-miss select {
   background: transparent;
+}
+/* Chrome/Edge tự hiện dd/mm/yyyy trong input ngày rỗng. Ẩn chữ này khi chưa focus để ô
+   thật sự trống như các cột khác; icon lịch vẫn còn và khi bấm vào thì gợi ý ngày hiện lại. */
+.inv-table input.inv-date-empty:not(:focus)::-webkit-datetime-edit {
+  color: transparent;
 }
 
 /* Quản lý dự án: NỚI cột Phim (168→240px — tên dự án là thông tin nhận dạng chính, đang bị cắt cụt).
