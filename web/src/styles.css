@@ -173,10 +173,48 @@
 .tbl-wrap tbody tr:hover .sticky-2 {
   background: var(--row-hover);
 }
-.tbl-wrap .row-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
+/* Cột thao tác: KHÔNG đặt display:flex trực tiếp lên <td> vì sẽ làm mất table-cell,
+   sinh khoảng trống và lệch cột header/body/footer. Nút vốn là inline-flex nên chỉ cần
+   căn phải + margin. Ghim cột này bên phải để bảng rộng vẫn luôn bấm được. */
+.tbl-wrap th.actions,
+.tbl-wrap td.row-actions,
+.tbl-wrap tfoot td.actions-foot {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  min-width: 138px;
+  padding-left: 8px;
+  padding-right: 8px;
+  text-align: right;
+  white-space: nowrap;
+  box-shadow: -3px 0 6px -3px rgba(15, 23, 42, 0.2);
+}
+.tbl-wrap th.actions {
+  z-index: 5;
+  background: var(--card-2);
+}
+.tbl-wrap tbody td.row-actions {
+  display: table-cell;
+  z-index: 2;
+  background: var(--card);
+}
+.tbl-wrap td.row-actions .btn + .btn {
+  margin-left: 6px;
+}
+.tbl-wrap tbody tr:nth-child(2n) td.row-actions {
+  background: color-mix(in srgb, var(--card-2) 55%, var(--card));
+}
+.tbl-wrap tbody tr:hover td.row-actions {
+  background: var(--row-hover);
+}
+.tbl-wrap tfoot td.actions-foot {
+  z-index: 4;
+  background: var(--card-2);
+}
+[data-theme="dark"] .tbl-wrap th.actions,
+[data-theme="dark"] .tbl-wrap td.row-actions,
+[data-theme="dark"] .tbl-wrap tfoot td.actions-foot {
+  box-shadow: -3px 0 6px -3px rgba(0, 0, 0, 0.55);
 }
 .tbl-wrap tfoot .sum-row td {
   background: var(--card-2);

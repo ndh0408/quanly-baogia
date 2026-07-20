@@ -132,7 +132,7 @@ export function EmployeesPage({ me, query, onQuery }: { me: Me; query: string; o
                   );
                 })}
                 <th scope="col">Người tạo</th>
-                <th scope="col" className="actions" aria-label="Thao tác" />
+                <th scope="col" className="actions">Thao tác</th>
               </tr>
             </thead>
             <tbody>

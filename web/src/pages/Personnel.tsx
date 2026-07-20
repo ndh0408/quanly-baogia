@@ -284,7 +284,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                   );
                 })}
                 <th rowSpan={2} scope="col">Người tạo</th>
-                <th rowSpan={2} scope="col" className="actions" aria-label="Thao tác" />
+                <th rowSpan={2} scope="col" className="actions">Thao tác</th>
               </tr>
               {/* Hàng 2: chỉ 2 cột con của "THỜI GIAN LÀM VIỆC" — sắp xếp được theo ngày */}
               <tr>
@@ -322,7 +322,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                       : ""}
                   </td>
                 ))}
-                <td /><td />
+                <td /><td className="actions-foot" />
               </tr>
             </tfoot>
           </table>
