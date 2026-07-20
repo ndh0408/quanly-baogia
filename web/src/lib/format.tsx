@@ -64,11 +64,12 @@ export const errMsg = (e: unknown, fallback = "Lỗi tải dữ liệu") => (e i
 export const dash: ReactElement = <span className="muted">—</span>;
 
 /* Thẻ thống kê đầu trang — pattern chung (class .stat-card trong styles.css). */
-export function Stat({ label, value, tone }: { label: string; value: string; tone?: "ok" | "danger" }) {
-  return (
-    <div className={`stat-card${tone ? ` stat-${tone}` : ""}`}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-    </div>
-  );
+export function Stat({ label, value, tone, onClick, active, title }: {
+  label: string; value: string; tone?: "ok" | "danger"; onClick?: () => void; active?: boolean; title?: string;
+}) {
+  const className = `stat-card${tone ? ` stat-${tone}` : ""}${onClick ? " stat-clickable" : ""}${active ? " active" : ""}`;
+  const content = <><div className="stat-label">{label}</div><div className="stat-value">{value}</div></>;
+  return onClick
+    ? <button type="button" className={className} onClick={onClick} aria-pressed={!!active} title={title}>{content}</button>
+    : <div className={className}>{content}</div>;
 }

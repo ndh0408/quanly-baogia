@@ -1721,6 +1721,170 @@ textarea[aria-invalid="true"] {
 .stat-card.stat-danger .stat-value {
   color: var(--danger);
 }
+.stat-card.stat-clickable {
+  appearance: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.14s,
+    box-shadow 0.14s,
+    transform 0.08s;
+}
+.stat-card.stat-clickable:hover {
+  border-color: var(--gold-d);
+  transform: translateY(-1px);
+}
+.stat-card.stat-clickable:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.stat-card.stat-clickable.active {
+  border-color: var(--gold-d);
+  box-shadow:
+    0 0 0 2px var(--ring),
+    var(--shadow-sm);
+}
+
+/* Hóa đơn: bộ lọc 2 tầng — nghiệp vụ chính + thời gian/pháp nhân. */
+.inv-filters {
+  margin: 4px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.inv-filter-row.toolbar {
+  margin: 0;
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+}
+.inv-filter-main {
+  border-bottom: 1px solid var(--border);
+}
+.inv-filter-main .grow {
+  min-width: 260px;
+}
+.inv-filter-extra {
+  background: var(--surface-2);
+}
+.inv-date-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.inv-date-filter input {
+  width: 138px;
+  padding: 7px 8px;
+}
+.inv-filter-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gold-d);
+  color: var(--gold-ink);
+  font-size: 11px;
+  font-weight: 800;
+}
+.inv-quick-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.inv-quick-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 2px;
+}
+.inv-quick-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.inv-quick-filters button:hover {
+  border-color: var(--gold-d);
+  background: var(--surface-hover);
+}
+.inv-quick-filters button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.inv-quick-filters button.active {
+  border-color: var(--gold-d);
+  background: var(--primary-soft);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.inv-quick-filters button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.inv-quick-filters button.warning {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+.inv-quick-filters button.warning.active {
+  background: var(--warn-bg);
+  border-color: var(--warn);
+}
+.inv-quick-filters button.danger.active {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+.inv-quick-filters button b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1180px) {
+  .inv-filter-row.toolbar {
+    flex-wrap: wrap;
+  }
+  .inv-filter-main .grow {
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 760px) {
+  .inv-filter-row > select,
+  .inv-date-filter {
+    flex: 1 1 145px;
+  }
+  .inv-date-filter input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+  .inv-filter-extra .spacer {
+    display: none;
+  }
+}
 
 /* Ô bảng theo TRẠNG THÁI — theme-aware (thay #ffdede/#ffe0ee/#ffd6d6/#b91c1c/#0a7d28 inline) */
 .cell-need {

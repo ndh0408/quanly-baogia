@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
 import { fmtMoney, fmtDate, toInputDate, shortTitle, codeLabel, dash, Stat } from "../lib/format";
+import { smartTextMatch } from "../lib/filterText";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
 // (QuoteSheet): kế toán NHẬP ở đây → trang Dự án THAM CHIẾU (read-only). Mỗi sheet đã chốt = 1 dòng.
@@ -36,6 +37,9 @@ const FIELD_LABEL: Record<string, string> = {
 // Field kế toán lưu qua saveField + field kiểu NGÀY (chuẩn hoá về yyyy-mm-dd như input khi so sánh).
 const SAVE_FIELDS = ["invoiceDesc", "poNumber", "invoiceCompany", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "invoiceYear", "invoiceNote"] as const;
 const DATE_FIELDS = new Set(["invoiceDate", "orderClosedAt", "paidAt", "docSentAt", "docReturnedAt"]);
+type StatusFilter = "" | "complete" | "incomplete";
+type CollectionFilter = "" | "paid" | "unpaid" | "dueSoon" | "overdue";
+type MissingFilter = "" | "any" | "invoiceDesc" | "poNumber" | "invoiceNo" | "invoiceDate" | "paymentMethod" | "orderClosedAt" | "invoiceLink" | "paidAt" | "docSentAt" | "docReturnedAt" | "signedAt" | "invoiceYear" | "invoiceNote";
 
 type Row = {
   key: string; q: ProjectQuote; code: string; sheetId: number | null; amount: number;
@@ -93,6 +97,19 @@ const debtDays = (r: Row): number | null => {
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
 };
 
+const hasValue = (v: unknown) => v != null && String(v).trim() !== "";
+const rowLimit = (r: Row) => r.q.customerDebtDays ?? DEBT_DEFAULT;
+const isOverdue = (r: Row) => { const days = debtDays(r); return days != null && days > rowLimit(r); };
+const isDueSoon = (r: Row) => {
+  const days = debtDays(r);
+  const limit = rowLimit(r);
+  return days != null && days <= limit && days >= Math.max(0, limit - 7);
+};
+const missingFields = (r: Row): MissingFilter[] => [
+  "invoiceDesc", "poNumber", "invoiceNo", "invoiceDate", "paymentMethod", "orderClosedAt",
+  "invoiceLink", "paidAt", "docSentAt", "docReturnedAt", "signedAt", "invoiceYear", "invoiceNote",
+].filter((field) => !hasValue(r[field as keyof Row])) as MissingFilter[];
+
 export function InvoicesPage({ me }: { me: Me }) {
   const canEdit = me.permissions.includes("invoice:edit");
   const canPay = me.permissions.includes("invoice:pay");
@@ -101,6 +118,11 @@ export function InvoicesPage({ me }: { me: Me }) {
   const [year, setYear] = useState("");
   const [month, setMonth] = useState("");   // lọc theo THÁNG của Ngày HĐơn
   const [cty, setCty] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("");
+  const [collection, setCollection] = useState<CollectionFilter>("");
+  const [missing, setMissing] = useState<MissingFilter>("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   // Hạn công nợ đặt RIÊNG TỪNG CÔNG TY ở trang Mã khách hàng (nút Sửa) — khách chưa đặt
   // thì dùng mặc định cố định 30 ngày. (2026-07-16: bỏ ô chỉnh "mặc định" trên toolbar theo
   // yêu cầu — thừa khi đã có hạn riêng từng khách.)
@@ -125,14 +147,51 @@ export function InvoicesPage({ me }: { me: Me }) {
   const load = () => { qc.invalidateQueries({ queryKey: ["quoteProjects"] }); };
 
   const years = useMemo(() => [...new Set(rows.map((r) => r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : null)).filter(Boolean))].sort() as number[], [rows]);
-  const norm = (s: unknown) => (s == null ? "" : String(s)).toLowerCase();
-  const shown = rows.filter((r) => {
+  // Lọc NGỮ CẢNH trước (tìm kiếm/pháp nhân/thời gian). Số lượng trên nút lọc nhanh tính từ tập này,
+  // nên vẫn đúng khi người dùng đang xem riêng một công ty hoặc một khoảng ngày.
+  const contextRows = rows.filter((r) => {
+    const inputDate = toInputDate(r.invoiceDate);
+    const done = !!(r.invoiceNo && r.invoiceDate);
     if (year && String(r.invoiceYear || (r.invoiceDate ? new Date(r.invoiceDate).getFullYear() : "")) !== year) return false;
     if (month && String(r.invoiceDate ? new Date(r.invoiceDate).getMonth() + 1 : "") !== month) return false;
+    if (dateFrom && (!inputDate || inputDate < dateFrom)) return false;
+    if (dateTo && (!inputDate || inputDate > dateTo)) return false;
     if (cty && (r.invoiceCompany || defaultCty(r.q)) !== cty) return false;
-    if (q && ![r.q.customerName, r.q.customerCode, r.q.title, r.code, r.invoiceDesc, r.invoiceNo, r.poNumber, r.q.createdBy?.displayName].map(norm).join(" ").includes(norm(q))) return false;
+    if (!smartTextMatch(q, [
+      r.q.customerName, r.q.customerCode, r.q.title, r.code, r.invoiceDesc, r.invoiceNo, r.poNumber,
+      r.invoiceCompany || defaultCty(r.q), r.paymentMethod, r.invoiceNote, r.q.createdBy?.displayName,
+      r.signedByName, r.amount, fmtMoney(r.amount), r.invoiceDate, fmtDate(r.invoiceDate),
+      done ? "hoàn tất" : "chưa đủ", r.paidAt ? "đã thu đã thanh toán" : "chưa thu chưa thanh toán",
+      isOverdue(r) ? "quá hạn nợ quá hạn" : "", isDueSoon(r) ? "sắp đến hạn sap den han" : "",
+    ])) return false;
     return true;
   });
+  // Sau đó mới áp điều kiện NGHIỆP VỤ; các nhóm độc lập để có thể kết hợp, vd CTy=GN + Chưa thu + Chưa ký.
+  const shown = contextRows.filter((r) => {
+    const done = !!(r.invoiceNo && r.invoiceDate);
+    if (status === "complete" && !done) return false;
+    if (status === "incomplete" && done) return false;
+    if (collection === "paid" && !r.paidAt) return false;
+    if (collection === "unpaid" && r.paidAt) return false;
+    if (collection === "dueSoon" && !isDueSoon(r)) return false;
+    if (collection === "overdue" && !isOverdue(r)) return false;
+    if (missing === "any" && missingFields(r).length === 0) return false;
+    if (missing && missing !== "any" && !missingFields(r).includes(missing)) return false;
+    return true;
+  });
+  const quickCounts = {
+    incomplete: contextRows.filter((r) => !(r.invoiceNo && r.invoiceDate)).length,
+    unpaid: contextRows.filter((r) => !r.paidAt).length,
+    dueSoon: contextRows.filter(isDueSoon).length,
+    overdue: contextRows.filter(isOverdue).length,
+    missing: contextRows.filter((r) => missingFields(r).length > 0).length,
+    unsigned: contextRows.filter((r) => !r.signedAt).length,
+    paid: contextRows.filter((r) => !!r.paidAt).length,
+  };
+  const activeFilterCount = [q.trim(), cty, year, month, status, collection, missing, dateFrom, dateTo].filter(Boolean).length;
+  const clearFilters = () => {
+    setQ(""); setCty(""); setYear(""); setMonth(""); setStatus(""); setCollection(""); setMissing(""); setDateFrom(""); setDateTo("");
+  };
 
   // Sort client 3 cột chính (Ngày HĐơn / Số tiền / Công nợ) — pattern th.sortable + aria-sort như trang Mã khách hàng.
   const [sortKey, setSortKey] = useState<SortKey | "">("");
@@ -156,8 +215,7 @@ export function InvoicesPage({ me }: { me: Me }) {
   const sumAmount = shown.reduce((s, r) => s + r.amount, 0);
   const collected = shown.reduce((s, r) => s + (r.paidAt ? r.amount : 0), 0);
   // Hạn công nợ áp cho TỪNG DÒNG: ưu tiên hạn RIÊNG của khách (trang Mã khách hàng), chưa đặt → 30 ngày.
-  const rowLimit = (r: Row) => r.q.customerDebtDays ?? DEBT_DEFAULT;
-  const overdue = shown.filter((r) => { const d = debtDays(r); return d != null && d > rowLimit(r); });
+  const overdue = shown.filter(isOverdue);
   const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
@@ -177,7 +235,6 @@ export function InvoicesPage({ me }: { me: Me }) {
   const fieldLabel = (f: string, r: Row) => `${FIELD_LABEL[f] || f} — ${r.code}`;
   const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
   // Một quy tắc duy nhất cho toàn bảng: null, chuỗi rỗng hoặc chỉ có khoảng trắng đều là CHƯA ĐIỀN.
-  const hasValue = (v: unknown) => v != null && String(v).trim() !== "";
   const missCls = (v: unknown) => (hasValue(v) ? undefined : "cell-miss");
   const textCell = (r: Row, field: keyof Row, w = 110) =>
     editable(r, field as string) ? (
@@ -203,15 +260,47 @@ export function InvoicesPage({ me }: { me: Me }) {
       <h1>Hóa đơn</h1>
       <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Nhập ở đây — trang Quản lý dự án <b>tham chiếu</b> tự động. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
 
-      <div className="toolbar" style={{ margin: "4px 0 6px" }}>
-        <input className="grow" type="search" placeholder="Tìm: khách, mã sản xuất, số HĐ, PO, hạng mục…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
-        <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-        <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
-        <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
-          <option value="">Tháng: Tất cả</option>
-          {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>Tháng {i + 1}</option>)}
-        </select>
-        <button className="btn btn-sm btn-ghost" type="button" disabled={!q && !year && !month && !cty} onClick={() => { setQ(""); setYear(""); setMonth(""); setCty(""); }}>Xóa lọc</button>
+      <div className="inv-filters">
+        <div className="toolbar inv-filter-row inv-filter-main">
+          <input className="grow" type="search" placeholder="Tìm không dấu: khách, MSX, số HĐ, PO, tiền, ngày, ghi chú…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Tìm hóa đơn" />
+          <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Lọc tình trạng hóa đơn">
+            <option value="">Tình trạng: Tất cả</option><option value="complete">Hoàn tất</option><option value="incomplete">Chưa đủ</option>
+          </select>
+          <select value={collection} onChange={(e) => setCollection(e.target.value as CollectionFilter)} aria-label="Lọc thu tiền">
+            <option value="">Thu tiền: Tất cả</option><option value="paid">Đã thu</option><option value="unpaid">Chưa thu</option><option value="dueSoon">Sắp đến hạn (7 ngày)</option><option value="overdue">Nợ quá hạn</option>
+          </select>
+          <select value={missing} onChange={(e) => setMissing(e.target.value as MissingFilter)} aria-label="Lọc thông tin còn thiếu">
+            <option value="">Thiếu dữ liệu: Tất cả</option><option value="any">Có ô còn thiếu</option>
+            <option value="invoiceDesc">Thiếu Hạng mục</option><option value="poNumber">Thiếu PO/HĐ</option>
+            <option value="invoiceNo">Thiếu Số HĐ</option><option value="invoiceDate">Thiếu Ngày HĐ</option>
+            <option value="paymentMethod">Thiếu Hình thức TT</option><option value="orderClosedAt">Thiếu Ngày đóng ĐH</option>
+            <option value="invoiceLink">Thiếu Link HĐ</option><option value="paidAt">Thiếu Ngày thanh toán</option>
+            <option value="docSentAt">Thiếu CT gửi đi</option><option value="docReturnedAt">Thiếu CT trả về</option>
+            <option value="signedAt">Chưa ký chứng từ</option><option value="invoiceYear">Thiếu Năm</option><option value="invoiceNote">Thiếu Note</option>
+          </select>
+        </div>
+        <div className="toolbar inv-filter-row inv-filter-extra">
+          <select value={cty} onChange={(e) => setCty(e.target.value)} aria-label="Lọc theo công ty"><option value="">CTy: Tất cả</option>{COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+          <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Lọc theo năm"><option value="">Năm: Tất cả</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+          <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Lọc theo tháng (Ngày HĐơn)" title="Theo tháng của Ngày HĐơn">
+            <option value="">Tháng: Tất cả</option>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>Tháng {i + 1}</option>)}
+          </select>
+          <label className="inv-date-filter"><span>Từ ngày HĐ</span><input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} /></label>
+          <label className="inv-date-filter"><span>Đến ngày HĐ</span><input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} /></label>
+          <span className="spacer" />
+          <button className="btn btn-sm btn-ghost" type="button" disabled={!activeFilterCount} onClick={clearFilters}>Xóa tất cả{activeFilterCount ? <span className="inv-filter-count">{activeFilterCount}</span> : null}</button>
+        </div>
+      </div>
+      <div className="inv-quick-filters" aria-label="Bộ lọc nhanh hóa đơn">
+        <span className="inv-quick-label">Lọc nhanh:</span>
+        <button type="button" className={!status && !collection && !missing ? "active" : ""} onClick={() => { setStatus(""); setCollection(""); setMissing(""); }}>Tất cả <b>{contextRows.length}</b></button>
+        <button type="button" className={status === "incomplete" ? "active" : ""} onClick={() => setStatus((v) => v === "incomplete" ? "" : "incomplete")}>Chưa đủ HĐ <b>{quickCounts.incomplete}</b></button>
+        <button type="button" className={collection === "unpaid" ? "active" : ""} onClick={() => setCollection((v) => v === "unpaid" ? "" : "unpaid")}>Chưa thu <b>{quickCounts.unpaid}</b></button>
+        <button type="button" className={`warning${collection === "dueSoon" ? " active" : ""}`} onClick={() => setCollection((v) => v === "dueSoon" ? "" : "dueSoon")}>Sắp đến hạn <b>{quickCounts.dueSoon}</b></button>
+        <button type="button" className={`danger${collection === "overdue" ? " active" : ""}`} onClick={() => setCollection((v) => v === "overdue" ? "" : "overdue")}>⚠ Nợ quá hạn <b>{quickCounts.overdue}</b></button>
+        <button type="button" className={missing === "any" ? "active" : ""} onClick={() => setMissing((v) => v === "any" ? "" : "any")}>Thiếu dữ liệu <b>{quickCounts.missing}</b></button>
+        <button type="button" className={missing === "signedAt" ? "active" : ""} onClick={() => setMissing((v) => v === "signedAt" ? "" : "signedAt")}>Chưa ký <b>{quickCounts.unsigned}</b></button>
+        <button type="button" className={collection === "paid" ? "active" : ""} onClick={() => setCollection((v) => v === "paid" ? "" : "paid")}>Đã thu <b>{quickCounts.paid}</b></button>
       </div>
 
       {err && <div className="err">⚠ {err} <button className="btn btn-sm" onClick={load}>Thử lại</button></div>}
@@ -222,14 +311,14 @@ export function InvoicesPage({ me }: { me: Me }) {
         <>
           <div className="stat-row">
             <Stat label="Tổng số tiền (VAT)" value={fmtMoney(sumAmount)} />
-            <Stat label="Đã thu" value={fmtMoney(collected)} tone="ok" />
-            <Stat label="Chưa thu" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} />
-            <Stat label="Nợ quá hạn" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} />
+            <Stat label="Đã thu" value={fmtMoney(collected)} tone="ok" active={collection === "paid"} onClick={() => setCollection((v) => v === "paid" ? "" : "paid")} title="Bấm để lọc hóa đơn đã thu" />
+            <Stat label="Chưa thu" value={fmtMoney(sumAmount - collected)} tone={sumAmount - collected > 0 ? "danger" : undefined} active={collection === "unpaid"} onClick={() => setCollection((v) => v === "unpaid" ? "" : "unpaid")} title="Bấm để lọc hóa đơn chưa thu" />
+            <Stat label="Nợ quá hạn" value={overdue.length ? `${overdue.length} HĐ · ${fmtMoney(overdueAmount)}` : "0"} tone={overdue.length ? "danger" : "ok"} active={collection === "overdue"} onClick={() => setCollection((v) => v === "overdue" ? "" : "overdue")} title="Bấm để lọc nợ quá hạn" />
             <Stat label="Số hóa đơn" value={String(shown.length)} />
           </div>
 
           {shown.length === 0 ? (
-            <div className="empty">{rows.length ? "Không có hóa đơn khớp bộ lọc." : 'Chưa có dự án nào ở trạng thái "Đã chốt".'}</div>
+            <div className="empty">{rows.length ? <>Không có hóa đơn khớp bộ lọc.{activeFilterCount > 0 && <div style={{ marginTop: 10 }}><button className="btn btn-sm" onClick={clearFilters}>Xóa tất cả bộ lọc</button></div>}</> : 'Chưa có dự án nào ở trạng thái "Đã chốt".'}</div>
           ) : (
             <>
               <div className="tbl-scroll">
@@ -301,7 +390,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                   </tbody>
                 </table>
               </div>
-              <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn</span></div>
+              <div className="list-foot"><span className="muted">Hiển thị {sorted.length} / {rows.length} hóa đơn{activeFilterCount ? ` · ${activeFilterCount} bộ lọc đang dùng` : ""}</span></div>
             </>
           )}
         </>
