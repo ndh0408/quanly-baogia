@@ -371,6 +371,10 @@
   inset: 0;
   background: rgba(8, 12, 22, 0.55);
   display: grid;
+  /* PHẢI khai báo cột 100% (định nghĩa rõ): grid không cột + item width min(940px,100%) là
+     vòng lặp phần trăm → cột auto co theo NỘI DUNG, modal teo theo form (Danh bạ 262px 1 cột,
+     Nhân sự "rộng" chỉ vì khối Dự án dài). Có cột 100% → mọi modal đúng min(940px,100%). */
+  grid-template-columns: minmax(0, 100%);
   place-items: center;
   padding: 20px;
   z-index: 50;
