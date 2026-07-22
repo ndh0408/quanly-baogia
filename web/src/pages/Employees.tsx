@@ -253,6 +253,7 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
                     <input
                       ref={idx === 0 ? firstRef : undefined}
                       type={f.type === "date" ? "date" : "text"}
+                      placeholder={f.ph}
                       value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
                     />
                   )}

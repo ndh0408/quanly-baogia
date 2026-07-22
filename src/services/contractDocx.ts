@@ -108,11 +108,14 @@ export async function buildContractDocx(rec: ContractRecord): Promise<{ buffer: 
   const soHd = rec.laborContractNo?.trim() || `${String(rec.id).padStart(2, "0")}/${signDate.getFullYear()}`;
   const dots = "…………………...";
 
+  const birth = rec.birthYear?.trim() || "";
   const tokens: Record<string, string> = {
     SO_HD: soHd,
     NGAY_KY: ngayChu(signDate),
     TEN_HOA: rec.fullName.trim().toLocaleUpperCase("vi"),
-    NGAY_SINH: rec.birthYear?.trim() || dots,
+    // Hồ sơ hay chỉ nhập NĂM ("1993") → nhãn tự đổi "Ngày sinh"/"Năm sinh" cho khỏi ngang tai.
+    NS_LABEL: /^\d{4}$/.test(birth) ? "Năm sinh" : "Ngày sinh",
+    NGAY_SINH: birth || dots,
     CCCD: rec.idCard?.trim() || dots,
     DIA_CHI: rec.address?.trim() || dots,
     LIEN_HE: rec.phone?.trim() || dots,

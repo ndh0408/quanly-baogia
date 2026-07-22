@@ -2152,6 +2152,14 @@ textarea[aria-invalid="true"] {
 .inv-table td.cell-miss select {
   background: transparent;
 }
+/* Ô sửa-được (chế độ XEM — nhấp đúp mới mở input): con trỏ ô tính + viền gợi ý khi rê chuột */
+.inv-table td.cell-edit {
+  cursor: cell;
+}
+.inv-table td.cell-edit:hover {
+  outline: 1px dashed var(--gold-d);
+  outline-offset: -2px;
+}
 /* Chrome/Edge tự hiện dd/mm/yyyy trong input ngày rỗng. Ẩn chữ này khi chưa focus để ô
    thật sự trống như các cột khác; icon lịch vẫn còn và khi bấm vào thì gợi ý ngày hiện lại. */
 .inv-table input.inv-date-empty:not(:focus)::-webkit-datetime-edit {

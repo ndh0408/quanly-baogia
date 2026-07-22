@@ -568,6 +568,7 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
                         <input
                           ref={isFirst ? firstRef : undefined}
                           type={f.type === "date" ? "date" : isMoney ? "number" : "text"}
+                          placeholder={f.ph}
                           {...(isMoney ? { min: "0", step: "1000", inputMode: "numeric" as const } : {})}
                           value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
                         />

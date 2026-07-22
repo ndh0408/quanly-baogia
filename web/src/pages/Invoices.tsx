@@ -226,6 +226,7 @@ export function InvoicesPage({ me }: { me: Me }) {
     try {
       await api.updateSheetInvoice(row.sheetId, field, val);
       savedRef.current[k] = val ?? null;
+      patch(row.key, { [field]: val } as unknown as Partial<Row>);   // ô hiển thị (chế độ xem) thấy giá trị mới ngay
       toast("Đã lưu", "success");
       // Đồng bộ cache cho trang Quản lý dự án / Dashboard (tham chiếu cùng nguồn) thấy ngay giá trị mới.
       qc.invalidateQueries({ queryKey: ["quoteProjects"] });
@@ -236,29 +237,53 @@ export function InvoicesPage({ me }: { me: Me }) {
   const editable = (r: Row, field?: string) => (field === "paidAt" ? canPay : canEdit) && !!r.sheetId;
   // Một quy tắc duy nhất cho toàn bảng: null, chuỗi rỗng hoặc chỉ có khoảng trắng đều là CHƯA ĐIỀN.
   const missCls = (v: unknown) => (hasValue(v) ? undefined : "cell-miss");
-  const textCell = (r: Row, field: keyof Row, w = 110) =>
-    editable(r, field as string) ? (
-      <td className={missCls(r[field])}><input value={(r[field] as string) || ""} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
-        onChange={(e) => patch(r.key, { [field]: e.target.value } as Partial<Row>)} onBlur={(e) => saveField(r, field as string, e.target.value.trim() || null)} /></td>
-    ) : <td className={missCls(r[field])}>{(r[field] as string) || dash}</td>;
-  const dateCell = (r: Row, field: keyof Row) =>
-    editable(r, field as string) ? (
-      <td className={missCls(r[field])}><input className={!hasValue(r[field]) ? "inv-date-empty" : undefined} type="date" value={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
-        onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }} /></td>
-    ) : <td className={missCls(r[field])}>{(r[field] as string) ? fmtDate(r[field] as string) : dash}</td>;
-  const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") =>
-    editable(r, field as string) ? (
-      <td className={missCls((r[field] as string) || defVal)}><select value={(r[field] as string) || defVal} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
-        onChange={(e) => { patch(r.key, { [field]: e.target.value || null } as Partial<Row>); saveField(r, field as string, e.target.value || null); }}>
-        {!defVal && <option value="">—</option>}
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select></td>
-    ) : <td>{(r[field] as string) || defVal || dash}</td>;
+
+  // CHỐNG SỬA NHẦM (2026-07-20, yêu cầu chủ dự án): ô hiển thị dạng CHỮ như Excel — NHẤP ĐÚP mới mở
+  // ô nhập; Enter/blur = lưu, Esc = hủy (input uncontrolled nên hủy là về nguyên trạng). Click 1 lần
+  // trên ô sửa-được KHÔNG mở báo giá (row-click bỏ qua [data-edit]) để nhấp đúp không bị nhảy trang,
+  // và đè phím lung tung không còn ăn vào ô vì bình thường không có input nào đang mở.
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const ck = (r: Row, f: string) => `${r.key}:${f}`;
+  const editKeyDown = (e: { key: string; stopPropagation: () => void; target: EventTarget }) => {
+    if (e.key === "Enter") (e.target as HTMLElement).blur();
+    else if (e.key === "Escape") { e.stopPropagation(); setEditKey(null); }
+  };
+  const viewTd = (r: Row, field: string, content: React.ReactNode, extraCls = "") => (
+    <td className={["cell-edit", extraCls, missCls(r[field as keyof Row])].filter(Boolean).join(" ")} data-edit
+        title="Nhấp đúp để sửa" onDoubleClick={() => setEditKey(ck(r, field))}>{content}</td>
+  );
+
+  const textCell = (r: Row, field: keyof Row, w = 110) => {
+    const v = (r[field] as string) || "";
+    if (!editable(r, field as string)) return <td className={missCls(r[field])}>{v || dash}</td>;
+    if (editKey !== ck(r, field as string)) return viewTd(r, field as string, v || dash);
+    return <td className={missCls(r[field])}><input autoFocus defaultValue={v} style={{ width: w }} aria-label={fieldLabel(field as string, r)}
+      onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value.trim() || null); }} /></td>;
+  };
+  const dateCell = (r: Row, field: keyof Row) => {
+    const disp = hasValue(r[field]) ? fmtDate(r[field] as string) : dash;
+    if (!editable(r, field as string)) return <td className={missCls(r[field])}>{disp}</td>;
+    if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp);
+    return <td className={missCls(r[field])}><input autoFocus type="date" defaultValue={toInputDate(r[field] as string)} style={{ width: 140 }} aria-label={fieldLabel(field as string, r)}
+      onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }} /></td>;
+  };
+  const selectCell = (r: Row, field: keyof Row, options: string[], defVal = "") => {
+    const disp = (r[field] as string) || defVal;
+    if (!editable(r, field as string)) return <td>{disp || dash}</td>;
+    if (editKey !== ck(r, field as string)) return viewTd(r, field as string, disp || dash);
+    return <td className={missCls(disp)}><select autoFocus defaultValue={disp} style={{ width: 74 }} aria-label={fieldLabel(field as string, r)}
+      onKeyDown={editKeyDown}
+      onChange={(e) => { setEditKey(null); saveField(r, field as string, e.target.value || null); }}
+      onBlur={() => setEditKey(null)}>
+      {!defVal && <option value="">—</option>}
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select></td>;
+  };
 
   return (
     <div>
       <h1>Hóa đơn</h1>
-      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). Nhập ở đây — trang Quản lý dự án <b>tham chiếu</b> tự động. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
+      <p className="muted">Theo dõi hóa đơn theo <b>dự án đã chốt</b> (mỗi sheet 1 dòng). <b>Nhấp đúp</b> vào ô để sửa (Enter lưu · Esc hủy) — trang Quản lý dự án <b>tham chiếu</b> tự động. Ô <b>hồng</b> = chưa điền. Tình trạng HĐ tự <b>Hoàn tất</b> khi có Số HĐơn + Ngày HĐơn. Bấm dòng để mở báo giá.</p>
 
       <div className="inv-filters">
         <div className="toolbar inv-filter-row inv-filter-main">
@@ -345,7 +370,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                       const over = nDays != null && nDays > limit;      // quá hạn → ĐỎ (đi đòi nợ)
                       return (
                         <tr key={r.key} className="qrow" title="Bấm để mở báo giá" tabIndex={0}
-                            onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select")) return; location.hash = "#/quotes/" + r.q.id; }}
+                            onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select,[data-edit]")) return; location.hash = "#/quotes/" + r.q.id; }}
                             onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
                           <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
                           <td>{r.q.customerCode || dash}</td>
@@ -365,10 +390,10 @@ export function InvoicesPage({ me }: { me: Me }) {
                           {dateCell(r, "orderClosedAt")}
                           <td>{r.q.createdBy?.displayName || dash}</td>
                           {editable(r)
-                            ? <td className={["nowrap", missCls(r.invoiceLink)].filter(Boolean).join(" ")}>
-                                <input value={r.invoiceLink || ""} style={{ width: 120 }} aria-label={fieldLabel("invoiceLink", r)} onChange={(e) => patch(r.key, { invoiceLink: e.target.value })} onBlur={(e) => saveField(r, "invoiceLink", e.target.value.trim() || null)} />
-                                {r.invoiceLink && /^https?:\/\//i.test(r.invoiceLink) && <a href={r.invoiceLink} target="_blank" rel="noopener" title="Mở link HĐ" style={{ marginLeft: 4 }} onClick={(e) => e.stopPropagation()}>↗</a>}
-                              </td>
+                            ? (editKey === ck(r, "invoiceLink")
+                              ? <td className={missCls(r.invoiceLink)}><input autoFocus defaultValue={r.invoiceLink || ""} style={{ width: 150 }} aria-label={fieldLabel("invoiceLink", r)}
+                                  onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); saveField(r, "invoiceLink", e.target.value.trim() || null); }} /></td>
+                              : viewTd(r, "invoiceLink", r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>Xem HĐ ↗</a> : dash, "nowrap"))
                             : <td className={missCls(r.invoiceLink)}>{r.invoiceLink ? <a href={r.invoiceLink} target="_blank" rel="noopener">Xem HĐ</a> : dash}</td>}
                           {dateCell(r, "paidAt")}
                           {dateCell(r, "docSentAt")}
@@ -379,9 +404,10 @@ export function InvoicesPage({ me }: { me: Me }) {
                               : <span className="muted">Chưa ký</span>}
                           </td>
                           {editable(r)
-                            ? <td className={missCls(r.invoiceYear)}><input inputMode="numeric" value={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
-                                onChange={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); patch(r.key, { invoiceYear: v ? Number(v) : null }); }}
-                                onBlur={(e) => { const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
+                            ? (editKey === ck(r, "invoiceYear")
+                              ? <td className={missCls(r.invoiceYear)}><input autoFocus inputMode="numeric" defaultValue={r.invoiceYear ?? ""} style={{ width: 64 }} aria-label={fieldLabel("invoiceYear", r)}
+                                  onKeyDown={editKeyDown} onBlur={(e) => { setEditKey(null); const v = e.target.value.replace(/[^\d]/g, ""); saveField(r, "invoiceYear", v || null); }} /></td>
+                              : viewTd(r, "invoiceYear", r.invoiceYear ?? dash))
                             : <td className={missCls(r.invoiceYear)}>{r.invoiceYear ?? dash}</td>}
                           {textCell(r, "invoiceNote", 130)}
                         </tr>

@@ -9,7 +9,7 @@ export type FieldSource = "input" | "formula" | "ref-project" | "action";
 // AI được sửa-tại-chỗ ô này (khớp endpoint + quyền backend): owner=Account chủ dòng · accounting=Kế toán ·
 // admin=Admin · pay=đánh dấu thanh toán (Kế toán) · confirm=xác nhận đã ký (Admin). Không có = read-only ở bảng.
 export type FieldEdit = "owner" | "accounting" | "admin" | "pay" | "confirm";
-export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource; edit?: FieldEdit };
+export type Field = { key: string; label: string; type: FieldType; group: string; source: FieldSource; edit?: FieldEdit; ph?: string };
 
 export const GROUPS = ["Cá nhân", "Lương / Thuế", "Dự án", "Hợp đồng", "Thanh toán"] as const;
 
@@ -17,7 +17,9 @@ export const FIELDS: Field[] = [
   // Cá nhân (Stage 1: nhập tay — Stage 2 sẽ chuyển sang chọn từ Danh bạ nhân sự)
   { key: "fullName", label: "Họ & Tên", type: "text", group: "Cá nhân", source: "input" },
   { key: "taxCode", label: "Mã số thuế", type: "text", group: "Cá nhân", source: "input" },
-  { key: "birthYear", label: "Năm sinh", type: "text", group: "Cá nhân", source: "input" },
+  // 2026-07-20 "Năm sinh"→"Ngày sinh": hợp đồng dịch vụ cần ĐỦ dd/mm/yyyy; dữ liệu cũ chỉ có năm
+  // vẫn hợp lệ (text tự do) — hợp đồng tải ra sẽ tự in nhãn "Năm sinh" cho hồ sơ chỉ có năm.
+  { key: "birthYear", label: "Ngày sinh", type: "text", group: "Cá nhân", source: "input", ph: "VD: 16/08/1993 — nhập đủ ngày/tháng/năm để in hợp đồng" },
   { key: "idCard", label: "Căn cước", type: "text", group: "Cá nhân", source: "input" },
   { key: "idIssueDate", label: "Ngày cấp", type: "date", group: "Cá nhân", source: "input" },
   { key: "idIssuePlace", label: "Nơi cấp", type: "text", group: "Cá nhân", source: "input" },
