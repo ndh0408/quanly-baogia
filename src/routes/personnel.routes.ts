@@ -120,6 +120,16 @@ router.post("/:id/note", requirePermission(P.PERSONNEL_EDIT_ALL), validate({ par
 router.get("/:id/payment-proof", validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.getPaymentProof(req))));
 
+// TẢI HỢP ĐỒNG DỊCH VỤ (.docx) sinh từ mẫu công ty + dữ liệu hồ sơ — gác quyền XEM hồ sơ (service).
+// Phiếu chi chỉ kèm khi hồ sơ ĐÃ thanh toán có ngày (paidAt).
+router.get("/:id/contract", validate({ params: idParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { buffer, fileName } = await svc.downloadContract(req);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="contract-${(req.params as any).id}.docx"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.send(buffer);
+  }));
+
 // KẾ TOÁN (hoặc admin) đánh dấu ĐÃ / BỎ thanh toán — lưu NGÀY + người + ẢNH chứng từ (base64, tùy chọn).
 // Quyền RIÊNG personnel:pay (KHÔNG cần manage, KHÔNG owner-scope → kế toán đánh dấu mọi hồ sơ).
 const PaymentBody = z.object({

@@ -39,7 +39,9 @@ export const FIELDS: Field[] = [
   { key: "accountName", label: "Account", type: "text", group: "Dự án", source: "input" },
   { key: "company", label: "CTY", type: "text", group: "Dự án", source: "input" },
   // Hợp đồng
-  { key: "projectNameContract", label: "Tên hợp đồng", type: "text", group: "Hợp đồng", source: "input" },
+  // 2026-07-20 đổi nhãn "Tên hợp đồng" → "Nội dung hợp đồng": giá trị này đổ vào mục
+  // "Công việc phải làm" của Hợp đồng dịch vụ tải ra (.docx) — key DB giữ nguyên.
+  { key: "projectNameContract", label: "Nội dung hợp đồng", type: "text", group: "Hợp đồng", source: "input" },
   { key: "laborContractNo", label: "Số HĐ LĐ", type: "text", group: "Hợp đồng", source: "input" },
   { key: "laborContractDate", label: "Ngày HĐ LĐ", type: "date", group: "Hợp đồng", source: "input" },
   { key: "salesContractNo", label: "Số HĐ bán", type: "text", group: "Hợp đồng", source: "ref-project" },

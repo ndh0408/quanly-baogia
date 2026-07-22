@@ -9,6 +9,7 @@ import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
 import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./projectRef.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
+import { buildContractDocx } from "./contractDocx.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
@@ -187,6 +188,14 @@ export async function getPaymentProof(req: Request) {
   const rec = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, select: { paymentProof: true } });
   if (!rec?.paymentProof) throw httpError(404, "Chưa có ảnh chứng từ");
   return { paymentProof: rec.paymentProof };
+}
+
+// TẢI HỢP ĐỒNG DỊCH VỤ (.docx) từ mẫu công ty — gác theo quyền XEM hồ sơ (owner-scope như read).
+export async function downloadContract(req: Request) {
+  const rec = await loadAuthorized(req, "read");
+  const out = await buildContractDocx(rec);
+  await audit(req, "personnel.contract-download", { resource: "personnel", resourceId: rec.id });
+  return out;
 }
 
 // ── SỬA-TẠI-CHỖ 1 cột theo QUYỀN (ô trên bảng/thẻ). authz: route gác quyền; teamNote thêm owner-check. ──

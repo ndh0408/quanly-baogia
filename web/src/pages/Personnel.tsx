@@ -80,6 +80,25 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Xóa thất bại", "error"); }
   };
 
+  // Tải HỢP ĐỒNG DỊCH VỤ (.docx) sinh từ mẫu công ty + dữ liệu hồ sơ. Fetch (không mở tab)
+  // để hồ sơ thiếu dữ liệu còn hiện được thông báo lỗi rõ ràng từ server.
+  const downloadContract = async (r: Personnel) => {
+    try {
+      const res = await fetch(`/api/personnel/${r.id}/contract`, { credentials: "same-origin" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast((body as { error?: string } | null)?.error || "Không tải được hợp đồng", "error");
+        return;
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `HD DV - ${r.fullName || r.id}.docx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch { toast("Không tải được hợp đồng", "error"); }
+  };
+
   // ADMIN bấm cột "Xác nhận (C.Hồng)" → xác nhận đã ký / bỏ (lưu ngày hôm nay).
   const onToggleConfirm = async (r: Personnel) => {
     const signed = !!r.confirmedAt;
@@ -245,6 +264,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                 <strong>{STT_OF(idx)}. {r.fullName}</strong>
                 <span className="prs-card-actions">
                   <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
+                  <button className="btn btn-sm" title="Tải Hợp đồng dịch vụ (.docx)" onClick={() => downloadContract(r)}>Tải HĐ</button>
                   {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                 </span>
               </div>
@@ -300,6 +320,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
                     <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
+                    <button className="btn btn-sm" title="Tải Hợp đồng dịch vụ (.docx) — điền sẵn từ hồ sơ; phiếu chi chỉ kèm khi đã thanh toán" onClick={() => downloadContract(r)}>Tải HĐ</button>
                     {/* Xóa theo quyền DELETE (khớp thẻ mobile + backend) — không dùng quyền edit. */}
                     {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                   </td>
