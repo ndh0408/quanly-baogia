@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Employee } from "../lib/api";
 import { FIELDS, type Field } from "../lib/fields";
-import { dash, fmtDate } from "../lib/format";
+import { dash, fmtDate, fullDateToInput, inputToDdmm } from "../lib/format";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, toLocalInputDate, fieldErrorsFrom, useIsMobile } from "../lib/ui";
 
@@ -249,6 +249,16 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
                     <textarea
                       value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)}
                     />
+                  ) : f.key === "birthYear" ? (
+                    // NGÀY SINH: lịch chọn ngày (đủ dd/mm/yyyy). Dữ liệu cũ chỉ có năm → input trống + nhắc,
+                    // KHÔNG ghi đè nếu không chọn lại.
+                    <>
+                      <input type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
+                        onChange={(e) => set(f.key, inputToDdmm(e.target.value))} />
+                      {form[f.key] && !fullDateToInput(form[f.key]) && (
+                        <em className="unit">Đang lưu: “{form[f.key]}” (chỉ năm) — chọn ngày để có đủ ngày/tháng/năm.</em>
+                      )}
+                    </>
                   ) : (
                     <input
                       ref={idx === 0 ? firstRef : undefined}

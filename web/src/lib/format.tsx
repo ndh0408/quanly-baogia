@@ -21,6 +21,21 @@ export const toInputDate = (v?: string | null) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+/* Ngày sinh dạng text tự do ("16/08/1993" | "1995"): đủ ngày/tháng/năm → yyyy-mm-dd cho input
+   type=date; chỉ có năm / không parse được → "" (input trống nhưng KHÔNG ghi đè giá trị cũ). */
+export const fullDateToInput = (s?: string | null): string => {
+  const m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/.exec((s || "").trim());
+  if (!m) return "";
+  const d = +m[1], mo = +m[2];
+  if (d < 1 || d > 31 || mo < 1 || mo > 12) return "";
+  return `${m[3]}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+};
+/* yyyy-mm-dd (giá trị input date) → "dd/mm/yyyy" để lưu vào trường text. */
+export const inputToDdmm = (v: string): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+};
+
 /* Bỏ tiền tố "Bảng báo giá –" cho gọn tiêu đề khi hiện trong bảng. */
 export const shortTitle = (t: string) => {
   const s = String(t || "");

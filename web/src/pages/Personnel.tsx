@@ -5,7 +5,7 @@ import { INPUT_FIELDS, FIELD_BY_KEY, GROUPS, TABLE_COLS, SORTABLE, statusClass, 
 import { EMP_FIELDS } from "./Employees";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, fieldErrorsFrom, useEscClose } from "../lib/ui";
-import { fmtMoney as fmtMoneyLib, fmtDate as fmtDateLib, toInputDate as toInputDateLib } from "../lib/format";
+import { fmtMoney as fmtMoneyLib, fmtDate as fmtDateLib, toInputDate as toInputDateLib, fullDateToInput, inputToDdmm } from "../lib/format";
 
 // Wrapper quanh lib/format: bảng này cần Ô TRỐNG khi null (fmtMoney lib trả "0") + nhận unknown từ r[k].
 const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : fmtMoneyLib(Number(v)));
@@ -564,6 +564,16 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
                       <span>{f.label}{f.key === "fullName" && <b className="req"> *</b>}{f.type === "money" && <em className="unit"> (đ)</em>}</span>
                       {f.type === "textarea" ? (
                         <textarea value={form[f.key]} disabled={readOnly} aria-invalid={fErr ? true : undefined} onChange={(e) => set(f.key, e.target.value)} />
+                      ) : f.key === "birthYear" ? (
+                        // NGÀY SINH: lịch chọn ngày (đủ dd/mm/yyyy cho hợp đồng). Trường DB là text —
+                        // dữ liệu cũ chỉ có năm ("1995") giữ nguyên nếu không chọn lại (input trống + nhắc).
+                        <>
+                          <input type="date" value={fullDateToInput(form[f.key])} disabled={readOnly} aria-invalid={fErr ? true : undefined}
+                            onChange={(e) => set(f.key, inputToDdmm(e.target.value))} />
+                          {form[f.key] && !fullDateToInput(form[f.key]) && (
+                            <em className="unit">Đang lưu: “{form[f.key]}” (chỉ năm) — chọn ngày để có đủ ngày/tháng/năm in hợp đồng.</em>
+                          )}
+                        </>
                       ) : (
                         <input
                           ref={isFirst ? firstRef : undefined}
