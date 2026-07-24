@@ -13,6 +13,7 @@ import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, gr
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
+import { vsUpdate, vsSteer, vsClose, openVenuePicker } from "./venueSuggest.js?v=20260724a";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
@@ -1400,6 +1401,29 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   // Insert a "hàng con" (sub-item) right below row i — stays inside i's group.
   const addSubAfter = (i) => { pushUndo(); activeSheet.items.splice(i + 1, 0, blankSub()); redraw(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
 
+  // ===== Gợi ý kích thước theo rạp (venueSuggest): điền Hạng Mục + KT + ĐVT + SL từ danh mục =====
+  // SL tự tính = W×H (m²) khi ĐVT là m2 — user chỉ còn gõ đơn giá.
+  const fillFromCatalog = (it, en) => {
+    it.name = en.name + " — " + en.venue + (en.dim ? "\nKT: " + en.dim : "");
+    if (en.unit) it.unit = en.unit;
+    if (en.unit === "m2" && en.w > 0 && en.h > 0) it.quantity = qtyRound(en.w * en.h);
+    else if (en.qty > 0) it.quantity = en.qty;
+    if (en.note && !it.notes) it.notes = en.note;
+  };
+  const applyCatalogPick = (i, en) => {
+    const it = activeSheet.items[i]; if (!it) return;
+    pushUndo(); fillFromCatalog(it, en); window._editorDirty = true;
+    redraw(); focusCell(i, "unitPrice");   // kích thước xong → nhảy tới Đơn giá cho gõ tiếp
+  };
+  const insertCatalogRows = (list) => {
+    if (!list || !list.length) return;
+    pushUndo();
+    let at = insertIndex();
+    for (const en of list) { const it = blank(); fillFromCatalog(it, en); activeSheet.items.splice(at, 0, it); at++; }
+    window._editorDirty = true; redraw();
+    toast(`Đã chèn ${list.length} hạng mục kèm kích thước — điền nốt Đơn giá là xong`, "success");
+  };
+
   // ===== Excel formula UX: point-and-click refs, function autocomplete, formula bar =====
   // The <td> backing a (row, field) — including the computed STT / Thành Tiền columns.
   const tdOf = (row, field) => {
@@ -1750,8 +1774,12 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         activeSheet.items[i][f] = v;
         // A text cell can also hold a formula (=H3, ="…"): remember it for commit + suggest.
         const it0 = activeSheet.items[i];
-        if (v.trim().startsWith("=")) { it0.formulas = it0.formulas || {}; it0.formulas[f] = v.trim(); fxAutocomplete(e.target, i, f); }
+        if (v.trim().startsWith("=")) { it0.formulas = it0.formulas || {}; it0.formulas[f] = v.trim(); fxAutocomplete(e.target, i, f); vsClose(); }
         else { if (it0.formulas && it0.formulas[f]) { delete it0.formulas[f]; if (!Object.keys(it0.formulas).length) delete it0.formulas; } closeFxAuto(); }
+        // Ô Hạng Mục (hàng item/sub) → gợi ý danh mục kích thước theo rạp khi đang gõ chữ thường.
+        if (f === "name" && editable && !v.trim().startsWith("=") && (it0.kind === "item" || it0.kind === "sub")) {
+          vsUpdate(e.target, (en) => applyCatalogPick(i, en));
+        } else if (f === "name") vsClose();
       }
       grid._dirty = true;   // mark this cell dirty so blur commits one undo snapshot
       const it = activeSheet.items[i];
@@ -1793,6 +1821,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       commitPending();
       clearActiveRefs();   // left the formula cell → drop the ref glow
       setTimeout(closeFxAuto, 150);   // let a click on a suggestion land first
+      setTimeout(vsClose, 150);       // gợi ý rạp cũng vậy — chờ cú click chọn kịp "đáp đất"
     });
 
     // Mouse drag to select a range. Transient listeners are removed on mouseup → no leak.
@@ -1829,6 +1858,10 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       const ctrl = e.ctrlKey || e.metaKey;
       const atStart = inp.selectionStart === 0 && inp.selectionEnd === 0;
       const atEnd = inp.selectionStart === (inp.value || "").length && inp.selectionEnd === (inp.value || "").length;
+
+      // Gợi ý danh mục rạp đang mở → phím điều hướng vào dropdown trước (Enter chỉ bị "ăn"
+      // khi đã bấm ↑↓ chọn dòng — gõ tên tự do rồi Enter vẫn xuống hàng như cũ).
+      if (vsSteer(e)) return;
 
       // Function-name autocomplete: only Arrow + Tab steer it. Enter must NOT be hijacked —
       // it always commits the formula + moves down như cũ (just close the dropdown first).
@@ -2144,6 +2177,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <button type="button" class="btn btn-sm gf-add-section">+ Thêm nhóm (A,B…)</button>
         <button type="button" class="btn btn-sm gf-add-subsection" title="Nhóm con: có tổng riêng, KHÔNG cộng vào nhóm chính, vẫn vào Tổng cộng">+ Thêm nhóm con</button>
         <button type="button" class="btn btn-sm gf-add-info">+ Thêm dòng thông tin</button>
+        <button type="button" class="btn btn-sm gf-venue-pick" title="Chèn hạng mục + kích thước có sẵn của rạp (quầy vé, quầy bắp, cover màn hình, bục soát vé…)">📐 Chèn từ rạp</button>
         <label class="grid-foot-toggle"><input type="checkbox" class="gf-group-sub" ${activeSheet.groupSubtotal ? "checked" : ""} /> Hiện Thành Tiền nhóm <span class="muted">(Đơn giá × SL)</span></label>
         ${!opts.subtotalFn ? `<label class="grid-foot-toggle"><input type="checkbox" class="gf-show-images" ${activeSheet.showImages ? "checked" : ""} /> Hiện cột <strong>Hình ảnh</strong> <span class="muted">(chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span></label>` : ""}
         <span class="muted grid-foot-hint">(hoặc Enter ở hàng cuối · dán từ Excel để điền nhanh)</span>
@@ -2163,6 +2197,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     tfoot.querySelector(".gf-add-section")?.addEventListener("click", addSection);
     tfoot.querySelector(".gf-add-subsection")?.addEventListener("click", addSubSection);
     tfoot.querySelector(".gf-add-info")?.addEventListener("click", addInfo);
+    tfoot.querySelector(".gf-venue-pick")?.addEventListener("click", () => openVenuePicker(insertCatalogRows));
     tfoot.querySelector(".gf-group-sub")?.addEventListener("change", (e) => { activeSheet.groupSubtotal = e.target.checked; redraw(); });
     tfoot.querySelector(".gf-show-images")?.addEventListener("change", (e) => { activeSheet.showImages = e.target.checked; window._editorDirty = true; redraw(); });
   }
