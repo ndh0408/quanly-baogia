@@ -2379,3 +2379,166 @@ textarea[aria-invalid="true"] {
 .has-preview-banner {
   padding-top: 42px;
 }
+
+/* ===== Gợi ý kích thước theo rạp (venueCatalog) — dropdown dưới ô Hạng Mục + modal "Chèn từ rạp".
+   Kèm .fx-auto (dropdown tên hàm =SU→SUM) vốn CHƯA có style bên React nên hiện ra trần trụi. ===== */
+.fx-auto,
+.vs-auto {
+  position: fixed;
+  z-index: 9999;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+  overflow: auto;
+}
+.fx-auto {
+  padding: 4px;
+  max-height: 220px;
+  min-width: 140px;
+}
+.fx-auto.hidden {
+  display: none;
+}
+.fx-auto-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font:
+    600 13px "Consolas",
+    ui-monospace,
+    monospace;
+  color: var(--soft);
+}
+.fx-auto-item span {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+.fx-auto-item.active,
+.fx-auto-item:hover {
+  background: var(--row-hover);
+}
+.vs-auto {
+  max-height: 320px;
+  max-width: min(480px, 92vw);
+}
+.vs-item {
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.vs-item.active,
+.vs-item:hover {
+  background: var(--row-hover);
+}
+.vs-line1 {
+  font-weight: 600;
+  font-size: 13px;
+}
+.vs-venue {
+  color: var(--soft);
+  font-weight: 500;
+}
+.vs-line2 {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.vs-cat {
+  opacity: 0.75;
+}
+.vs-hint {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--card-2);
+  position: sticky;
+  bottom: 0;
+  border-top: 1px solid var(--line);
+}
+.vs-pick-search {
+  width: 100%;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--field-bg);
+  color: inherit;
+  font: inherit;
+}
+.vs-pick-body {
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.vs-pick-note {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.vs-empty {
+  padding: 16px;
+  text-align: center;
+}
+.vs-venue-row {
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.vs-venue-row:hover {
+  background: var(--row-hover);
+}
+.vs-venue-meta {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.vs-item-row {
+  display: flex;
+  gap: 9px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  align-items: flex-start;
+  cursor: pointer;
+}
+.vs-item-row:hover {
+  background: var(--row-hover);
+}
+.vs-item-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex: none;
+}
+.vs-pick-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--card-2);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.vs-pick-head .btn-link {
+  background: none;
+  border: none;
+  color: var(--gold-d);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+}
+.vs-pick-head .btn-link:hover {
+  text-decoration: underline;
+}

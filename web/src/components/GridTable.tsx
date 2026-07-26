@@ -4,6 +4,8 @@ import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow } from "../lib/gridShared";
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../lib/clipboard";
+import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
+import { VenuePicker } from "./VenuePicker";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -56,6 +58,10 @@ export function GridTable(props: GridTableProps) {
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
   const [, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
+  // Gợi ý kích thước theo rạp: dropdown dưới ô Hạng Mục + modal "Chèn từ rạp".
+  type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
+  const [sug, setSug] = useState<Sug | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const FIELDS = (["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
@@ -309,6 +315,45 @@ export function GridTable(props: GridTableProps) {
   const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); items.splice(i + 1, 0, it); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
   const removeRow = (i: number) => { pushUndo(); items.splice(i, 1); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
+  // ── gợi ý kích thước theo rạp (danh mục /data/venue-catalog.json) ──────────────
+  const closeSug = () => setSug(null);
+  // Gõ ≥2 ký tự vào ô Hạng Mục → tra danh mục (không dấu) và mở dropdown ngay dưới ô.
+  const nameSuggest = (i: number, el: HTMLTextAreaElement) => {
+    const q = (el.value || "").trim();
+    if (!editable || q.length < 2 || q.startsWith("=")) { closeSug(); return; }
+    loadCatalog().then((cat) => {
+      if (document.activeElement !== el) return;                   // đã rời ô trong lúc chờ tải
+      const cur = (el.value || "").trim();
+      if (cur.length < 2) { closeSug(); return; }
+      const found = searchEntries(cat, cur, 8);
+      if (!found.length) { closeSug(); return; }
+      const r = el.getBoundingClientRect();
+      setSug({ i, el, items: found, idx: -1, rect: { left: r.left, top: r.bottom + 2, width: r.width } });
+    }).catch(() => closeSug());   // chưa có file danh mục → im lặng, lưới chạy như thường
+  };
+  // Chọn 1 gợi ý → điền tên + KT + ĐVT + SL(m²) rồi nhảy tới ô Đơn giá.
+  const applySug = (s: Sug, k: number) => {
+    const en = s.items[k]; if (!en) return;
+    pushUndo();
+    fillItemFromEntry(items[s.i] as Record<string, unknown>, en);
+    // Ô Hạng Mục đang focus nên effect đồng-bộ-ô sẽ BỎ QUA nó → tự set giá trị hiển thị ngay.
+    s.el.value = (items[s.i].name as string) || ""; autoGrow(s.el);
+    closeSug(); onChange(); focusCell(s.i, "unitPrice");
+  };
+  // Chèn hàng loạt từ modal "Chèn từ rạp" — mỗi hạng mục 1 dòng, đã điền sẵn kích thước.
+  const insertCatalogRows = (list: VenueEntry[]) => {
+    if (!list.length) return;
+    pushUndo();
+    let at = insertIndex();
+    for (const en of list) {
+      const it = M.blankItem(usesDays) as ItemK; it._k = nextK();
+      fillItemFromEntry(it as unknown as Record<string, unknown>, en);
+      items.splice(at, 0, it); at++;
+    }
+    onChange();
+    toast(`Đã chèn ${list.length} hạng mục kèm kích thước — điền nốt Đơn giá là xong`, "success");
+  };
+
   // ── undo/redo + dán Excel khối ─────────────────────────────────────────────────
   const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); };
   const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
@@ -414,6 +459,15 @@ export function GridTable(props: GridTableProps) {
     const i = parseInt(tr.getAttribute("data-row") || "0", 10);
     const ci = FIELDS.indexOf(f);
     const isMultiline = MULTILINE.has(f);
+    // Dropdown gợi ý rạp đang mở → ↑↓ chọn, Tab/Enter điền, Esc đóng. Enter CHỈ bị "ăn" khi đã
+    // bấm ↑↓ chọn dòng — gõ tên tự do rồi Enter vẫn xuống hàng như cũ.
+    if (sug && f === "name" && sug.i === i) {
+      if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); setSug({ ...sug, idx: (sug.idx + 1) % sug.items.length }); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); setSug({ ...sug, idx: (sug.idx - 1 + sug.items.length) % sug.items.length }); return; }
+      if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); applySug(sug, sug.idx < 0 ? 0 : sug.idx); return; }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeSug(); return; }
+      if (e.key === "Enter") { if (sug.idx >= 0) { e.preventDefault(); e.stopPropagation(); applySug(sug, sug.idx); return; } closeSug(); }
+    }
     if (autoRef.current) {
       if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveAuto(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveAuto(-1); return; }
@@ -488,6 +542,7 @@ export function GridTable(props: GridTableProps) {
       if (el.value !== want) el.value = want;
     }
     clearActiveRefs(); setTimeout(closeAuto, 150);
+    setTimeout(closeSug, 150);   // chờ cú click chọn gợi ý kịp "đáp đất" rồi mới đóng
   };
 
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
@@ -835,7 +890,7 @@ export function GridTable(props: GridTableProps) {
               return (
                 <tr key={it._k ?? i} data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                   <td className="col-stt" rowSpan={span}>{numberSubs ? "" : sttNo}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChange(); }} /></td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChange(); nameSuggest(i, el); }} /></td>
                   {dataCells(i)}
                 </tr>
               );
@@ -857,6 +912,21 @@ export function GridTable(props: GridTableProps) {
           <button className="btn btn-sm" onClick={addSection}>+ Thêm nhóm</button>
           <button className="btn btn-sm" onClick={addSubSection}>+ Nhóm con</button>
           <button className="btn btn-sm" onClick={addInfo}>+ Dòng thông tin</button>
+          <button className="btn btn-sm gf-venue-pick" title="Chèn hạng mục + kích thước có sẵn của rạp (quầy vé, quầy bắp, cover màn hình, bục soát vé…)" onClick={() => setPickerOpen(true)}>📐 Chèn từ rạp</button>
+        </div>
+      )}
+      {pickerOpen && <VenuePicker onInsert={insertCatalogRows} onClose={() => setPickerOpen(false)} />}
+      {sug && (
+        <div className="vs-auto" style={{ left: sug.rect.left, top: sug.rect.top, minWidth: Math.max(280, sug.rect.width) }}>
+          {sug.items.map((e, k) => (
+            // mousedown (không phải click) để thắng blur của ô đang gõ — như dropdown hàm ƒ
+            <div className={`vs-item${k === sug.idx ? " active" : ""}`} key={k}
+              onMouseDown={(ev) => { ev.preventDefault(); applySug(sug, k); }}>
+              <div className="vs-line1">{e.name} <span className="vs-venue">· {e.venue}</span></div>
+              <div className="vs-line2">{dimLabel(e)}{e.cat && <span className="vs-cat"> — {e.cat}</span>}</div>
+            </div>
+          ))}
+          <div className="vs-hint">↑↓ chọn · Tab điền · Esc đóng — hoặc bấm chuột</div>
         </div>
       )}
       {editable && onGroupSubtotal && (
