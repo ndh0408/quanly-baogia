@@ -315,7 +315,7 @@ export function GridTable(props: GridTableProps) {
   const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); items.splice(i + 1, 0, it); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
   const removeRow = (i: number) => { pushUndo(); items.splice(i, 1); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
-  // ── gợi ý kích thước theo rạp (danh mục /data/venue-catalog.json) ──────────────
+  // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
   // Gõ ≥2 ký tự vào ô Hạng Mục → tra danh mục (không dấu) và mở dropdown ngay dưới ô.
   const nameSuggest = (i: number, el: HTMLTextAreaElement) => {

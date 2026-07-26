@@ -63,6 +63,7 @@ class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean 
 import { PersonnelPage } from "../pages/Personnel";
 import { EmployeesPage } from "../pages/Employees";
 import { CustomersPage } from "../pages/Customers";
+import { VenuesPage } from "../pages/Venues";
 import { UsersPage } from "../pages/Users";
 import { AuditPage } from "../pages/Audit";
 import { PermissionsPage } from "../pages/Permissions";
@@ -91,6 +92,7 @@ const ICON: Record<string, ReactNode> = {
   list: <svg {...S}><line x1="8" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="8" y1="18" x2="20" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>,
   new: <svg {...S}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><line x1="12" y1="12" x2="12" y2="18" /><line x1="9" y1="15" x2="15" y2="15" /></svg>,
   customers: <svg {...S}><circle cx="12" cy="8" r="3.2" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>,
+  venues: <svg {...S}><path d="M3 20V8l9-4 9 4v12" /><path d="M3 20h18" /><rect x="8" y="12" width="8" height="8" /><line x1="8" y1="16" x2="16" y2="16" /></svg>,
   notifications: <svg {...S}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>,
   projects: <svg {...S}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>,
   invoices: <svg {...S}><path d="M6 3h9l4 4v14l-2.5-1.5L14 21l-2.5-1.5L9 21l-2.5-1.5L4 21V5a2 2 0 0 1 2-2z" /><line x1="8" y1="9" x2="15" y2="9" /><line x1="8" y1="13" x2="15" y2="13" /></svg>,
@@ -118,6 +120,7 @@ const NAV: Nav[] = [
   { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own", ported: true },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
   { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
+  { key: "venues", label: "Danh mục rạp", group: "Công việc", perm: "venue:read", ported: true },
   { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
   { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "employee:read:own", ported: true },
   { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
@@ -418,6 +421,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
               : key === "customers" ? <CustomersPage me={me} query={query} />
+              : key === "venues" ? <VenuesPage me={me} />
               : key === "users" ? <UsersPage me={me} onPreview={onPreview} />
               : key === "audit" ? <AuditPage />
               : key === "permissions" ? <PermissionsPage me={me} />

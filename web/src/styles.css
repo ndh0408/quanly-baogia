@@ -2542,3 +2542,18 @@ textarea[aria-invalid="true"] {
 .vs-pick-head .btn-link:hover {
   text-decoration: underline;
 }
+
+/* Ô đầu bảng bấm được như link (Danh mục rạp: tên rạp → mở hạng mục). */
+.btn-link-cell {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.btn-link-cell:hover strong {
+  text-decoration: underline;
+  color: var(--gold-d);
+}

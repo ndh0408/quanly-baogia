@@ -1,5 +1,5 @@
 // venueSuggest.js — GỢI Ý KÍCH THƯỚC THEO RẠP cho editor báo giá.
-// Dữ liệu tĩnh /data/venue-catalog.json (bóc từ Google Sheet kích thước quầy vé/quầy bắp,
+// Nguồn GET /api/venues/catalog — quản lý ở trang "Danh mục rạp" (quầy vé/quầy bắp,
 // cover màn hình, bục soát vé, bọc ghế…). Editor gọi 4 hook: vsUpdate (đang gõ ô Hạng Mục),
 // vsSteer (phím điều hướng khi dropdown mở), vsClose (rời ô), openVenuePicker (nút
 // "📐 Chèn từ rạp"). Mọi ghi vào items do editor làm qua callback — module này KHÔNG
@@ -15,7 +15,7 @@ const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 function loadCatalog() {
   if (CAT) return Promise.resolve(CAT);
   if (!catPromise) {
-    catPromise = fetch("/data/venue-catalog.json")
+    catPromise = fetch("/api/venues/catalog", { credentials: "same-origin" })
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then((j) => {
         (j.entries || []).forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""}`); });
@@ -227,5 +227,5 @@ export function openVenuePicker(onInsert) {
       onInsert(picked);
     });
     showVenues();
-  }).catch(() => toast("Chưa tải được danh mục kích thước (/data/venue-catalog.json)", "error"));
+  }).catch(() => toast("Chưa tải được danh mục kích thước — kiểm tra quyền “Xem danh mục rạp”", "error"));
 }

@@ -37,7 +37,7 @@ export function VenuePicker({ onInsert, onClose }: { onInsert: (list: VenueEntry
 
   useEffect(() => {
     let alive = true;
-    loadCatalog().then((c) => { if (alive) setCat(c); }).catch(() => { if (alive) setErr("Chưa tải được danh mục kích thước (/data/venue-catalog.json)"); });
+    loadCatalog().then((c) => { if (alive) setCat(c); }).catch(() => { if (alive) setErr("Chưa tải được danh mục kích thước — kiểm tra quyền “Xem danh mục rạp”"); });
     return () => { alive = false; };
   }, []);
 

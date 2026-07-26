@@ -86,6 +86,10 @@ export const PERMISSIONS = {
   EMPLOYEE_EDIT_ALL:      "employee:edit:all",
   EMPLOYEE_DELETE_OWN:    "employee:delete:own",
   EMPLOYEE_DELETE_ALL:    "employee:delete:all",
+  // Danh mục kích thước theo RẠP (gợi ý khi tạo báo giá). read = ai làm báo giá cũng cần;
+  // manage = sửa danh mục (thêm/sửa/xoá rạp + hạng mục) — mặc định Account trở lên.
+  VENUE_READ:             "venue:read",
+  VENUE_MANAGE:           "venue:manage",
 };
 
 const P = PERMISSIONS;
@@ -152,6 +156,8 @@ export const PERMISSION_LABELS = {
   [P.EMPLOYEE_EDIT_ALL]:    "Sửa cả danh bạ",
   [P.EMPLOYEE_DELETE_OWN]:  "Xóa danh bạ của mình",
   [P.EMPLOYEE_DELETE_ALL]:  "Xóa cả danh bạ",
+  [P.VENUE_READ]:   "Xem danh mục rạp",
+  [P.VENUE_MANAGE]: "Quản lý danh mục rạp",
 };
 
 // Mô tả 1 dòng "nghĩa là gì + phạm vi" cho GIÁM ĐỐC đọc hiểu khi cấp quyền (hiện dưới mỗi ô + tooltip).
@@ -212,6 +218,8 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.EMPLOYEE_EDIT_ALL]:    "Sửa BẤT KỲ mục danh bạ nào.",
   [P.EMPLOYEE_DELETE_OWN]:  "Xóa mục danh bạ MÌNH thêm.",
   [P.EMPLOYEE_DELETE_ALL]:  "Xóa BẤT KỲ mục danh bạ nào.",
+  [P.VENUE_READ]:   "Xem danh mục rạp + được GỢI Ý kích thước khi gõ hạng mục trong báo giá.",
+  [P.VENUE_MANAGE]: "Thêm/sửa/xóa rạp và hạng mục kích thước (trang Danh mục rạp).",
 };
 
 // Permission groups for nicer matrix rendering.
@@ -243,6 +251,7 @@ export const PERMISSION_GROUPS = [
     P.EMPLOYEE_READ_OWN, P.EMPLOYEE_READ_ALL, P.EMPLOYEE_CREATE,
     P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_OWN, P.EMPLOYEE_DELETE_ALL,
   ] },
+  { key: "venue", label: "Danh mục rạp (kích thước)", perms: [P.VENUE_READ, P.VENUE_MANAGE] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
     P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
   ] },
@@ -256,6 +265,8 @@ const EMPLOYEE = [
   // Danh bạ nhân sự: xem cả danh bạ + thêm + sửa/xóa của mình.
   P.EMPLOYEE_READ_ALL, P.EMPLOYEE_CREATE, P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_DELETE_OWN,
   P.PRODUCT_READ,
+  // Ai làm báo giá cũng cần ĐỌC danh mục rạp (gợi ý kích thước khi gõ hạng mục).
+  P.VENUE_READ,
 ];
 
 const MANAGER = [
@@ -265,6 +276,7 @@ const MANAGER = [
   P.AUDIT_VIEW,
   // Manager thấy + sửa/xóa MỌI khách hàng + giá vốn + quản sản phẩm (ẩn).
   P.CUSTOMER_READ_ALL, P.CUSTOMER_EDIT_ALL, P.CUSTOMER_DELETE_ALL, P.PRODUCT_READ_COST, P.PRODUCT_MANAGE,
+  P.VENUE_MANAGE, // Account tự cập nhật kích thước khi rạp thay khung — không phải nhờ admin
   // Nhân sự: Account TẠO hồ sơ + chỉ thấy/sửa/xóa của MÌNH (owner-scoped).
   P.PERSONNEL_CREATE, P.PERSONNEL_READ_OWN, P.PERSONNEL_EDIT_OWN, P.PERSONNEL_DELETE_OWN,
 ];

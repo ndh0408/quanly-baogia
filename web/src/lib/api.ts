@@ -44,6 +44,25 @@ export type Project = {
 export type Customer = { id: number; code: string; name: string; phone?: string | null; email?: string | null; debtDays?: number | null; [k: string]: unknown };
 export type CustomerListResult = { data: Customer[]; meta: { total: number; page: number; size: number; pageCount: number } };
 
+// Danh mục kích thước theo rạp (Venue = rạp, VenueItem = hạng mục đo sẵn).
+export type Venue = {
+  id: number; name: string; region: string;
+  cluster?: string | null; code?: string | null; note?: string | null;
+  active: boolean; itemCount?: number;
+};
+export type VenueItemRow = {
+  id: number; venueId: number; cat: string; name: string;
+  dim: string | null; w: number | null; h: number | null;
+  unit: string | null; qty: number | null; note: string | null;
+  sortOrder: number; active: boolean;
+};
+export type VenueInput = { name?: string; region?: string; cluster?: string | null; code?: string | null; note?: string | null; active?: boolean };
+export type VenueItemInput = {
+  cat?: string; name?: string; dim?: string | null;
+  w?: number | null; h?: number | null; unit?: string | null;
+  qty?: number | null; note?: string | null; active?: boolean;
+};
+
 // Người dùng (Quản lý nhân viên — increment 2). /api/users trả MẢNG (không phân trang).
 export type User = {
   id: number; username: string; displayName: string; role: string;
@@ -228,6 +247,17 @@ export const api = {
   createCustomer: (data: { name: string; code?: string; debtDays?: number | null }) => req<Customer>("/customers", { method: "POST", body: JSON.stringify(data) }),
   updateCustomer: (id: number, data: { name: string; debtDays?: number | null }) => req<Customer>(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCustomer: (id: number) => req<{ ok: boolean }>(`/customers/${id}`, { method: "DELETE" }),
+  // Danh mục kích thước theo rạp (nguồn gợi ý hạng mục khi tạo báo giá).
+  listVenues: (q = "") => req<{ data: Venue[] }>(`/venues?${new URLSearchParams({ q })}`),
+  getVenue: (id: number) => req<Venue & { items: VenueItemRow[] }>(`/venues/${id}`),
+  createVenue: (data: VenueInput) => req<Venue>("/venues", { method: "POST", body: JSON.stringify(data) }),
+  updateVenue: (id: number, data: VenueInput) => req<Venue>(`/venues/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteVenue: (id: number) => req<{ ok: boolean; removedItems: number }>(`/venues/${id}`, { method: "DELETE" }),
+  mergeVenue: (id: number, intoId: number) =>
+    req<{ ok: boolean; movedItems: number; into: { id: number; name: string } }>(`/venues/${id}/merge`, { method: "POST", body: JSON.stringify({ intoId }) }),
+  createVenueItem: (venueId: number, data: VenueItemInput) => req<VenueItemRow>(`/venues/${venueId}/items`, { method: "POST", body: JSON.stringify(data) }),
+  updateVenueItem: (itemId: number, data: VenueItemInput) => req<VenueItemRow>(`/venues/items/${itemId}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteVenueItem: (itemId: number) => req<{ ok: boolean }>(`/venues/items/${itemId}`, { method: "DELETE" }),
   // Quản lý nhân viên (increment 2) — gate user:manage (Shell nav đã lọc).
   listUsers: () => req<User[]>("/users"),
   inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; permissions?: string[] }) =>

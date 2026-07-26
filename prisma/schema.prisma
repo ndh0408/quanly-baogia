@@ -111,6 +111,7 @@ model User {
   personnelPaid     PersonnelRecord[] @relation("PersonnelPaidBy")
   personnelConfirmed PersonnelRecord[] @relation("PersonnelConfirmedBy")
   employees         Employee[]        @relation("EmployeeCreatedBy")
+  venues            Venue[]           @relation("VenueCreatedBy")
 
   @@index([deletedAt, active])
 }
@@ -351,6 +352,54 @@ model ProductPriceTier {
   price     Decimal @db.Decimal(18, 4)
 
   @@unique([productId, name])
+}
+
+// === Danh mục kích thước theo RẠP (dùng khi tạo báo giá) ===
+// Venue = 1 rạp/địa điểm; VenueItem = 1 hạng mục đo sẵn của rạp đó (quầy vé, quầy bắp, cover
+// màn hình, bục soát vé, bọc ghế…). Nhập 1 lần, mọi người gõ tên là gợi ý ra kích thước — thay
+// cho việc mở Google Sheet dò tay. KHÔNG xoá mềm: danh mục nhỏ, xoá là xoá hẳn (có audit log).
+model Venue {
+  id      Int         @id @default(autoincrement())
+  name    String // tên rạp như người dùng gọi: "CGV Aeon Tân Phú", "Lotte 7"
+  region  String      @default("") // HCM / Hà Nội / Đà Nẵng… ("" = chưa phân vùng)
+  cluster String? // cụm: CGV / Lotte / Cinestar / GLX…
+  code    String? // viết tắt nội bộ: HVP, VLM, SVH…
+  note    String?
+  active  Boolean     @default(true)
+  items   VenueItem[]
+
+  createdById Int?
+  createdBy   User?    @relation("VenueCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name, region]) // cùng tên + cùng vùng = một rạp (chặn nhập trùng)
+  @@index([active])
+  @@index([region])
+}
+
+model VenueItem {
+  id      Int    @id @default(autoincrement())
+  venueId Int
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  category  String // nhóm: "Quầy vé & quầy bắp", "Cover màn hình", "Bục soát vé"…
+  name      String // "Quầy bắp 2", "Cover màn hình"…
+  dim       String? // kích thước NGUYÊN VĂN như sổ tay: "(2.675W x 1H)m"
+  widthM    Decimal? @db.Decimal(12, 4) // quy ra mét để tự tính m² (null = không quy đổi được)
+  heightM   Decimal? @db.Decimal(12, 4)
+  unit      String? // ĐVT: m2 / bộ / bảng / ghế…
+  quantity  Decimal? @db.Decimal(18, 4) // SL mặc định (khi ĐVT không phải m2)
+  note      String?
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([venueId, sortOrder])
+  @@index([category])
+  @@index([active])
 }
 
 // === Quote ===

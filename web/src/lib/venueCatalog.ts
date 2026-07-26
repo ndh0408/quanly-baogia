@@ -1,7 +1,8 @@
-// venueCatalog.ts — DANH MỤC KÍCH THƯỚC THEO RẠP (bóc từ Google Sheet của công ty).
-// Dữ liệu tĩnh /data/venue-catalog.json: quầy vé/quầy bắp, cover màn hình, bục soát vé,
-// bọc ghế, standee/banner, wall/khu chờ… Dùng cho gợi ý khi gõ ô Hạng Mục + modal
-// "Chèn từ rạp" trong lưới báo giá. Tải ĐÚNG 1 LẦN mỗi phiên (cache module-level).
+// venueCatalog.ts — DANH MỤC KÍCH THƯỚC THEO RẠP (quản lý ở trang "Danh mục rạp").
+// Nguồn: GET /api/venues/catalog (có phân quyền venue:read) — quầy vé/quầy bắp, cover màn hình,
+// bục soát vé, bọc ghế, standee/banner, wall/khu chờ… Dùng cho gợi ý khi gõ ô Hạng Mục + modal
+// "Chèn từ rạp" trong lưới báo giá. Tải ĐÚNG 1 LẦN mỗi phiên (cache module-level; sửa danh mục
+// xong gọi invalidateCatalog() để lần gợi ý sau lấy bản mới).
 import * as M from "./quoteMath";
 
 export type VenueEntry = {
@@ -19,7 +20,7 @@ export type VenueEntry = {
 };
 export type VenueCatalog = {
   entries: VenueEntry[];
-  venues: { cluster: string | null; place: string | null; code: string | null; name: string }[];
+  venues: { id: number; name: string; region: string; cluster: string | null; code: string | null }[];
 };
 
 // So khớp KHÔNG DẤU: gõ "quay bap aeon" vẫn ra "Quầy bắp — CGV Aeon Tân Phú".
@@ -32,7 +33,7 @@ let catPromise: Promise<VenueCatalog> | null = null;
 export function loadCatalog(): Promise<VenueCatalog> {
   if (CAT) return Promise.resolve(CAT);
   if (!catPromise) {
-    catPromise = fetch("/data/venue-catalog.json")
+    catPromise = fetch("/api/venues/catalog", { credentials: "same-origin" })
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json() as Promise<VenueCatalog>; })
       .then((j) => {
         j.entries.forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""}`); });
@@ -43,6 +44,9 @@ export function loadCatalog(): Promise<VenueCatalog> {
   }
   return catPromise;
 }
+
+/** Sau khi sửa danh mục ở trang quản lý → bỏ cache để lần gợi ý kế tiếp lấy bản mới. */
+export function invalidateCatalog() { CAT = null; catPromise = null; }
 
 // Mọi token phải xuất hiện (AND). Xếp hạng: khớp tên RẠP > khớp tên hạng mục > khớp rải rác,
 // cộng điểm nếu khớp từ đầu chuỗi — để gõ "aeon tan phu" thì rạp đó nổi lên trước.

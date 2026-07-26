@@ -16,6 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.js",
+    "db:seed:venues": "node prisma/seed-venues.js",
     "db:studio": "prisma studio",
     "setup": "prisma migrate deploy && node prisma/seed.js",
     "test": "vitest",
