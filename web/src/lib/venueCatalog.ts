@@ -70,11 +70,13 @@ export function searchEntries(cat: VenueCatalog, q: string, limit = 8): VenueEnt
 }
 
 // Dòng mô tả phụ dưới tên: kích thước · ĐVT · diện tích (hoặc số lượng).
+// Diện tích hiển thị qua qtyRound (1 chữ số thập phân) — ĐÚNG con số sẽ được điền vào ô Số Lượng,
+// không phải giá trị thô 2 chữ số (trước đây gợi ý ghi "≈ 2,68 m²" mà điền 2,7 → nhìn như sai).
 export function dimLabel(e: VenueEntry): string {
   const bits: string[] = [];
   if (e.dim) bits.push(e.dim);
   if (e.unit) bits.push(e.unit);
-  if (e.unit === "m2" && e.w && e.h) bits.push(`≈ ${String(Math.round(e.w * e.h * 100) / 100).replace(".", ",")} m²`);
+  if (e.unit === "m2" && e.w && e.h) bits.push(`≈ ${String(M.qtyRound(e.w * e.h)).replace(".", ",")} m²`);
   else if (e.qty) bits.push(`SL ${e.qty}`);
   return bits.join(" · ");
 }

@@ -4,6 +4,7 @@ import { api, type Me, type Venue, type VenueItemRow } from "../lib/api";
 import { errMsg } from "../lib/format";
 import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
 import { invalidateCatalog, norm } from "../lib/venueCatalog";
+import { qtyRound } from "../lib/quoteMath";
 
 // Trang "Danh mục rạp" — nguồn dữ liệu cho GỢI Ý KÍCH THƯỚC khi tạo báo giá.
 // Hai tầng: (1) danh sách rạp → (2) chi tiết 1 rạp + bảng hạng mục (thêm/sửa/xoá/gộp).
@@ -14,7 +15,9 @@ const CATEGORIES = [
   "Standee & banner", "Wall / khu chờ", "Máy chiếu logo", "Bàn vuông/tròn",
 ];
 
-const m2 = (w: number | null, h: number | null) => (w && h ? Math.round(w * h * 100) / 100 : null);
+// Diện tích = qtyRound(W×H) — ĐÚNG con số app sẽ điền vào ô Số Lượng (quy tắc 1 chữ số thập
+// phân của lưới báo giá), để trang quản lý và gợi ý không hiện 2 số khác nhau.
+const m2 = (w: number | null, h: number | null) => (w && h ? qtyRound(w * h) : null);
 const numText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
 
 export function VenuesPage({ me }: { me: Me }) {

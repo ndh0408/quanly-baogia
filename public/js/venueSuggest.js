@@ -4,7 +4,7 @@
 // vsSteer (phím điều hướng khi dropdown mở), vsClose (rời ô), openVenuePicker (nút
 // "📐 Chèn từ rạp"). Mọi ghi vào items do editor làm qua callback — module này KHÔNG
 // import editor (giữ đồ thị phụ thuộc một chiều quanh app.js).
-import { escapeHtml } from "./util.js?v=20260630k";
+import { escapeHtml, qtyRound } from "./util.js?v=20260630k";
 import { toast, openModal } from "./ui.js?v=20260624b";
 
 let CAT = null;          // catalog sau khi fetch: {entries:[...], venues:[...]}
@@ -68,7 +68,8 @@ function dimLabel(e) {
   const bits = [];
   if (e.dim) bits.push(e.dim);
   if (e.unit) bits.push(e.unit);
-  if (e.unit === "m2" && e.w > 0 && e.h > 0) bits.push(`≈ ${(Math.round(e.w * e.h * 100) / 100).toString().replace(".", ",")} m²`);
+  // qtyRound = ĐÚNG con số sẽ điền vào ô Số Lượng (1 chữ số thập phân) — khỏi lệch với gợi ý.
+  if (e.unit === "m2" && e.w > 0 && e.h > 0) bits.push(`≈ ${String(qtyRound(e.w * e.h)).replace(".", ",")} m²`);
   else if (e.qty > 0) bits.push(`SL ${e.qty}`);
   return bits.join(" · ");
 }

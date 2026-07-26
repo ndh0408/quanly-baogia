@@ -13,7 +13,7 @@ import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, gr
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
-import { vsUpdate, vsSteer, vsClose, openVenuePicker } from "./venueSuggest.js?v=20260726a";
+import { vsUpdate, vsSteer, vsClose, openVenuePicker } from "./venueSuggest.js?v=20260726b";
 
 // Injected at boot (setEditorDeps); used only inside function bodies, so the destructure into
 // these lets keeps every moved body byte-for-byte unchanged (no _deps.* rewrite needed).
