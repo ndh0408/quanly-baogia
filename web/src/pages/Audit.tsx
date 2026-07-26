@@ -29,6 +29,9 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
   ["Nhân sự (hồ sơ) & danh bạ", [
     ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
     ["employee.create", "Thêm danh bạ nhân sự"], ["employee.update", "Sửa danh bạ nhân sự"], ["employee.delete", "Xóa danh bạ nhân sự"],
+    ["venue.create", "Thêm rạp (danh mục)"], ["venue.update", "Sửa rạp (danh mục)"], ["venue.delete", "Xóa rạp (danh mục)"],
+    ["venue.merge", "Gộp rạp"],
+    ["venue.item.create", "Thêm hạng mục kích thước"], ["venue.item.update", "Sửa hạng mục kích thước"], ["venue.item.delete", "Xóa hạng mục kích thước"],
   ]],
   ["Đăng nhập / bảo mật", [
     ["login.success", "Đăng nhập"], ["login.token", "Đăng nhập (ứng dụng)"], ["login.failed", "Đăng nhập thất bại"],
@@ -51,7 +54,7 @@ const ACTION_LABEL: Record<string, string> = Object.fromEntries(ACTION_GROUPS.fl
 const RESOURCE_LABEL: Record<string, string> = {
   quote: "Báo giá", customer: "Khách hàng", user: "Nhân viên", personnel: "Hồ sơ nhân sự",
   employee: "Danh bạ nhân sự", file: "Tệp", webhook: "Webhook", setting: "Cấu hình", system: "Hệ thống",
-  token: "Phiên đăng nhập", role: "Vai trò",
+  token: "Phiên đăng nhập", role: "Vai trò", venue: "Rạp (danh mục)", venueItem: "Hạng mục kích thước",
 };
 const actionLabel = (a: string) => ACTION_LABEL[a] ?? a;
 const resourceLabel = (r: string) => RESOURCE_LABEL[r] ?? r;
