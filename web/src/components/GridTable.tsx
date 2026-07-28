@@ -499,7 +499,21 @@ export function GridTable(props: GridTableProps) {
   };
 
   // ── undo/redo + dán Excel khối ─────────────────────────────────────────────────
-  const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); };
+  // Ô ĐANG focus bị effect đồng-bộ-ô BỎ QUA (để không cướp chữ người dùng đang gõ) → sau undo/redo
+  // nó vẫn hiện chữ cũ trong khi cả bảng đã lùi. Tự vẽ lại đúng một ô đó cho khớp model.
+  const syncActiveCell = () => {
+    const el = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+    const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
+    if (!f || !tr || !el) return;
+    const rec = items[parseInt(tr.getAttribute("data-row") || "-1", 10)] as Record<string, unknown> | undefined;
+    if (!rec) return;
+    const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
+    const want = fx ?? (NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? ""));
+    if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
+    el.dataset.escVal = el.value;      // mốc ESC phải theo giá trị SAU khi lùi
+    editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
+  };
+  const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
   const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
   const doRedo = () => { if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
