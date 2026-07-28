@@ -86,3 +86,8 @@ spa-smoke.png
 /e2e-modal-shot.mjs
 /modal-emp.png
 /modal-add.png
+
+/e2e-gridxl.mjs
+/e2e-probe-shift.mjs
+/e2e-probe-cells.mjs
+/gridxl.png
