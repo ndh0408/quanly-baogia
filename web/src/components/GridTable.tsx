@@ -156,8 +156,10 @@ export function GridTable(props: GridTableProps) {
     tb.querySelectorAll(".fill-handle").forEach((h) => h.remove());
     const sel = selRef.current; const rc = rectOf(sel);
     if (rc && sel) {
-      for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const el = cellEl(r, FIELDS[c]); el?.closest("td")?.classList.add("cell-selected"); }
-      cellEl(sel.anchor.row, sel.anchor.field)?.closest("td")?.classList.add("cell-anchor");
+      // tdOf (không phải cellEl): hàng NHÓM/NHÓM CON có ô tính (không có input) vẫn được tô →
+      // vùng chọn hiện liền mạch khi kéo qua nhóm, như Excel.
+      for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) tdOf(r, FIELDS[c])?.classList.add("cell-selected");
+      (cellEl(sel.anchor.row, sel.anchor.field)?.closest("td") || tdOf(sel.anchor.row, sel.anchor.field))?.classList.add("cell-anchor");
       if (editable) {
         const td = cellEl(rc.r1, FIELDS[rc.c1])?.closest("td");
         if (td) {
@@ -979,6 +981,14 @@ export function GridTable(props: GridTableProps) {
       <div className="tbl-scroll">
         <table className={`excel-table${clfTheme ? " clf-theme" : ""}`} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
           onMouseDownCapture={onPointMouseDown} onMouseDown={onSelDragStart}
+          onDoubleClick={(e) => {
+            // Nhấp đúp ô = vào chế độ SỬA với CON TRỎ tại chỗ bấm (Excel) — không bôi đen cả từ.
+            const el = (e.target as HTMLElement)?.closest?.("[data-f]") as HTMLInputElement | HTMLTextAreaElement | null;
+            if (!el || !FIELDS.includes(el.getAttribute("data-f") || "")) return;
+            editingRef.current = true;
+            const pos = el.selectionEnd ?? (el.value || "").length;
+            try { el.setSelectionRange(pos, pos); } catch { /* */ }
+          }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
           <thead>
             <tr>
