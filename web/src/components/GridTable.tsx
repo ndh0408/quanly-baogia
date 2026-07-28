@@ -768,7 +768,7 @@ export function GridTable(props: GridTableProps) {
     if (el) el.dataset.escVal = el.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
-  const onGridBlur = (e: { target: EventTarget | null }) => {
+  const onGridBlur = (e: { target: EventTarget | null; relatedTarget?: EventTarget | null }) => {
     if (pickingRef.current) return;   // đang point-pick → giữ focus, chưa commit
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (f && tr && el) {
@@ -785,6 +785,17 @@ export function GridTable(props: GridTableProps) {
     }
     clearActiveRefs(); setTimeout(closeAuto, 150);
     setTimeout(closeSug, 150);   // chờ cú click chọn gợi ý kịp "đáp đất" rồi mới đóng
+    // RỜI HẲN khỏi lưới (bấm ra ngoài bảng) → BỎ tô vùng chọn, ô về màu bình thường.
+    // Vẫn GIỮ khi qua thanh công thức fx (đang sửa ô đó) hoặc sang ô khác trong cùng lưới.
+    const to = e.relatedTarget as HTMLElement | null;
+    const stayInGrid = !!to && (!!to.closest?.(".excel-table") || !!to.closest?.(".fx-bar") || !!to.closest?.(".vs-auto") || !!to.closest?.(".fx-auto"));
+    if (!stayInGrid) {
+      setTimeout(() => {
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && (ae.closest?.(".excel-table") || ae.closest?.(".fx-bar"))) return;   // đã quay lại lưới
+        clearSel();
+      }, 60);
+    }
   };
 
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
