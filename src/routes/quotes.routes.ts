@@ -168,8 +168,14 @@ router.get(
 );
 
 // CREATE
+// Cổng quyền BẮT BUỘC: trước đây route này chỉ validate body, `createQuote` cũng chỉ hỏi "đã đăng
+// nhập chưa" → mọi tài khoản (kế toán/nhân sự/account HN) gõ thẳng #/rnew là tạo được báo giá thật.
+// requirePermission đọc quyền HIỆU LỰC (session.permissions ← resolveUserPermissions: admin full →
+// quyền riêng user → override vai trò từ bảng rolePermission), nên ai được cấp thêm quote:create ở
+// trang Phân quyền vẫn tạo bình thường. Đối xứng với duplicateQuote (quoteService.ts:841).
 router.post(
   "/",
+  requirePermission(P.QUOTE_CREATE),
   validate({ body: QuoteCreateSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await createQuote(req);

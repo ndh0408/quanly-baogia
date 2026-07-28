@@ -358,11 +358,19 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   const reditM = key.match(/^redit\/(\d+)$/);
   const quotesM = key.match(/^quotes\/(\d+)$/);
   const isNewEditor = key === "rnew";
-  const editId = reditM ? Number(reditM[1]) : (quotesM && !isAccountHn && !isInternalViewer ? Number(quotesM[1]) : undefined);
+  // #/redit/:id là ALIAS của #/quotes/:id → phải chịu CÙNG cổng quyền. Trước đây nhánh redit lấy id
+  // vô điều kiện, nên account_hn / tài khoản chi phí gõ alias là lách được view rút gọn, vào thẳng
+  // trình soạn đầy đủ. (Chưa rò dữ liệu vì server đã lược ở presentQuote — nhưng đó là may, không phải cổng.)
+  const anyQuoteM = reditM || quotesM;
+  const editId = anyQuoteM && !isAccountHn && !isInternalViewer ? Number(anyQuoteM[1]) : undefined;
   const isEditor = isNewEditor || editId !== undefined;
+  // #/rnew và #/redit/:id KHÔNG nằm trong mảng NAV → `denied` ở trên luôn false, nên trước đây gõ
+  // thẳng hash là vào ngay trình soạn mở khoá kèm nút Lưu. Gác riêng cho nhánh này: tạo mới cần
+  // quote:create, mở sửa cần quote:read:own. (hasOne đã tự chấp nhận bản :all.) Server vẫn là chốt cuối.
+  const editorDenied = isEditor && !has(isNewEditor ? "quote:create" : "quote:read:own");
   const isWizard = key === "new" && !isAccountHn && !isInternalViewer;   // Tạo báo giá mới → wizard React
-  const hnEditId = isAccountHn && quotesM ? Number(quotesM[1]) : undefined;   // account_hn mở BG → view điền HN React
-  const internalViewId = isInternalViewer && quotesM ? Number(quotesM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
+  const hnEditId = isAccountHn && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // account_hn mở BG → view điền HN React
+  const internalViewId = isInternalViewer && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
 
   return (
     <>
@@ -413,7 +421,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
           <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>
+            {editorDenied ? <AccessDenied /> : <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
           </main>
         ) : active?.ported ? (
           <main className="main" id="main" tabIndex={-1}>
