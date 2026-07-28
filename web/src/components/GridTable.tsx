@@ -204,7 +204,7 @@ export function GridTable(props: GridTableProps) {
   // không trông như đang gõ; .cell-lock giữ ô nhìn bình thường (khác kiểu xám của báo giá chỉ-xem).
   const lockCell = (el: HTMLInputElement | HTMLTextAreaElement | null) => {
     editingRef.current = false;
-    if (!el || !editable) return;
+    if (!el || !editable || !el.getAttribute?.("data-f")) return;
     el.readOnly = true; el.classList.add("cell-lock");
     try { el.setSelectionRange(0, 0); } catch { /* */ }
   };
@@ -326,7 +326,7 @@ export function GridTable(props: GridTableProps) {
     if (e.shiftKey && selRef.current) {   // mở rộng vùng, giữ nguyên ô neo
       e.preventDefault();
       selRef.current = { anchor: selRef.current.anchor, focus: { row: info.row, field: info.field } };
-      editingRef.current = false;
+      lockCell(document.activeElement as HTMLInputElement | HTMLTextAreaElement | null);   // thoát sửa + khóa
       paintSel();
       return;
     }
@@ -619,10 +619,13 @@ export function GridTable(props: GridTableProps) {
     const lastRow = items.length - 1, lastCol = FIELDS.length - 1;
     const selectRect = (r0: number, c0: number, r1: number, c1: number) => {
       selRef.current = { anchor: { row: r0, field: FIELDS[c0] }, focus: { row: r1, field: FIELDS[c1] } };
-      editingRef.current = false; paintSel();
+      lockCell(ae);   // chọn vùng = thoát chế độ sửa → khóa lại ô đang focus (đồng bộ readOnly)
+      paintSel();
     };
     if (e.key === "F2") { e.preventDefault(); e.stopPropagation(); if (editing) lockCell(ae); else enterEdit(ae, { caretEnd: true }); return; }
-    if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); e.stopPropagation(); selectRect(0, 0, lastRow, lastCol); return; }
+    // Ctrl/⌘+A: đang SỬA → để trình duyệt bôi đen CHỮ trong ô (như Excel/thanh công thức);
+    // đang chọn ô → chọn cả bảng.
+    if (ctrl && !editing && (e.key === "a" || e.key === "A")) { e.preventDefault(); e.stopPropagation(); selectRect(0, 0, lastRow, lastCol); return; }
     if (ctrl && (e.key === "r" || e.key === "R")) { e.preventDefault(); e.stopPropagation(); if (editable) fillRight(); return; }
     if (e.key === " " && (e.shiftKey || ctrl) && !editing) {   // Shift+Space: cả HÀNG · Ctrl+Space: cả CỘT
       e.preventDefault(); e.stopPropagation();
