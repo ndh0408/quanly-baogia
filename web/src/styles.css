@@ -2349,6 +2349,49 @@ textarea[aria-invalid="true"] {
   }
 }
 
+/* Bảng phím tắt kiểu Excel dưới lưới báo giá (thu gọn — bấm mới mở) */
+.grid-keys {
+  font-size: 12.5px;
+}
+.grid-keys > summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  padding: 5px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  list-style: none;
+  user-select: none;
+}
+.grid-keys > summary::-webkit-details-marker {
+  display: none;
+}
+.grid-keys > summary:hover {
+  color: var(--text);
+  border-color: var(--gold-d);
+}
+.grid-keys-body {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: 900px;
+  line-height: 1.7;
+}
+.grid-keys-body p {
+  margin: 0 0 4px;
+}
+.grid-keys-body kbd {
+  font: inherit;
+  font-size: 11.5px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
 /* Banner ĐANG XEM THỬ (sandbox) */
 .preview-banner {
   position: fixed;

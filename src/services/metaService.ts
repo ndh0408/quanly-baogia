@@ -10,9 +10,17 @@ function templateLayout(code: string) {
   try {
     const items = getConfig(code).items || {};
     const cols = items.columns || {};
-    return { hasDetail: !!cols.detail, hasDays: !!cols.days, numberSubsections: !!items.numberSubsections };
+    return {
+      // hasDetail = CÓ HIỆN cột Chi Tiết (mẫu có cột đó VÀ chưa ngừng dùng).
+      hasDetail: !!cols.detail && !items.hideDetail,
+      // reserveDetail = sơ đồ ĐỊA CHỈ Ô (A1) của editor VẪN chừa 1 cột cho Chi Tiết dù không hiện
+      // → công thức đã lưu của báo giá cũ (=F3*E3…) giữ nguyên ý nghĩa. ĐỪNG bỏ khi ẩn cột.
+      reserveDetail: !!cols.detail,
+      hasDays: !!cols.days,
+      numberSubsections: !!items.numberSubsections,
+    };
   } catch {
-    return { hasDetail: false, hasDays: false, numberSubsections: false };
+    return { hasDetail: false, reserveDetail: false, hasDays: false, numberSubsections: false };
   }
 }
 const withLayout = (t: QuoteTemplate) => ({ ...t, layout: templateLayout(t.code) });

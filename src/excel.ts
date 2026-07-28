@@ -379,6 +379,15 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
 
   const cols = itemsCfg.columns;
+  // Cột của file mẫu KHÔNG còn dùng (vd "Chi Tiết") → ẩn HẲN: không hiện trên Excel, không in ra
+  // PDF. KHÔNG xoá cột thật để mọi công thức/merge/ảnh trong mẫu giữ nguyên toạ độ. Kèm
+  // columnWidths để nới cột còn lại cho cân bảng.
+  for (const L of (itemsCfg.hiddenColumns || []) as string[]) {
+    try { const c = ws.getColumn(L); c.hidden = true; c.width = 0; } catch { /* mẫu không có cột đó */ }
+  }
+  for (const [L, w] of Object.entries((itemsCfg.columnWidths || {}) as Record<string, number>)) {
+    try { ws.getColumn(L).width = w; } catch { /* bỏ qua */ }
+  }
   // Đổi NỀN hàng tiêu đề cột (STT/Hạng Mục…) → f3c9a1 cho MỌI mẫu — chỉ đổi nền + chữ đen đậm,
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
   if (itemsCfg.headerRow) {
@@ -634,10 +643,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
           ensureWrap(ws.getCell(`${cols.name}${r}`));
         }
       }
-      if (cols.detail) {
+      // Cột Chi Tiết ngừng dùng (items.hideDetail) → KHÔNG ghi chữ, để trống hẳn (cột cũng bị ẩn).
+      if (cols.detail && !itemsCfg.hideDetail) {
         setCell(ws, `${cols.detail}${r}`, it.detail || "");
         ensureWrap(ws.getCell(`${cols.detail}${r}`));
-      }
+      } else if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
       // Số Lượng: LÀM TRÒN còn 1 số (ROUND) — vẫn GIỮ công thức người dùng (bọc ROUND) để khách thấy;
       // số khớp Thành Tiền (=ROUND(SL×ĐG)). Số chẵn → không lẻ ("0"); có lẻ → đúng 1 số ("0.0").

@@ -130,7 +130,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       }
     })();
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [quoteId, isNew]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <a href="#/list" className="btn btn-sm">Về danh sách</a></div>;
@@ -143,6 +143,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const tpl = templates.find((t) => t.id === activeSheet.templateId);
   const usesDays = !!tpl?.layout?.hasDays;
   const showDetail = !!tpl?.layout?.hasDetail;
+  // Mẫu từng có cột Chi Tiết (nay ẩn) → GIỮ chỗ trong sơ đồ địa chỉ ô để công thức cũ không lệch cột.
+  const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);
   const numberSubs = !!tpl?.layout?.numberSubsections;
 
   // editable (mirror server + renderEditor): admin sửa tất; manager/member sửa khi chưa chốt/mất.
@@ -315,7 +317,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
           clfTheme={!!tpl?.code?.startsWith("clofull")}
-          usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote
+          usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
           onChange={() => { mark(); redraw(); }} />

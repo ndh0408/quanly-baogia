@@ -47,8 +47,16 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       firstRow: 12,
       headerRow: 11,   // hàng tiêu đề cột (STT/Hạng Mục…) → đổi nền qua code
       lastRow:  21,
-      styleRow: 12,              // copy style hàng 12 (tên xanh, Chi Tiết nghiêng, viền) ra mọi hàng
-      italicColumns: ["D"],      // Chi Tiết in nghiêng
+      styleRow: 12,              // copy style hàng 12 (tên xanh, viền) ra mọi hàng
+      italicColumns: ["D"],      // (cột Chi Tiết — nay ẩn, giữ để khôi phục nhanh)
+      // 2026-07-28 — NGỪNG DÙNG cột "Chi Tiết": không hiện trên web, không ghi dữ liệu, cột D của
+      // file mẫu bị ẨN hẳn (không hiện/không in) + nới cột Hạng Mục bù chỗ.
+      // ⚠️ VẪN GIỮ `detail: "D"` trong `columns` — địa chỉ ô A1 của editor (A=STT, B=Hạng Mục,
+      // C=Chi Tiết, D=ĐVT…) suy ra từ danh sách cột này; bỏ hẳn sẽ DỊCH TRÁI mọi cột phía sau
+      // và làm CÔNG THỨC ĐÃ LƯU của các báo giá cũ trỏ sai ô. Muốn dùng lại: bỏ hideDetail.
+      hideDetail: true,
+      hiddenColumns: ["D"],
+      columnWidths: { C: 46 },
       columns: {
         stt:       "B",
         name:      "C",
@@ -179,6 +187,11 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       sectionFill: "FFFCEFDB", subFill: "FFEAF1FB",
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
+      // 2026-07-28: NGỪNG DÙNG cột "Chi Tiết" (xem ghi chú ở marico_decor) — ẩn cột D + nới
+      // Hạng Mục; GIỮ detail trong `columns` để địa chỉ ô A1 của công thức cũ không lệch.
+      hideDetail: true,
+      hiddenColumns: ["D"],
+      columnWidths: { C: 46 },
       columns: {
         stt:       "B",
         name:      "C",

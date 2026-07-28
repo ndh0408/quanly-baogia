@@ -111,7 +111,9 @@ export type ProjectQuote = {
 
 // Editor báo giá (increment 10).
 export type EditorCompany = { id: number; name: string; shortName?: string; address?: string };
-export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean } };
+// layout.hasDetail = CÓ hiện cột Chi Tiết · layout.reserveDetail = sơ đồ địa chỉ ô A1 vẫn chừa
+// chỗ cho cột đó (mẫu từng có) → công thức đã lưu không lệch cột khi cột bị ẩn đi.
+export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; reserveDetail?: boolean; numberSubsections?: boolean } };
 export type QuoteFull = {
   id: number; _new?: boolean; status: string; title?: string; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
   companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;

@@ -59,6 +59,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
   const t = tables[active] || null;
   const tpl = t ? tplOf(t) : null;
   const showDetail = !!tpl?.layout?.hasDetail, usesDays = !!tpl?.layout?.hasDays, numberSubs = !!tpl?.layout?.numberSubsections;
+  const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);   // giữ chỗ địa chỉ ô (xem QuoteEditor)
 
   const addTable = (cat: string) => {
     const it = M.blankItem(false) as ItemK; it._k = nextK();
@@ -109,7 +110,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                       {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
                     <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
-                      usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
+                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
                       payCol canPay={!!canPay && !!quoteId}
                       onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}

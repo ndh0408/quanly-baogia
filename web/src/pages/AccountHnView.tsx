@@ -107,6 +107,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
         if (!t.templateId) t.templateId = defTplId;
         const tpl = tplOf(t);
         const usesDays = !!tpl?.layout?.hasDays, showDetail = !!tpl?.layout?.hasDetail, numberSubs = !!tpl?.layout?.numberSubsections;
+        const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);   // giữ chỗ địa chỉ ô (xem QuoteEditor)
         return (
           <div key={hs.sheetId ?? si} className="extra-cat-group" style={{ marginTop: 10 }}>
             <div className="extra-cat-grouphead">
@@ -132,7 +133,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
                 <input className="extra-name" value={t.name || ""} placeholder="Tên bảng (tuỳ chọn)" aria-label="Tên bảng Hà Nội" disabled={!editable} style={{ minWidth: 180 }} onChange={(e) => { t.name = e.target.value; mark(); redraw(); }} />
                 {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} onChange={(e) => { t.templateId = Number(e.target.value); mark(); redraw(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
               </div>
-              <GridTable key={`hn-${si}-${active}-${t.templateId}-${t._k}`} items={t.items} usesDays={usesDays} showDetail={showDetail} numberSubs={numberSubs}
+              <GridTable key={`hn-${si}-${active}-${t.templateId}-${t._k}`} items={t.items} usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
                 editable={editable} internalNote={false} groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; mark(); redraw(); }} onChange={() => { mark(); redraw(); }} />
               <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>Tổng HN: <span style={{ color: "var(--danger)" }}>{M.fmtMoney(extraTableSum(t))}</span></div>
             </div>

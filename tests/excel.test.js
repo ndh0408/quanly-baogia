@@ -37,10 +37,27 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(isXlsx(await buildQuoteBuffer(plain))).toBe(true);
   });
 
-  it("handles the CLF template (has Chi Tiết column + discount row)", async () => {
+  it("handles the CLF template (discount row)", async () => {
     const q = makeQuote("clofull_decor");
     q.discount = 100_000;
     expect(isXlsx(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))))).toBe(true);
+  });
+
+  // 2026-07-28: BỎ cột "Chi Tiết" — file xuất ra KHÔNG được hiện cột đó nữa: cột nền (D) bị ẨN
+  // hẳn, KHÔNG có chữ detail của hạng mục, và cột Hạng Mục được nới rộng bù chỗ.
+  it.each(["marico_decor", "gn_banner", "clofull_decor"])("KHÔNG còn cột Chi Tiết trong Excel (%s)", async (code) => {
+    const q = makeQuote(code);
+    q.sheets[0].items = [
+      { kind: "item", name: "Hạng mục A", detail: "CHITIET_KHONG_DUOC_XUAT", unit: "cái", quantity: 1, unitPrice: 100_000, days: null, notes: "" },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.worksheets[0];
+    let leaked = false;
+    ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? "").includes("CHITIET_KHONG_DUOC_XUAT")) leaked = true; }));
+    expect(leaked).toBe(false);                       // chữ Chi Tiết không lọt ra file
+    expect(ws.getColumn("D").hidden).toBe(true);      // cột nền bị ẩn hẳn (không hiện/không in)
+    expect(ws.getColumn("C").width).toBeGreaterThan(40);   // Hạng Mục nới rộng bù chỗ
   });
 
   // GHI CHÚ NỘI BỘ (internalNote): hiện trong app cho mọi người NHƯNG tuyệt đối KHÔNG

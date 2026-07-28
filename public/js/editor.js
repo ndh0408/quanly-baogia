@@ -857,6 +857,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   };
   const tbody = document.querySelector(`${tableSel} tbody`);
   const showDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.hasDetail;
+  // Mẫu TỪNG có cột Chi Tiết (nay ẩn) → vẫn chừa chỗ trong sơ đồ địa chỉ ô A1 (xem ADDR_COLS).
+  const reserveDetail = !!state.templates.find(t => t.code === tplCode)?.layout?.reserveDetail;
   // Bản BANNER: nhóm con đánh số 1,2,3 (reset mỗi nhóm chính), mục bên dưới KHÔNG đánh số.
   const numberSubs = !!state.templates.find(t => t.code === tplCode)?.layout?.numberSubsections;
   // Fields that allow multi-line (Shift+Enter or paste with \n)
@@ -1075,7 +1077,9 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const ADDR_COLS = [
     { field: "_stt", ro: true },
     { field: "name" },
-    ...(showDetail ? [{ field: "detail" }] : []),
+    // Cột Chi Tiết dù ĐÃ ẨN (layout.hasDetail=false) vẫn giữ chỗ khi mẫu từng có cột đó
+    // (layout.reserveDetail) → công thức đã lưu của báo giá cũ không bị dịch cột.
+    ...(showDetail || reserveDetail ? [{ field: "detail" }] : []),
     { field: "unit" },
     { field: "quantity" },
     ...(usesDays ? [{ field: "days" }] : []),
