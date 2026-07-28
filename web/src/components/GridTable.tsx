@@ -59,6 +59,9 @@ export function GridTable(props: GridTableProps) {
   // khác, Ctrl+C copy cả ô); true = đang SỬA trong ô (con trỏ chữ — mũi tên chạy trong chữ, copy
   // đoạn bôi đen). Vào chế độ sửa: nhấp đúp · F2 · gõ 1 ký tự · bấm lại chính ô đang chọn.
   const editingRef = useRef(false);
+  // Enter/Tab khi ĐANG SỬA → giữ chế độ sửa sang ô kế (gõ liên tục không phải nhấp đúp lại).
+  const keepEditRef = useRef(false);
+  const lastLockHintRef = useRef(0);   // chống spam toast "ô đang khóa"
   // Thiết bị cảm ứng: giữ hành vi gõ trực tiếp (không ép chọn-cả-ô) để bàn phím ảo hoạt động bình thường.
   const coarsePointer = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Nhãn phím lệnh theo máy: macOS ⌘ · Windows/Linux Ctrl (mọi phím tắt nhận CẢ HAI).
@@ -187,16 +190,23 @@ export function GridTable(props: GridTableProps) {
     syncFxBar();
   };
   const clearSel = () => { selRef.current = null; paintSel(); };
-  // Vào chế độ SỬA trong ô (con trỏ chữ). caretEnd=true → nháy cuối chữ (F2/gõ tiếp), ngược lại giữ
-  // vị trí con trỏ do chuột đặt (nhấp đúp).
-  const enterEdit = (el: HTMLInputElement | HTMLTextAreaElement | null, caretEnd = false) => {
+  // MỞ KHÓA ô để SỬA (nhấp đúp · F2 · Enter/Tab khi đang sửa dây chuyền). selectAll=true → bôi đen
+  // sẵn để gõ là đè; caretEnd=true → nháy cuối chữ; mặc định giữ con trỏ tại chỗ bấm.
+  const enterEdit = (el: HTMLInputElement | HTMLTextAreaElement | null, opt: { caretEnd?: boolean; selectAll?: boolean } = {}) => {
     editingRef.current = true;
-    if (el && caretEnd) { const n = (el.value || "").length; try { el.setSelectionRange(n, n); } catch { /* */ } }
+    if (!el) return;
+    el.readOnly = false; el.classList.remove("cell-lock");
+    if (opt.selectAll) { try { el.select(); } catch { /* */ } }
+    else if (opt.caretEnd) { const n = (el.value || "").length; try { el.setSelectionRange(n, n); } catch { /* */ } }
   };
-  // Chọn ô (thoát chế độ sửa): bôi đen sẵn nội dung — gõ là ĐÈ, mũi tên đi ô khác (như Excel).
-  const selectWhole = (el: HTMLInputElement | HTMLTextAreaElement | null) => {
+  // CHỌN ô (KHÓA nội dung): ô chỉ được chọn — bấm nhầm / đè bàn phím KHÔNG sửa được gì.
+  // Muốn sửa phải nhấp đúp hoặc F2 (yêu cầu chủ dự án 2026-07-28). Con trỏ thu về đầu ô để
+  // không trông như đang gõ; .cell-lock giữ ô nhìn bình thường (khác kiểu xám của báo giá chỉ-xem).
+  const lockCell = (el: HTMLInputElement | HTMLTextAreaElement | null) => {
     editingRef.current = false;
-    if (el) { try { el.select(); } catch { /* */ } }
+    if (!el || !editable) return;
+    el.readOnly = true; el.classList.add("cell-lock");
+    try { el.setSelectionRange(0, 0); } catch { /* */ }
   };
   const moveTo = (row: number, field: string, extend: boolean) => {
     row = Math.max(0, Math.min(items.length - 1, row));
@@ -207,8 +217,17 @@ export function GridTable(props: GridTableProps) {
     if (extend && sel) selRef.current = { anchor: sel.anchor, focus: { row, field: f2 } };
     else selRef.current = { anchor: { row, field: f2 }, focus: { row, field: f2 } };
     navigatingRef.current = true;
-    editingRef.current = false;   // đi ô khác = thoát chế độ sửa (Excel)
-    const el = cellEl(row, f2); if (el) { el.focus(); if (!extend) { try { el.select(); } catch { /* */ } } }
+    const wasEditing = editingRef.current && keepEditRef.current;   // đang sửa dây chuyền (Enter/Tab)
+    editingRef.current = false;
+    const el = cellEl(row, f2);
+    if (el) {
+      el.focus();
+      // Enter/Tab lúc ĐANG SỬA → ô kế tiếp mở sẵn để gõ (nhập liệu nhanh như Excel);
+      // còn lại (mũi tên, bấm chuột) → ô ở trạng thái CHỌN + KHÓA.
+      if (wasEditing && !extend) enterEdit(el, { selectAll: true });
+      else lockCell(el);
+    }
+    keepEditRef.current = false;
     navigatingRef.current = false;
     paintSel();
   };
@@ -298,12 +317,11 @@ export function GridTable(props: GridTableProps) {
       if (inp && !inp.disabled && !coarsePointer && document.activeElement !== inp) {
         e.preventDefault();
         navigatingRef.current = true; inp.focus(); navigatingRef.current = false;
-        selectWhole(inp);
-      } else if (inp && document.activeElement === inp) enterEdit(inp);
+        lockCell(inp);
+      }
       return;
     }
     const el = cellEl(info.row, info.field);
-    const ae = document.activeElement as HTMLElement | null;
 
     if (e.shiftKey && selRef.current) {   // mở rộng vùng, giữ nguyên ô neo
       e.preventDefault();
@@ -312,13 +330,11 @@ export function GridTable(props: GridTableProps) {
       paintSel();
       return;
     }
-    const sameCell = !!el && ae === el;
-    if (sameCell) enterEdit(el);              // bấm lại ô đang chọn → sửa, con trỏ theo chuột
-    else if (!coarsePointer && el) {
-      // Ô khác: chặn trình duyệt đặt con trỏ chữ → focus + bôi đen cả ô (gõ là đè, như Excel).
+    if (!coarsePointer && el) {
+      // Bấm 1 lần (kể cả bấm lại ô đang chọn) = CHỌN + KHÓA ô. Muốn sửa: nhấp đúp hoặc F2.
       e.preventDefault();
-      navigatingRef.current = true; el.focus(); navigatingRef.current = false;
-      selectWhole(el);
+      if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
+      lockCell(el);
     } else editingRef.current = false;
     selRef.current = { anchor: { row: info.row, field: info.field }, focus: { row: info.row, field: info.field } };
     paintSel();
@@ -518,7 +534,15 @@ export function GridTable(props: GridTableProps) {
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = M.fmtNumCell((items[i0] as Record<string, unknown>)[f0] as number);
         return;
       }
-      return;   // 1 ô CHỮ → để trình duyệt chèn tại con trỏ (dán vào giữa đoạn text)
+      // 1 ô CHỮ: đang SỬA → để trình duyệt chèn tại con trỏ; đang CHỌN (ô khóa) → ghi đè cả ô.
+      if (!editingRef.current) {
+        e.preventDefault(); pushUndo();
+        const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
+        const fld = f0 || FIELDS[rc ? rc.c0 : 0];
+        pasteCellVal(i0, fld, val); recomputeAll(); onChange();
+        const el = cellEl(i0, fld); if (el) el.value = String((items[i0] as Record<string, unknown>)[fld] ?? "");
+      }
+      return;
     }
     e.preventDefault(); pushUndo();
 
@@ -597,7 +621,7 @@ export function GridTable(props: GridTableProps) {
       selRef.current = { anchor: { row: r0, field: FIELDS[c0] }, focus: { row: r1, field: FIELDS[c1] } };
       editingRef.current = false; paintSel();
     };
-    if (e.key === "F2") { e.preventDefault(); e.stopPropagation(); if (editing) selectWhole(ae); else enterEdit(ae, true); return; }
+    if (e.key === "F2") { e.preventDefault(); e.stopPropagation(); if (editing) lockCell(ae); else enterEdit(ae, { caretEnd: true }); return; }
     if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); e.stopPropagation(); selectRect(0, 0, lastRow, lastCol); return; }
     if (ctrl && (e.key === "r" || e.key === "R")) { e.preventDefault(); e.stopPropagation(); if (editable) fillRight(); return; }
     if (e.key === " " && (e.shiftKey || ctrl) && !editing) {   // Shift+Space: cả HÀNG · Ctrl+Space: cả CỘT
@@ -634,6 +658,7 @@ export function GridTable(props: GridTableProps) {
     if (e.key === "Enter" && !(isMultiline && e.shiftKey)) {
       e.preventDefault(); e.stopPropagation();
       commitCell(i, f, ae!.value); recomputeAll();
+      keepEditRef.current = editing;   // đang sửa → ô kế mở sẵn để gõ tiếp (nhập liệu dây chuyền)
       // Đang chọn VÙNG nhiều ô → Enter chạy VÒNG TRONG vùng (xuống, hết cột thì sang cột kế) — Excel.
       const rcSel = rectOf(selRef.current);
       if (rcSel && (rcSel.r0 !== rcSel.r1 || rcSel.c0 !== rcSel.c1)) {
@@ -668,7 +693,7 @@ export function GridTable(props: GridTableProps) {
       if (editing) {
         e.preventDefault();
         if (esc && esc.dataset && esc.dataset.escVal != null) esc.value = esc.dataset.escVal;
-        selectWhole(esc);
+        lockCell(esc);
         selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
         paintSel();
         return;
@@ -683,6 +708,7 @@ export function GridTable(props: GridTableProps) {
       return;
     }
     if (e.key === "Tab") {
+      keepEditRef.current = editing;   // Tab khi đang sửa → ô kế mở sẵn để gõ tiếp
       // Đang chọn VÙNG → Tab chạy vòng TRONG vùng (phải, hết hàng thì xuống hàng kế) — Excel.
       const rcSel = rectOf(selRef.current);
       if (rcSel && (rcSel.r0 !== rcSel.r1 || rcSel.c0 !== rcSel.c1)) {
@@ -721,8 +747,13 @@ export function GridTable(props: GridTableProps) {
       moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey);
       return;
     }
-    // Gõ 1 ký tự khi đang CHỌN ô → vào chế độ sửa (nội dung cũ bị ĐÈ vì đang bôi đen sẵn — Excel).
-    if (!ctrl && !e.nativeEvent?.altKey && e.key.length === 1) editingRef.current = true;
+    // Ô đang CHỌN thì bị KHÓA (readOnly) — gõ chữ/số KHÔNG sửa được gì (chống bấm nhầm, đè bàn
+    // phím). Nhắc 1 lần cho người dùng biết cách vào chế độ sửa.
+    if (!ctrl && !e.nativeEvent?.altKey && e.key.length === 1 && !editing && editable) {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastLockHintRef.current > 4000) { lastLockHintRef.current = now; toast("Ô đang KHÓA — nhấp đúp (hoặc F2) vào ô để sửa", "info"); }
+    }
   };
   const onGridFocus = (e: { target: EventTarget | null }) => {
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
@@ -1040,8 +1071,8 @@ export function GridTable(props: GridTableProps) {
             // Nhấp đúp ô = vào chế độ SỬA với CON TRỎ tại chỗ bấm (Excel) — không bôi đen cả từ.
             const el = (e.target as HTMLElement)?.closest?.("[data-f]") as HTMLInputElement | HTMLTextAreaElement | null;
             if (!el || !FIELDS.includes(el.getAttribute("data-f") || "")) return;
-            editingRef.current = true;
             const pos = el.selectionEnd ?? (el.value || "").length;
+            enterEdit(el);
             try { el.setSelectionRange(pos, pos); } catch { /* */ }
           }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
@@ -1134,7 +1165,7 @@ export function GridTable(props: GridTableProps) {
           <details className="grid-keys">
             <summary title="Bảng chạy như Excel — xem danh sách phím tắt">⌨️ Phím tắt kiểu Excel</summary>
             <div className="grid-keys-body">
-              <p><b>Chọn / sửa ô:</b> bấm 1 lần = chọn ô (gõ là đè) · nhấp đúp hoặc <kbd>F2</kbd> = sửa trong ô · <kbd>Esc</kbd> hủy sửa, <kbd>Esc</kbd> lần nữa thoát ô.</p>
+              <p><b>Chọn / sửa ô:</b> bấm 1 lần = <b>chọn ô, ô bị khóa</b> (bấm nhầm/đè bàn phím không sửa được) · <b>nhấp đúp</b> hoặc <kbd>F2</kbd> = mở ô để sửa · <kbd>Enter</kbd>/<kbd>Tab</kbd> khi đang sửa = sang ô kế và <b>mở sẵn</b> để gõ tiếp · <kbd>Esc</kbd> hủy sửa, <kbd>Esc</kbd> lần nữa thoát ô.</p>
               <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống hàng (đang chọn vùng thì chạy vòng trong vùng) · <kbd>Home</kbd>/<kbd>End</kbd> đầu–cuối hàng · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên bảng.</p>
               <p><b>Chọn vùng:</b> kéo chuột · <kbd>Shift</kbd>+bấm · <kbd>Shift</kbd>+mũi tên · <kbd>Shift+Space</kbd> cả hàng · <kbd>{modKey}+Space</kbd> cả cột · <kbd>{modKey}+A</kbd> cả bảng.</p>
               <p><b>Dữ liệu:</b> <kbd>{modKey}+C/X/V</kbd> copy–cắt–dán (qua lại Excel được) · <kbd>Delete</kbd> xóa nội dung vùng chọn · <kbd>{modKey}+D</kbd> chép xuống · <kbd>{modKey}+R</kbd> chép sang phải · kéo (hoặc nhấp đúp) ô vuông góc dưới-phải để chép xuống · <kbd>{modKey}+Z</kbd>/<kbd>{modKey}+Y</kbd> hoàn tác–làm lại.</p>

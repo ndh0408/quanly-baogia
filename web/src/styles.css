@@ -2349,6 +2349,20 @@ textarea[aria-invalid="true"] {
   }
 }
 
+/* Ô lưới đang CHỌN nhưng bị KHÓA (chưa nhấp đúp để sửa): vẫn hiện chữ bình thường — KHÔNG dùng
+   kiểu xám của báo giá chỉ-xem (.excel-table td input[readonly]); con trỏ hình ô tính. */
+.excel-table td input[readonly].cell-lock,
+.excel-table td textarea[readonly].cell-lock {
+  background: transparent;
+  color: var(--text);
+  -webkit-text-fill-color: currentColor;
+  cursor: cell;
+}
+.excel-table td.cell-anchor input.cell-lock,
+.excel-table td.cell-anchor textarea.cell-lock {
+  caret-color: transparent; /* ô đang chọn: không nháy con trỏ → nhìn là biết chưa vào chế độ sửa */
+}
+
 /* Bảng phím tắt kiểu Excel dưới lưới báo giá (thu gọn — bấm mới mở) */
 .grid-keys {
   font-size: 12.5px;
