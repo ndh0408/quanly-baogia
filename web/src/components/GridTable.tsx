@@ -62,6 +62,9 @@ export function GridTable(props: GridTableProps) {
   // Enter/Tab khi ĐANG SỬA → giữ chế độ sửa sang ô kế (gõ liên tục không phải nhấp đúp lại).
   const keepEditRef = useRef(false);
   const lastLockHintRef = useRef(0);   // chống spam toast "ô đang khóa"
+  // Ô đang trong MỘT phiên gõ (đã ghi mốc undo). Gõ 10 ký tự vào cùng ô chỉ sinh 1 mốc → Ctrl+Z
+  // lùi cả ô như Excel, không phải bấm 10 lần. Xoá khi rời ô (onGridBlur) để lần vào sau ghi mốc mới.
+  const editUndoRef = useRef<{ i: number; f: string } | null>(null);
   // Thiết bị cảm ứng: giữ hành vi gõ trực tiếp (không ép chọn-cả-ô) để bàn phím ảo hoạt động bình thường.
   const coarsePointer = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Nhãn phím lệnh theo máy: macOS ⌘ · Windows/Linux Ctrl (mọi phím tắt nhận CẢ HAI).
@@ -82,6 +85,13 @@ export function GridTable(props: GridTableProps) {
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
   const snap = () => JSON.stringify(items);
   const pushUndo = () => { undoRef.current.push(snap()); if (undoRef.current.length > 100) undoRef.current.shift(); redoRef.current.length = 0; };
+  // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
+  // vào items (onNumInput ghi thẳng vào model mỗi lần gõ, chụp sau là dính luôn số mới).
+  const markEditUndo = (i: number, f: string) => {
+    const m = editUndoRef.current;
+    if (m && m.i === i && m.f === f) return;
+    pushUndo(); editUndoRef.current = { i, f };
+  };
   const focusCell = (i: number, f: string) => { focusPend.current = { i, f }; };
 
   // ── A1 addressing + công thức ───────────────────────────────────────────────
@@ -283,7 +293,10 @@ export function GridTable(props: GridTableProps) {
     const after = fxInput.value.slice(caret);
     const baseLeft = fxInput.value.slice(0, caret).replace(/[A-Za-z]+\d+(?::[A-Za-z]+\d+)?$/, "");
     let curInfo = startInfo;
-    const apply = (info2: Addr) => { curInfo = info2; const ref = rangeAddr(startInfo, info2); fxInput.value = baseLeft + ref + after; const pos = (baseLeft + ref).length; try { fxInput.setSelectionRange(pos, pos); } catch { /* */ } paintRefPick(startInfo, info2); highlightActiveFormulaRefs(fxInput.value); };
+    const apply = (info2: Addr) => { curInfo = info2; const ref = rangeAddr(startInfo, info2); fxInput.value = baseLeft + ref + after; const pos = (baseLeft + ref).length; try { fxInput.setSelectionRange(pos, pos); } catch { /* */ } paintRefPick(startInfo, info2); highlightActiveFormulaRefs(fxInput.value);
+      // Gương chữ đang gõ dở sang thanh fx. KHÔNG dùng syncFxBar() ở đây: nó đọc formulas[] trong
+      // model, mà tham chiếu đang kéo chưa commit vào model → thanh fx sẽ kẹt ở "=SUM(" như cũ.
+      if (fxBar && fxInputRef.current && fxInputRef.current !== fxInput) fxInputRef.current.value = fxInput.value; };
     pickingRef.current = true; document.body.classList.add("fx-picking"); apply(startInfo);
     const onMove = (mv: MouseEvent) => { const info2 = cellAddrFromEvent(mv.target as HTMLElement); if (info2) apply(info2); };
     const onUp = () => { document.removeEventListener("mousemove", onMove, true); document.removeEventListener("mouseup", onUp, true); pickingRef.current = false; document.body.classList.remove("fx-picking"); clearRefPick(); fxInput.focus(); const pos = (baseLeft + rangeAddr(startInfo, curInfo)).length; try { fxInput.setSelectionRange(pos, pos); } catch { /* */ } };
@@ -695,7 +708,19 @@ export function GridTable(props: GridTableProps) {
       //    chế độ sửa NHƯNG GIỮ ô đang chọn — đúng Excel (Esc lần 1).
       if (editing) {
         e.preventDefault();
-        if (esc && esc.dataset && esc.dataset.escVal != null) esc.value = esc.dataset.escVal;
+        if (esc && esc.dataset && esc.dataset.escVal != null) {
+          esc.value = esc.dataset.escVal;
+          // Trả cả MODEL về giá trị lúc vào ô rồi tính lại NGAY. onNumInput đã ghi live vào items
+          // mỗi lần gõ, nên nếu chỉ trả esc.value thì Thành Tiền/tổng nhóm/Tổng sheet vẫn treo số
+          // đang gõ dở cho tới khi rời ô — người dùng thấy tổng sai ngay sau khi bấm Esc.
+          commitCell(i, f, esc.dataset.escVal);
+          recomputeAll();
+          // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
+          // một nhịp rỗng thay vì lùi thao tác thật trước đó.
+          const m = editUndoRef.current;
+          if (m && m.i === i && m.f === f) { undoRef.current.pop(); editUndoRef.current = null; }
+          onChange();
+        }
         lockCell(esc);
         selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
         paintSel();
@@ -770,6 +795,7 @@ export function GridTable(props: GridTableProps) {
   };
   const onGridBlur = (e: { target: EventTarget | null; relatedTarget?: EventTarget | null }) => {
     if (pickingRef.current) return;   // đang point-pick → giữ focus, chưa commit
+    editUndoRef.current = null;       // hết phiên gõ — vào lại chính ô này lần sau phải ghi mốc MỚI
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (f && tr && el) {
       const i = parseInt(tr.getAttribute("data-row") || "0", 10);
@@ -801,6 +827,7 @@ export function GridTable(props: GridTableProps) {
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
   const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
     editingRef.current = true;   // có gõ = đang SỬA (kể cả gõ tiếng Việt qua IME — keydown không bắt được)
+    markEditUndo(i, f);          // Ctrl+Z lùi được cả ô (trước đây gõ tay KHÔNG hề ghi undo)
     const raw = el.value; const it = items[i] as Record<string, unknown>;
     if (raw.trim().startsWith("=")) {
       // Đang GÕ công thức: LƯU LIVE vào model + eval ngay (như SPA), KHÔNG xóa formula khi đang gõ.
@@ -837,11 +864,11 @@ export function GridTable(props: GridTableProps) {
   };
   const txtInput = (i: number, f: string, ph?: string) => (
     <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      onInput={(e) => { editingRef.current = true; const el = e.target as HTMLInputElement; if (el.value.trim().startsWith("=")) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); onChange(); }} />
+      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; if (el.value.trim().startsWith("=")) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); onChange(); }} />
   );
   const taInput = (i: number, f: string, ph?: string) => (
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      ref={autoGrow} onInput={(e) => { editingRef.current = true; const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChange(); }} />
+      ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChange(); }} />
   );
   const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "") + ((items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> })._fxWarn?.[f] ? " cell-fx-error" : "");
   const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
