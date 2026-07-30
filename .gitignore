@@ -91,3 +91,10 @@ spa-smoke.png
 /e2e-probe-shift.mjs
 /e2e-probe-cells.mjs
 /gridxl.png
+
+# Agent / editor state — may contain local shell history with credentials
+.claude/
+.agents/
+_bmad/
+_bmad-output/
+.qwen/
