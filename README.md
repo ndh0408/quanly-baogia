@@ -71,10 +71,11 @@ Five roles (`admin`, `manager`, `account_hn`, `hr`, `accountant`) defined in
 |---|---|
 | API | Node.js · **TypeScript 5.7** · Express 4 · Zod 4 validation |
 | Data | PostgreSQL · **Prisma 7** (28 models) · Redis (ioredis) |
-| Auth | JWT · argon2-hashed credentials · TOTP MFA · role-based permissions |
+| Auth | JWT access + refresh tokens · bcrypt-hashed credentials · TOTP 2FA (otplib) · role-based permissions |
 | Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) — totals update live as cells are typed |
-| Documents | ExcelJS + custom OOXML zip stitching · PDFKit · Nodemailer |
-| Frontend | React + Vite (`web/`) · vanilla-JS grid engine (`public/`) |
+| Background work | BullMQ workers on Redis |
+| Documents | ExcelJS + custom OOXML zip stitching · PDFKit (embedded fonts) · Nodemailer |
+| Frontend | React 19 + Vite (`web/`) · vanilla-JS grid engine (`public/`) |
 | Testing | **Vitest** (unit + coverage) · **Playwright** (e2e) |
 | Ops | Docker + Compose (dev / staging / prod) · **Helm chart** with NetworkPolicy · pino structured logs |
 | CI | GitHub Actions — lint, typecheck, web build + test, coverage, `npm audit`, plus a separate security job · Dependabot · husky + lint-staged |
