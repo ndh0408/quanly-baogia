@@ -20,6 +20,22 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const prisma = new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: process.env.DATABASE_URL })) });
 
+// Sheet gốc ghi cùng một nơi bằng nhiều kiểu ("HÀ NỘI" / "Hà Nội" / "HN") → gom về MỘT cách viết,
+// nếu không hàng chip "Từ khóa nhanh" đẻ ra 3 nút cho cùng Hà Nội. CHỈ gộp khác-chính-tả; những
+// cách nhóm thật của người dùng (vd "TỈNH") giữ nguyên.
+const REGION_ALIAS = new Map([
+  ["ha noi", "Hà Nội"], ["hn", "Hà Nội"],
+  ["hai phong", "Hải Phòng"],
+  ["hcm", "HCM"], ["tp hcm", "HCM"], ["tphcm", "HCM"],
+  ["da nang", "Đà Nẵng"], ["da lat", "Đà Lạt"], ["can tho", "Cần Thơ"],
+]);
+const canonRegion = (s) => {
+  const raw = String(s || "").trim();
+  if (!raw) return "";
+  const key = raw.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ");
+  return REGION_ALIAS.get(key) || raw;
+};
+
 const RESET = process.argv.includes("--reset");
 const FORCE = process.argv.includes("--force");
 const SRC = path.join(__dirname, "venue-catalog.seed.json");
@@ -54,7 +70,7 @@ async function main() {
   for (const e of entries) {
     const name = String(e.venue || "").trim();
     if (!name) { skipped++; continue; }
-    const region = String(e.region || "").trim();
+    const region = canonRegion(e.region);
     const key = `${name}||${region}`;
 
     let venueId = venueIds.get(key);
