@@ -47,25 +47,61 @@ export async function getCatalog(req: Request) {
   const entries: Record<string, unknown>[] = [];
   for (const v of venues) {
     for (const it of v.items) {
-      entries.push({ ...itemOut(it), venue: v.name, region: v.region, venueId: v.id });
+      // tags đi kèm để gõ "hcm quay bap" trong ô Hạng Mục cũng ra đúng nhóm (không chỉ tên rạp).
+      entries.push({ ...itemOut(it), venue: v.name, region: v.region, venueId: v.id, tags: v.tags });
     }
   }
-  return { entries, venues: venues.map((v) => ({ id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code })) };
+  return { entries, venues: venues.map((v) => ({ id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code, tags: v.tags })) };
 }
 
 export async function listVenues(req: Request) {
   requireRead(req);
-  const { q, region } = req.query as { q?: string; region?: string };
+  const { q, region, full } = req.query as { q?: string; region?: string; full?: string };
   const where: Record<string, unknown> = {};
   if (region) where.region = region;
-  if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { code: { contains: q, mode: "insensitive" } }, { cluster: { contains: q, mode: "insensitive" } }];
+  if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { code: { contains: q, mode: "insensitive" } }, { cluster: { contains: q, mode: "insensitive" } }, { tags: { has: q } }];
+  // full=1: trả KÈM hạng mục (trang quản lý tải 1 lần rồi tìm/lọc tức thì tại client — danh mục
+  // chỉ vài trăm rạp/vài trăm hạng mục nên rẻ hơn nhiều so với gọi API mỗi lần gõ).
   const rows = await prisma.venue.findMany({
     where,
     orderBy: [{ region: "asc" }, { name: "asc" }],
-    include: { _count: { select: { items: true } } },
+    include: full === "1"
+      ? { items: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] } }
+      : { _count: { select: { items: true } } },
   });
-  // Danh mục nhỏ (vài trăm rạp) → trả hết, không phân trang: trang quản lý lọc/tìm ngay tại client.
-  return { data: rows.map((v) => ({ id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code, note: v.note, active: v.active, itemCount: v._count.items })) };
+  return {
+    data: rows.map((v) => {
+      const base = { id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code, tags: v.tags, note: v.note, active: v.active };
+      const anyV = v as unknown as { items?: Record<string, any>[]; _count?: { items: number } };
+      return anyV.items
+        ? { ...base, itemCount: anyV.items.length, items: anyV.items.map(itemOut) }
+        : { ...base, itemCount: anyV._count?.items ?? 0 };
+    }),
+  };
+}
+
+/** Mọi từ khóa đang dùng + số rạp mỗi từ — để vẽ hàng chip "Từ khóa nhanh". */
+export async function listTags(req: Request) {
+  requireRead(req);
+  const rows = await prisma.venue.findMany({ select: { tags: true } });
+  const count = new Map<string, number>();
+  for (const r of rows) for (const t of r.tags) count.set(t, (count.get(t) ?? 0) + 1);
+  return { data: [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "vi")).map(([tag, n]) => ({ tag, count: n })) };
+}
+
+/** Gắn/gỡ từ khóa cho NHIỀU rạp một lượt (chọn hàng loạt rồi đặt tên nhóm). */
+export async function bulkTags(req: Request) {
+  requireManage(req);
+  const { venueIds, add = [], remove = [] } = req.body as { venueIds: number[]; add?: string[]; remove?: string[] };
+  if (!add.length && !remove.length) throw httpError(400, "Chưa chọn từ khóa để gắn hoặc gỡ");
+  const venues = await prisma.venue.findMany({ where: { id: { in: venueIds } }, select: { id: true, name: true, tags: true } });
+  if (!venues.length) throw httpError(404, "Không tìm thấy rạp nào");
+  for (const v of venues) {
+    const next = [...new Set([...v.tags.filter((t) => !remove.includes(t)), ...add])];
+    await prisma.venue.update({ where: { id: v.id }, data: { tags: next } });
+  }
+  await audit(req, "venue.tags.bulk", { resource: "venue", resourceId: venues[0].id, before: venues, after: { add, remove, count: venues.length } });
+  return { ok: true, updated: venues.length };
 }
 
 export async function getVenue(req: Request) {
@@ -73,7 +109,7 @@ export async function getVenue(req: Request) {
   const id = (req.params as any).id as number;
   const v = await prisma.venue.findUnique({ where: { id }, include: { items: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] } } });
   if (!v) throw httpError(404, "Không tìm thấy rạp");
-  return { id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code, note: v.note, active: v.active, items: v.items.map(itemOut) };
+  return { id: v.id, name: v.name, region: v.region, cluster: v.cluster, code: v.code, tags: v.tags, note: v.note, active: v.active, items: v.items.map(itemOut) };
 }
 
 // Trùng tên+vùng → 409 (unique [name, region]) — bắt trước để trả lỗi tiếng Việt rõ ràng.

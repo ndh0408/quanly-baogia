@@ -63,7 +63,9 @@ async function main() {
       if (found) venueId = found.id;
       else {
         const m = meta.get(name.toLowerCase()) || {};
-        const created = await prisma.venue.create({ data: { name, region, cluster: m.cluster, code: m.code } });
+        // Từ khóa khởi tạo = khu vực + cụm → bấm chip là ra nhóm ngay, không phải gắn tay.
+        const tags = [...new Set([region, m.cluster].filter(Boolean))];
+        const created = await prisma.venue.create({ data: { name, region, cluster: m.cluster, code: m.code, tags } });
         venueId = created.id;
         newVenues++;
       }

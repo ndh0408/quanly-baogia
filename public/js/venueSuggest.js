@@ -18,7 +18,8 @@ function loadCatalog() {
     catPromise = fetch("/api/venues/catalog", { credentials: "same-origin" })
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then((j) => {
-        (j.entries || []).forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""}`); });
+        // Gộp cả TỪ KHÓA vào chuỗi so khớp → gõ "hcm quay bap" ra đúng nhóm, không chỉ tên rạp.
+        (j.entries || []).forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""} ${(e.tags || []).join(" ")}`); });
         CAT = j;
         return CAT;
       })

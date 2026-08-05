@@ -16,12 +16,45 @@ export type VenueEntry = {
   unit: string | null;
   qty: number | null;
   note: string | null;
+  tags?: string[];
   _hay?: string;   // chuỗi đã bỏ dấu để so khớp nhanh
 };
 export type VenueCatalog = {
   entries: VenueEntry[];
-  venues: { id: number; name: string; region: string; cluster: string | null; code: string | null }[];
+  venues: { id: number; name: string; region: string; cluster: string | null; code: string | null; tags?: string[] }[];
 };
+
+// Bóc Rộng × Cao (ra MÉT) từ chuỗi kích thước NGUYÊN VĂN của sổ tay, để khỏi gõ lại 2 ô:
+//   "(2.675W x 1H)m" → 2.675 × 1     · "(1m6W x 1H)m" → 1.6 × 1   (kiểu ghi "1m6" quen tay)
+//   "44cmW x 55cmH"  → 0.44 × 0.55   · "(3,79W x 0.91)m" → 3.79 × 0.91  (phẩy = thập phân)
+//   "(4.0 x 0.96H)m" thiếu chữ W → lấy nốt nhờ mẫu "số x số".
+export function parseDim(dim: string | null | undefined): { w: number | null; h: number | null } {
+  if (!dim) return { w: null, h: null };
+  const s = String(dim).toLowerCase();
+  const toNum = (raw: string, unit?: string): number | null => {
+    const t = raw.trim().replace(/,/g, ".");
+    const mm = t.match(/^(\d+)m(\d+)$/);          // "1m6" = 1,6 mét
+    const n = mm ? Number(`${mm[1]}.${mm[2]}`) : Number(t);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    // cm → m; làm tròn 4 số lẻ CHỈ để khử nhiễu dấu phẩy động (50.5/100 = 0.505, không phải 0,51).
+    return unit === "cm" ? Math.round(n * 100) / 10000 : n;
+  };
+  const NUM = "\\d+(?:[.,]\\d+)?(?:m\\d+)?";
+  const UNIT = "\\s*(cm|m)?\\s*";
+  const w = s.match(new RegExp(`(${NUM})${UNIT}w`));
+  const h = s.match(new RegExp(`(${NUM})${UNIT}h`));
+  let W = w ? toNum(w[1], w[2]) : null;
+  let H = h ? toNum(h[1], h[2]) : null;
+  // Thiếu chữ W hoặc H thì lấy theo VỊ TRÍ trong cặp "số x số" (số đầu = rộng, số sau = cao).
+  if (W == null || H == null) {
+    const pair = s.match(new RegExp(`(${NUM})${UNIT}[whd]?\\s*[x×]\\s*(${NUM})${UNIT}[whd]?`));
+    if (pair) {
+      if (W == null) W = toNum(pair[1], pair[2]);
+      if (H == null) H = toNum(pair[3], pair[4]);
+    }
+  }
+  return { w: W, h: H };
+}
 
 // So khớp KHÔNG DẤU: gõ "quay bap aeon" vẫn ra "Quầy bắp — CGV Aeon Tân Phú".
 export const norm = (s: string) =>
@@ -36,7 +69,8 @@ export function loadCatalog(): Promise<VenueCatalog> {
     catPromise = fetch("/api/venues/catalog", { credentials: "same-origin" })
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json() as Promise<VenueCatalog>; })
       .then((j) => {
-        j.entries.forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""}`); });
+        // Gộp cả TỪ KHÓA vào chuỗi so khớp → gõ "hcm quay bap" trong ô Hạng Mục ra đúng nhóm.
+        j.entries.forEach((e) => { e._hay = norm(`${e.venue} ${e.name} ${e.region || ""} ${e.cat || ""} ${(e.tags || []).join(" ")}`); });
         CAT = j;
         return j;
       })

@@ -364,6 +364,9 @@ model Venue {
   region  String      @default("") // HCM / Hà Nội / Đà Nẵng… ("" = chưa phân vùng)
   cluster String? // cụm: CGV / Lotte / Cinestar / GLX…
   code    String? // viết tắt nội bộ: HVP, VLM, SVH…
+  // TỪ KHÓA NHANH do người dùng tự đặt: gõ/bấm 1 từ khóa là lọc ra đúng nhóm rạp mình hay
+  // báo giá cùng nhau. Khởi tạo = khu vực ("HCM", "Hà Nội"), rồi tự thêm nhóm con tùy ý.
+  tags    String[]    @default([])
   note    String?
   active  Boolean     @default(true)
   items   VenueItem[]

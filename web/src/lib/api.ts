@@ -48,6 +48,7 @@ export type CustomerListResult = { data: Customer[]; meta: { total: number; page
 export type Venue = {
   id: number; name: string; region: string;
   cluster?: string | null; code?: string | null; note?: string | null;
+  tags?: string[];            // từ khóa nhanh do người dùng đặt
   active: boolean; itemCount?: number;
 };
 export type VenueItemRow = {
@@ -56,7 +57,7 @@ export type VenueItemRow = {
   unit: string | null; qty: number | null; note: string | null;
   sortOrder: number; active: boolean;
 };
-export type VenueInput = { name?: string; region?: string; cluster?: string | null; code?: string | null; note?: string | null; active?: boolean };
+export type VenueInput = { name?: string; region?: string; cluster?: string | null; code?: string | null; tags?: string[]; note?: string | null; active?: boolean };
 export type VenueItemInput = {
   cat?: string; name?: string; dim?: string | null;
   w?: number | null; h?: number | null; unit?: string | null;
@@ -250,7 +251,12 @@ export const api = {
   updateCustomer: (id: number, data: { name: string; debtDays?: number | null }) => req<Customer>(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCustomer: (id: number) => req<{ ok: boolean }>(`/customers/${id}`, { method: "DELETE" }),
   // Danh mục kích thước theo rạp (nguồn gợi ý hạng mục khi tạo báo giá).
-  listVenues: (q = "") => req<{ data: Venue[] }>(`/venues?${new URLSearchParams({ q })}`),
+  // full=1 → kèm luôn hạng mục của từng rạp (trang quản lý tải 1 lần rồi lọc tại client).
+  listVenues: (q = "", full = false) =>
+    req<{ data: (Venue & { items?: VenueItemRow[] })[] }>(`/venues?${new URLSearchParams(full ? { q, full: "1" } : { q })}`),
+  listVenueTags: () => req<{ data: { tag: string; count: number }[] }>("/venues/tags"),
+  bulkVenueTags: (venueIds: number[], add: string[], remove: string[]) =>
+    req<{ ok: boolean; updated: number }>("/venues/tags/bulk", { method: "POST", body: JSON.stringify({ venueIds, add, remove }) }),
   getVenue: (id: number) => req<Venue & { items: VenueItemRow[] }>(`/venues/${id}`),
   createVenue: (data: VenueInput) => req<Venue>("/venues", { method: "POST", body: JSON.stringify(data) }),
   updateVenue: (id: number, data: VenueInput) => req<Venue>(`/venues/${id}`, { method: "PUT", body: JSON.stringify(data) }),

@@ -145,6 +145,60 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     expect((await hr.post("/api/venues").send({ name: `${TAG} Trái phép` })).status).toBe(403);
   });
 
+  it("full=1 trả rạp KÈM hạng mục (trang quản lý tải 1 lần)", async () => {
+    const res = await admin.get("/api/venues?full=1");
+    expect(res.status).toBe(200);
+    const mine = res.body.data.find((v) => v.id === venueId);
+    expect(Array.isArray(mine.items)).toBe(true);
+    expect(mine.items.length).toBe(mine.itemCount);
+    expect(mine.items[0]).toHaveProperty("dim");
+  });
+
+  it("TỪ KHÓA: lưu khi tạo/sửa, bỏ trùng + bỏ khoảng trắng thừa", async () => {
+    const res = await admin.post("/api/venues").send({ name: `${TAG} Rạp từ khóa`, tags: ["HCM", " HCM ", "khách CGV", ""] });
+    expect(res.status).toBe(201);
+    expect(res.body.tags.sort()).toEqual(["HCM", "khách CGV"]);
+    const upd = await admin.put(`/api/venues/${res.body.id}`).send({ tags: ["HCM"] });
+    expect(upd.body.tags).toEqual(["HCM"]);
+    await admin.delete(`/api/venues/${res.body.id}`).expect(200);
+  });
+
+  it("TỪ KHÓA: lọc danh sách theo từ khóa + /tags đếm số rạp", async () => {
+    const a = await admin.post("/api/venues").send({ name: `${TAG} Nhóm A1`, tags: [`${TAG}nhom`] });
+    const b = await admin.post("/api/venues").send({ name: `${TAG} Nhóm A2`, tags: [`${TAG}nhom`] });
+    const list = await admin.get(`/api/venues?q=${TAG}nhom`);
+    expect(list.body.data.map((v) => v.id).sort()).toEqual([a.body.id, b.body.id].sort());
+    const tags = await admin.get("/api/venues/tags");
+    expect(tags.body.data.find((t) => t.tag === `${TAG}nhom`)?.count).toBe(2);
+    await admin.delete(`/api/venues/${a.body.id}`).expect(200);
+    await admin.delete(`/api/venues/${b.body.id}`).expect(200);
+  });
+
+  it("TỪ KHÓA: gắn/gỡ HÀNG LOẠT cho nhiều rạp", async () => {
+    const a = await admin.post("/api/venues").send({ name: `${TAG} Bulk1`, tags: ["HCM"] });
+    const b = await admin.post("/api/venues").send({ name: `${TAG} Bulk2`, tags: ["HCM"] });
+    const ids = [a.body.id, b.body.id];
+    const res = await admin.post("/api/venues/tags/bulk").send({ venueIds: ids, add: [`${TAG}tk`], remove: ["HCM"] });
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(2);
+    const after = await admin.get(`/api/venues/${a.body.id}`);
+    expect(after.body.tags).toEqual([`${TAG}tk`]);
+    // không chọn từ khóa nào → 400 (khỏi ghi đè im lặng)
+    expect((await admin.post("/api/venues/tags/bulk").send({ venueIds: ids })).status).toBe(400);
+    for (const id of ids) await admin.delete(`/api/venues/${id}`).expect(200);
+  });
+
+  it("TỪ KHÓA: vai trò chỉ-đọc KHÔNG gắn được (403)", async () => {
+    expect((await hr.post("/api/venues/tags/bulk").send({ venueIds: [venueId], add: ["X"] })).status).toBe(403);
+  });
+
+  it("/catalog kèm tags → gợi ý trong editor gõ từ khóa cũng ra", async () => {
+    await admin.put(`/api/venues/${venueId}`).send({ tags: [`${TAG}cat`] }).expect(200);
+    const res = await manager.get("/api/venues/catalog");
+    const mine = res.body.entries.filter((e) => (e.tags || []).includes(`${TAG}cat`));
+    expect(mine.length).toBeGreaterThan(0);
+  });
+
   it("xoá rạp thì xoá luôn hạng mục của nó", async () => {
     const before = await admin.get(`/api/venues/${venueId}`);
     const n = before.body.items.length;
