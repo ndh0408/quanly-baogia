@@ -31,6 +31,8 @@ const tagList = z.preprocess(
 
 const VenueCreate = z.object({
   name: z.string({ error: "Vui lòng nhập tên rạp" }).trim().min(1, { error: "Vui lòng nhập tên rạp" }).max(200, { error: "Tên rạp tối đa 200 ký tự" }),
+  // region/cluster/code: cột cũ sinh ra từ file Excel, KHÔNG còn hiện trên giao diện. Giữ lại để
+  // dữ liệu cũ không vỡ + unique [name, region] với region="" thành ra "không trùng tên rạp".
   region: z.preprocess((v) => (v == null ? "" : typeof v === "string" ? v.trim() : v), z.string().max(80, { error: "Khu vực tối đa 80 ký tự" }).default("")),
   cluster: optText(80),
   code: optText(40),
@@ -41,7 +43,9 @@ const VenueCreate = z.object({
 const VenueUpdate = VenueCreate.partial();
 
 const ItemCreate = z.object({
-  cat: z.string({ error: "Vui lòng chọn nhóm" }).trim().min(1, { error: "Vui lòng chọn nhóm" }).max(120, { error: "Tên nhóm tối đa 120 ký tự" }),
+  // "Nhóm" là TÙY CHỌN: nó vốn là di sản của mấy tab trong file Excel cũ, không phải thứ người
+  // dùng cần khai khi thêm hạng mục. Để trống cũng lưu được.
+  cat: z.preprocess((v) => (v == null ? "" : typeof v === "string" ? v.trim() : v), z.string().max(120, { error: "Tên nhóm tối đa 120 ký tự" }).default("")),
   name: z.string({ error: "Vui lòng nhập tên hạng mục" }).trim().min(1, { error: "Vui lòng nhập tên hạng mục" }).max(300, { error: "Tên hạng mục tối đa 300 ký tự" }),
   dim: optText(300),
   w: optNum(1000, "Chiều rộng"),

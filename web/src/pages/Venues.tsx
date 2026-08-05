@@ -2,48 +2,31 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Me, type Venue, type VenueItemRow } from "../lib/api";
 import { errMsg } from "../lib/format";
-import { toast, confirmModal, fieldErrorsFrom } from "../lib/ui";
+import { toast, confirmModal } from "../lib/ui";
 import { invalidateCatalog, norm, parseDim } from "../lib/venueCatalog";
 import { qtyRound } from "../lib/quoteMath";
 
-// Trang "Danh mục rạp" — nguồn dữ liệu cho GỢI Ý KÍCH THƯỚC khi tạo báo giá.
+// Trang "Danh mục rạp" — kho kích thước để lúc làm báo giá gõ tên là app điền sẵn.
 //
-// MỘT MÀN HÌNH duy nhất (không nhảy trang): 1 ô tìm + hàng chip TỪ KHÓA + danh sách rạp mở
-// ra được tại chỗ để xem/sửa hạng mục. Gõ gì cũng tìm: tên rạp · tên hạng mục · kích thước ·
-// từ khóa. Gõ trúng hạng mục thì rạp TỰ MỞ và chỉ hiện những hạng mục khớp.
-// Quyền: venue:read = xem · venue:manage = sửa. Mọi thay đổi → xoá cache gợi ý của editor.
-
-const CATEGORIES = [
-  "Quầy vé & quầy bắp", "Cover màn hình", "Bục soát vé", "Bọc ghế",
-  "Standee & banner", "Wall / khu chờ", "Máy chiếu logo", "Bàn vuông/tròn",
-];
-const UNITS = ["m2", "bộ", "bảng", "ghế", "tấm", "cái"];
+// Bố cục kiểu DANH BẠ: trái = danh sách rạp, phải = hạng mục của rạp đang chọn.
+// Cố ý giữ ÍT thứ trên màn: không checkbox chọn hàng loạt, không thanh công cụ,
+// không cột "nhóm/khu vực/cụm/viết tắt" (đó là di sản file Excel cũ, người dùng không cần khai).
+// Thêm mới không cần bấm nút mở form: ô nhập nằm sẵn ở đầu danh sách và cuối bảng.
 
 type FullVenue = Venue & { items?: VenueItemRow[] };
 
-const areaOf = (it: { unit: string | null; w: number | null; h: number | null }) =>
-  it.unit === "m2" && it.w && it.h ? qtyRound(it.w * it.h) : null;
 const numText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
-// Con số sẽ được điền vào ô Số Lượng của báo giá (m² nếu tính được, không thì SL mặc định).
-const slText = (it: VenueItemRow) => {
-  const a = areaOf(it);
-  return a != null ? `${numText(a)} m²` : it.qty != null ? numText(it.qty) : "—";
-};
+// Con số app sẽ điền vào ô Số Lượng của báo giá.
+const slOf = (it: VenueItemRow) =>
+  it.unit === "m2" && it.w && it.h ? qtyRound(it.w * it.h) : it.qty ?? null;
 
 export function VenuesPage({ me }: { me: Me }) {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
-  const [tags, setTags] = useState<string[]>([]);          // chip đang bật (AND với nhau)
-  const [open, setOpen] = useState<Set<number>>(new Set()); // rạp đang mở
-  const [picked, setPicked] = useState<Set<number>>(new Set()); // chọn hàng loạt để gắn từ khóa/gộp
-  const [editVenue, setEditVenue] = useState<FullVenue | null | undefined>(undefined);
-  const [editItem, setEditItem] = useState<{ venueId: number; rec: VenueItemRow | null } | null>(null);
-  const [merging, setMerging] = useState<FullVenue | null>(null);
-  const [tagging, setTagging] = useState(false);
-
+  const [tag, setTag] = useState("");           // 1 từ khóa đang lọc ("" = tất cả)
+  const [selId, setSelId] = useState<number | null>(null);
   const canManage = me.permissions.includes("venue:manage");
 
-  // Tải TOÀN BỘ danh mục 1 lần (vài trăm rạp) → gõ tới đâu lọc tới đó, không chờ mạng.
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["venues", "full"],
     queryFn: () => api.listVenues("", true),
@@ -52,212 +35,291 @@ export function VenuesPage({ me }: { me: Me }) {
 
   const reload = () => {
     qc.invalidateQueries({ queryKey: ["venues"] });
-    invalidateCatalog();   // editor lấy bản mới ở lần gõ kế tiếp
+    invalidateCatalog();   // gợi ý trong báo giá lấy bản mới ngay
   };
 
-  // Mọi từ khóa đang dùng + số rạp mỗi từ (để vẽ chip, xếp theo độ phổ biến).
-  const tagCounts = useMemo(() => {
+  const tags = useMemo(() => {
     const m = new Map<string, number>();
     for (const v of all) for (const t of v.tags ?? []) m.set(t, (m.get(t) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "vi"));
   }, [all]);
 
-  // Lọc: chip (AND) rồi tới chữ đang gõ. Mỗi rạp trả kèm danh sách hạng mục KHỚP (nếu có).
-  const results = useMemo(() => {
+  // Tìm 1 ô cho tất cả: khớp tên rạp HOẶC tên hạng mục (không dấu). Rạp khớp nhờ hạng mục thì
+  // ghi rõ "khớp N hạng mục" để người dùng hiểu vì sao nó hiện ra.
+  const list = useMemo(() => {
     const toks = norm(q).split(/\s+/).filter(Boolean);
-    const out: { v: FullVenue; hits: VenueItemRow[]; byItem: boolean }[] = [];
-    for (const v of all) {
-      if (tags.length && !tags.every((t) => (v.tags ?? []).includes(t))) continue;
-      const items = v.items ?? [];
-      if (!toks.length) { out.push({ v, hits: items, byItem: false }); continue; }
-      const vHay = norm(`${v.name} ${v.region} ${v.cluster || ""} ${v.code || ""} ${(v.tags ?? []).join(" ")}`);
-      const venueMatch = toks.every((t) => vHay.includes(t));
-      // Khớp hạng mục: ghép chuỗi rạp + hạng mục để "aeon quay bap" (nửa tên rạp, nửa hạng mục) vẫn ra.
-      const hits = items.filter((it) => {
-        const hay = `${vHay} ${norm(`${it.name} ${it.cat} ${it.dim || ""} ${it.note || ""}`)}`;
-        return toks.every((t) => hay.includes(t));
-      });
-      if (venueMatch) out.push({ v, hits: items, byItem: false });
-      else if (hits.length) out.push({ v, hits, byItem: true });
-    }
-    return out;
-  }, [all, q, tags]);
+    return all
+      .filter((v) => !tag || (v.tags ?? []).includes(tag))
+      .map((v) => {
+        if (!toks.length) return { v, hitNames: [] as string[] };
+        const vHay = norm(`${v.name} ${(v.tags ?? []).join(" ")}`);
+        if (toks.every((t) => vHay.includes(t))) return { v, hitNames: [] };
+        const hits = (v.items ?? []).filter((it) => {
+          const hay = `${vHay} ${norm(`${it.name} ${it.dim || ""} ${it.note || ""}`)}`;
+          return toks.every((t) => hay.includes(t));
+        });
+        return hits.length ? { v, hitNames: hits.map((h) => h.name) } : null;
+      })
+      .filter(Boolean) as { v: FullVenue; hitNames: string[] }[];
+  }, [all, q, tag]);
 
-  const totalItems = results.reduce((s, r) => s + (r.byItem ? r.hits.length : r.v.items?.length ?? 0), 0);
-  const searching = q.trim().length > 0;
+  // Rạp đang chọn: nếu nó rơi khỏi kết quả lọc thì tự nhảy về rạp đầu tiên.
+  const sel = useMemo(() => {
+    const found = all.find((v) => v.id === selId);
+    if (found && list.some((r) => r.v.id === selId)) return found;
+    return list[0]?.v ?? null;
+  }, [all, list, selId]);
 
-  const toggleOpen = (id: number) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const toggleTag = (t: string) => setTags((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]));
-  const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  useEffect(() => { if (sel && sel.id !== selId) setSelId(sel.id); }, [sel, selId]);
 
-  const onDeleteVenue = async (v: FullVenue) => {
-    const n = v.items?.length ?? v.itemCount ?? 0;
-    if (!(await confirmModal("Xóa rạp", `Xóa "${v.name}"${n ? ` và ${n} hạng mục của rạp này` : ""}? Không hoàn tác được.`, { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deleteVenue(v.id); toast("Đã xóa rạp", "success"); reload(); }
-    catch (ex) { toast(errMsg(ex, "Xóa thất bại"), "error"); }
+  const addVenue = async (name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    try {
+      const v = await api.createVenue({ name: n });
+      toast(`Đã thêm rạp "${n}"`, "success");
+      setSelId(v.id); setQ(""); setTag("");
+      reload();
+    } catch (ex) { toast(errMsg(ex, "Thêm rạp thất bại"), "error"); }
   };
-  const onDeleteItem = async (it: VenueItemRow) => {
-    if (!(await confirmModal("Xóa hạng mục", `Xóa "${it.name}"? Không hoàn tác được.`, { danger: true, confirmText: "Xóa" }))) return;
-    try { await api.deleteVenueItem(it.id); toast("Đã xóa hạng mục", "success"); reload(); }
-    catch (ex) { toast(errMsg(ex, "Xóa thất bại"), "error"); }
-  };
+
+  if (error) {
+    return (
+      <div>
+        <h1>Danh mục rạp</h1>
+        <div className="err">⚠ {errMsg(error)} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <h1>Danh mục rạp</h1>
       <p className="muted page-sub">
-        Kích thước đo sẵn của từng rạp. Khi tạo báo giá, gõ tên hạng mục ở ô <b>Hạng Mục</b> là app gợi ý ra kích thước —
-        hoặc bấm <b>📐 Chèn từ rạp</b> để chèn cả loạt. Sửa ở đây là lần gõ sau ra số mới ngay.
+        Lưu sẵn kích thước của từng rạp. Khi làm báo giá, gõ tên hạng mục ở ô <b>Hạng Mục</b> là app tự điền kích thước và số lượng — khỏi mở file đi dò.
       </p>
 
-      {/* MỘT ô tìm cho tất cả: tên rạp · tên hạng mục · kích thước · từ khóa */}
-      <div className="toolbar">
-        <input type="search" className="grow" autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Gõ bất kỳ: tên rạp, tên hạng mục, kích thước, từ khóa… (không dấu cũng được)"
-          aria-label="Tìm trong danh mục rạp" />
-        {canManage && <button className="btn btn-primary" onClick={() => setEditVenue(null)}>+ Rạp mới</button>}
-      </div>
-
-      {/* Từ khóa nhanh: bấm 1 phát ra cả nhóm; bấm thêm chip nữa để thu hẹp trong nhóm đó */}
-      {tagCounts.length > 0 && (
-        <div className="vcat-tags">
-          <span className="muted vcat-tags-lbl">Từ khóa nhanh:</span>
-          {tagCounts.map(([t, n]) => (
-            <button key={t} type="button" className={`vcat-chip${tags.includes(t) ? " on" : ""}`} onClick={() => toggleTag(t)}
-              title={tags.includes(t) ? "Bấm để bỏ lọc từ khóa này" : `Lọc ${n} rạp có từ khóa "${t}"`}>
-              {t} <span className="vcat-chip-n">{n}</span>
-            </button>
-          ))}
-          {tags.length > 0 && <button type="button" className="vcat-chip clear" onClick={() => setTags([])}>✕ Bỏ lọc</button>}
-        </div>
-      )}
-
-      {error && <div className="err">⚠ {errMsg(error)} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>}
-
-      {/* Thanh chọn hàng loạt — chỉ hiện khi đã tick rạp */}
-      {canManage && picked.size > 0 && (
-        <div className="vcat-bulk">
-          <b>{picked.size} rạp đã chọn</b>
-          <button className="btn btn-sm btn-primary" onClick={() => setTagging(true)}>🏷 Gắn từ khóa</button>
-          <button className="btn btn-sm" onClick={() => setPicked(new Set())}>Bỏ chọn</button>
-        </div>
-      )}
-
       {isPending ? (
-        <div className="skeleton-wrap">{Array.from({ length: 8 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
-      ) : results.length === 0 ? (
-        <div className="empty">
-          Không tìm thấy gì khớp{q ? ` “${q}”` : ""}{tags.length ? ` với từ khóa ${tags.join(" + ")}` : ""}.
-          {canManage && <div style={{ marginTop: 12 }}><button className="btn btn-primary" onClick={() => setEditVenue(null)}>+ Rạp mới</button></div>}
-        </div>
+        <div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>
+      ) : all.length === 0 ? (
+        <FirstVenue canManage={canManage} onAdd={addVenue} />
       ) : (
-        <>
-          <div className="muted vcat-count">
-            {results.length} rạp · {totalItems} hạng mục{searching ? " khớp" : ""}
-            {results.length !== all.length && <> <span className="muted">(trong tổng {all.length} rạp)</span></>}
-          </div>
-          <div className="vcat-list">
-            {results.map(({ v, hits, byItem }) => {
-              const isOpen = open.has(v.id) || byItem;   // gõ trúng hạng mục → rạp tự mở
-              const items = v.items ?? [];
-              return (
-                <div className={`vcat-venue${isOpen ? " open" : ""}`} key={v.id}>
-                  <div className="vcat-head">
-                    {canManage && (
-                      <input type="checkbox" className="vcat-pick" checked={picked.has(v.id)} onChange={() => togglePick(v.id)}
-                        onClick={(e) => e.stopPropagation()} title="Chọn để gắn từ khóa hàng loạt" aria-label={`Chọn ${v.name}`} />
-                    )}
-                    <button type="button" className="vcat-title" onClick={() => toggleOpen(v.id)} aria-expanded={isOpen}>
-                      <span className="vcat-caret" aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
-                      <span className="vcat-name">{v.name}{!v.active && <span className="muted"> (đang tắt)</span>}</span>
-                      <span className="vcat-meta">
-                        {(v.tags ?? []).map((t) => <span className="vcat-tag" key={t}>{t}</span>)}
-                        {v.code && <span className="vcat-code">{v.code}</span>}
-                        <span className="vcat-n">{items.length} hạng mục{byItem && hits.length !== items.length ? ` · ${hits.length} khớp` : ""}</span>
-                      </span>
-                    </button>
-                    {canManage && (
-                      <span className="vcat-acts">
-                        <button className="btn btn-sm" onClick={() => setEditVenue(v)}>Sửa rạp</button>
-                        <button className="btn btn-sm" onClick={() => setMerging(v)} title="Chuyển hết hạng mục sang rạp khác rồi xoá rạp này (khi 1 rạp bị nhập trùng nhiều tên)">⇄ Gộp</button>
-                        <button className="btn btn-sm btn-danger" onClick={() => onDeleteVenue(v)}>Xóa</button>
-                      </span>
-                    )}
-                  </div>
+        <div className={`vn-split${sel ? " has-sel" : ""}`}>
+          {/* ── TRÁI: danh sách rạp ── */}
+          <aside className="vn-left">
+            <input type="search" className="vn-search" value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Tìm rạp hoặc hạng mục…" aria-label="Tìm rạp hoặc hạng mục" />
 
-                  {isOpen && (
-                    <div className="vcat-body">
-                      {(byItem ? hits : items).length === 0 ? (
-                        <div className="muted vcat-noitem">Rạp này chưa có hạng mục nào.</div>
-                      ) : (
-                        <table className="vcat-items">
-                          <thead>
-                            <tr>
-                              <th scope="col">Hạng mục</th>
-                              <th scope="col">Kích thước</th>
-                              <th scope="col">ĐVT</th>
-                              <th scope="col" style={{ textAlign: "right" }}>SL tự điền</th>
-                              <th scope="col">Nhóm</th>
-                              {canManage && <th scope="col" aria-label="Thao tác" />}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(byItem ? hits : items).map((it) => (
-                              <tr key={it.id} className={it.active ? "" : "vcat-off"}>
-                                <td><b>{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
-                                  {it.note && <div className="vcat-note">{it.note}</div>}</td>
-                                <td>{it.dim || <span className="muted">—</span>}</td>
-                                <td>{it.unit || <span className="muted">—</span>}</td>
-                                <td style={{ textAlign: "right" }}>{slText(it)}</td>
-                                <td><span className="muted">{it.cat}</span></td>
-                                {canManage && (
-                                  <td className="vcat-row-acts">
-                                    <button className="btn btn-sm" onClick={() => setEditItem({ venueId: v.id, rec: it })}>Sửa</button>
-                                    <button className="btn btn-sm btn-danger" onClick={() => onDeleteItem(it)}>Xóa</button>
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                      {byItem && hits.length !== items.length && (
-                        <div className="muted vcat-noitem">Đang lọc theo ô tìm — rạp này còn {items.length - hits.length} hạng mục khác.</div>
-                      )}
-                      {canManage && <QuickAdd venueId={v.id} onAdded={reload} onFull={() => setEditItem({ venueId: v.id, rec: null })} />}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+            {tags.length > 0 && (
+              <div className="vn-tagbar">
+                <button type="button" className={`vn-tag${tag === "" ? " on" : ""}`} onClick={() => setTag("")}>Tất cả</button>
+                {tags.map(([t, n]) => (
+                  <button type="button" key={t} className={`vn-tag${tag === t ? " on" : ""}`} onClick={() => setTag(tag === t ? "" : t)}>
+                    {t} <i>{n}</i>
+                  </button>
+                ))}
+              </div>
+            )}
 
-      {editVenue !== undefined && (
-        <VenueForm rec={editVenue} allTags={tagCounts.map(([t]) => t)}
-          onClose={() => setEditVenue(undefined)} onSaved={() => { setEditVenue(undefined); reload(); }} />
-      )}
-      {editItem && (
-        <ItemForm venueId={editItem.venueId} rec={editItem.rec} readOnly={!canManage}
-          onClose={() => setEditItem(null)} onSaved={() => { setEditItem(null); reload(); }} />
-      )}
-      {merging && (
-        <MergeForm venue={merging} venues={all.filter((x) => x.id !== merging.id)}
-          onClose={() => setMerging(null)} onDone={() => { setMerging(null); reload(); }} />
-      )}
-      {tagging && (
-        <BulkTagForm ids={[...picked]} allTags={tagCounts.map(([t]) => t)}
-          onClose={() => setTagging(false)} onDone={() => { setTagging(false); setPicked(new Set()); reload(); }} />
+            {canManage && <AddVenueRow onAdd={addVenue} />}
+
+            <div className="vn-vlist">
+              {list.length === 0 && <div className="vn-none muted">Không có rạp nào khớp “{q}”.</div>}
+              {list.map(({ v, hitNames }) => (
+                <button type="button" key={v.id} className={`vn-vrow${v.id === sel?.id ? " on" : ""}`} onClick={() => setSelId(v.id)}>
+                  <span className="vn-vname">{v.name}{!v.active && <span className="muted"> (tắt)</span>}</span>
+                  <span className="vn-vsub">
+                    {hitNames.length
+                      ? <em>khớp {hitNames.length} hạng mục</em>
+                      : `${v.items?.length ?? 0} hạng mục`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          {/* ── PHẢI: hạng mục của rạp đang chọn ── */}
+          <section className="vn-right">
+            {sel
+              ? <VenueDetail key={sel.id} venue={sel} venues={all} canManage={canManage} highlight={q}
+                  onBack={() => setSelId(null)} onChanged={reload} onGone={() => { setSelId(null); reload(); }} />
+              : <div className="vn-none muted">Chọn một rạp bên trái.</div>}
+          </section>
+        </div>
       )}
     </div>
   );
 }
 
-// ── Thêm nhanh 1 hạng mục ngay trong rạp (không mở modal) ────────────────────
-// Dán nguyên chuỗi kích thước kiểu sổ tay "(2.675W x 1H)m" là tự ra Rộng × Cao.
-function QuickAdd({ venueId, onAdded, onFull }: { venueId: number; onAdded: () => void; onFull: () => void }) {
-  const [cat, setCat] = useState(CATEGORIES[0]);
+// ── Màn hình khi CHƯA CÓ GÌ: dạy đúng 3 bước, và cho nhập ngay ───────────────
+function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: (n: string) => void }) {
+  const [name, setName] = useState("");
+  if (!canManage) return <div className="empty">Danh mục chưa có rạp nào.</div>;
+  return (
+    <div className="vn-first">
+      <h2>Bắt đầu: thêm rạp đầu tiên</h2>
+      <ol className="vn-steps">
+        <li>Thêm <b>tên rạp</b> (vd: CGV Aeon Tân Phú).</li>
+        <li>Thêm các <b>hạng mục</b> của rạp đó kèm kích thước (vd: Quầy vé lớn — 6.5 × 1 m).</li>
+        <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện ra và tự điền kích thước + số lượng.</li>
+      </ol>
+      <div className="vn-firstform">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(name); setName(""); } }} />
+        <button className="btn btn-primary" onClick={() => { onAdd(name); setName(""); }}>Thêm rạp</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Ô thêm rạp nằm SẴN đầu danh sách (không phải bấm nút mở form) ────────────
+function AddVenueRow({ onAdd }: { onAdd: (n: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="vn-addv">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(name); setName(""); } }} />
+      {name.trim() && <button className="btn btn-sm btn-primary" onClick={() => { onAdd(name); setName(""); }}>Thêm</button>}
+    </div>
+  );
+}
+
+// ── PHẢI: tên rạp + từ khóa + bảng hạng mục + hàng thêm ─────────────────────
+function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, onGone }: {
+  venue: FullVenue; venues: FullVenue[]; canManage: boolean; highlight: string;
+  onBack: () => void; onChanged: () => void; onGone: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(venue.name);
+  const [editing, setEditing] = useState<VenueItemRow | null>(null);
+  const [merging, setMerging] = useState(false);
+  const items = venue.items ?? [];
+  const hl = norm(highlight).split(/\s+/).filter(Boolean);
+  const isHit = (it: VenueItemRow) =>
+    hl.length > 0 && hl.every((t) => norm(`${it.name} ${it.dim || ""}`).includes(t));
+
+  const rename = async () => {
+    const n = name.trim();
+    if (!n || n === venue.name) { setRenaming(false); setName(venue.name); return; }
+    try { await api.updateVenue(venue.id, { name: n }); toast("Đã đổi tên rạp", "success"); setRenaming(false); onChanged(); }
+    catch (ex) { toast(errMsg(ex, "Đổi tên thất bại"), "error"); }
+  };
+  const setTags = async (next: string[]) => {
+    try { await api.updateVenue(venue.id, { tags: next }); onChanged(); }
+    catch (ex) { toast(errMsg(ex, "Lưu từ khóa thất bại"), "error"); }
+  };
+  const delVenue = async () => {
+    if (!(await confirmModal("Xoá rạp", `Xoá "${venue.name}"${items.length ? ` và ${items.length} hạng mục` : ""}? Không lấy lại được.`, { danger: true, confirmText: "Xoá" }))) return;
+    try { await api.deleteVenue(venue.id); toast("Đã xoá rạp", "success"); onGone(); }
+    catch (ex) { toast(errMsg(ex, "Xoá thất bại"), "error"); }
+  };
+  const delItem = async (it: VenueItemRow) => {
+    if (!(await confirmModal("Xoá hạng mục", `Xoá "${it.name}"?`, { danger: true, confirmText: "Xoá" }))) return;
+    try { await api.deleteVenueItem(it.id); toast("Đã xoá", "success"); onChanged(); }
+    catch (ex) { toast(errMsg(ex, "Xoá thất bại"), "error"); }
+  };
+
+  return (
+    <>
+      <div className="vn-rhead">
+        <button className="btn btn-sm vn-back" onClick={onBack}>‹ Danh sách</button>
+        {renaming ? (
+          <input className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+            onBlur={() => void rename()} onKeyDown={(e) => { if (e.key === "Enter") void rename(); if (e.key === "Escape") { setRenaming(false); setName(venue.name); } }} />
+        ) : (
+          <h2 className="vn-rtitle" onDoubleClick={() => canManage && setRenaming(true)} title={canManage ? "Bấm đúp để đổi tên" : undefined}>{venue.name}</h2>
+        )}
+        {canManage && !renaming && (
+          <span className="vn-racts">
+            <button className="btn btn-sm" onClick={() => setRenaming(true)}>Đổi tên</button>
+            {venues.length > 1 && <button className="btn btn-sm" onClick={() => setMerging(true)} title="Dồn hạng mục sang rạp khác rồi xoá rạp này">Gộp</button>}
+            <button className="btn btn-sm btn-danger" onClick={() => void delVenue()}>Xoá rạp</button>
+          </span>
+        )}
+      </div>
+
+      <TagRow tags={venue.tags ?? []} all={venues.flatMap((v) => v.tags ?? [])} canManage={canManage} onChange={setTags} />
+
+      {items.length === 0 ? (
+        <p className="muted vn-hint">Rạp này chưa có hạng mục. Thêm dòng đầu tiên ở dưới — ví dụ “Quầy vé lớn”, kích thước “6.5 x 1”.</p>
+      ) : (
+        <table className="vn-items">
+          <thead>
+            <tr>
+              <th scope="col">Hạng mục</th>
+              <th scope="col">Kích thước</th>
+              <th scope="col">Đơn vị</th>
+              <th scope="col" style={{ textAlign: "right" }}>Số lượng</th>
+              {canManage && <th scope="col" aria-label="Thao tác" />}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it) => {
+              const sl = slOf(it);
+              return (
+                <tr key={it.id} className={`${isHit(it) ? "hit" : ""}${it.active ? "" : " off"}`}>
+                  <td><b>{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
+                    {it.note && <div className="vn-note">{it.note}</div>}</td>
+                  <td>{it.dim || <span className="muted">—</span>}</td>
+                  <td>{it.unit || <span className="muted">—</span>}</td>
+                  <td style={{ textAlign: "right" }}>{sl != null ? numText(sl) : <span className="muted">—</span>}</td>
+                  {canManage && (
+                    <td className="vn-iacts">
+                      <button className="btn btn-sm" onClick={() => setEditing(it)}>Sửa</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => void delItem(it)}>Xoá</button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {canManage && <AddItemRow venueId={venue.id} onAdded={onChanged} />}
+
+      {editing && <ItemModal rec={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged(); }} />}
+      {merging && <MergeModal venue={venue} venues={venues.filter((v) => v.id !== venue.id)} onClose={() => setMerging(false)} onDone={onGone} />}
+    </>
+  );
+}
+
+// ── Từ khóa: sửa TẠI CHỖ bằng chip, không qua form ──────────────────────────
+function TagRow({ tags, all, canManage, onChange }: {
+  tags: string[]; all: string[]; canManage: boolean; onChange: (t: string[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const others = [...new Set(all)].filter((t) => !tags.includes(t)).slice(0, 8);
+  const add = (t: string) => {
+    const v = t.trim();
+    setDraft(""); setAdding(false);
+    if (v && !tags.includes(v)) onChange([...tags, v]);
+  };
+  if (!canManage && !tags.length) return null;
+  return (
+    <div className="vn-tagrow">
+      <span className="muted">Từ khóa:</span>
+      {tags.map((t) => (
+        <span className="vn-tag on" key={t}>{t}
+          {canManage && <button type="button" onClick={() => onChange(tags.filter((x) => x !== t))} aria-label={`Bỏ ${t}`}>✕</button>}
+        </span>
+      ))}
+      {canManage && (adding ? (
+        <input className="vn-taginput" autoFocus value={draft} list="vn-tag-sug" placeholder="tên nhóm…"
+          onChange={(e) => setDraft(e.target.value)} onBlur={() => add(draft)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } if (e.key === "Escape") { setDraft(""); setAdding(false); } }} />
+      ) : (
+        <button type="button" className="vn-tag add" onClick={() => setAdding(true)}>+ từ khóa</button>
+      ))}
+      <datalist id="vn-tag-sug">{others.map((t) => <option key={t} value={t} />)}</datalist>
+      {!tags.length && canManage && <span className="muted vn-taghint">— đặt tên nhóm (vd “hcm”) để lọc nhanh ở cột trái</span>}
+    </div>
+  );
+}
+
+// ── Hàng thêm hạng mục nằm SẴN cuối bảng. Dán nhiều dòng = thêm nhiều hạng mục ──
+function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void }) {
   const [name, setName] = useState("");
   const [dim, setDim] = useState("");
   const [unit, setUnit] = useState("m2");
@@ -265,190 +327,79 @@ function QuickAdd({ venueId, onAdded, onFull }: { venueId: number; onAdded: () =
   const nameRef = useRef<HTMLInputElement>(null);
 
   const { w, h } = parseDim(dim);
-  const area = unit === "m2" && w && h ? qtyRound(w * h) : null;
+  const sl = unit === "m2" && w && h ? qtyRound(w * h) : null;
 
   const add = async () => {
-    if (!name.trim()) { toast("Nhập tên hạng mục đã", "info"); nameRef.current?.focus(); return; }
+    if (!name.trim()) { nameRef.current?.focus(); return; }
     setBusy(true);
     try {
-      await api.createVenueItem(venueId, { cat: cat.trim(), name: name.trim(), dim: dim.trim() || null, w, h, unit: unit.trim() || null });
-      toast("Đã thêm hạng mục", "success");
-      setName(""); setDim("");        // giữ Nhóm + ĐVT để nhập tiếp cho nhanh
-      onAdded();
-      nameRef.current?.focus();
+      await api.createVenueItem(venueId, { name: name.trim(), dim: dim.trim() || null, w, h, unit: unit.trim() || null });
+      setName(""); setDim("");            // giữ Đơn vị để gõ dòng tiếp cho nhanh
+      onAdded(); nameRef.current?.focus();
     } catch (ex) { toast(errMsg(ex, "Thêm thất bại"), "error"); }
     finally { setBusy(false); }
   };
 
-  return (
-    <div className="vcat-quick">
-      <input list="venue-cats" value={cat} onChange={(e) => setCat(e.target.value)} placeholder="Nhóm" className="vcat-q-cat" aria-label="Nhóm" />
-      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên hạng mục (vd: Quầy bắp 2)" className="vcat-q-name" aria-label="Tên hạng mục"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
-      <input value={dim} onChange={(e) => setDim(e.target.value)} placeholder="Dán kích thước: (2.675W x 1H)m" className="vcat-q-dim" aria-label="Kích thước"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
-      <input list="venue-units" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="ĐVT" className="vcat-q-unit" aria-label="ĐVT" />
-      <span className="vcat-q-hint muted">
-        {area != null ? <>→ SL <b>{numText(area)} m²</b></> : w || h ? <>→ {numText(w)}×{numText(h)} m</> : dim ? "chưa đọc được số" : ""}
-      </span>
-      <button className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "+ Thêm"}</button>
-      <button className="btn btn-sm" onClick={onFull} title="Mở form đầy đủ (có SL mặc định, ghi chú…)">Nhiều ô hơn…</button>
-      <datalist id="venue-cats">{CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
-      <datalist id="venue-units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
-    </div>
-  );
-}
-
-// ── Ô nhập từ khóa dạng chip (dùng chung cho form rạp + gắn hàng loạt) ───────
-function TagInput({ value, onChange, suggestions, autoFocus }: {
-  value: string[]; onChange: (v: string[]) => void; suggestions: string[]; autoFocus?: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-  const add = (t: string) => {
-    const v = t.trim();
-    if (v && !value.includes(v)) onChange([...value, v]);
-    setDraft("");
-  };
-  const free = suggestions.filter((s) => !value.includes(s)).slice(0, 12);
-  return (
-    <div>
-      <div className="vcat-taginput">
-        {value.map((t) => (
-          <span className="vcat-tag on" key={t}>{t}
-            <button type="button" onClick={() => onChange(value.filter((x) => x !== t))} aria-label={`Bỏ từ khóa ${t}`}>✕</button>
-          </span>
-        ))}
-        <input value={draft} autoFocus={autoFocus} placeholder={value.length ? "thêm…" : "vd: HCM, khách CGV, ưu tiên…"}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(draft); }
-            else if (e.key === "Backspace" && !draft && value.length) onChange(value.slice(0, -1));
-          }}
-          onBlur={() => add(draft)} />
-      </div>
-      {free.length > 0 && (
-        <div className="vcat-tagsug">
-          <span className="muted">Đang dùng:</span>
-          {free.map((s) => <button type="button" key={s} className="vcat-chip sm" onClick={() => add(s)}>+ {s}</button>)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Form rạp ────────────────────────────────────────────────────────────────
-function VenueForm({ rec, allTags, onClose, onSaved }: {
-  rec: FullVenue | null; allTags: string[]; onClose: () => void; onSaved: () => void;
-}) {
-  const isNew = !rec;
-  const [name, setName] = useState(rec?.name ?? "");
-  const [region, setRegion] = useState(rec?.region ?? "");
-  const [cluster, setCluster] = useState(rec?.cluster ?? "");
-  const [code, setCode] = useState(rec?.code ?? "");
-  const [tags, setTags] = useState<string[]>(rec?.tags ?? []);
-  const [note, setNote] = useState(rec?.note ?? "");
-  const [active, setActive] = useState(rec?.active ?? true);
-  const [err, setErr] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const firstRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { firstRef.current?.focus(); }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const save = async () => {
-    if (!name.trim()) { setFieldErrors({ name: "Vui lòng nhập tên rạp" }); return; }
-    setErr(""); setFieldErrors({}); setSaving(true);
-    // Khu vực cũng nên là 1 từ khóa (để bấm chip ra được) — tự thêm nếu người dùng chưa thêm.
-    const finalTags = region.trim() && !tags.includes(region.trim()) ? [...tags, region.trim()] : tags;
-    const body = { name: name.trim(), region: region.trim(), cluster: cluster.trim() || null, code: code.trim() || null, tags: finalTags, note: note.trim() || null, active };
-    try {
-      if (isNew) await api.createVenue(body); else await api.updateVenue(rec!.id, body);
-      toast("Đã lưu", "success"); onSaved();
-    } catch (ex) {
-      const fe = fieldErrorsFrom(ex);
-      setFieldErrors(fe);
-      setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : errMsg(ex, "Lưu thất bại"));
-      setSaving(false);
+  // Dán nhiều dòng (từ Excel/sheet) → mỗi dòng 1 hạng mục. Tách tên & kích thước theo TAB,
+  // theo chữ "Dimension:", hoặc theo dấu "(" mở đầu cụm số — cách nào có trước thì dùng.
+  const onPaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text/plain");
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) return;                   // 1 dòng → dán bình thường
+    e.preventDefault();
+    setBusy(true);
+    let ok = 0;
+    for (const line of lines) {
+      let nm = line, dm = "";
+      const tab = line.split("\t");
+      const dimAt = line.search(/Dimension\s*:/i);
+      const parenAt = line.search(/\((?=[^)]*[x×])/i);
+      if (tab.length > 1) { nm = tab[0]; dm = tab.slice(1).join(" "); }
+      else if (dimAt >= 0) { nm = line.slice(0, dimAt); dm = line.slice(dimAt).replace(/Dimension\s*:/i, ""); }
+      else if (parenAt > 0) { nm = line.slice(0, parenAt); dm = line.slice(parenAt); }
+      nm = nm.replace(/^[.\-–—•\s]+/, "").trim();
+      dm = dm.trim();
+      if (!nm) continue;
+      const p = parseDim(dm);
+      try {
+        await api.createVenueItem(venueId, { name: nm, dim: dm || null, w: p.w, h: p.h, unit: unit.trim() || null });
+        ok++;
+      } catch { /* bỏ qua dòng lỗi, báo tổng ở cuối */ }
     }
+    setBusy(false); setName(""); setDim("");
+    toast(ok ? `Đã thêm ${ok}/${lines.length} dòng` : "Không thêm được dòng nào", ok ? "success" : "error");
+    onAdded();
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="vf-title" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3 id="vf-title">{isNew ? "Thêm rạp" : "Sửa rạp"}</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
-        </div>
-        <div className="modal-body">
-          {err && <div className="err">⚠ {err}</div>}
-          <div className="grid">
-            <label className="full">
-              <span>Tên rạp <b className="req">*</b></span>
-              <input ref={firstRef} value={name} placeholder="VD: CGV Aeon Tân Phú"
-                aria-invalid={fieldErrors.name ? true : undefined}
-                onChange={(e) => { setName(e.target.value); setFieldErrors((f) => (f.name ? { ...f, name: "" } : f)); }} />
-              {fieldErrors.name && <div className="field-err">{fieldErrors.name}</div>}
-            </label>
-            <label className="full">
-              <span>Từ khóa nhanh <em className="unit">(gõ xong nhấn Enter — bấm chip ở trang ngoài là ra cả nhóm)</em></span>
-              <TagInput value={tags} onChange={setTags} suggestions={allTags} />
-            </label>
-            <label>
-              <span>Khu vực</span>
-              <input value={region} placeholder="HCM / Hà Nội / Đà Nẵng…" onChange={(e) => setRegion(e.target.value)} />
-            </label>
-            <label>
-              <span>Cụm</span>
-              <input value={cluster ?? ""} placeholder="CGV / Lotte / Cinestar…" onChange={(e) => setCluster(e.target.value)} />
-            </label>
-            <label>
-              <span>Viết tắt</span>
-              <input value={code ?? ""} placeholder="HVP, VLM, SVH…" onChange={(e) => setCode(e.target.value)} />
-            </label>
-            <label>
-              <span>Ghi chú</span>
-              <input value={note ?? ""} onChange={(e) => setNote(e.target.value)} />
-            </label>
-            <label className="full" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
-              <span>Đang dùng <em className="unit">(bỏ tick = ẩn khỏi gợi ý, vẫn giữ dữ liệu)</em></span>
-            </label>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
-          <button className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>
-        </div>
-      </div>
+    <div className="vn-additem">
+      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)}
+        placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
+      <input value={dim} onChange={(e) => setDim(e.target.value)} placeholder="Kích thước (vd: 6.5 x 1)" className="vn-ai-dim" aria-label="Kích thước"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
+      <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" />
+      <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
+      <span className="vn-ai-sl muted">{sl != null ? <>= <b>{numText(sl)}</b></> : ""}</span>
+      <button className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
+      <div className="vn-ai-hint muted">Gõ xong nhấn Enter. Dán nhiều dòng cùng lúc cũng được.</div>
     </div>
   );
 }
 
-// ── Form hạng mục (đầy đủ) ──────────────────────────────────────────────────
-function ItemForm({ venueId, rec, readOnly, onClose, onSaved }: {
-  venueId: number; rec: VenueItemRow | null; readOnly: boolean; onClose: () => void; onSaved: () => void;
-}) {
-  const isNew = !rec;
-  const [cat, setCat] = useState(rec?.cat ?? CATEGORIES[0]);
-  const [name, setName] = useState(rec?.name ?? "");
-  const [dim, setDim] = useState(rec?.dim ?? "");
-  const [w, setW] = useState(numText(rec?.w));
-  const [h, setH] = useState(numText(rec?.h));
-  const [unit, setUnit] = useState(rec?.unit ?? "m2");
-  const [qty, setQty] = useState(numText(rec?.qty));
-  const [note, setNote] = useState(rec?.note ?? "");
-  const [active, setActive] = useState(rec?.active ?? true);
-  const [err, setErr] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+// ── Sửa 1 hạng mục (chỉ mở khi bấm Sửa) ─────────────────────────────────────
+function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(rec.name);
+  const [dim, setDim] = useState(rec.dim ?? "");
+  const [w, setW] = useState(numText(rec.w));
+  const [h, setH] = useState(numText(rec.h));
+  const [unit, setUnit] = useState(rec.unit ?? "");
+  const [qty, setQty] = useState(numText(rec.qty));
+  const [note, setNote] = useState(rec.note ?? "");
+  const [active, setActive] = useState(rec.active);
   const [saving, setSaving] = useState(false);
-  const firstRef = useRef<HTMLInputElement>(null);
+  const [err, setErr] = useState("");
 
-  useEffect(() => { firstRef.current?.focus(); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -456,172 +407,71 @@ function ItemForm({ venueId, rec, readOnly, onClose, onSaved }: {
   }, [onClose]);
 
   const toNum = (s: string) => { const t = s.trim().replace(",", "."); return t === "" ? null : Number(t); };
-  const area = unit === "m2" ? (() => { const a = toNum(w), b = toNum(h); return a && b ? qtyRound(a * b) : null; })() : null;
-
-  // Dán chuỗi kích thước → tự điền Rộng/Cao (chỉ khi 2 ô còn trống, không đè số đã sửa tay).
-  const onDimChange = (v: string) => {
+  const sl = unit === "m2" ? (() => { const a = toNum(w), b = toNum(h); return a && b ? qtyRound(a * b) : null; })() : toNum(qty);
+  const onDim = (v: string) => {
     setDim(v);
-    if (w.trim() || h.trim()) return;
+    if (w.trim() || h.trim()) return;   // đã sửa tay thì không đè
     const p = parseDim(v);
     if (p.w) setW(numText(p.w));
     if (p.h) setH(numText(p.h));
   };
 
   const save = async () => {
-    const fe: Record<string, string> = {};
-    if (!name.trim()) fe.name = "Vui lòng nhập tên hạng mục";
-    if (!cat.trim()) fe.cat = "Vui lòng chọn nhóm";
-    if (w.trim() && !Number.isFinite(toNum(w) as number)) fe.w = "Chiều rộng phải là số";
-    if (h.trim() && !Number.isFinite(toNum(h) as number)) fe.h = "Chiều cao phải là số";
-    if (Object.keys(fe).length) { setFieldErrors(fe); return; }
-    setErr(""); setFieldErrors({}); setSaving(true);
-    const body = { cat: cat.trim(), name: name.trim(), dim: dim.trim() || null, w: toNum(w), h: toNum(h), unit: unit.trim() || null, qty: toNum(qty), note: note.trim() || null, active };
+    if (!name.trim()) { setErr("Chưa có tên hạng mục"); return; }
+    setErr(""); setSaving(true);
     try {
-      if (isNew) await api.createVenueItem(venueId, body); else await api.updateVenueItem(rec!.id, body);
+      await api.updateVenueItem(rec.id, { name: name.trim(), dim: dim.trim() || null, w: toNum(w), h: toNum(h), unit: unit.trim() || null, qty: toNum(qty), note: note.trim() || null, active });
       toast("Đã lưu", "success"); onSaved();
-    } catch (ex) {
-      const f = fieldErrorsFrom(ex);
-      setFieldErrors(f);
-      setErr(Object.keys(f).length ? "Vui lòng kiểm tra các ô được tô đỏ." : errMsg(ex, "Lưu thất bại"));
-      setSaving(false);
-    }
+    } catch (ex) { setErr(errMsg(ex, "Lưu thất bại")); setSaving(false); }
   };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="if-title" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3 id="if-title">{isNew ? "Thêm hạng mục" : readOnly ? "Xem hạng mục" : "Sửa hạng mục"}</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
-        </div>
+      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Sửa hạng mục" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Sửa hạng mục</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           {err && <div className="err">⚠ {err}</div>}
           <div className="grid">
-            <label>
-              <span>Nhóm <b className="req">*</b></span>
-              <input list="venue-cats-f" value={cat} disabled={readOnly} aria-invalid={fieldErrors.cat ? true : undefined} onChange={(e) => setCat(e.target.value)} />
-              <datalist id="venue-cats-f">{CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
-              {fieldErrors.cat && <div className="field-err">{fieldErrors.cat}</div>}
-            </label>
-            <label>
-              <span>Tên hạng mục <b className="req">*</b></span>
-              <input ref={firstRef} value={name} disabled={readOnly} placeholder="VD: Quầy bắp 2"
-                aria-invalid={fieldErrors.name ? true : undefined}
-                onChange={(e) => { setName(e.target.value); setFieldErrors((f) => (f.name ? { ...f, name: "" } : f)); }} />
-              {fieldErrors.name && <div className="field-err">{fieldErrors.name}</div>}
-            </label>
-            <label className="full">
-              <span>Kích thước <em className="unit">(dán nguyên như sổ tay — Rộng/Cao tự điền)</em></span>
-              <input value={dim ?? ""} disabled={readOnly} placeholder="VD: (2.675W x 1H)m" onChange={(e) => onDimChange(e.target.value)} />
-            </label>
-            <label>
-              <span>Rộng <em className="unit">(mét)</em></span>
-              <input value={w} disabled={readOnly} inputMode="decimal" placeholder="2,675"
-                aria-invalid={fieldErrors.w ? true : undefined} onChange={(e) => setW(e.target.value)} />
-              {fieldErrors.w && <div className="field-err">{fieldErrors.w}</div>}
-            </label>
-            <label>
-              <span>Cao <em className="unit">(mét)</em></span>
-              <input value={h} disabled={readOnly} inputMode="decimal" placeholder="1"
-                aria-invalid={fieldErrors.h ? true : undefined} onChange={(e) => setH(e.target.value)} />
-              {fieldErrors.h && <div className="field-err">{fieldErrors.h}</div>}
-            </label>
-            <label>
-              <span>ĐVT</span>
-              <input list="venue-units-f" value={unit ?? ""} disabled={readOnly} onChange={(e) => setUnit(e.target.value)} />
-              <datalist id="venue-units-f">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
-            </label>
-            <label>
-              <span>SL mặc định <em className="unit">(khi ĐVT không phải m2)</em></span>
-              <input value={qty} disabled={readOnly} inputMode="decimal" onChange={(e) => setQty(e.target.value)} />
-            </label>
-            <label className="full">
-              <span>Ghi chú <em className="unit">(chất liệu, lưu ý — điền sẵn vào cột Ghi chú của báo giá)</em></span>
-              <input value={note ?? ""} disabled={readOnly} placeholder="VD: PP in KTS, diecut theo hình" onChange={(e) => setNote(e.target.value)} />
-            </label>
+            <label className="full"><span>Tên hạng mục</span>
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+            <label className="full"><span>Kích thước <em className="unit">(ghi sao cũng được — Rộng/Cao tự đọc ra)</em></span>
+              <input value={dim} onChange={(e) => onDim(e.target.value)} placeholder="6.5 x 1" /></label>
+            <label><span>Rộng</span><input value={w} inputMode="decimal" onChange={(e) => setW(e.target.value)} /></label>
+            <label><span>Cao</span><input value={h} inputMode="decimal" onChange={(e) => setH(e.target.value)} /></label>
+            <label><span>Đơn vị</span><input value={unit} onChange={(e) => setUnit(e.target.value)} list="vn-units-m" />
+              <datalist id="vn-units-m"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist></label>
+            <label><span>Số lượng <em className="unit">(khi không tính theo m²)</em></span>
+              <input value={qty} inputMode="decimal" onChange={(e) => setQty(e.target.value)} /></label>
+            <label className="full"><span>Ghi chú <em className="unit">(điền sẵn vào cột Ghi chú của báo giá)</em></span>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="vd: PP in KTS" /></label>
             <label className="full" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={active} disabled={readOnly} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
-              <span>Đang dùng <em className="unit">(bỏ tick = ẩn khỏi gợi ý)</em></span>
-            </label>
+              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
+              <span>Đang dùng <em className="unit">(bỏ tick = ẩn khỏi gợi ý)</em></span></label>
           </div>
-          <p className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>
-            {area != null
-              ? <>Khi chọn hạng mục này, báo giá tự điền <b>SL = {numText(area)} m²</b> (Rộng × Cao).</>
-              : <>Điền <b>Rộng</b> + <b>Cao</b> và để ĐVT là <b>m2</b> thì báo giá sẽ tự tính số lượng m².</>}
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+            {sl != null ? <>Báo giá sẽ tự điền số lượng <b>{numText(sl)}</b>{unit === "m2" ? " m²" : ""}.</> : "Điền Rộng + Cao và để đơn vị là m2 thì số lượng tự tính."}
           </p>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>{readOnly ? "Đóng" : "Hủy"}</button>
-          {!readOnly && <button className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
+          <button className="btn" onClick={onClose}>Huỷ</button>
+          <button className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Gắn từ khóa cho nhiều rạp một lượt ──────────────────────────────────────
-function BulkTagForm({ ids, allTags, onClose, onDone }: {
-  ids: number[]; allTags: string[]; onClose: () => void; onDone: () => void;
-}) {
-  const [add, setAdd] = useState<string[]>([]);
-  const [remove, setRemove] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const submit = async () => {
-    if (!add.length && !remove.length) { toast("Chọn từ khóa muốn gắn hoặc gỡ", "info"); return; }
-    setBusy(true);
-    try { const r = await api.bulkVenueTags(ids, add, remove); toast(`Đã cập nhật từ khóa cho ${r.updated} rạp`, "success"); onDone(); }
-    catch (ex) { toast(errMsg(ex, "Cập nhật thất bại"), "error"); setBusy(false); }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Gắn từ khóa" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>🏷 Gắn từ khóa cho {ids.length} rạp</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
-        </div>
-        <div className="modal-body">
-          <p className="muted" style={{ marginTop: 0 }}>
-            Đặt tên nhóm cho những rạp vừa chọn — sau này bấm chip đó là ra đúng nhóm này. Ví dụ trong HCM tách riêng “khách CGV”, “rạp trung tâm”…
-          </p>
-          <div className="grid">
-            <label className="full">
-              <span>Gắn thêm từ khóa</span>
-              <TagInput value={add} onChange={setAdd} suggestions={allTags} autoFocus />
-            </label>
-            <label className="full">
-              <span>Gỡ bỏ từ khóa <em className="unit">(tùy chọn)</em></span>
-              <TagInput value={remove} onChange={setRemove} suggestions={allTags} />
-            </label>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
-          <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>{busy ? "Đang lưu…" : "Áp dụng"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Gộp rạp (sheet gốc gọi 1 rạp bằng nhiều tên: "LM81" / "Landmark" / "CGV Landmark 81") ──
-function MergeForm({ venue, venues, onClose, onDone }: {
+// ── Gộp rạp (khi lỡ tạo trùng tên) ──────────────────────────────────────────
+function MergeModal({ venue, venues, onClose, onDone }: {
   venue: FullVenue; venues: FullVenue[]; onClose: () => void; onDone: () => void;
 }) {
   const [q, setQ] = useState("");
   const [intoId, setIntoId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const nItems = venue.items?.length ?? venue.itemCount ?? 0;
+  const n = venue.items?.length ?? 0;
   const list = useMemo(() => {
     const nq = norm(q);
-    return (nq ? venues.filter((v) => norm(`${v.name} ${v.region} ${(v.tags ?? []).join(" ")}`).includes(nq)) : venues).slice(0, 60);
+    return (nq ? venues.filter((v) => norm(v.name).includes(nq)) : venues).slice(0, 60);
   }, [venues, q]);
 
   useEffect(() => {
@@ -631,41 +481,33 @@ function MergeForm({ venue, venues, onClose, onDone }: {
   }, [onClose]);
 
   const submit = async () => {
-    if (intoId == null) { toast("Chọn rạp đích trước", "info"); return; }
+    if (intoId == null) return;
     const into = venues.find((v) => v.id === intoId);
-    if (!(await confirmModal("Gộp rạp",
-      `Chuyển ${nItems} hạng mục của "${venue.name}" sang "${into?.name}" rồi XOÁ "${venue.name}"? Không hoàn tác được.`,
-      { danger: true, confirmText: "Gộp" }))) return;
+    if (!(await confirmModal("Gộp rạp", `Dồn ${n} hạng mục của "${venue.name}" sang "${into?.name}" rồi xoá "${venue.name}"?`, { danger: true, confirmText: "Gộp" }))) return;
     setBusy(true);
-    try { const r = await api.mergeVenue(venue.id, intoId); toast(`Đã gộp ${r.movedItems} hạng mục vào "${r.into.name}"`, "success"); onDone(); }
+    try { const r = await api.mergeVenue(venue.id, intoId); toast(`Đã dồn ${r.movedItems} hạng mục sang "${r.into.name}"`, "success"); onDone(); }
     catch (ex) { toast(errMsg(ex, "Gộp thất bại"), "error"); setBusy(false); }
   };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label="Gộp rạp" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>⇄ Gộp “{venue.name}” vào rạp khác</h3>
-          <button className="x" onClick={onClose} aria-label="Đóng">✕</button>
-        </div>
+      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Gộp rạp" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Gộp “{venue.name}” vào rạp khác</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
-          <p className="muted" style={{ marginTop: 0 }}>
-            Chọn rạp ĐÍCH — {nItems} hạng mục của “{venue.name}” sẽ chuyển sang đó, rồi “{venue.name}” bị xoá. Dùng khi cùng một rạp bị nhập trùng dưới nhiều tên.
-          </p>
-          <input className="vs-pick-search" autoFocus placeholder="Tìm rạp đích…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <p className="muted" style={{ marginTop: 0 }}>Chọn rạp giữ lại — {n} hạng mục sẽ dồn sang đó, rạp này bị xoá.</p>
+          <input className="vs-pick-search" autoFocus placeholder="Tìm rạp…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="vs-pick-body">
-            {list.length === 0 && <div className="vs-empty muted">Không tìm thấy rạp nào</div>}
+            {list.length === 0 && <div className="vs-empty muted">Không tìm thấy</div>}
             {list.map((v) => (
               <label className="vs-item-row" key={v.id}>
                 <input type="radio" name="into" checked={intoId === v.id} onChange={() => setIntoId(v.id)} />
-                <span><b>{v.name}</b>{v.region && <span className="muted"> — {v.region}</span>}<br />
-                  <span className="vs-line2">{v.items?.length ?? v.itemCount ?? 0} hạng mục</span></span>
+                <span><b>{v.name}</b><br /><span className="vs-line2">{v.items?.length ?? 0} hạng mục</span></span>
               </label>
             ))}
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Hủy</button>
+          <button className="btn" onClick={onClose}>Huỷ</button>
           <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || intoId == null}>{busy ? "Đang gộp…" : "Gộp"}</button>
         </div>
       </div>
