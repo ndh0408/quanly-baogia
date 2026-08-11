@@ -98,6 +98,37 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
   arm();
 }
 
+/**
+ * Giam bàn phím trong hộp thoại + trả tiêu điểm về chỗ cũ khi đóng.
+ *
+ * `role="dialog" aria-modal="true"` chỉ NÓI với trình đọc màn hình rằng đây là hộp thoại; nó KHÔNG
+ * giữ tiêu điểm lại. Trước đây nhấn Tab vài lần là con trỏ chui ra sau lớp phủ, người dùng bàn phím
+ * (và trình đọc màn hình) lạc vào phần trang bị che mà không biết đường quay lại. Đóng xong tiêu
+ * điểm cũng rơi về <body> thay vì nút vừa bấm.
+ */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function trapFocus(box: HTMLElement) {
+  const previous = document.activeElement as HTMLElement | null;
+  const onTab = (e: KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const items = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    // Ra khỏi hộp (kể cả khi tiêu điểm đang ở ngoài) → kéo về đầu/cuối danh sách trong hộp.
+    if (e.shiftKey && (document.activeElement === first || !box.contains(document.activeElement))) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !box.contains(document.activeElement))) {
+      e.preventDefault(); first.focus();
+    }
+  };
+  document.addEventListener("keydown", onTab, true);
+  return () => {
+    document.removeEventListener("keydown", onTab, true);
+    // Nút gọi hộp thoại có thể đã biến mất (vd xoá dòng) → chỉ trả tiêu điểm nếu còn trong tài liệu.
+    if (previous && document.contains(previous)) previous.focus();
+  };
+}
+
 export function confirmModal(
   title: string,
   message: string,
@@ -113,7 +144,8 @@ export function confirmModal(
         <button class="btn" data-no>Hủy</button>
         <button class="btn ${opts.danger ? "btn-danger" : "btn-primary"}" data-yes>${esc(opts.confirmText ?? "Đồng ý")}</button>
       </div></div>`;
-    const cleanup = () => { back.remove(); document.removeEventListener("keydown", onKey); };
+    let releaseFocus = () => {};
+    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
     const done = (v: boolean) => { cleanup(); resolve(v); };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") done(false);
@@ -124,6 +156,7 @@ export function confirmModal(
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(true));
     document.addEventListener("keydown", onKey);
     document.body.appendChild(back);
+    releaseFocus = trapFocus(back);
     (back.querySelector("[data-yes]") as HTMLElement | null)?.focus();
   });
 }
@@ -143,14 +176,20 @@ export function promptModal(
         <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
       <div class="modal-foot"><button class="btn" data-no>Hủy</button><button class="btn btn-primary" data-yes>${esc(opts.confirmText ?? "Xác nhận")}</button></div></div>`;
     const input = back.querySelector(".pm-input") as HTMLTextAreaElement;
-    const cleanup = () => { back.remove(); document.removeEventListener("keydown", onKey); };
+    let releaseFocus = () => {};
+    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
     const done = (v: string | null) => { cleanup(); resolve(v); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") done(null); };
+    // Ctrl/⌘+Enter gửi (Enter trần phải để xuống dòng vì ô là textarea) — khớp thói quen soạn thảo.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") done(null);
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value.trim()); }
+    };
     back.addEventListener("click", (e) => { if (e.target === back) done(null); });
     back.querySelector("[data-no]")?.addEventListener("click", () => done(null));
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(input.value.trim()));
     document.addEventListener("keydown", onKey);
     document.body.appendChild(back);
+    releaseFocus = trapFocus(back);
     input.focus();
   });
 }

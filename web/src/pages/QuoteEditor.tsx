@@ -5,7 +5,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
-import { ImportExcelModal, type ImportApplyPayload } from "../components/ImportExcelModal";
+import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { takePendingNewQuote } from "../lib/pendingQuote";
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -256,11 +256,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
-    let nAdd = 0, nSheet = 0;
+    let nAdd = 0, nSheet = 0, nNew = 0;
     for (const p of payload.plans) {
+      const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
+      // File có nhiều sheet hơn báo giá → TẠO THÊM sheet, đặt tên đúng tên tab trong file.
+      if (p.targetIndex === NEW_SHEET) {
+        sheets.push({
+          _k: nextK(), templateId: p.templateId ?? activeSheet.templateId,
+          name: p.file.name, groupSubtotal: !!p.file.groupSubtotal,
+          items: stamped, extraTables: [],
+        } as Sheet);
+        nAdd += stamped.length; nSheet++; nNew++;
+        continue;
+      }
       const target = sheets[p.targetIndex];
       if (!target) continue;
-      const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       if (p.mode === "append") target.items.push(...stamped);
       else {
         target.items.splice(0, target.items.length, ...stamped);
@@ -274,7 +284,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (payload.totals.discount != null) q.discount = payload.totals.discount;
     }
     mark(); redraw();
-    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet — kiểm tra lại rồi bấm Lưu`, "success");
+    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` (${nNew} sheet mới)` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
   };
 
   // ── Ý KIẾN KHÁCH theo TỪNG SHEET (ghi ngay, KHÔNG đợi Lưu — giống Chốt/Không chốt) ──────────
@@ -498,6 +508,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           sheets={sheets}
           usesDaysOf={(tid) => !!templates.find((t) => t.id === tid)?.layout?.hasDays}
           addrDetailOf={(tid) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }}
+          // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
+          // không đoán ra thì theo mẫu của sheet đang mở.
+          newSheetTemplateId={(code) => templates.find((t) => t.code === code && t.companyId === q.companyId)?.id ?? activeSheet.templateId}
           onApply={applyImport}
           onClose={() => setImportOpen(false)}
         />

@@ -12,22 +12,26 @@ import { toGridItems, diffItems, diffCounts, kindLabel, type DiffRow } from "../
 const MAX_ROWS_PER_SHEET = 2000;
 
 type TargetMode = "replace" | "append" | "skip";
+/** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
+export const NEW_SHEET = -1;
 type SheetPlan = { targetIndex: number; mode: TargetMode };
 
 export type ImportApplyPayload = {
   /** Theo thứ tự sheet trong FILE — sheet nào bỏ qua thì không có mặt. */
-  plans: { file: ImportedSheet; targetIndex: number; mode: TargetMode; items: M.Item[] }[];
+  plans: { file: ImportedSheet; targetIndex: number; mode: TargetMode; templateId?: number; items: M.Item[] }[];
   totals?: { vatPercent?: number | null; discount?: number | null };
 };
 
 export function ImportExcelModal({
-  quoteId, sheets, usesDaysOf, addrDetailOf, onApply, onClose,
+  quoteId, sheets, usesDaysOf, addrDetailOf, newSheetTemplateId, onApply, onClose,
 }: {
   quoteId?: number;
   /** Các sheet ĐANG CÓ trong báo giá (để chọn nạp vào đâu + đối chiếu trước/sau). */
   sheets: { name?: string | null; templateId?: number; items: M.Item[] }[];
   usesDaysOf: (templateId?: number) => boolean;
   addrDetailOf: (templateId?: number) => boolean;
+  /** Mẫu sẽ dùng cho SHEET MỚI, suy từ mẫu app đoán được của file (không đoán ra thì lấy mẫu sheet đang mở). */
+  newSheetTemplateId: (fileTemplateCode?: string | null) => number | undefined;
   onApply: (payload: ImportApplyPayload) => void;
   onClose: () => void;
 }) {
@@ -58,7 +62,7 @@ export function ImportExcelModal({
         return;
       }
       // Mặc định: sheet thứ n của file → sheet thứ n của báo giá, THAY toàn bộ hạng mục.
-      setPlans(ok.map((_s, i) => ({ targetIndex: Math.min(i, sheets.length - 1), mode: "replace" as TargetMode })));
+      setPlans(ok.map((_s, i) => ({ targetIndex: i < sheets.length ? i : NEW_SHEET, mode: "replace" as TargetMode })));
       setRes(r); setFileName(file.name); setActive(0);
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Không đọc được file");
@@ -70,9 +74,11 @@ export function ImportExcelModal({
     const fs = usable[active];
     const plan = plans[active];
     if (!fs || !plan) return null;
-    const target = sheets[plan.targetIndex];
-    const usesDays = usesDaysOf(target?.templateId);
-    const addrDetail = addrDetailOf(target?.templateId);
+    const isNew = plan.targetIndex === NEW_SHEET;
+    const tplId = isNew ? newSheetTemplateId(fs.templateCode) : sheets[plan.targetIndex]?.templateId;
+    const target = isNew ? null : sheets[plan.targetIndex];
+    const usesDays = usesDaysOf(tplId);
+    const addrDetail = addrDetailOf(tplId);
     const before = target?.items || [];
     const baseRow = plan.mode === "append" ? before.length : 0;
     const conv = toGridItems(fs.items, { usesDays, addrDetail, baseRow });
@@ -82,8 +88,8 @@ export function ImportExcelModal({
       return k >= 0 ? fs.items[k]?.warn : undefined;
     };
     const rows = diffItems(before, after, usesDays, warnOf);
-    return { fs, plan, target, usesDays, addrDetail, before, after, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas };
-  }, [usable, plans, active, sheets, usesDaysOf, addrDetailOf]);
+    return { fs, plan, target, isNew, usesDays, addrDetail, before, after, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas };
+  }, [usable, plans, active, sheets, usesDaysOf, addrDetailOf, newSheetTemplateId]);
 
   const setPlan = (i: number, patch: Partial<SheetPlan>) =>
     setPlans((p) => p.map((x, k) => (k === i ? { ...x, ...patch } : x)));
@@ -94,7 +100,7 @@ export function ImportExcelModal({
     const seen = new Map<number, number>();
     const dup = new Set<number>();
     plans.forEach((p, i) => {
-      if (!p || p.mode === "skip") return;
+      if (!p || p.mode === "skip" || p.targetIndex === NEW_SHEET) return;
       if (seen.has(p.targetIndex)) { dup.add(seen.get(p.targetIndex)!); dup.add(i); }
       else seen.set(p.targetIndex, i);
     });
@@ -108,18 +114,20 @@ export function ImportExcelModal({
     usable.forEach((fs, i) => {
       const plan = plans[i];
       if (!plan || plan.mode === "skip") return;
-      const target = sheets[plan.targetIndex];
-      const usesDays = usesDaysOf(target?.templateId);
-      const addrDetail = addrDetailOf(target?.templateId);
-      const baseRow = plan.mode === "append" ? (target?.items || []).length : 0;
+      const isNew = plan.targetIndex === NEW_SHEET;
+      const tplId = isNew ? newSheetTemplateId(fs.templateCode) : sheets[plan.targetIndex]?.templateId;
+      const target = isNew ? null : sheets[plan.targetIndex];
+      const usesDays = usesDaysOf(tplId);
+      const addrDetail = addrDetailOf(tplId);
+      const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
       const conv = toGridItems(fs.items, { usesDays, addrDetail, baseRow });
-      out.push({ file: fs, targetIndex: plan.targetIndex, mode: plan.mode, items: conv.items });
+      out.push({ file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: conv.items });
       // VAT/giảm giá lấy theo sheet ĐANG NẠP đầu tiên (không phải sheet đầu file — có thể bị bỏ qua).
       if (!totals && applyTotals && fs.totals) totals = { vatPercent: fs.totals.vatPercent ?? null, discount: fs.totals.discount ?? null };
     });
     if (!out.length) { toast("Chưa chọn sheet nào để nạp", "info"); return; }
     // Trần lưu của app (khớp sheetSchema server) — báo TRƯỚC khi nạp thay vì để lỗi lúc bấm Lưu.
-    const over = out.find((p) => ((p.mode === "append" ? (sheets[p.targetIndex]?.items.length || 0) : 0) + p.items.length) > MAX_ROWS_PER_SHEET);
+    const over = out.find((p) => ((p.mode === "append" && p.targetIndex !== NEW_SHEET ? (sheets[p.targetIndex]?.items.length || 0) : 0) + p.items.length) > MAX_ROWS_PER_SHEET);
     if (over) { toast(`Sheet “${over.file.name}” vượt ${MAX_ROWS_PER_SHEET} dòng/sheet — hãy tách bớt sang sheet khác rồi nạp lại`, "error"); return; }
     onApply({ plans: out, totals });
     onClose();
@@ -193,13 +201,15 @@ export function ImportExcelModal({
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPlan(i, { targetIndex: Number(e.target.value) })}>
                           {sheets.map((sh, k) => <option key={k} value={k}>{sh.name || `Sheet ${k + 1}`}</option>)}
+                          <option value={NEW_SHEET}>＋ Thêm sheet mới</option>
                         </select>
                       </td>
                       <td>
                         <select value={plans[i]?.mode ?? "replace"} onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPlan(i, { mode: e.target.value as TargetMode })}>
-                          <option value="replace">Thay toàn bộ hạng mục</option>
-                          <option value="append">Nối vào cuối</option>
+                          {plans[i]?.targetIndex === NEW_SHEET
+                            ? <option value="replace">Tạo sheet “{s.name}”</option>
+                            : <><option value="replace">Thay toàn bộ hạng mục</option><option value="append">Nối vào cuối</option></>}
                           <option value="skip">Bỏ qua sheet này</option>
                         </select>
                       </td>
@@ -245,7 +255,7 @@ export function ImportExcelModal({
 
                   {/* 3. Trước / sau */}
                   <h4 style={{ margin: "18px 0 8px" }}>
-                    3. Trước / sau khi nạp vào “{view.target?.name || `Sheet ${(view.plan.targetIndex ?? 0) + 1}`}”
+                    3. Trước / sau khi nạp vào {view.isNew ? <>sheet MỚI “{view.fs.name}”</> : <>“{view.target?.name || `Sheet ${(view.plan.targetIndex ?? 0) + 1}`}”</>}
                   </h4>
                   <div className="import-summary">
                     <span className="import-badge same">{view.counts.same} giữ nguyên</span>
