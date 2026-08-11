@@ -29,6 +29,14 @@ ssh "$SSH" '
   PIIK=$(docker exec quanly-app printenv PII_ENC_KEY 2>/dev/null || echo "")
   NET=$(docker inspect quanly-postgres -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{\$k}}{{end}}")
 
+  # Bucket RIÊNG cho bộ test. Không tạo sẵn thì mọi test đụng lưu trữ đỏ vì "NoSuchBucket" — và
+  # tệ hơn, dễ bị hiểu nhầm là lỗi ứng dụng. Tạo trước, dọn nội dung sau mỗi lượt chạy.
+  if [ -n "$S3EP" ]; then
+    docker run --rm --network "$NET" --entrypoint sh minio/mc:latest -c "
+      mc alias set t $S3EP $S3AK $S3SK >/dev/null 2>&1 &&
+      mc mb -p t/quanly-test >/dev/null 2>&1;
+      mc anonymous set none t/quanly-test >/dev/null 2>&1; true" >/dev/null 2>&1
+  fi
   echo "▶ [1/3] tạo DB test sạch (quanly_test)"
   docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "DROP DATABASE IF EXISTS quanly_test;" >/dev/null 2>&1
   docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "CREATE DATABASE quanly_test;" >/dev/null 2>&1
