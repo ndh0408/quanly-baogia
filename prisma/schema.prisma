@@ -137,6 +137,18 @@ model PersonnelRecord {
   bankName     String? // NGÂN HÀNG
   phone        String? // SỐ ĐIỆN THOẠI
 
+  // ── MÃ HOÁ PII KHI LƯU (bước 1/6 — xem SECURITY_AUDIT_2026-08.md §6) ──────────────────────
+  // Cột CỘNG THÊM, chưa ai ghi vào. Cột thô ở trên vẫn là nguồn sự thật cho tới khi cutover.
+  // Tách cột thay vì mã hoá tại chỗ để: migration không đụng dữ liệu (rollback = bỏ cột), và
+  // giai đoạn đọc-song-song có thể so đối chiếu hai bên trước khi tin bản mã.
+  // piiVersion: 0 = chưa backfill · 1 = đã có bản mã v1. Dùng để đếm tiến độ backfill và để
+  // câu lệnh backfill chạy lại được (idempotent) mà không mã hoá đè lần hai.
+  idCardEnc      String? // CCCD — bản mã AES-256-GCM (src/piiBox.ts)
+  idCardIdx      String? // chỉ mục mù HMAC — tra cứu BẰNG-ĐÚNG khi cột thô đã bỏ
+  bankAccountEnc String? // STK — bản mã
+  salaryEnc      String? // LƯƠNG — bản mã (Decimal chuyển sang chuỗi trước khi mã hoá)
+  piiVersion     Int     @default(0)
+
   // Lương / thuế
   salary        Decimal? @db.Decimal(18, 2) // LƯƠNG
   pit           Decimal? @db.Decimal(18, 2) // THUẾ TNCN
@@ -182,6 +194,7 @@ model PersonnelRecord {
   @@index([paidById])
   @@index([confirmedById])
   @@index([deletedAt])
+  @@index([idCardIdx]) // tra cứu BẰNG-ĐÚNG theo CCCD sau khi cột thô bị bỏ
 }
 
 // Danh bạ NHÂN VIÊN — kho thông tin cá nhân tái dùng. Khi tạo hồ sơ Nhân sự, chọn 1 người
@@ -202,12 +215,19 @@ model Employee {
   bankName     String? // NGÂN HÀNG
   phone        String? // SỐ ĐIỆN THOẠI
 
+  // Mã hoá PII khi lưu — cùng cơ chế với PersonnelRecord (Employee không có cột lương).
+  idCardEnc      String?
+  idCardIdx      String?
+  bankAccountEnc String?
+  piiVersion     Int     @default(0)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   @@index([createdById])
   @@index([deletedAt])
+  @@index([idCardIdx]) // tra cứu BẰNG-ĐÚNG theo CCCD sau khi cột thô bị bỏ
 }
 
 model RefreshToken {
