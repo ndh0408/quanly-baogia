@@ -2766,6 +2766,13 @@ textarea[aria-invalid="true"] {
   padding: 14px 16px 16px;
   background: var(--card);
   min-height: 220px;
+  /* Bảng hạng mục có min-content rộng hơn cột lưới ở các khổ trung gian (đo được: 1117px ở khung
+     nhìn 1024px). Không chặn ở đây thì CẢ TRANG cuộn ngang — thanh cuộn của trang, không phải của
+     bảng — nên tiêu đề/menu cũng trôi theo. `min-width: 0` để ô lưới được phép co dưới min-content
+     của nội dung; `overflow-x: auto` để phần thừa cuộn TRONG khung bảng.
+     Trước đây chỉ xử lý ở @media (max-width: 900px) nên khoảng 901–1180px bị hở. */
+  min-width: 0;
+  overflow-x: auto;
 }
 .vn-rhead {
   display: flex;
@@ -2990,7 +2997,7 @@ textarea[aria-invalid="true"] {
 .import-plan {
   table-layout: fixed;
   width: 100%;
-  min-width: 660px;   /* màn hẹp: cuộn ngang TRONG bảng, không làm vỡ modal */
+  min-width: 660px; /* màn hẹp: cuộn ngang TRONG bảng, không làm vỡ modal */
 }
 .import-plan th:nth-child(1),
 .import-plan td:nth-child(1) {
