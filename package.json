@@ -24,7 +24,12 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "postinstall": "node scripts/patch-codex-security-9router.mjs",
     "prepare": "husky || true",
+    "security:scan": "codex-security scan .",
+    "security:scan:deep": "codex-security scan . --mode deep",
+    "security:scan:diff": "codex-security scan . --working-tree",
+    "security:scan:dry": "codex-security scan . --dry-run",
     "format": "prettier --write ."
   },
   "engines": {
@@ -69,6 +74,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@openai/codex-security": "^0.1.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.8.1",
     "@types/connect-pg-simple": "^7.0.3",

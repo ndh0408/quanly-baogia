@@ -91,3 +91,14 @@ spa-smoke.png
 /e2e-probe-shift.mjs
 /e2e-probe-cells.mjs
 /gridxl.png
+/e2e-grid-excel2.mjs
+/e2e-venues-page.mjs
+/e2e-import-excel.mjs
+/tmp-e2e-import.xlsx
+
+# BMAD (cài 2026-07-28) + skill Claude: công cụ CỦA MÁY LẬP TRÌNH, không thuộc sản phẩm.
+# .claude/ 18MB (89 skill) — clone về nặng vô ích; _bmad/ là manifest bản cài trên máy này;
+# _bmad-output/ là sản phẩm sinh ra. CLAUDE.md thì VẪN commit (hướng dẫn chung cho repo).
+/.claude/
+/_bmad/
+/_bmad-output/
