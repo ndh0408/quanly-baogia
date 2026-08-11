@@ -8,6 +8,30 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// ⚠️ TUYỆT ĐỐI KHÔNG ĐƯỢC LÀM GÃY `npm ci`.
+//
+// Đây là script TIỆN ÍCH cho môi trường lập trình, chạy qua `postinstall` nên nó nằm chắn ngang MỌI
+// lượt cài đặt: Docker build, CI, và container test trên VM dev. Ngày 2026-08-11 nó ném lỗi ở dòng
+// "Could not configure UTF-8 and the Codex CLI path…" trên node:22-alpine → `npm ci` exit 1 →
+// `test-on-dev.sh` chết câm (script đó nuốt output bằng `>/dev/null 2>&1`) và CI Linux cũng sẽ chết
+// y hệt. Một công cụ quét bảo mật CHỈ dùng lúc code không đáng để chặn đường triển khai.
+//
+// Hai lớp bảo vệ:
+//   1. Bỏ qua trên hệ điều hành không phải Windows — toàn bộ bản vá là để xử lý chuyện của Windows
+//      (spawn `codex.cmd`, đường dẫn runtime Windows, chính sách chặn shell sandbox).
+//   2. Mọi lỗi ngoài dự kiến → CẢNH BÁO rồi thoát 0, không bao giờ exit khác 0.
+const softExit = (why) => {
+  console.warn(`⚠️  Bỏ qua vá codex-security (không ảnh hưởng ứng dụng): ${why}`);
+  process.exit(0);
+};
+process.on("uncaughtException", (e) => softExit(e?.message || String(e)));
+process.on("unhandledRejection", (e) => softExit(e?.message || String(e)));
+
+if (process.platform !== "win32") {
+  console.log("Bỏ qua vá codex-security: bản vá chỉ dành cho Windows.");
+  process.exit(0);
+}
+
 const packageRoot = new URL("../node_modules/@openai/codex-security/", import.meta.url);
 if (!existsSync(fileURLToPath(new URL("dist/config.js", packageRoot)))) {
   console.log("Bỏ qua vá codex-security: không có gói (bản cài production / --omit=dev).");
