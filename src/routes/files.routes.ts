@@ -206,8 +206,12 @@ router.get(
  *   • `size` bắt buộc, ≤ 10 MB, và được ĐƯA VÀO CHỮ KÝ (Content-Length) → kho lưu trữ tự từ chối
  *     request khác kích thước, không phụ thuộc thiện chí của client;
  *   • `contentType` nằm trong chữ ký (chỉ kiểu trong allowlist);
- *   • object được đánh dấu `pending=1` và CHƯA DÙNG ĐƯỢC cho tới khi qua /finalize (HEAD + dò
- *     magic bytes). Object chưa finalize không được gắn vào bất kỳ tài nguyên nghiệp vụ nào.
+ *   • một hàng `UploadObject` ở trạng thái `pending` được tạo TRƯỚC khi ký; `canAccessKey` từ chối
+ *     mọi khoá `uploads/` chưa `finalized` — kể cả cho admin. Đây là RÀNG BUỘC kiểm tra được trong
+ *     CSDL, không phải quy ước trong chú thích (bản đầu chỉ ghi "pending=1" mà không có gì đánh dấu,
+ *     nên bỏ qua /finalize rồi gọi thẳng /sign-download là tải được nội dung chưa ai kiểm);
+ *   • URL đã ký CHỈ trỏ vào `uploads/staging/` — vùng KHÔNG BAO GIỜ tải về được. Sau khi xác minh,
+ *     server tự sao chép sang khoá cuối. Nhờ vậy URL còn hạn cũng không ghi đè được thứ đã kiểm.
  */
 router.post(
   "/sign-upload",
