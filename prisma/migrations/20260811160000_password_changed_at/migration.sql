@@ -1,0 +1,11 @@
+-- Mốc đổi thông tin xác thực gần nhất — chốt vô hiệu hoá phiên ĐỘC LẬP với kho phiên.
+--
+-- Trước đây việc "giết phiên cũ sau khi đổi mật khẩu" chỉ dựa vào DELETE trên bảng user_sessions.
+-- Hai điểm yếu: (1) chỉ chạy được khi dùng kho phiên PG; (2) lỗi bị nuốt và chỉ ghi log, nên một
+-- trục trặc DB làm kiểm soát bảo mật im lặng fail-open đúng lúc cần nhất.
+--
+-- CHỈ CỘNG THÊM, nullable. ROLLBACK: ALTER TABLE "User" DROP COLUMN "passwordChangedAt";
+--
+-- Cố ý để NULL cho tài khoản hiện có: NULL = "chưa từng đổi kể từ khi có cơ chế này" → mọi phiên
+-- đang đăng nhập vẫn hợp lệ. Đặt mốc = now() cho tất cả sẽ đá toàn bộ nhân viên ra ngay lúc deploy.
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordChangedAt" TIMESTAMP(3);

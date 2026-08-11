@@ -123,6 +123,13 @@ model User {
   inviteTokenHash String?
   inviteExpiresAt DateTime?
 
+  // Mốc đổi thông tin xác thực gần nhất (đổi mật khẩu / đặt lại / admin reset).
+  // MỌI phiên và MỌI access token phát hành TRƯỚC mốc này đều bị từ chối ở middleware.
+  // Đây là chốt ĐỘC LẬP với kho phiên: xoá hàng trong user_sessions chỉ chạy được với kho PG và
+  // còn nuốt lỗi (chỉ log), nên nếu DB trục trặc thì phiên bị đánh cắp vẫn sống. So mốc thời gian
+  // thì không thể fail-open — thiếu dữ liệu là từ chối.
+  passwordChangedAt DateTime?
+
   failedAttempts Int       @default(0)
   lockedUntil    DateTime?
   lastLoginAt    DateTime?

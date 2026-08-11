@@ -9,5 +9,7 @@ declare module "express-session" {
     displayName?: string;
     username?: string;
     permissions?: string[]; // tập quyền HIỆU LỰC per-user (resolve mỗi request) — nguồn phân quyền
+    /** Mốc (ms) phiên được thiết lập — so với User.passwordChangedAt để vô hiệu hoá phiên cũ. */
+    authAt?: number;
   }
 }

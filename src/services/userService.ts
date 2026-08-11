@@ -163,7 +163,12 @@ export async function updateUser(req: Request) {
 
   const { password, ...rest } = req.body;
   const data = { ...rest };
-  if (password) data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
+  if (password) {
+    data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
+    // Admin đặt lại mật khẩu = đổi thông tin xác thực → đóng mốc để MỌI phiên và access token cũ
+    // của tài khoản đó chết ngay, không phụ thuộc việc xoá hàng trong kho phiên có thành công không.
+    data.passwordChangedAt = new Date();
+  }
   // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
   if (data.permissions !== undefined) {
     data.permissions = sanitizePerms(data.permissions);

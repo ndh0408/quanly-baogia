@@ -33,10 +33,17 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
     // immediately (within the access-token TTL the token is otherwise valid).
     const user = await prisma.user.findUnique({
       where: { id: Number(sub) },
-      select: { id: true, role: true, username: true, active: true, lockedUntil: true, permissions: true, canSign: true },
+      select: { id: true, role: true, username: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
     if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
       return next(); // fall through unauthenticated → requireAuth/requireRole reject
+    }
+    // Access token phát hành TRƯỚC lần đổi mật khẩu gần nhất → coi như không có token.
+    // Không có chốt này thì đổi mật khẩu vẫn để lọt một cửa sổ bằng TTL của access token (15 phút)
+    // trong đó token cũ vẫn dùng được — refresh token thì đã bị thu hồi, nhưng cái đang cầm thì chưa.
+    const iatMs = typeof payload !== "string" && payload.iat ? payload.iat * 1000 : 0;
+    if (user.passwordChangedAt && iatMs && iatMs < user.passwordChangedAt.getTime()) {
+      return next();
     }
     // Synthesize a session-like object so downstream code stays identical.
     req.session = req.session || {};
@@ -84,7 +91,7 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { role: true, active: true, lockedUntil: true, permissions: true, canSign: true },
+      select: { role: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
     if (!user || user.active === false || (user.lockedUntil && user.lockedUntil > new Date())) {
       return req.session.destroy(() =>
@@ -93,6 +100,23 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
           code: "session_revoked",
         })
       );
+    }
+    // Phiên được thiết lập TRƯỚC lần đổi mật khẩu gần nhất → huỷ ngay.
+    //
+    // Đây là chốt CHÍNH để "đổi mật khẩu thì mọi phiên khác chết", chứ không phải DELETE trên bảng
+    // user_sessions. Cái DELETE kia chỉ chạy với kho phiên PG và còn nuốt lỗi (chỉ ghi log), nên một
+    // trục trặc DB sẽ làm nó im lặng fail-open đúng vào lúc người dùng vừa tuyên bố "tôi nghi bị lộ".
+    // So mốc thời gian thì không fail-open được: thiếu `authAt` cũng bị coi là phiên cũ.
+    if (user.passwordChangedAt) {
+      const authAt = Number(req.session.authAt ?? 0);
+      if (authAt < user.passwordChangedAt.getTime()) {
+        return req.session.destroy(() =>
+          res.status(401).json({
+            error: "Phiên đã kết thúc — mật khẩu vừa được thay đổi",
+            code: "session_revoked",
+          })
+        );
+      }
     }
     if (req.session.role !== user.role) req.session.role = user.role; // authoritative role
     // Resolve quyền per-user MỖI request (cookie path) → admin đổi quyền user là hiệu lực ngay request kế.

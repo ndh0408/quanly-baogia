@@ -28,6 +28,9 @@ export async function establishSession(req: Request, user: SessionSeed) {
   req.session.displayName = user.displayName;
   req.session.username = user.username;
   req.session.permissions = resolveUserPermissions(user.role, user.permissions, user.canSign);
+  // Mốc thiết lập phiên — middleware so với User.passwordChangedAt để giết phiên cũ sau khi
+  // đổi mật khẩu, độc lập với việc kho phiên có xoá được hàng hay không.
+  req.session.authAt = Date.now();
   await new Promise<void>((resolve, reject) =>
     req.session.save((err: unknown) => (err ? reject(err) : resolve()))
   );
@@ -70,7 +73,7 @@ export async function changePassword(req: Request) {
   }
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST) },
+    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST), passwordChangedAt: new Date() },
   });
   // Thu hồi mọi refresh token — chúng sống độc lập với cookie nên không tự chết theo phiên.
   await revokeAllForUser(user.id);
@@ -158,6 +161,9 @@ export async function acceptInvite(req: Request) {
     where: { id: user.id },
     data: {
       passwordHash: await bcrypt.hash(password, config.BCRYPT_COST),
+      // Đường này kiêm luôn ĐẶT LẠI mật khẩu → cũng phải đóng mốc, nếu không thì mọi phiên cũ của
+      // tài khoản (kể cả phiên kẻ tấn công đang giữ) vẫn sống sau khi nạn nhân đặt lại mật khẩu.
+      passwordChangedAt: new Date(),
       active: true,
       displayName: displayName?.trim() || user.displayName,
       phone: phone?.trim() || null,

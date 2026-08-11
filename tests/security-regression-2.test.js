@@ -124,6 +124,21 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
       expect((await A.pwd.get("/api/auth/me")).status).toBe(200);
     });
 
+    it("access token JWT phát hành TRƯỚC khi đổi mật khẩu bị từ chối", async () => {
+      const u = await makeUser("jwt", "manager");
+      const tok = await request(app).post("/api/auth/token").send({ username: u.username, password: PASSWORD });
+      expect(tok.status).toBe(200);
+      const bearer = `Bearer ${tok.body.accessToken}`;
+      // Còn sống trước khi đổi.
+      expect((await request(app).get("/api/auth/me").set("Authorization", bearer)).status).toBe(200);
+
+      await A.jwt.post("/api/auth/change-password").send({ oldPassword: PASSWORD, newPassword: "MatKhauMoi456" });
+
+      // Refresh token đã bị thu hồi từ trước; đây là chốt cho ACCESS token đang cầm — nếu thiếu,
+      // token cũ vẫn dùng được suốt TTL 15 phút sau khi nạn nhân vừa đổi mật khẩu.
+      expect((await request(app).get("/api/auth/me").set("Authorization", bearer)).status).toBe(401);
+    });
+
     it("định danh phiên của chính người đổi mật khẩu được XOAY (chống dùng lại chuỗi phiên cũ)", async () => {
       const u = await makeUser("pwd2", "manager");
       const agent = request.agent(app);
