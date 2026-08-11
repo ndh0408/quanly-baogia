@@ -1,8 +1,10 @@
 // Mã hoá PII khi lưu trữ (at-rest) — dành cho các trường có sức sát thương cao nhất nếu bản dump
 // CSDL bị lộ: CCCD, số tài khoản ngân hàng, lương.
 //
-// ĐÂY LÀ BƯỚC 1 trong lộ trình 6 bước (xem SECURITY_AUDIT_2026-08.md §6). Module này CHƯA được
-// gọi ở đâu cả — nó là nền để bước 2 (ghi-song-song) dựng lên. Nạp nó vào không đổi hành vi gì.
+// Đây là lớp mật mã thuần. Bản đồ trường + ghi/đọc song song nằm ở `src/piiFields.ts`; tầng service
+// KHÔNG gọi thẳng vào đây. Backfill ở `scripts/pii-backfill.mjs`.
+// (Chú thích cũ ghi "module này CHƯA được gọi ở đâu cả" — đúng ở bước 1, sai từ khi nối bước 2.
+//  Một chú thích bảo mật lỗi thời tạo cảm giác an toàn giả, nên sửa ngay khi hành vi đổi.)
 //
 // ── VÌ SAO TÁCH KHOÁ RIÊNG ───────────────────────────────────────────────────
 // Không dùng lại MFA_ENC_KEY. Hai kho bí mật này có vòng đời và bán kính thiệt hại khác nhau: xoay

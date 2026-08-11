@@ -10,6 +10,7 @@ import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./proje
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
+import { storeProof, removeProof, readProofDataUrl } from "../paymentProof.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere, isPiiEncryptionEnabled } from "../piiFields.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
@@ -77,7 +78,7 @@ export async function listPersonnel(req: Request) {
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
   // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
   const proofIds = new Set((await prisma.personnelRecord.findMany({
-    where: { id: { in: data.map((r) => r.id) }, paymentProof: { not: null } }, select: { id: true },
+    where: { id: { in: data.map((r) => r.id) }, OR: [{ paymentProof: { not: null } }, { paymentProofKey: { not: null } }] }, select: { id: true },
   })).map((r) => r.id));
   const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
@@ -169,20 +170,42 @@ export async function deletePersonnel(req: Request) {
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true, paymentProof: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const paid = (req.body as any).paid as boolean;
-  // Ảnh chứng từ (base64 data URL, tùy chọn). paid + có ảnh → lưu; bỏ thanh toán → XÓA ảnh.
+  // Ảnh chứng từ. GHI MỚI luôn vào KHO OBJECT — cột base64 cũ chỉ còn để ĐỌC bản ghi chưa chuyển.
   const proof = (req.body as any).paymentProof as string | undefined;
-  const data: Record<string, unknown> = paid
-    ? { paidAt: new Date(), paidById: req.session.userId, ...(proof !== undefined ? { paymentProof: proof || null } : {}) }
-    : { paidAt: null, paidById: null, paymentProof: null };
+  const data: Record<string, unknown> = {};
+  const clearProofCols = {
+    paymentProof: null, paymentProofKey: null, paymentProofMime: null,
+    paymentProofSize: null, paymentProofSha256: null, paymentProofUploadedAt: null,
+  };
+  if (paid) {
+    data.paidAt = new Date();
+    data.paidById = req.session.userId;
+    if (proof !== undefined) {
+      if (proof) {
+        const meta = await storeProof(id, proof);
+        // Ảnh MỚI luôn vào kho; đồng thời XOÁ cột base64 để hàng này không còn giữ hai bản.
+        Object.assign(data, meta, { paymentProof: null });
+        await removeProof(before.paymentProofKey);   // dọn ảnh cũ nếu thay ảnh
+      } else {
+        Object.assign(data, clearProofCols);
+        await removeProof(before.paymentProofKey);
+      }
+    }
+  } else {
+    Object.assign(data, { paidAt: null, paidById: null }, clearProofCols);
+    await removeProof(before.paymentProofKey);
+  }
   const rec = await prisma.personnelRecord.update({
     where: { id }, data,
     include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
     omit: { paymentProof: true },   // không trả base64 về client
   });
-  const newProof = paid ? (proof !== undefined ? (proof || null) : before.paymentProof) : null;
+  const newProof = paid
+    ? (proof !== undefined ? (proof || null) : (before.paymentProofKey || before.paymentProof))
+    : null;
   await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
     resource: "personnel", resourceId: id,
     before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
@@ -194,10 +217,17 @@ export async function markPayment(req: Request) {
 
 // Lấy ảnh chứng từ thanh toán (base64) on-demand — gác theo quyền XEM hồ sơ (read own/all).
 export async function getPaymentProof(req: Request) {
+  // Quyền bám vào BẢN GHI NGHIỆP VỤ (ai đọc được hồ sơ thì đọc được chứng từ), không bám vào người
+  // đã tải ảnh lên — kế toán tải lên nhưng người xem hồ sơ cũng phải xem được.
   await loadAuthorized(req, "read");
-  const rec = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, select: { paymentProof: true } });
-  if (!rec?.paymentProof) throw httpError(404, "Chưa có ảnh chứng từ");
-  return { paymentProof: rec.paymentProof };
+  const rec = await prisma.personnelRecord.findFirst({
+    where: { id: (req.params as any).id },
+    select: { paymentProof: true, paymentProofKey: true, paymentProofMime: true },
+  });
+  if (!rec || (!rec.paymentProofKey && !rec.paymentProof)) throw httpError(404, "Chưa có ảnh chứng từ");
+  const dataUrl = await readProofDataUrl(rec);   // ưu tiên kho object, rơi về base64 nếu chưa chuyển
+  if (!dataUrl) throw httpError(404, "Chưa có ảnh chứng từ");
+  return { paymentProof: dataUrl };
 }
 
 // TẢI HỢP ĐỒNG DỊCH VỤ (.docx) từ mẫu công ty — gác theo quyền XEM hồ sơ (owner-scope như read).

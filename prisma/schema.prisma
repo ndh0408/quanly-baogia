@@ -247,6 +247,17 @@ model PersonnelRecord {
   note                String? // Note
   paymentProof        String? // Ảnh chứng từ thanh toán (base64 data URL, nén client) — kế toán up khi đánh dấu thanh toán. KHÔNG select ở list (nặng).
 
+  // ── CHỨNG TỪ THANH TOÁN → KHO OBJECT (thay cho base64 trong CSDL) ───────────
+  // `paymentProof` ở trên lưu ảnh dưới dạng data-URL base64 NGAY TRONG BẢNG. Hệ quả: mỗi bản sao lưu
+  // CSDL phải cõng toàn bộ ảnh, mỗi lần đọc hàng là kéo cả ảnh vào bộ nhớ, và ảnh nằm trong mọi bản
+  // dump gửi đi nơi khác. Cột dưới đây trỏ tới object trong bucket RIÊNG TƯ; CSDL chỉ giữ siêu dữ liệu.
+  // Cột cũ GIỮ NGUYÊN suốt giai đoạn chuyển tiếp (đọc-song-song) — bỏ nó là migration riêng, sau này.
+  paymentProofKey        String? // khoá object (payment-proofs/…)
+  paymentProofMime       String?
+  paymentProofSize       Int?
+  paymentProofSha256     String? // đối chiếu toàn vẹn sau khi chuyển + chống lưu trùng
+  paymentProofUploadedAt DateTime?
+
   searchText String @default("") // chuẩn-hóa bỏ dấu (fullName+projectName+projectCode+taxCode+phone+idCard) → tìm không dấu; GIN trgm index
 
   createdAt DateTime  @default(now())
