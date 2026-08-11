@@ -20,6 +20,13 @@ ssh "$SSH" '
   PGUSER=$(docker exec quanly-postgres printenv POSTGRES_USER 2>/dev/null || echo quanly)
   PGPASS=$(docker exec quanly-postgres printenv POSTGRES_PASSWORD)
   REDIS=$(docker exec quanly-app printenv REDIS_URL)
+  # Nạp KHO OBJECT + KHOÁ PII của DEV vào bộ test. Thiếu chúng thì test đụng lưu trữ lặng lẽ đi
+  # nhánh "chưa cấu hình" (503) và test PII chạy ở chế độ không-mã-hoá — xanh mà không kiểm gì.
+  # Dùng BUCKET RIÊNG (quanly-test) để không đụng dữ liệu DEV.
+  S3EP=$(docker exec quanly-app printenv S3_ENDPOINT 2>/dev/null || echo "")
+  S3AK=$(docker exec quanly-app printenv S3_ACCESS_KEY 2>/dev/null || echo "")
+  S3SK=$(docker exec quanly-app printenv S3_SECRET_KEY 2>/dev/null || echo "")
+  PIIK=$(docker exec quanly-app printenv PII_ENC_KEY 2>/dev/null || echo "")
   NET=$(docker inspect quanly-postgres -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{\$k}}{{end}}")
 
   echo "▶ [1/3] tạo DB test sạch (quanly_test)"
@@ -32,6 +39,9 @@ ssh "$SSH" '
     -e REDIS_URL="$REDIS" \
     -e SESSION_SECRET="ondev-test-secret-needs-to-be-at-least-32-characters-long-ok" \
     -e NODE_ENV="test" -e REQUIRE_DB_TESTS="1" \
+    -e S3_ENDPOINT="$S3EP" -e S3_ACCESS_KEY="$S3AK" -e S3_SECRET_KEY="$S3SK" \
+    -e S3_BUCKET="quanly-test" -e S3_REGION="us-east-1" -e S3_FORCE_PATH_STYLE="true" \
+    -e PII_ENC_KEY="$PIIK" \
     -e APP_BASE_URL="http://localhost:3000" -e PORT="3000" \
     node:22-alpine sh -c "
       apk add --no-cache openssl libc6-compat >/dev/null 2>&1 &&
