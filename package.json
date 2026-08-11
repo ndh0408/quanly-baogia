@@ -30,7 +30,10 @@
     "security:scan:deep": "codex-security scan . --mode deep",
     "security:scan:diff": "codex-security scan . --working-tree",
     "security:scan:dry": "codex-security scan . --dry-run",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "pii:backfill": "node --import tsx scripts/pii-backfill.mjs",
+    "pii:backfill:dry": "node --import tsx scripts/pii-backfill.mjs --dry-run",
+    "pii:verify": "node --import tsx scripts/pii-backfill.mjs --verify"
   },
   "engines": {
     "node": ">=22"

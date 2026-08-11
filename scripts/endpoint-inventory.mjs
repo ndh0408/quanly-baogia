@@ -99,24 +99,32 @@ if (args.includes("--json")) {
 }
 
 if (args.includes("--check")) {
-  const matrix = readFileSync(join(ROOT, "AUTHZ_MATRIX.md"), "utf8");
-  const m = matrix.match(/toàn bộ\s+(\d+)\s+endpoint/i);
-  const declared = m ? Number(m[1]) : null;
   let bad = false;
-  if (declared === null) {
-    console.error("✖ Không tìm thấy số endpoint công bố trong AUTHZ_MATRIX.md");
-    bad = true;
-  } else if (declared !== rows.length) {
-    console.error(`✖ LỆCH SỐ ENDPOINT: mã nguồn có ${rows.length}, AUTHZ_MATRIX.md ghi ${declared}.`);
+  // Đối chiếu MỌI nơi công bố con số. Chỉ canh ma trận là chưa đủ: README từng ghi 141 trong khi ma
+  // trận ghi 133 và mã nguồn có 138 — ba nguồn, ba con số, không ai biết cái nào đúng.
+  const sources = [
+    { file: "AUTHZ_MATRIX.md", re: /toàn bộ\s+(\d+)\s+endpoint/i },
+    { file: "README.md", re: /(\d+)\s+HTTP endpoints/i },
+  ];
+  for (const { file, re } of sources) {
+    const m = readFileSync(join(ROOT, file), "utf8").match(re);
+    if (!m) {
+      console.error(`✖ Không tìm thấy số endpoint công bố trong ${file}`);
+      bad = true;
+    } else if (Number(m[1]) !== rows.length) {
+      console.error(`✖ LỆCH SỐ ENDPOINT: mã nguồn có ${rows.length}, ${file} ghi ${m[1]}.`);
+      bad = true;
+    }
+  }
+  if (bad) {
     console.error("  Thêm/xoá route thì PHẢI cập nhật ma trận — endpoint ngoài ma trận là endpoint chưa ai soát quyền.");
-    bad = true;
   }
   if (unmounted.length) {
     console.error(`✖ Router được import nhưng không gắn vào app: ${unmounted.join(", ")}`);
     bad = true;
   }
   if (bad) process.exit(1);
-  console.log(`✓ ${rows.length} endpoint — khớp AUTHZ_MATRIX.md`);
+  console.log(`✓ ${rows.length} endpoint — khớp AUTHZ_MATRIX.md + README.md`);
   process.exit(0);
 }
 

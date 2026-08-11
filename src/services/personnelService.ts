@@ -10,12 +10,18 @@ import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./proje
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
+import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere, isPiiEncryptionEnabled } from "../piiFields.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
 // Các trường được dò khi tìm kiếm hồ sơ Nhân sự → gộp vào cột searchText (chuẩn-hóa bỏ dấu).
+// KHI ĐÃ BẬT MÃ HOÁ, idCard BỊ LOẠI khỏi cột tìm kiếm. `searchText` là cột phẳng không mã hoá nằm
+// ngay cạnh trong cùng bản dump — để CCCD trong đó thì mã hoá cột `idCard` chỉ còn là trang trí.
+// Tra CCCD bằng-đúng vẫn chạy, qua chỉ mục mù (idCardLookupWhere).
 const personnelSearchText = (r: Record<string, any>) =>
-  normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone, r.idCard);
+  isPiiEncryptionEnabled()
+    ? normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone)
+    : normalizeSearch(r.fullName, r.projectName, r.projectNameContract, r.projectCode, r.taxCode, r.phone, r.idCard);
 
 // Tải bản ghi + 403 nếu caller không được làm `action` (read|manage) với nó (owner = createdById).
 async function loadAuthorized(req: Request, action: Action) {
@@ -54,7 +60,11 @@ export async function listPersonnel(req: Request) {
   // Phân quyền dữ liệu: ai KHÔNG có read:all (manager) chỉ thấy hồ sơ MÌNH tạo.
   if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;
   // Tìm KHÔNG dấu / sai dấu trên cột searchText (fullName+projectName+projectCode+taxCode+phone+idCard).
-  if (q) where.searchText = searchTextFilter(q);
+  if (q) {
+    // Tìm theo cột chuẩn-hoá HOẶC khớp CHÍNH XÁC số CCCD qua chỉ mục mù (khi đã bật mã hoá).
+    const byIdCard = idCardLookupWhere(q);
+    where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
+  }
   const [total, data, agg] = await Promise.all([
     prisma.personnelRecord.count({ where }),
     prisma.personnelRecord.findMany({
@@ -69,7 +79,7 @@ export async function listPersonnel(req: Request) {
   const proofIds = new Set((await prisma.personnelRecord.findMany({
     where: { id: { in: data.map((r) => r.id) }, paymentProof: { not: null } }, select: { id: true },
   })).map((r) => r.id));
-  const decorated = data.map((r) => ({ ...decorate(r, refMap), hasPaymentProof: proofIds.has(r.id) }));
+  const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
   const salarySum = Number(agg._sum.salary ?? 0);
   const tax = computeTax(salarySum);
@@ -118,12 +128,12 @@ export async function listProjects(req: Request) {
 
 export async function createPersonnel(req: Request) {
   const rec = await prisma.personnelRecord.create({
-    data: { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) },   // người tạo = chủ sở hữu
+    data: encodePiiForWrite("PersonnelRecord", { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) }) as any,   // người tạo = chủ sở hữu
     include: ownerSelect,
   });
   await audit(req, "personnel.create", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(rec, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }
 
 export async function getPersonnel(req: Request) {
@@ -131,7 +141,7 @@ export async function getPersonnel(req: Request) {
   const full = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, include: ownerSelect });
   if (!full) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const refMap = await buildProjectRef([full.projectCode]);
-  return decorate(full, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", full) as any, refMap);
 }
 
 export async function updatePersonnel(req: Request) {
@@ -140,12 +150,12 @@ export async function updatePersonnel(req: Request) {
   const merged = { ...before, ...req.body };
   const rec = await prisma.personnelRecord.update({
     where: { id: (req.params as any).id },
-    data: { ...req.body, searchText: personnelSearchText(merged) },
+    data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
     include: ownerSelect,
   });
   await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(rec, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }
 
 export async function deletePersonnel(req: Request) {
@@ -179,7 +189,7 @@ export async function markPayment(req: Request) {
     after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
   });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return { ...decorate(rec, refMap), hasPaymentProof: !!newProof };
+  return { ...decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap), hasPaymentProof: !!newProof };
 }
 
 // Lấy ảnh chứng từ thanh toán (base64) on-demand — gác theo quyền XEM hồ sơ (read own/all).
@@ -208,7 +218,7 @@ export async function writeTeamNote(req: Request) {
   const rec = await prisma.personnelRecord.update({ where: { id: before.id }, data: { teamNote: value }, include: ownerSelect, omit: { paymentProof: true } });
   await audit(req, "personnel.team-note", { resource: "personnel", resourceId: rec.id, before: { teamNote: before.teamNote }, after: { teamNote: value } });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(rec, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }
 // KẾ TOÁN GHI CHÚ (route gác personnel:accounting-note) + NOTE (route gác personnel:manage:all = admin).
 export async function writeAccountingNote(req: Request) { return writeNoteField(req, "accountingNote", "personnel.accounting-note"); }
@@ -221,7 +231,7 @@ async function writeNoteField(req: Request, field: "accountingNote" | "note", ac
   const rec = await prisma.personnelRecord.update({ where: { id }, data: { [field]: value }, include: ownerSelect, omit: { paymentProof: true } });
   await audit(req, action, { resource: "personnel", resourceId: id, before: { [field]: before[field] }, after: { [field]: value } });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(rec, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }
 
 // ADMIN xác nhận "đã ký" / BỎ xác nhận cho 1 hồ sơ — lưu NGÀY + người.
@@ -242,5 +252,5 @@ export async function markConfirm(req: Request) {
     after: { confirmedAt: rec.confirmedAt, confirmedById: rec.confirmedById },
   });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(rec, refMap);
+  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }

@@ -53,12 +53,19 @@ export function isPiiEncrypted(value: unknown) {
  * AES-256-GCM, IV ngẫu nhiên mỗi lần, thẻ xác thực GHIM 16 byte (xem src/secretbox.ts để biết vì sao
  * không ghim là mở đường cho giả mạo bằng thẻ cắt ngắn).
  */
-export function encryptPii(value: string | null | undefined): string | null | undefined {
+export function encryptPii(value: string | null | undefined, aad?: string): string | null | undefined {
   if (value == null || value === "") return value;
   const k = keys();
   if (!k) return value;
   const iv = randomBytes(IV_LEN);
   const c = createCipheriv("aes-256-gcm", k.enc, iv, { authTagLength: TAG_LEN });
+  // DỮ LIỆU XÁC THỰC KÈM THEO (AAD) = "model:field". Nó KHÔNG được mã hoá, nhưng thẻ xác thực phủ
+  // lên nó — nên bản mã bị đem từ cột này sang cột khác sẽ KHÔNG giải mã được. Không có AAD thì ai
+  // ghi được vào DB có thể chuyển bản mã số-tài-khoản sang ô CCCD và ngược lại.
+  // KHÔNG đưa recordId vào: lúc TẠO bản ghi chưa có id, mà mã hoá sau khi insert thì phải thêm một
+  // vòng ghi nữa. Rủi ro còn lại là hoán bản mã GIỮA HAI BẢN GHI cùng cột — cần quyền ghi DB, và hậu
+  // quả là sai lệch dữ liệu chứ không phải lộ dữ liệu. Đánh đổi có chủ ý, ghi lại ở đây.
+  if (aad) c.setAAD(Buffer.from(aad, "utf8"));
   const ct = Buffer.concat([c.update(String(value), "utf8"), c.final()]);
   return PREFIX + Buffer.concat([iv, c.getAuthTag(), ct]).toString("base64");
 }
@@ -71,7 +78,7 @@ export function encryptPii(value: string | null | undefined): string | null | un
  * trang danh sách. Trả `null` (chứ không phải chuỗi rỗng) để chỗ gọi phân biệt được "không có dữ
  * liệu" với "có nhưng đọc không nổi" — và log lại để phát hiện khoá bị xoay nhầm.
  */
-export function decryptPii(stored: string | null | undefined): string | null | undefined {
+export function decryptPii(stored: string | null | undefined, aad?: string): string | null | undefined {
   if (stored == null || !isPiiEncrypted(stored)) return stored;
   const k = keys();
   if (!k) {
@@ -87,6 +94,7 @@ export function decryptPii(stored: string | null | undefined): string | null | u
     if (tag.length !== TAG_LEN) throw new Error("thẻ xác thực sai độ dài");
     const d = createDecipheriv("aes-256-gcm", k.enc, iv, { authTagLength: TAG_LEN });
     d.setAuthTag(tag);
+    if (aad) d.setAAD(Buffer.from(aad, "utf8"));
     return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
   } catch (e) {
     logger.error({ err: e instanceof Error ? e.message : String(e) }, "giải mã PII thất bại (sai khoá / dữ liệu hỏng)");
@@ -117,6 +125,25 @@ export function blindIndex(value: string | null | undefined): string | null {
 export function blindIndexEquals(a: string | null, b: string | null) {
   if (!a || !b || a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+}
+
+/**
+ * Như `decryptPii` nhưng NÉM khi bản mã tồn tại mà không giải được.
+ *
+ * Đây là ranh giới quan trọng nhất của cả cơ chế. Có hai tình huống nhìn giống nhau nhưng ý nghĩa
+ * trái ngược:
+ *   • cột bản mã RỖNG  → bản ghi chưa backfill → đọc cột thô là ĐÚNG (giai đoạn chuyển tiếp);
+ *   • cột bản mã CÓ nhưng thẻ xác thực sai → dữ liệu đã bị can thiệp hoặc sai khoá.
+ *
+ * Nếu tình huống thứ hai cũng lặng lẽ rơi về cột thô thì kẻ ghi được vào DB chỉ cần làm hỏng 1 byte
+ * bản mã là ép hệ thống quay lại đọc plaintext — vô hiệu hoá toàn bộ lớp toàn vẹn. Nên ở đây phải NỔ.
+ */
+export function decryptPiiOrThrow(stored: string, aad?: string): string {
+  const out = decryptPii(stored, aad);
+  if (out == null) {
+    throw Object.assign(new Error("Dữ liệu đã mã hoá không giải mã được (sai khoá hoặc bị can thiệp)"), { status: 500, piiIntegrity: true });
+  }
+  return out;
 }
 
 /** CHỈ DÙNG TRONG TEST: xoá cache khoá sau khi đổi biến môi trường. */
