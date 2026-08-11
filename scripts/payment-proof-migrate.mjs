@@ -38,13 +38,17 @@ if (!isStorageEnabled()) {
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-const PENDING = { paymentProof: { not: null }, paymentProofKey: null };
+// BỎ QUA bản ghi đã xoá-mềm. Script này dùng PrismaClient THUẦN (không qua extension ở src/db.ts)
+// nên không tự lọc `deletedAt` — phải lọc tay. Chuyển ảnh của hàng đã xoá sẽ tạo object MỒ CÔI: hàng
+// đó rồi sẽ bị `purgeSoftDeleted` xoá hẳn, nhưng object trong kho thì không ai dọn. Để base64 nằm lại
+// cùng hàng và cùng biến mất khi purge là gọn hơn.
+const PENDING = { paymentProof: { not: null }, paymentProofKey: null, deletedAt: null };
 
 async function counts() {
   const [total, legacy, migrated] = await Promise.all([
-    prisma.personnelRecord.count({ where: { OR: [{ paymentProof: { not: null } }, { paymentProofKey: { not: null } }] } }),
+    prisma.personnelRecord.count({ where: { deletedAt: null, OR: [{ paymentProof: { not: null } }, { paymentProofKey: { not: null } }] } }),
     prisma.personnelRecord.count({ where: PENDING }),
-    prisma.personnelRecord.count({ where: { paymentProofKey: { not: null } } }),
+    prisma.personnelRecord.count({ where: { paymentProofKey: { not: null }, deletedAt: null } }),
   ]);
   return { total, legacy, migrated };
 }
@@ -83,7 +87,7 @@ async function migrate() {
 /** Tải object về và so SHA-256 với base64 gốc — bằng chứng "chuyển đúng", không chỉ "chuyển xong". */
 async function verify() {
   const rows = await prisma.personnelRecord.findMany({
-    where: { paymentProofKey: { not: null } },
+    where: { paymentProofKey: { not: null }, deletedAt: null },
     select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofSize: true, paymentProofSha256: true },
   });
   let ok = 0, hashMismatch = 0, sizeMismatch = 0, unreadable = 0, noLegacy = 0;
