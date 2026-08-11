@@ -2363,6 +2363,13 @@ textarea[aria-invalid="true"] {
   caret-color: transparent; /* ô đang chọn: không nháy con trỏ → nhìn là biết chưa vào chế độ sửa */
 }
 
+/* Vùng đang CẮT chờ dán (Ctrl+X kiểu Excel): viền nét đứt "marching ants" — dán xong mới
+   chuyển đi, Esc huỷ. outline âm 1px để viền các ô liền nhau chồng khít, nhìn thành 1 khung. */
+.excel-table td.cell-cut {
+  outline: 1.5px dashed var(--gold-d);
+  outline-offset: -1.5px;
+}
+
 /* Bảng phím tắt kiểu Excel dưới lưới báo giá (thu gọn — bấm mới mở) */
 .grid-keys {
   font-size: 12.5px;
