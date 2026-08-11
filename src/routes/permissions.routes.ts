@@ -4,7 +4,7 @@ import { z } from "zod";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import {
   PERMISSION_GROUPS, PERMISSION_LABELS, PERMISSION_DESC, ROLE_LABELS, ROLE_PERMISSIONS,
-  permissionsForRole, PERMISSIONS, requirePermission, EDITABLE_ROLES, hasRoleOverride, ADMIN_ONLY_PERMISSIONS,
+  permissionsForRole, permissionsForSession, PERMISSIONS, requirePermission, EDITABLE_ROLES, hasRoleOverride, ADMIN_ONLY_PERMISSIONS,
 } from "../permissions.js";
 import { saveRoleOverride, resetRoleOverride } from "../roleOverrides.js";
 import { audit } from "../audit.js";
@@ -100,7 +100,8 @@ router.delete(
 router.get(
   "/me",
   asyncHandler(async (req: Request, res: Response) => {
-    res.json({ role: req.session.role, permissions: permissionsForRole(req.session.role!) });
+    // Quyền HIỆU LỰC của phiên (gồm cả quyền riêng per-user), KHÔNG phải quyền mặc định của vai trò.
+    res.json({ role: req.session.role, permissions: permissionsForSession(req.session) });
   })
 );
 

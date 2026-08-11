@@ -68,15 +68,27 @@ export async function changePassword(req: Request) {
     await audit(req, "password.change.failed", { resource: "user", resourceId: user.id, actorId: user.id });
     throw httpError(401, "Mật khẩu cũ không đúng");
   }
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: user.id },
     data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST) },
   });
-  // Invalidate outstanding refresh tokens AND every other cookie session so a
-  // stolen credential can't survive a password change (containment for the
-  // "I think I'm compromised" case). The caller's own session stays alive.
+  // Thu hồi mọi refresh token — chúng sống độc lập với cookie nên không tự chết theo phiên.
   await revokeAllForUser(user.id);
+
+  // XOAY ĐỊNH DANH PHIÊN của chính người vừa đổi mật khẩu.
+  //
+  // Trước đây phiên gọi lệnh GIỮ NGUYÊN session ID cũ. Đổi mật khẩu là lúc người dùng tuyên bố
+  // "thông tin xác thực cũ không còn đáng tin" — thường vì họ NGHI BỊ LỘ. Nếu chính chuỗi session ID
+  // đã lộ từ trước (rò qua log, qua Referer, qua một lỗ XSS đã vá), giữ lại nó nghĩa là kẻ tấn công
+  // vẫn còn đường vào sau khi nạn nhân vừa làm đúng việc cần làm. `regenerate()` huỷ hàng phiên cũ
+  // trong kho và cấp định danh mới, nên chuỗi cũ chết ngay.
+  //
+  // THỨ TỰ QUAN TRỌNG: xoay TRƯỚC rồi mới dọn các phiên khác, và giữ lại đúng định danh MỚI. Làm
+  // ngược lại sẽ giữ nhầm sid cũ (sắp bị huỷ) và phiên mới lại lọt vào diện bị xoá → người dùng bị
+  // đá ra ngay khi vừa đổi mật khẩu thành công.
+  await establishSession(req, updated as SessionSeed);
   await destroyAllSessions(user.id, req.sessionID);
+
   await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
   return { ok: true };
 }

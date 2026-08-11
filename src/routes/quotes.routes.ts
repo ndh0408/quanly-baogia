@@ -68,6 +68,10 @@ router.get(
 // NEXT NUMBER (preview only - real allocation happens at POST time)
 router.get(
   "/next-number",
+  // Chỉ người TẠO được báo giá mới cần biết số kế tiếp. Không gác thì mọi tài khoản đăng nhập đều
+  // đọc được nhịp phát hành báo giá của công ty (gọi hai lần cách nhau là suy ra số báo giá phát ra
+  // trong khoảng đó) — thông tin kinh doanh, không phải thứ để lộ cho kế toán/nhân sự/account HN.
+  requirePermission(P.QUOTE_CREATE),
   validate({ query: z.object({ companyId: z.coerce.number().int().positive().optional() }) }),
   asyncHandler(async (req: Request, res: Response) => res.json(await previewNextNumber(req)))
 );

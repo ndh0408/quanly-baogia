@@ -25,7 +25,13 @@ export async function pruneOldRecords() {
        ) t WHERE rn > $1)`,
     VERSION_KEEP
   );
-  const result = { audit: audit.count, login: login.count, webhook: webhook.count, quoteVersion: ver };
+  // Phiên tải lên treo: ký URL rồi không bao giờ /finalize. Hàng `pending` quá hạn là rác thuần —
+  // object tương ứng (nếu client có PUT lên) chưa qua xác minh nên KHÔNG dùng được, và cũng không
+  // ai tải được. Xoá hàng để bảng không phình và để hạn mức MAX_PENDING_UPLOADS không kẹt oan.
+  // Bản ghi `rejected` giữ lâu hơn (30 ngày) vì đó là dấu vết ai đó đẩy nội dung không hợp lệ.
+  const staleUploads = await prisma.uploadObject.deleteMany({ where: { status: "pending", expiresAt: { lt: days(1) } } });
+  const oldRejects = await prisma.uploadObject.deleteMany({ where: { status: "rejected", createdAt: { lt: days(30) } } });
+  const result = { audit: audit.count, login: login.count, webhook: webhook.count, quoteVersion: ver, staleUploads: staleUploads.count, rejectedUploads: oldRejects.count };
   logger.info(result, "retention prune done");
   return result;
 }

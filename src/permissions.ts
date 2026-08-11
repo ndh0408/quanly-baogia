@@ -533,7 +533,26 @@ export function permissionsForRole(role: string) {
  *  admin luôn full. Đây là cái frontend dùng để ẩn/hiện (me.permissions). */
 export function permissionsForUser(role: string | undefined, userPerms?: string[] | null, canSign = false) {
   const base = resolveUserPermissions(role, userPerms, canSign);
-  const out = new Set(base);
-  for (const p of base) if (p.endsWith(":all")) out.add(p.replace(/:all$/, ":own"));
+  return expandScopes(base);
+}
+
+/** Mở rộng `:all` → thêm `:own` cho client. `can()` đã ngầm hiểu quan hệ này; UI thì cần liệt kê rõ. */
+export function expandScopes(perms: string[]): string[] {
+  const out = new Set(perms);
+  for (const p of perms) if (p.endsWith(":all")) out.add(p.replace(/:all$/, ":own"));
   return [...out];
+}
+
+/**
+ * Tập quyền HIỆU LỰC của PHIÊN ĐANG GỌI — MỘT nguồn sự thật duy nhất cho mọi endpoint "quyền của tôi".
+ *
+ * Đọc thẳng `session.permissions`, tức ĐÚNG mảng mà `can()` dùng để cho/chặn ở mọi route, và được
+ * middleware resolve lại từ DB mỗi request. Trước đây `/api/permissions/me` tự tính bằng
+ * `permissionsForRole(session.role)` — chỉ theo VAI TRÒ, bỏ qua quyền riêng per-user — nên một tài
+ * khoản được tùy biến quyền sẽ thấy hai danh sách khác nhau ở `/auth/me` và `/permissions/me`, và cả
+ * hai đều có thể khác thứ server thực sự cưỡng chế. Ba phiên bản của cùng một sự thật là ba cơ hội
+ * để giao diện hiển thị sai quyền.
+ */
+export function permissionsForSession(session: SessionLike): string[] {
+  return expandScopes([...sessionPermSet(session)]);
 }

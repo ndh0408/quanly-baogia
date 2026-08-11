@@ -126,6 +126,29 @@ export async function headObject(key: string, bucket = config.S3_BUCKET) {
   }
 }
 
+/**
+ * Tải TOÀN BỘ object về bộ nhớ, có TRẦN CỨNG. Dùng khi phải soi cấu trúc bên trong (vd kiểm .xlsx là
+ * zip hợp lệ). Vượt trần → dừng và trả null chứ không nuốt hết vào RAM: nếu không, chính bước kiểm
+ * an toàn lại thành cách làm cạn bộ nhớ tiến trình.
+ */
+export async function getObjectBytes(key: string, maxBytes: number, bucket = config.S3_BUCKET): Promise<Buffer | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const r = await c.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of r.Body as AsyncIterable<Uint8Array>) {
+      total += chunk.length;
+      if (total > maxBytes) return null;
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
+}
+
 /** Đọc N byte ĐẦU của object — đủ để nhận dạng magic bytes mà không kéo cả file về. */
 export async function getObjectHeadBytes(key: string, n = 16, bucket = config.S3_BUCKET): Promise<Buffer | null> {
   const c = getClient();

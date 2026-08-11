@@ -13,6 +13,7 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { canOnQuote, requirePermission, can, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 import { parseQuoteWorkbook } from "../excelImport.js";
+import { inspectXlsx } from "../zipSafety.js";
 import { audit } from "../audit.js";
 
 const router = Router();
@@ -56,6 +57,18 @@ router.post(
     if (!req.file) return res.status(400).json({ error: "Vui lòng chọn file Excel (.xlsx)" });
     if (!looksXlsx(req.file.buffer)) {
       return res.status(415).json({ error: "File không phải .xlsx. Nếu đang dùng .xls cũ, hãy mở bằng Excel rồi 'Lưu thành' .xlsx." });
+    }
+    // ĐÂY là chỗ nguy hiểm nhất trong toàn hệ: buffer do người ngoài đưa vào sắp được GIẢI NÉN và
+    // phân tích XML ngay trong tiến trình ứng dụng. `PK\x03\x04` chỉ chứng minh "là zip" — nó khớp
+    // với cả bom giải nén (4 GB số 0 nén còn vài KB) lẫn zip 200.000 mục. Soi mục lục trước, không
+    // giải nén một byte nào (src/zipSafety.ts).
+    const zip = inspectXlsx(req.file.buffer);
+    if (!zip.ok) {
+      await audit(req, "quote.import.rejected", {
+        resource: "quote", resourceId: Number(req.body?.quoteId) || undefined,
+        after: { reason: zip.reason, file: String(req.file.originalname || "").slice(0, 120), size: req.file.size },
+      });
+      return res.status(415).json({ error: `Tệp Excel không hợp lệ: ${zip.reason}` });
     }
 
     // Nạp vào báo giá CÓ SẴN → phải sửa được chính báo giá đó (chặn IDOR: người không liên quan

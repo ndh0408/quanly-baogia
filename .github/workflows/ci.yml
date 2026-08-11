@@ -62,6 +62,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Gác MA TRẬN PHÂN QUYỀN: sinh danh sách endpoint từ mã nguồn rồi đối chiếu con số công bố
+      # trong AUTHZ_MATRIX.md. Thêm route mà quên soát quyền là đỏ pipeline ngay.
+      # Có lý do cụ thể: README từng ghi 141 endpoint, ma trận ghi 133, con số thật là 138 — cả hai
+      # đều đếm tay nên cả hai đều trôi.
+      - name: Endpoint inventory khớp ma trận phân quyền
+        run: node scripts/endpoint-inventory.mjs --check
+
       # Gác KIỂU: backend (.js + .ts trộn) chạy tsx runtime nên lỗi type chỉ lộ lúc deploy.
       # tsc --noEmit chặn .ts sai kiểu trước khi merge. (Script "typecheck" đã có sẵn.)
       - name: Typecheck (backend)

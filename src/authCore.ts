@@ -17,6 +17,20 @@ import { decryptSecret, consumeBackupCode } from "./mfa.js";
 // response time matches the real path (defeats username enumeration by timing).
 const DUMMY_HASH = bcrypt.hashSync("timing-equalizer-not-a-real-password", config.BCRYPT_COST);
 
+/**
+ * MỘT thông điệp duy nhất cho MỌI thất bại xác thực chưa chứng minh được danh tính.
+ *
+ * Trước đây phản hồi tự khai ra quá nhiều: "Sai mật khẩu" nghĩa là tài khoản CÓ TỒN TẠI, còn
+ * "Tài khoản không tồn tại hoặc đã bị khóa" nghĩa là không. Chỉ cần gửi một mật khẩu bừa và đọc JSON
+ * là dựng được danh sách email nhân viên có thật — nguyên liệu cho lừa đảo nhắm đích và nhồi mật khẩu.
+ * Thời gian phản hồi đã được cân bằng bằng DUMMY_HASH từ trước; nhưng cân bằng thời gian mà nội dung
+ * vẫn khác nhau thì vô nghĩa.
+ *
+ * Lý do thật (no_such_user / inactive / bad_password / locked) VẪN được ghi đầy đủ vào LoginAttempt
+ * và nhật ký kiểm toán — người vận hành thấy hết, kẻ tấn công không thấy gì.
+ */
+const GENERIC_AUTH_ERROR = "Thông tin đăng nhập không đúng hoặc tài khoản không khả dụng.";
+
 export function clientIp(req: Request) {
   // Use Express's trust-proxy-resolved req.ip. Do NOT read the raw X-Forwarded-For
   // first hop — it is fully client-controlled and would let an attacker forge the
@@ -49,14 +63,22 @@ export async function authenticateCredentials(
 
   if (!user || !user.active) {
     await recordAttempt(false, !user ? "no_such_user" : "inactive");
-    await audit(req, "login.failed", { resource: "user", resourceId: loginId, after: { reason: "no_such_user_or_inactive", flow } });
-    return { ok: false, status: 401, error: "Tài khoản không tồn tại hoặc đã bị khóa" };
+    await audit(req, "login.failed", { resource: "user", resourceId: loginId, after: { reason: !user ? "no_such_user" : "inactive", flow } });
+    return { ok: false, status: 401, error: GENERIC_AUTH_ERROR };
   }
 
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     await recordAttempt(false, "locked");
-    await audit(req, "login.locked", { resource: "user", resourceId: user.id, actorId: user.id, after: { flow } });
-    return { ok: false, status: 423, error: `Tài khoản đang tạm khóa, vui lòng thử lại sau ${config.LOGIN_LOCKOUT_MINUTES} phút` };
+    await audit(req, "login.locked", { resource: "user", resourceId: user.id, actorId: user.id, after: { flow, passwordOk } });
+    // CHỈ tiết lộ "đang tạm khoá" cho người ĐÃ CHỨNG MINH biết mật khẩu đúng.
+    //
+    // Khoá tài khoản là trạng thái mà người dùng thật CẦN biết — không nói thì họ gõ lại mãi rồi gọi
+    // hỗ trợ. Nhưng nói cho mọi người thì 423 trở thành đèn báo "tài khoản này có thật": kẻ tấn công
+    // chỉ cần gõ sai 5 lần để tự tạo ra tín hiệu đó. Chia theo việc biết mật khẩu là ranh giới đúng —
+    // ai qua được cửa đó thì thông tin khoá không còn là thứ họ chưa biết.
+    return passwordOk
+      ? { ok: false, status: 423, error: `Tài khoản đang tạm khóa, vui lòng thử lại sau ${config.LOGIN_LOCKOUT_MINUTES} phút` }
+      : { ok: false, status: 401, error: GENERIC_AUTH_ERROR };
   }
 
   if (!passwordOk) {
@@ -76,13 +98,10 @@ export async function authenticateCredentials(
     }
     await recordAttempt(false, "bad_password");
     await audit(req, "login.failed", { resource: "user", resourceId: user.id, actorId: user.id, after: { failedAttempts: updated.failedAttempts, locked: shouldLock, flow } });
-    return {
-      ok: false,
-      status: 401,
-      error: shouldLock
-        ? `Sai mật khẩu nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút`
-        : "Sai mật khẩu",
-    };
+    // Cùng một thông điệp với nhánh "không có tài khoản". Kể cả khi lần này chạm ngưỡng khoá cũng
+    // KHÔNG báo "tạm khoá X phút": người gõ sai mật khẩu thì ta chưa biết họ là chủ tài khoản hay
+    // người đang dò. Chủ tài khoản sẽ thấy thông báo khoá ở lần sau, khi gõ đúng mật khẩu.
+    return { ok: false, status: 401, error: GENERIC_AUTH_ERROR };
   }
 
   // MFA gate

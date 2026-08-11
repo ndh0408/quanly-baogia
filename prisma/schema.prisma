@@ -12,7 +12,7 @@ enum Role {
   admin
   manager
   account_hn // Account Hà Nội: CHỈ điền bảng nội bộ loại "hanoi" của báo giá được giao, không thấy gì khác
-  hr         // Nhân sự: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
+  hr // Nhân sự: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
   accountant // Kế toán: CHỈ XEM mọi hồ sơ nhân sự (read-only), không tạo/sửa
 }
 
@@ -21,7 +21,7 @@ enum Role {
 // 'admin' KHÔNG ghi đè được (luôn full — chống tự khóa). Chỉ admin (USER_MANAGE) sửa qua trang Phân quyền.
 model RolePermission {
   role        String   @id // khóa vai trò: manager/hr/accountant/account_hn
-  permissions String[]     // tập quyền (key trong PERMISSIONS) thay cho mặc định
+  permissions String[] // tập quyền (key trong PERMISSIONS) thay cho mặc định
   updatedAt   DateTime @updatedAt
   updatedById Int?
 }
@@ -55,19 +55,65 @@ enum NotificationChannel {
   telegram
 }
 
+// Vòng đời của một object tải lên TRỰC TIẾP (presigned PUT).
+//   pending   — đã ký URL, chưa xác minh nội dung. KHÔNG được tải về, KHÔNG được gắn vào nghiệp vụ.
+//   finalized — đã HEAD + dò magic bytes khớp allowlist. Từ đây mới dùng được.
+//   rejected  — nội dung không khớp; object đã bị xoá khỏi kho, giữ hàng này để truy vết.
+enum UploadStatus {
+  pending
+  finalized
+  rejected
+}
+
+// TRẠNG THÁI THẬT của object tải lên — trước đây chỉ tồn tại trong lời hứa ở chú thích.
+//
+// Đường presigned có 2 bước (/sign-upload → PUT thẳng lên S3 → /finalize). Nếu không lưu trạng thái
+// ở đâu, bước /finalize là TUỲ CHỌN: client ký URL, PUT nội dung bất kỳ khớp kích thước + Content-Type
+// đã ký, BỎ QUA /finalize, rồi gọi /sign-download là tải được object chưa hề kiểm nội dung. Bảng này
+// biến "đã xác minh" thành dữ kiện kiểm tra được thay vì quy ước.
+//
+// Vì sao khoá theo `key` là đủ: key do server sinh, chứa userId và 6 byte ngẫu nhiên, không client
+// nào đặt được. Vẫn giữ ownerId để truy vấn quota/dọn dẹp theo người và để kiểm quyền không phải
+// bóc chuỗi.
+model UploadObject {
+  id     Int          @id @default(autoincrement())
+  key    String       @unique
+  status UploadStatus @default(pending)
+
+  ownerId Int
+  owner   User @relation("UploadOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Kỳ vọng lúc ký — dùng để đối chiếu với thực tế lúc finalize.
+  expectedMime String
+  expectedSize Int
+
+  // Thực tế đo được trên kho lưu trữ lúc finalize.
+  actualMime String?
+  actualSize Int?
+  sha256     String? // băm nội dung — chống trùng lặp + đối chiếu về sau
+
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime // quá hạn mà còn pending → dọn (retention job)
+  finalizedAt  DateTime?
+  rejectReason String?
+
+  @@index([ownerId, status])
+  @@index([status, expiresAt]) // quét dọn object treo
+}
+
 model User {
-  id           Int     @id @default(autoincrement())
-  username     String  @unique
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
   passwordHash String
   displayName  String
-  email        String? @unique
-  role         Role    @default(manager)
+  email        String?  @unique
+  role         Role     @default(manager)
   phone        String?
   title        String?
   senderName   String? // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
   projectCode  String? // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
-  active       Boolean @default(true)
-  canSign      Boolean @default(false) // được "Ký Chứng từ" dự án DO MÌNH TẠO ở trang Quản lý dự án (admin ký + thấy toàn bộ)
+  active       Boolean  @default(true)
+  canSign      Boolean  @default(false) // được "Ký Chứng từ" dự án DO MÌNH TẠO ở trang Quản lý dự án (admin ký + thấy toàn bộ)
   // PHÂN QUYỀN PER-USER: tập quyền (key trong PERMISSIONS) tài khoản này được phép. TRỐNG = chưa tùy biến
   // → dùng quyền mặc định theo `role` (tương thích ngược). Có = nguồn quyền (không suy từ role nữa).
   permissions  String[] @default([])
@@ -94,25 +140,26 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  createdQuotes     Quote[]        @relation("CreatedBy")
-  approvedQuotes    Quote[]        @relation("ApprovedBy")
-  memberQuotes      Quote[]        @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
-  ownedCustomers    Customer[]
-  auditEvents       AuditEvent[]
-  notifications     Notification[]
-  approvals         Approval[]
-  refreshTokens     RefreshToken[]
+  createdQuotes      Quote[]           @relation("CreatedBy")
+  approvedQuotes     Quote[]           @relation("ApprovedBy")
+  memberQuotes       Quote[]           @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
+  ownedCustomers     Customer[]
+  auditEvents        AuditEvent[]
+  notifications      Notification[]
+  approvals          Approval[]
+  refreshTokens      RefreshToken[]
   // Back-relations for previously-bare Int references (now real FKs, onDelete: SetNull).
-  authoredNotes     CustomerNote[] @relation("NoteAuthor")
-  assignedFollowUps FollowUp[]     @relation("FollowupAssignee")
-  authoredVersions  QuoteVersion[] @relation("VersionAuthor")
-  signedSheets      QuoteSheet[]   @relation("SheetSigner")
-  sheetDecisions    QuoteSheet[]   @relation("SheetCustomerDecision")
-  personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
-  personnelPaid     PersonnelRecord[] @relation("PersonnelPaidBy")
+  authoredNotes      CustomerNote[]    @relation("NoteAuthor")
+  assignedFollowUps  FollowUp[]        @relation("FollowupAssignee")
+  authoredVersions   QuoteVersion[]    @relation("VersionAuthor")
+  signedSheets       QuoteSheet[]      @relation("SheetSigner")
+  sheetDecisions     QuoteSheet[]      @relation("SheetCustomerDecision")
+  personnelRecords   PersonnelRecord[] @relation("PersonnelCreatedBy")
+  personnelPaid      PersonnelRecord[] @relation("PersonnelPaidBy")
   personnelConfirmed PersonnelRecord[] @relation("PersonnelConfirmedBy")
-  employees         Employee[]        @relation("EmployeeCreatedBy")
-  venues            Venue[]           @relation("VenueCreatedBy")
+  employees          Employee[]        @relation("EmployeeCreatedBy")
+  venues             Venue[]           @relation("VenueCreatedBy")
+  uploads            UploadObject[]    @relation("UploadOwner")
 
   @@index([deletedAt, active])
 }
@@ -121,9 +168,9 @@ model User {
 // NGƯỜI TẠO + chỉ thấy/sửa của mình; hr + accountant XEM tất cả (read-only); admin toàn quyền.
 // Cột map theo file Excel chủ gửi (thông tin cá nhân + lương/thuế + dự án + hợp đồng + thanh toán).
 model PersonnelRecord {
-  id          Int   @id @default(autoincrement())
+  id          Int  @id @default(autoincrement())
   createdById Int // Account tạo dòng — owner để phân quyền "chỉ thấy của mình"
-  createdBy   User  @relation("PersonnelCreatedBy", fields: [createdById], references: [id])
+  createdBy   User @relation("PersonnelCreatedBy", fields: [createdById], references: [id])
 
   // Thông tin cá nhân
   fullName     String // HỌ & TÊN
@@ -200,9 +247,9 @@ model PersonnelRecord {
 // Danh bạ NHÂN VIÊN — kho thông tin cá nhân tái dùng. Khi tạo hồ sơ Nhân sự, chọn 1 người
 // ở đây để TỰ ĐIỀN các ô cá nhân (họ tên, MST, căn cước, STK, ngân hàng, SĐT…). CRUD riêng.
 model Employee {
-  id          Int   @id @default(autoincrement())
+  id          Int  @id @default(autoincrement())
   createdById Int
-  createdBy   User  @relation("EmployeeCreatedBy", fields: [createdById], references: [id])
+  createdBy   User @relation("EmployeeCreatedBy", fields: [createdById], references: [id])
 
   fullName     String // HỌ & TÊN
   taxCode      String? // MÃ SỐ THUẾ
@@ -298,7 +345,7 @@ model Customer {
   contactTitle String?
   status       CustomerStatus @default(lead)
   tags         String[]       @default([])
-  debtDays     Int?           // Hạn công nợ RIÊNG từng khách (ngày sau Ngày HĐơn) — trang Hóa đơn báo ĐỎ khi quá; null = dùng mặc định
+  debtDays     Int? // Hạn công nợ RIÊNG từng khách (ngày sau Ngày HĐơn) — trang Hóa đơn báo ĐỎ khi quá; null = dùng mặc định
   searchText   String         @default("") // chuẩn-hóa bỏ dấu (normalizeSearch) → tìm không dấu/sai dấu; GIN trgm index
   ownerId      Int?
   owner        User?          @relation(fields: [ownerId], references: [id])
@@ -403,9 +450,9 @@ model Venue {
 }
 
 model VenueItem {
-  id      Int    @id @default(autoincrement())
+  id      Int   @id @default(autoincrement())
   venueId Int
-  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue   Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   category  String // nhóm: "Quầy vé & quầy bắp", "Cover màn hình", "Bục soát vé"…
   name      String // "Quầy bắp 2", "Cover màn hình"…
@@ -519,56 +566,56 @@ model QuoteVersion {
 }
 
 model QuoteSheet {
-  id            Int           @id @default(autoincrement())
-  quoteId       Int
-  quote         Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  templateId    Int
-  template      QuoteTemplate @relation(fields: [templateId], references: [id])
-  order         Int
-  name          String?
-  groupSubtotal Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
-  showImages    Boolean       @default(false) // BẬT cột "Hình ảnh" cho sheet này (ảnh mỗi hạng mục, xuất Excel)
-  subtotal      Decimal       @default(0) @db.Decimal(18, 2) // materialized: tổng sheet (= computeQuoteTotals.sheetTotals), ghi lúc save → trang Dự án không phải kéo items vào RAM
-  items         QuoteItem[]
+  id             Int           @id @default(autoincrement())
+  quoteId        Int
+  quote          Quote         @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  templateId     Int
+  template       QuoteTemplate @relation(fields: [templateId], references: [id])
+  order          Int
+  name           String?
+  groupSubtotal  Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
+  showImages     Boolean       @default(false) // BẬT cột "Hình ảnh" cho sheet này (ảnh mỗi hạng mục, xuất Excel)
+  subtotal       Decimal       @default(0) @db.Decimal(18, 2) // materialized: tổng sheet (= computeQuoteTotals.sheetTotals), ghi lúc save → trang Dự án không phải kéo items vào RAM
+  items          QuoteItem[]
   // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
   // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
   // Tổng theo từng loại đổ vào cột Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng ở trang Quản lý dự án.
-  extraTables   Json?
+  extraTables    Json?
   // Ký chứng từ theo từng sheet (chỉ quản lý — admin/người có canSign mới ký).
-  signedAt      DateTime?
-  signedById    Int?
+  signedAt       DateTime?
+  signedById     Int?
   // FK to the signer. onDelete: SetNull — if the user is deleted we keep the sheet
   // and the snapshotted signedByName, just clear the link (audit-safe).
-  signedBy      User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
-  signedByName  String?
+  signedBy       User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
+  signedByName   String?
   // ===== KHÁCH DUYỆT THEO TỪNG SHEET =====
   // Báo giá nhiều sheet: khách có thể chốt sheet này mà chưa chốt sheet kia. Tách hẳn khỏi
   // Quote.status (trạng thái CẢ báo giá) — status chỉ đổi khi người phụ trách bấm Chốt/Không chốt.
   // null = chưa có ý kiến · "approved" = khách duyệt · "rejected" = khách không duyệt.
   custStatus     String?
   custStatusAt   DateTime?
-  custStatusById Int?      // nhân viên đánh dấu hộ khách (audit)
-  custStatusBy   User?     @relation("SheetCustomerDecision", fields: [custStatusById], references: [id], onDelete: SetNull)
-  custNote       String?   // ghi chú của khách / lý do không duyệt
+  custStatusById Int? // nhân viên đánh dấu hộ khách (audit)
+  custStatusBy   User?         @relation("SheetCustomerDecision", fields: [custStatusById], references: [id], onDelete: SetNull)
+  custNote       String? // ghi chú của khách / lý do không duyệt
   // Luồng hoá đơn ở trang Quản lý dự án (CHỈ admin nhập). Trạng thái suy ra: đã chốt →
   // "Hoá đơn"; có invoiceNo → "Thanh toán"; có CẢ invoiceNo + paidAt → "Done".
-  invoiceNo     String?  // Số hoá đơn / mã HĐ
-  paidAt        DateTime? // Ngày khách thanh toán
+  invoiceNo      String? // Số hoá đơn / mã HĐ
+  paidAt         DateTime? // Ngày khách thanh toán
   // Theo dõi chứng từ ở Quản lý dự án (đèn đỏ = cần làm, trắng = đã xong). CHỈ admin nhập.
-  poNumber      String?   // Số PO/HĐ — có giá trị thì "kích hoạt" 4 việc chứng từ bên dưới
-  hnInvoiceNo   String?   // Số HĐ HN — đỏ khi báo giá Hà Nội đã DUYỆT mà chưa có số
-  invoiceLink   String?   // Link Hoá Đơn (URL bản scan/PDF)
-  docSentAt     DateTime? // Chứng từ gửi đi (ngày gửi)
-  docReturnedAt DateTime? // Chứng từ trả về (ngày nhận lại)
+  poNumber       String? // Số PO/HĐ — có giá trị thì "kích hoạt" 4 việc chứng từ bên dưới
+  hnInvoiceNo    String? // Số HĐ HN — đỏ khi báo giá Hà Nội đã DUYỆT mà chưa có số
+  invoiceLink    String? // Link Hoá Đơn (URL bản scan/PDF)
+  docSentAt      DateTime? // Chứng từ gửi đi (ngày gửi)
+  docReturnedAt  DateTime? // Chứng từ trả về (ngày nhận lại)
   // ===== Trang HÓA ĐƠN (kế toán, 2026-07-06) — cùng nguồn dữ liệu với Quản lý dự án (nhập 1 nơi
   // hiện cả 2). Tình trạng HĐ auto "Done" khi có invoiceNo + invoiceDate.
   invoiceDate    DateTime? // Ngày HĐơn (kế toán nhập)
-  paymentMethod  String?   // Hình thức thanh toán (CK/TM…)
+  paymentMethod  String? // Hình thức thanh toán (CK/TM…)
   orderClosedAt  DateTime? // Ngày đóng đơn hàng
-  invoiceYear    Int?      // Năm (kế toán nhập)
-  invoiceCompany String?   // CTy XUẤT hóa đơn: GN | SM | CLF (nhãn pháp nhân, không phải FK)
-  invoiceDesc    String?   // "Hạng mục" trên trang Hóa đơn (kế toán nhập mô tả)
-  invoiceNote    String?   // Note (kế toán nhập)
+  invoiceYear    Int? // Năm (kế toán nhập)
+  invoiceCompany String? // CTy XUẤT hóa đơn: GN | SM | CLF (nhãn pháp nhân, không phải FK)
+  invoiceDesc    String? // "Hạng mục" trên trang Hóa đơn (kế toán nhập mô tả)
+  invoiceNote    String? // Note (kế toán nhập)
 
   @@index([quoteId, order])
   @@index([signedById])
@@ -707,7 +754,6 @@ model WebhookDelivery {
 
   @@index([webhookId, createdAt(sort: Desc)])
 }
-
 
 /// Session store table managed by connect-pg-simple (express-session).
 /// Declared here only so `prisma db push` adopts it instead of dropping it.

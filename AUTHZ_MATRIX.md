@@ -1,8 +1,22 @@
-# Ma trận phân quyền — toàn bộ 133 endpoint
+# Ma trận phân quyền — toàn bộ 138 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [SECURITY_AUDIT_2026-08.md](SECURITY_AUDIT_2026-08.md).
 
 **Mục tiêu**: không còn endpoint nào ở trạng thái `UNKNOWN`. Mọi dòng dưới đây đã được đối chiếu với mã nguồn.
+
+> ### Con số này được SINH TỰ ĐỘNG, không đếm tay
+>
+> ```bash
+> node scripts/endpoint-inventory.mjs          # bảng đầy đủ
+> node scripts/endpoint-inventory.mjs --check  # CI: lệch số → exit 1
+> ```
+>
+> **Vì sao**: README từng ghi *141 endpoint*, bản đầu của chính tài liệu này ghi *133*. Cả hai đều
+> đếm tay nên cả hai đều sai — con số thật là **138** (129 trong router + 9 khai báo thẳng trên
+> `app`). Bản 133 đã bỏ sót 5 route phục vụ SPA vì tôi chỉ nhớ 4 endpoint hạ tầng.
+>
+> CI chạy `--check`; thêm/xoá route mà quên cập nhật bảng này là **đỏ pipeline**. Một endpoint không
+> có trong ma trận là một endpoint chưa ai soát quyền.
 
 ### Cách đọc
 
@@ -24,12 +38,12 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| POST | `/login` | ✗ | — | — | — | khoá tài khoản + MFA | — | `authCore.test.js` | OK |
+| POST | `/login` | ✗ | — | — | — | khoá tài khoản + MFA · **một thông điệp chung cho mọi thất bại** | — | AUTH-007 | **VÁ** |
 | POST | `/logout` | ✗ | — | self | — | — | — | `app.smoke` | OK |
 | GET | `/me` | ✓ | — | self | — | — | PII | — | OK |
 | POST | `/profile` | ✓ | — | self | ghim `session.userId` | — | PII | — | OK |
-| POST | `/change-password` | ✓ | — | self | đòi mật khẩu cũ | — | SEC | — | OK |
-| POST | `/token` | ✗ | — | — | — | như `/login` | SEC | `jwt.test.js` | OK |
+| POST | `/change-password` | ✓ | — | self | đòi mật khẩu cũ | thu hồi refresh token + huỷ mọi phiên khác + **xoay định danh phiên của mình** | SEC | SESSION-001 | **VÁ** |
+| POST | `/token` | ✗ | — | — | — | như `/login` (dùng chung authCore) | SEC | AUTH-007 | **VÁ** |
 | POST | `/token/refresh` | ✗ | — | — | CAS trên token hash | hết hạn/thu hồi/**đốt family** | SEC | `jwt.test.js` | OK |
 | POST | `/token/revoke` | ✗ | — | — | theo token hash | — | — | — | OK |
 | POST | `/token/revoke-all` | ✓ | — | self | — | — | — | — | OK |
@@ -45,7 +59,7 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
 | GET | `/` | ✓ | `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | — | $ PII | AUTH-002 | **VÁ** |
-| GET | `/next-number` | ✓ | — | — | — | — | — | — | OK |
+| GET | `/next-number` | ✓ | `quote:create` | — | — | — | — | AUTHZ-007 | **VÁ** |
 | GET | `/assignable-users` | ✓ | `quote:create` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/projects` | ✓ | `user:manage`\|`invoice:read`\|`invoice:page` **hoặc** `quote:read:own` | all/own | — | chỉ `converted` | $ PII | AUTH-005 | **VÁ** |
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
@@ -129,16 +143,16 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | GET | `/permissions/catalog` | ✓ | `user:manage` | — | — | — | — | `role-permissions` | OK |
 | PUT | `/permissions/roles/:role` | ✓ | `user:manage` | — | chặn sửa `admin` | lọc `ADMIN_ONLY_PERMISSIONS` | — | `role-permissions` | OK |
 | DELETE | `/permissions/roles/:role` | ✓ | `user:manage` | — | chặn sửa `admin` | — | — | `role-permissions` | OK |
-| GET | `/permissions/me` | ✓ | — | self | — | — | — | — | OK |
+| GET | `/permissions/me` | ✓ | — | self | — | trả quyền **hiệu lực của phiên**, khớp `/auth/me` | — | PERM-001 | **VÁ** |
 
 ## `/api/files` — 5 endpoint
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| POST | `/` | ✓ | — | own | key do **server** sinh trong namespace mình | magic bytes + 10MB + allowlist MIME | — | — | OK |
+| POST | `/` | ✓ | — | own | key do **server** sinh trong namespace mình | magic bytes + **cấu trúc zip** (xlsx) + 10MB + allowlist · ghi bản ghi `finalized` | — | FILE-002 | **VÁ** |
 | GET | `/sign-download` | ✓ | — | theo namespace | `canAccessKey` (chặn `..`, `//`, `\`, `\0`; `exports/` → `canOnQuote`) | — | $ | — | OK |
-| POST | `/sign-upload` | ✓ | — | own | key server sinh | **`Content-Length` vào chữ ký** + limiter 30/phút/tài khoản | — | FILE-001 | **VÁ** |
-| POST | `/finalize` | ✓ | — | own | chỉ namespace của mình | HEAD + **dò magic bytes** → sai thì **xoá object** | — | FILE-001 | **VÁ** |
+| POST | `/sign-upload` | ✓ | — | own | key server sinh | **`Content-Length` vào chữ ký** + limiter 30/ph/tài khoản + trần 20 phiên `pending` + tạo bản ghi TRƯỚC khi ký | — | FILE-001 | **VÁ** |
+| POST | `/finalize` | ✓ | — | own | bản ghi `UploadObject` + chủ sở hữu | HEAD → khớp kích thước+kiểu đã ký → magic bytes → cấu trúc zip → **CAS `pending`→`finalized`**; sai thì xoá object + `rejected` | — | FILE-001 · FILE-002 | **VÁ** |
 | DELETE | `/` | ✓ | `role=admin` | global | — | — | — | — | OK |
 
 ## `/api/admin` (3) · `/api/settings` (4) · `/api/webhooks` (6)
@@ -177,7 +191,7 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | DELETE | `/employees/:id` | ✓ | `employee:delete:own` | **global** ² | tồn tại | xoá mềm | — | — | OK |
 | GET | `/notifications/` · `/unread-count` | ✓ | — | self | ghim `userId` | — | — | — | OK |
 | POST | `/notifications/:id/read` · `/read-all` | ✓ | — | self | `updateMany` có `userId` | — | — | — | OK |
-| GET | `/meta/companies` · `/templates` | ✓ | — | global | — | chỉ bản `active` | — | — | OK |
+| GET | `/meta/companies` · `/templates` | ✓ | — | global | — | chỉ bản `active` · **projection tối thiểu** (bỏ `filePath`/`logoPath`) | — | AUTHZ-008 | **VÁ** |
 | POST | `/mfa/setup` · `/enable` · `/disable` | ✓ | — | self | **đòi mật khẩu** (step-up) | limiter 10/15ph theo tài khoản; TOTP chống replay; mã dự phòng dùng-một-lần | SEC | `mfa.test.js` | OK |
 | GET | `/stream/events` | ✓ | — | self | kênh theo `userId` | không nén (SSE) | — | — | OK |
 | POST | `/stream/presence` | ✓ | — | own | `canOnQuote(read)` | **gửi có địa chỉ**, không phát tán toàn hệ thống | PII | — | **VÁ** |
@@ -189,13 +203,19 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 ² Danh bạ nhân sự là **kho dùng chung có chủ đích** — `:own` ở đây là tên quyền, không phải phạm vi dữ liệu. Xem ghi chú `employees.routes.ts:35`.
 ³ Các queue khác (email/webhook/telegram) chứa địa chỉ nhận + URL + secret trong `job.data` → không bao giờ lộ, kể cả cho admin.
 
-## Ngoài router — 4 endpoint
+## Ngoài router — 9 endpoint
+
+Nhóm này **bị bỏ sót ở bản ma trận đầu** (chỉ liệt kê 4). Chúng không phục vụ dữ liệu nghiệp vụ,
+nhưng "không có dữ liệu" phải là kết luận sau khi kiểm, không phải lý do để không liệt kê.
 
 | M | Đường dẫn | AUTH | QUYỀN | Ghi chú | TT |
 |---|---|---|---|---|---|
 | GET | `/metrics` | Bearer | `METRICS_TOKEN` | **fail-closed ở prod**: thiếu token → 404. So sánh hằng-thời-gian | OK |
 | GET | `/livez` · `/api/health` | ✗ | — | chỉ `{ok:true}` | OK |
 | GET | `/readyz` | ✗ | — | không lộ chi tiết lỗi DB | OK |
+| GET | `/app` · `/app/*` | ✗ | — | trả `public/index.html` (vỏ SPA cũ). Tệp tĩnh, **không** chứa dữ liệu; mọi dữ liệu vẫn phải qua `/api/*` có gác quyền | OK |
+| GET | `/app2` · `/app2/*` | ✗ | — | trả `public/app2/index.html` (vỏ SPA React) — như trên | OK |
+| GET | `*` (đón mọi đường còn lại) | ✗ | — | vỏ SPA React. Đặt SAU `notFound` nên `/api/*` không tồn tại vẫn trả **404 JSON**, không rơi vào vỏ SPA | OK |
 
 ---
 
@@ -203,10 +223,16 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 
 | Trạng thái | Số endpoint |
 |---|---:|
-| `OK` — đã đúng từ trước | 107 |
-| **`VÁ`** — sửa trong đợt này | **26** |
+| `OK` — đã đúng từ trước | 105 |
+| **`VÁ`** — sửa trong hai đợt rà soát | **33** |
 | `NỢ` — còn thiếu | 0 |
 | `UNKNOWN` | **0** |
+
+Đợt 2 vá thêm 7 endpoint: `/api/files/sign-download` · `/api/files/finalize` · `/api/files/` (trạng
+thái tải lên là ràng buộc thật, không còn là quy ước) · `/api/auth/login` + `/api/auth/token` (bỏ
+oracle phân loại tài khoản) · `/api/auth/change-password` (xoay định danh phiên) ·
+`/api/permissions/me` (quyền hiệu lực thay vì quyền vai trò) · `/api/quotes/next-number` +
+`/api/meta/*` (least privilege).
 
 ### Ma trận diễn viên × tài nguyên (sau bản vá)
 
