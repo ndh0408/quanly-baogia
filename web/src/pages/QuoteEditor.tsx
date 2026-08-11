@@ -278,10 +278,15 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
 
   // ── Ý KIẾN KHÁCH theo TỪNG SHEET (ghi ngay, KHÔNG đợi Lưu — giống Chốt/Không chốt) ──────────
+  // KHÔNG chặn khi lưới còn thay đổi chưa lưu: ý kiến khách ghi thẳng vào DB theo sheet, và lúc
+  // bấm Lưu server tự bê trạng thái này sang bản sheet mới (carrySheetState) → không mất gì.
+  // Chỉ cần sheet đã tồn tại trong DB thì mới có chỗ để ghi.
   const decideSheet = async (status: "approved" | "rejected" | "") => {
     const s = activeSheet;
-    if (!s.id) { toast("Hãy Lưu báo giá trước, rồi mới ghi nhận ý kiến khách cho sheet", "info"); return; }
-    if (dirtyRef.current) { toast("Còn thay đổi chưa lưu — hãy bấm Lưu trước để không mất dữ liệu", "info"); return; }
+    if (!s.id) {
+      toast("Sheet này chưa lưu lần nào — bấm Lưu xong mới ghi nhận được ý kiến khách", "info");
+      return;
+    }
     let note: string | undefined;
     if (status === "rejected") {
       const n = await promptModal("Khách không duyệt sheet này", "Lý do (không bắt buộc):", { placeholder: "VD: giá cao, đổi phương án, gộp sang sheet khác…" });
@@ -383,7 +388,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         {/* Ý KIẾN KHÁCH cho RIÊNG sheet đang mở — khách duyệt sheet này, sheet kia chưa duyệt vẫn theo dõi được */}
         {!isNew && (
           <div className="cust-decide" style={{ margin: "2px 0 10px" }}>
-            <span className="muted" style={{ fontSize: 13 }}>Khách duyệt sheet “{activeSheet.name || `Sheet ${ai + 1}`}”:</span>
+            {/* Nhãn tên sheet lấy ĐÚNG như trên tab (tên tự đặt → tên mẫu → "Sheet N") để khỏi
+                lệch nhau: tab ghi "CLF (không ngày)" mà dòng này lại ghi "Sheet 1" thì rối. */}
+            <span className="muted" style={{ fontSize: 13 }}>
+              Khách duyệt sheet “{activeSheet.name || templates.find((t) => t.id === activeSheet.templateId)?.name || `Sheet ${ai + 1}`}”:
+            </span>
             <span className={`cust-chip ${activeSheet.custStatus || ""}`}>
               {activeSheet.custStatus ? CUST_LABEL[activeSheet.custStatus] : "Chưa có ý kiến"}
             </span>

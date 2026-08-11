@@ -61,6 +61,18 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
   // aria-live so screen readers announce toasts (errors = assertive). Trước đây React
   // hoàn toàn câm với screen reader — đây là sửa a11y.
   host.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+  // GỘP thông báo TRÙNG: bấm liên tục cùng một nút (vd "Khách duyệt" khi chưa đủ điều kiện) trước
+  // đây xếp chồng 5-6 hộp giống hệt che kín màn hình. Đã có hộp y hệt đang hiện → chỉ gia hạn nó.
+  for (const old of Array.from(host.children) as HTMLElement[]) {
+    if (old.classList.contains("out")) continue;
+    if (old.querySelector(".toast-msg")?.textContent === message) {
+      // Đặt lại đồng hồ tự tắt: mouseenter HUỶ hẹn cũ rồi mouseleave hẹn lại. Chỉ bắn mouseleave
+      // là đẻ thêm hẹn giờ thứ hai mà hẹn cũ vẫn chạy → hộp biến mất sớm.
+      old.dispatchEvent(new Event("mouseenter"));
+      old.dispatchEvent(new Event("mouseleave"));
+      return;
+    }
+  }
   const el = document.createElement("div");
   el.className = `toast toast-${type}`;
   el.setAttribute("role", type === "error" ? "alert" : "status");

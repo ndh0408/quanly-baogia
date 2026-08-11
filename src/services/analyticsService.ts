@@ -4,7 +4,7 @@
 import type { Request } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
-import { can, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
+import { can, quoteScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
 
 function defaultRange(q: { from?: Date; to?: Date }) {
   const to = q.to || new Date();
@@ -13,12 +13,25 @@ function defaultRange(q: { from?: Date; to?: Date }) {
 }
 
 /**
+ * 🔒 Deny-by-default cho các biểu đồ chỉ có 2 mức "toàn công ty / của mình":
+ * true  = xem số liệu MỌI báo giá (quote:read:all)
+ * false = chỉ báo giá do mình tạo — VẪN đòi quote:read:own, không thì 403.
+ * Router đã gác quote:create nhưng "tạo được" KHÔNG suy ra "đọc được": ma trận phân quyền cho phép
+ * tick create mà bỏ read, khi đó doanh số/tổng tiền vẫn lọt qua các endpoint này.
+ */
+function seesAllQuotes(session: { userId?: number; role?: string; permissions?: string[] }): boolean {
+  if (can(session, P.QUOTE_READ_ALL)) return true;
+  if (!can(session, P.QUOTE_READ_OWN)) throw Object.assign(new Error("Bạn không có quyền xem số liệu báo giá"), { status: 403 });
+  return false;
+}
+
+/**
  * Overview KPIs: total amount of approved+sent+converted, count by status,
  * conversion rate, average deal size, expiring soon, top performers.
  */
 export async function overview(req: Request) {
   const { from, to } = defaultRange(req.query);
-  const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
+  const scope = quoteScopeWhereOrThrow(req.session); // read:all=mọi báo giá, read:own=tự tạo/thành viên, không quyền=403
 
   const where = { createdAt: { gte: from, lte: to }, ...scope };
 
@@ -62,7 +75,7 @@ export async function overview(req: Request) {
 export async function revenueByDay(req: Request) {
   const { from, to } = defaultRange(req.query);
   // admin sees all; manager/employee scoped to their own created quotes for this chart.
-  const allScope = can(req.session, P.QUOTE_READ_ALL);
+  const allScope = seesAllQuotes(req.session);
   // Conditional fragment via Prisma.sql so the value stays parameterized.
   const scope = allScope ? Prisma.empty : Prisma.sql`AND "createdById" = ${req.session.userId}`;
 
@@ -81,7 +94,7 @@ export async function revenueByDay(req: Request) {
 export async function topSales(req: Request) {
   const { from, to, limit } = { ...defaultRange(req.query), limit: (req.query as any).limit };
   // Only admin sees the company-wide leaderboard; others see just their own row.
-  const taScope = can(req.session, P.QUOTE_READ_ALL) ? {} : { createdById: req.session.userId };
+  const taScope = seesAllQuotes(req.session) ? {} : { createdById: req.session.userId };
   const rows = await prisma.quote.groupBy({
     by: ["createdById"],
     where: { ...taScope, createdAt: { gte: from, lte: to }, status: { in: ["converted"] } },
@@ -108,7 +121,7 @@ export async function topSales(req: Request) {
 
 /** Funnel: count of quotes at each status. */
 export async function funnel(req: Request) {
-  const scope = quoteScopeWhere(req.session); // admin=all, manager=own, employee=member
+  const scope = quoteScopeWhereOrThrow(req.session); // read:all / read:own / 403
   const rows = await prisma.quote.groupBy({
     by: ["status"],
     where: scope,
