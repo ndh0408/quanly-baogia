@@ -102,3 +102,5 @@ spa-smoke.png
 /.claude/
 /_bmad/
 /_bmad-output/
+/e2e-import-shot.mjs
+/import-modal-*.png
