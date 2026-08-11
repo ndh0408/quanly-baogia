@@ -130,10 +130,13 @@ router.get(
   "/sign-download",
   validate({ query: z.object({ key: z.string().min(1).max(500), expires: z.coerce.number().int().min(60).max(86400).default(3600) }) }),
   asyncHandler(async (req: Request, res: Response) => {
-    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
+    // PHÂN QUYỀN TRƯỚC, cấu hình sau. Đảo thứ tự thì người KHÔNG có quyền với key này vẫn dò được
+    // trạng thái hạ tầng ("đã bật lưu trữ chưa") — và tệ hơn, lớp kiểm quyền không hề chạy. Mẫu chuẩn
+    // là xác thực → quyền năng lực → quyền tài nguyên → trạng thái.
     if (!(await canAccessKey(req.session, req.query.key))) {
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
+    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     const url = await presignDownload(req.query.key as string, { expiresIn: (req.query as any).expires });
     res.json({ url, expiresIn: req.query.expires });
   })
@@ -191,13 +194,14 @@ router.post(
   signLimiter,
   validate({ body: z.object({ key: z.string().min(1).max(500) }) }),
   asyncHandler(async (req: Request, res: Response) => {
-    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     const key = String(req.body.key);
-    // Chỉ finalize được object trong namespace của CHÍNH mình (admin không ngoại lệ ở đây — key
-    // luôn do /sign-upload sinh, nên không có ca dùng hợp lệ nào cần vượt namespace).
+    // PHÂN QUYỀN TRƯỚC, cấu hình sau (xem ghi chú ở /sign-download). Chỉ finalize được object trong
+    // namespace của CHÍNH mình — admin cũng không ngoại lệ, vì key luôn do /sign-upload sinh nên
+    // không có ca dùng hợp lệ nào cần vượt namespace.
     if (!key.startsWith(`uploads/u${req.session.userId}/`)) {
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
+    if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
     const head = await headObject(key);
     if (!head) return res.status(404).json({ error: "Chưa thấy tệp trên kho lưu trữ" });
     if (head.size <= 0 || head.size > MAX_UPLOAD_BYTES) {
