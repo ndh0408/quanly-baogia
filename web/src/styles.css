@@ -2976,14 +2976,54 @@ textarea[aria-invalid="true"] {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+/* Modal nhập Excel cần rộng hơn .modal-wide (680px) vì có bảng 4 cột + bảng đối chiếu. */
+.modal.import-modal {
+  max-width: 1120px;
+  width: 96vw;
+}
+/* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
+   dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
+.import-plan-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.import-plan {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 660px;   /* màn hẹp: cuộn ngang TRONG bảng, không làm vỡ modal */
+}
+.import-plan th:nth-child(1),
+.import-plan td:nth-child(1) {
+  width: 30%;
+}
+.import-plan th:nth-child(2),
+.import-plan td:nth-child(2) {
+  width: 28%;
+}
+.import-plan th:nth-child(3),
+.import-plan td:nth-child(3) {
+  width: 22%;
+}
+.import-plan th:nth-child(4),
+.import-plan td:nth-child(4) {
+  width: 20%;
+}
 .import-plan td {
   vertical-align: top;
+  word-break: break-word;
+}
+.import-tpl {
+  margin-top: 2px;
 }
 .import-plan tr.qrow.active > td {
   background: var(--primary-soft);
 }
+/* Select phải CO ĐƯỢC: mặc định nó lấy bề rộng theo option dài nhất ("GN Banner (không ngày)")
+   và min-width:auto của flex/table làm nó không chịu co → tràn ngang cả modal. */
 .import-plan select {
-  max-width: 210px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 /* Sơ đồ "cột nào là gì" app đọc được từ hàng tiêu đề của file */
 .import-cols {
@@ -3049,6 +3089,11 @@ textarea[aria-invalid="true"] {
 }
 .import-diff {
   margin: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+.import-diff td {
+  word-break: break-word;
 }
 .import-diff thead th {
   position: sticky;

@@ -127,7 +127,7 @@ export function ImportExcelModal({
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal modal-wide" role="dialog" aria-modal="true" aria-label="Nhập báo giá từ file Excel">
+      <div className="modal modal-wide import-modal" role="dialog" aria-modal="true" aria-label="Nhập báo giá từ file Excel">
         <div className="modal-head">
           <h3>Nhập từ Excel {fileName && <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {fileName}</span>}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button>
@@ -165,6 +165,7 @@ export function ImportExcelModal({
             <>
               {/* 1. Sheet trong file → nạp vào đâu */}
               <h4 style={{ margin: "4px 0 8px" }}>1. Sheet trong file → nạp vào sheet nào</h4>
+              <div className="import-plan-wrap">
               <table className="list-table import-plan">
                 <thead>
                   <tr>
@@ -179,11 +180,11 @@ export function ImportExcelModal({
                     <tr key={s.index} className={i === active ? "qrow active" : "qrow"} onClick={() => setActive(i)}>
                       <td>
                         <strong>{s.name}</strong>
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          Mẫu đoán: {s.templateName || "—"}{s.templateWhy ? ` (${s.templateWhy})` : ""}
+                        <div className="muted import-tpl" style={{ fontSize: 12 }} title={s.templateWhy ? `Vì: ${s.templateWhy}` : undefined}>
+                          Mẫu đoán: {s.templateName || "—"}
                         </div>
                       </td>
-                      <td className="nowrap">
+                      <td>
                         {s.stats.items + s.stats.subs} hạng mục · {s.stats.sections} nhóm · {s.stats.subsections} nhóm con
                         {s.stats.formulas > 0 && <> · {s.stats.formulas} công thức</>}
                       </td>
@@ -206,6 +207,7 @@ export function ImportExcelModal({
                   ))}
                 </tbody>
               </table>
+              </div>
               {res.sheets.some((s) => s.skipped) && (
                 <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
                   Bỏ qua: {res.sheets.filter((s) => s.skipped).map((s) => `${s.name} (${s.skipped})`).join(" · ")}
