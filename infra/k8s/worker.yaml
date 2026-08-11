@@ -15,10 +15,22 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: ghcr.io/ndh0408/quanly-baogia:latest
           imagePullPolicy: IfNotPresent
+          # Khớp app.yaml: hệ thống tệp gốc CHỈ ĐỌC, bỏ sạch capability, cấm leo thang đặc quyền.
+          # /tmp gắn riêng vì engine Prisma cần chỗ ghi.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
           envFrom:
             - configMapRef: { name: quanly-config }
             - secretRef: { name: quanly-secrets }
@@ -27,8 +39,12 @@ spec:
             - { name: WORKER_CONCURRENCY, value: "4" }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 1,    memory: 1Gi }
-          command: ["node", "src/worker.js"]
+            limits: { cpu: 1, memory: 1Gi }
+          # Backend đã chuyển sang TypeScript chạy bằng tsx — `node src/worker.js` không còn tồn tại.
+          # Dùng script npm để khớp đúng entrypoint mà Dockerfile/compose đang dùng.
+          command: ["npm", "run", "worker"]
+      volumes:
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

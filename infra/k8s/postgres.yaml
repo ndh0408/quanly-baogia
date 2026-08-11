@@ -25,9 +25,25 @@ spec:
     metadata:
       labels: { app: postgres }
     spec:
+      # UID/GID 70 là user `postgres` trong ảnh postgres:16-alpine. fsGroup để PVC được cấp quyền
+      # nhóm đúng ngay lần gắn đầu tiên (chưa từng deploy nên không có PVC cũ để va quyền).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:16-alpine
+          # Hệ thống tệp gốc CHỈ ĐỌC. Postgres cần ghi ở ĐÚNG ba chỗ, đều gắn volume riêng bên dưới:
+          # dữ liệu (PVC), socket đơn vị (/var/run/postgresql), và tệp tạm (/tmp).
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports: [{ containerPort: 5432 }]
           env:
             - { name: POSTGRES_USER, value: quanly }
@@ -38,6 +54,8 @@ spec:
               valueFrom: { secretKeyRef: { name: quanly-secrets, key: DATABASE_PASSWORD } }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             exec: { command: ["pg_isready", "-U", "quanly"] }
             initialDelaySeconds: 5
@@ -45,6 +63,8 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: quanly-pgdata }
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

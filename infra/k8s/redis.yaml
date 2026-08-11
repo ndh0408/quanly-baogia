@@ -11,9 +11,27 @@ spec:
     metadata:
       labels: { app: redis }
     spec:
+      # Cùng khuôn với app.yaml: chạy không-phải-root, seccomp mặc định của runtime.
+      # UID 999 là user `redis` có sẵn trong ảnh redis:7-alpine.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7-alpine
+          # Không leo thang đặc quyền, hệ thống tệp gốc CHỈ ĐỌC, bỏ sạch capability.
+          # `--save 60 1` có ghi RDB nên /data phải là volume ghi được (khai bên dưới).
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: data, mountPath: /data }
           # XÁC THỰC BẮT BUỘC: --requirepass từ secret (khớp đường docker-compose prod). Không có nó thì bất kỳ
           # pod nào trong cluster cũng đọc/ghi được session + hàng đợi job. $(REDIS_PASSWORD) expand từ env dưới.
           env:
@@ -37,6 +55,10 @@ spec:
             tcpSocket: { port: 6379 }
             initialDelaySeconds: 3
             periodSeconds: 5
+      # Redis chỉ dùng làm cache/hàng đợi — mất khi pod chết là chấp nhận được, nên emptyDir là đủ
+      # (RDB ở đây chỉ để khởi động lại nhanh, không phải nguồn sự thật). Đổi sang PVC nếu sau này cần bền.
+      volumes:
+        - { name: data, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

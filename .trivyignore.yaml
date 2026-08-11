@@ -1,0 +1,16 @@
+# Miễn trừ Trivy — CÓ PHẠM VI, không tắt luật toàn cục.
+#
+# Dùng .trivyignore.yaml (không dùng .trivyignore dạng danh sách ID) để mỗi miễn trừ ghim vào ĐÚNG
+# đường dẫn. Tắt cả luật thì lần sau có bí mật thật lọt vào ConfigMap khác sẽ không ai biết.
+
+misconfigurations:
+  - id: KSV-0109
+    paths:
+      - "infra/k8s/configmap.yaml"
+    statement: >
+      False positive đã kiểm bằng mắt. KSV-0109 khớp theo TÊN KHOÁ nghi là bí mật; ở đây nó bắt các
+      khoá có tiền tố JWT_ (JWT_ACCESS_TTL="15m", JWT_REFRESH_TTL_DAYS="7"). Đó là THỜI HẠN token,
+      không phải khoá ký. Bí mật thật (JWT_SECRET, SESSION_SECRET, DATABASE_PASSWORD, REDIS_PASSWORD,
+      MFA_ENC_KEY, S3_*_KEY) nằm ở Secret riêng — xem infra/k8s/secret.example.yaml — và được nạp qua
+      secretRef chứ không bao giờ qua ConfigMap. Toàn bộ 19 khoá trong file này là tham số điều chỉnh
+      công khai (cỡ trang, số lần đăng nhập sai, mức log…).

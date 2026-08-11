@@ -1,0 +1,23 @@
+# Cấu hình gitleaks — mở rộng bộ luật mặc định, KHÔNG thay thế.
+# Gitleaks tự đọc file này khi nằm ở gốc nguồn quét.
+#
+# Nguyên tắc: allowlist phải HẸP. Không bao giờ bỏ qua cả thư mục `tests/` — test vẫn là nơi bí mật
+# thật hay bị dán vào (chuỗi kết nối, token staging). Chỉ miễn trừ ĐÚNG chuỗi đã kiểm chứng bằng mắt,
+# và ghim thêm đường dẫn để cùng chuỗi đó ở chỗ khác vẫn bị bắt.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Khoá mã hoá GIẢ trong test đơn vị MFA (tests/mfa.test.js:7).
+
+Đây không phải bí mật: chuỗi tự mô tả nó là đồ giả, độ dài cố ý đủ 16 ký tự chỉ để vượt qua ràng buộc
+`MFA_ENC_KEY: z.string().min(16)` của config, nhằm chạy được nhánh AES-256-GCM thay vì nhánh dự phòng
+plaintext. Nó chưa từng mở khoá dữ liệu thật ở bất kỳ môi trường nào.
+
+Gitleaks gắn cờ vì entropy 3.82 khớp luật `generic-api-key`. Không miễn trừ thì bước Security của CI
+(`--exit-code 1`) đỏ vĩnh viễn, và một cảnh báo luôn-đỏ là cảnh báo bị bỏ qua — nguy hiểm hơn không có.
+"""
+paths = ['''^tests/mfa\.test\.js$''']
+regexes = ['''test-mfa-encryption-key-at-least-16''']
