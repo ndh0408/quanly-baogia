@@ -15,7 +15,7 @@ import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
-import { can, canOnQuote, quoteScopeWhere, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, quoteScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
   QUOTE_INCLUDE,
@@ -122,6 +122,9 @@ export async function createQuote(req: Request) {
   const b = req.body;
   const userId = req.session.userId;
   if (userId === undefined) throw httpError(401, "Chưa đăng nhập");
+  // PHÒNG THỦ NHIỀU LỚP: route đã gác requirePermission(QUOTE_CREATE), nhưng service cũng phải tự
+  // kiểm — mọi đường gọi mới (job/script/route khác) đều đi qua đây. Đối xứng duplicateQuote().
+  if (!can(req.session, P.QUOTE_CREATE)) throw httpError(403, "Không có quyền tạo báo giá");
 
   const company = await prisma.company.findFirst({ where: { id: b.companyId } });
   if (!company) throw httpError(400, "Không tìm thấy công ty");
@@ -392,9 +395,11 @@ export async function listQuotes(req: Request) {
   const size = Number(qy.size) || config.DEFAULT_PAGE_SIZE;
   const sort = String(qy.sort);
   const order = qy.order;
-  // Visibility scope (admin=all, manager=own, employee=member) combined with
-  // the user's filters via AND so a scope-OR doesn't clash with the search-OR.
-  const filters: Prisma.QuoteWhereInput[] = [quoteScopeWhere(req.session)];
+  // Visibility scope (read:all = mọi báo giá, read:own = tự tạo/được thêm thành viên) kết hợp
+  // với bộ lọc của user bằng AND để OR-phạm-vi không đụng OR-tìm-kiếm.
+  // 🔒 CỔNG QUYỀN TRƯỚC PHẠM VI: không có quote:read:* nào → 403 (KHÔNG rơi xuống phạm vi own).
+  // Nếu không, người bị gỡ sạch quyền báo giá vẫn thấy các báo giá mình tạo/được thêm thành viên.
+  const filters: Prisma.QuoteWhereInput[] = [quoteScopeWhereOrThrow(req.session) as Prisma.QuoteWhereInput];
   if (status) filters.push({ status: status as Prisma.QuoteWhereInput["status"] });
   if (companyId) filters.push({ companyId });
   if (from || to) {
@@ -485,6 +490,10 @@ export async function listProjects(req: Request) {
   // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
   // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
   const seeAll = can(req.session, P.USER_MANAGE) || can(req.session, P.INVOICE_READ) || can(req.session, P.INVOICE_PAGE); // admin / người xem QLDA / KẾ TOÁN (trang Hóa đơn — cùng nguồn dữ liệu)
+  // 🔒 Deny-by-default: không thuộc nhóm "xem hết" thì PHẢI có quote:read:own mới rơi xuống phạm vi
+  // own. Trang này trả tên/mã KHÁCH HÀNG + tổng tiền + số hóa đơn — không được lọt cho tài khoản
+  // đã bị gỡ sạch quyền báo giá nhưng còn là người tạo cũ.
+  if (!seeAll && !can(req.session, P.QUOTE_READ_OWN)) throw httpError(403, "Bạn không có quyền xem danh sách dự án");
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!seeAll) where.createdById = req.session.userId;
   const quotes = await prisma.quote.findMany({

@@ -5,7 +5,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
-import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
+import { can, canScoped, readScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
@@ -21,14 +21,14 @@ async function loadAuthorized(req: Request, action: Action) {
 
 export async function listCustomers(req: Request) {
   const { q, status, tag, ownerId, page, size, sort, order } = req.query as any;
-  const where: Record<string, any> = {};
+  // 🔒 CỔNG QUYỀN TRƯỚC PHẠM VI (deny by default): read:all → mọi khách; read:own → khách của mình;
+  // KHÔNG có quyền đọc nào → 403. Trước đây thiếu :all là rơi thẳng xuống phạm vi own, nên tài khoản
+  // KHÔNG có quyền khách hàng nào (kế toán / nhân sự / account HN, hoặc người bị gỡ quyền) vẫn nhận
+  // 200 kèm hồ sơ khách mình còn đứng tên — lộ tên/điện thoại/email/MST của khách.
+  const where: Record<string, any> = { ...readScopeWhereOrThrow(req.session, "customer") };
   if (status) where.status = status;
-  // Cô lập dữ liệu: ai không có "read all" chỉ thấy khách của MÌNH.
-  if (can(req.session, P.CUSTOMER_READ_ALL)) {
-    if (ownerId) where.ownerId = ownerId;
-  } else {
-    where.ownerId = req.session.userId;
-  }
+  // read:all mới được lọc theo chủ sở hữu khác; read:own đã bị ghim vào ownerId của chính mình.
+  if (ownerId && can(req.session, P.CUSTOMER_READ_ALL)) where.ownerId = ownerId;
   if (tag) where.tags = { has: tag };
   // Tìm KHÔNG dấu / sai dấu: khớp trên cột searchText đã chuẩn-hóa (gồm name+code+phone+email+taxCode+contactName).
   if (q) where.searchText = searchTextFilter(q);
@@ -93,6 +93,19 @@ export async function updateCustomer(req: Request) {
   const data = { ...req.body };
   // Chỉ user sửa-được-mọi-KH mới đổi chủ sở hữu; còn lại strip.
   if (!can(req.session, P.CUSTOMER_EDIT_ALL)) delete data.ownerId;
+  // Đổi MÃ / MST: kiểm trùng TRƯỚC khi ghi để trả 409 rõ ràng (thay vì P2002 lộ ra như lỗi lạ) và
+  // để không cướp mã của khách khác. includeDeleted vì unique phủ cả bản xoá-mềm — khớp createCustomer.
+  if (data.code && data.code !== before.code) {
+    const dup = await prisma.customer.findFirst({ where: { code: data.code }, includeDeleted: true } as any);
+    if (dup) throw httpError(409, dup.deletedAt ? "Mã thuộc khách hàng đã xoá" : "Mã khách hàng đã tồn tại");
+  }
+  if (data.taxCode) {
+    data.taxCode = String(data.taxCode).trim();
+    if (data.taxCode !== before.taxCode) {
+      const dupTax = await prisma.customer.findFirst({ where: { taxCode: data.taxCode, id: { not: before.id } } });
+      if (dupTax) throw httpError(409, `Mã số thuế đã thuộc khách hàng ${dupTax.code} — ${dupTax.name}`);
+    }
+  }
   // Tính lại searchText theo giá trị SẼ ghi: field có trong payload thì dùng nó (KỂ CẢ null = xóa),
   // không thì giữ giá trị cũ. Dùng `k in data` thay `?? before` để xóa-rỗng phản ánh đúng (không stale).
   const pick = (k: string) => (k in data ? data[k] : (before as any)[k]);

@@ -441,12 +441,28 @@ export function canOnQuote(
 
 /**
  * Prisma `where` fragment limiting quotes to what the caller may SEE:
- *   admin             → all
- *   manager/employee  → quotes they created OR were added to as a member
+ *   quote:read:all → all
+ *   quote:read:own → quotes they created OR were added to as a member
+ *   KHÔNG có quyền đọc nào → `null` = TỪ CHỐI (deny by default).
+ *
+ * ⚠️ `null` KHÁC `{}`. "Không có read:all" KHÔNG đồng nghĩa "có read:own": trước đây hàm này
+ * rơi thẳng xuống phạm vi own nên một tài khoản bị gỡ SẠCH quyền báo giá (qua ma trận phân quyền
+ * hoặc quyền per-user) vẫn thấy báo giá mình từng tạo / được thêm làm thành viên trong danh sách,
+ * tìm kiếm và thống kê. Mọi caller PHẢI kiểm `null` rồi 403 — dùng `quoteScopeWhereOrThrow`.
  */
-export function quoteScopeWhere(session: SessionLike) {
+export function quoteScopeWhere(session: SessionLike): Record<string, any> | null {
   if (can(session, "quote:read:all")) return {}; // xem mọi báo giá
-  return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
+  if (can(session, "quote:read:own")) {
+    return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
+  }
+  return null; // fail closed
+}
+
+/** Như `quoteScopeWhere` nhưng ném 403 thay vì trả null — dùng ở service để khỏi quên kiểm. */
+export function quoteScopeWhereOrThrow(session: SessionLike): Record<string, any> {
+  const scope = quoteScopeWhere(session);
+  if (!scope) throw Object.assign(new Error("Bạn không có quyền xem báo giá"), { status: 403 });
+  return scope;
 }
 
 /**
@@ -459,6 +475,26 @@ export function canScoped(session: SessionLike, resource: string, action: string
     return row && row[ownerField] != null && row[ownerField] === session?.userId;
   }
   return false;
+}
+
+/**
+ * Phạm vi DANH SÁCH tổng quát cho tài nguyên có chủ sở hữu (customer, personnel, employee…).
+ *   `<resource>:read:all` → `{}`  (mọi bản ghi)
+ *   `<resource>:read:own` → `{ [ownerField]: userId }`
+ *   không quyền nào       → `null` = TỪ CHỐI.
+ * Cùng ngữ nghĩa với `quoteScopeWhere`: KHÔNG có :all KHÔNG suy ra :own.
+ */
+export function readScopeWhere(session: SessionLike, resource: string, ownerField = "ownerId"): Record<string, any> | null {
+  if (can(session, `${resource}:read:all`)) return {};
+  if (can(session, `${resource}:read:own`)) return { [ownerField]: session.userId };
+  return null;
+}
+
+/** Như `readScopeWhere` nhưng ném 403 thay vì trả null. */
+export function readScopeWhereOrThrow(session: SessionLike, resource: string, ownerField = "ownerId"): Record<string, any> {
+  const scope = readScopeWhere(session, resource, ownerField);
+  if (!scope) throw Object.assign(new Error("Bạn không có quyền xem dữ liệu này"), { status: 403 });
+  return scope;
 }
 
 /** Express middleware factory: 403 unless the session holds the permission. */

@@ -95,8 +95,47 @@ export async function presignDownload(key: string, { expiresIn = 3600, bucket = 
   );
 }
 
-export async function presignUpload({ key, contentType, expiresIn = 3600, bucket = config.S3_BUCKET }: { key: string; contentType?: string; expiresIn?: number; bucket?: string }) {
+/**
+ * Presigned PUT cho upload trực tiếp từ client.
+ *
+ * `contentLength` được ĐƯA VÀO CHỮ KÝ: S3/MinIO khi đó bắt buộc request phải gửi đúng
+ * `Content-Length` ấy, nếu không thì từ chối. Đó là CÁI DUY NHẤT chặn được kích thước ở phía kho
+ * lưu trữ — không có nó, đường presigned lách sạch giới hạn 10 MB của đường multipart và một tài
+ * khoản bất kỳ có thể đẩy file khổng lồ vào bucket. `contentType` cũng nằm trong chữ ký nên client
+ * không đổi kiểu được. Kiểm NỘI DUNG THẬT (magic bytes) làm ở bước finalize.
+ */
+export async function presignUpload({ key, contentType, contentLength, expiresIn = 3600, bucket = config.S3_BUCKET }: { key: string; contentType?: string; contentLength?: number; expiresIn?: number; bucket?: string }) {
   const c = getClient();
   if (!c) throw new Error("Storage not configured");
-  return getSignedUrl(c, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), { expiresIn });
+  return getSignedUrl(
+    c,
+    new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType, ContentLength: contentLength }),
+    { expiresIn, signableHeaders: contentLength != null ? new Set(["content-length", "content-type"]) : undefined }
+  );
+}
+
+/** Metadata của object (kích thước/kiểu thật do kho lưu trữ ghi nhận). null nếu không tồn tại. */
+export async function headObject(key: string, bucket = config.S3_BUCKET) {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const r = await c.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { size: Number(r.ContentLength ?? 0), contentType: r.ContentType || "", metadata: r.Metadata || {} };
+  } catch {
+    return null;
+  }
+}
+
+/** Đọc N byte ĐẦU của object — đủ để nhận dạng magic bytes mà không kéo cả file về. */
+export async function getObjectHeadBytes(key: string, n = 16, bucket = config.S3_BUCKET): Promise<Buffer | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const r = await c.send(new GetObjectCommand({ Bucket: bucket, Key: key, Range: `bytes=0-${n - 1}` }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of r.Body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
 }

@@ -21,16 +21,25 @@ const KNOWN_PERMS = new Set<string>(Object.values(PERMISSIONS));
 const sanitizePerms = (arr: unknown): string[] =>
   Array.isArray(arr) ? [...new Set(arr.filter((p): p is string => typeof p === "string" && KNOWN_PERMS.has(p) && !ADMIN_ONLY_PERMISSIONS.has(p)))] : [];
 
-// Accounts hidden from every user listing (developer/maintenance account).
-// The account still works for login — it just never shows in the admin user list
-// or the permissions matrix. Override/extend via HIDDEN_USER_EMAILS (comma-separated).
-const HIDDEN_USER_EMAILS = new Set(
-  (process.env.HIDDEN_USER_EMAILS || "ndh0408@gmail.com")
+// ── TÀI KHOẢN KHẨN CẤP (break-glass) ─────────────────────────────────────────
+// TRƯỚC 2026-08-11 đây là danh sách tài khoản ẨN: mặc định hard-code một email cá nhân của lập
+// trình viên; tài khoản đó đăng nhập bình thường, có quyền admin, KHÔNG hiện trong danh sách nhân
+// viên lẫn ma trận phân quyền, và KHÔNG thể bị hạ quyền/khóa. Đặc quyền lén lút như vậy là lỗi
+// quản trị: chủ hệ thống không nhìn thấy nên không kiểm soát/thu hồi được.
+//
+// Nay: KHÔNG còn mặc định hard-code, và KHÔNG còn ẩn. Nếu doanh nghiệp thực sự cần một tài khoản
+// khẩn cấp thì khai báo TƯỜNG MINH qua BREAK_GLASS_EMAILS — tài khoản vẫn HIỆN trong danh sách,
+// gắn cờ `breakGlass: true` để admin thấy rõ, và vẫn hạ quyền/khóa được như mọi tài khoản khác
+// (chỉ còn ràng buộc chung: không được gỡ quản trị viên cuối cùng).
+// HIDDEN_USER_EMAILS đọc kèm CHỈ để tương thích ngược cấu hình cũ; nên đổi sang tên mới.
+const BREAK_GLASS_EMAILS = new Set(
+  (process.env.BREAK_GLASS_EMAILS || process.env.HIDDEN_USER_EMAILS || "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
 );
-const isHiddenUser = (u: { email?: string | null }) => HIDDEN_USER_EMAILS.has(String(u.email || "").toLowerCase());
+const isBreakGlassUser = (u: { email?: string | null }) =>
+  BREAK_GLASS_EMAILS.size > 0 && BREAK_GLASS_EMAILS.has(String(u.email || "").toLowerCase());
 
 const USER_SELECT = {
   id: true,
@@ -69,15 +78,15 @@ async function sendInviteEmail(to: string, displayName: string, url: string) {
 
 export async function listUsers(_req: Request) {
   const users = await prisma.user.findMany({ orderBy: { id: "asc" }, select: { ...USER_SELECT, inviteTokenHash: true } });
-  return users
-    .filter((u) => !isHiddenUser(u))
-    .map(({ inviteTokenHash, ...u }) => ({
-      ...u,
-      pending: !u.active && !!inviteTokenHash,
-      // Quyền HIỆU LỰC để pre-fill ma trận (per-user nếu có, else theo role; +ký nếu canSign); permCustom = đã tùy biến.
-      effectivePermissions: permissionsForUser(u.role, u.permissions, u.canSign),
-      permCustom: (u.permissions?.length ?? 0) > 0,
-    }));
+  // KHÔNG lọc bỏ ai nữa — mọi tài khoản đều hiện; tài khoản khẩn cấp chỉ được GẮN CỜ để admin thấy.
+  return users.map(({ inviteTokenHash, ...u }) => ({
+    ...u,
+    pending: !u.active && !!inviteTokenHash,
+    breakGlass: isBreakGlassUser(u),
+    // Quyền HIỆU LỰC để pre-fill ma trận (per-user nếu có, else theo role; +ký nếu canSign); permCustom = đã tùy biến.
+    effectivePermissions: permissionsForUser(u.role, u.permissions, u.canSign),
+    permCustom: (u.permissions?.length ?? 0) > 0,
+  }));
 }
 
 // Invite an employee by email — they self-onboard (set password + fill details).
@@ -169,23 +178,21 @@ export async function updateUser(req: Request) {
     data.inviteExpiresAt = null;
   }
 
-  // Keep admin access alive: block any change that strips the LAST visible active
-  // admin, and never demote/deactivate the hidden developer backstop account
-  // (ndh0408 — used for real ops/monitoring; flip it via DB if ever needed).
+  // Giữ đường vào quản trị: chặn thay đổi làm mất QUẢN TRỊ VIÊN CUỐI CÙNG. Đây là ràng buộc DUY
+  // NHẤT — không còn ngoại lệ "tài khoản hệ thống không được hạ quyền", và tài khoản khẩn cấp
+  // ĐƯỢC TÍNH là admin hợp lệ khi đếm (nó hiện trong danh sách nên chủ hệ thống thấy và thu hồi được).
   const losingAdmin =
     before.role === "admin" &&
     ((rest.role !== undefined && rest.role !== "admin") || rest.active === false);
   if (losingAdmin) {
-    if (isHiddenUser(before)) {
-      throw httpError(400, "Không thể đổi vai trò hoặc khóa tài khoản quản trị hệ thống.");
-    }
-    const otherAdmins = await prisma.user.findMany({
-      where: { role: "admin", active: true, id: { not: id } },
-      select: { email: true },
-    });
-    if (otherAdmins.filter((u) => !isHiddenUser(u)).length === 0) {
+    const otherAdmins = await prisma.user.count({ where: { role: "admin", active: true, id: { not: id } } });
+    if (otherAdmins === 0) {
       throw httpError(400, "Không thể gỡ quyền hoặc khóa quản trị viên cuối cùng.");
     }
+  }
+  // Thao tác trên tài khoản khẩn cấp là sự kiện đáng chú ý → ghi vết riêng, mức cao.
+  if (isBreakGlassUser(before)) {
+    await audit(req, "user.breakglass.modify", { resource: "user", resourceId: id, after: { changed: Object.keys(rest) } });
   }
 
   const user = await prisma.user.update({ where: { id }, data, select: USER_SELECT });
