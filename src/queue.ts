@@ -16,6 +16,38 @@ export function getRedis() {
   return connection;
 }
 
+// Kết nối RIÊNG cho rate-limiter, cấu hình NGƯỢC HẲN với kết nối của BullMQ.
+//
+// Vì sao phải tách: kết nối trên đặt `maxRetriesPerRequest: null` — BullMQ CẦN thế, vì một job đã
+// nhận thì phải cố hoàn tất, thà đợi còn hơn mất. Nhưng rate-limiter chạy TRÊN ĐƯỜNG XỬ LÝ CỦA MỌI
+// REQUEST. Dùng chung kết nối "thử lại vô hạn" nghĩa là Redis chết → mọi lệnh xếp hàng vô thời hạn →
+// mọi request HTTP treo cho tới khi proxy bỏ cuộc. Đo được trên DEV: dừng Redis thì đăng nhập và API
+// đều trả 524 (Cloudflare timeout), trong khi container vẫn "running" và /readyz vẫn báo khoẻ.
+//
+// Ở đây thì ngược lại: thà TRƯỢT NHANH còn hơn đợi. `enableOfflineQueue: false` để lệnh lỗi ngay
+// thay vì xếp hàng; `commandTimeout` chặn lệnh treo; `maxRetriesPerRequest: 1` để không nhân thời
+// gian chờ lên nhiều lần.
+let rlConnection: any = null;
+export function getRateLimitRedis() {
+  if (!config.REDIS_URL) return null;
+  if (rlConnection) return rlConnection;
+  rlConnection = new (IORedis as any)(config.REDIS_URL, {
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: false,
+    enableOfflineQueue: false,
+    commandTimeout: 1000,
+    connectTimeout: 1000,
+    retryStrategy: (times: number) => Math.min(times * 500, 5000),
+  });
+  rlConnection.on("error", (e: Error) => logger.warn({ err: e.message }, "redis (rate limit)"));
+  return rlConnection;
+}
+
+/** Redis dành cho rate-limit có đang sẵn sàng không (dùng để bỏ qua limiter khi Redis chết). */
+export function isRateLimitRedisReady() {
+  return !!rlConnection && rlConnection.status === "ready";
+}
+
 export function isQueueEnabled() {
   return !!config.REDIS_URL;
 }
