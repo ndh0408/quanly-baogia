@@ -3141,3 +3141,19 @@ textarea[aria-invalid="true"] {
   margin-left: 6px;
   font-size: 11px;
 }
+
+/* public/style.css (ĐÓNG BĂNG) đặt `.modal label input { display:block; width:100% }` cho ô nhập
+   dạng form. Với CHECKBOX/RADIO thì sai: ô tick bị kéo rộng 100%, và khi label là inline-flex thì
+   nó ăn hết chỗ khiến phần chữ bị bó (nhãn "Lấy luôn VAT 8% theo file" rơi 3 dòng, ô tick lệch).
+   Trả checkbox/radio về kích thước thật — áp cho MỌI modal nên sửa luôn cả hộp "Thành viên phụ trách". */
+.modal label input[type="checkbox"],
+.modal label input[type="radio"] {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.modal label.toggle-totals {
+  margin-bottom: 0;
+}
