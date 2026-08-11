@@ -208,9 +208,9 @@ export function ImportExcelModal({
                         <select value={plans[i]?.mode ?? "replace"} onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setPlan(i, { mode: e.target.value as TargetMode })}>
                           {plans[i]?.targetIndex === NEW_SHEET
-                            ? <option value="replace">Tạo sheet “{s.name}”</option>
-                            : <><option value="replace">Thay toàn bộ hạng mục</option><option value="append">Nối vào cuối</option></>}
-                          <option value="skip">Bỏ qua sheet này</option>
+                            ? <option value="replace">Tạo sheet mới</option>
+                            : <><option value="replace">Thay toàn bộ</option><option value="append">Nối vào cuối</option></>}
+                          <option value="skip">Bỏ qua</option>
                         </select>
                       </td>
                     </tr>
