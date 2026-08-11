@@ -26,7 +26,7 @@ export function encryptSecret(plain: string | null | undefined) {
     return plain;
   }
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
   const ct = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString("base64");
@@ -44,10 +44,15 @@ export function decryptSecret(stored: string | null | undefined) {
   if (!key) return null;
   try {
     const raw = Buffer.from(String(stored).slice(ENC_PREFIX.length), "base64");
+    // GCM CẮT NGẮN THẺ XÁC THỰC — xem giải thích đầy đủ ở src/secretbox.ts. Tóm tắt: `subarray` không
+    // báo lỗi khi dữ liệu ngắn, và Node nhận thẻ GCM 4–16 byte nếu không ghim `authTagLength`; ai ghi
+    // được vào DB có thể lưu thẻ 4 byte rồi giả mạo bí mật TOTP với 2^32 công thay vì 2^128.
+    if (raw.length < 28) throw new Error("ciphertext quá ngắn");
     const iv = raw.subarray(0, 12);
     const tag = raw.subarray(12, 28);
     const ct = raw.subarray(28);
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    if (tag.length !== 16) throw new Error("thẻ xác thực sai độ dài");
+    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
   } catch (e) {

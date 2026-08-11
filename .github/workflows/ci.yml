@@ -110,6 +110,9 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          # BẮT BUỘC khai tường minh: trivy KHÔNG tự nhặt .trivyignore.yaml ở gốc repo (đã kiểm trên
+          # VM dev — thiếu cờ này thì miễn trừ không có tác dụng và job đỏ vì đúng một false positive).
+          trivyignores: .trivyignore.yaml
 
       # SAST. Trước đây CI KHÔNG có bước phân tích mã tĩnh nào: npm audit chỉ soi thư viện,
       # gitleaks soi bí mật, trivy soi hạ tầng — không ai đọc LOGIC của mình. Semgrep OSS chạy cục bộ

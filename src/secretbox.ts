@@ -25,7 +25,7 @@ function key() {
 export function encryptValue(plain: string | null | undefined) {
   if (plain == null || plain === "") return plain;
   const iv = randomBytes(IV_LEN);
-  const c = createCipheriv("aes-256-gcm", key(), iv);
+  const c = createCipheriv("aes-256-gcm", key(), iv, { authTagLength: TAG_LEN });
   const ct = Buffer.concat([c.update(String(plain), "utf8"), c.final()]);
   const tag = c.getAuthTag();
   return PREFIX + Buffer.concat([iv, tag, ct]).toString("base64");
@@ -37,10 +37,17 @@ export function decryptValue(value: string | null) {
   if (typeof value !== "string" || !value.startsWith(PREFIX)) return value; // legacy plaintext
   try {
     const raw = Buffer.from(value.slice(PREFIX.length), "base64");
+    // GCM CẮT NGẮN THẺ XÁC THỰC: `subarray` KHÔNG báo lỗi khi dữ liệu ngắn — nó lặng lẽ trả buffer
+    // ngắn hơn. Node lại chấp nhận thẻ GCM dài 4/8/12–16 byte trừ khi ta ghim `authTagLength`. Ghép
+    // hai điều đó: ai ghi được vào DB có thể lưu bản mã kèm thẻ 4 byte, hạ công sức giả mạo từ 2^128
+    // xuống 2^32 và qua mặt được kiểm tính toàn vẹn. Chặn cả hai đầu: kiểm độ dài tường minh ở đây,
+    // và ghim authTagLength để chính Node từ chối mọi thẻ khác 16 byte.
+    if (raw.length < IV_LEN + TAG_LEN) throw new Error("ciphertext quá ngắn");
     const iv = raw.subarray(0, IV_LEN);
     const tag = raw.subarray(IV_LEN, IV_LEN + TAG_LEN);
     const ct = raw.subarray(IV_LEN + TAG_LEN);
-    const d = createDecipheriv("aes-256-gcm", key(), iv);
+    if (tag.length !== TAG_LEN) throw new Error("thẻ xác thực sai độ dài");
+    const d = createDecipheriv("aes-256-gcm", key(), iv, { authTagLength: TAG_LEN });
     d.setAuthTag(tag);
     return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
   } catch (e) {
