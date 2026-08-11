@@ -5,6 +5,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
+import { ImportExcelModal, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { takePendingNewQuote } from "../lib/pendingQuote";
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -17,7 +18,15 @@ import { takePendingNewQuote } from "../lib/pendingQuote";
 const stampKeys = (q: QuoteFull) => {
   (q.sheets as Sheet[] | undefined)?.forEach((s) => (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); }));
 };
-type Sheet = M.Sheet & { _k?: number };
+// Ý kiến khách theo TỪNG SHEET (khách chốt sheet này, chưa chốt sheet kia) — server giữ, đổi bằng
+// endpoint riêng (không đi qua Lưu) nên không lẫn với trạng thái CẢ báo giá (q.status).
+type Sheet = M.Sheet & {
+  _k?: number;
+  custStatus?: string | null; custStatusAt?: string | null; custNote?: string | null;
+  custStatusBy?: { id: number; displayName: string } | null;
+};
+const CUST_LABEL: Record<string, string> = { approved: "Khách đã duyệt", rejected: "Khách không duyệt" };
+const CUST_DOT: Record<string, string> = { approved: "✓", rejected: "✗" };
 const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ";
 type WinDirty = Window & { __editorDirty?: boolean };
 
@@ -45,6 +54,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
   const moreRef = useRef<HTMLDivElement>(null);
@@ -192,7 +202,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           const stpl = templates.find((t) => t.id === s.templateId);
           const sUsesDays = !!stpl?.layout?.hasDays;
           return {
-            templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
+            // GỬI KÈM id sheet: lưu = server xoá-tạo-lại sheet, có id nó mới BÊ được trạng thái
+            // mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…). Giá trị vẫn do
+            // server quyết — client chỉ dùng id để ghép.
+            id: s.id, templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
@@ -241,6 +254,48 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     try { const u = await api.markLost(q.id, reason); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
+  // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
+  const applyImport = (payload: ImportApplyPayload) => {
+    let nAdd = 0, nSheet = 0;
+    for (const p of payload.plans) {
+      const target = sheets[p.targetIndex];
+      if (!target) continue;
+      const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
+      if (p.mode === "append") target.items.push(...stamped);
+      else {
+        target.items.splice(0, target.items.length, ...stamped);
+        // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file.
+        target.groupSubtotal = !!p.file.groupSubtotal;
+      }
+      nAdd += stamped.length; nSheet++;
+    }
+    if (payload.totals) {
+      if (payload.totals.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
+      if (payload.totals.discount != null) q.discount = payload.totals.discount;
+    }
+    mark(); redraw();
+    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet — kiểm tra lại rồi bấm Lưu`, "success");
+  };
+
+  // ── Ý KIẾN KHÁCH theo TỪNG SHEET (ghi ngay, KHÔNG đợi Lưu — giống Chốt/Không chốt) ──────────
+  const decideSheet = async (status: "approved" | "rejected" | "") => {
+    const s = activeSheet;
+    if (!s.id) { toast("Hãy Lưu báo giá trước, rồi mới ghi nhận ý kiến khách cho sheet", "info"); return; }
+    if (dirtyRef.current) { toast("Còn thay đổi chưa lưu — hãy bấm Lưu trước để không mất dữ liệu", "info"); return; }
+    let note: string | undefined;
+    if (status === "rejected") {
+      const n = await promptModal("Khách không duyệt sheet này", "Lý do (không bắt buộc):", { placeholder: "VD: giá cao, đổi phương án, gộp sang sheet khác…" });
+      if (n === null) return;
+      note = n;
+    }
+    try {
+      const r = await api.sheetCustomerDecision(s.id, status, note);
+      s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy;
+      toast(status === "approved" ? "Đã ghi: khách duyệt sheet này" : status === "rejected" ? "Đã ghi: khách không duyệt sheet này" : "Đã gỡ đánh dấu", "success");
+      redraw();
+    } catch (ex) { toast(errText(ex), "error"); }
+  };
+
   const exportFile = async (ext: "xlsx" | "pdf") => {
     if (dirtyRef.current && !(await confirmModal("Có thay đổi chưa lưu", "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi vừa sửa. Hãy Lưu trước rồi tải lại.", { confirmText: "Vẫn tải bản cũ" }))) return;
     window.open(`/api/export/${q.id}.${ext}?t=${Date.now()}`, "_blank");
@@ -304,6 +359,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           {sheets.map((s, i) => (
             <div key={s._k ?? i} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai} onClick={() => switchSheet(i)}>
               <span>{sheets.length > 1 ? `${i + 1}. ` : ""}{s.name || templates.find((t) => t.id === s.templateId)?.name || "Sheet " + (i + 1)}</span>
+              {/* Khách đã cho ý kiến sheet này → dấu ✓/✗ ngay trên tab để nhìn phát thấy */}
+              {s.custStatus && (
+                <span className={`cust-dot ${s.custStatus === "approved" ? "txt-ok" : "txt-danger"}`}
+                  title={CUST_LABEL[s.custStatus]} aria-label={CUST_LABEL[s.custStatus]}>{CUST_DOT[s.custStatus]}</span>
+              )}
               {editable && sheets.length > 1 && <span className="rm-tab" title="Xóa sheet" onClick={(e) => { e.stopPropagation(); removeSheet(i); }}>✕</span>}
             </div>
           ))}
@@ -313,7 +373,35 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redraw(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
           <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
+          {editable && (
+            <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
+              onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
+          )}
         </div>
+
+        {/* Ý KIẾN KHÁCH cho RIÊNG sheet đang mở — khách duyệt sheet này, sheet kia chưa duyệt vẫn theo dõi được */}
+        {!isNew && (
+          <div className="cust-decide" style={{ margin: "2px 0 10px" }}>
+            <span className="muted" style={{ fontSize: 13 }}>Khách duyệt sheet “{activeSheet.name || `Sheet ${ai + 1}`}”:</span>
+            <span className={`cust-chip ${activeSheet.custStatus || ""}`}>
+              {activeSheet.custStatus ? CUST_LABEL[activeSheet.custStatus] : "Chưa có ý kiến"}
+            </span>
+            {activeSheet.custStatusAt && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                {M.fmtDate(activeSheet.custStatusAt)}{activeSheet.custStatusBy?.displayName ? ` · ${activeSheet.custStatusBy.displayName} ghi nhận` : ""}
+              </span>
+            )}
+            {activeSheet.custNote && <span className="muted" style={{ fontSize: 12 }}>· lý do: {activeSheet.custNote}</span>}
+            {hasPerm("quote:send") && (
+              <>
+                {activeSheet.custStatus !== "approved" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("approved")}>✓ Khách duyệt</button>}
+                {activeSheet.custStatus !== "rejected" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("rejected")}>✗ Không duyệt</button>}
+                {activeSheet.custStatus && <button type="button" className="btn btn-sm btn-ghost" onClick={() => decideSheet("")}>Gỡ đánh dấu</button>}
+              </>
+            )}
+          </div>
+        )}
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
           clfTheme={!!tpl?.code?.startsWith("clofull")}
@@ -348,15 +436,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           <div className="quote-summary">
             <h3 style={{ margin: "18px 0 6px" }}>Tổng báo giá ({sheets.length} sheet)</h3>
             <table className="summary-table">
-              <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
+              <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col">Khách duyệt</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
               <tbody>
-                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const sub = M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{s.name || t?.name || `Sheet ${i + 1}`}</td><td style={{ textAlign: "right" }}>{M.fmtMoney(sub)}</td></tr>; })}
+                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const sub = M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{s.name || t?.name || `Sheet ${i + 1}`}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}>{M.fmtMoney(sub)}</td></tr>; })}
               </tbody>
               <tfoot>
-                <tr><td colSpan={2}>Tổng cộng</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.subtotal)}</td></tr>
-                <tr><td colSpan={2}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.vat)}</td></tr>
-                {tt.discount > 0 && <tr><td colSpan={2}>Giảm giá</td><td style={{ textAlign: "right" }}>-{M.fmtMoney(tt.discount)}</td></tr>}
-                <tr><td colSpan={2}><strong>Thành tiền</strong></td><td style={{ textAlign: "right", color: "var(--danger)" }}><strong>{M.fmtMoney(tt.total)}</strong></td></tr>
+                {/* Chỉ cộng các sheet KHÁCH ĐÃ DUYỆT — báo giá nhiều sheet hay chốt từng phần. */}
+                {sheets.some((s) => s.custStatus === "approved") && (
+                  <tr><td colSpan={3}>Tổng phần khách đã duyệt</td><td style={{ textAlign: "right" }}>
+                    <strong className="txt-ok">{M.fmtMoney(sheets.reduce((acc, s) => { if (s.custStatus !== "approved") return acc; const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0))}</strong>
+                  </td></tr>
+                )}
+                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.subtotal)}</td></tr>
+                <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.vat)}</td></tr>
+                {tt.discount > 0 && <tr><td colSpan={3}>Giảm giá</td><td style={{ textAlign: "right" }}>-{M.fmtMoney(tt.discount)}</td></tr>}
+                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right", color: "var(--danger)" }}><strong>{M.fmtMoney(tt.total)}</strong></td></tr>
               </tfoot>
             </table>
           </div>
@@ -389,6 +483,16 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         </div>
       </div>
 
+      {importOpen && (
+        <ImportExcelModal
+          quoteId={isNew ? undefined : q.id}
+          sheets={sheets}
+          usesDaysOf={(tid) => !!templates.find((t) => t.id === tid)?.layout?.hasDays}
+          addrDetailOf={(tid) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }}
+          onApply={applyImport}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
       {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
       {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
     </div>

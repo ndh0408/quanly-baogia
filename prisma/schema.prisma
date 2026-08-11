@@ -107,6 +107,7 @@ model User {
   assignedFollowUps FollowUp[]     @relation("FollowupAssignee")
   authoredVersions  QuoteVersion[] @relation("VersionAuthor")
   signedSheets      QuoteSheet[]   @relation("SheetSigner")
+  sheetDecisions    QuoteSheet[]   @relation("SheetCustomerDecision")
   personnelRecords  PersonnelRecord[] @relation("PersonnelCreatedBy")
   personnelPaid     PersonnelRecord[] @relation("PersonnelPaidBy")
   personnelConfirmed PersonnelRecord[] @relation("PersonnelConfirmedBy")
@@ -520,6 +521,15 @@ model QuoteSheet {
   // and the snapshotted signedByName, just clear the link (audit-safe).
   signedBy      User?         @relation("SheetSigner", fields: [signedById], references: [id], onDelete: SetNull)
   signedByName  String?
+  // ===== KHÁCH DUYỆT THEO TỪNG SHEET =====
+  // Báo giá nhiều sheet: khách có thể chốt sheet này mà chưa chốt sheet kia. Tách hẳn khỏi
+  // Quote.status (trạng thái CẢ báo giá) — status chỉ đổi khi người phụ trách bấm Chốt/Không chốt.
+  // null = chưa có ý kiến · "approved" = khách duyệt · "rejected" = khách không duyệt.
+  custStatus     String?
+  custStatusAt   DateTime?
+  custStatusById Int?      // nhân viên đánh dấu hộ khách (audit)
+  custStatusBy   User?     @relation("SheetCustomerDecision", fields: [custStatusById], references: [id], onDelete: SetNull)
+  custNote       String?   // ghi chú của khách / lý do không duyệt
   // Luồng hoá đơn ở trang Quản lý dự án (CHỈ admin nhập). Trạng thái suy ra: đã chốt →
   // "Hoá đơn"; có invoiceNo → "Thanh toán"; có CẢ invoiceNo + paidAt → "Done".
   invoiceNo     String?  // Số hoá đơn / mã HĐ

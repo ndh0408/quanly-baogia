@@ -22,6 +22,7 @@ import { prisma } from "./db.js";
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import quotesRoutes from "./routes/quotes.routes.js";
+import importRoutes from "./routes/import.routes.js";
 import exportRoutes from "./routes/export.routes.js";
 import metaRoutes from "./routes/meta.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
@@ -243,6 +244,7 @@ export function createApp() {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/users", usersRoutes);
+  app.use("/api/quotes", importRoutes);   // nhập Excel — đặt TRƯỚC quotesRoutes (tránh khớp "/:id")
   app.use("/api/quotes", quotesRoutes);
   app.use("/api/export", exportRoutes);
   app.use("/api/meta", metaRoutes);

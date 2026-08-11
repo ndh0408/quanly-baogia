@@ -2952,3 +2952,147 @@ textarea[aria-invalid="true"] {
     flex: 1 1 100%;
   }
 }
+
+/* ===== NHẬP TỪ EXCEL (ImportExcelModal) + KHÁCH DUYỆT TỪNG SHEET =====
+   Dùng token chung (--line/--surface/--success/--danger/--warn) → tự đúng cả dark mode. */
+.import-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 30px 18px;
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-hover, var(--bg));
+  text-align: center;
+  cursor: pointer;
+}
+.import-drop:hover,
+.import-drop.drag {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.import-drop:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.import-plan td {
+  vertical-align: top;
+}
+.import-plan tr.qrow.active > td {
+  background: var(--primary-soft);
+}
+.import-plan select {
+  max-width: 210px;
+}
+/* Sơ đồ "cột nào là gì" app đọc được từ hàng tiêu đề của file */
+.import-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.import-col-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.import-col-chip b {
+  color: var(--primary);
+}
+.import-warn {
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 26px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+.import-warn li + li {
+  margin-top: 4px;
+}
+.import-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.import-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.import-badge.changed {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.import-badge.added {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.import-badge.removed {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.import-diff-wrap {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.import-diff {
+  margin: 0;
+}
+.import-diff thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.import-row.same td {
+  opacity: 0.62;
+}
+.import-rowwarn {
+  margin-top: 3px;
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+/* Ý kiến khách theo TỪNG SHEET */
+.cust-decide {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cust-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cust-chip.approved {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.cust-chip.rejected {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.sheet-tab .cust-dot {
+  margin-left: 6px;
+  font-size: 11px;
+}

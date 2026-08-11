@@ -164,6 +164,10 @@ const extraTableSchema = z.object({
 });
 
 const sheetSchema = z.object({
+  // id của sheet ĐANG CÓ trong DB (client gửi lại khi sửa). Lưu = xoá-tạo-lại sheet nên server dùng
+  // id này để BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…).
+  // Chỉ dùng để GHÉP — mọi giá trị trạng thái vẫn do server quyết, client không đặt được.
+  id: z.coerce.number().int().positive().optional().nullable(),
   templateId: z.coerce.number({ error: "Vui lòng chọn mẫu báo giá" }).int("Mẫu báo giá không hợp lệ").positive("Vui lòng chọn mẫu báo giá"),
   name: z.string().max(120).optional().nullable(),
   order: z.coerce.number().int().optional(),

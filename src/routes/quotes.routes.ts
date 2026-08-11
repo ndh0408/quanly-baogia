@@ -21,6 +21,7 @@ import {
   getQuote,
   listProjects,
   signSheet,
+  setSheetCustomerDecision,
   updateSheetInvoice,
   markExtraTableRowPayment,
   getExtraTableRowProof,
@@ -99,6 +100,20 @@ router.post(
     body: z.object({ signed: z.boolean().default(true) }).default({} as any),
   }),
   asyncHandler(async (req: Request, res: Response) => res.json(await signSheet(req)))
+);
+
+// KHÁCH DUYỆT TỪNG SHEET (báo giá nhiều sheet: khách chốt sheet này, chưa chốt sheet kia).
+// Không đổi status cả báo giá — chỉ ghi ý kiến khách theo sheet. Đặt TRƯỚC "/:id".
+router.post(
+  "/sheets/:sheetId/customer-decision",
+  validate({
+    params: z.object({ sheetId: z.coerce.number().int().positive() }),
+    body: z.object({
+      status: z.enum(["approved", "rejected", ""]).nullable().default(null),
+      note: z.string().max(1000).optional().nullable(),
+    }),
+  }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await setSheetCustomerDecision(req)))
 );
 
 // HOÁ ĐƠN / THANH TOÁN cho 1 sheet (Quản lý dự án). CHỈ ADMIN. Số HĐ → "Thanh toán"; ngày

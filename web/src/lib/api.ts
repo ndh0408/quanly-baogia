@@ -123,6 +123,36 @@ export type QuoteFull = {
   members?: { id: number; displayName?: string }[]; sheets?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
 };
 export type QuoteVersion = { id: string; versionNo: number; total: number; createdAt: string; createdById?: number | null };
+
+// ===== NHẬP file Excel (server: src/excelImport.ts) =====
+// `formulas` ở dạng CANONICAL theo tên field ("={unitPrice:9}*2") — đổi sang chữ cột của lưới
+// đang mở bằng lib/importApply.ts, nên nạp sang mẫu khác vẫn trỏ ĐÚNG ô.
+export type ImportedItem = {
+  kind: "item" | "sub" | "section" | "subsection" | "info";
+  label?: string; name: string; detail?: string; unit?: string;
+  quantity: number; unitPrice: number; days?: number | null; notes?: string; internalNote?: string;
+  formulas?: Record<string, string>;
+  row: number;            // hàng trong file Excel (để đối chiếu)
+  warn?: string[];        // cảnh báo riêng dòng đó
+};
+export type ImportedSheet = {
+  index: number; name: string; skipped?: string;
+  headerRow?: number; firstRow?: number; lastRow?: number;
+  columns?: Record<string, string>;              // field → chữ cột trong FILE
+  templateCode?: string | null; templateName?: string | null; templateWhy?: string;
+  hasDays: boolean; numberSubs: boolean; groupSubtotal: boolean; showImages: boolean;
+  items: ImportedItem[];
+  totals?: { subtotal?: number | null; vatPercent?: number | null; vat?: number | null; discount?: number | null; total?: number | null };
+  warnings: string[];
+  stats: { rows: number; items: number; sections: number; subsections: number; subs: number; infos: number; formulas: number; formulasDropped: number };
+};
+export type ImportResult = { sheets: ImportedSheet[]; warnings: string[] };
+
+// Ý kiến khách theo TỪNG SHEET (khách chốt sheet này, chưa chốt sheet kia).
+export type SheetDecision = {
+  id: number; custStatus?: string | null; custStatusAt?: string | null; custNote?: string | null;
+  custStatusBy?: { id: number; displayName: string } | null;
+};
 export type AssignableUser = { id: number; displayName: string; role?: string; title?: string | null; senderName?: string | null };
 
 // Phân quyền (Permissions — increment 4).
@@ -196,6 +226,22 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
     // Mất phiên giữa chừng → báo App quay về màn đăng nhập (App lắng nghe "auth:expired").
+    if (res.status === 401) window.dispatchEvent(new Event("auth:expired"));
+    const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
+    throw new ApiError(msg, res.status, body);
+  }
+  return body as T;
+}
+
+/**
+ * Gửi FILE (multipart). KHÔNG tự đặt Content-Type — trình duyệt phải tự thêm boundary.
+ * Không đi qua chặn "xem thử" như `req` vì endpoint nhập Excel CHỈ ĐỌC file, không ghi DB.
+ */
+async function reqForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch("/api" + path, { method: "POST", credentials: "include", body: form });
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!res.ok) {
     if (res.status === 401) window.dispatchEvent(new Event("auth:expired"));
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
@@ -348,6 +394,17 @@ export const api = {
     req<{ editing: { id: number; name: string }[] }>("/stream/presence", { method: "POST", body: JSON.stringify({ quoteId, action }) }),
   markConverted: (id: number) => req<QuoteFull>(`/quotes/${id}/mark-converted`, { method: "POST" }),
   markLost: (id: number, reason: string) => req<QuoteFull>(`/quotes/${id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) }),
+  // NHẬP file Excel: server chỉ ĐỌC file rồi trả dữ liệu lưới để xem trước — không ghi gì.
+  // Ghi thật vẫn đi qua Lưu báo giá (updateQuote) như thường.
+  importExcel: (file: File, quoteId?: number) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (quoteId) form.append("quoteId", String(quoteId));
+    return reqForm<ImportResult>("/quotes/import-excel", form);
+  },
+  // Khách duyệt / không duyệt TỪNG SHEET ("" = gỡ đánh dấu).
+  sheetCustomerDecision: (sheetId: number, status: "approved" | "rejected" | "", note?: string) =>
+    req<SheetDecision>(`/quotes/sheets/${sheetId}/customer-decision`, { method: "POST", body: JSON.stringify({ status, note }) }),
   quoteVersions: (id: number) => req<{ data: QuoteVersion[] }>(`/quotes/${id}/versions`),
   versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),
   assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),

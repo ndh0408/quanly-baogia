@@ -209,6 +209,34 @@ export async function createQuote(req: Request) {
 }
 
 /**
+ * Ghép sheet GỬI LÊN với sheet ĐANG CÓ trong DB để bê trạng thái mức sheet (SHEET_CARRY_FIELDS).
+ *
+ * Ghép theo `id` khi client gửi kèm (React editor gửi) — chắc chắn đúng dù người dùng đổi thứ tự
+ * hay chèn/xoá sheet. Client CŨ không gửi id thì chỉ ghép theo VỊ TRÍ và chỉ khi SỐ SHEET không
+ * đổi + cùng mẫu (đúng ca "chỉ sửa hạng mục"); mọi ca khác bỏ qua, thà mất mốc còn hơn gán nhầm
+ * "khách đã duyệt" sang sheet khác.
+ */
+function carrySheetState(incoming: any[], existingSheets: any[]): (Record<string, any> | undefined)[] {
+  const list = Array.isArray(incoming) ? incoming : [];
+  const byId = new Map<number, any>((existingSheets || []).map((s: any) => [Number(s.id), s]));
+  const anyId = list.some((s: any) => Number(s?.id) > 0);
+  if (anyId) {
+    // Mỗi sheet cũ chỉ được bê MỘT lần: client gửi trùng id (vd nhân bản sheet trên màn hình) thì
+    // sheet thứ hai coi như MỚI — không nhân đôi số hoá đơn / trạng thái khách duyệt sang sheet khác.
+    const used = new Set<number>();
+    return list.map((s: any) => {
+      const id = Number(s?.id);
+      if (!byId.has(id) || used.has(id)) return undefined;
+      used.add(id);
+      return byId.get(id);
+    });
+  }
+  const sameShape = list.length === (existingSheets || []).length
+    && list.every((s: any, i: number) => Number(s?.templateId) === Number(existingSheets[i]?.templateId));
+  return sameShape ? list.map((_s: any, i: number) => existingSheets[i]) : list.map(() => undefined);
+}
+
+/**
  * Update a quote from a validated body. Recomputes totals server-side; a
  * price-affecting edit to a quote already in the approval pipeline reopens it to
  * draft (clears approval, bumps version, notifies creator). Returns the updated quote.
@@ -290,11 +318,14 @@ export async function updateQuote(req: Request) {
     data.vat = t.vat;
     data.discount = t.discount;
     data.total = t.total;
+    // Lưu = XOÁ sheet rồi TẠO LẠI → phải BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet,
+    // chữ ký, số hoá đơn/thanh toán…), nếu không mỗi lần bấm Lưu là mất sạch.
+    const carry = carrySheetState(b.sheets, existing.sheets);
     updated = await prisma.$transaction(async (tx) => {
       await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
       const u = await tx.quote.update({
         where: { id },
-        data: { ...data, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals) } },
+        data: { ...data, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals, carry) } },
         include: QUOTE_INCLUDE as any,
       });
       await snapshotQuoteVersion(tx, id, userId, "update");
@@ -537,6 +568,45 @@ export async function listProjects(req: Request) {
     };
   });
   return { data };
+}
+
+/**
+ * KHÁCH DUYỆT / KHÔNG DUYỆT **MỘT SHEET** của báo giá nhiều sheet.
+ *
+ * Vì sao tách riêng khỏi `Quote.status`: khách hay chốt từng phần ("đồng ý phần Décor, phần Banner
+ * để sau"). `status` vẫn là trạng thái CẢ báo giá (do người phụ trách bấm Chốt/Không chốt); cờ này
+ * chỉ ghi Ý KIẾN KHÁCH theo từng sheet để theo dõi — KHÔNG tự đổi status, KHÔNG đụng tổng tiền.
+ *
+ * Quyền: đúng người được "gửi khách / chốt đơn" (quote:send) VÀ sửa được báo giá đó (chống IDOR).
+ */
+export async function setSheetCustomerDecision(req: Request) {
+  if (!can(req.session, P.QUOTE_SEND)) throw httpError(403, "Bạn không có quyền ghi nhận ý kiến khách");
+  const sheet = await prisma.quoteSheet.findUnique({
+    where: { id: Number(req.params.sheetId) },
+    select: {
+      id: true, quoteId: true, name: true, order: true,
+      quote: { select: { id: true, deletedAt: true, createdById: true, members: { select: { id: true } } } },
+    },
+  });
+  if (!sheet || sheet.quote?.deletedAt) throw httpError(404, "Không tìm thấy sheet");
+  if (!canOnQuote(req.session, "update", sheet.quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
+
+  // "" / null = gỡ đánh dấu (quay lại "chưa có ý kiến").
+  const raw = req.body?.status;
+  const status = raw === "approved" || raw === "rejected" ? raw : null;
+  const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : null;
+  const updated = await prisma.quoteSheet.update({
+    where: { id: sheet.id },
+    data: status
+      ? { custStatus: status, custStatusAt: new Date(), custStatusById: req.session.userId, custNote: note || null }
+      : { custStatus: null, custStatusAt: null, custStatusById: null, custNote: null },
+    select: { id: true, custStatus: true, custStatusAt: true, custNote: true, custStatusBy: { select: { id: true, displayName: true } } },
+  });
+  await audit(req, "quote.sheet.customerDecision", {
+    resource: "quote", resourceId: sheet.quoteId,
+    after: { sheetId: sheet.id, sheet: sheet.name || `Sheet ${sheet.order}`, status: status || "cleared", note: note || undefined },
+  });
+  return updated;
 }
 
 /**

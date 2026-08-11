@@ -181,6 +181,83 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   return s;
 }
 
+// ===== CHIỀU NGƯỢC: công thức Excel (file khách gửi lại) → công thức EDITOR =====
+// Dùng khi NHẬP file Excel vào báo giá (src/excelImport.ts). Kết quả ở dạng CANONICAL — ref viết
+// theo TÊN FIELD, không theo chữ cột: "{unitPrice:3}*{quantity:3}". Vì chữ cột của editor phụ
+// thuộc mẫu ĐÍCH (có/không cột Chi Tiết, có/không Số Ngày), nên server trả canonical rồi web tự
+// đổi sang chữ cột của lưới đang mở (lib/importApply.ts). Nạp sang mẫu khác cũng không lệch ô.
+export type ExcelRefCtx = {
+  /** Chữ cột Excel ("G") → tên field ("unitPrice"), null nếu cột đó không nằm trong bảng. */
+  fieldOfCol: (colLetters: string) => string | null;
+  /** Hàng Excel (13) → dòng editor 1-based (vị trí trong mảng items + 1), null nếu ngoài bảng. */
+  rowToEditor: (excelRow: number) => number | null;
+};
+
+/** Ref canonical "{field:row}" — web đổi sang chữ cột của lưới đích. */
+export const canonicalRef = (field: string, row: number) => `{${field}:${row}}`;
+
+/**
+ * Dịch MỘT công thức Excel đọc từ file sang dạng canonical của editor, hoặc null nếu không dịch
+ * được (ref sang sheet khác, hàm lạ, ref ngoài bảng…). Nơi gọi khi đó chỉ giữ CON SỐ.
+ * Lưu ý cú pháp: Excel dùng "," tách đối số + "." thập phân; editor dùng ";" tách đối số.
+ */
+export function excelFormulaToEditor(raw: string | null | undefined, ctx: ExcelRefCtx): string | null {
+  if (raw == null) return null;
+  let s = String(raw).trim().replace(/^=/, "").trim();
+  if (!s || s.length > 500) return null;
+  // Ref sang sheet khác ('Sheet 2'!G13 / Décor!G13) hoặc file ngoài ([1]DATA!A1) → không dịch được.
+  if (/!/.test(s) || /\[\d*\]/.test(s) || /"/.test(s)) return null;
+  s = s.replace(/\$/g, "");   // ref tuyệt đối $G$13 → G13 (editor không có khái niệm này)
+
+  // Ref đơn + dải → canonical. Quét 1 lượt để dải không bị xử lý 2 lần.
+  let aborted = false;
+  s = s.replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (m, c1, r1, c2, r2) => {
+    if (aborted) return m;
+    const f1 = ctx.fieldOfCol(String(c1).toUpperCase());
+    const row1 = ctx.rowToEditor(Number(r1));
+    if (!f1 || row1 == null) { aborted = true; return m; }
+    if (c2 && r2) {
+      const f2 = ctx.fieldOfCol(String(c2).toUpperCase());
+      const row2 = ctx.rowToEditor(Number(r2));
+      // Dải PHẢI cùng một cột (SUM(H13:H15)); dải ngang/lệch cột → bỏ.
+      if (f2 !== f1 || row2 == null) { aborted = true; return m; }
+      return `${canonicalRef(f1, Math.min(row1, row2))}:${canonicalRef(f1, Math.max(row1, row2))}`;
+    }
+    return canonicalRef(f1, row1);
+  });
+  if (aborted) return null;
+
+  // Đối số: Excel "," → editor ";". (Số thập phân trong công thức Excel dùng "." nên "," còn lại
+  // đều là dấu tách đối số. Ref đã thành {field:row} nên không dính dấu nào.)
+  s = s.replace(/,/g, ";");
+
+  // Tên hàm: chỉ nhận hàm editor hiểu ĐÚNG ngữ nghĩa; hàm lạ (IF/VLOOKUP/CEILING 2 đối số…) → bỏ,
+  // ô đó giữ nguyên con số Excel đã tính (an toàn hơn là dịch sai tiền).
+  let bad = false;
+  s = s.replace(/([A-Za-z]+)\s*\(/g, (m, name) => {
+    const mapped = FN_ALIAS[String(name).toUpperCase()] || String(name).toUpperCase();
+    if (!SAFE_FNS.has(mapped)) { bad = true; return m; }
+    return `${mapped}(`;
+  });
+  if (bad) return null;
+
+  // Chốt chặn ký tự: chỉ còn số/toán tử/hàm/ref canonical.
+  if (!/^[A-Za-z0-9.;:%+\-*/(){}_ ]+$/.test(s)) return null;
+  return `=${s}`;
+}
+
+/** Bóc lớp ROUND(...,n) do CHÍNH app bọc lúc xuất (Số Lượng = ROUND(fx,1)) để lấy lại công thức gốc. */
+export function unwrapRound(formula: string, digits: number): string {
+  const s = String(formula).trim().replace(/^=/, "");
+  const re = new RegExp(`^ROUND\\s*\\(([\\s\\S]*),\\s*${digits}\\s*\\)$`, "i");
+  const m = re.exec(s);
+  if (!m) return s;
+  // Chỉ bóc khi phần trong ngoặc CÂN dấu ngoặc — tránh cắt nhầm "ROUND(a,1)+ROUND(b,1)".
+  let depth = 0;
+  for (const ch of m[1]) { if (ch === "(") depth++; else if (ch === ")") { depth--; if (depth < 0) return s; } }
+  return depth === 0 ? m[1].trim() : s;
+}
+
 function mapRef(ctx: FormulaContext, colLetters: string, rowDigits: string) {
   const field = ctx.colToField[colLetters.toUpperCase()];
   if (!field || !ctx.allowedRef.has(field)) return null;   // ref chữ/_stt/cột không có → bỏ

@@ -41,6 +41,28 @@
   - `e2e-editor.mjs`, `e2e-editor2..5.mjs`, `e2e-banner.mjs`, `e2e-venue-suggest.mjs`, `e2e-accounthn.mjs` → tất cả PASS (đã sửa các test cũ sang `dblclick()` cho khớp luật khóa ô).
   - Tài khoản test: `admin` / `GiaNguyenDemo2026`.
 
+### 2.4 NHẬP file Excel vào báo giá + KHÁCH DUYỆT TỪNG SHEET (2026-08-11)
+
+- `src/excelImport.ts` — đọc ngược file .xlsx thành dữ liệu lưới: dò **hàng tiêu đề** để map cột
+  (không bám vị trí cứng), nhận **nhóm/nhóm con** theo màu nền app tô lúc xuất + **hàng con** theo
+  ô gộp dọc, đọc **công thức tham chiếu ô** rồi tự kiểm lại bằng chính số Excel đã tính (lệch → bỏ
+  công thức, giữ số, ghi cảnh báo). Bỏ qua sheet "Tổng Báo Giá". Đoán được cả 4 mẫu.
+- Công thức trả về dạng **canonical `{field:row}`** (theo TÊN cột, không theo chữ cột) — `web/src/lib/
+  importApply.ts` mới đổi sang chữ cột của lưới đích ⇒ nạp sang mẫu khác KHÔNG lệch ô.
+- `POST /api/quotes/import-excel` (multer, 10MB, sniff PK zip) **chỉ đọc, không ghi DB**; ghi vẫn đi
+  qua `PUT /api/quotes/:id` như cũ (giữ zod + quyền + khoá lạc quan + lưu phiên bản).
+- UI: `web/src/components/ImportExcelModal.tsx` — kéo-thả file → xem app hiểu cột nào là gì → bảng
+  **trước/sau** (giữ nguyên/đổi/thêm/mất) → nạp vào lưới. Nút ở hàng "Tên sheet / Template".
+- **Khách duyệt TỪNG SHEET**: `QuoteSheet.custStatus/custStatusAt/custStatusById/custNote`
+  (migration `20260811000001_sheet_customer_decision`), endpoint
+  `POST /api/quotes/sheets/:sheetId/customer-decision` (quyền `quote:send`). Không đụng `Quote.status`.
+- ⚠️ **Bẫy đã vá**: lưu báo giá là **xoá sheet rồi tạo lại** → mọi trạng thái mức sheet phải nằm
+  trong `SHEET_CARRY_FIELDS` (`src/quoteUtils.ts`) và được ghép theo `sheet.id` client gửi lên
+  (`carrySheetState`). Trước đây số hoá đơn / chữ ký **bị xoá sạch** mỗi lần admin sửa báo giá đã chốt.
+- Trần dòng/sheet nâng 500 → **2000** (`sheetSchema` + `MAX_ITEMS_PER_SHEET`) để file dài nhập đủ.
+- Test: `tests/excelImport.test.js` (19 test — vòng tròn xuất→nhập cho 4 mẫu, công thức, file khách
+  sửa, file ngoài, các bẫy đã vá). Toàn bộ `npx vitest run` = 292 xanh.
+
 ## 3. VIỆC ĐANG DANG DỞ / TIẾP THEO
 
 1. **Chưa dùng được BMAD trong phiên cũ**: BMAD mới cài (`.claude/skills/bmad-*`, `_bmad/`) nên registry của phiên cũ chưa có. Session mới sẽ gọi được `Skill(bmad-code-review)`, `bmad-dev-story`… → **nên chạy `bmad-code-review` cho 6 commit `03d4e52..5ec5f5d`** (rà soát đối kháng phần lưới + Excel).

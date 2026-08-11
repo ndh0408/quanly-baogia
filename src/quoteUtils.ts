@@ -260,7 +260,29 @@ export function extraTableSum(t: any) {
 }
 
 // sheetTotals (theo ĐÚNG thứ tự sheets, từ computeQuoteTotals) → lưu materialized subtotal/sheet.
-export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
+/** Lọc đúng các field được phép bê sang bản sheet mới (bỏ undefined/null để Prisma dùng mặc định). */
+function pickCarry(src?: Record<string, any>) {
+  if (!src) return {};
+  const out: Record<string, any> = {};
+  for (const f of SHEET_CARRY_FIELDS) if (src[f] != null) out[f] = src[f];
+  return out;
+}
+
+/**
+ * Trạng thái sống ở MỨC SHEET, do server giữ — client KHÔNG đặt được qua đường lưu thường.
+ * Lưu báo giá là XOÁ SHEET rồi TẠO LẠI (updateQuote), nên các mốc này phải được BÊ SANG bản mới,
+ * nếu không mỗi lần bấm Lưu là mất sạch: khách duyệt sheet, chữ ký, số hoá đơn, ngày thanh toán…
+ * Mỗi phần tử của `carry` khớp theo VỊ TRÍ với `sheets` (updateQuote dò theo sheet.id, không có
+ * id thì theo thứ tự) — `undefined` = sheet mới, không bê gì.
+ */
+export const SHEET_CARRY_FIELDS = [
+  "custStatus", "custStatusAt", "custStatusById", "custNote",
+  "signedAt", "signedById", "signedByName",
+  "invoiceNo", "paidAt", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt",
+  "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceYear", "invoiceCompany", "invoiceDesc", "invoiceNote",
+] as const;
+
+export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[]) {
   return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
@@ -268,6 +290,7 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[]) {
     groupSubtotal: !!s.groupSubtotal,
     showImages: !!s.showImages,   // BẬT cột "Hình ảnh" cho sheet
     subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),
+    ...pickCarry(carry?.[sIdx]),
     items: {
       create: (s.items || []).map((it: any, iIdx: number) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,
