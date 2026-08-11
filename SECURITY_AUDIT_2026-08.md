@@ -1,6 +1,6 @@
 # Rà soát bảo mật + UI/UX — 2026-08-11
 
-Nhánh: `feat/venue-suggest` · Phạm vi: toàn bộ backend (`src/`, 133 endpoint), frontend React (`web/src/`), CI, phụ thuộc.
+Nhánh: `feat/venue-suggest` · Phạm vi: toàn bộ backend (`src/`, **138 endpoint** — sinh tự động, xem `scripts/endpoint-inventory.mjs`), frontend React (`web/src/`), CI, phụ thuộc.
 Phương pháp: đọc mã → xác minh từng cáo buộc → sửa gốc → viết test hồi quy → tự phản biện lại bản vá.
 
 > Tài liệu này KHÔNG tuyên bố hệ thống "an toàn". Nó ghi lại **bằng chứng**: đã kiểm gì, tìm ra gì,
@@ -40,7 +40,8 @@ IDENTITY → AUTHENTICATION → SESSION/JWT → ROLE → EFFECTIVE PERMISSIONS
 | I | Chứng từ base64 trong DB | **CÓ THẬT** | *chưa vá* — cần chuyển sang object storage |
 | J | Sao lưu CSDL | **Một phần** | đã có quyền + rate-limit + audit; thiếu header |
 
-Ngoài 10 cáo buộc, tìm thêm **6 lỗi mới** (mục 3, ID `NEW-*`).
+Ngoài 10 cáo buộc, đợt 1 tìm thêm **7 lỗi mới** (mục 3, `NEW-*`) và đợt 2 tìm thêm **8 lỗi** nữa (mục 3b) —
+trong đó **2 lỗ nằm trong chính bản vá của đợt 1**.
 
 ---
 
@@ -240,6 +241,94 @@ về `<body>` thay vì nút vừa bấm.
 
 **Bản vá**: `trapFocus()` — vòng Tab/Shift+Tab trong hộp, trả tiêu điểm về phần tử gọi (nếu còn tồn tại).
 Bonus: `promptModal` nhận Ctrl/⌘+Enter để gửi (Enter trần vẫn xuống dòng vì ô là `textarea`).
+
+---
+
+## 3b. ĐỢT RÀ SOÁT 2 — không tin kết luận của đợt 1
+
+Rà lại từ mã nguồn, coi tài liệu đợt 1 chỉ là đầu vào tham khảo. **Hai lỗ nặng nhất nằm ngay trong
+thứ đợt 1 tuyên bố đã sửa** — đó là lý do không được dùng kết luận vòng trước làm bằng chứng.
+
+### FILE-002 · P1 · CWE-863 — trạng thái tải lên chỉ là lời hứa trong chú thích
+
+Đợt 1 thêm `/finalize` dò magic bytes, và chú thích ghi *"object được đánh dấu `pending=1` và CHƯA
+DÙNG ĐƯỢC"*. **Không có gì đánh dấu, không có gì cưỡng chế**: `canAccessKey` cho `uploads/` chỉ so
+tiền tố. Bỏ qua `/finalize` rồi gọi thẳng `/sign-download` là tải được nội dung chưa ai kiểm.
+
+**Vá**: bảng `UploadObject` (`pending`/`finalized`/`rejected`), tạo bản ghi **trước** khi ký, CAS
+`pending→finalized`, `/sign-download` đòi `finalized` — **admin cũng không vượt**. Finalize còn đối
+chiếu kích thước + kiểu **thật** với cái đã ký (ký `image/png` rồi đẩy PDF là đã nói dối, dù PDF nằm
+trong allowlist).
+
+### FILE-003 · P2 · CWE-367 — ghi đè SAU khi đã xác minh (TOCTOU), tìm ra khi tự red-team
+
+URL presigned PUT còn hiệu lực tới `expires` giây. Bản vá FILE-002 ký URL trỏ **thẳng vào khoá cuối**:
+
+```
+/sign-upload → PUT ảnh PNG hợp lệ → /finalize (đánh dấu finalized)
+             → PUT LẠI file khác lên CÙNG khoá bằng CHÍNH URL cũ (vẫn còn hạn)
+             → /sign-download tải về nội dung chưa ai kiểm
+```
+
+Mức độ giảm nhẹ nhờ `presignDownload` luôn ép `attachment` (không thành stored-XSS) và bucket riêng
+tư — nhưng bảo đảm "đã xác minh nội dung" thì đã hỏng, và **một bảo đảm hỏng còn tệ hơn không có**.
+
+**Vá**: URL đã ký chỉ trỏ vào `uploads/staging/`; `/finalize` kiểm bản tạm rồi **sao chép phía máy
+chủ** sang khoá cuối và xoá bản tạm. Khoá cuối chưa từng có URL PUT nào được ký.
+
+### SESSION-001 · P1 · CWE-613 — vô hiệu hoá phiên phụ thuộc kho phiên và fail-open
+
+Cơ chế "đổi mật khẩu thì giết mọi phiên khác" chỉ là một câu `DELETE` trên `user_sessions`. Nó
+(1) chỉ chạy được với kho phiên PG, và (2) **nuốt lỗi, chỉ ghi log** — một trục trặc DB làm kiểm soát
+bảo mật im lặng fail-open đúng vào lúc người dùng vừa tuyên bố *"tôi nghi bị lộ"*. Ngoài ra phiên của
+chính người đổi mật khẩu **giữ nguyên định danh cũ**.
+
+**Vá**: `User.passwordChangedAt` đóng dấu ở **cả ba** đường đổi thông tin xác thực (tự đổi, đặt lại
+qua liên kết, admin reset). `session.authAt` đóng dấu lúc thiết lập phiên; middleware huỷ phiên nào
+cũ hơn mốc — thiếu `authAt` cũng bị coi là cũ, nên **không fail-open được**. `bearerAuth` so `iat` của
+access token với mốc, đóng nốt cửa sổ 15 phút mà refresh-token-revocation không với tới.
+
+### AUTH-007 · P2 · CWE-204 — phản hồi đăng nhập là oracle phân loại tài khoản
+
+`"Sai mật khẩu"` ⇒ tài khoản **có thật**; `"Tài khoản không tồn tại hoặc đã bị khóa"` ⇒ không; `423` ⇒
+có thật **và đang khoá**. Gửi một mật khẩu bừa rồi đọc JSON là dựng được danh sách email nhân viên.
+
+**Vá**: một thông điệp chung cho mọi thất bại chưa chứng minh danh tính. Trạng thái khoá **chỉ** tiết
+lộ cho ai gõ **đúng** mật khẩu — giữ UX cho người thật mà không cho kẻ dò tín hiệu nào. Lý do thật
+vẫn ghi đủ vào `LoginAttempt` + audit.
+
+> Test cũ `authCore.test.js` tự đặt tên *"no enumeration"* nhưng lại **khẳng định đúng thông điệp gây
+> rò** — nó neo lỗ hổng làm hợp đồng. Đã viết lại để khoá *tính chất* (hai phản hồi phải không phân
+> biệt được), chứ không phải nới lỏng cho xanh.
+
+### PERM-001 · P2 — ba phiên bản của cùng một sự thật về quyền
+
+`/api/permissions/me` tính bằng `permissionsForRole(session.role)` — bỏ qua quyền riêng per-user. Tài
+khoản được tùy biến quyền thấy hai danh sách khác nhau ở `/auth/me` và `/permissions/me`, cả hai đều
+có thể khác thứ server thực sự cưỡng chế. **Vá**: `permissionsForSession()` đọc thẳng mảng mà `can()` dùng.
+
+### XLSX-001 · P2 · CWE-409 — `PK` không chứng minh được gì ngoài "là zip"
+
+Cùng 4 byte đó khớp với bom giải nén (4 GB số 0 nén còn vài KB), zip 200.000 mục, và zip chứa đường
+dẫn `../../`. Đường nhập Excel **giải nén + phân tích XML ngay trong tiến trình ứng dụng**.
+
+**Vá**: `src/zipSafety.ts` đọc **thư mục trung tâm** của zip — không giải nén byte nào, nên chính bước
+kiểm không thể bị bom. Kiểm số mục, tổng dung lượng sau giải nén, tỉ lệ nén, zip-slip, và sự hiện
+diện của `[Content_Types].xml` / `_rels/.rels` / `xl/workbook.xml` / `xl/worksheets/*`.
+
+### AUTHZ-007 / AUTHZ-008 · P3 — least privilege
+
+`/quotes/next-number` không gác quyền: gọi hai lần cách nhau là suy ra công ty phát hành bao nhiêu báo
+giá trong khoảng đó. `/meta/*` trả **nguyên model** → lộ `filePath` (đường dẫn tệp mẫu trên máy chủ)
+và `logoPath`. **Vá**: gác `quote:create` + projection tối thiểu.
+
+### INV-001 · P2 — số endpoint công bố sai ở cả hai nơi
+
+README ghi **141**, `AUTHZ_MATRIX.md` ghi **133**, con số thật là **138** (129 trong router + 9 khai
+báo thẳng trên `app`). Cả hai đều đếm tay nên cả hai đều trôi; ma trận bỏ sót 5 route phục vụ SPA.
+
+**Vá**: `scripts/endpoint-inventory.mjs` sinh danh sách từ mã nguồn; CI chạy `--check` → thêm/xoá
+route mà quên soát quyền là **đỏ pipeline**.
 
 ---
 
@@ -535,7 +624,7 @@ READY WITH INFRA ACTIONS
 
 **Bằng chứng** (đã chạy thật, không suy luận):
 
-* **474/474** test backend xanh trên Postgres thật — gồm 30 ca hồi quy bắn HTTP đúng như kẻ tấn công
+* **518/518** test backend xanh trên Postgres thật — gồm 30 ca hồi quy bắn HTTP đúng như kẻ tấn công
   gõ thẳng API, và 15 ca khoá ngữ nghĩa phạm-vi-đọc;
 * Gitleaks (387 commit) · Trivy · Semgrep · `npm audit` — **cả bốn exit 0**;
 * kiểm tay trên bản đã deploy: 4 endpoint từng trả 200 nay trả 403, quyền hợp lệ vẫn thông (§8.1);
