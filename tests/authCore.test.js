@@ -48,18 +48,37 @@ describe.runIf(dbAvailable)("authenticateCredentials", () => {
     expect(u.failedAttempts).toBe(1);
   });
 
-  it("returns 423 when the account is locked", async () => {
+  // Khoá 423 CHỈ dành cho người đã chứng minh biết mật khẩu — xem giải thích ở src/authCore.ts.
+  // Với mật khẩu SAI, tài khoản đang khoá phải trả 401 chung, nếu không 423 thành đèn báo
+  // "tài khoản này có thật" mà kẻ tấn công tự bật được bằng cách gõ sai 5 lần.
+  it("tài khoản đang khoá + mật khẩu ĐÚNG → 423 (đã chứng minh danh tính)", async () => {
     await prisma.user.update({ where: { id: userId }, data: { lockedUntil: new Date(Date.now() + 60_000) } });
     const r = await authenticateCredentials(fakeReq, { username: TAG, password: PW, flow: "login" });
     expect(r.ok).toBe(false);
     expect(r.status).toBe(423);
   });
 
-  it("gives a generic 401 for an unknown user (no enumeration)", async () => {
-    const r = await authenticateCredentials(fakeReq, { username: "no-such-user-xyz", password: "whatever", flow: "login" });
-    expect(r.ok).toBe(false);
-    expect(r.status).toBe(401);
-    expect(r.error).toMatch(/không tồn tại hoặc đã bị khóa/i);
+  it("tài khoản đang khoá + mật khẩu SAI → 401 chung, không lộ là tài khoản có thật", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { lockedUntil: new Date(Date.now() + 60_000) } });
+    const locked = await authenticateCredentials(fakeReq, { username: TAG, password: "sai-mat-khau", flow: "login" });
+    const ghost = await authenticateCredentials(fakeReq, { username: "no-such-user-xyz", password: "sai-mat-khau", flow: "login" });
+    expect(locked.status).toBe(401);
+    expect(locked.error).toBe(ghost.error);
+  });
+
+  // TRƯỚC ĐÂY test này tự đặt tên "no enumeration" nhưng lại khẳng định ĐÚNG cái thông điệp gây rò:
+  // "Tài khoản không tồn tại hoặc đã bị khóa" cho người lạ, còn "Sai mật khẩu" cho người có thật —
+  // tức là nó khoá chặt lỗ hổng thay vì khoá tính chất an toàn. Nay kiểm đúng thứ cần kiểm: hai phản
+  // hồi phải KHÔNG PHÂN BIỆT ĐƯỢC với nhau.
+  it("người-không-tồn-tại và sai-mật-khẩu cho phản hồi giống hệt nhau (chống dò tài khoản)", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { lockedUntil: null, failedAttempts: 0 } });
+    const ghost = await authenticateCredentials(fakeReq, { username: "no-such-user-xyz", password: "sai-mat-khau", flow: "login" });
+    const real = await authenticateCredentials(fakeReq, { username: TAG, password: "sai-mat-khau", flow: "login" });
+    expect(ghost.status).toBe(real.status);
+    expect(ghost.error).toBe(real.error);
+    // Và thông điệp không được chứa từ khoá phân loại nào.
+    expect(real.error).not.toMatch(/sai mật khẩu/i);
+    expect(real.error).not.toMatch(/không tồn tại/i);
   });
 
   it("blocks an inactive account with the same generic 401", async () => {
