@@ -11,6 +11,10 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
+# package.json khai `postinstall` gọi scripts/patch-codex-security-9router.mjs, mà npm CHẠY
+# postinstall kể cả khi --omit=dev → thiếu file là `npm ci` gãy nguyên lượt build. Copy vào trước.
+# (Bản thân script tự thoát 0 khi không thấy gói dev @openai/codex-security — đúng cảnh image này.)
+COPY scripts ./scripts
 RUN apk add --no-cache openssl libc6-compat \
  && npm ci --omit=dev \
  # Prisma 7: prisma.config.ts dùng env("DATABASE_URL") (throw nếu thiếu). `generate` KHÔNG kết nối DB
