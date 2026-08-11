@@ -76,9 +76,18 @@ enum UploadStatus {
 // nào đặt được. Vẫn giữ ownerId để truy vấn quota/dọn dẹp theo người và để kiểm quyền không phải
 // bóc chuỗi.
 model UploadObject {
-  id     Int          @id @default(autoincrement())
-  key    String       @unique
-  status UploadStatus @default(pending)
+  id Int @id @default(autoincrement())
+
+  // HAI khoá, hai vùng tách bạch — đây là chốt chống TOCTOU:
+  //   stagingKey — nơi URL đã ký trỏ tới. Nằm dưới `uploads/staging/`, KHÔNG BAO GIỜ tải về được.
+  //   key        — khoá cuối cùng dưới `uploads/u<id>/`. Chỉ tồn tại SAU khi nội dung đã được xác
+  //                minh, và KHÔNG có URL PUT nào từng được ký cho nó.
+  // Nếu dùng chung một khoá: URL đã ký còn hiệu lực tới `expires` giây, nên sau khi /finalize xác
+  // minh xong, người dùng vẫn PUT đè nội dung khác lên đúng khoá đó bằng chính URL cũ — bản ghi vẫn
+  // ghi "finalized" trong khi nội dung đã bị thay. Tách vùng làm cửa sổ đó biến mất hoàn toàn.
+  key        String       @unique
+  stagingKey String       @unique
+  status     UploadStatus @default(pending)
 
   ownerId Int
   owner   User @relation("UploadOwner", fields: [ownerId], references: [id], onDelete: Cascade)

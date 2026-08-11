@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -55,6 +55,25 @@ export async function putObject({ key, body, contentType, bucket = config.S3_BUC
     ContentDisposition: contentDisposition || "attachment",
   }));
   return { key, bucket };
+}
+
+/**
+ * Sao chép object trong CÙNG bucket, phía máy chủ (không kéo dữ liệu về ứng dụng).
+ * Dùng để chuyển object từ vùng tạm sang vùng dùng được SAU khi đã xác minh nội dung.
+ */
+export async function copyObject(fromKey: string, toKey: string, { contentType, bucket = config.S3_BUCKET }: { contentType?: string; bucket?: string } = {}) {
+  const c = getClient();
+  if (!c) throw new Error("Storage not configured");
+  await c.send(new CopyObjectCommand({
+    Bucket: bucket,
+    CopySource: `${bucket}/${fromKey}`,
+    Key: toKey,
+    ContentType: contentType,
+    // Ép lại kiểu + luôn tải-về (không render inline), thay vì giữ metadata của bản tạm do client PUT.
+    MetadataDirective: contentType ? "REPLACE" : "COPY",
+    ContentDisposition: "attachment",
+  }));
+  return { key: toKey, bucket };
 }
 
 export async function deleteObject(key: string, bucket = config.S3_BUCKET) {

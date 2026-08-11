@@ -182,7 +182,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
       const key = `uploads/u${U.manager.id}/${Date.now()}-pending.png`;
       await prisma.uploadObject.create({
         data: {
-          key, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
+          key, stagingKey: `staging-${key}`, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
           status: "pending", expiresAt: new Date(Date.now() + 600_000),
         },
       });
@@ -194,7 +194,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
       const key = `uploads/u${U.manager.id}/${Date.now()}-pending-admin.png`;
       await prisma.uploadObject.create({
         data: {
-          key, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
+          key, stagingKey: `staging-${key}`, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
           status: "pending", expiresAt: new Date(Date.now() + 600_000),
         },
       });
@@ -205,11 +205,32 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
       const key = `uploads/u${U.manager.id}/${Date.now()}-rejected.png`;
       await prisma.uploadObject.create({
         data: {
-          key, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
+          key, stagingKey: `staging-${key}`, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
           status: "rejected", rejectReason: "test", expiresAt: new Date(Date.now() + 600_000),
         },
       });
       expect((await A.manager.get("/api/files/sign-download").query({ key })).status).toBe(403);
+    });
+
+    it("TOCTOU: vùng TẠM không bao giờ tải về được, kể cả khi bản ghi đã finalized", async () => {
+      // URL presigned PUT chỉ trỏ vào uploads/staging/. Nếu vùng tạm tải về được thì dù /finalize đã
+      // xác minh xong, người dùng vẫn PUT đè nội dung khác bằng chính URL cũ (còn hiệu lực) rồi tải
+      // về thứ chưa ai kiểm. Chặn thẳng theo tiền tố nên không phụ thuộc trạng thái bản ghi.
+      const key = `uploads/u${U.manager.id}/${Date.now()}-final.png`;
+      const stagingKey = `uploads/staging/u${U.manager.id}/${Date.now()}-tam.png`;
+      await prisma.uploadObject.create({
+        data: {
+          key, stagingKey, ownerId: U.manager.id, expectedMime: "image/png", expectedSize: 100,
+          actualMime: "image/png", actualSize: 100,
+          status: "finalized", finalizedAt: new Date(), expiresAt: new Date(Date.now() + 600_000),
+        },
+      });
+      // Khoá CUỐI: qua được cổng quyền (chỉ dừng ở 503 vì môi trường test chưa cấu hình S3).
+      expect((await A.manager.get("/api/files/sign-download").query({ key })).status).not.toBe(403);
+      // Khoá TẠM: 403 dứt khoát, dù bản ghi đã finalized.
+      expect((await A.manager.get("/api/files/sign-download").query({ key: stagingKey })).status).toBe(403);
+      // Admin cũng không.
+      expect((await A.admin.get("/api/files/sign-download").query({ key: stagingKey })).status).toBe(403);
     });
 
     it("finalize object của NGƯỜI KHÁC → 403 (không lộ có tồn tại hay không)", async () => {

@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
-import { putObject, presignDownload, presignUpload, deleteObject, isStorageEnabled, headObject, getObjectHeadBytes, getObjectBytes } from "../storage.js";
+import { putObject, presignDownload, presignUpload, deleteObject, isStorageEnabled, headObject, getObjectHeadBytes, getObjectBytes, copyObject } from "../storage.js";
 import { audit } from "../audit.js";
 import { canOnQuote } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
@@ -82,6 +82,8 @@ function sniffType(buffer: Buffer, declaredMime: string) {
  * `finalized` mới bị chặn; từ nay mọi object presigned đều có hàng.
  */
 async function isUploadUsable(key: string) {
+  // Vùng tạm KHÔNG BAO GIỜ tải về được — đó là chỗ URL đã ký trỏ tới, nội dung ở đây chưa qua kiểm.
+  if (key.startsWith("uploads/staging/")) return false;
   const row = await prisma.uploadObject.findUnique({ where: { key }, select: { status: true } });
   if (!row) return true; // di sản — xem giải thích ở trên
   return row.status === "finalized";
@@ -127,6 +129,11 @@ async function canAccessKey(session: Request["session"], key: unknown) {
 function userUploadKey(session: Request["session"], ext = "") {
   return `uploads/u${session.userId}/${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
 }
+// Vùng TẠM cho upload trực tiếp. URL đã ký CHỈ trỏ vào đây; `canAccessKey` từ chối thẳng mọi khoá
+// dưới `uploads/staging/` nên không ai tải được nội dung chưa xác minh, kể cả admin.
+function stagingUploadKey(session: Request["session"], ext = "") {
+  return `uploads/staging/u${session.userId}/${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
+}
 
 /** POST /api/files - multipart upload, returns object key + signed download URL. */
 router.post(
@@ -157,7 +164,8 @@ router.post(
     // isUploadUsable() có một quy tắc duy nhất cho mọi object mới, không phải phân biệt đường vào.
     await prisma.uploadObject.create({
       data: {
-        key, ownerId: req.session.userId as number,
+        key, stagingKey: key,   // đường multipart không ký URL nào → không có cửa sổ ghi đè
+        ownerId: req.session.userId as number,
         expectedMime: sniffed.mime, expectedSize: req.file.size,
         actualMime: sniffed.mime, actualSize: req.file.size,
         status: "finalized", finalizedAt: new Date(),
@@ -221,12 +229,13 @@ router.post(
     if (pending >= MAX_PENDING_UPLOADS) {
       return res.status(429).json({ error: `Đang có ${pending} tệp chờ xác minh — hoàn tất hoặc đợi hết hạn rồi thử lại.` });
     }
-    const key = userUploadKey(req.session, spec.ext);
+    const key = userUploadKey(req.session, spec.ext);              // khoá CUỐI — không ký PUT bao giờ
+    const stagingKey = stagingUploadKey(req.session, spec.ext);   // khoá TẠM — URL đã ký trỏ vào đây
     // GHI BẢN GHI TRƯỚC KHI KÝ. Ngược lại thì có cửa sổ ký-xong-mà-chưa-có-hàng, và trong cửa sổ đó
     // object vừa PUT lên sẽ rơi vào nhánh "di sản" của isUploadUsable → dùng được mà chưa xác minh.
     await prisma.uploadObject.create({
       data: {
-        key,
+        key, stagingKey,
         ownerId: req.session.userId as number,
         expectedMime: req.body.contentType,
         expectedSize: req.body.size,
@@ -234,7 +243,7 @@ router.post(
       },
     });
     const url = await presignUpload({
-      key,
+      key: stagingKey,
       contentType: req.body.contentType,
       contentLength: req.body.size,   // ghim kích thước vào chữ ký → S3 từ chối nếu khác
       expiresIn: req.body.expires,
@@ -278,13 +287,14 @@ router.post(
 
     /** Đánh dấu bị từ chối + XOÁ object khỏi kho (không để lại rác chưa xác minh trong bucket). */
     const reject = async (reason: string, status: number, message: string) => {
-      await deleteObject(key).catch(() => {});
+      await deleteObject(rec.stagingKey).catch(() => {});
       await prisma.uploadObject.updateMany({ where: { key, status: "pending" }, data: { status: "rejected", rejectReason: reason } });
       await audit(req, "file.finalize.rejected", { resource: "file", resourceId: key, after: { reason } });
       return res.status(status).json({ error: message });
     };
 
-    const head = await headObject(key);
+    // MỌI phép kiểm chạy trên khoá TẠM — đó mới là nơi client vừa PUT nội dung lên.
+    const head = await headObject(rec.stagingKey);
     if (!head) return res.status(404).json({ error: "Chưa thấy tệp trên kho lưu trữ" });
     // Kích thước THẬT phải khớp cái đã ký. Chữ ký đã ghim Content-Length nên lệch là bất thường —
     // hoặc kho lưu trữ không cưỡng chế, hoặc có người ghi đè. Đối chiếu lại chứ không tin một lớp.
@@ -293,7 +303,7 @@ router.post(
     }
     if (head.size <= 0 || head.size > MAX_UPLOAD_BYTES) return reject(`kích thước ngoài giới hạn: ${head.size}`, 413, "Tệp quá lớn (tối đa 10MB)");
 
-    const magic = await getObjectHeadBytes(key, 16);
+    const magic = await getObjectHeadBytes(rec.stagingKey, 16);
     const sniffed = magic ? sniffType(magic, head.contentType) : null;
     if (!sniffed) return reject("magic bytes không khớp allowlist", 415, "Nội dung tệp không hợp lệ (chỉ PNG/JPG/WEBP/PDF/XLSX)");
     // Nội dung thật phải khớp KIỂU ĐÃ KÝ, không chỉ "nằm trong allowlist": ký image/png rồi đẩy PDF
@@ -303,18 +313,31 @@ router.post(
     }
     // XLSX = tệp zip; magic bytes chỉ chứng minh "là zip". Kiểm cấu trúc thật (xem src/zipSafety.ts).
     if (sniffed.mime === XLSX_MIME) {
-      const body = await getObjectBytes(key, MAX_UPLOAD_BYTES);
+      const body = await getObjectBytes(rec.stagingKey, MAX_UPLOAD_BYTES);
       const verdict = body ? inspectXlsx(body) : { ok: false as const, reason: "không đọc được nội dung" };
       if (!verdict.ok) return reject(`xlsx không hợp lệ: ${verdict.reason}`, 415, `Tệp Excel không hợp lệ: ${verdict.reason}`);
     }
 
     // CHUYỂN TRẠNG THÁI NGUYÊN TỬ: chỉ request nào lật được pending → finalized mới thắng. Hai
     // request finalize đồng thời thì đúng một cái count===1, cái kia thấy 0 và đọc lại trạng thái.
+    // Đặt TRƯỚC bước sao chép để hai request không cùng copy; kẻ thua không đụng gì tới kho lưu trữ.
     const claimed = await prisma.uploadObject.updateMany({
       where: { key, status: "pending" },
       data: { status: "finalized", actualMime: sniffed.mime, actualSize: head.size, finalizedAt: new Date() },
     });
     if (claimed.count !== 1) return res.status(409).json({ error: "Tệp vừa được xử lý bởi yêu cầu khác, vui lòng tải lại trang." });
+
+    // SAO CHÉP sang khoá cuối rồi XOÁ bản tạm. Đây là chốt chống ghi đè sau xác minh: URL đã ký chỉ
+    // trỏ vào khoá tạm, nên dù nó còn hiệu lực thêm vài phút, đè lên đó cũng không chạm được thứ mà
+    // /sign-download phục vụ. Copy thất bại → trả bản ghi về `pending` để lần sau finalize lại được,
+    // thay vì để trạng thái nói "xong" mà khoá cuối rỗng.
+    try {
+      await copyObject(rec.stagingKey, key, { contentType: sniffed.mime });
+    } catch (e) {
+      await prisma.uploadObject.updateMany({ where: { key }, data: { status: "pending", finalizedAt: null } });
+      throw e;
+    }
+    await deleteObject(rec.stagingKey).catch(() => {});
 
     await audit(req, "file.finalize", { resource: "file", resourceId: key, after: { size: head.size, ct: sniffed.mime } });
     const url = await presignDownload(key, { expiresIn: 3600 });
