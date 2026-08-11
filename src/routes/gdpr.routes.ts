@@ -28,14 +28,26 @@ const gdprSelfLimiter = createLimiter("gdpr-self", {
 });
 router.use(requireAuth);
 
+/**
+ * Bản xuất GDPR là gói PII đầy đủ của một con người (email, điện thoại, IP đăng nhập, toàn bộ nhật
+ * ký hoạt động). Phải chặn mọi tầng cache — Cloudflare/proxy nội bộ/trình duyệt — kẻo bản sao còn
+ * nằm lại sau khi tab đóng, và chặn trình duyệt tự đoán kiểu để render thay vì tải về.
+ */
+function noStoreExport(res: Response, filename: string) {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-store, private, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+}
+
 /** GET /api/gdpr/me/export — user exports their own data. */
 router.get(
   "/me/export",
   gdprSelfLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.session as any).userId);
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="user-${req.session.userId}-export.json"`);
+    noStoreExport(res, `user-${req.session.userId}-export.json`);
     res.end(JSON.stringify(data, null, 2));
     await audit(req, "gdpr.export", { resource: "user", resourceId: req.session.userId });
   })
@@ -48,8 +60,7 @@ router.get(
   validate({ params: z.object({ id: z.coerce.number().int().positive() }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.params as any).id);
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="user-${req.params.id}-export.json"`);
+    noStoreExport(res, `user-${req.params.id}-export.json`);
     res.end(JSON.stringify(data, null, 2));
     await audit(req, "gdpr.export.by_admin", { resource: "user", resourceId: req.params.id });
   })

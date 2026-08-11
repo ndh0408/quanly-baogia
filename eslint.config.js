@@ -20,6 +20,12 @@ export default [
       "public/app2/**", // bundle Vite build ra (generated) — lint source ở web/src, không lint output
       ".scan/**",
       "e2e-*.mjs", // local Playwright/fetch verification harnesses (need a running app, not part of CI lint)
+      // Bộ công cụ BMAD cài vào repo (skill + script của nhà cung cấp). KHÔNG phải mã của dự án:
+      // ta không sửa được và không chịu trách nhiệm chất lượng, nhưng chúng mang theo ~137 lỗi lint
+      // (biến chưa khai báo, global trình duyệt…) đủ làm ĐỎ cả bước Lint của CI.
+      "_bmad/**",
+      "_bmad-output/**",
+      ".claude/**",
     ],
   },
   js.configs.recommended,

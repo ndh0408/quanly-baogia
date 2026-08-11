@@ -127,6 +127,11 @@ router.get("/:id/contract", validate({ params: idParam }),
     const { buffer, fileName } = await svc.downloadContract(req);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="contract-${(req.params as any).id}.docx"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    // Hợp đồng chứa CCCD + số tài khoản + lương của một cá nhân, lại là tệp tải theo từng người dùng.
+    // Đứng sau Cloudflare/proxy, thiếu no-store là bản sao có thể được giữ lại và phục vụ nhầm người.
+    // Khớp với các endpoint xuất khác (Excel/PDF báo giá, bản xuất GDPR, dump sao lưu).
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(buffer);
   }));
 

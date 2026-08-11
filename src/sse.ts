@@ -153,6 +153,23 @@ function freshPresence(quoteId: number): { id: number; name: string }[] {
   return out;
 }
 
+/**
+ * Gửi cập nhật presence CHỈ tới những người đang mở đúng báo giá đó (+ người vừa rời đi, để họ dọn
+ * trạng thái trên màn hình).
+ *
+ * TRƯỚC ĐÂY dùng `broadcast` — mọi tài khoản đang đăng nhập đều nhận `{quoteId, editing:[{id,name}]}`
+ * dù không có quyền đọc báo giá ấy. Đó là rò metadata: dựng được sơ đồ ai-đang-làm-báo-giá-nào theo
+ * thời gian thực, kèm HỌ TÊN, chỉ bằng cách ngồi nghe SSE. Route /presence gác quyền GHI nhưng
+ * không cứu được vì kênh phát tán mới là chỗ hở. Ai đang có mặt trên báo giá đều đã qua canOnQuote
+ * ở route, nên tập người nhận này đúng bằng tập được phép biết.
+ */
+function publishPresence(quoteId: number, list: { id: number; name: string }[], alsoNotify?: number) {
+  const payload = { quoteId, editing: list };
+  const seen = new Set<number>();
+  for (const p of list) { if (!seen.has(p.id)) { seen.add(p.id); publish(p.id, "presence", payload); } }
+  if (alsoNotify != null && !seen.has(alsoNotify)) publish(alsoNotify, "presence", payload);
+}
+
 /** open/heartbeat/close 1 editor báo giá. Trả danh sách người ĐANG sửa (đã lọc hết hạn). */
 export function setPresence(quoteId: number, userId: number, name: string, action: "open" | "heartbeat" | "close"): { id: number; name: string }[] {
   let m = editing.get(quoteId);
@@ -167,15 +184,15 @@ export function setPresence(quoteId: number, userId: number, name: string, actio
     m.set(userId, { name, at: Date.now() });
   }
   const list = freshPresence(quoteId);
-  // heartbeat KHÔNG đổi danh sách → khỏi broadcast (giảm nhiễu); open/close thì báo người khác.
-  if (action !== "heartbeat") broadcast("presence", { quoteId, editing: list });
+  // heartbeat KHÔNG đổi danh sách → khỏi bắn (giảm nhiễu); open/close thì báo những người còn lại.
+  if (action !== "heartbeat") publishPresence(quoteId, list, userId);
   return list;
 }
 
-// Gỡ user khỏi MỌI báo giá khi họ ngắt kết nối SSE hẳn (đóng hết tab) → báo người khác ngay.
+// Gỡ user khỏi MỌI báo giá khi họ ngắt kết nối SSE hẳn (đóng hết tab) → báo người còn lại ngay.
 function clearUserPresence(userId: number) {
   for (const quoteId of [...editing.keys()]) {
-    if (editing.get(quoteId)?.delete(userId)) broadcast("presence", { quoteId, editing: freshPresence(quoteId) });
+    if (editing.get(quoteId)?.delete(userId)) publishPresence(quoteId, freshPresence(quoteId));
   }
 }
 
@@ -184,7 +201,7 @@ const _presenceSweep = setInterval(() => {
   for (const quoteId of [...editing.keys()]) {
     const before = editing.get(quoteId)?.size ?? 0;
     const list = freshPresence(quoteId);
-    if (list.length !== before) broadcast("presence", { quoteId, editing: list });
+    if (list.length !== before) publishPresence(quoteId, list);
   }
 }, 35_000);
 (_presenceSweep as { unref?: () => void }).unref?.();

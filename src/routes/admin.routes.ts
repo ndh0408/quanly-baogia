@@ -79,10 +79,18 @@ router.get(
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="quanly-${new Date().toISOString().replace(/[:.]/g, "-")}.dump"`);
     res.setHeader("Content-Length", (await fs.promises.stat(tmp)).size);
+    // Bản dump chứa TOÀN BỘ dữ liệu công ty. Không được để CDN/proxy/trình duyệt giữ lại bản sao,
+    // và không được để trình duyệt tự đoán kiểu rồi render.
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     await audit(req, "admin.backup", { resource: "system", resourceId: "db" });
     const stream = fs.createReadStream(tmp);
     stream.on("close", cleanup);
     stream.on("error", cleanup);
+    // Client ngắt giữa chừng: `close` của readable KHÔNG chắc chắn nổ khi pipe bị tháo → file dump
+    // (chứa toàn bộ CSDL) có thể nằm lại trong thư mục tạm vô thời hạn. Dọn theo cả sự kiện của res.
+    res.on("close", () => { stream.destroy(); cleanup(); });
     stream.pipe(res);
   })
 );

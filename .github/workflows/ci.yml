@@ -111,6 +111,22 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      # SAST. Trước đây CI KHÔNG có bước phân tích mã tĩnh nào: npm audit chỉ soi thư viện,
+      # gitleaks soi bí mật, trivy soi hạ tầng — không ai đọc LOGIC của mình. Semgrep OSS chạy cục bộ
+      # trong container, dùng ruleset miễn phí (không cần tài khoản/không gửi mã ra ngoài).
+      # Chỉ gác ở mức ERROR để không chặn merge vì gợi ý phong cách.
+      # Bỏ qua mã của nhà cung cấp (BMAD/bundle build) — không phải mã dự án.
+      - name: SAST (Semgrep OSS)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
+            semgrep scan \
+              --config p/javascript --config p/typescript \
+              --config p/nodejs --config p/expressjs --config p/react \
+              --config p/secrets --config p/owasp-top-ten \
+              --exclude node_modules --exclude _bmad --exclude _bmad-output \
+              --exclude .claude --exclude public/app2 --exclude coverage \
+              --severity ERROR --error --metrics=off
+
   build-image:
     name: Build Docker image
     runs-on: ubuntu-latest

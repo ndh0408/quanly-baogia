@@ -11,8 +11,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      include: ["src/**/*.js"],
-      exclude: ["src/server.js"],
+      // Backend đã chuyển sang TypeScript: chỉ include "*.js" thì độ phủ đo trên gần như KHÔNG file
+      // nào (con số đẹp mà không kiểm gì) — nhất là các module phân quyền/dịch vụ đều là .ts.
+      include: ["src/**/*.{js,ts}"],
+      exclude: ["src/server.ts", "src/server.js", "src/types/**"],
     },
   },
 });
