@@ -267,6 +267,60 @@ Ghi lại để lần sau khỏi audit trùng:
 
 ---
 
+### NEW-008 · P1 · Chặn triển khai — `postinstall` làm gãy `npm ci` trên Linux
+
+Phát hiện khi `bash test-on-dev.sh` trả `exit 1` **không kèm một dòng output nào**.
+
+`package.json` khai `postinstall: node scripts/patch-codex-security-9router.mjs`. Script này vá cấu hình
+công cụ quét bảo mật cho **Windows** (spawn `codex.cmd`, đường dẫn runtime Windows). Trên
+`node:22-alpine` chuỗi cần thay không tồn tại → `throw` → `npm ci` exit 1. Vì `postinstall` chắn ngang
+**mọi** lượt cài, nó chặn cả `test-on-dev.sh` lẫn CI trên ubuntu (`npm ci` ở bước Install) — nghĩa là
+kể cả mở lại billing thì CI vẫn đỏ. `test-on-dev.sh` lại nuốt output bằng `>/dev/null 2>&1` nên triệu
+chứng chỉ là "exit 1" trống trơn.
+
+**Bản vá**: bỏ qua khi `process.platform !== "win32"`; và bắt `uncaughtException`/`unhandledRejection`
+→ cảnh báo rồi `exit 0`. Một công cụ chỉ dùng lúc code không được phép chặn đường triển khai.
+
+---
+
+### NEW-009 · P2 · CWE-327 — Thẻ xác thực GCM không ghim độ dài (Semgrep bắt)
+
+`src/mfa.ts:50` và `src/secretbox.ts:43` gọi `createDecipheriv("aes-256-gcm", key, iv)` **không**
+truyền `authTagLength`. Hai chi tiết ghép lại thành lỗ:
+
+* `Buffer.subarray` **không báo lỗi** khi dữ liệu ngắn hơn khoảng cắt — nó lặng lẽ trả buffer ngắn hơn;
+* Node chấp nhận thẻ GCM dài 4/8/12–16 byte trừ khi ghim `authTagLength` lúc tạo cipher.
+
+→ Ai ghi được vào DB (dump bị chiếm, SQLi tương lai, sao lưu rò) lưu bản mã kèm thẻ **4 byte** là hạ
+công sức giả mạo từ 2¹²⁸ xuống **2³²**. Ảnh hưởng bí mật TOTP và khoá ký webhook.
+
+**Bản vá**: ghim `{ authTagLength: 16 }` ở **cả** `createCipheriv` lẫn `createDecipheriv`, cộng kiểm độ
+dài tường minh trước `setAuthTag`. Thêm 3 ca test (thẻ cắt còn 4/8/12/15 byte · bản mã cụt · lật 1 bit).
+
+---
+
+### NEW-010 · P3 — Kiểm cấu hình chạy TRƯỚC kiểm quyền ở `/api/files`
+
+Do **chính test hồi quy tôi viết** bắt được (FILE-001 đỏ ở lượt chạy đầu). `/finalize` và
+`/sign-download` gọi `isStorageEnabled()` trước lớp phân quyền → khi chưa cấu hình S3, **mọi** người
+nhận 503 và lớp kiểm quyền **không hề chạy**. Đảo lại đúng mẫu: xác thực → quyền năng lực → quyền tài
+nguyên → trạng thái.
+
+---
+
+### NEW-011 · P3 — 8 misconfig Kubernetes (chưa deploy, nhưng gác CI đỏ)
+
+Trivy: `postgres`/`redis` không có `securityContext` nào; `worker` thiếu `readOnlyRootFilesystem`.
+Manifest **chưa từng được deploy** (không có cluster) nên không khai thác được, nhưng CI gác
+`exit-code: 1` → gate đỏ vĩnh viễn. Đã thêm `runAsNonRoot` + seccomp `RuntimeDefault` +
+`readOnlyRootFilesystem` + `drop: ["ALL"]` kèm volume ghi được **đúng chỗ mỗi service cần**
+(`/data` cho redis; PVC + `/var/run/postgresql` + `/tmp` cho postgres).
+
+Nhân tiện phát hiện `worker.yaml` còn chạy `node src/worker.js` — file đã đổi sang `.ts` từ lâu, tức
+manifest này sẽ chết ngay lần `kubectl apply` đầu tiên. Đổi sang `npm run worker`.
+
+---
+
 ### NEW-007 · P2 — Hai bộ token CSS song song, lệch hẳn từ vựng
 
 **Bối cảnh**: SPA cũ **vẫn sống trong production**, không phải xác chết. `Shell.tsx:445` render
@@ -383,20 +437,36 @@ hoặc `bash test-on-dev.sh`.
 
 ## 8. Kết quả kiểm chứng đã chạy
 
+**Tất cả đã chạy thật.** CI GitHub bị **khoá billing** (job không khởi động — `gh run view 31476710989`:
+*"The job was not started because your account is locked due to a billing issue"*), nên toàn bộ được chạy
+trên **VM dev qua SSH**, nơi có Docker + Postgres + Redis thật.
+
 | Bước | Kết quả |
 |---|---|
-| ESLint | ✅ PASS — 0 lỗi, 19 cảnh báo (trước bản vá: **137 lỗi**) |
-| Typecheck backend (`tsc --noEmit`) | ✅ PASS |
-| Typecheck + build frontend | ✅ PASS |
+| ESLint | ✅ PASS — 0 lỗi, 19 cảnh báo (trước: **137 lỗi**) |
+| Typecheck backend + frontend, build frontend | ✅ PASS |
 | Test đơn vị frontend | ✅ PASS — 17/17 |
-| Test backend (vitest) | ✅ PASS — **307 passed**, 149 skipped (cần DB) |
+| **Test backend đầy đủ trên Postgres thật** (`test-on-dev.sh`) | ✅ **PASS — 474/474**, 32/32 file (trước đợt này: 268) |
 | `npm audit --omit=dev --audit-level=high` | ✅ PASS — **0** (trước: 4 HIGH) |
 | `npm audit` (gồm dev) | ✅ PASS — **0** (trước: 7 HIGH + 5 moderate + 1 low) |
-| Quét bí mật (mẫu, file đang theo dõi) | ✅ 0 kết quả; `.env` không nằm trong git |
-| Gitleaks (đầy đủ, lịch sử git) | ⛔ **NOT RUN** — Docker daemon không chạy → chạy ở CI |
-| Trivy | ⛔ **NOT RUN** — như trên |
-| Semgrep (SAST) | ⛔ **NOT RUN** cục bộ — **đã thêm vào CI** |
-| Test tích hợp phân quyền (30 ca mới) | ⛔ **NOT RUN** — không có Postgres/Docker ở máy này |
+| **Gitleaks** — 387 commit, toàn lịch sử | ✅ PASS — 1 phát hiện, xác minh **false positive**, allowlist hẹp → `no leaks found` |
+| **Trivy** — vuln + secret + misconfig | ✅ PASS — 0 lỗ hổng, 0 secret; 8 misconfig **đã vá 7**, 1 false positive miễn trừ theo đường dẫn |
+| **Semgrep OSS** (SAST, 7 ruleset) | ✅ PASS — 2 phát hiện **THẬT** đã vá → `exit 0` |
+| **Kiểm tay trên bản đã deploy** | ✅ xem §8.1 |
+
+### 8.1 Kiểm tay trên staging (`https://dev.gianguyen.cloud`, tài khoản `demo_hr`)
+
+```
+403  GET /api/quotes                 ← trước bản vá: 200 kèm tên khách + giá bán
+403  GET /api/customers              ← trước bản vá: 200
+403  GET /api/quotes/projects        ← trước bản vá: 200
+403  GET /api/analytics/overview     ← trước bản vá: 200
+     GET /api/search?types=product → {"results":{},"denied":["product"]}
+200  GET /api/personnel              ← quyền HỢP LỆ vẫn thông (không chặn nhầm)
+```
+
+Và trên tài khoản admin: `/api/users` trả **đủ 11 tài khoản**, mỗi dòng có cờ `breakGlass`
+(trước bản vá tài khoản ẩn bị lọc mất khỏi danh sách).
 
 ---
 
@@ -434,9 +504,14 @@ hoặc `bash test-on-dev.sh`.
 ## 11. Rủi ro còn lại
 
 **Cần sửa mã (đã lên kế hoạch, chưa làm)**
-* PII thô: `idCard` / `bankAccount` / `salary` — theo trình tự 6 bước ở mục 6.
+* PII thô — **bước 1/6 ĐÃ XONG**: `src/piiBox.ts` (AES-256-GCM khoá riêng `PII_ENC_KEY`, HKDF tách
+  khoá mã-hoá / chỉ-mục-mù, thẻ ghim 16 byte, fail-closed, đọc-song-song) + migration cộng-thêm
+  `idCardEnc`/`idCardIdx`/`bankAccountEnc`/`salaryEnc`/`piiVersion` + 15 ca test. **Chưa gọi ở đâu,
+  chưa đặt khoá → ứng dụng chạy y hệt.** Còn bước 2-6: nối ghi-song-song vào service, chuyển
+  tìm-kiếm-theo-CCCD sang chỉ mục mù, backfill theo lô, đối chiếu, cutover, bỏ cột thô.
 * `paymentProof` base64 trong DB → object storage.
 * URL-state cho bộ lọc ở Customers / Personnel / Employees / Users / Audit.
+* Gộp token CSS giữa SPA cũ và React (NEW-007) — làm cùng lúc port nốt `#/new`.
 
 **Cần thao tác hạ tầng / vận hành** *(không làm được từ máy này)*
 * **Quyết định về `ndh0408@gmail.com` trên prod**: sau khi deploy, tài khoản này sẽ **hiện ra** trong danh
@@ -455,31 +530,30 @@ hoặc `bash test-on-dev.sh`.
 ## 12. Cổng phát hành
 
 ```
-NOT READY
-```
-
-**Lý do**: bộ test hồi quy cho **chính** các lỗi P1 vừa vá (30 ca, `tests/security-regression.test.js`)
-**chưa chạy lần nào** — máy này không có Postgres lẫn Docker. Theo đúng nguyên tắc "không tuyên bố PASS
-cho lệnh chưa chạy", không thể ký READY dựa trên suy luận.
-
-**Cách chuyển sang READY** — một trong hai:
-
-```bash
-# (a) đẩy nhánh lên, để CI chạy (đã có Postgres + REQUIRE_DB_TESTS=1)
-git push origin feat/venue-suggest
-
-# (b) chạy trên VM dev
-bash test-on-dev.sh
-```
-
-Nếu **cả 30 ca xanh** và không phát sinh lỗi mới → gate chuyển thành:
-
-```
 READY WITH INFRA ACTIONS
 ```
 
-*(còn "with infra actions" vì SEC-008/009 là nợ đã ghi nhận, và quyết định về tài khoản break-glass
-trên prod thuộc về chủ hệ thống, không phải về mã.)*
+**Bằng chứng** (đã chạy thật, không suy luận):
+
+* **474/474** test backend xanh trên Postgres thật — gồm 30 ca hồi quy bắn HTTP đúng như kẻ tấn công
+  gõ thẳng API, và 15 ca khoá ngữ nghĩa phạm-vi-đọc;
+* Gitleaks (387 commit) · Trivy · Semgrep · `npm audit` — **cả bốn exit 0**;
+* kiểm tay trên bản đã deploy: 4 endpoint từng trả 200 nay trả 403, quyền hợp lệ vẫn thông (§8.1);
+* staging đang chạy đúng commit này, `/livez` OK, migration áp sạch.
+
+**"WITH INFRA ACTIONS"** — 4 việc thuộc quyền quyết định của chủ hệ thống, không phải của mã:
+
+1. **Tài khoản `ndh0408@gmail.com`**: sau khi lên prod nó sẽ **hiện ra** trong Quản lý nhân viên và
+   **hạ quyền/khoá được**. Giữ hay khoá là quyết định của bạn; nếu giữ → bật MFA bắt buộc.
+2. **CI GitHub đang khoá billing** — mở lại thì toàn bộ gate (test + gitleaks + trivy + semgrep) tự chạy
+   trên mỗi PR. Cho tới lúc đó, `bash test-on-dev.sh` là đường kiểm chứng duy nhất.
+3. **`PII_ENC_KEY`**: chưa đặt ở đâu (cố ý). Bước 1 đã sẵn sàng; bật là quyết định vận hành, làm sau khi
+   sao lưu và chạy backfill (bước 3-6).
+4. **Deploy prod**: `bash deploy.sh prod` sau khi bạn duyệt staging. Migration là cộng-thêm, rollback
+   bằng `DROP COLUMN`.
+
+**Không tuyên bố hệ thống "an toàn"** — chỉ báo cáo: mọi thứ kiểm được ở đây đã kiểm và đã xanh; phần
+còn lại (bước 2-6 mã hoá PII, gộp token CSS, URL-state) nằm ở §11 với lý do rõ ràng.
 
 ---
 
