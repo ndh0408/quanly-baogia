@@ -3,10 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type Venue, type VenueItemRow } from "../lib/api";
 import { errMsg } from "../lib/format";
 import { toast, confirmModal } from "../lib/ui";
-import { invalidateCatalog, norm, parseDim } from "../lib/venueCatalog";
-import { qtyRound } from "../lib/quoteMath";
+import { invalidateCatalog, norm } from "../lib/venueCatalog";
 
-// Trang "Danh mục rạp" — kho kích thước để lúc làm báo giá gõ tên là app điền sẵn.
+// Trang "Danh mục rạp" — danh sách hạng mục thường dùng theo từng rạp.
 //
 // Bố cục kiểu DANH BẠ: trái = danh sách rạp, phải = hạng mục của rạp đang chọn.
 // Cố ý giữ ÍT thứ trên màn: không checkbox chọn hàng loạt, không thanh công cụ,
@@ -16,13 +15,21 @@ import { qtyRound } from "../lib/quoteMath";
 type FullVenue = Venue & { items?: VenueItemRow[] };
 type AddVenueHandler = (name: string) => Promise<boolean>;
 
-const numText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
 const normItemText = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
-const normItemDim = (v: string) => normItemText(v).replace(/\s+/g, "").replace(/×/g, "x").replace(/,/g, ".");
 const normItemUnit = (v: string) => /^m\s*(?:\^?\s*2|²)$/.test(normItemText(v)) ? "m2" : normItemText(v);
-// Con số app sẽ điền vào ô Số Lượng của báo giá.
-const slOf = (it: VenueItemRow) =>
-  it.unit === "m2" && it.w && it.h ? qtyRound(it.w * it.h) : it.qty ?? null;
+const quickUnits = new Set(["m2", "m", "md", "bộ", "cái", "ghế", "tấm", "bảng", "set", "kg"]);
+
+const parseQuickItemLine = (line: string, fallbackUnit: string) => {
+  const cells = line.split("\t").map((cell) => cell.trim());
+  let name = cells[0] ?? "";
+  const dimAt = name.search(/Dimension\s*:/i);
+  const parenAt = name.search(/\((?=[^)]*\d[^)]*[x×][^)]*\d)/i);
+  if (dimAt >= 0) name = name.slice(0, dimAt);
+  else if (parenAt > 0) name = name.slice(0, parenAt);
+  name = name.replace(/^[.\-–—•\s]+/, "").trim();
+  const rowUnit = cells.slice(1).find((cell) => quickUnits.has(normItemUnit(cell))) ?? fallbackUnit;
+  return { name, unit: rowUnit.trim() };
+};
 
 export function VenuesPage({ me }: { me: Me }) {
   const qc = useQueryClient();
@@ -108,7 +115,7 @@ export function VenuesPage({ me }: { me: Me }) {
     <div>
       <h1>Danh mục rạp</h1>
       <p className="muted page-sub">
-        Lưu sẵn kích thước của từng rạp. Khi làm báo giá, gõ tên hạng mục ở ô <b>Hạng Mục</b> là app tự điền kích thước và số lượng — khỏi mở file đi dò.
+        Lưu danh sách hạng mục thường dùng của từng rạp. Khi làm báo giá, gõ tên ở ô <b>Hạng Mục</b> để tìm và chèn nhanh.
       </p>
 
       {isPending ? (
@@ -184,8 +191,8 @@ function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: AddVenueH
       <h2>Bắt đầu: thêm rạp đầu tiên</h2>
       <ol className="vn-steps">
         <li>Thêm <b>tên rạp</b> (vd: CGV Aeon Tân Phú).</li>
-        <li>Thêm các <b>hạng mục</b> của rạp đó kèm kích thước (vd: Quầy vé lớn — 6.5 × 1 m).</li>
-        <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện ra và tự điền kích thước + số lượng.</li>
+        <li>Thêm các <b>hạng mục</b> thường dùng của rạp đó (vd: Quầy vé lớn).</li>
+        <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện đúng hạng mục để chèn nhanh.</li>
       </ol>
       <div className="vn-firstform">
         <input ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
@@ -286,7 +293,7 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
       <TagRow tags={venue.tags ?? []} all={venues.flatMap((v) => v.tags ?? [])} canManage={canManage} onChange={setTags} />
 
       {items.length === 0 ? (
-        <p className="muted vn-hint">Rạp này chưa có hạng mục. Thêm dòng đầu tiên ở dưới — ví dụ “Quầy vé lớn”, kích thước “6.5 x 1”.</p>
+        <p className="muted vn-hint">Rạp này chưa có hạng mục. Nhập dòng đầu tiên ở dưới — ví dụ “Quầy vé lớn”.</p>
       ) : (
         <table className="vn-items">
           <thead>
@@ -294,29 +301,24 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
               <th scope="col">Hạng mục</th>
               <th scope="col">Kích thước</th>
               <th scope="col">Đơn vị</th>
-              <th scope="col" style={{ textAlign: "right" }}>Số lượng</th>
               {canManage && <th scope="col" aria-label="Thao tác" />}
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => {
-              const sl = slOf(it);
-              return (
-                <tr key={it.id} className={`${isHit(it) ? "hit" : ""}${it.active ? "" : " off"}`}>
-                  <td><b>{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
-                    {it.note && <div className="vn-note">{it.note}</div>}</td>
-                  <td>{it.dim || <span className="muted">—</span>}</td>
-                  <td>{it.unit || <span className="muted">—</span>}</td>
-                  <td style={{ textAlign: "right" }}>{sl != null ? numText(sl) : <span className="muted">—</span>}</td>
-                  {canManage && (
-                    <td className="vn-iacts">
-                      <button type="button" className="btn btn-sm" onClick={() => setEditing(it)}>Sửa</button>
-                      <button type="button" className="btn btn-sm btn-danger" onClick={() => void delItem(it)}>Xoá</button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
+            {items.map((it) => (
+              <tr key={it.id} className={`${isHit(it) ? "hit" : ""}${it.active ? "" : " off"}`}>
+                <td><b>{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
+                  {it.note && <div className="vn-note">{it.note}</div>}</td>
+                <td>{it.dim || <span className="muted">—</span>}</td>
+                <td>{it.unit || <span className="muted">—</span>}</td>
+                {canManage && (
+                  <td className="vn-iacts">
+                    <button type="button" className="btn btn-sm" onClick={() => setEditing(it)}>Sửa</button>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => void delItem(it)}>Xoá</button>
+                  </td>
+                )}
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
@@ -389,22 +391,18 @@ function TagRow({ tags, all, canManage, onChange }: {
 // ── Hàng thêm hạng mục nằm SẴN cuối bảng. Dán nhiều dòng = thêm nhiều hạng mục ──
 function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void }) {
   const [name, setName] = useState("");
-  const [dim, setDim] = useState("");
   const [unit, setUnit] = useState("m2");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
-
-  const { w, h } = parseDim(dim);
-  const sl = unit === "m2" && w && h ? qtyRound(w * h) : null;
 
   const add = async () => {
     if (busyRef.current) return;
     if (!name.trim()) { nameRef.current?.focus(); return; }
     busyRef.current = true; setBusy(true);
     try {
-      await api.createVenueItem(venueId, { name: name.trim(), dim: dim.trim() || null, w, h, unit: unit.trim() || null });
-      setName(""); setDim("");            // giữ Đơn vị để gõ dòng tiếp cho nhanh
+      await api.createVenueItem(venueId, { name: name.trim(), unit: unit.trim() || null });
+      setName("");                         // giữ Đơn vị để nhập dòng tiếp như Excel
       onAdded();
     } catch (ex) { toast(errMsg(ex, "Thêm thất bại"), "error"); }
     finally {
@@ -413,12 +411,18 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     }
   };
 
-  // Dán nhiều dòng (từ Excel/sheet) → mỗi dòng 1 hạng mục. Tách tên & kích thước theo TAB,
-  // theo chữ "Dimension:", hoặc theo dấu "(" mở đầu cụm số — cách nào có trước thì dùng.
+  // Dán nhiều dòng từ Excel/sheet → lấy ô đầu tiên của mỗi hàng làm tên hạng mục.
   const onPaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
     const text = e.clipboardData.getData("text/plain");
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length < 2) return;                   // 1 dòng → dán bình thường
+    const structured = text.includes("\t") || /Dimension\s*:/i.test(text) || /\((?=[^)]*\d[^)]*[x×][^)]*\d)/i.test(text);
+    if (lines.length === 1 && structured) {
+      e.preventDefault();
+      const row = parseQuickItemLine(lines[0], unit);
+      setName(row.name); setUnit(row.unit);
+      return;
+    }
+    if (lines.length < 2) return;                   // văn bản thường 1 dòng → dán vào ô như cũ
     e.preventDefault();
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true);
@@ -428,22 +432,13 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     const seen = new Set<string>();
     try {
       for (const line of lines) {
-        let nm = line, dm = "";
-        const tab = line.split("\t");
-        const dimAt = line.search(/Dimension\s*:/i);
-        const parenAt = line.search(/\((?=[^)]*[x×])/i);
-        if (tab.length > 1) { nm = tab[0]; dm = tab.slice(1).join(" "); }
-        else if (dimAt >= 0) { nm = line.slice(0, dimAt); dm = line.slice(dimAt).replace(/Dimension\s*:/i, ""); }
-        else if (parenAt > 0) { nm = line.slice(0, parenAt); dm = line.slice(parenAt); }
-        nm = nm.replace(/^[.\-–—•\s]+/, "").trim();
-        dm = dm.trim();
-        if (!nm) continue;
-        const key = `${normItemText(nm)}\u0000${normItemDim(dm)}\u0000${normItemUnit(unit)}`;
+        const row = parseQuickItemLine(line, unit);
+        if (!row.name) continue;
+        const key = `${normItemText(row.name)}\u0000${normItemUnit(row.unit)}`;
         if (seen.has(key)) continue;
         seen.add(key); valid++;
-        const p = parseDim(dm);
         try {
-          await api.createVenueItem(venueId, { name: nm, dim: dm || null, w: p.w, h: p.h, unit: unit.trim() || null });
+          await api.createVenueItem(venueId, { name: row.name, unit: row.unit || null });
           ok++;
         } catch (ex) {
           if (ex instanceof ApiError && ex.status === 409) continue;
@@ -452,7 +447,8 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
         }
       }
     } finally {
-      busyRef.current = false; setBusy(false); setName(""); setDim("");
+      busyRef.current = false; setBusy(false); setName("");
+      requestAnimationFrame(() => nameRef.current?.focus());
     }
     if (stoppedError) {
       toast(`Đã thêm ${ok}/${valid} hạng mục. Dừng vì: ${stoppedError}`, "error");
@@ -467,14 +463,11 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     <div className="vn-additem">
       <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
-      <input value={dim} onChange={(e) => setDim(e.target.value)} placeholder="Kích thước (vd: 6.5 x 1)" className="vn-ai-dim" aria-label="Kích thước" disabled={busy}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
+        aria-keyshortcuts="Enter" onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }} />
       <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
-      <span className="vn-ai-sl muted">{sl != null ? <>= <b>{numText(sl)}</b></> : ""}</span>
       <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
-      <div className="vn-ai-hint muted">Gõ xong nhấn Enter. Dán nhiều dòng cùng lúc cũng được.</div>
+      <div className="vn-ai-hint muted"><b>Enter</b> = lưu và xuống dòng nhập tiếp như Excel. Có thể dán nhiều hàng cùng lúc.</div>
     </div>
   );
 }
@@ -482,11 +475,6 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
 // ── Sửa 1 hạng mục (chỉ mở khi bấm Sửa) ─────────────────────────────────────
 function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(rec.name);
-  const [dim, setDim] = useState(rec.dim ?? "");
-  const [w, setW] = useState(numText(rec.w));
-  const [h, setH] = useState(numText(rec.h));
-  const [unit, setUnit] = useState(rec.unit ?? "");
-  const [qty, setQty] = useState(numText(rec.qty));
   const [note, setNote] = useState(rec.note ?? "");
   const [active, setActive] = useState(rec.active);
   const [saving, setSaving] = useState(false);
@@ -499,22 +487,12 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const toNum = (s: string) => { const t = s.trim().replace(",", "."); return t === "" ? null : Number(t); };
-  const sl = unit === "m2" ? (() => { const a = toNum(w), b = toNum(h); return a && b ? qtyRound(a * b) : null; })() : toNum(qty);
-  const onDim = (v: string) => {
-    setDim(v);
-    if (w.trim() || h.trim()) return;   // đã sửa tay thì không đè
-    const p = parseDim(v);
-    if (p.w) setW(numText(p.w));
-    if (p.h) setH(numText(p.h));
-  };
-
   const save = async () => {
     if (savingRef.current) return;
     if (!name.trim()) { setErr("Chưa có tên hạng mục"); return; }
     savingRef.current = true; setErr(""); setSaving(true);
     try {
-      await api.updateVenueItem(rec.id, { name: name.trim(), dim: dim.trim() || null, w: toNum(w), h: toNum(h), unit: unit.trim() || null, qty: toNum(qty), note: note.trim() || null, active });
+      await api.updateVenueItem(rec.id, { name: name.trim(), note: note.trim() || null, active });
       toast("Đã lưu", "success"); onSaved();
     } catch (ex) { setErr(errMsg(ex, "Lưu thất bại")); savingRef.current = false; setSaving(false); }
   };
@@ -528,23 +506,12 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
           <div className="grid">
             <label className="full"><span>Tên hạng mục</span>
               <input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
-            <label className="full"><span>Kích thước <em className="unit">(ghi sao cũng được — Rộng/Cao tự đọc ra)</em></span>
-              <input value={dim} onChange={(e) => onDim(e.target.value)} placeholder="6.5 x 1" /></label>
-            <label><span>Rộng</span><input value={w} inputMode="decimal" onChange={(e) => setW(e.target.value)} /></label>
-            <label><span>Cao</span><input value={h} inputMode="decimal" onChange={(e) => setH(e.target.value)} /></label>
-            <label><span>Đơn vị</span><input value={unit} onChange={(e) => setUnit(e.target.value)} list="vn-units-m" />
-              <datalist id="vn-units-m"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist></label>
-            <label><span>Số lượng <em className="unit">(khi không tính theo m²)</em></span>
-              <input value={qty} inputMode="decimal" onChange={(e) => setQty(e.target.value)} /></label>
             <label className="full"><span>Ghi chú <em className="unit">(điền sẵn vào cột Ghi chú của báo giá)</em></span>
               <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="vd: PP in KTS" /></label>
             <label className="full" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} style={{ width: "auto" }} />
               <span>Đang dùng <em className="unit">(bỏ tick = ẩn khỏi gợi ý)</em></span></label>
           </div>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-            {sl != null ? <>Báo giá sẽ tự điền số lượng <b>{numText(sl)}</b>{unit === "m2" ? " m²" : ""}.</> : "Điền Rộng + Cao và để đơn vị là m2 thì số lượng tự tính."}
-          </p>
         </div>
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose}>Huỷ</button>

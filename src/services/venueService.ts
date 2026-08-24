@@ -251,6 +251,8 @@ const sameVenueItem = (a: Record<string, unknown>, b: Record<string, unknown>) =
   const ad = dimensionsOf(a);
   const bd = dimensionsOf(b);
   if (ad && bd) return ad[0] === bd[0] && ad[1] === bd[1];
+  // Hàng nhập nhanh mới không có kích thước: cùng tên + đơn vị phải khớp hạng mục legacy.
+  if (!normItemDim(a.dim) || !normItemDim(b.dim)) return true;
   return normItemDim(a.dim) === normItemDim(b.dim);
 };
 

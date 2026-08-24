@@ -2888,15 +2888,8 @@ textarea[aria-invalid="true"] {
   flex: 1;
   min-width: 190px;
 }
-.vn-ai-dim {
-  width: 190px;
-}
 .vn-ai-unit {
-  width: 82px;
-}
-.vn-ai-sl {
-  min-width: 48px;
-  font-size: 13px;
+  width: 96px;
 }
 .vn-ai-hint {
   width: 100%;
@@ -2948,7 +2941,6 @@ textarea[aria-invalid="true"] {
     display: block;
     overflow-x: auto;
   }
-  .vn-ai-dim,
   .vn-ai-name {
     width: 100%;
     flex: 1 1 100%;

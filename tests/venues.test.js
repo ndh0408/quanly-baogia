@@ -90,6 +90,21 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     expect(res.body.error).toContain("Đã có hạng mục");
   });
 
+  it("hàng nhập nhanh không có kích thước vẫn chặn trùng với dữ liệu cũ", async () => {
+    const res = await admin.post(`/api/venues/${venueId}/items`).send({ name: " quầy bắp 1 ", unit: "m2" });
+    expect(res.status).toBe(409);
+  });
+
+  it("modal rút gọn sửa tên/ghi chú không làm mất kích thước và đơn vị cũ", async () => {
+    const item = await admin.post(`/api/venues/${venueId}/items`).send({ name: `${TAG} Giữ metadata`, dim: "2 x 1", w: 2, h: 1, unit: "m2", qty: 2, note: "Ghi chú cũ" });
+    expect(item.status).toBe(201);
+    const newName = `${item.body.name} sửa`;
+    const res = await admin.put(`/api/venues/items/${item.body.id}`).send({ name: newName, note: "Ghi chú mới", active: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ name: newName, dim: item.body.dim, w: item.body.w, h: item.body.h, unit: item.body.unit, qty: item.body.qty, note: "Ghi chú mới" });
+    await admin.delete(`/api/venues/items/${item.body.id}`).expect(200);
+  });
+
   it("từ chối kích thước ÂM (400)", async () => {
     const res = await admin.post(`/api/venues/${venueId}/items`).send({ cat: "X", name: "Sai", w: -3 });
     expect(res.status).toBe(400);
@@ -221,6 +236,22 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     const after = await admin.get(`/api/venues/${venueId}`);
     const merged = after.body.items.find((i) => i.id === target.body.id);
     expect(merged).toMatchObject({ dim: "2,4 x 1,3", w: 2.4, h: 1.3 });
+    await admin.delete(`/api/venues/items/${target.body.id}`).expect(200);
+  });
+
+  it("gộp hàng nhập nhanh với dữ liệu legacy giữ kích thước và cả hai ghi chú", async () => {
+    const itemName = `${TAG} Quick merge`;
+    const target = await admin.post(`/api/venues/${venueId}/items`).send({ name: itemName, dim: "4 x 2", w: 4, h: 2, unit: "m2", note: "Ghi chú legacy" });
+    const sourceVenue = await admin.post("/api/venues").send({ name: `${TAG} Rạp quick merge`, region: "HCM" });
+    await admin.post(`/api/venues/${sourceVenue.body.id}/items`).send({ name: itemName, unit: "m2", note: "Ghi chú nhập nhanh" }).expect(201);
+    const merge = await admin.post(`/api/venues/${sourceVenue.body.id}/merge`).send({ intoId: venueId });
+    expect(merge.status).toBe(200);
+    expect(merge.body.removedDuplicates).toBe(1);
+    const after = await admin.get(`/api/venues/${venueId}`);
+    const merged = after.body.items.find((i) => i.id === target.body.id);
+    expect(merged).toMatchObject({ dim: "4 x 2", w: 4, h: 2, unit: "m2" });
+    expect(merged.note).toContain("Ghi chú legacy");
+    expect(merged.note).toContain("Ghi chú nhập nhanh");
     await admin.delete(`/api/venues/items/${target.body.id}`).expect(200);
   });
 
