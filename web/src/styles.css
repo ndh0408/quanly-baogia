@@ -3044,6 +3044,53 @@ textarea[aria-invalid="true"] {
 .import-col-chip b {
   color: var(--primary);
 }
+.import-check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.import-check-card {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.import-check-card > span,
+.import-check-card > small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.import-check-card > strong {
+  display: block;
+  margin: 3px 0;
+  font-size: 14px;
+}
+.import-check-card.ok {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.import-check-card.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.import-check-card.danger {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+}
+.import-tech-details {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.import-tech-details > summary,
+.import-row-formulas > summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 12.5px;
+}
 .import-warn {
   margin: 10px 0 0;
   padding: 8px 12px 8px 26px;
@@ -3062,6 +3109,22 @@ textarea[aria-invalid="true"] {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 8px;
+}
+.import-show-same {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.import-empty-change {
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-align: center;
 }
 .import-badge {
   display: inline-block;
@@ -3110,6 +3173,23 @@ textarea[aria-invalid="true"] {
   margin-top: 3px;
   color: var(--warn);
   font-size: 12.5px;
+}
+.import-row-values {
+  color: var(--text-soft);
+  font-size: 12.5px;
+}
+.import-row-formulas {
+  margin-top: 3px;
+  font-size: 12px;
+}
+.import-row-formulas code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .import-check-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Ý kiến khách theo TỪNG SHEET */

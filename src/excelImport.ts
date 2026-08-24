@@ -302,6 +302,16 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.showImages = colOf._images != null;
   base.columns = Object.fromEntries(Object.entries(colOf).map(([role, c]) => [role, colLetter(c)]));
 
+  // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
+  // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
+  const amountLetter = colOf._amount ? colLetter(colOf._amount) : "";
+  const hasGroupPriceFormula = (r: number) => {
+    const fx = fxOf(cellAt(r, "unitPrice"));
+    if (!fx || !amountLetter) return false;
+    const refs = [...fx.matchAll(/\$?([A-Z]{1,3})\$?\d+/gi)].map((m) => m[1].toUpperCase());
+    return refs.length > 0 && refs.every((L) => L === amountLetter);
+  };
+
   // ── Quét thô: chốt dòng cuối của bảng + nhận diện kiểu BANNER (nhóm con đánh SỐ) ──
   const lastSheetRow = ws.rowCount || hit.row;
   const scanEnd = Math.min(lastSheetRow, hit.row + MAX_SCAN_ROWS);
@@ -330,8 +340,13 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.stats.rows = bodyRows.length;
 
   // Bản BANNER: nhóm con đánh SỐ (STT số + có tên + KHÔNG ĐVT + có giá) → hàng STT-trống là MỤC.
-  const numberedSub = bodyRows.some((r) => /^\d+$/.test(textAt(r, "_stt")) && textAt(r, "name") !== ""
-    && isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "unitPrice")));
+  const numberedSub = bodyRows.some((r) => {
+    const stt = textAt(r, "_stt"), name = textAt(r, "name");
+    if (!/^\d+$/.test(stt) || !name) return false;
+    const fill = fillOf(cellAt(r, "name")) || fillOf(cellAt(r, "_stt"));
+    return FILL_SUB.has(fill) || hasGroupPriceFormula(r)
+      || (isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity")) && !isBlank(cellAt(r, "unitPrice")));
+  });
   base.numberSubs = numberedSub;
 
   // ── Phân loại + đọc giá trị từng dòng ──
@@ -348,6 +363,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const hasPrice = !isBlank(cellAt(r, "unitPrice"));
     const hasAmt = !isBlank(cellAt(r, "_amount"));
     const fill = fillOf(nameCell) || fillOf(sttCell);
+    const groupPriceFormula = hasGroupPriceFormula(r);
 
     // Ô Hạng Mục GỘP DỌC và dòng này không phải dòng đầu ô gộp → HÀNG CON (tên nằm ở dòng cha).
     const merged = !!nameCell?.isMerged && coordNum(nameCell.master?.row, false) < r;
@@ -361,13 +377,15 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     let kind: ImportedKind;
     if (bannerText) { kind = "info"; name = bannerText.replace(/^\*\s*Thông tin chương trình\s*:\s*/i, "").trim(); }
     else if (merged) kind = "sub";
-    else if (FILL_SECTION.has(fill) && !hasUnit) kind = "section";
-    else if (FILL_SUB.has(fill) && !hasUnit) kind = "subsection";
-    else if (/^[A-Z]{1,2}$/.test(stt) && !hasUnit) kind = "section";
-    else if (numberedSub && /^\d+$/.test(stt) && name !== "" && !hasUnit && hasPrice) kind = "subsection";
+    else if (FILL_SECTION.has(fill)) kind = "section";
+    else if (FILL_SUB.has(fill)) kind = "subsection";
+    // STT chữ A/B thường là nhóm; nếu dòng vẫn có ĐVT thì chỉ coi là nhóm khi Đơn Giá tổng hợp
+    // từ cột Thành Tiền. Tránh nuốt file ngoài dùng A/B/C để đánh số hạng mục thường.
+    else if (/^[A-Z]{1,2}$/.test(stt) && (!hasUnit || groupPriceFormula)) kind = "section";
+    else if (numberedSub && /^\d+$/.test(stt) && name !== "" && (groupPriceFormula || (!hasUnit && hasPrice))) kind = "subsection";
     else if (!stt && name === "" && (hasUnit || hasQty || hasPrice) && (prevKind === "item" || prevKind === "sub")) kind = "sub";
     else if (!stt && name !== "" && !hasUnit && !hasQty && !hasPrice && !hasAmt) kind = "info";
-    else if (!numberedSub && !stt && name !== "" && !hasUnit) kind = "subsection";
+    else if (!numberedSub && !stt && name !== "" && (groupPriceFormula || !hasUnit)) kind = "subsection";
     else if (name !== "" && !hasUnit && hasPrice && !hasQty) kind = "subsection";
     else kind = "item";
 
@@ -386,7 +404,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     const isGroup = kind === "section" || kind === "subsection";
     if (colOf.detail && !isGroup) it.detail = textAt(r, "detail");
-    if (!isGroup && kind !== "info") it.unit = unit;
+    // Nhóm vẫn có thể có ĐVT (vd "Booth ... | bộ | 5"). Giữ lại để lưới hiển thị đúng file.
+    if (kind !== "info") it.unit = unit;
     if (colOf.notes) it.notes = cellText(cellAt(r, "notes")?.value).trim();
     if (colOf.internalNote) {
       const n = cellText(cellAt(r, "internalNote")?.value).trim();
@@ -477,7 +496,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       const raw = fxOf(cell);
       if (!raw) continue;
       // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất.
-      const src = f.round1 ? unwrapRound(raw, 1) : raw.replace(/^=/, "");
+      const rawBody = raw.replace(/^=/, "");
+      const src = f.round1 ? unwrapRound(raw, 1) : rawBody;
+      const appQtyRoundWrapper = f.round1 && src !== rawBody;
       const canon = excelFormulaToEditor(src, refCtx);
       const label = FIELD_VN[f.field] || f.field;
       if (!canon) {
@@ -488,22 +509,28 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       // TỰ KIỂM: công thức dịch xong phải ra ĐÚNG con số Excel đã tính sẵn trong file.
       const want = resultOf(cell);
       const got = evalCanonical(canon);
-      if (got == null || (want != null && Math.abs(got - want) > Math.max(0.5, Math.abs(want) * 1e-6))) {
+      // File do app xuất bọc Số Lượng bằng ROUND(...,1), nhưng canonical cố ý giữ công thức gốc.
+      // So giá trị đã làm tròn để xác minh; lưu lại kết quả GỐC để lần xuất kế tiếp vẫn giữ formula.
+      const checked = appQtyRoundWrapper && got != null ? qtyRound(got) : got;
+      if (checked == null || (want != null && Math.abs(checked - want) > Math.max(0.5, Math.abs(want) * 1e-6))) {
         base.stats.formulasDropped++;
         (x.it.warn || (x.it.warn = [])).push(`Công thức ô ${label} ("=${src}") cho kết quả khác số trong file — đã giữ con số, bỏ công thức`);
         continue;
       }
       (x.it.formulas || (x.it.formulas = {}))[f.field] = canon;
       base.stats.formulas++;
-      if (want != null) {
-        if (f.field === "quantity") x.it.quantity = want;
-        else if (f.field === "unitPrice") x.it.unitPrice = want;
-        else if (f.field === "days") x.it.days = want;
+      const resolved = want ?? got;
+      if (resolved != null) {
+        if (f.field === "quantity") x.it.quantity = appQtyRoundWrapper && got != null ? got : resolved;
+        else if (f.field === "unitPrice") x.it.unitPrice = resolved;
+        else if (f.field === "days") x.it.days = resolved;
       }
     }
   }
 
   base.items = raws.map((x) => x.it);
+  const detailRows = base.items.filter((it) => String(it.detail || "").trim()).length;
+  if (detailRows) base.warnings.push(`File có ${detailRows} dòng chứa cột Chi Tiết. Trường này đã bỏ khỏi báo giá nên nội dung đó sẽ không được nạp.`);
   for (const x of raws) {
     if (x.kind === "item") base.stats.items++;
     else if (x.kind === "sub") base.stats.subs++;

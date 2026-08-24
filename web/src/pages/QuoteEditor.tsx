@@ -153,7 +153,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const tpl = templates.find((t) => t.id === activeSheet.templateId);
   const usesDays = !!tpl?.layout?.hasDays;
   const showDetail = !!tpl?.layout?.hasDetail;
-  // Mẫu từng có cột Chi Tiết (nay ẩn) → GIỮ chỗ trong sơ đồ địa chỉ ô để công thức cũ không lệch cột.
+  // Chi Tiết đã bỏ; chỉ giữ khe địa chỉ nội bộ để công thức báo giá cũ không lệch cột.
   const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);
   const numberSubs = !!tpl?.layout?.numberSubsections;
 
@@ -506,6 +506,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <ImportExcelModal
           quoteId={isNew ? undefined : q.id}
           sheets={sheets}
+          templates={templates}
           usesDaysOf={(tid) => !!templates.find((t) => t.id === tid)?.layout?.hasDays}
           addrDetailOf={(tid) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }}
           // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;

@@ -53,6 +53,44 @@ function safeUnmerge(ws: any, range: any) {
   try { ws.unMergeCells(range); } catch {}
 }
 
+function unmergeOverlapping(ws: any, c1: number, r1: number, c2: number, r2: number) {
+  const merges = Object.entries(ws._merges || {});
+  for (const [key, raw] of merges) {
+    const m = raw as any;
+    const top = m?.top ?? m?.model?.top, left = m?.left ?? m?.model?.left;
+    const bottom = m?.bottom ?? m?.model?.bottom, right = m?.right ?? m?.model?.right;
+    if (![top, left, bottom, right].every(Number.isFinite)) continue;
+    if (right < c1 || left > c2 || bottom < r1 || top > r2) continue;
+    try { ws.unMergeCells(key); } catch {
+      try { ws.unMergeCells(`${colLetter(left)}${top}:${colLetter(right)}${bottom}`); } catch {}
+    }
+  }
+}
+
+/** Gộp vùng Hạng Mục qua cột Chi Tiết đã bỏ, giữ viền ngoài của bảng. */
+function mergeNameArea(ws: any, nameCol: string, detailCol: string, r1: number, r2 = r1) {
+  const c1 = colLetterToIdx(nameCol) + 1, c2 = colLetterToIdx(detailCol) + 1;
+  if (c2 !== c1 + 1) throw new Error(`Cột Hạng Mục (${nameCol}) và vùng bỏ Chi Tiết (${detailCol}) phải nằm cạnh nhau`);
+  const tl = ws.getCell(r1, c1), tr = ws.getCell(r1, c2);
+  const bl = ws.getCell(r2, c1), br = ws.getCell(r2, c2);
+  const style = tl.style ? JSON.parse(JSON.stringify(tl.style)) : {};
+  const border = {
+    ...(style.border || {}),
+    top: tl.border?.top || tr.border?.top,
+    left: tl.border?.left || bl.border?.left,
+    right: tr.border?.right || br.border?.right,
+    bottom: bl.border?.bottom || br.border?.bottom,
+  };
+  const range = `${nameCol}${r1}:${detailCol}${r2}`;
+  unmergeOverlapping(ws, c1, r1, c2, r2);
+  try { ws.mergeCells(range); } catch (e) {
+    throw new Error(`Không thể xóa cột Chi Tiết bằng cách gộp vùng ${range}: ${e instanceof Error ? e.message : "lỗi không rõ"}`, { cause: e });
+  }
+  const master = ws.getCell(r1, c1);
+  master.style = { ...style, border };
+  ensureWrap(master);
+}
+
 /** Ensure a cell has wrapText alignment so multi-line content displays correctly */
 function ensureWrap(cell: any) {
   const align = cell.alignment ? { ...cell.alignment } : {};
@@ -379,6 +417,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
 
   const cols = itemsCfg.columns;
+  // duplicateRow của ExcelJS có thể nhân bản merge dọc cũ của template sang slot mới. Gỡ sạch
+  // merge trong vùng bảng trước khi ghi dữ liệu, rồi phần cuối hàm dựng lại đúng theo items mới.
+  if (itemsCfg.removeDetail && cols.stt && cols.detail) {
+    const from = colLetterToIdx(cols.stt) + 1, to = colLetterToIdx(cols.detail) + 1;
+    for (const r of slotRows) unmergeOverlapping(ws, from, r, to, r);
+  }
   // Cột của file mẫu KHÔNG còn dùng (vd "Chi Tiết") → ẩn HẲN: không hiện trên Excel, không in ra
   // PDF. KHÔNG xoá cột thật để mọi công thức/merge/ảnh trong mẫu giữ nguyên toạ độ. Kèm
   // columnWidths để nới cột còn lại cho cân bảng.
@@ -390,7 +434,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
   // Đổi NỀN hàng tiêu đề cột (STT/Hạng Mục…) → f3c9a1 cho MỌI mẫu — chỉ đổi nền + chữ đen đậm,
   // giữ nguyên viền/căn lề baked trong file mẫu. Khớp màu header của web.
-  if (itemsCfg.headerRow) {
+  if (itemsCfg.headerRow && itemsCfg.paintHeader !== false) {
     for (const col of Object.values(cols)) paintCell(ws.getCell(`${col}${itemsCfg.headerRow}`), { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
   }
   // Cột "HÌNH ẢNH" (bật theo sheet): nằm NGAY SAU cột cuối của template — không dịch cột nào,
@@ -415,7 +459,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const colWidthOf = (letter: any) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
   const wrapLines = (text: any, letter: any) => {
     if (text == null || text === "") return 1;
-    const cw = colWidthOf(letter) || 12;
+    const mergedNameWidth = itemsCfg.removeDetail && letter === cols.name && cols.detail
+      ? (colWidthOf(cols.name) || 12) + (colWidthOf(cols.detail) || 12)
+      : null;
+    const cw = mergedNameWidth || colWidthOf(letter) || 12;
     const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
     let total = 0;
     for (const seg of String(text).split(/\r?\n/)) total += Math.max(1, Math.ceil((seg.length || 1) / perLine));
@@ -442,7 +489,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // Hàng con (sub): ô STT + Hạng Mục gộp lên dòng cha → tên KHÔNG hiện ở dòng này, nên
       // không đo chiều cao theo tên (tránh hàng cao vô ích).
       const nameForHeight = effKind[hi] === "sub" ? null : it.name;
-      for (const [t, letter] of [[nameForHeight, cols.name], [it.detail, cols.detail], [it.notes, cols.notes]]) {
+      const measured = [[nameForHeight, cols.name], ...(!itemsCfg.removeDetail ? [[it.detail, cols.detail]] : []), [it.notes, cols.notes]];
+      for (const [t, letter] of measured) {
         if (t && letter) lines = Math.max(lines, wrapLines(t, letter));
       }
     }
@@ -643,8 +691,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
           ensureWrap(ws.getCell(`${cols.name}${r}`));
         }
       }
-      // Cột Chi Tiết ngừng dùng (items.hideDetail) → KHÔNG ghi chữ, để trống hẳn (cột cũng bị ẩn).
-      if (cols.detail && !itemsCfg.hideDetail) {
+      // Cột Chi Tiết đã bỏ khỏi bảng: không ghi dữ liệu; cuối vòng sẽ gộp vùng này vào Hạng Mục.
+      if (cols.detail && !itemsCfg.removeDetail) {
         setCell(ws, `${cols.detail}${r}`, it.detail || "");
         ensureWrap(ws.getCell(`${cols.detail}${r}`));
       } else if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
@@ -703,9 +751,28 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     }
   }
 
-  // Vertical merges for "hàng con" groups: STT + Hạng Mục span each head + its subs,
-  // reproducing the CLF template's grouped look. Done after the fill loop so slotRows
-  // hold final positions. Skipped if the surviving rows aren't contiguous.
+  // Cột Chi Tiết bị XÓA khỏi BẢNG (không ẩn): gộp toàn bộ bề rộng của nó vào Hạng Mục.
+  // Vẫn giữ cột vật lý trong workbook để công thức báo giá cũ không bị dịch địa chỉ.
+  if (itemsCfg.removeDetail && cols.name && cols.detail) {
+    if (itemsCfg.headerRow) {
+      ws.getCell(`${cols.detail}${itemsCfg.headerRow}`).value = null;
+      mergeNameArea(ws, cols.name, cols.detail, itemsCfg.headerRow);
+    }
+    if (!items.length) {
+      for (const r of slotRows) mergeNameArea(ws, cols.name, cols.detail, r);
+    } else {
+      for (let i = 0; i < items.length; i++) {
+        if (effKind[i] === "sub") continue;
+        let span = 1;
+        if (effKind[i] === "head") while (i + span < items.length && effKind[i + span] === "sub") span++;
+        const r1 = slotRows[i], r2 = slotRows[i + span - 1];
+        if (r1 != null && r2 != null && r2 - r1 === span - 1) mergeNameArea(ws, cols.name, cols.detail, r1, r2);
+      }
+    }
+  }
+
+  // Vertical merges for "hàng con" groups. Khi Chi Tiết đã bỏ, Hạng Mục ở trên đã được gộp
+  // thành hình chữ nhật C:D qua toàn bộ head+sub nên đây chỉ còn gộp STT.
   for (let i = 0; i < items.length; i++) {
     if (effKind[i] !== "head") continue;
     let span = 1;
@@ -713,7 +780,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (span <= 1) continue;
     const r1 = slotRows[i], r2 = slotRows[i + span - 1];
     if (r1 == null || r2 == null || r2 - r1 !== span - 1) continue;
-    for (const col of [cols.stt, cols.name]) {
+    for (const col of [cols.stt, ...(itemsCfg.removeDetail ? [] : [cols.name])]) {
       if (!col) continue;
       safeMerge(ws, `${col}${r1}:${col}${r2}`);
       const cell = ws.getCell(`${col}${r1}`);

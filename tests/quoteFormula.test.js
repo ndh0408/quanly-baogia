@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { translateFormula, evalEditorFormula, buildFormulaContext, colLetter } from "../src/quoteFormula.js";
+import { translateFormula, evalEditorFormula, buildFormulaContext, colLetter, excelFormulaToEditor } from "../src/quoteFormula.js";
 
 // --- ctx giả lập theo template GN (không ngày, CÓ Chi Tiết) ---
 //   cột editor:  A=_stt B=name C=detail D=unit E=quantity F=unitPrice G=_amount H=notes
@@ -62,6 +62,22 @@ describe("evalEditorFormula — khớp ngữ nghĩa frontend", () => {
   it("=SUM(10;20)+5 = 35", () => expect(evalEditorFormula("=SUM(10;20)+5")).toBeCloseTo(35));
   it("=ROUND(123456*8%;0) = 9876", () => expect(evalEditorFormula("=ROUND(123456*8%;0)")).toBeCloseTo(9876));
   it("hàm lạ → NaN/null", () => expect(evalEditorFormula("=NOPE(1;2)")).toBeNull());
+});
+
+describe("excelFormulaToEditor — nhập công thức từ file cũ", () => {
+  const ctx = {
+    fieldOfCol: (L) => ({ F: "quantity", G: "unitPrice", H: "_amount" })[L] || null,
+    rowToEditor: (r) => (r >= 12 && r <= 30 ? r - 11 : null),
+  };
+
+  it("TRUNC được đổi sang ROUNDDOWN có cùng ngữ nghĩa", () => {
+    expect(excelFormulaToEditor("TRUNC(2.75*2.05,2)", ctx)).toBe("=ROUNDDOWN(2.75*2.05;2)");
+    expect(evalEditorFormula("=ROUNDDOWN(2.75*2.05;2)")).toBe(5.63);
+  });
+
+  it("TRUNC có tham chiếu ô vẫn đổi đúng cột và dòng", () => {
+    expect(excelFormulaToEditor("TRUNC(F14,2)", ctx)).toBe("=ROUNDDOWN({quantity:3};2)");
+  });
 });
 
 // Dựng fctx như excel.js: bản đồ ĐỐI TƯỢNG item (item/sub đã đặt chỗ) → hàng Excel.

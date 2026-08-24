@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { buildQuoteBuffer } from "../src/excel.js";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
+import { toGridItems } from "../web/src/lib/importApply.js";
 
 const baseQuote = (code, items, over = {}) => JSON.parse(JSON.stringify({
   quoteNumber: "GN26IMP", title: "Báo giá nhập lại", toCompany: "Cty ABC", toContact: "Anh A",
@@ -104,6 +105,19 @@ describe("parseQuoteWorkbook — công thức tham chiếu ô", () => {
     expect(sheet.items[8].quantity).toBe(10);
   });
 
+  it("công thức Số Lượng lẻ sống qua vòng xuất → nhập → xuất", async () => {
+    const items = [{ kind: "item", name: "Diện tích", unit: "m2", quantity: 5.6375, unitPrice: 100_000, formulas: { quantity: "=2.75*2.05" } }];
+    const { sheet } = await roundTrip("marico_decor", items);
+    expect(sheet.items[0].formulas).toEqual({ quantity: "=2.75*2.05" });
+    expect(sheet.items[0].quantity).toBeCloseTo(5.6375);
+
+    const buf2 = await buildQuoteBuffer(baseQuote("marico_decor", sheet.items));
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(buf2);
+    expect(wb2.worksheets[0].getCell("F12").formula).toBe("ROUND(2.75*2.05,1)");
+    expect(wb2.worksheets[0].getCell("F12").result).toBe(5.6);
+  });
+
   it("dịch ref Ô sang toạ độ lưới theo TÊN FIELD + đúng dòng (không lệch ô)", async () => {
     const items = [
       { kind: "item", name: "A", unit: "cái", quantity: 2, unitPrice: 100000 },
@@ -133,6 +147,39 @@ describe("parseQuoteWorkbook — công thức tham chiếu ô", () => {
     expect(sheet.items[0].formulas).toBeUndefined();        // nhưng KHÔNG nạp công thức lạ
     expect(sheet.stats.formulasDropped).toBe(1);
     expect(sheet.items[0].warn.join(" ")).toMatch(/không dịch được/);
+  });
+
+  it("công thức không có cached result vẫn tự tính giá trị thay vì nạp số 0", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Không cache");
+    ["STT", "Hạng Mục", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ", "THÀNH TIỀN"]
+      .forEach((h, i) => { ws.getCell(5, 2 + i).value = h; });
+    [1, "Mục A", "cái"].forEach((v, i) => { ws.getCell(6, 2 + i).value = v; });
+    ws.getCell("E6").value = { formula: "2+3" };
+    ws.getCell("F6").value = { formula: "100000+200000" };
+
+    const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+    expect(res.sheets[0].items[0]).toMatchObject({ quantity: 5, unitPrice: 300_000 });
+    expect(res.sheets[0].items[0].formulas).toEqual({ quantity: "=2+3", unitPrice: "=100000+200000" });
+  });
+
+  it("trọn vòng Excel → import → cột web → export → import vẫn giữ loại dòng, công thức và tổng", async () => {
+    const sourceItems = [
+      { kind: "section", name: "Booth", unit: "bộ", quantity: 2 },
+      { kind: "item", name: "Vách", unit: "m2", quantity: 5.6375, unitPrice: 100_000, formulas: { quantity: "=2.75*2.05" } },
+      { kind: "subsection", name: "Vận chuyển", unit: "bộ", quantity: 1 },
+      { kind: "item", name: "HCM", unit: "điểm", quantity: 1, unitPrice: 300_000 },
+    ];
+    const first = await roundTrip("marico_decor", sourceItems);
+    const grid = toGridItems(first.sheet.items, { usesDays: false, addrDetail: true });
+    expect(grid.droppedFormulas).toBe(0);
+
+    const secondBuffer = await buildQuoteBuffer(baseQuote("marico_decor", grid.items));
+    const second = (await parseQuoteWorkbook(secondBuffer)).sheets.find((s) => !s.skipped);
+    expect(second.items.map((i) => i.kind)).toEqual(sourceItems.map((i) => i.kind));
+    expect(second.items[1].formulas).toEqual({ quantity: "=2.75*2.05" });
+    expect(second.stats.formulasDropped).toBe(0);
+    expect(second.totals.subtotal).toBe(first.sheet.totals.subtotal);
   });
 });
 
@@ -208,6 +255,45 @@ describe("parseQuoteWorkbook — file NGOÀI (không do app xuất)", () => {
     const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
     expect(res.sheets[0].skipped).toMatch(/Không tìm thấy hàng tiêu đề/);
     expect(res.warnings.join(" ")).toMatch(/Không tìm thấy bảng báo giá/);
+  });
+
+  it("nhận dòng nhóm có ĐVT + hệ số và công thức tổng các dòng con", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Booth ngoài");
+    ["STT", "Hạng Mục", "Chi Tiết", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"]
+      .forEach((h, i) => { ws.getCell(11, 2 + i).value = h; });
+
+    const put = (row, values) => values.forEach((v, i) => { ws.getCell(row, 2 + i).value = v; });
+    put(12, ["A", "Booth", "", "bộ", 5,
+      { formula: "SUM(H13:H14)", result: 300_000 }, { formula: "F12*G12", result: 1_500_000 }, ""]);
+    put(13, [1, "Vách", "", "m2", 2, 100_000, { formula: "F13*G13", result: 200_000 }, ""]);
+    put(14, [2, "Đèn", "", "bộ", 1, 100_000, { formula: "F14*G14", result: 100_000 }, ""]);
+    put(15, ["", "Vận chuyển", "", "bộ", 1,
+      { formula: "H16", result: 400_000 }, { formula: "F15*G15", result: 400_000 }, ""]);
+    put(16, [1, "HCM", "", "điểm", 2, 200_000, { formula: "F16*G16", result: 400_000 }, ""]);
+    put(17, ["", "Tổng cộng", "", "", "", "", 1_900_000, ""]);
+
+    const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+    const sheet = res.sheets.find((s) => !s.skipped);
+    expect(sheet.items.map((i) => i.kind)).toEqual(["section", "item", "item", "subsection", "item"]);
+    expect(sheet.items[0]).toMatchObject({ kind: "section", unit: "bộ", quantity: 5, unitPrice: 0 });
+    expect(sheet.items[3]).toMatchObject({ kind: "subsection", unit: "bộ", quantity: 1, unitPrice: 0 });
+    expect(sheet.groupSubtotal).toBe(true);
+    expect(sheet.stats.formulasDropped).toBe(0); // công thức tổng nhóm do app tự dựng lại, không báo rớt
+    expect(sheet.totals.subtotal).toBe(1_900_000);
+    expect(sheet.warnings.join(" ")).not.toMatch(/Tổng cộng tự tính.*lệch/);
+  });
+
+  it("không nhầm hạng mục đánh STT chữ A/B thành nhóm khi có ĐVT và đơn giá thường", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("STT chữ");
+    ["STT", "Hạng Mục", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ", "THÀNH TIỀN"]
+      .forEach((h, i) => { ws.getCell(5, 2 + i).value = h; });
+    ["A", "Hạng mục mã A", "cái", 2, 100_000, 200_000]
+      .forEach((v, i) => { ws.getCell(6, 2 + i).value = v; });
+
+    const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+    expect(res.sheets[0].items[0]).toMatchObject({ kind: "item", name: "Hạng mục mã A", unit: "cái", quantity: 2, unitPrice: 100_000 });
   });
 });
 

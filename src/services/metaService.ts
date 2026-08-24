@@ -11,10 +11,9 @@ function templateLayout(code: string) {
     const items = getConfig(code).items || {};
     const cols = items.columns || {};
     return {
-      // hasDetail = CÓ HIỆN cột Chi Tiết (mẫu có cột đó VÀ chưa ngừng dùng).
-      hasDetail: !!cols.detail && !items.hideDetail,
-      // reserveDetail = sơ đồ ĐỊA CHỈ Ô (A1) của editor VẪN chừa 1 cột cho Chi Tiết dù không hiện
-      // → công thức đã lưu của báo giá cũ (=F3*E3…) giữ nguyên ý nghĩa. ĐỪNG bỏ khi ẩn cột.
+      // Trường Chi Tiết đã bỏ khỏi UI/Excel. `reserveDetail` chỉ là khe địa chỉ nội bộ để công thức
+      // báo giá cũ (=F3*E3…) giữ nguyên ý nghĩa; người dùng không còn thấy một cột riêng.
+      hasDetail: !!cols.detail && !items.removeDetail,
       reserveDetail: !!cols.detail,
       hasDays: !!cols.days,
       numberSubsections: !!items.numberSubsections,

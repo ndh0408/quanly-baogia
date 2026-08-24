@@ -21,7 +21,9 @@
 // CEILING/FLOOR bị LOẠI: editor coi là ceil/floor 1 đối số, còn Excel BẮT BUỘC có
 // đối số "significance" → xuất ra sẽ lỗi ô. Công thức như vậy quay về ghi số.
 const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS"]);
-const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE" };
+// TRUNC(number,digits) và ROUNDDOWN(number,digits) cùng cắt phần dư về phía 0. File báo giá cũ
+// dùng TRUNC rất nhiều, còn editor chuẩn hoá về ROUNDDOWN để chỉ giữ một cách viết.
+const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE", TRUNC: "ROUNDDOWN" };
 
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Cột editor (giống groupLetter ở frontend). */
 export function colLetter(n: number) {

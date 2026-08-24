@@ -6,7 +6,50 @@
 // Field nào mẫu đích không có (vd Số Ngày) → BỎ công thức, giữ con số (không tạo ref chết).
 
 import * as M from "./quoteMath";
-import type { ImportedItem } from "./api";
+import type { EditorTemplate, ImportedItem, ImportedSheet } from "./api";
+
+export const NEW_IMPORT_SHEET = -1;
+
+type ImportTargetSheet = { name?: string | null; templateId?: number };
+
+/**
+ * Ghép sheet trong file vào sheet báo giá theo TEMPLATE, không theo vị trí mù.
+ *
+ * Ví dụ file có [Banner, Banner, Booth] nhưng báo giá đang có [Backdrop, Banner, Banner]:
+ * kết quả phải là [1, 2, 0], không phải [0, 1, 2]. Nếu không còn sheet cùng mẫu thì tạo sheet mới.
+ */
+export function autoTargetIndexes(
+  files: Pick<ImportedSheet, "name" | "templateCode" | "hasDays" | "numberSubs">[],
+  targets: ImportTargetSheet[],
+  templates: EditorTemplate[],
+): number[] {
+  const tplById = new Map(templates.map((t) => [t.id, t]));
+  const used = new Set<number>();
+  const out = new Array(files.length).fill(NEW_IMPORT_SHEET);
+
+  const take = (fi: number, accept: (t: EditorTemplate) => boolean) => {
+    const hit = targets.findIndex((target, ti) => {
+      if (used.has(ti)) return false;
+      const tpl = target.templateId == null ? undefined : tplById.get(target.templateId);
+      return !!tpl && accept(tpl);
+    });
+    if (hit >= 0) { out[fi] = hit; used.add(hit); }
+  };
+
+  // Bằng chứng mạnh nhất: mã template do server nhận từ bố cục/màu/cách đánh STT của file.
+  files.forEach((file, fi) => {
+    if (file.templateCode) take(fi, (tpl) => tpl.code === file.templateCode);
+  });
+
+  // File ngoài không nhận ra đúng mã mẫu: chỉ ghép khi cấu trúc cốt lõi thật sự tương thích.
+  files.forEach((file, fi) => {
+    if (out[fi] !== NEW_IMPORT_SHEET || file.templateCode) return;
+    take(fi, (tpl) => !!tpl.layout?.hasDays === file.hasDays
+      && !!tpl.layout?.numberSubsections === file.numberSubs);
+  });
+
+  return out;
+}
 
 /** Sơ đồ địa chỉ ô A1 của lưới — PHẢI khớp mảng ADDR trong components/GridTable.tsx. */
 export function addrFields(opts: { addrDetail: boolean; usesDays: boolean; internalNote?: boolean }): string[] {
@@ -60,7 +103,7 @@ export function toGridItems(imported: ImportedItem[], opts: ApplyOpts): ApplyRes
       ...M.blankItem(opts.usesDays),
       kind: src.kind,
       name: src.name || "",
-      detail: src.detail || "",
+      detail: "", // Trường Chi Tiết đã bỏ khỏi sản phẩm; file cũ có dữ liệu ở đây cũng không nạp lại.
       unit: src.unit || "",
       quantity: Number(src.quantity) || 0,
       unitPrice: Number(src.unitPrice) || 0,
@@ -100,6 +143,7 @@ export type DiffRow = {
   afterNo?: number;
   itemKind: string;
   name: string;
+  item?: M.Item;
   fields: DiffField[];
   warn?: string[];
 };
@@ -114,7 +158,7 @@ const FIELD_LABEL: Record<string, string> = {
   formulas: "Công thức",
 };
 const KIND_LABEL: Record<string, string> = {
-  item: "Hạng mục", sub: "Hàng con", section: "Nhóm", subsection: "Nhóm con", info: "Dòng thông tin",
+  item: "Hạng mục", sub: "Dòng phụ", section: "Nhóm chính", subsection: "Nhóm phụ", info: "Thông tin",
 };
 export const kindLabel = (k?: string) => KIND_LABEL[k || "item"] || k || "—";
 
@@ -144,9 +188,9 @@ function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, wa
     const a = before[i], b = after[i];
     if (a && b) {
       const fields = diffFields(a, b, usesDays);
-      rows.push({ kind: fields.length ? "changed" : "same", beforeNo: i + 1, afterNo: i + 1, itemKind: b.kind, name: b.name || a.name || "", fields, warn: warnOf?.(i) });
-    } else if (b) rows.push({ kind: "added", afterNo: i + 1, itemKind: b.kind, name: b.name || "", fields: [], warn: warnOf?.(i) });
-    else if (a) rows.push({ kind: "removed", beforeNo: i + 1, itemKind: a.kind, name: a.name || "", fields: [] });
+      rows.push({ kind: fields.length ? "changed" : "same", beforeNo: i + 1, afterNo: i + 1, itemKind: b.kind, name: b.name || a.name || "", item: b, fields, warn: warnOf?.(i) });
+    } else if (b) rows.push({ kind: "added", afterNo: i + 1, itemKind: b.kind, name: b.name || "", item: b, fields: [], warn: warnOf?.(i) });
+    else if (a) rows.push({ kind: "removed", beforeNo: i + 1, itemKind: a.kind, name: a.name || "", item: a, fields: [] });
   }
   return rows;
 }
@@ -171,20 +215,20 @@ export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, 
       rows.push({
         kind: fields.length ? "changed" : "same",
         beforeNo: i + 1, afterNo: j + 1,
-        itemKind: after[j].kind, name: after[j].name || before[i].name || "",
+        itemKind: after[j].kind, name: after[j].name || before[i].name || "", item: after[j],
         fields, warn: warnOf?.(j),
       });
       i++; j++;
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", fields: [] });
+      rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", item: before[i], fields: [] });
       i++;
     } else {
-      rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", fields: [], warn: warnOf?.(j) });
+      rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", item: after[j], fields: [], warn: warnOf?.(j) });
       j++;
     }
   }
-  while (i < n) { rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", fields: [] }); i++; }
-  while (j < m) { rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", fields: [], warn: warnOf?.(j) }); j++; }
+  while (i < n) { rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", item: before[i], fields: [] }); i++; }
+  while (j < m) { rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", item: after[j], fields: [], warn: warnOf?.(j) }); j++; }
   return rows;
 }
 

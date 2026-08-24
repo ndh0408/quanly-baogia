@@ -43,8 +43,8 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(isXlsx(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))))).toBe(true);
   });
 
-  // 2026-07-28: BỎ cột "Chi Tiết" — file xuất ra KHÔNG được hiện cột đó nữa: cột nền (D) bị ẨN
-  // hẳn, KHÔNG có chữ detail của hạng mục, và cột Hạng Mục được nới rộng bù chỗ.
+  // Cột "Chi Tiết" bị XÓA khỏi bảng: không ẩn cột D, mà gộp C:D thành một cột Hạng Mục rộng.
+  // Cột vật lý D chỉ là phần của ô gộp để không dịch địa chỉ công thức báo giá cũ.
   it.each(["marico_decor", "gn_banner", "clofull_decor"])("KHÔNG còn cột Chi Tiết trong Excel (%s)", async (code) => {
     const q = makeQuote(code);
     q.sheets[0].items = [
@@ -53,11 +53,18 @@ describe("buildQuoteBuffer (export generation)", () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
     const ws = wb.worksheets[0];
+    const headerRow = code === "clofull_decor" ? 4 : 11;
+    const firstRow = code === "clofull_decor" ? 6 : 12;
     let leaked = false;
     ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? "").includes("CHITIET_KHONG_DUOC_XUAT")) leaked = true; }));
-    expect(leaked).toBe(false);                       // chữ Chi Tiết không lọt ra file
-    expect(ws.getColumn("D").hidden).toBe(true);      // cột nền bị ẩn hẳn (không hiện/không in)
-    expect(ws.getColumn("C").width).toBeGreaterThan(40);   // Hạng Mục nới rộng bù chỗ
+    expect(leaked).toBe(false);
+    expect(ws.getColumn("D").hidden).not.toBe(true);  // không dùng mẹo ẩn cột
+    expect(ws.getCell(`D${headerRow}`).isMerged).toBe(true);
+    expect(ws.getCell(`D${headerRow}`).master.address).toBe(`C${headerRow}`);
+    expect(ws.getCell(`C${headerRow}`).value).toBe("Hạng Mục");
+    expect(String(ws.getCell(`D${headerRow}`).value)).not.toMatch(/Chi Tiết/i);
+    expect(ws.getCell(`D${firstRow}`).master.address).toBe(`C${firstRow}`);
+    expect((ws.getColumn("C").width || 0) + (ws.getColumn("D").width || 0)).toBeGreaterThan(40);
   });
 
   // GHI CHÚ NỘI BỘ (internalNote): hiện trong app cho mọi người NHƯNG tuyệt đối KHÔNG
