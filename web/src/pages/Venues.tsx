@@ -461,10 +461,11 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     <div className="vn-additem">
       <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
-        aria-keyshortcuts="Enter Alt+Enter" onKeyDown={(e) => {
-          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+        aria-keyshortcuts="Enter Shift+Enter Alt+Enter" onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.key === "Process") return;
+          if (e.key !== "Enter" || e.ctrlKey || e.metaKey) return;
           e.preventDefault();
-          if (e.altKey) {
+          if (e.altKey || e.shiftKey) {
             const el = e.currentTarget;
             const start = el.selectionStart;
             const end = el.selectionEnd;
@@ -475,7 +476,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
       <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
       <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
-      <div className="vn-ai-hint muted"><b>Alt/Option + Enter</b> = xuống dòng trong cùng hạng mục · <b>Enter</b> = lưu và nhập hàng tiếp.</div>
+      <div className="vn-ai-hint muted"><b>Shift + Enter</b> hoặc <b>Alt/Option + Enter</b> = xuống dòng · <b>Enter</b> = lưu hàng.</div>
     </div>
   );
 }
