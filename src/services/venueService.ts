@@ -283,7 +283,7 @@ const mergeVenueItemMetadata = (target: Record<string, any>, source: Record<stri
 class VenueItemMovedDuringLock extends Error {}
 
 async function lockVenueItems(tx: TxClient, venueId: number) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-items:${venueId}`}))`;
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-items:${venueId}`})) IS NULL AS "locked"`;
 }
 
 export async function createItem(req: Request) {

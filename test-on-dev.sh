@@ -56,8 +56,9 @@ ssh "$SSH" '
       npm ci >/dev/null 2>&1 &&
       npx prisma generate >/dev/null 2>&1 &&
       npx prisma migrate deploy >/dev/null 2>&1 &&
-      npm run test:run 2>&1 | tail -16
+      npm run test:run > /tmp/quanly-vitest.log 2>&1
       code=\$?
+      tail -20 /tmp/quanly-vitest.log 2>/dev/null || true
       rm -rf node_modules 2>/dev/null
       exit \$code
     "
