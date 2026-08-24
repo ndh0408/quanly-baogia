@@ -42,6 +42,7 @@ type QuoteTotalsInput = {
     items?: {
       kind?: string | null;
       quantity?: Prisma.Decimal.Value | null | undefined;
+      quantityExact?: boolean | null;
       unitPrice?: Prisma.Decimal.Value | null | undefined;
       days?: Prisma.Decimal.Value | null | undefined;
     }[] | null;
@@ -58,8 +59,9 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)
-      // Số Lượng LÀM TRÒN còn 1 số (ROUND_HALF_UP) — khớp hiển thị + Excel ROUND + client qtyRound.
-      const qty = D(it.quantity).toDecimalPlaces(1, Decimal.ROUND_HALF_UP);
+      // Báo giá cũ mặc định 1 số lẻ. Dòng import Excel ngoài có quantityExact giữ tối đa 4 số
+      // khi file chứng minh Thành Tiền đang tính theo số gốc.
+      const qty = D(it.quantity).toDecimalPlaces(it.quantityExact ? 4 : 1, Decimal.ROUND_HALF_UP);
       const price = D(it.unitPrice);
       const days = it.days != null ? D(it.days) : null;
       // Thành Tiền 1 dòng làm tròn số nguyên (khớp hiển thị + Excel) RỒI mới nhân hệ số nhóm

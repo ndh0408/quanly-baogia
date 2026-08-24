@@ -3027,6 +3027,36 @@ textarea[aria-invalid="true"] {
   max-width: 100%;
   min-width: 0;
 }
+.import-unmatched {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover, var(--surface));
+}
+.import-unmatched h4,
+.import-unmatched p {
+  margin: 0 0 7px;
+}
+.import-unmatched-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.import-unmatched-row span,
+.import-unmatched-row small {
+  display: block;
+}
+.import-unmatched-row small {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+.import-unmatched-row select {
+  width: min(230px, 48%);
+}
 /* Sơ đồ "cột nào là gì" app đọc được từ hàng tiêu đề của file */
 .import-cols {
   display: flex;

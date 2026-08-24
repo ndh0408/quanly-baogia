@@ -12,7 +12,7 @@ import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
 const catLabel = (c: string) => ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà Nội", khach: "Phí Khách Hàng" } as Record<string, string>)[c] || c;
 const isRow = (it: any) => it && !["section", "subsection", "info"].includes(it.kind);
 const rowTotal = (it: any) => {
-  const qty = M.qtyRound(it.quantity || 0), price = Number(it.unitPrice) || 0, days = it.days != null ? Number(it.days) : null;
+  const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0, days = it.days != null ? Number(it.days) : null;
   return Math.round(days && days > 0 ? qty * days * price : qty * price);
 };
 

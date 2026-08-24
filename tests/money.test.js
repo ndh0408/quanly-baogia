@@ -17,6 +17,14 @@ describe("D() decimal coercer", () => {
 });
 
 describe("computeQuoteTotals", () => {
+  it("quantityExact chỉ đổi cách tính cho đúng dòng được đánh dấu", () => {
+    const t = computeQuoteTotals({ vatPercent: 0, sheets: [{ items: [
+      { quantity: 0.35, quantityExact: true, unitPrice: 550_000 },
+      { quantity: 0.35, quantityExact: false, unitPrice: 550_000 },
+    ] }] });
+    expect(t.subtotal.toNumber()).toBe(412_500);
+  });
+
   it("handles single sheet, no days, integer math (Marico Decor style)", () => {
     const q = {
       vatPercent: 8,

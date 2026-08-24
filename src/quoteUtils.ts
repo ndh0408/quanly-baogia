@@ -252,7 +252,7 @@ export function extraTableSum(t: any) {
   return (t?.items || []).reduce((acc: number, it: any) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
     if (approvedOnly && !it.approved) return acc;   // HCM/Phí KH: chưa duyệt → KHÔNG tính
-    const qty = qtyRound(it.quantity);   // Số Lượng làm tròn 1 số — KHỚP CHÍNH XÁC extraTableSumLocal (client)
+    const qty = it.quantityExact ? Math.round((Number(it.quantity) || 0) * 10_000) / 10_000 : qtyRound(it.quantity);
     const price = Number(it.unitPrice) || 0;
     const days = it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
@@ -303,6 +303,7 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Rec
         detail: it.detail ? String(it.detail).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,
         unit: it.unit?.replace(/[\r\n]+/g, " ").trim() || null,
         quantity: D(it.quantity),
+        quantityExact: !!it.quantityExact,
         unitPrice: D(it.unitPrice),
         days: it.days != null ? D(it.days) : null,
         notes: it.notes ? String(it.notes).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : null,

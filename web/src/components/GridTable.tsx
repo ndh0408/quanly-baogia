@@ -91,6 +91,7 @@ export function GridTable(props: GridTableProps) {
 
   const FIELDS = (["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
+  const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   const snap = () => JSON.stringify(items);
   const pushUndo = () => { undoRef.current.push(snap()); if (undoRef.current.length > 100) undoRef.current.shift(); redoRef.current.length = 0; };
   // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
@@ -314,7 +315,7 @@ export function GridTable(props: GridTableProps) {
     addrEl.textContent = addrOf(row, field) || "—";
     if (document.activeElement === inEl) return;
     const it = items[row]; const fx = it?.formulas?.[field];
-    inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? M.fmtNumCell(it[field as keyof M.Item] as number) : ((it[field as keyof M.Item] as string) || ""));
+    inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? fmtField(row, field, it[field as keyof M.Item]) : ((it[field as keyof M.Item] as string) || ""));
     inEl.readOnly = !editable || field === "_amount" || field === "_stt";
   };
   const applyFxBar = (move: boolean) => {
@@ -593,7 +594,8 @@ export function GridTable(props: GridTableProps) {
     const rec = items[parseInt(tr.getAttribute("data-row") || "-1", 10)] as Record<string, unknown> | undefined;
     if (!rec) return;
     const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
-    const want = fx ?? (NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? ""));
+    const i = parseInt(tr.getAttribute("data-row") || "-1", 10);
+    const want = fx ?? (NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? ""));
     if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
     el.dataset.escVal = el.value;      // mốc ESC phải theo giá trị SAU khi lùi
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
@@ -648,7 +650,7 @@ export function GridTable(props: GridTableProps) {
         pasteCellVal(i0, f0, val);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
         recomputeAll(); onChange(); paintSel();
-        const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = M.fmtNumCell((items[i0] as Record<string, unknown>)[f0] as number);
+        const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
         return;
       }
       // 1 ô CHỮ: đang SỬA → để trình duyệt chèn tại con trỏ; đang CHỌN (ô khóa) → ghi đè cả ô.
@@ -974,7 +976,7 @@ export function GridTable(props: GridTableProps) {
       // RỜI focus → vẽ ô về GIÁ TRỊ HIỂN THỊ (kết quả nếu là công thức, hoặc số gom nghìn) — vì onGridFocus
       // đã set =… lúc focus; nếu dữ liệu không đổi sẽ không re-render nên phải tự set lại el.value ở đây.
       const rec = items[i] as Record<string, unknown>;
-      const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? "");
+      const want = NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? "");
       if (el.value !== want) el.value = want;
     }
     clearActiveRefs(); setTimeout(closeAuto, 150);
@@ -1035,7 +1037,7 @@ export function GridTable(props: GridTableProps) {
     recomputeAll(); onChange();   // FIX: sửa 1 ô → ô CÔNG THỨC tham chiếu nó phải eval lại trước khi lưu/hiển thị
   };
   const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
-    const it = items[i]; const fx = it.formulas?.[f]; const val = M.fmtNumCell(it[f] as number);
+    const it = items[i]; const fx = it.formulas?.[f]; const val = fmtField(i, f, it[f]);
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
     // Hiển thị (kết quả công thức / giá trị sau dán-undo) đồng bộ qua paintCells ở effect (như SPA).
     return (<>
@@ -1066,7 +1068,7 @@ export function GridTable(props: GridTableProps) {
         const tr = el.closest("tr[data-row]"); if (!tr) return;
         const i = parseInt(tr.getAttribute("data-row") || "-1", 10); if (i < 0 || i >= items.length) return;
         const f = el.getAttribute("data-f") as string; const rec = items[i] as Record<string, unknown>;
-        const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? "");
+        const want = NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? "");
         if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
       });
     }
@@ -1078,7 +1080,7 @@ export function GridTable(props: GridTableProps) {
         // Đồng bộ về model trước khi focus (ô công thức để onGridFocus hiện =… lúc focus).
         const rec = items[i] as Record<string, unknown>;
         const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
-        if (!fx) { const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? ""); if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); } }
+        if (!fx) { const want = NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? ""); if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); } }
         navigatingRef.current = true; el.focus(); navigatingRef.current = false;
         lockCell(el);
       }

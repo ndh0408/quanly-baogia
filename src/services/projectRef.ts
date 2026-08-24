@@ -57,7 +57,7 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
         select: {
           id: true, order: true, name: true, groupSubtotal: true,
           signedAt: true, invoiceNo: true, paidAt: true, poNumber: true,
-          items: { select: { kind: true, quantity: true, unitPrice: true, days: true } },
+          items: { select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } },
         },
       },
     },

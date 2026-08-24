@@ -13,7 +13,7 @@ async function main() {
   const quotes = await prisma.quote.findMany({
     select: {
       id: true, vatPercent: true, discount: true,
-      sheets: { select: { id: true, groupSubtotal: true, items: { select: { kind: true, quantity: true, unitPrice: true, days: true } } } },
+      sheets: { select: { id: true, groupSubtotal: true, items: { select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } } } },
     },
   });
   let n = 0;

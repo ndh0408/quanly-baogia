@@ -58,7 +58,8 @@ export function qtyRound(x) {
   return n < 0 ? -t : t;
 }
 export function lineAmount(it, usesDays) {
-  const q = qtyRound(it.quantity), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;   // Số Lượng làm tròn 1 số rồi mới × giá
+  const q = it && it.quantityExact ? Math.round((Number(it.quantity) || 0) * 10000) / 10000 : qtyRound(it.quantity);
+  const d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
   return Math.round(usesDays ? q * d * p : q * p);
 }
 export function pvAmount(it, usesDays) {

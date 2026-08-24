@@ -254,6 +254,21 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(Number(ws.getCell("H13").result)).toBe(760000);
   });
 
+  it("quantityExact xuất số/công thức tối đa 4 số lẻ và Thành Tiền khớp", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets[0].items = [
+      { kind: "item", name: "Nẹp", unit: "m2", quantity: 0.35, quantityExact: true, unitPrice: 550_000, formulas: { quantity: "=3.5*0.1" } },
+      { kind: "item", name: "Tên phim", unit: "m2", quantity: 0.9075, quantityExact: true, unitPrice: 2_200_000, formulas: { quantity: "=1.65*0.55" } },
+    ];
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await buildQuoteBuffer(q)); const ws = wb.worksheets[0];
+    expect(ws.getCell("F12").formula).toBe("3.5*0.1");
+    expect(ws.getCell("F12").result).toBeCloseTo(0.35);
+    expect(ws.getCell("F12").numFmt).toBe("0.####");
+    expect(ws.getCell("H12").result).toBe(192_500);
+    expect(ws.getCell("F13").result).toBeCloseTo(0.9075);
+    expect(ws.getCell("H13").result).toBe(1_996_500);
+  });
+
   // AN TOÀN: nếu giá trị đã lưu LỆCH với công thức (vd dữ liệu cũ chưa tính lại) → ghi
   // SỐ chứ không xuất công thức sai. Không bao giờ ship công thức cho ra số khác.
   it("không xuất công thức khi kết quả lệch với giá trị đã lưu (fallback số)", async () => {

@@ -130,6 +130,7 @@ const itemSchema = z.object({
   unit: z.string().max(40).optional().nullable(),
   // Allow negatives so a row can act as a discount line (vd "Giảm giá" với đơn giá âm).
   quantity: z.coerce.number({ error: "Số lượng phải là số" }).gte(-1e12, "Số lượng không hợp lệ").lte(1e12, "Số lượng không hợp lệ").default(0),
+  quantityExact: z.boolean().optional().default(false),
   unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
   days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),

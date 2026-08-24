@@ -9,7 +9,7 @@
 // renderManagerHnPanel from quotes.js) are INJECTED via setEditorDeps at boot — keeping the
 // dependency graph a one-way star around app.js (no import cycle with quotes.js).
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../grid-clipboard.js?v=20260706c";
-import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630k";
+import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630l";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
 import { api } from "./core/api.js?v=20260624b";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
@@ -866,14 +866,10 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
 
   // Numeric cells (số lượng / đơn giá / số ngày / thành tiền) display with VN
   // thousand-dots and show BLANK when zero/empty (so empty rows aren't full of "0").
-  const fmtNumCell = (v) => {
-    const t = qtyRound(v);   // làm tròn 1 số (cùng hàm với lúc tính tiền → hiển thị KHỚP giá trị dùng để tính)
+  const fmtNumCell = (v, exact = false) => {
+    const t = exact ? Math.round((Number(v) || 0) * 10000) / 10000 : qtyRound(v);
     if (!t || isNaN(t)) return "";                       // 0 / rỗng → ô trống
-    if (Number.isInteger(t)) return t.toLocaleString("vi-VN");   // số chẵn → KHÔNG ,0
-    // Có phần lẻ → hiện ĐÚNG 1 số: 7,378→7,4 · 6,42→6,4. t đã làm tròn 1 lẻ nên toFixed(1) chính xác.
-    const [intp, dec] = Math.abs(t).toFixed(1).split(".");
-    const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
-    return t < 0 ? "-" + out : out;
+    return t.toLocaleString("vi-VN", { maximumFractionDigits: exact ? 4 : 1 });
   };
   // Parse a VN-formatted string ("1.234.567" / "12,5" / "-5.000") back to a number.
   const parseVN = (s) => {
@@ -918,7 +914,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const dataCells = (it, i, amt) => `
         ${showDetail ? `<td class="col-detail"><textarea data-f="detail" rows="1" ${dis}>${escapeHtml(it.detail || "")}</textarea></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty${it._fxWarn && it._fxWarn.quantity ? " cell-fx-error" : ""}"><input data-f="quantity" inputmode="decimal" title="${it._fxWarn && it._fxWarn.quantity ? "⚠️ Công thức dán từ Excel tham chiếu ô KHÔNG dịch được — kiểm tra/sửa lại tham chiếu" : "Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu"}" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        <td class="col-qty${it._fxWarn && it._fxWarn.quantity ? " cell-fx-error" : ""}"><input data-f="quantity" inputmode="decimal" title="${it._fxWarn && it._fxWarn.quantity ? "⚠️ Công thức dán từ Excel tham chiếu ô KHÔNG dịch được — kiểm tra/sửa lại tham chiếu" : "Số hoặc công thức Excel: =E2*G2, =SUM(H3:H8), =ROUND(x;0), 8% — bấm/kéo ô để chèn tham chiếu"}" value="${fmtNumCell(it.quantity, !!it.quantityExact)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty${it._fxWarn && it._fxWarn.days ? " cell-fx-error" : ""}"><input data-f="days" inputmode="numeric" value="${fmtNumCell(it.days)}" ${dis} /></td>` : ""}
         <td class="col-price${it._fxWarn && it._fxWarn.unitPrice ? " cell-fx-error" : ""}"><input data-f="unitPrice" inputmode="numeric" title="${it._fxWarn && it._fxWarn.unitPrice ? "⚠️ Công thức dán từ Excel tham chiếu ô KHÔNG dịch được — kiểm tra/sửa lại tham chiếu" : "Số hoặc công thức Excel: =G3*1,1, =SUM(G3:G8), =1000000*8%, =MAX(G3:G8) — bấm/kéo ô để chèn tham chiếu"}" value="${fmtNumCell(it.unitPrice)}" ${dis} /></td>
         <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(amt)}</td>
@@ -964,7 +960,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-hangmuc"><textarea data-f="name" rows="1" placeholder="${isSub ? "Tên nhóm con (tổng riêng, không cộng vào nhóm chính)" : "Tên nhóm (vd: Wallsticker)"}" ${dis}>${escapeHtml(it.name || "")}</textarea></td>
         ${showDetail ? `<td class="col-detail"></td>` : ""}
         <td class="col-dvt"><input data-f="unit" value="${escapeHtml(it.unit || "")}" ${dis} /></td>
-        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity)}" ${dis} /></td>
+        <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity, !!it.quantityExact)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"></td>` : ""}
         <td class="col-price" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(subAmt)}</td>
         <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
@@ -1157,7 +1153,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       }
       if (it.formulas) for (const f in it.formulas) {
         const el = tr.querySelector(`[data-f="${f}"]`);
-        if (el && document.activeElement !== el) el.value = NUMERIC.has(f) ? fmtNumCell(it[f]) : (it[f] ?? "");
+        if (el && document.activeElement !== el) el.value = NUMERIC.has(f) ? fmtNumCell(it[f], f === "quantity" && !!it.quantityExact) : (it[f] ?? "");
       }
     });
     updateSummary(q); updateSectionSubtotals();
@@ -1699,7 +1695,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     if (document.activeElement === inEl) return;   // don't clobber while typing in the bar
     const it = activeSheet.items[row];
     const fx = it && it.formulas && it.formulas[field];
-    inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? fmtNumCell(it[field]) : (it[field] || ""));
+    inEl.value = fx ? fx : (!it ? "" : (field === "_amount" || field === "_stt") ? "" : NUMERIC.has(field) ? fmtNumCell(it[field], field === "quantity" && !!it.quantityExact) : (it[field] || ""));
     inEl.readOnly = !editable || field === "_amount" || field === "_stt";
   };
   if (opts.fxBar !== false) grid._fxSync = syncFxBar;   // lưới nội bộ không dùng fx-bar (singleton)

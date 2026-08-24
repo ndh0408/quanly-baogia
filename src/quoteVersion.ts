@@ -66,10 +66,12 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
         detail: it.detail,
         unit: it.unit,
         quantity: it.quantity.toString(),
+        quantityExact: it.quantityExact,
         unitPrice: it.unitPrice.toString(),
         days: it.days?.toString() ?? null,
         notes: it.notes,
         internalNote: it.internalNote,
+        formulas: it.formulas,
       })),
     })),
   };

@@ -19,6 +19,8 @@ type SheetPlan = { targetIndex: number; mode: TargetMode };
 export type ImportApplyPayload = {
   /** Theo thứ tự sheet trong FILE — sheet nào bỏ qua thì không có mặt. */
   plans: { file: ImportedSheet; targetIndex: number; mode: TargetMode; templateId?: number; items: M.Item[] }[];
+  /** Sheet đang có nhưng không xuất hiện trong file và người dùng chọn xóa. */
+  removeTargetIndexes?: number[];
   totals?: { vatPercent?: number | null; discount?: number | null };
 };
 
@@ -44,6 +46,7 @@ export function ImportExcelModal({
   const [active, setActive] = useState(0);
   const [applyTotals, setApplyTotals] = useState(true);
   const [showSame, setShowSame] = useState(false);
+  const [removeTargets, setRemoveTargets] = useState<number[]>([]);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEscClose(onClose);
@@ -67,7 +70,7 @@ export function ImportExcelModal({
       // xếp [Banner, Banner, Booth] còn báo giá đang xếp [Backdrop, Banner, Banner].
       const targets = autoTargetIndexes(ok, sheets, templates);
       setPlans(ok.map((_s, i) => ({ targetIndex: targets[i], mode: "replace" as TargetMode })));
-      setRes(r); setFileName(file.name); setActive(0); setShowSame(false);
+      setRes(r); setFileName(file.name); setActive(0); setShowSame(false); setRemoveTargets([]);
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Không đọc được file");
     } finally { setBusy(false); }
@@ -132,8 +135,14 @@ export function ImportExcelModal({
     return dup;
   }, [plans]);
 
+  const matchedTargets = useMemo(() => new Set(plans
+    .filter((p) => p && p.mode !== "skip" && p.targetIndex !== NEW_SHEET)
+    .map((p) => p.targetIndex)), [plans]);
+  const unmatchedTargets = useMemo(() => sheets.map((_s, i) => i).filter((i) => !matchedTargets.has(i)), [sheets, matchedTargets]);
+
   const apply = async () => {
     if (dupTargets.size) { toast("Hai sheet của file đang nạp vào cùng một sheet — hãy chọn sheet đích khác nhau", "error"); return; }
+    const effectiveRemovals = removeTargets.filter((i) => unmatchedTargets.includes(i));
     const out: ImportApplyPayload["plans"] = [];
     let totals: ImportApplyPayload["totals"];
     let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0;
@@ -171,13 +180,17 @@ export function ImportExcelModal({
       templateRisk ? `${templateRisk} sheet đang chọn khác mẫu của file` : "",
       rowRisk ? `${rowRisk} cảnh báo ở các dòng` : "",
       sheetRisk ? `${sheetRisk} cảnh báo chung của sheet` : "",
+      effectiveRemovals.length ? `${effectiveRemovals.length} sheet hiện có sẽ bị xóa` : "",
     ].filter(Boolean);
     if (risks.length && !(await confirmModal(
       "Nạp khi vẫn còn điểm cần kiểm tra?",
       `${risks.join("; ")}. Dữ liệu mới chỉ vào màn hình và chưa lưu vào hệ thống. Bạn nên xem kỹ các dòng màu vàng trước khi tiếp tục.`,
       { danger: true, confirmText: "Vẫn nạp để kiểm tra" },
     ))) return;
-    onApply({ plans: out, totals });
+    if (sheets.length - effectiveRemovals.length + out.filter((p) => p.targetIndex === NEW_SHEET).length <= 0) {
+      toast("Báo giá phải còn ít nhất một sheet", "error"); return;
+    }
+    onApply({ plans: out, removeTargetIndexes: effectiveRemovals, totals });
     onClose();
   };
 
@@ -277,6 +290,21 @@ export function ImportExcelModal({
                   Bỏ qua: {res.sheets.filter((s) => s.skipped).map((s) => `${s.name} (${s.skipped})`).join(" · ")}
                 </p>
               )}
+              {unmatchedTargets.length > 0 && <div className="import-unmatched">
+                <h4>Sheet đang có nhưng không thấy trong file</h4>
+                <p className="muted">App mặc định giữ lại để tránh mất dữ liệu. Chỉ chọn xóa khi bạn muốn báo giá khớp hoàn toàn với danh sách sheet trong Excel.</p>
+                {unmatchedTargets.map((i) => {
+                  const sh = sheets[i]; const tpl = templates.find((t) => t.id === sh.templateId);
+                  const remove = removeTargets.includes(i);
+                  return <div className="import-unmatched-row" key={i}>
+                    <span><strong>{sh.name || `Sheet ${i + 1}`}</strong>{tpl?.name && <small>{tpl.name}</small>}</span>
+                    <select value={remove ? "remove" : "keep"} onChange={(e) => setRemoveTargets((cur) => e.target.value === "remove" ? [...new Set([...cur, i])] : cur.filter((x) => x !== i))}>
+                      <option value="keep">Giữ lại trong báo giá</option>
+                      <option value="remove">Xóa khi nạp</option>
+                    </select>
+                  </div>;
+                })}
+              </div>}
 
               {view && (
                 <>
@@ -397,9 +425,10 @@ const COL_VN: Record<string, string> = {
 };
 const CHANGE_VN: Record<string, string> = { same: "Không đổi", changed: "Sẽ sửa", added: "Sẽ thêm", removed: "Sẽ xóa" };
 
-function fmtVal(field: string, v: unknown) {
+function fmtVal(field: string, v: unknown, exact = false) {
   if (v == null || v === "") return "—";
-  if (field === "quantity" || field === "days") return M.fmtNumCell(Number(v));
+  if (field === "quantityExact") return v ? "Giữ số chính xác theo Excel" : "Làm tròn 1 số lẻ";
+  if (field === "quantity" || field === "days") return M.fmtNumCell(Number(v), field === "quantity" && exact);
   if (field === "unitPrice") return M.fmtMoney(Number(v));
   return String(v);
 }
@@ -408,7 +437,7 @@ function ItemPreview({ item }: { item?: M.Item }) {
   if (!item) return null;
   const parts: string[] = [];
   if (item.unit) parts.push(`ĐVT ${item.unit}`);
-  if (Number(item.quantity)) parts.push(`SL ${M.fmtNumCell(item.quantity)}`);
+  if (Number(item.quantity)) parts.push(`SL ${M.fmtNumCell(item.quantity, !!item.quantityExact)}`);
   if (item.days != null && Number(item.days) !== 1) parts.push(`${M.fmtNumCell(item.days)} ngày`);
   if (Number(item.unitPrice) && item.kind !== "section" && item.kind !== "subsection") parts.push(`Đơn giá ${M.fmtMoney(item.unitPrice)}`);
   const formulas = Object.entries(item.formulas || {});
@@ -431,9 +460,9 @@ function DiffRowView({ row }: { row: DiffRow }) {
         <ItemPreview item={row.item} />
         {row.fields.map((f) => (
           <div key={f.field} style={{ fontSize: 13 }}>
-            {f.label}: <span className="txt-danger">{fmtVal(f.field, f.before)}</span>
+            {f.label}: <span className="txt-danger">{fmtVal(f.field, f.before, !!row.item?.quantityExact)}</span>
             {" → "}
-            <span className="txt-ok"><strong>{fmtVal(f.field, f.after)}</strong></span>
+            <span className="txt-ok"><strong>{fmtVal(f.field, f.after, !!row.item?.quantityExact)}</strong></span>
           </div>
         ))}
         {row.warn?.map((w, i) => <div key={i} className="import-rowwarn">⚠ {w}</div>)}

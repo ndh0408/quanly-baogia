@@ -274,6 +274,7 @@ function mapRef(ctx: FormulaContext, colLetters: string, rowDigits: string) {
 type EditorItem = {
   kind?: string;
   quantity?: number | string | null;
+  quantityExact?: boolean | null;
   unitPrice?: number | string | null;
   days?: number | string | null;
   formulas?: Record<string, string | undefined>;
@@ -340,9 +341,10 @@ export function buildFormulaContext(
   // Thành Tiền PHẢI khớp lineAmount của web: SL làm tròn 1 số (qtyRound) rồi × giá, tròn VNĐ —
   // nếu tính raw sẽ lệch với web + Excel (ô SL trong Excel đã ROUND(...,1)).
   const qtyRound1 = (x: unknown) => { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; };
+  const qtyExact4 = (x: unknown) => { const n = Number(x) || 0; const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; };
   const amountOf = (it: EditorItem | undefined) => {
     if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
-    const q = qtyRound1(it.quantity), p = Number(it.unitPrice) || 0;
+    const q = it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity), p = Number(it.unitPrice) || 0;
     return Math.round(usesDays ? q * (Number(it.days) || 1) * p : q * p);
   };
   const editorCellNum = (addr: string) => {

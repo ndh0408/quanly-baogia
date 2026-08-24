@@ -19,6 +19,11 @@ describe("lineAmount — Thành Tiền 1 dòng", () => {
   it("SL lẻ làm tròn 1 số trước khi nhân (2,555→2,6 × 1.000 = 2.600)", () => {
     expect(lineAmount({ kind: "item", quantity: 2.555, unitPrice: 1_000 }, false)).toBe(2_600);
   });
+  it("dòng import chính xác giữ tối đa 4 số lẻ khi tính tiền", () => {
+    expect(lineAmount({ kind: "item", quantity: 0.35, quantityExact: true, unitPrice: 550_000 }, false)).toBe(192_500);
+    expect(lineAmount({ kind: "item", quantity: 0.9075, quantityExact: true, unitPrice: 2_200_000 }, false)).toBe(1_996_500);
+    expect(fmtNumCell(0.9075, true)).toBe("0,9075");
+  });
 });
 
 describe("sheetSubtotalGrouped — hệ số nhóm", () => {

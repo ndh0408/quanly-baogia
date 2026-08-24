@@ -8,7 +8,7 @@
 export type ItemKind = "item" | "sub" | "section" | "subsection" | "info";
 export type Item = {
   kind: ItemKind; label?: string; name?: string; detail?: string; unit?: string;
-  quantity?: number; days?: number | null; unitPrice?: number; notes?: string; internalNote?: string;
+  quantity?: number; quantityExact?: boolean; days?: number | null; unitPrice?: number; notes?: string; internalNote?: string;
   approved?: boolean; approvedAt?: string | null; approvedBy?: number | null;
   formulas?: Record<string, string>; order?: number;
   images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
@@ -28,9 +28,17 @@ export function qtyRound(x: number) {
   const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
   return n < 0 ? -t : t;
 }
-// Thành Tiền 1 dòng = SL(làm tròn 1 số) × (Ngày) × Đơn Giá, làm tròn VNĐ. 1 nguồn cho dòng/nhóm/tổng/Excel.
+/** DB lưu tối đa 4 số lẻ. Dùng cho dòng Excel ngoài có Thành Tiền tính theo số gốc. */
+export function qtyExact(x: number) {
+  const n = Number(x) || 0;
+  const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000;
+  return n < 0 ? -t : t;
+}
+export const qtyForAmount = (it: Pick<Item, "quantity" | "quantityExact">) =>
+  it.quantityExact ? qtyExact(Number(it.quantity) || 0) : qtyRound(Number(it.quantity) || 0);
+// Thành Tiền 1 dòng: mặc định SL làm tròn 1 số; dòng quantityExact dùng tối đa 4 số lẻ theo file Excel.
 export function lineAmount(it: Item, usesDays: boolean) {
-  const q = qtyRound(it.quantity || 0), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
+  const q = qtyForAmount(it), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
   return Math.round(usesDays ? q * d * p : q * p);
 }
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
@@ -60,13 +68,10 @@ export function groupLetter(n: number) {
   return s;
 }
 // Ô số: dấu chấm nghìn VN, RỖNG khi 0 (tránh ô đầy "0"); Số Lượng làm tròn 1 chữ số thập phân (7,4).
-export function fmtNumCell(v?: number | string) {
-  const t = qtyRound(Number(v) || 0);
+export function fmtNumCell(v?: number | string, exact = false) {
+  const t = exact ? qtyExact(Number(v) || 0) : qtyRound(Number(v) || 0);
   if (!t || isNaN(t)) return "";
-  if (Number.isInteger(t)) return t.toLocaleString("vi-VN");
-  const [intp, dec] = Math.abs(t).toFixed(1).split(".");
-  const out = Number(intp).toLocaleString("vi-VN") + "," + dec;
-  return t < 0 ? "-" + out : out;
+  return t.toLocaleString("vi-VN", { maximumFractionDigits: exact ? 4 : 1 });
 }
 // "1.234.567" / "12,5" / "-5.000" → số.
 export function parseVN(s: string | number) {

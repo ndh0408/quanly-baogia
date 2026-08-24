@@ -256,7 +256,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
-    let nAdd = 0, nSheet = 0, nNew = 0;
+    let nAdd = 0, nSheet = 0, nNew = 0, nRemoved = 0;
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       // File có nhiều sheet hơn báo giá → TẠO THÊM sheet, đặt tên đúng tên tab trong file.
@@ -279,12 +279,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       }
       nAdd += stamped.length; nSheet++;
     }
+    for (const idx of [...(payload.removeTargetIndexes || [])].sort((a, b) => b - a)) {
+      if (idx < 0 || idx >= sheets.length) continue;
+      sheets.splice(idx, 1); nRemoved++;
+    }
+    if (!sheets.length) sheets.push({ _k: nextK(), templateId: activeSheet.templateId, name: "", groupSubtotal: true, items: [], extraTables: [] } as Sheet);
+    q._activeSheet = Math.max(0, Math.min(q._activeSheet, sheets.length - 1));
     if (payload.totals) {
       if (payload.totals.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
       if (payload.totals.discount != null) q.discount = payload.totals.discount;
     }
     mark(); redraw();
-    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` (${nNew} sheet mới)` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
+    toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` · thêm ${nNew} sheet` : ""}${nRemoved ? ` · xóa ${nRemoved} sheet` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
   };
 
   // ── Ý KIẾN KHÁCH theo TỪNG SHEET (ghi ngay, KHÔNG đợi Lưu — giống Chốt/Không chốt) ──────────

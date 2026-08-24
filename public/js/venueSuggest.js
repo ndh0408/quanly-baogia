@@ -4,7 +4,7 @@
 // vsSteer (phím điều hướng khi dropdown mở), vsClose (rời ô), openVenuePicker (nút
 // "📐 Chèn từ rạp"). Mọi ghi vào items do editor làm qua callback — module này KHÔNG
 // import editor (giữ đồ thị phụ thuộc một chiều quanh app.js).
-import { escapeHtml, qtyRound } from "./util.js?v=20260630k";
+import { escapeHtml, qtyRound } from "./util.js?v=20260630l";
 import { toast, openModal } from "./ui.js?v=20260624b";
 
 let CAT = null;          // catalog sau khi fetch: {entries:[...], venues:[...]}

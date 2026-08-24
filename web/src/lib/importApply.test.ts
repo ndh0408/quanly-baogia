@@ -29,6 +29,15 @@ describe("autoTargetIndexes", () => {
     expect(autoTargetIndexes([file("gn_banner", false, true)], [{ templateId: 1 }], templates))
       .toEqual([NEW_IMPORT_SHEET]);
   });
+
+  it("ưu tiên sheet trùng tên khi nhiều sheet dùng cùng template", () => {
+    const files = [
+      { ...file("marico_decor"), name: "Booth container" },
+      { ...file("marico_decor"), name: "2. Backdrop" },
+    ];
+    const targets = [{ templateId: 1, name: "Backdrop" }];
+    expect(autoTargetIndexes(files, targets, templates)).toEqual([NEW_IMPORT_SHEET, 0]);
+  });
 });
 
 describe("toGridItems — dịch công thức giữa cột Excel và cột web", () => {
@@ -64,5 +73,11 @@ describe("toGridItems — dịch công thức giữa cột Excel và cột web",
     expect(out.items[0].formulas).toBeUndefined();
     expect(out.items[0].unitPrice).toBe(100_000);
     expect(out.droppedFormulas).toBe(1);
+  });
+
+  it("giữ cờ Số Lượng chính xác từ kết quả đọc Excel", () => {
+    const rows = [{ kind: "item" as const, name: "A", quantity: 0.9075, quantityExact: true, unitPrice: 2_200_000, row: 12 }];
+    const out = toGridItems(rows, { usesDays: false, addrDetail: true });
+    expect(out.items[0]).toMatchObject({ quantity: 0.9075, quantityExact: true });
   });
 });

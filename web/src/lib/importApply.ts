@@ -26,19 +26,28 @@ export function autoTargetIndexes(
   const tplById = new Map(templates.map((t) => [t.id, t]));
   const used = new Set<number>();
   const out = new Array(files.length).fill(NEW_IMPORT_SHEET);
+  const normName = (s: unknown) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/^\s*\d+\s*[.)-]?\s*/, "").replace(/[^a-z0-9]+/g, " ").trim();
 
-  const take = (fi: number, accept: (t: EditorTemplate) => boolean) => {
+  const take = (fi: number, accept: (t: EditorTemplate, target: ImportTargetSheet, targetIndex: number) => boolean) => {
     const hit = targets.findIndex((target, ti) => {
       if (used.has(ti)) return false;
       const tpl = target.templateId == null ? undefined : tplById.get(target.templateId);
-      return !!tpl && accept(tpl);
+      return !!tpl && accept(tpl, target, ti);
     });
     if (hit >= 0) { out[fi] = hit; used.add(hit); }
   };
 
-  // Bằng chứng mạnh nhất: mã template do server nhận từ bố cục/màu/cách đánh STT của file.
+  // Tên + template cùng khớp: giữ đúng sheet ngay cả khi nhiều sheet dùng chung một mẫu.
   files.forEach((file, fi) => {
-    if (file.templateCode) take(fi, (tpl) => tpl.code === file.templateCode);
+    const name = normName(file.name);
+    if (!file.templateCode || !name) return;
+    take(fi, (tpl, target) => tpl.code === file.templateCode && normName(target.name) === name);
+  });
+
+  // Bằng chứng mạnh nhất còn lại: mã template do server nhận từ bố cục/màu/cách đánh STT của file.
+  files.forEach((file, fi) => {
+    if (out[fi] === NEW_IMPORT_SHEET && file.templateCode) take(fi, (tpl) => tpl.code === file.templateCode);
   });
 
   // File ngoài không nhận ra đúng mã mẫu: chỉ ghép khi cấu trúc cốt lõi thật sự tương thích.
@@ -106,6 +115,7 @@ export function toGridItems(imported: ImportedItem[], opts: ApplyOpts): ApplyRes
       detail: "", // Trường Chi Tiết đã bỏ khỏi sản phẩm; file cũ có dữ liệu ở đây cũng không nạp lại.
       unit: src.unit || "",
       quantity: Number(src.quantity) || 0,
+      quantityExact: !!src.quantityExact,
       unitPrice: Number(src.unitPrice) || 0,
       days: opts.usesDays ? (src.days != null ? Number(src.days) : 1) : null,
       notes: src.notes || "",
@@ -155,7 +165,7 @@ const numEq = (a: unknown, b: unknown) => Math.abs((Number(a) || 0) - (Number(b)
 const FIELD_LABEL: Record<string, string> = {
   name: "Hạng mục", unit: "ĐVT", quantity: "Số lượng", unitPrice: "Đơn giá",
   days: "Số ngày", notes: "Ghi chú", detail: "Chi tiết", kind: "Loại dòng", label: "Chữ nhóm",
-  formulas: "Công thức",
+  formulas: "Công thức", quantityExact: "Cách tính Số lượng",
 };
 const KIND_LABEL: Record<string, string> = {
   item: "Hạng mục", sub: "Dòng phụ", section: "Nhóm chính", subsection: "Nhóm phụ", info: "Thông tin",
@@ -168,6 +178,7 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean): DiffField[] {
   if (norm(a.name) !== norm(b.name)) push("name", a.name || "", b.name || "");
   if (norm(a.unit) !== norm(b.unit)) push("unit", a.unit || "", b.unit || "");
   if (!numEq(a.quantity, b.quantity)) push("quantity", Number(a.quantity) || 0, Number(b.quantity) || 0);
+  if (!!a.quantityExact !== !!b.quantityExact) push("quantityExact", !!a.quantityExact, !!b.quantityExact);
   if (!numEq(a.unitPrice, b.unitPrice)) push("unitPrice", Number(a.unitPrice) || 0, Number(b.unitPrice) || 0);
   if (usesDays && !numEq(a.days ?? 1, b.days ?? 1)) push("days", a.days ?? 1, b.days ?? 1);
   if (norm(a.notes) !== norm(b.notes)) push("notes", a.notes || "", b.notes || "");

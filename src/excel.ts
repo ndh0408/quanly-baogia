@@ -15,6 +15,12 @@ function qtyRound(x: any) {
   const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;   // +1e-6 khử nhiễu float; làm tròn 1 số
   return n < 0 ? -t : t;
 }
+function qtyExact(x: any) {
+  const n = Number(x) || 0;
+  const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000;
+  return n < 0 ? -t : t;
+}
+const qtyForAmount = (it: any) => it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity);
 
 // Template .xlsx files never change at runtime — read each from disk ONCE and
 // cache the bytes in RAM. Every export then loads from the cached Buffer instead
@@ -525,8 +531,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         else { curSection = i; curSub = -1; sectionSum[i] = 0; }
       } else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i]) {
         const it = items[i];
-        const qty = Number(it.quantity) || 0, days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        const amt = Math.round(cols.days ? qtyRound(qty) * days * price : qtyRound(qty) * price);   // SL làm tròn 1 số, Thành Tiền làm tròn
+        const qty = qtyForAmount(it), days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
+        const amt = Math.round(cols.days ? qty * days * price : qty * price);
         const parent = curSub >= 0 ? curSub : curSection;
         if (parent >= 0) sectionSum[parent] += amt;
         if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
@@ -674,15 +680,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     } else if (it) {
       const isSub = effKind[i] === "sub";
       if (!seenSection) looseAmtRows.push(r);   // mục lẻ (trước nhóm đầu) → cộng riêng vào subtotal
-      const qty = Number(it.quantity) || 0;
+      const rawQty = Number(it.quantity) || 0;
+      const qty = qtyForAmount(it);
       const days = Number(it.days) || 1;
       const price = Number(it.unitPrice) || 0;
       let amt;
       if (cols.days) {
-        amt = price * qtyRound(qty) * days;   // Số Lượng làm tròn 1 số trước khi × giá
+        amt = price * qty * days;
         putNum(it, r, "days", cols.days, days);
       } else {
-        amt = price * qtyRound(qty);
+        amt = price * qty;
       }
       amt = Math.round(amt);   // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng)
       subtotal += amt * mult;
@@ -710,17 +717,17 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // Số Lượng: LÀM TRÒN còn 1 số (ROUND) — vẫn GIỮ công thức người dùng (bọc ROUND) để khách thấy;
       // số khớp Thành Tiền (=ROUND(SL×ĐG)). Số chẵn → không lẻ ("0"); có lẻ → đúng 1 số ("0.0").
       if (cols.quantity) {
-        const qT = qtyRound(qty);
+        const qT = it.quantityExact ? qtyExact(qty) : qtyRound(qty);
         const rawQ = it.formulas && it.formulas.quantity;
-        const fxQ = rawQ ? fctx.cellFormula(rawQ, qty, { item: it, field: "quantity" }) : null;
+        const fxQ = rawQ ? fctx.cellFormula(rawQ, rawQty, { item: it, field: "quantity" }) : null;
         const qCell = ws.getCell(`${cols.quantity}${r}`);
-        if (fxQ) qCell.value = { formula: `ROUND(${fxQ},1)`, result: qT };
+        if (fxQ) qCell.value = { formula: it.quantityExact ? fxQ : `ROUND(${fxQ},1)`, result: qT };
         else qCell.value = qT;
         // Định dạng hiển thị: số chẵn → "0" (không lẻ); có lẻ → "0.0" (đúng 1 số). PHẢI gán qua
         // bản sao style (giống paintCell) — gán cell.numFmt trực tiếp KHÔNG "ăn" trên hàng được
         // duplicateRow nhân bản (style dùng chung) → trước đây 7,70 in ra 8 ở các dòng phía sau.
         const qSt = qCell.style ? JSON.parse(JSON.stringify(qCell.style)) : {};
-        qSt.numFmt = Number.isInteger(qT) ? "0" : "0.0";
+        qSt.numFmt = Number.isInteger(qT) ? "0" : (it.quantityExact ? "0.####" : "0.0");
         qCell.style = qSt;
       }
       putNum(it, r, "unitPrice", cols.unitPrice, price);

@@ -130,7 +130,7 @@ export type QuoteVersion = { id: string; versionNo: number; total: number; creat
 export type ImportedItem = {
   kind: "item" | "sub" | "section" | "subsection" | "info";
   label?: string; name: string; detail?: string; unit?: string;
-  quantity: number; unitPrice: number; days?: number | null; notes?: string; internalNote?: string;
+  quantity: number; quantityExact?: boolean; unitPrice: number; days?: number | null; notes?: string; internalNote?: string;
   formulas?: Record<string, string>;
   row: number;            // hàng trong file Excel (để đối chiếu)
   warn?: string[];        // cảnh báo riêng dòng đó

@@ -31,6 +31,7 @@ export type ImportedItem = {
   detail?: string;
   unit?: string;
   quantity: number;
+  quantityExact?: boolean;
   unitPrice: number;
   days?: number | null;
   notes?: string;
@@ -178,6 +179,8 @@ function parseLooseDecimal(s: string): number {
 
 /** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). */
 function qtyRound(n: number) { const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10; return n < 0 ? -t : t; }
+function qtyExact(n: number) { const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000; return n < 0 ? -t : t; }
+const qtyForAmount = (it: Pick<ImportedItem, "quantity" | "quantityExact">) => it.quantityExact ? qtyExact(it.quantity) : qtyRound(it.quantity);
 
 /** 0→"A" … chữ nhóm tự sinh (khớp sectionLetter ở excel.ts). */
 function sectionLetter(n: number) {
@@ -359,7 +362,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     return FILL_SUB.has(fill) || hasGroupPriceFormula(r)
       || (isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity")) && !isBlank(cellAt(r, "unitPrice")));
   });
-  base.numberSubs = markerCode ? !!TEMPLATE_CONFIGS[markerCode]?.items?.numberSubsections : numberedSub;
+  const effectiveNumberSubs = markerCode ? !!TEMPLATE_CONFIGS[markerCode]?.items?.numberSubsections : numberedSub;
+  base.numberSubs = effectiveNumberSubs;
 
   // ── Phân loại + đọc giá trị từng dòng ──
   type Raw = { row: number; kind: ImportedKind; it: ImportedItem };
@@ -394,10 +398,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // STT chữ A/B thường là nhóm; nếu dòng vẫn có ĐVT thì chỉ coi là nhóm khi Đơn Giá tổng hợp
     // từ cột Thành Tiền. Tránh nuốt file ngoài dùng A/B/C để đánh số hạng mục thường.
     else if (/^[A-Z]{1,2}$/.test(stt) && (!hasUnit || groupPriceFormula)) kind = "section";
-    else if (numberedSub && /^\d+$/.test(stt) && name !== "" && (groupPriceFormula || (!hasUnit && hasPrice))) kind = "subsection";
+    else if (effectiveNumberSubs && /^\d+$/.test(stt) && name !== "" && (groupPriceFormula || (!hasUnit && hasPrice))) kind = "subsection";
     else if (!stt && name === "" && (hasUnit || hasQty || hasPrice) && (prevKind === "item" || prevKind === "sub")) kind = "sub";
     else if (!stt && name !== "" && !hasUnit && !hasQty && !hasPrice && !hasAmt) kind = "info";
-    else if (!numberedSub && !stt && name !== "" && (groupPriceFormula || !hasUnit)) kind = "subsection";
+    else if (!effectiveNumberSubs && !stt && name !== "" && (groupPriceFormula || !hasUnit)) kind = "subsection";
     else if (name !== "" && !hasUnit && hasPrice && !hasQty) kind = "subsection";
     else kind = "item";
 
@@ -410,7 +414,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       subSeq = 0;
       if (stt && stt !== auto) it.label = stt.slice(0, 12);
     } else if (kind === "subsection") {
-      const auto = numberedSub ? String(++subSeq) : "";
+      const auto = effectiveNumberSubs ? String(++subSeq) : "";
       if (stt && stt !== auto) it.label = stt.slice(0, 12);
     }
 
@@ -440,9 +444,16 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // KHÔNG tự ý sửa số của khách.
     if ((kind === "item" || kind === "sub") && hasAmt) {
       const amt = numOf(cellAt(r, "_amount"));
-      const expect = Math.round(qtyRound(it.quantity) * (colOf.days ? (Number(it.days) || 1) : 1) * it.unitPrice);
-      if (amt && Math.abs(expect - amt) > Math.max(2, Math.abs(amt) * 0.005)) {
-        warn.push(`Thành Tiền trong file (${amt.toLocaleString("vi-VN")}) không khớp Số Lượng × Đơn Giá (${expect.toLocaleString("vi-VN")})`);
+      const factor = (colOf.days ? (Number(it.days) || 1) : 1) * it.unitPrice;
+      const rounded = Math.round(qtyRound(it.quantity) * factor);
+      const exact = Math.round(qtyExact(it.quantity) * factor);
+      const tolerance = Math.max(2, Math.abs(amt) * 0.005);
+      const roundedDiff = Math.abs(rounded - amt), exactDiff = Math.abs(exact - amt);
+      // Chỉ bật khi số chính xác khớp file RÕ RÀNG hơn cách làm tròn cũ. Báo giá cũ/app-export
+      // vẫn giữ quantityExact=false nên không đổi tiền hàng loạt.
+      if (amt && exactDiff <= tolerance && exactDiff + 0.5 < roundedDiff) it.quantityExact = true;
+      else if (amt && roundedDiff > tolerance && exactDiff > tolerance) {
+        warn.push(`Thành Tiền trong file (${amt.toLocaleString("vi-VN")}) không khớp Số Lượng × Đơn Giá (${rounded.toLocaleString("vi-VN")})`);
       }
     }
 
@@ -468,9 +479,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const it = x.it;
     if (field === "_amount") {
       if (x.kind === "section" || x.kind === "subsection") return NaN;   // tổng nhóm: app tự tính
-      return Math.round(qtyRound(Number(it.quantity) || 0) * (colOf.days ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+      return Math.round(qtyForAmount(it) * (colOf.days ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
     }
-    if (field === "quantity") return Number(it.quantity) || 0;
+    if (field === "quantity") return qtyForAmount(it);
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
     if (field === "days") return Number(it.days) || 0;
     return NaN;
@@ -495,6 +506,29 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   };
   const FIELD_VN: Record<string, string> = { quantity: "Số Lượng", unitPrice: "Đơn Giá", days: "Số Ngày" };
 
+  // File ngoài thường cho một dòng phí tham chiếu Đơn Giá nhóm (vd `=G12*13/100`). Web không
+  // lưu số tổng nhóm trong item, nên bung ref đó thành chính công thức SUM con của nhóm trước khi
+  // đổi toạ độ. Công thức/cached result vẫn qua lớp tự kiểm bên dưới.
+  const groupFormulaByAddr = new Map<string, string>();
+  for (const x of raws) {
+    if (x.kind !== "section" && x.kind !== "subsection") continue;
+    for (const role of ["unitPrice", "_amount"]) {
+      const c = colOf[role], fx = fxOf(cellAt(x.row, role));
+      if (c && fx) groupFormulaByAddr.set(`${colLetter(c)}${x.row}`, fx.replace(/^=/, ""));
+    }
+  }
+  const expandGroupRefs = (formula: string, depth = 0, seen = new Set<string>()): string => {
+    if (depth >= 4) return formula;
+    return formula.replace(/\$?([A-Z]{1,3})\$?(\d+)/gi, (match, L: string, r: string, offset: number, whole: string) => {
+      const before = whole.slice(0, offset), after = whole.slice(offset + match.length);
+      if (/:\s*$/.test(before) || /^\s*:/.test(after)) return match; // không bung đầu/cuối của range
+      const key = `${L.toUpperCase()}${r}`, nested = groupFormulaByAddr.get(key);
+      if (!nested || seen.has(key)) return match;
+      const nextSeen = new Set(seen); nextSeen.add(key);
+      return `(${expandGroupRefs(nested, depth + 1, nextSeen)})`;
+    });
+  };
+
   for (const x of raws) {
     if (x.kind === "info") continue;
     const isGroup = x.kind === "section" || x.kind === "subsection";
@@ -508,8 +542,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       const raw = fxOf(cell);
       if (!raw) continue;
       // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất.
-      const rawBody = raw.replace(/^=/, "");
-      const src = f.round1 ? unwrapRound(raw, 1) : rawBody;
+      const rawBody = expandGroupRefs(raw.replace(/^=/, ""));
+      const src = f.round1 ? unwrapRound(rawBody, 1) : rawBody;
       const appQtyRoundWrapper = f.round1 && src !== rawBody;
       const canon = excelFormulaToEditor(src, refCtx);
       const label = FIELD_VN[f.field] || f.field;
@@ -611,7 +645,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
 /** Tổng tiền của sheet theo đúng cách app tính (mục con cộng vào nhóm; nhóm ×SL khi bật). */
 export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal">): number {
-  const line = (it: ImportedItem) => Math.round(qtyRound(Number(it.quantity) || 0) * (s.hasDays ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+  const line = (it: ImportedItem) => Math.round(qtyForAmount(it) * (s.hasDays ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {
