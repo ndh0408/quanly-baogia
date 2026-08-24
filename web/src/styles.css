@@ -2354,8 +2354,6 @@ textarea[aria-invalid="true"] {
 .excel-table td input[readonly].cell-lock,
 .excel-table td textarea[readonly].cell-lock {
   background: transparent;
-  color: var(--text);
-  -webkit-text-fill-color: currentColor;
   cursor: cell;
   caret-color: transparent; /* ô đang chọn: không nháy con trỏ → nhìn là biết chưa vào chế độ sửa */
 }
