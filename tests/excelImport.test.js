@@ -105,6 +105,13 @@ describe("parseQuoteWorkbook — công thức tham chiếu ô", () => {
     expect(sheet.items[8].quantity).toBe(10);
   });
 
+  it("sheet Banner trống vẫn nhận đúng template nhờ mã nội bộ trong file xuất", async () => {
+    const { sheet } = await roundTrip("gn_banner", [{ kind: "item", name: "", unit: "", quantity: 0, unitPrice: 0 }]);
+    expect(sheet.templateCode).toBe("gn_banner");
+    expect(sheet.numberSubs).toBe(true);
+    expect(sheet.templateWhy).toMatch(/nhúng trong file/);
+  });
+
   it("công thức Số Lượng lẻ sống qua vòng xuất → nhập → xuất", async () => {
     const items = [{ kind: "item", name: "Diện tích", unit: "m2", quantity: 5.6375, unitPrice: 100_000, formulas: { quantity: "=2.75*2.05" } }];
     const { sheet } = await roundTrip("marico_decor", items);

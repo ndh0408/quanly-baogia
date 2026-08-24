@@ -25,6 +25,15 @@ function makeQuote(code = "marico_decor") {
 const isXlsx = (buf) => Buffer.isBuffer(buf) && buf.length > 2000 && buf[0] === 0x50 && buf[1] === 0x4b; // "PK" zip header
 
 describe("buildQuoteBuffer (export generation)", () => {
+  it.each(["marico_decor", "gn_banner", "clofull_decor", "unibenfood"])("nhúng mã template vô hình để lần import sau không phải đoán (%s)", async (code) => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(makeQuote(code)));
+    const marker = wb.worksheets[0].getCell("A1");
+    expect(marker.value).toBe(`__QUANLY_TEMPLATE__:${code}`);
+    expect(marker.numFmt).toBe(";;;");
+    expect(marker.font?.color?.argb).toBe("FFFFFFFF");
+  });
+
   it("produces a valid .xlsx buffer from a plain-number quote", async () => {
     expect(isXlsx(await buildQuoteBuffer(makeQuote()))).toBe(true);
   });

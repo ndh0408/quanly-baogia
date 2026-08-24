@@ -99,6 +99,7 @@ const FILL_SECTION = new Set(["FFFAE9DB", "FFFCEFDB", "FFE2EFDA"]);
 const FILL_SUB = new Set(["FFC9D9EF", "FFEAF1FB"]);
 /** Màu nền hàng TIÊU ĐỀ CỘT — phụ trợ khi nhận diện hàng tiêu đề. */
 const FILL_HEADER = new Set(["FFF3C9A1", "FFFFCC99"]);
+const TEMPLATE_MARKER_PREFIX = "__QUANLY_TEMPLATE__:";
 
 /** Chữ mở đầu các dòng TỔNG / chân trang → hết bảng hạng mục. */
 const RE_TOTALS = /^(TONG CONG|TONG|CONG|VAT|THANH TIEN|GIAM GIA|CHIET KHAU|TOTAL|SUBTOTAL|SUB TOTAL|GRAND TOTAL)\b/;
@@ -232,6 +233,16 @@ function fillOf(cell: Cell | null): string {
   return (f && f.pattern === "solid" && f.fgColor?.argb) ? String(f.fgColor.argb).toUpperCase() : "";
 }
 
+function markedTemplate(ws: ExcelJS.Worksheet, hasDays: boolean): string | null {
+  const raw = cellText(ws.getCell("A1").value).trim();
+  if (!raw.startsWith(TEMPLATE_MARKER_PREFIX)) return null;
+  const code = raw.slice(TEMPLATE_MARKER_PREFIX.length).trim();
+  const cfg = TEMPLATE_CONFIGS[code];
+  if (!cfg) return null;
+  // Marker chỉ được tin khi cấu trúc cốt lõi vẫn khớp; file bị sửa/chắp sheet sẽ quay về heuristic.
+  return !!cfg.items?.columns?.days === hasDays ? code : null;
+}
+
 // ===== Dò HÀNG TIÊU ĐỀ =====
 type HeaderHit = { row: number; roles: Map<number, string>; score: number };
 
@@ -301,6 +312,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.hasDays = colOf.days != null;
   base.showImages = colOf._images != null;
   base.columns = Object.fromEntries(Object.entries(colOf).map(([role, c]) => [role, colLetter(c)]));
+  const markerCode = markedTemplate(ws, base.hasDays);
 
   // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
   // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
@@ -347,7 +359,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     return FILL_SUB.has(fill) || hasGroupPriceFormula(r)
       || (isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity")) && !isBlank(cellAt(r, "unitPrice")));
   });
-  base.numberSubs = numberedSub;
+  base.numberSubs = markerCode ? !!TEMPLATE_CONFIGS[markerCode]?.items?.numberSubsections : numberedSub;
 
   // ── Phân loại + đọc giá trị từng dòng ──
   type Raw = { row: number; kind: ImportedKind; it: ImportedItem };
@@ -567,7 +579,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   if (Object.keys(totals).length) base.totals = totals;
 
   // ── Đoán MẪU ──
-  const guess = guessTemplate(ws, base);
+  const guess = guessTemplate(ws, base, markerCode);
   base.templateCode = guess.code;
   base.templateName = guess.name;
   base.templateWhy = guess.why;
@@ -610,7 +622,11 @@ export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "gr
 }
 
 /** Đoán mẫu báo giá của sheet: cột Số Ngày, cách đánh số nhóm con, tên sheet, màu nhóm, chữ cột. */
-function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet) {
+function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: string | null) {
+  if (markerCode && TEMPLATE_CONFIGS[markerCode]) {
+    const cfg = TEMPLATE_CONFIGS[markerCode];
+    return { code: markerCode, name: cfg.displayName || markerCode, why: "mã mẫu được nhúng trong file xuất", score: 999 };
+  }
   let best: { code: string | null; name: string | null; why: string; score: number } = { code: null, name: null, why: "", score: -99 };
   const sheetName = normHdr(ws.name);
   const nameCol = s.columns?.name ? colIndex(s.columns.name) : 0;

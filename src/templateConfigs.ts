@@ -339,6 +339,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 // nhóm con KHÔNG đánh số. Bật bằng cờ items.numberSubsections (excel.js + editor.js đọc cờ này).
 TEMPLATE_CONFIGS.gn_banner = {
   ...TEMPLATE_CONFIGS.marico_decor,
+  sheetName: "GN Banner",
   displayName: "GN Banner (không ngày)",
   items: { ...TEMPLATE_CONFIGS.marico_decor.items, numberSubsections: true },
 };

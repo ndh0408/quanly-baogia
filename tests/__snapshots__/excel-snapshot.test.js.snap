@@ -2,42 +2,42 @@
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: clf 1`] = `
 {
-  "clf": "f99f8d72400eeb32",
+  "clf": "bb6fb9aac27160dc",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: discount 1`] = `
 {
-  "discount": "1aa351ea1253df41",
+  "discount": "3e470fadf807a8c2",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: gn-nodate-simple 1`] = `
 {
-  "gn-nodate-simple": "a0df9a74d0b0714a",
+  "gn-nodate-simple": "250d24d76e4da1c9",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: gn-withdate 1`] = `
 {
-  "gn-withdate": "270e253e7db64b3b",
+  "gn-withdate": "d8034f33e8854ee5",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: groups 1`] = `
 {
-  "groups": "12c21e417e7d7cb4",
+  "groups": "73de64c8dd3b6244",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: multi-sheet 1`] = `
 {
-  "multi-sheet": "b281342ca915eaf2",
+  "multi-sheet": "2ac8d832354707e4",
 }
 `;
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: single-noname 1`] = `
 {
-  "single-noname": "d0d42e1cbb514d61",
+  "single-noname": "f2c37220f14da5f7",
 }
 `;

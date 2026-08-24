@@ -20,10 +20,20 @@ function qtyRound(x: any) {
 // cache the bytes in RAM. Every export then loads from the cached Buffer instead
 // of re-reading ~170-207 KB/sheet off disk (big win on the inline export path).
 const _templateCache = new Map();
+const TEMPLATE_MARKER_PREFIX = "__QUANLY_TEMPLATE__:";
 function templateBuffer(filePath: string) {
   let buf = _templateCache.get(filePath);
   if (!buf) { buf = readFileSync(path.join(ROOT, filePath)); _templateCache.set(filePath, buf); }
   return buf;
+}
+
+function stampTemplateMarker(ws: any, templateCode: string) {
+  const cell = ws.getCell("A1");
+  cell.value = `${TEMPLATE_MARKER_PREFIX}${templateCode}`;
+  const style = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+  style.font = { ...(style.font || {}), color: { argb: "FFFFFFFF" }, size: 1 };
+  style.numFmt = ";;;"; // không hiện trong ô/print; importer vẫn đọc được giá trị thật
+  cell.style = style;
 }
 
 function vnDateText(d: any, city: any) {
@@ -1318,6 +1328,7 @@ export async function buildQuoteBuffer(quote: any) {
 
     // Tiêu đề từng sheet nối tên sheet ("… - Banner") — áp dụng CẢ khi chỉ 1 sheet.
     const totals = fillSheetData(ws, cfg, quote, sheet, vatPct, (sheet.name || "").trim());
+    stampTemplateMarker(ws, tplCode);
 
     // Tên tab Excel: chỉ đánh số "N. …" khi báo giá có NHIỀU sheet (1 sheet giữ nguyên).
     const baseName = sheet.name || cfg.sheetName || `Sheet ${idx + 1}`;
