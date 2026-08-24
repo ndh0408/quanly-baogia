@@ -462,7 +462,15 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
       <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
         aria-keyshortcuts="Enter Alt+Enter" onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.altKey && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); }
+          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          if (e.altKey) {
+            const el = e.currentTarget;
+            const start = el.selectionStart;
+            const end = el.selectionEnd;
+            setName(el.value.slice(0, start) + "\n" + el.value.slice(end));
+            requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + 1; });
+          } else void add();
         }} />
       <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
