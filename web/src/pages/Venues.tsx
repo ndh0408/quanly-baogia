@@ -402,15 +402,14 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     if (busyRef.current) return;
     if (!name.trim()) { nameRef.current?.focus(); return; }
     busyRef.current = true; setBusy(true);
-    let added = false;
     try {
       await api.createVenueItem(venueId, { name: name.trim(), dim: dim.trim() || null, w, h, unit: unit.trim() || null });
       setName(""); setDim("");            // giữ Đơn vị để gõ dòng tiếp cho nhanh
-      added = true; onAdded();
+      onAdded();
     } catch (ex) { toast(errMsg(ex, "Thêm thất bại"), "error"); }
     finally {
       busyRef.current = false; setBusy(false);
-      if (added) requestAnimationFrame(() => nameRef.current?.focus());
+      requestAnimationFrame(() => nameRef.current?.focus());
     }
   };
 
