@@ -130,6 +130,21 @@ function renameSheet(wbXml: string, idx: number, newName: string) {
   });
 }
 
+function ensureAutoCalculation(wbXml: string) {
+  const attrs = { calcMode: "auto", fullCalcOnLoad: "1", forceFullCalc: "1" };
+  if (/<calcPr\b[^>]*\/>/.test(wbXml)) {
+    return wbXml.replace(/<calcPr\b([^>]*)\/>/, (_m, rawAttrs: string) => {
+      let out = rawAttrs;
+      for (const [name, value] of Object.entries(attrs)) {
+        const re = new RegExp(`${name}="[^"]*"`);
+        out = re.test(out) ? out.replace(re, `${name}="${value}"`) : `${out} ${name}="${value}"`;
+      }
+      return `<calcPr${out}/>`;
+    });
+  }
+  return wbXml.replace("</workbook>", `<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`);
+}
+
 /** Append a relationship to workbook.xml.rels */
 function addRelationship(relsXml: string, rId: string, target: string, type: string) {
   const rel = `<Relationship Id="${rId}" Type="${type}" Target="${target}"/>`;
@@ -510,6 +525,7 @@ export async function stitchXlsxBuffers(buffers: Buffer[], sheetNames: string[])
     const updated = attrs.replace(/sheetId="\d+"/, `sheetId="${sn}"`);
     return `<sheet${updated}/>`;
   });
+  baseWbXml = ensureAutoCalculation(baseWbXml);
 
   baseZip.file("xl/workbook.xml", baseWbXml);
   baseZip.file("xl/_rels/workbook.xml.rels", baseWbRelsXml);

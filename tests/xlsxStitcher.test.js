@@ -55,6 +55,9 @@ describe("stitchXlsxBuffers", () => {
     expect(sheets).toHaveLength(2);
     expect(/sheetId="1"/.test(sheets[0])).toBe(true);
     expect(/sheetId="2"/.test(sheets[1])).toBe(true);
+    expect(wbxml).toMatch(/<calcPr\b[^>]*calcMode="auto"/);
+    expect(wbxml).toMatch(/<calcPr\b[^>]*fullCalcOnLoad="1"/);
+    expect(wbxml).toMatch(/<calcPr\b[^>]*forceFullCalc="1"/);
   });
 
   it("merging same-style fonts does not duplicate or drop family attribute", async () => {
