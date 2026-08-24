@@ -368,8 +368,8 @@ export function GridTable(props: GridTableProps) {
   // Chuột trong lưới (khi KHÔNG ở point-mode) — hành vi Excel:
   //   · bấm ô          → CHỌN ô (READY — gõ là đè, nhấp đúp/F2 mới sửa trong chữ) + kéo chọn vùng
   //   · Shift+bấm      → MỞ RỘNG vùng chọn từ ô neo (không dời neo)
-  //   · nhấp đúp       → chế độ SỬA (EDIT), con trỏ đúng chỗ bấm
-  const onSelDragStart = (e: { button: number; detail: number; target: EventTarget | null; shiftKey?: boolean; preventDefault(): void }) => {
+  //   · nhấp đúp       → chế độ SỬA (EDIT), con trỏ ở cuối nội dung
+  const onSelDragStart = (e: { button: number; target: EventTarget | null; shiftKey?: boolean; preventDefault(): void }) => {
     if (e.button !== 0 || pickingRef.current) return;
     const info = cellAddrFromEvent(e.target as HTMLElement);
     if (!info || !FIELDS.includes(info.field)) {
@@ -395,12 +395,6 @@ export function GridTable(props: GridTableProps) {
       return;
     }
     if (!coarsePointer && el) {
-      // Cú mousedown thứ hai phải mở khóa trước hành vi mặc định của trình duyệt để nó xác định
-      // đúng vị trí bấm. Nếu vẫn preventDefault + lockCell, selectionEnd luôn là 0 khi dblclick.
-      if (e.detail >= 2 && document.activeElement === el && el.readOnly) {
-        enterEdit(el, {}, "edit");
-        return;
-      }
       // Bấm 1 lần (kể cả bấm lại ô đang chọn) = CHỌN + KHÓA ô. Muốn sửa: nhấp đúp hoặc F2.
       e.preventDefault();
       if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
@@ -1269,13 +1263,11 @@ export function GridTable(props: GridTableProps) {
         <table className={`excel-table${clfTheme ? " clf-theme" : ""}`} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
           onMouseDownCapture={onPointMouseDown} onMouseDown={onSelDragStart}
           onDoubleClick={(e) => {
-            // Nhấp đúp ô = vào chế độ SỬA (EDIT) với CON TRỎ tại chỗ bấm (Excel) — không bôi đen
-            // cả từ. Nhận MỌI ô nhập có data-f (kể cả nhãn nhóm A/B ngoài lưới điều hướng).
+            // Nhấp đúp ô = vào chế độ SỬA (EDIT), đặt con trỏ cuối nội dung để gõ nối tiếp.
+            // Nhận MỌI ô nhập có data-f (kể cả nhãn nhóm A/B ngoài lưới điều hướng).
             const el = (e.target as HTMLElement)?.closest?.("[data-f]") as HTMLInputElement | HTMLTextAreaElement | null;
             if (!el || el.disabled) return;
-            const pos = el.selectionEnd ?? (el.value || "").length;
-            enterEdit(el, {}, "edit");
-            try { el.setSelectionRange(pos, pos); } catch { /* */ }
+            enterEdit(el, { caretEnd: true }, "edit");
           }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
           <thead>
