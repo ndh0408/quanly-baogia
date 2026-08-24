@@ -299,7 +299,6 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
           <thead>
             <tr>
               <th scope="col">Hạng mục</th>
-              <th scope="col">Kích thước</th>
               <th scope="col">Đơn vị</th>
               {canManage && <th scope="col" aria-label="Thao tác" />}
             </tr>
@@ -307,9 +306,8 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
           <tbody>
             {items.map((it) => (
               <tr key={it.id} className={`${isHit(it) ? "hit" : ""}${it.active ? "" : " off"}`}>
-                <td><b>{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
+                <td><b className="vn-item-name">{it.name}</b>{!it.active && <span className="muted"> (tắt)</span>}
                   {it.note && <div className="vn-note">{it.note}</div>}</td>
-                <td>{it.dim || <span className="muted">—</span>}</td>
                 <td>{it.unit || <span className="muted">—</span>}</td>
                 {canManage && (
                   <td className="vn-iacts">
@@ -394,7 +392,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
   const [unit, setUnit] = useState("m2");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const nameRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLTextAreaElement>(null);
 
   const add = async () => {
     if (busyRef.current) return;
@@ -412,7 +410,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
   };
 
   // Dán nhiều dòng từ Excel/sheet → lấy ô đầu tiên của mỗi hàng làm tên hạng mục.
-  const onPaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const onPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const text = e.clipboardData.getData("text/plain");
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const structured = text.includes("\t") || /Dimension\s*:/i.test(text) || /\((?=[^)]*\d[^)]*[x×][^)]*\d)/i.test(text);
@@ -461,13 +459,15 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
 
   return (
     <div className="vn-additem">
-      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
+      <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
-        aria-keyshortcuts="Enter" onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }} />
+        aria-keyshortcuts="Enter Alt+Enter" onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.altKey && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); }
+        }} />
       <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
       <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
-      <div className="vn-ai-hint muted"><b>Enter</b> = lưu và xuống dòng nhập tiếp như Excel. Có thể dán nhiều hàng cùng lúc.</div>
+      <div className="vn-ai-hint muted"><b>Alt/Option + Enter</b> = xuống dòng trong cùng hạng mục · <b>Enter</b> = lưu và nhập hàng tiếp.</div>
     </div>
   );
 }
@@ -479,6 +479,7 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
   const [active, setActive] = useState(rec.active);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const backdropDownRef = useRef(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -498,8 +499,15 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Sửa hạng mục" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop"
+      onPointerDown={(e) => { backdropDownRef.current = e.target === e.currentTarget; }}
+      onPointerUp={(e) => {
+        const close = backdropDownRef.current && e.target === e.currentTarget;
+        backdropDownRef.current = false;
+        if (close) onClose();
+      }}
+      onPointerCancel={() => { backdropDownRef.current = false; }}>
+      <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Sửa hạng mục">
         <div className="modal-head"><h3>Sửa hạng mục</h3><button type="button" className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           {err && <div className="err">⚠ {err}</div>}

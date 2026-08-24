@@ -2858,6 +2858,9 @@ textarea[aria-invalid="true"] {
   color: var(--muted);
   margin-top: 2px;
 }
+.vn-item-name {
+  white-space: pre-line;
+}
 .vn-iacts {
   display: flex;
   gap: 5px;
@@ -2875,7 +2878,8 @@ textarea[aria-invalid="true"] {
   border-radius: 8px;
   background: var(--card-2);
 }
-.vn-additem input {
+.vn-additem input,
+.vn-additem textarea {
   padding: 7px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
@@ -2883,6 +2887,10 @@ textarea[aria-invalid="true"] {
   color: inherit;
   font: inherit;
   font-size: 13px;
+}
+.vn-additem textarea {
+  min-height: 58px;
+  resize: vertical;
 }
 .vn-ai-name {
   flex: 1;

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { queryClient, RealtimeBridge } from "./lib/query";
+import { installSafeModalBackdropClicks } from "./lib/safeModalBackdrop";
 // Design-system dùng-chung (app cũ vẫn nạp tĩnh file này) — IMPORT vào bundle để VITE TỰ hash/cache-bust
 // → KHÔNG còn phải bump ?v= tay khi sửa CSS chung. Phải đứng TRƯỚC styles.css (React override thắng).
 import "../../public/style.css";
@@ -16,6 +17,9 @@ try {
     document.documentElement.setAttribute("data-theme", "dark");
   else document.documentElement.setAttribute("data-theme", "light");
 } catch { /* ignore */ }
+
+// Áp dụng cho mọi modal React, kể cả modal tạo động từ confirmModal/promptModal.
+installSafeModalBackdropClicks();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
