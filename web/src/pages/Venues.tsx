@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Me, type Venue, type VenueItemRow } from "../lib/api";
+import { api, ApiError, type Me, type Venue, type VenueItemRow } from "../lib/api";
 import { errMsg } from "../lib/format";
 import { toast, confirmModal } from "../lib/ui";
 import { invalidateCatalog, norm, parseDim } from "../lib/venueCatalog";
@@ -14,14 +14,19 @@ import { qtyRound } from "../lib/quoteMath";
 // Thêm mới không cần bấm nút mở form: ô nhập nằm sẵn ở đầu danh sách và cuối bảng.
 
 type FullVenue = Venue & { items?: VenueItemRow[] };
+type AddVenueHandler = (name: string) => Promise<boolean>;
 
 const numText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
+const normItemText = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
+const normItemDim = (v: string) => normItemText(v).replace(/\s+/g, "").replace(/×/g, "x").replace(/,/g, ".");
+const normItemUnit = (v: string) => /^m\s*(?:\^?\s*2|²)$/.test(normItemText(v)) ? "m2" : normItemText(v);
 // Con số app sẽ điền vào ô Số Lượng của báo giá.
 const slOf = (it: VenueItemRow) =>
   it.unit === "m2" && it.w && it.h ? qtyRound(it.w * it.h) : it.qty ?? null;
 
 export function VenuesPage({ me }: { me: Me }) {
   const qc = useQueryClient();
+  const addVenueBusyRef = useRef(false);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState("");           // 1 từ khóa đang lọc ("" = tất cả)
   const [selId, setSelId] = useState<number | null>(null);
@@ -72,15 +77,22 @@ export function VenuesPage({ me }: { me: Me }) {
 
   useEffect(() => { if (sel && sel.id !== selId) setSelId(sel.id); }, [sel, selId]);
 
-  const addVenue = async (name: string) => {
+  const addVenue: AddVenueHandler = async (name) => {
     const n = name.trim();
-    if (!n) return;
+    if (!n || addVenueBusyRef.current) return false;
+    addVenueBusyRef.current = true;
     try {
       const v = await api.createVenue({ name: n });
       toast(`Đã thêm rạp "${n}"`, "success");
       setSelId(v.id); setQ(""); setTag("");
       reload();
-    } catch (ex) { toast(errMsg(ex, "Thêm rạp thất bại"), "error"); }
+      return true;
+    } catch (ex) {
+      toast(errMsg(ex, "Thêm rạp thất bại"), "error");
+      return false;
+    } finally {
+      addVenueBusyRef.current = false;
+    }
   };
 
   if (error) {
@@ -152,8 +164,20 @@ export function VenuesPage({ me }: { me: Me }) {
 }
 
 // ── Màn hình khi CHƯA CÓ GÌ: dạy đúng 3 bước, và cho nhập ngay ───────────────
-function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: (n: string) => void }) {
+function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: AddVenueHandler }) {
   const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const submit = async () => {
+    if (!name.trim() || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try { if (await onAdd(name)) setName(""); }
+    finally {
+      busyRef.current = false; setBusy(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
   if (!canManage) return <div className="empty">Danh mục chưa có rạp nào.</div>;
   return (
     <div className="vn-first">
@@ -164,22 +188,34 @@ function FirstVenue({ canManage, onAdd }: { canManage: boolean; onAdd: (n: strin
         <li>Xong. Lúc làm báo giá, gõ “quầy vé” là app hiện ra và tự điền kích thước + số lượng.</li>
       </ol>
       <div className="vn-firstform">
-        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…"
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(name); setName(""); } }} />
-        <button className="btn btn-primary" onClick={() => { onAdd(name); setName(""); }}>Thêm rạp</button>
+        <input ref={inputRef} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Tên rạp…" disabled={busy}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
+        <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy || !name.trim()}>{busy ? "Đang thêm…" : "Thêm rạp"}</button>
       </div>
     </div>
   );
 }
 
 // ── Ô thêm rạp nằm SẴN đầu danh sách (không phải bấm nút mở form) ────────────
-function AddVenueRow({ onAdd }: { onAdd: (n: string) => void }) {
+function AddVenueRow({ onAdd }: { onAdd: AddVenueHandler }) {
   const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const submit = async () => {
+    if (!name.trim() || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try { if (await onAdd(name)) setName(""); }
+    finally {
+      busyRef.current = false; setBusy(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
   return (
     <div className="vn-addv">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(name); setName(""); } }} />
-      {name.trim() && <button className="btn btn-sm btn-primary" onClick={() => { onAdd(name); setName(""); }}>Thêm</button>}
+      <input ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="+ Thêm rạp mới…" disabled={busy}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
+      {name.trim() && <button type="button" className="btn btn-sm btn-primary" onClick={() => void submit()} disabled={busy}>{busy ? "…" : "Thêm"}</button>}
     </div>
   );
 }
@@ -193,20 +229,26 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
   const [name, setName] = useState(venue.name);
   const [editing, setEditing] = useState<VenueItemRow | null>(null);
   const [merging, setMerging] = useState(false);
+  const renameBusyRef = useRef(false);
+  const renameCancelledRef = useRef(false);
   const items = venue.items ?? [];
   const hl = norm(highlight).split(/\s+/).filter(Boolean);
   const isHit = (it: VenueItemRow) =>
     hl.length > 0 && hl.every((t) => norm(`${it.name} ${it.dim || ""}`).includes(t));
 
   const rename = async () => {
+    if (renameCancelledRef.current) { renameCancelledRef.current = false; return; }
     const n = name.trim();
     if (!n || n === venue.name) { setRenaming(false); setName(venue.name); return; }
+    if (renameBusyRef.current) return;
+    renameBusyRef.current = true;
     try { await api.updateVenue(venue.id, { name: n }); toast("Đã đổi tên rạp", "success"); setRenaming(false); onChanged(); }
     catch (ex) { toast(errMsg(ex, "Đổi tên thất bại"), "error"); }
+    finally { renameBusyRef.current = false; }
   };
   const setTags = async (next: string[]) => {
-    try { await api.updateVenue(venue.id, { tags: next }); onChanged(); }
-    catch (ex) { toast(errMsg(ex, "Lưu từ khóa thất bại"), "error"); }
+    try { await api.updateVenue(venue.id, { tags: next }); onChanged(); return true; }
+    catch (ex) { toast(errMsg(ex, "Lưu từ khóa thất bại"), "error"); return false; }
   };
   const delVenue = async () => {
     if (!(await confirmModal("Xoá rạp", `Xoá "${venue.name}"${items.length ? ` và ${items.length} hạng mục` : ""}? Không lấy lại được.`, { danger: true, confirmText: "Xoá" }))) return;
@@ -222,18 +264,21 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
   return (
     <>
       <div className="vn-rhead">
-        <button className="btn btn-sm vn-back" onClick={onBack}>‹ Danh sách</button>
+        <button type="button" className="btn btn-sm vn-back" onClick={onBack}>‹ Danh sách</button>
         {renaming ? (
           <input className="vn-rename" autoFocus value={name} onChange={(e) => setName(e.target.value)}
-            onBlur={() => void rename()} onKeyDown={(e) => { if (e.key === "Enter") void rename(); if (e.key === "Escape") { setRenaming(false); setName(venue.name); } }} />
+            onBlur={() => void rename()} onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === "Escape") { e.preventDefault(); renameCancelledRef.current = true; setRenaming(false); setName(venue.name); }
+            }} />
         ) : (
-          <h2 className="vn-rtitle" onDoubleClick={() => canManage && setRenaming(true)} title={canManage ? "Bấm đúp để đổi tên" : undefined}>{venue.name}</h2>
+          <h2 className="vn-rtitle" onDoubleClick={() => { if (canManage) { renameCancelledRef.current = false; setRenaming(true); } }} title={canManage ? "Bấm đúp để đổi tên" : undefined}>{venue.name}</h2>
         )}
         {canManage && !renaming && (
           <span className="vn-racts">
-            <button className="btn btn-sm" onClick={() => setRenaming(true)}>Đổi tên</button>
-            {venues.length > 1 && <button className="btn btn-sm" onClick={() => setMerging(true)} title="Dồn hạng mục sang rạp khác rồi xoá rạp này">Gộp</button>}
-            <button className="btn btn-sm btn-danger" onClick={() => void delVenue()}>Xoá rạp</button>
+            <button type="button" className="btn btn-sm" onClick={() => { renameCancelledRef.current = false; setRenaming(true); }}>Đổi tên</button>
+            {venues.length > 1 && <button type="button" className="btn btn-sm" onClick={() => setMerging(true)} title="Dồn hạng mục sang rạp khác rồi xoá rạp này">Gộp</button>}
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => void delVenue()}>Xoá rạp</button>
           </span>
         )}
       </div>
@@ -265,8 +310,8 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
                   <td style={{ textAlign: "right" }}>{sl != null ? numText(sl) : <span className="muted">—</span>}</td>
                   {canManage && (
                     <td className="vn-iacts">
-                      <button className="btn btn-sm" onClick={() => setEditing(it)}>Sửa</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => void delItem(it)}>Xoá</button>
+                      <button type="button" className="btn btn-sm" onClick={() => setEditing(it)}>Sửa</button>
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => void delItem(it)}>Xoá</button>
                     </td>
                   )}
                 </tr>
@@ -286,34 +331,57 @@ function VenueDetail({ venue, venues, canManage, highlight, onBack, onChanged, o
 
 // ── Từ khóa: sửa TẠI CHỖ bằng chip, không qua form ──────────────────────────
 function TagRow({ tags, all, canManage, onChange }: {
-  tags: string[]; all: string[]; canManage: boolean; onChange: (t: string[]) => void;
+  tags: string[]; all: string[]; canManage: boolean; onChange: (t: string[]) => Promise<boolean>;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
-  const others = [...new Set(all)].filter((t) => !tags.includes(t)).slice(0, 8);
-  const add = (t: string) => {
-    const v = t.trim();
-    setDraft(""); setAdding(false);
-    if (v && !tags.includes(v)) onChange([...tags, v]);
+  const [shownTags, setShownTags] = useState(tags);
+  const [saving, setSaving] = useState(false);
+  const commitBusyRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setShownTags(tags); }, [tags]);
+  const others = [...new Set(all)].filter((t) => !shownTags.includes(t)).slice(0, 8);
+  const apply = async (next: string[]) => {
+    if (commitBusyRef.current) return false;
+    commitBusyRef.current = true; setSaving(true);
+    try {
+      const ok = await onChange(next);
+      if (ok) setShownTags(next);
+      return ok;
+    } finally {
+      commitBusyRef.current = false; setSaving(false);
+    }
   };
-  if (!canManage && !tags.length) return null;
+  const add = async (t: string) => {
+    if (cancelledRef.current) { cancelledRef.current = false; return; }
+    const v = t.trim();
+    if (!v || shownTags.includes(v)) { setDraft(""); setAdding(false); return; }
+    if (await apply([...shownTags, v])) { setDraft(""); setAdding(false); }
+    else requestAnimationFrame(() => inputRef.current?.focus());
+  };
+  const remove = async (t: string) => { await apply(shownTags.filter((x) => x !== t)); };
+  if (!canManage && !shownTags.length) return null;
   return (
     <div className="vn-tagrow">
       <span className="muted">Từ khóa:</span>
-      {tags.map((t) => (
+      {shownTags.map((t) => (
         <span className="vn-tag on" key={t}>{t}
-          {canManage && <button type="button" onClick={() => onChange(tags.filter((x) => x !== t))} aria-label={`Bỏ ${t}`}>✕</button>}
+          {canManage && <button type="button" onClick={() => void remove(t)} disabled={saving} aria-label={`Bỏ ${t}`}>✕</button>}
         </span>
       ))}
       {canManage && (adding ? (
-        <input className="vn-taginput" autoFocus value={draft} list="vn-tag-sug" placeholder="tên nhóm…"
-          onChange={(e) => setDraft(e.target.value)} onBlur={() => add(draft)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } if (e.key === "Escape") { setDraft(""); setAdding(false); } }} />
+        <input ref={inputRef} className="vn-taginput" autoFocus value={draft} list="vn-tag-sug" placeholder="tên nhóm…" disabled={saving}
+          onChange={(e) => setDraft(e.target.value)} onBlur={() => void add(draft)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+            if (e.key === "Escape") { e.preventDefault(); cancelledRef.current = true; setDraft(""); setAdding(false); }
+          }} />
       ) : (
-        <button type="button" className="vn-tag add" onClick={() => setAdding(true)}>+ từ khóa</button>
+        <button type="button" className="vn-tag add" onClick={() => { cancelledRef.current = false; setAdding(true); }}>+ từ khóa</button>
       ))}
       <datalist id="vn-tag-sug">{others.map((t) => <option key={t} value={t} />)}</datalist>
-      {!tags.length && canManage && <span className="muted vn-taghint">— đặt tên nhóm (vd “hcm”) để lọc nhanh ở cột trái</span>}
+      {!shownTags.length && canManage && <span className="muted vn-taghint">— đặt tên nhóm (vd “hcm”) để lọc nhanh ở cột trái</span>}
     </div>
   );
 }
@@ -324,20 +392,26 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
   const [dim, setDim] = useState("");
   const [unit, setUnit] = useState("m2");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   const { w, h } = parseDim(dim);
   const sl = unit === "m2" && w && h ? qtyRound(w * h) : null;
 
   const add = async () => {
+    if (busyRef.current) return;
     if (!name.trim()) { nameRef.current?.focus(); return; }
-    setBusy(true);
+    busyRef.current = true; setBusy(true);
+    let added = false;
     try {
       await api.createVenueItem(venueId, { name: name.trim(), dim: dim.trim() || null, w, h, unit: unit.trim() || null });
       setName(""); setDim("");            // giữ Đơn vị để gõ dòng tiếp cho nhanh
-      onAdded(); nameRef.current?.focus();
+      added = true; onAdded();
     } catch (ex) { toast(errMsg(ex, "Thêm thất bại"), "error"); }
-    finally { setBusy(false); }
+    finally {
+      busyRef.current = false; setBusy(false);
+      if (added) requestAnimationFrame(() => nameRef.current?.focus());
+    }
   };
 
   // Dán nhiều dòng (từ Excel/sheet) → mỗi dòng 1 hạng mục. Tách tên & kích thước theo TAB,
@@ -347,41 +421,60 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (lines.length < 2) return;                   // 1 dòng → dán bình thường
     e.preventDefault();
-    setBusy(true);
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true);
     let ok = 0;
-    for (const line of lines) {
-      let nm = line, dm = "";
-      const tab = line.split("\t");
-      const dimAt = line.search(/Dimension\s*:/i);
-      const parenAt = line.search(/\((?=[^)]*[x×])/i);
-      if (tab.length > 1) { nm = tab[0]; dm = tab.slice(1).join(" "); }
-      else if (dimAt >= 0) { nm = line.slice(0, dimAt); dm = line.slice(dimAt).replace(/Dimension\s*:/i, ""); }
-      else if (parenAt > 0) { nm = line.slice(0, parenAt); dm = line.slice(parenAt); }
-      nm = nm.replace(/^[.\-–—•\s]+/, "").trim();
-      dm = dm.trim();
-      if (!nm) continue;
-      const p = parseDim(dm);
-      try {
-        await api.createVenueItem(venueId, { name: nm, dim: dm || null, w: p.w, h: p.h, unit: unit.trim() || null });
-        ok++;
-      } catch { /* bỏ qua dòng lỗi, báo tổng ở cuối */ }
+    let valid = 0;
+    let stoppedError = "";
+    const seen = new Set<string>();
+    try {
+      for (const line of lines) {
+        let nm = line, dm = "";
+        const tab = line.split("\t");
+        const dimAt = line.search(/Dimension\s*:/i);
+        const parenAt = line.search(/\((?=[^)]*[x×])/i);
+        if (tab.length > 1) { nm = tab[0]; dm = tab.slice(1).join(" "); }
+        else if (dimAt >= 0) { nm = line.slice(0, dimAt); dm = line.slice(dimAt).replace(/Dimension\s*:/i, ""); }
+        else if (parenAt > 0) { nm = line.slice(0, parenAt); dm = line.slice(parenAt); }
+        nm = nm.replace(/^[.\-–—•\s]+/, "").trim();
+        dm = dm.trim();
+        if (!nm) continue;
+        const key = `${normItemText(nm)}\u0000${normItemDim(dm)}\u0000${normItemUnit(unit)}`;
+        if (seen.has(key)) continue;
+        seen.add(key); valid++;
+        const p = parseDim(dm);
+        try {
+          await api.createVenueItem(venueId, { name: nm, dim: dm || null, w: p.w, h: p.h, unit: unit.trim() || null });
+          ok++;
+        } catch (ex) {
+          if (ex instanceof ApiError && ex.status === 409) continue;
+          stoppedError = errMsg(ex, "Lỗi không xác định");
+          break;
+        }
+      }
+    } finally {
+      busyRef.current = false; setBusy(false); setName(""); setDim("");
     }
-    setBusy(false); setName(""); setDim("");
-    toast(ok ? `Đã thêm ${ok}/${lines.length} dòng` : "Không thêm được dòng nào", ok ? "success" : "error");
-    onAdded();
+    if (stoppedError) {
+      toast(`Đã thêm ${ok}/${valid} hạng mục. Dừng vì: ${stoppedError}`, "error");
+      if (ok) onAdded();
+    } else if (ok) {
+      toast(ok === valid ? `Đã thêm ${ok} hạng mục` : `Đã thêm ${ok}/${valid} hạng mục, các dòng còn lại đã tồn tại`, "success");
+      onAdded();
+    } else if (valid) toast("Các hạng mục này đã tồn tại hoặc không thể thêm", "error");
   };
 
   return (
     <div className="vn-additem">
-      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)}
+      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
-      <input value={dim} onChange={(e) => setDim(e.target.value)} placeholder="Kích thước (vd: 6.5 x 1)" className="vn-ai-dim" aria-label="Kích thước"
+      <input value={dim} onChange={(e) => setDim(e.target.value)} placeholder="Kích thước (vd: 6.5 x 1)" className="vn-ai-dim" aria-label="Kích thước" disabled={busy}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
-      <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" />
+      <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Đơn vị" className="vn-ai-unit" aria-label="Đơn vị" list="vn-units" disabled={busy} />
       <datalist id="vn-units"><option value="m2" /><option value="bộ" /><option value="cái" /><option value="ghế" /><option value="tấm" /></datalist>
       <span className="vn-ai-sl muted">{sl != null ? <>= <b>{numText(sl)}</b></> : ""}</span>
-      <button className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
+      <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={busy}>{busy ? "…" : "Thêm"}</button>
       <div className="vn-ai-hint muted">Gõ xong nhấn Enter. Dán nhiều dòng cùng lúc cũng được.</div>
     </div>
   );
@@ -398,6 +491,7 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
   const [note, setNote] = useState(rec.note ?? "");
   const [active, setActive] = useState(rec.active);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -417,18 +511,19 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
   };
 
   const save = async () => {
+    if (savingRef.current) return;
     if (!name.trim()) { setErr("Chưa có tên hạng mục"); return; }
-    setErr(""); setSaving(true);
+    savingRef.current = true; setErr(""); setSaving(true);
     try {
       await api.updateVenueItem(rec.id, { name: name.trim(), dim: dim.trim() || null, w: toNum(w), h: toNum(h), unit: unit.trim() || null, qty: toNum(qty), note: note.trim() || null, active });
       toast("Đã lưu", "success"); onSaved();
-    } catch (ex) { setErr(errMsg(ex, "Lưu thất bại")); setSaving(false); }
+    } catch (ex) { setErr(errMsg(ex, "Lưu thất bại")); savingRef.current = false; setSaving(false); }
   };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Sửa hạng mục" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Sửa hạng mục</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
+        <div className="modal-head"><h3>Sửa hạng mục</h3><button type="button" className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           {err && <div className="err">⚠ {err}</div>}
           <div className="grid">
@@ -453,8 +548,8 @@ function ItemModal({ rec, onClose, onSaved }: { rec: VenueItemRow; onClose: () =
           </p>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Huỷ</button>
-          <button className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>
+          <button type="button" className="btn" onClick={onClose}>Huỷ</button>
+          <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>
         </div>
       </div>
     </div>
@@ -468,6 +563,7 @@ function MergeModal({ venue, venues, onClose, onDone }: {
   const [q, setQ] = useState("");
   const [intoId, setIntoId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const n = venue.items?.length ?? 0;
   const list = useMemo(() => {
     const nq = norm(q);
@@ -481,18 +577,23 @@ function MergeModal({ venue, venues, onClose, onDone }: {
   }, [onClose]);
 
   const submit = async () => {
-    if (intoId == null) return;
+    if (intoId == null || busyRef.current) return;
+    busyRef.current = true;
     const into = venues.find((v) => v.id === intoId);
-    if (!(await confirmModal("Gộp rạp", `Dồn ${n} hạng mục của "${venue.name}" sang "${into?.name}" rồi xoá "${venue.name}"?`, { danger: true, confirmText: "Gộp" }))) return;
+    if (!(await confirmModal("Gộp rạp", `Dồn ${n} hạng mục của "${venue.name}" sang "${into?.name}" rồi xoá "${venue.name}"?`, { danger: true, confirmText: "Gộp" }))) { busyRef.current = false; return; }
     setBusy(true);
-    try { const r = await api.mergeVenue(venue.id, intoId); toast(`Đã dồn ${r.movedItems} hạng mục sang "${r.into.name}"`, "success"); onDone(); }
-    catch (ex) { toast(errMsg(ex, "Gộp thất bại"), "error"); setBusy(false); }
+    try {
+      const r = await api.mergeVenue(venue.id, intoId);
+      const merged = r.removedDuplicates ? `, hợp nhất ${r.removedDuplicates} dòng trùng` : "";
+      toast(`Đã chuyển ${r.movedItems} hạng mục sang "${r.into.name}"${merged}`, "success"); onDone();
+    }
+    catch (ex) { toast(errMsg(ex, "Gộp thất bại"), "error"); busyRef.current = false; setBusy(false); }
   };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Gộp rạp" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Gộp “{venue.name}” vào rạp khác</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
+        <div className="modal-head"><h3>Gộp “{venue.name}” vào rạp khác</h3><button type="button" className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
           <p className="muted" style={{ marginTop: 0 }}>Chọn rạp giữ lại — {n} hạng mục sẽ dồn sang đó, rạp này bị xoá.</p>
           <input className="vs-pick-search" autoFocus placeholder="Tìm rạp…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -507,8 +608,8 @@ function MergeModal({ venue, venues, onClose, onDone }: {
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Huỷ</button>
-          <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || intoId == null}>{busy ? "Đang gộp…" : "Gộp"}</button>
+          <button type="button" className="btn" onClick={onClose}>Huỷ</button>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={busy || intoId == null}>{busy ? "Đang gộp…" : "Gộp"}</button>
         </div>
       </div>
     </div>

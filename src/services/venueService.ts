@@ -2,7 +2,7 @@
 // Dùng cho gợi ý khi gõ hạng mục trong báo giá + trang "Danh mục rạp".
 // Mẫu chuẩn theo customerService.ts: quyền bằng can(), lỗi bằng httpError, ghi audit mọi thao tác ghi.
 import type { Request } from "express";
-import { prisma } from "../db.js";
+import { prisma, type TxClient } from "../db.js";
 import { audit } from "../audit.js";
 import { can, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
@@ -122,7 +122,13 @@ export async function createVenue(req: Request) {
   requireManage(req);
   const b = req.body as Record<string, any>;
   await assertNoDup(b.name, b.region ?? "");
-  const venue = await prisma.venue.create({ data: { ...(b as { name: string }), createdById: req.session.userId ?? null } });
+  let venue;
+  try {
+    venue = await prisma.venue.create({ data: { ...(b as { name: string }), createdById: req.session.userId ?? null } });
+  } catch (e) {
+    if ((e as { code?: string })?.code === "P2002") throw httpError(409, `Đã có rạp "${b.name}" trong danh mục`);
+    throw e;
+  }
   await audit(req, "venue.create", { resource: "venue", resourceId: venue.id, after: venue });
   return venue;
 }
@@ -134,7 +140,13 @@ export async function updateVenue(req: Request) {
   if (!before) throw httpError(404, "Không tìm thấy rạp");
   const b = req.body as Record<string, any>;
   if (b.name != null || b.region != null) await assertNoDup(b.name ?? before.name, b.region ?? before.region, id);
-  const venue = await prisma.venue.update({ where: { id }, data: b });
+  let venue;
+  try {
+    venue = await prisma.venue.update({ where: { id }, data: b });
+  } catch (e) {
+    if ((e as { code?: string })?.code === "P2002") throw httpError(409, `Đã có rạp "${b.name ?? before.name}" trong danh mục`);
+    throw e;
+  }
   await audit(req, "venue.update", { resource: "venue", resourceId: id, before, after: venue });
   return venue;
 }
@@ -142,9 +154,13 @@ export async function updateVenue(req: Request) {
 export async function deleteVenue(req: Request) {
   requireManage(req);
   const id = (req.params as any).id as number;
-  const before = await prisma.venue.findUnique({ where: { id }, include: { items: true } });
-  if (!before) throw httpError(404, "Không tìm thấy rạp");
-  await prisma.venue.delete({ where: { id } });   // items xoá theo (onDelete: Cascade)
+  const before = await prisma.$transaction(async (tx) => {
+    await lockVenueItems(tx, id);
+    const before = await tx.venue.findUnique({ where: { id }, include: { items: true } });
+    if (!before) throw httpError(404, "Không tìm thấy rạp");
+    await tx.venue.delete({ where: { id } });   // items xoá theo (onDelete: Cascade)
+    return before;
+  });
   await audit(req, "venue.delete", { resource: "venue", resourceId: id, before });
   return { ok: true, removedItems: before.items.length };
 }
@@ -158,24 +174,38 @@ export async function mergeVenue(req: Request) {
   const id = (req.params as any).id as number;
   const intoId = (req.body as any).intoId as number;
   if (id === intoId) throw httpError(400, "Không thể gộp một rạp vào chính nó");
-  const [from, into] = await Promise.all([
-    prisma.venue.findUnique({ where: { id }, include: { items: true } }),
-    prisma.venue.findUnique({ where: { id: intoId } }),
-  ]);
-  if (!from) throw httpError(404, "Không tìm thấy rạp nguồn");
-  if (!into) throw httpError(404, "Không tìm thấy rạp đích");
-  const moved = await prisma.$transaction(async (tx) => {
-    // Nối tiếp sortOrder của rạp đích để thứ tự hạng mục không bị trộn lẫn.
+  const result = await prisma.$transaction(async (tx) => {
+    for (const venueId of [id, intoId].sort((a, b) => a - b)) await lockVenueItems(tx, venueId);
+    const [from, into] = await Promise.all([
+      tx.venue.findUnique({ where: { id }, include: { items: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] } } }),
+      tx.venue.findUnique({ where: { id: intoId } }),
+    ]);
+    if (!from) throw httpError(404, "Không tìm thấy rạp nguồn");
+    if (!into) throw httpError(404, "Không tìm thấy rạp đích");
+    const targetItems = await tx.venueItem.findMany({ where: { venueId: intoId } });
     const max = await tx.venueItem.aggregate({ where: { venueId: intoId }, _max: { sortOrder: true } });
     let next = (max._max.sortOrder ?? 0) + 1;
+    let movedItems = 0;
+    let removedDuplicates = 0;
     for (const it of from.items) {
+      const target = targetItems.find((candidate) => sameVenueItem(candidate, it));
+      if (target) {
+        const merged = mergeVenueItemMetadata(target, it);
+        await tx.venueItem.update({ where: { id: target.id }, data: merged });
+        Object.assign(target, merged);
+        await tx.venueItem.delete({ where: { id: it.id } });
+        removedDuplicates++;
+        continue;
+      }
       await tx.venueItem.update({ where: { id: it.id }, data: { venueId: intoId, sortOrder: next++ } });
+      targetItems.push(it);
+      movedItems++;
     }
     await tx.venue.delete({ where: { id } });
-    return from.items.length;
+    return { from, into, movedItems, removedDuplicates };
   });
-  await audit(req, "venue.merge", { resource: "venue", resourceId: intoId, before: from, after: { intoId, movedItems: moved } });
-  return { ok: true, movedItems: moved, into: { id: into.id, name: into.name } };
+  await audit(req, "venue.merge", { resource: "venue", resourceId: intoId, before: result.from, after: { intoId, movedItems: result.movedItems, removedDuplicates: result.removedDuplicates } });
+  return { ok: true, movedItems: result.movedItems, removedDuplicates: result.removedDuplicates, into: { id: result.into.id, name: result.into.name } };
 }
 
 // ── Hạng mục ────────────────────────────────────────────────────────────────
@@ -195,17 +225,83 @@ const itemData = (b: Record<string, any>) => {
   return d;
 };
 
+const venueItemIdentitySelect = { id: true, name: true, dim: true, widthM: true, heightM: true, unit: true } as const;
+const normItemText = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+const normItemDim = (v: unknown) => normItemText(v).replace(/\s+/g, "").replace(/×/g, "x").replace(/,/g, ".");
+const normItemUnit = (v: unknown) => {
+  const unit = normItemText(v);
+  return /^m\s*(?:\^?\s*2|²)$/.test(unit) ? "m2" : unit;
+};
+const normItemNumber = (v: unknown) => {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const dimensionsFromText = (v: unknown): [number, number] | null => {
+  const nums = normItemDim(v).match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  return nums.length >= 2 ? [nums[0], nums[1]] : null;
+};
+const dimensionsOf = (it: Record<string, unknown>): [number, number] | null => {
+  const w = normItemNumber(it.widthM);
+  const h = normItemNumber(it.heightM);
+  return w != null && h != null ? [w, h] : dimensionsFromText(it.dim);
+};
+const sameVenueItem = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+  if (normItemText(a.name) !== normItemText(b.name) || normItemUnit(a.unit) !== normItemUnit(b.unit)) return false;
+  const ad = dimensionsOf(a);
+  const bd = dimensionsOf(b);
+  if (ad && bd) return ad[0] === bd[0] && ad[1] === bd[1];
+  return normItemDim(a.dim) === normItemDim(b.dim);
+};
+
+const mergeVenueItemMetadata = (target: Record<string, any>, source: Record<string, any>) => {
+  const targetQty = normItemNumber(target.quantity);
+  const sourceQty = normItemNumber(source.quantity);
+  if (targetQty != null && sourceQty != null && targetQty !== sourceQty) {
+    throw httpError(409, `Hạng mục "${source.name}" có số lượng khác nhau (${targetQty} và ${sourceQty}); hãy sửa cho khớp trước khi gộp rạp`);
+  }
+  const notes = [target.note, source.note]
+    .map((v) => String(v ?? "").trim())
+    .filter((v, i, arr) => v && arr.findIndex((x) => normItemText(x) === normItemText(v)) === i);
+  const targetCategory = String(target.category ?? "").trim();
+  const sourceCategory = String(source.category ?? "").trim();
+  if (targetCategory && sourceCategory && normItemText(targetCategory) !== normItemText(sourceCategory)) {
+    notes.push(`Nhóm ở rạp nguồn: ${sourceCategory}`);
+  }
+  const dimensions = dimensionsOf(target) ?? dimensionsOf(source);
+  return {
+    category: targetCategory || sourceCategory,
+    dim: target.dim ?? source.dim,
+    widthM: dimensions?.[0] ?? null,
+    heightM: dimensions?.[1] ?? null,
+    quantity: target.quantity ?? source.quantity,
+    note: notes.join("\n") || null,
+    active: Boolean(target.active || source.active),
+  };
+};
+
+class VenueItemMovedDuringLock extends Error {}
+
+async function lockVenueItems(tx: TxClient, venueId: number) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-items:${venueId}`}))`;
+}
+
 export async function createItem(req: Request) {
   requireManage(req);
   const venueId = (req.params as any).id as number;
-  const venue = await prisma.venue.findUnique({ where: { id: venueId } });
-  if (!venue) throw httpError(404, "Không tìm thấy rạp");
   const data = itemData(req.body as Record<string, any>);
-  if (data.sortOrder === undefined) {
-    const max = await prisma.venueItem.aggregate({ where: { venueId }, _max: { sortOrder: true } });
-    data.sortOrder = (max._max.sortOrder ?? 0) + 1;
-  }
-  const item = await prisma.venueItem.create({ data: { ...(data as any), venueId } });
+  const item = await prisma.$transaction(async (tx) => {
+    await lockVenueItems(tx, venueId);
+    const venue = await tx.venue.findUnique({ where: { id: venueId }, select: { id: true } });
+    if (!venue) throw httpError(404, "Không tìm thấy rạp");
+    const existing = await tx.venueItem.findMany({ where: { venueId }, select: venueItemIdentitySelect });
+    if (existing.some((it) => sameVenueItem(it, data))) throw httpError(409, `Đã có hạng mục "${String(data.name || "").trim()}" trong rạp này`);
+    if (data.sortOrder === undefined) {
+      const max = await tx.venueItem.aggregate({ where: { venueId }, _max: { sortOrder: true } });
+      data.sortOrder = (max._max.sortOrder ?? 0) + 1;
+    }
+    return tx.venueItem.create({ data: { ...(data as any), venueId } });
+  });
   await audit(req, "venue.item.create", { resource: "venueItem", resourceId: item.id, after: item });
   return itemOut(item);
 }
@@ -213,19 +309,57 @@ export async function createItem(req: Request) {
 export async function updateItem(req: Request) {
   requireManage(req);
   const itemId = (req.params as any).itemId as number;
-  const before = await prisma.venueItem.findUnique({ where: { id: itemId } });
-  if (!before) throw httpError(404, "Không tìm thấy hạng mục");
-  const item = await prisma.venueItem.update({ where: { id: itemId }, data: itemData(req.body as Record<string, any>) });
-  await audit(req, "venue.item.update", { resource: "venueItem", resourceId: itemId, before, after: item });
-  return itemOut(item);
+  const data = itemData(req.body as Record<string, any>);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { before, item } = await prisma.$transaction(async (tx) => {
+        const found = await tx.venueItem.findUnique({ where: { id: itemId }, select: { venueId: true } });
+        if (!found) throw httpError(404, "Không tìm thấy hạng mục");
+        await lockVenueItems(tx, found.venueId);
+        const before = await tx.venueItem.findUnique({ where: { id: itemId } });
+        if (!before) throw httpError(404, "Không tìm thấy hạng mục");
+        if (before.venueId !== found.venueId) throw new VenueItemMovedDuringLock();
+        const next = { ...before, ...data };
+        const existing = await tx.venueItem.findMany({ where: { venueId: before.venueId, id: { not: itemId } }, select: venueItemIdentitySelect });
+        if (!sameVenueItem(before, next) && existing.some((it) => sameVenueItem(it, next))) {
+          throw httpError(409, `Đã có hạng mục "${String(next.name || "").trim()}" trong rạp này`);
+        }
+        const item = await tx.venueItem.update({ where: { id: itemId }, data });
+        return { before, item };
+      });
+      await audit(req, "venue.item.update", { resource: "venueItem", resourceId: itemId, before, after: item });
+      return itemOut(item);
+    } catch (e) {
+      if (e instanceof VenueItemMovedDuringLock && attempt === 0) continue;
+      if (e instanceof VenueItemMovedDuringLock) throw httpError(409, "Hạng mục vừa được chuyển sang rạp khác, vui lòng thử lại");
+      throw e;
+    }
+  }
+  throw httpError(409, "Hạng mục vừa được chuyển sang rạp khác, vui lòng thử lại");
 }
 
 export async function deleteItem(req: Request) {
   requireManage(req);
   const itemId = (req.params as any).itemId as number;
-  const before = await prisma.venueItem.findUnique({ where: { id: itemId } });
-  if (!before) throw httpError(404, "Không tìm thấy hạng mục");
-  await prisma.venueItem.delete({ where: { id: itemId } });
-  await audit(req, "venue.item.delete", { resource: "venueItem", resourceId: itemId, before });
-  return { ok: true };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const before = await prisma.$transaction(async (tx) => {
+        const found = await tx.venueItem.findUnique({ where: { id: itemId }, select: { venueId: true } });
+        if (!found) throw httpError(404, "Không tìm thấy hạng mục");
+        await lockVenueItems(tx, found.venueId);
+        const before = await tx.venueItem.findUnique({ where: { id: itemId } });
+        if (!before) throw httpError(404, "Không tìm thấy hạng mục");
+        if (before.venueId !== found.venueId) throw new VenueItemMovedDuringLock();
+        await tx.venueItem.delete({ where: { id: itemId } });
+        return before;
+      });
+      await audit(req, "venue.item.delete", { resource: "venueItem", resourceId: itemId, before });
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof VenueItemMovedDuringLock && attempt === 0) continue;
+      if (e instanceof VenueItemMovedDuringLock) throw httpError(409, "Hạng mục vừa được chuyển sang rạp khác, vui lòng thử lại");
+      throw e;
+    }
+  }
+  throw httpError(409, "Hạng mục vừa được chuyển sang rạp khác, vui lòng thử lại");
 }

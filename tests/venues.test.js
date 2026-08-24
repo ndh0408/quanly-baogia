@@ -82,6 +82,14 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     expect(res.body.unit).toBe("m2");
   });
 
+  it("chặn hạng mục trùng dù khác hoa thường, khoảng trắng và cách ghi kích thước (409)", async () => {
+    const res = await admin.post(`/api/venues/${venueId}/items`).send({
+      name: "  QUẦY   BẮP 1 ", dim: "2,5 × 1", unit: " m² ",
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("Đã có hạng mục");
+  });
+
   it("từ chối kích thước ÂM (400)", async () => {
     const res = await admin.post(`/api/venues/${venueId}/items`).send({ cat: "X", name: "Sai", w: -3 });
     expect(res.status).toBe(400);
@@ -93,6 +101,58 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     const mine = res.body.entries.filter((e) => e.venue === `${TAG} CGV Test`);
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ name: "Quầy bắp 1", venue: `${TAG} CGV Test`, region: "HCM", w: 2.5, h: 1, unit: "m2" });
+  });
+
+  it("hai request thêm giống nhau chạy đồng thời chỉ tạo đúng một hạng mục", async () => {
+    const body = { name: `${TAG} Đồng thời`, dim: "3 x 1,5", w: 3, h: 1.5, unit: "m2" };
+    const results = await Promise.all([
+      admin.post(`/api/venues/${venueId}/items`).send(body),
+      admin.post(`/api/venues/${venueId}/items`).send(body),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    const rows = await prisma.venueItem.findMany({ where: { venueId, name: body.name } });
+    expect(rows).toHaveLength(1);
+    await admin.delete(`/api/venues/items/${rows[0].id}`).expect(200);
+  });
+
+  it("chặn sửa một hạng mục thành bản trùng với hạng mục khác", async () => {
+    const temp = await admin.post(`/api/venues/${venueId}/items`).send({ name: `${TAG} Tạm`, dim: "1 x 1", unit: "m2" });
+    expect(temp.status).toBe(201);
+    const res = await admin.put(`/api/venues/items/${temp.body.id}`).send({
+      name: "quầy bắp 1", dim: "(2,5W×1H)m", unit: "M2",
+    });
+    expect(res.status).toBe(409);
+    await admin.delete(`/api/venues/items/${temp.body.id}`).expect(200);
+  });
+
+  it("hai request sửa đồng thời không thể tạo hai hạng mục giống nhau", async () => {
+    const [a, b] = await Promise.all([
+      admin.post(`/api/venues/${venueId}/items`).send({ name: `${TAG} Race A`, dim: "1 x 1", w: 1, h: 1, unit: "m2" }),
+      admin.post(`/api/venues/${venueId}/items`).send({ name: `${TAG} Race B`, dim: "2 x 1", w: 2, h: 1, unit: "m2" }),
+    ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    const next = { name: `${TAG} Cùng đích`, dim: "4 x 2", w: 4, h: 2, unit: "m2" };
+    const results = await Promise.all([
+      admin.put(`/api/venues/items/${a.body.id}`).send(next),
+      admin.put(`/api/venues/items/${b.body.id}`).send(next),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(await prisma.venueItem.count({ where: { venueId, name: next.name } })).toBe(1);
+    await Promise.all([admin.delete(`/api/venues/items/${a.body.id}`), admin.delete(`/api/venues/items/${b.body.id}`)]);
+  });
+
+  it("hai rạp đổi đồng thời về cùng tên + khu vực trả một 200 và một 409", async () => {
+    const [a, b] = await Promise.all([
+      admin.post("/api/venues").send({ name: `${TAG} Rename A`, region: "HCM" }),
+      admin.post("/api/venues").send({ name: `${TAG} Rename B`, region: "HCM" }),
+    ]);
+    const next = { name: `${TAG} Rename chung`, region: "HCM" };
+    const results = await Promise.all([
+      admin.put(`/api/venues/${a.body.id}`).send(next),
+      admin.put(`/api/venues/${b.body.id}`).send(next),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    await Promise.all([admin.delete(`/api/venues/${a.body.id}`), admin.delete(`/api/venues/${b.body.id}`)]);
   });
 
   it("sửa hạng mục", async () => {
@@ -117,15 +177,51 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     const dup = await admin.post("/api/venues").send({ name: `${TAG} CGV Test (trùng)`, region: "HCM" });
     expect(dup.status).toBe(201);
     await admin.post(`/api/venues/${dup.body.id}/items`).send({ cat: "Cover màn hình", name: "Cover 1", unit: "bộ", qty: 6 }).expect(201);
+    const targetBefore = await admin.get(`/api/venues/${venueId}`);
+    const same = targetBefore.body.items.find((i) => i.name === "Quầy bắp 1 (sửa)");
+    await admin.post(`/api/venues/${dup.body.id}/items`).send({
+      cat: "Nhóm nguồn khác", name: same.name, dim: same.dim, w: same.w, h: same.h, unit: same.unit, note: "Ghi chú ở rạp nguồn",
+    }).expect(201);
 
     const res = await admin.post(`/api/venues/${dup.body.id}/merge`).send({ intoId: venueId });
     expect(res.status).toBe(200);
     expect(res.body.movedItems).toBe(1);
+    expect(res.body.removedDuplicates).toBe(1);
 
     const gone = await admin.get(`/api/venues/${dup.body.id}`);
     expect(gone.status).toBe(404);
     const into = await admin.get(`/api/venues/${venueId}`);
     expect(into.body.items.map((i) => i.name)).toContain("Cover 1");
+    expect(into.body.items.filter((i) => i.name === same.name)).toHaveLength(1);
+    const merged = into.body.items.find((i) => i.name === same.name);
+    expect(merged.note).toContain("PP in KTS");
+    expect(merged.note).toContain("Ghi chú ở rạp nguồn");
+    expect(merged.note).toContain("Nhóm ở rạp nguồn: Nhóm nguồn khác");
+  });
+
+  it("không tự chọn số lượng khi hai hạng mục trùng có số lượng khác nhau", async () => {
+    const target = await admin.post(`/api/venues/${venueId}/items`).send({ name: `${TAG} Ghế`, unit: "ghế", qty: 10 });
+    const sourceVenue = await admin.post("/api/venues").send({ name: `${TAG} Rạp lệch SL`, region: "HCM" });
+    await admin.post(`/api/venues/${sourceVenue.body.id}/items`).send({ name: `${TAG} Ghế`, unit: "ghế", qty: 12 }).expect(201);
+    const merge = await admin.post(`/api/venues/${sourceVenue.body.id}/merge`).send({ intoId: venueId });
+    expect(merge.status).toBe(409);
+    expect(merge.body.error).toContain("số lượng khác nhau");
+    expect((await admin.get(`/api/venues/${sourceVenue.body.id}`)).status).toBe(200);
+    await admin.delete(`/api/venues/${sourceVenue.body.id}`).expect(200);
+    await admin.delete(`/api/venues/items/${target.body.id}`).expect(200);
+  });
+
+  it("gộp hạng mục trùng giữ nguyên cặp rộng/cao và bổ sung chuỗi kích thước còn thiếu", async () => {
+    const itemName = `${TAG} Metadata kích thước`;
+    const target = await admin.post(`/api/venues/${venueId}/items`).send({ name: itemName, w: 2.4, h: 1.3, unit: "m2" });
+    const sourceVenue = await admin.post("/api/venues").send({ name: `${TAG} Rạp metadata KT`, region: "HCM" });
+    await admin.post(`/api/venues/${sourceVenue.body.id}/items`).send({ name: itemName, dim: "2,4 x 1,3", w: 2.4, h: 1.3, unit: "m²" }).expect(201);
+    const merge = await admin.post(`/api/venues/${sourceVenue.body.id}/merge`).send({ intoId: venueId });
+    expect(merge.status).toBe(200);
+    const after = await admin.get(`/api/venues/${venueId}`);
+    const merged = after.body.items.find((i) => i.id === target.body.id);
+    expect(merged).toMatchObject({ dim: "2,4 x 1,3", w: 2.4, h: 1.3 });
+    await admin.delete(`/api/venues/items/${target.body.id}`).expect(200);
   });
 
   it("chặn gộp rạp vào CHÍNH NÓ (400)", async () => {

@@ -308,7 +308,7 @@ export const api = {
   updateVenue: (id: number, data: VenueInput) => req<Venue>(`/venues/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteVenue: (id: number) => req<{ ok: boolean; removedItems: number }>(`/venues/${id}`, { method: "DELETE" }),
   mergeVenue: (id: number, intoId: number) =>
-    req<{ ok: boolean; movedItems: number; into: { id: number; name: string } }>(`/venues/${id}/merge`, { method: "POST", body: JSON.stringify({ intoId }) }),
+    req<{ ok: boolean; movedItems: number; removedDuplicates: number; into: { id: number; name: string } }>(`/venues/${id}/merge`, { method: "POST", body: JSON.stringify({ intoId }) }),
   createVenueItem: (venueId: number, data: VenueItemInput) => req<VenueItemRow>(`/venues/${venueId}/items`, { method: "POST", body: JSON.stringify(data) }),
   updateVenueItem: (itemId: number, data: VenueItemInput) => req<VenueItemRow>(`/venues/items/${itemId}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteVenueItem: (itemId: number) => req<{ ok: boolean }>(`/venues/items/${itemId}`, { method: "DELETE" }),
