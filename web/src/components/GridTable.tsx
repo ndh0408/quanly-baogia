@@ -53,6 +53,7 @@ export function GridTable(props: GridTableProps) {
   const focusPend = useRef<{ i: number; f: string } | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const selRef = useRef<Sel | null>(null);
+  const clearOutsideRef = useRef<() => void>(() => {});
   const navigatingRef = useRef(false);
   const pickingRef = useRef(false);
   // CHẾ ĐỘ Ô — đủ 3 chế độ như Excel thật:
@@ -99,7 +100,12 @@ export function GridTable(props: GridTableProps) {
     if (m && m.i === i && m.f === f) return;
     pushUndo(); editUndoRef.current = { i, f };
   };
-  const focusCell = (i: number, f: string) => { focusPend.current = { i, f }; };
+  const focusCell = (i: number, f: string, preserveSelection = false) => {
+    if (!preserveSelection) selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
+    editingRef.current = false;
+    editModeRef.current = null;
+    focusPend.current = { i, f };
+  };
 
   // ── A1 addressing + công thức ───────────────────────────────────────────────
   const ADDR: { f: string; ro?: boolean; L: string }[] = [
@@ -270,11 +276,18 @@ export function GridTable(props: GridTableProps) {
     el.dispatchEvent(new Event("input", { bubbles: true }));   // đường onInput sẵn có: ghi model live + eval + sáng ref
     return true;
   };
-  const moveTo = (row: number, field: string, extend: boolean) => {
+  const moveTo = (row: number, field: string, extend: boolean, prefer: -1 | 0 | 1 = 0) => {
     row = Math.max(0, Math.min(items.length - 1, row));
     const ci = Math.max(0, Math.min(FIELDS.length - 1, fieldIdx(field)));
     let f2 = FIELDS[ci];
-    if (!cellEl(row, f2)) { let found: string | null = null; for (let d = 1; d < FIELDS.length; d++) { if (cellEl(row, FIELDS[ci - d])) { found = FIELDS[ci - d]; break; } if (cellEl(row, FIELDS[ci + d])) { found = FIELDS[ci + d]; break; } } f2 = found || "name"; }
+    if (!cellEl(row, f2)) {
+      let found: string | null = null;
+      for (let d = 1; d < FIELDS.length && !found; d++) {
+        const order = prefer > 0 ? [ci + d, ci - d] : prefer < 0 ? [ci - d, ci + d] : [ci - d, ci + d];
+        for (const idx of order) if (idx >= 0 && idx < FIELDS.length && cellEl(row, FIELDS[idx])) { found = FIELDS[idx]; break; }
+      }
+      f2 = found || "name";
+    }
     const sel = selRef.current;
     if (extend && sel) selRef.current = { anchor: sel.anchor, focus: { row, field: f2 } };
     else selRef.current = { anchor: { row, field: f2 }, focus: { row, field: f2 } };
@@ -326,6 +339,7 @@ export function GridTable(props: GridTableProps) {
   const clearRefPick = () => tableRef.current?.querySelectorAll("td.cell-ref-pick").forEach((t) => t.classList.remove("cell-ref-pick"));
   const paintRefPick = (a: Addr, b: Addr) => { clearRefPick(); const ca = idxOfL(a.L), cb = idxOfL(b.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) tdOf(r, ADDR[c].f)?.classList.add("cell-ref-pick"); };
   const clearActiveRefs = () => tableRef.current?.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); (t as HTMLElement).style.removeProperty("--ref-color"); });
+  clearOutsideRef.current = () => { clearSel(); clearActiveRefs(); };
   const highlightActiveFormulaRefs = (text: string) => {
     clearActiveRefs();
     if (!text || !String(text).trim().startsWith("=")) return;
@@ -664,7 +678,7 @@ export function GridTable(props: GridTableProps) {
       autoEnableGroupSub(startRow, startRow + built.length - 1);
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[0] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
-      focusCell(startRow, FIELDS[0]);
+      focusCell(startRow, FIELDS[0], true);
       const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
@@ -693,7 +707,7 @@ export function GridTable(props: GridTableProps) {
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
     selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
-    focusCell(startRow, FIELDS[startCol]);
+    focusCell(startRow, FIELDS[startCol], true);
     toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
   };
 
@@ -785,7 +799,7 @@ export function GridTable(props: GridTableProps) {
       if (editing && !ctrl) return;   // đang sửa: Home/End chạy trong chữ như thường
       e.preventDefault(); e.stopPropagation();
       const toCol = e.key === "Home" ? 0 : lastCol;
-      moveTo(ctrl ? (e.key === "Home" ? 0 : lastRow) : i, FIELDS[toCol], e.shiftKey);
+      moveTo(ctrl ? (e.key === "Home" ? 0 : lastRow) : i, FIELDS[toCol], e.shiftKey, e.key === "End" ? -1 : 1);
       return;
     }
     if (e.key === "PageUp" || e.key === "PageDown") {
@@ -835,7 +849,7 @@ export function GridTable(props: GridTableProps) {
       }
       // Shift+Enter = đi LÊN (Excel). Xuống dòng trong ô nhiều dòng = Alt+Enter (xử lý ở trên).
       if (e.shiftKey) { onChange(); moveTo(i - 1, f, false); return; }
-      if (i >= items.length - 1) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); selRef.current = { anchor: { row: i + 1, field: f }, focus: { row: i + 1, field: f } }; focusCell(i + 1, f); onChange(); }
+      if (i >= items.length - 1) { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); focusCell(i + 1, f); onChange(); }
       else { onChange(); moveTo(i + 1, f, false); }
       return;
     }
@@ -843,7 +857,7 @@ export function GridTable(props: GridTableProps) {
     if (ctrl && editable && (e.key === "+" || e.key === "=" || e.key === "-")) {
       e.preventDefault(); e.stopPropagation();
       if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); items.splice(from, n); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
-      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(i + 1, 0, nit); selRef.current = { anchor: { row: i + 1, field: f }, focus: { row: i + 1, field: f } }; focusCell(i + 1, "name"); onChange(); }
+      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(i + 1, 0, nit); focusCell(i + 1, "name"); onChange(); }
       return;
     }
     if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
@@ -894,12 +908,12 @@ export function GridTable(props: GridTableProps) {
         let nc = ci + (e.shiftKey ? -1 : 1), nr = i;
         if (nc > rcSel.c1) { nc = rcSel.c0; nr = i + 1 > rcSel.r1 ? rcSel.r0 : i + 1; }
         if (nc < rcSel.c0) { nc = rcSel.c1; nr = i - 1 < rcSel.r0 ? rcSel.r1 : i - 1; }
-        moveTo(nr, FIELDS[nc], false);
+        moveTo(nr, FIELDS[nc], false, e.shiftKey ? -1 : 1);
         selRef.current = keep; paintSel();
         return;
       }
-      if (!e.shiftKey && (ci < FIELDS.length - 1 || i < items.length - 1)) { e.preventDefault(); e.stopPropagation(); if (ci < FIELDS.length - 1) moveTo(i, FIELDS[ci + 1], false); else moveTo(i + 1, FIELDS[0], false); }
-      else if (e.shiftKey && (ci > 0 || i > 0)) { e.preventDefault(); e.stopPropagation(); if (ci > 0) moveTo(i, FIELDS[ci - 1], false); else moveTo(i - 1, FIELDS[FIELDS.length - 1], false); }
+      if (!e.shiftKey && (ci < FIELDS.length - 1 || i < items.length - 1)) { e.preventDefault(); e.stopPropagation(); if (ci < FIELDS.length - 1) moveTo(i, FIELDS[ci + 1], false, 1); else moveTo(i + 1, FIELDS[0], false, 1); }
+      else if (e.shiftKey && (ci > 0 || i > 0)) { e.preventDefault(); e.stopPropagation(); if (ci > 0) moveTo(i, FIELDS[ci - 1], false, -1); else moveTo(i - 1, FIELDS[FIELDS.length - 1], false, -1); }
       return;
     }
     // Alt+↓ — mở danh sách gợi ý của ô (như Excel mở dropdown trong ô): ô Hạng Mục → gợi ý theo rạp.
@@ -922,11 +936,11 @@ export function GridTable(props: GridTableProps) {
       // Ctrl/⌘ + mũi tên → nhảy tới BIÊN bảng (thêm Shift = kéo vùng chọn tới biên), như Excel.
       if (ctrl) {
         e.preventDefault(); e.stopPropagation();
-        moveTo(up ? 0 : down ? lastRow : i, FIELDS[left ? 0 : right ? lastCol : ci], e.shiftKey);
+        moveTo(up ? 0 : down ? lastRow : i, FIELDS[left ? 0 : right ? lastCol : ci], e.shiftKey, right ? 1 : left ? -1 : 0);
         return;
       }
       e.preventDefault(); e.stopPropagation();
-      moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey);
+      moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey, right ? 1 : left ? -1 : 0);
       return;
     }
     // GÕ LÀ ĐÈ (type-to-replace — READY → ENTER, đúng nếp Excel): ô đang CHỌN, gõ ký tự thường/
@@ -977,6 +991,21 @@ export function GridTable(props: GridTableProps) {
       }, 60);
     }
   };
+
+  // Safari/macOS không phải lúc nào cũng blur input khi bấm vùng không nhận focus. Dọn selection
+  // ngay từ pointerdown ngoài lưới để màu/target không bị treo khác nhau giữa các trình duyệt.
+  useEffect(() => {
+    const onOutsidePointer = (ev: PointerEvent) => {
+      const tb = tableRef.current, target = ev.target as HTMLElement | null;
+      if (!tb || !target || tb.contains(target)) return;
+      if (target.closest(".tbl-scroll, .fx-bar, .vs-auto, .fx-auto")) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active && tb.contains(active)) active.blur();
+      clearOutsideRef.current();
+    };
+    document.addEventListener("pointerdown", onOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", onOutsidePointer, true);
+  }, []);
 
   // ── ô SỐ (công thức + gom nghìn live + autocomplete) / text / textarea ─────────
   const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
@@ -1050,7 +1079,8 @@ export function GridTable(props: GridTableProps) {
         const rec = items[i] as Record<string, unknown>;
         const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
         if (!fx) { const want = NUMERIC.has(f) ? M.fmtNumCell(rec[f] as number) : ((rec[f] as string) ?? ""); if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); } }
-        navigatingRef.current = true; el.focus(); try { el.select(); } catch { /* */ } navigatingRef.current = false;
+        navigatingRef.current = true; el.focus(); navigatingRef.current = false;
+        lockCell(el);
       }
     }
     paintSel();

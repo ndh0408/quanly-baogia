@@ -1533,7 +1533,7 @@ th.sortable[aria-sort="descending"] {
   position: relative;
 }
 .excel-table td.cell-selected {
-  background: #d7e8ff;
+  background: transparent;
 }
 .excel-table td.cell-selected input,
 .excel-table td.cell-selected textarea {
@@ -1541,7 +1541,7 @@ th.sortable[aria-sort="descending"] {
 }
 .excel-table td.cell-anchor {
   box-shadow: inset 0 0 0 2px #1769d6;
-  background: #c2dbff;
+  background: transparent;
 }
 /* Cell holding a formula: a small CLICKABLE green "ƒ" marker in the corner (like
    Excel/Sheets). Real <button> (not a ::after) so EVERYONE — incl. read-only viewers
