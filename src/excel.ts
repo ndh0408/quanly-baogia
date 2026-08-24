@@ -1003,6 +1003,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     subtotal,
     vat: subtotal * vatPct / 100,
     total: subtotal * (1 + vatPct / 100),
+    subtotalCell: `${t.subtotal.valueCell}${subtotalRow}`,
   };
 }
 
@@ -1158,6 +1159,9 @@ function copyWorksheetToWorkbook(srcWs: any, dstWb: any, newName: any) {
 
 async function buildSummaryBuffer(sheetTotals: any, quote: any, vatPct: any) {
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties.fullCalcOnLoad = true;
+  (wb.calcProperties as any).forceFullCalc = true;
+  (wb.calcProperties as any).calcMode = "auto";
   addSummarySheet(wb, sheetTotals, quote, vatPct);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
@@ -1204,7 +1208,8 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
     const r = headerRow + 1 + idx;
     ws.getCell(r, 1).value = idx + 1;
     ws.getCell(r, 2).value = neutralizeFormula(st.name);
-    ws.getCell(r, 3).value = st.subtotal;
+    const sheetRef = `'${String(st.name || "").replace(/'/g, "''")}'!${st.subtotalCell}`;
+    ws.getCell(r, 3).value = { formula: sheetRef, result: st.subtotal };
     ws.getCell(r, 3).numFmt = "#,##0";
     for (let c = 1; c <= 3; c++) {
       const cell = ws.getCell(r, c);
@@ -1228,12 +1233,20 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
   const subtotalVal = subtotalAll;
   const vatVal = Math.round(subtotalVal * vatPct / 100);
   const grandTotal = subtotalVal + vatVal - discountVal;
-  const totalRows = [
-    { label: "Tổng cộng", value: subtotalVal },
-    { label: `VAT (${vatPct}%)`, value: vatVal },
+  const firstSheetRow = headerRow + 1;
+  const lastSheetRow = headerRow + sheetTotals.length;
+  const subtotalSummaryRow = totalsStart;
+  const vatSummaryRow = totalsStart + 1;
+  const discountSummaryRow = discountVal > 0 ? totalsStart + 2 : null;
+  const totalRows: { label: string; value: number; formula?: string }[] = [
+    { label: "Tổng cộng", value: subtotalVal, formula: sheetTotals.length ? `SUM(C${firstSheetRow}:C${lastSheetRow})` : "0" },
+    { label: `VAT (${vatPct}%)`, value: vatVal, formula: `ROUND(C${subtotalSummaryRow}*${vatPct}%,0)` },
   ];
   if (discountVal > 0) totalRows.push({ label: "Giảm giá", value: discountVal });
-  totalRows.push({ label: "Thành tiền", value: grandTotal });
+  totalRows.push({
+    label: "Thành tiền", value: grandTotal,
+    formula: `C${subtotalSummaryRow}+C${vatSummaryRow}${discountSummaryRow ? `-C${discountSummaryRow}` : ""}`,
+  });
   totalRows.forEach((tr, i: any) => {
     const r = totalsStart + i;
     ws.mergeCells(r, 1, r, 2);
@@ -1248,7 +1261,7 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
       left: { style: "medium" }, right: { style: "thin" },
     };
     const valCell = ws.getCell(r, 3);
-    valCell.value = tr.value;
+    valCell.value = tr.formula ? { formula: tr.formula, result: tr.value } : tr.value;
     valCell.numFmt = "#,##0";
     valCell.font = { name: "Times New Roman", family: 1, size: 11, bold: true, color: { argb: "FFC00000" } };
     valCell.alignment = { horizontal: "right", vertical: "middle" };
@@ -1313,7 +1326,7 @@ export async function buildQuoteBuffer(quote: any) {
 
   const sheetBuffers: Buffer[] = [];
   const sheetNames: string[] = [];
-  const sheetTotals: { name: string; subtotal: number; vat: number; total: number }[] = [];
+  const sheetTotals: { name: string; subtotal: number; vat: number; total: number; subtotalCell: string }[] = [];
   const usedNames = new Set();
   const uniq = (name: any) => {
     let n = name, i = 2;

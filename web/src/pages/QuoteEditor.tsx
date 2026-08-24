@@ -30,6 +30,14 @@ const CUST_DOT: Record<string, string> = { approved: "✓", rejected: "✗" };
 const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ";
 type WinDirty = Window & { __editorDirty?: boolean };
 
+function SummaryFormula({ label, formula, value, prefix = "", danger = false }: { label: string; formula: string; value: number; prefix?: string; danger?: boolean }) {
+  const show = () => toast(`${label}: ${formula} = ${prefix}${M.fmtMoney(value)}`, "info");
+  return <span className={`summary-formula-value${danger ? " danger" : ""}`} onDoubleClick={show} title={`Bấm đúp hoặc bấm ƒ để xem: ${formula}`}>
+    <span>{prefix}{M.fmtMoney(value)}</span>
+    <button type="button" className="summary-fx-btn" onClick={show} aria-label={`Xem công thức ${label}`}>ƒ</button>
+  </span>;
+}
+
 let _companies: EditorCompany[] | null = null;
 let _templates: EditorTemplate[] | null = null;
 
@@ -463,19 +471,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             <table className="summary-table">
               <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col">Khách duyệt</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
               <tbody>
-                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const sub = M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{s.name || t?.name || `Sheet ${i + 1}`}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}>{M.fmtMoney(sub)}</td></tr>; })}
+                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const sub = M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={`=TỔNG_SHEET("${name}")`} value={sub} /></td></tr>; })}
               </tbody>
               <tfoot>
                 {/* Chỉ cộng các sheet KHÁCH ĐÃ DUYỆT — báo giá nhiều sheet hay chốt từng phần. */}
                 {sheets.some((s) => s.custStatus === "approved") && (
                   <tr><td colSpan={3}>Tổng phần khách đã duyệt</td><td style={{ textAlign: "right" }}>
-                    <strong className="txt-ok">{M.fmtMoney(sheets.reduce((acc, s) => { if (s.custStatus !== "approved") return acc; const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0))}</strong>
+                    <SummaryFormula label="Tổng phần khách đã duyệt" formula="=SUM(Các sheet khách đã duyệt)" value={sheets.reduce((acc, s) => { if (s.custStatus !== "approved") return acc; const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0)} />
                   </td></tr>
                 )}
-                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.subtotal)}</td></tr>
-                <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}>{M.fmtMoney(tt.vat)}</td></tr>
-                {tt.discount > 0 && <tr><td colSpan={3}>Giảm giá</td><td style={{ textAlign: "right" }}>-{M.fmtMoney(tt.discount)}</td></tr>}
-                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right", color: "var(--danger)" }}><strong>{M.fmtMoney(tt.total)}</strong></td></tr>
+                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=SUM(Tổng từng sheet)" value={tt.subtotal} /></td></tr>
+                <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}><SummaryFormula label="VAT" formula={`=ROUND(Tổng cộng*${Number(q.vatPercent) || 0}%;0)`} value={tt.vat} /></td></tr>
+                {tt.discount > 0 && <tr><td colSpan={3}>Giảm giá</td><td style={{ textAlign: "right" }}><SummaryFormula label="Giảm giá" formula="=Giảm giá đã nhập" value={tt.discount} prefix="-" /></td></tr>}
+                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><SummaryFormula label="Thành tiền" formula={`=Tổng cộng+VAT${tt.discount > 0 ? "-Giảm giá" : ""}`} value={tt.total} danger /></td></tr>
               </tfoot>
             </table>
           </div>

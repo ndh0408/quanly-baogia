@@ -3216,6 +3216,34 @@ textarea[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+.summary-formula-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  cursor: help;
+}
+.summary-formula-value.danger {
+  color: var(--danger);
+  font-weight: 700;
+}
+.summary-fx-btn {
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 55%, var(--line));
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+  font:
+    700 12px/19px Georgia,
+    serif;
+  cursor: pointer;
+}
+.summary-fx-btn:hover {
+  filter: brightness(0.96);
+}
+
 @media (max-width: 760px) {
   .import-check-grid {
     grid-template-columns: 1fr;

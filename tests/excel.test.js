@@ -105,11 +105,28 @@ describe("buildQuoteBuffer (export generation)", () => {
     const ws = wb.getWorksheet("Tổng Báo Giá") || wb.worksheets[wb.worksheets.length - 1];
     let foundTotal = false, foundVat = false;
     ws.eachRow((row) => row.eachCell((c) => {
-      if (Number(c.value) === 2_700_000) foundTotal = true;
-      if (Number(c.value) === 200_000) foundVat = true;
+      const value = typeof c.result === "number" ? c.result : c.value;
+      if (Number(value) === 2_700_000) foundTotal = true;
+      if (Number(value) === 200_000) foundVat = true;
     }));
     expect(foundTotal).toBe(true);   // grand total = stored quote.total
     expect(foundVat).toBe(true);     // VAT = stored quote.vat (no fractional recompute)
+  });
+
+  it("sheet Tổng dùng công thức liên-sheet và tổng/VAT/thành tiền đều là công thức sống", async () => {
+    const q = makeQuote("marico_decor");
+    q.sheets = [
+      { ...q.sheets[0], order: 1, name: "Backdrop", items: [{ kind: "item", name: "A", unit: "cái", quantity: 2, unitPrice: 100_000 }] },
+      { ...q.sheets[0], order: 2, name: "Booth's", items: [{ kind: "item", name: "B", unit: "cái", quantity: 3, unitPrice: 200_000 }] },
+    ];
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await buildQuoteBuffer(q));
+    const ws = wb.getWorksheet("Tổng Báo Giá");
+    expect(ws.getCell("C5").formula).toMatch(/^'1\. Backdrop'!H\d+$/);
+    expect(ws.getCell("C6").formula).toMatch(/^'2\. Booth''s'!H\d+$/); // tên sheet có dấu nháy phải escape
+    expect(ws.getCell("C7").formula).toBe("SUM(C5:C6)");
+    expect(ws.getCell("C8").formula).toBe("ROUND(C7*8%,0)");
+    expect(ws.getCell("C9").formula).toBe("C7+C8");
+    expect(ws.getCell("C9").result).toBe(864_000);
   });
 
   // Nhóm con (subsection): 2 ô STT + Ghi Chú phải để TRẮNG (không tô nền) — chỉ tô dải
