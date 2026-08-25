@@ -173,7 +173,12 @@ export function createApp() {
 
   // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
   // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
-  app.use(decompressBody(16 * 1024 * 1024));
+  // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
+  // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC auth/rate-limit nên
+  // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
+  // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
+  app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
+  app.use(decompressBody(2 * 1024 * 1024));
 
   // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
   // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
