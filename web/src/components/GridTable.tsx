@@ -230,7 +230,9 @@ export function GridTable(props: GridTableProps) {
     // thanh thống kê Đếm / TB / Tổng (ô số)
     if (statRef.current) {
       let sum = 0, cnt = 0;
-      if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (!NUMERIC.has(f)) continue; const v = Number((items[r] as Record<string, unknown>)?.[f]); if (v) { sum += v; cnt++; } }
+      // Cộng đúng con số ĐANG HIỂN THỊ: bôi 10 ô Số Lượng thì "Tổng" phải bằng tổng 10 số nhìn thấy,
+      // không phải tổng các số thô 4 số lẻ nằm dưới.
+      if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (!NUMERIC.has(f)) continue; const v = f === "quantity" ? M.qtyForAmount(items[r]) : Number((items[r] as Record<string, unknown>)?.[f]); if (v) { sum += v; cnt++; } }
       if (cnt >= 1) { statRef.current.classList.remove("hidden"); statRef.current.innerHTML = `Đếm: <b>${cnt}</b> · TB: <b>${M.fmtNumCell(Math.round(sum / cnt))}</b> · Tổng: <b>${M.fmtNumCell(sum)}</b>`; }
       else { statRef.current.classList.add("hidden"); statRef.current.textContent = ""; }
     }
@@ -544,7 +546,7 @@ export function GridTable(props: GridTableProps) {
     if (groupSubtotal) return;
     for (let i = Math.max(0, lo); i <= hi && i < items.length; i++) {
       const it = items[i];
-      if ((it.kind === "section" || it.kind === "subsection") && (Number(it.quantity) || 0) > 1) { onGroupSubtotal?.(true); return; }
+      if ((it.kind === "section" || it.kind === "subsection") && M.groupMult(it) > 1) { onGroupSubtotal?.(true); return; }   // theo SỐ ĐANG HIỆN
     }
   };
   const fillDown = () => {

@@ -1184,7 +1184,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     let hit = false;
     for (let i = lo; i <= hi && !hit; i++) {
       const it = activeSheet.items[i];
-      if (it && (it.kind === "section" || it.kind === "subsection") && (Number(it.quantity) || 0) > 1) hit = true;
+      if (it && (it.kind === "section" || it.kind === "subsection") && qtyRound(it.quantity) > 1) hit = true;   // theo SỐ ĐANG HIỆN
     }
     if (!hit) return;
     activeSheet.groupSubtotal = true;
@@ -1292,7 +1292,9 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) {
         const f = FIELDS[c];
         if (!NUMERIC.has(f)) continue;
-        const v = Number(activeSheet.items[r]?.[f]);
+        const it0 = activeSheet.items[r];
+        // đúng con số đang hiển thị (Số Lượng đã làm tròn), khớp bản React
+        const v = f === "quantity" ? (it0?.quantityExact ? Math.round((Number(it0.quantity) || 0) * 10000) / 10000 : qtyRound(it0?.quantity)) : Number(it0?.[f]);
         if (v) { sum += v; cnt++; }
       }
       if (cnt >= 1) {
@@ -1380,7 +1382,8 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       for (let r = rc.r0 + 1; r <= rc.r1; r++) {
         const it = activeSheet.items[r];
         if (it.kind === "info" && f2 !== "name") continue;   // never write price onto an info row
-        it[f2] = NUMERIC.has(f2) ? (Number(src) || 0) : src;
+        // Kéo fill/Ctrl+D chép Số Lượng: lấy số ĐÃ tròn của hàng nguồn, đúng như ô đang hiện.
+        it[f2] = f2 === "quantity" ? qtyRound(src) : (NUMERIC.has(f2) ? (Number(src) || 0) : src);
       }
     }
     autoEnableGroupSub(rc.r0, rc.r1);   // kéo fill-handle xuống SL nhóm > 1 → tự bật toggle

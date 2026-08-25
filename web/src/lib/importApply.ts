@@ -177,7 +177,11 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean): DiffField[] {
   const push = (f: string, before: unknown, after: unknown) => out.push({ field: f, label: FIELD_LABEL[f] || f, before, after });
   if (norm(a.name) !== norm(b.name)) push("name", a.name || "", b.name || "");
   if (norm(a.unit) !== norm(b.unit)) push("unit", a.unit || "", b.unit || "");
-  if (!numEq(a.quantity, b.quantity)) push("quantity", Number(a.quantity) || 0, Number(b.quantity) || 0);
+  // So theo con số HIỂN THỊ, nếu không bảng đối chiếu đẻ ra dòng "Số lượng: 7,4 → 7,4" (thực là
+  // 7.4213 vs 7.4313) — người dùng nhìn tưởng app hỏng.
+  const qa = a.quantityExact || b.quantityExact ? Number(a.quantity) || 0 : Math.round(((Number(a.quantity) || 0) + Number.EPSILON) * 10) / 10;
+  const qb = a.quantityExact || b.quantityExact ? Number(b.quantity) || 0 : Math.round(((Number(b.quantity) || 0) + Number.EPSILON) * 10) / 10;
+  if (!numEq(qa, qb)) push("quantity", qa, qb);
   if (!!a.quantityExact !== !!b.quantityExact) push("quantityExact", !!a.quantityExact, !!b.quantityExact);
   if (!numEq(a.unitPrice, b.unitPrice)) push("unitPrice", Number(a.unitPrice) || 0, Number(b.unitPrice) || 0);
   if (usesDays && !numEq(a.days ?? 1, b.days ?? 1)) push("days", a.days ?? 1, b.days ?? 1);

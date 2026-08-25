@@ -51,7 +51,7 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
                   : rows.map((it: any, ri: number) => (
                     <tr key={it.rid || ri}>
                       <td>{it.name || dash}</td>
-                      <td className="num">{M.fmtNumCell(it.quantity)}</td>
+                      <td className="num">{M.fmtNumCell(it.quantity, !!it.quantityExact)}</td>
                       <td className="num">{M.fmtMoney(Number(it.unitPrice) || 0)}</td>
                       <td className="num">{M.fmtMoney(rowTotal(it))}</td>
                       <td className="col-pay">
