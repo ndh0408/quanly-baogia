@@ -1532,13 +1532,18 @@ th.sortable[aria-sort="descending"] {
 .excel-table td {
   position: relative;
 }
+/* VÙNG CHỌN nhiều ô: nền xanh BÁN TRONG SUỐT nên màu gốc của hàng (nhóm = kem, nhóm con = xanh,
+   hàng thường = trắng) vẫn lộ qua — tô đặc sẽ nuốt mất phân cấp nhóm. Trước đây rule này là
+   `transparent`: class cell-selected vẫn được gắn đúng nhưng KHÔNG vẽ gì, quét bao nhiêu ô cũng chỉ
+   thấy mỗi ô neo có viền. Cùng cách pha với .cell-ref-active bên dưới. */
 .excel-table td.cell-selected {
-  background: transparent;
+  background: color-mix(in srgb, #1769d6 13%, transparent);
 }
 .excel-table td.cell-selected input,
 .excel-table td.cell-selected textarea {
   background: transparent;
 }
+/* Ô NEO (ô đang nhập) giữ nền gốc như Excel, chỉ viền đậm — rule đứng SAU .cell-selected nên thắng. */
 .excel-table td.cell-anchor {
   box-shadow: inset 0 0 0 2px #1769d6;
   background: transparent;
