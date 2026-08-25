@@ -87,6 +87,7 @@ export function GridTable(props: GridTableProps) {
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
+  const dblFromLockedRef = useRef(false);   // nhấp đúp vào ô CHƯA sửa → chỉ đặt con trỏ, không bôi từ
   const scrollRef = useRef<HTMLDivElement | null>(null);   // vùng cuộn bao lưới — mốc đo bề ngang
   const [wrapW, setWrapW] = useState(0);                   // bề ngang vùng chứa (0 = chưa đo)
   const [, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
@@ -420,6 +421,7 @@ export function GridTable(props: GridTableProps) {
         // Cú bấm THỨ HAI của nhấp đúp = vào SỬA. KHÔNG preventDefault và mở readOnly NGAY tại
         // mousedown, để chính trình duyệt đặt con trỏ đúng chỗ vừa bấm — trước đây ô bị khoá +
         // chặn mặc định nên con trỏ kẹt ở đầu, rồi onDoubleClick kéo tuột nó về cuối chữ.
+        dblFromLockedRef.current = el.readOnly;   // vào từ ô đang KHOÁ → nếp Excel: chỉ đặt con trỏ
         if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
         enterEdit(el, {}, "edit");
         selRef.current = { anchor: { row: info.row, field: info.field }, focus: { row: info.row, field: info.field } };
@@ -1419,6 +1421,14 @@ export function GridTable(props: GridTableProps) {
             const el = (e.target as HTMLElement)?.closest?.("[data-f]") as HTMLInputElement | HTMLTextAreaElement | null;
             if (!el || el.disabled) return;
             enterEdit(el, {}, "edit");
+            // NẾP EXCEL: nhấp đúp vào ô đang khoá = mở sửa + ĐẶT CON TRỎ, không bôi đen. Trình duyệt
+            // mặc định tô nguyên từ ở cú bấm thứ hai → thu vùng bôi về một con trỏ ngay đầu từ vừa
+            // bấm. Nhấp đúp khi ĐANG sửa vẫn bôi từ như mọi trình soạn thảo (dblFromLockedRef=false).
+            if (dblFromLockedRef.current) {
+              dblFromLockedRef.current = false;
+              const at = el.selectionStart ?? 0;
+              try { el.setSelectionRange(at, at); } catch { /* ô number không cho đặt vùng chọn */ }
+            }
           }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
           <colgroup>{COLS.map((c, k) => <col key={k} style={c.w ? { width: c.w } : undefined} />)}</colgroup>
