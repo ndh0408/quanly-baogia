@@ -6,6 +6,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import compression from "compression";
+import { decompressBody } from "./decompressBody.js";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pinoHttp from "pino-http";
@@ -170,6 +171,15 @@ export function createApp() {
   );
 
 
+  // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
+  // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
+  app.use(decompressBody(16 * 1024 * 1024));
+
+  // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
+  // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
+  // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
+  // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
+  app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 

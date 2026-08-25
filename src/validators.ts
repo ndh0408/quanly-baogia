@@ -161,7 +161,7 @@ const extraTableSchema = z.object({
   name: z.string().max(120).optional().nullable(),
   templateId: z.coerce.number().int().positive().optional().nullable(),   // mẫu cột (GN/CLF có/không ngày)
   groupSubtotal: z.boolean().optional(),
-  items: z.array(itemSchema).max(500).default([]),
+  items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
 });
 
 const sheetSchema = z.object({
@@ -174,7 +174,7 @@ const sheetSchema = z.object({
   order: z.coerce.number().int().optional(),
   groupSubtotal: z.boolean().optional(),
   showImages: z.boolean().optional(),   // BẬT cột "Hình ảnh" cho sheet này
-  items: z.array(itemSchema).max(500).default([]),
+  items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
   extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });
 
@@ -209,7 +209,7 @@ export const QuoteCreateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá"),
+  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá"),
 });
 
 // IMPORTANT: defined explicitly (NOT QuoteCreateSchema.partial()) because the
@@ -247,7 +247,7 @@ export const QuoteUpdateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(20, "Tối đa 20 trang trong một báo giá").optional(),
+  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá").optional(),
   // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
   baseUpdatedAt: z.coerce.date().optional(),
 });

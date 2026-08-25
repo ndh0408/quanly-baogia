@@ -217,10 +217,24 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     try { payload = opts.body ? JSON.parse(opts.body as string) : {}; } catch { /* ignore */ }
     return { ok: true, id: 900000000 + Math.floor(Math.random() * 1e8), _preview: true, ...payload } as T;
   }
+  // Báo giá lớn (50 trang × vài trăm dòng) nặng vài MB mỗi lần Lưu. Gói JSON nén rất tốt (~10 lần)
+  // nên với thân lớn thì nén trước khi gửi — mạng văn phòng chậm hay 4G đỡ hẳn, và không phải cứ
+  // nâng trần mãi khi báo giá to dần. Thân nhỏ thì gửi thẳng, nén chỉ tổ tốn công.
+  // Trình duyệt cũ không có CompressionStream → tự động gửi như cũ.
+  let thanGui = opts.body;
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...((opts.headers as Record<string, string>) ?? {}) };
+  if (typeof thanGui === "string" && thanGui.length > 256 * 1024 && typeof CompressionStream === "function") {
+    try {
+      const nen = new Response(new Blob([thanGui]).stream().pipeThrough(new CompressionStream("gzip")));
+      thanGui = (await nen.arrayBuffer()) as unknown as BodyInit;
+      headers["Content-Encoding"] = "gzip";
+    } catch { /* nén hỏng → gửi nguyên văn, không để mất dữ liệu */ }
+  }
   const res = await fetch("/api" + path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts.headers ?? {}) },
     ...opts,
+    headers,
+    body: thanGui,
   });
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;

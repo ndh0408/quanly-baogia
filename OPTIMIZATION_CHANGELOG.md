@@ -120,3 +120,46 @@ Build thường **không** kèm trang này.
 **Vì sao** Yêu cầu "đo trước / đo sau" chỉ có nghĩa khi phép đo chạy lại được và cho số ổn định.
 
 **Rủi ro** Không ảnh hưởng bản giao cho người dùng (khác `--mode`).
+
+
+---
+
+## 8. Mở giới hạn quy mô báo giá — sửa lỗi CHẶN CHỨC NĂNG
+
+**File** `src/validators.ts`, `src/app.ts`, `web/src/components/ImportExcelModal.tsx`
+
+**Đổi gì** Số trang tối đa 20 → **60**; số dòng mỗi trang 500 → **1000**; trần gói gửi lên nâng từ
+2 MB lên **16 MB** nhưng chỉ cho nhóm route báo giá, phần API còn lại giữ 2 MB.
+
+**Vì sao** Thực tế một báo giá có thể tới 50 trang × hơn 200 dòng. Kiểm bằng chính bộ kiểm tra dữ
+liệu của app: **21 trang trở lên bị chặn**, **501 dòng/trang bị chặn**. Nghĩa là báo giá 50 tab
+**không lưu được** — đây là lỗi chức năng, không phải chuyện tốc độ.
+
+**Đo được** Sau khi mở: 50 trang × 500 dòng (1,8 MB) OK; 60 trang × 1000 dòng (4,3 MB) OK; 61 trang
+vẫn bị chặn với thông báo rõ ràng.
+
+**Rủi ro** Trần lớn hơn là bề mặt tấn công lớn hơn — nên chỉ nâng cho nhóm route báo giá, và giữ
+nguyên lớp chặn số lượng của bộ kiểm tra dữ liệu phía sau.
+
+---
+
+## 9. Nén gói dữ liệu khi gửi lên — lời giải cho "sau này còn nhiều hơn"
+
+**File** `src/decompressBody.ts` (mới), `src/app.ts`, `web/src/lib/api.ts`
+
+**Đổi gì** Trình duyệt tự nén thân **trả về** nhưng không nén thân **gửi lên**. Nay client tự nén khi
+gói lớn hơn 256 KB, server có lớp giải nén đặt trước mọi bước đọc JSON.
+
+**Vì sao** Nâng trần mãi không phải lời giải. Nén giữ cho đường truyền nhẹ bất kể báo giá to dần.
+
+**Đo được** 50 trang × 200 dòng: **1.344 KB → 21 KB (65×)**. 60 trang × 1000 dòng: 8.082 KB → 195 KB
+(41×). Nén tốn 3–18 ms. Xác minh đầu-cuối trên trình duyệt thật: 553 KB gửi đi còn 9 KB, server nhận
+đúng header và mở ra đủ 50 trang.
+
+**Rủi ro** Đây là đường đi của **dữ liệu lưu thật**, sai là mất dữ liệu. Vì vậy:
+· client nén hỏng thì tự gửi nguyên văn, không bỏ dữ liệu;
+· trình duyệt cũ không có `CompressionStream` thì gửi như cũ;
+· server chỉ nhận gzip/deflate, kiểu khác trả 415 thay vì đoán;
+· đếm byte **sau giải nén** và cắt khi vượt trần — chặn "bom nén";
+· 9 test phủ: gzip, deflate, không nén, tiếng Việt nhiều byte, bom nén, kiểu lạ, dữ liệu hỏng,
+  JSON hỏng, và gói cỡ báo giá 50 trang.

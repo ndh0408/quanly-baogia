@@ -58,6 +58,22 @@ hàng vẫn tuyến tính theo số dòng** và chưa được cải thiện đ�
 | Kích thước gói gửi khi Lưu | 32 KB | 316 KB | **1.581 KB** | 3.954 KB |
 | Đóng gói JSON | 0,1 ms | 1,0 ms | 4,3 ms | 9,8 ms |
 | Mở gói JSON | 0,1 ms | 0,8 ms | 4,0 ms | 9,7 ms |
+| **Gửi đi sau khi nén** | — | 5 KB | **21 KB** | 79 KB |
+| Thời gian nén | — | 1 ms | 3 ms | 8 ms |
+
+Nén giảm **41–65 lần**. Đã xác minh đầu-cuối trên trình duyệt thật: gói 553 KB gửi đi còn **9 KB**,
+server nhận đúng `Content-Encoding: gzip` và mở ra đủ 50 trang — trình duyệt không bỏ header này.
+
+## Giới hạn quy mô (sau khi mở)
+
+| Mức | Trước | Sau |
+| --- | --- | --- |
+| Số trang tối đa / báo giá | 20 (chặn ở trang thứ 21) | **60** |
+| Số dòng tối đa / trang | 500 | **1000** |
+| Trần gói gửi lên | 2 MB toàn API | **16 MB** cho nhóm route báo giá, 2 MB cho phần còn lại |
+
+Trước khi mở, báo giá 50 trang **không lưu được** — bị chặn bởi `Tối đa 20 trang trong một báo giá`.
+Sau khi mở, 60 trang × 1000 dòng (8 MB thô, 195 KB sau nén) vẫn qua.
 
 Kết luận rút ra từ đây: nghi ngờ ban đầu rằng "mỗi lần vẽ lại phải cộng tổng mọi sheet nên chậm"
 là **sai** — 0,11ms. Vấn đề thật của báo giá nhiều tab nằm ở **1,58 MB mỗi lần bấm Lưu** và ở việc

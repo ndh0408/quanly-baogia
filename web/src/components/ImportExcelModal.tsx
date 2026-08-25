@@ -9,9 +9,9 @@ import { addrFields, autoTargetIndexes, letterOfField, NEW_IMPORT_SHEET, toGridI
 // Không ghi DB: nạp xong người dùng vẫn phải bấm Lưu (đi đúng đường lưu cũ + lưu phiên bản).
 
 /** Trần dòng/sheet khi lưu — khớp sheetSchema (src/validators.ts) + MAX_ITEMS_PER_SHEET. */
-// Trần LƯU của server (validators.ts: items.max(500)). Trước đây modal cho qua tới 2000 dòng, người
+// Trần LƯU của server (validators.ts: items.max(1000)). Trước đây modal cho qua tới 2000 dòng, người
 // dùng nạp xong mới ăn lỗi 400 lúc bấm Lưu — mất công đối chiếu cả file. Chặn sớm, nói rõ con số.
-const MAX_ROWS_PER_SHEET = 500;
+const MAX_ROWS_PER_SHEET = 1000;
 
 type TargetMode = "replace" | "append" | "skip";
 /** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
