@@ -41,11 +41,15 @@ export function lineAmount(it: Item, usesDays: boolean) {
   const q = qtyForAmount(it), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
   return Math.round(usesDays ? q * d * p : q * p);
 }
+/** Hệ số nhân của hàng NHÓM = Số Lượng của nhóm, lấy ĐÚNG con số đang hiển thị trên lưới
+ *  (qtyRound 1 số lẻ, hoặc 4 số lẻ với dòng quantityExact). Lấy số thô thì ô hiện "2,4" mà tiền
+ *  nhân 2,4213 — người dùng lẫn khách không đối chiếu nổi. Tối thiểu 1 (nhóm bỏ trống = ×1). */
+export const groupMult = (it: Pick<Item, "quantity" | "quantityExact">) => Math.max(1, qtyForAmount(it) || 1);
 // Tổng sheet có hệ số nhóm: section.Số Lượng nhân các dòng dưới nó (tới section kế); section tự nó = 0.
 export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubtotal?: boolean) {
   let mult = 1, sum = 0;
   for (const it of items || []) {
-    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
     if (it.kind === "info") continue;
     sum += lineAmount(it, usesDays) * mult;
   }

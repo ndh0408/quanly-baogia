@@ -55,7 +55,10 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
     let mult = 1;
     const subtotal = (sh.items || []).reduce((acc, it) => {
       if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
-        mult = sh.groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+        // Hệ số nhóm lấy SL ĐÃ làm tròn đúng như lưới hiển thị (cùng phép làm tròn với qty dòng
+        // thường ngay dưới) — trước đây nhân số thô nên tổng lệch con số người dùng nhìn thấy.
+        const gq = Number(D(it.quantity).toDecimalPlaces(it.quantityExact ? 4 : 1, Decimal.ROUND_HALF_UP));
+        mult = sh.groupSubtotal ? Math.max(1, gq || 1) : 1;
         return acc;
       }
       if (it.kind === "info") return acc;   // dòng thông tin: không tính tiền (khớp với Excel + client)

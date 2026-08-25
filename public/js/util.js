@@ -95,7 +95,7 @@ export function pvRows(items, usesDays, groupSubtotal) {
     const kind = eff[i];
     if (kind === "section") {
       sectionIdx++; itemNo = 0;
-      const gmult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1;
+      const gmult = groupSubtotal ? Math.max(1, qtyRound(it.quantity) || 1) : 1;
       mult = gmult;
       return { kind, it, letter: (it.label && String(it.label).trim()) || groupLetter(sectionIdx), groupSum: sectionSum[i] || 0, gmult, groupSubtotal };
     }
@@ -110,7 +110,7 @@ export function pvRows(items, usesDays, groupSubtotal) {
 export function sheetSubtotalGrouped(items, usesDays, groupSubtotal) {
   let mult = 1, sum = 0;
   for (const it of (items || [])) {
-    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, Number(it.quantity) || 1) : 1; continue; }
+    if (it.kind === "section" || it.kind === "subsection") { mult = groupSubtotal ? Math.max(1, qtyRound(it.quantity) || 1) : 1; continue; }   // SL nhóm ĐÃ tròn = đúng số đang hiện
     if (it.kind === "info") continue;   // dòng thông tin: không tính tiền (khớp Excel + money.js)
     sum += lineAmount(it, usesDays) * mult;   // cộng Thành Tiền ĐÃ làm tròn từng dòng
   }

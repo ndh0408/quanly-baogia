@@ -649,7 +649,7 @@ export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "gr
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {
-    if (it.kind === "section" || it.kind === "subsection") { mult = Math.max(1, Number(it.quantity) || 1); seen = true; continue; }
+    if (it.kind === "section" || it.kind === "subsection") { mult = Math.max(1, qtyForAmount(it) || 1); seen = true; continue; }
     if (it.kind === "item" || it.kind === "sub") total += line(it) * (seen ? mult : 1);
   }
   return total;

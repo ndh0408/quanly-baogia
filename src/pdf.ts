@@ -3,6 +3,8 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
+// Dùng CHUNG toán tiền với lưới web + file Excel — PDF trước đây tự nhân tay nên ra số khác.
+import { lineAmount, groupMult, groupLetter, qtyForAmount, fmtNumCell } from "../shared/quote-math.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FONT_DIR = path.join(__dirname, "..", "fonts");
@@ -85,8 +87,8 @@ export async function renderQuotePdf(quote: any) {
         doc.moveDown(0.3);
         doc.font("bold").fontSize(11).text(sh.name);
       }
-      drawItemsTable(doc, sh.items || [], runningIdx);
-      runningIdx += (sh.items || []).length;
+      drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal);
+      runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
     }
 
     doc.moveDown(0.5);
@@ -119,7 +121,7 @@ export async function renderQuotePdf(quote: any) {
   });
 }
 
-function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number) {
+function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, groupSubtotal: boolean) {
   const cols: { w: number; label: string; align: "left" | "center" | "right" | "justify" }[] = [
     { w: 30, label: "STT", align: "center" },
     { w: 200, label: "Hạng mục", align: "left" },
@@ -143,13 +145,46 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number) 
     return atY + 18;
   };
 
+  // Sheet dùng cột Số Ngày hay không — suy từ dữ liệu, vì PDF không in cột đó nhưng tiền phải nhân.
+  const usesDays = items.some((it) => it && it.days != null && Number(it.days) > 0);
+  // Tổng từng nhóm (Σ dòng con tới nhóm kế) để in Thành Tiền ở hàng nhóm, đúng như lưới web.
+  const sectionSum: Record<number, number> = {};
+  {
+    let cur = -1;
+    items.forEach((it, i) => {
+      if (it?.kind === "section" || it?.kind === "subsection") { cur = i; sectionSum[i] = 0; return; }
+      if (it?.kind === "info") return;
+      if (cur >= 0) sectionSum[cur] += lineAmount(it, usesDays);
+    });
+  }
+
   let y = drawHeader(doc.y + 4);
+  let sectionIdx = 0, subNo = 0, itemNo = baseIdx, mult = 1;
   items.forEach((it, idx) => {
-    const qty = Number(it.quantity || 0);
-    const price = Number(it.unitPrice || 0);
-    const days = it.days != null ? Number(it.days) : null;
-    const amount = days && days > 0 ? qty * days * price : qty * price;
-    const text = (it.name || "") + (it.detail ? `\n  ${it.detail}` : "");
+    const kind = it?.kind || "item";
+    const isGroup = kind === "section" || kind === "subsection";
+    const isInfo = kind === "info";
+
+    // Hàng NHÓM đặt hệ số nhân cho các dòng dưới nó (chỉ khi bật "Thành Tiền nhóm") và tự nó không
+    // cộng tiền. Trước đây PDF in nhóm y như hàng thường rồi nhân luôn Số Lượng của nhóm vào tiền.
+    if (isGroup) mult = groupSubtotal ? groupMult(it) : 1;
+
+    let stt = "", text = String(it?.name || ""), unit = "", qtyS = "", priceS = "", amtS = "";
+    if (isGroup) {
+      if (kind === "section") { sectionIdx++; subNo = 0; stt = String(it.label || groupLetter(sectionIdx)); }
+      else stt = String(it.label || ++subNo);
+      const gAmt = sectionSum[idx] || 0;
+      priceS = fmtNumCell(gAmt);                                      // Đơn Giá nhóm = Σ mục con
+      amtS = groupSubtotal ? fmtNumCell(gAmt * groupMult(it)) : "";   // × hệ số nhóm
+    } else if (!isInfo) {
+      stt = String(++itemNo);
+      if (it?.detail) text += "\n  " + it.detail;
+      unit = it?.unit || "";
+      qtyS = fmtNumCell(qtyForAmount(it), !!it?.quantityExact);       // ĐÚNG con số lưới hiển thị
+      priceS = fmt(Number(it?.unitPrice) || 0);
+      amtS = fmt(lineAmount(it, usesDays) * mult);                    // cùng phép tính với web + Excel
+    }
+
     const lines = Math.max(1, text.split("\n").length);
     const rowH = Math.max(18, 8 + lines * 12);
     // Page-break: if this row would overflow the page, start a new page + re-draw
@@ -159,12 +194,16 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number) 
       y = drawHeader(doc.page.margins.top);
     }
     let x = startX;
-    doc.rect(startX, y, tableW, rowH).stroke("#bbb");
-    const vals = [String(baseIdx + idx + 1), text, it.unit || "", fmt(qty), fmt(price), fmt(amount)];
+    if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", "#bbb");
+    else doc.rect(startX, y, tableW, rowH).stroke("#bbb");
+    doc.fillColor("black");
+    doc.font(isGroup ? "bold" : isInfo ? "italic" : "body");
+    const vals = [stt, text, unit, qtyS, priceS, amtS];
     vals.forEach((v, i) => {
       doc.text(String(v), x + 2, y + 4, { width: cols[i].w - 4, align: cols[i].align });
       x += cols[i].w;
     });
+    doc.font("body");
     y += rowH;
   });
   doc.y = y + 4;

@@ -963,7 +963,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
         <td class="col-qty"><input data-f="quantity" inputmode="decimal" value="${fmtNumCell(it.quantity, !!it.quantityExact)}" ${dis} /></td>
         ${usesDays ? `<td class="col-qty"></td>` : ""}
         <td class="col-price" title="Bấm đúp để xem công thức (như Excel)">${fmtNumCell(subAmt)}</td>
-        <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, Number(it.quantity) || 1)) : ""}</td>
+        <td class="col-amount" title="Bấm đúp để xem công thức (như Excel)">${activeSheet.groupSubtotal ? fmtNumCell(subAmt * Math.max(1, qtyRound(it.quantity) || 1)) : ""}</td>
         <td class="col-notes"><textarea data-f="notes" rows="1" placeholder="Ghi chú nhóm" ${dis}>${escapeHtml(it.notes || "")}</textarea></td>
         ${internalNoteCol ? `<td class="col-internal-note"><textarea data-f="internalNote" rows="1" placeholder="(không xuất Excel)" ${dis}>${escapeHtml(it.internalNote || "")}</textarea></td>` : ""}
         ${showImagesCol ? `<td class="col-images">${imagesCellHtml(it, i)}</td>` : ""}
@@ -1206,7 +1206,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
     for (const idx in sums) {
       const trS = tbody.querySelector(`tr[data-row="${idx}"]`);
       if (!trS) continue;
-      const sq = Math.max(1, Number(activeSheet.items[idx].quantity) || 1);
+      const sq = Math.max(1, qtyRound(activeSheet.items[idx].quantity) || 1);   // SL nhóm ĐÃ tròn
       const pc = trS.querySelector(".col-price"); if (pc) pc.textContent = fmtNumCell(sums[idx]);
       const ac = trS.querySelector(".col-amount"); if (ac) ac.textContent = activeSheet.groupSubtotal ? fmtNumCell(sums[idx] * sq) : "";
     }

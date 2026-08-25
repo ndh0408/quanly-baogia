@@ -170,6 +170,31 @@ describe("computeQuoteTotals — section rows & groupSubtotal", () => {
     expect(t.subtotal.toNumber()).toBe(100);
   });
 
+  // Ô Số Lượng của hàng nhóm HIỂN THỊ qua qtyRound (2,4213 → "2,4"). Hệ số nhân phải lấy đúng con
+  // số đang hiện, không lấy số thô — nếu không, tiền không đối chiếu được với lưới và với file Excel.
+  it("hệ số nhóm dùng Số Lượng ĐÃ làm tròn (2,4213 → ×2,4), không dùng số thô", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: true, items: [
+        { kind: "section", quantity: 2.4213 },
+        { quantity: 1, unitPrice: 100_000 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(240_000);      // 100.000 × 2,4
+    expect(t.subtotal.toNumber()).not.toBe(242_130);  // ×2,4213 = bệnh cũ
+  });
+
+  it("hệ số nhóm của dòng quantityExact giữ 4 số lẻ", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      sheets: [{ groupSubtotal: true, items: [
+        { kind: "section", quantity: 2.4213, quantityExact: true },
+        { quantity: 1, unitPrice: 100_000 },
+      ] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(242_130);
+  });
+
   it("groupSubtotal multiplies following items by the section quantity", () => {
     const t = computeQuoteTotals({
       vatPercent: 0,

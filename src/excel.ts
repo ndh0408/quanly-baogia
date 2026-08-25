@@ -628,8 +628,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
       if (cols.unit) setCell(ws, `${cols.unit}${r}`, clean(it.unit));
-      if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (Number(it.quantity) || 0) || null;
-      const gmult = showGroupSub ? Math.max(1, Number(it.quantity) || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
+      // SL hàng nhóm: ghi số ĐÃ làm tròn (ô này không set numFmt nên thừa hưởng định dạng template
+      // → ghi số thô là khách mở file thấy đủ 4 chữ số, khác hẳn lưới web).
+      const gq = qtyForAmount(it);
+      if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (gq || 0) || null;
+      const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
       mult = gmult;
       seenSection = true;
       if (showGroupSub) groupAmtRows.push(r);
