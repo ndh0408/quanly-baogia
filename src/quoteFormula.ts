@@ -92,11 +92,11 @@ export function evalEditorFormula(input: string, refs?: EditorRefs) {
   if (!s) return null;
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
-    s = s.replace(/([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g, (_m, a, b) => {
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => {
       const list = refs.range(a, b);
       return (list && list.length) ? list.join(";") : "0";
     });
-    s = s.replace(/(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g, (_m, a) => {
+    s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => {
       const v = refs.cell(a);
       return (v === null || v === undefined || isNaN(v)) ? "0" : String(v);
     });
@@ -350,7 +350,7 @@ export function buildFormulaContext(
     return Math.round(usesDays ? q * (Number(it.days) || 1) * p : q * p);
   };
   const editorCellNum = (addr: string) => {
-    const m = /^([A-Za-z]+)(\d+)$/.exec(String(addr).trim());
+    const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(String(addr).trim());
     if (!m) return 0;
     const field = colToField[m[1].toUpperCase()];
     const it = items[Number(m[2]) - 1];
@@ -366,7 +366,7 @@ export function buildFormulaContext(
   const editorRefs: EditorRefs = {
     cell: editorCellNum,
     range: (a: string, b: string) => {
-      const pa = /^([A-Za-z]+)(\d+)$/.exec(a), pb = /^([A-Za-z]+)(\d+)$/.exec(b);
+      const pa = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(a), pb = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(b);
       if (!pa || !pb) return [];
       const c0 = Math.min(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
       const c1 = Math.max(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
@@ -382,7 +382,7 @@ export function buildFormulaContext(
   // phụ thuộc quantity/unitPrice/days của CHÍNH hàng r (ô Excel Thành Tiền = ROUND(SL×ĐG)).
   const refsInFormula = (raw: string): { row: number; field: string }[] => {
     const out: { row: number; field: string }[] = [];
-    const re = /([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g;
+    const re = /\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(String(raw)))) {
       const f1 = colToField[m[1].toUpperCase()];
@@ -428,7 +428,7 @@ export function buildFormulaContext(
      */
     cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
-      const usesAmount = /[A-Za-z]+\d+/.test(String(raw)) && refsInFormula(String(raw)).some((r) => r.field === "_amount");
+      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refsInFormula(String(raw)).some((r) => r.field === "_amount");
       if (usesAmount) {
         const selfRow = self ? items.indexOf(self.item) : -1;
         if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw))) return null;   // vòng lặp / không rõ ô → ghi số

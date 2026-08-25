@@ -218,3 +218,26 @@ describe("$ tuyệt đối (khoá kiểu Excel)", () => {
     expect(out).toBe(excelFormulaToEditor("=F14*2", { fieldOfCol: (c) => (c === "F" ? "quantity" : null), rowToEditor: (r) => (r === 14 ? 3 : null) }));   // có $ hay không đều ra một kết quả
   });
 });
+
+// cellFormula tự KIỂM công thức bằng bộ tính phía server trước khi ghi vào file Excel. Bộ tính đó
+// phải nuốt $ giống hệt bộ tính trên lưới — nếu không, mọi công thức có khoá tuyệt đối đều trượt
+// self-check, trả null, và ô xuất ra chỉ còn SỐ CHẾT (mất công thức sống).
+describe("cellFormula giữ được công thức có $ (không rớt về số chết)", () => {
+  const items = [
+    { kind: "item", quantity: 2, unitPrice: 80000 },
+    { kind: "item", quantity: 4, unitPrice: 80000, formulas: { quantity: "=$D$1*2" } },
+  ];
+  const fc = fcFor({ quantity: "F", unitPrice: "G", amount: "H", days: null }, items, [12, 13]);
+
+  it("ref khoá $D$1 vẫn ra công thức Excel, không phải null", () => {
+    const out = fc.cellFormula("=$D$1*2", 4);
+    expect(out).not.toBeNull();
+    expect(out).toMatch(/\$/);
+  });
+  it("có $ hay không đều cho cùng kết quả (chỉ khác dấu khoá)", () => {
+    const co = fc.cellFormula("=$D$1*2", 4);
+    const khong = fc.cellFormula("=D1*2", 4);
+    expect(khong).not.toBeNull();
+    expect(String(co).replace(/\$/g, "")).toBe(String(khong));
+  });
+});

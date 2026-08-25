@@ -228,14 +228,17 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
     return v == null ? NaN : Number(v);
   };
   // Gom mọi ref (đơn + dải) của mọi công thức trong khối.
-  const refRe = /([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g;
+  // \$? : ref tuyệt đối của Excel ($G$12). Bỏ qua khoá khi dò/dịch — nếu không khớp được thì cả
+  // công thức trôi qua mà KHÔNG dịch toạ độ và KHÔNG bị đánh dấu đỏ, tức tính theo hàng của lưới
+  // web → sai tiền âm thầm.
+  const refRe = /\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g;
   const allRefs: { col: number; row: number }[] = [];
   const fxList: { k: number; f: string; raw: string }[] = [];
   built.forEach((it, k) => {
     if (!it.formulas) return;
     for (const f in it.formulas) {
       const raw = String(it.formulas[f] || "");
-      if (!/[A-Za-z]+\d+/.test(raw)) continue;   // không tham chiếu ô → số học thuần, giữ nguyên vẫn đúng
+      if (!/\$?[A-Za-z]+\$?\d+/.test(raw)) continue;   // không tham chiếu ô → số học thuần, giữ nguyên vẫn đúng
       fxList.push({ k, f, raw });
       let m: RegExpExecArray | null; refRe.lastIndex = 0;
       while ((m = refRe.exec(raw))) {
@@ -266,7 +269,7 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
     for (const { k, f, raw } of fxList) {
       // Dịch ref → địa chỉ WEB; fail ref nào → bỏ ô này (đánh đỏ khi apply).
       let good = true;
-      const rendered = raw.replace(/^=/, "").replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (mm, c1, r1, c2, r2) => {
+      const rendered = raw.replace(/^=/, "").replace(/\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g, (mm, c1, r1, c2, r2) => {
         if (!good) return mm;
         const roleA = roles[rtColIdx(c1) - x0]; const ka = +r1 - r0;
         if (!roleA || !NUMOK.has(roleA) || ka < 0 || ka >= n) { good = false; return mm; }
@@ -281,7 +284,7 @@ export function retargetPastedFormulas(built: RebuiltItem[], matrix: string[][],
       if (!good) { if (apply) markWarn(k, f); continue; }
       // Eval theo giá trị KHỐI: thay ref bằng SỐ.
       let evalable = true;
-      const numeric = raw.replace(/^=/, "").replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (mm, c1, r1, c2, r2) => {
+      const numeric = raw.replace(/^=/, "").replace(/\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g, (mm, c1, r1, c2, r2) => {
         if (!evalable) return mm;
         const roleA = roles[rtColIdx(c1) - x0]; const ka = +r1 - r0;
         if (c2 && r2) {

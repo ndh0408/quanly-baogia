@@ -702,7 +702,9 @@ export function GridTable(props: GridTableProps) {
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
     const sel = selRef.current;
     let startRow = sel ? rectOf(sel)!.r0 : (focusRef.current?.i ?? 0);
-    let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : 0);
+    const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
+    let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
+    if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
     let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[] } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
     const text = e.clipboardData.getData("text/plain") || e.clipboardData.getData("text") || "";
@@ -759,7 +761,7 @@ export function GridTable(props: GridTableProps) {
     // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
     // DATA_FIELD_COUNT: đếm cột DỮ LIỆU như trước khi thêm "_stt" vào FIELDS — nhận dạng khối dán từ
     // file Excel ngoài phải giữ nguyên ngưỡng cũ, không thì khối 7 cột bỗng bị coi là thiếu cột.
-    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, DATA_FIELD_COUNT))) {
+    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol - COL_NAME, DATA_FIELD_COUNT))) {
       const roles = hdrRoles || ADDR.map((c) => c.f);
       const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
       // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
@@ -770,8 +772,8 @@ export function GridTable(props: GridTableProps) {
       if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       autoEnableGroupSub(startRow, startRow + built.length - 1);
       recomputeAll(); onChange();
-      selRef.current = { anchor: { row: startRow, field: FIELDS[0] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
-      focusCell(startRow, FIELDS[0], true);
+      selRef.current = { anchor: { row: startRow, field: FIELDS[COL_NAME] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
+      focusCell(startRow, FIELDS[COL_NAME], true);
       const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
@@ -783,7 +785,7 @@ export function GridTable(props: GridTableProps) {
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
       rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
-      startRow += 1; startCol = 0;
+      startRow += 1; startCol = COL_NAME;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
     // theo tên trường để dán được sang sheet dùng mẫu khác.
