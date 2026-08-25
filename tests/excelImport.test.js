@@ -408,3 +408,44 @@ describe("parseQuoteWorkbook — bẫy đã vá (rà soát edge case)", () => {
     expect(sheet.items[599].unitPrice).toBe(1599);
   });
 });
+
+// File NGOÀI thiếu ĐỒNG THỜI cột STT và ĐVT — bảng dịch vụ rất phổ biến:
+//   Hạng Mục | Số Lượng | Đơn Giá | Thành Tiền
+// Trước đây mọi dòng rơi vào nhánh "nhóm con" rồi Đơn Giá bị ép 0 → nạp xong báo giá 0đ mà không
+// một cảnh báo nào. Dòng CÓ Số Lượng phải được hiểu là hạng mục.
+describe("nhập file ngoài thiếu cột STT + ĐVT", () => {
+  const mkFile = async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Báo giá");
+    ws.addRow(["BẢNG BÁO GIÁ DỊCH VỤ"]);
+    ws.addRow(["Hạng Mục", "Số Lượng", "Đơn Giá", "Thành Tiền"]);
+    ws.addRow(["Thiết kế banner", 2, 5_000_000, 10_000_000]);
+    ws.addRow(["Thi công lắp đặt", 1, 6_000_000, 6_000_000]);
+    ws.addRow(["Tổng cộng", null, null, 16_000_000]);
+    return await wb.xlsx.writeBuffer();
+  };
+
+  it("hạng mục giữ nguyên Đơn Giá, tổng KHÔNG về 0", async () => {
+    const parsed = await parseQuoteWorkbook(await mkFile());
+    const sh = parsed.sheets[0];
+    const rows = sh.items.filter((it) => it.kind === "item" || it.kind === "sub");
+    expect(rows.length).toBe(2);
+    expect(rows[0].name).toBe("Thiết kế banner");
+    expect(rows[0].quantity).toBe(2);
+    expect(rows[0].unitPrice).toBe(5_000_000);
+    expect(computeSubtotal(sh)).toBe(16_000_000);
+    expect(computeSubtotal(sh)).not.toBe(0);
+  });
+
+  it("dòng chỉ có TÊN, không số lượng/ĐVT vẫn là nhóm con (nếp cũ giữ nguyên)", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("BG");
+    ws.addRow(["Hạng Mục", "Số Lượng", "Đơn Giá", "Thành Tiền"]);
+    ws.addRow(["PHẦN A — DỰNG BOOTH", null, null, null]);
+    ws.addRow(["Khung sắt", 3, 1_000_000, 3_000_000]);
+    const parsed = await parseQuoteWorkbook(await wb.xlsx.writeBuffer());
+    const kinds = parsed.sheets[0].items.map((i) => i.kind);
+    expect(kinds).toContain("item");
+    expect(kinds.filter((k) => k === "item").length).toBe(1);
+  });
+});

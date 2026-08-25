@@ -401,7 +401,11 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     else if (effectiveNumberSubs && /^\d+$/.test(stt) && name !== "" && (groupPriceFormula || (!hasUnit && hasPrice))) kind = "subsection";
     else if (!stt && name === "" && (hasUnit || hasQty || hasPrice) && (prevKind === "item" || prevKind === "sub")) kind = "sub";
     else if (!stt && name !== "" && !hasUnit && !hasQty && !hasPrice && !hasAmt) kind = "info";
-    else if (!effectiveNumberSubs && !stt && name !== "" && (groupPriceFormula || !hasUnit)) kind = "subsection";
+    // !hasQty là chốt chặn quan trọng: file ngoài rất hay thiếu ĐỒNG THỜI cột STT và ĐVT
+    // ("Hạng Mục | Số Lượng | Đơn Giá | Thành Tiền" — bảng dịch vụ phổ biến). Không có nó thì MỌI
+    // dòng rơi vào đây thành nhóm con, rồi Đơn Giá bị ép 0 → nạp xong báo giá 0đ mà không một
+    // cảnh báo nào. Dòng CÓ Số Lượng thì chắc chắn là hạng mục, không phải tiêu đề nhóm.
+    else if (!effectiveNumberSubs && !stt && name !== "" && (groupPriceFormula || (!hasUnit && !hasQty))) kind = "subsection";
     else if (name !== "" && !hasUnit && hasPrice && !hasQty) kind = "subsection";
     else kind = "item";
 
