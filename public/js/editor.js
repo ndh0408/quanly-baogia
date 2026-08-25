@@ -1107,6 +1107,9 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
       return lineAmount(it, usesDays);
     }
     if (p.field === "_stt") return 0;
+    // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN đúng như ô đang hiển thị — khớp lineAmount (qtyForAmount) và
+    // khớp bản React. Trả số thô thì =E3*G3 ra tiền khác Thành Tiền của chính hàng đó.
+    if (p.field === "quantity") return it.quantityExact ? Math.round((Number(it.quantity) || 0) * 10000) / 10000 : qtyRound(it.quantity);
     if (NUMERIC.has(p.field)) return Number(it[p.field]) || 0;
     return parseVN(it[p.field] || "");   // text column → number-ish
   };
