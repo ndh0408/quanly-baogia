@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: app
-          image: ghcr.io/ndh0408/quanly-baogia:latest
+          image: ghcr.io/ndh0408/quanly-baogia:REPLACE_ME # kustomize `images:` ghi đè — xem kustomization.yaml
           imagePullPolicy: IfNotPresent
           # Least-privilege container hardening: no privilege escalation, read-only
           # root FS (writable /tmp mounted below for the Prisma engine), all Linux
@@ -40,7 +40,7 @@ spec:
             - secretRef: { name: quanly-secrets }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 1,    memory: 1Gi }
+            limits: { cpu: 1, memory: 1Gi }
           livenessProbe:
             httpGet: { path: /livez, port: http }
             initialDelaySeconds: 20
@@ -59,7 +59,9 @@ spec:
           # no-op when there are no pending migrations. Ideally run this once per release as a
           # Helm pre-upgrade Job / initContainer rather than in the steady-state command.
           command: ["/bin/sh", "-c"]
-          args: ["npx prisma migrate deploy && node src/server.js"]
+          # `node src/server.js` KHÔNG tồn tại trong image (mã là .ts, image chỉ chứa dist/).
+          # Phải khớp Dockerfile CMD.
+          args: ["npx prisma migrate deploy && exec node dist/server.js"]
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:

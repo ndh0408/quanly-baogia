@@ -36,3 +36,10 @@ e2e*.mjs
 *.log
 .editorconfig
 .gitattributes
+
+# dist/ được BUILD BÊN TRONG image (tầng `build` của Dockerfile). Nếu để lọt bản dist local vào
+# build context thì `COPY --from=build` vẫn thắng, nhưng context phình ra vô ích và dễ gây nhầm
+# tưởng là image dùng bản biên dịch trên máy dev.
+dist/
+coverage/
+_bmad-output/

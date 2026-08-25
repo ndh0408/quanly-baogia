@@ -18,6 +18,10 @@ export default [
       "coverage/**",
       "prisma/migrations/**",
       "public/app2/**", // bundle Vite build ra (generated) — lint source ở web/src, không lint output
+      // Đầu ra `npm run build` (TypeScript → JavaScript). Là mã SINH RA, lint nó chỉ báo lại đúng
+      // những gì đã lint ở src/ nhưng dưới dạng đã biến đổi — và làm ĐỎ bước Lint của CI ngay khi
+      // có ai đó chạy build trước lint trên cùng một máy.
+      "dist/**",
       ".scan/**",
       "e2e-*.mjs", // local Playwright/fetch verification harnesses (need a running app, not part of CI lint)
       // Bộ công cụ BMAD cài vào repo (skill + script của nhà cung cấp). KHÔNG phải mã của dự án:

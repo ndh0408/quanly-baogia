@@ -2,7 +2,14 @@
 
 image:
   repository: ghcr.io/ndh0408/quanly-baogia
-  tag: latest
+  # Ưu tiên digest — bất biến tuyệt đối, rollback luôn quay đúng bản mã cũ.
+  #   digest: "sha256:..."
+  digest: ""
+  # Nếu không dùng digest thì đặt tag TƯỜNG MINH (git sha). Bỏ trống → lấy Chart.appVersion.
+  # "latest" bị chặn (xem helper quanly.image) vì hai pod cùng ReplicaSet có thể chạy hai bản mã
+  # khác nhau và không có gì để rollback về.
+  tag: ""
+  allowMutableTag: false
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -25,6 +32,8 @@ worker:
   enabled: true
   replicaCount: 2
   concurrency: 4
+  # Thời gian cho worker chạy nốt job đang xử lý khi bị dừng (SIGTERM → Worker.close()).
+  terminationGracePeriodSeconds: 60
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 1, memory: 1Gi }
@@ -126,16 +135,25 @@ securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop: ["ALL"]
-  # readOnlyRootFilesystem: true   # enable after adding a writable /tmp emptyDir
-  #                                 # volume to the deployment template (Prisma engine)
+  # Bật được rồi: template app/worker đã gắn emptyDir vào /tmp cho engine Prisma ghi tạm.
+  readOnlyRootFilesystem: true
 
 podSecurityContext:
   fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 
+# PodDisruptionBudget: khi node được rút (drain/upgrade) k8s vẫn phải giữ tối thiểu ngần này pod
+# app sống. Không có PDB thì một lệnh `kubectl drain` có thể hạ sạch replica cùng lúc = downtime.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
 nodeSelector: {}
 tolerations: []
+# Rải pod app ra các node khác nhau khi có thể (soft anti-affinity — không chặn lập lịch nếu cụm
+# chỉ có 1 node). Hai replica nằm chung một node thì mất node là mất cả hai.
+spreadAcrossNodes: true
 affinity: {}
 
 # Metrics scraping
