@@ -3,8 +3,36 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
-// Dùng CHUNG toán tiền với lưới web + file Excel — PDF trước đây tự nhân tay nên ra số khác.
-import { lineAmount, groupMult, groupLetter, qtyForAmount, fmtNumCell } from "../shared/quote-math.js";
+
+// Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
+// KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
+// trong container (excel.ts/excelImport.ts cũng khai cục bộ vì lý do này).
+function qtyRound(x: unknown) {
+  const n = Number(x) || 0;
+  const t = Math.round(Math.abs(n) * 10 + 1e-6) / 10;
+  return n < 0 ? -t : t;
+}
+function qtyExact(x: unknown) {
+  const n = Number(x) || 0;
+  const t = Math.round(Math.abs(n) * 10_000 + 1e-8) / 10_000;
+  return n < 0 ? -t : t;
+}
+const qtyForAmount = (it: any) => (it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity));
+const lineAmount = (it: any, usesDays: boolean) => {
+  const q = qtyForAmount(it), d = Number(it?.days) || 1, pr = Number(it?.unitPrice) || 0;
+  return Math.round(usesDays ? q * d * pr : q * pr);
+};
+const groupMult = (it: any) => Math.max(1, qtyForAmount(it) || 1);
+function groupLetter(n: number) {
+  let s = "", x = n + 1;
+  while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
+  return s;
+}
+const fmtNumCell = (v?: number | string, exact = false) => {
+  const t = exact ? qtyExact(v) : qtyRound(v);
+  if (!t || isNaN(t)) return "";
+  return t.toLocaleString("vi-VN", { maximumFractionDigits: exact ? 4 : 1 });
+};
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FONT_DIR = path.join(__dirname, "..", "fonts");
