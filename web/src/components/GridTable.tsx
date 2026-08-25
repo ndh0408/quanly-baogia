@@ -43,6 +43,10 @@ type Addr = { row: number; field: string; L: string };
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
+// Bấm vào những vùng này KHÔNG được coi là "rời lưới" → GIỮ vùng chọn.
+// .grid-add-bar (nút + Thêm hàng/nhóm/Nhóm con/Dòng thông tin/Chèn từ rạp) và modal chèn từ rạp đều
+// chèn NGAY DƯỚI hàng đang chọn; xoá selection ngay lúc pointerdown làm hàng mới rơi xuống cuối bảng.
+const KEEP_SEL = ".excel-table, .tbl-scroll, .fx-bar, .vs-auto, .fx-auto, .grid-add-bar, .modal, .modal-backdrop";
 
 export function GridTable(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
@@ -984,11 +988,11 @@ export function GridTable(props: GridTableProps) {
     // RỜI HẲN khỏi lưới (bấm ra ngoài bảng) → BỎ tô vùng chọn, ô về màu bình thường.
     // Vẫn GIỮ khi qua thanh công thức fx (đang sửa ô đó) hoặc sang ô khác trong cùng lưới.
     const to = e.relatedTarget as HTMLElement | null;
-    const stayInGrid = !!to && (!!to.closest?.(".excel-table") || !!to.closest?.(".fx-bar") || !!to.closest?.(".vs-auto") || !!to.closest?.(".fx-auto"));
+    const stayInGrid = !!to && !!to.closest?.(KEEP_SEL);
     if (!stayInGrid) {
       setTimeout(() => {
         const ae = document.activeElement as HTMLElement | null;
-        if (ae && (ae.closest?.(".excel-table") || ae.closest?.(".fx-bar"))) return;   // đã quay lại lưới
+        if (ae && ae.closest?.(KEEP_SEL)) return;   // đã quay lại lưới (hoặc đang bấm nút chèn hàng)
         clearSel();
       }, 60);
     }
@@ -1000,7 +1004,7 @@ export function GridTable(props: GridTableProps) {
     const onOutsidePointer = (ev: PointerEvent) => {
       const tb = tableRef.current, target = ev.target as HTMLElement | null;
       if (!tb || !target || tb.contains(target)) return;
-      if (target.closest(".tbl-scroll, .fx-bar, .vs-auto, .fx-auto")) return;
+      if (target.closest(KEEP_SEL)) return;
       const active = document.activeElement as HTMLElement | null;
       if (active && tb.contains(active)) active.blur();
       clearOutsideRef.current();
