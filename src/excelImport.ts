@@ -638,6 +638,22 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   if (base.stats.formulasDropped) base.warnings.push(`${base.stats.formulasDropped} công thức không nạp được (đã giữ con số) — xem cột Cảnh báo từng dòng.`);
   if (!base.items.length) base.warnings.push("Không đọc được hạng mục nào trong bảng.");
   if (base.items.length > MAX_ITEMS_PER_SHEET) base.warnings.push(`Bảng có ${base.items.length} dòng — app lưu tối đa ${MAX_ITEMS_PER_SHEET} dòng/sheet, phần dư cần tách sang sheet khác.`);
+  // Thiếu cột thì app phải ĐOÁN cấu trúc, và đoán sai là mất tiền/mất nhóm mà người dùng không hay.
+  // Nói thẳng ra ngay trên bảng đối chiếu để họ soi lại trước khi bấm nạp.
+  {
+    const thieu: string[] = [];
+    if (!colOf._stt) thieu.push("STT");
+    if (!colOf.unit) thieu.push("ĐVT");
+    if (!colOf.quantity) thieu.push("Số Lượng");
+    if (!colOf.unitPrice) thieu.push("Đơn Giá");
+    if (thieu.length) {
+      base.warnings.push(
+        `File không có cột ${thieu.join(" / ")} — app phải tự đoán đâu là nhóm, đâu là hạng mục` +
+        (!colOf._stt && !colOf.unit ? " (thiếu cả STT lẫn ĐVT thì chỉ dựa vào Số Lượng để phân biệt)" : "") +
+        ". Hãy soi kỹ cột “Loại” trong bảng đối chiếu trước khi nạp.",
+      );
+    }
+  }
   if (totals.subtotal != null) {
     const calc = computeSubtotal(base);
     if (Math.abs(calc - totals.subtotal) > Math.max(2, Math.abs(totals.subtotal) * 0.005)) {

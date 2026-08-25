@@ -9,7 +9,9 @@ import { addrFields, autoTargetIndexes, letterOfField, NEW_IMPORT_SHEET, toGridI
 // Không ghi DB: nạp xong người dùng vẫn phải bấm Lưu (đi đúng đường lưu cũ + lưu phiên bản).
 
 /** Trần dòng/sheet khi lưu — khớp sheetSchema (src/validators.ts) + MAX_ITEMS_PER_SHEET. */
-const MAX_ROWS_PER_SHEET = 2000;
+// Trần LƯU của server (validators.ts: items.max(500)). Trước đây modal cho qua tới 2000 dòng, người
+// dùng nạp xong mới ăn lỗi 400 lúc bấm Lưu — mất công đối chiếu cả file. Chặn sớm, nói rõ con số.
+const MAX_ROWS_PER_SHEET = 500;
 
 type TargetMode = "replace" | "append" | "skip";
 /** targetIndex = NEW_SHEET → tạo THÊM sheet mới trong báo giá (file nhiều sheet hơn báo giá). */
@@ -173,7 +175,7 @@ export function ImportExcelModal({
     if (!out.length) { toast("Chưa chọn sheet nào để nạp", "info"); return; }
     // Trần lưu của app (khớp sheetSchema server) — báo TRƯỚC khi nạp thay vì để lỗi lúc bấm Lưu.
     const over = out.find((p) => ((p.mode === "append" && p.targetIndex !== NEW_SHEET ? (sheets[p.targetIndex]?.items.length || 0) : 0) + p.items.length) > MAX_ROWS_PER_SHEET);
-    if (over) { toast(`Sheet “${over.file.name}” vượt ${MAX_ROWS_PER_SHEET} dòng/sheet — hãy tách bớt sang sheet khác rồi nạp lại`, "error"); return; }
+    if (over) { toast(`Sheet “${over.file.name}” vượt ${MAX_ROWS_PER_SHEET} dòng/sheet (giới hạn lưu của hệ thống) — hãy tách bớt sang sheet khác rồi nạp lại`, "error"); return; }
     const risks = [
       moneyRisk ? `${moneyRisk} sheet có tổng sau nạp khác tổng trong Excel` : "",
       formulaRisk ? `${formulaRisk} công thức chỉ giữ được con số` : "",

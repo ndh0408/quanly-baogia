@@ -7,7 +7,24 @@ export type ItemK = M.Item & { _k?: number };
 let _kSeq = 1;
 export const nextK = () => _kSeq++;
 
-export const autoGrow = (el: HTMLTextAreaElement | null) => { if (!el) return; el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+// Ô nhiều dòng tự cao theo nội dung. Đọc scrollHeight BUỘC trình duyệt tính lại bố cục ngay lúc
+// đó — với lưới ~600 ô thì mỗi lần tốn hàng chục ms, gõ nhanh là khựng thấy rõ. Gộp về CUỐI KHUNG
+// HÌNH: gõ 20 ký tự trong một frame chỉ đo một lần. Ô đang chờ giữ trong Set nên không xếp trùng.
+const pendingGrow = new Set<HTMLTextAreaElement>();
+let growRaf = 0;
+const measureNow = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+export const autoGrow = (el: HTMLTextAreaElement | null) => {
+  if (!el) return;
+  if (typeof requestAnimationFrame !== "function") { measureNow(el); return; }
+  pendingGrow.add(el);
+  if (growRaf) return;
+  growRaf = requestAnimationFrame(() => {
+    growRaf = 0;
+    // Đo hết trong một nhịp: các lần đọc scrollHeight dồn lại chỉ gây một lượt tính bố cục.
+    for (const t of pendingGrow) if (t.isConnected) measureNow(t);
+    pendingGrow.clear();
+  });
+};
 
 // Chỉ số ký tự nằm ngay dưới con trỏ chuột trong <input>/<textarea>.
 // Chrome trả null cho caretPositionFromPoint/caretRangeFromPoint khi điểm rơi vào form control
