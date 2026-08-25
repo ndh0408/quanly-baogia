@@ -364,3 +364,39 @@ export function retargetPastedFormulas(built, matrix, roles, opts) {
   if (win && winOk > 0) tryFit(win.x0, win.r0, true);
   else for (const { k, f } of fxList) markWarn(k, f);   // không khớp được gì → giữ công thức gốc + ô ĐỎ hết
 }
+
+// ── DỊCH THAM CHIẾU khi COPY/DÁN hoặc FILL trong chính lưới (nếp Excel) ─────────────────────────
+// Excel: copy "=G3*E3" ở hàng 3 dán xuống hàng 7 → "=G7*E7"; dán sang phải 1 cột → cột cũng dời.
+// Dấu $ khoá: $E3 khoá CỘT, E$3 khoá HÀNG, $E$3 khoá cả hai. Dải A1:B5 dịch cả hai đầu.
+// Dịch ra ngoài bảng (hàng < 1 hoặc > maxRow, cột ra khỏi sơ đồ) → Excel trả #REF!; ở đây trả
+// null để nơi gọi biết mà giữ công thức gốc + đánh dấu ô đỏ, thay vì âm thầm tính sai.
+//
+// letters: mảng chữ cái cột theo THỨ TỰ sơ đồ địa chỉ của lưới (ADDR), vd ["A","B","C",…].
+// dRow/dCol: số hàng/cột dời đi. maxRow: số hàng hiện có (1-based, để chặn vượt biên).
+export function shiftFormulaRefs(fx, dRow, dCol, letters, maxRow) {
+  const raw = String(fx || "");
+  if (!raw.trim().startsWith("=")) return raw;          // không phải công thức → nguyên văn
+  if (!dRow && !dCol) return raw;                        // dán tại chỗ → khỏi đụng
+  const idxOf = (L) => letters.indexOf(String(L).toUpperCase());
+  let bad = false;
+  // ($?)(chữ)($?)(số) — bắt cả 2 đầu của dải "A1:B5" trong một lần khớp.
+  const RE = /(\$?)([A-Za-z]+)(\$?)(\d+)/g;
+  const out = raw.replace(RE, (m, cLock, col, rLock, row) => {
+    if (bad) return m;
+    // Cột: chỉ dời khi KHÔNG có $ trước chữ cái.
+    let ci = idxOf(col);
+    if (ci < 0) { bad = true; return m; }                // chữ cái không thuộc sơ đồ cột của lưới
+    if (!cLock && dCol) {
+      ci += dCol;
+      if (ci < 0 || ci >= letters.length) { bad = true; return m; }
+    }
+    // Hàng: chỉ dời khi KHÔNG có $ trước số.
+    let r = parseInt(row, 10);
+    if (!rLock && dRow) {
+      r += dRow;
+      if (r < 1 || (maxRow && r > maxRow)) { bad = true; return m; }
+    }
+    return cLock + letters[ci] + rLock + r;
+  });
+  return bad ? null : out;
+}

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
-import { type ItemK, nextK, autoGrow } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../lib/clipboard";
+import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShared";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 
@@ -81,7 +81,7 @@ export function GridTable(props: GridTableProps) {
   const coarsePointer = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Nhãn phím lệnh theo máy: macOS ⌘ · Windows/Linux Ctrl (mọi phím tắt nhận CẢ HAI).
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
-  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; c0?: number } | null>(null);
+  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; labels?: string[]; c0?: number; r0?: number } | null>(null);
   const copyTokenRef = useRef(0);
   const autoRef = useRef<{ input: HTMLInputElement | HTMLTextAreaElement; items: string[]; idx: number } | null>(null);
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
@@ -96,7 +96,14 @@ export function GridTable(props: GridTableProps) {
   const [sug, setSug] = useState<Sug | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const FIELDS = (["name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
+  // "_stt" nằm trong vùng CHỌN được (kéo/quét/Ctrl+A/Shift+mũi tên/copy) nhưng KHÔNG nhập được —
+  // nó là ô tính (số thứ tự, nhãn nhóm A/B/1/2). Có nó trong vùng chọn thì copy nguyên hàng mới
+  // mang theo được "hàng này là nhóm hay mục", dán xuống dựng lại đúng cấu trúc.
+  // LƯU Ý: FIELDS chỉ là danh sách cột ĐIỀU HƯỚNG, hoàn toàn tách khỏi ADDR (sơ đồ chữ cái cột) —
+  // thêm cột ở đây KHÔNG dịch chữ cái nào nên công thức đã lưu của báo giá cũ vẫn trỏ đúng.
+  const FIELDS = (["_stt", "name", showDetail ? "detail" : null, "unit", "quantity", usesDays ? "days" : null, "unitPrice", "notes", internalNote ? "internalNote" : null].filter(Boolean)) as string[];
+  const RO_FIELDS = new Set(["_stt", "_amount"]);   // chọn/copy được, cấm ghi vào model
+  const DATA_FIELD_COUNT = FIELDS.length - 1;       // số cột DỮ LIỆU (không tính _stt) — cho nhận dạng khối dán
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   const snap = () => JSON.stringify(items);
@@ -130,6 +137,7 @@ export function GridTable(props: GridTableProps) {
   const colByL: Record<string, { f: string }> = {}; ADDR.forEach((c) => { colByL[c.L] = c; });
   const idxOfL = (L: string) => ADDR.findIndex((c) => c.L === L);
   const letterOf = (f: string) => ADDR.find((c) => c.f === f)?.L || "";
+  const addrIdxOfField = (f: string) => ADDR.findIndex((c) => c.f === f);   // vị trí cột trong SƠ ĐỒ ĐỊA CHỈ (A,B,C…)
   const addrOf = (row: number, field: string) => { const L = letterOf(field); return L ? L + (row + 1) : ""; };
   const parseAddr = (a: string) => { const m = /^([A-Za-z]+)(\d+)$/.exec(a.trim()); if (!m) return null; const L = m[1].toUpperCase(); const col = colByL[L]; if (!col) return null; const row = parseInt(m[2], 10) - 1; if (row < 0 || row >= items.length) return null; return { row, f: col.f, L }; };
   const cellNum = (a: string): number => { const p = parseAddr(a); if (!p) return 0; const it = items[p.row] as Record<string, unknown>; if (!it) return 0; if (p.f === "_amount") return (items[p.row].kind === "section" || items[p.row].kind === "subsection" || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0;
@@ -293,6 +301,14 @@ export function GridTable(props: GridTableProps) {
     row = Math.max(0, Math.min(items.length - 1, row));
     const ci = Math.max(0, Math.min(FIELDS.length - 1, fieldIdx(field)));
     let f2 = FIELDS[ci];
+    // Cột STT: ô TÍNH — dời vùng chọn tới đó nhưng giữ nguyên ô đang focus, để mũi tên/Shift+mũi tên
+    // quét qua được mà không "rơi" con trỏ vào ô không nhập được.
+    if (f2 === "_stt") {
+      const sel0 = selRef.current;
+      selRef.current = extend && sel0 ? { anchor: sel0.anchor, focus: { row, field: f2 } } : { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+      paintSel();
+      return;
+    }
     if (!cellEl(row, f2)) {
       let found: string | null = null;
       for (let d = 1; d < FIELDS.length && !found; d++) {
@@ -344,6 +360,7 @@ export function GridTable(props: GridTableProps) {
     if (!td || !tr) return null;
     const row = parseInt(tr.getAttribute("data-row") || "0", 10);
     const inp = td.querySelector("[data-f]"); let field = inp?.getAttribute("data-f") || null;
+    if (field === "label") field = "_stt";   // nhãn nhóm A/B/1/2 ngồi trong ô STT → coi là cột STT
     if (!field) { if (td.classList.contains("col-amount")) field = "_amount"; else if (td.classList.contains("col-stt")) field = "_stt"; else return null; }
     const L = letterOf(field); if (!L) return null;
     return { row, field, L };
@@ -421,7 +438,16 @@ export function GridTable(props: GridTableProps) {
       paintSel();
       return;
     }
-    if (!coarsePointer && el) {
+    if (info.field === "_stt") {
+      // Cột STT là ô TÍNH: bấm/kéo chỉ để CHỌN (copy nguyên hàng), KHÔNG gõ vào được.
+      // Ngoại lệ duy nhất: nhãn nhóm A/B/1/2 do người dùng tự đặt — nhấp đúp vẫn sửa được.
+      const lab = (e.target as HTMLElement)?.closest?.('[data-f="label"]') as HTMLInputElement | null;
+      if (lab && !lab.disabled && !coarsePointer) {
+        e.preventDefault();
+        if (document.activeElement !== lab) { navigatingRef.current = true; lab.focus(); navigatingRef.current = false; }
+        if ((e.detail ?? 1) >= 2) enterEdit(lab, {}, "edit"); else lockCell(lab);
+      } else editingRef.current = false;
+    } else if (!coarsePointer && el) {
       if ((e.detail ?? 1) >= 2) {
         // Cú bấm THỨ HAI của nhấp đúp = vào SỬA. KHÔNG preventDefault và mở readOnly NGAY tại
         // mousedown, để chính trình duyệt đặt con trỏ đúng chỗ vừa bấm — trước đây ô bị khoá +
@@ -468,7 +494,9 @@ export function GridTable(props: GridTableProps) {
 
   // ── copy / cut / fill ──────────────────────────────────────────────────────────
   // ô số copy giá trị THÔ (US, không gom nghìn) để Excel nhận; công thức copy nguyên "=…".
-  const cellRawForCopy = (i: number, f: string) => { const it = items[i] as Record<string, unknown>; const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
+  const cellRawForCopy = (i: number, f: string) => { const it = items[i] as Record<string, unknown>;
+    if (f === "_stt") return sttText[i] || "";
+    if (f === "_amount") return rk[i] === "section" ? String(M.fmtNumCell(sectionSum[i] || 0)) : String(M.fmtNumCell(M.lineAmount(items[i], usesDays))); const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
   const onCopyCut = (e: { clipboardData: DataTransfer; preventDefault(): void }, cut: boolean) => {
     const sel = selRef.current; const rc = rectOf(sel); if (!rc) return;
     // ĐANG SỬA trong 1 ô → để trình duyệt copy đúng đoạn chữ bôi đen (như Excel ở chế độ sửa).
@@ -481,8 +509,13 @@ export function GridTable(props: GridTableProps) {
     e.clipboardData.setData("text/plain", tsv);
     e.clipboardData.setData("text/html", cellsToHTML(matrix));   // dán sang Word/Sheets giữ bảng
     const token = ++copyTokenRef.current;
-    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, cols: rc.c1 - rc.c0 + 1, c0: rc.c0 })); } catch { /* */ }
-    copyBufRef.current = { tsv, token, kinds, c0: rc.c0 };
+    const labels = [];
+    for (let r = rc.r0; r <= rc.r1; r++) labels.push(String((items[r] as Record<string, unknown>).label || ""));
+    // tsv nằm TRONG payload: dán sang lưới khác (bảng nội bộ, tab khác) vẫn dựng lại đúng khối này.
+    // Trước đây chỉ có token, mà mỗi lưới đếm token riêng từ 0 → token trùng nhau, dán nhầm khối cũ.
+    // r0/c0: mốc nguồn để DỊCH THAM CHIẾU công thức theo kiểu Excel khi dán chỗ khác.
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1) })); } catch { /* */ }
+    copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
     if (cut && editable) cutPendingRef.current = { token, ...rc };
@@ -517,7 +550,18 @@ export function GridTable(props: GridTableProps) {
   const fillDown = () => {
     const rc = rectOf(selRef.current); if (!rc || rc.r1 <= rc.r0) return;
     pushUndo();
-    for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; const top = items[rc.r0] as Record<string, unknown>; for (let r = rc.r0 + 1; r <= rc.r1; r++) { if (items[r].kind === "info") continue; const it = items[r] as Record<string, unknown>; it[f] = top[f]; const tfx = top.formulas as Record<string, string> | undefined; if (tfx && tfx[f]) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = tfx[f]; } else if (it.formulas) delete (it.formulas as Record<string, string>)[f]; } }
+    for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (RO_FIELDS.has(f)) continue; const top = items[rc.r0] as Record<string, unknown>; for (let r = rc.r0 + 1; r <= rc.r1; r++) {
+      if (items[r].kind === "info") continue;
+      const it = items[r] as Record<string, unknown>; it[f] = top[f];
+      const tfx = top.formulas as Record<string, string> | undefined;
+      if (tfx && tfx[f]) {
+        // Chép xuống n hàng thì tham chiếu tụt n hàng — "=G3*E3" ở hàng 3 xuống hàng 5 thành "=G5*E5".
+        const moved = shiftFormulaRefs(tfx[f], r - rc.r0, 0, ADDR.map((c) => c.L), items.length);
+        if (!it.formulas) it.formulas = {};
+        if (moved === null) { (it.formulas as Record<string, string>)[f] = tfx[f]; const w = (it._fxWarn as Record<string, boolean>) || (it._fxWarn = {} as Record<string, boolean>); w[f] = true; }
+        else (it.formulas as Record<string, string>)[f] = moved;
+      } else if (it.formulas) delete (it.formulas as Record<string, string>)[f];
+    } }
     autoEnableGroupSub(rc.r0, rc.r1);
     recomputeAll(); onChange();
   };
@@ -528,11 +572,19 @@ export function GridTable(props: GridTableProps) {
     for (let r = rc.r0; r <= rc.r1; r++) {
       if (items[r]?.kind === "info") continue;
       const it = items[r] as Record<string, unknown>; const src = FIELDS[rc.c0];
+      if (RO_FIELDS.has(src)) continue;
       for (let c = rc.c0 + 1; c <= rc.c1; c++) {
         const f = FIELDS[c];
+        if (RO_FIELDS.has(f)) continue;
         it[f] = NUMERIC.has(f) === NUMERIC.has(src) ? it[src] : (NUMERIC.has(f) ? (Number(it[src]) || 0) : String(it[src] ?? ""));
         const fx = it.formulas as Record<string, string> | undefined;
-        if (fx && fx[src]) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = fx[src]; }
+        if (fx && fx[src]) {
+          const dC = addrIdxOfField(f) - addrIdxOfField(src);
+          const moved = dC ? shiftFormulaRefs(fx[src], 0, dC, ADDR.map((cc) => cc.L), items.length) : fx[src];
+          if (!it.formulas) it.formulas = {};
+          if (moved === null) { (it.formulas as Record<string, string>)[f] = fx[src]; const w = (it._fxWarn as Record<string, boolean>) || (it._fxWarn = {} as Record<string, boolean>); w[f] = true; }
+          else (it.formulas as Record<string, string>)[f] = moved;
+        }
         else if (fx) delete fx[f];
       }
     }
@@ -547,6 +599,7 @@ export function GridTable(props: GridTableProps) {
       const it = items[r] as Record<string, unknown> | undefined; if (!it) continue;
       for (let c = rc.c0; c <= rc.c1; c++) {
         const f = FIELDS[c];
+        if (RO_FIELDS.has(f)) continue;
         it[f] = NUMERIC.has(f) ? 0 : "";
         const fx = it.formulas as Record<string, string> | undefined;
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
@@ -627,9 +680,21 @@ export function GridTable(props: GridTableProps) {
   const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
   const doRedo = () => { if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
-  const pasteCellVal = (i: number, f: string, val: string) => {
+  // dRow/dCol: khối được dán dời đi bao nhiêu hàng/cột so với chỗ copy → DỊCH tham chiếu trong công
+  // thức đúng nếp Excel ("=G3*E3" copy ở hàng 3 dán xuống hàng 7 thành "=G7*E7"; $ khoá thì giữ).
+  // Dịch ra ngoài bảng (Excel trả #REF!) → giữ nguyên công thức gốc và đánh dấu ô ĐỎ để người dùng
+  // thấy mà sửa, thay vì âm thầm tính ra số sai.
+  const pasteCellVal = (i: number, f: string, val: string, dRow = 0, dCol = 0) => {
     const it = items[i] as Record<string, unknown>;
-    if (val.trim().startsWith("=")) { if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = val.trim(); it[f] = NUMERIC.has(f) ? 0 : val.trim(); return; }
+    if (val.trim().startsWith("=")) {
+      let fx = val.trim();
+      if (dRow || dCol) {
+        const moved = shiftFormulaRefs(fx, dRow, dCol, ADDR.map((c) => c.L), items.length);
+        if (moved === null) { const w = (it._fxWarn as Record<string, boolean>) || (it._fxWarn = {} as Record<string, boolean>); w[f] = true; }
+        else fx = moved;
+      }
+      if (!it.formulas) it.formulas = {}; (it.formulas as Record<string, string>)[f] = fx; it[f] = NUMERIC.has(f) ? 0 : fx; return;
+    }
     if (it.formulas && (it.formulas as Record<string, string>)[f]) delete (it.formulas as Record<string, string>)[f];
     it[f] = NUMERIC.has(f) ? (val.trim() === "" ? 0 : parseLooseNumber(val)) : (MULTILINE.has(f) ? val : val.trim().replace(/\s+/g, " "));
   };
@@ -640,12 +705,15 @@ export function GridTable(props: GridTableProps) {
     const sel = selRef.current;
     let startRow = sel ? rectOf(sel)!.r0 : (focusRef.current?.i ?? 0);
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : 0);
-    let internal: { token: number; kinds?: string[]; cols?: number; c0?: number } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[] } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
     const text = e.clipboardData.getData("text/plain") || e.clipboardData.getData("text") || "";
     if (!text && !internal) return;
-    const sameBlock = !!(internal && copyBufRef.current && internal.token === copyBufRef.current.token);
-    const rows = parseClipboardTSV(sameBlock ? copyBufRef.current!.tsv : text);
+    // Khối nội bộ mang theo LUÔN nội dung TSV → dán sang lưới khác/tab khác vẫn dựng đúng khối đó.
+    // Trước đây chỉ so token với bộ đệm cục bộ, mà mỗi lưới đếm token riêng từ 0 nên token trùng
+    // nhau giữa hai lưới → dán ra khối CŨ của lưới kia.
+    const sameBlock = !!(internal && (internal.tsv != null || (copyBufRef.current && internal.token === copyBufRef.current.token)));
+    const rows = parseClipboardTSV(internal?.tsv ?? (sameBlock && copyBufRef.current ? copyBufRef.current.tsv : text));
     // Nếu user copy LUÔN hàng tiêu đề ("STT|Hạng Mục|…") → đọc nó để MAP cột theo file nguồn (dán
     // đúng dù sheet đích khác template, vd nguồn KHÔNG ngày dán vào sheet CÓ ngày), rồi bỏ hàng đó.
     let hdrRoles: string[] | null = null;
@@ -691,7 +759,9 @@ export function GridTable(props: GridTableProps) {
     e.preventDefault(); pushUndo();
 
     // DÁN NGUYÊN báo giá app xuất ra (có cột STT) → dựng lại nhóm/nhóm-con/hàng-con/info.
-    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, FIELDS.length))) {
+    // DATA_FIELD_COUNT: đếm cột DỮ LIỆU như trước khi thêm "_stt" vào FIELDS — nhận dạng khối dán từ
+    // file Excel ngoài phải giữ nguyên ngưỡng cũ, không thì khối 7 cột bỗng bị coi là thiếu cột.
+    if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol, DATA_FIELD_COUNT))) {
       const roles = hdrRoles || ADDR.map((c) => c.f);
       const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
       // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
@@ -717,13 +787,28 @@ export function GridTable(props: GridTableProps) {
       rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
       startRow += 1; startCol = 0;
     }
-    const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? copyBufRef.current!.kinds : null;
+    const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? (internal?.kinds ?? copyBufRef.current?.kinds ?? null) : null;
+    const labels = kinds ? (internal?.labels ?? copyBufRef.current?.labels ?? null) : null;
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       if (ri >= items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
       const it = items[ri] as Record<string, unknown>;
       if (kinds && kinds[r]) it.kind = kinds[r];
-      cells.forEach((val, c) => { const f = FIELDS[startCol + c]; if (f) pasteCellVal(ri, f, val); });
+      // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
+      if (labels && labels[r]) it.label = labels[r];
+      cells.forEach((val, c) => {
+        const f = FIELDS[startCol + c];
+        if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
+        // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
+        // (Khối dán từ file Excel NGOÀI đi đường riêng: retargetPastedFormulas dò mốc neo.)
+        let dR = 0, dC = 0;
+        if (internal && internal.r0 != null) {
+          dR = ri - (internal.r0 + r);
+          const fSrc = internal.fields?.[c];
+          if (fSrc) { const a = addrIdxOfField(f), b = addrIdxOfField(fSrc); if (a >= 0 && b >= 0) dC = a - b; }
+        }
+        pasteCellVal(ri, f, val, dR, dC);
+      });
     });
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token) {
@@ -1233,6 +1318,19 @@ export function GridTable(props: GridTableProps) {
   }
   const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
+  // Chuỗi STT của từng hàng (A/B/C cho nhóm, 1/2/3 cho nhóm con khi mẫu đánh số, số thứ tự cho hàng
+  // thường) — dựng sẵn để CHÉP được cột STT, và để dán ở nơi khác vẫn đọc ra được loại hàng.
+  const sttText: string[] = [];
+  { let n = 0, sIdx = -1, sub = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (rk[i] === "section") {
+        if (items[i].kind === "subsection") sttText[i] = String(items[i].label || (numberSubs ? String(++sub) : ""));
+        else { sIdx++; sub = 0; sttText[i] = String(items[i].label || M.groupLetter(sIdx)); }
+        n = 0;
+      } else if (rk[i] === "head") { n++; sttText[i] = numberSubs ? "" : String(n); }
+      else sttText[i] = "";   // hàng con (bị rowspan nuốt) và dòng thông tin: không có STT riêng
+    }
+  }
   let sttNo = 0, sectionIdx = -1, subNo = 0;
 
   // ── XEM CÔNG THỨC ô KHÓA (như Excel) ────────────────────────────────────────
@@ -1431,7 +1529,9 @@ export function GridTable(props: GridTableProps) {
             // bấm. Nhấp đúp khi ĐANG sửa vẫn bôi từ như mọi trình soạn thảo (dblFromLockedRef=false).
             if (dblFromLockedRef.current) {
               dblFromLockedRef.current = false;
-              const at = el.selectionStart ?? 0;
+              // CON TRỎ CHUỘT Ở ĐÂU THÌ DẤU NHÁY Ở ĐÓ: đo bằng phần tử gương (Chrome không cho hỏi
+              // vị trí ký tự bên trong form control). Đo hụt thì lùi về đầu từ trình duyệt vừa bôi.
+              const at = caretIndexAtPoint(el, e.clientX, e.clientY) ?? el.selectionStart ?? 0;
               try { el.setSelectionRange(at, at); } catch { /* ô number không cho đặt vùng chọn */ }
             }
           }}

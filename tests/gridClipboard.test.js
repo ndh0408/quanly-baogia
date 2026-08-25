@@ -11,6 +11,7 @@ import {
   isHeaderRow,
   headerToRoles,
   retargetPastedFormulas,
+  shiftFormulaRefs,
 } from "../public/grid-clipboard.js";
 
 // GN template export columns (no days, has Chi Tiết), as copied B:H (STT..Thành Tiền)
@@ -383,5 +384,55 @@ describe("retarget — dữ liệu TUẦN HOÀN: tie-break khoảng-cách-ref ch
     expect(b[10].formulas.quantity).toBe("=E10+1");   // trỏ hàng NGAY TRƯỚC, không lệch sang hàng cùng-giá-trị khác
     expect(b[20].formulas.quantity).toBe("=E20+1");
     expect(b[10]._fxWarn).toBeUndefined();
+  });
+});
+
+// Dịch tham chiếu khi copy/dán hoặc fill TRONG lưới — nếp Excel.
+describe("shiftFormulaRefs (dán/fill trong lưới, kiểu Excel)", () => {
+  const L = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
+  const sh = (fx, dr, dc = 0, maxRow = 50) => shiftFormulaRefs(fx, dr, dc, L, maxRow);
+
+  it("dịch theo HÀNG khi dán xuống", () => {
+    expect(sh("=G3*E3", 4)).toBe("=G7*E7");
+    expect(sh("=E3", 1)).toBe("=E4");
+  });
+
+  it("dịch theo CỘT khi dán sang ngang", () => {
+    expect(sh("=E3", 0, 1)).toBe("=F3");
+    expect(sh("=G5*E5", 0, -1)).toBe("=F5*D5");
+  });
+
+  it("dải ô dịch cả hai đầu", () => {
+    expect(sh("=SUM(H3:H8)", 2)).toBe("=SUM(H5:H10)");
+    expect(sh("=SUM(E3:G3)", 0, 1)).toBe("=SUM(F3:H3)");
+  });
+
+  it("$ khoá đúng phần bị khoá", () => {
+    expect(sh("=$E$3", 4)).toBe("=$E$3");
+    expect(sh("=$E3", 4)).toBe("=$E7");
+    expect(sh("=E$3", 4)).toBe("=E$3");
+    expect(sh("=$E3", 0, 2)).toBe("=$E3");
+  });
+
+  it("dịch vượt biên trả null (Excel: #REF!) thay vì âm thầm sai", () => {
+    expect(sh("=E3", -5)).toBeNull();
+    expect(sh("=E48", 5, 0, 50)).toBeNull();
+    expect(sh("=A3", 0, -1)).toBeNull();
+    expect(sh("=I3", 0, 1)).toBeNull();
+  });
+
+  it("không phải công thức, hoặc công thức không có ref → giữ nguyên", () => {
+    expect(sh("12345", 4)).toBe("12345");
+    expect(sh("Chi phí thi công", 4)).toBe("Chi phí thi công");
+    expect(sh("=2*3", 4)).toBe("=2*3");
+    expect(sh("=SUM(1;2;3)", 4)).toBe("=SUM(1;2;3)");
+  });
+
+  it("dán tại chỗ (không dời) giữ nguyên công thức", () => {
+    expect(sh("=G3*E3", 0, 0)).toBe("=G3*E3");
+  });
+
+  it("giữ nguyên tên hàm, chỉ đụng tham chiếu ô", () => {
+    expect(sh("=ROUND(E3*G3,0)", 2)).toBe("=ROUND(E5*G5,0)");
   });
 });
