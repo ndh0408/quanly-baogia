@@ -12,6 +12,7 @@ import {
   headerToRoles,
   retargetPastedFormulas,
   shiftFormulaRefs,
+  adjustRefsForRowEdit,
 } from "../public/grid-clipboard.js";
 
 // GN template export columns (no days, has Chi Tiết), as copied B:H (STT..Thành Tiền)
@@ -491,5 +492,32 @@ describe("reconstructExportRows theo từng mẫu báo giá", () => {
     expect(out[0].quantity).toBe(2);
     expect(out[0].days).toBe(3);
     expect(out[0].unitPrice).toBe(5000000);
+  });
+});
+
+// Chèn/xoá hàng: Excel tự dịch tham chiếu, ở đây cũng phải làm — không thì "=E5" lặng lẽ trỏ sang
+// hạng mục khác (chèn) hoặc trỏ vào hàng đã mất rồi trả 0 (xoá).
+describe("adjustRefsForRowEdit (chèn/xoá hàng)", () => {
+  it("chèn 1 hàng: ref từ hàng đó trở xuống tụt 1", () => {
+    expect(adjustRefsForRowEdit("=E5*G5", 5, 1)).toBe("=E6*G6");
+    expect(adjustRefsForRowEdit("=E4", 5, 1)).toBe("=E4");        // phía trên không đổi
+  });
+  it("xoá 1 hàng: ref phía dưới lùi 1, ref vào chính hàng đó = #REF! (null)", () => {
+    expect(adjustRefsForRowEdit("=E9", 5, -1)).toBe("=E8");
+    expect(adjustRefsForRowEdit("=E5", 5, -1)).toBeNull();
+  });
+  it("xoá nhiều hàng cùng lúc", () => {
+    expect(adjustRefsForRowEdit("=E10", 5, -2)).toBe("=E8");
+    expect(adjustRefsForRowEdit("=E6", 5, -2)).toBeNull();
+  });
+  it("dải ô dịch cả hai đầu", () => {
+    expect(adjustRefsForRowEdit("=SUM(H3:H8)", 5, 1)).toBe("=SUM(H3:H9)");
+  });
+  it("khoá $ KHÔNG bảo vệ khỏi chèn/xoá hàng (đúng như Excel)", () => {
+    expect(adjustRefsForRowEdit("=$E$5", 5, 1)).toBe("=$E$6");
+  });
+  it("không phải công thức thì giữ nguyên", () => {
+    expect(adjustRefsForRowEdit("Chi phí thi công", 5, 1)).toBe("Chi phí thi công");
+    expect(adjustRefsForRowEdit("=2*3", 5, 1)).toBe("=2*3");
   });
 });

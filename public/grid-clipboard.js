@@ -402,3 +402,29 @@ export function shiftFormulaRefs(fx, dRow, dCol, letters, maxRow) {
   });
   return bad ? null : out;
 }
+
+// ── CHÈN / XOÁ HÀNG: dịch tham chiếu như Excel ────────────────────────────────────────────────
+// Excel: chèn 1 hàng trên hàng 5 thì mọi "=E5" thành "=E6"; xoá hàng 5 thì "=E5" thành #REF! còn
+// "=E9" thành "=E8". Khoá $ KHÔNG bảo vệ khỏi việc này ($E$5 vẫn dịch) — $ chỉ chặn dịch khi
+// copy/dán. Không làm bước này thì chèn/xoá hàng khiến công thức lặng lẽ trỏ sang hạng mục khác.
+//
+// at: số hàng (1-based) nơi chèn/xoá. delta: +n = chèn n hàng TRƯỚC hàng at; -n = xoá n hàng từ at.
+// Trả null khi công thức trỏ vào chính hàng bị xoá (tương đương #REF!) → nơi gọi giữ công thức cũ
+// và đánh dấu ô đỏ để người dùng thấy mà sửa, thay vì để nó âm thầm tính ra 0.
+export function adjustRefsForRowEdit(fx, at, delta) {
+  const raw = String(fx || "");
+  if (!raw.trim().startsWith("=") || !delta) return raw;
+  let broken = false;
+  const out = raw.replace(/(\$?)([A-Za-z]+)(\$?)(\d+)/g, (m, cLock, col, rLock, rowS) => {
+    let r = parseInt(rowS, 10);
+    if (delta > 0) {
+      if (r >= at) r += delta;
+    } else {
+      const n = -delta;
+      if (r >= at && r < at + n) { broken = true; return m; }   // trỏ vào hàng vừa bị xoá
+      if (r >= at + n) r -= n;
+    }
+    return cLock + col + rLock + r;
+  });
+  return broken ? null : out;
+}

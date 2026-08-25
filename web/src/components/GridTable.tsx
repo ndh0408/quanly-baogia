@@ -3,7 +3,7 @@ import { toast } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs } from "../lib/clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 
@@ -87,6 +87,16 @@ export function GridTable(props: GridTableProps) {
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
+  const softRef = useRef(0);
+  // Gõ vào ô CHỮ (Hạng Mục / Chi Tiết / Ghi Chú) không làm đổi tiền, số thứ tự hay cấu trúc nhóm —
+  // model đã được ghi ngay ở onInput, chỉ việc VẼ LẠI là hoãn được. Lưới báo giá thật có ~560 ô
+  // nhập; vẽ lại toàn bộ sau mỗi ký tự tốn ~30ms nên gõ nhanh là thấy khựng. Gộp lại còn 1 lần
+  // mỗi 180ms. Ô SỐ vẫn gọi onChange NGAY vì tổng tiền phải nhảy theo.
+  const onChangeSoft = () => {
+    if (softRef.current) return;
+    softRef.current = window.setTimeout(() => { softRef.current = 0; onChange(); }, 180);
+  };
+  const flushSoft = () => { if (softRef.current) { clearTimeout(softRef.current); softRef.current = 0; onChange(); } };
   const dblFromLockedRef = useRef(false);   // nhấp đúp vào ô CHƯA sửa → chỉ đặt con trỏ, không bôi từ
   const scrollRef = useRef<HTMLDivElement | null>(null);   // vùng cuộn bao lưới — mốc đo bề ngang
   const [wrapW, setWrapW] = useState(0);                   // bề ngang vùng chứa (0 = chưa đo)
@@ -496,6 +506,7 @@ export function GridTable(props: GridTableProps) {
     if (f === "_stt") return sttText[i] || "";
     if (f === "_amount") return rk[i] === "section" ? String(M.fmtNumCell(sectionSum[i] || 0)) : String(M.fmtNumCell(M.lineAmount(items[i], usesDays))); const fx = (it.formulas as Record<string, string> | undefined)?.[f]; if (fx) return fx; if (NUMERIC.has(f)) { const v = it[f]; return v ? String(v) : ""; } return (it[f] as string) || ""; };
   const onCopyCut = (e: { clipboardData: DataTransfer; preventDefault(): void }, cut: boolean) => {
+    flushSoft();
     const sel = selRef.current; const rc = rectOf(sel); if (!rc) return;
     // ĐANG SỬA trong 1 ô → để trình duyệt copy đúng đoạn chữ bôi đen (như Excel ở chế độ sửa).
     // Đang CHỌN ô (kể cả khi nội dung đang bôi đen sẵn) → copy GIÁ TRỊ THÔ của ô/vùng.
@@ -611,13 +622,29 @@ export function GridTable(props: GridTableProps) {
 
   // ── row ops (CHÈN ngay dưới ô đang chọn — như Excel/SPA, không đẩy xuống cuối) ──
   const insertIndex = () => { const sel = selRef.current; return sel ? Math.max(sel.anchor.row, sel.focus.row) + 1 : items.length; };
-  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); items.splice(at, 0, it); onChange(); focusCell(at, "name"); };
+  // Chèn/xoá hàng làm mọi tham chiếu phía dưới lệch đi — Excel tự dịch, ở đây cũng phải làm, kẻo
+  // "=E5" lặng lẽ trỏ sang hạng mục khác (chèn) hoặc trỏ vào hàng đã mất rồi trả 0 (xoá).
+  // at: chỉ số hàng 0-based nơi chèn/xoá; delta: +n chèn, -n xoá.
+  const shiftFormulasForRowEdit = (at: number, delta: number) => {
+    for (const it of items) {
+      const fx = (it as Record<string, unknown>).formulas as Record<string, string> | undefined;
+      if (!fx) continue;
+      for (const f in fx) {
+        const moved = adjustRefsForRowEdit(fx[f], at + 1, delta);   // công thức đánh số hàng từ 1
+        if (moved === null) {
+          const w = ((it as Record<string, unknown>)._fxWarn as Record<string, boolean>) || ((it as Record<string, unknown>)._fxWarn = {} as Record<string, boolean>);
+          w[f] = true;   // trỏ vào hàng vừa xoá = #REF! của Excel → ô ĐỎ, giữ công thức để sửa tay
+        } else fx[f] = moved;
+      }
+    }
+  };
+  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); shiftFormulasForRowEdit(at, 1); items.splice(at, 0, it); recomputeAll(); onChange(); focusCell(at, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); items.splice(i + 1, 0, it); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
-  const removeRow = (i: number) => { pushUndo(); items.splice(i, 1); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
+  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, it); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+  const removeRow = (i: number) => { pushUndo(); shiftFormulasForRowEdit(i, -1); items.splice(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
@@ -675,8 +702,8 @@ export function GridTable(props: GridTableProps) {
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
   const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
-  const doUndo = () => { if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
-  const doRedo = () => { if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
+  const doUndo = () => { flushSoft(); if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
+  const doRedo = () => { flushSoft(); if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
   // dRow/dCol: khối được dán dời đi bao nhiêu hàng/cột so với chỗ copy → DỊCH tham chiếu trong công
   // thức đúng nếp Excel ("=G3*E3" copy ở hàng 3 dán xuống hàng 7 thành "=G7*E7"; $ khoá thì giữ).
@@ -698,6 +725,7 @@ export function GridTable(props: GridTableProps) {
   };
   const onPaste = (e: { clipboardData: DataTransfer; target: EventTarget | null; preventDefault(): void }) => {
     if (!editable) return;
+    flushSoft();
     const ae = document.activeElement as HTMLElement | null;
     const f0 = (e.target as HTMLElement)?.getAttribute?.("data-f") || ae?.getAttribute?.("data-f");
     const sel = selRef.current;
@@ -784,6 +812,7 @@ export function GridTable(props: GridTableProps) {
     // Khối nhiều ô. Dán vào hàng NHÓM → chèn hàng mới phía dưới (không đè nhóm).
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
+      shiftFormulasForRowEdit(startRow + 1, rows.length);
       rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
       startRow += 1; startCol = COL_NAME;
     }
@@ -974,8 +1003,8 @@ export function GridTable(props: GridTableProps) {
     // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa hàng đang chọn (Excel).
     if (ctrl && editable && (e.key === "+" || e.key === "=" || e.key === "-")) {
       e.preventDefault(); e.stopPropagation();
-      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); items.splice(from, n); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
-      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(i + 1, 0, nit); focusCell(i + 1, "name"); onChange(); }
+      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); shiftFormulasForRowEdit(from, -n); items.splice(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
+      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, nit); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
     if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
@@ -1080,6 +1109,7 @@ export function GridTable(props: GridTableProps) {
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
   const onGridBlur = (e: { target: EventTarget | null; relatedTarget?: EventTarget | null }) => {
+    flushSoft();   // rời ô = chốt ngay lần vẽ đang hoãn (đừng để bấm Lưu trước khi vẽ kịp)
     if (pickingRef.current) return;   // đang point-pick → giữ focus, chưa commit
     editUndoRef.current = null;       // hết phiên gõ — vào lại chính ô này lần sau phải ghi mốc MỚI
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
@@ -1206,11 +1236,11 @@ export function GridTable(props: GridTableProps) {
   };
   const txtInput = (i: number, f: string, ph?: string) => (
     <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; if (el.value.trim().startsWith("=")) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); onChange(); }} />
+      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); }} />
   );
   const taInput = (i: number, f: string, ph?: string) => (
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChange(); }} />
+      ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); }} />
   );
   const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "") + ((items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> })._fxWarn?.[f] ? " cell-fx-error" : "");
   const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
