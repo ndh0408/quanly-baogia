@@ -785,6 +785,9 @@ export function GridTable(props: GridTableProps) {
       rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
       startRow += 1; startCol = 0;
     }
+    // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
+    // theo tên trường để dán được sang sheet dùng mẫu khác.
+    const wholeRowBlock = internal?.fields?.[0] === "_stt";
     const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? (internal?.kinds ?? copyBufRef.current?.kinds ?? null) : null;
     const labels = kinds ? (internal?.labels ?? copyBufRef.current?.labels ?? null) : null;
     rows.forEach((cells, r) => {
@@ -795,7 +798,12 @@ export function GridTable(props: GridTableProps) {
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
       cells.forEach((val, c) => {
-        const f = FIELDS[startCol + c];
+        // Khối phủ NGUYÊN HÀNG (bắt đầu từ cột STT) → ghép cột theo TÊN TRƯỜNG, không theo vị trí:
+        // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
+        // Ghép theo vị trí thì Đơn Giá của mẫu này rơi vào Ghi Chú của mẫu kia. Trường đích không
+        // có (vd Chi Tiết) thì bỏ ô đó, phần còn lại vẫn vào đúng chỗ.
+        const fSrcName = wholeRowBlock ? internal?.fields?.[c] : null;
+        const f = fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : FIELDS[startCol + c];
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
         // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
         // (Khối dán từ file Excel NGOÀI đi đường riêng: retargetPastedFormulas dò mốc neo.)

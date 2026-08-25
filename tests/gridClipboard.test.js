@@ -436,3 +436,60 @@ describe("shiftFormulaRefs (dán/fill trong lưới, kiểu Excel)", () => {
     expect(sh("=ROUND(E3*G3,0)", 2)).toBe("=ROUND(E5*G5,0)");
   });
 });
+
+// Dán khối của app sang sheet dùng MẪU KHÁC: nhãn A/B/C, nhóm con, hàng con phải nhận đúng.
+describe("reconstructExportRows theo từng mẫu báo giá", () => {
+  const GN = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+  const NUM = new Set(["quantity", "unitPrice", "days"]);
+
+  it("mẫu GN (không đánh số nhóm con): A/B = nhóm, STT trống + tên + có giá = nhóm con", () => {
+    const m = [
+      ["A", "HCM", "", "", "", "", ""],
+      ["", "SVH - hallway", "", "", "", "896.000", "896.000"],   // nhóm con: Đơn Giá = Σ mục con
+      ["1", "Hallway 2m75W x 2m05H", "PP in KTS", "m2", "5,6", "95.000", "532.000"],
+      ["", "", "", "m2", "5,6", "65.000", "364.000"],
+    ];
+    const out = reconstructExportRows(m, GN, NUM, false);
+    expect(out.map((r) => r.kind)).toEqual(["section", "subsection", "item", "sub"]);
+    expect(out[0].name).toBe("HCM");
+    expect(out[2].quantity).toBeCloseTo(5.6, 4);
+  });
+
+  // Ranh giới KHÔNG thể phân định từ TSV: nhóm con CHƯA có mục con nào (nên Đơn Giá trống) trông
+  // y hệt một dòng thông tin. Dán khối NỘI BỘ thì không dính vì gói clipboard mang sẵn kind; chỉ
+  // khi dán từ file Excel ngoài mới phải đoán, và ở đây đoán là "dòng thông tin".
+  it("nhóm con RỖNG dán từ Excel ngoài bị hiểu thành dòng thông tin (giới hạn đã biết)", () => {
+    const out = reconstructExportRows([["", "Nhóm con chưa có mục", "", "", "", "", ""]], GN, NUM, false);
+    expect(out[0].kind).toBe("info");
+  });
+
+  it("mẫu BANNER (nhóm con đánh SỐ): số ở cột STT = nhóm con, không nhầm thành hạng mục", () => {
+    const m = [
+      ["A", "HCM", "", "", "", "", ""],
+      ["1", "Vivo", "", "", "", "2.587.000", "2.587.000"],
+      ["", "Banner LG ngoài sảnh", "Hiflex", "m2", "19,9", "65.000", "1.293.500"],
+    ];
+    const out = reconstructExportRows(m, GN, NUM, true);
+    expect(out.map((r) => r.kind)).toEqual(["section", "subsection", "item"]);
+    expect(out[1].name).toBe("Vivo");
+  });
+
+  it("nhãn nhóm 2 chữ (AA/AB) vẫn là nhóm", () => {
+    const out = reconstructExportRows([["AB", "Nhóm thứ 28", "", "", "", "", ""]], GN, NUM, false);
+    expect(out[0].kind).toBe("section");
+  });
+
+  it("dòng thông tin: STT trống + có tên, không đo không giá", () => {
+    const out = reconstructExportRows([["", "Chương trình khai trương", "", "", "", "", ""]], GN, NUM, true);
+    expect(out[0].kind).toBe("info");
+  });
+
+  it("mẫu CÓ SỐ NGÀY: cột days vào đúng chỗ, không lệch sang Đơn Giá", () => {
+    const roles = ["_stt", "name", "unit", "quantity", "days", "unitPrice", "_amount"];
+    const out = reconstructExportRows([["1", "Thuê màn LED", "bộ", "2", "3", "5.000.000", "30.000.000"]], roles, NUM, false);
+    expect(out[0].kind).toBe("item");
+    expect(out[0].quantity).toBe(2);
+    expect(out[0].days).toBe(3);
+    expect(out[0].unitPrice).toBe(5000000);
+  });
+});
