@@ -92,11 +92,25 @@ export function GridTable(props: GridTableProps) {
   // model đã được ghi ngay ở onInput, chỉ việc VẼ LẠI là hoãn được. Lưới báo giá thật có ~560 ô
   // nhập; vẽ lại toàn bộ sau mỗi ký tự tốn ~30ms nên gõ nhanh là thấy khựng. Gộp lại còn 1 lần
   // mỗi 180ms. Ô SỐ vẫn gọi onChange NGAY vì tổng tiền phải nhảy theo.
-  const onChangeSoft = () => {
+  const softNeedRecompute = useRef(false);
+  const skipCellSync = useRef(false);   // lần render tới do GÕ → khỏi quét lại toàn bộ ô
+  const onChangeSoft = (recompute = false) => {
+    if (recompute) softNeedRecompute.current = true;
     if (softRef.current) return;
-    softRef.current = window.setTimeout(() => { softRef.current = 0; onChange(); }, 180);
+    softRef.current = window.setTimeout(() => {
+      softRef.current = 0;
+      // Có tính lại công thức thì giá trị nhiều ô có thể đổi → phải quét. Chỉ gõ chữ thì không.
+      if (softNeedRecompute.current) { softNeedRecompute.current = false; recomputeAll(); }
+      else skipCellSync.current = true;
+      onChange();
+    }, 180);
   };
-  const flushSoft = () => { if (softRef.current) { clearTimeout(softRef.current); softRef.current = 0; onChange(); } };
+  const flushSoft = () => {
+    if (!softRef.current) return;
+    clearTimeout(softRef.current); softRef.current = 0;
+    if (softNeedRecompute.current) { softNeedRecompute.current = false; recomputeAll(); }
+    onChange();
+  };
   const dblFromLockedRef = useRef(false);   // nhấp đúp vào ô CHƯA sửa → chỉ đặt con trỏ, không bôi từ
   const scrollRef = useRef<HTMLDivElement | null>(null);   // vùng cuộn bao lưới — mốc đo bề ngang
   const [wrapW, setWrapW] = useState(0);                   // bề ngang vùng chứa (0 = chưa đo)
@@ -649,7 +663,16 @@ export function GridTable(props: GridTableProps) {
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
   // Gõ ≥2 ký tự vào ô Hạng Mục → tra danh mục (không dấu) và mở dropdown ngay dưới ô.
+  const sugTimer = useRef(0);
   const nameSuggest = (i: number, el: HTMLTextAreaElement) => {
+    // Gõ liên tục thì đừng tra danh mục từng phím: mỗi lần có kết quả là một lần setState, mà
+    // setState ở đây vẽ lại cả lưới (đo được 73ms mỗi phím ở 1000 dòng). Chờ ngưng gõ 150ms.
+    if (sugTimer.current) { clearTimeout(sugTimer.current); sugTimer.current = 0; }
+    const q0 = (el.value || "").trim();
+    if (!editable || q0.length < 2 || q0.startsWith("=")) { closeSug(); return; }
+    sugTimer.current = window.setTimeout(() => { sugTimer.current = 0; nameSuggestNow(i, el); }, 150);
+  };
+  const nameSuggestNow = (i: number, el: HTMLTextAreaElement) => {
     const q = (el.value || "").trim();
     if (!editable || q.length < 2 || q.startsWith("=")) { closeSug(); return; }
     loadCatalog().then((cat) => {
@@ -1221,7 +1244,16 @@ export function GridTable(props: GridTableProps) {
     if (it.formulas) delete (it.formulas as Record<string, string>)[f];
     if ((items[i].kind === "section" || items[i].kind === "subsection") && f === "quantity" && n > 1 && !groupSubtotal) onGroupSubtotal?.(true);
     closeAuto(); clearActiveRefs();
-    recomputeAll(); onChange();   // FIX: sửa 1 ô → ô CÔNG THỨC tham chiếu nó phải eval lại trước khi lưu/hiển thị
+    // Gõ số là đường NÓNG nhất: trước đây mỗi phím gọi recomputeAll + onChange → React vẽ lại TOÀN
+    // BỘ lưới. Đo được 73ms mỗi phím ở 1000 dòng (5.900 ô) — giật thấy rõ.
+    // Nay: cập nhật NGAY đúng ô Thành Tiền của hàng đang gõ (phản hồi tức thì, chỉ 1 ô DOM), còn
+    // tính lại công thức + vẽ lại cả lưới thì gộp về sau 180ms. Rời ô/copy/dán/undo đều chốt ngay.
+    const k = items[i].kind;
+    if (k !== "section" && k !== "subsection" && k !== "info") {
+      const amtTd = tdOf(i, "_amount");
+      if (amtTd) amtTd.textContent = M.fmtNumCell(M.lineAmount(items[i], usesDays));
+    }
+    onChangeSoft(true);
   };
   const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
     const it = items[i]; const fx = it.formulas?.[f]; const val = fmtField(i, f, it[f]);
@@ -1249,7 +1281,13 @@ export function GridTable(props: GridTableProps) {
   // thị đúng mà KHÔNG remount → không mất focus); (2) focus ô đích (paste/nav/undo); (3) tô lại vùng chọn.
   useEffect(() => {
     const tb = tableRef.current;
-    if (tb) {
+    // Quét TOÀN BỘ ô để kéo về đúng model là việc O(số ô) — với 1000 hàng là ~6.000 ô, mỗi ô còn
+    // closest() + so chuỗi. Chỉ CẦN quét khi giá trị có thể đã đổi ngoài tầm mắt của người dùng:
+    // undo/redo, dán, tính lại công thức, chèn/xoá hàng. Riêng lúc GÕ thì không: ô đang gõ tự có
+    // giá trị đúng, các ô khác không hề đổi. Bỏ được lượt quét này là bỏ luôn phần O(n) mỗi phím.
+    const boQuaLanNay = skipCellSync.current;
+    skipCellSync.current = false;
+    if (tb && !boQuaLanNay) {
       tb.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-f]").forEach((el) => {
         if (document.activeElement === el) return;   // ô đang gõ → để yên
         const tr = el.closest("tr[data-row]"); if (!tr) return;
@@ -1623,7 +1661,7 @@ export function GridTable(props: GridTableProps) {
                 return (
                   <tr key={it._k ?? i} data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                     <td className="col-stt">{String(it.label || letter)}</td>
-                    <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChange(); }} /></td>
+                    <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChangeSoft(); }} /></td>
                     {showDetail && <td className="col-detail" />}
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
@@ -1643,7 +1681,7 @@ export function GridTable(props: GridTableProps) {
                 return (
                   <tr key={it._k ?? i} data-row={i} className="info-row">
                     <td className="col-stt" />
-                    <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChange(); }} /></td>
+                    <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChangeSoft(); }} /></td>
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {editable && <td className="col-action"><button className="rm-row" title="Xóa" onClick={() => removeRow(i)}>✕</button></td>}
                   </tr>
@@ -1655,7 +1693,7 @@ export function GridTable(props: GridTableProps) {
               return (
                 <tr key={it._k ?? i} data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
                   <td className="col-stt" rowSpan={span}>{numberSubs ? "" : sttNo}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { editingRef.current = true; const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChange(); nameSuggest(i, el); }} /></td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, "name"); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); }} /></td>
                   {dataCells(i)}
                 </tr>
               );

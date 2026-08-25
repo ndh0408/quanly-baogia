@@ -3,11 +3,16 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 // App React phục vụ tại /app2 (Express serve thư mục public/app2). Dev proxy /api → :3000.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // Hỗ trợ máy/ĐT đời cũ qua build.target THẤP (es2017: phủ Chrome 58+/Safari 11+ ~2017+), KHÔNG dùng
   // @vitejs/plugin-legacy: plugin đó chèn inline + data: script (dò trình duyệt) → VI PHẠM CSP `script-src 'self'`
   // của app (chặn nên React không mount). Hi sinh trình duyệt tiền-ESM (gần như tuyệt chủng) để giữ CSP bảo mật.
-  build: { target: "es2017", outDir: "../public/app2", emptyOutDir: true },
+  // `vite build --mode bench` → build KÈM trang đo hiệu năng (/app2/bench.html). Build thường thì
+  // trang đo KHÔNG lọt vào bản giao cho người dùng.
+  build: {
+    target: "es2017", outDir: "../public/app2", emptyOutDir: true,
+    ...(mode === "bench" ? { rollupOptions: { input: { main: "index.html", bench: "bench.html" } } } : {}),
+  },
   plugins: [
     react(),
     // PWA: cài như app + tải app-shell nhanh (offline được phần tĩnh). KHÔNG cache /api (data động).
@@ -55,4 +60,4 @@ export default defineConfig({
     // Cho phép dev-server đọc gói shared/ ở ngoài thư mục web/ (single-source toán tiền BE↔FE).
     fs: { allow: [".."] },
   },
-});
+}));
