@@ -3297,3 +3297,23 @@ textarea[aria-invalid="true"] {
 .modal label.toggle-totals {
   margin-bottom: 0;
 }
+
+/* ── Lưới báo giá: chiều rộng cột do <colgroup> của GridTable quyết định (mảng COLS) ──────────
+   Phải có table-layout:fixed thì trình duyệt mới TÔN TRỌNG width đã khai. Để mặc định (auto),
+   width chỉ là gợi ý: header dài ("SỐ LƯỢNG", "(không xuất Excel)") và 2 nút ↳ ✕ ép các cột số
+   phình to, còn cột Hạng Mục — ô duy nhất co được vì textarea width:100% có min-content ≈ 0 — bị
+   bóp còn vài chục px, chữ vỡ dọc từng ký tự ("Ba/nne/r"). Cột không khai width (Hạng Mục, Chi
+   Tiết) chia nhau phần dư → co dãn theo cửa sổ. Hẹp hơn tổng min thì .tbl-scroll cuộn ngang. */
+.excel-table.grid-fixed {
+  table-layout: fixed;
+  /* border-collapse gộp viền: nửa viền NGOÀI (2px ở .col-stt trái và .col-notes/.col-internal-note
+     phải) nằm ngoài border-box của table, nên width:100% vẫn tràn 4px khỏi .tbl-scroll và bật một
+     thanh cuộn ngang "ma" dù bảng thừa chỗ. Chừa đúng 4px đó. */
+  width: calc(100% - 4px);
+}
+/* fixed layout không nới ô theo chữ nữa → chuỗi dài không dấu cách phải tự ngắt, kẻo tràn ra ngoài
+   viền ô (tên hạng mục kiểu "Banner_LG_ngoai_sanh_5m85Wx1m7H"). */
+.excel-table.grid-fixed th,
+.excel-table.grid-fixed td {
+  overflow-wrap: break-word;
+}

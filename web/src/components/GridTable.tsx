@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
@@ -87,6 +87,8 @@ export function GridTable(props: GridTableProps) {
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);   // vùng cuộn bao lưới — mốc đo bề ngang
+  const [wrapW, setWrapW] = useState(0);                   // bề ngang vùng chứa (0 = chưa đo)
   const [, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
   // Gợi ý kích thước theo rạp: dropdown dưới ô Hạng Mục + modal "Chèn từ rạp".
   type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
@@ -998,6 +1000,29 @@ export function GridTable(props: GridTableProps) {
     }
   };
 
+  // Đo bề ngang THẬT của vùng chứa lưới → COLS tính lại (cột số co/nở theo). Quan sát .tbl-scroll
+  // chứ KHÔNG quan sát <table>: bảng tự đổi kích thước theo COLS nên nghe nó sẽ thành vòng lặp.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") { setWrapW(0); return; }
+    const ro = new ResizeObserver((ents) => {
+      const w = Math.round(ents[0]?.contentRect.width || 0);
+      setWrapW((prev) => (Math.abs(prev - w) >= 2 ? w : prev));   // bỏ qua rung ±1px
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Cột đổi bề ngang → mọi textarea vẫn giữ style.height đo từ bề ngang CŨ: ô từng bị hẹp (chữ wrap
+  // 30 dòng) nên cao ~430px, cột rộng ra rồi vẫn cao y nguyên vì autoGrow chỉ chạy lúc mount / lúc
+  // gõ / lúc đổi giá trị. Đo lại toàn bộ sau mỗi lần bố cục cột thay đổi.
+  useEffect(() => {
+    const tb = tableRef.current;
+    if (!tb) return;
+    tb.querySelectorAll("textarea").forEach((t) => autoGrow(t as HTMLTextAreaElement));
+    // Cùng bộ phụ thuộc với COLS (khai báo bên dưới) — bố cục cột đổi thì chiều cao ô phải đo lại.
+  }, [wrapW, showDetail, usesDays, internalNote, showImages, approveCol, payCol, editable]);
+
   // Safari/macOS không phải lúc nào cũng blur input khi bấm vùng không nhận focus. Dọn selection
   // ngay từ pointerdown ngoài lưới để màu/target không bị treo khác nhau giữa các trình duyệt.
   useEffect(() => {
@@ -1091,6 +1116,85 @@ export function GridTable(props: GridTableProps) {
     }
     paintSel();
   });
+
+  // ── chiều rộng cột — co dãn theo bề ngang THẬT của vùng chứa ────────────────────
+  // <colgroup> + table-layout:fixed = trình duyệt TÔN TRỌNG width đã khai. Để mặc định (auto),
+  // width chỉ là gợi ý: header dài ("SỐ LƯỢNG", "(không xuất Excel)") ép cột số phình ra, còn cột
+  // Hạng Mục — ô duy nhất co được vì textarea width:100% có min-content ≈ 0 — bị bóp còn vài chục
+  // px, chữ vỡ dọc từng ký tự ("Ba/nne/r").
+  //
+  // Thứ tự nhường chỗ khi cửa sổ hẹp dần (zoom to, laptop nhỏ, mở thêm cột):
+  //   1. cột SỐ co lại theo tỉ lệ, tới mức tối thiểu vẫn đọc được số tiền
+  //   2. cột NỘI DUNG (Hạng Mục / Chi Tiết) co tới ngưỡng còn đọc được ~2 chữ mỗi dòng
+  //   3. hết đường co → .tbl-scroll cuộn ngang, KHÔNG bóp méo (giống .proj-table/.extra-grid)
+  const COLS = useMemo(() => {
+    // { ideal, floor } — floor là mức hẹp nhất còn đọc được, không co quá mức này.
+    const fixed: Array<{ ideal: number; floor: number }> = [
+      { ideal: 50, floor: 38 },                                  // STT
+      { ideal: 80, floor: 54 },                                  // ĐVT
+      { ideal: 90, floor: 62 },                                  // SỐ LƯỢNG
+      ...(usesDays ? [{ ideal: 80, floor: 54 }] : []),           // SỐ NGÀY
+      { ideal: 130, floor: 92 },                                 // ĐƠN GIÁ — "1.293.500" cần ~88px
+      { ideal: 140, floor: 96 },                                 // THÀNH TIỀN
+      { ideal: 150, floor: 96 },                                 // GHI CHÚ
+      ...(internalNote ? [{ ideal: 150, floor: 96 }] : []),      // GHI CHÚ NỘI BỘ
+      ...(showImages ? [{ ideal: 150, floor: 110 }] : []),       // HÌNH ẢNH — thumbnail 44px + nút
+      ...(approveCol ? [{ ideal: 120, floor: 92 }] : []),        // DUYỆT
+      ...(payCol ? [{ ideal: 140, floor: 104 }] : []),           // THANH TOÁN
+      ...(editable ? [{ ideal: 56, floor: 46 }] : []),           // nút ↳ ✕ (36px cũ không đủ 2 nút)
+    ];
+    const idealFixed = fixed.reduce((a, c) => a + c.ideal, 0);
+    const floorFixed = fixed.reduce((a, c) => a + c.floor, 0);
+    // Cột nội dung: rộng rãi trên desktop, hẹp hơn trên màn nhỏ (vẫn đủ ~2 chữ/dòng, không vỡ dọc).
+    const narrow = wrapW > 0 && wrapW < 720;
+    const nameMin = narrow ? 180 : 260;
+    const detailMin = narrow ? 140 : 200;
+    const contentMin = nameMin + (showDetail ? detailMin : 0);
+
+    // Chưa đo được (lần render đầu) → dùng bề rộng lý tưởng, ResizeObserver sẽ chỉnh lại ngay sau.
+    let scale = 1;
+    if (wrapW > 0 && wrapW < idealFixed + contentMin) {
+      // Phần còn lại cho cột số sau khi chừa đủ chỗ cho cột nội dung.
+      scale = Math.max(floorFixed / idealFixed, (wrapW - contentMin) / idealFixed);
+      scale = Math.min(1, scale);
+    }
+    const w = (c: { ideal: number; floor: number }) => Math.max(c.floor, Math.round(c.ideal * scale));
+
+    let k = 0;
+    const stt = w(fixed[k++]);
+    const dvt = w(fixed[k++]);
+    const qty = w(fixed[k++]);
+    const days = usesDays ? w(fixed[k++]) : 0;
+    const price = w(fixed[k++]);
+    const amount = w(fixed[k++]);
+    const notes = w(fixed[k++]);
+    const internal = internalNote ? w(fixed[k++]) : 0;
+    const images = showImages ? w(fixed[k++]) : 0;
+    const approve = approveCol ? w(fixed[k++]) : 0;
+    const pay = payCol ? w(fixed[k++]) : 0;
+    const act = editable ? w(fixed[k]) : 0;   // cột cuối — không cần tăng k nữa
+
+    const cols: Array<{ w: number | null; min: number }> = [
+      { w: stt, min: stt },
+      { w: null, min: nameMin },                          // Hạng Mục — ăn phần dư
+      ...(showDetail ? [{ w: null, min: detailMin }] : []),  // Chi Tiết — ăn phần dư
+      { w: dvt, min: dvt },
+      { w: qty, min: qty },
+      ...(usesDays ? [{ w: days, min: days }] : []),
+      { w: price, min: price },
+      { w: amount, min: amount },
+      { w: notes, min: notes },
+      ...(internalNote ? [{ w: internal, min: internal }] : []),
+      ...(showImages ? [{ w: images, min: images }] : []),
+      ...(approveCol ? [{ w: approve, min: approve }] : []),
+      ...(payCol ? [{ w: pay, min: pay }] : []),
+      ...(editable ? [{ w: act, min: act }] : []),
+    ];
+    return cols;
+  }, [wrapW, showDetail, usesDays, internalNote, showImages, approveCol, payCol, editable]);
+  // Hẹp hơn tổng min → .tbl-scroll CUỘN NGANG thay vì bóp méo. Trước đây .excel-table chỉ có
+  // min-width bên trong @media (max-width:920px) nên desktop không hề có chốt chặn nào.
+  const tableMinW = COLS.reduce((a, c) => a + c.min, 0);
 
   // ── derived ───────────────────────────────────────────────────────────────────
   const rk = M.computeRowKinds(items);
@@ -1295,8 +1399,8 @@ export function GridTable(props: GridTableProps) {
             onInput={(e) => { const el = e.target as HTMLInputElement; fxAutocomplete(el); highlightActiveFormulaRefs(el.value); }} />
         </div>
       )}
-      <div className="tbl-scroll">
-        <table className={`excel-table${clfTheme ? " clf-theme" : ""}`} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
+      <div className="tbl-scroll" ref={scrollRef}>
+        <table className={`excel-table grid-fixed${clfTheme ? " clf-theme" : ""}`} style={{ minWidth: tableMinW }} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
           onMouseDownCapture={onPointMouseDown} onMouseDown={onSelDragStart}
           onDoubleClick={(e) => {
             // Nhấp đúp ô = vào chế độ SỬA (EDIT), đặt con trỏ cuối nội dung để gõ nối tiếp.
@@ -1306,22 +1410,23 @@ export function GridTable(props: GridTableProps) {
             enterEdit(el, { caretEnd: true }, "edit");
           }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
+          <colgroup>{COLS.map((c, k) => <col key={k} style={c.w ? { width: c.w } : undefined} />)}</colgroup>
           <thead>
             <tr>
-              <th scope="col" style={{ width: 50 }}>STT</th>
+              <th scope="col">STT</th>
               <th scope="col">Hạng Mục</th>
               {showDetail && <th scope="col">Chi Tiết</th>}
-              <th scope="col" style={{ width: 80 }}>ĐVT</th>
-              <th scope="col" style={{ width: 90 }}>SỐ LƯỢNG</th>
-              {usesDays && <th scope="col" style={{ width: 80 }}>SỐ NGÀY</th>}
-              <th scope="col" style={{ width: 130 }}>ĐƠN GIÁ</th>
-              <th scope="col" style={{ width: 140 }}>THÀNH TIỀN</th>
-              <th scope="col" style={{ width: 150 }}>GHI CHÚ</th>
-              {internalNote && <th scope="col" style={{ width: 150 }} className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
-              {showImages && <th scope="col" style={{ width: 150 }} className="th-images">HÌNH ẢNH<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(có xuất Excel)</span></th>}
-              {approveCol && <th scope="col" style={{ width: 120 }}>DUYỆT</th>}
-              {payCol && <th scope="col" style={{ width: 140 }}>THANH TOÁN</th>}
-              {editable && <th scope="col" style={{ width: 36 }} />}
+              <th scope="col">ĐVT</th>
+              <th scope="col">SỐ LƯỢNG</th>
+              {usesDays && <th scope="col">SỐ NGÀY</th>}
+              <th scope="col">ĐƠN GIÁ</th>
+              <th scope="col">THÀNH TIỀN</th>
+              <th scope="col">GHI CHÚ</th>
+              {internalNote && <th scope="col" className="th-internal-note" title="Chỉ xem/quản lý nội bộ — KHÔNG xuất ra Excel/PDF">GHI CHÚ NỘI BỘ<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(không xuất Excel)</span></th>}
+              {showImages && <th scope="col" className="th-images">HÌNH ẢNH<br /><span style={{ fontWeight: 400, fontSize: 10, opacity: 0.75 }}>(có xuất Excel)</span></th>}
+              {approveCol && <th scope="col">DUYỆT</th>}
+              {payCol && <th scope="col">THANH TOÁN</th>}
+              {editable && <th scope="col" />}
             </tr>
           </thead>
           <tbody>
