@@ -354,7 +354,11 @@ export function buildFormulaContext(
     const it = items[Number(m[2]) - 1];
     if (!field || !it) return 0;
     if (field === "_amount") return amountOf(it);
-    if (field === "quantity" || field === "unitPrice" || field === "days") return Number(it[field]) || 0;
+    // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN, khớp amountOf() ngay trên và khớp lưới web (GridTable cellNum,
+    // editor.js cellNumByAddr). Trả số thô thì self-check ở dưới lệch quá dung sai → cellFormula
+    // trả null → công thức sống của người dùng bị âm thầm bỏ khỏi file Excel, chỉ còn số chết.
+    if (field === "quantity") return it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity);
+    if (field === "unitPrice" || field === "days") return Number(it[field]) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
   const editorRefs: EditorRefs = {
