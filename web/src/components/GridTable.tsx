@@ -390,7 +390,7 @@ export function GridTable(props: GridTableProps) {
   //   · bấm ô          → CHỌN ô (READY — gõ là đè, nhấp đúp/F2 mới sửa trong chữ) + kéo chọn vùng
   //   · Shift+bấm      → MỞ RỘNG vùng chọn từ ô neo (không dời neo)
   //   · nhấp đúp       → chế độ SỬA (EDIT), con trỏ ở cuối nội dung
-  const onSelDragStart = (e: { button: number; target: EventTarget | null; shiftKey?: boolean; preventDefault(): void }) => {
+  const onSelDragStart = (e: { button: number; target: EventTarget | null; shiftKey?: boolean; detail?: number; preventDefault(): void }) => {
     if (e.button !== 0 || pickingRef.current) return;
     const info = cellAddrFromEvent(e.target as HTMLElement);
     if (!info || !FIELDS.includes(info.field)) {
@@ -416,6 +416,16 @@ export function GridTable(props: GridTableProps) {
       return;
     }
     if (!coarsePointer && el) {
+      if ((e.detail ?? 1) >= 2) {
+        // Cú bấm THỨ HAI của nhấp đúp = vào SỬA. KHÔNG preventDefault và mở readOnly NGAY tại
+        // mousedown, để chính trình duyệt đặt con trỏ đúng chỗ vừa bấm — trước đây ô bị khoá +
+        // chặn mặc định nên con trỏ kẹt ở đầu, rồi onDoubleClick kéo tuột nó về cuối chữ.
+        if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
+        enterEdit(el, {}, "edit");
+        selRef.current = { anchor: { row: info.row, field: info.field }, focus: { row: info.row, field: info.field } };
+        paintSel();
+        return;
+      }
       // Bấm 1 lần (kể cả bấm lại ô đang chọn) = CHỌN + KHÓA ô. Muốn sửa: nhấp đúp hoặc F2.
       e.preventDefault();
       if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
@@ -1403,11 +1413,12 @@ export function GridTable(props: GridTableProps) {
         <table className={`excel-table grid-fixed${clfTheme ? " clf-theme" : ""}`} style={{ minWidth: tableMinW }} ref={tableRef} onPaste={onPaste} onKeyDown={onGridKeyDown} onFocus={onGridFocus} onBlur={onGridBlur}
           onMouseDownCapture={onPointMouseDown} onMouseDown={onSelDragStart}
           onDoubleClick={(e) => {
-            // Nhấp đúp ô = vào chế độ SỬA (EDIT), đặt con trỏ cuối nội dung để gõ nối tiếp.
+            // Nhấp đúp ô = vào chế độ SỬA (EDIT). KHÔNG ép con trỏ về cuối: mousedown lần 2 đã mở
+            // readOnly nên trình duyệt đặt con trỏ ngay chỗ bấm — muốn con trỏ ở cuối thì dùng F2.
             // Nhận MỌI ô nhập có data-f (kể cả nhãn nhóm A/B ngoài lưới điều hướng).
             const el = (e.target as HTMLElement)?.closest?.("[data-f]") as HTMLInputElement | HTMLTextAreaElement | null;
             if (!el || el.disabled) return;
-            enterEdit(el, { caretEnd: true }, "edit");
+            enterEdit(el, {}, "edit");
           }}
           onCopy={(e) => onCopyCut(e, false)} onCut={(e) => onCopyCut(e, true)}>
           <colgroup>{COLS.map((c, k) => <col key={k} style={c.w ? { width: c.w } : undefined} />)}</colgroup>
