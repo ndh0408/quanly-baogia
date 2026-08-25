@@ -103,3 +103,15 @@ ghi lại 10.000 hàng xuống cơ sở dữ liệu, chứ không phải ở ph�
 
 → Đúng hai ô gọi `setState` mỗi phím. Ô Ghi Chú 0ms chứng minh cơ chế hoãn vẽ đã đúng, chỉ là hai
 ô kia chưa dùng nó.
+
+
+## Kiểm trên dev thật (dev.gianguyen.cloud, báo giá 264 — 124 dòng, 699 ô)
+
+| Phép đo | Kết quả |
+| --- | ---: |
+| Gõ 1 phím (ô chữ) | 0,0 ms |
+| Gõ 1 phím (ô số, 6 hàng khác nhau) | 0,0 ms |
+| Gửi gói 1.140 KB có nén | **14 KB**, server trả 404 đúng nghiệp vụ (đã giải nén + đọc JSON + qua kiểm tra dữ liệu với 50 trang × 200 dòng) |
+
+Lưu ý khi tự đo lại: **lần gõ đầu tiên luôn cao hơn** (8,8 ms) do máy chưa "nóng" — phải bỏ vài lần
+đầu hoặc lấy trung vị, nếu không sẽ tưởng là còn chậm.
