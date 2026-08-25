@@ -1102,15 +1102,27 @@ export function GridTable(props: GridTableProps) {
 
   // Đo bề ngang THẬT của vùng chứa lưới → COLS tính lại (cột số co/nở theo). Quan sát .tbl-scroll
   // chứ KHÔNG quan sát <table>: bảng tự đổi kích thước theo COLS nên nghe nó sẽ thành vòng lặp.
+  //
+  // CHỐNG DAO ĐỘNG (đây là thứ làm treo trang nếu bỏ qua): cột co lại → bảng thấp/cao khác đi →
+  // thanh cuộn dọc của trang hiện rồi tắt → bề ngang đổi ~15px → cột lại co/nở → lặp vô tận, mỗi
+  // vòng còn kéo theo đo lại chiều cao toàn bộ textarea. Vì vậy:
+  //   · chỉ nhận thay đổi ĐỦ LỚN (>= 24px) — nhỏ hơn thì bố cục cột gần như không đổi
+  //   · dùng clientWidth (bỏ qua thanh cuộn) thay vì contentRect
+  //   · dồn về cuối khung hình bằng rAF để một loạt thay đổi liên tiếp chỉ tính một lần
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") { setWrapW(0); return; }
-    const ro = new ResizeObserver((ents) => {
-      const w = Math.round(ents[0]?.contentRect.width || 0);
-      setWrapW((prev) => (Math.abs(prev - w) >= 2 ? w : prev));   // bỏ qua rung ±1px
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const w = Math.round(el.clientWidth || 0);
+        setWrapW((prev) => (prev === 0 || Math.abs(prev - w) >= 24 ? w : prev));
+      });
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { if (raf) cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
   // Cột đổi bề ngang → mọi textarea vẫn giữ style.height đo từ bề ngang CŨ: ô từng bị hẹp (chữ wrap
@@ -1118,8 +1130,14 @@ export function GridTable(props: GridTableProps) {
   // gõ / lúc đổi giá trị. Đo lại toàn bộ sau mỗi lần bố cục cột thay đổi.
   useEffect(() => {
     const tb = tableRef.current;
-    if (!tb) return;
-    tb.querySelectorAll("textarea").forEach((t) => autoGrow(t as HTMLTextAreaElement));
+    if (!tb || !wrapW) return;
+    // Đo lại chiều cao MỌI textarea là việc nặng (mỗi ô một lần reflow) — dồn về cuối khung hình và
+    // bỏ qua trong lúc người dùng đang gõ, kẻo lưới dài vài trăm hàng bị khựng.
+    const raf = requestAnimationFrame(() => {
+      if (editingRef.current) return;
+      tb.querySelectorAll("textarea").forEach((t) => autoGrow(t as HTMLTextAreaElement));
+    });
+    return () => cancelAnimationFrame(raf);
     // Cùng bộ phụ thuộc với COLS (khai báo bên dưới) — bố cục cột đổi thì chiều cao ô phải đo lại.
   }, [wrapW, showDetail, usesDays, internalNote, showImages, approveCol, payCol, editable]);
 
