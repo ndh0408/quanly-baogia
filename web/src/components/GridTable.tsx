@@ -442,14 +442,9 @@ export function GridTable(props: GridTableProps) {
       return;
     }
     if (info.field === "_stt") {
-      // Cột STT là ô TÍNH: bấm/kéo chỉ để CHỌN (copy nguyên hàng), KHÔNG gõ vào được.
-      // Ngoại lệ duy nhất: nhãn nhóm A/B/1/2 do người dùng tự đặt — nhấp đúp vẫn sửa được.
-      const lab = (e.target as HTMLElement)?.closest?.('[data-f="label"]') as HTMLInputElement | null;
-      if (lab && !lab.disabled && !coarsePointer) {
-        e.preventDefault();
-        if (document.activeElement !== lab) { navigatingRef.current = true; lab.focus(); navigatingRef.current = false; }
-        if ((e.detail ?? 1) >= 2) enterEdit(lab, {}, "edit"); else lockCell(lab);
-      } else editingRef.current = false;
+      // Cột STT là ô TÍNH — bấm/kéo chỉ để CHỌN (copy nguyên hàng), KHÔNG gõ vào được, kể cả nhãn
+      // nhóm A/B/1/2: nhãn do lưới tự đánh theo vị trí, sửa tay chỉ làm lệch thứ tự.
+      editingRef.current = false;
     } else if (!coarsePointer && el) {
       if ((e.detail ?? 1) >= 2) {
         // Cú bấm THỨ HAI của nhấp đúp = vào SỬA. KHÔNG preventDefault và mở readOnly NGAY tại
@@ -1569,7 +1564,7 @@ export function GridTable(props: GridTableProps) {
                 const subAmt = sectionSum[i] || 0;
                 return (
                   <tr key={it._k ?? i} data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
-                    <td className="col-stt"><input data-f="label" defaultValue={it.label || ""} placeholder={letter} disabled={!editable} style={{ width: 34, textAlign: "center" }} onInput={(e) => { (items[i] as Record<string, unknown>).label = (e.target as HTMLInputElement).value; onChange(); }} /></td>
+                    <td className="col-stt">{String(it.label || letter)}</td>
                     <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChange(); }} /></td>
                     {showDetail && <td className="col-detail" />}
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
