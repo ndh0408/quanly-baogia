@@ -609,11 +609,12 @@ function evalFormula(input, refs) {
   // Ranges (H3:H8) become a ";"-joined list so SUM(H3:H8) works; single refs (G3) → a
   // bare number. `refs` is supplied only by the grid; absent (export/tests) = old behaviour.
   if (refs) {
-    s = s.replace(/([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g, (_m, a, b) => {
+    // $ chỉ có nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => {
       const list = refs.range(a, b);
       return (list && list.length) ? list.join(";") : "0";
     });
-    s = s.replace(/(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g, (_m, a) => {
+    s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => {
       const v = refs.cell(a);
       return (v === null || v === undefined || isNaN(v)) ? "0" : String(v);
     });
@@ -1090,7 +1091,7 @@ export function drawItems(q, activeSheet, editable, tplCode, usesDays, grid, opt
   const colIndexOfLetter = (L) => ADDR_COLS.findIndex((c) => c.L === L);
   const addrOf = (row, field) => (fieldToLetter[field] || "") + (row + 1);
   const parseAddr = (a) => {
-    const m = /^([A-Za-z]+)(\d+)$/.exec(String(a).trim());
+    const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(String(a).trim());   // $ (khoá kiểu Excel) không đổi ô được trỏ tới
     if (!m) return null;
     const col = letterToCol[m[1].toUpperCase()]; if (!col) return null;
     const row = parseInt(m[2], 10) - 1;

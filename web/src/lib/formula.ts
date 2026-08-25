@@ -55,8 +55,9 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   if (!s) return null;
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
-    s = s.replace(/([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g, (_m, a, b) => { const list = refs.range(a, b); return list && list.length ? list.join(";") : "0"; });
-    s = s.replace(/(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
+    // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => { const list = refs.range(a, b); return list && list.length ? list.join(";") : "0"; });
+    s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
   }
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(String(n).replace(",", ".")) / 100));
   let guard = 0;

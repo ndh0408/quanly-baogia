@@ -139,7 +139,8 @@ export function GridTable(props: GridTableProps) {
   const letterOf = (f: string) => ADDR.find((c) => c.f === f)?.L || "";
   const addrIdxOfField = (f: string) => ADDR.findIndex((c) => c.f === f);   // vị trí cột trong SƠ ĐỒ ĐỊA CHỈ (A,B,C…)
   const addrOf = (row: number, field: string) => { const L = letterOf(field); return L ? L + (row + 1) : ""; };
-  const parseAddr = (a: string) => { const m = /^([A-Za-z]+)(\d+)$/.exec(a.trim()); if (!m) return null; const L = m[1].toUpperCase(); const col = colByL[L]; if (!col) return null; const row = parseInt(m[2], 10) - 1; if (row < 0 || row >= items.length) return null; return { row, f: col.f, L }; };
+  // Nhận cả dạng khoá tuyệt đối "$E$3" — $ không đổi ô được trỏ tới, nó chỉ có nghĩa lúc copy/dán.
+  const parseAddr = (a: string) => { const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(a.trim()); if (!m) return null; const L = m[1].toUpperCase(); const col = colByL[L]; if (!col) return null; const row = parseInt(m[2], 10) - 1; if (row < 0 || row >= items.length) return null; return { row, f: col.f, L }; };
   const cellNum = (a: string): number => { const p = parseAddr(a); if (!p) return 0; const it = items[p.row] as Record<string, unknown>; if (!it) return 0; if (p.f === "_amount") return (items[p.row].kind === "section" || items[p.row].kind === "subsection" || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0;
     // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN đúng như ô đang hiển thị (qtyRound 1 số lẻ, hoặc 4 số lẻ với
     // dòng quantityExact nạp từ Excel). Trước đây trả số THÔ nên =E3*G3 nhân 7,4213 trong khi ô

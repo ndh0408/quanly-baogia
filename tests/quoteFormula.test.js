@@ -201,3 +201,20 @@ describe("ref cột THÀNH TIỀN (_amount) — xuất được, CHẶN VÒNG b�
     expect(fc.cellFormula("=G1", 290000, { item: items[1], field: "unitPrice" })).toBe("H12");
   });
 });
+
+// $ = khoá tuyệt đối kiểu Excel. Lưới nay hiểu $ (tính thì bỏ qua, copy/dán thì khoá không cho
+// dịch), nên khi XUẤT ra file Excel phải GIỮ NGUYÊN $ — trước đây chốt chặn không nhận ký tự $
+// nên cả công thức bị loại, ô chỉ còn số chết.
+describe("$ tuyệt đối (khoá kiểu Excel)", () => {
+  const ctx = gnCtx();
+  it("ref khoá cả cột lẫn hàng: $F$3 → $G$14", () => expect(translateFormula("=$F$3*1,1", ctx)).toBe("$G$14*1.1"));
+  it("khoá riêng cột: $F3 → $G14", () => expect(translateFormula("=$F3*2", ctx)).toBe("$G14*2"));
+  it("khoá riêng hàng: F$3 → G$14", () => expect(translateFormula("=F$3*2", ctx)).toBe("G$14*2"));
+  it("dải có khoá: SUM($E$3:$E$5) → SUM($F$14:$F$16)", () =>
+    expect(translateFormula("=SUM($E$3:$E$5)", ctx)).toBe("SUM($F$14:$F$16)"));
+  it("chiều NHẬP: $ của file khách được bỏ khi đưa về canonical, công thức vẫn dịch được", () => {
+    const out = excelFormulaToEditor("=$F$14*2", { fieldOfCol: (c) => (c === "F" ? "quantity" : c === "G" ? "unitPrice" : null), rowToEditor: (r) => (r === 14 ? 3 : null) });
+    expect(out).toBe("={quantity:3}*2");
+    expect(out).toBe(excelFormulaToEditor("=F14*2", { fieldOfCol: (c) => (c === "F" ? "quantity" : null), rowToEditor: (r) => (r === 14 ? 3 : null) }));   // có $ hay không đều ra một kết quả
+  });
+});

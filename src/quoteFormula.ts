@@ -150,8 +150,10 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   // Đổi tham chiếu ô (đơn lẻ HOẶC dải) sang toạ độ Excel — quét 1 lượt để dải không
   // bị xử lý hai lần. Tên hàm (SUM…) không có chữ số đuôi nên KHÔNG bị bắt nhầm.
   let aborted = false;
-  const refRe = /([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g;
-  s = s.replace(refRe, (m, c1, r1, c2, r2) => {
+  // ($?) hai bên: GIỮ NGUYÊN khoá tuyệt đối của người dùng khi ghi ra Excel — Excel hiểu $, và
+  // trước đây chốt chặn ở dưới không cho ký tự $ nên cả công thức bị bỏ, ô chỉ còn số chết.
+  const refRe = /(\$?)([A-Za-z]+)(\$?)(\d+)(?:\s*:\s*(\$?)([A-Za-z]+)(\$?)(\d+))?/g;
+  s = s.replace(refRe, (m, cl1, c1, rl1, r1, cl2, c2, rl2, r2) => {
     if (aborted) return m;
     const a = mapRef(ctx, c1, r1);
     if (!a) { aborted = true; return m; }
@@ -159,9 +161,9 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
       const b = mapRef(ctx, c2, r2);
       // Dải PHẢI cùng một cột Excel + liền mạch + toàn hàng item (không chèn nhóm).
       if (!b || a.col !== b.col || !ctx.rangeOk(Number(r1), Number(r2))) { aborted = true; return m; }
-      return `${a.col}${a.row}:${b.col}${b.row}`;
+      return `${cl1}${a.col}${rl1}${a.row}:${cl2}${b.col}${rl2}${b.row}`;
     }
-    return `${a.col}${a.row}`;
+    return `${cl1}${a.col}${rl1}${a.row}`;
   });
   if (aborted) return null;
 
@@ -179,7 +181,7 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   if (bad) return null;
 
   // Chốt chặn: chỉ còn ký tự hợp lệ của công thức Excel.
-  if (!/^[A-Za-z0-9.,:%+\-*/() ]+$/.test(s)) return null;
+  if (!/^[A-Za-z0-9.,:%+\-*/()$ ]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
   return s;
 }
 
@@ -209,11 +211,11 @@ export function excelFormulaToEditor(raw: string | null | undefined, ctx: ExcelR
   if (!s || s.length > 500) return null;
   // Ref sang sheet khác ('Sheet 2'!G13 / Décor!G13) hoặc file ngoài ([1]DATA!A1) → không dịch được.
   if (/!/.test(s) || /\[\d*\]/.test(s) || /"/.test(s)) return null;
-  s = s.replace(/\$/g, "");   // ref tuyệt đối $G$13 → G13 (editor không có khái niệm này)
-
-  // Ref đơn + dải → canonical. Quét 1 lượt để dải không bị xử lý 2 lần.
+  // $ (khoá tuyệt đối) được NUỐT ở regex dưới rồi bỏ đi: dạng canonical ("{unitPrice:3}") không có
+  // chỗ ghi khoá. Công thức vẫn tính đúng y nguyên; chỉ mất tính "khoá" nếu sau này người dùng
+  // copy/dán ô đó trong lưới. Muốn giữ thì phải mở rộng canonical + lib/importApply.ts cùng lúc.
   let aborted = false;
-  s = s.replace(/([A-Za-z]+)(\d+)(?:\s*:\s*([A-Za-z]+)(\d+))?/g, (m, c1, r1, c2, r2) => {
+  s = s.replace(/\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g, (m, c1, r1, c2, r2) => {
     if (aborted) return m;
     const f1 = ctx.fieldOfCol(String(c1).toUpperCase());
     const row1 = ctx.rowToEditor(Number(r1));
