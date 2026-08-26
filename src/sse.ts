@@ -95,6 +95,32 @@ export function attach(req: Request, res: Response, userId: number) {
   });
 }
 
+/**
+ * Đóng MỌI kết nối SSE đang mở. Gọi khi tắt máy chủ có kiểm soát.
+ *
+ * VÌ SAO CẦN: `server.close()` chờ MỌI kết nối đang mở kết thúc. Kết nối SSE thì theo thiết kế là
+ * KHÔNG BAO GIỜ kết thúc — nên callback của `server.close()` không bao giờ chạy, và tiến trình chỉ
+ * thoát nhờ bộ đếm giờ cưỡng bức 10 giây, với mã thoát 1. Hệ quả: mỗi lần deploy đều là một lần
+ * tắt CỨNG (request đang dở bị cắt), và orchestrator thấy mã thoát 1 nên coi như container hỏng.
+ *
+ * Gửi một sự kiện `shutdown` trước khi đóng để client biết mà kết nối lại, thay vì im lặng ngắt.
+ */
+export function closeAllSse() {
+  let n = 0;
+  for (const set of subscribers.values()) {
+    for (const res of set) {
+      // end() phải nằm trong try RIÊNG: nếu write hỏng (EPIPE — socket đã chết ở đầu bên kia) mà
+      // gộp chung một try thì end() bị bỏ qua và socket ở lại trong danh sách của Node, đúng cái
+      // mà hàm này sinh ra để dọn.
+      try { res.write(`event: shutdown\ndata: {}\n\n`); } catch { /* socket đã hỏng */ }
+      try { res.end(); n++; } catch { /* đã đóng rồi */ }
+    }
+  }
+  subscribers.clear();
+  recountClients();
+  return n;
+}
+
 /** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId: number, event: string, data: unknown) {
   if (pub) {

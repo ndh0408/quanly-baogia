@@ -19,7 +19,12 @@ spec:
           image: {{ .Values.redis.image }}
           # XÁC THỰC BẮT BUỘC: --requirepass (khớp mật khẩu nhúng trong quanly.redisUrl). Không có nó thì mọi
           # pod trong cluster đọc/ghi được session + hàng đợi. Đổi mặc định qua .Values.redis.password.
-          args: ["redis-server", "--requirepass", {{ .Values.redis.password | quote }}, "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          # PHẢI là noeviction. `allkeys-lru` cho phép Redis XOÁ BẤT KỲ khoá nào khi chạm maxmemory —
+          # kể cả khoá job của BullMQ (job đang chờ biến mất, không ai biết) và khoá phiên
+          # (người dùng bị đăng xuất ngẫu nhiên). BullMQ yêu cầu rõ noeviction. Thà ghi lỗi khi hết
+          # bộ nhớ còn hơn âm thầm nuốt mất việc. docker-compose.prod.yml đã đúng từ trước; chart
+          # và manifest k8s thì chưa — deploy bằng Helm là dính.
+          args: ["redis-server", "--requirepass", {{ .Values.redis.password | quote }}, "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
           ports: [{ containerPort: 6379 }]
           resources: {{- toYaml .Values.redis.resources | nindent 12 }}
           readinessProbe:

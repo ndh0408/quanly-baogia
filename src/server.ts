@@ -8,6 +8,7 @@ import { prisma } from "./db.js";
 import { createApp } from "./app.js";
 import { reloadRoleOverrides } from "./roleOverrides.js";
 import { ensureBucket, isStorageEnabled } from "./storage.js";
+import { closeAllSse } from "./sse.js";
 
 initSentry();
 
@@ -50,11 +51,22 @@ const server = app.listen(config.PORT, () => {
 
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
+  // ĐÓNG SSE TRƯỚC. `server.close()` chờ mọi kết nối đang mở kết thúc, mà kết nối SSE thì theo
+  // thiết kế không bao giờ kết thúc — không có bước này thì callback bên dưới KHÔNG BAO GIỜ chạy
+  // và tiến trình chỉ thoát nhờ bộ đếm giờ cưỡng bức, với mã thoát 1. Tức mỗi lần deploy là một
+  // lần tắt cứng: request đang dở bị cắt, và orchestrator đọc mã thoát 1 là container hỏng.
+  const n = closeAllSse();
+  if (n) logger.info({ sse: n }, "đã đóng kết nối SSE");
+
   server.close(async () => {
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   });
-  setTimeout(() => process.exit(1), 10_000).unref();
+  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
+  setTimeout(() => {
+    logger.error("tắt máy quá hạn 10s — thoát cưỡng bức (còn kết nối chưa đóng?)");
+    process.exit(1);
+  }, 10_000).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

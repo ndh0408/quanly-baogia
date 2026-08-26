@@ -37,8 +37,7 @@ spec:
           env:
             - name: REDIS_PASSWORD
               valueFrom: { secretKeyRef: { name: quanly-secrets, key: REDIS_PASSWORD } }
-          args:
-            [
+          args: [
               "redis-server",
               "--requirepass",
               "$(REDIS_PASSWORD)",
@@ -48,7 +47,7 @@ spec:
               "--maxmemory",
               "256mb",
               "--maxmemory-policy",
-              "allkeys-lru",
+              "noeviction", # BullMQ yêu cầu: allkeys-lru xoá mất khoá job + khoá phiên
             ]
           ports: [{ containerPort: 6379 }]
           readinessProbe:

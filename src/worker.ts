@@ -55,7 +55,16 @@ export const processors = {
         const url = await presignDownload(key, { expiresIn: 24 * 3600 });
         return { key, url, size: buf.length };
       }
-      return { size: buf.length, inline: buf.toString("base64") };
+      // KHÔNG nhét file vào giá trị trả về của job.
+      //
+      // BullMQ lưu returnvalue TRONG REDIS và giữ lại tới `removeOnComplete: 1000` job đã xong.
+      // Một file .xlsx 5MB thành ~6,7MB base64; 1000 job như thế là ~6,7GB trong một Redis đặt
+      // maxmemory 256mb. Với `noeviction` (đúng cấu hình prod) Redis sẽ TỪ CHỐI GHI — toàn bộ hệ
+      // hàng đợi đứng, không chỉ riêng việc xuất file.
+      //
+      // Đường xuất NỀN tồn tại để trả về một ĐƯỜNG TẢI. Không có kho object thì nó không có gì để
+      // trả — nói thẳng, thay vì âm thầm nhồi Redis. Route enqueue đã chặn sớm hơn; đây là chốt cuối.
+      throw new Error("Xuất nền cần kho object (S3_*). Chưa cấu hình — dùng chức năng xuất trực tiếp.");
     }),
     "pdf": (job: any) => withExportMetric("pdf", async () => {
       const { quoteId, requestedBy } = job.data;
@@ -83,7 +92,16 @@ export const processors = {
         const url = await presignDownload(key, { expiresIn: 24 * 3600 });
         return { key, url, size: buf.length };
       }
-      return { size: buf.length, inline: buf.toString("base64") };
+      // KHÔNG nhét file vào giá trị trả về của job.
+      //
+      // BullMQ lưu returnvalue TRONG REDIS và giữ lại tới `removeOnComplete: 1000` job đã xong.
+      // Một file .xlsx 5MB thành ~6,7MB base64; 1000 job như thế là ~6,7GB trong một Redis đặt
+      // maxmemory 256mb. Với `noeviction` (đúng cấu hình prod) Redis sẽ TỪ CHỐI GHI — toàn bộ hệ
+      // hàng đợi đứng, không chỉ riêng việc xuất file.
+      //
+      // Đường xuất NỀN tồn tại để trả về một ĐƯỜNG TẢI. Không có kho object thì nó không có gì để
+      // trả — nói thẳng, thay vì âm thầm nhồi Redis. Route enqueue đã chặn sớm hơn; đây là chốt cuối.
+      throw new Error("Xuất nền cần kho object (S3_*). Chưa cấu hình — dùng chức năng xuất trực tiếp.");
     }),
   },
   [QUEUES.EMAIL]: {

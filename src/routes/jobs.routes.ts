@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { getQueue, QUEUES, isQueueEnabled } from "../queue.js";
+import { isStorageEnabled } from "../storage.js";
 import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
 
 const router = Router();
@@ -38,6 +39,15 @@ router.post(
     }
     const q = getQueue(QUEUES.EXPORT);
     if (!q) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình. Vui lòng dùng chức năng xuất file trực tiếp." });
+    // Xuất NỀN trả về một ĐƯỜNG TẢI từ kho object. Không có kho thì worker không có gì để trả —
+    // và bản trước nhồi luôn cả file dưới dạng base64 vào giá trị trả về của job, tức là vào REDIS.
+    // Chặn ngay ở đây để người dùng biết liền, thay vì chờ poll rồi nhận lỗi.
+    if (!isStorageEnabled()) {
+      return res.status(503).json({
+        error: "Xuất nền chưa dùng được (chưa cấu hình kho lưu trữ tệp). Vui lòng dùng chức năng xuất file trực tiếp.",
+        code: "export_async_unavailable",
+      });
+    }
     const job = await q.add(req.body.format, { quoteId: req.params.id, requestedBy: req.session.userId });
     res.status(202).json({ jobId: job.id, queue: QUEUES.EXPORT, format: req.body.format });
   })
