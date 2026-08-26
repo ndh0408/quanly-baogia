@@ -3317,3 +3317,15 @@ textarea[aria-invalid="true"] {
 .excel-table.grid-fixed td {
   overflow-wrap: break-word;
 }
+
+/* LỚP PHỦ ĐĂNG NHẬP LẠI (SessionLostOverlay) — dùng lại <Login> nguyên vẹn bên trong .modal.
+   .modal đã có nền/viền/bo/đổ bóng rồi, nên .login-card phải BỎ bộ chrome của chính nó, kẻo
+   thành hai lớp thẻ lồng nhau (viền đôi, bóng đôi). Chỉ giữ phần padding + bề rộng. */
+.modal.modal-sm > .login-card {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  width: 100%;
+  padding: 26px 24px;
+}

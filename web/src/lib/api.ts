@@ -240,7 +240,17 @@ const LA_LOI_CSRF = (b: unknown) =>
   !!b && typeof b === "object" && typeof (b as { code?: unknown }).code === "string" &&
   ((b as { code: string }).code === "csrf_token_missing" || (b as { code: string }).code === "csrf_token_invalid");
 
-async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+/**
+ * `im401`: lời gọi NỀN (không do người dùng bấm) — gặp 401 thì KHÔNG bắn "auth:expired".
+ *
+ * Nhịp tim presence chạy mỗi 30 giây (QuoteEditor.tsx). Không có cờ này thì một phiên hết hạn lúc
+ * 3 giờ sáng, hay một lần khoá tài khoản, sẽ tự bắn sự kiện mất-phiên GIỮA LÚC người dùng đang gõ
+ * báo giá — dù họ không hề thao tác gì. Người dùng chỉ cần biết mình mất phiên vào ĐÚNG lúc họ làm
+ * một việc thật (bấm Lưu, mở trang), và lúc đó lớp phủ đăng nhập lại giữ nguyên dữ liệu cho họ.
+ */
+type ReqOpts = RequestInit & { im401?: boolean };
+
+async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   const method = (opts.method || "GET").toUpperCase();
   if (__preview && method !== "GET" && method !== "HEAD") {
     // XEM THỬ (sandbox): KHÔNG gửi lên server → trả "thành công giả" để thao tác chạy mượt, lưu TẠM ở client,
@@ -279,8 +289,9 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    // Mất phiên giữa chừng → báo App quay về màn đăng nhập (App lắng nghe "auth:expired").
-    if (res.status === 401) { resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); }
+    // Mất phiên giữa chừng → báo App mở LỚP PHỦ đăng nhập lại (App lắng nghe "auth:expired").
+    // Lời gọi nền (im401) chỉ dọn mã CSRF rồi im — xem chú thích ở ReqOpts.
+    if (res.status === 401) { resetCsrfToken(); if (!opts.im401) window.dispatchEvent(new Event("auth:expired")); }
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
@@ -321,11 +332,25 @@ function periodQS(from?: string, to?: string, extra?: Record<string, string>): s
 
 export const api = {
   me: () => req<Me>("/auth/me"),
-  login: (username: string, password: string, mfaToken?: string) => req<Me>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, ...(mfaToken ? { mfaToken } : {}) }) }),
-  logout: () => req("/auth/logout", { method: "POST" }),
+  // resetCsrfToken() SAU khi đổi phiên: server gọi session.regenerate() nên bí mật CSRF cũ chết theo.
+  // Chú thích ở resetCsrfToken khẳng định điều này từ đầu nhưng KHÔNG chỗ nào gọi — mã cũ nằm lại
+  // trong biến module, lần GHI kế tiếp ăn 403 rồi mới lấy mã mới và thử lại. Đường thử-lại đó cứu
+  // được tính đúng đắn, nhưng nó gửi LẠI nguyên thân request: ngay sau khi đăng nhập lại qua lớp
+  // phủ mất-phiên, việc đầu tiên người dùng làm thường là bấm Lưu một báo giá vài MB — tức tải lên
+  // hai lần trên mạng văn phòng chậm. Dọn mã ngay tại chỗ đổi phiên thì không tốn vòng nào.
+  login: async (username: string, password: string, mfaToken?: string) => {
+    const m = await req<Me>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, ...(mfaToken ? { mfaToken } : {}) }) });
+    resetCsrfToken();
+    return m;
+  },
+  logout: async () => { const r = await req("/auth/logout", { method: "POST" }); resetCsrfToken(); return r; },
   forgotPassword: (email: string) => req<unknown>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
   getInvite: (token: string) => req<{ email: string; displayName?: string }>(`/auth/invite/${encodeURIComponent(token)}`),
-  acceptInvite: (data: { token: string; displayName: string; senderName?: string; phone?: string; title?: string; password: string }) => req<Me>("/auth/accept-invite", { method: "POST", body: JSON.stringify(data) }),
+  acceptInvite: async (data: { token: string; displayName: string; senderName?: string; phone?: string; title?: string; password: string }) => {
+    const m = await req<Me>("/auth/accept-invite", { method: "POST", body: JSON.stringify(data) });
+    resetCsrfToken();   // kích hoạt lời mời cũng đăng nhập luôn → phiên mới, mã cũ chết
+    return m;
+  },
   searchQuotes: (q: string) => req<{ results: { quotes?: { id: number; quoteNumber?: string; projectCode?: string | null; title: string; status: string }[] } }>(`/search?q=${encodeURIComponent(q)}&types=quote&limit=8`),
   listPersonnel: (q = "", page = 1, size = 50, sort = "createdAt", order: "asc" | "desc" = "desc") =>
     req<ListResult>(`/personnel?${new URLSearchParams({ q, page: String(page), size: String(size), sort, order })}`),
@@ -451,8 +476,9 @@ export const api = {
   createQuote: (payload: unknown) => req<QuoteFull>("/quotes", { method: "POST", body: JSON.stringify(payload) }),
   updateQuote: (id: number, payload: unknown) => req<QuoteFull>(`/quotes/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   // Presence: báo editor đang mở/heartbeat/đóng 1 báo giá → trả danh sách người đang sửa (gồm cả mình).
+  // im401: nhịp tim nền, KHÔNG được tự kéo lớp phủ mất-phiên lên giữa lúc người dùng đang gõ.
   presence: (quoteId: number, action: "open" | "heartbeat" | "close") =>
-    req<{ editing: { id: number; name: string }[] }>("/stream/presence", { method: "POST", body: JSON.stringify({ quoteId, action }) }),
+    req<{ editing: { id: number; name: string }[] }>("/stream/presence", { method: "POST", body: JSON.stringify({ quoteId, action }), im401: true }),
   markConverted: (id: number) => req<QuoteFull>(`/quotes/${id}/mark-converted`, { method: "POST" }),
   markLost: (id: number, reason: string) => req<QuoteFull>(`/quotes/${id}/mark-lost`, { method: "POST", body: JSON.stringify({ reason }) }),
   // NHẬP file Excel: server chỉ ĐỌC file rồi trả dữ liệu lưới để xem trước — không ghi gì.
