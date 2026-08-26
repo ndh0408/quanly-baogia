@@ -16,6 +16,7 @@ Mọi tài liệu ĐANG HIỆU LỰC nằm trong thư mục này. Tài liệu l�
 | Đang có sự cố | [operations/INCIDENT_RESPONSE.md](operations/INCIDENT_RESPONSE.md) |
 | Mất dữ liệu / phải khôi phục | [operations/DISASTER_RECOVERY.md](operations/DISASTER_RECOVERY.md) |
 | Soát bảo mật | [architecture/SECURITY_MODEL.md](architecture/SECURITY_MODEL.md) → [product/ROLES_PERMISSIONS.md](product/ROLES_PERMISSIONS.md) |
+| Biết cái gì còn chưa làm | [REMAINING_RISKS.md](REMAINING_RISKS.md) |
 
 ## Bố cục
 
