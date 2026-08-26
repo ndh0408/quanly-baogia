@@ -160,6 +160,34 @@ trên: `sinhFileXuat` đặt `choPhepNoiTuyen: false`, tức **bỏ hẳn đư�
 nhánh cần một cái trần thật — vì một đường lui không có trần thì vô hiệu hoá đúng
 cái trần vừa đặt, và lại làm nó im lặng.
 
+## Mã hoá PII: MẶC ĐỊNH TẮT, và cột thô vẫn được ghi — QUYẾT ĐỊNH GIỮ NGUYÊN (2026-08-26)
+
+Chủ dự án đã đọc và **chọn giữ nguyên**. Mục này không phải việc còn tồn — nó là bản ghi
+trạng thái thật, để không ai đọc tên biến `PII_ENC_KEY` rồi tưởng dữ liệu đã được bảo vệ.
+
+**Ba điều đã kiểm bằng cách đọc mã, không suy đoán:**
+
+1. `PII_ENC_KEY` là **tuỳ chọn** — `src/config.ts:107` khai `.optional()`. Không đặt khoá thì
+   `encodePiiForWrite` (`src/piiFields.ts:53-55`) trả `data` **nguyên xi**: không có mã hoá nào,
+   CCCD / số tài khoản / lương nằm thô trong CSDL.
+2. Ở production, thiếu khoá chỉ in **một dòng `console.warn`** (`src/config.ts:241-245`) rồi chạy
+   tiếp. Cố ý — chú thích ở `src/config.ts:237-239` giải thích: chặn khởi động vì một tính năng phụ
+   còn tệ hơn. Đánh đổi hợp lý, nhưng hệ quả là **im lặng trong log của một lần deploy bình thường**.
+3. Kể cả khi ĐÃ đặt khoá, cột thô **vẫn được ghi song song** (`src/piiFields.ts:47-48`: "cột thô GIỮ
+   NGUYÊN cho tới khi cutover"). Giai đoạn đọc-song-song cần nó. Migration bỏ cột thô **chưa tồn
+   tại** — `scripts/migration/pii-backfill.mjs:29-31` ghi rõ đó là việc riêng, và việc riêng đó
+   chưa ai làm.
+
+**Nghĩa là:** mối đe doạ mà cả hệ con này sinh ra để chặn — *"bản dump CSDL bị lộ"* — **chưa được
+giảm nhẹ**, ở cả hai trạng thái. Chưa đặt khoá thì không có gì mã hoá. Đặt rồi thì bản dump vẫn
+chứa cột thô nguyên vẹn bên cạnh cột mã hoá.
+
+**Việc phải làm khi bạn quyết định làm:** (a) đặt `PII_ENC_KEY` trên production, (b) chạy
+`npm run pii:backfill` cho dữ liệu cũ, (c) xác minh bằng `dist/tools/verifyIntegrity.js`, (d) **rồi
+mới** viết migration bỏ ba cột thô. Bước (d) là **không hoàn tác được** — đừng chạy trước (c).
+
+**Đừng ghi ở đâu rằng PII đã được mã hoá cho tới khi (d) xong.**
+
 ## Ưu tiên đề xuất
 
 1. **Xoay mật khẩu demo trên dev/staging.** Chuỗi cũ đã bị gỡ khỏi cây làm việc
