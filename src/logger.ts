@@ -37,9 +37,20 @@ export const redactConfig = {
     "*.newPassword",
     "*.oldPassword",
     "req.url",
+    // `path` PHẲNG, KHÔNG PHẢI `req.path`. Trình xử lý lỗi ghi `{ reqId, path: req.path, … }`
+    // (src/middleware.ts) — một khoá ở GỐC đối tượng log, nên `req.url` ở trên KHÔNG phủ nó.
+    // ĐÃ ĐO: với `GET /api/auth/invite/<token 48 hex>` gây 5xx, dòng log chứa NGUYÊN VĂN token —
+    // mà token đó là đầu vào duy nhất của POST /accept-invite, tức CHIẾM ĐƯỢC TÀI KHOẢN.
+    // Đợt vá trước chỉ khai `req.url` và tưởng thế là phủ hết; không phải.
+    "path",
+    "req.path",
   ],
-  censor: (value: unknown, path: string[]) =>
-    (path[path.length - 1] === "url" ? maskUrlSecrets(String(value)) : undefined),
+  // Che (chứ không xoá) MỌI khoá mang đường dẫn — `url` lẫn `path`. Xoá thì mất luôn thông tin
+  // "request nào đã chạy"; che thì giữ được đường dẫn mà bỏ đúng phần bí mật.
+  censor: (value: unknown, path: string[]) => {
+    const khoa = path[path.length - 1];
+    return khoa === "url" || khoa === "path" ? maskUrlSecrets(String(value)) : undefined;
+  },
 };
 
 export const logger = pino({

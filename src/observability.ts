@@ -46,6 +46,20 @@ export function scrubSentryEvent<T extends { request?: { headers?: Record<string
   }
   if (event?.extra) {
     for (const k of KHOA_NOI_DUNG) delete event.extra[k];
+    // CHE MỌI CHUỖI CÒN LẠI TRONG `extra`, không chỉ ba khoá nội dung ở trên.
+    //
+    // Bản trước chỉ che `request.url` và xoá ba khoá nội dung, rồi tự nhận rằng "lọc ở beforeSend
+    // nên chỗ gọi mới thêm sau sẽ không phải nhớ". SAI: `captureError` ở trình xử lý lỗi truyền
+    // `{ reqId, path: req.path, method, userId }`, mà `path` không nằm trong KHOA_NOI_DUNG và
+    // không đi qua maskUrlSecrets. ĐÃ ĐO: token mời 48 hex trong `GET /api/auth/invite/:token`
+    // sang tới Sentry nguyên văn — đúng thứ mà chú thích ngay phía trên nói là đã chặn.
+    //
+    // Quét toàn bộ giá trị chuỗi thì lời hứa đó mới thành thật: chỗ gọi thêm sau này đặt tên khoá
+    // gì cũng được che. maskUrlSecrets vô hại với chuỗi không phải URL (nó chỉ viết lại đoạn
+    // /invite/… , /reset/… và các tham số token=…), nên quét rộng không làm hỏng dữ liệu truy vết.
+    for (const [k, v] of Object.entries(event.extra)) {
+      if (typeof v === "string") event.extra[k] = maskUrlSecrets(v);
+    }
   }
   return event;
 }

@@ -103,20 +103,68 @@ export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], is
 // có-quyền → honor + đóng dấu paidAt/paidById. ẢNH (paidProof) LUÔN theo DB ở đây — chỉ route /pay ghi ảnh.
 export function reconcileExtraPayments(sheets: any[], existingSheets: any[], canPay: boolean, payerId: number) {
   if (!Array.isArray(sheets)) return;
-  const prior = new Map();   // rid -> { paid, paidAt, paidById, paidProof }
+  // rid -> trạng thái thanh toán CỘNG số tiền tại thời điểm đó.
+  //
+  // ── VÌ SAO PHẢI GHIM CẢ SỐ TIỀN ─────────────────────────────────────────────
+  // `rid` do CHÍNH CLIENT gửi lên và được `sanitizeExtraTables` (src/quoteUtils.ts) giữ NGUYÊN VĂN
+  // khi ghi. Bản trước chỉ tra `prior.get(it.rid)`, nên tin cậy hoàn toàn vào một chuỗi client
+  // kiểm soát. ĐÃ ĐO hai chiều:
+  //   • rid BỊA (chưa từng có trong CSDL) → `p` là null → `paid` bị ép về false. Chiều này AN TOÀN
+  //     từ trước, và cần nói đúng như vậy: nó KHÔNG phải lỗ.
+  //   • CHÉP LẠI rid của một hàng ĐÃ THANH TOÁN sang một hàng BỊA giá 50.000.000đ → hàng bịa nhận
+  //     `paid: true` cùng `paidAt`/`paidById` của người trả thật VÀ cả ẢNH CHỨNG TỪ thật. Đó là
+  //     giả mạo chứng từ tài chính, làm được bởi đúng lớp tài khoản mà lớp gác này sinh ra để chặn
+  //     (account_hn đọc được rid trong payload trả về của chính họ).
+  //
+  // Bất biến đóng lỗ đó: AI KHÔNG ĐƯỢC ĐẶT `paid` THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ TRẢ.
+  // Hàng nào lấy trạng thái đã-trả mà số tiền lệch so với bản CSDL thì KHÔNG kế thừa gì — nó không
+  // còn là hàng đó nữa. Người có quyền `quote:internal:pay` không bị ràng buộc này (họ vốn đặt được
+  // `paid` trực tiếp), nên luồng kế toán bình thường không đổi.
+  //
+  // Cộng thêm: mỗi rid chỉ được kế thừa MỘT lần. Gửi hai hàng cùng rid thì hàng thứ hai trở đi là
+  // bản sao, không phải hàng gốc.
+  // Dấu vân tay SỐ TIỀN của một hàng — `null` nghĩa là "hàng này KHÔNG GHI số tiền", khác hẳn "số
+  // tiền bằng 0".
+  //
+  // PHẢI PHÂN BIỆT HAI THỨ ĐÓ. Bản đầu của chốt này quy cả hai về `0|0|`, và nó lập tức phá một ca
+  // THẬT: hàng bảng nội bộ ghi từ trước khi `sanitizeExtraTables` chuẩn hoá (hoặc ghi qua route
+  // /pay) không có `quantity`/`unitPrice` trong JSON, trong khi payload gửi lên thì luôn có số sau
+  // khi sanitize. So ra "lệch" ⇒ chốt cắt trạng thái đã-trả của một hàng HỢP LỆ — tức tự tay xoá
+  // chứng từ tài chính thật, hại hơn hẳn thứ nó đi chặn. tests/extra-paid-preserved.test.js bắt
+  // đúng ca này.
+  //
+  // Nên: thiếu dữ liệu thì MỞ (không áp phép so), có dữ liệu thì SIẾT. Phần dư lại rất hẹp — kẻ
+  // tấn công phải chép rid của một hàng vừa ĐÃ THANH TOÁN vừa KHÔNG GHI số tiền — và đánh đổi đó
+  // đúng chiều: không bao giờ hi sinh dữ liệu thật để chặn một đường khai thác hẹp.
+  const soTien = (it: any) => {
+    const q = it?.quantity, dg = it?.unitPrice;
+    if ((q === undefined || q === null) && (dg === undefined || dg === null)) return null;
+    return `${Number(q) || 0}|${Number(dg) || 0}|${it?.days != null ? Number(it.days) : ""}`;
+  };
+  const prior = new Map();   // rid -> { paid, paidAt, paidById, paidProof, tien }
   for (const s of (existingSheets || [])) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       for (const it of (t?.items || [])) {
-        if (it && it.rid) prior.set(it.rid, { paid: !!it.paid, paidAt: it.paidAt || null, paidById: it.paidById ?? null, paidProof: it.paidProof ?? null });
+        if (it && it.rid) prior.set(it.rid, { paid: !!it.paid, paidAt: it.paidAt || null, paidById: it.paidById ?? null, paidProof: it.paidProof ?? null, tien: soTien(it) });
       }
     }
   }
+  const daDung = new Set<string>();
   const now = new Date().toISOString();
   for (const s of sheets) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       for (const it of (t?.items || [])) {
         if (!it) continue;
-        const p = it.rid ? prior.get(it.rid) : null;
+        let p = it.rid ? prior.get(it.rid) : null;
+        if (p && it.rid) {
+          if (daDung.has(it.rid)) p = null;                                   // bản sao của cùng một rid
+          else {
+            daDung.add(it.rid);
+            // Đổi số tiền của hàng ĐÃ TRẢ mà không có quyền đặt `paid` → cắt mọi kế thừa.
+            // `p.tien === null` = bản CSDL không ghi số tiền → không có gì để so, giữ nguyên kế thừa.
+            if (!canPay && p.paid && p.tien !== null && p.tien !== soTien(it)) p = null;
+          }
+        }
         it.paidProof = p ? p.paidProof : null;  // ảnh không đi qua quote-save (chống base64 chảy + giả mạo)
         if (!canPay) {
           it.paid = p ? p.paid : false;
