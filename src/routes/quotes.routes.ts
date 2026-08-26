@@ -8,6 +8,7 @@ import {
   QuoteCreateSchema,
   QuoteUpdateSchema,
   ListQuerySchema,
+  HnSaveSchema,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
@@ -220,7 +221,10 @@ router.put(
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
   asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
-router.put("/:id/hn", validate({ params: idParam }),   // account lưu phần HN (chỉ ghi bảng hanoi)
+// BODY PHẢI QUA SCHEMA. Trước đây route này chỉ kiểm `:id`, còn saveHn đọc thẳng req.body →
+// sanitizeExtraTables persist nguyên trạng cờ duyệt/thanh toán do server sở hữu, và không có
+// cap nào cho số bảng / số dòng / độ dài chuỗi. Xem tests/hn-save-forgery.test.js.
+router.put("/:id/hn", validate({ params: idParam, body: HnSaveSchema }),   // account lưu phần HN (chỉ ghi bảng hanoi)
   asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/submit", validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));

@@ -178,6 +178,34 @@ const extraTableSchema = z.object({
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
 });
 
+// LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).
+//
+// Route này TRƯỚC ĐÂY không có body schema: `validate({ params: idParam })` chỉ kiểm `:id`, còn
+// `saveHn` đọc thẳng `req.body?.hnSheets` rồi đưa vào `sanitizeExtraTables`, mà hàm đó persist
+// NGUYÊN TRẠNG mọi cờ do server sở hữu (`approved*`, `paid*`, `paidProof`). Người dùng duy nhất
+// gọi được endpoint này là account Hà Nội — vai trò có ĐÚNG BA quyền
+// (`quote:read:own`, `quote:update:own`, `quote:hn:fill`), KHÔNG có `quote:internal:pay` cũng
+// KHÔNG có `quote:internal:approve`. Xem tests/hn-save-forgery.test.js.
+//
+// Schema chỉ chặn HÌNH DẠNG (kích thước payload, kiểu dữ liệu). Phần QUYỀN — cờ duyệt/thanh toán
+// phải lấy lại từ CSDL — do saveHn xử lý; hai lớp này bổ sung nhau, không thay thế nhau.
+export const HnSaveSchema = z.object({
+  hnSheets: z
+    .array(
+      z.object({
+        // Sheet mới chưa lưu → client gửi null; saveHn dò không thấy thì bỏ qua sheet đó.
+        sheetId: z.coerce.number().int().positive().optional().nullable(),
+        // category do server ép cứng thành "hanoi"; client cũ có gửi kèm nên vẫn chấp nhận.
+        hnTables: z
+          .array(extraTableSchema.extend({ category: z.literal("hanoi").optional() }))
+          .max(20, "Tối đa 20 bảng Hà Nội trong một trang")
+          .default([]),
+      })
+    )
+    .max(50, "Tối đa 50 trang")
+    .default([]),
+});
+
 const sheetSchema = z.object({
   // id của sheet ĐANG CÓ trong DB (client gửi lại khi sửa). Lưu = xoá-tạo-lại sheet nên server dùng
   // id này để BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…).
