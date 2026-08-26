@@ -50,7 +50,23 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
     include: {
       sheets: {
         orderBy: { order: "asc" },
-        include: { items: { orderBy: { order: "asc" } }, template: { select: { code: true, name: true } } },
+        include: {
+          // `select` LIỆT KÊ ĐÚNG các cột payload dùng (bên dưới) — CỐ Ý không dùng `include`.
+          // `include` lấy mọi cột của QuoteItem, kể cả `images` (mảng data-URL base64, tối đa 10
+          // ảnh/hạng mục) mà payload không hề chép vào. Đo được: một báo giá 12 hạng mục có ảnh
+          // làm lần đọc này giải TOAST 612 block rồi vứt — TRONG transaction lưu báo giá, tức kéo
+          // dài đúng transaction đang giữ khoá hàng Quote + toàn bộ QuoteSheet.
+          // Thêm trường vào payload thì PHẢI thêm vào đây, nếu không nó im lặng thành undefined.
+          items: {
+            orderBy: { order: "asc" },
+            select: {
+              order: true, kind: true, productId: true, name: true, detail: true, unit: true,
+              quantity: true, quantityExact: true, unitPrice: true, days: true,
+              notes: true, internalNote: true, formulas: true,
+            },
+          },
+          template: { select: { code: true, name: true } },
+        },
       },
     },
   });

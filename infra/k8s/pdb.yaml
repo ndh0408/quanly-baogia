@@ -1,0 +1,39 @@
+# PodDisruptionBudget cho bản kustomize.
+#
+# VÌ SAO CÓ FILE NÀY: chart Helm đã có PDB từ lâu (infra/helm/quanly/templates/pdb.yaml) còn bản
+# kustomize thì không — hai bản tham chiếu của CÙNG một hệ thống lệch mức phòng thủ, và ai deploy
+# bằng `kubectl apply -k` nhận bản yếu hơn mà không có gì báo. Không PDB thì một lệnh `kubectl drain`
+# (rút node, nâng cấp cụm) hạ được cả hai replica app CÙNG LÚC: API đứt hẳn giữa một thao tác bảo
+# trì đáng lẽ không downtime.
+#
+# ⚠️ CHƯA KIỂM CHỨNG TRÊN CỤM THẬT. Sandbox không có Docker daemon lẫn k8s, nên file này mới chỉ
+# qua `kubeconform` — tức đúng HÌNH DẠNG schema, không phải "đã thấy drain kết thúc".
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: quanly-app
+  namespace: quanly
+  labels: { app: quanly, component: api }
+spec:
+  # `minAvailable` hợp cho app vì HPA giữ minReplicas: 2 (app.yaml) — luôn còn pod thứ hai để
+  # eviction đi tiếp, drain không bao giờ kẹt.
+  minAvailable: 1
+  selector:
+    matchLabels: { app: quanly, component: api }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: quanly-worker
+  namespace: quanly
+  labels: { app: quanly, component: worker }
+spec:
+  # WORKER PHẢI DÙNG maxUnavailable, KHÔNG dùng minAvailable. HPA worker có minReplicas: 1
+  # (worker.yaml), và `minAvailable: 1` trên một Deployment đang có đúng 1 pod làm eviction API
+  # từ chối VĨNH VIỄN → `kubectl drain` treo, node không bao giờ rút được, cụm kẹt giữa lúc bảo
+  # trì. Đúng cái bẫy đã phải gỡ ở chart Helm (templates/pdb.yaml). Với maxUnavailable thì drain
+  # luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds: 90 ở worker.yaml.
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app: quanly, component: worker }

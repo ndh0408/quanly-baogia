@@ -156,6 +156,24 @@ export const exportDuration = new Histogram({
   registers: [registry],
 });
 
+// === Độ sâu hàng đợi BullMQ ===
+//
+// `export_queue_depth` ở trên CHỈ đo cổng worker-thread ĐỒNG BỘ trong src/exportQueue.ts — nó
+// không biết gì về 5 hàng đợi BullMQ. Trước gauge này, job xuất file/email/webhook chất đống trong
+// Redis mà /metrics im lặng hoàn toàn: worker chết thì dấu hiệu đầu tiên là người dùng gọi điện.
+//
+// Nhãn `state` lấy đúng tên trạng thái của BullMQ (waiting/active/delayed/failed/…), là tập HỮU HẠN
+// và cố định nên cardinality bị chặn ở (số hàng đợi × số trạng thái).
+//
+// CHƯA KIỂM CHỨNG Ở PRODUCTION: bộ số này mới chỉ được đo qua Redis cục bộ trong test. Prod hiện
+// chạy docker-compose và KHÔNG có Prometheus nào scrape — xem docs/REMAINING_RISKS.md.
+export const bullQueueDepth = new Gauge({
+  name: "bullmq_jobs",
+  help: "Số job trong mỗi hàng đợi BullMQ, tách theo trạng thái",
+  labelNames: ["queue", "state"],
+  registers: [registry],
+});
+
 /**
  * Express middleware that records request latency. Mount AFTER routing so that
  * req.route is populated; for routes that don't match any handler we tag as "unknown".

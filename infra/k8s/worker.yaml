@@ -12,6 +12,21 @@ spec:
     metadata:
       labels: { app: quanly, component: worker }
     spec:
+      # ÂN HẠN DỪNG. src/worker.ts bắt SIGTERM rồi `await Worker.close()` — bản KHÔNG cưỡng bức,
+      # tức nó chờ job đang chạy xong. Không khai khoá này thì k8s cho đúng 30s mặc định rồi
+      # SIGKILL, mà riêng bước sinh file của một job xuất đã được cấp trần cứng 30s
+      # (`EXPORT_GEN_TIMEOUT_MS` ở src/exportQueue.ts), chưa kể tải lên kho object và ghi CSDL sau đó.
+      # Trần đó CÓ HIỆU LỰC với tiến trình worker: `sinhFileXuat` trong src/worker.ts đi qua
+      # `runExportJob(..., { choPhepNoiTuyen: false })`, tức sinh file trong worker_threads và hết
+      # hạn là `terminate()` giết luồng. (Trước bản vá src/worker.ts KHÔNG hề import exportQueue.js
+      # và gọi thẳng buildQuoteBuffer — con số 90 khi đó neo vào một trần không tồn tại.)
+      # Job bị cắt ngang không "chạy lại ngay": BullMQ giữ khoá tới hết lockDuration (5 phút,
+      # src/queue.ts) rồi mới cho chạy lại — người dùng thấy bản xuất đứng im suốt lượt deploy.
+      # 90 = 3× trần 30s, đủ chỗ cho upload + ghi CSDL. Đây là con số CHỌN CÓ CĂN CỨ, KHÔNG phải
+      # số đo: sandbox không có cụm k8s nên chưa ai bấm giờ một lượt đóng worker thật.
+      # Phải khớp với `worker.terminationGracePeriodSeconds` của chart Helm và `stop_grace_period`
+      # của compose — ba đường triển khai cùng một hệ thống, lệch nhau là lỗi lại mọc ở đường kia.
+      terminationGracePeriodSeconds: 90
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

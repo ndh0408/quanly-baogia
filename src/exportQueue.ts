@@ -41,6 +41,22 @@ export const abortedError = () =>
   Object.assign(new Error("Yêu cầu xuất file đã bị huỷ"), { name: "AbortError", status: 499, code: "export_aborted" });
 export const isAbortedError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_aborted";
 
+/**
+ * Lỗi "sinh file quá hạn" — PHẢI phân biệt được với lỗi sinh file thường.
+ *
+ * Trước đây `generateInWorker` ném `new Error("export worker timeout")`, không mã lỗi, nên
+ * `runExportJob` không tách được nó khỏi "worker sập" và cho rơi về đường NỘI TUYẾN. Với đường
+ * HTTP đồng bộ đó là lựa chọn đúng (thà chậm còn hơn hỏng). Với tiến trình WORKER thì không: rơi
+ * về nội tuyến sau khi đã quá hạn nghĩa là làm lại đúng việc chậm đó trên vòng lặp sự kiện, LẦN
+ * NÀY KHÔNG CÓ TRẦN NÀO — chính cái trần vừa đặt bị vô hiệu. Có mã lỗi riêng thì mỗi đường gọi tự
+ * chọn được cách xử lý.
+ */
+export const timeoutError = (tranMs: number) =>
+  Object.assign(new Error(`Sinh file xuất quá hạn ${Math.round(tranMs / 1000)}s`), {
+    name: "TimeoutError", status: 504, code: "export_timeout",
+  });
+export const isTimeoutError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_timeout";
+
 type Waiter = { resolve: () => void; reject: (e: unknown) => void; detach: () => void };
 
 /**
@@ -142,12 +158,24 @@ const gate = createConcurrencyGate({
 /** Ai đó vượt trần hàng đợi (503) — KHÔNG được nuốt rồi rơi về nội tuyến. */
 const isCapacityError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_capacity";
 
-function generateInWorker(kind: string, quote: any, timeoutMs = 30_000) {
+/**
+ * TRẦN CỨNG cho MỘT lượt sinh file trong luồng worker (worker_threads).
+ *
+ * Đây là trần THẬT chứ không phải `Promise.race`: hết hạn thì `w.terminate()` giết luôn luồng, tức
+ * công việc DỪNG hẳn và CPU được trả lại. `Promise.race` quanh một hàm async chỉ bỏ mặc lời hứa —
+ * workbook vẫn dựng tiếp, vẫn ăn CPU và RAM, chỉ là không ai đọc kết quả nữa.
+ *
+ * Xuất khẩu ra ngoài để hạ tầng (ân hạn dừng của k8s/compose) neo được vào một con số CÓ THẬT thay
+ * vì chép lại một hằng số ma. Đổi bằng EXPORT_GEN_TIMEOUT_MS khi báo giá thật sự lớn hơn mức này.
+ */
+export const EXPORT_GEN_TIMEOUT_MS = Math.max(1_000, Number(process.env.EXPORT_GEN_TIMEOUT_MS) || 30_000);
+
+function generateInWorker(kind: string, quote: any, timeoutMs = EXPORT_GEN_TIMEOUT_MS) {
   return new Promise<any>((resolve, reject) => {
     let done = false;
     const w = new Worker(WORKER_URL, { workerData: { kind, quote } });
     const finish = (fn: (arg: any) => void, arg: any) => { if (done) return; done = true; clearTimeout(timer); w.terminate(); fn(arg); };
-    const timer = setTimeout(() => finish(reject, new Error("export worker timeout")), timeoutMs);
+    const timer = setTimeout(() => finish(reject, timeoutError(timeoutMs)), timeoutMs);
     w.once("message", (m) => (m && m.ok) ? finish(resolve, Buffer.from(m.buffer)) : finish(reject, new Error((m && m.error) || "worker error")));
     w.once("error", (e) => finish(reject, e));
     w.once("exit", (code) => { if (!done && code !== 0) finish(reject, new Error("worker exit " + code)); });
@@ -169,8 +197,19 @@ const looksValid = (kind: string, buf: any) =>
  * NGOẠI LỆ DUY NHẤT: hết công suất (503). Cái đó phải ném RA NGOÀI cho người gọi.
  * Nếu nuốt rồi rơi về nội tuyến thì trần hàng đợi thành vô nghĩa — đúng lúc hệ thống quá tải
  * lại dồn thêm việc nặng CPU vào luồng chính.
+ *
+ * `choPhepNoiTuyen: false` TẮT hẳn đường rơi về nội tuyến. Mặc định là `true`, tức đường HTTP đồng
+ * bộ (src/routes/export.routes.ts) giữ NGUYÊN hành vi cũ không đổi một ly. Chỉ tiến trình WORKER
+ * (src/worker.ts) đặt `false`, và lý do rất cụ thể: ở đó đường nội tuyến KHÔNG có trần thời gian
+ * nào cả, nên giữ nó lại là biến trần cứng 30s thành lời nói suông — mà toàn bộ ân hạn dừng 90s
+ * của k8s/compose lại đang neo vào chính con số đó.
  */
-export async function runExportJob(kind: string, plainQuote: any, inlineFn: () => any, { signal }: { signal?: AbortSignal } = {}) {
+export async function runExportJob(
+  kind: string,
+  plainQuote: any,
+  inlineFn: () => any,
+  { signal, choPhepNoiTuyen = true }: { signal?: AbortSignal; choPhepNoiTuyen?: boolean } = {}
+) {
   // Xin chỗ NGOÀI try: lỗi hết công suất không được rơi vào nhánh "thử lại nội tuyến" bên dưới.
   await gate.acquire(signal);
   exportActiveWorkers.set(gate.active());
@@ -192,12 +231,16 @@ export async function runExportJob(kind: string, plainQuote: any, inlineFn: () =
       exportDuration.observe({ format: kind, path: "worker" }, Number(process.hrtime.bigint() - startedAt) / 1e9);
       return buf;
     }
+    if (!choPhepNoiTuyen) throw new Error("Luồng xuất trả về buffer không hợp lệ");
     logger.warn({ kind }, "export worker returned invalid buffer — falling back to inline");
   } catch (e) {
     if (isCapacityError(e)) throw e;
     // Huỷ cũng KHÔNG được rơi về nội tuyến: người gọi đã bỏ đi, làm lại trên luồng chính chỉ tổ
     // chẹn event loop cho một kết quả không ai đọc.
     if (isAbortedError(e)) throw e;
+    // Quá hạn thì càng KHÔNG được rơi về nội tuyến khi người gọi đã tắt đường đó: xem chú thích
+    // của `timeoutError`. Với đường đồng bộ (choPhepNoiTuyen mặc định) hành vi giữ nguyên như cũ.
+    if (!choPhepNoiTuyen) throw e;
     logger.warn({ kind, err: e instanceof Error ? e.message : String(e) }, "export worker failed — falling back to inline");
   }
   const out = await runExport(inlineFn);

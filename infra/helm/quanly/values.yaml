@@ -33,7 +33,12 @@ worker:
   replicaCount: 2
   concurrency: 4
   # Thời gian cho worker chạy nốt job đang xử lý khi bị dừng (SIGTERM → Worker.close()).
-  terminationGracePeriodSeconds: 60
+  # 90 chứ không phải 60: riêng bước sinh file của job xuất đã có trần cứng 30s
+  # (`EXPORT_GEN_TIMEOUT_MS` ở src/exportQueue.ts, áp vào worker qua `sinhFileXuat` trong
+  # src/worker.ts), còn phải cộng tải lên kho object và ghi CSDL.
+  # Cùng con số với infra/k8s/worker.yaml và `stop_grace_period` của compose — ba đường triển
+  # khai lệch nhau thì bản vá chỉ dời chỗ hỏng sang đường khác. CHƯA đo trên cụm thật.
+  terminationGracePeriodSeconds: 90
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 1, memory: 1Gi }
@@ -141,8 +146,6 @@ secrets:
   SMTP_FROM: ""
   TELEGRAM_BOT_TOKEN: ""
   SENTRY_DSN: ""
-  STRIPE_SECRET_KEY: ""
-  STRIPE_WEBHOOK_SECRET: ""
 
 serviceAccount:
   create: true
@@ -170,7 +173,7 @@ podDisruptionBudget:
   # Worker dùng maxUnavailable chứ KHÔNG dùng chung minAvailable với app. Lý do: worker autoscale
   # xuống minReplicas=1, và `minAvailable: 1` trên một Deployment có đúng 1 pod làm eviction API
   # từ chối vĩnh viễn → `kubectl drain` treo, node không bao giờ rút được. Với maxUnavailable thì
-  # drain luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds: 60.
+  # drain luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ worker.terminationGracePeriodSeconds.
   workerMaxUnavailable: 1
 
 nodeSelector: {}

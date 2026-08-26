@@ -9,7 +9,7 @@ import type { Request } from "express";
 import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, D } from "../money.js";
-import { nextQuoteNumber, nextProjectCode } from "../quoteNumber.js";
+import { nextQuoteNumber, nextProjectCode, syncQuoteCounter } from "../quoteNumber.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
@@ -203,10 +203,16 @@ export async function createQuote(req: Request) {
 
   const prefix = company.quotePrefix || "GN";
   let quote;
+  // Số của LƯỢT VỪA HỎNG, đọc lại được ở khối catch (xem lý do ở đó).
+  const capSo: { so: string | null } = { so: null };
   for (let attempt = 0; ; attempt++) {
     try {
       quote = await prisma.$transaction(async (tx) => {
         const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx as any);
+        capSo.so = quoteNumber;
+        // Số do client gửi không đi qua bộ đếm → phải đẩy bộ đếm theo, nếu không lần cấp TỰ ĐỘNG
+        // kế tiếp sinh lại số đã dùng và đốt sạch ngân sách thử lại (xem syncQuoteCounter).
+        if (b.quoteNumber) await syncQuoteCounter(b.quoteNumber, prefix, tx as any);
         if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
         const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
         const created = await tx.quote.create({
@@ -219,7 +225,15 @@ export async function createQuote(req: Request) {
       break;
     } catch (e) {
       const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
-      if (code === "P2002" && !b.quoteNumber && attempt < 3) continue;
+      if (code === "P2002" && !b.quoteNumber && attempt < 3) {
+        // Thử lại KHÔNG tự khỏi: transaction hỏng cuốn theo cả lần tăng bộ đếm (chủ ý "không đốt
+        // số" của nextQuoteNumber), nên lượt sau sinh LẠI ĐÚNG số vừa đụng — bốn lượt cùng một số,
+        // rồi 409. Ghi nhận số đã bị chiếm vào bộ đếm NGOÀI transaction (GREATEST nên không lùi)
+        // để lượt sau nhảy sang số kế tiếp. Đây là ca CÓ THẬT bất cứ khi nào tồn tại báo giá mang
+        // số không do bộ đếm cấp: nhập tay qua API, hoặc dữ liệu chuyển từ hệ cũ.
+        if (capSo.so) await syncQuoteCounter(capSo.so, prefix).catch(() => {});
+        continue;
+      }
       if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
       throw e;
     }
@@ -380,6 +394,10 @@ export async function updateQuote(req: Request) {
       throw httpError(409, dup.deletedAt ? "Số báo giá đã dùng (thuộc báo giá đã xoá)" : "Số báo giá đã tồn tại");
     }
     data.quoteNumber = b.quoteNumber;
+    // ĐỔI số cũng làm lệch bộ đếm y như lúc tạo: số mới có thể nằm CAO hơn vùng đã cấp, và lần
+    // cấp tự động kế tiếp sẽ đâm vào nó. Prefix lấy theo công ty SẼ ghi (payload có thể đổi công ty).
+    const cty = await prisma.company.findFirst({ where: { id: data.companyId ?? existing.companyId }, select: { quotePrefix: true } });
+    await syncQuoteCounter(b.quoteNumber, cty?.quotePrefix || "GN");
   }
 
   // Price-affecting edit on a quote already in the pipeline -> reopen to draft.
@@ -526,22 +544,72 @@ export async function listQuotes(req: Request) {
   // Tìm KHÔNG dấu / sai dấu trên cột searchText chuẩn-hóa (quoteNumber+projectCode+title+toCompany+toContact).
   if (q) filters.push({ searchText: searchTextFilter(String(q)) });
   const where = { AND: filters };
-  // account_hn: cần bảng "hanoi" của từng sheet để tính SỐ SHEET HN + TỔNG HN (số nội bộ của
-  // họ). Account chỉ thấy ít báo giá (được giao) nên select nặng hơn không sao.
-  const listSelect = (can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW))
-    ? { ...QUOTE_LIST_SELECT, sheets: { select: { extraTables: true } } }
-    : QUOTE_LIST_SELECT;
+  // account_hn / xem-nội-bộ: cần BẢNG NỘI BỘ của từng sheet để tính SỐ SHEET HN + TỔNG HN (hoặc
+  // số hàng nội bộ). Nhưng KHÔNG nạp qua `select` của Prisma: `extraTables` chứa cả `paidProof` —
+  // ảnh chứng từ base64 hàng trăm KB mỗi cái — mà presentQuoteRow không hề đọc tới. Một trang danh
+  // sách 12 báo giá đo được 7,2 MB base64 kéo về rồi vứt. Xem `bangNoiBoTheoBaoGia` bên dưới.
+  const canBangNoiBo = can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW);
   const [total, rows] = await Promise.all([
     prisma.quote.count({ where }),
     prisma.quote.findMany({
       where,
       orderBy: { [sort]: order },
-      select: listSelect,   // slim projection (account_hn: +sheets.extraTables để tính Tổng HN)
+      select: QUOTE_LIST_SELECT,   // slim projection — không sheets, không customerLogo
       skip: (page - 1) * size,
       take: size,
     }),
   ]);
+  if (canBangNoiBo && rows.length) {
+    const theoBaoGia = await bangNoiBoTheoBaoGia(rows.map((r: any) => r.id));
+    // Gắn vào ĐÚNG hình dạng mà presentQuoteRow vẫn đọc (`q.sheets[].extraTables`): cả hai nhánh
+    // của nó đều flatMap qua MỌI sheet rồi mới đếm/cộng, nên gộp về một phần tử không đổi kết quả.
+    for (const r of rows as any[]) r.sheets = [{ extraTables: theoBaoGia.get(r.id) ?? [] }];
+  }
   return { rows, total, page, size };
+}
+
+/**
+ * Bảng nội bộ của một trang danh sách, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
+ *
+ * Vì sao phải cắt ở tầng SQL chứ không lọc sau khi nạp: lọc ở JS thì base64 đã đi qua dây và đã
+ * nằm trong heap rồi — đúng chi phí cần bỏ. Ảnh vẫn sống trong CSDL và vẫn tải được on-demand qua
+ * GET /:id/extra/:sheetId/:rid/proof, y như trước.
+ *
+ * Phép tính TIỀN/ĐẾM vẫn do `extraTableSum`/`presentQuoteRow` ở JS làm, KHÔNG dịch sang SQL: quy
+ * tắc ở đó (làm tròn từng dòng, cờ `quantityExact`, `days`, chỉ cộng hàng đã duyệt với hcm/khách)
+ * là quy tắc TIỀN — dựng lại nó bằng SQL là mở đường cho hai nguồn số lệch nhau.
+ *
+ * `extraTables` là cột Json TỰ DO (đường ghi ở hnWorkflow và lúc nhân bản không qua
+ * sanitizeExtraTables), nên phải phòng cả ca không phải mảng: CASE ở ngoài chặn `jsonb_array_elements`
+ * ném lỗi trên object/chuỗi, và bảng có `items` không phải mảng thì để nguyên.
+ */
+async function bangNoiBoTheoBaoGia(ids: number[]) {
+  const rows = await prisma.$queryRaw<{ quoteId: number; tables: any }[]>`
+    SELECT s."quoteId" AS "quoteId", jsonb_agg(x.t ORDER BY s."order", s.id) AS "tables"
+      FROM "QuoteSheet" s
+      CROSS JOIN LATERAL (
+        SELECT CASE WHEN jsonb_typeof(t->'items') = 'array'
+                    THEN jsonb_set(t, '{items}', (SELECT coalesce(jsonb_agg(
+                                                           -- Phep tru jsonb-text NEM LOI 22023 "cannot delete from
+                                                           -- scalar" khi phan tu KHONG phai object/array. CASE ben
+                                                           -- ngoai chi phong extraTables khong phai mang va items
+                                                           -- khong phai mang - KHONG phong PHAN TU vo huong ben trong
+                                                           -- items (null, chuoi, so). Cot nay la jsonb tu do, da qua
+                                                           -- nhieu doi ma ghi, nen phan tu di dang la chuyen co that.
+                                                           -- Duong JS cu chiu duoc hoan toan, nen chuyen sang SQL ma
+                                                           -- thieu lop nay la lam HONG CA TRANG DANH SACH bao gia vi
+                                                           -- mot hang du lieu cu. (Chu thich khong dau: khoi SQL nay
+                                                           -- nam trong template literal, backtick se lam dut chuoi.)
+                                                           CASE WHEN jsonb_typeof(it) = 'object' THEN it - 'paidProof' ELSE it END
+                                                         ), '[]'::jsonb)
+                                                    FROM jsonb_array_elements(t->'items') it))
+                    ELSE t END AS t
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array'
+                                         THEN s."extraTables" ELSE '[]'::jsonb END) t
+      ) x
+     WHERE s."quoteId" = ANY(${ids})
+     GROUP BY s."quoteId"`;
+  return new Map<number, any[]>(rows.map((r) => [r.quoteId, Array.isArray(r.tables) ? r.tables : []]));
 }
 
 /** Xem trước SỐ báo giá KẾ TIẾP (không tiêu thụ counter). Prefix theo công ty đã chọn. */
@@ -1155,10 +1223,14 @@ export async function duplicateQuote(req: Request) {
   // failed insert rolls the counter back (no burned numbers) and the copy always
   // gets an initial QuoteVersion snapshot.
   let created;
+  const prefixNhanBan = src.company?.quotePrefix || "GN";
+  // Số của LƯỢT VỪA HỎNG — cùng lý do như createQuote, xem khối catch bên dưới.
+  const capSoNhanBan: { so: string | null } = { so: null };
   for (let attempt = 0; ; attempt++) {
     try {
       created = await prisma.$transaction(async (tx: any) => {
-        const quoteNumber = await nextQuoteNumber(src.company?.quotePrefix || "GN", tx);
+        const quoteNumber = await nextQuoteNumber(prefixNhanBan, tx);
+        capSoNhanBan.so = quoteNumber;
         let projectCode, projectVersion;
         if (sameProject) {
           projectCode = sameProjectCode;
@@ -1177,7 +1249,15 @@ export async function duplicateQuote(req: Request) {
       break;
     } catch (e) {
       const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
-      if (code === "P2002" && attempt < 3) continue;
+      if (code === "P2002" && attempt < 3) {
+        // CÙNG LỖI VỚI createQuote, và đường này bị BỎ SÓT ở lượt vá trước: transaction hỏng cuốn
+        // theo cả lần tăng bộ đếm (chủ ý "không đốt số" của nextQuoteNumber), nên lượt thử lại sinh
+        // LẠI ĐÚNG số vừa đụng — bốn lượt cùng một số rồi 409, tức vòng thử lại không có tác dụng
+        // gì. Đẩy số đã bị chiếm vào bộ đếm NGOÀI transaction (GREATEST nên không lùi) để lượt sau
+        // nhảy sang số kế tiếp.
+        if (capSoNhanBan.so) await syncQuoteCounter(capSoNhanBan.so, prefixNhanBan).catch(() => {});
+        continue;
+      }
       if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
       throw e;
     }

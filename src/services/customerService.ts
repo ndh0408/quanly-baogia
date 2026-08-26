@@ -11,6 +11,31 @@ import { normalizeSearch, searchTextFilter } from "../searchText.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
+/**
+ * Dịch P2002 (đụng ràng buộc duy nhất ở CSDL) thành ĐÚNG thông điệp 409 mà người dùng vốn nhận.
+ *
+ * Các lần kiểm trùng phía dưới là check-then-write NGOÀI transaction: chúng cho lỗi 409 đọc được,
+ * nhưng KHÔNG đóng được cửa sổ đua vài mili-giây khi hai người nhập cùng một MST. Cửa sổ đó nay do
+ * index `Customer_taxCode_live_key` (migration 20260826120000) đóng — nhưng nếu để P2002 rơi thẳng
+ * ra thì người thua cuộc nhận 500 "Lỗi server" thay vì câu tiếng Việt nói rõ MST thuộc về ai.
+ */
+async function nem409TuP2002(e: unknown, taxCode?: string | null): Promise<never> {
+  const err = e as { code?: string; meta?: { target?: unknown } };
+  if (err?.code !== "P2002") throw e;
+  // `target` có thể là mảng cột (["taxCode"]) hoặc TÊN INDEX ("Customer_taxCode_live_key") tuỳ
+  // ràng buộc là @unique của Prisma hay index thô — so trên chuỗi phủ được cả hai.
+  const target = String(err.meta?.target ?? "");
+  if (target.includes("taxCode")) {
+    if (taxCode) {
+      const chu = await prisma.customer.findFirst({ where: { taxCode } });
+      if (chu) throw httpError(409, `Mã số thuế đã thuộc khách hàng ${chu.code} — ${chu.name}`);
+    }
+    throw httpError(409, "Mã số thuế đã thuộc khách hàng khác");
+  }
+  if (target.includes("code")) throw httpError(409, "Mã khách hàng đã tồn tại");
+  throw e;
+}
+
 // Tải khách hàng + 403 nếu caller không được làm `action` (read|edit|delete) với nó.
 async function loadAuthorized(req: Request, action: Action) {
   const customer = await prisma.customer.findFirst({ where: { id: (req.params as any).id } });
@@ -68,7 +93,7 @@ export async function createCustomer(req: Request) {
   const customer = await prisma.customer.create({
     data,
     include: { owner: { select: { id: true, displayName: true } } },
-  });
+  }).catch((e) => nem409TuP2002(e, data.taxCode));
   await audit(req, "customer.create", { resource: "customer", resourceId: customer.id, after: customer });
   return customer;
 }
@@ -110,7 +135,8 @@ export async function updateCustomer(req: Request) {
   // không thì giữ giá trị cũ. Dùng `k in data` thay `?? before` để xóa-rỗng phản ánh đúng (không stale).
   const pick = (k: string) => (k in data ? data[k] : (before as any)[k]);
   data.searchText = normalizeSearch(pick("name"), pick("code"), pick("phone"), pick("email"), pick("taxCode"), pick("contactName"));
-  const customer = await prisma.customer.update({ where: { id: (req.params as any).id }, data });
+  const customer = await prisma.customer.update({ where: { id: (req.params as any).id }, data })
+    .catch((e) => nem409TuP2002(e, data.taxCode));
   await audit(req, "customer.update", { resource: "customer", resourceId: customer.id, before, after: customer });
   return customer;
 }

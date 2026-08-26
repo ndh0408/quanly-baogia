@@ -80,10 +80,19 @@ describe.runIf(dbAvailable)("/api/files: ba đường GHI phải đòi quyền f
     expect(res.status, JSON.stringify(res.body)).toBe(403);
   });
 
-  it("manager (có file:upload) vẫn ký được URL tải lên — không siết nhầm", async () => {
+  it("manager (có file:upload) KHÔNG bị cổng quyền chặn — không siết nhầm", async () => {
     const res = await A.manager.post("/api/files/sign-upload").send({ contentType: "image/png", size: PNG.length });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body.key).toMatch(new RegExp(`^uploads/u${U.manager.id}/`));
+
+    // Điều bài này chốt là CỔNG QUYỀN, nên nó phải đo đúng cổng quyền: 403 = chặn nhầm người có
+    // quyền. Khẳng định cứng `200` sẽ đo lẫn cả việc kho object có được cấu hình hay không —
+    // route trả 503 "Chưa cấu hình lưu trữ tệp" khi thiếu S3_*, và máy dev thường không có. CI thì
+    // có (job `test` dựng service MinIO), nên bài cũ xanh ở CI và đỏ ở máy dev vì một lý do KHÔNG
+    // liên quan tới thứ nó muốn kiểm.
+    expect(res.status, `cổng quyền chặn nhầm manager: ${JSON.stringify(res.body)}`).not.toBe(403);
+    expect([200, 503], JSON.stringify(res.body)).toContain(res.status);
+
+    // Chỉ khi kho object THẬT SỰ được cấu hình mới kiểm được hình dạng khoá.
+    if (res.status === 200) expect(res.body.key).toMatch(new RegExp(`^uploads/u${U.manager.id}/`));
   });
 
   it("mặc định vai trò: manager/admin CÓ file:upload, hr/accountant/account_hn KHÔNG", () => {

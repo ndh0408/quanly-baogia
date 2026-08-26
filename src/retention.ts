@@ -43,10 +43,37 @@ async function dropObject(key: string) {
   }
 }
 
+/**
+ * Trần SỐ HÀNG cho MỘT câu lệnh DELETE khi dọn bảng append-only.
+ *
+ * `deleteMany` không chia lô là MỘT câu lệnh xoá sạch phần quá hạn. Trên bảng đã tích tụ (AuditEvent
+ * giữ 2 năm) lượt prune ĐẦU TIÊN sau khi bật retention là hàng triệu hàng trong một transaction:
+ * khoá giữ suốt câu lệnh, WAL phình bằng đúng lượng xoá, và replica/backup phải nuốt trọn khối đó.
+ * Chia lô cho phép mỗi lệnh commit riêng — dừng giữa chừng cũng không phải làm lại từ đầu.
+ */
+const PRUNE_BATCH = 5_000;
+
+/**
+ * Xoá theo lô cho tới khi hết hàng quá hạn. `bang` CHỈ nhận hằng chuỗi trong chính file này
+ * (không có đầu vào người dùng) nên nội suy vào SQL là an toàn; mốc thời gian vẫn đi qua tham số.
+ * Lọc trong truy vấn con rồi xoá theo id: bám đúng index dẫn đầu `createdAt DESC` của ba bảng này.
+ */
+async function xoaTheoLo(bang: "AuditEvent" | "LoginAttempt" | "WebhookDelivery", cutoff: Date) {
+  let tong = 0;
+  for (;;) {
+    const n = await prisma.$executeRawUnsafe(
+      `DELETE FROM "${bang}" WHERE id IN (SELECT id FROM "${bang}" WHERE "createdAt" < $1 LIMIT ${PRUNE_BATCH})`,
+      cutoff,
+    );
+    tong += n;
+    if (n < PRUNE_BATCH) return tong;
+  }
+}
+
 export async function pruneOldRecords() {
-  const audit = await prisma.auditEvent.deleteMany({ where: { createdAt: { lt: days(AUDIT_DAYS) } } });
-  const login = await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: days(LOGIN_DAYS) } } });
-  const webhook = await prisma.webhookDelivery.deleteMany({ where: { createdAt: { lt: days(WEBHOOK_DAYS) } } });
+  const audit = { count: await xoaTheoLo("AuditEvent", days(AUDIT_DAYS)) };
+  const login = { count: await xoaTheoLo("LoginAttempt", days(LOGIN_DAYS)) };
+  const webhook = { count: await xoaTheoLo("WebhookDelivery", days(WEBHOOK_DAYS)) };
   // QuoteVersion: giữ VERSION_KEEP bản MỚI NHẤT mỗi quote, xoá bản cũ hơn (raw — keep-top-N theo partition).
   const ver = await prisma.$executeRawUnsafe(
     `DELETE FROM "QuoteVersion" WHERE id IN (

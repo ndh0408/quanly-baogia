@@ -120,9 +120,24 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                 {idxs.length > 0 && (
                   <div className="sheet-tabs extra-sheet-tabs">
                     {idxs.map((i) => (
-                      <div key={tables[i]._k ?? i} className={`sheet-tab ${i === active ? "active" : ""}`} title={label} onClick={() => { sheet._activeExtra = i; redraw(); }}>
+                      // BÀN PHÍM: một <div> trần không nhận được tiêu điểm, nên phím Tab đi thẳng
+                      // qua cả dải tab — người dùng bàn phím không đổi được sheet, cũng không xoá
+                      // được. Hai nơi vẽ đúng dải tab này (QuoteEditor, AccountHnView) đã sửa; đây
+                      // là chỗ cuối còn sót. Dùng lại y nguyên mẫu của QuoteEditor để quy ước khỏi
+                      // trôi tiếp: role + tabIndex + Enter/Space cho tab, còn nút xoá là <button>
+                      // thật (tự vào thứ tự Tab, tự nhận Enter/Space, có tên đọc lên được thay vì
+                      // mỗi dấu ✕ trần).
+                      <div key={tables[i]._k ?? i} role="button" tabIndex={0} aria-pressed={i === active}
+                        className={`sheet-tab ${i === active ? "active" : ""}`} title={label}
+                        onClick={() => { sheet._activeExtra = i; redraw(); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sheet._activeExtra = i; redraw(); } }}>
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
-                        {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); void removeTable(i); }}>✕</span>}
+                        {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
+                            handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
+                        {editable && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
+                          aria-label={`Xoá sheet nội bộ ${i + 1}`}
+                          onClick={(e) => { e.stopPropagation(); void removeTable(i); }}
+                          onKeyDown={(e) => e.stopPropagation()}>✕</button>}
                       </div>
                     ))}
                   </div>

@@ -108,7 +108,15 @@ router.post(
 
 router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
   const userId = req.session?.userId;
-  await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+  // `req.session` CÓ THỂ KHÔNG TỒN TẠI. Middleware phiên bị BỎ QUA cho request Bearer không kèm
+  // cookie (src/app.ts) — chính là để một client API không bị phát cookie phiên ngoài ý muốn.
+  // Gọi thẳng `req.session.destroy` ở đó là TypeError → 500, và tệ hơn: nó ném TRƯỚC
+  // `revokeAllForUser` bên dưới, tức đúng lớp client DUY NHẤT có refresh token lại là lớp không
+  // bao giờ thu hồi được token khi bấm đăng xuất. Bản vá "logout thu hồi refresh token" của đợt
+  // trước vì thế không chạy được với người mà nó nhắm tới.
+  if (typeof req.session?.destroy === "function") {
+    await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+  }
   res.clearCookie("qly.sid");
   if (userId) {
     // Refresh token sống ĐỘC LẬP với cookie phiên: huỷ phiên không đụng gì tới chúng, nên trước bản

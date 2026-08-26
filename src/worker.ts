@@ -2,6 +2,7 @@
 // Pulls jobs from BullMQ queues and executes them off the request thread.
 
 import type { Worker, Job } from "bullmq";
+import { UnrecoverableError } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
@@ -9,6 +10,7 @@ import { createWorker, getQueue, QUEUES, isQueueEnabled } from "./queue.js";
 import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
+import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS } from "./exportQueue.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
@@ -24,6 +26,58 @@ async function withExportMetric(format: string, fn: () => Promise<any>) {
   } catch (err) {
     exportJobsTotal.inc({ format, status: "error" });
     throw err;
+  }
+}
+
+/**
+ * Sinh file cho MỘT job xuất nền — qua luồng worker, CÓ TRẦN THỜI GIAN THẬT.
+ *
+ * ── VÌ SAO KHÔNG GỌI THẲNG buildQuoteBuffer/renderQuotePdf NỮA ───────────────
+ * Bản trước gọi thẳng, ngay trên vòng lặp sự kiện của tiến trình worker. Ba hệ quả đã kiểm lại
+ * bằng cách đọc mã, không suy đoán:
+ *
+ *   1) KHÔNG CÓ TRẦN THỜI GIAN NÀO. `buildQuoteBuffer` là hàm async thuần (không worker_threads,
+ *      không setTimeout), `putObject` không đặt requestTimeout, BullMQ v4+ bỏ hẳn job timeout, và
+ *      `workerOptionsFor` (src/queue.ts) chỉ đặt lockDuration/stalledInterval. Thế mà ân hạn dừng
+ *      90s ở infra/k8s/worker.yaml, infra/helm/quanly/values.yaml và hai file compose đều tự xưng
+ *      là neo vào "trần cứng 30s của generateInWorker" — trong khi src/worker.ts trước đây thậm
+ *      chí KHÔNG import exportQueue.js. Con số 90 neo vào hư không.
+ *
+ *   2) Hậu quả cụ thể: báo giá lớn (đường xuất không chặn số item, xem docs/REMAINING_RISKS.md)
+ *      dựng workbook mất vài phút → deploy gửi SIGTERM → `Worker.close()` chờ job → hết 90s →
+ *      SIGKILL. Khoá BullMQ giữ tới EXPORT_JOB_LOCK_MS (300s) mới trả job về hàng chờ. Bị cắt HAI
+ *      lần (deploy rồi rollback — chính deploy.sh hướng dẫn rollback bằng một lượt `up -d` nữa) là
+ *      chạm maxStalledCount mặc định = 1: BullMQ đánh hỏng VĨNH VIỄN. Người dùng bấm Xuất, chờ,
+ *      không bao giờ nhận file, cũng không có lỗi nào nói cho họ biết.
+ *
+ *   3) Nó CHẸN vòng lặp sự kiện của worker, nên timer gia hạn khoá của BullMQ không chạy được —
+ *      đúng thứ mà chú thích ở src/queue.ts phải nâng lockDuration lên 5 phút để bù. Đưa việc sinh
+ *      file sang luồng riêng là gỡ đúng gốc chứ không bù thêm nữa.
+ *
+ * ── TRẦN NÀY LÀ TRẦN THẬT ────────────────────────────────────────────────────
+ * `generateInWorker` hết hạn thì `w.terminate()` GIẾT luồng: công việc dừng hẳn, CPU và RAM được
+ * trả lại. Khác hẳn `Promise.race`, thứ chỉ bỏ mặc lời hứa còn workbook vẫn dựng tiếp.
+ *
+ * `choPhepNoiTuyen: false` là phần bắt buộc: mặc định `runExportJob` rơi về sinh file NỘI TUYẾN
+ * khi luồng lỗi, mà đường nội tuyến không có trần — giữ nó lại thì trần vừa đặt bị vô hiệu ngay ở
+ * lần quá hạn đầu tiên. Đường HTTP ĐỒNG BỘ (src/routes/export.routes.ts) KHÔNG đổi: nó vẫn dùng
+ * mặc định `true` và giữ nguyên đường rơi về nội tuyến như trước.
+ *
+ * Quá hạn ném `UnrecoverableError` để BullMQ hỏng NGAY, không thử lại: `attempts: 3` nghĩa là ba
+ * lượt nghiến CPU y hệt nhau cho cùng một kết quả quá hạn. Thà báo lỗi rõ cho người dùng đọc được
+ * ở GET /api/jobs/:queue/:id (`failedReason`) — thứ mà đường cũ không hề có.
+ */
+export async function sinhFileXuat(kind: "xlsx" | "pdf", quote: any, noiTuyen: () => any) {
+  try {
+    return await runExportJob(kind, JSON.parse(JSON.stringify(quote)), noiTuyen, { choPhepNoiTuyen: false });
+  } catch (e) {
+    if (isTimeoutError(e)) {
+      const giay = Math.round(EXPORT_GEN_TIMEOUT_MS / 1000);
+      throw new UnrecoverableError(
+        `Báo giá quá lớn: sinh file vượt trần ${giay}s. Nâng EXPORT_GEN_TIMEOUT_MS (và ân hạn dừng của worker) nếu đây là báo giá hợp lệ.`
+      );
+    }
+    throw e;
   }
 }
 
@@ -44,7 +98,7 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
-      const buf = await buildQuoteBuffer(quote);
+      const buf = await sinhFileXuat("xlsx", quote, () => buildQuoteBuffer(quote));
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
         await putObject({
@@ -76,13 +130,14 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
-      const buf: any = await renderQuotePdf({
+      const pdfQuote = {
         ...quote,
         subtotal: Number(quote.subtotal),
         vat: Number(quote.vat),
         total: Number(quote.total),
         vatPercent: Number(quote.vatPercent),
-      });
+      };
+      const buf: any = await sinhFileXuat("pdf", pdfQuote, () => renderQuotePdf(pdfQuote));
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.pdf`;
         await putObject({

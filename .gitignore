@@ -107,3 +107,8 @@ _bmad/
 _bmad-output/
 .qwen/
 ui-rc-shots/
+
+# Ảnh chụp Redis do redis-server sinh ra khi chạy test ở thư mục repo (redis-cli SAVE/BGSAVE).
+# Nó chứa dữ liệu phiên + job hàng đợi của lượt chạy — không phải mã nguồn, và không được lên Git.
+dump.rdb
+*.rdb

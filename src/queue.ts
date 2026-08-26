@@ -3,6 +3,7 @@ import type { Job, JobsOptions, Processor, WorkerOptions } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { bullQueueDepth } from "./observability.js";
 
 let connection: any = null;
 export function getRedis() {
@@ -82,6 +83,52 @@ export async function runOrQueue(queueName: string, jobName: string, data: any, 
     return null;
   }
   return handler({ data });
+}
+
+// ─── Đo độ sâu hàng đợi ─────────────────────────────────────────────────────
+//
+// Gọi ĐÚNG LÚC SCRAPE (từ handler /metrics) thay vì bằng `setInterval`. Hai lý do:
+//   • setInterval trong `createApp` sẽ chạy mãi trong MỌI tiến trình test gọi createApp() — rò
+//     handle và đập vào Redis dù chẳng ai đọc số liệu.
+//   • Số liệu lấy tại thời điểm scrape thì luôn tươi; interval chỉ thêm một lớp trễ.
+//
+// TIMEOUT LÀ BẮT BUỘC, KHÔNG PHẢI TRANG TRÍ. Kết nối của BullMQ đặt `maxRetriesPerRequest: null`
+// (dòng 12 — BullMQ yêu cầu thế), tức lệnh xếp hàng VÔ HẠN khi Redis chết. Không có `Promise.race`
+// ở đây thì Redis chết sẽ làm /metrics treo, và /metrics treo lâu hơn scrape_timeout của Prometheus
+// là mất luôn cả những số liệu KHÔNG dính Redis.
+const QUEUE_DEPTH_TIMEOUT_MS = Number(process.env.QUEUE_DEPTH_TIMEOUT_MS) || 2000;
+
+/**
+ * Cập nhật gauge `bullmq_jobs` cho mọi hàng đợi trong QUEUES.
+ * KHÔNG BAO GIỜ ném: /metrics phải trả được số liệu còn lại kể cả khi Redis hỏng.
+ * Trả về `false` khi không lấy được số (chưa có Redis, hoặc quá hạn) — dùng cho test/chẩn đoán.
+ */
+export async function capNhatDoSauHangDoi(): Promise<boolean> {
+  if (!isQueueEnabled()) return false;
+  const quaHan = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("getJobCounts quá hạn")), QUEUE_DEPTH_TIMEOUT_MS).unref?.()
+  );
+  try {
+    await Promise.race([
+      Promise.all(
+        Object.values(QUEUES).map(async (ten) => {
+          const q = getQueue(ten);
+          if (!q) return;
+          const counts: Record<string, number> = await q.getJobCounts();
+          for (const [state, n] of Object.entries(counts)) {
+            bullQueueDepth.set({ queue: ten, state }, Number(n) || 0);
+          }
+        })
+      ),
+      quaHan,
+    ]);
+    return true;
+  } catch (e) {
+    // Không đặt gauge về 0: "không đo được" KHÁC "hàng đợi rỗng", và một số 0 bịa ra sẽ làm cảnh báo
+    // im lặng đúng lúc Redis chết. Giá trị cũ ở lại, còn `up`/scrape error là tín hiệu thật.
+    logger.warn({ err: e instanceof Error ? e.message : String(e) }, "không đọc được độ sâu hàng đợi BullMQ");
+    return false;
+  }
 }
 
 // ─── Tuỳ chọn job THEO TỪNG HÀNG ĐỢI ────────────────────────────────────────

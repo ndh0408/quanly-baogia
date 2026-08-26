@@ -322,3 +322,214 @@ rủi ro đang chạy thật, không phải giả định.
   triển khai sau không còn hiện tượng đó. Chưa đo trên production (không có
   Docker/cluster trong môi trường phát triển) — mới chỉ chứng minh bằng test tích
   hợp `tests/authsess-session-absolute-ttl.test.js` chạy qua express-session thật.
+
+## Chứng từ thanh toán di sản — cần một lần chạy TRÊN PRODUCTION
+
+`PersonnelRecord.paymentProof` (base64 trong CSDL) đã được thay bằng kho object từ
+migration `20260811200000_payment_proof_object`, nhưng migration đó **chỉ thêm cột** —
+việc chuyển dữ liệu nằm ở script chạy tay `scripts/migration/payment-proof-migrate.mjs`.
+
+Đợt này đã vá phần **mã**: hai route ghi (`/api/quotes/:id/extra/:sheetId/:rid/pay`,
+`/api/personnel/:id/payment`) nay kiểm data-URL **toàn chuỗi** thay vì chỉ tiền tố, và
+`readProofDataUrl` (`src/paymentProof.ts`) trả `null` + ghi log cảnh báo nếu giá trị di
+sản không phải data-URL ảnh hợp lệ. Đo được bằng `tests/qua-proof-dataurl.test.js`.
+
+**Chưa kiểm chứng được ở đây:** có bao nhiêu hàng di sản còn lại trên production, và
+trong đó có hàng nào thực sự chứa chuỗi dị dạng hay không — môi trường phát triển
+không có dữ liệu thật. Bản vá là **hỏng-an-toàn** (ảnh dị dạng biến mất khỏi giao
+diện) chứ không sửa dữ liệu, nên nếu có hàng hợp lệ-nhưng-lạ (ví dụ base64 xuống dòng)
+thì người dùng sẽ thấy "chưa có ảnh chứng từ" thay vì ảnh.
+
+**Việc phải làm:**
+
+```sql
+-- 1) còn bao nhiêu hàng chưa chuyển
+SELECT count(*) FROM "PersonnelRecord" WHERE "paymentProof" IS NOT NULL;
+-- 2) trong đó bao nhiêu hàng KHÔNG khớp kiểm toàn chuỗi (sẽ bị trả null sau bản vá)
+SELECT id FROM "PersonnelRecord"
+ WHERE "paymentProof" IS NOT NULL
+   AND "paymentProof" !~* '^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$';
+```
+
+Chạy `scripts/migration/payment-proof-migrate.mjs`, xác minh truy vấn (1) trả về 0, rồi
+mới bỏ cột cũ ở một migration riêng.
+
+## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ngõ cụt cho người dùng
+
+`src/validators.ts:270` cho **60 trang** × `:194` **1000 dòng/trang** = tối đa
+**60.000 item** một báo giá. Đường xuất đồng bộ `src/routes/export.routes.ts:35-41`
+lại từ chối từ **20.000 item** (trả 413 ở `:67` và `:105`) với lời nhắn "vui lòng
+dùng xuất nền (async)". Nhưng **không client nào gọi đường nền**: `grep -rn
+"api/jobs\|/jobs" web/src` không ra kết quả nào — route `POST /api/quotes/:id/export`
+(`src/routes/jobs.routes.ts:17`) chỉ có thể gọi bằng tay, và nó còn trả 503 nếu
+thiếu Redis hoặc kho object. Người dùng lưu được báo giá rồi mới phát hiện không
+tải được, không có cảnh báo nào từ trước.
+
+**Trần 20.000 KHÔNG nên nâng.** Đo trên máy này (Node 22, `buildQuoteBuffer`,
+template `marico_decor`, 1000 dòng/trang):
+
+| Kích thước | Thời gian | File | RSS sau |
+|---|---|---|---|
+| 5.000 item | 2,6 s | 2,5 MB | 172 MB |
+| 20.000 item | 7,7 s | 10,1 MB | 270 MB |
+| 60.000 item | 20,8 s | 30,7 MB | 393 MB |
+
+20,8 giây chặn event loop cho một request là không chấp nhận được, nên chốt chặn
+hiện tại đúng — vấn đề nằm ở phía LƯU và phía giao diện, không phải ở phía xuất.
+
+**Chưa xảy ra trong thực tế:** tải trọng thật theo tài liệu là 50 trang × 200 dòng
+= 10.000 item, tức mới dùng một nửa headroom. Vì vậy đây là mục **UX/headroom**,
+không phải lỗi đang gây hại.
+
+**Việc phải làm (một trong hai, chưa làm ở đợt này vì nằm ngoài cụm excel/pdf):**
+đưa `MAX_EXPORT_SHEETS`/`MAX_EXPORT_ITEMS` vào `src/config.ts` cho cả hai phía đọc
+chung rồi cảnh báo ngay lúc lưu trong `src/services/quoteService.ts`; **hoặc** nối
+nút "Xuất Excel" ở `web/src` với `POST /api/jobs` khi gặp 413 (chỉ có ích nếu
+production đã bật Redis + kho object).
+
+## Logo khách hàng định dạng .webp vẫn KHÔNG hiện trong file Excel
+
+`src/validators.ts:132` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
+`data:image/webp`, còn `insertCustomerLogo` (`src/excel.ts`) chỉ nhúng được
+png/jpeg/gif. Đợt này **chỉ vá phần tệ nhất**: ô C3 nay được xoá trước khi hàm
+`return`, nên file gửi khách không còn in dòng hướng dẫn "logo cty khách hàng"
+(`tests/xp3-excel-cells.test.js`). **Logo vẫn biến mất**, chỉ là mất im lặng vào
+một ô trống thay vì thành chữ sai.
+
+Cố ý **không** gỡ `webp` khỏi validator: người dùng có thể đã lưu logo webp, và
+lưới hạng mục (`web/src/components/GridTable.tsx:89`) cũng nhận webp — siết
+validator sẽ làm **hỏng nút Lưu** của những báo giá đó, tệ hơn hẳn một logo thiếu.
+
+**Chưa kiểm chứng:** ExcelJS ghi content-type `image/webp` một cách máy móc
+(`node_modules/exceljs/.../content-types-xform.js:19`), nhưng chưa mở thử bằng
+Excel thật nên **không biết** bản Excel nào của khách đọc được. Vì thế không nhúng
+thẳng webp. **Việc nên làm:** tái mã hoá logo sang JPEG ngay ở client
+(`NewQuoteWizard.tsx`), đúng cách `GridTable.tsx` đang làm cho ảnh hạng mục.
+
+## Số liệu hàng đợi BullMQ: CHƯA có ai scrape ở production
+
+`/metrics` nay có gauge `bullmq_jobs{queue,state}` (đọc `getJobCounts()` của cả 5
+hàng đợi ngay tại thời điểm scrape — `src/queue.ts` `capNhatDoSauHangDoi`). Đã đo
+được qua Redis cục bộ trong `tests/hq3-bullmq-metrics.test.js`.
+
+**Chưa kiểm chứng ở production, và còn thiếu hai mảnh:**
+
+1. **Không có Prometheus nào đang chạy.** Production là docker-compose/Coolify;
+   trong repo không có deployment Prometheus/Grafana. Bộ số này hiện chỉ đọc được
+   bằng cách gọi tay `/metrics`. Cấu hình ServiceMonitor trong `infra/helm/` đã có
+   token nhưng chart đó chưa được dùng.
+2. **Tiến trình worker KHÔNG được scrape.** `src/worker.ts` không mở cổng HTTP nào,
+   nên `export_jobs_total` mà nó tăng (`worker.ts:22/:25`) ghi vào một registry
+   không ai đọc. Gauge `bullmq_jobs` không bị ảnh hưởng vì nó được đọc từ phía API,
+   nhưng mọi số liệu SINH RA TRONG worker thì vẫn vô hình. Muốn có: mở một server
+   `/metrics` riêng trong worker + thêm `ports:`/annotation `prometheus.io/*` vào
+   `infra/helm/quanly/templates/worker-deployment.yaml` (hiện thiếu cả hai, khác với
+   `app-deployment.yaml`).
+
+## Băm SHA-256 của tệp tải lên đã được LƯU, nhưng CHƯA có ai đối chiếu
+
+`UploadObject.sha256` (cột đã có sẵn trong schema từ lâu) nay được điền ở cả hai
+đường ghi trong `src/routes/files.routes.ts`: multipart băm buffer vừa nhận, và
+`/finalize` băm nội dung thật đọc từ kho object. Có test qua HTTP + MinIO thật
+(`tests/hq3-upload-sha256.test.js`).
+
+**Còn thiếu phía ĐỐI CHIẾU.** `src/tools/verifyIntegrity.ts` mới chỉ có `--pii` và
+`--proof`; chưa có chế độ duyệt `UploadObject` đã `finalized` để so lại hash như
+`paymentProofSha256` đang được so. Nghĩa là: từ nay có BẢN GHI để đối chiếu, nhưng
+diễn tập khôi phục (`scripts/backup/restore-drill.sh`) vẫn chưa kiểm tệp đính kèm.
+**Cố ý không làm ở đợt này** vì thêm một bước mới vào diễn tập hàng tuần mà không
+chạy thử được trên dữ liệu production là cách dễ nhất để biến một diễn tập đang
+xanh thành đỏ vì lý do sai. Hàng cũ (tải lên trước thay đổi này) có `sha256 = NULL`
+và phải được coi là "không đối chiếu được", không phải "sai hash".
+
+**Lưu ý về giá phải trả:** `/finalize` nay tải NGUYÊN nội dung object về (trước chỉ
+tải với .xlsx) để băm — thêm một lượt GET tối đa 10 MB mỗi tệp, đúng một lần trong
+đời tệp đó.
+
+## Ân hạn dừng worker = 90s là số CHỌN, không phải số ĐO (cụm ha-tang-trienkhai)
+
+`docker-compose.prod.yml` / `.staging.yml` nay khai `stop_grace_period: 90s` cho
+service `worker`, và `infra/k8s/worker.yaml` + `values.yaml` khai
+`terminationGracePeriodSeconds: 90`. Trước đó compose không khai gì — tức dùng
+**mặc định 10s của Docker**, nhỏ hơn cả trần cứng 30s của riêng bước sinh file
+trong một job xuất (`EXPORT_GEN_TIMEOUT_MS` ở `src/exportQueue.ts`, áp vào tiến trình worker qua
+`sinhFileXuat` trong `src/worker.ts`).
+
+**90 đến từ đâu:** 3× trần 30s đó, chừa chỗ cho tải lên kho object và ghi CSDL sau
+khi file đã dựng xong. Đó là suy luận từ hằng số có thật trong mã, **không phải
+phép đo**. Chưa ai bấm giờ một lượt `docker compose down` trên VM production để
+xem worker thật sự cần bao lâu mới đóng hết job.
+
+**Trần 30s đó trước đây KHÔNG áp cho worker — nay thì có.** Cho tới bản vá này
+`src/worker.ts` không hề import `exportQueue.js`: processor `QUEUES.EXPORT` gọi
+thẳng `buildQuoteBuffer`/`renderQuotePdf`, tức job xuất nền chạy **không có trần
+thời gian nào cả**, và con số 90 neo vào một cái trần không nằm trên đường thực
+thi của nó. Nay `sinhFileXuat` (src/worker.ts) đi qua
+`runExportJob(..., { choPhepNoiTuyen: false })`, nên bước sinh file chạy trong
+`worker_threads` và hết hạn là `terminate()` — **trần thật**, vì luồng bị giết chứ
+không phải lời hứa bị bỏ mặc. Quá hạn ném `UnrecoverableError` để BullMQ hỏng ngay
+với `failedReason` người dùng đọc được ở `GET /api/jobs/:queue/:id`, thay cho hành
+vi cũ: chờ mãi, bị SIGKILL, rồi chết vĩnh viễn vì `maxStalledCount`.
+
+**Vẫn còn là số CHỌN:** trần 30s (`EXPORT_GEN_TIMEOUT_MS`) chưa neo vào phân vị đo
+được của `export_jobs_total`/`exportDuration`. Báo giá lớn hơn mức đó nay **hỏng
+có thông báo** thay vì treo — tốt hơn, nhưng nếu p99 thật vượt 30s thì phải nâng
+biến môi trường đó **và** nâng ân hạn dừng theo cùng tỉ lệ.
+
+**Đã kiểm được tới đâu:** `docker compose config` (chạy phía client, không cần
+daemon) parse cả hai file và chuẩn hoá đúng `90s → 1m30s` trên đúng service
+`worker`; `kubeconform` xác nhận manifest hợp schema. Cả hai chỉ nói **khai báo
+đúng hình dạng**, không nói hành vi lúc dừng.
+
+**Việc phải làm:** một lần deploy có người canh, đo thời gian từ SIGTERM tới lúc
+tiến trình worker thoát khi đang có job xuất chạy. Nếu vượt 90s thì nâng số; nếu
+luôn dưới 20s thì hạ xuống cho lượt deploy nhanh lại. Ba chỗ phải đổi CÙNG NHAU —
+`tests/ht3-k8s-drain-and-grace.test.js` đỏ nếu chúng lệch nhau.
+
+**Đồng thời:** `infra/k8s/pdb.yaml` (PodDisruptionBudget) là file MỚI, **chưa từng
+chạy trên cụm k8s nào**. Nó mới chỉ qua `kubeconform` — đúng hình dạng schema, chứ
+không phải "đã thấy `kubectl drain` kết thúc". Đường triển khai thật vẫn là compose
+(`deploy.sh`), nên toàn bộ nhánh k8s/Helm ở đây là bản tham chiếu chưa được xác minh.
+
+## Khoá bộ đếm số báo giá giữ suốt transaction TẠO — CỐ Ý chưa vá (cụm csdl-truyvan)
+
+`nextQuoteNumber` (`src/quoteNumber.ts`) upsert-increment hàng `QuoteCounter(prefix, year)` và nó
+vẫn là LỆNH ĐẦU của transaction tạo báo giá (`src/services/quoteService.ts`, `createQuote` và
+đường nhân bản). Postgres giữ khoá hàng đó tới COMMIT, tức suốt cả phần chèn sheet + hạng mục +
+`snapshotQuoteVersion`. Hai người CÙNG công ty bấm "Tạo báo giá" chồng nhau thì người sau xếp hàng
+sau người trước — vấn đề THÔNG LƯỢNG, không phải lỗi đúng-sai, và với đội vài chục người thì hiếm.
+
+**Vì sao chưa vá.** Cách chữa gốc là tạo báo giá với số TẠM (`TMP-<uuid>`) rồi cấp số thật bằng
+một UPDATE ở cuối transaction. Đổi như vậy đụng ba thứ trên đường ghi nóng nhất của hệ thống:
+(1) thêm một lượt ghi Quote trong cùng transaction ⇒ extension realtime ở `src/db.ts` bắn HAI sự
+kiện SSE cho một lần tạo (né được bằng `$executeRaw`, nhưng rồi);
+(2) `$executeRaw` không cho ra `P2002` mà cho `P2010` kèm mã `23505` ⇒ vòng thử lại chống trùng số
+phải đổi cách nhận diện lỗi;
+(3) `searchText` chứa số báo giá nên phải cập nhật cùng lệnh đó.
+Đổi lấy một cải thiện thông lượng chưa từng có ai báo là đang đau.
+
+**Và chưa có phép đo nào không chập chờn.** Thứ duy nhất đo được là "hàng bộ đếm bị khoá bao lâu
+so với độ dài transaction", đo bằng cách bắn `SELECT … FOR UPDATE NOWAIT` liên tục từ một kết nối
+khác. Đó là bài test phụ thuộc thời gian — đúng loại làm CI đỏ ngẫu nhiên. Không viết một bài như
+thế chỉ để có cho đủ.
+
+**Phần ĐÃ vá trong đợt này** (có test đi kèm, `tests/db3-quote-manual-number-counter.test.js`):
+số báo giá NHẬP TAY nay đẩy bộ đếm lên theo (`syncQuoteCounter`), và vòng thử lại khi đụng số
+trùng nay THOÁT ra được — trước đó nó vô tác dụng vì lần tăng bộ đếm bị rollback cùng transaction
+hỏng, nên bốn lượt thử đều sinh lại đúng một số.
+
+## Truy vấn `existing` khi LƯU báo giá vẫn kéo toàn bộ hạng mục + ảnh (cụm csdl-truyvan)
+
+`updateQuote` (`src/services/quoteService.ts`) mở đầu bằng `findFirst({ include: QUOTE_INCLUDE })`,
+tức đọc mọi sheet, mọi hạng mục và cả cột `images` (base64) — trong khi phần lớn chỉ dùng vài
+trường phẳng. `tx.quote.update` bên trong transaction cũng `include: QUOTE_INCLUDE` để trả về client.
+
+**Chưa thu hẹp** vì `existing` được dùng rải rác (quyền sửa, khoá lạc quan, `hnStatus`, nhánh tính
+lại tổng từ `existing.sheets`, audit trước/sau, thông báo). Một `select` hẹp bỏ sót một trường sẽ
+thành `undefined` LẶNG LẼ ở production chứ không phải lỗi biên dịch — cái giá của việc sai lớn hơn
+nhiều so với phần đọc tiết kiệm được. Nếu làm thì phải làm kèm bài test đi qua đủ các nhánh dùng
+`existing`, không phải sửa một dòng.
+
+**Phần ĐÃ vá:** lần đọc thứ BA — `snapshotQuoteVersion` (`src/quoteVersion.ts`) — nay có `select`
+liệt kê đúng 13 trường payload dùng, nên không còn giải TOAST ảnh base64 bên trong transaction lưu.
+Đo được bằng `pg_statio_all_tables`: 612 block TOAST → 0 (`tests/db3-snapshot-no-images.test.js`).

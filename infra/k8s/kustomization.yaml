@@ -9,6 +9,8 @@ resources:
   - networkpolicy.yaml
   - app.yaml
   - worker.yaml
+  # PDB phải đứng SAU hai Deployment nó trỏ tới cho dễ đọc; kustomize không quan tâm thứ tự.
+  - pdb.yaml
   - ingress.yaml
   - backup-cronjob.yaml
   - backup-objects-cronjob.yaml

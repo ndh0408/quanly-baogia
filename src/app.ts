@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { logger } from "./logger.js";
 import { createLimiter } from "./rateLimit.js";
+import { capNhatDoSauHangDoi } from "./queue.js";
 import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
 import { registry, metricsMiddleware } from "./observability.js";
 import { prisma } from "./db.js";
@@ -372,6 +373,10 @@ export function createApp() {
     if (config.METRICS_TOKEN && !bearerTokenMatches(req.headers.authorization, config.METRICS_TOKEN)) {
       return res.status(401).end();
     }
+    // Độ sâu hàng đợi BullMQ được đọc NGAY TRƯỚC khi kết xuất, không bằng setInterval — xem khối
+    // chú thích ở src/queue.ts. Hàm này tự nuốt lỗi và có timeout, nên Redis chết KHÔNG làm
+    // /metrics treo hay hỏng: phần số liệu còn lại vẫn trả về bình thường.
+    await capNhatDoSauHangDoi();
     res.setHeader("Content-Type", registry.contentType);
     res.end(await registry.metrics());
   });

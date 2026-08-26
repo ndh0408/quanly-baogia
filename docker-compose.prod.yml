@@ -143,6 +143,15 @@ services:
     restart: unless-stopped
     # Cùng artifact đã biên dịch với app (Dockerfile build ra dist/). Không còn tsx lúc chạy.
     command: ["node", "dist/worker.js"]
+    # ÂN HẠN DỪNG. Không khai khoá này thì `docker compose down/up` cho worker đúng 10s mặc định
+    # của Docker rồi SIGKILL — NHỎ HƠN cả trần cứng 30s của riêng bước sinh file trong một job xuất
+    # (`EXPORT_GEN_TIMEOUT_MS` ở src/exportQueue.ts, có hiệu lực qua `sinhFileXuat` trong
+    # src/worker.ts → `runExportJob(..., { choPhepNoiTuyen: false })`). worker.ts bắt SIGTERM rồi `await Worker.close()`, tức
+    # chờ job đang chạy xong; bị cắt ngang thì BullMQ giữ khoá tới hết lockDuration (5 phút,
+    # src/queue.ts) mới cho chạy lại — người dùng thấy bản xuất đứng im suốt lượt deploy. Đây là
+    # đường ĐANG CHẠY THẬT (deploy.sh), nên nó quan trọng hơn hai đường k8s/Helm cùng sửa kèm.
+    # 90 khớp infra/k8s/worker.yaml và values.yaml. CHƯA đo trên VM thật — là mức chọn có căn cứ.
+    stop_grace_period: 90s
     # Worker nền (không HTTP) → tắt healthcheck HTTP kế thừa Dockerfile (luôn fail = unhealthy giả).
     healthcheck:
       disable: true

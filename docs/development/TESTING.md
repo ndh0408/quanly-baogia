@@ -11,8 +11,12 @@
      └──────────────────────────────────┘
 ```
 
-Chưa có E2E trình duyệt trong CI. `playwright` có trong devDependencies nhưng
-không bộ test nào dùng — xem mục "Chưa được kiểm" bên dưới.
+Chưa có E2E trình duyệt trong CI, và cũng KHÔNG còn công cụ E2E nào trong
+`devDependencies`: `playwright` đã bị gỡ vì không file nào trong repo dùng tới nó
+(không config, không spec, không bước CI) trong khi mỗi lượt `npm ci` vẫn tải về.
+Muốn thêm E2E thì cài lại kèm `playwright.config.*` và ít nhất một spec — chốt
+`tests/ch3-npm-manifest.test.js` sẽ đỏ nếu gói quay lại mà vẫn không ai dùng.
+Xem mục "Chưa được kiểm" bên dưới.
 
 ## Nhóm test
 

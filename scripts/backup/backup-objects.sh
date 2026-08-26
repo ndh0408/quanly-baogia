@@ -78,9 +78,27 @@ if ! mc mirror --quiet --overwrite "q/$BUCKET" /mirror; then
 fi
 
 echo "▶ [2/5] Đối chiếu số lượng object bucket ↔ bản gương"
-REMOTE_N="$(mc ls --recursive "q/$BUCKET" 2>/dev/null | grep -c . || echo 0)"
+# CỔNG NÀY TỪNG TỰ VÔ HIỆU. Bản cũ là:
+#     REMOTE_N="$(mc ls --recursive "q/$BUCKET" 2>/dev/null | grep -c . || echo 0)"
+# `grep -c .` khi không khớp dòng nào IN RA "0" RỒI THOÁT VỚI MÃ 1, nên `|| echo 0` chạy THÊM và
+# REMOTE_N thành chuỗi hai dòng "0\n0". `[ "$REMOTE_N" -gt 0 ]` gặp chuỗi đó thì in
+# "integer expression expected" và trả mã 2 — điều kiện SAI, nhánh cảnh báo không chạy, và script
+# (không có `set -e`) đi tiếp in "✓ backup object OK". Cộng thêm `2>/dev/null` nuốt lỗi của mc:
+# `mc ls` hỏng cũng rơi đúng vào tình huống ấy. Nghĩa là cổng kiểm tính đầy đủ của bản sao lưu
+# CHỨNG TỪ TÀI CHÍNH tắt đúng lúc cần nhất. (Đã đo lại trong tests/hq3-backup-object-count.test.js.)
+#
+# Sửa theo ba điểm: tách LIỆT KÊ khỏi ĐẾM để kiểm được mã thoát của mc; giữ stderr của mc để đưa vào
+# cảnh báo thay vì vứt đi; và đếm bằng awk — luôn in ra một số, kể cả khi danh sách rỗng hoặc thiếu
+# ký tự xuống dòng ở dòng cuối.
+REMOTE_LIST="$(mktemp)"
+if ! mc ls --recursive "q/$BUCKET" > "$REMOTE_LIST" 2>"$REMOTE_LIST.err"; then
+  alert "mc ls thất bại — KHÔNG đối chiếu được bản gương: $(head -c 300 "$REMOTE_LIST.err" | tr '\n' ' ')"
+  rm -f "$REMOTE_LIST" "$REMOTE_LIST.err"; exit 1
+fi
+REMOTE_N="$(awk 'NF{n++} END{print n+0}' "$REMOTE_LIST")"
+rm -f "$REMOTE_LIST" "$REMOTE_LIST.err"
 LOCAL_N="$(find "$MIRROR_DIR" -type f | wc -l)"
-if [ "$REMOTE_N" -gt 0 ] && [ "$LOCAL_N" -lt "$REMOTE_N" ]; then
+if [ "$LOCAL_N" -lt "$REMOTE_N" ]; then
   alert "bản gương THIẾU object: bucket có $REMOTE_N, gương chỉ có $LOCAL_N"; exit 1
 fi
 

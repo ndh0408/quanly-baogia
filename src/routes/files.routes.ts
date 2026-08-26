@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
@@ -172,6 +172,10 @@ router.post(
         ownerId: req.session.userId as number,
         expectedMime: sniffed.mime, expectedSize: req.file.size,
         actualMime: sniffed.mime, actualSize: req.file.size,
+        // Băm nội dung ngay lúc nhận. Cột này đã có sẵn trong schema từ lâu nhưng KHÔNG đường nào
+        // ghi vào — nên tệp đính kèm là thứ duy nhất trong hệ không kiểm chứng lại được sau khôi
+        // phục (đối lập với paymentProofSha256, thứ khiến verifyIntegrity đối chiếu được).
+        sha256: createHash("sha256").update(req.file.buffer).digest("hex"),
         status: "finalized", finalizedAt: new Date(),
         expiresAt: new Date(Date.now() + 3600_000),
       },
@@ -314,27 +318,55 @@ router.post(
     }
     if (head.size <= 0 || head.size > MAX_UPLOAD_BYTES) return reject(`kích thước ngoài giới hạn: ${head.size}`, 413, "Tệp quá lớn (tối đa 10MB)");
 
+    // TÁCH "LỖI HẠ TẦNG" KHỎI "NỘI DUNG XẤU" — `reject()` là KHÔNG HOÀN TÁC ĐƯỢC.
+    //
+    // `reject()` xoá object tạm và lật bản ghi sang `rejected`; người dùng phải tải lên lại từ đầu.
+    // Đó là phản ứng ĐÚNG cho nội dung sai (magic bytes lệch, kiểu lệch, xlsx hỏng) — nội dung đó
+    // sẽ không tự tốt lên.
+    //
+    // Nhưng `getObjectHeadBytes`/`getObjectBytes` (src/storage.ts) đều là `catch { return null }`:
+    // chúng trả `null` cho MỌI thứ — timeout mạng, MinIO trả 500, kho tạm bận. Gộp hai loại đó lại
+    // nghĩa là một nhịp trục trặc của kho object HUỶ VĨNH VIỄN tệp người dùng vừa tải lên xong,
+    // kèm thông điệp nói rằng nội dung của họ không hợp lệ. Đúng phần khó nhất (tải lên) đã xong
+    // rồi mới mất.
+    //
+    // Nay: đọc không được → 503, GIỮ NGUYÊN trạng thái `pending` để bấm lại là tiếp tục được.
     const magic = await getObjectHeadBytes(rec.stagingKey, 16);
-    const sniffed = magic ? sniffType(magic, head.contentType) : null;
+    if (!magic) {
+      return res.status(503).json({ error: "Kho lưu trữ đang bận, vui lòng bấm hoàn tất lại sau ít giây.", retryAfter: 5 });
+    }
+    const sniffed = sniffType(magic, head.contentType);
     if (!sniffed) return reject("magic bytes không khớp allowlist", 415, "Nội dung tệp không hợp lệ (chỉ PNG/JPG/WEBP/PDF/XLSX)");
     // Nội dung thật phải khớp KIỂU ĐÃ KÝ, không chỉ "nằm trong allowlist": ký image/png rồi đẩy PDF
     // lên là đã nói dối, dù PDF vốn được phép.
     if (sniffed.mime !== rec.expectedMime) {
       return reject(`kiểu lệch: ký ${rec.expectedMime}, nội dung là ${sniffed.mime}`, 415, "Nội dung tệp không khớp định dạng đã đăng ký.");
     }
+    // ĐỌC NGUYÊN NỘI DUNG MỘT LẦN, dùng cho cả hai việc bên dưới.
+    //
+    // Trước đây chỉ nhánh XLSX mới tải nội dung về. Nay mọi kiểu đều tải, để BĂM được — đó là cái
+    // giá phải trả: thêm một lượt GET tối đa 10MB (head.size đã bị chặn ở trên) cho mỗi lần finalize
+    // ảnh/PDF. Chấp nhận được vì finalize xảy ra đúng một lần cho mỗi tệp, và đổi lại tệp đính kèm
+    // mới có bản băm để đối chiếu về sau — thứ mà chứng từ thanh toán đã có còn tệp thì chưa.
+    const body = await getObjectBytes(rec.stagingKey, MAX_UPLOAD_BYTES);
+    // KHÔNG `reject()` ở đây — xem chú thích ở chỗ đọc magic bytes phía trên. Thông điệp cũ còn tự
+    // mâu thuẫn: nó bảo "vui lòng thử lại" trong khi vừa xoá mất thứ để thử lại.
+    if (!body) {
+      return res.status(503).json({ error: "Kho lưu trữ đang bận, vui lòng bấm hoàn tất lại sau ít giây.", retryAfter: 5 });
+    }
     // XLSX = tệp zip; magic bytes chỉ chứng minh "là zip". Kiểm cấu trúc thật (xem src/zipSafety.ts).
     if (sniffed.mime === XLSX_MIME) {
-      const body = await getObjectBytes(rec.stagingKey, MAX_UPLOAD_BYTES);
-      const verdict = body ? inspectXlsx(body) : { ok: false as const, reason: "không đọc được nội dung" };
+      const verdict = inspectXlsx(body);
       if (!verdict.ok) return reject(`xlsx không hợp lệ: ${verdict.reason}`, 415, `Tệp Excel không hợp lệ: ${verdict.reason}`);
     }
+    const bamNoiDung = createHash("sha256").update(body).digest("hex");
 
     // CHUYỂN TRẠNG THÁI NGUYÊN TỬ: chỉ request nào lật được pending → finalized mới thắng. Hai
     // request finalize đồng thời thì đúng một cái count===1, cái kia thấy 0 và đọc lại trạng thái.
     // Đặt TRƯỚC bước sao chép để hai request không cùng copy; kẻ thua không đụng gì tới kho lưu trữ.
     const claimed = await prisma.uploadObject.updateMany({
       where: { key, status: "pending" },
-      data: { status: "finalized", actualMime: sniffed.mime, actualSize: head.size, finalizedAt: new Date() },
+      data: { status: "finalized", actualMime: sniffed.mime, actualSize: head.size, sha256: bamNoiDung, finalizedAt: new Date() },
     });
     if (claimed.count !== 1) return res.status(409).json({ error: "Tệp vừa được xử lý bởi yêu cầu khác, vui lòng tải lại trang." });
 

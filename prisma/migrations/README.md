@@ -56,6 +56,12 @@ everything from `0_init` directly.
   SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE NOT i.indisvalid;
   ```
   Có tên nào trong ba index trên → `DROP INDEX` rồi tạo lại, đừng resolve.
+- `20260826120000_customer_taxcode_live_unique` — `Customer_taxCode_live_key`: UNIQUE **partial**
+  trên `("taxCode") WHERE "taxCode" IS NOT NULL AND "deletedAt" IS NULL`, thay cho
+  `Customer_taxCode_idx` (bị DROP trong cùng migration). ⚠️ **Đụng dữ liệu đang có**: migration mở
+  đầu bằng một khối `DO $$` dừng ngay và in ra các MST trùng nếu prod còn khách SỐNG trùng mã số
+  thuế — dọn trùng trước rồi chạy lại. Bản `CONCURRENTLY` cho prod đang tải ghi sẵn trong chính
+  file migration (kèm bước kiểm index INVALID trước khi `migrate resolve`).
 
 ### Drift ĐƯỢC PHÉP — danh sách ĐÍCH DANH, do NOT drop
 
@@ -75,7 +81,7 @@ báo drift đều là schema.prisma đang thiếu khai báo — **sửa schema.p
 | `Customer_name_trgm`, `Customer_taxCode_trgm`, `Customer_searchText_trgm_idx`, `Product_name_trgm`, `Product_sku_trgm`, `Quote_title_trgm`, `Quote_toCompany_trgm`, `Quote_quoteNumber_trgm`, `Quote_searchText_trgm_idx`, `PersonnelRecord_searchText_trgm_idx` | GIN trigram (`gin_trgm_ops`) | **CÓ** — "Removed index on columns (…)" | |
 | `Venue_tags_idx` | GIN trên mảng | **CÓ** | |
 | `_QuoteMembers` (PK + unique `(A, B)`) | bảng nối m2m **NGẦM** (Quote ↔ User) | **CÓ** — "Added primary key…" + "Removed unique index…" | Prisma tự quản bảng này, không có model để khai |
-| `Customer_taxCode_idx` | partial btree (`WHERE "taxCode" IS NOT NULL`) | không | ⚠️ **TẠM THỜI** — xem bên dưới |
+| `Customer_taxCode_live_key` | partial **UNIQUE** btree (`WHERE "taxCode" IS NOT NULL AND "deletedAt" IS NULL`) | không | Chống trùng MST; Prisma không khai được partial unique |
 | `Approval_pending_queue_idx` | partial btree (`WHERE "decision" = 'pending'`) | không | |
 | `Quote_createdAt_live_idx`, `Quote_createdById_createdAt_live_idx`, `Quote_projectCode_live_idx`, `Quote_quoteDate_live_idx`, `Quote_total_live_idx` | partial btree (`WHERE "deletedAt" IS NULL`) | không | |
 | Mọi ràng buộc `CHECK` (tiền ≥ 0, `kind` hợp lệ…) | CHECK | không | Prisma không có CHECK |
@@ -85,10 +91,9 @@ chứ không miễn trừ: migration 20260625000004 tạo cột với `DEFAULT A
 quên `@default([])`. Prisma khai được default cho scalar list (xem `User.permissions`), nên đó là
 drift THẬT — nay `prisma/schema.prisma` đã khai. Ghi lại ở đây để không ai "miễn trừ" nó lần nữa.
 
-⚠️ `Customer_taxCode_idx` nằm trong bảng này với nghĩa **"đừng drop lẻ"**, KHÔNG phải "bất khả
-xâm phạm". Mục Deferred bên dưới CỐ Ý thay nó bằng `Customer_taxCode_live_key`: khi làm mục đó thì
-tạo unique mới **rồi mới** drop cái này, trong CÙNG một migration, kèm bản vá `customerService.ts`.
-Đó là thao tác THAY THẾ có kế hoạch, không phải vi phạm luật ở trên.
+`Customer_taxCode_idx` (partial btree thường) ĐÃ BỊ THAY bởi `Customer_taxCode_live_key` trong
+migration `20260826120000` — đừng thêm lại. Mọi truy vấn tra theo MST đều kèm `deletedAt IS NULL`
+(extension soft-delete tự thêm) nên rơi đúng predicate của index unique mới.
 
 Cột "`migrate diff` có báo?" quan trọng vì trên Prisma 7.9.1 lệnh này **không nhìn thấy partial
 index** (đã kiểm: 7 partial btree ở trên có thật trong `pg_indexes` nhưng không xuất hiện trong đầu
@@ -117,24 +122,14 @@ sẽ báo "unknown or unexpected option". Dùng đúng hai cờ ở trên.
 
 ## Deferred (apply in a maintenance window, NOT auto-deployed)
 
-Ba phát hiện audit CỐ Ý chưa migrate ở đây vì chúng high-churn trên hệ đang chạy và mức
-khẩn thấp hơn — ghi lại để làm trong một cửa sổ bảo trì có kế hoạch:
+Hai phát hiện audit CỐ Ý chưa migrate ở đây vì chúng high-churn trên hệ đang chạy và mức
+khẩn thấp hơn — ghi lại để làm trong một cửa sổ bảo trì có kế hoạch. (Mục thứ ba,
+partial-unique cho `Customer.taxCode`, ĐÃ LÀM — xem migration `20260826120000`.)
 
 - **Partial-unique on soft-delete columns** (username/email/code/sku): would let a
   soft-deleted value be reused. Mitigated in code (dup-checks now return a clean 409
   "thuộc bản đã xoá" instead of a 500). Full fix needs dropping the global `@unique`
   + converting `findUnique`→`findFirst` + raw-SQL partial unique.
-- **Partial-unique on `Customer.taxCode`** (`CREATE UNIQUE INDEX CONCURRENTLY
-  "Customer_taxCode_live_key" ON "Customer"("taxCode") WHERE "taxCode" IS NOT NULL AND
-  "deletedAt" IS NULL;` + `DROP INDEX "Customer_taxCode_idx";`). `createCustomer`/`updateCustomer`
-  trong `src/services/customerService.ts` đang là check-then-write NGOÀI transaction ⇒ hai người
-  nhập cùng một MST trong cùng vài mili-giây tạo được hai hàng Customer. Chưa áp vì:
-  (1) phải dọn trùng trước — `SELECT "taxCode", count(*) FROM "Customer" WHERE "taxCode" IS NOT NULL
-  AND "deletedAt" IS NULL GROUP BY 1 HAVING count(*) > 1;` — nếu prod còn trùng thì migration
-  NGÃ và chặn deploy; (2) phải vá KÈM `customerService.ts`: bọc `prisma.customer.create`/`update`
-  bằng try/catch mã P2002 để trả 409 tiếng Việt như hiện nay, không thì đua thành 500.
-  Ràng buộc phải có `deletedAt IS NULL` mới khớp hành vi hiện tại (check ở service chạy qua
-  extension soft-delete nên KHÔNG thấy khách đã xoá mềm).
 - **Int→BigInt PK on QuoteItem/QuoteSheet**: overflow is decades away for this
   workload; the change is high-churn (BigInt isn't JSON-serializable). Better paired
   with switching the editor save from delete-all+recreate to diff-update.

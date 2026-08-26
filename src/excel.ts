@@ -162,6 +162,11 @@ function cellAnchor(ref: any) {
 const MAX_LOGO_BYTES = 6 * 1024 * 1024; // hard cap on decoded logo size (DoS guard)
 
 function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
+  // Người dùng ĐÃ chọn logo, nên chữ mồi trong mẫu ("logo cty khách hàng" ở C3) sai trong MỌI
+  // trường hợp — xoá TRƯỚC, không đợi nhúng thành công. Trước đây các nhánh `return` sớm bên dưới
+  // nhảy qua bước xoá, nên một logo .webp (validators.ts VẪN cho phép, ExcelJS thì không nhúng
+  // được) làm file gửi khách in nguyên dòng hướng dẫn dành cho người dựng mẫu.
+  try { ws.getCell(ref).value = null; } catch { /* ô ngoài vùng/đang merge — bỏ qua */ }
   const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
   if (!m) return;
   let extension = m[1].toLowerCase();
@@ -172,7 +177,6 @@ function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
   try {
     const buffer = Buffer.from(m[2], "base64");
     const imageId = ws.workbook.addImage({ buffer, extension });
-    try { ws.getCell(ref).value = null; } catch {}
     const a = cellAnchor(ref);
     ws.addImage(imageId, {
       tl: { col: a.col + 0.05, row: a.row + 0.05 },
@@ -972,7 +976,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         st.font = { ...ff, bold: !!bold };
         st.alignment = { horizontal: align || "center", vertical: "middle" };
         cell.style = st;
-        cell.value = value;
+        // Cùng bộ lọc với `setCell`: khối này nhận quote.fromContact/fromTitle/fromPhone — chữ
+        // người dùng gõ tự do. Không phải chống Excel tự chạy công thức (ô chuỗi trong .xlsx thì
+        // Excel hiển thị nguyên văn), mà để MỌI đường ghi ô chữ ra file khách đi qua một luật:
+        // chuỗi mở đầu bằng = + - @ khi được lưu-lại-thành-CSV hoặc dán sang Sheets mới thành lệnh.
+        cell.value = neutralizeFormula(value);
       };
       // Lời chào ("Rất mong…" / "Trân trọng…") canh GIỮA trong cột trái (B:F) → cân đối.
       if (f.left) {

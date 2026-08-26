@@ -106,12 +106,24 @@ jobs:
       - name: Format check (json/css/yaml — khớp lint-staged)
         run: npx prettier --check "**/*.{json,css,yml,yaml}"
 
-      # Gác MA TRẬN PHÂN QUYỀN: sinh danh sách endpoint từ mã nguồn rồi đối chiếu con số công bố
-      # trong docs/product/ROLES_PERMISSIONS.md. Thêm route mà quên soát quyền là đỏ pipeline ngay.
-      # Có lý do cụ thể: README từng ghi 141 endpoint, ma trận ghi 133, con số thật là 138 — cả hai
-      # đều đếm tay nên cả hai đều trôi.
-      - name: Endpoint inventory khớp ma trận phân quyền
-        run: node scripts/ci/endpoint-inventory.mjs --check
+      # HAI phép kiểm KHÁC NHAU, đừng gộp làm một trong đầu:
+      #   --check        so TỪNG DÒNG: mỗi endpoint trong mã phải có một dòng trong bảng ma trận của
+      #                  docs/product/ROLES_PERMISSIONS.md, và ngược lại không dòng chết. Cộng thêm
+      #                  so con số công bố ở ROLES_PERMISSIONS.md và README.md (README từng ghi 141,
+      #                  ma trận ghi 133, mã có 138 — cả ba đếm tay nên cả ba trôi).
+      #                  ĐÂY là phép kiểm chặn được "thêm route không ai soát rồi nhớ +1 con số":
+      #                  muốn xanh phải VIẾT một dòng ma trận, tức phải điền cột QUYỀN/P.VI/T.NGUYÊN.
+      #   --check-guards đỏ khi một endpoint không có middleware gác nào (cấp route lẫn cấp router),
+      #                  trừ danh sách miễn trừ tường minh trong script. ĐÃ ĐO: 84/137 endpoint chỉ
+      #                  dựa vào `router.use(requireAuth)` cấp router nên nằm NGOÀI tầm phép kiểm này
+      #                  — nó chỉ thật sự gác 4 file không có guard cấp router (app.ts, auth, jobs,
+      #                  stream). Giữ vì vẫn có giá trị ở 4 file đó, nhưng đừng tính nó là phần bù.
+      # Cả hai cộng lại vẫn KHÔNG khẳng định được quyền gác là ĐÚNG — chỉ khẳng định có gác và có
+      # trong bảng. Nhãn cũ ("quên soát quyền là đỏ ngay") hứa nhiều hơn thế; đừng đặt lại như vậy.
+      - name: Endpoint inventory — khớp từng dòng ma trận + không endpoint nào trống guard
+        run: |
+          node scripts/ci/endpoint-inventory.mjs --check
+          node scripts/ci/endpoint-inventory.mjs --check-guards
 
       # Gác SỐ LIỆU README. README từng ghi "29 Prisma models" ở dòng tóm tắt và
       # "Prisma 7 (28 models)" trong bảng Stack ngay bên dưới — hai con số mâu thuẫn trong
@@ -233,7 +245,7 @@ jobs:
             infra/k8s/app.yaml infra/k8s/worker.yaml infra/k8s/redis.yaml \
             infra/k8s/postgres.yaml infra/k8s/configmap.yaml infra/k8s/ingress.yaml \
             infra/k8s/networkpolicy.yaml infra/k8s/namespace.yaml infra/k8s/backup-cronjob.yaml \
-            infra/k8s/backup-objects-cronjob.yaml
+            infra/k8s/backup-objects-cronjob.yaml infra/k8s/pdb.yaml
 
   security:
     name: Security scan
