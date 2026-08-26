@@ -172,8 +172,15 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     }).catch(() => {});
   }
   if (res.headersSent) return;
+  // Retry-After cho 429/503: nói cho client BAO LÂU thì thử lại. Không có header này thì client
+  // (và mọi proxy ở giữa) chỉ biết thử lại ngay lập tức, đúng lúc hệ thống đang quá tải — biến
+  // một đợt bận thoáng qua thành bão retry tự duy trì.
+  if (err.retryAfter && (status === 429 || status === 503)) {
+    res.setHeader("Retry-After", String(err.retryAfter));
+  }
   res.status(status).json({
     error: exposed ? err.message : "Lỗi server",
+    ...(err.code ? { code: err.code } : {}),
     reqId: req.id,
   });
 }

@@ -1,18 +1,85 @@
-// Excel/PDF generation is CPU-bound. The PRIMARY path now runs it in a worker
-// thread (runExportJob) so it never blocks the main event loop. This inline
-// serializer is the FALLBACK (used when no worker / worker fails): it runs one at
-// a time so a burst can't pile up several multi-MB buffers + CPU blocks at once,
-// with a depth cap that degrades to 429 instead of timing out.
+// Excel/PDF generation is CPU-bound. The PRIMARY path runs it in a worker thread
+// (runExportJob) so it never blocks the main event loop. This inline serializer is
+// the FALLBACK (used when no worker / worker fails): it runs one at a time so a
+// burst can't pile up several multi-MB buffers + CPU blocks at once, with a depth
+// cap that degrades to 429 instead of timing out.
 import { Worker } from "node:worker_threads";
 import { logger } from "./logger.js";
+import { exportActiveWorkers, exportQueueDepth, exportRejectedTotal, exportDuration } from "./observability.js";
 
+// ─── Cổng giới hạn đồng thời, CÓ TRẦN HÀNG ĐỢI ──────────────────────────────
+//
+// Bản trước dùng một mảng resolver KHÔNG GIỚI HẠN sau `MAX_WORKERS = 3`. Hai vấn đề thật:
+//
+//   1) Không có tín hiệu ngược. Request thứ 4 trở đi chỉ nằm chờ, mỗi cái ôm nguyên payload báo
+//      giá trong bộ nhớ (báo giá 50 trang × 500 dòng ≈ 4MB JSON). Người dùng không nhận được
+//      "hệ thống đang bận" — họ thấy treo cho tới khi proxy bỏ cuộc, còn tiến trình phình tới OOM.
+//      Bộ giới hạn tần suất ở route (30/phút) không cứu được: nó tính THEO IP, mà nhiều người dùng
+//      là nhiều IP.
+//
+//   2) Chen ngang làm VƯỢT trần. Cách trả chỗ cũ giảm biến đếm rồi mới đánh thức người chờ bằng
+//      microtask; ai xin chỗ ĐỒNG BỘ trong khe đó sẽ thấy còn chỗ và chiếm luôn, xong người chờ
+//      CŨNG tăng biến đếm → hai việc nặng CPU chạy cùng lúc dù trần là một.
+//      Nói đúng mức độ (đã đo, xem tests/exportQueue.test.js): khe này KHÔNG với tới được từ hai
+//      request HTTP khác nhau, vì microtask luôn chạy hết trước macrotask kế tiếp. Nó chỉ với tới
+//      được khi hai lượt xuất cùng bắt đầu trong MỘT khối đồng bộ (vd xuất hàng loạt bằng
+//      Promise.all). Là lỗi TIỀM ẨN chứ chưa phải sự cố đang xảy ra — vẫn sửa, vì tính đúng đắn
+//      của một cái trần không nên phụ thuộc vào việc chỗ gọi tình cờ viết thế nào.
+//
+// Chốt chặn ở đây: khi trả chỗ mà ĐANG CÓ người xếp hàng thì CHUYỂN THẲNG chỗ cho họ, KHÔNG hạ
+// biến đếm — nên không tồn tại khe nào để chen. Và request mới chỉ được đi thẳng khi hàng đợi
+// RỖNG, nên thứ tự là FIFO và người xếp hàng không bị bỏ đói.
+export type ConcurrencyGate = {
+  acquire: () => Promise<void>;
+  release: () => void;
+  active: () => number;
+  pending: () => number;
+};
+
+export function createConcurrencyGate({ maxActive, maxPending }: { maxActive: number; maxPending: number }): ConcurrencyGate {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+
+  return {
+    acquire() {
+      // Chỉ đi thẳng khi CÒN chỗ VÀ KHÔNG ai đang xếp hàng (giữ FIFO).
+      if (active < maxActive && waiters.length === 0) {
+        active++;
+        return Promise.resolve();
+      }
+      if (waiters.length >= maxPending) {
+        // 503 + Retry-After: đây là "máy chủ hết công suất", không phải "bạn gửi quá nhiều" (429).
+        // Trả lỗi NGAY tốt hơn nhiều so với để client treo rồi timeout ở tầng proxy.
+        return Promise.reject(
+          Object.assign(new Error("Hệ thống đang xuất file quá tải, vui lòng thử lại sau ít phút"), {
+            status: 503,
+            retryAfter: 30,
+            code: "export_capacity",
+          })
+        );
+      }
+      return new Promise<void>((resolve) => waiters.push(resolve));
+    },
+    release() {
+      const next = waiters.shift();
+      // CHUYỂN CHỖ trực tiếp: `active` không hạ xuống, nên không có khe cho request mới chen vào.
+      if (next) return next();
+      active--;
+    },
+    active: () => active,
+    pending: () => waiters.length,
+  };
+}
+
+// ─── Fallback nội tuyến (chạy tuần tự trên luồng chính) ─────────────────────
 let chain = Promise.resolve();
 let pending = 0;
 const MAX_PENDING = 8;
 
 export async function runExport(fn: () => any) {
   if (pending >= MAX_PENDING) {
-    throw Object.assign(new Error("Hệ thống đang bận xuất file, vui lòng thử lại sau"), { status: 429 });
+    exportRejectedTotal.inc({ reason: "inline_queue_full" });
+    throw Object.assign(new Error("Hệ thống đang bận xuất file, vui lòng thử lại sau"), { status: 429, retryAfter: 30 });
   }
   pending++;
   // Run after the previous job settles (success OR failure — never block the chain).
@@ -27,14 +94,13 @@ export async function runExport(fn: () => any) {
 
 // ─── Worker-thread generation (keeps the event loop free) ───────────────────
 const WORKER_URL = new URL("./exportWorker.js", import.meta.url);
-const MAX_WORKERS = 3;            // bound concurrent workers (memory + CPU on shared box)
-let activeWorkers = 0;
-const workerWaiters: Array<() => void> = [];
-function acquireWorkerSlot() {
-  if (activeWorkers < MAX_WORKERS) { activeWorkers++; return Promise.resolve(); }
-  return new Promise<void>((res) => workerWaiters.push(res)).then(() => { activeWorkers++; });
-}
-function releaseWorkerSlot() { activeWorkers--; const w = workerWaiters.shift(); if (w) w(); }
+// Bound concurrent workers (memory + CPU on a shared box) AND the queue behind them.
+const MAX_WORKERS = Math.max(1, Number(process.env.EXPORT_MAX_ACTIVE || 3));
+const MAX_QUEUED = Math.max(0, Number(process.env.EXPORT_MAX_PENDING || 20));
+const gate = createConcurrencyGate({ maxActive: MAX_WORKERS, maxPending: MAX_QUEUED });
+
+/** Ai đó vượt trần hàng đợi (503) — KHÔNG được nuốt rồi rơi về nội tuyến. */
+const isCapacityError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_capacity";
 
 function generateInWorker(kind: string, quote: any, timeoutMs = 30_000) {
   return new Promise<any>((resolve, reject) => {
@@ -59,17 +125,39 @@ const looksValid = (kind: string, buf: any) =>
  * error, timeout, invalid output) it falls back to inline generation via
  * `inlineFn`, so exports never break — the worker is a perf optimization, not a
  * correctness dependency.
+ *
+ * NGOẠI LỆ DUY NHẤT: hết công suất (503). Cái đó phải ném RA NGOÀI cho người gọi.
+ * Nếu nuốt rồi rơi về nội tuyến thì trần hàng đợi thành vô nghĩa — đúng lúc hệ thống quá tải
+ * lại dồn thêm việc nặng CPU vào luồng chính.
  */
 export async function runExportJob(kind: string, plainQuote: any, inlineFn: () => any) {
+  // Xin chỗ NGOÀI try: lỗi hết công suất không được rơi vào nhánh "thử lại nội tuyến" bên dưới.
+  await gate.acquire();
+  exportActiveWorkers.set(gate.active());
+  exportQueueDepth.set(gate.pending());
+  const startedAt = process.hrtime.bigint();
   try {
-    await acquireWorkerSlot();
     let buf;
-    try { buf = await generateInWorker(kind, plainQuote); }
-    finally { releaseWorkerSlot(); }
-    if (looksValid(kind, buf)) return buf;
+    try {
+      buf = await generateInWorker(kind, plainQuote);
+    } finally {
+      gate.release();
+      exportActiveWorkers.set(gate.active());
+      exportQueueDepth.set(gate.pending());
+    }
+    if (looksValid(kind, buf)) {
+      exportDuration.observe({ format: kind, path: "worker" }, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      return buf;
+    }
     logger.warn({ kind }, "export worker returned invalid buffer — falling back to inline");
   } catch (e) {
+    if (isCapacityError(e)) throw e;
     logger.warn({ kind, err: e instanceof Error ? e.message : String(e) }, "export worker failed — falling back to inline");
   }
-  return runExport(inlineFn);
+  const out = await runExport(inlineFn);
+  exportDuration.observe({ format: kind, path: "inline" }, Number(process.hrtime.bigint() - startedAt) / 1e9);
+  return out;
 }
+
+/** Trạng thái cổng xuất file — dùng cho /readyz mở rộng và cho test. */
+export const exportGateStats = () => ({ active: gate.active(), pending: gate.pending(), maxActive: MAX_WORKERS, maxPending: MAX_QUEUED });

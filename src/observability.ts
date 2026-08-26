@@ -81,6 +81,33 @@ export const sseClients = new Gauge({
   registers: [registry],
 });
 
+// === Cổng xuất file (Excel/PDF) ===
+// Không có mấy số này thì quá tải xuất file là một hộp đen: người dùng báo "chậm", còn hệ thống
+// không nói được là đang bận bao nhiêu, xếp hàng bao sâu, hay đã từ chối bao nhiêu lượt.
+export const exportActiveWorkers = new Gauge({
+  name: "export_active_workers",
+  help: "Số worker thread đang sinh file xuất",
+  registers: [registry],
+});
+export const exportQueueDepth = new Gauge({
+  name: "export_queue_depth",
+  help: "Số yêu cầu xuất file đang xếp hàng chờ tới lượt",
+  registers: [registry],
+});
+export const exportRejectedTotal = new Counter({
+  name: "export_rejected_total",
+  help: "Số lượt xuất file bị từ chối vì hết công suất",
+  labelNames: ["reason"],
+  registers: [registry],
+});
+export const exportDuration = new Histogram({
+  name: "export_duration_seconds",
+  help: "Thời gian sinh file xuất, tách theo đường worker/nội tuyến",
+  labelNames: ["format", "path"],
+  buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+  registers: [registry],
+});
+
 /**
  * Express middleware that records request latency. Mount AFTER routing so that
  * req.route is populated; for routes that don't match any handler we tag as "unknown".
