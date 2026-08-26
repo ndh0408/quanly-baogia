@@ -1,3 +1,13 @@
+> ## ⚠️ TÀI LIỆU LỊCH SỬ — ĐÃ LƯU TRỮ
+>
+> Giữ lại vì nó ghi lại VÌ SAO hệ thống thành ra như hiện nay, không phải để mô tả hiện trạng.
+> **Nhiều phát hiện trong đây ĐÃ ĐƯỢC SỬA.** Đừng mở một issue hay viết một bản vá dựa trên tài
+> liệu này mà chưa đối chiếu với mã nguồn đang chạy.
+>
+> **Nguồn sự thật là MÃ NGUỒN.** Tài liệu đang hiệu lực nằm ở [docs/README.md](../../README.md).
+
+---
+
 # Rà soát bảo mật + UI/UX — 2026-08-11
 
 Nhánh: `feat/venue-suggest` · Phạm vi: toàn bộ backend (`src/`, **138 endpoint** — sinh tự động, xem `scripts/endpoint-inventory.mjs`), frontend React (`web/src/`), CI, phụ thuộc.
@@ -324,7 +334,7 @@ và `logoPath`. **Vá**: gác `quote:create` + projection tối thiểu.
 
 ### INV-001 · P2 — số endpoint công bố sai ở cả hai nơi
 
-README ghi **141**, `AUTHZ_MATRIX.md` ghi **133**, con số thật là **138** (129 trong router + 9 khai
+README ghi **141**, `docs/product/ROLES_PERMISSIONS.md` ghi **133**, con số thật là **138** (129 trong router + 9 khai
 báo thẳng trên `app`). Cả hai đều đếm tay nên cả hai đều trôi; ma trận bỏ sót 5 route phục vụ SPA.
 
 **Vá**: `scripts/endpoint-inventory.mjs` sinh danh sách từ mã nguồn; CI chạy `--check` → thêm/xoá
@@ -442,7 +452,7 @@ là rủi ro không cần thiết. Ghi nợ, làm cùng lúc port nốt `#/new` 
 ## 5. Ma trận phân quyền (tóm tắt)
 
 > **Bảng đầy đủ 133 endpoint** — kèm cột phạm vi / kiểm tài nguyên / kiểm trạng thái / mức nhạy cảm /
-> test / trạng thái vá — nằm ở **[AUTHZ_MATRIX.md](AUTHZ_MATRIX.md)**.
+> test / trạng thái vá — nằm ở **[docs/product/ROLES_PERMISSIONS.md](../../product/ROLES_PERMISSIONS.md)**.
 > Kết quả: **0 endpoint `UNKNOWN`** · 107 `OK` · **26 `VÁ`** · 0 `NỢ`.
 
 **133 endpoint** (129 trong router + `/metrics`, `/livez`, `/readyz`, `/api/health`).

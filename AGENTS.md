@@ -1,91 +1,103 @@
-# QuanLY — Hướng dẫn cho Codex
+# QuanLY — hướng dẫn kỹ thuật (canonical)
 
-Hệ quản lý nội bộ đã chạy production tại `gianguyen.cloud`. Brownfield, một lập trình viên.
-Node + TypeScript + Prisma + Postgres + Redis, deploy Docker qua Coolify.
-SPA cũ (`public/js`, ES module thuần) đang được port dần sang React (`web/src`).
+Đây là **nguồn duy nhất** cho quy ước làm việc trên repo này. Mọi trợ lý AI và
+mọi lập trình viên đọc file này. `CLAUDE.md` chỉ chứa phần riêng của công cụ
+Claude Code và trỏ ngược về đây.
 
-Trả lời bằng **tiếng Việt**.
+**Trả lời bằng tiếng Việt.**
 
----
+## Hệ thống này là gì
 
-## BMAD (đã cài — 89 skill)
+Hệ quản lý nội bộ **đang chạy production** tại `gianguyen.cloud`: báo giá, hồ sơ
+nhân sự, theo dõi dự án cho hai công ty (Gia Nguyễn + Colorfull). Brownfield, một
+lập trình viên. Node 22 + TypeScript + Express + Prisma + Postgres + Redis, deploy
+Docker qua Coolify. SPA cũ (`public/js`, ES module thuần) đang được port dần sang
+React (`web/src`); **cả hai còn chạy**.
 
-BMAD v6 cài trong repo này ngày 2026-07-28. Skill nằm ở `.Codex/skills/bmad-*` và `wds-*`,
-config ở `_bmad/`, sản phẩm sinh ra ghi vào `_bmad-output/`.
+Đây là dữ liệu thật của một doanh nghiệp thật. Mọi thay đổi phải giả định là có
+người đang dùng ngay lúc này.
 
-Module đã cài: `core` · `bmm` · `cis` · `tea` · `wds` · `bmb` · `bmad-loop` (**không** cài `gds`).
+## Đọc trước khi sửa
 
-Không biết bắt đầu từ đâu → gọi skill `bmad-help`, nó tự dò trạng thái rồi gợi bước kế.
+| Việc | Đọc |
+|---|---|
+| Hiểu hệ thống | [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) |
+| Đụng vào auth/quyền | [docs/architecture/SECURITY_MODEL.md](docs/architecture/SECURITY_MODEL.md) |
+| Dựng môi trường | [docs/development/SETUP.md](docs/development/SETUP.md) |
+| Viết test | [docs/development/TESTING.md](docs/development/TESTING.md) |
+| Deploy | [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md) |
 
-### ⛔ Ba thứ TUYỆT ĐỐI không chạy
+## Quy ước bất di bất dịch
 
-1. **`bmad-bmb-setup`** — nó gọi `cleanup-legacy.py --also-remove _config`, mà
-   `cleanup-legacy.py:183` là `shutil.rmtree(target)`. SKILL.md dòng 70 ghi rõ thư mục
-   không chứa skill (như `_config/`) bị **xoá thẳng, bỏ qua lớp kiểm tra an toàn**.
-   `_bmad/_config/` đang giữ toàn bộ manifest của bản cài 89 skill
-   (`files-manifest.csv`, `skill-manifest.csv`, `bmad-help.csv`, `manifest.yaml`).
-   Mất thư mục này là `bmad-help` mù. Các skill bmb khác (`bmad-workflow-builder`,
-   `bmad-eval-runner`) thì vô hại.
+- **Đừng đề xuất multi-tenancy/RLS.** Hai công ty dùng chung nhân viên và chung
+  dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
+- **`projectCode` CỐ Ý free-format** theo từng người — đừng chuẩn hoá, đừng thêm FK.
+- **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị **bỏ qua âm thầm**,
+  làm lọt thông báo tiếng Anh ra giao diện. Dùng tham số `error`.
+- **Tiền dùng `Decimal`**, không dùng float JS. Đổi sang `Number` là mất chính xác.
+- **Sửa `public/js` thì PHẢI bump `?v=`** ở mọi file import nó **và** trong
+  `public/index.html`. Không bump = người dùng chạy bản cache cũ.
+- **Prettier KHÔNG đụng `.ts/.tsx/.js`** (xem `lint-staged.config.mjs`). House
+  style dùng one-liner có chủ đích; để prettier bung dòng là diff khổng lồ và
+  conflict với nhánh song song. Chỉ format `{json,css,yml,yaml}`.
+- Test tích hợp không chạy được trên máy Windows của tác giả — dùng
+  `bash test-on-dev.sh` (chạy trên VM dev).
 
-2. **`bmad-loop-*`** (3 skill) — cần `tmux`, máy Windows không có; backend `psmux` được
-   chính README ghi là *experimental, native Windows is not yet shipped*. Còn cần
-   `sprint-status.yaml` mà repo không có. `bmad-loop-setup` sẽ đăng ký hook
-   `Stop`/`SessionStart`/`SessionEnd`/`PreCompact` vào `.Codex/settings.json` — đừng chạy.
+## TUYỆT ĐỐI không phá
 
-3. **Agent WDS** (`wds-agent-saga-analyst`, `wds-agent-freya-ux`, `wds-agent-mimir-builder`)
-   — có tool `sync` tự động ghi 6 slash command (`/saga` `/freya` `/mimir` `/start`
-   `/wrap` `/handoff`) vào `~/.Codex/commands/`, tức **ra ngoài repo, ảnh hưởng mọi
-   project khác trên máy**. Tính đến 2026-07-28 thư mục đó chưa tồn tại. Hỏi trước khi kích hoạt.
+Đây là hành vi production đã được người dùng dựa vào. Sửa mà không có test hồi
+quy là làm hỏng công việc của người khác.
 
-### Bẫy cấu hình đã vá — đừng vá lại
+- Engine lưới báo giá: **clipboard** (copy/cut/paste bằng sự kiện trình duyệt,
+  KHÔNG bắt phím), **phân tích RFC-4180**, **IME tiếng Việt** (Enter để chốt từ
+  trong OpenKey/Unikey không được nhảy ô), **Ctrl+Z/Y**, chọn nhiều ô, fill-down.
+- **Round-trip Excel**: dán lại bảng do chính app xuất ra phải dựng lại đúng cấp
+  nhóm / nhóm con / dòng con / dòng thông tin.
+- **Mẫu Excel**: xuất ra phải là **file của công ty** — logo, phông, viền, ô gộp,
+  vùng in. Đó là lý do `src/xlsxStitcher.ts` ghép XML thay vì sinh workbook mới.
+- **Công thức**: `=5x3`, `=SUM(H3:H8)`, tham chiếu ô, `$` tuyệt đối.
+- **Bảng nội bộ** (chi phí HCM / báo giá HN / phí khách) **không được** lọt vào
+  file Excel gửi khách.
 
-- `output_folder` ban đầu **không được định nghĩa** ở đâu cả → installer tạo thư mục tên
-  literal `{output_folder}` ở gốc repo. Đã vá bằng `--output-folder _bmad-output`.
-- TEA và WDS mặc định đẻ thư mục ra **gốc repo** (`skills/`, `design-artifacts/`).
-  Đã trỏ hết vào `_bmad-output/`. TEA có **4 key** phải set: `test_artifacts` cộng 3 key con
-  `test_design_output` / `test_review_output` / `trace_output` — sửa key cha không đủ.
-- `python3` trên máy này vốn là **stub Microsoft Store** (exit 9009). Đã tạo shim
-  `C:\Users\Admin\AppData\Local\Programs\Python\Python313\python3.exe` (thư mục này đứng
-  trước `WindowsApps` trong PATH). Mọi script BMAD gọi `python3` nay chạy thật.
+## Chốt chặn của CI — đừng vô hiệu hoá
 
-Muốn đổi cấu hình BMAD thì **chạy lại installer** với `--set`, đừng sửa tay
-`_bmad/config.toml` (file ghi rõ installer-managed, bị ghi đè mỗi lần cài).
+Mỗi cái ra đời từ một lỗi có thật.
 
-### Skill BMAD nào đáng dùng cho repo này
+| Chốt | Bắt gì |
+|---|---|
+| `scripts/ci/endpoint-inventory.mjs --check` | Endpoint mới chưa vào ma trận phân quyền = **chưa ai soát quyền** |
+| `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
+| `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch |
+| `scripts/ci/smoke-image.sh` | Image vừa dựng không chạy được |
+| `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
+| `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
+| `REQUIRE_DB_TESTS=1` | CI xanh trong khi test tích hợp lặng lẽ bỏ qua |
 
-**Nên dùng** — vá đúng chỗ đang thiếu:
-- `bmad-generate-project-context` — sinh `project-context.md`, là `persistent_facts` mặc định
-  của gần như mọi skill BMAD khác. Không có nó thì cả bộ chạy mù.
-- `bmad-document-project` — repo `docs/` gần như trống.
-- `bmad-testarch-test-review` — chấm determinism/isolation/maintainability trên test **sẵn có**.
-- `bmad-review-edge-case-hunter` — trực giao với coderabbit, hợp cho code tiền + phân quyền
-  (`quoteFormula`, `excel`, `permissions`, `hnWorkflow`).
-- `bmad-spec` — hợp cách làm từng nhánh nhỏ ở đây hơn là bộ PRD→epic→story.
+## Trước khi coi là xong
 
-**Đừng dùng** — trùng thứ repo đã có:
-- `bmad-code-review`, `bmad-review-adversarial-general` → đã có `coderabbit:code-review`,
-  `/code-review`, `/security-review`, `AUDIT_REPORT.md`, `.scan/`.
-- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có 30 vitest + 39 script
-  `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác chỉ làm phình.
-- `bmad-agent-*` (persona) → chỉ là menu router, gọi thẳng skill nhanh hơn.
-- Nhóm `bmad-cis-*` và `wds-*` → dựng cho sản phẩm bán ra thị trường có khách ngoài;
-  QuanLY là công cụ nội bộ, không có thị trường/khách hàng/nhà đầu tư để phục vụ.
+```bash
+npm run lint
+npm run typecheck
+npm run build                       # phải sinh được dist/
+npm run test:run                    # cần Postgres + Redis + MinIO cho test tích hợp
+npm --prefix web run typecheck
+npm run web:test
+node scripts/ci/endpoint-inventory.mjs --check
+node scripts/ci/repo-stats.mjs --check
+bash scripts/ci/check-runtime-command.sh
+```
 
-### Skill BMAD cần PRD/epics mới chạy
+## Cách làm việc mong đợi
 
-`bmad-sprint-planning`, `bmad-create-story`, `bmad-dev-story`, `bmad-correct-course`,
-`bmad-check-implementation-readiness`, `bmad-testarch-trace` đều HALT nếu thiếu
-PRD/epics/`sprint-status.yaml`. Repo hiện **không có** — muốn dùng phải chạy
-`bmad-prd` → `bmad-create-epics-and-stories` → `bmad-sprint-planning` trước.
-
----
-
-## Quy ước chung của repo
-
-- **Đừng đề xuất multi-tenancy/RLS.** Hai công ty (GN + Colorfull) dùng chung nhân viên và
-  chung dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
-- **`projectCode` cố ý free-format** theo từng người — đừng chuẩn hoá hay thêm FK.
-- **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị bỏ qua âm thầm làm lọt tiếng
-  Anh ra UI. Dùng tham số `error`.
-- Sửa SPA cũ trong `public/js` thì **nhớ bump `?v=`** để phá cache.
-- Test integration không chạy được cục bộ — dùng `bash test-on-dev.sh` (chạy trên VM dev).
+- **Đọc mã trước khi kết luận.** Tài liệu audit cũ trong `docs/archive/` là LỊCH
+  SỬ — nhiều phát hiện đã được sửa. Đừng vá lại thứ đã vá.
+- **Tái hiện lỗi trước khi sửa.** "Có vẻ sai" không đủ; phải chỉ ra được đầu vào
+  nào cho ra kết quả sai nào.
+- **Test cùng commit với bản sửa**, và test đó phải ĐỎ trên mã cũ. Một test không
+  bao giờ đỏ được thì không bảo vệ gì.
+- **Nói đúng mức độ.** Lỗi tiềm ẩn không với tới được thì ghi là tiềm ẩn, đừng
+  gọi là sự cố đang xảy ra.
+- **Migration phải an toàn**: production dùng `prisma migrate deploy`, KHÔNG dùng
+  `db push` (nó xoá được cột và dữ liệu). Thay đổi đụng dữ liệu thì diễn tập
+  trước bằng `scripts/db/migration-rehearsal.sh`.
+- **Comment giải thích VÌ SAO**, không mô tả CÁI GÌ. Cái gì thì đọc code cũng ra.

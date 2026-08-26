@@ -12,7 +12,7 @@
 # Watchdog này soi DẤU THỜI GIAN THÀNH CÔNG chứ không soi tiến trình, nên nó bắt
 # được cả những kiểu chết mà bản thân script backup không bao giờ báo được.
 #
-# Ngưỡng bám theo SLO trong docs/SLO.md:
+# Ngưỡng bám theo SLO trong docs/operations/SLO.md:
 #   - backup CSDL thành công gần nhất   < 26h
 #   - sao lưu kho object gần nhất       < 26h
 #   - diễn tập khôi phục gần nhất       < 8 ngày

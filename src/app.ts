@@ -112,9 +112,18 @@ function issueCsrfToken(req: Request): string {
   return req.session.csrfSecret;
 }
 
-function csrfTokenMatches(sent: unknown, expected: string) {
-  if (typeof sent !== "string" || sent.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+// Export để test trực tiếp: ca hỏng (header 64 byte có byte ≥ 0x80) KHÔNG gửi được qua
+// supertest — Node phía client từ chối header ngoài Latin-1 — nên phải kiểm ở mức hàm.
+export function csrfTokenMatches(sent: unknown, expected: string) {
+  if (typeof sent !== "string") return false;
+  // So theo ĐỘ DÀI BYTE, không phải độ dài chuỗi. `"ă".repeat(64)` có 64 KÝ TỰ nhưng 128 BYTE:
+  // qua được phép so `sent.length !== expected.length` rồi làm timingSafeEqual ném RangeError
+  // ("Input buffers must have the same byte length") — biến một lần từ chối 403 đáng lẽ gọn gàng
+  // thành 500 kèm vết stack trong log. Đã kiểm bằng node: chuỗi 64 ký tự tiếng Việt ném thật.
+  const a = Buffer.from(sent, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 function csrfGuard(req: Request, res: Response, next: NextFunction) {

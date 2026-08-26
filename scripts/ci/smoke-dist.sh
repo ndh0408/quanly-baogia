@@ -31,7 +31,9 @@ fail() {
 
 echo "▶ build artifact có mặt?"
 for f in dist/server.js dist/worker.js dist/exportWorker.js; do
-  [ -f "$f" ] || fail "thiếu $f — `npm run build` chưa chạy hoặc bố trí đầu ra đã đổi"
+  # KHÔNG dùng dấu backtick trong chuỗi nháy kép: bash coi đó là thay-thế-lệnh và CHẠY THẬT
+  # `npm run build` ngay giữa lúc đang báo lỗi.
+  [ -f "$f" ] || fail "thiếu $f — 'npm run build' chưa chạy hoặc bố trí đầu ra đã đổi"
 done
 
 echo "▶ khởi động node dist/server.js (NODE_ENV=$NODE_ENV)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Backfill mã hoá PII — bước 5/6 của lộ trình (xem SECURITY_AUDIT_2026-08.md).
+// Backfill mã hoá PII — bước 5/6 của lộ trình (xem docs/archive/audits/SECURITY_AUDIT_2026-08.md).
 //
 //   node scripts/migration/pii-backfill.mjs --dry-run     # đếm, KHÔNG ghi gì
 //   node scripts/migration/pii-backfill.mjs               # chạy thật

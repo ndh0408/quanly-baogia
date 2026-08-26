@@ -63,7 +63,7 @@ for (const role of Object.keys(ACTORS)) {
 }
 
 // ── §30 MA TRẬN VAI TRÒ: mỗi ô là một quyết định phân quyền đã tuyên bố ─────
-// Mong đợi: 200 = được, 403 = chặn đúng. Bảng này phải khớp AUTHZ_MATRIX.md.
+// Mong đợi: 200 = được, 403 = chặn đúng. Bảng này phải khớp docs/product/ROLES_PERMISSIONS.md.
 const MATRIX = [
   // [đường dẫn,          admin, manager, accounthn, hr,  accountant]
   ["/api/quotes", 200, 200, 200, 403, 403],

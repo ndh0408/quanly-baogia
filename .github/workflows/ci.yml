@@ -101,7 +101,7 @@ jobs:
         run: npx prettier --check "**/*.{json,css,yml,yaml}"
 
       # Gác MA TRẬN PHÂN QUYỀN: sinh danh sách endpoint từ mã nguồn rồi đối chiếu con số công bố
-      # trong AUTHZ_MATRIX.md. Thêm route mà quên soát quyền là đỏ pipeline ngay.
+      # trong docs/product/ROLES_PERMISSIONS.md. Thêm route mà quên soát quyền là đỏ pipeline ngay.
       # Có lý do cụ thể: README từng ghi 141 endpoint, ma trận ghi 133, con số thật là 138 — cả hai
       # đều đếm tay nên cả hai đều trôi.
       - name: Endpoint inventory khớp ma trận phân quyền

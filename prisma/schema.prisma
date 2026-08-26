@@ -200,7 +200,7 @@ model PersonnelRecord {
   bankName     String? // NGÂN HÀNG
   phone        String? // SỐ ĐIỆN THOẠI
 
-  // ── MÃ HOÁ PII KHI LƯU (bước 1/6 — xem SECURITY_AUDIT_2026-08.md §6) ──────────────────────
+  // ── MÃ HOÁ PII KHI LƯU (bước 1/6 — xem docs/archive/audits/SECURITY_AUDIT_2026-08.md §6) ──────────────────────
   // Cột CỘNG THÊM, chưa ai ghi vào. Cột thô ở trên vẫn là nguồn sự thật cho tới khi cutover.
   // Tách cột thay vì mã hoá tại chỗ để: migration không đụng dữ liệu (rollback = bỏ cột), và
   // giai đoạn đọc-song-song có thể so đối chiếu hai bên trước khi tin bản mã.

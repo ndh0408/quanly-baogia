@@ -1,3 +1,13 @@
+> ## ⚠️ TÀI LIỆU LỊCH SỬ — ĐÃ LƯU TRỮ
+>
+> Giữ lại vì nó ghi lại VÌ SAO hệ thống thành ra như hiện nay, không phải để mô tả hiện trạng.
+> **Nhiều phát hiện trong đây ĐÃ ĐƯỢC SỬA.** Đừng mở một issue hay viết một bản vá dựa trên tài
+> liệu này mà chưa đối chiếu với mã nguồn đang chạy.
+>
+> **Nguồn sự thật là MÃ NGUỒN.** Tài liệu đang hiệu lực nằm ở [docs/README.md](../../README.md).
+
+---
+
 # PERFORMANCE_BENCHMARK
 
 Số đo của lưới nhập báo giá (`web/src/components/GridTable.tsx`) — màn hình quan trọng nhất.
@@ -48,7 +58,7 @@ lên khi đọc các số này.
 
 Đọc bảng này cho đúng: **thao tác gõ đã hết chậm ở mọi kích thước**, còn **dựng lưới / thêm / xoá
 hàng vẫn tuyến tính theo số dòng** và chưa được cải thiện đáng kể. Xem phần "Còn lại" trong
-`PERFORMANCE_AUDIT.md`.
+`docs/archive/performance/PERFORMANCE_AUDIT.md`.
 
 ## Báo giá nhiều tab (50 sheet × 200 dòng = 10.000 dòng)
 

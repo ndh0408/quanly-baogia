@@ -1,7 +1,17 @@
+> ## ⚠️ TÀI LIỆU LỊCH SỬ — ĐÃ LƯU TRỮ
+>
+> Giữ lại vì nó ghi lại VÌ SAO hệ thống thành ra như hiện nay, không phải để mô tả hiện trạng.
+> **Nhiều phát hiện trong đây ĐÃ ĐƯỢC SỬA.** Đừng mở một issue hay viết một bản vá dựa trên tài
+> liệu này mà chưa đối chiếu với mã nguồn đang chạy.
+>
+> **Nguồn sự thật là MÃ NGUỒN.** Tài liệu đang hiệu lực nằm ở [docs/README.md](../../README.md).
+
+---
+
 # OPTIMIZATION_CHANGELOG
 
 Mỗi mục ghi đúng thứ đã làm, vì sao, và **số đo thật** — không có mục nào dựa trên cảm tính.
-Số đo lấy từ `PERFORMANCE_BENCHMARK.md` (bản build production, lưới 1000 dòng, đo A/B cùng phiên).
+Số đo lấy từ `docs/archive/performance/PERFORMANCE_BENCHMARK.md` (bản build production, lưới 1000 dòng, đo A/B cùng phiên).
 
 ---
 

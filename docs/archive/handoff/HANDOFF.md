@@ -1,3 +1,13 @@
+> ## ⚠️ TÀI LIỆU LỊCH SỬ — ĐÃ LƯU TRỮ
+>
+> Giữ lại vì nó ghi lại VÌ SAO hệ thống thành ra như hiện nay, không phải để mô tả hiện trạng.
+> **Nhiều phát hiện trong đây ĐÃ ĐƯỢC SỬA.** Đừng mở một issue hay viết một bản vá dựa trên tài
+> liệu này mà chưa đối chiếu với mã nguồn đang chạy.
+>
+> **Nguồn sự thật là MÃ NGUỒN.** Tài liệu đang hiệu lực nằm ở [docs/README.md](../../README.md).
+
+---
+
 # BÀN GIAO PHIÊN LÀM VIỆC — cập nhật 2026-07-28
 
 > Mở session mới thì đọc file này TRƯỚC (kèm `CLAUDE.md` nếu có) rồi làm tiếp.

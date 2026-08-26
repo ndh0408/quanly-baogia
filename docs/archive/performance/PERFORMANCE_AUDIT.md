@@ -1,3 +1,13 @@
+> ## ⚠️ TÀI LIỆU LỊCH SỬ — ĐÃ LƯU TRỮ
+>
+> Giữ lại vì nó ghi lại VÌ SAO hệ thống thành ra như hiện nay, không phải để mô tả hiện trạng.
+> **Nhiều phát hiện trong đây ĐÃ ĐƯỢC SỬA.** Đừng mở một issue hay viết một bản vá dựa trên tài
+> liệu này mà chưa đối chiếu với mã nguồn đang chạy.
+>
+> **Nguồn sự thật là MÃ NGUỒN.** Tài liệu đang hiệu lực nằm ở [docs/README.md](../../README.md).
+
+---
+
 # PERFORMANCE_AUDIT
 
 Rà hiệu năng hệ báo giá QuanLY, tập trung vào màn hình nhập báo giá — nơi người dùng ngồi lâu nhất
@@ -43,7 +53,7 @@ Hạng Mục **72,6ms**, Số Lượng **73,4ms** — đúng hai ô gọi `setSt
 
 **Nguyên nhân gốc** `onChange()` gọi mỗi phím → vẽ lại 5.900 ô.
 
-**Đã sửa** Xem `OPTIMIZATION_CHANGELOG.md` mục 1–4.
+**Đã sửa** Xem `docs/archive/performance/OPTIMIZATION_CHANGELOG.md` mục 1–4.
 
 **Kết quả** ô chữ 196,6 → **0,0ms**; ô số 179,9 → **0,2ms**; đổi đơn giá đến khi vẽ xong 206,1 →
 **26,3ms**.

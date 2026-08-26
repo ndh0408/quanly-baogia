@@ -9,7 +9,7 @@
 # sạch sẽ vẫn có thể để lại CCCD/số tài khoản/lương hoá đá vĩnh viễn (sai khoá) và
 # mọi hàng chứng từ trỏ vào object không tồn tại — mà bài test cũ vẫn báo PASS.
 #
-# Diễn tập này kiểm ĐỦ BA THỨ mà docs/DR-runbook.md nói là điều kiện cần:
+# Diễn tập này kiểm ĐỦ BA THỨ mà docs/operations/DISASTER_RECOVERY.md nói là điều kiện cần:
 #     bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 #
 # Bước 3 và 4 là phần mà bài test cũ không có; chúng chính là chỗ hỏng âm thầm.

@@ -5,7 +5,7 @@
 # ── VÌ SAO CÓ FILE NÀY ──────────────────────────────────────────────────────
 # Bản dump Postgres KHÔNG còn chứa đủ dữ liệu để khôi phục. Từ 2026-08-11 ảnh
 # chứng từ thanh toán đã rời CSDL sang kho object; CSDL chỉ giữ khoá + SHA-256.
-# docs/DR-runbook.md đã ghi nhận đúng khoảng trống này ("kho object production
+# docs/operations/DISASTER_RECOVERY.md đã ghi nhận đúng khoảng trống này ("kho object production
 # chưa có lịch sao lưu") nhưng chưa có gì thực hiện. Mất bucket = mất CHỨNG TỪ
 # TÀI CHÍNH, trong khi mọi hàng trong CSDL vẫn còn và trỏ vào hư không.
 #

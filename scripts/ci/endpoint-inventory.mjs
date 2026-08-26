@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Liệt kê MỌI endpoint HTTP từ mã nguồn — nguồn sự thật duy nhất về số lượng endpoint.
 //
-// Vì sao cần: README từng ghi "141 HTTP endpoints" trong khi AUTHZ_MATRIX.md ghi "133". Cả hai đều
+// Vì sao cần: README từng ghi "141 HTTP endpoints" trong khi docs/product/ROLES_PERMISSIONS.md ghi "133". Cả hai đều
 // đếm tay nên cả hai đều có thể sai, và không ai biết cái nào. Con số đếm tay lệch âm thầm mỗi lần
 // thêm route — mà một endpoint không nằm trong ma trận phân quyền là một endpoint chưa ai soát.
 //
 //   node scripts/ci/endpoint-inventory.mjs            # bảng cho người đọc
 //   node scripts/ci/endpoint-inventory.mjs --json     # JSON cho công cụ
-//   node scripts/ci/endpoint-inventory.mjs --check    # đối chiếu AUTHZ_MATRIX.md, khác là exit 1 (CI)
+//   node scripts/ci/endpoint-inventory.mjs --check    # đối chiếu docs/product/ROLES_PERMISSIONS.md, khác là exit 1 (CI)
 //
 // Giới hạn có chủ đích: đây là bộ phân tích theo mẫu, không phải trình biên dịch TS. Nó KHÔNG chạy
 // mã (chạy mã lúc kiểm kê là tự chuốc lấy side effect). Đổi lại, mọi lối khai báo route bất thường
@@ -104,7 +104,7 @@ if (args.includes("--check")) {
   // Đối chiếu MỌI nơi công bố con số. Chỉ canh ma trận là chưa đủ: README từng ghi 141 trong khi ma
   // trận ghi 133 và mã nguồn có 138 — ba nguồn, ba con số, không ai biết cái nào đúng.
   const sources = [
-    { file: "AUTHZ_MATRIX.md", re: /toàn bộ\s+(\d+)\s+endpoint/i },
+    { file: "docs/product/ROLES_PERMISSIONS.md", re: /toàn bộ\s+(\d+)\s+endpoint/i },
     { file: "README.md", re: /(\d+)\s+HTTP endpoints/i },
   ];
   for (const { file, re } of sources) {
@@ -125,7 +125,7 @@ if (args.includes("--check")) {
     bad = true;
   }
   if (bad) process.exit(1);
-  console.log(`✓ ${rows.length} endpoint — khớp AUTHZ_MATRIX.md + README.md`);
+  console.log(`✓ ${rows.length} endpoint — khớp docs/product/ROLES_PERMISSIONS.md + README.md`);
   process.exit(0);
 }
 

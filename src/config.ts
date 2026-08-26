@@ -96,7 +96,7 @@ const schema = z.object({
 
   // Mã hoá PII khi lưu trữ (CCCD / số tài khoản / lương). TÁCH BIỆT hoàn toàn với MFA_ENC_KEY,
   // JWT_SECRET, SESSION_SECRET — xoay một khoá không được làm hỏng dữ liệu của hệ thống kia.
-  // Không đặt → mã hoá TẮT (ghi thô). Xem docs/DR-runbook.md: MẤT KHOÁ = MẤT DỮ LIỆU VĨNH VIỄN.
+  // Không đặt → mã hoá TẮT (ghi thô). Xem docs/operations/DISASTER_RECOVERY.md: MẤT KHOÁ = MẤT DỮ LIỆU VĨNH VIỄN.
   PII_ENC_KEY: strEnv(z.string().min(16, "PII_ENC_KEY phải ≥ 16 ký tự (sinh bằng: openssl rand -base64 48)").optional()),
 
   // Vòng đời dữ liệu (job dọn chạy hằng ngày 03:00 — src/retention.ts).
@@ -225,7 +225,7 @@ if (config.NODE_ENV === "production") {
   if (!config.PII_ENC_KEY) {
     console.warn(
       "⚠️  PII_ENC_KEY chưa đặt ở production — CCCD / số tài khoản / lương đang được ghi THÔ vào CSDL.\n" +
-        "    Bất kỳ bản dump CSDL nào cũng lộ nguyên các trường này. Xem docs/DR-runbook.md."
+        "    Bất kỳ bản dump CSDL nào cũng lộ nguyên các trường này. Xem docs/operations/DISASTER_RECOVERY.md."
     );
   }
   if (!config.S3_ENDPOINT) {

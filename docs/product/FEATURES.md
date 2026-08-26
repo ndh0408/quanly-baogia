@@ -26,11 +26,11 @@ Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia 
 - **Ngày thi công**: ô chọn ngày, **chỉ quản lý nội bộ — KHÔNG xuất Excel** (hiện ở trang Quản lý dự án).
 - **Lưới kiểu Excel — copy/paste chuẩn mọi thiết bị/bộ gõ:** dùng **sự kiện copy/cut/paste của trình duyệt** (không phải bắt phím) nên chạy ổn trên **macOS/Safari/Firefox, chuột phải, cảm ứng, và cả khi mở bằng IP nội bộ (http)**. Có:
   - **Dán hiểu ô nhiều dòng** của Excel (parser RFC‑4180, có unit test) — không vỡ hàng.
-  - **Dán nguyên bảng báo giá** mà app đã xuất ra (copy cả cột STT) → **tự dựng lại nhóm lớn (A/B) + nhóm con + hàng con + dòng thông tin**, map đúng cột (xem [public/grid-clipboard.js](public/grid-clipboard.js)). Dán khi đang ở dòng nhóm/nhóm con → chèn item ngay dưới.
+  - **Dán nguyên bảng báo giá** mà app đã xuất ra (copy cả cột STT) → **tự dựng lại nhóm lớn (A/B) + nhóm con + hàng con + dòng thông tin**, map đúng cột (xem [public/grid-clipboard.js](../../public/grid-clipboard.js)). Dán khi đang ở dòng nhóm/nhóm con → chèn item ngay dưới.
   - **Dán 1 giá trị ra cả vùng đang chọn**; copy ra Excel/Word kèm bảng (text/html). Số kiểu VN (`1.234`) đọc đúng = 1234.
   - **Người chỉ‑xem cũng copy được** dữ liệu ra (ô read‑only, không sửa/cắt/dán).
   - **Ctrl+Z/Y, fill‑down (Ctrl+D)** — hoàn tác chạy ngay cả sau khi dán/cắt/fill. Chữ dài tự **xuống hàng** để dễ đọc (không vào Excel).
-- Nhiều **sheet** trong 1 báo giá; mỗi sheet 1 template; xuất ra 1 file Excel nhiều sheet (ghép bằng XML/zip, xem [src/xlsxStitcher.ts](src/xlsxStitcher.ts)).
+- Nhiều **sheet** trong 1 báo giá; mỗi sheet 1 template; xuất ra 1 file Excel nhiều sheet (ghép bằng XML/zip, xem [src/xlsxStitcher.ts](../../src/xlsxStitcher.ts)).
 - **Responsive**: dùng tốt trên điện thoại / máy tính bảng / desktop.
 
 ## Trang Quản lý dự án
@@ -65,7 +65,7 @@ App đang chạy **song song 2 frontend** trên cùng 1 server Express, để ch
 | Phục vụ tại | `gianguyen.cloud` (production) | `/app2` (mọi nơi) **và `/`** trên DEV/staging/`*.ts.net` |
 | Trạng thái | ổn định, đang dùng thật | **đã port xong 100%** (mọi trang + editor báo giá + wizard + luồng Account HN), **không còn iframe** |
 
-- **Định tuyến** ([src/app.ts](src/app.ts)): `/app2/*` luôn trả app React; `"/"` trả React nếu host là DEV/staging (`isStagingHost`: khớp `dev.` / `staging` / `*.ts.net`), ngược lại trả SPA cũ. → **Production vẫn là SPA**, DEV/staging chạy React để kiểm thử trước khi flip.
+- **Định tuyến** ([src/app.ts](../../src/app.ts)): `/app2/*` luôn trả app React; `"/"` trả React nếu host là DEV/staging (`isStagingHost`: khớp `dev.` / `staging` / `*.ts.net`), ngược lại trả SPA cũ. → **Production vẫn là SPA**, DEV/staging chạy React để kiểm thử trước khi flip.
 - **Design-system dùng chung:** React nạp thẳng `/style.css` của SPA + font Be Vietnam Pro → giao diện **giống y** app cũ. Money-math: FE dùng nguồn chung **`shared/quote-math.ts`** (re-export qua `web/src/quoteMath.ts`), **cùng công thức** với backend `src/money.ts` → tổng trên màn = DB = Excel (14 vector vàng `web:test` chốt).
 - **Build:** `public/app2/` là **artifact build, KHÔNG commit** (gitignored) — sinh lại bằng `npm run web:build` (hoặc `cd web && npm run build`, có `tsc --noEmit` chặn lỗi type). Mã nguồn React nằm ở **`web/src/`** (đã commit đầy đủ).
 - **Hiện-đại-hóa (nhánh `chore/modernization`):** backend → **100% TypeScript + `strict` ĐẦY ĐỦ (gồm noImplicitAny)** + kiến trúc tầng; gói **`shared/quote-math.ts`** (1 nguồn toán tiền dùng chung BE↔FE); frontend **TanStack Query** + **code-split** + **PWA**; CI gác `typecheck`/`web:build`/`web:test`; **optimistic-lock** chống mất dữ liệu khi 2 người sửa; `prisma migrate deploy` vào `deploy.sh`; **Prisma 5→7** (driver adapter `@prisma/adapter-pg` + `prisma.config.ts`; soft-delete/filter/SSE chuyển từ `$use` sang Client Extension `$extends`); **compose `staging`/`prod` versioned trong repo** (sạch secret → `${VAR}`, worker chạy qua `tsx`); **Vite 6→8**; **Dependabot** auto-update; **tìm kiếm KHÔNG dấu/sai dấu** (cột `searchText` chuẩn-hóa + GIN trigram pg_trgm). Verify: **268 integration + ~50 e2e + 14 web money** (chạy `bash test-on-dev.sh`) — *giữ hành vi y hệt, không đổi logic nghiệp vụ.*
@@ -83,10 +83,10 @@ Internet → Cloudflare (TLS) → cloudflared tunnel → quanly-app:3000  (conta
                                                       └─ quanly-redis     (Redis 7)         ← chỉ mạng nội bộ
 ```
 
-- **Image:** build từ [`Dockerfile`](Dockerfile) (multi-stage, chạy **non-root**, `npm ci --omit=dev`); `app` và `worker` dùng chung image.
+- **Image:** build từ [`Dockerfile`](../../Dockerfile) (multi-stage, chạy **non-root**, `npm ci --omit=dev`); `app` và `worker` dùng chung image.
 - **Mạng:** Postgres/Redis **không expose ra ngoài** (chỉ docker network nội bộ); chỉ `app:3000` đi ra qua Cloudflare tunnel — không publish cổng nào lên host.
 - **Cache:** `public/app.js` & `style.css` phục vụ `immutable` → **BẮT BUỘC tăng `?v=`** trong `public/index.html` mỗi khi đổi nội dung (không tái dùng `?v=` cũ → kẹt cache).
-- **Migrations:** server KHÔNG tự chạy migrate (CMD = `node --import tsx src/server.js`); `deploy.sh` chạy `prisma migrate deploy` ở **bước riêng** (container dùng-rồi-bỏ) khi deploy. **Luôn `pg_dump` backup trước khi migrate** ([prisma/migrations/README.md](prisma/migrations/README.md)).
+- **Migrations:** server KHÔNG tự chạy migrate (CMD = `node --import tsx src/server.js`); `deploy.sh` chạy `prisma migrate deploy` ở **bước riêng** (container dùng-rồi-bỏ) khi deploy. **Luôn `pg_dump` backup trước khi migrate** ([prisma/migrations/README.md](../../prisma/migrations/README.md)).
 - **Bí mật:** `docker-compose.staging.yml`/`docker-compose.prod.yml` **đã versioned trong repo nhưng sạch secret** (mật khẩu đọc qua `${VAR}` từ `.env`); chỉ **`.env`** (chứa giá trị thật) nằm trên host — **không** commit. Host `.env` cần `POSTGRES_PASSWORD` + `REDIS_PASSWORD` (cho `${VAR}` trong compose).
 
 > Quy trình deploy chi tiết (archive → ship → build → migrate → recreate → verify, kèm retag rollback) giữ trong **ops runbook nội bộ** (không đưa vào repo vì chứa địa chỉ máy chủ + bí mật).
@@ -150,11 +150,11 @@ Quản lý **giao** 1 account Hà Nội điền phần **giá Hà Nội** (số 
 
 - Account HN chỉ thấy **danh sách BG được giao** (ẩn tiền/khách báo giá chính, ẩn menu Tổng quan / Tạo BG / Quản lý dự án) — cột riêng: **Người giao · Số sheet HN · Tổng HN · trạng thái HN**.
 - Màn điền: nhiều **sheet Hà Nội** dạng tab ("+ Thêm sheet"), chọn **Mẫu** (có/không ngày) từng sheet, tổng gộp mọi sheet.
-- Luồng: **Được giao → điền → Gửi duyệt → Quản lý duyệt / trả lại** (`hnStatus`: assigned · submitted · approved · rejected). File: [src/hnWorkflow.ts](src/hnWorkflow.ts).
+- Luồng: **Được giao → điền → Gửi duyệt → Quản lý duyệt / trả lại** (`hnStatus`: assigned · submitted · approved · rejected). File: [src/hnWorkflow.ts](../../src/hnWorkflow.ts).
 
 ## Mẫu Excel & cấu hình template
 
-Mỗi template ánh xạ field báo giá → ô Excel trong [src/templateConfigs.ts](src/templateConfigs.ts); writer ở [src/excel.ts](src/excel.ts).
+Mỗi template ánh xạ field báo giá → ô Excel trong [src/templateConfigs.ts](../../src/templateConfigs.ts); writer ở [src/excel.ts](../../src/excel.ts).
 
 | Template (code) | File | Đặc điểm |
 |---|---|---|
