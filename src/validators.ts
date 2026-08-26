@@ -17,6 +17,18 @@ export const zbool = z.preprocess(
   z.boolean(),
 );
 
+// Data-URL ảnh chứng từ thanh toán, kiểm TOÀN CHUỖI (có neo cuối `$`).
+//
+// VÌ SAO tách ra hằng số dùng chung: hai route chứng từ (`quotes.routes.ts` /pay và
+// `personnel.routes.ts` /payment) trước đây mỗi nơi tự viết một regex CHỈ khớp TIỀN TỐ, nên
+// `data:image/png;base64,<png hợp lệ>" onerror="…` lọt vào CSDL nguyên văn — đúng cái lỗ mà
+// customerLogo/itemSchema.images bên dưới đã bịt và ghi chú rõ. Regex ở hai nơi thì hai nơi sẽ
+// trôi khỏi nhau; một chỗ là một chỗ.
+//
+// Tập MIME CỐ Ý hẹp hơn customerLogo (KHÔNG có gif): `sniffImage` trong src/paymentProof.ts chỉ
+// nhận PNG/JPEG/WEBP, nhận gif ở cửa vào chỉ đổi lỗi 400 thành 415 ở tầng sâu hơn.
+export const PAYMENT_PROOF_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
 const pwd = z
   .string()
   .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)

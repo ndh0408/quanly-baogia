@@ -49,6 +49,25 @@ const acceptInviteLimiter = createLimiter("accept-invite", {
   message: { error: "Quá nhiều lần thử, vui lòng thử lại sau 15 phút" },
 });
 
+// Trần riêng cho nhóm endpoint ĐỌC/XOAY TOKEN không cần đăng nhập: GET /invite/:token,
+// POST /token/refresh, POST /token/revoke.
+//
+// KHÔNG NÓI QUÁ: đây không phải vá một lỗ hổng. Token mời/đặt-lại là 48 ký tự hex và refresh token
+// là 64 ký tự hex — không dò cạn được, và cả ba route vốn đã nằm dưới apiLimiter chung. Cái limiter
+// này mua về hai thứ cụ thể: (a) một tín hiệu 429 để người vận hành THẤY có ai đang quét, thay vì
+// một dòng 401 lẫn trong hàng nghìn dòng khác; (b) chặn chi phí truy vấn CSDL của một vòng lặp
+// request không cần thông tin đăng nhập nào.
+//
+// Dùng CHUNG một bộ đếm cho cả ba là có chủ ý: chúng cùng thuộc một luồng (client cầm token gọi
+// máy chủ), nên một kẻ quét không né được bằng cách xoay vòng giữa ba đường. 20 lần/15 phút rộng
+// gấp nhiều lần nhịp thật (client di động làm mới token khoảng 1 lần/15 phút; người nhận lời mời mở
+// link vài lần).
+const tokenLimiter = createLimiter("auth-token", {
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút" },
+});
+
 // Đăng nhập/token KHÔNG bê được hết vào service: body lỗi cần thêm cờ `mfaRequired` (khác shape
 // errorHandler) → route giữ phần map kết quả → response; credentials/lockout đã ở authCore.ts.
 router.post(
@@ -169,6 +188,7 @@ router.post(
 
 router.post(
   "/token/refresh",
+  tokenLimiter,
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -192,6 +212,7 @@ router.post(
 
 router.post(
   "/token/revoke",
+  tokenLimiter,
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req: Request, res: Response) => {
     await revokeRefreshToken(req.body.refreshToken);
@@ -229,7 +250,7 @@ router.post(
 );
 
 // Validate an invite link and return prefill info for the onboarding form.
-router.get("/invite/:token", asyncHandler(async (req: Request, res: Response) => res.json(await svc.inviteInfo(req))));
+router.get("/invite/:token", tokenLimiter, asyncHandler(async (req: Request, res: Response) => res.json(await svc.inviteInfo(req))));
 
 // Accept an invite: set own password + phone, activate, then log in.
 router.post(

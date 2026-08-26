@@ -159,17 +159,17 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| POST | `/` | ✓ | — | own | key do **server** sinh trong namespace mình | magic bytes + **cấu trúc zip** (xlsx) + 10MB + allowlist · ghi bản ghi `finalized` | — | FILE-002 | **VÁ** |
-| GET | `/sign-download` | ✓ | — | theo namespace | `canAccessKey` (chặn `..`, `//`, `\`, `\0`; `exports/` → `canOnQuote`) | — | $ | — | OK |
-| POST | `/sign-upload` | ✓ | — | own | key server sinh | **`Content-Length` vào chữ ký** + limiter 30/ph/tài khoản + trần 20 phiên `pending` + tạo bản ghi TRƯỚC khi ký | — | FILE-001 | **VÁ** |
-| POST | `/finalize` | ✓ | — | own | bản ghi `UploadObject` + chủ sở hữu | HEAD → khớp kích thước+kiểu đã ký → magic bytes → cấu trúc zip → **CAS `pending`→`finalized`**; sai thì xoá object + `rejected` | — | FILE-001 · FILE-002 | **VÁ** |
+| POST | `/` | ✓ | `file:upload` | own | key do **server** sinh trong namespace mình | magic bytes + **cấu trúc zip** (xlsx) + 10MB + allowlist · ghi bản ghi `finalized` | — | FILE-002 | **VÁ** |
+| GET | `/sign-download` | ✓ | — *(cố ý: đường ĐỌC, `canAccessKey` là chốt phạm vi)* | theo namespace | `canAccessKey` (chặn `..`, `//`, `\`, `\0`; `exports/` → `canOnQuote`) | — | $ | — | OK |
+| POST | `/sign-upload` | ✓ | `file:upload` | own | key server sinh | **`Content-Length` vào chữ ký** + limiter 30/ph/tài khoản + trần 20 phiên `pending` + tạo bản ghi TRƯỚC khi ký | — | FILE-001 | **VÁ** |
+| POST | `/finalize` | ✓ | `file:upload` | own | bản ghi `UploadObject` + chủ sở hữu | HEAD → khớp kích thước+kiểu đã ký → magic bytes → cấu trúc zip → **CAS `pending`→`finalized`**; sai thì xoá object + `rejected` | — | FILE-001 · FILE-002 | **VÁ** |
 | DELETE | `/` | ✓ | `role=admin` | global | — | — | — | — | OK |
 
 ## `/api/admin` (3) · `/api/settings` (4) · `/api/webhooks` (6)
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| GET | `/admin/backup.dump` | ✓ | `settings:manage` | global | — | limiter 5/15ph · audit · `no-store` · dọn temp khi ngắt | **SEC toàn bộ CSDL** | ADM-001 | **VÁ** |
+| POST | `/admin/backup.dump` | ✓ | `settings:manage` | global | — | limiter 5/15ph · audit · `no-store` · dọn temp khi ngắt · POST để qua cổng CSRF | **SEC toàn bộ CSDL** | ADM-001 | **VÁ** |
 | GET | `/admin/stats` | ✓ | `settings:manage` | global | — | — | — | — | OK |
 | POST | `/admin/purge-soft-deleted` | ✓ | `settings:manage` | global | `none:{}` chặn xoá bản còn bị tham chiếu | lỗi nổi lên, không nuốt | — | — | OK |
 | GET | `/settings/` | ✓ | `settings:manage` | global | — | — | SEC | — | OK |

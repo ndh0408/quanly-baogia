@@ -9,6 +9,7 @@ import {
   QuoteUpdateSchema,
   ListQuerySchema,
   HnSaveSchema,
+  PAYMENT_PROOF_DATA_URL_RE,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
@@ -158,7 +159,9 @@ router.post(
   "/:id/extra/:sheetId/:rid/pay",
   validate({
     params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
-    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(/^data:image\/(png|jpe?g|webp);base64,/).optional() }),
+    // Kiểm TOÀN CHUỖI (hằng số dùng chung ở src/validators.ts): regex tiền tố cũ cho phần đuôi
+    // `" onerror="…` đi thẳng vào CSDL, phá bất biến "chuỗi *Proof luôn là ảnh base64 hợp lệ".
+    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
   }),
   requirePermission(P.QUOTE_INTERNAL_PAY),
   asyncHandler(async (req: Request, res: Response) => res.json(await markExtraTableRowPayment(req)))

@@ -222,11 +222,18 @@ export async function getPaymentProof(req: Request) {
   await loadAuthorized(req, "read");
   const rec = await prisma.personnelRecord.findFirst({
     where: { id: (req.params as any).id },
-    select: { paymentProof: true, paymentProofKey: true, paymentProofMime: true },
+    // `id` được chọn CHỈ để hàng audit bên dưới có resourceId — thiếu nó thì nhật ký ghi null và
+    // không truy được về hồ sơ nào.
+    select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofMime: true },
   });
   if (!rec || (!rec.paymentProofKey && !rec.paymentProof)) throw httpError(404, "Chưa có ảnh chứng từ");
   const dataUrl = await readProofDataUrl(rec);   // ưu tiên kho object, rơi về base64 nếu chưa chuyển
   if (!dataUrl) throw httpError(404, "Chưa có ảnh chứng từ");
+  // Ảnh uỷ nhiệm chi (tên + số tài khoản + số tiền) — khi có tranh chấp chi trả, câu hỏi đầu tiên là
+  // "ai đã mở, lúc nào". `downloadContract` ngay bên dưới và `markPayment` đều đã ghi; chỗ này bị sót.
+  // CỐ Ý không đưa data-URL vào before/after: bảng AuditEvent KHÔNG mã hoá, ghi ảnh vào đó là nhân
+  // bản lại đúng thứ mà storeProof vừa dời khỏi CSDL.
+  await audit(req, "personnel.payment-proof.view", { resource: "personnel", resourceId: rec.id });
   return { paymentProof: dataUrl };
 }
 

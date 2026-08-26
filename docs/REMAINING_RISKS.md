@@ -311,3 +311,14 @@ rủi ro đang chạy thật, không phải giả định.
   Khi có client di động thì đăng xuất trên điện thoại sẽ giết luôn quyền gọi API
   của máy tính (còn cookie máy tính thì vẫn sống) — hành vi bất đối xứng, cần
   thu hồi theo HỌ token của đúng phiên đó.
+- **Bật trần tuổi thọ tuyệt đối cho phiên cookie sẽ ĐÁ MỌI NGƯỜI ĐANG ĐĂNG NHẬP
+  RA ĐÚNG MỘT LẦN, ngay lần triển khai đầu tiên.** `enforceActiveUser`
+  (`src/middleware.ts`, `SESSION_MAX_AGE_DAYS = 30`) huỷ phiên khi
+  `Date.now() - session.authAt` vượt trần, **và cũng huỷ phiên KHÔNG có
+  `authAt`** — fail-closed, vì chọn hướng ngược lại thì xoá một khoá trong phiên
+  là vô hiệu hoá được chốt. `authAt` chỉ được đặt trong `establishSession`, nên
+  mọi phiên sinh ra trước bản vá đều thiếu nó. **Việc phải làm:** báo trước cho
+  người dùng là họ phải đăng nhập lại một lần sau lần triển khai này; các lần
+  triển khai sau không còn hiện tượng đó. Chưa đo trên production (không có
+  Docker/cluster trong môi trường phát triển) — mới chỉ chứng minh bằng test tích
+  hợp `tests/authsess-session-absolute-ttl.test.js` chạy qua express-session thật.

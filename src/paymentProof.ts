@@ -20,6 +20,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { putObject, deleteObject, isStorageEnabled, headObject, getObjectBytes } from "./storage.js";
 import { httpError } from "./httpError.js";
+import { PAYMENT_PROOF_DATA_URL_RE } from "./validators.js";
+import { logger } from "./logger.js";
 
 const NAMESPACE = "payment-proofs";
 export const MAX_PROOF_BYTES = 900_000; // khớp trần của validator (ảnh đã nén ở client)
@@ -116,5 +118,13 @@ export async function readProofDataUrl(rec: {
     if (!buf) throw httpError(502, "Không đọc được ảnh chứng từ từ kho lưu trữ");
     return `data:${rec.paymentProofMime || "image/png"};base64,${buf.toString("base64")}`;
   }
-  return rec.paymentProof ?? null; // bản ghi chưa chuyển
+  // Nhánh DI SẢN (bản ghi chưa chuyển): cột base64 cũ được ghi TRƯỚC khi có `storeProof`, tức chưa
+  // từng qua decode + sniff magic-byte, và route hồi đó chỉ kiểm TIỀN TỐ data-URL. Không tin dữ liệu
+  // đã nằm sẵn trong bảng: lọc lại tại chỗ đọc để hợp đồng "trả về là data-URL ảnh hợp lệ" đúng cho
+  // CẢ hai nhánh. (Nhánh kho object ở trên tự dựng data-URL từ mime của server nên vốn đã sạch.)
+  if (rec.paymentProof && !PAYMENT_PROOF_DATA_URL_RE.test(rec.paymentProof)) {
+    logger.warn({ len: rec.paymentProof.length }, "chứng từ di sản không phải data-URL ảnh hợp lệ — bỏ qua");
+    return null;
+  }
+  return rec.paymentProof ?? null;
 }

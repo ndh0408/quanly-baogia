@@ -9,6 +9,24 @@ import { resolveUserPermissions } from "./permissions.js";
 // đủ cho mọi định dạng đang dùng ngoài đời (UUID, trace-id của Cloudflare/OTel) mà không hơn.
 const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
 
+/**
+ * TRẦN TUỔI THỌ TUYỆT ĐỐI của một phiên cookie, tính từ lần XÁC THỰC (`authAt`, đặt trong
+ * authService.establishSession), KHÔNG phải từ lần dùng gần nhất.
+ *
+ * VÌ SAO cần: cấu hình phiên (src/app.ts) là `rolling: true` + cookie.maxAge 7 ngày, nên MỖI request
+ * lại đẩy hạn thêm 7 ngày. Trước chốt này, `enforceActiveUser` đọc `authAt` DUY NHẤT để so với
+ * `User.passwordChangedAt` — mà cột đó nullable và chỉ được ghi khi đổi mật khẩu / nhận lời mời /
+ * admin đặt lại. Tài khoản chưa từng đổi mật khẩu có phiên sống VÔ HẠN miễn là được dùng mỗi tuần:
+ * không có mốc nào buộc người dùng chứng minh lại danh tính bằng mật khẩu (+MFA). Đây đúng là lớp
+ * lỗi đã được vá cho HỌ refresh token (REFRESH_FAMILY_MAX_DAYS, src/jwt.ts) — chốt này là bản
+ * tương ứng cho đường cookie.
+ *
+ * Là hằng số trong module chứ không phải biến môi trường một cách CÓ CHỦ Ý — cùng lý do như
+ * REFRESH_FAMILY_MAX_DAYS: một chính sách bảo mật không nên có nút vặn mà chưa ai cần vặn. (Nếu sau
+ * này thật sự cần thì chuyển sang src/config.ts.) Export để test hồi quy ÔM SÁT được ranh giới.
+ */
+export const SESSION_MAX_AGE_DAYS = 30;
+
 export function requestId(req: Request, res: Response, next: NextFunction) {
   // x-request-id header có thể là string | string[] (header trùng lặp) | undefined.
   // Chuẩn hoá về 1 string: header trùng → lấy phần tử đầu; thiếu → sinh UUID.
@@ -129,6 +147,26 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
           })
         );
       }
+    }
+    // TRẦN TUỔI THỌ TUYỆT ĐỐI — xem SESSION_MAX_AGE_DAYS ở đầu file.
+    //
+    // FAIL-CLOSED VÀ HỆ QUẢ ĐÃ BIẾT: phiên KHÔNG có `authAt` cũng bị huỷ. `authAt` chỉ được đặt ở
+    // establishSession (src/services/authService.ts), nên mọi phiên hợp lệ sinh ra từ lần triển khai
+    // trước bản vá này đều thiếu nó → LẦN TRIỂN KHAI NÀY BUỘC TẤT CẢ NGƯỜI DÙNG ĐANG ĐĂNG NHẬP PHẢI
+    // ĐĂNG NHẬP LẠI ĐÚNG MỘT LẦN. Đó là cái giá được chấp nhận có ý thức: chọn hướng ngược lại (coi
+    // thiếu `authAt` là hợp lệ) biến chốt này thành thứ tự vô hiệu hoá được bằng cách xoá một khoá.
+    //
+    // Mã trả về là 'session_expired' chứ không dùng lại 'session_revoked': hai tình huống khác nhau
+    // (hết hạn theo thời gian vs tài khoản bị khoá/đổi mật khẩu) nên nhật ký phân biệt được. Client
+    // không cần đổi gì — web/src/lib/api.ts bắn "auth:expired" cho MỌI 401, không đọc `code`.
+    const tuoiPhien = Date.now() - Number(req.session.authAt ?? 0);
+    if (!req.session.authAt || tuoiPhien > SESSION_MAX_AGE_DAYS * 86400_000) {
+      return req.session.destroy(() =>
+        res.status(401).json({
+          error: "Phiên đã hết hạn, vui lòng đăng nhập lại",
+          code: "session_expired",
+        })
+      );
     }
     if (req.session.role !== user.role) req.session.role = user.role; // authoritative role
     // Resolve quyền per-user MỖI request (cookie path) → admin đổi quyền user là hiệu lực ngay request kế.

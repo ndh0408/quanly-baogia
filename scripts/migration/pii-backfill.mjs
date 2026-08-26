@@ -65,6 +65,24 @@ if (ROTATE && process.env.PII_ENC_KEY_OLD === process.env.PII_ENC_KEY) {
   console.error("✖ PII_ENC_KEY_OLD trùng PII_ENC_KEY — không có gì để xoay.");
   process.exit(1);
 }
+// `--verify` là bước CHỨNG MINH "khoá mới TỰ ĐỨNG ĐƯỢC", và runbook dùng đúng dấu ✓ của nó làm
+// điều kiện để HUỶ khoá cũ khỏi kho bí mật. Chạy nó khi PII_ENC_KEY_OLD vẫn còn trong môi trường
+// là tự phá bước chứng minh: `decryptPii` sẽ lặng lẽ rơi về khoá cũ.
+//
+// Đây KHÔNG phải tình huống hiếm — nó gần như chắc chắn xảy ra: bước ngay trước đó (`--rotate`)
+// BẮT BUỘC phải có PII_ENC_KEY_OLD, nên người vận hành chạy `--verify` từ cùng shell / cùng file
+// .env là chuyện tự nhiên nhất. Rồi họ huỷ khoá cũ, và những hàng chưa xoay không bao giờ giải
+// lại được. Chặn ở đây, đừng chỉ đếm.
+//
+// (verifyModel BÊN TRONG cũng đã đếm riêng `conKhoaCu` và coi đó là ✖ — hai lớp, cố ý.)
+if (VERIFY && (process.env.PII_ENC_KEY_OLD || "")) {
+  console.error("✖ --verify là bước CHỨNG MINH khoá MỚI tự đứng được, nên KHÔNG được chạy khi");
+  console.error("  PII_ENC_KEY_OLD vẫn còn trong môi trường — bản mã cũ sẽ vẫn giải ra được và");
+  console.error("  bước kiểm sẽ báo ĐẠT một cách sai sự thật.");
+  console.error("  Gỡ PII_ENC_KEY_OLD khỏi môi trường rồi chạy lại. Nếu lúc đó có hàng KHÔNG giải");
+  console.error("  được, ĐẶT LẠI PII_ENC_KEY_OLD và chạy --rotate tiếp — ĐỪNG huỷ khoá cũ.");
+  process.exit(1);
+}
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -111,7 +129,7 @@ async function rotateModel(model, fields) {
   if (DRY) return { model, total, rotated: 0, failed: 0 };
 
   const select = Object.fromEntries([["id", true], ...fields.map((f) => [f.enc, true])]);
-  let rotated = 0, failed = 0, cursor = 0;
+  let rotated = 0, failed = 0, cursor = 0, boQuaVìDaDoi = 0;
   for (;;) {
     // Phân trang bằng CON TRỎ id chứ không bằng skip: hàng đã xoay vẫn khớp `piiVersion > 0` nên
     // `skip` sẽ đứng yên tại chỗ và lặp vô tận.
@@ -138,13 +156,34 @@ async function rotateModel(model, fields) {
       // bản ghi nửa khoá cũ nửa khoá mới — không cách nào sửa sau khi khoá cũ bị gỡ.
       if (hong) { failed++; continue; }
       if (!Object.keys(data).length) continue;
-      await client.update({ where: { id: row.id }, data });
+
+      // GHI CÓ ĐIỀU KIỆN (compare-and-set), KHÔNG ghi mù.
+      //
+      // Giữa lúc đọc lô và lúc ghi lại, ứng dụng VẪN ĐANG PHỤC VỤ — runbook nói rõ vậy. Nếu ai đó
+      // sửa hồ sơ trong khoảng đó, `update({ where: { id } })` sẽ ghi đè bản mã MỚI của họ bằng
+      // giá trị CŨ vừa mã lại. Và vì `decodePiiOnRead` ƯU TIÊN cột *Enc hơn cột thô, API sẽ trả
+      // GIÁ TRỊ CŨ mãi mãi sau đó.
+      //
+      // Tình huống đã được dựng ra cụ thể: 10:00:03 rotate đọc hồ sơ #123 (bankAccountEnc = STK cũ);
+      // 10:00:05 kế toán đổi số tài khoản qua PUT /api/personnel/123; 10:00:07 rotate ghi đè bằng
+      // STK CŨ. Từ đó màn hình hiện STK cũ trong khi cột thô giữ STK mới → chuyển lương sai tài
+      // khoản. Với `salary` còn lộ rõ hơn: tổng ở summary tính trên cột THÔ (mới) còn từng dòng
+      // hiển thị từ *Enc (cũ) → tổng không bằng tổng các dòng trên cùng một màn hình.
+      //
+      // `updateMany` kèm bản mã CŨ trong WHERE biến việc ghi thành nguyên tử: hàng đã đổi thì
+      // `count === 0` và ta bỏ qua — hàng đó đã mang khoá MỚI rồi (encodePiiForWrite luôn dùng
+      // khoá hiện tại), nên bỏ qua là ĐÚNG, không phải lỗi.
+      const dieuKien = { id: row.id };
+      for (const f of fields) if (isPiiEncrypted(row[f.enc])) dieuKien[f.enc] = row[f.enc];
+      const kq = await client.updateMany({ where: dieuKien, data });
+      if (kq.count === 0) { boQuaVìDaDoi++; continue; }
       rotated++;
     }
     process.stdout.write(`   … ${rotated}\r`);
   }
-  console.log(`   xoay ${rotated} bản ghi · KHÔNG giải mã được ${failed}`);
-  return { model, total, rotated, failed };
+  const ghiChu = boQuaVìDaDoi ? ` · ${boQuaVìDaDoi} bị ứng dụng ghi đè giữa chừng (đã mang khoá mới, bỏ qua đúng)` : "";
+  console.log(`   xoay ${rotated} bản ghi · KHÔNG giải mã được ${failed}${ghiChu}`);
+  return { model, total, rotated, failed, boQuaVìDaDoi };
 }
 
 async function backfillModel(model, fields) {

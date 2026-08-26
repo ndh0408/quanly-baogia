@@ -65,7 +65,21 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 ### Xoay `PII_ENC_KEY`
 
 Đổi biến môi trường rồi khởi động lại = **toàn bộ dữ liệu cũ hoá đá**. Xoay khoá là một quy trình
-bốn bước, và trong suốt quy trình đó ứng dụng vẫn phục vụ bình thường:
+bốn bước, và trong suốt quy trình đó ứng dụng vẫn phục vụ bình thường.
+
+> **Chạy TỪ TRONG container app đang chạy.** Cả hai lệnh dưới đây là artifact đã biên dịch trong
+> `dist/` nên có sẵn trong image production.
+>
+> Bản trước của runbook này gọi script trong `scripts/migration/` qua tsx, và một npm script — **cả
+> hai đều MODULE_NOT_FOUND trong container**: tầng runtime của Dockerfile chỉ COPY `node_modules`,
+> `prisma`, `package.json`, `dist`, `public`, `templates`; không có `scripts/`, không có `src/`, và
+> `tsx` là devDependency. (Cố ý KHÔNG chép lại nguyên văn hai lệnh hỏng đó ở đây — người đọc lướt
+> copy nhầm là mất thêm một vòng lúc 2 giờ sáng.) Đó đúng là lỗi mà `src/tools/verifyIntegrity.ts`
+> đã sửa một lần cho diễn tập khôi phục, rồi lặp lại ở runbook này.
+>
+> ```bash
+> docker compose -f docker-compose.prod.yml exec app node dist/tools/piiRotate.js
+> ```
 
 ```bash
 # 1. Đặt THÊM khoá cũ bên cạnh khoá mới, rồi khởi động lại (đọc chấp nhận cả hai khoá,
@@ -74,16 +88,34 @@ PII_ENC_KEY=<khoá MỚI>
 PII_ENC_KEY_OLD=<khoá CŨ>
 
 # 2. Mã hoá lại toàn bộ hàng đã mã hoá. Chạy lại được, đứt giữa chừng thì chạy lại.
-#    KHÔNG đụng cột thô. Bản ghi nào không giải được bằng CẢ HAI khoá → script báo đỏ và
-#    bỏ qua nguyên hàng (không để lại bản ghi nửa khoá cũ nửa khoá mới).
-node --import tsx scripts/migration/pii-backfill.mjs --rotate
+#    KHÔNG đụng cột thô. Bản ghi nào không giải được bằng CẢ HAI khoá → báo đỏ và bỏ qua
+#    nguyên hàng (không để lại bản ghi nửa khoá cũ nửa khoá mới).
+#    Ghi CÓ ĐIỀU KIỆN: hàng nào bị người dùng sửa giữa chừng thì bỏ qua thay vì ghi đè —
+#    hàng đó đã mang khoá mới rồi. Thêm --dry-run để chỉ đếm.
+node dist/tools/piiRotate.js
 
-# 3. GỠ PII_ENC_KEY_OLD, khởi động lại.
-# 4. Chứng minh khoá mới tự đứng được — còn hàng nào mã bằng khoá cũ là bước này báo đỏ.
-npm run pii:verify
+# 3. GỠ PII_ENC_KEY_OLD khỏi môi trường, khởi động lại.
+#    BẮT BUỘC làm trước bước 4 — xem cảnh báo bên dưới.
+# 4. Chứng minh khoá MỚI TỰ ĐỨNG ĐƯỢC.
+node dist/tools/verifyIntegrity.js --pii
 ```
 
-Đừng gỡ `PII_ENC_KEY_OLD` khi bước 2 chưa báo `✓`. Trong lúc cửa sổ còn mở, mỗi lần đọc trúng hàng
+> ### ⚠️ Bước 3 phải làm TRƯỚC bước 4 — không có ngoại lệ
+>
+> `decryptPii` **cố ý** thử khoá mới rồi rơi về `PII_ENC_KEY_OLD` — đó chính là thứ làm cho cửa sổ
+> chuyển tiếp không gây gián đoạn. Nhưng nó cũng có nghĩa là: chạy bước 4 khi khoá cũ VẪN CÒN trong
+> môi trường thì bước kiểm **báo đạt kể cả khi không một hàng nào được mã lại**.
+>
+> Đó không phải tình huống hiếm — nó gần như chắc chắn xảy ra, vì bước 2 vừa bắt buộc phải có
+> `PII_ENC_KEY_OLD`, nên chạy bước 4 từ cùng shell / cùng file `.env` là chuyện tự nhiên nhất. Rồi
+> khoá cũ bị huỷ, và những hàng chưa xoay **không bao giờ giải lại được**.
+>
+> Nay có ba lớp chặn: `piiRotate.js` in ra đúng thứ tự này khi chạy xong;
+> `scripts/migration/pii-backfill.mjs --verify` **từ chối chạy** khi `PII_ENC_KEY_OLD` còn đặt; và
+> `verifyIntegrity.js --pii` **đếm riêng** số trường còn nằm ở khoá cũ rồi báo ✖ nếu cửa sổ xoay
+> không còn mở.
+
+Đừng gỡ `PII_ENC_KEY_OLD` khi bước 2 chưa chạy xong. Trong lúc cửa sổ còn mở, mỗi lần đọc trúng hàng
 chưa xoay sẽ ghi một dòng `warn` — đó là cách biết còn tồn đọng. Chỉ khi bước 4 đạt mới **huỷ** khoá
 cũ khỏi kho bí mật.
 

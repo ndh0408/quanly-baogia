@@ -8,12 +8,15 @@ import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { putObject, presignDownload, presignUpload, deleteObject, isStorageEnabled, headObject, getObjectHeadBytes, getObjectBytes, copyObject } from "../storage.js";
 import { audit } from "../audit.js";
-import { canOnQuote } from "../permissions.js";
+import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 import { inspectXlsx } from "../zipSafety.js";
 
 const router = Router();
 router.use(requireAuth);
+// requireAuth là XÁC THỰC, không phải PHÂN QUYỀN. Ba đường GHI bên dưới thêm `file:upload`; đường
+// ĐỌC (`GET /sign-download`) CỐ Ý không thêm, vì ở đó `canAccessKey` mới là chốt phạm vi đúng —
+// người xem hợp lệ (vd kế toán mở chứng từ) không có nghiệp vụ tải lên nào.
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // giữ CÙNG trần với đường multipart bên dưới
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -138,6 +141,7 @@ function stagingUploadKey(session: Request["session"], ext = "") {
 /** POST /api/files - multipart upload, returns object key + signed download URL. */
 router.post(
   "/",
+  requirePermission(P.FILE_UPLOAD),
   upload.single("file"),
   asyncHandler(async (req: Request, res: Response) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
@@ -215,6 +219,8 @@ router.get(
  */
 router.post(
   "/sign-upload",
+  // Quyền TRƯỚC limiter: người không được phép ghi thì không nên tiêu ô hạn mức của ai cả.
+  requirePermission(P.FILE_UPLOAD),
   signLimiter,
   validate({ body: z.object({
     // Only allowlisted, display-safe content types — never text/html or svg.
@@ -267,6 +273,7 @@ router.post(
  */
 router.post(
   "/finalize",
+  requirePermission(P.FILE_UPLOAD),
   signLimiter,
   validate({ body: z.object({ key: z.string().min(1).max(500) }) }),
   asyncHandler(async (req: Request, res: Response) => {
