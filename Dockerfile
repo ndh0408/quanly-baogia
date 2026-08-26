@@ -36,7 +36,7 @@ RUN apk add --no-cache openssl libc6-compat \
 COPY src ./src
 RUN npm run build \
  # Chốt an toàn: nếu tsc đổi cách bố trí đầu ra thì phải VỠ Ở ĐÂY, không phải lúc pod khởi động.
- && test -f dist/server.js && test -f dist/worker.js && test -f dist/exportWorker.js
+ && test -f dist/server.js && test -f dist/worker.js && test -f dist/exportWorker.js && test -f dist/importWorker.js
 
 ##### web build stage — frontend React + Vite + TypeScript → public/app2 #####
 FROM node:22-alpine AS webbuild

@@ -52,6 +52,43 @@ không tồn tại là job chết lúc 02:30 — không ai thấy, và đội v�
 không ghi nổi config ở `$HOME` mặc định). Nhưng `sha256sum`, `sed`, `sort`, `wc`,
 `tr` thì **vẫn chưa xác minh được** — sandbox không có Docker daemon.
 
+### 3. Nhập Excel: đã rời event loop, nhưng CHƯA có hàng rào bộ nhớ thật
+
+`POST /api/quotes/import-excel` nay đọc workbook trong **worker thread** — điều này
+đã đo được (`tests/import-worker-thread.test.js` đo độ trễ event loop trong lúc
+worker chạy). Server không còn đứng khi ai đó nhập file nặng.
+
+**Nhưng trần bộ nhớ thì chưa có thật.** Tôi đặt
+`resourceLimits.maxOldGenerationSizeMb` rồi **đo lại**, và nó KHÔNG chặn: với trần
+32MB, một worker vẫn cấp phát thoải mái `Buffer.alloc(300MB)` và ba triệu object.
+Buffer là bộ nhớ ngoài heap V8, còn old-space thì V8 co giãn theo cách riêng.
+
+Hàng rào thật hiện nay chỉ là **trần tải lên 10MB** (multer) cộng **timeout 30s**.
+Mà `.xlsx` là ZIP: 10MB nén bung ra hàng trăm MB.
+
+**Việc phải làm:** đọc theo LUỒNG bằng `exceljs.stream.xlsx.WorkbookReader` thay cho
+`workbook.xlsx.load()`, để `MAX_SHEETS` / `MAX_SCAN_ROWS` có tác dụng **trong lúc**
+đọc chứ không phải sau khi đã dựng xong cả workbook trong RAM. Đó là thay đổi lớn
+hơn một lượt vá và cần bộ test round-trip Excel chạy kèm từng bước — nên chưa làm.
+
+**Đừng ghi ở đâu rằng trần heap của worker bảo vệ được gì.**
+
+### 4. Worker thread TỪNG không chạy ở dev/test suốt thời gian dài
+
+Không phải rủi ro còn mở — đã vá — nhưng đáng ghi lại vì nó cho thấy một lớp lỗi:
+**đường lui im lặng che mất việc đường chính chưa bao giờ chạy.**
+
+`new Worker(new URL("./exportWorker.js", import.meta.url))` chạy tốt ở production
+(image chỉ chứa `dist/`, mọi thứ là `.js`) nhưng **luôn hỏng** ở dev/test — `npm run
+dev` là `tsx src/server.ts`, mà worker thread KHÔNG kế thừa loader của tsx, nên
+`./excel.js` không giải được (trên đĩa chỉ có `excel.ts`). `runExportJob` bắt lỗi,
+ghi một dòng `warn`, rồi rơi về chạy **nội tuyến trên luồng chính** — đúng thứ mà
+worker sinh ra để tránh. Bộ test vẫn xanh vì đường lui cho kết quả đúng.
+
+Nay cả hai worker tự đăng ký loader tsx khi chạy từ nguồn. Bài học: **một đường lui
+tự động che được việc đường chính chưa bao giờ hoạt động.** Khi thêm đường lui, hãy
+thêm luôn cách nhìn thấy nó đang được dùng.
+
 **Việc phải làm:** `kubectl create job --from=cronjob/quanly-object-backup thu-1`
 trên kind/minikube, đọc log, xác nhận kết thúc bằng `OBJECT_BACKUP_DONE` và
 `manifest_*.tsv` có nội dung, rồi **diễn tập khôi phục từ bản gương đó**.

@@ -12,7 +12,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { canOnQuote, requirePermission, can, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
-import { parseQuoteWorkbook } from "../excelImport.js";
+import { Worker } from "node:worker_threads";
 import { inspectXlsx } from "../zipSafety.js";
 import { audit } from "../audit.js";
 
@@ -23,6 +23,65 @@ router.use(requireAuth);
 const importLimiter = createLimiter("import-excel", { windowMs: 60_000, max: 12 });
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// ─── Đọc workbook TRONG WORKER THREAD ──────────────────────────────────────
+//
+// `parseQuoteWorkbook` gọi `workbook.xlsx.load()` của exceljs — giải nén và dựng TOÀN BỘ workbook
+// trong bộ nhớ TRƯỚC khi bất kỳ trần nào của app (MAX_SHEETS, MAX_SCAN_ROWS) có tác dụng. Trần tải
+// lên là 10MB, nhưng .xlsx là ZIP: XML thưa nén cực tốt, 10MB nén bung ra hàng trăm MB. Chạy trên
+// luồng chính thì CẢ SERVER ĐỨNG (event loop bị chiếm — mọi request khác, mọi SSE, mọi nhịp tim
+// xếp hàng sau nó), và vượt RAM là V8 giết TIẾN TRÌNH chứ không phải một request.
+//
+// CỐ Ý KHÔNG có đường rơi về nội tuyến (khác `runExportJob`): nội tuyến CHÍNH LÀ thứ đang bỏ đi.
+// Worker hỏng thì trả lỗi cho người dùng, không kéo việc nặng về luồng chính đúng lúc đang tải cao.
+const IMPORT_WORKER_URL = new URL("../importWorker.js", import.meta.url);
+const IMPORT_TIMEOUT_MS = Math.max(5_000, Number(process.env.IMPORT_TIMEOUT_MS) || 30_000);
+// Trần heap của worker.
+//
+// ⚠️ ĐÃ ĐO: `maxOldGenerationSizeMb` KHÔNG chặn được thứ tốn kém nhất ở đây. Thử với trần 32MB,
+// một worker vẫn cấp phát thoải mái `Buffer.alloc(300MB)` và ba triệu object. Buffer là bộ nhớ
+// NGOÀI heap V8, còn old-space thì V8 co giãn theo cách riêng. Nên ĐỪNG coi đây là hàng rào.
+//
+// Hàng rào THẬT ở đường này là hai thứ khác: trần tải lên 10MB (multer, ngay trên) và
+// IMPORT_TIMEOUT_MS. Trần heap giữ lại như một lớp phòng khi V8 đổi hành vi, không phải như một
+// bảo đảm. Lợi ích ĐÃ CHỨNG MINH của worker là tách việc đọc file khỏi EVENT LOOP —
+// tests/import-worker-thread.test.js đo độ trễ event loop để chốt điều đó.
+//
+// Việc còn lại: giới hạn bộ nhớ thật sự cần đọc theo luồng (exceljs WorkbookReader) thay vì
+// `.load()` cả workbook. Xem docs/REMAINING_RISKS.md.
+const IMPORT_HEAP_MB = Math.max(128, Number(process.env.IMPORT_HEAP_MB) || 512);
+
+class LoiNhap extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+function docWorkbookTrongWorker(buffer: Buffer): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let xong = false;
+    const w = new Worker(IMPORT_WORKER_URL, {
+      workerData: { buffer },
+      resourceLimits: { maxOldGenerationSizeMb: IMPORT_HEAP_MB },
+    });
+    const ket = (fn: (a: any) => void, a: any) => { if (xong) return; xong = true; clearTimeout(dongHo); void w.terminate(); fn(a); };
+    const dongHo = setTimeout(
+      () => ket(reject, new LoiNhap("File Excel quá nặng để đọc trong thời gian cho phép. Hãy tách bớt sheet rồi thử lại.", 413)),
+      IMPORT_TIMEOUT_MS,
+    );
+    w.once("message", (m: any) => {
+      if (m?.ok) return ket(resolve, m.result);
+      // `quaNang` = worker chạm trần heap. Đó là 413 (file quá lớn), không phải 422 (file hỏng) —
+      // lời khuyên cho người dùng khác hẳn nhau.
+      ket(reject, m?.quaNang
+        ? new LoiNhap("File Excel quá lớn để xử lý. Hãy tách bớt sheet hoặc bớt dòng rồi thử lại.", 413)
+        : new LoiNhap(`Không đọc được file Excel: ${m?.error || "file hỏng hoặc sai định dạng"}`, 422));
+    });
+    w.once("error", (e) => ket(reject, e));
+    // Chạm trần heap thì worker CHẾT HẲN, không kịp gửi message nào — bắt ở đây mới thấy.
+    w.once("exit", (code) => {
+      if (!xong && code !== 0) ket(reject, new LoiNhap("File Excel quá lớn để xử lý. Hãy tách bớt sheet hoặc bớt dòng rồi thử lại.", 413));
+    });
+  });
+}
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 4 },
@@ -93,11 +152,13 @@ router.post(
 
     let result;
     try {
-      result = await parseQuoteWorkbook(req.file.buffer);
+      result = await docWorkbookTrongWorker(req.file.buffer);
     } catch (e) {
-      return res.status(422).json({
-        error: `Không đọc được file Excel: ${e instanceof Error ? e.message : "file hỏng hoặc sai định dạng"}`,
-      });
+      const st = e instanceof LoiNhap ? e.status : 422;
+      const msg = e instanceof LoiNhap
+        ? e.message
+        : `Không đọc được file Excel: ${e instanceof Error ? e.message : "file hỏng hoặc sai định dạng"}`;
+      return res.status(st).json({ error: msg });
     }
 
     await audit(req, "quote.import.preview", {
@@ -106,7 +167,7 @@ router.post(
       after: {
         file: String(req.file.originalname || "").slice(0, 120),
         size: req.file.size,
-        sheets: result.sheets.map((s) => ({ name: s.name, rows: s.items.length, skipped: s.skipped || undefined })),
+        sheets: result.sheets.map((s: any) => ({ name: s.name, rows: s.items.length, skipped: s.skipped || undefined })),
       },
     });
     res.json(result);
