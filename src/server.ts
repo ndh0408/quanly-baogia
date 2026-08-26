@@ -1,7 +1,7 @@
 // Entrypoint: process-level concerns only — Sentry, the HTTP listener,
 // maintenance timers and graceful shutdown. The Express app itself is built in
 // app.js (createApp) so integration tests can drive it without binding a port.
-import { config } from "./config.js";
+import { config, featureStatus } from "./config.js";
 import { logger } from "./logger.js";
 import { initSentry } from "./observability.js";
 import { prisma } from "./db.js";
@@ -19,6 +19,10 @@ const app = createApp();
 
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, `🚀 Server chạy tại http://localhost:${config.PORT}`);
+  // Trạng thái tính năng NẰM NGAY TRONG LOG khởi động. Trước đây muốn biết "production có đang mã
+  // hoá PII không", "email có thật sự gửi không" thì phải đi đọc mã nguồn hoặc so biến môi trường
+  // bằng tay. Nay một dòng log trả lời hết.
+  logger.info({ features: featureStatus() }, "cấu hình tính năng");
   void reloadRoleOverrides(); // phân quyền động: nạp quyền ghi-đè vai trò từ DB (lỗi → dùng mặc định)
 
   // KIỂM KHO OBJECT NGAY LÚC KHỞI ĐỘNG.
