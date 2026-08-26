@@ -58,6 +58,17 @@ services:
       PORT: "3000"
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # ĐẶT TƯỜNG MINH, không phó mặc cho .env trên máy chủ.
+      #
+      # Topology: Cloudflare → cloudflared → container. Đúng MỘT chặng proxy tin được, nên giá trị
+      # là "1". Không đặt thì Express lấy req.ip là IP của cloudflared trong mạng docker — GIỐNG NHAU
+      # cho mọi người dùng. Hậu quả: toàn bộ giới hạn theo IP (đăng nhập, API, xuất file) gộp chung
+      # MỘT xô — một người gõ nhiều là khoá cả công ty — và nhật ký kiểm toán ghi IP proxy thay vì
+      # IP thật, làm điều tra sự cố bảo mật thành vô nghĩa.
+      #
+      # Đặt "1" chứ KHÔNG đặt "true": "true" tin mọi chặng, nghĩa là client tự thêm X-Forwarded-For
+      # là giả được IP nguồn và lách rate-limit.
+      TRUST_PROXY: "1"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

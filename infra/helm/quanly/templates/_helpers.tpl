@@ -41,7 +41,7 @@ default
 
 {{- define "quanly.databaseUrl" -}}
 {{- if .Values.postgres.enabled -}}
-postgresql://quanly:CHANGE_ME_INTERNAL@{{ include "quanly.fullname" . }}-postgres:5432/quanly?schema=public
+postgresql://quanly:{{ .Values.postgres.password }}@{{ include "quanly.fullname" . }}-postgres:5432/quanly?schema=public
 {{- else -}}
 {{ .Values.secrets.DATABASE_URL }}
 {{- end -}}

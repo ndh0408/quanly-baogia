@@ -65,6 +65,12 @@ ingress:
 postgres:
   enabled: true # set false to use external DB
   image: postgres:16-alpine
+  # Mật khẩu Postgres NỘI BỘ. Bản trước ghi CHẾT chuỗi `CHANGE_ME_INTERNAL` trong hai template và
+  # KHÔNG có key nào ở values để đổi — nghĩa là mọi cài đặt chart dùng Postgres nhúng đều chạy với
+  # đúng một mật khẩu mà bất kỳ ai đọc repo cũng biết. NetworkPolicy có chặn pod lạ, nhưng đó là
+  # phòng thủ theo mạng, không phải lý do để dùng thông tin đăng nhập ai cũng biết.
+  # ĐỔI ở mọi triển khai thật. Sinh: openssl rand -base64 24
+  password: CHANGE_ME_INTERNAL
   storageSize: 20Gi
   resources:
     requests: { cpu: 100m, memory: 256Mi }

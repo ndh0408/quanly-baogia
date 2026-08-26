@@ -54,9 +54,20 @@ ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrat
 echo "▶ [5/6] Recreate app + worker"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
 
+# `|| echo FAILED` ở bản trước NUỐT mã lỗi: `set -e` không bắt được, và dòng "✅ now running" phía
+# dưới in ra VÔ ĐIỀU KIỆN. Một lần deploy mà container không bao giờ healthy vẫn báo thành công —
+# người deploy đóng terminal, và sự cố chỉ lộ ra khi người dùng gọi điện.
 echo "▶ [6/6] Verify /livez"
-ssh "$SSH" "for i in \$(seq 1 20); do s=\$(docker inspect -f '{{.State.Health.Status}}' quanly-app 2>/dev/null); [ \"\$s\" = healthy ] && break; sleep 3; done; \
-  echo -n 'livez: '; docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez || echo FAILED"
+if ssh "$SSH" "for i in \$(seq 1 20); do s=\$(docker inspect -f '{{.State.Health.Status}}' quanly-app 2>/dev/null); [ \"\$s\" = healthy ] && break; sleep 3; done; \
+  docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez" | grep -q '\"ok\":true'; then
+  echo "   livez OK"
+else
+  echo
+  echo "❌ $TARGET KHÔNG lên được sau khi deploy $SHA — /livez không trả ok."
+  echo "   Xem log:  ssh $SSH \"docker logs quanly-app --tail 200\""
+  echo "   Rollback: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""
+  exit 1
+fi
 echo
 echo "✅ $TARGET now running $SHA  →  $URL"
 echo "   Rollback: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""

@@ -22,7 +22,7 @@ spec:
           env:
             - { name: POSTGRES_USER, value: quanly }
             - { name: POSTGRES_DB, value: quanly }
-            - { name: POSTGRES_PASSWORD, value: CHANGE_ME_INTERNAL }
+            - { name: POSTGRES_PASSWORD, value: {{ .Values.postgres.password | quote }} }
           volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
           resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
           readinessProbe:
