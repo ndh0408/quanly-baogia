@@ -4,7 +4,7 @@
 - **RPO** (mất tối đa bao nhiêu data): ≤ 24h (backup hằng ngày 02:00) — hoặc tới lần deploy gần nhất nếu mới deploy.
 - **RTO** (thời gian khôi phục): ≤ 1h cho khôi phục DB; ≤ 4h nếu phải dựng lại VM.
 
-## Backup tự động (cài bằng `scripts/install-backup.sh`)
+## Backup tự động (cài bằng `scripts/backup/install-backup.sh`)
 - **Lịch:** `quanly-backup.timer` hằng ngày 02:00 → `pg_dump` (read-only) → `gzip` → `/opt/quanly-backups/quanly-<ngày>.sql.gz`, giữ **14 bản** local.
 - **Off-host:** nếu điền `NAS_*` trong `/etc/quanly-backup.env` → đẩy lên **NAS Synology** (192.168.1.100) qua docker smbclient (host coolify CŨNG được Proxmox backup cả VM lên NAS → 2 lớp off-host).
 - **Restore-test:** `quanly-restore-test.timer` hằng tuần → nạp dump mới nhất vào DB tạm + đếm User/Quote → DROP. Lỗi → **alert Telegram**.
@@ -66,8 +66,17 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 
 ### Sao lưu kho object
 
-Kho object cần cơ chế riêng — bật versioning của bucket, hoặc đồng bộ định kỳ sang NAS. Bản dump CSDL
-**không** kéo theo ảnh.
+`scripts/backup/backup-objects.sh` — chạy hằng ngày 02:30 qua `quanly-backup-objects.timer`
+(cài bằng `scripts/backup/install-backup.sh`).
+
+* **Cộng dồn, KHÔNG lan truyền xoá.** `mc mirror` không dùng `--remove`: bucket bị xoá nhầm hay bị mã
+  hoá tống tiền thì bản sao lưu vẫn GIỮ vật. Đây là khác biệt giữa *bản sao lưu* và *bản chép*.
+* **Manifest SHA-256** mỗi lượt (`objects-manifest-<ngày>.tsv`) — về sau đối chiếu được bản gương có
+  đúng nội dung không, chứ không chỉ đúng số file.
+* **Đối chiếu số lượng** bucket ↔ bản gương ngay sau khi mirror; thiếu object là dừng + alert.
+* **Off-host** lên NAS như bản dump CSDL (đóng gói `.tar.gz` khi bản gương còn dưới ngưỡng
+  `OBJ_TARBALL_MAX_MB`, vượt ngưỡng thì chỉ đẩy manifest và cảnh báo).
+* Cần `S3_*` trong `/etc/quanly-backup.env`. Thiếu → script dừng và alert, KHÔNG im lặng bỏ qua.
 
 Đối chiếu tính toàn vẹn sau khi khôi phục:
 
@@ -87,8 +96,35 @@ npm run pii:verify     # giải mã lại toàn bộ PII, đối chiếu cột t
 
 | | Hiện tại | Ghi chú |
 |---|---|---|
-| RPO (mất tối đa bao nhiêu dữ liệu) | 24h | theo lịch dump hằng ngày; kho object chưa có lịch riêng |
+| RPO (mất tối đa bao nhiêu dữ liệu) | 24h | dump CSDL 02:00 + kho object 02:30, cùng nhịp hằng ngày |
 | RTO (bao lâu chạy lại được) | ~30 phút | đo trên DEV: restore 615 KB mất vài giây; phần lớn thời gian là dựng lại hạ tầng |
 
-**Việc còn treo**: kho object production chưa có lịch sao lưu. Ghi nhận ở đây thay vì để trống —
-`payment-proofs/` mất là mất chứng từ tài chính.
+## Diễn tập khôi phục tự động
+
+`scripts/backup/restore-drill.sh` — CN 03:30 hằng tuần (`quanly-restore-drill.timer`).
+
+Khác `restore-test.sh` ở chỗ nó kiểm **đủ ba thứ**, không chỉ "dump có nạp được không":
+
+| Bước | Kiểm cái gì | Hỏng thì nghĩa là |
+|---|---|---|
+| 1 | Tuổi bản dump + checksum | lịch backup đã chết, hoặc file đã hỏng |
+| 2 | Nạp vào CSDL **tạm** + đếm bản ghi | dump không dùng được |
+| 3 | `pii:verify` với `PII_ENC_KEY` thật | **khoá đang giữ không mở được bản sao lưu** — CCCD/STK/lương sẽ hoá đá |
+| 4 | `proof:verify` đối chiếu SHA-256 | object thiếu hoặc sai — chứng từ tài chính đã mất |
+| 5 | Bản gương kho object + 20 mẫu ngẫu nhiên | bản sao lưu object hỏng hoặc quá hạn |
+
+Bước 3 và 4 chính là chỗ hỏng âm thầm: bài test cũ vẫn báo PASS trong cả hai tình huống đó.
+
+## Canh độ tươi (watchdog)
+
+`scripts/backup/backup-watchdog.sh` — mỗi 6h (`quanly-backup-watchdog.timer`).
+
+Mọi script backup chỉ alert **khi chúng chạy và hỏng**. Không cái nào alert được khi chúng **không
+chạy**: timer bị disable sau một lần cập nhật, host mất điện đúng khung 02:00, docker daemon chết,
+ai đó `systemctl stop`. Chế độ hỏng nguy hiểm nhất của backup là im lặng — mọi thứ trông bình thường
+cho tới hôm cần khôi phục thì bản mới nhất đã sáu tuần tuổi.
+
+Watchdog soi **dấu thời gian thành công** (`.db-last-success`, `.objects-last-success`,
+`.drill-last-success`) và trạng thái enable của từng timer, nên bắt được cả kiểu chết mà bản thân
+script backup không bao giờ báo được. Ngưỡng theo `docs/operations/SLO.md`: CSDL < 26h, kho object
+< 26h, diễn tập < 8 ngày.

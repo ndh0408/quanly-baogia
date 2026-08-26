@@ -28,7 +28,7 @@ printf 'DATABASE_URL=postgresql://%s:%s@quanly-postgres:5432/%s?schema=public\nN
 
 mkdir -p /tmp/mig && rm -rf /tmp/mig/* && tar xzf /tmp/prodmig.tgz -C /tmp/mig
 
-docker run --rm --network "$NET" -v "$DIR":/app -v /tmp/mig/migrations:/prodmig:ro -w /app --env-file "$EF" node:22-alpine sh /app/scripts/migration-rehearsal-inner.sh
+docker run --rm --network "$NET" -v "$DIR":/app -v /tmp/mig/migrations:/prodmig:ro -w /app --env-file "$EF" node:22-alpine sh /app/scripts/db/migration-rehearsal-inner.sh
 RC=$?
 rm -f "$EF"
 exit $RC

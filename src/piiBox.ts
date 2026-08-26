@@ -2,7 +2,7 @@
 // CSDL bị lộ: CCCD, số tài khoản ngân hàng, lương.
 //
 // Đây là lớp mật mã thuần. Bản đồ trường + ghi/đọc song song nằm ở `src/piiFields.ts`; tầng service
-// KHÔNG gọi thẳng vào đây. Backfill ở `scripts/pii-backfill.mjs`.
+// KHÔNG gọi thẳng vào đây. Backfill ở `scripts/migration/pii-backfill.mjs`.
 // (Chú thích cũ ghi "module này CHƯA được gọi ở đâu cả" — đúng ở bước 1, sai từ khi nối bước 2.
 //  Một chú thích bảo mật lỗi thời tạo cảm giác an toàn giả, nên sửa ngay khi hành vi đổi.)
 //

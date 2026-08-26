@@ -34,12 +34,12 @@
     "security:scan:diff": "codex-security scan . --working-tree",
     "security:scan:dry": "codex-security scan . --dry-run",
     "format": "prettier --write .",
-    "pii:backfill": "node --import tsx scripts/pii-backfill.mjs",
-    "pii:backfill:dry": "node --import tsx scripts/pii-backfill.mjs --dry-run",
-    "pii:verify": "node --import tsx scripts/pii-backfill.mjs --verify",
-    "proof:migrate": "node --import tsx scripts/payment-proof-migrate.mjs",
-    "proof:migrate:dry": "node --import tsx scripts/payment-proof-migrate.mjs --dry-run",
-    "proof:verify": "node --import tsx scripts/payment-proof-migrate.mjs --verify"
+    "pii:backfill": "node --import tsx scripts/migration/pii-backfill.mjs",
+    "pii:backfill:dry": "node --import tsx scripts/migration/pii-backfill.mjs --dry-run",
+    "pii:verify": "node --import tsx scripts/migration/pii-backfill.mjs --verify",
+    "proof:migrate": "node --import tsx scripts/migration/payment-proof-migrate.mjs",
+    "proof:migrate:dry": "node --import tsx scripts/migration/payment-proof-migrate.mjs --dry-run",
+    "proof:verify": "node --import tsx scripts/migration/payment-proof-migrate.mjs --verify"
   },
   "engines": {
     "node": ">=22"

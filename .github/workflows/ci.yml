@@ -105,7 +105,7 @@ jobs:
       # Có lý do cụ thể: README từng ghi 141 endpoint, ma trận ghi 133, con số thật là 138 — cả hai
       # đều đếm tay nên cả hai đều trôi.
       - name: Endpoint inventory khớp ma trận phân quyền
-        run: node scripts/endpoint-inventory.mjs --check
+        run: node scripts/ci/endpoint-inventory.mjs --check
 
       # Gác KIỂU: backend chạy TypeScript nên lỗi type chỉ lộ lúc deploy nếu không chặn ở đây.
       - name: Typecheck (backend)

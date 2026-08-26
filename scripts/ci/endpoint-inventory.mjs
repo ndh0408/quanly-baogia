@@ -5,9 +5,9 @@
 // đếm tay nên cả hai đều có thể sai, và không ai biết cái nào. Con số đếm tay lệch âm thầm mỗi lần
 // thêm route — mà một endpoint không nằm trong ma trận phân quyền là một endpoint chưa ai soát.
 //
-//   node scripts/endpoint-inventory.mjs            # bảng cho người đọc
-//   node scripts/endpoint-inventory.mjs --json     # JSON cho công cụ
-//   node scripts/endpoint-inventory.mjs --check    # đối chiếu AUTHZ_MATRIX.md, khác là exit 1 (CI)
+//   node scripts/ci/endpoint-inventory.mjs            # bảng cho người đọc
+//   node scripts/ci/endpoint-inventory.mjs --json     # JSON cho công cụ
+//   node scripts/ci/endpoint-inventory.mjs --check    # đối chiếu AUTHZ_MATRIX.md, khác là exit 1 (CI)
 //
 // Giới hạn có chủ đích: đây là bộ phân tích theo mẫu, không phải trình biên dịch TS. Nó KHÔNG chạy
 // mã (chạy mã lúc kiểm kê là tự chuốc lấy side effect). Đổi lại, mọi lối khai báo route bất thường
@@ -17,7 +17,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+// scripts/ci/<file> → lùi HAI cấp về gốc repo.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const METHODS = ["get", "post", "put", "delete", "patch", "all"];
 
 /** Bóc literal đường dẫn đầu tiên sau dấu `(` — chịu được khai báo xuống dòng và mảng đường dẫn. */

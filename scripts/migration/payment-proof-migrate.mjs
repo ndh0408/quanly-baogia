@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Chuyển ảnh chứng từ thanh toán: base64-trong-CSDL → kho object riêng tư.
 //
-//   node scripts/payment-proof-migrate.mjs --dry-run   # đếm, KHÔNG ghi gì
-//   node scripts/payment-proof-migrate.mjs             # chạy thật
-//   node scripts/payment-proof-migrate.mjs --verify    # tải object về, so SHA-256 với base64 gốc
+//   node scripts/migration/payment-proof-migrate.mjs --dry-run   # đếm, KHÔNG ghi gì
+//   node scripts/migration/payment-proof-migrate.mjs             # chạy thật
+//   node scripts/migration/payment-proof-migrate.mjs --verify    # tải object về, so SHA-256 với base64 gốc
 //
 // ── NGUYÊN TẮC ───────────────────────────────────────────────────────────────
 // 1. KHÔNG XOÁ CỘT BASE64. Script chỉ TẢI LÊN + ghi siêu dữ liệu. Cột cũ là đường lui: nếu kho object
@@ -18,8 +18,8 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
-import { decodeDataUrl, sniffImage, sha256, storeProof, MAX_PROOF_BYTES } from "../src/paymentProof.js";
-import { getObjectBytes, isStorageEnabled } from "../src/storage.js";
+import { decodeDataUrl, sniffImage, sha256, storeProof, MAX_PROOF_BYTES } from "../../src/paymentProof.js";
+import { getObjectBytes, isStorageEnabled } from "../../src/storage.js";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry-run");

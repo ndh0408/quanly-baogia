@@ -7,8 +7,8 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [SECURIT
 > ### Con số này được SINH TỰ ĐỘNG, không đếm tay
 >
 > ```bash
-> node scripts/endpoint-inventory.mjs          # bảng đầy đủ
-> node scripts/endpoint-inventory.mjs --check  # CI: lệch số → exit 1
+> node scripts/ci/endpoint-inventory.mjs          # bảng đầy đủ
+> node scripts/ci/endpoint-inventory.mjs --check  # CI: lệch số → exit 1
 > ```
 >
 > **Vì sao**: README từng ghi *141 endpoint*, bản đầu của chính tài liệu này ghi *133*. Cả hai đều

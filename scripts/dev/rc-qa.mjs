@@ -6,7 +6,7 @@
 // kho object đang hoạt động. Nó bắt được lớp sai mà test tích hợp không thấy: cấu hình môi trường,
 // biến thiếu, proxy, và hiệu năng thật.
 //
-//   node scripts/rc-qa.mjs
+//   node scripts/dev/rc-qa.mjs
 
 const BASE = process.env.BASE || "https://dev.gianguyen.cloud";
 const PASS = process.env.QA_PASS || "GiaNguyenDemo2026";

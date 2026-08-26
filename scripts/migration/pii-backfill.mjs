@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Backfill mã hoá PII — bước 5/6 của lộ trình (xem SECURITY_AUDIT_2026-08.md).
 //
-//   node scripts/pii-backfill.mjs --dry-run     # đếm, KHÔNG ghi gì
-//   node scripts/pii-backfill.mjs               # chạy thật
-//   node scripts/pii-backfill.mjs --verify      # giải mã lại toàn bộ và đối chiếu với cột thô
+//   node scripts/migration/pii-backfill.mjs --dry-run     # đếm, KHÔNG ghi gì
+//   node scripts/migration/pii-backfill.mjs               # chạy thật
+//   node scripts/migration/pii-backfill.mjs --verify      # giải mã lại toàn bộ và đối chiếu với cột thô
 //
 // ── BA NGUYÊN TẮC ────────────────────────────────────────────────────────────
 // 1. KHÔNG BAO GIỜ IN GIÁ TRỊ PII. Script này chạy trong terminal, terminal vào lịch sử shell, lịch
@@ -21,8 +21,8 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
-import { encryptPii, blindIndex, decryptPii, isPiiEncrypted, isPiiEncryptionEnabled } from "../src/piiBox.js";
-import { PII_FIELDS } from "../src/piiFields.js";
+import { encryptPii, blindIndex, decryptPii, isPiiEncrypted, isPiiEncryptionEnabled } from "../../src/piiBox.js";
+import { PII_FIELDS } from "../../src/piiFields.js";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry-run");

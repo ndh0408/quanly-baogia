@@ -13,7 +13,7 @@ comes out of it.
 · 34 test files (~5,200 LOC of tests)**
 
 <sub>Số endpoint và ma trận phân quyền được **sinh từ mã nguồn**, không đếm tay:
-`node scripts/endpoint-inventory.mjs`. CI chạy `--check` nên số ở đây, ở
+`node scripts/ci/endpoint-inventory.mjs`. CI chạy `--check` nên số ở đây, ở
 [AUTHZ_MATRIX.md](AUTHZ_MATRIX.md) và trong code không thể trôi khỏi nhau.</sub>
 
 ---
