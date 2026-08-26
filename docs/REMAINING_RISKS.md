@@ -15,9 +15,11 @@ bằng nhiều tác nhân đọc mã thật).
 > Những mục ĐÃ được tôi tự tái hiện và ĐÃ VÁ thì không có trong đây — xem lịch sử
 > commit của nhánh này.
 
-## ⚠️ Hai thứ PHẢI làm trước khi tin nhánh này ở production
+## ⚠️ Bốn thứ PHẢI đọc trước khi tin nhánh này ở production
 
-Cả hai đều là hệ quả TRỰC TIẾP của các bản vá trong chính nhánh này. Chúng không
+(Ba việc còn phải làm, cộng một ghi chép về lớp lỗi đã vá — mục 4.)
+
+Cả bốn đều là hệ quả TRỰC TIẾP của các bản vá trong chính nhánh này. Chúng không
 phải lỗi có sẵn — chúng là chỗ bản vá đi xa hơn mức đã đo được.
 
 ### 1. Trần RAM container là số PHỎNG ĐOÁN, chưa đo trên VM thật
@@ -51,6 +53,14 @@ không tồn tại là job chết lúc 02:30 — không ai thấy, và đội v�
 `HOME=/tmp` + `MC_CONFIG_DIR=/tmp/.mc` (pod chạy `readOnlyRootFilesystem` nên `mc`
 không ghi nổi config ở `$HOME` mặc định). Nhưng `sha256sum`, `sed`, `sort`, `wc`,
 `tr` thì **vẫn chưa xác minh được** — sandbox không có Docker daemon.
+
+**Việc phải làm:** `kubectl create job --from=cronjob/quanly-object-backup thu-1`
+trên kind/minikube, đọc log, xác nhận kết thúc bằng `OBJECT_BACKUP_DONE` và
+`manifest_*.tsv` có nội dung, rồi **diễn tập khôi phục từ bản gương đó**.
+
+**Cho tới lúc đó: nhánh đang chạy thật là docker-compose +
+`scripts/backup/backup-objects.sh`.** Đừng ghi ở đâu rằng k8s đã sao lưu kho object.
+
 
 ### 3. Nhập Excel: đã rời event loop, nhưng CHƯA có hàng rào bộ nhớ thật
 
@@ -89,12 +99,13 @@ Nay cả hai worker tự đăng ký loader tsx khi chạy từ nguồn. Bài h�
 tự động che được việc đường chính chưa bao giờ hoạt động.** Khi thêm đường lui, hãy
 thêm luôn cách nhìn thấy nó đang được dùng.
 
-**Việc phải làm:** `kubectl create job --from=cronjob/quanly-object-backup thu-1`
-trên kind/minikube, đọc log, xác nhận kết thúc bằng `OBJECT_BACKUP_DONE` và
-`manifest_*.tsv` có nội dung, rồi **diễn tập khôi phục từ bản gương đó**.
-
-**Cho tới lúc đó: nhánh đang chạy thật là docker-compose +
-`scripts/backup/backup-objects.sh`.** Đừng ghi ở đâu rằng k8s đã sao lưu kho object.
+Đúng lớp lỗi đó lặp lại một lần nữa ở tiến trình worker BullMQ, và cũng đã vá trong
+nhánh này: processor xuất nền gọi thẳng `buildQuoteBuffer` nên **không đi qua trần
+thời gian nào**, trong khi ân hạn dừng 90s của k8s/Helm/compose lại tự xưng neo vào
+trần đó (xem mục "Ân hạn dừng worker = 90s" bên dưới). Cách vá lấy luôn bài học ở
+trên: `sinhFileXuat` đặt `choPhepNoiTuyen: false`, tức **bỏ hẳn đường lui** trên
+nhánh cần một cái trần thật — vì một đường lui không có trần thì vô hiệu hoá đúng
+cái trần vừa đặt, và lại làm nó im lặng.
 
 ## Ưu tiên đề xuất
 
