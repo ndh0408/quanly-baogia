@@ -1,7 +1,15 @@
 // Cụm hàng đợi/worker — đường xuất NỀN không có trần KÍCH THƯỚC nào.
 //
+// ── TRẦN NÀY PHẢI RỘNG HƠN TRẦN ĐỒNG BỘ. ĐỌC KỸ TRƯỚC KHI "SIẾT LẠI". ───────
+// Bản đầu đặt trần đường nền BẰNG trần đồng bộ (100 trang / 20.000 dòng) với lý lẽ "hai đường xuất
+// phải từ chối cùng một tập báo giá". Vòng phản biện bác bỏ, và bác bỏ đúng: đường đồng bộ trả 413
+// kèm CHÍNH lời khuyên "vui lòng dùng xuất nền (async)". Cho đường nền từ chối đúng tập đó là bịt
+// nốt lối thoát duy nhất mà thông điệp kia chỉ tới — báo giá lớn hết đường tải về.
+// Nay trần đường nền = SỨC CHỨA CỦA ĐƯỜNG LƯU (60 × 1000 = 60.000, `MAX_ASYNC_EXPORT_ITEMS`), tức
+// mọi báo giá LƯU ĐƯỢC đều XUẤT ĐƯỢC bằng đường nền. Xem tests/b9-export-escape-route.test.js.
+//
 // ── LỖI (no-job-idempotency-no-async-export-limit, phần (c) còn mở) ─────────
-// Đường xuất ĐỒNG BỘ chặn sớm: src/routes/export.routes.ts:76-80 `MAX_EXPORT_SHEETS = 100`,
+// Đường xuất ĐỒNG BỘ chặn sớm: src/routes/export.routes.ts `MAX_EXPORT_SHEETS = 100`,
 // `MAX_EXPORT_ITEMS = 20_000` → 413. Đường xuất NỀN thì không: đọc trọn route enqueue
 // (src/routes/jobs.routes.ts:31-96) không có một phép kiểm kích thước nào, và processor trong
 // src/worker.ts nạp báo giá rồi lao thẳng vào sinh file. Trần duy nhất là trần THỜI GIAN 30s ở
@@ -46,9 +54,9 @@ function baoGia(soSheet, moiSheet) {
   };
 }
 
-describe("processor xuất nền — trần kích thước như đường đồng bộ", () => {
+describe("processor xuất nền — trần kích thước RỘNG HƠN đường đồng bộ", () => {
   it("báo giá quá NHIỀU SHEET bị từ chối trước khi tiêu một giây CPU nào", async () => {
-    h.quote = baoGia(200, 1);
+    h.quote = baoGia(200, 1);   // 200 > 60 trang: vượt cả sức chứa đường lưu
     h.daSinhFile = 0;
     await expect(processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } }))
       .rejects.toThrow(/quá lớn/i);
@@ -56,11 +64,28 @@ describe("processor xuất nền — trần kích thước như đường đồn
   });
 
   it("báo giá quá NHIỀU DÒNG cũng bị từ chối (pdf cùng một chốt)", async () => {
-    h.quote = baoGia(30, 1_000); // 30 000 dòng > 20 000
+    h.quote = baoGia(60, 2_000); // 120 000 dòng — vượt cả 60 000 mà đường lưu cho phép
     h.daSinhFile = 0;
     await expect(processors[QUEUES.EXPORT].pdf({ data: { quoteId: 1, requestedBy: 1 } }))
       .rejects.toThrow(/quá lớn/i);
     expect(h.daSinhFile).toBe(0);
+  });
+
+  // ── VẾ QUAN TRỌNG NHẤT: ĐƯỜNG THOÁT PHẢI CÒN DÙNG ĐƯỢC ────────────────────
+  // Không có bài này thì "siết cho hai đường bằng nhau" lại lọt qua lần nữa.
+  it("báo giá VƯỢT trần đồng bộ (30.000 dòng) VẪN xuất được bằng đường nền", async () => {
+    h.quote = baoGia(30, 1_000);   // 30 000 dòng: > 20 000 (đồng bộ 413) nhưng < 60 000
+    h.daSinhFile = 0;
+    const r = await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
+    expect(r.url, "đường nền cũng từ chối ⇒ báo giá lớn hết đường tải về").toBe("https://vi-du/tai-ve");
+    expect(h.daSinhFile).toBe(1);
+  });
+
+  it("đúng SỨC CHỨA TỐI ĐA của đường lưu (60 × 1000) vẫn xuất nền được", async () => {
+    h.quote = baoGia(60, 1_000);
+    h.daSinhFile = 0;
+    const r = await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
+    expect(r.url).toBe("https://vi-du/tai-ve");
   });
 
   it("lỗi vượt trần KHÔNG được thử lại: 3 lượt nghiến CPU cho cùng một kết quả là vô ích", async () => {

@@ -17,7 +17,19 @@ spec:
     metadata:
       labels: {{- include "quanly.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
-      {{- if .Values.metrics.enabled }}
+      {{/*
+        ANNOTATION prometheus.io CHỈ RENDER KHI /metrics THẬT SỰ TRẢ LỜI ĐƯỢC.
+        Kiểu scrape theo annotation KHÔNG mang được Bearer token — Prometheus chỉ có URL. Mà
+        src/app.ts gác /metrics như sau: production + KHÔNG có METRICS_TOKEN → 404 (fail closed);
+        CÓ METRICS_TOKEN → đòi Bearer đúng, sai thì 401. Nghĩa là ở bản cài MẶC ĐỊNH
+        (NODE_ENV=production, METRICS_TOKEN rỗng, serviceMonitor tắt) ba dòng annotation này chỉ
+        làm một việc: chỉ Prometheus tới một endpoint trả 404 mãi mãi, không cảnh báo nào — đúng
+        triệu chứng mà mục `metrics-unreachable-shipped-scrape-config` nói tới, chỉ đổi đường tới.
+        Nên chỉ khai chúng khi endpoint đáp được KHÔNG cần xác thực: không đặt token VÀ không phải
+        production. Có token thì đường đúng là ServiceMonitor (templates/sa.yaml) — nó gắn được
+        `authorization:`. NOTES.txt in cảnh báo cho tổ hợp còn lại.
+      */}}
+      {{- if and .Values.metrics.enabled (not .Values.secrets.METRICS_TOKEN) (ne (toString .Values.config.NODE_ENV) "production") }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"

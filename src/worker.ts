@@ -12,6 +12,7 @@ import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
 import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS } from "./exportQueue.js";
+import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
@@ -144,12 +145,20 @@ export async function sinhFileXuat(kind: "xlsx" | "pdf", quote: any, noiTuyen: (
 // 30s của generateInWorker, tức báo giá khổng lồ vẫn đốt trọn 30s CPU một luồng rồi mới hỏng — và
 // người dùng bấm lại thì đốt tiếp.
 //
-// HAI CON SỐ NÀY CHÉP TỪ export.routes.ts CÓ CHỦ Ý: hai đường xuất phải từ chối CÙNG một tập báo
-// giá, nếu không người dùng bị "xuất trực tiếp thì báo quá lớn, xuất nền thì chờ mãi rồi lỗi khác".
-// Không import chéo được vì hằng số bên đó không export (và file đó không thuộc tập sửa của nhóm
-// này); đổi bên nào thì phải đổi bên kia.
-const MAX_EXPORT_SHEETS = 100;
-const MAX_EXPORT_ITEMS = 20_000;
+// ── TRẦN NÀY PHẢI RỘNG HƠN TRẦN ĐỒNG BỘ, KHÔNG ĐƯỢC BẰNG ──────────────────────────────────
+// Bản đầu chép đúng 100/20 000 của export.routes.ts với lý lẽ "hai đường phải từ chối cùng một
+// tập báo giá". Lý lẽ đó SAI, và sai nghiêm trọng: đường đồng bộ trả 413 kèm CHÍNH LỜI KHUYÊN
+// "vui lòng dùng xuất nền (async)" (src/routes/export.routes.ts). Cho đường nền từ chối đúng tập
+// đó là bịt nốt lối thoát duy nhất mà thông điệp kia chỉ tới — báo giá lớn hết đường tải về.
+//
+// Đường nền tồn tại ĐỂ làm việc mà đường đồng bộ không kham nổi: nó chạy trong worker_threads,
+// không chẹn request nào, và đã có trần THỜI GIAN thật (30s, `terminate()` giết luồng). Nên trần
+// KÍCH THƯỚC ở đây chỉ để từ chối SỚM thứ chắc chắn không thể xong, không phải để lặp lại trần kia.
+//
+// Mốc: đúng bằng SỨC CHỨA CỦA ĐƯỜNG LƯU (60 trang × 1000 dòng = 60 000). Nghĩa là mọi báo giá
+// LƯU ĐƯỢC đều XUẤT ĐƯỢC bằng đường nền — lời khuyên trong thông điệp 413 thành lời khuyên thật.
+const MAX_EXPORT_SHEETS = MAX_SAVE_SHEETS;
+const MAX_EXPORT_ITEMS = MAX_ASYNC_EXPORT_ITEMS;
 
 /**
  * Chặn báo giá vượt trần TRƯỚC khi tiêu CPU.
@@ -163,7 +172,7 @@ function chanBaoGiaQuaLon(quote: any) {
   const soDong = (quote?.sheets || []).reduce((n: number, s: any) => n + (s?.items?.length || 0), 0);
   if (soSheet > MAX_EXPORT_SHEETS || soDong > MAX_EXPORT_ITEMS) {
     throw new UnrecoverableError(
-      `Báo giá quá lớn để xuất (${soSheet} trang / ${soDong} dòng; trần ${MAX_EXPORT_SHEETS} trang / ${MAX_EXPORT_ITEMS} dòng). Hãy tách bớt trang rồi xuất lại.`
+      `Báo giá quá lớn để xuất (${soSheet} trang / ${soDong} dòng; trần ${MAX_EXPORT_SHEETS} trang / ${MAX_EXPORT_ITEMS} dòng). Báo giá này vượt cả sức chứa của đường lưu — hãy nhân bản rồi tách bớt trang sang bản mới.`
     );
   }
 }

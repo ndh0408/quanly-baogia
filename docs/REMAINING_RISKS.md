@@ -188,6 +188,30 @@ mới** viết migration bỏ ba cột thô. Bước (d) là **không hoàn tác
 
 **Đừng ghi ở đâu rằng PII đã được mã hoá cho tới khi (d) xong.**
 
+## Báo giá > 20.000 dòng: có đường xuất, nhưng CHƯA có nút bấm (2026-08-26)
+
+Đường xuất ĐỒNG BỘ chặn ở 100 trang / 20.000 dòng rồi trả 413 kèm lời khuyên *"vui lòng
+dùng xuất nền (async)"*. Trước đợt này lời khuyên đó **không thực hiện được**, và một
+bản vá trong chính đợt này suýt làm nó tệ hơn — chi tiết ở đầu
+`tests/b2-quote-size-cap.test.js` và `src/validators.ts`.
+
+**Đã đóng:** đường xuất NỀN nay nhận trọn sức chứa của đường lưu (60 trang × 1000 dòng =
+60.000). Mọi báo giá **lưu được** đều **xuất được** qua `POST /api/quotes/:id/export`.
+
+**Chưa đóng:** SPA React **chưa nối** đường đó — `grep -rn "/jobs" web/src` không ra kết
+quả; hai chỗ xuất file (`QuoteEditor`, `QuoteList`) đều mở thẳng `/api/export/:id.xlsx|pdf`.
+Nên với người dùng cuối, báo giá 20.001–60.000 dòng vẫn là: bấm Xuất → nhận lỗi kèm một
+lời khuyên không bấm được ở đâu.
+
+**Việc phải làm:** bắt 413 ở client, gọi `POST /api/quotes/:id/export`, poll
+`GET /api/jobs/export/:id`, rồi mở `returnvalue.url`. Cần thêm: hàng đợi phải bật
+(`REDIS_URL`) và kho object phải có (`S3_*`) — thiếu một trong hai thì route trả 503 kèm
+`code: "export_async_unavailable"`, và client phải nói ra điều đó thay vì im lặng.
+
+**Đừng đóng lại bằng cách siết trần LƯU.** Trần đó chưa từng tồn tại, nên siết là khoá
+chủ những báo giá lớn đã lưu từ trước ra khỏi chính dữ liệu của họ — kể cả khỏi thao tác
+tách bớt trang, vì tách cũng là một lần Lưu.
+
 ## Ưu tiên đề xuất
 
 1. **Xoay mật khẩu demo trên dev/staging.** Chuỗi cũ đã bị gỡ khỏi cây làm việc

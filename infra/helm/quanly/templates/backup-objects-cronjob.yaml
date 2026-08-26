@@ -87,15 +87,35 @@ spec:
                   export MC_HOST_q="$(echo "$S3_ENDPOINT" | sed "s#://#://$S3_ACCESS_KEY:$S3_SECRET_KEY@#")"
                   echo "Mirroring q/$S3_BUCKET -> /objects (cộng dồn, KHÔNG lan truyền xoá)"
                   mc mirror --quiet --overwrite "q/$S3_BUCKET" /objects
-                  # Đối chiếu SỐ LƯỢNG: mirror trả 0 mà thiếu object thì bản sao lưu vô dụng và
-                  # không ai biết cho tới lúc cần khôi phục thật. Đếm bằng chính `mc` cho cả hai
-                  # phía — ảnh minio/mc KHÔNG có findutils, `find -printf` là phần mở rộng GNU.
-                  # `| wc -l` chứ không `grep -c .`: bucket rỗng thì `grep -c .` in "0" NHƯNG thoát
-                  # mã 1, nên `|| echo 0` in thêm một "0" nữa và biến thành chuỗi "0\n0".
-                  REMOTE_N=$(mc ls --recursive --quiet "q/$S3_BUCKET" | wc -l | tr -d ' ')
-                  LOCAL_N=$(mc ls --recursive --quiet /objects | grep -v '/manifest_' | wc -l | tr -d ' ')
-                  echo "bucket=$REMOTE_N gương=$LOCAL_N"
-                  [ "$REMOTE_N" -eq 0 ] || [ "$LOCAL_N" -ge "$REMOTE_N" ] || { echo "BẢN GƯƠNG THIẾU OBJECT"; exit 1; }
+                  # ── ĐỐI CHIẾU THEO THÀNH VIÊN, KHÔNG THEO SỐ ĐẾM ──────────────────────────
+                  # Bản đầu của lịch này so `[ "$LOCAL_N" -ge "$REMOTE_N" ]`. Phép so đó TỰ VÔ HIỆU,
+                  # và scripts/backup/backup-objects.sh đã phải gỡ đúng lỗi ấy: bước mirror ở trên là
+                  # CỘNG DỒN (`mc mirror` KHÔNG có `--remove`, cố ý — xoá nhầm trên bucket không được
+                  # lan sang bản sao lưu), nên LOCAL_N chỉ có tăng. Ngay khi retention bắt đầu xoá
+                  # object khỏi bucket (RETAIN_EXPORT_DAYS, src/retention.ts) thì LOCAL_N > REMOTE_N
+                  # VĨNH VIỄN: bản gương thiếu bao nhiêu object cũng được, cổng vẫn báo OK.
+                  #
+                  # Câu hỏi cần trả lời là "mọi object ĐANG CÓ trong bucket có mặt trong gương không?"
+                  # — tức so THÀNH VIÊN. Phép so đó đúng với cả gương cộng dồn, và vẫn đúng sau
+                  # retention. Cùng một logic với scripts/backup/backup-objects.sh bước [2/5].
+                  #
+                  # `--json` để lấy khoá: dạng bảng đặt khoá ở cột cuối mà khoá có thể chứa dấu cách.
+                  # Khoá ở đây do hệ sinh (uploads/… exports/… payment-proofs/…) nên không chứa dấu
+                  # ngoặc kép — phép cắt bằng sed an toàn với chính tập dữ liệu này.
+                  mc ls --recursive --json "q/$S3_BUCKET" > /tmp/remote.json
+                  sed -n 's/.*"key":"\([^"]*\)".*/\1/p' /tmp/remote.json > /tmp/remote-keys.txt
+                  REMOTE_N=$(awk 'NF{n++} END{print n+0}' /tmp/remote-keys.txt)
+                  : > /tmp/thieu.txt
+                  while IFS= read -r k; do
+                    [ -n "$k" ] || continue
+                    [ -f "/objects/$k" ] || printf '%s\n' "$k" >> /tmp/thieu.txt
+                  done < /tmp/remote-keys.txt
+                  THIEU_N=$(awk 'NF{n++} END{print n+0}' /tmp/thieu.txt)
+                  echo "bucket=$REMOTE_N thiếu trong gương=$THIEU_N"
+                  if [ "$THIEU_N" -gt 0 ]; then
+                    echo "BẢN GƯƠNG THIẾU $THIEU_N/$REMOTE_N OBJECT. Ví dụ: $(head -20 /tmp/thieu.txt | tr '\n' ' ')"
+                    exit 1
+                  fi
                   # Manifest SHA-256: ghi .partial rồi đổi tên, để một lượt chết giữa chừng không
                   # để lại manifest cụt mà bước kiểm khôi phục sau này lại tin là hợp lệ.
                   STAMP=$(date +%Y%m%d_%H%M%S)

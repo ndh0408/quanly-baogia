@@ -257,18 +257,40 @@ const sheetSchema = z.object({
 export const MAX_EXPORT_SHEETS = 100;
 export const MAX_EXPORT_ITEMS = 20_000;
 
-const demSoDong = (sheets: { items?: unknown[] }[]) =>
+// SỨC CHỨA TỐI ĐA CỦA ĐƯỜNG LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
+// ngần này — xem chú thích ngay dưới, và src/worker.ts dùng lại đúng hai hằng số này.
+export const MAX_SAVE_SHEETS = 60;
+export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
+export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
+
+/**
+ * ── ĐÃ TỪNG CÓ MỘT TRẦN 20.000 DÒNG Ở ĐÂY. ĐÃ GỠ. ĐỪNG ĐẶT LẠI. ─────────────
+ *
+ * Nó được thêm để đóng mục "lưu được mà không xuất được": trần lưu (60 × 1000 = 60.000) rộng gấp
+ * ba trần xuất ĐỒNG BỘ (20.000), nên người dùng dựng được báo giá rồi không tải về nổi.
+ *
+ * Nhưng siết ở ĐƯỜNG LƯU là sai chỗ, và sai theo kiểu nguy hiểm nhất: nó áp NGƯỢC lên dữ liệu ĐÃ
+ * CÓ. Trần này chưa từng tồn tại trước đó, nên CSDL production có thể đang chứa báo giá 25.000
+ * dòng lưu hợp lệ từ trước. Với trần mới, chủ báo giá đó sửa MỘT ký tự tiêu đề rồi bấm Lưu là
+ * nhận lỗi xác thực và KHÔNG lưu được nữa — mất quyền sửa chính dữ liệu của mình, mà không có
+ * đường nào tự thoát (tách bớt trang cũng là một lần Lưu, nên cũng bị chặn).
+ *
+ * Cách đóng ĐÚNG chỗ: làm cho đường xuất NỀN thật sự nhận hết những gì lưu được (xem
+ * `MAX_ASYNC_EXPORT_ITEMS` ở trên và `chanBaoGiaQuaLon` trong src/worker.ts). Khi đó lời khuyên
+ * "dùng xuất nền" trong thông điệp 413 của src/routes/export.routes.ts mới là lời khuyên THẬT.
+ *
+ * CÒN LẠI (đã ghi vào docs/REMAINING_RISKS.md, không tự ý làm): SPA chưa nối nút xuất nền — đường
+ * thoát hiện có ở tầng API chứ chưa có ở giao diện.
+ */
+
+// Bảng nội bộ (extraTables) KHÔNG tính vào đây: chúng không đi vào file xuất (xem extraTableSchema).
+export const demSoDong = (sheets: { items?: unknown[] }[]) =>
   sheets.reduce((n, s) => n + (Array.isArray(s?.items) ? s.items.length : 0), 0);
 
-// Bảng nội bộ (extraTables) KHÔNG tính vào đây: chúng không đi vào file xuất (xem extraTableSchema),
-// nên chúng không phải là thứ làm báo giá "lưu được mà không xuất được".
 const quoteSheetsSchema = z
   .array(sheetSchema)
   .min(1, "Báo giá phải có ít nhất 1 trang")
-  .max(60, "Tối đa 60 trang trong một báo giá")
-  .refine((sheets) => demSoDong(sheets) <= MAX_EXPORT_ITEMS, {
-    error: `Báo giá vượt quá ${MAX_EXPORT_ITEMS.toLocaleString("vi-VN")} dòng nên sẽ không xuất được file Excel/PDF. Hãy tách bớt sang một báo giá khác rồi lưu lại.`,
-  });
+  .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang trong một báo giá`);
 
 export const QuoteCreateSchema = z.object({
   // quoteNumber is server-generated; allow override but not required

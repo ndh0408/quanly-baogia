@@ -18,15 +18,35 @@ router.use(requirePermission(P.QUOTE_CREATE));
 // Bốn route ở đây là truy vấn TỔNG HỢP trên toàn bảng Quote (đếm/gộp theo kỳ), tức đắt hơn hẳn một
 // lần đọc theo id, và tham số `from`/`to` do client tự đặt nên một kỳ rộng quét gần hết bảng.
 //
-// CHỌN SỐ: CHƯA ĐO trên production. Màn hình Dashboard (web/src/pages/Dashboard.tsx) bắn 4 request
-// mỗi lần đổi khoảng thời gian; 60/phút cho phép đổi khoảng ~15 lần mỗi phút — rộng hơn nhiều so
-// với thao tác người thật, mà vẫn là một nửa trần chung.
+// ── CHỌN SỐ: PHẢI TÍNH CẢ ĐƯỜNG TỰ-TẢI-LẠI, KHÔNG CHỈ THAO TÁC TAY ──────────────────────────
+// Bản đầu đặt 60/phút với lý lẽ "Dashboard bắn 4 request mỗi lần đổi khoảng thời gian; 60/phút cho
+// phép đổi ~15 lần mỗi phút — rộng hơn thao tác người thật". Phép tính đó BỎ SÓT nguồn sinh request
+// áp đảo, và bỏ sót nó thì trần 60 chặn đúng người dùng bình thường:
+//
+//   1. src/db.ts — sau MỌI thao tác ghi Quote/Customer/User: `emitChange(...)`.
+//   2. src/sse.ts — `emitChange` → `broadcast("changed", …)`, bắn cho MỌI client đang mở, không
+//      riêng người vừa ghi.
+//   3. web/src/components/Shell.tsx — nhận sự kiện đó, phát `realtime:changed`.
+//   4. web/src/lib/query.tsx — `qc.invalidateQueries()` KHÔNG THAM SỐ ⇒ làm cũ MỌI query; cửa sổ
+//      gộp `WINDOW = 800`ms ⇒ tối đa 60_000/800 = 75 lượt invalidate mỗi phút.
+//   5. web/src/pages/Dashboard.tsx — một query `["dashboard", period]`, nhưng queryFn của nó bắn
+//      `Promise.all` 4 request analytics (3 nếu không phải admin).
+//
+// TRẦN TRÊN THẬT: 75 × 4 = 300 request/phút, và người dùng KHÔNG làm gì cả — chỉ cần đồng nghiệp
+// lưu báo giá đủ dày. Chỉ 15 lần ghi mỗi phút (một lần mỗi 4 giây) là chạm đúng 60. Sau đó Dashboard
+// nhận 429 và vào trạng thái lỗi, dù không ai làm gì sai.
+//
+// Nên mốc phải là 300 CỘNG biên cho thao tác tay đồng thời → 400. Nó vẫn là một cái trần thật:
+// 400/phút cho MỘT tài khoản chặn được vòng lặp gọi tự động, chỉ không chặn nhịp mà chính ứng dụng
+// sinh ra. Muốn hạ số này thì phải hạ NGUỒN trước — cho `invalidateQueries` lọc theo queryKey để
+// "dashboard" không bị làm cũ theo mọi sự kiện. Xem tests/b9-analytics-limit-vs-sse.test.js: bài đó
+// đọc thẳng WINDOW và số request từ mã nguồn web/, nên đổi một trong hai mà quên nới trần là ĐỎ.
 //
 // Khoá theo TÀI KHOẢN (requireAuth đã đứng trước): khoá theo IP sẽ gộp cả văn phòng sau NAT.
 router.use(
   createLimiter("analytics", {
     windowMs: 60_000,
-    max: 60,
+    max: 400,
     keyGenerator: (req: Request) => `analytics:${req.session.userId}`,
     message: { error: "Quá nhiều yêu cầu thống kê, vui lòng thử lại sau ít phút" },
   })
