@@ -21,6 +21,7 @@
     "db:seed:venues": "node prisma/seed-venues.js",
     "db:studio": "prisma studio",
     "setup": "prisma migrate deploy && node prisma/seed.js",
+    "test:toast": "DO_TOAST_MEASURE=1 vitest run tests/b2-update-quote-no-image-read.test.js tests/db3-snapshot-no-images.test.js",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

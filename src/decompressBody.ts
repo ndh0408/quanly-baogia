@@ -11,10 +11,36 @@ import type { Request, Response, NextFunction } from "express";
  * An toàn:
  *  · chỉ nhận gzip/deflate, kiểu khác trả 415 thay vì đoán mò;
  *  · đếm số byte SAU GIẢI NÉN và cắt ngay khi vượt trần — chặn "bom nén" (gói vài KB phình thành GB);
+ *  · CHẶN THEO TỈ LỆ NÉN nữa, không chỉ theo trần tuyệt đối — xem `TRAN_TI_LE` bên dưới;
  *  · hỏng giữa chừng thì trả 400, không để luồng treo.
  *
  * Đặt TRƯỚC mọi express.json: hàm này tự parse JSON rồi đánh dấu `_body` để body-parser bỏ qua.
  */
+
+/**
+ * TRẦN TỈ LỆ NÉN (số byte ra / số byte vào).
+ *
+ * ── VÌ SAO TRẦN TUYỆT ĐỐI THÔI LÀ CHƯA ĐỦ ───────────────────────────────────
+ * Lớp này chạy TRƯỚC xác thực và TRƯỚC bộ giới hạn tần suất: src/app.ts:270-271 gắn nó ở dòng
+ * 270/271, còn `bearerAuth` mãi tới :384 và `apiLimiter` cũng nằm sau. Nghĩa là người CHƯA đăng
+ * nhập chạm được vào đây.
+ *
+ * Trần tuyệt đối (2MB chung, 16MB cho /api/quotes) chặn được "phình thành GB", nhưng KHÔNG chặn
+ * được phần khuếch đại: gói gzip ~16KB nở ra đúng 16MB rồi mới bị cắt. Mỗi request như vậy giữ
+ * 16MB trong mảng `manh` trước khi bị bỏ. Vài chục request song song từ một máy là vài trăm MB,
+ * và người gửi không cần tài khoản nào.
+ *
+ * Tỉ lệ thì phân biệt được hai thứ mà trần tuyệt đối gộp làm một: một báo giá thật 16MB gửi lên
+ * kèm ~1,6MB gzip (JSON nén được khoảng 10 lần — đã đo trên chính bộ test: bài "gói lớn cỡ báo giá
+ * 50 trang"), còn bom nén thì 1000 lần trở lên. Mốc 100 nằm giữa, rộng gấp 10 lần nhịp thật.
+ *
+ * SÀN 1MB trước khi bắt đầu kiểm: những chunk đầu tiên zlib có thể nhả ra nhiều hơn hẳn số byte
+ * vừa nhận (bộ đệm nội bộ), nên tỉ lệ lúc đó vô nghĩa và sẽ báo động giả. Dưới 1MB thì lượng bộ
+ * nhớ cũng không đáng để chặn — trần tuyệt đối là đủ.
+ */
+const TRAN_TI_LE = Math.max(2, Number(process.env.BODY_MAX_COMPRESS_RATIO) || 100);
+const SAN_KIEM_TI_LE = 1024 * 1024;
+
 export function decompressBody(tranByte = 16 * 1024 * 1024) {
   return (req: Request, res: Response, next: NextFunction) => {
     const enc = String(req.headers["content-encoding"] || "").toLowerCase().trim();
@@ -27,6 +53,7 @@ export function decompressBody(tranByte = 16 * 1024 * 1024) {
     const giaiNen = enc === "gzip" ? zlib.createGunzip() : zlib.createInflate();
     const manh: Buffer[] = [];
     let tong = 0;
+    let vaoByte = 0;
     let ketThuc = false;
 
     const dungLai = (ma: number, loi: string) => {
@@ -39,6 +66,11 @@ export function decompressBody(tranByte = 16 * 1024 * 1024) {
     giaiNen.on("data", (c: Buffer) => {
       tong += c.length;
       if (tong > tranByte) return dungLai(413, "Dữ liệu gửi lên quá lớn");
+      // `vaoByte` LUÔN đi trước: chunk tới `req` được đếm ở listener dưới rồi mới được pipe vào
+      // zlib, và zlib nhả kết quả sau đó. Nên phép chia này không bao giờ dùng mẫu số cũ hơn tử số.
+      if (tong > SAN_KIEM_TI_LE && tong > vaoByte * TRAN_TI_LE) {
+        return dungLai(413, "Tỉ lệ nén bất thường — dữ liệu gửi lên bị từ chối");
+      }
       manh.push(c);
     });
 
@@ -71,6 +103,9 @@ export function decompressBody(tranByte = 16 * 1024 * 1024) {
     });
 
     giaiNen.on("error", () => dungLai(400, "Không giải nén được dữ liệu gửi lên"));
+    // Đếm byte VÀO. Phải gắn TRƯỚC `req.pipe(...)`: nhiều listener `data` cùng nhận được chunk,
+    // nhưng gắn sau khi luồng đã chảy thì bỏ lỡ những chunk đầu — đúng chỗ tỉ lệ nhạy cảm nhất.
+    req.on("data", (c: Buffer) => { vaoByte += c.length; });
     req.pipe(giaiNen);
   };
 }

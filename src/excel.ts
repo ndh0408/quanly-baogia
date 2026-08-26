@@ -1463,6 +1463,3 @@ export async function buildQuoteBuffer(quote: any) {
   return stitchXlsxBuffers(sheetBuffers, sheetNames);
 }
 
-// Backwards-compatible name: callers that previously got a Workbook now get a buffer.
-// Update the export route to consume a buffer.
-export const buildQuoteWorkbook = buildQuoteBuffer;

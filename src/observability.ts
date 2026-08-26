@@ -177,12 +177,11 @@ export const httpRequestDuration = new Histogram({
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   registers: [registry],
 });
-export const quoteOpsTotal = new Counter({
-  name: "quote_operations_total",
-  help: "Quote lifecycle events (create/approve/reject/send)",
-  labelNames: ["op", "status"],
-  registers: [registry],
-});
+// GỠ `quoteOpsTotal` (quote_operations_total): khai báo xong rồi KHÔNG có chỗ nào `.inc()` —
+// grep toàn repo chỉ ra đúng một dòng, chính dòng khai báo. Một Counter không ai tăng vẫn được
+// /metrics phát ra với giá trị 0 vĩnh viễn, và 0 ở đây đọc thành "không có báo giá nào được tạo/
+// duyệt/gửi" — sai lệch nguy hiểm hơn hẳn việc không có số liệu đó. Cần đo lại thì khai lại KÈM
+// chỗ tăng, đừng khai trước rồi để đó.
 export const exportJobsTotal = new Counter({
   name: "export_jobs_total",
   help: "Export jobs by format and status",

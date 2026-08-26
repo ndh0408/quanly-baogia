@@ -34,21 +34,33 @@ function trichBuoc2() {
 
 /**
  * Chạy khối đó với `mc` giả.
- * @param mcOut   những gì `mc ls` in ra stdout
- * @param mcRc    mã thoát của `mc ls`
- * @param soFile  số file có sẵn trong thư mục gương
+ *
+ * ĐÃ ĐỔI MÔ HÌNH so với bản đầu: trước đây `mc` giả in ra những dòng trần ("a\nb\nc") và thư mục
+ * gương chứa file tên f0/f1/… — hai bên KHÔNG liên quan gì tới nhau, nên chỉ so được SỐ ĐẾM. Cổng
+ * thật nay so THÀNH VIÊN (xem chú thích trong script), nên `mc` giả phải in đúng dạng `--json` mà
+ * script gọi, và bản gương phải chứa đúng những KHOÁ đó.
+ *
+ * @param khoaBucket  khoá object ĐANG CÓ trong bucket
+ * @param khoaGuong   khoá có mặt trong thư mục gương (mặc định = giống bucket)
+ * @param mcRc        mã thoát của `mc ls`
  */
-function chay({ mcOut = "", mcRc = 0, soFile = 0 }) {
+function chay({ khoaBucket = [], khoaGuong = null, mcRc = 0 }) {
   const thuMuc = mkdtempSync(path.join(tmpdir(), "hq3-obj-"));
   const guong = path.join(thuMuc, "objects");
   mkdirSync(guong, { recursive: true });
-  for (let i = 0; i < soFile; i++) writeFileSync(path.join(guong, `f${i}`), "x");
+  for (const k of (khoaGuong ?? khoaBucket)) {
+    const f = path.join(guong, k);
+    mkdirSync(path.dirname(f), { recursive: true });
+    writeFileSync(f, "x");
+  }
+  // Đúng dạng `mc ls --recursive --json` thật: mỗi dòng một object, khoá nằm ở trường "key".
+  const mcOut = khoaBucket.map((k) => JSON.stringify({ status: "success", type: "file", size: 1, key: k })).join("\n") + (khoaBucket.length ? "\n" : "");
 
   const kichBan = `set -uo pipefail
 BUCKET="quanly"
 MIRROR_DIR=${JSON.stringify(guong)}
 alert() { echo "ALERT:$1"; }
-mc() { printf '%b' ${JSON.stringify(mcOut)}; return ${mcRc}; }  # %b để \\n trong chuỗi JSON thành xuống dòng thật
+mc() { printf '%b' ${JSON.stringify(mcOut)}; return ${mcRc}; }
 ${trichBuoc2()}
 echo "DI_TIEP"
 `;
@@ -60,30 +72,60 @@ echo "DI_TIEP"
   return { rc: r.status, out: String(r.stdout || ""), err: String(r.stderr || "") };
 }
 
-describe("backup-objects.sh bước [2/5] — đối chiếu số lượng object", () => {
+describe("backup-objects.sh bước [2/5] — đối chiếu bucket ↔ bản gương", () => {
   it("`mc ls` HỎNG thì phải cảnh báo và DỪNG, không được đi tiếp báo OK", () => {
-    const r = chay({ mcOut: "", mcRc: 1, soFile: 0 });
+    const r = chay({ khoaBucket: [], mcRc: 1 });
     expect(r.out, "script vẫn chạy tiếp sau khi mc ls hỏng").not.toContain("DI_TIEP");
     expect(r.out).toContain("ALERT:");
     expect(r.rc).toBe(1);
   });
 
   it("bản gương THIẾU object thì cảnh báo và DỪNG", () => {
-    const r = chay({ mcOut: "a\nb\nc\n", mcRc: 0, soFile: 1 });
+    const r = chay({ khoaBucket: ["uploads/a.png", "uploads/b.png", "exports/c.xlsx"], khoaGuong: ["uploads/a.png"] });
     expect(r.out).toContain("ALERT:");
     expect(r.out).not.toContain("DI_TIEP");
     expect(r.rc).toBe(1);
   });
 
   it("bucket RỖNG là hợp lệ: đi tiếp, và KHÔNG được có lỗi so sánh số nguyên nào", () => {
-    const r = chay({ mcOut: "", mcRc: 0, soFile: 0 });
+    const r = chay({ khoaBucket: [] });
     expect(r.out).toContain("DI_TIEP");
     expect(r.out).not.toContain("ALERT:");
     expect(r.err).not.toMatch(/integer expression expected/);
   });
 
   it("bản gương ĐỦ object thì đi tiếp bình thường", () => {
-    const r = chay({ mcOut: "a\nb\n", mcRc: 0, soFile: 2 });
+    const r = chay({ khoaBucket: ["uploads/a.png", "payment-proofs/p1/x.png"] });
+    expect(r.out).toContain("DI_TIEP");
+    expect(r.out).not.toContain("ALERT:");
+  });
+
+  // ── CA QUYẾT ĐỊNH: GƯƠNG CỘNG DỒN ─────────────────────────────────────────
+  // Bước [1/5] gương CỘNG DỒN (`mc mirror` không `--remove`, cố ý). Nên sau khi retention bắt đầu
+  // xoá object khỏi bucket, số tệp trong gương LỚN HƠN số object trong bucket — vĩnh viễn.
+  // Cổng so SỐ ĐẾM (`[ "$LOCAL_N" -lt "$REMOTE_N" ]`) khi đó KHÔNG BAO GIỜ đúng nữa: bản gương
+  // thiếu bao nhiêu cũng được, nó vẫn báo OK. Đây chính là ca mà bản trước cho đi lọt.
+  it("gương CỘNG DỒN (nhiều tệp hơn bucket) mà VẪN thiếu một object → phải cảnh báo", () => {
+    const r = chay({
+      khoaBucket: ["uploads/moi-1.png", "uploads/moi-2.png"],
+      // Gương giữ 3 tệp cũ đã bị retention xoá khỏi bucket, và CÓ 1 trong 2 tệp mới → LOCAL_N (4) > REMOTE_N (2).
+      khoaGuong: ["exports/cu-1.xlsx", "exports/cu-2.xlsx", "exports/cu-3.xlsx", "uploads/moi-1.png"],
+    });
+    expect(r.out, "cổng so SỐ ĐẾM đã cho lọt: gương thiếu uploads/moi-2.png mà vẫn báo OK").toContain("ALERT:");
+    expect(r.out).not.toContain("DI_TIEP");
+    expect(r.rc).toBe(1);
+  });
+
+  it("cảnh báo phải NÊU TÊN object thiếu, không chỉ nói một con số", () => {
+    const r = chay({ khoaBucket: ["payment-proofs/p9/chung-tu.png"], khoaGuong: [] });
+    expect(r.out).toContain("payment-proofs/p9/chung-tu.png");
+  });
+
+  it("gương cộng dồn ĐỦ object của bucket → đi tiếp, không báo động giả", () => {
+    const r = chay({
+      khoaBucket: ["uploads/a.png"],
+      khoaGuong: ["uploads/a.png", "exports/da-bi-retention-xoa.xlsx"],
+    });
     expect(r.out).toContain("DI_TIEP");
     expect(r.out).not.toContain("ALERT:");
   });

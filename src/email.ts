@@ -25,9 +25,9 @@ function init() {
 
 const _esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c: string) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
 
-// Exported so call sites can escape user-controlled fragments when they DO need
-// to build trusted HTML themselves.
-export const escapeEmailHtml = _esc;
+// GỠ export `escapeEmailHtml`: được xuất khẩu "phòng khi chỗ gọi cần" nhưng suốt thời gian qua
+// không chỗ nào gọi. `_esc` vẫn dùng nội bộ ở dưới; xuất khẩu nó ra ngoài chỉ mời gọi kiểu dùng
+// "tự dựng HTML rồi tự escape", đúng thứ mà `renderEmailContent` sinh ra để không ai phải làm.
 
 /**
  * Render one piece of email content SAFELY BY DEFAULT:

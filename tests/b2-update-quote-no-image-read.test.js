@@ -20,6 +20,7 @@
 // nên nằm quanh 2,0 lần → đỏ; bản vá đọc một lượt → xanh. Cách này miễn nhiễm với việc máy/CI có
 // block size hay mức nén khác nhau.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { QUOTE_UPDATE_STATE_SELECT } from "../src/quoteUtils.js";
 import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
@@ -28,6 +29,21 @@ import { randomBytes } from "node:crypto";
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "QuoteItem" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres");
+
+/**
+ * ⚠️ PHÉP ĐO TOAST CHẠY SAU MỘT CỜ — VÀ ĐÂY LÀ LÝ DO, KHÔNG PHẢI SỰ LƯỜI.
+ *
+ * `pg_statio_all_tables` là bộ đếm CẤP CƠ SỞ DỮ LIỆU cho CẢ BẢNG `QuoteItem`. Vitest chạy các FILE
+ * test SONG SONG trên cùng một Postgres, nên bất kỳ file nào khác đọc ảnh hạng mục trong cùng cửa
+ * sổ đo đều CỘNG vào `tang` — và `tests/db3-snapshot-no-images.test.js` dùng đúng kỹ thuật này trên
+ * đúng bảng này. ĐÃ ĐO: bài này xanh 3/3 khi chạy RIÊNG, nhưng đỏ trong lượt chạy đầy đủ.
+ *
+ * Một bài test chập chờn tệ hơn không có bài test nào: nó dạy người ta bấm "chạy lại". Nên phép đo
+ * chỉ chạy khi được gọi tường minh (`DO_TOAST_MEASURE=1 npx vitest run <file>` — có sẵn ở
+ * `npm run test:toast`), còn thứ gác trong CI là chốt chặn TIỀN ĐỊNH ngay dưới: hình dạng của
+ * `QUOTE_UPDATE_STATE_SELECT`. Chốt đó bắt đúng lớp lỗi (đọc thừa ảnh) mà không phụ thuộc thời điểm.
+ */
+const DO_TOAST = process.env.DO_TOAST_MEASURE === "1";
 
 const TAG = `b2upd${Date.now()}`;
 const PWD = "Test1234!a";
@@ -55,6 +71,44 @@ async function toastBlocks(bang) {
     return Number(r.rows[0]?.n ?? 0);
   } finally { await c.end(); }
 }
+
+/**
+ * CHỐT CHẶN TIỀN ĐỊNH — không cần CSDL, không phụ thuộc thời điểm, LUÔN chạy trong CI.
+ *
+ * Nó gác đúng hai chiều của bản vá:
+ *   · KHÔNG được kéo cột nặng ở bản đọc đầu (`images`, `extraTables`) — đó là lỗ đang vá;
+ *   · PHẢI còn đủ mọi cột mà nhánh "payload không có sheets" cần để TÍNH LẠI TIỀN
+ *     (`computeQuoteTotals` ở src/money.ts:52-76 đọc groupSubtotal/id + kind/quantity/
+ *     quantityExact/unitPrice/days; `assertTotalsStorable` ở src/money.ts:110-118 đọc `name`).
+ * Thiếu vế thứ hai thì một lượt "tối ưu" sau này cắt thêm cột là TIỀN SAI mà không ai thấy.
+ */
+describe("QUOTE_UPDATE_STATE_SELECT — hình dạng bản đọc đầu của updateQuote", () => {
+  const sheet = QUOTE_UPDATE_STATE_SELECT.sheets.select;
+  const item = sheet.items.select;
+
+  it("KHÔNG kéo ảnh hạng mục hay bảng nội bộ (cột nặng, bản đọc này không dùng tới)", () => {
+    expect(item).not.toHaveProperty("images");
+    expect(sheet).not.toHaveProperty("extraTables");
+    // Cũng không được quay về `include` (kéo MỌI cột) — đó chính là bản cũ.
+    expect(QUOTE_UPDATE_STATE_SELECT).not.toHaveProperty("include");
+  });
+
+  it("còn ĐỦ cột cho computeQuoteTotals — cắt thêm là TIỀN SAI", () => {
+    for (const c of ["kind", "quantity", "quantityExact", "unitPrice", "days"]) {
+      expect(item, `thiếu QuoteItem.${c} → computeQuoteTotals tính sai tổng tiền`).toHaveProperty(c, true);
+    }
+    expect(sheet, "thiếu QuoteSheet.groupSubtotal → hệ số nhóm mất, tổng sai").toHaveProperty("groupSubtotal", true);
+    expect(sheet, "thiếu QuoteSheet.id → sheetTotals mất định danh").toHaveProperty("id", true);
+    expect(sheet, "thiếu QuoteSheet.name → assertTotalsStorable không nêu được trang nào âm").toHaveProperty("name", true);
+  });
+
+  it("còn đủ cột cho kiểm quyền + khoá lạc quan + đánh số", () => {
+    for (const c of ["id", "updatedAt", "status", "hnStatus", "createdById", "currentVersion", "companyId", "quoteNumber", "projectCode", "vatPercent", "discount", "total"]) {
+      expect(QUOTE_UPDATE_STATE_SELECT, `thiếu Quote.${c}`).toHaveProperty(c, true);
+    }
+    expect(QUOTE_UPDATE_STATE_SELECT.members, "thiếu members → canEdit không kiểm được thành viên").toBeTruthy();
+  });
+});
 
 describe.runIf(dbAvailable)("PUT /api/quotes/:id — chỉ được đọc ảnh hạng mục MỘT lần", () => {
   let app, admin, quoteId, motLanDoc;
@@ -88,7 +142,7 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id — chỉ được đọc ảnh
     await prisma.user.deleteMany({ where: { username: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
   });
 
-  it("bảo hiểm bộ đo: MỘT lần đọc QUOTE_INCLUDE làm block TOAST nhảy", async () => {
+  it.runIf(DO_TOAST)("bảo hiểm bộ đo: MỘT lần đọc QUOTE_INCLUDE làm block TOAST nhảy", async () => {
     const truoc = await toastBlocks("QuoteItem");
     const q = await prisma.quote.findFirst({ where: { id: quoteId }, include: QUOTE_INCLUDE });
     expect(q.sheets[0].items.length).toBe(SO_HANG_MUC);
@@ -96,7 +150,7 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id — chỉ được đọc ảnh
     expect(motLanDoc, "đọc 12 ảnh 400KB mà TOAST không nhúc nhích ⇒ bộ đo hỏng, khẳng định dưới vô nghĩa").toBeGreaterThan(200);
   }, 90_000);
 
-  it("một lần Lưu (không đổi sheets) chỉ đọc ảnh MỘT lượt, không hai", async () => {
+  it.runIf(DO_TOAST)("một lần Lưu (không đổi sheets) chỉ đọc ảnh MỘT lượt, không hai", async () => {
     const truoc = await toastBlocks("QuoteItem");
     const r = await admin.put(`/api/quotes/${quoteId}`).send({ title: `${TAG} bg đã sửa` });
     expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
@@ -105,7 +159,14 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id — chỉ được đọc ảnh
     expect(tang, `PUT làm TOAST nhảy ${tang} block trong khi một lần đọc chỉ tốn ${motLanDoc} — vẫn đang đọc ảnh hai lượt`)
       .toBeLessThan(motLanDoc * 1.6);
 
-    // Phản hồi VẪN phải có đủ ảnh: editor lấy nguyên phản hồi làm state, thiếu ảnh là xoá trắng màn hình.
+  }, 90_000);
+
+  // LUÔN CHẠY. Đây là nửa "không được mất gì" của bản vá: rút gọn bản đọc ĐẦU không được làm
+  // phản hồi thiếu ảnh — editor lấy nguyên phản hồi làm state (web/src/pages/QuoteEditor.tsx),
+  // thiếu ảnh là xoá trắng màn hình sau mỗi lần Lưu.
+  it("phản hồi của PUT vẫn đủ ảnh và đúng tiêu đề", async () => {
+    const r = await admin.put(`/api/quotes/${quoteId}`).send({ title: `${TAG} bg đã sửa` });
+    expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
     expect(r.body.sheets[0].items.length).toBe(SO_HANG_MUC);
     expect(r.body.sheets[0].items[0].images[0]).toBe(ANH);
     expect(r.body.title).toBe(`${TAG} bg đã sửa`);

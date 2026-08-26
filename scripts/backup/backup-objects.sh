@@ -97,17 +97,46 @@ echo "▶ [2/5] Đối chiếu số lượng object bucket ↔ bản gương"
 # Sửa theo ba điểm: tách LIỆT KÊ khỏi ĐẾM để kiểm được mã thoát của mc; giữ stderr của mc để đưa vào
 # cảnh báo thay vì vứt đi; và đếm bằng awk — luôn in ra một số, kể cả khi danh sách rỗng hoặc thiếu
 # ký tự xuống dòng ở dòng cuối.
+# ── VÀ LẦN THỨ HAI: SO SỐ ĐẾM LÀ SAI HẲN VỀ NGUYÊN TẮC ──────────────────────────────────────
+# Bản vá trước dựng lại cổng bằng `[ "$LOCAL_N" -lt "$REMOTE_N" ]`. Cổng đó CŨNG tự vô hiệu, chỉ là
+# chậm hơn: bước [1/5] gương CỘNG DỒN (`mc mirror` KHÔNG có `--remove`, cố ý — xoá nhầm trên bucket
+# không được phép lan sang bản sao lưu). Nên `LOCAL_N` chỉ có tăng. Ngay khi retention bắt đầu xoá
+# object khỏi bucket — `RETAIN_EXPORT_DAYS` trong src/retention.ts, đúng thứ đang chờ được bật —
+# thì `LOCAL_N > REMOTE_N` VĨNH VIỄN, và điều kiện `-lt` không bao giờ đúng nữa. Bản gương có thể
+# thiếu bao nhiêu object cũng được, cổng vẫn báo OK.
+#
+# So SỐ ĐẾM không trả lời được câu hỏi cần trả lời. Câu hỏi là: "mọi object ĐANG CÓ trong bucket có
+# mặt trong bản gương không?" — tức so THÀNH VIÊN. Phép so thành viên đúng với cả gương cộng dồn,
+# và vẫn đúng sau khi retention chạy.
+#
+# Dùng `--json` để lấy khoá: dạng bảng của `mc ls` đặt khoá ở cột cuối, mà khoá có thể chứa dấu
+# cách nên cắt theo cột là hỏng. Khoá ở đây do hệ sinh (uploads/… exports/… payment-proofs/…) nên
+# không chứa dấu ngoặc kép — phép cắt bằng sed dưới đây an toàn với chính tập dữ liệu này.
+# CỐ Ý KHÔNG dùng jq/node/python: ảnh `minio/mc` dựng trên UBI-micro, không có sẵn thứ nào trong đó.
 REMOTE_LIST="$(mktemp)"
-if ! mc ls --recursive "q/$BUCKET" > "$REMOTE_LIST" 2>"$REMOTE_LIST.err"; then
+if ! mc ls --recursive --json "q/$BUCKET" > "$REMOTE_LIST" 2>"$REMOTE_LIST.err"; then
   alert "mc ls thất bại — KHÔNG đối chiếu được bản gương: $(head -c 300 "$REMOTE_LIST.err" | tr '\n' ' ')"
   rm -f "$REMOTE_LIST" "$REMOTE_LIST.err"; exit 1
 fi
-REMOTE_N="$(awk 'NF{n++} END{print n+0}' "$REMOTE_LIST")"
-rm -f "$REMOTE_LIST" "$REMOTE_LIST.err"
+REMOTE_KEYS="$(mktemp)"
+sed -n 's/.*"key":"\([^"]*\)".*/\1/p' "$REMOTE_LIST" > "$REMOTE_KEYS"
+REMOTE_N="$(awk 'NF{n++} END{print n+0}' "$REMOTE_KEYS")"
 LOCAL_N="$(find "$MIRROR_DIR" -type f | wc -l)"
-if [ "$LOCAL_N" -lt "$REMOTE_N" ]; then
-  alert "bản gương THIẾU object: bucket có $REMOTE_N, gương chỉ có $LOCAL_N"; exit 1
+
+# Liệt kê object CÓ trong bucket mà KHÔNG có trong gương. Trần 20 dòng cho cảnh báo: một sự cố
+# mirror hỏng có thể để thiếu hàng nghìn object, và một cảnh báo dài hàng nghìn dòng thì không ai đọc.
+THIEU="$(mktemp)"
+while IFS= read -r k; do
+  [ -n "$k" ] || continue
+  [ -f "$MIRROR_DIR/$k" ] || printf '%s\n' "$k" >> "$THIEU"
+done < "$REMOTE_KEYS"
+THIEU_N="$(awk 'NF{n++} END{print n+0}' "$THIEU")"
+rm -f "$REMOTE_LIST" "$REMOTE_LIST.err" "$REMOTE_KEYS"
+if [ "$THIEU_N" -gt 0 ]; then
+  alert "bản gương THIẾU $THIEU_N/$REMOTE_N object (gương đang có $LOCAL_N tệp). Ví dụ: $(head -20 "$THIEU" | tr '\n' ' ')"
+  rm -f "$THIEU"; exit 1
 fi
+rm -f "$THIEU"
 
 echo "▶ [3/5] Sinh manifest SHA-256 ($LOCAL_N object)"
 # Ghi ra file tạm rồi mới đổi tên: tiến trình chết giữa chừng KHÔNG được để lại một manifest cụt

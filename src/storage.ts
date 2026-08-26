@@ -144,16 +144,9 @@ export async function listObjects(prefix: string, { bucket = config.S3_BUCKET, m
   return out;
 }
 
-export async function objectExists(key: string, bucket = config.S3_BUCKET) {
-  const c = getClient();
-  if (!c) return false;
-  try {
-    await c.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return true;
-  } catch {
-    return false;
-  }
-}
+// GỠ `objectExists`: không nơi nào gọi (grep toàn repo chỉ ra đúng dòng khai báo). Và nó là mẫu
+// hình dễ dùng sai — kiểm tồn tại rồi mới thao tác là TOCTOU; đường đúng ở repo này là cứ gọi thẳng
+// rồi bắt lỗi (xem `getObjectBytes`/`deleteObject`).
 
 /**
  * Generate a time-limited signed URL clients can download the object from directly.

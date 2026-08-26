@@ -4,17 +4,29 @@
 // LƯU Ý: các bảng này KHÔNG soft-delete (không nằm trong SOFT_DELETE_MODELS của db.ts) → deleteMany là
 // HARD delete đúng ý. AuditEvent được GIỮ 2 năm theo nghĩa vụ truy vết.
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { deleteObject, listObjects, isStorageEnabled } from "./storage.js";
 
 const days = (n: number) => new Date(Date.now() - n * 86_400_000);
-const AUDIT_DAYS = Number(process.env.RETAIN_AUDIT_DAYS) || 730; // 2 năm
-const LOGIN_DAYS = Number(process.env.RETAIN_LOGIN_DAYS) || 365; // 1 năm
-const WEBHOOK_DAYS = Number(process.env.RETAIN_WEBHOOK_DAYS) || 90; // 90 ngày
-const VERSION_KEEP = Number(process.env.RETAIN_VERSION_KEEP) || 100; // giữ N bản mới nhất / báo giá
+
+// ĐỌC QUA `config`, KHÔNG đọc thẳng `process.env`.
+//
+// Bản trước dùng `Number(process.env.RETAIN_AUDIT_DAYS) || 730`, và dạng đó nuốt hai loại sai cấu
+// hình theo hai kiểu khác nhau:
+//   · `RETAIN_AUDIT_DAYS=abc` → NaN → falsy → rơi về 730. Sai thành im lặng.
+//   · `RETAIN_AUDIT_DAYS=-5`  → -5 là TRUTHY nên đi thẳng vào `days(-5)`, cho ra mốc trong TƯƠNG
+//     LAI, và `deleteMany({ createdAt: { lt: mốc } })` khi ấy xoá SẠCH nhật ký kiểm toán. Job này
+//     chạy tự động hằng ngày, không ai bấm nút, không có bước xác nhận.
+// `config` (src/config.ts) đã khai cả bốn khoá với `.int().positive()`, nên gõ sai là CHẾT NGAY
+// LÚC KHỞI ĐỘNG kèm tên biến — đúng thứ cần cho một nút xoá dữ liệu không hoàn tác được.
+const AUDIT_DAYS = config.RETAIN_AUDIT_DAYS;       // 2 năm — nghĩa vụ truy vết
+const LOGIN_DAYS = config.RETAIN_LOGIN_DAYS;       // 1 năm
+const WEBHOOK_DAYS = config.RETAIN_WEBHOOK_DAYS;   // 90 ngày
+const VERSION_KEEP = config.RETAIN_VERSION_KEEP;   // giữ N bản mới nhất / báo giá
 // Dọn file xuất trong kho object: TẮT MẶC ĐỊNH (0 = tắt). Xem khối chú thích ở chỗ dùng bên dưới —
 // đây là thao tác XOÁ VĨNH VIỄN dữ liệu production và nó còn làm hỏng một cổng kiểm sao lưu.
-const EXPORT_DAYS = Number(process.env.RETAIN_EXPORT_DAYS) || 0;
+const EXPORT_DAYS = config.RETAIN_EXPORT_DAYS;
 
 // Trần MỖI LƯỢT cho nhánh dọn object. Vì sao phải có: prune chạy trong tiến trình worker, nạp cả
 // bảng vào mảng rồi bắn từng lệnh S3 tuần tự là tự tay làm cạn RAM + giữ khoá job quá hạn.

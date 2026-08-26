@@ -111,6 +111,11 @@ const schema = z.object({
   RETAIN_LOGIN_DAYS: numEnv(z.coerce.number().int().positive().default(365)),
   RETAIN_WEBHOOK_DAYS: numEnv(z.coerce.number().int().positive().default(90)),
   RETAIN_VERSION_KEEP: numEnv(z.coerce.number().int().positive().default(100)),
+  // 0 = TẮT (mặc định). Đây là XOÁ VĨNH VIỄN file trong kho object nên phải bật tường minh —
+  // xem khối chú thích ở chỗ dùng trong src/retention.ts. `nonnegative` chứ không `positive`:
+  // 0 là giá trị HỢP LỆ và có nghĩa, còn số ÂM thì `days(-n)` cho ra mốc trong TƯƠNG LAI, tức
+  // xoá sạch — phải chết ngay lúc khởi động thay vì im lặng.
+  RETAIN_EXPORT_DAYS: numEnv(z.coerce.number().int().nonnegative().default(0)),
 
   // Kích thước pool kết nối Postgres CỦA MỘT TIẾN TRÌNH (src/db.ts). Nhân với số instance app +
   // worker phải còn nằm dưới max_connections của Postgres.
