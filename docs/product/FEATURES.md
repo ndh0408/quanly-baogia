@@ -26,7 +26,7 @@ Web nội bộ quản lý báo giá theo đúng mẫu Excel của công ty (Gia 
 - **Ngày thi công**: ô chọn ngày, **chỉ quản lý nội bộ — KHÔNG xuất Excel** (hiện ở trang Quản lý dự án).
 - **Lưới kiểu Excel — copy/paste chuẩn mọi thiết bị/bộ gõ:** dùng **sự kiện copy/cut/paste của trình duyệt** (không phải bắt phím) nên chạy ổn trên **macOS/Safari/Firefox, chuột phải, cảm ứng, và cả khi mở bằng IP nội bộ (http)**. Có:
   - **Dán hiểu ô nhiều dòng** của Excel (parser RFC‑4180, có unit test) — không vỡ hàng.
-  - **Dán nguyên bảng báo giá** mà app đã xuất ra (copy cả cột STT) → **tự dựng lại nhóm lớn (A/B) + nhóm con + hàng con + dòng thông tin**, map đúng cột (xem [public/grid-clipboard.js](../../public/grid-clipboard.js)). Dán khi đang ở dòng nhóm/nhóm con → chèn item ngay dưới.
+  - **Dán nguyên bảng báo giá** mà app đã xuất ra (copy cả cột STT) → **tự dựng lại nhóm lớn (A/B) + nhóm con + hàng con + dòng thông tin**, map đúng cột (xem [web/src/lib/clipboard.ts](../../web/src/lib/clipboard.ts)). Dán khi đang ở dòng nhóm/nhóm con → chèn item ngay dưới.
   - **Dán 1 giá trị ra cả vùng đang chọn**; copy ra Excel/Word kèm bảng (text/html). Số kiểu VN (`1.234`) đọc đúng = 1234.
   - **Người chỉ‑xem cũng copy được** dữ liệu ra (ô read‑only, không sửa/cắt/dán).
   - **Ctrl+Z/Y, fill‑down (Ctrl+D)** — hoàn tác chạy ngay cả sau khi dán/cắt/fill. Chữ dài tự **xuống hàng** để dễ đọc (không vào Excel).
@@ -85,7 +85,7 @@ Internet → Cloudflare (TLS) → cloudflared tunnel → quanly-app:3000  (conta
 
 - **Image:** build từ [`Dockerfile`](../../Dockerfile) (multi-stage, chạy **non-root**, `npm ci --omit=dev`); `app` và `worker` dùng chung image.
 - **Mạng:** Postgres/Redis **không expose ra ngoài** (chỉ docker network nội bộ); chỉ `app:3000` đi ra qua Cloudflare tunnel — không publish cổng nào lên host.
-- **Cache:** `public/app.js` & `style.css` phục vụ `immutable` → **BẮT BUỘC tăng `?v=`** trong `public/index.html` mỗi khi đổi nội dung (không tái dùng `?v=` cũ → kẹt cache).
+- **Cache:** asset React (`public/app2/assets/*`) mang băm nội dung trong tên file và phục vụ `immutable`; `index.html` phục vụ `no-cache` nên bản mới luôn được thấy. Không còn `?v=` gõ tay (SPA cũ đã gỡ 2026-08-26).
 - **Migrations:** server KHÔNG tự chạy migrate (CMD = `node --import tsx src/server.js`); `deploy.sh` chạy `prisma migrate deploy` ở **bước riêng** (container dùng-rồi-bỏ) khi deploy. **Luôn `pg_dump` backup trước khi migrate** ([prisma/migrations/README.md](../../prisma/migrations/README.md)).
 - **Bí mật:** `docker-compose.staging.yml`/`docker-compose.prod.yml` **đã versioned trong repo nhưng sạch secret** (mật khẩu đọc qua `${VAR}` từ `.env`); chỉ **`.env`** (chứa giá trị thật) nằm trên host — **không** commit. Host `.env` cần `POSTGRES_PASSWORD` + `REDIS_PASSWORD` (cho `${VAR}` trong compose).
 

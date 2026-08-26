@@ -171,10 +171,10 @@ export function createApp() {
 
   app.disable("x-powered-by");
 
-  // Security headers. script-src is 'self' only (no 'unsafe-inline') — all JS is
-  // external (app.js + theme-init.js), so an injected inline <script> or onX=
-  // handler is blocked by CSP. style-src keeps 'unsafe-inline' because the SPA
-  // renders many inline style="" attributes (would need a templating overhaul to drop).
+  // Security headers. script-src is 'self' only (no 'unsafe-inline') — every script is an
+  // external file emitted by Vite, so an injected inline <script> or onX= handler is blocked
+  // by CSP. style-src keeps 'unsafe-inline' because the app renders many inline style=""
+  // attributes (would need a templating overhaul to drop).
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -413,15 +413,19 @@ export function createApp() {
       }
     },
   }));
-  const sendOld = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "index.html")); };
   const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
-  // App CŨ (vanilla) LUÔN truy cập được tại /app — để app React mở các mục CHƯA port + dùng song song.
-  app.get(["/app", "/app/*"], (_req, res) => sendOld(res));
-  // App MỚI (React/TS) tại /app2 (giữ tương thích/đường dẫn cũ).
+  // App React tại /app2 (đường dẫn lịch sử — asset build ra đó nên giữ nguyên) và tại gốc "/".
+  //
+  // SPA CŨ (vanilla ES module ở public/js) ĐÃ GỠ HẲN 2026-08-26. Từ 2026-07-06 gốc "/" đã phục vụ
+  // React cho mọi môi trường, còn /app chỉ còn là đường lui KHÔNG ai đi tới: React không có một
+  // liên kết nào trỏ về đó. Nhưng nó vẫn CHẠY được với cùng cookie phiên và cùng API, và mang theo
+  // hai lỗi mất dữ liệu mà React không có:
+  //   1. `public/js/editor.js` không gửi `baseUpdatedAt` → khoá lạc quan không bao giờ kích hoạt,
+  //      lần lưu của người này ghi đè im lặng lần lưu của người kia.
+  //   2. Payload sheet không có `id` → updateQuote phải ghép theo VỊ TRÍ; thêm/xoá/đổi thứ tự sheet
+  //      là SHEET_CARRY_FIELDS (số hoá đơn, ngày thanh toán, chữ ký, duyệt khách) bê nhầm hoặc mất.
+  // Vá code sắp xoá là lãng phí; gỡ hẳn đóng luôn cả hai đường. Xem docs/adr/.
   app.get(["/app2", "/app2/*"], (_req, res) => sendReact(res));
-  // Gốc "/": phục vụ app REACT cho MỌI môi trường (2026-07-06 — chuyển đổi công nghệ chính thức:
-  // React đã port đầy đủ tính năng, duyệt kỹ trên staging, bỏ gate hostname). App CŨ (vanilla SPA)
-  // vẫn truy cập được tại /app làm đường lui — không xoá gì, chỉ đổi mặc định.
   app.get("*", (_req, res) => sendReact(res));
 
   app.use(errorHandler);

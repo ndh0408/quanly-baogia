@@ -50,8 +50,9 @@ router.post(
   requirePermission(P.QUOTE_CREATE),
   upload.single("file"),
   asyncHandler(async (req: Request, res: Response) => {
-    // account_hn chỉ được điền bảng Hà Nội — không nạp đè lưới báo giá chính (khớp PUT /:id).
-    if (req.session.role === "account_hn") {
+    // Người điền HN chỉ được điền bảng Hà Nội — không nạp đè lưới báo giá chính (khớp PUT /:id).
+    // Theo QUYỀN chứ không theo chuỗi role: quote:hn:fill cấp được per-user. Xem quotes.routes.ts.
+    if (can(req.session, P.QUOTE_HN_FILL)) {
       return res.status(403).json({ error: "Account Hà Nội không được nhập file vào báo giá chính." });
     }
     if (!req.file) return res.status(400).json({ error: "Vui lòng chọn file Excel (.xlsx)" });

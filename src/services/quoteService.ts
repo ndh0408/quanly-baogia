@@ -27,7 +27,28 @@ import {
 } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
 
-/** Tải báo giá theo :id và THROW 403/404 nếu caller không được `action`. Dùng cho sub-resource. */
+/**
+ * Caller có VIEW BỊ LƯỢC — `GET /quotes/:id` chỉ trả cho họ một phần báo giá:
+ *   quote:hn:fill      → presentQuoteForAccountHn (chỉ bảng "hanoi")
+ *   quote:internal:view → presentQuoteForInternal (chỉ các bảng nội bộ)
+ * Cả hai CỐ Ý giấu tên/liên hệ khách, đơn giá bán và subtotal/vat/total.
+ */
+const viewBiLuoc = (session: any) => can(session, P.QUOTE_HN_FILL) || can(session, P.QUOTE_INTERNAL_VIEW);
+
+/**
+ * Tải báo giá theo :id và THROW 403/404 nếu caller không được `action`. Dùng cho sub-resource.
+ *
+ * TỪ CHỐI LUÔN caller có view bị lược. `canOnQuote` cho THÀNH VIÊN đi qua với `quote:read:own`, mà
+ * `assignHn` thì `members: { connect: … }` — account Hà Nội LUÔN là thành viên của báo giá được
+ * giao. Không có lớp này thì họ chỉ cần đổi URL `/quotes/7` → `/quotes/7/versions/1` là đọc được
+ * nguyên `QuoteVersion.payload`: toCompany, toEmail, toPhone, toAddress, subtotal, vat, total và
+ * toàn bộ sheets[].items[] kèm unitPrice — đúng những thứ projection sinh ra để giấu.
+ *
+ * Đặt ở helper CHUNG chứ không rải ở từng handler là cố ý: cả bốn caller hiện tại (listVersions,
+ * getVersion, diffVersionsService, listApprovals) đều là lịch sử/duyệt ở MỨC BÁO GIÁ, và caller
+ * thứ năm thêm sau này nên thừa hưởng "từ chối mặc định" thay vì thừa hưởng lỗ rò.
+ * Xem tests/version-projection-leak.test.js.
+ */
 async function loadAuthorizedQuote(req: Request, action: string = "read") {
   const id = Number(req.params.id);
   const quote = await prisma.quote.findFirst({
@@ -36,6 +57,7 @@ async function loadAuthorizedQuote(req: Request, action: string = "read") {
   });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, action, quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
+  if (viewBiLuoc(req.session)) throw httpError(403, "Bạn chỉ được xem phần được giao của báo giá này");
   return quote;
 }
 

@@ -109,7 +109,8 @@ docker logs quanly-app | grep -c csrf_origin      # sai cấu hình origin
 dùng. Phải là scheme+host+port, **không có đường dẫn phía sau**.
 
 Người dùng đang mở tab cũ với bản JS đã cache có thể vẫn hỏng — bảo họ tải lại
-cứng. Đó là lý do mọi thay đổi trong `public/js` phải bump `?v=`.
+cứng. Frontend React né được chuyện đó vì Vite băm tên file asset — đổi nội dung là
+đổi tên file, cache cũ không còn khớp. `index.html` vẫn phục vụ `no-cache`.
 
 ---
 

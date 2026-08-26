@@ -74,20 +74,22 @@ Prisma đã là lớp trừu tượng hoá truy cập dữ liệu, bọc thêm m
 tiếp lời gọi thì thêm file, thêm chỗ lệch, mà không thêm khả năng nào. Chỗ nào
 truy vấn phức tạp thì viết hàm riêng **trong chính service đó**.
 
-## Hai SPA cùng tồn tại
+## Frontend
 
-| Đường | App | Trạng thái |
-|---|---|---|
-| `/` | React 19 + Vite (`web/`) | mặc định, đã port đủ tính năng |
-| `/app` | vanilla ES module (`public/js`) | đường lui, vẫn chạy được |
+| Đường | Phục vụ |
+|---|---|
+| `/` và mọi đường không khớp | `public/app2/index.html` (React 19 + Vite, nguồn ở `web/`) |
+| `/app2`, `/app2/*` | y hệt — đường dẫn lịch sử, asset build ra đó nên giữ |
 
-Giữ cả hai là có chủ ý: bản vanilla là đường lui khi React có vấn đề, và **engine
-lưới** (`public/grid-clipboard.js`) là mã đã được tôi luyện qua nhiều năm với
-clipboard, IME tiếng Việt và round-trip Excel — viết lại nó là rủi ro không có
-phần thưởng tương xứng.
+**Chỉ còn một frontend.** SPA vanilla ES module ở `public/js` (phục vụ tại `/app`)
+đã gỡ hẳn ngày 2026-08-26 — xem [ADR 0006](../adr/0006-go-spa-vanilla-cu.md).
 
-Sửa `public/js` thì **phải bump `?v=`** trong mọi file import nó, kể cả
-`public/index.html` — nếu không trình duyệt nạp bản cache cũ.
+Vite băm nội dung vào tên file asset (`assets/index-<hash>.js`) nên asset phục vụ
+`immutable` an toàn, còn `index.html` phục vụ `no-cache`. Không còn `?v=` gõ tay.
+
+**Engine lưới** — clipboard, IME tiếng Việt, round-trip Excel — sống ở
+`web/src/lib/clipboard.ts`, là port thuần của bản vanilla đã tôi luyện nhiều năm.
+`tests/gridClipboard.test.js` (76 bài) phủ chính module này.
 
 ## Xử lý nền
 

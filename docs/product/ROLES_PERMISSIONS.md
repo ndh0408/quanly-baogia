@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 139 endpoint
+# Ma trận phân quyền — toàn bộ 137 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -12,8 +12,11 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 > ```
 >
 > **Vì sao**: README từng ghi *141 endpoint*, bản đầu của chính tài liệu này ghi *133*. Cả hai đều
-> đếm tay nên cả hai đều sai — con số thật là **139** (129 trong router + 10 khai báo thẳng trên
-> `app`). Bản 133 đã bỏ sót 5 route phục vụ SPA vì tôi chỉ nhớ 4 endpoint hạ tầng.
+> đếm tay nên cả hai đều sai — con số thật là **137** (129 trong router + 8 khai báo thẳng trên
+> `app`). Bản 133 đã bỏ sót các route phục vụ SPA vì tôi chỉ nhớ 4 endpoint hạ tầng.
+>
+> Từ 139 xuống 137 ngày 2026-08-26: bỏ `GET /app` và `GET /app/*` khi gỡ SPA vanilla cũ
+> (xem [ADR 0006](../adr/0006-go-spa-vanilla-cu.md)).
 >
 > CI chạy `--check`; thêm/xoá route mà quên cập nhật bảng này là **đỏ pipeline**. Một endpoint không
 > có trong ma trận là một endpoint chưa ai soát quyền.
@@ -214,7 +217,6 @@ nhưng "không có dữ liệu" phải là kết luận sau khi kiểm, không p
 | GET | `/api/csrf-token` | ✗ | — | Cấp mã chống giả mạo GẮN VỚI PHIÊN gọi nó. Công khai một cách CÓ CHỦ Ý: mã chỉ có giá trị với đúng phiên nhận nó, nên lấy được mã của phiên MÌNH không giúp gì cho việc giả mạo phiên NGƯỜI KHÁC. `no-store` để proxy/CDN không phát mã của người này cho người kia | OK |
 | GET | `/livez` · `/api/health` | ✗ | — | chỉ `{ok:true}` | OK |
 | GET | `/readyz` | ✗ | — | không lộ chi tiết lỗi DB | OK |
-| GET | `/app` · `/app/*` | ✗ | — | trả `public/index.html` (vỏ SPA cũ). Tệp tĩnh, **không** chứa dữ liệu; mọi dữ liệu vẫn phải qua `/api/*` có gác quyền | OK |
 | GET | `/app2` · `/app2/*` | ✗ | — | trả `public/app2/index.html` (vỏ SPA React) — như trên | OK |
 | GET | `*` (đón mọi đường còn lại) | ✗ | — | vỏ SPA React. Đặt SAU `notFound` nên `/api/*` không tồn tại vẫn trả **404 JSON**, không rơi vào vỏ SPA | OK |
 

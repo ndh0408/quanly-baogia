@@ -106,5 +106,6 @@ DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
 Cả hai SPA tự lo; nếu gọi API bằng curl thì lấy mã ở `GET /api/csrf-token` (hoặc
 dùng Bearer, được miễn).
 
-**Sửa `public/js` mà trình duyệt không thấy đổi** — phải bump `?v=` ở mọi file
-import nó **và** trong `public/index.html`.
+**Sửa `web/src` mà trình duyệt không thấy đổi** — chạy lại `npm run build:web`.
+Vite tự băm tên file asset nên không còn phải bump `?v=` bằng tay (SPA cũ dùng `?v=`
+đã gỡ 2026-08-26).

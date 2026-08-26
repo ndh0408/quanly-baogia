@@ -111,25 +111,26 @@ function toggleTheme() {
   try { localStorage.setItem("theme", next); } catch { /* ignore */ }
 }
 
-// ported=true → trang React thật; còn lại NHÚNG app cũ (/app?embed=1) — dùng được ngay, không tách rời.
-type Nav = { key: string; label: string; group: string; perm?: string | string[]; ported?: boolean };
+// MỌI trang giờ là React thật. Cờ `ported` + nhánh iframe `/app?embed=1` ĐÃ BỎ 2026-08-26 cùng
+// SPA cũ — xem docs/adr/0006-go-spa-vanilla-cu.md.
+type Nav = { key: string; label: string; group: string; perm?: string | string[] };
 // Nhóm theo công việc: Tổng quan dẫn đầu (tổng-quan trước), rồi cụm Báo giá, rồi cụm Nhân sự, rồi
 // Thông báo. KHÔNG đổi trang đích (Shell vẫn ép HR-first cho ai có quyền HR) — chỉ sắp xếp menu.
 const NAV: Nav[] = [
-  { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:create", ported: true },
-  { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own", ported: true },
+  { key: "dashboard", label: "Tổng quan", group: "Công việc", perm: "quote:create" },
+  { key: "list", label: "Danh sách báo giá", group: "Công việc", perm: "quote:read:own" },
   { key: "new", label: "Tạo báo giá", group: "Công việc", perm: "quote:create" },
-  { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own", ported: true },
-  { key: "venues", label: "Danh mục rạp", group: "Công việc", perm: "venue:read", ported: true },
-  { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own", ported: true },
-  { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "employee:read:own", ported: true },
-  { key: "notifications", label: "Thông báo", group: "Công việc", ported: true },
-  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: ["quote:create", "invoice:read"], ported: true },
-  { key: "invoices", label: "Hóa đơn", group: "Quản trị", perm: "invoice:page", ported: true },
-  { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage", ported: true },
-  { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage", ported: true },
-  { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view", ported: true },
-  { key: "profile", label: "Tài khoản", group: "Tài khoản", ported: true },
+  { key: "customers", label: "Mã khách hàng", group: "Công việc", perm: "customer:read:own" },
+  { key: "venues", label: "Danh mục rạp", group: "Công việc", perm: "venue:read" },
+  { key: "personnel", label: "Nhân sự", group: "Công việc", perm: "personnel:read:own" },
+  { key: "employees", label: "Danh bạ nhân sự", group: "Công việc", perm: "employee:read:own" },
+  { key: "notifications", label: "Thông báo", group: "Công việc" },
+  { key: "projects", label: "Quản lý dự án", group: "Quản trị", perm: ["quote:create", "invoice:read"] },
+  { key: "invoices", label: "Hóa đơn", group: "Quản trị", perm: "invoice:page" },
+  { key: "users", label: "Quản lý nhân viên", group: "Quản trị", perm: "user:manage" },
+  { key: "permissions", label: "Phân quyền", group: "Quản trị", perm: "user:manage" },
+  { key: "audit", label: "Nhật ký hoạt động", group: "Quản trị", perm: "audit:view" },
+  { key: "profile", label: "Tài khoản", group: "Tài khoản" },
 ];
 
 // Strip ?query (filters) khi khớp nav key → #/list?status=… vẫn là trang "list".
@@ -349,9 +350,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   // Trang nav có `perm` mà tài khoản KHÔNG có → chặn render (dù gõ thẳng hash). API vẫn là chốt chặn cuối.
   const denied = !!(active?.perm && !has(active.perm));
   const onTheme = () => { toggleTheme(); setTheme(themeIcon()); };
-  // FLIP: #/quotes/:id (SỬA báo giá đã có) giờ dùng React editor. NGOẠI LỆ: account_hn giữ view
-  // fill-HN của SPA qua iframe. #/new (TẠO mới) tạm giữ wizard SPA (chọn công ty/mẫu/khách) — sẽ port
-  // sau. #/redit + #/rnew là alias test → luôn React.
+  // #/quotes/:id (SỬA báo giá đã có) → React editor; account_hn → AccountHnView; tài khoản chi phí →
+  // InternalQuoteView; #/new (TẠO mới) → NewQuoteWizard. #/redit + #/rnew là alias test → luôn React.
   const isAccountHn = me.permissions.includes("quote:hn:fill"); // người ĐIỀN HN (theo quyền, không role cứng) → view lược HN
   // Tài khoản "chi phí" (quote:internal:view) → mở báo giá CHỈ thấy bảng nội bộ (server lược). account_hn ưu tiên.
   const isInternalViewer = me.permissions.includes("quote:internal:view") && !isAccountHn;
@@ -368,7 +368,10 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   // thẳng hash là vào ngay trình soạn mở khoá kèm nút Lưu. Gác riêng cho nhánh này: tạo mới cần
   // quote:create, mở sửa cần quote:read:own. (hasOne đã tự chấp nhận bản :all.) Server vẫn là chốt cuối.
   const editorDenied = isEditor && !has(isNewEditor ? "quote:create" : "quote:read:own");
-  const isWizard = key === "new" && !isAccountHn && !isInternalViewer;   // Tạo báo giá mới → wizard React
+  // Tạo báo giá mới → wizard React. account_hn / tài khoản chi phí KHÔNG có quote:create nên rơi
+  // xuống nhánh trang thường và bị `denied` chặn — TRƯỚC ĐÂY chúng rơi vào iframe `/app?embed=1#/new`,
+  // là đường DUY NHẤT còn phụ thuộc SPA cũ (bỏ qua luôn cả cổng `denied`).
+  const isWizard = key === "new" && !isAccountHn && !isInternalViewer;
   const hnEditId = isAccountHn && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // account_hn mở BG → view điền HN React
   const internalViewId = isInternalViewer && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
 
@@ -423,7 +426,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
           <main className="main" id="main" tabIndex={-1}>
             {editorDenied ? <AccessDenied /> : <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
           </main>
-        ) : active?.ported ? (
+        ) : (
           <main className="main" id="main" tabIndex={-1}>
             {denied ? <AccessDenied />
               : key === "dashboard" ? <DashboardPage me={me} />
@@ -438,12 +441,9 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "profile" ? <ProfilePage me={me} onMe={onMe} />
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />
+              : key === "new" ? <AccessDenied />
               : <PersonnelPage me={me} query={query} onQuery={setQuery} />}
           </main>
-        ) : (
-          <div className="embed-host" id="main">
-            <iframe key={key} title={active?.label ?? "Trang"} src={`/app?embed=1#/${key}`} />
-          </div>
         )}
       </div>
     </>

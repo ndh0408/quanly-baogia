@@ -11,8 +11,9 @@ Claude Code và trỏ ngược về đây.
 Hệ quản lý nội bộ **đang chạy production** tại `gianguyen.cloud`: báo giá, hồ sơ
 nhân sự, theo dõi dự án cho hai công ty (Gia Nguyễn + Colorfull). Brownfield, một
 lập trình viên. Node 22 + TypeScript + Express + Prisma + Postgres + Redis, deploy
-Docker qua Coolify. SPA cũ (`public/js`, ES module thuần) đang được port dần sang
-React (`web/src`); **cả hai còn chạy**.
+Docker qua Coolify. Frontend là **React 19 + Vite** ở `web/src`. SPA vanilla cũ
+(`public/js`) đã **gỡ hẳn 2026-08-26** — xem
+[docs/adr/0006-go-spa-vanilla-cu.md](docs/adr/0006-go-spa-vanilla-cu.md).
 
 Đây là dữ liệu thật của một doanh nghiệp thật. Mọi thay đổi phải giả định là có
 người đang dùng ngay lúc này.
@@ -35,8 +36,8 @@ người đang dùng ngay lúc này.
 - **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị **bỏ qua âm thầm**,
   làm lọt thông báo tiếng Anh ra giao diện. Dùng tham số `error`.
 - **Tiền dùng `Decimal`**, không dùng float JS. Đổi sang `Number` là mất chính xác.
-- **Sửa `public/js` thì PHẢI bump `?v=`** ở mọi file import nó **và** trong
-  `public/index.html`. Không bump = người dùng chạy bản cache cũ.
+- **Frontend chỉ có MỘT**: `web/src`. Vite băm nội dung vào tên file asset nên
+  không còn phải bump `?v=` bằng tay như SPA cũ.
 - **Prettier KHÔNG đụng `.ts/.tsx/.js`** (xem `lint-staged.config.mjs`). House
   style dùng one-liner có chủ đích; để prettier bung dòng là diff khổng lồ và
   conflict với nhánh song song. Chỉ format `{json,css,yml,yaml}`.

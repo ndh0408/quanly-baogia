@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**29 Prisma models · 139 HTTP endpoints · 44 test files**
+**29 Prisma models · 137 HTTP endpoints · 45 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -56,7 +56,7 @@ The parts that took the actual work:
   doesn't shred rows, and Vietnamese number formatting (`1.234`) parses as 1234.
 - **Round-tripping its own export**: paste a table this app produced back into
   it, and it reconstructs the group / sub-group / sub-row / info-row hierarchy
-  from the flat cells — see [`public/grid-clipboard.js`](public/grid-clipboard.js).
+  from the flat cells — see [`web/src/lib/clipboard.ts`](web/src/lib/clipboard.ts).
 - **IME-safe editing** — pressing Enter to commit a word in OpenKey/Unikey does
   not jump the cursor to the next cell.
 

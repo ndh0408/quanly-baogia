@@ -208,8 +208,16 @@ router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    // 🔒 account_hn KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
-    if (req.session.role === "account_hn") {
+    // 🔒 Người ĐIỀN phần HN KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
+    //
+    // Kiểm theo QUYỀN, không theo chuỗi role. `quote:hn:fill` cấp được per-user (trang Phân quyền)
+    // và chính nó là cờ bật view lược: GET /:id trả `presentQuoteForAccountHn` cho BẤT KỲ ai có
+    // quyền này, còn React SPA cũng nhận diện bằng `me.permissions.includes("quote:hn:fill")`
+    // (web/src/components/Shell.tsx:355). Nếu ở đây vẫn so `role === "account_hn"` thì một manager
+    // được cấp riêng quote:hn:fill sẽ: nhận editor CHỈ có phần HN, nhưng KHÔNG bị chặn ở PUT /:id —
+    // bấm Lưu là gửi payload thiếu toàn bộ sheet báo giá chính và XOÁ TRẮNG báo giá.
+    // Xem tests/hn-guard-by-permission.test.js.
+    if (can(req.session, P.QUOTE_HN_FILL)) {
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
     }
     const updated = await updateQuote(req);
