@@ -14,7 +14,7 @@
 //      hàng sống 7 ngày (~10.000 hàng thường trực). Job prune chỉ dọn hàng ĐÃ HẾT HẠN.
 //   2. Client API cầm thêm một thông tin đăng nhập THỨ HAI (cookie phiên) nằm NGOÀI đường thu hồi
 //      token mà hệ thống công bố — thu hồi refresh token không giết được cái cookie đó.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import request from "supertest";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
@@ -34,8 +34,17 @@ describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
   beforeAll(async () => {
     // NODE_ENV=test dùng MemoryStore, không chạm bảng user_sessions → không đo được gì.
     // Ép sang "development" để kho phiên PG THẬT được dùng, đúng như production.
+    //
+    // `vi.resetModules()` là BẮT BUỘC, không phải cho chắc. `src/config.ts` đọc process.env NGAY
+    // LÚC NẠP MODULE rồi đóng băng kết quả, và `app.ts` chọn kho phiên bằng `config.NODE_ENV`.
+    // Dòng `import { prisma } from "../src/db.js"` ở đầu file này kéo theo `src/config.js` (db.ts
+    // import config để lấy trần transaction) — tức config đã bị đóng băng ở "test" TRƯỚC khi
+    // beforeAll chạy. Không nạp lại module thì `createApp()` lặng lẽ dùng MemoryStore, bảng
+    // user_sessions không hề được ghi, và bài test dưới đo NHẦM: nó sẽ báo "không sinh hàng phiên"
+    // cho CẢ hai đường — xanh vì lý do sai ở ca Bearer, đỏ khó hiểu ở ca cookie.
     envCu = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
+    vi.resetModules();
     const { createApp } = await import("../src/app.js");
     app = createApp();
     user = await prisma.user.create({
@@ -75,7 +84,7 @@ describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
     expect(r.status).toBe(200);
     expect(r.headers["set-cookie"], "đường trình duyệt PHẢI có cookie").toBeTruthy();
     await new Promise((r) => setTimeout(r, 600));
-    expect(await demPhien()).toBeGreaterThan(truoc);
+    expect(await demPhien(), "không tăng = app đang dùng MemoryStore, tức vi.resetModules() ở beforeAll không còn hiệu lực").toBeGreaterThan(truoc);
   });
 
   it("request Bearer KÈM cookie phiên vẫn đi qua phiên thật", async () => {

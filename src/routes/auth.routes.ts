@@ -36,6 +36,19 @@ const forgotLimiter = createLimiter("forgot", {
   message: { error: "Quá nhiều yêu cầu đặt lại mật khẩu, thử lại sau 15 phút" },
 });
 
+// /accept-invite là một đường CẤP PHIÊN ĐẦY ĐỦ y như /login (nó kiêm luôn "đặt lại mật khẩu"), và
+// từ khi có cổng MFA thì nó cũng là chỗ đoán được mã 6 số. Nhưng nó KHÔNG đi qua loginLimiter, nên
+// trần duy nhất từng có là apiLimiter 120 req/phút cho toàn API — đủ để dò mã trong vòng đời 2 giờ
+// của một token đặt-lại. Trần theo IP ở đây là lớp chặn thứ hai, độc lập với bộ đếm khoá theo TÀI
+// KHOẢN trong authService (kẻ tấn công xoay IP thì vướng bộ đếm kia; dò nhiều tài khoản một lúc để
+// né bộ đếm kia thì vướng trần này). Rộng hơn loginLimiter một chút vì người dùng thật có thể gõ
+// nhầm mật khẩu mới/mã MFA vài lần trong một lần kích hoạt.
+const acceptInviteLimiter = createLimiter("accept-invite", {
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Quá nhiều lần thử, vui lòng thử lại sau 15 phút" },
+});
+
 // Đăng nhập/token KHÔNG bê được hết vào service: body lỗi cần thêm cờ `mfaRequired` (khác shape
 // errorHandler) → route giữ phần map kết quả → response; credentials/lockout đã ở authCore.ts.
 router.post(
@@ -84,8 +97,13 @@ router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
     // vẫn còn hiệu lực tới JWT_REFRESH_TTL_DAYS. Mọi đường xoay credential khác (đổi mật khẩu, đặt
     // lại, admin sửa tài khoản) đều đã gọi revokeAllForUser — chỗ này là ngoại lệ duy nhất còn sót.
     //
-    // CỐ Ý KHÔNG gọi destroyAllSessions: đăng xuất trên máy này KHÔNG được đá người dùng ra khỏi
-    // các trình duyệt khác của chính họ. Muốn dọn sạch mọi thiết bị thì đã có /token/revoke-all.
+    // PHẠM VI KHÔNG ĐỐI XỨNG, GHI RÕ ĐỂ KHÔNG AI TƯỞNG NHẦM: cookie phiên thì chỉ huỷ phiên NÀY
+    // (destroyAllSessions cố ý không được gọi — đăng xuất ở máy này không được đá người dùng ra
+    // khỏi các trình duyệt khác của chính họ), nhưng refresh token thì thu hồi TOÀN BỘ tài khoản,
+    // vì hiện không có gì gắn một refresh token với phiên cookie đã cấp ra nó. Hôm nay vô hại:
+    // không client nào dùng /auth/token (web/src/lib/api.ts chỉ dùng cookie). Khi có client di
+    // động thì phải lưu "họ" token vào req.session lúc cấp rồi thu hồi theo họ — đã ghi vào
+    // docs/REMAINING_RISKS.md. Muốn dọn sạch mọi thiết bị ngay bây giờ thì dùng /token/revoke-all.
     await revokeAllForUser(userId).catch(() => {});
     await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
   }
@@ -216,6 +234,7 @@ router.get("/invite/:token", asyncHandler(async (req: Request, res: Response) =>
 // Accept an invite: set own password + phone, activate, then log in.
 router.post(
   "/accept-invite",
+  acceptInviteLimiter,
   validate({ body: AcceptInviteSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     try {

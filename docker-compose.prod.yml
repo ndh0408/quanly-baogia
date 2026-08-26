@@ -84,6 +84,20 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *default-logging
     # exceljs/pdfkit dựng workbook trong bộ nhớ; vượt trần thì CHỈ app chết và tự restart.
+    # ⚠️ TRẦN NÀY LÀ SỐ PHỎNG ĐOÁN, CHƯA ĐO TRÊN VM THẬT. Đọc kỹ trước khi tin nó.
+    #
+    # Đặt cgroup limit mà KHÔNG bảo V8 biết là tự bắn vào chân: Node KHÔNG đọc cgroup limit để
+    # chỉnh heap, nó nới heap theo RAM của HOST rồi bị kernel SIGKILL nguyên container. Lúc đó
+    # không phải một request hỏng — mà là MỌI request đang bay của MỌI người đứt, SSE đứt, lần
+    # Lưu báo giá đang gửi dở mất trắng; `restart: unless-stopped` dựng lại rồi người dùng bấm
+    # lại là chết lại. Trước khi có trần, cùng đầu vào đó chỉ làm VM chậm.
+    #
+    # Nên `--max-old-space-size` đặt ở ~70% trần: V8 GC gắt trước, rồi ném heap-OOM BẮT ĐƯỢC —
+    # errorHandler ghi log và trả 500 cho đúng một request, container sống tiếp.
+    #
+    # Repo BIẾT còn đường tiêu bộ nhớ chưa chặn (nhập Excel nạp cả workbook trên event loop).
+    # Việc phải làm: chạy `docker stats` một tuần, xem đỉnh RSS thật khi xuất báo giá lớn nhất,
+    # rồi thay hai con số này bằng số đo được. Xem docs/REMAINING_RISKS.md.
     deploy:
       resources:
         limits:
@@ -92,6 +106,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: "--max-old-space-size=1024" # ~70% trần 1536m — xem chú thích ở deploy.resources
       PORT: "3000"
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
@@ -124,7 +139,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 2g # worker dựng workbook exceljs/pdfkit — cao hơn app
     restart: unless-stopped
     # Cùng artifact đã biên dịch với app (Dockerfile build ra dist/). Không còn tsx lúc chạy.
     command: ["node", "dist/worker.js"]
@@ -134,6 +149,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: "--max-old-space-size=1400" # worker DỰNG workbook → trần cao hơn app
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:

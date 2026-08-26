@@ -68,8 +68,8 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
 | POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá | — | — | OK |
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
-| POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | global | sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng | $ | — | OK |
-| GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | global | sheet phải thuộc `:id` | — | PII | — | OK |
+| POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
+| GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
 | POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
@@ -87,6 +87,13 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | PUT | `/:id/members` | ✓ | người tạo **hoặc** `quote:update:all` | own | so `createdById` | — | PII | — | OK |
 | DELETE | `/:id` | ✓ | `quote:delete:*` | all/own | `canOnQuote(delete)` | **`converted` không ai xoá được** | — | `quotes.workflow` | OK |
 | POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | — | $ | — | OK |
+
+⁴ `quote:internal:*` là **năng lực**, không phải phạm vi. Phạm vi báo giá do `assertQuoteInScope`
+(`src/services/quoteService.ts`) áp. Hàm này **cố ý** hỏi action `read` cho **cả** đường ghi `/pay`:
+`quote:internal:pay` mới là cổng GHI, còn `read` chỉ trả lời "được đụng tới báo giá nào". Siết lên
+`canOnQuote(update)` sẽ khoá đúng tài khoản chi phí (chỉ có `quote:read:own`; tư cách thành viên
+không suy ra `quote:update:*`) — đó là đổi **chính sách**, và `rbacscope-extra-idor` đã chốt hành vi
+hiện tại lại để lần sau ai đổi thì thấy đỏ.
 
 ## `/api/customers` — 8 endpoint
 
@@ -188,10 +195,10 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
-| GET | `/employees/` | ✓ | `employee:read:own` | **global** ² | — | — | **PII** | — | OK |
+| GET | `/employees/` | ✓ | `employee:read:own` | all/own | `readScopeWhereOrThrow(…, "createdById")` | — | **PII** | `rbacscope-employee-directory` | **VÁ** |
 | POST | `/employees/` | ✓ | `employee:create` | global | ghim `createdById` | — | **PII** | — | OK |
-| PUT | `/employees/:id` | ✓ | `employee:edit:own` | **global** ² | tồn tại | — | **PII** | — | OK |
-| DELETE | `/employees/:id` | ✓ | `employee:delete:own` | **global** ² | tồn tại | xoá mềm | — | — | OK |
+| PUT | `/employees/:id` | ✓ | `employee:edit:own` | all/own ² | tồn tại **+** `assertEmployeeInReadScope` → `canScoped(employee, read)` | — | **PII** | `rbacscope-employee-directory` | **VÁ** |
+| DELETE | `/employees/:id` | ✓ | `employee:delete:own` | all/own ² | tồn tại **+** `assertEmployeeInReadScope` | xoá mềm | — | `rbacscope-employee-directory` | **VÁ** |
 | GET | `/notifications/` · `/unread-count` | ✓ | — | self | ghim `userId` | — | — | — | OK |
 | POST | `/notifications/:id/read` · `/read-all` | ✓ | — | self | `updateMany` có `userId` | — | — | — | OK |
 | GET | `/meta/companies` · `/templates` | ✓ | — | global | — | chỉ bản `active` · **projection tối thiểu** (bỏ `filePath`/`logoPath`) | — | AUTHZ-008 | **VÁ** |
@@ -203,7 +210,15 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** `quote:read:all` | **chỉ mở queue `export`** ³ | $ | — | OK |
 | POST | `/quotes/import-excel` | ✓ | `quote:create` | own | `canOnQuote(update)` nếu có `quoteId` | chặn `account_hn` · terminal → 409 · magic bytes · limiter 12/ph | — | `excelImport.test.js` | OK |
 
-² Danh bạ nhân sự là **kho dùng chung có chủ đích** — `:own` ở đây là tên quyền, không phải phạm vi dữ liệu. Xem ghi chú `employees.routes.ts:35`.
+² Danh bạ nhân sự **vẫn là kho dùng chung khi GHI** cho mọi tài khoản Account thật, nhưng phạm vi ghi
+bám theo **phạm vi ĐỌC**, không theo `employee:edit:*`. `:own` trong TÊN QUYỀN `employee:edit:own` /
+`employee:delete:own` vẫn không phải phạm vi dữ liệu; phạm vi dữ liệu do `assertEmployeeInReadScope`
+(`src/services/employeeService.ts`) áp bằng `employee:read:*`. Vì EMPLOYEE nền — và MANAGER/ADMIN kế
+thừa — đều có `employee:read:all` (`src/permissions.ts:266`), sửa/xoá chéo **không đổi**; chỉ tập
+quyền per-user bị bó về `employee:read:own` mới hết PUT/DELETE mục người khác. Bỏ chốt đó thì `PUT`
+chính là một kênh **ĐỌC PII đầy đủ** — nó trả bản ghi đã giải mã và body rỗng `{}` vẫn hợp lệ, nên
+chặn `GET` mà để ngỏ `PUT` là hàng rào rỗng. Xem `src/routes/employees.routes.ts`.
+
 ³ Các queue khác (email/webhook/telegram) chứa địa chỉ nhận + URL + secret trong `job.data` → không bao giờ lộ, kể cả cho admin.
 
 ## Ngoài router — 9 endpoint

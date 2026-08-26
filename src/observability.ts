@@ -5,7 +5,7 @@ import * as Sentry from "@sentry/node";
 import type { Request, Response, NextFunction } from "express";
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
 import { config } from "./config.js";
-import { logger } from "./logger.js";
+import { logger, maskUrlSecrets } from "./logger.js";
 
 // === Sentry ===
 let sentryReady = false;
@@ -22,10 +22,27 @@ let sentryReady = false;
  * Tách thành hàm export để test được — `beforeSend` nằm trong Sentry.init thì chỉ chạy khi có DSN.
  */
 const KHOA_NOI_DUNG = ["data", "payload", "body"] as const;
-export function scrubSentryEvent<T extends { request?: { headers?: Record<string, unknown> }; extra?: Record<string, unknown> }>(event: T): T {
+export function scrubSentryEvent<T extends { request?: { headers?: Record<string, unknown>; url?: string; query_string?: unknown }; extra?: Record<string, unknown> }>(event: T): T {
   if (event?.request?.headers) {
     delete event.request.headers.cookie;
     delete event.request.headers.authorization;
+  }
+  // URL PHẢI ĐƯỢC CHE Ở ĐÂY NỮA, không chỉ ở `redact` của pino.
+  //
+  // Chốt che URL đặt trong src/logger.ts phủ mọi thứ đi qua pino — nhưng Sentry KHÔNG đi qua pino:
+  // tích hợp HTTP của nó tự đọc request và gắn `request.url` / `request.query_string` vào sự kiện.
+  // Mà token mời/đặt-lại nằm NGAY TRONG ĐƯỜNG DẪN (GET /api/auth/invite/:token) và nó CHIẾM ĐƯỢC
+  // TÀI KHOẢN. `beforeSend` là chốt CUỐI trước khi dữ liệu rời hạ tầng công ty sang một dịch vụ
+  // ngoài — không che ở đây thì token nằm nguyên văn trên Sentry, với vòng đời và quyền đọc hoàn
+  // toàn khác CSDL. Dùng CHUNG maskUrlSecrets với logger để hai đường không lệch pha.
+  if (event?.request?.url) event.request.url = maskUrlSecrets(event.request.url);
+  // `query_string` của Sentry có thể là CHUỖI trần ("token=…&x=1") hoặc ĐỐI TƯỢNG {khoá: giá trị};
+  // chỉ đụng vào dạng chuỗi, vì ghi đè dạng đối tượng bằng một chuỗi sẽ làm hỏng kiểu Sentry mong
+  // đợi. Chuỗi đó không có dấu "?" mở đầu, mà maskUrlSecrets chỉ nhận diện tham số đứng sau "?"
+  // hoặc "&" — thêm tạm dấu "?" rồi cắt đi để dùng LẠI đúng hàm đó thay vì chép một regex thứ hai
+  // rồi để nó trôi khỏi bản gốc.
+  if (typeof event?.request?.query_string === "string") {
+    event.request.query_string = maskUrlSecrets("?" + event.request.query_string).slice(1);
   }
   if (event?.extra) {
     for (const k of KHOA_NOI_DUNG) delete event.extra[k];

@@ -85,3 +85,71 @@ describe("createConcurrencyGate — đếm lượt từ chối vì hết công s
     await expect(gate.acquire()).rejects.toMatchObject({ code: "export_capacity" });
   });
 });
+
+// ─── ĐI QUA CỔNG THẬT (module-level gate trong src/exportQueue.ts) ──────────────────────────────
+//
+// Vì sao phải có khối này: các test trên dựng gate RIÊNG bằng `createConcurrencyGate({...})`, nên
+// chúng KHÔNG phủ hai mảnh dây nối quan trọng nhất của bản vá:
+//   · `onReject: () => exportRejectedTotal.inc({ reason: "gate_full" })` tiêm vào gate module-level —
+//     gỡ dòng đó thì lỗi "từ chối vì quá tải không được đếm" quay lại 100% mà test gate riêng vẫn xanh.
+//   · nhánh `if (isAbortedError(e)) throw e;` trong runExportJob — gỡ nó thì request đã huỷ rơi về
+//     `runExport(inlineFn)` và chẹn event loop luồng chính ĐÚNG LÚC hệ thống đang quá tải.
+//
+// Cả hai test dưới đều gọi `runExportJob` thật, đọc bộ đếm thật từ registry thật.
+describe("runExportJob — huỷ và quá tải đi qua cổng THẬT", () => {
+  it("huỷ trong lúc chờ: reject export_aborted, KHÔNG rơi về đường nội tuyến, và 503 được ĐẾM", async () => {
+    // Ép cổng module-level về đúng 1 suất chạy, 0 suất chờ → request thứ hai chắc chắn ăn 503.
+    const prev = { a: process.env.EXPORT_MAX_ACTIVE, p: process.env.EXPORT_MAX_PENDING };
+    process.env.EXPORT_MAX_ACTIVE = "1";
+    process.env.EXPORT_MAX_PENDING = "0";
+    vi.resetModules();
+    // Nạp CÙNG một lượt reset để exportQueue và test dùng CHUNG một registry đo đạc.
+    const obs = await import("../src/observability.js");
+    const eq = await import("../src/exportQueue.js");
+
+    // prom-client trả Promise ở .get() — đọc bộ đếm THẬT trong registry, không phải hằng số trong test.
+    const gateFull = async () =>
+      ((await obs.exportRejectedTotal.get()).values.find((v) => v.labels.reason === "gate_full") || { value: 0 }).value;
+    const before = await gateFull();
+
+    const inline1 = vi.fn(() => Buffer.alloc(0));
+    const inline2 = vi.fn(() => Buffer.alloc(0));
+
+    // BA THAO TÁC DƯỚI ĐÂY PHẢI NẰM TRONG CÙNG MỘT KHỐI ĐỒNG BỘ. `runExportJob` chạy tới
+    // `await gate.acquire(...)` là đồng bộ, nên chỗ được chiếm/từ chối NGAY tại lời gọi; phần thân
+    // (kiểm signal rồi sinh file) mới nằm ở microtask kế. Chen một `await` vào giữa là p1 kịp chạy
+    // qua chốt kiểm huỷ và bài test không còn kiểm cái nó định kiểm nữa.
+    const ac = new AbortController();
+    const p1 = eq.runExportJob("xlsx", {}, inline1, { signal: ac.signal }); // chiếm suất active duy nhất
+    ac.abort();                                                            // khách đóng tab NGAY lúc này
+    const p2 = eq.runExportJob("xlsx", {}, inline2);                       // hết suất, hàng chờ trần 0
+    const r1 = p1.then(() => "resolved", (e) => e); // nuốt sớm, tránh unhandledRejection
+
+    // Suất chạy hết, hàng chờ trần 0 → phải là 503 export_capacity, và phải được ĐẾM.
+    await expect(p2).rejects.toMatchObject({ status: 503, code: "export_capacity" });
+    expect(inline2, "503 KHÔNG được nuốt rồi chạy nội tuyến — trần hàng đợi sẽ thành vô nghĩa").not.toHaveBeenCalled();
+    const after = await gateFull();
+    expect(after, "export_rejected_total{reason=gate_full} phải tăng").toBe(before + 1);
+
+    const err = await r1;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code, "huỷ phải ném ra ngoài, không được rơi về nội tuyến").toBe("export_aborted");
+    expect(inline1, "người gọi đã bỏ đi — chạy lại trên luồng chính chỉ tổ chẹn event loop").not.toHaveBeenCalled();
+    // Chỗ đã được trả lại: cổng không rò rỉ suất khi người xin chỗ bỏ đi.
+    expect(eq.exportGateStats().active).toBe(0);
+
+    if (prev.a === undefined) delete process.env.EXPORT_MAX_ACTIVE; else process.env.EXPORT_MAX_ACTIVE = prev.a;
+    if (prev.p === undefined) delete process.env.EXPORT_MAX_PENDING; else process.env.EXPORT_MAX_PENDING = prev.p;
+  });
+
+  it("signal đã huỷ TỪ TRƯỚC: trượt ngay, không chiếm suất nào, không đụng đường nội tuyến", async () => {
+    vi.resetModules();
+    const eq = await import("../src/exportQueue.js");
+    const inline = vi.fn(() => Buffer.alloc(0));
+    await expect(eq.runExportJob("pdf", {}, inline, { signal: AbortSignal.abort() }))
+      .rejects.toMatchObject({ code: "export_aborted", status: 499 });
+    expect(inline).not.toHaveBeenCalled();
+    expect(eq.exportGateStats().active).toBe(0);
+    expect(eq.exportGateStats().pending).toBe(0);
+  });
+});

@@ -86,8 +86,28 @@ export function paintRect(idx: Map<number, Element>, r0: number, r1: number, c0:
 // customerLogo/images và src/quoteUtils.ts). Kiểm tiền tố sẽ cho chuỗi kiểu
 // `data:image/png;base64,AAA"><a …>` đi lọt, và chuỗi đó thoát khỏi src="" ở bất cứ chỗ nào sau
 // này nội suy nó vào HTML (Excel/PDF). Ảnh không hợp lệ → chuỗi rỗng, trình duyệt không tải gì.
+const RE_ANH_HOP_LE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
+// NHỚ KẾT QUẢ theo CHÍNH chuỗi ảnh. Ảnh trong lưới là data-URL base64 vài trăm KB tới ~2MB, và
+// regex neo cả chuỗi phải quét TOÀN BỘ chuỗi đó. `imagesCell` chạy lại ở MỌI lần render lưới (mỗi
+// phím gõ ở ô meta, mỗi lần kéo chọn vùng), nhân với số ảnh của mọi hàng — tức đúng loại chi phí
+// mà lượt vá `paintSel` vừa dọn đi, nay lại mọc lại ở ngay bên cạnh. Đo thô: 20 ảnh × 1,5MB là
+// ~30MB ký tự phải quét cho MỖI lần render.
+//
+// WeakRef không dùng được vì khoá là chuỗi. Dùng Map có TRẦN: ảnh cũ rơi ra khỏi bộ nhớ tạm thì
+// chỉ tốn lại một lượt quét, không rò bộ nhớ theo phiên làm việc.
+const NHO_ANH = new Map<string, string>();
+const NHO_ANH_MAX = 256;
+
 export function safeImgSrc(s: string | null | undefined): string {
-  return typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
+  if (typeof s !== "string" || !s) return "";
+  const da = NHO_ANH.get(s);
+  if (da !== undefined) return da;
+  const kq = RE_ANH_HOP_LE.test(s) ? s : "";
+  // Quá trần thì bỏ mục CŨ NHẤT (Map giữ thứ tự chèn) — đủ cho một lưới đang mở, không phình mãi.
+  if (NHO_ANH.size >= NHO_ANH_MAX) NHO_ANH.delete(NHO_ANH.keys().next().value as string);
+  NHO_ANH.set(s, kq);
+  return kq;
 }
 
 export function GridTable(props: GridTableProps) {

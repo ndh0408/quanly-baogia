@@ -108,20 +108,49 @@ export function decryptPii(stored: string | null | undefined, aad?: string): str
     logger.error("Gặp dữ liệu PII đã mã hoá nhưng PII_ENC_KEY chưa được đặt — kiểm tra cấu hình môi trường");
     return null;
   }
-  const raw = Buffer.from(String(stored).slice(PREFIX.length), "base64");
-  const cur = openWith(k.enc, raw, aad);
-  if (cur != null) return cur;
-  if (k.encOld) {
-    const prev = openWith(k.encOld, raw, aad);
+  const r = moTheoKhoa(stored, aad);
+  if (r.khoa === "cu") {
     // Giải được bằng khoá CŨ = hàng chưa được `--rotate` chạy tới. Đọc vẫn phải chạy, nhưng phải để
     // lại dấu vết: im lặng ở đây là cách chắc chắn nhất để quên mất còn tồn đọng rồi gỡ khoá cũ.
-    if (prev != null) {
-      logger.warn({ aad }, "PII còn mã bằng KHOÁ CŨ — chạy pii-backfill.mjs --rotate trước khi gỡ PII_ENC_KEY_OLD");
-      return prev;
-    }
+    logger.warn({ aad }, "PII còn mã bằng KHOÁ CŨ — chạy pii-backfill.mjs --rotate trước khi gỡ PII_ENC_KEY_OLD");
+  } else if (r.khoa === null) {
+    logger.error({ aad }, "giải mã PII thất bại (sai khoá / dữ liệu hỏng)");
   }
-  logger.error({ aad }, "giải mã PII thất bại (sai khoá / dữ liệu hỏng)");
-  return null;
+  return r.giaTri;
+}
+
+/**
+ * Giải mã và NÓI RÕ KHOÁ NÀO mở được — `"moi"`, `"cu"`, hoặc `null` khi không khoá nào mở nổi.
+ *
+ * ── VÌ SAO PHẢI CÓ HÀM NÀY, KHÔNG DÙNG `decryptPii` ─────────────────────────
+ * `decryptPii` cố ý thử khoá mới rồi rơi về khoá cũ — đó là điều làm cho việc xoay khoá không gây
+ * gián đoạn. Nhưng chính cái rơi-về ấy làm mọi bước KIỂM CHỨNG dựa trên nó trở thành BẰNG CHỨNG
+ * GIẢ: sau khi xoay, `verify` báo "tất cả đọc được" kể cả khi KHÔNG MỘT HÀNG NÀO được mã lại.
+ *
+ * Đó không phải lỗi vô hại. Quy trình trong docs/operations/DISASTER_RECOVERY.md dùng đúng dấu `✓`
+ * đó làm điều kiện để GỠ `PII_ENC_KEY_OLD`. Gỡ khoá cũ khi chưa xoay xong = toàn bộ hàng còn lại
+ * hoá đá VĨNH VIỄN, không có đường về. Bước chứng minh phải hỏi "mở được bằng khoá MỚI chưa",
+ * không phải "có mở được không".
+ *
+ * Dùng ở: scripts/migration/pii-backfill.mjs (--verify) và src/tools/verifyIntegrity.ts (diễn tập
+ * khôi phục hằng tuần, chạy trong image production).
+ */
+export function moTheoKhoa(stored: string, aad?: string): { giaTri: string | null; khoa: "moi" | "cu" | null } {
+  const k = keys();
+  if (!k) return { giaTri: null, khoa: null };
+  const raw = Buffer.from(String(stored).slice(PREFIX.length), "base64");
+  const cur = openWith(k.enc, raw, aad);
+  if (cur != null) return { giaTri: cur, khoa: "moi" };
+  if (k.encOld) {
+    const prev = openWith(k.encOld, raw, aad);
+    if (prev != null) return { giaTri: prev, khoa: "cu" };
+  }
+  return { giaTri: null, khoa: null };
+}
+
+/** Có đang mở cửa sổ xoay khoá không (PII_ENC_KEY_OLD được đặt và KHÁC khoá hiện tại). */
+export function dangXoayKhoa() {
+  return !!keys()?.encOld;
 }
 
 /**

@@ -174,9 +174,53 @@ export async function acceptInvite(req: Request) {
   // không thì kẻ tấn công tuy không vào được vẫn khoá được nạn nhân ra khỏi chính tài khoản họ.
   if (user.mfaEnabled) {
     if (!mfaToken) throw Object.assign(httpError(401, "Cần mã MFA"), { mfaRequired: true });
+
+    // ĐẾM MÃ SAI VÀO ĐÚNG BỘ ĐẾM KHOÁ CỦA ĐƯỜNG ĐĂNG NHẬP.
+    //
+    // Không có bước này thì cổng MFA ở đây là cổng DUY NHẤT của hệ thống không có trần thử: mã sai
+    // ném lỗi TRƯỚC prisma.user.update nên token mời/đặt-lại KHÔNG bị tiêu thụ, tức cùng một token
+    // thử lại được không giới hạn suốt vòng đời của nó (2 giờ với "quên mật khẩu", 7 ngày với lời
+    // mời). Kẻ đã chiếm hộp thư nạn nhân — đúng mô hình đe doạ mà cổng này sinh ra để chặn — bắn
+    // 120 request/phút (trần apiLimiter) với mã 6 số ngẫu nhiên là có xác suất thật sự đáng kể, và
+    // nạn nhân không hề bị khoá nên không có tín hiệu nào để nhận ra.
+    //
+    // Dùng CHUNG failedAttempts/lockedUntil với /login (thay vì một bộ đếm riêng) để "khoá tài
+    // khoản" chỉ có MỘT nghĩa duy nhất trong toàn hệ thống, và để admin gỡ ở một chỗ.
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await audit(req, "user.invite.mfa.locked", { resource: "user", resourceId: user.id });
+      throw httpError(423, `Tài khoản đang tạm khóa, vui lòng thử lại sau ${config.LOGIN_LOCKOUT_MINUTES} phút`);
+    }
+    // Khoá đã HẾT HẠN thì xoá luôn bộ đếm — giống hệt authenticateCredentials. Để nó nằm lại ở
+    // ngưỡng thì lần gõ sai kế tiếp, dù nhiều ngày sau, lập tức khoá thêm một chu kỳ nữa.
+    if (user.lockedUntil) {
+      await prisma.user.update({ where: { id: user.id }, data: { failedAttempts: 0, lockedUntil: null } });
+      user.failedAttempts = 0;
+      user.lockedUntil = null;
+    }
+
     if (!(await verifyMfaChallenge(user, mfaToken))) {
-      await audit(req, "user.invite.mfa.failed", { resource: "user", resourceId: user.id });
-      throw httpError(401, "Mã MFA không đúng");
+      // Tăng NGUYÊN TỬ: nhiều request song song không được cùng đọc một giá trị cũ rồi lách ngưỡng.
+      const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: { failedAttempts: { increment: 1 } },
+        select: { failedAttempts: true },
+      });
+      const shouldLock = updated.failedAttempts >= config.LOGIN_MAX_ATTEMPTS;
+      if (shouldLock) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: new Date(Date.now() + config.LOGIN_LOCKOUT_MINUTES * 60_000) },
+        });
+      }
+      await audit(req, "user.invite.mfa.failed", {
+        resource: "user",
+        resourceId: user.id,
+        after: { failedAttempts: updated.failedAttempts, locked: shouldLock },
+      });
+      throw httpError(
+        shouldLock ? 423 : 401,
+        shouldLock ? `Sai mã MFA nhiều lần, tài khoản tạm khóa ${config.LOGIN_LOCKOUT_MINUTES} phút` : "Mã MFA không đúng"
+      );
     }
   }
 
@@ -194,6 +238,11 @@ export async function acceptInvite(req: Request) {
       senderName: senderName?.trim() || null,
       inviteTokenHash: null,
       inviteExpiresAt: null,
+      // Đặt lại mật khẩu THÀNH CÔNG thì xoá bộ đếm khoá, y như đăng nhập thành công. Không xoá thì
+      // người vừa chứng minh được quyền sở hữu hộp thư (và mã MFA, nếu có) vẫn bị chặn ở màn đăng
+      // nhập cho hết chu kỳ khoá — họ vừa làm đúng mọi thứ mà vẫn không vào được.
+      failedAttempts: 0,
+      lockedUntil: null,
     },
   });
   await audit(req, "user.invite.accept", { resource: "user", resourceId: user.id, actorId: user.id });

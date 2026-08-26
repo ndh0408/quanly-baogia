@@ -49,7 +49,7 @@ export async function enableMfa(req: Request) {
   const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
   if (!pwOk) throw httpError(401, "Mật khẩu không đúng");
 
-  const ok = speakeasy.totp.verify({
+  const ok = speakeasy.totp.verifyDelta({
     secret: req.body.secret,
     encoding: "base32",
     token: req.body.token,
@@ -62,7 +62,22 @@ export async function enableMfa(req: Request) {
   const { plain: backupCodes, hashed } = await generateBackupCodes(8);
   await prisma.user.update({
     where: { id: user.id },
-    data: { mfaEnabled: true, mfaSecret: encryptSecret(req.body.secret), mfaBackupCodes: hashed },
+    data: {
+      mfaEnabled: true,
+      mfaSecret: encryptSecret(req.body.secret),
+      mfaBackupCodes: hashed,
+      // TIÊU THỤ LUÔN mã vừa dùng để BẬT — cùng chốt chống replay như /login và /disable.
+      //
+      // Trước đây chỗ này gọi `speakeasy.totp.verify` trần, không đụng tới `mfaLastStep`. Nghĩa là
+      // mã X mà người dùng gõ vào lúc 10:00:05 để bật MFA còn nguyên giá trị trong 25 giây còn lại
+      // của cửa sổ: ai nhìn thấy nó (đang chia sẻ màn hình, người đứng sau, ảnh chụp form) trình
+      // lại được chính X ở màn đăng nhập, và `claimTotpStep` thấy `mfaLastStep` là null nên nhận.
+      // Đúng lớp lỗi đã vá ở `disableMfa`, chỉ khác là nó nằm ở nơi mã ĐẦU TIÊN của bí mật xuất hiện.
+      //
+      // KHÔNG gọi được `claimTotpStep` ở đây: bí mật chưa nằm trong CSDL lúc kiểm (đó là ý đồ của
+      // luồng hai bước), nên ghi thẳng step vừa khớp — `verifyDelta` cho biết mã rơi vào step nào.
+      mfaLastStep: Math.floor(Date.now() / 1000 / 30) + ok.delta,
+    },
   });
   await audit(req, "mfa.enable", { resource: "user", resourceId: user.id });
   return { ok: true, backupCodes };

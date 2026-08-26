@@ -176,8 +176,12 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
               <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
             </span>
           </label>
+          {/* pattern PHẢI khớp regex của server (src/validators.ts): 6 chữ số = TOTP, 10–20 ký tự
+              hex = mã dự phòng (20 là định dạng hiện tại 80 bit, 10 là mã cũ vẫn còn hiệu lực).
+              Bản trước ghi "{6,8}" nên CHÍNH TRÌNH DUYỆT chặn submit khi dán mã dự phòng — request
+              còn không rời máy. Người mất điện thoại chỉ còn mã dự phòng, tức mất luôn tài khoản. */}
           <label id="mfa-field" style={{ display: mfaShown ? "" : "none" }}><span>Mã xác thực (MFA)</span>
-            <input name="mfaToken" autoComplete="one-time-code" pattern="[0-9A-Za-z]{6,8}" placeholder="Mã 6 số hoặc mã dự phòng" value={mfaToken} onChange={(e) => setMfaToken(e.target.value)} /></label>
+            <input name="mfaToken" autoComplete="one-time-code" pattern="[0-9]{6}|[0-9A-Fa-f]{10,20}" placeholder="Mã 6 số hoặc mã dự phòng" value={mfaToken} onChange={(e) => setMfaToken(e.target.value)} /></label>
           <button type="submit" className="btn-login" disabled={busy || !username || !password} aria-busy={busy}>
             {busy ? "Đang đăng nhập…" : "Đăng nhập"}
           </button>
@@ -197,6 +201,13 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // MFA ở màn ONBOARD — màn này kiêm luôn "đặt lại mật khẩu", và server nay bắt tài khoản đã bật
+  // MFA phải trình mã thứ hai tại đây. Không có ô này thì người bật MFA bấm "Quên mật khẩu" sẽ
+  // nhận 401 "Cần mã MFA" mà không có chỗ nào để nhập — mất tài khoản vĩnh viễn, vì hệ thống
+  // KHÔNG có endpoint admin nào gỡ MFA hộ. Dùng lại đúng cơ chế của màn đăng nhập: chỉ hiện ô khi
+  // server báo cần, để người không bật MFA (đa số) không phải nhìn thấy một ô họ không hiểu.
+  const [mfaToken, setMfaToken] = useState("");
+  const [mfaShown, setMfaShown] = useState(false);
 
   useEffect(() => {
     if (!token) { setLoadErr("Liên kết không hợp lệ."); return; }
@@ -209,10 +220,18 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
     if (form.password !== form.password2) { setErr("Mật khẩu nhập lại không khớp."); return; }
     setBusy(true);
     try {
-      const m = await api.acceptInvite({ token, displayName: form.displayName, senderName: form.senderName, phone: form.phone, title: form.title, password: form.password });
+      const m = await api.acceptInvite({ token, displayName: form.displayName, senderName: form.senderName, phone: form.phone, title: form.title, password: form.password, mfaToken: mfaToken.trim() || undefined });
       location.hash = "#/list"; onLogin(m); toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
     } catch (ex) {
-      const d = ex instanceof ApiError ? (ex.body as { details?: { message?: string }[] } | undefined)?.details : undefined;
+      const body = ex instanceof ApiError ? (ex.body as { mfaRequired?: boolean; details?: { message?: string }[] } | undefined) : undefined;
+      // Server yêu cầu lớp 2 → lộ ô MFA và cho nhập lại, ĐÚNG như nhánh ở màn đăng nhập.
+      if (body?.mfaRequired) {
+        setMfaShown(true);
+        setErr(mfaToken.trim() ? "Mã MFA không đúng, thử lại." : "Tài khoản đã bật MFA — nhập mã xác thực hoặc mã dự phòng để đặt lại mật khẩu.");
+        setBusy(false);
+        return;
+      }
+      const d = body?.details;
       setErr((Array.isArray(d) && d[0]?.message) || (ex instanceof ApiError ? ex.message : "Lỗi kích hoạt")); setBusy(false);
     }
   };
@@ -236,6 +255,10 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
                 <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
                   <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
               <label><span>Nhập lại mật khẩu</span><input type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
+              {/* Cùng pattern với ô MFA ở màn đăng nhập — khớp regex server, KHÔNG hẹp hơn, nếu
+                  không thì trình duyệt tự chặn mã dự phòng và người dùng hết đường phục hồi. */}
+              <label id="ob-mfa-field" style={{ display: mfaShown ? "" : "none" }}><span>Mã xác thực (MFA)</span>
+                <input name="mfaToken" autoComplete="one-time-code" pattern="[0-9]{6}|[0-9A-Fa-f]{10,20}" placeholder="Mã 6 số hoặc mã dự phòng" value={mfaToken} onChange={(e) => setMfaToken(e.target.value)} /></label>
               <button type="submit" className="btn-login" disabled={busy} aria-busy={busy}>{busy ? "Đang kích hoạt…" : "Kích hoạt & đăng nhập"}</button>
             </form>
           </>

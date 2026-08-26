@@ -116,6 +116,16 @@ const schema = z.object({
   // worker phải còn nằm dưới max_connections của Postgres.
   DB_POOL_MAX: numEnv(z.coerce.number().int().positive().max(200).default(20)),
 
+  // Trần thời gian của MỌI $transaction tương tác (src/db.ts, transactionOptions). ĐƠN VỊ: MILI-GIÂY.
+  //
+  // Vì sao khai ở đây chứ không đọc thẳng process.env: chữ "timeout" đọc lên rất dễ hiểu thành GIÂY.
+  // `DB_TX_TIMEOUT=5` với `Number(x) || 60_000` là 5 MILI-GIÂY — mọi lần Lưu báo giá, tạo báo giá,
+  // nhập Excel, snapshot phiên bản, /pay, saveHn đều chết P2028 ngay lập tức, trong khi tiến trình
+  // vẫn khởi động bình thường: ứng dụng đứng ở chế độ CHỈ-ĐỌC mà không có lấy một dòng log giải
+  // thích. `-1` cũng lọt qua `||` vì số âm là truthy. `.min(1_000)` chặn cả hai kiểu gõ nhầm đó.
+  DB_TX_MAX_WAIT: numEnv(z.coerce.number().int().positive().max(60_000).default(10_000)),
+  DB_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000 (=1 giây)").max(300_000).default(60_000)),
+
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
   EXPORT_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(500).default(20)),

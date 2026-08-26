@@ -5,8 +5,7 @@ bằng nhiều tác nhân đọc mã thật).
 
 > ## Đọc kỹ trước khi hành động
 >
-> **Những mục dưới đây CHƯA ĐƯỢC XÁC MINH ĐỘC LẬP.** Bước kiểm chứng đối kháng của
-> đợt rà soát KHÔNG chạy được (hết hạn mức phiên), nên đây là kết quả **một lượt
+> **Những mục dưới đây CHƯA ĐƯỢC XÁC MINH ĐỘC LẬP.** Đây là kết quả **một lượt
 > đọc**, chưa có ai phản biện lại.
 >
 > Kinh nghiệm ngay trong chính đợt này cho thấy tỉ lệ nhầm là có thật: vài phát
@@ -15,6 +14,50 @@ bằng nhiều tác nhân đọc mã thật).
 >
 > Những mục ĐÃ được tôi tự tái hiện và ĐÃ VÁ thì không có trong đây — xem lịch sử
 > commit của nhánh này.
+
+## ⚠️ Hai thứ PHẢI làm trước khi tin nhánh này ở production
+
+Cả hai đều là hệ quả TRỰC TIẾP của các bản vá trong chính nhánh này. Chúng không
+phải lỗi có sẵn — chúng là chỗ bản vá đi xa hơn mức đã đo được.
+
+### 1. Trần RAM container là số PHỎNG ĐOÁN, chưa đo trên VM thật
+
+`docker-compose.prod.yml` / `.staging.yml` nay đặt `deploy.resources.limits.memory`
+(app 1536m, worker 2g). **Chưa ai đo đỉnh RSS thật.**
+
+Đặt cgroup limit mà không bảo V8 biết là tự bắn vào chân: Node không đọc cgroup
+limit để chỉnh heap, nó nới theo RAM của **host** rồi bị kernel SIGKILL nguyên
+container. Lúc đó không phải một request hỏng — mà mọi request đang bay của mọi
+người đứt, SSE đứt, lần Lưu báo giá đang gửi dở mất trắng.
+
+Đã giảm nhẹ bằng `NODE_OPTIONS=--max-old-space-size` ở ~70% trần, để V8 GC gắt rồi
+ném heap-OOM **bắt được** (hỏng đúng một request) thay vì để kernel giết container.
+Nhưng đó là lưới an toàn, không phải phép đo.
+
+**Việc phải làm:** chạy `docker stats` trên VM một tuần, xem đỉnh RSS thật khi xuất
+báo giá lớn nhất, rồi thay hai con số đó bằng số đo được. Repo còn đường tiêu bộ
+nhớ chưa chặn (nhập Excel nạp cả workbook trên event loop), nên số đo phải lấy ở
+tình huống xấu nhất, không phải ngày thường.
+
+### 2. `infra/k8s/backup-objects-cronjob.yaml` CHƯA TỪNG CHẠY THẬT
+
+File này mới chỉ qua `kubeconform` — chỉ kiểm hình dạng YAML, không kiểm ảnh
+`minio/mc` có sẵn lệnh mà script dùng hay không. Ảnh đó dựng trên UBI-micro, cắt
+rất sâu. Bản đầu dùng `find -printf` (GNU-only) và `xargs`; với `set -e`, một lệnh
+không tồn tại là job chết lúc 02:30 — không ai thấy, và đội vận hành vẫn tin rằng
+**chứng từ tài chính đã có bản sao lưu**.
+
+Đã viết lại để mọi thao tác liệt kê/xoá đều qua chính `mc`, và đặt
+`HOME=/tmp` + `MC_CONFIG_DIR=/tmp/.mc` (pod chạy `readOnlyRootFilesystem` nên `mc`
+không ghi nổi config ở `$HOME` mặc định). Nhưng `sha256sum`, `sed`, `sort`, `wc`,
+`tr` thì **vẫn chưa xác minh được** — sandbox không có Docker daemon.
+
+**Việc phải làm:** `kubectl create job --from=cronjob/quanly-object-backup thu-1`
+trên kind/minikube, đọc log, xác nhận kết thúc bằng `OBJECT_BACKUP_DONE` và
+`manifest_*.tsv` có nội dung, rồi **diễn tập khôi phục từ bản gương đó**.
+
+**Cho tới lúc đó: nhánh đang chạy thật là docker-compose +
+`scripts/backup/backup-objects.sh`.** Đừng ghi ở đâu rằng k8s đã sao lưu kho object.
 
 ## Ưu tiên đề xuất
 
@@ -197,3 +240,37 @@ Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải p
   sai mật khẩu nhiều lần nằm ở CSDL nên vẫn còn.
 - **VM production là điểm hỏng đơn** — xem
   [operations/DEPLOYMENT.md](operations/DEPLOYMENT.md).
+
+---
+
+## Còn nợ sau đợt siết xác thực (cụm auth-session, 2026-08-26)
+
+Ba việc dưới đây KHÔNG được vá bằng mã trong đợt này. Ghi ra vì mỗi cái đều là
+rủi ro đang chạy thật, không phải giả định.
+
+- **Mã dự phòng MFA CŨ vẫn còn nguyên trong CSDL và vẫn dùng được.** Bản vá tăng
+  entropy (`src/mfa.ts`: `randomBytes(5)` → `randomBytes(10)`, băm SHA-256 trần →
+  bcrypt) chỉ áp cho mã **sinh mới**. Người đã bật MFA trước bản vá vẫn giữ 8 mã
+  40 bit băm SHA-256 KHÔNG MUỐI, và `consumeBackupCode` cố ý còn nhận chúng để
+  không khoá họ ra khỏi tài khoản. Không có đường tự nâng cấp: mã cũ chỉ biến mất
+  khi người dùng **tắt rồi bật lại MFA**. Ai lấy được một bản dump CSDL quét cạn
+  không gian 2^40 trong vài giờ trên một GPU, rồi dùng mã tìm ra để VƯỢT và TẮT
+  MFA — mà mã dự phòng không bị vô hiệu khi đổi mật khẩu, nên nó là thông tin
+  đăng nhập sống rất dai.
+  **Việc phải làm bằng tay:** yêu cầu mọi tài khoản có `mfaEnabled = true` từ
+  trước 2026-08-26 tắt rồi bật lại MFA (hoặc viết một endpoint sinh lại mã dự
+  phòng). Danh sách:
+  `SELECT id, username FROM "User" WHERE "mfaEnabled" AND EXISTS (SELECT 1 FROM unnest("mfaBackupCodes") c WHERE c !~ '^\$2');`
+- **Không có endpoint admin nào gỡ / đặt lại MFA hộ người dùng.** Từ khi
+  `/accept-invite` có cổng MFA, người bật MFA mà mất thiết bị **và** mất luôn mã
+  dự phòng thì không còn đường phục hồi nào trong sản phẩm — giao diện đã được vá
+  để nhập được mã dự phòng ở cả màn đăng nhập lẫn màn đặt-lại-mật-khẩu, nhưng ai
+  mất cả hai thì phải nhờ người có quyền vào CSDL:
+  `UPDATE "User" SET "mfaEnabled" = false, "mfaSecret" = NULL, "mfaBackupCodes" = '{}', "mfaLastStep" = NULL WHERE username = '...';`
+  (sau đó thu hồi refresh token của tài khoản đó). Nên làm hẳn một endpoint có
+  ghi nhật ký kiểm toán thay cho thao tác tay này.
+- **`POST /auth/logout` thu hồi MỌI refresh token của tài khoản**, không riêng
+  phiên đang đăng xuất. Hôm nay vô hại vì chưa client nào dùng `/auth/token`.
+  Khi có client di động thì đăng xuất trên điện thoại sẽ giết luôn quyền gọi API
+  của máy tính (còn cookie máy tính thì vẫn sống) — hành vi bất đối xứng, cần
+  thu hồi theo HỌ token của đúng phiên đó.

@@ -169,10 +169,34 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     } else if (err.code === "P2003") {
       err.status = 409;
       err.message = "Vi phạm ràng buộc dữ liệu (bản ghi đang được tham chiếu)";
+    } else if (err.code === "P2028") {
+      // Transaction hết giờ (trần DB_TX_TIMEOUT — src/db.ts). KHÔNG phải hỏng hệ thống: đường Lưu
+      // báo giá gói cả việc nặng vào MỘT transaction, nên báo giá quá lớn là chạm trần. Trả 500
+      // "Lỗi server" ở đây vừa giấu mất cách thoát (tách bớt trang), vừa bắn báo động giả sang
+      // Sentry — và từ khi trần được nới lên 60s thì người dùng còn phải chờ 60 GIÂY để nhận nó.
+      err.status = 503;
+      err.retryAfter = err.retryAfter || 10;
+      err.message = "Lưu không kịp: báo giá quá lớn cho một lần ghi. Hãy tách bớt trang (hoặc bớt dòng) rồi lưu lại.";
+    } else if (err.code === "P2024") {
+      // Hết kết nối trong pool (trần connectionTimeoutMillis — src/db.ts). Đây là QUÁ TẢI THOÁNG
+      // QUA: thử lại sau vài giây là xong. Retry-After để client và proxy không dội lại tức thì.
+      err.status = 503;
+      err.retryAfter = err.retryAfter || 5;
+      err.message = "Hệ thống đang bận (hết kết nối cơ sở dữ liệu). Vui lòng thử lại sau ít giây.";
+    } else if (err.code === "P2034") {
+      // Deadlock / write conflict: hai người ghi cùng một báo giá, Postgres giết một bên. Việc của
+      // người dùng chỉ là bấm Lưu lại — cùng nhóm nghĩa với 409 khoá lạc quan, không phải lỗi 500.
+      err.status = 409;
+      err.message = "Có người khác đang lưu cùng lúc. Vui lòng thử lại.";
     }
   }
   const status = err.status || err.statusCode || 500;
-  const exposed = status < 500;
+  // 5xx thì giấu thông điệp (không để chi tiết nội bộ/stack rò ra) — TRỪ 503 kèm `retryAfter`.
+  // Cặp đó CHỈ do mã của chính hệ thống đặt ra để nói "đang quá tải, thử lại sau": hàng đợi xuất
+  // file (src/exportQueue.ts) và các lỗi transaction vừa map ở trên. Giấu chúng sau "Lỗi server"
+  // là xoá đúng phần thông tin người dùng cần để tự thoát (chờ rồi thử lại / tách bớt trang), và
+  // biến một tình huống có cách xử lý thành một lỗi bí ẩn.
+  const exposed = status < 500 || (status === 503 && !!err.retryAfter);
   logger.error(
     { reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack },
     "request failed"

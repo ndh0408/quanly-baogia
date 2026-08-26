@@ -278,13 +278,25 @@ function carrySheetState(incoming: any[], existingSheets: any[]): (Record<string
  *
  * Thay TẠI CHỖ để giữ nguyên THỨ TỰ bảng trên màn hình; bảng HN có trong CSDL mà payload bỏ sót
  * thì trả lại ở cuối — mất bảng cũng là mất dữ liệu. Mutate `sheets`, đối xứng với reconcileExtra*.
+ *
+ * Payload có NHIỀU bảng "hanoi" HƠN CSDL → 409, KHÔNG vứt im lặng. Hai ca có thật dẫn tới đây:
+ * người dùng bấm "nhân bản trang" (client gửi trùng sheet id, `carrySheetState` trả undefined cho
+ * bản thứ hai nên `db` rỗng) và người dùng THÊM một bảng HN mới khi phần HN đã chốt. Trước đây cả
+ * hai đều nhận 200 + toast "Đã lưu" rồi tải lại thấy bảng biến mất — mất phần vừa gõ, không một lời
+ * cảnh báo. Dữ liệu ĐANG CÓ trong CSDL không hề mất, nhưng im lặng là lựa chọn tệ nhất trong ba.
+ * Chiều NGƯỢC LẠI (payload ÍT bảng hơn) KHÔNG chặn: client cũ không round-trip `extraTables` thì
+ * `list` rỗng, và chặn nó sẽ làm mọi lần Lưu từ những client đó hỏng.
  */
 function reconcileHanoiTables(sheets: any[], carry: (Record<string, any> | undefined)[], canManage: boolean, hnStatus: string | null | undefined) {
   if (canManage || !["submitted", "approved"].includes(hnStatus ?? "")) return;
   (sheets || []).forEach((s: any, i: number) => {
     const db = (Array.isArray(carry[i]?.extraTables) ? carry[i]!.extraTables : []).filter((t: any) => t && t.category === "hanoi");
     const list = Array.isArray(s?.extraTables) ? s.extraTables : [];
-    if (!db.length && !list.some((t: any) => t && t.category === "hanoi")) return;
+    const soTrongPayload = list.filter((t: any) => t && t.category === "hanoi").length;
+    if (!db.length && !soTrongPayload) return;
+    if (soTrongPayload > db.length) {
+      throw httpError(409, "Phần giá Hà Nội đã chốt nên không thêm được bảng mới ở đây. Hãy chép lại phần vừa gõ, tải lại trang, rồi nhờ người phụ trách phần Hà Nội mở lại.");
+    }
     const out: any[] = [];
     let k = 0;
     for (const t of list) {
@@ -321,16 +333,23 @@ export async function updateQuote(req: Request) {
 
   // Kiểm khoá lạc quan LẦN NỮA, ở TRONG transaction ghi. Lần kiểm phía trên chạy NGOÀI transaction
   // nên hai người bấm Lưu chồng nhau vẫn lọt qua CẢ HAI (cùng đọc một mốc) rồi người ghi sau đè im
-  // lặng — UPDATE không hề kèm điều kiện mốc. `updateMany ... WHERE updatedAt = <mốc>` vừa KIỂM vừa
-  // KHOÁ hàng Quote: bên đến sau phải xếp hàng, tới lượt thì mốc đã đổi → 0 dòng → 409.
-  // ĐẶT SAU deleteMany (không phải đầu transaction) là CỐ Ý: giữ đúng thứ tự lấy khoá
-  // QuoteSheet → Quote như các đường ghi khác (markExtraTableRowPayment, saveHn) để không đẻ ra
-  // deadlock. Rollback dọn hết phần đã làm trước đó nên không để lại dấu vết.
+  // lặng — UPDATE không hề kèm điều kiện mốc. `UPDATE … WHERE updatedAt = <mốc>` vừa KIỂM vừa KHOÁ
+  // hàng Quote: bên đến sau phải xếp hàng, tới lượt thì mốc đã đổi → 0 dòng → 409.
+  // ĐẶT SAU khi đã lấy khoá QuoteSheet (không phải đầu transaction) là CỐ Ý: giữ đúng thứ tự lấy
+  // khoá QuoteSheet → Quote như các đường ghi khác (markExtraTableRowPayment, saveHn) để không đẻ
+  // ra deadlock. Rollback dọn hết phần đã làm trước đó nên không để lại dấu vết.
+  //
+  // Dùng `$executeRaw` chứ KHÔNG dùng `tx.quote.updateMany`: extension realtime ở src/db.ts coi
+  // `updateMany` là WRITE nên mỗi lần Lưu bắn HAI sự kiện SSE thay vì một — và tệ hơn, khi guard
+  // ném 409 thì transaction ROLLBACK nhưng sự kiện SSE đã bắn rồi (emit nằm NGOÀI vòng đời
+  // transaction), tức một lần Lưu THẤT BẠI vẫn bắt mọi client đang mở danh sách tải lại. Câu raw
+  // không đi qua extension. Mốc mới do chính `tx.quote.update` phía sau bump (@updatedAt), nên ở
+  // đây chỉ cần KHOÁ + KIỂM, không cần ghi giá trị mới.
   const mocClient = b.baseUpdatedAt ? new Date(b.baseUpdatedAt) : null;
   const chotKhoaLacQuan = async (tx: TxClient) => {
     if (!mocClient) return;   // client cũ không gửi mốc → bỏ qua, y như lần kiểm phía trên
-    const r = await tx.quote.updateMany({ where: { id, updatedAt: mocClient }, data: { updatedAt: new Date() } });
-    if (!r.count) throw httpError(409, "Báo giá vừa được người khác cập nhật. Vui lòng tải lại để không ghi đè thay đổi của họ.");
+    const n = await tx.$executeRaw`UPDATE "Quote" SET "updatedAt" = "updatedAt" WHERE id = ${id} AND "updatedAt" = ${mocClient}`;
+    if (!n) throw httpError(409, "Báo giá vừa được người khác cập nhật. Vui lòng tải lại để không ghi đè thay đổi của họ.");
   };
 
   if (Array.isArray(b.sheets)) {
@@ -383,9 +402,8 @@ export async function updateQuote(req: Request) {
 
   let updated;
   if (Array.isArray(b.sheets)) {
-    // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
-    reconcileExtraApprovals(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
-    reconcileExtraPayments(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
+    // Tiền KHÔNG phụ thuộc extraTables (computeQuoteTotals chỉ đọc `sh.items` — src/money.ts:54),
+    // nên tính tổng ở NGOÀI transaction là an toàn và giữ transaction ngắn nhất có thể.
     const vatPct = data.vatPercent ?? existing.vatPercent;
     const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
     assertTotalsStorable(t, b.sheets);
@@ -393,12 +411,32 @@ export async function updateQuote(req: Request) {
     data.vat = t.vat;
     data.discount = t.discount;
     data.total = t.total;
-    // Lưu = XOÁ sheet rồi TẠO LẠI → phải BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet,
-    // chữ ký, số hoá đơn/thanh toán…), nếu không mỗi lần bấm Lưu là mất sạch.
-    const carry = carrySheetState(b.sheets, existing.sheets);
-    // Giá HN đã chốt: lấy lại từ CSDL trước khi ghi (xem reconcileHanoiTables).
-    reconcileHanoiTables(b.sheets, carry, can(req.session, P.QUOTE_HN_MANAGE), existing.hnStatus);
     updated = await prisma.$transaction(async (tx) => {
+      // KHOÁ RỒI MỚI ĐỌC, TẤT CẢ TRONG TRANSACTION — y hệt saveHn (src/hnWorkflow.ts:112).
+      //
+      // Vì sao KHÔNG dùng được `existing.sheets` (đọc ở đầu hàm, NGOÀI transaction): có BA đường ghi
+      // QuoteSheet KHÔNG hề chạm Quote — customerDecision (custStatus…), signSheet (signedAt…),
+      // updateSheetInvoice (invoiceNo/paidAt/poNumber…). Đúng những field nằm trong
+      // SHEET_CARRY_FIELDS. Kế toán ghi số hoá đơn xen vào giữa lúc sale đang Lưu thì
+      // `Quote.updatedAt` KHÔNG đổi → khoá lạc quan không thấy gì → `carry` dựng từ ảnh chụp cũ →
+      // sheet tạo lại MẤT số hoá đơn, ngày thanh toán và chữ ký, im lặng, vẫn trả 200. Đọc lại SAU
+      // khi đã giữ khoá thì thấy bản TƯƠI, và người kia không chen vào được nữa cho tới lúc commit.
+      //
+      // `ORDER BY id` để mọi đường ghi lấy khoá CÙNG THỨ TỰ: `deleteMany` khoá theo thứ tự quét vật
+      // lý (không xác định), nên thiếu câu này thì nó và saveHn có thể lấy khoá ngược chiều nhau
+      // trên cùng báo giá → deadlock 40P01 → Prisma P2034.
+      await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+      const sheetsTuoi: any[] = await tx.quoteSheet.findMany({ where: { quoteId: id }, orderBy: { id: "asc" } });
+
+      // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
+      reconcileExtraApprovals(b.sheets, sheetsTuoi, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
+      reconcileExtraPayments(b.sheets, sheetsTuoi, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
+      // Lưu = XOÁ sheet rồi TẠO LẠI → phải BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet,
+      // chữ ký, số hoá đơn/thanh toán…), nếu không mỗi lần bấm Lưu là mất sạch.
+      const carry = carrySheetState(b.sheets, sheetsTuoi);
+      // Giá HN đã chốt: lấy lại từ CSDL trước khi ghi (xem reconcileHanoiTables).
+      reconcileHanoiTables(b.sheets, carry, can(req.session, P.QUOTE_HN_MANAGE), existing.hnStatus);
+
       await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
       await chotKhoaLacQuan(tx);
       const u = await tx.quote.update({
@@ -740,6 +778,18 @@ export async function signSheet(req: Request) {
 // chính họ vẫn bị `quoteScopeWhereOrThrow` giới hạn. CỐ Ý KHÔNG dùng `loadAuthorizedQuote`: hàm đó
 // từ chối luôn caller có view bị lược (internal:view / hn:fill) — mà đó chính là người dùng HỢP LỆ
 // của hai endpoint này, dùng nó sẽ khoá chết tính năng. Xem tests/rbacscope-extra-idor.test.js.
+//
+// VÌ SAO action "read" CHO CẢ ĐƯỜNG GHI `/pay` (lệch quy ước `canOnQuote(update)` của các đường ghi
+// khác — hnWorkflow.ts, /customer-decision): ở đây `quote:internal:pay` MỚI là cổng GHI, còn hàm
+// này chỉ trả lời "được đụng tới BÁO GIÁ NÀO". Siết lên "update" sẽ chặn đúng tài khoản chi phí —
+// họ chỉ có `quote:read:own`, và tư cách thành viên KHÔNG suy ra `quote:update:*` vì `canOnQuote`
+// kiểm quyền trước rồi mới xét thành viên. Đó là đổi CHÍNH SÁCH, không phải sửa lỗi; ca test
+// "read:all + internal:pay, KHÔNG update → 200" khoá lựa chọn này lại để lần sau ai siết thì biết.
+//
+// BÁO GIÁ ĐÃ XOÁ MỀM → 404: `findFirst` đi qua extension soft-delete (src/db.ts) nên tự có
+// `deletedAt: null`. CỐ Ý giữ vậy — `QuoteSheet` không soft-delete, nếu không chốt qua Quote thì
+// sheet của báo giá trong thùng rác vẫn với tới được, trong khi `GET /api/quotes/:id` (lối vào duy
+// nhất của hai endpoint này) đã 404 từ lâu.
 async function assertQuoteInScope(req: Request, quoteId: number) {
   const quote = await prisma.quote.findFirst({ where: { id: quoteId }, include: { members: { select: { id: true } } } });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
@@ -791,7 +841,17 @@ export async function getExtraTableRowProof(req: Request) {
   if (!sheet) throw httpError(404, "Không tìm thấy");
   const rid = String((req.params as any).rid);
   for (const t of (Array.isArray(sheet.extraTables) ? sheet.extraTables : []) as any[]) for (const it of (t?.items || [])) {
-    if (it && it.rid === rid) return { paidProof: it.paidProof || null };
+    if (it && it.rid === rid) {
+      // GHI NHẬT KÝ đường ĐỌC: ảnh uỷ nhiệm chi là PII của bên thứ ba (tên + số tài khoản + số
+      // tiền). `/pay` ngay trên đã ghi audit; nếu đường đọc không ghi thì không truy được ai đã
+      // xem chứng từ của báo giá nào. CỐ Ý chỉ ghi ĐỊNH DANH (sheetId/rid + có ảnh hay không) —
+      // chép cả `paidProof` vào AuditEvent là nhân bản chính cái PII đang muốn kiểm soát.
+      await audit(req, "quote.internal.proof-view", {
+        resource: "quote", resourceId: Number(req.params.id),
+        after: { sheetId: Number(req.params.sheetId), rid, hasProof: !!it.paidProof },
+      });
+      return { paidProof: it.paidProof || null };
+    }
   }
   throw httpError(404, "Không tìm thấy dòng");
 }

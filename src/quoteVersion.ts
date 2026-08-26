@@ -2,21 +2,36 @@ import type { TxClient } from "./db.js";
 
 /**
  * Lược ẢNH chứng từ thanh toán (`paidProof`, base64 tới ~900.000 ký tự/ảnh) khỏi bản chụp
- * phiên bản, giữ lại cờ `hasPaidProof` — cùng hình dạng `stripExtraProofs` đã dùng khi gửi
- * client, để giao diện đọc phiên bản cũ không phải xử lý hai kiểu dữ liệu khác nhau.
+ * phiên bản, giữ lại cờ `hasPaidProof` — CÙNG hình dạng `stripExtraProofs` (src/quoteUtils.ts)
+ * đã dùng khi gửi client, để giao diện đọc phiên bản cũ không phải xử lý hai kiểu dữ liệu.
  *
  * VÌ SAO: phiên bản chỉ để ĐỐI CHIẾU cấu trúc/giá; ảnh không bao giờ được diff, mà mỗi lần lưu
  * có ảnh hưởng giá lại đẻ một hàng QuoteVersion mang trọn bộ ảnh — nhân với RETAIN_VERSION_KEEP
  * (mặc định 100) là phình DB và phình bản sao lưu. Ảnh gốc vẫn sống ở bản HIỆN TẠI của báo giá
  * và tải được qua GET /:id/extra/:sheetId/:rid/proof.
+ *
+ * ⚠️ TRÙNG LẶP CÓ CHỦ Ý: `stripExtraProofs` trong src/quoteUtils.ts làm y hệt việc này cho đường
+ * GỬI CLIENT nhưng KHÔNG được export (và quoteUtils kéo theo db/permissions/money, không đáng
+ * import vào đây). Ràng buộc "hai bản không được trôi khỏi nhau" nay do TEST giữ, không do kỷ
+ * luật con người: tests/vdb-version-snapshot-proof.test.js so kết quả của hai đường trên cùng
+ * một dữ liệu vào. Thêm trường ảnh thứ hai mà chỉ sửa một bên là test ĐỎ.
+ *
+ * KHÁC BIỆT DUY NHẤT so với bản kia (cố ý): bảng KHÔNG có khoá `items` thì giữ nguyên, không bị
+ * thêm `items: []`. Payload phiên bản là dữ liệu đem đi DIFF — bịa thêm khoá làm diffVersions báo
+ * `sheets` đã đổi cho một thay đổi không hề có.
  */
 function stripProofsForSnapshot(extraTables: unknown): unknown {
   if (!Array.isArray(extraTables)) return extraTables ?? null;
   return extraTables.map((t: any) => {
     if (!t || typeof t !== "object") return t;
+    // `extraTables` là cột Json TỰ DO: đường ghi lại ở src/hnWorkflow.ts và lúc nhân bản báo giá
+    // KHÔNG đi qua sanitizeExtraTables, nên dữ liệu lịch sử có thể có `items` là object/chuỗi.
+    // `.map` trên thứ đó ném TypeError NGAY TRONG transaction lưu báo giá ⇒ 500 và mất trắng lần
+    // sửa. Không phải mảng thì để nguyên, không đụng tới.
+    if (!Array.isArray(t.items)) return t;
     return {
       ...t,
-      items: (t.items || []).map((it: any) => {
+      items: t.items.map((it: any) => {
         if (!it || typeof it !== "object") return it;
         const { paidProof, ...rest } = it;
         return { ...rest, hasPaidProof: !!paidProof };

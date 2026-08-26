@@ -23,7 +23,7 @@
 // KHÔNG in ra giá trị PII nào — chỉ đếm.
 import { prisma } from "../db.js";
 import { PII_FIELDS } from "../piiFields.js";
-import { decryptPii, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
+import { moTheoKhoa, dangXoayKhoa, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
 import { getObjectBytes, isStorageEnabled } from "../storage.js";
 import { sha256, MAX_PROOF_BYTES, decodeDataUrl } from "../paymentProof.js";
 
@@ -44,7 +44,7 @@ async function kiemPii(): Promise<Ket> {
     };
   }
 
-  let rows = 0, checked = 0, mismatch = 0, undecryptable = 0;
+  let rows = 0, checked = 0, mismatch = 0, undecryptable = 0, conKhoaCu = 0;
   for (const [model, fields] of Object.entries(PII_FIELDS)) {
     const client = modelClient(model);
     if (!client) continue;
@@ -59,8 +59,13 @@ async function kiemPii(): Promise<Ket> {
         const enc = r[f.enc];
         if (!isPiiEncrypted(enc)) continue;
         checked++;
-        const got = decryptPii(enc, aadFor(model, f.plain));
+        // KHÔNG dùng decryptPii ở đây. Nó cố ý rơi về PII_ENC_KEY_OLD, nên nếu dùng, bước kiểm này
+        // báo "tất cả đọc được" kể cả khi KHÔNG MỘT HÀNG NÀO được mã lại bằng khoá mới — tức bằng
+        // chứng GIẢ, ở đúng chỗ nguy hiểm nhất: diễn tập khôi phục hằng tuần là thứ người vận hành
+        // tin để quyết định gỡ khoá cũ, mà gỡ sớm là mất dữ liệu vĩnh viễn.
+        const { giaTri: got, khoa } = moTheoKhoa(String(enc), aadFor(model, f.plain));
         if (got == null) { undecryptable++; continue; }
+        if (khoa === "cu") conKhoaCu++;
         // So SÁNH TRONG BỘ NHỚ, không in ra. Chỉ đếm.
         const want = r[f.plain] == null ? null : String(r[f.plain]);
         if (want != null && got !== want) mismatch++;
@@ -68,11 +73,18 @@ async function kiemPii(): Promise<Ket> {
     }
   }
 
-  const dat = undecryptable === 0 && mismatch === 0;
+  // Còn hàng nằm ở khoá cũ KHÔNG phải lỗi trong lúc cửa sổ xoay còn mở — đó là trạng thái mong đợi.
+  // Nhưng nó PHẢI hiện ra, và phải là ĐỎ khi không hề đang xoay khoá (nghĩa là dữ liệu chỉ đọc được
+  // nhờ một khoá mà cấu hình không còn khai — quả bom hẹn giờ).
+  const dangXoay = dangXoayKhoa();
+  const dat = undecryptable === 0 && mismatch === 0 && (conKhoaCu === 0 || dangXoay);
+  const ghiChu = conKhoaCu > 0
+    ? ` · ${conKhoaCu} trường CÒN Ở KHOÁ CŨ — chạy pii-backfill.mjs --rotate TRƯỚC KHI gỡ PII_ENC_KEY_OLD`
+    : "";
   return {
     ten: "PII",
     dat,
-    chiTiet: `${rows} hàng · ${checked} trường mã hoá · ${undecryptable} KHÔNG giải mã được · ${mismatch} lệch`,
+    chiTiet: `${rows} hàng · ${checked} trường mã hoá · ${undecryptable} KHÔNG giải mã được · ${mismatch} lệch${ghiChu}`,
   };
 }
 

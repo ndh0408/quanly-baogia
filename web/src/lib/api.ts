@@ -367,7 +367,10 @@ export const api = {
   logout: async () => { const r = await req("/auth/logout", { method: "POST" }); resetCsrfToken(); return r; },
   forgotPassword: (email: string) => req<unknown>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
   getInvite: (token: string) => req<{ email: string; displayName?: string }>(`/auth/invite/${encodeURIComponent(token)}`),
-  acceptInvite: async (data: { token: string; displayName: string; senderName?: string; phone?: string; title?: string; password: string }) => {
+  // `mfaToken` TUỲ CHỌN: đường này kiêm luôn "đặt lại mật khẩu", và tài khoản đã bật MFA phải trình
+  // mã thứ hai ở đây (server trả 401 { error, mfaRequired: true } — đúng hình dạng của /login).
+  // Không có tham số này thì người bật MFA mà quên mật khẩu KHÔNG còn đường phục hồi nào.
+  acceptInvite: async (data: { token: string; displayName: string; senderName?: string; phone?: string; title?: string; password: string; mfaToken?: string }) => {
     const m = await req<Me>("/auth/accept-invite", { method: "POST", body: JSON.stringify(data) });
     resetCsrfToken();   // kích hoạt lời mời cũng đăng nhập luôn → phiên mới, mã cũ chết
     return m;

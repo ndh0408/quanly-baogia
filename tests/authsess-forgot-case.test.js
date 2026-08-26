@@ -26,27 +26,35 @@ if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") {
 
 const TAG = `asxFgt${Date.now()}`;
 const EMAIL = `${TAG}.Hoa@Example.VN`;
+// Tài khoản ĐỐI CHỨNG: dùng làm mốc đồng bộ cho ca "email không tồn tại" (xem chú thích ở đó).
+const EMAIL_DC = `${TAG}.Doi@Example.VN`;
 
 describe.runIf(dbAvailable)("quên mật khẩu — không phân biệt hoa/thường", () => {
-  let userId;
+  let userId, userDcId;
 
   beforeAll(async () => {
     const u = await prisma.user.create({
       data: { username: `${TAG}u`, email: EMAIL, displayName: "Forgot Case", passwordHash: bcrypt.hashSync("Abc12345", 4), active: true },
     });
     userId = u.id;
+    const dc = await prisma.user.create({
+      data: { username: `${TAG}dc`, email: EMAIL_DC, displayName: "Forgot Control", passwordHash: bcrypt.hashSync("Abc12345", 4), active: true },
+    });
+    userDcId = dc.id;
   });
 
   afterAll(async () => {
     await prisma.auditEvent.deleteMany({ where: { actorId: userId } }).catch(() => {});
+    await prisma.auditEvent.deleteMany({ where: { actorId: userDcId } }).catch(() => {});
     await prisma.user.delete({ where: { id: userId }, includeDeleted: true }).catch(() => {});
+    await prisma.user.delete({ where: { id: userDcId }, includeDeleted: true }).catch(() => {});
   });
 
   // sendPasswordReset chạy nền và tự nuốt lỗi (kể cả lỗi SMTP), nhưng nó GHI inviteTokenHash TRƯỚC
   // khi gửi mail — nên cột đó là bằng chứng đáng tin cho việc "có cấp token hay không".
-  const doiCapToken = async () => {
+  const doiCapToken = async (id = userId) => {
     for (let i = 0; i < 60; i++) {
-      const u = await prisma.user.findUnique({ where: { id: userId }, select: { inviteTokenHash: true } });
+      const u = await prisma.user.findUnique({ where: { id }, select: { inviteTokenHash: true } });
       if (u.inviteTokenHash) return u.inviteTokenHash;
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -61,8 +69,18 @@ describe.runIf(dbAvailable)("quên mật khẩu — không phân biệt hoa/thư
 
   it("email KHÔNG tồn tại thì vẫn không cấp gì (không mở đường dò tài khoản)", async () => {
     await prisma.user.update({ where: { id: userId }, data: { inviteTokenHash: null, inviteExpiresAt: null } });
+    await prisma.user.update({ where: { id: userDcId }, data: { inviteTokenHash: null, inviteExpiresAt: null } });
     sendPasswordReset({ body: { email: `khong-ton-tai-${TAG}@example.vn` }, headers: {}, ip: "127.0.0.1" });
-    await new Promise((r) => setTimeout(r, 500));
+
+    // MỐC ĐỒNG BỘ, KHÔNG PHẢI `sleep(500)`. Tác vụ nền chạy sau khi route đã trả 200, nên "chờ nửa
+    // giây rồi khẳng định vẫn null" là XANH VÌ LÝ DO SAI mỗi khi CI tải nặng: có thể tác vụ chưa
+    // kịp chạy chứ không phải nó đã chạy và đã từ chối. Ở đây ta bắn thêm một yêu cầu cho tài khoản
+    // ĐỐI CHỨNG NGAY SAU đó rồi chờ token của nó xuất hiện: đường đi của ca đối chứng là đường đi
+    // của ca âm CỘNG THÊM phần ghi CSDL, và nó khởi chạy SAU — nên khi nó đã ghi xong thì ca âm
+    // chắc chắn đã tra cứu xong và đã quyết định không cấp gì.
+    sendPasswordReset({ body: { email: EMAIL_DC.toLowerCase() }, headers: {}, ip: "127.0.0.1" });
+    expect(await doiCapToken(userDcId)).toBeTruthy();
+
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { inviteTokenHash: true } });
     expect(u.inviteTokenHash).toBeNull();
   });

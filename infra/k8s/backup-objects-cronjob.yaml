@@ -9,6 +9,24 @@
 # CƠ CHẾ: `mc mirror` CỘNG DỒN — cố ý KHÔNG dùng --remove. Nếu bucket bị xoá nhầm (hoặc bị mã hoá
 # tống tiền) thì bản sao lưu phải GIỮ LẠI vật, chứ không đồng bộ luôn cái xoá đó. Đó là khác biệt
 # giữa "bản sao lưu" và "bản chép".
+#
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# ⚠️  CHƯA TỪNG CHẠY THẬT TRÊN CLUSTER. ĐỪNG COI NHÁNH K8S LÀ "ĐÃ CÓ SAO LƯU KHO OBJECT".
+#
+# File này mới chỉ qua `kubeconform` — tức chỉ kiểm được HÌNH DẠNG YAML, không kiểm được ảnh
+# `minio/mc` có sẵn những lệnh mà script dùng hay không. Ảnh đó dựng trên UBI-micro, một bản nền
+# cắt rất sâu. Bản đầu của file này dùng `find -printf` (phần mở rộng riêng của GNU findutils) và
+# `xargs`; với `set -e`, một lệnh không tồn tại là job chết lúc 02:30 — không ai thấy, và đội vận
+# hành vẫn tin rằng chứng từ tài chính đã có bản sao lưu. Đã viết lại để chỉ dùng `mc` cho mọi
+# thao tác liệt kê/xoá, nhưng `sha256sum`, `sed`, `sort`, `wc`, `tr` thì VẪN CHƯA XÁC MINH ĐƯỢC.
+#
+# VIỆC PHẢI LÀM TRƯỚC KHI TIN FILE NÀY:
+#   1. kind/minikube: `kubectl create job --from=cronjob/quanly-object-backup thu-1` rồi đọc log.
+#   2. Xác nhận log kết thúc bằng `OBJECT_BACKUP_DONE` và manifest_*.tsv có nội dung.
+#   3. Diễn tập khôi phục TỪ bản gương này, không chỉ nhìn nó tồn tại.
+# Nhánh ĐANG CHẠY THẬT là docker-compose + scripts/backup/backup-objects.sh — đó mới là đường được
+# kiểm chứng. Xem docs/REMAINING_RISKS.md.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -51,6 +69,14 @@ spec:
                 capabilities:
                   drop: ["ALL"]
               env:
+                # `mc` ghi cấu hình vào $HOME/.mc. Pod chạy readOnlyRootFilesystem + runAsUser 1000
+                # nên $HOME KHÔNG ghi được → mc lỗi ngay ở lệnh đầu tiên. Trỏ vào emptyDir /tmp đã
+                # khai sẵn bên dưới. (Bản compose chạy mc bằng root với lớp ghi container nên không
+                # gặp chuyện này — logic được dời vào pod mà chưa kiểm lại môi trường.)
+                - name: HOME
+                  value: /tmp
+                - name: MC_CONFIG_DIR
+                  value: /tmp/.mc
                 # Cặp khoá đi qua env (không qua argv): argv của tiến trình đọc được từ trong pod.
                 - name: S3_ENDPOINT
                   valueFrom: { secretKeyRef: { name: quanly-secrets, key: S3_ENDPOINT } }
@@ -70,19 +96,41 @@ spec:
                   mc mirror --quiet --overwrite "q/$S3_BUCKET" /objects
                   # Đối chiếu SỐ LƯỢNG: mirror trả 0 mà thiếu object thì bản sao lưu vô dụng và
                   # không ai biết cho tới lúc cần khôi phục thật.
-                  REMOTE_N=$(mc ls --recursive "q/$S3_BUCKET" | grep -c . || echo 0)
-                  LOCAL_N=$(find /objects -type f ! -name '*.tsv*' | wc -l)
+                  # ĐẾM BẰNG `mc` CHO CẢ HAI PHÍA, KHÔNG DÙNG `find`/`xargs`/`stat`.
+                  # Ảnh minio/mc dựng trên UBI-micro: nó KHÔNG có findutils, và `find -printf` là
+                  # phần mở rộng riêng của GNU. Với `set -e`, lệnh đầu tiên không tồn tại là job
+                  # chết — mà job chết lúc 02:30 thì không ai thấy, và đội vận hành vẫn tin rằng
+                  # ảnh chứng từ thanh toán đã có bản sao lưu. Dùng đúng công cụ chắc chắn có
+                  # trong ảnh: chính `mc`.
+                  #
+                  # `| wc -l` chứ không `grep -c .`: với bucket RỖNG, `grep -c .` in "0" NHƯNG
+                  # thoát mã 1, nên `|| echo 0` in thêm một "0" nữa và biến thành chuỗi "0\n0".
+                  REMOTE_N=$(mc ls --recursive --quiet "q/$S3_BUCKET" | wc -l | tr -d ' ')
+                  LOCAL_N=$(mc ls --recursive --quiet /objects | grep -v '/manifest_' | wc -l | tr -d ' ')
                   echo "bucket=$REMOTE_N gương=$LOCAL_N"
                   [ "$REMOTE_N" -eq 0 ] || [ "$LOCAL_N" -ge "$REMOTE_N" ] || { echo "BẢN GƯƠNG THIẾU OBJECT"; exit 1; }
                   # Manifest SHA-256: ghi .partial rồi đổi tên, để một lượt chết giữa chừng không
                   # để lại manifest cụt mà bước kiểm khôi phục sau này lại tin là hợp lệ.
+                  # `mc cat` + `sha256sum` thay cho `stat`/`sha256sum` trên đường dẫn: mc luôn có,
+                  # còn coreutils thì không chắc. Kích thước lấy từ chính `mc ls --json`.
                   STAMP=$(date +%Y%m%d_%H%M%S)
                   M="/objects/manifest_${STAMP}.tsv"
-                  cd /objects && find . -type f ! -name 'manifest_*' -printf '%P\n' | sort | while IFS= read -r k; do
-                    printf '%s\t%s\t%s\n' "$k" "$(stat -c%s "$k")" "$(sha256sum "$k" | cut -d' ' -f1)"
-                  done > "$M.partial"
+                  mc ls --recursive --json /objects | \
+                    sed -n 's/.*"key":"\([^"]*\)".*"size":\([0-9]*\).*/\1\t\2/p' | \
+                    grep -v '^manifest_' | sort > /tmp/keys.tsv
+                  : > "$M.partial"
+                  while IFS="$(printf '\t')" read -r k sz; do
+                    [ -n "$k" ] || continue
+                    h=$(mc cat "/objects/$k" | sha256sum | cut -d' ' -f1)
+                    printf '%s\t%s\t%s\n' "$k" "$sz" "$h" >> "$M.partial"
+                  done < /tmp/keys.tsv
                   mv "$M.partial" "$M"
-                  ls -1t /objects/manifest_*.tsv | tail -n +31 | xargs -r rm -f
+                  # Giữ 30 manifest gần nhất. `mc rm` thay `xargs -r rm -f` (xargs cũng thuộc
+                  # findutils). Vòng lặp `while read` chịu được danh sách rỗng, không cần `-r`.
+                  mc ls --quiet /objects | sed -n 's/.*\(manifest_[0-9_]*\.tsv\)$/\1/p' | \
+                    sort -r | tail -n +31 | while IFS= read -r old; do
+                      [ -n "$old" ] && mc rm --force "/objects/$old" || true
+                    done
                   echo "OBJECT_BACKUP_DONE"
               volumeMounts:
                 - { name: objects, mountPath: /objects }

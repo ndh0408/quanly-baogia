@@ -29,7 +29,10 @@ const JWT_AUDIENCE = "quanly-api";
  * hiện chưa có client nào dùng, thêm một key config cho nó là mở rộng cấu hình mà chưa ai cần.
  * Nếu sau này có client di động thật thì hãy chuyển sang config.ts cùng lúc.
  */
-const REFRESH_FAMILY_MAX_DAYS = 30;
+// Export để test hồi quy ÔM SÁT ranh giới được (MAX−1 ngày phải xoay được, MAX+1 ngày phải bị đốt).
+// Trước đây test lùi createdAt về 400 ngày với lý do "mọi trần hợp lý đều < 400 ngày" — nghĩa là
+// đổi hằng số này thành 365 (gần như vô hiệu hoá chốt) mà bộ test vẫn xanh.
+export const REFRESH_FAMILY_MAX_DAYS = 30;
 
 // config.JWT_SECRET là string|undefined trong type (zod .optional()) nhưng LUÔN được
 // đặt ở runtime (config.ts:96 fallback về SESSION_SECRET). Secret cast chỉ thu hẹp kiểu.

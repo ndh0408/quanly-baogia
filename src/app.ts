@@ -337,11 +337,23 @@ export function createApp() {
   // Prometheus metrics middleware (records all requests).
   app.use(metricsMiddleware);
 
-  // TRẦN CHO PROBE. `app.use("/api/", apiLimiter)` chỉ phủ tiền tố /api/, nên /livez, /readyz và
-  // /metrics nằm NGOÀI mọi giới hạn — mà /readyz thì truy vấn CSDL. Phải mount TRƯỚC các handler đó:
-  // Express khớp theo thứ tự đăng ký, đặt sau là không bao giờ chạy. 120/phút thoải mái cho probe
-  // của Docker/k8s (thường 5-10 giây một lần) nhưng chặn được vòng lặp gọi liên tục.
-  app.use(["/livez", "/readyz", "/metrics"], createLimiter("probe", {
+  // TRẦN CHO PROBE. `app.use("/api/", apiLimiter)` chỉ phủ tiền tố /api/, nên /readyz và /metrics
+  // nằm NGOÀI mọi giới hạn — mà /readyz thì truy vấn CSDL. Phải mount TRƯỚC các handler đó: Express
+  // khớp theo thứ tự đăng ký, đặt sau là không bao giờ chạy. 120/phút thoải mái cho probe của
+  // Docker/k8s (thường 5-10 giây một lần) nhưng chặn được vòng lặp gọi liên tục.
+  //
+  // ⛔ /livez CỐ Ý ĐỨNG NGOÀI — đây là chỗ dễ tự bắn vào chân nhất trong file này.
+  //
+  // `createLimiter` ở production gắn kho đếm REDIS. Đưa nó vào trước /livez nghĩa là biến LIVENESS
+  // PROBE thành thứ phụ thuộc Redis: Redis chớp một nhịp (restart, đầy bộ nhớ, mạng chập) là probe
+  // trả lỗi hoặc chậm, Docker/k8s đọc đó là "container chết" và GIẾT container — dù ứng dụng vẫn
+  // đang phục vụ hoàn hảo. Một sự cố ở thành phần PHỤ TRỢ thành sự cố toàn hệ thống, đúng thứ mà
+  // lớp dự phòng in-memory ở src/rateLimit.ts vừa được viết ra để tránh.
+  //
+  // Bản thân /livez cũng không cần trần: handler của nó chỉ `res.json({ ok: true })`, không đụng
+  // CSDL, không đụng Redis, không cấp phát gì đáng kể. Kẻ muốn làm ngập nó thì làm ngập được mọi
+  // endpoint khác — đó là việc của tầng mạng, không phải của một limiter đặt trước probe sống.
+  app.use(["/readyz", "/metrics"], createLimiter("probe", {
     windowMs: 60 * 1000,
     max: 120,
     message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },

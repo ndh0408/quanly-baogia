@@ -36,7 +36,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
-import { encryptPii, blindIndex, decryptPii, isPiiEncrypted, isPiiEncryptionEnabled } from "../../src/piiBox.js";
+import { encryptPii, blindIndex, decryptPii, moTheoKhoa, dangXoayKhoa, isPiiEncrypted, isPiiEncryptionEnabled } from "../../src/piiBox.js";
 import { PII_FIELDS } from "../../src/piiFields.js";
 
 const args = process.argv.slice(2);
@@ -79,20 +79,25 @@ async function verifyModel(model, fields) {
     where: { piiVersion: { gt: 0 } },
     select: Object.fromEntries([["id", true], ...fields.flatMap((f) => [[f.plain, true], [f.enc, true]])]),
   });
-  let checked = 0, mismatch = 0, undecryptable = 0;
+  let checked = 0, mismatch = 0, undecryptable = 0, conKhoaCu = 0;
   for (const r of rows) {
     for (const f of fields) {
       const enc = r[f.enc];
       if (!isPiiEncrypted(enc)) continue;
       checked++;
-      const got = decryptPii(enc, aadFor(model, f.plain));
+      // KHÔNG dùng decryptPii: nó CỐ Ý rơi về PII_ENC_KEY_OLD, nên bước "chứng minh đã xoay xong"
+      // sẽ báo ✓ kể cả khi chưa hàng nào được mã lại. Runbook dùng đúng dấu ✓ đó làm điều kiện để
+      // GỠ khoá cũ — gỡ sớm là mọi hàng còn lại hoá đá vĩnh viễn. Phải hỏi "mở được bằng khoá MỚI
+      // chưa", không phải "có mở được không".
+      const { giaTri: got, khoa } = moTheoKhoa(String(enc), aadFor(model, f.plain));
       if (got == null) { undecryptable++; continue; }
+      if (khoa === "cu") conKhoaCu++;
       const want = r[f.plain] == null ? null : String(r[f.plain]);
       // So SÁNH TRONG BỘ NHỚ, không in ra. Chỉ đếm.
       if (want != null && got !== want) mismatch++;
     }
   }
-  return { rows: rows.length, checked, mismatch, undecryptable };
+  return { rows: rows.length, checked, mismatch, undecryptable, conKhoaCu };
 }
 
 /**
@@ -188,16 +193,24 @@ for (const [model, fields] of Object.entries(PII_FIELDS)) {
     if (r.failed > 0) bad = true;
   } else if (VERIFY) {
     const v = await verifyModel(model, fields);
-    const ok = v.mismatch === 0 && v.undecryptable === 0;
+    // `conKhoaCu > 0` là ✖ CHỨ KHÔNG PHẢI ✓: đây chính là bước mà runbook dùng để quyết định có
+    // được gỡ PII_ENC_KEY_OLD hay không. Đọc được nhờ khoá CŨ nghĩa là chưa xoay xong; báo đạt ở
+    // đây là mời người vận hành gỡ khoá cũ và làm hoá đá vĩnh viễn phần còn lại.
+    const ok = v.mismatch === 0 && v.undecryptable === 0 && v.conKhoaCu === 0;
     if (!ok) bad = true;
-    console.log(`   ${ok ? "✓" : "✖"} ${model}: ${v.rows} bản ghi · ${v.checked} trường đã kiểm · lệch ${v.mismatch} · không giải mã được ${v.undecryptable}`);
+    const cu = v.conKhoaCu > 0 ? ` · CÒN Ở KHOÁ CŨ ${v.conKhoaCu}` : "";
+    console.log(`   ${ok ? "✓" : "✖"} ${model}: ${v.rows} bản ghi · ${v.checked} trường đã kiểm · lệch ${v.mismatch} · không giải mã được ${v.undecryptable}${cu}`);
   } else {
     const r = await backfillModel(model, fields);
     if (!DRY && r.pending > 0) bad = true;
   }
 }
 
-if (VERIFY) console.log(bad ? "\n✖ XÁC MINH THẤT BẠI" : "\n✓ XÁC MINH ĐẠT — mọi bản mã giải ra khớp cột thô");
+if (VERIFY) {
+  console.log(bad
+    ? "\n✖ XÁC MINH THẤT BẠI" + (dangXoayKhoa() ? " — nếu vì 'CÒN Ở KHOÁ CŨ' thì chạy --rotate rồi kiểm lại; ĐỪNG gỡ PII_ENC_KEY_OLD." : "")
+    : "\n✓ XÁC MINH ĐẠT — mọi bản mã mở được BẰNG KHOÁ HIỆN TẠI và khớp cột thô");
+}
 else if (ROTATE && !DRY) {
   console.log(bad
     ? "\n✖ XOAY KHOÁ CHƯA XONG — còn bản ghi không giải mã được bằng cả hai khoá. ĐỪNG gỡ PII_ENC_KEY_OLD."

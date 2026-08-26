@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../src/db.js";
 import { snapshotQuoteVersion } from "../src/quoteVersion.js";
+import { presentQuote } from "../src/quoteUtils.js";
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "Quote" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres");
@@ -33,7 +34,7 @@ const TAG = `vdbsnap${Date.now()}`;
 const ANH_BASE64 = `data:image/png;base64,${"QUJD".repeat(2000)}${TAG}`;
 
 describe.runIf(dbAvailable)("snapshot phiên bản không được chép ảnh chứng từ", () => {
-  let userId, companyId, templateId, quoteId, sheetId;
+  let userId, companyId, templateId, quoteId, sheetId, sheetLaId;
 
   beforeAll(async () => {
     const u = await prisma.user.create({ data: { username: `${TAG}-u`, displayName: `${TAG} u`, role: "admin", passwordHash: "x" } });
@@ -59,23 +60,36 @@ describe.runIf(dbAvailable)("snapshot phiên bản không được chép ảnh c
               ],
             }],
             items: { create: [{ order: 0, kind: "item", name: "Hạng mục A", unit: "cái", quantity: "1", unitPrice: "1000000" }] },
+          }, {
+            // Sheet 2: extraTables DỊ DẠNG. `extraTables` là cột Json TỰ DO — đường ghi ở
+            // src/hnWorkflow.ts và lúc nhân bản báo giá KHÔNG đi qua sanitizeExtraTables, nên dữ
+            // liệu lịch sử có thể có hình dạng khác hẳn. Snapshot phải chịu được, không được ném.
+            templateId, order: 1, name: "Sheet 2",
+            extraTables: [
+              { category: "hcm", name: "Bảng KHÔNG có khoá items" },
+              { category: "hanoi", name: "items SAI KIỂU", items: { r9: { name: "hàng lạc" } } },
+            ],
+            items: { create: [{ order: 0, kind: "item", name: "Hạng mục B", unit: "cái", quantity: "1", unitPrice: "2000000" }] },
           }],
         },
       },
-      include: { sheets: true },
+      include: { sheets: { orderBy: { order: "asc" } } },
     });
     quoteId = q.id;
     sheetId = q.sheets[0].id;
+    sheetLaId = q.sheets[1].id;
   });
 
   afterAll(async () => {
     await prisma.quoteVersion.deleteMany({ where: { quoteId } });
-    await prisma.quoteItem.deleteMany({ where: { sheetId } });
+    await prisma.quoteItem.deleteMany({ where: { sheetId: { in: [sheetId, sheetLaId] } } });
     await prisma.quoteSheet.deleteMany({ where: { quoteId } });
-    await prisma.quote.deleteMany({ where: { id: quoteId } });
-    await prisma.quoteTemplate.deleteMany({ where: { id: templateId } });
-    await prisma.company.deleteMany({ where: { id: companyId } });
-    await prisma.user.deleteMany({ where: { id: userId } });
+    // hardDelete: Quote/QuoteTemplate/Company/User là model SOFT-DELETE — deleteMany thường chỉ
+    // đặt deletedAt, để lại rác vĩnh viễn trong CSDL test dùng chung.
+    await prisma.quote.deleteMany({ where: { id: quoteId }, hardDelete: true });
+    await prisma.quoteTemplate.deleteMany({ where: { id: templateId }, hardDelete: true });
+    await prisma.company.deleteMany({ where: { id: companyId }, hardDelete: true });
+    await prisma.user.deleteMany({ where: { id: userId }, hardDelete: true });
   });
 
   it("payload KHÔNG chứa chuỗi base64 của paidProof", async () => {
@@ -106,5 +120,45 @@ describe.runIf(dbAvailable)("snapshot phiên bản không được chép ảnh c
   it("ảnh gốc vẫn còn ở bản HIỆN TẠI của báo giá (snapshot không được xoá dữ liệu sống)", async () => {
     const sh = await prisma.quoteSheet.findUnique({ where: { id: sheetId }, select: { extraTables: true } });
     expect(sh.extraTables[0].items[0].paidProof).toBe(ANH_BASE64);
+  });
+
+  // ── extraTables dị dạng: KHÔNG được làm ngã lần Lưu ────────────────────────────────────────
+  // snapshotQuoteVersion chạy BÊN TRONG transaction lưu báo giá (src/services/quoteService.ts).
+  // Một TypeError ở đây không phải lỗi cosmetic: nó rollback cả transaction ⇒ HTTP 500 và người
+  // dùng MẤT TRẮNG lần sửa, lặp lại mãi mãi vì dữ liệu hỏng vẫn nằm đó.
+  it("bảng có `items` SAI KIỂU (không phải mảng): snapshot không ném, giữ nguyên dữ liệu", async () => {
+    await expect(prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, userId, "dị dạng"))).resolves.toBeTruthy();
+    const ver = await prisma.quoteVersion.findFirst({ where: { quoteId }, orderBy: { versionNo: "desc" } });
+    const et = ver.payload.sheets[1].extraTables;
+    expect(et[1].items).toEqual({ r9: { name: "hàng lạc" } });   // để nguyên, không đụng tới
+  });
+
+  it("bảng KHÔNG có khoá `items`: payload không được BỊA thêm `items: []`", async () => {
+    // diffVersions so bằng JSON.stringify trên khoá `sheets`. Thêm một khoá không có trong dữ liệu
+    // gốc làm mọi lần diff giữa bản cũ và bản mới báo "sheets đã đổi" cho một thay đổi không hề có.
+    await prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, userId, "dị dạng"));
+    const ver = await prisma.quoteVersion.findFirst({ where: { quoteId }, orderBy: { versionNo: "desc" } });
+    const et = ver.payload.sheets[1].extraTables;
+    expect(Object.prototype.hasOwnProperty.call(et[0], "items")).toBe(false);
+  });
+
+  // ── Khoá hai bản lược ảnh vào nhau ─────────────────────────────────────────────────────────
+  // `stripProofsForSnapshot` (src/quoteVersion.ts) và `stripExtraProofs` (src/quoteUtils.ts, dùng
+  // ở presentQuote) là HAI bản cùng một logic. Nếu mai này thêm một trường ảnh thứ hai mà chỉ sửa
+  // một bên, đường còn lại lặng lẽ chép base64 trở lại — đúng lỗi vừa vá quay về. Bài này bắt
+  // điều đó thay cho kỷ luật con người.
+  it("hai đường lược ảnh (snapshot ↔ presentQuote) cho CÙNG kết quả trên bảng có items", async () => {
+    await prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, userId, "đối chiếu"));
+    const ver = await prisma.quoteVersion.findFirst({ where: { quoteId }, orderBy: { versionNo: "desc" } });
+    const q = await prisma.quote.findFirst({
+      where: { id: quoteId },
+      include: { sheets: { orderBy: { order: "asc" }, include: { items: true, template: true } } },
+    });
+    // CHỈ đưa sheet 1 (bảng đúng hình dạng) vào presentQuote: `stripExtraProofs` bên quoteUtils
+    // CHƯA có lá chắn Array.isArray nên nó NGÃ trên sheet 2 dị dạng — đó là lỗi riêng của
+    // src/quoteUtils.ts (ngoài phạm vi cụm này, đã ghi vào bàn giao), không phải thứ bài đối chiếu
+    // này đo. Ở đây chỉ chốt: cùng dữ liệu ĐÚNG hình dạng thì hai đường phải ra y hệt nhau.
+    const trinhBay = presentQuote({ ...q, sheets: [q.sheets[0]] }, { internalOnly: true });
+    expect(trinhBay.internalSheets[0].tables).toEqual(ver.payload.sheets[0].extraTables);
   });
 });

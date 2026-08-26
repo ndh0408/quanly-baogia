@@ -25,9 +25,15 @@ const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "R
 // dùng TRUNC rất nhiều, còn editor chuẩn hoá về ROUNDDOWN để chỉ giữ một cách viết.
 const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE", TRUNC: "ROUNDDOWN" };
 
-// Trần số HÀNG mà MỘT dải ô ("G1:G9999999") được phép bung ra. Một trang lưu tối đa 1000 dòng
+// Trần TỔNG số ref mà MỘT công thức được phép bung ra. Một trang lưu tối đa 1000 dòng
 // (sheetSchema trong src/validators.ts) nên 20.000 đã là 20 lần dư cho mọi báo giá thật; vượt trần
 // nghĩa là công thức rác hoặc cố ý phá, và cách xử lý an toàn của module này luôn là "ghi con số".
+//
+// PHẢI LÀ TRẦN TÍCH LUỸ, KHÔNG PHẢI TRẦN THEO TỪNG DẢI. Bản vá đầu chỉ kiểm `r1 - r0` bên trong
+// mỗi dải, nên "=SUM(G1:G20001,G1:G20001,…)" lặp 199 lần — dài đúng 1995 ký tự, LỌT trần 2000 ký
+// tự của `formulas` trong validators.ts — vẫn bung ~4.000.000 đối tượng (đo được 1265 ms / 430 MB
+// heap cho MỘT ô). Mỗi lần xuất file gọi cellFormula cho TỪNG item × từng trường số, nên chi phí
+// đó nhân lên hàng nghìn lần; worker xuất hết hạn 30 s rồi rơi về chạy NỘI TUYẾN trên luồng chính.
 const MAX_REF_ROWS = 20_000;
 
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Cột editor (giống groupLetter ở frontend). */
@@ -368,6 +374,8 @@ export function buildFormulaContext(
     if (field === "unitPrice" || field === "days") return Number(it[field]) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
+  // Xem MAX_REF_ROWS: ngân sách ref còn lại cho LẦN DỊCH công thức đang chạy (cellFormula đặt lại).
+  let evalBudget = MAX_REF_ROWS;
   const editorRefs: EditorRefs = {
     cell: editorCellNum,
     range: (a: string, b: string) => {
@@ -380,7 +388,13 @@ export function buildFormulaContext(
       // Trả [] → evalEditorFormula thay dải bằng "0", tự kiểm lệch → cellFormula ghi số (an toàn).
       if (r1 - r0 > MAX_REF_ROWS) return [];
       const out: number[] = [];
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(editorCellNum(colLetter(c) + r));
+      // Ngân sách TÍCH LUỸ: một công thức có thể chứa nhiều dải, mỗi dải dưới trần nhưng cộng lại
+      // vẫn nổ. `evalBudget` được cellFormula đặt lại trước mỗi lần dịch nên nó là trần CHO MỘT
+      // công thức, không phải trần cho cả đời context.
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        if (--evalBudget < 0) return [];
+        out.push(editorCellNum(colLetter(c) + r));
+      }
       return out;
     },
   };
@@ -405,8 +419,14 @@ export function buildFormulaContext(
       if (m[3] && m[4]) {
         const f2 = colToField[m[3].toUpperCase()];
         const r0 = Math.min(+m[2], +m[4]) - 1, r1 = Math.max(+m[2], +m[4]) - 1;
-        if (r1 - r0 > MAX_REF_ROWS) return null;
-        for (let r = r0; r <= r1; r++) { if (f1) out.push({ row: r, field: f1 }); if (f2 && f2 !== f1) out.push({ row: r, field: f2 }); }
+        if (r1 - r0 > MAX_REF_ROWS) return null;   // thoát sớm: một dải đã vượt trần thì khỏi đếm
+        for (let r = r0; r <= r1; r++) {
+          // Trần TÍCH LUỸ trên TỔNG `out` — trần theo từng dải ở trên KHÔNG đủ, vì một công thức
+          // 1995 ký tự chứa được 199 dải, mỗi dải 20.001 hàng (xem ghi chú ở MAX_REF_ROWS).
+          if (out.length >= MAX_REF_ROWS) return null;
+          if (f1) out.push({ row: r, field: f1 });
+          if (f2 && f2 !== f1) out.push({ row: r, field: f2 });
+        }
       } else if (f1) out.push({ row: +m[2] - 1, field: f1 });
     }
     return out;
@@ -448,6 +468,7 @@ export function buildFormulaContext(
      */
     cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
+      evalBudget = MAX_REF_ROWS;   // ngân sách bung dải của bộ tự kiểm: mỗi công thức một suất
       const refs = refsInFormula(String(raw));
       if (refs === null) return null;   // dải ô khổng lồ → ghi số, KHÔNG bung ra bộ nhớ
       const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refs.some((r) => r.field === "_amount");
@@ -467,5 +488,8 @@ export function buildFormulaContext(
     // Lộ ra cho test/soi.
     _ctx: ctx,
     _editorRefs: editorRefs,
+    // Lộ ra để test ghim ĐÚNG bất biến "số ref bung ra bị chặn". Không dùng cellFormula được:
+    // nó trả null cho dải ngoài bảng dù có trần hay không, nên xanh cả khi lỗ hổng còn nguyên.
+    _refsInFormula: refsInFormula,
   };
 }

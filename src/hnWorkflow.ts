@@ -111,6 +111,31 @@ export async function saveHn(req: Request) {
     // updateQuote/markExtraTableRowPayment đang dùng.
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
     const sheets = await tx.quoteSheet.findMany({ where: { quoteId: id }, select: { id: true, extraTables: true } });
+    // SHEET ĐÃ CHẾT → 409, KHÔNG được im lặng trả 200.
+    //
+    // Lưu báo giá (updateQuote) là XOÁ SHEET + TẠO LẠI, tức id đổi hết. Chỉ cần quản lý bấm Lưu một
+    // lần là mọi sheetId mà màn hình Account Hà Nội đang giữ (AccountHnView nạp lúc mở trang) trở
+    // thành id CHẾT. Trước đây `.filter(x => x.sheet)` lọc sạch chúng rồi vẫn trả 200: account gõ
+    // nửa tiếng, bấm Lưu, nhận toast "Đã lưu phần Hà Nội", cờ dirty về false, màn hình nạp lại bản
+    // CŨ — mất trắng KÈM THÔNG BÁO THÀNH CÔNG. Đó là kiểu mất dữ liệu tệ nhất trong hệ.
+    //
+    // PHÂN BIỆT với ca "id trỏ ra ngoài báo giá này" mà tests/hn-save-forgery.test.js đã chốt là
+    // BỎ QUA + 200: id của QuoteSheet TĂNG DẦN theo sequence, nên
+    //   • id NHỎ HƠN mọi sheet hiện có của báo giá  → đúng dấu vết xoá-tạo-lại → 409, bảo tải lại;
+    //   • id LỚN HƠN (client bịa ra, chưa từng tồn tại) → giữ nguyên hành vi cũ: bỏ qua, 200.
+    // Đây là suy đoán theo dấu vết, không phải bằng chứng — hợp đồng đúng đắn cần client gửi
+    // baseUpdatedAt (xem conLai). Nhưng suy đoán này KHÔNG BAO GIỜ làm mất dữ liệu: sai thì cùng
+    // lắm là bắt tải lại một lần thừa.
+    const idNhoNhat = sheets.length ? Math.min(...sheets.map((s) => s.id)) : 0;
+    const coSheetChet = hnSheets.some((hs: any) => {
+      const sid = Number(hs?.sheetId);
+      if (!Number.isFinite(sid) || sid <= 0) return false;          // sheet mới chưa lưu → client gửi null
+      return !sheets.some((s) => s.id === sid) && sheets.length > 0 && sid < idNhoNhat;
+    });
+    if (coSheetChet) {
+      throw httpError(409, "Quản lý vừa lưu lại báo giá nên các trang đã được tạo mới. Hãy tải lại trang rồi nhập lại phần Hà Nội (đừng đóng tab trước khi chép phần vừa gõ).");
+    }
+
     const toWrite = hnSheets
       .map((hs: any) => ({ sheet: sheets.find((s) => s.id === Number(hs.sheetId)), extraTables: (hs.hnTables || []).map((t: any) => ({ ...t, category: "hanoi" })) }))
       .filter((x: any) => x.sheet);   // chỉ sheet thuộc báo giá này

@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
-import { issueRefreshToken, rotateRefreshToken } from "../src/jwt.js";
+import { issueRefreshToken, rotateRefreshToken, REFRESH_FAMILY_MAX_DAYS } from "../src/jwt.js";
 import { agentWithCsrf } from "./helpers/agent.js";
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "RefreshToken" LIMIT 1').then(() => true).catch(() => false);
@@ -75,16 +75,38 @@ describe.runIf(dbAvailable)("refresh token — khoá, tuổi thọ họ, và đ�
     }
   });
 
-  it("họ token quá GIÀ thì bị đốt cả họ, không xoay được nữa", async () => {
+  // Hai bài ôm ranh giới ở dưới dùng CHÍNH hằng số, nên chúng kiểm cơ chế chứ không ghim CHÍNH SÁCH:
+  // đổi trần thành 365 ngày thì chúng vẫn xanh. Bài này ghim chính sách — trần phải đủ ngắn để có ý
+  // nghĩa (một chuỗi xoay token bị đánh cắp bị cắt trong vòng vài tuần) và đủ dài để không đá người
+  // dùng bình thường ra ngoài mỗi tuần.
+  it("trần tuổi thọ HỌ token nằm trong khoảng có ý nghĩa", () => {
+    expect(REFRESH_FAMILY_MAX_DAYS).toBeGreaterThanOrEqual(7);
+    expect(REFRESH_FAMILY_MAX_DAYS).toBeLessThanOrEqual(90);
+  });
+
+  // Hai bài dưới ÔM SÁT ranh giới REFRESH_FAMILY_MAX_DAYS thay vì lùi về "400 ngày cho chắc".
+  // Lùi quá xa thì test không ghim được hằng số: đổi trần thành 365 ngày — tức gần như vô hiệu hoá
+  // chốt — mà vẫn xanh. Và không có chiều ngược lại thì cũng không có bằng chứng là chốt này không
+  // đá nhầm người dùng bình thường ra ngoài.
+  it(`họ token ${REFRESH_FAMILY_MAX_DAYS + 1} ngày tuổi bị đốt cả họ, không xoay được nữa`, async () => {
     const { token, family } = await issueRefreshToken(userId, ctx);
-    // Lùi ngày sinh của cả họ về quá xa (mọi trần hợp lý đều < 400 ngày).
     await prisma.refreshToken.updateMany({
       where: { family },
-      data: { createdAt: new Date(Date.now() - 400 * 86400_000) },
+      data: { createdAt: new Date(Date.now() - (REFRESH_FAMILY_MAX_DAYS + 1) * 86400_000) },
     });
     await expect(rotateRefreshToken(token, ctx)).rejects.toThrow();
     const song = await prisma.refreshToken.count({ where: { family, revokedAt: null } });
     expect(song).toBe(0);
+  });
+
+  it(`họ token ${REFRESH_FAMILY_MAX_DAYS - 1} ngày tuổi VẪN xoay được`, async () => {
+    const { token, family } = await issueRefreshToken(userId, ctx);
+    await prisma.refreshToken.updateMany({
+      where: { family },
+      data: { createdAt: new Date(Date.now() - (REFRESH_FAMILY_MAX_DAYS - 1) * 86400_000) },
+    });
+    const { refresh } = await rotateRefreshToken(token, ctx);
+    expect(refresh.token).toBeTruthy();
   });
 
   it("ĐĂNG XUẤT thu hồi mọi refresh token còn sống của tài khoản", async () => {

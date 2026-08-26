@@ -114,21 +114,29 @@ const EXTERNAL_JOB_OPTS: JobsOptions = {
   removeOnFail: { age: 7 * D, count: 1000 },
 };
 
+/**
+ * BẢN SAO SÂU của bảng hằng số. Trả thẳng đối tượng module-level theo THAM CHIẾU là cái bẫy im lặng:
+ * `jobOptionsFor(x).attempts = 5` ở một chỗ gọi bất kỳ sẽ đổi số lần thử lại của MỌI hàng đợi dựng
+ * sau đó (ba hàng đợi email/webhook/notify vốn dùng CHUNG một thể hiện, và spread nông còn để chúng
+ * dùng chung luôn đối tượng `backoff` với bộ mặc định). Không lỗi, không log — chỉ sai âm thầm.
+ */
+const cloneOpts = (o: JobsOptions): JobsOptions => structuredClone(o);
+
 export function jobOptionsFor(name: string): JobsOptions {
   switch (name) {
     // Link tải file xuất chỉ sống 24h nên bản ghi job hết giá trị rất nhanh; giữ ngắn để
     // returnvalue (khoá + URL đã ký) không nằm lại trong Redis lâu hơn mức có ích.
     case QUEUES.EXPORT:
-      return { ...BASE_JOB_OPTS, removeOnComplete: { age: 6 * H, count: 200 }, removeOnFail: { age: 2 * D, count: 500 } };
+      return { ...cloneOpts(BASE_JOB_OPTS), removeOnComplete: { age: 6 * H, count: 200 }, removeOnFail: { age: 2 * D, count: 500 } };
     case QUEUES.EMAIL:
     case QUEUES.WEBHOOK:
     case QUEUES.NOTIFY:
-      return EXTERNAL_JOB_OPTS;
+      return cloneOpts(EXTERNAL_JOB_OPTS);
     // Repeatable 1 lần/ngày: trần theo số lượng gần như không bao giờ chạm, phải chặn theo tuổi.
     case QUEUES.MAINTENANCE:
-      return { ...BASE_JOB_OPTS, removeOnComplete: { age: 30 * D, count: 60 }, removeOnFail: { age: 90 * D, count: 60 } };
+      return { ...cloneOpts(BASE_JOB_OPTS), removeOnComplete: { age: 30 * D, count: 60 }, removeOnFail: { age: 90 * D, count: 60 } };
     default:
-      return BASE_JOB_OPTS;
+      return cloneOpts(BASE_JOB_OPTS);
   }
 }
 
@@ -142,6 +150,10 @@ export function jobOptionsFor(name: string): JobsOptions {
 // Đánh đổi của lockDuration dài: worker chết thật thì job của nó bị giữ khoá tới 5 phút mới được
 // nhận lại. Chấp nhận được — thà chậm hồi phục còn hơn liên tục làm lại việc đã xong.
 const EXPORT_LOCK_MS = Number(process.env.EXPORT_JOB_LOCK_MS) || 300_000;
+// CHỈ HẠ ĐƯỢC, KHÔNG NÂNG ĐƯỢC. Giá trị cuối là `min(concurrency, EXPORT_WORKER_CONCURRENCY)`, mà
+// `concurrency` do src/worker.ts truyền vào từ WORKER_CONCURRENCY (mặc định 4). Đặt biến này = 8 vẫn
+// cho ra 4 — muốn NÂNG thông lượng xuất file thì phải nâng WORKER_CONCURRENCY. Cố ý giữ trần trên như
+// vậy: đây là việc nặng CPU trong MỘT tiến trình, nới rộng chỉ làm mọi job cùng chậm và cùng chẹn.
 const EXPORT_WORKER_CONCURRENCY = Number(process.env.EXPORT_WORKER_CONCURRENCY) || 2;
 
 export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerOptions> & { concurrency: number } {

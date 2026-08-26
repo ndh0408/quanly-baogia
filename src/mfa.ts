@@ -2,8 +2,15 @@
 //  1) Never store the TOTP secret in plaintext — encrypt with AES-256-GCM.
 //  2) Never store backup codes in a form that survives a database dump — store bcrypt hashes.
 // Both are BACKWARD-COMPATIBLE: legacy plaintext secrets, legacy SHA-256 backup-code hashes and
-// legacy 10-char plaintext backup codes are still accepted (and re-secured on next write), so
-// enabling this does not lock out users who set up MFA before the upgrade.
+// legacy 10-char plaintext backup codes are still accepted, so enabling this does not lock out
+// users who set up MFA before the upgrade.
+//
+// ⚠️ KHÔNG có đường tự nâng cấp cho dữ liệu CŨ. `consumeBackupCode` chỉ GỠ mã đã dùng ra khỏi mảng;
+// không nơi nào băm lại mã cũ sang bcrypt, và bí mật TOTP plaintext cũng chỉ được mã hoá khi người
+// dùng bật lại MFA. Nghĩa là mọi người đã bật MFA trước bản vá vẫn giữ 8 mã dự phòng 40 bit băm
+// SHA-256 không muối — đúng thứ mà bản vá này nói là quét cạn được từ một bản dump CSDL. Cách duy
+// nhất để thay là TẮT rồi BẬT LẠI MFA. Đã ghi vào docs/REMAINING_RISKS.md kèm câu SQL liệt kê các
+// tài khoản còn dính; đừng đọc chú thích "backward-compatible" ở trên như là "đã an toàn".
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { config } from "./config.js";

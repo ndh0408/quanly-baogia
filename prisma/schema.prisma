@@ -21,7 +21,11 @@ enum Role {
 // 'admin' KHÔNG ghi đè được (luôn full — chống tự khóa). Chỉ admin (USER_MANAGE) sửa qua trang Phân quyền.
 model RolePermission {
   role        String   @id // khóa vai trò: manager/hr/accountant/account_hn
-  permissions String[] // tập quyền (key trong PERMISSIONS) thay cho mặc định
+  // @default([]) KHỚP đúng `DEFAULT ARRAY[]::TEXT[]` mà migration 20260625000004 đã tạo trong CSDL.
+  // Thiếu nó thì `migrate diff` báo trôi ("default changed … to None") và `migrate dev` sẽ sinh
+  // migration GỠ default — đây là drift THẬT, không phải giới hạn của Prisma (User.permissions
+  // dòng dưới vẫn khai được y hệt).
+  permissions String[] @default([]) // tập quyền (key trong PERMISSIONS) thay cho mặc định
   updatedAt   DateTime @updatedAt
   updatedById Int?
 }

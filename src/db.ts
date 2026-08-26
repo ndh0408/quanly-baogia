@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { logger } from "./logger.js";
+import { config } from "./config.js";
 
 // Soft-delete + realtime-feed nay dùng Client Extensions ($extends) thay cho $use (đã DEPRECATED,
 // bị gỡ ở Prisma 6+). HÀNH VI GIỮ Y HỆT bản $use cũ:
@@ -22,21 +23,34 @@ const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 // Prisma 7: kết nối qua driver adapter @prisma/adapter-pg (pg Pool) — engine TS, không còn engine Rust.
 // max: nâng trần kết nối từ mặc định 10/process (dễ thành nút thắt concurrency khi đông user) lên cấu-hình-được
 // qua DB_POOL_MAX (mặc định 20). CHỈ đổi capacity hạ tầng, KHÔNG đổi hành vi nghiệp vụ.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.DB_POOL_MAX) || 20 });
+// connectionTimeoutMillis: node-pg mặc định chờ VÔ HẠN khi pool cạn. Trước đây một transaction hỏng
+// bị Prisma cắt sau 5s nên kết nối quay lại pool nhanh; nay trần là DB_TX_TIMEOUT (mặc định 60s), tức
+// DB_POOL_MAX lần Lưu báo giá lớn đồng thời là cạn pool — và mọi request khác (kể cả /readyz và đăng
+// nhập) sẽ xếp hàng KHÔNG có trần thời gian thay vì thất bại nhanh. `maxWait` của Prisma KHÔNG chi
+// phối hàng đợi này khi dùng driver adapter, nên trần phải đặt ở chính Pool. Lấy đúng DB_TX_MAX_WAIT
+// để hai hàng đợi cùng một ngưỡng chờ.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: config.DB_POOL_MAX,
+  connectionTimeoutMillis: config.DB_TX_MAX_WAIT,
+});
 const adapter = new PrismaPg(pool);
 // transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).
 // Đường LƯU báo giá gói cả việc nặng vào MỘT transaction: xoá sạch sheet → tạo lại toàn bộ item →
 // đọc lại báo giá qua QUOTE_INCLUDE → snapshot phiên bản (đọc thêm lần nữa + ghi khối jsonb). Trần
 // payload cho phép 60 trang × 1000 dòng, nên báo giá lớn CHẠM 5s là rollback: người dùng mất trắng
-// lần sửa, và middleware chưa map P2028 nên giao diện chỉ thấy "Lỗi server". Nới trần là biện pháp
-// GIẢM NHẸ (thu nhỏ transaction mới là cách chữa gốc) — đặt ở đây để mọi $transaction cùng hưởng.
-// Đọc process.env trực tiếp như DB_POOL_MAX ngay trên: đây là hạ tầng, không phải cấu hình nghiệp vụ.
+// lần sửa. Nới trần là biện pháp GIẢM NHẸ (thu nhỏ transaction mới là cách chữa gốc) — đặt ở đây để
+// mọi $transaction cùng hưởng, và P2028/P2024/P2034 nay được src/middleware.ts dịch thành thông điệp
+// tiếng Việt nói được người dùng phải làm gì (trước đó rơi vào 500 "Lỗi server").
+// Hai mốc lấy từ `config` chứ KHÔNG đọc thẳng process.env: đơn vị là MILI-GIÂY và rất dễ bị hiểu
+// thành GIÂY — `DB_TX_TIMEOUT=5` (5ms) làm mọi lần Lưu chết P2028 mà tiến trình vẫn khởi động bình
+// thường. Đi qua config.ts thì gõ sai là THOÁT NGAY kèm tên biến. Xem tests/qc-db-tx-config.test.js.
 const base = new PrismaClient({
   adapter,
   log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
   transactionOptions: {
-    maxWait: Number(process.env.DB_TX_MAX_WAIT) || 10_000,
-    timeout: Number(process.env.DB_TX_TIMEOUT) || 60_000,
+    maxWait: config.DB_TX_MAX_WAIT,
+    timeout: config.DB_TX_TIMEOUT,
   },
 });
 base.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));

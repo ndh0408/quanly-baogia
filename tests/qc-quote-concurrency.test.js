@@ -180,6 +180,36 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
       expect(hn.items[0].unitPrice, "giai đoạn này chưa có gì để bảo vệ").toBe(9);
     });
 
+    // Bảng HN THỪA trong payload trước đây bị VỨT IM LẶNG + 200: người dùng thêm/nhân bản một bảng
+    // HN rồi bấm Lưu, thấy "Đã lưu", tải lại thì bảng biến mất. Không mất dữ liệu ĐANG CÓ trong
+    // CSDL, nhưng mất phần vừa gõ — và im lặng là lựa chọn tệ nhất.
+    it("thêm bảng HN mới khi phần HN đã chốt → 409 nói rõ, KHÔNG vứt im lặng", async () => {
+      const { id, sheetId } = await dungBaoGiaHN("approved");
+      const r = await emp.put(`/api/quotes/${id}`).send({
+        sheets: [{
+          id: sheetId, templateId, name: "Trang 1", order: 1,
+          items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }],
+          extraTables: [bangHN(5_000_000), { ...bangHN(1_234), name: "Giá HN (bảng vừa thêm)" }],
+        }],
+      });
+      expect(r.status, "bảng vừa thêm bị bỏ mà vẫn báo 200 = người dùng mất phần vừa gõ").toBe(409);
+      expect(r.body.error).toMatch(/Hà Nội/i);
+      // Bảng HN đã duyệt trong CSDL vẫn nguyên vẹn (409 ném ra trước mọi lệnh ghi).
+      const hn = (await bangCuaBaoGia(id)).filter((t) => t.category === "hanoi");
+      expect(hn).toHaveLength(1);
+      expect(hn[0].items[0].unitPrice).toBe(5_000_000);
+    });
+
+    it("payload BỎ SÓT bảng HN (client cũ không round-trip extraTables) vẫn 200 và giữ nguyên bảng", async () => {
+      const { id, sheetId } = await dungBaoGiaHN("approved");
+      const r = await emp.put(`/api/quotes/${id}`).send({
+        sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const hn = (await bangCuaBaoGia(id)).filter((t) => t.category === "hanoi");
+      expect(hn, "bảng HN có trong CSDL mà payload bỏ sót phải được trả lại, không phải mất").toHaveLength(1);
+    });
+
     it("người CÓ quote:hn:manage (admin/quản lý) vẫn sửa được giá HN đã duyệt", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
       expect((await luuDeGiaHN(admin, id, sheetId, 3)).status).toBe(200);

@@ -83,21 +83,31 @@ export async function deleteObject(key: string, bucket = config.S3_BUCKET) {
 }
 
 /**
- * Liệt kê object theo tiền tố, CÓ TRẦN SỐ LƯỢNG.
+ * Liệt kê object theo tiền tố, CÓ TRẦN SỐ LƯỢNG và CÓ ĐIỂM BẮT ĐẦU.
  *
  * Vì sao có trần: bucket production chứa cả file xuất tích tụ nhiều năm. Gom hết khoá vào một mảng
- * là để một tác vụ dọn dẹp chạy nền tự tay làm cạn bộ nhớ tiến trình. Chạm trần thì DỪNG — lượt
- * chạy sau (retention chạy hằng ngày) dọn tiếp phần còn lại; dọn chậm vẫn tốt hơn OOM.
+ * là để một tác vụ dọn dẹp chạy nền tự tay làm cạn bộ nhớ tiến trình.
+ *
+ * ĐỌC KỸ Ý NGHĨA CỦA TRẦN: ListObjectsV2 trả khoá theo thứ tự TỰ VỰNG, KHÔNG theo ngày, và hàm này
+ * KHÔNG nhớ vị trí giữa hai lần gọi. Nên "chạm trần rồi lượt sau dọn tiếp" là SAI: lượt sau lại bắt
+ * đầu từ đúng đầu dải, phần ĐUÔI không bao giờ tới lượt (một tiền tố công ty đông việc chiếm trọn
+ * cửa sổ đầu là đủ để file 5 năm tuổi của tiền tố xếp sau không bao giờ được rà).
+ *
+ * Muốn đi hết dải thì chỗ gọi phải TỰ PHÂN TRANG: truyền `startAfter` = khoá cuối của trang trước
+ * (xem vòng lặp exports/ trong src/retention.ts). Cách đó giữ bộ nhớ ở mức O(một trang) mà vẫn quét
+ * hết, thay vì cắt cụt rồi hứa suông.
  *
  * Trả về mảng rỗng khi chưa cấu hình kho, để chỗ gọi không phải bọc try/catch.
  */
-export async function listObjects(prefix: string, { bucket = config.S3_BUCKET, maxKeys = 10_000 }: { bucket?: string; maxKeys?: number } = {}) {
+export async function listObjects(prefix: string, { bucket = config.S3_BUCKET, maxKeys = 10_000, startAfter }: { bucket?: string; maxKeys?: number; startAfter?: string } = {}) {
   const c = getClient();
   if (!c) return [];
   const out: Array<{ key: string; size: number; lastModified: Date | null }> = [];
   let token: string | undefined;
   do {
-    const r: any = await c.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    // S3 CHỈ đọc StartAfter ở request ĐẦU TIÊN; từ trang thứ hai trở đi ContinuationToken mới là
+    // thứ định vị. Truyền cả hai cùng lúc là mơ hồ nên chỉ gửi StartAfter khi chưa có token.
+    const r: any = await c.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token, StartAfter: token ? undefined : startAfter }));
     for (const o of r.Contents || []) {
       if (!o.Key) continue;
       out.push({ key: o.Key, size: Number(o.Size ?? 0), lastModified: o.LastModified ? new Date(o.LastModified) : null });
