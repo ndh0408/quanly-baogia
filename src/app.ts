@@ -254,8 +254,7 @@ export function createApp() {
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
-  app.use(
-    session({
+  const sessionMiddleware = session({
       name: "qly.sid",
       // Tests run against an in-memory store: no PG dependency, no prune timer
       // keeping the process alive. Behavior at the route level is identical.
@@ -277,8 +276,34 @@ export function createApp() {
         sameSite: "lax",
         secure: isProd,
       },
-    })
-  );
+  });
+
+  // BỎ QUA hẳn phiên cho request Bearer KHÔNG mang cookie.
+  //
+  // ── VẤN ĐỀ ĐÃ ĐO ĐƯỢC ─────────────────────────────────────────────────────
+  // `bearerAuth` (src/middleware.ts) ghi danh tính vào `req.session` để mã phía sau không phải
+  // phân biệt hai đường xác thực. Nhưng ghi vào đối tượng phiên là ĐÁNH DẤU NÓ ĐÃ THAY ĐỔI, nên
+  // express-session LƯU nó xuống kho PG và trả kèm Set-Cookie — cho một client API chưa bao giờ
+  // xin cookie.
+  //
+  // Đã đo: 5 request Bearer → 5 hàng mới trong `user_sessions` và 5 Set-Cookie. Một script gọi API
+  // mỗi phút sinh 1.440 hàng/ngày, mỗi hàng sống 7 ngày (~10.000 hàng thường trực). Job prune chỉ
+  // dọn hàng ĐÃ HẾT HẠN nên không cứu được. Kèm theo đó là một thông tin đăng nhập THỨ HAI nằm
+  // ngoài đường thu hồi token mà chính hệ thống công bố.
+  //
+  // Cách chữa: những request này KHÔNG cần phiên, nên đừng dựng phiên. `bearerAuth` vốn đã làm
+  // `req.session = req.session || {}` — không có middleware phiên thì nó dùng object thường, mã
+  // phía sau chạy y hệt, mà không có gì được ghi xuống và không có cookie nào được phát.
+  //
+  // Điều kiện CỐ Ý hẹp: phải CÓ Bearer VÀ KHÔNG có cookie phiên. Trình duyệt gửi cả hai (vd SPA đã
+  // đăng nhập lại thử gọi kèm token) vẫn phải đi qua phiên thật như cũ.
+  const COOKIE_PHIEN = /(?:^|;\s*)qly\.sid=/;
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const coBearer = /^Bearer\s+\S/i.test(req.headers.authorization || "");
+    const coCookiePhien = COOKIE_PHIEN.test(req.headers.cookie || "");
+    if (coBearer && !coCookiePhien) return next();
+    return sessionMiddleware(req, res, next);
+  });
 
   // Prometheus metrics middleware (records all requests).
   app.use(metricsMiddleware);
