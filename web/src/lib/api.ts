@@ -250,6 +250,27 @@ const LA_LOI_CSRF = (b: unknown) =>
  */
 type ReqOpts = RequestInit & { im401?: boolean };
 
+/**
+ * Thân phản hồi → JSON, KHÔNG BAO GIỜ ném.
+ *
+ * `JSON.parse` trần ở đây ném `SyntaxError` khi thân không phải JSON — và thân không phải JSON là
+ * chuyện BÌNH THƯỜNG ở production: nginx/Coolify trả trang HTML cho 502/504/413, và trang bảo trì
+ * cũng là HTML. Lỗi ném ra ở đúng dòng này nên nó nhảy qua HẾT phần xử lý phía sau: nhánh thử lại
+ * mã CSRF (403), nhánh mất phiên (401), và cả việc dựng `ApiError` có `status`. Chỗ gọi chỉ bắt
+ * `ex instanceof ApiError` nên người dùng nhận đúng một câu "Có lỗi xảy ra" cho mọi sự cố hạ tầng.
+ *
+ * Nay: parse hỏng → dựng một thân giả có khoá `error` tiếng Việt nói rõ đây là lỗi máy chủ/hạ tầng,
+ * và mọi nhánh phía sau chạy tiếp bình thường.
+ */
+function docThan(t: string, r: Response): unknown {
+  if (!t) return null;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return { error: r.ok ? "Máy chủ trả dữ liệu không đọc được — thử lại sau ít phút." : `Máy chủ lỗi ${r.status} — thử lại sau ít phút.` };
+  }
+}
+
 async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   const method = (opts.method || "GET").toUpperCase();
   if (__preview && method !== "GET" && method !== "HEAD") {
@@ -278,7 +299,7 @@ async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
     if (token) h["X-CSRF-Token"] = token;
     const r = await fetch("/api" + path, { credentials: "include", ...opts, headers: h, body: thanGui });
     const t = await r.text();
-    return { r, body: t ? JSON.parse(t) : null };
+    return { r, body: docThan(t, r) };
   };
 
   let { r: res, body } = await goi(CAN_GHI(method) ? await layCsrf() : null);
@@ -309,7 +330,7 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
     if (token) headers["X-CSRF-Token"] = token;
     const r = await fetch("/api" + path, { method: "POST", credentials: "include", headers, body: form });
     const t = await r.text();
-    return { r, body: t ? JSON.parse(t) : null };
+    return { r, body: docThan(t, r) };
   };
   let { r: res, body } = await goi(await layCsrf());
   if (res.status === 403 && LA_LOI_CSRF(body)) ({ r: res, body } = await goi(await layCsrf(true)));

@@ -8,6 +8,9 @@ import { ExtraTables } from "../components/ExtraTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { takePendingNewQuote } from "../lib/pendingQuote";
 
+// Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
+const RONG: never[] = [];
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor) sang React. Form (KH/người gửi/meta) +
 // multi-sheet + LƯỚI (component GridTable dùng chung) + summary + Lưu/Chốt/Không-chốt + Excel/PDF/
@@ -106,8 +109,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     };
   }, [quoteId, isNew, me.id]);
 
-  const templates = _templates || [];
-  const companies = _companies || [];
+  // `|| RONG` chứ không phải `|| []`: `_templates` là cache MỨC MODULE nên khi đã tải xong nó vốn
+  // giữ nguyên identity, nhưng nhánh CHƯA tải thì `[]` đẻ mảng mới mỗi lần render và phá mọi
+  // useCallback nhận `templates` làm phụ thuộc. Một hằng rỗng dùng chung là đủ, KHÔNG cần useMemo —
+  // useMemo ở đây còn tệ hơn vì `_templates` là biến ngoài phạm vi component, khai nó làm phụ thuộc
+  // là nói dối React (đổi giá trị không hề kích hoạt render).
+  const templates = _templates || RONG;
+  const companies = _companies || RONG;
 
   // ── load catalogs + quote ──────────────────────────────────────────────────
   useEffect(() => {
@@ -150,6 +158,25 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     return () => { alive = false; };
      
   }, [quoteId, isNew]);
+
+  // Ba hàm truyền cho <ImportExcelModal>. TRƯỚC ĐÂY viết inline ngay trong JSX nên identity đổi mỗi
+  // lần QuoteEditor render — mà editor render lại theo TỪNG PHÍM gõ ở ô Ngày báo giá / VAT / Giảm
+  // giá / Tên sheet. useMemo dựng bảng xem-trước bên trong modal khai đúng ba hàm này làm phụ thuộc,
+  // nên nó tính lại toàn bộ bảng đối chiếu ở mỗi lần đó: memo có mà như không.
+  //
+  // Đặt TRƯỚC hai lệnh `return` sớm bên dưới: hook gọi sau một return sớm là gọi CÓ ĐIỀU KIỆN, tức
+  // thứ tự hook đổi giữa các lần render và React vỡ trạng thái. Trạng thái báo giá đọc qua `qRef`
+  // (ref ổn định) nên phụ thuộc chỉ còn `templates` — đúng thứ ta muốn: càng ít đổi càng tốt.
+  const usesDaysOf = useCallback((tid?: number) => !!templates.find((t) => t.id === tid)?.layout?.hasDays, [templates]);
+  const addrDetailOf = useCallback((tid?: number) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }, [templates]);
+  // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
+  // không đoán ra thì theo mẫu của sheet đang mở.
+  const newSheetTemplateId = useCallback((code?: string | null) => {
+    const cur = qRef.current as (QuoteFull & { _activeSheet: number }) | null;
+    const cuaSheet = cur ? (cur.sheets as Sheet[])[cur._activeSheet]?.templateId : undefined;
+    return templates.find((t) => t.code === code && t.companyId === cur?.companyId)?.id ?? cuaSheet;
+     
+  }, [templates]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <a href="#/list" className="btn btn-sm">Về danh sách</a></div>;
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
@@ -386,14 +413,26 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         {/* sheet tabs */}
         <div className="sheet-tabs">
           {sheets.map((s, i) => (
-            <div key={s._k ?? i} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai} onClick={() => switchSheet(i)}>
+            // BÀN PHÍM: `aria-pressed` trên một <div> KHÔNG có role bị công nghệ hỗ trợ BỎ QUA, và
+            // <div> thì không nhận focus. Nghĩa là người dùng chỉ bàn phím (hoặc dùng trình đọc màn
+            // hình) KHÔNG chuyển được sheet — tab là thao tác cốt lõi của editor, không phải trang
+            // trí. Thêm role + tabIndex + Enter/Space là đủ, không phải dựng lại component.
+            <div key={s._k ?? i} role="button" tabIndex={0} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai}
+              onClick={() => switchSheet(i)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); switchSheet(i); } }}>
               <span>{sheets.length > 1 ? `${i + 1}. ` : ""}{s.name || templates.find((t) => t.id === s.templateId)?.name || "Sheet " + (i + 1)}</span>
               {/* Khách đã cho ý kiến sheet này → dấu ✓/✗ ngay trên tab để nhìn phát thấy */}
               {s.custStatus && (
                 <span className={`cust-dot ${s.custStatus === "approved" ? "txt-ok" : "txt-danger"}`}
                   title={CUST_LABEL[s.custStatus]} aria-label={CUST_LABEL[s.custStatus]}>{CUST_DOT[s.custStatus]}</span>
               )}
-              {editable && sheets.length > 1 && <span className="rm-tab" title="Xóa sheet" onClick={(e) => { e.stopPropagation(); removeSheet(i); }}>✕</span>}
+              {/* <button> thật: tự vào được thứ tự Tab, tự nhận Enter/Space, và có tên đọc lên được
+                  ("Xóa sheet 2") thay vì chỉ một dấu ✕ mà trình đọc màn hình không diễn giải nổi. */}
+              {editable && sheets.length > 1 && (
+                <button type="button" className="rm-tab" title="Xóa sheet" aria-label={`Xóa sheet ${i + 1}`}
+                  onClick={(e) => { e.stopPropagation(); removeSheet(i); }}
+                  onKeyDown={(e) => e.stopPropagation()}>✕</button>
+              )}
             </div>
           ))}
           {editable && <button className="btn btn-sm add-sheet" onClick={addSheet}>+ Thêm sheet</button>}
@@ -521,11 +560,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           quoteId={isNew ? undefined : q.id}
           sheets={sheets}
           templates={templates}
-          usesDaysOf={(tid) => !!templates.find((t) => t.id === tid)?.layout?.hasDays}
-          addrDetailOf={(tid) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }}
-          // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
-          // không đoán ra thì theo mẫu của sheet đang mở.
-          newSheetTemplateId={(code) => templates.find((t) => t.code === code && t.companyId === q.companyId)?.id ?? activeSheet.templateId}
+          usesDaysOf={usesDaysOf}
+          addrDetailOf={addrDetailOf}
+          newSheetTemplateId={newSheetTemplateId}
           onApply={applyImport}
           onClose={() => setImportOpen(false)}
         />

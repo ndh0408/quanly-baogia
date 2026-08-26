@@ -149,6 +149,37 @@ describe("401 ở lời gọi NỀN không được kéo cả ứng dụng về 
     expect(demMa()).toBe(2);
   });
 
+  // ── Thân KHÔNG PHẢI JSON (proxy trả HTML) ──────────────────────────────────
+  // `JSON.parse` trần ném SyntaxError NGAY tại chỗ đọc thân, nhảy qua HẾT phần xử lý phía sau:
+  // nhánh thử lại CSRF (403), nhánh mất phiên (401), và cả việc dựng ApiError có `status`. Mà thân
+  // HTML là chuyện bình thường ở production: nginx/Coolify trả trang HTML cho 502/504/413.
+  it("502 kèm trang HTML → vẫn là ApiError có status, KHÔNG phải SyntaxError", async () => {
+    const { api, ApiError } = await import("./api");
+    status = 502;
+    body = "<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>";
+
+    const loi = await api.me().then(() => null, (e) => e);
+    expect(loi, "trước khi vá: SyntaxError, chỗ gọi không nhận ra").toBeInstanceOf(ApiError);
+    expect((loi as InstanceType<typeof ApiError>).status).toBe(502);
+    expect(String((loi as Error).message), "thông báo phải nói được điều gì đó có ích").toMatch(/502/);
+  });
+
+  it("401 kèm trang HTML (proxy nuốt JSON) → VẪN bắn auth:expired", async () => {
+    const { api } = await import("./api");
+    status = 401;
+    body = "<html>401 Unauthorized</html>";
+    await expect(api.me()).rejects.toThrow();
+    // Trước khi vá: SyntaxError ném trước dòng dispatchEvent → người dùng kẹt ở màn hình chết,
+    // bấm gì cũng lỗi mà không hề được mời đăng nhập lại.
+    expect(suKien).toEqual(["auth:expired"]);
+  });
+
+  it("200 kèm thân rỗng vẫn trả null như cũ (không lỡ tay đổi hành vi đúng)", async () => {
+    const { api } = await import("./api");
+    status = 200; body = "";
+    await expect(api.me()).resolves.toBe(null);
+  });
+
   it("lỗi KHÁC 401 (403/500) không bắn auth:expired ở bất kỳ đường nào", async () => {
     const { api } = await import("./api");
     for (const st of [403, 500]) {

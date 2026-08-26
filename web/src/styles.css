@@ -3329,3 +3329,21 @@ textarea[aria-invalid="true"] {
   width: 100%;
   padding: 26px 24px;
 }
+
+/* TAB SHEET thao tác được bằng bàn phím (QuoteEditor).
+   - `.rm-tab` đổi từ <span> sang <button> thật (tự vào thứ tự Tab, tự nhận Enter/Space, có tên
+     đọc lên được). Phải BỎ chrome mặc định của button để nhìn y hệt như trước.
+   - `.sheet-tab` nay có role="button" + tabIndex → phải THẤY được viền focus, nếu không người
+     dùng bàn phím không biết mình đang ở tab nào. */
+.sheet-tab .rm-tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  font: inherit;
+  line-height: 1;
+}
+.sheet-tab:focus-visible,
+.sheet-tab .rm-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
