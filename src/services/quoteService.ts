@@ -8,7 +8,7 @@ import { Prisma } from "@prisma/client";
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
-import { computeQuoteTotals, D } from "../money.js";
+import { computeQuoteTotals, assertTotalsStorable, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode } from "../quoteNumber.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
@@ -173,6 +173,7 @@ export async function createQuote(req: Request) {
 
   // Compute totals from sheets+items BEFORE writing so we store the snapshot.
   const t = computeQuoteTotals({ vatPercent: draft.vatPercent, discount: draft.discount, sheets: b.sheets });
+  assertTotalsStorable(t, b.sheets); // 400 nói rõ trang nào âm, thay vì 500 mất trắng lần Lưu
   draft.subtotal = t.subtotal;
   draft.vat = t.vat;
   draft.discount = t.discount;
@@ -317,6 +318,7 @@ export async function updateQuote(req: Request) {
     reconcileExtraPayments(b.sheets, existing.sheets, can(req.session, P.QUOTE_INTERNAL_PAY), userId);
     const vatPct = data.vatPercent ?? existing.vatPercent;
     const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
+    assertTotalsStorable(t, b.sheets);
     data.subtotal = t.subtotal;
     data.vat = t.vat;
     data.discount = t.discount;
@@ -337,6 +339,7 @@ export async function updateQuote(req: Request) {
   } else {
     if (data.vatPercent !== undefined || data.discount !== undefined) {
       const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, discount: data.discount ?? existing.discount, sheets: existing.sheets });
+      assertTotalsStorable(t, existing.sheets);
       data.subtotal = t.subtotal;
       data.vat = t.vat;
       data.discount = t.discount;

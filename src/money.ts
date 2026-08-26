@@ -89,6 +89,48 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
   return { subtotal, vat, discount, total, sheetTotals };
 }
 
+/**
+ * Chặn tổng tiền ÂM TRƯỚC KHI ghi xuống CSDL.
+ *
+ * ── SỰ CỐ ĐÃ TÁI HIỆN ĐƯỢC ──────────────────────────────────────────────────
+ * Lưới báo giá CHO PHÉP gõ số âm — `parseVN` trong shared/quote-math.ts xử lý "-5.000" đàng hoàng,
+ * và người dùng vẫn dùng dòng âm để ghi khoản giảm trừ. Nhưng CSDL có ràng buộc
+ * `Quote_money_check` (subtotal/vat/total/discount đều phải ≥ 0). Một báo giá có tổng ròng âm sẽ
+ * làm INSERT/UPDATE vi phạm ràng buộc, Prisma ném lỗi, và errorHandler trả về đúng một cục
+ * "Lỗi server" 500 — TOÀN BỘ lần Lưu bị mất, người dùng không biết vì sao và không biết sửa ở đâu.
+ * Đã tái hiện: một dòng đơn giá -5.000.000 → 500, không hàng nào được ghi.
+ *
+ * Ràng buộc CSDL là ĐÚNG (báo giá xuất cho khách không thể có tổng âm). Cái sai là để người dùng
+ * đâm vào nó bằng một lỗi 500 vô nghĩa. Ở đây chuyển thành 400 nói rõ TRANG nào đang âm.
+ *
+ * CỐ Ý không đặt trong `computeQuoteTotals`: hàm đó còn được gọi trên ĐƯỜNG ĐỌC (quoteUtils,
+ * projectRef) để tính lại tổng khi hiển thị. Ném lỗi ở đó sẽ khiến một bản ghi cũ có dữ liệu xấu
+ * không mở ra xem được nữa — biến một lỗi lúc ghi thành một lỗi lúc đọc, tệ hơn hẳn.
+ */
+export function assertTotalsStorable(
+  t: { subtotal: Prisma.Decimal; vat: Prisma.Decimal; total: Prisma.Decimal; sheetTotals: { subtotal: Prisma.Decimal }[] },
+  sheets?: ({ name?: string | null } | null)[] | null
+) {
+  if (t.subtotal.gte(0) && t.vat.gte(0) && t.total.gte(0)) return;
+
+  const badSheets = t.sheetTotals
+    .map((s, i) => ({ i, neg: s.subtotal.lessThan(0), name: sheets?.[i]?.name || `Trang ${i + 1}` }))
+    .filter((s) => s.neg)
+    .map((s) => s.name);
+
+  const detail = badSheets.length
+    ? `Các trang đang âm: ${badSheets.join(", ")}.`
+    : "Tổng các trang cộng lại đang âm.";
+
+  throw Object.assign(
+    new Error(
+      `Không lưu được: tổng tiền báo giá đang ÂM (${t.total.toFixed(0)} đ). ${detail} ` +
+        `Kiểm tra các dòng có Đơn Giá hoặc Số Lượng âm — tổng của cả báo giá phải từ 0 trở lên.`
+    ),
+    { status: 400, code: "quote_negative_total" }
+  );
+}
+
 /** Serialize Decimal fields as JS numbers for JSON response. Loses precision on huge numbers but UI-safe. */
 export function totalsToJson(t: {
   subtotal: Prisma.Decimal;
