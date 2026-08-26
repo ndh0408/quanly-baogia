@@ -153,6 +153,20 @@ const itemSchema = z.object({
   approved: z.boolean().optional(),
   approvedAt: z.string().max(40).optional().nullable(),
   approvedBy: z.coerce.number().int().positive().optional().nullable(),
+  // THANH TOÁN theo HÀNG — phải khai vì ĐÚNG LÝ DO như `approved` ở trên: Zod v4 loại bỏ khoá lạ,
+  // và validate() THAY LUÔN req.body bằng object đã lọc. Thiếu ba dòng này thì tới
+  // reconcileExtraPayments mọi hàng đều có `paid === undefined`, `!!undefined` là false, và người
+  // CÓ quyền quote:internal:pay bấm Lưu là XOÁ SẠCH cờ đã-thanh-toán của mọi hàng nội bộ — mất luôn
+  // paidAt/paidById, không cảnh báo gì. Nhánh không-có-quyền thì khôi phục từ CSDL nên vẫn đúng,
+  // tức lỗi đánh trúng đúng những người quản lý thanh toán. Xem tests/extra-paid-preserved.test.js.
+  //
+  // Khai ở đây KHÔNG phải là tin client: reconcileExtraPayments vẫn quyết định giá trị cuối
+  // (không quyền → lấy theo CSDL; có quyền → đóng dấu thời gian + người trả ở phía server).
+  paid: z.boolean().optional(),
+  paidAt: z.string().max(40).optional().nullable(),
+  paidById: z.coerce.number().int().positive().optional().nullable(),
+  // CỐ Ý KHÔNG khai `paidProof`: ảnh chứng từ chỉ đi qua route /pay, không đi qua đường lưu báo
+  // giá (chống base64 chảy qua payload + chống giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
 });
 
 // Bảng nội bộ (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
