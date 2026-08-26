@@ -1,0 +1,131 @@
+// Xác minh TOÀN VẸN DỮ LIỆU sau khi khôi phục — chạy được TỪ TRONG image production.
+//
+// ── VÌ SAO FILE NÀY TỒN TẠI ─────────────────────────────────────────────────
+// `restore-drill.sh` cần chứng minh hai điều sau mỗi lần khôi phục:
+//   1. khoá `PII_ENC_KEY` đang giữ có GIẢI MÃ ĐƯỢC dữ liệu trong bản dump không;
+//   2. ảnh chứng từ trong kho object có KHỚP SHA-256 lưu trong CSDL không.
+//
+// Ban đầu nó gọi `npm run pii:verify` / `npm run proof:verify` bên trong image production. Cách đó
+// KHÔNG BAO GIỜ chạy được: hai script ấy nằm ở `scripts/migration/*.mjs`, import mã nguồn TypeScript
+// (`../../src/piiBox.js`) và cần tsx — mà image production CHỈ chứa `dist/`, không có `scripts/`,
+// không có `src/`, không có tsx. Kết quả sẽ là MODULE_NOT_FOUND mỗi tối Chủ nhật, hai bước quan
+// trọng nhất của diễn tập luôn báo THẤT BẠI, `.drill-last-success` không bao giờ được ghi, và
+// watchdog bắn cảnh báo "CHƯA TỪNG chạy thành công" mỗi 6 giờ, mãi mãi.
+//
+// Chỗ đúng của logic này là `src/` — nó là kiểm tra toàn vẹn dữ liệu của ứng dụng, không phải một
+// script tiện ích cho máy dev. Nằm ở đây thì nó được BIÊN DỊCH VÀO `dist/` và đi theo image.
+//
+//   node dist/tools/verifyIntegrity.js            # kiểm cả hai
+//   node dist/tools/verifyIntegrity.js --pii      # chỉ PII
+//   node dist/tools/verifyIntegrity.js --proof    # chỉ chứng từ
+//
+// Thoát 0 = đạt. Thoát 1 = có thứ không khôi phục được.
+// KHÔNG in ra giá trị PII nào — chỉ đếm.
+import { prisma } from "../db.js";
+import { PII_FIELDS } from "../piiFields.js";
+import { decryptPii, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
+import { getObjectBytes, isStorageEnabled } from "../storage.js";
+import { sha256, MAX_PROOF_BYTES, decodeDataUrl } from "../paymentProof.js";
+
+const aadFor = (model: string, field: string) => `${model}:${field}`;
+const modelClient = (m: string) => (prisma as any)[m.charAt(0).toLowerCase() + m.slice(1)];
+
+type Ket = { ten: string; dat: boolean; chiTiet: string };
+
+/** Giải mã lại toàn bộ PII và đối chiếu với cột thô còn lại. */
+async function kiemPii(): Promise<Ket> {
+  if (!isPiiEncryptionEnabled()) {
+    return {
+      ten: "PII",
+      dat: false,
+      chiTiet:
+        "PII_ENC_KEY chưa đặt — KHÔNG kiểm được. Nếu bản dump có dữ liệu đã mã hoá thì hiện không ai " +
+        "biết khoá đang giữ có mở được nó hay không, cho tới đúng lúc cần khôi phục thật.",
+    };
+  }
+
+  let rows = 0, checked = 0, mismatch = 0, undecryptable = 0;
+  for (const [model, fields] of Object.entries(PII_FIELDS)) {
+    const client = modelClient(model);
+    if (!client) continue;
+    const select = Object.fromEntries([
+      ["id", true],
+      ...fields.flatMap((f) => [[f.plain, true], [f.enc, true]]),
+    ]);
+    const list = await client.findMany({ where: { piiVersion: { gt: 0 } }, select });
+    rows += list.length;
+    for (const r of list) {
+      for (const f of fields) {
+        const enc = r[f.enc];
+        if (!isPiiEncrypted(enc)) continue;
+        checked++;
+        const got = decryptPii(enc, aadFor(model, f.plain));
+        if (got == null) { undecryptable++; continue; }
+        // So SÁNH TRONG BỘ NHỚ, không in ra. Chỉ đếm.
+        const want = r[f.plain] == null ? null : String(r[f.plain]);
+        if (want != null && got !== want) mismatch++;
+      }
+    }
+  }
+
+  const dat = undecryptable === 0 && mismatch === 0;
+  return {
+    ten: "PII",
+    dat,
+    chiTiet: `${rows} hàng · ${checked} trường mã hoá · ${undecryptable} KHÔNG giải mã được · ${mismatch} lệch`,
+  };
+}
+
+/** Tải object chứng từ về và đối chiếu SHA-256 với hash lưu trong CSDL. */
+async function kiemChungTu(): Promise<Ket> {
+  if (!isStorageEnabled()) {
+    return {
+      ten: "Chứng từ",
+      dat: false,
+      chiTiet: "S3_* chưa cấu hình — KHÔNG kiểm được. Hàng chứng từ có thể đang trỏ vào object không tồn tại.",
+    };
+  }
+
+  const rows = await prisma.personnelRecord.findMany({
+    where: { paymentProofKey: { not: null }, deletedAt: null },
+    select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true },
+  });
+
+  let ok = 0, missing = 0, hashMismatch = 0, noHash = 0;
+  for (const r of rows) {
+    const buf = await getObjectBytes(r.paymentProofKey as string, MAX_PROOF_BYTES * 2);
+    if (!buf) { missing++; continue; }
+    if (!r.paymentProofSha256) {
+      // Hàng chuyển từ thời chưa lưu hash: đối chiếu với cột base64 cũ nếu còn.
+      const orig = r.paymentProof ? decodeDataUrl(r.paymentProof) : null;
+      if (orig && sha256(orig) === sha256(buf)) ok++;
+      else noHash++;
+      continue;
+    }
+    if (sha256(buf) !== r.paymentProofSha256) { hashMismatch++; continue; }
+    ok++;
+  }
+
+  const dat = missing === 0 && hashMismatch === 0;
+  return {
+    ten: "Chứng từ",
+    dat,
+    chiTiet: `${rows.length} hàng · ${ok} khớp · ${missing} THIẾU object · ${hashMismatch} SAI hash · ${noHash} không đối chiếu được`,
+  };
+}
+
+const args = process.argv.slice(2);
+const chiPii = args.includes("--pii");
+const chiProof = args.includes("--proof");
+const chayCa = !chiPii && !chiProof;
+
+const ketQua: Ket[] = [];
+if (chayCa || chiPii) ketQua.push(await kiemPii());
+if (chayCa || chiProof) ketQua.push(await kiemChungTu());
+
+for (const k of ketQua) {
+  console.log(`${k.dat ? "✓" : "✖"} ${k.ten}: ${k.chiTiet}`);
+}
+
+await prisma.$disconnect().catch(() => {});
+process.exit(ketQua.every((k) => k.dat) ? 0 : 1);

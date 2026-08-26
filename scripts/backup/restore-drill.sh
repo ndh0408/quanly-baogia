@@ -96,7 +96,13 @@ ENVFILE="$(mktemp)"; chmod 600 "$ENVFILE"
   [ -n "${S3_BUCKET:-}" ]     && printf 'S3_BUCKET=%s\n'     "$S3_BUCKET"
 } > "$ENVFILE"
 
-# Chạy script kiểm tra bằng CHÍNH image production (có đủ mã + node_modules + prisma client).
+# Chạy kiểm tra bằng CHÍNH image production.
+#
+# CỐ Ý gọi `node dist/tools/verifyIntegrity.js`, KHÔNG gọi `npm run pii:verify` / `proof:verify`.
+# Hai script npm ấy nằm ở scripts/migration/*.mjs, import mã nguồn TypeScript và cần tsx — mà image
+# production CHỈ chứa dist/, không có scripts/, không có src/, không có tsx. Gọi chúng ở đây sẽ
+# MODULE_NOT_FOUND mỗi tối Chủ nhật: hai bước quan trọng nhất luôn báo thất bại, .drill-last-success
+# không bao giờ được ghi, và watchdog bắn cảnh báo "CHƯA TỪNG chạy thành công" mỗi 6 giờ, mãi mãi.
 in_app() {
   docker run --rm --network "$NET" --env-file "$ENVFILE" \
     --entrypoint sh "$(docker inspect "$APP_CONTAINER" -f '{{.Config.Image}}')" -c "$1"
@@ -110,7 +116,7 @@ if [ -z "${PII_ENC_KEY:-}" ]; then
   echo "     cho tới đúng lúc cần khôi phục thật."
   alert "PII_ENC_KEY chưa cấu hình cho diễn tập — khả năng giải mã bản sao lưu KHÔNG được kiểm chứng"
 else
-  if in_app 'npm run --silent pii:verify' 2>&1 | tee /tmp/drill-pii.log | tail -5; then
+  if in_app 'node dist/tools/verifyIntegrity.js --pii' 2>&1 | tee /tmp/drill-pii.log | tail -5; then
     echo "   PII giải mã lại OK"
   else
     alert "pii:verify THẤT BẠI — khoá không mở được dữ liệu trong bản dump (xem /tmp/drill-pii.log)"
@@ -123,7 +129,7 @@ if [ -z "${S3_ENDPOINT:-}" ]; then
   echo "   ⚠ S3_* chưa đặt — BỎ QUA. Hàng chứng từ có thể đang trỏ vào object không tồn tại."
   alert "S3_* chưa cấu hình cho diễn tập — tính toàn vẹn chứng từ KHÔNG được kiểm chứng"
 else
-  if in_app 'npm run --silent proof:verify' 2>&1 | tee /tmp/drill-proof.log | tail -5; then
+  if in_app 'node dist/tools/verifyIntegrity.js --proof' 2>&1 | tee /tmp/drill-proof.log | tail -5; then
     echo "   Chứng từ toàn vẹn OK"
   else
     alert "proof:verify THẤT BẠI — object thiếu hoặc sai hash (xem /tmp/drill-proof.log)"

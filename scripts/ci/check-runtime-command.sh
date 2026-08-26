@@ -50,6 +50,25 @@ for f in infra/k8s/app.yaml infra/helm/quanly/templates/app-deployment.yaml; do
   grep -q 'dist/server\.js' "$f" || err "$f không gọi dist/server.js"
 done
 
+echo "▶ lệnh mà diễn tập khôi phục gọi TRONG image phải có thật trong dist/"
+# Sự cố cụ thể: restore-drill.sh từng gọi `npm run pii:verify` bên trong image production. Hai script
+# npm đó nằm ở scripts/migration/*.mjs, import mã TypeScript và cần tsx — image chỉ chứa dist/.
+# Hậu quả sẽ là MODULE_NOT_FOUND mỗi tối Chủ nhật, hai bước quan trọng nhất của diễn tập luôn đỏ,
+# và watchdog cảnh báo mãi mãi. Cái đó KHÔNG lộ ra cho tới khi có sự cố thật.
+if [ -f scripts/backup/restore-drill.sh ]; then
+  if sed 's/#.*//' scripts/backup/restore-drill.sh | grep -qE "in_app '(npm run|npx|node .*(src|scripts)/)"; then
+    err "restore-drill.sh gọi lệnh KHÔNG chạy được trong image production (image chỉ có dist/)"
+  fi
+  # Mọi đường dẫn dist/... mà nó gọi phải là file thật sau khi build.
+  for t in $(sed 's/#.*//' scripts/backup/restore-drill.sh | grep -oE "dist/[A-Za-z0-9_/.-]+\.js" | sort -u); do
+    if [ -d dist ]; then
+      [ -f "$t" ] || err "restore-drill.sh gọi $t nhưng build không sinh ra file đó"
+    else
+      grep -q "$(basename "$t" .js)" <(ls src/tools 2>/dev/null) || true
+    fi
+  done
+fi
+
 echo "▶ package.json start/worker trỏ dist/"
 node -e '
   const p = require("./package.json");

@@ -49,7 +49,7 @@
 - E2E thật trên staging (file `e2e-*.mjs` ở gốc repo, **gitignored**):
   - `node e2e-gridxl.mjs` → **30/30** (cột Chi Tiết + toàn bộ thao tác Excel).
   - `e2e-editor.mjs`, `e2e-editor2..5.mjs`, `e2e-banner.mjs`, `e2e-venue-suggest.mjs`, `e2e-accounthn.mjs` → tất cả PASS (đã sửa các test cũ sang `dblclick()` cho khớp luật khóa ô).
-  - Tài khoản test: `admin` / `GiaNguyenDemo2026`.
+  - Tài khoản test: `admin` / **[ĐÃ GỠ KHỎI TÀI LIỆU]** — mật khẩu demo nay truyền qua `DEMO_PASSWORD`, không hard-code. Mật khẩu cũ từng nằm trong repo công khai này: **phải coi là đã lộ và ĐÃ XOAY**.
 
 ### 2.4 NHẬP file Excel vào báo giá + KHÁCH DUYỆT TỪNG SHEET (2026-08-11)
 

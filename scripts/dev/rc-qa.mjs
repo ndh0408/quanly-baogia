@@ -9,7 +9,12 @@
 //   node scripts/dev/rc-qa.mjs
 
 const BASE = process.env.BASE || "https://dev.gianguyen.cloud";
-const PASS = process.env.QA_PASS || "GiaNguyenDemo2026";
+// KHÔNG có mật khẩu mặc định trong mã nguồn — xem chú thích ở prisma/seed-demo.js.
+const PASS = process.env.QA_PASS;
+if (!PASS) {
+  console.error("✗ Cần QA_PASS (mật khẩu tài khoản demo trên DEV). Không hard-code trong repo.");
+  process.exit(1);
+}
 
 // Tài khoản seed sẵn trên DEV. Mỗi vai trò một góc nhìn khác nhau về cùng dữ liệu.
 const ACTORS = {

@@ -21,3 +21,27 @@ Gitleaks gắn cờ vì entropy 3.82 khớp luật `generic-api-key`. Không mi�
 """
 paths = ['''^tests/mfa\.test\.js$''']
 regexes = ['''test-mfa-encryption-key-at-least-16''']
+
+# Mật khẩu demo dùng chung, viết thẳng trong mã.
+#
+# Chuỗi cũ nằm ở BA nơi (prisma/seed-demo.js, scripts/dev/rc-qa.mjs, tài liệu handoff) và là mật
+# khẩu MẶC ĐỊNH cho mọi tài khoản demo được seed, gồm cả `admin` — trong một repo publish CÔNG KHAI
+# có kèm luôn hostname dev. Ruleset mặc định của gitleaks KHÔNG bắt được vì entropy của một cụm từ
+# tiếng Việt viết liền quá thấp. Luật này bắt theo KHUÔN đặt mật khẩu mặc định, không bắt theo đúng
+# một chuỗi cụ thể — chuỗi thì đổi, thói quen thì không.
+[[rules]]
+id = "hardcoded-default-password"
+description = "Mật khẩu mặc định viết thẳng trong mã (PWD/PASS/PASSWORD = \"...\" hoặc || \"...\")"
+regex = '''(?i)(?:PWD|PASS|PASSWORD|SECRET)\s*=\s*(?:process\.env\.\w+\s*\|\|\s*)?["'][A-Za-z0-9@#$%^&*_-]{10,}["']'''
+[rules.allowlist]
+# Miễn theo GIÁ TRỊ, không chỉ theo đường dẫn: một chuỗi tự nói rõ nó là đồ vứt đi
+# ("test", "smoke", "ci-only", "drill-only", "CHANGE_ME"…) thì không phải bí mật thật, dù nằm ở đâu.
+# Miễn theo đường dẫn thôi thì thêm một file dev mới là luật lại kêu oan.
+regexes = [
+  '''(?i)(test|smoke|ci-only|drill-only|example|placeholder|CHANGE_ME|dummy|fake)''',
+]
+paths = [
+  '''tests/.*''',
+  '''\.env\.example''',
+  '''\.gitleaks\.toml''',
+]
