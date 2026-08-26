@@ -11,6 +11,7 @@ import { audit } from "../audit.js";
 import { logger } from "../logger.js";
 import { httpError } from "../httpError.js";
 import { revokeAllForUser } from "../jwt.js";
+import { findLoginUser, verifyMfaChallenge } from "../authCore.js";
 import { destroyAllSessions } from "../sessions.js";
 import { permissionsForUser, resolveUserPermissions } from "../permissions.js";
 import { sendEmail, brandedEmailHtml } from "../email.js";
@@ -116,7 +117,11 @@ async function findInvitee(token: string) {
 export function sendPasswordReset(req: Request) {
   const email = (req.body.email as string).trim();
   (async () => {
-    const user = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
+    // Dùng CHUNG hàm tra cứu của đường đăng nhập: nếu chỗ này còn so byte-for-byte thì người gõ
+    // email viết thường (bàn phím điện thoại tự hạ chữ) sẽ không được cấp token nào — mà endpoint
+    // luôn trả 200 để chống dò tài khoản, nên họ ngồi chờ một email không bao giờ tới. Đường tự
+    // phục hồi duy nhất hỏng theo đúng cách khó nhận ra nhất.
+    const user = await findLoginUser(email);
     if (!user || !user.active) return;
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
@@ -153,9 +158,27 @@ export async function inviteInfo(req: Request) {
 
 // Accept an invite: set own password + phone, activate, then log in.
 export async function acceptInvite(req: Request) {
-  const { token, displayName, phone, title, senderName, password } = req.body;
+  const { token, displayName, phone, title, senderName, password, mfaToken } = req.body;
   const user = await findInvitee(token);
   if (!user) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
+
+  // CỔNG MFA cho đường ĐẶT LẠI MẬT KHẨU.
+  //
+  // Endpoint này kiêm luôn "Quên mật khẩu", tức nó là một đường CẤP PHIÊN ĐẦY ĐỦ mà đầu vào duy
+  // nhất là một token trong hộp thư. Cổng MFA duy nhất của hệ thống nằm trong
+  // authenticateCredentials, và hàm đó chỉ được gọi từ /login và /token — nên trước bản vá này,
+  // ai chiếm được hộp thư nạn nhân là vô hiệu hoá được lớp bảo vệ thứ hai mà nạn nhân đã CHỦ ĐỘNG
+  // bật, trong khi mfaEnabled vẫn báo "đã bật 2FA" ở /me nên không có dấu hiệu gì để nghi ngờ.
+  //
+  // ĐẶT TRƯỚC prisma.user.update một cách CÓ CHỦ Ý: mã sai không được phép kịp xoay mật khẩu, nếu
+  // không thì kẻ tấn công tuy không vào được vẫn khoá được nạn nhân ra khỏi chính tài khoản họ.
+  if (user.mfaEnabled) {
+    if (!mfaToken) throw Object.assign(httpError(401, "Cần mã MFA"), { mfaRequired: true });
+    if (!(await verifyMfaChallenge(user, mfaToken))) {
+      await audit(req, "user.invite.mfa.failed", { resource: "user", resourceId: user.id });
+      throw httpError(401, "Mã MFA không đúng");
+    }
+  }
 
   const updated = await prisma.user.update({
     where: { id: user.id },

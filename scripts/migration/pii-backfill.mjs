@@ -4,6 +4,21 @@
 //   node scripts/migration/pii-backfill.mjs --dry-run     # đếm, KHÔNG ghi gì
 //   node scripts/migration/pii-backfill.mjs               # chạy thật
 //   node scripts/migration/pii-backfill.mjs --verify      # giải mã lại toàn bộ và đối chiếu với cột thô
+//   PII_ENC_KEY_OLD=<khoá cũ> node scripts/migration/pii-backfill.mjs --rotate   # XOAY KHOÁ
+//
+// ── XOAY KHOÁ (--rotate) ─────────────────────────────────────────────────────
+// Backfill và xoay khoá là HAI việc khác nhau, cố ý tách:
+//   • backfill mã hoá TỪ CỘT THÔ cho hàng `piiVersion = 0` — chạy một lần lúc bật mã hoá;
+//   • xoay khoá GIẢI MÃ bản mã cũ rồi mã hoá lại bằng khoá mới, KHÔNG đọc cột thô, và chỉ đụng hàng
+//     `piiVersion > 0`. Không đọc cột thô là điều kiện bắt buộc để quy trình này còn dùng được sau
+//     khi cột thô bị bỏ.
+// Cần ĐỒNG THỜI `PII_ENC_KEY` (khoá mới) và `PII_ENC_KEY_OLD` (khoá cũ) — src/piiBox.ts đọc được cả
+// hai trong cửa sổ xoay. Xong thì gỡ `PII_ENC_KEY_OLD` rồi chạy `--verify` để chứng minh mọi hàng
+// đã đọc được bằng MỘT MÌNH khoá mới; còn hàng nào sót là verify báo đỏ ngay.
+//
+// Chạy lại được: hàng đã xoay giải mã bằng khoá MỚI vẫn thành công nên chỉ bị mã hoá lại lần nữa
+// (vô hại). CỐ Ý không dùng `piiVersion` làm cột đánh dấu đã-xoay — ứng dụng ghi `piiVersion = 1`
+// cho mọi bản ghi mới, mượn nó làm số thế hệ khoá là hai nghĩa chồng lên một cột.
 //
 // ── BA NGUYÊN TẮC ────────────────────────────────────────────────────────────
 // 1. KHÔNG BAO GIỜ IN GIÁ TRỊ PII. Script này chạy trong terminal, terminal vào lịch sử shell, lịch
@@ -27,6 +42,7 @@ import { PII_FIELDS } from "../../src/piiFields.js";
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry-run");
 const VERIFY = args.includes("--verify");
+const ROTATE = args.includes("--rotate");
 const BATCH = Number(args.find((a) => a.startsWith("--batch="))?.split("=")[1]) || 200;
 
 if (process.env.NODE_ENV === "production" && process.env.ALLOW_PII_BACKFILL_PROD !== "true") {
@@ -36,6 +52,17 @@ if (process.env.NODE_ENV === "production" && process.env.ALLOW_PII_BACKFILL_PROD
 }
 if (!isPiiEncryptionEnabled()) {
   console.error("✖ Chưa đặt PII_ENC_KEY — không có gì để mã hoá bằng.");
+  process.exit(1);
+}
+// Xoay khoá mà thiếu khoá cũ thì mọi bản mã cũ sẽ giải ra null → script sẽ đếm là hỏng hàng loạt.
+// Chặn ngay từ đầu rõ ràng hơn nhiều so với để nó chạy 10 phút rồi báo "0 xoay được".
+if (ROTATE && !(process.env.PII_ENC_KEY_OLD || "")) {
+  console.error("✖ --rotate cần PII_ENC_KEY_OLD (khoá CŨ) bên cạnh PII_ENC_KEY (khoá MỚI).");
+  console.error("  Xem docs/operations/DISASTER_RECOVERY.md § Sao lưu khoá mã hoá.");
+  process.exit(1);
+}
+if (ROTATE && process.env.PII_ENC_KEY_OLD === process.env.PII_ENC_KEY) {
+  console.error("✖ PII_ENC_KEY_OLD trùng PII_ENC_KEY — không có gì để xoay.");
   process.exit(1);
 }
 
@@ -66,6 +93,53 @@ async function verifyModel(model, fields) {
     }
   }
   return { rows: rows.length, checked, mismatch, undecryptable };
+}
+
+/**
+ * XOAY KHOÁ: giải mã bằng bộ khoá hiện có (piiBox tự thử khoá mới rồi khoá cũ) và mã hoá lại bằng
+ * khoá MỚI, tính lại chỉ mục mù. Không đọc và không ghi cột thô.
+ */
+async function rotateModel(model, fields) {
+  const client = modelClient(model);
+  const total = await client.count({ where: { piiVersion: { gt: 0 } } });
+  console.log(`\n── ${model}: ${total} bản ghi đã mã hoá — cần mã hoá lại bằng khoá mới`);
+  if (DRY) return { model, total, rotated: 0, failed: 0 };
+
+  const select = Object.fromEntries([["id", true], ...fields.map((f) => [f.enc, true])]);
+  let rotated = 0, failed = 0, cursor = 0;
+  for (;;) {
+    // Phân trang bằng CON TRỎ id chứ không bằng skip: hàng đã xoay vẫn khớp `piiVersion > 0` nên
+    // `skip` sẽ đứng yên tại chỗ và lặp vô tận.
+    const batch = await client.findMany({
+      where: { piiVersion: { gt: 0 }, id: { gt: cursor } },
+      select,
+      orderBy: { id: "asc" },
+      take: BATCH,
+    });
+    if (!batch.length) break;
+    for (const row of batch) {
+      cursor = row.id;
+      const data = {};
+      let hong = false;
+      for (const f of fields) {
+        const enc = row[f.enc];
+        if (!isPiiEncrypted(enc)) continue;      // cột rỗng → không có gì để xoay
+        const plain = decryptPii(enc, aadFor(model, f.plain));
+        if (plain == null) { hong = true; break; }
+        data[f.enc] = encryptPii(plain, aadFor(model, f.plain));
+        if (f.idx) data[f.idx] = blindIndex(plain);
+      }
+      // FAIL-CLOSED: một trường không giải được thì BỎ QUA CẢ HÀNG. Ghi phần đã xoay được sẽ để lại
+      // bản ghi nửa khoá cũ nửa khoá mới — không cách nào sửa sau khi khoá cũ bị gỡ.
+      if (hong) { failed++; continue; }
+      if (!Object.keys(data).length) continue;
+      await client.update({ where: { id: row.id }, data });
+      rotated++;
+    }
+    process.stdout.write(`   … ${rotated}\r`);
+  }
+  console.log(`   xoay ${rotated} bản ghi · KHÔNG giải mã được ${failed}`);
+  return { model, total, rotated, failed };
 }
 
 async function backfillModel(model, fields) {
@@ -103,12 +177,16 @@ async function backfillModel(model, fields) {
   return { model, total, done: done + written, pending, written };
 }
 
-const mode = VERIFY ? "XÁC MINH" : DRY ? "CHẠY THỬ (không ghi)" : "CHẠY THẬT";
-console.log(`▶ Backfill PII — ${mode} · NODE_ENV=${process.env.NODE_ENV || "development"} · lô ${BATCH}`);
+const mode = VERIFY ? "XÁC MINH" : ROTATE ? "XOAY KHOÁ" : DRY ? "CHẠY THỬ (không ghi)" : "CHẠY THẬT";
+const modeDry = DRY && !VERIFY ? " (chạy thử, không ghi)" : "";
+console.log(`▶ Backfill PII — ${mode}${modeDry} · NODE_ENV=${process.env.NODE_ENV || "development"} · lô ${BATCH}`);
 
 let bad = false;
 for (const [model, fields] of Object.entries(PII_FIELDS)) {
-  if (VERIFY) {
+  if (ROTATE && !VERIFY) {
+    const r = await rotateModel(model, fields);
+    if (r.failed > 0) bad = true;
+  } else if (VERIFY) {
     const v = await verifyModel(model, fields);
     const ok = v.mismatch === 0 && v.undecryptable === 0;
     if (!ok) bad = true;
@@ -120,7 +198,11 @@ for (const [model, fields] of Object.entries(PII_FIELDS)) {
 }
 
 if (VERIFY) console.log(bad ? "\n✖ XÁC MINH THẤT BẠI" : "\n✓ XÁC MINH ĐẠT — mọi bản mã giải ra khớp cột thô");
-else if (!DRY) console.log(bad ? "\n✖ Còn bản ghi chưa mã hoá — chạy lại để tiếp tục" : "\n✓ Backfill xong");
+else if (ROTATE && !DRY) {
+  console.log(bad
+    ? "\n✖ XOAY KHOÁ CHƯA XONG — còn bản ghi không giải mã được bằng cả hai khoá. ĐỪNG gỡ PII_ENC_KEY_OLD."
+    : "\n✓ Xoay khoá xong. Bước cuối: gỡ PII_ENC_KEY_OLD rồi chạy --verify để chứng minh khoá mới tự đứng được.");
+} else if (!DRY) console.log(bad ? "\n✖ Còn bản ghi chưa mã hoá — chạy lại để tiếp tục" : "\n✓ Backfill xong");
 
 await prisma.$disconnect();
 await pool.end();

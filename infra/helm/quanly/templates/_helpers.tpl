@@ -39,9 +39,25 @@ default
 {{- end -}}
 {{- end -}}
 
+{{/*
+  Mật khẩu kho dữ liệu NHÚNG. Đi qua `required` chứ không đọc thẳng .Values: trước đây values.yaml
+  mang sẵn placeholder `CHANGE_ME_INTERNAL` / `CHANGE_ME_INTERNAL_REDIS` HỢP LỆ, nên chart cài được
+  và chạy được với mật khẩu mà bất kỳ ai đọc repo cũng biết — không có gì buộc người cài phải đổi.
+  NetworkPolicy chặn pod lạ là phòng thủ theo mạng, không phải lý do để dùng thông tin đăng nhập
+  công khai. Cùng tinh thần với việc chart từ chối image.tag=latest: thà không render còn hơn render
+  ra một thứ không an toàn.
+*/}}
+{{- define "quanly.postgresPassword" -}}
+{{- required "postgres.password BAT BUOC khi postgres.enabled=true. Sinh: openssl rand -base64 24" .Values.postgres.password -}}
+{{- end -}}
+
+{{- define "quanly.redisPassword" -}}
+{{- required "redis.password BAT BUOC khi redis.enabled=true. Sinh: openssl rand -base64 24" .Values.redis.password -}}
+{{- end -}}
+
 {{- define "quanly.databaseUrl" -}}
 {{- if .Values.postgres.enabled -}}
-postgresql://quanly:{{ .Values.postgres.password }}@{{ include "quanly.fullname" . }}-postgres:5432/quanly?schema=public
+postgresql://quanly:{{ include "quanly.postgresPassword" . }}@{{ include "quanly.fullname" . }}-postgres:5432/quanly?schema=public
 {{- else -}}
 {{ .Values.secrets.DATABASE_URL }}
 {{- end -}}
@@ -49,7 +65,7 @@ postgresql://quanly:{{ .Values.postgres.password }}@{{ include "quanly.fullname"
 
 {{- define "quanly.redisUrl" -}}
 {{- if .Values.redis.enabled -}}
-redis://:{{ .Values.redis.password }}@{{ include "quanly.fullname" . }}-redis:6379
+redis://:{{ include "quanly.redisPassword" . }}@{{ include "quanly.fullname" . }}-redis:6379
 {{- else -}}
 {{ .Values.secrets.REDIS_URL }}
 {{- end -}}

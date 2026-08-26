@@ -47,6 +47,35 @@ import searchRoutes from "./routes/search.routes.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
 
+/**
+ * Tham số kết nối của KHO PHIÊN — pool Postgres THỨ HAI của tiến trình web.
+ *
+ * VÌ SAO PHẢI ĐẶT `max` TƯỜNG MINH: connect-pg-simple dựng pool node-pg riêng, tách hẳn khỏi pool
+ * Prisma (`max: DB_POOL_MAX || 20` ở src/db.ts). Không đặt gì thì node-pg lấy mặc định 10, nên ngân
+ * sách thật của một tiến trình web là 30 — con số không được khai ở đâu cả, trong khi comment ở
+ * db.ts còn mời người vận hành nâng DB_POOL_MAX. Kho phiên chỉ SELECT/UPSERT đúng một hàng mỗi
+ * request nên vài kết nối là đủ; hạ trần ở đây trả lại 6 kết nối cho phần còn lại của hệ thống và
+ * biến ngân sách thành thứ đọc được.
+ *
+ * CÔNG THỨC: kết nối mỗi tiến trình = DB_POOL_MAX + SESSION_POOL_MAX.
+ * (web × số instance) + worker phải nhỏ hơn `max_connections` của Postgres.
+ */
+export function conObjectPhien() {
+  return { connectionString: config.DATABASE_URL, max: Number(process.env.SESSION_POOL_MAX) || 4 };
+}
+
+/**
+ * /readyz NHỚ TẠM kết quả 5 giây.
+ *
+ * VÌ SAO: endpoint này không cần xác thực và nằm NGOÀI `app.use("/api/", apiLimiter)` (limiter chỉ
+ * phủ tiền tố /api/), nên mỗi lượt gọi từ bất kỳ đâu là một truy vấn thẳng vào pool CSDL dùng chung
+ * với người dùng thật. Probe của Docker/k8s chỉ hỏi vài giây một lần, nên 5 giây không làm chậm
+ * việc phát hiện CSDL chết, mà biến "gọi bao nhiêu cũng được" thành trần cứng 1 truy vấn / 5 giây.
+ *
+ * Bộ nhớ tạm nằm TRONG createApp (không phải module-level) để mỗi app là một trạng thái độc lập.
+ */
+const READYZ_TTL_MS = 5_000;
+
 // Constant-time compare of an "Authorization: Bearer <token>" header against the
 // expected secret. Plain !== short-circuits on the first differing byte (timing
 // oracle); timingSafeEqual on equal-length SHA-256 digests removes that.
@@ -261,7 +290,7 @@ export function createApp() {
       store: config.NODE_ENV === "test"
         ? undefined
         : new PgSession({
-            conObject: { connectionString: config.DATABASE_URL },
+            conObject: conObjectPhien(),
             createTableIfMissing: true,
             tableName: "user_sessions",
             pruneSessionInterval: 60 * 60, // hourly prune
@@ -307,6 +336,16 @@ export function createApp() {
 
   // Prometheus metrics middleware (records all requests).
   app.use(metricsMiddleware);
+
+  // TRẦN CHO PROBE. `app.use("/api/", apiLimiter)` chỉ phủ tiền tố /api/, nên /livez, /readyz và
+  // /metrics nằm NGOÀI mọi giới hạn — mà /readyz thì truy vấn CSDL. Phải mount TRƯỚC các handler đó:
+  // Express khớp theo thứ tự đăng ký, đặt sau là không bao giờ chạy. 120/phút thoải mái cho probe
+  // của Docker/k8s (thường 5-10 giây một lần) nhưng chặn được vòng lặp gọi liên tục.
+  app.use(["/livez", "/readyz", "/metrics"], createLimiter("probe", {
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
+  }));
 
   // Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
   // AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
@@ -384,11 +423,18 @@ export function createApp() {
 
   // Health probes
   app.get("/livez", (_req, res) => res.json({ ok: true }));
+  let readyzCache: { t: number; ok: boolean } = { t: 0, ok: false };
   app.get("/readyz", async (_req, res) => {
+    const now = Date.now();
+    if (now - readyzCache.t < READYZ_TTL_MS) {
+      return res.status(readyzCache.ok ? 200 : 503).json({ ok: readyzCache.ok });
+    }
     try {
       await prisma.$queryRaw`SELECT 1`;
+      readyzCache = { t: now, ok: true };
       res.json({ ok: true });
     } catch (e) {
+      readyzCache = { t: now, ok: false };
       // Never leak DB error details on an unauthenticated endpoint.
       logger.error({ err: e instanceof Error ? e.message : String(e) }, "readyz failed");
       res.status(503).json({ ok: false });

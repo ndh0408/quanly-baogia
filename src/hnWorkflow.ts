@@ -75,8 +75,8 @@ export async function assignHn(req: Request) {
 /** Account_hn LƯU phần HN: CHỈ ghi bảng "hanoi" của từng sheet, GIỮ NGUYÊN mọi thứ khác
  *  (hcm/khach + items/giá báo giá chính không hề bị account đụng tới). */
 export async function saveHn(req: Request) {
-  const id = (req.params as any).id;
-  const existing = await prisma.quote.findFirst({ where: { id }, include: { sheets: { select: { id: true, extraTables: true } } } });
+  const id = Number((req.params as any).id);
+  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, hnStatus: true, hnAssigneeId: true } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Chỉ Account Hà Nội được giao mới điền được phần này");
   if (["submitted", "approved"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN đã gửi duyệt/đã duyệt — không sửa được");
@@ -96,13 +96,27 @@ export async function saveHn(req: Request) {
   const userId = req.session.userId!;
   const canPay = can(req.session, P.QUOTE_INTERNAL_PAY);
   const canApprove = can(req.session, P.QUOTE_INTERNAL_APPROVE);
-  const toWrite = hnSheets
-    .map((hs: any) => ({ sheet: existing.sheets.find((s) => s.id === Number(hs.sheetId)), extraTables: (hs.hnTables || []).map((t: any) => ({ ...t, category: "hanoi" })) }))
-    .filter((x: any) => x.sheet);   // chỉ sheet thuộc báo giá này
-  reconcileExtraPayments(toWrite, existing.sheets, canPay, userId);
-  reconcileHanoiApprovals(toWrite, existing.sheets, canApprove);
 
   await prisma.$transaction(async (tx) => {
+    // KHOÁ RỒI MỚI ĐỌC, TẤT CẢ TRONG TRANSACTION.
+    //
+    // Ghi bảng HN là read-modify-write NGUYÊN KHỐI cột Json `extraTables`: phần "hanoi" thay mới,
+    // phần hcm/khách (`others`) chép lại y nguyên. Đọc `others` từ ảnh chụp NGOÀI transaction thì
+    // mọi thứ kế toán vừa ghi xen vào giữa (paid/paidAt/paidById/paidProof qua route /pay) bị chép
+    // đè bằng bản cũ — mất trắng, im lặng, dù account Hà Nội không hề được phép đụng bảng hcm.
+    //
+    // `markExtraTableRowPayment` đã tuần tự hoá đúng cách bằng SELECT … FOR UPDATE; đường này cũng
+    // phải lấy CÙNG khoá đó thì hai bên mới xếp hàng với nhau. ORDER BY id để hai lần lưu song song
+    // lấy khoá cùng thứ tự (chống deadlock), và lấy khoá QuoteSheet TRƯỚC Quote — đúng thứ tự mà
+    // updateQuote/markExtraTableRowPayment đang dùng.
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+    const sheets = await tx.quoteSheet.findMany({ where: { quoteId: id }, select: { id: true, extraTables: true } });
+    const toWrite = hnSheets
+      .map((hs: any) => ({ sheet: sheets.find((s) => s.id === Number(hs.sheetId)), extraTables: (hs.hnTables || []).map((t: any) => ({ ...t, category: "hanoi" })) }))
+      .filter((x: any) => x.sheet);   // chỉ sheet thuộc báo giá này
+    reconcileExtraPayments(toWrite, sheets, canPay, userId);
+    reconcileHanoiApprovals(toWrite, sheets, canApprove);
+
     for (const { sheet, extraTables } of toWrite) {
       const others = (Array.isArray(sheet!.extraTables) ? sheet!.extraTables : []).filter((t: any) => t && t.category !== "hanoi");
       const hanoi = sanitizeExtraTables(extraTables) || [];

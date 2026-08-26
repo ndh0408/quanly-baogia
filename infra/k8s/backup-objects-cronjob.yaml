@@ -1,0 +1,94 @@
+# Sao lưu KHO OBJECT cho nhánh triển khai k8s.
+#
+# VÌ SAO CÓ FILE NÀY: từ 2026-08-11 ảnh chứng từ thanh toán đã RỜI CSDL sang kho object; CSDL chỉ
+# còn giữ khoá + SHA-256. backup-cronjob.yaml sao lưu Postgres, nên nhánh k8s TRƯỚC ĐÂY chỉ sao lưu
+# được một nửa: mất bucket là mất CHỨNG TỪ TÀI CHÍNH, trong khi mọi hàng trong CSDL vẫn còn và trỏ
+# vào hư không. Nhánh docker-compose đã có scripts/backup/backup-objects.sh làm đúng việc này; đây
+# là bản tương ứng cho k8s.
+#
+# CƠ CHẾ: `mc mirror` CỘNG DỒN — cố ý KHÔNG dùng --remove. Nếu bucket bị xoá nhầm (hoặc bị mã hoá
+# tống tiền) thì bản sao lưu phải GIỮ LẠI vật, chứ không đồng bộ luôn cái xoá đó. Đó là khác biệt
+# giữa "bản sao lưu" và "bản chép".
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quanly-object-backups
+  namespace: quanly
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: quanly-object-backup
+  namespace: quanly
+spec:
+  schedule: "30 2 * * *" # 02:30, sau lượt dump CSDL lúc 02:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: mc-mirror
+              image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # Cặp khoá đi qua env (không qua argv): argv của tiến trình đọc được từ trong pod.
+                - name: S3_ENDPOINT
+                  valueFrom: { secretKeyRef: { name: quanly-secrets, key: S3_ENDPOINT } }
+                - name: S3_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: quanly-secrets, key: S3_ACCESS_KEY } }
+                - name: S3_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: quanly-secrets, key: S3_SECRET_KEY } }
+                - name: S3_BUCKET
+                  valueFrom: { configMapKeyRef: { name: quanly-config, key: S3_BUCKET } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  umask 077
+                  export MC_HOST_q="$(echo "$S3_ENDPOINT" | sed "s#://#://$S3_ACCESS_KEY:$S3_SECRET_KEY@#")"
+                  echo "Mirroring q/$S3_BUCKET -> /objects (cộng dồn, KHÔNG lan truyền xoá)"
+                  mc mirror --quiet --overwrite "q/$S3_BUCKET" /objects
+                  # Đối chiếu SỐ LƯỢNG: mirror trả 0 mà thiếu object thì bản sao lưu vô dụng và
+                  # không ai biết cho tới lúc cần khôi phục thật.
+                  REMOTE_N=$(mc ls --recursive "q/$S3_BUCKET" | grep -c . || echo 0)
+                  LOCAL_N=$(find /objects -type f ! -name '*.tsv*' | wc -l)
+                  echo "bucket=$REMOTE_N gương=$LOCAL_N"
+                  [ "$REMOTE_N" -eq 0 ] || [ "$LOCAL_N" -ge "$REMOTE_N" ] || { echo "BẢN GƯƠNG THIẾU OBJECT"; exit 1; }
+                  # Manifest SHA-256: ghi .partial rồi đổi tên, để một lượt chết giữa chừng không
+                  # để lại manifest cụt mà bước kiểm khôi phục sau này lại tin là hợp lệ.
+                  STAMP=$(date +%Y%m%d_%H%M%S)
+                  M="/objects/manifest_${STAMP}.tsv"
+                  cd /objects && find . -type f ! -name 'manifest_*' -printf '%P\n' | sort | while IFS= read -r k; do
+                    printf '%s\t%s\t%s\n' "$k" "$(stat -c%s "$k")" "$(sha256sum "$k" | cut -d' ' -f1)"
+                  done > "$M.partial"
+                  mv "$M.partial" "$M"
+                  ls -1t /objects/manifest_*.tsv | tail -n +31 | xargs -r rm -f
+                  echo "OBJECT_BACKUP_DONE"
+              volumeMounts:
+                - { name: objects, mountPath: /objects }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: objects
+              persistentVolumeClaim:
+                claimName: quanly-object-backups
+            - { name: tmp, emptyDir: {} }

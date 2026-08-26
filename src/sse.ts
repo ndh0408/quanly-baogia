@@ -7,7 +7,7 @@
 
 import type { Redis } from "ioredis";
 import type { Request, Response } from "express";
-import { sseClients } from "./observability.js";
+import { sseClients, sseBackplaneUp, sseBackplaneErrors } from "./observability.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -21,21 +21,36 @@ function recountClients() {
   sseClients.set(n);
 }
 
+/**
+ * ÁP LỰC NGƯỢC. `res.write` trả `false` khi bộ đệm đã đầy, nhưng giá trị đó trước đây bị bỏ qua —
+ * nên một client đọc chậm, hay một socket đã chết mà không gửi FIN (chuyện thường qua tunnel/NAT),
+ * làm mọi sự kiện tiếp theo dồn vào bộ đệm TRONG TIẾN TRÌNH, không giới hạn. SSE là dữ liệu gợi ý
+ * làm mới màn hình: mất vài sự kiện thì client tự re-fetch, còn phình bộ nhớ thì kéo sập cả app.
+ *
+ * Huỷ socket thay vì chỉ bỏ ghi: `res.destroy()` làm `req` phát "close", nên phần dọn dẹp trong
+ * `attach` chạy đúng như khi người dùng đóng tab — không cần đường dọn thứ hai.
+ */
+export const SSE_MAX_BUFFER = Number(process.env.SSE_MAX_BUFFER) || 1_000_000;
+function ghiAnToan(res: Response, payload: string): boolean {
+  const dem = (res as unknown as { writableLength?: number }).writableLength ?? 0;
+  if (dem > SSE_MAX_BUFFER) {
+    try { res.destroy(); } catch { /* đã hỏng sẵn */ }
+    return false;
+  }
+  try { return res.write(payload) !== false; } catch { return false; /* socket gone */ }
+}
+
 // --- delivery to THIS process's connections only ---
 function localPublish(userId: number, event: string, data: unknown) {
   const set = subscribers.get(userId);
   if (!set || set.size === 0) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
-  for (const res of set) {
-    try { res.write(payload); } catch { /* socket gone */ }
-  }
+  for (const res of [...set]) ghiAnToan(res, payload); // sao chép: ghiAnToan có thể gỡ phần tử
 }
 function localBroadcast(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
-  for (const set of subscribers.values()) {
-    for (const res of set) {
-      try { res.write(payload); } catch {}
-    }
+  for (const set of [...subscribers.values()]) {
+    for (const res of [...set]) ghiAnToan(res, payload);
   }
 }
 
@@ -43,16 +58,30 @@ function localBroadcast(event: string, data: unknown) {
 // On every instance: PUBLISH goes to Redis; a dedicated subscriber receives the
 // message (on this instance too) and delivers it to local connections. So publish
 // must NOT also deliver locally when Redis is active — the subscriber handles it.
+/**
+ * Options ioredis TÁCH THEO VAI TRÒ. Trước đây publisher và subscriber dùng CHUNG
+ * `{ maxRetriesPerRequest: null }` — tức "thử lại vô hạn", cộng hàng đợi offline mặc định.
+ *
+ * Với subscriber thì đúng: đó là kết nối dài, phải tự nối lại và chờ được.
+ * Với publisher thì SAI, và src/queue.ts:19-29 đã viết hẳn một đoạn dài về đúng cái bẫy này: PUBLISH
+ * của SSE là bắn-và-quên trên đường xử lý request. Redis chết mà xếp hàng vô hạn thì hàng đợi offline
+ * của ioredis phình trong bộ nhớ, còn sự kiện thì dù sao cũng đã lỗi thời khi Redis sống lại. Thà
+ * TRƯỢT NHANH và mất sự kiện — client vẫn tự re-fetch khi tương tác.
+ */
+export function backplaneOptions(vaiTro: "pub" | "sub") {
+  if (vaiTro === "sub") return { maxRetriesPerRequest: null, enableReadyCheck: false } as const;
+  return { maxRetriesPerRequest: 2, enableReadyCheck: false, enableOfflineQueue: false, commandTimeout: 1000 } as const;
+}
+
 if (config.REDIS_URL) {
   (async () => {
     try {
       const { default: IORedis } = await import("ioredis");
-      const opts = { maxRetriesPerRequest: null, enableReadyCheck: false };
-      const pubClient: Redis = new (IORedis as any)(config.REDIS_URL, opts);
+      const pubClient: Redis = new (IORedis as any)(config.REDIS_URL, backplaneOptions("pub"));
       pub = pubClient;
-      pubClient.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis pub error"));
-      const sub = new (IORedis as any)(config.REDIS_URL, opts);
-      sub.on("error", (e: any) => logger.warn({ err: e.message }, "sse redis sub error"));
+      pubClient.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis pub error"); });
+      const sub = new (IORedis as any)(config.REDIS_URL, backplaneOptions("sub"));
+      sub.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis sub error"); });
       await sub.subscribe(CHANNEL);
       sub.on("message", (_chan: string, raw: string) => {
         try {
@@ -61,15 +90,33 @@ if (config.REDIS_URL) {
           else localBroadcast(m.event, m.data);
         } catch { /* ignore malformed */ }
       });
+      sseBackplaneUp.set(1);
       logger.info("SSE Redis pub/sub backplane enabled");
     } catch (e) {
       pub = null;
+      sseBackplaneUp.set(0);
       logger.warn({ err: e instanceof Error ? e.message : String(e) }, "SSE Redis backplane init failed — falling back to in-memory");
     }
   })();
 }
 
+/**
+ * Trần số kết nối SSE ĐỒNG THỜI của MỘT tài khoản. Không có trần thì `attach` nhận vô hạn: mỗi kết
+ * nối là một `Response` giữ mãi cộng một `setInterval` keepalive, và dọn dẹp chỉ xảy ra khi client
+ * đóng — nên socket chết không FIN tích lại cho tới lần restart. Đặt rộng rãi so với nhu cầu thật
+ * (vài tab mỗi người) để không ai đang làm việc bị chặn oan; đây là chốt chặn lạm dụng, không phải
+ * hạn ngạch. Nới bằng SSE_MAX_PER_USER nếu có nhu cầu thật.
+ */
+export const SSE_MAX_PER_USER = Number(process.env.SSE_MAX_PER_USER) || 10;
+
 export function attach(req: Request, res: Response, userId: number) {
+  // KIỂM TRẦN TRƯỚC khi đặt header: đã flushHeaders với text/event-stream thì không còn trả 429 được.
+  const daCo = subscribers.get(userId);
+  if (daCo && daCo.size >= SSE_MAX_PER_USER) {
+    res.status(429).json({ error: "Quá nhiều kết nối realtime — đóng bớt tab rồi thử lại", code: "sse_too_many" });
+    return;
+  }
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -84,7 +131,7 @@ export function attach(req: Request, res: Response, userId: number) {
 
   // Keepalive every 25s
   const ka = setInterval(() => {
-    try { res.write(`: keepalive\n\n`); } catch {}
+    ghiAnToan(res, `: keepalive\n\n`);
   }, 25_000);
 
   req.on("close", () => {
@@ -124,7 +171,13 @@ export function closeAllSse() {
 /** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId: number, event: string, data: unknown) {
   if (pub) {
-    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch(() => {});
+    // KHÔNG nuốt lỗi im lặng nữa: publisher nay trượt nhanh khi Redis chết, nên lỗi ở đây là tín
+    // hiệu duy nhất cho biết realtime đang hỏng. Đếm để /metrics thấy được, thay vì `catch(() => {})`.
+    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch((e) => {
+      sseBackplaneErrors.inc({ op: "publish" });
+      sseBackplaneUp.set(0);
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "sse publish thất bại");
+    });
     return;
   }
   localPublish(userId, event, data);
@@ -133,7 +186,11 @@ export function publish(userId: number, event: string, data: unknown) {
 /** Broadcast to everyone connected (across instances when Redis is on). */
 export function broadcast(event: string, data: unknown) {
   if (pub) {
-    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch(() => {});
+    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch((e) => {
+      sseBackplaneErrors.inc({ op: "broadcast" });
+      sseBackplaneUp.set(0);
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "sse broadcast thất bại");
+    });
     return;
   }
   localBroadcast(event, data);
@@ -143,9 +200,16 @@ export function broadcast(event: string, data: unknown) {
  * Broadcast a data-change hint so every connected client refreshes the relevant
  * list view without a manual reload. The client re-fetches through the normal
  * (permission-scoped) API, so broadcasting to everyone is safe.
+ *
+ * KHÔNG PHÁT `id` RA NGOÀI. `broadcast` đi tới MỌI phiên đang mở, không lọc quyền, còn chỗ gọi
+ * (src/db.ts) chạy sau mỗi lần ghi Quote/Customer/User — nên id thật của báo giá trước đây tới cả
+ * những tài khoản không được phép đọc báo giá ấy. Nghe SSE một lúc là dựng được nhịp làm việc và
+ * khoảng id. Client React (web/src/components/Shell.tsx) KHÔNG hề đọc payload — nó chỉ dùng sự kiện
+ * làm tín hiệu re-fetch qua API đã gác quyền — nên bỏ id không đổi hành vi nào của giao diện.
+ * Tham số vẫn giữ để chỗ gọi không phải sửa.
  */
-export function emitChange(entity: string, action: string, id?: number | string | null) {
-  broadcast("changed", { entity, action, id: id != null ? String(id) : null });
+export function emitChange(entity: string, action: string, _id?: number | string | null) {
+  broadcast("changed", { entity, action });
 }
 
 /** Tell one user their session is no longer valid (locked/deactivated/deleted) → client logs out. */

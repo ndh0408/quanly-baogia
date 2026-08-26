@@ -11,6 +11,7 @@ resources:
   - worker.yaml
   - ingress.yaml
   - backup-cronjob.yaml
+  - backup-objects-cronjob.yaml
 
 # ẢNH BẤT BIẾN. Các manifest ghi tag placeholder `:REPLACE_ME`; kustomize thay bằng digest/sha thật
 # lúc deploy, ví dụ:

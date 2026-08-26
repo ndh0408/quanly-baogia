@@ -1,10 +1,27 @@
 # Compose STAGING (VM quanly-staging). BÍ MẬT đọc từ .env (gitignored) qua ${VAR} — KHÔNG hardcode.
 # .env phải có: POSTGRES_PASSWORD, REDIS_PASSWORD + toàn bộ env app (SESSION_SECRET, JWT_SECRET,
 # MFA_ENC_KEY, APP_BASE_URL, S3/SMTP…) — xem src/config.js. deploy.sh ship file NÀY (đã tracked).
+
+# XOAY VÒNG LOG cho MỌI service. Driver mặc định của Docker là json-file KHÔNG giới hạn: app dùng
+# pino-http ghi mỗi request một dòng, VM production chỉ có MỘT đĩa, và khi đĩa đầy thì Postgres
+# không ghi nổi WAL nữa — mất dữ liệu vì log chứ không phải vì lỗi mã. 10MB × 5 tệp = trần 50MB
+# mỗi container.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: quanly-postgres
+    logging: *default-logging
+    # Postgres: shared_buffers mặc định 128MB; 2g là trần rộng rãi, chỉ để chặn rò rỉ.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     restart: unless-stopped
     environment:
       POSTGRES_USER: quanly
@@ -21,6 +38,12 @@ services:
   redis:
     image: redis:7-alpine
     container_name: quanly-redis
+    logging: *default-logging
+    # Lớn hơn `--maxmemory 256mb` để Redis tự evict/báo lỗi TRƯỚC khi bị OOM-kill.
+    deploy:
+      resources:
+        limits:
+          memory: 384m
     restart: unless-stopped
     command:
       [
@@ -44,8 +67,14 @@ services:
       retries: 10
     networks: [internal]
   mailhog:
-    image: mailhog/mailhog:latest
+    image: mailhog/mailhog:v1.0.1
     container_name: quanly-mailhog
+    logging: *default-logging
+    # Hòm thư giả của staging, giữ mail trong RAM.
+    deploy:
+      resources:
+        limits:
+          memory: 128m
     restart: unless-stopped
     ports:
       - "127.0.0.1:8025:8025"
@@ -56,6 +85,20 @@ services:
       dockerfile: Dockerfile
     image: quanly-app:staging
     container_name: quanly-app
+    # Siết đặc quyền: container này chỉ nghe cổng 3000 (>1024) dưới user `app` nên KHÔNG cần
+    # bất kỳ Linux capability nào. Bỏ sạch + cấm leo thang biến một RCE giả định từ "toàn quyền
+    # trong container" thành "một tiến trình không đặc quyền". Đường k8s/Helm đã siết như vậy
+    # từ lâu (infra/k8s/app.yaml) — compose mới là thứ đang chạy thật thì lại chưa.
+    # KHÔNG bật `read_only: true` ở đây: deploy.sh chạy `compose run --rm app npx prisma migrate
+    # deploy`, mà npx cần ghi ~/.npm — phải diễn tập bằng docker trước khi bật.
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    logging: *default-logging
+    # exceljs/pdfkit dựng workbook trong bộ nhớ; vượt trần thì CHỈ app chết và tự restart.
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
     restart: unless-stopped
     env_file: .env
     environment:
@@ -83,6 +126,18 @@ services:
   worker:
     image: quanly-app:staging
     container_name: quanly-worker
+    # Siết đặc quyền: worker chỉ chạy node dưới user `app`, không mở cổng, không cần Linux
+    # capability nào. Bỏ sạch + cấm leo thang để một RCE giả định không leo được lên root
+    # trong container. Đường k8s/Helm siết như vậy từ lâu (infra/k8s/worker.yaml); compose
+    # mới là thứ đang chạy thật thì lại chưa.
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    logging: *default-logging
+    # Worker chạy đúng những job xuất file nặng nhất — cùng trần với app.
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
     restart: unless-stopped
     # Cùng artifact đã biên dịch với app (Dockerfile build ra dist/). Không còn tsx lúc chạy.
     command: ["node", "dist/worker.js"]

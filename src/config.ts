@@ -27,7 +27,12 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: numEnv(z.coerce.number().int().positive().default(3000)),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be ≥ 32 chars in production").or(z.string().min(1)),
+  // KHÔNG dùng `.min(32).or(z.string().min(1))`: union chỉ cần MỘT nhánh khớp, nên `min(32)` không
+  // chặn được gì — "short" vẫn qua. Và khi CẢ HAI nhánh trượt (chuỗi rỗng), zod v4 gộp thành
+  // `invalid_union` với message "Invalid input", còn thông điệp thật nằm trong mảng lỗi lồng bên
+  // trong — mà vòng in lỗi phía dưới chỉ in `issue.message`, tức người vận hành nhận đúng một câu
+  // vô nghĩa. Ngưỡng 32 ký tự áp ở lớp kiểm production tường minh phía dưới, nơi nó thật sự bắt buộc.
+  SESSION_SECRET: z.string().min(1, "SESSION_SECRET là bắt buộc (production còn phải ≥ 32 ký tự)"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).optional(),
   // Auth tuning
   BCRYPT_COST: numEnv(z.coerce.number().int().min(10).max(15).default(12)),
@@ -66,7 +71,9 @@ const schema = z.object({
   S3_FORCE_PATH_STYLE: z.preprocess((v) => (typeof v === "string" ? !/^(false|0|no)$/i.test(v) : v), z.boolean()).default(true),
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
-  // Webhook
+  // [KHÔNG DÙNG] Webhook đi được ký bằng secret RIÊNG của từng webhook (`Webhook.secret`, sinh ngẫu
+  // nhiên rồi mã hoá at-rest — xem src/webhooks.ts + src/secretbox.ts), KHÔNG dùng biến này. Giữ khai
+  // báo để `.env` cũ có dòng này không bị coi là biến lạ; đừng nối nó vào tính năng nào.
   WEBHOOK_SECRET: z.string().optional(),
   // Sentry
   SENTRY_DSN: z.string().optional(),
@@ -213,7 +220,6 @@ export function featureStatus() {
     "Gửi email (SMTP)": !!config.SMTP_HOST,
     "Sentry": !!config.SENTRY_DSN,
     "Thông báo Telegram": !!config.TELEGRAM_BOT_TOKEN,
-    "Webhook đi (đã ký)": !!config.WEBHOOK_SECRET,
     "/metrics có token bảo vệ": !!config.METRICS_TOKEN,
   };
 }

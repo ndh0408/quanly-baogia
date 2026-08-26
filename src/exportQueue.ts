@@ -30,18 +30,31 @@ import { exportActiveWorkers, exportQueueDepth, exportRejectedTotal, exportDurat
 // biến đếm — nên không tồn tại khe nào để chen. Và request mới chỉ được đi thẳng khi hàng đợi
 // RỖNG, nên thứ tự là FIFO và người xếp hàng không bị bỏ đói.
 export type ConcurrencyGate = {
-  acquire: () => Promise<void>;
+  acquire: (signal?: AbortSignal) => Promise<void>;
   release: () => void;
   active: () => number;
   pending: () => number;
 };
 
-export function createConcurrencyGate({ maxActive, maxPending }: { maxActive: number; maxPending: number }): ConcurrencyGate {
+/** Lỗi "người xin chỗ đã bỏ đi" — KHÔNG được nhầm với lỗi sinh file để rồi rơi về đường nội tuyến. */
+export const abortedError = () =>
+  Object.assign(new Error("Yêu cầu xuất file đã bị huỷ"), { name: "AbortError", status: 499, code: "export_aborted" });
+export const isAbortedError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_aborted";
+
+type Waiter = { resolve: () => void; reject: (e: unknown) => void; detach: () => void };
+
+/**
+ * `onReject` được tiêm từ ngoài (thay vì import observability.js ngay tại đây) để cổng này không kéo
+ * theo cả bộ đo đạc — test dựng gate độc lập được, và module vẫn nạp được ở nơi không có registry.
+ */
+export function createConcurrencyGate({ maxActive, maxPending, onReject }: { maxActive: number; maxPending: number; onReject?: () => void }): ConcurrencyGate {
   let active = 0;
-  const waiters: Array<() => void> = [];
+  const waiters: Waiter[] = [];
 
   return {
-    acquire() {
+    acquire(signal?: AbortSignal) {
+      // Đã huỷ từ trước thì đừng chiếm chỗ: mỗi suất active là một lượt nghiến CPU sinh file.
+      if (signal?.aborted) return Promise.reject(abortedError());
       // Chỉ đi thẳng khi CÒN chỗ VÀ KHÔNG ai đang xếp hàng (giữ FIFO).
       if (active < maxActive && waiters.length === 0) {
         active++;
@@ -50,6 +63,11 @@ export function createConcurrencyGate({ maxActive, maxPending }: { maxActive: nu
       if (waiters.length >= maxPending) {
         // 503 + Retry-After: đây là "máy chủ hết công suất", không phải "bạn gửi quá nhiều" (429).
         // Trả lỗi NGAY tốt hơn nhiều so với để client treo rồi timeout ở tầng proxy.
+        //
+        // Đếm NGAY tại đây. Trước đó chỉ nhánh nội tuyến tăng export_rejected_total, mà nhánh ấy chỉ
+        // tới được khi worker thread hỏng — nên trong vận hành bình thường mọi lượt từ chối vì quá
+        // tải đều vô hình: người dùng nhận 503 còn biểu đồ vẫn phẳng.
+        onReject?.();
         return Promise.reject(
           Object.assign(new Error("Hệ thống đang xuất file quá tải, vui lòng thử lại sau ít phút"), {
             status: 503,
@@ -58,12 +76,30 @@ export function createConcurrencyGate({ maxActive, maxPending }: { maxActive: nu
           })
         );
       }
-      return new Promise<void>((resolve) => waiters.push(resolve));
+      // Người xếp hàng phải RỜI HÀNG ĐỢI được. Không có đường thoát thì khách đóng tab xong hệ thống
+      // vẫn cấp chỗ và vẫn sinh ra một file không ai nhận — ăn trọn một suất công suất lẽ ra dành cho
+      // người còn đang chờ.
+      return new Promise<void>((resolve, reject) => {
+        const w: Waiter = { resolve, reject, detach: () => {} };
+        if (signal) {
+          const onAbort = () => {
+            const i = waiters.indexOf(w);
+            if (i >= 0) waiters.splice(i, 1); // rời hàng đợi, KHÔNG đụng `active` (chưa từng cầm chỗ)
+            reject(abortedError());
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          w.detach = () => signal.removeEventListener("abort", onAbort);
+        }
+        waiters.push(w);
+      });
     },
     release() {
       const next = waiters.shift();
       // CHUYỂN CHỖ trực tiếp: `active` không hạ xuống, nên không có khe cho request mới chen vào.
-      if (next) return next();
+      if (next) {
+        next.detach();
+        return next.resolve();
+      }
       active--;
     },
     active: () => active,
@@ -97,7 +133,11 @@ const WORKER_URL = new URL("./exportWorker.js", import.meta.url);
 // Bound concurrent workers (memory + CPU on a shared box) AND the queue behind them.
 const MAX_WORKERS = Math.max(1, Number(process.env.EXPORT_MAX_ACTIVE || 3));
 const MAX_QUEUED = Math.max(0, Number(process.env.EXPORT_MAX_PENDING || 20));
-const gate = createConcurrencyGate({ maxActive: MAX_WORKERS, maxPending: MAX_QUEUED });
+const gate = createConcurrencyGate({
+  maxActive: MAX_WORKERS,
+  maxPending: MAX_QUEUED,
+  onReject: () => exportRejectedTotal.inc({ reason: "gate_full" }),
+});
 
 /** Ai đó vượt trần hàng đợi (503) — KHÔNG được nuốt rồi rơi về nội tuyến. */
 const isCapacityError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_capacity";
@@ -130,15 +170,18 @@ const looksValid = (kind: string, buf: any) =>
  * Nếu nuốt rồi rơi về nội tuyến thì trần hàng đợi thành vô nghĩa — đúng lúc hệ thống quá tải
  * lại dồn thêm việc nặng CPU vào luồng chính.
  */
-export async function runExportJob(kind: string, plainQuote: any, inlineFn: () => any) {
+export async function runExportJob(kind: string, plainQuote: any, inlineFn: () => any, { signal }: { signal?: AbortSignal } = {}) {
   // Xin chỗ NGOÀI try: lỗi hết công suất không được rơi vào nhánh "thử lại nội tuyến" bên dưới.
-  await gate.acquire();
+  await gate.acquire(signal);
   exportActiveWorkers.set(gate.active());
   exportQueueDepth.set(gate.pending());
   const startedAt = process.hrtime.bigint();
   try {
     let buf;
     try {
+      // Chờ trong hàng đợi xong mới tới lượt — trong lúc đó client có thể đã bỏ đi. Kiểm lại NGAY
+      // trước khi tiêu CPU, thay vì sinh ra một file không ai nhận.
+      if (signal?.aborted) throw abortedError();
       buf = await generateInWorker(kind, plainQuote);
     } finally {
       gate.release();
@@ -152,6 +195,9 @@ export async function runExportJob(kind: string, plainQuote: any, inlineFn: () =
     logger.warn({ kind }, "export worker returned invalid buffer — falling back to inline");
   } catch (e) {
     if (isCapacityError(e)) throw e;
+    // Huỷ cũng KHÔNG được rơi về nội tuyến: người gọi đã bỏ đi, làm lại trên luồng chính chỉ tổ
+    // chẹn event loop cho một kết quả không ai đọc.
+    if (isAbortedError(e)) throw e;
     logger.warn({ kind, err: e instanceof Error ? e.message : String(e) }, "export worker failed — falling back to inline");
   }
   const out = await runExport(inlineFn);

@@ -11,6 +11,10 @@
 #   NAS_SHARE (vd //192.168.1.100/QuanlyBackup), NAS_USER, NAS_PASS, NAS_SUBDIR  (off-host — tuỳ chọn)
 # ============================================================================
 set -uo pipefail
+# Bản dump chứa CCCD / số tài khoản / lương ở dạng THÔ. umask kế thừa của systemd là 0022 →
+# mọi file sinh ra ở đây là 0644, tức bất kỳ tài khoản nào trên host cũng đọc được toàn bộ hồ sơ
+# nhân sự. Đặt umask ở ĐẦU script để bao luôn cả file tạm, checksum và dấu vết watchdog.
+umask 077
 [ -f /etc/quanly-backup.env ] && set -a && . /etc/quanly-backup.env && set +a
 
 BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
@@ -59,12 +63,22 @@ fi
 mv -f "$TMP" "$FILE"
 # Checksum cạnh file: sau này đối chiếu được bản trên NAS có bằng bản gốc không.
 sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"
+# Siết lại tường minh: umask ở trên chỉ áp cho tiến trình NÀY. Ai chạy tay script với umask khác
+# (hoặc thừa kế từ một shell đã đổi) vẫn phải ra 0600 — đây là dữ liệu nhân sự thô.
+chmod 600 "$FILE" "$FILE.sha256"
 
 # 2) Off-host → NAS (tuỳ chọn). Dùng docker smbclient để KHÔNG cần cài gì lên host.
 if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
   B="$(basename "$FILE")"
-  if ! docker run --rm -v "$BACKUP_DIR":/data:ro alpine sh -c \
-      "apk add --no-cache samba-client >/dev/null 2>&1 && smbclient '${NAS_SHARE}' -U '${NAS_USER}%${NAS_PASS:-}' -m SMB2 -c 'cd ${NAS_SUBDIR:-.}; put /data/$B $B; put /data/$B.sha256 $B.sha256'"; then
+  # Mật khẩu đi qua BIẾN MÔI TRƯỜNG chứ không nội suy vào chuỗi lệnh: chuỗi lệnh nằm trong argv nên
+  # hiện nguyên văn ở `ps aux` trên host, trong `docker inspect` và /proc/<pid>/cmdline của container
+  # tạm. Bên trong container thì ghi ra file credentials (umask 077) rồi dùng `smbclient -A`.
+  if ! NAS_SHARE="$NAS_SHARE" NAS_USER="$NAS_USER" NAS_PASS="${NAS_PASS:-}" NAS_SUBDIR="${NAS_SUBDIR:-.}" B="$B" \
+      docker run --rm -e NAS_SHARE -e NAS_USER -e NAS_PASS -e NAS_SUBDIR -e B \
+      -v "$BACKUP_DIR":/data:ro alpine sh -c \
+      'apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
+       umask 077; printf "username=%s\npassword=%s\n" "$NAS_USER" "$NAS_PASS" > /tmp/cred
+       smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "cd $NAS_SUBDIR; put /data/$B $B; put /data/$B.sha256 $B.sha256"'; then
     alert "đẩy NAS thất bại ($FILE) — bản local vẫn giữ"
   fi
 fi

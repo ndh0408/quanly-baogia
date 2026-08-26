@@ -27,16 +27,37 @@ const TAG_LEN = 16;
 // Hai khoá con dẫn xuất từ CÙNG một khoá gốc bằng HKDF với `info` khác nhau: một để mã hoá, một để
 // làm chỉ mục mù. Dùng chung một khoá cho cả hai việc là lỗi kinh điển — HMAC của chỉ mục sẽ rò
 // thông tin về khoá mã hoá.
-let cachedKeys: { enc: Buffer; idx: Buffer } | null = null;
-function keys() {
-  const material = process.env.PII_ENC_KEY || "";
-  if (!material) return null;
-  if (cachedKeys) return cachedKeys;
+//
+// ── VÌ SAO CÓ PII_ENC_KEY_OLD ────────────────────────────────────────────────
+// Xoay khoá là thao tác KHÔNG NGUYÊN TỬ: hàng đang nằm trong CSDL mã bằng khoá cũ, hàng ghi mới mã
+// bằng khoá mới, và giữa hai mốc đó ứng dụng vẫn phải phục vụ. Chỉ có một khoá thì không có cửa sổ
+// nào để chuyển — đổi biến môi trường là toàn bộ dữ liệu cũ "hoá đá" ngay lập tức, đúng như
+// docs/operations/INCIDENT_RESPONSE.md đang phải cảnh báo. Đặt THÊM `PII_ENC_KEY_OLD` mở ra cửa sổ
+// đó: ĐỌC chấp nhận cả hai khoá, GHI chỉ dùng khoá mới, và `scripts/migration/pii-backfill.mjs
+// --rotate` mã hoá lại dần. Xong thì gỡ `PII_ENC_KEY_OLD` — gỡ được nghĩa là đã xoay xong thật.
+// KHÔNG nhét định danh khoá vào bản mã: thử-hai-khoá tốn nhiều nhất một phép giải mã thất bại, còn
+// gắn nhãn khoá vào từng hàng là thêm một trường phải di trú và phải giữ đồng bộ mãi mãi.
+type PiiKeys = { enc: Buffer; idx: Buffer; encOld: Buffer | null; idxOld: Buffer | null };
+let cachedKeys: PiiKeys | null = null;
+
+function derive(material: string) {
   const salt = Buffer.from("quanly-pii-v1");
-  cachedKeys = {
+  return {
     enc: Buffer.from(hkdfSync("sha256", material, salt, "encryption", 32)),
     idx: Buffer.from(hkdfSync("sha256", material, salt, "blind-index", 32)),
   };
+}
+
+function keys(): PiiKeys | null {
+  const material = process.env.PII_ENC_KEY || "";
+  if (!material) return null;
+  if (cachedKeys) return cachedKeys;
+  const cur = derive(material);
+  // Khoá cũ TRÙNG khoá mới thì coi như không có: tránh mọi lần giải mã hỏng đều tốn thêm một lượt
+  // thử vô ích, và tránh log "còn hàng chưa xoay" sai sự thật.
+  const before = process.env.PII_ENC_KEY_OLD || "";
+  const prev = before && before !== material ? derive(before) : null;
+  cachedKeys = { enc: cur.enc, idx: cur.idx, encOld: prev?.enc ?? null, idxOld: prev?.idx ?? null };
   return cachedKeys;
 }
 
@@ -87,19 +108,38 @@ export function decryptPii(stored: string | null | undefined, aad?: string): str
     logger.error("Gặp dữ liệu PII đã mã hoá nhưng PII_ENC_KEY chưa được đặt — kiểm tra cấu hình môi trường");
     return null;
   }
+  const raw = Buffer.from(String(stored).slice(PREFIX.length), "base64");
+  const cur = openWith(k.enc, raw, aad);
+  if (cur != null) return cur;
+  if (k.encOld) {
+    const prev = openWith(k.encOld, raw, aad);
+    // Giải được bằng khoá CŨ = hàng chưa được `--rotate` chạy tới. Đọc vẫn phải chạy, nhưng phải để
+    // lại dấu vết: im lặng ở đây là cách chắc chắn nhất để quên mất còn tồn đọng rồi gỡ khoá cũ.
+    if (prev != null) {
+      logger.warn({ aad }, "PII còn mã bằng KHOÁ CŨ — chạy pii-backfill.mjs --rotate trước khi gỡ PII_ENC_KEY_OLD");
+      return prev;
+    }
+  }
+  logger.error({ aad }, "giải mã PII thất bại (sai khoá / dữ liệu hỏng)");
+  return null;
+}
+
+/**
+ * Một lượt thử mở bản mã bằng ĐÚNG một khoá. Trả `null` khi không mở được — KHÔNG log ở đây, vì
+ * lượt thử đầu thất bại là chuyện BÌNH THƯỜNG trong lúc xoay khoá; chỉ chỗ gọi mới biết đã hết cửa
+ * hay chưa. Log ở đây là đổ đầy log bằng báo động giả.
+ */
+function openWith(key: Buffer, raw: Buffer, aad?: string): string | null {
   try {
-    const raw = Buffer.from(String(stored).slice(PREFIX.length), "base64");
-    if (raw.length < IV_LEN + TAG_LEN) throw new Error("bản mã quá ngắn");
+    if (raw.length < IV_LEN + TAG_LEN) return null;
     const iv = raw.subarray(0, IV_LEN);
     const tag = raw.subarray(IV_LEN, IV_LEN + TAG_LEN);
     const ct = raw.subarray(IV_LEN + TAG_LEN);
-    if (tag.length !== TAG_LEN) throw new Error("thẻ xác thực sai độ dài");
-    const d = createDecipheriv("aes-256-gcm", k.enc, iv, { authTagLength: TAG_LEN });
+    const d = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
     d.setAuthTag(tag);
     if (aad) d.setAAD(Buffer.from(aad, "utf8"));
     return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
-  } catch (e) {
-    logger.error({ err: e instanceof Error ? e.message : String(e) }, "giải mã PII thất bại (sai khoá / dữ liệu hỏng)");
+  } catch {
     return null;
   }
 }
@@ -119,8 +159,26 @@ export function blindIndex(value: string | null | undefined): string | null {
   if (value == null || value === "") return null;
   const k = keys();
   if (!k) return null;
-  const norm = String(value).trim().toLowerCase().replace(/\s+/g, "");
-  return createHmac("sha256", k.idx).update(norm).digest("hex");
+  return hmacIdx(k.idx, value);
+}
+
+const hmacIdx = (key: Buffer, value: string) =>
+  createHmac("sha256", key).update(String(value).trim().toLowerCase().replace(/\s+/g, "")).digest("hex");
+
+/**
+ * MỌI chỉ mục mù có thể đang nằm trong CSDL cho một giá trị — khoá mới trước, khoá cũ sau.
+ *
+ * Chỉ mục mù dẫn xuất TỪ KHOÁ, nên trong lúc xoay khoá cùng một CCCD tồn tại dưới hai HMAC khác
+ * nhau. Tra cứu chỉ bằng chỉ mục MỚI sẽ lặng lẽ không tìm thấy hàng chưa xoay — tệ hơn lỗi, vì nó
+ * trông y hệt "không có hồ sơ nào". Chỗ gọi dùng `IN (...)` để phủ cả hai giai đoạn.
+ */
+export function blindIndexCandidates(value: string | null | undefined): string[] {
+  if (value == null || value === "") return [];
+  const k = keys();
+  if (!k) return [];
+  const out = [hmacIdx(k.idx, value)];
+  if (k.idxOld) out.push(hmacIdx(k.idxOld, value));
+  return out;
 }
 
 /** So hai chỉ mục mù theo thời gian hằng — tránh biến phép so sánh thành kênh phụ dò từng byte. */

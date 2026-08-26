@@ -25,6 +25,9 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "quanly.serviceAccountName" . }}
+      # > 5s (preStop) + 10s (lưới an toàn cứng trong src/server.ts shutdown()) để pod không bị
+      # SIGKILL giữa lúc đang đóng êm.
+      terminationGracePeriodSeconds: 45
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -65,6 +68,14 @@ spec:
           command: ["/bin/sh", "-c"]
           args: ["npx prisma migrate deploy && exec node dist/server.js"]
           {{- end }}
+          # TRỄ RÚT KẾT NỐI. k8s gửi SIGTERM và gỡ pod khỏi Endpoints SONG SONG, không theo thứ tự:
+          # src/server.ts nhận SIGTERM là ngừng nhận kết nối mới NGAY, trong khi kube-proxy/ingress
+          # trên các node khác còn đang lan truyền bản Endpoints mới và vẫn gửi request tới. Kết quả
+          # là 502 lác đác mỗi lần rolling update. `sleep 5` trong preStop giữ pod phục vụ thêm 5s để
+          # việc rút hoàn tất TRƯỚC khi tiến trình bắt đầu đóng.
+          lifecycle:
+            preStop:
+              exec: { command: ["/bin/sh", "-c", "sleep 5"] }
           volumeMounts:
             # Prisma query engine + tsx/node cần chỗ ghi tạm. Có volume này thì
             # securityContext.readOnlyRootFilesystem=true bật được (values.yaml).

@@ -19,7 +19,11 @@ metadata:
   name: {{ include "quanly.fullname" . }}-worker
   labels: {{- include "quanly.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  # maxUnavailable, KHÔNG phải minAvailable dùng chung với app: worker autoscale xuống
+  # minReplicas=1 (values.yaml), và `minAvailable: 1` trên một Deployment có đúng 1 pod làm
+  # eviction API từ chối MÃI MÃI → `kubectl drain` treo, node không rút được, cụm kẹt giữa
+  # lúc bảo trì. Job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds ở worker-deployment.
+  maxUnavailable: {{ .Values.podDisruptionBudget.workerMaxUnavailable }}
   selector:
     matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker

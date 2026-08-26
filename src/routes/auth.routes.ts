@@ -12,8 +12,9 @@ import { authenticateCredentials, clientIp } from "../authCore.js";
 import { permissionsForUser } from "../permissions.js";
 import * as svc from "../services/authService.js";
 
-// MFA token: 6-digit TOTP OR a 10-char hex backup code.
-const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/).optional();
+// MFA token: 6-digit TOTP OR a hex backup code (20 chars now, 10 for codes issued before the
+// entropy upgrade in src/mfa.ts — both must keep working or old users lose their recovery path).
+const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10,20})$/).optional();
 
 const router = Router();
 
@@ -77,7 +78,17 @@ router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
   const userId = req.session?.userId;
   await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
   res.clearCookie("qly.sid");
-  if (userId) await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
+  if (userId) {
+    // Refresh token sống ĐỘC LẬP với cookie phiên: huỷ phiên không đụng gì tới chúng, nên trước bản
+    // vá này "Đăng xuất" chỉ vứt cookie trong khi một thông tin đăng nhập KHÁC của cùng tài khoản
+    // vẫn còn hiệu lực tới JWT_REFRESH_TTL_DAYS. Mọi đường xoay credential khác (đổi mật khẩu, đặt
+    // lại, admin sửa tài khoản) đều đã gọi revokeAllForUser — chỗ này là ngoại lệ duy nhất còn sót.
+    //
+    // CỐ Ý KHÔNG gọi destroyAllSessions: đăng xuất trên máy này KHÔNG được đá người dùng ra khỏi
+    // các trình duyệt khác của chính họ. Muốn dọn sạch mọi thiết bị thì đã có /token/revoke-all.
+    await revokeAllForUser(userId).catch(() => {});
+    await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
+  }
   res.json({ ok: true });
 }));
 
@@ -206,7 +217,18 @@ router.get("/invite/:token", asyncHandler(async (req: Request, res: Response) =>
 router.post(
   "/accept-invite",
   validate({ body: AcceptInviteSchema }),
-  asyncHandler(async (req: Request, res: Response) => res.json(await svc.acceptInvite(req)))
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      res.json(await svc.acceptInvite(req));
+    } catch (e) {
+      // errorHandler chỉ chuyển tiếp `error` + `code`, không chuyển cờ tuỳ ý. Map ở đây để phản hồi
+      // có ĐÚNG hình dạng của /login ({ error, mfaRequired }) — client dùng chung một nhánh xử lý.
+      if (e && typeof e === "object" && "mfaRequired" in e) {
+        return res.status(401).json({ error: e instanceof Error ? e.message : "Cần mã MFA", mfaRequired: true });
+      }
+      throw e;
+    }
+  })
 );
 
 export default router;

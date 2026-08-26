@@ -269,6 +269,7 @@ model PersonnelRecord {
   @@index([confirmedById])
   @@index([deletedAt])
   @@index([idCardIdx]) // tra cứu BẰNG-ĐÚNG theo CCCD sau khi cột thô bị bỏ
+  @@index([paymentProofKey]) // btree THƯỜNG do 20260811200000 tạo — phải khai ở đây, không thì migrate dev sinh DROP INDEX
 }
 
 // Danh bạ NHÂN VIÊN — kho thông tin cá nhân tái dùng. Khi tạo hồ sơ Nhân sự, chọn 1 người
@@ -647,6 +648,7 @@ model QuoteSheet {
   @@index([quoteId, order])
   @@index([signedById])
   @@index([templateId]) // FK tới QuoteTemplate (RESTRICT) — index để kiểm "template còn sheet tham chiếu?" không seq-scan
+  @@index([custStatusById]) // btree THƯỜNG do 20260811000001 tạo — phải khai ở đây, không thì migrate dev sinh DROP INDEX
 }
 
 model QuoteItem {
@@ -752,6 +754,9 @@ model AuditEvent {
   @@index([actorId, createdAt(sort: Desc)])
   @@index([resource, resourceId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
+  // Ba index trên đều có createdAt ở cột 2/3 → VÔ DỤNG khi KHÔNG lọc. Trang Nhật ký mở không bộ
+  // lọc và job retention xoá thuần theo `createdAt <` đều rơi vào ca đó, trên bảng chỉ lớn lên.
+  @@index([createdAt(sort: Desc)])
 }
 
 // === Webhook out (integrations) ===
@@ -781,6 +786,7 @@ model WebhookDelivery {
   createdAt      DateTime  @default(now())
 
   @@index([webhookId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)]) // job retention xoá theo createdAt, không lọc webhookId
 }
 
 /// Session store table managed by connect-pg-simple (express-session).
@@ -804,4 +810,5 @@ model LoginAttempt {
 
   @@index([username, createdAt(sort: Desc)])
   @@index([ip, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)]) // job retention xoá theo createdAt, không lọc username/ip
 }

@@ -6,9 +6,15 @@ import { validate } from "../validators.js";
 import { requirePermission, PERMISSIONS as P } from "../permissions.js";
 import * as svc from "../services/employeeService.js";
 
-// Danh bạ NHÂN VIÊN — kho thông tin cá nhân DÙNG CHUNG (không phân quyền theo owner): ai có
-// quyền XEM nhân sự thì xem được cả danh bạ (để chọn khi tạo hồ sơ); ai TẠO được nhân sự thì
-// thêm/sửa/xóa danh bạ. Chỉ chứa 10 trường cá nhân (khớp nhóm "Cá nhân" của trang Nhân sự).
+// Danh bạ NHÂN VIÊN — chỉ chứa 10 trường cá nhân (khớp nhóm "Cá nhân" của trang Nhân sự).
+// ĐỌC theo đúng phạm vi của quyền: `employee:read:all` (mọi vai trò mặc định đều có) → cả danh bạ
+// để chọn khi tạo hồ sơ; `employee:read:own` → chỉ mục mình thêm — nếu không thì ô tích hẹp nhất
+// lại mở CCCD + số tài khoản của cả công ty (tests/rbacscope-employee-directory.test.js).
+// GHI (PUT/DELETE) vẫn là kho DÙNG CHUNG có chủ đích cho mọi tài khoản Account thật — nhưng phạm
+// vi ghi bám theo PHẠM VI ĐỌC, không phải `employee:edit:*`: EMPLOYEE nền đã có `employee:read:all`
+// nên sửa/xoá chéo không đổi, còn tài khoản bị bó về `employee:read:own` thì không PUT/DELETE được
+// mục người khác nữa. Bỏ chốt đó thì PUT chính là một kênh ĐỌC PII đầy đủ (nó trả bản ghi đã giải
+// mã, body rỗng vẫn hợp lệ) — chặn GET mà để ngỏ PUT là hàng rào rỗng.
 const router = Router();
 router.use(requireAuth);
 
@@ -32,8 +38,10 @@ const ListQuery = z.object({
   order: z.enum(["asc", "desc"]).default("asc"),
 });
 
-// QUYỀN RIÊNG cho Danh bạ (employee:*) — tách khỏi personnel:* (trước mượn nhờ). Kho DÙNG CHUNG nên
-// :own ở đây = thao tác trên cả danh bạ (service không owner-scope) — GIỮ NGUYÊN logic, chỉ đổi KEY quyền.
+// QUYỀN RIÊNG cho Danh bạ (employee:*) — tách khỏi personnel:* (trước mượn nhờ).
+// ĐỌC: phạm vi thật do listEmployees áp (readScopeWhereOrThrow). SỬA/XOÁ: `:own` trong TÊN QUYỀN
+// vẫn không phải phạm vi dữ liệu — phạm vi dữ liệu của đường ghi do `assertEmployeeInReadScope`
+// (employeeService.ts) áp theo `employee:read:*`. Xem khối chú thích đầu file.
 router.get(
   "/",
   requirePermission(P.EMPLOYEE_READ_OWN),

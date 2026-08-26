@@ -1,4 +1,7 @@
-node_modules
+# `node_modules` KHÔNG có `**/` chỉ khớp thư mục ở GỐC: dockerignore so khớp trên TOÀN BỘ đường
+# dẫn tương đối, nên `web/node_modules` (153MB) vẫn lọt vào build context của `COPY web ./web`.
+**/node_modules
+**/dist
 npm-debug.log
 .git
 .github
@@ -43,3 +46,8 @@ e2e*.mjs
 dist/
 coverage/
 _bmad-output/
+# Bộ công cụ cài cục bộ + hook git: không file nào được Dockerfile COPY, chỉ làm phình context.
+_bmad/
+.claude/
+.husky/
+tests/

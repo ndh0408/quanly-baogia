@@ -27,7 +27,6 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "postinstall": "node scripts/patch-codex-security-9router.mjs",
     "prepare": "husky || true",
     "security:scan": "codex-security scan .",
     "security:scan:deep": "codex-security scan . --mode deep",

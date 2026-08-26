@@ -213,22 +213,42 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, 
       amtS = fmt(lineAmount(it, usesDays) * mult);                    // cùng phép tính với web + Excel
     }
 
-    const lines = Math.max(1, text.split("\n").length);
-    const rowH = Math.max(18, 8 + lines * 12);
+    // Chiều cao hàng phải ĐO THẬT chứ không đếm "\n": chữ được vẽ CÓ ràng bề rộng cột ngay bên
+    // dưới nên pdfkit tự xuống dòng, mà cột "Hạng mục" chỉ rộng 200pt ở cỡ chữ 10 (~40 ký tự/dòng)
+    // trong khi tên hạng mục được phép dài tới 2000 ký tự (src/validators.ts). Đếm "\n" cho ra 1
+    // dòng → khung kẻ ngắn hơn chữ, hàng sau đè lên chữ hàng trước, và điều kiện ngắt trang bên
+    // dưới cũng dùng đúng con số sai đó nên trang bị tràn. Đây là tài liệu gửi cho khách.
+    const rowFont = isGroup ? "bold" : isInfo ? "italic" : "body";
+    doc.font(rowFont);
+    const vals = [stt, text, unit, qtyS, priceS, amtS];
+    const textH = Math.max(...vals.map((v, i) => doc.heightOfString(String(v), { width: cols[i].w - 4 })));
+    // Trần = phần dùng được của MỘT trang (đã trừ hàng tiêu đề bảng 18pt + 4pt đệm): hàng cao hơn
+    // cả trang thì không chỗ nào vẽ trọn được — cắt bớt (có "…") vẫn hơn để chữ tràn đè hàng kế.
+    const maxRowH = Math.max(18, doc.page.height - doc.page.margins.bottom - doc.page.margins.top - 22);
+    // Làm tròn LÊN bội số 12pt — đúng bước dòng của công thức cũ. Nhờ vậy hàng KHÔNG bị xuống dòng
+    // giữ nguyên chiều cao như trước (1 dòng = 20pt), chỉ những hàng vốn bị vẽ hụt mới cao lên:
+    // bản vá này không dàn lại trang cho hàng nghìn báo giá đang chạy.
+    const wantH = 8 + Math.max(1, Math.ceil(textH / 12)) * 12;
+    const rowH = Math.min(maxRowH, Math.max(18, wantH));
+    const clipped = wantH > maxRowH;
     // Page-break: if this row would overflow the page, start a new page + re-draw
     // the table header so long quotes don't get clipped/overlapped.
     if (y + rowH > pageBottom()) {
       doc.addPage();
       y = drawHeader(doc.page.margins.top);
+      doc.font(rowFont);   // drawHeader trả font về "body" — đặt lại font của hàng trước khi vẽ
     }
     let x = startX;
     if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", "#bbb");
     else doc.rect(startX, y, tableW, rowH).stroke("#bbb");
     doc.fillColor("black");
-    doc.font(isGroup ? "bold" : isInfo ? "italic" : "body");
-    const vals = [stt, text, unit, qtyS, priceS, amtS];
+    doc.font(rowFont);
     vals.forEach((v, i) => {
-      doc.text(String(v), x + 2, y + 4, { width: cols[i].w - 4, align: cols[i].align });
+      // Chỉ truyền height/ellipsis ở trường hợp BỊ CẮT: hàng bình thường giữ nguyên đường vẽ cũ
+      // của pdfkit, không đổi cách dàn chữ của những báo giá đang chạy.
+      const opt: PDFKit.Mixins.TextOptions = { width: cols[i].w - 4, align: cols[i].align };
+      if (clipped) { opt.height = rowH - 8; opt.ellipsis = true; }
+      doc.text(String(v), x + 2, y + 4, opt);
       x += cols[i].w;
     });
     doc.font("body");

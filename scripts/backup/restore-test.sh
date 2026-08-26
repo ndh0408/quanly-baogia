@@ -6,6 +6,7 @@
 #   KHÔNG đụng DB thật (chỉ tạo/xoá DB tạm riêng).
 # ============================================================================
 set -uo pipefail
+umask 077
 [ -f /etc/quanly-backup.env ] && set -a && . /etc/quanly-backup.env && set +a
 BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
 PG_CONTAINER="${PG_CONTAINER:-quanly-postgres}"
@@ -22,6 +23,19 @@ alert() {
 LATEST="$(ls -1t "$BACKUP_DIR"/quanly-*.sql.gz 2>/dev/null | head -1)"
 [ -z "$LATEST" ] && { alert "không có file backup nào trong $BACKUP_DIR"; exit 1; }
 PGUSER="$(docker exec "$PG_CONTAINER" printenv POSTGRES_USER 2>/dev/null)" || { alert "không đọc được POSTGRES_USER"; exit 1; }
+
+# Chỗ trống đĩa TRƯỚC khi nạp. CSDL tạm nằm trong CÙNG volume với Postgres production
+# (quanly-pgdata), nên một lượt diễn tập nhân đôi dung lượng: đầy volume = production NGỪNG GHI,
+# đúng 3h sáng Chủ nhật, do chính bộ máy sinh ra để bảo vệ nó. backup-db.sh đã kiểm điều này ở
+# bước 0) cho đĩa host; ở đây phải kiểm cho volume của Postgres.
+PGDB="$(docker exec "$PG_CONTAINER" printenv POSTGRES_DB 2>/dev/null)"
+DB_MB="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER" -d postgres -tAc "SELECT pg_database_size('$PGDB')/1048576;" 2>/dev/null | tr -cd '0-9')"
+AVAIL_MB="$(docker exec "$PG_CONTAINER" df -Pm /var/lib/postgresql/data 2>/dev/null | awk 'NR==2{print $4}')"
+NEED_MB=$(( ${DB_MB:-0} * 2 )); [ "$NEED_MB" -lt 500 ] && NEED_MB=500
+if [ "${AVAIL_MB:-0}" -lt "$NEED_MB" ]; then
+  alert "volume Postgres còn ${AVAIL_MB:-?}MB, bản sao tạm cần ~${NEED_MB}MB — DỪNG, không làm đầy volume production"
+  exit 1
+fi
 
 cleanup() { docker exec "$PG_CONTAINER" psql -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS $TESTDB;" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

@@ -5,11 +5,23 @@ import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./db.js";
 import { resolveUserPermissions } from "./permissions.js";
 
+// Hình dạng id truy vết được CHẤP NHẬN từ client. Cố ý hẹp: chữ-số cùng `. _ -`, tối đa 64 ký tự —
+// đủ cho mọi định dạng đang dùng ngoài đời (UUID, trace-id của Cloudflare/OTel) mà không hơn.
+const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
+
 export function requestId(req: Request, res: Response, next: NextFunction) {
   // x-request-id header có thể là string | string[] (header trùng lặp) | undefined.
   // Chuẩn hoá về 1 string: header trùng → lấy phần tử đầu; thiếu → sinh UUID.
+  //
+  // VÌ SAO PHẢI KIỂM HÌNH DẠNG chứ không dùng nguyên xi: giá trị này được ghi thẳng ra header phản
+  // hồi ngay dòng dưới, nên một ký tự điều khiển làm `res.setHeader` ném ERR_INVALID_CHAR — tức
+  // chính lớp truy vết sinh ra lỗi 500 kèm một sự kiện Sentry cho MỖI request như vậy. Nó còn đi
+  // vào mọi dòng log, vào ngữ cảnh Sentry và vào thân JSON trả về, nên một chuỗi 100 KB do client
+  // gửi là kênh bơm rác vào hạ tầng quan sát. Không hợp lệ thì sinh UUID, không từ chối request:
+  // header truy vết hỏng không phải lý do để chặn một request đúng đắn.
   const hdr = req.headers["x-request-id"];
-  req.id = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID();
+  const tho = Array.isArray(hdr) ? hdr[0] : hdr;
+  req.id = typeof tho === "string" && ID_HOP_LE.test(tho) ? tho : randomUUID();
   res.setHeader("X-Request-Id", req.id);
   next();
 }

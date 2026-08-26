@@ -7,7 +7,8 @@ import qrcode from "qrcode";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
-import { encryptSecret, decryptSecret, generateBackupCodes, consumeBackupCode } from "../mfa.js";
+import { encryptSecret, generateBackupCodes, consumeBackupCode } from "../mfa.js";
+import { claimTotpStep } from "../authCore.js";
 
 async function loadUser(req: Request) {
   const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
@@ -58,7 +59,7 @@ export async function enableMfa(req: Request) {
 
   // Store the TOTP secret encrypted and only the HASHES of backup codes.
   // The plaintext codes are returned to the user exactly once, here.
-  const { plain: backupCodes, hashed } = generateBackupCodes(8);
+  const { plain: backupCodes, hashed } = await generateBackupCodes(8);
   await prisma.user.update({
     where: { id: user.id },
     data: { mfaEnabled: true, mfaSecret: encryptSecret(req.body.secret), mfaBackupCodes: hashed },
@@ -73,16 +74,19 @@ export async function disableMfa(req: Request) {
   // Step-up: require the account password before allowing 2FA removal.
   const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
   if (!pwOk) throw httpError(401, "Mật khẩu không đúng");
-  const secret = decryptSecret(user.mfaSecret);
-  const totpOk = /^\d{6}$/.test(req.body.token)
-    && !!secret
-    && speakeasy.totp.verify({ secret, encoding: "base32", token: req.body.token, window: 1 });
+  // Mã TOTP phải được TIÊU THỤ y như ở đường đăng nhập (claimTotpStep tiến `mfaLastStep` một cách
+  // nguyên tử). Trước đây chỗ này gọi speakeasy.totp.verify TRẦN — không đọc, không tiến mfaLastStep
+  // — nên đúng mã 6 số vừa dùng để đăng nhập còn trình lại được trong cùng cửa sổ 30 giây để GỠ HẲN
+  // yếu tố thứ hai. Ai nhìn trộm màn hình một lần biến được cái liếc đó thành quyền truy cập lâu dài.
+  const totpOk = await claimTotpStep(user.id, user.mfaSecret, req.body.token);
   // Backup code works even when the secret can't be decrypted (key rotation).
-  const backupOk = !totpOk && !!consumeBackupCode(user.mfaBackupCodes, req.body.token);
+  const backupOk = !totpOk && !!(await consumeBackupCode(user.mfaBackupCodes, req.body.token));
   if (!totpOk && !backupOk) throw httpError(401, "Mã xác thực hoặc mã dự phòng không đúng");
   await prisma.user.update({
     where: { id: user.id },
-    data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [] },
+    // mfaLastStep về null: mốc đó chỉ có nghĩa với bí mật vừa bị xoá. Giữ lại thì lần BẬT MFA kế
+    // tiếp sẽ từ chối mã hợp lệ đầu tiên của bí mật MỚI chỉ vì step của nó nhỏ hơn mốc cũ.
+    data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], mfaLastStep: null },
   });
   await audit(req, "mfa.disable", { resource: "user", resourceId: user.id });
   return { ok: true };

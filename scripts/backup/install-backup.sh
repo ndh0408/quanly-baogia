@@ -16,7 +16,10 @@
 # ============================================================================
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)"
-install -d /opt/quanly /opt/quanly-backups
+# 0700 chứ KHÔNG để mặc định 0755: /opt/quanly-backups chứa dump CSDL với CCCD / số tài khoản /
+# lương ở dạng thô và bản gương chứng từ thanh toán. Thư mục ai-cũng-liệt-kê-được là bước đầu
+# tiên của mọi lần rò rỉ.
+install -d -m 0700 /opt/quanly /opt/quanly-backups
 install -m 0750 "$SRC/backup-db.sh"        /opt/quanly/backup-db.sh
 install -m 0750 "$SRC/backup-objects.sh"   /opt/quanly/backup-objects.sh
 install -m 0750 "$SRC/restore-test.sh"     /opt/quanly/restore-test.sh

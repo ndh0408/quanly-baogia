@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand, CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -80,6 +80,32 @@ export async function deleteObject(key: string, bucket = config.S3_BUCKET) {
   const c = getClient();
   if (!c) return;
   await c.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/**
+ * Liệt kê object theo tiền tố, CÓ TRẦN SỐ LƯỢNG.
+ *
+ * Vì sao có trần: bucket production chứa cả file xuất tích tụ nhiều năm. Gom hết khoá vào một mảng
+ * là để một tác vụ dọn dẹp chạy nền tự tay làm cạn bộ nhớ tiến trình. Chạm trần thì DỪNG — lượt
+ * chạy sau (retention chạy hằng ngày) dọn tiếp phần còn lại; dọn chậm vẫn tốt hơn OOM.
+ *
+ * Trả về mảng rỗng khi chưa cấu hình kho, để chỗ gọi không phải bọc try/catch.
+ */
+export async function listObjects(prefix: string, { bucket = config.S3_BUCKET, maxKeys = 10_000 }: { bucket?: string; maxKeys?: number } = {}) {
+  const c = getClient();
+  if (!c) return [];
+  const out: Array<{ key: string; size: number; lastModified: Date | null }> = [];
+  let token: string | undefined;
+  do {
+    const r: any = await c.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    for (const o of r.Contents || []) {
+      if (!o.Key) continue;
+      out.push({ key: o.Key, size: Number(o.Size ?? 0), lastModified: o.LastModified ? new Date(o.LastModified) : null });
+      if (out.length >= maxKeys) return out;
+    }
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return out;
 }
 
 export async function objectExists(key: string, bucket = config.S3_BUCKET) {

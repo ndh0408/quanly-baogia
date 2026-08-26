@@ -17,6 +17,20 @@ import { config } from "./config.js";
 const JWT_ISSUER = "quanly";
 const JWT_AUDIENCE = "quanly-api";
 
+/**
+ * TRẦN TUỔI THỌ TUYỆT ĐỐI của một HỌ refresh token, tính từ mắt xích ĐẦU TIÊN.
+ *
+ * VÌ SAO cần: `issueRefreshToken` tính lại `expiresAt` từ Date.now() ở MỖI lần xoay và tái dùng
+ * cùng `family`, nên JWT_REFRESH_TTL_DAYS chỉ là hạn của từng mắt xích chứ không phải của cả chuỗi.
+ * Một token bị đánh cắp mà cứ được xoay đều thì sống VĨNH VIỄN — không có mốc nào buộc người dùng
+ * chứng minh lại danh tính bằng mật khẩu (+MFA).
+ *
+ * Là hằng số trong module chứ không phải biến môi trường một cách CÓ CHỦ Ý: bề mặt refresh token
+ * hiện chưa có client nào dùng, thêm một key config cho nó là mở rộng cấu hình mà chưa ai cần.
+ * Nếu sau này có client di động thật thì hãy chuyển sang config.ts cùng lúc.
+ */
+const REFRESH_FAMILY_MAX_DAYS = 30;
+
 // config.JWT_SECRET là string|undefined trong type (zod .optional()) nhưng LUÔN được
 // đặt ở runtime (config.ts:96 fallback về SESSION_SECRET). Secret cast chỉ thu hẹp kiểu.
 const JWT_SECRET = config.JWT_SECRET as Secret;
@@ -109,10 +123,30 @@ export async function rotateRefreshToken(
     throw Object.assign(new Error("Refresh token không còn hợp lệ, vui lòng đăng nhập lại"), { status: 401 });
   }
 
+  // Cả HỌ token có tuổi thọ tuyệt đối: quá trần thì đốt sạch, buộc đăng nhập lại bằng mật khẩu
+  // (+MFA). Đây là mốc duy nhất cắt được một chuỗi xoay token bị đánh cắp mà vẫn "hợp lệ".
+  const goc = await prisma.refreshToken.findFirst({
+    where: { family: row.family },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  if (goc && Date.now() - goc.createdAt.getTime() > REFRESH_FAMILY_MAX_DAYS * 86400_000) {
+    await prisma.refreshToken.updateMany({
+      where: { family: row.family, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    throw Object.assign(new Error("Phiên đăng nhập đã quá hạn tối đa, vui lòng đăng nhập lại"), { status: 401 });
+  }
+
   // Verify account state BEFORE issuing the new token so we never create an
   // orphaned, still-valid refresh token for a locked/deleted account.
+  //
+  // `lockedUntil` phải được kiểm ở đây y như bearerAuth và enforceActiveUser (src/middleware.ts)
+  // đã làm: thiếu nó thì tài khoản đang bị khoá vì dò mật khẩu vẫn tiếp tục làm mới được thông tin
+  // đăng nhập của mình suốt cửa sổ khoá — khoá không cắt được chuỗi credential, chỉ hoãn nó.
+  // Token cũ đã bị CAS tiêu thụ ở trên nên caller buộc phải đăng nhập lại, đúng ý muốn.
   const user = await prisma.user.findUnique({ where: { id: row.userId } });
-  if (!user || !user.active) {
+  if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
     throw Object.assign(new Error("Tài khoản đã bị khóa"), { status: 401 });
   }
   const newPair = await issueRefreshToken(row.userId, { ip, userAgent, family: row.family });

@@ -23,4 +23,12 @@ spec:
     - port: http
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
+      # /metrics trả 404 ở production khi request không kèm METRICS_TOKEN (src/app.ts). Không có
+      # khối này thì Prometheus scrape đều đặn, nhận 404 đều đặn, và bảng số liệu trống trơn mà
+      # KHÔNG có cảnh báo nào — im lặng đúng lúc cần nhìn nhất.
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "quanly.secretName" . }}
+          key: METRICS_TOKEN
 {{- end }}

@@ -196,12 +196,22 @@ export async function deliverWebhook({ webhookId, event, payload }: { webhookId:
   if (!h || !h.active) return { skipped: true };
 
   const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
-  // Secret is stored encrypted at rest — decrypt before signing (legacy plaintext
-  // rows pass through unchanged).
-  const sig = sign(body, decryptValue(h.secret) as string);
 
   let status, text;
   try {
+    // KÝ PHẢI NẰM TRONG try. Trước đây dòng này ở NGOÀI, và `decryptValue` trả `null` khi không giải
+    // mã được (nó chỉ ghi log warn) — `as string` chỉ là ép kiểu của TypeScript, lúc chạy vẫn null,
+    // rồi `createHmac("sha256", null)` ném TypeError. Lỗi đó thoát ra TRƯỚC `webhookDelivery.create`
+    // nên KHÔNG có bản ghi giao nhận nào: màn hình webhook của admin im lặng y hệt "chưa có sự kiện",
+    // không phân biệt được với "mọi lần gửi đều chết". Ca có thật: xoay MFA_ENC_KEY (nguyên liệu khoá
+    // của secretbox) làm mọi Webhook.secret đã mã hoá thành không giải được.
+    // Secret is stored encrypted at rest — decrypt before signing (legacy plaintext
+    // rows pass through unchanged).
+    const secret = decryptValue(h.secret);
+    if (secret == null) {
+      throw new Error("không giải mã được secret webhook (MFA_ENC_KEY đã đổi?) — cần tạo lại secret");
+    }
+    const sig = sign(body, secret);
     // Validate AND pin the IP, then connect to that exact IP at delivery time so
     // a rebinding DNS can't swap in an internal address between check and fetch.
     const pinned = await assertPublicHttpUrl(h.url);

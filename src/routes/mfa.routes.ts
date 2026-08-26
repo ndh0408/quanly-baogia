@@ -25,7 +25,8 @@ const mfaLimiter = createLimiter("mfa", {
 // recovery path if the TOTP secret can't be decrypted (e.g. MFA_ENC_KEY rotated).
 const DisableBody = z.object({
   password: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
-  token: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10})$/, "Mã TOTP 6 số hoặc mã dự phòng"),
+  // 10–20 ký tự hex: 20 là mã dự phòng hiện tại (80 bit), 10 là mã cũ vẫn còn hiệu lực.
+  token: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10,20})$/, "Mã TOTP 6 số hoặc mã dự phòng"),
 });
 
 const EnableBody = z.object({

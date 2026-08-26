@@ -60,9 +60,35 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 được bản dump cũng lấy luôn khoá — mã hoá thành vô nghĩa; mà mất chỗ đó thì mất cả hai.
 
 * Nơi lưu: trình quản lý bí mật của tổ chức, hoặc phong bì niêm phong cất két (khoá không dài).
-* Xoay khoá: **phải** giải mã bằng khoá cũ rồi mã hoá lại bằng khoá mới (chạy backfill với khoá mới).
-  Đổi biến môi trường mà không backfill = toàn bộ dữ liệu cũ hoá đá.
 * Mỗi môi trường một khoá riêng. Khoá DEV **không** dùng cho production.
+
+### Xoay `PII_ENC_KEY`
+
+Đổi biến môi trường rồi khởi động lại = **toàn bộ dữ liệu cũ hoá đá**. Xoay khoá là một quy trình
+bốn bước, và trong suốt quy trình đó ứng dụng vẫn phục vụ bình thường:
+
+```bash
+# 1. Đặt THÊM khoá cũ bên cạnh khoá mới, rồi khởi động lại (đọc chấp nhận cả hai khoá,
+#    ghi mới luôn dùng khoá mới). Chưa xoay gì cả — chỉ mở cửa sổ chuyển tiếp.
+PII_ENC_KEY=<khoá MỚI>
+PII_ENC_KEY_OLD=<khoá CŨ>
+
+# 2. Mã hoá lại toàn bộ hàng đã mã hoá. Chạy lại được, đứt giữa chừng thì chạy lại.
+#    KHÔNG đụng cột thô. Bản ghi nào không giải được bằng CẢ HAI khoá → script báo đỏ và
+#    bỏ qua nguyên hàng (không để lại bản ghi nửa khoá cũ nửa khoá mới).
+node --import tsx scripts/migration/pii-backfill.mjs --rotate
+
+# 3. GỠ PII_ENC_KEY_OLD, khởi động lại.
+# 4. Chứng minh khoá mới tự đứng được — còn hàng nào mã bằng khoá cũ là bước này báo đỏ.
+npm run pii:verify
+```
+
+Đừng gỡ `PII_ENC_KEY_OLD` khi bước 2 chưa báo `✓`. Trong lúc cửa sổ còn mở, mỗi lần đọc trúng hàng
+chưa xoay sẽ ghi một dòng `warn` — đó là cách biết còn tồn đọng. Chỉ khi bước 4 đạt mới **huỷ** khoá
+cũ khỏi kho bí mật.
+
+> `docs/operations/INCIDENT_RESPONSE.md` (mục "Khi nào leo thang") vẫn ghi **"Đừng xoay
+> `PII_ENC_KEY`"** — câu đó có từ thời chưa có `--rotate` và cần được thay bằng con trỏ về đây.
 
 ### Sao lưu kho object
 

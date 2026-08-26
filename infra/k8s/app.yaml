@@ -15,6 +15,9 @@ spec:
     metadata:
       labels: { app: quanly, component: api }
     spec:
+      # > 5s (preStop) + 10s (lưới an toàn cứng trong src/server.ts shutdown()) để pod không bị
+      # SIGKILL giữa lúc đang đóng êm.
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -62,6 +65,14 @@ spec:
           # `node src/server.js` KHÔNG tồn tại trong image (mã là .ts, image chỉ chứa dist/).
           # Phải khớp Dockerfile CMD.
           args: ["npx prisma migrate deploy && exec node dist/server.js"]
+          # TRỄ RÚT KẾT NỐI. k8s gửi SIGTERM và gỡ pod khỏi Endpoints SONG SONG, không theo thứ tự:
+          # src/server.ts nhận SIGTERM là ngừng nhận kết nối mới NGAY, trong khi kube-proxy/ingress
+          # trên các node khác còn đang lan truyền bản Endpoints mới và vẫn gửi request tới. Kết quả
+          # là 502 lác đác mỗi lần rolling update. `sleep 5` giữ pod phục vụ thêm 5s để việc rút
+          # hoàn tất TRƯỚC khi tiến trình bắt đầu đóng.
+          lifecycle:
+            preStop:
+              exec: { command: ["/bin/sh", "-c", "sleep 5"] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:

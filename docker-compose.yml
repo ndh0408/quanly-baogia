@@ -1,14 +1,28 @@
+# XOAY VÒNG LOG cho MỌI service. Driver mặc định của Docker là json-file KHÔNG giới hạn: app dùng
+# pino-http ghi mỗi request một dòng, VM chỉ có MỘT đĩa, và khi đĩa đầy thì Postgres không ghi nổi
+# WAL nữa — mất dữ liệu vì log, không phải vì lỗi mã. 10MB × 5 tệp = trần 50MB mỗi container.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: quanly-postgres
+    logging: *default-logging
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-quanly}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quanly_pwd}
       POSTGRES_DB: ${POSTGRES_DB:-quanly}
+    # CHỈ loopback (áp cho MỌI kho dữ liệu bên dưới). Không có tiền tố 127.0.0.1 thì docker mở cổng
+    # ra MỌI giao diện — kể cả Wi-Fi/LAN/Tailscale — và luật DOCKER-USER của nó đi vòng qua tường lửa
+    # của máy. Kho dữ liệu dev mang mật khẩu mặc định ghi thẳng trong chính file này, nên "mở ra LAN"
+    # nghĩa là ai cùng mạng cũng đọc/ghi được Postgres, Redis, MinIO và hòm thư dev.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - quanly-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,10 +38,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: quanly-redis
+    logging: *default-logging
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"] # khớp prod: allkeys-lru xoá mất khoá job BullMQ + khoá phiên
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - quanly-redisdata:/data
     healthcheck:
@@ -37,16 +52,17 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: quanly-minio
+    logging: *default-logging
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - quanly-miniodata:/data
     healthcheck:
@@ -56,18 +72,20 @@ services:
       retries: 5
 
   mailhog:
-    image: mailhog/mailhog:latest
+    image: mailhog/mailhog:v1.0.1
     container_name: quanly-mailhog
+    logging: *default-logging
     restart: unless-stopped
     ports:
-      - "1025:1025" # SMTP
-      - "8025:8025" # Web UI
+      - "127.0.0.1:1025:1025" # SMTP
+      - "127.0.0.1:8025:8025" # Web UI
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: quanly-app
+    logging: *default-logging
     restart: unless-stopped
     depends_on:
       postgres:

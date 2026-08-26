@@ -80,6 +80,10 @@ export const AcceptInviteSchema = z.object({
   title,
   senderName: title,
   password: pwd,
+  // Mã yếu tố thứ hai cho tài khoản ĐÃ bật MFA. Đường này kiêm "Quên mật khẩu" nên nó cấp phiên
+  // đầy đủ — không hỏi mã ở đây thì chiếm được hộp thư là gỡ được luôn MFA. 6 chữ số = TOTP;
+  // 10–20 ký tự hex = mã dự phòng (10 là định dạng CŨ, 20 là định dạng hiện tại 80 bit).
+  mfaToken: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10,20})$/, "Mã MFA gồm 6 chữ số, hoặc mã dự phòng").optional(),
 });
 
 export const UserCreateSchema = z.object({

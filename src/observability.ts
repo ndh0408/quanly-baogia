@@ -9,6 +9,29 @@ import { logger } from "./logger.js";
 
 // === Sentry ===
 let sentryReady = false;
+
+/**
+ * Bộ lọc chạy trên MỌI sự kiện trước khi rời máy: cắt bỏ thứ không được phép rời khỏi hạ tầng công ty.
+ *
+ * VÌ SAO CÓ `extra`: `captureError` đóng gói ngữ cảnh vào `extra`, và chỗ gọi ở worker nhét NGUYÊN
+ * `job.data` vào đó. Với hàng đợi webhook, `job.data.payload` là đối tượng nghiệp vụ thật (khách
+ * hàng / báo giá) — mà `deliverWebhook` ném lỗi mỗi lần đích không trả 2xx, tức nhánh này chạy
+ * thường xuyên chứ không hiếm. Lọc ở ĐÂY chứ không chỉ ở chỗ gọi, vì chỗ gọi mới thêm sau này sẽ
+ * lại quên; định danh (queue/jobId/reqId…) vẫn giữ nên Sentry không mất giá trị truy vết.
+ *
+ * Tách thành hàm export để test được — `beforeSend` nằm trong Sentry.init thì chỉ chạy khi có DSN.
+ */
+const KHOA_NOI_DUNG = ["data", "payload", "body"] as const;
+export function scrubSentryEvent<T extends { request?: { headers?: Record<string, unknown> }; extra?: Record<string, unknown> }>(event: T): T {
+  if (event?.request?.headers) {
+    delete event.request.headers.cookie;
+    delete event.request.headers.authorization;
+  }
+  if (event?.extra) {
+    for (const k of KHOA_NOI_DUNG) delete event.extra[k];
+  }
+  return event;
+}
 export function initSentry() {
   if (!process.env.SENTRY_DSN) return false;
   Sentry.init({
@@ -16,14 +39,7 @@ export function initSentry() {
     environment: config.NODE_ENV,
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0.1),
     profilesSampleRate: Number(process.env.SENTRY_PROFILES_SAMPLE_RATE || 0),
-    beforeSend(event) {
-      // Strip cookies + auth headers from events
-      if (event.request?.headers) {
-        delete event.request.headers.cookie;
-        delete event.request.headers.authorization;
-      }
-      return event;
-    },
+    beforeSend: (event) => scrubSentryEvent(event) as typeof event,
   });
   sentryReady = true;
   logger.info("Sentry initialized");
@@ -81,6 +97,21 @@ export const sseClients = new Gauge({
   registers: [registry],
 });
 
+// Backplane Redis của SSE hỏng thì realtime CHẾT ÊM: không lỗi nào tới người dùng, không endpoint
+// nào đổi trạng thái (/readyz chỉ hỏi Postgres), chỉ còn một dòng log warn lẫn trong luồng khởi
+// động. Hai số này là cách duy nhất để biết trước khi có người báo "thông báo không hiện nữa".
+export const sseBackplaneUp = new Gauge({
+  name: "sse_backplane_up",
+  help: "1 = backplane Redis của SSE đang chạy, 0 = đã rơi về in-memory (mất realtime giữa các instance)",
+  registers: [registry],
+});
+export const sseBackplaneErrors = new Counter({
+  name: "sse_backplane_errors_total",
+  help: "Số lần PUBLISH sự kiện SSE qua Redis thất bại",
+  labelNames: ["op"],
+  registers: [registry],
+});
+
 // === Cổng xuất file (Excel/PDF) ===
 // Không có mấy số này thì quá tải xuất file là một hộp đen: người dùng báo "chậm", còn hệ thống
 // không nói được là đang bận bao nhiêu, xếp hàng bao sâu, hay đã từ chối bao nhiêu lượt.
@@ -116,7 +147,13 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
   const start = process.hrtime.bigint();
   res.on("finish", () => {
     const dur = Number(process.hrtime.bigint() - start) / 1e9;
-    const route = req.route?.path || req.baseUrl + (req.route?.path || "") || "unknown";
+    // `||` chốt ở vế đầu: có req.route.path là nhánh ghép baseUrl không bao giờ chạy — mà trong một
+    // Router con, req.route.path là đường dẫn TƯƠNG ĐỐI ("/"), nên /api/search, /api/audit,
+    // /api/webhooks… bị gộp chung nhãn "/". Ghép tường minh; vẫn là pattern nên cardinality không tăng.
+    const tho = req.route?.path ? (req.baseUrl || "") + req.route.path : (req.baseUrl || "unknown");
+    // Router mount tại "/api/search" với handler "/" ghép ra "/api/search/" — bỏ gạch chéo cuối để
+    // không sinh HAI nhãn cho cùng một endpoint khi router khác khai "/api/search" trực tiếp.
+    const route = tho.length > 1 ? tho.replace(/\/+$/, "") : tho;
     const labels = { method: req.method, route, status: String(res.statusCode) };
     httpRequestsTotal.inc(labels);
     httpRequestDuration.observe(labels, dur);

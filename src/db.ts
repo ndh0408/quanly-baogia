@@ -24,9 +24,20 @@ const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 // qua DB_POOL_MAX (mặc định 20). CHỈ đổi capacity hạ tầng, KHÔNG đổi hành vi nghiệp vụ.
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.DB_POOL_MAX) || 20 });
 const adapter = new PrismaPg(pool);
+// transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).
+// Đường LƯU báo giá gói cả việc nặng vào MỘT transaction: xoá sạch sheet → tạo lại toàn bộ item →
+// đọc lại báo giá qua QUOTE_INCLUDE → snapshot phiên bản (đọc thêm lần nữa + ghi khối jsonb). Trần
+// payload cho phép 60 trang × 1000 dòng, nên báo giá lớn CHẠM 5s là rollback: người dùng mất trắng
+// lần sửa, và middleware chưa map P2028 nên giao diện chỉ thấy "Lỗi server". Nới trần là biện pháp
+// GIẢM NHẸ (thu nhỏ transaction mới là cách chữa gốc) — đặt ở đây để mọi $transaction cùng hưởng.
+// Đọc process.env trực tiếp như DB_POOL_MAX ngay trên: đây là hạ tầng, không phải cấu hình nghiệp vụ.
 const base = new PrismaClient({
   adapter,
   log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
+  transactionOptions: {
+    maxWait: Number(process.env.DB_TX_MAX_WAIT) || 10_000,
+    timeout: Number(process.env.DB_TX_TIMEOUT) || 60_000,
+  },
 });
 base.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));
 base.$on("error", (e) => logger.error({ source: "prisma" }, e.message));

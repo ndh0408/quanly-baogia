@@ -6,7 +6,6 @@
 //   nếu báo giá nhiều sheet → mỗi sheet thêm hậu tố "_{i+1}"                  [admin.js renderProjects]
 // Khớp ĐÚNG 1 mã sản xuất (gồm hậu tố). Không khớp → không có entry → UI hiện "—" (giống #N/A trong Excel).
 import { prisma } from "../db.js";
-import { computeQuoteTotals } from "../money.js";
 
 /** Dựng "base" mã dự án y như client codeLabel() để mã sản xuất khớp tuyệt đối. */
 export function codeLabel(q: { projectCode?: string | null; quoteNumber?: string | null; projectVersion?: number | null }): string {
@@ -50,14 +49,16 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
     where: { status: "converted", deletedAt: null, OR: [{ projectCode: { in: arr } }, { quoteNumber: { in: arr } }] },
     take: 1000,
     select: {
-      quoteNumber: true, projectCode: true, projectVersion: true,
-      vatPercent: true, discount: true, subtotal: true,
+      quoteNumber: true, projectCode: true, projectVersion: true, subtotal: true,
       sheets: {
         orderBy: { order: "asc" },
         select: {
-          id: true, order: true, name: true, groupSubtotal: true,
+          id: true, order: true, name: true,
           signedAt: true, invoiceNo: true, paidAt: true, poNumber: true,
-          items: { select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } },
+          // subtotal ĐÃ materialized lúc save (= computeQuoteTotals.sheetTotals). Đọc thẳng cột
+          // thay vì kéo items về tính lại: CÙNG nguồn số với trang Quản lý dự án (listProjects),
+          // nên hai trang không thể hiện hai con số khác nhau cho cùng một mã sản xuất.
+          subtotal: true,
         },
       },
     },
@@ -65,16 +66,14 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
 
   for (const q of quotes) {
     const base = codeLabel(q);
-    const { sheetTotals } = computeQuoteTotals(q as any);
-    const byId = new Map<number, number>((sheetTotals as Array<{ sheetId: number; subtotal: unknown }>).map((s) => [s.sheetId, Number(s.subtotal)]));
     // Báo giá không có sheet → coi như 1 dòng dùng subtotal tổng (giống admin.js fallback).
-    const sheets = q.sheets.length ? q.sheets : [{ id: -1, poNumber: null, invoiceNo: null, signedAt: null, paidAt: null } as any];
+    const sheets = q.sheets.length ? q.sheets : [{ id: -1, subtotal: null, poNumber: null, invoiceNo: null, signedAt: null, paidAt: null } as any];
     const multi = sheets.length > 1;
     sheets.forEach((sh: any, i: number) => {
       const code = base + (multi ? `_${i + 1}` : "");
       if (!wanted.has(code)) return; // chỉ giữ mã đang cần — khớp đúng 1 mã sản xuất
       // `|| 0` (không phải ??): Number() trả NaN chứ không bao giờ nullish — subtotal thiếu/hỏng phải về 0.
-      const baoGia = byId.get(sh.id) ?? (Number(q.subtotal) || 0);
+      const baoGia = sh.subtotal != null ? (Number(sh.subtotal) || 0) : (Number(q.subtotal) || 0);
       out.set(code, {
         salesContractNo: sh.invoiceNo ?? null,
         salesContractDate: sh.signedAt ?? null,

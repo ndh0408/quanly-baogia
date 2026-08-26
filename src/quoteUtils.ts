@@ -50,7 +50,10 @@ function presentQuoteForAccountHn(q: any) {
     sheetId: s.id,
     sheetName: s.name || null,
     order: s.order,
-    hnTables: (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"),
+    // stripExtraProofs: account Hà Nội KHÔNG có quote:internal:pay/internal:view, mà ảnh chứng từ
+    // (base64) VẪN nằm được trên hàng bảng "hanoi" — route /pay khớp theo `rid`, không lọc category.
+    // Hai presenter kia đều bọc; thiếu ở đây là vừa lộ chứng từ vừa phình payload mỗi lần mở báo giá.
+    hnTables: stripExtraProofs((Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi")),
   }));
   return {
     id: q.id,
@@ -223,6 +226,10 @@ export function sanitizeExtraTables(tables: any) {
       detail: it.detail ? String(it.detail).trim() : null,
       unit: it.unit ? String(it.unit).replace(/[\r\n]+/g, " ").trim() : null,
       quantity: Number(it.quantity) || 0,
+      // Cờ "số lẻ chính xác" PHẢI theo được xuống DB: `extraTableSum` rẽ nhánh theo nó (giữ 4 chữ số
+      // thập phân thay vì `qtyRound` cắt còn 1). Thiếu dòng này thì tổng bảng nội bộ NHẢY SỐ sau khi
+      // tải lại trang, dù không ai sửa gì — đường lưới chính (buildSheetsCreate) vốn đã persist cờ này.
+      quantityExact: !!it.quantityExact,
       unitPrice: Number(it.unitPrice) || 0,
       days: it.days != null ? Number(it.days) : null,
       notes: it.notes ? String(it.notes).trim() : null,

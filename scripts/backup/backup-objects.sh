@@ -25,6 +25,9 @@
 #   MC_IMAGE (minio/mc:RELEASE.2024-11-21T17-21-54Z)
 # ============================================================================
 set -uo pipefail
+# Bản gương chứa ẢNH CHỨNG TỪ THANH TOÁN. umask kế thừa của systemd (0022) cho ra 0644/0755,
+# tức mọi tài khoản trên host đọc được chứng từ tài chính. Đặt ở đầu để bao cả manifest và tarball.
+umask 077
 [ -f /etc/quanly-backup.env ] && set -a && . /etc/quanly-backup.env && set +a
 
 BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
@@ -58,8 +61,13 @@ fi
 
 # `mc` chạy trong container để host không phải cài gì. --quiet để log không ngập tên từng object.
 mc() {
+  # `-e "MC_HOST_q=<url có access key + secret key>"` đặt cả cặp khoá kho object vào ARGV của
+  # `docker run` — hiện ở `ps aux` trên host trong suốt thời gian mirror (có thể vài phút). Truyền
+  # bằng BIẾN MÔI TRƯỜNG (`-e TÊN`, không kèm giá trị) thì docker đọc từ môi trường tiến trình cha,
+  # không có gì lọt ra dòng lệnh.
+  MC_HOST_q="${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
   docker run --rm --network host \
-    -e "MC_HOST_q=${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
+    -e MC_HOST_q \
     -v "$MIRROR_DIR":/mirror \
     "$MC_IMAGE" "$@"
 }
@@ -87,6 +95,10 @@ if ! (cd "$MIRROR_DIR" && find . -type f -printf '%P\n' | sort | while IFS= read
 fi
 mv -f "$TMP_MANIFEST" "$MANIFEST"
 sha256sum "$MANIFEST" | cut -d' ' -f1 > "$MANIFEST.sha256"
+# Bản gương do `mc` trong container tạo ra nên KHÔNG chịu umask của script này — mc chạy bằng root
+# với umask riêng của nó. Siết lại sau mỗi lượt: chứng từ tài chính không để ai-cũng-đọc.
+chmod 600 "$MANIFEST" "$MANIFEST.sha256"
+chmod -R go-rwx "$MIRROR_DIR"
 
 MIRROR_MB="$(du -sm "$MIRROR_DIR" | cut -f1)"
 echo "   $LOCAL_N object · ${MIRROR_MB}MB · manifest: $(basename "$MANIFEST")"
@@ -109,8 +121,15 @@ if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
   fi
   CMDS="cd ${NAS_SUBDIR:-.};"
   for f in "${PUSH_FILES[@]}"; do CMDS="$CMDS put /data/$f $f;"; done
-  if ! docker run --rm -v "$BACKUP_DIR":/data:ro alpine sh -c \
-      "apk add --no-cache samba-client >/dev/null 2>&1 && smbclient '${NAS_SHARE}' -U '${NAS_USER}%${NAS_PASS:-}' -m SMB2 -c '$CMDS'"; then
+  # Mật khẩu NAS đi qua biến môi trường, KHÔNG nội suy vào chuỗi lệnh: chuỗi lệnh nằm trong argv nên
+  # hiện ở `ps aux` trên host và trong `docker inspect` container tạm. Bên trong thì ghi credentials
+  # ra file (umask 077) rồi `smbclient -A`.
+  if ! NAS_SHARE="$NAS_SHARE" NAS_USER="$NAS_USER" NAS_PASS="${NAS_PASS:-}" NAS_CMDS="$CMDS" \
+      docker run --rm -e NAS_SHARE -e NAS_USER -e NAS_PASS -e NAS_CMDS \
+      -v "$BACKUP_DIR":/data:ro alpine sh -c \
+      'apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
+       umask 077; printf "username=%s\npassword=%s\n" "$NAS_USER" "$NAS_PASS" > /tmp/cred
+       smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "$NAS_CMDS"'; then
     alert "đẩy kho object lên NAS thất bại — bản gương local vẫn giữ"
   fi
   # tarball chỉ là phương tiện vận chuyển off-host; bản gương mới là bản sao lưu chính.

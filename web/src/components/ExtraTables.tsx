@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
-import { GridTable } from "./GridTable";
+import { GridTable, safeImgSrc } from "./GridTable";
 import { api, ApiError, type EditorTemplate } from "../lib/api";
-import { toast } from "../lib/ui";
+import { confirmModal, toast } from "../lib/ui";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -25,6 +25,30 @@ export function extraTableSum(t: ExtraTable): number {
     const days = it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);
   }, 0);
+}
+
+// Sheet đã có người điền vào chưa? Dùng để quyết định có phải HỎI trước khi xoá (khớp cách
+// AccountHnView hỏi khi xoá bảng HN): sheet mới tạo còn trống thì xoá nhầm cũng chẳng mất gì.
+export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
+  return (t?.items || []).some((it) => (it.name || "").trim() || (it.detail || "").trim() || it.quantity || it.unitPrice);
+}
+
+// ĐƯỜNG XOÁ DUY NHẤT của sheet nội bộ. Trước đây nút ✕ (nằm sát nhãn tab) splice thẳng, không hỏi:
+// bấm nhầm là mất cả cờ duyệt/thanh toán từng hàng lẫn phần tổng đổ sang Quản lý dự án, mà Ctrl+Z
+// không cứu được vì ngăn hoàn tác nằm TRONG GridTable của chính sheet vừa bị gỡ khỏi cây.
+// Tách khỏi component để kiểm thử được ngoài trình duyệt và để không ai thêm đường splice thứ hai.
+export async function removeExtraTableAt(
+  sheet: { extraTables?: ExtraTable[]; _activeExtra?: number },
+  i: number,
+  confirmRemove: (t: ExtraTable) => Promise<boolean>,
+): Promise<boolean> {
+  const tables = sheet.extraTables;
+  if (!Array.isArray(tables) || !tables[i]) return false;
+  if (extraTableHasData(tables[i]) && !(await confirmRemove(tables[i]))) return false;
+  tables.splice(i, 1);
+  let a = sheet._activeExtra || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
+  sheet._activeExtra = a;
+  return true;
 }
 
 export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty }: {
@@ -66,10 +90,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
     tables.push({ category: cat, templateId: defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
     sheet._activeExtra = tables.length - 1; onChange();
   };
-  const removeTable = (i: number) => {
-    tables.splice(i, 1);
-    let a = sheet._activeExtra || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
-    sheet._activeExtra = a; onChange();
+  const removeTable = async (i: number) => {
+    const ok = await removeExtraTableAt(sheet, i, (tbl) => confirmModal(
+      "Xoá sheet nội bộ?",
+      `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
+      { danger: true, confirmText: "Xoá sheet" },
+    ));
+    if (ok) onChange();
   };
 
   return (
@@ -95,7 +122,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                     {idxs.map((i) => (
                       <div key={tables[i]._k ?? i} className={`sheet-tab ${i === active ? "active" : ""}`} title={label} onClick={() => { sheet._activeExtra = i; redraw(); }}>
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
-                        {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); removeTable(i); }}>✕</span>}
+                        {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); void removeTable(i); }}>✕</span>}
                       </div>
                     ))}
                   </div>
@@ -169,7 +196,7 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
           {paid && <div style={{ marginTop: 12 }}>
             <label className="muted" style={{ fontSize: 13 }}>Ảnh chứng từ (tuỳ chọn):</label>
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => onFile(e.target.files?.[0])} style={{ display: "block", marginTop: 5 }} />
-            {img && <img src={img} alt="chứng từ" style={{ maxWidth: "100%", maxHeight: 240, marginTop: 8, borderRadius: 8, border: "1px solid var(--line)" }} />}
+            {img && <img src={safeImgSrc(img)} alt="chứng từ" style={{ maxWidth: "100%", maxHeight: 240, marginTop: 8, borderRadius: 8, border: "1px solid var(--line)" }} />}
           </div>}
         </div>
         <div className="modal-foot">

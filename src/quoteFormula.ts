@@ -25,6 +25,11 @@ const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "R
 // dùng TRUNC rất nhiều, còn editor chuẩn hoá về ROUNDDOWN để chỉ giữ một cách viết.
 const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE", TRUNC: "ROUNDDOWN" };
 
+// Trần số HÀNG mà MỘT dải ô ("G1:G9999999") được phép bung ra. Một trang lưu tối đa 1000 dòng
+// (sheetSchema trong src/validators.ts) nên 20.000 đã là 20 lần dư cho mọi báo giá thật; vượt trần
+// nghĩa là công thức rác hoặc cố ý phá, và cách xử lý an toàn của module này luôn là "ghi con số".
+const MAX_REF_ROWS = 20_000;
+
 /** 0→"A", 1→"B", …, 25→"Z", 26→"AA". Cột editor (giống groupLetter ở frontend). */
 export function colLetter(n: number) {
   let s = "", x = n + 1;
@@ -371,6 +376,9 @@ export function buildFormulaContext(
       const c0 = Math.min(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
       const c1 = Math.max(fieldToColIndex[colToField[pa[1].toUpperCase()]] ?? 0, fieldToColIndex[colToField[pb[1].toUpperCase()]] ?? 0);
       const r0 = Math.min(Number(pa[2]), Number(pb[2])), r1 = Math.max(Number(pa[2]), Number(pb[2]));
+      // Cùng trần với refsInFormula: bộ tự kiểm KHÔNG được là đường vòng để bung lại dải khổng lồ.
+      // Trả [] → evalEditorFormula thay dải bằng "0", tự kiểm lệch → cellFormula ghi số (an toàn).
+      if (r1 - r0 > MAX_REF_ROWS) return [];
       const out: number[] = [];
       for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(editorCellNum(colLetter(c) + r));
       return out;
@@ -380,7 +388,15 @@ export function buildFormulaContext(
   // ===== ĐỒ THỊ PHỤ THUỘC — chặn VÒNG LẶP khi cho ref cột Thành Tiền =====
   // Node (rowIdx0, field). Cạnh: công thức tại (r,f) → các ref của nó; riêng _amount(r) LUÔN
   // phụ thuộc quantity/unitPrice/days của CHÍNH hàng r (ô Excel Thành Tiền = ROUND(SL×ĐG)).
-  const refsInFormula = (raw: string): { row: number; field: string }[] => {
+  // Trả null nghĩa là "dải ô lớn bất thường, không dựng nổi đồ thị" → nơi gọi coi như KHÔNG DỊCH
+  // ĐƯỢC và ghi con số (mặc định an toàn sẵn có của module).
+  //
+  // VÌ SAO PHẢI CÓ TRẦN: hàm này bung dải "G1:G<n>" thành MỘT đối tượng cho TỪNG hàng, và nó chạy
+  // ở dòng đầu tiên của cellFormula — tức TRƯỚC translateFormula, nơi duy nhất từ chối hàng ngoài
+  // bảng. Chuỗi công thức do người dùng gõ và chỉ bị giới hạn ĐỘ DÀI (validators.ts), nên
+  // "=SUM(G1:G9999999)" lưu được bình thường; không có trần thì mỗi lần ai đó xuất báo giá ấy là
+  // một lần ngốn hàng GB heap (và `stack.push(...deps)` còn tràn luôn call stack).
+  const refsInFormula = (raw: string): { row: number; field: string }[] | null => {
     const out: { row: number; field: string }[] = [];
     const re = /\$?([A-Za-z]+)\$?(\d+)(?:\s*:\s*\$?([A-Za-z]+)\$?(\d+))?/g;
     let m: RegExpExecArray | null;
@@ -389,12 +405,13 @@ export function buildFormulaContext(
       if (m[3] && m[4]) {
         const f2 = colToField[m[3].toUpperCase()];
         const r0 = Math.min(+m[2], +m[4]) - 1, r1 = Math.max(+m[2], +m[4]) - 1;
+        if (r1 - r0 > MAX_REF_ROWS) return null;
         for (let r = r0; r <= r1; r++) { if (f1) out.push({ row: r, field: f1 }); if (f2 && f2 !== f1) out.push({ row: r, field: f2 }); }
       } else if (f1) out.push({ row: +m[2] - 1, field: f1 });
     }
     return out;
   };
-  const depsOf = (row: number, field: string): { row: number; field: string }[] => {
+  const depsOf = (row: number, field: string): { row: number; field: string }[] | null => {
     if (field === "_amount") {
       const base = [{ row, field: "quantity" }, { row, field: "unitPrice" }];
       if (usesDays) base.push({ row, field: "days" });
@@ -407,6 +424,7 @@ export function buildFormulaContext(
     const start = `${row}|${field}`;
     const seen = new Set<string>();
     const stack = refsInFormula(raw);
+    if (stack === null) return true;   // dải ô khổng lồ → không kết luận được → coi như vòng (ghi số)
     let guard = 0;
     while (stack.length) {
       if (guard++ > 5000) return true;   // đồ thị quá lớn/bất thường → coi như vòng (an toàn)
@@ -415,7 +433,9 @@ export function buildFormulaContext(
       if (key === start) return true;
       if (seen.has(key)) continue;
       seen.add(key);
-      stack.push(...depsOf(n.row, n.field));
+      const deps = depsOf(n.row, n.field);
+      if (deps === null) return true;   // hàng khác có công thức dải khổng lồ → dừng, đừng bung nó ra
+      stack.push(...deps);
     }
     return false;
   };
@@ -428,7 +448,9 @@ export function buildFormulaContext(
      */
     cellFormula(raw: string | null | undefined, computedValue: number, self?: { item: EditorItem; field: string }) {
       if (!raw) return null;
-      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refsInFormula(String(raw)).some((r) => r.field === "_amount");
+      const refs = refsInFormula(String(raw));
+      if (refs === null) return null;   // dải ô khổng lồ → ghi số, KHÔNG bung ra bộ nhớ
+      const usesAmount = /\$?[A-Za-z]+\$?\d+/.test(String(raw)) && refs.some((r) => r.field === "_amount");
       if (usesAmount) {
         const selfRow = self ? items.indexOf(self.item) : -1;
         if (selfRow < 0 || !self || hasCycle(selfRow, self.field, String(raw))) return null;   // vòng lặp / không rõ ô → ghi số

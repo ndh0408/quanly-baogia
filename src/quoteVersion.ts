@@ -1,6 +1,31 @@
 import type { TxClient } from "./db.js";
 
 /**
+ * Lược ẢNH chứng từ thanh toán (`paidProof`, base64 tới ~900.000 ký tự/ảnh) khỏi bản chụp
+ * phiên bản, giữ lại cờ `hasPaidProof` — cùng hình dạng `stripExtraProofs` đã dùng khi gửi
+ * client, để giao diện đọc phiên bản cũ không phải xử lý hai kiểu dữ liệu khác nhau.
+ *
+ * VÌ SAO: phiên bản chỉ để ĐỐI CHIẾU cấu trúc/giá; ảnh không bao giờ được diff, mà mỗi lần lưu
+ * có ảnh hưởng giá lại đẻ một hàng QuoteVersion mang trọn bộ ảnh — nhân với RETAIN_VERSION_KEEP
+ * (mặc định 100) là phình DB và phình bản sao lưu. Ảnh gốc vẫn sống ở bản HIỆN TẠI của báo giá
+ * và tải được qua GET /:id/extra/:sheetId/:rid/proof.
+ */
+function stripProofsForSnapshot(extraTables: unknown): unknown {
+  if (!Array.isArray(extraTables)) return extraTables ?? null;
+  return extraTables.map((t: any) => {
+    if (!t || typeof t !== "object") return t;
+    return {
+      ...t,
+      items: (t.items || []).map((it: any) => {
+        if (!it || typeof it !== "object") return it;
+        const { paidProof, ...rest } = it;
+        return { ...rest, hasPaidProof: !!paidProof };
+      }),
+    };
+  });
+}
+
+/**
  * Snapshot the current state of a quote (including sheets+items) into QuoteVersion.
  * Called after every mutating operation that changes price/structure.
  */
@@ -55,9 +80,10 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
       order: s.order,
       groupSubtotal: s.groupSubtotal,
       showImages: s.showImages,
-      // KHÔNG chép item.images vào snapshot phiên bản: ảnh base64 nặng, mỗi lần lưu tạo snapshot →
-      // phình DB. Phiên bản chỉ lưu cấu trúc/giá để đối chiếu; ảnh sống ở bản HIỆN TẠI của báo giá.
-      extraTables: s.extraTables ?? null,
+      // KHÔNG chép ẢNH base64 vào snapshot phiên bản (item.images ở dòng item, paidProof trong
+      // extraTables): ảnh nặng, mỗi lần lưu tạo snapshot → phình DB. Phiên bản chỉ lưu cấu trúc/giá
+      // để đối chiếu; ảnh sống ở bản HIỆN TẠI của báo giá.
+      extraTables: stripProofsForSnapshot(s.extraTables),
       items: s.items.map((it) => ({
         order: it.order,
         kind: it.kind,

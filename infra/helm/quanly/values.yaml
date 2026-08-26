@@ -69,8 +69,11 @@ postgres:
   # KHÔNG có key nào ở values để đổi — nghĩa là mọi cài đặt chart dùng Postgres nhúng đều chạy với
   # đúng một mật khẩu mà bất kỳ ai đọc repo cũng biết. NetworkPolicy có chặn pod lạ, nhưng đó là
   # phòng thủ theo mạng, không phải lý do để dùng thông tin đăng nhập ai cũng biết.
-  # ĐỔI ở mọi triển khai thật. Sinh: openssl rand -base64 24
-  password: CHANGE_ME_INTERNAL
+  # KHÔNG có mặc định dùng được: một placeholder hợp lệ nghĩa là chart cài được và CHẠY được với
+  # mật khẩu mà bất kỳ ai đọc repo cũng biết — không ai bị buộc phải đổi. Bỏ trống thì helper
+  # `quanly.postgresPassword` gọi `required` và chart TỪ CHỐI render, giống hệt cách image.tag=latest
+  # đang bị chặn. Sinh: openssl rand -base64 24
+  password: ""
   storageSize: 20Gi
   resources:
     requests: { cpu: 100m, memory: 256Mi }
@@ -79,8 +82,9 @@ postgres:
 redis:
   enabled: true # set false to use external Redis
   image: redis:7-alpine
-  # Mật khẩu Redis nội bộ (dùng cho --requirepass + nhúng vào REDIS_URL). ĐỔI ở production.
-  password: CHANGE_ME_INTERNAL_REDIS
+  # Mật khẩu Redis nội bộ (dùng cho --requirepass + nhúng vào REDIS_URL). Bỏ trống có chủ đích —
+  # xem chú thích ở postgres.password. Sinh: openssl rand -base64 24
+  password: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
@@ -118,6 +122,15 @@ secrets:
   REDIS_URL: "" # required if redis.enabled=false
   SESSION_SECRET: "" # REQUIRED, ≥32 chars
   JWT_SECRET: "" # optional; defaults to SESSION_SECRET
+  # BẮT BUỘC ở production: src/config.ts process.exit(1) nếu thiếu → deploy theo file mẫu chết ngay
+  # lúc khởi động, không phải lúc ai đó bật MFA.
+  MFA_ENC_KEY: ""
+  # ⚠️ MẤT KHOÁ NÀY = MẤT DỮ LIỆU. Ba trường PII (CCCD / số tài khoản / lương) được mã hoá bằng nó;
+  # thiếu khoá thì bản ghi mới ghi THÔ (chỉ console.warn) còn bản ghi cũ ném lỗi lúc giải mã.
+  # Sao lưu khoá ở nơi KHÁC với bản dump CSDL.
+  PII_ENC_KEY: ""
+  # /metrics trả 404 ở production khi thiếu token (src/app.ts). ServiceMonitor gửi kèm token này.
+  METRICS_TOKEN: ""
   S3_ENDPOINT: ""
   S3_ACCESS_KEY: ""
   S3_SECRET_KEY: ""
@@ -154,6 +167,11 @@ podSecurityContext:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+  # Worker dùng maxUnavailable chứ KHÔNG dùng chung minAvailable với app. Lý do: worker autoscale
+  # xuống minReplicas=1, và `minAvailable: 1` trên một Deployment có đúng 1 pod làm eviction API
+  # từ chối vĩnh viễn → `kubectl drain` treo, node không bao giờ rút được. Với maxUnavailable thì
+  # drain luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds: 60.
+  workerMaxUnavailable: 1
 
 nodeSelector: {}
 tolerations: []

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "../lib/ui";
+import { toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShared";
@@ -48,6 +48,47 @@ const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8
 // .grid-add-bar (nút + Thêm hàng/nhóm/Nhóm con/Dòng thông tin/Chèn từ rạp) và modal chèn từ rạp đều
 // chèn NGAY DƯỚI hàng đang chọn; xoá selection ngay lúc pointerdown làm hàng mới rơi xuống cuối bảng.
 const KEEP_SEL = ".excel-table, .tbl-scroll, .fx-bar, .vs-auto, .fx-auto, .grid-add-bar, .modal, .modal-backdrop";
+
+// Hàng NHÓM/NHÓM CON có ô TÍNH (đơn giá, số lượng…) — không có <input data-f> để bám vào, phải dò
+// theo CLASS cột. Nhờ vậy vùng chọn kéo qua nhóm vẫn liền mạch và công thức nhóm cha =SUM(F2,F5)
+// sáng được ô đơn giá của các nhóm con.
+const CALC_COL_CLASS: Record<string, string> = { unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" };
+
+/** Dò <td> của một cột TRONG MỘT HÀNG đã biết — tách khỏi tdOf để tô vùng khỏi phải tìm lại hàng. */
+export function tdIn(tr: Element | null | undefined, field: string): HTMLElement | null {
+  if (!tr) return null;
+  if (field === "_amount") return tr.querySelector(".col-amount");
+  if (field === "_stt") return tr.querySelector(".col-stt");
+  const inp = tr.querySelector(`[data-f="${field}"]`);
+  if (inp) return inp.closest("td") as HTMLElement;
+  const cls = CALC_COL_CLASS[field];
+  return cls ? (tr.querySelector(cls) as HTMLElement | null) : null;
+}
+
+/** Chỉ mục hàng, dựng bằng ĐÚNG MỘT lượt quét bảng. */
+export function rowIndexOf(tb: ParentNode): Map<number, Element> {
+  const idx = new Map<number, Element>();
+  tb.querySelectorAll("tr[data-row]").forEach((tr) => { const n = Number(tr.getAttribute("data-row")); if (Number.isFinite(n)) idx.set(n, tr); });
+  return idx;
+}
+
+// Tô 1 class lên hình chữ nhật ô. Trước đây mỗi ô tự gọi querySelector('tr[data-row=N]') trên cả
+// <tbody> → tô vùng R×C tốn R×C lượt quét tuyến tính, tức O(hàng²): Ctrl+A ở sheet 1000 dòng (hoặc
+// mỗi mouseover khi kéo chọn) làm lưới khựng thấy rõ. Tra hàng bằng Map thì chi phí về tuyến tính.
+export function paintRect(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, cls: string) {
+  for (let r = r0; r <= r1; r++) {
+    const tr = idx.get(r); if (!tr) continue;
+    for (let c = c0; c <= c1; c++) tdIn(tr, fieldAt(c))?.classList.add(cls);
+  }
+}
+
+// Nguồn ảnh CHỈ được là data-URL ảnh base64 — khớp TOÀN CHUỖI đúng như server (src/validators.ts
+// customerLogo/images và src/quoteUtils.ts). Kiểm tiền tố sẽ cho chuỗi kiểu
+// `data:image/png;base64,AAA"><a …>` đi lọt, và chuỗi đó thoát khỏi src="" ở bất cứ chỗ nào sau
+// này nội suy nó vào HTML (Excel/PDF). Ảnh không hợp lệ → chuỗi rỗng, trình duyệt không tải gì.
+export function safeImgSrc(s: string | null | undefined): string {
+  return typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
+}
 
 export function GridTable(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
@@ -120,6 +161,10 @@ export function GridTable(props: GridTableProps) {
   type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
   const [sug, setSug] = useState<Sug | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Ảnh đang xem lớn. Phải xem TRONG app: ảnh của lưới luôn là data-URL (fileToImg nén bằng canvas)
+  // mà trình duyệt CHẶN điều hướng cấp cao nhất tới data:, nên window.open chỉ mở ra tab trắng.
+  const [zoom, setZoom] = useState<string | null>(null);
+  useEscClose(() => setZoom(null), zoom != null);
 
   // "_stt" nằm trong vùng CHỌN được (kéo/quét/Ctrl+A/Shift+mũi tên/copy) nhưng KHÔNG nhập được —
   // nó là ô tính (số thứ tự, nhãn nhóm A/B/1/2). Có nó trong vùng chọn thì copy nguyên hàng mới
@@ -204,17 +249,7 @@ export function GridTable(props: GridTableProps) {
   // ── selection rectangle (sống qua redraw: tô lại từ selRef ở effect mỗi render) ─
   const fieldIdx = (f: string) => FIELDS.indexOf(f);
   const cellEl = (row: number, field: string) => tableRef.current?.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
-  const tdOf = (row: number, field: string): HTMLElement | null => {
-    const tr = tableRef.current?.querySelector(`tr[data-row="${row}"]`); if (!tr) return null;
-    if (field === "_amount") return tr.querySelector(".col-amount");
-    if (field === "_stt") return tr.querySelector(".col-stt");
-    const inp = tr.querySelector(`[data-f="${field}"]`);
-    if (inp) return inp.closest("td") as HTMLElement;
-    // Hàng NHÓM/NHÓM CON: ĐƠN GIÁ (và vài cột) là ô TÍNH — không có input data-f → dò theo CLASS cột
-    // để công thức nhóm cha =SUM(F2,F5) vẫn SÁNG được ô đơn giá các nhóm con.
-    const cls = ({ unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" } as Record<string, string>)[field];
-    return cls ? (tr.querySelector(cls) as HTMLElement | null) : null;
-  };
+  const tdOf = (row: number, field: string): HTMLElement | null => tdIn(tableRef.current?.querySelector(`tr[data-row="${row}"]`), field);
   const rectOf = (sel: Sel | null) => { if (!sel) return null; const a = fieldIdx(sel.anchor.field), b = fieldIdx(sel.focus.field); if (a < 0 || b < 0) return null; return { r0: Math.min(sel.anchor.row, sel.focus.row), r1: Math.max(sel.anchor.row, sel.focus.row), c0: Math.min(a, b), c1: Math.max(a, b) }; };
   const onFillHandleDown = (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
@@ -227,15 +262,19 @@ export function GridTable(props: GridTableProps) {
     const tb = tableRef.current; if (!tb) return;
     tb.querySelectorAll("td.cell-selected, td.cell-anchor, td.cell-cut").forEach((td) => td.classList.remove("cell-selected", "cell-anchor", "cell-cut"));
     tb.querySelectorAll(".fill-handle").forEach((h) => h.remove());
+    // MỘT chỉ mục hàng dùng chung cho cả vùng cắt lẫn vùng chọn: paintSel chạy lại sau mỗi render
+    // và mỗi mouseover khi kéo chọn, nên chi phí ở đây phải tuyến tính theo số ô, không theo R×C×R.
+    const rowIdx = rowIndexOf(tb);
+    const fieldAt = (c: number) => FIELDS[c];
     // Vùng đang CẮT chờ dán → viền nét đứt (kiểu "marching ants" của Excel).
     const cp = cutPendingRef.current;
-    if (cp) for (let r = cp.r0; r <= cp.r1; r++) for (let c = cp.c0; c <= cp.c1; c++) tdOf(r, FIELDS[c])?.classList.add("cell-cut");
+    if (cp) paintRect(rowIdx, cp.r0, cp.r1, cp.c0, cp.c1, fieldAt, "cell-cut");
     const sel = selRef.current; const rc = rectOf(sel);
     if (rc && sel) {
-      // tdOf (không phải cellEl): hàng NHÓM/NHÓM CON có ô tính (không có input) vẫn được tô →
+      // tdIn (không phải cellEl): hàng NHÓM/NHÓM CON có ô tính (không có input) vẫn được tô →
       // vùng chọn hiện liền mạch khi kéo qua nhóm, như Excel.
-      for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) tdOf(r, FIELDS[c])?.classList.add("cell-selected");
-      (cellEl(sel.anchor.row, sel.anchor.field)?.closest("td") || tdOf(sel.anchor.row, sel.anchor.field))?.classList.add("cell-anchor");
+      paintRect(rowIdx, rc.r0, rc.r1, rc.c0, rc.c1, fieldAt, "cell-selected");
+      (cellEl(sel.anchor.row, sel.anchor.field)?.closest("td") || tdIn(rowIdx.get(sel.anchor.row), sel.anchor.field))?.classList.add("cell-anchor");
       if (editable) {
         const td = cellEl(rc.r1, FIELDS[rc.c1])?.closest("td");
         if (td) {
@@ -1530,7 +1569,7 @@ export function GridTable(props: GridTableProps) {
       <div className="cell-images">
         {imgs.map((src, k) => (
           <span className="cell-img" key={k}>
-            <img src={src} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => window.open(src, "_blank")} />
+            <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => setZoom(safeImgSrc(src))} />
             {editable && <button type="button" className="img-rm" title="Xoá ảnh" onClick={() => removeImage(i, k)}>✕</button>}
           </span>
         ))}
@@ -1749,6 +1788,11 @@ export function GridTable(props: GridTableProps) {
           <input type="checkbox" checked={!!showImages} onChange={(e) => onShowImages(e.target.checked)} />
           <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
+      )}
+      {zoom && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Xem ảnh lớn" onClick={() => setZoom(null)}>
+          <img src={safeImgSrc(zoom)} alt="Ảnh hạng mục (bấm để đóng)" style={{ maxWidth: "92vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 6 }} />
+        </div>
       )}
     </>
   );
