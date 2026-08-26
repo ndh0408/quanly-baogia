@@ -6,7 +6,7 @@
 // app.js — zero behavior change.
 import { fmtMoney, fmtDate, escapeHtml, safeLogoSrc, statusLabel, ROLE_LABEL } from "../util.js?v=20260630l";
 import { state, can, canOnQuote } from "../core/state.js?v=20260624b";
-import { api } from "../core/api.js?v=20260624b";
+import { api } from "../core/api.js?v=20260826a";
 import { toast, skeleton, KBD, errorState, confirmModal, promptModal } from "../ui.js?v=20260624b";
 import { pickCustomer } from "./admin.js?v=20260624b";
 

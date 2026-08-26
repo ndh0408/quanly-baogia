@@ -10,7 +10,7 @@ import { decompressBody } from "./decompressBody.js";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pinoHttp from "pino-http";
-import { timingSafeEqual, createHash } from "node:crypto";
+import { timingSafeEqual, createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,41 +58,98 @@ function bearerTokenMatches(authHeader: string | undefined, expected: string) {
   return timingSafeEqual(a, b);
 }
 
-// Origins allowed to make state-changing cookie-session requests (CSRF allowlist).
-// Normalized to lowercase (scheme+host are case-insensitive) for robust matching.
+// Origin được phép thực hiện thao tác GHI bằng phiên cookie (danh sách cho phép của CSRF).
 // config.ts đảm bảo APP_BASE_URL luôn được đặt (fallback http://localhost:PORT) trước khi tới đây,
 // nhưng kiểu khai báo là string|undefined → narrow bằng guard để TS biết chắc là string.
+//
+// Chuẩn hoá về ORIGIN thật (scheme://host[:port]) rồi mới so.
+//
+// Trước đây danh sách này chứa NGUYÊN chuỗi cấu hình. Nếu APP_BASE_URL có đường dẫn phía sau
+// (vd "https://gianguyen.cloud/app" — một cấu hình sai rất dễ mắc) thì phần tử trong danh sách là
+// "https://gianguyen.cloud/app", trong khi header Origin trình duyệt gửi luôn là
+// "https://gianguyen.cloud". Không bao giờ khớp → MỌI thao tác ghi bằng phiên cookie trả 403, và
+// thông điệp lỗi thì đổ cho CSRF chứ không chỉ ra cấu hình sai.
+function toOrigin(raw: string): string | null {
+  try {
+    return new URL(raw.trim()).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
 const baseOrigin = config.APP_BASE_URL;
 if (!baseOrigin) throw new Error("APP_BASE_URL chưa được cấu hình (config.ts phải đặt fallback)");
-const ALLOWED_ORIGINS = new Set([baseOrigin.toLowerCase()]);
+const baseParsed = toOrigin(baseOrigin);
+if (!baseParsed) throw new Error(`APP_BASE_URL không phải URL hợp lệ: ${baseOrigin}`);
+const ALLOWED_ORIGINS = new Set([baseParsed]);
 if (config.CORS_ORIGINS) {
   for (const o of config.CORS_ORIGINS.split(",")) {
-    const v = o.trim().replace(/\/+$/, "").toLowerCase();
+    const v = toOrigin(o);
     if (v) ALLOWED_ORIGINS.add(v);
   }
 }
 
+// ─── CSRF: token đồng bộ hoá gắn với phiên ──────────────────────────────────
+//
+// Vì sao cần thêm token khi ĐÃ có kiểm Origin/Referer + SameSite=Lax:
+//
+//   Nhánh cũ KẾT THÚC BẰNG next() khi KHÔNG có Origin VÀ KHÔNG có Referer. Lập luận đi kèm ("trình
+//   duyệt nào cũng gửi Origin, nên đây chắc chắn là client không phải trình duyệt") đúng với trình
+//   duyệt hiện đại, nhưng nó bắt toàn bộ khả năng chống CSRF phụ thuộc vào một hành vi mà máy chủ
+//   KHÔNG kiểm soát được — và mặc định của nó là CHO QUA. Một trình duyệt cũ, một tiện ích mở rộng,
+//   một kiểu điều hướng mới trong tương lai lược bỏ cả hai header là hàng rào biến mất, âm thầm.
+//   Mặc định phải là TỪ CHỐI, và cái cho phép đi qua phải là thứ chỉ mã của chính mình có được.
+//
+// Phạm vi áp dụng CHÍNH XÁC: chỉ những request được xác thực bằng PHIÊN COOKIE. Đó đúng là tập
+// request mà trình duyệt tự đính kèm thông tin đăng nhập — tức tập bị CSRF. Request dùng Bearer
+// (viaJwt) và request chưa đăng nhập không nằm trong đó, nên client API, webhook vào và bản thân
+// lần POST đăng nhập KHÔNG bị ảnh hưởng.
+const CSRF_HEADER = "x-csrf-token";
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function issueCsrfToken(req: Request): string {
+  if (!req.session) throw new Error("csrf: không có phiên");
+  if (!req.session.csrfSecret) req.session.csrfSecret = randomBytes(32).toString("hex");
+  return req.session.csrfSecret;
+}
+
+function csrfTokenMatches(sent: unknown, expected: string) {
+  if (typeof sent !== "string" || sent.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+}
+
 function csrfGuard(req: Request, res: Response, next: NextFunction) {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+  if (CSRF_SAFE_METHODS.has(req.method)) return next();
   if (req.viaJwt) return next(); // Bearer tokens are not auto-sent by browsers → not CSRF-able
+
+  // LỚP 1 — Origin/Referer. Giữ nguyên, vẫn là hàng rào rẻ nhất và chặn sớm nhất.
   const origin = req.headers.origin;
   if (origin) {
     if (!ALLOWED_ORIGINS.has(origin.toLowerCase())) {
       return res.status(403).json({ error: "Yêu cầu bị chặn (CSRF: origin không hợp lệ)", code: "csrf_origin" });
     }
-    return next();
-  }
-  // No Origin (some clients omit it) — fall back to Referer when present.
-  const ref = req.headers.referer;
-  if (ref) {
-    let refOrigin: string | null = null;
-    try { refOrigin = new URL(ref).origin.toLowerCase(); } catch { /* malformed */ }
-    if (!refOrigin || !ALLOWED_ORIGINS.has(refOrigin)) {
-      return res.status(403).json({ error: "Yêu cầu bị chặn (CSRF: referer không hợp lệ)", code: "csrf_referer" });
+  } else {
+    const ref = req.headers.referer;
+    if (ref) {
+      const refOrigin = toOrigin(ref);
+      if (!refOrigin || !ALLOWED_ORIGINS.has(refOrigin)) {
+        return res.status(403).json({ error: "Yêu cầu bị chặn (CSRF: referer không hợp lệ)", code: "csrf_referer" });
+      }
     }
+    // Không có cả hai → KHÔNG cho qua nữa. Lớp 2 bên dưới quyết định.
   }
-  // Neither header present → non-browser client (curl/SDK); cookie CSRF needs a
-  // browser, which would have sent Origin. Allow.
+
+  // LỚP 2 — token đồng bộ hoá, CHỈ với request xác thực bằng phiên cookie.
+  if (!req.session?.userId) return next(); // chưa đăng nhập bằng cookie → không có gì để giả mạo
+  const expected = req.session.csrfSecret;
+  if (!expected) {
+    // Phiên có TỪ TRƯỚC khi tính năng này tồn tại (hoặc vừa bị regenerate lúc đăng nhập) thì chưa
+    // có bí mật nào. Nói rõ bằng mã lỗi riêng để client tự lấy token rồi thử lại — thay vì bắt
+    // toàn bộ người đang đăng nhập phải tải lại trang ngay lúc deploy.
+    return res.status(403).json({ error: "Thiếu mã chống giả mạo (CSRF) — vui lòng thử lại", code: "csrf_token_missing" });
+  }
+  if (!csrfTokenMatches(req.headers[CSRF_HEADER], expected)) {
+    return res.status(403).json({ error: "Mã chống giả mạo (CSRF) không hợp lệ — vui lòng thử lại", code: "csrf_token_invalid" });
+  }
   next();
 }
 
@@ -242,10 +299,20 @@ export function createApp() {
   // (cookie sessions otherwise carry a stale role and never re-check `active`).
   app.use("/api/", enforceActiveUser);
 
+  // Cấp mã chống giả mạo (CSRF) cho SPA. Phải nằm TRƯỚC csrfGuard trong chuỗi, và là GET nên
+  // bản thân nó không bị guard chặn. Ghi vào phiên → express-session tự lưu và đặt cookie
+  // (saveUninitialized=false nên phiên ẩn danh chỉ được tạo khi thực sự có gì để ghi).
+  app.get("/api/csrf-token", (req, res) => {
+    if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
+    const token = issueCsrfToken(req);
+    // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
+    res.json({ token });
+  });
+
   // CSRF defence for the cookie-session path: reject state-changing requests whose
-  // Origin/Referer isn't our own. Browsers always send Origin on cross-site
-  // POST/PUT/DELETE, so this blocks CSRF without a token. Bearer-JWT requests are
-  // exempt (tokens aren't auto-attached by browsers). Safe methods pass through.
+  // Origin/Referer isn't our own, AND require a session-bound token. Bearer-JWT
+  // requests are exempt (tokens aren't auto-attached by browsers). Safe methods pass.
   app.use("/api/", csrfGuard);
 
   // API-wide rate limit (DoS protection). Login route has its own stricter limit.

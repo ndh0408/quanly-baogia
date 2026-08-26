@@ -11,21 +11,50 @@ import { state } from "./state.js?v=20260624b";
 let onUnauthorized = () => {};
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
+// ─── Mã chống giả mạo (CSRF) ────────────────────────────────────────────────
+// Máy chủ đòi header X-CSRF-Token cho MỌI thao tác ghi xác thực bằng phiên cookie (csrfGuard trong
+// src/app.ts). Nhớ tạm ở đây, và THỬ LẠI MỘT LẦN khi máy chủ báo mã thiếu/không hợp lệ — cần thiết
+// vì (a) lúc deploy, phiên đang mở được tạo TRƯỚC khi có tính năng này nên chưa có bí mật, và
+// (b) đăng nhập gọi session.regenerate() nên mã cũ hết giá trị.
+let _csrf = null;
+let _csrfDangLay = null;
+async function layCsrf(force = false) {
+  if (_csrf && !force) return _csrf;
+  if (_csrfDangLay) return _csrfDangLay;
+  _csrfDangLay = fetch("/api/csrf-token", { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((b) => { _csrf = (b && b.token) || null; return _csrf; })
+    .catch(() => null)
+    .finally(() => { _csrfDangLay = null; });
+  return _csrfDangLay;
+}
+/** Đăng nhập/đăng xuất làm mới phiên → mã cũ hết giá trị. */
+export function resetCsrfToken() { _csrf = null; }
+const _canGhi = (m) => m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
+const _laLoiCsrf = (b) => !!b && typeof b === "object" && (b.code === "csrf_token_missing" || b.code === "csrf_token_invalid");
+
 export async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    ...opts,
-  });
-  let body;
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) body = await res.json();
-  else body = await res.text();
+  const method = String(opts.method || "GET").toUpperCase();
+  const goi = async (token) => {
+    const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+    if (token) headers["X-CSRF-Token"] = token;
+    const r = await fetch(path, { credentials: "same-origin", ...opts, headers });
+    const ct = r.headers.get("content-type") || "";
+    const b = ct.includes("application/json") ? await r.json() : await r.text();
+    return { r, b };
+  };
+
+  let { r: res, b: body } = await goi(_canGhi(method) ? await layCsrf() : null);
+  // 403 vì mã CSRF → lấy mã MỚI, thử lại ĐÚNG MỘT LẦN.
+  if (res.status === 403 && _canGhi(method) && _laLoiCsrf(body)) {
+    ({ r: res, b: body } = await goi(await layCsrf(true)));
+  }
   // A 401 while already logged in = session expired → bounce to login.
   // But NOT during the login attempt itself (state.user is null), so the login
   // form can surface the real message ("Sai mật khẩu" / "Tài khoản bị khóa"…).
   if (res.status === 401 && state.user) {
     state.user = null;
+    resetCsrfToken();
     onUnauthorized();
     throw new Error((body && body.error) || "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
   }

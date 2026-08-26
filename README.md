@@ -9,7 +9,7 @@ comes out of it.
 > *Tiếng Việt: hệ thống nội bộ quản lý báo giá + hồ sơ nhân sự + theo dõi dự án,
 > xuất Excel khớp đúng mẫu công ty. Đang chạy production.*
 
-**391 commits · ~22,000 LOC TypeScript · 29 Prisma models · 138 HTTP endpoints
+**391 commits · ~22,000 LOC TypeScript · 29 Prisma models · 139 HTTP endpoints
 · 34 test files (~5,200 LOC of tests)**
 
 <sub>Số endpoint và ma trận phân quyền được **sinh từ mã nguồn**, không đếm tay:

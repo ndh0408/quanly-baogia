@@ -3,6 +3,7 @@
 // Form chung (PUT) KHÔNG ghi accountingNote/note (chống rò quyền). Drive REAL app qua supertest.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -34,7 +35,7 @@ describe.runIf(dbAvailable)("personnel field-level edit + payment proof (integra
     const { createApp } = await import("../src/app.js");
     app = createApp();
     [adminU, mgrU, mgr2U, acctU] = await Promise.all([makeUser("admin", "admin"), makeUser("manager", "mgr"), makeUser("manager", "mgr2"), makeUser("accountant", "acct")]);
-    admin = request.agent(app); mgr = request.agent(app); mgr2 = request.agent(app); acct = request.agent(app);
+    admin = agentWithCsrf(app); mgr = agentWithCsrf(app); mgr2 = agentWithCsrf(app); acct = agentWithCsrf(app);
     await Promise.all([login(admin, adminU), login(mgr, mgrU), login(mgr2, mgr2U), login(acct, acctU)]);
     const c = await mgr.post("/api/personnel").send({ fullName: `${TAG} NV`, salary: 10_000_000, projectName: "DA", projectCode: "PRJ-X" });
     expect(c.status).toBe(201);

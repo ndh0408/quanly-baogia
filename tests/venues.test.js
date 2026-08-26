@@ -4,6 +4,7 @@
 // Chạy trên app THẬT qua supertest — cần Postgres có schema (CI có; máy dev thiếu DB thì skip).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -41,7 +42,7 @@ describe.runIf(dbAvailable)("danh mục rạp (/api/venues) — CRUD + phân quy
     const { createApp } = await import("../src/app.js");
     app = createApp();
     [adminU, managerU, hrU] = await Promise.all([makeUser("admin"), makeUser("manager"), makeUser("hr")]);
-    admin = request.agent(app); manager = request.agent(app); hr = request.agent(app);
+    admin = agentWithCsrf(app); manager = agentWithCsrf(app); hr = agentWithCsrf(app);
     await Promise.all([login(admin, adminU), login(manager, managerU), login(hr, hrU)]);
   });
 

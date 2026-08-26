@@ -4,6 +4,7 @@
 // Cần Postgres + schema. CI/`test-on-dev.sh` đặt REQUIRE_DB_TESTS=1 để cấm bỏ qua âm thầm.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -27,7 +28,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
         passwordHash: await bcrypt.hash(PASSWORD, 4),
       },
     });
-    A[key] = request.agent(app);
+    A[key] = agentWithCsrf(app);
     if (active) {
       const r = await A[key].post("/api/auth/login").send({ username: U[key].username, password: PASSWORD });
       expect(r.status, `đăng nhập ${key}`).toBe(200);
@@ -111,7 +112,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
   describe("SESSION-001 — đổi mật khẩu vô hiệu hoá phiên cũ", () => {
     it("phiên thứ hai của cùng tài khoản bị 401 sau khi phiên thứ nhất đổi mật khẩu", async () => {
       const u = await makeUser("pwd", "manager");
-      const other = request.agent(app);
+      const other = agentWithCsrf(app);
       expect((await other.post("/api/auth/login").send({ username: u.username, password: PASSWORD })).status).toBe(200);
       expect((await other.get("/api/auth/me")).status).toBe(200); // còn sống trước khi đổi
 
@@ -141,7 +142,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật đợt 2 (integration)", () =
 
     it("định danh phiên của chính người đổi mật khẩu được XOAY (chống dùng lại chuỗi phiên cũ)", async () => {
       const u = await makeUser("pwd2", "manager");
-      const agent = request.agent(app);
+      const agent = agentWithCsrf(app);
       const first = await agent.post("/api/auth/login").send({ username: u.username, password: PASSWORD });
       const sidBefore = String(first.headers["set-cookie"] || "");
       const ch = await agent.post("/api/auth/change-password").send({ oldPassword: PASSWORD, newPassword: "MatKhauMoi456" });

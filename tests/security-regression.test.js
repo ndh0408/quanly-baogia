@@ -5,6 +5,7 @@
 // Cần Postgres + schema. Máy dev không có DB thì tự bỏ qua; CI đặt REQUIRE_DB_TESTS=1 để BẮT BUỘC chạy.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -40,7 +41,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật — phân quyền ở server 
         passwordHash: await bcrypt.hash(PASSWORD, 4),
       },
     });
-    A[key] = request.agent(app);
+    A[key] = agentWithCsrf(app);
     const res = await A[key].post("/api/auth/login").send({ username: U[key].username, password: PASSWORD });
     expect(res.status, `đăng nhập ${key}`).toBe(200);
     return U[key];

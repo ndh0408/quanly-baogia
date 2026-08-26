@@ -14,7 +14,7 @@
 // đâm vào nó bằng một lỗi 500 vô nghĩa. Bộ test này chốt: 400 kèm thông điệp chỉ đúng chỗ, và dòng
 // âm LẺ vẫn dùng được bình thường miễn tổng còn dương.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -42,7 +42,7 @@ describe.runIf(dbAvailable)("báo giá có tổng ÂM", () => {
     adminU = await prisma.user.create({
       data: { username: `${TAG}-admin`, displayName: `${TAG} admin`, role: "admin", passwordHash: await bcrypt.hash(PWD, 4) },
     });
-    admin = request.agent(app);
+    admin = agentWithCsrf(app);
     expect((await admin.post("/api/auth/login").send({ username: adminU.username, password: PWD })).status).toBe(200);
 
     const co = await prisma.company.create({ data: { code: `${TAG}CO`, name: "Cty thử", address: "1 Thử", quotePrefix: "TT" } });

@@ -9,7 +9,7 @@ import {
 } from "./js/core/state.js?v=20260624b";
 // api(): single fetch wrapper (step 3). 401-while-logged-in bounces to login via the
 // injected handler wired just below (render is a hoisted declaration, safe to reference).
-import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260624b";
+import { api, setUnauthorizedHandler } from "./js/core/api.js?v=20260826a";
 // UI primitives (step 4): toasts, modals, theme, keyboard activation, inline field errors.
 import {
   toast, KBD, installKeyActivation, applyFieldErrors,

@@ -11,5 +11,7 @@ declare module "express-session" {
     permissions?: string[]; // tập quyền HIỆU LỰC per-user (resolve mỗi request) — nguồn phân quyền
     /** Mốc (ms) phiên được thiết lập — so với User.passwordChangedAt để vô hiệu hoá phiên cũ. */
     authAt?: number;
+    /** Bí mật CSRF của phiên (token đồng bộ hoá). Cấp qua GET /api/csrf-token. */
+    csrfSecret?: string;
   }
 }

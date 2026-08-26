@@ -11,7 +11,7 @@
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas } from "../grid-clipboard.js?v=20260706c";
 import { fmtMoney, fmtDate, quoteTotals, vnDateText, escapeHtml, safeLogoSrc, groupLetter, sheetSubtotalGrouped, lineAmount, qtyRound, statusLabel, ROLE_LABEL_FULL } from "./util.js?v=20260630l";
 import { state, can, sheetUsesDays, clearDaysIfUnused } from "./core/state.js?v=20260624b";
-import { api } from "./core/api.js?v=20260624b";
+import { api } from "./core/api.js?v=20260826a";
 import { toast, skeleton, KBD, applyFieldErrors, openModal, promptModal, confirmModal } from "./ui.js?v=20260624b";
 import { vsUpdate, vsSteer, vsClose, openVenuePicker } from "./venueSuggest.js?v=20260726c";
 

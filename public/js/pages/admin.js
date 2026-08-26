@@ -7,7 +7,7 @@ import {
   ROLE_LABEL, RESOURCE_LABEL, ACTION_LABEL, actionLabel, resourceLabel,
 } from "../util.js?v=20260630l";
 import { state, can } from "../core/state.js?v=20260624b";
-import { api } from "../core/api.js?v=20260624b";
+import { api } from "../core/api.js?v=20260826a";
 import {
   toast, skeleton, KBD, errorState, emptyState, openModal, promptModal, confirmModal,
 } from "../ui.js?v=20260624b";

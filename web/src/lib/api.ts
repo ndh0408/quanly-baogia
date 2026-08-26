@@ -207,6 +207,39 @@ let __preview = false;
 export function setPreviewMode(on: boolean) { __preview = on; }
 export function isPreviewMode() { return __preview; }
 
+// ─── Mã chống giả mạo (CSRF) ────────────────────────────────────────────────
+//
+// Máy chủ đòi header X-CSRF-Token cho MỌI thao tác ghi được xác thực bằng phiên cookie (xem
+// csrfGuard trong src/app.ts). Ở đây giữ một bản nhớ tạm và CHỦ ĐỘNG THỬ LẠI MỘT LẦN khi máy chủ
+// báo mã thiếu/không hợp lệ.
+//
+// Vì sao phải có thử-lại chứ không chỉ lấy token một lần lúc khởi động:
+//   • lúc deploy, người đang đăng nhập có phiên tạo TRƯỚC khi tính năng này tồn tại → chưa có bí mật;
+//   • đăng nhập gọi session.regenerate() nên bí mật cũ bị bỏ, phải lấy lại;
+//   • phiên hết hạn rồi đăng nhập lại ở tab khác cũng làm mã trong tay lỗi thời.
+// Không có thử-lại thì cả ba tình huống trên đều hiện ra thành lỗi 403 khó hiểu giữa lúc làm việc.
+let csrfToken: string | null = null;
+let csrfInFlight: Promise<string | null> | null = null;
+
+async function layCsrf(force = false): Promise<string | null> {
+  if (csrfToken && !force) return csrfToken;
+  if (csrfInFlight) return csrfInFlight;
+  csrfInFlight = fetch("/api/csrf-token", { credentials: "include" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((b) => { csrfToken = b?.token ?? null; return csrfToken; })
+    .catch(() => null)
+    .finally(() => { csrfInFlight = null; });
+  return csrfInFlight;
+}
+
+/** Đăng nhập/đăng xuất làm mới phiên → mã cũ hết giá trị. */
+export function resetCsrfToken() { csrfToken = null; }
+
+const CAN_GHI = (m: string) => m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
+const LA_LOI_CSRF = (b: unknown) =>
+  !!b && typeof b === "object" && typeof (b as { code?: unknown }).code === "string" &&
+  ((b as { code: string }).code === "csrf_token_missing" || (b as { code: string }).code === "csrf_token_invalid");
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const method = (opts.method || "GET").toUpperCase();
   if (__preview && method !== "GET" && method !== "HEAD") {
@@ -230,17 +263,24 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
       headers["Content-Encoding"] = "gzip";
     } catch { /* nén hỏng → gửi nguyên văn, không để mất dữ liệu */ }
   }
-  const res = await fetch("/api" + path, {
-    credentials: "include",
-    ...opts,
-    headers,
-    body: thanGui,
-  });
-  const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
+  const goi = async (token: string | null) => {
+    const h = { ...headers };
+    if (token) h["X-CSRF-Token"] = token;
+    const r = await fetch("/api" + path, { credentials: "include", ...opts, headers: h, body: thanGui });
+    const t = await r.text();
+    return { r, body: t ? JSON.parse(t) : null };
+  };
+
+  let { r: res, body } = await goi(CAN_GHI(method) ? await layCsrf() : null);
+
+  // 403 vì mã CSRF → lấy mã MỚI và thử lại ĐÚNG MỘT LẦN. Xem giải thích ở layCsrf().
+  if (res.status === 403 && CAN_GHI(method) && LA_LOI_CSRF(body)) {
+    ({ r: res, body } = await goi(await layCsrf(true)));
+  }
+
   if (!res.ok) {
     // Mất phiên giữa chừng → báo App quay về màn đăng nhập (App lắng nghe "auth:expired").
-    if (res.status === 401) window.dispatchEvent(new Event("auth:expired"));
+    if (res.status === 401) { resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); }
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
@@ -252,11 +292,18 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
  * Không đi qua chặn "xem thử" như `req` vì endpoint nhập Excel CHỈ ĐỌC file, không ghi DB.
  */
 async function reqForm<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch("/api" + path, { method: "POST", credentials: "include", body: form });
-  const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
+  const goi = async (token: string | null) => {
+    // KHÔNG đặt Content-Type — trình duyệt phải tự thêm boundary. Chỉ thêm header CSRF.
+    const headers: Record<string, string> = {};
+    if (token) headers["X-CSRF-Token"] = token;
+    const r = await fetch("/api" + path, { method: "POST", credentials: "include", headers, body: form });
+    const t = await r.text();
+    return { r, body: t ? JSON.parse(t) : null };
+  };
+  let { r: res, body } = await goi(await layCsrf());
+  if (res.status === 403 && LA_LOI_CSRF(body)) ({ r: res, body } = await goi(await layCsrf(true)));
   if (!res.ok) {
-    if (res.status === 401) window.dispatchEvent(new Event("auth:expired"));
+    if (res.status === 401) { resetCsrfToken(); window.dispatchEvent(new Event("auth:expired")); }
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
