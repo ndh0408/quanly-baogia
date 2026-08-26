@@ -236,6 +236,40 @@ const sheetSchema = z.object({
   extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });
 
+/**
+ * TRẦN XUẤT FILE — và vì thế cũng là trần LƯU. Một nguồn duy nhất cho cả hai đường.
+ *
+ * `src/routes/export.routes.ts` từ chối 413 khi báo giá vượt hai con số này ("dùng xuất nền").
+ * Trần LƯU thì rộng hơn hẳn: 60 trang × 1000 dòng = 60.000 dòng, tức người dùng lưu được những
+ * báo giá mà HỆ THỐNG KHÔNG CÓ CÁCH NÀO xuất ra file — đường xuất nền không có nút nào trên giao
+ * diện React (`grep -rn "/jobs" web/src` không ra kết quả) và còn tự tắt khi không có hàng đợi
+ * (`export_async_unavailable`, src/routes/jobs.routes.ts). Kết quả: soạn xong, bấm Lưu thấy "Đã
+ * lưu", rồi bấm Xuất file thì nhận một lỗi kèm lời khuyên không bấm được ở đâu cả.
+ *
+ * Nên chốt chặn được dời LÊN lúc LƯU: hỏng sớm, ngay tại thao tác gây ra nó, kèm câu nói được
+ * người dùng phải làm gì (tách bớt sang báo giá khác). Không nới trần xuất trực tiếp thay vì siết
+ * trần lưu: sinh file chạy trong worker_threads có trần 30s (`EXPORT_GEN_TIMEOUT_MS`,
+ * src/exportQueue.ts:171), vượt là bị `terminate()` — đổi 413 lấy một lỗi hết-giờ thì tệ hơn.
+ * (CHƯA ĐO được 60.000 dòng mất bao lâu để sinh file; chỉ biết trần thời gian ở đó là 30s.)
+ *
+ * Trần TRANG (60 khi lưu) đã nằm dưới trần xuất (100) nên không phải đụng tới.
+ */
+export const MAX_EXPORT_SHEETS = 100;
+export const MAX_EXPORT_ITEMS = 20_000;
+
+const demSoDong = (sheets: { items?: unknown[] }[]) =>
+  sheets.reduce((n, s) => n + (Array.isArray(s?.items) ? s.items.length : 0), 0);
+
+// Bảng nội bộ (extraTables) KHÔNG tính vào đây: chúng không đi vào file xuất (xem extraTableSchema),
+// nên chúng không phải là thứ làm báo giá "lưu được mà không xuất được".
+const quoteSheetsSchema = z
+  .array(sheetSchema)
+  .min(1, "Báo giá phải có ít nhất 1 trang")
+  .max(60, "Tối đa 60 trang trong một báo giá")
+  .refine((sheets) => demSoDong(sheets) <= MAX_EXPORT_ITEMS, {
+    error: `Báo giá vượt quá ${MAX_EXPORT_ITEMS.toLocaleString("vi-VN")} dòng nên sẽ không xuất được file Excel/PDF. Hãy tách bớt sang một báo giá khác rồi lưu lại.`,
+  });
+
 export const QuoteCreateSchema = z.object({
   // quoteNumber is server-generated; allow override but not required
   quoteNumber: z.string().max(40).optional(),
@@ -267,7 +301,7 @@ export const QuoteCreateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá"),
+  sheets: quoteSheetsSchema,
 });
 
 // IMPORTANT: defined explicitly (NOT QuoteCreateSchema.partial()) because the
@@ -305,7 +339,7 @@ export const QuoteUpdateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá").optional(),
+  sheets: quoteSheetsSchema.optional(),
   // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
   baseUpdatedAt: z.coerce.date().optional(),
 });

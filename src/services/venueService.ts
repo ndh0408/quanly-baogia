@@ -228,7 +228,34 @@ export async function mergeVenue(req: Request) {
                   FROM jsonb_array_elements(${JSON.stringify(chuyen)}::jsonb) e) d
          WHERE v.id = d.id`;
     }
-    for (const u of doiMeta) await tx.venueItem.update({ where: { id: u.id }, data: u.data });
+    // Một lệnh cho TOÀN BỘ hạng mục đích phải ghi lại metadata (ghi chú nối, nhóm, kích thước…).
+    // Trước đây là `for … await tx.venueItem.update(...)`: một round-trip cho MỖI hạng mục, nối
+    // đuôi nhau trong transaction đang giữ advisory lock của cả hai rạp. Ca này KHÔNG hiếm — nó
+    // chính là lý do gộp rạp tồn tại: cùng một hạng mục được hai rạp ghi bằng hai kiểu ghi chú/nhóm
+    // khác nhau. Đo được: 20 hạng mục = 21 câu lệnh, sau khi gộp còn 2
+    // (tests/b2-venue-merge-meta-batch.test.js).
+    //
+    // `e->>'x'` trả NULL khi giá trị JSON là null nên cột nullable (`dim`/`note`/`widthM`…) giữ
+    // đúng ngữ nghĩa null của `mergeVenueItemMetadata`. CHỈ ghi 7 cột mà hàm đó sinh ra — `unit`,
+    // `name`, `sortOrder`, `venueId` không nằm trong bản gộp nên phải nguyên vẹn.
+    // "updatedAt" tự đặt: câu raw không đi qua `@updatedAt` của Prisma (giống lệnh chuyển ở trên).
+    if (doiMeta.length) {
+      const payload = doiMeta.map((u) => ({ id: u.id, ...u.data }));
+      await tx.$executeRaw`
+        UPDATE "VenueItem" v
+           SET "category" = d.category, "dim" = d.dim, "widthM" = d."widthM", "heightM" = d."heightM",
+               "quantity" = d.quantity, "note" = d.note, "active" = d.active, "updatedAt" = now()
+          FROM (SELECT (e->>'id')::int AS id,
+                       e->>'category' AS category,
+                       e->>'dim' AS dim,
+                       (e->>'widthM')::numeric AS "widthM",
+                       (e->>'heightM')::numeric AS "heightM",
+                       (e->>'quantity')::numeric AS quantity,
+                       e->>'note' AS note,
+                       (e->>'active')::boolean AS active
+                  FROM jsonb_array_elements(${JSON.stringify(payload)}::jsonb) e) d
+         WHERE v.id = d.id`;
+    }
     if (xoa.length) await tx.venueItem.deleteMany({ where: { id: { in: xoa } } });
     await tx.venue.delete({ where: { id } });
     return { from, into, movedItems, removedDuplicates };

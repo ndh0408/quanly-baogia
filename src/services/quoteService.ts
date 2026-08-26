@@ -20,6 +20,7 @@ import {
   canEdit,
   QUOTE_INCLUDE,
   QUOTE_LIST_SELECT,
+  QUOTE_UPDATE_STATE_SELECT,
   templatesBelongToCompany,
   buildSheetsCreate,
   sanitizeExtraTables,
@@ -381,7 +382,10 @@ export async function updateQuote(req: Request) {
   if (userId === undefined) throw httpError(401, "Chưa đăng nhập");
   const b = req.body;
 
-  const existing: any = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE as any });
+  // Bản đọc RÚT GỌN (QUOTE_UPDATE_STATE_SELECT, src/quoteUtils.ts): CỐ Ý không kèm `images` của
+  // hạng mục lẫn `extraTables` của sheet — cả hai chứa base64 nặng mà đường lưu không hề đọc tới.
+  // Ảnh vẫn về đủ ở phản hồi cuối hàm (lần đọc đó mới là lần editor cần).
+  const existing: any = await prisma.quote.findFirst({ where: { id }, select: QUOTE_UPDATE_STATE_SELECT as any });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canEdit(existing, req.session)) throw httpError(403, "Bạn không thể sửa báo giá này");
 
@@ -617,7 +621,10 @@ export async function listQuotes(req: Request) {
 }
 
 /**
- * Bảng nội bộ của một trang danh sách, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
+ * Bảng nội bộ THEO TỪNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
+ *
+ * Hai đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`) và `listProjects`
+ * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang).
  *
  * Vì sao phải cắt ở tầng SQL chứ không lọc sau khi nạp: lọc ở JS thì base64 đã đi qua dây và đã
  * nằm trong heap rồi — đúng chi phí cần bỏ. Ảnh vẫn sống trong CSDL và vẫn tải được on-demand qua
@@ -631,13 +638,14 @@ export async function listQuotes(req: Request) {
  * sanitizeExtraTables), nên phải phòng cả ca không phải mảng: CASE ở ngoài chặn `jsonb_array_elements`
  * ném lỗi trên object/chuỗi, và bảng có `items` không phải mảng thì để nguyên.
  */
-async function bangNoiBoTheoBaoGia(ids: number[]) {
-  const rows = await prisma.$queryRaw<{ quoteId: number; tables: any }[]>`
-    SELECT s."quoteId" AS "quoteId", jsonb_agg(x.t ORDER BY s."order", s.id) AS "tables"
+async function bangNoiBoTheoSheet(ids: number[]) {
+  const rows = await prisma.$queryRaw<{ quoteId: number; sheetId: number; order: number; tables: any }[]>`
+    SELECT s."quoteId" AS "quoteId", s.id AS "sheetId", s."order" AS "order",
+           coalesce(jsonb_agg(x.t ORDER BY x.ord), '[]'::jsonb) AS "tables"
       FROM "QuoteSheet" s
       CROSS JOIN LATERAL (
-        SELECT CASE WHEN jsonb_typeof(t->'items') = 'array'
-                    THEN jsonb_set(t, '{items}', (SELECT coalesce(jsonb_agg(
+        SELECT CASE WHEN jsonb_typeof(e.t->'items') = 'array'
+                    THEN jsonb_set(e.t, '{items}', (SELECT coalesce(jsonb_agg(
                                                            -- Phep tru jsonb-text NEM LOI 22023 "cannot delete from
                                                            -- scalar" khi phan tu KHONG phai object/array. CASE ben
                                                            -- ngoai chi phong extraTables khong phai mang va items
@@ -650,14 +658,34 @@ async function bangNoiBoTheoBaoGia(ids: number[]) {
                                                            -- nam trong template literal, backtick se lam dut chuoi.)
                                                            CASE WHEN jsonb_typeof(it) = 'object' THEN it - 'paidProof' ELSE it END
                                                          ), '[]'::jsonb)
-                                                    FROM jsonb_array_elements(t->'items') it))
-                    ELSE t END AS t
+                                                    FROM jsonb_array_elements(e.t->'items') it))
+                    ELSE e.t END AS t, e.ord AS ord
           FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array'
-                                         THEN s."extraTables" ELSE '[]'::jsonb END) t
+                                         THEN s."extraTables" ELSE '[]'::jsonb END) WITH ORDINALITY AS e(t, ord)
       ) x
      WHERE s."quoteId" = ANY(${ids})
-     GROUP BY s."quoteId"`;
-  return new Map<number, any[]>(rows.map((r) => [r.quoteId, Array.isArray(r.tables) ? r.tables : []]));
+     GROUP BY s."quoteId", s.id, s."order"`;
+  // WITH ORDINALITY giu dung THU TU bang trong mang goc: jsonb_agg khong co ORDER BY thi thu tu
+  // do planner quyet, va thu tu bang la thu tu nguoi dung nhin thay tren man hinh.
+  return rows;
+}
+
+/**
+ * Bảng nội bộ GOM THEO BÁO GIÁ (thứ tự sheet: `order` rồi `id`) — hình dạng mà `presentQuoteRow`
+ * đọc. Chỉ là lớp gộp trong JS trên `bangNoiBoTheoSheet`, để chỉ có MỘT câu SQL cắt `paidProof`
+ * trong cả tệp: hai bản chép của quy tắc cắt ấy sẽ trôi khỏi nhau.
+ */
+async function bangNoiBoTheoBaoGia(ids: number[]) {
+  const rows = await bangNoiBoTheoSheet(ids);
+  rows.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.sheetId - b.sheetId);
+  const out = new Map<number, any[]>();
+  for (const r of rows) {
+    const cu = out.get(r.quoteId);
+    const them = Array.isArray(r.tables) ? r.tables : [];
+    if (cu) cu.push(...them);
+    else out.set(r.quoteId, [...them]);
+  }
+  return out;
 }
 
 /** Xem trước SỐ báo giá KẾ TIẾP (không tiêu thụ counter). Prefix theo công ty đã chọn. */
@@ -744,7 +772,15 @@ export async function listProjects(req: Request) {
       sheets: {
         orderBy: { order: "asc" },
         select: {
-          id: true, order: true, name: true, subtotal: true, extraTables: true,
+          // KHÔNG kéo `extraTables` ở đây: cột jsonb đó chứa `paidProof` (ảnh chứng từ base64
+          // hàng trăm KB) mà trang này chỉ dùng để CỘNG ba con số rồi vứt. Nạp riêng bằng
+          // `bangNoiBoTheoSheet` (cắt ảnh NGAY TẠI SQL) ngay dưới — y như `listQuotes` đã làm.
+          // Đo được (tests/b2-projects-no-proof.test.js, đếm byte tại socket): 8 báo giá × 3 bảng
+          // × ảnh 400KB kéo về 9,6 MB; sau khi vá còn dưới 0,48 MB. Ở production trần là 2000 báo
+          // giá, và người mở trang gồm cả kế toán (`invoice:page`).
+          // LƯU Ý số block TOAST KHÔNG giảm: máy chủ vẫn phải giải TOAST cột đó để cắt `paidProof`.
+          // Thứ bỏ đi là phần đi QUA DÂY và nằm trong heap của Node.
+          id: true, order: true, name: true, subtotal: true,
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
           invoiceDate: true, paymentMethod: true, orderClosedAt: true, invoiceYear: true, invoiceCompany: true, invoiceDesc: true, invoiceNote: true,
@@ -753,6 +789,13 @@ export async function listProjects(req: Request) {
       },
     },
   });
+  // Bảng nội bộ (đã cắt ảnh chứng từ) theo TỪNG sheet — chỉ để cộng hcm/hanoi/khach ngay dưới.
+  const bangTheoSheet = new Map<number, any[]>();
+  if (quotes.length) {
+    for (const r of await bangNoiBoTheoSheet(quotes.map((q: any) => q.id))) {
+      bangTheoSheet.set(r.sheetId, Array.isArray(r.tables) ? r.tables : []);
+    }
+  }
   const data = quotes.map((q: any) => {
     // subtotal/sheet ĐÃ materialized (ghi lúc save) → KHÔNG kéo items + computeQuoteTotals nữa (perf).
     return {
@@ -774,7 +817,7 @@ export async function listProjects(req: Request) {
       customerDebtDays: q.customer?.debtDays ?? null,   // hạn công nợ riêng của khách (trang Hóa đơn)
       createdBy: q.createdBy,
       sheets: q.sheets.map((sh: any) => {
-        const ex = Array.isArray(sh.extraTables) ? sh.extraTables : [];
+        const ex = bangTheoSheet.get(sh.id) ?? [];
         const sumCat = (cat: string) => ex.filter((t: any) => t && t.category === cat).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
         return {
           id: sh.id,

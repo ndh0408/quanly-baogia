@@ -3,7 +3,7 @@
 // app.js (createApp) so integration tests can drive it without binding a port.
 import { config, featureStatus } from "./config.js";
 import { logger } from "./logger.js";
-import { initSentry } from "./observability.js";
+import { initSentry, dangKyChanSuCoTienTrinh, flushSentry } from "./observability.js";
 import { prisma } from "./db.js";
 import { createApp } from "./app.js";
 import { reloadRoleOverrides } from "./roleOverrides.js";
@@ -60,6 +60,9 @@ function shutdown(sig: string) {
 
   server.close(async () => {
     await prisma.$disconnect().catch(() => {});
+    // Đẩy nốt bộ đệm Sentry trước khi đi, y như src/worker.ts. Không có bước này thì lỗi ghi nhận
+    // trong những giây cuối (thường là lỗi CỦA chính lần deploy) không bao giờ rời khỏi máy.
+    await flushSentry();
     process.exit(0);
   });
   // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
@@ -70,5 +73,8 @@ function shutdown(sig: string) {
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("unhandledRejection", (err) => logger.error({ err }, "unhandledRejection"));
-process.on("uncaughtException", (err) => logger.error({ err }, "uncaughtException"));
+// Sự cố cấp tiến trình: báo Sentry → flush → thoát (uncaughtException). Dùng CHUNG một chốt với
+// tiến trình worker — xem khối chú thích ở src/observability.ts. Hai dòng chỉ-log trước đây vừa
+// đánh mất sự kiện Sentry, vừa TẮT hành vi thoát mặc định của Node: tiến trình API ở lại phục vụ
+// request sau một uncaughtException, còn /livez thì vẫn xanh.
+dangKyChanSuCoTienTrinh();

@@ -41,6 +41,43 @@ export const QUOTE_INCLUDE = {
   members: { select: { id: true, username: true, displayName: true } },
 } satisfies Prisma.QuoteInclude;
 
+/**
+ * Bản đọc "TRẠNG THÁI HIỆN TẠI" cho đường LƯU (`updateQuote`) — CỐ Ý liệt kê từng cột.
+ *
+ * `QUOTE_INCLUDE` ở trên lấy `items` bằng `include`, tức MỌI cột của QuoteItem, kể cả `images`
+ * (mảng data-URL base64) và `QuoteSheet.extraTables` (jsonb chứa `paidProof` base64). Đường lưu
+ * dùng bản đọc này cho ĐÚNG bốn việc: kiểm quyền sửa (`status`/`createdById`/`members`), so mốc
+ * khoá lạc quan (`updatedAt`), lấy các cột vô hướng để dựng `searchText` + nhật ký, và — chỉ khi
+ * payload KHÔNG kèm `sheets` — tính lại tổng tiền từ `items`. Không chỗ nào đọc ảnh.
+ *
+ * Đo được (tests/b2-update-quote-no-image-read.test.js, 12 hạng mục × ảnh 400KB): một lần Lưu
+ * làm bảng QuoteItem đụng 1224 block TOAST, đúng GẤP ĐÔI một lần đọc đầy đủ (612) — vì cùng một
+ * khối ảnh bị đọc ở đây rồi đọc lại lần nữa ở phản hồi. Bỏ ảnh khỏi lần đọc này còn 612.
+ *
+ * Lần đọc CUỐI (`tx.quote.update(... include: QUOTE_INCLUDE)`) thì PHẢI giữ nguyên ảnh: editor lấy
+ * nguyên phản hồi làm state (`qRef.current = { ...saved }` — web/src/pages/QuoteEditor.tsx), cắt
+ * ảnh ở đó là xoá trắng ảnh trên màn hình sau mỗi lần Lưu.
+ *
+ * `items` PHẢI giữ `orderBy: { order: "asc" }`: `computeQuoteTotals` đọc dòng "section" để đặt hệ
+ * số nhân cho các dòng SAU nó, nên đảo thứ tự là ra tổng tiền khác.
+ */
+export const QUOTE_UPDATE_STATE_SELECT = {
+  id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
+  toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
+  companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  members: { select: { id: true } },
+  sheets: {
+    orderBy: { order: "asc" },
+    select: {
+      id: true, name: true, order: true, groupSubtotal: true,
+      items: {
+        orderBy: { order: "asc" },
+        select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
+      },
+    },
+  },
+} satisfies Prisma.QuoteSelect;
+
 // Account Hà Nội: CHỈ được thấy phần GIÁ HÀ NỘI. Trả về object TỐI GIẢN — KHÔNG có
 // sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
 // qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại

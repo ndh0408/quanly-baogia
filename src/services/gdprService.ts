@@ -7,8 +7,17 @@ import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
 
-function bigIntToString(obj: unknown) {
-  return JSON.parse(JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+/**
+ * Tuần tự hoá khối xuất — MỘT lần stringify duy nhất cho cả đường xuất, và là chỗ DUY NHẤT xử lý
+ * BigInt (AuditEvent/Notification/RefreshToken đều có id BigInt, thứ JSON.stringify trần sẽ ném).
+ *
+ * Trước đây việc này làm hai lần: `bigIntToString` chạy JSON.stringify + JSON.parse trên TOÀN BỘ cây
+ * (dựng thêm một chuỗi đầy đủ và một cây object đầy đủ trong heap), rồi route lại JSON.stringify lần
+ * nữa để gửi đi. Ba bản sao cho một lần tải về. Bỏ vòng parse ấy không đổi một byte nào của JSON gửi
+ * ra: Decimal của Prisma có toJSON trả chuỗi và Date có toJSON trả ISO, y hệt vòng cũ tạo ra.
+ */
+export function serializeExport(data: unknown): string {
+  return JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2);
 }
 
 /**
@@ -42,7 +51,7 @@ function anonymizeUserOps(id: number) {
   ];
 }
 
-/** Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu (đã chuyển bigint→string). */
+/** Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu. Tuần tự hoá: `serializeExport`. */
 export async function exportUser(userId: number) {
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
@@ -53,9 +62,20 @@ export async function exportUser(userId: number) {
         lastLoginAt: true, lastLoginIp: true, createdAt: true,
       },
     }),
+    // Ba cột BLOB bị loại khỏi bản xuất — lý do KHÁC NHAU cho từng cột, không phải "cho nhẹ":
+    //   · QuoteItem.images  — mảng data-URL base64, trần validator là 10 ảnh × 2.800.000 ký tự MỖI
+    //     hạng mục (src/validators.ts:161-163). Một báo giá cỡ trung đã vượt xa bộ nhớ hợp lý, mà
+    //     take ở đây là 1000 báo giá.
+    //   · QuoteSheet.extraTables — jsonb chứa `paidProof`, tức ảnh CHỨNG TỪ THANH TOÁN. Ngoài kích
+    //     thước, đó là chứng từ của công ty/người khác chứ không phải dữ liệu cá nhân của người xin
+    //     bản xuất: đưa nó vào một tệp tải-về là tự tạo đường rò.
+    //   · Quote.customerLogo — data-URL base64 logo của KHÁCH HÀNG, cùng lý do trên.
+    // Mọi trường chữ/số của báo giá, sheet và hạng mục vẫn nguyên; `omit` (không phải `select`) để
+    // cột mới thêm sau này tự động CÓ trong bản xuất thay vì âm thầm biến mất.
     prisma.quote.findMany({
       where: { createdById: userId },
-      include: { sheets: { include: { items: true } } },
+      omit: { customerLogo: true },
+      include: { sheets: { omit: { extraTables: true }, include: { items: { omit: { images: true } } } } },
       take: 1000,
     }),
     prisma.customer.findMany({ where: { ownerId: userId }, take: 5000 }),
@@ -75,7 +95,7 @@ export async function exportUser(userId: number) {
     }),
   ]);
 
-  return bigIntToString({
+  return {
     exportedAt: new Date(),
     format: "qly-gdpr-export/1.0",
     user,
@@ -84,7 +104,7 @@ export async function exportUser(userId: number) {
     auditEvents,
     refreshTokens,
     notifications,
-  });
+  };
 }
 
 /**

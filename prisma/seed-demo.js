@@ -37,6 +37,15 @@ async function main() {
     console.error("✗ Từ chối seed demo: cần ALLOW_DEMO_SEED=1 (chặn seed nhầm vào prod).");
     process.exit(1);
   }
+  // CHỐT THỨ HAI, theo NODE_ENV. `ALLOW_DEMO_SEED=1` một mình là chưa đủ: nó nằm ngay trong lệnh
+  // người ta chép từ tài liệu dev, nên chép nhầm cửa sổ SSH là đủ để chạy trên máy production.
+  // Phần "dọn dữ liệu demo cũ" ngay bên dưới dùng client RAW (không có extension soft-delete) →
+  // `deleteMany` là XOÁ THẬT. Cùng dạng chốt với scripts/migration/pii-backfill.mjs:47-50.
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED_PROD !== "true") {
+    console.error("✗ NODE_ENV=production: từ chối seed demo (script XOÁ CỨNG dữ liệu mang dấu [DEMO]/demo_/DEMOKH).");
+    console.error("  Chắc chắn muốn chạy trên production thì đặt THÊM ALLOW_DEMO_SEED_PROD=true.");
+    process.exit(1);
+  }
 
   const co = await prisma.company.findUnique({ where: { code: "gia_nguyen" } });
   if (!co) { console.error("✗ Chưa có công ty gia_nguyen — chạy `npm run db:seed` trước."); process.exit(1); }

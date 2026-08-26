@@ -5,7 +5,7 @@
 // cap that degrades to 429 instead of timing out.
 import { Worker } from "node:worker_threads";
 import { logger } from "./logger.js";
-import { exportActiveWorkers, exportQueueDepth, exportRejectedTotal, exportDuration } from "./observability.js";
+import { exportActiveWorkers, exportQueueDepth, exportRejectedTotal, exportDuration, exportMaxActiveWorkers, exportMaxQueueDepth } from "./observability.js";
 
 // ─── Cổng giới hạn đồng thời, CÓ TRẦN HÀNG ĐỢI ──────────────────────────────
 //
@@ -248,5 +248,25 @@ export async function runExportJob(
   return out;
 }
 
-/** Trạng thái cổng xuất file — dùng cho /readyz mở rộng và cho test. */
+/** Trạng thái cổng xuất file — nguồn của cả 4 gauge công suất, và dùng cho test. */
 export const exportGateStats = () => ({ active: gate.active(), pending: gate.pending(), maxActive: MAX_WORKERS, maxPending: MAX_QUEUED });
+
+/**
+ * Đồng bộ 4 gauge công suất xuất file. Gọi ĐÚNG LÚC SCRAPE (từ handler /metrics), cùng lý do đã
+ * viết cho `capNhatDoSauHangDoi` ở src/queue.ts: `setInterval` trong createApp sẽ chạy mãi trong
+ * MỌI tiến trình test, còn số lấy tại thời điểm scrape thì luôn tươi.
+ *
+ * `active`/`pending` vẫn được đặt tại chỗ ở acquire/release (đường nóng cần số tức thời); ở đây đặt
+ * lại là để khi KHÔNG có lượt xuất nào từ lúc khởi động, /metrics vẫn nói được "0 trên trần 3" thay
+ * vì hai gauge trống trơn. Hai trần thì chỉ ở đây mới có chỗ phát ra.
+ *
+ * KHÔNG ném: /metrics phải trả được phần số liệu còn lại.
+ */
+export function capNhatCongSuatXuat() {
+  const s = exportGateStats();
+  exportActiveWorkers.set(s.active);
+  exportQueueDepth.set(s.pending);
+  exportMaxActiveWorkers.set(s.maxActive);
+  exportMaxQueueDepth.set(s.maxPending);
+  return s;
+}

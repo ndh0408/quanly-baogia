@@ -24,6 +24,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "qa:dev": "node scripts/dev/rc-qa.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "husky || true",

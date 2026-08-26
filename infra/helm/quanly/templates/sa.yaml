@@ -9,6 +9,18 @@ metadata:
   {{- end }}
 {{- end }}
 {{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+{{/*
+  ServiceMonitor gửi Bearer lấy từ khoá METRICS_TOKEN của Secret. Nhưng mặc định khoá đó RỖNG và
+  templates/secret.yaml vẫn TẠO khoá rỗng ấy, nên bật serviceMonitor mà quên đặt token thì:
+  Prometheus scrape đều đặn với `Authorization: Bearer ` rỗng → src/app.ts:370-371
+  (`if (isProd && !config.METRICS_TOKEN) return res.status(404)`) trả 404 đều đặn → bảng số liệu
+  trống trơn mà KHÔNG có cảnh báo nào. Đúng triệu chứng cũ, chỉ khác đường tới.
+  Dừng render còn hơn render ra một thứ im lặng sai — cùng cách chart đang chặn image.tag=latest.
+  Không chặn khi dùng existingSecret: Secret đó do người khác quản, chart không đọc được nội dung.
+*/}}
+{{- if and (not .Values.existingSecret) (not .Values.secrets.METRICS_TOKEN) }}
+{{- fail "metrics.serviceMonitor.enabled=true nhung secrets.METRICS_TOKEN dang RONG: Prometheus se scrape bang Bearer rong va nhan 404 im lang. Dat --set secrets.METRICS_TOKEN=<token>, hoac tat metrics.serviceMonitor.enabled, hoac dung existingSecret." -}}
+{{- end }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

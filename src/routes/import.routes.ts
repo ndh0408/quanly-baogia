@@ -55,6 +55,73 @@ class LoiNhap extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+// ─── PHỄU: TRẦN SỐ WORKER NHẬP CHẠY CÙNG LÚC ───────────────────────────────
+//
+// Rate limiter ở trên đếm theo KHOÁ (người dùng/IP) trong 60s — nó KHÔNG nói gì về số việc chạy
+// ĐỒNG THỜI. 8 người mỗi người một file 10MB là 8 worker cùng lúc, mỗi worker được cấp
+// `maxOldGenerationSizeMb: 512`, mà chính chú thích trên ĐÃ ĐO và ghi rằng trần heap đó không
+// chặn được thứ tốn kém nhất. Vượt RAM ở mức container thì kernel SIGKILL CẢ TIẾN TRÌNH — mọi
+// request đang bay đứt, đúng thứ mà việc chuyển sang worker thread định tránh.
+//
+// Nên: N việc chạy cùng lúc, hàng chờ có trần, chờ quá lâu thì 429 kèm Retry-After. Từ chối SỚM
+// và nói rõ tốt hơn nhận hết rồi chết cả tiến trình.
+//
+// Trần mặc định 2: đây là việc NGỐN CPU+RAM, chạy song song nhiều hơn số việc máy làm nổi chỉ
+// làm mọi người cùng chậm chứ không ai xong sớm hơn. Chỉnh bằng env khi biết rõ máy.
+const soNguyen = (raw: string | undefined, mac: number, toiThieu: number) => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= toiThieu ? Math.floor(n) : mac;
+};
+const IMPORT_MAX_CONCURRENT = soNguyen(process.env.IMPORT_MAX_CONCURRENT, 2, 1);
+const IMPORT_MAX_QUEUED = soNguyen(process.env.IMPORT_MAX_QUEUED, 4, 0);
+// Chờ tối đa bấy nhiêu trước khi bỏ cuộc. Phải NGẮN hơn nhiều so với thời gian chờ của trình
+// duyệt: người dùng thà nhận "máy chủ đang bận, thử lại" sau 15s còn hơn treo tab.
+const IMPORT_WAIT_MS = soNguyen(process.env.IMPORT_WAIT_MS, 15_000, 1);
+
+const BAN = () => new LoiNhap("Máy chủ đang bận đọc file Excel khác. Hãy thử lại sau vài giây.", 429);
+
+let dangChay = 0;
+type NguoiCho = { nhan: () => void; huy: (e: unknown) => void; dongHo: NodeJS.Timeout };
+const hangCho: NguoiCho[] = [];
+
+/** Xin một suất chạy worker. Resolve = được chạy; reject(LoiNhap 429) = bận, không chạy. */
+function xinSuat(): Promise<void> {
+  if (dangChay < IMPORT_MAX_CONCURRENT) { dangChay++; return Promise.resolve(); }
+  if (hangCho.length >= IMPORT_MAX_QUEUED) return Promise.reject(BAN());
+  return new Promise<void>((resolve, reject) => {
+    const v: NguoiCho = {
+      nhan: () => { clearTimeout(v.dongHo); resolve(); },
+      huy: reject,
+      dongHo: setTimeout(() => {
+        const i = hangCho.indexOf(v);
+        if (i >= 0) hangCho.splice(i, 1);
+        v.huy(BAN());
+      }, IMPORT_WAIT_MS),
+    };
+    hangCho.push(v);
+  });
+}
+
+/**
+ * Trả suất. CHUYỂN TAY thẳng cho người đang chờ chứ không giảm rồi tăng lại — giảm/tăng qua hai
+ * nhịp event loop sẽ để lọt một request mới chen ngang trước người đã xếp hàng.
+ */
+function traSuat(): void {
+  const v = hangCho.shift();
+  if (v) { v.nhan(); return; }
+  if (dangChay > 0) dangChay--;
+}
+
+/** Chốt cho test: xem/điều khiển phễu mà không phải dựng cả một request HTTP. */
+export const _tranNhap = {
+  xin: xinSuat,
+  tra: traSuat,
+  soDangChay: () => dangChay,
+  soDangCho: () => hangCho.length,
+  MAX_CONCURRENT: IMPORT_MAX_CONCURRENT,
+  MAX_QUEUED: IMPORT_MAX_QUEUED,
+};
+
 function docWorkbookTrongWorker(buffer: Buffer): Promise<any> {
   return new Promise((resolve, reject) => {
     let xong = false;
@@ -150,6 +217,15 @@ router.post(
       }
     }
 
+    // Xin suất SAU mọi kiểm tra rẻ tiền (quyền, chữ ký zip, quyền trên báo giá) để không giữ
+    // chỗ cho những request đằng nào cũng bị từ chối.
+    try {
+      await xinSuat();
+    } catch (e) {
+      res.setHeader("Retry-After", "5");
+      return res.status(429).json({ error: e instanceof LoiNhap ? e.message : "Máy chủ đang bận, hãy thử lại sau vài giây." });
+    }
+
     let result;
     try {
       result = await docWorkbookTrongWorker(req.file.buffer);
@@ -159,6 +235,10 @@ router.post(
         ? e.message
         : `Không đọc được file Excel: ${e instanceof Error ? e.message : "file hỏng hoặc sai định dạng"}`;
       return res.status(st).json({ error: msg });
+    } finally {
+      // PHẢI ở finally: thiếu một đường thoát là suất bị ăn mòn dần cho tới khi không ai nhập
+      // được nữa — kiểu hỏng chỉ lộ ra sau nhiều ngày chạy.
+      traSuat();
     }
 
     await audit(req, "quote.import.preview", {

@@ -51,9 +51,23 @@ function vnDateText(d: any, city: any) {
 // = + - @ (or a leading tab/CR) is interpreted as a formula by Excel/Sheets when
 // the exported file is opened. Prefix a zero-width-safe apostrophe so the value
 // is shown literally. Only applied to plain strings (numbers/dates untouched).
+// `\t`/`\r` ở NGAY đầu vẫn tính (Excel bỏ qua chúng khi phân giải ô), còn `= + - @` thì tính kể
+// cả khi có khoảng trắng đứng trước: tên hạng mục KHÔNG đi qua `clean()` (xem chỗ ghi cột name),
+// nên `" =SUM(...)"` giữ nguyên dấu cách tới lúc ghi ô. Đa số nơi nhận (Google Sheets, trình đọc
+// CSV) cắt khoảng trắng đầu TRƯỚC khi quyết định "có phải công thức không", nên neo cứng vào ký
+// tự đầu tiên là bỏ lọt. `\s` của JS CÓ bao gồm U+00A0 (no-break space) — ký tự hay dính theo khi
+// dán từ Word — nên không cần liệt kê riêng.
+//
+// GIÁ PHẢI TRẢ, đã biết và CỐ Ý giữ: exceljs 4.4.0 KHÔNG hỗ trợ `quotePrefix` (thuộc tính kiểu ô
+// mà Excel dùng để nhớ "đây là chữ" mà không hiện ký tự nào) — `grep -rn "quotePrefix"
+// node_modules/exceljs/lib/` trả 0 kết quả. Nên cách duy nhất còn lại là chèn thật một dấu `'`
+// vào chuỗi, và khách MỞ FILE RA SẼ THẤY nó với tên hạng mục kiểu "-Ghế Tiffany". Muốn bỏ dấu
+// nháy cho nhánh `- +` (vốn gần như không bao giờ là công thức thật) thì phải sửa cả
+// tests/xp3-excel-cells.test.js — bài đó đang chốt "không ô chữ nào bắt đầu bằng = + - @".
+const DAU_CONG_THUC = /^[\t\r]|^\s*[=+\-@]/;
 function neutralizeFormula(value: any) {
   if (typeof value !== "string" || value.length === 0) return value;
-  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return DAU_CONG_THUC.test(value) ? `'${value}` : value;
 }
 
 function setCell(ws: any, ref: any, value: any) {
@@ -167,7 +181,9 @@ function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
   // nhảy qua bước xoá, nên một logo .webp (validators.ts VẪN cho phép, ExcelJS thì không nhúng
   // được) làm file gửi khách in nguyên dòng hướng dẫn dành cho người dựng mẫu.
   try { ws.getCell(ref).value = null; } catch { /* ô ngoài vùng/đang merge — bỏ qua */ }
-  const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
+  // Dùng CHUNG danh sách định dạng với cột ảnh theo hạng mục (ANH_NHUNG_DUOC, khai báo bên dưới)
+  // — hai chỗ lệch nhau là kiểu lỗi chỉ lộ ra trên file đã gửi khách.
+  const m = ANH_NHUNG_DUOC.exec(dataUrl);
   if (!m) return;
   let extension = m[1].toLowerCase();
   if (extension === "jpg") extension = "jpeg";
@@ -213,8 +229,26 @@ function imgDims(buf: Buffer, ext: string): { w: number; h: number } | null {
 const IMG_BOX = 74;               // khung mỗi ảnh (px)
 const MAX_ROW_PX = 540;           // Excel giới hạn hàng 409pt ≈ 545px — nhiều ảnh thì thu khung lại
 const MAX_ITEM_IMG_BYTES = 3 * 1024 * 1024;   // cap ảnh/hạng mục (client đã nén ~JPEG 1400px)
+// Định dạng ExcelJS ghi thẳng được vào .xlsx. KHÔNG có `webp` ở đây dù validators.ts:132 và
+// web/src/components/GridTable.tsx:89 cho lưu webp: nhúng được thì phải chuyển mã, mà dự án
+// không có bộ chuyển mã ảnh nào trong package.json (không sharp, không jimp), còn ném thẳng
+// byte webp vào file thì phụ thuộc Excel của KHÁCH có đọc được WebP không — Office bản vĩnh
+// viễn 2016/2019 thì không, và một khung ảnh lỗi giữa báo giá gửi khách còn tệ hơn ô trống.
+const ANH_NHUNG_DUOC = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i;
 function insertItemImages(ws: any, colLetter: string, rowNum: number, images: any) {
-  const list = (Array.isArray(images) ? images : []).filter((s) => typeof s === "string").slice(0, 10);
+  // Lọc TRƯỚC khi tính chiều cao. Trước đây `n` đếm cả ảnh sắp bị bỏ (webp, hoặc quá nặng) nên
+  // hàng bị kéo cao đúng số tầng đó rồi để trống — 3 ảnh webp = hàng cao 180pt không có gì
+  // trong đó (đo bằng tests/b3-excel-item-images.test.js). Trần 10 ảnh giữ nguyên, nhưng nay
+  // đếm trên ảnh NHÚNG ĐƯỢC.
+  const list: RegExpExecArray[] = [];
+  for (const s of (Array.isArray(images) ? images : [])) {
+    if (typeof s !== "string") continue;
+    const m = ANH_NHUNG_DUOC.exec(s);
+    if (!m) continue;
+    if (Math.floor((m[2].length * 3) / 4) > MAX_ITEM_IMG_BYTES) continue;   // DoS guard như logo
+    list.push(m);
+    if (list.length >= 10) break;
+  }
   if (!list.length) return;
   const n = list.length;
   const box = Math.min(IMG_BOX, Math.floor(MAX_ROW_PX / n) - 6);   // n ảnh vẫn nằm gọn dưới trần 409pt
@@ -223,10 +257,8 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
   row.height = Math.max(row.height || 0, rowPx * 0.75);   // px → pt (1pt = 4/3px)
   const c0 = colLetterToIdx(colLetter);
   for (let k = 0; k < n; k++) {
-    const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(list[k]);
-    if (!m) continue;
+    const m = list[k];
     let extension = m[1].toLowerCase(); if (extension === "jpg") extension = "jpeg";
-    if (Math.floor((m[2].length * 3) / 4) > MAX_ITEM_IMG_BYTES) continue;   // DoS guard như logo
     try {
       const buffer = Buffer.from(m[2], "base64");
       const d = imgDims(buffer, extension);

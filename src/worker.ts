@@ -1,6 +1,7 @@
 // Worker process. Run via `npm run worker` in its own container.
 // Pulls jobs from BullMQ queues and executes them off the request thread.
 
+import http from "node:http";
 import type { Worker, Job } from "bullmq";
 import { UnrecoverableError } from "bullmq";
 import { config } from "./config.js";
@@ -14,7 +15,60 @@ import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS } from "./exportQue
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
-import { initSentry, captureError, flushSentry, exportJobsTotal } from "./observability.js";
+import { initSentry, captureError, flushSentry, exportJobsTotal, registry, khopTokenBearer, dangKyChanSuCoTienTrinh } from "./observability.js";
+
+// ─── /metrics của TIẾN TRÌNH WORKER ─────────────────────────────────────────
+//
+// Trước bản vá, `grep -nE "listen|node:http|registry" src/worker.ts` không ra một dòng nào: worker
+// nạp observability.js (nên có registry, có collectDefaultMetrics và TĂNG `export_jobs_total` ở
+// `withExportMetric` bên dưới) nhưng KHÔNG mở cổng nào để đọc số đó. Mọi job chạy qua hàng đợi vì
+// thế vô hình với Prometheus; số duy nhất lên được biểu đồ là phần chạy nội tuyến trong tiến trình
+// API — đúng phần KHÔNG phải đường chạy chính.
+//
+// Cổng mặc định 9091 (Prometheus quy ước dải 909x cho exporter phụ). Đặt WORKER_METRICS_PORT=0 để
+// tắt hẳn — trong dev/CI, nơi mở thêm một cổng chỉ tổ va nhau.
+//
+// CHƯA XONG PHÍA HẠ TẦNG: infra/k8s/worker.yaml vẫn chưa khai containerPort lẫn annotation
+// `prometheus.io/scrape` (khác app-deployment.yaml), và prod hiện chạy docker-compose không có
+// Prometheus nào. Hai file đó nằm ngoài tập file của nhóm này — xem docs/REMAINING_RISKS.md.
+export const WORKER_METRICS_PORT = Number(process.env.WORKER_METRICS_PORT ?? 9091);
+
+/**
+ * Máy chủ HTTP tí hon chỉ phục vụ GET /metrics.
+ *
+ * Gác y hệt /metrics của app (src/app.ts): production mà không có METRICS_TOKEN thì TRẢ 404 (fail
+ * closed — số liệu lộ tên route, lưu lượng và tỉ lệ lỗi); có token thì bắt buộc Bearer đúng, so ở
+ * thời gian không đổi. `token`/`laProd` nhận từ ngoài được để test kiểm cả hai nhánh mà không phải
+ * giả lập cả module config.
+ *
+ * `cong = 0` là để hệ điều hành cấp một cổng rảnh (dùng trong test).
+ */
+export function taoMayChuMetrics(
+  cong: number = WORKER_METRICS_PORT,
+  { token = config.METRICS_TOKEN, laProd = config.NODE_ENV === "production" }: { token?: string; laProd?: boolean } = {}
+) {
+  const srv = http.createServer((req, res) => {
+    void (async () => {
+      const duong = (req.url || "").split("?")[0];
+      if (duong !== "/metrics") { res.statusCode = 404; return res.end(); }
+      if (laProd && !token) { res.statusCode = 404; return res.end(); }
+      if (token && !khopTokenBearer(req.headers.authorization, token)) { res.statusCode = 401; return res.end(); }
+      try {
+        res.setHeader("Content-Type", registry.contentType);
+        res.end(await registry.metrics());
+      } catch (e) {
+        logger.warn({ err: e instanceof Error ? e.message : String(e) }, "không kết xuất được /metrics của worker");
+        res.statusCode = 500;
+        res.end();
+      }
+    })();
+  });
+  // KHÔNG để lỗi cổng giết tiến trình worker: số liệu là thứ phụ, job mới là việc chính. Cổng bị
+  // chiếm (hai worker cùng máy) phải thành một dòng log, không phải một lần restart.
+  srv.on("error", (e) => logger.warn({ err: e.message, cong }, "không mở được cổng /metrics của worker"));
+  srv.listen(cong);
+  return srv;
+}
 
 // Increment the export_jobs_total metric around a generator (counts both the
 // worker path and the inline fallback path in queue.js, so the metric is real).
@@ -81,6 +135,39 @@ export async function sinhFileXuat(kind: "xlsx" | "pdf", quote: any, noiTuyen: (
   }
 }
 
+// ─── TRẦN KÍCH THƯỚC cho đường xuất NỀN ─────────────────────────────────────
+//
+// Đường xuất ĐỒNG BỘ đã có trần từ trước: src/routes/export.routes.ts kiểm `MAX_EXPORT_SHEETS`
+// (100) / `MAX_EXPORT_ITEMS` (20 000) rồi trả 413. Đường xuất NỀN thì KHÔNG có phép kiểm kích
+// thước nào — route enqueue (src/routes/jobs.routes.ts) chưa từng đọc báo giá nên không biết nó to
+// cỡ nào, còn processor thì nạp xong là lao thẳng vào sinh file. Trần duy nhất là trần THỜI GIAN
+// 30s của generateInWorker, tức báo giá khổng lồ vẫn đốt trọn 30s CPU một luồng rồi mới hỏng — và
+// người dùng bấm lại thì đốt tiếp.
+//
+// HAI CON SỐ NÀY CHÉP TỪ export.routes.ts CÓ CHỦ Ý: hai đường xuất phải từ chối CÙNG một tập báo
+// giá, nếu không người dùng bị "xuất trực tiếp thì báo quá lớn, xuất nền thì chờ mãi rồi lỗi khác".
+// Không import chéo được vì hằng số bên đó không export (và file đó không thuộc tập sửa của nhóm
+// này); đổi bên nào thì phải đổi bên kia.
+const MAX_EXPORT_SHEETS = 100;
+const MAX_EXPORT_ITEMS = 20_000;
+
+/**
+ * Chặn báo giá vượt trần TRƯỚC khi tiêu CPU.
+ *
+ * Ném `UnrecoverableError` chứ không phải Error thường: kích thước báo giá không đổi giữa các lần
+ * thử, nên `attempts: 3` chỉ là ba lượt từ chối y hệt nhau. Thông điệp đi thẳng vào `failedReason`
+ * mà GET /api/jobs/:queue/:id trả về, nên người dùng đọc được cách thoát (tách bớt trang).
+ */
+function chanBaoGiaQuaLon(quote: any) {
+  const soSheet = quote?.sheets?.length || 0;
+  const soDong = (quote?.sheets || []).reduce((n: number, s: any) => n + (s?.items?.length || 0), 0);
+  if (soSheet > MAX_EXPORT_SHEETS || soDong > MAX_EXPORT_ITEMS) {
+    throw new UnrecoverableError(
+      `Báo giá quá lớn để xuất (${soSheet} trang / ${soDong} dòng; trần ${MAX_EXPORT_SHEETS} trang / ${MAX_EXPORT_ITEMS} dòng). Hãy tách bớt trang rồi xuất lại.`
+    );
+  }
+}
+
 // === Processors map. Used both by the worker process AND by the inline
 // fallback in queue.js when REDIS_URL is not set (local dev).
 export const processors = {
@@ -98,6 +185,7 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
+      chanBaoGiaQuaLon(quote);
       const buf = await sinhFileXuat("xlsx", quote, () => buildQuoteBuffer(quote));
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
@@ -130,6 +218,7 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
+      chanBaoGiaQuaLon(quote);
       const pdfQuote = {
         ...quote,
         subtotal: Number(quote.subtotal),
@@ -193,6 +282,10 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   }
   logger.info({ env: config.NODE_ENV }, "Worker starting");
 
+  // Mở /metrics của chính tiến trình này (0 = tắt). Xem khối chú thích ở `taoMayChuMetrics`.
+  const mayChuMetrics = WORKER_METRICS_PORT > 0 ? taoMayChuMetrics(WORKER_METRICS_PORT) : null;
+  if (mayChuMetrics) logger.info({ cong: WORKER_METRICS_PORT }, "worker /metrics đang lắng nghe");
+
   const workers: Worker[] = [];
   for (const [queueName, jobs] of Object.entries(processors)) {
     const w = createWorker(queueName, async (job: Job) => {
@@ -224,6 +317,9 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Worker shutting down");
+    // Đóng cổng metrics NGAY: nó không giữ dữ liệu nghiệp vụ nào, mà một kết nối keep-alive của
+    // Prometheus còn mở là đủ giữ tiến trình sống qua mốc ân hạn.
+    mayChuMetrics?.close();
     try {
       await Promise.all(workers.map((w) => w.close()));
     } finally {
@@ -234,16 +330,8 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
-  // A worker had no top-level crash handlers — an unexpected throw died silently.
-  process.on("unhandledRejection", async (reason) => {
-    logger.error({ err: reason instanceof Error ? reason.message : String(reason) }, "worker unhandledRejection");
-    captureError(reason instanceof Error ? reason : new Error(String(reason)), { kind: "unhandledRejection" });
-    await flushSentry();
-  });
-  process.on("uncaughtException", async (err) => {
-    logger.error({ err: err.message, stack: err.stack }, "worker uncaughtException — exiting");
-    captureError(err, { kind: "uncaughtException" });
-    await flushSentry();
-    process.exit(1);
-  });
+  // Sự cố cấp tiến trình (worker trước đây chết ÊM khi có throw ngoài dự tính). Dùng CHUNG chốt với
+  // src/server.ts thay vì chép lại: hai bản chép tay đã trôi khỏi nhau đúng một lần rồi — bản của
+  // worker báo Sentry và thoát, bản của server chỉ log. Xem src/observability.ts.
+  dangKyChanSuCoTienTrinh();
 }

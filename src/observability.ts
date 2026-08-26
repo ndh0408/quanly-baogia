@@ -1,6 +1,7 @@
 // Sentry + Prometheus integration. Both are no-ops when their env vars are unset,
 // so the app boots cleanly in dev without any external services.
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import * as Sentry from "@sentry/node";
 import type { Request, Response, NextFunction } from "express";
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
@@ -92,6 +93,72 @@ export async function flushSentry(timeoutMs = 2000) {
   } catch {}
 }
 
+/**
+ * Đăng ký chốt chặn sự cố cấp TIẾN TRÌNH: báo Sentry, đẩy bộ đệm đi, rồi THOÁT khi cần.
+ *
+ * ── VÌ SAO KHÔNG ĐỂ MỖI ENTRYPOINT TỰ VIẾT ──────────────────────────────────
+ * src/worker.ts làm đúng (captureError → flushSentry → exit 1) còn src/server.ts thì chỉ
+ * `logger.error(...)`. Hai bản chép tay đã trôi khỏi nhau đúng như vậy.
+ *
+ * ── VÌ SAO "CHỈ LOG" LÀ NGUY HIỂM, KHÔNG PHẢI CHỈ THIẾU SÓT ──────────────────
+ * @sentry/node-core nạp sẵn `onUncaughtExceptionIntegration`. Integration đó chỉ chạy
+ * `onFatalError`/`logAndExitProcess` khi nó là listener DUY NHẤT của sự kiện
+ * (`processWouldExit === false` ngay khi có listener khác). Nên việc entrypoint tự đăng ký một
+ * listener KHÔNG chỉ bỏ lỡ phần flush — nó còn TẮT LUÔN hành vi thoát mặc định của Node. Tiến
+ * trình API chạy tiếp sau một uncaughtException, ở trạng thái không xác định, trong khi /livez vẫn
+ * xanh nên orchestrator không hề restart nó.
+ *
+ * `unhandledRejection` KHÔNG tự thoát: hành vi mặc định của Node với rejection chưa xử lý phụ
+ * thuộc cờ chạy, và tự ý giết tiến trình web vì một promise lạc là đổi hành vi vận hành. Chỉ báo
+ * và flush.
+ *
+ * Các phụ thuộc nhận qua tham số để test kiểm được đúng chuỗi báo → flush → thoát mà không cần DSN
+ * thật và không giết tiến trình chạy test.
+ */
+export function dangKyChanSuCoTienTrinh(
+  proc: NodeJS.EventEmitter & { exit: (ma: number) => void } = process,
+  {
+    capture = captureError,
+    flush = flushSentry,
+  }: { capture?: (err: unknown, ctx?: Record<string, unknown>) => void; flush?: (ms?: number) => Promise<void> } = {}
+) {
+  const chuanHoa = (v: unknown) => (v instanceof Error ? v : new Error(String(v)));
+
+  proc.on("unhandledRejection", (reason: unknown) => {
+    const err = chuanHoa(reason);
+    logger.error({ err: err.message }, "unhandledRejection");
+    capture(err, { kind: "unhandledRejection" });
+    void flush().catch(() => {});
+  });
+
+  proc.on("uncaughtException", (err: unknown) => {
+    const e = chuanHoa(err);
+    logger.error({ err: e.message, stack: e.stack }, "uncaughtException — thoát");
+    capture(e, { kind: "uncaughtException" });
+    // flush hỏng KHÔNG được nuốt mất lần thoát: thà mất sự kiện Sentry còn hơn để một tiến trình
+    // đã hỏng ở lại phục vụ request.
+    void flush().catch(() => {}).finally(() => proc.exit(1));
+  });
+}
+
+/**
+ * So một header `Authorization: Bearer <token>` với bí mật mong đợi, THỜI GIAN KHÔNG ĐỔI.
+ *
+ * `!==` thoát ngay ở byte đầu khác nhau, tức là một kênh phụ đo được; so hai digest SHA-256 (luôn
+ * cùng độ dài) bằng timingSafeEqual thì không.
+ *
+ * ĐẶT Ở ĐÂY vì nay CÓ HAI tiến trình cần đúng cổng này: /metrics của app (src/app.ts) và /metrics
+ * của tiến trình worker (src/worker.ts). Trước bản vá hàm nằm riêng trong app.ts; chép sang worker
+ * là để hai bản trôi khỏi nhau — sửa một chỗ, chỗ kia lặng lẽ giữ lỗi cũ.
+ */
+export function khopTokenBearer(authHeader: string | undefined, expected: string) {
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader || "");
+  if (!m) return false;
+  const a = createHash("sha256").update(m[1]).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 // === Prometheus ===
 export const registry = new Registry();
 registry.setDefaultLabels({ app: "quanly-baogia", env: config.NODE_ENV });
@@ -154,6 +221,23 @@ export const exportActiveWorkers = new Gauge({
 export const exportQueueDepth = new Gauge({
   name: "export_queue_depth",
   help: "Số yêu cầu xuất file đang xếp hàng chờ tới lượt",
+  registers: [registry],
+});
+// TRẦN của cổng xuất file — MẪU SỐ để tính tỉ lệ bão hoà.
+//
+// Không có hai số này thì `export_active_workers` / `export_queue_depth` là số trần trụi: nhìn
+// "20 đang xếp hàng" không biết là đầy hay mới 10%. Muốn đặt cảnh báo thì phải chép cứng
+// EXPORT_MAX_ACTIVE / EXPORT_MAX_PENDING vào quy tắc cảnh báo, rồi nó lệch âm thầm ngay lần đầu ai
+// đó chỉnh biến môi trường. Phát cả mẫu số thì cảnh báo viết được là
+// `export_queue_depth / export_max_queue_depth > 0.8` và luôn đúng.
+export const exportMaxActiveWorkers = new Gauge({
+  name: "export_max_active_workers",
+  help: "Trần số worker thread sinh file chạy đồng thời (EXPORT_MAX_ACTIVE)",
+  registers: [registry],
+});
+export const exportMaxQueueDepth = new Gauge({
+  name: "export_max_queue_depth",
+  help: "Trần số yêu cầu xuất file được phép xếp hàng (EXPORT_MAX_PENDING); vượt là 503",
   registers: [registry],
 });
 export const exportRejectedTotal = new Counter({

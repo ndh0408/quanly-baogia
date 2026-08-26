@@ -54,7 +54,19 @@ async function xoayModel(model: string, fields: any[]) {
   const client = modelClient(model);
   if (!client) return { model, total: 0, xoay: 0, hong: 0, daDoi: 0 };
 
-  const total = await client.count({ where: { piiVersion: { gt: 0 } } });
+  // ⚠️ includeDeleted: true — BẮT BUỘC, không phải tuỳ chọn.
+  //
+  // `prisma` ở đây là bản ĐÃ MỞ RỘNG của src/db.ts. Cả hai model có PII (PersonnelRecord, Employee)
+  // đều nằm trong `SOFT_DELETE_MODELS` (src/db.ts:16), và `READS` (src/db.ts:17) gồm cả `count` lẫn
+  // `findMany` — nên nếu không truyền cờ này, db.ts:80-88 lặng lẽ chèn `where.deletedAt = null`.
+  // Hàng xoá mềm khi ấy KHÔNG BAO GIỜ được mã lại, script vẫn báo "xoay xong", và bước tiếp theo của
+  // runbook là HUỶ khoá cũ → phần dữ liệu đó hoá đá vĩnh viễn. Xoá mềm là XOÁ ĐỐI VỚI NGƯỜI DÙNG,
+  // không phải xoá đối với kho: dữ liệu vẫn nằm trong CSDL và vẫn phải đọc được để trả lời yêu cầu
+  // GDPR/thanh tra. Xem tests/b4-pii-rotate-softdeleted.test.js.
+  //
+  // `updateMany` bên dưới KHÔNG cần cờ này: db.ts:89-96 chỉ lọc `deletedAt` cho thao tác ĐỌC, thao
+  // tác ghi đi thẳng (nó chỉ lược bỏ cờ điều khiển còn sót).
+  const total = await client.count({ where: { piiVersion: { gt: 0 } }, includeDeleted: true });
   console.log(`\n── ${model}: ${total} bản ghi đã mã hoá`);
   if (DRY) return { model, total, xoay: 0, hong: 0, daDoi: 0 };
 
@@ -69,6 +81,7 @@ async function xoayModel(model: string, fields: any[]) {
       select,
       orderBy: { id: "asc" },
       take: BATCH,
+      includeDeleted: true,   // xem giải thích ở `count` phía trên
     });
     if (!batch.length) break;
 

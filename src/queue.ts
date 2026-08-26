@@ -71,10 +71,34 @@ export const QUEUES = {
   MAINTENANCE: "maintenance", // repeatable: prune bảng append-only (retention)
 };
 
+/**
+ * HỢP NHẤT `backoff` thay vì để chỗ gọi ghi đè NÔNG cả đối tượng.
+ *
+ * BullMQ trộn nông: node_modules/bullmq/dist/cjs/classes/queue.js:192
+ * `Object.assign(Object.assign({}, this.jobsOpts), opts)` — truyền `backoff` là THAY THẾ nguyên
+ * đối tượng backoff của `defaultJobOptions`, không phải hợp nhất từng khoá.
+ *
+ * Hệ quả đã đo trên đường chạy thật: src/webhooks.ts gọi kèm
+ * `{ attempts: 5, backoff: { type: "exponential", delay: 5_000 } }` — không có `jitter` — nên MỌI
+ * job webhook chạy KHÔNG jitter, dù `jobOptionsFor(WEBHOOK)` khai `jitter: 0.5`. Tức chốt chặn
+ * "thundering herd khi dịch vụ ngoài sống lại" chỉ tồn tại trên giấy đúng ở hàng đợi cần nó nhất
+ * (webhook là hàng đợi duy nhất tự đặt lại backoff).
+ *
+ * CHỈ bù đúng khoá `jitter`, và chỉ khi chỗ gọi KHÔNG tự đặt: `type`/`delay` là quyết định của chỗ
+ * gọi (webhook cố ý giãn từ 5s thay vì 2s) và không được đụng vào.
+ */
+function honNhatBackoff(queueName: string, opts: Record<string, any>): Record<string, any> {
+  const bo = opts?.backoff;
+  if (!bo || typeof bo !== "object" || "jitter" in bo) return opts;
+  const macDinh = jobOptionsFor(queueName).backoff as { jitter?: number } | undefined;
+  if (!macDinh || typeof macDinh !== "object" || macDinh.jitter == null) return opts;
+  return { ...opts, backoff: { ...bo, jitter: macDinh.jitter } };
+}
+
 /** Run a job synchronously if the queue isn't available; otherwise enqueue it. */
 export async function runOrQueue(queueName: string, jobName: string, data: any, opts: Record<string, any> = {}) {
   const q = getQueue(queueName);
-  if (q) return q.add(jobName, data, opts);
+  if (q) return q.add(jobName, data, honNhatBackoff(queueName, opts));
   // Fallback: inline execution (used when REDIS_URL not set, e.g. local dev)
   const { processors } = await import("./worker.js");
   const handler = (processors as unknown as Record<string, Record<string, (job: { data: any }) => any>>)[queueName]?.[jobName];

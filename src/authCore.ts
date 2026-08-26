@@ -64,8 +64,13 @@ export function clientIp(req: Request) {
  *   · và `sendPasswordReset` dùng chung hàm này nên cũng bắn được email đặt-lại cho người bất kỳ.
  */
 
-/** Thoát ký tự đại diện của LIKE để chuỗi người dùng gõ được so như VĂN BẢN THƯỜNG, không phải mẫu. */
-const thoatLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+/**
+ * Thoát ký tự đại diện của LIKE để chuỗi người dùng gõ được so như VĂN BẢN THƯỜNG, không phải mẫu.
+ * XUẤT RA để phía GHI (src/services/userService.ts chống trùng tài khoản) dùng CHUNG đúng một cách
+ * thoát — hai bản sao chép của quy tắc này sẽ trôi khỏi nhau, và nửa nào quên thoát thì `%` lại
+ * thành ký tự đại diện ở nửa đó.
+ */
+export const thoatLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
 
 export async function findLoginUser(loginId: string) {
   // Đường THƯỜNG: so bằng-đúng, dùng thẳng index unique, không đụng ILIKE.

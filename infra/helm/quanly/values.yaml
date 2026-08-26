@@ -98,6 +98,35 @@ redis:
 networkPolicy:
   enabled: true
 
+# === Sao lưu (nhánh Helm) ===
+# Trước đây chart Helm KHÔNG có template sao lưu nào, trong khi nhánh kustomize (infra/k8s/) có đủ
+# hai CronJob. Cài bằng Helm nghĩa là cụm chạy mà không có bản sao lưu nào — và không có gì báo.
+# Bật SẴN có chủ ý: một cơ chế sao lưu mặc định TẮT thì cũng là không có sao lưu.
+# Dùng CSDL do nhà cung cấp quản (snapshot/PITR riêng) thì `backup.enabled=false`.
+backup:
+  enabled: true
+  schedule: "0 2 * * *" # 02:00 hằng ngày
+  keepDays: 14
+  storageSize: 10Gi
+  storageClass: "" # bỏ trống = StorageClass mặc định của cụm
+  image: postgres:16-alpine # phải cùng dòng phiên bản với postgres.image, kẻo pg_dump từ chối server mới hơn
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  objects:
+    # Bản dump CSDL KHÔNG chứa ảnh chứng từ thanh toán (đã rời sang kho object từ 2026-08-11);
+    # thiếu lịch này là mất chứng từ tài chính mà mọi hàng trong CSDL vẫn còn và trỏ vào hư không.
+    # ⚠️ CHƯA CHẠY THẬT TRÊN CLUSTER — xem cảnh báo đầu templates/backup-objects-cronjob.yaml.
+    enabled: true
+    schedule: "30 2 * * *" # 02:30, sau lượt dump CSDL
+    keepManifests: 30
+    storageSize: 50Gi
+    storageClass: ""
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
 # === Application config (non-secret) ===
 config:
   NODE_ENV: production

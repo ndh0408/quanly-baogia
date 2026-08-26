@@ -10,7 +10,7 @@ import { decompressBody } from "./decompressBody.js";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pinoHttp from "pino-http";
-import { timingSafeEqual, createHash, randomBytes } from "node:crypto";
+import { timingSafeEqual, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,7 +18,8 @@ import { logger } from "./logger.js";
 import { createLimiter } from "./rateLimit.js";
 import { capNhatDoSauHangDoi } from "./queue.js";
 import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
-import { registry, metricsMiddleware } from "./observability.js";
+import { registry, metricsMiddleware, khopTokenBearer } from "./observability.js";
+import { capNhatCongSuatXuat } from "./exportQueue.js";
 import { prisma } from "./db.js";
 
 import authRoutes from "./routes/auth.routes.js";
@@ -77,16 +78,9 @@ export function conObjectPhien() {
  */
 const READYZ_TTL_MS = 5_000;
 
-// Constant-time compare of an "Authorization: Bearer <token>" header against the
-// expected secret. Plain !== short-circuits on the first differing byte (timing
-// oracle); timingSafeEqual on equal-length SHA-256 digests removes that.
-function bearerTokenMatches(authHeader: string | undefined, expected: string) {
-  const m = /^Bearer\s+(.+)$/i.exec(authHeader || "");
-  if (!m) return false;
-  const a = createHash("sha256").update(m[1]).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
-}
+// So token của /metrics ở THỜI GIAN KHÔNG ĐỔI: `khopTokenBearer` (src/observability.ts).
+// Trước đây hàm này nằm riêng trong file này. Nay tiến trình WORKER cũng mở /metrics của nó
+// (src/worker.ts) và phải gác bằng ĐÚNG một cách — hai bản chép tay là hai bản sẽ trôi khỏi nhau.
 
 // Origin được phép thực hiện thao tác GHI bằng phiên cookie (danh sách cho phép của CSRF).
 // config.ts đảm bảo APP_BASE_URL luôn được đặt (fallback http://localhost:PORT) trước khi tới đây,
@@ -370,13 +364,18 @@ export function createApp() {
     if (isProd && !config.METRICS_TOKEN) {
       return res.status(404).end();
     }
-    if (config.METRICS_TOKEN && !bearerTokenMatches(req.headers.authorization, config.METRICS_TOKEN)) {
+    if (config.METRICS_TOKEN && !khopTokenBearer(req.headers.authorization, config.METRICS_TOKEN)) {
       return res.status(401).end();
     }
     // Độ sâu hàng đợi BullMQ được đọc NGAY TRƯỚC khi kết xuất, không bằng setInterval — xem khối
     // chú thích ở src/queue.ts. Hàm này tự nuốt lỗi và có timeout, nên Redis chết KHÔNG làm
     // /metrics treo hay hỏng: phần số liệu còn lại vẫn trả về bình thường.
     await capNhatDoSauHangDoi();
+    // Công suất cổng xuất file (đang chạy / đang xếp hàng / hai TRẦN tương ứng). Trần là mẫu số:
+    // không có nó thì quy tắc cảnh báo phải chép cứng EXPORT_MAX_* và lệch âm thầm khi ai đó chỉnh
+    // biến môi trường. Đây cũng là chỗ gọi thật đầu tiên của `exportGateStats` — trước đó nó là mã
+    // chết, chỉ test đụng tới.
+    capNhatCongSuatXuat();
     res.setHeader("Content-Type", registry.contentType);
     res.end(await registry.metrics());
   });

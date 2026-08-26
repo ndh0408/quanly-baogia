@@ -198,7 +198,24 @@ router.get(
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
-    const url = await presignDownload(req.query.key as string, { expiresIn: (req.query as any).expires });
+    const key = req.query.key as string;
+    const url = await presignDownload(key, { expiresIn: (req.query as any).expires });
+    // GHI NHẬT KÝ ở đường ĐỌC. Ký một URL tải KHÔNG phải "xem trạng thái" — nó TRAO nội dung, và
+    // URL ấy còn dùng được suốt `expires` giây mà không cần phiên nữa. Namespace `payment-proofs/`
+    // (src/paymentProof.ts) đi qua đúng cửa này: đường xem qua hồ sơ nhân sự có ghi
+    // `personnel.payment-proof.view`, còn đường này thì không — mà `paymentProofKey` vẫn nằm trong
+    // JSON của /api/personnel, nên chép khoá sang đây là xem ảnh chứng từ mà không để lại vết.
+    // Cùng lý do cho `uploads/` (tệp đính kèm) và `exports/` (bản Excel/PDF đầy đủ của báo giá).
+    //
+    // TRỪ `logos/`: logo công ty là thứ MỌI người đăng nhập đọc được (canAccessKey cho qua vô điều
+    // kiện) và SPA xin chữ ký cho nó ở gần như mỗi lần mở báo giá — ghi lại chỉ làm phình bảng chứ
+    // không trả lời được câu hỏi nào.
+    //
+    // KHÔNG nhét nội dung/URL đã ký vào `after`: bảng AuditEvent không mã hoá, và URL đã ký chính
+    // là thứ mở được file. Chỉ ghi khoá + hạn.
+    if (!key.startsWith("logos/")) {
+      await audit(req, "file.sign-download", { resource: "file", resourceId: key, after: { expiresIn: (req.query as any).expires } });
+    }
     res.json({ url, expiresIn: req.query.expires });
   })
 );

@@ -9,6 +9,7 @@
 //   node scripts/ci/endpoint-inventory.mjs --json          # JSON cho công cụ
 //   node scripts/ci/endpoint-inventory.mjs --check         # đối chiếu TỪNG DÒNG với docs/product/ROLES_PERMISSIONS.md
 //   node scripts/ci/endpoint-inventory.mjs --check-guards  # route KHÔNG có middleware gác nào → exit 1
+//   node scripts/ci/endpoint-inventory.mjs --check-write-authz  # route GHI không khai quyền ở đâu cả → exit 1
 //
 // ── LỖ THẬT SỰ, VÀ CÁI GÌ BỊT NÓ ────────────────────────────────────────────
 // Lỗ cần bịt là: "thêm một route mà không ai soát quyền, nhớ +1 vào tài liệu, CI vẫn xanh".
@@ -21,6 +22,10 @@
 // hiệu lực ở 4 file không có `router.use(<guard>)` cấp router: src/app.ts, auth.routes.ts,
 // jobs.routes.ts, stream.routes.ts (đã kiểm ngược: thêm một route hở vào auth.routes.ts thì exit 1).
 // Nó vẫn đáng giữ — nhưng đúng tầm của nó là "chặn route hở ở 4 file đó", không hơn.
+//
+// `--check-write-authz` (thêm sau) đóng nốt phần còn lại của lỗ đó cho các endpoint GHI: xem khối
+// "CỔNG PHÂN QUYỀN CHO ENDPOINT GHI" ở giữa file. Tóm tắt: `requireAuth` không được tính là gác
+// quyền, và một dòng ma trận có cột QUYỀN bỏ trống (`—`) cũng không được tính là đã soát.
 //
 // Thứ THỰC SỰ bịt lỗ là `--check`, sau khi bản này nâng nó từ ĐẾM SỐ lên ĐỐI CHIẾU TỪNG DÒNG với
 // bảng ma trận trong docs/product/ROLES_PERMISSIONS.md. `docMatrix()` bóc ra (METHOD, đường dẫn)
@@ -280,6 +285,72 @@ export function doiChieuMaTran(rows, doc) {
   return { thieuDong, dongChet };
 }
 
+// ── CỔNG PHÂN QUYỀN CHO ENDPOINT GHI ────────────────────────────────────────
+// `--check-guards` coi `requireAuth` là "có gác", nên một route GHI mới thêm vào bất kỳ file nào
+// mở đầu bằng `router.use(requireAuth)` (20/24 file) luôn xanh dù không ai kiểm quyền. `--check`
+// thì đòi có DÒNG ma trận nhưng không đọc cột QUYỀN — một dòng ghi `—` cũng qua.
+//
+// Cổng này đòi mỗi endpoint GHI (POST/PUT/PATCH/DELETE) có ÍT NHẤT một trong ba:
+//   (a) middleware PHÂN QUYỀN ở cấp route/router — `requireAuth` KHÔNG tính (đó là xác thực);
+//   (b) một dòng ma trận có cột QUYỀN ghi quyền THẬT — hợp lệ vì repo này kiểm quyền trong thân
+//       handler (`can`, `canOnQuote`) hoặc trong service rất nhiều, không phải bằng middleware;
+//   (c) tên trong MIEN_TRU_GHI, kèm lý do viết ngay tại chỗ.
+// ĐÃ ĐO lúc thêm cổng: 78 endpoint GHI, 46 không có middleware phân quyền, và sau khi tính cột
+// QUYỀN thì còn đúng 17 phải miễn trừ — toàn bộ là đường TỰ PHỤC VỤ trên chính tài khoản/phiên
+// của người gọi. Cổng KHÔNG khẳng định quyền ấy ĐÚNG (xem phần giới hạn ở đầu file); nó khẳng
+// định không ai thêm được route GHI mà bỏ trống chỗ "ai được gọi".
+export const PHUONG_THUC_GHI = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// `requireAuth` CỐ Ý không nằm đây: nó trả lời "anh là ai", không trả lời "anh được làm gì".
+const AUTHZ_MIDDLEWARE = ["requirePermission", "requireAnyPermission", "requireRole"];
+
+/**
+ * Ô QUYỀN có khai một quyền thật không. Quyền trong ma trận luôn nằm trong code-span và có dạng
+ * `nhóm:hành-động` (`quote:update:all`, `settings:manage`) hoặc `role=admin`. Ô rỗng, ô `—`, và ô
+ * `— *(giải thích)*` đều KHÔNG tính là đã khai.
+ */
+export const quyenDaKhai = (o) => /`[A-Za-z_]+(?:[:=][-A-Za-z_*:.]+)+`|`role=/.test(String(o || ""));
+
+/**
+ * Endpoint GHI không có bằng chứng phân quyền nào. Hàm THUẦN (nhận rows + ma trận đã bóc + tập
+ * miễn trừ) để bài test dựng được ca giả mà không phải đọc file.
+ */
+export function mutationsWithoutAuthz(rows, doc, mienTru = new Set()) {
+  return rows
+    .filter((r) => PHUONG_THUC_GHI.has(r.method))
+    .filter((r) => ![...(r.capRoute || []), ...(r.capRouter || [])].some((g) => AUTHZ_MIDDLEWARE.includes(g)))
+    .filter((r) => !doc.some((d) => dongPhu(d, r.method, chuanDuong(r.path)) && quyenDaKhai(d.quyen)))
+    .filter((r) => !mienTru.has(`${r.method} ${chuanDuong(r.path)}`))
+    .map((r) => ({ method: r.method, path: chuanDuong(r.path), source: r.source }));
+}
+
+/**
+ * Endpoint GHI CỐ Ý không đòi quyền, kèm lý do. Tất cả đều là đường TỰ PHỤC VỤ: chủ thể của thao
+ * tác chính là người gọi, nên không có quyền nào để đòi — chốt phạm vi nằm ở chỗ khác (phiên,
+ * token dùng một lần, hoặc `req.session.userId` trong handler).
+ */
+export const MIEN_TRU_GHI = new Map([
+  // ── Cửa vào: chưa có phiên thì chưa có quyền để kiểm ──
+  ["POST /api/auth/login", "đăng nhập bằng mật khẩu — cửa vào"],
+  ["POST /api/auth/logout", "huỷ CHÍNH phiên của người gọi"],
+  ["POST /api/auth/token", "đăng nhập cho client JWT"],
+  ["POST /api/auth/token/refresh", "bí mật nằm TRONG refresh token"],
+  ["POST /api/auth/token/revoke", "thu hồi một refresh token bằng chính token đó"],
+  ["POST /api/auth/token/revoke-all", "thu hồi token của CHÍNH mình"],
+  ["POST /api/auth/forgot-password", "vào bằng email, không bằng phiên"],
+  ["POST /api/auth/accept-invite", "đặt mật khẩu bằng token mời dùng một lần"],
+  // ── Tự phục vụ trên chính tài khoản mình ──
+  ["POST /api/auth/change-password", "đổi mật khẩu của CHÍNH mình (đòi mật khẩu cũ)"],
+  ["POST /api/auth/profile", "sửa hồ sơ của CHÍNH mình"],
+  ["POST /api/mfa/setup", "bật MFA cho CHÍNH tài khoản mình"],
+  ["POST /api/mfa/enable", "xác nhận MFA của CHÍNH mình"],
+  ["POST /api/mfa/disable", "tắt MFA của CHÍNH mình (đòi mật khẩu)"],
+  ["POST /api/gdpr/me/delete", "yêu cầu xoá dữ liệu của CHÍNH mình — quyền GDPR của chủ thể"],
+  ["POST /api/notifications/:id/read", "đánh dấu đã đọc thông báo của CHÍNH mình"],
+  ["POST /api/notifications/read-all", "đánh dấu đã đọc mọi thông báo của CHÍNH mình"],
+  ["POST /api/stream/presence", "báo hiện diện của CHÍNH phiên đang mở"],
+]);
+
 /**
  * Route KHÔNG có middleware gác nào (cấp route lẫn cấp router) và KHÔNG nằm trong danh sách miễn trừ.
  * Hàm THUẦN: nhận danh sách đã dựng + tập miễn trừ, không đọc file, không thoát tiến trình — nhờ vậy
@@ -392,6 +463,32 @@ if (args.includes("--check-guards")) {
   }
   console.log(`✓ ${rows.length} endpoint — mọi endpoint đều có middleware gác, trừ ${MIEN_TRU.size} miễn trừ tường minh`);
   console.log("  (LƯU Ý: đây là kiểm CÓ GÁC HAY KHÔNG, không phải gác ĐÚNG — xem phần giới hạn ở đầu file.)");
+  process.exit(0);
+}
+
+if (args.includes("--check-write-authz")) {
+  const doc = docMatrix(readFileSync(join(ROOT, "docs/product/ROLES_PERMISSIONS.md"), "utf8"));
+  const thieu = mutationsWithoutAuthz(rows, doc, new Set(MIEN_TRU_GHI.keys()));
+  if (thieu.length) {
+    console.error(`✖ ${thieu.length} endpoint GHI không có bằng chứng phân quyền nào:`);
+    for (const r of thieu) console.error(`    ${r.method.padEnd(7)} ${r.path.padEnd(52)} ${r.source}`);
+    console.error("  requireAuth KHÔNG tính — nó chỉ trả lời 'anh là ai'. Làm MỘT trong ba:");
+    console.error("   (a) gắn requirePermission/requireAnyPermission/requireRole cho route;");
+    console.error("   (b) điền cột QUYỀN của dòng ma trận trong docs/product/ROLES_PERMISSIONS.md");
+    console.error("       (hợp lệ khi quyền được kiểm trong handler/service — hãy ghi ĐÚNG quyền đang kiểm);");
+    console.error("   (c) nếu endpoint CỐ Ý không đòi quyền (đường tự phục vụ), thêm vào MIEN_TRU_GHI");
+    console.error("       trong scripts/ci/endpoint-inventory.mjs kèm lý do.");
+    process.exit(1);
+  }
+  const khoa = new Set(rows.map((r) => `${r.method} ${chuanDuong(r.path)}`));
+  const thua = [...MIEN_TRU_GHI.keys()].filter((k) => !khoa.has(k));
+  if (thua.length) {
+    console.error(`✖ Miễn trừ GHI trỏ vào endpoint không còn tồn tại: ${thua.join(", ")}`);
+    process.exit(1);
+  }
+  const soGhi = rows.filter((r) => PHUONG_THUC_GHI.has(r.method)).length;
+  console.log(`✓ ${soGhi} endpoint GHI — mỗi cái đều có middleware phân quyền HOẶC quyền ghi rõ trong ma trận, trừ ${MIEN_TRU_GHI.size} miễn trừ tự-phục-vụ`);
+  console.log("  (LƯU Ý: cổng này kiểm CÓ KHAI QUYỀN hay không, không kiểm quyền đó có ĐÚNG không.)");
   process.exit(0);
 }
 

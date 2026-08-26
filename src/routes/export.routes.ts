@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
-import { validate } from "../validators.js";
+import { validate, MAX_EXPORT_SHEETS, MAX_EXPORT_ITEMS } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
 import { runExportJob, isAbortedError } from "../exportQueue.js";
@@ -73,8 +73,8 @@ function daXuLyHuy(e: unknown, res: Response): boolean {
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
-const MAX_EXPORT_SHEETS = 100;
-const MAX_EXPORT_ITEMS = 20_000;
+// Trần lấy từ validators.ts — CÙNG một cặp số với trần LƯU, để không còn báo giá nào lưu được mà
+// không xuất được (xem chú thích ở chỗ khai báo). Khai lại ở đây là mở đường cho hai số trôi khỏi nhau.
 function exportTooBig(quote: any) {
   const sheets = quote.sheets?.length || 0;
   const items = (quote.sheets || []).reduce((n: number, s: any) => n + (s.items?.length || 0), 0);

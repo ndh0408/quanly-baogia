@@ -6,6 +6,7 @@
 //   nếu báo giá nhiều sheet → mỗi sheet thêm hậu tố "_{i+1}"                  [admin.js renderProjects]
 // Khớp ĐÚNG 1 mã sản xuất (gồm hậu tố). Không khớp → không có entry → UI hiện "—" (giống #N/A trong Excel).
 import { prisma } from "../db.js";
+import { logger } from "../logger.js";
 import { computeQuoteTotals } from "../money.js";
 
 /** Dựng "base" mã dự án y như client codeLabel() để mã sản xuất khớp tuyệt đối. */
@@ -21,6 +22,22 @@ export type ProjectRef = {
   preTaxAmount: number | null;        // Tiền trước thuế ← subtotal theo sheet
   // (Thanh toán KHÔNG còn suy từ dự án — nay là hành động của KẾ TOÁN trên từng hồ sơ: PersonnelRecord.paidAt)
 };
+
+/**
+ * TRẦN SỐ DÒNG nạp trong MỘT lượt tính lại (đường lùi cho sheet chưa backfill cột `subtotal`).
+ *
+ * Vì sao phải có: truy vấn đường lùi trước đây không có `take`, mà điều kiện vào đường lùi là MẶC
+ * ĐỊNH trên CSDL chưa chạy prisma/backfill-sheet-subtotal.mjs (script đó không được nối vào
+ * package.json lẫn deploy.sh, và báo giá "converted" là bất biến nên cột 0 ở lại vĩnh viễn).
+ *
+ * Quy mô tệ nhất, tính theo chính các trần đang có trong mã (KHÔNG phải phỏng đoán): số sheet vào
+ * đường lùi = số dòng một trang Nhân sự, tới MAX_PAGE_SIZE = 500 (src/config.ts) — mỗi sheet tới
+ * 1000 dòng (src/validators.ts) = 500 000 hàng cho MỘT lượt mở trang.
+ *
+ * 50 000 là trần AN TOÀN, CHƯA ĐO được kích thước hàng thật: nó phủ trọn 50 sheet đầy kín (cỡ báo
+ * giá lớn nhất mô tả trong mã: 50 trang × 500-1000 dòng) và vẫn giữ lượt nạp ở mức hàng chục MB.
+ */
+export const MAX_TINH_LAI_ITEMS = 50_000;
 
 /**
  * Trả về Map[mã sản xuất → dữ liệu tham chiếu] cho TẬP mã đang cần (các projectCode ở trang hiện tại).
@@ -98,12 +115,35 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
     const items = await prisma.quoteItem.findMany({
       where: { sheetId: { in: [...canTinhLai] } },
       // THỨ TỰ QUAN TRỌNG: dòng "section" đặt hệ số nhóm cho các dòng ĐỨNG SAU nó trong cùng sheet.
+      // Thứ tự này còn là thứ mà việc cắt-cụt bên dưới dựa vào: các dòng của một sheet nằm liền
+      // nhau, nên chỉ ĐÚNG MỘT sheet (sheet cuối) có thể bị nạp thiếu.
       orderBy: [{ sheetId: "asc" }, { order: "asc" }],
       select: { sheetId: true, kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
+      // +1 để PHÂN BIỆT "vừa đủ" với "còn nữa" mà không phải đếm trước bằng một truy vấn thứ hai.
+      take: MAX_TINH_LAI_ITEMS + 1,
     });
+    // ── Chạm trần: BỎ HẲN sheet nạp thiếu, không gán cho nó một con số sai ──────────────────────
+    // Tính tổng trên phần đã nạp là ra một số TIỀN THIẾU DÒNG. Đó tệ hơn hẳn số 0 cũ: 0 nhìn là
+    // biết "chưa có dữ liệu", còn một con số thiếu thì không ai nhận ra. Bỏ sheet đó ra thì nó rơi
+    // về đúng giá trị cột (0) như trước bản vá — xấu, nhưng KHÔNG SAI.
+    let dung = items;
+    const dongBiCat = items[MAX_TINH_LAI_ITEMS]; // dòng ĐẦU TIÊN nằm ngoài trần (undefined = không chạm trần)
+    if (dongBiCat) {
+      dung = items.slice(0, MAX_TINH_LAI_ITEMS);
+      const sheetCuoi = dung[dung.length - 1]?.sheetId;
+      // CHỈ bỏ khi vết cắt rơi vào GIỮA một sheet. Nếu nó rơi đúng ranh giới hai sheet thì sheet
+      // cuối trong `dung` đã nạp ĐỦ — bỏ nó đi là tự vứt một con số đúng.
+      if (sheetCuoi != null && sheetCuoi === dongBiCat.sheetId) dung = dung.filter((it) => it.sheetId !== sheetCuoi);
+      logger.warn(
+        { tran: MAX_TINH_LAI_ITEMS, soSheet: canTinhLai.size, sheetCatDo: dongBiCat.sheetId },
+        "buildProjectRef: chạm trần nạp QuoteItem — chạy prisma/backfill-sheet-subtotal.mjs để khỏi phải tính lại"
+      );
+    }
     const theoSheet = new Map<number, any[]>();
-    for (const id of canTinhLai) theoSheet.set(id, []);
-    for (const it of items) theoSheet.get(it.sheetId)!.push(it);
+    // CHỈ gieo những sheet THẬT SỰ nạp đủ: sheet vắng mặt ở đây sẽ không có mục trong `tinhLai`,
+    // nên bước 3 dùng lại giá trị cột thay vì một tổng dựng từ dữ liệu thiếu.
+    for (const it of dung) if (!theoSheet.has(it.sheetId)) theoSheet.set(it.sheetId, []);
+    for (const it of dung) theoSheet.get(it.sheetId)!.push(it);
     const gs = new Map<number, boolean>();
     for (const { sh } of cho) if (canTinhLai.has(sh.id)) gs.set(sh.id, !!sh.groupSubtotal);
     // vatPercent 0: chỉ cần sheetTotals (tiền TRƯỚC thuế), không dùng vat/total.

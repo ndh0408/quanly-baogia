@@ -57,7 +57,15 @@ const errText = (ex: unknown): string => {
 export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: number; isNew: boolean }) {
   const qRef = useRef<QuoteFull | null>(null);
   const [, setTick] = useState(0);
-  const redraw = useCallback(() => setTick((t) => t + 1), []);
+  // HAI mức vẽ lại. `redraw()` là mức MẶC ĐỊNH: tăng `gridVerRef` nên <GridTable> (đã bọc memo)
+  // cũng vẽ lại — dùng cho MỌI đường có thể đụng tới items (onChange của chính lưới, nạp Excel,
+  // tải lại báo giá…). `redrawMeta()` chỉ vẽ lại phần NGOÀI lưới, dành cho các ô meta gõ-từng-phím
+  // (Ngày báo giá · VAT · Giảm giá · Tên sheet): chúng không đổi gì trong lưới, mà mỗi lượt vẽ lưới
+  // ở sheet lớn là hàng chục ms chặn luồng chính (bench.tsx: ~73ms/phím ở 1000 dòng).
+  // Quên dùng redrawMeta ở đâu đó = chỉ mất phần tối ưu, KHÔNG sai màn hình — xem gridPropsEqual.
+  const gridVerRef = useRef(0);
+  const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
+  const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -399,10 +407,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <div className="meta-row">
           <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!editable} /></label>
-          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redraw(); }} /></label>
+          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
           <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!editable} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
-          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redraw(); }} /></label>
-          <label>Giảm giá (VNĐ) <span className="muted" style={{ fontSize: 11 }}>(trừ vào tổng)</span><input type="number" step="1000" min="0" defaultValue={Number(q.discount) || 0} disabled={!editable} onInput={(e) => { setQ("discount", Number((e.target as HTMLInputElement).value) || 0); redraw(); }} /></label>
+          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
+          <label>Giảm giá (VNĐ) <span className="muted" style={{ fontSize: 11 }}>(trừ vào tổng)</span><input type="number" step="1000" min="0" defaultValue={Number(q.discount) || 0} disabled={!editable} onInput={(e) => { setQ("discount", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
@@ -439,7 +447,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redraw(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
+          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
           <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {editable && (
@@ -475,7 +483,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           </div>
         )}
 
-        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
+        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}

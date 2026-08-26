@@ -43,7 +43,15 @@ export async function purgeSoftDeleted(req: Request) {
     ["quoteTemplate", { ...base, sheets: { none: {} } }],
     ["customer", { ...base, quotes: { none: {} } }],
     ["company", { ...base, quotes: { none: {} }, templates: { none: {} } }],
-    ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} } }],
+    // `auditEvents: { none: {} }` KHÔNG phải một cửa nghiệp vụ như bốn cửa kia — nó giữ NHẬT KÝ.
+    // Khoá ngoại AuditEvent_actorId_fkey là ON DELETE SET NULL (0_init/migration.sql:695), nên mỗi
+    // hàng User xoá cứng kéo theo một UPDATE hàng loạt đặt actorId = NULL trên mọi nhật ký của
+    // người đó: dòng còn, người mất. Bốn cửa cũ chỉ chặn được ai từng đụng báo giá/khách hàng —
+    // hr / accountant / account_hn không bao giờ đụng, nên họ đi thẳng qua và mất sạch danh tính
+    // trong nhật ký. Sửa ở tầng ỨNG DỤNG chứ KHÔNG đổi khoá ngoại sang RESTRICT: đường dọn dữ
+    // liệu quá hạn (src/retention.ts) phải DELETE được hàng AuditEvent, và nhiều đường xoá cứng
+    // hợp lệ khác sẽ ngã thành lỗi 500 thay vì bị bỏ qua êm như ở đây.
+    ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} }, auditEvents: { none: {} } }],
   ];
   for (const [model, where] of steps) {
     // Let errors propagate to the global handler (500 + logged) instead of being

@@ -9,6 +9,28 @@ export function isStorageEnabled() {
   return !!(config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY);
 }
 
+// ─── TRẦN THỜI GIAN cho mọi lệnh tới kho object ─────────────────────────────
+//
+// AWS SDK v3 KHÔNG đặt requestTimeout mặc định ở NodeHttpHandler: không khai gì thì một lệnh S3 có
+// thể chờ VÔ HẠN. Điều đó không chỉ là "chậm":
+//
+//   · Tiến trình WORKER: job xuất nền sinh file xong (đã có trần cứng 30s ở exportQueue.ts) rồi mới
+//     `putObject` + `presignDownload` — pha KHÔNG có trần. MinIO treo thì `Worker.close()` chờ job
+//     đó mãi, hết ân hạn dừng 90s (infra/k8s/worker.yaml) là SIGKILL, job nằm lại tới hết
+//     EXPORT_JOB_LOCK_MS (300s, src/queue.ts) rồi về hàng chờ ở trạng thái stalled. Bị cắt hai lần
+//     (deploy rồi rollback) là chạm maxStalledCount mặc định = 1 → BullMQ đánh hỏng VĨNH VIỄN.
+//     Tức cả lập luận "ân hạn 90s neo vào trần 30s có thật" chỉ đúng nếu pha này cũng có trần.
+//   · Tiến trình API: đường tải ảnh chứng từ gọi kho ngay trên request — không trần là giữ luôn
+//     một kết nối HTTP và một suất trong pool cho tới khi proxy bỏ cuộc.
+//
+// CHỌN SỐ: 20s cho một lệnh, nhân tối đa 2 lượt (maxAttempts = 2) là ~40s — vẫn nằm gọn trong ân
+// hạn 90s, và rộng hơn nhiều so với thời gian PUT một file xuất vài MB qua mạng nội bộ. CHƯA ĐO
+// được p99 thật của kho production (không có số liệu kho object); đây là trần AN TOÀN, không phải
+// số đo. Chỉnh bằng S3_REQUEST_TIMEOUT_MS / S3_CONNECT_TIMEOUT_MS nếu kho thật sự chậm hơn.
+export const S3_REQUEST_TIMEOUT_MS = Math.max(1_000, Number(process.env.S3_REQUEST_TIMEOUT_MS) || 20_000);
+export const S3_CONNECT_TIMEOUT_MS = Math.max(500, Number(process.env.S3_CONNECT_TIMEOUT_MS) || 5_000);
+const S3_MAX_ATTEMPTS = Math.max(1, Number(process.env.S3_MAX_ATTEMPTS) || 2);
+
 export function getClient() {
   if (!isStorageEnabled()) return null;
   if (client) return client;
@@ -19,6 +41,10 @@ export function getClient() {
     region: config.S3_REGION,
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
     credentials: { accessKeyId: S3_ACCESS_KEY, secretAccessKey: S3_SECRET_KEY },
+    // Dạng đối tượng: SDK tự dựng NodeHttpHandler với đúng hai trần này (khỏi phải import
+    // @smithy/node-http-handler làm phụ thuộc trực tiếp thứ hai vào cùng một lớp).
+    requestHandler: { requestTimeout: S3_REQUEST_TIMEOUT_MS, connectionTimeout: S3_CONNECT_TIMEOUT_MS },
+    maxAttempts: S3_MAX_ATTEMPTS,
   });
   return client;
 }

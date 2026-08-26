@@ -74,12 +74,20 @@ echo "▶ [2/5] Nạp vào CSDL tạm ($TESTDB)"
 # (quanly-pgdata), nên một lượt diễn tập nhân đôi dung lượng: đầy volume = production NGỪNG GHI,
 # đúng 3h sáng Chủ nhật, do chính bộ máy sinh ra để bảo vệ nó. backup-db.sh đã kiểm điều này ở
 # bước 0) cho đĩa host; ở đây phải kiểm cho volume của Postgres.
+# Ba phép đo dưới đây phải FAIL-CLOSED. Bản trước nuốt lỗi bằng `2>/dev/null` mà không kiểm kết
+# quả: PGDB rỗng (container đổi tên/chưa lên), psql sai quyền, df lỗi — tất cả đều cho DB_MB rỗng,
+# rồi `${DB_MB:-0} * 2` = 0 kéo ngưỡng xuống đúng sàn 500MB, KHÔNG cảnh báo. Với CSDL 50GB và
+# volume còn 600MB thì điều kiện vẫn qua và bản dump vẫn được nạp — đúng sự cố mà chốt này sinh ra
+# để chặn. Không đo được điều kiện an toàn thì BỎ một lượt diễn tập, chứ không đoán.
 PGDB="$(docker exec "$PG_CONTAINER" printenv POSTGRES_DB 2>/dev/null)"
+[ -n "$PGDB" ] || { alert "không đọc được POSTGRES_DB ($PG_CONTAINER) — không đo được cỡ CSDL, DỪNG diễn tập"; exit 1; }
 DB_MB="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER" -d postgres -tAc "SELECT pg_database_size('$PGDB')/1048576;" 2>/dev/null | tr -cd '0-9')"
-AVAIL_MB="$(docker exec "$PG_CONTAINER" df -Pm /var/lib/postgresql/data 2>/dev/null | awk 'NR==2{print $4}')"
-NEED_MB=$(( ${DB_MB:-0} * 2 )); [ "$NEED_MB" -lt 500 ] && NEED_MB=500
-if [ "${AVAIL_MB:-0}" -lt "$NEED_MB" ]; then
-  alert "volume Postgres còn ${AVAIL_MB:-?}MB, bản sao tạm cần ~${NEED_MB}MB — DỪNG, không làm đầy volume production"
+[ -n "$DB_MB" ] || { alert "không đo được cỡ CSDL '$PGDB' — DỪNG (sàn 500MB sẽ cho qua cả CSDL 50GB)"; exit 1; }
+AVAIL_MB="$(docker exec "$PG_CONTAINER" df -Pm /var/lib/postgresql/data 2>/dev/null | awk 'NR==2{print $4}' | tr -cd '0-9')"
+[ -n "$AVAIL_MB" ] || { alert "không đọc được chỗ trống volume Postgres — DỪNG"; exit 1; }
+NEED_MB=$(( DB_MB * 2 )); [ "$NEED_MB" -lt 500 ] && NEED_MB=500
+if [ "$AVAIL_MB" -lt "$NEED_MB" ]; then
+  alert "volume Postgres còn ${AVAIL_MB}MB, bản sao tạm cần ~${NEED_MB}MB — DỪNG, không làm đầy volume production"
   exit 1
 fi
 docker exec "$PG_CONTAINER" psql -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS $TESTDB;" >/dev/null 2>&1

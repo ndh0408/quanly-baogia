@@ -29,17 +29,23 @@ const EXPORT_SCAN_MAX = 200_000;
 /**
  * Xoá object nhưng KHÔNG cho một khoá hỏng làm gãy cả lượt prune (job này còn nhiều việc khác).
  *
- * Trả FALSE khi chưa cấu hình kho: `deleteObject` thoát êm (không ném) khi không có client, nên nếu
- * cứ trả true thì bộ đếm `staleObjects` báo những lần xoá CHƯA TỪNG xảy ra — con số bịa trong log.
+ * BA kết quả, KHÔNG PHẢI HAI. Bản trước trả boolean và chỗ gọi chỉ dùng nó để ĐẾM; hệ quả là
+ * "xoá hụt" và "không có gì để xoá" gộp làm một, nên không cách nào biết có được phép xoá hàng
+ * CSDL đi kèm hay không:
+ *   · "da-xoa"  — object đã đi thật (đếm vào staleObjects).
+ *   · "bo-qua"  — không có khoá, hoặc chưa cấu hình kho: KHÔNG có object nào để mất. `deleteObject`
+ *                 thoát êm khi không có client, nên đếm nó là "đã xoá" sẽ là con số bịa trong log.
+ *   · "loi"     — kho từ chối (S3 503, MinIO đang restart…): object CÒN NGUYÊN ở đó.
  */
-async function dropObject(key: string) {
-  if (!key || !isStorageEnabled()) return false;
+type KetQuaXoa = "da-xoa" | "bo-qua" | "loi";
+async function dropObject(key: string): Promise<KetQuaXoa> {
+  if (!key || !isStorageEnabled()) return "bo-qua";
   try {
     await deleteObject(key);
-    return true;
+    return "da-xoa";
   } catch (e) {
     logger.warn({ key, err: e instanceof Error ? e.message : String(e) }, "retention: không xoá được object");
-    return false;
+    return "loi";
   }
 }
 
@@ -116,7 +122,7 @@ export async function pruneOldRecords() {
       const page = await listObjects("exports/", { maxKeys: EXPORT_PAGE, startAfter });
       if (!page.length) break;
       for (const o of page) {
-        if (o.lastModified && o.lastModified < cutoff && (await dropObject(o.key))) exportsPruned++;
+        if (o.lastModified && o.lastModified < cutoff && (await dropObject(o.key)) === "da-xoa") exportsPruned++;
       }
       scanned += page.length;
       startAfter = page[page.length - 1].key;
@@ -158,8 +164,24 @@ export async function pruneOldRecords() {
         select: { id: true, stagingKey: true },
         take: UPLOAD_BATCH,
       });
-      for (const u of rows) if (await dropObject(u.stagingKey)) staleObjects++;
-      const del = await prisma.uploadObject.deleteMany({ where: { ...where, id: { in: rows.map((r) => r.id) } } });
+      // XOÁ HÀNG CHỈ KHI OBJECT THẬT SỰ ĐÃ ĐI.
+      //
+      // Bản trước xoá cả lô `rows` bất kể `dropObject` trả gì. Mà dropObject NUỐT lỗi S3 — nên một
+      // lần MinIO chập chờn là mất VĨNH VIỄN manh mối `stagingKey` của mọi hàng trong lô đó: đúng
+      // thứ mà thứ tự "object trước, hàng sau" ở trên sinh ra để chống. Giữ hàng lại thì lượt prune
+      // hôm sau gặp lại nó (điều kiện quá hạn vẫn đúng) và dọn nốt.
+      //
+      // "bo-qua" (stagingKey rỗng) VẪN được xoá hàng: không có object nào để mất, giữ lại chỉ tạo
+      // ra một loại rác mới không bao giờ dọn được.
+      const choXoa: number[] = [];
+      for (const u of rows) {
+        const kq = await dropObject(u.stagingKey);
+        if (kq === "da-xoa") staleObjects++;
+        if (kq !== "loi") choXoa.push(u.id);
+      }
+      // Vẫn gọi kể cả khi `choXoa` rỗng: Prisma dịch `in: []` thành điều kiện không khớp hàng nào
+      // (count = 0), và giữ đúng MỘT đường chạy cho mọi trường hợp thì ít chỗ sai hơn.
+      const del = await prisma.uploadObject.deleteMany({ where: { ...where, id: { in: choXoa } } });
       removed[where.status] = del.count;
     } else {
       // Không có kho object thì không có object tạm nào để dọn — bỏ hẳn phần nạp hàng (đỡ một lượt

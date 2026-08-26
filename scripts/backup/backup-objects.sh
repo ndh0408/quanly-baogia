@@ -65,6 +65,13 @@ mc() {
   # `docker run` — hiện ở `ps aux` trên host trong suốt thời gian mirror (có thể vài phút). Truyền
   # bằng BIẾN MÔI TRƯỜNG (`-e TÊN`, không kèm giá trị) thì docker đọc từ môi trường tiến trình cha,
   # không có gì lọt ra dòng lệnh.
+  #
+  # CHƯA ĐÓNG HẾT — nói cho đúng: cờ `-e` trần vẫn khiến docker NẠP giá trị vào `Config.Env` của
+  # container, nên `docker inspect` (và /proc/<pid>/environ bên trong container) đọc được cặp khoá
+  # suốt thời gian mirror. Khối NAS bên dưới bịt được đường này bằng cách đẩy credentials qua STDIN,
+  # nhưng `mc` KHÔNG nhận alias qua stdin: phải hoặc ghi file config rồi mount, hoặc ghi đè entrypoint
+  # của ảnh `minio/mc`. Cả hai đều phải diễn tập bằng docker thật trước — chưa đo được, nên để nguyên
+  # thay vì đổi mù một đường đang chạy thật. Đây là đường lộ CỤC BỘ TRÊN HOST (cần đã vào được host).
   MC_HOST_q="${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
   docker run --rm --network host \
     -e MC_HOST_q \
@@ -139,14 +146,17 @@ if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
   fi
   CMDS="cd ${NAS_SUBDIR:-.};"
   for f in "${PUSH_FILES[@]}"; do CMDS="$CMDS put /data/$f $f;"; done
-  # Mật khẩu NAS đi qua biến môi trường, KHÔNG nội suy vào chuỗi lệnh: chuỗi lệnh nằm trong argv nên
-  # hiện ở `ps aux` trên host và trong `docker inspect` container tạm. Bên trong thì ghi credentials
-  # ra file (umask 077) rồi `smbclient -A`.
-  if ! NAS_SHARE="$NAS_SHARE" NAS_USER="$NAS_USER" NAS_PASS="${NAS_PASS:-}" NAS_CMDS="$CMDS" \
-      docker run --rm -e NAS_SHARE -e NAS_USER -e NAS_PASS -e NAS_CMDS \
+  # Mật khẩu NAS không đi qua argv VÀ không đi qua `-e NAS_PASS`: cờ `-e` trần khiến docker CLI đọc
+  # giá trị từ môi trường của nó rồi nạp vào `Config.Env` của container, tức `docker inspect` và
+  # /proc/<pid>/environ trong container vẫn đọc được. Đẩy qua STDIN (`docker run -i`) thì không
+  # đường nào trong hai đường đó thấy. `cat > /tmp/cred` đứng TRƯỚC `apk add` để stdin không bị nuốt.
+  # (Xem chú thích cùng nội dung ở scripts/backup/backup-db.sh.)
+  if ! printf 'username=%s\npassword=%s\n' "$NAS_USER" "${NAS_PASS:-}" |
+      NAS_SHARE="$NAS_SHARE" NAS_CMDS="$CMDS" \
+      docker run --rm -i -e NAS_SHARE -e NAS_CMDS \
       -v "$BACKUP_DIR":/data:ro alpine sh -c \
-      'apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
-       umask 077; printf "username=%s\npassword=%s\n" "$NAS_USER" "$NAS_PASS" > /tmp/cred
+      'umask 077; cat > /tmp/cred
+       apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
        smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "$NAS_CMDS"'; then
     alert "đẩy kho object lên NAS thất bại — bản gương local vẫn giữ"
   fi

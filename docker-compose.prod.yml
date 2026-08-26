@@ -16,14 +16,48 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # ẢNH GHIM THEO DIGEST. `postgres:16-alpine` là tag DI ĐỘNG: dựng lại VM sau sự cố có thể kéo về
+    # một minor khác với minor đã sinh bản dump — mà `pg_restore`/`psql` KHÔNG nhận dump của server
+    # mới hơn. Digest dưới đây là index đa kiến trúc (có linux/amd64), đọc từ registry ngày
+    # 2026-08-26. GHIM cũng có nghĩa là KHÔNG tự nhận bản vá bảo mật nữa: làm mới CÓ CHỦ Ý bằng
+    #   docker buildx imagetools inspect postgres:16-alpine   (dòng Digest)
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: quanly-postgres
+    # Siết đặc quyền cho KHO DỮ LIỆU, không chỉ app/worker. Bản k8s song sinh siết từ lâu
+    # (infra/k8s/postgres.yaml:42-46 `allowPrivilegeEscalation: false` + `drop: ["ALL"]`), còn
+    # compose — thứ ĐANG CHẠY THẬT — thì chạy full capability.
+    # GIỮ LẠI đúng 5 capability mà entrypoint chính thức cần: nó khởi động bằng root để
+    # `chown -R postgres "$PGDATA"` + `chmod 00700` rồi mới `su-exec postgres` hạ quyền.
+    #   CHOWN, FOWNER, DAC_OVERRIDE → đổi chủ/đổi quyền và ghi vào thư mục của user postgres
+    #   SETUID, SETGID              → su-exec hạ quyền
+    # Bỏ toàn bộ phần còn lại (NET_RAW, MKNOD, SYS_CHROOT, AUDIT_WRITE, KILL…).
+    # ⚠️ CHƯA DIỄN TẬP ĐƯỢC bằng docker thật khi viết bản vá này (môi trường không có docker
+    #    daemon). Deploy staging TRƯỚC và xem log tới `database system is ready to accept
+    #    connections`; thiếu capability thì entrypoint chết ngay ở bước chown, thấy liền.
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+    security_opt: ["no-new-privileges:true"]
     logging: *default-logging
     # Postgres: shared_buffers mặc định 128MB; 2g là trần rộng rãi, chỉ để chặn rò rỉ.
+    # TRẦN CPU. Trần RAM chặn container ăn hết bộ nhớ; không có trần CPU thì một vòng lặp thoát ly
+    # trong app/worker (xuất báo giá lớn, nhập Excel) vẫn chiếm sạch CPU của VM, và Postgres —
+    # thứ phải ghi WAL đúng lúc đó — chỉ còn phần thừa.
+    # ⚠️ CÁC CON SỐ NÀY CHƯA ĐO TRÊN VM THẬT, và số vCPU của VM cũng không được ghi ở đâu trong
+    # repo. Đây là TRẦN, không phải phần dành riêng: trên VM 2 vCPU thì `cpus: 2` gần như không
+    # ràng buộc gì. Vì `deploy.sh` ghi đè file này mỗi lượt deploy (git archive), giá trị được đưa
+    # ra `.env` (không tracked, được giữ nguyên trên máy chủ) để chỉnh mà không mất khi deploy:
+    #     POSTGRES_CPUS=1.5   REDIS_CPUS=0.5   APP_CPUS=2   WORKER_CPUS=1.5
+    # ⚠️ NẾU VM CHỈ CÓ 1 vCPU: docker TỪ CHỐI khởi động container khi trần lớn hơn số CPU sẵn có
+    # ("Range of CPUs is from 0.01 to 1.00"). Mặc định trên giả định VM ≥ 2 vCPU. Deploy STAGING
+    # trước (đúng quy trình ở deploy.sh) thì lỗi này lộ ra ngay chứ không đợi tới prod; gặp thì đặt
+    # lại bốn biến trên trong `.env` của máy chủ.
+    # Việc phải làm: `docker stats` một tuần, xem đỉnh CPU thật lúc xuất báo giá lớn nhất, rồi
+    # thay bằng số đo được — y như hai con số RAM (xem docs/REMAINING_RISKS.md).
     deploy:
       resources:
         limits:
           memory: 2g
+          cpus: "${POSTGRES_CPUS:-1.5}"
     restart: unless-stopped
     environment:
       POSTGRES_USER: quanly
@@ -38,14 +72,22 @@ services:
       retries: 20
     networks: [internal]
   redis:
-    image: redis:7-alpine
+    # Ghim digest — xem lý do ở service postgres. Làm mới:
+    #   docker buildx imagetools inspect redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: quanly-redis
+    # Siết như postgres. Entrypoint redis cũng khởi động bằng root: `find . \! -user redis -exec
+    # chown redis '{}' +` rồi `su-exec redis`. Cùng 5 capability, không hơn.
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+    security_opt: ["no-new-privileges:true"]
     logging: *default-logging
     # Lớn hơn `--maxmemory 256mb` để Redis tự evict/báo lỗi TRƯỚC khi bị OOM-kill.
     deploy:
       resources:
         limits:
           memory: 384m
+          cpus: "${REDIS_CPUS:-0.5}" # Redis đơn luồng cho lệnh; 0.5 vẫn dư cho tải của repo này
     restart: unless-stopped
     command:
       [
@@ -102,6 +144,7 @@ services:
       resources:
         limits:
           memory: 1536m
+          cpus: "${APP_CPUS:-2}"
     restart: unless-stopped
     env_file: .env
     environment:
@@ -140,6 +183,9 @@ services:
       resources:
         limits:
           memory: 2g # worker dựng workbook exceljs/pdfkit — cao hơn app
+          # Worker là việc NỀN: một job xuất chậm đi vài giây không ai thấy, còn app/Postgres bị
+          # đói CPU thì mọi người thấy ngay. Nên worker là chỗ đặt trần chặt nhất.
+          cpus: "${WORKER_CPUS:-1.5}"
     restart: unless-stopped
     # Cùng artifact đã biên dịch với app (Dockerfile build ra dist/). Không còn tsx lúc chạy.
     command: ["node", "dist/worker.js"]

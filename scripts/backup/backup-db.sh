@@ -70,14 +70,21 @@ chmod 600 "$FILE" "$FILE.sha256"
 # 2) Off-host → NAS (tuỳ chọn). Dùng docker smbclient để KHÔNG cần cài gì lên host.
 if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
   B="$(basename "$FILE")"
-  # Mật khẩu đi qua BIẾN MÔI TRƯỜNG chứ không nội suy vào chuỗi lệnh: chuỗi lệnh nằm trong argv nên
-  # hiện nguyên văn ở `ps aux` trên host, trong `docker inspect` và /proc/<pid>/cmdline của container
-  # tạm. Bên trong container thì ghi ra file credentials (umask 077) rồi dùng `smbclient -A`.
-  if ! NAS_SHARE="$NAS_SHARE" NAS_USER="$NAS_USER" NAS_PASS="${NAS_PASS:-}" NAS_SUBDIR="${NAS_SUBDIR:-.}" B="$B" \
-      docker run --rm -e NAS_SHARE -e NAS_USER -e NAS_PASS -e NAS_SUBDIR -e B \
+  # Mật khẩu KHÔNG đi qua argv và cũng KHÔNG đi qua `-e NAS_PASS`. Hai đường lộ KHÁC NHAU:
+  #   • argv — chuỗi lệnh hiện nguyên văn ở `ps aux` trên host và /proc/<pid>/cmdline.
+  #   • `-e NAS_PASS` (cờ TRẦN, không kèm giá trị) — docker CLI đọc giá trị từ môi trường của chính
+  #     nó rồi NẠP vào `Config.Env` của container, nên `docker inspect quanly-…` và
+  #     /proc/<pid>/environ BÊN TRONG container vẫn trả về mật khẩu suốt cửa sổ chạy. Bản trước bịt
+  #     đường thứ nhất và chú thích ghi là đã bịt cả `docker inspect` — điều đó KHÔNG đúng.
+  # Cách còn lại: đẩy nguyên nội dung file credentials qua STDIN (`docker run -i`). Ống stdin không
+  # nằm trong argv lẫn Config.Env. `cat > /tmp/cred` chạy TRƯỚC `apk add` để không có lệnh nào khác
+  # kịp nuốt mất stdin; `umask 077` cho file 0600 ngay lúc tạo.
+  if ! printf 'username=%s\npassword=%s\n' "$NAS_USER" "${NAS_PASS:-}" |
+      NAS_SHARE="$NAS_SHARE" NAS_SUBDIR="${NAS_SUBDIR:-.}" B="$B" \
+      docker run --rm -i -e NAS_SHARE -e NAS_SUBDIR -e B \
       -v "$BACKUP_DIR":/data:ro alpine sh -c \
-      'apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
-       umask 077; printf "username=%s\npassword=%s\n" "$NAS_USER" "$NAS_PASS" > /tmp/cred
+      'umask 077; cat > /tmp/cred
+       apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
        smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "cd $NAS_SUBDIR; put /data/$B $B; put /data/$B.sha256 $B.sha256"'; then
     alert "đẩy NAS thất bại ($FILE) — bản local vẫn giữ"
   fi

@@ -14,6 +14,43 @@ import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
 import { httpError } from "../httpError.js";
 import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, permissionsForUser } from "../permissions.js";
+import { thoatLike } from "../authCore.js";
+
+/**
+ * TÌM TÀI KHOẢN ĐÃ TỒN TẠI, KHÔNG PHÂN BIỆT HOA/THƯỜNG — chốt chống trùng cho đường GHI.
+ *
+ * VÌ SAO: `username` và `email` khai là `String @unique` THƯỜNG (prisma/schema.prisma), không phải
+ * citext, nên Postgres so byte-for-byte. Ràng buộc unique KHÔNG chặn "bob@x.com" cạnh "Bob@x.com".
+ * Trước đây `inviteUser` so bằng-đúng, nên mời lại đúng một con người bằng email viết hoa khác đi là
+ * tạo tài khoản THỨ HAI: hai hồ sơ, hai tập quyền, hai đường đăng nhập — gỡ quyền ở một bên không
+ * đụng bên kia. Phía ĐỌC (`findLoginUser` trong authCore.ts) đã không phân biệt hoa/thường từ trước;
+ * để phía GHI so byte là để hai nửa nói hai chuyện khác nhau về "cùng một tài khoản".
+ *
+ * KHỚP CHÍNH XÁC ĐI TRƯỚC, cùng lý do như authCore.ts: CSDL hiện có thể ĐANG chứa hai hàng chỉ khác
+ * hoa/thường; đường bằng-đúng dùng thẳng index unique và luôn thắng, nhánh không phân biệt hoa/thường
+ * chỉ là đường lùi. `orderBy: { id: "asc" }` để kết quả TẤT ĐỊNH.
+ *
+ * ⚠️ PHẢI THOÁT `% _ \`: trên Postgres, Prisma biên dịch `equals` + `mode: "insensitive"` thành
+ * ILIKE — chuỗi gửi lên trở thành MẪU. Không thoát thì một email hình dạng `%@x.com` khớp MỌI tài
+ * khoản và biến chốt chống trùng thành "không mời được ai nữa". Dùng CHUNG `thoatLike` của authCore
+ * để hai nửa không trôi khỏi nhau.
+ *
+ * KHÔNG chuẩn hoá giá trị đem LƯU: email/tên đăng nhập vẫn được lưu ĐÚNG như người dùng gõ. Đây chỉ
+ * là phép TRA CỨU. Xem tests/b4-user-case-duplicate.test.js.
+ */
+async function timTaiKhoanTrung(giaTri: string, truong: ("username" | "email")[], kemDaXoa = false) {
+  const dungY = await prisma.user.findFirst({
+    where: { OR: truong.map((f) => ({ [f]: giaTri })) },
+    includeDeleted: kemDaXoa,
+  } as any);
+  if (dungY) return dungY;
+  const mau = thoatLike(giaTri);
+  return (await prisma.user.findFirst({
+    where: { OR: truong.map((f) => ({ [f]: { equals: mau, mode: "insensitive" } })) },
+    orderBy: { id: "asc" },
+    includeDeleted: kemDaXoa,
+  } as any)) ?? null;
+}
 
 // Tích quyền PER-USER: chỉ nhận quyền HỢP LỆ (trong catalog) + KHÓA nhóm admin-tier (user:manage,
 // settings:manage…) — chống leo thang đặc quyền (nhóm này chỉ vai trò admin/master mới có).
@@ -92,7 +129,9 @@ export async function listUsers(_req: Request) {
 // Invite an employee by email — they self-onboard (set password + fill details).
 export async function inviteUser(req: Request) {
   const { email, displayName, role, projectCode, permissions } = req.body;
-  const exists = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
+  // Giữ NGUYÊN tập trường được đối chiếu (email HOẶC username) — chỉ đổi phép so từ byte-for-byte
+  // sang không-phân-biệt-hoa/thường. Nới tập trường sẽ đổi hành vi đang chạy.
+  const exists = await timTaiKhoanTrung(email, ["email", "username"]);
   if (exists) throw httpError(409, "Email này đã có tài khoản");
   const token = randomBytes(24).toString("hex");
   const user = await prisma.user.create({
@@ -138,7 +177,8 @@ export async function createUser(req: Request) {
   const { username, password, displayName, role, phone, title } = req.body;
   // includeDeleted: username is unique across soft-deleted rows too — a plain
   // check would miss a deleted holder and surface the DB constraint as a 500.
-  const exists = await prisma.user.findFirst({ where: { username }, includeDeleted: true } as any);
+  // CHỈ đối chiếu cột `username` (KHÔNG kèm `email`) — giữ đúng tập trường cũ, chỉ đổi phép so.
+  const exists = await timTaiKhoanTrung(username, ["username"], true);
   if (exists) throw httpError(409, exists.deletedAt ? "Tên đăng nhập thuộc về một tài khoản đã xóa" : "Tên đăng nhập đã tồn tại");
 
   const user = await prisma.user.create({

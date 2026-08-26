@@ -27,28 +27,59 @@ export function extraTableSum(t: ExtraTable): number {
   }, 0);
 }
 
-// Sheet đã có người điền vào chưa? Dùng để quyết định có phải HỎI trước khi xoá (khớp cách
-// AccountHnView hỏi khi xoá bảng HN): sheet mới tạo còn trống thì xoá nhầm cũng chẳng mất gì.
+// Sheet đã có người điền vào chưa? Dùng để quyết định có phải HỎI trước khi xoá: sheet mới tạo còn
+// trống thì xoá nhầm cũng chẳng mất gì.
+//
+// Trước đây phép đo này CHỈ nhìn name/detail/quantity/unitPrice, nên bảng mà mọi dòng chỉ có GHI
+// CHÚ, CÔNG THỨC, ẢNH, hoặc đã tích DUYỆT/THANH TOÁN bị coi là "trống" và xoá THẲNG không hỏi —
+// trong khi cờ duyệt/thanh toán (có chứng từ đính kèm) mới là thứ không dựng lại được.
+//
+// KHÔNG tính `days`: `M.blankItem(usesDays)` đặt sẵn days = 1 cho mẫu có cột Số Ngày
+// (shared/quote-math.ts:125) → tính vào thì bảng mới tinh cũng bị hỏi vô cớ.
 export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
-  return (t?.items || []).some((it) => (it.name || "").trim() || (it.detail || "").trim() || it.quantity || it.unitPrice);
+  return (t?.items || []).some((it) => {
+    const r = it as unknown as Record<string, unknown>;
+    const chu = (v: unknown) => typeof v === "string" && v.trim() !== "";
+    if (chu(it.name) || chu(it.detail) || it.quantity || it.unitPrice) return true;
+    if (chu(it.unit) || chu(it.notes) || chu(it.internalNote) || chu(r.label)) return true;
+    if (Array.isArray(it.images) && it.images.length > 0) return true;
+    if (it.formulas && Object.keys(it.formulas).length > 0) return true;
+    // cờ duyệt (approveCol) + cờ thanh toán nội bộ (payCol, xem PayDialog bên dưới)
+    return !!(it.approved || r.paid || r.hasPaidProof || r.paidAt);
+  });
 }
 
-// ĐƯỜNG XOÁ DUY NHẤT của sheet nội bộ. Trước đây nút ✕ (nằm sát nhãn tab) splice thẳng, không hỏi:
-// bấm nhầm là mất cả cờ duyệt/thanh toán từng hàng lẫn phần tổng đổ sang Quản lý dự án, mà Ctrl+Z
-// không cứu được vì ngăn hoàn tác nằm TRONG GridTable của chính sheet vừa bị gỡ khỏi cây.
-// Tách khỏi component để kiểm thử được ngoài trình duyệt và để không ai thêm đường splice thứ hai.
+// LÕI DÙNG CHUNG của MỌI đường xoá bảng nội bộ: bảng đã có dữ liệu thì phải HỎI trước, huỷ thì
+// không đụng vào mảng; trả luôn chỉ số tab đang mở sau khi xoá.
+// Có hai màn hình xoá bảng loại này — "Bảng nội bộ" ở editor (dưới đây) và bảng Hà Nội ở
+// AccountHnView — và trước đây màn HN CHÉP TAY lại toàn bộ logic (hasData + hỏi + splice + dịch
+// tab). Hai bản chép tay trôi khỏi nhau là chuyện thời gian: nới `extraTableHasData` ở một chỗ thì
+// bên kia vẫn xoá thẳng. Nay cả hai gọi chung hàm này.
+export async function removeTableFromList(
+  tables: ExtraTable[] | undefined,
+  i: number,
+  active: number,
+  confirmRemove: (t: ExtraTable) => Promise<boolean>,
+): Promise<{ removed: boolean; active: number }> {
+  if (!Array.isArray(tables) || !tables[i]) return { removed: false, active };
+  if (extraTableHasData(tables[i]) && !(await confirmRemove(tables[i]))) return { removed: false, active };
+  tables.splice(i, 1);
+  let a = active || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
+  return { removed: true, active: a };
+}
+
+// ĐƯỜNG XOÁ DUY NHẤT của sheet nội bộ ở editor. Trước đây nút ✕ (nằm sát nhãn tab) splice thẳng,
+// không hỏi: bấm nhầm là mất cả cờ duyệt/thanh toán từng hàng lẫn phần tổng đổ sang Quản lý dự án,
+// mà Ctrl+Z không cứu được vì ngăn hoàn tác nằm TRONG GridTable của chính sheet vừa bị gỡ khỏi cây.
+// Tách khỏi component để kiểm thử được ngoài trình duyệt (web/ không có jsdom).
 export async function removeExtraTableAt(
   sheet: { extraTables?: ExtraTable[]; _activeExtra?: number },
   i: number,
   confirmRemove: (t: ExtraTable) => Promise<boolean>,
 ): Promise<boolean> {
-  const tables = sheet.extraTables;
-  if (!Array.isArray(tables) || !tables[i]) return false;
-  if (extraTableHasData(tables[i]) && !(await confirmRemove(tables[i]))) return false;
-  tables.splice(i, 1);
-  let a = sheet._activeExtra || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
-  sheet._activeExtra = a;
-  return true;
+  const r = await removeTableFromList(sheet.extraTables, i, sheet._activeExtra || 0, confirmRemove);
+  if (r.removed) sheet._activeExtra = r.active;
+  return r.removed;
 }
 
 export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty }: {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
@@ -37,6 +37,8 @@ export type GridTableProps = {
   onChange: () => void;
   fxBar?: boolean;                 // chỉ lưới chính bật thanh công thức
   clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
+  /** Số ĐỔI MỖI KHI dữ liệu lưới có thể đã đổi (xem gridPropsEqual). Không khai = luôn vẽ lại. */
+  dataVersion?: number;
 };
 
 type Sel = { anchor: { row: number; field: string }; focus: { row: number; field: string } };
@@ -75,11 +77,42 @@ export function rowIndexOf(tb: ParentNode): Map<number, Element> {
 // Tô 1 class lên hình chữ nhật ô. Trước đây mỗi ô tự gọi querySelector('tr[data-row=N]') trên cả
 // <tbody> → tô vùng R×C tốn R×C lượt quét tuyến tính, tức O(hàng²): Ctrl+A ở sheet 1000 dòng (hoặc
 // mỗi mouseover khi kéo chọn) làm lưới khựng thấy rõ. Tra hàng bằng Map thì chi phí về tuyến tính.
-export function paintRect(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, cls: string) {
+export function paintRectWith(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, apply: (td: HTMLElement) => void) {
   for (let r = r0; r <= r1; r++) {
     const tr = idx.get(r); if (!tr) continue;
-    for (let c = c0; c <= c1; c++) tdIn(tr, fieldAt(c))?.classList.add(cls);
+    for (let c = c0; c <= c1; c++) { const td = tdIn(tr, fieldAt(c)); if (td) apply(td); }
   }
+}
+
+export function paintRect(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, cls: string) {
+  paintRectWith(idx, r0, r1, c0, c1, fieldAt, (td) => td.classList.add(cls));
+}
+
+export type RefRect = { r0: number; r1: number; c0: number; c1: number };
+
+// Các Ô/VÙNG mà một công thức tham chiếu tới, THEO THỨ TỰ dải-trước-ô-đơn — thứ tự này quyết định
+// màu highlight (REF_COLORS) nên phải giữ nguyên. Tách khỏi component (không đụng DOM) để kiểm
+// được ngoài trình duyệt: web/ không có jsdom.
+export function refRectsOfFormula(
+  text: string,
+  parse: (a: string) => { row: number; f: string; L: string } | null,
+  colOf: (L: string) => number,
+): RefRect[] {
+  const out: RefRect[] = [];
+  if (!text || !String(text).trim().startsWith("=")) return out;
+  const body = String(text).replace(/^=/, "");
+  const rangeRe = /([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g; let m: RegExpExecArray | null;
+  while ((m = rangeRe.exec(body))) {
+    const a = parse(m[1]), b = parse(m[2]); if (!a || !b) continue;
+    const ca = colOf(a.L), cb = colOf(b.L);
+    out.push({ r0: Math.min(a.row, b.row), r1: Math.max(a.row, b.row), c0: Math.min(ca, cb), c1: Math.max(ca, cb) });
+  }
+  // Ô nằm TRONG dải đã xử lý ở trên → xoá khỏi chuỗi (thay bằng khoảng trắng, giữ nguyên độ dài)
+  // để vòng dò ô đơn không đếm lại.
+  const noRanges = body.replace(rangeRe, (mm) => " ".repeat(mm.length));
+  const singleRe = /(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g;
+  while ((m = singleRe.exec(noRanges))) { const p = parse(m[1]); if (p) { const c = colOf(p.L); out.push({ r0: p.row, r1: p.row, c0: c, c1: c }); } }
+  return out;
 }
 
 // Nguồn ảnh CHỈ được là data-URL ảnh base64 — khớp TOÀN CHUỖI đúng như server (src/validators.ts
@@ -110,7 +143,31 @@ export function safeImgSrc(s: string | null | undefined): string {
   return kq;
 }
 
-export function GridTable(props: GridTableProps) {
+// Bỏ qua lượt vẽ nào? Lưới vẽ lại TỪNG hàng (items.map, không cửa sổ hoá) nên một lượt vẽ thừa ở
+// sheet 1000 dòng là hàng chục ms chặn luồng chính. Cha (QuoteEditor) render lại theo TỪNG PHÍM gõ
+// ở ô Ngày báo giá / VAT / Giảm giá / Tên sheet — những ô KHÔNG đổi gì trong lưới.
+//
+// Quy tắc (an toàn theo hướng "quên thì như cũ"):
+//   · nơi gọi KHÔNG khai `dataVersion` → trả false, tức VẼ LẠI y như trước khi có memo
+//     (ExtraTables, AccountHnView, bench.tsx đang ở diện này);
+//   · `dataVersion` lệch → vẽ lại (cha tăng số này ở MỌI đường có thể đụng tới `items`);
+//   · bất kỳ prop GIÁ TRỊ nào lệch → vẽ lại, kể cả prop thêm sau này (duyệt khoá của CẢ HAI bên,
+//     nên thiếu/thừa khoá cũng bắt vẽ lại);
+//   · chỉ prop HÀM được bỏ qua khi so — chúng là arrow tạo mới mỗi lần cha render. An toàn vì mọi
+//     closure ấy chỉ bắt `activeSheet`/`mark`/`redraw`, mà `activeSheet` đổi thì `items` đổi theo
+//     (hoặc `key` đổi → remount).
+export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
+  if (a.dataVersion == null || b.dataVersion == null) return false;
+  const ra = a as unknown as Record<string, unknown>, rb = b as unknown as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(ra), ...Object.keys(rb)])) {
+    const va = ra[k], vb = rb[k];
+    if (typeof va === "function" && typeof vb === "function") continue;
+    if (va !== vb) return false;
+  }
+  return true;
+}
+
+function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   const undoRef = useRef<string[]>([]);
@@ -454,19 +511,27 @@ export function GridTable(props: GridTableProps) {
   };
   const rangeAddr = (a: Addr, b: Addr) => { const ca = idxOfL(a.L), cb = idxOfL(b.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); const tl = ADDR[c0].L + (r0 + 1), br = ADDR[c1].L + (r1 + 1); return tl === br ? tl : tl + ":" + br; };
   const clearRefPick = () => tableRef.current?.querySelectorAll("td.cell-ref-pick").forEach((t) => t.classList.remove("cell-ref-pick"));
-  const paintRefPick = (a: Addr, b: Addr) => { clearRefPick(); const ca = idxOfL(a.L), cb = idxOfL(b.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) tdOf(r, ADDR[c].f)?.classList.add("cell-ref-pick"); };
+  // MỘT chỉ mục hàng cho cả vùng (như paintSel). Trước đây mỗi ô gọi tdOf → một lượt quét cả bảng
+  // cho MỖI ô, mà hàm này chạy lại ở MỖI mousemove khi kéo chọn dải cho công thức.
+  const paintRefPick = (a: Addr, b: Addr) => {
+    clearRefPick();
+    const tb = tableRef.current; if (!tb) return;
+    const ca = idxOfL(a.L), cb = idxOfL(b.L);
+    paintRect(rowIndexOf(tb), Math.min(a.row, b.row), Math.max(a.row, b.row), Math.min(ca, cb), Math.max(ca, cb), (c) => ADDR[c].f, "cell-ref-pick");
+  };
   const clearActiveRefs = () => tableRef.current?.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); (t as HTMLElement).style.removeProperty("--ref-color"); });
   clearOutsideRef.current = () => { clearSel(); clearActiveRefs(); };
+  // Cũng dựng chỉ mục hàng MỘT lần: hàm này chạy cùng nhịp với paintRefPick (mỗi mousemove khi
+  // kéo chọn dải, và mỗi phím khi gõ công thức).
   const highlightActiveFormulaRefs = (text: string) => {
     clearActiveRefs();
-    if (!text || !String(text).trim().startsWith("=")) return;
-    const body = String(text).replace(/^=/, ""); let ci = 0;
-    const paint = (td: HTMLElement | null) => { if (td) { td.classList.add("cell-ref-active"); td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]); } };
-    const rangeRe = /([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g; let m: RegExpExecArray | null;
-    while ((m = rangeRe.exec(body))) { const a = parseAddr(m[1]), b = parseAddr(m[2]); if (!a || !b) continue; const c0 = Math.min(idxOfL(a.L), idxOfL(b.L)), c1 = Math.max(idxOfL(a.L), idxOfL(b.L)); const r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) paint(tdOf(r, ADDR[c].f)); ci++; }
-    const noRanges = body.replace(rangeRe, (mm) => " ".repeat(mm.length));
-    const singleRe = /(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g;
-    while ((m = singleRe.exec(noRanges))) { const p = parseAddr(m[1]); if (p) { paint(tdOf(p.row, p.f)); ci++; } }
+    const rects = refRectsOfFormula(text, parseAddr, idxOfL);
+    const tb = tableRef.current; if (!tb || !rects.length) return;
+    const idx = rowIndexOf(tb);
+    rects.forEach((rc, ci) => paintRectWith(idx, rc.r0, rc.r1, rc.c0, rc.c1, (c) => ADDR[c].f, (td) => {
+      td.classList.add("cell-ref-active");
+      td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]);
+    }));
   };
   const startPointDrag = (fxInput: HTMLInputElement | HTMLTextAreaElement, startInfo: Addr) => {
     const caret = fxInput.selectionStart ?? fxInput.value.length;
@@ -1817,3 +1882,5 @@ export function GridTable(props: GridTableProps) {
     </>
   );
 }
+
+export const GridTable = memo(GridTableInner, gridPropsEqual);

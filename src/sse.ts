@@ -80,6 +80,10 @@ if (config.REDIS_URL) {
       const pubClient: Redis = new (IORedis as any)(config.REDIS_URL, backplaneOptions("pub"));
       pub = pubClient;
       pubClient.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis pub error"); });
+      // PHẢI CÓ ĐƯỜNG VỀ 1. Không có handler này thì MỘT lỗi thoáng qua (ECONNRESET khi Redis
+      // restart) ghim gauge ở 0 VĨNH VIỄN dù backplane đã khoẻ lại — và một cảnh báo kêu mãi là
+      // một cảnh báo bị người trực tắt đi. ioredis phát "ready" sau mỗi lần nối lại thành công.
+      pubClient.on("ready", () => sseBackplaneUp.set(1));
       const sub = new (IORedis as any)(config.REDIS_URL, backplaneOptions("sub"));
       sub.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis sub error"); });
       await sub.subscribe(CHANNEL);
@@ -98,6 +102,15 @@ if (config.REDIS_URL) {
       logger.warn({ err: e instanceof Error ? e.message : String(e) }, "SSE Redis backplane init failed — falling back to in-memory");
     }
   })();
+} else {
+  // KHÔNG CẤU HÌNH REDIS KHÔNG PHẢI LÀ HỎNG.
+  //
+  // Chạy một tiến trình duy nhất, không backplane, là cấu hình hợp lệ (xem đầu file: "Without Redis
+  // it behaves exactly as the previous single-process broker"). Trước đây gauge chỉ được `.set(1)`
+  // bên trong nhánh có REDIS_URL, nên mọi bản triển khai như vậy báo `sse_backplane_up 0` ngay từ
+  // giây đầu — báo động giả vĩnh viễn. Số này đo "đường phát realtime có đang hoạt động không",
+  // và ở chế độ một tiến trình thì nó đang hoạt động.
+  sseBackplaneUp.set(1);
 }
 
 /**
@@ -168,16 +181,34 @@ export function closeAllSse() {
   return n;
 }
 
+/**
+ * PUBLISH hỏng thì RƠI VỀ PHÁT CỤC BỘ, không chỉ đếm rồi bỏ.
+ *
+ * Bản trước đếm lỗi và hạ gauge, nhưng dừng ở đó — và `pub` không bao giờ được đặt lại về null.
+ * Nghĩa là khi Redis chết, mọi sự kiện realtime biến mất KỂ CẢ với client đang nối vào CHÍNH tiến
+ * trình này, dù danh sách `subscribers` nằm ngay trong bộ nhớ và phát được ngay. Đó là hỏng rộng
+ * hơn cần thiết: mất backplane lẽ ra chỉ mất đồng bộ GIỮA các instance.
+ *
+ * ĐÁNH ĐỔI đã cân: nếu Redis nhận được lệnh nhưng phản hồi bị mất (lệnh vẫn tới subscriber) thì
+ * client cùng tiến trình nhận sự kiện HAI LẦN. Vô hại ở đây — mọi sự kiện SSE là gợi ý làm mới, và
+ * client React chỉ dùng nó để re-fetch qua API đã gác quyền. Nhân đôi một lượt re-fetch rẻ hơn
+ * nhiều so với mất hẳn realtime.
+ */
+function roiVeCucBo(op: "publish" | "broadcast", e: unknown, phatLai: () => void) {
+  sseBackplaneErrors.inc({ op });
+  sseBackplaneUp.set(0);
+  logger.warn({ err: e instanceof Error ? e.message : String(e) }, `sse ${op} thất bại — phát cục bộ`);
+  phatLai();
+}
+
 /** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId: number, event: string, data: unknown) {
   if (pub) {
     // KHÔNG nuốt lỗi im lặng nữa: publisher nay trượt nhanh khi Redis chết, nên lỗi ở đây là tín
     // hiệu duy nhất cho biết realtime đang hỏng. Đếm để /metrics thấy được, thay vì `catch(() => {})`.
-    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch((e) => {
-      sseBackplaneErrors.inc({ op: "publish" });
-      sseBackplaneUp.set(0);
-      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "sse publish thất bại");
-    });
+    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch((e) =>
+      roiVeCucBo("publish", e, () => localPublish(userId, event, data))
+    );
     return;
   }
   localPublish(userId, event, data);
@@ -186,11 +217,9 @@ export function publish(userId: number, event: string, data: unknown) {
 /** Broadcast to everyone connected (across instances when Redis is on). */
 export function broadcast(event: string, data: unknown) {
   if (pub) {
-    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch((e) => {
-      sseBackplaneErrors.inc({ op: "broadcast" });
-      sseBackplaneUp.set(0);
-      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "sse broadcast thất bại");
-    });
+    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch((e) =>
+      roiVeCucBo("broadcast", e, () => localBroadcast(event, data))
+    );
     return;
   }
   localBroadcast(event, data);

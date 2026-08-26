@@ -106,7 +106,7 @@ jobs:
       - name: Format check (json/css/yaml — khớp lint-staged)
         run: npx prettier --check "**/*.{json,css,yml,yaml}"
 
-      # HAI phép kiểm KHÁC NHAU, đừng gộp làm một trong đầu:
+      # BA phép kiểm KHÁC NHAU, đừng gộp làm một trong đầu:
       #   --check        so TỪNG DÒNG: mỗi endpoint trong mã phải có một dòng trong bảng ma trận của
       #                  docs/product/ROLES_PERMISSIONS.md, và ngược lại không dòng chết. Cộng thêm
       #                  so con số công bố ở ROLES_PERMISSIONS.md và README.md (README từng ghi 141,
@@ -118,12 +118,20 @@ jobs:
       #                  dựa vào `router.use(requireAuth)` cấp router nên nằm NGOÀI tầm phép kiểm này
       #                  — nó chỉ thật sự gác 4 file không có guard cấp router (app.ts, auth, jobs,
       #                  stream). Giữ vì vẫn có giá trị ở 4 file đó, nhưng đừng tính nó là phần bù.
-      # Cả hai cộng lại vẫn KHÔNG khẳng định được quyền gác là ĐÚNG — chỉ khẳng định có gác và có
-      # trong bảng. Nhãn cũ ("quên soát quyền là đỏ ngay") hứa nhiều hơn thế; đừng đặt lại như vậy.
-      - name: Endpoint inventory — khớp từng dòng ma trận + không endpoint nào trống guard
+      #   --check-write-authz  đỏ khi một endpoint GHI (POST/PUT/PATCH/DELETE) không có BẤT KỲ chỗ nào
+      #                  khai ai được gọi: không middleware phân quyền (requireAuth KHÔNG tính — nó chỉ
+      #                  trả lời "anh là ai"), VÀ cột QUYỀN của dòng ma trận bỏ trống `—`. Đây là phần
+      #                  mà --check-guards để lọt: 20/24 file route mở đầu bằng `router.use(requireAuth)`
+      #                  nên route GHI mới thêm vào đó luôn xanh. ĐÃ ĐO: 78 endpoint GHI, 17 miễn trừ
+      #                  tự-phục-vụ (đăng nhập, MFA/mật khẩu của chính mình…) khai tường minh trong script.
+      # Cả ba cộng lại vẫn KHÔNG khẳng định được quyền gác là ĐÚNG — chỉ khẳng định có gác, có trong
+      # bảng, và (với route GHI) có KHAI ra quyền ở đâu đó. Nhãn cũ ("quên soát quyền là đỏ ngay")
+      # hứa nhiều hơn thế; đừng đặt lại như vậy.
+      - name: Endpoint inventory — khớp ma trận + không route trống guard + route GHI phải khai quyền
         run: |
           node scripts/ci/endpoint-inventory.mjs --check
           node scripts/ci/endpoint-inventory.mjs --check-guards
+          node scripts/ci/endpoint-inventory.mjs --check-write-authz
 
       # Gác SỐ LIỆU README. README từng ghi "29 Prisma models" ở dòng tóm tắt và
       # "Prisma 7 (28 models)" trong bảng Stack ngay bên dưới — hai con số mâu thuẫn trong
@@ -153,6 +161,14 @@ jobs:
       # Test đơn vị frontend (Vitest) — gồm vector vàng toán tiền (shared/quote-math).
       - name: Web unit tests (Vitest)
         run: npm run web:test
+
+      # Gác SQL HUỶ DỮ LIỆU. Gác trôi schema (tests/vdb-schema-index-drift.test.js) chạy
+      # `prisma migrate diff` nên một `DROP TABLE`/`DROP COLUMN` viết trong migration là HỢP LỆ với
+      # nó: schema và CSDL vẫn khớp, chỉ dữ liệu là mất. Bước này đọc chính nội dung .sql (đã bỏ
+      # chú thích ROLLBACK) và đỏ nếu migration huỷ dữ liệu chưa được khai kèm lý do trong
+      # scripts/ci/check-destructive-sql.mjs. ĐÃ ĐO: 4 migration huỷ dữ liệu đang có trong repo.
+      - name: SQL huỷ dữ liệu phải được khai tường minh
+        run: node scripts/ci/check-destructive-sql.mjs --check
 
       - name: Prisma generate + migrate
         run: |
@@ -295,8 +311,13 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install (cho npm audit)
-        run: npm ci
+      # KHÔNG kéo devDependencies về đây. Job này chỉ chạy `npm audit --omit=dev` ngay bên dưới —
+      # tức bỏ qua đúng cái nhóm vừa tải. Đo trên cây làm việc: `du -sh node_modules/@openai/*` =
+      # 336M codex-linux-x64 + 6.3M codex-security + 100K codex-sdk + 24K codex, cả bốn đều được
+      # package-lock.json đánh dấu `"dev": true` (không gói production nào chạm tới).
+      # Job `test` thì VẪN cần devDeps thật (vitest/eslint/tsc) nên giữ nguyên `npm ci` ở đó.
+      - name: Install (cho npm audit — chỉ phụ thuộc production)
+        run: npm ci --omit=dev
 
       - name: Dependency audit (high+) — gate
         run: npm audit --omit=dev --audit-level=high
@@ -366,10 +387,13 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
-            # Chỉ tag BẤT BIẾN. Bỏ `latest`: chart Helm đã TỪ CHỐI image.tag=latest (_helpers.tpl) và
-            # CI có hẳn một bước gác điều đó — đẩy `latest` lên registry là tự mâu thuẫn với chính
-            # chính sách ấy, và để lại một cái bẫy sẵn sàng cho người deploy vội.
+            # CHỈ tag BẤT BIẾN — đúng MỘT dòng, và đó là chủ ý.
+            # Bỏ `latest` là chưa đủ: `type=ref,event=branch` cũng là tag DI ĐỘNG. Job này chỉ chạy
+            # trên master/main (xem `if:` của job), nên nó đẩy đúng một tag `:master` bị ghi đè sau
+            # mỗi lần merge — hai pod cùng ReplicaSet kéo hai bản mã khác nhau, và rollback không
+            # còn gì để quay về. Chốt Helm (_helpers.tpl) chỉ từ chối ĐÚNG CHUỖI "latest" nên
+            # `--set image.tag=master` lọt qua; cái bẫy chỉ đổi tên chứ không mất đi.
+            # Deploy đi bằng DIGEST — xem bước "Ghi lại digest bất biến của bản phát hành" bên dưới.
             type=sha,format=long
 
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
