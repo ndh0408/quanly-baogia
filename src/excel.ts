@@ -1320,6 +1320,44 @@ function renumberSheetIds(wb: any) {
  * at the OOXML/zip level. This preserves each template's original styling perfectly,
  * which cell-by-cell cross-workbook copying in ExcelJS does not.
  */
+/** Trần cứng của Excel cho tên tab. */
+const MAX_SHEET_NAME = 31;
+
+/**
+ * Tên tab Excel HỢP LỆ từ chuỗi người dùng gõ tự do.
+ *
+ * Setter `ws.name` của ExcelJS (node_modules/exceljs/lib/doc/worksheet.js:140-170) NÉM lỗi với
+ * `* ? : \ / [ ]`, với dấu nháy đơn ở đầu/cuối, với chuỗi rỗng và với đúng chữ "History"; quá 31
+ * ký tự thì nó chỉ cảnh báo rồi cắt TRONG BỘ NHỚ. `sheetSchema` phía validator chỉ có
+ * `.max(120)` nên không chặn gì trong số đó.
+ *
+ * Hai hậu quả khác nhau, cả hai đều đã tái hiện (tests/excel-sheetname.test.js):
+ *   1. Ký tự cấm → ném ngay → route xuất trả 500 tiếng Anh, người dùng KHÔNG xuất được file và
+ *      không có manh mối nào chỉ về tên sheet. "Booth/Backdrop" là tên hoàn toàn bình thường.
+ *   2. Quá 31 ký tự → KHÔNG báo gì. ExcelJS cắt trong bộ nhớ, nhưng `sheetNames` giữ tên THÔ và
+ *      `xlsxStitcher.renameSheet` ghi đè `xl/workbook.xml` bằng chính tên thô đó → file tải về
+ *      mở lên là Excel đòi "sửa chữa". Hỏng ÂM THẦM tệ hơn hỏng ồn ào.
+ *
+ * Lọc thay vì từ chối: người dùng đặt tên theo nghiệp vụ của họ, không theo luật OOXML. Đổi
+ * `/` `:` thành khoảng trắng giữ nguyên ý nghĩa đọc được, còn ném lỗi thì chặn cả lần xuất.
+ */
+export function safeSheetName(raw: unknown, duPhong: string) {
+  const s = String(raw ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F]/g, " ")   // ký tự điều khiển: XML 1.0 không cho, làm hỏng workbook.xml
+    .replace(/[*?:/\\[\]]/g, " ")             // tập ký tự Excel cấm
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^'+|'+$/g, "")                   // nháy đơn đầu/cuối
+    .trim()
+    .slice(0, MAX_SHEET_NAME)
+    .trim();                                   // slice có thể để lại khoảng trắng cuối
+  // So không phân biệt hoa/thường: Excel giữ chỗ "History" bất kể cách viết, dù ExcelJS chỉ chặn
+  // đúng một cách viết.
+  if (!s || s.toLowerCase() === "history") return duPhong.slice(0, MAX_SHEET_NAME);
+  return s;
+}
+
 export async function buildQuoteBuffer(quote: any) {
   const sheets = (quote.sheets || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   if (sheets.length === 0) {
@@ -1330,11 +1368,17 @@ export async function buildQuoteBuffer(quote: any) {
   const sheetBuffers: Buffer[] = [];
   const sheetNames: string[] = [];
   const sheetTotals: { name: string; subtotal: number; vat: number; total: number; subtotalCell: string }[] = [];
-  const usedNames = new Set();
-  const uniq = (name: any) => {
+  // Excel ĐỐI CHIẾU TÊN TAB KHÔNG PHÂN BIỆT HOA/THƯỜNG (exceljs/lib/doc/worksheet.js:168 dùng
+  // `.toLowerCase()`). Set phân biệt hoa/thường sẽ cho "Booth" và "booth" cùng lọt rồi ném ở setter.
+  const usedNames = new Set<string>();
+  const uniq = (name: string) => {
     let n = name, i = 2;
-    while (usedNames.has(n)) n = `${name} (${i++})`;
-    usedNames.add(n);
+    while (usedNames.has(n.toLowerCase())) {
+      const hau = ` (${i++})`;
+      // Cắt lại SAU khi nối hậu tố. Bản cũ nối vào tên ĐÃ cắt 31 nên kết quả vượt trần trở lại.
+      n = `${name.slice(0, MAX_SHEET_NAME - hau.length).trim()}${hau}`;
+    }
+    usedNames.add(n.toLowerCase());
     return n;
   };
 
@@ -1354,9 +1398,11 @@ export async function buildQuoteBuffer(quote: any) {
     stampTemplateMarker(ws, tplCode);
 
     // Tên tab Excel: chỉ đánh số "N. …" khi báo giá có NHIỀU sheet (1 sheet giữ nguyên).
-    const baseName = sheet.name || cfg.sheetName || `Sheet ${idx + 1}`;
-    const labeled = sheets.length > 1 ? `${idx + 1}. ${baseName}`.replace(/[[\]/\\?*:]/g, "").substring(0, 31) : baseName;
-    const displayName = uniq(labeled);
+    // CẢ HAI nhánh đều phải đi qua safeSheetName. Bản cũ chỉ lọc ở nhánh nhiều-sheet, nên một báo
+    // giá MỘT sheet tên "Booth/Backdrop" là 500 và không xuất được file.
+    const duPhong = `Sheet ${idx + 1}`;
+    const baseName = safeSheetName(sheet.name || cfg.sheetName, duPhong);
+    const displayName = uniq(sheets.length > 1 ? safeSheetName(`${idx + 1}. ${baseName}`, duPhong) : baseName);
     ws.name = displayName;
 
     const buf = Buffer.from(await wb.xlsx.writeBuffer());

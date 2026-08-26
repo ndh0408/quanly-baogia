@@ -6,6 +6,7 @@ import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShare
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
+import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -639,26 +640,18 @@ export function GridTable(props: GridTableProps) {
   // Chèn/xoá hàng làm mọi tham chiếu phía dưới lệch đi — Excel tự dịch, ở đây cũng phải làm, kẻo
   // "=E5" lặng lẽ trỏ sang hạng mục khác (chèn) hoặc trỏ vào hàng đã mất rồi trả 0 (xoá).
   // at: chỉ số hàng 0-based nơi chèn/xoá; delta: +n chèn, -n xoá.
-  const shiftFormulasForRowEdit = (at: number, delta: number) => {
-    for (const it of items) {
-      const fx = (it as Record<string, unknown>).formulas as Record<string, string> | undefined;
-      if (!fx) continue;
-      for (const f in fx) {
-        const moved = adjustRefsForRowEdit(fx[f], at + 1, delta);   // công thức đánh số hàng từ 1
-        if (moved === null) {
-          const w = ((it as Record<string, unknown>)._fxWarn as Record<string, boolean>) || ((it as Record<string, unknown>)._fxWarn = {} as Record<string, boolean>);
-          w[f] = true;   // trỏ vào hàng vừa xoá = #REF! của Excel → ô ĐỎ, giữ công thức để sửa tay
-        } else fx[f] = moved;
-      }
-    }
-  };
-  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); shiftFormulasForRowEdit(at, 1); items.splice(at, 0, it); recomputeAll(); onChange(); focusCell(at, "name"); };
+  // "dịch tham chiếu + splice" là MỘT thao tác không tách rời — xem web/src/lib/rowEdit.ts.
+  // Trước đây mỗi đường chèn/xoá tự gọi hai bước, và `insertCatalogRows` quên bước dịch → công
+  // thức trỏ sai hạng mục, tức SAI TIỀN, không cảnh báo. Nay muốn chèn thì phải qua hai hàm này.
+  const chen = (at: number, rows: ItemK[]) => insertRows(items as unknown as RowLike[], at, rows as unknown as RowLike[], adjustRefsForRowEdit);
+  const xoa = (at: number, n: number) => removeRows(items as unknown as RowLike[], at, n, adjustRefsForRowEdit);
+  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); chen(at, [it]); recomputeAll(); onChange(); focusCell(at, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, it); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
-  const removeRow = (i: number) => { pushUndo(); shiftFormulasForRowEdit(i, -1); items.splice(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
+  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); chen(i + 1, [it]); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+  const removeRow = (i: number) => { pushUndo(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
@@ -698,12 +691,14 @@ export function GridTable(props: GridTableProps) {
   const insertCatalogRows = (list: VenueEntry[]) => {
     if (!list.length) return;
     pushUndo();
-    let at = insertIndex();
-    for (const en of list) {
+    const at = insertIndex();
+    const rows = list.map((en) => {
       const it = M.blankItem(usesDays) as ItemK; it._k = nextK();
       fillItemFromEntry(it as unknown as Record<string, unknown>, en);
-      items.splice(at, 0, it); at++;
-    }
+      return it;
+    });
+    chen(at, rows);       // TRƯỚC ĐÂY: splice trần, không dịch tham chiếu → công thức trỏ lệch
+    recomputeAll();       // TRƯỚC ĐÂY: thiếu → bảng còn hiện số CŨ tới lần gõ kế tiếp
     onChange();
     toast(`Đã chèn ${list.length} hạng mục kèm kích thước — điền nốt Đơn giá là xong`, "success");
   };
@@ -835,8 +830,7 @@ export function GridTable(props: GridTableProps) {
     // Khối nhiều ô. Dán vào hàng NHÓM → chèn hàng mới phía dưới (không đè nhóm).
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
-      shiftFormulasForRowEdit(startRow + 1, rows.length);
-      rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
+      chen(startRow + 1, rows.map(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); return nit; }));
       startRow += 1; startCol = COL_NAME;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
@@ -1026,8 +1020,8 @@ export function GridTable(props: GridTableProps) {
     // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa hàng đang chọn (Excel).
     if (ctrl && editable && (e.key === "+" || e.key === "=" || e.key === "-")) {
       e.preventDefault(); e.stopPropagation();
-      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); shiftFormulasForRowEdit(from, -n); items.splice(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
-      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, nit); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
+      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
+      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
     if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
