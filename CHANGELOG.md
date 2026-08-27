@@ -12,12 +12,16 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**97 commit**, từ 2026-08-11 tới 2026-08-27.
+**101 commit**, từ 2026-08-11 tới 2026-08-27.
 
 ---
 
 ## 2026-08-27
 
+- `81e1f51` §9 phân trang một chỗ · §2 khoá ranh giới bằng cổng thay vì đổi cây thư mục · §0 hai loại nhãn còn thiếu
+- `97cc155` Đo trước rồi mới sửa: lưu báo giá nhanh 3,5× · index còn thiếu · log đủ trường · Loki+Grafana
+- `4b7a56b` Ba khoảng trống hồi quy được vá: IME tiếng Việt, phiên hết hạn, và bản nháp cục bộ
+- `5d75a8c` docs: sinh lại CHANGELOG theo lịch sử git
 - `9fa4892` E2E đi hết luồng người dùng — và phát hiện bundle giao cho người dùng là BẢN DEV của React
 - `9fa1064` Vá lỗ bảo mật còn sót, chặn migration Prisma xoá index, và ba file root §32 còn thiếu
 - `78decd3` Bí mật đọc từ file (*_FILE), vá 5 lỗ của verify, và gộp smoke image về MỘT chỗ
