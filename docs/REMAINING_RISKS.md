@@ -340,56 +340,47 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 | 1 · P0 Production Risk | **xong** | `scripts/backup/backup-objects.sh` · `BACKUP_RESTORE.md` + `DISASTER_RECOVERY.md` · `src/tools/piiRotate.ts` + `verifyIntegrity.ts` · 31 file test bảo mật |
 | 2 · Security | **xong** | ADR-0005 CSRF · `ROLES_PERMISSIONS.md` + `endpoint-inventory.mjs` (137/137 hai chiều) · break-glass ở `userService.ts` |
 | 3 · Production Runtime | **xong** | `tsconfig.build.json` · 4 khối `cap_drop` trong compose · `exportGateStats` |
-| 4 · CI/CD | **CHƯA — xem dưới** | mọi thứ nằm trong `.github/workflows/ci.yml`, mà file đó **không chạy** |
-| 5 · Observability | **một phần** | có: `src/observability.ts`, `SLO.md`, `/metrics`. Thiếu: **không một rule cảnh báo nào**; Loki/Grafana mới chỉ có trong `MONITORING.md`, chưa có cấu hình chạy |
+| 4 · CI/CD | **xong** (2026-08-27) | `.github/workflows/ci.yml` vẫn không chạy (tài khoản không bật Actions) — nhưng cả 5 thứ nó khai nay chạy trong `npm run verify`: xem bảng ngay dưới |
+| 5 · Observability | **xong** (2026-08-27) | 14 rule cảnh báo + 10 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
-| 9 · Final QA | **một phần** | `npm run verify` xanh trọn (1271 test + web 187). Thiếu: quét bảo mật và mô phỏng deploy **chưa chạy thật lần nào** |
+| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 17 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
 
-### PHASE 4 hụt hẳn — và đây là chỗ hụt lớn nhất còn lại
+### PHASE 4 — đã đóng (2026-08-27)
 
-Prompt đòi 5 thứ. Đo ở HEAD:
+Đoạn này trước đây ghi "hụt hẳn — chỗ hụt lớn nhất còn lại". Không còn đúng; giữ lại
+bảng để thấy đã đóng bằng cái gì.
 
-| Đòi | Thật |
-|---|---|
-| Playwright smoke | **không có** — `find . -name "*e2e*"` ra 0, `package.json` không có playwright |
-| Helm checks | chỉ `helm lint`; 4 bất biến chart trong `ci.yml` (render đầy đủ, từ chối `image.tag=latest`, từ chối mật khẩu rỗng, kubeconform) **không chạy ở đâu** |
-| Docker smoke | **không có** — không nơi nào dựng image rồi thử nó |
-| SBOM | chỉ là văn bản trong `ci.yml` |
-| Ghim nguồn cung | **có** — 2 image ghim `sha256:` trong compose |
+| Đòi | Trước | Nay |
+|---|---|---|
+| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **17 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền), 0 lỗi console |
+| Helm checks | chỉ `helm lint` | `scripts/ci/check-helm.mjs` — render đầy đủ + kubeconform + 4 bất biến |
+| Docker smoke | không có | `scripts/ci/docker-smoke.sh` dựng image, `smoke-image.sh` giữ MỌI khẳng định về image (kể cả **0 dòng stack trong log khởi động**) |
+| SBOM | chỉ là văn bản | `scripts/ci/security-scan.sh` sinh thật, cùng gitleaks (cả lịch sử git) · trivy · semgrep |
+| Ghim nguồn cung | có | giữ nguyên, cộng đường kéo image theo digest (`IMAGE_REF=…@sha256:`) |
 
-Gốc rễ: tài khoản GitHub không bật Actions, nên `ci.yml` là **tài liệu về những cổng
-cần chạy, không phải cổng đang chạy**. `scripts/verify-local.sh` thay được phần lớn,
-nhưng **không** thay được ba thứ cần Docker/trình duyệt: smoke test artifact
-production, dựng + smoke image Docker, và job `security` (gitleaks · trivy · semgrep).
+Lượt chạy THẬT đầu tiên của nhóm bảo mật lộ ra hai chốt vô tác dụng — `.gitleaks.toml`
+viết allowlist bằng cú pháp gitleaks BỎ QUA, và `.trivyignore.yaml` ghi ID thiếu tiền
+tố `AVD-`. Đó là lý lẽ tốt nhất cho việc "cổng phải CHẠY, không phải được khai".
 
-Chúng canh đúng thứ đi ra production, mà hiện không ai canh cả. Đây là việc đáng làm
-tiếp nhất.
+### Những mục nhỏ hơn — đã vá (2026-08-27)
 
-### Những mục nhỏ hơn còn mở
+Năm mục từng liệt ở đây (`[0/9]` kiểm nhầm địa chỉ hạ tầng · không bước nào chạy
+`npm ci` · `build` không dọn `dist/` · ngưỡng tự hiệu chuẩn chỉ có chặn dưới · bước
+`[1b]` in ✓ kể cả khi không bài đo nào chạy) **đều đã vá**. Nay `verify-local.sh` phân
+tích `DATABASE_URL`/`REDIS_URL` để kiểm đúng máy, có `npm ci --dry-run`, dùng
+`build:clean`, và `[1b]` đọc báo cáo JSON của vitest nên một bài BỎ QUA là ĐỎ.
 
-- `verify-local.sh` bước `[0/9]` kiểm Postgres/Redis ở địa chỉ **mặc định**, không phải
-  địa chỉ trong `DATABASE_URL`/`REDIS_URL` (chốt hạ tầng mới đã ép chúng phải cục bộ,
-  nên hậu quả hẹp lại — nhưng vẫn là kiểm nhầm thứ).
-- Không bước nào chạy `npm ci`: `package.json` lệch `package-lock.json` thì verify vẫn
-  xanh, còn Docker và `ci.yml` đỏ ngay ở bước cài.
-- `npm run build` ở bước `[2b]` **không dọn** `dist/`. Xoá một file nguồn thì artifact cũ
-  nằm lại và bài `node dist/...` vẫn xanh. (Đã kiểm: hiện **0 file mồ côi**, và Dockerfile
-  dựng `dist/` trong container sạch nên production không dính. Rủi ro chỉ ở máy local.)
-- Ngưỡng của `tests/b2-update-quote-no-image-read.test.js` tự hiệu chuẩn từ một phép đo
-  **chỉ có chặn dưới** (`toBeGreaterThan(200)`). Một lượt hiệu chuẩn bị nhiễu đẩy ngưỡng
-  lên cao sẽ làm khẳng định chính trở nên rỗng mà không ai biết.
-- Bước `[1b]` in ✓ kể cả khi **không bài đo nào chạy** — nó không khẳng định phép đo đã
-  thật sự diễn ra (chỉ khẳng định lệnh thoát 0).
+### Định nghĩa HOÀN THÀNH (mục 52)
 
-### Định nghĩa HOÀN THÀNH (mục 52) — chỗ chưa đạt
-
-Mọi ô khác đã đạt. Ba ô chưa:
-
-- **Security → security scans pass**: chưa chạy thật lần nào (gitleaks/trivy/semgrep).
-- **Operations → dashboards, alerts**: không có rule cảnh báo, không có dashboard chạy.
-- **Backup → off-host copy**: script có, nhưng chưa có bằng chứng đã chạy trên máy chủ thật.
+- **Security → security scans pass**: ✅ chạy thật trong `verify` bước [13/13].
+- **Operations → dashboards, alerts**: ✅ 14 rule + 10 bài kiểm logic; bảng điều khiển
+  Grafana ở `infra/observability/` (opt-in, chưa bật ở production — quyết định vận hành,
+  xem `TECHNOLOGY_DECISIONS.md`).
+- **Backup → off-host copy**: ⚠️ **vẫn chưa** có bằng chứng đã chạy trên máy chủ thật.
+  Script và bài diễn tập khôi phục có; thứ thiếu là một lượt chạy trên VM, và không mã
+  nào làm thay được việc đó.
 
 ## Đối chiếu PHỤ LỤC "TECHNOLOGY MODERNIZATION & MIGRATION AUTHORITY" (2026-08-27)
 
