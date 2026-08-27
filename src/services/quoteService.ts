@@ -27,6 +27,7 @@ import {
   extraTableSum,
 } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
+import { sheetKhongDoi } from "../quoteSheetDiff.js";
 
 /**
  * Caller có VIEW BỊ LƯỢC — `GET /quotes/:id` chỉ trả cho họ một phần báo giá:
@@ -106,7 +107,7 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
   if (!Array.isArray(sheets)) return;
   // rid -> trạng thái thanh toán CỘNG số tiền tại thời điểm đó.
   //
-  // ── VÌ SAO PHẢI GHIM CẢ SỐ TIỀN ─────────────────────────────────────────────
+  // ── VÌ SAO PHẢI GHIM CẢ SỐ TIỀN ───────────────────────────────────────────
   // `rid` do CHÍNH CLIENT gửi lên và được `sanitizeExtraTables` (src/quoteUtils.ts) giữ NGUYÊN VĂN
   // khi ghi. Bản trước chỉ tra `prior.get(it.rid)`, nên tin cậy hoàn toàn vào một chuỗi client
   // kiểm soát. ĐÃ ĐO hai chiều:
@@ -496,7 +497,15 @@ export async function updateQuote(req: Request) {
       // lý (không xác định), nên thiếu câu này thì nó và saveHn có thể lấy khoá ngược chiều nhau
       // trên cùng báo giá → deadlock 40P01 → Prisma P2034.
       await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
-      const sheetsTuoi: any[] = await tx.quoteSheet.findMany({ where: { quoteId: id }, orderBy: { id: "asc" } });
+      // Cờ BẬT thì phải đọc kèm `items` để so được "trang này có đổi không". Đo được
+      // (scripts/bench/quote-save-bench.mjs): 94,7 ms cho 10.000 dòng — rẻ hơn hai bậc độ lớn so
+      // với 3.940 ms của lần ghi mà nó giúp tránh. Cờ TẮT thì KHÔNG đọc, để đường mặc định không
+      // gánh thêm một xu chi phí nào.
+      const sheetsTuoi: any[] = await tx.quoteSheet.findMany({
+        where: { quoteId: id },
+        orderBy: { id: "asc" },
+        ...(config.INCREMENTAL_QUOTE_SAVE ? { include: { items: { orderBy: { order: "asc" } } } } : {}),
+      });
 
       // CHỈ người có quyền DUYỆT NỘI BỘ được đổi trạng thái duyệt hàng (HCM/Khách); còn lại giữ nguyên theo DB.
       reconcileExtraApprovals(b.sheets, sheetsTuoi, can(req.session, P.QUOTE_INTERNAL_APPROVE), userId);
@@ -507,11 +516,33 @@ export async function updateQuote(req: Request) {
       // Giá HN đã chốt: lấy lại từ CSDL trước khi ghi (xem reconcileHanoiTables).
       reconcileHanoiTables(b.sheets, carry, can(req.session, P.QUOTE_HN_MANAGE), existing.hnStatus);
 
-      await tx.quoteSheet.deleteMany({ where: { quoteId: id } });
+      const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry);
+
+      // ── GHI TĂNG DẦN Ở MỨC TRANG (cờ INCREMENTAL_QUOTE_SAVE) ──────────────
+      // Trang nào ghi đè lên chính nó KHÔNG đổi một byte thì không xoá, không tạo lại. Lý lẽ và số
+      // đo: src/quoteSheetDiff.ts. `carry[i]` CHÍNH LÀ hàng CSDL tương ứng với trang thứ i của
+      // payload (carrySheetState dò theo sheet.id, không có id thì theo thứ tự) — nên phép ghép
+      // dùng lại đúng thứ mà đường lưu vẫn dùng, không đẻ thêm luật ghép thứ hai.
+      const giuLai: number[] = [];
+      let sheetsTao = sheetsGhi;
+      if (config.INCREMENTAL_QUOTE_SAVE) {
+        const canTao: any[] = [];
+        sheetsGhi.forEach((m: any, i: number) => {
+          const cu = carry[i] as any;
+          if (cu && sheetKhongDoi(m, cu)) giuLai.push(Number(cu.id));
+          else canTao.push(m);
+        });
+        sheetsTao = canTao;
+      }
+      // Trang GIỮ LẠI phải nằm ngoài lệnh xoá. Danh sách rỗng thì `notIn: []` vẫn hợp lệ nhưng viết
+      // tường minh cho rõ: không giữ gì thì xoá sạch, y như đường cũ.
+      await tx.quoteSheet.deleteMany({
+        where: { quoteId: id, ...(giuLai.length ? { id: { notIn: giuLai } } : {}) },
+      });
       await chotKhoaLacQuan(tx);
       const u = await tx.quote.update({
         where: { id },
-        data: { ...data, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals, carry) } },
+        data: { ...data, sheets: { create: sheetsTao } },
         include: QUOTE_INCLUDE as any,
       });
       await snapshotQuoteVersion(tx, id, userId, "update");
@@ -621,10 +652,10 @@ export async function listQuotes(req: Request) {
 }
 
 /**
- * Bảng nội bộ THEO TỪNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
+ * Bảng nội bộ THEO TẮNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
  *
  * BA đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`), `listProjects`
- * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
+ * (cần theo TẮNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
  * bản xuất GDPR (src/services/gdprService.ts) — đường đó cũng cần dữ liệu chữ/số của bảng nội bộ
  * mà KHÔNG kéo ảnh chứng từ qua dây.
  *
@@ -791,7 +822,7 @@ export async function listProjects(req: Request) {
       },
     },
   });
-  // Bảng nội bộ (đã cắt ảnh chứng từ) theo TỪNG sheet — chỉ để cộng hcm/hanoi/khach ngay dưới.
+  // Bảng nội bộ (đã cắt ảnh chứng từ) theo TẮNG sheet — chỉ để cộng hcm/hanoi/khach ngay dưới.
   const bangTheoSheet = new Map<number, any[]>();
   if (quotes.length) {
     for (const r of await bangNoiBoTheoSheet(quotes.map((q: any) => q.id))) {
