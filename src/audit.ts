@@ -37,6 +37,10 @@ export async function audit(ctx: Request | null, action: string, opts: Record<st
   // immutable audit trail (it would let an attacker forge the source IP).
   const ip = ctx?.ip || null;
   const ua = ctx?.headers?.["user-agent"] || null;
+  // Mã request do `requestId` ở src/middleware.ts sinh. Nối nhật ký kiểm toán với log pino: không
+  // có nó thì "ai làm gì" và "request nào chạy" là hai kho không ghép lại được.
+  // `opts.requestId` cho phép job nền tự truyền mã của lượt chạy nếu có.
+  const reqId = opts.requestId ?? ctx?.id ?? null;
 
   try {
     await prisma.auditEvent.create({
@@ -49,6 +53,7 @@ export async function audit(ctx: Request | null, action: string, opts: Record<st
         after: opts.after ?? undefined,
         ip,
         userAgent: ua,
+        requestId: reqId ? String(reqId) : null,
       },
     });
   } catch (e) {

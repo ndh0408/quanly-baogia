@@ -49,7 +49,8 @@
     "proof:verify": "node --import tsx scripts/migration/payment-proof-migrate.mjs --verify",
     "check:refs": "node scripts/ci/check-line-refs.mjs",
     "check:helm": "node scripts/ci/check-helm.mjs",
-    "check:alerts": "node scripts/ci/check-alerts.mjs"
+    "check:alerts": "node scripts/ci/check-alerts.mjs",
+    "check:changelog": "node scripts/ci/gen-changelog.mjs --check"
   },
   "engines": {
     "node": ">=22"

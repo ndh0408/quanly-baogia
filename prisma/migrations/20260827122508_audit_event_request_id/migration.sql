@@ -1,0 +1,23 @@
+-- Thêm `AuditEvent.requestId` — nối nhật ký kiểm toán với log pino (§42 của MASTER PROMPT).
+--
+-- ⚠️ FILE NÀY ĐÃ ĐƯỢC VIẾT LẠI BẰNG TAY. ĐỌC TRƯỚC KHI CHẠY LẠI `prisma migrate dev`.
+--
+-- Bản `prisma migrate dev` sinh ra TỰ ĐỘNG chứa thêm 11 câu `DROP INDEX`:
+--     Quote_title_trgm · Quote_toCompany_trgm · Quote_quoteNumber_trgm · Quote_searchText_trgm_idx
+--     Customer_name_trgm · Customer_taxCode_trgm · Customer_searchText_trgm_idx
+--     Product_name_trgm · Product_sku_trgm · PersonnelRecord_searchText_trgm_idx · Venue_tags_idx
+--
+-- Vì sao Prisma muốn xoá chúng: đó là index GIN/trigram được tạo bằng SQL THÔ ở các migration
+-- trước (20260613000002_search_trgm_indexes, 20260625000000_add_search_text,
+-- 20260625000002_personnel_searchtext, 20260726000002_venue_tags). `schema.prisma` KHÔNG diễn đạt
+-- được `USING gin (... gin_trgm_ops)`, nên Prisma nhìn CSDL thấy index "không có trong schema" và
+-- kết luận là thừa.
+--
+-- Chạy nguyên bản tự sinh đó lên production = xoá sạch index tìm kiếm. Mọi truy vấn tìm báo giá /
+-- khách hàng / nhân sự rơi về quét tuần tự, và KHÔNG có lỗi nào được ném ra — chỉ chậm dần.
+--
+-- Nên file này CHỈ giữ đúng phần cần: thêm một cột nullable.
+-- Cổng `scripts/ci/check-destructive-sql.mjs` nay soi cả `DROP INDEX` để lần sau việc này không
+-- lọt qua im lặng nữa.
+
+ALTER TABLE "AuditEvent" ADD COLUMN "requestId" TEXT;
