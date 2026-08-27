@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
-import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShared";
+import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
@@ -1008,7 +1008,7 @@ function GridTableInner(props: GridTableProps) {
     const i = parseInt(tr.getAttribute("data-row") || "0", 10);
     const ci = FIELDS.indexOf(f);
     const isMultiline = MULTILINE.has(f);
-    if (!ctrl && (e.nativeEvent?.isComposing || e.keyCode === 229 || e.key === "Process")) {
+    if (!ctrl && dangGoIME(e)) {
       // IME (gõ tiếng Việt trên macOS, Trung/Nhật/Hàn…): phím đầu tiên rơi vào ô đang KHÓA →
       // mở khóa + xoá NGAY TRONG keydown (trước khi composition bắt đầu) để cụm chữ đè nội dung
       // cũ — cùng nếp "gõ là đè" với ký tự thường. Đang sửa rồi thì để IME tự chạy.

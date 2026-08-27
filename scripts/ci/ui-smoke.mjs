@@ -43,7 +43,7 @@ import bcrypt from "bcryptjs";
 // `page.waitForFunction` — chúng được TUẦN TỰ HOÁ rồi chạy TRONG TRÌNH DUYỆT, không chạy ở Node.
 // eslint đọc file này bằng cấu hình Node nên báo `no-undef`; khai báo ở đây thay vì rắc
 // eslint-disable ở từng chỗ.
-/* global location, document */
+/* global location, document, window */
 
 const GOC = path.resolve(import.meta.dirname, "../..");
 const HIEN = process.argv.includes("--hien");
@@ -337,6 +337,38 @@ async function main() {
     const sauTai = await soCuaO('tr[data-row="0"] .col-amount');
     doi(sauTai === 750_000, `sau khi tải lại Thành Tiền = ${sauTai.toLocaleString("vi-VN")} (mong 750.000 — đọc lại từ máy chủ)`);
 
+    // Gõ vào một ô đúng nếp Excel (bấm CHỌN → gõ là ĐÈ). Xem lý do dài ở [U8].
+    const goVaoO = async (sel, gt) => { await trang.locator(sel).click(); await trang.keyboard.type(gt); await trang.keyboard.press("Enter"); };
+
+    buoc("[U10b] Mất tab giữa chừng — bản nháp cục bộ cứu được phần chưa lưu");
+    // Ba lớp chống mất dữ liệu sẵn có (beforeunload · guardLeave · lớp phủ đăng nhập lại) đều chỉ
+    // sống trong bộ nhớ tab. Bài này dựng đúng chỗ chúng không với tới: gõ, KHÔNG lưu, rồi nạp lại
+    // trang — tương đương tab sập / máy mất điện. Không có web/src/lib/localDraft.ts thì phần vừa
+    // gõ biến mất và ô quay về 750.000.
+    await goVaoO('tr[data-row="0"] [data-f="unitPrice"]', "400000");
+    const truocNhap = await soCuaO('tr[data-row="0"] .col-amount');
+    doi(truocNhap === 1_200_000, `gõ 400.000 → Thành Tiền = ${truocNhap.toLocaleString("vi-VN")} (chưa lưu)`);
+    // Chờ ĐÚNG cái mốc chương trình tạo ra, không ngủ một con số đoán: ghi bản nháp gộp 1,2 giây.
+    const khoaNhap = `quanly:draft:quote:${bg.id}`;
+    await trang.waitForFunction((k) => !!window.localStorage.getItem(k), khoaNhap, { timeout: 15_000 }).catch(() => {});
+    doi(await trang.evaluate((k) => !!window.localStorage.getItem(k), khoaNhap), "bản nháp đã nằm trong localStorage");
+
+    await trang.reload({ waitUntil: "domcontentloaded" });
+    await trang.waitForSelector('.modal[aria-label="Có thay đổi chưa lưu từ lần trước"]', { timeout: 30_000 });
+    ok("nạp lại → hiện hộp hỏi khôi phục");
+    await trang.click('.modal[aria-label="Có thay đổi chưa lưu từ lần trước"] [data-yes]');
+    await trang.waitForSelector('tr[data-row="0"]', { timeout: 30_000 });
+    const sauKhoiPhuc = await soCuaO('tr[data-row="0"] .col-amount');
+    doi(sauKhoiPhuc === 1_200_000, `sau khôi phục Thành Tiền = ${sauKhoiPhuc.toLocaleString("vi-VN")} (mong 1.200.000 — số CHƯA LƯU sống sót)`);
+
+    // Lưu để trạng thái sạch cho các bước sau, và chốt luôn: lưu xong bản nháp bị dọn (giữ lại sẽ
+    // khiến lần mở sau hỏi khôi phục một thứ CŨ HƠN bản trên máy chủ).
+    await trang.click(".actions > .btn-primary");
+    await trang.waitForSelector("#toast-host .toast-msg:has-text('Đã lưu')", { timeout: 30_000 });
+    doi(!(await trang.evaluate((k) => !!window.localStorage.getItem(k), khoaNhap)), "lưu xong → bản nháp cục bộ đã bị dọn");
+    const dbSauKhoiPhuc = await prisma.quoteItem.findFirst({ where: { sheet: { quoteId: bg.id }, order: 1 }, select: { unitPrice: true } });
+    doi(Number(dbSauKhoiPhuc?.unitPrice) === 400_000, `CSDL: đơn giá dòng 1 = ${dbSauKhoiPhuc?.unitPrice} (mong 400000)`);
+
     buoc("[U11] Tạo báo giá mới — wizard 3 bước");
     await trang.evaluate(() => { location.hash = "#/new"; });
     await trang.waitForSelector("h1:has-text('Tạo báo giá mới')", { timeout: 20_000 });
@@ -363,7 +395,6 @@ async function main() {
     ok("wizard đi hết 3 bước → trình soạn bản nháp #/rnew");
 
     buoc("[U12] Lưu báo giá MỚI — POST tạo bản ghi thật");
-    const goVaoO = async (sel, gt) => { await trang.locator(sel).click(); await trang.keyboard.type(gt); await trang.keyboard.press("Enter"); };
     await goVaoO('tr[data-row="0"] [data-f="name"]', "Hạng mục wizard");
     await goVaoO('tr[data-row="0"] [data-f="quantity"]', "4");
     await goVaoO('tr[data-row="0"] [data-f="unitPrice"]', "125000");

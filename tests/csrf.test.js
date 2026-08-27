@@ -152,6 +152,57 @@ describe.runIf(dbAvailable)("CSRF", () => {
     expect(r.status).toBe(401);
   });
 
+  // ── PHIÊN HẾT HẠN ─────────────────────────────────────────────────────────
+  // Trường hợp cuối trong danh sách §5 (valid origin · invalid origin · no origin · valid CSRF ·
+  // invalid CSRF · bearer · EXPIRED SESSION), và là trường hợp DUY NHẤT trước đây không có bài nào.
+  //
+  // "Hết hạn" ở đây đúng nghĩa vận hành: cookie vẫn còn trong trình duyệt và chữ ký vẫn hợp lệ
+  // (cùng SESSION_SECRET), nhưng BẢN GHI phiên không còn ở kho — TTL 7 ngày trôi qua, prune dọn,
+  // kho PG được khôi phục từ bản sao lưu, hay tiến trình khởi động lại với MemoryStore. Dựng lại
+  // đúng tình huống đó bằng một `createApp()` thứ hai: kho phiên mới tinh, không có id nào.
+  //
+  // ĐIỀU PHẢI ĐÚNG, và vì sao nó quan trọng hơn vẻ ngoài:
+  //   · phải trả 401, KHÔNG phải 403. web/src/lib/api.ts bắt ĐÚNG 401 để bắn `auth:expired` →
+  //     App.tsx phủ hộp đăng nhập lại LÊN TRÊN cây đang mount, giữ nguyên báo giá đang soạn. Trả
+  //     403 ở đây thì người dùng nhận "Yêu cầu bị chặn (CSRF)" — một câu vô nghĩa với họ — và
+  //     KHÔNG có đường đăng nhập lại, tức mất trắng phần đang gõ.
+  //   · mã CSRF cũ KHÔNG được giúp gì. Nó thuộc về một phiên không còn tồn tại; nếu nó vẫn mở được
+  //     đường ghi thì token đã không thật sự gắn với phiên.
+  it("phiên HẾT HẠN: cookie còn chữ ký hợp lệ nhưng bản ghi phiên đã mất → 401 (không phải 403), mã CSRF cũ vô dụng", async () => {
+    const { createApp } = await import("../src/app.js");
+    // Đăng nhập bằng một client RIÊNG để lấy cookie thô (agent dùng chung ở trên giấu cookie đi).
+    const dangNhap = await request(app).post("/api/auth/login").send({ username: user.username, password: PWD });
+    expect(dangNhap.status).toBe(200);
+    const cookie = dangNhap.headers["set-cookie"];
+    expect(Array.isArray(cookie) && cookie.length).toBeTruthy();
+
+    // Tiện thể chốt luôn hai thuộc tính cookie mà THIẾT KẾ §5 dựa vào — trước đây không bài nào
+    // kiểm, nên "SameSite" chỉ tồn tại trong chú thích.
+    const chuoiCookie = cookie.join("; ");
+    expect(chuoiCookie).toMatch(/qly\.sid=/);
+    expect(chuoiCookie).toMatch(/HttpOnly/i);
+    expect(chuoiCookie).toMatch(/SameSite=Lax/i);
+
+    // Mã CSRF hợp lệ CỦA CHÍNH phiên đó, lấy trước khi phiên "mất".
+    const rToken = await request(app).get("/api/csrf-token").set("Cookie", cookie);
+    expect(rToken.status).toBe(200);
+    const tokenCu = rToken.body.token;
+
+    const appMoi = createApp();   // kho phiên trống → id trong cookie không tra ra gì
+    const coMa = await request(appMoi).post("/api/customers")
+      .set("Cookie", cookie).set("Origin", ORIGIN).set("X-CSRF-Token", tokenCu)
+      .send({ name: `${TAG} khong duoc phep`, code: `${TAG}NO` });
+    expect(coMa.status).toBe(401);
+
+    const khongMa = await request(appMoi).post("/api/customers")
+      .set("Cookie", cookie).set("Origin", ORIGIN)
+      .send({ name: `${TAG} khong duoc phep 2`, code: `${TAG}NO2` });
+    expect(khongMa.status).toBe(401);
+
+    // Không có bản ghi nào lọt xuống CSDL — chốt ngược, phòng khi 401 đến TỪ SAU khi đã ghi.
+    expect(await prisma.customer.count({ where: { code: { startsWith: `${TAG}NO` } } })).toBe(0);
+  });
+
   it("đăng nhập lại (session.regenerate) làm mã CŨ hết giá trị — đây là lý do client phải thử lại", async () => {
     const tokenCu = await layToken();
     // Đăng nhập lại KHI ĐANG CÓ PHIÊN cũng là thao tác ghi bằng phiên cookie → phải kèm mã, đúng
