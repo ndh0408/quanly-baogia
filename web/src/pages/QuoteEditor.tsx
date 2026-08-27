@@ -7,17 +7,18 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
-import { takePendingNewQuote } from "../lib/pendingQuote";
+import { giuBanNhap } from "../lib/pendingQuote";
+import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan } from "../lib/localDraft";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
 
-// ───────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor) sang React. Form (KH/người gửi/meta) +
 // multi-sheet + LƯỚI (component GridTable dùng chung) + summary + Lưu/Chốt/Không-chốt + Excel/PDF/
 // Phiên-bản/Thành-viên + BẢNG NỘI BỘ (component ExtraTables). Lưới + công thức + dán + undo nằm trong
 // GridTable. Ô nhập UNCONTROLLED + key _k giữ focus; qRef + tick để vẽ lại tổng.
-// ───────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
 
 const stampKeys = (q: QuoteFull) => {
   (q.sheets as Sheet[] | undefined)?.forEach((s) => (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); }));
@@ -78,7 +79,28 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
   const dirtyRef = useRef(false);
-  const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
+  // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
+  // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
+  const draftRef = useRef<QuoteFull | null>(null);
+  // ── BẢN NHÁP CỤC BỘ ────────────────────────────────────────────────────
+  // Ba lớp chống mất dữ liệu sẵn có (beforeunload · guardLeave · lớp phủ đăng nhập lại) đều CHỈ
+  // sống trong bộ nhớ tab. Tab sập / máy mất điện / bấm "Rời khỏi trang" là mất trắng. Đây là lưới
+  // cuối: ghi xuống localStorage, có trần dung lượng và hạn 7 ngày (web/src/lib/localDraft.ts).
+  const khoaNhapRef = useRef<string | null>(null);
+  const baseNhapRef = useRef<string | null>(null);   // updatedAt của bản MÁY CHỦ mà bản nháp dựa vào
+  const hnNhapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Gộp 1,2 giây: `mark()` bị gọi theo TỪNG PHÍM ở lưới. Ghi mỗi phím là stringify cả báo giá
+  // hàng nghìn dòng rồi đẩy xuống đĩa — gõ sẽ khựng thấy rõ, tức chính tính năng chống mất dữ liệu
+  // lại làm hỏng trải nghiệm gõ mà §3 bắt phải giữ.
+  const mark = useCallback(() => {
+    dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
+    if (hnNhapRef.current) clearTimeout(hnNhapRef.current);
+    hnNhapRef.current = setTimeout(() => {
+      hnNhapRef.current = null;
+      if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
+      ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current);
+    }, 1200);
+  }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -113,7 +135,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", h);
-    return () => { window.removeEventListener("beforeunload", h); (window as WinDirty).__editorDirty = false; };
+    return () => {
+      window.removeEventListener("beforeunload", h);
+      (window as WinDirty).__editorDirty = false;
+      // Hẹn giờ ghi bản nháp phải huỷ theo: để nó bắn sau khi component đã rời là ghi đè bản nháp
+      // của báo giá VỪA MỞ bằng dữ liệu của báo giá CŨ.
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+    };
   }, []);
 
   // PRESENCE: báo "tôi đang mở báo giá này" + nghe ai khác đang sửa → hiện banner. Chỉ báo giá ĐÃ LƯU.
@@ -144,7 +172,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const templates = _templates || RONG;
   const companies = _companies || RONG;
 
-  // ── load catalogs + quote ──────────────────────────────────────────────────
+  // ── load catalogs + quote ─────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -154,10 +182,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           _companies = cs; _templates = ts;
         }
         let q: QuoteFull;
+        let tuWizard = false;
         if (isNew) {
           // Draft từ Wizard Tạo-mới (công ty/mẫu/khách/logo đã chọn); nếu vào thẳng #/rnew thì dựng mặc định.
-          const pend = takePendingNewQuote();
-          if (pend) { q = pend; }
+          const pend = giuBanNhap(draftRef);
+          if (pend) { q = pend; tuWizard = true; }
           else {
             const firstTpl = _templates![0];
             q = {
@@ -174,10 +203,51 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
+        // ── BẢN NHÁP CỤC BỘ: có gì để khôi phục không? ──────────────────────────
+        // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
+        // đụng khoá của một báo giá thật id 0 nếu sau này có.
+        let khoiPhuc = false;
+        khoaNhapRef.current = khoaBanNhap(isNew ? "moi" : quoteId!);
+        baseNhapRef.current = (q as { updatedAt?: string }).updatedAt ?? null;
+        donBanNhapQuaHan();   // rẻ, và giữ hạn ngạch localStorage sạch cho cả origin
+        const nhapCu = docBanNhap(khoaNhapRef.current);
+        // CHỈ đề nghị khi bản nháp dựa trên ĐÚNG bản máy chủ vừa tải. Lệch `updatedAt` nghĩa là
+        // người khác đã lưu đè trong lúc đó — khôi phục lúc ấy là âm thầm cán lên việc của họ,
+        // đúng thứ mà khoá lạc quan (409) sinh ra để chặn. Bản nháp lệch bị bỏ đi, không hỏi.
+        // ĐẾN TỪ WIZARD thì KHÔNG hỏi: người dùng vừa chọn công ty/mẫu/khách xong, hỏi "khôi phục
+        // bản nháp cũ?" ngay lúc đó là mời họ ĐÈ LÊN lựa chọn vừa làm. Bản nháp "moi" bỏ dở của
+        // lần trước bị xoá luôn — nó đã hết ý nghĩa từ lúc wizard chạy lại.
+        if (tuWizard && khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        else if (alive && nhapCu && nhapCu.baseUpdatedAt === baseNhapRef.current) {
+          const luc = new Date(nhapCu.luuLuc).toLocaleString("vi-VN");
+          const canhBaoAnh = nhapCu.bocAnh
+            ? " LƯU Ý: bản nháp này KHÔNG kèm ảnh trong các dòng (quá lớn để giữ trên máy) — khôi phục rồi bấm Lưu sẽ XOÁ ảnh đang có trên máy chủ."
+            : "";
+          const dong = await confirmModal(
+            "Có thay đổi chưa lưu từ lần trước",
+            `Lần trước bạn rời trang lúc ${luc} khi còn thay đổi CHƯA LƯU. Khôi phục phần đang soạn đó?${canhBaoAnh}`,
+            { confirmText: "Khôi phục", danger: nhapCu.bocAnh },
+          );
+          if (dong) {
+            const kp = nhapCu.quote as QuoteFull;
+            // Bản nháp đi qua JSON nên mất `_k` và có thể thiếu mảng con — chuẩn hoá đúng như
+            // nhánh thường bên dưới, rồi mới giao cho lưới.
+            if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
+            (kp.sheets as Sheet[]).forEach((sh) => { if (!Array.isArray(sh.extraTables)) sh.extraTables = []; });
+            q = kp;
+            khoiPhuc = true;   // khôi phục xong LÀ đang có thay đổi chưa lưu → cờ bẩn bên dưới
+          } else {
+            xoaBanNhap(khoaNhapRef.current);
+          }
+        }
         (q as QuoteFull & { _activeSheet: number })._activeSheet = 0;
         stampKeys(q);
         qRef.current = q;
-        if (alive) { dirtyRef.current = false; setReady(true); }
+        if (alive) {
+          dirtyRef.current = khoiPhuc;
+          (window as WinDirty).__editorDirty = khoiPhuc;
+          setReady(true);
+        }
       } catch (ex) {
         if (alive) setErr(ex instanceof ApiError ? ex.message : "Lỗi tải báo giá");
       }
@@ -235,10 +305,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     location.hash = "#/list";
   };
 
-  // ── field setters ──────────────────────────────────────────────────────────
+  // ── field setters ─────────────────────────────────────────────────────────
   const setQ = (k: string, v: unknown) => { (q as Record<string, unknown>)[k] = v; mark(); };
 
-  // ── sheet ops ──────────────────────────────────────────────────────────────
+  // ── sheet ops ────────────────────────────────────────────────────────────
   const switchSheet = (i: number) => { q._activeSheet = i; redraw(); };
   const addSheet = () => {
     const t = templates.filter((x) => x.companyId === q.companyId)[0] || templates[0];
@@ -253,7 +323,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     mark(); redraw();
   };
 
-  // ── save ───────────────────────────────────────────────────────────────────
+  // ── save ────────────────────────────────────────────────────────────────
   const save = async () => {
     if (saving) return;
     setSaving(true);
@@ -285,6 +355,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) { delete payload.quoteNumber; delete payload.baseUpdatedAt; }
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+      // Lưu xong thì bản nháp cục bộ hết lý do tồn tại. Giữ lại là lần mở sau hỏi khôi phục một
+      // thứ CŨ HƠN bản trên máy chủ — đúng kiểu "tính năng chống mất dữ liệu tự gây mất dữ liệu".
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+      if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
       toast("Đã lưu", "success");
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
