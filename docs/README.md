@@ -17,14 +17,20 @@ Mọi tài liệu ĐANG HIỆU LỰC nằm trong thư mục này. Tài liệu l�
 | Mất dữ liệu / phải khôi phục | [operations/DISASTER_RECOVERY.md](operations/DISASTER_RECOVERY.md) |
 | Soát bảo mật | [architecture/SECURITY_MODEL.md](architecture/SECURITY_MODEL.md) → [product/ROLES_PERMISSIONS.md](product/ROLES_PERMISSIONS.md) |
 | Biết cái gì còn chưa làm | [REMAINING_RISKS.md](REMAINING_RISKS.md) |
+| Đọc TỔNG KẾT một lượt rà soát | [BAO_CAO_TONG_KET.md](BAO_CAO_TONG_KET.md) — trước/sau, phát hiện, số đo, rủi ro còn lại, lộ trình |
 
 ## Bố cục
 
 ```
 docs/
+├── BAO_CAO_TONG_KET.md   tổng kết rà soát (A–L): trước/sau · phát hiện · số đo · rủi ro · lộ trình
+│
 ├── architecture/     hệ thống ghép lại thế nào, và vì sao
 │   ├── ARCHITECTURE.md
-│   └── SECURITY_MODEL.md
+│   ├── SECURITY_MODEL.md
+│   ├── TECHNOLOGY_DECISIONS.md   giữ / nâng / thay / hoãn — kèm lý do và rủi ro migration
+│   ├── QUOTE_SAVE_PERFORMANCE.md đo trước/sau đường lưu báo giá
+│   └── API_VERSIONING.md         /api vs /api/v1 · chính sách ngừng hỗ trợ · chuẩn phân trang
 │
 ├── development/      làm việc trên mã nguồn
 │   ├── SETUP.md
@@ -33,6 +39,7 @@ docs/
 ├── operations/       vận hành nó
 │   ├── DEPLOYMENT.md
 │   ├── MONITORING.md
+│   ├── REVERSE_PROXY.md    Cloudflare Tunnel · trust proxy · IP client thật
 │   ├── DISASTER_RECOVERY.md
 │   ├── INCIDENT_RESPONSE.md
 │   └── SLO.md
