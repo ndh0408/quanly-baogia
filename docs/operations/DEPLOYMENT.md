@@ -91,6 +91,10 @@ là mặc định của compose chứ không phải hợp đồng được ghim 
 # Bỏ bước này là diễn tập đúng file compose CŨ đang nằm sẵn trên máy chủ: lệnh xanh, thay đổi
 # của bạn chưa hề được thử. Đây chính là cách `deploy.sh` ship file (dòng `git archive`), nên
 # chạy tay như dưới cho ra đúng thứ mà lượt deploy sẽ ghi vào:
+# ⚠️ `git archive` đọc một COMMIT, KHÔNG đọc thư mục làm việc. Sửa compose xong mà chưa commit
+#    thì lệnh dưới đẩy lên bản CŨ — đúng cái bẫy mà cả mục này sinh ra để chống. Commit trước
+#    (hoặc `git stash` rồi bỏ ý định diễn tập bản nháp).
+git status --porcelain docker-compose.staging.yml   # phải TRỐNG trước khi chạy dòng dưới
 git archive --format=tar.gz HEAD | ssh staging-ts 'tar xzf - -C /opt/stacks/quanly/quanly'
 
 ssh staging-ts

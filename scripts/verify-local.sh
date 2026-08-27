@@ -3,7 +3,9 @@
 # verify-local.sh — CHẠY TOÀN BỘ CỔNG KIỂM NGAY TRÊN MÁY NÀY.
 #
 #   bash scripts/verify-local.sh          # chạy hết
-#   bash scripts/verify-local.sh --nhanh  # bỏ qua build + test web (vòng lặp sửa nhanh)
+#   bash scripts/verify-local.sh --nhanh  # bỏ qua TEST WEB + BUILD WEB (vòng lặp sửa nhanh).
+#                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/9] phụ
+#                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
 # ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
 # CI trên GitHub KHÔNG chạy được (tài khoản không bật Actions). Nghĩa là mọi câu kiểu
@@ -147,7 +149,7 @@ if [ "$NHANH" -eq 0 ]; then
   buoc "[6/9] Build web (backend đã dựng ở [2b])"
   (cd web && npx vite build >/dev/null);                            ket $? "build web"
 else
-  buoc "[5-6/9] Bỏ qua test web + build (--nhanh)"
+  buoc "[5-6/9] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
 fi
 
 buoc "[7/9] Cổng số liệu / phân quyền"

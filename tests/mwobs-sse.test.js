@@ -247,3 +247,30 @@ describe("SSE — backplane không được nuốt sự kiện lúc khởi độ
     expect(bat, "thêm một chỗ bật công tắc `pub` là mở lại đúng cửa sổ đua vừa đóng").toEqual(["pubClient"]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FILE NÀY PHẢI BIẾT NÓ VỪA KIỂM ĐƯỜNG NÀO.
+//
+// Cả bộ bài trên được viết lại (commit 417d579) với lý lẽ "production LUÔN có Redis, nên phải kiểm
+// ở cấu hình đó". Nhưng đo lại thì file này XANH 10/10 CẢ KHI Redis chết — đặt
+// `REDIS_URL=redis://127.0.0.1:6399` (không có gì lắng nghe) vẫn xanh trọn. Nó không phân biệt nổi
+// đường Redis với đường rơi cục bộ, nên "kiểm đúng cấu hình production" mới chỉ là lời tự nhận.
+//
+// Một bộ test không biết mình chạy nhánh nào thì mọi kết luận về nhánh đó đều vô căn cứ.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("bộ test phải biết mình vừa kiểm đường nào", () => {
+  it("có REDIS_URL thì backplane PHẢI lên — nếu không, mọi bài trên chỉ kiểm đường cục bộ", async () => {
+    if (!process.env.REDIS_URL) return;   // không đặt Redis = cố ý kiểm đường cục bộ, hợp lệ
+
+    const { backplaneDangDung } = await import("../src/sse.js");
+    // Khởi tạo backplane là bất đồng bộ (nạp ioredis + bắt tay TCP). Chờ có giới hạn.
+    const het = Date.now() + 8000;
+    while (!backplaneDangDung() && Date.now() < het) await new Promise((r) => setTimeout(r, 50));
+
+    expect(backplaneDangDung(),
+      `REDIS_URL=${process.env.REDIS_URL} nhưng backplane không lên sau 8 giây. Mọi bài trong file ` +
+      `này vừa chạy trên ĐƯỜNG RƠI CỤC BỘ, không phải đường của production — chúng xanh mà không ` +
+      `nói lên điều gì về cấu hình thật. Kiểm Redis có sống không, và có đúng địa chỉ không.`)
+      .toBe(true);
+  }, 30_000);
+});

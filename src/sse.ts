@@ -248,6 +248,21 @@ function roiVeCucBo(op: "publish" | "broadcast", e: unknown, phatLai: () => void
   phatLai();
 }
 
+/**
+ * Backplane Redis ĐÃ SẴN SÀNG chưa (tức `publish`/`broadcast` có đi qua Redis không).
+ *
+ * Có mặt vì BỘ TEST cần biết nó vừa kiểm ĐƯỜNG NÀO. tests/mwobs-sse.test.js được viết lại riêng
+ * cho cấu hình CÓ Redis (production luôn có), nhưng nó XANH 10/10 cả khi Redis chết — nó không
+ * phân biệt được đường Redis với đường rơi cục bộ, nên "kiểm đúng cấu hình production" chỉ là
+ * lời tự nhận. Đo được: đặt REDIS_URL trỏ cổng 6399 (không có gì lắng nghe) → vẫn 10/10.
+ *
+ * KHÔNG dùng cái này trong mã nghiệp vụ để rẽ nhánh: `publish`/`broadcast` đã tự xử lý cả hai
+ * đường, thêm một nhánh nữa là thêm một trạng thái phải kiểm.
+ */
+export function backplaneDangDung(): boolean {
+  return pub !== null;
+}
+
 /** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId: number, event: string, data: unknown) {
   if (pub) {
