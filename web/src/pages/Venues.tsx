@@ -4,6 +4,7 @@ import { api, ApiError, type Me, type Venue, type VenueItemRow } from "../lib/ap
 import { errMsg } from "../lib/format";
 import { toast, confirmModal } from "../lib/ui";
 import { invalidateCatalog, norm } from "../lib/venueCatalog";
+import { dangGoIME } from "../lib/gridShared";
 
 // Trang "Danh mục rạp" — danh sách hạng mục thường dùng theo từng rạp.
 //
@@ -432,7 +433,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
       for (const line of lines) {
         const row = parseQuickItemLine(line, unit);
         if (!row.name) continue;
-        const key = `${normItemText(row.name)}\u0000${normItemUnit(row.unit)}`;
+        const key = `${normItemText(row.name)} ${normItemUnit(row.unit)}`;
         if (seen.has(key)) continue;
         seen.add(key); valid++;
         try {
@@ -462,7 +463,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
       <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
         aria-keyshortcuts="Enter Shift+Enter Alt+Enter" onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.key === "Process") return;
+          if (dangGoIME(e)) return;   // nhịp của bộ gõ — xem web/src/lib/gridShared.ts
           if (e.key !== "Enter" || e.ctrlKey || e.metaKey) return;
           e.preventDefault();
           if (e.altKey || e.shiftKey) {
