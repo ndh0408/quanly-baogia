@@ -2,7 +2,7 @@
 //
 // ── ĐO TRƯỚC KHI VIẾT ────────────────────────────────────────────────────────
 // Chốt duy nhất của seed demo là `ALLOW_DEMO_SEED=1`. Nó KHÔNG hề nhìn NODE_ENV, trong khi script
-// phá huỷ tương đương thì có: scripts/migration/pii-backfill.mjs:47-50 đòi
+// phá huỷ tương đương thì có: scripts/migration/pii-backfill.mjs (chốt `ALLOW_PII_BACKFILL_PROD`) đòi
 // `NODE_ENV === "production" && ALLOW_PII_BACKFILL_PROD !== "true"` mới dừng.
 // Nghĩa là trên VM production, một lệnh `ALLOW_DEMO_SEED=1 DEMO_PASSWORD=... node
 // prisma/seed-demo.js` chạy trót lọt — và prisma/seed-demo.js dùng client RAW (không có extension

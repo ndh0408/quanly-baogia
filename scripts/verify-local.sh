@@ -37,6 +37,52 @@ export DATABASE_URL REDIS_URL S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET 
        S3_FORCE_PATH_STYLE SESSION_SECRET PII_ENC_KEY NODE_ENV
 export REQUIRE_DB_TESTS=1
 
+# ══ CHỐT CHẶN: KHÔNG BAO GIỜ CHẠY LÊN HẠ TẦNG THẬT ══════════════════════════════════
+# Mấy dòng `: "${VAR:=...}"` ở trên chỉ đặt mặc định KHI BIẾN CHƯA CÓ. Ai đang export
+# DATABASE_URL của production trong shell (chuyện thường ngày: vừa chạy `prisma studio`, vừa soi
+# một truy vấn, vừa deploy) rồi gõ `npm run verify` sẽ chạy TOÀN BỘ những thứ sau lên production:
+#   · `prisma migrate deploy`          — thao tác schema THẬT
+#   · 165 file test                    — tạo/xoá bản ghi, nhiều file gọi deleteMany
+#   · `hangDoi.obliterate({force:true})` (tests/hq3-*) — XOÁ SẠCH hàng đợi xuất file
+# Không có bước nào hỏi lại. Đây là mất dữ liệu, không phải bất tiện.
+#
+# Nên: đòi hạ tầng phải TRÔNG NHƯ hạ tầng test. Hai điều kiện độc lập cho CSDL (máy chủ cục bộ VÀ
+# tên CSDL có chữ "test"), vì mỗi cái một mình đều hụt:
+#   · chỉ kiểm host → tunnel SSH tới prod qua 127.0.0.1 lọt;
+#   · chỉ kiểm tên  → một CSDL tên "quanly_test" trên máy chủ prod lọt.
+#
+# Cửa thoát có CHỦ Ý: VERIFY_CHO_PHEP_HA_TANG_LA=1. Ai thật sự cần (chạy trong container CI riêng
+# với DB tên khác) thì gõ tường minh — và họ đã phải đọc tới đây để biết tên biến.
+la_may_cuc_bo() {
+  case "$1" in
+    *@127.0.0.1:*|*@localhost:*|*@\[::1\]:*|*//127.0.0.1:*|*//localhost:*|*//\[::1\]:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [ "${VERIFY_CHO_PHEP_HA_TANG_LA:-0}" != "1" ]; then
+  loi=""
+  la_may_cuc_bo "$DATABASE_URL" || loi="$loi\n  · DATABASE_URL KHÔNG trỏ tới máy cục bộ"
+  case "$DATABASE_URL" in *test*) : ;; *) loi="$loi\n  · DATABASE_URL không có chữ \"test\" — bộ test sẽ GHI VÀ XOÁ trên CSDL này" ;; esac
+  la_may_cuc_bo "$REDIS_URL" || loi="$loi\n  · REDIS_URL KHÔNG trỏ tới máy cục bộ (bộ test gọi obliterate — xoá sạch hàng đợi)"
+  la_may_cuc_bo "$S3_ENDPOINT" || loi="$loi\n  · S3_ENDPOINT KHÔNG trỏ tới máy cục bộ"
+  case "$S3_BUCKET" in *test*) : ;; *) loi="$loi\n  · S3_BUCKET không có chữ \"test\"" ;; esac
+  if [ -n "$loi" ]; then
+    printf '\n\033[31m╔══ DỪNG: hạ tầng KHÔNG trông như hạ tầng test ══╗\033[0m\n'
+    printf '\033[31m%b\033[0m\n' "$loi"
+    printf '\nLượt chạy này sẽ `prisma migrate deploy`, chạy 165 file test có ghi/xoá, và
+'
+    printf 'obliterate hàng đợi. Trên hạ tầng thật thì đó là MẤT DỮ LIỆU.\n\n'
+    printf 'Nhiều khả năng shell của bạn đang còn export biến của môi trường khác. Kiểm:\n'
+    printf '  env | grep -E "DATABASE_URL|REDIS_URL|S3_"\n\n'
+    printf 'Cách chạy sạch:  env -u DATABASE_URL -u REDIS_URL -u S3_ENDPOINT -u S3_BUCKET npm run verify\n'
+    printf 'Thật sự cố ý:    VERIFY_CHO_PHEP_HA_TANG_LA=1 npm run verify\n\n'
+    exit 1
+  fi
+fi
+# Chạy RIÊNG chốt trên rồi thoát — để tests/x4-verify-chan-ha-tang-that.test.js kiểm được cả hai
+# chiều trong tích tắc, thay vì phải chạy trọn 4 phút cổng để biết chốt còn sống.
+[ "${1:-}" = "--kiem-hatang" ] && { printf 'hạ tầng trông như hạ tầng test\n'; exit 0; }
+
 do=0
 buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
@@ -103,6 +149,12 @@ buoc "[7/9] Cổng số liệu / phân quyền"
 node scripts/ci/endpoint-inventory.mjs --check >/dev/null;          ket $? "endpoint-inventory --check (khớp từng dòng ma trận)"
 node scripts/ci/endpoint-inventory.mjs --check-guards >/dev/null;   ket $? "endpoint-inventory --check-guards"
 node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo-stats --check (số liệu README)"
+# Chú thích trỏ "file:dòng" trôi mỗi lần ai đó thêm dòng vào file ĐÍCH, và không có gì báo.
+# Đã lặp lại nhiều vòng trong repo này — mỗi vòng rà tay một lượt, rồi chính lượt rà đó làm
+# trôi tiếp. Cổng CỐ Ý HẸP: chỉ đỏ khi tham chiếu trỏ vào chỗ KHÔNG THỂ là đích (dòng trống /
+# dấu đóng lẻ / quá cuối file). Phần mờ (trỏ vào dòng chú thích) chỉ được liệt kê, không làm
+# đỏ — một cổng hay báo động giả sẽ bị người ta tắt, lúc đó còn tệ hơn không có cổng nào.
+node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check-line-refs (chú thích trỏ file:dòng)"
 
 buoc "[8/9] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"

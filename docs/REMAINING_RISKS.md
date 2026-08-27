@@ -170,7 +170,7 @@ trạng thái thật, để không ai đọc tên biến `PII_ENC_KEY` rồi tư
 1. `PII_ENC_KEY` là **tuỳ chọn** — `src/config.ts:107` khai `.optional()`. Không đặt khoá thì
    `encodePiiForWrite` (`src/piiFields.ts:53-55`) trả `data` **nguyên xi**: không có mã hoá nào,
    CCCD / số tài khoản / lương nằm thô trong CSDL.
-2. Ở production, thiếu khoá chỉ in **một dòng `console.warn`** (`src/config.ts:241-245`) rồi chạy
+2. Ở production, thiếu khoá chỉ in **một dòng `console.warn`** (`src/config.ts`, khối `console.warn` về PII_ENC_KEY — grep `PII_ENC_KEY` trong file đó) rồi chạy
    tiếp. Cố ý — chú thích ở `src/config.ts:237-239` giải thích: chặn khởi động vì một tính năng phụ
    còn tệ hơn. Đánh đổi hợp lý, nhưng hệ quả là **im lặng trong log của một lần deploy bình thường**.
 3. Kể cả khi ĐÃ đặt khoá, cột thô **vẫn được ghi song song** (`src/piiFields.ts:47-48`: "cột thô GIỮ
@@ -289,7 +289,7 @@ Cột "hệ quả nếu đúng" là lập luận của người rà soát, **ch�
 
 | Mục | Vấn đề | Hệ quả nếu đúng | Trạng thái sau đối soát |
 |---|---|---|---|
-| `logout-leaves-refresh-tokens-alive` | POST /api/auth/logout destroys the cookie session but leaves every refresh token of that user valid | A user who has used both surfaces from the same device — the SPA cookie plus a token obtained from POST /api/auth/token (src/routes/auth.routes.ts:303) — clicks "Đăng xuất", sees the UI log … | **vá một phần** · mức thật: khong-dang-ke |
+| `logout-leaves-refresh-tokens-alive` | POST /api/auth/logout destroys the cookie session but leaves every refresh token of that user valid | A user who has used both surfaces from the same device — the SPA cookie plus a token obtained from POST /api/auth/token (src/routes/auth.routes.ts, route `router.post("/token", …)`) — clicks "Đăng xuất", sees the UI log … | **vá một phần** · mức thật: khong-dang-ke |
 | `username-email-case-sensitivity` | Login/invite lookups are byte-exact, so email casing splits one human into two accounts and locks the other out with a generic 401 | Two failure modes, both real for an internal tool where accounts are created by typing an address into an invite form. (1) An admin invites `Nam.Tran@giaNguyen.vn` today and `nam.tran@giangu… | **vá một phần** · mức thật: nho |
 | `webp-logo-silently-dropped` | Logo WEBP được zod chấp nhận nhưng excel.ts bỏ qua im lặng, để lại chữ placeholder của mẫu trong file gửi khách | Khách gửi logo .webp (định dạng mặc định khi lưu ảnh từ Chrome). Thuộc tính `accept` của input chỉ là gợi ý — hệ điều hành vẫn cho chọn — và API thì chấp nhận, UI hiện logo bình thường. Nhưn… | **vá một phần** · mức thật: nho |
 | `emitchange-broadcast-not-authz-filtered` | emitChange broadcasts entity/action/id to every connected user — the same leak class that was already fixed for presence | Any logged-in account — including `account_hn`, which is explicitly barred from seeing pricing (src/routes/export.routes.ts:22-27) — can sit on the SSE stream and record that quote id 4711 w… | **vá một phần** · mức thật: khong-dang-ke |

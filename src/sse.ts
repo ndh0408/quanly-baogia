@@ -63,7 +63,7 @@ function localBroadcast(event: string, data: unknown) {
  * `{ maxRetriesPerRequest: null }` — tức "thử lại vô hạn", cộng hàng đợi offline mặc định.
  *
  * Với subscriber thì đúng: đó là kết nối dài, phải tự nối lại và chờ được.
- * Với publisher thì SAI, và src/queue.ts:19-29 đã viết hẳn một đoạn dài về đúng cái bẫy này: PUBLISH
+ * Với publisher thì SAI, và src/queue.ts (khối chú thích trên `maxRetriesPerRequest`) đã viết hẳn một đoạn dài về đúng cái bẫy này: PUBLISH
  * của SSE là bắn-và-quên trên đường xử lý request. Redis chết mà xếp hàng vô hạn thì hàng đợi offline
  * của ioredis phình trong bộ nhớ, còn sự kiện thì dù sao cũng đã lỗi thời khi Redis sống lại. Thà
  * TRƯỢT NHANH và mất sự kiện — client vẫn tự re-fetch khi tương tác.

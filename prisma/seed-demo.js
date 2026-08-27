@@ -40,7 +40,7 @@ async function main() {
   // CHỐT THỨ HAI, theo NODE_ENV. `ALLOW_DEMO_SEED=1` một mình là chưa đủ: nó nằm ngay trong lệnh
   // người ta chép từ tài liệu dev, nên chép nhầm cửa sổ SSH là đủ để chạy trên máy production.
   // Phần "dọn dữ liệu demo cũ" ngay bên dưới dùng client RAW (không có extension soft-delete) →
-  // `deleteMany` là XOÁ THẬT. Cùng dạng chốt với scripts/migration/pii-backfill.mjs:47-50.
+  // `deleteMany` là XOÁ THẬT. Cùng dạng chốt với scripts/migration/pii-backfill.mjs (chốt `ALLOW_PII_BACKFILL_PROD`).
   if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED_PROD !== "true") {
     console.error("✗ NODE_ENV=production: từ chối seed demo (script XOÁ CỨNG dữ liệu mang dấu [DEMO]/demo_/DEMOKH).");
     console.error("  Chắc chắn muốn chạy trên production thì đặt THÊM ALLOW_DEMO_SEED_PROD=true.");

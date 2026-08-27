@@ -12,7 +12,7 @@
 // ── LỖI 2: backplane Redis dùng CHUNG options với BullMQ ─────────────────────
 // `const opts = { maxRetriesPerRequest: null, enableReadyCheck: false }` dùng cho CẢ publisher lẫn
 // subscriber. `maxRetriesPerRequest: null` + hàng đợi offline mặc định nghĩa là: Redis chết thì mọi
-// lệnh PUBLISH xếp hàng VÔ HẠN trong bộ nhớ. Đây đúng thứ mà src/queue.ts:19-29 đã viết hẳn một
+// lệnh PUBLISH xếp hàng VÔ HẠN trong bộ nhớ. Đây đúng thứ mà src/queue.ts (khối chú thích trên `maxRetriesPerRequest`) đã viết hẳn một
 // đoạn dài để tránh cho đường xử lý request. Publish SSE là bắn-và-quên: thà mất còn hơn xếp hàng.
 // HẬU QUẢ: Redis chết → hàng đợi offline của ioredis phình, và không một số liệu nào cho biết.
 //

@@ -41,7 +41,8 @@
     "pii:verify": "node --import tsx scripts/migration/pii-backfill.mjs --verify",
     "proof:migrate": "node --import tsx scripts/migration/payment-proof-migrate.mjs",
     "proof:migrate:dry": "node --import tsx scripts/migration/payment-proof-migrate.mjs --dry-run",
-    "proof:verify": "node --import tsx scripts/migration/payment-proof-migrate.mjs --verify"
+    "proof:verify": "node --import tsx scripts/migration/payment-proof-migrate.mjs --verify",
+    "check:refs": "node scripts/ci/check-line-refs.mjs"
   },
   "engines": {
     "node": ">=22"
