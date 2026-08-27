@@ -8,6 +8,7 @@ import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
 import { canScoped, readScopeWhereOrThrow } from "../permissions.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere } from "../piiFields.js";
+import { phanTrang } from "../pagination.js";
 
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 
@@ -34,7 +35,7 @@ export async function listEmployees(req: Request) {
     prisma.employee.count({ where }),
     prisma.employee.findMany({ where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect }),
   ]);
-  return { data: decodePiiList("Employee", data), meta: { total, page, size, pageCount: Math.ceil(total / size) } };
+  return phanTrang(decodePiiList("Employee", data), total, page, size);
 }
 
 export async function createEmployee(req: Request) {

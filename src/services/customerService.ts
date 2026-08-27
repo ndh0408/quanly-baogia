@@ -8,6 +8,7 @@ import { nextCustomerCode } from "../codeAllocator.js";
 import { can, canScoped, readScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
+import { phanTrang } from "../pagination.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
@@ -67,7 +68,7 @@ export async function listCustomers(req: Request) {
       include: { owner: { select: { id: true, displayName: true, username: true } } },
     }),
   ]);
-  return { data, meta: { total, page, size, pageCount: Math.ceil(total / size) } };
+  return phanTrang(data, total, page, size);
 }
 
 export async function createCustomer(req: Request) {

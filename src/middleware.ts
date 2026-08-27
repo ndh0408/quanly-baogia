@@ -10,7 +10,7 @@ import { resolveUserPermissions } from "./permissions.js";
 const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
- * TRẦN TUỔI THỌ TUYỆT ĐỐI của một phiên cookie, tính từ lần XÁC THỰC (`authAt`, đặt trong
+ * TRẦN TUỔI THỌTỦYỆT ĐỐI của một phiên cookie, tính từ lần XÁC THỰC (`authAt`, đặt trong
  * authService.establishSession), KHÔNG phải từ lần dùng gần nhất.
  *
  * VÌ SAO cần: cấu hình phiên (src/app.ts) là `rolling: true` + cookie.maxAge 7 ngày, nên MỖI request
@@ -18,7 +18,7 @@ const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
  * `User.passwordChangedAt` — mà cột đó nullable và chỉ được ghi khi đổi mật khẩu / nhận lời mời /
  * admin đặt lại. Tài khoản chưa từng đổi mật khẩu có phiên sống VÔ HẠN miễn là được dùng mỗi tuần:
  * không có mốc nào buộc người dùng chứng minh lại danh tính bằng mật khẩu (+MFA). Đây đúng là lớp
- * lỗi đã được vá cho HỌ refresh token (REFRESH_FAMILY_MAX_DAYS, src/jwt.ts) — chốt này là bản
+ * lỗi đã được vá cho HỌrefresh token (REFRESH_FAMILY_MAX_DAYS, src/jwt.ts) — chốt này là bản
  * tương ứng cho đường cookie.
  *
  * Là hằng số trong module chứ không phải biến môi trường một cách CÓ CHỦ Ý — cùng lý do như
@@ -148,7 +148,7 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
         );
       }
     }
-    // TRẦN TUỔI THỌ TUYỆT ĐỐI — xem SESSION_MAX_AGE_DAYS ở đầu file.
+    // TRẦN TUỔI THỌTỦYỆT ĐỐI — xem SESSION_MAX_AGE_DAYS ở đầu file.
     //
     // FAIL-CLOSED VÀ HỆ QUẢ ĐÃ BIẾT: phiên KHÔNG có `authAt` cũng bị huỷ. `authAt` chỉ được đặt ở
     // establishSession (src/services/authService.ts), nên mọi phiên hợp lệ sinh ra từ lần triển khai
@@ -178,7 +178,24 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
 }
 
 export function asyncHandler(fn: RequestHandler) {
-  return (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
+  return (req: Request, res: Response, next: NextFunction) => {
+    // ── GHI LẠI MẪU ROUTE NGAY LÚC NÀY, KHÔNG ĐỂ TỚI LÚC GHI LOG ─────────────
+    // §27 đòi mỗi dòng log có `route` — MẪU (`/api/quotes/:id`), không phải URL thật, vì URL chứa
+    // id nên mỗi request thành một chuỗi riêng và không nhóm được "endpoint nào đang chậm".
+    //
+    // Không đọc được ở lúc ghi log: pino-http chạy `customProps` khi phản hồi KẾT THÚC, mà Express
+    // KHÔI PHỤC `req.baseUrl` về "" khi ngăn xếp router tháo ra. Đường THÀNH CÔNG không tháo (handler
+    // không gọi `next()`) nên còn đúng, còn đường LỖI thì `.catch(next)` làm nó tháo — và ta nhận
+    // `/:id` thay vì `/api/quotes/:id`. Nghĩa là đúng những request 4xx/5xx (thứ cần điều tra nhất)
+    // lại mất mất tiền tố. Đo được, không phải lo xa.
+    //
+    // Ở ĐÂY thì cả `req.route` lẫn `req.baseUrl` đều đang đúng. Mọi route trong repo bọc bằng
+    // `asyncHandler`, nên chốt đặt tại đây phủ hết; route nào không bọc thì `customProps` tự lùi về
+    // cách đọc trực tiếp (src/app.ts).
+    const mau = (req as Request & { route?: { path?: string } }).route?.path;
+    if (mau) (req as Request & { routePattern?: string }).routePattern = `${req.baseUrl || ""}${mau}`;
+    return Promise.resolve(fn(req, res, next)).catch(next);
+  };
 }
 
 export function notFound(req: Request, res: Response, next: NextFunction) {
