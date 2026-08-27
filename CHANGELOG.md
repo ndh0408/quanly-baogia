@@ -12,12 +12,14 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**95 commit**, từ 2026-08-11 tới 2026-08-27.
+**97 commit**, từ 2026-08-11 tới 2026-08-27.
 
 ---
 
 ## 2026-08-27
 
+- `9fa4892` E2E đi hết luồng người dùng — và phát hiện bundle giao cho người dùng là BẢN DEV của React
+- `9fa1064` Vá lỗ bảo mật còn sót, chặn migration Prisma xoá index, và ba file root §32 còn thiếu
 - `78decd3` Bí mật đọc từ file (*_FILE), vá 5 lỗ của verify, và gộp smoke image về MỘT chỗ
 - `cfb13e2` Quét bảo mật chạy thật + 14 quy tắc cảnh báo Prometheus có bài kiểm logic
 - `40d3fce` PHASE 4: dựng image + mở trình duyệt + render chart — ba cổng kiểm THỨ ĐƯỢC TRIỂN KHAI
