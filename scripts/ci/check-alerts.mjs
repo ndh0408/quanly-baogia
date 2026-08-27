@@ -21,7 +21,7 @@
 // promtool KHÔNG có sẵn trên mọi máy. Thiếu nó thì [A1]/[A2] bỏ qua kèm cảnh báo vàng, còn [A3]
 // VẪN CHẠY — nó chỉ cần đọc file.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const GOC = path.resolve(import.meta.dirname, "../..");
@@ -110,13 +110,16 @@ const TU_KHOA = new Set([
   "sum", "min", "max", "avg", "group", "stddev", "stdvar", "count", "count_values",
   "bottomk", "topk", "quantile", "limitk", "limit_ratio",
   // Tên NHÃN hay dùng trong bộ lọc — không phải tên metric.
-  "le", "instance", "job", "mode", "state", "queue", "reason", "status",
+  // `route` và `method` là NHÃN của http_requests_total / http_request_duration_seconds
+  // (src/observability.ts `labelNames`), không phải tên metric. `label_values(x, route)` của
+  // Grafana đưa chúng ra ngoài dấu ngoặc nhọn nên bộ lọc `{...}` bên dưới không nuốt được.
+  "le", "instance", "job", "mode", "state", "queue", "reason", "status", "route", "method",
 ]);
 const dung = new Set();
 for (const d of bieuThuc) {
   // Bỏ nội dung trong ngoặc nhọn (bộ lọc nhãn) trước khi tìm tên metric.
   const sach = d.replace(/\{[^}]*\}/g, "").replace(/"[^"]*"/g, "");
-  for (const m of sach.matchAll(/\b([a-z_][a-z0-9_]*)\b(\s*\()?/g)) {
+  for (const m of sach.matchAll(/\b([a-zA-Z_:][a-zA-Z0-9_:]*)\b(\s*\()?/g)) {
     if (m[2]) continue;                       // theo sau là "(" → tên hàm
     if (TU_KHOA.has(m[1])) continue;
     if (/^\d/.test(m[1])) continue;
@@ -135,6 +138,70 @@ if (thieu.length) {
 
 // Bảo hiểm hai chiều: bộ tách trên mà hỏng thì `dung` rỗng và [A3] sẽ xanh một cách vô nghĩa.
 if (dung.size < 8) xau(`chỉ tách được ${dung.size} tên metric — bộ tách nhiều khả năng đã hỏng, [A3] đang xanh giả`);
+
+// ── [A4] ────────────────────────────────────────────────────────────────────
+// Bảng điều khiển Grafana hỏng theo ĐÚNG cách cảnh báo hỏng — và tệ hơn một bậc: một quy tắc cảnh
+// báo im lặng thì ít ra không ai bị lừa, còn một panel trỏ vào metric đã chết vẽ ra đường thẳng
+// bằng 0 và người trực đọc thành "hệ thống đang yên". Dùng lại y hệt bộ máy của [A3].
+buoc("[A4] Mọi metric trong bảng điều khiển Grafana phải CÓ THẬT");
+const THUMUC_BANG = path.join(GOC, "infra/observability/grafana/dashboards");
+if (!existsSync(THUMUC_BANG)) {
+  console.log("      (chưa có bảng điều khiển nào — bỏ qua)");
+} else {
+  const tepBang = readdirSync(THUMUC_BANG).filter((f) => f.endsWith(".json"));
+  if (!tepBang.length) console.log("      (chưa có bảng điều khiển nào — bỏ qua)");
+  let soPanel = 0;
+  const dungBang = new Set();
+  const loiJson = [];
+  for (const f of tepBang) {
+    let bang;
+    try {
+      bang = JSON.parse(readFileSync(path.join(THUMUC_BANG, f), "utf8"));
+    } catch (e) {
+      loiJson.push(`${f}: ${String(e.message).slice(0, 120)}`);
+      continue;
+    }
+    for (const pn of bang.panels || []) {
+      soPanel++;
+      for (const t of pn.targets || []) {
+        // CHỈ soi truy vấn Prometheus. Panel Loki dùng LogQL — cú pháp khác, tên nhãn khác, và
+        // `{container="quanly-app"}` mà đem đi dò tên metric thì sẽ đỏ oan.
+        const nguon = (t.datasource?.type || pn.datasource?.type || "").toLowerCase();
+        if (nguon && nguon !== "prometheus") continue;
+        if (typeof t.expr === "string") dungBang.add(t.expr);
+      }
+    }
+    // Biến truy vấn (`templating`) cũng chạy PromQL thật.
+    for (const bien of bang.templating?.list || []) {
+      if ((bien.datasource?.type || "").toLowerCase() === "prometheus" && typeof bien.query === "string") {
+        dungBang.add(bien.query);
+      }
+    }
+  }
+  for (const x of loiJson) xau(`bảng điều khiển KHÔNG phải JSON hợp lệ — ${x}`);
+
+  const tenBang = new Set();
+  for (const d of dungBang) {
+    const sach = d.replace(/\{[^}]*\}/g, "").replace(/"[^"]*"/g, "");
+    // Tên metric của Prometheus CHO PHÉP chữ hoa (`[a-zA-Z_:][a-zA-Z0-9_:]*`). Bản đầu của bộ
+    // tách chỉ nhận chữ thường, nên một tên có chữ hoa KHÔNG khớp gì cả và cổng tưởng là không có
+    // metric nào — xanh giả. Phát hiện lúc kiểm ngược [A4]: đổi tên metric thành
+    // `..._KHONG_TON_TAI` mà cổng vẫn xanh.
+    for (const m of sach.matchAll(/\b([a-zA-Z_:][a-zA-Z0-9_:]*)\b(\s*\()?/g)) {
+      if (m[2]) continue;
+      if (TU_KHOA.has(m[1])) continue;
+      if (/^\d/.test(m[1])) continue;
+      tenBang.add(m[1]);
+    }
+  }
+  const thieuBang = [...tenBang].filter((t) => !tuUngDung.has(t) && !laBuiltin(t)).sort();
+  console.log(`      ${tepBang.length} tệp · ${soPanel} panel · ${tenBang.size} tên metric`);
+  if (thieuBang.length) {
+    xau(`metric KHÔNG tồn tại, bảng điều khiển sẽ vẽ đường 0: ${thieuBang.join(", ")}`);
+  } else if (tepBang.length) {
+    ok("mọi metric trong bảng điều khiển đều có thật");
+  }
+}
 
 console.log(loi ? "\n\x1b[31m❌ CỔNG CẢNH BÁO ĐỎ\x1b[0m" : "\n\x1b[32m✅ CỔNG CẢNH BÁO XANH\x1b[0m");
 process.exit(loi);

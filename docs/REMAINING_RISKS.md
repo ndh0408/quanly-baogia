@@ -167,11 +167,11 @@ trạng thái thật, để không ai đọc tên biến `PII_ENC_KEY` rồi tư
 
 **Ba điều đã kiểm bằng cách đọc mã, không suy đoán:**
 
-1. `PII_ENC_KEY` là **tuỳ chọn** — `src/config.ts:107` khai `.optional()`. Không đặt khoá thì
+1. `PII_ENC_KEY` là **tuỳ chọn** — khai `.optional()` trong `schema` của `src/config.ts` (grep `PII_ENC_KEY`). Không đặt khoá thì
    `encodePiiForWrite` (`src/piiFields.ts:53-55`) trả `data` **nguyên xi**: không có mã hoá nào,
    CCCD / số tài khoản / lương nằm thô trong CSDL.
 2. Ở production, thiếu khoá chỉ in **một dòng `console.warn`** (`src/config.ts`, khối `console.warn` về PII_ENC_KEY — grep `PII_ENC_KEY` trong file đó) rồi chạy
-   tiếp. Cố ý — chú thích ở `src/config.ts:237-239` giải thích: chặn khởi động vì một tính năng phụ
+   tiếp. Cố ý — chú thích ngay trên khối `console.warn` đó giải thích: chặn khởi động vì một tính năng phụ
    còn tệ hơn. Đánh đổi hợp lý, nhưng hệ quả là **im lặng trong log của một lần deploy bình thường**.
 3. Kể cả khi ĐÃ đặt khoá, cột thô **vẫn được ghi song song** (`src/piiFields.ts:47-48`: "cột thô GIỮ
    NGUYÊN cho tới khi cutover"). Giai đoạn đọc-song-song cần nó. Migration bỏ cột thô **chưa tồn

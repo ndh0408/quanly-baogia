@@ -53,7 +53,9 @@
     "check:changelog": "node scripts/ci/gen-changelog.mjs --check",
     "check:shell": "node scripts/ci/check-shell-strict.mjs",
     "check:deps": "node scripts/ci/check-deps.mjs",
-    "check:web-bundle": "node scripts/ci/check-web-bundle.mjs"
+    "check:web-bundle": "node scripts/ci/check-web-bundle.mjs",
+    "db:explain": "node scripts/db/explain-hot-paths.mjs",
+    "bench:quote-save": "node scripts/bench/quote-save-bench.mjs"
   },
   "engines": {
     "node": ">=22"

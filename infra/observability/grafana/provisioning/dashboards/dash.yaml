@@ -1,0 +1,14 @@
+apiVersion: 1
+providers:
+  - name: quanly
+    orgId: 1
+    folder: QuanLy
+    type: file
+    disableDeletion: false
+    # Cho sửa trên giao diện để dò tìm, nhưng nguồn sự thật là file trong repo: mỗi lần khởi động
+    # lại Grafana sẽ nạp lại từ đây. Sửa gì muốn giữ thì phải xuất JSON rồi commit.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

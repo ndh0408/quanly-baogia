@@ -81,7 +81,8 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 | `scripts/ci/ui-smoke.mjs` | Chromium thật, 17 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → 0 lỗi console. jsdom không thấy lớp lỗi này |
 | `scripts/ci/check-web-bundle.mjs` | Bundle giao cho người dùng là **bản DEV của React**. Vite quyết dev-hay-prod theo `NODE_ENV` của máy đang build, mà chính `verify-local.sh` export `NODE_ENV=test` — nên trước 2026-08-27 `npm run verify` đẻ ra bundle dev (984.802 byte thay vì 630.482) rồi đem đi smoke |
 | `scripts/ci/check-helm.mjs` | Chart render ra manifest hỏng: tag di động, mật khẩu rỗng, `secretKeyRef` trỏ khoá không tồn tại. `helm lint` KHÔNG render nên không thấy gì |
-| `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên |
+| `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên. Bước `[A4]` soi luôn PromQL trong bảng điều khiển Grafana — panel trỏ vào metric đã chết vẽ đường 0 và người trực đọc thành "hệ thống đang yên" |
+| `scripts/db/explain-hot-paths.mjs` | Truy vấn nóng QUÉT TUẦN TỰ bảng lớn. Dựng 5.000 dòng thật, nghe câu SQL Prisma THẬT SỰ chạy rồi `EXPLAIN ANALYZE` nó. Đã tìm ra một index thiếu thật (trang Mã khách hàng sắp theo `createdAt` mà không có index nào phục vụ) |
 | `scripts/ci/security-scan.sh` | Bí mật trong mã **và trong lịch sử git**, lỗ hổng HIGH/CRITICAL có bản vá, mẫu nguy hiểm (semgrep), SBOM |
 | `scripts/ci/check-line-refs.mjs` | Chú thích trỏ `file:dòng` vào hư không (số dòng trôi mỗi lần ai đó thêm dòng) |
 | `scripts/ci/check-shell-strict.mjs` | Script shell thiếu `set -euo pipefail` — lỗi giữa chừng đi tiếp im lặng (đã từng nuốt trọn một lượt migration hỏng) |
@@ -93,7 +94,7 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 ## Trước khi coi là xong
 
 ```bash
-npm run verify          # 12 bước — chạy HẾT, khoảng 8 phút
+npm run verify          # 13 bước — chạy HẾT, khoảng 9 phút
 npm run verify:nhanh    # vòng lặp sửa nhanh: bỏ test/build web, smoke image, smoke giao diện, quét bảo mật
 ```
 

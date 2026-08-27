@@ -56,7 +56,8 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 | Helm / Kubernetes | chart có, chưa dùng ở production | **KEEP (chưa kích hoạt)** | — | Phụ lục §15 Level 3: chỉ khi quy mô vận hành xứng đáng. Chart phải **thật sự render được** — `scripts/ci/check-helm.mjs` chốt bằng kubeconform + 4 bất biến. | — |
 | Ảnh production | `quanly-app:prod` (**tag di động**) | **DEFER** | digest bất biến | Phụ lục §18 đòi artifact bất biến. Đường digest đã có (`IMAGE_REF=…@sha256:`) nhưng **mặc định vẫn dựng trên VM** — quyết định của chủ hệ thống. | Thấp khi bật |
 | Log | Pino → stdout | **KEEP** | — | Có `requestId` xuyên suốt; nhật ký kiểm toán nay cũng mang mã đó. | — |
-| Gom log tập trung | **chưa có** | **DEFER** | Loki + Grafana | Phụ lục §16 khuyến nghị. Chưa dựng vì production một VM, `docker logs` còn đủ. Cần khi lên Level 2 (nhiều instance). | Thấp |
+| Gom log tập trung | cấu hình CÓ SẴN, **chưa bật** | **DEFER (bật được ngay)** | Loki + Promtail + Grafana | Phụ lục §16 khuyến nghị. Ngăn xếp đã viết sẵn ở `infra/observability/` — một lệnh compose overlay là chạy. Chưa bật mặc định vì production một VM và ba container nữa ăn RAM của chính ứng dụng. Bảng điều khiển đặt log CẠNH metric; mọi PromQL trong đó được `check-alerts.mjs [A4]` đối chiếu với `src/observability.ts`. | Thấp |
+| Lưu báo giá (xoá-tạo-lại mọi trang) | full rewrite | **ĐÃ LÀM** ✔ (sau cờ, mặc định TẮT) | bỏ qua trang KHÔNG ĐỔI | §16 đòi benchmark trước/sau — đã đo: 10.000 dòng đi từ 3.255 ms xuống 930 ms (3,5×), 98% thời gian nằm ở ghi CSDL nên đây đúng chỗ cần chạm. Mức TRANG chứ không mức DÒNG: mức dòng đòi id bền + luật ghép dòng, tức một tầng lỗi mới giữa đường tiền bạc. Số liệu đầy đủ: `docs/architecture/QUOTE_SAVE_PERFORMANCE.md`. | Trung bình — nên bật ở staging trước; gỡ biến môi trường là quay lại đường cũ, không cần rollback mã |
 | Metrics | Prometheus (`prom-client` 15.1) | **KEEP** | — | 13 metric riêng + bộ mặc định. `/metrics` gác bằng Bearer, **404 ở production nếu thiếu token**. | — |
 | Cảnh báo | 14 rule ở `infra/prometheus/alerts.yaml` | **KEEP (chưa kích hoạt)** | — | Có bài `promtool test rules` chốt logic. ⚠️ **Chưa Prometheus nào scrape** — file đã sẵn sàng, chưa phải thứ đang bảo vệ hệ thống. | — |
 | Sentry | 10.55 | **KEEP** | — | Phụ lục §16: giữ cho lỗi ứng dụng, không dựng chồng 3–4 hệ giám sát. | — |
@@ -78,7 +79,7 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 |---|---|---|---|---|---|
 | Vitest | 4.1 (backend + web) | **KEEP** | — | Một runner cho cả hai phía. | — |
 | Playwright | 1.62 | **KEEP** | — | Dùng cho smoke giao diện chạy **cục bộ** (`scripts/ci/ui-smoke.mjs`), không phải bộ E2E đầy đủ. | — |
-| GitHub Actions | `ci.yml` có, **chưa bao giờ chạy** | **REPLACE** ✔ | `npm run verify` cục bộ | Tài khoản không bật Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 12 bước gõ tay. | Đã hoàn tất |
+| GitHub Actions | `ci.yml` có, **chưa bao giờ chạy** | **REPLACE** ✔ | `npm run verify` cục bộ | Tài khoản không bật Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 13 bước gõ tay. | Đã hoàn tất |
 | gitleaks · trivy · semgrep | ghim theo tag, chạy qua Docker | **KEEP** | — | Phụ lục §22: không phụ thuộc `latest` cho image quét. | — |
 | Ký ảnh (Cosign) | **chưa có** | **DEFER** | Cosign + OIDC | §22 nói "nếu infrastructure hỗ trợ". Không có registry nào đang phát hành ảnh đã ký, và production dựng ảnh **trên VM** — không có gì để ký. Bật cùng lúc với đường digest. | Thấp |
 

@@ -45,14 +45,45 @@ const adapter = new PrismaPg(pool);
 // Hai mốc lấy từ `config` chứ KHÔNG đọc thẳng process.env: đơn vị là MILI-GIÂY và rất dễ bị hiểu
 // thành GIÂY — `DB_TX_TIMEOUT=5` (5ms) làm mọi lần Lưu chết P2028 mà tiến trình vẫn khởi động bình
 // thường. Đi qua config.ts thì gõ sai là THOÁT NGAY kèm tên biến. Xem tests/qc-db-tx-config.test.js.
+// PRISMA_LOG_QUERIES=1 → phát thêm sự kiện `query` (câu SQL THẬT + tham số + thời gian).
+//
+// MẶC ĐỊNH TẮT, và tắt ở đây là tắt hẳn: `$on("query")` chỉ hoạt động khi client được DỰNG với
+// mức log đó, nên không thể bật lúc chạy. Vì sao vẫn cần một đường bật: §17 đòi EXPLAIN ANALYZE
+// trên các đường NÓNG, mà cách duy nhất để EXPLAIN đúng câu Prisma thật sự chạy là hỏi chính
+// Prisma — chép tay câu SQL mình NGHĨ nó sinh ra thì vài tháng sau ta EXPLAIN một truy vấn không
+// còn ai chạy. `scripts/db/explain-hot-paths.mjs` bật biến này rồi lắng nghe.
+//
+// KHÔNG bật ở production: câu SQL kèm THAM SỐ, tức tên khách, số điện thoại, và mọi thứ người dùng
+// gõ vào ô tìm kiếm sẽ nằm trong nhật ký.
+const logQuery = process.env.PRISMA_LOG_QUERIES === "1";
 const base = new PrismaClient({
   adapter,
-  log: [{ emit: "event", level: "warn" }, { emit: "event", level: "error" }],
+  log: [
+    ...(logQuery ? ([{ emit: "event", level: "query" }] as const) : []),
+    { emit: "event", level: "warn" },
+    { emit: "event", level: "error" },
+  ],
   transactionOptions: {
     maxWait: config.DB_TX_MAX_WAIT,
     timeout: config.DB_TX_TIMEOUT,
   },
 });
+if (logQuery) {
+  base.$on("query", (e) => logger.debug({ source: "prisma", ms: e.duration, params: e.params }, e.query));
+}
+
+/**
+ * Nghe câu SQL Prisma thật sự chạy. Trả `false` nếu PRISMA_LOG_QUERIES chưa bật (không thể bật lúc
+ * chạy — mức log là tham số DỰNG client).
+ *
+ * Tồn tại vì client được export bên dưới là bản `$extends`, mà bản đó KHÔNG có `$on`. Công cụ cần
+ * nghe (scripts/db/explain-hot-paths.mjs) do đó không với tới `base` được nếu không có hàm này.
+ */
+export function ngheTruyVan(cb: (e: { query: string; params: string; duration: number }) => void): boolean {
+  if (!logQuery) return false;
+  base.$on("query", cb as never);
+  return true;
+}
 base.$on("warn", (e) => logger.warn({ source: "prisma" }, e.message));
 base.$on("error", (e) => logger.error({ source: "prisma" }, e.message));
 

@@ -49,8 +49,17 @@ pino, JSON ra stdout (`src/logger.ts`). Mỗi request có `reqId` — sinh ra ho
 từ header `x-request-id` — và được dội lại trong response header `X-Request-Id`,
 nên có thể lần từ một khiếu nại của người dùng về đúng dòng log.
 
-Mỗi dòng log truy cập có: method, url, status, `reqId`, `userId` (nếu đã đăng
-nhập). Lỗi kèm thêm path, status, message, stack.
+Mỗi dòng log truy cập có **bảy** trường: `method` · `url` · `res.status` ·
+`responseTime` · `reqId` · `userId` (nếu đã đăng nhập) · `role` · `route`.
+Lỗi kèm thêm path, status, message, stack.
+
+`route` là **MẪU** route của Express (`/api/quotes/:id`), không phải URL thật.
+Khác biệt này quyết định khi gom log: `url` chứa id nên mỗi request là một chuỗi
+riêng và không nhóm được "endpoint nào đang chậm". Nó được ghi lại **ngay lúc
+handler chạy** (`asyncHandler`, `src/middleware.ts`) chứ không phải lúc ghi log —
+Express khôi phục `req.baseUrl` về rỗng khi ngăn xếp router tháo ra, mà đường LỖI
+thì luôn tháo, nên đọc muộn sẽ cho `/:id` thay vì `/api/quotes/:id` đúng ở những
+request cần điều tra nhất. `tests/xd-log-fields.test.js` canh cả bảy trường.
 
 **Không bao giờ được ghi log**: mật khẩu, JWT, cookie phiên, bí mật MFA, số tài
 khoản/CCCD dạng thô. Sentry cũng lược `cookie` và `authorization` trước khi gửi.
@@ -68,11 +77,25 @@ prometheus-operator thì bật `metrics.serviceMonitor.enabled`.
 
 Trên Compose thì trỏ Prometheus vào cổng app kèm bearer token.
 
-## Việc còn treo
+## Gom log tập trung (Loki + Grafana) — có sẵn, chưa bật
 
-- **Chưa có tổng hợp log tập trung.** Log ra stdout và dừng ở đó. Muốn tìm việc
-  đã xảy ra tuần trước thì phải `docker logs` trên host — mất khi container bị
-  recreate. Loki hoặc tương đương là bước tiếp theo.
+`infra/observability/` chứa nguyên một ngăn xếp chạy được: Loki + Promtail +
+Grafana, kèm bảng điều khiển 9 panel trong đó **log nằm cùng trang với metric**.
+
+```bash
+docker compose -f docker-compose.prod.yml \
+  -f infra/observability/docker-compose.observability.yml up -d
+```
+
+Promtail đọc file log JSON của Docker, **không** phải ứng dụng tự đẩy — Loki chết
+thì log vẫn nằm trên đĩa và Promtail đọc bù, còn ứng dụng thì không biết Loki tồn
+tại. Chi tiết + lý do chọn nhãn: [infra/observability/README.md](../../infra/observability/README.md).
+
+Chưa bật mặc định vì production là một VM và ba container nữa ăn RAM của chính
+ứng dụng — xem hàng "Gom log tập trung" trong
+[TECHNOLOGY_DECISIONS.md](../architecture/TECHNOLOGY_DECISIONS.md).
+
+## Việc còn treo
 - **Chưa có Prometheus/Grafana chạy production.** Metric có sẵn nhưng chưa ai
   scrape, nên mọi mục tiêu độ trễ trong [SLO.md](SLO.md) còn là giả định.
 - **Chưa có Alertmanager.** Alert duy nhất đang chạy thật là backup watchdog qua

@@ -105,6 +105,32 @@ ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrat
 echo "▶ [5/6] Recreate app + worker"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
 
+# ── SỔ PHÁT HÀNH ──────────────────────────────────────────────────────────────────────────
+# §46 đòi mỗi lần phát hành ghi lại BỐN thứ: git SHA · phiên bản migration · digest image ·
+# thời điểm deploy. `DEPLOYED_SHA` chỉ có thứ nhất, và nó bị GHI ĐÈ mỗi lượt — nên khi cần trả
+# lời "chiều thứ ba tuần trước đang chạy bản nào, đã migrate tới đâu" thì không còn gì để đọc.
+#
+# Ba thứ còn lại lấy như sau, và mỗi cái đều lấy TỪ MÁY CHỦ chứ không từ máy đang gõ lệnh:
+#   · migration: hàng mới nhất trong `_prisma_migrations` — tức thứ CSDL THẬT SỰ đã áp, không
+#     phải thư mục mới nhất trong repo (hai cái lệch nhau đúng lúc migrate hỏng giữa chừng, và
+#     đó chính là lúc cần sổ này nhất);
+#   · digest: `RepoDigests[0]` nếu image kéo từ registry (đường IMAGE_REF — digest bất biến,
+#     đối chiếu được với thứ CI đã quét); dựng trên VM thì không có RepoDigest nào, rơi về
+#     `Id` (sha256 của image cục bộ) kèm tiền tố `local:` để không ai nhầm hai loại với nhau;
+#   · thời điểm: giờ UTC của MÁY CHỦ.
+#
+# Ghi NỐI THÊM vào $DIR/RELEASES.log (untracked, `git archive` không đụng tới) — một dòng JSON
+# mỗi lần, đọc bằng `tail`/`jq` được, và không bao giờ mất lịch sử.
+echo "▶ [5b/6] Ghi sổ phát hành"
+REL=$(ssh "$SSH" "cd $DIR && \
+  MIG=\$(docker exec quanly-postgres psql -U quanly -d quanly -tAc \
+        \"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1\" 2>/dev/null || echo unknown) && \
+  DG=\$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}local:{{.Id}}{{end}}' $IMAGE 2>/dev/null || echo unknown) && \
+  TS=\$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
+  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\") && \
+  printf '%s\n' \"\$LINE\" >> RELEASES.log && printf '%s' \"\$LINE\"")
+echo "   $REL"
+
 # `|| echo FAILED` ở bản trước NUỐT mã lỗi: `set -e` không bắt được, và dòng "✅ now running" phía
 # dưới in ra VÔ ĐIỀU KIỆN. Một lần deploy mà container không bao giờ healthy vẫn báo thành công —
 # người deploy đóng terminal, và sự cố chỉ lộ ra khi người dùng gọi điện.

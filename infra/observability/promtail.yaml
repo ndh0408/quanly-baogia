@@ -1,0 +1,61 @@
+# Promtail — đọc log JSON của Docker rồi đẩy sang Loki.
+#
+# Ứng dụng in pino JSON ra stdout; Docker bọc mỗi dòng trong một lớp JSON nữa
+# ({"log":"<dòng gốc>\n","stream":"stdout","time":"..."}). Nên phải bóc HAI lớp: lớp Docker trước,
+# rồi lớp pino.
+#
+# NHÃN (`labels`) là thứ Loki đánh index — càng ít càng tốt. Đặt nhãn theo trường có ÍT giá trị
+# (container, level, route) chứ TUYỆT ĐỐI không theo `reqId` hay `userId`: mỗi giá trị mới đẻ một
+# chuỗi mới trong Loki, và vài triệu chuỗi là sập. `reqId`/`userId` vẫn tìm được bằng bộ lọc nội
+# dung (`|= "reqId"` / `| json | reqId="..."`) — chậm hơn nhưng không phá kho.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      # Tên container thành nhãn — bỏ dấu "/" ở đầu mà Docker thêm vào.
+      - source_labels: [__meta_docker_container_name]
+        regex: "/?(.*)"
+        target_label: container
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+    pipeline_stages:
+      # 1) Bóc lớp bọc của Docker.
+      - docker: {}
+      # 2) Bóc lớp pino. `expressions` chỉ lấy đúng những trường sẽ dùng làm nhãn hoặc để lọc.
+      #    Dòng KHÔNG phải JSON (vd stack trace của Node lúc sập) sẽ không khớp — pipeline vẫn cho
+      #    qua nguyên văn, và đó là hành vi đúng: mất dòng log lúc sập là mất đúng dòng cần nhất.
+      - json:
+          expressions:
+            level: level
+            route: route
+            status: res.status
+            reqId: reqId
+            responseTime: responseTime
+      # 3) pino ghi `level` là SỐ (30=info, 40=warn, 50=error). Đổi sang chữ cho người đọc.
+      - template:
+          source: level_name
+          template: '{{ if eq .level "50" }}error{{ else if eq .level "40" }}warn{{ else if eq .level "30" }}info{{ else if eq .level "20" }}debug{{ else }}other{{ end }}'
+      - labels:
+          level: level_name
+          route:
+      # 4) Dùng mốc thời gian của ỨNG DỤNG, không phải lúc Promtail đọc được. Lệch vài giây là
+      #    đủ để so log với metric trở nên vô nghĩa lúc điều tra sự cố.
+      - json:
+          expressions:
+            ts: time
+      - timestamp:
+          source: ts
+          format: UnixMs
+          action_on_failure: fudge

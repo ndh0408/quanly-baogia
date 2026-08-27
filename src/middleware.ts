@@ -178,7 +178,24 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
 }
 
 export function asyncHandler(fn: RequestHandler) {
-  return (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
+  return (req: Request, res: Response, next: NextFunction) => {
+    // ── GHI LẠI MẪU ROUTE NGAY LÚC NÀY, KHÔNG ĐỂ TỚI LÚC GHI LOG ─────────────
+    // §27 đòi mỗi dòng log có `route` — MẪU (`/api/quotes/:id`), không phải URL thật, vì URL chứa
+    // id nên mỗi request thành một chuỗi riêng và không nhóm được "endpoint nào đang chậm".
+    //
+    // Không đọc được ở lúc ghi log: pino-http chạy `customProps` khi phản hồi KẾT THÚC, mà Express
+    // KHÔI PHỤC `req.baseUrl` về "" khi ngăn xếp router tháo ra. Đường THÀNH CÔNG không tháo (handler
+    // không gọi `next()`) nên còn đúng, còn đường LỖI thì `.catch(next)` làm nó tháo — và ta nhận
+    // `/:id` thay vì `/api/quotes/:id`. Nghĩa là đúng những request 4xx/5xx (thứ cần điều tra nhất)
+    // lại mất mất tiền tố. Đo được, không phải lo xa.
+    //
+    // Ở ĐÂY thì cả `req.route` lẫn `req.baseUrl` đều đang đúng. Mọi route trong repo bọc bằng
+    // `asyncHandler`, nên chốt đặt tại đây phủ hết; route nào không bọc thì `customProps` tự lùi về
+    // cách đọc trực tiếp (src/app.ts).
+    const mau = (req as Request & { route?: { path?: string } }).route?.path;
+    if (mau) (req as Request & { routePattern?: string }).routePattern = `${req.baseUrl || ""}${mau}`;
+    return Promise.resolve(fn(req, res, next)).catch(next);
+  };
 }
 
 export function notFound(req: Request, res: Response, next: NextFunction) {

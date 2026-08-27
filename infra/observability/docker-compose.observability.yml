@@ -1,0 +1,84 @@
+# ============================================================================
+# NGĂN XẾP QUAN SÁT — TUỲ CHỌN, KHÔNG BẬT MẶC ĐỊNH.
+#
+#   docker compose -f docker-compose.prod.yml -f infra/observability/docker-compose.observability.yml up -d
+#
+# ── VÌ SAO TÁCH RIÊNG THAY VÌ NHÉT VÀO COMPOSE CHÍNH ───────────────────────
+# `docs/architecture/TECHNOLOGY_DECISIONS.md` xếp "gom log tập trung" là DEFER: production hiện là
+# MỘT VM, `docker logs` còn đủ, và ba container nữa (Loki + Promtail + Grafana) ăn RAM của chính
+# ứng dụng. Nhưng "chưa cần" khác "chưa dựng được" — file này để lúc cần thì là một lệnh, không
+# phải một dự án. Bật nó là quyết định vận hành, không phải mặc định.
+#
+# ── ĐỌC LOG TỪ ĐÂU ─────────────────────────────────────────────────────────
+# Ứng dụng in JSON ra stdout (pino). Docker ghi stdout vào /var/lib/docker/containers/*/*-json.log.
+# Promtail đọc thẳng những file đó — KHÔNG cần ứng dụng biết gì về Loki, không cần đổi một dòng mã,
+# và ứng dụng không phụ thuộc vào việc hệ log có sống hay không (đúng thứ tự ưu tiên: log hỏng
+# không được kéo ứng dụng theo).
+#
+# ── CHỖ PHẢI ĐỔI TRƯỚC KHI DÙNG THẬT ───────────────────────────────────────
+#   · GF_SECURITY_ADMIN_PASSWORD: đặt trong `.env` của máy chủ, đừng để nguyên ở đây.
+#   · Grafana ở đây KHÔNG mở ra Internet (chỉ cổng nội bộ + mạng `internal`). Muốn xem từ xa thì
+#     đi qua Cloudflare Tunnel như ứng dụng chính (xem docs/operations/REVERSE_PROXY.md), ĐỪNG
+#     publish cổng 3001 ra 0.0.0.0.
+services:
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: quanly-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready | grep -q ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: quanly-promtail
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./infra/observability/promtail.yaml:/etc/promtail/config.yaml:ro
+      # CHỈ ĐỌC. Promtail không có việc gì phải ghi vào thư mục log của Docker.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-positions:/tmp/promtail
+    depends_on:
+      loki: { condition: service_healthy }
+    networks: [internal]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: quanly-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?đặt GRAFANA_PASSWORD trong .env}
+      # Không cho tự đăng ký, không cho xem ẩn danh — đây là màn hình có số liệu vận hành thật.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # CHỈ nghe trên loopback của VM. Ra ngoài thì qua đường hầm, không qua cổng mở.
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      loki: { condition: service_healthy }
+    networks: [internal]
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  promtail-positions:
+  grafana-data:
+
+networks:
+  internal:
+    external: false

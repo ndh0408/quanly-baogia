@@ -4,7 +4,7 @@
 #
 #   bash scripts/verify-local.sh          # chạy hết
 #   bash scripts/verify-local.sh --nhanh  # bỏ qua TEST WEB + BUILD WEB (vòng lặp sửa nhanh).
-#                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/12] phụ
+#                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/13] phụ
 #                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
 # ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
@@ -89,12 +89,12 @@ do=0
 buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
 
-buoc "[0/12] Hạ tầng"
+buoc "[0/13] Hạ tầng"
 # ── KIỂM ĐÚNG MÁY CHỦ ĐANG ĐƯỢC CẤU HÌNH, KHÔNG PHẢI MÁY CHỦ MẶC ĐỊNH ──────
 # Bản trước gọi `pg_isready -q` và `redis-cli ping` TRẦN. Cả hai lệnh đó dùng mặc định của CHÍNH
 # CHÚNG (localhost:5432, localhost:6379), KHÔNG đọc DATABASE_URL/REDIS_URL. Nên nếu ai đó trỏ
 # DATABASE_URL sang cổng 5433 (một instance Postgres thứ hai — chuyện thường khi thử phiên bản
-# mới), bước này báo XANH cho instance 5432 rồi bước [1/12] chết vì không nối được 5433, kèm một
+# mới), bước này báo XANH cho instance 5432 rồi bước [1/13] chết vì không nối được 5433, kèm một
 # thông báo của Prisma không hề nhắc tới hạ tầng.
 # `node -e` để bóc host/port: URL kết nối có mật khẩu chứa ký tự đặc biệt, tách bằng sed là sai.
 doc_url() { node -e 'const u=new URL(process.argv[1]);process.stdout.write((u.hostname||"127.0.0.1")+" "+(u.port||process.argv[2]))' "$1" "$2" 2>/dev/null; }
@@ -115,10 +115,10 @@ ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data
 # — tức cổng xanh nói về một cây phụ thuộc không ai khác có.
 # `npm ci --dry-run` làm đúng phép so đó mà KHÔNG xoá node_modules (npm ci thật xoá sạch rồi cài
 # lại, mất hàng chục giây mỗi lượt verify — một cổng chậm là một cổng bị bỏ chạy).
-buoc "[0b/12] Cây phụ thuộc khớp package-lock.json"
+buoc "[0b/13] Cây phụ thuộc khớp package-lock.json"
 npm ci --dry-run >/dev/null 2>&1;                                   ket $? "npm ci --dry-run (nếu đỏ: chạy \`npm install\` để đồng bộ lockfile)"
 
-buoc "[1/12] Prisma client + migrate"
+buoc "[1/13] Prisma client + migrate"
 npx prisma generate >/dev/null 2>&1;                                ket $? "prisma generate"
 npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "prisma migrate deploy"
 
@@ -128,11 +128,11 @@ npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "pris
 # bảng và con số nhảy → đỏ vì lý do sai. Nên chúng nằm sau cờ DO_TOAST_MEASURE=1.
 # Không có CI thì một bài opt-in là một bài KHÔNG BAO GIỜ CHẠY Ở ĐÂU — nên chạy ngay ở đây.
 #
-# VỊ TRÍ LÀ CÓ CHỦ Ý: TRƯỚC bước [4/12], không phải sau. Đặt sau bộ đầy đủ thì vẫn đỏ (đã thử):
+# VỊ TRÍ LÀ CÓ CHỦ Ý: TRƯỚC bước [4/13], không phải sau. Đặt sau bộ đầy đủ thì vẫn đỏ (đã thử):
 # Postgres dồn thống kê theo lô, nên hoạt động của 161 file vừa chạy còn đang chảy về
 # pg_statio_all_tables trong lúc bài này đo. Chạy ở đây, ngay sau `migrate deploy`, CSDL còn yên.
 # ĐỪNG chuyển xuống dưới cho "gọn nhóm test" — đó đúng là cách làm nó đỏ lại.
-buoc "[1b/12] Bài đo TOAST (chạy riêng, CSDL còn yên)"
+buoc "[1b/13] Bài đo TOAST (chạy riêng, CSDL còn yên)"
 # HAI LỆNH RIÊNG, KHÔNG GỘP MỘT LỆNH. Cả hai file đều đọc ảnh hạng mục của CHÍNH bảng QuoteItem;
 # gộp lại thì vitest chạy chúng SONG SONG và chúng tự nhiễu nhau — đúng nguồn nhiễu mà cờ này sinh
 # ra để tránh. ĐÃ THỬ: gộp một lệnh → db3 đỏ với "TOAST nhảy 3637 block" (ngưỡng 100).
@@ -167,7 +167,7 @@ do_toast() {
 do_toast tests/b2-update-quote-no-image-read.test.js "vitest đo TOAST — b2 (không bài nào bị bỏ qua)"
 do_toast tests/db3-snapshot-no-images.test.js       "vitest đo TOAST — db3 (không bài nào bị bỏ qua)"
 
-buoc "[2/12] Typecheck"
+buoc "[2/13] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
 (cd web && npx tsc --noEmit -p tsconfig.json);                      ket $? "tsc (web)"
 
@@ -179,25 +179,33 @@ npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc 
 # mã nguồn đã biến mất.
 # Đây là hình dạng tệ nhất của lỗi ngầm: cổng nói XANH về một thứ nó không hề kiểm.
 # `tsc -p tsconfig.build.json` mất vài giây — rẻ hơn nhiều so với một cổng nói dối.
-# Chạy CẢ ở chế độ --nhanh, vì bước [4/12] luôn chạy và nó phụ thuộc dist/.
-buoc "[2b/12] Build backend (dist/) — PHẢI trước test, xem chú thích"
+# Chạy CẢ ở chế độ --nhanh, vì bước [4/13] luôn chạy và nó phụ thuộc dist/.
+buoc "[2b/13] Build backend (dist/) — PHẢI trước test, xem chú thích"
 # `build:clean` chứ không phải `build`: `tsc` GHI ĐÈ đầu ra nhưng KHÔNG XOÁ file mồ côi. Đổi tên
 # hay gỡ một file trong src/ thì bản .js cũ nằm lại trong dist/ mãi mãi — và nó vẫn `import` được,
 # nên một module đã bị xoá vẫn chạy được ở máy này trong khi Docker (build từ đầu) thì không có nó.
 # Đó là cổng xanh cho một artifact chỉ tồn tại trên máy của một người.
 npm run build:clean >/dev/null;                                     ket $? "build backend (dist/ dọn sạch trước khi dựng)"
 
-buoc "[3/12] Lint + format"
+buoc "[3/13] Lint + format"
 npx eslint .;                                                       ket $? "eslint"
 npx prettier --check "**/*.{json,css,yml,yaml}" >/dev/null;         ket $? "prettier"
 
-buoc "[4/12] Test backend (REQUIRE_DB_TESTS=1 — bỏ qua = ĐỎ)"
+buoc "[4/13] Test backend (REQUIRE_DB_TESTS=1 — bỏ qua = ĐỎ)"
 npx vitest run;                                                     ket $? "vitest backend"
 
+buoc "[5/13] EXPLAIN ANALYZE đường nóng (dựng 5.000 dòng thật rồi đo)"
+# Cần dist/ (bước [2b]) vì nó nghe câu SQL của CHÍNH client ứng dụng — xem chú thích trong script.
+# Vì sao là CỔNG chứ không phải báo cáo: truy vấn mất index không HỎNG, nó chỉ CHẬM DẦN theo số
+# dòng, và không ai để ý cho tới lúc trang khách hàng mất vài giây. Cổng này bắt lúc mới 5.000 dòng
+# thử, tức trước khi dữ liệu thật chạm tới đó. (Đã tìm ra một index thiếu thật: xem
+# prisma/migrations/20260827140000_customer_sort_indexes.)
+node scripts/db/explain-hot-paths.mjs >/dev/null;                   ket $? "explain-hot-paths (không quét tuần tự bảng lớn)"
+
 if [ "$NHANH" -eq 0 ]; then
-  buoc "[5/12] Test web"
+  buoc "[6/13] Test web"
   (cd web && npx vitest run);                                       ket $? "vitest web"
-  buoc "[6/12] Build web (backend đã dựng ở [2b])"
+  buoc "[7/13] Build web (backend đã dựng ở [2b])"
   (cd web && npx vite build >/dev/null);                            ket $? "build web"
   # NGAY SAU khi build, không để sang bước khác: file này export NODE_ENV=test cho cả lượt chạy, mà
   # Vite đọc đúng biến đó để quyết dev-hay-prod. Trước đợt này `npm run verify` đẻ ra bundle DEV rồi
@@ -205,10 +213,10 @@ if [ "$NHANH" -eq 0 ]; then
   # dev còn làm hỏng bàn giao bản nháp Wizard → trình soạn.
   node scripts/ci/check-web-bundle.mjs >/dev/null;                  ket $? "check-web-bundle (bundle là bản production)"
 else
-  buoc "[5-6/12] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
+  buoc "[6-7/13] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
 fi
 
-buoc "[7/12] Cổng số liệu / phân quyền"
+buoc "[8/13] Cổng số liệu / phân quyền"
 node scripts/ci/endpoint-inventory.mjs --check >/dev/null;          ket $? "endpoint-inventory --check (khớp từng dòng ma trận)"
 node scripts/ci/endpoint-inventory.mjs --check-guards >/dev/null;   ket $? "endpoint-inventory --check-guards"
 node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo-stats --check (số liệu README)"
@@ -222,7 +230,7 @@ node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check
 # này bắt lúc nó lệch khỏi lịch sử — tức lúc ai đó sửa tay hoặc quên sinh lại sau khi commit.
 node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run check:changelog)"
 
-buoc "[8/12] Hạ tầng triển khai"
+buoc "[9/13] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
 # §38: mọi script shell phải có `-u` + `pipefail`; bỏ `-e` thì phải khai kèm lý do.
 # `pipefail` mới là thứ đắt giá: migration-rehearsal-inner.sh từng chạy
@@ -244,7 +252,7 @@ fi
 # còn `test rules` ĐỎ. Không có promtool thì hai lớp đầu tự bỏ qua, lớp thứ ba vẫn chạy.
 node scripts/ci/check-alerts.mjs >/dev/null 2>&1;                   ket $? "check-alerts (chi tiết: npm run check:alerts)"
 
-buoc "[9/12] Phụ thuộc"
+buoc "[10/13] Phụ thuộc"
 # CỔNG CỨNG. Trước đây chỉ là cảnh báo vì advisory GHSA-ggr8-5vv4-36mx đi theo `deepmerge-ts@7.1.5`
 # mà `@prisma/config` GHIM CHÍNH XÁC, và `npm audit fix --force` thì tụt prisma về 6.12 (phá vỡ).
 # Nay đóng bằng `overrides: { "deepmerge-ts": "^8.0.2" }` trong package.json. Lý do KHÔNG nằm trong
@@ -253,13 +261,13 @@ buoc "[9/12] Phụ thuộc"
 #
 # ⚠️ CỔNG NÀY KHÔNG BẮT ĐƯỢC VIỆC GỠ OVERRIDE. `npm audit` đọc cây ĐÃ CÀI, không đọc `overrides`.
 # Gỡ dòng đó khỏi package.json mà chưa `npm install` thì ở đây vẫn xanh. Thứ bắt được là
-# tests/x2-override-deepmerge.test.js, chạy ở bước [4/12].
+# tests/x2-override-deepmerge.test.js, chạy ở bước [4/13].
 npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm audit (production)"
 # §37: phụ thuộc RUNTIME phải có người dùng. `tests/ch3-npm-manifest.test.js` đã gác chiều DEV;
 # chiều runtime thì chưa có gì gác. Mỗi gói thừa là bề mặt tấn công thừa + một mục nữa trong SBOM.
 node scripts/ci/check-deps.mjs --check >/dev/null;                  ket $? "phụ thuộc runtime đều có người dùng (chi tiết: npm run check:deps)"
 
-# ── [10/12] ARTIFACT ĐƯỢC TRIỂN KHAI, KHÔNG PHẢI MÃ NGUỒN ──────────────────
+# ── [11/13] ARTIFACT ĐƯỢC TRIỂN KHAI, KHÔNG PHẢI MÃ NGUỒN ──────────────────
 # Chín bước trên đều kiểm MÃ NGUỒN. Không bước nào kiểm THỨ THẬT SỰ CHẠY Ở PRODUCTION.
 # Khoảng trống đó đã nuốt những lỗi chỉ lộ ra lúc pod khởi động: Helm gọi `node src/server.js`
 # (file không có trong image), `postinstall` gọi script chưa được COPY vào, fonts/*.ttf bị
@@ -268,36 +276,36 @@ node scripts/ci/check-deps.mjs --check >/dev/null;                  ket $? "ph�
 # BỎ QUA Ở --nhanh: dựng image mất ~70 giây khi chưa có cache. Vòng lặp sửa nhanh không chịu nổi,
 # mà một cổng chậm quá thì người ta ngừng chạy — lúc đó còn tệ hơn không có.
 if [ "$NHANH" -eq 0 ]; then
-  buoc "[10/12] Image production (dựng + chạy thật)"
+  buoc "[11/13] Image production (dựng + chạy thật)"
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     bash scripts/ci/docker-smoke.sh >/dev/null 2>&1;                  ket $? "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
   else
     printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
   fi
 else
-  buoc "[10/12] Bỏ qua smoke image (--nhanh)"
+  buoc "[11/13] Bỏ qua smoke image (--nhanh)"
 fi
 
-# ── [11/12] GIAO DIỆN THẬT TRONG TRÌNH DUYỆT THẬT ──────────────────────────
+# ── [12/13] GIAO DIỆN THẬT TRONG TRÌNH DUYỆT THẬT ──────────────────────────
 # 187 bài vitest của web/ chạy trên jsdom với component MOUNT LẺ — không bài nào nạp bundle ĐÃ
 # BUILD qua Express thật. Bước này mở Chromium, đăng nhập, mở trình soạn, GÕ vào ô đơn giá và đòi
 # Thành Tiền tính đúng; rồi chốt "không lỗi console, không request hỏng" suốt lượt chạy.
 # Kiểm ngược đã đo: cộng 1 đồng vào `lineAmount` (shared/quote-math.ts) thì bước này ĐỎ.
 #
-# Phụ thuộc [6/12] (build web) nên phải đứng SAU nó, và bỏ qua ở --nhanh vì --nhanh không build web
+# Phụ thuộc [7/13] (build web) nên phải đứng SAU nó, và bỏ qua ở --nhanh vì --nhanh không build web
 # → sẽ kiểm bundle của lần build trước, đúng cái bẫy mà chú thích ở [2b] nói tới.
 if [ "$NHANH" -eq 0 ]; then
-  buoc "[11/12] Smoke giao diện (Chromium thật)"
+  buoc "[12/13] Smoke giao diện (Chromium thật)"
   if node -e 'import("playwright").then(()=>process.exit(0),()=>process.exit(1))' 2>/dev/null; then
     node scripts/ci/ui-smoke.mjs >/dev/null 2>&1;                    ket $? "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
   else
     printf '  \033[33m— gói playwright chưa cài, bỏ qua smoke giao diện (npm ci)\033[0m\n'
   fi
 else
-  buoc "[11/12] Bỏ qua smoke giao diện (--nhanh)"
+  buoc "[12/13] Bỏ qua smoke giao diện (--nhanh)"
 fi
 
-# ── [12/12] BỐN CỔNG BẢO MẬT ────────────────────────────────────────────────
+# ── [13/13] BỐN CỔNG BẢO MẬT ────────────────────────────────────────────────
 # `.github/workflows/ci.yml` job `security` đã khai đủ gitleaks + trivy + semgrep + SBOM từ lâu,
 # nhưng tài khoản GitHub không bật Actions nên nó CHƯA BAO GIỜ CHẠY. Lượt chạy thật đầu tiên
 # (2026-08-27) cho ra hai lỗi im lặng: `.gitleaks.toml` viết allowlist bằng cú pháp `[[allowlists]]`
@@ -305,10 +313,10 @@ fi
 # tác dụng. Cả hai đều là "repo tưởng mình có chốt".
 # Mất ~25 giây khi image và cache đã có sẵn.
 if [ "$NHANH" -eq 0 ]; then
-  buoc "[12/12] Bảo mật (gitleaks · trivy · semgrep · SBOM)"
+  buoc "[13/13] Bảo mật (gitleaks · trivy · semgrep · SBOM)"
   bash scripts/ci/security-scan.sh >/dev/null 2>&1;                 ket $? "security-scan (chi tiết: npm run scan)"
 else
-  buoc "[12/12] Bỏ qua cổng bảo mật (--nhanh)"
+  buoc "[13/13] Bỏ qua cổng bảo mật (--nhanh)"
 fi
 
 if [ "$do" -eq 0 ]; then
