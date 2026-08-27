@@ -7,11 +7,11 @@ import { UnrecoverableError } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
-import { createWorker, getQueue, QUEUES, isQueueEnabled } from "./queue.js";
+import { createWorker, getQueue, QUEUES, isQueueEnabled, capNhatDoSauHangDoi } from "./queue.js";
 import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
-import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS } from "./exportQueue.js";
+import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS, capNhatCongSuatXuat } from "./exportQueue.js";
 import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
@@ -55,6 +55,16 @@ export function taoMayChuMetrics(
       if (laProd && !token) { res.statusCode = 404; return res.end(); }
       if (token && !khopTokenBearer(req.headers.authorization, token)) { res.statusCode = 401; return res.end(); }
       try {
+        // PHẢI CẬP NHẬT MẪU SỐ TRƯỚC KHI KẾT XUẤT, y như src/app.ts.
+        //
+        // Bản đầu chỉ gọi `registry.metrics()`. Hai gauge kia là loại phải được ĐẨY giá trị mỗi lần
+        // scrape (chúng đọc trạng thái tức thời của cổng xuất và của hàng đợi), nên bỏ bước này thì
+        // chúng phát ra 0 — và phát ra 0 ĐÚNG Ở TIẾN TRÌNH mà cổng xuất file thật sự chạy:
+        // `sinhFileXuat` (dưới) đi qua `runExportJob`, tức `gate` của src/exportQueue.ts sống trong
+        // tiến trình WORKER, không phải tiến trình app. Nghĩa là bản scrape của app cho mẫu số của
+        // một cổng gần như luôn rỗng, còn bản scrape của worker — nơi có số thật — lại báo 0.
+        await capNhatDoSauHangDoi();
+        capNhatCongSuatXuat();
         res.setHeader("Content-Type", registry.contentType);
         res.end(await registry.metrics());
       } catch (e) {

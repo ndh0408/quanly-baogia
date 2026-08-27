@@ -202,6 +202,28 @@ export const sseBackplaneUp = new Gauge({
   help: "1 = backplane Redis của SSE đang chạy, 0 = đã rơi về in-memory (mất realtime giữa các instance)",
   registers: [registry],
 });
+/**
+ * CHẾ ĐỘ đang chạy của đường phát realtime — TÁCH khỏi `sse_backplane_up`.
+ *
+ * Vì sao phải tách: `sse_backplane_up` từng được `.set(1)` cả ở nhánh KHÔNG có REDIS_URL, với lý lẽ
+ * "chạy một tiến trình là cấu hình hợp lệ". Lý lẽ đó không được gì bảo đảm: infra/k8s/app.yaml khai
+ * `replicas: 2`, `REDIS_URL` là `.optional()` trong src/config.ts và thiếu nó ở production chỉ sinh
+ * một `console.warn`, còn infra/helm/quanly/values.yaml để sẵn `REDIS_URL: ""`. Tức tổ hợp "nhiều
+ * replica + không Redis" là dựng được, và đó CHÍNH LÀ cấu hình hỏng mà gauge này sinh ra để bắt —
+ * nhưng nó lại báo 1. Một gauge nói dối đúng trong tình huống nó phải kêu thì tệ hơn không có.
+ *
+ * Nay `sse_backplane_up` chỉ nói về backplane REDIS (1 = đang chạy, 0 = không), còn gauge này nói
+ * hệ đang ở chế độ nào. Quy tắc cảnh báo đúng:
+ *     sse_backplane_mode{mode="redis"} == 1  và  sse_backplane_up == 0
+ * — nó im lặng với bản triển khai một tiến trình cố ý không dùng Redis, và kêu đúng lúc backplane
+ * chết hoặc bị cấu hình thiếu ở nơi có nhiều instance.
+ */
+export const sseBackplaneMode = new Gauge({
+  name: "sse_backplane_mode",
+  help: '1 ở chế độ đang chạy: mode="redis" (có backplane) hoặc mode="local" (một tiến trình, không backplane)',
+  labelNames: ["mode"],
+  registers: [registry],
+});
 export const sseBackplaneErrors = new Counter({
   name: "sse_backplane_errors_total",
   help: "Số lần PUBLISH sự kiện SSE qua Redis thất bại",

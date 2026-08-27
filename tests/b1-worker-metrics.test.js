@@ -61,4 +61,28 @@ describe("tiến trình worker phải scrape được", () => {
     dangMo.push(srv);
     expect((await fetch(`${goc}/metrics`)).status).toBe(404);
   });
+
+  // ── MẪU SỐ PHẢI CÓ SỐ THẬT Ở ĐÚNG TIẾN TRÌNH NÀY ──────────────────────────
+  // `sinhFileXuat` đi qua `runExportJob`, tức `gate` của src/exportQueue.ts sống trong tiến trình
+  // WORKER. Nếu trình xử lý /metrics ở đây không gọi `capNhatCongSuatXuat()` trước khi kết xuất thì
+  // hai gauge mẫu số phát ra 0 — đúng ở nơi có số thật, trong khi bản scrape của app (nơi cổng gần
+  // như luôn rỗng) mới là nơi chúng được cập nhật. Bài này khoá đúng chỗ đó.
+  it("bản scrape của worker mang MẪU SỐ công suất xuất, không phải 0", async () => {
+    const { exportGateStats } = await import("../src/exportQueue.js");
+    const mong = exportGateStats();
+    const { srv, goc } = await moMayChu({ token: undefined, laProd: false });
+    dangMo.push(srv);
+    const text = await (await fetch(`${goc}/metrics`)).text();
+    // Dòng metric MANG NHÃN: `export_max_active_workers{app="quanly-baogia",env="test"} 3`.
+    // Regex phải cho phép phần nhãn, nếu không nó không khớp gì và bài test xanh/đỏ vì lý do sai.
+    const doc = (ten) => {
+      const m = new RegExp(`^${ten}(?:\\{[^}]*\\})?\\s+(\\d+(?:\\.\\d+)?)$`, "m").exec(text);
+      return m ? Number(m[1]) : null;
+    };
+    expect(doc("export_max_active_workers"),
+      "gauge mẫu số vắng mặt hoặc = 0 trong bản scrape của worker — mà cổng xuất chạy TRONG tiến trình này")
+      .toBe(mong.maxActive);
+    expect(doc("export_max_queue_depth")).toBe(mong.maxPending);
+    expect(mong.maxActive, "mẫu số phải > 0, nếu không phép so cảnh báo chia cho 0").toBeGreaterThan(0);
+  });
 });

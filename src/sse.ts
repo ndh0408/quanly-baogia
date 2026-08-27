@@ -7,7 +7,7 @@
 
 import type { Redis } from "ioredis";
 import type { Request, Response } from "express";
-import { sseClients, sseBackplaneUp, sseBackplaneErrors } from "./observability.js";
+import { sseClients, sseBackplaneUp, sseBackplaneErrors, sseBackplaneMode } from "./observability.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -84,6 +84,10 @@ if (config.REDIS_URL) {
       // restart) ghim gauge ở 0 VĨNH VIỄN dù backplane đã khoẻ lại — và một cảnh báo kêu mãi là
       // một cảnh báo bị người trực tắt đi. ioredis phát "ready" sau mỗi lần nối lại thành công.
       pubClient.on("ready", () => sseBackplaneUp.set(1));
+      // Chế độ là "redis" ngay khi ĐÃ CHỌN đường Redis, không đợi "ready": cảnh báo cần phân biệt
+      // "đang định dùng Redis mà nó chưa lên" với "cố ý không dùng Redis".
+      sseBackplaneMode.set({ mode: "redis" }, 1);
+      sseBackplaneMode.set({ mode: "local" }, 0);
       const sub = new (IORedis as any)(config.REDIS_URL, backplaneOptions("sub"));
       sub.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis sub error"); });
       await sub.subscribe(CHANNEL);
@@ -99,18 +103,27 @@ if (config.REDIS_URL) {
     } catch (e) {
       pub = null;
       sseBackplaneUp.set(0);
+      sseBackplaneMode.set({ mode: "local" }, 1);
+      sseBackplaneMode.set({ mode: "redis" }, 0);
       logger.warn({ err: e instanceof Error ? e.message : String(e) }, "SSE Redis backplane init failed — falling back to in-memory");
     }
   })();
 } else {
-  // KHÔNG CẤU HÌNH REDIS KHÔNG PHẢI LÀ HỎNG.
+  // KHÔNG CẤU HÌNH REDIS KHÔNG PHẢI LÀ HỎNG — nhưng cũng KHÔNG được báo là "up".
   //
-  // Chạy một tiến trình duy nhất, không backplane, là cấu hình hợp lệ (xem đầu file: "Without Redis
-  // it behaves exactly as the previous single-process broker"). Trước đây gauge chỉ được `.set(1)`
-  // bên trong nhánh có REDIS_URL, nên mọi bản triển khai như vậy báo `sse_backplane_up 0` ngay từ
-  // giây đầu — báo động giả vĩnh viễn. Số này đo "đường phát realtime có đang hoạt động không",
-  // và ở chế độ một tiến trình thì nó đang hoạt động.
-  sseBackplaneUp.set(1);
+  // Chạy một tiến trình duy nhất, không backplane, là cấu hình hợp lệ (xem đầu file). Bản trước
+  // giải quyết chuyện đó bằng cách `sseBackplaneUp.set(1)` ngay tại đây, và như vậy là sai: KHÔNG
+  // có gì bảo đảm "một tiến trình". infra/k8s/app.yaml khai `replicas: 2`; `REDIS_URL` là
+  // `.optional()` và thiếu nó ở production chỉ sinh một `console.warn`; values.yaml của Helm để sẵn
+  // `REDIS_URL: ""`. Tổ hợp "nhiều replica + không Redis" vì thế dựng được — và đó ĐÚNG LÀ cấu hình
+  // hỏng mà gauge này sinh ra để bắt, trong khi nó lại báo 1.
+  //
+  // Nay tách làm hai: `sse_backplane_up` chỉ nói về backplane REDIS, còn CHẾ ĐỘ nằm ở
+  // `sse_backplane_mode`. Cảnh báo đúng là `mode{mode="redis"}==1 and up==0`, nên bản một tiến
+  // trình không bị báo động giả mà cấu hình thiếu Redis ở cụm nhiều instance vẫn lộ ra.
+  sseBackplaneUp.set(0);
+  sseBackplaneMode.set({ mode: "local" }, 1);
+  sseBackplaneMode.set({ mode: "redis" }, 0);
 }
 
 /**
