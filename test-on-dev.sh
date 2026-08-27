@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# test-on-dev.sh — chạy TRỌN bộ test backend (unit + integration, 268 test) trên hạ tầng
-# Docker của DEV/STAGING (vì CI GitHub đang khóa billing + Docker Desktop local không khởi được).
+# test-on-dev.sh — chạy TRỌN bộ test backend (unit + integration) trên hạ tầng Docker của
+# DEV/STAGING. Con số test CỐ Ý không ghi ở đây: nó trôi mỗi lượt và một con số cũ trong
+# tiêu đề chỉ làm người đọc tin nhầm — `npm run verify` in ra số thật mỗi lần chạy.
+#
+# ⚠️ CI TRÊN GITHUB KHÔNG CHẠY (tài khoản không bật Actions). Nên .github/workflows/ci.yml là
+# TÀI LIỆU về những cổng cần chạy, KHÔNG phải thứ đang chạy. Cổng thật sự chạy chỉ có hai:
+#   · `npm run verify`  — chạy TẤT CẢ ngay trên máy đang ngồi (scripts/verify-local.sh)
+#   · file này          — chạy trên hạ tầng Docker của VM dev, khi máy local không có Postgres/Redis/MinIO
 #
 #   bash test-on-dev.sh            # mặc định SSH staging-ts (= dev.gianguyen.cloud VM)
 #   SSH=staging-ts bash test-on-dev.sh

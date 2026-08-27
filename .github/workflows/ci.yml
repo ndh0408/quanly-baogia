@@ -1,3 +1,19 @@
+# ⚠️ WORKFLOW NÀY KHÔNG CHẠY. Tài khoản GitHub của dự án không bật Actions, nên KHÔNG có lượt
+# chạy nào cả — không phải "thỉnh thoảng đỏ", mà là KHÔNG BAO GIỜ CHẠY.
+#
+# Vì thế đừng bao giờ nói "cứ đẩy lên, CI sẽ bắt". Ở repo này câu đó luôn sai. File này là TÀI LIỆU
+# về những cổng cần chạy; cổng THẬT SỰ chạy chỉ có hai, và cả hai đều phải gõ tay:
+#
+#   npm run verify        → scripts/verify-local.sh — chạy TẤT CẢ những gì khai dưới đây, ngay trên
+#                           máy đang ngồi, và đặt REQUIRE_DB_TESTS=1 nên bài nào thiếu hạ tầng thì
+#                           ĐỎ chứ không lặng lẽ "skipped" (một dòng skipped trông y hệt một dòng
+#                           xanh trong phần tổng kết — đó là cách một bộ test chết mà không ai biết).
+#   bash test-on-dev.sh   → chạy trên hạ tầng Docker của VM dev, khi máy local không có
+#                           Postgres/Redis/MinIO.
+#
+# Giữ file này ĐỒNG BỘ với scripts/verify-local.sh: thêm một bước ở đây mà quên thêm ở kia là thêm
+# một cổng không ai chạy.
+
 name: CI
 
 on:
@@ -114,16 +130,23 @@ jobs:
       #                  ĐÂY là phép kiểm chặn được "thêm route không ai soát rồi nhớ +1 con số":
       #                  muốn xanh phải VIẾT một dòng ma trận, tức phải điền cột QUYỀN/P.VI/T.NGUYÊN.
       #   --check-guards đỏ khi một endpoint không có middleware gác nào (cấp route lẫn cấp router),
-      #                  trừ danh sách miễn trừ tường minh trong script. ĐÃ ĐO: 84/137 endpoint chỉ
-      #                  dựa vào `router.use(requireAuth)` cấp router nên nằm NGOÀI tầm phép kiểm này
-      #                  — nó chỉ thật sự gác 4 file không có guard cấp router (app.ts, auth, jobs,
-      #                  stream). Giữ vì vẫn có giá trị ở 4 file đó, nhưng đừng tính nó là phần bù.
+      #                  trừ danh sách miễn trừ tường minh trong script. ĐÃ ĐO: 84/137 endpoint có
+      #                  guard cấp route RỖNG và chỉ dựa vào guard cấp router, nên nằm NGOÀI tầm phép
+      #                  kiểm này — nó chỉ thật sự gác 4 NGUỒN không có guard cấp router: src/app.ts
+      #                  (chỉ có `app.use("/api/", …)` dạng có đường dẫn, không tính là guard cả
+      #                  router) cộng auth/jobs/stream. Giữ vì vẫn có giá trị ở 4 nguồn đó, nhưng
+      #                  đừng tính nó là phần bù.
       #   --check-write-authz  đỏ khi một endpoint GHI (POST/PUT/PATCH/DELETE) không có BẤT KỲ chỗ nào
       #                  khai ai được gọi: không middleware phân quyền (requireAuth KHÔNG tính — nó chỉ
       #                  trả lời "anh là ai"), VÀ cột QUYỀN của dòng ma trận bỏ trống `—`. Đây là phần
-      #                  mà --check-guards để lọt: 20/24 file route mở đầu bằng `router.use(requireAuth)`
-      #                  nên route GHI mới thêm vào đó luôn xanh. ĐÃ ĐO: 78 endpoint GHI, 17 miễn trừ
+      #                  mà --check-guards để lọt: 16/23 file route mở đầu bằng `router.use(requireAuth)`
+      #                  nên route GHI mới thêm vào đó luôn xanh. Ngược lại,
+      #                  4 file (admin/audit/users/webhooks) gác bằng `router.use(requirePermission(...))`
+      #                  — đã khai quyền ngay ở cấp router nên KHÔNG nằm trong vùng mù này;
+      #                  analytics và export có CẢ hai.
+      #                  ĐÃ ĐO: 78 endpoint GHI, 46 không có middleware phân quyền, 17 miễn trừ
       #                  tự-phục-vụ (đăng nhập, MFA/mật khẩu của chính mình…) khai tường minh trong script.
+      #                  Ba con số file ở trên do tests/w4-route-guard-counts.test.js đo lại và chốt.
       # Cả ba cộng lại vẫn KHÔNG khẳng định được quyền gác là ĐÚNG — chỉ khẳng định có gác, có trong
       # bảng, và (với route GHI) có KHAI ra quyền ở đâu đó. Nhãn cũ ("quên soát quyền là đỏ ngay")
       # hứa nhiều hơn thế; đừng đặt lại như vậy.

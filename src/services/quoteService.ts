@@ -623,8 +623,10 @@ export async function listQuotes(req: Request) {
 /**
  * Bảng nội bộ THEO TỪNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
  *
- * Hai đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`) và `listProjects`
- * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang).
+ * BA đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`), `listProjects`
+ * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
+ * bản xuất GDPR (src/services/gdprService.ts) — đường đó cũng cần dữ liệu chữ/số của bảng nội bộ
+ * mà KHÔNG kéo ảnh chứng từ qua dây.
  *
  * Vì sao phải cắt ở tầng SQL chứ không lọc sau khi nạp: lọc ở JS thì base64 đã đi qua dây và đã
  * nằm trong heap rồi — đúng chi phí cần bỏ. Ảnh vẫn sống trong CSDL và vẫn tải được on-demand qua
@@ -638,7 +640,7 @@ export async function listQuotes(req: Request) {
  * sanitizeExtraTables), nên phải phòng cả ca không phải mảng: CASE ở ngoài chặn `jsonb_array_elements`
  * ném lỗi trên object/chuỗi, và bảng có `items` không phải mảng thì để nguyên.
  */
-async function bangNoiBoTheoSheet(ids: number[]) {
+export async function bangNoiBoTheoSheet(ids: number[]) {
   const rows = await prisma.$queryRaw<{ quoteId: number; sheetId: number; order: number; tables: any }[]>`
     SELECT s."quoteId" AS "quoteId", s.id AS "sheetId", s."order" AS "order",
            coalesce(jsonb_agg(x.t ORDER BY x.ord), '[]'::jsonb) AS "tables"

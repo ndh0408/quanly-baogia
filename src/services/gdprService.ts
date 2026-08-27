@@ -6,6 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
+import { bangNoiBoTheoSheet } from "./quoteService.js";
 
 /**
  * Tuần tự hoá khối xuất — MỘT lần stringify duy nhất cho cả đường xuất, và là chỗ DUY NHẤT xử lý
@@ -52,28 +53,6 @@ function anonymizeUserOps(id: number) {
 }
 
 /** Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu. Tuần tự hoá: `serializeExport`. */
-/**
- * Bỏ ẢNH chứng từ khỏi các bảng nội bộ, GIỮ mọi trường chữ/số, và giữ một cờ cho biết dòng đó có
- * chứng từ hay không.
- *
- * TRÙNG HÌNH DẠNG CÓ CHỦ Ý với `stripExtraProofs` (src/quoteUtils.ts) và với bản chụp phiên bản
- * (src/quoteVersion.ts): ba đường đều phải cắt đúng một khoá `paidProof` và đều phải để lại
- * `hasPaidProof`. Không gọi chéo vì hai file kia nằm trên đường phục vụ request nóng và kéo theo
- * phụ thuộc mà bản xuất GDPR không cần.
- */
-function catAnhChungTu(extraTables: unknown) {
-  if (!Array.isArray(extraTables)) return extraTables ?? null;
-  return extraTables.map((t: any) => {
-    if (!t || typeof t !== "object") return t;
-    const items = Array.isArray(t.items) ? t.items.map((it: any) => {
-      if (!it || typeof it !== "object") return it;
-      const { paidProof, ...conLai } = it;
-      return { ...conLai, hasPaidProof: !!paidProof };
-    }) : t.items;
-    return { ...t, items };
-  });
-}
-
 export async function exportUser(userId: number) {
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
@@ -91,26 +70,33 @@ export async function exportUser(userId: number) {
     //   · Quote.customerLogo — data-URL base64 logo của KHÁCH HÀNG, không phải dữ liệu cá nhân của
     //     người xin bản xuất: đưa vào một tệp tải-về là tự tạo đường rò.
     //
-    // CÒN `QuoteSheet.extraTables` THÌ GIỮ — CHỈ CẮT RIÊNG ẢNH.
+    // CÒN `QuoteSheet.extraTables` THÌ GIỮ — CHỈ CẮT RIÊNG ẢNH, VÀ CẮT NGAY TẠI SQL.
     //
     // Bản trước dùng `omit: { extraTables: true }` và chú thích đi kèm khẳng định "mọi trường
     // chữ/số của báo giá, sheet và hạng mục vẫn nguyên". Sai: `extraTables` là MỘT cột jsonb, cắt
     // nó là cắt cả nội dung — các bảng nội bộ Chi Phí HCM / Giá Hà Nội / Phí Khách Hàng, gồm
-    // {name, detail, unit, quantity, unitPrice, days, notes} của từng dòng. Đó là dữ liệu do chính
-    // người xin bản xuất nhập vào báo giá của họ, và một bản xuất GDPR thiếu nó là thiếu thật.
-    // Thứ KHÔNG được đưa ra chỉ là `paidProof` (ảnh uỷ nhiệm chi — chứng từ của công ty/người khác),
-    // nên cắt đúng khoá đó ở tầng ứng dụng thay vì vứt cả cột.
-    // `hasPaidProof` giữ lại để bản xuất vẫn nói được "dòng này đã có chứng từ", cùng hình dạng mà
-    // presentQuote dùng khi trả về cho client.
+    // {name, detail, unit, quantity, unitPrice, days, notes} của từng dòng. Đó là dữ liệu do CHÍNH
+    // người xin bản xuất nhập vào báo giá của họ; một bản xuất GDPR thiếu nó là thiếu thật.
+    //
+    // Nhưng cắt ở tầng JS cũng sai, và tests/b5-gdpr-export-anh.test.js đo được: ảnh `paidProof`
+    // vẫn đi qua dây rồi mới bị bỏ (2,4 MB thay vì 0,36 MB cho cùng bộ dữ liệu). Nên dùng lại
+    // `bangNoiBoTheoSheet` của quoteService — câu SQL DUY NHẤT trong repo cắt `paidProof` — thay vì
+    // viết bản thứ hai. Hai bản chép của quy tắc cắt ấy chắc chắn sẽ trôi khỏi nhau.
     prisma.quote.findMany({
       where: { createdById: userId },
       omit: { customerLogo: true },
-      include: { sheets: { include: { items: { omit: { images: true } } } } },
+      include: { sheets: { omit: { extraTables: true }, include: { items: { omit: { images: true } } } } },
       take: 1000,
-    }).then((qs) => qs.map((q: any) => ({
-      ...q,
-      sheets: (q.sheets || []).map((sh: any) => ({ ...sh, extraTables: catAnhChungTu(sh.extraTables) })),
-    }))),
+    }).then(async (qs: any[]) => {
+      if (!qs.length) return qs;
+      const bang = await bangNoiBoTheoSheet(qs.map((q) => q.id));
+      const theoSheet = new Map<number, any>();
+      for (const r of bang) theoSheet.set(r.sheetId, r.tables);
+      return qs.map((q) => ({
+        ...q,
+        sheets: (q.sheets || []).map((sh: any) => ({ ...sh, extraTables: theoSheet.get(sh.id) ?? [] })),
+      }));
+    }),
     prisma.customer.findMany({ where: { ownerId: userId }, take: 5000 }),
     prisma.auditEvent.findMany({
       where: { actorId: userId },
