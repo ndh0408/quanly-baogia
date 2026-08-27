@@ -5,6 +5,7 @@ import { api, type Me, type QuoteRow } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
 import { statusLabel, fmtMoney, fmtDate, codeLabel, shortTitle, errMsg, dash } from "../lib/format";
+import { xuatBaoGia } from "../lib/exportQuote";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
 // + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·
@@ -73,7 +74,9 @@ export function QuoteListPage({ me }: { me: Me }) {
     e?.stopPropagation();
     if (busy.current) return; busy.current = true;
     try {
-      if (a === "excel") window.open(`/api/export/${qr.id}.xlsx?t=${Date.now()}`, "_blank");
+      // `xuatBaoGia` thay cho `window.open`: nó thấy được mã 413 và tự chuyển sang xuất nền.
+      // window.open giao thẳng phản hồi cho trình duyệt nên báo giá lớn chỉ ra một tab in JSON lỗi.
+      if (a === "excel") await xuatBaoGia(qr.id, "xlsx");
       else if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
       else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(nq)}).`, "success"); open(nq.id); }
       else if (a === "del") {

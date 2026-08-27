@@ -428,7 +428,7 @@ SELECT id FROM "PersonnelRecord"
 Chạy `scripts/migration/payment-proof-migrate.mjs`, xác minh truy vấn (1) trả về 0, rồi
 mới bỏ cột cũ ở một migration riêng.
 
-## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ngõ cụt cho người dùng
+## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ĐÃ NỐI đường nền (2026-08-27)
 
 `src/validators.ts:270` cho **60 trang** × `:194` **1000 dòng/trang** = tối đa
 **60.000 item** một báo giá. Đường xuất đồng bộ `src/routes/export.routes.ts:35-41`
@@ -455,11 +455,31 @@ hiện tại đúng — vấn đề nằm ở phía LƯU và phía giao diện, 
 = 10.000 item, tức mới dùng một nửa headroom. Vì vậy đây là mục **UX/headroom**,
 không phải lỗi đang gây hại.
 
-**Việc phải làm (một trong hai, chưa làm ở đợt này vì nằm ngoài cụm excel/pdf):**
+### ĐÃ NỐI (2026-08-27) — ngõ cụt đã đóng
+
+`web/src/lib/exportQuote.ts` thay cho `window.open` ở cả hai nơi gọi
+(`QuoteList.tsx`, `QuoteEditor.tsx`). `window.open` giao thẳng phản hồi cho trình
+duyệt nên **413 không bao giờ tới được JavaScript** — đó là lý do gốc khiến lời
+nhắn "vui lòng dùng xuất nền" không dẫn tới đâu.
+
+Luồng mới: `fetch` đường đồng bộ → 200 thì tải ngay (không đổi gì với người dùng)
+→ gặp 413 thì tự `POST /api/quotes/:id/export`, hỏi `GET /api/jobs/export/:jobId`
+tới khi xong, rồi tải từ URL đã ký worker trả về.
+
+Tải bằng thẻ `<a download>` chứ không `window.open`/`location.href`: bước nền là
+bất đồng bộ, mà mọi cách mở cửa sổ **sau** một `await` đều có thể bị chặn pop-up.
+
+Chốt bằng `web/src/lib/exportQuoteAsync.test.ts` (8 bài, chặn `fetch` ở mức mạng).
+Đã kiểm ngược: gỡ nhánh 413 ra thì 4/8 bài đỏ ngay.
+
+**Vẫn cần Redis + kho object.** Thiếu thì `POST /api/quotes/:id/export` trả 503
+kèm `code: "export_async_unavailable"`, và giao diện nói thẳng là phải nhờ quản
+trị viên bật — thay vì để người dùng đoán. Trần 20.000 **giữ nguyên**, không nâng.
+
+**Còn lại (chưa làm):** cảnh báo NGAY LÚC LƯU khi báo giá vượt ngưỡng xuất đồng
+bộ, để người dùng biết trước chứ không phải tới lúc bấm Tải mới biết. Muốn làm thì
 đưa `MAX_EXPORT_SHEETS`/`MAX_EXPORT_ITEMS` vào `src/config.ts` cho cả hai phía đọc
-chung rồi cảnh báo ngay lúc lưu trong `src/services/quoteService.ts`; **hoặc** nối
-nút "Xuất Excel" ở `web/src` với `POST /api/jobs` khi gặp 413 (chỉ có ích nếu
-production đã bật Redis + kho object).
+chung rồi báo trong `src/services/quoteService.ts`.
 
 ## Logo khách hàng định dạng .webp vẫn KHÔNG hiện trong file Excel
 

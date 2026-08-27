@@ -517,6 +517,22 @@ export const api = {
   sheetCustomerDecision: (sheetId: number, status: "approved" | "rejected" | "", note?: string) =>
     req<SheetDecision>(`/quotes/sheets/${sheetId}/customer-decision`, { method: "POST", body: JSON.stringify({ status, note }) }),
   quoteVersions: (id: number) => req<{ data: QuoteVersion[] }>(`/quotes/${id}/versions`),
+
+  // ── XUẤT NỀN ────────────────────────────────────────────────────────────────
+  // Đường xuất ĐỒNG BỘ (/api/export/:id.xlsx) từ chối từ MAX_EXPORT_ITEMS dòng và trả 413. Hai
+  // route dưới đây là lối thoát: xếp việc vào hàng đợi rồi hỏi kết quả. Backend đã có từ trước
+  // (src/routes/jobs.routes.ts) nhưng KHÔNG client nào gọi — người dùng lưu được báo giá 60.000
+  // dòng rồi mới phát hiện không tải về được. Xem web/src/lib/exportQuote.ts để biết luồng.
+  exportAsync: (quoteId: number, format: "xlsx" | "pdf") =>
+    req<{ jobId: string; queue: string; format: string }>(`/quotes/${quoteId}/export`, {
+      method: "POST", body: JSON.stringify({ format }),
+    }),
+  jobStatus: (queue: string, id: string) =>
+    req<{
+      id: string; state: string; progress: unknown;
+      returnvalue: { url?: string; key?: string; size?: number } | null;
+      failedReason: string | null;
+    }>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`),
   versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),
   assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),
   setMembers: (id: number, memberIds: number[]) => req<unknown>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) }),

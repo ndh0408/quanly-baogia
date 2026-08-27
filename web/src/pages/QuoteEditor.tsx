@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "../lib/api";
 import { toast, confirmModal, promptModal } from "../lib/ui";
+import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
@@ -369,7 +370,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
   const exportFile = async (ext: "xlsx" | "pdf") => {
     if (dirtyRef.current && !(await confirmModal("Có thay đổi chưa lưu", "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi vừa sửa. Hãy Lưu trước rồi tải lại.", { confirmText: "Vẫn tải bản cũ" }))) return;
-    window.open(`/api/export/${q.id}.${ext}?t=${Date.now()}`, "_blank");
+    // Xem web/src/lib/exportQuote.ts: đường đồng bộ trước, gặp 413 thì tự chuyển sang xuất nền.
+    // Bản cũ dùng window.open nên KHÔNG BAO GIỜ thấy 413 — báo giá quá 20.000 dòng chỉ ra một tab
+    // in JSON lỗi, dù báo giá 60.000 dòng là LƯU ĐƯỢC.
+    await xuatBaoGia(q.id, ext);
   };
 
   // ── summary tổng báo giá (mọi sheet) ─────────────────────────────────────────
