@@ -50,7 +50,10 @@
     "check:refs": "node scripts/ci/check-line-refs.mjs",
     "check:helm": "node scripts/ci/check-helm.mjs",
     "check:alerts": "node scripts/ci/check-alerts.mjs",
-    "check:changelog": "node scripts/ci/gen-changelog.mjs --check"
+    "check:changelog": "node scripts/ci/gen-changelog.mjs --check",
+    "check:shell": "node scripts/ci/check-shell-strict.mjs",
+    "check:deps": "node scripts/ci/check-deps.mjs",
+    "check:web-bundle": "node scripts/ci/check-web-bundle.mjs"
   },
   "engines": {
     "node": ">=22"

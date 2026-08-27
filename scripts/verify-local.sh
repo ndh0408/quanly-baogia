@@ -199,6 +199,11 @@ if [ "$NHANH" -eq 0 ]; then
   (cd web && npx vitest run);                                       ket $? "vitest web"
   buoc "[6/12] Build web (backend đã dựng ở [2b])"
   (cd web && npx vite build >/dev/null);                            ket $? "build web"
+  # NGAY SAU khi build, không để sang bước khác: file này export NODE_ENV=test cho cả lượt chạy, mà
+  # Vite đọc đúng biến đó để quyết dev-hay-prod. Trước đợt này `npm run verify` đẻ ra bundle DEV rồi
+  # đem đi smoke ở [11] — smoke xanh trên một bản không người dùng nào chạy, và <StrictMode> của bản
+  # dev còn làm hỏng bàn giao bản nháp Wizard → trình soạn.
+  node scripts/ci/check-web-bundle.mjs >/dev/null;                  ket $? "check-web-bundle (bundle là bản production)"
 else
   buoc "[5-6/12] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
 fi
@@ -219,6 +224,11 @@ node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "chang
 
 buoc "[8/12] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
+# §38: mọi script shell phải có `-u` + `pipefail`; bỏ `-e` thì phải khai kèm lý do.
+# `pipefail` mới là thứ đắt giá: migration-rehearsal-inner.sh từng chạy
+# `prisma migrate deploy | grep | tail` — mã thoát lấy từ `tail`, LUÔN 0, migration hỏng bị nuốt
+# và bài diễn tập báo ĐẠT.
+node scripts/ci/check-shell-strict.mjs --check >/dev/null;          ket $? "script shell bật chế độ nghiêm (chi tiết: npm run check:shell)"
 if command -v helm >/dev/null 2>&1; then
   helm lint infra/helm/quanly >/dev/null;                           ket $? "helm lint (cú pháp + Chart.yaml)"
   # `helm lint` KHÔNG render template — nó không thấy được `node src/server.js` trong args, không
@@ -245,6 +255,9 @@ buoc "[9/12] Phụ thuộc"
 # Gỡ dòng đó khỏi package.json mà chưa `npm install` thì ở đây vẫn xanh. Thứ bắt được là
 # tests/x2-override-deepmerge.test.js, chạy ở bước [4/12].
 npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm audit (production)"
+# §37: phụ thuộc RUNTIME phải có người dùng. `tests/ch3-npm-manifest.test.js` đã gác chiều DEV;
+# chiều runtime thì chưa có gì gác. Mỗi gói thừa là bề mặt tấn công thừa + một mục nữa trong SBOM.
+node scripts/ci/check-deps.mjs --check >/dev/null;                  ket $? "phụ thuộc runtime đều có người dùng (chi tiết: npm run check:deps)"
 
 # ── [10/12] ARTIFACT ĐƯỢC TRIỂN KHAI, KHÔNG PHẢI MÃ NGUỒN ──────────────────
 # Chín bước trên đều kiểm MÃ NGUỒN. Không bước nào kiểm THỨ THẬT SỰ CHẠY Ở PRODUCTION.

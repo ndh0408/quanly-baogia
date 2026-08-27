@@ -7,7 +7,7 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
-import { takePendingNewQuote } from "../lib/pendingQuote";
+import { giuBanNhap } from "../lib/pendingQuote";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -78,6 +78,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
   const dirtyRef = useRef(false);
+  // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
+  // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
+  const draftRef = useRef<QuoteFull | null>(null);
   const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
@@ -156,7 +159,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         let q: QuoteFull;
         if (isNew) {
           // Draft từ Wizard Tạo-mới (công ty/mẫu/khách/logo đã chọn); nếu vào thẳng #/rnew thì dựng mặc định.
-          const pend = takePendingNewQuote();
+          const pend = giuBanNhap(draftRef);
           if (pend) { q = pend; }
           else {
             const firstTpl = _templates![0];

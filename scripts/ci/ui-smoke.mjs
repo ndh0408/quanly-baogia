@@ -25,9 +25,13 @@
 // có khởi động nổi không" KHÔNG bỏ trống: nó nằm ở scripts/ci/docker-smoke.sh, chạy container
 // NODE_ENV=production thật. Hai script chia nhau hai vế, không cái nào phủ được cả hai.
 //
+// ── LUỒNG NGƯỜI DÙNG ĐƯỢC PHỦ ──────────────────────────────────────────────
+// đăng nhập → danh sách → mở trình soạn → sửa ô → LƯU → tải lại + kiểm số đã lưu → TẠO báo giá mới
+// (wizard 3 bước) → lưu bản mới → XUẤT Excel → ĐĂNG XUẤT → ĐĂNG NHẬP tài khoản hạn chế → KIỂM QUYỀN.
+//
 // ── DỮ LIỆU ────────────────────────────────────────────────────────────────
-// Tự tạo user + công ty + mẫu + báo giá mang tiền tố `uismoke-<pid>`, và XOÁ CỨNG ở finally.
-// Không đụng dữ liệu sẵn có, không phụ thuộc seed.
+// Tự tạo 2 user + công ty + mẫu + khách hàng + báo giá mang tiền tố `uismoke-<pid>`, và XOÁ CỨNG ở
+// finally. Không đụng dữ liệu sẵn có, không phụ thuộc seed.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -91,23 +95,33 @@ async function main() {
   // này ghi thẳng qua Prisma nên phải gọi đúng hàm đó — nếu tự bịa một chuỗi thì báo giá tồn tại
   // nhưng tìm không ra, và bài test đỏ vì lý do sai.
   const { normalizeSearch } = await import(path.join(GOC, "dist/searchText.js"));
+  // `src/excel.ts` gọi `getConfig(sheet.template.code)` và getConfig NÉM với mã lạ — xem [U1].
+  const { TEMPLATE_CONFIGS, getConfig } = await import(path.join(GOC, "dist/templateConfigs.js"));
   const cong = await congRanh();
   const goc = `http://127.0.0.1:${cong}`;
   const matKhau = `Ui-Smoke-${process.pid}-${Math.floor(Date.now() % 1e6)}!`;
 
   let may = null, trinhDuyet = null;
+  // ── VÌ SAO DỌN THEO ID, KHÔNG CHỈ THEO TIỀN TỐ TÊN ─────────────────────────
+  // Báo giá do bước WIZARD tạo ra mang số do MÁY CHỦ sinh (theo `quotePrefix` của công ty), KHÔNG
+  // mang tiền tố `uismoke-`. Lọc `quoteNumber startsWith TAG` như bản đầu bỏ sót đúng bản ghi đó và
+  // để lại rác sau MỖI lượt chạy. Dọn theo `companyId` thì bắt cả hai.
+  // Mẫu báo giá là ngoại lệ ngược lại: mã của nó BẮT BUỘC là một khoá có thật trong TEMPLATE_CONFIGS
+  // (lý do ở [U1]) nên không gắn tiền tố được — chỉ xoá khi CHÍNH lượt này tạo ra nó.
+  const id = { user: [], company: null, template: null, khach: null };
   const donDep = async () => {
     try { if (trinhDuyet) await trinhDuyet.close(); } catch {}
     try { if (may && !may.killed) { may.kill("SIGTERM"); await nghi(400); may.kill("SIGKILL"); } } catch {}
     // Xoá CỨNG: db.ts có lớp soft-delete, xoá mềm thì lần chạy sau vấp `quoteNumber` trùng.
-    for (const [ten, dk] of [
-      ["quote", { quoteNumber: { startsWith: TAG } }],
-      ["quoteTemplate", { code: { startsWith: TAG } }],
-      ["company", { code: { startsWith: TAG } }],
-      ["user", { username: { startsWith: TAG } }],
-    ]) {
-      try { await prisma[ten].deleteMany({ where: dk, hardDelete: true, includeDeleted: true }); } catch {}
-    }
+    const xoa = async (ten, dk) => { try { await prisma[ten].deleteMany({ where: dk, hardDelete: true, includeDeleted: true }); } catch {} };
+    // Thứ tự BẮT BUỘC: báo giá trỏ tới công ty + mẫu + khách + người tạo bằng khoá ngoại NOT NULL.
+    if (id.company) await xoa("quote", { companyId: id.company });
+    await xoa("quote", { quoteNumber: { startsWith: TAG } });
+    if (id.template) await xoa("quoteTemplate", { id: id.template });
+    if (id.company) await xoa("company", { id: id.company });
+    if (id.khach) await xoa("customer", { id: id.khach });
+    if (id.user.length) await xoa("user", { id: { in: id.user } });
+    await xoa("user", { username: { startsWith: TAG } });
     try { await prisma.$disconnect(); } catch {}
   };
 
@@ -117,12 +131,38 @@ async function main() {
       username: `${TAG}-admin`, displayName: "Smoke Admin", role: "admin",
       passwordHash: await bcrypt.hash(matKhau, 10),
     } });
+    id.user.push(u.id);
+    // Tài khoản THỨ HAI, chỉ để [U15] kiểm quyền có nghĩa: `account_hn` KHÔNG có `quote:create` lẫn
+    // `user:manage` (src/permissions.ts → ACCOUNT_HN). Kiểm quyền bằng chính tài khoản admin — vốn
+    // có MỌI quyền — là kiểm rỗng: nó xanh kể cả khi mọi cổng quyền đã bị gỡ.
+    const uHn = await prisma.user.create({ data: {
+      username: `${TAG}-hn`, displayName: "Smoke HN", role: "account_hn",
+      passwordHash: await bcrypt.hash(matKhau, 10),
+    } });
+    id.user.push(uHn.id);
     const co = await prisma.company.create({ data: {
       code: `${TAG}CO`, name: "Cty Smoke", address: "1 Đường Thử", quotePrefix: `S${String(process.pid).slice(-4)}`,
     } });
+    id.company = co.id;
+    // ── MÃ MẪU PHẢI LÀ MỘT KHOÁ CÓ THẬT TRONG TEMPLATE_CONFIGS ────────────────
+    // `src/excel.ts:getConfig(tplCode)` NÉM `Không có config cho template code: …` với mã lạ. Bản
+    // đầu của fixture này đặt mã `uismoke-<pid>k`, chạy được MỌI bước trừ xuất file — đúng bước
+    // [U13] vừa thêm mới lộ ra. Mã mẫu là tập ĐÓNG (không có API tạo mẫu, chỉ seed đặt) nên không
+    // gắn tiền tố `uismoke-` được: lấy khoá đầu tiên chưa nằm trong CSDL, và nói thẳng nếu hết.
+    const maCoThe = Object.keys(TEMPLATE_CONFIGS);
+    const daDung = new Set((await prisma.quoteTemplate.findMany({ select: { code: true }, includeDeleted: true })).map((t) => t.code));
+    const maTpl = maCoThe.find((m) => !daDung.has(m));
+    if (!maTpl) { xau(`CSDL đã dùng hết ${maCoThe.length} mã mẫu (${maCoThe.join(", ")}) — smoke cần 1 mã còn trống`); return 1; }
     const tpl = await prisma.quoteTemplate.create({ data: {
-      companyId: co.id, name: "Mẫu Smoke", code: `${TAG}k`, filePath: "templates/GN_KhongNgay.xlsx",
+      companyId: co.id, name: "Mẫu Smoke", code: maTpl, filePath: getConfig(maTpl).filePath,
     } });
+    id.template = tpl.id;
+    // Khách hàng cho wizard [U11]: bước 3 CHẶN nếu chưa chọn mã khách ("Chọn khách hàng").
+    const kh = await prisma.customer.create({ data: {
+      code: `${TAG}KH`, name: "Khách Smoke Wizard",
+      searchText: normalizeSearch("Khách Smoke Wizard", `${TAG}KH`, null, null, null, null),
+    } });
+    id.khach = kh.id;
     const bg = await prisma.quote.create({ data: {
       quoteNumber: `${TAG}-001`, title: "Báo giá smoke giao diện", toCompany: "Khách Smoke",
       searchText: normalizeSearch(`${TAG}-001`, null, "Báo giá smoke giao diện", "Khách Smoke", null),
@@ -133,7 +173,7 @@ async function main() {
         { order: 2, kind: "item", name: "Hạng mục smoke B", unit: "bộ", quantity: 2, unitPrice: 50000 },
       ] } }] },
     } });
-    ok(`user + công ty + mẫu + báo giá #${bg.id} (${TAG})`);
+    ok(`2 user + công ty + mẫu \`${maTpl}\` + khách + báo giá #${bg.id} (${TAG})`);
 
     buoc("[U2] Khởi động máy chủ từ dist/");
     may = spawn(process.execPath, ["dist/server.js"], {
@@ -190,6 +230,12 @@ async function main() {
     //    `display=swap` khiến trang vẫn đọc được bằng phông dự phòng. Nên KHÔNG làm đỏ, nhưng
     //    VẪN liệt kê: một phụ thuộc ngoài lúc tải trang là chuyện người vận hành cần biết, không
     //    phải chuyện được im lặng. (Ghi trong docs/REMAINING_RISKS.md.)
+    // ── 4. MÃ LỖI MÀ BÀI TEST CỐ Ý GỌI RA ───────────────────────────────────
+    // [U15] kiểm quyền bằng cách gọi THẲNG API bằng tài khoản không có quyền và đòi đúng 403 — đó
+    // là chốt chặn thật (giao diện ẩn nút chỉ là lớp phủ). Nếu không khai trước thì chính bài kiểm
+    // quyền ĐẠT sẽ làm [U16] đỏ. Khai theo CẶP `<mã> <đường dẫn>` chứ không tha cả mã 403: tha
+    // rộng là mở cửa cho một 403 THẬT ở chỗ khác lọt qua.
+    const coY = new Set();
     const laCuaMinh = (url) => url.startsWith(goc);
     const ghiHong = (mo) => (laCuaMinh(mo) ? requestHong : ngoai).push(mo);
     trang.on("requestfailed", (r) => {
@@ -200,6 +246,9 @@ async function main() {
     trang.on("response", (r) => {
       if (r.status() < 400) return;
       if (r.status() === 401 && r.url().includes("/api/auth/me")) return;
+      let duongDan = r.url();
+      try { duongDan = new URL(r.url()).pathname; } catch { /* URL lạ — giữ nguyên chuỗi */ }
+      if (coY.has(`${r.status()} ${duongDan}`)) return;
       ghiHong(`${r.status()} ${r.request().method()} ${r.url()}`);
     });
 
@@ -264,19 +313,147 @@ async function main() {
     const sau = await soCuaO('tr[data-row="0"] .col-amount');
     doi(sau === 750_000, `sau khi gõ 250.000 → Thành Tiền = ${sau.toLocaleString("vi-VN")} (mong 750.000)`);
 
-    buoc("[U9] Tải lại trang — bundle vẫn nạp được, phiên còn nguyên");
+    buoc("[U9] Bấm Lưu — số vừa gõ phải đi tới CSDL");
+    // Gõ vào lưới mới chỉ đổi state trong trình duyệt. Thiếu bước này thì [U10] "tải lại" chỉ chứng
+    // minh bundle nạp lại được, KHÔNG chứng minh dữ liệu đi tới đâu — và cả hai vẫn xanh khi đường
+    // LƯU đã đứt hẳn.
+    await trang.click(".actions > .btn-primary");
+    await trang.waitForSelector("#toast-host .toast-msg:has-text('Đã lưu')", { timeout: 30_000 });
+    // Đọc THẲNG từ CSDL, không đọc lại màn hình: màn hình là thứ vừa được gõ vào, nó đồng ý với
+    // chính nó dù máy chủ có ghi hay không. `save()` gửi CẢ báo giá và máy chủ xoá-tạo-lại sheet,
+    // nên phải tìm theo quan hệ chứ không theo id dòng cũ.
+    const dongDb = await prisma.quoteItem.findFirst({
+      where: { sheet: { quoteId: bg.id }, order: 1 }, select: { name: true, unitPrice: true, quantity: true },
+    });
+    doi(Number(dongDb?.unitPrice) === 250_000, `CSDL: đơn giá dòng 1 = ${dongDb?.unitPrice} (mong 250000)`);
+    doi(dongDb?.name === "Hạng mục smoke A", `CSDL: tên dòng 1 = "${dongDb?.name}" (các ô KHÔNG gõ vào vẫn nguyên)`);
+
+    buoc("[U10] Tải lại trang — bundle nạp lại được, phiên còn, SỐ ĐÃ LƯU còn");
     // ChunkLoadError sau khi build mới chỉ hiện ra ở lượt tải lại. Shell.tsx có sẵn một lớp tự
     // reload cho chuyện này — bài này là chỗ duy nhất chạm tới nó.
     await trang.reload({ waitUntil: "domcontentloaded" });
-    await trang.waitForSelector("tr[data-row], h1", { timeout: 30_000 });
+    await trang.waitForSelector('tr[data-row="0"]', { timeout: 30_000 });
     doi(!(await trang.isVisible("#login-form")), "tải lại KHÔNG bị đá về màn đăng nhập");
+    const sauTai = await soCuaO('tr[data-row="0"] .col-amount');
+    doi(sauTai === 750_000, `sau khi tải lại Thành Tiền = ${sauTai.toLocaleString("vi-VN")} (mong 750.000 — đọc lại từ máy chủ)`);
+
+    buoc("[U11] Tạo báo giá mới — wizard 3 bước");
+    await trang.evaluate(() => { location.hash = "#/new"; });
+    await trang.waitForSelector("h1:has-text('Tạo báo giá mới')", { timeout: 20_000 });
+    // Bước 1 — công ty. KHÔNG dựa vào lựa chọn mặc định: wizard chọn sẵn `companies[0]`, mà công ty
+    // của smoke gần như không bao giờ là cái đầu tiên.
+    await trang.click('.pick-card:has-text("Cty Smoke")');
+    await trang.click(".wizard-foot .btn-primary");
+    // Bước 2 — mẫu (mỗi mẫu = 1 sheet)
+    await trang.click('.pick-card:has-text("Mẫu Smoke")');
+    await trang.click(".wizard-foot .btn-primary");
+    // Bước 3 — thông tin. Ba trường BẮT BUỘC (`next()` chặn nếu thiếu): tiêu đề, mã khách, tên khách.
+    const tieuDeMoi = `Báo giá wizard ${TAG}`;
+    await trang.fill('input[placeholder="VD: Décor Premiere Phim Thỏ Ơi"]', tieuDeMoi);
+    await trang.click('button:has-text("Chọn khách hàng")');
+    await trang.waitForSelector('.modal[aria-label="Chọn khách hàng"]', { timeout: 20_000 });
+    await trang.fill('.modal[aria-label="Chọn khách hàng"] input[type="search"]', `${TAG}KH`);
+    await trang.click(`.modal[aria-label="Chọn khách hàng"] tr:has-text("${TAG}KH")`, { timeout: 20_000 });
+    await trang.fill('.form-grid label:has-text("Khách hàng (To)") input', "Khách Smoke Wizard");
+    await trang.click(".wizard-foot .btn-primary");
+    // Wizard KHÔNG gọi API tạo: nó dựng bản nháp trong bộ nhớ rồi mở trình soạn ở #/rnew. Bấm Lưu
+    // mới POST — nên "tạo báo giá" chỉ trọn vẹn khi có cả bước [U12].
+    await trang.waitForFunction(() => location.hash === "#/rnew", undefined, { timeout: 20_000 });
+    await trang.waitForSelector('tr[data-row="0"]', { timeout: 30_000 });
+    ok("wizard đi hết 3 bước → trình soạn bản nháp #/rnew");
+
+    buoc("[U12] Lưu báo giá MỚI — POST tạo bản ghi thật");
+    const goVaoO = async (sel, gt) => { await trang.locator(sel).click(); await trang.keyboard.type(gt); await trang.keyboard.press("Enter"); };
+    await goVaoO('tr[data-row="0"] [data-f="name"]', "Hạng mục wizard");
+    await goVaoO('tr[data-row="0"] [data-f="quantity"]', "4");
+    await goVaoO('tr[data-row="0"] [data-f="unitPrice"]', "125000");
+    await trang.click(".actions > .btn-primary");
+    // `save()` cho bản mới đổi hash sang #/quotes/:id — đó là mốc "máy chủ đã cấp id" duy nhất.
+    await trang.waitForFunction(() => /^#\/quotes\/\d+$/.test(location.hash), undefined, { timeout: 30_000 });
+    const idMoi = Number((await trang.evaluate(() => location.hash)).split("/").pop());
+    const bgMoi = await prisma.quote.findFirst({
+      where: { id: idMoi }, select: { title: true, quoteNumber: true, companyId: true, customerId: true, createdById: true },
+    });
+    doi(bgMoi?.title === tieuDeMoi, `CSDL có báo giá mới #${idMoi} tiêu đề "${bgMoi?.title}"`);
+    doi(!!bgMoi?.quoteNumber && bgMoi.quoteNumber.startsWith(`S${String(process.pid).slice(-4)}`),
+        `số báo giá do MÁY CHỦ sinh theo quotePrefix: ${bgMoi?.quoteNumber}`);
+    doi(bgMoi?.companyId === co.id && bgMoi?.customerId === kh.id && bgMoi?.createdById === u.id,
+        "công ty + khách hàng + người tạo được ghi đúng theo lựa chọn trong wizard");
+    const dongMoi = await prisma.quoteItem.findFirst({ where: { sheet: { quoteId: idMoi } }, select: { name: true, quantity: true, unitPrice: true } });
+    doi(dongMoi?.name === "Hạng mục wizard" && Number(dongMoi?.quantity) === 4 && Number(dongMoi?.unitPrice) === 125_000,
+        `hạng mục đầu tiên: "${dongMoi?.name}" × ${dongMoi?.quantity} × ${dongMoi?.unitPrice}`);
+
+    buoc("[U13] Xuất Excel từ menu ⋯ — file thật, không phải trang HTML");
+    await trang.evaluate((qid) => { location.hash = `#/quotes/${qid}`; }, bg.id);
+    await trang.waitForSelector('tr[data-row="0"]', { timeout: 30_000 });
+    await trang.click(".actions .kebab-btn");
+    const [taiXuong, phanHoiXuat] = await Promise.all([
+      trang.waitForEvent("download", { timeout: 90_000 }),
+      trang.waitForResponse((r) => r.url().includes(`/api/export/${bg.id}.xlsx`), { timeout: 90_000 }),
+      trang.click('.kebab-menu [role="menuitem"]:has-text("Tải Excel gửi khách")'),
+    ]);
+    doi(phanHoiXuat.status() === 200, `GET /api/export/${bg.id}.xlsx → ${phanHoiXuat.status()}`);
+    const kieuXuat = phanHoiXuat.headers()["content-type"] || "";
+    doi(kieuXuat.includes("spreadsheetml.sheet"), `Content-Type = ${kieuXuat.slice(0, 70)}`);
+    // Chốt ĐẮT nhất của bước này: 200 KHÔNG bảo đảm đó là file. SPA fallback, proxy, hay trang đăng
+    // nhập SSO đều trả 200 kèm HTML — web/src/lib/exportQuote.ts chặn đúng chuyện đó ở phía client.
+    // .xlsx là gói ZIP nên hai byte đầu PHẢI là "PK".
+    const thanXuat = await phanHoiXuat.body();
+    doi(thanXuat.length > 4 && thanXuat[0] === 0x50 && thanXuat[1] === 0x4b,
+        `thân trả về là gói OOXML thật (${thanXuat.length} byte, mở đầu ${thanXuat.slice(0, 2).toString("latin1")})`);
+    doi(!!taiXuong, `trình duyệt bắt đầu tải: ${taiXuong.suggestedFilename()}`);
+
+    buoc("[U14] Đăng xuất");
+    await trang.evaluate(() => { location.hash = "#/list"; });
+    await trang.waitForSelector("h1:has-text('Danh sách báo giá')", { timeout: 20_000 });
+    await trang.click("button.logout");
+    await trang.waitForSelector("#login-form", { timeout: 30_000 });
+    // Màn đăng nhập hiện lại CHƯA phải là đăng xuất: `location.reload()` sau một `api.logout()` hỏng
+    // cũng cho ra đúng màn hình đó. Hỏi thẳng máy chủ xem cookie phiên còn sống không.
+    const maSauThoat = await trang.evaluate(async () => (await fetch("/api/auth/me", { credentials: "include" })).status);
+    doi(maSauThoat === 401, `sau đăng xuất /api/auth/me trả ${maSauThoat} (mong 401 — phiên đã bị huỷ ở MÁY CHỦ)`);
+
+    buoc("[U15] Kiểm quyền — account_hn không vào được chỗ của admin");
+    await trang.fill('#login-form input[name="username"]', `${TAG}-hn`);
+    await trang.fill('#login-form input[name="password"]', matKhau);
+    await trang.click("#login-form .btn-login");
+    await trang.waitForSelector("#login-form", { state: "detached", timeout: 30_000 });
+    const menu = (await trang.locator("nav a span").allTextContents()).map((x) => x.trim());
+    doi(!menu.includes("Tạo báo giá"), `menu KHÔNG có "Tạo báo giá" (đang thấy: ${menu.join(" · ")})`);
+    doi(!menu.includes("Quản lý nhân viên"), 'menu KHÔNG có "Quản lý nhân viên"');
+    // Ẩn nút KHÔNG phải là chặn. Gõ thẳng hash là đường đi thật của người muốn lách — trong đó
+    // `#/rnew` là alias KHÔNG nằm trong mảng NAV, nên nó đi qua cổng `editorDenied` riêng.
+    for (const h of ["#/new", "#/rnew", "#/users"]) {
+      await trang.evaluate(() => { location.hash = "#/list"; });
+      await trang.waitForSelector(".access-denied", { state: "detached", timeout: 20_000 });
+      await trang.evaluate((x) => { location.hash = x; }, h);
+      await trang.waitForSelector(".access-denied h2", { timeout: 20_000 }).catch(() => {});
+      const chu = await trang.textContent(".access-denied h2").catch(() => null);
+      doi(chu === "Không có quyền truy cập", `gõ thẳng ${h} → "${chu ?? "KHÔNG bị chặn"}"`);
+    }
+    // CHỐT CHẶN THẬT nằm ở máy chủ; hai chốt trên chỉ là lớp phủ giao diện. Gọi thẳng API.
+    coY.add("403 /api/users");
+    coY.add("403 /api/quotes");
+    const maUsers = await trang.evaluate(async () => (await fetch("/api/users", { credentials: "include" })).status);
+    doi(maUsers === 403, `GET /api/users bằng account_hn → ${maUsers} (mong 403)`);
+    const maTao = await trang.evaluate(async () => {
+      // POST cần mã CSRF — lấy đúng đường mà SPA dùng, để 403 nhận về là do QUYỀN chứ không do CSRF.
+      const t = await (await fetch("/api/csrf-token", { credentials: "include" })).json().catch(() => ({}));
+      const r = await fetch("/api/quotes", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", ...(t?.token ? { "x-csrf-token": t.token } : {}) },
+        body: JSON.stringify({ title: "khong duoc phep" }),
+      });
+      return r.status;
+    });
+    doi(maTao === 403, `POST /api/quotes bằng account_hn → ${maTao} (mong 403 — không tạo được báo giá)`);
 
     } catch (e) {
       xau(`kịch bản dừng giữa chừng: ${String(e).split("\n")[0]}`);
       neKichBan = e;
     }
 
-    buoc("[U10] Console sạch + không request nào hỏng");
+    buoc("[U16] Console sạch + không request nào hỏng");
     doi(loiConsole.length === 0, `lỗi console: ${loiConsole.length}`);
     loiConsole.slice(0, 10).forEach((x) => console.log(`      · ${x.slice(0, 200)}`));
     doi(requestHong.length === 0, `request hỏng ở máy chủ CỦA MÌNH: ${requestHong.length}`);

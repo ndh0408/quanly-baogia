@@ -57,13 +57,35 @@ function main() {
   const ra = dungChangelog(log);
   if (!process.argv.includes("--check")) { process.stdout.write(ra); return; }
 
+  // ── `--check` KIỂM "KHÔNG BỊA", KHÔNG KIỂM "KHỚP TUYỆT ĐỐI" ──────────────
+  // Bản đầu của cổng này so `hienCo.trim() !== ra.trim()`. Sai về mặt thiết kế: CHÍNH commit thêm
+  // CHANGELOG.md cũng là một commit, nên file vừa sinh đã lệch ngay khi commit xong — cổng đỏ
+  // vĩnh viễn và người ta sẽ tắt nó.
+  //
+  // Điều thật sự cần chốt là CHANGELOG không chứa dòng BỊA: mọi mục `- \`sha\` tiêu đề` phải ứng
+  // với một commit CÓ THẬT và tiêu đề phải khớp NGUYÊN VĂN. Việc file đi sau lịch sử vài commit là
+  // bình thường — nó được sinh lại lúc phát hành, không phải mỗi lần commit.
   const hienCo = readFileSync(path.join(GOC, "CHANGELOG.md"), "utf8");
-  if (hienCo.trim() !== ra.trim()) {
-    console.error("✖ CHANGELOG.md đã lệch khỏi lịch sử git.");
+  const that = new Map(log.map((l) => { const [h, , s2] = l.split("|", 3); return [h, s2]; }));
+
+  const bia = [];
+  const lech = [];
+  for (const m of hienCo.matchAll(/^- `([0-9a-f]{7,40})` (.*)$/gm)) {
+    const [, sha, tieuDe] = m;
+    if (!that.has(sha)) { bia.push(sha); continue; }
+    if (that.get(sha) !== tieuDe) lech.push(`${sha}: ghi "${tieuDe}" ≠ thật "${that.get(sha)}"`);
+  }
+  const coTrongFile = new Set([...hienCo.matchAll(/^- `([0-9a-f]{7,40})`/gm)].map((m) => m[1]));
+  const thieu = log.length - coTrongFile.size;
+
+  if (bia.length || lech.length) {
+    if (bia.length) console.error(`✖ CHANGELOG.md có ${bia.length} commit KHÔNG TỒN TẠI: ${bia.join(", ")}`);
+    for (const l of lech) console.error(`✖ tiêu đề bị sửa tay — ${l}`);
     console.error("  Sinh lại:  node scripts/ci/gen-changelog.mjs > CHANGELOG.md");
     process.exit(1);
   }
-  console.log(`✓ CHANGELOG.md khớp lịch sử git (${log.length} commit)`);
+  console.log(`✓ CHANGELOG.md: ${coTrongFile.size}/${log.length} commit, không mục nào bịa` +
+    (thieu > 0 ? ` (đi sau ${thieu} commit — sinh lại khi phát hành)` : ""));
 }
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();
