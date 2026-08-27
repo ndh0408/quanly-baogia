@@ -24,6 +24,11 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["quote.import.preview", "Xem trước nhập từ Excel"], ["quote.import.rejected", "Từ chối tệp Excel nhập vào"],
     ["quote.sheet.customerDecision", "Khách duyệt / từ chối sheet"],
     ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (bảng nội bộ)"],
+    // MƯỜI MÃ DƯỚI ĐÂY (ở đây và ở nhóm Nhân sự) TỪNG VẮNG MẶT, và bài test phủ mã vẫn XANH:
+    // bộ dò của nó chỉ khớp `audit(req, "chuỗi")`, bỏ hết dạng ternary và dạng truyền qua biến.
+    // Nhãn đặt theo ĐÚNG việc mà nơi gọi làm — đã đọc từng nơi gọi, không suy từ tên mã.
+    ["quote.sign", "Ký duyệt sheet"], ["quote.unsign", "Gỡ ký duyệt sheet"],
+    ["quote.internal.pay", "Đánh dấu ĐÃ chi (bảng nội bộ)"], ["quote.internal.unpay", "Gỡ đánh dấu đã chi (bảng nội bộ)"],
   ]],
   ["Khách hàng", [
     ["customer.create", "Thêm khách hàng"], ["customer.update", "Sửa khách hàng"], ["customer.delete", "Xóa khách hàng"],
@@ -40,6 +45,11 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
     ["personnel.payment-proof.view", "Xem ảnh chứng từ thanh toán (nhân sự)"], ["personnel.contract-download", "Tải hợp đồng dịch vụ (nhân sự)"],
     ["personnel.team-note", "Sửa ghi chú nội bộ (nhân sự)"],
+    ["personnel.pay", "Đánh dấu ĐÃ thanh toán (nhân sự)"], ["personnel.unpay", "Gỡ đánh dấu đã thanh toán (nhân sự)"],
+    ["personnel.confirm", "Xác nhận hồ sơ nhân sự"], ["personnel.unconfirm", "Gỡ xác nhận hồ sơ nhân sự"],
+    // Hai mã này `audit()` nhận QUA BIẾN (writeNoteField), nên bộ dò tĩnh không lần ra —
+    // chúng được khai tường minh ở `MA_NHAT_KY_GIAN_TIEP` trong src/audit.ts.
+    ["personnel.accounting-note", "Sửa ghi chú kế toán (nhân sự)"], ["personnel.note", "Sửa ghi chú chung (nhân sự)"],
     ["employee.create", "Thêm danh bạ nhân sự"], ["employee.update", "Sửa danh bạ nhân sự"], ["employee.delete", "Xóa danh bạ nhân sự"],
     ["venue.create", "Thêm rạp (danh mục)"], ["venue.update", "Sửa rạp (danh mục)"], ["venue.delete", "Xóa rạp (danh mục)"],
     ["venue.merge", "Gộp rạp"], ["venue.tags.bulk", "Gắn / gỡ nhãn rạp hàng loạt"],

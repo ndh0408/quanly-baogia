@@ -14,6 +14,22 @@ import { logger } from "./logger.js";
  * @param {object} [opts.after]
  * @param {number} [opts.actorId]    override session.userId
  */
+/**
+ * MÃ NHẬT KÝ ĐƯỢC TRUYỀN QUA BIẾN — khai tường minh vì máy không lần ra được.
+ *
+ * `writeNoteField` (src/services/personnelService.ts) nhận `action: string` từ nơi gọi rồi mới
+ * `audit(req, action, …)`. Không bộ phân tích tĩnh nào theo được, nên hai mã dưới đây từng VÔ HÌNH
+ * với web/src/pages/w2-auditActionCoverage.test.ts — và vì thế cũng vắng mặt trong bộ lọc "Hoạt
+ * động" của trang Nhật ký, khiến admin không lọc ra được và cột Hoạt động hiện mã thô.
+ *
+ * BẮT BUỘC: thêm một lời gọi `audit()` mà đối số thứ hai KHÔNG phải chuỗi văn tự thì phải khai mã
+ * vào đây. Bài test trên đỏ cho tới khi khai — cố ý, để chuyện đó không lặng lẽ trôi lần nữa.
+ */
+export const MA_NHAT_KY_GIAN_TIEP = [
+  "personnel.accounting-note",
+  "personnel.note",
+] as const;
+
 export async function audit(ctx: Request | null, action: string, opts: Record<string, any> = {}) {
   const actorId = opts.actorId ?? ctx?.session?.userId ?? null;
   // req.ip is resolved by Express from the configured trust-proxy hop count; the
