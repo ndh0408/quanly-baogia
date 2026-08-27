@@ -24,6 +24,7 @@
 // ngoài người nghe lén.
 // HẬU QUẢ: dựng được nhịp làm việc + khoảng id báo giá theo thời gian thực chỉ bằng cách nghe SSE.
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { attach, publish, broadcast, emitChange, backplaneOptions, SSE_MAX_PER_USER, SSE_MAX_BUFFER } from "../src/sse.js";
 
 /** Giả lập cặp req/res đủ cho `attach`, có `writableLength` để mô phỏng bộ đệm đầy. */
@@ -47,6 +48,23 @@ function gia() {
   const req = { on(ev, fn) { handlers[ev] = fn; } };
   return { req, res, dongSocket: () => handlers.close?.() };
 }
+
+/**
+ * userId RIÊNG CHO TỪNG TIẾN TRÌNH — đừng gán số cố định.
+ *
+ * Khi CÓ Redis, mọi tiến trình test nói chuyện qua CÙNG MỘT kênh `sse:events` trên CÙNG MỘT Redis.
+ * Hai lượt `npx vitest run` chạy song song (hai người cùng chạy test, hoặc một người chạy lại khi
+ * lượt trước chưa xong) sẽ dùng CHUNG uid 910004 — và sự kiện của tiến trình kia rơi vào đúng danh
+ * sách kết nối của tiến trình này. Bài "không nhồi thêm vào bộ đệm đã đầy" đếm số lần ghi, nên một
+ * sự kiện lạ là đủ làm nó đỏ.
+ *
+ * ĐO ĐƯỢC (2026-08-27): chạy hai tiến trình cùng lúc trên cùng Redis → một trong hai đỏ ở bài
+ * "kết nối có bộ đệm vượt trần bị huỷ".
+ *
+ * Trộn PID vào uid làm hai tiến trình không đụng nhau. Giữ trong khoảng an toàn của số nguyên.
+ */
+const RIENG = (process.pid % 9000) * 100;
+const uidRieng = (n) => 910000 + RIENG + n;
 
 /**
  * CHỜ TỚI KHI ĐIỀU KIỆN ĐÚNG — ĐỪNG ĐỔI VỀ KHẲNG ĐỊNH ĐỒNG BỘ.
@@ -74,7 +92,7 @@ async function choToi(dieuKien, moTa, hanMs = 3000) {
 
 describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
   it("vượt trần thì trả 429 và KHÔNG thêm vào danh sách phát", async () => {
-    const uid = 910001;
+    const uid = uidRieng(1);
     const oks = [];
     for (let i = 0; i < SSE_MAX_PER_USER; i++) {
       const c = gia();
@@ -95,7 +113,7 @@ describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
   });
 
   it("trần tính RIÊNG từng tài khoản — người khác không bị ảnh hưởng", () => {
-    const a = [], uidA = 910002, uidB = 910003;
+    const a = [], uidA = uidRieng(2), uidB = uidRieng(3);
     for (let i = 0; i < SSE_MAX_PER_USER; i++) { const c = gia(); attach(c.req, c.res, uidA); a.push(c); }
     const b = gia();
     attach(b.req, b.res, uidB);
@@ -108,7 +126,7 @@ describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
 
 describe("SSE — áp lực ngược", () => {
   it("kết nối có bộ đệm vượt trần bị huỷ và gỡ khỏi danh sách", async () => {
-    const uid = 910004;
+    const uid = uidRieng(4);
     const cham = gia(), nhanh = gia();
     attach(cham.req, cham.res, uid);
     attach(nhanh.req, nhanh.res, uid);
@@ -130,7 +148,7 @@ describe("SSE — áp lực ngược", () => {
   });
 
   it("broadcast cũng áp cùng trần, không chỉ publish", async () => {
-    const uid = 910005;
+    const uid = uidRieng(5);
     const cham = gia();
     attach(cham.req, cham.res, uid);
     cham.res.writableLength = SSE_MAX_BUFFER + 1;
@@ -141,7 +159,7 @@ describe("SSE — áp lực ngược", () => {
 
 describe("SSE — emitChange không phát id ra toàn hệ thống", () => {
   it("payload chỉ còn entity + action", async () => {
-    const uid = 910006;
+    const uid = uidRieng(6);
     const c = gia();
     attach(c.req, c.res, uid);
     emitChange("quote", "update", 4271);
@@ -166,5 +184,60 @@ describe("SSE — options của backplane Redis", () => {
   it("subscriber vẫn được phép chờ mãi (kết nối dài, phải tự nối lại)", () => {
     const o = backplaneOptions("sub");
     expect(o.maxRetriesPerRequest).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LỖI 4 (tìm ra khi phản biện chính bản vá "chờ giao hàng" ở commit 417d579):
+// MẤT SỰ KIỆN LÚC KHỞI ĐỘNG — và đây là lỗi PRODUCTION, không phải chuyện của bộ test.
+//
+// `pub` là CÔNG TẮC: `publish()`/`broadcast()` thấy nó khác null là đi đường Redis rồi TRẢ VỀ NGAY,
+// KHÔNG phát cục bộ (đúng thiết kế — subscriber mới là nơi phát, nếu không mỗi sự kiện tới hai lần).
+//
+// Bản trước gán `pub = pubClient` NGAY SAU khi dựng publisher, tức TRƯỚC `await sub.subscribe()`.
+// Redis pub/sub KHÔNG có bộ đệm: mọi sự kiện phát trong cửa sổ đó vào Redis mà KHÔNG AI NGHE và
+// MẤT HẲN — im lặng, gauge vẫn báo khoẻ.
+//
+// Hậu quả thật: mỗi lần một instance khởi động lại, mọi `emitChange` trong cửa sổ ấy (báo giá vừa
+// tạo/sửa/xoá) không tới màn hình của ai. Đúng lúc người ta cần nhất — vừa deploy xong.
+//
+// ĐO ĐƯỢC: trước bản vá, file test này đỏ 2/3 lượt chạy MỘT MÌNH (bài "kết nối có bộ đệm vượt trần
+// bị huỷ" hết hạn chờ 3 giây vì gói phát ra không bao giờ quay về). Sau bản vá: 0/8 lượt một mình,
+// 0/6 lượt chạy ba tiến trình song song.
+//
+// Bài dưới khoá THỨ TỰ trong mã nguồn. Không kiểm được bằng hành vi: cửa sổ đua nằm trong lúc nạp
+// module, trước khi bài test đầu tiên chạy.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("SSE — backplane không được nuốt sự kiện lúc khởi động", () => {
+  const nguon = readFileSync(new URL("../src/sse.ts", import.meta.url), "utf8");
+  // Bỏ chú thích: khối văn bản giải thích lỗi có chứa đúng những chuỗi đang tìm.
+  const ma = nguon.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
+  const viTri = (chuoi) => {
+    const i = ma.indexOf(chuoi);
+    expect(i, `không tìm thấy trong src/sse.ts (đã đổi cách viết?): ${chuoi}`).toBeGreaterThan(-1);
+    return i;
+  };
+
+  it("`pub` chỉ được gán SAU khi subscriber đã subscribe xong", () => {
+    expect(viTri("pub = pubClient;"),
+      "gán `pub` trước `await sub.subscribe` → mọi sự kiện phát trong cửa sổ khởi động đi vào Redis " +
+      "mà không ai nghe và MẤT HẲN. Đây là lỗi production, không phải chuyện của test.")
+      .toBeGreaterThan(viTri("await sub.subscribe(CHANNEL)"));
+  });
+
+  it("handler `message` gắn TRƯỚC subscribe, không phải sau", () => {
+    expect(viTri('sub.on("message"'),
+      "gắn handler sau `subscribe` → gói tới trong khoảng giữa bị ioredis bỏ vì không ai nghe")
+      .toBeLessThan(viTri("await sub.subscribe(CHANNEL)"));
+  });
+
+  it("chỉ có ĐÚNG MỘT chỗ gán `pub` khác null — công tắc không được bật ở nơi khác", () => {
+    // KHÔNG dùng `(?!null)` ở đây: `\s*` lùi bước được, nên lookahead soi vào dấu cách thay vì vào
+    // chữ "null" và luôn đúng. (Bản đầu của chính bài này dính đúng bẫy đó — đếm ra 2 thay vì 1.)
+    // Bắt lấy TÊN được gán rồi lọc, không đoán bằng lookahead.
+    const gan = [...ma.matchAll(/\bpub\s*=\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
+    const bat = gan.filter((g) => g !== "null");
+    expect(bat, "thêm một chỗ bật công tắc `pub` là mở lại đúng cửa sổ đua vừa đóng").toEqual(["pubClient"]);
   });
 });

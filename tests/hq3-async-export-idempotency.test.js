@@ -24,13 +24,29 @@ const REDIS_TEST_URL = "redis://127.0.0.1:6379/14";
 vi.mock("../src/storage.js", () => ({ isStorageEnabled: () => true }));
 
 let app, hangDoi, getRedis, prisma;
+/** Mốc sửa đổi của báo giá giả — bài test đổi nó để mô phỏng người dùng vừa sửa. */
+let mocTho;
 // Trả lại process.env nguyên trạng — xem ghi chú cùng lý do ở tests/hq3-bullmq-metrics.test.js.
 const REDIS_URL_GOC = process.env.REDIS_URL;
 
 beforeAll(async () => {
   process.env.REDIS_URL = REDIS_TEST_URL;
   ({ prisma } = await import("../src/db.js"));
-  vi.spyOn(prisma.quote, "findFirst").mockResolvedValue({ id: 4242, createdById: 1, members: [] });
+  // `updatedAt` PHẢI CÓ TRONG MOCK, và phải sửa được giữa các bài.
+  //
+  // Bản trước mock `{ id, createdById, members }` — KHÔNG có `updatedAt`. Khoá chống trùng dựng từ
+  // `+new Date(quote.updatedAt)`, tức `+new Date(undefined)` = **NaN**. Khoá vẫn ổn định nên hai
+  // bài dưới vẫn xanh, NHƯNG chúng xanh y hệt nhau dù `updatedAt` có nằm trong khoá hay không.
+  // Nói cách khác: phần QUAN TRỌNG NHẤT của cơ chế này chưa từng được kiểm.
+  //
+  // Quan trọng vì đây là chốt cho một lỗi THẬT (xem chú thích dài ở src/routes/jobs.routes.ts):
+  // TTL của `deduplication` KHÔNG tự hết hiệu lực khi job xong, nên trong 30 giây sau một lượt
+  // xuất, người dùng SỬA báo giá rồi xuất lại sẽ bị gộp vào job cũ và tải về ĐÚNG FILE CŨ — sai dữ
+  // liệu, im lặng. Mốc sửa đổi trong khoá là thứ duy nhất phá vỡ chuyện đó.
+  mocTho = new Date("2026-08-27T01:00:00.000Z");
+  vi.spyOn(prisma.quote, "findFirst").mockImplementation(async () => ({
+    id: 4242, createdById: 1, members: [], updatedAt: mocTho,
+  }));
 
   const q = await import("../src/queue.js");
   ({ getRedis } = q);
@@ -71,5 +87,47 @@ describe("POST /api/quotes/:id/export — chống nhấn trùng", () => {
     expect(b.body.jobId).not.toBe(a.body.jobId);
     const counts = await hangDoi.getJobCounts();
     expect(counts.waiting + counts.active + counts.delayed).toBe(2);
+  });
+  // ── PHẦN CHƯA TỪNG ĐƯỢC KIỂM: MỐC SỬA ĐỔI TRONG KHOÁ ────────────────────────
+  it("SỬA báo giá rồi xuất lại → job MỚI, không gộp vào job cũ (nếu không: tải về file CŨ)", async () => {
+    await hangDoi.obliterate({ force: true });
+    const a = await request(app).post("/api/quotes/4242/export").send({ format: "xlsx" });
+    expect(a.status).toBe(202);
+
+    // Người dùng sửa báo giá → Quote.updatedAt đổi.
+    mocTho = new Date("2026-08-27T01:00:30.000Z");
+
+    const b = await request(app).post("/api/quotes/4242/export").send({ format: "xlsx" });
+    expect(b.status).toBe(202);
+    expect(b.body.jobId,
+      "gộp vào job CŨ sau khi báo giá đã đổi → người dùng tải về đúng file trước lúc sửa, và không " +
+      "có gì báo cho họ biết. Mốc sửa đổi phải nằm trong khoá chống trùng.")
+      .not.toBe(a.body.jobId);
+    const counts = await hangDoi.getJobCounts();
+    expect(counts.waiting + counts.active + counts.delayed).toBe(2);
+  });
+
+  it("KHÔNG sửa gì thì vẫn gộp — chốt trên không được phá mất chính việc chống trùng", async () => {
+    await hangDoi.obliterate({ force: true });
+    const a = await request(app).post("/api/quotes/4242/export").send({ format: "xlsx" });
+    const b = await request(app).post("/api/quotes/4242/export").send({ format: "xlsx" });
+    expect(b.body.jobId).toBe(a.body.jobId);
+  });
+
+  it("khoá chống trùng KHÔNG được chứa NaN — dấu hiệu updatedAt vắng mặt", async () => {
+    // Bẫy đã sập một lần: mock thiếu `updatedAt` làm khoá thành "…:NaN" mà mọi bài vẫn xanh.
+    // Bài này soi thẳng đối số truyền vào BullMQ.
+    await hangDoi.obliterate({ force: true });
+    const theo = vi.spyOn(hangDoi, "add");
+    try {
+      await request(app).post("/api/quotes/4242/export").send({ format: "xlsx" });
+      expect(theo, "route không gọi queue.add?").toHaveBeenCalled();
+      const opts = theo.mock.calls[0][2];
+      const id = opts?.deduplication?.id ?? "";
+      expect(id, `khoá chống trùng: ${id}`).not.toMatch(/NaN/);
+      expect(id, "khoá phải mang mốc sửa đổi dạng số").toMatch(/:\d{10,}$/);
+    } finally {
+      theo.mockRestore();
+    }
   });
 });

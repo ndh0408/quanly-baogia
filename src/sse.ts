@@ -78,19 +78,23 @@ if (config.REDIS_URL) {
     try {
       const { default: IORedis } = await import("ioredis");
       const pubClient: Redis = new (IORedis as any)(config.REDIS_URL, backplaneOptions("pub"));
-      pub = pubClient;
+      // ⚠️ KHÔNG gán `pub` Ở ĐÂY. Xem khối "MẤT SỰ KIỆN LÚC KHỞI ĐỘNG" ngay dưới `await subscribe`.
       pubClient.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis pub error"); });
       // PHẢI CÓ ĐƯỜNG VỀ 1. Không có handler này thì MỘT lỗi thoáng qua (ECONNRESET khi Redis
       // restart) ghim gauge ở 0 VĨNH VIỄN dù backplane đã khoẻ lại — và một cảnh báo kêu mãi là
       // một cảnh báo bị người trực tắt đi. ioredis phát "ready" sau mỗi lần nối lại thành công.
-      pubClient.on("ready", () => sseBackplaneUp.set(1));
+      // Chỉ nâng gauge khi backplane ĐÃ dùng được cả hai chiều. `pub` còn null nghĩa là subscriber
+      // chưa sẵn sàng, tức đang chạy cục bộ — báo up=1 lúc đó là nói dối người trực.
+      pubClient.on("ready", () => { if (pub) sseBackplaneUp.set(1); });
       // Chế độ là "redis" ngay khi ĐÃ CHỌN đường Redis, không đợi "ready": cảnh báo cần phân biệt
       // "đang định dùng Redis mà nó chưa lên" với "cố ý không dùng Redis".
       sseBackplaneMode.set({ mode: "redis" }, 1);
       sseBackplaneMode.set({ mode: "local" }, 0);
       const sub = new (IORedis as any)(config.REDIS_URL, backplaneOptions("sub"));
       sub.on("error", (e: any) => { sseBackplaneUp.set(0); logger.warn({ err: e.message }, "sse redis sub error"); });
-      await sub.subscribe(CHANNEL);
+      // GẮN HANDLER TRƯỚC `subscribe`, không phải sau. Redis pub/sub KHÔNG có bộ đệm: gói tới trong
+      // khoảng giữa "subscribe xong" và "gắn handler" bị ioredis bỏ đi vì không ai nghe. Khoảng đó
+      // ngắn, nhưng nó có thật và không có gì báo khi mất.
       sub.on("message", (_chan: string, raw: string) => {
         try {
           const m = JSON.parse(raw);
@@ -98,6 +102,25 @@ if (config.REDIS_URL) {
           else localBroadcast(m.event, m.data);
         } catch { /* ignore malformed */ }
       });
+      await sub.subscribe(CHANNEL);
+
+      // ── MẤT SỰ KIỆN LÚC KHỞI ĐỘNG ─────────────────────────────────────────
+      // `pub` là CÔNG TẮC: `publish()`/`broadcast()` thấy nó khác null là đi đường Redis và TRẢ VỀ
+      // NGAY, KHÔNG phát cục bộ (đúng thiết kế — subscriber mới là nơi phát, nếu không mỗi sự kiện
+      // sẽ tới hai lần trên chính instance này).
+      //
+      // Bản trước gán `pub` NGAY SAU khi dựng publisher, tức TRƯỚC khi subscriber kịp `subscribe`.
+      // Mọi sự kiện phát trong khoảng đó đi thẳng vào Redis MÀ KHÔNG AI NGHE, và Redis pub/sub
+      // không có bộ đệm — chúng MẤT HẲN, im lặng, gauge vẫn báo khoẻ.
+      //
+      // Đó là lỗi PRODUCTION chứ không phải chuyện của bộ test: mỗi lần một instance khởi động lại,
+      // mọi `emitChange` trong cửa sổ đó (báo giá vừa tạo/sửa/xoá) không tới màn hình của ai cả —
+      // đúng lúc người ta cần nhất, là lúc vừa deploy xong.
+      //
+      // Gán `pub` Ở ĐÂY, sau `await subscribe`. Trước thời điểm này `publish()` rơi về `localPublish`:
+      // instance khác vẫn không nhận được, nhưng người đang ngồi trên chính instance này THÌ CÓ —
+      // hơn hẳn "không ai nhận được".
+      pub = pubClient;
       sseBackplaneUp.set(1);
       logger.info("SSE Redis pub/sub backplane enabled");
     } catch (e) {

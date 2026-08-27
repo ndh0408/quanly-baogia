@@ -30,7 +30,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 const chay = promisify(execFile);
@@ -85,6 +85,28 @@ describe("LỖI 3 — công cụ xoay khoá phải CÓ THẬT trong artifact bi�
     // Runbook (docs/operations/DISASTER_RECOVERY.md) bảo chạy đúng đường dẫn này TỪ TRONG container.
     // Image production chỉ chứa dist/ — không scripts/, không src/, không tsx.
     expect(existsSync(path.join(GOC, "dist/tools/piiRotate.js")), "chạy `npm run build` trước").toBe(true);
+  });
+
+  // ── dist/ PHẢI MỚI HƠN src/ ────────────────────────────────────────────────
+  // Bốn bài trong file này chạy `node dist/tools/piiRotate.js`, tức chúng kiểm một artifact BIÊN
+  // DỊCH mà vitest KHÔNG dựng lại. Nếu dist/ cũ hơn src/ thì chúng đang kiểm mã của lần build
+  // trước, và mọi khẳng định bên dưới nói về một thứ không còn tồn tại.
+  //
+  // ĐO ĐƯỢC (2026-08-27): xoá sạch src/tools/piiRotate.ts còn đúng `export {};` rồi chạy file này
+  // → 8/9 bài VẪN XANH. Chỉ bài đọc thẳng mã nguồn là đỏ. Đó là lý do có chốt này.
+  //
+  // scripts/verify-local.sh nay dựng dist/ ở bước [2b], TRƯỚC bước test [4]. Chốt này KHÔNG thừa:
+  // nó bắt được cả người chạy `npx vitest run` thẳng tay (đường phổ biến nhất khi sửa một test),
+  // và bắt được cả việc ai đó xếp lại thứ tự bước trong script.
+  it("dist/tools/piiRotate.js MỚI HƠN src/tools/piiRotate.ts — nếu không, 4 bài dưới kiểm mã CŨ", () => {
+    const dist = statSync(path.join(GOC, "dist/tools/piiRotate.js")).mtimeMs;
+    const src = statSync(path.join(GOC, "src/tools/piiRotate.ts")).mtimeMs;
+    expect(dist,
+      `dist/tools/piiRotate.js (${new Date(dist).toISOString()}) CŨ HƠN src/tools/piiRotate.ts ` +
+      `(${new Date(src).toISOString()}). Bốn bài chạy \`node dist/...\` bên dưới đang kiểm bản ` +
+      `biên dịch của lần trước — chúng sẽ XANH kể cả khi bản vá ở src/ bị gỡ sạch. ` +
+      `Chạy \`npm run build\` rồi chạy lại (scripts/verify-local.sh làm việc này ở bước [2b]).`)
+      .toBeGreaterThanOrEqual(src);
   });
 
   it("runbook KHÔNG còn chỉ người vận hành gõ lệnh không tồn tại trong container", async () => {

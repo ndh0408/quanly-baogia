@@ -134,3 +134,41 @@ describe("503 của đường xuất nền không được bỏ người dùng �
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHÚ THÍCH TRỎ SANG FILE KHÁC PHẢI TRỎ TỚI THỨ CÓ THẬT.
+//
+// Repo này đã nhiều lần có chú thích trỏ sai. Trước đây là SỐ DÒNG (trôi mỗi lần ai đó thêm dòng);
+// lần này chính tôi suýt ship một chú thích gọi tên hàm `quaLon()` — một cái tên KHÔNG TỒN TẠI,
+// hàm thật tên `exportTooBig`. Đổi từ số dòng sang TÊN không tự nó làm chú thích đúng: tên cũng
+// bịa ra được, và cũng bị đổi khi ai đó rename.
+//
+// Bài này lấy danh sách TƯỜNG MINH những tên mà web/src/lib/exportQuote.ts nhắc tới, rồi đòi
+// chúng có thật ở đúng file được nêu. Rename mà quên chú thích → đỏ.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("chú thích của exportQuote.ts trỏ tới TÊN CÓ THẬT ở máy chủ", () => {
+  const chuThich = doc("web/src/lib/exportQuote.ts");
+
+  const CAP = [
+    ["exportTooBig", "src/routes/export.routes.ts", /function exportTooBig\b/],
+    ["MAX_EXPORT_SHEETS", "src/validators.ts", /export const MAX_EXPORT_SHEETS\b/],
+    ["MAX_EXPORT_ITEMS", "src/validators.ts", /export const MAX_EXPORT_ITEMS\b/],
+    ["export_async_unavailable", "src/routes/jobs.routes.ts", /"export_async_unavailable"/],
+    ["presignDownload", "src/worker.ts", /presignDownload\(/],
+  ];
+
+  for (const [ten, file, re] of CAP) {
+    it(`\`${ten}\` — nếu chú thích còn nhắc thì nó phải có thật ở ${file}`, () => {
+      if (!chuThich.includes(ten)) return;   // chú thích không nhắc nữa thì không đòi gì
+      expect(doc(file), `chú thích ở exportQuote.ts nhắc \`${ten}\` nhưng ${file} không có — đổi tên mà quên sửa chú thích?`)
+        .toMatch(re);
+    });
+  }
+
+  it("KHÔNG quay lại trỏ bằng SỐ DÒNG sang file máy chủ", () => {
+    // Số dòng trôi mỗi lần có người thêm dòng, và không cổng nào bắt được. Bản đầu của chính file
+    // này ghi "export.routes.ts:108" và ":152"; đúng lượt vá kèm theo đã làm chúng thành 109/153.
+    const lac = [...chuThich.matchAll(/src\/[a-zA-Z0-9/._-]+\.(?:ts|tsx|js|mjs):\d+/g)].map((m) => m[0]);
+    expect(lac, `trỏ bằng số dòng sang mã máy chủ — dùng tên hàm/hằng thay thế: ${lac.join(", ")}`).toEqual([]);
+  });
+});

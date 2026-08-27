@@ -2,9 +2,14 @@
 //
 // ── VÌ SAO KHÔNG CÒN `window.open` ──────────────────────────────────────────
 // Trước đây cả hai nơi gọi `window.open("/api/export/:id.xlsx")`. Với báo giá vừa thì chạy tốt,
-// nhưng nó KHÔNG BAO GIỜ thấy được mã lỗi: `src/routes/export.routes.ts:108` (và `:152` cho PDF)
-// trả **413** khi báo giá vượt `MAX_EXPORT_ITEMS`, mà `window.open` giao thẳng phản hồi cho trình
-// duyệt — người dùng nhận một tab trắng in ra JSON `{"error":"Báo giá quá lớn…"}`.
+// nhưng nó KHÔNG BAO GIỜ thấy được mã lỗi: `src/routes/export.routes.ts` trả **413** ở CẢ HAI
+// route (xlsx và pdf) khi `exportTooBig()` đúng — tức vượt `MAX_EXPORT_SHEETS` hoặc `MAX_EXPORT_ITEMS`
+// (khai ở src/validators.ts). `window.open` giao thẳng phản hồi cho trình duyệt, nên người dùng
+// nhận một tab trắng in ra JSON `{"error":"Báo giá quá lớn…"}`.
+//
+// TRỎ THEO TÊN HÀM/HẰNG, KHÔNG THEO SỐ DÒNG. Bản đầu của chính chú thích này ghi ":108" và ":152";
+// đúng lượt vá kèm theo nó đã làm hai số ấy thành 109 và 153. Số dòng trong repo này trôi liên tục
+// và không cổng nào bắt được — tên hàm thì grep ra được và không trôi.
 //
 // Và đó là một ngõ cụt THẬT, không phải trường hợp lý thuyết: `src/validators.ts` cho LƯU tới 60
 // trang × 1000 dòng = 60.000 dòng, trong khi đường xuất đồng bộ dừng ở 20.000. Người dùng lưu

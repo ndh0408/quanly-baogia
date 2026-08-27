@@ -71,6 +71,18 @@ buoc "[2/9] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
 (cd web && npx tsc --noEmit -p tsconfig.json);                      ket $? "tsc (web)"
 
+# ── BUILD PHẢI ĐỨNG TRƯỚC TEST ──────────────────────────────────────────────
+# tests/pii-rotate-safety.test.js chạy `node dist/tools/piiRotate.js` — một artifact BIÊN DỊCH.
+# Trước đây build nằm ở bước [6/9], tức SAU test: bộ test kiểm bản dist/ của LẦN CHẠY TRƯỚC.
+# ĐO ĐƯỢC: xoá sạch src/tools/piiRotate.ts còn đúng `export {};` rồi chạy file test đó →
+# 8/9 bài VẪN XANH (chỉ bài đọc thẳng mã nguồn là đỏ). Bốn bài chạy `node dist/...` không hề biết
+# mã nguồn đã biến mất.
+# Đây là hình dạng tệ nhất của lỗi ngầm: cổng nói XANH về một thứ nó không hề kiểm.
+# `tsc -p tsconfig.build.json` mất vài giây — rẻ hơn nhiều so với một cổng nói dối.
+# Chạy CẢ ở chế độ --nhanh, vì bước [4/9] luôn chạy và nó phụ thuộc dist/.
+buoc "[2b/9] Build backend (dist/) — PHẢI trước test, xem chú thích"
+npm run build >/dev/null;                                           ket $? "build backend (dist/)"
+
 buoc "[3/9] Lint + format"
 npx eslint .;                                                       ket $? "eslint"
 npx prettier --check "**/*.{json,css,yml,yaml}" >/dev/null;         ket $? "prettier"
@@ -81,8 +93,7 @@ npx vitest run;                                                     ket $? "vite
 if [ "$NHANH" -eq 0 ]; then
   buoc "[5/9] Test web"
   (cd web && npx vitest run);                                       ket $? "vitest web"
-  buoc "[6/9] Build"
-  npm run build >/dev/null;                                         ket $? "build backend (dist/)"
+  buoc "[6/9] Build web (backend đã dựng ở [2b])"
   (cd web && npx vite build >/dev/null);                            ket $? "build web"
 else
   buoc "[5-6/9] Bỏ qua test web + build (--nhanh)"
