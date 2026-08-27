@@ -485,6 +485,147 @@ thật của `@prisma/config` trong `node_modules`, rồi bắt hai bên nhất 
 
 Nói cách khác: ngày cần gỡ, bộ test sẽ tự nói. Không phải nhớ.
 
+## Ba cổng mới kiểm ARTIFACT, không kiểm mã nguồn (2026-08-27)
+
+Chín cổng cũ của `scripts/verify-local.sh` đều đọc **mã nguồn**. Không cổng nào chạm
+tới thứ thật sự chạy ở production. Khoảng trống đó đã nuốt ba lỗi chỉ lộ ra lúc pod
+khởi động (Helm gọi `node src/server.js` — file không có trong image; `postinstall`
+gọi script chưa được COPY vào; `fonts/*.ttf` bị `.gitignore` loại nên PDF mất dấu
+tiếng Việt). Cả ba đều XANH ở mọi cổng đọc mã nguồn.
+
+| Cổng | Chạy gì | Bước |
+|---|---|---|
+| `scripts/ci/docker-smoke.sh` → `scripts/ci/smoke-image.sh` | dựng image từ cây làm việc rồi giao cho `smoke-image.sh` (đã có từ trước, CI cũng gọi): dựng Postgres + Redis riêng, chạy container `NODE_ENV=production`, `/livez` + `/readyz`, `GET /app2/`, `prisma migrate deploy` **từ trong image**, worker khởi động, và **0 dòng stack trong log khởi động**. Mọi khẳng định về image nằm ở `smoke-image.sh` — `docker-smoke.sh` chỉ lo phần dựng. | `[10/12]` |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật: đăng nhập → danh sách → trình soạn → **gõ vào ô đơn giá** và đòi Thành Tiền tính lại → tải lại trang → 0 lỗi console, 0 request hỏng | `[11/12]` |
+| `scripts/ci/check-helm.mjs` | render chart THẬT + 4 bất biến + kubeconform + secretKeyRef trỏ khoá có thật | `[8/12]` |
+
+**Đã kiểm ngược từng cổng** (phá đúng thứ nó canh, xác nhận đúng nó đỏ, khôi phục).
+Đáng ghi nhất: cộng **1 đồng** vào `lineAmount` (`shared/quote-math.ts`) làm
+`ui-smoke` đỏ — nghĩa là cổng đó thật sự đọc con số người dùng nhìn thấy.
+
+**Điều kiện chạy:** `docker-smoke` cần Docker; `ui-smoke` cần gói `playwright` (đã là
+devDependency) và một bản Chromium; `check-helm` cần `helm`, và `kubeconform` là tuỳ
+chọn (thiếu thì lớp schema tự bỏ qua, các bất biến ngữ nghĩa vẫn chạy). Thiếu công cụ
+thì bước tự bỏ qua kèm dòng vàng — **không** im lặng báo xanh.
+
+## Hai chốt bảo mật TƯỞNG CÓ mà thật ra KHÔNG chạy (2026-08-27)
+
+Job `security` trong `.github/workflows/ci.yml` khai đủ gitleaks + trivy + semgrep từ
+lâu. Nhưng tài khoản GitHub không bật Actions nên **nó chưa bao giờ chạy**. Lượt chạy
+thật đầu tiên (qua `scripts/ci/security-scan.sh`, bước `[12/12]`) cho ra 13 phát hiện
+và hai chốt vô tác dụng:
+
+1. **`.gitleaks.toml` viết allowlist bằng `[[allowlists]]` (số nhiều) — gitleaks
+   v8.21.2 BỎ QUA hoàn toàn.** Đo: 13 phát hiện với dạng số nhiều, 12 với `[allowlist]`
+   số ít. Repo tưởng đã miễn trừ `tests/mfa.test.js`; thật ra chưa.
+   Cũng đo được: **`condition = "AND"` KHÔNG được tôn trọng** ở allowlist toàn cục —
+   nó hành xử như OR, nên đưa `paths` vào là **miễn trừ cả file**, ngược hẳn ý định
+   "ghim thêm đường dẫn cho chặt" ghi trong chính file đó. Nay allowlist miễn theo
+   **giá trị**, không theo đường dẫn.
+2. **`.trivyignore.yaml` ghi `id: KSV-0109`** trong khi trivy báo dưới ID
+   `AVD-KSV-0109`, và so khớp là so khớp chuỗi đầy đủ. Đo hai lượt giống hệt nhau chỉ
+   khác ID: `KSV-0109` → exit 1, `AVD-KSV-0109` → exit 0.
+
+**Mật khẩu demo `GiaNguyenDemo2026` phải coi như ĐÃ LỘ.** Nó đã được gỡ khỏi cây làm
+việc nhưng còn nằm trong hai commit lịch sử (`0d5ba969`, `83fc9234`), và một chuỗi đã
+commit thì đọc được vĩnh viễn. Miễn trừ trong `.gitleaks.toml` ghim theo **đúng hai
+SHA đó** — chính chuỗi ấy trong một commit MỚI vẫn bị bắt. Đừng dùng lại nó ở bất kỳ
+môi trường nào, kể cả demo.
+
+### gitleaks phải chạy HAI lượt, không phải một
+
+`ci.yml` chỉ khai lượt quét lịch sử. Đo được: dán một khoá ngẫu nhiên vào
+`tests/mfa.test.js` mà **chưa commit** → `detect` exit 0 (không thấy),
+`detect --no-git` exit 1 (thấy). Một lượt là một nửa cổng: lượt lịch sử bắt bí mật đã
+lỡ commit, lượt cây làm việc bắt nó **trước khi** thành lịch sử. `security-scan.sh`
+chạy cả hai.
+
+### Vùng mù của semgrep — nay được ĐẾM, chưa được xoá
+
+Semgrep phân tích **dở dang** 3 file và vẫn kết thúc thành công, chỉ ghi một dòng
+"Partially scanned: N files" lẫn trong tổng kết:
+
+- `src/app.ts:470` — chú thích kiểu trong tham số arrow function
+- `src/quoteUtils.ts:65` — toán tử `satisfies` (TS 4.9)
+- `src/zodErrorMap.ts:14` — kiểu `import("zod").X`
+
+Cả ba là cú pháp TypeScript hợp lệ mà parser của semgrep 1.97 chưa hỗ trợ. **Không
+viết lại mã ứng dụng cho vừa parser của công cụ quét.** Thay vào đó cổng `[S3]` ghim
+con số 3; file thứ tư xuất hiện là đỏ.
+
+**Phạm vi vùng mù — đã đo, và hẹp hơn tưởng ban đầu:** "dở dang" bỏ qua **vùng** quanh
+chỗ không parse được, KHÔNG phải cả file. Mẫu `new Function(req.query.body)` đặt vào
+`src/quoteUtils.ts` (file dở dang) **vẫn bị bắt**, đúng dòng. Đừng đọc mục này thành
+"ba file đó không được quét".
+
+## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
+
+`infra/prometheus/alerts.yaml` — 14 quy tắc, 5 nhóm, mỗi cái bám một chế độ hỏng có
+thật và `runbook` trỏ tới đúng file. Trước đó repo **không có quy tắc cảnh báo nào**
+(`find infra -iname '*alert*'` rỗng): 13 metric chỉ dùng được khi có người đang mở
+dashboard — mà lúc hỏng thì không ai đang mở.
+
+`infra/prometheus/alerts.test.yaml` — 10 bài `promtool test rules`, gồm cả vế **chống
+kêu oan** (triển khai một tiến trình không được kêu; lưu lượng 0 không được kêu; nâng
+trần hàng đợi thì cảnh báo phải tự tắt). Vế đó mới là thứ giữ cho cảnh báo không bị
+người ta tắt đi.
+
+**Vẫn chưa chạy ở đâu.** Production là docker-compose/Coolify, không có Prometheus
+nào scrape (xem mục "Số liệu hàng đợi BullMQ" ở trên — tình trạng đó không đổi). File
+này là thứ đã sẵn sàng để nạp, **không** phải thứ đang bảo vệ hệ thống. Thêm nữa:
+`/metrics` ở production trả **404** khi thiếu `METRICS_TOKEN`, nên quên token thì mọi
+quy tắc im lặng vĩnh viễn — `QuanlyMetricsKhongScrapeDuoc` sinh ra để bắt đúng ca đó.
+
+## Bí mật đọc từ file (`*_FILE`) — có đường, chưa ai đi (2026-08-27)
+
+`src/secretFiles.ts`: đặt `SESSION_SECRET_FILE=/run/secrets/session` thì tiến trình
+đọc file đó thay vì đòi biến môi trường. Áp cho **mọi** biến. Lý do: biến môi trường
+bị `docker inspect` in ra nguyên vẹn, bị mọi tiến trình cùng UID đọc qua
+`/proc/<pid>/environ`, và được kế thừa sang mọi tiến trình con.
+
+Bốn quy tắc, tất cả đều **đóng chứ không mở** (`tests/x7-bi-mat-tu-file.test.js`,
+22 bài): đặt cả hai → thoát; file không đọc được → thoát; file rỗng → thoát; cắt đúng
+một `\n` cuối (không dùng `trim()`, vì khoá base64 có thể kết thúc bằng dấu cách).
+
+### Phạm vi chỉ là KHOÁ CỦA SCHEMA — và lý do là một lỗi tôi tự gây ra
+
+Bản đầu nhận **mọi** biến kết thúc bằng `_FILE`. Sai, vì hậu tố đó không thuộc về repo này: cả một
+hệ sinh thái công cụ dùng nó với nghĩa "đường dẫn tới một file", không phải "đọc file này thành
+biến kia". Trên chính máy chạy repo, `env | grep _FILE=` ra **năm** biến như vậy —
+`SSL_CERT_FILE` (biến chuẩn của OpenSSL, có trên mọi máy sau proxy doanh nghiệp / hệ Nix / máy
+cài gcloud SDK), `NIX_SSL_CERT_FILE`, `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE`,
+`CLAUDE_CODE_DIAGNOSTICS_FILE`, `CLAUDE_SESSION_INGRESS_TOKEN_FILE`.
+
+Hậu quả đo được: `npm run verify` **đỏ 25 bài**, ứng dụng **từ chối khởi động** — trên bất kỳ máy
+nào chỉ vì nó có `SSL_CERT_FILE`. Nay phạm vi là `Object.keys(schema.shape)` của zod trong
+`src/config.ts`; `SSL_CERT` không có trong schema nên `SSL_CERT_FILE` bị bỏ qua.
+Khoá lại bằng 12 bài hồi quy trong `tests/x7-bi-mat-tu-file.test.js`.
+
+Ghi lại vì nó là một bài học chung: **một quy ước đặt tên rộng sẽ va vào hệ sinh thái**, và cách
+va chạm tệ nhất là "từ chối khởi động". Phạm vi phải bám vào danh sách khoá của chính ứng dụng.
+
+**Chưa đường triển khai nào dùng nó.** `docker-compose.prod.yml` và chart Helm vẫn
+truyền bí mật qua `environment:`/`envFrom`. Đổi sang `*_FILE` là việc của người vận
+hành và **cố ý chưa làm ở đợt này**: nó đụng vào cách production nạp bí mật, và không
+thể diễn tập được ở đây.
+
+## SPA nạp phông chữ từ CDN Google — phụ thuộc NGOÀI lúc tải trang
+
+`web/index.html` `<link>` tới `fonts.googleapis.com` cho phông Be Vietnam Pro. Nghĩa
+là mỗi lần mở app, trình duyệt người dùng gọi ra một máy chủ của Google.
+
+- **Không hỏng chức năng khi mạng chặn:** `display=swap` khiến trang dùng phông dự
+  phòng và vẫn đọc được. `scripts/ci/ui-smoke.mjs` đo đúng chuyện này trong môi
+  trường bị chặn — trang chạy trọn vẹn, chỉ khác mặt chữ.
+- **Nhưng vẫn là ba thứ cần biết:** một phụ thuộc ngoài ở đường tải trang; mỗi người
+  dùng để lại một request ở Google; và triển khai trong mạng kín thì mặt chữ đổi mà
+  không ai báo.
+
+`ui-smoke` liệt kê request ngoài không tới nơi thành dòng **vàng**, không làm đỏ — bộ
+test không kiểm soát được mạng của máy chạy nó. **Chưa tự lưu phông** vì việc đó đổi
+diện mạo bản build và cần một quyết định về giấy phép phông, không phải việc lặng lẽ
+kèm vào một đợt siết hạ tầng.
+
 ## Hạn chế đã biết của hệ thống (không phải lỗi, là đánh đổi)
 
 Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải phát hiện lại:

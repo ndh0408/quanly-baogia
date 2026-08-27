@@ -90,12 +90,33 @@ buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
 
 buoc "[0/12] Hạ tầng"
+# ── KIỂM ĐÚNG MÁY CHỦ ĐANG ĐƯỢC CẤU HÌNH, KHÔNG PHẢI MÁY CHỦ MẶC ĐỊNH ──────
+# Bản trước gọi `pg_isready -q` và `redis-cli ping` TRẦN. Cả hai lệnh đó dùng mặc định của CHÍNH
+# CHÚNG (localhost:5432, localhost:6379), KHÔNG đọc DATABASE_URL/REDIS_URL. Nên nếu ai đó trỏ
+# DATABASE_URL sang cổng 5433 (một instance Postgres thứ hai — chuyện thường khi thử phiên bản
+# mới), bước này báo XANH cho instance 5432 rồi bước [1/12] chết vì không nối được 5433, kèm một
+# thông báo của Prisma không hề nhắc tới hạ tầng.
+# `node -e` để bóc host/port: URL kết nối có mật khẩu chứa ký tự đặc biệt, tách bằng sed là sai.
+doc_url() { node -e 'const u=new URL(process.argv[1]);process.stdout.write((u.hostname||"127.0.0.1")+" "+(u.port||process.argv[2]))' "$1" "$2" 2>/dev/null; }
+read -r PG_HOST PG_PORT <<<"$(doc_url "$DATABASE_URL" 5432)"
+read -r RD_HOST RD_PORT <<<"$(doc_url "$REDIS_URL" 6379)"
 # `--noproxy '*'`: máy dev đặt HTTPS_PROXY thì curl tới 127.0.0.1 trả 000 và ta chẩn đoán nhầm.
-pg_isready -q 2>/dev/null;                                          ket $? "Postgres (nếu đỏ: pg_ctlcluster 16 main start)"
-redis-cli ping >/dev/null 2>&1;                                     ket $? "Redis (nếu đỏ: redis-server --daemonize yes)"
+pg_isready -q -h "${PG_HOST:-127.0.0.1}" -p "${PG_PORT:-5432}" 2>/dev/null
+ket $? "Postgres tại ${PG_HOST:-?}:${PG_PORT:-?} (nếu đỏ: pg_ctlcluster 16 main start)"
+redis-cli -h "${RD_HOST:-127.0.0.1}" -p "${RD_PORT:-6379}" ping >/dev/null 2>&1
+ket $? "Redis tại ${RD_HOST:-?}:${RD_PORT:-?} (nếu đỏ: redis-server --daemonize yes)"
 curl -fsS --noproxy '*' -o /dev/null "$S3_ENDPOINT/minio/health/live" 2>/dev/null
 ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data --address :9000)"
 [ "$do" -eq 0 ] || { printf '\n\033[31mDỪNG: thiếu hạ tầng. Chạy tiếp cũng chỉ ra một dòng "skipped" trông như xanh.\033[0m\n'; exit 1; }
+
+# ── CÂY PHỤ THUỘC PHẢI KHỚP LOCKFILE ──────────────────────────────────────
+# Không cổng nào từng kiểm chuyện này. Sửa `package.json` mà quên `npm install` thì lockfile lệch,
+# và MỌI bước sau chạy trên bộ thư viện KHÁC với bộ mà `npm ci` sẽ cài trên máy khác / trong Docker
+# — tức cổng xanh nói về một cây phụ thuộc không ai khác có.
+# `npm ci --dry-run` làm đúng phép so đó mà KHÔNG xoá node_modules (npm ci thật xoá sạch rồi cài
+# lại, mất hàng chục giây mỗi lượt verify — một cổng chậm là một cổng bị bỏ chạy).
+buoc "[0b/12] Cây phụ thuộc khớp package-lock.json"
+npm ci --dry-run >/dev/null 2>&1;                                   ket $? "npm ci --dry-run (nếu đỏ: chạy \`npm install\` để đồng bộ lockfile)"
 
 buoc "[1/12] Prisma client + migrate"
 npx prisma generate >/dev/null 2>&1;                                ket $? "prisma generate"
@@ -115,10 +136,36 @@ buoc "[1b/12] Bài đo TOAST (chạy riêng, CSDL còn yên)"
 # HAI LỆNH RIÊNG, KHÔNG GỘP MỘT LỆNH. Cả hai file đều đọc ảnh hạng mục của CHÍNH bảng QuoteItem;
 # gộp lại thì vitest chạy chúng SONG SONG và chúng tự nhiễu nhau — đúng nguồn nhiễu mà cờ này sinh
 # ra để tránh. ĐÃ THỬ: gộp một lệnh → db3 đỏ với "TOAST nhảy 3637 block" (ngưỡng 100).
-DO_TOAST_MEASURE=1 npx vitest run tests/b2-update-quote-no-image-read.test.js
-ket $? "vitest đo TOAST — b2 (DO_TOAST_MEASURE=1)"
-DO_TOAST_MEASURE=1 npx vitest run tests/db3-snapshot-no-images.test.js
-ket $? "vitest đo TOAST — db3 (DO_TOAST_MEASURE=1)"
+# ── BỎ QUA ÂM THẦM Ở ĐÂY LÀ MẤT SẠCH Ý NGHĨA CỦA BƯỚC NÀY ─────────────────
+# Hai bài đo nằm sau `it.runIf(DO_TOAST)`. Nếu cờ không tới nơi — ai đó sửa dòng lệnh, hoặc biến
+# bị nuốt bởi một lớp bọc — thì vitest BỎ QUA chúng và THOÁT 0, còn bước này in ✓.
+# ĐO ĐƯỢC: chạy đúng file này KHÔNG có cờ → "5 passed, 2 skipped", exit 0.
+# Nên đừng chỉ tin mã thoát: đọc báo cáo JSON và đòi KHÔNG bài nào bị bỏ qua.
+do_toast() {
+  local file="$1" nhan="$2" bc; bc="$(mktemp)"
+  DO_TOAST_MEASURE=1 npx vitest run "$file" --reporter=json --outputFile="$bc"
+  local ma=$?
+  if [ $ma -eq 0 ]; then
+    node -e '
+      // `readFileSync` + JSON.parse, KHÔNG `require`: file báo cáo do `mktemp` tạo không có đuôi
+      // .json và `require` từ chối nạp nó ("Cannot find module").
+      const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const b = d.testResults.flatMap((r) => r.assertionResults);
+      const boQua = b.filter((t) => t.status === "skipped");
+      const dat = b.filter((t) => t.status === "passed");
+      if (boQua.length) {
+        console.error(`  ${boQua.length}/${b.length} bài BỊ BỎ QUA — cờ DO_TOAST_MEASURE không tới nơi:`);
+        for (const t of boQua) console.error(`    · ${t.title}`);
+        process.exit(1);
+      }
+      if (dat.length === 0) { console.error("  KHÔNG bài nào chạy"); process.exit(1); }
+    ' "$bc" || ma=1
+  fi
+  rm -f "$bc"
+  ket $ma "$nhan"
+}
+do_toast tests/b2-update-quote-no-image-read.test.js "vitest đo TOAST — b2 (không bài nào bị bỏ qua)"
+do_toast tests/db3-snapshot-no-images.test.js       "vitest đo TOAST — db3 (không bài nào bị bỏ qua)"
 
 buoc "[2/12] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
@@ -134,7 +181,11 @@ npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc 
 # `tsc -p tsconfig.build.json` mất vài giây — rẻ hơn nhiều so với một cổng nói dối.
 # Chạy CẢ ở chế độ --nhanh, vì bước [4/12] luôn chạy và nó phụ thuộc dist/.
 buoc "[2b/12] Build backend (dist/) — PHẢI trước test, xem chú thích"
-npm run build >/dev/null;                                           ket $? "build backend (dist/)"
+# `build:clean` chứ không phải `build`: `tsc` GHI ĐÈ đầu ra nhưng KHÔNG XOÁ file mồ côi. Đổi tên
+# hay gỡ một file trong src/ thì bản .js cũ nằm lại trong dist/ mãi mãi — và nó vẫn `import` được,
+# nên một module đã bị xoá vẫn chạy được ở máy này trong khi Docker (build từ đầu) thì không có nó.
+# Đó là cổng xanh cho một artifact chỉ tồn tại trên máy của một người.
+npm run build:clean >/dev/null;                                     ket $? "build backend (dist/ dọn sạch trước khi dựng)"
 
 buoc "[3/12] Lint + format"
 npx eslint .;                                                       ket $? "eslint"

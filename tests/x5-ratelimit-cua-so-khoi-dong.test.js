@@ -15,8 +15,9 @@
 // Chỉ container production mới lộ ra: `createLimiter` THOÁT SỚM khi NODE_ENV=test
 // (dòng đầu của hàm, để limiter Redis dùng chung không gây 429 giả giữa các file test), nên
 // KHÔNG bài test trong tiến trình nào chạm tới nhánh có RedisStore được.
-// Vế hành vi nằm ở `scripts/ci/docker-smoke.sh` bước [D5] — đã kiểm ngược: quay lại mã cũ thì
-// [D5] báo "15 vết" và 157 dòng stack; có bản vá thì 0.
+// Vế hành vi nằm ở `scripts/ci/smoke-image.sh`, bước "LOG KHỞI ĐỘNG KHÔNG ĐƯỢC CÓ VẾT STACK"
+// (chạy trên container production thật; `scripts/ci/docker-smoke.sh` dựng image rồi gọi nó).
+// Đã kiểm ngược: quay lại mã cũ thì bước đó đếm được 157 dòng stack; có bản vá thì 0.
 //
 // File này khoá phần CÓ THỂ kiểm trong tiến trình: bản thân `rateLimitRedisSanSang` và thứ tự
 // `await` trong `sendCommand`.
@@ -82,7 +83,7 @@ describe("thứ tự trong sendCommand của kho rate-limit", () => {
   const src = readFileSync(new URL("../src/rateLimit.ts", import.meta.url), "utf8");
 
   // ⚠️ ĐÂY LÀ BÀI ĐỌC MÃ NGUỒN, KHÔNG PHẢI BÀI HÀNH VI. Nó KHÔNG chứng minh bản vá chạy đúng —
-  // vế đó nằm ở docker-smoke [D5]. Nó chỉ khoá đúng MỘT cách viết sai mà tôi đã tự mắc khi viết
+  // vế đó nằm ở smoke-image.sh. Nó chỉ khoá đúng MỘT cách viết sai mà tôi đã tự mắc khi viết
   // bản vá này: gán `cho = null` TRƯỚC khi `await`. `store.init()` bắn HAI `SCRIPT LOAD` SONG SONG;
   // gán null trước thì lượt thứ hai thấy null và đi thẳng vào Redis chưa nối — vẫn ném, chỉ bớt
   // một vết thay vì hết. Sai lầm đó không bài hành vi nào trong tiến trình bắt được (xem đầu file).

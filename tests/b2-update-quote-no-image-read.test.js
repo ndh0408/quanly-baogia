@@ -128,7 +128,22 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id — chỉ được đọc ảnh
       prisma.quote.findFirst({ where: { id: quoteId }, include: QUOTE_INCLUDE }));
     expect(kq.sheets[0].items.length).toBe(SO_HANG_MUC);
     motLanDoc = tang;
-    expect(motLanDoc, "đọc 12 ảnh 400KB mà TOAST không nhúc nhích ⇒ bộ đo hỏng, khẳng định dưới vô nghĩa").toBeGreaterThan(200);
+    // ── CHẶN CẢ HAI ĐẦU, VÀ CHẶN THEO KÍCH THƯỚC DỮ LIỆU THẬT ─────────────
+    // Ngưỡng của bài NGAY DƯỚI tự hiệu chuẩn theo `motLanDoc` (`< motLanDoc * 1.6`). Bản trước chỉ
+    // chặn ĐẦU DƯỚI (`> 200`), nên nếu con số này bị NHIỄU LÊN — một bài khác chạy song song cũng
+    // đụng bảng QuoteItem, hoặc Postgres còn đang dồn thống kê của lượt trước — thì ngưỡng nới ra
+    // theo và bài dưới thành VÔ NGHĨA: nó xanh kể cả khi PUT đọc ảnh hai lượt. Một cổng tự nới
+    // ngưỡng theo nhiễu là cổng chỉ còn hình thức.
+    //
+    // Chặn theo con số SUY RA TỪ DỮ LIỆU, không phải hằng số ma thuật: mỗi hạng mục cõng một ảnh
+    // dài `ANH.length` byte, TOAST đọc theo block 8KB. Đo thật trên máy này: 612 block cho
+    // 12 × 400.004 byte, tức kỳ vọng ≈ 586 — lệch 4% vì phần đầu trang và biên block.
+    // Biên ±: dưới 0,5× là bộ đo không thấy gì; trên 2× là đang đếm cả việc của người khác.
+    const KHOI_KY_VONG = Math.ceil((SO_HANG_MUC * ANH.length) / 8192);
+    expect(motLanDoc, `đọc ${SO_HANG_MUC} ảnh mà TOAST chỉ nhảy ${motLanDoc} block (kỳ vọng ≈ ${KHOI_KY_VONG}) ⇒ bộ đo hỏng, khẳng định dưới vô nghĩa`)
+      .toBeGreaterThan(KHOI_KY_VONG * 0.5);
+    expect(motLanDoc, `TOAST nhảy ${motLanDoc} block, GẤP HƠN HAI LẦN kỳ vọng ${KHOI_KY_VONG} ⇒ bộ đo đang đếm cả hoạt động của bài khác. Ngưỡng của bài dưới suy ra từ con số này, nên nó đang bị nới rộng và không còn bắt được lỗi đọc hai lượt.`)
+      .toBeLessThan(KHOI_KY_VONG * 2);
   }, 180_000);
 
   it.runIf(DO_TOAST)("một lần Lưu (không đổi sheets) chỉ đọc ảnh MỘT lượt, không hai", async () => {

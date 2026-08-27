@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
+import { napBiMatTuFile } from "./secretFiles.js";
+
 
 /**
  * Biến môi trường SỐ, coi chuỗi RỖNG như KHÔNG ĐẶT.
@@ -149,6 +151,29 @@ const schema = z.object({
   // [BỎ DẦN] tên cũ của BREAK_GLASS_EMAILS. Vẫn đọc để tương thích, KHÔNG còn ẩn tài khoản nữa.
   HIDDEN_USER_EMAILS: z.string().optional(),
 });
+
+// ── BÍ MẬT TỪ FILE, NGAY TRƯỚC KHI ĐỌC process.env ─────────────────────────
+// PHẢI chạy TRƯỚC `schema.safeParse(process.env)` ngay dưới, vì nó ĐẶT THÊM biến vào process.env.
+// Đặt sau thì `SESSION_SECRET_FILE` không có tác dụng gì và tiến trình chết vì "thiếu
+// SESSION_SECRET" — đúng lúc người vận hành vừa làm đúng cách an toàn hơn.
+//
+// Và PHẢI đứng ở đây (sau khi `schema` đã khai) chứ không phải đầu file: phạm vi của quy ước
+// `*_FILE` là DANH SÁCH KHOÁ CỦA SCHEMA, không phải mọi biến môi trường. `SSL_CERT_FILE` (biến
+// chuẩn của OpenSSL, có trên mọi máy sau proxy doanh nghiệp) không được coi là "đọc file này
+// thành SSL_CERT". Xem khối chú thích trong src/secretFiles.ts để biết vì sao — bản đầu nhận mọi
+// `*_FILE` và làm 25 bài test đỏ vì ứng dụng từ chối khởi động.
+try {
+  const daNap = napBiMatTuFile(process.env, Object.keys(schema.shape));
+  // In TÊN BIẾN và ĐƯỜNG DẪN, KHÔNG BAO GIỜ in giá trị.
+  if (daNap.length) {
+    console.log(
+      `🔐 Nạp ${daNap.length} bí mật từ file: ` + daNap.map((x) => `${x.ten}←${x.duongDan}`).join(", "),
+    );
+  }
+} catch (e) {
+  console.error(`❌ ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
 
 const parsed = schema.safeParse(process.env);
 

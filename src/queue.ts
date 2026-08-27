@@ -55,7 +55,7 @@ export function isRateLimitRedisReady() {
 // nối xong, mà kết nối này cố ý đặt `enableOfflineQueue: false` (trượt nhanh, không xếp hàng) →
 // mỗi limiter ném một lỗi và express-rate-limit in nguyên vết stack.
 //
-// ĐO ĐƯỢC trong container production (scripts/ci/docker-smoke.sh): 15 vết stack mỗi lần khởi động.
+// ĐO ĐƯỢC trong container production (scripts/ci/smoke-image.sh): 15 vết stack mỗi lần khởi động.
 // KHÔNG hỏng chức năng — `retryableIncrement`/`get` của rate-limit-redis bắt lỗi EVALSHA rồi tự nạp
 // lại script ở lần dùng đầu tiên. Nhưng 15 vết stack ở đầu mỗi log khởi động thì che mất lỗi thật,
 // và ai đọc log sẽ tưởng rate-limit đang hỏng.

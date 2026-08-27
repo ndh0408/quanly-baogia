@@ -73,6 +73,55 @@ echo "▶ image KHÔNG được chứa mã nguồn .ts (chỉ artifact đã biê
 docker exec "$APP" sh -c '[ ! -d src ]' \
   || { echo "::error::image vẫn chứa src/ — bề mặt image phình và runtime dễ chạy nhầm mã chưa biên dịch"; exit 1; }
 
+echo "▶ CMD của image đúng là \`node dist/server.js\` (chung một artifact với Helm/k8s/compose)"
+cmd=$(docker image inspect "$IMAGE" --format '{{join .Config.Cmd " "}}')
+[ "$cmd" = "node dist/server.js" ] \
+  || { echo "::error::CMD của image là \"$cmd\", không phải \"node dist/server.js\""; exit 1; }
+
+echo "▶ bốn điểm vào đã biên dịch có mặt trong dist/"
+docker exec "$APP" sh -c 'for f in dist/server.js dist/worker.js dist/exportWorker.js dist/importWorker.js; do test -f "$f" || exit 1; done' \
+  || { echo "::error::image thiếu một trong bốn điểm vào dist/"; exit 1; }
+
+echo "▶ SPA React (public/app2) NẰM TRONG image — đây là giao diện DUY NHẤT của hệ thống"
+docker exec "$APP" sh -c 'test -f public/app2/index.html && ls public/app2/assets/*.js >/dev/null 2>&1' \
+  || { echo "::error::image thiếu bản build của web/ — người dùng sẽ thấy màn hình trắng"; exit 1; }
+
+echo "▶ SPA PHỤC VỤ ĐƯỢC qua HTTP, không chỉ nằm trong image"
+# Nằm trong image mà express.static/route fallback sai thì vẫn là màn hình trắng. Đòi cả HTML lẫn
+# đường dẫn bundle đã băm.
+trang=$(docker exec "$APP" wget -q -O - http://127.0.0.1:3000/app2/ 2>/dev/null || true)
+printf '%s' "$trang" | grep -qi '<div id="root"' \
+  || { echo "::error::GET /app2/ không trả HTML của SPA"; exit 1; }
+printf '%s' "$trang" | grep -q '/app2/assets/' \
+  || { echo "::error::HTML của SPA không tham chiếu bundle đã băm — bản build hỏng"; exit 1; }
+
+echo "▶ mẫu Excel (templates/) nằm trong image"
+docker exec "$APP" sh -c 'ls templates/*.xls* >/dev/null 2>&1' \
+  || { echo "::error::image thiếu templates/ — xuất Excel sẽ hỏng"; exit 1; }
+
+echo "▶ prisma CLI còn trong image (compose/helm gọi \`migrate deploy\` lúc khởi động)"
+docker exec "$APP" sh -c 'test -x node_modules/.bin/prisma' \
+  || { echo "::error::--omit=dev đã loại mất prisma CLI — deploy sẽ chết ở bước migrate"; exit 1; }
+
+echo "▶ KHÔNG có bộ đồ nghề test/lint trong image production"
+# typescript và tsx CÓ mặt hợp lệ: `tsx` khai ở dependencies, `typescript` là phụ thuộc bắc cầu
+# của prisma/@prisma/client. Chỉ soi những gói chỉ dùng lúc phát triển.
+docker exec "$APP" sh -c 'for m in vitest eslint supertest prettier husky; do test -d "node_modules/$m" && exit 1; done; exit 0' \
+  || { echo "::error::image production chứa bộ đồ nghề test/lint"; exit 1; }
+
+echo "▶ LOG KHỞI ĐỘNG KHÔNG ĐƯỢC CÓ VẾT STACK"
+# Từng có 15 vết "express-rate-limit: async error during store initialization" ở MỖI lần khởi động
+# (rate-limit-redis bắn SCRIPT LOAD lúc ioredis chưa nối xong, mà kết nối đó cố ý không xếp hàng
+# ngoại tuyến). Không hỏng chức năng, nhưng 157 dòng stack ở đầu log thì che mất lỗi thật.
+# Vá ở src/rateLimit.ts (`rateLimitRedisSanSang`); chốt này giữ cho nó không quay lại.
+log=$(docker logs "$APP" 2>&1)
+nstack=$(printf '%s\n' "$log" | grep -cE '^[[:space:]]+at .+\(.*:[0-9]+:[0-9]+\)' || true)
+if [ "$nstack" != "0" ]; then
+  echo "::error::log khởi động có $nstack dòng stack-trace — một ngoại lệ đang bị in ra lúc boot"
+  printf '%s\n' "$log" | grep -E '^[[:space:]]+at |Error' | head -12
+  exit 1
+fi
+
 echo "▶ container chạy bằng người dùng KHÔNG phải root"
 uid=$(docker exec "$APP" id -u)
 [ "$uid" != "0" ] || { echo "::error::container chạy bằng root"; exit 1; }

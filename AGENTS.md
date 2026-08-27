@@ -60,33 +60,47 @@ quy là làm hỏng công việc của người khác.
 - **Bảng nội bộ** (chi phí HCM / báo giá HN / phí khách) **không được** lọt vào
   file Excel gửi khách.
 
-## Chốt chặn của CI — đừng vô hiệu hoá
+## Chốt chặn — đừng vô hiệu hoá
 
-Mỗi cái ra đời từ một lỗi có thật.
+⚠️ **GitHub Actions KHÔNG bật trên tài khoản của repo này.** `.github/workflows/ci.yml` khai
+đầy đủ nhưng **chưa bao giờ chạy**. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều SAI ở đây. Cổng
+duy nhất thật sự chạy là cổng bạn gõ tay: `npm run verify`.
+
+Cái giá của việc đó không phải giả định: lượt chạy thật đầu tiên của job `security` (2026-08-27)
+lộ ra `.gitleaks.toml` viết allowlist bằng cú pháp gitleaks BỎ QUA, và `.trivyignore.yaml` ghi ID
+thiếu tiền tố — hai chốt mà repo tưởng mình đang có.
+
+Mỗi cái dưới đây ra đời từ một lỗi có thật.
 
 | Chốt | Bắt gì |
 |---|---|
 | `scripts/ci/endpoint-inventory.mjs --check` | Endpoint mới chưa vào ma trận phân quyền = **chưa ai soát quyền** |
 | `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
 | `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch |
-| `scripts/ci/smoke-image.sh` | Image vừa dựng không chạy được |
+| `scripts/ci/smoke-image.sh` | Image production: boot, `/livez` + `/readyz`, SPA phục vụ được, phông PDF, prisma CLI, không có mã nguồn/đồ nghề test, **0 dòng stack trong log khởi động**. `scripts/ci/docker-smoke.sh` dựng image từ cây làm việc rồi gọi nó — **mọi khẳng định về image nằm ở `smoke-image.sh`**, đừng nhân đôi |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật: bundle nạp được, đăng nhập được, **lưới tính tiền đúng**, 0 lỗi console. jsdom không thấy lớp lỗi này |
+| `scripts/ci/check-helm.mjs` | Chart render ra manifest hỏng: tag di động, mật khẩu rỗng, `secretKeyRef` trỏ khoá không tồn tại. `helm lint` KHÔNG render nên không thấy gì |
+| `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên |
+| `scripts/ci/security-scan.sh` | Bí mật trong mã **và trong lịch sử git**, lỗ hổng HIGH/CRITICAL có bản vá, mẫu nguy hiểm (semgrep), SBOM |
+| `scripts/ci/check-line-refs.mjs` | Chú thích trỏ `file:dòng` vào hư không (số dòng trôi mỗi lần ai đó thêm dòng) |
 | `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
 | `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
-| `REQUIRE_DB_TESTS=1` | CI xanh trong khi test tích hợp lặng lẽ bỏ qua |
+| `REQUIRE_DB_TESTS=1` | Cổng xanh trong khi test tích hợp lặng lẽ bỏ qua |
 
 ## Trước khi coi là xong
 
 ```bash
-npm run lint
-npm run typecheck
-npm run build                       # phải sinh được dist/
-npm run test:run                    # cần Postgres + Redis + MinIO cho test tích hợp
-npm --prefix web run typecheck
-npm run web:test
-node scripts/ci/endpoint-inventory.mjs --check
-node scripts/ci/repo-stats.mjs --check
-bash scripts/ci/check-runtime-command.sh
+npm run verify          # 12 bước — chạy HẾT, khoảng 8 phút
+npm run verify:nhanh    # vòng lặp sửa nhanh: bỏ test/build web, smoke image, smoke giao diện, quét bảo mật
 ```
+
+`verify` cần Postgres + Redis + MinIO cục bộ (nó tự kiểm và **dừng ngay** nếu thiếu — một dòng
+"skipped" trông y hệt một dòng xanh). Nó cũng **từ chối chạy** nếu `DATABASE_URL`/`REDIS_URL`/
+`S3_*` không trông như hạ tầng test: bộ test có `deleteMany` và `obliterate`, chạy nhầm lên
+production là mất dữ liệu chứ không phải bất tiện.
+
+Chạy riêng từng cổng khi cần: `npm run check:helm` · `npm run check:alerts` · `npm run check:refs`
+· `npm run smoke:image` · `npm run smoke:ui` · `npm run scan` · `npm run sbom`
 
 ## Cách làm việc mong đợi
 

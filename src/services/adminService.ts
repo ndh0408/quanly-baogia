@@ -56,8 +56,8 @@ export async function purgeSoftDeleted(req: Request) {
     //   · src/services/authService.ts:248      — user.invite.accept
     //   · src/services/authService.ts:62/72/96 — profile.update / password.change.*
     // Nghĩa là gõ SAI mật khẩu đúng một lần, hoặc chỉ bấm nhận lời mời, là đã đủ để không qua được
-    // bước "user" của purge nữa — cho tới khi src/retention.ts:92 dọn hết nhật ký của họ theo
-    // RETAIN_AUDIT_DAYS (mặc định 730 ngày, src/config.ts:110). Trên thực tế bước "user" chỉ xoá
+    // bước "user" của purge nữa — cho tới khi `pruneOldRecords` (src/retention.ts) dọn hết nhật ký của họ theo
+    // RETAIN_AUDIT_DAYS (mặc định 730 ngày — khai trong schema zod ở src/config.ts). Trên thực tế bước "user" chỉ xoá
     // cứng được tài khoản chưa từng CHẠM vào form đăng nhập lẫn lời mời và cũng không dính bốn
     // quan hệ trên; `result.user = 0` là kết quả BÌNH THƯỜNG chứ không phải dấu hiệu purge hỏng.
     //
