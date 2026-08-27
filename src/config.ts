@@ -81,6 +81,18 @@ const schema = z.object({
   SENTRY_DSN: z.string().optional(),
   // Optional bearer token to protect /metrics (defence-in-depth on top of network policy)
   METRICS_TOKEN: z.string().optional(),
+  // ── CỜ TÍNH NĂNG ────────────────────────────────────────────────────────
+  // §47: chỉ dùng cho triển khai RỦI RO cần bật/tắt được, không dựng hệ thống cờ.
+  //
+  // INCREMENTAL_QUOTE_SAVE — bỏ qua việc xoá-tạo-lại những TRANG KHÔNG ĐỔI khi lưu báo giá.
+  // MẶC ĐỊNH TẮT, có chủ ý: đường lưu là chỗ tiền và trạng thái mức sheet đi qua, và một lỗi so
+  // sánh ở đó là mất dữ liệu ÂM THẦM (trả 200, người dùng không biết gì). Bật sau khi đã chạy
+  // thật ở staging. Số đo trước/sau: docs/architecture/QUOTE_SAVE_PERFORMANCE.md.
+  // Cùng cách phân tích "false" như S3_FORCE_PATH_STYLE — `z.coerce.boolean()` coi chuỗi "false"
+  // là true, nên KHÔNG dùng được ở đây.
+  INCREMENTAL_QUOTE_SAVE: z
+    .preprocess((v) => (typeof v === "string" ? /^(1|true|yes|on)$/i.test(v) : !!v), z.boolean())
+    .default(false),
   // Key used to encrypt MFA TOTP secrets at rest (AES-256-GCM). Strongly recommended
   // in production; if absent, secrets fall back to plaintext (legacy) with a warning.
   MFA_ENC_KEY: strEnv(z.string().min(16).optional()),

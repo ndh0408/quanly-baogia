@@ -252,7 +252,30 @@ export function createApp() {
         if (res.statusCode >= 400) return "warn";
         return "info";
       },
-      customProps: (req: Request) => ({ reqId: req.id, userId: req.session?.userId }),
+      // §27 đòi mỗi dòng log request có ĐỦ: route · method · status · latency · userId · role ·
+      // requestId. `responseTime` do pino-http tự thêm; `method`/`status`/`url` do serializer bên
+      // dưới; ba thứ còn lại ở đây.
+      //
+      // `route` là MẪU route của Express (`/api/quotes/:id`), KHÔNG phải URL thật. Đó là khác biệt
+      // quyết định khi gom log: `url` chứa id nên mỗi request là một chuỗi riêng — không nhóm được
+      // "endpoint nào đang chậm/đang lỗi". Express đặt `req.route` khi đã vào tay handler; request
+      // 404 hoặc bị middleware chặn sớm (rate-limit, CSRF) thì không có, để `null` chứ đừng bịa.
+      // `req.baseUrl` là tiền tố nơi router được mount (`/api/quotes`), nối lại mới ra đường đầy đủ.
+      //
+      // `role` được §27 cho phép tường minh. Nó KHÔNG phải PII và là chiều lọc đầu tiên khi điều
+      // tra "ai làm được việc này".
+      customProps: (req: Request) => {
+        // `routePattern` do `asyncHandler` ghi NGAY LÚC handler chạy — đó là thời điểm DUY NHẤT
+        // `req.baseUrl` còn đúng cho cả đường lỗi (xem chú thích dài ở src/middleware.ts).
+        const ghiSan = (req as Request & { routePattern?: string }).routePattern;
+        const r = (req as Request & { route?: { path?: string } }).route?.path;
+        return {
+          reqId: req.id,
+          userId: req.session?.userId,
+          role: req.session?.role ?? null,
+          route: ghiSan ?? (r ? `${req.baseUrl || ""}${r}` : null),
+        };
+      },
       serializers: {
         req: (req: Request) => ({ method: req.method, url: req.url, id: req.id }),
         res: (res: Response) => ({ status: res.statusCode }),
