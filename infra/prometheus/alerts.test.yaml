@@ -1,0 +1,193 @@
+# ============================================================================
+# Bài kiểm ĐƠN VỊ cho infra/prometheus/alerts.yaml — chạy bằng `promtool test rules`.
+#
+#   npm run check:alerts     (scripts/ci/check-alerts.sh chạy cả check lẫn test)
+#
+# ── VÌ SAO CẦN, KHI ĐÃ CÓ `promtool check rules` ───────────────────────────
+# `check rules` chỉ nói "PromQL này PHÂN TÍCH ĐƯỢC". Nó KHÔNG chạy biểu thức, nên một quy tắc
+# viết sai logic (thiếu vế `and`, so sai chiều, `for:` quá dài) vẫn qua được nó — và cách duy nhất
+# để phát hiện là chờ một sự cố thật rồi thấy cảnh báo không kêu. Đó là kiểu thất bại tệ nhất của
+# hệ thống giám sát: im lặng đúng lúc cần kêu.
+#
+# Bài dưới đây bơm chuỗi số liệu GIẢ vào rồi đòi cảnh báo kêu ĐÚNG lúc — và quan trọng ngang thế:
+# KHÔNG kêu ở tình huống hợp lệ. Vế thứ hai mới là vế giữ cho cảnh báo còn được bật.
+# ============================================================================
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ── SSE: hai vế của biểu thức, cả hai chiều ───────────────────────────────
+  - interval: 1m
+    name: "SSE backplane chết ở chế độ redis thì PHẢI kêu"
+    input_series:
+      - series: 'sse_backplane_mode{mode="redis", instance="app-1", job="quanly"}'
+        values: "1x10"
+      - series: 'sse_backplane_up{instance="app-1", job="quanly"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QuanlySseBackplaneChet
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: app-1
+              job: quanly
+              mode: redis
+            exp_annotations:
+              summary: "Backplane Redis của SSE chết trên app-1"
+              description: >-
+                Instance này được cấu hình chạy chế độ redis nhưng backplane đang không lên. Nhiều
+                replica + backplane chết = người dùng nối vào instance A không thấy thay đổi do người
+                trên instance B tạo. Không màn hình nào báo lỗi; danh sách chỉ đơn giản là không cập nhật.
+              runbook: "src/sse.ts — biến `pub` và hàm `backplaneDangDung`"
+
+  - interval: 1m
+    name: "Triển khai MỘT tiến trình (mode=local) thì KHÔNG được kêu"
+    # Đây là vế chống-kêu-oan. Nếu ai đó rút gọn biểu thức thành `sse_backplane_up == 0` cho
+    # "đỡ rườm rà", bài này đỏ ngay — đúng lúc, thay vì sau khi cảnh báo đã bị tắt vì kêu suốt.
+    input_series:
+      - series: 'sse_backplane_mode{mode="local", instance="app-1", job="quanly"}'
+        values: "1x10"
+      - series: 'sse_backplane_up{instance="app-1", job="quanly"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QuanlySseBackplaneChet
+        exp_alerts: []
+
+  # ── 5xx: hành vi ở lưu lượng BẰNG KHÔNG ──────────────────────────────────
+  - interval: 1m
+    name: "Không có lưu lượng thì tỉ lệ 5xx KHÔNG được kêu (0/0)"
+    input_series:
+      - series: 'http_requests_total{status="200", job="quanly"}'
+        values: "100x20" # đứng yên = rate 0
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyTiLeLoi5xxCao
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Toàn bộ request là 5xx thì PHẢI kêu"
+    input_series:
+      - series: 'http_requests_total{status="500", job="quanly"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyTiLeLoi5xxCao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Trên 2% request trả 5xx (10 phút liên tục)"
+              description: >-
+                `clamp_min` ở mẫu số là có chủ ý: ban đêm lưu lượng có thể về 0 và phép chia 0/0 cho ra
+                NaN — quy tắc sẽ KHÔNG kêu đúng lúc mọi request đều hỏng nhưng chỉ có vài request.
+
+  # ── Worker chết: có job chờ nhưng không job nào chạy ─────────────────────
+  - interval: 1m
+    name: "Job chờ mà không job nào active → worker chết"
+    input_series:
+      - series: 'bullmq_jobs{queue="export", state="waiting"}'
+        values: "5x20"
+      - series: 'bullmq_jobs{queue="export", state="active"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongCoWorkerNao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Có job chờ nhưng KHÔNG job nào đang chạy — worker có thể đã chết"
+              description: >-
+                Deployment worker chạy `node dist/worker.js` TÁCH RIÊNG khỏi app. App vẫn phục vụ
+                request bình thường khi worker chết, nên không cảnh báo nào khác bắt được.
+              runbook: "infra/helm/quanly/templates/worker-deployment.yaml"
+
+  - interval: 1m
+    name: "Worker ĐANG chạy job thì KHÔNG được kêu"
+    input_series:
+      - series: 'bullmq_jobs{queue="export", state="waiting"}'
+        values: "5x20"
+      - series: 'bullmq_jobs{queue="export", state="active"}'
+        values: "2x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongCoWorkerNao
+        exp_alerts: []
+
+  # ── Hàng đợi xuất đầy: so với gauge, không so với hằng số ────────────────
+  - interval: 1m
+    name: "Độ sâu hàng đợi chạm trần → kêu"
+    input_series:
+      - series: 'export_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+      - series: 'export_max_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyHangDoiXuatDay
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "Hàng đợi chờ xuất file đã đầy trên app-1"
+              description: >-
+                Hàng đợi chờ có TRẦN (EXPORT_MAX_PENDING). Đầy nghĩa là yêu cầu xuất mới bị TỪ CHỐI
+                ngay, không phải xếp hàng — người dùng nhận lỗi chứ không phải chờ lâu.
+              runbook: "src/exportQueue.ts"
+
+  - interval: 1m
+    name: "Trần được NÂNG LÊN thì cảnh báo phải tự tắt (không viết cứng con số)"
+    # Chốt chống hồi quy: nếu ai đó thay `export_max_queue_depth` bằng một số cố định (vd `> 20`)
+    # thì bài này đỏ — vì ở đây trần là 50 và độ sâu 20 hoàn toàn bình thường.
+    input_series:
+      - series: 'export_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+      - series: 'export_max_queue_depth{instance="app-1", job="quanly"}'
+        values: "50x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyHangDoiXuatDay
+        exp_alerts: []
+
+  # ── Mất sạch target: `up == 0` KHÔNG bắt được ca này ─────────────────────
+  - interval: 1m
+    name: "Không còn chuỗi up nào → absent() phải kêu"
+    input_series:
+      - series: 'http_requests_total{status="200", job="quanly"}'
+        values: "1x30" # có số liệu khác, nhưng KHÔNG có `up`
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongConTargetNao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Không còn target QuanLY nào trong Prometheus"
+              description: >-
+                Không có chuỗi `up{job=~"quanly.*"}` nào tồn tại. Khác hẳn "scrape hỏng": ở đây
+                Prometheus không biết là CÓ thứ cần scrape. Thường do ServiceMonitor bị xoá, nhãn
+                release không khớp, hoặc đổi tên job.
+              runbook: "infra/helm/quanly/templates/sa.yaml — ServiceMonitor"
+      - eval_time: 15m
+        alertname: QuanlyMetricsKhongScrapeDuoc
+        exp_alerts: [] # không có target thì `up == 0` im — đó chính là lý do cần absent()
+
+  # ── Crash loop ───────────────────────────────────────────────────────────
+  - interval: 1m
+    name: "Tiến trình liên tục trẻ hơn 10 phút → crash loop"
+    input_series:
+      # Mốc khởi động NHÍCH THEO thời gian: mỗi phút lại là một tiến trình mới → tuổi luôn ~1 phút.
+      - series: 'process_start_time_seconds{instance="app-1", job="quanly"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QuanlyTienTrinhKhoiDongLaiLienTuc
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "app-1 khởi động lại liên tục"
+              description: >-
+                Tuổi tiến trình liên tục dưới 10 phút trong suốt 20 phút. Nguyên nhân đã gặp: lệnh khởi
+                động trỏ vào file không tồn tại, hoặc src/config.ts `process.exit(1)` vì thiếu biến bắt
+                buộc ở production (SESSION_SECRET/JWT_SECRET/APP_BASE_URL/MFA_ENC_KEY).
+              runbook: "src/config.ts — các chốt chỉ bật ở production"

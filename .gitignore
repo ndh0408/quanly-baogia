@@ -115,3 +115,7 @@ dump.rdb
 
 # Ảnh màn hình khi scripts/ci/ui-smoke.mjs đỏ — vật phẩm gỡ lỗi, không phải mã nguồn.
 .ui-smoke/
+
+# SBOM sinh ra bởi scripts/ci/security-scan.sh — dựng lại được từ package-lock.json,
+# không phải mã nguồn. Bản đi kèm mỗi lần phát hành thì lưu ở nơi phát hành, không lưu ở đây.
+sbom.cdx.json

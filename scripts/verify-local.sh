@@ -174,6 +174,11 @@ if command -v helm >/dev/null 2>&1; then
 else
   printf '  \033[33m— helm không có trên máy này, bỏ qua cổng chart\033[0m\n'
 fi
+# Quy tắc cảnh báo Prometheus: cú pháp, LOGIC (promtool test rules trên chuỗi số liệu giả), và
+# tên metric có thật trong src/observability.ts. Lớp thứ hai là lớp duy nhất bắt được lỗi logic —
+# đã kiểm ngược: rút gọn biểu thức SSE thành `sse_backplane_up == 0` thì `check rules` vẫn SUCCESS
+# còn `test rules` ĐỎ. Không có promtool thì hai lớp đầu tự bỏ qua, lớp thứ ba vẫn chạy.
+node scripts/ci/check-alerts.mjs >/dev/null 2>&1;                   ket $? "check-alerts (chi tiết: npm run check:alerts)"
 
 buoc "[9/12] Phụ thuộc"
 # CỔNG CỨNG. Trước đây chỉ là cảnh báo vì advisory GHSA-ggr8-5vv4-36mx đi theo `deepmerge-ts@7.1.5`
@@ -223,6 +228,20 @@ if [ "$NHANH" -eq 0 ]; then
   fi
 else
   buoc "[11/12] Bỏ qua smoke giao diện (--nhanh)"
+fi
+
+# ── [12/12] BỐN CỔNG BẢO MẬT ────────────────────────────────────────────────
+# `.github/workflows/ci.yml` job `security` đã khai đủ gitleaks + trivy + semgrep + SBOM từ lâu,
+# nhưng tài khoản GitHub không bật Actions nên nó CHƯA BAO GIỜ CHẠY. Lượt chạy thật đầu tiên
+# (2026-08-27) cho ra hai lỗi im lặng: `.gitleaks.toml` viết allowlist bằng cú pháp `[[allowlists]]`
+# mà gitleaks v8.21.2 BỎ QUA, và `.trivyignore.yaml` ghi ID thiếu tiền tố `AVD-` nên miễn trừ vô
+# tác dụng. Cả hai đều là "repo tưởng mình có chốt".
+# Mất ~25 giây khi image và cache đã có sẵn.
+if [ "$NHANH" -eq 0 ]; then
+  buoc "[12/12] Bảo mật (gitleaks · trivy · semgrep · SBOM)"
+  bash scripts/ci/security-scan.sh >/dev/null 2>&1;                 ket $? "security-scan (chi tiết: npm run scan)"
+else
+  buoc "[12/12] Bỏ qua cổng bảo mật (--nhanh)"
 fi
 
 if [ "$do" -eq 0 ]; then
