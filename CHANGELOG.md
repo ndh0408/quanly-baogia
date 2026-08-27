@@ -12,12 +12,15 @@ Hệ thống **không đánh phiên bản theo semver** — nó là công cụ n
 không phát hành gói. Nên nhật ký gom **theo ngày**, và "phiên bản" của một bản triển khai chính là
 git SHA của nó (xem [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md)).
 
-**101 commit**, từ 2026-08-11 tới 2026-08-27.
+**104 commit**, từ 2026-08-11 tới 2026-08-27.
 
 ---
 
 ## 2026-08-27
 
+- `eb782c4` docs: báo cáo tổng kết theo §53 (A–L), sau khi verify 13 bước xanh trọn
+- `3925941` docs: đối chiếu lại phần "PHASE 4 hụt hẳn" — nó không còn đúng, và Excel import xếp lại là KEEP
+- `3f5f52e` docs: sinh lại CHANGELOG theo lịch sử git
 - `81e1f51` §9 phân trang một chỗ · §2 khoá ranh giới bằng cổng thay vì đổi cây thư mục · §0 hai loại nhãn còn thiếu
 - `97cc155` Đo trước rồi mới sửa: lưu báo giá nhanh 3,5× · index còn thiếu · log đủ trường · Loki+Grafana
 - `4b7a56b` Ba khoảng trống hồi quy được vá: IME tiếng Việt, phiên hết hạn, và bản nháp cục bộ
