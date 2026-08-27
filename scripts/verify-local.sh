@@ -7,7 +7,7 @@
 #                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/12] phụ
 #                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
-# ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
+# ── VÌ SAO TỒN TẠI ──────────────────────────────────────────
 # CI trên GitHub KHÔNG chạy được (tài khoản không bật Actions). Nghĩa là mọi câu kiểu
 # "cứ đẩy lên, CI sẽ bắt" đều SAI ở repo này: cổng duy nhất thật sự chạy là cổng bạn
 # gõ tay. File này gom đúng những gì .github/workflows/ci.yml khai, để một lệnh là đủ.
@@ -109,7 +109,7 @@ curl -fsS --noproxy '*' -o /dev/null "$S3_ENDPOINT/minio/health/live" 2>/dev/nul
 ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data --address :9000)"
 [ "$do" -eq 0 ] || { printf '\n\033[31mDỪNG: thiếu hạ tầng. Chạy tiếp cũng chỉ ra một dòng "skipped" trông như xanh.\033[0m\n'; exit 1; }
 
-# ── CÂY PHỤ THUỘC PHẢI KHỚP LOCKFILE ──────────────────────────────────────
+# ── CÂY PHỤ THUỘC PHẢI KHỚP LOCKFILE ────────────────────────────────
 # Không cổng nào từng kiểm chuyện này. Sửa `package.json` mà quên `npm install` thì lockfile lệch,
 # và MỌI bước sau chạy trên bộ thư viện KHÁC với bộ mà `npm ci` sẽ cài trên máy khác / trong Docker
 # — tức cổng xanh nói về một cây phụ thuộc không ai khác có.
@@ -122,7 +122,7 @@ buoc "[1/12] Prisma client + migrate"
 npx prisma generate >/dev/null 2>&1;                                ket $? "prisma generate"
 npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "prisma migrate deploy"
 
-# ── BÀI ĐO PHẢI CHẠY RIÊNG, VÀ PHẢI CHẠY TRƯỚC ─────────────────────────────
+# ── BÀI ĐO PHẢI CHẠY RIÊNG, VÀ PHẢI CHẠY TRƯỚC ───────────────────────
 # tests/b2-update-quote-no-image-read.test.js có 2 bài đọc `pg_statio_all_tables` — bộ đếm TOÀN
 # CSDL, không phải của riêng một bài. Chạy song song với 161 file khác thì bài khác cũng đụng cùng
 # bảng và con số nhảy → đỏ vì lý do sai. Nên chúng nằm sau cờ DO_TOAST_MEASURE=1.
@@ -171,7 +171,7 @@ buoc "[2/12] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
 (cd web && npx tsc --noEmit -p tsconfig.json);                      ket $? "tsc (web)"
 
-# ── BUILD PHẢI ĐỨNG TRƯỚC TEST ──────────────────────────────────────────────
+# ── BUILD PHẢI ĐỨNG TRƯỚC TEST ─────────────────────────────────────
 # tests/pii-rotate-safety.test.js chạy `node dist/tools/piiRotate.js` — một artifact BIÊN DỊCH.
 # Trước đây build nằm CHUNG với bước build web, tức SAU test: bộ test kiểm dist/ của LẦN CHẠY TRƯỚC.
 # ĐO ĐƯỢC: xoá sạch src/tools/piiRotate.ts còn đúng `export {};` rồi chạy file test đó →
@@ -213,6 +213,9 @@ node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo
 # dấu đóng lẻ / quá cuối file). Phần mờ (trỏ vào dòng chú thích) chỉ được liệt kê, không làm
 # đỏ — một cổng hay báo động giả sẽ bị người ta tắt, lúc đó còn tệ hơn không có cổng nào.
 node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check-line-refs (chú thích trỏ file:dòng)"
+# CHANGELOG.md sinh từ `git log`, không viết tay (§34: không ghi số liệu dễ trôi bằng tay). Cổng
+# này bắt lúc nó lệch khỏi lịch sử — tức lúc ai đó sửa tay hoặc quên sinh lại sau khi commit.
+node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run check:changelog)"
 
 buoc "[8/12] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
@@ -262,7 +265,7 @@ else
   buoc "[10/12] Bỏ qua smoke image (--nhanh)"
 fi
 
-# ── [11/12] GIAO DIỆN THẬT TRONG TRÌNH DUYỆT THẬT ──────────────────────────
+# ── [11/12] GIAO DIỆN THẬT TRONG TRÌNH DUYỆT THẬT ───────────────────────
 # 187 bài vitest của web/ chạy trên jsdom với component MOUNT LẺ — không bài nào nạp bundle ĐÃ
 # BUILD qua Express thật. Bước này mở Chromium, đăng nhập, mở trình soạn, GÕ vào ô đơn giá và đòi
 # Thành Tiền tính đúng; rồi chốt "không lỗi console, không request hỏng" suốt lượt chạy.
@@ -281,7 +284,7 @@ else
   buoc "[11/12] Bỏ qua smoke giao diện (--nhanh)"
 fi
 
-# ── [12/12] BỐN CỔNG BẢO MẬT ────────────────────────────────────────────────
+# ── [12/12] BỐN CỔNG BẢO MẬT ──────────────────────────────────────
 # `.github/workflows/ci.yml` job `security` đã khai đủ gitleaks + trivy + semgrep + SBOM từ lâu,
 # nhưng tài khoản GitHub không bật Actions nên nó CHƯA BAO GIỜ CHẠY. Lượt chạy thật đầu tiên
 # (2026-08-27) cho ra hai lỗi im lặng: `.gitleaks.toml` viết allowlist bằng cú pháp `[[allowlists]]`
