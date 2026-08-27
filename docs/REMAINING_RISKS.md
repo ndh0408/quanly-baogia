@@ -304,6 +304,140 @@ Cột "hệ quả nếu đúng" là lập luận của người rà soát, **ch�
 
 ---
 
+## Đối chiếu PHASE của MASTER PROMPT — cái gì XONG, cái gì CHƯA (2026-08-27)
+
+Đối chiếu mục **49. THỨ TỰ TRIỂN KHAI** (PHASE 0→9) của prompt gốc với repo ở HEAD.
+Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
+
+| Phase | Trạng thái | Bằng chứng / chỗ hụt |
+|---|---|---|
+| 0 · Baseline | **xong** | `docs/` 26 file, 6 ADR, `web/src/bench.tsx`, 166 file test |
+| 1 · P0 Production Risk | **xong** | `scripts/backup/backup-objects.sh` · `BACKUP_RESTORE.md` + `DISASTER_RECOVERY.md` · `src/tools/piiRotate.ts` + `verifyIntegrity.ts` · 31 file test bảo mật |
+| 2 · Security | **xong** | ADR-0005 CSRF · `ROLES_PERMISSIONS.md` + `endpoint-inventory.mjs` (137/137 hai chiều) · break-glass ở `userService.ts` |
+| 3 · Production Runtime | **xong** | `tsconfig.build.json` · 4 khối `cap_drop` trong compose · `exportGateStats` |
+| 4 · CI/CD | **CHƯA — xem dưới** | mọi thứ nằm trong `.github/workflows/ci.yml`, mà file đó **không chạy** |
+| 5 · Observability | **một phần** | có: `src/observability.ts`, `SLO.md`, `/metrics`. Thiếu: **không một rule cảnh báo nào**; Loki/Grafana mới chỉ có trong `MONITORING.md`, chưa có cấu hình chạy |
+| 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
+| 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
+| 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
+| 9 · Final QA | **một phần** | `npm run verify` xanh trọn (1271 test + web 187). Thiếu: quét bảo mật và mô phỏng deploy **chưa chạy thật lần nào** |
+
+### PHASE 4 hụt hẳn — và đây là chỗ hụt lớn nhất còn lại
+
+Prompt đòi 5 thứ. Đo ở HEAD:
+
+| Đòi | Thật |
+|---|---|
+| Playwright smoke | **không có** — `find . -name "*e2e*"` ra 0, `package.json` không có playwright |
+| Helm checks | chỉ `helm lint`; 4 bất biến chart trong `ci.yml` (render đầy đủ, từ chối `image.tag=latest`, từ chối mật khẩu rỗng, kubeconform) **không chạy ở đâu** |
+| Docker smoke | **không có** — không nơi nào dựng image rồi thử nó |
+| SBOM | chỉ là văn bản trong `ci.yml` |
+| Ghim nguồn cung | **có** — 2 image ghim `sha256:` trong compose |
+
+Gốc rễ: tài khoản GitHub không bật Actions, nên `ci.yml` là **tài liệu về những cổng
+cần chạy, không phải cổng đang chạy**. `scripts/verify-local.sh` thay được phần lớn,
+nhưng **không** thay được ba thứ cần Docker/trình duyệt: smoke test artifact
+production, dựng + smoke image Docker, và job `security` (gitleaks · trivy · semgrep).
+
+Chúng canh đúng thứ đi ra production, mà hiện không ai canh cả. Đây là việc đáng làm
+tiếp nhất.
+
+### Những mục nhỏ hơn còn mở
+
+- `verify-local.sh` bước `[0/9]` kiểm Postgres/Redis ở địa chỉ **mặc định**, không phải
+  địa chỉ trong `DATABASE_URL`/`REDIS_URL` (chốt hạ tầng mới đã ép chúng phải cục bộ,
+  nên hậu quả hẹp lại — nhưng vẫn là kiểm nhầm thứ).
+- Không bước nào chạy `npm ci`: `package.json` lệch `package-lock.json` thì verify vẫn
+  xanh, còn Docker và `ci.yml` đỏ ngay ở bước cài.
+- `npm run build` ở bước `[2b]` **không dọn** `dist/`. Xoá một file nguồn thì artifact cũ
+  nằm lại và bài `node dist/...` vẫn xanh. (Đã kiểm: hiện **0 file mồ côi**, và Dockerfile
+  dựng `dist/` trong container sạch nên production không dính. Rủi ro chỉ ở máy local.)
+- Ngưỡng của `tests/b2-update-quote-no-image-read.test.js` tự hiệu chuẩn từ một phép đo
+  **chỉ có chặn dưới** (`toBeGreaterThan(200)`). Một lượt hiệu chuẩn bị nhiễu đẩy ngưỡng
+  lên cao sẽ làm khẳng định chính trở nên rỗng mà không ai biết.
+- Bước `[1b]` in ✓ kể cả khi **không bài đo nào chạy** — nó không khẳng định phép đo đã
+  thật sự diễn ra (chỉ khẳng định lệnh thoát 0).
+
+### Định nghĩa HOÀN THÀNH (mục 52) — chỗ chưa đạt
+
+Mọi ô khác đã đạt. Ba ô chưa:
+
+- **Security → security scans pass**: chưa chạy thật lần nào (gitleaks/trivy/semgrep).
+- **Operations → dashboards, alerts**: không có rule cảnh báo, không có dashboard chạy.
+- **Backup → off-host copy**: script có, nhưng chưa có bằng chứng đã chạy trên máy chủ thật.
+
+## Đối chiếu PHỤ LỤC "TECHNOLOGY MODERNIZATION & MIGRATION AUTHORITY" (2026-08-27)
+
+Phụ lục này nằm ngay sau mục 52 của MASTER PROMPT, gồm 21 mục. Tinh thần của nó (mục 21):
+chọn **công nghệ đơn giản nhất đủ đáp ứng 3–5 năm tới**, không giữ bằng mọi giá và cũng
+không thay bằng mọi giá.
+
+Phần lớn phụ lục là các quyết định **giữ nguyên có lý do**, và mục 2 mô tả "PREFERRED
+TARGET STACK" đúng bằng thứ repo đang chạy:
+
+```
+React SPA → Express → Domain/Service → Prisma → PostgreSQL
+Redis (session · rate limit phân tán · Pub/Sub · BullMQ) · BullMQ workers
+Storage Adapter → kho object S3-compatible
+```
+
+| Mục | Trạng thái | Ghi chú |
+|---|---|---|
+| 1 · Decision matrix | áp dụng | mọi quyết định giữ/thay đều ghi lý do trong ADR |
+| 2 · Preferred target stack | **khớp sẵn** | không phải làm gì — repo đã đúng hình dạng đó |
+| 3 · TypeScript production | **xong** | `tsx src/server.ts` → `node dist/server.js`; 5 chỗ dùng `dist/` (Dockerfile + Helm); ADR-0002 |
+| 4 · Background job | giữ BullMQ | đúng khuyến nghị |
+| 5 · Redis | giữ | đúng khuyến nghị |
+| 6 · Realtime | giữ SSE | ADR-0004 ghi lý do không dùng WebSocket |
+| 7 · Storage | **xong** | Storage Adapter → S3; ADR-0003 |
+| 8 · Auth | giữ | session + Bearer + MFA |
+| 9 · Database | giữ PostgreSQL | đúng khuyến nghị |
+| 10 · ORM | giữ Prisma | đúng khuyến nghị |
+| 11 · Framework | giữ Express | đúng khuyến nghị |
+| 12 · Microservices | **cố ý KHÔNG** | ADR-0001 modular monolith |
+| 13 · Message broker | **cố ý KHÔNG Kafka** | BullMQ đủ cho tải thật |
+| 14 · Search | giữ PostgreSQL | cột `searchText` trong `schema.prisma` |
+| 15 · Deployment | Level 1→2 | compose đang chạy; Helm/k8s sẵn sàng nhưng chưa bắt buộc |
+| 16 · Observability | **CHƯA XONG** | xem dưới |
+| 17 · Secrets | **CHƯA XONG** | xem dưới |
+| 18 · Build & release | **một phần — theo quyết định của chủ dự án** | xem dưới |
+| 19 · Migration rule | tuân thủ | không có big-bang migration nào trong đợt này |
+| 20 · Implement, don't recommend | tuân thủ | mọi phát hiện đều vá + test + kiểm ngược, không dừng ở báo cáo |
+| 21 · Final target | tuân thủ | không thêm công nghệ nào mới |
+
+### 16 · Observability — thiếu nửa sau của chuỗi
+
+Có: Pino (`src/logger.ts`), Prometheus (`src/observability.ts`, `/metrics` cho cả app lẫn
+worker), Sentry, `SLO.md`.
+
+Thiếu: **Loki và Grafana mới chỉ tồn tại trong `docs/operations/MONITORING.md`** — không có
+cấu hình chạy, không có datasource, không có dashboard. Và **không một rule cảnh báo nào**
+(`find infra -iname "*alert*"` ra rỗng).
+
+Nghĩa là: số liệu có được sinh ra, nhưng không ai đang nhìn và không gì đánh thức người
+trực. `SLO.md` mô tả mục tiêu mà không có thứ gì đo được vi phạm.
+
+### 17 · Secrets — chưa có lớp trừu tượng
+
+Phụ lục đòi thiết kế abstraction để production dùng được Docker secrets / Kubernetes
+Secrets / Vault. Hiện `src/config.ts` chỉ đọc `process.env`; không có quy ước `*_FILE`
+(cách chuẩn để nhận Docker/K8s secret dạng file), không có lớp nạp thay thế.
+
+Hệ quả thực tế hôm nay: hẹp — mọi bí mật đi qua `.env` trên VM. Nhưng nó chặn đường lên
+Level 2/3 của mục 15, vì Helm/k8s muốn dùng Secret dạng file thì ứng dụng phải đọc được.
+
+### 18 · Build & release — lệch có CHỦ Ý, không phải bỏ sót
+
+Phụ lục viết: *"Production không build source lại trên server."* Hiện `deploy.sh` **mặc định
+vẫn `docker compose build` ngay trên VM**.
+
+Đây **không phải** thiếu sót của đợt này. Khi được hỏi, chủ dự án đã chọn: *"Thêm đường kéo
+digest, mặc định giữ nguyên"*. Nên đường kéo theo digest đã được làm (`IMAGE_REF=…`, 11 chỗ
+tham chiếu trong `deploy.sh`) và để **tuỳ chọn**; mặc định giữ build-trên-VM theo đúng ý đó.
+
+Muốn tuân thủ hẳn mục 18 thì phải đảo mặc định — và điều đó cần CI dựng image, tức phụ
+thuộc PHASE 4 ở mục trên. Hai việc này đi cùng nhau.
+
 ## Ghim phụ thuộc bằng `overrides` (2026-08-27)
 
 `package.json` có ba mục `overrides`. Chúng KHÔNG có chỗ ghi chú (npm từ chối khoá `"//"` bên
