@@ -187,6 +187,16 @@ describe("PDF — tiêu đề bảng của sheet KHÔNG TÊN không được v�
 const DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf";
 const DEJAVU2 = "/usr/share/fonts/dejavu/DejaVuSerif.ttf";   // đường dẫn trong image (Dockerfile)
 const dejavu = [DEJAVU, DEJAVU2].find((p) => fs.existsSync(p));
+// Cùng lý do với tests/pii-rotate-safety.test.js: dưới REQUIRE_DB_TESTS=1 thì thiếu điều kiện phải
+// là ĐỎ, không phải bỏ qua âm thầm. Thiếu phông DejaVu là 9 bài dưới đây lặng lẽ biến mất, mà đó
+// đúng là nhóm ghim con số bố cục PDF (+60% số trang) — thứ dễ trôi nhất khi ai đó "tối ưu" pdf.ts.
+// Phông có sẵn ở gói `fonts-dejavu-core` (Debian/Ubuntu) hoặc `font-dejavu` (Alpine, đúng gói mà
+// Dockerfile cài).
+if (!dejavu && process.env.REQUIRE_DB_TESTS === "1") {
+  throw new Error(
+    `REQUIRE_DB_TESTS=1 nhưng không tìm thấy DejaVuSerif.ttf (đã tìm: ${DEJAVU}, ${DEJAVU2}). ` +
+    "9 bài ghim bố cục PDF sẽ bị bỏ qua âm thầm. Cài: apt-get install fonts-dejavu-core");
+}
 
 describe.skipIf(!dejavu)("PDF — bản vá CÓ dàn lại trang (ghim con số đã đo)", () => {
   /** Chiều cao hàng theo ĐÚNG hai công thức: cũ đếm "\n", mới đo bằng heightOfString. */

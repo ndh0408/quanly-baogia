@@ -220,7 +220,9 @@ export const processors = {
         // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
         // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
         // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
-        // Công thức dưới đây khớp ĐÚNG src/routes/export.routes.ts (safeName ở :118 và :169).
+        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
+        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
+        // chính lượt vá gộp hàm đã xoá.)
         const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "xlsx") });
         return { key, url, size: buf.length };
       }
@@ -266,7 +268,9 @@ export const processors = {
         // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
         // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
         // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
-        // Công thức dưới đây khớp ĐÚNG src/routes/export.routes.ts (safeName ở :118 và :169).
+        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
+        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
+        // chính lượt vá gộp hàm đã xoá.)
         const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "pdf") });
         return { key, url, size: buf.length };
       }

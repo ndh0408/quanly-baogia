@@ -6,7 +6,7 @@
 // Cột đó do migration 20260625000003 thêm với `NOT NULL DEFAULT 0`, nên MỌI sheet lưu TRƯỚC ngày
 // đó mang giá trị 0 cho tới khi ai đó chạy tay `prisma/backfill-sheet-subtotal.mjs`.
 // `buildProjectRef` CHỈ đọc báo giá `status:"converted"`, mà converted là BẤT BIẾN
-// (canEdit ở src/quoteUtils.ts:19 trả false) ⇒ những sheet đó KHÔNG BAO GIỜ được lưu lại để cột
+// (canEdit ở src/quoteUtils.ts (hàm `canEdit`) trả false) ⇒ những sheet đó KHÔNG BAO GIỜ được lưu lại để cột
 // được ghi. Cột là NOT NULL nên nhánh dự phòng `sh.subtotal != null ? … : q.subtotal` không bao
 // giờ chạy: 0 được coi là số hợp lệ.
 //

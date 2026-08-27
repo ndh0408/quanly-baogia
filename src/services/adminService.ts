@@ -49,7 +49,7 @@ export async function purgeSoftDeleted(req: Request) {
     // hàng loạt đặt actorId = NULL trên mọi nhật ký của người đó: dòng còn, người mất.
     //
     // PHẠM VI cửa này RỘNG, không phải một nhóm vai trò hẹp, và cũng không chỉ là đăng nhập THÀNH
-    // CÔNG. Sáu đường dưới đây đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
+    // CÔNG. MƯỜI vị trí gọi dưới đây (chín mã hành động) đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
     // AuditEvent mang tên chính chủ tài khoản:
     //   · src/routes/auth.routes.ts:93/135/186 — login.success / logout / login.token
     //   · src/authCore.ts:173/214/245          — login.locked / login.failed / login.mfa.failed

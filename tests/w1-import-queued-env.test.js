@@ -81,36 +81,58 @@ describe("W1 — soNguyen: từng nhánh", () => {
   });
 });
 
-// ── SỐ DÒNG TRONG .env.example PHẢI TRỎ ĐÚNG CHỖ ────────────────────────────
-// Khối chú thích IMPORT_* của .env.example dẫn người đọc tới đúng dòng khai báo trong
-// src/routes/import.routes.ts. Ba trong năm số đó đã trôi một lần (75/76/79 trong khi thực tế là
-// 94/95/98) — không có gì làm chúng đỏ nên chúng sống qua nhiều lượt sửa. Bài này ĐỌC số ghi
-// trong .env.example rồi đòi dòng ấy trong mã nguồn phải thật sự khai đúng biến đó.
+// ── .env.example PHẢI MÔ TẢ ĐÚNG NĂM BIẾN, VÀ MẶC ĐỊNH PHẢI KHỚP MÃ NGUỒN ──
+// Bản đầu của khối này canh SỐ DÒNG: ".env.example nói IMPORT_X khai ở dòng N" rồi kiểm dòng N.
+// Nó bắt được thật (và bắt đúng chính tôi, ngay sau khi tôi thêm dòng vào import.routes.ts) —
+// nhưng nó canh một thứ vốn không đáng tồn tại. Số dòng trong tài liệu trôi mỗi lần có người sửa
+// file đích; giữ nó nghĩa là ký hợp đồng sửa vặt mãi mãi.
 //
-// Ghi chú tham chiếu bằng SỐ DÒNG vốn mong manh. Giữ được vì nó rẻ, và vì có bài test này thì lần
-// trôi kế tiếp là một dòng đỏ chứ không phải một người đọc bị dẫn sai chỗ.
-describe("W1 — .env.example trỏ đúng dòng khai báo IMPORT_*", () => {
+// Nay .env.example trỏ bằng TÊN BIẾN, không số dòng. Thứ đáng canh không còn là vị trí mà là
+// NỘI DUNG: tài liệu có nêu đủ năm biến không, và CON SỐ MẶC ĐỊNH nó hứa có đúng với mã không —
+// một mặc định ghi sai còn tai hại hơn một số dòng lệch, vì người vận hành tin nó mà đặt cấu hình.
+describe("W1 — .env.example mô tả đúng năm biến IMPORT_*", () => {
   const goc = new URL("..", import.meta.url).pathname;
   const doc = (p) => readFileSync(join(goc, p), "utf8");
 
-  it("mỗi '(dòng N)' trong khối IMPORT_* trỏ tới đúng dòng khai báo biến ấy", () => {
+  it("nêu đủ NĂM biến, và tên khớp mã nguồn", () => {
     const env = doc(".env.example");
-    const maNguon = doc("src/routes/import.routes.ts").split("\n");
-
-    // Bắt các dòng dạng `#   IMPORT_XXX  : … (dòng N).`
-    const cap = [...env.matchAll(/^#\s+(IMPORT_[A-Z_]+)\s*:[^\n]*?\(dòng (\d+)\)/gm)]
-      .map((m) => [m[1], Number(m[2])]);
-    expect(cap.length, "khối chú thích IMPORT_* trong .env.example biến mất hoặc đổi dạng")
-      .toBe(5);
-
-    for (const [ten, so] of cap) {
-      const dong = maNguon[so - 1] ?? "";
-      // Thông báo NÓI LUÔN số đúng: chú thích kiểu này trôi mỗi lần ai đó thêm dòng vào
-      // import.routes.ts, nên bắt được thôi chưa đủ — phải sửa được ngay mà không phải đi đếm.
-      const dungLa = maNguon.findIndex((l) => new RegExp(`^const ${ten}\\s*=`).test(l)) + 1;
-      expect(dong, `.env.example nói ${ten} khai ở dòng ${so}, nhưng dòng đó là: ${dong.trim()}`
-        + (dungLa ? ` — SỬA THÀNH "(dòng ${dungLa})".` : ` — không tìm thấy khai báo ${ten} nào.`))
-        .toMatch(new RegExp(`^const ${ten}\\s*=`));
+    const ma = doc("src/routes/import.routes.ts");
+    // Lọc theo `process.env`: `IMPORT_WORKER_URL` cũng bắt đầu bằng IMPORT_ nhưng là `new URL(...)`,
+    // không phải nút cấu hình — đưa nó vào là đòi tài liệu mô tả một thứ người vận hành không đặt được.
+    const trongMa = [...ma.matchAll(/^const (IMPORT_[A-Z_]+)\s*=\s*(.+)$/gm)]
+      .filter((m) => m[2].includes("process.env"))
+      .map((m) => m[1]).sort();
+    expect(trongMa.length, "số biến IMPORT_* trong mã đã đổi").toBe(5);
+    for (const ten of trongMa) {
+      expect(env, `.env.example không nhắc ${ten} — người vận hành không biết nó tồn tại`)
+        .toMatch(new RegExp(`^#\\s+${ten}\\s*:`, "m"));
     }
+  });
+
+  it("CON SỐ MẶC ĐỊNH trong tài liệu khớp mã nguồn", () => {
+    const env = doc(".env.example");
+    const ma = doc("src/routes/import.routes.ts");
+    // Lấy mặc định thật từ mã: `soNguyen(process.env.X, <mac>, <san>)` hoặc `|| <mac>`.
+    const thatSu = {};
+    for (const m of ma.matchAll(/^const (IMPORT_[A-Z_]+)\s*=\s*(.+)$/gm)) {
+      if (!m[2].includes("process.env")) continue;   // xem chú thích ở bài trên
+      const so = [...m[2].matchAll(/(\d[\d_]*)/g)].map((x) => Number(x[1].replace(/_/g, "")));
+      // Math.max(san, Number(env) || mac) → số lớn nhất là mặc định; soNguyen(env, mac, san) → mac trước san.
+      thatSu[m[1]] = /Math\.max/.test(m[2]) ? Math.max(...so) : so[0];
+    }
+    for (const [ten, mac] of Object.entries(thatSu)) {
+      const dong = new RegExp(`^#\\s+${ten}\\s*:[^\\n]*$`, "m").exec(env)?.[0] ?? "";
+      expect(dong, `.env.example không có dòng mô tả ${ten}`).not.toBe("");
+      expect(dong.replace(/_/g, ""),
+        `.env.example hứa mặc định khác mã nguồn cho ${ten} (mã: ${mac}) — dòng: ${dong.trim()}`)
+        .toMatch(new RegExp(`Mặc định ${mac}\\b`));
+    }
+  });
+
+  it("KHÔNG quay lại ghi số dòng trong khối IMPORT_*", () => {
+    const env = doc(".env.example");
+    const khoi = env.slice(env.indexOf("IMPORT_TIMEOUT_MS     :"), env.indexOf("# IMPORT_WAIT_MS="));
+    const lac = [...khoi.matchAll(/\(dòng \d+\)/g)].map((m) => m[0]);
+    expect(lac, `số dòng trôi mỗi lần sửa import.routes.ts — dùng tên biến: ${lac.join(", ")}`).toEqual([]);
   });
 });

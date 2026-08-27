@@ -120,6 +120,17 @@ if (config.REDIS_URL) {
       // Gán `pub` Ở ĐÂY, sau `await subscribe`. Trước thời điểm này `publish()` rơi về `localPublish`:
       // instance khác vẫn không nhận được, nhưng người đang ngồi trên chính instance này THÌ CÓ —
       // hơn hẳn "không ai nhận được".
+      // ── REDIS CHẾT RỒI SỐNG LẠI: ĐÃ ĐO, KHÔNG CẦN VÁ THÊM ─────────────────
+      // Một vòng phản biện nghi rằng subscriber không tự nối lại, làm mất hàng chục sự kiện âm
+      // thầm. ĐO THẬT (giết `redis-cli shutdown nosave`, chờ, `redis-server` lại):
+      //   · ioredis TỰ SUBSCRIBE LẠI — sự kiện phát sau khi hồi phục VẪN TỚI nơi;
+      //   · publish TRONG LÚC Redis chết thì NÉM ("Stream isn't writeable…", vì
+      //     `backplaneOptions("pub")` tắt hàng đợi ngoại tuyến) → rơi vào `.catch(roiVeCucBo)` →
+      //     `sseBackplaneUp` xuống 0 và sự kiện được phát CỤC BỘ.
+      // Nghĩa là không có chuyện "mất im lặng": người trên chính instance này vẫn nhận được, và
+      // gauge báo hỏng. Thứ THẬT SỰ mất là sự kiện tới người dùng trên INSTANCE KHÁC trong quãng
+      // Redis chết — đó là bản chất của pub/sub không bộ đệm, và là đánh đổi đã cân ở khối
+      // `roiVeCucBo` bên dưới. Muốn đóng nốt thì phải đổi sang Redis Streams; đừng vá lặt vặt.
       pub = pubClient;
       sseBackplaneUp.set(1);
       logger.info("SSE Redis pub/sub backplane enabled");

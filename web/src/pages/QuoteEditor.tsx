@@ -90,7 +90,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // ra. Nay không còn chỉ báo đó — nút phải tự nói.
   //
   // ⚠️ HOOK PHẢI Ở ĐÂY, cạnh các hook khác. Bản đầu tôi khai nó ngay trên `exportFile` (dòng ~375),
-  // tức SAU hai early return ở dòng 197-198 (`if (err) return …` / `if (!ready) return …`) — React
+  // tức SAU hai early return `if (err) return …` và `if (!ready || !qRef.current) return …` — React
   // gọi hook theo THỨ TỰ, nên một hook nằm sau early return sẽ khiến thứ tự đổi giữa các lượt
   // render và toàn bộ state của component lệch nhau. eslint (react-hooks/rules-of-hooks) bắt được;
   // đừng chuyển nó xuống lại cho "gần chỗ dùng".

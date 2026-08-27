@@ -35,7 +35,7 @@ services:
     #            `docker_create_db_directories` được gọi ở dòng 340 TRƯỚC nhánh `id -u = 0`, tức
     #            nó chạy LẠI sau `exec gosu` dưới uid 70 — lúc đó postgres là CHỦ thư mục nên
     #            chmod thành công mà không cần capability nào. Vẫn GIỮ vì hai lý do: nhánh
-    #            POSTGRES_INITDB_WALDIR (dòng 54) chmod KHÔNG có `|| :` nên sẽ chết thật nếu ai đó
+    #            POSTGRES_INITDB_WALDIR (`chmod 700 "$POSTGRES_INITDB_WALDIR"`) KHÔNG có `|| :` nên sẽ chết thật nếu ai đó
     #            đặt biến ấy, và bỏ FOWNER làm mỗi lượt khởi động in ra `chmod: …: Operation not
     #            permitted` — một dòng báo động giả rất tốn thời gian lúc đang xử lý sự cố.
     # KHÔNG phải su-exec như chú thích cũ ghi: ảnh alpine cài gosu 1.19 thật (ELF 1.7MB), còn

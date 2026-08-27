@@ -164,6 +164,13 @@ describe("LỖI 3 — công cụ xoay khoá phải CÓ THẬT trong artifact bi�
 import { prisma as prismaDb } from "../src/db.js";
 
 const dbOk = await prismaDb.$queryRawUnsafe('SELECT 1 FROM "PersonnelRecord" LIMIT 1').then(() => true).catch(() => false);
+// REQUIRE_DB_TESTS=1 nghĩa là "thiếu hạ tầng thì ĐỎ, đừng bỏ qua âm thầm" — nhãn của bước [4/9]
+// trong scripts/verify-local.sh khẳng định đúng thế. File này TỪNG không tuân: mất CSDL thì
+// `describe.runIf(dbOk)` lặng lẽ bỏ 3 bài và cổng vẫn xanh, đúng lớp lỗi ngầm mà cờ ấy sinh ra để
+// chặn. Một cổng nói "đã kiểm" về thứ nó không hề kiểm thì tệ hơn không có cổng.
+if (!dbOk && process.env.REQUIRE_DB_TESTS === "1") {
+  throw new Error("REQUIRE_DB_TESTS=1 nhưng không đọc được bảng PersonnelRecord — nhóm 'xoay khoá không ghi đè' sẽ bị bỏ qua âm thầm");
+}
 const TAG_R = `rot${Date.now()}`;
 
 describe.runIf(dbOk)("LỖI 2 — xoay khoá KHÔNG được ghi đè bản ghi người dùng vừa sửa", () => {

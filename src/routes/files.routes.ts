@@ -209,10 +209,11 @@ router.get(
     //
     // KHÔNG ngoại lệ theo tiền tố. Bản trước miễn trừ `logos/` với lý do "SPA xin chữ ký cho logo ở
     // gần như mỗi lần mở báo giá"; đo lại thì lý do đó sai:
-    //   grep -rn "sign-download\|signDownload" web/src --include=*.ts --include=*.tsx | grep -v '\.test\.'
-    // ra ĐÚNG MỘT dòng — web/src/pages/Audit.tsx:58 — và đó là NHÃN tiếng Việt của mã hành động
-    // trong bộ lọc trang Nhật ký, không phải lời gọi. (Bỏ `grep -v` thì ra 2 dòng: dòng thứ hai là
-    // web/src/pages/w2-auditActionCoverage.test.ts, bài test canh chính bảng nhãn đó.) web/src/lib/api.ts không có hàm nào chạm
+    //   grep -rn "sign-download\|signDownload" web/src --include=*.ts --include=*.tsx
+    // KHÔNG ra lời gọi nào. Mọi kết quả đều là NHÃN tiếng Việt của mã hành động hoặc bài test canh
+    // bảng nhãn đó (web/src/pages/Audit.tsx và w2-auditActionCoverage.test.ts). Cố ý KHÔNG ghi số
+    // kết quả ở đây: con số ấy đổi mỗi lần ai đó thêm một bài test nhắc tới mã này — bản trước ghi
+    // "ĐÚNG MỘT dòng" rồi sai ngay ở lượt vá kế tiếp. web/src/lib/api.ts không có hàm nào chạm
     // endpoint này, còn logo khách hàng trong SPA là data-URL nhúng thẳng vào báo giá
     // (web/src/pages/NewQuoteWizard.tsx:62), không đi qua kho object. Lưu lượng SPA đo được trên
     // nhánh `logos/` vì thế là 0 request → miễn trừ không tiết kiệm được hàng nhật ký nào, chỉ chừa
