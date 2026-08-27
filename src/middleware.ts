@@ -10,7 +10,7 @@ import { resolveUserPermissions } from "./permissions.js";
 const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
- * TRẦN TUỔI THỌTỦYỆT ĐỐI của một phiên cookie, tính từ lần XÁC THỰC (`authAt`, đặt trong
+ * TRẦN TUỔI THỌ TUYỆT ĐỐI của một phiên cookie, tính từ lần XÁC THỰC (`authAt`, đặt trong
  * authService.establishSession), KHÔNG phải từ lần dùng gần nhất.
  *
  * VÌ SAO cần: cấu hình phiên (src/app.ts) là `rolling: true` + cookie.maxAge 7 ngày, nên MỖI request
@@ -18,7 +18,7 @@ const ID_HOP_LE = /^[A-Za-z0-9._-]{1,64}$/;
  * `User.passwordChangedAt` — mà cột đó nullable và chỉ được ghi khi đổi mật khẩu / nhận lời mời /
  * admin đặt lại. Tài khoản chưa từng đổi mật khẩu có phiên sống VÔ HẠN miễn là được dùng mỗi tuần:
  * không có mốc nào buộc người dùng chứng minh lại danh tính bằng mật khẩu (+MFA). Đây đúng là lớp
- * lỗi đã được vá cho HỌrefresh token (REFRESH_FAMILY_MAX_DAYS, src/jwt.ts) — chốt này là bản
+ * lỗi đã được vá cho HỌ refresh token (REFRESH_FAMILY_MAX_DAYS, src/jwt.ts) — chốt này là bản
  * tương ứng cho đường cookie.
  *
  * Là hằng số trong module chứ không phải biến môi trường một cách CÓ CHỦ Ý — cùng lý do như
@@ -148,7 +148,7 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
         );
       }
     }
-    // TRẦN TUỔI THỌTỦYỆT ĐỐI — xem SESSION_MAX_AGE_DAYS ở đầu file.
+    // TRẦN TUỔI THỌ TUYỆT ĐỐI — xem SESSION_MAX_AGE_DAYS ở đầu file.
     //
     // FAIL-CLOSED VÀ HỆ QUẢ ĐÃ BIẾT: phiên KHÔNG có `authAt` cũng bị huỷ. `authAt` chỉ được đặt ở
     // establishSession (src/services/authService.ts), nên mọi phiên hợp lệ sinh ra từ lần triển khai
