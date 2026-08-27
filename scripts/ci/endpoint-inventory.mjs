@@ -16,12 +16,14 @@
 //
 // `--check-guards` KHÔNG bịt được lỗ đó, và bản trước của khối chú thích này nói sai khi gọi nó là
 // "phần bù". ĐÃ ĐO bằng chính hàm `inventory()` trong file này: 84/137 endpoint có `capRoute` RỖNG
-// và chỉ dựa vào `capRouter`, vì 20/24 file route mở đầu bằng `router.use(requireAuth)` — mà
+// và chỉ dựa vào `capRouter`, vì 20/23 file trong src/routes/ có MỘT guard cấp router nào đó — mà
 // `routerLevelGuards` coi một dòng như thế là phủ MỌI route trong file. Một route mới thêm vào bất
 // kỳ file nào trong số đó KHÔNG BAO GIỜ lọt vào `routesWithoutGuards`. Phép kiểm ấy chỉ thật sự có
-// hiệu lực ở 4 file không có `router.use(<guard>)` cấp router: src/app.ts, auth.routes.ts,
+// hiệu lực ở 4 NGUỒN không có `router.use(<guard>)` cấp router: src/app.ts, auth.routes.ts,
 // jobs.routes.ts, stream.routes.ts (đã kiểm ngược: thêm một route hở vào auth.routes.ts thì exit 1).
-// Nó vẫn đáng giữ — nhưng đúng tầm của nó là "chặn route hở ở 4 file đó", không hơn.
+// src/app.ts vào nhóm này vì mọi lời gọi gác của nó đều ở dạng `app.use("/api/", <mw>)` — có đường
+// dẫn ở đối số đầu, nên `routerLevelGuards` cố ý bỏ qua (dòng "không phải guard cho cả router").
+// Nó vẫn đáng giữ — nhưng đúng tầm của nó là "chặn route hở ở 4 nguồn đó", không hơn.
 //
 // `--check-write-authz` (thêm sau) đóng nốt phần còn lại của lỗ đó cho các endpoint GHI: xem khối
 // "CỔNG PHÂN QUYỀN CHO ENDPOINT GHI" ở giữa file. Tóm tắt: `requireAuth` không được tính là gác
@@ -287,8 +289,17 @@ export function doiChieuMaTran(rows, doc) {
 
 // ── CỔNG PHÂN QUYỀN CHO ENDPOINT GHI ────────────────────────────────────────
 // `--check-guards` coi `requireAuth` là "có gác", nên một route GHI mới thêm vào bất kỳ file nào
-// mở đầu bằng `router.use(requireAuth)` (20/24 file) luôn xanh dù không ai kiểm quyền. `--check`
-// thì đòi có DÒNG ma trận nhưng không đọc cột QUYỀN — một dòng ghi `—` cũng qua.
+// mở đầu bằng requireAuth luôn xanh dù không ai kiểm quyền — ĐÃ ĐO:
+// 16/23 file route mở đầu bằng `router.use(requireAuth)`
+// Vùng mù đó KHÔNG phủ cả cây route. Phần còn lại:
+// 4 file (admin/audit/users/webhooks) gác bằng `router.use(requirePermission(...))`
+// tức khai quyền ngay ở cấp router, nên cổng dưới đây THẤY được và chúng không phải vùng mù.
+// analytics + export có CẢ requireAuth lẫn requirePermission (vì thế "số file có requirePermission"
+// là 6 chứ không phải 4 — đừng gộp hai con số), còn auth/jobs/stream không có guard cấp router nào.
+// Ba con số file này do tests/w4-route-guard-counts.test.js đo lại từ mã nguồn và chốt ở cả ba chỗ
+// chép tay, nên chúng không trôi âm thầm nữa.
+//
+// `--check` cũng không bịt: nó đòi có DÒNG ma trận nhưng không đọc cột QUYỀN — dòng ghi `—` vẫn qua.
 //
 // Cổng này đòi mỗi endpoint GHI (POST/PUT/PATCH/DELETE) có ÍT NHẤT một trong ba:
 //   (a) middleware PHÂN QUYỀN ở cấp route/router — `requireAuth` KHÔNG tính (đó là xác thực);

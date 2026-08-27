@@ -7,8 +7,13 @@ import { useIsMobile } from "../lib/ui";
 // Port "Nhật ký hoạt động" (renderAuditLog) — bê ĐẦY ĐỦ: lọc theo Hoạt động/Đối tượng/Khoảng
 // ngày (Từ–Đến) + Xóa lọc + phân trang + nhãn tiếng Việt + skeleton/empty/error. Read-only.
 // Bảo mật: gate audit:view (Shell nav + /api/audit server).
-// ĐẦY ĐỦ mọi mã action thực tế (quét từ src/ — gồm cả HR/quote-HN/gdpr/login mà util.js SPA còn thiếu).
-// Nhóm sẵn để dropdown render <optgroup> (dò trong ~60 mã dễ hơn); ACTION_LABEL phẳng suy ra từ đây (1 nguồn).
+// Phải phủ ĐỦ mọi mã `audit(req, "…")` mà máy chủ ghi: ô lọc "Hoạt động" là <select> dựng THUẦN từ
+// bảng này (không có ô nhập tự do), nên mã thiếu ở đây = admin không có cách nào lọc ra, và cột
+// Hoạt động hiện mã thô thay vì tiếng Việt (actionLabel fallback về chính `a`).
+// Danh sách này trôi khỏi máy chủ một cách im lặng (thêm audit() ở src/ không làm hỏng build web/),
+// nên có test khoá hai chiều: web/src/pages/w2-auditActionCoverage.test.ts — nó đọc src/ bằng
+// import.meta.glob + Audit.tsx bằng ?raw rồi so, thiếu HOẶC thừa một mã đều đỏ.
+// Nhóm sẵn để dropdown render <optgroup> (dò trong 82 mã — số đếm lúc viết); ACTION_LABEL phẳng suy ra từ đây (1 nguồn).
 const ACTION_GROUPS: [string, [string, string][]][] = [
   ["Báo giá", [
     ["quote.create", "Tạo báo giá"], ["quote.update", "Sửa báo giá"], ["quote.delete", "Xóa báo giá"],
@@ -16,6 +21,9 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["quote.reopened", "Mở lại để sửa"], ["quote.export", "Xuất Excel báo giá"], ["quote.export.pdf", "Xuất PDF báo giá"],
     ["quote.invoice", "Cập nhật hóa đơn / thanh toán"], ["quote.members.update", "Cập nhật thành viên phụ trách"],
     ["quote.hn.assign", "Giao phần Hà Nội"], ["quote.hn.submit", "Gửi duyệt phần Hà Nội"], ["quote.hn.review", "Duyệt / trả phần Hà Nội"],
+    ["quote.import.preview", "Xem trước nhập từ Excel"], ["quote.import.rejected", "Từ chối tệp Excel nhập vào"],
+    ["quote.sheet.customerDecision", "Khách duyệt / từ chối sheet"],
+    ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (bảng nội bộ)"],
   ]],
   ["Khách hàng", [
     ["customer.create", "Thêm khách hàng"], ["customer.update", "Sửa khách hàng"], ["customer.delete", "Xóa khách hàng"],
@@ -24,13 +32,17 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
   ["Nhân viên (tài khoản)", [
     ["user.create", "Thêm nhân viên"], ["user.update", "Cập nhật nhân viên"], ["user.delete", "Xóa nhân viên"],
     ["user.invite", "Mời nhân viên"], ["user.invite.resend", "Gửi lại lời mời"], ["user.invite.accept", "Kích hoạt tài khoản (lời mời)"],
+    ["user.invite.mfa.failed", "Nhập sai mã MFA (kích hoạt lời mời)"], ["user.invite.mfa.locked", "Khóa do sai mã MFA (kích hoạt lời mời)"],
     ["user.profile.update", "Cập nhật hồ sơ cá nhân"], ["user.memberships.cleared", "Xóa phân công thành viên"],
+    ["user.breakglass.modify", "Sửa tài khoản khẩn cấp (break-glass)"],
   ]],
   ["Nhân sự (hồ sơ) & danh bạ", [
     ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
+    ["personnel.payment-proof.view", "Xem ảnh chứng từ thanh toán (nhân sự)"], ["personnel.contract-download", "Tải hợp đồng dịch vụ (nhân sự)"],
+    ["personnel.team-note", "Sửa ghi chú nội bộ (nhân sự)"],
     ["employee.create", "Thêm danh bạ nhân sự"], ["employee.update", "Sửa danh bạ nhân sự"], ["employee.delete", "Xóa danh bạ nhân sự"],
     ["venue.create", "Thêm rạp (danh mục)"], ["venue.update", "Sửa rạp (danh mục)"], ["venue.delete", "Xóa rạp (danh mục)"],
-    ["venue.merge", "Gộp rạp"],
+    ["venue.merge", "Gộp rạp"], ["venue.tags.bulk", "Gắn / gỡ nhãn rạp hàng loạt"],
     ["venue.item.create", "Thêm hạng mục kích thước"], ["venue.item.update", "Sửa hạng mục kích thước"], ["venue.item.delete", "Xóa hạng mục kích thước"],
   ]],
   ["Đăng nhập / bảo mật", [
@@ -42,6 +54,8 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
   ]],
   ["Tệp / tích hợp / hệ thống / GDPR", [
     ["file.upload", "Tải tệp lên"], ["file.delete", "Xóa tệp"],
+    ["file.sign-upload", "Xin URL tải tệp lên (bước 1/2)"], ["file.finalize", "Chốt tệp đã tải lên (bước 2/2)"],
+    ["file.finalize.rejected", "Từ chối chốt tệp (không hợp lệ)"], ["file.sign-download", "Xin URL tải tệp về"],
     ["webhook.create", "Thêm tích hợp"], ["webhook.update", "Sửa tích hợp"], ["webhook.delete", "Xóa tích hợp"],
     ["settings.update", "Cập nhật cấu hình"], ["settings.delete", "Xóa cấu hình"],
     ["role.permissions.update", "Cập nhật quyền vai trò"], ["role.permissions.reset", "Đặt lại quyền vai trò"],

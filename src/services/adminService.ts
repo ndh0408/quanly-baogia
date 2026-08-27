@@ -44,13 +44,27 @@ export async function purgeSoftDeleted(req: Request) {
     ["customer", { ...base, quotes: { none: {} } }],
     ["company", { ...base, quotes: { none: {} }, templates: { none: {} } }],
     // `auditEvents: { none: {} }` KHÔNG phải một cửa nghiệp vụ như bốn cửa kia — nó giữ NHẬT KÝ.
-    // Khoá ngoại AuditEvent_actorId_fkey là ON DELETE SET NULL (0_init/migration.sql:695), nên mỗi
-    // hàng User xoá cứng kéo theo một UPDATE hàng loạt đặt actorId = NULL trên mọi nhật ký của
-    // người đó: dòng còn, người mất. Bốn cửa cũ chỉ chặn được ai từng đụng báo giá/khách hàng —
-    // hr / accountant / account_hn không bao giờ đụng, nên họ đi thẳng qua và mất sạch danh tính
-    // trong nhật ký. Sửa ở tầng ỨNG DỤNG chứ KHÔNG đổi khoá ngoại sang RESTRICT: đường dọn dữ
-    // liệu quá hạn (src/retention.ts) phải DELETE được hàng AuditEvent, và nhiều đường xoá cứng
-    // hợp lệ khác sẽ ngã thành lỗi 500 thay vì bị bỏ qua êm như ở đây.
+    // Khoá ngoại AuditEvent_actorId_fkey là ON DELETE SET NULL
+    // (prisma/migrations/0_init/migration.sql:695), nên mỗi hàng User xoá cứng kéo theo một UPDATE
+    // hàng loạt đặt actorId = NULL trên mọi nhật ký của người đó: dòng còn, người mất.
+    //
+    // PHẠM VI cửa này RỘNG, không phải một nhóm vai trò hẹp, và cũng không chỉ là đăng nhập THÀNH
+    // CÔNG. Sáu đường dưới đây đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
+    // AuditEvent mang tên chính chủ tài khoản:
+    //   · src/routes/auth.routes.ts:93/135/186 — login.success / logout / login.token
+    //   · src/authCore.ts:173/214/245          — login.locked / login.failed / login.mfa.failed
+    //   · src/services/authService.ts:248      — user.invite.accept
+    //   · src/services/authService.ts:62/72/96 — profile.update / password.change.*
+    // Nghĩa là gõ SAI mật khẩu đúng một lần, hoặc chỉ bấm nhận lời mời, là đã đủ để không qua được
+    // bước "user" của purge nữa — cho tới khi src/retention.ts:92 dọn hết nhật ký của họ theo
+    // RETAIN_AUDIT_DAYS (mặc định 730 ngày, src/config.ts:110). Trên thực tế bước "user" chỉ xoá
+    // cứng được tài khoản chưa từng CHẠM vào form đăng nhập lẫn lời mời và cũng không dính bốn
+    // quan hệ trên; `result.user = 0` là kết quả BÌNH THƯỜNG chứ không phải dấu hiệu purge hỏng.
+    //
+    // Đó là đánh đổi CỐ Ý và giữ nguyên: giữ danh tính trong nhật ký kiểm toán đáng hơn giải phóng
+    // vài hàng User. Sửa ở tầng ỨNG DỤNG chứ KHÔNG đổi khoá ngoại sang RESTRICT: đường dọn dữ liệu
+    // quá hạn (src/retention.ts) phải DELETE được hàng AuditEvent, và nhiều đường xoá cứng hợp lệ
+    // khác sẽ ngã thành lỗi 500 thay vì bị bỏ qua êm như ở đây.
     ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} }, auditEvents: { none: {} } }],
   ];
   for (const [model, where] of steps) {

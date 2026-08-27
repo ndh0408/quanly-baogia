@@ -207,15 +207,20 @@ router.get(
     // JSON của /api/personnel, nên chép khoá sang đây là xem ảnh chứng từ mà không để lại vết.
     // Cùng lý do cho `uploads/` (tệp đính kèm) và `exports/` (bản Excel/PDF đầy đủ của báo giá).
     //
-    // TRỪ `logos/`: logo công ty là thứ MỌI người đăng nhập đọc được (canAccessKey cho qua vô điều
-    // kiện) và SPA xin chữ ký cho nó ở gần như mỗi lần mở báo giá — ghi lại chỉ làm phình bảng chứ
-    // không trả lời được câu hỏi nào.
+    // KHÔNG ngoại lệ theo tiền tố. Bản trước miễn trừ `logos/` với lý do "SPA xin chữ ký cho logo ở
+    // gần như mỗi lần mở báo giá"; đo lại thì lý do đó sai:
+    //   grep -rn "sign-download\|signDownload" web/src --include=*.ts --include=*.tsx | grep -v '\.test\.'
+    // ra ĐÚNG MỘT dòng — web/src/pages/Audit.tsx:58 — và đó là NHÃN tiếng Việt của mã hành động
+    // trong bộ lọc trang Nhật ký, không phải lời gọi. (Bỏ `grep -v` thì ra 2 dòng: dòng thứ hai là
+    // web/src/pages/w2-auditActionCoverage.test.ts, bài test canh chính bảng nhãn đó.) web/src/lib/api.ts không có hàm nào chạm
+    // endpoint này, còn logo khách hàng trong SPA là data-URL nhúng thẳng vào báo giá
+    // (web/src/pages/NewQuoteWizard.tsx:62), không đi qua kho object. Lưu lượng SPA đo được trên
+    // nhánh `logos/` vì thế là 0 request → miễn trừ không tiết kiệm được hàng nhật ký nào, chỉ chừa
+    // một khe không để lại vết ở đúng endpoint TRAO nội dung.
     //
     // KHÔNG nhét nội dung/URL đã ký vào `after`: bảng AuditEvent không mã hoá, và URL đã ký chính
     // là thứ mở được file. Chỉ ghi khoá + hạn.
-    if (!key.startsWith("logos/")) {
-      await audit(req, "file.sign-download", { resource: "file", resourceId: key, after: { expiresIn: (req.query as any).expires } });
-    }
+    await audit(req, "file.sign-download", { resource: "file", resourceId: key, after: { expiresIn: (req.query as any).expires } });
     res.json({ url, expiresIn: req.query.expires });
   })
 );

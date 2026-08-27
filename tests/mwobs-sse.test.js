@@ -48,8 +48,32 @@ function gia() {
   return { req, res, dongSocket: () => handlers.close?.() };
 }
 
+/**
+ * CHỜ TỚI KHI ĐIỀU KIỆN ĐÚNG — ĐỪNG ĐỔI VỀ KHẲNG ĐỊNH ĐỒNG BỘ.
+ *
+ * `publish`/`broadcast` (src/sse.ts:218/231) có HAI đường chạy, và chỉ một trong hai là đồng bộ:
+ *   · KHÔNG có REDIS_URL → `localPublish` chạy ngay trong lời gọi → ghi xong trước khi hàm trả về.
+ *   · CÓ REDIS_URL       → `pub.publish(CHANNEL, …)` rồi TRẢ VỀ NGAY; việc ghi ra từng kết nối chỉ
+ *                          xảy ra khi subscriber nhận lại gói từ Redis, tức MỘT VÒNG MẠNG sau đó.
+ *
+ * Bản test cũ khẳng định đồng bộ nên nó chỉ đúng ở cấu hình KHÔNG Redis. ĐO ĐƯỢC 2026-08-27:
+ * cùng file, `REQUIRE_DB_TESTS=1 npx vitest run` → 7/7 xanh khi không đặt REDIS_URL, 4/7 ĐỎ khi có.
+ * Mà production LUÔN có Redis, còn `npm run verify` cũng đặt REDIS_URL — nên bản cũ vừa đỏ thất
+ * thường (vòng loopback đôi khi kịp về trước dòng expect) vừa kiểm nhầm cấu hình.
+ *
+ * Chờ như thế này đúng cho CẢ HAI đường: không Redis thì vòng lặp thoát ngay lượt đầu.
+ */
+async function choToi(dieuKien, moTa, hanMs = 3000) {
+  const het = Date.now() + hanMs;
+  for (;;) {
+    if (dieuKien()) return;
+    if (Date.now() > het) throw new Error(`quá ${hanMs}ms mà chưa: ${moTa}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
-  it("vượt trần thì trả 429 và KHÔNG thêm vào danh sách phát", () => {
+  it("vượt trần thì trả 429 và KHÔNG thêm vào danh sách phát", async () => {
     const uid = 910001;
     const oks = [];
     for (let i = 0; i < SSE_MAX_PER_USER; i++) {
@@ -63,8 +87,9 @@ describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
     expect(thua.res.daGhi).toEqual([]); // không được mở stream
 
     publish(uid, "thu", { a: 1 });
-    expect(thua.res.daGhi).toEqual([]);
-    for (const c of oks) expect(c.res.daGhi.some((s) => s.includes("event: thu"))).toBe(true);
+    await choToi(() => oks.every((c) => c.res.daGhi.some((s) => s.includes("event: thu"))),
+      "mọi kết nối trong trần nhận được sự kiện");
+    expect(thua.res.daGhi, "kết nối bị 429 vẫn nhận sự kiện ⇒ nó chưa bị gỡ khỏi danh sách phát").toEqual([]);
 
     for (const c of oks) c.dongSocket();
   });
@@ -82,7 +107,7 @@ describe("SSE — trần số kết nối trên mỗi tài khoản", () => {
 });
 
 describe("SSE — áp lực ngược", () => {
-  it("kết nối có bộ đệm vượt trần bị huỷ và gỡ khỏi danh sách", () => {
+  it("kết nối có bộ đệm vượt trần bị huỷ và gỡ khỏi danh sách", async () => {
     const uid = 910004;
     const cham = gia(), nhanh = gia();
     attach(cham.req, cham.res, uid);
@@ -92,34 +117,37 @@ describe("SSE — áp lực ngược", () => {
     cham.res.writableLength = SSE_MAX_BUFFER + 1; // client đọc chậm / socket chết không FIN
     publish(uid, "thu", { a: 1 });
 
-    expect(cham.res.daHuy).toBe(true);
-    expect(cham.res.daGhi.length).toBe(truocCham); // không nhồi thêm vào bộ đệm đã đầy
-    expect(nhanh.res.daGhi.some((s) => s.includes("event: thu"))).toBe(true);
+    await choToi(() => cham.res.daHuy, "kết nối bộ đệm đầy bị huỷ");
+    expect(cham.res.daGhi.length, "vẫn nhồi thêm vào bộ đệm đã đầy").toBe(truocCham);
+    await choToi(() => nhanh.res.daGhi.some((s) => s.includes("event: thu")),
+      "kết nối đọc nhanh nhận được sự kiện");
 
     // Đã bị gỡ → lần phát sau không đụng tới nó nữa (nếu còn, write sẽ ném vì đã huỷ).
     expect(() => publish(uid, "thu2", { a: 2 })).not.toThrow();
-    expect(nhanh.res.daGhi.some((s) => s.includes("event: thu2"))).toBe(true);
+    await choToi(() => nhanh.res.daGhi.some((s) => s.includes("event: thu2")),
+      "sự kiện thứ hai vẫn tới được kết nối còn sống");
     nhanh.dongSocket();
   });
 
-  it("broadcast cũng áp cùng trần, không chỉ publish", () => {
+  it("broadcast cũng áp cùng trần, không chỉ publish", async () => {
     const uid = 910005;
     const cham = gia();
     attach(cham.req, cham.res, uid);
     cham.res.writableLength = SSE_MAX_BUFFER + 1;
     broadcast("thu", { a: 1 });
-    expect(cham.res.daHuy).toBe(true);
+    await choToi(() => cham.res.daHuy, "broadcast cũng huỷ kết nối có bộ đệm vượt trần");
   });
 });
 
 describe("SSE — emitChange không phát id ra toàn hệ thống", () => {
-  it("payload chỉ còn entity + action", () => {
+  it("payload chỉ còn entity + action", async () => {
     const uid = 910006;
     const c = gia();
     attach(c.req, c.res, uid);
     emitChange("quote", "update", 4271);
+    await choToi(() => c.res.daGhi.some((s) => s.includes("event: changed")),
+      "nhận được sự kiện changed");
     const su = c.res.daGhi.find((s) => s.includes("event: changed"));
-    expect(su, "không nhận được sự kiện changed").toBeTruthy();
     const data = JSON.parse(su.split("data: ")[1].trim());
     expect(data).toEqual({ entity: "quote", action: "update" });
     expect(JSON.stringify(data)).not.toContain("4271");

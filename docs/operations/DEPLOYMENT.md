@@ -55,12 +55,76 @@ Mỗi lượt:
 1. **Backup CSDL** + gắn tag `:rollback` cho image hiện tại
 2. Ship file đã tracked (`git archive`), dọn `.js` cũ còn sót có `.ts` cùng tên
 3. `docker compose build app`
-4. **`prisma migrate deploy`** — hỏng ở đây thì `set -e` dừng deploy, app cũ vẫn chạy
+4. **`prisma migrate deploy`** (`docker compose run --rm app …`) — hỏng ở đây thì
+   `set -e` dừng deploy, app cũ vẫn chạy
 5. Recreate `app` + `worker`, ghi `DEPLOYED_SHA`
 6. Verify `/livez`
 
 Bước 4 đặt **trước** bước 5 là có chủ ý: schema phải có cột mới trước khi mã mới
 dùng tới.
+
+## Diễn tập thay đổi postgres/redis
+
+Bước 5 **chỉ** `docker compose up -d app worker` — nó không bao giờ dựng lại
+`postgres`/`redis`. Nên câu "cứ deploy staging trước là mọi thay đổi đều được thử"
+là **sai một nửa**: hai service dữ liệu được chạm ở **bước 4**, gián tiếp.
+`docker compose run --rm app …` khởi động các service trong `depends_on`, và compose
+recreate một service phụ thuộc khi *config hash* của nó lệch — `cap_add`, `cap_drop`,
+`deploy.resources` đều nằm trong hash đó.
+
+Đo được ngày 2026-08-27 (docker 29.3.1, compose v5.1.1, máy sandbox):
+
+| Tình huống | Kết quả thật |
+|---|---|
+| đổi `cap_add` của service phụ thuộc rồi `compose run` | dep bị **recreate** (container id đổi) |
+| không đổi gì rồi `compose run` | **không** recreate |
+| dep không lên nổi | `compose run` thoát **mã 1** → `set -e` dừng deploy |
+| `cpus` lớn hơn số vCPU của máy | `Error response from daemon: range of CPUs is from 0.01 to 4.00, as there are only 4 CPUs available` |
+
+Phiên bản compose **trên VM thật chưa được đối chiếu**, và hành vi recreate-khi-lệch-hash
+là mặc định của compose chứ không phải hợp đồng được ghim ở đâu. Nên khi sửa
+`cap_add` / `cap_drop` / `security_opt` / `deploy.resources` của `postgres` hoặc
+`redis`, **diễn tập tay trên staging trước**, đừng trông vào lượt deploy:
+
+```bash
+# BƯỚC 0 — BẮT BUỘC: đẩy file compose MỚI lên VM trước đã.
+# Bỏ bước này là diễn tập đúng file compose CŨ đang nằm sẵn trên máy chủ: lệnh xanh, thay đổi
+# của bạn chưa hề được thử. Đây chính là cách `deploy.sh` ship file (dòng `git archive`), nên
+# chạy tay như dưới cho ra đúng thứ mà lượt deploy sẽ ghi vào:
+git archive --format=tar.gz HEAD | ssh staging-ts 'tar xzf - -C /opt/stacks/quanly/quanly'
+
+ssh staging-ts
+cd /opt/stacks/quanly/quanly
+grep -A2 cap_add docker-compose.staging.yml      # xác nhận đúng là bản vừa đẩy lên
+docker compose -f docker-compose.staging.yml up -d postgres redis
+docker compose -f docker-compose.staging.yml ps          # cả hai phải (healthy)
+docker logs quanly-postgres --tail 30 | grep 'ready to accept connections'
+docker logs quanly-redis    --tail 30 | grep 'Ready to accept connections'
+```
+
+> `docker-compose.*.yml` được git theo dõi, nên `git archive` **ghi đè** chúng trên máy chủ mỗi
+> lượt deploy. Hệ quả hai chiều: (a) không đẩy trước thì diễn tập sai file; (b) sửa tay compose
+> trên máy chủ sẽ mất ở lượt deploy kế — giá trị riêng theo máy phải nằm trong `.env`.
+
+Thiếu capability thì hỏng **ngay lúc khởi động**, thấy liền trong log, ví dụ thật đã đo:
+
+- postgres, `cap_drop: ALL` không `cap_add`:
+  `error: failed switching to 'postgres': operation not permitted` (gosu)
+- postgres, có `FOWNER` nhưng thiếu `DAC_OVERRIDE`:
+  `find: /var/lib/postgresql/data: Permission denied`
+- redis, thiếu `SETGID`: `setpriv: setresgid failed: Operation not permitted`
+
+Lưu ý: **volume rỗng và volume đã có dữ liệu không đi qua cùng một nhánh quyền.**
+Entrypoint postgres chạy `chmod 00700 "$PGDATA"` (nuốt lỗi) *rồi mới* `find "$PGDATA"
+\! -user postgres …`. Ba phép đo:
+
+| Volume | Capability | Kết quả |
+|---|---|---|
+| rỗng | chỉ `SETGID,SETUID` | **lên được** — chmod hỏng lặng lẽ nên thư mục còn 1777, `find` vẫn đọc được |
+| đã có dữ liệu (0700) | chỉ `SETGID,SETUID` | **chết** — `find: … Permission denied` |
+| rỗng | `CHOWN,FOWNER,SETGID,SETUID` (thiếu `DAC_OVERRIDE`) | **chết ngay lượt đầu** — chmod thành công rồi chính root không đọc lại được |
+
+Nên diễn tập trên staging (volume đã có dữ liệu) sát prod hơn là dựng volume mới.
 
 ## Helm
 
@@ -130,5 +194,8 @@ giữ cho khớp với schema.
 - [ ] Có migration đụng dữ liệu → đã diễn tập
 - [ ] Backup gần nhất < 24h (`/opt/quanly/backup-watchdog.sh`)
 - [ ] Đã deploy staging và duyệt bằng tay
+- [ ] Có sửa `cap_*` / `security_opt` / `deploy.resources` của `postgres` hoặc `redis`
+      → đã diễn tập tay (mục "Diễn tập thay đổi postgres/redis"), vì bước 5 của
+      `deploy.sh` không dựng lại hai service đó
 - [ ] Biết trước lệnh rollback
 - [ ] Không deploy chiều thứ Sáu, trừ khi đang chữa sự cố

@@ -106,7 +106,10 @@ describe("refRectsOfFormula — tách ô/vùng mà công thức tham chiếu t�
 describe("tô vùng tham chiếu — số lượt quét BẢNG là hằng số", () => {
   const fieldAt = (c: number) => ADDR[c].f;
 
-  it("paintRefPick (kéo chuột chọn dải cho công thức): 1 lượt quét bảng dù dải dài bao nhiêu", () => {
+  // LƯU Ý TÊN BÀI: bài này kiểm CHÍNH paintRect/rowIndexOf (thứ paintRefPick gọi), KHÔNG gọi
+  // paintRefPick — hàm đó nằm trong closure của <GridTable> nên không import ra được. Chốt rằng
+  // paintRefPick THẬT SỰ đi qua đường này nằm ở describe cuối file (đọc nguồn).
+  it("paintRect trên cả dải (đường mà paintRefPick gọi): 1 lượt quét bảng dù dải dài bao nhiêu", () => {
     const scansFor = (rowCount: number) => {
       const tb = fakeTable(rowCount, FIELDS);
       // đúng như trong lưới: mỗi nhịp mousemove dựng chỉ mục MỘT lần rồi tô cả dải
@@ -137,5 +140,71 @@ describe("tô vùng tham chiếu — số lượt quét BẢNG là hằng số",
   it("hàng không có trong chỉ mục → bỏ qua, không ném lỗi", () => {
     const tb = fakeTable(3, FIELDS);
     expect(() => paintRectWith(rowIndexOf(asNode(tb)), 0, 99, 0, 3, fieldAt, () => {})).not.toThrow();
+  });
+});
+
+// ── CHỐT NỐI: hai hàm THẬT trong <GridTable> có đi qua đường đã tối ưu không? ───────────────────
+// Hai bài trên chỉ chứng minh `paintRect`/`paintRectWith` rẻ. Chúng KHÔNG chứng minh `paintRefPick`
+// và `highlightActiveFormulaRefs` gọi tới đó — hai hàm này khai báo bên trong thân component
+// (closure quanh `tableRef`/`ADDR`) nên không export ra để gọi thẳng được, và web/ không có jsdom
+// để dựng lưới thật. Không có chốt này thì đổi thân chúng về `tdOf(...)` vẫn xanh cả bộ test.
+// Cách khả thi còn lại: ĐỌC NGUỒN. `?raw` của Vite đã là tiền lệ trong repo
+// (web/src/lib/imgSrcGuard.test.ts, web/src/components/sheetTabKeyboard.test.ts).
+import GRID from "../components/GridTable.tsx?raw";
+
+/** Thân của `const <ten> = (...) => { … }` — cắt bằng đếm ngoặc nhọn, không phải regex tham lam. */
+function thanHam(src: string, ten: string): string {
+  const decl = src.indexOf(`const ${ten} = `);
+  if (decl < 0) throw new Error(`không thấy khai báo ${ten} trong GridTable.tsx`);
+  const open = src.indexOf("{", src.indexOf("=>", decl));
+  if (open < 0) throw new Error(`${ten} không có thân dạng { … }`);
+  let sau = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") sau++;
+    else if (src[i] === "}" && --sau === 0) return src.slice(open, i + 1);
+  }
+  throw new Error(`ngoặc nhọn của ${ten} không đóng`);
+}
+
+describe("GridTable.tsx — hai hàm tô tham chiếu THẬT dùng chỉ mục, không quét lại cả bảng", () => {
+  it("tdOf vẫn còn trong file (nếu đã bị xoá hẳn thì các khẳng định 'không gọi tdOf' là vô nghĩa)", () => {
+    // tdOf tự nó không sai — nó vẫn đúng chỗ cho MỘT ô lẻ (đường gõ ô số cập nhật ô Thành Tiền).
+    // Bài này chỉ để bảo đảm chốt dưới không "xanh vì tìm không thấy gì".
+    expect(GRID).toContain("const tdOf = (row: number, field: string)");
+    expect(GRID).toMatch(/tdOf\(/);
+  });
+
+  it("paintRefPick: dựng rowIndexOf 1 lần rồi paintRect — KHÔNG gọi tdOf", () => {
+    const than = thanHam(GRID, "paintRefPick");
+    expect(than).toContain("rowIndexOf(");
+    expect(than).toContain("paintRect(");
+    expect(than).not.toContain("tdOf(");
+    // đúng MỘT lần dựng chỉ mục cho cả vùng (không phải mỗi hàng một lần)
+    expect(than.match(/rowIndexOf\(/g)).toHaveLength(1);
+    // và không có vòng lặp tự tô từng ô ở đây — việc đó nằm trong paintRect
+    expect(than).not.toMatch(/\bfor\s*\(/);
+  });
+
+  it("highlightActiveFormulaRefs: 1 chỉ mục dùng lại cho MỌI tham chiếu, tô qua paintRectWith", () => {
+    const than = thanHam(GRID, "highlightActiveFormulaRefs");
+    expect(than).toContain("refRectsOfFormula(");
+    expect(than).toContain("paintRectWith(");
+    expect(than).not.toContain("tdOf(");
+    // Chỉ mục phải dựng NGOÀI vòng lặp rects: đúng 1 lần gọi, và nó đứng TRƯỚC forEach.
+    expect(than.match(/rowIndexOf\(/g)).toHaveLength(1);
+    expect(than.indexOf("rowIndexOf(")).toBeLessThan(than.indexOf(".forEach("));
+  });
+
+  it("bộ cắt thân hàm phân biệt được bản CŨ (đối chứng ngược)", () => {
+    // Nếu ai đó trả paintRefPick về bản cũ, thân hàm sẽ trông như dưới đây — và các khẳng định
+    // ở bài trên PHẢI đỏ. Chạy chính bộ cắt trên một bản giả để chứng minh nó có phân biệt.
+    const cu = `const paintRefPick = (a: Addr, b: Addr) => {
+    clearRefPick();
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const td = tdOf(r, ADDR[c].f); if (td) td.classList.add("cell-ref-pick"); }
+  };`;
+    const than = thanHam(cu, "paintRefPick");
+    expect(than).toContain("tdOf(");
+    expect(than).not.toContain("rowIndexOf(");
+    expect(than).toMatch(/\bfor\s*\(/);
   });
 });

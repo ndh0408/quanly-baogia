@@ -66,12 +66,39 @@ class LoiNhap extends Error {
 // Nên: N việc chạy cùng lúc, hàng chờ có trần, chờ quá lâu thì 429 kèm Retry-After. Từ chối SỚM
 // và nói rõ tốt hơn nhận hết rồi chết cả tiến trình.
 //
+// ⚠️ PHẠM VI — phễu này chặn ĐÚNG MỘT thứ: số WORKER đang ĐỌC FILE cùng lúc. Nó KHÔNG phải trần
+// RAM của cả đường nhập. `traSuat()` nằm ở `finally` của lượt `await docWorkbookTrongWorker(...)`,
+// tức suất được trả NGAY KHI worker giao kết quả về; `audit(...)` (một lượt ghi DB, có await) và
+// `res.json(result)` (tuần tự hoá TOÀN BỘ kết quả ra chuỗi) chạy SAU đó, ngoài phễu. Nên số
+// KẾT QUẢ LỚN đang nằm trong RAM luồng chính có thể nhiều hơn IMPORT_MAX_CONCURRENT. Chưa đo
+// được mức RAM đó ở đây.
+// KHÔNG viết "thứ duy nhất chặn nó là rate limiter" — bản trước ghi thế và tự mâu thuẫn với dòng
+// 45 ngay trong file này. Chặn theo tầng, từ ngoài vào:
+//   1. multer `fileSize: MAX_FILE_BYTES` (10MB) — trần thật cho mỗi lượt, chặn TRƯỚC khi đọc
+//   2. `files: 1, fields: 4` — không cho gửi nhiều file trong một request
+//   3. rate limiter theo khoá (người dùng/IP, 60s) — chặn theo TẦN SUẤT, không theo số việc
+//   4. phễu này — chặn số worker ĐỌC cùng lúc, và chỉ tới lúc worker giao kết quả
+//   5. IMPORT_TIMEOUT_MS — trần thời gian, `terminate()` luồng khi hết hạn
+// Phần nằm ngoài mọi tầng trên là quãng từ khi worker giao kết quả tới khi `res.json` viết xong.
+//
 // Trần mặc định 2: đây là việc NGỐN CPU+RAM, chạy song song nhiều hơn số việc máy làm nổi chỉ
 // làm mọi người cùng chậm chứ không ai xong sớm hơn. Chỉnh bằng env khi biết rõ máy.
+//
+// `raw` RỖNG phải coi như CHƯA ĐẶT. Lý do: `Number("")` và `Number("   ")` đều bằng 0 và đều
+// hữu hạn, nên với sàn 0 (`IMPORT_MAX_QUEUED` ngay dưới) chuỗi rỗng lọt qua và cho ra trần 0 —
+// tắt hẳn hàng chờ, mọi lượt nhập vượt `IMPORT_MAX_CONCURRENT` bị 429 ngay lập tức thay vì được
+// xếp hàng. Mà .env.example ghi sẵn dòng `# IMPORT_MAX_QUEUED=4`: bỏ dấu `#` rồi xoá số là thao
+// tác rất dễ xảy ra, và hỏng theo kiểu im lặng (không log, chỉ 429 lác đác). `0` GÕ TƯỜNG MINH
+// vẫn giữ nguyên nghĩa "không cho xếp hàng" — chỉ chuỗi rỗng mới rơi về mặc định.
+// Xem tests/w1-import-queued-env.test.js.
 const soNguyen = (raw: string | undefined, mac: number, toiThieu: number) => {
-  const n = Number(raw);
+  const s = (raw ?? "").trim();
+  if (s === "") return mac;
+  const n = Number(s);
   return Number.isFinite(n) && n >= toiThieu ? Math.floor(n) : mac;
 };
+/** Chốt cho test: đọc từng nhánh của bộ phân tích env mà không phải nạp lại cả module. */
+export const _soNguyen = soNguyen;
 const IMPORT_MAX_CONCURRENT = soNguyen(process.env.IMPORT_MAX_CONCURRENT, 2, 1);
 const IMPORT_MAX_QUEUED = soNguyen(process.env.IMPORT_MAX_QUEUED, 4, 0);
 // Chờ tối đa bấy nhiêu trước khi bỏ cuộc. Phải NGẮN hơn nhiều so với thời gian chờ của trình
@@ -238,6 +265,11 @@ router.post(
     } finally {
       // PHẢI ở finally: thiếu một đường thoát là suất bị ăn mòn dần cho tới khi không ai nhập
       // được nữa — kiểu hỏng chỉ lộ ra sau nhiều ngày chạy.
+      //
+      // Trả suất ở ĐÂY nghĩa là phễu buông ngay khi worker xong, TRƯỚC `audit()` và
+      // `res.json(result)` bên dưới. Đánh đổi: giữ suất qua lượt ghi DB thì một truy vấn chậm
+      // khoá luôn cả hàng nhập, còn buông sớm như hiện nay thì `result` vẫn nằm trong RAM luồng
+      // chính suốt hai bước đó mà KHÔNG được phễu tính — xem đoạn "PHẠM VI" ở khai báo phễu.
       traSuat();
     }
 

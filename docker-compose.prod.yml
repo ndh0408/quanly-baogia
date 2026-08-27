@@ -26,14 +26,41 @@ services:
     # Siết đặc quyền cho KHO DỮ LIỆU, không chỉ app/worker. Bản k8s song sinh siết từ lâu
     # (infra/k8s/postgres.yaml:42-46 `allowPrivilegeEscalation: false` + `drop: ["ALL"]`), còn
     # compose — thứ ĐANG CHẠY THẬT — thì chạy full capability.
-    # GIỮ LẠI đúng 5 capability mà entrypoint chính thức cần: nó khởi động bằng root để
-    # `chown -R postgres "$PGDATA"` + `chmod 00700` rồi mới `su-exec postgres` hạ quyền.
-    #   CHOWN, FOWNER, DAC_OVERRIDE → đổi chủ/đổi quyền và ghi vào thư mục của user postgres
-    #   SETUID, SETGID              → su-exec hạ quyền
+    # GIỮ LẠI đúng tập capability mà entrypoint chính thức cần. Cơ chế ĐỌC TỪ CHÍNH ẢNH đã ghim
+    # digest ở trên (lấy lại bằng `docker cp <container>:/usr/local/bin/docker-entrypoint.sh -`):
+    #   dòng 58  `find "$PGDATA" \! -user postgres -exec chown postgres '{}' +` → CHOWN, cộng
+    #            DAC_OVERRIDE để root đọc lại được thư mục NGAY SAU khi chính nó chmod 00700, và ở
+    #            mọi lượt khởi động trên volume đã có dữ liệu
+    #   dòng 343 `exec gosu postgres "$BASH_SOURCE" "$@"`                   → SETUID + SETGID
+    #   FOWNER   → ĐO ĐƯỢC LÀ KHÔNG BẮT BUỘC. Bản chú thích trước quy nó cho dòng 41
+    #            `chmod 00700 "$PGDATA"`, nhưng dòng đó kết thúc bằng `|| :` nên lỗi bị NUỐT; và
+    #            `docker_create_db_directories` được gọi ở dòng 340 TRƯỚC nhánh `id -u = 0`, tức
+    #            nó chạy LẠI sau `exec gosu` dưới uid 70 — lúc đó postgres là CHỦ thư mục nên
+    #            chmod thành công mà không cần capability nào. Vẫn GIỮ vì hai lý do: nhánh
+    #            POSTGRES_INITDB_WALDIR (dòng 54) chmod KHÔNG có `|| :` nên sẽ chết thật nếu ai đó
+    #            đặt biến ấy, và bỏ FOWNER làm mỗi lượt khởi động in ra `chmod: …: Operation not
+    #            permitted` — một dòng báo động giả rất tốn thời gian lúc đang xử lý sự cố.
+    # KHÔNG phải su-exec như chú thích cũ ghi: ảnh alpine cài gosu 1.19 thật (ELF 1.7MB), còn
+    # `/usr/local/bin/su-exec` chỉ là symlink trỏ về gosu và entrypoint không gọi tên đó.
     # Bỏ toàn bộ phần còn lại (NET_RAW, MKNOD, SYS_CHROOT, AUDIT_WRITE, KILL…).
-    # ⚠️ CHƯA DIỄN TẬP ĐƯỢC bằng docker thật khi viết bản vá này (môi trường không có docker
-    #    daemon). Deploy staging TRƯỚC và xem log tới `database system is ready to accept
-    #    connections`; thiếu capability thì entrypoint chết ngay ở bước chown, thấy liền.
+    # ĐÃ DIỄN TẬP thật 2026-08-27 (docker 29.3.1 / compose v5.1.1, đúng digest trên, máy sandbox
+    # — KHÔNG phải VM staging/prod): `docker compose -f docker-compose.staging.yml up -d postgres
+    # redis` → cả hai `healthy`, log tới `database system is ready to accept connections`, PID 1
+    # chạy dưới user postgres, `CapEff: 0000000000000000`. Khối postgres/redis của prod và staging
+    # giống hệt nhau từng dòng nên lượt diễn tập đó phủ cả hai file. Đối chứng đã đo:
+    #   • `--cap-drop ALL` không cap_add → chết ngay: `error: failed switching to 'postgres':
+    #     operation not permitted`
+    #   • bỏ DAC_OVERRIDE mà giữ FOWNER → chết: `find: /var/lib/postgresql/data: Permission
+    #     denied` (chmod 0700 chạy xong thì chính root hết đọc nổi thư mục)
+    #   • trên volume ĐÃ CÓ dữ liệu, chỉ SETGID+SETUID → cũng `Permission denied` như trên
+    #   • bỏ SETUID hoặc bỏ SETGID → `error: failed switching to 'postgres': operation not
+    #     permitted` (gosu cần CẢ HAI, có một cái không đủ)
+    #   • bỏ CHOWN trên volume mà MỌI tệp đã thuộc postgres → vẫn XANH, vì nhánh `find \! -user
+    #     postgres` không khớp gì. Nhưng chown 1 tệp trong PGDATA về root (đúng hình dạng của một
+    #     lượt khôi phục từ tar/backup) rồi bỏ CHOWN → ĐỎ ngay: `chown: …/PG_VERSION: Operation
+    #     not permitted`. Nói cách khác CHOWN là capability của ĐƯỜNG KHÔI PHỤC, không phải của
+    #     đường khởi động thường ngày — đừng siết nó chỉ vì lượt diễn tập thường ngày vẫn xanh.
+    #   • bỏ FOWNER (cả volume trống lẫn volume đã có dữ liệu) → XANH; xem giải thích ở trên.
     cap_drop: ["ALL"]
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
     security_opt: ["no-new-privileges:true"]
@@ -47,10 +74,21 @@ services:
     # ràng buộc gì. Vì `deploy.sh` ghi đè file này mỗi lượt deploy (git archive), giá trị được đưa
     # ra `.env` (không tracked, được giữ nguyên trên máy chủ) để chỉnh mà không mất khi deploy:
     #     POSTGRES_CPUS=1.5   REDIS_CPUS=0.5   APP_CPUS=2   WORKER_CPUS=1.5
-    # ⚠️ NẾU VM CHỈ CÓ 1 vCPU: docker TỪ CHỐI khởi động container khi trần lớn hơn số CPU sẵn có
-    # ("Range of CPUs is from 0.01 to 1.00"). Mặc định trên giả định VM ≥ 2 vCPU. Deploy STAGING
-    # trước (đúng quy trình ở deploy.sh) thì lỗi này lộ ra ngay chứ không đợi tới prod; gặp thì đặt
-    # lại bốn biến trên trong `.env` của máy chủ.
+    # ⚠️ NẾU VM CHỈ CÓ 1 vCPU: docker TỪ CHỐI TẠO container khi trần lớn hơn số CPU sẵn có. Đo
+    # được trên sandbox 4 vCPU (2026-08-27): cả `docker run --cpus 9999` lẫn
+    # `deploy.resources.limits.cpus: "9999"` qua `docker compose up -d` đều trả
+    # `Error response from daemon: range of CPUs is from 0.01 to 4.00, as there are only 4 CPUs
+    # available` — trên VM 1 vCPU thì `4.00` thành `1.00`. Mặc định trên giả định VM ≥ 2 vCPU;
+    # gặp lỗi thì đặt lại bốn biến trên trong `.env` của máy chủ.
+    # MỘT LƯỢT `deploy.sh staging` CÓ chạm postgres/redis — nhưng ở BƯỚC [4/6], không phải [5/6]:
+    # [5/6] chỉ `up -d app worker`, còn [4/6] `docker compose run --rm app npx prisma migrate
+    # deploy` khởi động các service trong depends_on, và compose recreate service phụ thuộc khi
+    # config hash của nó lệch (cap_add và deploy.resources đều nằm trong hash đó). Đo bằng compose
+    # v5.1.1: đổi cap_add của dep → `compose run` recreate nó (container id đổi); không đổi gì →
+    # không recreate; dep không lên nổi → `compose run` thoát mã 1, `set -e` dừng deploy và app cũ
+    # vẫn chạy. CHƯA đối chiếu phiên bản compose trên VM thật, nên đừng coi đó là bảo đảm: cách
+    # chắc chắn là diễn tập tay hai service này trước — docs/operations/DEPLOYMENT.md, mục
+    # "Diễn tập thay đổi postgres/redis".
     # Việc phải làm: `docker stats` một tuần, xem đỉnh CPU thật lúc xuất báo giá lớn nhất, rồi
     # thay bằng số đo được — y như hai con số RAM (xem docs/REMAINING_RISKS.md).
     deploy:
@@ -76,8 +114,20 @@ services:
     #   docker buildx imagetools inspect redis:7-alpine
     image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: quanly-redis
-    # Siết như postgres. Entrypoint redis cũng khởi động bằng root: `find . \! -user redis -exec
-    # chown redis '{}' +` rồi `su-exec redis`. Cùng 5 capability, không hơn.
+    # Siết như postgres nhưng CƠ CHẾ KHÁC HẲN: ảnh redis:7-alpine KHÔNG có gosu, KHÔNG có su-exec.
+    # docker-entrypoint.sh của ảnh (24 dòng) hạ quyền bằng setpriv của util-linux 2.40.4:
+    #   dòng 12  `find . \! -user redis -exec chown redis '{}' +`   (`.` là WORKDIR /data)
+    #   dòng 13  `exec /usr/bin/setpriv --reuid redis --regid redis --clear-groups "$0" "$@"`
+    # Vì sao từng capability (đo 2026-08-27, cùng lượt diễn tập với postgres — xem khối trên):
+    #   SETUID, SETGID  → BẮT BUỘC cho setpriv. Chỉ cap_add SETUID thì chết ngay:
+    #                     `setpriv: setresgid failed: Operation not permitted`.
+    #   CHOWN,          → dành cho nhánh `find … chown` ở dòng 12, chỉ chạy khi /data có tệp KHÔNG
+    #   DAC_OVERRIDE      thuộc redis (dump.rdb do root ghi, bind-mount của máy chủ…). Trong diễn
+    #                     tập, volume vốn đã thuộc redis nên nhánh này rỗng → CHƯA ĐO ĐƯỢC là cần.
+    #   FOWNER          → entrypoint redis không chmod gì cả → CHƯA ĐO ĐƯỢC là cần; đang giữ cho
+    #                     trùng tập với postgres. Muốn siết tiếp thì FOWNER là ứng viên đầu tiên.
+    # Kết quả diễn tập: `healthy`, log `Ready to accept connections`, PID 1 dưới user redis,
+    # `CapEff: 0000000000000000`.
     cap_drop: ["ALL"]
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
     security_opt: ["no-new-privileges:true"]

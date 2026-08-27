@@ -61,7 +61,14 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // cũng vẽ lại — dùng cho MỌI đường có thể đụng tới items (onChange của chính lưới, nạp Excel,
   // tải lại báo giá…). `redrawMeta()` chỉ vẽ lại phần NGOÀI lưới, dành cho các ô meta gõ-từng-phím
   // (Ngày báo giá · VAT · Giảm giá · Tên sheet): chúng không đổi gì trong lưới, mà mỗi lượt vẽ lưới
-  // ở sheet lớn là hàng chục ms chặn luồng chính (bench.tsx: ~73ms/phím ở 1000 dòng).
+  // ở sheet lớn là hàng chục ms chặn luồng chính.
+  // CON SỐ ĐO ĐƯỢC là 73ms/phím ở 1000 dòng, và nó đo đường gõ TRONG lưới, không phải ở đây —
+  // nguồn: web/src/components/GridTable.tsx (grep "73ms": nay ở dòng 786 và 1366).
+  // Chi phí gõ ô meta ở QuoteEditor thì CHƯA ĐO RIÊNG, chỉ SUY RA: nếu không có redrawMeta thì
+  // mỗi phím ở đây cũng kéo theo đúng lượt vẽ lại <GridTable> đã đo nói trên.
+  // src/bench.tsx KHÔNG đo được việc này — nó gắn một <GridTable> trần, không dựng QuoteEditor,
+  // nên trang đo không có ô meta nào để gõ (các phép đo của nó: vẽ lần đầu · gõ ô chữ/ô số trong
+  // lưới · thêm/xoá hàng · cuộn · đổi đơn giá).
   // Quên dùng redrawMeta ở đâu đó = chỉ mất phần tối ưu, KHÔNG sai màn hình — xem gridPropsEqual.
   const gridVerRef = useRef(0);
   const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);

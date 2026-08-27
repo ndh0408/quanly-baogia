@@ -12,7 +12,12 @@
 # Each run: backup DB → tag :rollback → ship tracked files (git archive) →
 #           lấy image (pull digest HOẶC build trên VM) → recreate app+worker →
 #           write DEPLOYED_SHA → verify /livez.
-# Untracked server files (.env, docker-compose.*.yml, DEPLOYED_SHA) are preserved.
+# Untracked server files (.env, DEPLOYED_SHA) are preserved.
+# ⚠️ docker-compose.*.yml KHÔNG nằm trong nhóm đó: cả ba file compose ĐỀU được git theo dõi
+#    (`git ls-files | grep docker-compose`), nên `git archive` ở dưới GHI ĐÈ chúng mỗi lượt
+#    deploy. Sửa tay compose trên máy chủ là mất lặng lẽ ở lượt deploy kế. Giá trị cần chỉnh
+#    theo từng máy (POSTGRES_CPUS / REDIS_CPUS / APP_CPUS / WORKER_CPUS…) phải đặt trong
+#    `.env` — file đó mới thật sự untracked và được giữ nguyên.
 #
 #   IMAGE_REF="ghcr.io/ndh0408/quanly-baogia@sha256:…" bash deploy.sh prod
 #     → kéo đúng image CI đã dựng/quét/ký thay vì dựng lại trên VM (xem khối ở dưới).

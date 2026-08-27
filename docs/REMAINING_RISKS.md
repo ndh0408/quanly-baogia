@@ -304,6 +304,36 @@ Cột "hệ quả nếu đúng" là lập luận của người rà soát, **ch�
 
 ---
 
+## Ghim phụ thuộc bằng `overrides` (2026-08-27)
+
+`package.json` có ba mục `overrides`. Chúng KHÔNG có chỗ ghi chú (npm từ chối khoá `"//"` bên
+trong `overrides` — đã thử, lỗi `Override without name`), nên lý do nằm ở đây.
+
+| Gói | Ghim | Vì sao |
+|---|---|---|
+| `deepmerge-ts` | `^8.0.2` | `@prisma/config@7.9.1` ghim **chính xác** `7.1.5`, dính GHSA-ggr8-5vv4-36mx (stack exhaustion khi merge đồ thị object đệ quy, mức **high**). Không có bản prisma 7.x nào thoát. |
+| `@opentelemetry/core` | `^2.8.0` | (có từ trước đợt này) |
+| `uuid` | `^11.1.1` | (có từ trước đợt này) |
+
+### Vì sao không `npm audit fix --force`
+
+Nó tụt `prisma` về **6.12.0** — đổi lớn, và repo đang ở schema/API của prisma 7.
+
+### Đã kiểm những gì trước khi ghim `deepmerge-ts@8`
+
+`deepmerge-ts@8.0.2` **không có phụ thuộc nào** (`npm view deepmerge-ts@8.0.2 dependencies` trả
+rỗng), nên bề mặt rủi ro của chính bản ghim là nhỏ nhất có thể. Đo trên máy, cùng lượt:
+
+- `npx prisma generate` · `validate` · `migrate status` · `migrate deploy` — cả bốn chạy trọn
+- `npm run verify` đầy đủ: 162 file test / 1227 xanh, web 163 xanh, build backend + web xanh
+- `npm audit --omit=dev --audit-level=high` → `found 0 vulnerabilities`
+
+### Khi nào gỡ
+
+Khi `@prisma/config` tự nâng lên `deepmerge-ts@8` (theo dõi ở bản prisma mới). Gỡ dòng override
+rồi chạy `npm run verify`: bước `[9/9] Phụ thuộc` sẽ **đỏ ngay** nếu gỡ sớm — đó là cổng cứng,
+không phải cảnh báo.
+
 ## Hạn chế đã biết của hệ thống (không phải lỗi, là đánh đổi)
 
 Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải phát hiện lại:

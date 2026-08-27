@@ -107,10 +107,20 @@ describe("endpoint-inventory: phải bóc được middleware gác của từng 
  * ============================================================================
  * LỖ THẬT: `--check-guards` KHÔNG bịt được "thêm route không ai soát mà nhớ +1 con số".
  *
- * ĐO ĐƯỢC (khẳng định ngay dưới đây, không phải suy đoán): 20/24 file route mở đầu bằng
- * `router.use(requireAuth)`, mà `routerLevelGuards` coi một dòng như thế là phủ MỌI route trong
- * file — nên phần lớn endpoint không bao giờ lọt vào `routesWithoutGuards`. Thêm một route hở vào
+ * ĐO ĐƯỢC (khẳng định ngay dưới đây, không phải suy đoán):
+ * 16/23 file route mở đầu bằng `router.use(requireAuth)`, mà `routerLevelGuards` coi một dòng như
+ * thế là phủ MỌI route trong file — nên phần lớn endpoint không bao giờ lọt vào `routesWithoutGuards`. Thêm một route hở vào
  * bất kỳ file nào trong số đó rồi sửa con số 137→138 là CI xanh trơn.
+ * Thêm
+ * 4 file (admin/audit/users/webhooks) gác bằng `router.use(requirePermission(...))`
+ * — chúng KHÔNG nằm trong vùng mù nói trên vì đã khai quyền ngay ở cấp router. Còn lại 3 file (auth/jobs/
+ * stream) không có guard cấp router nào, và chỉ 3 file đó cộng src/app.ts là nơi `--check-guards`
+ * thật sự có hiệu lực.
+ *
+ * CON SỐ NÀY TỪNG SAI Ở NĂM CHỖ CÙNG LÚC ("20/24"). "20/24" là số NGUỒN có guard cấp router BẤT
+ * KỲ trên tổng 24 nguồn `inventory()` quét (23 file route + src/app.ts) — không phải số file dùng
+ * `requireAuth`. tests/w4-route-guard-counts.test.js nay ĐO từ mã nguồn rồi đối chiếu chú thích ở
+ * cả năm chỗ, nên chép sai lần nữa là đỏ chứ không sống sót âm thầm như trước.
  *
  * BỊT BẰNG: `--check` nay đối chiếu TỪNG DÒNG với bảng ma trận. Muốn xanh phải viết một dòng bảng,
  * tức phải điền cột QUYỀN / P.VI / T.NGUYÊN — tức phải soát.

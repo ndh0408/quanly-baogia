@@ -1,10 +1,16 @@
 // Lỗ mà `--check-guards` KHÔNG bịt được, và bài test này chốt lớp bịt mới.
 //
 // ── ĐO TRƯỚC KHI VIẾT ────────────────────────────────────────────────────────
-// `--check-guards` coi `requireAuth` là "có gác". 20/24 file route mở đầu bằng
-// `router.use(requireAuth)`, nên MỘT route GHI mới thêm vào bất kỳ file nào trong số đó luôn xanh
-// dù không có bất kỳ phép kiểm QUYỀN nào. Đo trên cây hiện tại: 78 endpoint GHI
-// (POST/PUT/PATCH/DELETE), trong đó 46 KHÔNG có middleware phân quyền nào ở cấp route/router.
+// `--check-guards` coi `requireAuth` là "có gác", mà
+// 16/23 file route mở đầu bằng `router.use(requireAuth)`
+// — nên MỘT route GHI mới thêm vào bất kỳ file nào trong số đó luôn xanh
+// dù không có bất kỳ phép kiểm QUYỀN nào. Vùng mù ấy KHÔNG phủ hết cây route:
+// 4 file (admin/audit/users/webhooks) gác bằng `router.use(requirePermission(...))` — tức đã khai
+// quyền ngay ở cấp router và cổng này thấy được; analytics + export có CẢ requireAuth lẫn
+// requirePermission; 3 file (auth/jobs/stream) không có guard cấp router nào.
+// Đo trên cây hiện tại: 78 endpoint GHI (POST/PUT/PATCH/DELETE), trong đó 46 KHÔNG có middleware
+// phân quyền nào ở cấp route/router. Các con số file này do tests/w4-route-guard-counts.test.js
+// đo lại từ mã nguồn và chốt, nên chúng không trôi âm thầm nữa.
 //
 // `--check` cũng không bịt: nó đòi mỗi endpoint phải CÓ một dòng trong ma trận
 // docs/product/ROLES_PERMISSIONS.md, nhưng KHÔNG hề đọc cột QUYỀN — một dòng ghi `—` vẫn qua.

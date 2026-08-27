@@ -19,6 +19,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../src/db.js";
 import { snapshotQuoteVersion } from "../src/quoteVersion.js";
 import { randomBytes } from "node:crypto";
+import { doSach } from "./helpers/toast.js";
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "QuoteItem" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres");
@@ -28,28 +29,6 @@ const SO_HANG_MUC = 12;
 // ~400KB/ảnh. NGẪU NHIÊN chứ không phải một ký tự lặp: chuỗi lặp bị pglz nén còn vài trăm byte và
 // nằm gọn TRONG hàng, không hề ra bảng TOAST — bộ đo sẽ đọc ra 0 ở mọi phép đo và bài test XANH giả.
 const ANH = `data:image/png;base64,${randomBytes(300_000).toString("base64")}`;
-
-const nghi = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Số block TOAST mà bảng đã đụng.
- *
- * Postgres gom thống kê trong TỪNG backend và chỉ đẩy lên bộ nhớ chung khi đã qua PGSTAT_MIN_INTERVAL
- * (1 giây) kể từ lần đẩy trước. Kết nối của Prisma nằm trong pool và không đẩy ngay sau truy vấn,
- * nên đo liền tay sẽ ra 0 ở MỌI phép đo — chính là ca "xanh giả" mà bài đối chứng bên trên canh.
- * Nghỉ hơn một giây rồi bắn vài truy vấn rỗng qua pool để các backend đó đẩy thống kê của mình.
- */
-async function toastBlocks(bang) {
-  await nghi(1200);
-  for (let i = 0; i < 8; i++) await prisma.$queryRawUnsafe("SELECT 1");
-  const c = new (await import("pg")).default.Client({ connectionString: process.env.DATABASE_URL });
-  await c.connect();
-  try {
-    await c.query("SELECT pg_stat_force_next_flush()");
-    const r = await c.query("SELECT coalesce(toast_blks_hit,0) + coalesce(toast_blks_read,0) AS n FROM pg_statio_all_tables WHERE relname = $1", [bang]);
-    return Number(r.rows[0]?.n ?? 0);
-  } finally { await c.end(); }
-}
 
 describe.runIf(dbAvailable)("Bản chụp phiên bản không được đọc ảnh hạng mục", () => {
   let quoteId, sheetId;
@@ -79,22 +58,20 @@ describe.runIf(dbAvailable)("Bản chụp phiên bản không được đọc �
   });
 
   it("đọc ảnh THẬT làm block TOAST nhảy (bảo hiểm: bộ đo có hoạt động)", async () => {
-    const truoc = await toastBlocks("QuoteItem");
-    const rows = await prisma.quoteItem.findMany({ where: { sheetId }, select: { images: true } });
+    const { tang, kq: rows } = await doSach("QuoteItem", () =>
+      prisma.quoteItem.findMany({ where: { sheetId }, select: { images: true } }));
     expect(rows.length).toBe(SO_HANG_MUC);
-    const tang = (await toastBlocks("QuoteItem")) - truoc;
     expect(tang, "đọc 12 ảnh 400KB mà TOAST không nhúc nhích ⇒ bộ đo hỏng, mọi khẳng định dưới vô nghĩa").toBeGreaterThan(200);
-  }, 60_000);
+  }, 180_000);
 
   it("snapshot phiên bản KHÔNG đụng tới ảnh", async () => {
-    const truoc = await toastBlocks("QuoteItem");
-    const v = await prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, null, "db3-test"));
-    const tang = (await toastBlocks("QuoteItem")) - truoc;
+    const { tang, kq: v } = await doSach("QuoteItem", () =>
+      prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, null, "db3-test")));
     // Bản cũ (`include` không `select`): xấp xỉ bằng phép đọc đối chứng ở trên (600+ block).
     expect(tang, `snapshot làm TOAST nhảy ${tang} block — vẫn đang kéo ảnh về`).toBeLessThan(100);
     // Và payload vẫn đủ dữ liệu để đối chiếu phiên bản (không cắt nhầm thứ đang dùng).
     expect(v.payload.sheets[0].items.length).toBe(SO_HANG_MUC);
     expect(v.payload.sheets[0].items[0]).toMatchObject({ order: 1, kind: "item", name: "Hạng mục 1", quantity: "1", unitPrice: "1000" });
     expect(JSON.stringify(v.payload).includes("data:image")).toBe(false);
-  }, 60_000);
+  }, 180_000);
 });

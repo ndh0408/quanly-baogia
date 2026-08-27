@@ -4,7 +4,11 @@
 // `insertItemImages` (src/excel.ts) đặt `n = list.length` rồi kéo `row.height` lên `n` tầng
 // TRƯỚC khi biết ảnh nào nhúng được. Hai loại ảnh bị bỏ ngay sau đó:
 //   • định dạng ExcelJS không nhúng (regex chỉ nhận png/jpe?g/gif — .webp thì `continue`),
-//     mà src/validators.ts:132 và web/src/components/GridTable.tsx:89 ĐỀU cho phép webp;
+//     mà webp thì LƯU ĐƯỢC: regex của `images` trong src/validators.ts (dòng 163-165, tìm bằng
+//     `grep -n 'images: z.array'`) nhận cả webp. (Bên web, RE_ANH_HOP_LE ở
+//     web/src/components/GridTable.tsx:122 cũng nhận webp nhưng chỉ là guard HIỂN THỊ trong
+//     `safeImgSrc`, không phải đường lưu — đường lưu `fileToImg` ở dòng 1618 tự chuyển ảnh
+//     sang JPEG bằng `toDataURL("image/jpeg", 0.82)` ở dòng 1631.)
 //   • ảnh vượt `MAX_ITEM_IMG_BYTES`.
 // Kết quả trong file gửi khách: hàng bị kéo cao gấp 2–3 lần (mỗi tầng ≈ 74px) trong khi ô ảnh
 // TRỐNG — một khoảng trắng lớn giữa bảng báo giá, không ai thấy lỗi ở đâu.

@@ -7,8 +7,10 @@
 // tổng, tên sheet chỉ đổi nhãn tab + bảng tổng.
 //
 // ── TÁI HIỆN ────────────────────────────────────────────────────────────────
-// Báo giá ~1000 dòng, gõ tên sheet: mỗi ký tự dựng lại cả cây lưới (bench.tsx đo được ~73ms/phím
-// ở 1000 dòng — con số này của bộ đo sẵn có trong repo, không phải ước lượng của lượt vá này).
+// Báo giá ~1000 dòng, gõ tên sheet: mỗi ký tự dựng lại cả cây lưới (~73ms/phím ở 1000 dòng —
+// con số này CÓ SẴN trong repo, không phải ước lượng của lượt vá này). Nguồn là chú thích tại
+// web/src/components/GridTable.tsx (grep "73ms": nay ở dòng 786 và 1366), KHÔNG phải web/src/
+// bench.tsx — bench.tsx là trang đo tay, nó không chứa con số nào.
 //
 // ── CÁCH VÁ ─────────────────────────────────────────────────────────────────
 // Bọc `GridTable` bằng `memo(..., gridPropsEqual)` + prop `dataVersion`:

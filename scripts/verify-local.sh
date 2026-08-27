@@ -53,6 +53,20 @@ buoc "[1/9] Prisma client + migrate"
 npx prisma generate >/dev/null 2>&1;                                ket $? "prisma generate"
 npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "prisma migrate deploy"
 
+# ── BÀI ĐO PHẢI CHẠY RIÊNG, VÀ PHẢI CHẠY TRƯỚC ─────────────────────────────
+# tests/b2-update-quote-no-image-read.test.js có 2 bài đọc `pg_statio_all_tables` — bộ đếm TOÀN
+# CSDL, không phải của riêng một bài. Chạy song song với 161 file khác thì bài khác cũng đụng cùng
+# bảng và con số nhảy → đỏ vì lý do sai. Nên chúng nằm sau cờ DO_TOAST_MEASURE=1.
+# Không có CI thì một bài opt-in là một bài KHÔNG BAO GIỜ CHẠY Ở ĐÂU — nên chạy ngay ở đây.
+#
+# VỊ TRÍ LÀ CÓ CHỦ Ý: TRƯỚC bước [4/9], không phải sau. Đặt sau bộ đầy đủ thì vẫn đỏ (đã thử):
+# Postgres dồn thống kê theo lô, nên hoạt động của 161 file vừa chạy còn đang chảy về
+# pg_statio_all_tables trong lúc bài này đo. Chạy ở đây, ngay sau `migrate deploy`, CSDL còn yên.
+# ĐỪNG chuyển xuống dưới cho "gọn nhóm test" — đó đúng là cách làm nó đỏ lại.
+buoc "[1b/9] Bài đo TOAST (chạy riêng, CSDL còn yên)"
+DO_TOAST_MEASURE=1 npx vitest run tests/b2-update-quote-no-image-read.test.js
+ket $? "vitest đo TOAST (DO_TOAST_MEASURE=1)"
+
 buoc "[2/9] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
 (cd web && npx tsc --noEmit -p tsconfig.json);                      ket $? "tsc (web)"
@@ -88,13 +102,10 @@ else
 fi
 
 buoc "[9/9] Phụ thuộc"
-# KHÔNG dừng cả lượt vì cổng này: xem docs/REMAINING_RISKS.md — advisory GHSA-ggr8-5vv4-36mx
-# đi theo `deepmerge-ts` mà MỌI bản prisma 7.x đều ghim, chỉ prisma 8 (còn RC) mới thoát.
-if npm audit --omit=dev --audit-level=high >/dev/null 2>&1; then
-  printf '  \033[32m✓ npm audit (production)\033[0m\n'
-else
-  printf '  \033[33m! npm audit (production) ĐỎ — đã biết, xem docs/REMAINING_RISKS.md\033[0m\n'
-fi
+# CỔNG CỨNG. Trước đây chỉ là cảnh báo vì advisory GHSA-ggr8-5vv4-36mx đi theo `deepmerge-ts@7.1.5`
+# mà `@prisma/config` GHIM CHÍNH XÁC, và `npm audit fix --force` thì tụt prisma về 6.12 (phá vỡ).
+# Nay đóng bằng `overrides: { "deepmerge-ts": "^8.0.2" }` trong package.json — xem lý do ở đó.
+npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm audit (production)"
 
 if [ "$do" -eq 0 ]; then
   printf '\n\033[32m✅ TẤT CẢ CỔNG XANH\033[0m\n'
