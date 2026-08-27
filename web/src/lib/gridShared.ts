@@ -3,6 +3,36 @@ import * as M from "./quoteMath";
 
 export type ItemK = M.Item & { _k?: number };
 
+/**
+ * Phím này có phải một nhịp của BỘ GÕ (IME) không?
+ *
+ * ── VÌ SAO PHẢI HỎI ────────────────────────────────────────────────────────
+ * Gõ tiếng Việt (Telex/VNI trên macOS, và mọi bộ gõ Trung/Nhật/Hàn) đi qua một lớp SOẠN THẢO:
+ * trình duyệt gom nhiều phím thành một cụm rồi mới nhả ra ký tự cuối. Trong lúc đó nó vẫn bắn
+ * `keydown`, nhưng `key` không phải ký tự người ta gõ. Xử lý những nhịp ấy như phím thường thì:
+ *   · ở LƯỚI — phím đầu tiên rơi vào ô đang KHÓA nên bị nuốt, chữ đầu của mỗi ô mất;
+ *   · ở "thêm hạng mục" của trang Rạp — Enter XÁC NHẬN cụm chữ của bộ gõ lại bị hiểu là "gửi",
+ *     tức mỗi lần bỏ dấu là một lần gửi nhầm.
+ * Cả hai đều là lỗi CHỈ người gõ tiếng Việt gặp, và không lộ ra ở bàn phím tiếng Anh.
+ *
+ * ── BA DẤU HIỆU, VÌ KHÔNG TRÌNH DUYỆT NÀO ĐỦ MỘT MÌNH ──────────────────────
+ *   · `isComposing` — chuẩn, nhưng Safari cũ để `false` ở nhịp ĐẦU TIÊN của cụm;
+ *   · `keyCode === 229` — quy ước cũ mọi trình duyệt còn giữ cho "phím thuộc về IME";
+ *   · `key === "Process"` — Firefox dùng thay cho 229.
+ * Đọc `keyCode` ở CẢ sự kiện tổng hợp của React lẫn `nativeEvent`: React chép trường này sang nên
+ * hai chỗ luôn bằng nhau, khai cả hai chỉ để nơi gọi truyền kiểu nào cũng đúng.
+ *
+ * Hàm THUẦN và KHÔNG xét Ctrl/Cmd — phím tắt là việc của nơi gọi, và hai nơi gọi trong repo này
+ * xử lý phím tắt khác nhau (lưới loại Ctrl trước, trang Rạp loại sau).
+ */
+export function dangGoIME(e: {
+  key?: string;
+  keyCode?: number;
+  nativeEvent?: { isComposing?: boolean; keyCode?: number } | null;
+}): boolean {
+  return !!e.nativeEvent?.isComposing || e.keyCode === 229 || e.nativeEvent?.keyCode === 229 || e.key === "Process";
+}
+
 // Bộ đếm khoá React duy nhất cho mọi item (lưới chính + bảng nội bộ) → key ổn định, không trùng.
 let _kSeq = 1;
 export const nextK = () => _kSeq++;
