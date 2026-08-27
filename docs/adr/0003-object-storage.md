@@ -32,3 +32,13 @@ trỏ vào hư không — nên nó không còn đủ.
 Quyền tải ảnh bám vào **bản ghi nghiệp vụ** (ai đọc được hồ sơ thì đọc được chứng
 từ của nó), không bám vào "ai là người đã tải lên". Kế toán tải ảnh lên, nhưng
 người có quyền xem hồ sơ cũng phải xem được.
+
+## Đường lùi
+
+Giai đoạn chuyển tiếp **cố ý** giữ đường đọc cũ: thiếu object thì rơi về cột base64. Nên lùi =
+ngừng ghi vào kho object (gỡ `S3_*`), và mọi bản ghi CŨ vẫn đọc được như trước.
+
+Cái KHÔNG lùi được: những **tệp đã ghi SAU khi bật kho object** không có bản base64 tương ứng. Muốn
+lùi thật thì phải kéo chúng về CSDL trước — chưa có script cho việc đó, và viết nó là điều kiện bắt
+buộc nếu quyết định này bị lật. `scripts/backup/backup-objects.sh` + bài diễn tập khôi phục là thứ
+bảo đảm dữ liệu vẫn còn để kéo về.

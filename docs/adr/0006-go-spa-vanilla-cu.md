@@ -97,3 +97,13 @@ với API mỗi lần đổi schema, để đổi lấy một đường lui chư
 
 **Giữ nguyên và vá đầy đủ.** Tốn công viết test hồi quy cho engine lưới thứ hai,
 với thứ đằng nào cũng nên xoá. Chi phí bảo trì vĩnh viễn, lợi ích một lần.
+
+## Đường lùi
+
+`git revert` commit gỡ, rồi deploy. SPA cũ là **tệp tĩnh** (`public/*.js`, `public/*.html`) — không
+có migration, không có trạng thái, không có bảng nào để dọn. Đó là lý do quyết định này an toàn:
+đường lùi là một lệnh git.
+
+Cái phải kiểm sau khi lùi: iframe `/app?embed=1#/new` từng là đường DUY NHẤT còn phụ thuộc SPA cũ và
+nó **đi vòng qua cổng `denied`** của Shell (xem chú thích ở `web/src/components/Shell.tsx`). Lùi mà
+không dựng lại cổng đó là mở lại một lỗ phân quyền, không chỉ là bật lại một trang cũ.

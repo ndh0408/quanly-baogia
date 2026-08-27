@@ -222,6 +222,31 @@ tách bớt trang, vì tách cũng là một lần Lưu.
 3. Nhóm P1 về **hàng đợi/worker** — ảnh hưởng độ tin cậy của xuất file và job nền.
 4. Phần còn lại theo thứ tự thuận tiện.
 
+## ĐÃ BÁC BỎ — đừng vá lại (false positive)
+
+§0 của quy ước dự án đòi mỗi phát hiện phải được xếp vào một trong năm loại: EXISTS · ALREADY FIXED
+· PARTIALLY FIXED · **FALSE POSITIVE** · **OBSOLETE DOCUMENTATION**. Ba loại đầu đã có chỗ trong
+các bảng dưới. Hai loại cuối trước đây **không có chỗ nào** — phát hiện bị bác bỏ chỉ đơn giản biến
+mất khỏi bảng, nên lần rà sau nó quay lại và tốn thêm một lượt điều tra nữa.
+
+Mỗi mục dưới đây đã được **ĐO**, không phải suy luận. Muốn lật thì phải đo lại, đừng đọc mã rồi kết luận.
+
+| Phát hiện | Vì sao BÁC BỎ | Đo bằng cách nào |
+|---|---|---|
+| `invoiceLink` là lỗ XSS: chuỗi `javascript:` do người dùng nhập được render thành `href` | **Hai** lớp chặn, cả hai có sẵn từ trước. (1) React 19 CHẶN `javascript:` trong `href` — nó thay bằng một hàm ném lỗi; (2) zod ở `quotes.routes.ts` đã ép `^https?://` cho endpoint duy nhất ghi trường này. | `renderToStaticMarkup` trên một component có `href="javascript:alert(1)"` → chuỗi ra KHÔNG chứa `javascript:`. Đã thử sửa "phòng xa" ở tầng service rồi **REVERT**: đó là sửa mã đang đúng, vi phạm §0/§50. |
+| semgrep "partially analyzes" một file thì cả file thành điểm mù | Vùng mù là **khu vực quanh lỗi cú pháp**, KHÔNG phải cả file. Quy tắc vẫn khớp ở phần còn lại. | Dựng một file có lỗi cú pháp ở giữa + mẫu nguy hiểm ở đầu và cuối; semgrep vẫn báo cả hai. |
+| `tsx` lọt vào ảnh production (nằm trong `dependencies`, không phải `devDependencies`) | Đúng chỗ. Cấu hình Prisma 7 là **`prisma.config.ts`** — một file TypeScript mà Prisma CLI phải nạp được lúc `migrate deploy` CHẠY TRONG CONTAINER (bước [4/6] của `deploy.sh`). Không có bộ nạp TS trong `dependencies` thì migration hỏng ở production, trong khi mọi thứ khác vẫn xanh. (`typescript` thì nằm ở `devDependencies` — không lọt vào ảnh.) | Đọc `prisma.config.ts` (TS, `import "dotenv/config"`) + vị trí thật của hai gói trong `package.json`. |
+
+## Tài liệu LỖI THỜI (obsolete documentation)
+
+Không phải lỗi mã — là **mô tả không còn đúng**. Ghi ở đây để không ai đi vá mã theo một câu văn cũ.
+
+| Ở đâu | Câu đã lỗi thời | Thực tế |
+|---|---|---|
+| `docs/archive/audits/SECURITY_AUDIT_2026-08.md` | toàn bộ danh sách phát hiện | Nhiều mục ĐÃ VÁ. File đã có khối chặn "TÀI LIỆU LỊCH SỬ" ở đầu; **nguồn sự thật là MÃ NGUỒN**. |
+| `docs/archive/performance/PERFORMANCE_BENCHMARK.md` | mọi con số | Đo trên cấu hình cũ. Số hiện hành cho đường LƯU nằm ở `docs/architecture/QUOTE_SAVE_PERFORMANCE.md`, đo lại được bằng `npm run bench:quote-save`. |
+| chú thích cũ trong `web/src/lib/exportQuote.ts` | trỏ `:108` và `:152` | Chính đợt vá kèm nó đã làm hai số thành 109 và 153. Nay trỏ theo TÊN HÀM; `scripts/ci/check-line-refs.mjs` canh phần còn lại. |
+
 ## Cách đọc bảng
 
 `id` là định danh nội bộ của phát hiện, dùng để tra lại trong ghi chép rà soát.

@@ -31,3 +31,14 @@ reconnect — để đổi lấy một chiều truyền mà ta không dùng.
 - Sự kiện presence chỉ gửi cho người đang mở đúng báo giá đó — phát cho tất cả sẽ
   rò metadata (dựng được sơ đồ ai-đang-làm-báo-giá-nào kèm họ tên, chỉ bằng cách
   ngồi nghe SSE).
+
+## Đường lùi
+
+Bỏ realtime hoàn toàn (client quay lại hỏi định kỳ) là đường lùi **rẻ và tức thì**: SSE ở đây chỉ
+đẩy thông báo và tín hiệu làm mới, không có luồng nghiệp vụ nào phụ thuộc nó. Gỡ `EventSource` ở
+`web/src/components/Shell.tsx` và đặt một `setInterval` gọi `api.unreadCount()` là xong.
+
+Đường lùi thứ hai (đổi sang WebSocket) **đắt hơn nhiều** vì nó kéo theo hạ tầng: Cloudflare Tunnel,
+cân bằng tải và mọi proxy ở giữa phải hỗ trợ nâng cấp giao thức, còn SSE chỉ là HTTP thường. Đó
+chính là lý do của quyết định này — nên nếu lật, phải lật vì một yêu cầu HAI CHIỀU có thật, không
+vì "WebSocket hiện đại hơn".

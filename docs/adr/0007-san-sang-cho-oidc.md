@@ -68,3 +68,14 @@ Ghi ra để lần đó không phải khảo sát lại:
   ngược vào `establishSession`, hoặc cho phân quyền phụ thuộc vào cách đăng nhập, sẽ làm nó đỏ.
 - Rủi ro còn lại: **chưa từng chạy thử với một IdP thật.** Các tính chất trên là điều kiện *cần*,
   không phải bằng chứng *đủ*.
+
+## Đường lùi
+
+ADR này **chưa triển khai gì**, nên không có gì để lùi — đó là điểm mạnh của nó. Nếu OIDC được thêm
+sau này rồi phải gỡ: `establishSession` không biết danh tính từ đâu ra, nên gỡ nhánh OIDC là xoá
+đúng nguồn gọi thứ tư, ba nguồn cũ (đăng nhập mật khẩu · nhận lời mời · đổi mật khẩu) không đổi một
+dòng.
+
+Điều kiện để đường lùi đó còn đúng: **không** cho phép tài khoản chỉ-OIDC (không có `passwordHash`).
+Có tài khoản như vậy thì gỡ OIDC là khoá họ ra ngoài, và lúc đó phải chạy một đợt đặt lại mật khẩu
+trước khi gỡ.

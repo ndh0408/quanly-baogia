@@ -36,3 +36,17 @@ không phải microservice — nó dùng chung mã nguồn và chung CSDL.
 - Muốn scale ngang thì scale cả app; hiện đủ dùng.
 - Nếu sau này có phần thật sự cần vòng đời riêng, tách nó ra **lúc đó**, với lý
   do cụ thể — không tách trước.
+
+## Đường lùi
+
+Phụ lục §19 đòi mọi quyết định kiến trúc phải có đường lùi. Với ADR này, "lùi" nghĩa là **tách một
+miền ra dịch vụ riêng** — và điều kiện tiên quyết đã sẵn: ranh giới `routes/ → services/` được
+`scripts/ci/check-architecture.mjs` khoá, nên một miền muốn tách chỉ cần đổi lớp gọi service thành
+lớp gọi HTTP/hàng đợi, không phải gỡ mã ra khỏi một khối rối.
+
+Cái KHÔNG lùi được rẻ: **một CSDL dùng chung**. Tách một miền ra là tách luôn dữ liệu của nó, và
+mọi truy vấn đang `JOIN` xuyên miền trở thành hai lần đọc mạng cộng một phép ghép trong bộ nhớ. Nên
+điều kiện lật quyết định này là **áp lực TỔ CHỨC** (nhiều đội chạm cùng lúc), không phải áp lực tải
+— tải thì thêm instance rẻ hơn nhiều.
+
+Xem thêm [ADR 0008](0008-khong-doi-cay-thu-muc-sang-modules.md).

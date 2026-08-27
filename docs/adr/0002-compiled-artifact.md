@@ -37,3 +37,13 @@ thầm**: typecheck xanh, server báo khoẻ.
 - `smoke-dist.sh` chạy **thật** artifact ở `NODE_ENV=production` và gọi
   `/style.css` — bắt được đúng lớp lỗi đường dẫn tài nguyên nói trên.
 - `.js` cũ còn sót trong `src/` trên máy chủ có thể che `.ts` — `deploy.sh` dọn.
+
+## Đường lùi
+
+Quay lại chạy `tsx src/server.ts` ở production: sửa `CMD` trong Dockerfile (và `command:` trong
+compose/Helm), dựng lại ảnh, deploy. Không có migration dữ liệu nào, không có trạng thái nào bị
+kẹt — đây là quyết định **chỉ về artifact**, nên lùi là một lệnh build.
+
+Trước khi lùi, đọc `scripts/ci/check-runtime-command.sh`: nó tồn tại vì bốn đường triển khai
+(Dockerfile · compose · Helm · k8s) TỪNG lệch nhau và làm mọi pod chết vòng lặp. Lùi mà chỉ sửa một
+chỗ là tái hiện đúng sự cố đó — cổng sẽ đỏ, và nó đang đỏ đúng chỗ.

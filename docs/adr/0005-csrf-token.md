@@ -39,3 +39,15 @@ mình có được. Token đúng nghĩa như vậy.
   khó hiểu giữa lúc làm việc.
 - Client API dùng Bearer không bị ảnh hưởng.
 - Test tích hợp phải làm giống SPA — xem `tests/helpers/agent.js`.
+
+## Đường lùi
+
+Gỡ lớp 2 (token đồng bộ hoá) và quay về chỉ kiểm Origin/Referer: xoá khối "LỚP 2" trong `csrfGuard`
+(`src/app.ts`). Client không cần đổi — `web/src/lib/api.ts` vẫn gửi `X-CSRF-Token`, chỉ là máy chủ
+thôi đọc.
+
+**Nhưng đọc `tests/csrf.test.js` trước.** Lùi là mở lại đúng lỗ mà ADR này đóng: thao tác GHI xác
+thực bằng phiên cookie mà KHÔNG có Origin lẫn Referer sẽ đi qua. Bài "ĐÂY LÀ CHỖ ĐÃ SIẾT" sẽ đỏ, và
+nó đỏ đúng.
+
+Không có trạng thái nào cần dọn: `session.csrfSecret` là một chuỗi trong phiên, hết hạn theo phiên.

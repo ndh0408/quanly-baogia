@@ -12,6 +12,7 @@ import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
 import { storeProof, removeProof, readProofDataUrl } from "../paymentProof.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere, isPiiEncryptionEnabled } from "../piiFields.js";
+import { phanTrang } from "../pagination.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
@@ -85,7 +86,7 @@ export async function listPersonnel(req: Request) {
   const salarySum = Number(agg._sum.salary ?? 0);
   const tax = computeTax(salarySum);
   const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
-  return { data: decorated, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary };
+  return { ...phanTrang(decorated, total, page, size), summary };
 }
 
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
