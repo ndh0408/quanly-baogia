@@ -107,7 +107,7 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
   if (!Array.isArray(sheets)) return;
   // rid -> trạng thái thanh toán CỘNG số tiền tại thời điểm đó.
   //
-  // ── VÌ SAO PHẢI GHIM CẢ SỐ TIỀN ───────────────────────────────────────────
+  // ── VÌ SAO PHẢI GHIM CẢ SỐ TIỀN ─────────────────────────────────────────────
   // `rid` do CHÍNH CLIENT gửi lên và được `sanitizeExtraTables` (src/quoteUtils.ts) giữ NGUYÊN VĂN
   // khi ghi. Bản trước chỉ tra `prior.get(it.rid)`, nên tin cậy hoàn toàn vào một chuỗi client
   // kiểm soát. ĐÃ ĐO hai chiều:
@@ -652,10 +652,10 @@ export async function listQuotes(req: Request) {
 }
 
 /**
- * Bảng nội bộ THEO TẮNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
+ * Bảng nội bộ THEO TỪNG SHEET của một nhóm báo giá, ĐÃ CẮT `paidProof` NGAY TẠI SQL.
  *
  * BA đường dùng nó: `listQuotes` (gộp theo báo giá — xem `bangNoiBoTheoBaoGia`), `listProjects`
- * (cần theo TẮNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
+ * (cần theo TỪNG sheet vì trang Quản lý dự án / Hoá đơn cộng hcm/hanoi/khach cho mỗi trang), và
  * bản xuất GDPR (src/services/gdprService.ts) — đường đó cũng cần dữ liệu chữ/số của bảng nội bộ
  * mà KHÔNG kéo ảnh chứng từ qua dây.
  *
@@ -822,7 +822,7 @@ export async function listProjects(req: Request) {
       },
     },
   });
-  // Bảng nội bộ (đã cắt ảnh chứng từ) theo TẮNG sheet — chỉ để cộng hcm/hanoi/khach ngay dưới.
+  // Bảng nội bộ (đã cắt ảnh chứng từ) theo TỪNG sheet — chỉ để cộng hcm/hanoi/khach ngay dưới.
   const bangTheoSheet = new Map<number, any[]>();
   if (quotes.length) {
     for (const r of await bangNoiBoTheoSheet(quotes.map((q: any) => q.id))) {
