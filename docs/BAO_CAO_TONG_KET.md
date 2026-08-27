@@ -18,7 +18,7 @@ lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh 
 Docker thật, smoke giao diện Chromium 18 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
-**1.380 bài backend + 251 bài web** (số backend đo lúc chốt vòng 1 — xem mục J).
+**1.410 bài backend + 251 bài web** (đo lại 2026-08-27 sau đợt vá, `npm run verify` xanh trọn).
 
 **Điều đáng nói nhất không phải các bản vá — mà là ba lỗi mà chính việc viết cổng kiểm mới lộ ra:**
 
@@ -231,7 +231,7 @@ npm run verify                     # 13 bước · 34 khẳng định · TẤT C
 
 | Lệnh | Kết quả |
 |---|---|
-| `npx vitest run` (backend) | **177 tệp** (đếm bằng `find tests -name '*.test.js'`) · **1 380 bài xanh · 4 bỏ qua** — số BÀI đo lúc chốt vòng 1; vòng soát 2026-08-27 thêm tệp `tests/xf-observability-gaps.test.js` nên số thật nay cao hơn, chưa đo lại được vì máy soát không có PostgreSQL |
+| `npx vitest run` (backend) | **177 tệp · 1 410 bài xanh · 4 bỏ qua** — đo lại 2026-08-27 trong lượt `npm run verify` trọn (có PostgreSQL, Redis, MinIO và Docker). Vòng soát cùng ngày thêm `tests/xf-observability-gaps.test.js`, `web/src/lib/gridUndo.test.ts` và `gridSelect.test.ts` |
 | `npx vitest run` trong `web/` | **21 tệp · 251 bài xanh** (environment `node`, KHÔNG jsdom — `web/vite.config.ts` không khai khối `test`) |
 | `npm run smoke:ui` | **18/18 bước xanh** · 0 lỗi console · 0 request hỏng ở origin của mình |
 | `bash scripts/ci/docker-smoke.sh` | image dựng + chạy thật, **0 dòng stack trong log khởi động** |
