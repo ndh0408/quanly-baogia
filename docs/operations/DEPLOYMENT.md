@@ -11,7 +11,10 @@ node dist/worker.js       worker nền
 ```
 
 Docker, docker-compose, Helm và manifest k8s **đều gọi đúng lệnh đó**.
-`scripts/ci/check-runtime-command.sh` làm đỏ CI nếu chúng lệch nhau.
+`scripts/ci/check-runtime-command.sh` bắt chúng lệch nhau — và nó chạy ở bước **[9/13] của
+`npm run verify`**, KHÔNG phải ở CI. GitHub Actions không bật trên tài khoản này
+(`.github/workflows/ci.yml` khai đủ nhưng chưa bao giờ chạy — xem `AGENTS.md`), nên mọi câu
+kiểu "CI sẽ bắt" đều sai ở repo này.
 
 Lý do có chốt này rất cụ thể: Dockerfile từng chạy `node --import tsx src/server.js`
 trong khi Helm và `infra/k8s/app.yaml` chạy `node src/server.js` — **file đó không
@@ -30,6 +33,52 @@ thẩm mỹ: mã tính đường dẫn tài nguyên bằng `__dirname/..`.
 
 Và nó **404 âm thầm** — typecheck vẫn xanh, server vẫn báo khoẻ.
 `scripts/ci/smoke-dist.sh` bắt đúng lớp lỗi này bằng cách gọi thật `/style.css`.
+
+### Stack trace đọc được: source map lúc chạy
+
+`tsconfig.build.json` bật `sourceMap: true`, nên `dist/*.js.map` nằm sẵn trong image từ lâu.
+Nhưng CÓ map không có nghĩa là DÙNG map: Node chỉ đọc chúng khi được bảo, và trước đây không đường
+triển khai nào bảo cả — mọi stack trace (log lẫn Sentry) trỏ vào `dist/*.js`, số dòng vô nghĩa với
+người đọc lẫn với `git blame`.
+
+Nay `--enable-source-maps` được bật ở **hai chỗ trong Dockerfile**, vì không chỗ nào phủ hết một mình:
+
+| Đường triển khai | Nó ghi đè cái gì | Cờ tới từ đâu |
+|---|---|---|
+| `docker run` trần | không ghi đè gì | `ENV NODE_OPTIONS` |
+| compose app | ghi đè `NODE_OPTIONS` (`--max-old-space-size`) | wrapper ở `ENTRYPOINT` |
+| compose worker | ghi đè **cả** `NODE_OPTIONS` **lẫn** `command` | wrapper ở `ENTRYPOINT` |
+| k8s / Helm (app + worker) | ghi đè `command`/`args`, tức thay luôn entrypoint | `ENV NODE_OPTIONS` |
+
+Wrapper `/usr/local/bin/bat-source-map` **nối thêm** cờ vào `NODE_OPTIONS` đang có thay vì thay
+thế, nên trần heap mà compose đã tính vẫn còn nguyên. `command:` của compose chỉ ghi đè `CMD` nên
+vẫn đi qua entrypoint; k8s/Helm thay cả entrypoint nhưng lại KHÔNG khai `NODE_OPTIONS`, nên biến
+môi trường của image tới nơi. Hai cơ chế bù đúng chỗ hở của nhau.
+
+**Giá phải trả, đã đo** (node 22.22, bài đo tổng hợp: 20.000 lần ném lồng 5 tầng trên `dist` do
+`tsc` sinh kèm `.map` — KHÔNG phải đo trên chính ứng dụng này):
+
+| Tình huống | Không cờ | Có cờ |
+|---|---|---|
+| ném rồi **đọc** `.stack` | 19,1 µs | 44,4 µs (+25 µs) |
+| ném mà **không** đọc `.stack` | 5,66 µs | 5,98 µs (trong nhiễu đo) |
+
+Giải mã map là **lười** — chỉ chạy khi stack thật sự được định dạng. Trong ứng dụng này lỗi nằm ở
+đường ngoại lệ (500 / log / Sentry), không phải đường nóng, nên +25 µs mỗi lỗi được ghi log là giá
+rẻ để đổi lấy đúng tệp `.ts` và đúng số dòng khi có sự cố.
+
+Đã kiểm: map vẫn ánh xạ đúng **dù image không chứa `src/`** — Node chỉ cần `mappings` trong file
+`.map` để viết lại `tệp:dòng:cột`. Cái image thiếu `src/` làm mất là **đoạn mã ngữ cảnh** quanh
+dòng lỗi, không phải vị trí.
+
+**`SENTRY_RELEASE` thì CHƯA xong.** Dockerfile đã nhận `--build-arg SENTRY_RELEASE`, và
+`@sentry/node` tự đọc biến đó khi `Sentry.init` không truyền `release` — nghĩa là chỉ cần truyền
+tham số, không phải sửa `src/observability.ts`. Nhưng `deploy.sh` **không** truyền:
+`tests/b7-deploy-image-digest.test.js` chốt lệnh build khớp đúng mẫu `compose -f <file> build app`,
+chèn cờ vào giữa là làm đỏ cổng đó. Nên hiện tại **production chạy với `SENTRY_RELEASE` rỗng** →
+stack trace đã đúng tệp `.ts`, nhưng Sentry **không** gom được lỗi theo bản phát hành.
+Muốn bật: nới mẫu trong test đó rồi thêm cờ vào `deploy.sh` — hai việc phải đi cùng nhau.
+Dựng tay thì đã dùng được ngay: `docker build --build-arg SENTRY_RELEASE=$(git rev-parse HEAD) .`
 
 ## Ba mức triển khai
 
@@ -194,12 +243,18 @@ giữ cho khớp với schema.
 
 ## Danh sách kiểm trước khi phát hành
 
-- [ ] CI xanh trên commit sẽ deploy
+- [ ] `npm run verify` **xanh trên đúng commit sẽ deploy** — 13 bước, gõ tay.
+      Mục này trước đây ghi "CI xanh", tức trỏ vào một cổng **không bao giờ chạy**: GitHub
+      Actions không bật trên tài khoản này. Không có gì chạy thay bạn.
+      Cần nhanh thì `npm run verify:nhanh`, nhưng nó **bỏ** smoke image + smoke giao diện +
+      cổng bảo mật — đừng dùng bản nhanh cho lượt deploy prod.
 - [ ] Có migration đụng dữ liệu → đã diễn tập
 - [ ] Backup gần nhất < 24h (`/opt/quanly/backup-watchdog.sh`)
 - [ ] Đã deploy staging và duyệt bằng tay
 - [ ] Có sửa `cap_*` / `security_opt` / `deploy.resources` của `postgres` hoặc `redis`
       → đã diễn tập tay (mục "Diễn tập thay đổi postgres/redis"), vì bước 5 của
       `deploy.sh` không dựng lại hai service đó
-- [ ] Biết trước lệnh rollback
+- [ ] Biết trước lệnh rollback **và biết lùi về bản nào**: `tail $DIR/RELEASES.log` trên máy chủ
+      cho `image_tag` = `quanly-app:<git-sha>` — tag bất biến `deploy.sh` gắn ở bước [3b/6].
+      `:rollback` chỉ lùi được đúng một bước và bị ghi đè mỗi lượt deploy; tag theo SHA thì không.
 - [ ] Không deploy chiều thứ Sáu, trừ khi đang chữa sự cố

@@ -7,7 +7,7 @@
 
 import type { Redis } from "ioredis";
 import type { Request, Response } from "express";
-import { sseClients, sseBackplaneUp, sseBackplaneErrors, sseBackplaneMode } from "./observability.js";
+import { sseClients, sseBackplaneUp, sseBackplaneErrors, sseBackplaneMode, sseEvents, sseReconnects } from "./observability.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -40,17 +40,35 @@ function ghiAnToan(res: Response, payload: string): boolean {
   try { return res.write(payload) !== false; } catch { return false; /* socket gone */ }
 }
 
+/**
+ * CHUẨN HOÁ nhãn `event` của metric `sse_events` về một tập HỮU HẠN.
+ *
+ * `publish`/`broadcast` là hàm EXPORT: chỗ gọi mới có thể truyền tên sự kiện dựng động (ghép id,
+ * ghép tên người dùng…). Lấy thẳng tham số làm nhãn Prometheus là công thức nổ cardinality — mỗi
+ * giá trị nhãn là một chuỗi thời gian riêng, và không có gì trong repo chặn được điều đó ở chỗ gọi.
+ * Tập dưới đây là ĐÚNG những tên đang được phát (grep `publish(`/`broadcast(` toàn src/), phần còn
+ * lại gộp vào "khac" — mất chi tiết ở một sự kiện lạ, đổi lại không bao giờ giết được Prometheus.
+ */
+const TEN_SU_KIEN = new Set(["changed", "notification", "presence", "session:refresh", "session:revoked", "shutdown"]);
+const nhanSuKien = (event: string) => (TEN_SU_KIEN.has(event) ? event : "khac");
+
 // --- delivery to THIS process's connections only ---
 function localPublish(userId: number, event: string, data: unknown) {
   const set = subscribers.get(userId);
   if (!set || set.size === 0) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
-  for (const res of [...set]) ghiAnToan(res, payload); // sao chép: ghiAnToan có thể gỡ phần tử
+  const nhan = nhanSuKien(event);
+  // ĐẾM LẦN GHI THÀNH CÔNG, không đếm lần GỌI. Một broadcast tới 50 tab là 50 lần giao — đó mới là
+  // khối lượng thật của đường realtime, và nó là thứ so được với `sse_clients`. Khung bị bỏ vì áp
+  // lực ngược (`ghiAnToan` trả false) KHÔNG được tính: đó là sự kiện MẤT, đếm nó vào đây là tự nói
+  // dối mình rằng đã giao xong.
+  for (const res of [...set]) if (ghiAnToan(res, payload)) sseEvents.inc({ event: nhan }); // sao chép: ghiAnToan có thể gỡ phần tử
 }
 function localBroadcast(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
+  const nhan = nhanSuKien(event);
   for (const set of [...subscribers.values()]) {
-    for (const res of [...set]) ghiAnToan(res, payload);
+    for (const res of [...set]) if (ghiAnToan(res, payload)) sseEvents.inc({ event: nhan });
   }
 }
 
@@ -169,6 +187,45 @@ if (config.REDIS_URL) {
  */
 export const SSE_MAX_PER_USER = Number(process.env.SSE_MAX_PER_USER) || 10;
 
+// ── ĐẾM NỐI LẠI (`sse_reconnects`) ──────────────────────────────────────────
+//
+// KHÔNG có cách đo CHÍNH XÁC ở phía máy chủ, và chỗ này phải nói thật về điều đó.
+// `EventSource` chỉ gửi header `Last-Event-ID` khi máy chủ ĐÃ từng gửi trường `id:` — mà đường phát
+// ở file này không gửi `id:` bao giờ (xem `localPublish`), nên header đó không tồn tại. Client
+// (web/src/components/Shell.tsx) cũng chỉ `new EventSource("/api/stream/events")`, không kèm dấu
+// hiệu nào.
+//
+// SUY LUẬN ĐANG DÙNG: một lượt `attach` được tính là NỐI LẠI khi tài khoản đó vừa rớt về KHÔNG
+// kết nối trong vòng `SSE_RECONNECT_WINDOW_MS` trước đó. Mở thêm tab thứ hai KHÔNG tính (số kết nối
+// chưa hề về 0). Người bỏ đi 10 phút rồi quay lại cũng không tính.
+//
+// Cửa sổ mặc định 90 giây = hơn 3 nhịp keepalive 25 giây, đủ để trùm lượt thử lại mặc định của
+// EventSource (~3 giây) và một lượt F5, mà không trùm cả một buổi làm việc.
+//
+// Con số này vì thế đọc là "đường realtime có đang CHẬP CHỜN không", không phải "đếm tuyệt đối số
+// lần nối lại" — và đó đúng là câu hỏi người trực cần trả lời.
+export const SSE_RECONNECT_WINDOW_MS = Number(process.env.SSE_RECONNECT_WINDOW_MS) || 90_000;
+/** userId → mốc rớt HẾT kết nối gần nhất. Chỉ giữ trong cửa sổ trên. */
+const roiLucCuoi = new Map<number, number>();
+/** Trần số mục nhớ — bản đồ này KHÔNG được phép thành một đường rò bộ nhớ mới. */
+const RECONNECT_NHO_TOI_DA = 5_000;
+
+function donRoi() {
+  const han = Date.now() - SSE_RECONNECT_WINDOW_MS;
+  for (const [u, t] of roiLucCuoi) if (t < han) roiLucCuoi.delete(u);
+  // Vẫn đầy (5000 người rớt cùng lúc — đứt mạng diện rộng) → bỏ nửa CŨ NHẤT. Thà đếm thiếu vài lượt
+  // nối lại còn hơn để một bản đồ chẩn đoán phình không giới hạn trong tiến trình phục vụ request.
+  if (roiLucCuoi.size >= RECONNECT_NHO_TOI_DA) {
+    const cu = [...roiLucCuoi.entries()].sort((a, b) => a[1] - b[1]).slice(0, Math.floor(RECONNECT_NHO_TOI_DA / 2));
+    for (const [u] of cu) roiLucCuoi.delete(u);
+  }
+}
+
+function ghiNhoRoi(userId: number) {
+  if (roiLucCuoi.size >= RECONNECT_NHO_TOI_DA) donRoi();
+  roiLucCuoi.set(userId, Date.now());
+}
+
 export function attach(req: Request, res: Response, userId: number) {
   // KIỂM TRẦN TRƯỚC khi đặt header: đã flushHeaders với text/event-stream thì không còn trả 429 được.
   const daCo = subscribers.get(userId);
@@ -184,6 +241,14 @@ export function attach(req: Request, res: Response, userId: number) {
   res.flushHeaders?.();
   res.write(`: connected\n\n`);
 
+  // ĐẶT SAU cổng 429 và sau khi header đã đi: một lượt bị TỪ CHỐI vì chạm trần không phải một lượt
+  // nối lại thành công, đếm nó vào đây sẽ làm số này nói về chuyện khác.
+  const mocRoi = roiLucCuoi.get(userId);
+  if (mocRoi !== undefined) {
+    roiLucCuoi.delete(userId);
+    if (Date.now() - mocRoi <= SSE_RECONNECT_WINDOW_MS) sseReconnects.inc();
+  }
+
   let set = subscribers.get(userId);
   if (!set) { set = new Set(); subscribers.set(userId, set); }
   set.add(res);
@@ -197,7 +262,9 @@ export function attach(req: Request, res: Response, userId: number) {
   req.on("close", () => {
     clearInterval(ka);
     set.delete(res);
-    if (set.size === 0) { subscribers.delete(userId); clearUserPresence(userId); } // đóng hết tab → gỡ presence
+    // đóng hết tab → gỡ presence, VÀ ghi mốc rớt để lượt `attach` kế tiếp trong cửa sổ được tính là
+    // nối lại (xem khối chú thích ở `SSE_RECONNECT_WINDOW_MS`).
+    if (set.size === 0) { subscribers.delete(userId); clearUserPresence(userId); ghiNhoRoi(userId); }
     recountClients();
   });
 }
@@ -219,7 +286,7 @@ export function closeAllSse() {
       // end() phải nằm trong try RIÊNG: nếu write hỏng (EPIPE — socket đã chết ở đầu bên kia) mà
       // gộp chung một try thì end() bị bỏ qua và socket ở lại trong danh sách của Node, đúng cái
       // mà hàm này sinh ra để dọn.
-      try { res.write(`event: shutdown\ndata: {}\n\n`); } catch { /* socket đã hỏng */ }
+      try { res.write(`event: shutdown\ndata: {}\n\n`); sseEvents.inc({ event: "shutdown" }); } catch { /* socket đã hỏng */ }
       try { res.end(); n++; } catch { /* đã đóng rồi */ }
     }
   }

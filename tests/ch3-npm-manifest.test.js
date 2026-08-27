@@ -7,9 +7,16 @@
 //     `npm run e2e:hr` nhận `Cannot find module '/…/e2e-hr.mjs'` — một lệnh trong bảng script
 //     chính thức của dự án mà chạy là gãy thì bảng script đó mất giá trị chỉ đường.
 //
-// (2) `playwright` nằm ở devDependencies nhưng KHÔNG file nào trong repo nhắc tới nó: không
-//     `playwright.config.*`, không spec, không bước CI. `npm ci` ở job test (ci.yml:96) và job
-//     security (ci.yml:293) tải nó về mỗi lượt để không kiểm gì.
+// (2) `playwright` nằm ở devDependencies mà LÚC ẤY không file nào trong repo nhắc tới nó: không
+//     `playwright.config.*`, không spec, không bước CI — `npm ci` tải nó về mỗi lượt để không
+//     kiểm gì. TRẠNG THÁI NAY ĐÃ KHÁC, nói cho rõ kẻo đọc nhầm luật ở dưới:
+//       · `scripts/ci/ui-smoke.mjs:35` nhập `chromium` từ gói đó. Nhờ đúng chỗ dùng này mà
+//         `playwright` xanh ở luật devDependency — không phải nhờ một ngoại lệ nào.
+//       · Vẫn KHÔNG có `playwright.config.*` và KHÔNG có spec: smoke giao diện là một script Node
+//         tự cầm trình duyệt, không phải bộ E2E của Playwright.
+//       · Vẫn KHÔNG có bước CI nào chạy nó. `.github/workflows/ci.yml` không nhắc `ui-smoke` lẫn
+//         `smoke:ui`; cổng thật là `npm run verify` bước [12/13] chạy tay (scripts/verify-local.sh).
+//         Job `security` nay dùng `npm ci --omit=dev` nên còn không tải gói này về nữa.
 //
 // (3) `pdf-fontkit` và `nanoid` nằm ở khối `dependencies` (tức ĐI VÀO IMAGE PRODUCTION) mà không
 //     mã nào import. `pdfkit` dùng gói `fontkit` RIÊNG của nó (node_modules/pdfkit/package.json:

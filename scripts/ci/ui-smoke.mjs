@@ -6,8 +6,11 @@
 //   node scripts/ci/ui-smoke.mjs --hien     # mở cửa sổ trình duyệt (gỡ lỗi trên máy có màn hình)
 //
 // ── VÌ SAO CẦN ─────────────────────────────────────────────────────────────
-// 187 bài vitest của web/ chạy trên jsdom với component ĐƯỢC MOUNT LẺ. Không bài nào nạp
-// BUNDLE ĐÃ BUILD qua máy chủ Express thật. Khoảng trống đó nuốt đúng một lớp lỗi:
+// 251 bài vitest của web/ (21 tệp — `cd web && npx vitest run`) chạy ở environment `node`: repo
+// KHÔNG cài jsdom, `web/vite.config.ts` không khai khối `test` nên vitest lấy mặc định `node`. Tức
+// chúng kiểm HÀM và ĐỌC MÃ NGUỒN — không có `document`, không mount nổi một component nào, và dĩ
+// nhiên không bài nào nạp BUNDLE ĐÃ BUILD qua máy chủ Express thật. Khoảng trống đó nuốt đúng một
+// lớp lỗi:
 //   · asset trỏ sai đường (public/app2/assets/… 404) → màn hình trắng, mọi unit test vẫn xanh;
 //   · ChunkLoadError sau khi build mới xoá chunk-hash cũ (web/src/components/Shell.tsx tự reload
 //     một lần vì chuyện này ĐÃ xảy ra);
@@ -26,8 +29,10 @@
 // NODE_ENV=production thật. Hai script chia nhau hai vế, không cái nào phủ được cả hai.
 //
 // ── LUỒNG NGƯỜI DÙNG ĐƯỢC PHỦ ──────────────────────────────────────────────
-// đăng nhập → danh sách → mở trình soạn → sửa ô → LƯU → tải lại + kiểm số đã lưu → TẠO báo giá mới
-// (wizard 3 bước) → lưu bản mới → XUẤT Excel → ĐĂNG XUẤT → ĐĂNG NHẬP tài khoản hạn chế → KIỂM QUYỀN.
+// đăng nhập → danh sách → mở trình soạn → sửa ô → LƯU → tải lại + kiểm số đã lưu → MẤT TAB GIỮA
+// CHỪNG: khôi phục bản nháp cục bộ → TẠO báo giá mới (wizard 3 bước) → lưu bản mới → XUẤT Excel →
+// ĐĂNG XUẤT → ĐĂNG NHẬP tài khoản hạn chế → KIỂM QUYỀN → console sạch.
+// Tổng 18 bước: `grep -cE '^\s*(await )?buoc\("' scripts/ci/ui-smoke.mjs`.
 //
 // ── DỮ LIỆU ────────────────────────────────────────────────────────────────
 // Tự tạo 2 user + công ty + mẫu + khách hàng + báo giá mang tiền tố `uismoke-<pid>`, và XOÁ CỨNG ở

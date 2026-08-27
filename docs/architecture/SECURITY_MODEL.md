@@ -4,7 +4,7 @@
 
 | Đường | Dùng cho | Mang bởi |
 |---|---|---|
-| Phiên cookie | trình duyệt (cả hai SPA) | cookie `qly.sid`, kho phiên trong PG |
+| Phiên cookie | trình duyệt (app React ở `web/`) | cookie `qly.sid`, kho phiên trong PG |
 | Bearer JWT | client API / script | header `Authorization` |
 
 **Vai trò và quyền KHÔNG BAO GIỜ lấy từ claim trong token.** Cả hai đường đều nạp
@@ -58,7 +58,7 @@ lại mỗi request.
 **Quyền nằm ở SERVER.** Ẩn menu ở frontend là tiện lợi cho người dùng, không phải
 phân quyền. Mọi endpoint tự kiểm quyền.
 
-`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 139 endpoint và
+`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 137 endpoint và
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI — **một endpoint không
 có trong ma trận là một endpoint chưa ai soát quyền**.
 
@@ -103,10 +103,9 @@ thao tác chứng từ thanh toán. Bảng thiên về **chỉ ghi thêm**; job 
 
 Nói thẳng — đây là hạn chế thật, không phải danh sách mong muốn:
 
-- **`style-src 'unsafe-inline'` vẫn còn bật.** Cả hai SPA render rất nhiều
-  `style=""` inline. Bỏ nó đòi refactor hàng trăm chỗ; rủi ro hồi quy giao diện
-  cao hơn giá trị bảo mật thu được ở một hệ nội bộ. `script-src` thì đã là
-  `'self'` thuần — không có `'unsafe-inline'`, nên script chèn vào bị CSP chặn.
+- **`style-src 'unsafe-inline'` vẫn còn bật** (`src/app.ts`, directive `style-src`).
+  `script-src` thì đã là `'self'` thuần — không có `'unsafe-inline'`, nên script
+  chèn vào bị CSP chặn. Lộ trình gỡ ở ngay dưới.
 - **Chưa có SSO / OIDC.** Đăng nhập cục bộ. Kiến trúc không cản việc thêm sau.
 - **Presence SSE là in-process** — chạy nhiều replica thì danh sách "ai đang sửa"
   không đầy đủ.
@@ -115,3 +114,102 @@ Nói thẳng — đây là hạn chế thật, không phải danh sách mong mu�
   `src/rateLimit.ts`): lựa chọn còn lại là để mọi request treo. Khoá tài khoản khi
   sai mật khẩu nhiều lần nằm ở **CSDL**, không phụ thuộc Redis, nên lớp chống dò
   mật khẩu quan trọng nhất vẫn còn.
+
+## Lộ trình gỡ `style-src 'unsafe-inline'`
+
+### Đếm lại đã, đừng chép lại lời cũ
+
+Bản trước ghi "cả hai SPA render rất nhiều `style=""` inline, bỏ nó đòi refactor
+hàng trăm chỗ". Câu đó sai hai lần. SPA vanilla **đã gỡ** từ 2026-08-26
+([ADR 0006](../adr/0006-go-spa-vanilla-cu.md)) — chỉ còn một frontend. Và "hàng
+trăm chỗ" là đếm nhầm đối tượng:
+
+| Đếm trên `web/src` | Số | Có bị CSP chặn không |
+|---|---|---|
+| `grep -ro "style=" web/src \| wc -l` | **197** | — |
+| trong đó `style={…}` (prop JSX của React) | **194** | **KHÔNG** |
+| trong đó `style="…"` (chuỗi HTML gán qua `innerHTML`) | **3** | **CÓ** |
+
+Vì sao 194 chỗ kia không tính: React **không** viết thuộc tính `style` lên DOM. Nó
+gán qua CSSOM — `setValueForStyles` ở `node_modules/react-dom/cjs/react-dom-client.production.js`
+làm `node.style[tên] = giá trị` / `node.style.setProperty(...)`. CSP điều chỉnh
+thuộc tính `style` **do bộ phân tích HTML tạo ra**, không điều chỉnh việc ghi CSSOM
+bằng script. Nên số chỗ thật sự vướng CSP hôm nay là **3**, tất cả trong
+`web/src/lib/ui.ts` (hai hàm `confirmModal` và `promptModal` dựng khung bằng
+`back.innerHTML = \`…\``):
+
+- `web/src/lib/ui.ts:142` — thẻ `<p>` chứa nội dung của `confirmModal` (đặt lề)
+- `web/src/lib/ui.ts:175` — thẻ `<p>` chứa nội dung của `promptModal` (đặt lề)
+- `web/src/lib/ui.ts:176` — ô `<textarea>` của `promptModal` (bề rộng, viền, cỡ chữ)
+
+(Ba số dòng trên nằm trong phạm vi `npm run check:refs` — trôi là CI báo.)
+
+Cũng đã soát các đường khác và **không có**: không chỗ nào gọi
+`setAttribute("style", …)` trong `web/src`; không chỗ nào chèn thẻ `<style>` lúc
+chạy; `web/index.html` không có `<style>` hay `style=`; bản build production của
+Vite phát CSS ra **file rời nạp bằng `<link>`** (đã hợp `style-src 'self'`), còn
+`https://fonts.googleapis.com` phải giữ trong danh sách vì đó là stylesheet của
+Google Fonts.
+
+> Cảnh báo về mức độ chắc chắn: toàn bộ đoạn trên là **phân tích tĩnh** — đọc mã
+> nguồn `web/src`, `web/index.html`, cấu hình Vite và bản react-dom đang cài. Chưa
+> ai chạy thử app với `style-src` đã siết trong trình duyệt thật. Vì vậy bước 5 dưới
+> đây **không phải thủ tục**: nó là chỗ duy nhất chứng minh được kết luận này đúng.
+
+### Các bước
+
+1. **Đổi 3 chỗ ở `web/src/lib/ui.ts` thành class.** Thêm `.modal-msg` và `.pm-input`
+   vào `web/src/styles.css`, bỏ thuộc tính `style` khỏi hai chuỗi `innerHTML`.
+   Quy mô thật: khoảng 10 dòng, không đụng lưới báo giá, không đụng `GridTable`.
+2. **Dựng chốt chặn tái phát trước khi siết CSP.** Thêm một bước vào
+   `scripts/ci/` chặn chuỗi `style="` xuất hiện trong `web/src` (chỉ cấm dạng chuỗi
+   HTML — `style={{` của React vẫn cho). Không có chốt này thì bước 1 sẽ trôi lại
+   sau vài PR và CSP siết rồi sẽ vỡ giao diện lúc nào không biết.
+3. **Bỏ `'unsafe-inline'`** khỏi `style-src` trong `src/app.ts`, để lại
+   `["'self'", "https://fonts.googleapis.com"]`. Đồng thời sửa comment ngay trên
+   khối `helmet(...)` — nó đang giải thích lý do cũ.
+4. **Khoá bằng test.** `tests/app.smoke.test.js` đã có bài kiểm CSP cho
+   `object-src 'none'` và `frame-ancestors 'self'`; thêm một assertion cùng chỗ:
+   `style-src` **không** chứa `'unsafe-inline'`.
+5. **Kiểm chứng bằng trình duyệt thật, không chỉ bằng test đơn vị.**
+   `npm run smoke:ui` (`scripts/ci/ui-smoke.mjs`) đã mở trình duyệt thật và **đỏ khi
+   có bất kỳ lỗi console nào** — một vi phạm CSP (*"Refused to apply inline style"*)
+   tự khắc làm hỏng lượt chạy, không cần thêm assertion. Lượt smoke hiện tại **đã
+   đi qua `confirmModal`** (`scripts/ci/ui-smoke.mjs:359` bấm `[data-yes]` của hộp
+   "Có thay đổi chưa lưu từ lần trước"), tức dòng 142 đã được phủ. Còn thiếu đúng
+   **`promptModal`** — hộp nhập lý do "không chốt", nơi có hai chỗ còn lại. Thêm một
+   chặng chạm vào nó là đủ. Một ô lệch định dạng là hồi quy giao diện thật, và người
+   dùng sẽ gặp trước khi ta biết.
+
+**Bước lui, nếu bước 5 lòi ra chỗ chưa tìm thấy:** giữ `style-src` có
+`'unsafe-inline'` làm nền, thêm `style-src-elem 'self' https://fonts.googleapis.com`
+để ít nhất chặn thẻ `<style>` chèn vào. Nói thẳng giới hạn: trình duyệt không hỗ trợ
+các directive `-elem`/`-attr` sẽ **bỏ qua** chúng và rơi về `style-src`, nên bước lui
+này chỉ siết được trên trình duyệt mới — phải đo tỷ lệ trình duyệt thực tế của công
+ty trước khi coi nó là một lớp phòng thủ, chứ không phải một cái ô cho vui.
+
+### Khi nào thì đáng làm
+
+Việc này **chưa được xếp lịch**, và đây là lý do — để người sau xét lại chứ không
+phải để bào chữa.
+
+Với `script-src 'self'` thuần, thứ `'unsafe-inline'` của `style-src` còn cho phép là
+**giả mạo giao diện** và **rò dữ liệu qua bộ chọn CSS**. Cả hai đều đòi kẻ tấn công
+**trước hết phải chèn được HTML** vào trang — mà hôm nay mọi đường render HTML đều
+đi qua `esc()` hoặc `textContent`, và React tự thoát chuỗi. Nghĩa là nó là lớp
+phòng thủ **thứ hai** cho một lỗ **chưa tồn tại**, trên một hệ nội bộ, người dùng đã
+xác thực, số lượng nhỏ.
+
+Kéo nó lên đầu hàng đợi khi **một trong bốn điều sau** thành đúng:
+
+1. **Có người ngoài công ty vào được** — link xem báo giá cho khách, cổng đối tác,
+   SSO liên thông. Bề mặt tấn công đổi chất, không phải đổi lượng.
+2. **Xuất hiện chỗ render HTML do người dùng nhập** — soạn thảo có định dạng, chữ ký
+   email nhúng, ghi chú cho phép thẻ. Đây là lúc "lỗ chưa tồn tại" trở thành có thật.
+3. **Có yêu cầu kiểm định bên ngoài** đòi CSP không `'unsafe-inline'` (khách hàng
+   lớn, bảo hiểm mạng, chứng chỉ).
+4. **Có ai đó vốn đã phải sửa `web/src/lib/ui.ts`** vì việc khác — lúc đó bước 1 tốn
+   thêm chừng 10 dòng, rẻ hơn hẳn so với mở một nhánh riêng cho nó.
+
+Trước khi có một trong bốn điều đó, viết `'unsafe-inline'` vào danh sách nợ là đủ;
+làm sớm chỉ đổi một rủi ro giả thuyết lấy một rủi ro hồi quy giao diện có thật.

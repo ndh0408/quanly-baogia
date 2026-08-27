@@ -40,7 +40,7 @@ services:
     container_name: quanly-redis
     logging: *default-logging
     restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"] # khớp prod: allkeys-lru xoá mất khoá job BullMQ + khoá phiên
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"] # khớp prod: allkeys-lru xoá mất khoá job BullMQ + bộ đếm rate-limit (phiên ở Postgres, không dính)
     ports:
       - "127.0.0.1:6379:6379"
     volumes:

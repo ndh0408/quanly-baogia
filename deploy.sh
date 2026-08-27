@@ -62,7 +62,23 @@ if [ -n "$IMAGE_REF" ] && [ "${IMAGE_REF#*@sha256:}" = "$IMAGE_REF" ]; then
 fi
 
 SHA=$(git rev-parse --verify "$REF^{commit}")
+
+# ── TAG BẤT BIẾN CHO ẢNH (§46) ────────────────────────────────────────────────────────────
+# `$IMAGE` (quanly-app:prod) là một CON TRỎ GHI ĐÈ ĐƯỢC: lượt deploy kế gắn đúng cái tên đó
+# lên một ảnh khác. Hậu quả là sau vài lượt, câu "bản chạy chiều thứ ba tuần trước là ảnh nào"
+# KHÔNG còn tham chiếu nào gọi tên được — `:rollback` chỉ giữ đúng MỘT bước lùi, và chính nó cũng
+# bị ghi đè mỗi lượt. `<tên>:<git-sha>` thì mỗi commit đúng một tag, không lượt nào đè lượt nào.
+#
+# GIỮ NGUYÊN `:prod` / `:staging` làm con trỏ: compose `image:` gọi đúng tên đó, bước rollback cũng
+# vậy. Tag bất biến là THÊM VÀO, không phải thay thế — không đụng gì vào quy trình đang chạy.
+#
+# ĐÁNH ĐỔI ĐÃ BIẾT: tag không tự hết hạn, nên ảnh cũ thôi rơi vào `docker image prune` và đĩa VM
+# phình dần. Đó là giá của việc lùi được xa hơn một bước. Dọn CÓ CHỦ ĐÍCH khi cần, giữ ~10 bản:
+#   ssh $SSH "docker images --format '{{.Repository}}:{{.Tag}}' ${IMAGE%%:*} | grep -E ':[0-9a-f]{40}$' | tail -n +11 | xargs -r docker rmi"
+IMAGE_SHA="${IMAGE%%:*}:$SHA"
+
 echo "▶ Deploy $SHA ($REF) → $TARGET  [$SSH]"
+echo "   tag bất biến: $IMAGE_SHA"
 
 echo "▶ [1/6] Backup DB + tag :rollback"
 # Bản dump này chứa CCCD / số tài khoản / lương ở dạng THÔ — cùng nội dung mà
@@ -93,8 +109,21 @@ else
   echo "   ⚠️  Không đặt IMAGE_REF → image này KHÔNG phải bản CI đã quét lỗ hổng và đính SBOM +"
   echo "      provenance, và không có digest nào để đối chiếu về sau. Đường ưu tiên:"
   echo "      IMAGE_REF=<repo>@sha256:<digest> bash deploy.sh $TARGET"
+  # KHÔNG truyền `--build-arg SENTRY_RELEASE=$SHA` ở đây, dù Dockerfile ĐÃ nhận tham số đó (xem khối
+  # ARG SENTRY_RELEASE gần cuối Dockerfile) và dù nó sẽ cho Sentry gom lỗi theo bản phát hành:
+  # tests/b7-deploy-image-digest.test.js chốt lệnh này khớp đúng mẫu `compose -f <file> build app`,
+  # nên chèn cờ vào giữa làm ĐỎ cổng kiểm. Một cổng đang bắt được hồi quy có giá hơn một nhãn
+  # release. Muốn bật: sửa mẫu trong test đó rồi thêm cờ vào đây — hai thay đổi phải đi cùng nhau.
   ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE build app"
 fi
+
+# Gắn tag bất biến NGAY sau khi $IMAGE trỏ vào ảnh mới. Một lệnh dùng chung cho CẢ HAI nhánh
+# trên, vì cả hai đều kết thúc bằng $IMAGE trỏ vào ảnh vừa lấy. `docker tag` chỉ thêm TÊN cho
+# ảnh đã có sẵn trên máy: không tải, không dựng, không đụng container đang chạy — nên đặt TRƯỚC
+# migrate là an toàn, và có lợi: các bước sau hỏng thì ảnh vẫn đã có tên gọi được để soi và lùi về.
+echo "▶ [3b/6] Gắn tag bất biến"
+echo "   $IMAGE_SHA"
+ssh "$SSH" "docker tag $IMAGE $IMAGE_SHA"
 
 # Chạy migration TRƯỚC khi recreate (schema thêm cột/bảng → code mới mới dùng được). prisma nằm
 # trong dependencies nên có trong image; migrate deploy tự lấy advisory-lock (an toàn nhiều instance).
@@ -119,6 +148,11 @@ ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d app worker && printf '%s
 #     `Id` (sha256 của image cục bộ) kèm tiền tố `local:` để không ai nhầm hai loại với nhau;
 #   · thời điểm: giờ UTC của MÁY CHỦ.
 #
+# Trường thứ năm `image_tag` = tag BẤT BIẾN `<tên>:<git-sha>` gắn ở bước [3b/6]. Nó KHÁC `image`:
+# `image` là digest/Id — đúng, nhưng khi ảnh dựng trên VM thì không có RepoDigest và giá trị rơi
+# về `local:sha256:…`, một chuỗi KHÔNG gọi lại được. `image_tag` là cái tên GÕ ĐƯỢC để quay về
+# đúng bản đó, kể cả sau nhiều lượt deploy nữa.
+#
 # Ghi NỐI THÊM vào $DIR/RELEASES.log (untracked, `git archive` không đụng tới) — một dòng JSON
 # mỗi lần, đọc bằng `tail`/`jq` được, và không bao giờ mất lịch sử.
 echo "▶ [5b/6] Ghi sổ phát hành"
@@ -127,7 +161,7 @@ REL=$(ssh "$SSH" "cd $DIR && \
         \"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1\" 2>/dev/null || echo unknown) && \
   DG=\$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}local:{{.Id}}{{end}}' $IMAGE 2>/dev/null || echo unknown) && \
   TS=\$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
-  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\") && \
+  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\",\"image_tag\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\" '$IMAGE_SHA') && \
   printf '%s\n' \"\$LINE\" >> RELEASES.log && printf '%s' \"\$LINE\"")
 echo "   $REL"
 
@@ -142,7 +176,9 @@ else
   echo
   echo "❌ $TARGET KHÔNG lên được sau khi deploy $SHA — /livez không trả ok."
   echo "   Xem log:  ssh $SSH \"docker logs quanly-app --tail 200\""
-  echo "   Rollback: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""
+  echo "   Rollback 1 bước: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""
+  echo "   Rollback về BẤT KỲ bản nào đã phát hành (tag bất biến; lấy sha trong RELEASES.log):"
+  echo "     ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:<git-sha> $IMAGE && docker compose -f $COMPOSE up -d app worker\""
   exit 1
 fi
 echo

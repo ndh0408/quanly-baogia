@@ -336,16 +336,16 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 
 | Phase | Trạng thái | Bằng chứng / chỗ hụt |
 |---|---|---|
-| 0 · Baseline | **xong** | `docs/` 26 file, 6 ADR, `web/src/bench.tsx`, 166 file test |
+| 0 · Baseline | **xong** | *(ảnh chụp lúc Phase 0, không phải số hiện tại)* `docs/` 26 file, 6 ADR, `web/src/bench.tsx`, 166 file test — nay là 39 · 9 · 177 |
 | 1 · P0 Production Risk | **xong** | `scripts/backup/backup-objects.sh` · `BACKUP_RESTORE.md` + `DISASTER_RECOVERY.md` · `src/tools/piiRotate.ts` + `verifyIntegrity.ts` · 31 file test bảo mật |
 | 2 · Security | **xong** | ADR-0005 CSRF · `ROLES_PERMISSIONS.md` + `endpoint-inventory.mjs` (137/137 hai chiều) · break-glass ở `userService.ts` |
 | 3 · Production Runtime | **xong** | `tsconfig.build.json` · 4 khối `cap_drop` trong compose · `exportGateStats` |
 | 4 · CI/CD | **xong** (2026-08-27) | `.github/workflows/ci.yml` vẫn không chạy (tài khoản không bật Actions) — nhưng cả 5 thứ nó khai nay chạy trong `npm run verify`: xem bảng ngay dưới |
-| 5 · Observability | **xong** (2026-08-27) | 14 rule cảnh báo + 10 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
+| 5 · Observability | **xong** (2026-08-27) | 17 rule cảnh báo + 28 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
-| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 17 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
+| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 18 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
 
 ### PHASE 4 — đã đóng (2026-08-27)
 
@@ -354,7 +354,7 @@ bảng để thấy đã đóng bằng cái gì.
 
 | Đòi | Trước | Nay |
 |---|---|---|
-| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **17 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền), 0 lỗi console |
+| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **18 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền), 0 lỗi console |
 | Helm checks | chỉ `helm lint` | `scripts/ci/check-helm.mjs` — render đầy đủ + kubeconform + 4 bất biến |
 | Docker smoke | không có | `scripts/ci/docker-smoke.sh` dựng image, `smoke-image.sh` giữ MỌI khẳng định về image (kể cả **0 dòng stack trong log khởi động**) |
 | SBOM | chỉ là văn bản | `scripts/ci/security-scan.sh` sinh thật, cùng gitleaks (cả lịch sử git) · trivy · semgrep |
@@ -375,7 +375,7 @@ tích `DATABASE_URL`/`REDIS_URL` để kiểm đúng máy, có `npm ci --dry-run
 ### Định nghĩa HOÀN THÀNH (mục 52)
 
 - **Security → security scans pass**: ✅ chạy thật trong `verify` bước [13/13].
-- **Operations → dashboards, alerts**: ✅ 14 rule + 10 bài kiểm logic; bảng điều khiển
+- **Operations → dashboards, alerts**: ✅ 17 rule + 28 bài kiểm logic; bảng điều khiển
   Grafana ở `infra/observability/` (opt-in, chưa bật ở production — quyết định vận hành,
   xem `TECHNOLOGY_DECISIONS.md`).
 - **Backup → off-host copy**: ⚠️ **vẫn chưa** có bằng chứng đã chạy trên máy chủ thật.
@@ -388,25 +388,57 @@ Phụ lục này nằm ngay sau mục 52 của MASTER PROMPT, gồm 21 mục. Ti
 chọn **công nghệ đơn giản nhất đủ đáp ứng 3–5 năm tới**, không giữ bằng mọi giá và cũng
 không thay bằng mọi giá.
 
-Phần lớn phụ lục là các quyết định **giữ nguyên có lý do**, và mục 2 mô tả "PREFERRED
-TARGET STACK" đúng bằng thứ repo đang chạy:
+Phần lớn phụ lục là các quyết định **giữ nguyên có lý do**. Mục 2 mô tả "PREFERRED
+TARGET STACK" gần bằng thứ repo đang chạy — **gần**, không phải khít: kho phiên lệch
+một bậc, và bậc đó đổi hẳn cách đọc sự cố Redis.
 
 ```
 React SPA → Express → Domain/Service → Prisma → PostgreSQL
-Redis (session · rate limit phân tán · Pub/Sub · BullMQ) · BullMQ workers
+Redis (rate limit phân tán · Pub/Sub cho SSE · BullMQ) · BullMQ workers
+Kho phiên: PostgreSQL — connect-pg-simple, bảng `user_sessions`   ← LỆCH so với phụ lục
 Storage Adapter → kho object S3-compatible
 ```
+
+> **Sửa ngày 2026-08-27 — khối trên trước đây khai SAI.** Bản trước xếp `session` vào
+> danh sách việc của Redis (`Redis (session · rate limit phân tán · Pub/Sub · BullMQ)`)
+> và chấm mục 2 là "khớp sẵn — không phải làm gì". Đọc mã thì phiên **không nằm ở
+> Redis**:
+>
+> - `src/app.ts:11` — `import connectPgSimple from "connect-pg-simple";`
+> - `src/app.ts:304-317` — `session({ store: new PgSession({ conObject: conObjectPhien(),
+>   createTableIfMissing: true, tableName: "user_sessions", pruneSessionInterval: 60 * 60 }) })`
+> - Toàn repo **không có** `connect-redis`: không trong `package.json`, không trong `src/`.
+>
+> Redis chỉ lo ba việc: rate limit phân tán (`src/rateLimit.ts`), Pub/Sub cho SSE
+> (`src/sse.ts`) và BullMQ (`src/queue.ts`, `src/worker.ts`).
+>
+> **Vì sao lời khai này nguy hiểm hơn một lỗi chính tả:** nó dẫn tới hai kết luận
+> ngược nhau về vận hành. Nếu phiên ở Redis thì Redis rơi = mọi người bị đăng xuất,
+> và instance Redis 256 MB phải được tính thêm chỗ cho phiên. Thật ra Redis rơi thì
+> **phiên vẫn sống** — mất SSE, mất hàng đợi, và rate limit thì mở (xem
+> "Rate limit bỏ qua khi Redis chết"). Ngược lại, thứ thật sự phải canh dung lượng
+> là **bảng `user_sessions` trong PostgreSQL**, dọn bằng `pruneSessionInterval` mỗi
+> giờ chứ không bằng TTL của Redis.
+>
+> Một ngoại lệ có chủ ý: ở `NODE_ENV=test`, `store` để `undefined` — tức MemoryStore
+> của express-session — để bộ test không cần Postgres cho riêng tầng phiên.
+>
+> Lý lẽ đầy đủ vì sao kho phiên CỐ Ý nằm ở Postgres (và hệ quả cho khôi phục thảm hoạ)
+> nằm ở [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md), mục "Phiên nằm ở
+> Postgres"; bảng quyết định công nghệ ở
+> [architecture/TECHNOLOGY_DECISIONS.md](architecture/TECHNOLOGY_DECISIONS.md) cũng đã
+> được sửa cùng đợt.
 
 | Mục | Trạng thái | Ghi chú |
 |---|---|---|
 | 1 · Decision matrix | áp dụng | mọi quyết định giữ/thay đều ghi lý do trong ADR |
-| 2 · Preferred target stack | **khớp sẵn** | không phải làm gì — repo đã đúng hình dạng đó |
+| 2 · Preferred target stack | **khớp, TRỪ kho phiên** | phiên ở PostgreSQL (`connect-pg-simple`, bảng `user_sessions`), không ở Redis — xem khối ngay trên |
 | 3 · TypeScript production | **xong** | `tsx src/server.ts` → `node dist/server.js`; 5 chỗ dùng `dist/` (Dockerfile + Helm); ADR-0002 |
 | 4 · Background job | giữ BullMQ | đúng khuyến nghị |
 | 5 · Redis | giữ | đúng khuyến nghị |
 | 6 · Realtime | giữ SSE | ADR-0004 ghi lý do không dùng WebSocket |
 | 7 · Storage | **xong** | Storage Adapter → S3; ADR-0003 |
-| 8 · Auth | giữ | session + Bearer + MFA |
+| 8 · Auth | giữ | session (kho PG, cookie `qly.sid`) + Bearer + MFA |
 | 9 · Database | giữ PostgreSQL | đúng khuyến nghị |
 | 10 · ORM | giữ Prisma | đúng khuyến nghị |
 | 11 · Framework | giữ Express | đúng khuyến nghị |
@@ -511,9 +543,14 @@ tiếng Việt). Cả ba đều XANH ở mọi cổng đọc mã nguồn.
 
 | Cổng | Chạy gì | Bước |
 |---|---|---|
-| `scripts/ci/docker-smoke.sh` → `scripts/ci/smoke-image.sh` | dựng image từ cây làm việc rồi giao cho `smoke-image.sh` (đã có từ trước, CI cũng gọi): dựng Postgres + Redis riêng, chạy container `NODE_ENV=production`, `/livez` + `/readyz`, `GET /app2/`, `prisma migrate deploy` **từ trong image**, worker khởi động, và **0 dòng stack trong log khởi động**. Mọi khẳng định về image nằm ở `smoke-image.sh` — `docker-smoke.sh` chỉ lo phần dựng. | `[10/12]` |
-| `scripts/ci/ui-smoke.mjs` | Chromium thật: đăng nhập → danh sách → trình soạn → **gõ vào ô đơn giá** và đòi Thành Tiền tính lại → tải lại trang → 0 lỗi console, 0 request hỏng | `[11/12]` |
-| `scripts/ci/check-helm.mjs` | render chart THẬT + 4 bất biến + kubeconform + secretKeyRef trỏ khoá có thật | `[8/12]` |
+| `scripts/ci/docker-smoke.sh` → `scripts/ci/smoke-image.sh` | dựng image từ cây làm việc rồi giao cho `smoke-image.sh` (đã có từ trước, CI cũng gọi): dựng Postgres + Redis riêng, chạy container `NODE_ENV=production`, `/livez` + `/readyz`, `GET /app2/`, `prisma migrate deploy` **từ trong image**, worker khởi động, và **0 dòng stack trong log khởi động**. Mọi khẳng định về image nằm ở `smoke-image.sh` — `docker-smoke.sh` chỉ lo phần dựng. | `[11/13]` |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật: đăng nhập → danh sách → trình soạn → **gõ vào ô đơn giá** và đòi Thành Tiền tính lại → tải lại trang → 0 lỗi console, 0 request hỏng | `[12/13]` |
+| `scripts/ci/check-helm.mjs` | render chart THẬT + 4 bất biến + kubeconform + secretKeyRef trỏ khoá có thật | `[9/13]` |
+
+Cột "Bước" đánh theo `scripts/verify-local.sh` **hiện tại** (14 bước, `[0/13]`…`[13/13]`);
+bản đầu của mục này ghi `[8/12]`/`[10/12]`/`[11/12]` theo bản script cũ 12 bước — đã sửa
+2026-08-27. Số bước là thứ trôi nhanh nhất trong tài liệu này, kiểm lại bằng
+`grep -nE 'buoc "\[[0-9]+/' scripts/verify-local.sh` trước khi tin.
 
 **Đã kiểm ngược từng cổng** (phá đúng thứ nó canh, xác nhận đúng nó đỏ, khôi phục).
 Đáng ghi nhất: cộng **1 đồng** vào `lineAmount` (`shared/quote-math.ts`) làm
@@ -528,7 +565,7 @@ thì bước tự bỏ qua kèm dòng vàng — **không** im lặng báo xanh.
 
 Job `security` trong `.github/workflows/ci.yml` khai đủ gitleaks + trivy + semgrep từ
 lâu. Nhưng tài khoản GitHub không bật Actions nên **nó chưa bao giờ chạy**. Lượt chạy
-thật đầu tiên (qua `scripts/ci/security-scan.sh`, bước `[12/12]`) cho ra 13 phát hiện
+thật đầu tiên (qua `scripts/ci/security-scan.sh`, nay là bước `[13/13]`) cho ra 13 phát hiện
 và hai chốt vô tác dụng:
 
 1. **`.gitleaks.toml` viết allowlist bằng `[[allowlists]]` (số nhiều) — gitleaks
@@ -576,12 +613,12 @@ chỗ không parse được, KHÔNG phải cả file. Mẫu `new Function(req.qu
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
-`infra/prometheus/alerts.yaml` — 14 quy tắc, 5 nhóm, mỗi cái bám một chế độ hỏng có
+`infra/prometheus/alerts.yaml` — 17 quy tắc, 6 nhóm, mỗi cái bám một chế độ hỏng có
 thật và `runbook` trỏ tới đúng file. Trước đó repo **không có quy tắc cảnh báo nào**
-(`find infra -iname '*alert*'` rỗng): 13 metric chỉ dùng được khi có người đang mở
+(`find infra -iname '*alert*'` rỗng): 14 metric (số của mốc đó — nay là 21) chỉ dùng được khi có người đang mở
 dashboard — mà lúc hỏng thì không ai đang mở.
 
-`infra/prometheus/alerts.test.yaml` — 10 bài `promtool test rules`, gồm cả vế **chống
+`infra/prometheus/alerts.test.yaml` — 28 bài `promtool test rules`, gồm cả vế **chống
 kêu oan** (triển khai một tiến trình không được kêu; lưu lượng 0 không được kêu; nâng
 trần hàng đợi thì cảnh báo phải tự tắt). Vế đó mới là thứ giữ cho cảnh báo không bị
 người ta tắt đi.
@@ -646,20 +683,114 @@ kèm vào một đợt siết hạ tầng.
 
 Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải phát hiện lại:
 
-- **`style-src 'unsafe-inline'` vẫn bật** — hai SPA render rất nhiều `style=""`.
+- **`style-src 'unsafe-inline'` vẫn bật** — SPA React render nhiều `style=""`.
   Bỏ nó đòi refactor hàng trăm chỗ. `script-src` thì đã `'self'` thuần.
 - **Presence SSE là in-process** — nhiều replica thì danh sách "ai đang sửa"
   không đầy đủ. Bản thân sự kiện SSE thì đã lan qua Redis Pub/Sub.
 - **Chưa có tổng hợp log tập trung** (Loki hoặc tương đương). Log dừng ở stdout.
 - **Chưa có Prometheus/Grafana chạy production** — nên mọi mục tiêu độ trễ trong
   [operations/SLO.md](operations/SLO.md) còn là giả định, chưa phải số đo.
-- **Chưa có E2E trình duyệt trong CI** — clipboard, IME tiếng Việt và undo/redo
-  chỉ được bảo vệ bởi test đơn vị trên hàm phân tích.
+- **E2E trình duyệt CÓ, nhưng KHÔNG chạy trong CI** — `scripts/ci/ui-smoke.mjs`
+  lái Chromium THẬT qua 18 bước trên bundle ĐÃ BUILD, và nó là bước `[12/13]` của
+  `scripts/verify-local.sh`. `.github/workflows/ci.yml` không có bước nào gọi nó,
+  nên một thay đổi làm trắng màn hình vẫn xanh trên GitHub và chỉ bị bắt khi có
+  người gõ `npm run verify` trên máy mình. Chi tiết 18 bước:
+  [development/TESTING.md](development/TESTING.md).
+- **Ba đường của lưới mà `ui-smoke` KHÔNG đi qua** — smoke chỉ gõ phím thường
+  (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Cả ba
+  nay đều có lưới đỡ ở tầng dưới, nhưng CHỈ ở mức hàm thuần:
+  - clipboard → `tests/gridClipboard.test.js`, đơn vị, trên 13 hàm thuần
+    export từ `web/src/lib/clipboard.ts`;
+  - IME tiếng Việt → `web/src/lib/imeGuard.test.ts`, đơn vị, trên
+    `dangGoIME` của `web/src/lib/gridShared.ts`;
+  - undo/redo → `web/src/lib/gridUndo.test.ts`, đơn vị (20 ca), trên
+    `createUndoStack`/`undoRedoKey` của `web/src/lib/gridUndo.ts` — **mới có từ
+    2026-08-27**, trước đó không có gì. Dây nối trong component thì vẫn hở: xem
+    mục riêng ngay sau danh sách này.
 - **Rate limit bỏ qua khi Redis chết** — đánh đổi có chủ ý; khoá tài khoản khi
   sai mật khẩu nhiều lần nằm ở CSDL nên vẫn còn.
 - **VM production là điểm hỏng đơn** — xem
   [operations/DEPLOYMENT.md](operations/DEPLOYMENT.md).
 
+## Undo/redo của lưới: ngăn xếp ĐÃ có bài kiểm, dây nối trong component thì CHƯA (2026-08-27)
+
+Mục này trước đây ghi *"0 bài kiểm — rủi ro ĐANG MỞ"*. Lời khai đó **nay sai**: phần
+thuần của cơ chế hoàn tác đã được tách ra khỏi component và có bài kiểm chạy xanh
+trong CHÍNH nhánh này. Rủi ro **đóng một phần** — phần còn hở được ghi rõ bên dưới,
+đừng đọc mục này thành "đã xong".
+
+### Cái gì NAY đã được kiểm
+
+`web/src/lib/gridUndo.ts` export `createUndoStack`, `undoRedoKey` và `UNDO_LIMIT` —
+tức đã có thứ để một bài vitest `import`. Bài kiểm:
+
+- `web/src/lib/gridUndo.test.ts` — **20 ca, xanh**: vòng lùi/tiến, ba lối phím
+  (Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z, cả chữ hoa lẫn chữ thường), ghi mốc mới thì
+  nhánh redo mất hiệu lực, trần 100 mốc cắt ở ĐẦU, `dropMark()` khi Esc huỷ phiên
+  gõ, mỗi lưới một ngăn xếp riêng, và bấm lùi/tiến lúc hết mốc không sinh rác.
+- `web/src/lib/gridSelect.test.ts` — 21 ca cho Shift+mũi tên (đường thứ hai được
+  tách cùng đợt). Hai file cộng lại **41 ca**.
+
+Chạy lại: `cd web && npx vitest run src/lib/gridUndo.test.ts src/lib/gridSelect.test.ts`.
+
+### Cái gì VẪN CÒN HỞ
+
+**Không có bài kiểm nào chạy qua chính `GridTable.tsx`.** Lý do là hạ tầng, không
+phải lười: `web/` **không có** `vitest.config.*` và `web/vite.config.ts` **không**
+khai khối `test`, nên vitest chạy ở environment mặc định **`"node"`** — không có
+`document`. `jsdom`/`happy-dom` chỉ là peer TUỲ CHỌN của vitest và **không được
+cài** (`web/package.json` không có chúng, cũng không có `@testing-library/*`).
+Muốn kiểm mức component thì phải thêm phụ thuộc và một khối `test` trước đã.
+
+Hệ quả — những thứ sau vẫn chạy không có lưới an toàn:
+
+- **19 chỗ gọi `pushUndo()`** (dán, xoá dòng `Ctrl+-`, chèn dòng `Ctrl++`, điền
+  chuỗi, gộp phiên gõ trong một ô, thêm/xoá ảnh hạng mục) — bài kiểm chứng minh
+  ngăn xếp cư xử đúng, **không** chứng minh mốc được đặt đúng chỗ. Đặt `pushUndo()`
+  SAU khi đã ghi vào `items` là chụp luôn giá trị mới; không cổng nào đỏ.
+- **`snap()` / `restore()`** — `JSON.stringify(items)` và chiều ngược lại
+  (`JSON.parse`, cấp lại `_k` cho dòng thiếu khoá, `recomputeAll()`,
+  `syncActiveCell()`). Đây là phần đụng model và DOM, nằm ngoài module thuần.
+- **Dây nối bàn phím thật.** `gridUndo.test.ts` mô phỏng nếp gọi của
+  `onGridKeyDown` bằng một harness (`sua()` / `bam()`), nhưng cái nó kiểm là
+  `undoRedoKey` TRẢ VỀ đúng lệnh — không kiểm được rằng component có gọi nó,
+  có tôn trọng cờ `editable`, hay có `preventDefault()` đúng chỗ.
+- **`ui-smoke` vẫn không bấm Ctrl+Z lần nào** — nó chỉ gõ phím thường
+  (`keyboard.type` + `Enter`).
+
+### Chỗ ở (đã đo lại 2026-08-27 — số dòng cũ đã trôi)
+
+| Thành phần | Chỗ ở |
+|---|---|
+| Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm** |
+| `histRef = useRef(createUndoStack())` (thay cho `undoRef`/`redoRef` cũ) | `web/src/components/GridTable.tsx:175` |
+| `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:257` |
+| `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:258` |
+| `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:844` |
+| `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx:845-846` |
+| Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1149-1150` |
+| `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1169` |
+
+Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần như bản trước — `npm run check:refs`
+chỉ kiểm được số dòng khi tên file nằm CÙNG DÒNG với nó.
+
+> **Hai lần lời khai của mục này bị sửa — ghi lại để không lặp.**
+>
+> **(2026-08-27, lần hai)** Bản trước viết *"`undoRef`/`redoRef` tại
+> `GridTable.tsx:173-174`"*, *"`doUndo`/`doRedo` tại `:847-848`"*, *"phím tắt tại
+> `:1151-1152`"* và *"Vì không có gì export ra ngoài component, không có gì để một
+> bài vitest import"*. Cả bốn đều sai sau khi ngăn xếp được tách ra `gridUndo.ts`:
+> `undoRef`/`redoRef` **không còn tồn tại**, hai cặp số dòng kia lệch 2, và
+> `gridUndo.ts` export ba thứ. `check:refs` không bắt được vì nó chỉ kiểm dòng đích
+> **có tồn tại và không rỗng**, không kiểm nội dung dòng đó có đúng thứ được nhắc.
+>
+> **(2026-08-27, lần một)** Trước đó nữa, cả ba đường bị gói vào một gạch đầu dòng:
+> *"Chưa có E2E trình duyệt trong CI — clipboard, IME tiếng Việt và undo/redo chỉ
+> được bảo vệ bởi test đơn vị trên hàm phân tích."* Sai ở hai vế. (a) E2E trình
+> duyệt **có tồn tại** từ trước, chỉ là không chạy ở CI — câu cũ đọc ra thành "không
+> có gì cả". (b) Nặng hơn: lúc ấy undo/redo **không hề** có test đơn vị nào, và cũng
+> chưa có hàm thuần nào để mà kiểm. Một dòng rủi ro khai rằng thứ đó ĐANG được bảo
+> vệ thì tệ hơn không viết gì, vì nó khiến người đọc yên tâm bỏ qua đúng chỗ hở.
 ---
 
 ## Còn nợ sau đợt siết xác thực (cụm auth-session, 2026-08-26)

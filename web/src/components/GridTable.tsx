@@ -7,6 +7,8 @@ import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstru
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
+import { createUndoStack, undoRedoKey } from "../lib/gridUndo";
+import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -41,7 +43,6 @@ export type GridTableProps = {
   dataVersion?: number;
 };
 
-type Sel = { anchor: { row: number; field: string }; focus: { row: number; field: string } };
 type Addr = { row: number; field: string; L: string };
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
@@ -170,8 +171,8 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
-  const undoRef = useRef<string[]>([]);
-  const redoRef = useRef<string[]>([]);
+  // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
+  const histRef = useRef(createUndoStack());
   const focusRef = useRef<{ i: number; f: string } | null>(null);
   const focusPend = useRef<{ i: number; f: string } | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -254,7 +255,7 @@ function GridTableInner(props: GridTableProps) {
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   const snap = () => JSON.stringify(items);
-  const pushUndo = () => { undoRef.current.push(snap()); if (undoRef.current.length > 100) undoRef.current.shift(); redoRef.current.length = 0; };
+  const pushUndo = () => { histRef.current.mark(snap()); };
   // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
   // vào items (onNumInput ghi thẳng vào model mỗi lần gõ, chụp sau là dính luôn số mới).
   const markEditUndo = (i: number, f: string) => {
@@ -327,7 +328,7 @@ function GridTableInner(props: GridTableProps) {
   const fieldIdx = (f: string) => FIELDS.indexOf(f);
   const cellEl = (row: number, field: string) => tableRef.current?.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
   const tdOf = (row: number, field: string): HTMLElement | null => tdIn(tableRef.current?.querySelector(`tr[data-row="${row}"]`), field);
-  const rectOf = (sel: Sel | null) => { if (!sel) return null; const a = fieldIdx(sel.anchor.field), b = fieldIdx(sel.focus.field); if (a < 0 || b < 0) return null; return { r0: Math.min(sel.anchor.row, sel.focus.row), r1: Math.max(sel.anchor.row, sel.focus.row), c0: Math.min(a, b), c1: Math.max(a, b) }; };
+  const rectOf = (sel: Sel | null) => rectOfSel(sel, fieldIdx);
   const onFillHandleDown = (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     const start = rectOf(selRef.current); if (!start) return;
@@ -442,14 +443,13 @@ function GridTableInner(props: GridTableProps) {
     return true;
   };
   const moveTo = (row: number, field: string, extend: boolean, prefer: -1 | 0 | 1 = 0) => {
-    row = Math.max(0, Math.min(items.length - 1, row));
-    const ci = Math.max(0, Math.min(FIELDS.length - 1, fieldIdx(field)));
+    row = clampRow(row, items.length);
+    const ci = clampCol(fieldIdx(field), FIELDS.length);
     let f2 = FIELDS[ci];
     // Cột STT: ô TÍNH — dời vùng chọn tới đó nhưng giữ nguyên ô đang focus, để mũi tên/Shift+mũi tên
     // quét qua được mà không "rơi" con trỏ vào ô không nhập được.
     if (f2 === "_stt") {
-      const sel0 = selRef.current;
-      selRef.current = extend && sel0 ? { anchor: sel0.anchor, focus: { row, field: f2 } } : { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+      selRef.current = nextSel(selRef.current, row, f2, extend);
       paintSel();
       return;
     }
@@ -461,9 +461,7 @@ function GridTableInner(props: GridTableProps) {
       }
       f2 = found || "name";
     }
-    const sel = selRef.current;
-    if (extend && sel) selRef.current = { anchor: sel.anchor, focus: { row, field: f2 } };
-    else selRef.current = { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+    selRef.current = nextSel(selRef.current, row, f2, extend);
     navigatingRef.current = true;
     editingRef.current = false;
     const el = cellEl(row, f2);
@@ -585,7 +583,7 @@ function GridTableInner(props: GridTableProps) {
 
     if (e.shiftKey && selRef.current) {   // mở rộng vùng, giữ nguyên ô neo
       e.preventDefault();
-      selRef.current = { anchor: selRef.current.anchor, focus: { row: info.row, field: info.field } };
+      selRef.current = nextSel(selRef.current, info.row, info.field, true);
       lockCell(document.activeElement as HTMLInputElement | HTMLTextAreaElement | null);   // thoát sửa + khóa
       paintSel();
       return;
@@ -844,8 +842,8 @@ function GridTableInner(props: GridTableProps) {
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
   const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
-  const doUndo = () => { flushSoft(); if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
-  const doRedo = () => { flushSoft(); if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
+  const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
+  const doRedo = () => { flushSoft(); const next = histRef.current.stepForward(snap); if (next !== null) restore(next); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
   // dRow/dCol: khối được dán dời đi bao nhiêu hàng/cột so với chỗ copy → DỊCH tham chiếu trong công
   // thức đúng nếp Excel ("=G3*E3" copy ở hàng 3 dán xuống hàng 7 thành "=G7*E7"; $ khoá thì giữ).
@@ -1148,8 +1146,8 @@ function GridTableInner(props: GridTableProps) {
       else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
-    if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
-    if (ctrl && ((e.key === "y" || e.key === "Y") || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); e.stopPropagation(); if (editable) doRedo(); return; }
+    const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
+    if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); return; }
     if (ctrl && (e.key === "d" || e.key === "D")) { e.preventDefault(); e.stopPropagation(); if (editable) fillDown(); return; }
     if (e.key === "Escape") {
       e.stopPropagation();
@@ -1168,7 +1166,7 @@ function GridTableInner(props: GridTableProps) {
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
           // một nhịp rỗng thay vì lùi thao tác thật trước đó.
           const m = editUndoRef.current;
-          if (m && m.i === i && m.f === f) { undoRef.current.pop(); editUndoRef.current = null; }
+          if (m && m.i === i && m.f === f) { histRef.current.dropMark(); editUndoRef.current = null; }
           onChange();
         }
         lockCell(esc);
@@ -1212,7 +1210,7 @@ function GridTableInner(props: GridTableProps) {
       return;
     }
     if (e.key.indexOf("Arrow") === 0) {
-      const up = e.key === "ArrowUp", down = e.key === "ArrowDown", left = e.key === "ArrowLeft", right = e.key === "ArrowRight";
+      const { dRow, dCol, prefer } = arrowStep(e.key);
       if (editing) {
         // EDIT (nhấp đúp/F2): mũi tên CHỈ chạy trong chữ — không rời ô, Ctrl+mũi tên nhảy theo
         // từ (trình duyệt xử lý). Muốn mũi tên chốt-và-đi thì bấm F2 lần nữa (sang ENTER) — Excel.
@@ -1224,11 +1222,11 @@ function GridTableInner(props: GridTableProps) {
       // Ctrl/⌘ + mũi tên → nhảy tới BIÊN bảng (thêm Shift = kéo vùng chọn tới biên), như Excel.
       if (ctrl) {
         e.preventDefault(); e.stopPropagation();
-        moveTo(up ? 0 : down ? lastRow : i, FIELDS[left ? 0 : right ? lastCol : ci], e.shiftKey, right ? 1 : left ? -1 : 0);
+        moveTo(dRow < 0 ? 0 : dRow > 0 ? lastRow : i, FIELDS[dCol < 0 ? 0 : dCol > 0 ? lastCol : ci], e.shiftKey, prefer);
         return;
       }
       e.preventDefault(); e.stopPropagation();
-      moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey, right ? 1 : left ? -1 : 0);
+      moveTo(i + dRow, FIELDS[ci + dCol] || f, e.shiftKey, prefer);
       return;
     }
     // GÕ LÀ ĐÈ (type-to-replace — READY → ENTER, đúng nếp Excel): ô đang CHỌN, gõ ký tự thường/

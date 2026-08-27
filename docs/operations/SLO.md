@@ -20,9 +20,11 @@ Việt Nam. SLO dưới đây được đặt cho đúng quy mô đó — không
 | Xuất file p95 | < 10 s | `export_duration_seconds` | giả định |
 | Tỉ lệ 5xx | < 0,5% | `http_requests_total{status=~"5.."}` | giả định |
 
-Cả sáu dòng đều là **giả định**: chưa có Prometheus scrape production nào chạy đủ
-lâu để rút ra số thật. Việc đầu tiên cần làm là để metric chạy hai tuần rồi quay
-lại đặt mục tiêu theo phân vị thật, thay vì theo cảm tính.
+Cả sáu dòng đều là **giả định**: repo nay đã có một Prometheus dựng được bằng một
+lệnh (`infra/observability/`, giữ 15 ngày số liệu), nhưng nó **chưa bật ở
+production** nên chưa có chuỗi số liệu thật nào đủ dài. Việc đầu tiên cần làm là
+bật ngăn xếp đó, để metric chạy hai tuần, rồi quay lại đặt mục tiêu theo phân vị
+thật thay vì theo cảm tính.
 
 Số đo hiệu năng cũ nằm ở
 [docs/archive/performance/PERFORMANCE_BENCHMARK.md](../archive/performance/PERFORMANCE_BENCHMARK.md) —
@@ -68,24 +70,76 @@ sum(rate(export_rejected_total[15m]))
 
 # Hàng đợi xuất file đang sâu bao nhiêu
 export_queue_depth
+
+# Sức khoẻ phụ thuộc (đo NGAY LÚC SCRAPE, xem src/observability.ts)
+db_up                                    # 1 = Postgres trả lời SELECT 1
+redis_configured == 1 and redis_up == 0  # có cấu hình Redis nhưng không nối được
+disk_free_bytes / disk_total_bytes       # tỉ lệ trống của hệ tệp
+
+# Đường realtime có chập chờn không (§18)
+sse_clients                              # số kết nối SSE đang mở (= "sse_connections" của §18)
+rate(sse_reconnects[15m])                # nhịp NỐI LẠI — tăng đột biến = proxy cắt, hoặc áp lực ngược
+sum by (event) (rate(sse_events[5m]))    # lưu lượng sự kiện thật sự giao được
 ```
 
-## Cảnh báo NÊN đặt
+## Cảnh báo
 
-Chưa cái nào được cấu hình — đây là danh sách việc cần làm, không phải mô tả
-hiện trạng.
+**17 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
+— chúng nằm ở [`infra/prometheus/alerts.yaml`](../../infra/prometheus/alerts.yaml),
+bài kiểm logic ở `infra/prometheus/alerts.test.yaml`, cổng CI là
+`npm run check:alerts`. Bản trước của tài liệu này viết "chưa cái nào được cấu
+hình", và câu đó **nói ngược mã nguồn**.
 
-| Cảnh báo | Điều kiện | Vì sao |
+Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa mình:
+
+| Mức | Trạng thái |
+|---|---|
+| Quy tắc **được viết + kiểm logic** | ✅ 17 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
+| Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana), **không bật mặc định** |
+| Có ai **bị đánh thức** khi chúng kêu | ❌ **KHÔNG có Alertmanager** — xem dưới |
+
+| Cảnh báo | Quy tắc | Mức |
 |---|---|---|
-| App chết | `up{job="quanly"} == 0` quá 2 phút | mất dịch vụ |
-| 5xx cao | tỉ lệ 5xx > 2% trong 10 phút | hỏng thật, không phải nhiễu |
-| CSDL không tới được | `/readyz` hỏng 3 lần liên tiếp | app còn sống nhưng vô dụng |
-| Hàng đợi xuất file đầy | `export_rejected_total` tăng | người dùng đang bị từ chối |
-| Backup quá hạn | watchdog exit ≠ 0 | **đã có**, qua Telegram |
+| Không scrape được `/metrics` | `QuanlyMetricsKhongScrapeDuoc` (`up == 0`, 3m) | critical |
+| Mất sạch target | `QuanlyKhongConTargetNao` (`absent(up{…})`, 10m) | critical |
+| 5xx cao | `QuanlyTiLeLoi5xxCao` (> 2% trong 10m) | critical |
+| Độ trễ p95 cao | `QuanlyDoTreP95Cao` (> 2s trong 15m) | warning |
+| **CSDL không tới được** | `QuanlyCsdlKhongToiDuoc` (`db_up == 0`, 3m) | critical |
+| **Redis không tới được** | `QuanlyRedisChet` (`redis_configured == 1 and redis_up == 0`, 3m) | critical |
+| **Đĩa sắp đầy** | `QuanlyDiaSapDay` (`disk_free_bytes / disk_total_bytes < 0,10`, 15m) | critical |
+| Backplane SSE chết | `QuanlySseBackplaneChet` | critical |
+| PUBLISH SSE thất bại | `QuanlySsePublishThatBai` | warning |
+| Hàng đợi xuất file đầy | `QuanlyHangDoiXuatDay` | critical |
+| Xuất file bị từ chối | `QuanlyXuatFileBiTuChoi` | warning |
+| Worker xuất file căng cứng | `QuanlyWorkerXuatCangCung` | warning |
+| Job nền chất đống | `QuanlyJobNenChatDong` | warning |
+| Job nền thất bại | `QuanlyJobNenThatBai` | warning |
+| Không worker nào chạy job | `QuanlyKhongCoWorkerNao` | critical |
+| Tiến trình khởi động lại liên tục | `QuanlyTienTrinhKhoiDongLaiLienTuc` | critical |
+| Event loop nghẽn | `QuanlyEventLoopNgheN` | warning |
+| Backup quá hạn | `scripts/backup/backup-watchdog.sh` | **đang chạy thật**, qua Telegram |
 
-Ba dòng đầu cần Prometheus + Alertmanager, hiện **chưa dựng**. Backup thì đã có
-đường alert riêng qua Telegram, không phụ thuộc Prometheus — cố ý, vì đó là thứ
-không được phép im lặng.
+Ba dòng in đậm là bổ sung của §28 và chúng lấp đúng ba điểm mù: `up` vẫn bằng 1
+khi CSDL chết (tiến trình Node vẫn trả `/metrics`); quy tắc Redis cũ chỉ nói về
+*backplane SSE* nên bản triển khai không dùng backplane im lặng dù Redis đang giữ
+hàng đợi/rate-limit/Pub-Sub SSE; và đĩa đầy không sinh 5xx nào cho tới đúng lúc Postgres
+không ghi nổi WAL — lúc đó đã mất dữ liệu.
+
+### Cảnh báo dừng lại ở đâu (đọc kỹ)
+
+**Không có Alertmanager.** Quy tắc được đánh giá và chuyển sang `firing`, rồi
+**dừng ở giao diện Prometheus** (`/alerts`). Không Telegram, không email, **không
+ai bị đánh thức**. Đó là "có cảnh báo" theo nghĩa kỹ thuật, chưa phải theo nghĩa
+vận hành.
+
+Đường báo động **duy nhất đang chạy thật** là backup watchdog qua Telegram — cố
+ý tách khỏi Prometheus, vì đó là thứ không được phép im lặng ngay cả khi hệ giám
+sát chết.
+
+Việc còn lại để đóng khoảng cách: dựng Alertmanager (một service nữa trong
+`infra/observability/docker-compose.observability.yml`, khối `alerting:` trong
+`infra/observability/prometheus.yml` đã để sẵn chỗ) và nối vào cùng bot Telegram
+mà watchdog đang dùng.
 
 ## Ngân sách lỗi, với đội một người
 

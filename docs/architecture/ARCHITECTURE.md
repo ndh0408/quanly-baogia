@@ -9,7 +9,7 @@ mã nguồn và cùng một CSDL. Cố ý không tách microservice — quy mô 
                              │
                              ▼
    ┌─────────────────────────────────────────────┐
-   │  React SPA (/)          SPA vanilla (/app)  │
+   │  React SPA (Vite) — phục vụ ở "/" và "/app2"│
    └────────────────────┬────────────────────────┘
                         │ HTTPS
                         ▼
@@ -24,17 +24,17 @@ mã nguồn và cùng một CSDL. Cố ý không tách microservice — quy mô 
           ▼                           ▼
    ┌─────────────┐            ┌──────────────┐
    │  services/  │            │    Redis     │
-   │  (nghiệp vụ)│            │  session·SSE │
-   └──────┬──────┘            │  BullMQ·rate │
+   │  (nghiệp vụ)│            │  BullMQ·rate │
+   └──────┬──────┘            │  SSE Pub/Sub │
           │                   └──────┬───────┘
           ▼                          ▼
    ┌─────────────┐            ┌──────────────┐
    │   Prisma    │            │   Worker     │
    │      ▼      │            │ dist/worker  │
    │ PostgreSQL  │            │ xlsx·pdf·mail│
-   └─────────────┘            └──────┬───────┘
-                                     ▼
-                            ┌──────────────────┐
+   │ nghiệp vụ + │            └──────┬───────┘
+   │user_sessions│                   ▼
+   └─────────────┘          ┌──────────────────┐
                             │  Kho object (S3) │
                             │  chứng từ · file │
                             └──────────────────┘
@@ -112,18 +112,63 @@ nhiều instance**.
 `Map` **trong tiến trình**, KHÔNG qua Redis. Chạy nhiều replica thì người dùng
 trên replica A không thấy người trên replica B. Đây là hạn chế đã biết, chưa sửa.
 
+Đừng suy rộng chữ "trong tiến trình" đó sang **phiên đăng nhập**: hai thứ khác
+hẳn nhau. Presence là trạng thái phù du sống trong RAM của một tiến trình duy
+nhất; phiên nằm trong Postgres (bảng `user_sessions`) nên **dùng chung được cho
+mọi replica** — đăng nhập ở replica A thì replica B nhận ra ngay, không cần
+sticky session ở lớp cân bằng tải. Xem [§ Phiên nằm ở
+Postgres](#phiên-nằm-ở-postgres--có-chủ-ý-không-phải-thiếu-sót) bên dưới.
+
 ## Dữ liệu nằm ở đâu
 
 | Nơi | Giữ gì |
 |---|---|
 | PostgreSQL | toàn bộ dữ liệu nghiệp vụ; tiền dùng `Decimal`, không dùng float |
 | PostgreSQL (đã mã hoá) | CCCD, số tài khoản, lương — AES-256-GCM bằng `PII_ENC_KEY` |
+| PostgreSQL, bảng `user_sessions` | **phiên đăng nhập** — `connect-pg-simple`, KHÔNG phải Redis |
 | Kho object | ảnh chứng từ thanh toán, tệp đính kèm, bản xuất |
-| Redis | phiên, hàng đợi, bộ đếm rate-limit, kênh Pub/Sub |
+| Redis | hàng đợi BullMQ, bộ đếm rate-limit, kênh Pub/Sub của SSE — **không giữ phiên** |
 
 CSDL chỉ giữ **khoá object + SHA-256**, không giữ nội dung file. Hệ quả trực
 tiếp: bản dump CSDL một mình **không** khôi phục được — xem
 [operations/BACKUP_RESTORE.md](../operations/BACKUP_RESTORE.md).
+
+### Phiên nằm ở Postgres — CÓ CHỦ Ý, không phải thiếu sót
+
+Đây là chỗ tài liệu trước đây nói **ngược** với mã, nên viết rõ một lần. Kho phiên
+là `connect-pg-simple` dựng trong `src/app.ts` (`new PgSession({ … tableName:
+"user_sessions" })`), không có `connect-redis` ở đâu trong repo. Chính
+`src/config.ts` cũng dán nhãn Redis là "hàng đợi/rate-limit/SSE" khi in bảng
+trạng thái khởi động.
+
+Hai hệ quả **thật sự quan trọng**, và cả hai đều nghiêng về phía chọn Postgres:
+
+1. **Phiên sống sót qua lần khởi động lại Redis.** Redis ở đây chỉ có RDB
+   (`--save 60 1` trong `docker-compose.prod.yml`), tức tối đa 60 giây ghi cuối
+   cùng có thể mất khi container chết đột ngột — và nó là thành phần bị đụng vào
+   nhiều nhất: nâng cấp ảnh, đổi `maxmemory`, `FLUSHALL` lúc gỡ rối, hoặc dọn
+   sạch để chuyển sang Redis quản lý. Nếu phiên nằm trong Redis thì **mỗi** lần
+   như thế là đăng xuất toàn bộ người dùng. Với kho PG thì mất Redis chỉ làm hỏng
+   hàng đợi, rate-limit và SSE — người đang gõ dở một báo giá **không bị văng
+   ra**, và việc gỡ rối Redis không còn là thao tác chạm vào xác thực.
+2. **Phiên nằm trong bản dump Postgres.** `backup-db.sh` chạy `pg_dump` toàn CSDL,
+   không loại trừ bảng nào, nên `user_sessions` đi theo bản dump. Khôi phục thảm
+   hoạ kéo theo cả phiên — người dùng không phải đăng nhập lại hàng loạt ngay sau
+   sự cố. ⚠️ **Với điều kiện `SESSION_SECRET` được khôi phục y hệt**: cookie
+   `qly.sid` ký bằng khoá đó, đổi khoá là mọi cookie cũ thành vô hiệu dù hàng
+   trong bảng vẫn còn. Khoá này **nằm ngoài CSDL** — nó đến từ biến môi trường
+   `SESSION_SECRET` (hoặc `SESSION_SECRET_FILE` trỏ tới một secret file), nên
+   `pg_dump` KHÔNG chứa nó. Khôi phục CSDL mà cấp khoá mới thì bảng
+   `user_sessions` còn nguyên nhưng vô dụng — tất cả vẫn phải đăng nhập lại.
+   ⚠️ Tính đến 2026-08-27, [operations/DISASTER_RECOVERY.md](../operations/DISASTER_RECOVERY.md)
+   **chưa** liệt kê `SESSION_SECRET` trong danh sách thứ phải khôi phục cùng bản
+   dump; đó là lỗ hổng đã biết của runbook, không phải của mã.
+
+Cái giá phải trả, nói cho đủ: mỗi request có phiên là một lượt đọc/ghi Postgres,
+và kho phiên dựng **pool node-pg thứ hai** tách khỏi pool Prisma (`SESSION_POOL_MAX`,
+mặc định 4 — công thức kết nối mỗi tiến trình = `DB_POOL_MAX + SESSION_POOL_MAX`).
+Ở quy mô này đó là cái giá rẻ hơn nhiều so với việc đăng xuất tất cả mỗi lần Redis
+nhấp nháy.
 
 ## Quyết định và lý do
 
@@ -132,6 +177,6 @@ tiếp: bản dump CSDL một mình **không** khôi phục được — xem
 | Monolith, không microservice | một người vận hành; ranh giới module giải quyết được vấn đề tổ chức mã mà không thêm gánh nặng vận hành |
 | Ghép XML vào mẫu .xlsx thật | kế toán cần **file của họ**, không phải "file có cùng con số" |
 | SSE, không WebSocket | luồng một chiều là đủ; SSE đi qua proxy dễ hơn và tự reconnect |
-| BullMQ trên Redis | Redis đã có sẵn cho phiên; thêm Kafka cho khối lượng này là vô cớ |
+| BullMQ trên Redis | Redis đã có sẵn cho rate-limit và Pub/Sub của SSE, nên hàng đợi không kéo thêm hạ tầng mới; thêm Kafka/RabbitMQ cho khối lượng này là vô cớ. (Lập luận cũ ghi "Redis đã có sẵn cho phiên" — **sai**: phiên nằm ở Postgres.) |
 | Prisma, không viết SQL tay | an toàn kiểu + migration; chỗ nào cần thì dùng raw query |
 | Chạy artifact đã biên dịch | production không cần trình biên dịch; Docker/Compose/Helm/k8s dùng CHUNG một lệnh |

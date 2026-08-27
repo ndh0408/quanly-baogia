@@ -33,7 +33,8 @@ spec:
           volumeMounts:
             - { name: data, mountPath: /data }
           # XÁC THỰC BẮT BUỘC: --requirepass từ secret (khớp đường docker-compose prod). Không có nó thì bất kỳ
-          # pod nào trong cluster cũng đọc/ghi được session + hàng đợi job. $(REDIS_PASSWORD) expand từ env dưới.
+          # pod nào trong cluster cũng đọc/ghi được hàng đợi job + bộ đếm rate-limit (KHÔNG có phiên đăng
+          # nhập ở đây — phiên nằm ở Postgres). $(REDIS_PASSWORD) expand từ env dưới.
           env:
             - name: REDIS_PASSWORD
               valueFrom: { secretKeyRef: { name: quanly-secrets, key: REDIS_PASSWORD } }
@@ -47,7 +48,9 @@ spec:
               "--maxmemory",
               "256mb",
               "--maxmemory-policy",
-              "noeviction", # BullMQ yêu cầu: allkeys-lru xoá mất khoá job + khoá phiên
+              # BullMQ yêu cầu: allkeys-lru xoá mất khoá job + bộ đếm rate-limit. Phiên KHÔNG ở
+              # Redis (connect-pg-simple → Postgres) nên không dính.
+              "noeviction",
             ]
           ports: [{ containerPort: 6379 }]
           readinessProbe:

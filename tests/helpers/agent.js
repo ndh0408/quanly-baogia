@@ -2,8 +2,9 @@
 //
 // ── VÌ SAO CẦN ──────────────────────────────────────────────────────────────
 // csrfGuard (src/app.ts) đòi header X-CSRF-Token cho MỌI thao tác ghi được xác thực bằng phiên
-// cookie. Cả hai SPA đều tự lo việc này trong lớp bọc fetch của mình (web/src/lib/api.ts và
-// public/js/core/api.js): lấy mã, đính vào, và thử lại một lần nếu máy chủ báo mã thiếu/không hợp lệ.
+// cookie. SPA React tự lo việc này trong lớp bọc fetch của mình (web/src/lib/api.ts): lấy mã, đính
+// vào, và thử lại một lần nếu máy chủ báo mã thiếu/không hợp lệ. (SPA vanilla cũ —
+// public/js/core/api.js — đã gỡ hẳn 2026-08-26, xem docs/adr/0006-go-spa-vanilla-cu.md.)
 //
 // Test tích hợp lái ứng dụng bằng supertest, tức là ĐI VÒNG qua lớp bọc đó. Nếu để test tự gửi
 // request trần thì chúng không còn mô phỏng client thật nữa. Có hai cách xử lý, và cách chọn ở đây

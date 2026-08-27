@@ -20,6 +20,9 @@
 #   S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET   ← BẮT BUỘC
 #   OBJ_TARBALL=1        (tuỳ chọn) đóng gói .tar.gz để đẩy off-host
 #   OBJ_TARBALL_MAX_MB   (2048) — vượt ngưỡng thì bỏ đóng gói, chỉ đẩy manifest
+#   OBJ_VERSIONING=1     (tuỳ chọn, MẶC ĐỊNH TẮT) bật versioning trên bucket nguồn nếu provider
+#                        hỗ trợ — xem bước [0/5] và DISASTER_RECOVERY.md để biết vì sao mặc định tắt
+#   OBJ_VERSIONING_KEEP_DAYS (30) số ngày giữ phiên bản cũ khi OBJ_VERSIONING=1
 #   NAS_SHARE/NAS_USER/NAS_PASS/NAS_SUBDIR                 (off-host — tuỳ chọn)
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT                (alert — tuỳ chọn)
 #   MC_IMAGE (minio/mc:RELEASE.2024-11-21T17-21-54Z)
@@ -78,6 +81,64 @@ mc() {
     -v "$MIRROR_DIR":/mirror \
     "$MC_IMAGE" "$@"
 }
+
+# ── [0/5] VERSIONING CỦA BUCKET NGUỒN ───────────────────────────────────────
+# Bước này KHÔNG sao lưu gì. Nó ĐO một quyết định kiến trúc và ghi lại kết quả đo, vì cho tới
+# 2026-08-27 không dòng nào trong scripts/, docs/operations/ hay infra/ nói bucket production có bật
+# versioning hay không — tức "có/không" là chuyện phỏng đoán, và phỏng đoán về lớp chống-ghi-đè là
+# đúng thứ không được phép phỏng đoán.
+#
+# QUYẾT ĐỊNH HIỆN TẠI: KHÔNG bật mặc định; lớp chống-xoá-nhầm là BẢN GƯƠNG CỘNG DỒN + off-host.
+# Lập luận đầy đủ (kèm điều kiện để đổi quyết định) ở docs/operations/DISASTER_RECOVERY.md,
+# mục "Versioning kho object". Ba ý đo được, tóm tắt:
+#   1. Kho DEV chạy MinIO SINGLE-NODE SINGLE-DRIVE (docker-compose.yml: `server /data`, một volume).
+#      MinIO ghi rõ chế độ này KHÔNG hỗ trợ versioning/object-lock/replication → không có gì để bật.
+#   2. Production KHÔNG dùng compose có minio (docker-compose.prod.yml không có service ấy), nên
+#      provider do /etc/quanly-backup.env quyết định và REPO KHÔNG BIẾT nó là gì. Vì vậy phải ĐO lúc
+#      chạy, không giả định — đó là toàn bộ lý do bước này tồn tại.
+#   3. Version nằm CÙNG bucket. Mất bucket / mất host / xoá cả bucket thì mọi version đi theo. Nó
+#      chỉ bù được vế "ghi đè hoặc xoá nhầm MỘT object", mà vế đó bản gương cộng dồn đã phủ.
+# Bật thì đặt OBJ_VERSIONING=1 (kèm OBJ_VERSIONING_KEEP_DAYS, mặc định 30) — script sẽ bật versioning
+# VÀ đặt quy tắc hết hạn phiên bản cũ. Bật mà không có quy tắc hết hạn thì dung lượng tăng không
+# trần, đúng vào cái rủi ro mà cổng "còn < 500MB thì dừng" bên trên đang canh.
+echo "▶ [0/5] Versioning bucket q/$BUCKET"
+VER_OUT="$(mc version info "q/$BUCKET" 2>&1)"; VER_RC=$?
+# THỨ TỰ QUAN TRỌNG: xét mã thoát TRƯỚC rồi mới đọc chữ. Đọc chữ trước thì một thông báo lỗi có
+# chứa chữ "enabled" (vd "versioning is not enabled on this deployment") bị phân loại thành ĐANG BẬT
+# — tức đúng chốt này báo an toàn giả ở đúng lúc nó cần báo động.
+if [ "$VER_RC" -ne 0 ]; then
+  # Provider không hỗ trợ (MinIO một-node-một-ổ trả lỗi ở đây) hoặc khoá thiếu quyền đọc cấu hình bucket.
+  VER_STATE="unsupported"
+  echo "   KHÔNG hỏi được trạng thái versioning: $(printf '%s' "$VER_OUT" | head -c 200 | tr '\n' ' ')"
+  echo "   → provider không hỗ trợ, hoặc khoá thiếu quyền đọc cấu hình bucket. Bản gương cộng dồn vẫn là lớp chống xoá nhầm."
+elif printf '%s' "$VER_OUT" | grep -qi 'suspended'; then
+  VER_STATE="suspended"
+elif printf '%s' "$VER_OUT" | grep -qi 'enabled'; then
+  VER_STATE="enabled"
+  echo "   ĐANG BẬT — kho tự giữ phiên bản cũ; bản gương là lớp thứ hai (khác host)."
+else
+  VER_STATE="off"
+fi
+
+if [ "$VER_STATE" = "off" ] || [ "$VER_STATE" = "suspended" ]; then
+  if [ "${OBJ_VERSIONING:-0}" = "1" ]; then
+    if mc version enable "q/$BUCKET" >/dev/null 2>&1; then
+      VER_STATE="enabled"
+      echo "   đã BẬT versioning theo OBJ_VERSIONING=1"
+      # Quy tắc hết hạn phiên bản cũ. Hỏng thì CẢNH BÁO chứ không im: versioning đã bật rồi mà không
+      # có trần thời gian là một cái đĩa đầy dần, và nó đầy vào đúng volume của kho object production.
+      if ! mc ilm rule add --noncurrent-expire-days "${OBJ_VERSIONING_KEEP_DAYS:-30}" "q/$BUCKET" >/dev/null 2>&1; then
+        alert "đã bật versioning nhưng KHÔNG đặt được quy tắc hết hạn phiên bản cũ cho $BUCKET — dung lượng sẽ tăng không trần. Đặt tay: mc ilm rule add --noncurrent-expire-days ${OBJ_VERSIONING_KEEP_DAYS:-30} <alias>/$BUCKET"
+      fi
+    else
+      alert "OBJ_VERSIONING=1 nhưng KHÔNG bật được versioning cho $BUCKET — provider không hỗ trợ (MinIO một-node-một-ổ) hoặc khoá thiếu quyền PutBucketVersioning"
+    fi
+  else
+    echo "   TẮT (quyết định có chủ ý — xem DISASTER_RECOVERY.md mục 'Versioning kho object'; bật bằng OBJ_VERSIONING=1)"
+  fi
+fi
+# Ghi lại KẾT QUẢ ĐO để người trực đọc được mà không phải lục log systemd của lượt chạy đêm qua.
+printf '%s\t%s\n' "$(date +%s)" "$VER_STATE" > "$BACKUP_DIR/.objects-versioning" 2>/dev/null || true
 
 echo "▶ [1/5] Gương bucket q/$BUCKET → $MIRROR_DIR (cộng dồn, KHÔNG lan truyền xoá)"
 if ! mc mirror --quiet --overwrite "q/$BUCKET" /mirror; then

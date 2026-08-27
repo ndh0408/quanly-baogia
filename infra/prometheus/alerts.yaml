@@ -4,7 +4,7 @@
 # Kiểm cú pháp + PromQL:  npm run check:alerts   (scripts/ci/check-alerts.sh, dùng promtool)
 #
 # ── VÌ SAO CÓ FILE NÀY ─────────────────────────────────────────────────────
-# src/observability.ts phát 13 metric riêng cộng bộ mặc định của prom-client. Trước file này,
+# src/observability.ts phát 21 metric riêng cộng bộ mặc định của prom-client. Trước file này,
 # KHÔNG có một quy tắc cảnh báo nào trong repo (`find infra -iname '*alert*'` không ra gì). Nghĩa
 # là số liệu chỉ dùng được khi đã có người MỞ dashboard ra xem — mà lúc hệ thống hỏng thì không ai
 # đang xem. Có metric mà không có cảnh báo là có hộp đen kèm đèn báo không ai nối dây.
@@ -14,15 +14,20 @@
 # trong mã nguồn hoặc trong docs/REMAINING_RISKS.md, và `annotations.runbook` chỉ tới chỗ đó.
 #
 # ── ĐIỀU KIỆN ĐỂ CHÚNG CHẠY ĐƯỢC ───────────────────────────────────────────
-# ⚠️ Production hiện chạy docker-compose và CHƯA có Prometheus nào scrape (xem
-#    docs/REMAINING_RISKS.md). File này là thứ ĐÃ SẴN SÀNG để nạp, chưa phải thứ đang chạy.
-#    Đừng đọc nó thành "hệ thống đã có cảnh báo".
+# ✔ CÓ định nghĩa Prometheus trong repo: `infra/observability/prometheus.yml` +
+#   service `prometheus` trong `infra/observability/docker-compose.observability.yml`, đã nạp sẵn
+#   ĐÚNG file này qua `rule_files:`. Nhưng ngăn xếp đó KHÔNG bật mặc định (xem README ở thư mục
+#   ấy) — nên câu đúng là "đã dựng được bằng một lệnh", KHÔNG phải "đang chạy ở production".
+# ⚠️ KHÔNG CÓ ALERTMANAGER. Quy tắc dưới đây chuyển sang `firing` và DỪNG LẠI ở giao diện
+#    Prometheus (/alerts). Không Telegram, không email, KHÔNG AI BỊ ĐÁNH THỨC. Đường báo động duy
+#    nhất đang chạy thật là backup watchdog qua Telegram, cố ý tách khỏi Prometheus.
 # ⚠️ `/metrics` ở production TRẢ 404 khi thiếu METRICS_TOKEN (src/app.ts), và 401 khi Bearer sai.
 #    Không đặt token thì Prometheus scrape ra 404 và MỌI quy tắc dưới đây im lặng vĩnh viễn —
 #    `QuanlyMetricsKhongScrapeDuoc` sinh ra để bắt đúng chuyện đó.
 #
 # ── CÁCH NẠP ───────────────────────────────────────────────────────────────
-# Prometheus thường:      thêm đường dẫn file này vào `rule_files:` trong prometheus.yml
+# Ngăn xếp trong repo:    đã nạp sẵn (infra/observability/prometheus.yml → `rule_files:`)
+# Prometheus khác:        thêm đường dẫn file này vào `rule_files:` trong prometheus.yml
 # prometheus-operator:    bọc `groups:` bên dưới vào một CR `PrometheusRule`:
 #     apiVersion: monitoring.coreos.com/v1
 #     kind: PrometheusRule
@@ -89,6 +94,70 @@ groups:
             Bucket cao nhất của histogram này là 10 giây (src/observability.ts). P95 vượt 2s thường
             là cạn pool CSDL (DB_POOL_MAX) hoặc một truy vấn quét bảng.
           runbook: "src/db.ts — chú thích về DB_POOL_MAX"
+
+  # ── Nhóm 1b: phụ thuộc bên ngoài (CSDL · Redis · đĩa) ────────────────────
+  #
+  # Ba quy tắc này bắt những chế độ hỏng mà TOÀN BỘ phần còn lại của file MÙ:
+  #   · `up` vẫn 1 khi CSDL chết — tiến trình Node vẫn trả /metrics bình thường.
+  #   · Tỉ lệ 5xx chỉ tăng khi CÓ người đang bấm; ban đêm CSDL chết là im lặng tuyệt đối.
+  #   · Đĩa đầy không sinh 5xx cho tới đúng lúc Postgres không ghi nổi WAL — lúc đó đã mất dữ liệu.
+  - name: quanly.phu-thuoc
+    rules:
+      - alert: QuanlyCsdlKhongToiDuoc
+        # `db_up` do src/observability.ts đo NGAY LÚC SCRAPE bằng `SELECT 1` — cùng câu truy vấn
+        # /readyz dùng. Vì sao cần metric riêng khi ĐÃ có /readyz: Prometheus không hỏi /readyz, và
+        # `up` chỉ nói tiến trình có trả lời hay không. "App còn sống mà CSDL chết" là chế độ hỏng
+        # THƯỜNG GẶP NHẤT của repo này (pool cạn, Postgres restart, mật khẩu xoay) và trước quy tắc
+        # này không có gì bắt được nó.
+        expr: db_up == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} không chạm được Postgres"
+          description: >-
+            `SELECT 1` thất bại hoặc quá 2 giây trong 3 phút liên tục. Ứng dụng vẫn trả lời HTTP nên
+            liveness probe XANH và `up` vẫn 1 — không có cảnh báo nào khác trong file này bắt được
+            trạng thái này. Kiểm pool (DB_POOL_MAX), tiến trình Postgres, và DATABASE_URL.
+          runbook: "src/db.ts — Pool + DB_POOL_MAX; src/app.ts — handler /readyz"
+
+      - alert: QuanlyRedisChet
+        # HAI VẾ, bắt buộc — cùng lý lẽ với `QuanlySseBackplaneChet`: `REDIS_URL` là `.optional()`
+        # (src/config.ts), tức chạy KHÔNG Redis là cấu hình hợp lệ, và một quy tắc kêu oan ở đó sẽ
+        # bị tắt trong tuần đầu.
+        #
+        # VÌ SAO KHÔNG DÙNG LẠI `QuanlySseBackplaneChet`: quy tắc ấy gác trên
+        # `sse_backplane_mode{mode="redis"}`, tức nó chỉ nói về BACKPLANE. Bản triển khai có
+        # REDIS_URL nhưng backplane chưa dựng xong (hoặc cố ý không dùng) vẫn xài Redis cho HÀNG ĐỢI
+        # và RATE-LIMIT — Redis chết ở đó thì job nền và giới hạn tần suất phân tán đều hỏng, mà quy
+        # tắc kia im lặng hoàn toàn. (Phiên đăng nhập thì KHÔNG dính: kho phiên là connect-pg-simple
+        # → bảng user_sessions trong Postgres. Redis chết không đăng xuất ai cả.)
+        expr: redis_configured == 1 and on(instance, job) redis_up == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "Redis không tới được từ {{ $labels.instance }}"
+          description: >-
+            Tiến trình có REDIS_URL nhưng không kết nối Redis nào ở trạng thái ready. Hệ quả THẬT:
+            rate-limit phân tán rơi về bộ đếm trong tiến trình → giới hạn tần suất không còn dùng
+            chung giữa các instance; job BullMQ không đẩy được; SSE giữa các instance mất đồng bộ.
+            KHÔNG ai bị đăng xuất — kho phiên là connect-pg-simple trên Postgres, không phải Redis.
+          runbook: "src/queue.ts — getRedis/getRateLimitRedis; src/rateLimit.ts"
+
+      - alert: QuanlyDiaSapDay
+        # Không viết cứng "còn dưới N GB": mẫu số `disk_total_bytes` do chính app phát ra, nên
+        # ngưỡng theo TỈ LỆ và đổi ổ đĩa không làm quy tắc sai — cùng khuôn với
+        # `export_max_queue_depth` ở nhóm xuất file.
+        expr: disk_free_bytes / disk_total_bytes < 0.10
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hệ tệp {{ $labels.mountpoint }} trên {{ $labels.instance }} còn dưới 10% trống"
+          description: >-
+            Đây là cảnh báo MẤT DỮ LIỆU, không phải cảnh báo hiệu năng: docker-compose.prod.yml ghi
+            rõ chế độ hỏng — đĩa đầy thì Postgres không ghi nổi WAL nữa. Nguồn tiêu đĩa đã biết:
+            log JSON của Docker (đã chặn ở 50MB/container), volume pgdata, và file tạm của đường
+            xuất Excel/PDF.
+          runbook: "docker-compose.prod.yml — x-logging; docs/operations/DISASTER_RECOVERY.md"
 
   # ── Nhóm 2: realtime (SSE) ───────────────────────────────────────────────
   - name: quanly.sse

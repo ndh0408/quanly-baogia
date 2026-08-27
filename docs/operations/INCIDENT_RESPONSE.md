@@ -96,7 +96,7 @@ docker logs quanly-app | grep -i "kho object"
 ## Người dùng bị 403 CSRF hàng loạt sau khi deploy
 
 Mong đợi **trong thời gian rất ngắn**: phiên tạo trước khi có tính năng CSRF chưa
-có bí mật, nên request ghi đầu tiên trả `csrf_token_missing`. Cả hai SPA **tự lấy
+có bí mật, nên request ghi đầu tiên trả `csrf_token_missing`. SPA React **tự lấy
 mã mới và thử lại một lần**, nên người dùng không thấy gì.
 
 Nếu 403 vẫn kéo dài:

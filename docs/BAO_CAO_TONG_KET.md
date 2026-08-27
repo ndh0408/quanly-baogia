@@ -15,10 +15,10 @@ lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
 **Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 34 khẳng định, gồm dựng + smoke image
-Docker thật, smoke giao diện Chromium 17 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
+Docker thật, smoke giao diện Chromium 18 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
-**1.380 bài backend + 210 bài web**.
+**1.380 bài backend + 251 bài web** (số backend đo lúc chốt vòng 1 — xem mục J).
 
 **Điều đáng nói nhất không phải các bản vá — mà là ba lỗi mà chính việc viết cổng kiểm mới lộ ra:**
 
@@ -231,9 +231,9 @@ npm run verify                     # 13 bước · 34 khẳng định · TẤT C
 
 | Lệnh | Kết quả |
 |---|---|
-| `npx vitest run` (backend) | **176 tệp · 1 380 bài xanh · 4 bỏ qua** |
-| `npx vitest run` trong `web/` | **19 tệp · 210 bài xanh** |
-| `npm run smoke:ui` | **17/17 bước xanh** · 0 lỗi console · 0 request hỏng ở origin của mình |
+| `npx vitest run` (backend) | **177 tệp** (đếm bằng `find tests -name '*.test.js'`) · **1 380 bài xanh · 4 bỏ qua** — số BÀI đo lúc chốt vòng 1; vòng soát 2026-08-27 thêm tệp `tests/xf-observability-gaps.test.js` nên số thật nay cao hơn, chưa đo lại được vì máy soát không có PostgreSQL |
+| `npx vitest run` trong `web/` | **21 tệp · 251 bài xanh** (environment `node`, KHÔNG jsdom — `web/vite.config.ts` không khai khối `test`) |
+| `npm run smoke:ui` | **18/18 bước xanh** · 0 lỗi console · 0 request hỏng ở origin của mình |
 | `bash scripts/ci/docker-smoke.sh` | image dựng + chạy thật, **0 dòng stack trong log khởi động** |
 | `npm run scan` | gitleaks (lịch sử + cây làm việc) · trivy · semgrep · SBOM |
 | `npm run db:explain` | không truy vấn nào quét tuần tự bảng ≥1.000 dòng |

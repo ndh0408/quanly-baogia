@@ -22,8 +22,10 @@ npm run dev                   # API tại :3000 (tsx watch)
 npm --prefix web run dev      # SPA React (Vite dev server) — tiến trình RIÊNG
 ```
 
-`npm run dev` **chỉ chạy API**. Frontend React là tiến trình riêng. SPA cũ
-(`public/`) do chính API phục vụ ở `/app`, không cần build gì.
+`npm run dev` **chỉ chạy API**. Frontend React là tiến trình riêng. Chỉ còn
+**một** SPA: SPA vanilla cũ ở `public/js` (phục vụ tại `/app`) đã gỡ hẳn
+2026-08-26 — xem [ADR 0006](../adr/0006-go-spa-vanilla-cu.md). Bản React đã build
+nằm ở `public/app2/` và do chính API phục vụ ở `/`.
 
 Nếu để `ADMIN_PASSWORD` trống, seed sinh mật khẩu mạnh và ghi ra
 `.admin-credentials.local` (đã gitignore).
@@ -32,8 +34,8 @@ Nếu để `ADMIN_PASSWORD` trống, seed sinh mật khẩu mạnh và ghi ra
 
 | Service | Cổng | Dùng để |
 |---|---|---|
-| postgres | 5432 | CSDL chính |
-| redis | 6379 | phiên, hàng đợi, rate-limit, kênh SSE |
+| postgres | 5432 | CSDL chính — **và kho phiên đăng nhập** (`connect-pg-simple`, bảng `user_sessions`) |
+| redis | 6379 | hàng đợi BullMQ, rate-limit, kênh Pub/Sub của SSE — **không giữ phiên** |
 | minio | 9000 (console 9001) | kho object — **ảnh chứng từ thanh toán cần cái này** |
 | mailhog | 1025 (UI 8025) | bắt email gửi đi, không gửi ra ngoài thật |
 
@@ -103,7 +105,7 @@ DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
 động; `tests/setup.js` tự tạo cho test. Chạy tay thì kiểm MinIO đã lên chưa.
 
 **Thao tác ghi trả 403 `csrf_token_missing`** — client chưa gửi `X-CSRF-Token`.
-Cả hai SPA tự lo; nếu gọi API bằng curl thì lấy mã ở `GET /api/csrf-token` (hoặc
+SPA React tự lo; nếu gọi API bằng curl thì lấy mã ở `GET /api/csrf-token` (hoặc
 dùng Bearer, được miễn).
 
 **Sửa `web/src` mà trình duyệt không thấy đổi** — chạy lại `npm run build:web`.

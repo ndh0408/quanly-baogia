@@ -11,7 +11,10 @@ Mọi tài liệu ĐANG HIỆU LỰC nằm trong thư mục này. Tài liệu l�
 | Bạn là ai / cần gì | Đọc theo thứ tự |
 |---|---|
 | Mới vào dự án | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) → [development/SETUP.md](development/SETUP.md) → [product/FEATURES.md](product/FEATURES.md) |
-| Sắp sửa code | [development/SETUP.md](development/SETUP.md) → [development/TESTING.md](development/TESTING.md) → [../AGENTS.md](../AGENTS.md) |
+| Sắp sửa code | [development/SETUP.md](development/SETUP.md) → [development/CODING_GUIDELINES.md](development/CODING_GUIDELINES.md) → [development/TESTING.md](development/TESTING.md) → [../AGENTS.md](../AGENTS.md) |
+| Cần biết dữ liệu chạy đường nào | [architecture/DATA_FLOW.md](architecture/DATA_FLOW.md) → [architecture/diagrams/](architecture/diagrams/) |
+| Sắp đụng CSDL / viết migration | [development/DATABASE.md](development/DATABASE.md) → [../prisma/migrations/README.md](../prisma/migrations/README.md) |
+| Cần hiểu nghiệp vụ báo giá | [product/QUOTE_WORKFLOW.md](product/QUOTE_WORKFLOW.md) → [product/ROLES_PERMISSIONS.md](product/ROLES_PERMISSIONS.md) |
 | Sắp deploy | [operations/DEPLOYMENT.md](operations/DEPLOYMENT.md) |
 | Đang có sự cố | [operations/INCIDENT_RESPONSE.md](operations/INCIDENT_RESPONSE.md) |
 | Mất dữ liệu / phải khôi phục | [operations/DISASTER_RECOVERY.md](operations/DISASTER_RECOVERY.md) |
@@ -27,13 +30,23 @@ docs/
 │
 ├── architecture/     hệ thống ghép lại thế nào, và vì sao
 │   ├── ARCHITECTURE.md
+│   ├── DATA_FLOW.md              request · SSE · đường lưu báo giá · đường xuất file
 │   ├── SECURITY_MODEL.md
 │   ├── TECHNOLOGY_DECISIONS.md   giữ / nâng / thay / hoãn — kèm lý do và rủi ro migration
 │   ├── QUOTE_SAVE_PERFORMANCE.md đo trước/sau đường lưu báo giá
-│   └── API_VERSIONING.md         /api vs /api/v1 · chính sách ngừng hỗ trợ · chuẩn phân trang
+│   ├── API_VERSIONING.md         /api vs /api/v1 · chính sách ngừng hỗ trợ · chuẩn phân trang
+│   └── diagrams/                 sơ đồ mermaid (GitHub tự render)
+│       ├── request-lifecycle.md
+│       ├── quote-save.md
+│       ├── quote-lifecycle.md
+│       ├── export-paths.md
+│       ├── realtime-sse.md
+│       └── data-model.md
 │
 ├── development/      làm việc trên mã nguồn
 │   ├── SETUP.md
+│   ├── CODING_GUIDELINES.md      quy ước THẬT của repo — Decimal, zod v4, ranh giới tầng, đặt tên
+│   ├── DATABASE.md               bảng chính · searchText/trgm · bẫy làm mất index
 │   └── TESTING.md
 │
 ├── operations/       vận hành nó
@@ -46,6 +59,7 @@ docs/
 │
 ├── product/          nó LÀM gì và ai được làm gì
 │   ├── FEATURES.md
+│   ├── QUOTE_WORKFLOW.md   vòng đời báo giá: bốn trục trạng thái, ai đổi được trục nào
 │   └── ROLES_PERMISSIONS.md
 │
 ├── adr/              các quyết định kiến trúc, kèm lý do

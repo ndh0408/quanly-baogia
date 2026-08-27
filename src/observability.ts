@@ -2,6 +2,7 @@
 // so the app boots cleanly in dev without any external services.
 
 import { createHash, timingSafeEqual } from "node:crypto";
+import { statfs } from "node:fs/promises";
 import * as Sentry from "@sentry/node";
 import type { Request, Response, NextFunction } from "express";
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
@@ -231,6 +232,216 @@ export const sseBackplaneErrors = new Counter({
   registers: [registry],
 });
 
+// ── HAI SỐ SSE MÀ §18 ĐÒI ĐÍCH DANH ─────────────────────────────────────────
+//
+// §18 gọi tên ba số: `sse_connections`, `sse_reconnects`, `sse_events`. Repo đã có `sse_clients`
+// (ĐÚNG NGHĨA `sse_connections` — số kết nối đang mở), và đổi tên nó là thay đổi PHÁ VỠ với bảng
+// điều khiển + quy tắc cảnh báo đang dùng, nên giữ nguyên tên cũ; quan hệ tên được ghi ở
+// docs/operations/MONITORING.md. Hai số dưới đây trước bản vá này KHÔNG TỒN TẠI (grep toàn repo rỗng).
+//
+// TÊN KHÔNG CÓ HẬU TỐ `_total` LÀ CÓ CHỦ Ý, không phải quên: quy ước Prometheus muốn `_total` cho
+// counter, nhưng §18 chỉ đích danh hai chuỗi này và người soát sẽ grep đúng chúng. Đổi thành
+// `sse_events_total` là lại đẻ ra một cặp tên-spec / tên-thật thứ hai, đúng thứ khối chú thích trên
+// vừa nói là phải tránh.
+export const sseReconnects = new Counter({
+  name: "sse_reconnects",
+  help: "Số lần một tài khoản NỐI LẠI SSE sau khi vừa rớt hết kết nối (xem SSE_RECONNECT_WINDOW_MS ở src/sse.ts)",
+  registers: [registry],
+});
+export const sseEvents = new Counter({
+  name: "sse_events",
+  help: "Số KHUNG sự kiện SSE ghi thành công xuống một kết nối trong tiến trình này (keepalive KHÔNG tính)",
+  // Nhãn `event` được CHUẨN HOÁ về một tập hữu hạn ở src/sse.ts (`nhanSuKien`) — `publish`/
+  // `broadcast` là hàm export, nên nếu lấy thẳng tham số làm nhãn thì một chỗ gọi mới đặt tên động
+  // sẽ làm nổ cardinality của Prometheus.
+  labelNames: ["event"],
+  registers: [registry],
+});
+
+// === SỨC KHOẺ PHỤ THUỘC: CSDL · REDIS · ĐĨA ===
+//
+// ── VÌ SAO PHẢI CÓ ─────────────────────────────────────────────────────────
+// §28 đòi cảnh báo cho ba chế độ hỏng mà trước bản vá này KHÔNG có metric nào bắt được:
+//
+//   · CSDL chết   — `/readyz` biết, nhưng /readyz là một endpoint HTTP, không phải chuỗi số liệu.
+//                   Prometheus không hỏi /readyz, nên "app còn sống mà CSDL chết" là mù hoàn toàn:
+//                   `up` vẫn 1 (tiến trình trả /metrics bình thường), 5xx chỉ tăng khi CÓ người
+//                   dùng đang bấm — ban đêm thì im.
+//   · Redis chết  — quy tắc cũ (`QuanlySseBackplaneChet`) gác thêm vế
+//                   `sse_backplane_mode{mode="redis"}==1`, cố ý để không kêu oan ở bản một tiến
+//                   trình. Hệ quả KHÔNG cố ý: bản triển khai KHÔNG dùng backplane vẫn dùng Redis
+//                   cho HÀNG ĐỢI và RATE-LIMIT — Redis chết ở đó thì mọi quy tắc im lặng.
+//                   (Phiên đăng nhập KHÔNG nằm ở Redis: `connect-pg-simple` → bảng `user_sessions`
+//                   trong Postgres, xem src/app.ts. Redis chết không làm ai bị đăng xuất.)
+//   · Đĩa đầy     — không có metric nào. Mà docker-compose.prod.yml đã ghi rõ chế độ hỏng: đĩa đầy
+//                   → Postgres không ghi nổi WAL → MẤT DỮ LIỆU. Đây là hạng nặng nhất trong thang
+//                   ưu tiên của repo, và nó là thứ duy nhất báo trước được hàng ngày.
+//
+// ── VÌ SAO ĐO LÚC SCRAPE, KHÔNG PHẢI setInterval ───────────────────────────
+// Y hệt lý lẽ ở `capNhatDoSauHangDoi` (src/queue.ts): `setInterval` sẽ chạy trong MỌI tiến trình
+// test nạp module này, rò handle và đập vào CSDL/Redis dù không ai đọc số. `collect()` của
+// prom-client được `registry.metrics()` AWAIT, nên đo tại đây là số luôn tươi và chỉ tốn khi có
+// người scrape thật.
+//
+// ── KHÔNG BAO GIỜ ĐƯỢC NÉM, KHÔNG BAO GIỜ ĐƯỢC TREO ────────────────────────
+// `collect()` ném là `registry.metrics()` ném là /metrics trả 500 — tức MỘT phụ thuộc chết làm mất
+// TOÀN BỘ số liệu, kể cả phần không dính gì tới nó. Nên mọi phép đo dưới đây đi qua `hanCho()`:
+// quá hạn hay ném đều thành `null`, và `null` được diễn giải riêng cho từng số (xem từng hàm).
+const SUCKHOE_TAT = process.env.HEALTH_METRICS === "0";
+const SUCKHOE_TTL_MS = Number(process.env.HEALTH_METRICS_TTL_MS) || 5_000;
+const SUCKHOE_HAN_MS = Number(process.env.HEALTH_METRICS_TIMEOUT_MS) || 2_000;
+/** Điểm gắn của hệ tệp cần theo dõi. Trong container prod đây là lớp ghi của chính container. */
+export const DISK_METRICS_PATH = process.env.DISK_METRICS_PATH || "/";
+
+export const dbUp = new Gauge({
+  name: "db_up",
+  help: "1 = Postgres trả lời `SELECT 1` ở lần scrape gần nhất; 0 = không trả lời (hoặc quá hạn)",
+  registers: [registry],
+  collect() { return capNhatSucKhoe(); },
+});
+/**
+ * Redis CÓ ĐƯỢC CẤU HÌNH hay không — TÁCH khỏi `redis_up`, đúng theo bài học của cặp
+ * `sse_backplane_up` / `sse_backplane_mode` ngay phía trên.
+ *
+ * Không tách thì quy tắc "Redis chết" sẽ kêu suốt ở bản triển khai một tiến trình cố ý chạy KHÔNG
+ * Redis (`REDIS_URL` là `.optional()` trong src/config.ts) — và một cảnh báo kêu oan là một cảnh
+ * báo sẽ bị tắt. Quy tắc đúng: `redis_configured == 1 and redis_up == 0`.
+ */
+export const redisConfigured = new Gauge({
+  name: "redis_configured",
+  help: "1 = tiến trình này được cấu hình REDIS_URL (hàng đợi BullMQ/rate-limit/backplane SSE — KHÔNG giữ phiên); 0 = cố ý chạy không Redis",
+  registers: [registry],
+  collect() { return capNhatSucKhoe(); },
+});
+export const redisUp = new Gauge({
+  name: "redis_up",
+  help: "1 = có ít nhất một kết nối Redis của tiến trình này ở trạng thái ready; 0 = không (chỉ có nghĩa khi redis_configured=1)",
+  registers: [registry],
+  collect() { return capNhatSucKhoe(); },
+});
+export const diskFreeBytes = new Gauge({
+  name: "disk_free_bytes",
+  help: "Số byte TRỐNG cho tiến trình thường trên hệ tệp DISK_METRICS_PATH (statfs bavail × bsize)",
+  labelNames: ["mountpoint"],
+  registers: [registry],
+  collect() { return capNhatSucKhoe(); },
+});
+export const diskTotalBytes = new Gauge({
+  name: "disk_total_bytes",
+  help: "Tổng dung lượng hệ tệp DISK_METRICS_PATH (statfs blocks × bsize) — MẪU SỐ để tính tỉ lệ trống",
+  labelNames: ["mountpoint"],
+  registers: [registry],
+  collect() { return capNhatSucKhoe(); },
+});
+
+/** Chờ `p` tối đa `ms`; quá hạn HOẶC `p` ném đều trả `null`. Không bao giờ ném. */
+function hanCho<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((tra) => {
+    const h = setTimeout(() => tra(null), ms);
+    (h as unknown as { unref?: () => void }).unref?.();
+    p.then(
+      (v) => { clearTimeout(h); tra(v); },
+      () => { clearTimeout(h); tra(null); }
+    );
+  });
+}
+
+async function doCsdl(): Promise<void> {
+  // `import()` ĐỘNG chứ không phải import tĩnh ở đầu file. Lý do KHÔNG phải vòng import — đã kiểm
+  // lại mã: src/db.ts chỉ import TĨNH PrismaClient/PrismaPg/Pool/logger/config, còn src/sse.ts thì
+  // nó nạp bằng import ĐỘNG (chỗ bắn SSE sau mỗi write), nên chẳng có vòng tĩnh nào để tránh cả.
+  // (Vòng THẬT nằm ở `doRedis` ngay dưới: src/queue.ts import TĨNH file này để lấy `bullQueueDepth`.)
+  //
+  // Lý do thật ở đây là TÁC DỤNG PHỤ LÚC NẠP MODULE của src/db.ts: file đó dựng `new Pool(...)`,
+  // `new PrismaPg(...)` rồi `new PrismaClient(...).$extends(...)` ngay ở cấp module. Import tĩnh
+  // sẽ kéo nguyên khối đó — cùng @prisma/client và pg — vào MỌI tiến trình và MỌI bài test chỉ nạp
+  // file này, dù chúng không bao giờ đọc /metrics. Động thì db.ts chỉ vào đồ thị module khi có
+  // người scrape thật, và với `HEALTH_METRICS=0` thì không bao giờ vào.
+  //
+  // Cả hai tiến trình mở /metrics (src/app.ts, src/worker.ts) đều đã `import { prisma } from
+  // "./db.js"` ở đầu file, nên ở đó đây LUÔN là một lượt tra bộ nhớ đệm module, không phải một
+  // lượt dựng PrismaClient mới.
+  const ok = await hanCho(
+    (async () => {
+      const { prisma } = await import("./db.js");
+      await prisma.$queryRaw`SELECT 1`;
+      return true;
+    })(),
+    SUCKHOE_HAN_MS
+  );
+  // Quá hạn ĐƯỢC TÍNH LÀ CHẾT, khác hẳn cách `capNhatDoSauHangDoi` xử lý độ sâu hàng đợi (ở đó
+  // "không đo được" giữ giá trị cũ). Lý do: `SELECT 1` mà không xong trong 2 giây thì với người
+  // dùng, CSDL đã hỏng rồi — mọi request đều đang xếp hàng sau nó.
+  dbUp.set(ok ? 1 : 0);
+}
+
+async function doRedis(): Promise<void> {
+  if (!config.REDIS_URL) {
+    redisConfigured.set(0);
+    redisUp.set(0);
+    return;
+  }
+  redisConfigured.set(1);
+  const ok = await hanCho(
+    (async () => {
+      const q = await import("./queue.js");
+      // KHÔNG gửi lệnh PING. Kết nối của BullMQ đặt `maxRetriesPerRequest: null` (src/queue.ts),
+      // tức lệnh xếp hàng VÔ HẠN khi Redis chết — mỗi lượt scrape sẽ bỏ lại một PING trong hàng đợi
+      // ngoại tuyến và chúng tích lại hàng nghìn qua một đêm sự cố. `status` của ioredis là thuộc
+      // tính đọc tại chỗ, không tốn gì, và nó chỉ bằng "ready" khi kết nối THẬT SỰ dùng được.
+      if (q.isRateLimitRedisReady()) return true;
+      const c = q.getRedis() as { status?: string } | null;
+      return !!c && c.status === "ready";
+    })(),
+    SUCKHOE_HAN_MS
+  );
+  redisUp.set(ok ? 1 : 0);
+}
+
+async function doDia(): Promise<void> {
+  const st = await hanCho(statfs(DISK_METRICS_PATH), SUCKHOE_HAN_MS);
+  // KHÔNG đặt 0 khi không đo được. `disk_free_bytes = 0` đọc thành "đĩa đầy" và sẽ kêu báo động
+  // giả trên mọi nền không có statfs. Không có số thì KHÔNG PHÁT chuỗi nào — `absent()` trung thực
+  // hơn một con số bịa.
+  if (!st) return;
+  const bsize = Number(st.bsize);
+  const tong = Number(st.blocks) * bsize;
+  const trong = Number(st.bavail) * bsize;
+  if (!Number.isFinite(tong) || tong <= 0 || !Number.isFinite(trong)) return;
+  diskTotalBytes.set({ mountpoint: DISK_METRICS_PATH }, tong);
+  diskFreeBytes.set({ mountpoint: DISK_METRICS_PATH }, trong);
+}
+
+let sucKhoeXong = 0;
+let sucKhoeDangChay: Promise<void> | null = null;
+
+/**
+ * Đo lại cả ba phụ thuộc, GỘP mọi lời gọi của cùng một lượt scrape thành MỘT lượt đo.
+ *
+ * `registry.metrics()` gọi `get()` của mọi metric song song qua `Promise.all`, nên năm gauge ở trên
+ * cùng gọi hàm này trong cùng một tick. Không gộp thì mỗi lượt scrape đo CSDL năm lần. Gộp bằng
+ * promise-đang-bay (không chỉ bằng mốc thời gian) mới đúng: chúng chạy đồng thời, mốc thời gian
+ * chưa kịp cập nhật thì cả năm đều thấy "cache hết hạn".
+ */
+export function capNhatSucKhoe(): Promise<void> {
+  if (SUCKHOE_TAT) return Promise.resolve();
+  if (sucKhoeDangChay) return sucKhoeDangChay;
+  if (Date.now() - sucKhoeXong < SUCKHOE_TTL_MS) return Promise.resolve();
+  const chay = (async () => {
+    try {
+      await Promise.all([doCsdl(), doRedis(), doDia()]);
+    } catch {
+      // Không thể tới đây (mọi phép đo đã đi qua `hanCho`), nhưng `collect()` ném là /metrics trả
+      // 500 — chốt chặn cuối rẻ hơn nhiều so với hậu quả.
+    } finally {
+      sucKhoeXong = Date.now();
+      sucKhoeDangChay = null;
+    }
+  })();
+  sucKhoeDangChay = chay;
+  return chay;
+}
+
 // === Cổng xuất file (Excel/PDF) ===
 // Không có mấy số này thì quá tải xuất file là một hộp đen: người dùng báo "chậm", còn hệ thống
 // không nói được là đang bận bao nhiêu, xếp hàng bao sâu, hay đã từ chối bao nhiêu lượt.
@@ -284,8 +495,10 @@ export const exportDuration = new Histogram({
 // Nhãn `state` lấy đúng tên trạng thái của BullMQ (waiting/active/delayed/failed/…), là tập HỮU HẠN
 // và cố định nên cardinality bị chặn ở (số hàng đợi × số trạng thái).
 //
-// CHƯA KIỂM CHỨNG Ở PRODUCTION: bộ số này mới chỉ được đo qua Redis cục bộ trong test. Prod hiện
-// chạy docker-compose và KHÔNG có Prometheus nào scrape — xem docs/REMAINING_RISKS.md.
+// CHƯA KIỂM CHỨNG Ở PRODUCTION: bộ số này mới chỉ được đo qua Redis cục bộ trong test. Repo NAY đã
+// có định nghĩa Prometheus (infra/observability/ — service `prometheus` scrape cả app lẫn worker),
+// nhưng ngăn xếp đó KHÔNG bật mặc định, nên vẫn chưa có chuỗi số liệu production nào để đối chiếu.
+// Xem docs/REMAINING_RISKS.md và infra/observability/README.md.
 export const bullQueueDepth = new Gauge({
   name: "bullmq_jobs",
   help: "Số job trong mỗi hàng đợi BullMQ, tách theo trạng thái",

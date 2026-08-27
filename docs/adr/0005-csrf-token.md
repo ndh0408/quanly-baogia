@@ -1,6 +1,9 @@
 # ADR 0005 — CSRF: token đồng bộ hoá, không chỉ dựa vào Origin
 
 **Trạng thái:** đã chấp nhận · **Ngày:** 2026-08
+> **Lưu ý đọc sau này:** câu "cả hai SPA" trong thân bài là đúng TẠI THỜI ĐIỂM ký.
+> SPA vanilla đã được gỡ ngày 2026-08-26 — xem [ADR 0006](0006-go-spa-vanilla-cu.md).
+> Thân bài giữ nguyên vì ADR là biên bản, không phải tài liệu sống.
 
 ## Bối cảnh
 
