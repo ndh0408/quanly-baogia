@@ -49,6 +49,35 @@ export function isRateLimitRedisReady() {
   return !!rlConnection && rlConnection.status === "ready";
 }
 
+// ── CỬA SỔ KHỞI ĐỘNG CỦA KẾT NỐI RATE-LIMIT ─────────────────────────────────
+// `rate-limit-redis` nạp hai script Lua bằng `SCRIPT LOAD` NGAY trong `new RedisStore(...)` →
+// `rateLimit(...)` → `store.init()`. Ở production, `createApp()` dựng 15 limiter TRƯỚC khi ioredis
+// nối xong, mà kết nối này cố ý đặt `enableOfflineQueue: false` (trượt nhanh, không xếp hàng) →
+// mỗi limiter ném một lỗi và express-rate-limit in nguyên vết stack.
+//
+// ĐO ĐƯỢC trong container production (scripts/ci/docker-smoke.sh): 15 vết stack mỗi lần khởi động.
+// KHÔNG hỏng chức năng — `retryableIncrement`/`get` của rate-limit-redis bắt lỗi EVALSHA rồi tự nạp
+// lại script ở lần dùng đầu tiên. Nhưng 15 vết stack ở đầu mỗi log khởi động thì che mất lỗi thật,
+// và ai đọc log sẽ tưởng rate-limit đang hỏng.
+//
+// Hàm này cho ĐÚNG lượt lệnh đầu tiên được chờ kết nối lên. Mọi lệnh sau vẫn trượt nhanh y như cũ —
+// xem `sendCommand` trong src/rateLimit.ts, nơi promise này được dùng đúng một lần rồi bỏ.
+let rlChoSanSang: Promise<void> | null = null;
+export function rateLimitRedisSanSang(hanMs = 3000): Promise<void> {
+  if (rlChoSanSang) return rlChoSanSang;
+  const c = getRateLimitRedis();
+  if (!c) return Promise.resolve();
+  rlChoSanSang = new Promise<void>((xong) => {
+    if (c.status === "ready") return xong();
+    // `unref()` để một Redis không bao giờ lên KHÔNG giữ tiến trình sống (CLI, script một lượt).
+    const het = setTimeout(() => { c.off("ready", len); xong(); }, hanMs);
+    if (typeof het.unref === "function") het.unref();
+    const len = () => { clearTimeout(het); xong(); };
+    c.once("ready", len);
+  });
+  return rlChoSanSang;
+}
+
 export function isQueueEnabled() {
   return !!config.REDIS_URL;
 }

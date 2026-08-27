@@ -476,8 +476,6 @@ export function createApp() {
     },
   }));
   const sendReact = (res: Response) => { res.setHeader("Cache-Control", "no-cache"); res.sendFile(path.join(__dirname, "..", "public", "app2", "index.html")); };
-  // App React tại /app2 (đường dẫn lịch sử — asset build ra đó nên giữ nguyên) và tại gốc "/".
-  //
   // SPA CŨ (vanilla ES module ở public/js) ĐÃ GỠ HẲN 2026-08-26. Từ 2026-07-06 gốc "/" đã phục vụ
   // React cho mọi môi trường, còn /app chỉ còn là đường lui KHÔNG ai đi tới: React không có một
   // liên kết nào trỏ về đó. Nhưng nó vẫn CHẠY được với cùng cookie phiên và cùng API, và mang theo
@@ -487,8 +485,24 @@ export function createApp() {
   //   2. Payload sheet không có `id` → updateQuote phải ghép theo VỊ TRÍ; thêm/xoá/đổi thứ tự sheet
   //      là SHEET_CARRY_FIELDS (số hoá đơn, ngày thanh toán, chữ ký, duyệt khách) bê nhầm hoặc mất.
   // Vá code sắp xoá là lãng phí; gỡ hẳn đóng luôn cả hai đường. Xem docs/adr/.
-  app.get(["/app2", "/app2/*"], (_req, res) => sendReact(res));
-  app.get("*", (_req, res) => sendReact(res));
+  // ── FILE TĨNH KHÔNG CÓ THẬT PHẢI TRẢ 404, KHÔNG PHẢI index.html ────────────
+  // `express.static` ở trên chỉ phục vụ file CÓ THẬT; thiếu file thì rơi xuống hai route dưới và
+  // chúng trả index.html kèm 200 + Content-Type: text/html cho MỌI đường dẫn — kể cả
+  // `/app2/assets/index-<hash>.js`. Trình duyệt nhận HTML ở chỗ nó chờ JavaScript và ném
+  // "Unexpected token '<'": màn hình trắng, thông báo không dính dáng gì tới nguyên nhân thật.
+  // (Đo được bằng scripts/ci/ui-smoke.mjs: giấu public/app2/assets đi thì ra đúng như vậy.)
+  //
+  // Route SPA ở đây định tuyến bằng HASH (`#/list`, `#/quotes/:id`) nên phần đường dẫn máy chủ
+  // NHÌN THẤY không bao giờ có phần mở rộng file. Vì thế "có đuôi .xyz → 404" là chốt hẹp và an
+  // toàn: nó chỉ chạm vào đường dẫn tài nguyên tĩnh, không chạm route nào của ứng dụng.
+  const laDuongDanFile = (p: string) => /\.[a-z0-9]{1,8}$/i.test(p);
+  const spa = (req: Request, res: Response) => {
+    if (laDuongDanFile(req.path)) return res.status(404).type("txt").send("Not Found");
+    return sendReact(res);
+  };
+  // App React tại /app2 (đường dẫn lịch sử — asset build ra đó nên giữ nguyên) và tại gốc "/".
+  app.get(["/app2", "/app2/*"], spa);
+  app.get("*", spa);
 
   app.use(errorHandler);
 

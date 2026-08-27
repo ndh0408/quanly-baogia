@@ -112,3 +112,6 @@ ui-rc-shots/
 # Nó chứa dữ liệu phiên + job hàng đợi của lượt chạy — không phải mã nguồn, và không được lên Git.
 dump.rdb
 *.rdb
+
+# Ảnh màn hình khi scripts/ci/ui-smoke.mjs đỏ — vật phẩm gỡ lỗi, không phải mã nguồn.
+.ui-smoke/

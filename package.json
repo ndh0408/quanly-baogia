@@ -23,6 +23,8 @@
     "setup": "prisma migrate deploy && node prisma/seed.js",
     "verify": "bash scripts/verify-local.sh",
     "verify:nhanh": "bash scripts/verify-local.sh --nhanh",
+    "smoke:image": "bash scripts/ci/docker-smoke.sh",
+    "smoke:ui": "node scripts/ci/ui-smoke.mjs",
     "test:toast": "DO_TOAST_MEASURE=1 vitest run tests/b2-update-quote-no-image-read.test.js && DO_TOAST_MEASURE=1 vitest run tests/db3-snapshot-no-images.test.js",
     "test": "vitest",
     "test:run": "vitest run",
@@ -42,7 +44,8 @@
     "proof:migrate": "node --import tsx scripts/migration/payment-proof-migrate.mjs",
     "proof:migrate:dry": "node --import tsx scripts/migration/payment-proof-migrate.mjs --dry-run",
     "proof:verify": "node --import tsx scripts/migration/payment-proof-migrate.mjs --verify",
-    "check:refs": "node scripts/ci/check-line-refs.mjs"
+    "check:refs": "node scripts/ci/check-line-refs.mjs",
+    "check:helm": "node scripts/ci/check-helm.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -103,6 +106,7 @@
     "globals": "^17.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
+    "playwright": "^1.62.1",
     "prettier": "^3.9.4",
     "supertest": "^7.2.2",
     "typescript": "^5.7.2",

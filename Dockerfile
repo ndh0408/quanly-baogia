@@ -1,13 +1,20 @@
 # syntax=docker/dockerfile:1.7
-# NOTE: pin the base image by digest in production for reproducible builds, e.g.
-#   FROM node:22-alpine@sha256:<digest> AS deps
-# (kept as a tag here so local builds don't break on an unknown digest).
+# ── ẢNH NỀN LÀ MỘT THAM SỐ ──────────────────────────────────────────────────
+# Mặc định là TAG để bản clone nào cũng build được ngay. Production nên GHIM THEO DIGEST cho
+# build tái lập được — nay ghim bằng tham số, không phải sửa file:
+#
+#   docker build --build-arg NODE_IMAGE=node:22-alpine@sha256:<digest> .
+#
+# Tham số này còn là đường để `scripts/ci/docker-smoke.sh` chèn một ảnh nền có sẵn CA của proxy
+# MITM khi máy build nằm sau proxy đó (xem chú thích trong script). CA KHÔNG được nướng vào
+# Dockerfile: nó là chuyện của MỘT môi trường build, không phải của image.
+ARG NODE_IMAGE=node:22-alpine
 
 ##### deps stage — PRODUCTION-ONLY deps + generated Prisma client #####
 # `prisma` (the migrate CLI) is a runtime dependency in this project because
 # k8s/helm/compose run `prisma migrate deploy` on startup, so --omit=dev keeps it
 # while dropping eslint/vitest/supertest/coverage from the image.
-FROM node:22-alpine AS deps
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
@@ -25,7 +32,7 @@ RUN apk add --no-cache openssl libc6-compat \
 # Production KHÔNG còn chạy qua tsx. Xem tsconfig.build.json để biết vì sao rootDir phải là "src".
 # Cần dev deps (typescript) nên `npm ci` ĐẦY ĐỦ ở đây; tầng runtime chỉ lấy dist/, không lấy
 # node_modules của tầng này.
-FROM node:22-alpine AS build
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY package.json package-lock.json prisma.config.ts tsconfig.json tsconfig.build.json ./
 COPY prisma ./prisma
@@ -39,7 +46,7 @@ RUN npm run build \
  && test -f dist/server.js && test -f dist/worker.js && test -f dist/exportWorker.js && test -f dist/importWorker.js
 
 ##### web build stage — frontend React + Vite + TypeScript → public/app2 #####
-FROM node:22-alpine AS webbuild
+FROM ${NODE_IMAGE} AS webbuild
 WORKDIR /app
 COPY web ./web
 COPY shared ./shared
@@ -50,7 +57,7 @@ RUN cd web && npm ci && npm run build
 # vite outDir = ../public/app2 → ghi ra /app/public/app2
 
 ##### runtime stage — slim production image #####
-FROM node:22-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

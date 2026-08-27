@@ -29,9 +29,17 @@ vi.mock("../src/config.js", async (importOriginal) => {
 });
 
 const goiRedis = vi.fn();
+// ⚠️ MOCK NÀY PHẢI THEO KỊP src/queue.js. `createLimiter` bọc toàn bộ nhánh Redis trong try/catch và
+// khi bắt được thì RƠI ÊM về MemoryStore. Nên một export thiếu ở đây KHÔNG ném ra ngoài — nó biến
+// limiter Redis thành limiter bộ nhớ mà không ai thấy. Đúng chuyện vừa xảy ra: thêm
+// `rateLimitRedisSanSang` vào src/queue.js mà quên mock → bài "vẫn dùng kho Redis" ở cuối file đỏ,
+// và ĐÓ là bài duy nhất bắt được.
 vi.mock("../src/queue.js", () => ({
   isQueueEnabled: () => true,
   isRateLimitRedisReady: () => redisSanSang.value,
+  // Chờ kết nối lên MỘT lượt trước `SCRIPT LOAD` (xem chú thích trong src/rateLimit.ts).
+  // Ở đây kết nối là giả nên sẵn sàng ngay.
+  rateLimitRedisSanSang: () => Promise.resolve(),
   getRateLimitRedis: () => ({
     call: async (...args) => {
       goiRedis(...args);
@@ -63,9 +71,19 @@ describe("createLimiter khi Redis KHÔNG sẵn sàng", () => {
 
   it("không gọi Redis khi Redis đang chết (không treo request chờ lệnh trượt)", async () => {
     const app = dungApp(2);
-    goiRedis.mockClear(); // bỏ qua SCRIPT LOAD lúc dựng kho — chỉ quan tâm lệnh trên đường request
     await request(app).get("/thu");
-    expect(goiRedis).not.toHaveBeenCalled();
+    // LỌC THEO NỘI DUNG LỆNH, KHÔNG THEO THỜI ĐIỂM.
+    // Bản trước gọi `goiRedis.mockClear()` ngay sau `dungApp()` để bỏ hai lệnh `SCRIPT LOAD` của
+    // `store.init()`. Cách đó ngầm giả định init chạy ĐỒNG BỘ — đúng cho tới khi src/rateLimit.ts
+    // cho lượt lệnh đầu chờ kết nối lên (một microtask), lúc đó hai SCRIPT LOAD rơi SAU mockClear
+    // và bài này đỏ dù hành vi không đổi.
+    // Điều bài này thật sự muốn nói: ĐƯỜNG XỬ LÝ REQUEST không chạm Redis. `SCRIPT LOAD` là việc
+    // của lúc dựng kho, không phải của request — nên loại nó ra theo TÊN LỆNH.
+    const tren_request = goiRedis.mock.calls.filter((c) => c[0] !== "SCRIPT");
+    expect(
+      tren_request,
+      `Redis chết mà request vẫn bắn lệnh: ${JSON.stringify(tren_request)}`,
+    ).toEqual([]);
   });
 
   it("bộ đếm dự phòng tính RIÊNG từng limiter (prefix khác nhau không dùng chung quota)", async () => {

@@ -7,7 +7,7 @@
 import rateLimit from "express-rate-limit";
 import type { Request, Response, NextFunction } from "express";
 import { RedisStore } from "rate-limit-redis";
-import { getRateLimitRedis, isRateLimitRedisReady, isQueueEnabled } from "./queue.js";
+import { getRateLimitRedis, isRateLimitRedisReady, isQueueEnabled, rateLimitRedisSanSang } from "./queue.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -43,10 +43,25 @@ export function createLimiter(prefix: string, options: Partial<import("express-r
         // chuyển sang một limiter dự phòng dùng MemoryStore khi Redis chết. Per-process nên nếu sau
         // này chạy nhiều instance thì trần bị nhân lên theo số instance — vẫn tốt hơn vô hạn, và
         // production hiện chỉ có MỘT container app nên gần như không mất độ chính xác.
+        // LƯỢT LỆNH ĐẦU TIÊN ĐƯỢC CHỜ KẾT NỐI LÊN, mọi lượt sau trượt nhanh như cũ.
+        //
+        // `new RedisStore(...)` → `store.init()` bắn ngay hai lệnh `SCRIPT LOAD`, mà lúc `createApp()`
+        // dựng 15 limiter thì ioredis chưa nối xong và kết nối này cố ý KHÔNG xếp hàng ngoại tuyến →
+        // 15 vết stack ở đầu mỗi log khởi động production (đo trong scripts/ci/docker-smoke.sh).
+        //
+        // Chờ ở đây KHÔNG làm chậm đường xử lý request: handler bên dưới chỉ gọi `limiterRedis` khi
+        // `isRateLimitRedisReady()` đã đúng, nên `cho` luôn đã được tiêu thụ và gán null từ lúc khởi
+        // động. Nếu Redis không bao giờ lên thì promise tự hết hạn sau 3s và hành vi y như trước.
+        let cho: Promise<void> | null = rateLimitRedisSanSang();
         const limiterRedis = rateLimit({
           ...opts,
           store: new RedisStore({
-            sendCommand: (...args: string[]) => client.call(...args),
+            sendCommand: async (...args: string[]) => {
+              // `await` TRƯỚC rồi mới gán null: `store.init()` bắn HAI `SCRIPT LOAD` song song, nếu
+              // gán null trước thì lượt thứ hai thấy null và đi thẳng — đúng lỗi vừa vá, chỉ bớt một vết.
+              if (cho) { await cho; cho = null; }
+              return client.call(...args);
+            },
             prefix: `rl:${prefix}:`,
           }),
         });

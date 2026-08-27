@@ -4,7 +4,7 @@
 #
 #   bash scripts/verify-local.sh          # chạy hết
 #   bash scripts/verify-local.sh --nhanh  # bỏ qua TEST WEB + BUILD WEB (vòng lặp sửa nhanh).
-#                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/9] phụ
+#                                         # Build BACKEND vẫn chạy ở [2b] — bước test [4/12] phụ
 #                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
 # ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ do=0
 buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
 
-buoc "[0/9] Hạ tầng"
+buoc "[0/12] Hạ tầng"
 # `--noproxy '*'`: máy dev đặt HTTPS_PROXY thì curl tới 127.0.0.1 trả 000 và ta chẩn đoán nhầm.
 pg_isready -q 2>/dev/null;                                          ket $? "Postgres (nếu đỏ: pg_ctlcluster 16 main start)"
 redis-cli ping >/dev/null 2>&1;                                     ket $? "Redis (nếu đỏ: redis-server --daemonize yes)"
@@ -97,7 +97,7 @@ curl -fsS --noproxy '*' -o /dev/null "$S3_ENDPOINT/minio/health/live" 2>/dev/nul
 ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data --address :9000)"
 [ "$do" -eq 0 ] || { printf '\n\033[31mDỪNG: thiếu hạ tầng. Chạy tiếp cũng chỉ ra một dòng "skipped" trông như xanh.\033[0m\n'; exit 1; }
 
-buoc "[1/9] Prisma client + migrate"
+buoc "[1/12] Prisma client + migrate"
 npx prisma generate >/dev/null 2>&1;                                ket $? "prisma generate"
 npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "prisma migrate deploy"
 
@@ -107,11 +107,11 @@ npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "pris
 # bảng và con số nhảy → đỏ vì lý do sai. Nên chúng nằm sau cờ DO_TOAST_MEASURE=1.
 # Không có CI thì một bài opt-in là một bài KHÔNG BAO GIỜ CHẠY Ở ĐÂU — nên chạy ngay ở đây.
 #
-# VỊ TRÍ LÀ CÓ CHỦ Ý: TRƯỚC bước [4/9], không phải sau. Đặt sau bộ đầy đủ thì vẫn đỏ (đã thử):
+# VỊ TRÍ LÀ CÓ CHỦ Ý: TRƯỚC bước [4/12], không phải sau. Đặt sau bộ đầy đủ thì vẫn đỏ (đã thử):
 # Postgres dồn thống kê theo lô, nên hoạt động của 161 file vừa chạy còn đang chảy về
 # pg_statio_all_tables trong lúc bài này đo. Chạy ở đây, ngay sau `migrate deploy`, CSDL còn yên.
 # ĐỪNG chuyển xuống dưới cho "gọn nhóm test" — đó đúng là cách làm nó đỏ lại.
-buoc "[1b/9] Bài đo TOAST (chạy riêng, CSDL còn yên)"
+buoc "[1b/12] Bài đo TOAST (chạy riêng, CSDL còn yên)"
 # HAI LỆNH RIÊNG, KHÔNG GỘP MỘT LỆNH. Cả hai file đều đọc ảnh hạng mục của CHÍNH bảng QuoteItem;
 # gộp lại thì vitest chạy chúng SONG SONG và chúng tự nhiễu nhau — đúng nguồn nhiễu mà cờ này sinh
 # ra để tránh. ĐÃ THỬ: gộp một lệnh → db3 đỏ với "TOAST nhảy 3637 block" (ngưỡng 100).
@@ -120,39 +120,39 @@ ket $? "vitest đo TOAST — b2 (DO_TOAST_MEASURE=1)"
 DO_TOAST_MEASURE=1 npx vitest run tests/db3-snapshot-no-images.test.js
 ket $? "vitest đo TOAST — db3 (DO_TOAST_MEASURE=1)"
 
-buoc "[2/9] Typecheck"
+buoc "[2/12] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
 (cd web && npx tsc --noEmit -p tsconfig.json);                      ket $? "tsc (web)"
 
 # ── BUILD PHẢI ĐỨNG TRƯỚC TEST ──────────────────────────────────────────────
 # tests/pii-rotate-safety.test.js chạy `node dist/tools/piiRotate.js` — một artifact BIÊN DỊCH.
-# Trước đây build nằm ở bước [6/9], tức SAU test: bộ test kiểm bản dist/ của LẦN CHẠY TRƯỚC.
+# Trước đây build nằm CHUNG với bước build web, tức SAU test: bộ test kiểm dist/ của LẦN CHẠY TRƯỚC.
 # ĐO ĐƯỢC: xoá sạch src/tools/piiRotate.ts còn đúng `export {};` rồi chạy file test đó →
 # 8/9 bài VẪN XANH (chỉ bài đọc thẳng mã nguồn là đỏ). Bốn bài chạy `node dist/...` không hề biết
 # mã nguồn đã biến mất.
 # Đây là hình dạng tệ nhất của lỗi ngầm: cổng nói XANH về một thứ nó không hề kiểm.
 # `tsc -p tsconfig.build.json` mất vài giây — rẻ hơn nhiều so với một cổng nói dối.
-# Chạy CẢ ở chế độ --nhanh, vì bước [4/9] luôn chạy và nó phụ thuộc dist/.
-buoc "[2b/9] Build backend (dist/) — PHẢI trước test, xem chú thích"
+# Chạy CẢ ở chế độ --nhanh, vì bước [4/12] luôn chạy và nó phụ thuộc dist/.
+buoc "[2b/12] Build backend (dist/) — PHẢI trước test, xem chú thích"
 npm run build >/dev/null;                                           ket $? "build backend (dist/)"
 
-buoc "[3/9] Lint + format"
+buoc "[3/12] Lint + format"
 npx eslint .;                                                       ket $? "eslint"
 npx prettier --check "**/*.{json,css,yml,yaml}" >/dev/null;         ket $? "prettier"
 
-buoc "[4/9] Test backend (REQUIRE_DB_TESTS=1 — bỏ qua = ĐỎ)"
+buoc "[4/12] Test backend (REQUIRE_DB_TESTS=1 — bỏ qua = ĐỎ)"
 npx vitest run;                                                     ket $? "vitest backend"
 
 if [ "$NHANH" -eq 0 ]; then
-  buoc "[5/9] Test web"
+  buoc "[5/12] Test web"
   (cd web && npx vitest run);                                       ket $? "vitest web"
-  buoc "[6/9] Build web (backend đã dựng ở [2b])"
+  buoc "[6/12] Build web (backend đã dựng ở [2b])"
   (cd web && npx vite build >/dev/null);                            ket $? "build web"
 else
-  buoc "[5-6/9] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
+  buoc "[5-6/12] Bỏ qua test web + build WEB (--nhanh; build backend đã chạy ở [2b])"
 fi
 
-buoc "[7/9] Cổng số liệu / phân quyền"
+buoc "[7/12] Cổng số liệu / phân quyền"
 node scripts/ci/endpoint-inventory.mjs --check >/dev/null;          ket $? "endpoint-inventory --check (khớp từng dòng ma trận)"
 node scripts/ci/endpoint-inventory.mjs --check-guards >/dev/null;   ket $? "endpoint-inventory --check-guards"
 node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo-stats --check (số liệu README)"
@@ -163,15 +163,19 @@ node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo
 # đỏ — một cổng hay báo động giả sẽ bị người ta tắt, lúc đó còn tệ hơn không có cổng nào.
 node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check-line-refs (chú thích trỏ file:dòng)"
 
-buoc "[8/9] Hạ tầng triển khai"
+buoc "[8/12] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
 if command -v helm >/dev/null 2>&1; then
-  helm lint infra/helm/quanly >/dev/null;                           ket $? "helm lint"
+  helm lint infra/helm/quanly >/dev/null;                           ket $? "helm lint (cú pháp + Chart.yaml)"
+  # `helm lint` KHÔNG render template — nó không thấy được `node src/server.js` trong args, không
+  # thấy `image.tag=latest`, không thấy secretKeyRef trỏ vào khoá không tồn tại. Bước dưới render
+  # THẬT rồi soi bản render. Xem đầu scripts/ci/check-helm.mjs.
+  node scripts/ci/check-helm.mjs >/dev/null 2>&1;                   ket $? "check-helm (render + 4 bất biến; chi tiết: npm run check:helm)"
 else
-  printf '  \033[33m— helm không có trên máy này, bỏ qua helm lint\033[0m\n'
+  printf '  \033[33m— helm không có trên máy này, bỏ qua cổng chart\033[0m\n'
 fi
 
-buoc "[9/9] Phụ thuộc"
+buoc "[9/12] Phụ thuộc"
 # CỔNG CỨNG. Trước đây chỉ là cảnh báo vì advisory GHSA-ggr8-5vv4-36mx đi theo `deepmerge-ts@7.1.5`
 # mà `@prisma/config` GHIM CHÍNH XÁC, và `npm audit fix --force` thì tụt prisma về 6.12 (phá vỡ).
 # Nay đóng bằng `overrides: { "deepmerge-ts": "^8.0.2" }` trong package.json. Lý do KHÔNG nằm trong
@@ -180,8 +184,46 @@ buoc "[9/9] Phụ thuộc"
 #
 # ⚠️ CỔNG NÀY KHÔNG BẮT ĐƯỢC VIỆC GỠ OVERRIDE. `npm audit` đọc cây ĐÃ CÀI, không đọc `overrides`.
 # Gỡ dòng đó khỏi package.json mà chưa `npm install` thì ở đây vẫn xanh. Thứ bắt được là
-# tests/x2-override-deepmerge.test.js, chạy ở bước [4/9].
+# tests/x2-override-deepmerge.test.js, chạy ở bước [4/12].
 npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm audit (production)"
+
+# ── [10/12] ARTIFACT ĐƯỢC TRIỂN KHAI, KHÔNG PHẢI MÃ NGUỒN ──────────────────
+# Chín bước trên đều kiểm MÃ NGUỒN. Không bước nào kiểm THỨ THẬT SỰ CHẠY Ở PRODUCTION.
+# Khoảng trống đó đã nuốt những lỗi chỉ lộ ra lúc pod khởi động: Helm gọi `node src/server.js`
+# (file không có trong image), `postinstall` gọi script chưa được COPY vào, fonts/*.ttf bị
+# .gitignore loại nên PDF production mất dấu tiếng Việt. Cả ba đều XANH ở mọi cổng đọc mã nguồn.
+#
+# BỎ QUA Ở --nhanh: dựng image mất ~70 giây khi chưa có cache. Vòng lặp sửa nhanh không chịu nổi,
+# mà một cổng chậm quá thì người ta ngừng chạy — lúc đó còn tệ hơn không có.
+if [ "$NHANH" -eq 0 ]; then
+  buoc "[10/12] Image production (dựng + chạy thật)"
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    bash scripts/ci/docker-smoke.sh >/dev/null 2>&1;                  ket $? "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
+  else
+    printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
+  fi
+else
+  buoc "[10/12] Bỏ qua smoke image (--nhanh)"
+fi
+
+# ── [11/12] GIAO DIỆN THẬT TRONG TRÌNH DUYỆT THẬT ──────────────────────────
+# 187 bài vitest của web/ chạy trên jsdom với component MOUNT LẺ — không bài nào nạp bundle ĐÃ
+# BUILD qua Express thật. Bước này mở Chromium, đăng nhập, mở trình soạn, GÕ vào ô đơn giá và đòi
+# Thành Tiền tính đúng; rồi chốt "không lỗi console, không request hỏng" suốt lượt chạy.
+# Kiểm ngược đã đo: cộng 1 đồng vào `lineAmount` (shared/quote-math.ts) thì bước này ĐỎ.
+#
+# Phụ thuộc [6/12] (build web) nên phải đứng SAU nó, và bỏ qua ở --nhanh vì --nhanh không build web
+# → sẽ kiểm bundle của lần build trước, đúng cái bẫy mà chú thích ở [2b] nói tới.
+if [ "$NHANH" -eq 0 ]; then
+  buoc "[11/12] Smoke giao diện (Chromium thật)"
+  if node -e 'import("playwright").then(()=>process.exit(0),()=>process.exit(1))' 2>/dev/null; then
+    node scripts/ci/ui-smoke.mjs >/dev/null 2>&1;                    ket $? "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
+  else
+    printf '  \033[33m— gói playwright chưa cài, bỏ qua smoke giao diện (npm ci)\033[0m\n'
+  fi
+else
+  buoc "[11/12] Bỏ qua smoke giao diện (--nhanh)"
+fi
 
 if [ "$do" -eq 0 ]; then
   printf '\n\033[32m✅ TẤT CẢ CỔNG XANH\033[0m\n'
