@@ -753,6 +753,13 @@ model AuditEvent {
   after      Json?
   ip         String?
   userAgent  String?
+  // Mã request (src/middleware.ts `requestId` → `req.id`). §42 của prompt đòi nhật ký kiểm toán có
+  // trường này, và lý do rất thực dụng: khi điều tra sự cố, log ứng dụng (pino) và nhật ký kiểm
+  // toán là HAI kho tách rời. Không có mã chung thì không nối được "ai đã làm gì" với "request nào
+  // đã chạy, mất bao lâu, trả mã gì" — phải dò theo dấu thời gian và đoán.
+  // Nullable: hàng CŨ không có, và các lời gọi audit() ngoài đường HTTP (job nền, script) không có
+  // request nào để tham chiếu.
+  requestId  String?
   createdAt  DateTime @default(now())
 
   @@index([actorId, createdAt(sort: Desc)])

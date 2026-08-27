@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**29 Prisma models · 137 HTTP endpoints · 169 test files**
+**29 Prisma models · 137 HTTP endpoints · 171 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -124,6 +124,10 @@ Toàn bộ tài liệu nằm ở [`docs/`](docs/README.md). Điểm vào chính:
 | Tính năng nghiệp vụ | [docs/product/FEATURES.md](docs/product/FEATURES.md) |
 | Ai được làm gì | [docs/product/ROLES_PERMISSIONS.md](docs/product/ROLES_PERMISSIONS.md) |
 | Vì sao chọn kiến trúc này | [docs/adr/](docs/adr/) |
+| Quyết định giữ / nâng / thay từng công nghệ | [docs/architecture/TECHNOLOGY_DECISIONS.md](docs/architecture/TECHNOLOGY_DECISIONS.md) |
+| Báo lỗi bảo mật, phạm vi, các chốt đang có | [SECURITY.md](SECURITY.md) |
+| Quy trình đóng góp, luật viết test | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Đã thay đổi những gì | [CHANGELOG.md](CHANGELOG.md) *(sinh từ `git log`)* |
 
 Tài liệu cũ (audit, benchmark, handoff) nằm ở [`docs/archive/`](docs/archive/) —
 giữ lại vì chúng ghi lại *vì sao* hệ thống thành ra như hiện nay, nhưng nhiều
@@ -131,8 +135,12 @@ phát hiện trong đó đã được sửa. **Nguồn sự thật luôn là mã
 
 ## Contributing
 
-Xem [AGENTS.md](AGENTS.md) — quy ước mã nguồn, chốt chặn của CI, và những thứ
-tuyệt đối không được phá (Excel round-trip, clipboard, IME tiếng Việt).
+[CONTRIBUTING.md](CONTRIBUTING.md) cho quy trình; [AGENTS.md](AGENTS.md) cho quy
+ước mã nguồn, chốt chặn, và những thứ tuyệt đối không được phá (Excel round-trip,
+clipboard, IME tiếng Việt).
+
+⚠️ GitHub Actions **không bật** trên tài khoản của repo này — cổng duy nhất thật
+sự chạy là `npm run verify` gõ tay.
 
 ## License
 

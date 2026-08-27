@@ -213,6 +213,9 @@ node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo
 # dấu đóng lẻ / quá cuối file). Phần mờ (trỏ vào dòng chú thích) chỉ được liệt kê, không làm
 # đỏ — một cổng hay báo động giả sẽ bị người ta tắt, lúc đó còn tệ hơn không có cổng nào.
 node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check-line-refs (chú thích trỏ file:dòng)"
+# CHANGELOG.md sinh từ `git log`, không viết tay (§34: không ghi số liệu dễ trôi bằng tay). Cổng
+# này bắt lúc nó lệch khỏi lịch sử — tức lúc ai đó sửa tay hoặc quên sinh lại sau khi commit.
+node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run check:changelog)"
 
 buoc "[8/12] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
