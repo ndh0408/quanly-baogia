@@ -205,8 +205,14 @@ describe("SSE — options của backplane Redis", () => {
 // bị huỷ" hết hạn chờ 3 giây vì gói phát ra không bao giờ quay về). Sau bản vá: 0/8 lượt một mình,
 // 0/6 lượt chạy ba tiến trình song song.
 //
-// Bài dưới khoá THỨ TỰ trong mã nguồn. Không kiểm được bằng hành vi: cửa sổ đua nằm trong lúc nạp
-// module, trước khi bài test đầu tiên chạy.
+// ĐÂY LÀ NƠI CỬA SỔ ĐUA ĐƯỢC KHOÁ. Đo được: quay lại đúng lỗi cũ thì file này ĐỎ 4/4 lượt,
+// 2 bài mỗi lượt — gồm cả bài HÀNH VI ở trên ("kết nối có bộ đệm vượt trần bị huỷ") lẫn các bài
+// khoá thứ tự dưới đây.
+//
+// KHÔNG kiểm được cửa sổ này từ một bài test viết BÊN NGOÀI module: ioredis có hàng đợi ngoại
+// tuyến, nên lệnh PUBLISH gọi lúc chưa nối được xếp lại và chỉ bay đi khi kết nối lên — mà lúc
+// đó subscriber cũng vừa subscribe xong. tests/x3-sse-cua-so-khoi-dong.test.js đã thử và KHÔNG
+// bắt được (ghi rõ ở đầu file đó). Vì vậy ba bài khoá THỨ TỰ dưới đây là thứ giữ bất biến.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("SSE — backplane không được nuốt sự kiện lúc khởi động", () => {
   const nguon = readFileSync(new URL("../src/sse.ts", import.meta.url), "utf8");
