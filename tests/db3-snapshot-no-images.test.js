@@ -21,6 +21,9 @@ import { snapshotQuoteVersion } from "../src/quoteVersion.js";
 import { randomBytes } from "node:crypto";
 import { doSach } from "./helpers/toast.js";
 
+// Cùng cờ với tests/b2-update-quote-no-image-read.test.js — xem lý do ở khối trước phép đo dưới.
+const DO_TOAST = process.env.DO_TOAST_MEASURE === "1";
+
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "QuoteItem" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres");
 
@@ -57,21 +60,37 @@ describe.runIf(dbAvailable)("Bản chụp phiên bản không được đọc �
     await prisma.user.deleteMany({ where: { username: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
   });
 
-  it("đọc ảnh THẬT làm block TOAST nhảy (bảo hiểm: bộ đo có hoạt động)", async () => {
+  // ── CHỐT TIỀN ĐỊNH — LUÔN CHẠY, KHÔNG PHỤ THUỘC THỜI ĐIỂM ─────────────────
+  // Đây mới là thứ canh đúng lớp lỗi (snapshot kéo ảnh về): payload không được chứa data-URL, và
+  // vẫn phải đủ dữ liệu để đối chiếu phiên bản. Nó không đo gì cả nên không nhiễu được.
+  it("payload snapshot KHÔNG chứa ảnh, mà vẫn đủ dữ liệu đối chiếu phiên bản", async () => {
+    const v = await prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, null, "db3-shape"));
+    expect(v.payload.sheets[0].items.length).toBe(SO_HANG_MUC);
+    expect(v.payload.sheets[0].items[0]).toMatchObject({ order: 1, kind: "item", name: "Hạng mục 1", quantity: "1", unitPrice: "1000" });
+    expect(JSON.stringify(v.payload).includes("data:image"),
+      "snapshot lại kéo ảnh base64 vào payload — mỗi phiên bản nhân bản toàn bộ ảnh của báo giá")
+      .toBe(false);
+  }, 60_000);
+
+  // ── PHÉP ĐO BLOCK — SAU CỜ, VÌ NÓ ĐO BỘ ĐẾM TOÀN CSDL ─────────────────────
+  // `doSach` chống được nguồn nhiễu VACUUM. Nó KHÔNG chống được nguồn nhiễu còn lại: một FILE TEST
+  // KHÁC chạy song song cũng đọc ảnh hạng mục trong cùng cửa sổ đo — `pg_statio_all_tables` là bộ
+  // đếm CẤP CSDL, nó cộng hết. Đó đúng là lý do tests/b2-update-quote-no-image-read.test.js phải
+  // nằm sau cờ; file này thì không, nên nó vẫn nhấp nháy trong lượt chạy đầy đủ.
+  //
+  // Nay cùng cơ chế với b2: sau `DO_TOAST_MEASURE=1`, và scripts/verify-local.sh chạy nó ở bước
+  // [1b] MỘT MÌNH — không file nào khác cùng lúc thì bộ đếm toàn cục lại đo đúng.
+  it.runIf(DO_TOAST)("đọc ảnh THẬT làm block TOAST nhảy (bảo hiểm: bộ đo có hoạt động)", async () => {
     const { tang, kq: rows } = await doSach("QuoteItem", () =>
       prisma.quoteItem.findMany({ where: { sheetId }, select: { images: true } }));
     expect(rows.length).toBe(SO_HANG_MUC);
     expect(tang, "đọc 12 ảnh 400KB mà TOAST không nhúc nhích ⇒ bộ đo hỏng, mọi khẳng định dưới vô nghĩa").toBeGreaterThan(200);
   }, 180_000);
 
-  it("snapshot phiên bản KHÔNG đụng tới ảnh", async () => {
-    const { tang, kq: v } = await doSach("QuoteItem", () =>
+  it.runIf(DO_TOAST)("snapshot phiên bản KHÔNG đụng tới ảnh (đo bằng block TOAST)", async () => {
+    const { tang } = await doSach("QuoteItem", () =>
       prisma.$transaction((tx) => snapshotQuoteVersion(tx, quoteId, null, "db3-test")));
     // Bản cũ (`include` không `select`): xấp xỉ bằng phép đọc đối chứng ở trên (600+ block).
     expect(tang, `snapshot làm TOAST nhảy ${tang} block — vẫn đang kéo ảnh về`).toBeLessThan(100);
-    // Và payload vẫn đủ dữ liệu để đối chiếu phiên bản (không cắt nhầm thứ đang dùng).
-    expect(v.payload.sheets[0].items.length).toBe(SO_HANG_MUC);
-    expect(v.payload.sheets[0].items[0]).toMatchObject({ order: 1, kind: "item", name: "Hạng mục 1", quantity: "1", unitPrice: "1000" });
-    expect(JSON.stringify(v.payload).includes("data:image")).toBe(false);
   }, 180_000);
 });

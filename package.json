@@ -23,7 +23,7 @@
     "setup": "prisma migrate deploy && node prisma/seed.js",
     "verify": "bash scripts/verify-local.sh",
     "verify:nhanh": "bash scripts/verify-local.sh --nhanh",
-    "test:toast": "DO_TOAST_MEASURE=1 vitest run tests/b2-update-quote-no-image-read.test.js tests/db3-snapshot-no-images.test.js",
+    "test:toast": "DO_TOAST_MEASURE=1 vitest run tests/b2-update-quote-no-image-read.test.js && DO_TOAST_MEASURE=1 vitest run tests/db3-snapshot-no-images.test.js",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

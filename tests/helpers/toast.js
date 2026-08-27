@@ -15,7 +15,7 @@
 // động thống kê.
 //
 // Cách xử lý ở đây KHÔNG phải "chạy lại cho tới khi xanh". Nó là: đo kèm số lần vacuum/analyze
-// của chính bảng đó, và chỉ CHẤP NHẬN lượt đo nào không có vacuum nào chen vào. Bẩn thì đo lại;
+// của chính bảng đó VÀ CỦA BẢNG TOAST CỦA NÓ, rồi chỉ CHẤP NHẬN lượt đo nào không có vacuum chen vào. Bẩn thì đo lại;
 // bẩn liên tiếp thì ném lỗi NÓI ĐÚNG nguyên nhân, thay vì buộc tội mã nghiệp vụ bằng một con số
 // mà chính bộ đo biết là vô nghĩa.
 import { prisma } from "../../src/db.js";
@@ -39,9 +39,18 @@ export async function toastBlocks(bang) {
     const r = await c.query(
       "SELECT coalesce(toast_blks_hit,0) + coalesce(toast_blks_read,0) AS n FROM pg_statio_all_tables WHERE relname = $1",
       [bang]);
+    // ⚠️ PHẢI ĐẾM CẢ BẢNG TOAST, KHÔNG CHỈ BẢNG CHÍNH.
+    // Bản đầu chỉ `WHERE relname = $1` — tức chỉ nhìn bảng chính. Nhưng thứ đang đo là
+    // `toast_blks_*`, và kẻ gây nhiễu là autovacuum của BẢNG TOAST, vốn có relname RIÊNG dạng
+    // `pg_toast_<oid>`. ĐO ĐƯỢC: QuoteItem có autovacuum_count = 30, còn pg_toast_16606 (bảng
+    // TOAST của chính nó) = 57. Cờ `sach` cũ mù đúng nguồn nhiễu mà nó sinh ra để bắt.
+    // Bản đầu vẫn làm giảm nhấp nháy (1/5 → 0/8) nhưng KHÔNG PHẢI nhờ cờ — nhờ việc ĐO LẠI.
+    // Đừng bỏ vế TOAST đi vì "thấy thừa".
     const v = await c.query(
-      `SELECT coalesce(sum(vacuum_count + autovacuum_count + analyze_count + autoanalyze_count), 0) AS n
-         FROM pg_stat_all_tables WHERE relname = $1`, [bang]);
+      `SELECT coalesce(sum(s.vacuum_count + s.autovacuum_count + s.analyze_count + s.autoanalyze_count), 0) AS n
+         FROM pg_stat_all_tables s
+        WHERE s.relname = $1
+           OR s.relid = (SELECT c2.reltoastrelid FROM pg_class c2 WHERE c2.relname = $1)`, [bang]);
     return { blocks: Number(r.rows[0]?.n ?? 0), don: Number(v.rows[0]?.n ?? 0) };
   } finally { await c.end(); }
 }
@@ -59,6 +68,17 @@ export async function doMotLuot(bang, viec) {
  *
  * `viec` bị gọi NHIỀU LẦN khi phải đo lại — nên nó phải lặp lại được. Việc chỉ-đọc thì mặc nhiên
  * đạt; việc có GHI (một lượt PUT chẳng hạn) phải tự lo cho lần chạy thứ hai không đụng lần đầu.
+ */
+/**
+ * ⚠️ HAI FILE DÙNG HELPER NÀY PHẢI CHẠY TRONG HAI LỆNH `vitest run` RIÊNG.
+ *
+ * `tests/b2-update-quote-no-image-read.test.js` và `tests/db3-snapshot-no-images.test.js` đều đọc
+ * ảnh hạng mục của CÙNG bảng `QuoteItem`. Gộp chúng vào một lệnh thì vitest chạy song song và
+ * chúng tự nhiễu nhau — `pg_statio_all_tables` là bộ đếm CẤP CSDL, nó cộng cả hai.
+ * ĐÃ THỬ: gộp một lệnh → db3 đỏ với "TOAST nhảy 3637 block" trong khi ngưỡng là 100.
+ * `doSach` KHÔNG cứu được ca này: nó chỉ chống nhiễu VACUUM, không chống được một tiến trình khác
+ * đang đọc cùng bảng.
+ * Xem `npm run test:toast` và bước [1b] của scripts/verify-local.sh — cả hai đều chạy LẦN LƯỢT.
  */
 export async function doSach(bang, viec, lan = 4) {
   let cuoi = null;

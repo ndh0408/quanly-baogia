@@ -110,8 +110,13 @@ npx prisma migrate deploy >/dev/null 2>&1;                          ket $? "pris
 # pg_statio_all_tables trong lúc bài này đo. Chạy ở đây, ngay sau `migrate deploy`, CSDL còn yên.
 # ĐỪNG chuyển xuống dưới cho "gọn nhóm test" — đó đúng là cách làm nó đỏ lại.
 buoc "[1b/9] Bài đo TOAST (chạy riêng, CSDL còn yên)"
+# HAI LỆNH RIÊNG, KHÔNG GỘP MỘT LỆNH. Cả hai file đều đọc ảnh hạng mục của CHÍNH bảng QuoteItem;
+# gộp lại thì vitest chạy chúng SONG SONG và chúng tự nhiễu nhau — đúng nguồn nhiễu mà cờ này sinh
+# ra để tránh. ĐÃ THỬ: gộp một lệnh → db3 đỏ với "TOAST nhảy 3637 block" (ngưỡng 100).
 DO_TOAST_MEASURE=1 npx vitest run tests/b2-update-quote-no-image-read.test.js
-ket $? "vitest đo TOAST (DO_TOAST_MEASURE=1)"
+ket $? "vitest đo TOAST — b2 (DO_TOAST_MEASURE=1)"
+DO_TOAST_MEASURE=1 npx vitest run tests/db3-snapshot-no-images.test.js
+ket $? "vitest đo TOAST — db3 (DO_TOAST_MEASURE=1)"
 
 buoc "[2/9] Typecheck"
 npx tsc --noEmit -p tsconfig.json;                                  ket $? "tsc (backend)"
