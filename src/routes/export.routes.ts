@@ -10,6 +10,7 @@ import { renderQuotePdf } from "../pdf.js";
 import { runExportJob, isAbortedError } from "../exportQueue.js";
 import { createLimiter } from "../rateLimit.js";
 import { audit } from "../audit.js";
+import { tenFileXuat } from "../quoteUtils.js";
 
 // JSON-safe copy of the quote for the worker thread (normalizes Prisma Decimals →
 // strings and Dates → ISO; buildQuoteBuffer/renderQuotePdf read these via Number()
@@ -115,9 +116,9 @@ router.get(
       if (daXuLyHuy(e, res)) return;
       throw e;
     }
-    const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
+
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "xlsx")}"`);
     res.setHeader("Content-Length", buf.length);
     // Per-user, auth-gated download — must NOT be cached by the CDN (Cloudflare caches
     // .xlsx by extension) or the browser, else stale/other-user files get served.
@@ -166,9 +167,9 @@ router.get(
       if (daXuLyHuy(e, res)) return;
       throw e;
     }
-    const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
+
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "pdf")}"`);
     res.setHeader("Content-Length", buf.length);
     res.setHeader("Cache-Control", "no-store, private, max-age=0");   // per-user — never cache at CDN/browser
     res.end(buf);

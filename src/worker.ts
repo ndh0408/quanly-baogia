@@ -17,6 +17,7 @@ import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
 import { initSentry, captureError, flushSentry, exportJobsTotal, registry, khopTokenBearer, dangKyChanSuCoTienTrinh } from "./observability.js";
+import { tenFileXuat } from "./quoteUtils.js";
 
 // ─── /metrics của TIẾN TRÌNH WORKER ─────────────────────────────────────────
 //
@@ -213,7 +214,14 @@ export const processors = {
           contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        const url = await presignDownload(key, { expiresIn: 24 * 3600 });
+        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
+        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
+        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
+        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
+        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
+        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
+        // Công thức dưới đây khớp ĐÚNG src/routes/export.routes.ts (safeName ở :118 và :169).
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "xlsx") });
         return { key, url, size: buf.length };
       }
       // KHÔNG nhét file vào giá trị trả về của job.
@@ -252,7 +260,14 @@ export const processors = {
           key, body: buf, contentType: "application/pdf",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        const url = await presignDownload(key, { expiresIn: 24 * 3600 });
+        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
+        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
+        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
+        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
+        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
+        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
+        // Công thức dưới đây khớp ĐÚNG src/routes/export.routes.ts (safeName ở :118 và :169).
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "pdf") });
         return { key, url, size: buf.length };
       }
       // KHÔNG nhét file vào giá trị trả về của job.

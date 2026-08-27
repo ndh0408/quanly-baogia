@@ -72,12 +72,19 @@ export function QuoteListPage({ me }: { me: Me }) {
   const open = (id: number) => { location.hash = "#/quotes/" + id; };
   const act = async (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
+    // ── XUẤT FILE KHÔNG ĐI QUA `busy` ─────────────────────────────────────────
+    // `busy` là MỘT cờ dùng chung cho MỌI hành động trong hàm này (Xuất / Nhân bản / Bản mới / Xoá),
+    // và nó chặn IM LẶNG (`if (busy.current) return;` — không toast, không nút mờ).
+    // Chuyện đó vô hại khi Xuất còn là `window.open`: nó trả quyền điều khiển về ngay lập tức.
+    // Nay Xuất `await` tới HÀNG PHÚT ở đường nền — giữ `busy` suốt quãng đó nghĩa là trong lúc chờ
+    // file, người dùng bấm Xoá hay Nhân bản một báo giá KHÁC thì KHÔNG CÓ GÌ XẢY RA và không có
+    // lời giải thích nào. Họ sẽ nghĩ trang bị treo.
+    // `xuatBaoGia` đã tự chặn bấm lại theo (báo giá, định dạng) và tự báo lỗi, nên nó không cần
+    // `busy` — cho nó ra ngoài.
+    if (a === "excel") { await xuatBaoGia(qr.id, "xlsx"); return; }
     if (busy.current) return; busy.current = true;
     try {
-      // `xuatBaoGia` thay cho `window.open`: nó thấy được mã 413 và tự chuyển sang xuất nền.
-      // window.open giao thẳng phản hồi cho trình duyệt nên báo giá lớn chỉ ra một tab in JSON lỗi.
-      if (a === "excel") await xuatBaoGia(qr.id, "xlsx");
-      else if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
+      if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
       else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(nq)}).`, "success"); open(nq.id); }
       else if (a === "del") {
         if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${qr.projectCode || qr.quoteNumber}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;

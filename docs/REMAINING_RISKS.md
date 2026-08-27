@@ -330,9 +330,26 @@ rỗng), nên bề mặt rủi ro của chính bản ghim là nhỏ nhất có t
 
 ### Khi nào gỡ
 
-Khi `@prisma/config` tự nâng lên `deepmerge-ts@8` (theo dõi ở bản prisma mới). Gỡ dòng override
-rồi chạy `npm run verify`: bước `[9/9] Phụ thuộc` sẽ **đỏ ngay** nếu gỡ sớm — đó là cổng cứng,
-không phải cảnh báo.
+Khi `@prisma/config` tự nâng lên `deepmerge-ts@8`. **Không phải chuyện tuỳ hứng: để lâu là có
+hại.** `overrides` không giới hạn theo gói cha, nên khi prisma nâng lên `deepmerge-ts@9` thì dòng
+`^8.0.2` của ta sẽ **âm thầm kéo nó xuống 8.x** — prisma chạy với bản thư viện nó không được thử
+cùng, và không có gì báo.
+
+### ⚠️ `npm audit` KHÔNG canh chuyện này — đừng trông vào nó
+
+Bản đầu của mục này viết: *"Gỡ dòng override rồi chạy `npm run verify`: bước `[9/9] Phụ thuộc` sẽ
+đỏ ngay"*. **Đo lại thì SAI.** `npm audit` đọc **cây đã cài** (`node_modules` + `package-lock`),
+không đọc `overrides` trong `package.json`. Xoá dòng override mà chưa `npm install` → audit vẫn
+thoát 0, toàn bộ cổng xanh. Người xoá nó tin là an toàn; lần `npm ci` kế tiếp (máy khác, hoặc
+trong Dockerfile) mới cài lại 7.1.5 dính lỗ hổng — lúc đó không ai đang nhìn.
+
+Thứ **thật sự** canh là `tests/x2-override-deepmerge.test.js`. Nó đọc `package.json` và bản ghim
+thật của `@prisma/config` trong `node_modules`, rồi bắt hai bên nhất quán theo cả hai chiều:
+
+- gỡ override khi prisma còn ghim 7.x → **đỏ**;
+- giữ override khi prisma đã lên >= 8 → **đỏ**, kèm hướng dẫn gỡ.
+
+Nói cách khác: ngày cần gỡ, bộ test sẽ tự nói. Không phải nhớ.
 
 ## Hạn chế đã biết của hệ thống (không phải lỗi, là đánh đổi)
 

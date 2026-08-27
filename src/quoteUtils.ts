@@ -12,6 +12,29 @@ import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 // khớp validators.customerLogo/itemSchema.images. Kiểm tiền tố sẽ lọt markup thoát thuộc tính src="".
 const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
 
+/**
+ * TÊN FILE người dùng nhận được khi tải báo giá. MỘT nguồn cho CẢ HAI đường xuất.
+ *
+ * ── VÌ SAO PHẢI DÙNG CHUNG ──────────────────────────────────────────────────
+ * Công thức này từng bị chép tay ở hai nơi và chúng ĐÃ LỆCH NHAU:
+ *   · đường ĐỒNG BỘ (src/routes/export.routes.ts) cho ra "BaoGia_BG-2026-001.xlsx";
+ *   · đường NỀN (src/worker.ts) không truyền `filename` vào `presignDownload` nên kho object lấy
+ *     phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu thời gian.
+ * Cùng MỘT nút bấm mà ra hai kiểu tên, tuỳ báo giá to hay nhỏ — người dùng không hiểu vì sao.
+ *
+ * Chuyện đó quan trọng ở đường nền hơn hẳn: link tải là URL đã ký trỏ vào kho object, tức KHÁC
+ * ORIGIN, mà trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác origin. Nghĩa là tên
+ * file do header Content-Disposition của KHO quyết định — client không sửa được.
+ *
+ * Bộ lọc `[^A-Za-z0-9_-]` cố ý HẸP: tên này đi thẳng vào một header HTTP
+ * (`Content-Disposition: attachment; filename="..."`), nên mọi dấu nháy, chấm phẩy và dấu gạch
+ * chéo phải chết ở đây. Đừng nới ra để "giữ dấu tiếng Việt" — đó là chèn header.
+ */
+export function tenFileXuat(quoteNumber: string | null | undefined, quoteId: number | string, ext: "xlsx" | "pdf"): string {
+  const an = String(quoteNumber || `quote-${quoteId}`).replace(/[^A-Za-z0-9_-]/g, "_");
+  return `BaoGia_${an}.${ext}`;
+}
+
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected. converted/lost are terminal
 // (immutable for everyone — duplicate to make a new revision instead).

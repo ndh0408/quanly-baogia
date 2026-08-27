@@ -54,13 +54,26 @@ router.post(
       return res.status(403).json({ error: "Bạn không có quyền xuất báo giá" });
     }
     const q = getQueue(QUEUES.EXPORT);
-    if (!q) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình. Vui lòng dùng chức năng xuất file trực tiếp." });
+    // LỜI NHẮN CŨ LÀ MỘT VÒNG CỤT. Nó bảo "vui lòng dùng chức năng xuất file trực tiếp" — mà người
+    // dùng tới được đây CHÍNH VÌ đường trực tiếp vừa từ chối họ bằng 413 (báo giá quá lớn).
+    // Bảo họ quay lại thứ vừa thất bại là bỏ họ đứng giữa đường.
+    //
+    // Và thiếu `code` là thiếu thứ DUY NHẤT mà client dùng để phân biệt "xuất nền chưa bật" với
+    // một lỗi 503 bất kỳ — nhánh dưới (thiếu kho object) có `code`, nhánh này thì không, nên cùng
+    // một nguyên nhân "chưa bật xuất nền" lại cho ra hai hành vi khác nhau ở giao diện.
+    // Hai nhánh nay dùng CHUNG một `code`; khác nhau ở phần nói rõ THIẾU CÁI GÌ.
+    if (!q) {
+      return res.status(503).json({
+        error: "Xuất nền chưa dùng được (chưa cấu hình hàng đợi/Redis). Báo giá này quá lớn để tải trực tiếp — hãy nhờ quản trị viên bật hàng đợi, hoặc tách bớt sheet rồi tải lại.",
+        code: "export_async_unavailable",
+      });
+    }
     // Xuất NỀN trả về một ĐƯỜNG TẢI từ kho object. Không có kho thì worker không có gì để trả —
     // và bản trước nhồi luôn cả file dưới dạng base64 vào giá trị trả về của job, tức là vào REDIS.
     // Chặn ngay ở đây để người dùng biết liền, thay vì chờ poll rồi nhận lỗi.
     if (!isStorageEnabled()) {
       return res.status(503).json({
-        error: "Xuất nền chưa dùng được (chưa cấu hình kho lưu trữ tệp). Vui lòng dùng chức năng xuất file trực tiếp.",
+        error: "Xuất nền chưa dùng được (chưa cấu hình kho lưu trữ tệp). Báo giá này quá lớn để tải trực tiếp — hãy nhờ quản trị viên bật kho lưu trữ, hoặc tách bớt sheet rồi tải lại.",
         code: "export_async_unavailable",
       });
     }
@@ -100,7 +113,16 @@ router.get(
   requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req: Request, res: Response) => {
-    if (!isQueueEnabled()) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình" });
+    // Nhánh này là lúc ĐANG HỎI kết quả, không phải lúc xếp việc — tức người dùng đã bấm Tải và
+    // đang chờ. Redis chết giữa chừng thì việc của họ mất luôn, mà lời nhắn cũ chỉ nói "chưa được
+    // cấu hình" như thể họ vừa gõ nhầm địa chỉ. Mang `code` giống hai nhánh kia để giao diện xử lý
+    // một kiểu duy nhất, và nói rõ ai khắc phục được.
+    if (!isQueueEnabled()) {
+      return res.status(503).json({
+        error: "Hệ thống hàng đợi chưa được cấu hình (hoặc vừa mất kết nối Redis) nên không theo dõi được lượt tạo file. Hãy nhờ quản trị viên kiểm tra rồi bấm tải lại.",
+        code: "export_async_unavailable",
+      });
+    }
     // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
     // carry recipient addresses, target URLs and secrets in job.data — never expose
     // them here, even to QUOTE_READ_ALL/admin callers.

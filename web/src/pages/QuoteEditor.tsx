@@ -84,6 +84,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
+  // ĐANG TẢI FILE — để nút MỜ ĐI và đổi chữ. `xuatBaoGia` đã tự chặn bấm lại ở tầng dưới, nhưng
+  // chặn không phải là BÁO: hai nút Tải nằm trong menu "…", đóng menu rồi mở lại là bấm được tiếp,
+  // và `window.open` cũ thì trình duyệt tự hiện chỉ báo tải nên người dùng biết có chuyện đang xảy
+  // ra. Nay không còn chỉ báo đó — nút phải tự nói.
+  //
+  // ⚠️ HOOK PHẢI Ở ĐÂY, cạnh các hook khác. Bản đầu tôi khai nó ngay trên `exportFile` (dòng ~375),
+  // tức SAU hai early return ở dòng 197-198 (`if (err) return …` / `if (!ready) return …`) — React
+  // gọi hook theo THỨ TỰ, nên một hook nằm sau early return sẽ khiến thứ tự đổi giữa các lượt
+  // render và toàn bộ state của component lệch nhau. eslint (react-hooks/rules-of-hooks) bắt được;
+  // đừng chuyển nó xuống lại cho "gần chỗ dùng".
+  const [dangTai, setDangTai] = useState<"xlsx" | "pdf" | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const noteWrapRef = useRef<HTMLDivElement>(null);
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
@@ -369,11 +380,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
 
   const exportFile = async (ext: "xlsx" | "pdf") => {
+    if (dangTai) return;
     if (dirtyRef.current && !(await confirmModal("Có thay đổi chưa lưu", "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi vừa sửa. Hãy Lưu trước rồi tải lại.", { confirmText: "Vẫn tải bản cũ" }))) return;
     // Xem web/src/lib/exportQuote.ts: đường đồng bộ trước, gặp 413 thì tự chuyển sang xuất nền.
     // Bản cũ dùng window.open nên KHÔNG BAO GIỜ thấy 413 — báo giá quá 20.000 dòng chỉ ra một tab
     // in JSON lỗi, dù báo giá 60.000 dòng là LƯU ĐƯỢC.
-    await xuatBaoGia(q.id, ext);
+    setDangTai(ext);
+    try { await xuatBaoGia(q.id, ext); } finally { setDangTai(null); }
   };
 
   // ── summary tổng báo giá (mọi sheet) ─────────────────────────────────────────
@@ -563,8 +576,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
               <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
               {moreOpen && (
                 <div className="kebab-menu" role="menu">
-                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>Tải Excel gửi khách</button>
-                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>Tải PDF gửi khách</button>
+                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>{dangTai === "xlsx" ? "Đang tạo Excel…" : "Tải Excel gửi khách"}</button>
+                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>{dangTai === "pdf" ? "Đang tạo PDF…" : "Tải PDF gửi khách"}</button>
                   <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
                   {(hasPerm("quote:update:all") || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
                 </div>

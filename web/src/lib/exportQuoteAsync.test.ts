@@ -250,3 +250,231 @@ describe("xuatBaoGia — hỏng thì nói rõ, không im lặng và không treo"
     expect(toastRa.some((t) => t.loai === "error")).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BA LỖI NGẦM TÌM RA KHI PHẢN BIỆN LẠI CHÍNH BẢN VÁ NÀY (2026-08-27).
+// Chúng KHÔNG do bản cũ để lại — chúng do bản vá 782243d sinh ra. Ghi rõ để khỏi ai đó
+// "dọn dẹp" mấy chốt dưới đây vì tưởng là thừa.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("xuatBaoGia — chế độ XEM THỬ", () => {
+  // `req()` (api.ts) có nhánh `if (__preview && method !== "GET")` trả THÀNH CÔNG GIẢ, không gửi gì
+  // lên máy chủ. `exportAsync` là POST → rơi vào đó → không có jobId/queue.
+  // ĐÃ TÁI HIỆN trước khi vá: client hỏi `GET /api/jobs/undefined/undefined`, máy chủ trả 404,
+  // người dùng nhận "Không tìm thấy hàng đợi" — không hề biết là do đang xem thử.
+  it("báo giá LỚN khi đang xem thử: nói rõ là do xem thử, KHÔNG hỏi /jobs/undefined/undefined", async () => {
+    traLoi = (u) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      return new Response(JSON.stringify({ error: "Không tìm thấy hàng đợi" }), { status: 404 });
+    };
+    const { setPreviewMode } = await import("./api");
+    const { xuatBaoGia } = await nap();
+    setPreviewMode(true);
+    try {
+      expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    } finally {
+      setPreviewMode(false);
+    }
+
+    expect(daGoi.some((c) => c.url.includes("undefined")),
+      "hỏi máy chủ về job 'undefined' — đúng lỗi đã tái hiện được").toBe(false);
+    const loi = toastRa.find((t) => t.loai === "error");
+    expect(loi, "im lặng thì người dùng tưởng nút hỏng").toBeTruthy();
+    expect(loi!.msg, "phải nói là do XEM THỬ, chứ 'Không tìm thấy hàng đợi' thì chẳng ai hiểu")
+      .toMatch(/[Xx]em thử/);
+  });
+
+  it("báo giá VỪA khi đang xem thử vẫn tải được — xem thử chỉ chặn lệnh GHI", async () => {
+    // Đường đồng bộ là GET, không bị nhánh xem thử chặn, và tải file là việc admin vốn làm được.
+    traLoi = () => new Response("x", { status: 200 });
+    const { setPreviewMode } = await import("./api");
+    const { xuatBaoGia } = await nap();
+    setPreviewMode(true);
+    try {
+      expect(await xuatBaoGia(7, "xlsx")).toBe(true);
+    } finally {
+      setPreviewMode(false);
+    }
+    expect(daTai.length).toBe(1);
+  });
+});
+
+describe("xuatBaoGia — phản hồi và chặn bấm lại", () => {
+  it("phản hồi thiếu jobId/queue thì báo lỗi, KHÔNG hỏi /jobs/undefined/undefined", async () => {
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({ ok: true }), { status: 202 });   // thiếu jobId
+      return new Response(JSON.stringify({ error: "Không tìm thấy hàng đợi" }), { status: 404 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(daGoi.some((c) => c.url.includes("undefined"))).toBe(false);
+    expect(toastRa.some((t) => t.loai === "error" && /mã tác vụ/.test(t.msg))).toBe(true);
+  });
+
+  it("bấm lần thứ hai trong lúc đang chạy bị chặn — KHÔNG gửi thêm request nào", async () => {
+    // Hồi quy do chính bản vá này gây ra: `window.open` trả quyền về ngay và trình duyệt tự hiện
+    // chỉ báo tải, còn bản này `await` hàng giây mà màn hình không có gì → người dùng bấm lại.
+    // QuoteList có busy.current che, nhưng QuoteEditor thì KHÔNG (nút nằm trong menu).
+    let moKhoa: (() => void) | null = null;
+    const cho = new Promise<void>((r) => { moKhoa = r; });
+    g.fetch = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/csrf-token")) return new Response(JSON.stringify({ token: "t" }), { status: 200 });
+      daGoi.push({ url: u, method: "GET" });
+      await cho;                       // giữ lượt đầu treo lại
+      return new Response("x", { status: 200 });
+    });
+    const { xuatBaoGia } = await nap();
+
+    const dau = xuatBaoGia(7, "xlsx");
+    await new Promise((r) => setTimeout(r, 20));
+    const soLanTruoc = daGoi.length;
+
+    expect(await xuatBaoGia(7, "xlsx"), "lượt thứ hai phải bị chặn").toBe(false);
+    expect(daGoi.length, "lượt thứ hai vẫn gửi request = vẫn tạo việc trùng").toBe(soLanTruoc);
+    expect(toastRa.some((t) => t.msg.includes("Đang tạo file"))).toBe(true);
+
+    moKhoa!();
+    expect(await dau).toBe(true);
+
+    // Xong rồi thì KHOÁ PHẢI ĐƯỢC MỞ, nếu không nút chết vĩnh viễn tới khi tải lại trang.
+    expect(await xuatBaoGia(7, "xlsx"), "khoá không được mở sau khi xong — nút chết").toBe(true);
+  }, 30000);
+
+  it("khoá được mở cả khi lượt trước THẤT BẠI", async () => {
+    traLoi = () => new Response(JSON.stringify({ error: "Bạn không có quyền xuất báo giá" }), { status: 403 });
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    // Lần hai phải CHẠY THẬT (ra 403 lần nữa), không phải bị chặn bởi khoá còn kẹt.
+    const truoc = daGoi.length;
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(daGoi.length, "khoá kẹt sau lượt lỗi → nút chết").toBeGreaterThan(truoc);
+  });
+
+  it("khoá tính theo (báo giá, định dạng) — xuất PDF không bị Excel chặn", async () => {
+    let moKhoa: (() => void) | null = null;
+    const cho = new Promise<void>((r) => { moKhoa = r; });
+    g.fetch = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/csrf-token")) return new Response(JSON.stringify({ token: "t" }), { status: 200 });
+      daGoi.push({ url: u, method: "GET" });
+      if (u.includes(".xlsx")) await cho;
+      return new Response("x", { status: 200 });
+    });
+    const { xuatBaoGia } = await nap();
+    const dauXlsx = xuatBaoGia(7, "xlsx");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await xuatBaoGia(7, "pdf"), "PDF bị Excel chặn oan").toBe(true);
+    moKhoa!();
+    expect(await dauXlsx).toBe(true);
+  }, 30000);
+});
+
+describe("xuatBaoGia — mất phiên và xuất nền chưa bật", () => {
+  it("401 phải bắn auth:expired + dọn mã CSRF — `fetch` trần đi vòng qua req() nên mất hai việc đó", async () => {
+    // Lớp phủ đăng nhập lại (App.tsx nghe "auth:expired") tồn tại để KHÔNG unmount QuoteEditor và
+    // không làm mất báo giá đang soạn — xem web/src/lib/api401.test.ts. Đường xuất đi vòng qua
+    // `req()` nên phải tự làm phần việc đó.
+    const suKien: string[] = [];
+    g.window = { dispatchEvent: (e: { type: string }) => { suKien.push(e.type); return true; } };
+    traLoi = () => new Response(JSON.stringify({ error: "Chưa đăng nhập" }), { status: 401 });
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(suKien, "mất phiên mà app không biết → người dùng kẹt, không có đường đăng nhập lại")
+      .toContain("auth:expired");
+  });
+
+  it("503 KHÔNG có `code` và lời nhắn KỸ THUẬT (proxy/LB) → vẫn phải nói người dùng làm gì", async () => {
+    // ⚠️ BÀI NÀY TỪNG RỖNG. Bản đầu dùng một lời nhắn 503 có sẵn chữ "quản trị viên", nên nó xanh
+    // CẢ KHI gỡ chốt `|| loi?.status === 503` — đường rơi chung cũng in đúng chuỗi đó ra.
+    // Đã kiểm ngược: gỡ chốt → KHÔNG bài nào đỏ. Bài phải phân biệt được mới có giá trị.
+    //
+    // Ca THẬT phân biệt được: 503 từ một lớp KHÔNG PHẢI ứng dụng (nginx, Cloudflare, LB) — thân
+    // chỉ có một câu kỹ thuật, không `code`, không hướng dẫn. Không có chốt thì người dùng nhận
+    // đúng "Service Unavailable" và không biết làm gì tiếp.
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({ error: "Service Unavailable" }), { status: 503 });
+      return new Response("{}", { status: 200 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    const loi = toastRa.find((t) => t.loai === "error");
+    expect(loi!.msg, "đổ nguyên 'Service Unavailable' ra cho người dùng thì họ không làm gì được")
+      .not.toBe("Service Unavailable");
+    expect(loi!.msg, "phải nói rõ: quá lớn để tải trực tiếp, và chế độ nền chưa bật")
+      .toMatch(/chế độ nền chưa được bật/);
+  }, 30000);
+
+  it("503 CỦA ỨNG DỤNG thì giữ NGUYÊN VĂN — quản trị viên cần biết thiếu HÀNG ĐỢI hay thiếu KHO", async () => {
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({ error: "Xuất nền chưa dùng được (chưa cấu hình hàng đợi/Redis). Hãy nhờ quản trị viên bật hàng đợi." }), { status: 503 });
+      return new Response("{}", { status: 200 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(toastRa.find((t) => t.loai === "error")!.msg).toMatch(/hàng đợi\/Redis/);
+  }, 30000);
+
+  it("503 nhánh thiếu KHO cũng nói rõ thiếu kho, không nhầm sang hàng đợi", async () => {
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({
+        error: "Xuất nền chưa dùng được (chưa cấu hình kho lưu trữ tệp). Hãy nhờ quản trị viên bật kho lưu trữ.",
+        code: "export_async_unavailable",
+      }), { status: 503 });
+      return new Response("{}", { status: 200 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(toastRa.find((t) => t.loai === "error")!.msg).toMatch(/kho lưu trữ/);
+  }, 30000);
+});
+
+describe("xuatBaoGia — ba ca hỏng câm", () => {
+  it("200 nhưng thân là HTML (proxy/SSO/SPA fallback) → KHÔNG lưu thành .xlsx hỏng", async () => {
+    traLoi = () => new Response("<!doctype html><title>Đăng nhập</title>", {
+      status: 200, headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(daTai, "lưu nguyên trang HTML thành .xlsx — Excel chỉ báo 'không mở được', không manh mối").toEqual([]);
+    expect(toastRa.some((t) => t.loai === "error" && /trang web/.test(t.msg))).toBe(true);
+  });
+
+  it("job ở trạng thái 'unknown' → dừng NGAY, không hỏi 65 lượt trong 5 phút", async () => {
+    let lanHoi = 0;
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({ jobId: "j-9", queue: "export" }), { status: 202 });
+      lanHoi++;
+      return new Response(JSON.stringify({ id: "j-9", state: "unknown", returnvalue: null, failedReason: null }), { status: 200 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx")).toBe(false);
+    expect(lanHoi, "vẫn hỏi vòng về một job không tồn tại").toBe(1);
+    expect(toastRa.some((t) => t.loai === "error" && /không còn tồn tại/.test(t.msg))).toBe(true);
+  }, 30000);
+
+  it("thẻ <a> KHÔNG bị gỡ ngay trong tick của click() (Safari cũ huỷ mất lượt tải)", async () => {
+    // Bằng chứng đo được: ghi lại thứ tự click/remove trên chính thẻ giả.
+    const nhatKy: string[] = [];
+    g.document = {
+      createElement: () => {
+        const a = { href: "", download: "", rel: "", style: {} as Record<string, string>,
+          click() { nhatKy.push("click"); },
+          remove() { nhatKy.push("remove"); } };
+        return a;
+      },
+      body: { appendChild: () => nhatKy.push("append") },
+    };
+    traLoi = () => new Response("x", { status: 200 });
+    const { xuatBaoGia } = await nap();
+    await xuatBaoGia(7, "xlsx");
+    expect(nhatKy, "remove xảy ra ngay sau click trong cùng tick").toEqual(["append", "click"]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(nhatKy, "nhưng vẫn phải được dọn ở tick sau, không rò thẻ vào DOM").toEqual(["append", "click", "remove"]);
+  });
+});

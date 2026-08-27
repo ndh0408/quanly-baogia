@@ -104,7 +104,13 @@ fi
 buoc "[9/9] Phụ thuộc"
 # CỔNG CỨNG. Trước đây chỉ là cảnh báo vì advisory GHSA-ggr8-5vv4-36mx đi theo `deepmerge-ts@7.1.5`
 # mà `@prisma/config` GHIM CHÍNH XÁC, và `npm audit fix --force` thì tụt prisma về 6.12 (phá vỡ).
-# Nay đóng bằng `overrides: { "deepmerge-ts": "^8.0.2" }` trong package.json — xem lý do ở đó.
+# Nay đóng bằng `overrides: { "deepmerge-ts": "^8.0.2" }` trong package.json. Lý do KHÔNG nằm trong
+# package.json (npm từ chối khoá chú thích bên trong `overrides` — đã thử, lỗi "Override without
+# name") mà ở docs/REMAINING_RISKS.md, mục "Ghim phụ thuộc bằng overrides".
+#
+# ⚠️ CỔNG NÀY KHÔNG BẮT ĐƯỢC VIỆC GỠ OVERRIDE. `npm audit` đọc cây ĐÃ CÀI, không đọc `overrides`.
+# Gỡ dòng đó khỏi package.json mà chưa `npm install` thì ở đây vẫn xanh. Thứ bắt được là
+# tests/x2-override-deepmerge.test.js, chạy ở bước [4/9].
 npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm audit (production)"
 
 if [ "$do" -eq 0 ]; then
