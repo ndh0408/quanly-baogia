@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**29 Prisma models · 137 HTTP endpoints · 177 test files**
+**29 Prisma models · 137 HTTP endpoints · 178 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -71,7 +71,7 @@ The parts that took the actual work:
 | Background work | BullMQ workers on Redis |
 | Documents | ExcelJS + custom OOXML zip stitching · PDFKit (embedded fonts) · Nodemailer |
 | Storage | S3-compatible object storage (payment proofs, attachments) |
-| Frontend | React 19 + Vite (`web/`) · vanilla-JS grid engine (`public/`) |
+| Frontend | React 19 + Vite (`web/`) — SPA **duy nhất**; bundle build ra `public/app2/` |
 | Testing | **Vitest** (unit + integration + coverage) |
 | Ops | Docker + Compose (dev / staging / prod) · **Helm chart** · pino structured logs · Prometheus metrics |
 | CI | GitHub Actions — lint, typecheck, build, tests, Helm render, artifact + container smoke tests, security scans, SBOM |

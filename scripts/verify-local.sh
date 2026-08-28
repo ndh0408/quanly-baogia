@@ -226,6 +226,11 @@ node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo
 # dấu đóng lẻ / quá cuối file). Phần mờ (trỏ vào dòng chú thích) chỉ được liệt kê, không làm
 # đỏ — một cổng hay báo động giả sẽ bị người ta tắt, lúc đó còn tệ hơn không có cổng nào.
 node scripts/ci/check-line-refs.mjs --check >/dev/null;            ket $? "check-line-refs (chú thích trỏ file:dòng)"
+# check-line-refs chỉ kiểm tham chiếu file:dòng CÓ TỒN TẠI — nó không nhìn CON SỐ. Cổng dưới đây
+# đo 9 con số từ mã nguồn (quy tắc cảnh báo, nhóm, bài promtool, bước ui-smoke, metric, endpoint,
+# ADR, tệp test backend/web) rồi đối chiếu với mọi tài liệu. Số LỊCH SỬ có quy ước khai riêng để
+# không bị báo oan — xem chú thích đầu scripts/ci/check-doc-numbers.mjs.
+node scripts/ci/check-doc-numbers.mjs --check >/dev/null;          ket $? "check-doc-numbers (số liệu tài liệu; chi tiết: npm run docnum)"
 # Ranh giới tầng (routes → services → Prisma) — ADR 0001 khai nó, ADR 0008 giải thích vì sao khoá
 # bằng cổng thay vì đổi cây thư mục. Thư mục là cách SẮP XẾP; thứ giữ ranh giới là phép kiểm chạy được.
 node scripts/ci/check-architecture.mjs >/dev/null;                  ket $? "check-architecture (ranh giới tầng)"

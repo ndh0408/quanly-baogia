@@ -78,19 +78,48 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 | `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
 | `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch |
 | `scripts/ci/smoke-image.sh` | Image production: boot, `/livez` + `/readyz`, SPA phục vụ được, phông PDF, prisma CLI, không có mã nguồn/đồ nghề test, **0 dòng stack trong log khởi động**. `scripts/ci/docker-smoke.sh` dựng image từ cây làm việc rồi gọi nó — **mọi khẳng định về image nằm ở `smoke-image.sh`**, đừng nhân đôi |
-| `scripts/ci/ui-smoke.mjs` | Chromium thật, 18 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → 0 lỗi console. test đơn vị không thấy lớp lỗi này — web/ chạy vitest ở `environment: "node"`, repo không cài jsdom |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật, 18 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → 0 lỗi console. Không tầng nào dưới nó thấy lớp lỗi này: tầng component chạy jsdom (dựng lại DOM trong tiến trình, không tải asset, không thi hành CSP, không có mạng), chỉ E2E mới nạp bundle ĐÃ BUILD qua Express thật |
 | `scripts/ci/check-web-bundle.mjs` | Bundle giao cho người dùng là **bản DEV của React**. Vite quyết dev-hay-prod theo `NODE_ENV` của máy đang build, mà chính `verify-local.sh` export `NODE_ENV=test` — nên trước 2026-08-27 `npm run verify` đẻ ra bundle dev (984.802 byte thay vì 630.482) rồi đem đi smoke |
 | `scripts/ci/check-helm.mjs` | Chart render ra manifest hỏng: tag di động, mật khẩu rỗng, `secretKeyRef` trỏ khoá không tồn tại. `helm lint` KHÔNG render nên không thấy gì |
 | `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên. Bước `[A4]` soi luôn PromQL trong bảng điều khiển Grafana — panel trỏ vào metric đã chết vẽ đường 0 và người trực đọc thành "hệ thống đang yên" |
 | `scripts/db/explain-hot-paths.mjs` | Truy vấn nóng QUÉT TUẦN TỰ bảng lớn. Dựng 5.000 dòng thật, nghe câu SQL Prisma THẬT SỰ chạy rồi `EXPLAIN ANALYZE` nó. Đã tìm ra một index thiếu thật (trang Mã khách hàng sắp theo `createdAt` mà không có index nào phục vụ) |
 | `scripts/ci/security-scan.sh` | Bí mật trong mã **và trong lịch sử git**, lỗ hổng HIGH/CRITICAL có bản vá, mẫu nguy hiểm (semgrep), SBOM |
 | `scripts/ci/check-line-refs.mjs` | Chú thích trỏ `file:dòng` vào hư không (số dòng trôi mỗi lần ai đó thêm dòng) |
+| `scripts/ci/check-doc-numbers.mjs --check` | **Con số trong tài liệu trôi khỏi mã nguồn.** `check-line-refs` chỉ kiểm tham chiếu `file:dòng` có trỏ vào chỗ có thật — nó KHÔNG nhìn con số. Cổng này đo chín đại lượng từ mã nguồn (quy tắc cảnh báo, nhóm quy tắc, bài `promtool`, bước ui-smoke, metric, endpoint, ADR, tệp test backend, tệp test web) rồi đối chiếu với mọi tài liệu trong cây, và in kèm lệnh shell để tự đo lại. **Viết số vào tài liệu thì đọc quy ước ngay dưới bảng trước** |
 | `scripts/ci/check-architecture.mjs` | Ranh giới tầng nhoè đi: route chạm thẳng Prisma, service tự trả HTTP, phụ thuộc ngược chiều, vòng import. 7 khoản nợ hiện có được KHAI kèm lý do — file mới thì ĐỎ ([ADR 0008](docs/adr/0008-khong-doi-cay-thu-muc-sang-modules.md)) |
 | `scripts/ci/check-shell-strict.mjs` | Script shell thiếu `set -euo pipefail` — lỗi giữa chừng đi tiếp im lặng (đã từng nuốt trọn một lượt migration hỏng) |
 | `scripts/ci/check-deps.mjs` | Phụ thuộc lệch giữa `package.json` và `package-lock.json`, hoặc gói chỉ-dev lọt vào `dependencies` |
 | `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
 | `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
 | `REQUIRE_DB_TESTS=1` | Cổng xanh trong khi test tích hợp lặng lẽ bỏ qua |
+
+### Viết số vào tài liệu — quy ước khai SỐ LỊCH SỬ
+
+`check-doc-numbers` soi **mọi** con số trong tài liệu, kể cả con số bạn cố ý viết về quá khứ
+("trước đợt vá là 14 metric"). Repo này GIỮ những con số đó — chúng là bản ghi, không phải lỗi.
+Nên trước khi viết, phải biết cách khai, nếu không cổng sẽ chặn bạn mà bạn không hiểu vì sao.
+
+Ba cách khai một con số lịch sử, dùng cách nào cũng được:
+
+1. **Mốc bằng lời** — đặt một cụm như `trước đợt` · `trước đó` · `trước đây` · `từng ghi` ·
+   `từng là` · `bản trước` · `bản cũ` · `ảnh chụp` · `số của mốc` · `lúc Phase` · `đã đo lúc`
+   vào **trước** con số, trong cùng đoạn văn. Mốc làm mờ mọi con số đứng SAU nó.
+2. **Nhãn tường minh** `<!-- so-lich-su -->` trên chính dòng đó, hoặc dòng ngay trước.
+3. **Dạng tỉ lệ `N/M`** — "8/8 ADR", "137/137 endpoint". Đây là lời khai "đã xử lý N trong M
+   của LÚC ĐÓ", nên cổng bỏ qua cả cụm.
+
+Hai hệ quả dễ vấp:
+
+- **Mốc chỉ về PHÍA TRƯỚC.** Số hiện tại đứng TRƯỚC mốc vẫn bị soi — đó là chủ ý, vì người ta
+  hay viết "hiện có 17 quy tắc; trước đợt 2026-08-27 là 14". Nếu bạn đặt số hiện tại SAU một
+  mốc, nó sẽ bị bỏ qua và **cổng mất răng ở đúng chỗ đó**.
+- **Đoạn văn cắt tại dòng trống, dòng bảng `|`, tiêu đề `#`, mục danh sách.** Một mốc trong ô
+  bảng chỉ mờ đúng hàng đó, không lan xuống cả bảng. Ngược lại: viết một mốc trong văn xuôi vì
+  lý do KHÔNG liên quan tới số liệu ("Trước đây chúng tôi dùng Grafana Cloud") vẫn làm mờ mọi
+  con số sau nó trong cùng đoạn. Muốn giữ răng thì đặt số hiện tại TRƯỚC mốc, hoặc tách đoạn.
+
+Không khai được vì con số thật sự sai? Thì **sửa con số**, đừng khai lịch sử để cho qua. Chạy
+`npm run docnum` để xem toàn bộ số đo cùng lệnh shell tương đương của từng đại lượng.
 
 ## Trước khi coi là xong
 

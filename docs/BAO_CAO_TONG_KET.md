@@ -18,7 +18,8 @@ lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh 
 Docker thật, smoke giao diện Chromium 18 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
-**1.410 bài backend + 251 bài web** (đo lại 2026-08-27 sau đợt vá, `npm run verify` xanh trọn).
+**1.410 bài backend + 293 bài web** (backend đo 2026-08-27; web đo lại 2026-08-28 sau khi thêm
+tầng kiểm mức component — xem mục J).
 
 **Điều đáng nói nhất không phải các bản vá — mà là ba lỗi mà chính việc viết cổng kiểm mới lộ ra:**
 
@@ -226,13 +227,23 @@ Tài liệu **chuẩn** (canonical) sau đợt này:
 ## J. Test Results
 
 ```bash
-npm run verify                     # 13 bước · 34 khẳng định · TẤT CẢ XANH · exit 0
+npm run verify                     # 13 bước · 35 khẳng định
 ```
+
+> **Số khẳng định đọc từ script, KHÔNG từ một lượt chạy mới.** Lượt `npm run verify` trọn
+> gần nhất là 2026-08-27 và xanh ở **34** khẳng định. Đợt 2026-08-28 thêm đúng một cổng
+> (`check-doc-numbers`, một dòng `ket` trong bước `[8/13]`, không đổi mẫu số bước) → 35.
+> Đếm lại: `grep -cE '(^|;)\s*ket ' scripts/verify-local.sh` ra 34 dòng, trong đó một dòng
+> nằm trong hàm `do_toast` được gọi hai lần, nên 33 + 2 = 35. Chưa có lượt chạy trọn nào
+> sau 2026-08-27 xác nhận cả 35 cùng xanh — nó cần PostgreSQL + Redis + MinIO + Docker.
 
 | Lệnh | Kết quả |
 |---|---|
-| `npx vitest run` (backend) | **177 tệp · 1 410 bài xanh · 4 bỏ qua** — đo lại 2026-08-27 trong lượt `npm run verify` trọn (có PostgreSQL, Redis, MinIO và Docker). Vòng soát cùng ngày thêm `tests/xf-observability-gaps.test.js`, `web/src/lib/gridUndo.test.ts` và `gridSelect.test.ts` |
-| `npx vitest run` trong `web/` | **21 tệp · 251 bài xanh** (environment `node`, KHÔNG jsdom — `web/vite.config.ts` không khai khối `test`) |
+| `npx vitest run` (backend) | **178 tệp** — đo 2026-08-28. Đợt này thêm `tests/xg-doc-numbers.test.js`; chạy riêng nó: **36 bài xanh**, không cần hạ tầng |
+| ↳ số BÀI của backend | **Chưa đo lại được ở đợt 2026-08-28** — cần PostgreSQL + Redis + MinIO, thiếu một cái là 71 tệp chết ngay lúc nạp. Số của mốc gần nhất (2026-08-27, lượt `npm run verify` trọn): 1 410 bài xanh · 4 bỏ qua. Cộng thêm bao nhiêu thì phải CHẠY mới biết, không cộng nhẩm |
+| `npx vitest run` trong `web/` | **22 tệp · 293 bài xanh** — đo 2026-08-28. Mặc định vẫn là environment `node` (`web/vite.config.ts` không khai khối `test`); đúng một tệp bật jsdom bằng docblock `@vitest-environment`, xem [development/TESTING.md](development/TESTING.md) |
+| ↳ trong đó, mức component | `web/src/components/GridTable.component.test.tsx` — **42 bài xanh**, dựng `<GridTable />` thật. Đã kiểm ngược từng cổng (làm hỏng `doUndo`, bỏ cổng `editable`, tắt cổng IME, đảo `pushUndo` ra SAU khi ghi) và xác nhận nó ĐỎ đúng chỗ |
+| `npm run check:docnum` | Cổng mới: đo chín đại lượng từ mã nguồn rồi đối chiếu với toàn bộ tài liệu trong cây. Quy ước khai số lịch sử ghi ở [AGENTS.md](../AGENTS.md) |
 | `npm run smoke:ui` | **18/18 bước xanh** · 0 lỗi console · 0 request hỏng ở origin của mình |
 | `bash scripts/ci/docker-smoke.sh` | image dựng + chạy thật, **0 dòng stack trong log khởi động** |
 | `npm run scan` | gitleaks (lịch sử + cây làm việc) · trivy · semgrep · SBOM |
@@ -268,6 +279,22 @@ Không che giấu. Đầy đủ ở `docs/REMAINING_RISKS.md`; những mục cò
    (`IMAGE_REF=…@sha256:`), bật là quyết định của chủ hệ thống.
 8. **cosign chưa dùng** — không có registry publishing, nên ký ảnh chưa có nơi để kiểm chữ ký.
    Ghi `DEFER` trong bảng công nghệ.
+9. **Lưới báo giá: phần cần layout hoặc ảnh THẬT vẫn không có cổng.** Đợt 2026-08-28 đóng được
+   dây nối bàn phím — đo được rằng **18 trong 19** chỗ gọi `pushUndo()` đều chụp ảnh TRƯỚC khi
+   ghi vào `items`. Chỗ thứ 19 là `addImages` (`web/src/components/GridTable.tsx:1642`): nó chờ
+   `Image.onload`, mà jsdom không giải mã ảnh nên promise treo — giả lập được thì cũng chỉ là
+   giả lập chính hàm mình định kiểm. Cùng nhóm chưa có cổng: `onCopyCut` (chiều GHI vào
+   clipboard), chọn vùng bằng chuột, `caretIndexAtPoint`, nút kéo-fill, và mọi phép tính bề
+   rộng cột — jsdom không có layout, `ResizeObserver` hay `matchMedia`. Đây là **giới hạn của
+   tầng**, không phải việc bỏ dở: chúng thuộc E2E. Chi tiết:
+   [REMAINING_RISKS.md](REMAINING_RISKS.md).
+10. **Ba component khác chưa có bài kiểm mức component nào** — `ExtraTables.tsx`, `Shell.tsx`,
+    `ImportExcelModal.tsx`. Đợt 2026-08-28 chỉ lấp lỗ `GridTable`; đừng đọc "có tầng component"
+    thành "frontend đã được phủ".
+11. **`check-doc-numbers` cố ý HẸP.** Nó canh chín đại lượng đo tĩnh được. Nó **không** canh: số
+    BÀI test (`it.each` nở ra lúc chạy, đếm tĩnh sai), số bước của `verify-local.sh`, số commit,
+    số dòng mã. Những con số đó vẫn trôi được mà không cổng nào đỏ — `scripts/ci/ui-smoke.mjs`
+    và `scripts/verify-local.sh` đang có sẵn một ca như thế.
 
 ---
 

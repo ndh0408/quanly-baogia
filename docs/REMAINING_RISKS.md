@@ -698,83 +698,161 @@ Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải p
   [development/TESTING.md](development/TESTING.md).
 - **Ba đường của lưới mà `ui-smoke` KHÔNG đi qua** — smoke chỉ gõ phím thường
   (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Cả ba
-  nay đều có lưới đỡ ở tầng dưới, nhưng CHỈ ở mức hàm thuần:
+  nay đều có lưới đỡ ở tầng dưới, nhưng KHÔNG cùng một mức:
   - clipboard → `tests/gridClipboard.test.js`, đơn vị, trên 13 hàm thuần
-    export từ `web/src/lib/clipboard.ts`;
+    export từ `web/src/lib/clipboard.ts`. Đường dán TRONG component nay cũng có
+    cổng, nhưng `onCopyCut` (chiều GHI) thì chưa — xem mục riêng ngay sau danh sách.
   - IME tiếng Việt → `web/src/lib/imeGuard.test.ts`, đơn vị, trên
-    `dangGoIME` của `web/src/lib/gridShared.ts`;
+    `dangGoIME` của `web/src/lib/gridShared.ts`; cổng IME **trong component** cũng
+    đã có bài kiểm từ 2026-08-28.
   - undo/redo → `web/src/lib/gridUndo.test.ts`, đơn vị (20 ca), trên
-    `createUndoStack`/`undoRedoKey` của `web/src/lib/gridUndo.ts` — **mới có từ
-    2026-08-27**, trước đó không có gì. Dây nối trong component thì vẫn hở: xem
-    mục riêng ngay sau danh sách này.
+    `createUndoStack`/`undoRedoKey` của `web/src/lib/gridUndo.ts`; và
+    `web/src/components/GridTable.component.test.tsx` (42 bài, chạy jsdom) cho dây
+    nối bàn phím THẬT — **mới có từ 2026-08-28**. Phần còn hở của đường này (đáng kể
+    nhất: `addImages`, và mọi thứ cần layout thật) ghi ở mục riêng ngay sau danh sách.
 - **Rate limit bỏ qua khi Redis chết** — đánh đổi có chủ ý; khoá tài khoản khi
   sai mật khẩu nhiều lần nằm ở CSDL nên vẫn còn.
 - **VM production là điểm hỏng đơn** — xem
   [operations/DEPLOYMENT.md](operations/DEPLOYMENT.md).
 
-## Undo/redo của lưới: ngăn xếp ĐÃ có bài kiểm, dây nối trong component thì CHƯA (2026-08-27)
+## Undo/redo của lưới: dây nối trong component NAY có bài kiểm; phần cần layout/ảnh thật vẫn hở (2026-08-28)
 
-Mục này trước đây ghi *"0 bài kiểm — rủi ro ĐANG MỞ"*. Lời khai đó **nay sai**: phần
-thuần của cơ chế hoàn tác đã được tách ra khỏi component và có bài kiểm chạy xanh
-trong CHÍNH nhánh này. Rủi ro **đóng một phần** — phần còn hở được ghi rõ bên dưới,
-đừng đọc mục này thành "đã xong".
+Mục này đã bị sửa lời khai ba lần. Hai lần đầu vì lời khai **SAI**; lần này khác — lời
+khai cũ (*"ngăn xếp ĐÃ có bài kiểm, dây nối trong component thì CHƯA"*) đúng vào lúc
+viết, và nay hết đúng vì lỗ **đã được vá**. Ghi rõ sự khác biệt đó để người đọc sau
+không tưởng mục này lại vừa nói dối lần nữa.
+
+Rủi ro **thu hẹp mạnh, chưa đóng hết**. Cái gì có cổng và cái gì không nằm ngay dưới.
 
 ### Cái gì NAY đã được kiểm
 
-`web/src/lib/gridUndo.ts` export `createUndoStack`, `undoRedoKey` và `UNDO_LIMIT` —
-tức đã có thứ để một bài vitest `import`. Bài kiểm:
+**Tầng đơn vị** (có từ 2026-08-27):
 
-- `web/src/lib/gridUndo.test.ts` — **20 ca, xanh**: vòng lùi/tiến, ba lối phím
+- `web/src/lib/gridUndo.test.ts` — **20 ca**: vòng lùi/tiến, ba lối phím
   (Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z, cả chữ hoa lẫn chữ thường), ghi mốc mới thì
   nhánh redo mất hiệu lực, trần 100 mốc cắt ở ĐẦU, `dropMark()` khi Esc huỷ phiên
   gõ, mỗi lưới một ngăn xếp riêng, và bấm lùi/tiến lúc hết mốc không sinh rác.
-- `web/src/lib/gridSelect.test.ts` — 21 ca cho Shift+mũi tên (đường thứ hai được
-  tách cùng đợt). Hai file cộng lại **41 ca**.
+- `web/src/lib/gridSelect.test.ts` — 21 ca cho Shift+mũi tên.
 
-Chạy lại: `cd web && npx vitest run src/lib/gridUndo.test.ts src/lib/gridSelect.test.ts`.
+**Tầng component** (mới, 2026-08-28) — `web/src/components/GridTable.component.test.tsx`,
+**42 bài xanh**, dựng `<GridTable />` THẬT rồi bắn `KeyboardEvent` GỐC vào ô nhập. React
+uỷ quyền sự kiện ở gốc cây, nên đây đúng là đường phím thật đi, không phải harness mô phỏng.
+
+Nó phủ năm cụm:
+
+| Cụm | Kiểm gì |
+|---|---|
+| Hoàn tác/làm lại | Ctrl+Z lùi ô vừa gõ — cả model LẪN giá trị hiển thị của ô đang focus (chốt luôn `syncActiveCell`); Ctrl+Y và Ctrl+Shift+Z làm lại; ⌘+Z chạy y hệt; gõ ba nhịp vào cùng một ô chỉ sinh MỘT mốc; Ctrl+Z lúc ngăn xếp rỗng không hỏng gì |
+| Cổng `editable` | Đổi prop trên CÙNG MỘT instance (giữ nguyên `histRef`): `editable=false` thì Ctrl+Z/Ctrl+Y đứng im, bật lại thì lùi được ngay. Lưới chỉ đọc thì Ctrl+`-` · Ctrl+`+` · Delete không đổi dữ liệu |
+| Cổng IME | ↓ và Enter khi `isComposing` / `keyCode` 229 KHÔNG bị lưới cướp (kèm bài ĐỐI CHỨNG: ↓ thường thì lưới nhận); `key="Process"` của Firefox thì ô đang khoá được mở `readOnly` + xoá rỗng để cụm chữ đè lên |
+| Shift+mũi tên | Shift+↓ nới vùng (hai `<td>` mang class `cell-selected`, neo giữ `cell-anchor`); Shift+↓ rồi Shift+↑ THU vùng lại; Shift+→ nới ngang rồi ↓ trơn thì bỏ vùng; Shift+↓ ở hàng cuối đứng yên |
+| Vị trí đặt mốc | Bất biến: chụp JSON trước → làm thao tác → BẮT BUỘC dữ liệu phải đổi → Ctrl+Z → JSON phải bằng Y HỆT chuỗi ban đầu |
+
+Chạy lại cả ba tầng:
+
+```bash
+cd web && npx vitest run src/lib/gridUndo.test.ts src/lib/gridSelect.test.ts \
+                        src/components/GridTable.component.test.tsx
+```
+
+### Câu hỏi cũ của mục này ĐÃ CÓ CÂU TRẢ LỜI ĐO ĐƯỢC
+
+Bản trước để ngỏ: *"19 chỗ gọi `pushUndo()` — bài kiểm chứng minh ngăn xếp cư xử đúng,
+**không** chứng minh mốc được đặt đúng chỗ."* Nay đo được: **18 trong 19 chỗ** có cổng
+gác, và cả 18 đều chụp ảnh TRƯỚC khi ghi vào `items`.
+
+Cách đo, để người sau lặp lại được: tạm gắn `new Error().stack` vào `pushUndo`, chạy 42
+bài, thu số dòng — ra `264, 698, 717, 743, 770, 775, 776, 806, 815, 898, 907, 917, 927,
+1116, 1138, 1145, 1146, 1647` (đối chiếu: `grep -n 'pushUndo()' web/src/components/GridTable.tsx`
+ra đúng 19 chỗ), rồi khôi phục nguyên trạng.
+
+Đường tới 18 chỗ đó đều là thao tác người dùng thật: gõ ô chữ, gõ ô số, Ctrl+`-`,
+Ctrl+`+`, Ctrl+D, Ctrl+R, Delete, Enter ở hàng cuối, Ctrl+Enter điền cả vùng, bốn nhánh
+dán (một số / một chữ / fill ra vùng / khối 2×2), nút "+ Thêm hàng", nút "↳", nút "✕",
+chọn gợi ý rạp (`applySug`), modal "📐 Chèn từ rạp" (`insertCatalogRows`), và xoá ảnh
+(`removeImage`). Thêm một bài cho `dropMark()`: Esc huỷ phiên gõ thì bỏ luôn mốc của nó.
+
+### Hạ tầng đã đổi cái gì — và cái gì CỐ Ý không đổi
+
+Lý do cũ (*"`web/` chạy environment `node`, không có `document`, jsdom không được cài"*)
+nay chỉ còn đúng một nửa:
+
+- `jsdom` **đã được cài** — đúng MỘT gói, `web/package.json` → `devDependencies`.
+  **KHÔNG** cài `@testing-library/*`; bài kiểm dùng `createRoot` + `act` của chính React 19.
+  Giữ dấu chân phụ thuộc ở một gói là có chủ ý: `tests/ch3-npm-manifest.test.js` đòi mọi
+  `devDependencies` phải có người dùng thật.
+- **Mặc định của `web/` VẪN là `node`.** `web/vite.config.ts` vẫn **không** khai khối
+  `test`, và không có `vitest.config.*`. Tệp nào cần DOM thì tự khai bằng docblock
+  `/** @vitest-environment jsdom */` ở dòng 1 — tính đến 2026-08-28 đúng một tệp làm thế.
+  Đừng thêm khối `test` với `environment: "jsdom"` cho cả `web/`: nó sẽ bọc DOM giả quanh
+  những bài đang cố tình chạy thuần, và làm mất chính lớp bảo đảm "hàm này không đụng DOM".
 
 ### Cái gì VẪN CÒN HỞ
 
-**Không có bài kiểm nào chạy qua chính `GridTable.tsx`.** Lý do là hạ tầng, không
-phải lười: `web/` **không có** `vitest.config.*` và `web/vite.config.ts` **không**
-khai khối `test`, nên vitest chạy ở environment mặc định **`"node"`** — không có
-`document`. `jsdom`/`happy-dom` chỉ là peer TUỲ CHỌN của vitest và **không được
-cài** (`web/package.json` không có chúng, cũng không có `@testing-library/*`).
-Muốn kiểm mức component thì phải thêm phụ thuộc và một khối `test` trước đã.
+1. **`addImages` — chỗ pushUndo DUY NHẤT trong 19 chỗ không có cổng**
+   (`web/src/components/GridTable.tsx:1642`). Lý do đo được, không phải phỏng đoán:
+   `fileToImg` (`web/src/components/GridTable.tsx:1616`) chờ `im.onload` của `new Image()`
+   với `src` là data-URL rồi vẽ vào canvas. jsdom KHÔNG giải mã ảnh nên `onload` không bao
+   giờ bắn và promise treo vĩnh viễn. Giả lập được thì cũng chỉ là giả lập chính hàm mình
+   định kiểm, nên không làm. Chỗ song sinh của nó, `removeImage`
+   (`web/src/components/GridTable.tsx:1647`), thì ĐÃ có cổng.
+2. **`onCopyCut` chưa có cổng.** Nó GHI vào `e.clipboardData.setData(...)` và quản
+   `cutPendingRef` (viền nét đứt, di chuyển khi dán). Stub hiện có chỉ ĐỌC được; viết một
+   stub ghi được thì bài kiểm hoá ra chỉ kiểm chính stub đó.
+3. **Đối tượng clipboard là hàng thay thế, không phải hàng thật.** jsdom 30 không có
+   `ClipboardEvent` lẫn `DataTransfer` (đo trực tiếp: cả hai đều `undefined`). Bốn bài dán
+   dùng `new Event("paste")` kèm một `clipboardData` tối thiểu chỉ có `getData` — đúng và
+   chỉ đúng hai thứ mà `onPaste` đụng tới. Đường dán TRONG component là thật; cái nền tảng
+   thì không. Ghi ra để không ai đọc nhầm.
+4. **Không có LAYOUT trong jsdom** — `getBoundingClientRect` trả toàn số 0, không có
+   `ResizeObserver`, không có `matchMedia`. Nên chưa kiểm: vị trí dropdown autocomplete và
+   gợi ý rạp, `caretIndexAtPoint` (đo bằng phần tử gương), nút kéo-fill và cú kéo của nó,
+   toàn bộ phép tính bề rộng cột, chọn vùng bằng CHUỘT (`onSelDragStart` + `mouseover`),
+   point-mode chèn tham chiếu bằng bấm/kéo ô, và `coarsePointer` (luôn `false` vì không có
+   `matchMedia`). Mã đã tự phòng bằng `typeof ResizeObserver === "undefined"` nên nhánh đó
+   chạy — chỉ là không được kiểm.
+5. **Một trong 18 chỗ tới được bằng đường TẮT so với đời thực.** Ctrl+Enter điền cả vùng
+   (`web/src/components/GridTable.tsx:1116`) chỉ tới lượt `pushUndo` sau chuỗi
+   Shift+↓ → gõ → Ctrl+Z (xoá mốc phiên gõ mà vẫn giữ cờ đang-sửa). Chuỗi đó hợp lệ bằng
+   bàn phím nhưng hiếm; ai đổi logic `editUndoRef` thì bài này có thể đổi màu vì lý do khác
+   với ý định ban đầu.
+6. **`ui-smoke` vẫn không bấm Ctrl+Z lần nào** — nó chỉ gõ phím thường
+   (`keyboard.type` + `Enter`).
+7. **Ba component còn lại KHÔNG có bài kiểm mức component nào** —
+   `web/src/components/ExtraTables.tsx`, `web/src/components/Shell.tsx`,
+   `web/src/components/ImportExcelModal.tsx`. Đợt này chỉ lấp lỗ `GridTable`.
 
-Hệ quả — những thứ sau vẫn chạy không có lưới an toàn:
-
-- **19 chỗ gọi `pushUndo()`** (dán, xoá dòng `Ctrl+-`, chèn dòng `Ctrl++`, điền
-  chuỗi, gộp phiên gõ trong một ô, thêm/xoá ảnh hạng mục) — bài kiểm chứng minh
-  ngăn xếp cư xử đúng, **không** chứng minh mốc được đặt đúng chỗ. Đặt `pushUndo()`
-  SAU khi đã ghi vào `items` là chụp luôn giá trị mới; không cổng nào đỏ.
-- **`snap()` / `restore()`** — `JSON.stringify(items)` và chiều ngược lại
-  (`JSON.parse`, cấp lại `_k` cho dòng thiếu khoá, `recomputeAll()`,
-  `syncActiveCell()`). Đây là phần đụng model và DOM, nằm ngoài module thuần.
-- **Dây nối bàn phím thật.** `gridUndo.test.ts` mô phỏng nếp gọi của
-  `onGridKeyDown` bằng một harness (`sua()` / `bam()`), nhưng cái nó kiểm là
-  `undoRedoKey` TRẢ VỀ đúng lệnh — không kiểm được rằng component có gọi nó,
-  có tôn trọng cờ `editable`, hay có `preventDefault()` đúng chỗ.
-- **`ui-smoke` vẫn không bấm Ctrl+Z lần nào** — nó chỉ gõ phím thường
-  (`keyboard.type` + `Enter`).
-
-### Chỗ ở (đã đo lại 2026-08-27 — số dòng cũ đã trôi)
+### Chỗ ở (đã đo lại 2026-08-28)
 
 | Thành phần | Chỗ ở |
 |---|---|
-| Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm** |
-| `histRef = useRef(createUndoStack())` (thay cho `undoRef`/`redoRef` cũ) | `web/src/components/GridTable.tsx:175` |
+| Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm đơn vị** |
+| Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **42 bài** |
+| `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx:175` |
 | `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:257` |
 | `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:258` |
 | `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:844` |
 | `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx:845-846` |
 | Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1149-1150` |
+| Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1009` |
 | `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1169` |
+| `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx:1642` |
 
-Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần như bản trước — `npm run check:refs`
-chỉ kiểm được số dòng khi tên file nằm CÙNG DÒNG với nó.
+Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần — `npm run check:refs` chỉ kiểm được số
+dòng khi tên file nằm CÙNG DÒNG với nó.
 
-> **Hai lần lời khai của mục này bị sửa — ghi lại để không lặp.**
+> **Ghi chú thiết kế, kẻo ai đó "sửa" nhầm:** Ctrl+Z VẪN chạy khi người dùng đang dựng ký
+> tự Telex. Đó là chủ ý — cổng IME viết là `!ctrl && dangGoIME(e)`, tức phím có Ctrl không
+> bao giờ bị cổng IME nuốt. Có một bài riêng chốt điều này, để lần sau không ai đọc thành
+> tai nạn rồi đi "vá".
+
+> **Ba lần lời khai của mục này bị sửa — ghi lại để không lặp.**
+>
+> **(2026-08-28, lần ba)** Lần này lời khai cũ không sai, chỉ hết hạn: lỗ đã được vá bằng
+> `web/src/components/GridTable.component.test.tsx`. Điều đáng giữ lại là *cách* biết nó
+> được vá thật — kiểm ngược từng cổng một (làm hỏng `doUndo`, bỏ cổng `editable`, tắt cổng
+> IME, đảo `pushUndo` ra SAU khi ghi, bỏ `syncActiveCell`, bỏ `dropMark`) rồi xác nhận bài
+> kiểm ĐỎ đúng chỗ, đúng số lượng. Một bài kiểm chưa từng đỏ thì chưa biết nó bảo vệ gì.
 >
 > **(2026-08-27, lần hai)** Bản trước viết *"`undoRef`/`redoRef` tại
 > `GridTable.tsx:173-174`"*, *"`doUndo`/`doRedo` tại `:847-848`"*, *"phím tắt tại

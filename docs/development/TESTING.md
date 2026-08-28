@@ -9,12 +9,15 @@
      ├──────────────────────────────────┤
      │ Tích hợp (supertest + PG + MinIO)│  lái ứng dụng THẬT
      ├──────────────────────────────────┤
+     │ Component React (jsdom)          │  render component THẬT, bắn phím THẬT;
+     │ (*.component.test.tsx)           │  OPT-IN TỪNG TỆP — xem mục ngay dưới
+     ├──────────────────────────────────┤
      │ Đơn vị (toán tiền, phân quyền,   │  thuần, chạy đâu cũng được
      │ excel, clipboard, mã hoá…)       │
      └──────────────────────────────────┘
 ```
 
-Ba tầng, và tầng trên cùng **có thật** — không phải kế hoạch. `playwright` nằm trong
+Bốn tầng, và tầng trên cùng **có thật** — không phải kế hoạch. `playwright` nằm trong
 khối `devDependencies` của `package.json` và có đúng một chỗ dùng:
 `scripts/ci/ui-smoke.mjs` (`import { chromium } from "playwright"`). Chốt
 `tests/ch3-npm-manifest.test.js` đòi mọi `devDependencies` phải được cấu hình/script
@@ -72,7 +75,9 @@ Chromium được tìm theo thứ tự `SMOKE_CHROMIUM` → thư mục `PLAYWRIG
 `U16` là chốt đắt giá nhất: một smoke chỉ hỏi "có thấy chữ X không" vẫn xanh trong
 khi console đỏ rực, mà console đỏ chính là chỗ asset 404, `ChunkLoadError`, CSP chặn
 bundle của chính mình, và lỗi React lúc mount cả cây hiện ra. Bốn lớp lỗi đó không
-bài vitest nào bắt được (web/ chạy `environment: "node"`, repo không cài jsdom), vì không bài nào nạp bundle ĐÃ BUILD qua Express thật.
+bài vitest nào bắt được — kể cả tầng component chạy jsdom, vì không bài nào nạp bundle
+ĐÃ BUILD qua Express thật. jsdom dựng lại DOM trong tiến trình; nó không tải asset,
+không thi hành CSP, không có mạng.
 
 Bốn ngoại lệ được khai tường minh (không tha rộng): `/api/stream/events` bị
 `ERR_ABORTED` (SSE là kết nối sống mãi, đóng tab là kết thúc bình thường); `401` ở
@@ -88,6 +93,56 @@ số do máy chủ sinh. Không đụng dữ liệu sẵn có, không phụ thu�
 **Khi nào bước `[12/13]` tự bỏ qua:** chạy `npm run verify:nhanh` (`--nhanh` không
 build web nên sẽ kiểm nhầm bundle của lần build trước), hoặc gói `playwright` chưa
 được cài — lúc đó verify in một dòng **vàng** và đi tiếp, không đỏ.
+
+## Tầng component React — jsdom, và nó **OPT-IN TỪNG TỆP**
+
+> **Đọc mục này TRƯỚC khi viết bài kiểm mới trong `web/`.** Người viết sau rất dễ tưởng
+> mọi test của `web/` đều có DOM. **Không.** Mặc định vẫn là `"node"`, và một bài dùng
+> `document` mà quên khai docblock sẽ chết bằng `document is not defined` — lỗi trông
+> như bài kiểm sai, chứ không chỉ ra rằng thiếu một dòng cấu hình.
+
+Cách bật DOM cho một tệp: đặt docblock ở **dòng 1**, trước mọi `import`.
+
+```ts
+/** @vitest-environment jsdom */
+import { createRoot } from "react-dom/client";
+```
+
+Ba điều cố ý, đừng "sửa" ngược:
+
+1. **`web/vite.config.ts` KHÔNG khai khối `test`**, và `web/` không có
+   `vitest.config.*`. Nên environment mặc định của `web/` là `"node"` và
+   **mọi tệp không khai docblock vẫn chạy thuần**. Đừng đặt
+   `test: { environment: "jsdom" }` cho cả `web/`: nó bọc một DOM giả quanh những bài
+   đang cố tình chạy không có DOM, và làm mất chính lớp bảo đảm *"hàm này không đụng
+   `document`"* — thứ khiến `web/src/lib/*` an toàn khi dùng lại ở nơi khác. Chi phí
+   cũng có thật: dựng jsdom tốn thời gian cho từng tệp, và tuyệt đại đa số bài không cần.
+2. **Chỉ `jsdom` được cài, KHÔNG có `@testing-library/*`.** Bài kiểm dùng `createRoot`
+   + `act` của chính React 19 và bắn `KeyboardEvent` **gốc** vào phần tử. React uỷ quyền
+   sự kiện ở gốc cây, nên phím bắn kiểu này đi đúng đường phím thật đi. Giữ dấu chân phụ
+   thuộc ở một gói là có chủ ý — `tests/ch3-npm-manifest.test.js` đòi mọi
+   `devDependencies` phải có người dùng thật.
+3. **`jsdom` không lọt vào ảnh production.** Stage `webbuild` chạy `npm ci` để BUILD;
+   stage runtime chỉ lấy kết quả đã build — `Dockerfile:98` là
+   `COPY --from=webbuild /app/public/app2 ./public/app2`, không copy `node_modules` nào.
+
+**Tệp đang có ở tầng này** (tính đến 2026-08-28, đúng một):
+`web/src/components/GridTable.component.test.tsx` — **42 bài**, dựng `<GridTable />` thật
+để kiểm dây nối bàn phím: hoàn tác/làm lại, cổng `editable`, cổng IME, Shift+mũi tên, và
+bất biến *"mốc hoàn tác phải được chụp TRƯỚC khi ghi vào `items`"*. `loadCatalog` — lối ra
+mạng duy nhất của component — bị chặn bằng `vi.mock`; mọi hàm thuần khác vẫn chạy bản thật.
+
+```bash
+cd web && npx vitest run src/components/GridTable.component.test.tsx
+```
+
+**Giới hạn của tầng này — biết trước để đừng phí công.** jsdom không có layout
+(`getBoundingClientRect` trả toàn số 0), không có `ResizeObserver`, không có `matchMedia`,
+không có `ClipboardEvent` lẫn `DataTransfer`, và **không giải mã ảnh** (`Image.onload`
+không bao giờ bắn). Nên mọi thứ cần đo đạc thật — vị trí dropdown, bề rộng cột, kéo-thả,
+chọn vùng bằng chuột, nén ảnh qua canvas — **không** kiểm được ở đây; chúng thuộc tầng E2E
+hoặc chưa có cổng. Danh sách chính xác chỗ nào còn hở:
+[../REMAINING_RISKS.md](../REMAINING_RISKS.md).
 
 ## Nhóm test
 
@@ -156,8 +211,9 @@ npm run test:run                          # tất cả
 npx vitest run tests/csrf.test.js         # một file
 npx vitest run -t "tổng âm"               # một ca theo tên
 npm run test:coverage                     # kèm coverage
-npm run web:test                          # test đơn vị frontend
+npm run web:test                          # test frontend: đơn vị + tầng component jsdom
 npm run smoke:ui                          # E2E Chromium thật (cần build + Postgres)
+npm run docnum                            # số liệu tài liệu có khớp mã nguồn không
 ```
 
 ## Chưa được kiểm
@@ -168,28 +224,27 @@ Nói thẳng:
   không có bước nào gọi `ui-smoke`, nên một thay đổi làm trắng màn hình vẫn xanh
   trên GitHub và chỉ bị bắt khi có người chạy `npm run verify` trên máy mình.
 - **`ui-smoke` KHÔNG đụng tới clipboard, IME và undo/redo.** Nó gõ phím thường
-  (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Cả ba
-  đường nay đều có bài kiểm đơn vị ở tầng dưới, nhưng CHỈ trên hàm thuần:
+  (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Ba
+  đường đó nay có cổng ở tầng THẤP HƠN, không phải ở E2E:
   - clipboard → `tests/gridClipboard.test.js`, đơn vị, trên 13 hàm thuần của
-    `web/src/lib/clipboard.ts`;
+    `web/src/lib/clipboard.ts`; chiều DÁN trong component có bài kiểm ở tầng
+    jsdom, chiều COPY/CUT (`onCopyCut`) thì **chưa**;
   - IME tiếng Việt → `web/src/lib/imeGuard.test.ts`, đơn vị, trên `dangGoIME`
-    của `web/src/lib/gridShared.ts`;
+    của `web/src/lib/gridShared.ts`, cộng cổng IME trong component ở tầng jsdom;
   - undo/redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z) → `web/src/lib/gridUndo.test.ts`,
     đơn vị (20 ca), trên `createUndoStack`/`undoRedoKey` của
-    `web/src/lib/gridUndo.ts`. Có từ 2026-08-27; trước đó không có gì.
-- **Undo/redo: ngăn xếp có bài kiểm, dây nối trong component thì KHÔNG.** Phần
-  thuần đã tách ra `web/src/lib/gridUndo.ts` và được
-  `web/src/lib/gridUndo.test.ts` phủ 20 ca (vòng lùi/tiến, ba lối phím, trần 100
-  mốc, `dropMark()` khi Esc, mỗi lưới một ngăn xếp riêng). Nhưng **không bài kiểm
-  nào chạy qua `web/src/components/GridTable.tsx`**: `web/` không có
-  `vitest.config.*` và `web/vite.config.ts` không khai khối `test`, nên vitest
-  chạy ở environment mặc định `"node"` — không có `document`, và `jsdom`/
-  `happy-dom` (peer tuỳ chọn của vitest) lẫn `@testing-library/*` đều **không
-  được cài**. Nên vẫn hở: 19 chỗ gọi `pushUndo()` có đặt đúng chỗ không (chụp
-  TRƯỚC khi ghi vào `items`), `snap()`/`restore()`, và việc component có thật sự
-  hỏi `undoRedoKey` rồi tôn trọng cờ `editable` hay không. `ui-smoke` cũng vẫn
-  không bấm Ctrl+Z lần nào. Chi tiết:
-  [../REMAINING_RISKS.md](../REMAINING_RISKS.md).
+    `web/src/lib/gridUndo.ts`, cộng dây nối bàn phím thật ở tầng jsdom.
+- **Undo/redo: dây nối trong component NAY có cổng, phần cần layout/ảnh thật thì
+  KHÔNG.** `web/src/components/GridTable.component.test.tsx` (42 bài, 2026-08-28)
+  dựng `<GridTable />` thật và đo được rằng **18 trong 19** chỗ gọi `pushUndo()`
+  đều chụp ảnh TRƯỚC khi ghi vào `items`. Còn hở: `addImages`
+  (`web/src/components/GridTable.tsx:1642` — `fileToImg` chờ `Image.onload`, mà
+  jsdom không giải mã ảnh nên promise treo), `onCopyCut`, chọn vùng bằng chuột, và
+  mọi thứ cần layout thật. `ui-smoke` cũng vẫn không bấm Ctrl+Z lần nào. Danh
+  sách đầy đủ: [../REMAINING_RISKS.md](../REMAINING_RISKS.md).
+- **Ba component còn lại chưa có bài kiểm mức component nào** —
+  `web/src/components/ExtraTables.tsx`, `web/src/components/Shell.tsx`,
+  `web/src/components/ImportExcelModal.tsx`.
 - **Chưa có test hiệu năng/tải.** Số trong `docs/archive/performance/` là lịch sử.
 - **Chưa có test khôi phục trong CI.** Diễn tập khôi phục chạy trên host
   production theo systemd timer, không chạy ở CI.

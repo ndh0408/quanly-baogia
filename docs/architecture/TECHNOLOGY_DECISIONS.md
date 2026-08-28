@@ -18,7 +18,7 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
 | React | 19.0 (SPA, Vite) | **KEEP** | — | Ứng dụng nghiệp vụ nội bộ, **có xác thực**, không cần SSR/SEO. Phụ lục §11 cấm đổi sang Next.js đúng cảnh này. Lưới báo giá là DOM thủ công hiệu năng cao — đổi framework là viết lại nó. | — |
-| Vite | 8.1 | **KEEP** | — | Build 16 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
+| Vite | 8.1 | **KEEP** | — | Build 22 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
 | Express | 4.21 | **KEEP** | — | Phụ lục §11 cấm đổi sang NestJS chỉ vì DI/modules. Ranh giới module đạt được bằng cấu trúc thư mục TypeScript. Express 5 thì `DEFER` (xem dưới). | — |
 | Express | 4.21 | **DEFER** | Express 5 | Express 5 đổi cách xử lý lỗi async và pattern route. Lợi ích thật: bỏ được `asyncHandler`. Chưa đủ để đánh đổi rủi ro trên 137 endpoint. Xem lại khi Express 4 hết hỗ trợ. | Trung bình — mọi route phải test lại |
 | TypeScript | 5.7 | **KEEP** | — | `strict` đã bật, typecheck chạy trong cổng. | — |
