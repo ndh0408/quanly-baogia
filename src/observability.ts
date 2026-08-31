@@ -287,16 +287,44 @@ export const sseEvents = new Counter({
 // `collect()` ném là `registry.metrics()` ném là /metrics trả 500 — tức MỘT phụ thuộc chết làm mất
 // TOÀN BỘ số liệu, kể cả phần không dính gì tới nó. Nên mọi phép đo dưới đây đi qua `hanCho()`:
 // quá hạn hay ném đều thành `null`, và `null` được diễn giải riêng cho từng số (xem từng hàm).
-const SUCKHOE_TAT = process.env.HEALTH_METRICS === "0";
+// Nhận cả `0`/`false`/`off`/`no` (không phân biệt hoa thường). Vì sao không chỉ `"0"`: người vận
+// hành gõ `HEALTH_METRICS=false` sẽ tưởng đã tắt, còn thực tế gauge vẫn ping CSDL mỗi lần scrape —
+// một nút tắt IM LẶNG KHÔNG ĂN tệ hơn là không có nút tắt, vì nó tạo niềm tin sai.
+const SUCKHOE_TAT = /^(0|false|off|no)$/i.test((process.env.HEALTH_METRICS ?? "").trim());
 const SUCKHOE_TTL_MS = Number(process.env.HEALTH_METRICS_TTL_MS) || 5_000;
 const SUCKHOE_HAN_MS = Number(process.env.HEALTH_METRICS_TIMEOUT_MS) || 2_000;
 /** Điểm gắn của hệ tệp cần theo dõi. Trong container prod đây là lớp ghi của chính container. */
 export const DISK_METRICS_PATH = process.env.DISK_METRICS_PATH || "/";
 
+/**
+ * `HEALTH_METRICS=0` phải làm năm gauge dưới đây BIẾN MẤT KHỎI /metrics, không phải chỉ chặn phép đo.
+ *
+ * ── LỖI ĐÃ ĐO ĐƯỢC, DO CHÍNH BẢN VÁ TRƯỚC SINH RA ──────────────────────────
+ * Bản trước để `registers: [registry]` cố định rồi chỉ cho `capNhatSucKhoe()` thoát sớm khi tắt.
+ * Nhưng một Gauge KHÔNG NHÃN được prom-client khởi tạo sẵn ở 0, nên registry vẫn phát nguyên văn:
+ *     db_up{app="quanly-baogia",env="production"} 0
+ *     redis_up{...} 0
+ * (đo bằng `HEALTH_METRICS=0 node --import tsx` rồi in `registry.metrics()`). Quy tắc
+ * `QuanlyCsdlKhongToiDuoc` là `db_up == 0` trong 3 phút → nó kêu CRITICAL suốt ngày đêm trong khi
+ * Postgres hoàn toàn khoẻ. Và một cảnh báo kêu oan là một cảnh báo SẼ BỊ TẮT — đúng chế độ hỏng mà
+ * `QuanlySseBackplaneChet` và `QuanlyRedisChet` đã phải thêm hẳn một vế `and` để tránh.
+ *
+ * ── VÌ SAO "KHÔNG PHÁT" ĐÚNG HƠN "PHÁT 0" ──────────────────────────────────
+ * Cùng lý lẽ đã viết ở `doDia()`: không đo được thì KHÔNG PHÁT chuỗi nào, vì một con số bịa (0) đọc
+ * thành "CSDL chết" / "đĩa đầy". `disk_free_bytes` thoát nạn này nhờ có NHÃN (prom-client không tạo
+ * mẫu mặc định cho metric có nhãn) — tức nó đúng do tình cờ, không do thiết kế. Không đăng ký khi
+ * tắt làm cả năm gauge cùng một hành vi, và hành vi đó là hành vi có chủ ý.
+ *
+ * Phần "mất tín hiệu" do `absent()` lo: `QuanlyKhongConTargetNao` bắt ca mất sạch target. Người
+ * vận hành cố ý tắt phép đo thì nhận IM LẶNG (mất tín hiệu), không nhận BÁO ĐỘNG GIẢ — đánh đổi
+ * này được ghi ở .env.example ngay tại chỗ khai HEALTH_METRICS.
+ */
+const DK_SUCKHOE = SUCKHOE_TAT ? [] : [registry];
+
 export const dbUp = new Gauge({
   name: "db_up",
   help: "1 = Postgres trả lời `SELECT 1` ở lần scrape gần nhất; 0 = không trả lời (hoặc quá hạn)",
-  registers: [registry],
+  registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
 /**
@@ -310,27 +338,27 @@ export const dbUp = new Gauge({
 export const redisConfigured = new Gauge({
   name: "redis_configured",
   help: "1 = tiến trình này được cấu hình REDIS_URL (hàng đợi BullMQ/rate-limit/backplane SSE — KHÔNG giữ phiên); 0 = cố ý chạy không Redis",
-  registers: [registry],
+  registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
 export const redisUp = new Gauge({
   name: "redis_up",
   help: "1 = có ít nhất một kết nối Redis của tiến trình này ở trạng thái ready; 0 = không (chỉ có nghĩa khi redis_configured=1)",
-  registers: [registry],
+  registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
 export const diskFreeBytes = new Gauge({
   name: "disk_free_bytes",
   help: "Số byte TRỐNG cho tiến trình thường trên hệ tệp DISK_METRICS_PATH (statfs bavail × bsize)",
   labelNames: ["mountpoint"],
-  registers: [registry],
+  registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
 export const diskTotalBytes = new Gauge({
   name: "disk_total_bytes",
   help: "Tổng dung lượng hệ tệp DISK_METRICS_PATH (statfs blocks × bsize) — MẪU SỐ để tính tỉ lệ trống",
   labelNames: ["mountpoint"],
-  registers: [registry],
+  registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
 
@@ -441,6 +469,66 @@ export function capNhatSucKhoe(): Promise<void> {
   sucKhoeDangChay = chay;
   return chay;
 }
+
+// === CẤU HÌNH BẮT BUỘC Ở PRODUCTION MÀ ĐANG THIẾU ===
+//
+// ── VÌ SAO CÓ ─────────────────────────────────────────────────────────────
+// §10 đòi production PHẢI kêu khi thiếu "Redis credentials" / "storage credentials". src/config.ts
+// cố ý KHÔNG `process.exit` ở đó, và lập luận của nó (config.ts, khối `if NODE_ENV === "production"`)
+// đúng: làm cả ứng dụng không khởi động vì một tính năng phụ còn tệ hơn. Nhưng lập luận đó chỉ
+// đứng được nếu CÓ LỚP BÙ — mà lớp bù duy nhất đang có là một dòng `console.warn` lúc khởi động,
+// tức nó trôi mất sau lần cuộn log đầu tiên và KHÔNG ai đọc lại bao giờ.
+//
+// Hai lỗ cụ thể đã đo được:
+//   · `redis_configured == 0` ở production nghĩa là QUÊN REDIS_URL — nhưng quy tắc `QuanlyRedisChet`
+//     lại gác trên `redis_configured == 1`, tức nó TỰ LOẠI TRỪ đúng ca cần nó nhất.
+//   · S3_* và SMTP_HOST thì không có metric nào, nên không có quy tắc nào kêu được.
+//
+// ── VÌ SAO KHÔNG NẰM TRONG KHỐI HEALTH_METRICS ─────────────────────────────
+// Đây KHÔNG phải phép đo: nó chỉ đọc `config`, không chạm CSDL/Redis/đĩa, không tốn gì lúc scrape.
+// Gộp nó vào nút tắt `HEALTH_METRICS=0` sẽ làm mất luôn tín hiệu "quên cấu hình" ở đúng nơi người
+// ta tắt phép đo vì /metrics bị scrape dày — hai chuyện không liên quan gì nhau.
+//
+// ── VÌ SAO CHỈ PHÁT Ở PRODUCTION ──────────────────────────────────────────
+// Thiếu SMTP/S3/Redis ở máy dev là chuyện bình thường và ĐÚNG. Phát ở đó thì quy tắc cảnh báo phải
+// tự lọc `env="production"`, và một quy tắc kêu oan trên máy dev là quy tắc bị tắt. Chặn ngay ở
+// nguồn: ngoài production, `config_missing` không có chuỗi nào — `absent()` trung thực hơn.
+export const configMissing = new Gauge({
+  name: "config_missing",
+  help: '1 = biến bắt buộc-ở-production này CHƯA đặt (nhãn `key` = tên biến môi trường), 0 = đã đặt. CHỈ phát khi NODE_ENV=production.',
+  labelNames: ["key"],
+  registers: [registry],
+});
+
+/**
+ * Tập biến được theo dõi. PHẢI bám sát khối cảnh báo chỉ-production trong src/config.ts — thêm một
+ * `console.warn` ở đó mà quên thêm vào đây là lại có một cấu hình sót không ai quan sát được.
+ *
+ * S3 khai đủ BA biến chứ không chỉ `S3_ENDPOINT` như config.ts đang kiểm: `featureStatus()` coi kho
+ * object là BẬT chỉ khi có cả endpoint + access key + secret key, nên "có endpoint, thiếu khoá" là
+ * một cấu hình hỏng mà cảnh báo của config.ts hiện bỏ lọt.
+ */
+const CAUHINH_PROD: ReadonlyArray<readonly [string, unknown]> = [
+  ["REDIS_URL", config.REDIS_URL],
+  ["S3_ENDPOINT", config.S3_ENDPOINT],
+  ["S3_ACCESS_KEY", config.S3_ACCESS_KEY],
+  ["S3_SECRET_KEY", config.S3_SECRET_KEY],
+  ["SMTP_HOST", config.SMTP_HOST],
+  ["PII_ENC_KEY", config.PII_ENC_KEY],
+];
+
+/**
+ * Đặt `config_missing` một lần lúc nạp module. Không cần đo lại theo thời gian: `config` được zod
+ * đóng băng lúc khởi động và không có đường nào đổi nó lúc chạy — đổi biến môi trường bắt buộc
+ * khởi động lại tiến trình, và lúc đó hàm này chạy lại.
+ *
+ * Tách thành hàm (thay vì vòng lặp trần) để kiểm được cả hai nhánh mà không phải nạp lại module.
+ */
+export function capNhatCauHinhThieu(laProd = config.NODE_ENV === "production") {
+  if (!laProd) return;
+  for (const [khoa, gt] of CAUHINH_PROD) configMissing.set({ key: khoa }, gt ? 0 : 1);
+}
+capNhatCauHinhThieu();
 
 // === Cổng xuất file (Excel/PDF) ===
 // Không có mấy số này thì quá tải xuất file là một hộp đen: người dùng báo "chậm", còn hệ thống

@@ -72,9 +72,15 @@ sum(rate(export_rejected_total[15m]))
 export_queue_depth
 
 # Sức khoẻ phụ thuộc (đo NGAY LÚC SCRAPE, xem src/observability.ts)
+# HEALTH_METRICS=0 làm cả năm gauge dưới đây KHÔNG PHÁT CHUỖI NÀO (không phải phát 0) — chọn im
+# lặng, không phải chọn báo động giả. Xem .env.example tại chỗ khai HEALTH_METRICS.
 db_up                                    # 1 = Postgres trả lời SELECT 1
 redis_configured == 1 and redis_up == 0  # có cấu hình Redis nhưng không nối được
 disk_free_bytes / disk_total_bytes       # tỉ lệ trống của hệ tệp
+
+# Cấu hình bắt buộc ở production còn THIẾU (chỉ phát khi NODE_ENV=production)
+config_missing == 1                      # nhãn `key` = tên biến môi trường chưa đặt
+config_missing{key="REDIS_URL"} == 1     # ca mà `redis_configured == 1 and ...` ở trên KHÔNG bắt được
 
 # Đường realtime có chập chờn không (§18)
 sse_clients                              # số kết nối SSE đang mở (= "sse_connections" của §18)
@@ -84,7 +90,7 @@ sum by (event) (rate(sse_events[5m]))    # lưu lượng sự kiện thật sự
 
 ## Cảnh báo
 
-**17 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
+**19 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
 — chúng nằm ở [`infra/prometheus/alerts.yaml`](../../infra/prometheus/alerts.yaml),
 bài kiểm logic ở `infra/prometheus/alerts.test.yaml`, cổng CI là
 `npm run check:alerts`. Bản trước của tài liệu này viết "chưa cái nào được cấu
@@ -94,7 +100,7 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 
 | Mức | Trạng thái |
 |---|---|
-| Quy tắc **được viết + kiểm logic** | ✅ 17 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
+| Quy tắc **được viết + kiểm logic** | ✅ 19 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
 | Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana), **không bật mặc định** |
 | Có ai **bị đánh thức** khi chúng kêu | ❌ **KHÔNG có Alertmanager** — xem dưới |
 
@@ -107,6 +113,8 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 | **CSDL không tới được** | `QuanlyCsdlKhongToiDuoc` (`db_up == 0`, 3m) | critical |
 | **Redis không tới được** | `QuanlyRedisChet` (`redis_configured == 1 and redis_up == 0`, 3m) | critical |
 | **Đĩa sắp đầy** | `QuanlyDiaSapDay` (`disk_free_bytes / disk_total_bytes < 0,10`, 15m) | critical |
+| **Production thiếu cấu hình bắt buộc** | `QuanlyThieuCauHinhBatBuoc` (`config_missing{key!="PII_ENC_KEY"} == 1`, 30m) | warning |
+| **PII đang ghi THÔ** | `QuanlyPiiGhiTho` (`config_missing{key="PII_ENC_KEY"} == 1`, 30m) | critical |
 | Backplane SSE chết | `QuanlySseBackplaneChet` | critical |
 | PUBLISH SSE thất bại | `QuanlySsePublishThatBai` | warning |
 | Hàng đợi xuất file đầy | `QuanlyHangDoiXuatDay` | critical |
@@ -124,6 +132,15 @@ khi CSDL chết (tiến trình Node vẫn trả `/metrics`); quy tắc Redis cũ
 *backplane SSE* nên bản triển khai không dùng backplane im lặng dù Redis đang giữ
 hàng đợi/rate-limit/Pub-Sub SSE; và đĩa đầy không sinh 5xx nào cho tới đúng lúc Postgres
 không ghi nổi WAL — lúc đó đã mất dữ liệu.
+
+Hai dòng `config_missing` là lớp bù cho §10. §10 đòi production **fail-fast** khi
+thiếu Redis/storage credentials; `src/config.ts` cố ý chỉ `console.warn` vì "làm cả
+ứng dụng không khởi động vì một tính năng phụ còn tệ hơn". Lập luận đó đúng, nhưng
+nó chỉ đứng vững nếu có lớp bù — mà lớp bù cũ là một dòng log lúc khởi động, trôi
+mất sau lần cuộn log đầu tiên. Đáng chú ý: `QuanlyRedisChet` **không** bắt được ca
+này, vì nó gác trên `redis_configured == 1` còn "quên đặt REDIS_URL" cho ra
+`redis_configured = 0` — quy tắc cũ tự loại trừ đúng ca nguy hiểm nhất. Bài kiểm
+`"Production QUÊN REDIS_URL … → PHẢI kêu"` trong `alerts.test.yaml` khoá cả hai vế đó.
 
 ### Cảnh báo dừng lại ở đâu (đọc kỹ)
 

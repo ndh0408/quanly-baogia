@@ -43,8 +43,8 @@ hỏng tệ nhất của một hệ giám sát.
 **Số liệu HIỆN TẠI** (đo lại bằng lệnh, đừng chép tay — số ở đây trôi rất nhanh):
 
 ```bash
-grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 21 metric ứng dụng
-grep -c '^      - alert:' infra/prometheus/alerts.yaml    # 17 quy tắc cảnh báo
+grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 22 metric ứng dụng
+grep -c '^      - alert:' infra/prometheus/alerts.yaml    # 19 quy tắc cảnh báo
 ```
 
 Trước đợt 2026-08-27 hai con số này là **14 metric và 14 quy tắc**. Đợt đó thêm 7 metric
@@ -112,7 +112,7 @@ bằng `tests/xf-observability-gaps.test.js`.
 
 Đây là thứ dễ đọc nhầm nhất trong cả thư mục, nên nói thẳng:
 
-> 17 quy tắc trong `infra/prometheus/alerts.yaml` **được Prometheus đánh giá thật** và **chuyển sang
+> 19 quy tắc trong `infra/prometheus/alerts.yaml` **được Prometheus đánh giá thật** và **chuyển sang
 > trạng thái `firing` thật**. Rồi chúng **DỪNG LẠI** ở giao diện Prometheus (`/alerts`,
 > `/api/v1/alerts`). **Không Telegram. Không email. Không ai bị đánh thức.**
 

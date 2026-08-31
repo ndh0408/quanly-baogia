@@ -219,7 +219,17 @@ fi
 buoc "[8/13] Cổng số liệu / phân quyền"
 node scripts/ci/endpoint-inventory.mjs --check >/dev/null;          ket $? "endpoint-inventory --check (khớp từng dòng ma trận)"
 node scripts/ci/endpoint-inventory.mjs --check-guards >/dev/null;   ket $? "endpoint-inventory --check-guards"
+# Anh em thứ ba của hai dòng trên. Nó CHỈ được gọi ở .github/workflows/ci.yml:157 — nơi không bao
+# giờ chạy. Đường cục bộ vẫn tồn tại gián tiếp (tests/b8-endpoint-write-authz.test.js gọi thẳng ba
+# hàm xuất khẩu của cổng trên cây thật, ở bước [4/13]), nhưng một cổng được gọi qua bài test là
+# một cổng phụ thuộc vào việc bài test đó còn sống. Gọi thẳng thì rẻ và không có tầng trung gian.
+node scripts/ci/endpoint-inventory.mjs --check-write-authz >/dev/null; ket $? "endpoint-inventory --check-write-authz (route GHI phải khai quyền)"
 node scripts/ci/repo-stats.mjs --check >/dev/null;                  ket $? "repo-stats --check (số liệu README)"
+# Cùng dạng mồ côi: ci.yml:194 là nơi DUY NHẤT gọi cổng này. Gác trôi schema
+# (tests/vdb-schema-index-drift.test.js) coi một `DROP COLUMN` viết trong migration là HỢP LỆ —
+# schema và CSDL vẫn khớp, chỉ dữ liệu là mất. Đây là ưu tiên số một của repo (không mất dữ liệu),
+# nên nó không được phép sống nhờ một workflow không chạy.
+node scripts/ci/check-destructive-sql.mjs --check >/dev/null;       ket $? "check-destructive-sql (SQL huỷ dữ liệu phải khai kèm lý do)"
 # Chú thích trỏ "file:dòng" trôi mỗi lần ai đó thêm dòng vào file ĐÍCH, và không có gì báo.
 # Đã lặp lại nhiều vòng trong repo này — mỗi vòng rà tay một lượt, rồi chính lượt rà đó làm
 # trôi tiếp. Cổng CỐ Ý HẸP: chỉ đỏ khi tham chiếu trỏ vào chỗ KHÔNG THỂ là đích (dòng trống /
@@ -254,6 +264,22 @@ if command -v helm >/dev/null 2>&1; then
 else
   printf '  \033[33m— helm không có trên máy này, bỏ qua cổng chart\033[0m\n'
 fi
+# ci.yml:283 chạy kubeconform trên 11 tệp infra/k8s/*.yaml — và CHỈ ở đó. `check-helm.mjs` có gọi
+# kubeconform nhưng chỉ trên bản RENDER của chart Helm; các manifest THÔ trong infra/k8s/ chưa từng
+# được kiểm schema ở bất kỳ đường nào chạy được. Dùng GLOB chứ không chép lại danh sách 11 tệp: một
+# danh sách chép tay là một danh sách sẽ trôi (tests/ht3-k8s-drain-and-grace.test.js đang phải canh
+# đúng chuyện đó cho ci.yml). Glob còn phủ rộng hơn — bắt cả tệp mới thêm mà ci.yml chưa kịp khai.
+if command -v kubeconform >/dev/null 2>&1; then
+  kq="$(kubeconform -strict -ignore-missing-schemas -summary infra/k8s/*.yaml 2>&1 || true)"
+  # `Invalid` và `Errors` LÀ HAI CHUYỆN KHÁC HẲN — cùng lý do đã ghi ở scripts/ci/check-helm.mjs:
+  # kubeconform tải schema qua mạng, máy offline cho `Valid: 0, Invalid: 0, Errors: N` tức KHÔNG
+  # manifest nào sai, chỉ là không kiểm được. Nhập hai thứ làm một thì cổng đỏ mỗi lần mạng chập,
+  # và một cổng hay báo động giả thì sớm muộn bị tắt.
+  case "$kq" in *"Invalid: 0,"*) : ;; *) false ;; esac
+  ket $? "kubeconform infra/k8s/ — $(printf '%s' "$kq" | tail -1)"
+else
+  printf '  \033[33m— kubeconform không có trên máy này, bỏ qua kiểm schema infra/k8s/\033[0m\n'
+fi
 # Quy tắc cảnh báo Prometheus: cú pháp, LOGIC (promtool test rules trên chuỗi số liệu giả), và
 # tên metric có thật trong src/observability.ts. Lớp thứ hai là lớp duy nhất bắt được lỗi logic —
 # đã kiểm ngược: rút gọn biểu thức SSE thành `sse_backplane_up == 0` thì `check rules` vẫn SUCCESS
@@ -275,8 +301,35 @@ npm audit --omit=dev --audit-level=high >/dev/null 2>&1;             ket $? "npm
 # chiều runtime thì chưa có gì gác. Mỗi gói thừa là bề mặt tấn công thừa + một mục nữa trong SBOM.
 node scripts/ci/check-deps.mjs --check >/dev/null;                  ket $? "phụ thuộc runtime đều có người dùng (chi tiết: npm run check:deps)"
 
+# ── [10b/13] ARTIFACT dist/ CHẠY THẬT — KHÔNG CẦN DOCKER ───────────────────
+# `scripts/ci/smoke-dist.sh` trước đợt này CHỈ được gọi ở .github/workflows/ci.yml:217, tức KHÔNG
+# BAO GIỜ chạy — trong khi AGENTS.md, docs/operations/DEPLOYMENT.md và docs/adr/0002 đều khai nó là
+# chốt đang gác.
+#
+# GIỮ chứ không xoá, vì nó KHÔNG trùng [11/13]: `smoke-image.sh` không kiểm `/api/health`, không
+# kiểm `/style.css` (đúng thứ vỡ khi rootDir/outDir sai — xem bảng trong DEPLOYMENT.md), không kiểm
+# cổng token của `/metrics`, không kiểm `/api/auth/login` trả 401 chứ không phải 5xx, và không kiểm
+# worker thoát êm khi nhận SIGTERM. Năm khẳng định đó chỉ có ở đây.
+# ĐO ĐƯỢC: 4,5 giây và không cần docker — rẻ hơn [11/13] cả chục lần, nên chạy CẢ ở --nhanh.
+#
+# TRUYỀN env TƯỜNG MINH thay vì để thừa hưởng: file này export NODE_ENV=test cho cả lượt chạy, mà
+# artifact phải được kiểm ở ĐÚNG nhánh production — JWT_SECRET / MFA_ENC_KEY / APP_BASE_URL chỉ là
+# bắt buộc ở nhánh đó (src/config.ts). Giá trị là rác dùng một lần, giống hệt khối `env:` của ci.yml.
+buoc "[10b/13] Artifact production dist/ chạy thật (không cần docker)"
+env NODE_ENV=production PORT="${SMOKE_DIST_PORT:-3999}" \
+    APP_BASE_URL="http://localhost:${SMOKE_DIST_PORT:-3999}" \
+    SESSION_SECRET=smoke-session-secret-long-enough-for-the-validator \
+    JWT_SECRET=smoke-jwt-secret-different-from-session-and-long-enough \
+    MFA_ENC_KEY=smoke-mfa-encryption-key-for-ci-only \
+    METRICS_TOKEN=smoke-metrics-token \
+    bash scripts/ci/smoke-dist.sh >/dev/null 2>&1
+ket $? "smoke-dist (chi tiết: bash scripts/ci/smoke-dist.sh)"
+
 # ── [11/13] ARTIFACT ĐƯỢC TRIỂN KHAI, KHÔNG PHẢI MÃ NGUỒN ──────────────────
-# Chín bước trên đều kiểm MÃ NGUỒN. Không bước nào kiểm THỨ THẬT SỰ CHẠY Ở PRODUCTION.
+# Mọi bước tới [10/13] đều kiểm MÃ NGUỒN. [10b/13] là bước đầu tiên chạm vào THỨ THẬT SỰ CHẠY, và
+# bước này đi xa thêm một tầng: [10b] chạy artifact trần trên máy, còn ở đây artifact nằm TRONG
+# image — nơi lộ ra lớp lỗi mà chạy trần không thấy (thiếu file chưa được COPY, thiếu phông, sai
+# quyền, chạy bằng root, gói dev lọt vào bản production).
 # Khoảng trống đó đã nuốt những lỗi chỉ lộ ra lúc pod khởi động: Helm gọi `node src/server.js`
 # (file không có trong image), `postinstall` gọi script chưa được COPY vào, fonts/*.ttf bị
 # .gitignore loại nên PDF production mất dấu tiếng Việt. Cả ba đều XANH ở mọi cổng đọc mã nguồn.

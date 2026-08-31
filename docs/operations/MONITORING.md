@@ -25,7 +25,7 @@ chạm tới được.
 
 ### Metric có thật
 
-Bảng dưới đây là **toàn bộ 21 metric** do `src/observability.ts` khai. Nguồn sự
+Bảng dưới đây là **toàn bộ 22 metric** do `src/observability.ts` khai. Nguồn sự
 thật là file đó — `scripts/ci/check-alerts.mjs` đối chiếu mọi quy tắc cảnh báo và
 mọi panel Grafana với nó, nên metric đổi tên mà quên sửa là cổng CI đỏ.
 
@@ -52,6 +52,7 @@ mọi panel Grafana với nó, nên metric đổi tên mà quên sửa là cổn
 | `redis_up` | Gauge | — | có kết nối Redis nào ở trạng thái ready |
 | `disk_free_bytes` | Gauge | mountpoint | byte trống của hệ tệp `DISK_METRICS_PATH` |
 | `disk_total_bytes` | Gauge | mountpoint | **mẫu số** để tính tỉ lệ trống |
+| `config_missing` | Gauge | key | 1 = biến bắt buộc-ở-production CHƯA đặt. Nhãn `key`: `REDIS_URL` · `S3_ENDPOINT` · `S3_ACCESS_KEY` · `S3_SECRET_KEY` · `SMTP_HOST` · `PII_ENC_KEY`. **Chỉ phát khi `NODE_ENV=production`** |
 
 Cộng thêm metric mặc định của `prom-client` (CPU, bộ nhớ, event loop, GC).
 
@@ -96,6 +97,16 @@ bằng `setInterval` (interval sẽ chạy trong mọi tiến trình test, rò h
 vào CSDL/Redis dù không ai đọc). Kết quả được nhớ tạm 5 giây và mỗi phép đo bị cắt
 ở 2 giây, nên **một phụ thuộc chết không bao giờ làm `/metrics` treo hay trả 500**
 — phần số liệu còn lại vẫn về nguyên vẹn.
+
+`HEALTH_METRICS=0` (nhận cả `false`/`off`/`no`) **KHÔNG ĐĂNG KÝ** năm gauge này — tức
+`/metrics` không có dòng nào cho chúng, chứ **không phải** phát số 0. Đây là điểm dễ
+hiểu ngược, và hiểu ngược thì hậu quả nặng: nếu tắt mà vẫn phát `db_up 0` thì quy tắc
+critical `db_up == 0` sẽ kêu suốt ngày đêm trên một Postgres hoàn toàn khoẻ — mà một
+cảnh báo kêu oan là một cảnh báo sẽ bị tắt. Ca mất sạch tín hiệu do
+`QuanlyKhongConTargetNao` (`absent()`) lo, không phải do các gauge này.
+
+`config_missing` **không** nằm sau nút đó: nó chỉ đọc cấu hình, không ping gì, nên
+tắt phép đo sức khoẻ không có lý do gì làm mất nó.
 
 Ba khác biệt cần nhớ khi đọc số:
 
@@ -185,7 +196,7 @@ Chưa bật mặc định vì production là một VM và ba container nữa ăn
   giả định. Chưa bật vì production là **một VM** và bốn container nữa ăn RAM của
   chính ứng dụng (xem
   [TECHNOLOGY_DECISIONS.md](../architecture/TECHNOLOGY_DECISIONS.md)).
-- **Chưa có Alertmanager — cảnh báo dừng ở giao diện Prometheus.** 17 quy tắc sẽ
+- **Chưa có Alertmanager — cảnh báo dừng ở giao diện Prometheus.** 19 quy tắc sẽ
   chuyển sang `firing` và nằm ở `/alerts`; **không** Telegram, **không** email,
   **không ai bị đánh thức**. Khối `alerting:` trong
   `infra/observability/prometheus.yml` đã để sẵn chỗ nối. Alert duy nhất đang

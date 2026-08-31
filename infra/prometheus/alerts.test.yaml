@@ -509,3 +509,127 @@ tests:
       - eval_time: 15m
         alertname: QuanlyEventLoopNgheN
         exp_alerts: []
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # HAI LỖI NGƯỢC NHAU, CÙNG MỘT GỐC: metric sức khoẻ nói sai khi tính năng bị
+  # TẮT hoặc KHÔNG ĐƯỢC CẤU HÌNH.
+  #
+  #   [1] Kêu OAN  — `HEALTH_METRICS=0` từng vẫn phát `db_up 0` (gauge không nhãn được prom-client
+  #                  khởi tạo sẵn ở 0), nên quy tắc `db_up == 0` kêu CRITICAL suốt trên một Postgres
+  #                  khoẻ mạnh. Đã đo bằng `HEALTH_METRICS=0 node --import tsx` + `registry.metrics()`.
+  #   [2] KHÔNG BAO GIỜ kêu — `QuanlyRedisChet` gác trên `redis_configured == 1`, nên production
+  #                  QUÊN REDIS_URL (redis_configured = 0) là ca duy nhất nó không bắt được.
+  #
+  # Hai bài dưới đây khoá cả hai chiều. Chúng KHÔNG thừa với bài "Cố ý chạy KHÔNG Redis" ở trên: bài
+  # đó nói về chuỗi CÓ mặt và bằng 0, bài này nói về chuỗi KHÔNG TỒN TẠI — promtool phân biệt được,
+  # còn `promtool check rules` thì mù với cả hai.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  - interval: 1m
+    name: "HEALTH_METRICS=0: không còn chuỗi db_up/redis_up nào → KHÔNG cảnh báo nào được kêu oan"
+    # Đây là hình dạng THẬT của /metrics sau bản vá khi tắt phép đo: tiến trình vẫn scrape được
+    # (`up` = 1) nhưng db_up / redis_up / redis_configured / disk_* KHÔNG được đăng ký nên không có
+    # chuỗi nào. Nếu ai đó trả `registers: [registry]` về vô điều kiện, bài này KHÔNG đỏ (vì
+    # input_series ở đây do ta viết) — nên chốt thật nằm ở phía mã nguồn; bài này khoá phía QUY TẮC:
+    # cấm ai đó "sửa" quy tắc thành `db_up != 1` hay `absent(db_up)`, cả hai đều kêu oan ở ca này.
+    input_series:
+      - series: 'up{instance="app-1", job="quanly"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyCsdlKhongToiDuoc
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyRedisChet
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyDiaSapDay
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyMetricsKhongScrapeDuoc
+        exp_alerts: [] # `up` = 1: tiến trình vẫn trả /metrics bình thường.
+      - eval_time: 20m
+        alertname: QuanlyKhongConTargetNao
+        exp_alerts: [] # vẫn còn target — mất tín hiệu ở đây là do người vận hành CỐ Ý tắt.
+
+  - interval: 1m
+    name: "Production QUÊN REDIS_URL (và SMTP_HOST) → PHẢI kêu, mỗi biến một cảnh báo"
+    # Ca mà `QuanlyRedisChet` tự loại trừ: redis_configured = 0 nên vế `== 1` của nó không bao giờ
+    # đúng. Đối chứng ngay bên dưới chứng minh điều đó, và chứng minh luôn rằng quy tắc mới không
+    # phải bản trùng lặp của quy tắc cũ.
+    input_series:
+      - series: 'config_missing{key="REDIS_URL", instance="app-1", job="quanly"}'
+        values: "1x40"
+      - series: 'config_missing{key="SMTP_HOST", instance="app-1", job="quanly"}'
+        values: "1x40"
+      - series: 'redis_configured{instance="app-1", job="quanly"}'
+        values: "0x40"
+      - series: 'redis_up{instance="app-1", job="quanly"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly, key: REDIS_URL }
+            exp_annotations:
+              summary: "app-1 chạy production mà THIẾU REDIS_URL"
+              description: >-
+                Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+                REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+                nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+                S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+                LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+              runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+          - exp_labels: { severity: warning, instance: app-1, job: quanly, key: SMTP_HOST }
+            exp_annotations:
+              summary: "app-1 chạy production mà THIẾU SMTP_HOST"
+              description: >-
+                Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+                REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+                nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+                S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+                LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+              runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+      - eval_time: 35m
+        alertname: QuanlyRedisChet
+        exp_alerts: [] # ĐỐI CHỨNG: đây đúng là ca quy tắc cũ mù. Không có quy tắc mới thì KHÔNG AI kêu.
+
+  - interval: 1m
+    name: "Production cấu hình ĐỦ (config_missing = 0) thì KHÔNG được kêu"
+    # Vế chống-kêu-oan. Viết quy tắc thành `config_missing` trần (không `== 1`) là bài này đỏ ngay:
+    # một chuỗi bằng 0 vẫn là một mẫu tồn tại, và cảnh báo sẽ kêu ở MỌI bản triển khai đúng.
+    input_series:
+      - series: 'config_missing{key="REDIS_URL", instance="app-1", job="quanly"}'
+        values: "0x40"
+      - series: 'config_missing{key="PII_ENC_KEY", instance="app-1", job="quanly"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: QuanlyPiiGhiTho
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Thiếu PII_ENC_KEY → kêu CRITICAL riêng, và KHÔNG kêu chồng ở quy tắc chung"
+    # Bộ lọc `key!="PII_ENC_KEY"` của quy tắc chung là thứ giữ cho "CCCD/lương ghi thô" không bị
+    # chôn chung mức warning với "thư mời không gửi được". Bỏ bộ lọc đó là bài này đỏ.
+    input_series:
+      - series: 'config_missing{key="PII_ENC_KEY", instance="app-1", job="quanly"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyPiiGhiTho
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly, key: PII_ENC_KEY }
+            exp_annotations:
+              summary: "app-1 ghi PII THÔ — PII_ENC_KEY chưa đặt ở production"
+              description: >-
+                CCCD, số tài khoản và lương đang được ghi KHÔNG MÃ HOÁ vào CSDL. Mỗi bản dump, mỗi bản
+                sao lưu, mỗi quyền đọc CSDL đều lộ nguyên các trường này — và dữ liệu đã ghi thô thì
+                đặt khoá sau KHÔNG tự mã hoá ngược, phải chạy `npm run pii:backfill`.
+              runbook: "docs/operations/DISASTER_RECOVERY.md; scripts/migration/pii-backfill.mjs"
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts: []

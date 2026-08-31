@@ -341,7 +341,7 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 | 2 · Security | **xong** | ADR-0005 CSRF · `ROLES_PERMISSIONS.md` + `endpoint-inventory.mjs` (137/137 hai chiều) · break-glass ở `userService.ts` |
 | 3 · Production Runtime | **xong** | `tsconfig.build.json` · 4 khối `cap_drop` trong compose · `exportGateStats` |
 | 4 · CI/CD | **xong** (2026-08-27) | `.github/workflows/ci.yml` vẫn không chạy (tài khoản không bật Actions) — nhưng cả 5 thứ nó khai nay chạy trong `npm run verify`: xem bảng ngay dưới |
-| 5 · Observability | **xong** (2026-08-27) | 17 rule cảnh báo + 28 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
+| 5 · Observability | **xong** (2026-08-27) | 19 rule cảnh báo + 32 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
@@ -375,7 +375,7 @@ tích `DATABASE_URL`/`REDIS_URL` để kiểm đúng máy, có `npm ci --dry-run
 ### Định nghĩa HOÀN THÀNH (mục 52)
 
 - **Security → security scans pass**: ✅ chạy thật trong `verify` bước [13/13].
-- **Operations → dashboards, alerts**: ✅ 17 rule + 28 bài kiểm logic; bảng điều khiển
+- **Operations → dashboards, alerts**: ✅ 19 rule + 32 bài kiểm logic; bảng điều khiển
   Grafana ở `infra/observability/` (opt-in, chưa bật ở production — quyết định vận hành,
   xem `TECHNOLOGY_DECISIONS.md`).
 - **Backup → off-host copy**: ⚠️ **vẫn chưa** có bằng chứng đã chạy trên máy chủ thật.
@@ -613,12 +613,12 @@ chỗ không parse được, KHÔNG phải cả file. Mẫu `new Function(req.qu
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
-`infra/prometheus/alerts.yaml` — 17 quy tắc, 6 nhóm, mỗi cái bám một chế độ hỏng có
+`infra/prometheus/alerts.yaml` — 19 quy tắc, 7 nhóm, mỗi cái bám một chế độ hỏng có
 thật và `runbook` trỏ tới đúng file. Trước đó repo **không có quy tắc cảnh báo nào**
 (`find infra -iname '*alert*'` rỗng): 14 metric (số của mốc đó — nay là 21) chỉ dùng được khi có người đang mở
 dashboard — mà lúc hỏng thì không ai đang mở.
 
-`infra/prometheus/alerts.test.yaml` — 28 bài `promtool test rules`, gồm cả vế **chống
+`infra/prometheus/alerts.test.yaml` — 32 bài `promtool test rules`, gồm cả vế **chống
 kêu oan** (triển khai một tiến trình không được kêu; lưu lượng 0 không được kêu; nâng
 trần hàng đợi thì cảnh báo phải tự tắt). Vế đó mới là thứ giữ cho cảnh báo không bị
 người ta tắt đi.

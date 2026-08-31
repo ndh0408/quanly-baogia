@@ -109,6 +109,13 @@ groups:
         # `up` chỉ nói tiến trình có trả lời hay không. "App còn sống mà CSDL chết" là chế độ hỏng
         # THƯỜNG GẶP NHẤT của repo này (pool cạn, Postgres restart, mật khẩu xoay) và trước quy tắc
         # này không có gì bắt được nó.
+        #
+        # KHÔNG có vế "and" nào ở đây, và đó là CÓ CHỦ Ý: `HEALTH_METRICS=0` làm
+        # src/observability.ts KHÔNG ĐĂNG KÝ gauge nữa nên `db_up` biến mất khỏi /metrics hoàn toàn,
+        # chứ không phát ra 0. (Bản vá trước chỉ chặn phép đo mà vẫn đăng ký gauge → /metrics phát
+        # `db_up 0` và quy tắc này kêu CRITICAL suốt ngày đêm trên một Postgres hoàn toàn khoẻ. Ca
+        # đó nay có bài kiểm riêng trong alerts.test.yaml.) Mất tín hiệu do người vận hành cố ý tắt
+        # là việc của `QuanlyKhongConTargetNao`, không phải của quy tắc này.
         expr: db_up == 0
         for: 3m
         labels: { severity: critical }
@@ -158,6 +165,57 @@ groups:
             log JSON của Docker (đã chặn ở 50MB/container), volume pgdata, và file tạm của đường
             xuất Excel/PDF.
           runbook: "docker-compose.prod.yml — x-logging; docs/operations/DISASTER_RECOVERY.md"
+
+  # ── Nhóm 1c: cấu hình bắt buộc ở production còn THIẾU ────────────────────
+  #
+  # ── LỖ MÀ NHÓM NÀY LẤP ────────────────────────────────────────────────────
+  # `QuanlyRedisChet` ở trên gác trên `redis_configured == 1`. Vế đó cần thiết để không kêu oan ở
+  # bản triển khai CỐ Ý chạy không Redis — nhưng hệ quả là nó TỰ LOẠI TRỪ đúng ca nguy hiểm nhất:
+  # production QUÊN đặt REDIS_URL thì `redis_configured = 0` và quy tắc ấy KHÔNG BAO GIỜ bắn.
+  # S3_* và SMTP_HOST thì trước nhóm này không có metric lẫn quy tắc nào.
+  #
+  # ── VÌ SAO LÀ CẢNH BÁO CHỨ KHÔNG PHẢI `process.exit` ─────────────────────
+  # §10 đòi production fail-fast khi thiếu Redis/storage credentials. src/config.ts cố ý chỉ
+  # `console.warn`, với lý lẽ "làm cả ứng dụng không khởi động vì một tính năng phụ còn tệ hơn" —
+  # lý lẽ đó ĐÚNG, đổi nó thành exit là biến một cảnh báo thành một sự cố ngừng chạy. Nhưng nó chỉ
+  # đứng vững khi CÓ lớp bù, mà lớp bù cũ là một dòng log lúc khởi động: trôi mất sau lần cuộn log
+  # đầu tiên. Hai quy tắc dưới đây LÀ lớp bù đó.
+  #
+  # `config_missing` chỉ được phát khi NODE_ENV=production (src/observability.ts), nên quy tắc
+  # không cần tự lọc `env` — máy dev thiếu SMTP/S3 là bình thường và không sinh chuỗi nào.
+  - name: quanly.cau-hinh
+    rules:
+      - alert: QuanlyThieuCauHinhBatBuoc
+        # `for: 30m` dài hơn hẳn các quy tắc khác vì đây KHÔNG phải sự cố đang diễn ra mà là một
+        # KHIẾM KHUYẾT TRIỂN KHAI: nó đúng từ giây đầu tiên tiến trình chạy và đúng mãi. Kêu sau 30
+        # phút để một lượt rolling-update (pod cũ chưa chết, pod mới cấu hình khác) không sinh nhiễu.
+        expr: config_missing{key!="PII_ENC_KEY"} == 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} chạy production mà THIẾU {{ $labels.key }}"
+          description: >-
+            Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+            REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+            nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+            S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+            LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+          runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+
+      - alert: QuanlyPiiGhiTho
+        # TÁCH khỏi quy tắc trên bằng bộ lọc nhãn `key` để hai bên KHÔNG kêu chồng nhau, và để mức
+        # nghiêm trọng không bị gộp: "thư mời không gửi được" và "CCCD/lương nằm THÔ trong mọi bản
+        # dump CSDL" mà cùng một severity thì cái nặng bị chôn dưới cái nhẹ.
+        expr: config_missing{key="PII_ENC_KEY"} == 1
+        for: 30m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} ghi PII THÔ — PII_ENC_KEY chưa đặt ở production"
+          description: >-
+            CCCD, số tài khoản và lương đang được ghi KHÔNG MÃ HOÁ vào CSDL. Mỗi bản dump, mỗi bản
+            sao lưu, mỗi quyền đọc CSDL đều lộ nguyên các trường này — và dữ liệu đã ghi thô thì
+            đặt khoá sau KHÔNG tự mã hoá ngược, phải chạy `npm run pii:backfill`.
+          runbook: "docs/operations/DISASTER_RECOVERY.md; scripts/migration/pii-backfill.mjs"
 
   # ── Nhóm 2: realtime (SSE) ───────────────────────────────────────────────
   - name: quanly.sse

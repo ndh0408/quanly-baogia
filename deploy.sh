@@ -87,11 +87,61 @@ echo "▶ [1/6] Backup DB + tag :rollback"
 # production đọc được toàn bộ hồ sơ nhân sự, và nó sinh ra MỖI LẦN deploy rồi nằm lại đó.
 #   • `umask 077`            → file mới ra 0600 ngay lúc tạo (bao cả trường hợp gzip ghi dở dang).
 #   • `install -d -m 0700`   → siết cả thư mục ĐÃ TỒN TẠI từ những lượt deploy trước (mkdir -p thì không).
-#   • `chmod 600` tường minh → như backup-db.sh:66-68, phòng shell đăng nhập có umask khác.
-ssh "$SSH" "umask 077 && install -d -m 0700 ~/quanly-backups && \
+#   • `chmod 600` tường minh → như backup-db.sh, phòng shell đăng nhập có umask khác.
+#
+# ── VÌ SAO TÁCH LÀM HAI LỆNH ssh (§45) ────────────────────────────────────────────────────
+# Bản trước gộp dump và `docker tag …:rollback` vào MỘT chuỗi `A && B && … && tag || true`.
+# `&&` và `||` cùng độ ưu tiên và kết hợp TRÁI, nên `|| true` không chỉ tha cho `docker tag` —
+# nó nuốt mã thoát của CẢ chuỗi, kể cả bước dump. `set -e` ở dòng 24 vì thế không thấy gì, và
+# deploy đi thẳng sang [4/6] migrate. Đó đúng là hình dạng tệ nhất: đổi schema mà KHÔNG có bản
+# lùi nào. `docker tag` được phép hỏng thật (lượt deploy đầu chưa có ảnh cũ để gắn nhãn) — nhưng
+# đó là lý do để tách nó ra, không phải để miễn trừ cho cả khối.
+#
+# `set -o pipefail` phải đặt Ở PHÍA MÁY CHỦ: dòng 24 chỉ áp cho shell đang gõ lệnh, nó KHÔNG
+# theo ssh sang máy kia. Không có nó thì `pg_dump | gzip` lấy mã thoát của `gzip` — pg_dump chết
+# giữa chừng vẫn cho ra 0 và để lại một .sql.gz hợp lệ nhưng CỤT. `|| true` ngay sau là phòng
+# shell đăng nhập không phải bash (dash chưa có pipefail): thiếu lớp đó thì rơi xuống hai lớp
+# dưới, chứ không làm hỏng cả lượt deploy vì một chi tiết của shell máy chủ.
+# Hai lớp dưới — cỡ tệp và `gzip -t` — mượn nguyên từ backup-db.sh, và mỗi lớp bắt một thứ khác:
+# pg_dump chết NGAY thì gzip vẫn ghi ra ~20 byte gzip HỢP LỆ (chỉ cỡ tệp bắt được), còn dump đứt
+# giữa chừng thì tệp đủ lớn nhưng luồng nén cụt (chỉ `gzip -t` bắt được).
+#
+# GIỮ 7 BẢN GẦN NHẤT, và dọn `.partial` mồ côi quá 60 phút. Vì sao phải có:
+# mỗi tệp này là một bản `pg_dump` TOÀN CSDL — tức CCCD, số tài khoản và lương của nhân sự ở dạng
+# THÔ (cột mã hoá PII chưa bật, xem docs/REMAINING_RISKS.md). Không dọn thì mỗi lần deploy để lại
+# thêm một bản vĩnh viễn trên VM: vừa đầy đĩa (đúng thứ làm hỏng bước dump này), vừa biến thư mục
+# home thành kho PII lớn dần mà không ai rà.
+# Dọn NẰM SAU `mv` và dùng `;` chứ không `&&`: lượt dọn hỏng KHÔNG được làm cả bước backup báo đỏ —
+# bản dump lúc đó đã yên vị và hợp lệ, mất nó vì một lỗi dọn dẹp là đánh đổi ngược.
+# Ghi vào `.partial` rồi mới đổi tên — cùng khuôn nguyên tử của backup-db.sh, và ở đây nó giải
+# một cái bẫy cụ thể: lượt hỏng mà để lại đúng cái tên `predeploy-….sql.gz` thì người trực lúc
+# 2 giờ sáng sẽ tưởng đó là điểm lùi và khôi phục từ một bản dump CỤT. Đổi tên chỉ xảy ra sau khi
+# cả ba lớp kiểm đã qua: hoặc có tệp hoàn chỉnh, hoặc chỉ có `.partial` — không lẫn được.
+if ! ssh "$SSH" "set -o pipefail 2>/dev/null || true; \
+  umask 077 && install -d -m 0700 ~/quanly-backups && \
   F=~/quanly-backups/predeploy-\$(date +%F-%H%M%S).sql.gz && \
-  docker exec quanly-postgres pg_dump -U quanly -d quanly | gzip > \"\$F\" && chmod 600 \"\$F\" && \
-  docker tag $IMAGE ${IMAGE%%:*}:rollback 2>/dev/null || true"
+  docker exec quanly-postgres pg_dump -U quanly -d quanly | gzip > \"\$F.partial\" && \
+  chmod 600 \"\$F.partial\" && \
+  SZ=\$(stat -c%s \"\$F.partial\" 2>/dev/null || echo 0) && [ \"\$SZ\" -ge 1000 ] && \
+  gzip -t \"\$F.partial\" && mv -f \"\$F.partial\" \"\$F\" && \
+  find ~/quanly-backups -maxdepth 1 -name 'predeploy-*.sql.gz.partial' -mmin +60 -delete; \
+  ls -1t ~/quanly-backups/predeploy-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f"; then
+  echo
+  echo "❌ Backup DB tiền-deploy THẤT BẠI — dừng TRƯỚC bước migrate, chưa đụng gì vào máy chủ."
+  echo "   Migrate không có bản lùi là rủi ro MẤT DỮ LIỆU, không phải phiền toái nhỏ."
+  echo "   Soi tay:  ssh $SSH \"docker exec quanly-postgres pg_dump -U quanly -d quanly | head -c 200\""
+  echo "   Chỗ trống: ssh $SSH \"df -h ~; ls -lt ~/quanly-backups | head\""
+  exit 1
+fi
+
+# `:rollback` là con trỏ MỘT bước lùi, và nó ĐƯỢC PHÉP hỏng: lượt deploy đầu tiên trên một máy
+# chủ mới chưa có ảnh `$IMAGE` nào để gắn nhãn. Hỏng thì chỉ mất đường lùi NHANH ở bước [6/6];
+# tag bất biến `<tên>:<git-sha>` ghi trong RELEASES.log vẫn lùi được, nên không đáng dừng deploy.
+if ssh "$SSH" "docker tag $IMAGE ${IMAGE%%:*}:rollback 2>/dev/null"; then
+  echo "   :rollback → ảnh $IMAGE đang chạy"
+else
+  echo "   ⚠️  chưa gắn được :rollback (lượt deploy đầu?) — lùi bằng tag <tên>:<git-sha> trong RELEASES.log"
+fi
 
 echo "▶ [2/6] Ship tracked files"
 git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"

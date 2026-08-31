@@ -34,6 +34,20 @@ thẩm mỹ: mã tính đường dẫn tài nguyên bằng `__dirname/..`.
 Và nó **404 âm thầm** — typecheck vẫn xanh, server vẫn báo khoẻ.
 `scripts/ci/smoke-dist.sh` bắt đúng lớp lỗi này bằng cách gọi thật `/style.css`.
 
+Cho tới 2026-08-31 câu trên **đúng về nguyên lý nhưng sai về thực tế**: script chỉ được
+gọi ở `.github/workflows/ci.yml:217`, mà Actions không bật trên tài khoản này — nghĩa là
+lớp lỗi đó chưa từng có ai gác. Nay nó là bước `[10b/13]` của `scripts/verify-local.sh`
+và chạy ở cả `npm run verify` lẫn `npm run verify:nhanh`. Chạy riêng:
+
+```bash
+DATABASE_URL=... REDIS_URL=... bash scripts/ci/smoke-dist.sh
+```
+
+Ngoài `/style.css`, cùng lượt đó còn đòi `/livez` `/readyz` `/api/health` trả `ok`,
+`/metrics` phải đòi token khi `METRICS_TOKEN` đã đặt, `/api/auth/login` trả `401` chứ
+không phải `5xx`, và `node dist/worker.js` phải thoát khi nhận `SIGTERM` — không có vế
+cuối thì rolling update cắt ngang job đang chạy.
+
 ### Stack trace đọc được: source map lúc chạy
 
 `tsconfig.build.json` bật `sourceMap: true`, nên `dist/*.js.map` nằm sẵn trong image từ lâu.

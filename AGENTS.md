@@ -76,7 +76,7 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 |---|---|
 | `scripts/ci/endpoint-inventory.mjs --check` | Endpoint mới chưa vào ma trận phân quyền = **chưa ai soát quyền** |
 | `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
-| `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch |
+| `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch. Chạy `node dist/server.js` + `node dist/worker.js` THẬT ở `NODE_ENV=production`, không cần docker (bước `[10b/13]`, vài giây, nên chạy cả ở `--nhanh`). Năm khẳng định KHÔNG có ở `smoke-image.sh`: `/api/health`, `/style.css` trả `200` (đúng thứ vỡ khi `rootDir`/`outDir` sai), `/metrics` đòi token, `/api/auth/login` trả `401` chứ không phải `5xx`, worker thoát êm khi nhận `SIGTERM` |
 | `scripts/ci/smoke-image.sh` | Image production: boot, `/livez` + `/readyz`, SPA phục vụ được, phông PDF, prisma CLI, không có mã nguồn/đồ nghề test, **0 dòng stack trong log khởi động**. `scripts/ci/docker-smoke.sh` dựng image từ cây làm việc rồi gọi nó — **mọi khẳng định về image nằm ở `smoke-image.sh`**, đừng nhân đôi |
 | `scripts/ci/ui-smoke.mjs` | Chromium thật, 18 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → 0 lỗi console. Không tầng nào dưới nó thấy lớp lỗi này: tầng component chạy jsdom (dựng lại DOM trong tiến trình, không tải asset, không thi hành CSP, không có mạng), chỉ E2E mới nạp bundle ĐÃ BUILD qua Express thật |
 | `scripts/ci/check-web-bundle.mjs` | Bundle giao cho người dùng là **bản DEV của React**. Vite quyết dev-hay-prod theo `NODE_ENV` của máy đang build, mà chính `verify-local.sh` export `NODE_ENV=test` — nên trước 2026-08-27 `npm run verify` đẻ ra bundle dev (984.802 byte thay vì 630.482) rồi đem đi smoke |
@@ -92,6 +92,30 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 | `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
 | `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
 | `REQUIRE_DB_TESTS=1` | Cổng xanh trong khi test tích hợp lặng lẽ bỏ qua |
+
+### Cổng chỉ sống trong `ci.yml` là cổng KHÔNG AI CHẠY
+
+Actions không bật, nên một bước chỉ được khai trong `.github/workflows/ci.yml` không phải chốt —
+nó là ghi chú. Lượt rà 2026-08-31 tìm thấy bốn bước như vậy; cả bốn nay có đường cục bộ:
+
+| Từng mồ côi | Nay chạy ở | Ghi chú |
+|---|---|---|
+| `endpoint-inventory.mjs --check-write-authz` (`.github/workflows/ci.yml:157`) | `[8/13]` | Đường gián tiếp vẫn có từ trước (`tests/b8-endpoint-write-authz.test.js` gọi thẳng hàm xuất khẩu của cổng), nhưng một cổng chạy nhờ bài test là một cổng phụ thuộc bài test đó còn sống |
+| `check-destructive-sql.mjs --check` (`.github/workflows/ci.yml:194`) | `[8/13]` | Gác trôi schema coi `DROP COLUMN` viết trong migration là HỢP LỆ — schema khớp CSDL, chỉ dữ liệu là mất |
+| `smoke-dist.sh` (`.github/workflows/ci.yml:217`) | `[10b/13]` | Lượt chạy tay đầu tiên lộ ngay lỗi: script gán `PORT` mà không `export`, nên tiến trình con bind cổng `3000` còn script gõ cửa `3999`. CI không thấy vì khối `env:` của bước đã export sẵn |
+| `kubeconform` trên `infra/k8s/` (`.github/workflows/ci.yml:283`) | `[9/13]` | `check-helm.mjs` chỉ chạy kubeconform trên bản RENDER của chart; manifest thô trong `infra/k8s/` chưa từng được kiểm schema. Bản cục bộ dùng **glob** chứ không chép lại danh sách tệp — danh sách chép tay là danh sách sẽ trôi |
+
+Bốn thứ dưới đây **vẫn chỉ chạy khi Actions bật**. Đừng tính chúng là chốt của repo này:
+
+| Chỉ có ở CI | Vì sao chưa nối vào máy | Rủi ro còn lại |
+|---|---|---|
+| `trivy` quét **IMAGE** (`.github/workflows/ci.yml:377` và `.github/workflows/ci.yml:446`) | `security-scan.sh` mới quét `fs` — tức cây làm việc. Gói OS mà `Dockerfile` `apk add` và cả tầng nền `node:22-alpine` nằm ngoài tầm nó; `docker-smoke.sh` có dựng image cục bộ nhưng không ai quét | Lỗ hổng trong tầng nền image đi thẳng ra production, không cổng chạy được nào thấy |
+| SBOM của **image** (`.github/workflows/ci.yml:458`) và `provenance`/`sbom` đính kèm digest (`.github/workflows/ci.yml:434`) | Bước `[S4]` của `security-scan.sh` sinh SBOM từ `npm sbom --omit=dev` — chỉ cây phụ thuộc npm, không có gói OS | CVE mới công bố thì không tra được image đang chạy chứa gói OS bản nào |
+| `npm --prefix web ci` (nằm trong `npm run web:build`) | `verify-local.sh` chỉ chạy `npx vite build` trong `web/`; bước `[0b/13]` kiểm lockfile gốc chứ **không** kiểm `web/package-lock.json` | Sửa `web/package.json` mà quên `npm install` thì bundle cục bộ dựng trên cây phụ thuộc khác với bản Docker dựng |
+| Toàn bộ job `build-image` (đăng nhập ghcr, đẩy digest, tag `type=sha`) | Cần registry và `GITHUB_TOKEN`; không tái hiện được trên máy | Chỉ ảnh hưởng đường phát hành, không ảnh hưởng cây mã |
+
+**Thêm một bước vào `ci.yml` thì thêm luôn vào `scripts/verify-local.sh`** — nếu không nối được thì
+ghi vào bảng thứ hai ở trên kèm lý do. Im lặng bỏ qua là cách một repo tích lại chốt giả.
 
 ### Viết số vào tài liệu — quy ước khai SỐ LỊCH SỬ
 

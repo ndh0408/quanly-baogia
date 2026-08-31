@@ -59,8 +59,8 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 | Log | Pino → stdout | **KEEP** | — | Có `requestId` xuyên suốt; nhật ký kiểm toán nay cũng mang mã đó. | — |
 | Gom log tập trung | cấu hình CÓ SẴN, **chưa bật** | **DEFER (bật được ngay)** | Loki + Promtail + Grafana | Phụ lục §16 khuyến nghị. Ngăn xếp đã viết sẵn ở `infra/observability/` — một lệnh compose overlay là chạy. Chưa bật mặc định vì production một VM và bốn container nữa (Loki · Promtail · Prometheus · Grafana) ăn RAM của chính ứng dụng. Bảng điều khiển đặt log CẠNH metric; mọi PromQL trong đó được `check-alerts.mjs [A4]` đối chiếu với `src/observability.ts`. | Thấp |
 | Lưu báo giá (xoá-tạo-lại mọi trang) | full rewrite | **ĐÃ LÀM** ✔ (sau cờ, mặc định TẮT) | bỏ qua trang KHÔNG ĐỔI | §16 đòi benchmark trước/sau — đã đo: 10.000 dòng đi từ 3.255 ms xuống 930 ms (3,5×), 98% thời gian nằm ở ghi CSDL nên đây đúng chỗ cần chạm. Mức TRANG chứ không mức DÒNG: mức dòng đòi id bền + luật ghép dòng, tức một tầng lỗi mới giữa đường tiền bạc. Số liệu đầy đủ: `docs/architecture/QUOTE_SAVE_PERFORMANCE.md`. | Trung bình — nên bật ở staging trước; gỡ biến môi trường là quay lại đường cũ, không cần rollback mã |
-| Metrics | Prometheus (`prom-client` 15.1) | **KEEP** | — | 21 metric riêng + bộ mặc định (đếm: `grep -coE 'name: "[a-z_]+"' src/observability.ts`). `/metrics` gác bằng Bearer, **404 ở production nếu thiếu token**. | — |
-| Cảnh báo | 17 rule ở `infra/prometheus/alerts.yaml` (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) | **KEEP (chưa kích hoạt)** | — | Có bài `promtool test rules` chốt logic. Máy chủ Prometheus nay CÓ định nghĩa (`infra/observability/prometheus.yml` mount thẳng tệp quy tắc này), nhưng ngăn xếp quan sát **không bật mặc định** — và vẫn **không có Alertmanager**, nên cảnh báo dừng ở giao diện Prometheus, không đánh thức ai. | — |
+| Metrics | Prometheus (`prom-client` 15.1) | **KEEP** | — | 22 metric riêng + bộ mặc định (đếm: `grep -coE 'name: "[a-z_]+"' src/observability.ts`). `/metrics` gác bằng Bearer, **404 ở production nếu thiếu token**. | — |
+| Cảnh báo | 19 rule ở `infra/prometheus/alerts.yaml` (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) | **KEEP (chưa kích hoạt)** | — | Có bài `promtool test rules` chốt logic. Máy chủ Prometheus nay CÓ định nghĩa (`infra/observability/prometheus.yml` mount thẳng tệp quy tắc này), nhưng ngăn xếp quan sát **không bật mặc định** — và vẫn **không có Alertmanager**, nên cảnh báo dừng ở giao diện Prometheus, không đánh thức ai. | — |
 | Sentry | 10.55 | **KEEP** | — | Phụ lục §16: giữ cho lỗi ứng dụng, không dựng chồng 3–4 hệ giám sát. | — |
 | Bí mật | `.env` + quy ước `*_FILE` | **KEEP** | — | Phụ lục §17: `*_FILE` cho Docker secrets / K8s Secret / Vault mà không đổi cách triển khai. ⚠️ Chưa đường triển khai nào dùng. | — |
 | Kho object | S3 API (`@aws-sdk/client-s3` 3.x) | **KEEP** | — | Phụ lục §7: có lớp trừu tượng `src/storage.ts`, không hard-code nhà cung cấp. | — |
@@ -90,7 +90,7 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 
 | Quyết định | Số mục | Ghi chú |
 |---|---|---|
-| KEEP | 33 | Không có vấn đề đo được nào biện minh cho việc thay. Hai trong số này là **KEEP (chưa kích hoạt)** — Helm/k8s và 17 rule cảnh báo: có file, chưa phải thứ đang chạy. |
+| KEEP | 33 | Không có vấn đề đo được nào biện minh cho việc thay. Hai trong số này là **KEEP (chưa kích hoạt)** — Helm/k8s và 19 rule cảnh báo: có file, chưa phải thứ đang chạy. |
 | ĐÃ MIGRATE ✔ | 1 | `tsx src/*.ts` → `node dist/*.js` |
 | ĐÃ LÀM ✔ | 1 | Lưu báo giá incremental (sau cờ, **mặc định TẮT**) |
 | REPLACE ✔ | 1 | CI GitHub Actions → `npm run verify` cục bộ |

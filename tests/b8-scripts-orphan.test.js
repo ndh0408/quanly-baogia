@@ -16,12 +16,24 @@ import path from "node:path";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Mọi nơi được coi là ĐƯỜNG CHẠY hợp lệ: npm script, workflow CI, hoặc tài liệu vào cửa. */
+/**
+ * Mọi nơi được coi là ĐƯỜNG CHẠY hợp lệ.
+ *
+ * ⚠️ `scripts/verify-local.sh` PHẢI có trong danh sách này, và nó là mục QUAN TRỌNG NHẤT: GitHub
+ * Actions KHÔNG bật trên tài khoản của repo này, nên `.github/workflows/*` là nơi một script có thể
+ * được "gọi" mà KHÔNG AI CHẠY. Trước đây danh sách chỉ có workflow + tài liệu, nên một script chỉ
+ * xuất hiện ở ci.yml vẫn được tính là còn sống — đúng ca đã xảy ra thật với `smoke-dist.sh`.
+ *
+ * Vẫn GIỮ workflow và tài liệu trong danh sách: mục đích của cổng này là bắt script CHẾT HẲN
+ * (không ai nhắc tới ở đâu), không phải phân xử đường chạy nào mới đáng tin. Việc phân xử đó nằm
+ * ở bảng "Cổng chỉ sống trong ci.yml" của AGENTS.md.
+ */
 function noiGoi() {
   const files = [
     "package.json",
     "README.md",
     "AGENTS.md",
+    "scripts/verify-local.sh",
     ...readdirSync(path.join(ROOT, ".github/workflows")).map((f) => `.github/workflows/${f}`),
   ].filter((f) => existsSync(path.join(ROOT, f)));
   return files.map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");

@@ -49,8 +49,10 @@ Chromium được tìm theo thứ tự `SMOKE_CHROMIUM` → thư mục `PLAYWRIG
 **Vì sao chạy ở `NODE_ENV=development`, có chủ ý:** cookie phiên đặt
 `secure: isProd`, nên ở production cookie chỉ đi qua HTTPS và một lượt smoke qua
 `http://127.0.0.1` sẽ không bao giờ giữ được phiên. Vế "cấu hình production có khởi
-động nổi không" nằm ở `scripts/ci/docker-smoke.sh` (bước `[11/13]`), chạy container
-`NODE_ENV=production` thật. Hai script chia nhau hai vế.
+động nổi không" nằm ở hai script khác, cùng chạy `NODE_ENV=production` thật:
+`scripts/ci/smoke-dist.sh` (bước `[10b/13]`, chạy artifact `dist/` trần) và
+`scripts/ci/docker-smoke.sh` (bước `[11/13]`, chạy trong container). Ba script chia
+nhau ba vế — xem mục dưới để biết vì sao hai vế production không gộp làm một.
 
 **18 bước, đi hết một luồng người dùng thật:**
 
@@ -93,6 +95,36 @@ số do máy chủ sinh. Không đụng dữ liệu sẵn có, không phụ thu�
 **Khi nào bước `[12/13]` tự bỏ qua:** chạy `npm run verify:nhanh` (`--nhanh` không
 build web nên sẽ kiểm nhầm bundle của lần build trước), hoặc gói `playwright` chưa
 được cài — lúc đó verify in một dòng **vàng** và đi tiếp, không đỏ.
+
+## Tầng artifact production — `bash scripts/ci/smoke-dist.sh`
+
+```bash
+DATABASE_URL=... REDIS_URL=... bash scripts/ci/smoke-dist.sh
+```
+
+Chạy ĐÚNG hai lệnh mà Docker/Compose/Helm/k8s sẽ chạy — `node dist/server.js` và
+`node dist/worker.js` — ở `NODE_ENV=production`, trên cây làm việc hiện tại, không
+cần docker. Là bước `[10b/13]` của `scripts/verify-local.sh`; **chạy cả ở
+`--nhanh`** vì nó tốn vài giây chứ không phải vài chục (bước `[11/13]` phải dựng
+image nên mới bị `--nhanh` bỏ qua).
+
+**Vì sao không gộp vào `smoke-image.sh`.** Năm khẳng định dưới đây chỉ có ở đây —
+`smoke-image.sh` không kiểm cái nào:
+
+| Kiểm gì | Lớp lỗi nó bắt |
+|---|---|
+| `/api/health` | route sức khoẻ của ứng dụng (khác `/livez` hạ tầng) chết sau khi biên dịch |
+| `/style.css` trả `200` | `rootDir`/`outDir` sai → `__dirname/../public` trỏ lệch → **toàn bộ frontend 404 âm thầm** trong khi typecheck vẫn xanh. Xem bảng trong [../operations/DEPLOYMENT.md](../operations/DEPLOYMENT.md) |
+| `/metrics` trả `401` khi không có token, và trả số liệu khi có | `METRICS_TOKEN` đã đặt mà cổng token không được mắc — số liệu nội bộ mở toang |
+| `/api/auth/login` trả `401`, **không phải** `5xx` | đường đăng nhập vỡ ở bản đã biên dịch: `5xx` và `401` trông giống nhau trên biểu đồ, khác hẳn với người dùng |
+| worker thoát sau `SIGTERM` | rolling update cắt ngang job đang chạy vì worker không nghe tín hiệu dừng |
+
+**Trước 2026-08-31 script này KHÔNG BAO GIỜ CHẠY.** Nó chỉ được gọi ở
+`.github/workflows/ci.yml:217`, mà Actions không bật trên tài khoản này. Lượt chạy tay
+đầu tiên lộ ra ngay một lỗi: script gán `PORT=3999` nhưng **không `export`**, nên tiến
+trình con `node dist/server.js` bind cổng mặc định `3000` của chính nó còn script gõ cửa
+`3999`. Trong CI thì không thấy, vì khối `env:` của bước đã export sẵn — đúng hình dạng
+của một cổng chỉ chạy được ở một nơi duy nhất.
 
 ## Tầng component React — jsdom, và nó **OPT-IN TỪNG TỆP**
 
@@ -214,6 +246,9 @@ npm run test:coverage                     # kèm coverage
 npm run web:test                          # test frontend: đơn vị + tầng component jsdom
 npm run smoke:ui                          # E2E Chromium thật (cần build + Postgres)
 npm run docnum                            # số liệu tài liệu có khớp mã nguồn không
+
+DATABASE_URL=... REDIS_URL=... \
+  bash scripts/ci/smoke-dist.sh           # artifact dist/ chạy thật (cần build + Postgres + Redis)
 ```
 
 ## Chưa được kiểm

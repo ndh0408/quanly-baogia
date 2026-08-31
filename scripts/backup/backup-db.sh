@@ -60,12 +60,40 @@ if [ "$SZ" -lt 1000 ]; then alert "dump quá nhỏ ($SZ bytes) — nghi hỏng";
 if ! gzip -t "$TMP" 2>/dev/null; then
   alert "dump gzip hỏng/cụt — không giữ lại"; rm -f "$TMP"; exit 1
 fi
-mv -f "$TMP" "$FILE"
+# ── BA BƯỚC DƯỚI ĐÂY PHẢI KIỂM MÃ THOÁT BẰNG TAY (§39) ──────────────────────────────────────
+# Script này CỐ Ý không có `set -e` (lý do ghi trong CHO_PHEP_KHONG_E của
+# scripts/ci/check-shell-strict.mjs: dump hỏng phải ĐI TIẾP tới nhánh cảnh báo và tuyệt đối
+# không xoá bản sao lưu cũ). Cái giá của lựa chọn đó là lỗi KHÔNG tự lan ra mã thoát — mỗi bước
+# phải tự kiểm.
+# Bỏ kiểm thì hình dạng hỏng tệ nhất không phải "báo lỗi", mà là IM LẶNG: `mv` thất bại (đầy đĩa,
+# đích khác filesystem, thư mục mất quyền ghi) → không có tệp nào ở đích, nhưng script vẫn chạy
+# tới cuối, vẫn ghi `.db-last-success` và vẫn in "✓ backup OK", nên watchdog vẫn thấy "backup còn
+# tươi". Mất sao lưu mà không ai biết — chỉ lộ ra đúng lúc cần khôi phục.
+if ! mv -f "$TMP" "$FILE"; then
+  # KHÔNG xoá "$TMP": bản dump này ĐÃ qua kiểm cỡ và `gzip -t`, tức nó TỐT — chỉ chỗ đến hỏng.
+  # Giữ lại để còn cứu tay được. Lượt này thoát ngay nên KHÔNG chạy tới nhánh dọn mồ côi ở dưới;
+  # phải một lượt SAU chạy trót lọt mới thu nó, và chỉ khi đã quá 180 phút.
+  alert "mv thất bại: không đưa được bản dump về $FILE (còn nguyên ở $TMP) — lượt này KHÔNG có bản sao lưu mới"
+  exit 1
+fi
 # Checksum cạnh file: sau này đối chiếu được bản trên NAS có bằng bản gốc không.
-sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"
+# `pipefail` bật ở đầu tệp nên mã thoát của `sha256sum` không bị `awk` (luôn 0) che mất.
+if ! sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"; then
+  # Chuyển hướng `>` đã kịp tạo tệp rỗng/dở TRƯỚC khi sha256sum hỏng. Xoá đi: một checksum SAI
+  # tệ hơn không có checksum — nó làm bước đối chiếu báo lệch trên một bản dump lành lặn, và
+  # người trực sẽ vứt bản tốt đi.
+  rm -f "$FILE.sha256"
+  alert "sha256sum thất bại cho $FILE — bản dump vẫn còn nhưng KHÔNG có checksum để đối chiếu với bản NAS"
+  exit 1
+fi
 # Siết lại tường minh: umask ở trên chỉ áp cho tiến trình NÀY. Ai chạy tay script với umask khác
 # (hoặc thừa kế từ một shell đã đổi) vẫn phải ra 0600 — đây là dữ liệu nhân sự thô.
-chmod 600 "$FILE" "$FILE.sha256"
+if ! chmod 600 "$FILE" "$FILE.sha256"; then
+  # KHÔNG xoá bản dump: §54 xếp "không mất dữ liệu" TRÊN "không hở bảo mật". Báo thật to để người
+  # trực siết tay, chứ đừng đánh đổi một bản sao lưu tốt lấy một lỗi phân quyền.
+  alert "chmod 600 thất bại cho $FILE — dữ liệu nhân sự thô có thể đang ở chế độ ai-cũng-đọc, siết tay NGAY"
+  exit 1
+fi
 
 # 2) Off-host → NAS (tuỳ chọn). Dùng docker smbclient để KHÔNG cần cài gì lên host.
 if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then

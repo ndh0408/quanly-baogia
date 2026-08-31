@@ -192,9 +192,65 @@ describe("sse_reconnects — đo đường realtime có CHẬP CHỜN không", (
 
 // ── §28: ba metric sức khoẻ phụ thuộc ───────────────────────────────────────
 describe("§28 — metric cho CSDL / Redis / đĩa", () => {
-  it("năm gauge phải tồn tại trong registry", () => {
-    for (const ten of ["db_up", "redis_up", "redis_configured", "disk_free_bytes", "disk_total_bytes"]) {
+  const GAUGE_SUCKHOE = ["db_up", "redis_up", "redis_configured", "disk_free_bytes", "disk_total_bytes"];
+
+  it("năm gauge phải tồn tại trong registry — ở cấu hình MẶC ĐỊNH", () => {
+    for (const ten of GAUGE_SUCKHOE) {
       expect(registry.getSingleMetric(ten), `${ten} không tồn tại → quy tắc cảnh báo dùng nó sẽ KHÔNG BAO GIỜ kêu`).toBeTruthy();
+    }
+  });
+
+  // ── CHỐT CHO MỘT LỖI ĐÃ XẢY RA THẬT, DO CHÍNH BẢN VÁ §28 SINH RA ──────────
+  // Bản vá §28 mở nút `HEALTH_METRICS=0` và ghi trong .env.example rằng bật nó thì "mất cảnh báo
+  // CSDL chết". ĐO THẬT THÌ NGƯỢC: prom-client KHỞI TẠO SẴN Gauge KHÔNG NHÃN ở 0, còn nút tắt chỉ
+  // chặn phép ĐO chứ không chặn việc ĐĂNG KÝ — nên /metrics vẫn phát `db_up 0` và quy tắc critical
+  // `db_up == 0` kêu suốt ngày đêm trên một Postgres hoàn toàn khoẻ. Cảnh báo kêu oan là cảnh báo
+  // SẼ BỊ TẮT, tức nút "giảm tải" hoá ra là nút phá hệ giám sát.
+  // (`disk_*` thoát nạn chỉ vì TÌNH CỜ có nhãn — prom-client không tạo mẫu mặc định cho metric có
+  //  nhãn. Nay cả năm cùng một hành vi CÓ CHỦ Ý.)
+  //
+  // Bài trên KHÔNG bắt được lỗi này: nó chạy ở cấu hình mặc định nên năm gauge luôn có mặt.
+  // Tệ hơn, đọc một mình nó thì cách "sửa" hiển nhiên là bỏ `registers: DK_SUCKHOE` — tức làm lại
+  // đúng lỗi vừa vá. Bài dưới đây tồn tại để chặn đúng đường đó.
+  it("HEALTH_METRICS=0 thì KHÔNG PHÁT CHUỖI NÀO — không phải phát 0", async () => {
+    vi.resetModules();
+    const truoc = process.env.HEALTH_METRICS;
+    process.env.HEALTH_METRICS = "0";
+    try {
+      const mod = await import("../src/observability.js");
+      const ra = await mod.registry.metrics();
+      for (const ten of GAUGE_SUCKHOE) {
+        expect(ra, `${ten} vẫn được phát khi đã TẮT → quy tắc "${ten} == 0" sẽ kêu oan trên hệ thống khoẻ`)
+          .not.toMatch(new RegExp(`^${ten}[ {]`, "m"));
+      }
+      // Vế đối chứng: tắt phép đo sức khoẻ KHÔNG được kéo theo các metric khác.
+      expect(ra, "tắt HEALTH_METRICS không được làm mất luôn metric thường").toMatch(/^sse_clients[ {]/m);
+    } finally {
+      if (truoc === undefined) delete process.env.HEALTH_METRICS;
+      else process.env.HEALTH_METRICS = truoc;
+      vi.resetModules();
+    }
+  });
+
+  it("`config_missing` chỉ phát ở production — máy dev thiếu SMTP/S3 là bình thường", async () => {
+    // Đây là lớp bù cho §10: `src/config.ts` CỐ Ý chỉ console.warn khi thiếu REDIS_URL/S3_*/SMTP_HOST
+    // (lập luận: chết cả ứng dụng vì một tính năng phụ còn tệ hơn). Lập luận đó chỉ đứng được nếu có
+    // TÍN HIỆU thay thế — mà trước bản vá thì không: quy tắc Redis gác bằng `redis_configured == 1`,
+    // nên một production QUÊN đặt REDIS_URL không sinh ra tín hiệu nào ở đâu cả.
+    //
+    // Gọi thẳng hàm thay vì đổi NODE_ENV rồi nạp lại module — đúng như chú thích của chính nó dặn.
+    // Nạp lại với NODE_ENV=production còn kích hoạt fail-fast của config.ts trên các bí mật cỡ test.
+    const { capNhatCauHinhThieu, registry: reg } = await import("../src/observability.js");
+
+    expect(await reg.metrics(), "ngoài production KHÔNG được phát chuỗi nào — `absent()` trung thực hơn phát 0")
+      .not.toMatch(/^config_missing[ {]/m);
+
+    capNhatCauHinhThieu(true);
+    const ra = await reg.metrics();
+    expect(ra, "ở production phải phát, nếu không thì §10 vẫn không có lớp bù nào").toMatch(/^config_missing[ {]/m);
+    for (const khoa of ["REDIS_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "SMTP_HOST", "PII_ENC_KEY"]) {
+      expect(ra, `thiếu nhãn key="${khoa}" → quên biến đó ở production vẫn không ai thấy`)
+        .toMatch(new RegExp(`config_missing\\{[^}]*key="${khoa}"`));
     }
   });
 
