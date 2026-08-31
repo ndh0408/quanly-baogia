@@ -2,7 +2,7 @@
 
 > Định dạng theo §53 của MASTER PROMPT (mục A–L).
 > **Nguồn sự thật là MÃ NGUỒN.** Mọi con số dưới đây đo được lại bằng một lệnh, và lệnh đó ghi kèm.
-> Chốt cuối: `npm run verify` — **35/35 cổng xanh**, exit 0 (2026-08-28).
+> Chốt cuối: `npm run verify` — **39/39 cổng xanh**, exit 0 (2026-08-28).
 
 ---
 
@@ -14,11 +14,11 @@ lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml
 (tài khoản không bật GitHub Actions), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
-**Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 35 khẳng định, gồm dựng + smoke image
+**Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 39 khẳng định, gồm dựng + smoke image
 Docker thật, smoke giao diện Chromium 18 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
-**1.446 bài backend + 293 bài web** (cả hai đo 2026-08-28 trong cùng một lượt `npm run verify` trọn, sau khi thêm
+**1.448 bài backend + 293 bài web** (cả hai đo 2026-08-28 trong cùng một lượt `npm run verify` trọn, sau khi thêm
 tầng kiểm mức component — xem mục J).
 
 **Điều đáng nói nhất không phải các bản vá — mà là ba lỗi mà chính việc viết cổng kiểm mới lộ ra:**
@@ -227,7 +227,7 @@ Tài liệu **chuẩn** (canonical) sau đợt này:
 ## J. Test Results
 
 ```bash
-npm run verify                     # 13 bước · 35 khẳng định
+npm run verify                     # 13 bước · 39 khẳng định
 ```
 
 > **Số khẳng định đọc từ script, KHÔNG từ một lượt chạy mới.** Lượt `npm run verify` trọn
@@ -240,7 +240,7 @@ npm run verify                     # 13 bước · 35 khẳng định
 | Lệnh | Kết quả |
 |---|---|
 | `npx vitest run` (backend) | **178 tệp** — đo 2026-08-28. Đợt này thêm `tests/xg-doc-numbers.test.js`; chạy riêng nó: **36 bài xanh**, không cần hạ tầng |
-| ↳ số BÀI của backend | **1 446 bài xanh · 4 bỏ qua** (1 450) — ĐÃ đo 2026-08-28 trong lượt `npm run verify` trọn, đủ PostgreSQL + Redis + MinIO + Docker. Mốc trước (2026-08-27) là 1 410; phần chênh do các bài thêm ở đợt này, và con số này chỉ có được bằng cách CHẠY chứ không cộng nhẩm |
+| ↳ số BÀI của backend | **1 448 bài xanh · 4 bỏ qua** (1 452) — đo 2026-08-28 trong lượt `npm run verify` trọn, đủ PostgreSQL + Redis + MinIO + Docker. Mốc trước: 1 410 (2026-08-27) → 1 446 → 1 448; phần chênh là các bài thêm ở từng đợt, và mỗi con số chỉ có được bằng cách CHẠY chứ không cộng nhẩm |
 | `npx vitest run` trong `web/` | **22 tệp · 293 bài xanh** — đo 2026-08-28. Mặc định vẫn là environment `node` (`web/vite.config.ts` không khai khối `test`); đúng một tệp bật jsdom bằng docblock `@vitest-environment`, xem [development/TESTING.md](development/TESTING.md) |
 | ↳ trong đó, mức component | `web/src/components/GridTable.component.test.tsx` — **42 bài xanh**, dựng `<GridTable />` thật. Đã kiểm ngược từng cổng (làm hỏng `doUndo`, bỏ cổng `editable`, tắt cổng IME, đảo `pushUndo` ra SAU khi ghi) và xác nhận nó ĐỎ đúng chỗ |
 | `npm run check:docnum` | Cổng mới: đo chín đại lượng từ mã nguồn rồi đối chiếu với toàn bộ tài liệu trong cây. Quy ước khai số lịch sử ghi ở [AGENTS.md](../AGENTS.md) |
