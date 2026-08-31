@@ -210,8 +210,14 @@ export const PHEP_DO = {
 
 // ── MỐC LỊCH SỬ ─────────────────────────────────────────────────────────────
 // Xem "QUY ƯỚC KHAI SỐ LỊCH SỬ" ở đầu file. Danh sách này LÀ quy ước đó, dạng mã.
+//
+// ⚠️ Viết `<!-{2}` chứ KHÔNG viết `<!--` nguyên văn. Trong JavaScript `<!--` là token mở chú thích
+// kiểu HTML (Annex B của chuẩn), nên parser của semgrep tokenize nhầm NGAY GIỮA regex literal và
+// bỏ quét cả vùng quanh đó. Cổng [S3] của scripts/ci/security-scan.sh bắt đúng ca này: số file
+// "phân tích dở dang" tăng 3 → 4 và cổng bảo mật ĐỎ. Hai cách viết khớp chuỗi Y HỆT nhau
+// (`-{2}` = đúng hai dấu gạch). Đừng đổi ngược lại cho "dễ đọc" — sẽ làm semgrep mù lại.
 const MOC_LICH_SU =
-  /<!--\s*so-lich-su\s*-->|trước đợt|trước đó|trước đây|từng ghi|từng là|bản đầu|bản cũ|bản trước|ảnh chụp|số của mốc|lúc Phase|đã đo lúc|không phải số hiện tại|số của lúc/iu;
+  /<!-{2}\s*so-lich-su\s*-{2}>|trước đợt|trước đó|trước đây|từng ghi|từng là|bản đầu|bản cũ|bản trước|ảnh chụp|số của mốc|lúc Phase|đã đo lúc|không phải số hiện tại|số của lúc/iu;
 
 /** Dòng mở một ĐOẠN VĂN mới: bảng, tiêu đề, mục danh sách, dòng trống, rào mã. */
 const laDauDoan = (d) => /^\s*(\||#{1,6}\s|[-*+]\s|\d+\.\s|```|\/\/ ─|# ─)/.test(d) || d.trim() === "";
@@ -236,7 +242,7 @@ export function danhDauLichSu(dong) {
   for (let i = 0; i < dong.length; i++) {
     if (laDauDoan(dong[i])) trongDoanLichSu = false;
     // Nhãn tường minh đặt ở dòng NGAY TRƯỚC cũng có tác dụng (kiểu chú thích của markdown).
-    const nhanODongTruoc = i > 0 && /<!--\s*so-lich-su\s*-->/iu.test(dong[i - 1]);
+    const nhanODongTruoc = i > 0 && /<!-{2}\s*so-lich-su\s*-{2}>/iu.test(dong[i - 1]);
     if (MOC_LICH_SU.test(dong[i]) || nhanODongTruoc) trongDoanLichSu = true;
     ra[i] = trongDoanLichSu;
   }

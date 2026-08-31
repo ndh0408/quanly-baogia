@@ -168,7 +168,8 @@ if chay_buoc sast && [ "$NHANH" -eq 0 ]; then
     console.log(`      ${ds.length} file MÃ NGUỒN phân tích dở dang (ngưỡng ghim: ${base}), ${haTang} lỗi ở YAML/shell (không tính)`);
     for (const p of ds) console.log(`      · ${p}`);
     if (ds.length > base) {
-      console.error(`      → TĂNG so với ngưỡng: những file này KHÔNG được quét mà cổng vẫn xanh.`);
+      console.error(`      → TĂNG so với ngưỡng. Vùng mù là CỤC BỘ (quanh chỗ không parse được), KHÔNG phải cả file — đã đo, xem chú thích trên. Vẫn đỏ vì luật không khớp được thứ parser không dựng nổi.`);
+      console.error(`      → Cách vá ĐÚNG: tìm chỗ parser vấp rồi viết lại cho parse được (ca thật: \`<!--\` nguyên văn trong regex literal là token chú thích HTML của JS). Nâng SEMGREP_BASE_DODANG là cách CUỐI, và phải kèm lý do tại chỗ.`);
       process.exit(1);
     }
     if (ds.length < base) {
