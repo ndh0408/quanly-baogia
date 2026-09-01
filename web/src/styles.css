@@ -630,14 +630,14 @@ legend {
 }
 
 /* Toast React (riêng app2) */
-/* Toast phải NHƯỜNG CHỖ cho thanh công cụ dính đáy của trang soạn báo giá — nếu không nó đè đúng
-   lên nút "⋯" (tải Excel/PDF, lịch sử phiên bản) ở góc phải thanh. Đã thấy thật trong ảnh chụp
-   smoke: toast "Đã lưu" nằm chồng lên nút đó.
+/* Toast KHÔNG được chặn cú bấm vào thanh công cụ dính đáy. Hộp chứa toast là một khối `fixed` ở
+   góc phải-dưới — đúng chỗ nút "⋯" của thanh — nên dù rỗng nó vẫn ăn mất cú bấm. Đã đo: bài U13
+   của scripts/ci/ui-smoke.mjs (mở menu ⋯ → tải Excel) hết giờ vì cú bấm không tới nút.
 
-   Dùng `:has()` thay vì một biến ở `:root`: biến toàn cục sẽ đẩy toast lên cao ở MỌI trang, kể cả
-   Tổng quan / Danh sách / Admin — nơi không có thanh nào để tránh. Ở đây chỉ trang nào thật sự có
-   `.editor .actions` mới đổi. */
-body:has(.editor .actions) #toast-host {
+   Cách chữa là cho chuột ĐI XUYÊN hộp chứa, còn từng toast tự nhận lại chuột (để nút × vẫn bấm
+   được). KHÔNG dùng `body:has(...)` để đẩy toast lên trên thanh: nó bắt trình duyệt tính lại kiểu
+   theo cây con và đã làm bài U13 đỏ 2/3 lượt — đổi lấy một chút thẩm mỹ thì không đáng. */
+#toast-host {
   bottom: 84px;
 }
 
