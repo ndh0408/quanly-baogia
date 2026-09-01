@@ -200,7 +200,33 @@ echo "▶ [4/6] DB migrate (prisma migrate deploy)"
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate deploy"
 
 echo "▶ [5/6] Recreate app + worker"
-ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
+# `--force-recreate` KHÔNG phải để cho chắc — nó vá một lỗi ĐÃ ĐO ĐƯỢC.
+#
+# Bước [3/6] dựng image rồi gắn lại tag `quanly-app:staging` (hoặc :prod) cho ảnh MỚI. Nhưng
+# `docker compose up -d` với một service có khối `build:` KHÔNG so ảnh mà tag đang trỏ tới với ảnh
+# container đang chạy — nó thấy cấu hình service y nguyên và kết luận "không có gì để làm". Lệnh
+# thoát 0, deploy.sh in "✅ now running <sha>", RELEASES.log ghi digest MỚI — trong khi container
+# vẫn chạy ảnh CŨ.
+#
+# Đo ngày 2026-09-01 trên staging: sau BA lượt deploy liên tiếp, `quanly-app:staging` trỏ ảnh
+# 0c1aa87b4bbc còn container vẫn chạy 954ee4fafcdf — bản của ba lượt trước, giờ khởi động đứng im
+# ở lượt đầu. Chạy tay `docker compose up -d app worker` một lần nữa cũng không đổi gì. Đây là lỗi
+# nguy hiểm nhất trong cả tệp này: nó không hỏng ồn ào mà báo THÀNH CÔNG cho một việc chưa xảy ra,
+# nên bản vá bảo mật có thể nằm im hàng tuần mà không ai biết.
+#
+# Bước [6/6] verify /livez cũng không bắt được: app CŨ vẫn trả 200.
+ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d --force-recreate app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
+
+# CHỐT: ảnh container ĐANG CHẠY phải khớp ảnh mà tag vừa trỏ tới. Không có bước này thì lần sau
+# Compose đổi hành vi lần nữa là ta lại không biết.
+echo "▶ [5c/6] Đối chiếu ảnh đang chạy với ảnh vừa dựng"
+ssh "$SSH" "
+  muon=\$(docker images $IMAGE --format '{{.ID}}' | head -1)
+  for c in quanly-app quanly-worker; do
+    dang=\$(docker inspect \$c --format '{{.Image}}' 2>/dev/null | cut -c8-19)
+    [ \"\$dang\" = \"\$muon\" ] || { echo \"✖ \$c đang chạy ảnh \$dang, đáng lẽ phải là \$muon\"; exit 1; }
+    echo \"   \$c → \$dang ✓\"
+  done"
 
 # ── SỔ PHÁT HÀNH ──────────────────────────────────────────────────────────────────────────
 # §46 đòi mỗi lần phát hành ghi lại BỐN thứ: git SHA · phiên bản migration · digest image ·

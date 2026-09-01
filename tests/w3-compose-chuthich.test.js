@@ -79,10 +79,26 @@ describe("W3 · chú thích compose phải khớp cơ chế thật của ảnh",
   it("deploy.sh bước [5/6] thật sự chỉ recreate app + worker", () => {
     const sh = read("deploy.sh");
     expect(sh).toMatch(/\[5\/6\] Recreate app \+ worker/);
-    expect(sh).toMatch(/docker compose -f \$COMPOSE up -d app worker/);
+    expect(sh).toMatch(/docker compose -f \$COMPOSE up -d --force-recreate app worker/);
     // không có lượt `up -d` nào kéo theo postgres/redis
     expect(sh).not.toMatch(/up -d[^\n]*postgres/);
     expect(sh).not.toMatch(/up -d[^\n]*redis/);
+  });
+
+  // ── LỖI ĐÃ ĐO, KHÔNG PHẢI LO XA ──────────────────────────────────────────
+  // `docker compose up -d` với service có khối `build:` không so ảnh mà tag đang trỏ tới với ảnh
+  // container đang chạy. Trên staging ngày 2026-09-01, sau BA lượt deploy liên tiếp thì
+  // `quanly-app:staging` trỏ ảnh 0c1aa87b4bbc còn container vẫn chạy 954ee4fafcdf. Lệnh thoát 0,
+  // deploy.sh in "✅ now running <sha>", RELEASES.log ghi digest mới — mà mã chạy vẫn là mã cũ.
+  // Bước verify /livez không bắt được vì app CŨ cũng trả 200.
+  it("deploy.sh ÉP recreate và ĐỐI CHIẾU ảnh đang chạy — không tin lời Compose", () => {
+    const sh = read("deploy.sh");
+    expect(sh, "thiếu --force-recreate: Compose sẽ bỏ qua ảnh mới và báo thành công")
+      .toMatch(/up -d --force-recreate app worker/);
+    expect(sh, "thiếu bước đối chiếu ảnh đang chạy với ảnh vừa dựng")
+      .toMatch(/\[5c\/6\] Đối chiếu ảnh đang chạy/);
+    expect(sh, "bước đối chiếu phải soi CẢ app lẫn worker")
+      .toMatch(/for c in quanly-app quanly-worker/);
   });
 
   it("DEPLOYMENT.md có bước diễn tập tay cho postgres/redis", () => {
