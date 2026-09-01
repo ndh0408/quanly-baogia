@@ -72,6 +72,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // nên trang đo không có ô meta nào để gõ (các phép đo của nó: vẽ lần đầu · gõ ô chữ/ô số trong
   // lưới · thêm/xoá hàng · cuộn · đổi đơn giá).
   // Quên dùng redrawMeta ở đâu đó = chỉ mất phần tối ưu, KHÔNG sai màn hình — xem gridPropsEqual.
+  // Ô CHỨA thanh "+ Thêm hàng…" — nằm trong thanh hành động dính đáy, để nút thêm hàng và nút Lưu
+  // ở CÙNG một chỗ. Dùng ref callback chứ không useEffect: `.actions` chỉ vào DOM sau khi `ready`
+  // lật sang true (trước đó component trả về khung xương), nên một `useEffect` deps [] sẽ chạy đúng
+  // lượt render đầu — lúc chưa có gì để bắt — rồi không bao giờ chạy lại.
+  const [oDock, setODock] = useState<HTMLElement | null>(null);
   const gridVerRef = useRef(0);
   const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
   const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
@@ -619,6 +624,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         )}
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
+          dock={oDock}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
@@ -679,6 +685,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} />
 
         <div className="actions">
+          <div className="dock-slot" ref={setODock} />
           {editable && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
           {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-success" onClick={convert}>✓ Khách chốt</button>}
           {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-danger" onClick={lost}>✗ Khách không chốt</button>}

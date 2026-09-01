@@ -630,6 +630,17 @@ legend {
 }
 
 /* Toast React (riêng app2) */
+/* Toast phải NHƯỜNG CHỖ cho thanh công cụ dính đáy của trang soạn báo giá — nếu không nó đè đúng
+   lên nút "⋯" (tải Excel/PDF, lịch sử phiên bản) ở góc phải thanh. Đã thấy thật trong ảnh chụp
+   smoke: toast "Đã lưu" nằm chồng lên nút đó.
+
+   Dùng `:has()` thay vì một biến ở `:root`: biến toàn cục sẽ đẩy toast lên cao ở MỌI trang, kể cả
+   Tổng quan / Danh sách / Admin — nơi không có thanh nào để tránh. Ở đây chỉ trang nào thật sự có
+   `.editor .actions` mới đổi. */
+body:has(.editor .actions) #toast-host {
+  bottom: 84px;
+}
+
 #toast-host {
   position: fixed;
   right: 18px;
@@ -2366,6 +2377,100 @@ textarea[aria-invalid="true"] {
 }
 
 /* Bảng phím tắt kiểu Excel dưới lưới báo giá (thu gọn — bấm mới mở) */
+/* ─────────────────────────────────────────────────────────────────────────────
+   THANH CÔNG CỤ GỘP Ở ĐÁY TRANG SOẠN BÁO GIÁ
+
+   Trước: nút "+ Thêm hàng…" nằm ngay dưới bảng (cuộn theo trang), còn nút Lưu / Khách chốt nằm
+   trong `.editor .actions` — vốn ĐÃ dính đáy (public/style.css). Báo giá vài trăm dòng thì muốn
+   thêm một hàng phải cuộn xuống hết bảng, thêm xong lại cuộn về. Nay hai nhóm nút vào chung một
+   thanh dính: nhóm thêm bên trái, nhóm hành động bên phải.
+
+   Thanh nút được GridTable portal vào `.dock-slot`; nơi nào không có ô đó (bảng nội bộ, trang
+   account HN, trang đo hiệu năng, bài kiểm mức component) vẫn vẽ tại chỗ như cũ.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* `display: contents` để các nút hoà thẳng vào flex của `.actions` — không sinh thêm một tầng
+   hộp làm hỏng khoảng cách. Ô rỗng (chưa portal vào) thì không chiếm chỗ nào. */
+.editor .actions .dock-slot {
+  display: contents;
+}
+
+/* Bố cục nền của thanh thêm-hàng. Trước đây nằm ở inline style trong GridTable.tsx nên không
+   @media nào với tới được; chuyển ra đây để còn thu gọn được ở màn hình hẹp. */
+.grid-add-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0;
+}
+
+/* Trong thanh dính thì bỏ lề dọc, và chiếm phần trái để nhóm Lưu/Khách chốt tự dạt sang phải. */
+.editor .actions .grid-add-bar {
+  margin: 0;
+  /* `min-width: 0` là phần quan trọng: không có nó, nhóm nút thêm không co được dưới bề rộng nội
+     dung, nên khi thanh chật nó ĐẨY nút Lưu / Khách chốt / ⋯ xuống hàng thứ hai. Nút ⋯ rơi xuống
+     hàng dưới thì menu của nó (bung LÊN TRÊN) nằm đè chính thanh — đã làm bài U13 của
+     scripts/ci/ui-smoke.mjs đỏ. Cho nhóm thêm tự xuống dòng BÊN TRONG thay vì đẩy cả nhóm phải. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Bảng phím tắt bung LÊN TRÊN. Nằm trong thanh đáy mà bung xuống thì rơi ra ngoài màn hình.
+   `.grid-add-bar` có sticky/stacking riêng nên z-index ở đây chỉ so với anh em trong thanh. */
+.editor .actions .grid-keys {
+  position: relative;
+}
+.editor .actions .grid-keys > .grid-keys-body {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: min(900px, 92vw);
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+
+/* Hàng vừa thêm không được nằm khuất sau thanh. `focusCell` gọi `el.focus()` trên chính ô NHẬP
+   (input/textarea) chứ không phải <td>, mà trình duyệt đọc scroll-margin của phần tử ĐƯỢC cuộn
+   tới — nên phải đặt lên ô nhập, đặt lên td là trượt. 140px ≈ thanh một hàng + khoảng thở. */
+.excel-table td input,
+.excel-table td textarea {
+  scroll-margin-bottom: 140px;
+}
+
+/* Ô đọc "Đếm / Trung bình / Tổng" của vùng đang quét: trước nó nằm ngay trên thanh thêm-hàng nên
+   quét tới đâu liếc thấy tới đó. Thanh nay xuống đáy, nên cho ô này dính theo — mất nó là mất một
+   thói quen kiểu Excel. `bottom` chừa chỗ cho thanh; chỉ dính trong trang soạn báo giá. */
+.editor .grid-stat:not(.hidden) {
+  position: sticky;
+  bottom: 4px;
+  z-index: 29;
+  align-self: flex-start;
+}
+
+/* Màn hình THẤP (laptop 768p còn thanh bookmark + extension) hoặc HẸP: thanh dễ chiếm hai hàng.
+   Cho phép cuộn ngang trong thanh thay vì xuống hàng, giữ chiều cao một hàng.
+   Dấu phẩy = HOẶC; viết `or` trong một câu @media là cú pháp khác và im lặng không ăn. */
+@media (max-height: 700px), (max-width: 860px) {
+  .editor .actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    scrollbar-width: thin;
+  }
+  .editor .actions .grid-add-bar {
+    flex-wrap: nowrap;
+  }
+  .editor .actions .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 .grid-keys {
   font-size: 12.5px;
 }

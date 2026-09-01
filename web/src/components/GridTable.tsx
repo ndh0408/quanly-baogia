@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
@@ -41,6 +42,18 @@ export type GridTableProps = {
   clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
   /** Số ĐỔI MỖI KHI dữ liệu lưới có thể đã đổi (xem gridPropsEqual). Không khai = luôn vẽ lại. */
   dataVersion?: number;
+  /**
+   * Ô CHỨA thanh nút "+ Thêm hàng…". Ba trạng thái, cố ý:
+   *   · `undefined` → vẽ tại chỗ ngay dưới bảng — hành vi cũ. ExtraTables, AccountHnView, bench
+   *     và bài kiểm mức component đều đi đường này nên không đổi một byte nào;
+   *   · `null`      → nơi gọi CÓ ô dock nhưng ô đó chưa gắn vào DOM → chưa vẽ, để thanh không
+   *     nhấp nháy một khung hình ở chỗ cũ rồi mới nhảy xuống đáy;
+   *   · phần tử     → chuyển thanh vào đó bằng portal.
+   *
+   * Portal KHÔNG phá chốt giữ vùng chọn: `KEEP_SEL` kiểm bằng `target.closest()` — đi cây DOM,
+   * không đi cây React — nên chỉ cần class `grid-add-bar` còn nằm trên tổ tiên của các nút.
+   */
+  dock?: HTMLElement | null;
 };
 
 type Addr = { row: number; field: string; L: string };
@@ -169,7 +182,7 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 }
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
@@ -1709,6 +1722,16 @@ function GridTableInner(props: GridTableProps) {
     </>
   );
 
+  /**
+   * Đặt thanh nút "+ Thêm hàng…" vào đúng chỗ — xem prop `dock`.
+   *
+   * HÀM chứ không phải component: một component khai trong thân render là một KIỂU MỚI ở mỗi lượt
+   * vẽ, nên React tháo và dựng lại cả cây con — và <details> bảng phím tắt bên trong sẽ tự đóng
+   * mỗi lần người dùng gõ một phím. Hàm trả JSX thì không có chuyện đó.
+   */
+  const datVaoDock = (nut: React.ReactNode) =>
+    dock === undefined ? nut : dock ? createPortal(nut, dock) : null;
+
   return (
     <>
       {fxBar && (
@@ -1825,16 +1848,16 @@ function GridTableInner(props: GridTableProps) {
         </div>
       )}
 
-      {editable && (
-        <div className="grid-add-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+      {editable && datVaoDock(
+        <div className="grid-add-bar">
           <button className="btn btn-sm" onClick={addItem}>+ Thêm hàng</button>
-          <button className="btn btn-sm" onClick={addSection}>+ Thêm nhóm</button>
+          <button className="btn btn-sm" onClick={addSection} title="Thêm nhóm">+ Nhóm</button>
           <button className="btn btn-sm" onClick={addSubSection}>+ Nhóm con</button>
-          <button className="btn btn-sm" onClick={addInfo}>+ Dòng thông tin</button>
+          <button className="btn btn-sm" onClick={addInfo} title="Thêm dòng thông tin (không tính tiền)">+ Thông tin</button>
           <button className="btn btn-sm gf-venue-pick" title="Chèn hạng mục + kích thước có sẵn của rạp (quầy vé, quầy bắp, cover màn hình, bục soát vé…)" onClick={() => setPickerOpen(true)}>📐 Chèn từ rạp</button>
           <span className="spacer" />
           <details className="grid-keys">
-            <summary title="Bảng chạy như Excel — xem danh sách phím tắt">⌨️ Phím tắt kiểu Excel</summary>
+            <summary title="Bảng chạy như Excel — xem danh sách phím tắt">⌨️</summary>
             <div className="grid-keys-body">
               <p><b>Chọn / sửa ô (như Excel):</b> bấm = chọn ô · <b>gõ là ĐÈ nội dung luôn</b> (không cần nhấp đúp) · <b>nhấp đúp</b>/<kbd>F2</kbd> = sửa trong chữ (mũi tên chạy trong chữ; bấm <kbd>F2</kbd> lần nữa để mũi tên chốt-và-đi) · <kbd>Esc</kbd> hủy sửa · <kbd>Delete</kbd> xóa vùng chọn · <kbd>Backspace</kbd> xóa ô rồi gõ luôn.</p>
               <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.</p>

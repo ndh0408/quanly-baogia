@@ -43,6 +43,9 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
+// `pathToFileURL`: ESM chỉ nhận file:// URL. Đường dẫn tuyệt đối Windows (D:\…) làm `import()`
+// ném ERR_UNSUPPORTED_ESM_URL_SCHEME ("Received protocol 'd:'") ngay ở bước dựng dữ liệu.
+import { pathToFileURL } from "node:url";
 import bcrypt from "bcryptjs";
 
 // `location` và `document` xuất hiện trong các hàm truyền cho `page.evaluate` /
@@ -95,14 +98,14 @@ async function main() {
   }
   ok("dist/server.js + public/app2/index.html");
 
-  const { prisma } = await import(path.join(GOC, "dist/db.js"));
+  const { prisma } = await import(pathToFileURL(path.join(GOC, "dist/db.js")).href);
   // Ô tìm kiếm của danh sách lọc theo cột `searchText`, mà cột đó KHÔNG tự sinh: quoteService
   // dựng nó bằng `normalizeSearch(quoteNumber, projectCode, title, toCompany, toContact)`. Fixture
   // này ghi thẳng qua Prisma nên phải gọi đúng hàm đó — nếu tự bịa một chuỗi thì báo giá tồn tại
   // nhưng tìm không ra, và bài test đỏ vì lý do sai.
-  const { normalizeSearch } = await import(path.join(GOC, "dist/searchText.js"));
+  const { normalizeSearch } = await import(pathToFileURL(path.join(GOC, "dist/searchText.js")).href);
   // `src/excel.ts` gọi `getConfig(sheet.template.code)` và getConfig NÉM với mã lạ — xem [U1].
-  const { TEMPLATE_CONFIGS, getConfig } = await import(path.join(GOC, "dist/templateConfigs.js"));
+  const { TEMPLATE_CONFIGS, getConfig } = await import(pathToFileURL(path.join(GOC, "dist/templateConfigs.js")).href);
   const cong = await congRanh();
   const goc = `http://127.0.0.1:${cong}`;
   const matKhau = `Ui-Smoke-${process.pid}-${Math.floor(Date.now() % 1e6)}!`;
