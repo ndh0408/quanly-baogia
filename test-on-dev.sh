@@ -64,6 +64,11 @@ ssh "$SSH" '
       npx prisma migrate deploy >/dev/null 2>&1 &&
       npm run test:run > /tmp/quanly-vitest.log 2>&1
       code=\$?
+      # DANH SÁCH FILE ĐỎ trước, rồi mới tới đuôi log. `tail -20` một mình chỉ cho thấy bài CUỐI
+      # CÙNG bị đỏ — muốn biết 14 file nào hỏng thì phải chạy lại và mò, mà mỗi lượt tốn ~3 phút.
+      echo "── FILE ĐỎ ─────────────────────────────────────────────"
+      grep -a \"FAIL \" /tmp/quanly-vitest.log 2>/dev/null | sed \"s/ > .*//\" | sort -u || true
+      echo "── 20 dòng cuối ────────────────────────────────────────"
       tail -20 /tmp/quanly-vitest.log 2>/dev/null || true
       rm -rf node_modules 2>/dev/null
       exit \$code
