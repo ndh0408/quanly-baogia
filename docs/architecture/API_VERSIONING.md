@@ -1,6 +1,6 @@
 # Phiên bản API và chính sách ngừng hỗ trợ
 
-> §9 đòi *chuẩn bị* kiến trúc `/api/v1/`, **không** đòi viết lại 137 endpoint chỉ để gắn số. Và nó
+> §9 đòi *chuẩn bị* kiến trúc `/api/v1/`, **không** đòi viết lại 138 endpoint chỉ để gắn số. Và nó
 > nói thẳng điều kiện: *"Nếu SPA và backend release cùng nhau thì `/api` cũ có thể giữ."*
 >
 > Ở repo này SPA và backend **nằm trong cùng một image** và deploy cùng một lệnh. Nên tài liệu này
@@ -18,7 +18,7 @@
 
 ### Vì sao chưa dựng
 
-Một bề mặt API thứ hai **không phải là một dòng cấu hình**: nó là 137 endpoint nữa phải nằm trong
+Một bề mặt API thứ hai **không phải là một dòng cấu hình**: nó là 138 endpoint nữa phải nằm trong
 ma trận phân quyền (`docs/product/ROLES_PERMISSIONS.md`), nữa phải được `endpoint-inventory --check`
 soát, và nữa phải được nhớ tới trong mọi lần rà bảo mật sau này. Dựng nó cho **không consumer nào**
 là nhân đôi bề mặt tấn công để đổi lấy một dòng đánh dấu trong tài liệu.

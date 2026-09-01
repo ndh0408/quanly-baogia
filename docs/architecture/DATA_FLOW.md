@@ -76,7 +76,7 @@ Hai lớp phân quyền, và **không lớp nào thay được lớp kia**:
 | Năng lực | `requirePermission(...)` ở route | "Tài khoản này được phép làm hành động này không?" |
 | Phạm vi bản ghi | `canOnQuote` / `canScoped` / `quoteScopeWhereOrThrow` trong service | "Được phép làm nó **trên bản ghi cụ thể này** không?" |
 
-Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 137 endpoint:
+Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 138 endpoint:
 [ROLES_PERMISSIONS.md](../product/ROLES_PERMISSIONS.md).
 
 ### 1.4 Prisma → Postgres

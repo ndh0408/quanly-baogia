@@ -104,11 +104,19 @@ const lsFiles = (...co) =>
 //
 //   · QUÉT mà bỏ tệp chưa add → một tài liệu MỚI toanh ghi sai số sẽ lọt, vì người ta chạy
 //     `npm run verify` TRƯỚC khi `git add`. Nó chỉ bị bắt ở lượt verify SAU, tức sau khi đã commit.
-const TEP_GIT = lsFiles();
-const TEP_QUET = lsFiles("--cached", "--others", "--exclude-standard");
+let _tepGit = null;
+let _tepQuet = null;
+function TEP_GIT() {
+  if (_tepGit === null) _tepGit = lsFiles();
+  return _tepGit;
+}
+function TEP_QUET() {
+  if (_tepQuet === null) _tepQuet = lsFiles("--cached", "--others", "--exclude-standard");
+  return _tepQuet;
+}
 
 /** Đếm tệp khớp `re` trong danh sách tệp ĐÃ THEO DÕI (xem khối ngay trên). */
-const demTepGit = (re) => TEP_GIT.filter((f) => re.test(f)).length;
+const demTepGit = (re) => TEP_GIT().filter((f) => re.test(f)).length;
 
 // ── ĐƠN VỊ DÙNG CHUNG ────────────────────────────────────────────────────────
 // "bước" là đơn vị của BA đại lượng khác nhau trong repo này (bước ui-smoke, bước verify-local,
@@ -170,7 +178,10 @@ export const PHEP_DO = {
     nhan: "endpoint HTTP",
     // Dùng LẠI bộ sinh danh sách endpoint thay vì cài lại logic lần hai — cùng lý do repo-stats.mjs
     // dùng lại nó. `inventory()` là hàm thuần, không in bảng, không process.exit.
-    do: async () => (await import(path.join(GOC, "scripts/ci/endpoint-inventory.mjs"))).inventory().rows.length,
+    // `pathToFileURL` chứ không phải đường dẫn trần: ESM chỉ nhận file:// URL, nên trên Windows
+    // một đường dẫn tuyệt đối kiểu `D:\...` ném ERR_UNSUPPORTED_ESM_URL_SCHEME ("Received
+    // protocol 'd:'") và cả cổng `npm run check:docnum` chết ngay khi khởi động.
+    do: async () => (await import(pathToFileURL(path.join(GOC, "scripts/ci/endpoint-inventory.mjs")).href)).inventory().rows.length,
     lenh: "node scripts/ci/endpoint-inventory.mjs   # dòng TỔNG cuối bảng",
     donVi: [/^endpoints?\b/iu, /^HTTP endpoints?\b/iu],
     loaiTru: [
@@ -352,7 +363,7 @@ export const NGOAI_PHAM_VI = [
 ];
 
 export function danhSachTep() {
-  return TEP_QUET
+  return TEP_QUET()
     .filter((f) => /\.md$/.test(f) || /^scripts\/.*\.(mjs|sh)$/.test(f))
     .filter((f) => !NGOAI_PHAM_VI.some((bo) => bo(f)))
     .filter((f) => existsSync(path.join(GOC, f)));

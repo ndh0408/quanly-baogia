@@ -9,7 +9,7 @@
 ## A. Executive Summary
 
 **Trước.** Một hệ quản lý báo giá đang chạy thật, kiến trúc lành mạnh (React SPA → Express →
-Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 137 endpoint, tiền dùng `Decimal`. Nhưng
+Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 138 endpoint, tiền dùng `Decimal`. Nhưng
 lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml` khai đủ cổng mà **chưa bao giờ chạy**
 (tài khoản không bật GitHub Actions), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
@@ -239,7 +239,7 @@ npm run verify                     # 13 bước · 39 khẳng định
 
 | Lệnh | Kết quả |
 |---|---|
-| `npx vitest run` (backend) | **178 tệp** — đo 2026-08-28. Đợt này thêm `tests/xg-doc-numbers.test.js`; chạy riêng nó: **36 bài xanh**, không cần hạ tầng |
+| `npx vitest run` (backend) | **180 tệp** — đo 2026-08-28. Đợt này thêm `tests/xg-doc-numbers.test.js`; chạy riêng nó: **36 bài xanh**, không cần hạ tầng |
 | ↳ số BÀI của backend | **1 448 bài xanh · 4 bỏ qua** (1 452) — đo 2026-08-28 trong lượt `npm run verify` trọn, đủ PostgreSQL + Redis + MinIO + Docker. Mốc trước: 1 410 (2026-08-27) → 1 446 → 1 448; phần chênh là các bài thêm ở từng đợt, và mỗi con số chỉ có được bằng cách CHẠY chứ không cộng nhẩm |
 | `npx vitest run` trong `web/` | **22 tệp · 293 bài xanh** — đo 2026-08-28. Mặc định vẫn là environment `node` (`web/vite.config.ts` không khai khối `test`); đúng một tệp bật jsdom bằng docblock `@vitest-environment`, xem [development/TESTING.md](development/TESTING.md) |
 | ↳ trong đó, mức component | `web/src/components/GridTable.component.test.tsx` — **42 bài xanh**, dựng `<GridTable />` thật. Đã kiểm ngược từng cổng (làm hỏng `doUndo`, bỏ cổng `editable`, tắt cổng IME, đảo `pushUndo` ra SAU khi ghi) và xác nhận nó ĐỎ đúng chỗ |
@@ -311,7 +311,7 @@ Chỉ những thứ **thật sự cần**, theo thứ tự.
 | **6–12 tháng** | Bật Loki/Grafana khi lên nhiều instance | Một VM thì `docker logs` còn đủ |
 | **6–12 tháng** | Chuyển sang kéo ảnh theo digest làm mặc định | Cần VM đăng nhập được registry |
 | **12–24 tháng** | Dựng `/api/v1` — **chỉ khi** có consumer ngoài repo | Phiên bản là lời hứa với người khác; hứa với không ai thì chỉ còn là chi phí |
-| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 137 endpoint. Xem lại khi Express 4 hết hỗ trợ |
+| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 138 endpoint. Xem lại khi Express 4 hết hỗ trợ |
 | **khi có áp lực TỔ CHỨC** | Ranh giới dọc (`src/modules/`) | Đọc lại bảng bảy câu ở ADR 0008: lúc đó cột "vấn đề đo được" mới không còn rỗng |
 
 **Không đề xuất:** microservices · NestJS · Next.js · Kafka · event sourcing/CQRS · Kubernetes bắt
