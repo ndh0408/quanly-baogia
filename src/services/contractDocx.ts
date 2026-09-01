@@ -12,8 +12,38 @@ import { httpError } from "../httpError.js";
 
 const TEMPLATE = path.join(process.cwd(), "templates", "hd-dichvu-template.docx");
 
+// Ký tự NẰM NGOÀI tập Char của XML 1.0 — không có thực thể nào biểu diễn được, kể cả &#11;. Lọt
+// một cái vào word/document.xml là Word từ chối mở cả file. Hồ sơ nhân sự chỉ bị chặn ĐỘ DÀI
+// (personnel.routes.ts) nên gọi API trực tiếp là chúng vào tới DB. ExcelJS tự lọc y hệt khi ghi
+// .xlsx; đường .docx này là chỗ duy nhất còn thiếu.
+//
+//   Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+//
+// Bản trước giữ lại theo vị từ `c > 0x1f`, tức CHỈ chặn nhóm điều khiển C0. Đã đo bằng saxes
+// (trình phân tích chính bộ test dùng) trên chuỗi `<a>x…y</a>`:
+//   • U+FFFE và U+FFFF  → "disallowed character" — hai noncharacter này lớn hơn 0x1f nên bản
+//     trước GIỮ chúng lại, và một hồ sơ có `fullName = "Ngu" + U+FFFF + "yen"` sinh ra .docx hỏng.
+//   • U+FDD0, U+1FFFE, U+1FFFF → HỢP LỆ theo đúng vị từ trên (noncharacter nhưng vẫn trong Char),
+//     saxes chấp nhận — nên KHÔNG được lọc, nếu không là cắt mất chữ của người ta.
+//   • surrogate ĐƠN LẺ (U+D800–U+DFFF, lọt vào khi chuỗi bị cắt giữa cặp thay thế) không làm hỏng
+//     XML: JSZip mã hoá UTF-8 và Node đổi nó thành EF BF BD, tức U+FFFD. Nhưng thế là in một dấu
+//     ký tự thay thế (hình thoi chấm hỏi) vào hợp đồng gửi khách, nên vẫn bỏ.
+//
+// PHẢI so bằng CODE POINT, không phải `charCodeAt(0)`: `[...s]` duyệt theo code point nên một cặp
+// thay thế hợp lệ (chữ astral, U+10000+) ra MỘT phần tử hai đơn vị mã, và `charCodeAt(0)` của nó
+// trả về nửa cao 0xD800+ — không phân biệt được với surrogate đơn lẻ. `codePointAt(0)` trả code
+// point thật, nhờ đó giữ chữ astral mà vẫn loại được surrogate đơn lẻ.
+// (viết bằng mã ký tự thay vì regex: eslint `no-control-regex` cấm ký tự điều khiển trong regex)
+const laCharXml = (cp: number) =>
+  cp === 0x09 || cp === 0x0a || cp === 0x0d ||
+  (cp >= 0x20 && cp <= 0xd7ff) ||
+  (cp >= 0xe000 && cp <= 0xfffd) ||
+  cp >= 0x10000;
+const stripXmlCtrl = (s: string) => [...s].filter((ch) => laCharXml(ch.codePointAt(0)!)).join("");
+
 const escXml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  stripXmlCtrl(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const ddmmyyyy = (d: Date) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
@@ -57,11 +87,21 @@ export function moneyWordsVN(amount: number): string {
   return s.charAt(0).toUpperCase() + s.slice(1) + " đồng";
 }
 
+// Đầu đoạn <w:p> gần nhất TRƯỚC vị trí i. Phải xét cả thẻ CÓ THUỘC TÍNH: mẫu hiện tại chỉ tình
+// cờ có thẻ `<w:p>` trần ngay trước 2 marker, nhưng Word gắn w:rsidR cho MỌI đoạn khi ai đó mở
+// mẫu ra sửa rồi lưu lại — lúc đó `lastIndexOf("<w:p>")` trả -1 và cả hai hàm dưới im lặng
+// không cắt gì, tức hợp đồng gửi đi kèm nguyên khối PHIẾU CHI cùng 2 dòng "{{PC_START}}".
+// `<w:pPr>` / `<w:p/>` KHÔNG khớp: sau `<w:p` bắt buộc là khoảng trắng hoặc `>`.
+function paragraphStartBefore(xml: string, i: number): number {
+  const last = [...xml.slice(0, i).matchAll(/<w:p(?:\s[^>]*)?>/g)].pop();
+  return last ? (last.index as number) : -1;
+}
+
 /** Bỏ nguyên đoạn <w:p> chứa token (marker khi GIỮ phiếu chi). */
 function dropParagraphWith(xml: string, token: string): string {
   const i = xml.indexOf(token);
   if (i < 0) return xml;
-  const start = xml.lastIndexOf("<w:p>", i);
+  const start = paragraphStartBefore(xml, i);
   const end = xml.indexOf("</w:p>", i);
   if (start < 0 || end < 0) return xml;
   return xml.slice(0, start) + xml.slice(end + "</w:p>".length);
@@ -70,7 +110,7 @@ function dropParagraphWith(xml: string, token: string): string {
 function cutSection(xml: string, startToken: string, endToken: string): string {
   const si = xml.indexOf(startToken), ei = xml.indexOf(endToken);
   if (si < 0 || ei < 0) return xml;
-  const start = xml.lastIndexOf("<w:p>", si);
+  const start = paragraphStartBefore(xml, si);
   const end = xml.indexOf("</w:p>", ei);
   if (start < 0 || end < 0) return xml;
   return xml.slice(0, start) + xml.slice(end + "</w:p>".length);
@@ -135,6 +175,12 @@ export async function buildContractDocx(rec: ContractRecord): Promise<{ buffer: 
   xml = rec.paidAt
     ? dropParagraphWith(dropParagraphWith(xml, "{{PC_START}}"), "{{PC_END}}")
     : cutSection(xml, "{{PC_START}}", "{{PC_END}}");
+  // Chốt chặn: cả hai hàm trên đều "trả nguyên xml" khi không nhận ra cấu trúc đoạn. Không có
+  // dòng này thì thất bại đó ÂM THẦM — hợp đồng vẫn tải về được, chỉ là in ra chuỗi {{PC_…}}
+  // (và có thể kèm nguyên khối phiếu chi cho hồ sơ CHƯA thanh toán). Thà hỏng ồn ào.
+  if (xml.includes("{{PC_")) {
+    throw httpError(500, "Mẫu hợp đồng không khớp — không cắt được khối phiếu chi. Cần kiểm tra lại templates/hd-dichvu-template.docx.");
+  }
 
   for (const [k, v] of Object.entries(tokens)) xml = xml.split(`{{${k}}}`).join(escXml(v));
 

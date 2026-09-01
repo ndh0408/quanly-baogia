@@ -17,7 +17,19 @@ spec:
     metadata:
       labels: {{- include "quanly.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
-      {{- if .Values.metrics.enabled }}
+      {{/*
+        ANNOTATION prometheus.io CHỈ RENDER KHI /metrics THẬT SỰ TRẢ LỜI ĐƯỢC.
+        Kiểu scrape theo annotation KHÔNG mang được Bearer token — Prometheus chỉ có URL. Mà
+        src/app.ts gác /metrics như sau: production + KHÔNG có METRICS_TOKEN → 404 (fail closed);
+        CÓ METRICS_TOKEN → đòi Bearer đúng, sai thì 401. Nghĩa là ở bản cài MẶC ĐỊNH
+        (NODE_ENV=production, METRICS_TOKEN rỗng, serviceMonitor tắt) ba dòng annotation này chỉ
+        làm một việc: chỉ Prometheus tới một endpoint trả 404 mãi mãi, không cảnh báo nào — đúng
+        triệu chứng mà mục `metrics-unreachable-shipped-scrape-config` nói tới, chỉ đổi đường tới.
+        Nên chỉ khai chúng khi endpoint đáp được KHÔNG cần xác thực: không đặt token VÀ không phải
+        production. Có token thì đường đúng là ServiceMonitor (templates/sa.yaml) — nó gắn được
+        `authorization:`. NOTES.txt in cảnh báo cho tổ hợp còn lại.
+      */}}
+      {{- if and .Values.metrics.enabled (not .Values.secrets.METRICS_TOKEN) (ne (toString .Values.config.NODE_ENV) "production") }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"
@@ -25,13 +37,16 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "quanly.serviceAccountName" . }}
+      # > 5s (preStop) + 10s (lưới an toàn cứng trong src/server.ts shutdown()) để pod không bị
+      # SIGKILL giữa lúc đang đóng êm.
+      terminationGracePeriodSeconds: 45
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: app
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "quanly.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
@@ -48,17 +63,55 @@ spec:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 5
             periodSeconds: 5
+          # Khởi động lần đầu phải chạy `prisma migrate deploy` trước khi nghe cổng. Không có
+          # startupProbe thì livenessProbe bắt đầu đếm ngay và giết pod giữa chừng migration trên
+          # cụm chậm/migration dài → deploy không bao giờ lên được. (infra/k8s/app.yaml đã có, chart
+          # thì thiếu.) 30 × 2s = tối đa 60s cho lần khởi động đầu.
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
           {{- if .Values.app.runMigration }}
           # Versioned, non-destructive, advisory-locked migrations (safe across replicas).
           # Do NOT use `prisma db push --accept-data-loss` — it can drop columns/data.
+          # LỆNH PHẢI KHỚP Dockerfile CMD: `node dist/server.js`. Bản trước ghi `node src/server.js`
+          # — file đó KHÔNG tồn tại trong image (mã nguồn là .ts, và nay image chỉ chứa dist/) nên
+          # mọi pod chết vòng lặp ngay lần deploy Helm đầu tiên.
           command: ["/bin/sh", "-c"]
-          args: ["npx prisma migrate deploy && node src/server.js"]
+          args: ["npx prisma migrate deploy && exec node dist/server.js"]
           {{- end }}
+          # TRỄ RÚT KẾT NỐI. k8s gửi SIGTERM và gỡ pod khỏi Endpoints SONG SONG, không theo thứ tự:
+          # src/server.ts nhận SIGTERM là ngừng nhận kết nối mới NGAY, trong khi kube-proxy/ingress
+          # trên các node khác còn đang lan truyền bản Endpoints mới và vẫn gửi request tới. Kết quả
+          # là 502 lác đác mỗi lần rolling update. `sleep 5` trong preStop giữ pod phục vụ thêm 5s để
+          # việc rút hoàn tất TRƯỚC khi tiến trình bắt đầu đóng.
+          lifecycle:
+            preStop:
+              exec: { command: ["/bin/sh", "-c", "sleep 5"] }
+          volumeMounts:
+            # Prisma query engine + tsx/node cần chỗ ghi tạm. Có volume này thì
+            # securityContext.readOnlyRootFilesystem=true bật được (values.yaml).
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
-      affinity: {{- toYaml . | nindent 8 }}
+      {{- if .Values.affinity }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if .Values.spreadAcrossNodes }}
+      # Rải replica ra các node khác nhau. "preferred" chứ không "required": cụm 1 node vẫn lập
+      # lịch được, cụm nhiều node thì mất 1 node không hạ hết API.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "quanly.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: api
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}

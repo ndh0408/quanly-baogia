@@ -14,18 +14,46 @@ spec:
       labels: {{- include "quanly.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis
     spec:
+      # Cùng khuôn với infra/k8s/redis.yaml. UID 999 là user `redis` trong ảnh redis:7-alpine.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: {{ .Values.redis.image }}
+          # Hệ thống tệp gốc CHỈ ĐỌC + bỏ sạch capability. `--save 60 1` có ghi RDB nên /data phải là
+          # volume ghi được — trước đây chart KHÔNG khai volume nào cho /data, tức Redis ghi thẳng vào
+          # lớp ghi của container; bật read-only mà quên volume này là pod chết ngay.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: data, mountPath: /data }
           # XÁC THỰC BẮT BUỘC: --requirepass (khớp mật khẩu nhúng trong quanly.redisUrl). Không có nó thì mọi
-          # pod trong cluster đọc/ghi được session + hàng đợi. Đổi mặc định qua .Values.redis.password.
-          args: ["redis-server", "--requirepass", {{ .Values.redis.password | quote }}, "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          # pod trong cluster đọc/ghi được hàng đợi + rate-limit (phiên KHÔNG ở Redis mà ở Postgres).
+          # Đổi mặc định qua .Values.redis.password.
+          # PHẢI là noeviction. `allkeys-lru` cho phép Redis XOÁ BẤT KỲ khoá nào khi chạm maxmemory —
+          # kể cả khoá job của BullMQ (job đang chờ biến mất, không ai biết) và bộ đếm rate-limit
+          # (giới hạn tần suất tự mở ra). Phiên đăng nhập KHÔNG nằm ở đây nên không ai bị đăng xuất —
+          # kho phiên là connect-pg-simple trên Postgres. BullMQ yêu cầu rõ noeviction. Thà ghi lỗi khi hết
+          # bộ nhớ còn hơn âm thầm nuốt mất việc. docker-compose.prod.yml đã đúng từ trước; chart
+          # và manifest k8s thì chưa — deploy bằng Helm là dính.
+          args: ["redis-server", "--requirepass", {{ include "quanly.redisPassword" . | quote }}, "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
           ports: [{ containerPort: 6379 }]
           resources: {{- toYaml .Values.redis.resources | nindent 12 }}
           readinessProbe:
             tcpSocket: { port: 6379 }
             initialDelaySeconds: 3
             periodSeconds: 5
+      # Redis chỉ là cache/hàng đợi — RDB ở đây để khởi động lại nhanh, không phải nguồn sự thật.
+      volumes:
+        - { name: data, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

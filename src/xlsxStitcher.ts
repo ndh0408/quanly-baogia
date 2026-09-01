@@ -160,6 +160,12 @@ function addOverride(ctXml: string, partName: string, contentType: string) {
 
 function escapeXmlAttr(s: unknown) {
   return String(s ?? "")
+    // Ký tự điều khiển KHÔNG hợp lệ trong XML 1.0 — escape thực thể không cứu được, chúng làm
+    // `xl/workbook.xml` sai cú pháp và Excel đòi "sửa chữa" file. Cả hai chỗ gọi hàm này đều là
+    // TÊN SHEET; `safeSheetName` (src/excel.ts) đã lọc từ đầu nguồn, đây là lớp thứ hai cho mọi
+    // đường gọi thêm sau này.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

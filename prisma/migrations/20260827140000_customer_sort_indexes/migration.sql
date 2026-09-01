@@ -1,0 +1,29 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- §17 — INDEX CÒN THIẾU CHO SẮP XẾP MẶC ĐỊNH CỦA TRANG KHÁCH HÀNG
+--
+-- Phát hiện bằng `node scripts/db/explain-hot-paths.mjs` (EXPLAIN ANALYZE trên câu SQL Prisma
+-- THẬT SỰ chạy, với 5.000 khách hàng và thống kê đã ANALYZE):
+--
+--     danh sách khách hàng (trang 1) — 5,3 ms · QUÉT TUẦN TỰ Customer (10.000 dòng)
+--     kế hoạch: Limit → Sort (createdAt DESC) → Seq Scan on "Customer"
+--
+-- `ListQuerySchema` (src/validators.ts) đặt mặc định `sort=createdAt, order=desc`, tức ĐÂY LÀ
+-- truy vấn chạy mỗi lần ai đó mở trang Mã khách hàng. Bảng `Customer` có index cho
+-- (deletedAt,status), (ownerId) và (name) — KHÔNG có cái nào phục vụ được `ORDER BY createdAt`.
+-- Nên Postgres đọc trọn bảng rồi sắp xếp, chỉ để lấy 20 dòng đầu. Chi phí đó tăng TUYẾN TÍNH theo
+-- số khách hàng, trong khi trang thì luôn chỉ hiện 20 dòng.
+--
+-- Index PHẦN (`WHERE "deletedAt" IS NULL`) đúng theo nếp đã có ở migration
+-- 20260613000001_integrity_fks_indexes: mọi truy vấn đọc của ứng dụng đều mang điều kiện đó (lớp
+-- xoá-mềm ở src/db.ts tự thêm), nên index phần vừa nhỏ hơn vừa khớp chính xác hơn.
+--
+-- `updatedAt` cũng nằm trong enum sort của trang. `name` thì đã có index thường.
+--
+-- AN TOÀN KHI CHẠY THẬT: `CREATE INDEX` thường (không CONCURRENTLY) khoá GHI trên bảng trong lúc
+-- dựng. Ở quy mô hiện tại (hàng nghìn khách hàng) đó là vài chục mili-giây. Prisma chạy mỗi file
+-- migration TRONG MỘT TRANSACTION, mà `CREATE INDEX CONCURRENTLY` thì KHÔNG chạy được trong
+-- transaction — nên nếu bảng này có ngày lên hàng triệu dòng, hãy dựng tay bằng
+-- `CREATE INDEX CONCURRENTLY` TRƯỚC rồi mới chạy migration (có `IF NOT EXISTS` nên nó thành no-op).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS "Customer_createdAt_live_idx" ON "Customer" ("createdAt" DESC) WHERE "deletedAt" IS NULL;
+CREATE INDEX IF NOT EXISTS "Customer_updatedAt_live_idx" ON "Customer" ("updatedAt" DESC) WHERE "deletedAt" IS NULL;

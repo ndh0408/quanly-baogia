@@ -15,6 +15,9 @@ spec:
     metadata:
       labels: { app: quanly, component: api }
     spec:
+      # > 5s (preStop) + 10s (lưới an toàn cứng trong src/server.ts shutdown()) để pod không bị
+      # SIGKILL giữa lúc đang đóng êm.
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -23,7 +26,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: app
-          image: ghcr.io/ndh0408/quanly-baogia:latest
+          image: ghcr.io/ndh0408/quanly-baogia:REPLACE_ME # kustomize `images:` ghi đè — xem kustomization.yaml
           imagePullPolicy: IfNotPresent
           # Least-privilege container hardening: no privilege escalation, read-only
           # root FS (writable /tmp mounted below for the Prisma engine), all Linux
@@ -40,7 +43,7 @@ spec:
             - secretRef: { name: quanly-secrets }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 1,    memory: 1Gi }
+            limits: { cpu: 1, memory: 1Gi }
           livenessProbe:
             httpGet: { path: /livez, port: http }
             initialDelaySeconds: 20
@@ -59,12 +62,36 @@ spec:
           # no-op when there are no pending migrations. Ideally run this once per release as a
           # Helm pre-upgrade Job / initContainer rather than in the steady-state command.
           command: ["/bin/sh", "-c"]
-          args: ["npx prisma migrate deploy && node src/server.js"]
+          # `node src/server.js` KHÔNG tồn tại trong image (mã là .ts, image chỉ chứa dist/).
+          # Phải khớp Dockerfile CMD.
+          args: ["npx prisma migrate deploy && exec node dist/server.js"]
+          # TRỄ RÚT KẾT NỐI. k8s gửi SIGTERM và gỡ pod khỏi Endpoints SONG SONG, không theo thứ tự:
+          # src/server.ts nhận SIGTERM là ngừng nhận kết nối mới NGAY, trong khi kube-proxy/ingress
+          # trên các node khác còn đang lan truyền bản Endpoints mới và vẫn gửi request tới. Kết quả
+          # là 502 lác đác mỗi lần rolling update. `sleep 5` giữ pod phục vụ thêm 5s để việc rút
+          # hoàn tất TRƯỚC khi tiến trình bắt đầu đóng.
+          lifecycle:
+            preStop:
+              exec: { command: ["/bin/sh", "-c", "sleep 5"] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: tmp
           emptyDir: {}
+      # RẢI REPLICA RA NODE KHÁC NHAU. Không có khối này thì scheduler được phép xếp cả hai replica
+      # lên cùng một node — mất node đó là mất toàn bộ API, và PodDisruptionBudget cũng không cứu
+      # được (PDB chỉ chặn eviction CÓ KẾ HOẠCH, không chặn node chết đột ngột).
+      # "preferred" chứ không "required": cụm một node vẫn lập lịch được, không để pod treo Pending.
+      # Chép từ infra/helm/quanly/templates/app-deployment.yaml, đổi selector sang nhãn của bản
+      # kustomize — hai bản tham chiếu của cùng một hệ thống không được lệch mức phòng thủ.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: { app: quanly, component: api }
 ---
 apiVersion: v1
 kind: Service

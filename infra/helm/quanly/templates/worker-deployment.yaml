@@ -18,9 +18,12 @@ spec:
     spec:
       serviceAccountName: {{ include "quanly.serviceAccountName" . }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Worker không phục vụ HTTP nên không có probe HTTP. Cho nó đủ thời gian đóng job đang chạy
+      # khi rolling update — worker.ts bắt SIGTERM và gọi Worker.close() để job hiện tại chạy nốt.
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 60 }}
       containers:
         - name: worker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "quanly.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           envFrom:
@@ -30,7 +33,15 @@ spec:
             - { name: WORKER_MODE, value: "true" }
             - { name: WORKER_CONCURRENCY, value: "{{ .Values.worker.concurrency }}" }
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}
-          command: ["node", "src/worker.js"]
+          # Khớp artifact đã biên dịch trong image (xem Dockerfile). Bản trước gọi `src/worker.js`
+          # — không tồn tại → worker chết vòng lặp và MỌI job nền (xuất Excel/PDF, email, webhook,
+          # dọn dữ liệu) im lặng không chạy.
+          command: ["node", "dist/worker.js"]
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 {{- if .Values.worker.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2

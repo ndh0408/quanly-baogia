@@ -12,6 +12,29 @@ import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 // khớp validators.customerLogo/itemSchema.images. Kiểm tiền tố sẽ lọt markup thoát thuộc tính src="".
 const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
 
+/**
+ * TÊN FILE người dùng nhận được khi tải báo giá. MỘT nguồn cho CẢ HAI đường xuất.
+ *
+ * ── VÌ SAO PHẢI DÙNG CHUNG ──────────────────────────────────────────────────
+ * Công thức này từng bị chép tay ở hai nơi và chúng ĐÃ LỆCH NHAU:
+ *   · đường ĐỒNG BỘ (src/routes/export.routes.ts) cho ra "BaoGia_BG-2026-001.xlsx";
+ *   · đường NỀN (src/worker.ts) không truyền `filename` vào `presignDownload` nên kho object lấy
+ *     phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu thời gian.
+ * Cùng MỘT nút bấm mà ra hai kiểu tên, tuỳ báo giá to hay nhỏ — người dùng không hiểu vì sao.
+ *
+ * Chuyện đó quan trọng ở đường nền hơn hẳn: link tải là URL đã ký trỏ vào kho object, tức KHÁC
+ * ORIGIN, mà trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác origin. Nghĩa là tên
+ * file do header Content-Disposition của KHO quyết định — client không sửa được.
+ *
+ * Bộ lọc `[^A-Za-z0-9_-]` cố ý HẸP: tên này đi thẳng vào một header HTTP
+ * (`Content-Disposition: attachment; filename="..."`), nên mọi dấu nháy, chấm phẩy và dấu gạch
+ * chéo phải chết ở đây. Đừng nới ra để "giữ dấu tiếng Việt" — đó là chèn header.
+ */
+export function tenFileXuat(quoteNumber: string | null | undefined, quoteId: number | string, ext: "xlsx" | "pdf"): string {
+  const an = String(quoteNumber || `quote-${quoteId}`).replace(/[^A-Za-z0-9_-]/g, "_");
+  return `BaoGia_${an}.${ext}`;
+}
+
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
 // their own only while it's still draft/rejected. converted/lost are terminal
 // (immutable for everyone — duplicate to make a new revision instead).
@@ -41,6 +64,43 @@ export const QUOTE_INCLUDE = {
   members: { select: { id: true, username: true, displayName: true } },
 } satisfies Prisma.QuoteInclude;
 
+/**
+ * Bản đọc "TRẠNG THÁI HIỆN TẠI" cho đường LƯU (`updateQuote`) — CỐ Ý liệt kê từng cột.
+ *
+ * `QUOTE_INCLUDE` ở trên lấy `items` bằng `include`, tức MỌI cột của QuoteItem, kể cả `images`
+ * (mảng data-URL base64) và `QuoteSheet.extraTables` (jsonb chứa `paidProof` base64). Đường lưu
+ * dùng bản đọc này cho ĐÚNG bốn việc: kiểm quyền sửa (`status`/`createdById`/`members`), so mốc
+ * khoá lạc quan (`updatedAt`), lấy các cột vô hướng để dựng `searchText` + nhật ký, và — chỉ khi
+ * payload KHÔNG kèm `sheets` — tính lại tổng tiền từ `items`. Không chỗ nào đọc ảnh.
+ *
+ * Đo được (tests/b2-update-quote-no-image-read.test.js, 12 hạng mục × ảnh 400KB): một lần Lưu
+ * làm bảng QuoteItem đụng 1224 block TOAST, đúng GẤP ĐÔI một lần đọc đầy đủ (612) — vì cùng một
+ * khối ảnh bị đọc ở đây rồi đọc lại lần nữa ở phản hồi. Bỏ ảnh khỏi lần đọc này còn 612.
+ *
+ * Lần đọc CUỐI (`tx.quote.update(... include: QUOTE_INCLUDE)`) thì PHẢI giữ nguyên ảnh: editor lấy
+ * nguyên phản hồi làm state (`qRef.current = { ...saved }` — web/src/pages/QuoteEditor.tsx), cắt
+ * ảnh ở đó là xoá trắng ảnh trên màn hình sau mỗi lần Lưu.
+ *
+ * `items` PHẢI giữ `orderBy: { order: "asc" }`: `computeQuoteTotals` đọc dòng "section" để đặt hệ
+ * số nhân cho các dòng SAU nó, nên đảo thứ tự là ra tổng tiền khác.
+ */
+export const QUOTE_UPDATE_STATE_SELECT = {
+  id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
+  toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
+  companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  members: { select: { id: true } },
+  sheets: {
+    orderBy: { order: "asc" },
+    select: {
+      id: true, name: true, order: true, groupSubtotal: true,
+      items: {
+        orderBy: { order: "asc" },
+        select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
+      },
+    },
+  },
+} satisfies Prisma.QuoteSelect;
+
 // Account Hà Nội: CHỈ được thấy phần GIÁ HÀ NỘI. Trả về object TỐI GIẢN — KHÔNG có
 // sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
 // qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại
@@ -50,7 +110,10 @@ function presentQuoteForAccountHn(q: any) {
     sheetId: s.id,
     sheetName: s.name || null,
     order: s.order,
-    hnTables: (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"),
+    // stripExtraProofs: account Hà Nội KHÔNG có quote:internal:pay/internal:view, mà ảnh chứng từ
+    // (base64) VẪN nằm được trên hàng bảng "hanoi" — route /pay khớp theo `rid`, không lọc category.
+    // Hai presenter kia đều bọc; thiếu ở đây là vừa lộ chứng từ vừa phình payload mỗi lần mở báo giá.
+    hnTables: stripExtraProofs((Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi")),
   }));
   return {
     id: q.id,
@@ -223,6 +286,10 @@ export function sanitizeExtraTables(tables: any) {
       detail: it.detail ? String(it.detail).trim() : null,
       unit: it.unit ? String(it.unit).replace(/[\r\n]+/g, " ").trim() : null,
       quantity: Number(it.quantity) || 0,
+      // Cờ "số lẻ chính xác" PHẢI theo được xuống DB: `extraTableSum` rẽ nhánh theo nó (giữ 4 chữ số
+      // thập phân thay vì `qtyRound` cắt còn 1). Thiếu dòng này thì tổng bảng nội bộ NHẢY SỐ sau khi
+      // tải lại trang, dù không ai sửa gì — đường lưới chính (buildSheetsCreate) vốn đã persist cờ này.
+      quantityExact: !!it.quantityExact,
       unitPrice: Number(it.unitPrice) || 0,
       days: it.days != null ? Number(it.days) : null,
       notes: it.notes ? String(it.notes).trim() : null,

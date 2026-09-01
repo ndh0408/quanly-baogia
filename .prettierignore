@@ -12,6 +12,5 @@ templates
 .scan
 
 # Code cũ (SPA vanilla) + Markdown báo cáo: giữ nguyên định dạng tay, tránh churn diff
-public/js
 public/*.js
 *.md

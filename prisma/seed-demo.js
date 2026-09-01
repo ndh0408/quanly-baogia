@@ -16,13 +16,34 @@ import bcrypt from "bcryptjs";
 // Prisma 7: vẫn cần driver adapter (chỉ KHÔNG gắn $extends soft-delete → giữ "raw").
 const prisma = new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: process.env.DATABASE_URL })) });
 const TAG = "[DEMO]";
-const PWD = process.env.DEMO_PASSWORD || "GiaNguyenDemo2026";
+// KHÔNG có mật khẩu mặc định trong mã nguồn.
+//
+// Trước đây dòng này có một mật khẩu mặc định VIẾT THẲNG trong mã. Repo được publish
+// CÔNG KHAI làm work sample, và cùng chuỗi đó cũng nằm trong docs/archive/handoff/HANDOFF.md và
+// scripts/dev/rc-qa.mjs — kèm luôn hostname `https://dev.gianguyen.cloud`. Tức là ai đọc repo cũng
+// có đủ tên tài khoản + host + mật khẩu của MỌI tài khoản demo được seed (gồm cả `admin`).
+// README lại ghi "No credentials are committed" — trái ngược hẳn.
+// Bắt buộc phải truyền tường minh; không đặt thì dừng.
+const PWD = process.env.DEMO_PASSWORD;
+if (!PWD || PWD.length < 12) {
+  console.error("✗ Cần DEMO_PASSWORD (≥ 12 ký tự). Sinh: openssl rand -base64 24");
+  process.exit(1);
+}
 const DAY = 86400000;
 const ago = (d) => new Date(Date.now() - d * DAY);
 
 async function main() {
   if (process.env.ALLOW_DEMO_SEED !== "1") {
     console.error("✗ Từ chối seed demo: cần ALLOW_DEMO_SEED=1 (chặn seed nhầm vào prod).");
+    process.exit(1);
+  }
+  // CHỐT THỨ HAI, theo NODE_ENV. `ALLOW_DEMO_SEED=1` một mình là chưa đủ: nó nằm ngay trong lệnh
+  // người ta chép từ tài liệu dev, nên chép nhầm cửa sổ SSH là đủ để chạy trên máy production.
+  // Phần "dọn dữ liệu demo cũ" ngay bên dưới dùng client RAW (không có extension soft-delete) →
+  // `deleteMany` là XOÁ THẬT. Cùng dạng chốt với scripts/migration/pii-backfill.mjs (chốt `ALLOW_PII_BACKFILL_PROD`).
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED_PROD !== "true") {
+    console.error("✗ NODE_ENV=production: từ chối seed demo (script XOÁ CỨNG dữ liệu mang dấu [DEMO]/demo_/DEMOKH).");
+    console.error("  Chắc chắn muốn chạy trên production thì đặt THÊM ALLOW_DEMO_SEED_PROD=true.");
     process.exit(1);
   }
 

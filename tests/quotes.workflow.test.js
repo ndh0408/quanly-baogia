@@ -4,6 +4,7 @@
 // skips itself when the DB or schema is missing).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -70,9 +71,9 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       makeUser("admin"), makeUser("manager", "manager"), makeUser("manager", "manager2"),
     ]);
 
-    admin = request.agent(app);
-    manager = request.agent(app);
-    manager2 = request.agent(app);
+    admin = agentWithCsrf(app);
+    manager = agentWithCsrf(app);
+    manager2 = agentWithCsrf(app);
     await login(admin, adminU);
     await login(manager, managerU);
     await login(manager2, manager2U);

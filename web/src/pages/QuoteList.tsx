@@ -5,6 +5,7 @@ import { api, type Me, type QuoteRow } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
 import { statusLabel, fmtMoney, fmtDate, codeLabel, shortTitle, errMsg, dash } from "../lib/format";
+import { xuatBaoGia } from "../lib/exportQuote";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
 // + phân trang + LƯU filter vào URL (#/list?q=&status=&sort=&page=) + thao tác (mở→editor ·
@@ -71,10 +72,19 @@ export function QuoteListPage({ me }: { me: Me }) {
   const open = (id: number) => { location.hash = "#/quotes/" + id; };
   const act = async (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
+    // ── XUẤT FILE KHÔNG ĐI QUA `busy` ─────────────────────────────────────────
+    // `busy` là MỘT cờ dùng chung cho MỌI hành động trong hàm này (Xuất / Nhân bản / Bản mới / Xoá),
+    // và nó chặn IM LẶNG (`if (busy.current) return;` — không toast, không nút mờ).
+    // Chuyện đó vô hại khi Xuất còn là `window.open`: nó trả quyền điều khiển về ngay lập tức.
+    // Nay Xuất `await` tới HÀNG PHÚT ở đường nền — giữ `busy` suốt quãng đó nghĩa là trong lúc chờ
+    // file, người dùng bấm Xoá hay Nhân bản một báo giá KHÁC thì KHÔNG CÓ GÌ XẢY RA và không có
+    // lời giải thích nào. Họ sẽ nghĩ trang bị treo.
+    // `xuatBaoGia` đã tự chặn bấm lại theo (báo giá, định dạng) và tự báo lỗi, nên nó không cần
+    // `busy` — cho nó ra ngoài.
+    if (a === "excel") { await xuatBaoGia(qr.id, "xlsx"); return; }
     if (busy.current) return; busy.current = true;
     try {
-      if (a === "excel") window.open(`/api/export/${qr.id}.xlsx?t=${Date.now()}`, "_blank");
-      else if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
+      if (a === "dup") { const nq = await api.duplicateQuote(qr.id); toast("Đã nhân bản. Bạn đang sửa bản mới.", "success"); open(nq.id); }
       else if (a === "revise") { const nq = await api.duplicateQuote(qr.id, true); toast(`Đã tạo bản mới cùng mã dự án (${codeLabel(nq)}).`, "success"); open(nq.id); }
       else if (a === "del") {
         if (!(await confirmModal("Xóa báo giá", `Xóa báo giá ${qr.projectCode || qr.quoteNumber}? Hành động không thể hoàn tác.`, { danger: true, confirmText: "Xóa" }))) return;

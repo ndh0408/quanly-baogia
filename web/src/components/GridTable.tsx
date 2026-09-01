@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "../lib/ui";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { toast, useEscClose } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
-import { type ItemK, nextK, autoGrow, caretIndexAtPoint } from "../lib/gridShared";
+import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
+import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
+import { createUndoStack, undoRedoKey } from "../lib/gridUndo";
+import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
 // head/sub/section/subsection/info + rowspan · công thức =… (badge ƒ) · gom-nghìn-live · CHỌN VÙNG
@@ -36,9 +39,10 @@ export type GridTableProps = {
   onChange: () => void;
   fxBar?: boolean;                 // chỉ lưới chính bật thanh công thức
   clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
+  /** Số ĐỔI MỖI KHI dữ liệu lưới có thể đã đổi (xem gridPropsEqual). Không khai = luôn vẽ lại. */
+  dataVersion?: number;
 };
 
-type Sel = { anchor: { row: number; field: string }; focus: { row: number; field: string } };
 type Addr = { row: number; field: string; L: string };
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
@@ -48,11 +52,127 @@ const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8
 // chèn NGAY DƯỚI hàng đang chọn; xoá selection ngay lúc pointerdown làm hàng mới rơi xuống cuối bảng.
 const KEEP_SEL = ".excel-table, .tbl-scroll, .fx-bar, .vs-auto, .fx-auto, .grid-add-bar, .modal, .modal-backdrop";
 
-export function GridTable(props: GridTableProps) {
+// Hàng NHÓM/NHÓM CON có ô TÍNH (đơn giá, số lượng…) — không có <input data-f> để bám vào, phải dò
+// theo CLASS cột. Nhờ vậy vùng chọn kéo qua nhóm vẫn liền mạch và công thức nhóm cha =SUM(F2,F5)
+// sáng được ô đơn giá của các nhóm con.
+const CALC_COL_CLASS: Record<string, string> = { unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" };
+
+/** Dò <td> của một cột TRONG MỘT HÀNG đã biết — tách khỏi tdOf để tô vùng khỏi phải tìm lại hàng. */
+export function tdIn(tr: Element | null | undefined, field: string): HTMLElement | null {
+  if (!tr) return null;
+  if (field === "_amount") return tr.querySelector(".col-amount");
+  if (field === "_stt") return tr.querySelector(".col-stt");
+  const inp = tr.querySelector(`[data-f="${field}"]`);
+  if (inp) return inp.closest("td") as HTMLElement;
+  const cls = CALC_COL_CLASS[field];
+  return cls ? (tr.querySelector(cls) as HTMLElement | null) : null;
+}
+
+/** Chỉ mục hàng, dựng bằng ĐÚNG MỘT lượt quét bảng. */
+export function rowIndexOf(tb: ParentNode): Map<number, Element> {
+  const idx = new Map<number, Element>();
+  tb.querySelectorAll("tr[data-row]").forEach((tr) => { const n = Number(tr.getAttribute("data-row")); if (Number.isFinite(n)) idx.set(n, tr); });
+  return idx;
+}
+
+// Tô 1 class lên hình chữ nhật ô. Trước đây mỗi ô tự gọi querySelector('tr[data-row=N]') trên cả
+// <tbody> → tô vùng R×C tốn R×C lượt quét tuyến tính, tức O(hàng²): Ctrl+A ở sheet 1000 dòng (hoặc
+// mỗi mouseover khi kéo chọn) làm lưới khựng thấy rõ. Tra hàng bằng Map thì chi phí về tuyến tính.
+export function paintRectWith(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, apply: (td: HTMLElement) => void) {
+  for (let r = r0; r <= r1; r++) {
+    const tr = idx.get(r); if (!tr) continue;
+    for (let c = c0; c <= c1; c++) { const td = tdIn(tr, fieldAt(c)); if (td) apply(td); }
+  }
+}
+
+export function paintRect(idx: Map<number, Element>, r0: number, r1: number, c0: number, c1: number, fieldAt: (c: number) => string, cls: string) {
+  paintRectWith(idx, r0, r1, c0, c1, fieldAt, (td) => td.classList.add(cls));
+}
+
+export type RefRect = { r0: number; r1: number; c0: number; c1: number };
+
+// Các Ô/VÙNG mà một công thức tham chiếu tới, THEO THỨ TỰ dải-trước-ô-đơn — thứ tự này quyết định
+// màu highlight (REF_COLORS) nên phải giữ nguyên. Tách khỏi component (không đụng DOM) để kiểm
+// được ngoài trình duyệt: web/ không có jsdom.
+export function refRectsOfFormula(
+  text: string,
+  parse: (a: string) => { row: number; f: string; L: string } | null,
+  colOf: (L: string) => number,
+): RefRect[] {
+  const out: RefRect[] = [];
+  if (!text || !String(text).trim().startsWith("=")) return out;
+  const body = String(text).replace(/^=/, "");
+  const rangeRe = /([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g; let m: RegExpExecArray | null;
+  while ((m = rangeRe.exec(body))) {
+    const a = parse(m[1]), b = parse(m[2]); if (!a || !b) continue;
+    const ca = colOf(a.L), cb = colOf(b.L);
+    out.push({ r0: Math.min(a.row, b.row), r1: Math.max(a.row, b.row), c0: Math.min(ca, cb), c1: Math.max(ca, cb) });
+  }
+  // Ô nằm TRONG dải đã xử lý ở trên → xoá khỏi chuỗi (thay bằng khoảng trắng, giữ nguyên độ dài)
+  // để vòng dò ô đơn không đếm lại.
+  const noRanges = body.replace(rangeRe, (mm) => " ".repeat(mm.length));
+  const singleRe = /(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g;
+  while ((m = singleRe.exec(noRanges))) { const p = parse(m[1]); if (p) { const c = colOf(p.L); out.push({ r0: p.row, r1: p.row, c0: c, c1: c }); } }
+  return out;
+}
+
+// Nguồn ảnh CHỈ được là data-URL ảnh base64 — khớp TOÀN CHUỖI đúng như server (src/validators.ts
+// customerLogo/images và src/quoteUtils.ts). Kiểm tiền tố sẽ cho chuỗi kiểu
+// `data:image/png;base64,AAA"><a …>` đi lọt, và chuỗi đó thoát khỏi src="" ở bất cứ chỗ nào sau
+// này nội suy nó vào HTML (Excel/PDF). Ảnh không hợp lệ → chuỗi rỗng, trình duyệt không tải gì.
+const RE_ANH_HOP_LE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
+// NHỚ KẾT QUẢ theo CHÍNH chuỗi ảnh. Ảnh trong lưới là data-URL base64 vài trăm KB tới ~2MB, và
+// regex neo cả chuỗi phải quét TOÀN BỘ chuỗi đó. `imagesCell` chạy lại ở MỌI lần render lưới (mỗi
+// phím gõ ở ô meta, mỗi lần kéo chọn vùng), nhân với số ảnh của mọi hàng — tức đúng loại chi phí
+// mà lượt vá `paintSel` vừa dọn đi, nay lại mọc lại ở ngay bên cạnh. Đo thô: 20 ảnh × 1,5MB là
+// ~30MB ký tự phải quét cho MỖI lần render.
+//
+// WeakRef không dùng được vì khoá là chuỗi. Dùng Map có TRẦN: ảnh cũ rơi ra khỏi bộ nhớ tạm thì
+// chỉ tốn lại một lượt quét, không rò bộ nhớ theo phiên làm việc.
+const NHO_ANH = new Map<string, string>();
+const NHO_ANH_MAX = 256;
+
+export function safeImgSrc(s: string | null | undefined): string {
+  if (typeof s !== "string" || !s) return "";
+  const da = NHO_ANH.get(s);
+  if (da !== undefined) return da;
+  const kq = RE_ANH_HOP_LE.test(s) ? s : "";
+  // Quá trần thì bỏ mục CŨ NHẤT (Map giữ thứ tự chèn) — đủ cho một lưới đang mở, không phình mãi.
+  if (NHO_ANH.size >= NHO_ANH_MAX) NHO_ANH.delete(NHO_ANH.keys().next().value as string);
+  NHO_ANH.set(s, kq);
+  return kq;
+}
+
+// Bỏ qua lượt vẽ nào? Lưới vẽ lại TỪNG hàng (items.map, không cửa sổ hoá) nên một lượt vẽ thừa ở
+// sheet 1000 dòng là hàng chục ms chặn luồng chính. Cha (QuoteEditor) render lại theo TỪNG PHÍM gõ
+// ở ô Ngày báo giá / VAT / Giảm giá / Tên sheet — những ô KHÔNG đổi gì trong lưới.
+//
+// Quy tắc (an toàn theo hướng "quên thì như cũ"):
+//   · nơi gọi KHÔNG khai `dataVersion` → trả false, tức VẼ LẠI y như trước khi có memo
+//     (ExtraTables, AccountHnView, bench.tsx đang ở diện này);
+//   · `dataVersion` lệch → vẽ lại (cha tăng số này ở MỌI đường có thể đụng tới `items`);
+//   · bất kỳ prop GIÁ TRỊ nào lệch → vẽ lại, kể cả prop thêm sau này (duyệt khoá của CẢ HAI bên,
+//     nên thiếu/thừa khoá cũng bắt vẽ lại);
+//   · chỉ prop HÀM được bỏ qua khi so — chúng là arrow tạo mới mỗi lần cha render. An toàn vì mọi
+//     closure ấy chỉ bắt `activeSheet`/`mark`/`redraw`, mà `activeSheet` đổi thì `items` đổi theo
+//     (hoặc `key` đổi → remount).
+export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
+  if (a.dataVersion == null || b.dataVersion == null) return false;
+  const ra = a as unknown as Record<string, unknown>, rb = b as unknown as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(ra), ...Object.keys(rb)])) {
+    const va = ra[k], vb = rb[k];
+    if (typeof va === "function" && typeof vb === "function") continue;
+    if (va !== vb) return false;
+  }
+  return true;
+}
+
+function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
-  const undoRef = useRef<string[]>([]);
-  const redoRef = useRef<string[]>([]);
+  // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
+  const histRef = useRef(createUndoStack());
   const focusRef = useRef<{ i: number; f: string } | null>(null);
   const focusPend = useRef<{ i: number; f: string } | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -119,6 +239,10 @@ export function GridTable(props: GridTableProps) {
   type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
   const [sug, setSug] = useState<Sug | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Ảnh đang xem lớn. Phải xem TRONG app: ảnh của lưới luôn là data-URL (fileToImg nén bằng canvas)
+  // mà trình duyệt CHẶN điều hướng cấp cao nhất tới data:, nên window.open chỉ mở ra tab trắng.
+  const [zoom, setZoom] = useState<string | null>(null);
+  useEscClose(() => setZoom(null), zoom != null);
 
   // "_stt" nằm trong vùng CHỌN được (kéo/quét/Ctrl+A/Shift+mũi tên/copy) nhưng KHÔNG nhập được —
   // nó là ô tính (số thứ tự, nhãn nhóm A/B/1/2). Có nó trong vùng chọn thì copy nguyên hàng mới
@@ -131,7 +255,7 @@ export function GridTable(props: GridTableProps) {
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
   const snap = () => JSON.stringify(items);
-  const pushUndo = () => { undoRef.current.push(snap()); if (undoRef.current.length > 100) undoRef.current.shift(); redoRef.current.length = 0; };
+  const pushUndo = () => { histRef.current.mark(snap()); };
   // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
   // vào items (onNumInput ghi thẳng vào model mỗi lần gõ, chụp sau là dính luôn số mới).
   const markEditUndo = (i: number, f: string) => {
@@ -203,18 +327,8 @@ export function GridTable(props: GridTableProps) {
   // ── selection rectangle (sống qua redraw: tô lại từ selRef ở effect mỗi render) ─
   const fieldIdx = (f: string) => FIELDS.indexOf(f);
   const cellEl = (row: number, field: string) => tableRef.current?.querySelector(`tr[data-row="${row}"] [data-f="${field}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
-  const tdOf = (row: number, field: string): HTMLElement | null => {
-    const tr = tableRef.current?.querySelector(`tr[data-row="${row}"]`); if (!tr) return null;
-    if (field === "_amount") return tr.querySelector(".col-amount");
-    if (field === "_stt") return tr.querySelector(".col-stt");
-    const inp = tr.querySelector(`[data-f="${field}"]`);
-    if (inp) return inp.closest("td") as HTMLElement;
-    // Hàng NHÓM/NHÓM CON: ĐƠN GIÁ (và vài cột) là ô TÍNH — không có input data-f → dò theo CLASS cột
-    // để công thức nhóm cha =SUM(F2,F5) vẫn SÁNG được ô đơn giá các nhóm con.
-    const cls = ({ unitPrice: ".col-price", quantity: ".col-qty", days: ".col-qty", name: ".col-hangmuc", detail: ".col-detail", unit: ".col-dvt", notes: ".col-notes" } as Record<string, string>)[field];
-    return cls ? (tr.querySelector(cls) as HTMLElement | null) : null;
-  };
-  const rectOf = (sel: Sel | null) => { if (!sel) return null; const a = fieldIdx(sel.anchor.field), b = fieldIdx(sel.focus.field); if (a < 0 || b < 0) return null; return { r0: Math.min(sel.anchor.row, sel.focus.row), r1: Math.max(sel.anchor.row, sel.focus.row), c0: Math.min(a, b), c1: Math.max(a, b) }; };
+  const tdOf = (row: number, field: string): HTMLElement | null => tdIn(tableRef.current?.querySelector(`tr[data-row="${row}"]`), field);
+  const rectOf = (sel: Sel | null) => rectOfSel(sel, fieldIdx);
   const onFillHandleDown = (e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     const start = rectOf(selRef.current); if (!start) return;
@@ -226,15 +340,19 @@ export function GridTable(props: GridTableProps) {
     const tb = tableRef.current; if (!tb) return;
     tb.querySelectorAll("td.cell-selected, td.cell-anchor, td.cell-cut").forEach((td) => td.classList.remove("cell-selected", "cell-anchor", "cell-cut"));
     tb.querySelectorAll(".fill-handle").forEach((h) => h.remove());
+    // MỘT chỉ mục hàng dùng chung cho cả vùng cắt lẫn vùng chọn: paintSel chạy lại sau mỗi render
+    // và mỗi mouseover khi kéo chọn, nên chi phí ở đây phải tuyến tính theo số ô, không theo R×C×R.
+    const rowIdx = rowIndexOf(tb);
+    const fieldAt = (c: number) => FIELDS[c];
     // Vùng đang CẮT chờ dán → viền nét đứt (kiểu "marching ants" của Excel).
     const cp = cutPendingRef.current;
-    if (cp) for (let r = cp.r0; r <= cp.r1; r++) for (let c = cp.c0; c <= cp.c1; c++) tdOf(r, FIELDS[c])?.classList.add("cell-cut");
+    if (cp) paintRect(rowIdx, cp.r0, cp.r1, cp.c0, cp.c1, fieldAt, "cell-cut");
     const sel = selRef.current; const rc = rectOf(sel);
     if (rc && sel) {
-      // tdOf (không phải cellEl): hàng NHÓM/NHÓM CON có ô tính (không có input) vẫn được tô →
+      // tdIn (không phải cellEl): hàng NHÓM/NHÓM CON có ô tính (không có input) vẫn được tô →
       // vùng chọn hiện liền mạch khi kéo qua nhóm, như Excel.
-      for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) tdOf(r, FIELDS[c])?.classList.add("cell-selected");
-      (cellEl(sel.anchor.row, sel.anchor.field)?.closest("td") || tdOf(sel.anchor.row, sel.anchor.field))?.classList.add("cell-anchor");
+      paintRect(rowIdx, rc.r0, rc.r1, rc.c0, rc.c1, fieldAt, "cell-selected");
+      (cellEl(sel.anchor.row, sel.anchor.field)?.closest("td") || tdIn(rowIdx.get(sel.anchor.row), sel.anchor.field))?.classList.add("cell-anchor");
       if (editable) {
         const td = cellEl(rc.r1, FIELDS[rc.c1])?.closest("td");
         if (td) {
@@ -325,14 +443,13 @@ export function GridTable(props: GridTableProps) {
     return true;
   };
   const moveTo = (row: number, field: string, extend: boolean, prefer: -1 | 0 | 1 = 0) => {
-    row = Math.max(0, Math.min(items.length - 1, row));
-    const ci = Math.max(0, Math.min(FIELDS.length - 1, fieldIdx(field)));
+    row = clampRow(row, items.length);
+    const ci = clampCol(fieldIdx(field), FIELDS.length);
     let f2 = FIELDS[ci];
     // Cột STT: ô TÍNH — dời vùng chọn tới đó nhưng giữ nguyên ô đang focus, để mũi tên/Shift+mũi tên
     // quét qua được mà không "rơi" con trỏ vào ô không nhập được.
     if (f2 === "_stt") {
-      const sel0 = selRef.current;
-      selRef.current = extend && sel0 ? { anchor: sel0.anchor, focus: { row, field: f2 } } : { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+      selRef.current = nextSel(selRef.current, row, f2, extend);
       paintSel();
       return;
     }
@@ -344,9 +461,7 @@ export function GridTable(props: GridTableProps) {
       }
       f2 = found || "name";
     }
-    const sel = selRef.current;
-    if (extend && sel) selRef.current = { anchor: sel.anchor, focus: { row, field: f2 } };
-    else selRef.current = { anchor: { row, field: f2 }, focus: { row, field: f2 } };
+    selRef.current = nextSel(selRef.current, row, f2, extend);
     navigatingRef.current = true;
     editingRef.current = false;
     const el = cellEl(row, f2);
@@ -394,19 +509,27 @@ export function GridTable(props: GridTableProps) {
   };
   const rangeAddr = (a: Addr, b: Addr) => { const ca = idxOfL(a.L), cb = idxOfL(b.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); const tl = ADDR[c0].L + (r0 + 1), br = ADDR[c1].L + (r1 + 1); return tl === br ? tl : tl + ":" + br; };
   const clearRefPick = () => tableRef.current?.querySelectorAll("td.cell-ref-pick").forEach((t) => t.classList.remove("cell-ref-pick"));
-  const paintRefPick = (a: Addr, b: Addr) => { clearRefPick(); const ca = idxOfL(a.L), cb = idxOfL(b.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) tdOf(r, ADDR[c].f)?.classList.add("cell-ref-pick"); };
+  // MỘT chỉ mục hàng cho cả vùng (như paintSel). Trước đây mỗi ô gọi tdOf → một lượt quét cả bảng
+  // cho MỖI ô, mà hàm này chạy lại ở MỖI mousemove khi kéo chọn dải cho công thức.
+  const paintRefPick = (a: Addr, b: Addr) => {
+    clearRefPick();
+    const tb = tableRef.current; if (!tb) return;
+    const ca = idxOfL(a.L), cb = idxOfL(b.L);
+    paintRect(rowIndexOf(tb), Math.min(a.row, b.row), Math.max(a.row, b.row), Math.min(ca, cb), Math.max(ca, cb), (c) => ADDR[c].f, "cell-ref-pick");
+  };
   const clearActiveRefs = () => tableRef.current?.querySelectorAll("td.cell-ref-active").forEach((t) => { t.classList.remove("cell-ref-active"); (t as HTMLElement).style.removeProperty("--ref-color"); });
   clearOutsideRef.current = () => { clearSel(); clearActiveRefs(); };
+  // Cũng dựng chỉ mục hàng MỘT lần: hàm này chạy cùng nhịp với paintRefPick (mỗi mousemove khi
+  // kéo chọn dải, và mỗi phím khi gõ công thức).
   const highlightActiveFormulaRefs = (text: string) => {
     clearActiveRefs();
-    if (!text || !String(text).trim().startsWith("=")) return;
-    const body = String(text).replace(/^=/, ""); let ci = 0;
-    const paint = (td: HTMLElement | null) => { if (td) { td.classList.add("cell-ref-active"); td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]); } };
-    const rangeRe = /([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)/g; let m: RegExpExecArray | null;
-    while ((m = rangeRe.exec(body))) { const a = parseAddr(m[1]), b = parseAddr(m[2]); if (!a || !b) continue; const c0 = Math.min(idxOfL(a.L), idxOfL(b.L)), c1 = Math.max(idxOfL(a.L), idxOfL(b.L)); const r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row); for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) paint(tdOf(r, ADDR[c].f)); ci++; }
-    const noRanges = body.replace(rangeRe, (mm) => " ".repeat(mm.length));
-    const singleRe = /(?<![A-Za-z0-9_.])([A-Za-z]+\d+)/g;
-    while ((m = singleRe.exec(noRanges))) { const p = parseAddr(m[1]); if (p) { paint(tdOf(p.row, p.f)); ci++; } }
+    const rects = refRectsOfFormula(text, parseAddr, idxOfL);
+    const tb = tableRef.current; if (!tb || !rects.length) return;
+    const idx = rowIndexOf(tb);
+    rects.forEach((rc, ci) => paintRectWith(idx, rc.r0, rc.r1, rc.c0, rc.c1, (c) => ADDR[c].f, (td) => {
+      td.classList.add("cell-ref-active");
+      td.style.setProperty("--ref-color", REF_COLORS[ci % REF_COLORS.length]);
+    }));
   };
   const startPointDrag = (fxInput: HTMLInputElement | HTMLTextAreaElement, startInfo: Addr) => {
     const caret = fxInput.selectionStart ?? fxInput.value.length;
@@ -460,7 +583,7 @@ export function GridTable(props: GridTableProps) {
 
     if (e.shiftKey && selRef.current) {   // mở rộng vùng, giữ nguyên ô neo
       e.preventDefault();
-      selRef.current = { anchor: selRef.current.anchor, focus: { row: info.row, field: info.field } };
+      selRef.current = nextSel(selRef.current, info.row, info.field, true);
       lockCell(document.activeElement as HTMLInputElement | HTMLTextAreaElement | null);   // thoát sửa + khóa
       paintSel();
       return;
@@ -639,26 +762,18 @@ export function GridTable(props: GridTableProps) {
   // Chèn/xoá hàng làm mọi tham chiếu phía dưới lệch đi — Excel tự dịch, ở đây cũng phải làm, kẻo
   // "=E5" lặng lẽ trỏ sang hạng mục khác (chèn) hoặc trỏ vào hàng đã mất rồi trả 0 (xoá).
   // at: chỉ số hàng 0-based nơi chèn/xoá; delta: +n chèn, -n xoá.
-  const shiftFormulasForRowEdit = (at: number, delta: number) => {
-    for (const it of items) {
-      const fx = (it as Record<string, unknown>).formulas as Record<string, string> | undefined;
-      if (!fx) continue;
-      for (const f in fx) {
-        const moved = adjustRefsForRowEdit(fx[f], at + 1, delta);   // công thức đánh số hàng từ 1
-        if (moved === null) {
-          const w = ((it as Record<string, unknown>)._fxWarn as Record<string, boolean>) || ((it as Record<string, unknown>)._fxWarn = {} as Record<string, boolean>);
-          w[f] = true;   // trỏ vào hàng vừa xoá = #REF! của Excel → ô ĐỎ, giữ công thức để sửa tay
-        } else fx[f] = moved;
-      }
-    }
-  };
-  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); shiftFormulasForRowEdit(at, 1); items.splice(at, 0, it); recomputeAll(); onChange(); focusCell(at, "name"); };
+  // "dịch tham chiếu + splice" là MỘT thao tác không tách rời — xem web/src/lib/rowEdit.ts.
+  // Trước đây mỗi đường chèn/xoá tự gọi hai bước, và `insertCatalogRows` quên bước dịch → công
+  // thức trỏ sai hạng mục, tức SAI TIỀN, không cảnh báo. Nay muốn chèn thì phải qua hai hàm này.
+  const chen = (at: number, rows: ItemK[]) => insertRows(items as unknown as RowLike[], at, rows as unknown as RowLike[], adjustRefsForRowEdit);
+  const xoa = (at: number, n: number) => removeRows(items as unknown as RowLike[], at, n, adjustRefsForRowEdit);
+  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); chen(at, [it]); recomputeAll(); onChange(); focusCell(at, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, it); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
-  const removeRow = (i: number) => { pushUndo(); shiftFormulasForRowEdit(i, -1); items.splice(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
+  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); chen(i + 1, [it]); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
+  const removeRow = (i: number) => { pushUndo(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
@@ -698,12 +813,14 @@ export function GridTable(props: GridTableProps) {
   const insertCatalogRows = (list: VenueEntry[]) => {
     if (!list.length) return;
     pushUndo();
-    let at = insertIndex();
-    for (const en of list) {
+    const at = insertIndex();
+    const rows = list.map((en) => {
       const it = M.blankItem(usesDays) as ItemK; it._k = nextK();
       fillItemFromEntry(it as unknown as Record<string, unknown>, en);
-      items.splice(at, 0, it); at++;
-    }
+      return it;
+    });
+    chen(at, rows);       // TRƯỚC ĐÂY: splice trần, không dịch tham chiếu → công thức trỏ lệch
+    recomputeAll();       // TRƯỚC ĐÂY: thiếu → bảng còn hiện số CŨ tới lần gõ kế tiếp
     onChange();
     toast(`Đã chèn ${list.length} hạng mục kèm kích thước — điền nốt Đơn giá là xong`, "success");
   };
@@ -725,8 +842,8 @@ export function GridTable(props: GridTableProps) {
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
   const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
-  const doUndo = () => { flushSoft(); if (!undoRef.current.length) return; redoRef.current.push(snap()); restore(undoRef.current.pop() as string); };
-  const doRedo = () => { flushSoft(); if (!redoRef.current.length) return; undoRef.current.push(snap()); restore(redoRef.current.pop() as string); };
+  const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
+  const doRedo = () => { flushSoft(); const next = histRef.current.stepForward(snap); if (next !== null) restore(next); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
   // dRow/dCol: khối được dán dời đi bao nhiêu hàng/cột so với chỗ copy → DỊCH tham chiếu trong công
   // thức đúng nếp Excel ("=G3*E3" copy ở hàng 3 dán xuống hàng 7 thành "=G7*E7"; $ khoá thì giữ).
@@ -835,8 +952,7 @@ export function GridTable(props: GridTableProps) {
     // Khối nhiều ô. Dán vào hàng NHÓM → chèn hàng mới phía dưới (không đè nhóm).
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
-      shiftFormulasForRowEdit(startRow + 1, rows.length);
-      rows.forEach(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.splice(startRow + 1, 0, nit); });
+      chen(startRow + 1, rows.map(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); return nit; }));
       startRow += 1; startCol = COL_NAME;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
@@ -890,7 +1006,7 @@ export function GridTable(props: GridTableProps) {
     const i = parseInt(tr.getAttribute("data-row") || "0", 10);
     const ci = FIELDS.indexOf(f);
     const isMultiline = MULTILINE.has(f);
-    if (!ctrl && (e.nativeEvent?.isComposing || e.keyCode === 229 || e.key === "Process")) {
+    if (!ctrl && dangGoIME(e)) {
       // IME (gõ tiếng Việt trên macOS, Trung/Nhật/Hàn…): phím đầu tiên rơi vào ô đang KHÓA →
       // mở khóa + xoá NGAY TRONG keydown (trước khi composition bắt đầu) để cụm chữ đè nội dung
       // cũ — cùng nếp "gõ là đè" với ký tự thường. Đang sửa rồi thì để IME tự chạy.
@@ -1026,12 +1142,12 @@ export function GridTable(props: GridTableProps) {
     // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa hàng đang chọn (Excel).
     if (ctrl && editable && (e.key === "+" || e.key === "=" || e.key === "-")) {
       e.preventDefault(); e.stopPropagation();
-      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); shiftFormulasForRowEdit(from, -n); items.splice(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
-      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); shiftFormulasForRowEdit(i + 1, 1); items.splice(i + 1, 0, nit); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
+      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
+      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
-    if (ctrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.stopPropagation(); if (editable) doUndo(); return; }
-    if (ctrl && ((e.key === "y" || e.key === "Y") || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); e.stopPropagation(); if (editable) doRedo(); return; }
+    const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
+    if (uz) { e.preventDefault(); e.stopPropagation(); if (editable) (uz === "undo" ? doUndo : doRedo)(); return; }
     if (ctrl && (e.key === "d" || e.key === "D")) { e.preventDefault(); e.stopPropagation(); if (editable) fillDown(); return; }
     if (e.key === "Escape") {
       e.stopPropagation();
@@ -1050,7 +1166,7 @@ export function GridTable(props: GridTableProps) {
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
           // một nhịp rỗng thay vì lùi thao tác thật trước đó.
           const m = editUndoRef.current;
-          if (m && m.i === i && m.f === f) { undoRef.current.pop(); editUndoRef.current = null; }
+          if (m && m.i === i && m.f === f) { histRef.current.dropMark(); editUndoRef.current = null; }
           onChange();
         }
         lockCell(esc);
@@ -1094,7 +1210,7 @@ export function GridTable(props: GridTableProps) {
       return;
     }
     if (e.key.indexOf("Arrow") === 0) {
-      const up = e.key === "ArrowUp", down = e.key === "ArrowDown", left = e.key === "ArrowLeft", right = e.key === "ArrowRight";
+      const { dRow, dCol, prefer } = arrowStep(e.key);
       if (editing) {
         // EDIT (nhấp đúp/F2): mũi tên CHỈ chạy trong chữ — không rời ô, Ctrl+mũi tên nhảy theo
         // từ (trình duyệt xử lý). Muốn mũi tên chốt-và-đi thì bấm F2 lần nữa (sang ENTER) — Excel.
@@ -1106,11 +1222,11 @@ export function GridTable(props: GridTableProps) {
       // Ctrl/⌘ + mũi tên → nhảy tới BIÊN bảng (thêm Shift = kéo vùng chọn tới biên), như Excel.
       if (ctrl) {
         e.preventDefault(); e.stopPropagation();
-        moveTo(up ? 0 : down ? lastRow : i, FIELDS[left ? 0 : right ? lastCol : ci], e.shiftKey, right ? 1 : left ? -1 : 0);
+        moveTo(dRow < 0 ? 0 : dRow > 0 ? lastRow : i, FIELDS[dCol < 0 ? 0 : dCol > 0 ? lastCol : ci], e.shiftKey, prefer);
         return;
       }
       e.preventDefault(); e.stopPropagation();
-      moveTo(i + (down ? 1 : 0) - (up ? 1 : 0), FIELDS[ci + (right ? 1 : 0) - (left ? 1 : 0)] || f, e.shiftKey, right ? 1 : left ? -1 : 0);
+      moveTo(i + dRow, FIELDS[ci + dCol] || f, e.shiftKey, prefer);
       return;
     }
     // GÕ LÀ ĐÈ (type-to-replace — READY → ENTER, đúng nếp Excel): ô đang CHỌN, gõ ký tự thường/
@@ -1536,7 +1652,7 @@ export function GridTable(props: GridTableProps) {
       <div className="cell-images">
         {imgs.map((src, k) => (
           <span className="cell-img" key={k}>
-            <img src={src} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => window.open(src, "_blank")} />
+            <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => setZoom(safeImgSrc(src))} />
             {editable && <button type="button" className="img-rm" title="Xoá ảnh" onClick={() => removeImage(i, k)}>✕</button>}
           </span>
         ))}
@@ -1756,6 +1872,13 @@ export function GridTable(props: GridTableProps) {
           <span>Hiện cột <strong>Hình ảnh</strong> (chèn ảnh mỗi hạng mục · CÓ xuất Excel)</span>
         </label>
       )}
+      {zoom && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Xem ảnh lớn" onClick={() => setZoom(null)}>
+          <img src={safeImgSrc(zoom)} alt="Ảnh hạng mục (bấm để đóng)" style={{ maxWidth: "92vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 6 }} />
+        </div>
+      )}
     </>
   );
 }
+
+export const GridTable = memo(GridTableInner, gridPropsEqual);

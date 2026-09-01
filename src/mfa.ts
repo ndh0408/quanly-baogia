@@ -1,10 +1,18 @@
 // MFA secret/backup-code cryptography. Two goals:
 //  1) Never store the TOTP secret in plaintext — encrypt with AES-256-GCM.
-//  2) Never store backup codes in plaintext — store SHA-256 hashes.
-// Both are BACKWARD-COMPATIBLE: legacy plaintext secrets and 10-char plaintext
-// backup codes are still accepted (and re-secured on next write), so enabling
-// this does not lock out users who set up MFA before the upgrade.
+//  2) Never store backup codes in a form that survives a database dump — store bcrypt hashes.
+// Both are BACKWARD-COMPATIBLE: legacy plaintext secrets, legacy SHA-256 backup-code hashes and
+// legacy 10-char plaintext backup codes are still accepted, so enabling this does not lock out
+// users who set up MFA before the upgrade.
+//
+// ⚠️ KHÔNG có đường tự nâng cấp cho dữ liệu CŨ. `consumeBackupCode` chỉ GỠ mã đã dùng ra khỏi mảng;
+// không nơi nào băm lại mã cũ sang bcrypt, và bí mật TOTP plaintext cũng chỉ được mã hoá khi người
+// dùng bật lại MFA. Nghĩa là mọi người đã bật MFA trước bản vá vẫn giữ 8 mã dự phòng 40 bit băm
+// SHA-256 không muối — đúng thứ mà bản vá này nói là quét cạn được từ một bản dump CSDL. Cách duy
+// nhất để thay là TẮT rồi BẬT LẠI MFA. Đã ghi vào docs/REMAINING_RISKS.md kèm câu SQL liệt kê các
+// tài khoản còn dính; đừng đọc chú thích "backward-compatible" ở trên như là "đã an toàn".
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -63,10 +71,30 @@ export function decryptSecret(stored: string | null | undefined) {
 
 const sha256 = (s: string) => createHash("sha256").update(String(s)).digest("hex");
 
-/** Generate N single-use backup codes; returns { plain[], hashed[] }. Show plain ONCE. */
-export function generateBackupCodes(n = 8) {
-  const plain = Array.from({ length: n }, () => randomBytes(5).toString("hex").toUpperCase());
-  return { plain, hashed: plain.map(sha256) };
+// 10 byte = 80 bit. Bản cũ dùng randomBytes(5) — đúng 2^40 khả năng — mà lại băm bằng SHA-256 TRẦN
+// (không muối, không KDF), trong khi định dạng `[0-9A-Fa-f]{10}` được công bố ngay trong schema của
+// route. Ai lấy được một bản dump CSDL quét cạn được không gian đó trong vài giờ trên một GPU, rồi
+// dùng mã tìm ra để VƯỢT MFA lẫn TẮT MFA — mà mã dự phòng KHÔNG bị vô hiệu khi đổi mật khẩu nên nó
+// là thông tin đăng nhập sống rất dai. Chính thiết kế đã coi "dump CSDL" là mô hình đe doạ có thật:
+// bí mật TOTP được AES-256-GCM và MFA_ENC_KEY là BẮT BUỘC ở production.
+const BACKUP_CODE_BYTES = 10;
+
+// Cost RIÊNG, thấp hơn config.BCRYPT_COST (mật khẩu người tự nghĩ ra) một cách CÓ CHỦ Ý.
+//
+// Mã dự phòng là 80 bit NGẪU NHIÊN: nó không nằm trong bất kỳ từ điển nào, nên việc của hàm băm ở
+// đây chỉ là muối + làm chậm vừa đủ, không phải kéo giãn một bí mật yếu. Đổi lại, cost thấp giữ cho
+// việc so tuần tự tới 8 mã không biến một lần đăng nhập bằng mã dự phòng thành nhiều giây bcrypt.
+const BACKUP_CODE_COST = 10;
+
+/**
+ * Sinh N mã dự phòng dùng-một-lần; trả { plain[], hashed[] }. CHỈ hiện `plain` đúng một lần.
+ * Bất đồng bộ vì bcryptjs là JS thuần: bản `*Sync` băm 8 mã sẽ CHẶN vòng lặp sự kiện gần một giây.
+ */
+export async function generateBackupCodes(n = 8) {
+  const plain = Array.from({ length: n }, () => randomBytes(BACKUP_CODE_BYTES).toString("hex").toUpperCase());
+  const hashed: string[] = [];
+  for (const p of plain) hashed.push(await bcrypt.hash(p, BACKUP_CODE_COST));
+  return { plain, hashed };
 }
 
 function eq(a: string, b: string) {
@@ -75,18 +103,25 @@ function eq(a: string, b: string) {
 }
 
 /**
- * Match a submitted backup code against the stored list (hashed or legacy plaintext).
+ * Match a submitted backup code against the stored list (bcrypt, legacy SHA-256, or legacy plaintext).
  * Returns { matched, remaining } where `matched` is the exact stored entry (used as
  * an optimistic-lock guard so consumption is atomic), or null if no match.
  */
-export function consumeBackupCode(storedList: string[] | null | undefined, submitted: string) {
+export async function consumeBackupCode(storedList: string[] | null | undefined, submitted: string) {
   const code = String(submitted || "").toUpperCase();
+  // Chuỗi rỗng không được phép khớp một phần tử plaintext rỗng còn sót trong CSDL.
+  if (!code) return null;
   const list = storedList || [];
   const target = sha256(code);
   for (let i = 0; i < list.length; i++) {
     const entry = String(list[i]);
-    // Hashed entries are 64 hex chars; legacy plaintext are 10.
-    const match = entry.length === 64 ? eq(entry, target) : eq(entry.toUpperCase(), code);
+    // bcrypt bắt đầu bằng "$2"; bản băm SHA-256 cũ dài đúng 64 ký tự hex; mã plaintext cũ dài 10.
+    // Giữ đủ ba nhánh để bản vá KHÔNG khoá những người đã đăng ký MFA trước đó.
+    const match = entry.startsWith("$2")
+      ? await bcrypt.compare(code, entry)
+      : entry.length === 64
+        ? eq(entry, target)
+        : eq(entry.toUpperCase(), code);
     if (match) {
       const remaining = [...list];
       remaining.splice(i, 1);

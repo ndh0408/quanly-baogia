@@ -1,4 +1,4 @@
--- Mã hoá PII khi lưu trữ — BƯỚC 1/6 (xem SECURITY_AUDIT_2026-08.md §6).
+-- Mã hoá PII khi lưu trữ — BƯỚC 1/6 (xem docs/archive/audits/SECURITY_AUDIT_2026-08.md §6).
 --
 -- CHỈ CỘNG THÊM. Không đụng một byte dữ liệu nào đang có, không đổi kiểu, không thêm ràng buộc
 -- NOT NULL. Sau migration này ứng dụng chạy y hệt trước: chưa đường ghi nào chạm các cột mới, và

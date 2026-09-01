@@ -8,6 +8,8 @@ import {
   QuoteCreateSchema,
   QuoteUpdateSchema,
   ListQuerySchema,
+  HnSaveSchema,
+  PAYMENT_PROOF_DATA_URL_RE,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
@@ -157,7 +159,9 @@ router.post(
   "/:id/extra/:sheetId/:rid/pay",
   validate({
     params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
-    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(/^data:image\/(png|jpe?g|webp);base64,/).optional() }),
+    // Kiểm TOÀN CHUỖI (hằng số dùng chung ở src/validators.ts): regex tiền tố cũ cho phần đuôi
+    // `" onerror="…` đi thẳng vào CSDL, phá bất biến "chuỗi *Proof luôn là ảnh base64 hợp lệ".
+    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
   }),
   requirePermission(P.QUOTE_INTERNAL_PAY),
   asyncHandler(async (req: Request, res: Response) => res.json(await markExtraTableRowPayment(req)))
@@ -207,8 +211,16 @@ router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    // 🔒 account_hn KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
-    if (req.session.role === "account_hn") {
+    // 🔒 Người ĐIỀN phần HN KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
+    //
+    // Kiểm theo QUYỀN, không theo chuỗi role. `quote:hn:fill` cấp được per-user (trang Phân quyền)
+    // và chính nó là cờ bật view lược: GET /:id trả `presentQuoteForAccountHn` cho BẤT KỲ ai có
+    // quyền này, còn React SPA cũng nhận diện bằng `me.permissions.includes("quote:hn:fill")`
+    // (web/src/components/Shell.tsx:355). Nếu ở đây vẫn so `role === "account_hn"` thì một manager
+    // được cấp riêng quote:hn:fill sẽ: nhận editor CHỈ có phần HN, nhưng KHÔNG bị chặn ở PUT /:id —
+    // bấm Lưu là gửi payload thiếu toàn bộ sheet báo giá chính và XOÁ TRẮNG báo giá.
+    // Xem tests/hn-guard-by-permission.test.js.
+    if (can(req.session, P.QUOTE_HN_FILL)) {
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
     }
     const updated = await updateQuote(req);
@@ -220,7 +232,10 @@ router.put(
 // Quản lý giao account điền bảng "hanoi"; account chỉ thấy/sửa phần đó; gửi duyệt; quản lý duyệt/trả.
 router.post("/:id/hn/assign", validate({ params: idParam, body: z.object({ accountId: z.coerce.number().int().positive() }) }),
   asyncHandler(async (req: Request, res: Response) => { const q = await assignHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
-router.put("/:id/hn", validate({ params: idParam }),   // account lưu phần HN (chỉ ghi bảng hanoi)
+// BODY PHẢI QUA SCHEMA. Trước đây route này chỉ kiểm `:id`, còn saveHn đọc thẳng req.body →
+// sanitizeExtraTables persist nguyên trạng cờ duyệt/thanh toán do server sở hữu, và không có
+// cap nào cho số bảng / số dòng / độ dài chuỗi. Xem tests/hn-save-forgery.test.js.
+router.put("/:id/hn", validate({ params: idParam, body: HnSaveSchema }),   // account lưu phần HN (chỉ ghi bảng hanoi)
   asyncHandler(async (req: Request, res: Response) => { const q = await saveHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));
 router.post("/:id/hn/submit", validate({ params: idParam }),
   asyncHandler(async (req: Request, res: Response) => { const q = await submitHn(req); res.json(presentQuote(q, { hnOnly: can(req.session, P.QUOTE_HN_FILL) })); }));

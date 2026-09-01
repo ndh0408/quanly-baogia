@@ -1,0 +1,31 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# Giữ tối thiểu N pod app sống khi node bị rút có kế hoạch (drain / node upgrade).
+# Không có PDB thì `kubectl drain` hạ được cả hai replica cùng lúc → API đứt hẳn trong lúc bảo trì.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "quanly.fullname" . }}-app
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+{{- if .Values.worker.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "quanly.fullname" . }}-worker
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  # maxUnavailable, KHÔNG phải minAvailable dùng chung với app: worker autoscale xuống
+  # minReplicas=1 (values.yaml), và `minAvailable: 1` trên một Deployment có đúng 1 pod làm
+  # eviction API từ chối MÃI MÃI → `kubectl drain` treo, node không rút được, cụm kẹt giữa
+  # lúc bảo trì. Job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds ở worker-deployment.
+  maxUnavailable: {{ .Values.podDisruptionBudget.workerMaxUnavailable }}
+  selector:
+    matchLabels: {{- include "quanly.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+{{- end }}
+{{- end }}

@@ -35,8 +35,16 @@ const backupLimiter = createLimiter("backup", { windowMs: 15 * 60 * 1000, max: 5
  * 200 on the first chunk, so a mid-dump failure delivered a TRUNCATED archive as a
  * "successful" download — a silent-corrupt-backup hazard. On failure we return 500
  * and never record the audit success.
+ *
+ * POST, KHÔNG PHẢI GET — dù về mặt ngữ nghĩa đây là "tải về". Lý do: handler spawn pg_dump và ghi
+ * một hàng audit, tức GET có side effect, mà csrfGuard (src/app.ts) bỏ qua VÔ ĐIỀU KIỆN mọi
+ * GET/HEAD/OPTIONS và cookie phiên là `sameSite: "lax"` — Lax VẪN đi kèm khi điều hướng top-level
+ * cross-site bằng GET. Nghĩa là một trang lạ ép được admin fork pg_dump chỉ bằng `location = …`.
+ * Đổi sang POST cho endpoint thừa hưởng cổng CSRF. Không frontend nào gọi endpoint này nên không
+ * có caller phải sửa; công cụ vận hành dùng `curl -X POST` (client Bearer vẫn qua vì csrfGuard chỉ
+ * áp cho phiên cookie).
  */
-router.get(
+router.post(
   "/backup.dump",
   backupLimiter,
   asyncHandler(async (req: Request, res: Response) => {

@@ -90,6 +90,11 @@ export const PERMISSIONS = {
   // manage = sửa danh mục (thêm/sửa/xoá rạp + hạng mục) — mặc định Account trở lên.
   VENUE_READ:             "venue:read",
   VENUE_MANAGE:           "venue:manage",
+  // Tải tệp lên kho object (/api/files: multipart, sign-upload, finalize). Là quyền NĂNG LỰC —
+  // "ai được phép ghi vào kho" — chứ không phải quyền theo tài nguyên; phạm vi ĐỌC vẫn do
+  // `canAccessKey` quyết định. Trước đây ba route ghi chỉ có `requireAuth`, nên hr/accountant
+  // (vai trò CHỈ-ĐỌC hồ sơ nhân sự) cũng bơm được tệp vào bucket dù không có nghiệp vụ nào cần.
+  FILE_UPLOAD:            "file:upload",
 };
 
 const P = PERMISSIONS;
@@ -156,6 +161,7 @@ export const PERMISSION_LABELS = {
   [P.EMPLOYEE_EDIT_ALL]:    "Sửa cả danh bạ",
   [P.EMPLOYEE_DELETE_OWN]:  "Xóa danh bạ của mình",
   [P.EMPLOYEE_DELETE_ALL]:  "Xóa cả danh bạ",
+  [P.FILE_UPLOAD]:          "Tải tệp lên",
   [P.VENUE_READ]:   "Xem danh mục rạp",
   [P.VENUE_MANAGE]: "Quản lý danh mục rạp",
 };
@@ -218,6 +224,7 @@ export const PERMISSION_DESC: Record<string, string> = {
   [P.EMPLOYEE_EDIT_ALL]:    "Sửa BẤT KỲ mục danh bạ nào.",
   [P.EMPLOYEE_DELETE_OWN]:  "Xóa mục danh bạ MÌNH thêm.",
   [P.EMPLOYEE_DELETE_ALL]:  "Xóa BẤT KỲ mục danh bạ nào.",
+  [P.FILE_UPLOAD]:          "Tải tệp lên kho lưu trữ (ảnh/PDF/Excel đính kèm). Không có quyền này thì mọi đường tải lên đều bị từ chối.",
   [P.VENUE_READ]:   "Xem danh mục rạp + được GỢI Ý kích thước khi gõ hạng mục trong báo giá.",
   [P.VENUE_MANAGE]: "Thêm/sửa/xóa rạp và hạng mục kích thước (trang Danh mục rạp).",
 };
@@ -252,6 +259,7 @@ export const PERMISSION_GROUPS = [
     P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_EDIT_ALL, P.EMPLOYEE_DELETE_OWN, P.EMPLOYEE_DELETE_ALL,
   ] },
   { key: "venue", label: "Danh mục rạp (kích thước)", perms: [P.VENUE_READ, P.VENUE_MANAGE] },
+  { key: "file", label: "Tệp đính kèm", perms: [P.FILE_UPLOAD] },
   { key: "invoice", label: "Hóa đơn / Quản lý dự án", perms: [
     P.INVOICE_READ, P.INVOICE_PAGE, P.INVOICE_EDIT, P.INVOICE_PAY, P.QUOTE_SIGN_OWN, P.QUOTE_SIGN_ALL,
   ] },
@@ -267,6 +275,9 @@ const EMPLOYEE = [
   P.PRODUCT_READ,
   // Ai làm báo giá cũng cần ĐỌC danh mục rạp (gợi ý kích thước khi gõ hạng mục).
   P.VENUE_READ,
+  // Ai làm báo giá thì cần đính kèm tệp. CỐ Ý đặt ở NỀN của EMPLOYEE (manager/admin kế thừa) chứ
+  // không ở ADMIN: hr/accountant/account_hn không kế thừa danh sách này nên mặc định KHÔNG có.
+  P.FILE_UPLOAD,
 ];
 
 const MANAGER = [

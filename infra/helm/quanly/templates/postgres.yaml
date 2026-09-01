@@ -15,20 +15,45 @@ spec:
       labels: {{- include "quanly.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
+      # Cùng khuôn với infra/k8s/postgres.yaml (bản kustomize đã siết từ lâu; chart thì chưa —
+      # hai đường triển khai của cùng một hệ thống không được lệch mức phòng thủ). UID/GID 70 là
+      # user `postgres` trong ảnh postgres:16-alpine; fsGroup để PVC được cấp quyền nhóm đúng ngay
+      # lần gắn đầu tiên.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
+          # Hệ thống tệp gốc CHỈ ĐỌC. Postgres cần ghi ở ĐÚNG ba chỗ, đều có volume riêng bên dưới:
+          # dữ liệu (PVC), socket đơn vị (/var/run/postgresql) và tệp tạm (/tmp). Thiếu volume socket
+          # thì Postgres không tạo nổi socket và pod chết vòng lặp — nên hai thứ này đi kèm nhau.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports: [{ containerPort: 5432 }]
           env:
             - { name: POSTGRES_USER, value: quanly }
             - { name: POSTGRES_DB, value: quanly }
-            - { name: POSTGRES_PASSWORD, value: CHANGE_ME_INTERNAL }
-          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+            - { name: POSTGRES_PASSWORD, value: {{ include "quanly.postgresPassword" . | quote }} }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
           resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
           readinessProbe:
             exec: { command: ["pg_isready", "-U", "quanly"] }
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:

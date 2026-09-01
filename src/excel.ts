@@ -51,9 +51,23 @@ function vnDateText(d: any, city: any) {
 // = + - @ (or a leading tab/CR) is interpreted as a formula by Excel/Sheets when
 // the exported file is opened. Prefix a zero-width-safe apostrophe so the value
 // is shown literally. Only applied to plain strings (numbers/dates untouched).
+// `\t`/`\r` ở NGAY đầu vẫn tính (Excel bỏ qua chúng khi phân giải ô), còn `= + - @` thì tính kể
+// cả khi có khoảng trắng đứng trước: tên hạng mục KHÔNG đi qua `clean()` (xem chỗ ghi cột name),
+// nên `" =SUM(...)"` giữ nguyên dấu cách tới lúc ghi ô. Đa số nơi nhận (Google Sheets, trình đọc
+// CSV) cắt khoảng trắng đầu TRƯỚC khi quyết định "có phải công thức không", nên neo cứng vào ký
+// tự đầu tiên là bỏ lọt. `\s` của JS CÓ bao gồm U+00A0 (no-break space) — ký tự hay dính theo khi
+// dán từ Word — nên không cần liệt kê riêng.
+//
+// GIÁ PHẢI TRẢ, đã biết và CỐ Ý giữ: exceljs 4.4.0 KHÔNG hỗ trợ `quotePrefix` (thuộc tính kiểu ô
+// mà Excel dùng để nhớ "đây là chữ" mà không hiện ký tự nào) — `grep -rn "quotePrefix"
+// node_modules/exceljs/lib/` trả 0 kết quả. Nên cách duy nhất còn lại là chèn thật một dấu `'`
+// vào chuỗi, và khách MỞ FILE RA SẼ THẤY nó với tên hạng mục kiểu "-Ghế Tiffany". Muốn bỏ dấu
+// nháy cho nhánh `- +` (vốn gần như không bao giờ là công thức thật) thì phải sửa cả
+// tests/xp3-excel-cells.test.js — bài đó đang chốt "không ô chữ nào bắt đầu bằng = + - @".
+const DAU_CONG_THUC = /^[\t\r]|^\s*[=+\-@]/;
 function neutralizeFormula(value: any) {
   if (typeof value !== "string" || value.length === 0) return value;
-  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return DAU_CONG_THUC.test(value) ? `'${value}` : value;
 }
 
 function setCell(ws: any, ref: any, value: any) {
@@ -162,7 +176,14 @@ function cellAnchor(ref: any) {
 const MAX_LOGO_BYTES = 6 * 1024 * 1024; // hard cap on decoded logo size (DoS guard)
 
 function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
-  const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(dataUrl);
+  // Người dùng ĐÃ chọn logo, nên chữ mồi trong mẫu ("logo cty khách hàng" ở C3) sai trong MỌI
+  // trường hợp — xoá TRƯỚC, không đợi nhúng thành công. Trước đây các nhánh `return` sớm bên dưới
+  // nhảy qua bước xoá, nên một logo .webp (validators.ts VẪN cho phép, ExcelJS thì không nhúng
+  // được) làm file gửi khách in nguyên dòng hướng dẫn dành cho người dựng mẫu.
+  try { ws.getCell(ref).value = null; } catch { /* ô ngoài vùng/đang merge — bỏ qua */ }
+  // Dùng CHUNG danh sách định dạng với cột ảnh theo hạng mục (ANH_NHUNG_DUOC, khai báo bên dưới)
+  // — hai chỗ lệch nhau là kiểu lỗi chỉ lộ ra trên file đã gửi khách.
+  const m = ANH_NHUNG_DUOC.exec(dataUrl);
   if (!m) return;
   let extension = m[1].toLowerCase();
   if (extension === "jpg") extension = "jpeg";
@@ -172,7 +193,6 @@ function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
   try {
     const buffer = Buffer.from(m[2], "base64");
     const imageId = ws.workbook.addImage({ buffer, extension });
-    try { ws.getCell(ref).value = null; } catch {}
     const a = cellAnchor(ref);
     ws.addImage(imageId, {
       tl: { col: a.col + 0.05, row: a.row + 0.05 },
@@ -209,8 +229,33 @@ function imgDims(buf: Buffer, ext: string): { w: number; h: number } | null {
 const IMG_BOX = 74;               // khung mỗi ảnh (px)
 const MAX_ROW_PX = 540;           // Excel giới hạn hàng 409pt ≈ 545px — nhiều ảnh thì thu khung lại
 const MAX_ITEM_IMG_BYTES = 3 * 1024 * 1024;   // cap ảnh/hạng mục (client đã nén ~JPEG 1400px)
+// Định dạng ExcelJS ghi thẳng được vào .xlsx. KHÔNG có `webp` ở đây dù `webp` LƯU ĐƯỢC:
+// regex của `images` trong src/validators.ts (tìm bằng `grep -n 'images: z.array'` — hiện ở
+// dòng 163-165) nhận cả webp. Bên web, RE_ANH_HOP_LE (web/src/components/GridTable.tsx:122)
+// cũng nhận webp, nhưng nó là guard HIỂN THỊ trong `safeImgSrc` (dòng 135) — chống chuỗi thoát
+// khỏi `src=""`, KHÔNG phải đường lưu. Đường lưu thật là `fileToImg` (GridTable.tsx:1618): ảnh
+// chọn từ máy được vẽ lên canvas rồi `toDataURL("image/jpeg", 0.82)` (dòng 1631), tức webp
+// người dùng chèn đã thành JPEG trước khi rời trình duyệt; webp chỉ tới được server qua nhánh
+// dự phòng khi `toDataURL` ném lỗi, hoặc qua API gọi thẳng.
+// Vì sao vẫn không nhúng: muốn nhúng webp thì phải chuyển mã, mà dự án
+// không có bộ chuyển mã ảnh nào trong package.json (không sharp, không jimp), còn ném thẳng
+// byte webp vào file thì phụ thuộc Excel của KHÁCH có đọc được WebP không — Office bản vĩnh
+// viễn 2016/2019 thì không, và một khung ảnh lỗi giữa báo giá gửi khách còn tệ hơn ô trống.
+const ANH_NHUNG_DUOC = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i;
 function insertItemImages(ws: any, colLetter: string, rowNum: number, images: any) {
-  const list = (Array.isArray(images) ? images : []).filter((s) => typeof s === "string").slice(0, 10);
+  // Lọc TRƯỚC khi tính chiều cao. Trước đây `n` đếm cả ảnh sắp bị bỏ (webp, hoặc quá nặng) nên
+  // hàng bị kéo cao đúng số tầng đó rồi để trống — 3 ảnh webp = hàng cao 180pt không có gì
+  // trong đó (đo bằng tests/b3-excel-item-images.test.js). Trần 10 ảnh giữ nguyên, nhưng nay
+  // đếm trên ảnh NHÚNG ĐƯỢC.
+  const list: RegExpExecArray[] = [];
+  for (const s of (Array.isArray(images) ? images : [])) {
+    if (typeof s !== "string") continue;
+    const m = ANH_NHUNG_DUOC.exec(s);
+    if (!m) continue;
+    if (Math.floor((m[2].length * 3) / 4) > MAX_ITEM_IMG_BYTES) continue;   // DoS guard như logo
+    list.push(m);
+    if (list.length >= 10) break;
+  }
   if (!list.length) return;
   const n = list.length;
   const box = Math.min(IMG_BOX, Math.floor(MAX_ROW_PX / n) - 6);   // n ảnh vẫn nằm gọn dưới trần 409pt
@@ -219,10 +264,8 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
   row.height = Math.max(row.height || 0, rowPx * 0.75);   // px → pt (1pt = 4/3px)
   const c0 = colLetterToIdx(colLetter);
   for (let k = 0; k < n; k++) {
-    const m = /^data:image\/(png|jpe?g|gif);base64,(.+)$/i.exec(list[k]);
-    if (!m) continue;
+    const m = list[k];
     let extension = m[1].toLowerCase(); if (extension === "jpg") extension = "jpeg";
-    if (Math.floor((m[2].length * 3) / 4) > MAX_ITEM_IMG_BYTES) continue;   // DoS guard như logo
     try {
       const buffer = Buffer.from(m[2], "base64");
       const d = imgDims(buffer, extension);
@@ -972,7 +1015,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         st.font = { ...ff, bold: !!bold };
         st.alignment = { horizontal: align || "center", vertical: "middle" };
         cell.style = st;
-        cell.value = value;
+        // Cùng bộ lọc với `setCell`: khối này nhận quote.fromContact/fromTitle/fromPhone — chữ
+        // người dùng gõ tự do. Không phải chống Excel tự chạy công thức (ô chuỗi trong .xlsx thì
+        // Excel hiển thị nguyên văn), mà để MỌI đường ghi ô chữ ra file khách đi qua một luật:
+        // chuỗi mở đầu bằng = + - @ khi được lưu-lại-thành-CSV hoặc dán sang Sheets mới thành lệnh.
+        cell.value = neutralizeFormula(value);
       };
       // Lời chào ("Rất mong…" / "Trân trọng…") canh GIỮA trong cột trái (B:F) → cân đối.
       if (f.left) {
@@ -1320,6 +1367,44 @@ function renumberSheetIds(wb: any) {
  * at the OOXML/zip level. This preserves each template's original styling perfectly,
  * which cell-by-cell cross-workbook copying in ExcelJS does not.
  */
+/** Trần cứng của Excel cho tên tab. */
+const MAX_SHEET_NAME = 31;
+
+/**
+ * Tên tab Excel HỢP LỆ từ chuỗi người dùng gõ tự do.
+ *
+ * Setter `ws.name` của ExcelJS (node_modules/exceljs/lib/doc/worksheet.js:140-170) NÉM lỗi với
+ * `* ? : \ / [ ]`, với dấu nháy đơn ở đầu/cuối, với chuỗi rỗng và với đúng chữ "History"; quá 31
+ * ký tự thì nó chỉ cảnh báo rồi cắt TRONG BỘ NHỚ. `sheetSchema` phía validator chỉ có
+ * `.max(120)` nên không chặn gì trong số đó.
+ *
+ * Hai hậu quả khác nhau, cả hai đều đã tái hiện (tests/excel-sheetname.test.js):
+ *   1. Ký tự cấm → ném ngay → route xuất trả 500 tiếng Anh, người dùng KHÔNG xuất được file và
+ *      không có manh mối nào chỉ về tên sheet. "Booth/Backdrop" là tên hoàn toàn bình thường.
+ *   2. Quá 31 ký tự → KHÔNG báo gì. ExcelJS cắt trong bộ nhớ, nhưng `sheetNames` giữ tên THÔ và
+ *      `xlsxStitcher.renameSheet` ghi đè `xl/workbook.xml` bằng chính tên thô đó → file tải về
+ *      mở lên là Excel đòi "sửa chữa". Hỏng ÂM THẦM tệ hơn hỏng ồn ào.
+ *
+ * Lọc thay vì từ chối: người dùng đặt tên theo nghiệp vụ của họ, không theo luật OOXML. Đổi
+ * `/` `:` thành khoảng trắng giữ nguyên ý nghĩa đọc được, còn ném lỗi thì chặn cả lần xuất.
+ */
+export function safeSheetName(raw: unknown, duPhong: string) {
+  const s = String(raw ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F]/g, " ")   // ký tự điều khiển: XML 1.0 không cho, làm hỏng workbook.xml
+    .replace(/[*?:/\\[\]]/g, " ")             // tập ký tự Excel cấm
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^'+|'+$/g, "")                   // nháy đơn đầu/cuối
+    .trim()
+    .slice(0, MAX_SHEET_NAME)
+    .trim();                                   // slice có thể để lại khoảng trắng cuối
+  // So không phân biệt hoa/thường: Excel giữ chỗ "History" bất kể cách viết, dù ExcelJS chỉ chặn
+  // đúng một cách viết.
+  if (!s || s.toLowerCase() === "history") return duPhong.slice(0, MAX_SHEET_NAME);
+  return s;
+}
+
 export async function buildQuoteBuffer(quote: any) {
   const sheets = (quote.sheets || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   if (sheets.length === 0) {
@@ -1330,11 +1415,17 @@ export async function buildQuoteBuffer(quote: any) {
   const sheetBuffers: Buffer[] = [];
   const sheetNames: string[] = [];
   const sheetTotals: { name: string; subtotal: number; vat: number; total: number; subtotalCell: string }[] = [];
-  const usedNames = new Set();
-  const uniq = (name: any) => {
+  // Excel ĐỐI CHIẾU TÊN TAB KHÔNG PHÂN BIỆT HOA/THƯỜNG (exceljs/lib/doc/worksheet.js:168 dùng
+  // `.toLowerCase()`). Set phân biệt hoa/thường sẽ cho "Booth" và "booth" cùng lọt rồi ném ở setter.
+  const usedNames = new Set<string>();
+  const uniq = (name: string) => {
     let n = name, i = 2;
-    while (usedNames.has(n)) n = `${name} (${i++})`;
-    usedNames.add(n);
+    while (usedNames.has(n.toLowerCase())) {
+      const hau = ` (${i++})`;
+      // Cắt lại SAU khi nối hậu tố. Bản cũ nối vào tên ĐÃ cắt 31 nên kết quả vượt trần trở lại.
+      n = `${name.slice(0, MAX_SHEET_NAME - hau.length).trim()}${hau}`;
+    }
+    usedNames.add(n.toLowerCase());
     return n;
   };
 
@@ -1354,9 +1445,11 @@ export async function buildQuoteBuffer(quote: any) {
     stampTemplateMarker(ws, tplCode);
 
     // Tên tab Excel: chỉ đánh số "N. …" khi báo giá có NHIỀU sheet (1 sheet giữ nguyên).
-    const baseName = sheet.name || cfg.sheetName || `Sheet ${idx + 1}`;
-    const labeled = sheets.length > 1 ? `${idx + 1}. ${baseName}`.replace(/[[\]/\\?*:]/g, "").substring(0, 31) : baseName;
-    const displayName = uniq(labeled);
+    // CẢ HAI nhánh đều phải đi qua safeSheetName. Bản cũ chỉ lọc ở nhánh nhiều-sheet, nên một báo
+    // giá MỘT sheet tên "Booth/Backdrop" là 500 và không xuất được file.
+    const duPhong = `Sheet ${idx + 1}`;
+    const baseName = safeSheetName(sheet.name || cfg.sheetName, duPhong);
+    const displayName = uniq(sheets.length > 1 ? safeSheetName(`${idx + 1}. ${baseName}`, duPhong) : baseName);
     ws.name = displayName;
 
     const buf = Buffer.from(await wb.xlsx.writeBuffer());
@@ -1377,6 +1470,3 @@ export async function buildQuoteBuffer(quote: any) {
   return stitchXlsxBuffers(sheetBuffers, sheetNames);
 }
 
-// Backwards-compatible name: callers that previously got a Workbook now get a buffer.
-// Update the export route to consume a buffer.
-export const buildQuoteWorkbook = buildQuoteBuffer;

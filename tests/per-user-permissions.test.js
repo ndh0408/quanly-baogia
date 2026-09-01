@@ -5,6 +5,7 @@
 // - /me trả đúng tập quyền per-user (không phải role mặc định)
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -33,7 +34,7 @@ describe.runIf(dbAvailable)("phân quyền PER-USER ghi đè role (integration)"
     mgrRestrict = await mk("manager", "mgrrestrict", ["personnel:read:all"]);
     // ADMIN gán quyền tí xíu → vẫn FULL (chống tự khóa).
     adminMin = await mk("admin", "adminmin", ["quote:create"]);
-    hrGrantA = request.agent(app); mgrRestrictA = request.agent(app); adminMinA = request.agent(app);
+    hrGrantA = agentWithCsrf(app); mgrRestrictA = agentWithCsrf(app); adminMinA = agentWithCsrf(app);
     await Promise.all([login(hrGrantA, hrGrant), login(mgrRestrictA, mgrRestrict), login(adminMinA, adminMin)]);
   });
 

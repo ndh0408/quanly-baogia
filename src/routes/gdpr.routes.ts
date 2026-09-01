@@ -48,7 +48,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.session as any).userId);
     noStoreExport(res, `user-${req.session.userId}-export.json`);
-    res.end(JSON.stringify(data, null, 2));
+    res.end(svc.serializeExport(data));
     await audit(req, "gdpr.export", { resource: "user", resourceId: req.session.userId });
   })
 );
@@ -61,7 +61,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const data = await svc.exportUser((req.params as any).id);
     noStoreExport(res, `user-${req.params.id}-export.json`);
-    res.end(JSON.stringify(data, null, 2));
+    res.end(svc.serializeExport(data));
     await audit(req, "gdpr.export.by_admin", { resource: "user", resourceId: req.params.id });
   })
 );

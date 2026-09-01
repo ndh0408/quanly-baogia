@@ -15,7 +15,7 @@
 // `searchText` là cột phẳng, KHÔNG mã hoá, nằm ngay cạnh trong cùng bản dump. Để CCCD trong đó thì
 // việc mã hoá cột `idCard` chỉ là trang trí. Thay bằng chỉ mục mù: tra CCCD BẰNG-ĐÚNG vẫn chạy.
 
-import { encryptPii, decryptPii, decryptPiiOrThrow, blindIndex, isPiiEncryptionEnabled, isPiiEncrypted } from "./piiBox.js";
+import { encryptPii, decryptPii, decryptPiiOrThrow, blindIndex, blindIndexCandidates, isPiiEncryptionEnabled, isPiiEncrypted } from "./piiBox.js";
 
 /** Một trường được mã hoá: cột thô ↔ cột bản mã (+ cột chỉ mục mù nếu cần tra cứu). */
 type PiiField = { plain: string; enc: string; idx?: string };
@@ -103,8 +103,12 @@ export function idCardLookupWhere(q: string | null | undefined): Record<string, 
   const v = (q ?? "").trim();
   if (!v) return null;
   if (!isPiiEncryptionEnabled()) return { idCard: v };
-  const idx = blindIndex(v);
-  return idx ? { idCardIdx: idx } : null;
+  const cands = blindIndexCandidates(v);
+  if (!cands.length) return null;
+  // Đang xoay khoá (`PII_ENC_KEY_OLD` còn đặt) thì cùng một CCCD nằm dưới hai chỉ mục mù khác nhau —
+  // phải phủ cả hai, nếu không hàng chưa xoay biến mất khỏi kết quả tìm kiếm mà không báo gì.
+  // Ngoài cửa sổ xoay khoá thì giữ nguyên dạng so-bằng-đúng để không đổi kế hoạch truy vấn.
+  return cands.length === 1 ? { idCardIdx: cands[0] } : { idCardIdx: { in: cands } };
 }
 
 export { isPiiEncryptionEnabled, decryptPii };

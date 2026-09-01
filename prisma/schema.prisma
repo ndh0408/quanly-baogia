@@ -21,7 +21,11 @@ enum Role {
 // 'admin' KHÔNG ghi đè được (luôn full — chống tự khóa). Chỉ admin (USER_MANAGE) sửa qua trang Phân quyền.
 model RolePermission {
   role        String   @id // khóa vai trò: manager/hr/accountant/account_hn
-  permissions String[] // tập quyền (key trong PERMISSIONS) thay cho mặc định
+  // @default([]) KHỚP đúng `DEFAULT ARRAY[]::TEXT[]` mà migration 20260625000004 đã tạo trong CSDL.
+  // Thiếu nó thì `migrate diff` báo trôi ("default changed … to None") và `migrate dev` sẽ sinh
+  // migration GỠ default — đây là drift THẬT, không phải giới hạn của Prisma (User.permissions
+  // dòng dưới vẫn khai được y hệt).
+  permissions String[] @default([]) // tập quyền (key trong PERMISSIONS) thay cho mặc định
   updatedAt   DateTime @updatedAt
   updatedById Int?
 }
@@ -200,7 +204,7 @@ model PersonnelRecord {
   bankName     String? // NGÂN HÀNG
   phone        String? // SỐ ĐIỆN THOẠI
 
-  // ── MÃ HOÁ PII KHI LƯU (bước 1/6 — xem SECURITY_AUDIT_2026-08.md §6) ──────────────────────
+  // ── MÃ HOÁ PII KHI LƯU (bước 1/6 — xem docs/archive/audits/SECURITY_AUDIT_2026-08.md §6) ──────────────────────
   // Cột CỘNG THÊM, chưa ai ghi vào. Cột thô ở trên vẫn là nguồn sự thật cho tới khi cutover.
   // Tách cột thay vì mã hoá tại chỗ để: migration không đụng dữ liệu (rollback = bỏ cột), và
   // giai đoạn đọc-song-song có thể so đối chiếu hai bên trước khi tin bản mã.
@@ -269,6 +273,7 @@ model PersonnelRecord {
   @@index([confirmedById])
   @@index([deletedAt])
   @@index([idCardIdx]) // tra cứu BẰNG-ĐÚNG theo CCCD sau khi cột thô bị bỏ
+  @@index([paymentProofKey]) // btree THƯỜNG do 20260811200000 tạo — phải khai ở đây, không thì migrate dev sinh DROP INDEX
 }
 
 // Danh bạ NHÂN VIÊN — kho thông tin cá nhân tái dùng. Khi tạo hồ sơ Nhân sự, chọn 1 người
@@ -647,6 +652,7 @@ model QuoteSheet {
   @@index([quoteId, order])
   @@index([signedById])
   @@index([templateId]) // FK tới QuoteTemplate (RESTRICT) — index để kiểm "template còn sheet tham chiếu?" không seq-scan
+  @@index([custStatusById]) // btree THƯỜNG do 20260811000001 tạo — phải khai ở đây, không thì migrate dev sinh DROP INDEX
 }
 
 model QuoteItem {
@@ -747,11 +753,21 @@ model AuditEvent {
   after      Json?
   ip         String?
   userAgent  String?
+  // Mã request (src/middleware.ts `requestId` → `req.id`). §42 của prompt đòi nhật ký kiểm toán có
+  // trường này, và lý do rất thực dụng: khi điều tra sự cố, log ứng dụng (pino) và nhật ký kiểm
+  // toán là HAI kho tách rời. Không có mã chung thì không nối được "ai đã làm gì" với "request nào
+  // đã chạy, mất bao lâu, trả mã gì" — phải dò theo dấu thời gian và đoán.
+  // Nullable: hàng CŨ không có, và các lời gọi audit() ngoài đường HTTP (job nền, script) không có
+  // request nào để tham chiếu.
+  requestId  String?
   createdAt  DateTime @default(now())
 
   @@index([actorId, createdAt(sort: Desc)])
   @@index([resource, resourceId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
+  // Ba index trên đều có createdAt ở cột 2/3 → VÔ DỤNG khi KHÔNG lọc. Trang Nhật ký mở không bộ
+  // lọc và job retention xoá thuần theo `createdAt <` đều rơi vào ca đó, trên bảng chỉ lớn lên.
+  @@index([createdAt(sort: Desc)])
 }
 
 // === Webhook out (integrations) ===
@@ -781,6 +797,7 @@ model WebhookDelivery {
   createdAt      DateTime  @default(now())
 
   @@index([webhookId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)]) // job retention xoá theo createdAt, không lọc webhookId
 }
 
 /// Session store table managed by connect-pg-simple (express-session).
@@ -804,4 +821,5 @@ model LoginAttempt {
 
   @@index([username, createdAt(sort: Desc)])
   @@index([ip, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)]) // job retention xoá theo createdAt, không lọc username/ip
 }

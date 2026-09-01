@@ -5,6 +5,7 @@
 // q rác "@#$" chuẩn-hóa ra rỗng → token-không-khớp → KHÔNG nuốt cả list.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -52,7 +53,7 @@ describe.runIf(dbAvailable)("personnel search KHÔNG dấu (integration)", () =>
         passwordHash: await bcrypt.hash(PASSWORD, 4),
       },
     });
-    mgr = request.agent(app);
+    mgr = agentWithCsrf(app);
     await login(mgr, mgrU);
 
     // (1) Tạo hồ sơ có dấu bằng user manager → 201; searchText do server tự sinh.

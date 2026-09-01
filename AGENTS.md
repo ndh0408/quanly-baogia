@@ -1,91 +1,176 @@
-# QuanLY — Hướng dẫn cho Codex
+# QuanLY — hướng dẫn kỹ thuật (canonical)
 
-Hệ quản lý nội bộ đã chạy production tại `gianguyen.cloud`. Brownfield, một lập trình viên.
-Node + TypeScript + Prisma + Postgres + Redis, deploy Docker qua Coolify.
-SPA cũ (`public/js`, ES module thuần) đang được port dần sang React (`web/src`).
+Đây là **nguồn duy nhất** cho quy ước làm việc trên repo này. Mọi trợ lý AI và
+mọi lập trình viên đọc file này. `CLAUDE.md` chỉ chứa phần riêng của công cụ
+Claude Code và trỏ ngược về đây.
 
-Trả lời bằng **tiếng Việt**.
+**Trả lời bằng tiếng Việt.**
 
----
+## Hệ thống này là gì
 
-## BMAD (đã cài — 89 skill)
+Hệ quản lý nội bộ **đang chạy production** tại `gianguyen.cloud`: báo giá, hồ sơ
+nhân sự, theo dõi dự án cho hai công ty (Gia Nguyễn + Colorfull). Brownfield, một
+lập trình viên. Node 22 + TypeScript + Express + Prisma + Postgres + Redis, deploy
+Docker qua Coolify. Frontend là **React 19 + Vite** ở `web/src`. SPA vanilla cũ
+(`public/js`) đã **gỡ hẳn 2026-08-26** — xem
+[docs/adr/0006-go-spa-vanilla-cu.md](docs/adr/0006-go-spa-vanilla-cu.md).
 
-BMAD v6 cài trong repo này ngày 2026-07-28. Skill nằm ở `.Codex/skills/bmad-*` và `wds-*`,
-config ở `_bmad/`, sản phẩm sinh ra ghi vào `_bmad-output/`.
+Đây là dữ liệu thật của một doanh nghiệp thật. Mọi thay đổi phải giả định là có
+người đang dùng ngay lúc này.
 
-Module đã cài: `core` · `bmm` · `cis` · `tea` · `wds` · `bmb` · `bmad-loop` (**không** cài `gds`).
+## Đọc trước khi sửa
 
-Không biết bắt đầu từ đâu → gọi skill `bmad-help`, nó tự dò trạng thái rồi gợi bước kế.
+| Việc | Đọc |
+|---|---|
+| Hiểu hệ thống | [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) |
+| Đụng vào auth/quyền | [docs/architecture/SECURITY_MODEL.md](docs/architecture/SECURITY_MODEL.md) |
+| Dựng môi trường | [docs/development/SETUP.md](docs/development/SETUP.md) |
+| Viết test | [docs/development/TESTING.md](docs/development/TESTING.md) |
+| Deploy | [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md) |
 
-### ⛔ Ba thứ TUYỆT ĐỐI không chạy
+## Quy ước bất di bất dịch
 
-1. **`bmad-bmb-setup`** — nó gọi `cleanup-legacy.py --also-remove _config`, mà
-   `cleanup-legacy.py:183` là `shutil.rmtree(target)`. SKILL.md dòng 70 ghi rõ thư mục
-   không chứa skill (như `_config/`) bị **xoá thẳng, bỏ qua lớp kiểm tra an toàn**.
-   `_bmad/_config/` đang giữ toàn bộ manifest của bản cài 89 skill
-   (`files-manifest.csv`, `skill-manifest.csv`, `bmad-help.csv`, `manifest.yaml`).
-   Mất thư mục này là `bmad-help` mù. Các skill bmb khác (`bmad-workflow-builder`,
-   `bmad-eval-runner`) thì vô hại.
+- **Đừng đề xuất multi-tenancy/RLS.** Hai công ty dùng chung nhân viên và chung
+  dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
+- **`projectCode` CỐ Ý free-format** theo từng người — đừng chuẩn hoá, đừng thêm FK.
+- **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị **bỏ qua âm thầm**,
+  làm lọt thông báo tiếng Anh ra giao diện. Dùng tham số `error`.
+- **Tiền dùng `Decimal`**, không dùng float JS. Đổi sang `Number` là mất chính xác.
+- **Frontend chỉ có MỘT**: `web/src`. Vite băm nội dung vào tên file asset nên
+  không còn phải bump `?v=` bằng tay như SPA cũ.
+- **Prettier KHÔNG đụng `.ts/.tsx/.js`** (xem `lint-staged.config.mjs`). House
+  style dùng one-liner có chủ đích; để prettier bung dòng là diff khổng lồ và
+  conflict với nhánh song song. Chỉ format `{json,css,yml,yaml}`.
+- Test tích hợp không chạy được trên máy Windows của tác giả — dùng
+  `bash test-on-dev.sh` (chạy trên VM dev).
 
-2. **`bmad-loop-*`** (3 skill) — cần `tmux`, máy Windows không có; backend `psmux` được
-   chính README ghi là *experimental, native Windows is not yet shipped*. Còn cần
-   `sprint-status.yaml` mà repo không có. `bmad-loop-setup` sẽ đăng ký hook
-   `Stop`/`SessionStart`/`SessionEnd`/`PreCompact` vào `.Codex/settings.json` — đừng chạy.
+## TUYỆT ĐỐI không phá
 
-3. **Agent WDS** (`wds-agent-saga-analyst`, `wds-agent-freya-ux`, `wds-agent-mimir-builder`)
-   — có tool `sync` tự động ghi 6 slash command (`/saga` `/freya` `/mimir` `/start`
-   `/wrap` `/handoff`) vào `~/.Codex/commands/`, tức **ra ngoài repo, ảnh hưởng mọi
-   project khác trên máy**. Tính đến 2026-07-28 thư mục đó chưa tồn tại. Hỏi trước khi kích hoạt.
+Đây là hành vi production đã được người dùng dựa vào. Sửa mà không có test hồi
+quy là làm hỏng công việc của người khác.
 
-### Bẫy cấu hình đã vá — đừng vá lại
+- Engine lưới báo giá: **clipboard** (copy/cut/paste bằng sự kiện trình duyệt,
+  KHÔNG bắt phím), **phân tích RFC-4180**, **IME tiếng Việt** (Enter để chốt từ
+  trong OpenKey/Unikey không được nhảy ô), **Ctrl+Z/Y**, chọn nhiều ô, fill-down.
+- **Round-trip Excel**: dán lại bảng do chính app xuất ra phải dựng lại đúng cấp
+  nhóm / nhóm con / dòng con / dòng thông tin.
+- **Mẫu Excel**: xuất ra phải là **file của công ty** — logo, phông, viền, ô gộp,
+  vùng in. Đó là lý do `src/xlsxStitcher.ts` ghép XML thay vì sinh workbook mới.
+- **Công thức**: `=5x3`, `=SUM(H3:H8)`, tham chiếu ô, `$` tuyệt đối.
+- **Bảng nội bộ** (chi phí HCM / báo giá HN / phí khách) **không được** lọt vào
+  file Excel gửi khách.
 
-- `output_folder` ban đầu **không được định nghĩa** ở đâu cả → installer tạo thư mục tên
-  literal `{output_folder}` ở gốc repo. Đã vá bằng `--output-folder _bmad-output`.
-- TEA và WDS mặc định đẻ thư mục ra **gốc repo** (`skills/`, `design-artifacts/`).
-  Đã trỏ hết vào `_bmad-output/`. TEA có **4 key** phải set: `test_artifacts` cộng 3 key con
-  `test_design_output` / `test_review_output` / `trace_output` — sửa key cha không đủ.
-- `python3` trên máy này vốn là **stub Microsoft Store** (exit 9009). Đã tạo shim
-  `C:\Users\Admin\AppData\Local\Programs\Python\Python313\python3.exe` (thư mục này đứng
-  trước `WindowsApps` trong PATH). Mọi script BMAD gọi `python3` nay chạy thật.
+## Chốt chặn — đừng vô hiệu hoá
 
-Muốn đổi cấu hình BMAD thì **chạy lại installer** với `--set`, đừng sửa tay
-`_bmad/config.toml` (file ghi rõ installer-managed, bị ghi đè mỗi lần cài).
+⚠️ **GitHub Actions KHÔNG bật trên tài khoản của repo này.** `.github/workflows/ci.yml` khai
+đầy đủ nhưng **chưa bao giờ chạy**. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều SAI ở đây. Cổng
+duy nhất thật sự chạy là cổng bạn gõ tay: `npm run verify`.
 
-### Skill BMAD nào đáng dùng cho repo này
+Cái giá của việc đó không phải giả định: lượt chạy thật đầu tiên của job `security` (2026-08-27)
+lộ ra `.gitleaks.toml` viết allowlist bằng cú pháp gitleaks BỎ QUA, và `.trivyignore.yaml` ghi ID
+thiếu tiền tố — hai chốt mà repo tưởng mình đang có.
 
-**Nên dùng** — vá đúng chỗ đang thiếu:
-- `bmad-generate-project-context` — sinh `project-context.md`, là `persistent_facts` mặc định
-  của gần như mọi skill BMAD khác. Không có nó thì cả bộ chạy mù.
-- `bmad-document-project` — repo `docs/` gần như trống.
-- `bmad-testarch-test-review` — chấm determinism/isolation/maintainability trên test **sẵn có**.
-- `bmad-review-edge-case-hunter` — trực giao với coderabbit, hợp cho code tiền + phân quyền
-  (`quoteFormula`, `excel`, `permissions`, `hnWorkflow`).
-- `bmad-spec` — hợp cách làm từng nhánh nhỏ ở đây hơn là bộ PRD→epic→story.
+Mỗi cái dưới đây ra đời từ một lỗi có thật.
 
-**Đừng dùng** — trùng thứ repo đã có:
-- `bmad-code-review`, `bmad-review-adversarial-general` → đã có `coderabbit:code-review`,
-  `/code-review`, `/security-review`, `AUDIT_REPORT.md`, `.scan/`.
-- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có 30 vitest + 39 script
-  `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác chỉ làm phình.
-- `bmad-agent-*` (persona) → chỉ là menu router, gọi thẳng skill nhanh hơn.
-- Nhóm `bmad-cis-*` và `wds-*` → dựng cho sản phẩm bán ra thị trường có khách ngoài;
-  QuanLY là công cụ nội bộ, không có thị trường/khách hàng/nhà đầu tư để phục vụ.
+| Chốt | Bắt gì |
+|---|---|
+| `scripts/ci/endpoint-inventory.mjs --check` | Endpoint mới chưa vào ma trận phân quyền = **chưa ai soát quyền** |
+| `scripts/ci/check-runtime-command.sh` | Docker/Compose/Helm/k8s khởi động lệch nhau (đã từng làm mọi pod chết vòng lặp) |
+| `scripts/ci/smoke-dist.sh` | Artifact production không boot được, hoặc đường dẫn tài nguyên sai sau khi biên dịch. Chạy `node dist/server.js` + `node dist/worker.js` THẬT ở `NODE_ENV=production`, không cần docker (bước `[10b/13]`, vài giây, nên chạy cả ở `--nhanh`). Năm khẳng định KHÔNG có ở `smoke-image.sh`: `/api/health`, `/style.css` trả `200` (đúng thứ vỡ khi `rootDir`/`outDir` sai), `/metrics` đòi token, `/api/auth/login` trả `401` chứ không phải `5xx`, worker thoát êm khi nhận `SIGTERM` |
+| `scripts/ci/smoke-image.sh` | Image production: boot, `/livez` + `/readyz`, SPA phục vụ được, phông PDF, prisma CLI, không có mã nguồn/đồ nghề test, **0 dòng stack trong log khởi động**. `scripts/ci/docker-smoke.sh` dựng image từ cây làm việc rồi gọi nó — **mọi khẳng định về image nằm ở `smoke-image.sh`**, đừng nhân đôi |
+| `scripts/ci/ui-smoke.mjs` | Chromium thật, 18 bước đi hết luồng người dùng: đăng nhập → danh sách → sửa ô → **Lưu** → tải lại + đọc lại số đã lưu → **mất tab giữa chừng: khôi phục bản nháp cục bộ** → **tạo báo giá qua wizard 3 bước** → lưu bản mới → **xuất Excel** (kiểm cả byte "PK" của gói OOXML) → **đăng xuất** → **kiểm quyền** bằng tài khoản `account_hn` (menu, hash gõ thẳng, và 403 ở MÁY CHỦ) → 0 lỗi console. Không tầng nào dưới nó thấy lớp lỗi này: tầng component chạy jsdom (dựng lại DOM trong tiến trình, không tải asset, không thi hành CSP, không có mạng), chỉ E2E mới nạp bundle ĐÃ BUILD qua Express thật |
+| `scripts/ci/check-web-bundle.mjs` | Bundle giao cho người dùng là **bản DEV của React**. Vite quyết dev-hay-prod theo `NODE_ENV` của máy đang build, mà chính `verify-local.sh` export `NODE_ENV=test` — nên trước 2026-08-27 `npm run verify` đẻ ra bundle dev (984.802 byte thay vì 630.482) rồi đem đi smoke |
+| `scripts/ci/check-helm.mjs` | Chart render ra manifest hỏng: tag di động, mật khẩu rỗng, `secretKeyRef` trỏ khoá không tồn tại. `helm lint` KHÔNG render nên không thấy gì |
+| `scripts/ci/check-alerts.mjs` | Quy tắc cảnh báo sai **logic** (`promtool test rules`) hoặc trỏ vào metric đã đổi tên. Bước `[A4]` soi luôn PromQL trong bảng điều khiển Grafana — panel trỏ vào metric đã chết vẽ đường 0 và người trực đọc thành "hệ thống đang yên" |
+| `scripts/db/explain-hot-paths.mjs` | Truy vấn nóng QUÉT TUẦN TỰ bảng lớn. Dựng 5.000 dòng thật, nghe câu SQL Prisma THẬT SỰ chạy rồi `EXPLAIN ANALYZE` nó. Đã tìm ra một index thiếu thật (trang Mã khách hàng sắp theo `createdAt` mà không có index nào phục vụ) |
+| `scripts/ci/security-scan.sh` | Bí mật trong mã **và trong lịch sử git**, lỗ hổng HIGH/CRITICAL có bản vá, mẫu nguy hiểm (semgrep), SBOM |
+| `scripts/ci/check-line-refs.mjs` | Chú thích trỏ `file:dòng` vào hư không (số dòng trôi mỗi lần ai đó thêm dòng) |
+| `scripts/ci/check-doc-numbers.mjs --check` | **Con số trong tài liệu trôi khỏi mã nguồn.** `check-line-refs` chỉ kiểm tham chiếu `file:dòng` có trỏ vào chỗ có thật — nó KHÔNG nhìn con số. Cổng này đo chín đại lượng từ mã nguồn (quy tắc cảnh báo, nhóm quy tắc, bài `promtool`, bước ui-smoke, metric, endpoint, ADR, tệp test backend, tệp test web) rồi đối chiếu với mọi tài liệu trong cây, và in kèm lệnh shell để tự đo lại. **Viết số vào tài liệu thì đọc quy ước ngay dưới bảng trước** |
+| `scripts/ci/check-architecture.mjs` | Ranh giới tầng nhoè đi: route chạm thẳng Prisma, service tự trả HTTP, phụ thuộc ngược chiều, vòng import. 7 khoản nợ hiện có được KHAI kèm lý do — file mới thì ĐỎ ([ADR 0008](docs/adr/0008-khong-doi-cay-thu-muc-sang-modules.md)) |
+| `scripts/ci/check-shell-strict.mjs` | Script shell thiếu `set -euo pipefail` — lỗi giữa chừng đi tiếp im lặng (đã từng nuốt trọn một lượt migration hỏng) |
+| `scripts/ci/check-deps.mjs` | Phụ thuộc lệch giữa `package.json` và `package-lock.json`, hoặc gói chỉ-dev lọt vào `dependencies` |
+| `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
+| `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
+| `REQUIRE_DB_TESTS=1` | Cổng xanh trong khi test tích hợp lặng lẽ bỏ qua |
 
-### Skill BMAD cần PRD/epics mới chạy
+### Cổng chỉ sống trong `ci.yml` là cổng KHÔNG AI CHẠY
 
-`bmad-sprint-planning`, `bmad-create-story`, `bmad-dev-story`, `bmad-correct-course`,
-`bmad-check-implementation-readiness`, `bmad-testarch-trace` đều HALT nếu thiếu
-PRD/epics/`sprint-status.yaml`. Repo hiện **không có** — muốn dùng phải chạy
-`bmad-prd` → `bmad-create-epics-and-stories` → `bmad-sprint-planning` trước.
+Actions không bật, nên một bước chỉ được khai trong `.github/workflows/ci.yml` không phải chốt —
+nó là ghi chú. Lượt rà 2026-08-31 tìm thấy bốn bước như vậy; cả bốn nay có đường cục bộ:
 
----
+| Từng mồ côi | Nay chạy ở | Ghi chú |
+|---|---|---|
+| `endpoint-inventory.mjs --check-write-authz` (`.github/workflows/ci.yml:157`) | `[8/13]` | Đường gián tiếp vẫn có từ trước (`tests/b8-endpoint-write-authz.test.js` gọi thẳng hàm xuất khẩu của cổng), nhưng một cổng chạy nhờ bài test là một cổng phụ thuộc bài test đó còn sống |
+| `check-destructive-sql.mjs --check` (`.github/workflows/ci.yml:194`) | `[8/13]` | Gác trôi schema coi `DROP COLUMN` viết trong migration là HỢP LỆ — schema khớp CSDL, chỉ dữ liệu là mất |
+| `smoke-dist.sh` (`.github/workflows/ci.yml:217`) | `[10b/13]` | Lượt chạy tay đầu tiên lộ ngay lỗi: script gán `PORT` mà không `export`, nên tiến trình con bind cổng `3000` còn script gõ cửa `3999`. CI không thấy vì khối `env:` của bước đã export sẵn |
+| `kubeconform` trên `infra/k8s/` (`.github/workflows/ci.yml:283`) | `[9/13]` | `check-helm.mjs` chỉ chạy kubeconform trên bản RENDER của chart; manifest thô trong `infra/k8s/` chưa từng được kiểm schema. Bản cục bộ dùng **glob** chứ không chép lại danh sách tệp — danh sách chép tay là danh sách sẽ trôi |
 
-## Quy ước chung của repo
+Bốn thứ dưới đây **vẫn chỉ chạy khi Actions bật**. Đừng tính chúng là chốt của repo này:
 
-- **Đừng đề xuất multi-tenancy/RLS.** Hai công ty (GN + Colorfull) dùng chung nhân viên và
-  chung dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
-- **`projectCode` cố ý free-format** theo từng người — đừng chuẩn hoá hay thêm FK.
-- **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị bỏ qua âm thầm làm lọt tiếng
-  Anh ra UI. Dùng tham số `error`.
-- Sửa SPA cũ trong `public/js` thì **nhớ bump `?v=`** để phá cache.
-- Test integration không chạy được cục bộ — dùng `bash test-on-dev.sh` (chạy trên VM dev).
+| Chỉ có ở CI | Vì sao chưa nối vào máy | Rủi ro còn lại |
+|---|---|---|
+| `trivy` quét **IMAGE** (`.github/workflows/ci.yml:377` và `.github/workflows/ci.yml:446`) | `security-scan.sh` mới quét `fs` — tức cây làm việc. Gói OS mà `Dockerfile` `apk add` và cả tầng nền `node:22-alpine` nằm ngoài tầm nó; `docker-smoke.sh` có dựng image cục bộ nhưng không ai quét | Lỗ hổng trong tầng nền image đi thẳng ra production, không cổng chạy được nào thấy |
+| SBOM của **image** (`.github/workflows/ci.yml:458`) và `provenance`/`sbom` đính kèm digest (`.github/workflows/ci.yml:434`) | Bước `[S4]` của `security-scan.sh` sinh SBOM từ `npm sbom --omit=dev` — chỉ cây phụ thuộc npm, không có gói OS | CVE mới công bố thì không tra được image đang chạy chứa gói OS bản nào |
+| `npm --prefix web ci` (nằm trong `npm run web:build`) | `verify-local.sh` chỉ chạy `npx vite build` trong `web/`; bước `[0b/13]` kiểm lockfile gốc chứ **không** kiểm `web/package-lock.json` | Sửa `web/package.json` mà quên `npm install` thì bundle cục bộ dựng trên cây phụ thuộc khác với bản Docker dựng |
+| Toàn bộ job `build-image` (đăng nhập ghcr, đẩy digest, tag `type=sha`) | Cần registry và `GITHUB_TOKEN`; không tái hiện được trên máy | Chỉ ảnh hưởng đường phát hành, không ảnh hưởng cây mã |
+
+**Thêm một bước vào `ci.yml` thì thêm luôn vào `scripts/verify-local.sh`** — nếu không nối được thì
+ghi vào bảng thứ hai ở trên kèm lý do. Im lặng bỏ qua là cách một repo tích lại chốt giả.
+
+### Viết số vào tài liệu — quy ước khai SỐ LỊCH SỬ
+
+`check-doc-numbers` soi **mọi** con số trong tài liệu, kể cả con số bạn cố ý viết về quá khứ
+("trước đợt vá là 14 metric"). Repo này GIỮ những con số đó — chúng là bản ghi, không phải lỗi.
+Nên trước khi viết, phải biết cách khai, nếu không cổng sẽ chặn bạn mà bạn không hiểu vì sao.
+
+Ba cách khai một con số lịch sử, dùng cách nào cũng được:
+
+1. **Mốc bằng lời** — đặt một cụm như `trước đợt` · `trước đó` · `trước đây` · `từng ghi` ·
+   `từng là` · `bản trước` · `bản cũ` · `ảnh chụp` · `số của mốc` · `lúc Phase` · `đã đo lúc`
+   vào **trước** con số, trong cùng đoạn văn. Mốc làm mờ mọi con số đứng SAU nó.
+2. **Nhãn tường minh** `<!-- so-lich-su -->` trên chính dòng đó, hoặc dòng ngay trước.
+3. **Dạng tỉ lệ `N/M`** — "8/8 ADR", "137/137 endpoint". Đây là lời khai "đã xử lý N trong M
+   của LÚC ĐÓ", nên cổng bỏ qua cả cụm.
+
+Hai hệ quả dễ vấp:
+
+- **Mốc chỉ về PHÍA TRƯỚC.** Số hiện tại đứng TRƯỚC mốc vẫn bị soi — đó là chủ ý, vì người ta
+  hay viết "hiện có 17 quy tắc; trước đợt 2026-08-27 là 14". Nếu bạn đặt số hiện tại SAU một
+  mốc, nó sẽ bị bỏ qua và **cổng mất răng ở đúng chỗ đó**.
+- **Đoạn văn cắt tại dòng trống, dòng bảng `|`, tiêu đề `#`, mục danh sách.** Một mốc trong ô
+  bảng chỉ mờ đúng hàng đó, không lan xuống cả bảng. Ngược lại: viết một mốc trong văn xuôi vì
+  lý do KHÔNG liên quan tới số liệu ("Trước đây chúng tôi dùng Grafana Cloud") vẫn làm mờ mọi
+  con số sau nó trong cùng đoạn. Muốn giữ răng thì đặt số hiện tại TRƯỚC mốc, hoặc tách đoạn.
+
+Không khai được vì con số thật sự sai? Thì **sửa con số**, đừng khai lịch sử để cho qua. Chạy
+`npm run docnum` để xem toàn bộ số đo cùng lệnh shell tương đương của từng đại lượng.
+
+## Trước khi coi là xong
+
+```bash
+npm run verify          # 13 bước — chạy HẾT, khoảng 9 phút
+npm run verify:nhanh    # vòng lặp sửa nhanh: bỏ test/build web, smoke image, smoke giao diện, quét bảo mật
+```
+
+`verify` cần Postgres + Redis + MinIO cục bộ (nó tự kiểm và **dừng ngay** nếu thiếu — một dòng
+"skipped" trông y hệt một dòng xanh). Nó cũng **từ chối chạy** nếu `DATABASE_URL`/`REDIS_URL`/
+`S3_*` không trông như hạ tầng test: bộ test có `deleteMany` và `obliterate`, chạy nhầm lên
+production là mất dữ liệu chứ không phải bất tiện.
+
+Chạy riêng từng cổng khi cần: `npm run check:helm` · `npm run check:alerts` · `npm run check:refs`
+· `npm run smoke:image` · `npm run smoke:ui` · `npm run scan` · `npm run sbom`
+
+## Cách làm việc mong đợi
+
+- **Đọc mã trước khi kết luận.** Tài liệu audit cũ trong `docs/archive/` là LỊCH
+  SỬ — nhiều phát hiện đã được sửa. Đừng vá lại thứ đã vá.
+- **Tái hiện lỗi trước khi sửa.** "Có vẻ sai" không đủ; phải chỉ ra được đầu vào
+  nào cho ra kết quả sai nào.
+- **Test cùng commit với bản sửa**, và test đó phải ĐỎ trên mã cũ. Một test không
+  bao giờ đỏ được thì không bảo vệ gì.
+- **Nói đúng mức độ.** Lỗi tiềm ẩn không với tới được thì ghi là tiềm ẩn, đừng
+  gọi là sự cố đang xảy ra.
+- **Migration phải an toàn**: production dùng `prisma migrate deploy`, KHÔNG dùng
+  `db push` (nó xoá được cột và dữ liệu). Thay đổi đụng dữ liệu thì diễn tập
+  trước bằng `scripts/db/migration-rehearsal.sh`.
+- **Comment giải thích VÌ SAO**, không mô tả CÁI GÌ. Cái gì thì đọc code cũng ra.

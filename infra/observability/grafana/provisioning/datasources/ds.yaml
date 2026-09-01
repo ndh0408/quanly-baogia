@@ -1,0 +1,35 @@
+# Nguồn dữ liệu nạp sẵn — không phải bấm tay sau mỗi lần dựng lại Grafana.
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    isDefault: false
+    jsonData:
+      maxLines: 2000
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    # ⚠️ ĐỪNG VIẾT `${PROMETHEUS_URL:-http://prometheus:9090}` Ở ĐÂY.
+    #
+    # Bản trước dùng đúng cú pháp đó và nó KHÔNG chạy: Grafana nội suy biến môi trường trong file
+    # provisioning bằng cơ chế kiểu `os.ExpandEnv` — nó hiểu `$VAR` và `${VAR}`, nhưng KHÔNG hiểu
+    # dạng-có-mặc-định `${VAR:-…}` của shell. Chuỗi đó bị đọc thành một tên biến không hợp lệ và nở
+    # ra RỖNG, tức datasource có URL trống: mọi panel metric im lặng vẽ đường không có dữ liệu, và
+    # người trực đọc thành "hệ thống đang yên". Đúng chế độ hỏng mà bước [A4] của
+    # `scripts/ci/check-alerts.mjs` sinh ra để chặn — nhưng [A4] soi TÊN METRIC trong bảng, không
+    # soi URL của datasource, nên nó không thể bắt được cái này.
+    #
+    # Nay Prometheus NẰM TRONG chính ngăn xếp này (docker-compose.observability.yml), nên tên DNS
+    # `prometheus` trên mạng `internal` luôn phân giải được — viết thẳng, không cần biến.
+    # Chạy Prometheus ở nơi khác thì SỬA DÒNG NÀY (hoặc thay bằng `${PROMETHEUS_URL}` không có phần
+    # mặc định, và luôn đặt biến đó).
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      # Khớp `scrape_interval` trong infra/observability/prometheus.yml. Lệch giá trị này thì Grafana
+      # tự chọn bước `$__rate_interval` sai và các panel `rate()` cho ra đồ thị răng cưa.
+      timeInterval: 15s

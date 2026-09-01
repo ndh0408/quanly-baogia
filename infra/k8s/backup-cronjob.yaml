@@ -53,16 +53,35 @@ spec:
               args:
                 - |
                   set -e
+                  # Bản dump chứa CCCD / số tài khoản / lương thô → không để ai-cũng-đọc.
+                  umask 077
                   STAMP=$(date +%Y%m%d_%H%M%S)
                   OUT="/backups/quanly_${STAMP}.dump"
                   echo "Backing up to ${OUT}"
-                  pg_dump "$DATABASE_URL" -Fc -f "$OUT"
+                  # Ghi ra .partial rồi mới đổi tên. Ghi THẲNG vào tên cuối là cái bẫy mà
+                  # scripts/backup/backup-db.sh đã phải viết hẳn một đoạn để tránh: pod bị evict
+                  # giữa chừng để lại một .dump CỤT nhưng trông hợp lệ, rồi bước prune bên dưới
+                  # xoá mất bản TỐT cũ hơn. Đổi tên trên cùng filesystem là thao tác nguyên tử.
+                  pg_dump "$DATABASE_URL" -Fc -f "$OUT.partial"
+                  # pg_restore -l đọc mục lục của kho lưu trữ: bắt được file cụt mà kiểm cỡ bỏ lọt.
+                  pg_restore -l "$OUT.partial" > /dev/null
+                  mv "$OUT.partial" "$OUT"
+                  # Checksum cạnh file: sau này đối chiếu được bản đã sao đi nơi khác có bằng bản gốc.
+                  sha256sum "$OUT" | awk '{print $1}' > "$OUT.sha256"
+                  # Prune CHỈ chạy sau khi bản mới đã hoàn chỉnh — không bao giờ xoá bản cũ dựa trên
+                  # một lượt backup còn chưa chắc thành công.
                   echo "Pruning backups older than 14 days"
                   find /backups -name '*.dump' -mtime +14 -delete
+                  find /backups -name '*.dump.sha256' -mtime +14 -delete
+                  # Dọn file tạm mồ côi của những lượt chết giữa chừng trước đây.
+                  find /backups -name '*.dump.partial' -mmin +180 -delete
                   echo "BACKUP_DONE"
               volumeMounts:
                 - { name: backups, mountPath: /backups }
+                # readOnlyRootFilesystem=true ở trên: pg_dump/pg_restore vẫn cần /tmp ghi được.
+                - { name: tmp, mountPath: /tmp }
           volumes:
             - name: backups
               persistentVolumeClaim:
                 claimName: quanly-db-backups
+            - { name: tmp, emptyDir: {} }

@@ -1,0 +1,149 @@
+{{- if and .Values.backup.enabled .Values.backup.objects.enabled }}
+{{/*
+  SAO LƯU KHO OBJECT cho NHÁNH HELM.
+
+  Bản dump Postgres KHÔNG còn đủ để khôi phục: từ 2026-08-11 ảnh chứng từ thanh toán đã rời CSDL
+  sang kho object, CSDL chỉ giữ khoá + SHA-256. Mất bucket = mất CHỨNG TỪ TÀI CHÍNH trong khi mọi
+  hàng trong CSDL vẫn còn và trỏ vào hư không.
+
+  `mc mirror` CỘNG DỒN — CỐ Ý không dùng --remove. Bucket bị xoá nhầm (hoặc bị mã hoá tống tiền)
+  thì bản sao lưu phải GIỮ LẠI vật chứ không đồng bộ luôn cái xoá đó. Đó là khác biệt giữa "bản
+  sao lưu" và "bản chép".
+
+  ⚠️ CHƯA TỪNG CHẠY THẬT TRÊN CLUSTER — y như infra/k8s/backup-objects-cronjob.yaml mà nó chép
+  logic sang. Ở đây mới chỉ qua `helm template` + `kubeconform`, tức chỉ kiểm được HÌNH DẠNG YAML.
+  Ảnh `minio/mc` dựng trên UBI-micro (bản nền cắt sâu): `mc` thì chắc chắn có, nhưng `sha256sum`,
+  `sed`, `sort`, `wc`, `tr` thì CHƯA XÁC MINH ĐƯỢC. ĐỪNG ghi ở đâu rằng nhánh Helm "đã có sao lưu
+  kho object" trước khi chạy thật một lượt và đọc log tới dòng `OBJECT_BACKUP_DONE`.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "quanly.fullname" . }}-object-backups
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.backup.objects.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.objects.storageSize }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "quanly.fullname" . }}-object-backup
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.objects.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: {{- include "quanly.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: object-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: mc-mirror
+              image: {{ .Values.backup.objects.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # `mc` ghi cấu hình vào $HOME/.mc. Pod chạy readOnlyRootFilesystem + runAsUser 1000
+                # nên $HOME KHÔNG ghi được → mc lỗi ngay lệnh đầu tiên. Trỏ vào emptyDir /tmp.
+                - name: HOME
+                  value: /tmp
+                - name: MC_CONFIG_DIR
+                  value: /tmp/.mc
+                # Cặp khoá đi qua env, không qua argv: argv của tiến trình đọc được từ trong pod.
+                - name: S3_ENDPOINT
+                  valueFrom: { secretKeyRef: { name: {{ include "quanly.secretName" . }}, key: S3_ENDPOINT } }
+                - name: S3_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ include "quanly.secretName" . }}, key: S3_ACCESS_KEY } }
+                - name: S3_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: {{ include "quanly.secretName" . }}, key: S3_SECRET_KEY } }
+                - name: S3_BUCKET
+                  valueFrom: { configMapKeyRef: { name: {{ include "quanly.fullname" . }}-config, key: S3_BUCKET } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  umask 077
+                  export MC_HOST_q="$(echo "$S3_ENDPOINT" | sed "s#://#://$S3_ACCESS_KEY:$S3_SECRET_KEY@#")"
+                  echo "Mirroring q/$S3_BUCKET -> /objects (cộng dồn, KHÔNG lan truyền xoá)"
+                  mc mirror --quiet --overwrite "q/$S3_BUCKET" /objects
+                  # ── ĐỐI CHIẾU THEO THÀNH VIÊN, KHÔNG THEO SỐ ĐẾM ──────────────────────────
+                  # Bản đầu của lịch này so `[ "$LOCAL_N" -ge "$REMOTE_N" ]`. Phép so đó TỰ VÔ HIỆU,
+                  # và scripts/backup/backup-objects.sh đã phải gỡ đúng lỗi ấy: bước mirror ở trên là
+                  # CỘNG DỒN (`mc mirror` KHÔNG có `--remove`, cố ý — xoá nhầm trên bucket không được
+                  # lan sang bản sao lưu), nên LOCAL_N chỉ có tăng. Ngay khi retention bắt đầu xoá
+                  # object khỏi bucket (RETAIN_EXPORT_DAYS, src/retention.ts) thì LOCAL_N > REMOTE_N
+                  # VĨNH VIỄN: bản gương thiếu bao nhiêu object cũng được, cổng vẫn báo OK.
+                  #
+                  # Câu hỏi cần trả lời là "mọi object ĐANG CÓ trong bucket có mặt trong gương không?"
+                  # — tức so THÀNH VIÊN. Phép so đó đúng với cả gương cộng dồn, và vẫn đúng sau
+                  # retention. Cùng một logic với scripts/backup/backup-objects.sh bước [2/5].
+                  #
+                  # `--json` để lấy khoá: dạng bảng đặt khoá ở cột cuối mà khoá có thể chứa dấu cách.
+                  # Khoá ở đây do hệ sinh (uploads/… exports/… payment-proofs/…) nên không chứa dấu
+                  # ngoặc kép — phép cắt bằng sed an toàn với chính tập dữ liệu này.
+                  mc ls --recursive --json "q/$S3_BUCKET" > /tmp/remote.json
+                  sed -n 's/.*"key":"\([^"]*\)".*/\1/p' /tmp/remote.json > /tmp/remote-keys.txt
+                  REMOTE_N=$(awk 'NF{n++} END{print n+0}' /tmp/remote-keys.txt)
+                  : > /tmp/thieu.txt
+                  while IFS= read -r k; do
+                    [ -n "$k" ] || continue
+                    [ -f "/objects/$k" ] || printf '%s\n' "$k" >> /tmp/thieu.txt
+                  done < /tmp/remote-keys.txt
+                  THIEU_N=$(awk 'NF{n++} END{print n+0}' /tmp/thieu.txt)
+                  echo "bucket=$REMOTE_N thiếu trong gương=$THIEU_N"
+                  if [ "$THIEU_N" -gt 0 ]; then
+                    echo "BẢN GƯƠNG THIẾU $THIEU_N/$REMOTE_N OBJECT. Ví dụ: $(head -20 /tmp/thieu.txt | tr '\n' ' ')"
+                    exit 1
+                  fi
+                  # Manifest SHA-256: ghi .partial rồi đổi tên, để một lượt chết giữa chừng không
+                  # để lại manifest cụt mà bước kiểm khôi phục sau này lại tin là hợp lệ.
+                  STAMP=$(date +%Y%m%d_%H%M%S)
+                  M="/objects/manifest_${STAMP}.tsv"
+                  mc ls --recursive --json /objects | \
+                    sed -n 's/.*"key":"\([^"]*\)".*"size":\([0-9]*\).*/\1\t\2/p' | \
+                    grep -v '^manifest_' | sort > /tmp/keys.tsv
+                  : > "$M.partial"
+                  while IFS="$(printf '\t')" read -r k sz; do
+                    [ -n "$k" ] || continue
+                    h=$(mc cat "/objects/$k" | sha256sum | cut -d' ' -f1)
+                    printf '%s\t%s\t%s\n' "$k" "$sz" "$h" >> "$M.partial"
+                  done < /tmp/keys.tsv
+                  mv "$M.partial" "$M"
+                  # Giữ {{ .Values.backup.objects.keepManifests }} manifest gần nhất. `mc rm` thay
+                  # `xargs -r rm -f` (xargs cũng thuộc findutils).
+                  mc ls --quiet /objects | sed -n 's/.*\(manifest_[0-9_]*\.tsv\)$/\1/p' | \
+                    sort -r | tail -n +{{ add .Values.backup.objects.keepManifests 1 }} | while IFS= read -r old; do
+                      [ -n "$old" ] && mc rm --force "/objects/$old" || true
+                    done
+                  echo "OBJECT_BACKUP_DONE"
+              resources: {{- toYaml .Values.backup.objects.resources | nindent 16 }}
+              volumeMounts:
+                - { name: objects, mountPath: /objects }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: objects
+              persistentVolumeClaim:
+                claimName: {{ include "quanly.fullname" . }}-object-backups
+            - { name: tmp, emptyDir: {} }
+{{- end }}

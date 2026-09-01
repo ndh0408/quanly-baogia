@@ -4,12 +4,13 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
-import { validate } from "../validators.js";
+import { validate, MAX_EXPORT_SHEETS, MAX_EXPORT_ITEMS } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
-import { runExportJob } from "../exportQueue.js";
+import { runExportJob, isAbortedError } from "../exportQueue.js";
 import { createLimiter } from "../rateLimit.js";
 import { audit } from "../audit.js";
+import { tenFileXuat } from "../quoteUtils.js";
 
 // JSON-safe copy of the quote for the worker thread (normalizes Prisma Decimals →
 // strings and Dates → ISO; buildQuoteBuffer/renderQuotePdf read these via Number()
@@ -30,10 +31,51 @@ router.use(requirePermission(P.QUOTE_EXPORT));
 // through the async BullMQ queue, not pin the event loop here.
 router.use(createLimiter("export", { windowMs: 60_000, max: 30 }));
 
+/**
+ * TÍN HIỆU HUỶ cho một lượt xuất file. Bấm khi CLIENT BỎ ĐI, hoặc khi quá HẠN CHÓT.
+ *
+ * VÌ SAO CẦN: src/exportQueue.ts đã nhận `signal` từ lâu (rời hàng đợi khi huỷ, và kiểm lại ngay
+ * trước khi tiêu CPU), nhưng route lại gọi `runExportJob` với BA tham số — không truyền gì. Cả
+ * đường huỷ vì thế là mã chết ở production: khách bấm xuất rồi đóng tab, hệ thống vẫn xếp hàng,
+ * vẫn được cấp chỗ, vẫn sinh ra một file không ai nhận, và ăn trọn một suất trong `maxActive` (3)
+ * lẫn `maxPending` (20) — người còn ở lại chờ lâu hơn hoặc bị 503 oan.
+ *
+ * Dùng `res` chứ KHÔNG dùng `req`: với một GET không thân, luồng `req` được tiêu thụ xong ngay nên
+ * `req` có thể phát "close" khi kết nối vẫn còn sống — huỷ theo đó là huỷ nhầm mọi lượt xuất.
+ * `res` phát "close" khi phản hồi kết thúc HOẶC kết nối đứt giữa chừng; trường hợp đầu thì việc đã
+ * xong nên `abort()` lúc đó vô hại, và nó còn dọn luôn bộ hẹn giờ.
+ *
+ * HẠN CHÓT là chốt thứ hai: một socket chết mà không gửi FIN (chuyện thường qua tunnel/NAT) sẽ
+ * KHÔNG bao giờ phát "close", nên nếu chỉ dựa vào sự kiện đó thì chỗ vẫn bị giữ vô thời hạn. 60s
+ * rộng hơn nhiều thời gian sinh file thật (worker tự timeout ở 30s) nên không cắt ngang việc đang chạy.
+ */
+const EXPORT_REQUEST_DEADLINE_MS = Number(process.env.EXPORT_REQUEST_DEADLINE_MS) || 60_000;
+function tinHieuHuy(res: Response): AbortSignal {
+  const ac = new AbortController();
+  const hen = setTimeout(() => ac.abort(), EXPORT_REQUEST_DEADLINE_MS);
+  (hen as unknown as { unref?: () => void }).unref?.();
+  res.on("close", () => { clearTimeout(hen); ac.abort(); });
+  return ac.signal;
+}
+
+/**
+ * Xử lý lỗi HUỶ tách khỏi lỗi sinh file. Trả `true` nghĩa là "đã xử lý xong, người gọi dừng lại".
+ * Không tách thì mọi lượt khách đóng tab sẽ nổi lên errorHandler thành log lỗi 500 giả, làm loãng
+ * đúng thứ tín hiệu cần nhìn khi xuất file thật sự hỏng.
+ */
+function daXuLyHuy(e: unknown, res: Response): boolean {
+  if (!isAbortedError(e)) return false;
+  // Còn kết nối → là quá HẠN CHÓT, phải nói cho người dùng biết. Mất kết nối → không còn ai nhận.
+  if (!res.headersSent && !res.writableEnded) {
+    res.status(504).json({ error: "Xuất file quá hạn chờ — hệ thống đang bận, vui lòng thử lại" });
+  }
+  return true;
+}
+
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
-const MAX_EXPORT_SHEETS = 100;
-const MAX_EXPORT_ITEMS = 20_000;
+// Trần lấy từ validators.ts — CÙNG một cặp số với trần LƯU, để không còn báo giá nào lưu được mà
+// không xuất được (xem chú thích ở chỗ khai báo). Khai lại ở đây là mở đường cho hai số trôi khỏi nhau.
 function exportTooBig(quote: any) {
   const sheets = quote.sheets?.length || 0;
   const items = (quote.sheets || []).reduce((n: number, s: any) => n + (s.items?.length || 0), 0);
@@ -67,10 +109,16 @@ router.get(
       return res.status(413).json({ error: "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng xuất nền (async)" });
     }
 
-    const buf = await runExportJob("xlsx", plain(quote), () => buildQuoteBuffer(quote));
-    const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
+    let buf;
+    try {
+      buf = await runExportJob("xlsx", plain(quote), () => buildQuoteBuffer(quote), { signal: tinHieuHuy(res) });
+    } catch (e) {
+      if (daXuLyHuy(e, res)) return;
+      throw e;
+    }
+
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "xlsx")}"`);
     res.setHeader("Content-Length", buf.length);
     // Per-user, auth-gated download — must NOT be cached by the CDN (Cloudflare caches
     // .xlsx by extension) or the browser, else stale/other-user files get served.
@@ -112,10 +160,16 @@ router.get(
       total: Number(quote.total),
       vatPercent: Number(quote.vatPercent),
     };
-    const buf = await runExportJob("pdf", plain(pdfQuote), () => renderQuotePdf(pdfQuote));
-    const safeName = (quote.quoteNumber || `quote-${id}`).replace(/[^A-Za-z0-9_-]/g, "_");
+    let buf;
+    try {
+      buf = await runExportJob("pdf", plain(pdfQuote), () => renderQuotePdf(pdfQuote), { signal: tinHieuHuy(res) });
+    } catch (e) {
+      if (daXuLyHuy(e, res)) return;
+      throw e;
+    }
+
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="BaoGia_${safeName}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "pdf")}"`);
     res.setHeader("Content-Length", buf.length);
     res.setHeader("Cache-Control", "no-store, private, max-age=0");   // per-user — never cache at CDN/browser
     res.end(buf);

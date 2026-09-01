@@ -1,0 +1,635 @@
+# ============================================================================
+# Bài kiểm ĐƠN VỊ cho infra/prometheus/alerts.yaml — chạy bằng `promtool test rules`.
+#
+#   npm run check:alerts     (scripts/ci/check-alerts.sh chạy cả check lẫn test)
+#
+# ── VÌ SAO CẦN, KHI ĐÃ CÓ `promtool check rules` ───────────────────────────
+# `check rules` chỉ nói "PromQL này PHÂN TÍCH ĐƯỢC". Nó KHÔNG chạy biểu thức, nên một quy tắc
+# viết sai logic (thiếu vế `and`, so sai chiều, `for:` quá dài) vẫn qua được nó — và cách duy nhất
+# để phát hiện là chờ một sự cố thật rồi thấy cảnh báo không kêu. Đó là kiểu thất bại tệ nhất của
+# hệ thống giám sát: im lặng đúng lúc cần kêu.
+#
+# Bài dưới đây bơm chuỗi số liệu GIẢ vào rồi đòi cảnh báo kêu ĐÚNG lúc — và quan trọng ngang thế:
+# KHÔNG kêu ở tình huống hợp lệ. Vế thứ hai mới là vế giữ cho cảnh báo còn được bật.
+# ============================================================================
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ── SSE: hai vế của biểu thức, cả hai chiều ───────────────────────────────
+  - interval: 1m
+    name: "SSE backplane chết ở chế độ redis thì PHẢI kêu"
+    input_series:
+      - series: 'sse_backplane_mode{mode="redis", instance="app-1", job="quanly"}'
+        values: "1x10"
+      - series: 'sse_backplane_up{instance="app-1", job="quanly"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QuanlySseBackplaneChet
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: app-1
+              job: quanly
+              mode: redis
+            exp_annotations:
+              summary: "Backplane Redis của SSE chết trên app-1"
+              description: >-
+                Instance này được cấu hình chạy chế độ redis nhưng backplane đang không lên. Nhiều
+                replica + backplane chết = người dùng nối vào instance A không thấy thay đổi do người
+                trên instance B tạo. Không màn hình nào báo lỗi; danh sách chỉ đơn giản là không cập nhật.
+              runbook: "src/sse.ts — biến `pub` và hàm `backplaneDangDung`"
+
+  - interval: 1m
+    name: "Triển khai MỘT tiến trình (mode=local) thì KHÔNG được kêu"
+    # Đây là vế chống-kêu-oan. Nếu ai đó rút gọn biểu thức thành `sse_backplane_up == 0` cho
+    # "đỡ rườm rà", bài này đỏ ngay — đúng lúc, thay vì sau khi cảnh báo đã bị tắt vì kêu suốt.
+    input_series:
+      - series: 'sse_backplane_mode{mode="local", instance="app-1", job="quanly"}'
+        values: "1x10"
+      - series: 'sse_backplane_up{instance="app-1", job="quanly"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QuanlySseBackplaneChet
+        exp_alerts: []
+
+  # ── CSDL: `up` KHÔNG bắt được ca này ─────────────────────────────────────
+  - interval: 1m
+    name: "CSDL không trả lời `SELECT 1` → PHẢI kêu, dù tiến trình vẫn scrape được"
+    input_series:
+      # `up` = 1 suốt: tiến trình Node SỐNG và trả /metrics bình thường. Đó chính là điều làm chế độ
+      # hỏng này vô hình trước khi có `db_up`.
+      - series: 'up{instance="app-1", job="quanly"}'
+        values: "1x20"
+      - series: 'db_up{instance="app-1", job="quanly"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyCsdlKhongToiDuoc
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "app-1 không chạm được Postgres"
+              description: >-
+                `SELECT 1` thất bại hoặc quá 2 giây trong 3 phút liên tục. Ứng dụng vẫn trả lời HTTP nên
+                liveness probe XANH và `up` vẫn 1 — không có cảnh báo nào khác trong file này bắt được
+                trạng thái này. Kiểm pool (DB_POOL_MAX), tiến trình Postgres, và DATABASE_URL.
+              runbook: "src/db.ts — Pool + DB_POOL_MAX; src/app.ts — handler /readyz"
+      - eval_time: 10m
+        alertname: QuanlyMetricsKhongScrapeDuoc
+        exp_alerts: [] # đối chứng: `up` vẫn 1 → quy tắc scrape im. Không có db_up thì KHÔNG AI kêu.
+
+  - interval: 1m
+    name: "CSDL khoẻ thì KHÔNG được kêu"
+    input_series:
+      - series: 'db_up{instance="app-1", job="quanly"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyCsdlKhongToiDuoc
+        exp_alerts: []
+
+  # ── Redis: hai vế, cả hai chiều ──────────────────────────────────────────
+  - interval: 1m
+    name: "Có cấu hình Redis mà Redis chết → PHẢI kêu (kể cả khi KHÔNG dùng backplane SSE)"
+    input_series:
+      - series: 'redis_configured{instance="app-1", job="quanly"}'
+        values: "1x20"
+      - series: 'redis_up{instance="app-1", job="quanly"}'
+        values: "0x20"
+      # Instance này chạy chế độ LOCAL (không backplane) — quy tắc SSE cố ý im ở đây. Đó đúng là lỗ
+      # hổng mà QuanlyRedisChet sinh ra để lấp: Redis vẫn đang giữ hàng đợi BullMQ và rate-limit
+      # (phiên thì KHÔNG — kho phiên là connect-pg-simple → bảng user_sessions trong Postgres).
+      - series: 'sse_backplane_mode{mode="local", instance="app-1", job="quanly"}'
+        values: "1x20"
+      - series: 'sse_backplane_up{instance="app-1", job="quanly"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyRedisChet
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "Redis không tới được từ app-1"
+              description: >-
+                Tiến trình có REDIS_URL nhưng không kết nối Redis nào ở trạng thái ready. Hệ quả THẬT:
+                rate-limit phân tán rơi về bộ đếm trong tiến trình → giới hạn tần suất không còn dùng
+                chung giữa các instance; job BullMQ không đẩy được; SSE giữa các instance mất đồng bộ.
+                KHÔNG ai bị đăng xuất — kho phiên là connect-pg-simple trên Postgres, không phải Redis.
+              runbook: "src/queue.ts — getRedis/getRateLimitRedis; src/rateLimit.ts"
+      - eval_time: 10m
+        alertname: QuanlySseBackplaneChet
+        exp_alerts: [] # đối chứng: quy tắc SSE im ở chế độ local — đó là lý do phải có quy tắc riêng.
+
+  - interval: 1m
+    name: "Cố ý chạy KHÔNG Redis (redis_configured=0) thì KHÔNG được kêu"
+    # Vế chống-kêu-oan. Rút gọn biểu thức thành `redis_up == 0` là bài này đỏ ngay — trước khi cảnh
+    # báo kịp bị người trực tắt vì kêu suốt ở bản triển khai một tiến trình.
+    input_series:
+      - series: 'redis_configured{instance="app-1", job="quanly"}'
+        values: "0x20"
+      - series: 'redis_up{instance="app-1", job="quanly"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyRedisChet
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Redis có cấu hình và đang sống thì KHÔNG được kêu"
+    input_series:
+      - series: 'redis_configured{instance="app-1", job="quanly"}'
+        values: "1x20"
+      - series: 'redis_up{instance="app-1", job="quanly"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyRedisChet
+        exp_alerts: []
+
+  # ── Đĩa: ngưỡng theo TỈ LỆ, không theo số byte viết cứng ──────────────────
+  - interval: 1m
+    name: "Còn 5% trống → kêu"
+    input_series:
+      - series: 'disk_free_bytes{mountpoint="/", instance="app-1", job="quanly"}'
+        values: "5000000000x20"
+      - series: 'disk_total_bytes{mountpoint="/", instance="app-1", job="quanly"}'
+        values: "100000000000x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyDiaSapDay
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly, mountpoint: "/" }
+            exp_annotations:
+              summary: "Hệ tệp / trên app-1 còn dưới 10% trống"
+              description: >-
+                Đây là cảnh báo MẤT DỮ LIỆU, không phải cảnh báo hiệu năng: docker-compose.prod.yml ghi
+                rõ chế độ hỏng — đĩa đầy thì Postgres không ghi nổi WAL nữa. Nguồn tiêu đĩa đã biết:
+                log JSON của Docker (đã chặn ở 50MB/container), volume pgdata, và file tạm của đường
+                xuất Excel/PDF.
+              runbook: "docker-compose.prod.yml — x-logging; docs/operations/DISASTER_RECOVERY.md"
+
+  - interval: 1m
+    name: "Đĩa NHỎ nhưng còn 50% trống thì KHÔNG được kêu (chốt chống ngưỡng viết cứng theo byte)"
+    # Ổ 10GB còn 5GB trống. Nếu ai đó đổi quy tắc thành `disk_free_bytes < 10e9` cho "dễ đọc" thì
+    # bài này đỏ — đúng lúc, thay vì sau một đêm bị đánh thức oan.
+    input_series:
+      - series: 'disk_free_bytes{mountpoint="/", instance="app-1", job="quanly"}'
+        values: "5000000000x20"
+      - series: 'disk_total_bytes{mountpoint="/", instance="app-1", job="quanly"}'
+        values: "10000000000x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyDiaSapDay
+        exp_alerts: []
+
+  # ── 5xx: hành vi ở lưu lượng BẰNG KHÔNG ──────────────────────────────────
+  - interval: 1m
+    name: "Không có lưu lượng thì tỉ lệ 5xx KHÔNG được kêu (0/0)"
+    input_series:
+      - series: 'http_requests_total{status="200", job="quanly"}'
+        values: "100x20" # đứng yên = rate 0
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyTiLeLoi5xxCao
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Toàn bộ request là 5xx thì PHẢI kêu"
+    input_series:
+      - series: 'http_requests_total{status="500", job="quanly"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyTiLeLoi5xxCao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Trên 2% request trả 5xx (10 phút liên tục)"
+              description: >-
+                `clamp_min` ở mẫu số là có chủ ý: ban đêm lưu lượng có thể về 0 và phép chia 0/0 cho ra
+                NaN — quy tắc sẽ KHÔNG kêu đúng lúc mọi request đều hỏng nhưng chỉ có vài request.
+
+  # ── Worker chết: có job chờ nhưng không job nào chạy ─────────────────────
+  - interval: 1m
+    name: "Job chờ mà không job nào active → worker chết"
+    input_series:
+      - series: 'bullmq_jobs{queue="export", state="waiting"}'
+        values: "5x20"
+      - series: 'bullmq_jobs{queue="export", state="active"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongCoWorkerNao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Có job chờ nhưng KHÔNG job nào đang chạy — worker có thể đã chết"
+              description: >-
+                Deployment worker chạy `node dist/worker.js` TÁCH RIÊNG khỏi app. App vẫn phục vụ
+                request bình thường khi worker chết, nên không cảnh báo nào khác bắt được.
+              runbook: "infra/helm/quanly/templates/worker-deployment.yaml"
+
+  - interval: 1m
+    name: "Worker ĐANG chạy job thì KHÔNG được kêu"
+    input_series:
+      - series: 'bullmq_jobs{queue="export", state="waiting"}'
+        values: "5x20"
+      - series: 'bullmq_jobs{queue="export", state="active"}'
+        values: "2x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongCoWorkerNao
+        exp_alerts: []
+
+  # ── Hàng đợi xuất đầy: so với gauge, không so với hằng số ────────────────
+  - interval: 1m
+    name: "Độ sâu hàng đợi chạm trần → kêu"
+    input_series:
+      - series: 'export_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+      - series: 'export_max_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyHangDoiXuatDay
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "Hàng đợi chờ xuất file đã đầy trên app-1"
+              description: >-
+                Hàng đợi chờ có TRẦN (EXPORT_MAX_PENDING). Đầy nghĩa là yêu cầu xuất mới bị TỪ CHỐI
+                ngay, không phải xếp hàng — người dùng nhận lỗi chứ không phải chờ lâu.
+              runbook: "src/exportQueue.ts"
+
+  - interval: 1m
+    name: "Trần được NÂNG LÊN thì cảnh báo phải tự tắt (không viết cứng con số)"
+    # Chốt chống hồi quy: nếu ai đó thay `export_max_queue_depth` bằng một số cố định (vd `> 20`)
+    # thì bài này đỏ — vì ở đây trần là 50 và độ sâu 20 hoàn toàn bình thường.
+    input_series:
+      - series: 'export_queue_depth{instance="app-1", job="quanly"}'
+        values: "20x20"
+      - series: 'export_max_queue_depth{instance="app-1", job="quanly"}'
+        values: "50x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: QuanlyHangDoiXuatDay
+        exp_alerts: []
+
+  # ── Mất sạch target: `up == 0` KHÔNG bắt được ca này ─────────────────────
+  - interval: 1m
+    name: "Không còn chuỗi up nào → absent() phải kêu"
+    input_series:
+      - series: 'http_requests_total{status="200", job="quanly"}'
+        values: "1x30" # có số liệu khác, nhưng KHÔNG có `up`
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyKhongConTargetNao
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Không còn target QuanLY nào trong Prometheus"
+              description: >-
+                Không có chuỗi `up{job=~"quanly.*"}` nào tồn tại. Khác hẳn "scrape hỏng": ở đây
+                Prometheus không biết là CÓ thứ cần scrape. Thường do ServiceMonitor bị xoá, nhãn
+                release không khớp, hoặc đổi tên job.
+              runbook: "infra/helm/quanly/templates/sa.yaml — ServiceMonitor"
+      - eval_time: 15m
+        alertname: QuanlyMetricsKhongScrapeDuoc
+        exp_alerts: [] # không có target thì `up == 0` im — đó chính là lý do cần absent()
+
+  # ── Crash loop ───────────────────────────────────────────────────────────
+  - interval: 1m
+    name: "Tiến trình liên tục trẻ hơn 10 phút → crash loop"
+    input_series:
+      # Mốc khởi động NHÍCH THEO thời gian: mỗi phút lại là một tiến trình mới → tuổi luôn ~1 phút.
+      - series: 'process_start_time_seconds{instance="app-1", job="quanly"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QuanlyTienTrinhKhoiDongLaiLienTuc
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "app-1 khởi động lại liên tục"
+              description: >-
+                Tuổi tiến trình liên tục dưới 10 phút trong suốt 20 phút. Nguyên nhân đã gặp: lệnh khởi
+                động trỏ vào file không tồn tại, hoặc src/config.ts `process.exit(1)` vì thiếu biến bắt
+                buộc ở production (SESSION_SECRET/JWT_SECRET/APP_BASE_URL/MFA_ENC_KEY).
+              runbook: "src/config.ts — các chốt chỉ bật ở production"
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # BẢY QUY TẮC BỊ BỎ QUÊN
+  #
+  # Bản đầu của file này chỉ phủ 10/17 quy tắc, và không có gì cho biết điều đó — `promtool test
+  # rules` chỉ chạy những bài BẠN VIẾT, nó không bao giờ nói "còn quy tắc chưa ai kiểm". Bảy quy tắc
+  # dưới đây vì thế nằm trong repo suốt với đúng mức bảo đảm mà `check rules` cho được: "PromQL này
+  # phân tích được" — tức chưa ai chứng minh chúng kêu đúng lúc.
+  #
+  # `tests/xf-observability-gaps.test.js` nay đối chiếu danh sách `- alert:` của alerts.yaml với
+  # danh sách `alertname:` ở đây và ĐỎ nếu còn sót, nên khoảng trống này không quay lại được nữa.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  - interval: 1m
+    name: "P95 độ trễ vượt 2s → kêu"
+    input_series:
+      # Toàn bộ khối lượng rơi vào bucket (1s, 2.5s] → p95 nội suy ra ~2,43s.
+      - series: 'http_request_duration_seconds_bucket{le="1", job="quanly"}'
+        values: "0x40"
+      - series: 'http_request_duration_seconds_bucket{le="2.5", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="10", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="+Inf", job="quanly"}'
+        values: "0+10x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyDoTreP95Cao
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "P95 độ trễ HTTP vượt 2 giây"
+              description: >-
+                Bucket cao nhất của histogram này là 10 giây (src/observability.ts). P95 vượt 2s thường
+                là cạn pool CSDL (DB_POOL_MAX) hoặc một truy vấn quét bảng.
+              runbook: "src/db.ts — chú thích về DB_POOL_MAX"
+
+  - interval: 1m
+    name: "Mọi request dưới 1 giây thì KHÔNG được kêu"
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{le="1", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="2.5", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="10", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="+Inf", job="quanly"}'
+        values: "0+10x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyDoTreP95Cao
+        exp_alerts: []
+
+  - interval: 1m
+    name: "PUBLISH SSE qua Redis thất bại đều đặn → kêu"
+    input_series:
+      - series: 'sse_backplane_errors_total{op="publish", instance="app-1", job="quanly"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlySsePublishThatBai
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "PUBLISH sự kiện SSE qua Redis đang thất bại"
+              description: >-
+                Redis pub/sub KHÔNG có bộ đệm: một sự kiện phát lúc không publish được là MẤT HẲN, không
+                có cách phát lại. Mỗi lần tăng là một lần màn hình của ai đó không cập nhật.
+
+  - interval: 1m
+    name: "Bộ đếm lỗi PUBLISH đứng yên (lỗi cũ, đã hết) thì KHÔNG được kêu"
+    # Đây là gauge-hoá của một counter: giá trị KHÁC 0 nhưng KHÔNG TĂNG. Viết quy tắc thành
+    # `sse_backplane_errors_total > 0` thay vì `rate(...) > 0` là kêu mãi mãi sau sự cố đầu tiên.
+    input_series:
+      - series: 'sse_backplane_errors_total{op="publish", instance="app-1", job="quanly"}'
+        values: "7x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlySsePublishThatBai
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Yêu cầu xuất file bị từ chối → kêu, kèm LÝ DO"
+    input_series:
+      - series: 'export_rejected_total{reason="queue_full", instance="app-1", job="quanly"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyXuatFileBiTuChoi
+        exp_alerts:
+          - exp_labels: { severity: warning, reason: queue_full }
+            exp_annotations:
+              summary: "Yêu cầu xuất file đang bị từ chối (lý do: queue_full)"
+              description: "Mỗi lần tăng là một người dùng bấm Xuất và không nhận được file."
+
+  - interval: 1m
+    name: "Mọi worker xuất file bận liên tục → kêu"
+    input_series:
+      - series: 'export_active_workers{instance="app-1", job="quanly"}'
+        values: "4x30"
+      - series: 'export_max_active_workers{instance="app-1", job="quanly"}'
+        values: "4x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyWorkerXuatCangCung
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "Mọi worker xuất file bận liên tục 15 phút"
+              description: >-
+                Chưa phải sự cố, nhưng là ngưỡng trước khi `QuanlyHangDoiXuatDay` nổ. Cân nhắc tăng
+                EXPORT_MAX_ACTIVE hoặc thêm replica worker.
+
+  - interval: 1m
+    name: "Nâng EXPORT_MAX_ACTIVE thì cảnh báo worker phải tự tắt"
+    input_series:
+      - series: 'export_active_workers{instance="app-1", job="quanly"}'
+        values: "4x30"
+      - series: 'export_max_active_workers{instance="app-1", job="quanly"}'
+        values: "8x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyWorkerXuatCangCung
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Job chờ vượt 100 → kêu, tách theo hàng đợi"
+    input_series:
+      - series: 'bullmq_jobs{queue="email", state="waiting"}'
+        values: "150x30"
+      # Hàng đợi thứ hai DƯỚI ngưỡng: chốt rằng quy tắc gom `by (queue)` chứ không gom tất cả lại
+      # (gộp chung thì 150 + 5 vẫn nổ và cảnh báo không chỉ được hàng đợi nào).
+      - series: 'bullmq_jobs{queue="webhook", state="waiting"}'
+        values: "5x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyJobNenChatDong
+        exp_alerts:
+          - exp_labels: { severity: warning, queue: email }
+            exp_annotations:
+              summary: "Hàng đợi email còn 150 job đang chờ"
+              description: >-
+                Trước khi có gauge này, worker chết thì job chất đống trong Redis mà /metrics im lặng
+                hoàn toàn — dấu hiệu đầu tiên là người dùng gọi điện.
+              runbook: "src/queue.ts — bullQueueDepth"
+
+  - interval: 1m
+    name: "Có job THẤT BẠI tồn đọng → kêu"
+    input_series:
+      - series: 'bullmq_jobs{queue="webhook", state="failed"}'
+        values: "3x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyJobNenThatBai
+        exp_alerts:
+          - exp_labels: { severity: warning, queue: webhook }
+            exp_annotations:
+              summary: "Hàng đợi webhook có 3 job THẤT BẠI"
+              description: >-
+                Job thất bại nằm lại trong Redis chứ không tự biến mất. Đây là gauge ĐẾM TỒN, không
+                phải tốc độ — số không tự về 0 cho tới khi ai đó dọn hoặc thử lại.
+
+  - interval: 1m
+    name: "Event loop trễ P99 vượt 0,5s → kêu"
+    input_series:
+      - series: 'nodejs_eventloop_lag_p99_seconds{instance="app-1", job="quanly"}'
+        values: "0.8x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyEventLoopNgheN
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "Event loop trễ P99 trên 0,5 giây"
+              description: >-
+                Node chạy MỘT luồng: event loop nghẽn thì MỌI request chậm, kể cả /readyz. Nguyên nhân
+                đã gặp trong repo này là công việc nặng chạy nội tuyến thay vì đẩy sang worker thread.
+              runbook: "src/exportQueue.ts, src/importWorker.ts"
+
+  - interval: 1m
+    name: "Event loop khoẻ thì KHÔNG được kêu"
+    input_series:
+      - series: 'nodejs_eventloop_lag_p99_seconds{instance="app-1", job="quanly"}'
+        values: "0.02x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyEventLoopNgheN
+        exp_alerts: []
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # HAI LỖI NGƯỢC NHAU, CÙNG MỘT GỐC: metric sức khoẻ nói sai khi tính năng bị
+  # TẮT hoặc KHÔNG ĐƯỢC CẤU HÌNH.
+  #
+  #   [1] Kêu OAN  — `HEALTH_METRICS=0` từng vẫn phát `db_up 0` (gauge không nhãn được prom-client
+  #                  khởi tạo sẵn ở 0), nên quy tắc `db_up == 0` kêu CRITICAL suốt trên một Postgres
+  #                  khoẻ mạnh. Đã đo bằng `HEALTH_METRICS=0 node --import tsx` + `registry.metrics()`.
+  #   [2] KHÔNG BAO GIỜ kêu — `QuanlyRedisChet` gác trên `redis_configured == 1`, nên production
+  #                  QUÊN REDIS_URL (redis_configured = 0) là ca duy nhất nó không bắt được.
+  #
+  # Hai bài dưới đây khoá cả hai chiều. Chúng KHÔNG thừa với bài "Cố ý chạy KHÔNG Redis" ở trên: bài
+  # đó nói về chuỗi CÓ mặt và bằng 0, bài này nói về chuỗi KHÔNG TỒN TẠI — promtool phân biệt được,
+  # còn `promtool check rules` thì mù với cả hai.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  - interval: 1m
+    name: "HEALTH_METRICS=0: không còn chuỗi db_up/redis_up nào → KHÔNG cảnh báo nào được kêu oan"
+    # Đây là hình dạng THẬT của /metrics sau bản vá khi tắt phép đo: tiến trình vẫn scrape được
+    # (`up` = 1) nhưng db_up / redis_up / redis_configured / disk_* KHÔNG được đăng ký nên không có
+    # chuỗi nào. Nếu ai đó trả `registers: [registry]` về vô điều kiện, bài này KHÔNG đỏ (vì
+    # input_series ở đây do ta viết) — nên chốt thật nằm ở phía mã nguồn; bài này khoá phía QUY TẮC:
+    # cấm ai đó "sửa" quy tắc thành `db_up != 1` hay `absent(db_up)`, cả hai đều kêu oan ở ca này.
+    input_series:
+      - series: 'up{instance="app-1", job="quanly"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyCsdlKhongToiDuoc
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyRedisChet
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyDiaSapDay
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: QuanlyMetricsKhongScrapeDuoc
+        exp_alerts: [] # `up` = 1: tiến trình vẫn trả /metrics bình thường.
+      - eval_time: 20m
+        alertname: QuanlyKhongConTargetNao
+        exp_alerts: [] # vẫn còn target — mất tín hiệu ở đây là do người vận hành CỐ Ý tắt.
+
+  - interval: 1m
+    name: "Production QUÊN REDIS_URL (và SMTP_HOST) → PHẢI kêu, mỗi biến một cảnh báo"
+    # Ca mà `QuanlyRedisChet` tự loại trừ: redis_configured = 0 nên vế `== 1` của nó không bao giờ
+    # đúng. Đối chứng ngay bên dưới chứng minh điều đó, và chứng minh luôn rằng quy tắc mới không
+    # phải bản trùng lặp của quy tắc cũ.
+    input_series:
+      - series: 'config_missing{key="REDIS_URL", instance="app-1", job="quanly"}'
+        values: "1x40"
+      - series: 'config_missing{key="SMTP_HOST", instance="app-1", job="quanly"}'
+        values: "1x40"
+      - series: 'redis_configured{instance="app-1", job="quanly"}'
+        values: "0x40"
+      - series: 'redis_up{instance="app-1", job="quanly"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly, key: REDIS_URL }
+            exp_annotations:
+              summary: "app-1 chạy production mà THIẾU REDIS_URL"
+              description: >-
+                Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+                REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+                nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+                S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+                LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+              runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+          - exp_labels: { severity: warning, instance: app-1, job: quanly, key: SMTP_HOST }
+            exp_annotations:
+              summary: "app-1 chạy production mà THIẾU SMTP_HOST"
+              description: >-
+                Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+                REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+                nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+                S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+                LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+              runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+      - eval_time: 35m
+        alertname: QuanlyRedisChet
+        exp_alerts: [] # ĐỐI CHỨNG: đây đúng là ca quy tắc cũ mù. Không có quy tắc mới thì KHÔNG AI kêu.
+
+  - interval: 1m
+    name: "Production cấu hình ĐỦ (config_missing = 0) thì KHÔNG được kêu"
+    # Vế chống-kêu-oan. Viết quy tắc thành `config_missing` trần (không `== 1`) là bài này đỏ ngay:
+    # một chuỗi bằng 0 vẫn là một mẫu tồn tại, và cảnh báo sẽ kêu ở MỌI bản triển khai đúng.
+    input_series:
+      - series: 'config_missing{key="REDIS_URL", instance="app-1", job="quanly"}'
+        values: "0x40"
+      - series: 'config_missing{key="PII_ENC_KEY", instance="app-1", job="quanly"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: QuanlyPiiGhiTho
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Thiếu PII_ENC_KEY → kêu CRITICAL riêng, và KHÔNG kêu chồng ở quy tắc chung"
+    # Bộ lọc `key!="PII_ENC_KEY"` của quy tắc chung là thứ giữ cho "CCCD/lương ghi thô" không bị
+    # chôn chung mức warning với "thư mời không gửi được". Bỏ bộ lọc đó là bài này đỏ.
+    input_series:
+      - series: 'config_missing{key="PII_ENC_KEY", instance="app-1", job="quanly"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: QuanlyPiiGhiTho
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: app-1, job: quanly, key: PII_ENC_KEY }
+            exp_annotations:
+              summary: "app-1 ghi PII THÔ — PII_ENC_KEY chưa đặt ở production"
+              description: >-
+                CCCD, số tài khoản và lương đang được ghi KHÔNG MÃ HOÁ vào CSDL. Mỗi bản dump, mỗi bản
+                sao lưu, mỗi quyền đọc CSDL đều lộ nguyên các trường này — và dữ liệu đã ghi thô thì
+                đặt khoá sau KHÔNG tự mã hoá ngược, phải chạy `npm run pii:backfill`.
+              runbook: "docs/operations/DISASTER_RECOVERY.md; scripts/migration/pii-backfill.mjs"
+      - eval_time: 35m
+        alertname: QuanlyThieuCauHinhBatBuoc
+        exp_alerts: []

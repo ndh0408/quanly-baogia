@@ -1,14 +1,40 @@
+# ⚠️ WORKFLOW NÀY KHÔNG CHẠY. Tài khoản GitHub của dự án không bật Actions, nên KHÔNG có lượt
+# chạy nào cả — không phải "thỉnh thoảng đỏ", mà là KHÔNG BAO GIỜ CHẠY.
+#
+# Vì thế đừng bao giờ nói "cứ đẩy lên, CI sẽ bắt". Ở repo này câu đó luôn sai. File này là TÀI LIỆU
+# về những cổng cần chạy; cổng THẬT SỰ chạy chỉ có hai, và cả hai đều phải gõ tay:
+#
+#   npm run verify        → scripts/verify-local.sh — chạy TẤT CẢ những gì khai dưới đây, ngay trên
+#                           máy đang ngồi, và đặt REQUIRE_DB_TESTS=1 nên bài nào thiếu hạ tầng thì
+#                           ĐỎ chứ không lặng lẽ "skipped" (một dòng skipped trông y hệt một dòng
+#                           xanh trong phần tổng kết — đó là cách một bộ test chết mà không ai biết).
+#   bash test-on-dev.sh   → chạy trên hạ tầng Docker của VM dev, khi máy local không có
+#                           Postgres/Redis/MinIO.
+#
+# Giữ file này ĐỒNG BỘ với scripts/verify-local.sh: thêm một bước ở đây mà quên thêm ở kia là thêm
+# một cổng không ai chạy.
+
 name: CI
 
 on:
   push:
-    branches: [master, main, develop, "harden/**", "feat/**", "fix/**", "chore/**"]
+    branches: [master, main, develop, "harden/**", "feat/**", "fix/**", "chore/**", "claude/**"]
   pull_request:
     branches: [master, main, develop]
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+# Mặc định chỉ-đọc; job nào cần đẩy image thì tự khai thêm (đặc quyền tối thiểu).
+permissions:
+  contents: read
+
+# MỌI `uses:` dưới đây ghim SHA 40 ký tự, kèm chú thích phiên bản để người đọc biết đang ở đâu.
+# Tag của action là DI ĐỘNG: chủ repo (hoặc kẻ chiếm được nó) trỏ lại `v4` sang commit khác là mã
+# đó chạy trong runner của ta với GITHUB_TOKEN trong tay, không cần bất kỳ thay đổi nào ở repo này.
+# Cùng lý do đã khiến gitleaks/semgrep được ghim theo tag phiên bản ở job `security`.
+# Dependabot đã bật cho github-actions (.github/dependabot.yml) nên SHA vẫn được bump tự động.
 
 jobs:
   test:
@@ -38,6 +64,23 @@ jobs:
           --health-timeout 3s
           --health-retries 5
 
+      # KHO OBJECT cho test. Không có nó, tests/personnel-fields.test.js (ảnh chứng từ thanh toán)
+      # nhận 503 "Chưa cấu hình lưu trữ tệp" và CI ĐỎ — nghĩa là toàn bộ đường ghi/đọc chứng từ
+      # hiện KHÔNG được kiểm ở CI. Cách sửa đúng là cấp kho thật cho test chạy, không phải cho
+      # test bỏ qua.
+      minio:
+        image: bitnami/minio:2024
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: quanly-test
+        ports: ["9000:9000"]
+        options: >-
+          --health-cmd "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
     env:
       DATABASE_URL: postgresql://quanly:quanly_pwd@localhost:5432/quanly_test?schema=public
       REDIS_URL: redis://localhost:6379
@@ -47,11 +90,20 @@ jobs:
       # is missing) instead of silently skipping — closes the "green but untested
       # authz" gap.
       REQUIRE_DB_TESTS: "1"
+      # Kho object (service minio ở trên) — đường chứng từ thanh toán mới thật sự chạy ở CI.
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: quanly-test
+      S3_FORCE_PATH_STYLE: "true"
+      # Khoá mã hoá PII dùng riêng cho CI — giá trị vứt đi, KHÔNG phải bí mật thật. Có nó thì test
+      # chạy nhánh ĐÃ BẬT mã hoá, thay vì chỉ chạy nhánh "chưa cấu hình".
+      PII_ENC_KEY: ci-only-throwaway-pii-key-not-a-real-secret
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: "npm"
@@ -62,26 +114,84 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Gác MA TRẬN PHÂN QUYỀN: sinh danh sách endpoint từ mã nguồn rồi đối chiếu con số công bố
-      # trong AUTHZ_MATRIX.md. Thêm route mà quên soát quyền là đỏ pipeline ngay.
-      # Có lý do cụ thể: README từng ghi 141 endpoint, ma trận ghi 133, con số thật là 138 — cả hai
-      # đều đếm tay nên cả hai đều trôi.
-      - name: Endpoint inventory khớp ma trận phân quyền
-        run: node scripts/endpoint-inventory.mjs --check
+      # Gác ĐỊNH DẠNG — CỐ Ý chỉ soi {json,css,yml,yaml}, KHÔNG soi .ts/.tsx/.js.
+      # Đây đúng bằng phạm vi mà lint-staged.config.mjs đang áp lúc commit. Repo có chủ trương rõ:
+      # không để prettier đụng vào TS/JS vì house style dùng one-liner có chủ đích và prettier sẽ
+      # bung dòng ồ ạt (diff khổng lồ + conflict với nhánh song song). Gác rộng hơn lint-staged thì
+      # CI sẽ đỏ trên đúng những file mà pre-commit hook vừa bảo là hợp lệ.
+      - name: Format check (json/css/yaml — khớp lint-staged)
+        run: npx prettier --check "**/*.{json,css,yml,yaml}"
 
-      # Gác KIỂU: backend (.js + .ts trộn) chạy tsx runtime nên lỗi type chỉ lộ lúc deploy.
-      # tsc --noEmit chặn .ts sai kiểu trước khi merge. (Script "typecheck" đã có sẵn.)
+      # BA phép kiểm KHÁC NHAU, đừng gộp làm một trong đầu:
+      #   --check        so TỪNG DÒNG: mỗi endpoint trong mã phải có một dòng trong bảng ma trận của
+      #                  docs/product/ROLES_PERMISSIONS.md, và ngược lại không dòng chết. Cộng thêm
+      #                  so con số công bố ở ROLES_PERMISSIONS.md và README.md (README từng ghi 141,
+      #                  ma trận ghi 133, mã có 138 — cả ba đếm tay nên cả ba trôi).
+      #                  ĐÂY là phép kiểm chặn được "thêm route không ai soát rồi nhớ +1 con số":
+      #                  muốn xanh phải VIẾT một dòng ma trận, tức phải điền cột QUYỀN/P.VI/T.NGUYÊN.
+      #   --check-guards đỏ khi một endpoint không có middleware gác nào (cấp route lẫn cấp router),
+      #                  trừ danh sách miễn trừ tường minh trong script. ĐÃ ĐO: 84/137 endpoint có
+      #                  guard cấp route RỖNG và chỉ dựa vào guard cấp router, nên nằm NGOÀI tầm phép
+      #                  kiểm này — nó chỉ thật sự gác 4 NGUỒN không có guard cấp router: src/app.ts
+      #                  (chỉ có `app.use("/api/", …)` dạng có đường dẫn, không tính là guard cả
+      #                  router) cộng auth/jobs/stream. Giữ vì vẫn có giá trị ở 4 nguồn đó, nhưng
+      #                  đừng tính nó là phần bù.
+      #   --check-write-authz  đỏ khi một endpoint GHI (POST/PUT/PATCH/DELETE) không có BẤT KỲ chỗ nào
+      #                  khai ai được gọi: không middleware phân quyền (requireAuth KHÔNG tính — nó chỉ
+      #                  trả lời "anh là ai"), VÀ cột QUYỀN của dòng ma trận bỏ trống `—`. Đây là phần
+      #                  mà --check-guards để lọt: 16/23 file route mở đầu bằng `router.use(requireAuth)`
+      #                  nên route GHI mới thêm vào đó luôn xanh. Ngược lại,
+      #                  4 file (admin/audit/users/webhooks) gác bằng `router.use(requirePermission(...))`
+      #                  — đã khai quyền ngay ở cấp router nên KHÔNG nằm trong vùng mù này;
+      #                  analytics và export có CẢ hai.
+      #                  ĐÃ ĐO: 78 endpoint GHI, 46 không có middleware phân quyền, 17 miễn trừ
+      #                  tự-phục-vụ (đăng nhập, MFA/mật khẩu của chính mình…) khai tường minh trong script.
+      #                  Ba con số file ở trên do tests/w4-route-guard-counts.test.js đo lại và chốt.
+      # Cả ba cộng lại vẫn KHÔNG khẳng định được quyền gác là ĐÚNG — chỉ khẳng định có gác, có trong
+      # bảng, và (với route GHI) có KHAI ra quyền ở đâu đó. Nhãn cũ ("quên soát quyền là đỏ ngay")
+      # hứa nhiều hơn thế; đừng đặt lại như vậy.
+      - name: Endpoint inventory — khớp ma trận + không route trống guard + route GHI phải khai quyền
+        run: |
+          node scripts/ci/endpoint-inventory.mjs --check
+          node scripts/ci/endpoint-inventory.mjs --check-guards
+          node scripts/ci/endpoint-inventory.mjs --check-write-authz
+
+      # Gác SỐ LIỆU README. README từng ghi "29 Prisma models" ở dòng tóm tắt và
+      # "Prisma 7 (28 models)" trong bảng Stack ngay bên dưới — hai con số mâu thuẫn trong
+      # cùng một file — cộng thêm sai số file test và sai tên thư viện TOTP. Sinh từ mã nguồn
+      # rồi đối chiếu, giống hệt cách đã làm với số endpoint.
+      - name: Số liệu README khớp mã nguồn
+        run: node scripts/ci/repo-stats.mjs --check
+
+      # Gác KIỂU: backend chạy TypeScript nên lỗi type chỉ lộ lúc deploy nếu không chặn ở đây.
       - name: Typecheck (backend)
         run: npm run typecheck
 
-      # Gác BUILD frontend React (web/): tsc --noEmit + vite build. Trước đây không chạy ở CI
-      # nên app React có thể vỡ build mà PR vẫn xanh.
+      # Gác BUILD BACKEND. Production KHÔNG còn chạy qua tsx — image chạy `node dist/server.js`.
+      # Nếu tsc không phát sinh được dist/ thì image không boot; phải đỏ Ở ĐÂY chứ không phải lúc
+      # pod khởi động. Kiểm cả ba entrypoint (server / worker / worker thread xuất file).
+      - name: Build backend (TypeScript → dist/)
+        run: |
+          npm run build
+          test -f dist/server.js
+          test -f dist/worker.js
+          test -f dist/exportWorker.js
+
+      # Gác BUILD frontend React (web/): tsc --noEmit + vite build.
       - name: Typecheck + build web (React)
         run: npm run web:build
 
       # Test đơn vị frontend (Vitest) — gồm vector vàng toán tiền (shared/quote-math).
       - name: Web unit tests (Vitest)
         run: npm run web:test
+
+      # Gác SQL HUỶ DỮ LIỆU. Gác trôi schema (tests/vdb-schema-index-drift.test.js) chạy
+      # `prisma migrate diff` nên một `DROP TABLE`/`DROP COLUMN` viết trong migration là HỢP LỆ với
+      # nó: schema và CSDL vẫn khớp, chỉ dữ liệu là mất. Bước này đọc chính nội dung .sql (đã bỏ
+      # chú thích ROLLBACK) và đỏ nếu migration huỷ dữ liệu chưa được khai kèm lý do trong
+      # scripts/ci/check-destructive-sql.mjs. ĐÃ ĐO: 4 migration huỷ dữ liệu đang có trong repo.
+      - name: SQL huỷ dữ liệu phải được khai tường minh
+        run: node scripts/ci/check-destructive-sql.mjs --check
 
       - name: Prisma generate + migrate
         run: |
@@ -91,26 +201,110 @@ jobs:
       - name: Unit + integration tests (with coverage)
         run: npm run test:coverage
 
-      - name: Dependency audit (high+) — gate
-        run: npm audit --omit=dev --audit-level=high
+      # SMOKE TEST ARTIFACT THẬT. Chạy ĐÚNG lệnh mà Docker/Compose/Helm/k8s sẽ chạy
+      # (`node dist/server.js`, `node dist/worker.js`) ở NODE_ENV=production rồi gọi các endpoint
+      # sức khoẻ. Đây là bước bắt đúng lớp lỗi đã từng làm Helm chết vòng lặp: lệnh khởi động trỏ
+      # vào file không tồn tại, hoặc đường dẫn tài nguyên tĩnh sai sau khi biên dịch.
+      - name: Smoke test artifact production (dist/)
+        env:
+          NODE_ENV: production
+          PORT: "3999"
+          APP_BASE_URL: http://localhost:3999
+          SESSION_SECRET: smoke-session-secret-long-enough-for-the-validator
+          JWT_SECRET: smoke-jwt-secret-different-from-session-and-long-enough
+          MFA_ENC_KEY: smoke-mfa-encryption-key-for-ci-only
+          METRICS_TOKEN: smoke-metrics-token
+        run: bash scripts/ci/smoke-dist.sh
+
+  helm:
+    name: Helm • k8s manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.16.3
+
+      # Chart Helm TỪNG render lệnh khởi động `node src/server.js` — file không có trong image, mọi
+      # pod chết vòng lặp, và không bước CI nào phát hiện vì chart chưa bao giờ được render ở CI.
+      - name: helm lint
+        run: helm lint infra/helm/quanly --set secrets.SESSION_SECRET=ci-session-secret-32-chars-minimum-value --set postgres.password=ci-only-pg-pass --set redis.password=ci-only-redis-pass
+
+      - name: helm template (render đầy đủ)
+        run: |
+          helm template quanly infra/helm/quanly \
+            --set secrets.SESSION_SECRET=ci-session-secret-32-chars-minimum-value \
+            --set postgres.password=ci-only-pg-pass --set redis.password=ci-only-redis-pass \
+            --set image.tag=ci-test > /tmp/helm-render.yaml
+          wc -l /tmp/helm-render.yaml
+
+      # Gác BẤT BIẾN ẢNH: chart phải TỪ CHỐI deploy từ tag di động `latest`.
+      - name: helm từ chối image.tag=latest
+        run: |
+          if helm template quanly infra/helm/quanly \
+               --set secrets.SESSION_SECRET=ci-session-secret-32-chars-minimum-value \
+               --set postgres.password=ci-only-pg-pass --set redis.password=ci-only-redis-pass \
+               --set image.tag=latest >/dev/null 2>&1; then
+            echo "::error::chart vẫn render với image.tag=latest — mất tính bất biến của bản phát hành"
+            exit 1
+          fi
+          echo "OK: chart chặn tag latest"
+
+      # Gác MẬT KHẨU KHO DỮ LIỆU NHÚNG: chart phải TỪ CHỐI render khi chưa đặt mật khẩu Postgres/Redis.
+      # Trước đây values.yaml mang sẵn placeholder HỢP LỆ (`CHANGE_ME_INTERNAL`), nên một bản cài quên
+      # đổi vẫn lên và chạy với mật khẩu ai đọc repo cũng biết. Gác giống hệt cách đang gác image.tag=latest.
+      - name: helm từ chối mật khẩu Postgres/Redis bỏ trống
+        run: |
+          for k in postgres redis; do
+            if helm template quanly infra/helm/quanly \
+                 --set secrets.SESSION_SECRET=ci-session-secret-32-chars-minimum-value \
+                 --set image.tag=ci-test \
+                 --set "$( [ "$k" = postgres ] && echo redis.password=x || echo postgres.password=x )" >/dev/null 2>&1; then
+              echo "::error::chart vẫn render khi thiếu $k.password"
+              exit 1
+            fi
+          done
+          echo "OK: chart bắt buộc đặt mật khẩu cho Postgres và Redis nhúng"
+
+      # Gác KHỚP LỆNH KHỞI ĐỘNG: mọi manifest/compose/chart phải gọi cùng artifact với Dockerfile.
+      - name: Lệnh khởi động khớp Dockerfile CMD
+        run: bash scripts/ci/check-runtime-command.sh
+
+      # Tải về FILE rồi đối chiếu checksum, thay vì `curl | tar xz` chạy thẳng. `curl` không có -f
+      # nên một trang lỗi/chuyển hướng của upstream cũng đi tiếp, và nếu tài sản phát hành bị thay
+      # thì runner chạy nhị phân lạ mà không ai biết. Bổ sung -f (fail trên HTTP lỗi) + sha256sum -c.
+      - name: Kubeconform (validate schema k8s)
+        run: |
+          curl -sSLf -o /tmp/kc.tgz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kc.tgz" | sha256sum -c -
+          tar xzf /tmp/kc.tgz -C /tmp kubeconform
+          /tmp/kubeconform -strict -ignore-missing-schemas -summary /tmp/helm-render.yaml
+          /tmp/kubeconform -strict -ignore-missing-schemas -summary \
+            infra/k8s/app.yaml infra/k8s/worker.yaml infra/k8s/redis.yaml \
+            infra/k8s/postgres.yaml infra/k8s/configmap.yaml infra/k8s/ingress.yaml \
+            infra/k8s/networkpolicy.yaml infra/k8s/namespace.yaml infra/k8s/backup-cronjob.yaml \
+            infra/k8s/backup-objects-cronjob.yaml infra/k8s/pdb.yaml
 
   security:
     name: Security scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # gitleaks needs full history to scan all commits
 
-      # Secret scanning across the whole git history (no org license needed via Docker).
+      # Image ghim theo TAG PHIÊN BẢN, không dùng `latest`: quét bảo mật mà chạy trên một image có
+      # thể đổi dưới chân mình thì kết quả không lặp lại được, và một bản upstream hỏng làm đỏ CI
+      # trên đúng những PR không đụng gì tới nó.
       - name: Secret scan (gitleaks)
         run: |
-          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 \
             detect --source=/repo --redact --no-banner --exit-code 1
 
       # Vulnerabilities + misconfig + secrets in the working tree.
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -121,26 +315,79 @@ jobs:
           # VM dev — thiếu cờ này thì miễn trừ không có tác dụng và job đỏ vì đúng một false positive).
           trivyignores: .trivyignore.yaml
 
-      # SAST. Trước đây CI KHÔNG có bước phân tích mã tĩnh nào: npm audit chỉ soi thư viện,
-      # gitleaks soi bí mật, trivy soi hạ tầng — không ai đọc LOGIC của mình. Semgrep OSS chạy cục bộ
-      # trong container, dùng ruleset miễn phí (không cần tài khoản/không gửi mã ra ngoài).
-      # Chỉ gác ở mức ERROR để không chặn merge vì gợi ý phong cách.
-      # Bỏ qua mã của nhà cung cấp (BMAD/bundle build) — không phải mã dự án.
+      # SAST. npm audit chỉ soi thư viện, gitleaks soi bí mật, trivy soi hạ tầng — không ai đọc
+      # LOGIC của mình. Semgrep OSS chạy cục bộ trong container, ruleset miễn phí (không cần tài
+      # khoản, không gửi mã ra ngoài). Chỉ gác ở mức ERROR để không chặn merge vì gợi ý phong cách.
       - name: SAST (Semgrep OSS)
         run: |
-          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:1.97.0 \
             semgrep scan \
               --config p/javascript --config p/typescript \
               --config p/nodejs --config p/expressjs --config p/react \
               --config p/secrets --config p/owasp-top-ten \
               --exclude node_modules --exclude _bmad --exclude _bmad-output \
-              --exclude .claude --exclude public/app2 --exclude coverage \
+              --exclude .claude --exclude public/app2 --exclude coverage --exclude dist \
               --severity ERROR --error --metrics=off
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # KHÔNG kéo devDependencies về đây. Job này chỉ chạy `npm audit --omit=dev` ngay bên dưới —
+      # tức bỏ qua đúng cái nhóm vừa tải. Đo trên cây làm việc: `du -sh node_modules/@openai/*` =
+      # 336M codex-linux-x64 + 6.3M codex-security + 100K codex-sdk + 24K codex, cả bốn đều được
+      # package-lock.json đánh dấu `"dev": true` (không gói production nào chạm tới).
+      # Job `test` thì VẪN cần devDeps thật (vitest/eslint/tsc) nên giữ nguyên `npm ci` ở đó.
+      - name: Install (cho npm audit — chỉ phụ thuộc production)
+        run: npm ci --omit=dev
+
+      - name: Dependency audit (high+) — gate
+        run: npm audit --omit=dev --audit-level=high
+
+  # Dockerfile TỪNG chỉ được dựng khi push vào master (job build-image bên dưới), nên một PR làm hỏng
+  # Dockerfile vẫn xanh và chỉ vỡ SAU khi merge. Job này dựng image ở MỌI sự kiện — không có `if:` —
+  # rồi chạy đúng bộ smoke test và quét lỗ hổng như đường phát hành, nhưng KHÔNG đẩy đi đâu.
+  docker-build:
+    name: Docker build • smoke • scan (mọi nhánh + PR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Dựng image (KHÔNG đẩy)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: false
+          load: true # nạp vào docker cục bộ để smoke test + trivy dùng được
+          tags: quanly-app:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image vừa dựng
+        env:
+          IMAGE: quanly-app:pr
+        run: bash scripts/ci/smoke-image.sh
+
+      # Trivy `scan-type: fs` ở job security chỉ soi cây làm việc — nó KHÔNG thấy các gói OS mà
+      # Dockerfile `apk add` (openssl, libc6-compat, tini, postgresql16-client, font-dejavu) lẫn
+      # tầng nền node:22-alpine. Đúng chỗ CVE nghiêm trọng hay nằm.
+      - name: Quét lỗ hổng IMAGE (trivy)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          scan-type: image
+          image-ref: quanly-app:pr
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
 
   build-image:
     name: Build Docker image
     runs-on: ubuntu-latest
-    needs: [test, security]
+    needs: [test, security, helm, docker-build]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
 
     permissions:
@@ -148,26 +395,32 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
+            # CHỈ tag BẤT BIẾN — đúng MỘT dòng, và đó là chủ ý.
+            # Bỏ `latest` là chưa đủ: `type=ref,event=branch` cũng là tag DI ĐỘNG. Job này chỉ chạy
+            # trên master/main (xem `if:` của job), nên nó đẩy đúng một tag `:master` bị ghi đè sau
+            # mỗi lần merge — hai pod cùng ReplicaSet kéo hai bản mã khác nhau, và rollback không
+            # còn gì để quay về. Chốt Helm (_helpers.tpl) chỉ từ chối ĐÚNG CHUỖI "latest" nên
+            # `--set image.tag=master` lọt qua; cái bẫy chỉ đổi tên chứ không mất đi.
+            # Deploy đi bằng DIGEST — xem bước "Ghi lại digest bất biến của bản phát hành" bên dưới.
+            type=sha,format=long
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        id: push
         with:
           context: .
           push: true
@@ -175,3 +428,52 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # SBOM + xuất xứ ĐÍNH KÈM image, sống cùng digest trong registry. Bước anchore bên dưới chỉ
+          # tạo workflow artifact — thứ hết hạn theo retention, đúng lúc CVE mới công bố sáu tháng sau
+          # thì không còn để tra "image đang chạy prod chứa gói gì".
+          provenance: mode=max
+          sbom: true
+
+      # SMOKE TEST CONTAINER. Chạy ĐÚNG image vừa dựng, kiểm nó phục vụ được /livez và worker khởi
+      # động được. Trước đây CI dựng image xong đẩy đi luôn — một image không boot được vẫn lên
+      # registry và chỉ vỡ khi deploy.
+      - name: Smoke test image vừa dựng
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+        run: bash scripts/ci/smoke-image.sh
+
+      # Quét lại trên ĐÚNG digest đã đẩy (không phải trên bản dựng cục bộ ở job docker-build).
+      - name: Quét lỗ hổng IMAGE đã phát hành (trivy)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
+
+      # SBOM cho image đã phát hành — khi có CVE mới công bố thì biết chính xác image đang chạy
+      # production chứa gói gì, không phải suy từ package-lock của một commit nào đó.
+      - name: SBOM (SPDX) cho image
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          artifact-name: sbom-${{ github.sha }}.spdx.json
+
+      - name: Ghi lại digest bất biến của bản phát hành
+        run: |
+          {
+            echo "### Bản phát hành"
+            echo ""
+            echo "| Trường | Giá trị |"
+            echo "|---|---|"
+            echo "| Git SHA | \`${{ github.sha }}\` |"
+            echo "| Image digest | \`${{ steps.push.outputs.digest }}\` |"
+            echo ""
+            echo "Deploy bằng digest (bất biến), KHÔNG bằng tag:"
+            echo '```sh'
+            echo "helm upgrade quanly infra/helm/quanly --set image.digest=${{ steps.push.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

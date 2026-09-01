@@ -1,0 +1,157 @@
+# ============================================================================
+# NGĂN XẾP QUAN SÁT — TUỲ CHỌN, KHÔNG BẬT MẶC ĐỊNH.
+#
+#   docker compose -f docker-compose.prod.yml -f infra/observability/docker-compose.observability.yml up -d
+#
+# ── VÌ SAO TÁCH RIÊNG THAY VÌ NHÉT VÀO COMPOSE CHÍNH ───────────────────────
+# `docs/architecture/TECHNOLOGY_DECISIONS.md` xếp "gom log tập trung" là DEFER: production hiện là
+# MỘT VM, `docker logs` còn đủ, và BỐN container nữa (Prometheus + Loki + Promtail + Grafana) ăn RAM
+# của chính ứng dụng. Nhưng "chưa cần" khác "chưa dựng được" — file này để lúc cần thì là một lệnh,
+# không phải một dự án. Bật nó là quyết định vận hành, không phải mặc định.
+#
+# ── ĐỌC LOG TỪ ĐÂU ─────────────────────────────────────────────────────────
+# Ứng dụng in JSON ra stdout (pino). Docker ghi stdout vào /var/lib/docker/containers/*/*-json.log.
+# Promtail đọc thẳng những file đó — KHÔNG cần ứng dụng biết gì về Loki, không cần đổi một dòng mã,
+# và ứng dụng không phụ thuộc vào việc hệ log có sống hay không (đúng thứ tự ưu tiên: log hỏng
+# không được kéo ứng dụng theo).
+#
+# ── ĐỌC METRIC TỪ ĐÂU ──────────────────────────────────────────────────────
+# Prometheus scrape /metrics của app (`app:3000`) và của worker (`worker:9091`) qua mạng `internal`.
+# Cả hai endpoint đó CÓ BẢO VỆ: production mà thiếu METRICS_TOKEN thì trả 404, có token thì đòi
+# `Authorization: Bearer` đúng (src/app.ts, src/worker.ts). Token đi vào Prometheus bằng đường TỆP
+# (`secrets:` ở cuối file) vì Prometheus không nội suy biến môi trường trong cấu hình.
+#
+# ── CHỖ PHẢI ĐỔI TRƯỚC KHI DÙNG THẬT ───────────────────────────────────────
+#   · METRICS_TOKEN: BẮT BUỘC, đặt trong `.env` của máy chủ. Thiếu nó thì `compose up` dừng ngay
+#     (`${METRICS_TOKEN:?…}`) — cố ý, vì một Prometheus scrape ra 404 là một hệ giám sát MÙ mà
+#     không có gì báo lỗi.
+#   · GF_SECURITY_ADMIN_PASSWORD: đặt trong `.env` của máy chủ, đừng để nguyên ở đây.
+#   · Grafana ở đây KHÔNG mở ra Internet (chỉ cổng nội bộ + mạng `internal`). Muốn xem từ xa thì
+#     đi qua Cloudflare Tunnel như ứng dụng chính (xem docs/operations/REVERSE_PROXY.md), ĐỪNG
+#     publish cổng 3001 ra 0.0.0.0.
+#   · Prometheus KHÔNG publish cổng nào ra máy chủ: giao diện 9090 không có xác thực.
+services:
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: quanly-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready | grep -q ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: quanly-promtail
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./infra/observability/promtail.yaml:/etc/promtail/config.yaml:ro
+      # CHỈ ĐỌC. Promtail không có việc gì phải ghi vào thư mục log của Docker.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-positions:/tmp/promtail
+    depends_on:
+      loki: { condition: service_healthy }
+    networks: [internal]
+    restart: unless-stopped
+
+  # ── PROMETHEUS ────────────────────────────────────────────────────────────
+  # Trước service này, repo đã có metric ứng dụng, quy tắc cảnh báo đã qua `promtool test rules` và
+  # một bảng Grafana — mà KHÔNG có một định nghĩa Prometheus nào ở bất kỳ đâu. Tức không môi trường
+  # nào thu thập được số liệu, không cảnh báo nào KÊU ĐƯỢC, và datasource của Grafana trỏ vào hư
+  # không. Số HIỆN TẠI: 21 metric (`grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l`) và 17
+  # quy tắc (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) — trước đợt 2026-08-27 là 14
+  # và 14. Đo lại bằng hai lệnh đó, đừng tin con số chép tay ở đây.
+  #
+  # ⚠️ ĐIỀU KIỆN BẮT BUỘC: `.env` của máy chủ PHẢI có METRICS_TOKEN, và app/worker phải nhận CÙNG
+  # token đó (chúng đọc từ cùng `.env` qua `env_file` trong docker-compose.prod.yml). Không có
+  # token thì /metrics ở production trả 404 cho mọi lượt scrape — im lặng, không lỗi ở đâu cả.
+  # Chính vì thế `${METRICS_TOKEN:?...}` dừng `compose up` ngay thay vì dựng một hệ giám sát mù.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: quanly-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15 ngày: đủ cho điều tra sự cố và cho việc "chạy hai tuần rồi đặt lại SLO theo phân vị thật"
+      # mà docs/operations/SLO.md đang chờ. Muốn giữ lâu hơn thì cân RAM/đĩa của VM trước.
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle # POST /-/reload để nạp lại quy tắc, không phải restart cả container
+    environment:
+      METRICS_TOKEN: ${METRICS_TOKEN:?đặt METRICS_TOKEN trong .env — thiếu nó thì /metrics trả 404 và MỌI cảnh báo im lặng}
+    secrets:
+      # Prometheus KHÔNG nội suy biến môi trường trong file cấu hình, nên token phải đi bằng ĐƯỜNG
+      # TỆP. Nguồn `environment:` của compose secrets bày giá trị ra /run/secrets/<tên> mà không cần
+      # tạo file trên đĩa máy chủ (cần Docker Compose ≥ 2.24; bản cũ hơn thì đổi sang
+      # `file: ./secrets/metrics-token` và tự tạo tệp đó, nhớ chmod 600 + thêm vào .gitignore).
+      - metrics_token
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # MOUNT THẲNG bản gốc infra/prometheus/alerts.yaml — KHÔNG chép. `npm run check:alerts` chỉ
+      # kiểm bản gốc đó, nên một bản chép sẽ trôi khỏi nó mà không cổng CI nào đỏ.
+      - ./infra/prometheus/alerts.yaml:/etc/prometheus/rules/alerts.yaml:ro
+      - prometheus-data:/prometheus
+    # CHỈ mạng `internal`. Prometheus giữ toàn bộ số liệu vận hành và giao diện của nó KHÔNG có xác
+    # thực — không publish cổng 9090 ra máy chủ, không nối vào mạng `edge`. Muốn xem thì đi qua
+    # Grafana (đã có mật khẩu) hoặc `docker compose exec`.
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy | grep -q Healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: quanly-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?đặt GRAFANA_PASSWORD trong .env}
+      # Không cho tự đăng ký, không cho xem ẩn danh — đây là màn hình có số liệu vận hành thật.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # CHỈ nghe trên loopback của VM. Ra ngoài thì qua đường hầm, không qua cổng mở.
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      loki: { condition: service_healthy }
+      # `service_started`, KHÔNG phải `service_healthy`. Grafana không cần Prometheus khoẻ để khởi
+      # động — datasource chỉ được truy vấn khi có người mở bảng. Buộc `service_healthy` là biến một
+      # trục trặc của healthcheck Prometheus thành "không mở được Grafana", tức mất luôn cả phần
+      # LOG đang chạy tốt. Healthcheck của prometheus vẫn giữ, nhưng để người vận hành nhìn, không
+      # để chặn.
+      prometheus: { condition: service_started }
+    networks: [internal]
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  promtail-positions:
+  grafana-data:
+  prometheus-data:
+
+secrets:
+  metrics_token:
+    # Nguồn `environment` (Docker Compose ≥ 2.24): giá trị của biến METRICS_TOKEN được bày ra
+    # /run/secrets/metrics_token trong container, KHÔNG nằm lại trên đĩa máy chủ và KHÔNG lộ trong
+    # `docker inspect` như một biến môi trường thường. Bản compose cũ hơn: đổi thành
+    # `file: ./secrets/metrics-token`.
+    environment: METRICS_TOKEN
+
+networks:
+  internal:
+    external: false

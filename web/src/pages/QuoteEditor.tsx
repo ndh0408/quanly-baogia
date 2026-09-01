@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "../lib/api";
 import { toast, confirmModal, promptModal } from "../lib/ui";
+import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
-import { takePendingNewQuote } from "../lib/pendingQuote";
+import { giuBanNhap } from "../lib/pendingQuote";
+import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan } from "../lib/localDraft";
+
+// Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
+const RONG: never[] = [];
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Port "Editor báo giá" (public/js/editor.js renderEditor) sang React. Form (KH/người gửi/meta) +
@@ -54,17 +59,64 @@ const errText = (ex: unknown): string => {
 export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: number; isNew: boolean }) {
   const qRef = useRef<QuoteFull | null>(null);
   const [, setTick] = useState(0);
-  const redraw = useCallback(() => setTick((t) => t + 1), []);
+  // HAI mức vẽ lại. `redraw()` là mức MẶC ĐỊNH: tăng `gridVerRef` nên <GridTable> (đã bọc memo)
+  // cũng vẽ lại — dùng cho MỌI đường có thể đụng tới items (onChange của chính lưới, nạp Excel,
+  // tải lại báo giá…). `redrawMeta()` chỉ vẽ lại phần NGOÀI lưới, dành cho các ô meta gõ-từng-phím
+  // (Ngày báo giá · VAT · Giảm giá · Tên sheet): chúng không đổi gì trong lưới, mà mỗi lượt vẽ lưới
+  // ở sheet lớn là hàng chục ms chặn luồng chính.
+  // CON SỐ ĐO ĐƯỢC là 73ms/phím ở 1000 dòng, và nó đo đường gõ TRONG lưới, không phải ở đây —
+  // nguồn: web/src/components/GridTable.tsx (grep "73ms": nay ở dòng 786 và 1366).
+  // Chi phí gõ ô meta ở QuoteEditor thì CHƯA ĐO RIÊNG, chỉ SUY RA: nếu không có redrawMeta thì
+  // mỗi phím ở đây cũng kéo theo đúng lượt vẽ lại <GridTable> đã đo nói trên.
+  // src/bench.tsx KHÔNG đo được việc này — nó gắn một <GridTable> trần, không dựng QuoteEditor,
+  // nên trang đo không có ô meta nào để gõ (các phép đo của nó: vẽ lần đầu · gõ ô chữ/ô số trong
+  // lưới · thêm/xoá hàng · cuộn · đổi đơn giá).
+  // Quên dùng redrawMeta ở đâu đó = chỉ mất phần tối ưu, KHÔNG sai màn hình — xem gridPropsEqual.
+  const gridVerRef = useRef(0);
+  const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
+  const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
   const dirtyRef = useRef(false);
-  const mark = useCallback(() => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; }, []);
+  // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
+  // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
+  const draftRef = useRef<QuoteFull | null>(null);
+  // ── BẢN NHÁP CỤC BỘ ────────────────────────────────────────────────────────
+  // Ba lớp chống mất dữ liệu sẵn có (beforeunload · guardLeave · lớp phủ đăng nhập lại) đều CHỈ
+  // sống trong bộ nhớ tab. Tab sập / máy mất điện / bấm "Rời khỏi trang" là mất trắng. Đây là lưới
+  // cuối: ghi xuống localStorage, có trần dung lượng và hạn 7 ngày (web/src/lib/localDraft.ts).
+  const khoaNhapRef = useRef<string | null>(null);
+  const baseNhapRef = useRef<string | null>(null);   // updatedAt của bản MÁY CHỦ mà bản nháp dựa vào
+  const hnNhapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Gộp 1,2 giây: `mark()` bị gọi theo TỪNG PHÍM ở lưới. Ghi mỗi phím là stringify cả báo giá
+  // hàng nghìn dòng rồi đẩy xuống đĩa — gõ sẽ khựng thấy rõ, tức chính tính năng chống mất dữ liệu
+  // lại làm hỏng trải nghiệm gõ mà §3 bắt phải giữ.
+  const mark = useCallback(() => {
+    dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
+    if (hnNhapRef.current) clearTimeout(hnNhapRef.current);
+    hnNhapRef.current = setTimeout(() => {
+      hnNhapRef.current = null;
+      if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
+      ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current);
+    }, 1200);
+  }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [othersEditing, setOthersEditing] = useState<{ id: number; name: string }[]>([]); // presence: người KHÁC đang mở báo giá này
+  // ĐANG TẢI FILE — để nút MỜ ĐI và đổi chữ. `xuatBaoGia` đã tự chặn bấm lại ở tầng dưới, nhưng
+  // chặn không phải là BÁO: hai nút Tải nằm trong menu "…", đóng menu rồi mở lại là bấm được tiếp,
+  // và `window.open` cũ thì trình duyệt tự hiện chỉ báo tải nên người dùng biết có chuyện đang xảy
+  // ra. Nay không còn chỉ báo đó — nút phải tự nói.
+  //
+  // ⚠️ HOOK PHẢI Ở ĐÂY, cạnh các hook khác. Bản đầu tôi khai nó ngay trên `exportFile` (dòng ~375),
+  // tức SAU hai early return `if (err) return …` và `if (!ready || !qRef.current) return …` — React
+  // gọi hook theo THỨ TỰ, nên một hook nằm sau early return sẽ khiến thứ tự đổi giữa các lượt
+  // render và toàn bộ state của component lệch nhau. eslint (react-hooks/rules-of-hooks) bắt được;
+  // đừng chuyển nó xuống lại cho "gần chỗ dùng".
+  const [dangTai, setDangTai] = useState<"xlsx" | "pdf" | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const noteWrapRef = useRef<HTMLDivElement>(null);
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
@@ -83,7 +135,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", h);
-    return () => { window.removeEventListener("beforeunload", h); (window as WinDirty).__editorDirty = false; };
+    return () => {
+      window.removeEventListener("beforeunload", h);
+      (window as WinDirty).__editorDirty = false;
+      // Hẹn giờ ghi bản nháp phải huỷ theo: để nó bắn sau khi component đã rời là ghi đè bản nháp
+      // của báo giá VỪA MỞ bằng dữ liệu của báo giá CŨ.
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+    };
   }, []);
 
   // PRESENCE: báo "tôi đang mở báo giá này" + nghe ai khác đang sửa → hiện banner. Chỉ báo giá ĐÃ LƯU.
@@ -106,8 +164,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     };
   }, [quoteId, isNew, me.id]);
 
-  const templates = _templates || [];
-  const companies = _companies || [];
+  // `|| RONG` chứ không phải `|| []`: `_templates` là cache MỨC MODULE nên khi đã tải xong nó vốn
+  // giữ nguyên identity, nhưng nhánh CHƯA tải thì `[]` đẻ mảng mới mỗi lần render và phá mọi
+  // useCallback nhận `templates` làm phụ thuộc. Một hằng rỗng dùng chung là đủ, KHÔNG cần useMemo —
+  // useMemo ở đây còn tệ hơn vì `_templates` là biến ngoài phạm vi component, khai nó làm phụ thuộc
+  // là nói dối React (đổi giá trị không hề kích hoạt render).
+  const templates = _templates || RONG;
+  const companies = _companies || RONG;
 
   // ── load catalogs + quote ──────────────────────────────────────────────────
   useEffect(() => {
@@ -119,10 +182,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           _companies = cs; _templates = ts;
         }
         let q: QuoteFull;
+        let tuWizard = false;
         if (isNew) {
           // Draft từ Wizard Tạo-mới (công ty/mẫu/khách/logo đã chọn); nếu vào thẳng #/rnew thì dựng mặc định.
-          const pend = takePendingNewQuote();
-          if (pend) { q = pend; }
+          const pend = giuBanNhap(draftRef);
+          if (pend) { q = pend; tuWizard = true; }
           else {
             const firstTpl = _templates![0];
             q = {
@@ -139,10 +203,51 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
+        // ── BẢN NHÁP CỤC BỘ: có gì để khôi phục không? ───────────────────────
+        // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
+        // đụng khoá của một báo giá thật id 0 nếu sau này có.
+        let khoiPhuc = false;
+        khoaNhapRef.current = khoaBanNhap(isNew ? "moi" : quoteId!);
+        baseNhapRef.current = (q as { updatedAt?: string }).updatedAt ?? null;
+        donBanNhapQuaHan();   // rẻ, và giữ hạn ngạch localStorage sạch cho cả origin
+        const nhapCu = docBanNhap(khoaNhapRef.current);
+        // CHỈ đề nghị khi bản nháp dựa trên ĐÚNG bản máy chủ vừa tải. Lệch `updatedAt` nghĩa là
+        // người khác đã lưu đè trong lúc đó — khôi phục lúc ấy là âm thầm cán lên việc của họ,
+        // đúng thứ mà khoá lạc quan (409) sinh ra để chặn. Bản nháp lệch bị bỏ đi, không hỏi.
+        // ĐẾN TỪ WIZARD thì KHÔNG hỏi: người dùng vừa chọn công ty/mẫu/khách xong, hỏi "khôi phục
+        // bản nháp cũ?" ngay lúc đó là mời họ ĐÈ LÊN lựa chọn vừa làm. Bản nháp "moi" bỏ dở của
+        // lần trước bị xoá luôn — nó đã hết ý nghĩa từ lúc wizard chạy lại.
+        if (tuWizard && khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        else if (alive && nhapCu && nhapCu.baseUpdatedAt === baseNhapRef.current) {
+          const luc = new Date(nhapCu.luuLuc).toLocaleString("vi-VN");
+          const canhBaoAnh = nhapCu.bocAnh
+            ? " LƯU Ý: bản nháp này KHÔNG kèm ảnh trong các dòng (quá lớn để giữ trên máy) — khôi phục rồi bấm Lưu sẽ XOÁ ảnh đang có trên máy chủ."
+            : "";
+          const dong = await confirmModal(
+            "Có thay đổi chưa lưu từ lần trước",
+            `Lần trước bạn rời trang lúc ${luc} khi còn thay đổi CHƯA LƯU. Khôi phục phần đang soạn đó?${canhBaoAnh}`,
+            { confirmText: "Khôi phục", danger: nhapCu.bocAnh },
+          );
+          if (dong) {
+            const kp = nhapCu.quote as QuoteFull;
+            // Bản nháp đi qua JSON nên mất `_k` và có thể thiếu mảng con — chuẩn hoá đúng như
+            // nhánh thường bên dưới, rồi mới giao cho lưới.
+            if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
+            (kp.sheets as Sheet[]).forEach((sh) => { if (!Array.isArray(sh.extraTables)) sh.extraTables = []; });
+            q = kp;
+            khoiPhuc = true;   // khôi phục xong LÀ đang có thay đổi chưa lưu → cờ bẩn bên dưới
+          } else {
+            xoaBanNhap(khoaNhapRef.current);
+          }
+        }
         (q as QuoteFull & { _activeSheet: number })._activeSheet = 0;
         stampKeys(q);
         qRef.current = q;
-        if (alive) { dirtyRef.current = false; setReady(true); }
+        if (alive) {
+          dirtyRef.current = khoiPhuc;
+          (window as WinDirty).__editorDirty = khoiPhuc;
+          setReady(true);
+        }
       } catch (ex) {
         if (alive) setErr(ex instanceof ApiError ? ex.message : "Lỗi tải báo giá");
       }
@@ -150,6 +255,25 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     return () => { alive = false; };
      
   }, [quoteId, isNew]);
+
+  // Ba hàm truyền cho <ImportExcelModal>. TRƯỚC ĐÂY viết inline ngay trong JSX nên identity đổi mỗi
+  // lần QuoteEditor render — mà editor render lại theo TỪNG PHÍM gõ ở ô Ngày báo giá / VAT / Giảm
+  // giá / Tên sheet. useMemo dựng bảng xem-trước bên trong modal khai đúng ba hàm này làm phụ thuộc,
+  // nên nó tính lại toàn bộ bảng đối chiếu ở mỗi lần đó: memo có mà như không.
+  //
+  // Đặt TRƯỚC hai lệnh `return` sớm bên dưới: hook gọi sau một return sớm là gọi CÓ ĐIỀU KIỆN, tức
+  // thứ tự hook đổi giữa các lần render và React vỡ trạng thái. Trạng thái báo giá đọc qua `qRef`
+  // (ref ổn định) nên phụ thuộc chỉ còn `templates` — đúng thứ ta muốn: càng ít đổi càng tốt.
+  const usesDaysOf = useCallback((tid?: number) => !!templates.find((t) => t.id === tid)?.layout?.hasDays, [templates]);
+  const addrDetailOf = useCallback((tid?: number) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }, [templates]);
+  // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
+  // không đoán ra thì theo mẫu của sheet đang mở.
+  const newSheetTemplateId = useCallback((code?: string | null) => {
+    const cur = qRef.current as (QuoteFull & { _activeSheet: number }) | null;
+    const cuaSheet = cur ? (cur.sheets as Sheet[])[cur._activeSheet]?.templateId : undefined;
+    return templates.find((t) => t.code === code && t.companyId === cur?.companyId)?.id ?? cuaSheet;
+     
+  }, [templates]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <a href="#/list" className="btn btn-sm">Về danh sách</a></div>;
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
@@ -231,6 +355,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) { delete payload.quoteNumber; delete payload.baseUpdatedAt; }
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+      // Lưu xong thì bản nháp cục bộ hết lý do tồn tại. Giữ lại là lần mở sau hỏi khôi phục một
+      // thứ CŨ HƠN bản trên máy chủ — đúng kiểu "tính năng chống mất dữ liệu tự gây mất dữ liệu".
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+      if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
       toast("Đã lưu", "success");
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
@@ -326,8 +454,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
 
   const exportFile = async (ext: "xlsx" | "pdf") => {
+    if (dangTai) return;
     if (dirtyRef.current && !(await confirmModal("Có thay đổi chưa lưu", "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi vừa sửa. Hãy Lưu trước rồi tải lại.", { confirmText: "Vẫn tải bản cũ" }))) return;
-    window.open(`/api/export/${q.id}.${ext}?t=${Date.now()}`, "_blank");
+    // Xem web/src/lib/exportQuote.ts: đường đồng bộ trước, gặp 413 thì tự chuyển sang xuất nền.
+    // Bản cũ dùng window.open nên KHÔNG BAO GIỜ thấy 413 — báo giá quá 20.000 dòng chỉ ra một tab
+    // in JSON lỗi, dù báo giá 60.000 dòng là LƯU ĐƯỢC.
+    setDangTai(ext);
+    try { await xuatBaoGia(q.id, ext); } finally { setDangTai(null); }
   };
 
   // ── summary tổng báo giá (mọi sheet) ─────────────────────────────────────────
@@ -372,10 +505,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <div className="meta-row">
           <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!editable} /></label>
-          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redraw(); }} /></label>
+          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
           <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!editable} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
-          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redraw(); }} /></label>
-          <label>Giảm giá (VNĐ) <span className="muted" style={{ fontSize: 11 }}>(trừ vào tổng)</span><input type="number" step="1000" min="0" defaultValue={Number(q.discount) || 0} disabled={!editable} onInput={(e) => { setQ("discount", Number((e.target as HTMLInputElement).value) || 0); redraw(); }} /></label>
+          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
+          <label>Giảm giá (VNĐ) <span className="muted" style={{ fontSize: 11 }}>(trừ vào tổng)</span><input type="number" step="1000" min="0" defaultValue={Number(q.discount) || 0} disabled={!editable} onInput={(e) => { setQ("discount", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
@@ -386,21 +519,33 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         {/* sheet tabs */}
         <div className="sheet-tabs">
           {sheets.map((s, i) => (
-            <div key={s._k ?? i} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai} onClick={() => switchSheet(i)}>
+            // BÀN PHÍM: `aria-pressed` trên một <div> KHÔNG có role bị công nghệ hỗ trợ BỎ QUA, và
+            // <div> thì không nhận focus. Nghĩa là người dùng chỉ bàn phím (hoặc dùng trình đọc màn
+            // hình) KHÔNG chuyển được sheet — tab là thao tác cốt lõi của editor, không phải trang
+            // trí. Thêm role + tabIndex + Enter/Space là đủ, không phải dựng lại component.
+            <div key={s._k ?? i} role="button" tabIndex={0} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai}
+              onClick={() => switchSheet(i)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); switchSheet(i); } }}>
               <span>{sheets.length > 1 ? `${i + 1}. ` : ""}{s.name || templates.find((t) => t.id === s.templateId)?.name || "Sheet " + (i + 1)}</span>
               {/* Khách đã cho ý kiến sheet này → dấu ✓/✗ ngay trên tab để nhìn phát thấy */}
               {s.custStatus && (
                 <span className={`cust-dot ${s.custStatus === "approved" ? "txt-ok" : "txt-danger"}`}
                   title={CUST_LABEL[s.custStatus]} aria-label={CUST_LABEL[s.custStatus]}>{CUST_DOT[s.custStatus]}</span>
               )}
-              {editable && sheets.length > 1 && <span className="rm-tab" title="Xóa sheet" onClick={(e) => { e.stopPropagation(); removeSheet(i); }}>✕</span>}
+              {/* <button> thật: tự vào được thứ tự Tab, tự nhận Enter/Space, và có tên đọc lên được
+                  ("Xóa sheet 2") thay vì chỉ một dấu ✕ mà trình đọc màn hình không diễn giải nổi. */}
+              {editable && sheets.length > 1 && (
+                <button type="button" className="rm-tab" title="Xóa sheet" aria-label={`Xóa sheet ${i + 1}`}
+                  onClick={(e) => { e.stopPropagation(); removeSheet(i); }}
+                  onKeyDown={(e) => e.stopPropagation()}>✕</button>
+              )}
             </div>
           ))}
           {editable && <button className="btn btn-sm add-sheet" onClick={addSheet}>+ Thêm sheet</button>}
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redraw(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
+          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
           <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {editable && (
@@ -436,7 +581,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           </div>
         )}
 
-        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar
+        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
@@ -505,8 +650,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
               <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
               {moreOpen && (
                 <div className="kebab-menu" role="menu">
-                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>Tải Excel gửi khách</button>
-                  <button role="menuitem" onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>Tải PDF gửi khách</button>
+                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>{dangTai === "xlsx" ? "Đang tạo Excel…" : "Tải Excel gửi khách"}</button>
+                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>{dangTai === "pdf" ? "Đang tạo PDF…" : "Tải PDF gửi khách"}</button>
                   <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
                   {(hasPerm("quote:update:all") || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
                 </div>
@@ -521,11 +666,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           quoteId={isNew ? undefined : q.id}
           sheets={sheets}
           templates={templates}
-          usesDaysOf={(tid) => !!templates.find((t) => t.id === tid)?.layout?.hasDays}
-          addrDetailOf={(tid) => { const t = templates.find((x) => x.id === tid); return !!(t?.layout?.reserveDetail ?? t?.layout?.hasDetail); }}
-          // Sheet MỚI: dùng đúng mẫu app đoán được từ file, miễn mẫu đó thuộc công ty của báo giá;
-          // không đoán ra thì theo mẫu của sheet đang mở.
-          newSheetTemplateId={(code) => templates.find((t) => t.code === code && t.companyId === q.companyId)?.id ?? activeSheet.templateId}
+          usesDaysOf={usesDaysOf}
+          addrDetailOf={addrDetailOf}
+          newSheetTemplateId={newSheetTemplateId}
           onApply={applyImport}
           onClose={() => setImportOpen(false)}
         />

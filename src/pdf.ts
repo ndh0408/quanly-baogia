@@ -115,7 +115,7 @@ export async function renderQuotePdf(quote: any) {
         doc.moveDown(0.3);
         doc.font("bold").fontSize(11).text(sh.name);
       }
-      drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal);
+      drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name });
       runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
     }
 
@@ -149,7 +149,13 @@ export async function renderQuotePdf(quote: any) {
   });
 }
 
-function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, groupSubtotal: boolean) {
+function drawItemsTable(
+  doc: PDFKit.PDFDocument,
+  items: any[],
+  baseIdx: number,
+  groupSubtotal: boolean,
+  where: { quoteNumber?: string; sheetName?: string } = {},
+) {
   const cols: { w: number; label: string; align: "left" | "center" | "right" | "justify" }[] = [
     { w: 30, label: "STT", align: "center" },
     { w: 200, label: "Hạng mục", align: "left" },
@@ -161,6 +167,11 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, 
   const startX = 40;
   const tableW = cols.reduce((s, c) => s + c.w, 0);
   const pageBottom = () => doc.page.height - doc.page.margins.bottom;
+  // Cỡ chữ của bảng phải đặt NGAY ĐÂY. Chiều cao hàng đo bằng doc.heightOfString, mà hàm đó dùng
+  // cỡ chữ ĐANG hiệu lực — trước kia drawHeader() chạy trước vòng lặp và vô tình đặt hộ 10pt.
+  // Nay tiêu đề vẽ muộn, nên nếu không đặt thì phép đo thừa hưởng fontSize(11) của dòng tên sheet
+  // và MỌI hàng bị tính cao gấp đôi.
+  doc.fontSize(10);
 
   // Draw the orange header row at y, return the y below it.
   const drawHeader = (atY: number) => {
@@ -186,7 +197,22 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, 
     });
   }
 
-  let y = drawHeader(doc.y + 4);
+  // Hàng TIÊU ĐỀ bảng vẽ MUỘN — chỉ khi đã biết hàng đầu tiên nằm ở đâu. Vẽ sớm (`drawHeader(doc.y + 4)`
+  // ngay tại đây) sinh hai lỗi thấy được trong file gửi khách:
+  //   (a) sheet thứ hai trở đi KHÔNG có tên thì renderQuotePdf bỏ qua lệnh text duy nhất có thể ép
+  //       pdfkit sang trang → tiêu đề bị vẽ RA NGOÀI lề dưới (tái hiện được từ 31 hạng mục ở sheet đầu);
+  //   (b) hàng đầu quá cao (nhánh cắt) thì trang trước còn lại đúng một hàng tiêu đề trống.
+  let y = doc.y + 4;
+  let needHeader = true;
+  /** Đặt chỗ cho một hàng cao `rowH`: sang trang nếu thiếu, rồi vẽ tiêu đề bảng nếu trang chưa có. */
+  const startRow = (rowH: number) => {
+    if (y + (needHeader ? 18 : 0) + rowH > pageBottom()) {
+      doc.addPage();
+      y = doc.page.margins.top;
+      needHeader = true;
+    }
+    if (needHeader) { y = drawHeader(y); needHeader = false; }
+  };
   let sectionIdx = 0, subNo = 0, itemNo = baseIdx, mult = 1;
   items.forEach((it, idx) => {
     const kind = it?.kind || "item";
@@ -213,26 +239,70 @@ function drawItemsTable(doc: PDFKit.PDFDocument, items: any[], baseIdx: number, 
       amtS = fmt(lineAmount(it, usesDays) * mult);                    // cùng phép tính với web + Excel
     }
 
-    const lines = Math.max(1, text.split("\n").length);
-    const rowH = Math.max(18, 8 + lines * 12);
-    // Page-break: if this row would overflow the page, start a new page + re-draw
-    // the table header so long quotes don't get clipped/overlapped.
-    if (y + rowH > pageBottom()) {
-      doc.addPage();
-      y = drawHeader(doc.page.margins.top);
-    }
-    let x = startX;
-    if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", "#bbb");
-    else doc.rect(startX, y, tableW, rowH).stroke("#bbb");
-    doc.fillColor("black");
-    doc.font(isGroup ? "bold" : isInfo ? "italic" : "body");
+    // Chiều cao hàng phải ĐO THẬT chứ không đếm "\n": chữ được vẽ CÓ ràng bề rộng cột ngay bên
+    // dưới nên pdfkit tự xuống dòng, mà cột "Hạng mục" chỉ rộng 200pt ở cỡ chữ 10 (~40 ký tự/dòng)
+    // trong khi tên hạng mục được phép dài tới 2000 ký tự (src/validators.ts). Đếm "\n" cho ra 1
+    // dòng → khung kẻ ngắn hơn chữ, hàng sau đè lên chữ hàng trước, và điều kiện ngắt trang bên
+    // dưới cũng dùng đúng con số sai đó nên trang bị tràn. Đây là tài liệu gửi cho khách.
+    const rowFont = isGroup ? "bold" : isInfo ? "italic" : "body";
+    doc.font(rowFont);
     const vals = [stt, text, unit, qtyS, priceS, amtS];
+    const cellH = vals.map((v, i) => doc.heightOfString(String(v), { width: cols[i].w - 4 }));
+    const textH = Math.max(...cellH);
+    // Trần = phần dùng được của MỘT trang (đã trừ hàng tiêu đề bảng 18pt + 4pt đệm): hàng cao hơn
+    // cả trang thì KHÔNG chỗ nào vẽ trọn được.
+    const maxRowH = Math.max(18, doc.page.height - doc.page.margins.bottom - doc.page.margins.top - 22);
+    // Làm tròn LÊN bội số 12pt — đúng bước dòng của công thức cũ.
+    //
+    // CẢNH BÁO BỐ CỤC (đo thật, không phỏng đoán): với phông production DejaVuSerif — Dockerfile
+    // chép DejaVuSerif.ttf vào fonts/Times.ttf — cột "Hạng mục" rộng 196pt ở cỡ 10 chứa được
+    // khoảng 35 ký tự trên MỘT dòng. Tên hạng mục dài hơn thế (rất thường gặp) trước đây bị đếm
+    // là 1 dòng (20pt) nay thành 2 dòng (32pt): báo giá 2000 dòng đi từ 53 lên 85 trang (+60%).
+    // Mọi hàng có `detail` cũng đổi. Tức bản vá này CÓ dàn lại trang cho báo giá đang chạy —
+    // đó là hệ quả bắt buộc của việc sửa khung vẽ hụt, nhưng phải nói đúng để bên in/gửi biết.
+    const wantH = 8 + Math.max(1, Math.ceil(textH / 12)) * 12;
+    const rowH = Math.min(maxRowH, Math.max(18, wantH));
+    const clipped = wantH > maxRowH;
+    // Chiều cao chữ được phép vẽ trong ô. Hàng bị cắt nhường 12pt cuối cho DÒNG BÁO CẮT: tài liệu
+    // này gửi cho khách, mất chữ mà không có dấu hiệu gì là điều tệ nhất có thể làm.
+    const textCap = rowH - 8 - (clipped ? 12 : 0);
+    if (clipped) {
+      logger.warn(
+        { quoteNumber: where.quoteNumber, sheetName: where.sheetName, itemName: String(it?.name || "").slice(0, 80), wantH, maxRowH },
+        "PDF: hàng hạng mục cao hơn một trang giấy — nội dung bị cắt trong bản PDF (bản Excel vẫn đủ)",
+      );
+    }
+    startRow(rowH);
+    doc.font(rowFont);   // drawHeader trả font về "body" — đặt lại font của hàng trước khi vẽ
+    let x = startX;
+    // Viền ĐỎ cho hàng bị cắt: dấu hiệu nhìn thấy được ngay cả khi lướt nhanh qua trang.
+    const border = clipped ? "#CC0000" : "#bbb";
+    if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", border);
+    else doc.rect(startX, y, tableW, rowH).stroke(border);
+    doc.fillColor("black");
+    doc.font(rowFont);
     vals.forEach((v, i) => {
-      doc.text(String(v), x + 2, y + 4, { width: cols[i].w - 4, align: cols[i].align });
+      // Chỉ ràng height/ellipsis cho ĐÚNG ô thật sự tràn: hàng bình thường — và cả những ô ngắn
+      // (STT, ĐVT, tiền) của hàng bị cắt — giữ nguyên đường vẽ cũ của pdfkit.
+      const opt: PDFKit.Mixins.TextOptions = { width: cols[i].w - 4, align: cols[i].align };
+      if (clipped && cellH[i] > textCap) { opt.height = textCap; opt.ellipsis = true; }
+      doc.text(String(v), x + 2, y + 4, opt);
       x += cols[i].w;
     });
+    if (clipped) {
+      // Dòng báo cắt nằm TRONG khung hàng, ở 12pt vừa chừa ra bên trên.
+      doc.font("italic").fontSize(8).fillColor("#CC0000");
+      doc.text("[…] Nội dung bị cắt — xem bản Excel để có đầy đủ", startX + 2, y + rowH - 13,
+        { width: tableW - 4, align: "left", height: 11, ellipsis: true, lineBreak: false });
+      doc.fillColor("black").fontSize(10);
+    }
     doc.font("body");
     y += rowH;
   });
+  // Sheet KHÔNG có hạng mục nào: giữ nguyên hành vi cũ (vẫn in hàng tiêu đề bảng), chỉ thêm chốt lề.
+  if (needHeader) {
+    if (y + 18 > pageBottom()) { doc.addPage(); y = doc.page.margins.top; }
+    y = drawHeader(y);
+  }
   doc.y = y + 4;
 }

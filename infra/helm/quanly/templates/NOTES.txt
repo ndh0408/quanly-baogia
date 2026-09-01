@@ -25,3 +25,16 @@
   - secrets.SESSION_SECRET ≥ 32 ký tự ngẫu nhiên (không phải default)
   - secrets.S3_* để export Excel/PDF lưu trên object store
   - secrets.SMTP_* để approval/send notification
+
+{{ if .Values.metrics.enabled }}
+{{- if and (not .Values.existingSecret) (not .Values.secrets.METRICS_TOKEN) (eq (toString .Values.config.NODE_ENV) "production") }}
+⚠️  SỐ LIỆU /metrics HIỆN KHÔNG SCRAPE ĐƯỢC BẰNG BẤT KỲ ĐƯỜNG NÀO.
+    metrics.enabled=true nhưng secrets.METRICS_TOKEN đang RỖNG và NODE_ENV=production.
+    src/app.ts fail-closed: production mà không có token thì /metrics trả 404.
+      · Annotation prometheus.io ĐÃ KHÔNG được khai (chúng không mang được Bearer, sẽ chỉ
+        dẫn Prometheus tới một endpoint trả 404 mãi mãi).
+      · ServiceMonitor cũng đang tắt (metrics.serviceMonitor.enabled=false).
+    Cách bật thật: --set secrets.METRICS_TOKEN=<token> --set metrics.serviceMonitor.enabled=true
+    Hoặc chấp nhận không có số liệu và đặt metrics.enabled=false cho khỏi hiểu nhầm.
+{{- end }}
+{{- end }}

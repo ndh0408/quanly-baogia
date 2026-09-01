@@ -12,6 +12,13 @@ const fmtMoney = (v: unknown) => (v == null || v === "" ? "" : fmtMoneyLib(Numbe
 const fmtDate = (v: unknown) => fmtDateLib(v == null ? null : String(v));
 const toInputDate = (v: unknown) => toInputDateLib(v == null ? null : String(v));
 const PAGE_SIZE = 50;
+// Ảnh chứng từ chỉ được là data-URL ảnh base64, khớp TOÀN CHUỖI như server (src/validators.ts).
+// POST /personnel/:id/payment mới chỉ kiểm TIỀN TỐ nên chuỗi kiểu `data:image/png;base64,AAA"><a …>`
+// vẫn vào được CSDL; lọc lại ở đây để nó không bao giờ ra tới thuộc tính src.
+// (Bản sao của safeImgSrc trong GridTable.tsx — CỐ Ý: GridTable nằm ở chunk tải-trễ của trang báo
+//  giá, kéo cả engine lưới vào trang Nhân sự chỉ vì một regex là phình bundle chính.)
+const safeImgSrc = (s: string | null | undefined) =>
+  typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
 // Field LẤY TỪ DỰ ÁN — KHÔNG hiện ô nhập trong form, chỉ điền qua "Chọn dự án" (bắt buộc) rồi hiện "đã chọn".
 const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
 
@@ -457,7 +464,7 @@ function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () =
         <div className="modal-body">
           <p className="muted" style={{ marginTop: 0 }}>{paid ? `Trạng thái: ĐÃ thanh toán${(rec.paidBy as { displayName?: string } | undefined)?.displayName ? ` · ${(rec.paidBy as { displayName?: string }).displayName}` : ""}.` : "Trạng thái: CHƯA thanh toán."}</p>
           {!paid && <label className="full"><span>Ảnh chứng từ (tùy chọn — sẽ nén tự động)</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} /></label>}
-          {shown && <div className="pay-proof"><img src={shown} alt="ảnh chứng từ thanh toán" /></div>}
+          {shown && <div className="pay-proof"><img src={safeImgSrc(shown)} alt="ảnh chứng từ thanh toán" /></div>}
           {paid && !shown && <p className="muted">Chưa có ảnh chứng từ.</p>}
         </div>
         <div className="modal-foot">

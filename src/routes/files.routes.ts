@@ -2,18 +2,21 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { putObject, presignDownload, presignUpload, deleteObject, isStorageEnabled, headObject, getObjectHeadBytes, getObjectBytes, copyObject } from "../storage.js";
 import { audit } from "../audit.js";
-import { canOnQuote } from "../permissions.js";
+import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 import { inspectXlsx } from "../zipSafety.js";
 
 const router = Router();
 router.use(requireAuth);
+// requireAuth là XÁC THỰC, không phải PHÂN QUYỀN. Ba đường GHI bên dưới thêm `file:upload`; đường
+// ĐỌC (`GET /sign-download`) CỐ Ý không thêm, vì ở đó `canAccessKey` mới là chốt phạm vi đúng —
+// người xem hợp lệ (vd kế toán mở chứng từ) không có nghiệp vụ tải lên nào.
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // giữ CÙNG trần với đường multipart bên dưới
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -138,6 +141,7 @@ function stagingUploadKey(session: Request["session"], ext = "") {
 /** POST /api/files - multipart upload, returns object key + signed download URL. */
 router.post(
   "/",
+  requirePermission(P.FILE_UPLOAD),
   upload.single("file"),
   asyncHandler(async (req: Request, res: Response) => {
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
@@ -168,6 +172,10 @@ router.post(
         ownerId: req.session.userId as number,
         expectedMime: sniffed.mime, expectedSize: req.file.size,
         actualMime: sniffed.mime, actualSize: req.file.size,
+        // Băm nội dung ngay lúc nhận. Cột này đã có sẵn trong schema từ lâu nhưng KHÔNG đường nào
+        // ghi vào — nên tệp đính kèm là thứ duy nhất trong hệ không kiểm chứng lại được sau khôi
+        // phục (đối lập với paymentProofSha256, thứ khiến verifyIntegrity đối chiếu được).
+        sha256: createHash("sha256").update(req.file.buffer).digest("hex"),
         status: "finalized", finalizedAt: new Date(),
         expiresAt: new Date(Date.now() + 3600_000),
       },
@@ -190,7 +198,30 @@ router.get(
       return res.status(403).json({ error: "Bạn không có quyền với file này" });
     }
     if (!isStorageEnabled()) return res.status(503).json({ error: "Chưa cấu hình lưu trữ tệp" });
-    const url = await presignDownload(req.query.key as string, { expiresIn: (req.query as any).expires });
+    const key = req.query.key as string;
+    const url = await presignDownload(key, { expiresIn: (req.query as any).expires });
+    // GHI NHẬT KÝ ở đường ĐỌC. Ký một URL tải KHÔNG phải "xem trạng thái" — nó TRAO nội dung, và
+    // URL ấy còn dùng được suốt `expires` giây mà không cần phiên nữa. Namespace `payment-proofs/`
+    // (src/paymentProof.ts) đi qua đúng cửa này: đường xem qua hồ sơ nhân sự có ghi
+    // `personnel.payment-proof.view`, còn đường này thì không — mà `paymentProofKey` vẫn nằm trong
+    // JSON của /api/personnel, nên chép khoá sang đây là xem ảnh chứng từ mà không để lại vết.
+    // Cùng lý do cho `uploads/` (tệp đính kèm) và `exports/` (bản Excel/PDF đầy đủ của báo giá).
+    //
+    // KHÔNG ngoại lệ theo tiền tố. Bản trước miễn trừ `logos/` với lý do "SPA xin chữ ký cho logo ở
+    // gần như mỗi lần mở báo giá"; đo lại thì lý do đó sai:
+    //   grep -rn "sign-download\|signDownload" web/src --include=*.ts --include=*.tsx
+    // KHÔNG ra lời gọi nào. Mọi kết quả đều là NHÃN tiếng Việt của mã hành động hoặc bài test canh
+    // bảng nhãn đó (web/src/pages/Audit.tsx và w2-auditActionCoverage.test.ts). Cố ý KHÔNG ghi số
+    // kết quả ở đây: con số ấy đổi mỗi lần ai đó thêm một bài test nhắc tới mã này — bản trước ghi
+    // "ĐÚNG MỘT dòng" rồi sai ngay ở lượt vá kế tiếp. web/src/lib/api.ts không có hàm nào chạm
+    // endpoint này, còn logo khách hàng trong SPA là data-URL nhúng thẳng vào báo giá
+    // (web/src/pages/NewQuoteWizard.tsx:62), không đi qua kho object. Lưu lượng SPA đo được trên
+    // nhánh `logos/` vì thế là 0 request → miễn trừ không tiết kiệm được hàng nhật ký nào, chỉ chừa
+    // một khe không để lại vết ở đúng endpoint TRAO nội dung.
+    //
+    // KHÔNG nhét nội dung/URL đã ký vào `after`: bảng AuditEvent không mã hoá, và URL đã ký chính
+    // là thứ mở được file. Chỉ ghi khoá + hạn.
+    await audit(req, "file.sign-download", { resource: "file", resourceId: key, after: { expiresIn: (req.query as any).expires } });
     res.json({ url, expiresIn: req.query.expires });
   })
 );
@@ -215,6 +246,8 @@ router.get(
  */
 router.post(
   "/sign-upload",
+  // Quyền TRƯỚC limiter: người không được phép ghi thì không nên tiêu ô hạn mức của ai cả.
+  requirePermission(P.FILE_UPLOAD),
   signLimiter,
   validate({ body: z.object({
     // Only allowlisted, display-safe content types — never text/html or svg.
@@ -267,6 +300,7 @@ router.post(
  */
 router.post(
   "/finalize",
+  requirePermission(P.FILE_UPLOAD),
   signLimiter,
   validate({ body: z.object({ key: z.string().min(1).max(500) }) }),
   asyncHandler(async (req: Request, res: Response) => {
@@ -307,27 +341,55 @@ router.post(
     }
     if (head.size <= 0 || head.size > MAX_UPLOAD_BYTES) return reject(`kích thước ngoài giới hạn: ${head.size}`, 413, "Tệp quá lớn (tối đa 10MB)");
 
+    // TÁCH "LỖI HẠ TẦNG" KHỎI "NỘI DUNG XẤU" — `reject()` là KHÔNG HOÀN TÁC ĐƯỢC.
+    //
+    // `reject()` xoá object tạm và lật bản ghi sang `rejected`; người dùng phải tải lên lại từ đầu.
+    // Đó là phản ứng ĐÚNG cho nội dung sai (magic bytes lệch, kiểu lệch, xlsx hỏng) — nội dung đó
+    // sẽ không tự tốt lên.
+    //
+    // Nhưng `getObjectHeadBytes`/`getObjectBytes` (src/storage.ts) đều là `catch { return null }`:
+    // chúng trả `null` cho MỌI thứ — timeout mạng, MinIO trả 500, kho tạm bận. Gộp hai loại đó lại
+    // nghĩa là một nhịp trục trặc của kho object HUỶ VĨNH VIỄN tệp người dùng vừa tải lên xong,
+    // kèm thông điệp nói rằng nội dung của họ không hợp lệ. Đúng phần khó nhất (tải lên) đã xong
+    // rồi mới mất.
+    //
+    // Nay: đọc không được → 503, GIỮ NGUYÊN trạng thái `pending` để bấm lại là tiếp tục được.
     const magic = await getObjectHeadBytes(rec.stagingKey, 16);
-    const sniffed = magic ? sniffType(magic, head.contentType) : null;
+    if (!magic) {
+      return res.status(503).json({ error: "Kho lưu trữ đang bận, vui lòng bấm hoàn tất lại sau ít giây.", retryAfter: 5 });
+    }
+    const sniffed = sniffType(magic, head.contentType);
     if (!sniffed) return reject("magic bytes không khớp allowlist", 415, "Nội dung tệp không hợp lệ (chỉ PNG/JPG/WEBP/PDF/XLSX)");
     // Nội dung thật phải khớp KIỂU ĐÃ KÝ, không chỉ "nằm trong allowlist": ký image/png rồi đẩy PDF
     // lên là đã nói dối, dù PDF vốn được phép.
     if (sniffed.mime !== rec.expectedMime) {
       return reject(`kiểu lệch: ký ${rec.expectedMime}, nội dung là ${sniffed.mime}`, 415, "Nội dung tệp không khớp định dạng đã đăng ký.");
     }
+    // ĐỌC NGUYÊN NỘI DUNG MỘT LẦN, dùng cho cả hai việc bên dưới.
+    //
+    // Trước đây chỉ nhánh XLSX mới tải nội dung về. Nay mọi kiểu đều tải, để BĂM được — đó là cái
+    // giá phải trả: thêm một lượt GET tối đa 10MB (head.size đã bị chặn ở trên) cho mỗi lần finalize
+    // ảnh/PDF. Chấp nhận được vì finalize xảy ra đúng một lần cho mỗi tệp, và đổi lại tệp đính kèm
+    // mới có bản băm để đối chiếu về sau — thứ mà chứng từ thanh toán đã có còn tệp thì chưa.
+    const body = await getObjectBytes(rec.stagingKey, MAX_UPLOAD_BYTES);
+    // KHÔNG `reject()` ở đây — xem chú thích ở chỗ đọc magic bytes phía trên. Thông điệp cũ còn tự
+    // mâu thuẫn: nó bảo "vui lòng thử lại" trong khi vừa xoá mất thứ để thử lại.
+    if (!body) {
+      return res.status(503).json({ error: "Kho lưu trữ đang bận, vui lòng bấm hoàn tất lại sau ít giây.", retryAfter: 5 });
+    }
     // XLSX = tệp zip; magic bytes chỉ chứng minh "là zip". Kiểm cấu trúc thật (xem src/zipSafety.ts).
     if (sniffed.mime === XLSX_MIME) {
-      const body = await getObjectBytes(rec.stagingKey, MAX_UPLOAD_BYTES);
-      const verdict = body ? inspectXlsx(body) : { ok: false as const, reason: "không đọc được nội dung" };
+      const verdict = inspectXlsx(body);
       if (!verdict.ok) return reject(`xlsx không hợp lệ: ${verdict.reason}`, 415, `Tệp Excel không hợp lệ: ${verdict.reason}`);
     }
+    const bamNoiDung = createHash("sha256").update(body).digest("hex");
 
     // CHUYỂN TRẠNG THÁI NGUYÊN TỬ: chỉ request nào lật được pending → finalized mới thắng. Hai
     // request finalize đồng thời thì đúng một cái count===1, cái kia thấy 0 và đọc lại trạng thái.
     // Đặt TRƯỚC bước sao chép để hai request không cùng copy; kẻ thua không đụng gì tới kho lưu trữ.
     const claimed = await prisma.uploadObject.updateMany({
       where: { key, status: "pending" },
-      data: { status: "finalized", actualMime: sniffed.mime, actualSize: head.size, finalizedAt: new Date() },
+      data: { status: "finalized", actualMime: sniffed.mime, actualSize: head.size, sha256: bamNoiDung, finalizedAt: new Date() },
     });
     if (claimed.count !== 1) return res.status(409).json({ error: "Tệp vừa được xử lý bởi yêu cầu khác, vui lòng tải lại trang." });
 

@@ -5,8 +5,8 @@ metadata:
   namespace: quanly
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
-    nginx.ingress.kubernetes.io/proxy-buffering: "off"      # SSE
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # SSE
+    nginx.ingress.kubernetes.io/proxy-buffering: "off" # SSE
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600" # SSE
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx

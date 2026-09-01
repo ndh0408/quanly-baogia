@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, HeadBucketCommand, CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -8,6 +8,28 @@ let client: S3Client | null = null;
 export function isStorageEnabled() {
   return !!(config.S3_ENDPOINT && config.S3_ACCESS_KEY && config.S3_SECRET_KEY);
 }
+
+// ─── TRẦN THỜI GIAN cho mọi lệnh tới kho object ─────────────────────────────
+//
+// AWS SDK v3 KHÔNG đặt requestTimeout mặc định ở NodeHttpHandler: không khai gì thì một lệnh S3 có
+// thể chờ VÔ HẠN. Điều đó không chỉ là "chậm":
+//
+//   · Tiến trình WORKER: job xuất nền sinh file xong (đã có trần cứng 30s ở exportQueue.ts) rồi mới
+//     `putObject` + `presignDownload` — pha KHÔNG có trần. MinIO treo thì `Worker.close()` chờ job
+//     đó mãi, hết ân hạn dừng 90s (infra/k8s/worker.yaml) là SIGKILL, job nằm lại tới hết
+//     EXPORT_JOB_LOCK_MS (300s, src/queue.ts) rồi về hàng chờ ở trạng thái stalled. Bị cắt hai lần
+//     (deploy rồi rollback) là chạm maxStalledCount mặc định = 1 → BullMQ đánh hỏng VĨNH VIỄN.
+//     Tức cả lập luận "ân hạn 90s neo vào trần 30s có thật" chỉ đúng nếu pha này cũng có trần.
+//   · Tiến trình API: đường tải ảnh chứng từ gọi kho ngay trên request — không trần là giữ luôn
+//     một kết nối HTTP và một suất trong pool cho tới khi proxy bỏ cuộc.
+//
+// CHỌN SỐ: 20s cho một lệnh, nhân tối đa 2 lượt (maxAttempts = 2) là ~40s — vẫn nằm gọn trong ân
+// hạn 90s, và rộng hơn nhiều so với thời gian PUT một file xuất vài MB qua mạng nội bộ. CHƯA ĐO
+// được p99 thật của kho production (không có số liệu kho object); đây là trần AN TOÀN, không phải
+// số đo. Chỉnh bằng S3_REQUEST_TIMEOUT_MS / S3_CONNECT_TIMEOUT_MS nếu kho thật sự chậm hơn.
+export const S3_REQUEST_TIMEOUT_MS = Math.max(1_000, Number(process.env.S3_REQUEST_TIMEOUT_MS) || 20_000);
+export const S3_CONNECT_TIMEOUT_MS = Math.max(500, Number(process.env.S3_CONNECT_TIMEOUT_MS) || 5_000);
+const S3_MAX_ATTEMPTS = Math.max(1, Number(process.env.S3_MAX_ATTEMPTS) || 2);
 
 export function getClient() {
   if (!isStorageEnabled()) return null;
@@ -19,6 +41,10 @@ export function getClient() {
     region: config.S3_REGION,
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
     credentials: { accessKeyId: S3_ACCESS_KEY, secretAccessKey: S3_SECRET_KEY },
+    // Dạng đối tượng: SDK tự dựng NodeHttpHandler với đúng hai trần này (khỏi phải import
+    // @smithy/node-http-handler làm phụ thuộc trực tiếp thứ hai vào cùng một lớp).
+    requestHandler: { requestTimeout: S3_REQUEST_TIMEOUT_MS, connectionTimeout: S3_CONNECT_TIMEOUT_MS },
+    maxAttempts: S3_MAX_ATTEMPTS,
   });
   return client;
 }
@@ -82,16 +108,45 @@ export async function deleteObject(key: string, bucket = config.S3_BUCKET) {
   await c.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
-export async function objectExists(key: string, bucket = config.S3_BUCKET) {
+/**
+ * Liệt kê object theo tiền tố, CÓ TRẦN SỐ LƯỢNG và CÓ ĐIỂM BẮT ĐẦU.
+ *
+ * Vì sao có trần: bucket production chứa cả file xuất tích tụ nhiều năm. Gom hết khoá vào một mảng
+ * là để một tác vụ dọn dẹp chạy nền tự tay làm cạn bộ nhớ tiến trình.
+ *
+ * ĐỌC KỸ Ý NGHĨA CỦA TRẦN: ListObjectsV2 trả khoá theo thứ tự TỰ VỰNG, KHÔNG theo ngày, và hàm này
+ * KHÔNG nhớ vị trí giữa hai lần gọi. Nên "chạm trần rồi lượt sau dọn tiếp" là SAI: lượt sau lại bắt
+ * đầu từ đúng đầu dải, phần ĐUÔI không bao giờ tới lượt (một tiền tố công ty đông việc chiếm trọn
+ * cửa sổ đầu là đủ để file 5 năm tuổi của tiền tố xếp sau không bao giờ được rà).
+ *
+ * Muốn đi hết dải thì chỗ gọi phải TỰ PHÂN TRANG: truyền `startAfter` = khoá cuối của trang trước
+ * (xem vòng lặp exports/ trong src/retention.ts). Cách đó giữ bộ nhớ ở mức O(một trang) mà vẫn quét
+ * hết, thay vì cắt cụt rồi hứa suông.
+ *
+ * Trả về mảng rỗng khi chưa cấu hình kho, để chỗ gọi không phải bọc try/catch.
+ */
+export async function listObjects(prefix: string, { bucket = config.S3_BUCKET, maxKeys = 10_000, startAfter }: { bucket?: string; maxKeys?: number; startAfter?: string } = {}) {
   const c = getClient();
-  if (!c) return false;
-  try {
-    await c.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return true;
-  } catch {
-    return false;
-  }
+  if (!c) return [];
+  const out: Array<{ key: string; size: number; lastModified: Date | null }> = [];
+  let token: string | undefined;
+  do {
+    // S3 CHỈ đọc StartAfter ở request ĐẦU TIÊN; từ trang thứ hai trở đi ContinuationToken mới là
+    // thứ định vị. Truyền cả hai cùng lúc là mơ hồ nên chỉ gửi StartAfter khi chưa có token.
+    const r: any = await c.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token, StartAfter: token ? undefined : startAfter }));
+    for (const o of r.Contents || []) {
+      if (!o.Key) continue;
+      out.push({ key: o.Key, size: Number(o.Size ?? 0), lastModified: o.LastModified ? new Date(o.LastModified) : null });
+      if (out.length >= maxKeys) return out;
+    }
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return out;
 }
+
+// GỠ `objectExists`: không nơi nào gọi (grep toàn repo chỉ ra đúng dòng khai báo). Và nó là mẫu
+// hình dễ dùng sai — kiểm tồn tại rồi mới thao tác là TOCTOU; đường đúng ở repo này là cứ gọi thẳng
+// rồi bắt lỗi (xem `getObjectBytes`/`deleteObject`).
 
 /**
  * Generate a time-limited signed URL clients can download the object from directly.

@@ -1,23 +1,91 @@
 # Cấu hình gitleaks — mở rộng bộ luật mặc định, KHÔNG thay thế.
-# Gitleaks tự đọc file này khi nằm ở gốc nguồn quét.
+# Gitleaks tự đọc file này khi nằm ở gốc nguồn quét (đã xác nhận trong log: "using existing
+# gitleaks config /repo/.gitleaks.toml from `(--source)/.gitleaks.toml`").
 #
-# Nguyên tắc: allowlist phải HẸP. Không bao giờ bỏ qua cả thư mục `tests/` — test vẫn là nơi bí mật
-# thật hay bị dán vào (chuỗi kết nối, token staging). Chỉ miễn trừ ĐÚNG chuỗi đã kiểm chứng bằng mắt,
-# và ghim thêm đường dẫn để cùng chuỗi đó ở chỗ khác vẫn bị bắt.
+# Chạy cổng này: `npm run scan:secrets` (scripts/ci/security-scan.sh, bước [S1]).
+#
+# ── HAI ĐIỀU ĐÃ ĐO, ĐỪNG VIẾT LẠI THEO TRỰC GIÁC ───────────────────────────
+#
+# 1. `[[allowlists]]` (SỐ NHIỀU) BỊ GITLEAKS v8.21.2 BỎ QUA HOÀN TOÀN.
+#    Bản trước của file này dùng dạng số nhiều cho allowlist toàn cục, và nó KHÔNG có tác dụng:
+#    đo được 13 phát hiện với dạng số nhiều, 12 với dạng SỐ ÍT `[allowlist]` (đúng một mục —
+#    tests/mfa.test.js — được miễn). Nghĩa là repo tưởng mình đã miễn trừ, nhưng chưa.
+#    (Riêng `[rules.allowlist]` LỒNG trong `[[rules]]` thì hoạt động bình thường — đó là lý do
+#    luật `hardcoded-default-password` bên dưới vẫn chạy đúng.)
+#
+# 2. `condition = "AND"` KHÔNG được tôn trọng ở `[allowlist]` toàn cục của v8.21.2 — nó hành xử
+#    như OR. Đã kiểm bằng một cấu hình dò: liệt kê đường dẫn tests/mfa.test.js kèm một regex
+#    KHÔNG BAO GIỜ khớp; nếu là AND thì mục đó phải vẫn bị báo, nhưng nó im.
+#    HỆ QUẢ TRỰC TIẾP: đưa `paths` vào allowlist toàn cục là MIỄN TRỪ CẢ FILE, chứ không phải
+#    "ghim thêm đường dẫn cho chặt" như ý định ban đầu. Nên allowlist dưới đây CHỈ dùng `regexes`
+#    — miễn theo ĐÚNG GIÁ TRỊ đã soi bằng mắt. Một bí mật THẬT dán vào chính những file đó vẫn bị
+#    bắt, vì nó không khớp chuỗi nào ở đây.
 
 [extend]
 useDefault = true
 
-[[allowlists]]
+[allowlist]
 description = """
-Khoá mã hoá GIẢ trong test đơn vị MFA (tests/mfa.test.js:7).
+Chuỗi GIẢ trong test và script kiểm thử. Mỗi chuỗi đã được đọc tận nơi và đều TỰ MÔ TẢ nó là đồ
+giả; không chuỗi nào từng mở khoá dữ liệu thật ở bất kỳ môi trường nào. Chúng chỉ đủ dài để vượt
+ràng buộc độ dài của zod (`MFA_ENC_KEY`/`PII_ENC_KEY` ≥ 16) nhằm chạy được nhánh AES-256-GCM thay
+vì nhánh dự phòng plaintext.
 
-Đây không phải bí mật: chuỗi tự mô tả nó là đồ giả, độ dài cố ý đủ 16 ký tự chỉ để vượt qua ràng buộc
-`MFA_ENC_KEY: z.string().min(16)` của config, nhằm chạy được nhánh AES-256-GCM thay vì nhánh dự phòng
-plaintext. Nó chưa từng mở khoá dữ liệu thật ở bất kỳ môi trường nào.
+Gitleaks gắn cờ vì entropy khớp luật `generic-api-key`. Không miễn trừ thì cổng đỏ VĨNH VIỄN — mà
+một cảnh báo luôn-đỏ là cảnh báo bị bỏ qua, nguy hiểm hơn không có cảnh báo.
 
-Gitleaks gắn cờ vì entropy 3.82 khớp luật `generic-api-key`. Không miễn trừ thì bước Security của CI
-(`--exit-code 1`) đỏ vĩnh viễn, và một cảnh báo luôn-đỏ là cảnh báo bị bỏ qua — nguy hiểm hơn không có.
+Miễn theo GIÁ TRỊ, không theo đường dẫn — xem điểm 2 ở đầu file.
 """
-paths = ['''^tests/mfa\.test\.js$''']
-regexes = ['''test-mfa-encryption-key-at-least-16''']
+regexes = [
+  # Khoá mã hoá giả trong test (tests/mfa.test.js, tests/b4-pii-rotate-softdeleted.test.js,
+  # tests/pii-rotate-key.test.js).
+  '''test-mfa-encryption-key-at-least-16''',
+  '''kiem-thu-mfa-key-16''',
+  '''kiem-thu-session-secret-du-32-ky-tu''',
+  '''khoa-(moi|cu)-cho-bai-test-b4-du-dai''',
+  '''PIIROT-khoa-(cu|moi|la-hoan-toan-khong-lien-quan)-''',
+  # Mật khẩu tự nói rõ "không phải mật khẩu thật" (tests/b8-seed-demo-prod-guard.test.js).
+  '''khong-phai-mat-khau-that-''',
+  # Token độn trong test chống rò rỉ log/URL: toàn chữ số hex tăng dần, không phải token của ai.
+  # (tests/authsess-logger-redact.test.js, tests/authsess-sentry-url-scrub.test.js,
+  #  tests/qua-token-in-flat-path-key.test.js)
+  '''(asx|9f3c1d2e4b5a6789)0123456789abcdef0123456789abcd''',
+]
+
+# ── Mật khẩu demo dùng chung, viết thẳng trong mã ───────────────────────────
+#
+# Chuỗi cũ nằm ở BA nơi (prisma/seed-demo.js, scripts/dev/rc-qa.mjs, tài liệu handoff) và là mật
+# khẩu MẶC ĐỊNH cho mọi tài khoản demo được seed, gồm cả `admin`. Ruleset mặc định của gitleaks
+# KHÔNG bắt được vì entropy của một cụm từ tiếng Việt viết liền quá thấp. Luật này bắt theo KHUÔN
+# đặt mật khẩu mặc định, không bắt theo một chuỗi cụ thể — chuỗi thì đổi, thói quen thì không.
+[[rules]]
+id = "hardcoded-default-password"
+description = "Mật khẩu mặc định viết thẳng trong mã (PWD/PASS/PASSWORD = \"...\" hoặc || \"...\")"
+regex = '''(?i)(?:PWD|PASS|PASSWORD|SECRET)\s*=\s*(?:process\.env\.\w+\s*\|\|\s*)?["'][A-Za-z0-9@#$%^&*_-]{10,}["']'''
+
+[rules.allowlist]
+# Miễn theo GIÁ TRỊ: một chuỗi tự nói rõ nó là đồ vứt đi ("test", "smoke", "ci-only",
+# "drill-only", "CHANGE_ME"…) thì không phải bí mật thật, dù nằm ở đâu.
+regexes = [
+  '''(?i)(test|kiem-thu|smoke|ci-only|drill-only|example|placeholder|CHANGE_ME|dummy|fake)''',
+  # JBSWY3DPEHPK3PXP là VECTOR THỬ CÔNG KHAI của TOTP (RFC 6238 / Google Authenticator) — base32
+  # của "Hello!\xDE\xAD\xBE\xEF". Nó có trong tài liệu và bộ test của gần như mọi thư viện TOTP,
+  # nên nó là hằng số công khai chứ không phải bí mật của ai. Năm file test dùng nó để sinh mã
+  # 6 số tất định (tests/authsess-*.test.js).
+  '''JBSWY3DPEHPK3PXP''',
+]
+# ── HAI COMMIT LỊCH SỬ: MẬT KHẨU DEMO ĐÃ BỊ ĐỐT ────────────────────────────
+# `gitleaks detect` quét TOÀN BỘ LỊCH SỬ (93 commit), không chỉ cây làm việc — CI cố ý đặt
+# `fetch-depth: 0` cho đúng mục đích đó. Chuỗi `GiaNguyenDemo2026` ĐÃ được gỡ khỏi cây làm việc
+# (`grep -r` toàn repo: không còn dòng nào), nhưng nó vẫn nằm trong hai commit dưới đây và chỉ có
+# thể xoá bằng cách VIẾT LẠI LỊCH SỬ — thứ làm hỏng mọi bản clone đang tồn tại.
+#
+# ⚠️ COI NHƯ ĐÃ LỘ. Một chuỗi đã được commit thì vĩnh viễn đọc được từ lịch sử; đừng bao giờ dùng
+#    lại nó ở bất kỳ môi trường nào, kể cả demo.
+#
+# Miễn theo COMMIT chứ không theo giá trị hay đường dẫn: đây là dạng hẹp nhất có thể. Đúng hai
+# commit này được tha; CHÍNH chuỗi đó xuất hiện trong một commit MỚI vẫn bị bắt ngay.
+commits = [
+  "0d5ba969190066ea73346f50ee174339e20e2441", # scripts/rc-qa.mjs (2026-08-11)
+  "83fc9234442bb2074effb2793c6cadb554e725fc", # prisma/seed-demo.js (2026-08-11)
+]

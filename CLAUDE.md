@@ -1,10 +1,12 @@
-# QuanLY — Hướng dẫn cho Claude
+# QuanLY — hướng dẫn riêng cho Claude Code
 
-Hệ quản lý nội bộ đã chạy production tại `gianguyen.cloud`. Brownfield, một lập trình viên.
-Node + TypeScript + Prisma + Postgres + Redis, deploy Docker qua Coolify.
-SPA cũ (`public/js`, ES module thuần) đang được port dần sang React (`web/src`).
+> ## Đọc [AGENTS.md](AGENTS.md) TRƯỚC.
+>
+> Toàn bộ quy ước kỹ thuật, chốt chặn của CI và danh sách "tuyệt đối không phá"
+> nằm ở đó, và áp dụng cho mọi công cụ. File này CHỈ chứa phần riêng của Claude
+> Code — nội dung không lặp lại AGENTS.md.
 
-Trả lời bằng **tiếng Việt**.
+**Trả lời bằng tiếng Việt.**
 
 ---
 
@@ -80,12 +82,17 @@ PRD/epics/`sprint-status.yaml`. Repo hiện **không có** — muốn dùng ph�
 
 ---
 
-## Quy ước chung của repo
+---
 
-- **Đừng đề xuất multi-tenancy/RLS.** Hai công ty (GN + Colorfull) dùng chung nhân viên và
-  chung dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
-- **`projectCode` cố ý free-format** theo từng người — đừng chuẩn hoá hay thêm FK.
-- **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị bỏ qua âm thầm làm lọt tiếng
-  Anh ra UI. Dùng tham số `error`.
-- Sửa SPA cũ trong `public/js` thì **nhớ bump `?v=`** để phá cache.
-- Test integration không chạy được cục bộ — dùng `bash test-on-dev.sh` (chạy trên VM dev).
+## Vì sao file này ngắn
+
+Trước đây `CLAUDE.md` và `AGENTS.md` là hai bản gần như y hệt nhau — `AGENTS.md`
+được tạo bằng cách tìm-thay `Claude` → `Codex` trên `CLAUDE.md`. Phép thay đó
+biến đường dẫn thật `.claude/skills/` thành `.Codex/skills/` (không tồn tại) và
+`.claude/settings.json` thành `.Codex/settings.json`, tức là tài liệu chỉ người
+đọc tới chỗ không có gì.
+
+Nhân đôi tài liệu thì hai bản sẽ trôi khỏi nhau — câu hỏi chỉ là bao lâu. Nay quy
+ước chung nằm ở **một chỗ** (`AGENTS.md`), còn đây giữ đúng phần thật sự riêng
+của Claude Code: bộ skill BMAD cài cục bộ (`.claude/` và `_bmad/` đều nằm trong
+`.gitignore` — chúng KHÔNG có trong bản clone).

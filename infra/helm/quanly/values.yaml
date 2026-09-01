@@ -2,7 +2,14 @@
 
 image:
   repository: ghcr.io/ndh0408/quanly-baogia
-  tag: latest
+  # Ưu tiên digest — bất biến tuyệt đối, rollback luôn quay đúng bản mã cũ.
+  #   digest: "sha256:..."
+  digest: ""
+  # Nếu không dùng digest thì đặt tag TƯỜNG MINH (git sha). Bỏ trống → lấy Chart.appVersion.
+  # "latest" bị chặn (xem helper quanly.image) vì hai pod cùng ReplicaSet có thể chạy hai bản mã
+  # khác nhau và không có gì để rollback về.
+  tag: ""
+  allowMutableTag: false
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -25,6 +32,13 @@ worker:
   enabled: true
   replicaCount: 2
   concurrency: 4
+  # Thời gian cho worker chạy nốt job đang xử lý khi bị dừng (SIGTERM → Worker.close()).
+  # 90 chứ không phải 60: riêng bước sinh file của job xuất đã có trần cứng 30s
+  # (`EXPORT_GEN_TIMEOUT_MS` ở src/exportQueue.ts, áp vào worker qua `sinhFileXuat` trong
+  # src/worker.ts), còn phải cộng tải lên kho object và ghi CSDL.
+  # Cùng con số với infra/k8s/worker.yaml và `stop_grace_period` của compose — ba đường triển
+  # khai lệch nhau thì bản vá chỉ dời chỗ hỏng sang đường khác. CHƯA đo trên cụm thật.
+  terminationGracePeriodSeconds: 90
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 1, memory: 1Gi }
@@ -56,6 +70,15 @@ ingress:
 postgres:
   enabled: true # set false to use external DB
   image: postgres:16-alpine
+  # Mật khẩu Postgres NỘI BỘ. Bản trước ghi CHẾT chuỗi `CHANGE_ME_INTERNAL` trong hai template và
+  # KHÔNG có key nào ở values để đổi — nghĩa là mọi cài đặt chart dùng Postgres nhúng đều chạy với
+  # đúng một mật khẩu mà bất kỳ ai đọc repo cũng biết. NetworkPolicy có chặn pod lạ, nhưng đó là
+  # phòng thủ theo mạng, không phải lý do để dùng thông tin đăng nhập ai cũng biết.
+  # KHÔNG có mặc định dùng được: một placeholder hợp lệ nghĩa là chart cài được và CHẠY được với
+  # mật khẩu mà bất kỳ ai đọc repo cũng biết — không ai bị buộc phải đổi. Bỏ trống thì helper
+  # `quanly.postgresPassword` gọi `required` và chart TỪ CHỐI render, giống hệt cách image.tag=latest
+  # đang bị chặn. Sinh: openssl rand -base64 24
+  password: ""
   storageSize: 20Gi
   resources:
     requests: { cpu: 100m, memory: 256Mi }
@@ -64,8 +87,9 @@ postgres:
 redis:
   enabled: true # set false to use external Redis
   image: redis:7-alpine
-  # Mật khẩu Redis nội bộ (dùng cho --requirepass + nhúng vào REDIS_URL). ĐỔI ở production.
-  password: CHANGE_ME_INTERNAL_REDIS
+  # Mật khẩu Redis nội bộ (dùng cho --requirepass + nhúng vào REDIS_URL). Bỏ trống có chủ đích —
+  # xem chú thích ở postgres.password. Sinh: openssl rand -base64 24
+  password: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
@@ -73,6 +97,35 @@ redis:
 # NetworkPolicy: chặn mọi pod khác (không thuộc release này) kết nối Postgres/Redis. Cần CNI hỗ trợ.
 networkPolicy:
   enabled: true
+
+# === Sao lưu (nhánh Helm) ===
+# Trước đây chart Helm KHÔNG có template sao lưu nào, trong khi nhánh kustomize (infra/k8s/) có đủ
+# hai CronJob. Cài bằng Helm nghĩa là cụm chạy mà không có bản sao lưu nào — và không có gì báo.
+# Bật SẴN có chủ ý: một cơ chế sao lưu mặc định TẮT thì cũng là không có sao lưu.
+# Dùng CSDL do nhà cung cấp quản (snapshot/PITR riêng) thì `backup.enabled=false`.
+backup:
+  enabled: true
+  schedule: "0 2 * * *" # 02:00 hằng ngày
+  keepDays: 14
+  storageSize: 10Gi
+  storageClass: "" # bỏ trống = StorageClass mặc định của cụm
+  image: postgres:16-alpine # phải cùng dòng phiên bản với postgres.image, kẻo pg_dump từ chối server mới hơn
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  objects:
+    # Bản dump CSDL KHÔNG chứa ảnh chứng từ thanh toán (đã rời sang kho object từ 2026-08-11);
+    # thiếu lịch này là mất chứng từ tài chính mà mọi hàng trong CSDL vẫn còn và trỏ vào hư không.
+    # ⚠️ CHƯA CHẠY THẬT TRÊN CLUSTER — xem cảnh báo đầu templates/backup-objects-cronjob.yaml.
+    enabled: true
+    schedule: "30 2 * * *" # 02:30, sau lượt dump CSDL
+    keepManifests: 30
+    storageSize: 50Gi
+    storageClass: ""
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
 
 # === Application config (non-secret) ===
 config:
@@ -103,6 +156,15 @@ secrets:
   REDIS_URL: "" # required if redis.enabled=false
   SESSION_SECRET: "" # REQUIRED, ≥32 chars
   JWT_SECRET: "" # optional; defaults to SESSION_SECRET
+  # BẮT BUỘC ở production: src/config.ts process.exit(1) nếu thiếu → deploy theo file mẫu chết ngay
+  # lúc khởi động, không phải lúc ai đó bật MFA.
+  MFA_ENC_KEY: ""
+  # ⚠️ MẤT KHOÁ NÀY = MẤT DỮ LIỆU. Ba trường PII (CCCD / số tài khoản / lương) được mã hoá bằng nó;
+  # thiếu khoá thì bản ghi mới ghi THÔ (chỉ console.warn) còn bản ghi cũ ném lỗi lúc giải mã.
+  # Sao lưu khoá ở nơi KHÁC với bản dump CSDL.
+  PII_ENC_KEY: ""
+  # /metrics trả 404 ở production khi thiếu token (src/app.ts). ServiceMonitor gửi kèm token này.
+  METRICS_TOKEN: ""
   S3_ENDPOINT: ""
   S3_ACCESS_KEY: ""
   S3_SECRET_KEY: ""
@@ -113,8 +175,6 @@ secrets:
   SMTP_FROM: ""
   TELEGRAM_BOT_TOKEN: ""
   SENTRY_DSN: ""
-  STRIPE_SECRET_KEY: ""
-  STRIPE_WEBHOOK_SECRET: ""
 
 serviceAccount:
   create: true
@@ -126,16 +186,30 @@ securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop: ["ALL"]
-  # readOnlyRootFilesystem: true   # enable after adding a writable /tmp emptyDir
-  #                                 # volume to the deployment template (Prisma engine)
+  # Bật được rồi: template app/worker đã gắn emptyDir vào /tmp cho engine Prisma ghi tạm.
+  readOnlyRootFilesystem: true
 
 podSecurityContext:
   fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 
+# PodDisruptionBudget: khi node được rút (drain/upgrade) k8s vẫn phải giữ tối thiểu ngần này pod
+# app sống. Không có PDB thì một lệnh `kubectl drain` có thể hạ sạch replica cùng lúc = downtime.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # Worker dùng maxUnavailable chứ KHÔNG dùng chung minAvailable với app. Lý do: worker autoscale
+  # xuống minReplicas=1, và `minAvailable: 1` trên một Deployment có đúng 1 pod làm eviction API
+  # từ chối vĩnh viễn → `kubectl drain` treo, node không bao giờ rút được. Với maxUnavailable thì
+  # drain luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ worker.terminationGracePeriodSeconds.
+  workerMaxUnavailable: 1
+
 nodeSelector: {}
 tolerations: []
+# Rải pod app ra các node khác nhau khi có thể (soft anti-affinity — không chặn lập lịch nếu cụm
+# chỉ có 1 node). Hai replica nằm chung một node thì mất node là mất cả hai.
+spreadAcrossNodes: true
 affinity: {}
 
 # Metrics scraping

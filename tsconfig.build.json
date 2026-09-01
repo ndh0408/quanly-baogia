@@ -1,0 +1,24 @@
+{
+  // Build cấu hình PHÁT SINH mã (tsconfig.json gốc là noEmit — chỉ để typecheck).
+  //
+  // VÌ SAO CÓ FILE NÀY: production trước đây chạy `node --import tsx src/server.js`, tức container
+  // phải cõng theo tsx + esbuild và biên dịch lại mã ở MỖI lần khởi động. Nặng hơn, và quan trọng
+  // hơn: Helm/k8s lại gọi `node src/server.js` (không có loader) — file đó KHÔNG TỒN TẠI, pod chết
+  // ngay. Biên dịch sẵn ra dist/ để Docker/Compose/Helm/k8s dùng CHUNG một artifact `node dist/*.js`.
+  //
+  // rootDir="src" (KHÔNG phải ".") là điều kiện bắt buộc: mã tính đường dẫn tài nguyên bằng
+  // `__dirname/..` (public/, fonts/). Với rootDir="src" thì dist/app.js có __dirname=/app/dist →
+  // `../public` = /app/public. Nếu rootDir="." thì thành dist/src/app.js → `../public` = dist/public
+  // (không tồn tại) và toàn bộ frontend tĩnh 404.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": false,
+    "removeComments": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"],
+  "exclude": ["node_modules", "web", "public", "tests", "prisma"]
+}

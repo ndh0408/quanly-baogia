@@ -13,7 +13,11 @@ import {
   retargetPastedFormulas,
   shiftFormulaRefs,
   adjustRefsForRowEdit,
-} from "../public/grid-clipboard.js";
+} from "../web/src/lib/clipboard.ts";
+// NGUỒN ĐÃ ĐỔI 2026-08-26: `public/grid-clipboard.js` bị gỡ cùng SPA cũ. Bản React
+// `web/src/lib/clipboard.ts` là port THUẦN của nó và export ĐÚNG 13 hàm y hệt, nên bộ test này
+// chuyển thẳng sang mà không sửa một assertion nào — đây vẫn là lớp phủ DUY NHẤT cho logic
+// clipboard của lưới (web/ không có clipboard.test.ts riêng).
 
 // GN template export columns (no days, has Chi Tiết), as copied B:H (STT..Thành Tiền)
 const GN_ROLES = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];

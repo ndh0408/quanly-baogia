@@ -1,0 +1,98 @@
+{{- if .Values.backup.enabled }}
+{{/*
+  SAO LƯU CSDL cho NHÁNH HELM.
+
+  VÌ SAO CÓ FILE NÀY: nhánh kustomize (infra/k8s/backup-cronjob.yaml) đã có lịch dump từ lâu, còn
+  chart Helm — đúng cái mà CI render và kubeconform kiểm — thì KHÔNG có template sao lưu nào. Cài
+  bằng Helm nghĩa là cụm chạy mà không có bản sao lưu nào, và không có gì báo cho biết điều đó.
+  Ưu tiên số 1 của repo là không mất dữ liệu, nên khoảng trống này không phải chuyện hình thức.
+
+  Với CSDL do nhà cung cấp quản (postgres.enabled=false) thì snapshot/PITR của họ vẫn tốt hơn;
+  đây là bản dự phòng KHẢ CHUYỂN để LUÔN có một bản sao. Tắt bằng `--set backup.enabled=false`.
+
+  Nội dung bước dump giữ ĐÚNG như nhánh kustomize: ghi ra .partial → `pg_restore -l` đọc lại mục
+  lục (bắt file cụt mà kiểm cỡ bỏ lọt) → `mv` nguyên tử → ghi checksum → CHỈ SAU ĐÓ mới prune.
+  Ba đường triển khai lệch nhau thì bản vá chỉ dời chỗ hỏng sang đường khác.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "quanly.fullname" . }}-db-backups
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.backup.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.storageSize }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "quanly.fullname" . }}-db-backup
+  labels: {{- include "quanly.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: {{- include "quanly.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: db-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70 # user postgres trong ảnh alpine
+            fsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: {{ .Values.backup.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quanly.secretName" . }}
+                      key: DATABASE_URL
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  # Bản dump chứa CCCD / số tài khoản / lương THÔ → không để ai-cũng-đọc.
+                  umask 077
+                  STAMP=$(date +%Y%m%d_%H%M%S)
+                  OUT="/backups/quanly_${STAMP}.dump"
+                  echo "Backing up to ${OUT}"
+                  pg_dump "$DATABASE_URL" -Fc -f "$OUT.partial"
+                  pg_restore -l "$OUT.partial" > /dev/null
+                  mv "$OUT.partial" "$OUT"
+                  sha256sum "$OUT" | awk '{print $1}' > "$OUT.sha256"
+                  echo "Pruning backups older than {{ .Values.backup.keepDays }} days"
+                  find /backups -name '*.dump' -mtime +{{ .Values.backup.keepDays }} -delete
+                  find /backups -name '*.dump.sha256' -mtime +{{ .Values.backup.keepDays }} -delete
+                  find /backups -name '*.dump.partial' -mmin +180 -delete
+                  echo "BACKUP_DONE"
+              resources: {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+                # readOnlyRootFilesystem=true: pg_dump/pg_restore vẫn cần /tmp ghi được.
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ include "quanly.fullname" . }}-db-backups
+            - { name: tmp, emptyDir: {} }
+{{- end }}

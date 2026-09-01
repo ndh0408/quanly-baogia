@@ -96,10 +96,19 @@ export async function bulkTags(req: Request) {
   if (!add.length && !remove.length) throw httpError(400, "Chưa chọn từ khóa để gắn hoặc gỡ");
   const venues = await prisma.venue.findMany({ where: { id: { in: venueIds } }, select: { id: true, name: true, tags: true } });
   if (!venues.length) throw httpError(404, "Không tìm thấy rạp nào");
-  for (const v of venues) {
-    const next = [...new Set([...v.tags.filter((t) => !remove.includes(t)), ...add])];
-    await prisma.venue.update({ where: { id: v.id }, data: { tags: next } });
-  }
+  // Nhãn mới tính ở JS để giữ NGUYÊN quy tắc thứ tự cũ (`new Set`: nhãn cũ giữ vị trí, nhãn mới nối
+  // vào cuối) — hàng chip trên giao diện hiện đúng thứ tự này. Nhưng GHI bằng MỘT lệnh UPDATE:
+  // vòng `for` cũ bắn tối đa 1000 lệnh rời rạc, không transaction, nên hỏng giữa chừng để lại nửa
+  // danh mục mang nhãn mới, nửa kia không — mà người dùng chỉ thấy một lỗi. Một lệnh thì nguyên tử
+  // sẵn, không cần transaction lồng (bọc 1000 round-trip vào interactive transaction lại đổi hỏng-
+  // một-phần thành hỏng-toàn-phần khi chạm trần thời gian).
+  const nhanMoi = venues.map((v) => ({ id: v.id, tags: [...new Set([...v.tags.filter((t) => !remove.includes(t)), ...add])] }));
+  // "updatedAt" phải tự đặt: câu raw không đi qua `@updatedAt` của Prisma.
+  await prisma.$executeRaw`
+    UPDATE "Venue" v
+       SET "tags" = ARRAY(SELECT jsonb_array_elements_text(d.tags)), "updatedAt" = now()
+      FROM (SELECT (e->>'id')::int AS id, e->'tags' AS tags FROM jsonb_array_elements(${JSON.stringify(nhanMoi)}::jsonb) e) d
+     WHERE v.id = d.id`;
   await audit(req, "venue.tags.bulk", { resource: "venue", resourceId: venues[0].id, before: venues, after: { add, remove, count: venues.length } });
   return { ok: true, updated: venues.length };
 }
@@ -185,22 +194,69 @@ export async function mergeVenue(req: Request) {
     const targetItems = await tx.venueItem.findMany({ where: { venueId: intoId } });
     const max = await tx.venueItem.aggregate({ where: { venueId: intoId }, _max: { sortOrder: true } });
     let next = (max._max.sortOrder ?? 0) + 1;
-    let movedItems = 0;
-    let removedDuplicates = 0;
+    // PHÂN LOẠI TRƯỚC, thuần CPU — vòng lặp cũ bắn 1-2 round-trip MỖI hạng mục, tất cả nối đuôi
+    // nhau bên trong transaction đang giữ advisory lock của cả hai rạp. Thứ tự duyệt và mọi quy
+    // tắc (khớp trùng, gộp metadata, cấp sortOrder nối tiếp) giữ NGUYÊN: `targetItems` vẫn lớn dần
+    // theo từng hạng mục đã chuyển, nên một hạng mục nguồn vẫn có thể khớp với hạng mục vừa chuyển.
+    const chuyen: { id: number; sortOrder: number }[] = [];
+    const xoa: number[] = [];
+    const doiMeta: { id: number; data: Record<string, any> }[] = [];
     for (const it of from.items) {
       const target = targetItems.find((candidate) => sameVenueItem(candidate, it));
       if (target) {
         const merged = mergeVenueItemMetadata(target, it);
-        await tx.venueItem.update({ where: { id: target.id }, data: merged });
+        // CHỈ ghi khi thật sự đổi. Gộp hai bản chép của cùng một hạng mục (ca thường gặp nhất)
+        // cho ra y nguyên bản cũ — bản trước vẫn bắn một UPDATE cho mỗi hạng mục như thế.
+        if (khacNhau(target, merged)) doiMeta.push({ id: target.id, data: merged });
         Object.assign(target, merged);
-        await tx.venueItem.delete({ where: { id: it.id } });
-        removedDuplicates++;
+        xoa.push(it.id);
         continue;
       }
-      await tx.venueItem.update({ where: { id: it.id }, data: { venueId: intoId, sortOrder: next++ } });
+      chuyen.push({ id: it.id, sortOrder: next++ });
       targetItems.push(it);
-      movedItems++;
     }
+    const movedItems = chuyen.length;
+    const removedDuplicates = xoa.length;
+
+    // Một lệnh cho TOÀN BỘ hạng mục chuyển sang (đổi venueId + đánh lại sortOrder theo bảng ánh xạ).
+    // "updatedAt" phải tự đặt: câu raw không đi qua `@updatedAt` của Prisma.
+    if (chuyen.length) {
+      await tx.$executeRaw`
+        UPDATE "VenueItem" v
+           SET "venueId" = ${intoId}, "sortOrder" = d."sortOrder", "updatedAt" = now()
+          FROM (SELECT (e->>'id')::int AS id, (e->>'sortOrder')::int AS "sortOrder"
+                  FROM jsonb_array_elements(${JSON.stringify(chuyen)}::jsonb) e) d
+         WHERE v.id = d.id`;
+    }
+    // Một lệnh cho TOÀN BỘ hạng mục đích phải ghi lại metadata (ghi chú nối, nhóm, kích thước…).
+    // Trước đây là `for … await tx.venueItem.update(...)`: một round-trip cho MỖI hạng mục, nối
+    // đuôi nhau trong transaction đang giữ advisory lock của cả hai rạp. Ca này KHÔNG hiếm — nó
+    // chính là lý do gộp rạp tồn tại: cùng một hạng mục được hai rạp ghi bằng hai kiểu ghi chú/nhóm
+    // khác nhau. Đo được: 20 hạng mục = 21 câu lệnh, sau khi gộp còn 2
+    // (tests/b2-venue-merge-meta-batch.test.js).
+    //
+    // `e->>'x'` trả NULL khi giá trị JSON là null nên cột nullable (`dim`/`note`/`widthM`…) giữ
+    // đúng ngữ nghĩa null của `mergeVenueItemMetadata`. CHỈ ghi 7 cột mà hàm đó sinh ra — `unit`,
+    // `name`, `sortOrder`, `venueId` không nằm trong bản gộp nên phải nguyên vẹn.
+    // "updatedAt" tự đặt: câu raw không đi qua `@updatedAt` của Prisma (giống lệnh chuyển ở trên).
+    if (doiMeta.length) {
+      const payload = doiMeta.map((u) => ({ id: u.id, ...u.data }));
+      await tx.$executeRaw`
+        UPDATE "VenueItem" v
+           SET "category" = d.category, "dim" = d.dim, "widthM" = d."widthM", "heightM" = d."heightM",
+               "quantity" = d.quantity, "note" = d.note, "active" = d.active, "updatedAt" = now()
+          FROM (SELECT (e->>'id')::int AS id,
+                       e->>'category' AS category,
+                       e->>'dim' AS dim,
+                       (e->>'widthM')::numeric AS "widthM",
+                       (e->>'heightM')::numeric AS "heightM",
+                       (e->>'quantity')::numeric AS quantity,
+                       e->>'note' AS note,
+                       (e->>'active')::boolean AS active
+                  FROM jsonb_array_elements(${JSON.stringify(payload)}::jsonb) e) d
+         WHERE v.id = d.id`;
+    }
+    if (xoa.length) await tx.venueItem.deleteMany({ where: { id: { in: xoa } } });
     await tx.venue.delete({ where: { id } });
     return { from, into, movedItems, removedDuplicates };
   });
@@ -281,6 +337,14 @@ const mergeVenueItemMetadata = (target: Record<string, any>, source: Record<stri
     active: Boolean(target.active || source.active),
   };
 };
+
+/**
+ * Bản gộp có ĐỔI gì so với hạng mục đích không? So trên CHUỖI vì `widthM/heightM/quantity` là
+ * `Decimal` của Prisma — `===` giữa hai Decimal cùng giá trị vẫn FALSE, và so kiểu đó thì mọi lần
+ * gộp đều "có đổi", tức chẳng bỏ được lệnh ghi nào.
+ */
+const khacNhau = (target: Record<string, any>, merged: Record<string, any>) =>
+  Object.keys(merged).some((k) => String(target[k] ?? "") !== String(merged[k] ?? ""));
 
 class VenueItemMovedDuringLock extends Error {}
 

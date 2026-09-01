@@ -1,18 +1,86 @@
 // Worker process. Run via `npm run worker` in its own container.
 // Pulls jobs from BullMQ queues and executes them off the request thread.
 
+import http from "node:http";
 import type { Worker, Job } from "bullmq";
+import { UnrecoverableError } from "bullmq";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { prisma } from "./db.js";
-import { createWorker, getQueue, QUEUES, isQueueEnabled } from "./queue.js";
+import { createWorker, getQueue, QUEUES, isQueueEnabled, capNhatDoSauHangDoi } from "./queue.js";
 import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
+import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS, capNhatCongSuatXuat } from "./exportQueue.js";
+import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
-import { initSentry, captureError, flushSentry, exportJobsTotal } from "./observability.js";
+import { initSentry, captureError, flushSentry, exportJobsTotal, registry, khopTokenBearer, dangKyChanSuCoTienTrinh } from "./observability.js";
+import { tenFileXuat } from "./quoteUtils.js";
+
+// ─── /metrics của TIẾN TRÌNH WORKER ─────────────────────────────────────────
+//
+// Trước bản vá, `grep -nE "listen|node:http|registry" src/worker.ts` không ra một dòng nào: worker
+// nạp observability.js (nên có registry, có collectDefaultMetrics và TĂNG `export_jobs_total` ở
+// `withExportMetric` bên dưới) nhưng KHÔNG mở cổng nào để đọc số đó. Mọi job chạy qua hàng đợi vì
+// thế vô hình với Prometheus; số duy nhất lên được biểu đồ là phần chạy nội tuyến trong tiến trình
+// API — đúng phần KHÔNG phải đường chạy chính.
+//
+// Cổng mặc định 9091 (Prometheus quy ước dải 909x cho exporter phụ). Đặt WORKER_METRICS_PORT=0 để
+// tắt hẳn — trong dev/CI, nơi mở thêm một cổng chỉ tổ va nhau.
+//
+// CHƯA XONG PHÍA HẠ TẦNG: infra/k8s/worker.yaml vẫn chưa khai containerPort lẫn annotation
+// `prometheus.io/scrape` (khác app-deployment.yaml), và prod hiện chạy docker-compose không có
+// Prometheus nào. Hai file đó nằm ngoài tập file của nhóm này — xem docs/REMAINING_RISKS.md.
+export const WORKER_METRICS_PORT = Number(process.env.WORKER_METRICS_PORT ?? 9091);
+
+/**
+ * Máy chủ HTTP tí hon chỉ phục vụ GET /metrics.
+ *
+ * Gác y hệt /metrics của app (src/app.ts): production mà không có METRICS_TOKEN thì TRẢ 404 (fail
+ * closed — số liệu lộ tên route, lưu lượng và tỉ lệ lỗi); có token thì bắt buộc Bearer đúng, so ở
+ * thời gian không đổi. `token`/`laProd` nhận từ ngoài được để test kiểm cả hai nhánh mà không phải
+ * giả lập cả module config.
+ *
+ * `cong = 0` là để hệ điều hành cấp một cổng rảnh (dùng trong test).
+ */
+export function taoMayChuMetrics(
+  cong: number = WORKER_METRICS_PORT,
+  { token = config.METRICS_TOKEN, laProd = config.NODE_ENV === "production" }: { token?: string; laProd?: boolean } = {}
+) {
+  const srv = http.createServer((req, res) => {
+    void (async () => {
+      const duong = (req.url || "").split("?")[0];
+      if (duong !== "/metrics") { res.statusCode = 404; return res.end(); }
+      if (laProd && !token) { res.statusCode = 404; return res.end(); }
+      if (token && !khopTokenBearer(req.headers.authorization, token)) { res.statusCode = 401; return res.end(); }
+      try {
+        // PHẢI CẬP NHẬT MẪU SỐ TRƯỚC KHI KẾT XUẤT, y như src/app.ts.
+        //
+        // Bản đầu chỉ gọi `registry.metrics()`. Hai gauge kia là loại phải được ĐẨY giá trị mỗi lần
+        // scrape (chúng đọc trạng thái tức thời của cổng xuất và của hàng đợi), nên bỏ bước này thì
+        // chúng phát ra 0 — và phát ra 0 ĐÚNG Ở TIẾN TRÌNH mà cổng xuất file thật sự chạy:
+        // `sinhFileXuat` (dưới) đi qua `runExportJob`, tức `gate` của src/exportQueue.ts sống trong
+        // tiến trình WORKER, không phải tiến trình app. Nghĩa là bản scrape của app cho mẫu số của
+        // một cổng gần như luôn rỗng, còn bản scrape của worker — nơi có số thật — lại báo 0.
+        await capNhatDoSauHangDoi();
+        capNhatCongSuatXuat();
+        res.setHeader("Content-Type", registry.contentType);
+        res.end(await registry.metrics());
+      } catch (e) {
+        logger.warn({ err: e instanceof Error ? e.message : String(e) }, "không kết xuất được /metrics của worker");
+        res.statusCode = 500;
+        res.end();
+      }
+    })();
+  });
+  // KHÔNG để lỗi cổng giết tiến trình worker: số liệu là thứ phụ, job mới là việc chính. Cổng bị
+  // chiếm (hai worker cùng máy) phải thành một dòng log, không phải một lần restart.
+  srv.on("error", (e) => logger.warn({ err: e.message, cong }, "không mở được cổng /metrics của worker"));
+  srv.listen(cong);
+  return srv;
+}
 
 // Increment the export_jobs_total metric around a generator (counts both the
 // worker path and the inline fallback path in queue.js, so the metric is real).
@@ -24,6 +92,99 @@ async function withExportMetric(format: string, fn: () => Promise<any>) {
   } catch (err) {
     exportJobsTotal.inc({ format, status: "error" });
     throw err;
+  }
+}
+
+/**
+ * Sinh file cho MỘT job xuất nền — qua luồng worker, CÓ TRẦN THỜI GIAN THẬT.
+ *
+ * ── VÌ SAO KHÔNG GỌI THẲNG buildQuoteBuffer/renderQuotePdf NỮA ───────────────
+ * Bản trước gọi thẳng, ngay trên vòng lặp sự kiện của tiến trình worker. Ba hệ quả đã kiểm lại
+ * bằng cách đọc mã, không suy đoán:
+ *
+ *   1) KHÔNG CÓ TRẦN THỜI GIAN NÀO. `buildQuoteBuffer` là hàm async thuần (không worker_threads,
+ *      không setTimeout), `putObject` không đặt requestTimeout, BullMQ v4+ bỏ hẳn job timeout, và
+ *      `workerOptionsFor` (src/queue.ts) chỉ đặt lockDuration/stalledInterval. Thế mà ân hạn dừng
+ *      90s ở infra/k8s/worker.yaml, infra/helm/quanly/values.yaml và hai file compose đều tự xưng
+ *      là neo vào "trần cứng 30s của generateInWorker" — trong khi src/worker.ts trước đây thậm
+ *      chí KHÔNG import exportQueue.js. Con số 90 neo vào hư không.
+ *
+ *   2) Hậu quả cụ thể: báo giá lớn (đường xuất không chặn số item, xem docs/REMAINING_RISKS.md)
+ *      dựng workbook mất vài phút → deploy gửi SIGTERM → `Worker.close()` chờ job → hết 90s →
+ *      SIGKILL. Khoá BullMQ giữ tới EXPORT_JOB_LOCK_MS (300s) mới trả job về hàng chờ. Bị cắt HAI
+ *      lần (deploy rồi rollback — chính deploy.sh hướng dẫn rollback bằng một lượt `up -d` nữa) là
+ *      chạm maxStalledCount mặc định = 1: BullMQ đánh hỏng VĨNH VIỄN. Người dùng bấm Xuất, chờ,
+ *      không bao giờ nhận file, cũng không có lỗi nào nói cho họ biết.
+ *
+ *   3) Nó CHẸN vòng lặp sự kiện của worker, nên timer gia hạn khoá của BullMQ không chạy được —
+ *      đúng thứ mà chú thích ở src/queue.ts phải nâng lockDuration lên 5 phút để bù. Đưa việc sinh
+ *      file sang luồng riêng là gỡ đúng gốc chứ không bù thêm nữa.
+ *
+ * ── TRẦN NÀY LÀ TRẦN THẬT ────────────────────────────────────────────────────
+ * `generateInWorker` hết hạn thì `w.terminate()` GIẾT luồng: công việc dừng hẳn, CPU và RAM được
+ * trả lại. Khác hẳn `Promise.race`, thứ chỉ bỏ mặc lời hứa còn workbook vẫn dựng tiếp.
+ *
+ * `choPhepNoiTuyen: false` là phần bắt buộc: mặc định `runExportJob` rơi về sinh file NỘI TUYẾN
+ * khi luồng lỗi, mà đường nội tuyến không có trần — giữ nó lại thì trần vừa đặt bị vô hiệu ngay ở
+ * lần quá hạn đầu tiên. Đường HTTP ĐỒNG BỘ (src/routes/export.routes.ts) KHÔNG đổi: nó vẫn dùng
+ * mặc định `true` và giữ nguyên đường rơi về nội tuyến như trước.
+ *
+ * Quá hạn ném `UnrecoverableError` để BullMQ hỏng NGAY, không thử lại: `attempts: 3` nghĩa là ba
+ * lượt nghiến CPU y hệt nhau cho cùng một kết quả quá hạn. Thà báo lỗi rõ cho người dùng đọc được
+ * ở GET /api/jobs/:queue/:id (`failedReason`) — thứ mà đường cũ không hề có.
+ */
+export async function sinhFileXuat(kind: "xlsx" | "pdf", quote: any, noiTuyen: () => any) {
+  try {
+    return await runExportJob(kind, JSON.parse(JSON.stringify(quote)), noiTuyen, { choPhepNoiTuyen: false });
+  } catch (e) {
+    if (isTimeoutError(e)) {
+      const giay = Math.round(EXPORT_GEN_TIMEOUT_MS / 1000);
+      throw new UnrecoverableError(
+        `Báo giá quá lớn: sinh file vượt trần ${giay}s. Nâng EXPORT_GEN_TIMEOUT_MS (và ân hạn dừng của worker) nếu đây là báo giá hợp lệ.`
+      );
+    }
+    throw e;
+  }
+}
+
+// ─── TRẦN KÍCH THƯỚC cho đường xuất NỀN ─────────────────────────────────────
+//
+// Đường xuất ĐỒNG BỘ đã có trần từ trước: src/routes/export.routes.ts kiểm `MAX_EXPORT_SHEETS`
+// (100) / `MAX_EXPORT_ITEMS` (20 000) rồi trả 413. Đường xuất NỀN thì KHÔNG có phép kiểm kích
+// thước nào — route enqueue (src/routes/jobs.routes.ts) chưa từng đọc báo giá nên không biết nó to
+// cỡ nào, còn processor thì nạp xong là lao thẳng vào sinh file. Trần duy nhất là trần THỜI GIAN
+// 30s của generateInWorker, tức báo giá khổng lồ vẫn đốt trọn 30s CPU một luồng rồi mới hỏng — và
+// người dùng bấm lại thì đốt tiếp.
+//
+// ── TRẦN NÀY PHẢI RỘNG HƠN TRẦN ĐỒNG BỘ, KHÔNG ĐƯỢC BẰNG ──────────────────────────────────
+// Bản đầu chép đúng 100/20 000 của export.routes.ts với lý lẽ "hai đường phải từ chối cùng một
+// tập báo giá". Lý lẽ đó SAI, và sai nghiêm trọng: đường đồng bộ trả 413 kèm CHÍNH LỜI KHUYÊN
+// "vui lòng dùng xuất nền (async)" (src/routes/export.routes.ts). Cho đường nền từ chối đúng tập
+// đó là bịt nốt lối thoát duy nhất mà thông điệp kia chỉ tới — báo giá lớn hết đường tải về.
+//
+// Đường nền tồn tại ĐỂ làm việc mà đường đồng bộ không kham nổi: nó chạy trong worker_threads,
+// không chẹn request nào, và đã có trần THỜI GIAN thật (30s, `terminate()` giết luồng). Nên trần
+// KÍCH THƯỚC ở đây chỉ để từ chối SỚM thứ chắc chắn không thể xong, không phải để lặp lại trần kia.
+//
+// Mốc: đúng bằng SỨC CHỨA CỦA ĐƯỜNG LƯU (60 trang × 1000 dòng = 60 000). Nghĩa là mọi báo giá
+// LƯU ĐƯỢC đều XUẤT ĐƯỢC bằng đường nền — lời khuyên trong thông điệp 413 thành lời khuyên thật.
+const MAX_EXPORT_SHEETS = MAX_SAVE_SHEETS;
+const MAX_EXPORT_ITEMS = MAX_ASYNC_EXPORT_ITEMS;
+
+/**
+ * Chặn báo giá vượt trần TRƯỚC khi tiêu CPU.
+ *
+ * Ném `UnrecoverableError` chứ không phải Error thường: kích thước báo giá không đổi giữa các lần
+ * thử, nên `attempts: 3` chỉ là ba lượt từ chối y hệt nhau. Thông điệp đi thẳng vào `failedReason`
+ * mà GET /api/jobs/:queue/:id trả về, nên người dùng đọc được cách thoát (tách bớt trang).
+ */
+function chanBaoGiaQuaLon(quote: any) {
+  const soSheet = quote?.sheets?.length || 0;
+  const soDong = (quote?.sheets || []).reduce((n: number, s: any) => n + (s?.items?.length || 0), 0);
+  if (soSheet > MAX_EXPORT_SHEETS || soDong > MAX_EXPORT_ITEMS) {
+    throw new UnrecoverableError(
+      `Báo giá quá lớn để xuất (${soSheet} trang / ${soDong} dòng; trần ${MAX_EXPORT_SHEETS} trang / ${MAX_EXPORT_ITEMS} dòng). Báo giá này vượt cả sức chứa của đường lưu — hãy nhân bản rồi tách bớt trang sang bản mới.`
+    );
   }
 }
 
@@ -44,7 +205,8 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
-      const buf = await buildQuoteBuffer(quote);
+      chanBaoGiaQuaLon(quote);
+      const buf = await sinhFileXuat("xlsx", quote, () => buildQuoteBuffer(quote));
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
         await putObject({
@@ -52,10 +214,28 @@ export const processors = {
           contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        const url = await presignDownload(key, { expiresIn: 24 * 3600 });
+        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
+        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
+        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
+        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
+        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
+        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
+        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
+        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
+        // chính lượt vá gộp hàm đã xoá.)
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "xlsx") });
         return { key, url, size: buf.length };
       }
-      return { size: buf.length, inline: buf.toString("base64") };
+      // KHÔNG nhét file vào giá trị trả về của job.
+      //
+      // BullMQ lưu returnvalue TRONG REDIS và giữ lại tới `removeOnComplete: 1000` job đã xong.
+      // Một file .xlsx 5MB thành ~6,7MB base64; 1000 job như thế là ~6,7GB trong một Redis đặt
+      // maxmemory 256mb. Với `noeviction` (đúng cấu hình prod) Redis sẽ TỪ CHỐI GHI — toàn bộ hệ
+      // hàng đợi đứng, không chỉ riêng việc xuất file.
+      //
+      // Đường xuất NỀN tồn tại để trả về một ĐƯỜNG TẢI. Không có kho object thì nó không có gì để
+      // trả — nói thẳng, thay vì âm thầm nhồi Redis. Route enqueue đã chặn sớm hơn; đây là chốt cuối.
+      throw new Error("Xuất nền cần kho object (S3_*). Chưa cấu hình — dùng chức năng xuất trực tiếp.");
     }),
     "pdf": (job: any) => withExportMetric("pdf", async () => {
       const { quoteId, requestedBy } = job.data;
@@ -67,23 +247,43 @@ export const processors = {
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");
-      const buf: any = await renderQuotePdf({
+      chanBaoGiaQuaLon(quote);
+      const pdfQuote = {
         ...quote,
         subtotal: Number(quote.subtotal),
         vat: Number(quote.vat),
         total: Number(quote.total),
         vatPercent: Number(quote.vatPercent),
-      });
+      };
+      const buf: any = await sinhFileXuat("pdf", pdfQuote, () => renderQuotePdf(pdfQuote));
       if (isStorageEnabled()) {
         const key = `exports/${quote.quoteNumber}-${Date.now()}.pdf`;
         await putObject({
           key, body: buf, contentType: "application/pdf",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        const url = await presignDownload(key, { expiresIn: 24 * 3600 });
+        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
+        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
+        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
+        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
+        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
+        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
+        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
+        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
+        // chính lượt vá gộp hàm đã xoá.)
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "pdf") });
         return { key, url, size: buf.length };
       }
-      return { size: buf.length, inline: buf.toString("base64") };
+      // KHÔNG nhét file vào giá trị trả về của job.
+      //
+      // BullMQ lưu returnvalue TRONG REDIS và giữ lại tới `removeOnComplete: 1000` job đã xong.
+      // Một file .xlsx 5MB thành ~6,7MB base64; 1000 job như thế là ~6,7GB trong một Redis đặt
+      // maxmemory 256mb. Với `noeviction` (đúng cấu hình prod) Redis sẽ TỪ CHỐI GHI — toàn bộ hệ
+      // hàng đợi đứng, không chỉ riêng việc xuất file.
+      //
+      // Đường xuất NỀN tồn tại để trả về một ĐƯỜNG TẢI. Không có kho object thì nó không có gì để
+      // trả — nói thẳng, thay vì âm thầm nhồi Redis. Route enqueue đã chặn sớm hơn; đây là chốt cuối.
+      throw new Error("Xuất nền cần kho object (S3_*). Chưa cấu hình — dùng chức năng xuất trực tiếp.");
     }),
   },
   [QUEUES.EMAIL]: {
@@ -120,6 +320,10 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   }
   logger.info({ env: config.NODE_ENV }, "Worker starting");
 
+  // Mở /metrics của chính tiến trình này (0 = tắt). Xem khối chú thích ở `taoMayChuMetrics`.
+  const mayChuMetrics = WORKER_METRICS_PORT > 0 ? taoMayChuMetrics(WORKER_METRICS_PORT) : null;
+  if (mayChuMetrics) logger.info({ cong: WORKER_METRICS_PORT }, "worker /metrics đang lắng nghe");
+
   const workers: Worker[] = [];
   for (const [queueName, jobs] of Object.entries(processors)) {
     const w = createWorker(queueName, async (job: Job) => {
@@ -151,6 +355,9 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Worker shutting down");
+    // Đóng cổng metrics NGAY: nó không giữ dữ liệu nghiệp vụ nào, mà một kết nối keep-alive của
+    // Prometheus còn mở là đủ giữ tiến trình sống qua mốc ân hạn.
+    mayChuMetrics?.close();
     try {
       await Promise.all(workers.map((w) => w.close()));
     } finally {
@@ -161,16 +368,8 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
-  // A worker had no top-level crash handlers — an unexpected throw died silently.
-  process.on("unhandledRejection", async (reason) => {
-    logger.error({ err: reason instanceof Error ? reason.message : String(reason) }, "worker unhandledRejection");
-    captureError(reason instanceof Error ? reason : new Error(String(reason)), { kind: "unhandledRejection" });
-    await flushSentry();
-  });
-  process.on("uncaughtException", async (err) => {
-    logger.error({ err: err.message, stack: err.stack }, "worker uncaughtException — exiting");
-    captureError(err, { kind: "uncaughtException" });
-    await flushSentry();
-    process.exit(1);
-  });
+  // Sự cố cấp tiến trình (worker trước đây chết ÊM khi có throw ngoài dự tính). Dùng CHUNG chốt với
+  // src/server.ts thay vì chép lại: hai bản chép tay đã trôi khỏi nhau đúng một lần rồi — bản của
+  // worker báo Sentry và thoát, bản của server chỉ log. Xem src/observability.ts.
+  dangKyChanSuCoTienTrinh();
 }

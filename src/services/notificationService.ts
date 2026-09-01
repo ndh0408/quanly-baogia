@@ -3,6 +3,7 @@
 // validate → gọi service → res. Mẫu chuẩn theo customerService.ts.
 import type { Request } from "express";
 import { prisma } from "../db.js";
+import { phanTrang } from "../pagination.js";
 
 export async function listNotifications(req: Request) {
   const where: any = { userId: req.session.userId };
@@ -16,10 +17,12 @@ export async function listNotifications(req: Request) {
       take: (req.query as any).size,
     }),
   ]);
-  return {
-    data: rows.map((r) => ({ ...r, id: r.id.toString() })),
-    meta: { total, page: (req.query as any).page, size: (req.query as any).size, pageCount: Math.ceil(total / (req.query as any).size) },
-  };
+  return phanTrang(
+    rows.map((r) => ({ ...r, id: r.id.toString() })),
+    total,
+    (req.query as any).page,
+    (req.query as any).size,
+  );
 }
 
 export async function unreadCount(req: Request) {

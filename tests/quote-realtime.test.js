@@ -3,7 +3,7 @@
 // (1b) PRESENCE — POST /api/stream/presence open/heartbeat/close; 2 người mở cùng báo giá thấy nhau.
 // Drive REAL app qua supertest — cần Postgres có schema (CI cấp; local tự skip).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -29,7 +29,7 @@ describe.runIf(dbAvailable)("Mức 1 realtime — optimistic lock + presence (in
     company = await prisma.company.create({ data: { code: `${TAG}-co`, name: `${TAG} Co`, address: "1 Test St", quotePrefix: "RT" } });
     template = await prisma.quoteTemplate.create({ data: { code: `${TAG}-tpl`, name: `${TAG} Template`, companyId: company.id, filePath: "templates/Unibenfood.xlsx" } });
     [aU, bU] = await Promise.all([makeUser("a"), makeUser("b")]);
-    a = request.agent(app); b = request.agent(app);
+    a = agentWithCsrf(app); b = agentWithCsrf(app);
     await Promise.all([login(a, aU), login(b, bU)]);
   });
 

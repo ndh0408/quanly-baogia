@@ -4,6 +4,7 @@
 //       POST /confirm (admin)    → AuditEvent action "personnel.confirm" có before.confirmedAt=null + after.confirmedAt!=null.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
@@ -47,7 +48,7 @@ describe.runIf(dbAvailable)("GĐ1 #3 — audit before/after pay/confirm (integra
     [adminU, mgrU, acctU] = await Promise.all([
       makeUser("admin", "admin"), makeUser("manager", "mgr"), makeUser("accountant", "acct"),
     ]);
-    admin = request.agent(app); mgr = request.agent(app); acct = request.agent(app);
+    admin = agentWithCsrf(app); mgr = agentWithCsrf(app); acct = agentWithCsrf(app);
     await Promise.all([login(admin, adminU), login(mgr, mgrU), login(acct, acctU)]);
   });
 

@@ -5,17 +5,34 @@ import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import { getQueue, QUEUES, isQueueEnabled } from "../queue.js";
+import { isStorageEnabled } from "../storage.js";
 import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
+import { createLimiter } from "../rateLimit.js";
 
 const router = Router();
 // requireAuth is applied PER ROUTE, not router-wide: this router is mounted at
 // the /api root, so a router-wide guard would swallow every unmatched /api/*
 // path (incl. /api/health and the 404 handler) with a 401.
 
+// Trần RIÊNG cho đường xuất NỀN. Đường xuất ĐỒNG BỘ đã có `createLimiter("export", 30/phút)` ở
+// src/routes/export.routes.ts, còn đường này trước đó chỉ nằm dưới limiter chung của /api/ — mà mỗi
+// lượt ở đây là một job nặng CPU trong tiến trình worker. 10/phút rộng hơn nhiều nhịp làm việc thật
+// (một người xuất vài báo giá mỗi giờ) nhưng chặn được vòng lặp gọi liên tục.
+//
+// CHƯA KIỂM CHỨNG BẰNG TEST: `createLimiter` trả middleware RỖNG khi NODE_ENV=test (xem chú thích ở
+// src/rateLimit.ts — bộ đếm Redis dùng chung giữa các tiến trình vitest gây 429 giả), nên không có
+// cách nào lái con số 10 này qua HTTP trong bộ test. Chỉ đường mã là kiểm được, không phải hành vi.
+const asyncExportLimiter = createLimiter("export-async", {
+  windowMs: 60_000,
+  max: 10,
+  message: { error: "Bạn đang tạo quá nhiều lượt xuất nền, vui lòng chờ một phút" },
+});
+
 /** Async export: returns a jobId; client polls /api/jobs/:queue/:id */
 router.post(
   "/quotes/:id/export",
   requireAuth,
+  asyncExportLimiter,
   validate({
     params: z.object({ id: z.coerce.number().int().positive() }),
     body: z.object({ format: z.enum(["xlsx", "pdf"]).default("xlsx") }).default({} as any),
@@ -37,8 +54,56 @@ router.post(
       return res.status(403).json({ error: "Bạn không có quyền xuất báo giá" });
     }
     const q = getQueue(QUEUES.EXPORT);
-    if (!q) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình. Vui lòng dùng chức năng xuất file trực tiếp." });
-    const job = await q.add(req.body.format, { quoteId: req.params.id, requestedBy: req.session.userId });
+    // LỜI NHẮN CŨ LÀ MỘT VÒNG CỤT. Nó bảo "vui lòng dùng chức năng xuất file trực tiếp" — mà người
+    // dùng tới được đây CHÍNH VÌ đường trực tiếp vừa từ chối họ bằng 413 (báo giá quá lớn).
+    // Bảo họ quay lại thứ vừa thất bại là bỏ họ đứng giữa đường.
+    //
+    // Và thiếu `code` là thiếu thứ DUY NHẤT mà client dùng để phân biệt "xuất nền chưa bật" với
+    // một lỗi 503 bất kỳ — nhánh dưới (thiếu kho object) có `code`, nhánh này thì không, nên cùng
+    // một nguyên nhân "chưa bật xuất nền" lại cho ra hai hành vi khác nhau ở giao diện.
+    // Hai nhánh nay dùng CHUNG một `code`; khác nhau ở phần nói rõ THIẾU CÁI GÌ.
+    if (!q) {
+      return res.status(503).json({
+        error: "Xuất nền chưa dùng được (chưa cấu hình hàng đợi/Redis). Báo giá này quá lớn để tải trực tiếp — hãy nhờ quản trị viên bật hàng đợi, hoặc tách bớt sheet rồi tải lại.",
+        code: "export_async_unavailable",
+      });
+    }
+    // Xuất NỀN trả về một ĐƯỜNG TẢI từ kho object. Không có kho thì worker không có gì để trả —
+    // và bản trước nhồi luôn cả file dưới dạng base64 vào giá trị trả về của job, tức là vào REDIS.
+    // Chặn ngay ở đây để người dùng biết liền, thay vì chờ poll rồi nhận lỗi.
+    if (!isStorageEnabled()) {
+      return res.status(503).json({
+        error: "Xuất nền chưa dùng được (chưa cấu hình kho lưu trữ tệp). Báo giá này quá lớn để tải trực tiếp — hãy nhờ quản trị viên bật kho lưu trữ, hoặc tách bớt sheet rồi tải lại.",
+        code: "export_async_unavailable",
+      });
+    }
+    // CHỐNG NHẤN TRÙNG. Nút "Xuất" không bị vô hiệu trong lúc chờ và route chỉ trả 202 rồi để client
+    // poll, nên nhấn hai lần tạo hai job y hệt: hai lần đọc cả báo giá kèm mọi sheet/dòng, hai lần
+    // sinh file, hai object rác trong kho — gấp đôi việc nặng nhất của hệ cho một kết quả duy nhất.
+    //
+    // DÙNG `deduplication` CHỨ KHÔNG PHẢI `jobId`. Trùng `jobId` thì BullMQ bỏ qua lượt add suốt
+    // thời gian job còn được GIỮ LẠI, mà hàng đợi export giữ job đã xong tới 6 GIỜ (src/queue.ts).
+    //
+    // Khoá gộp có `userId`: hai người cùng xuất một báo giá vẫn là hai lượt tải riêng, và ai poll
+    // job của người kia thì đã bị chặn ở kiểm quyền của GET /api/jobs/:queue/:id.
+    //
+    // ── VÌ SAO CÓ `updatedAt` TRONG KHOÁ ──────────────────────────────────────
+    // TTL KHÔNG tự hết hiệu lực khi job xong. Đã đo trên bullmq 5.77.6: `moveToFinished` chỉ `DEL`
+    // khoá `de:` khi `PTTL` là 0 hoặc -1; với `ttl: 30000` thì PTTL luôn > 0, nên khoá SỐNG SÓT qua
+    // lúc job completed. Nghĩa là trong 30 giây sau khi xuất xong, một lượt xuất lại HỢP LỆ (người
+    // dùng vừa sửa báo giá) bị gộp vào job cũ và nhận về ĐÚNG FILE CŨ — chính cái mà chú thích
+    // trước đó nói là đã tránh được.
+    //
+    // Đưa mốc sửa đổi vào khoá làm nó TỰ hết hiệu lực đúng lúc cần: sửa báo giá là đổi
+    // `Quote.updatedAt` là đổi khoá là không gộp nữa. Nhấn hai lần liên tiếp trên báo giá KHÔNG
+    // đổi thì vẫn gộp — đó mới là thứ cần gộp.
+    const DEDUP_TTL_MS = Number(process.env.EXPORT_DEDUP_TTL_MS) || 30_000;
+    const dauThoiGian = +new Date(quote.updatedAt);
+    const job = await q.add(
+      req.body.format,
+      { quoteId: req.params.id, requestedBy: req.session.userId },
+      { deduplication: { id: `export:${req.params.id}:${req.body.format}:${req.session.userId}:${dauThoiGian}`, ttl: DEDUP_TTL_MS } }
+    );
     res.status(202).json({ jobId: job.id, queue: QUEUES.EXPORT, format: req.body.format });
   })
 );
@@ -48,7 +113,16 @@ router.get(
   requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req: Request, res: Response) => {
-    if (!isQueueEnabled()) return res.status(503).json({ error: "Hệ thống hàng đợi chưa được cấu hình" });
+    // Nhánh này là lúc ĐANG HỎI kết quả, không phải lúc xếp việc — tức người dùng đã bấm Tải và
+    // đang chờ. Redis chết giữa chừng thì việc của họ mất luôn, mà lời nhắn cũ chỉ nói "chưa được
+    // cấu hình" như thể họ vừa gõ nhầm địa chỉ. Mang `code` giống hai nhánh kia để giao diện xử lý
+    // một kiểu duy nhất, và nói rõ ai khắc phục được.
+    if (!isQueueEnabled()) {
+      return res.status(503).json({
+        error: "Hệ thống hàng đợi chưa được cấu hình (hoặc vừa mất kết nối Redis) nên không theo dõi được lượt tạo file. Hãy nhờ quản trị viên kiểm tra rồi bấm tải lại.",
+        code: "export_async_unavailable",
+      });
+    }
     // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
     // carry recipient addresses, target URLs and secrets in job.data — never expose
     // them here, even to QUOTE_READ_ALL/admin callers.

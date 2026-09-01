@@ -1,7 +1,7 @@
 // Test VECTOR VÀNG cho lõi toán tiền dùng chung (shared/quote-math.ts, qua re-export ./quoteMath).
 // Khóa CHÍNH SÁCH làm tròn/cắt/giảm-giá để KHÔNG ai đổi nhầm → lệch tiền khách. Đây là tiền khách.
 import { describe, it, expect } from "vitest";
-import { qtyRound, roundVnd, lineAmount, sheetSubtotalGrouped, quoteTotals, fmtNumCell, parseVN } from "./quoteMath";
+import { qtyRound, roundVnd, lineAmount, sheetSubtotalGrouped, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
 
 describe("qtyRound — LÀM TRÒN Số Lượng về 1 chữ số thập phân", () => {
   it("làm tròn 1 số (7,378→7,4 · 6,42→6,4 · 5,65→5,7)", () => { expect(qtyRound(7.378)).toBeCloseTo(7.4); expect(qtyRound(6.42)).toBeCloseTo(6.4); expect(qtyRound(5.65)).toBeCloseTo(5.7); });
@@ -64,4 +64,27 @@ describe("định dạng VN", () => {
     expect(parseVN("-5.000")).toBe(-5_000);
   });
   it("roundVnd làm tròn nửa lên", () => { expect(roundVnd(0.5)).toBe(1); expect(roundVnd(2.4)).toBe(2); });
+
+  // ── Ba bài dưới CHUYỂN TỪ tests/util.test.js ────────────────────────────────
+  // File đó test `public/js/util.js`, bị gỡ cùng SPA cũ ngày 2026-08-26. Ba hàm này KHÔNG chết
+  // theo: chúng sống ở `shared/quote-math.ts` và React đang dùng — nhưng trước đó chưa có bài nào
+  // ở đây phủ, nên chuyển sang để lớp phủ không tụt khi xoá file cũ.
+  it("fmtMoney: nhóm nghìn kiểu vi-VN, rác → 0", () => {
+    expect(fmtMoney(1_234_567)).toBe("1.234.567");
+    expect(fmtMoney(null)).toBe("0");
+    expect(fmtMoney(undefined)).toBe("0");
+    expect(fmtMoney(NaN)).toBe("0");
+  });
+  it("statusLabel: trạng thái đã biết → nhãn Việt; lạ → trả nguyên chuỗi", () => {
+    expect(statusLabel("converted")).toBe("Đã chốt");
+    expect(statusLabel("draft")).toBe("Nháp");
+    // "expired" đã BỎ khỏi hệ (không còn auto hết hạn) → không có nhãn, rơi về chính nó.
+    expect(statusLabel("expired")).toBe("expired");
+    expect(statusLabel("")).toBe("—");
+  });
+  it("groupLetter: nhãn cột kiểu bảng tính (A…Z, AA)", () => {
+    expect(groupLetter(0)).toBe("A");
+    expect(groupLetter(25)).toBe("Z");
+    expect(groupLetter(26)).toBe("AA");
+  });
 });

@@ -4,7 +4,7 @@ import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
-import { extraTableSum, type ExtraTable } from "../components/ExtraTables";
+import { extraTableSum, removeTableFromList, type ExtraTable } from "../components/ExtraTables";
 
 // Port "renderAccountHnView" — vai trò account_hn CHỈ điền giá Hà Nội (số nội bộ, không thấy báo giá khách).
 // Mỗi sheet báo giá → 1 khối; trong khối là các bảng HN dạng tab (tái dùng GridTable, category=hanoi).
@@ -59,12 +59,17 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   const newHnTable = (tplId?: number): HnTable => ({ category: "hanoi", name: "", templateId: tplId || defTplId, groupSubtotal: true, items: [blankHnItem()], _k: nextK() });
 
   // Xoá 1 bảng HN trong sheet — hỏi xác nhận khi bảng đã có dữ liệu điền (không hoàn tác được).
+  // Dùng CHUNG lõi `removeTableFromList` với "Bảng nội bộ" của editor: trước đây chỗ này chép tay
+  // lại cả phép đo "bảng có dữ liệu chưa" lẫn bước dịch tab đang mở, nên nới phép đo bên kia
+  // (ghi chú/công thức/ảnh/cờ duyệt/cờ thanh toán cũng là dữ liệu) thì bảng HN vẫn xoá thẳng.
   const removeTable = async (hs: HnSheet, ti: number) => {
-    const tbl = hs.hnTables[ti];
-    const hasData = (tbl?.items || []).some((it) => (it.name || "").trim() || (it.detail || "").trim() || it.quantity || it.unitPrice);
-    if (hasData && !(await confirmModal("Xoá bảng Hà Nội?", `Bảng "${tbl?.name || `Bảng ${ti + 1}`}" đã có dòng điền — xoá sẽ mất dữ liệu, không hoàn tác được. Tiếp tục?`, { danger: true, confirmText: "Xoá bảng" }))) return;
-    hs.hnTables.splice(ti, 1);
-    let a = hs._activeHn || 0; if (a > ti) a--; if (a >= hs.hnTables.length) a = hs.hnTables.length - 1; if (a < 0) a = 0; hs._activeHn = a;
+    const r = await removeTableFromList(hs.hnTables, ti, hs._activeHn || 0, (tbl) => confirmModal(
+      "Xoá bảng Hà Nội?",
+      `Bảng "${tbl.name || `Bảng ${ti + 1}`}" đã có dòng điền — xoá sẽ mất dữ liệu, không hoàn tác được. Tiếp tục?`,
+      { danger: true, confirmText: "Xoá bảng" },
+    ));
+    if (!r.removed) return;
+    hs._activeHn = r.active;
     mark(); redraw();
   };
 

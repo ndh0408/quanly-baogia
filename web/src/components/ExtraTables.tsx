@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
-import { GridTable } from "./GridTable";
+import { GridTable, safeImgSrc } from "./GridTable";
 import { api, ApiError, type EditorTemplate } from "../lib/api";
-import { toast } from "../lib/ui";
+import { confirmModal, toast } from "../lib/ui";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -25,6 +25,61 @@ export function extraTableSum(t: ExtraTable): number {
     const days = it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);
   }, 0);
+}
+
+// Sheet đã có người điền vào chưa? Dùng để quyết định có phải HỎI trước khi xoá: sheet mới tạo còn
+// trống thì xoá nhầm cũng chẳng mất gì.
+//
+// Trước đây phép đo này CHỈ nhìn name/detail/quantity/unitPrice, nên bảng mà mọi dòng chỉ có GHI
+// CHÚ, CÔNG THỨC, ẢNH, hoặc đã tích DUYỆT/THANH TOÁN bị coi là "trống" và xoá THẲNG không hỏi —
+// trong khi cờ duyệt/thanh toán (có chứng từ đính kèm) mới là thứ không dựng lại được.
+//
+// KHÔNG tính `days`: `M.blankItem(usesDays)` đặt sẵn days = 1 cho mẫu có cột Số Ngày
+// (shared/quote-math.ts:125) → tính vào thì bảng mới tinh cũng bị hỏi vô cớ.
+export function extraTableHasData(t: ExtraTable | null | undefined): boolean {
+  return (t?.items || []).some((it) => {
+    const r = it as unknown as Record<string, unknown>;
+    const chu = (v: unknown) => typeof v === "string" && v.trim() !== "";
+    if (chu(it.name) || chu(it.detail) || it.quantity || it.unitPrice) return true;
+    if (chu(it.unit) || chu(it.notes) || chu(it.internalNote) || chu(r.label)) return true;
+    if (Array.isArray(it.images) && it.images.length > 0) return true;
+    if (it.formulas && Object.keys(it.formulas).length > 0) return true;
+    // cờ duyệt (approveCol) + cờ thanh toán nội bộ (payCol, xem PayDialog bên dưới)
+    return !!(it.approved || r.paid || r.hasPaidProof || r.paidAt);
+  });
+}
+
+// LÕI DÙNG CHUNG của MỌI đường xoá bảng nội bộ: bảng đã có dữ liệu thì phải HỎI trước, huỷ thì
+// không đụng vào mảng; trả luôn chỉ số tab đang mở sau khi xoá.
+// Có hai màn hình xoá bảng loại này — "Bảng nội bộ" ở editor (dưới đây) và bảng Hà Nội ở
+// AccountHnView — và trước đây màn HN CHÉP TAY lại toàn bộ logic (hasData + hỏi + splice + dịch
+// tab). Hai bản chép tay trôi khỏi nhau là chuyện thời gian: nới `extraTableHasData` ở một chỗ thì
+// bên kia vẫn xoá thẳng. Nay cả hai gọi chung hàm này.
+export async function removeTableFromList(
+  tables: ExtraTable[] | undefined,
+  i: number,
+  active: number,
+  confirmRemove: (t: ExtraTable) => Promise<boolean>,
+): Promise<{ removed: boolean; active: number }> {
+  if (!Array.isArray(tables) || !tables[i]) return { removed: false, active };
+  if (extraTableHasData(tables[i]) && !(await confirmRemove(tables[i]))) return { removed: false, active };
+  tables.splice(i, 1);
+  let a = active || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
+  return { removed: true, active: a };
+}
+
+// ĐƯỜNG XOÁ DUY NHẤT của sheet nội bộ ở editor. Trước đây nút ✕ (nằm sát nhãn tab) splice thẳng,
+// không hỏi: bấm nhầm là mất cả cờ duyệt/thanh toán từng hàng lẫn phần tổng đổ sang Quản lý dự án,
+// mà Ctrl+Z không cứu được vì ngăn hoàn tác nằm TRONG GridTable của chính sheet vừa bị gỡ khỏi cây.
+// Tách khỏi component để kiểm thử được ngoài trình duyệt (web/ không có jsdom).
+export async function removeExtraTableAt(
+  sheet: { extraTables?: ExtraTable[]; _activeExtra?: number },
+  i: number,
+  confirmRemove: (t: ExtraTable) => Promise<boolean>,
+): Promise<boolean> {
+  const r = await removeTableFromList(sheet.extraTables, i, sheet._activeExtra || 0, confirmRemove);
+  if (r.removed) sheet._activeExtra = r.active;
+  return r.removed;
 }
 
 export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty }: {
@@ -66,10 +121,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
     tables.push({ category: cat, templateId: defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
     sheet._activeExtra = tables.length - 1; onChange();
   };
-  const removeTable = (i: number) => {
-    tables.splice(i, 1);
-    let a = sheet._activeExtra || 0; if (a > i) a--; if (a >= tables.length) a = tables.length - 1; if (a < 0) a = 0;
-    sheet._activeExtra = a; onChange();
+  const removeTable = async (i: number) => {
+    const ok = await removeExtraTableAt(sheet, i, (tbl) => confirmModal(
+      "Xoá sheet nội bộ?",
+      `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
+      { danger: true, confirmText: "Xoá sheet" },
+    ));
+    if (ok) onChange();
   };
 
   return (
@@ -93,9 +151,24 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                 {idxs.length > 0 && (
                   <div className="sheet-tabs extra-sheet-tabs">
                     {idxs.map((i) => (
-                      <div key={tables[i]._k ?? i} className={`sheet-tab ${i === active ? "active" : ""}`} title={label} onClick={() => { sheet._activeExtra = i; redraw(); }}>
+                      // BÀN PHÍM: một <div> trần không nhận được tiêu điểm, nên phím Tab đi thẳng
+                      // qua cả dải tab — người dùng bàn phím không đổi được sheet, cũng không xoá
+                      // được. Hai nơi vẽ đúng dải tab này (QuoteEditor, AccountHnView) đã sửa; đây
+                      // là chỗ cuối còn sót. Dùng lại y nguyên mẫu của QuoteEditor để quy ước khỏi
+                      // trôi tiếp: role + tabIndex + Enter/Space cho tab, còn nút xoá là <button>
+                      // thật (tự vào thứ tự Tab, tự nhận Enter/Space, có tên đọc lên được thay vì
+                      // mỗi dấu ✕ trần).
+                      <div key={tables[i]._k ?? i} role="button" tabIndex={0} aria-pressed={i === active}
+                        className={`sheet-tab ${i === active ? "active" : ""}`} title={label}
+                        onClick={() => { sheet._activeExtra = i; redraw(); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sheet._activeExtra = i; redraw(); } }}>
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
-                        {editable && <span className="rm-tab" title="Xoá sheet nội bộ này" onClick={(e) => { e.stopPropagation(); removeTable(i); }}>✕</span>}
+                        {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
+                            handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
+                        {editable && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
+                          aria-label={`Xoá sheet nội bộ ${i + 1}`}
+                          onClick={(e) => { e.stopPropagation(); void removeTable(i); }}
+                          onKeyDown={(e) => e.stopPropagation()}>✕</button>}
                       </div>
                     ))}
                   </div>
@@ -169,7 +242,7 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
           {paid && <div style={{ marginTop: 12 }}>
             <label className="muted" style={{ fontSize: 13 }}>Ảnh chứng từ (tuỳ chọn):</label>
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => onFile(e.target.files?.[0])} style={{ display: "block", marginTop: 5 }} />
-            {img && <img src={img} alt="chứng từ" style={{ maxWidth: "100%", maxHeight: 240, marginTop: 8, borderRadius: 8, border: "1px solid var(--line)" }} />}
+            {img && <img src={safeImgSrc(img)} alt="chứng từ" style={{ maxWidth: "100%", maxHeight: 240, marginTop: 8, borderRadius: 8, border: "1px solid var(--line)" }} />}
           </div>}
         </div>
         <div className="modal-foot">

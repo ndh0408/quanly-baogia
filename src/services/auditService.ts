@@ -4,6 +4,7 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
 import { can, PERMISSIONS } from "../permissions.js";
+import { phanTrang } from "../pagination.js";
 
 // Resolve resourceId → TÊN người-đọc-được (admin không phải dân code → cần thấy "Báo giá GN26043 — Đại
 // nhạc hội" thay vì "#114"; "Nhân sự: Nguyễn Văn A" thay vì "#1"). Gộp truy vấn theo loại;
@@ -77,5 +78,5 @@ export async function listAuditEvents(req: Request) {
     const targetLabel = r.resource && r.resourceId ? (targets!.get(`${r.resource}:${r.resourceId}`) ?? null) : null;
     return { ...r, id: r.id.toString(), targetLabel }; // BigInt id → string for JSON
   });
-  return { data, meta: { total, page, size, pageCount: Math.ceil(total / size) } };
+  return phanTrang(data, total, page, size);
 }

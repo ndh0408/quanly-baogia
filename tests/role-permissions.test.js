@@ -2,7 +2,7 @@
 // Kiểm: mặc định đúng · PUT đổi quyền có hiệu lực LIVE (manager mất audit:view → /audit 403) · DELETE
 // đặt lại · admin LUÔN full (PUT /roles/admin → 400) · validate quyền/role lạ · non-admin bị chặn (403).
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 import { reloadRoleOverrides } from "../src/roleOverrides.js";
@@ -25,7 +25,7 @@ describe.runIf(dbAvailable)("phân quyền động — role permission override 
     const { createApp } = await import("../src/app.js");
     app = createApp();
     [adminU, mgrU] = await Promise.all([makeUser("admin", "admin"), makeUser("manager", "mgr")]);
-    admin = request.agent(app); mgr = request.agent(app);
+    admin = agentWithCsrf(app); mgr = agentWithCsrf(app);
     await Promise.all([login(admin, adminU), login(mgr, mgrU)]);
   });
 

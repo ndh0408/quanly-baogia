@@ -9,12 +9,16 @@ comes out of it.
 > *Tiếng Việt: hệ thống nội bộ quản lý báo giá + hồ sơ nhân sự + theo dõi dự án,
 > xuất Excel khớp đúng mẫu công ty. Đang chạy production.*
 
-**391 commits · ~22,000 LOC TypeScript · 29 Prisma models · 138 HTTP endpoints
-· 34 test files (~5,200 LOC of tests)**
+![Quote editor](editor.png)
 
-<sub>Số endpoint và ma trận phân quyền được **sinh từ mã nguồn**, không đếm tay:
-`node scripts/endpoint-inventory.mjs`. CI chạy `--check` nên số ở đây, ở
-[AUTHZ_MATRIX.md](AUTHZ_MATRIX.md) và trong code không thể trôi khỏi nhau.</sub>
+**29 Prisma models · 137 HTTP endpoints · 178 test files**
+
+<sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
+`node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
+CI chạy cả hai với `--check`, nên số ở đây, ở
+[docs/product/ROLES_PERMISSIONS.md](docs/product/ROLES_PERMISSIONS.md) và trong
+code không thể trôi khỏi nhau. Con số nào không kiểm chứng được thì không được
+công bố — số commit và tổng LOC đã bị bỏ vì đúng lý do đó.</sub>
 
 ---
 
@@ -30,11 +34,11 @@ across three different templates (two Gia Nguyễn variants, one Colorfull). A
 generated-from-scratch workbook always looked subtly wrong.
 
 So instead of generating workbooks, [`src/xlsxStitcher.ts`](src/xlsxStitcher.ts)
-(519 lines) treats the real `.xlsx` templates as what they are — zip archives of
-XML — and **splices rows into the template's sheet XML directly**, rewriting
-shared strings, merge ranges, row spans and dimension refs, then repacking the
-zip. One quotation with several sheets becomes one multi-sheet workbook, each
-sheet keeping its own template's formatting. PDF export goes through PDFKit.
+treats the real `.xlsx` templates as what they are — zip archives of XML — and
+**splices rows into the template's sheet XML directly**, rewriting shared
+strings, merge ranges, row spans and dimension refs, then repacking the zip. One
+quotation with several sheets becomes one multi-sheet workbook, each sheet
+keeping its own template's formatting. PDF export goes through PDFKit.
 
 ### 2. A spreadsheet grid in the browser that Vietnamese typists can actually use
 
@@ -52,37 +56,30 @@ The parts that took the actual work:
   doesn't shred rows, and Vietnamese number formatting (`1.234`) parses as 1234.
 - **Round-tripping its own export**: paste a table this app produced back into
   it, and it reconstructs the group / sub-group / sub-row / info-row hierarchy
-  from the flat cells — see [`public/grid-clipboard.js`](public/grid-clipboard.js).
+  from the flat cells — see [`web/src/lib/clipboard.ts`](web/src/lib/clipboard.ts).
 - **IME-safe editing** — pressing Enter to commit a word in OpenKey/Unikey does
   not jump the cursor to the next cell.
-
-## Access control
-
-Five roles (`admin`, `manager`, `account_hn`, `hr`, `accountant`) defined in
-[`src/permissions.ts`](src/permissions.ts). Two details worth pointing at:
-
-- **Per-row approval is enforced server-side.** Internal cost rows carry an
-  approval checkbox that only `admin` may tick, and only approved rows count
-  toward totals. The check is not a UI guard — the server validates the row id
-  on every request and stamps who approved it and when, so a `manager` account
-  cannot self-approve through the API.
-- **Read-only users can still copy data out** but cannot edit, cut or paste —
-  the grid distinguishes the two rather than disabling the clipboard wholesale.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| API | Node.js · **TypeScript 5.7** · Express 4 · Zod 4 validation |
-| Data | PostgreSQL · **Prisma 7** (28 models) · Redis (ioredis) |
-| Auth | JWT access + refresh tokens · bcrypt-hashed credentials · TOTP 2FA (otplib) · role-based permissions |
-| Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) — totals update live as cells are typed |
+| API | Node.js 22 · **TypeScript 5.7** · Express 4 · Zod 4 validation |
+| Data | PostgreSQL · **Prisma 7** (29 models) · Redis (ioredis) |
+| Auth | Cookie sessions + JWT access/refresh · bcrypt · TOTP 2FA (speakeasy) · role + per-user permissions |
+| Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) with a Redis Pub/Sub backplane |
 | Background work | BullMQ workers on Redis |
 | Documents | ExcelJS + custom OOXML zip stitching · PDFKit (embedded fonts) · Nodemailer |
-| Frontend | React 19 + Vite (`web/`) · vanilla-JS grid engine (`public/`) |
-| Testing | **Vitest** (unit + coverage) · **Playwright** (e2e) |
-| Ops | Docker + Compose (dev / staging / prod) · **Helm chart** with NetworkPolicy · pino structured logs |
-| CI | GitHub Actions — lint, typecheck, web build + test, coverage, `npm audit`, plus a separate security job · Dependabot · husky + lint-staged |
+| Storage | S3-compatible object storage (payment proofs, attachments) |
+| Frontend | React 19 + Vite (`web/`) — SPA **duy nhất**; bundle build ra `public/app2/` |
+| Testing | **Vitest** (unit + integration + coverage) |
+| Ops | Docker + Compose (dev / staging / prod) · **Helm chart** · pino structured logs · Prometheus metrics |
+| CI | GitHub Actions — lint, typecheck, build, tests, Helm render, artifact + container smoke tests, security scans, SBOM |
+
+Production runs a **compiled artifact** — `node dist/server.js` — and Docker,
+Compose, Helm and the raw k8s manifests all start that exact same command. A CI
+check ([`scripts/ci/check-runtime-command.sh`](scripts/ci/check-runtime-command.sh))
+fails the build if any of them drift apart.
 
 ## Beyond quotations
 
@@ -98,31 +95,52 @@ Quotation lifecycle is intentionally not an internal approval chain — the only
 approval that matters is the customer's: `Draft → Customer confirmed / declined`.
 An earlier internal review queue was removed once it proved to be ceremony.
 
-## Documentation
-
-- [`docs/FEATURES.md`](docs/FEATURES.md) — the full feature specification,
-  in Vietnamese, written for the people who use the system.
-- [`docs/DR-runbook.md`](docs/DR-runbook.md) — disaster-recovery procedure.
-- [`docs/HANDOFF.md`](docs/HANDOFF.md) — operational handover notes.
-- [`docs/UX_AUDIT_2026-06.md`](docs/UX_AUDIT_2026-06.md) — a UX audit pass and
-  what came out of it.
-
 ## Running it
 
 ```bash
-cp .env.example .env        # DATABASE_URL, JWT/session secrets, SMTP
+cp .env.example .env         # đọc kỹ: biến nào BẮT BUỘC ở production được đánh dấu rõ
 npm ci
+docker compose up -d postgres redis minio   # hạ tầng cho môi trường dev
 npx prisma migrate deploy
-npm run dev                 # API + web
-npm test                    # Vitest
+npm run dev                  # API (tsx watch) — web chạy riêng: npm --prefix web run dev
+npm test                     # Vitest
 ```
 
-Docker Compose files are provided for dev, staging and production; the Helm
-chart under [`infra/helm/quanly`](infra/helm/quanly) deploys app + Postgres +
-Redis with an ingress and a NetworkPolicy.
+Chi tiết đầy đủ: [docs/development/SETUP.md](docs/development/SETUP.md).
 
-No credentials are committed — everything is read from the environment, and
-`.env.example` lists what is required.
+## Documentation
+
+Toàn bộ tài liệu nằm ở [`docs/`](docs/README.md). Điểm vào chính:
+
+| Cần gì | Đọc gì |
+|---|---|
+| Hệ thống ghép lại thế nào | [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) |
+| Mô hình bảo mật | [docs/architecture/SECURITY_MODEL.md](docs/architecture/SECURITY_MODEL.md) |
+| Dựng môi trường dev | [docs/development/SETUP.md](docs/development/SETUP.md) |
+| Chạy / viết test | [docs/development/TESTING.md](docs/development/TESTING.md) |
+| Triển khai, phát hành, rollback | [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md) |
+| Sao lưu và khôi phục thảm hoạ | [docs/operations/DISASTER_RECOVERY.md](docs/operations/DISASTER_RECOVERY.md) |
+| Có sự cố, xử lý ra sao | [docs/operations/INCIDENT_RESPONSE.md](docs/operations/INCIDENT_RESPONSE.md) |
+| Tính năng nghiệp vụ | [docs/product/FEATURES.md](docs/product/FEATURES.md) |
+| Ai được làm gì | [docs/product/ROLES_PERMISSIONS.md](docs/product/ROLES_PERMISSIONS.md) |
+| Vì sao chọn kiến trúc này | [docs/adr/](docs/adr/) |
+| Quyết định giữ / nâng / thay từng công nghệ | [docs/architecture/TECHNOLOGY_DECISIONS.md](docs/architecture/TECHNOLOGY_DECISIONS.md) |
+| Báo lỗi bảo mật, phạm vi, các chốt đang có | [SECURITY.md](SECURITY.md) |
+| Quy trình đóng góp, luật viết test | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Đã thay đổi những gì | [CHANGELOG.md](CHANGELOG.md) *(sinh từ `git log`)* |
+
+Tài liệu cũ (audit, benchmark, handoff) nằm ở [`docs/archive/`](docs/archive/) —
+giữ lại vì chúng ghi lại *vì sao* hệ thống thành ra như hiện nay, nhưng nhiều
+phát hiện trong đó đã được sửa. **Nguồn sự thật luôn là mã nguồn.**
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) cho quy trình; [AGENTS.md](AGENTS.md) cho quy
+ước mã nguồn, chốt chặn, và những thứ tuyệt đối không được phá (Excel round-trip,
+clipboard, IME tiếng Việt).
+
+⚠️ GitHub Actions **không bật** trên tài khoản của repo này — cổng duy nhất thật
+sự chạy là `npm run verify` gõ tay.
 
 ## License
 

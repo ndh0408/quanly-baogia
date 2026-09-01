@@ -4,6 +4,7 @@ import { api, ApiError, type Me, type Venue, type VenueItemRow } from "../lib/ap
 import { errMsg } from "../lib/format";
 import { toast, confirmModal } from "../lib/ui";
 import { invalidateCatalog, norm } from "../lib/venueCatalog";
+import { dangGoIME } from "../lib/gridShared";
 
 // Trang "Danh mục rạp" — danh sách hạng mục thường dùng theo từng rạp.
 //
@@ -462,7 +463,7 @@ function AddItemRow({ venueId, onAdded }: { venueId: number; onAdded: () => void
       <textarea ref={nameRef} rows={2} value={name} onChange={(e) => setName(e.target.value)} onPaste={(e) => void onPaste(e)} disabled={busy}
         placeholder="Tên hạng mục (vd: Quầy vé lớn)" className="vn-ai-name" aria-label="Tên hạng mục"
         aria-keyshortcuts="Enter Shift+Enter Alt+Enter" onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.key === "Process") return;
+          if (dangGoIME(e)) return;   // nhịp của bộ gõ — xem web/src/lib/gridShared.ts
           if (e.key !== "Enter" || e.ctrlKey || e.metaKey) return;
           e.preventDefault();
           if (e.altKey || e.shiftKey) {

@@ -1,0 +1,108 @@
+# ============================================================================
+# Cấu hình Prometheus cho QuanLY — dùng bởi service `prometheus` trong
+# infra/observability/docker-compose.observability.yml.
+#
+# ── VÌ SAO FILE NÀY TỒN TẠI ────────────────────────────────────────────────
+# Trước nó, repo đã có metric ứng dụng, quy tắc cảnh báo đã qua `promtool test rules`, và một bảng
+# Grafana 9 panel — nhưng KHÔNG có một định nghĩa Prometheus nào ở bất kỳ đâu (`grep -ril
+# prometheus infra/` chỉ ra quy tắc và annotation, không ra server). Nghĩa là không có môi trường
+# nào thu thập được số liệu, không cảnh báo nào KÊU ĐƯỢC, và datasource của Grafana trỏ vào một chỗ
+# không tồn tại. Cả ba thứ kia chỉ là giấy tờ cho tới khi có file này.
+#
+# Số HIỆN TẠI, đo lại bằng lệnh chứ đừng chép tay:
+#   grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   → 21 metric ứng dụng
+#   grep -c '^      - alert:' infra/prometheus/alerts.yaml    → 17 quy tắc cảnh báo
+# (trước đợt 2026-08-27: 14 metric và 14 quy tắc.)
+#
+# ── /metrics CÓ BẢO VỆ — ĐỌC KỸ TRƯỚC KHI SỬA ──────────────────────────────
+# src/app.ts (và src/worker.ts, gác y hệt):
+#   · production + KHÔNG có METRICS_TOKEN → 404  (fail closed: số liệu lộ tên route, lưu lượng,
+#     tỉ lệ lỗi và mức tiêu tài nguyên cho bất kỳ ai chạm tới được)
+#   · có METRICS_TOKEN → bắt buộc `Authorization: Bearer <token>`, so ở thời gian không đổi; sai → 401
+# Nên KHÔNG đặt METRICS_TOKEN thì mọi target dưới đây scrape ra 404 và MỌI quy tắc cảnh báo im lặng
+# vĩnh viễn. Quy tắc `QuanlyMetricsKhongScrapeDuoc` (up == 0) sinh ra để bắt đúng chuyện đó — nhưng
+# nó chỉ kêu khi Prometheus ĐANG chạy, tức khi file này được nạp.
+#
+# ── TOKEN LẤY TỪ ĐÂU ───────────────────────────────────────────────────────
+# Prometheus KHÔNG nội suy biến môi trường trong file cấu hình (chỉ `external_labels` mới có, và
+# phải bật cờ riêng). Nên token đi bằng ĐƯỜNG TỆP: compose lấy `METRICS_TOKEN` từ `.env` của máy chủ
+# và bày ra `/run/secrets/metrics_token` (khối `secrets:` trong file compose). Prometheus tự
+# `TrimSpace` nội dung, nên tệp có hay không có ký tự xuống dòng cuối đều được.
+# ============================================================================
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  # 15s: đủ nhanh để `for: 3m` của các quy tắc nặng (db/redis) có ~12 mẫu trước khi nổ, mà không
+  # bắt tiến trình app phải kết xuất số liệu liên tục.
+  evaluation_interval: 15s
+  external_labels:
+    # Nhãn này đi kèm MỌI cảnh báo gửi ra ngoài. Đổi khi dựng thêm môi trường thứ hai, kẻo cảnh báo
+    # của staging và của prod trông y hệt nhau trên cùng một kênh.
+    environment: prod
+
+rule_files:
+  # ĐÚNG file infra/prometheus/alerts.yaml, mount vào đây — KHÔNG chép nội dung sang.
+  # Hai bản của cùng một tập quy tắc là hai bản sẽ trôi khỏi nhau; và `npm run check:alerts` chỉ
+  # kiểm bản gốc, nên bản chép sẽ hỏng mà không cổng nào đỏ.
+  - /etc/prometheus/rules/alerts.yaml
+
+# ── ALERTMANAGER: CỐ Ý CHƯA CÓ ─────────────────────────────────────────────
+# Ngăn xếp này KHÔNG kèm Alertmanager. Hệ quả phải nói thẳng: quy tắc vẫn được ĐÁNH GIÁ và vẫn
+# chuyển sang trạng thái `firing`, nhưng chúng DỪNG LẠI ở giao diện Prometheus
+# (http://prometheus:9090/alerts) — KHÔNG có Telegram, KHÔNG có email, KHÔNG ai bị đánh thức. Đó là
+# "có cảnh báo" theo nghĩa kỹ thuật, KHÔNG phải theo nghĩa vận hành.
+#
+# Đường báo động DUY NHẤT đang chạy thật là backup watchdog qua Telegram
+# (scripts/backup/backup-watchdog.sh) — cố ý tách khỏi Prometheus, vì đó là thứ không được phép im
+# lặng ngay cả khi hệ giám sát chết.
+#
+# Muốn nối: dựng thêm service alertmanager rồi bỏ chú thích khối dưới.
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # TÊN JOB PHẢI KHỚP `quanly.*`.
+  # 4 quy tắc trong infra/prometheus/alerts.yaml lọc theo `job=~"quanly.*"`
+  # (QuanlyMetricsKhongScrapeDuoc, QuanlyKhongConTargetNao, QuanlyTienTrinhKhoiDongLaiLienTuc,
+  # QuanlyEventLoopNgheN — đếm lại bằng
+  # `awk '/^      - alert:/{a=$3} /job=~"quanly/{print a}' infra/prometheus/alerts.yaml | sort -u`;
+  # `grep -c` ra 5 vì lần thứ năm nằm trong phần annotation, không phải một quy tắc thứ năm).
+  # Đổi tên job ở đây mà quên sửa quy tắc = cảnh báo im lặng vĩnh viễn, đúng
+  # chế độ hỏng mà `QuanlyKhongConTargetNao` phải bắt — nhưng chính nó cũng lọc theo tên job, nên
+  # nó cũng im. tests/xf-observability-gaps.test.js khoá lại ràng buộc này.
+  - job_name: quanly-app
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      # `app` là tên service trong docker-compose.prod.yml; DNS nội bộ của mạng `internal` phân giải
+      # được vì Prometheus cũng nằm trên mạng đó. Cổng 3000 = PORT của container app.
+      - targets: ["app:3000"]
+        labels:
+          service: app
+
+  - job_name: quanly-worker
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      # Tiến trình worker mở /metrics RIÊNG ở cổng WORKER_METRICS_PORT (mặc định 9091 —
+      # src/worker.ts). PHẢI scrape riêng: `export_duration_seconds`, `export_jobs_total` và
+      # `bullmq_jobs` có số THẬT ở đây, còn bản scrape của app cho một cổng xuất file gần như luôn
+      # rỗng (job chạy trong tiến trình worker, không phải trong tiến trình API).
+      - targets: ["worker:9091"]
+        labels:
+          service: worker
+
+  # Prometheus tự giám sát chính nó. Tên job CỐ Ý KHÔNG khớp `quanly.*`: nếu khớp thì
+  # `QuanlyKhongConTargetNao` sẽ không bao giờ kêu — luôn còn ít nhất chuỗi `up` của chính
+  # Prometheus, và quy tắc "mất sạch target ứng dụng" trở thành vô dụng.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

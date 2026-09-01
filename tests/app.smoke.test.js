@@ -47,6 +47,29 @@ describe("app factory (no DB)", () => {
     expect(res.headers["x-request-id"]).toBeTruthy();
     expect(res.headers["x-powered-by"]).toBeUndefined();
   });
+
+  // object-src 'none' và frame-ancestors 'self' được nêu ĐÍCH DANH trong yêu cầu bảo mật, có
+  // trong src/app.ts, nhưng trước bài này KHÔNG cổng nào khoá.
+  //   · object-src 'none'      → chặn <object>/<embed>/<applet>. default-src 'self' vẫn cho nhúng
+  //     plugin từ chính origin, mà app này không bao giờ dùng plugin.
+  //   · frame-ancestors 'self' → chặn clickjacking. Chỉ thị này KHÔNG kế thừa default-src, thiếu
+  //     nó là hở thật.
+  //
+  // CHỐT TRÊN HEADER THẬT, KHÔNG CHỐT TRÊN MÃ CẤU HÌNH — có chủ ý. Hai giá trị này đến từ HAI
+  // nguồn: helmet `useDefaults: true` đã cấp sẵn, và src/app.ts còn khai lại tường minh. Nên xoá
+  // riêng hai dòng khai trong app.ts thì header KHÔNG đổi và bài này vẫn xanh (đã thử). Cái bài
+  // này bắt được là thứ thật sự nguy hiểm: header ĐẦU RA mất/nới hai chỉ thị đó — do nới giá trị
+  // (object-src 'self', frame-ancestors *), do tắt useDefaults, hay do nâng cấp helmet đổi mặc
+  // định. Kiểm ngược: đổi thành "'self'" / "*" trong app.ts → bài này ĐỎ.
+  it("CSP khoá object-src 'none' và frame-ancestors 'self'", async () => {
+    const res = await request(app).get("/livez");
+    const csp = res.headers["content-security-policy"];
+    expect(csp).toMatch(/(^|;)\s*object-src\s+'none'\s*(;|$)/);
+    expect(csp).toMatch(/(^|;)\s*frame-ancestors\s+'self'\s*(;|$)/);
+    // frame-ancestors không kế thừa default-src → phải có mặt TƯỜNG MINH, không được nhờ vả.
+    expect(csp).toContain("frame-ancestors");
+    expect(csp).toContain("object-src");
+  });
 });
 
 describe("CSRF origin guard (no DB)", () => {

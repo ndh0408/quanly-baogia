@@ -10,7 +10,9 @@ import { setPendingNewQuote } from "../lib/pendingQuote";
 const STEPS = ["Công ty phát hành", "Mẫu báo giá", "Thông tin"];
 const ROLE_LABEL: Record<string, string> = { admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán" };
 const DEFAULT_GREETING = "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:";
-const safeLogo = (s: string) => /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s) ? s : "";
+// Khớp TOÀN CHUỖI đúng như customerLogoSchema ở src/validators.ts. Kiểm tiền tố cho lọt chuỗi kiểu
+// `data:image/png;base64,AAA"><a …>` — đúng thứ thoát khỏi src="" nếu chuỗi này được nội suy vào HTML.
+const safeLogo = (s: string) => /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
 // Mô tả thân thiện 1 mẫu theo cấu trúc (thay cho codename nội bộ). Rỗng → chỉ hiện tên mẫu.
 const tplDesc = (t: EditorTemplate) => {
   const p: string[] = [];

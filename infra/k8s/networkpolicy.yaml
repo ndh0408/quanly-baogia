@@ -1,6 +1,7 @@
 # Giới hạn truy cập datastore: CHỈ pod ứng dụng (app=quanly: api + worker) mới kết nối được
-# Postgres (5432) và Redis (6379). Không có policy này, MỌI pod trong namespace đọc/ghi được DB +
-# session/hàng đợi. (Cần CNI hỗ trợ NetworkPolicy: Calico/Cilium/Weave… — kube-proxy thuần không đủ.)
+# Postgres (5432) và Redis (6379). Không có policy này, MỌI pod trong namespace đọc/ghi được cả dữ
+# liệu nghiệp vụ lẫn bảng phiên trong Postgres, và cả hàng đợi/rate-limit trong Redis.
+# (Cần CNI hỗ trợ NetworkPolicy: Calico/Cilium/Weave… — kube-proxy thuần không đủ.)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

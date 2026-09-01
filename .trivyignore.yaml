@@ -3,8 +3,13 @@
 # Dùng .trivyignore.yaml (không dùng .trivyignore dạng danh sách ID) để mỗi miễn trừ ghim vào ĐÚNG
 # đường dẫn. Tắt cả luật thì lần sau có bí mật thật lọt vào ConfigMap khác sẽ không ai biết.
 
+# ⚠️ ID PHẢI CÓ TIỀN TỐ `AVD-`. Bản trước ghi `KSV-0109` và miễn trừ này KHÔNG có tác dụng nào:
+# trivy 0.58.0 báo lỗi dưới ID `AVD-KSV-0109`, và so khớp là so khớp CHUỖI ĐẦY ĐỦ. Đo được bằng
+# hai lượt chạy giống hệt nhau, chỉ khác ID: `KSV-0109` → exit 1 (vẫn đỏ), `AVD-KSV-0109` → exit 0.
+# Sai sót này nằm im được lâu vì job `security` của ci.yml CHƯA BAO GIỜ CHẠY (tài khoản không bật
+# Actions). Nay nó chạy ở scripts/ci/security-scan.sh bước [S2].
 misconfigurations:
-  - id: KSV-0109
+  - id: AVD-KSV-0109
     paths:
       - "infra/k8s/configmap.yaml"
     statement: >

@@ -1,0 +1,348 @@
+# ============================================================================
+# Quy tắc cảnh báo Prometheus cho QuanLY.
+#
+# Kiểm cú pháp + PromQL:  npm run check:alerts   (scripts/ci/check-alerts.sh, dùng promtool)
+#
+# ── VÌ SAO CÓ FILE NÀY ─────────────────────────────────────────────────────
+# src/observability.ts phát 21 metric riêng cộng bộ mặc định của prom-client. Trước file này,
+# KHÔNG có một quy tắc cảnh báo nào trong repo (`find infra -iname '*alert*'` không ra gì). Nghĩa
+# là số liệu chỉ dùng được khi đã có người MỞ dashboard ra xem — mà lúc hệ thống hỏng thì không ai
+# đang xem. Có metric mà không có cảnh báo là có hộp đen kèm đèn báo không ai nối dây.
+#
+# ── MỖI QUY TẮC BÁM VÀO MỘT SỰ CỐ CÓ THẬT ──────────────────────────────────
+# Không có quy tắc nào ở đây là "cho đủ bộ". Từng cái tương ứng một chế độ hỏng đã được ghi lại
+# trong mã nguồn hoặc trong docs/REMAINING_RISKS.md, và `annotations.runbook` chỉ tới chỗ đó.
+#
+# ── ĐIỀU KIỆN ĐỂ CHÚNG CHẠY ĐƯỢC ───────────────────────────────────────────
+# ✔ CÓ định nghĩa Prometheus trong repo: `infra/observability/prometheus.yml` +
+#   service `prometheus` trong `infra/observability/docker-compose.observability.yml`, đã nạp sẵn
+#   ĐÚNG file này qua `rule_files:`. Nhưng ngăn xếp đó KHÔNG bật mặc định (xem README ở thư mục
+#   ấy) — nên câu đúng là "đã dựng được bằng một lệnh", KHÔNG phải "đang chạy ở production".
+# ⚠️ KHÔNG CÓ ALERTMANAGER. Quy tắc dưới đây chuyển sang `firing` và DỪNG LẠI ở giao diện
+#    Prometheus (/alerts). Không Telegram, không email, KHÔNG AI BỊ ĐÁNH THỨC. Đường báo động duy
+#    nhất đang chạy thật là backup watchdog qua Telegram, cố ý tách khỏi Prometheus.
+# ⚠️ `/metrics` ở production TRẢ 404 khi thiếu METRICS_TOKEN (src/app.ts), và 401 khi Bearer sai.
+#    Không đặt token thì Prometheus scrape ra 404 và MỌI quy tắc dưới đây im lặng vĩnh viễn —
+#    `QuanlyMetricsKhongScrapeDuoc` sinh ra để bắt đúng chuyện đó.
+#
+# ── CÁCH NẠP ───────────────────────────────────────────────────────────────
+# Ngăn xếp trong repo:    đã nạp sẵn (infra/observability/prometheus.yml → `rule_files:`)
+# Prometheus khác:        thêm đường dẫn file này vào `rule_files:` trong prometheus.yml
+# prometheus-operator:    bọc `groups:` bên dưới vào một CR `PrometheusRule`:
+#     apiVersion: monitoring.coreos.com/v1
+#     kind: PrometheusRule
+#     metadata: { name: quanly, labels: { release: <tên-release-prometheus> } }
+#     spec:
+#       <dán nguyên khối `groups:` bên dưới vào đây>
+#   (Chart Helm KHÔNG tự sinh CR này: `.Files.Get` của Helm chỉ đọc được file NẰM TRONG chart, mà
+#    giữ hai bản của cùng một tập quy tắc là cách chắc chắn để chúng trôi khỏi nhau. Một file, dán
+#    tay một lần, hơn hai file tự động lệch nhau.)
+# ============================================================================
+groups:
+  # ── Nhóm 1: ứng dụng còn sống và còn đo được ─────────────────────────────
+  - name: quanly.suc-khoe
+    rules:
+      - alert: QuanlyMetricsKhongScrapeDuoc
+        # `up` do chính Prometheus sinh cho mỗi target. 0 = scrape hỏng: tiến trình chết, mạng
+        # đứt, HOẶC /metrics trả 404/401 vì METRICS_TOKEN sai — trường hợp cuối là cấu hình sai
+        # âm thầm làm TẤT CẢ quy tắc còn lại vô hiệu, nên nó phải là cảnh báo đầu tiên của file.
+        expr: up{job=~"quanly.*"} == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "Không scrape được {{ $labels.instance }}"
+          description: >-
+            Prometheus không lấy được /metrics trong 3 phút. Nếu tiến trình vẫn sống thì gần như
+            chắc chắn là METRICS_TOKEN: src/app.ts trả 404 khi production thiếu token và 401 khi
+            Bearer sai. Mọi cảnh báo khác trong nhóm này đang MÙ cho tới khi cái này hết.
+          runbook: "src/app.ts — handler /metrics"
+
+      - alert: QuanlyKhongConTargetNao
+        # `up == 0` chỉ kêu khi CÒN target để kêu. Xoá nhầm ServiceMonitor / đổi nhãn job thì
+        # target biến mất hẳn và `up` không sinh chuỗi nào — im lặng tuyệt đối. `absent()` bắt ca đó.
+        expr: absent(up{job=~"quanly.*"})
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Không còn target QuanLY nào trong Prometheus"
+          description: >-
+            Không có chuỗi `up{job=~"quanly.*"}` nào tồn tại. Khác hẳn "scrape hỏng": ở đây
+            Prometheus không biết là CÓ thứ cần scrape. Thường do ServiceMonitor bị xoá, nhãn
+            release không khớp, hoặc đổi tên job.
+          runbook: "infra/helm/quanly/templates/sa.yaml — ServiceMonitor"
+
+      - alert: QuanlyTiLeLoi5xxCao
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Trên 2% request trả 5xx (10 phút liên tục)"
+          description: >-
+            `clamp_min` ở mẫu số là có chủ ý: ban đêm lưu lượng có thể về 0 và phép chia 0/0 cho ra
+            NaN — quy tắc sẽ KHÔNG kêu đúng lúc mọi request đều hỏng nhưng chỉ có vài request.
+
+      - alert: QuanlyDoTreP95Cao
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "P95 độ trễ HTTP vượt 2 giây"
+          description: >-
+            Bucket cao nhất của histogram này là 10 giây (src/observability.ts). P95 vượt 2s thường
+            là cạn pool CSDL (DB_POOL_MAX) hoặc một truy vấn quét bảng.
+          runbook: "src/db.ts — chú thích về DB_POOL_MAX"
+
+  # ── Nhóm 1b: phụ thuộc bên ngoài (CSDL · Redis · đĩa) ────────────────────
+  #
+  # Ba quy tắc này bắt những chế độ hỏng mà TOÀN BỘ phần còn lại của file MÙ:
+  #   · `up` vẫn 1 khi CSDL chết — tiến trình Node vẫn trả /metrics bình thường.
+  #   · Tỉ lệ 5xx chỉ tăng khi CÓ người đang bấm; ban đêm CSDL chết là im lặng tuyệt đối.
+  #   · Đĩa đầy không sinh 5xx cho tới đúng lúc Postgres không ghi nổi WAL — lúc đó đã mất dữ liệu.
+  - name: quanly.phu-thuoc
+    rules:
+      - alert: QuanlyCsdlKhongToiDuoc
+        # `db_up` do src/observability.ts đo NGAY LÚC SCRAPE bằng `SELECT 1` — cùng câu truy vấn
+        # /readyz dùng. Vì sao cần metric riêng khi ĐÃ có /readyz: Prometheus không hỏi /readyz, và
+        # `up` chỉ nói tiến trình có trả lời hay không. "App còn sống mà CSDL chết" là chế độ hỏng
+        # THƯỜNG GẶP NHẤT của repo này (pool cạn, Postgres restart, mật khẩu xoay) và trước quy tắc
+        # này không có gì bắt được nó.
+        #
+        # KHÔNG có vế "and" nào ở đây, và đó là CÓ CHỦ Ý: `HEALTH_METRICS=0` làm
+        # src/observability.ts KHÔNG ĐĂNG KÝ gauge nữa nên `db_up` biến mất khỏi /metrics hoàn toàn,
+        # chứ không phát ra 0. (Bản vá trước chỉ chặn phép đo mà vẫn đăng ký gauge → /metrics phát
+        # `db_up 0` và quy tắc này kêu CRITICAL suốt ngày đêm trên một Postgres hoàn toàn khoẻ. Ca
+        # đó nay có bài kiểm riêng trong alerts.test.yaml.) Mất tín hiệu do người vận hành cố ý tắt
+        # là việc của `QuanlyKhongConTargetNao`, không phải của quy tắc này.
+        expr: db_up == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} không chạm được Postgres"
+          description: >-
+            `SELECT 1` thất bại hoặc quá 2 giây trong 3 phút liên tục. Ứng dụng vẫn trả lời HTTP nên
+            liveness probe XANH và `up` vẫn 1 — không có cảnh báo nào khác trong file này bắt được
+            trạng thái này. Kiểm pool (DB_POOL_MAX), tiến trình Postgres, và DATABASE_URL.
+          runbook: "src/db.ts — Pool + DB_POOL_MAX; src/app.ts — handler /readyz"
+
+      - alert: QuanlyRedisChet
+        # HAI VẾ, bắt buộc — cùng lý lẽ với `QuanlySseBackplaneChet`: `REDIS_URL` là `.optional()`
+        # (src/config.ts), tức chạy KHÔNG Redis là cấu hình hợp lệ, và một quy tắc kêu oan ở đó sẽ
+        # bị tắt trong tuần đầu.
+        #
+        # VÌ SAO KHÔNG DÙNG LẠI `QuanlySseBackplaneChet`: quy tắc ấy gác trên
+        # `sse_backplane_mode{mode="redis"}`, tức nó chỉ nói về BACKPLANE. Bản triển khai có
+        # REDIS_URL nhưng backplane chưa dựng xong (hoặc cố ý không dùng) vẫn xài Redis cho HÀNG ĐỢI
+        # và RATE-LIMIT — Redis chết ở đó thì job nền và giới hạn tần suất phân tán đều hỏng, mà quy
+        # tắc kia im lặng hoàn toàn. (Phiên đăng nhập thì KHÔNG dính: kho phiên là connect-pg-simple
+        # → bảng user_sessions trong Postgres. Redis chết không đăng xuất ai cả.)
+        expr: redis_configured == 1 and on(instance, job) redis_up == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "Redis không tới được từ {{ $labels.instance }}"
+          description: >-
+            Tiến trình có REDIS_URL nhưng không kết nối Redis nào ở trạng thái ready. Hệ quả THẬT:
+            rate-limit phân tán rơi về bộ đếm trong tiến trình → giới hạn tần suất không còn dùng
+            chung giữa các instance; job BullMQ không đẩy được; SSE giữa các instance mất đồng bộ.
+            KHÔNG ai bị đăng xuất — kho phiên là connect-pg-simple trên Postgres, không phải Redis.
+          runbook: "src/queue.ts — getRedis/getRateLimitRedis; src/rateLimit.ts"
+
+      - alert: QuanlyDiaSapDay
+        # Không viết cứng "còn dưới N GB": mẫu số `disk_total_bytes` do chính app phát ra, nên
+        # ngưỡng theo TỈ LỆ và đổi ổ đĩa không làm quy tắc sai — cùng khuôn với
+        # `export_max_queue_depth` ở nhóm xuất file.
+        expr: disk_free_bytes / disk_total_bytes < 0.10
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hệ tệp {{ $labels.mountpoint }} trên {{ $labels.instance }} còn dưới 10% trống"
+          description: >-
+            Đây là cảnh báo MẤT DỮ LIỆU, không phải cảnh báo hiệu năng: docker-compose.prod.yml ghi
+            rõ chế độ hỏng — đĩa đầy thì Postgres không ghi nổi WAL nữa. Nguồn tiêu đĩa đã biết:
+            log JSON của Docker (đã chặn ở 50MB/container), volume pgdata, và file tạm của đường
+            xuất Excel/PDF.
+          runbook: "docker-compose.prod.yml — x-logging; docs/operations/DISASTER_RECOVERY.md"
+
+  # ── Nhóm 1c: cấu hình bắt buộc ở production còn THIẾU ────────────────────
+  #
+  # ── LỖ MÀ NHÓM NÀY LẤP ────────────────────────────────────────────────────
+  # `QuanlyRedisChet` ở trên gác trên `redis_configured == 1`. Vế đó cần thiết để không kêu oan ở
+  # bản triển khai CỐ Ý chạy không Redis — nhưng hệ quả là nó TỰ LOẠI TRỪ đúng ca nguy hiểm nhất:
+  # production QUÊN đặt REDIS_URL thì `redis_configured = 0` và quy tắc ấy KHÔNG BAO GIỜ bắn.
+  # S3_* và SMTP_HOST thì trước nhóm này không có metric lẫn quy tắc nào.
+  #
+  # ── VÌ SAO LÀ CẢNH BÁO CHỨ KHÔNG PHẢI `process.exit` ─────────────────────
+  # §10 đòi production fail-fast khi thiếu Redis/storage credentials. src/config.ts cố ý chỉ
+  # `console.warn`, với lý lẽ "làm cả ứng dụng không khởi động vì một tính năng phụ còn tệ hơn" —
+  # lý lẽ đó ĐÚNG, đổi nó thành exit là biến một cảnh báo thành một sự cố ngừng chạy. Nhưng nó chỉ
+  # đứng vững khi CÓ lớp bù, mà lớp bù cũ là một dòng log lúc khởi động: trôi mất sau lần cuộn log
+  # đầu tiên. Hai quy tắc dưới đây LÀ lớp bù đó.
+  #
+  # `config_missing` chỉ được phát khi NODE_ENV=production (src/observability.ts), nên quy tắc
+  # không cần tự lọc `env` — máy dev thiếu SMTP/S3 là bình thường và không sinh chuỗi nào.
+  - name: quanly.cau-hinh
+    rules:
+      - alert: QuanlyThieuCauHinhBatBuoc
+        # `for: 30m` dài hơn hẳn các quy tắc khác vì đây KHÔNG phải sự cố đang diễn ra mà là một
+        # KHIẾM KHUYẾT TRIỂN KHAI: nó đúng từ giây đầu tiên tiến trình chạy và đúng mãi. Kêu sau 30
+        # phút để một lượt rolling-update (pod cũ chưa chết, pod mới cấu hình khác) không sinh nhiễu.
+        expr: config_missing{key!="PII_ENC_KEY"} == 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} chạy production mà THIẾU {{ $labels.key }}"
+          description: >-
+            Biến này chưa đặt nên tính năng phụ thuộc nó đang TẮT ÊM — không lỗi nào tới người dùng.
+            REDIS_URL: rate-limit rơi về bộ đếm trong tiến trình (nhiều replica = giới hạn tần suất
+            nhân lên theo số replica), job BullMQ không chạy, SSE mất đồng bộ giữa các instance.
+            S3_*: ảnh chứng từ thanh toán trả 503. SMTP_HOST: thư mời và đặt lại mật khẩu bị BỎ IM
+            LẶNG. Sửa bằng cách đặt biến rồi khởi động lại — `config_missing` đọc cấu hình lúc nạp.
+          runbook: "src/config.ts — khối cảnh báo chỉ-production; .env.example"
+
+      - alert: QuanlyPiiGhiTho
+        # TÁCH khỏi quy tắc trên bằng bộ lọc nhãn `key` để hai bên KHÔNG kêu chồng nhau, và để mức
+        # nghiêm trọng không bị gộp: "thư mời không gửi được" và "CCCD/lương nằm THÔ trong mọi bản
+        # dump CSDL" mà cùng một severity thì cái nặng bị chôn dưới cái nhẹ.
+        expr: config_missing{key="PII_ENC_KEY"} == 1
+        for: 30m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} ghi PII THÔ — PII_ENC_KEY chưa đặt ở production"
+          description: >-
+            CCCD, số tài khoản và lương đang được ghi KHÔNG MÃ HOÁ vào CSDL. Mỗi bản dump, mỗi bản
+            sao lưu, mỗi quyền đọc CSDL đều lộ nguyên các trường này — và dữ liệu đã ghi thô thì
+            đặt khoá sau KHÔNG tự mã hoá ngược, phải chạy `npm run pii:backfill`.
+          runbook: "docs/operations/DISASTER_RECOVERY.md; scripts/migration/pii-backfill.mjs"
+
+  # ── Nhóm 2: realtime (SSE) ───────────────────────────────────────────────
+  - name: quanly.sse
+    rules:
+      - alert: QuanlySseBackplaneChet
+        # Biểu thức này lấy NGUYÊN VĂN từ khối chú thích của `sseBackplaneMode` trong
+        # src/observability.ts. Hai vế là bắt buộc: chỉ kiểm `sse_backplane_up == 0` sẽ kêu oan ở
+        # bản triển khai MỘT tiến trình cố ý không dùng Redis, và một cảnh báo hay kêu oan thì bị tắt.
+        expr: sse_backplane_mode{mode="redis"} == 1 and on(instance) sse_backplane_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Backplane Redis của SSE chết trên {{ $labels.instance }}"
+          description: >-
+            Instance này được cấu hình chạy chế độ redis nhưng backplane đang không lên. Nhiều
+            replica + backplane chết = người dùng nối vào instance A không thấy thay đổi do người
+            trên instance B tạo. Không màn hình nào báo lỗi; danh sách chỉ đơn giản là không cập nhật.
+          runbook: "src/sse.ts — biến `pub` và hàm `backplaneDangDung`"
+
+      - alert: QuanlySsePublishThatBai
+        expr: sum(rate(sse_backplane_errors_total[10m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "PUBLISH sự kiện SSE qua Redis đang thất bại"
+          description: >-
+            Redis pub/sub KHÔNG có bộ đệm: một sự kiện phát lúc không publish được là MẤT HẲN, không
+            có cách phát lại. Mỗi lần tăng là một lần màn hình của ai đó không cập nhật.
+
+  # ── Nhóm 3: xuất file (Excel/PDF) ────────────────────────────────────────
+  - name: quanly.xuat-file
+    rules:
+      - alert: QuanlyHangDoiXuatDay
+        # `export_max_queue_depth` là gauge do chính app phát ra từ EXPORT_MAX_PENDING — so với
+        # gauge thay vì với hằng số viết cứng, để đổi cấu hình không làm quy tắc sai.
+        expr: export_queue_depth >= export_max_queue_depth
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hàng đợi chờ xuất file đã đầy trên {{ $labels.instance }}"
+          description: >-
+            Hàng đợi chờ có TRẦN (EXPORT_MAX_PENDING). Đầy nghĩa là yêu cầu xuất mới bị TỪ CHỐI
+            ngay, không phải xếp hàng — người dùng nhận lỗi chứ không phải chờ lâu.
+          runbook: "src/exportQueue.ts"
+
+      - alert: QuanlyXuatFileBiTuChoi
+        expr: sum by (reason) (rate(export_rejected_total[15m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Yêu cầu xuất file đang bị từ chối (lý do: {{ $labels.reason }})"
+          description: "Mỗi lần tăng là một người dùng bấm Xuất và không nhận được file."
+
+      - alert: QuanlyWorkerXuatCangCung
+        expr: export_active_workers >= export_max_active_workers
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Mọi worker xuất file bận liên tục 15 phút"
+          description: >-
+            Chưa phải sự cố, nhưng là ngưỡng trước khi `QuanlyHangDoiXuatDay` nổ. Cân nhắc tăng
+            EXPORT_MAX_ACTIVE hoặc thêm replica worker.
+
+  # ── Nhóm 4: hàng đợi nền (BullMQ) ────────────────────────────────────────
+  - name: quanly.hang-doi
+    rules:
+      - alert: QuanlyJobNenChatDong
+        expr: sum by (queue) (bullmq_jobs{state="waiting"}) > 100
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hàng đợi {{ $labels.queue }} còn {{ $value }} job đang chờ"
+          description: >-
+            Trước khi có gauge này, worker chết thì job chất đống trong Redis mà /metrics im lặng
+            hoàn toàn — dấu hiệu đầu tiên là người dùng gọi điện.
+          runbook: "src/queue.ts — bullQueueDepth"
+
+      - alert: QuanlyJobNenThatBai
+        expr: sum by (queue) (bullmq_jobs{state="failed"}) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hàng đợi {{ $labels.queue }} có {{ $value }} job THẤT BẠI"
+          description: >-
+            Job thất bại nằm lại trong Redis chứ không tự biến mất. Đây là gauge ĐẾM TỒN, không
+            phải tốc độ — số không tự về 0 cho tới khi ai đó dọn hoặc thử lại.
+
+      - alert: QuanlyKhongCoWorkerNao
+        # Cả `waiting` lẫn `active` đều tồn tại nhưng KHÔNG job nào chuyển sang active: dấu hiệu
+        # kinh điển của "app còn sống, worker chết". `QuanlyJobNenChatDong` cần 15 phút và ngưỡng
+        # 100 job; cái này bắt sớm hơn ở mọi mức tải.
+        expr: |
+          sum(bullmq_jobs{state="waiting"}) > 0
+            and sum(bullmq_jobs{state="active"}) == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Có job chờ nhưng KHÔNG job nào đang chạy — worker có thể đã chết"
+          description: >-
+            Deployment worker chạy `node dist/worker.js` TÁCH RIÊNG khỏi app. App vẫn phục vụ
+            request bình thường khi worker chết, nên không cảnh báo nào khác bắt được.
+          runbook: "infra/helm/quanly/templates/worker-deployment.yaml"
+
+  # ── Nhóm 5: tiến trình Node ──────────────────────────────────────────────
+  - name: quanly.tien-trinh
+    rules:
+      - alert: QuanlyTienTrinhKhoiDongLaiLienTuc
+        # `process_start_time_seconds` do collectDefaultMetrics của prom-client phát. Tuổi tiến
+        # trình liên tục dưới 10 phút = vòng lặp khởi động lại (crash loop).
+        expr: time() - process_start_time_seconds{job=~"quanly.*"} < 600
+        for: 20m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} khởi động lại liên tục"
+          description: >-
+            Tuổi tiến trình liên tục dưới 10 phút trong suốt 20 phút. Nguyên nhân đã gặp: lệnh khởi
+            động trỏ vào file không tồn tại, hoặc src/config.ts `process.exit(1)` vì thiếu biến bắt
+            buộc ở production (SESSION_SECRET/JWT_SECRET/APP_BASE_URL/MFA_ENC_KEY).
+          runbook: "src/config.ts — các chốt chỉ bật ở production"
+
+      - alert: QuanlyEventLoopNgheN
+        expr: nodejs_eventloop_lag_p99_seconds{job=~"quanly.*"} > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Event loop trễ P99 trên 0,5 giây"
+          description: >-
+            Node chạy MỘT luồng: event loop nghẽn thì MỌI request chậm, kể cả /readyz. Nguyên nhân
+            đã gặp trong repo này là công việc nặng chạy nội tuyến thay vì đẩy sang worker thread.
+          runbook: "src/exportQueue.ts, src/importWorker.ts"

@@ -12,6 +12,7 @@ import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
 import { storeProof, removeProof, readProofDataUrl } from "../paymentProof.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere, isPiiEncryptionEnabled } from "../piiFields.js";
+import { phanTrang } from "../pagination.js";
 
 type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (trước gộp "manage")
 
@@ -85,7 +86,7 @@ export async function listPersonnel(req: Request) {
   const salarySum = Number(agg._sum.salary ?? 0);
   const tax = computeTax(salarySum);
   const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
-  return { data: decorated, meta: { total, page, size, pageCount: Math.ceil(total / size) }, summary };
+  return { ...phanTrang(decorated, total, page, size), summary };
 }
 
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
@@ -222,11 +223,18 @@ export async function getPaymentProof(req: Request) {
   await loadAuthorized(req, "read");
   const rec = await prisma.personnelRecord.findFirst({
     where: { id: (req.params as any).id },
-    select: { paymentProof: true, paymentProofKey: true, paymentProofMime: true },
+    // `id` được chọn CHỈ để hàng audit bên dưới có resourceId — thiếu nó thì nhật ký ghi null và
+    // không truy được về hồ sơ nào.
+    select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofMime: true },
   });
   if (!rec || (!rec.paymentProofKey && !rec.paymentProof)) throw httpError(404, "Chưa có ảnh chứng từ");
   const dataUrl = await readProofDataUrl(rec);   // ưu tiên kho object, rơi về base64 nếu chưa chuyển
   if (!dataUrl) throw httpError(404, "Chưa có ảnh chứng từ");
+  // Ảnh uỷ nhiệm chi (tên + số tài khoản + số tiền) — khi có tranh chấp chi trả, câu hỏi đầu tiên là
+  // "ai đã mở, lúc nào". `downloadContract` ngay bên dưới và `markPayment` đều đã ghi; chỗ này bị sót.
+  // CỐ Ý không đưa data-URL vào before/after: bảng AuditEvent KHÔNG mã hoá, ghi ảnh vào đó là nhân
+  // bản lại đúng thứ mà storeProof vừa dời khỏi CSDL.
+  await audit(req, "personnel.payment-proof.view", { resource: "personnel", resourceId: rec.id });
   return { paymentProof: dataUrl };
 }
 

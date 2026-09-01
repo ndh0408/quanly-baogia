@@ -1,0 +1,177 @@
+{
+  "uid": "quanly-app",
+  "title": "QuanLý — ứng dụng",
+  "tags": ["quanly"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_requests_total, route)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Lưu lượng theo mã trạng thái (req/s)",
+      "description": "Nhìn hình dạng trước, con số sau: một bậc thang ở 5xx nói nhiều hơn mọi cảnh báo.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tỉ lệ lỗi 5xx (%)",
+      "description": "Cùng biểu thức mà quy tắc cảnh báo HttpErrorRateCao dùng (infra/prometheus/alerts.yaml) — bảng điều khiển và cảnh báo phải nói CÙNG một chuyện.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+          "legendFormat": "5xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Độ trễ p50 / p95 / p99 (giây)",
+      "description": "p95 mới là thứ người dùng cảm nhận; trung bình che mất đúng phần đuôi cần xem.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Hàng đợi xuất file — worker đang chạy / hàng chờ / trần",
+      "description": "Hàng chờ chạm trần là lúc người dùng bắt đầu nhận 429 ở nút Tải. Vẽ cả trần để thấy còn cách bao xa.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "export_active_workers", "legendFormat": "đang chạy" },
+        { "refId": "B", "expr": "export_queue_depth", "legendFormat": "đang chờ" },
+        { "refId": "C", "expr": "export_max_active_workers", "legendFormat": "trần worker" },
+        { "refId": "D", "expr": "export_max_queue_depth", "legendFormat": "trần hàng chờ" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Xuất file bị TỪ CHỐI (req/s)",
+      "description": "Khác 5xx: đây là từ chối CÓ CHỦ Ý khi hàng chờ đầy. Không phải lỗi, nhưng là tín hiệu phải nâng công suất.",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(export_rejected_total[5m]))", "legendFormat": "bị từ chối" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "SSE — số client đang kết nối và trạng thái backplane",
+      "description": "backplane = 0 nghĩa là Redis pub/sub đứt: mỗi instance chỉ còn phát cho client của chính nó, và người dùng ở instance khác không nhận được thông báo nào.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sse_clients", "legendFormat": "client" },
+        { "refId": "B", "expr": "sse_backplane_up", "legendFormat": "backplane sống" },
+        { "refId": "C", "expr": "sum(rate(sse_backplane_errors_total[5m]))", "legendFormat": "lỗi backplane/s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "BullMQ — việc theo trạng thái",
+      "description": "`failed` tăng đều mà `completed` đứng yên = worker chết hoặc job hỏng lặp lại.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "bullmq_jobs", "legendFormat": "{{queue}} · {{state}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Log LỖI gần nhất (Loki)",
+      "description": "Cùng một trang với biểu đồ, cố ý: nhìn thấy bậc thang 5xx rồi phải đọc được ngay dòng log của chính quãng đó, không phải mở tab khác rồi tự canh giờ.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=\"quanly-app\", level=\"error\"}",
+          "queryType": "range"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Số dòng log theo mức (Loki)",
+      "description": "Cầu nối giữa metric và log: mức warn/error nhảy vọt thường tới TRƯỚC khi tỉ lệ 5xx kịp đổi.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 33 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level) (count_over_time({container=\"quanly-app\"}[5m]))",
+          "legendFormat": "{{level}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}

@@ -138,7 +138,9 @@ function cellText(v: unknown): string {
   // Ô CHỮ do app xuất ra có thể được thêm dấu ' ở đầu để Excel không hiểu nhầm là công thức
   // (neutralizeFormula ở excel.ts). Đọc ngược phải BÓC ra, nếu không mỗi vòng xuất→nhập lại
   // cộng thêm một dấu nháy vào tên hạng mục.
-  if (typeof v === "string") return v.replace(/^'(?=[=+\-@\t\r])/, "");
+  // Lookahead phải KHỚP ĐÚNG regex của phía xuất — kể cả nhánh có khoảng trắng đứng trước
+  // (`"' =SUM(...)"`). Lệch một nhánh là dấu nháy cộng dồn qua mỗi vòng xuất→nhập.
+  if (typeof v === "string") return v.replace(/^'(?=[\t\r]|\s*[=+\-@])/, "");
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   const o = v as Record<string, unknown>;

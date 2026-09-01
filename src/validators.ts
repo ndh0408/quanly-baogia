@@ -17,6 +17,18 @@ export const zbool = z.preprocess(
   z.boolean(),
 );
 
+// Data-URL ảnh chứng từ thanh toán, kiểm TOÀN CHUỖI (có neo cuối `$`).
+//
+// VÌ SAO tách ra hằng số dùng chung: hai route chứng từ (`quotes.routes.ts` /pay và
+// `personnel.routes.ts` /payment) trước đây mỗi nơi tự viết một regex CHỈ khớp TIỀN TỐ, nên
+// `data:image/png;base64,<png hợp lệ>" onerror="…` lọt vào CSDL nguyên văn — đúng cái lỗ mà
+// customerLogo/itemSchema.images bên dưới đã bịt và ghi chú rõ. Regex ở hai nơi thì hai nơi sẽ
+// trôi khỏi nhau; một chỗ là một chỗ.
+//
+// Tập MIME CỐ Ý hẹp hơn customerLogo (KHÔNG có gif): `sniffImage` trong src/paymentProof.ts chỉ
+// nhận PNG/JPEG/WEBP, nhận gif ở cửa vào chỉ đổi lỗi 400 thành 415 ở tầng sâu hơn.
+export const PAYMENT_PROOF_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+
 const pwd = z
   .string()
   .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)
@@ -80,6 +92,10 @@ export const AcceptInviteSchema = z.object({
   title,
   senderName: title,
   password: pwd,
+  // Mã yếu tố thứ hai cho tài khoản ĐÃ bật MFA. Đường này kiêm "Quên mật khẩu" nên nó cấp phiên
+  // đầy đủ — không hỏi mã ở đây thì chiếm được hộp thư là gỡ được luôn MFA. 6 chữ số = TOTP;
+  // 10–20 ký tự hex = mã dự phòng (10 là định dạng CŨ, 20 là định dạng hiện tại 80 bit).
+  mfaToken: z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10,20})$/, "Mã MFA gồm 6 chữ số, hoặc mã dự phòng").optional(),
 });
 
 export const UserCreateSchema = z.object({
@@ -153,6 +169,20 @@ const itemSchema = z.object({
   approved: z.boolean().optional(),
   approvedAt: z.string().max(40).optional().nullable(),
   approvedBy: z.coerce.number().int().positive().optional().nullable(),
+  // THANH TOÁN theo HÀNG — phải khai vì ĐÚNG LÝ DO như `approved` ở trên: Zod v4 loại bỏ khoá lạ,
+  // và validate() THAY LUÔN req.body bằng object đã lọc. Thiếu ba dòng này thì tới
+  // reconcileExtraPayments mọi hàng đều có `paid === undefined`, `!!undefined` là false, và người
+  // CÓ quyền quote:internal:pay bấm Lưu là XOÁ SẠCH cờ đã-thanh-toán của mọi hàng nội bộ — mất luôn
+  // paidAt/paidById, không cảnh báo gì. Nhánh không-có-quyền thì khôi phục từ CSDL nên vẫn đúng,
+  // tức lỗi đánh trúng đúng những người quản lý thanh toán. Xem tests/extra-paid-preserved.test.js.
+  //
+  // Khai ở đây KHÔNG phải là tin client: reconcileExtraPayments vẫn quyết định giá trị cuối
+  // (không quyền → lấy theo CSDL; có quyền → đóng dấu thời gian + người trả ở phía server).
+  paid: z.boolean().optional(),
+  paidAt: z.string().max(40).optional().nullable(),
+  paidById: z.coerce.number().int().positive().optional().nullable(),
+  // CỐ Ý KHÔNG khai `paidProof`: ảnh chứng từ chỉ đi qua route /pay, không đi qua đường lưu báo
+  // giá (chống base64 chảy qua payload + chống giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
 });
 
 // Bảng nội bộ (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
@@ -162,6 +192,34 @@ const extraTableSchema = z.object({
   templateId: z.coerce.number().int().positive().optional().nullable(),   // mẫu cột (GN/CLF có/không ngày)
   groupSubtotal: z.boolean().optional(),
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
+});
+
+// LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).
+//
+// Route này TRƯỚC ĐÂY không có body schema: `validate({ params: idParam })` chỉ kiểm `:id`, còn
+// `saveHn` đọc thẳng `req.body?.hnSheets` rồi đưa vào `sanitizeExtraTables`, mà hàm đó persist
+// NGUYÊN TRẠNG mọi cờ do server sở hữu (`approved*`, `paid*`, `paidProof`). Người dùng duy nhất
+// gọi được endpoint này là account Hà Nội — vai trò có ĐÚNG BA quyền
+// (`quote:read:own`, `quote:update:own`, `quote:hn:fill`), KHÔNG có `quote:internal:pay` cũng
+// KHÔNG có `quote:internal:approve`. Xem tests/hn-save-forgery.test.js.
+//
+// Schema chỉ chặn HÌNH DẠNG (kích thước payload, kiểu dữ liệu). Phần QUYỀN — cờ duyệt/thanh toán
+// phải lấy lại từ CSDL — do saveHn xử lý; hai lớp này bổ sung nhau, không thay thế nhau.
+export const HnSaveSchema = z.object({
+  hnSheets: z
+    .array(
+      z.object({
+        // Sheet mới chưa lưu → client gửi null; saveHn dò không thấy thì bỏ qua sheet đó.
+        sheetId: z.coerce.number().int().positive().optional().nullable(),
+        // category do server ép cứng thành "hanoi"; client cũ có gửi kèm nên vẫn chấp nhận.
+        hnTables: z
+          .array(extraTableSchema.extend({ category: z.literal("hanoi").optional() }))
+          .max(20, "Tối đa 20 bảng Hà Nội trong một trang")
+          .default([]),
+      })
+    )
+    .max(50, "Tối đa 50 trang")
+    .default([]),
 });
 
 const sheetSchema = z.object({
@@ -177,6 +235,62 @@ const sheetSchema = z.object({
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
   extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });
+
+/**
+ * TRẦN XUẤT FILE — và vì thế cũng là trần LƯU. Một nguồn duy nhất cho cả hai đường.
+ *
+ * `src/routes/export.routes.ts` từ chối 413 khi báo giá vượt hai con số này ("dùng xuất nền").
+ * Trần LƯU thì rộng hơn hẳn: 60 trang × 1000 dòng = 60.000 dòng, tức người dùng lưu được những
+ * báo giá mà HỆ THỐNG KHÔNG CÓ CÁCH NÀO xuất ra file — đường xuất nền không có nút nào trên giao
+ * diện React (`grep -rn "/jobs" web/src` không ra kết quả) và còn tự tắt khi không có hàng đợi
+ * (`export_async_unavailable`, src/routes/jobs.routes.ts). Kết quả: soạn xong, bấm Lưu thấy "Đã
+ * lưu", rồi bấm Xuất file thì nhận một lỗi kèm lời khuyên không bấm được ở đâu cả.
+ *
+ * Nên chốt chặn được dời LÊN lúc LƯU: hỏng sớm, ngay tại thao tác gây ra nó, kèm câu nói được
+ * người dùng phải làm gì (tách bớt sang báo giá khác). Không nới trần xuất trực tiếp thay vì siết
+ * trần lưu: sinh file chạy trong worker_threads có trần 30s (`EXPORT_GEN_TIMEOUT_MS`,
+ * src/exportQueue.ts:171), vượt là bị `terminate()` — đổi 413 lấy một lỗi hết-giờ thì tệ hơn.
+ * (CHƯA ĐO được 60.000 dòng mất bao lâu để sinh file; chỉ biết trần thời gian ở đó là 30s.)
+ *
+ * Trần TRANG (60 khi lưu) đã nằm dưới trần xuất (100) nên không phải đụng tới.
+ */
+export const MAX_EXPORT_SHEETS = 100;
+export const MAX_EXPORT_ITEMS = 20_000;
+
+// SỨC CHỨA TỐI ĐA CỦA ĐƯỜNG LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
+// ngần này — xem chú thích ngay dưới, và src/worker.ts dùng lại đúng hai hằng số này.
+export const MAX_SAVE_SHEETS = 60;
+export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
+export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
+
+/**
+ * ── ĐÃ TỪNG CÓ MỘT TRẦN 20.000 DÒNG Ở ĐÂY. ĐÃ GỠ. ĐỪNG ĐẶT LẠI. ─────────────
+ *
+ * Nó được thêm để đóng mục "lưu được mà không xuất được": trần lưu (60 × 1000 = 60.000) rộng gấp
+ * ba trần xuất ĐỒNG BỘ (20.000), nên người dùng dựng được báo giá rồi không tải về nổi.
+ *
+ * Nhưng siết ở ĐƯỜNG LƯU là sai chỗ, và sai theo kiểu nguy hiểm nhất: nó áp NGƯỢC lên dữ liệu ĐÃ
+ * CÓ. Trần này chưa từng tồn tại trước đó, nên CSDL production có thể đang chứa báo giá 25.000
+ * dòng lưu hợp lệ từ trước. Với trần mới, chủ báo giá đó sửa MỘT ký tự tiêu đề rồi bấm Lưu là
+ * nhận lỗi xác thực và KHÔNG lưu được nữa — mất quyền sửa chính dữ liệu của mình, mà không có
+ * đường nào tự thoát (tách bớt trang cũng là một lần Lưu, nên cũng bị chặn).
+ *
+ * Cách đóng ĐÚNG chỗ: làm cho đường xuất NỀN thật sự nhận hết những gì lưu được (xem
+ * `MAX_ASYNC_EXPORT_ITEMS` ở trên và `chanBaoGiaQuaLon` trong src/worker.ts). Khi đó lời khuyên
+ * "dùng xuất nền" trong thông điệp 413 của src/routes/export.routes.ts mới là lời khuyên THẬT.
+ *
+ * CÒN LẠI (đã ghi vào docs/REMAINING_RISKS.md, không tự ý làm): SPA chưa nối nút xuất nền — đường
+ * thoát hiện có ở tầng API chứ chưa có ở giao diện.
+ */
+
+// Bảng nội bộ (extraTables) KHÔNG tính vào đây: chúng không đi vào file xuất (xem extraTableSchema).
+export const demSoDong = (sheets: { items?: unknown[] }[]) =>
+  sheets.reduce((n, s) => n + (Array.isArray(s?.items) ? s.items.length : 0), 0);
+
+const quoteSheetsSchema = z
+  .array(sheetSchema)
+  .min(1, "Báo giá phải có ít nhất 1 trang")
+  .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang trong một báo giá`);
 
 export const QuoteCreateSchema = z.object({
   // quoteNumber is server-generated; allow override but not required
@@ -209,7 +323,7 @@ export const QuoteCreateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá"),
+  sheets: quoteSheetsSchema,
 });
 
 // IMPORTANT: defined explicitly (NOT QuoteCreateSchema.partial()) because the
@@ -247,7 +361,7 @@ export const QuoteUpdateSchema = z.object({
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
   customerLogo: customerLogoSchema,
-  sheets: z.array(sheetSchema).min(1, "Báo giá phải có ít nhất 1 trang").max(60, "Tối đa 60 trang trong một báo giá").optional(),
+  sheets: quoteSheetsSchema.optional(),
   // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
   baseUpdatedAt: z.coerce.date().optional(),
 });

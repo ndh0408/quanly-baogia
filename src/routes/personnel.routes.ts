@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { validate } from "../validators.js";
+import { validate, PAYMENT_PROOF_DATA_URL_RE } from "../validators.js";
 import { requirePermission, PERMISSIONS as P } from "../permissions.js";
 import * as svc from "../services/personnelService.js";
 
@@ -140,7 +140,8 @@ router.get("/:id/contract", validate({ params: idParam }),
 const PaymentBody = z.object({
   paid: z.boolean(),
   // Ảnh chứng từ: data URL ảnh, ≤ ~675KB (client đã nén). Bỏ qua nếu không gửi.
-  paymentProof: z.string().max(900_000).regex(/^data:image\/(png|jpe?g|webp);base64,/, "Ảnh không hợp lệ").optional(),
+  // Kiểm TOÀN CHUỖI, không chỉ tiền tố — xem ghi chú tại PAYMENT_PROOF_DATA_URL_RE.
+  paymentProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh không hợp lệ").optional(),
 });
 router.post(
   "/:id/payment",

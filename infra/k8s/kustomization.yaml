@@ -9,5 +9,17 @@ resources:
   - networkpolicy.yaml
   - app.yaml
   - worker.yaml
+  # PDB phải đứng SAU hai Deployment nó trỏ tới cho dễ đọc; kustomize không quan tâm thứ tự.
+  - pdb.yaml
   - ingress.yaml
   - backup-cronjob.yaml
+  - backup-objects-cronjob.yaml
+
+# ẢNH BẤT BIẾN. Các manifest ghi tag placeholder `:REPLACE_ME`; kustomize thay bằng digest/sha thật
+# lúc deploy, ví dụ:
+#   kustomize edit set image ghcr.io/ndh0408/quanly-baogia=ghcr.io/ndh0408/quanly-baogia@sha256:...
+# Cố tình KHÔNG để `latest`: hai pod cùng ReplicaSet có thể kéo hai bản mã khác nhau, và rollback
+# thì không còn gì để quay về.
+images:
+  - name: ghcr.io/ndh0408/quanly-baogia
+    newTag: REPLACE_ME

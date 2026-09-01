@@ -3,11 +3,21 @@
 // Form chung (PUT) KHÔNG ghi accountingNote/note (chống rò quyền). Drive REAL app qua supertest.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "PersonnelRecord" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") throw new Error("REQUIRE_DB_TESTS=1 nhưng không kết nối được Postgres/schema PersonnelRecord");
+
+// Ảnh chứng từ thanh toán lưu ở KHO OBJECT, không lưu trong CSDL. Không có kho thì route trả 503
+// và bài test không nói lên điều gì. Cùng triết lý với REQUIRE_DB_TESTS: máy dev không có MinIO thì
+// BỎ QUA cho gọn, nhưng ở CI (REQUIRE_DB_TESTS=1) thì phải ĐỎ — nếu không, đường ghi/đọc chứng từ
+// tài chính lặng lẽ không được kiểm mà pipeline vẫn xanh.
+const storageAvailable = !!(process.env.S3_ENDPOINT && process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY);
+if (!storageAvailable && process.env.REQUIRE_DB_TESTS === "1") {
+  throw new Error("REQUIRE_DB_TESTS=1 nhưng chưa cấu hình S3_* — đường ảnh chứng từ thanh toán sẽ không được kiểm");
+}
 
 const TAG = `pf${Date.now()}`;
 const PWD = "Test1234!a";
@@ -25,7 +35,7 @@ describe.runIf(dbAvailable)("personnel field-level edit + payment proof (integra
     const { createApp } = await import("../src/app.js");
     app = createApp();
     [adminU, mgrU, mgr2U, acctU] = await Promise.all([makeUser("admin", "admin"), makeUser("manager", "mgr"), makeUser("manager", "mgr2"), makeUser("accountant", "acct")]);
-    admin = request.agent(app); mgr = request.agent(app); mgr2 = request.agent(app); acct = request.agent(app);
+    admin = agentWithCsrf(app); mgr = agentWithCsrf(app); mgr2 = agentWithCsrf(app); acct = agentWithCsrf(app);
     await Promise.all([login(admin, adminU), login(mgr, mgrU), login(mgr2, mgr2U), login(acct, acctU)]);
     const c = await mgr.post("/api/personnel").send({ fullName: `${TAG} NV`, salary: 10_000_000, projectName: "DA", projectCode: "PRJ-X" });
     expect(c.status).toBe(201);
@@ -71,7 +81,7 @@ describe.runIf(dbAvailable)("personnel field-level edit + payment proof (integra
     expect(got.note).toBe("admin note");          // form KHÔNG ghi đè
   });
 
-  it("THANH TOÁN + ẢNH: kế toán đánh dấu + ảnh → lưu; list omit base64 + hasPaymentProof; getPaymentProof trả ảnh", async () => {
+  it.runIf(storageAvailable)("THANH TOÁN + ẢNH: kế toán đánh dấu + ảnh → lưu; list omit base64 + hasPaymentProof; getPaymentProof trả ảnh", async () => {
     const r = await acct.post(`/api/personnel/${recId}/payment`).send({ paid: true, paymentProof: PNG });
     expect(r.status).toBe(200);
     expect(r.body.paidAt).toBeTruthy();
@@ -88,7 +98,7 @@ describe.runIf(dbAvailable)("personnel field-level edit + payment proof (integra
     expect(pp.body.paymentProof).toBe(PNG);          // lấy on-demand đúng ảnh
   });
 
-  it("THANH TOÁN: bỏ đánh dấu → XÓA ảnh; ảnh không-phải-image → 400", async () => {
+  it.runIf(storageAvailable)("THANH TOÁN: bỏ đánh dấu → XÓA ảnh; ảnh không-phải-image → 400", async () => {
     const r = await acct.post(`/api/personnel/${recId}/payment`).send({ paid: false });
     expect(r.status).toBe(200);
     expect(r.body.hasPaymentProof).toBe(false);
