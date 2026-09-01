@@ -15,6 +15,7 @@
 //   · file rỗng  → chấp nhận             ⇒ chạy với khoá rỗng, volume gắn hụt mà không ai biết;
 //   · dùng trim() → cắt cả dấu cách cuối ⇒ khoá base64/mật khẩu kết thúc bằng dấu cách bị hỏng.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -221,7 +222,7 @@ describe("mọi trường hợp mơ hồ đều là LỖI, không đoán", () =>
 });
 
 describe("không có quyền đọc", () => {
-  it("file chmod 000 → ném với lý do quyền, không phải 'không tồn tại'", () => {
+  it.skipIf(process.platform === "win32")("file chmod 000 → ném với lý do quyền, không phải 'không tồn tại'", () => {
     // root bỏ qua kiểm quyền của file, nên bài này chỉ có nghĩa khi KHÔNG chạy bằng root.
     if (typeof process.getuid === "function" && process.getuid() === 0) return;
     const p = ghi("cam", "x");
@@ -242,7 +243,7 @@ describe("không có quyền đọc", () => {
 // ở nhiều nhánh — không nạp được trong tiến trình vitest).
 // ─────────────────────────────────────────────────────────────────────────────
 describe("nối dây vào src/config.ts (chạy dist/ trong tiến trình riêng)", () => {
-  const DIST = new URL("../dist/config.js", import.meta.url).pathname;
+  const DIST = fileURLToPath(new URL("../dist/config.js", import.meta.url));
   const co = existsSync(DIST);
   if (!co && process.env.REQUIRE_DB_TESTS === "1") {
     throw new Error("Thiếu dist/config.js — chạy `npm run build` trước. Bỏ qua âm thầm ở đây là mất đúng bài kiểm quan trọng nhất của file.");
@@ -250,8 +251,10 @@ describe("nối dây vào src/config.ts (chạy dist/ trong tiến trình riêng
 
   /** Chạy node với env chỉ định, in ra giá trị config muốn xem. */
   const chay = (env, in_) =>
-    spawnSync(process.execPath, ["-e", `import(${JSON.stringify(DIST)}).then(m => { ${in_} })`], {
+    spawnSync(process.execPath, ["-e", `import(${JSON.stringify(pathToFileURL(DIST).href)}).then(m => { ${in_} })`], {
       encoding: "utf8", timeout: 30_000,
+      // cwd = thư mục tạm, KHÔNG phải gốc repo: xem chú thích ngay trên `chay`.
+      cwd: thuMuc,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: "test", ...env },
     });
 

@@ -12,10 +12,11 @@
 // mã — hẹp, cụ thể, và mỗi bài chặn đúng MỘT cách làm hỏng tính chất tương ứng. Chúng KHÔNG chứng
 // minh OIDC sẽ chạy được; xem mục "Rủi ro còn lại" ở cuối ADR.
 import { describe, it, expect } from "vitest";
+import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-const GOC = path.resolve(new URL(".", import.meta.url).pathname, "..");
+const GOC = fileURLToPath(new URL("..", import.meta.url));
 const doc = (p) => readFileSync(path.join(GOC, p), "utf8");
 const boChuThich = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 

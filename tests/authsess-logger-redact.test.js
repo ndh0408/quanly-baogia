@@ -27,7 +27,7 @@
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const TOKEN = "asx0123456789abcdef0123456789abcdef0123456789abcd";
 
@@ -44,10 +44,10 @@ const BAN_GHI = [
 /** Chạy logger THẬT trong tiến trình con và trả về các dòng JSON nó in ra, theo đúng thứ tự BAN_GHI. */
 function ghiBangLoggerThat() {
   const loggerPath = fileURLToPath(new URL("../src/logger.ts", import.meta.url));
-  const tsx = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+
   // KHÔNG dùng await ở mức cao nhất: tsx -e biên dịch sang CJS, top-level await là lỗi biên dịch.
   const code = `
-    import(${JSON.stringify(loggerPath)}).then(({ logger }) => {
+    import(${JSON.stringify(pathToFileURL(loggerPath).href)}).then(({ logger }) => {
       // pino-http gắn serializer req ở tầng child — mô phỏng đúng hình dạng bản ghi thật (src/app.ts).
       const ghi = logger.child({}, { serializers: { req: (r) => ({ method: r.method, url: r.url, id: r.id, headers: r.headers }) } });
       for (const rec of JSON.parse(process.env.BAN_GHI)) ghi.info(rec, "request completed");
@@ -55,7 +55,7 @@ function ghiBangLoggerThat() {
       setTimeout(() => {}, 50);
     });
   `;
-  const out = execFileSync(tsx, ["-e", code], {
+  const out = execFileSync(process.execPath, ["--import", "tsx", "-e", code], {
     // production → pino KHÔNG gắn transport pino-pretty, JSON đi thẳng ra stdout tiến trình này.
     env: { ...process.env, NODE_ENV: "production", LOG_LEVEL: "info", BAN_GHI: JSON.stringify(BAN_GHI) },
     encoding: "utf8",

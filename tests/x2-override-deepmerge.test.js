@@ -21,10 +21,11 @@
 // Bài này bịt CẢ HAI: nó đọc `package.json` (nguồn của sự thật về ý định) và bản GHIM THẬT của
 // `@prisma/config` trong node_modules, rồi bắt hai bên phải nhất quán.
 import { describe, it, expect } from "vitest";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const GOC = new URL("..", import.meta.url).pathname;
+const GOC = fileURLToPath(new URL("..", import.meta.url));
 const json = (p) => JSON.parse(readFileSync(join(GOC, p), "utf8"));
 
 const pkg = json("package.json");

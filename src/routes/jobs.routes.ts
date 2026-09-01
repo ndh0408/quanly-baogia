@@ -99,11 +99,35 @@ router.post(
     // đổi thì vẫn gộp — đó mới là thứ cần gộp.
     const DEDUP_TTL_MS = Number(process.env.EXPORT_DEDUP_TTL_MS) || 30_000;
     const dauThoiGian = +new Date(quote.updatedAt);
-    const job = await q.add(
-      req.body.format,
-      { quoteId: req.params.id, requestedBy: req.session.userId },
-      { deduplication: { id: `export:${req.params.id}:${req.body.format}:${req.session.userId}:${dauThoiGian}`, ttl: DEDUP_TTL_MS } }
-    );
+    const khoaGop = `export:${req.params.id}:${req.body.format}:${req.session.userId}:${dauThoiGian}`;
+    const themViec = () =>
+      q.add(
+        req.body.format,
+        { quoteId: req.params.id, requestedBy: req.session.userId },
+        { deduplication: { id: khoaGop, ttl: DEDUP_TTL_MS } }
+      );
+    let job = await themViec();
+
+    // THỬ LẠI SAU KHI JOB HỎNG PHẢI CHẠY THẬT.
+    //
+    // Khoá gộp SỐNG SÓT qua lúc job chuyển sang `failed`: BullMQ chỉ xoá khoá `de:` khi TTL của nó
+    // là 0 hoặc -1 (removeDeduplicationKeyIfNeededOnFinalization.lua), mà ở đây TTL là 30 giây.
+    // Nên nếu job vừa hỏng vì lý do NHẤT THỜI — kho object chớp mất kết nối, worker vừa restart
+    // giữa lượt deploy — thì người dùng bấm "Tải lại" nhận lại ĐÚNG job cũ đó: không job mới nào
+    // được tạo, không lượt chạy nào diễn ra, và họ nhận lại nguyên `failedReason` cũ tức thì. Bấm
+    // bao nhiêu lần trong 30 giây cũng vậy. Đường xuất nền chỉ mới được nối vào giao diện ở nhánh
+    // này (trước đó không nút nào gọi tới), nên đây là lần đầu có người thật đi qua chỗ đó.
+    //
+    // Chốt: gặp job đã `failed` thì XOÁ nó — `job.remove()` dọn luôn khoá gộp — rồi xếp việc mới.
+    // Bọc try/catch vì `remove()` có thể đua với worker đang dọn (removeOnFail); hỏng thì cứ trả
+    // job cũ, đúng như trước, không làm request chết theo.
+    try {
+      if ((await job.getState()) === "failed") {
+        await job.remove();
+        job = await themViec();
+      }
+    } catch { /* không xoá được thì giữ nguyên job cũ — vẫn tốt hơn 500 */ }
+
     res.status(202).json({ jobId: job.id, queue: QUEUES.EXPORT, format: req.body.format });
   })
 );

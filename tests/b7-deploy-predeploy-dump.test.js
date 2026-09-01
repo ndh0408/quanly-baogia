@@ -85,7 +85,12 @@ afterAll(() => {
   if (sb) rmSync(sb.dir, { recursive: true, force: true });
 });
 
-describe("[b7] deploy.sh bước [1/6]: bản dump tiền-deploy không được ai-cũng-đọc", () => {
+// Bài này đo QUYỀN POSIX (0600 / 0700) trên file do `deploy.sh` sinh ra, và dựng cả một PATH giả
+// gồm ba stub `ssh`/`git`/`docker` là shell script KHÔNG ĐUÔI. Cả hai thứ đó chỉ có nghĩa trên
+// POSIX: NTFS dùng ACL nên `statSync().mode` luôn trả 0666/0777 bất kể chmod, và CreateProcess
+// không chạy được file không đuôi. Chạy trên Windows thì bài không đo được thứ nó định đo — đỏ ở
+// đây là tin sai, không phải lỗi của deploy.sh. Máy chủ deploy và CI đều là Linux, nơi bài vẫn chạy.
+describe.skipIf(process.platform === "win32")("[b7] deploy.sh bước [1/6]: bản dump tiền-deploy không được ai-cũng-đọc", () => {
   it("file predeploy-*.sql.gz ra 0600 và thư mục chứa ra 0700", () => {
     const thuMuc = join(sb.home, "quanly-backups");
     const dumps = readdirSync(thuMuc).filter((f) => f.startsWith("predeploy-") && f.endsWith(".sql.gz"));

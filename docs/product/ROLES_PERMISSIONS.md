@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 137 endpoint
+# Ma trận phân quyền — toàn bộ 138 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -12,10 +12,12 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 > ```
 >
 > **Vì sao**: README từng ghi *141 endpoint*, bản đầu của chính tài liệu này ghi *133*. Cả hai đều
-> đếm tay nên cả hai đều sai — con số thật là **137** (129 trong router + 8 khai báo thẳng trên
+> đếm tay nên cả hai đều sai — con số thật là **138** (129 trong router + 8 khai báo thẳng trên
 > `app`). Bản 133 đã bỏ sót các route phục vụ SPA vì tôi chỉ nhớ 4 endpoint hạ tầng.
 >
 > Từ 139 xuống 137 ngày 2026-08-26: bỏ `GET /app` và `GET /app/*` khi gỡ SPA vanilla cũ
+> Từ 137 lên 138 ngày 2026-09-01: thêm `POST /users/:id/mfa-reset` — đường phục hồi cho
+> người mất cả điện thoại lẫn mã dự phòng (trước đó chỉ chữa được bằng SQL tay trên production).
 > (xem [ADR 0006](../adr/0006-go-spa-vanilla-cu.md)).
 >
 > CI chạy `--check`; thêm/xoá route mà quên cập nhật bảng này là **đỏ pipeline**. Một endpoint không
@@ -140,7 +142,7 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 
 > Quyền nằm **trong service** chứ không ở route — dễ nhìn nhầm là "không gác". Đã đối chiếu `venueService.ts:10-15`.
 
-## `/api/users` (6) · `/api/permissions` (4)
+## `/api/users` (7) · `/api/permissions` (4)
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
@@ -150,6 +152,7 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 | POST | `/users` | ✓ | `user:manage` | — | trùng username → 409 | — | — | — | OK |
 | PUT | `/users/:id` | ✓ | `user:manage` | — | `sanitizePerms` chặn leo thang | chặn gỡ **admin cuối cùng**; đổi mật khẩu/khoá → thu hồi mọi phiên | SEC | `per-user-permissions` | **VÁ** |
 | DELETE | `/users/:id` | ✓ | `user:manage` | — | không tự xoá mình | có báo giá → 409 | — | — | OK |
+| POST | `/users/:id/mfa-reset` | ✓ | `user:manage` | — | tài khoản tồn tại; chưa bật MFA → 400 | gỡ cờ + xoá bí mật/mã dự phòng, **thu hồi mọi phiên** của người đó | SEC | `mfa-reset` | OK |
 | GET | `/permissions/catalog` | ✓ | `user:manage` | — | — | — | — | `role-permissions` | OK |
 | PUT | `/permissions/roles/:role` | ✓ | `user:manage` | — | chặn sửa `admin` | lọc `ADMIN_ONLY_PERMISSIONS` | — | `role-permissions` | OK |
 | DELETE | `/permissions/roles/:role` | ✓ | `user:manage` | — | chặn sửa `admin` | — | — | `role-permissions` | OK |

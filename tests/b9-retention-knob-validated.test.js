@@ -36,9 +36,13 @@ const boChuThich = (src) =>
  */
 function napConfig(env) {
   const { spawnSync } = require("node:child_process");
+  // KHÔNG gọi "npx": trên Windows đó là `npx.cmd`, và spawnSync (shell: false) không tự thêm đuôi
+  // nên ENOENT — stdout/stderr rỗng, mọi phép so `toMatch(/TÊN_BIẾN/)` đỏ mà không rõ vì sao.
+  // `process.execPath` + loader `--import tsx` chạy y hệt nhau trên mọi hệ, và là cách các bài
+  // khác trong repo đang dùng (tests/qc-db-tx-config.test.js, tests/mwobs-config.test.js).
   const r = spawnSync(
-    "npx",
-    ["tsx", "-e", 'import("./src/config.js").then(m => console.log("CFG:" + JSON.stringify(m.config)))'],
+    process.execPath,
+    ["--import", "tsx", "-e", 'import("./src/config.js").then(m => console.log("CFG:" + JSON.stringify(m.config)))'],
     { encoding: "utf8", env: { ...GOC, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, String(v)])) }, timeout: 60000 },
   );
   const ra = String(r.stdout || "") + String(r.stderr || "");

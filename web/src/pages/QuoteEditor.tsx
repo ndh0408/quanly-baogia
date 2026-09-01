@@ -92,13 +92,39 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // Gộp 1,2 giây: `mark()` bị gọi theo TỪNG PHÍM ở lưới. Ghi mỗi phím là stringify cả báo giá
   // hàng nghìn dòng rồi đẩy xuống đĩa — gõ sẽ khựng thấy rõ, tức chính tính năng chống mất dữ liệu
   // lại làm hỏng trải nghiệm gõ mà §3 bắt phải giữ.
+  // ── BÁO GIÁ QUÁ LỚN: NGỪNG HẲN, ĐỪNG THỬ LẠI MỖI 1,2 GIÂY ─────────────────
+  // `ghiBanNhap` trả "qua-lon" khi bản JSON vượt 1MB. Với báo giá thật thì đó KHÔNG phải trường
+  // hợp hiếm: từ khoảng 3.000 dòng là chạm trần, và bóc ảnh ra cũng không cứu được (báo giá to vì
+  // CHỮ, không vì ảnh) — nên toàn bộ công stringify + bóc ảnh + stringify lại là làm rồi vứt.
+  //
+  // Đo thật (node, cùng V8 với Chrome, dòng tiếng Việt có name/detail/notes/internalNote):
+  //     5.000 dòng  = 1,74 MB  →  20,9 ms
+  //    20.000 dòng  = 6,96 MB  →  78,4 ms
+  //    60.000 dòng  = 20,9 MB  → 244,9 ms
+  // cả ba đều trả "qua-lon", không ghi được byte nào. Mà `mark()` chạy sau MỖI lần ngừng gõ, nên
+  // đó là 78ms đơ luồng chính mỗi lần người dùng dừng lại đọc một dòng — suốt buổi.
+  //
+  // Nhớ kết quả rồi thôi hẳn cho phiên này, và NÓI RA MỘT LẦN. `localDraft.ts` mở đầu bằng đúng
+  // nguyên tắc "im lặng thất bại ở đây tệ hơn không có tính năng", nhưng `mark()` lại vứt giá trị
+  // trả về — người dùng tưởng mình có lưới an toàn trong khi thực tế không có gì.
+  const nhapQuaLonRef = useRef(false);
   const mark = useCallback(() => {
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
+    if (nhapQuaLonRef.current) return;   // đã biết không ghi nổi — đừng tốn CPU nữa
     if (hnNhapRef.current) clearTimeout(hnNhapRef.current);
     hnNhapRef.current = setTimeout(() => {
       hnNhapRef.current = null;
       if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
-      ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current);
+      const kq = ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current);
+      if (kq === "qua-lon" || kq === "khong-ghi-duoc") {
+        nhapQuaLonRef.current = true;
+        toast(
+          kq === "qua-lon"
+            ? "Báo giá quá lớn để giữ bản nháp tạm trên máy — hãy bấm Lưu thường xuyên hơn."
+            : "Không lưu được bản nháp tạm trên máy (bộ nhớ trình duyệt đầy) — hãy bấm Lưu thường xuyên hơn.",
+          "info",
+        );
+      }
     }, 1200);
   }, []);
   const [versions, setVersions] = useState<QuoteVersion[] | null>(null);
@@ -362,7 +388,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       toast("Đã lưu", "success");
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
-      else { qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); }
+      else {
+        qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw();
+        // MỐC của bản nháp phải đi theo bản máy chủ VỪA lưu. `baseNhapRef` chỉ được gán một lần
+        // lúc nạp; không làm tươi ở đây thì mọi bản nháp ghi SAU lần Lưu đầu tiên đều mang
+        // `baseUpdatedAt` CŨ, và điều kiện `nhapCu.baseUpdatedAt === baseNhapRef.current` ở đường
+        // nạp không bao giờ đúng nữa → lần mở sau KHÔNG hỏi khôi phục.
+        //
+        // Đúng kịch bản phổ biến nhất: gõ 20 phút → bấm Lưu (nháp bị xoá, đúng thiết kế) → gõ tiếp
+        // 40 phút → máy sập. Mở lại: máy chủ trả updatedAt MỚI, bản nháp mang mốc CŨ, không khớp,
+        // 40 phút mất trắng. Lưới an toàn chỉ còn hiệu lực cho phiên chưa từng bấm Lưu.
+        baseNhapRef.current = (saved as { updatedAt?: string }).updatedAt ?? null;
+      }
     } catch (ex) {
       // Khóa lạc quan: server trả 409 khi NGƯỜI KHÁC vừa lưu báo giá này (baseUpdatedAt lệch) →
       // KHÔNG ghi đè ngầm. Hỏi rõ + cho TẢI LẠI bản mới (reload đảm bảo nạp đúng toàn bộ luồng load).

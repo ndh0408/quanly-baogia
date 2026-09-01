@@ -102,3 +102,72 @@ describe("reconcileExtraPayments — giữ trạng thái đã thanh toán", () =
     expect(r3.paidAt).toBeTruthy();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SỬA GIÁ MỘT HÀNG ĐÃ THANH TOÁN KHÔNG ĐƯỢC LÀM MẤT CHỨNG TỪ — chốt hồi quy.
+//
+// Chốt chống giả mạo trong reconcileExtraPayments so "vân tay số tiền" của payload với bản CSDL,
+// và bản đầu của nó phản ứng bằng `p = null` — tức bỏ luôn kế thừa. Hệ quả: `paid` về false,
+// `paidAt`/`paidById`/`paidProof` về null. Đó là XOÁ chứng từ tài chính thật, âm thầm, trả 200.
+//
+// Kịch bản đời thật đánh trúng: kế toán bấm /pay đánh dấu một hàng chi phí HCM đã trả kèm ảnh uỷ
+// nhiệm chi → sale (KHÔNG có quote:internal:pay) sửa số lượng/đơn giá đúng hàng đó vì chi phí thay
+// đổi → bấm Lưu. Chốt phải khôi phục SỐ TIỀN theo CSDL, KHÔNG được đụng tới trạng thái đã trả.
+//
+// Các hàng ở `sheetsTuDB` phía trên KHÔNG ghi quantity/unitPrice nên `soTien` trả null và chốt
+// không áp — đúng ca đã có. Bộ dữ liệu dưới đây CÓ ghi số tiền, tức là ca duy nhất kích hoạt chốt.
+const dbCoSoTien = [
+  {
+    extraTables: [
+      {
+        category: "hcm",
+        items: [
+          { rid: "p1", name: "Thuê cẩu", quantity: 2, unitPrice: 1_000_000, days: null,
+            paid: true, paidAt: "2026-08-01T00:00:00Z", paidById: 7, paidProof: "data:image/png;base64,UNC" },
+        ],
+      },
+    ],
+  },
+];
+
+const guiSuaGia = (q, dg) =>
+  quaSchema([{ kind: "item", name: "Thuê cẩu", quantity: q, unitPrice: dg, rid: "p1", paid: true }]);
+
+describe("reconcileExtraPayments — sửa giá hàng đã trả", () => {
+  it("người KHÔNG có quyền trả tiền sửa đơn giá → TỪ CHỐI, và KHÔNG đụng tới cờ/ảnh", () => {
+    const sheets = guiSuaGia(2, 9_000_000);
+    let loi;
+    try { reconcileExtraPayments(sheets, dbCoSoTien, false, 42); } catch (e) { loi = e; }
+    expect(loi, "sửa giá hàng đã trả phải bị chặn, không được nuốt im lặng").toBeTruthy();
+    expect(loi.status).toBe(400);
+    expect(loi.message).toContain("Thuê cẩu");
+    // Điểm cốt lõi: bản vá CŨ phản ứng bằng cách xoá `paid`/`paidAt`/`paidById`/`paidProof` —
+    // tức tiêu huỷ chứng từ tài chính thật. Ném lỗi thì hàng trong CSDL không bị đụng tới.
+    expect(dbCoSoTien[0].extraTables[0].items[0].paid).toBe(true);
+    expect(dbCoSoTien[0].extraTables[0].items[0].paidProof).toBe("data:image/png;base64,UNC");
+  });
+
+  it("sửa SỐ LƯỢNG cũng bị chặn", () => {
+    expect(() => reconcileExtraPayments(guiSuaGia(50, 1_000_000), dbCoSoTien, false, 42)).toThrowError(/đã thanh toán/);
+  });
+
+  it("KHÔNG sửa gì → đi qua nguyên vẹn, giữ cờ và ẢNH (chốt không bắt oan)", () => {
+    const sheets = guiSuaGia(2, 1_000_000);
+    reconcileExtraPayments(sheets, dbCoSoTien, false, 42);
+    const r = sheets[0].extraTables[0].items[0];
+    expect(r.paid).toBe(true);
+    expect(r.paidAt).toBe("2026-08-01T00:00:00Z");
+    expect(r.paidById).toBe(7);
+    expect(r.paidProof, "ảnh uỷ nhiệm chi phải được bê sang bản mới").toBe("data:image/png;base64,UNC");
+    expect(Number(r.unitPrice)).toBe(1_000_000);
+  });
+
+  it("người CÓ quyền trả tiền vẫn đổi được số tiền (luồng kế toán không bị siết)", () => {
+    const sheets = guiSuaGia(3, 1_500_000);
+    reconcileExtraPayments(sheets, dbCoSoTien, true, 99);
+    const r = sheets[0].extraTables[0].items[0];
+    expect(Number(r.unitPrice)).toBe(1_500_000);
+    expect(Number(r.quantity)).toBe(3);
+    expect(r.paid).toBe(true);
+  });
+});

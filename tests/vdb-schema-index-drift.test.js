@@ -20,12 +20,13 @@
 //      danh sách miễn trừ ghi trong prisma/migrations/README.md. Đây chính là lệnh sinh ra
 //      `DROP INDEX`, nên bài này bắt được cả những dạng trôi mà tầng A không nhìn thấy.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Client } from "pg";
 
-const ROOT = new URL("../", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SCHEMA_PATH = join(ROOT, "prisma/schema.prisma");
 const SCHEMA = readFileSync(SCHEMA_PATH, "utf8");
 const MIG_DIR = join(ROOT, "prisma/migrations");

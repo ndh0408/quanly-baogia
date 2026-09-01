@@ -30,6 +30,10 @@ export default [
       "_bmad/**",
       "_bmad-output/**",
       ".claude/**",
+      // `.agents/` cùng nhóm với ba dòng trên: skill/template do bộ công cụ agent sinh ra trên máy
+      // lập trình viên. Không nằm trong git (nên CI không thấy), nhưng có mặt là `npm run lint` ở
+      // máy đó đỏ ~23 lỗi — đủ để người chạy tưởng mình vừa làm hỏng gì đó.
+      ".agents/**",
     ],
   },
   js.configs.recommended,

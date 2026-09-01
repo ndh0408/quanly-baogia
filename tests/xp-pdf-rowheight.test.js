@@ -123,7 +123,7 @@ const wideRects = (txt) =>
     .filter((r) => r.w > 500);
 const PAGE_BOTTOM = 841.89 - 40;   // A4 cao 841,89pt, lề 40 (renderQuotePdf)
 
-describe("PDF — hàng quá cao: cắt thì phải NHÌN THẤY được, không im lặng", () => {
+describe("PDF — hạng mục cao hơn một trang: CHIA hàng, KHÔNG được mất chữ", () => {
   const LONG = (CHUNK.repeat(30)).slice(0, 2000);
   const quote = () => quoteOf([{ kind: "item", name: LONG, detail: LONG, unit: "cai", quantity: 1, unitPrice: 1000 }]);
 
@@ -134,13 +134,30 @@ describe("PDF — hàng quá cao: cắt thì phải NHÌN THẤY được, khôn
     }
   });
 
-  it("hàng bị cắt phải có DẤU HIỆU nhìn thấy được: viền đỏ", async () => {
+  // Bản trước xử lý hàng quá cao bằng `opt.height` + `opt.ellipsis` — tức CẮT BỎ phần chữ thừa, kèm
+  // viền đỏ và dòng "[…] xem bản Excel" làm dấu hiệu. Đo thật: ô 4.003 ký tự chỉ còn 2.813 glyph,
+  // MẤT khoảng một phần ba. Bài kiểm cũ ở đây ghim đúng cái viền đỏ đó, tức nó KHOÁ LẠI hành vi mất
+  // chữ. PDF là bản gửi khách; có báo mất thì vẫn là mất. Nay hàng được CHIA thành nhiều hàng nối
+  // tiếp (src/pdf.ts `chiaVuaTrang`), nên hai bài dưới đây ghim thứ thật sự cần: chữ phải còn đủ,
+  // và không còn dấu hiệu cắt nào.
+  it("hạng mục dài hơn một trang được CHIA thành nhiều hàng, không nhét vào một hàng rồi cắt", async () => {
+    const buf = await renderQuotePdf(quote());
+    // Báo giá này có ĐÚNG MỘT hạng mục. Bản CẮT vẽ đúng một khung hàng (cao kịch trần một trang,
+    // 739,89pt) rồi bỏ phần chữ thừa. Bản CHIA vẽ NHIỀU khung hàng nối tiếp, mỗi khung một mảnh chữ.
+    // Đếm khung hàng (bỏ khung tiêu đề bảng cao đúng 18pt) là phép phân biệt trực tiếp giữa hai chế độ.
+    const khung = pageStreams(buf).flatMap((t) => wideRects(t)).filter((r) => r.h !== 18);
+    expect(khung.length, "chỉ có một khung hàng — nghĩa là vẫn đang nhét tất cả vào một hàng rồi cắt")
+      .toBeGreaterThan(1);
+    // Và không khung nào được cao hơn phần dùng được của một trang (nếu cao hơn thì chữ lại tràn lề).
+    for (const r of khung) expect(r.h).toBeLessThanOrEqual(841.89 - 40 - 40 - 22 + 0.01);
+  });
+
+  it("KHÔNG còn dấu hiệu 'nội dung bị cắt' nào trong file", async () => {
     const buf = await renderQuotePdf(quote());
     const all = pageStreams(buf).join("\n");
-    // pdfkit ghi màu viền dạng "r g b SCN" (hoặc "… RG"). Đỏ = thành phần đỏ cao, xanh lá/lam thấp.
     const reds = [...all.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:SCN|RG)\b/g)]
       .filter((m) => +m[1] > 0.5 && +m[2] < 0.3 && +m[3] < 0.3);
-    expect(reds.length).toBeGreaterThan(0);   // ĐỎ khi chưa vá: chỉ có viền xám #bbb
+    expect(reds.length, "còn viền đỏ báo cắt — nghĩa là vẫn đang cắt chữ ở đâu đó").toBe(0);
   });
 
   it("KHÔNG sinh trang chỉ có mỗi hàng tiêu đề bảng", async () => {
@@ -186,16 +203,20 @@ describe("PDF — tiêu đề bảng của sheet KHÔNG TÊN không được v�
 // (ASCII, hẹp hơn), bố cục KHÁC production nên phép đo vô nghĩa.
 const DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf";
 const DEJAVU2 = "/usr/share/fonts/dejavu/DejaVuSerif.ttf";   // đường dẫn trong image (Dockerfile)
-const dejavu = [DEJAVU, DEJAVU2].find((p) => fs.existsSync(p));
+// Trên máy lập trình viên Windows KHÔNG có hai đường dẫn Linux trên, mà cũng không có gói hệ
+// thống nào đặt DejaVu vào chỗ cố định. `DEJAVU_SERIF` cho phép trỏ tay tới bản đã tải về —
+// thiếu biến thì hành vi y như cũ (đỏ khi REQUIRE_DB_TESTS=1, bỏ qua khi không).
+const dejavu = [process.env.DEJAVU_SERIF, DEJAVU, DEJAVU2].filter(Boolean).find((p) => fs.existsSync(p));
 // Cùng lý do với tests/pii-rotate-safety.test.js: dưới REQUIRE_DB_TESTS=1 thì thiếu điều kiện phải
 // là ĐỎ, không phải bỏ qua âm thầm. Thiếu phông DejaVu là 9 bài dưới đây lặng lẽ biến mất, mà đó
 // đúng là nhóm ghim con số bố cục PDF (+60% số trang) — thứ dễ trôi nhất khi ai đó "tối ưu" pdf.ts.
-// Phông có sẵn ở gói `fonts-dejavu-core` (Debian/Ubuntu) hoặc `font-dejavu` (Alpine, đúng gói mà
+// Phông có sẵn ở gói `fonts-dejavu-core` (Debian/Ubuntu), `font-dejavu` (Alpine, đúng gói mà
 // Dockerfile cài).
 if (!dejavu && process.env.REQUIRE_DB_TESTS === "1") {
   throw new Error(
     `REQUIRE_DB_TESTS=1 nhưng không tìm thấy DejaVuSerif.ttf (đã tìm: ${DEJAVU}, ${DEJAVU2}). ` +
-    "9 bài ghim bố cục PDF sẽ bị bỏ qua âm thầm. Cài: apt-get install fonts-dejavu-core");
+    "9 bài ghim bố cục PDF sẽ bị bỏ qua âm thầm. Cài: apt-get install fonts-dejavu-core " +
+    "(Linux), hoặc trỏ DEJAVU_SERIF=<đường dẫn>/DejaVuSerif.ttf tới bản tải từ dejavu-fonts.github.io.");
 }
 
 describe.skipIf(!dejavu)("PDF — bản vá CÓ dàn lại trang (ghim con số đã đo)", () => {

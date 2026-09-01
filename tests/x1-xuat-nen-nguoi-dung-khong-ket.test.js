@@ -26,11 +26,12 @@
 // do header của kho quyết định — nên phải sửa ở máy chủ.
 // Nay cả hai đường gọi CHUNG `tenFileXuat` (src/quoteUtils.ts).
 import { describe, it, expect } from "vitest";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tenFileXuat } from "../src/quoteUtils.js";
 
-const GOC = new URL("..", import.meta.url).pathname;
+const GOC = fileURLToPath(new URL("..", import.meta.url));
 const doc = (p) => readFileSync(join(GOC, p), "utf8");
 
 /** Bỏ chú thích để khỏi khớp nhầm chính đoạn văn đang giải thích lỗi. */

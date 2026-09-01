@@ -162,9 +162,36 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
           if (daDung.has(it.rid)) p = null;                                   // bản sao của cùng một rid
           else {
             daDung.add(it.rid);
-            // Đổi số tiền của hàng ĐÃ TRẢ mà không có quyền đặt `paid` → cắt mọi kế thừa.
-            // `p.tien === null` = bản CSDL không ghi số tiền → không có gì để so, giữ nguyên kế thừa.
-            if (!canPay && p.paid && p.tien !== null && p.tien !== soTien(it)) p = null;
+            // Đổi số tiền của hàng ĐÃ TRẢ mà không có quyền đặt `paid` → TỪ CHỐI CẢ LẦN LƯU.
+            // `p.tien === null` = bản CSDL không ghi số tiền → không có gì để so, cho đi qua.
+            //
+            // ── VÌ SAO TỪ CHỐI, KHÔNG PHẢI "CẮT KẾ THỪA" ──────────────────────────────
+            // Bản trước đặt `p = null`, tức `paid=false`, `paidAt/paidById=null` và
+            // `paidProof=null`: XOÁ VĨNH VIỄN chứng từ tài chính THẬT, im lặng, vẫn trả 200. Nó
+            // không đánh trúng kẻ tấn công mà đánh trúng thao tác BÌNH THƯỜNG — kế toán bấm /pay
+            // đánh dấu một hàng chi phí đã trả (kèm ảnh uỷ nhiệm chi); sau đó sale, vốn KHÔNG có
+            // `quote:internal:pay`, sửa số lượng hoặc đơn giá đúng hàng đó rồi bấm Lưu. Ảnh và cờ
+            // đã-trả biến mất, không cảnh báo, không khôi phục được.
+            //
+            // Âm thầm KHÔI PHỤC số tiền theo CSDL cũng không đúng: người dùng tin là đã sửa giá,
+            // thực tế không, và họ chỉ phát hiện khi tình cờ tải lại.
+            //
+            // Nên hỏng TO thay vì hỏng ÂM THẦM. Ba tính chất cùng đạt: không mất dữ liệu, không
+            // nuốt thay đổi của người dùng, và kẻ chép `rid` sang hàng bịa không thu được gì (cả
+            // lần ghi bị chặn). Người dùng có đường thoát rõ ràng — nhờ kế toán bỏ đánh dấu trước.
+            //
+            // Điều kiện `p.tien !== null` giữ nguyên có chủ ý: hàng ghi từ trước khi
+            // `sanitizeExtraTables` chuẩn hoá (hoặc ghi qua route /pay) không có
+            // `quantity`/`unitPrice` trong JSON, và chặn chúng sẽ khoá người dùng khỏi chính dữ
+            // liệu hợp lệ của họ. Thiếu dữ liệu thì MỞ, có dữ liệu thì SIẾT.
+            if (!canPay && p.paid && p.tien !== null && p.tien !== soTien(it)) {
+              throw httpError(
+                400,
+                `Không sửa được số tiền của hàng đã thanh toán: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
+                  `Hàng này đã được đánh dấu ĐÃ TRẢ nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
+                  `Cần đổi thì nhờ người phụ trách thanh toán bỏ đánh dấu trước, rồi sửa và đánh dấu lại.`
+              );
+            }
           }
         }
         it.paidProof = p ? p.paidProof : null;  // ảnh không đi qua quote-save (chống base64 chảy + giả mạo)

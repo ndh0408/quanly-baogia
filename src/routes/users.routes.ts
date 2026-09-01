@@ -20,6 +20,9 @@ router.post("/invite", validate({ body: UserInviteSchema }), asyncHandler(async 
 router.post("/:id/resend-invite", validate({ params: idParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.resendInvite(req))));
 router.post("/", validate({ body: UserCreateSchema }), asyncHandler(async (req: Request, res: Response) => res.status(201).json(await svc.createUser(req))));
 router.put("/:id", validate({ params: idParam, body: UserUpdateSchema }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateUser(req))));
+// GỠ MFA hộ một tài khoản (mất điện thoại + mất mã dự phòng). Xem userService.resetMfa để biết
+// vì sao đây là đường phục hồi DUY NHẤT và vì sao nó không mở thêm quyền nào.
+router.post("/:id/mfa-reset", validate({ params: idParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.resetMfa(req))));
 router.delete("/:id", validate({ params: idParam }), asyncHandler(async (req: Request, res: Response) => res.json(await svc.deleteUser(req))));
 
 export default router;

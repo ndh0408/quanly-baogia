@@ -20,9 +20,19 @@
  *     (account_hn đọc được `rid` ngay trong payload trả về của chính họ).
  *
  * ── BẤT BIẾN ĐÓNG LỖ ────────────────────────────────────────────────────────
- * AI KHÔNG ĐƯỢC ĐẶT `paid` THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ TRẢ. Số tiền lệch so với
- * bản CSDL ⇒ không còn là hàng đó ⇒ không kế thừa gì. Cộng thêm: mỗi `rid` chỉ kế thừa MỘT lần.
- * Người có `quote:internal:pay` không bị ràng buộc (họ vốn đặt `paid` trực tiếp).
+ * AI KHÔNG ĐƯỢC ĐẶT `paid` THÌ CŨNG KHÔNG ĐƯỢC ĐỔI SỐ TIỀN CỦA HÀNG ĐÃ TRẢ. Cộng thêm: mỗi `rid`
+ * chỉ kế thừa MỘT lần. Người có `quote:internal:pay` không bị ràng buộc (họ vốn đặt `paid` trực tiếp).
+ *
+ * ── CƠ CHẾ: TỪ CHỐI CẢ LẦN LƯU, KHÔNG PHẢI "CẮT KẾ THỪA" ────────────────────
+ * Bản đầu phản ứng bằng `p = null`, tức ép `paid=false` và bỏ luôn `paidAt`/`paidById`/`paidProof`.
+ * Chốt đó chặn được kẻ chép `rid`, nhưng nó KHÔNG phân biệt được "chép rid sang hàng bịa" với
+ * "sale sửa giá đúng hàng thật" — và ca thứ hai là thao tác BÌNH THƯỜNG: kế toán bấm /pay đánh dấu
+ * một hàng chi phí đã trả kèm ảnh uỷ nhiệm chi, rồi sale (không có `quote:internal:pay`) sửa số
+ * lượng vì chi phí đổi. Kết quả cũ: ảnh và cờ đã-trả biến mất vĩnh viễn, im lặng, vẫn trả 200 —
+ * xoá chứng từ tài chính THẬT để chặn một đường khai thác hẹp.
+ *
+ * Nay hàm ném 400 nêu ĐÍCH DANH hàng đang vướng. Kẻ tấn công vẫn không thu được gì (cả lần ghi bị
+ * chặn), người dùng thật giữ nguyên dữ liệu và biết phải làm gì. Xem tests/extra-paid-preserved.test.js.
  * ============================================================================
  */
 import { describe, it, expect } from "vitest";
@@ -43,25 +53,25 @@ describe("reconcileExtraPayments — rid do client gửi", () => {
     expect(hang(p)[0].paidProof).toBeNull();
   });
 
-  it("CHÉP rid của hàng đã trả sang hàng ĐỔI SỐ TIỀN → không kế thừa gì", () => {
+  it("CHÉP rid của hàng đã trả sang hàng ĐỔI SỐ TIỀN → cả lần lưu bị từ chối", () => {
     const p = payload([{ rid: "r-that", name: "Hàng bịa 50 triệu", quantity: 1, unitPrice: 50_000_000, paid: true }]);
-    reconcileExtraPayments(p, db([hangDb()]), false, 1);
-    const it = hang(p)[0];
-    expect(it.paid, "hàng bịa vẫn được đánh dấu ĐÃ TRẢ").toBe(false);
-    expect(it.paidById, "mượn được danh nghĩa người trả thật").toBeNull();
-    expect(it.paidProof, "mượn được ẢNH CHỨNG TỪ thật").toBeNull();
+    let loi;
+    try { reconcileExtraPayments(p, db([hangDb()]), false, 1); } catch (e) { loi = e; }
+    expect(loi, "hàng bịa đi lọt — phải chặn cả lần ghi").toBeTruthy();
+    expect(loi.status, "phải là lỗi của người gửi, không phải 500").toBe(400);
+    expect(loi.message, "thông điệp phải nêu đích danh hàng vướng").toContain("Hàng bịa 50 triệu");
+    // Và KHÔNG được xoá chứng từ thật để đổi lấy việc chặn — đó là bản vá cũ.
+    expect(hang(p)[0].paidProof, "ảnh gốc trong CSDL không được đụng tới").not.toBe(null);
   });
 
   it("đổi SỐ LƯỢNG cũng tính là đổi số tiền", () => {
     const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 40, unitPrice: 1_000_000, paid: true }]);
-    reconcileExtraPayments(p, db([hangDb()]), false, 1);
-    expect(hang(p)[0].paid).toBe(false);
+    expect(() => reconcileExtraPayments(p, db([hangDb()]), false, 1)).toThrowError(/đã thanh toán/);
   });
 
   it("đổi SỐ NGÀY cũng vậy", () => {
     const p = payload([{ rid: "r-that", name: "Thi công nhỏ", quantity: 1, unitPrice: 1_000_000, days: 30, paid: true }]);
-    reconcileExtraPayments(p, db([hangDb({ days: 1 })]), false, 1);
-    expect(hang(p)[0].paid).toBe(false);
+    expect(() => reconcileExtraPayments(p, db([hangDb({ days: 1 })]), false, 1)).toThrowError(/đã thanh toán/);
   });
 
   it("hai hàng CÙNG rid → chỉ hàng ĐẦU kế thừa, bản sao thì không", () => {

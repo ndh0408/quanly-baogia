@@ -280,6 +280,42 @@ export async function updateUser(req: Request) {
   return user;
 }
 
+/**
+ * GỠ MFA HỘ MỘT TÀI KHOẢN — đường phục hồi duy nhất khi người dùng mất cả điện thoại lẫn mã dự phòng.
+ *
+ * ── VÌ SAO PHẢI CÓ ──────────────────────────────────────────────────────────
+ * `POST /api/mfa/disable` đòi đúng một mã TOTP hoặc một mã dự phòng (src/services/mfaService.ts),
+ * mà mã dự phòng chỉ hiện MỘT LẦN lúc bật. Đường "Quên mật khẩu" (`/auth/accept-invite`) nay cũng
+ * có cổng MFA đặt TRƯỚC lệnh đổi mật khẩu — đúng về bảo mật, vì chiếm được hộp thư không được phép
+ * vô hiệu hoá lớp thứ hai. Nhưng cộng lại, người mất điện thoại + mất mã dự phòng KHÔNG còn đường
+ * nào: `UserUpdateSchema` không nhận trường MFA nào nên admin sửa tài khoản cũng không hạ được cờ.
+ * Trước bản này, cách duy nhất là chạy SQL tay trên Postgres production.
+ *
+ * ── VÌ SAO AN TOÀN ──────────────────────────────────────────────────────────
+ * Người gọi phải có `user:manage` — đúng nhóm đã đặt lại được mật khẩu của người khác qua
+ * `PUT /api/users/:id` (`UserUpdateSchema.password`). Nên đây KHÔNG mở thêm quyền nào mà nhóm đó
+ * chưa có; nó chỉ đưa một thao tác vốn phải làm bằng SQL tay vào trong hệ thống, nơi có kiểm quyền
+ * và có nhật ký kiểm toán.
+ *
+ * Huỷ luôn phiên đang mở của người đó: cờ MFA vừa đổi thì mọi phiên cấp trước đó không còn phản ánh
+ * đúng trạng thái xác thực hiện tại.
+ */
+export async function resetMfa(req: Request) {
+  const id = Number(req.params.id);
+  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, username: true, mfaEnabled: true } });
+  if (!user) throw httpError(404, "Không tìm thấy tài khoản");
+  if (!user.mfaEnabled) throw httpError(400, "Tài khoản này chưa bật xác thực hai bước");
+  await prisma.user.update({
+    where: { id },
+    // `mfaLastStep` về null cùng lý do như POST /api/mfa/disable: mốc đó chỉ có nghĩa với bí mật
+    // vừa bị xoá; giữ lại thì lần BẬT lại sẽ từ chối mã hợp lệ đầu tiên của bí mật MỚI.
+    data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], mfaLastStep: null },
+  });
+  revokeSession(id, "mfa_reset");
+  await audit(req, "user.mfa.reset", { resource: "user", resourceId: id, before: { mfaEnabled: true } });
+  return { ok: true, username: user.username };
+}
+
 export async function deleteUser(req: Request) {
   const id = Number(req.params.id);
   if (id === req.session.userId) {

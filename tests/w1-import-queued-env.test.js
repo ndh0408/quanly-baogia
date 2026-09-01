@@ -17,6 +17,7 @@
 process.env.IMPORT_MAX_QUEUED = "";
 
 import { describe, it, expect, afterEach } from "vitest";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -91,7 +92,7 @@ describe("W1 — soNguyen: từng nhánh", () => {
 // NỘI DUNG: tài liệu có nêu đủ năm biến không, và CON SỐ MẶC ĐỊNH nó hứa có đúng với mã không —
 // một mặc định ghi sai còn tai hại hơn một số dòng lệch, vì người vận hành tin nó mà đặt cấu hình.
 describe("W1 — .env.example mô tả đúng năm biến IMPORT_*", () => {
-  const goc = new URL("..", import.meta.url).pathname;
+  const goc = fileURLToPath(new URL("..", import.meta.url));
   const doc = (p) => readFileSync(join(goc, p), "utf8");
 
   it("nêu đủ NĂM biến, và tên khớp mã nguồn", () => {

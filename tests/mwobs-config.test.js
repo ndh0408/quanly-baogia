@@ -22,7 +22,7 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { featureStatus } from "../src/config.js";
 
@@ -33,7 +33,7 @@ function napConfig(env) {
   try {
     const out = execFileSync(
       process.execPath,
-      ["--import", "tsx", "-e", `import(${JSON.stringify(path.join(ROOT, "src/config.ts"))})`],
+      ["--import", "tsx", "-e", `import(${JSON.stringify(pathToFileURL(path.join(ROOT, "src/config.ts")).href)})`],
       {
         cwd: ROOT,
         encoding: "utf8",

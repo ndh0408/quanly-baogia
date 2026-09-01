@@ -52,7 +52,22 @@ async function kiemPii(): Promise<Ket> {
       ["id", true],
       ...fields.flatMap((f) => [[f.plain, true], [f.enc, true]]),
     ]);
-    const list = await client.findMany({ where: { piiVersion: { gt: 0 } }, select });
+    // `includeDeleted: true` — BẮT BUỘC, y như src/tools/piiRotate.ts:84.
+    //
+    // `prisma` ở src/db.ts được mở rộng: PersonnelRecord và Employee đều nằm trong
+    // SOFT_DELETE_MODELS, nên mọi `findMany` tự bị chèn `where.deletedAt = null`. Không có cờ này
+    // thì bước kiểm BỎ QUA toàn bộ hồ sơ đã xoá mềm — trong khi piiRotate CỐ Ý mã lại đúng những
+    // hàng đó, vì chúng vẫn còn nguyên idCardEnc/bankAccountEnc/salaryEnc trong CSDL.
+    //
+    // Hậu quả nếu thiếu: người vận hành xoay khoá theo docs/operations/DISASTER_RECOVERY.md; lượt
+    // rotate đứt giữa chừng để sót mấy hàng xoá mềm; bước kiểm này chỉ đếm hàng còn sống nên in ✓
+    // và thoát 0; runbook (và chính piiRotate.ts:147) lấy đúng dấu ✓ đó làm điều kiện HUỶ KHOÁ CŨ.
+    // Khoá cũ mất đi thì CCCD / số tài khoản / lương của các hồ sơ ấy không bao giờ giải lại được.
+    // Đây là bằng chứng GIẢ ở đúng chỗ mà khối chú thích ngay dưới đang lo phòng.
+    //
+    // Bản mà file này thay thế — scripts/migration/pii-backfill.mjs --verify — dùng PrismaClient
+    // THÔ nên vẫn quét hàng xoá mềm; thiếu cờ này là phủ HẸP HƠN thứ nó thay.
+    const list = await client.findMany({ where: { piiVersion: { gt: 0 } }, select, includeDeleted: true } as never);
     rows += list.length;
     for (const r of list) {
       for (const f of fields) {

@@ -330,15 +330,45 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   // khoản→ép ĐĂNG XUẤT ngay (bảo mật phiên); thay đổi dữ liệu→bắn event cho trang đang mở.
   useEffect(() => {
     let es: EventSource | null = null;
-    try {
-      es = new EventSource("/api/stream/events");
-      es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
-      es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
-      es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
-      es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
-      es.addEventListener("session:revoked", async () => { try { await api.logout(); } catch { /* ignore */ } location.reload(); });
-    } catch { /* ignore */ }
-    return () => { es?.close(); };
+    let hen: number | null = null;
+    let lan = 0;
+    let song = true;
+
+    // NỐI LẠI KHI BẮT TAY HỎNG — không có lớp này thì mất realtime là mất VĨNH VIỄN cho tab đó.
+    //
+    // EventSource chỉ tự nối lại khi một kết nối ĐANG MỞ bị đứt. Nếu phản hồi đầu tiên không phải
+    // 200 thì theo đặc tả nó "fail the connection": readyState = CLOSED, bắn `error`, và DỪNG HẲN.
+    // Máy chủ có đúng đường trả non-200 như vậy: trần `SSE_MAX_PER_USER` trả 429 (src/sse.ts) khi
+    // một người mở quá nhiều tab, hoặc khi kết nối nửa-chết chưa kịp đóng còn tồn đọng sau một lần
+    // rớt mạng. Tab đó im lặng mất badge thông báo, mất tự làm mới danh sách, mất "X đang sửa", và
+    // mất cả `session:revoked` (khoá/xoá tài khoản → ép đăng xuất) cho tới khi người dùng F5.
+    // Không có thông báo nào trên giao diện, nên không ai biết mà F5.
+    //
+    // Lùi dần 2s → 4s → 8s… trần 60s: đủ nhanh để tab tồn đọng sống lại sau khi kết nối cũ hết
+    // hạn, đủ chậm để mười tab đang chạm trần không quay thành một vòng thử lại dồn dập.
+    const noi = () => {
+      if (!song) return;
+      try {
+        es = new EventSource("/api/stream/events");
+        es.addEventListener("open", () => { lan = 0; });   // nối được thì quên lịch sử lùi
+        es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
+        es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+        es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
+        es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
+        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } location.reload(); });
+        es.onerror = () => {
+          // CLOSED = bắt tay hỏng (429/401/5xx) → trình duyệt sẽ KHÔNG tự thử lại, ta phải tự hẹn.
+          // CONNECTING = đứt giữa chừng → trình duyệt tự lo, đừng dựng thêm kết nối thứ hai.
+          if (!song || !es || es.readyState !== EventSource.CLOSED) return;
+          es.close(); es = null;
+          const cho = Math.min(60_000, 2000 * 2 ** Math.min(lan++, 5));
+          hen = window.setTimeout(noi, cho);
+        };
+      } catch { /* ignore */ }
+    };
+    noi();
+
+    return () => { song = false; if (hen) clearTimeout(hen); es?.close(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

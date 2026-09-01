@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import type { Request, Response } from "express";
 import { createLimiter } from "../rateLimit.js";
 import { z } from "zod";
@@ -43,10 +44,34 @@ const forgotLimiter = createLimiter("forgot", {
 // KHOẢN trong authService (kẻ tấn công xoay IP thì vướng bộ đếm kia; dò nhiều tài khoản một lúc để
 // né bộ đếm kia thì vướng trần này). Rộng hơn loginLimiter một chút vì người dùng thật có thể gõ
 // nhầm mật khẩu mới/mã MFA vài lần trong một lần kích hoạt.
+//
+// KHOÁ THEO TOKEN, KHÔNG THEO IP. Cả công ty đi ra Internet qua một địa chỉ công cộng duy nhất
+// (router MikroTik của văn phòng), nên khoá theo IP biến trần này thành MỘT bộ đếm cho cả phòng —
+// đúng kết luận mà chính repo này đã ghi ở src/routes/search.routes.ts và
+// src/routes/analytics.routes.ts ("một người gõ nhiều làm cả phòng bị chặn"). Kịch bản vỡ: HR mời
+// một đợt 8-10 người trong cùng buổi; mỗi lần bấm "Kích hoạt" ăn một suất, kể cả lần hỏng vì mật
+// khẩu yếu (400) hay vì tài khoản có MFA (401 mfaRequired luôn tốn một lượt trước khi ô mã hiện
+// ra) — người thứ N nhận 429 trên một thao tác hoàn toàn hợp lệ và phải chờ 15 phút.
+//
+// Token là khoá ĐÚNG cho mục đích của trần này: nó sinh ra để chặn dò mã MFA / mật khẩu trên MỘT
+// lời mời, mà mỗi lời mời có token 48 ký tự hex riêng. Người dùng thật vì thế có quota riêng.
+// `acceptInviteIpLimiter` ngay dưới giữ lại lớp chặn quét NHIỀU token từ một nguồn.
 const acceptInviteLimiter = createLimiter("accept-invite", {
   windowMs: 15 * 60 * 1000,
   max: 10,
+  keyGenerator: (req: Request) => {
+    const t = typeof req.body?.token === "string" ? req.body.token : "";
+    return t ? `ai:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `ai:ip:${req.ip}`;
+  },
   message: { error: "Quá nhiều lần thử, vui lòng thử lại sau 15 phút" },
+});
+
+// Lớp thứ hai: chặn QUÉT nhiều token khác nhau từ cùng một nguồn. Đặt rộng (100/15 phút) để chứa
+// được cả một văn phòng đang kích hoạt tài khoản hàng loạt, trong khi vẫn cắt được vòng lặp máy.
+const acceptInviteIpLimiter = createLimiter("accept-invite-ip", {
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: "Quá nhiều lần thử từ mạng của bạn, vui lòng thử lại sau 15 phút" },
 });
 
 // Trần riêng cho nhóm endpoint ĐỌC/XOAY TOKEN không cần đăng nhập: GET /invite/:token,
@@ -65,6 +90,17 @@ const acceptInviteLimiter = createLimiter("accept-invite", {
 const tokenLimiter = createLimiter("auth-token", {
   windowMs: 15 * 60 * 1000,
   max: 20,
+  // Cùng lý lẽ như acceptInviteLimiter ngay trên: khoá theo TOKEN chứ không theo IP. Màn
+  // OnboardPage gọi `api.getInvite(token)` mỗi lần mount (web/src/App.tsx) — 8-10 người mở link
+  // trong cùng một buổi, cộng mỗi lần bấm F5 — là ăn hết quota 20 của CẢ VĂN PHÒNG sau NAT.
+  // `/token/refresh` và `/token/revoke` mang refresh token trong thân, dùng chính nó làm khoá.
+  keyGenerator: (req: Request) => {
+    const t =
+      (typeof req.params?.token === "string" && req.params.token) ||
+      (typeof req.body?.refreshToken === "string" && req.body.refreshToken) ||
+      "";
+    return t ? `tk:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `tk:ip:${req.ip}`;
+  },
   message: { error: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút" },
 });
 
@@ -263,6 +299,7 @@ router.get("/invite/:token", tokenLimiter, asyncHandler(async (req: Request, res
 // Accept an invite: set own password + phone, activate, then log in.
 router.post(
   "/accept-invite",
+  acceptInviteIpLimiter,
   acceptInviteLimiter,
   validate({ body: AcceptInviteSchema }),
   asyncHandler(async (req: Request, res: Response) => {

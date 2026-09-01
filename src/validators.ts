@@ -194,6 +194,12 @@ const extraTableSchema = z.object({
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
 });
 
+// SỨC CHỨA TỐI ĐA CỦA ĐƯỜNG LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
+// ngần này — xem chú thích ngay dưới, và src/worker.ts dùng lại đúng hai hằng số này.
+export const MAX_SAVE_SHEETS = 60;
+export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
+export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
+
 // LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).
 //
 // Route này TRƯỚC ĐÂY không có body schema: `validate({ params: idParam })` chỉ kiểm `:id`, còn
@@ -218,7 +224,10 @@ export const HnSaveSchema = z.object({
           .default([]),
       })
     )
-    .max(50, "Tối đa 50 trang")
+    // PHẢI ĐI THEO trần của đường lưu. Số 50 viết tay ở đây thấp hơn MAX_SAVE_SHEETS (60): sale lưu
+    // được báo giá 60 trang, rồi account Hà Nội mở đúng báo giá đó, điền phần HN, bấm Lưu và nhận
+    // 400 — mất chức năng cho mọi báo giá 51–60 trang, đúng cỡ mà trần 60 sinh ra để phục vụ.
+    .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang`)
     .default([]),
 });
 
@@ -256,12 +265,6 @@ const sheetSchema = z.object({
  */
 export const MAX_EXPORT_SHEETS = 100;
 export const MAX_EXPORT_ITEMS = 20_000;
-
-// SỨC CHỨA TỐI ĐA CỦA ĐƯỜNG LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
-// ngần này — xem chú thích ngay dưới, và src/worker.ts dùng lại đúng hai hằng số này.
-export const MAX_SAVE_SHEETS = 60;
-export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
-export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
 
 /**
  * ── ĐÃ TỪNG CÓ MỘT TRẦN 20.000 DÒNG Ở ĐÂY. ĐÃ GỠ. ĐỪNG ĐẶT LẠI. ─────────────

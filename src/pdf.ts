@@ -205,6 +205,44 @@ function drawItemsTable(
   let y = doc.y + 4;
   let needHeader = true;
   /** Đặt chỗ cho một hàng cao `rowH`: sang trang nếu thiếu, rồi vẽ tiêu đề bảng nếu trang chưa có. */
+  /**
+   * Chia một ô chữ thành các MẢNH, mỗi mảnh vẽ vừa `capH` ở bề rộng `w`.
+   *
+   * Vì sao cần: ô "Hạng mục" ghép `name` (tối đa 2000 ký tự) với `detail` (2000 nữa) — cả hai đều
+   * là mức `src/validators.ts` cho phép và lưới thật cho nhập nhiều dòng. Ở cột 196pt cỡ 10 với
+   * phông production (DejaVuSerif), khoảng 2.600 ký tự đã cao hơn một trang A4. Một HÀNG bảng thì
+   * không thể cao hơn một trang, nên phải chia ra nhiều hàng nối tiếp — đúng cách Excel và Word in.
+   *
+   * Bản trước xử lý bằng `opt.height` + `opt.ellipsis`, tức CẮT BỎ phần thừa (đo được: ô 4.003 ký
+   * tự chỉ còn 2.813 glyph — mất khoảng một phần ba) và thay bằng một dòng đỏ "[…] xem bản Excel".
+   * Đây là tài liệu gửi khách: mất nội dung thật, kể cả khi có ghi chú báo mất, vẫn là mất.
+   *
+   * Cắt theo RANH GIỚI TỪ khi tìm được khoảng trắng đủ gần, để không xé đôi một từ.
+   */
+  const chiaVuaTrang = (chu: string, w: number, capH: number): string[] => {
+    const ra: string[] = [];
+    let con = chu;
+    // Trần vòng lặp: dữ liệu bệnh hoạn (một "từ" dài vô tận) không được treo tiến trình sinh file.
+    for (let lan = 0; lan < 500 && con.length; lan++) {
+      if (doc.heightOfString(con, { width: w }) <= capH) { ra.push(con); return ra; }
+      // Nhị phân trên SỐ KÝ TỰ: mảnh dài nhất còn vẽ vừa `capH`.
+      let lo = 1, hi = con.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (doc.heightOfString(con.slice(0, mid), { width: w }) <= capH) lo = mid; else hi = mid - 1;
+      }
+      let cat = Math.max(1, lo);
+      const lui = con.lastIndexOf(" ", cat);
+      if (lui > 0 && cat - lui <= 40) cat = lui;   // lùi về khoảng trắng gần, không lùi quá xa
+      ra.push(con.slice(0, cat));
+      // `trimStart()` chứ không phải regex có 	: eslint `no-control-regex` cấm ký tự điều khiển
+      // trong biểu thức chính quy, và ở đây không cần regex làm gì.
+      con = con.slice(cat).trimStart();
+    }
+    if (con.length) ra.push(con);
+    return ra;
+  };
+
   const startRow = (rowH: number) => {
     if (y + (needHeader ? 18 : 0) + rowH > pageBottom()) {
       doc.addPage();
@@ -246,58 +284,54 @@ function drawItemsTable(
     // dưới cũng dùng đúng con số sai đó nên trang bị tràn. Đây là tài liệu gửi cho khách.
     const rowFont = isGroup ? "bold" : isInfo ? "italic" : "body";
     doc.font(rowFont);
-    const vals = [stt, text, unit, qtyS, priceS, amtS];
-    const cellH = vals.map((v, i) => doc.heightOfString(String(v), { width: cols[i].w - 4 }));
-    const textH = Math.max(...cellH);
-    // Trần = phần dùng được của MỘT trang (đã trừ hàng tiêu đề bảng 18pt + 4pt đệm): hàng cao hơn
-    // cả trang thì KHÔNG chỗ nào vẽ trọn được.
+    // Trần = phần dùng được của MỘT trang (đã trừ hàng tiêu đề bảng 18pt + 4pt đệm): một HÀNG bảng
+    // không thể cao hơn thế.
     const maxRowH = Math.max(18, doc.page.height - doc.page.margins.bottom - doc.page.margins.top - 22);
-    // Làm tròn LÊN bội số 12pt — đúng bước dòng của công thức cũ.
-    //
-    // CẢNH BÁO BỐ CỤC (đo thật, không phỏng đoán): với phông production DejaVuSerif — Dockerfile
-    // chép DejaVuSerif.ttf vào fonts/Times.ttf — cột "Hạng mục" rộng 196pt ở cỡ 10 chứa được
-    // khoảng 35 ký tự trên MỘT dòng. Tên hạng mục dài hơn thế (rất thường gặp) trước đây bị đếm
-    // là 1 dòng (20pt) nay thành 2 dòng (32pt): báo giá 2000 dòng đi từ 53 lên 85 trang (+60%).
-    // Mọi hàng có `detail` cũng đổi. Tức bản vá này CÓ dàn lại trang cho báo giá đang chạy —
-    // đó là hệ quả bắt buộc của việc sửa khung vẽ hụt, nhưng phải nói đúng để bên in/gửi biết.
-    const wantH = 8 + Math.max(1, Math.ceil(textH / 12)) * 12;
-    const rowH = Math.min(maxRowH, Math.max(18, wantH));
-    const clipped = wantH > maxRowH;
-    // Chiều cao chữ được phép vẽ trong ô. Hàng bị cắt nhường 12pt cuối cho DÒNG BÁO CẮT: tài liệu
-    // này gửi cho khách, mất chữ mà không có dấu hiệu gì là điều tệ nhất có thể làm.
-    const textCap = rowH - 8 - (clipped ? 12 : 0);
-    if (clipped) {
+    const capH = maxRowH - 8;
+    const wCotText = cols[1].w - 4;
+    // Ô "Hạng mục" cao hơn một trang → CHIA thành nhiều hàng nối tiếp, KHÔNG cắt bỏ chữ.
+    // Xem khối chú thích ở `chiaVuaTrang`. Đây là đường hiếm (cần ~2.600 ký tự trong một ô) nên
+    // phép đo `heightOfString` thừa ra ở đây không đáng kể so với chi phí vẽ.
+    const manh = doc.heightOfString(text, { width: wCotText }) > capH
+      ? chiaVuaTrang(text, wCotText, capH)
+      : [text];
+    if (manh.length > 1) {
       logger.warn(
-        { quoteNumber: where.quoteNumber, sheetName: where.sheetName, itemName: String(it?.name || "").slice(0, 80), wantH, maxRowH },
-        "PDF: hàng hạng mục cao hơn một trang giấy — nội dung bị cắt trong bản PDF (bản Excel vẫn đủ)",
+        { quoteNumber: where.quoteNumber, sheetName: where.sheetName, itemName: String(it?.name || "").slice(0, 80), soManh: manh.length },
+        "PDF: hạng mục dài hơn một trang giấy — đã chia thành nhiều hàng nối tiếp (không mất chữ)",
       );
     }
-    startRow(rowH);
-    doc.font(rowFont);   // drawHeader trả font về "body" — đặt lại font của hàng trước khi vẽ
-    let x = startX;
-    // Viền ĐỎ cho hàng bị cắt: dấu hiệu nhìn thấy được ngay cả khi lướt nhanh qua trang.
-    const border = clipped ? "#CC0000" : "#bbb";
-    if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", border);
-    else doc.rect(startX, y, tableW, rowH).stroke(border);
-    doc.fillColor("black");
-    doc.font(rowFont);
-    vals.forEach((v, i) => {
-      // Chỉ ràng height/ellipsis cho ĐÚNG ô thật sự tràn: hàng bình thường — và cả những ô ngắn
-      // (STT, ĐVT, tiền) của hàng bị cắt — giữ nguyên đường vẽ cũ của pdfkit.
-      const opt: PDFKit.Mixins.TextOptions = { width: cols[i].w - 4, align: cols[i].align };
-      if (clipped && cellH[i] > textCap) { opt.height = textCap; opt.ellipsis = true; }
-      doc.text(String(v), x + 2, y + 4, opt);
-      x += cols[i].w;
+
+    manh.forEach((phan, mi) => {
+      // Hàng NỐI chỉ mang phần chữ còn lại: STT / ĐVT / số lượng / đơn giá / thành tiền đã in ở
+      // hàng đầu, lặp lại sẽ đọc thành nhiều dòng tiền khác nhau.
+      const vals = mi === 0 ? [stt, phan, unit, qtyS, priceS, amtS] : ["", phan, "", "", "", ""];
+      doc.font(rowFont);
+      const cellH = vals.map((v, i2) => doc.heightOfString(String(v), { width: cols[i2].w - 4 }));
+      const textH = Math.max(...cellH);
+      // Làm tròn LÊN bội số 12pt — đúng bước dòng của công thức cũ.
+      //
+      // CẢNH BÁO BỐ CỤC (đo thật, không phỏng đoán): với phông production DejaVuSerif — Dockerfile
+      // chép DejaVuSerif.ttf vào fonts/Times.ttf — cột "Hạng mục" rộng 196pt ở cỡ 10 chứa được
+      // khoảng 35 ký tự trên MỘT dòng. Tên hạng mục dài hơn thế (rất thường gặp) trước đây bị đếm
+      // là 1 dòng (20pt) nay thành 2 dòng (32pt): báo giá 2000 dòng đi từ 53 lên 85 trang (+60%).
+      // Mọi hàng có `detail` cũng đổi. Tức bản vá này CÓ dàn lại trang cho báo giá đang chạy —
+      // đó là hệ quả bắt buộc của việc sửa khung vẽ hụt, nhưng phải nói đúng để bên in/gửi biết.
+      const rowH = Math.min(maxRowH, Math.max(18, 8 + Math.max(1, Math.ceil(textH / 12)) * 12));
+      startRow(rowH);
+      doc.font(rowFont);   // drawHeader trả font về "body" — đặt lại font của hàng trước khi vẽ
+      let x = startX;
+      if (isGroup) doc.rect(startX, y, tableW, rowH).fillAndStroke(kind === "section" ? "#FDEBD8" : "#DCE6F4", "#bbb");
+      else doc.rect(startX, y, tableW, rowH).stroke("#bbb");
+      doc.fillColor("black");
+      doc.font(rowFont);
+      vals.forEach((v, i2) => {
+        doc.text(String(v), x + 2, y + 4, { width: cols[i2].w - 4, align: cols[i2].align });
+        x += cols[i2].w;
+      });
+      doc.font("body");
+      y += rowH;
     });
-    if (clipped) {
-      // Dòng báo cắt nằm TRONG khung hàng, ở 12pt vừa chừa ra bên trên.
-      doc.font("italic").fontSize(8).fillColor("#CC0000");
-      doc.text("[…] Nội dung bị cắt — xem bản Excel để có đầy đủ", startX + 2, y + rowH - 13,
-        { width: tableW - 4, align: "left", height: 11, ellipsis: true, lineBreak: false });
-      doc.fillColor("black").fontSize(10);
-    }
-    doc.font("body");
-    y += rowH;
   });
   // Sheet KHÔNG có hạng mục nào: giữ nguyên hành vi cũ (vẫn in hàng tiêu đề bảng), chỉ thêm chốt lề.
   if (needHeader) {
