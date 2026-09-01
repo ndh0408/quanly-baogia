@@ -108,7 +108,9 @@ ssh "$SSH" '
       echo ===== LY DO =====
       grep -aE \"AssertionError|Error:|ENOENT|not found|Cannot find|ECONNREFUSED\" /tmp/quanly-vitest.log | sed \"s/^ *//\" | cut -c1-160 | sort -u | head -12
       echo ===== TONG KET =====
-      grep -aE \"Test Files|^ +Tests \" /tmp/quanly-vitest.log | tail -4
+      grep -aE \"Test Files|Tests \" /tmp/quanly-vitest.log | tail -6
+      echo ===== BAI BI BO QUA =====
+      grep -aE \"^ *[↓v] |skipped\" /tmp/quanly-vitest.log | head -40
       echo ===== EXIT=\$code =====
 
       # Thư mục mã nguồn được mount THẲNG từ VM (không phải bản sao) — mọi thứ vừa dựng phải dọn,
