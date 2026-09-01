@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
+import { ipKeyGenerator } from "express-rate-limit";
 import type { Request, Response } from "express";
 import { createLimiter } from "../rateLimit.js";
 import { z } from "zod";
@@ -61,7 +62,7 @@ const acceptInviteLimiter = createLimiter("accept-invite", {
   max: 10,
   keyGenerator: (req: Request) => {
     const t = typeof req.body?.token === "string" ? req.body.token : "";
-    return t ? `ai:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `ai:ip:${req.ip}`;
+    return t ? `ai:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `ai:ip:${ipKeyGenerator(req.ip || "")}`;
   },
   message: { error: "Quá nhiều lần thử, vui lòng thử lại sau 15 phút" },
 });
@@ -99,7 +100,7 @@ const tokenLimiter = createLimiter("auth-token", {
       (typeof req.params?.token === "string" && req.params.token) ||
       (typeof req.body?.refreshToken === "string" && req.body.refreshToken) ||
       "";
-    return t ? `tk:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `tk:ip:${req.ip}`;
+    return t ? `tk:t:${createHash("sha256").update(t).digest("hex").slice(0, 32)}` : `tk:ip:${ipKeyGenerator(req.ip || "")}`;
   },
   message: { error: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút" },
 });
