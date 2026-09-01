@@ -40,6 +40,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["user.invite.mfa.failed", "Nhập sai mã MFA (kích hoạt lời mời)"], ["user.invite.mfa.locked", "Khóa do sai mã MFA (kích hoạt lời mời)"],
     ["user.profile.update", "Cập nhật hồ sơ cá nhân"], ["user.memberships.cleared", "Xóa phân công thành viên"],
     ["user.breakglass.modify", "Sửa tài khoản khẩn cấp (break-glass)"],
+    ["user.mfa.reset", "Gỡ xác thực hai bước hộ (admin)"],
   ]],
   ["Nhân sự (hồ sơ) & danh bạ", [
     ["personnel.create", "Thêm hồ sơ nhân sự"], ["personnel.update", "Sửa hồ sơ nhân sự"], ["personnel.delete", "Xóa hồ sơ nhân sự"],
