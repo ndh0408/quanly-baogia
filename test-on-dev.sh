@@ -58,19 +58,62 @@ ssh "$SSH" '
     -e PII_ENC_KEY="$PIIK" \
     -e APP_BASE_URL="http://localhost:3000" -e PORT="3000" \
     node:22-alpine sh -c "
-      apk add --no-cache openssl libc6-compat >/dev/null 2>&1 &&
-      npm ci >/dev/null 2>&1 &&
-      npx prisma generate >/dev/null 2>&1 &&
-      npx prisma migrate deploy >/dev/null 2>&1 &&
+      # ── CHUẨN BỊ: mỗi bước tự báo, KHÔNG nối bằng && ─────────────────────────
+      # Trước đây cả khối là một chuỗi \`a && b && c && npm run test:run\`, nên một bước hỏng ở
+      # giữa làm vitest KHÔNG chạy mà mã thoát vẫn có thể là 0 — cổng báo XANH trong khi không
+      # kiểm gì. Đã xảy ra thật (2026-09-01). Nay từng bước tự báo, và có chốt \`test -s\` để một
+      # lượt không-chạy-được không bao giờ đi qua thành công.
+      #
+      # Danh sách dưới đây là thứ bộ test ĐÒI ngoài node. Thiếu cái nào là file đỏ mà KHÔNG phải
+      # lỗi code — đo được đúng 14 file: pg_dump · bash · redis nghe ở CHÍNH localhost (hai bài
+      # hàng đợi tự đặt REDIS_URL=redis://127.0.0.1:6379/<db> để không đụng Redis thật của dev) ·
+      # phông DejaVu · dist/ · public/app2/ · helm · git (tests/xg-doc-numbers đếm số liệu
+      # tài liệu bằng `git ls-files`; thiếu git thì nó chết ở bước collect, không phải đỏ một bài) ·
+      # findutils (scripts/backup/backup-objects.sh dùng `find -printf` của GNU; busybox không có
+      # cờ đó nên script ngã — máy chủ thật chạy GNU findutils 4.10 nên đây thuần là chuyện container).
+      set -u
+      apk add --no-cache openssl libc6-compat bash postgresql16-client redis font-dejavu curl tar git findutils >/dev/null 2>&1 || { echo HONG_apk_add; exit 90; }
+      redis-server --daemonize yes --save \"\" --appendonly no >/dev/null 2>&1 || echo CANH_BAO_khong_bat_duoc_redis_cuc_bo
+
+      # helm: chỉ cần binary — các bài chỉ chạy helm lint / helm template, không cần cluster.
+      if curl -fsSL -m 90 https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz -o /tmp/h.tgz 2>/dev/null; then
+        tar xzf /tmp/h.tgz -C /tmp 2>/dev/null && install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm 2>/dev/null
+      fi
+      command -v helm >/dev/null || echo CANH_BAO_khong_co_helm_cac_bai_helm_se_do
+
+      # Phông cho PDF: image production chép DejaVuSerif thành fonts/Times.ttf (Dockerfile), bộ
+      # test phải thấy ĐÚNG phông đó thì con số bố cục mới là con số thật.
+      mkdir -p fonts
+      cp /usr/share/fonts/dejavu/DejaVuSerif.ttf        fonts/Times.ttf        2>/dev/null
+      cp /usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf   fonts/Times-Bold.ttf   2>/dev/null
+      cp /usr/share/fonts/dejavu/DejaVuSerif-Italic.ttf fonts/Times-Italic.ttf 2>/dev/null
+
+      npm ci >/dev/null 2>&1                    || { echo HONG_npm_ci; exit 91; }
+      npx prisma generate >/dev/null 2>&1       || { echo HONG_prisma_generate; exit 92; }
+      npx prisma migrate deploy >/dev/null 2>&1 || { echo HONG_prisma_migrate; exit 93; }
+      # dist/: bốn bài PII chạy node dist/tools/piiRotate.js ở tiến trình riêng, và một bài đòi
+      # dist/ MỚI HƠN src/ — nếu không, chúng kiểm bản biên dịch của lần trước và xanh giả.
+      npm run build >/dev/null 2>&1             || { echo HONG_npm_run_build; exit 94; }
+      # public/app2/: bộ test dựng app THẬT rồi gọi GET /; không có bản build giao diện thì route
+      # SPA trả 404 và các bài phục vụ tĩnh đỏ oan.
+      ( cd web && npm ci >/dev/null 2>&1 && npm run build >/dev/null 2>&1 ) || { echo HONG_build_web; exit 95; }
+
       npm run test:run > /tmp/quanly-vitest.log 2>&1
       code=\$?
-      # DANH SÁCH FILE ĐỎ trước, rồi mới tới đuôi log. `tail -20` một mình chỉ cho thấy bài CUỐI
-      # CÙNG bị đỏ — muốn biết 14 file nào hỏng thì phải chạy lại và mò, mà mỗi lượt tốn ~3 phút.
-      echo "── FILE ĐỎ ─────────────────────────────────────────────"
-      grep -a \"FAIL \" /tmp/quanly-vitest.log 2>/dev/null | sed \"s/ > .*//\" | sort -u || true
-      echo "── 20 dòng cuối ────────────────────────────────────────"
-      tail -20 /tmp/quanly-vitest.log 2>/dev/null || true
-      rm -rf node_modules 2>/dev/null
+      # Chốt: log rỗng nghĩa là vitest chưa từng chạy — không được đi qua thành công.
+      test -s /tmp/quanly-vitest.log || { echo HONG_vitest_khong_chay_log_rong; code=96; }
+
+      echo ===== FILE DO =====
+      grep -a \"FAIL \" /tmp/quanly-vitest.log | sed \"s/ > .*//\" | sort -u
+      echo ===== LY DO =====
+      grep -aE \"AssertionError|Error:|ENOENT|not found|Cannot find|ECONNREFUSED\" /tmp/quanly-vitest.log | sed \"s/^ *//\" | cut -c1-160 | sort -u | head -12
+      echo ===== TONG KET =====
+      grep -aE \"Test Files|^ +Tests \" /tmp/quanly-vitest.log | tail -4
+      echo ===== EXIT=\$code =====
+
+      # Thư mục mã nguồn được mount THẲNG từ VM (không phải bản sao) — mọi thứ vừa dựng phải dọn,
+      # nếu không lần deploy sau ship nhầm artefact của bộ test.
+      rm -rf node_modules web/node_modules dist public/app2 fonts/Times.ttf fonts/Times-Bold.ttf fonts/Times-Italic.ttf 2>/dev/null
       exit \$code
     "
   rc=$?

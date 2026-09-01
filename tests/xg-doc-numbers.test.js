@@ -29,8 +29,31 @@ import {
 const GOC = path.resolve(import.meta.dirname, "..");
 const doc = (p) => readFileSync(path.join(GOC, p), "utf8");
 
+// ── CHỈ CHẠY ĐƯỢC TRONG MỘT GIT REPO ────────────────────────────────────────
+// `doTatCa()` → `scripts/ci/check-doc-numbers.mjs` đếm tệp bằng `git ls-files`, nên nó cần
+// metadata của git. Bản ship lên máy chủ đi qua `git archive | tar x` (deploy.sh) — thư mục ở đó
+// KHÔNG có `.git`, và lệnh kia ngã với "fatal: not a git repository" ngay ở mức module, tức cả
+// file chết ở bước collect chứ không phải đỏ một bài. Trong lượt chạy trên hạ tầng dev
+// (`test-on-dev.sh`, mount thẳng thư mục đã ship) thì điều đó xảy ra MỖI LƯỢT.
+//
+// Bỏ qua CÓ LÝ DO, không im lặng: in một dòng nói rõ vì sao, để không ai nhìn con số "đã chạy"
+// mà tưởng cổng này vừa gác. Nơi nó thật sự cần gác — máy lập trình viên và CI, cả hai đều có
+// `.git` — thì nó vẫn chạy đủ.
+const laGitRepo = (() => {
+  try {
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: GOC, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+if (!laGitRepo) {
+   
+  console.warn("[xg-doc-numbers] BỎ QUA: thư mục không phải git repo (bản ship qua `git archive` không mang .git), mà check-doc-numbers.mjs đếm bằng `git ls-files`.");
+}
+
 // Đo MỘT LẦN ở mức module: `doTatCa()` gọi `endpoint-inventory` và đọc chục tệp.
-const soThuc = await doTatCa();
+const soThuc = laGitRepo ? await doTatCa() : null;
 
 // Số đo GIẢ, cố định — bài kiểm logic không được đổi kết quả khi ai đó thêm một quy tắc cảnh báo.
 const GIA = {
@@ -47,7 +70,7 @@ const GIA = {
 const q = (vanBan) => quet(vanBan, GIA);
 const lech = (vanBan) => q(vanBan).filter((k) => !k.khop);
 
-describe("bắt được số SAI", () => {
+describe.runIf(laGitRepo)("bắt được số SAI", () => {
   it("số quy tắc cảnh báo lệch → báo, kèm đúng số dòng và cả hai con số", () => {
     const r = lech("dòng đệm\n`alerts.yaml` có 14 quy tắc cảnh báo.\n");
     expect(r).toHaveLength(1);
@@ -85,7 +108,7 @@ describe("bắt được số SAI", () => {
   });
 });
 
-describe("KHÔNG báo số lịch sử — quy ước khai mốc", () => {
+describe.runIf(laGitRepo)("KHÔNG báo số lịch sử — quy ước khai mốc", () => {
   it("mốc bằng lời làm mờ số đứng SAU nó trong cùng đoạn", () => {
     expect(lech("Trước đợt 2026-08-27 hai con số này là **14 metric và 14 quy tắc**.")).toHaveLength(0);
   });
@@ -138,7 +161,7 @@ describe("KHÔNG báo số lịch sử — quy ước khai mốc", () => {
   });
 });
 
-describe("KHÔNG báo động giả — những ca đã thật sự gặp khi dựng cổng", () => {
+describe.runIf(laGitRepo)("KHÔNG báo động giả — những ca đã thật sự gặp khi dựng cổng", () => {
   it.each([
     ["S3_ENDPOINT không phải '3 endpoint'", ': "${S3_ENDPOINT:=http://127.0.0.1:9000}"'],
     ["app:3000/metrics không phải '3000 metric'", "scrape `app:3000/metrics` và `worker:9091/metrics`"],
@@ -184,7 +207,7 @@ describe("KHÔNG báo động giả — những ca đã thật sự gặp khi d�
   });
 });
 
-describe("phạm vi quét", () => {
+describe.runIf(laGitRepo)("phạm vi quét", () => {
   it("bỏ CHANGELOG.md, docs/archive/**, chính cổng, và bài kiểm này", () => {
     for (const f of [
       "CHANGELOG.md",
@@ -205,7 +228,7 @@ describe("phạm vi quét", () => {
   });
 });
 
-describe("hàm đo — đối chiếu với phép đếm ĐỘC LẬP trên cây thật", () => {
+describe.runIf(laGitRepo)("hàm đo — đối chiếu với phép đếm ĐỘC LẬP trên cây thật", () => {
   // Mỗi khẳng định dưới đây đếm lại bằng một cách KHÁC với cách hàm đo dùng. Đếm lại bằng chính
   // hàm đo thì bài test chỉ chứng minh `x === x`.
 
