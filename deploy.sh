@@ -145,10 +145,28 @@ fi
 
 echo "▶ [2/6] Ship tracked files"
 git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
-# tar KHÔNG xóa file cũ. Sau khi migrate .js→.ts (git mv), các .js cũ từ deploy trước CÒN SÓT trên
-# $DIR và SHADOW .ts (import './x.js' resolve vào file .js thật nếu tồn tại) → app chạy code CŨ.
-# Dọn mọi .js có .ts cùng tên (trong src/ + shared/) để .ts mới thực sự được dùng.
-ssh "$SSH" "cd $DIR && find src shared -name '*.js' 2>/dev/null | while read f; do [ -f \"\${f%.js}.ts\" ] && rm -f \"\$f\" && echo \"  gỡ stale \$f\"; done; true"
+# tar KHÔNG XOÁ file cũ, nên $DIR tích lại mọi file từng được ship. Ba kiểu rác, và cả ba đều đã
+# cắn thật:
+#   · .js cũ SHADOW .ts sau khi `git mv x.js x.ts` — `import './x.js'` resolve vào .js thật nếu nó
+#     còn tồn tại, tức app chạy code CŨ mà không báo gì;
+#   · .ts bị DI CHUYỂN sang thư mục khác (`git mv src/quoteService.ts src/services/`) — bản cũ nằm
+#     lại ở chỗ cũ;
+#   · .js của tính năng đã GỠ HẲN (approval, products) — không có .ts cùng tên nên chốt cũ, vốn chỉ
+#     dò `.js` có `.ts` kèm theo, không thấy chúng.
+# Trước đây hai kiểu sau vô hại vì production chạy `tsx src/server.ts`: chỉ file nào ĐƯỢC IMPORT mới
+# được nạp. Từ khi build bằng `tsc -p tsconfig.build.json`, TOÀN BỘ cây src/ bị biên dịch — một file
+# mồ côi tham chiếu kiểu Prisma đã đổi là VỠ CẢ LẦN BUILD, ngay giữa deploy. Đúng như vậy ngày
+# 2026-09-01: `src/quoteService.ts(366,46): error TS2322` trên một file không còn trong repo.
+#
+# Nên chốt phải TỔNG QUÁT: giữ đúng những gì git đang theo dõi, xoá phần còn lại. `src/` và
+# `shared/` hoàn toàn do repo quản lý — không có gì sinh ra trong đó lúc chạy — nên phép so này an
+# toàn. Danh sách đi qua stdin để không đụng trần độ dài dòng lệnh.
+echo "▶ [2b/6] Dọn file mồ côi trong src/ + shared/ (tar không tự xoá)"
+git ls-tree -r --name-only "$REF" -- src shared | ssh "$SSH" "cat > $DIR/.tracked-src.txt && cd $DIR && \
+  find src shared -type f 2>/dev/null | sort > .onvm-src.txt && \
+  sort .tracked-src.txt -o .tracked-src.txt && \
+  comm -13 .tracked-src.txt .onvm-src.txt | while read -r f; do rm -f \"\$f\" && echo \"  gỡ mồ côi \$f\"; done; \
+  rm -f .tracked-src.txt .onvm-src.txt; true"
 
 if [ -n "$IMAGE_REF" ]; then
   echo "▶ [3/6] Kéo image đã ghim digest (KHÔNG dựng trên VM)"
