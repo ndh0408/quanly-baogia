@@ -50,6 +50,22 @@ describe("ChangePasswordSchema", () => {
     expect(() => ChangePasswordSchema.parse({ oldPassword: "x", newPassword: "12345678" })).toThrow();
     expect(ChangePasswordSchema.parse({ oldPassword: "x", newPassword: "GoodPass1" })).toBeTruthy();
   });
+
+  // Đo được trên production 2026-09-07 qua Chrome DevTools: tài khoản mời mới (AcceptInviteSchema
+  // dùng CHUNG schema `pwd` này) chấp nhận "password1" — có chữ và số, đủ 8 ký tự, nhưng là một
+  // trong vài mật khẩu bị thử ĐẦU TIÊN ở mọi cuộc dò tự động. Chốt để không tái diễn.
+  it("chặn mật khẩu PHỔ BIẾN dù đủ chữ + số + độ dài (password1, admin123…)", () => {
+    for (const yeu of ["password1", "Password1", " PASSWORD1 ", "admin123", "welcome1", "abc12345", "qwerty123"]) {
+      expect(() => ChangePasswordSchema.parse({ oldPassword: "x", newPassword: yeu }), yeu).toThrow();
+    }
+  });
+
+  it("vẫn nhận mật khẩu KHÔNG NẰM trong danh sách phổ biến dù cấu trúc tương tự", () => {
+    // Không lỡ tay chặn quá tay: mật khẩu lạ, chỉ trùng CẤU TRÚC (chữ+số) với mật khẩu phổ biến,
+    // phải qua được — bộ lọc so khớp CHUỖI trong danh sách, không suy luận theo pattern.
+    expect(ChangePasswordSchema.parse({ oldPassword: "x", newPassword: "GoodPass1" })).toBeTruthy();
+    expect(ChangePasswordSchema.parse({ oldPassword: "x", newPassword: "TruongPhat88" })).toBeTruthy();
+  });
 });
 
 describe("UserCreateSchema", () => {

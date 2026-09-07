@@ -29,6 +29,20 @@ export const zbool = z.preprocess(
 // nhận PNG/JPEG/WEBP, nhận gif ở cửa vào chỉ đổi lỗi 400 thành 415 ở tầng sâu hơn.
 export const PAYMENT_PROOF_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
 
+// Chặn TOP mật khẩu bị dò nhiều nhất (nguồn: các bảng "top common password" bị rò rỉ hàng năm,
+// vd Have I Been Pwned / SplashData) — quy tắc "có chữ và số" một mình cho "password1", "abc12345"
+// qua thẳng, mà đây là hai trong số mật khẩu bị thử ĐẦU TIÊN ở mọi cuộc dò tự động. Đo được trên
+// production 2026-09-07: tài khoản mời mới chấp nhận "password1" không một cảnh báo nào.
+// So khớp KHÔNG phân biệt hoa/thường và bỏ khoảng trắng hai đầu — kẻ dò cũng thử "Password1".
+const MAT_KHAU_PHO_BIEN = new Set([
+  "password", "password1", "password12", "password123", "passw0rd", "passw0rd1",
+  "12345678", "123456789", "1234567890", "87654321", "11111111", "00000000",
+  "qwerty123", "qwertyui", "qwerty12", "1qaz2wsx", "1q2w3e4r",
+  "letmein1", "letmein123", "admin123", "administrator1",
+  "welcome1", "welcome123", "iloveyou1", "iloveyou2",
+  "abc12345", "abcd1234", "changeme1", "changeme123",
+  "matkhau123", "matkhau1", "123matkhau",
+]);
 const pwd = z
   .string()
   .min(config.PASSWORD_MIN_LENGTH, `Mật khẩu tối thiểu ${config.PASSWORD_MIN_LENGTH} ký tự`)
@@ -39,6 +53,9 @@ const pwd = z
   .refine((s) => Buffer.byteLength(s, "utf8") <= 72, "Mật khẩu quá dài (tối đa 72 byte; tiếng Việt có dấu tính ~2–3 byte mỗi ký tự)")
   .refine((s) => /[A-Za-z]/.test(s) && /\d/.test(s), {
     message: "Mật khẩu phải có cả chữ và số",
+  })
+  .refine((s) => !MAT_KHAU_PHO_BIEN.has(s.trim().toLowerCase()), {
+    message: "Mật khẩu này quá phổ biến, dễ bị dò ra — vui lòng chọn mật khẩu khác",
   });
 
 const username = z
