@@ -16,7 +16,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
+import speakeasy from "speakeasy";
 import { prisma } from "../src/db.js";
+
+const SECRET = "JBSWY3DPEHPK3PXP"; // cùng bí mật gán cho keToan bên dưới
 
 const dbAvailable = await prisma.$queryRawUnsafe('SELECT 1 FROM "User" LIMIT 1').then(() => true).catch(() => false);
 if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") {
@@ -47,7 +50,7 @@ describe.runIf(dbAvailable)("POST /api/users/:id/mfa-reset", () => {
     admin = await mk("admin", "admin");
     // Kế toán đã bật MFA và — đúng kịch bản đời thật — không còn mã dự phòng nào.
     keToan = await mk("accountant", "ketoan", {
-      mfaEnabled: true, mfaSecret: "JBSWY3DPEHPK3PXP", mfaBackupCodes: [], mfaLastStep: 12345,
+      mfaEnabled: true, mfaSecret: SECRET, mfaBackupCodes: [], mfaLastStep: 12345,
     });
     nguoiThuong = await mk("manager", "thuong");
     adminA = agentWithCsrf(app); nhanVienA = agentWithCsrf(app);
@@ -75,6 +78,35 @@ describe.runIf(dbAvailable)("POST /api/users/:id/mfa-reset", () => {
     expect(sau.mfaBackupCodes).toEqual([]);
     // `mfaLastStep` về null cùng lý do như POST /api/mfa/disable — xem chú thích ở mfaService.
     expect(sau.mfaLastStep).toBeNull();
+  });
+
+  // Phát hiện qua ultracode audit 2026-09-07: docblock của resetMfa hứa "Huỷ luôn phiên đang mở",
+  // nhưng `revokeSession` (src/sse.ts) chỉ bắn một sự kiện SSE gợi ý — không huỷ gì ở server. Kẻ
+  // đang giữ phiên/thiết bị nạn nhân (đúng mô hình đe doạ "mất điện thoại" mà chức năng này sinh ra
+  // để phục vụ) tiếp tục dùng được phiên CŨ sau khi admin tưởng đã xử lý xong.
+  //
+  // Nạn nhân RIÊNG cho bài này (không dùng chung `keToan`): bài "gỡ được MFA" ở trên đã TIÊU MỘT
+  // LẦN gỡ của keToan — gọi lại sẽ vướng nhánh "tài khoản chưa bật MFA" (400) và không chạy tới
+  // đoạn huỷ phiên đang muốn kiểm ở đây.
+  it("PHIÊN CŨ của nạn nhân chết ngay sau khi admin gỡ MFA hộ — không chỉ đổi cờ trong CSDL", async () => {
+    const nanNhan2 = await mk("accountant", "nannhan2", {
+      mfaEnabled: true, mfaSecret: SECRET, mfaBackupCodes: [], mfaLastStep: 22345,
+    });
+    const nanNhanA = agentWithCsrf(app);
+    const rP = await nanNhanA.post("/api/auth/login").send({ username: nanNhan2.username, password: PASSWORD });
+    expect(rP.body.mfaRequired).toBe(true);
+    const ma = speakeasy.totp({ secret: SECRET, encoding: "base32" });
+    const rM = await nanNhanA.post("/api/auth/login").send({ username: nanNhan2.username, password: PASSWORD, mfaToken: ma });
+    expect(rM.status, "đăng nhập kèm TOTP hợp lệ phải qua được").toBe(200);
+
+    const truoc = await nanNhanA.get("/api/auth/me");
+    expect(truoc.status, "phiên nạn nhân phải đang sống trước khi gỡ").toBe(200);
+
+    const r = await adminA.post(`/api/users/${nanNhan2.id}/mfa-reset`);
+    expect(r.status).toBe(200);
+
+    const sau = await nanNhanA.get("/api/auth/me");
+    expect(sau.status, "phiên cấp TRƯỚC khi gỡ MFA phải chết ngay, không chờ hết hạn tự nhiên").toBe(401);
   });
 
   it("sau khi gỡ, người đó đăng nhập lại được BẰNG MẬT KHẨU, không bị hỏi mã", async () => {

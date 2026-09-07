@@ -35,6 +35,37 @@ async function loadAuthorized(req: Request, action: Action) {
   return rec;
 }
 
+/**
+ * BA ĐƯỜNG GHI RIÊNG LẺ CỦA NHÂN SỰ TỪNG TRẢ VỀ BẢN GHI ĐÃ GIẢI MÃ CHO NGƯỜI KHÔNG ĐƯỢC ĐỌC NÓ.
+ *
+ * markPayment / writeNoteField (kế toán ghi chú / note) / markConfirm gác quyền ở ROUTE bằng một Ô
+ * ĐỘC LẬP trong ma trận Phân quyền — `personnel:pay`, `personnel:accounting-note`,
+ * `personnel:confirm` — KHÔNG nằm trong `ADMIN_ONLY_PERMISSIONS`, nên admin tích được cho BẤT KỲ
+ * tài khoản nào mà KHÔNG kèm theo bất kỳ ô "Xem hồ sơ" nào (mọi vai trò MẶC ĐỊNH — accountant, hr,
+ * admin — đều bundle sẵn `personnel:read:all` cùng các ô này, nên hành vi hiện tại của họ KHÔNG đổi
+ * một bit nào bởi thay đổi dưới đây; chỉ cấu hình PER-USER tuỳ chỉnh mới lộ ra khác biệt).
+ *
+ * Trước bản vá, cả ba hàm tự `prisma.personnelRecord.findFirst({ select: {...vài cột...} })` rồi
+ * `return decorate(decodePiiOnRead(...))` — BẢN GHI ĐÃ GIẢI MÃ ĐẦY ĐỦ (CCCD, số tài khoản, lương).
+ * `PersonnelRecord.id` là số tăng dần đếm được → tài khoản chỉ có `personnel:pay` một mình đếm
+ * 1,2,3… là moi sạch PII + lương toàn công ty qua đúng endpoint GHI, đi vòng qua mọi lớp chặn ở GET.
+ *
+ * CỐ Ý KHÔNG chặn cả LẦN GHI (không throw 403 khi thiếu phạm vi đọc): comment ngay tại
+ * `personnel.routes.ts` (`/:id/payment`) ghi rõ "Quyền RIÊNG personnel:pay (KHÔNG cần manage,
+ * KHÔNG owner-scope → kế toán đánh dấu MỌI hồ sơ)" — đó là thiết kế CÓ CHỦ Ý, không phải lỗ hổng
+ * (một kế toán chỉ tích đúng ô "Đánh dấu đã thanh toán" phải đánh dấu được hồ sơ của BẤT KỲ ai).
+ * Chặn theo phạm vi ĐỌC như `assertEmployeeInReadScope` (employeeService.ts) làm với PUT/DELETE sẽ
+ * phá đúng khả năng đó. Cái LỘ không nằm ở việc GHI được, mà ở việc PHẢN HỒI cõng theo PII — nên chỉ
+ * cắt PHẢN HỒI: có phạm vi đọc thì trả bản ghi đầy đủ như cũ (không đổi hành vi cho mọi tài khoản
+ * thật); không có thì chỉ trả đúng vài trường giao dịch vừa ghi (không giải mã, không decorate).
+ * Client (web/src/pages/Personnel.tsx) vốn đã KHÔNG dùng phần thân trả về của ba lời gọi này — luôn
+ * `reload()` qua `listPersonnel` (đã lọc phạm vi đúng) ngay sau khi lưu — nên đổi phần thân trả về
+ * không chạm gì tới UI thật.
+ */
+function coPhamViDocPersonnel(req: Request, rec: { createdById: number | null }): boolean {
+  return !!canScoped(req.session, "personnel", "read", rec, "createdById");
+}
+
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 
 // 🔵 Gắn field công thức (pit, taxableIncome) + 🩷 field tham chiếu Dự án vào bản ghi khi TRẢ VỀ.
@@ -169,8 +200,9 @@ export async function deletePersonnel(req: Request) {
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  const coQuyenDoc = coPhamViDocPersonnel(req, before);   // quyết định HÌNH DẠNG phản hồi — xem chú thích ở hàm này
   const paid = (req.body as any).paid as boolean;
   // Ảnh chứng từ. GHI MỚI luôn vào KHO OBJECT — cột base64 cũ chỉ còn để ĐỌC bản ghi chưa chuyển.
   const proof = (req.body as any).paymentProof as string | undefined;
@@ -210,6 +242,11 @@ export async function markPayment(req: Request) {
     before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
     after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
   });
+  if (!coQuyenDoc) {
+    // KHÔNG decorate/decodePiiOnRead: người không đọc được hồ sơ này chỉ nhận đúng vài trường giao
+    // dịch vừa ghi, không kèm CCCD/số tài khoản/lương. Xem chú thích ở coPhamViDocPersonnel.
+    return { id: rec.id, paidAt: rec.paidAt, paidById: rec.paidById, payment: rec.paidAt ? "Đã thanh toán" : "Chưa thanh toán", hasPaymentProof: !!newProof };
+  }
   const refMap = await buildProjectRef([rec.projectCode]);
   return { ...decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap), hasPaymentProof: !!newProof };
 }
@@ -261,11 +298,13 @@ export async function writeAccountingNote(req: Request) { return writeNoteField(
 export async function writeNote(req: Request) { return writeNoteField(req, "note", "personnel.note"); }
 async function writeNoteField(req: Request, field: "accountingNote" | "note", action: string) {
   const id = (req.params as any).id;
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, accountingNote: true, note: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, accountingNote: true, note: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  const coQuyenDoc = coPhamViDocPersonnel(req, before);
   const value = oneFieldValue(req);
   const rec = await prisma.personnelRecord.update({ where: { id }, data: { [field]: value }, include: ownerSelect, omit: { paymentProof: true } });
   await audit(req, action, { resource: "personnel", resourceId: id, before: { [field]: before[field] }, after: { [field]: value } });
+  if (!coQuyenDoc) return { id: rec.id, [field]: (rec as any)[field] };   // xem chú thích ở coPhamViDocPersonnel
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }
@@ -274,8 +313,9 @@ async function writeNoteField(req: Request, field: "accountingNote" | "note", ac
 export async function markConfirm(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ (confirmedAt/confirmedById) để ghi before/after vào audit — thao tác ký/xác-nhận cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, confirmedAt: true, confirmedById: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, confirmedAt: true, confirmedById: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
+  const coQuyenDoc = coPhamViDocPersonnel(req, before);
   const confirmed = (req.body as any).confirmed as boolean;
   const rec = await prisma.personnelRecord.update({
     where: { id },
@@ -287,6 +327,10 @@ export async function markConfirm(req: Request) {
     before: { confirmedAt: before.confirmedAt, confirmedById: before.confirmedById },
     after: { confirmedAt: rec.confirmedAt, confirmedById: rec.confirmedById },
   });
+  if (!coQuyenDoc) {
+    // Xem chú thích ở coPhamViDocPersonnel.
+    return { id: rec.id, confirmedAt: rec.confirmedAt, confirmedById: rec.confirmedById, confirmed: rec.confirmedAt ? "Đã ký" : null };
+  }
   const refMap = await buildProjectRef([rec.projectCode]);
   return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
 }

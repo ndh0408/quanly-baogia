@@ -315,6 +315,14 @@ export async function resetMfa(req: Request) {
     data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], mfaLastStep: null },
   });
   revokeSession(id, "mfa_reset");
+  // `revokeSession` Ở TRÊN CHỈ BẮN MỘT SỰ KIỆN SSE — nó gợi ý client tự đăng xuất, KHÔNG huỷ gì ở
+  // server. Docblock hàm này hứa "Huỷ luôn phiên đang mở", nhưng thiếu đúng hai dòng làm điều đó
+  // thật sự (đã có sẵn, cùng nơi 2 nhánh khác của file này dùng — dòng ~250 và ~261). Không có nó:
+  // kẻ đang giữ phiên/thiết bị của nạn nhân (đúng mô hình đe doạ "mất điện thoại" mà chức năng này
+  // sinh ra để phục vụ) tiếp tục dùng được phiên cũ sau khi admin tưởng đã "gỡ MFA hộ" xong — MFA
+  // vừa tắt không hề làm phiên đang mở hết hạn, và refresh token cũ vẫn cấp access token mới được.
+  await revokeAllForUser(id);
+  await destroyAllSessions(id);
   await audit(req, "user.mfa.reset", { resource: "user", resourceId: id, before: { mfaEnabled: true } });
   return { ok: true, username: user.username };
 }
