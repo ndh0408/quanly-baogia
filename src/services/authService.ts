@@ -122,7 +122,19 @@ export function sendPasswordReset(req: Request) {
     // luôn trả 200 để chống dò tài khoản, nên họ ngồi chờ một email không bao giờ tới. Đường tự
     // phục hồi duy nhất hỏng theo đúng cách khó nhận ra nhất.
     const user = await findLoginUser(email);
-    if (!user || !user.active) return;
+    if (!user) return;
+    // TÀI KHOẢN CHƯA KÍCH HOẠT VẪN ĐƯỢC CẤP LIÊN KẾT.
+    //
+    // Trước 2026-09-07 nhánh này là `if (!user || !user.active) return;`. Mà endpoint LUÔN trả 200
+    // (chống dò tài khoản), nên người được mời — lời mời đã hết hạn, chưa từng đặt mật khẩu — bấm
+    // "Quên mật khẩu", thấy báo thành công, rồi ngồi chờ một email KHÔNG BAO GIỜ TỚI. Không còn
+    // đường nào tự thoát: đăng nhập thì nhận 401 chung chung, quên mật khẩu thì im lặng; phải nhờ
+    // admin bấm "Gửi lại lời mời". Đo được trên production: minhhuy.gianguyen@gmail.com kẹt đúng
+    // như vậy từ 22/06.
+    //
+    // Vá được vì HAI luồng vốn dùng CHUNG hạ tầng: cùng cột `inviteTokenHash`, cùng trang
+    // `/#/onboard?token=`, và `acceptInvite` đã tự bật `active: true` + xoá khoá. Chỉ khác câu chữ.
+    const chuaKichHoat = !user.active;
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
       where: { id: user.id },
@@ -131,21 +143,38 @@ export function sendPasswordReset(req: Request) {
     // Link base comes from configuration only — Origin/Host headers are
     // client-controlled and would allow reset-link poisoning (ATO).
     const url = `${config.APP_BASE_URL}/#/onboard?token=${token}`;
-    await sendEmail({
+    const nhan = chuaKichHoat
+      ? { subject: "Kích hoạt tài khoản – Báo Giá Gia Nguyễn", nut: "Kích hoạt tài khoản",
+          html: "Tài khoản của bạn <b>chưa được kích hoạt</b>. Nhấn nút bên dưới để đặt mật khẩu và bắt đầu dùng hệ thống Quản lý Báo Giá – Gia Nguyễn.",
+          text: "Tài khoản của bạn chưa được kích hoạt. Mở liên kết bên dưới để đặt mật khẩu và bắt đầu dùng hệ thống Quản lý Báo Giá – Gia Nguyễn" }
+      : { subject: "Đặt lại mật khẩu – Báo Giá Gia Nguyễn", nut: "Đặt lại mật khẩu",
+          html: "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới.",
+          text: "Bạn vừa yêu cầu đặt lại mật khẩu cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để tạo mật khẩu mới" };
+    const gui = await sendEmail({
       to: user.email || email,
-      subject: "Đặt lại mật khẩu – Báo Giá Gia Nguyễn",
-      text: `Chào ${user.displayName || ""},\n\nBạn vừa yêu cầu đặt lại mật khẩu cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để tạo mật khẩu mới (hết hạn sau 2 giờ):\n${url}\n\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`,
+      subject: nhan.subject,
+      text: `Chào ${user.displayName || ""},\n\n${nhan.text} (hết hạn sau 2 giờ):\n${url}\n\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`,
       html: brandedEmailHtml({
         name: user.displayName,
         paragraphs: [
-          { html: "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới." },
+          { html: nhan.html },
           "Nếu không phải bạn yêu cầu, hãy bỏ qua email này — mật khẩu hiện tại vẫn an toàn.",
         ],
-        button: { label: "Đặt lại mật khẩu", url },
+        button: { label: nhan.nut, url },
         note: { html: "⏳ Liên kết hết hạn sau <b>2 giờ</b>." },
       } as any),
     } as any);
-    await audit(req, "password.forgot", { resource: "user", resourceId: user.id });
+    // KHÔNG ĐƯỢC VỨT KẾT QUẢ GỬI. Response đã trả 200 từ trước (chống dò tài khoản), nên đây là
+    // NƠI DUY NHẤT còn biết thư có đi hay không. Không ghi lại thì khi người dùng bảo "tôi không
+    // nhận được thư" sẽ không có gì để tra — đúng cảnh vừa xảy ra với thư mời trên production.
+    const loiGui = (gui as { error?: string } | null)?.error;
+    const boQua = (gui as { skipped?: boolean } | null)?.skipped;
+    if (loiGui) logger.error({ err: loiGui, to: user.email || email, chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
+    else if (boQua) logger.warn({ to: user.email || email }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
+    await audit(req, "password.forgot", {
+      resource: "user", resourceId: user.id,
+      after: { chuaKichHoat, emailSent: !loiGui && !boQua, emailError: loiGui ?? null },
+    });
   })().catch((e) => logger.error({ err: e.message }, "forgot-password background task failed"));
 }
 

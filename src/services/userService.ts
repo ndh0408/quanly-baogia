@@ -152,7 +152,10 @@ export async function inviteUser(req: Request) {
   const url = inviteLink(token);
   const mail = await sendInviteEmail(email, displayName, url);
   await audit(req, "user.invite", { resource: "user", resourceId: user.id, after: { email, role } });
-  return { user, inviteUrl: url, emailSent: !mail.skipped && !mail.error };
+  // Trả LÝ DO thật, không chỉ true/false: "chưa cấu hình SMTP" và "SMTP từ chối mật khẩu" là hai
+  // việc khác nhau, cần sửa ở hai chỗ khác nhau. Gộp làm một là đẩy admin đi tìm nhầm chỗ (đúng
+  // chuyện đã xảy ra: Gmail trả 535 BadCredentials mà giao diện báo "email chưa được cấu hình").
+  return { user, inviteUrl: url, emailSent: !mail.skipped && !mail.error, emailSkipped: !!mail.skipped, emailError: mail.error ?? null };
 }
 
 // Re-send an invite (new token) for a still-pending user.
@@ -170,7 +173,7 @@ export async function resendInvite(req: Request) {
   const url = inviteLink(token);
   const mail = await sendInviteEmail(u.email, u.displayName, url);
   await audit(req, "user.invite.resend", { resource: "user", resourceId: u.id });
-  return { inviteUrl: url, emailSent: !mail.skipped && !mail.error };
+  return { inviteUrl: url, emailSent: !mail.skipped && !mail.error, emailSkipped: !!mail.skipped, emailError: mail.error ?? null };
 }
 
 export async function createUser(req: Request) {

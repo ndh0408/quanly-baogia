@@ -84,4 +84,29 @@ describe.runIf(dbAvailable)("quên mật khẩu — không phân biệt hoa/thư
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { inviteTokenHash: true } });
     expect(u.inviteTokenHash).toBeNull();
   });
+
+  // ── NGÕ CỤT ĐÃ VÁ (2026-09-07) ────────────────────────────────────────────────────────────
+  // Trước đây `sendPasswordReset` có nhánh `if (!user || !user.active) return;`. Endpoint LUÔN trả
+  // 200 (chống dò tài khoản), nên người được mời — lời mời hết hạn, chưa từng đặt mật khẩu — bấm
+  // "Quên mật khẩu", thấy báo thành công, rồi ngồi chờ một email KHÔNG BAO GIỜ TỚI. Không còn
+  // đường nào tự thoát, phải nhờ admin. Đo được trên production: một tài khoản kẹt đúng thế 2,5 tháng.
+  it("tài khoản CHƯA KÍCH HOẠT vẫn được cấp token — không còn ngõ cụt", async () => {
+    const u = await prisma.user.create({
+      data: { username: `${TAG}na`, email: `${TAG}.chuakichhoat@example.vn`, displayName: "Chua Kich Hoat",
+              passwordHash: bcrypt.hashSync("Abc12345", 4), active: false,
+              // lời mời ĐÃ HẾT HẠN — đúng trạng thái kẹt trên production
+              inviteTokenHash: null, inviteExpiresAt: new Date(Date.now() - 24 * 3600 * 1000) },
+    });
+    try {
+      sendPasswordReset({ body: { email: `${TAG}.chuakichhoat@example.vn` }, headers: {}, ip: "127.0.0.1" });
+      expect(await doiCapToken(u.id)).toBeTruthy();
+      // và hạn phải được ĐẨY VỀ TƯƠNG LAI, nếu không token vừa cấp đã chết ngay lúc sinh ra.
+      const sau = await prisma.user.findUnique({ where: { id: u.id }, select: { inviteExpiresAt: true } });
+      expect(sau.inviteExpiresAt.getTime()).toBeGreaterThan(Date.now());
+    } finally {
+      await prisma.auditEvent.deleteMany({ where: { actorId: u.id } }).catch(() => {});
+      await prisma.user.delete({ where: { id: u.id }, includeDeleted: true }).catch(() => {});
+    }
+  });
+
 });

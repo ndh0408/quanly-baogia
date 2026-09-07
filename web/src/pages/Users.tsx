@@ -371,9 +371,21 @@ function InviteResultModal({ result, onClose }: { result: InviteResult; onClose:
       <div className="modal modal-sm" role="dialog" aria-modal="true" aria-label="Đã tạo lời mời" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><h3>Đã tạo lời mời</h3><button className="x" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
+          {/* NÓI ĐÚNG LÝ DO. "Chưa cấu hình SMTP" và "SMTP từ chối" phải sửa ở hai chỗ khác nhau;
+              gộp làm một là đẩy admin đi tìm nhầm chỗ — đúng chuyện đã xảy ra khi Gmail trả
+              535 BadCredentials mà hộp thoại này vẫn báo "email chưa được cấu hình". */}
           <p style={{ marginTop: 0 }}>{result.emailSent
             ? <>Đã gửi email lời mời tới <b>{result.user.email}</b>.</>
-            : <>Email chưa được cấu hình trên hệ thống — hãy gửi <b>liên kết mời</b> này cho nhân viên:</>}</p>
+            : result.emailSkipped
+              ? <>Hệ thống <b>chưa cấu hình email</b> (thiếu <code>SMTP_HOST</code>) — hãy gửi <b>liên kết mời</b> này cho nhân viên:</>
+              : <><b>Gửi email thất bại</b> — hãy gửi <b>liên kết mời</b> này cho nhân viên:</>}</p>
+          {!result.emailSent && !result.emailSkipped && result.emailError && (
+            <p className="muted" style={{ margin: "0 0 8px", fontSize: 12.5, wordBreak: "break-word" }}>
+              Máy chủ thư báo: <code>{result.emailError}</code>
+              {/^535|BadCredentials|Username and Password not accepted/i.test(result.emailError) &&
+                <> — Gmail chỉ nhận <b>Mật khẩu ứng dụng</b> 16 ký tự (bật Xác minh 2 bước rồi tạo), không nhận mật khẩu Gmail thường. Sửa <code>SMTP_PASS</code> trên máy chủ.</>}
+            </p>
+          )}
           <div className="copy-row" style={{ marginTop: 8 }}>
             <input ref={ref} value={result.inviteUrl} readOnly aria-label="Liên kết mời" />
             <button className="btn" type="button" onClick={copy}>Sao chép</button>

@@ -75,6 +75,21 @@ describe("cả hai đường xuất phải DÙNG CHUNG công thức đó", () =>
       .not.toMatch(/replace\(\/\[\^A-Za-z0-9_-\]/);
   });
 
+  // ── THƯ RƠI MÀ SỔ VIỆC VẪN XANH ────────────────────────────────────────────────────────────
+  // `sendEmail` CỐ Ý không ném (nó trả `{error}`) để chỗ gọi đồng bộ tự quyết. Nhưng ở HÀNG ĐỢI,
+  // "resolve" nghĩa là BullMQ đánh dấu job THÀNH CÔNG và KHÔNG BAO GIỜ thử lại. Đo được trên
+  // production 2026-09-07: Gmail trả 535 BadCredentials cho mọi thư mời, không một lần thử lại.
+  it("worker.ts: job gửi email phải NÉM khi hỏng, nếu không BullMQ coi là thành công", () => {
+    const src = boChuThich(doc("src/worker.ts"));
+    const i = src.indexOf('"send"');
+    expect(i, "không tìm thấy handler job email").toBeGreaterThan(-1);
+    const than = src.slice(i, i + 400);
+    expect(than, "handler phải kiểm `.error` của sendEmail rồi ném — trả về êm là mất hẳn retry")
+      .toMatch(/[.]error[\s\S]*throw/);
+    expect(than, "không được trả thẳng sendEmail(...) — nó không bao giờ ném")
+      .not.toMatch(/"send":\s*async\s*\([^)]*\)\s*=>\s*sendEmail\(/);
+  });
+
   it("worker.ts (nền) TRUYỀN filename vào presignDownload, và cũng qua tenFileXuat", () => {
     const src = boChuThich(doc("src/worker.ts"));
     const goi = [...src.matchAll(/presignDownload\([^)]*\)/g)].map((m) => m[0]);

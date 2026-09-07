@@ -73,7 +73,7 @@ export type User = {
   effectivePermissions?: string[]; // quyền HIỆU LỰC (để pre-fill ma trận)
   permCustom?: boolean;            // đã tùy biến quyền riêng (khác mặc định role)
 };
-export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean };
+export type InviteResult = { user: { email: string }; inviteUrl: string; emailSent: boolean; emailSkipped?: boolean; emailError?: string | null };
 
 // Nhật ký hoạt động (Audit — increment 3).
 export type AuditEntry = { id: string; createdAt: string; action: string; resource: string; resourceId?: string | null; actor?: { displayName?: string; username?: string } | null; targetLabel?: string | null; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null };
@@ -429,7 +429,7 @@ export const api = {
   listUsers: () => req<User[]>("/users"),
   inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; permissions?: string[] }) =>
     req<InviteResult>("/users/invite", { method: "POST", body: JSON.stringify(data) }),
-  resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean }>(`/users/${id}/resend-invite`, { method: "POST" }),
+  resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean; emailSkipped?: boolean; emailError?: string | null }>(`/users/${id}/resend-invite`, { method: "POST" }),
   updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: "DELETE" }),
   // Nhật ký hoạt động (increment 3) — gate audit:view (Shell nav + server).

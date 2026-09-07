@@ -289,7 +289,15 @@ export const processors = {
     }),
   },
   [QUEUES.EMAIL]: {
-    "send": async (job: any) => sendEmail(job.data),
+    // NÉM khi gửi hỏng — KHÔNG được trả về êm. `sendEmail` cố ý không ném (nó trả `{error}`) để
+    // chỗ gọi đồng bộ tự quyết; nhưng ở hàng đợi, "resolve" nghĩa là BullMQ đánh dấu job THÀNH
+    // CÔNG và KHÔNG BAO GIỜ thử lại — thư rơi mà sổ việc vẫn xanh. Đo được trên production
+    // 2026-09-07: Gmail trả 535 BadCredentials cho mọi thư mời, không lần thử lại nào.
+    "send": async (job: any) => {
+      const r = await sendEmail(job.data);
+      if (r && (r as { error?: string }).error) throw new Error(`gửi email thất bại: ${(r as { error?: string }).error}`);
+      return r;
+    },
   },
   [QUEUES.WEBHOOK]: {
     "deliver": async (job: any) => {
