@@ -9,11 +9,10 @@ import { prisma } from "../db.js";
 import { logger } from "../logger.js";
 import { computeQuoteTotals } from "../money.js";
 
-/** Dựng "base" mã dự án y như client codeLabel() để mã sản xuất khớp tuyệt đối. */
-export function codeLabel(q: { projectCode?: string | null; quoteNumber?: string | null; projectVersion?: number | null }): string {
-  const c = q.projectCode || q.quoteNumber || "";
-  return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c;
-}
+// `codeLabel` + `sheetCode` sống ở src/quoteCode.ts (thuần, không Prisma) và được re-export ở đây
+// để mọi nơi đang `import ... from "./projectRef.js"` không phải đổi.
+export { codeLabel, sheetCode, soMa } from "../quoteCode.js";
+import { codeLabel, sheetCode, soMa } from "../quoteCode.js";
 
 export type ProjectRef = {
   salesContractNo: string | null;     // Số HĐ bán    ← QuoteSheet.invoiceNo
@@ -70,7 +69,7 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
       sheets: {
         orderBy: { order: "asc" },
         select: {
-          id: true, order: true, name: true,
+          id: true, order: true, name: true, codeNo: true,
           signedAt: true, invoiceNo: true, paidAt: true, poNumber: true,
           // subtotal materialized lúc save (= computeQuoteTotals.sheetTotals) → đường NHANH: đọc
           // thẳng cột, KHÔNG kéo items. Cùng nguồn số với trang Quản lý dự án (listProjects), nên
@@ -91,19 +90,18 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
   const cho: Cho[] = [];
   const canTinhLai = new Set<number>();
   for (const q of quotes) {
-    const base = codeLabel(q);
     // Báo giá không có sheet → coi như 1 dòng dùng subtotal tổng (giống admin.js fallback).
     const sheets = q.sheets.length ? q.sheets : [{ id: -1, subtotal: null, groupSubtotal: false, poNumber: null, invoiceNo: null, signedAt: null, paidAt: null } as any];
-    const multi = sheets.length > 1;
     sheets.forEach((sh: any, i: number) => {
-      const code = base + (multi ? `_${i + 1}` : "");
+      const code = sheetCode(q, soMa(sh, i), sheets.length);
       if (!wanted.has(code)) return; // chỉ giữ mã đang cần — khớp đúng 1 mã sản xuất
       cho.push({ code, quoteSubtotal: q.subtotal, sh });
       // Cột `QuoteSheet.subtotal` được thêm bởi migration 20260625000003 với NOT NULL DEFAULT 0 ⇒
       // MỌI sheet lưu TRƯỚC ngày đó mang 0 cho tới khi chạy prisma/backfill-sheet-subtotal.mjs.
-      // buildProjectRef chỉ đọc báo giá "converted", mà converted là BẤT BIẾN (canEdit trả false)
-      // nên nhóm dữ liệu đó KHÔNG BAO GIỜ được lưu lại để cột được ghi — tin cột là hiện 0 đ vĩnh
-      // viễn ở cột TIỀN trang Nhân sự. Vì vậy 0 KHÔNG được coi là số đã biết: kéo items của RIÊNG
+      // buildProjectRef chỉ đọc báo giá "converted". Từ 2026-09-07 "converted" KHÔNG còn bất
+      // biến (canEdit khoá theo HOÁ ĐƠN, không theo trạng thái) nên cột CÓ THỂ được ghi lại — nhưng
+      // chỉ khi ai đó bấm Lưu, mà báo giá đã chốt thì hiếm khi mở lại. Vẫn phải giữ đường lùi:
+      // tin cột là hiện 0 đ ở cột TIỀN trang Nhân sự. Vì vậy 0 KHÔNG coi là số đã biết: kéo items của RIÊNG
       // sheet đó và tính lại. Sheet rỗng thật sự cũng ra 0 nên đường lùi không thể làm sai số đúng.
       if (sh.id > 0 && !(Number(sh.subtotal) > 0)) canTinhLai.add(sh.id);
     });

@@ -87,7 +87,7 @@ describe.runIf(dbAvailable)("buildProjectRef — nguồn tiền cột HỒNG tra
     await taoBaoGia(MA_KHOP, [{ subtotal: "1500000", items: [{ qty: "2", price: "500000" }, { qty: "1", price: "500000" }] }]);
     // Cột khác items nhưng KHÁC 0 → chính sách: tin cột (đúng con số trang Quản lý dự án đang hiện).
     await taoBaoGia(MA_LECH, [{ subtotal: "777000", items: [{ qty: "1", price: "1000000" }] }]);
-    // Nhiều sheet → hậu tố _1/_2; sheet 1 chưa backfill, sheet 2 đã có số.
+    // Nhiều sheet → hậu tố _01/_02 (hai chữ số, chốt 2026-09-07); sheet 1 chưa backfill, sheet 2 đã có số.
     await taoBaoGia(MA_DOI, [
       { subtotal: "0", items: [{ qty: "1", price: "999999" }] },
       { subtotal: "222000", items: [{ qty: "1", price: "888888" }] },
@@ -144,9 +144,9 @@ describe.runIf(dbAvailable)("buildProjectRef — nguồn tiền cột HỒNG tra
   });
 
   it("nhiều sheet: sheet chưa backfill tự tính lại, sheet đã có số giữ nguyên", async () => {
-    const ref = await buildProjectRef([`${MA_DOI}_1`, `${MA_DOI}_2`]);
-    expect(ref.get(`${MA_DOI}_1`).preTaxAmount).toBe(999_999);
-    expect(ref.get(`${MA_DOI}_2`).preTaxAmount).toBe(222_000);
+    const ref = await buildProjectRef([`${MA_DOI}_01`, `${MA_DOI}_02`]);
+    expect(ref.get(`${MA_DOI}_01`).preTaxAmount).toBe(999_999);
+    expect(ref.get(`${MA_DOI}_02`).preTaxAmount).toBe(222_000);
   });
 
   it("nhánh dự phòng dùng ĐÚNG computeQuoteTotals (hệ số nhóm, bỏ dòng section)", async () => {

@@ -287,8 +287,8 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
             <label className="full"><span>Email cá nhân <b className="req">*</b></span>
               <input type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
-            <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá của họ sẽ là FE_A26_001…)</em></span>
-              <input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
+            <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: báo giá của họ năm nay là FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span>
+              <input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={displayName.trim() || "tài khoản mới"} />
         </div>
@@ -341,7 +341,7 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
             <label className="full"><span>Tên đăng nhập</span><input value={user.username} disabled /></label>
             <label className="full"><span>Họ tên</span><input ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
             <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
-            <label className="full"><span>Mã dự án <em className="unit">(vd FE_A26 — báo giá user này tạo sẽ là FE_A26_001…)</em></span><input value={projectCode} placeholder="VD: FE_A26" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
+            <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={user.displayName || user.username} />
         </div>

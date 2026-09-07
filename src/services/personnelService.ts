@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
-import { buildProjectRef, computeTax, codeLabel, type ProjectRef } from "./projectRef.js";
+import { buildProjectRef, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
@@ -107,17 +107,15 @@ export async function listProjects(req: Request) {
       quoteNumber: true, projectCode: true, projectVersion: true, title: true,
       company: { select: { name: true } },
       createdBy: { select: { displayName: true } },
-      sheets: { orderBy: { order: "asc" }, select: { id: true, name: true } },
+      sheets: { orderBy: { order: "asc" }, select: { id: true, name: true, codeNo: true } },
     },
   });
   const data: Array<Record<string, string>> = [];
   for (const qt of quotes) {
-    const base = codeLabel(qt);
     const sheets = qt.sheets.length ? qt.sheets : [{ id: -1, name: "" } as any];
-    const multi = sheets.length > 1;
     sheets.forEach((sh: any, i: number) => {
       data.push({
-        projectCode: base + (multi ? `_${i + 1}` : ""),   // = mã sản xuất (khớp tra cứu cột HĐ)
+        projectCode: sheetCode(qt, soMa(sh, i), sheets.length),   // = mã sản xuất (khớp tra cứu cột HĐ)
         projectName: qt.title || "",                       // Tên dự án
         accountName: qt.createdBy?.displayName || "",       // Account (người tạo báo giá)
         company: qt.company?.name || "",                   // CTY

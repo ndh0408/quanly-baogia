@@ -42,11 +42,10 @@ export const shortTitle = (t: string) => {
   return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s;
 };
 
-/* Mã dự án hiển thị: projectCode (fallback quoteNumber) + _v2… khi có phiên bản. */
-export const codeLabel = (q: { projectCode?: string | null; quoteNumber?: string; projectVersion?: number | null }) => {
-  const c = q.projectCode || q.quoteNumber || "";
-  return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c;
-};
+/* Mã dự án hiển thị + mã theo từng sheet — RE-EXPORT từ nguồn dùng chung, KHÔNG chép lại.
+   Bản chép tay ở đây trước kia là bản sao thứ hai của cùng một quy tắc; hai bản trôi khỏi nhau
+   là hai trang hiện hai mã khác nhau cho cùng một sheet. */
+export { codeLabel, sheetCode, soMa } from "./quoteMath";
 
 export const fmtDateTime = (v?: string | null) => {
   if (!v) return "";

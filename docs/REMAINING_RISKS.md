@@ -1000,7 +1000,7 @@ chung rồi báo trong `src/services/quoteService.ts`.
 
 ## Logo khách hàng định dạng .webp vẫn KHÔNG hiện trong file Excel
 
-`src/validators.ts:132` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
+`src/validators.ts:139` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
 `data:image/webp`, còn `insertCustomerLogo` (`src/excel.ts`) chỉ nhúng được
 png/jpeg/gif. Đợt này **chỉ vá phần tệ nhất**: ô C3 nay được xoá trước khi hàm
 `return`, nên file gửi khách không còn in dòng hướng dẫn "logo cty khách hàng"

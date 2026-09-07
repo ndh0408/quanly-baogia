@@ -13,9 +13,20 @@ describe("quoteUtils (extracted pure helpers)", () => {
     it("admin can edit a non-terminal quote", () => {
       expect(canEdit({ status: "approved", createdById: 9, members: [] }, admin)).toBe(true);
     });
-    it("nobody can edit a converted/lost quote", () => {
-      expect(canEdit({ status: "converted", createdById: 1, members: [] }, admin)).toBe(false);
-      expect(canEdit({ status: "lost", createdById: 1, members: [] }, admin)).toBe(false);
+    // Mốc khoá sửa là HOÁ ĐƠN, KHÔNG phải "khách chốt" (chốt với chủ dự án 2026-09-07): sau khi
+    // khách chốt vẫn còn phải đổi hạng mục / giá thương lượng. Chỉ khi số hoá đơn đã ra chứng từ
+    // kế toán thì mới không được đụng nữa.
+    it("khách chốt / không chốt VẪN sửa được — trạng thái không còn là mốc khoá", () => {
+      expect(canEdit({ status: "converted", createdById: 1, members: [], sheets: [] }, admin)).toBe(true);
+      expect(canEdit({ status: "lost", createdById: 1, members: [], sheets: [] }, admin)).toBe(true);
+    });
+    it("đã có số hoá đơn ở BẤT KỲ trang nào → khoá với mọi người, kể cả admin", () => {
+      const coHD = { status: "converted", createdById: 1, members: [], sheets: [{ invoiceNo: null }, { invoiceNo: "HD-9" }] };
+      expect(canEdit(coHD, admin)).toBe(false);
+      expect(canEdit({ ...coHD, status: "draft" }, admin)).toBe(false);   // kể cả còn nháp
+    });
+    it("số hoá đơn RỖNG / toàn khoảng trắng không tính là đã xuất", () => {
+      expect(canEdit({ status: "draft", createdById: 1, members: [], sheets: [{ invoiceNo: "" }, { invoiceNo: "   " }] }, admin)).toBe(true);
     });
     it("a stranger cannot edit", () => {
       const stranger = { role: "manager", userId: 2 };

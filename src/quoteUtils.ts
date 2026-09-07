@@ -35,11 +35,25 @@ export function tenFileXuat(quoteNumber: string | null | undefined, quoteId: num
   return `BaoGia_${an}.${ext}`;
 }
 
+/**
+ * ĐÃ XUẤT HOÁ ĐƠN = có ÍT NHẤT một sheet mang số hoá đơn. Đây là mốc DUY NHẤT khoá việc sửa.
+ *
+ * `quote` phải được đọc KÈM `sheets.invoiceNo`; thiếu thì hàm trả false (coi như chưa xuất) —
+ * hướng NỚI, nên mọi đường ghi bắt buộc phải select cột đó (xem QUOTE_UPDATE_STATE_SELECT).
+ */
+export function daXuatHoaDon(quote: any): boolean {
+  return (quote?.sheets || []).some((s: any) => String(s?.invoiceNo ?? "").trim() !== "");
+}
+
 // Editing rule: holders of quote:update:all may edit anything; owners may edit
-// their own only while it's still draft/rejected. converted/lost are terminal
-// (immutable for everyone — duplicate to make a new revision instead).
+// their own only while it's still draft/rejected.
+//
+// KHÁCH CHỐT KHÔNG CÒN LÀ MỐC KHOÁ (chốt với chủ dự án 2026-09-07). Trước đây `converted`/`lost`
+// là BẤT BIẾN với mọi người, nhưng thực tế sau khi khách chốt vẫn phải sửa: đổi hạng mục, sửa
+// tên, cập nhật giá thương lượng. Mốc khoá đúng là lúc đã XUẤT HOÁ ĐƠN — từ đó con số đã đi ra
+// chứng từ kế toán, sửa là lệch sổ.
 export function canEdit(quote: any, session: { role?: string; userId?: number; permissions?: string[] }): boolean {
-  if (quote.status === "converted" || quote.status === "lost") return false;
+  if (daXuatHoaDon(quote)) return false;
   if (canOnQuote(session, "update", quote)) {
     // Người có quyền "gửi khách" (admin/account mặc định) sửa được mọi trạng thái; còn lại chỉ nháp/trả lại.
     if (can(session, PERMISSIONS.QUOTE_SEND)) return true;
@@ -93,6 +107,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
     orderBy: { order: "asc" },
     select: {
       id: true, name: true, order: true, groupSubtotal: true, discount: true,
+      invoiceNo: true,   // canEdit khoá theo HOÁ ĐƠN — thiếu cột này là khoá không bao giờ đóng
       items: {
         orderBy: { order: "asc" },
         select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
@@ -351,9 +366,33 @@ export const SHEET_CARRY_FIELDS = [
   "signedAt", "signedById", "signedByName",
   "invoiceNo", "paidAt", "poNumber", "hnInvoiceNo", "invoiceLink", "docSentAt", "docReturnedAt",
   "invoiceDate", "paymentMethod", "orderClosedAt", "invoiceYear", "invoiceCompany", "invoiceDesc", "invoiceNote",
+  // Số thứ tự mã sản xuất — ĐÓNG BĂNG. Lưu = xoá sheet rồi tạo lại, không bê sang là mỗi lần bấm
+  // Lưu lại cấp số mới và mã trên hoá đơn trỏ sang sheet khác.
+  "codeNo",
 ] as const;
 
+/**
+ * CẤP SỐ THỨ TỰ MÃ cho từng sheet của MỘT lượt lưu — `QuoteSheet.codeNo`.
+ *
+ * Luật: sheet ĐANG CÓ giữ nguyên số đã cấp (đọc từ `carry`, tức hàng CSDL vừa khoá trong
+ * transaction); sheet MỚI nhận số kế tiếp CHƯA AI DÙNG trong cùng báo giá.
+ *
+ * VÌ SAO KHÔNG DÙNG VỊ TRÍ: mã sản xuất "FP_A26_003_02" đi vào hoá đơn và vào
+ * `PersonnelRecord.projectCode`. Nếu số suy từ chỉ số mảng thì xoá sheet thứ 2 làm sheet thứ 3
+ * tụt xuống thành "_02" — một mã đã phát hành bỗng trỏ sang sheet khác, im lặng. Đóng băng số
+ * thì xoá 02 để lại 01 và 03, và sheet thêm mới là 04 chứ không tái dùng 02.
+ */
+function capSoMaSheet(sheets: any, carry?: (Record<string, any> | undefined)[]): number[] {
+  const ds: (number | null)[] = (sheets || []).map((_s: any, i: number) => {
+    const cu = carry?.[i]?.codeNo;
+    return Number.isFinite(Number(cu)) && Number(cu) > 0 ? Number(cu) : null;
+  });
+  let ke = Math.max(0, ...ds.filter((n): n is number => n != null)) + 1;
+  return ds.map((n) => (n != null ? n : ke++));
+}
+
 export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[]) {
+  const soMa = capSoMaSheet(sheets, carry);
   return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
@@ -365,6 +404,8 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Rec
     discount: sheetTotals?.[sIdx]?.discount ?? D(0),
     subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),   // ĐÃ trừ discount
     ...pickCarry(carry?.[sIdx]),
+    // SAU pickCarry: sheet đã có số thì giữ nguyên số đó, sheet mới nhận số chưa ai dùng.
+    codeNo: soMa[sIdx],
     items: {
       create: (s.items || []).map((it: any, iIdx: number) => ({
         order: it.order != null ? Number(it.order) : iIdx + 1,

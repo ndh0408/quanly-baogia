@@ -3,7 +3,7 @@
 //     `neutralizeFormula` như `setCell`, dù nó nhận `quote.fromContact/fromTitle/fromPhone`
 //     là chữ người dùng gõ tự do.
 //  2) `insertCustomerLogo` chỉ nhận png/jpeg/gif, nhưng validators + web CHO PHÉP webp
-//     (src/validators.ts:132). Gặp webp thì hàm `return` NGAY — trước cả bước xoá chữ mồi —
+//     (src/validators.ts:139). Gặp webp thì hàm `return` NGAY — trước cả bước xoá chữ mồi —
 //     nên ô C3 của mẫu CLF còn nguyên dòng "logo cty khách hàng" trong file gửi khách.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import ExcelJS from "exceljs";

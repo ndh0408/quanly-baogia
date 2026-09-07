@@ -124,7 +124,8 @@ model User {
   phone        String?
   title        String?
   senderName   String? // tên hiển thị làm "Người gửi" trên báo giá (nếu khác Họ tên đăng nhập)
-  projectCode  String? // prefix mã dự án của nhân viên (vd FE_A26) — báo giá họ tạo đánh FE_A26_001…
+  projectCode  String? // prefix mã dự án của nhân viên, CHỈ PHẦN CHỮ (vd FE_A) — năm do
+  // nextProjectCode tự thêm: báo giá họ tạo năm 2026 đánh FE_A26_001, sang 2027 là FE_A27_001.
   active       Boolean  @default(true)
   canSign      Boolean  @default(false) // được "Ký Chứng từ" dự án DO MÌNH TẠO ở trang Quản lý dự án (admin ký + thấy toàn bộ)
   // PHÂN QUYỀN PER-USER: tập quyền (key trong PERMISSIONS) tài khoản này được phép. TRỐNG = chưa tùy biến
@@ -509,7 +510,8 @@ model VenueItem {
 model Quote {
   id             Int         @id @default(autoincrement())
   quoteNumber    String      @unique
-  projectCode    String? // mã dự án theo nhân viên (FE_A26_001…); hiển thị trong app, KHÔNG vào Excel
+  projectCode    String? // mã dự án theo nhân viên (FE_A26_001…); KHÔNG chứa hậu tố sheet
+  // (_01/_02 dựng lúc hiển thị từ QuoteSheet.codeNo — xem src/quoteCode.ts)
   projectVersion Int         @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
   title          String
   toCompany      String // legacy free-text; kept for backwards compat
@@ -607,6 +609,16 @@ model QuoteSheet {
   name           String?
   groupSubtotal  Boolean       @default(false) // hiện tổng tiền theo từng nhóm A/B/C
   showImages     Boolean       @default(false) // BẬT cột "Hình ảnh" cho sheet này (ảnh mỗi hạng mục, xuất Excel)
+  // SỐ THỨ TỰ MÃ SẢN XUẤT của sheet, ĐÓNG BĂNG lúc cấp: mã hiện ra là
+  // `<mã báo giá>_<codeNo 2 chữ số>` (chỉ khi báo giá có >1 sheet), vd "FP_A26_003_02".
+  //
+  // VÌ SAO LƯU CHỨ KHÔNG SUY TỪ VỊ TRÍ: trước 2026-09-07 mã được dựng bằng `_${i+1}` theo chỉ số
+  // mảng ở 5 chỗ khác nhau. Xoá một sheet ở giữa (hoặc đổi thứ tự) làm mã của MỌI sheet phía sau
+  // dịch đi một — kể cả sheet đã xuất hoá đơn mang mã cũ. Đóng băng số này thì xoá sheet 2 để lại
+  // 01 và 03 (đúng: 03 vẫn là 03), còn sheet thêm mới nhận số kế tiếp chưa ai dùng.
+  // Lưu SỐ chứ không lưu cả chuỗi: chuỗi còn phụ thuộc `Quote.projectCode`/`projectVersion` và
+  // luật "1 sheet thì không có hậu tố" — lưu chuỗi là đóng băng luôn cả những thứ đó.
+  codeNo         Int? // null = dữ liệu cũ chưa cấp; đường đọc lùi về vị trí (xem src/quoteCode.ts)
   // Giảm giá RIÊNG của sheet này (VNĐ, luôn ≥ 0). Trừ vào tổng sheet TRƯỚC khi tính VAT:
   // Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền. `Quote.discount` = tổng cột này.
   discount       Decimal       @default(0) @db.Decimal(18, 2)

@@ -74,10 +74,10 @@ describe("buildProjectRef — đường lùi phải có trần BỘ NHỚ mà v�
     h.items = h.quotes[0].sheets.flatMap((sh) =>
       Array.from({ length: 3 }, (_, k) => dong(sh.id, k, sh.id)));
 
-    const ma = Array.from({ length: SO_SHEET }, (_, i) => `DA-2_${i + 1}`);
+    const ma = Array.from({ length: SO_SHEET }, (_, i) => `DA-2_${String(i + 1).padStart(2, "0")}`);
     const out = await buildProjectRef(ma);
     for (let i = 0; i < SO_SHEET; i++) {
-      expect(out.get(`DA-2_${i + 1}`).preTaxAmount,
+      expect(out.get(`DA-2_${String(i + 1).padStart(2, "0")}`).preTaxAmount,
         `sheet ${i + 1} rơi về 0 — bị vết cắt nuốt mất, và điều đó phụ thuộc các sheet đứng trước`)
         .toBe((i + 1) * 3);
     }
@@ -100,9 +100,9 @@ describe("buildProjectRef — đường lùi phải có trần BỘ NHỚ mà v�
       ...Array.from({ length: TRAN_CU }, (_, i) => dong(1, i, 1)),
       ...Array.from({ length: 10 }, (_, i) => dong(2, i, 1_000_000)),
     ];
-    const out = await buildProjectRef(["DA-5_1", "DA-5_2"]);
-    expect(out.get("DA-5_1").preTaxAmount).toBe(TRAN_CU);
-    expect(out.get("DA-5_2").preTaxAmount,
+    const out = await buildProjectRef(["DA-5_01", "DA-5_02"]);
+    expect(out.get("DA-5_01").preTaxAmount).toBe(TRAN_CU);
+    expect(out.get("DA-5_02").preTaxAmount,
       "hiện 0 đ cho một dự án CÓ dữ liệu, chỉ vì dự án khác trên cùng trang quá nhiều dòng")
       .toBe(10_000_000);
   }, 60_000);
@@ -117,7 +117,7 @@ describe("buildProjectRef — đường lùi phải có trần BỘ NHỚ mà v�
       })),
     }];
     h.items = h.quotes[0].sheets.flatMap((sh) => [dong(sh.id, 0, 1)]);
-    await buildProjectRef(Array.from({ length: SO_SHEET }, (_, i) => `DA-4_${i + 1}`));
+    await buildProjectRef(Array.from({ length: SO_SHEET }, (_, i) => `DA-4_${String(i + 1).padStart(2, "0")}`));
 
     expect(h.itemArgs.length, "vẫn nạp một phát → không có trần bộ nhớ nào").toBeGreaterThan(1);
     // KHÔNG được dùng `take`: cắt theo DÒNG là cách sinh ra đúng lỗi vừa gỡ.

@@ -13,7 +13,7 @@ export type Item = {
   formulas?: Record<string, string>; order?: number;
   images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
 };
-export type Sheet = { id?: number; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; discount?: number; order?: number; items: Item[]; extraTables?: unknown[] };
+export type Sheet = { id?: number; codeNo?: number | null; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; discount?: number; order?: number; items: Item[]; extraTables?: unknown[] };
 export type TemplateLayout = { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean };
 export type Template = { id: number; code?: string; name: string; companyId?: number; layout?: TemplateLayout };
 export type Company = { id: number; name: string; shortName?: string; address?: string };
@@ -147,3 +147,17 @@ export const blankSubSection = (): Item => ({ kind: "subsection", label: "", nam
 export const STATUS_LABEL: Record<string, string> = { draft: "Nháp", pending: "Chờ duyệt", approved: "Đã duyệt", rejected: "Bị từ chối", sent: "Đã gửi", converted: "Đã chốt", lost: "Không chốt" };
 export const statusLabel = (s: string) => STATUS_LABEL[s] || s || "—";
 export const codeLabel = (q: { projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string }) => { const c = q.projectCode || q.quoteNumber || ""; return q.projectVersion && q.projectVersion > 1 ? `${c}_v${q.projectVersion}` : c; };
+/**
+ * MÃ SẢN XUẤT CỦA MỘT SHEET = mã báo giá + hậu tố HAI CHỮ SỐ ("_01", "_02").
+ * `codeNo` là SỐ ĐÃ ĐÓNG BĂNG trong CSDL (`QuoteSheet.codeNo`), KHÔNG phải vị trí trong mảng —
+ * xoá sheet 02 thì 03 vẫn là 03. Báo giá MỘT sheet thì không có hậu tố.
+ * ⚠️ MIRROR của src/quoteCode.ts; tests/projectcode-parity.test.js khoá hai bản không được lệch.
+ */
+export function sheetCode(q: { projectCode?: string | null; projectVersion?: number | null; quoteNumber?: string }, codeNo: number, total: number) {
+  const base = codeLabel(q);
+  return total > 1 ? `${base}_${String(codeNo).padStart(2, "0")}` : base;
+}
+/** `codeNo` đã cấp, hoặc vị trí + 1 cho dữ liệu cũ chưa backfill. */
+export const soMa = (sh: { codeNo?: number | null } | null | undefined, i: number) =>
+  sh && sh.codeNo != null && sh.codeNo > 0 ? sh.codeNo : i + 1;
+

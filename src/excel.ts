@@ -1,3 +1,4 @@
+import { sheetCode, soMa } from "./quoteCode.js";
 import ExcelJS from "exceljs";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -334,7 +335,7 @@ function unmergeTotals(ws: any, cfg: any, lastItemRow: any) {
 
 /** Fill data for one sheet using its template config. Returns totals.
  *  sheetLabel: khi báo giá có NHIỀU sheet, tên sheet được nối vào tiêu đề ("… - Banner"). */
-function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, sheetLabel?: string) {
+function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, sheetLabel?: string, sheetIdx = 0, tongSheet = 1) {
   applyTemplateCleanup(ws, cfg);
 
   const c = cfg.cells;
@@ -399,7 +400,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     setCell(ws, c.title, clean(title));
   }
   if (c.quoteNumber) {
-    setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(quote.quoteNumber) : (quote.quoteNumber || ""));
+    // MÃ SẢN XUẤT CỦA CHÍNH SHEET NÀY, không phải số GN của cả báo giá: mỗi tab Excel mang mã
+    // riêng ("FP_A26_003_02") để khớp với trang Hoá đơn và với màn hình soạn.
+    const maSheet = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
+    setCell(ws, c.quoteNumber, c.quoteNumberFormat ? c.quoteNumberFormat(maSheet) : maSheet);
   }
   if (c.greeting) setCell(ws, c.greeting, quote.greeting || "");
 
@@ -1496,7 +1500,7 @@ export async function buildQuoteBuffer(quote: any) {
     const ws = wb.getWorksheet(cfg.sheetName) || wb.worksheets[0];
 
     // Tiêu đề từng sheet nối tên sheet ("… - Banner") — áp dụng CẢ khi chỉ 1 sheet.
-    const totals = fillSheetData(ws, cfg, quote, sheet, vatPct, (sheet.name || "").trim());
+    const totals = fillSheetData(ws, cfg, quote, sheet, vatPct, (sheet.name || "").trim(), idx, sheets.length);
     stampTemplateMarker(ws, tplCode);
 
     // Tên tab Excel: chỉ đánh số "N. …" khi báo giá có NHIỀU sheet (1 sheet giữ nguyên).

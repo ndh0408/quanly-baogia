@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, toInputDate, shortTitle, codeLabel, dash, Stat } from "../lib/format";
+import { fmtMoney, fmtDate, toInputDate, shortTitle, sheetCode, soMa, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
@@ -54,14 +54,12 @@ function buildRows(quotes: ProjectQuote[]): Row[] {
   const out: Row[] = [];
   for (const q of quotes) {
     if (q.status !== "converted") continue;   // hóa đơn chỉ theo dự án ĐÃ CHỐT
-    const base = codeLabel(q);
     const sheets = q.sheets && q.sheets.length ? q.sheets : [];
-    const multi = sheets.length > 1;
     sheets.forEach((sh, i) => {
       const baoGia = Number(sh.subtotal) || 0;
       const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
       out.push({
-        key: `${q.id}-${i}`, q, code: base + (multi ? `_${i + 1}` : ""), sheetId: sh.id || null,
+        key: `${q.id}-${i}`, q, code: sheetCode(q, soMa(sh, i), sheets.length), sheetId: sh.id || null,
         amount: baoGia + vat,
         invoiceDesc: sh.invoiceDesc || null, poNumber: sh.poNumber || null,
         invoiceCompany: sh.invoiceCompany || null, invoiceNo: sh.invoiceNo || null,

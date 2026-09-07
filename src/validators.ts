@@ -55,12 +55,18 @@ const title = z.string().max(120, "Chức danh tối đa 120 ký tự").trim().o
 // auto-appends the per-quote sequence _001, _002… (nextProjectCode). So the prefix must
 // NOT itself end in a sequence — otherwise you get FP_D26_001_001. Strip any trailing
 // _NNN the admin accidentally typed (repeat to undo a pasted already-allocated code).
+//
+// VÀ BỎ LUÔN HAI SỐ NĂM Ở CUỐI. `nextProjectCode` tự thêm năm hiện tại ("FP_A" → "FP_A26_001"),
+// nên một mã nhân viên tận cùng bằng 2 chữ số LUÔN LUÔN là năm gõ nhầm vào: để nguyên thì báo giá
+// ra "FP_A2626_001", và sang năm mới nó vẫn kẹt ở năm cũ. Đây chính là lỗi đã xảy ra trên
+// production (cả 5 nhân viên đều mang đuôi "26"), nên chặn ngay tại ô nhập để không tái diễn.
 const projectCode = z
   .string()
   .max(40, "Mã dự án tối đa 40 ký tự")
   .transform((s) => {
     let v = (s || "").trim();
     while (/_\d{3}$/.test(v)) v = v.replace(/_\d{3}$/, "");   // _NNN = the auto sequence (exactly 3 digits)
+    v = v.replace(/\d{2}$/, "");                              // YY = năm, do nextProjectCode thêm
     return v.length ? v : null;
   })
   .nullable()

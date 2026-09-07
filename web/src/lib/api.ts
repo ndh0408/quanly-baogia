@@ -96,7 +96,7 @@ export type QuoteListResult = { data: QuoteRow[]; meta: { total: number; page: n
 
 // Quản lý dự án (increment 9) — báo giá đã chốt, mỗi sheet 1 dòng theo dõi hoá đơn.
 export type ProjectSheet = {
-  id?: number; name?: string | null; subtotal?: number; hcm?: number; hanoi?: number; khach?: number; cty?: string | null;
+  id?: number; name?: string | null; codeNo?: number | null; subtotal?: number; hcm?: number; hanoi?: number; khach?: number; cty?: string | null;
   signedAt?: string | null; signedByName?: string | null; invoiceNo?: string | null; paidAt?: string | null;
   invStatus?: string; poNumber?: string | null; hnInvoiceNo?: string | null; invoiceLink?: string | null;
   docSentAt?: string | null; docReturnedAt?: string | null;

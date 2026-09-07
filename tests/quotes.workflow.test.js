@@ -251,11 +251,22 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       await prisma.quote.update({ where: { id: quoteId }, data: { status: "converted" } });
     });
 
-    it("REGRESSION: even admin cannot edit a converted quote", async () => {
+    // Khách chốt KHÔNG còn khoá việc sửa (chốt với chủ dự án 2026-09-07) — mốc khoá là HOÁ ĐƠN.
+    it("báo giá đã chốt VẪN sửa được khi chưa xuất hoá đơn", async () => {
       const res = await admin.put(`/api/quotes/${quoteId}`).send({
         sheets: [{ templateId: template.id, items: [{ name: "Sửa giá deal đã chốt", quantity: 1, unitPrice: 9_999_999 }] }],
       });
+      expect(res.status).toBe(200);
+    });
+
+    it("có số hoá đơn rồi thì khoá — kể cả admin", async () => {
+      const sh = await prisma.quoteSheet.findFirst({ where: { quoteId }, orderBy: { order: "asc" }, select: { id: true } });
+      await prisma.quoteSheet.update({ where: { id: sh.id }, data: { invoiceNo: "HD-WF-1" } });
+      const res = await admin.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, items: [{ name: "Sửa sau khi đã xuất hoá đơn", quantity: 1, unitPrice: 1 }] }],
+      });
       expect(res.status).toBe(403);
+      await prisma.quoteSheet.update({ where: { id: sh.id }, data: { invoiceNo: null } });   // trả lại cho bài sau
     });
 
     it("converted quote cannot be deleted", async () => {

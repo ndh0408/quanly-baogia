@@ -253,8 +253,11 @@ describe.runIf(dbAvailable)("§16 lưu tăng dần ở mức trang (INCREMENTAL_
     await moi(phien, q.id);
     const truoc = await idTrang(q.id);
     // Ghi thẳng trạng thái do MÁY CHỦ giữ (client không đặt được qua đường lưu thường).
-    await prisma.quoteSheet.update({ where: { id: truoc[0] }, data: { custStatus: "approved", invoiceNo: "HD-001" } });
-    await prisma.quoteSheet.update({ where: { id: truoc[2] }, data: { custStatus: "rejected", invoiceNo: "HD-003" } });
+    // CỐ Ý KHÔNG đặt `invoiceNo` ở đây: từ 2026-09-07 số hoá đơn KHOÁ hẳn việc sửa báo giá
+    // (canEdit/daXuatHoaDon), nên đặt vào là lần Lưu dưới đây nhận 403 và bài test không còn
+    // kiểm được cái nó sinh ra để kiểm. Ca "đã xuất hoá đơn thì khoá" có bài riêng ngay dưới.
+    await prisma.quoteSheet.update({ where: { id: truoc[0] }, data: { custStatus: "approved", poNumber: "PO-001" } });
+    await prisma.quoteSheet.update({ where: { id: truoc[2] }, data: { custStatus: "rejected", poNumber: "PO-003" } });
 
     const p = await napPayload(phien, q.id);
     p.sheets[0].items[0].notes = "sửa để trang 1 phải tạo lại";
@@ -263,14 +266,33 @@ describe.runIf(dbAvailable)("§16 lưu tăng dần ở mức trang (INCREMENTAL_
     const sau = await prisma.quoteSheet.findMany({
       where: { quoteId: q.id },
       orderBy: { order: "asc" },
-      select: { id: true, custStatus: true, invoiceNo: true },
+      select: { id: true, custStatus: true, poNumber: true, codeNo: true },
     });
     expect(sau[0].id).not.toBe(truoc[0]);         // tạo lại
     expect(sau[0].custStatus).toBe("approved");    // …mà vẫn bê được trạng thái
-    expect(sau[0].invoiceNo).toBe("HD-001");
+    expect(sau[0].poNumber).toBe("PO-001");
     expect(sau[2].id).toBe(truoc[2]);              // giữ nguyên
     expect(sau[2].custStatus).toBe("rejected");
-    expect(sau[2].invoiceNo).toBe("HD-003");
+    expect(sau[2].poNumber).toBe("PO-003");
+    // Số thứ tự mã sản xuất phải ĐÓNG BĂNG qua lượt xoá-tạo-lại, kể cả trang bị tạo lại.
+    expect(sau.map((x) => x.codeNo)).toEqual([1, 2, 3]);
+  });
+
+  // Mốc khoá sửa là HOÁ ĐƠN, không phải "khách chốt" (chốt với chủ dự án 2026-09-07).
+  it("đã xuất hoá đơn → mọi lần Lưu bị chặn 403", async () => {
+    const phien = await dangNhap(appBat);
+    const q = await taoBaoGia("bat-khoa-hd");
+    await moi(phien, q.id);
+    const truoc = await idTrang(q.id);
+    const p = await napPayload(phien, q.id);
+    p.sheets[0].items[0].notes = "sửa lần 1 — chưa có hoá đơn, phải lưu được";
+    await luu(phien, q.id, p);                                   // luu() tự khẳng định 200
+
+    await prisma.quoteSheet.update({ where: { id: truoc[1] }, data: { invoiceNo: "HD-777" } });
+    const p2 = await napPayload(phien, q.id);
+    p2.sheets[0].items[0].notes = "sửa lần 2 — đã có hoá đơn, phải bị chặn";
+    const r = await phien.agent.put(`/api/quotes/${q.id}`).set("Origin", ORIGIN).set("x-csrf-token", phien.ma).send(p2);
+    expect(r.status, JSON.stringify(r.body).slice(0, 200)).toBe(403);
   });
 
   it("CỜ BẬT: đảo thứ tự trang — hai trang đổi chỗ bị tạo lại, trang ĐỨNG YÊN vẫn giữ id", async () => {

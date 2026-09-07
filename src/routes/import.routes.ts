@@ -11,6 +11,7 @@ import multer from "multer";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { canOnQuote, requirePermission, can, PERMISSIONS as P } from "../permissions.js";
+import { daXuatHoaDon } from "../quoteUtils.js";
 import { createLimiter } from "../rateLimit.js";
 import { Worker } from "node:worker_threads";
 import { inspectXlsx } from "../zipSafety.js";
@@ -231,16 +232,17 @@ router.post(
     if (quoteId) {
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
-        select: { id: true, createdById: true, status: true, members: { select: { id: true } } },
+        select: { id: true, createdById: true, status: true, members: { select: { id: true } },
+                  sheets: { select: { invoiceNo: true } } },   // daXuatHoaDon đọc cột này
       });
       if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
       if (!canOnQuote(req.session, "update", quote)) {
         return res.status(403).json({ error: "Bạn không có quyền sửa báo giá này" });
       }
-      // Đã chốt / không chốt là TRẠNG THÁI CUỐI — khớp `editable` ở editor + canEdit ở service.
-      const terminal = quote.status === "converted" || quote.status === "lost";
-      if (terminal && !can(req.session, P.QUOTE_SEND)) {
-        return res.status(409).json({ error: "Báo giá đã chốt/không chốt — không nhập đè được nữa." });
+      // ĐÃ XUẤT HOÁ ĐƠN mới là mốc khoá — khớp `canEdit`/`daXuatHoaDon` ở service và `editable`
+      // ở editor. Khách chốt rồi vẫn nhập đè được (chốt với chủ dự án 2026-09-07).
+      if (daXuatHoaDon(quote)) {
+        return res.status(409).json({ error: "Báo giá đã xuất hoá đơn — không nhập đè được nữa." });
       }
     }
 

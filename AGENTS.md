@@ -32,7 +32,12 @@ người đang dùng ngay lúc này.
 
 - **Đừng đề xuất multi-tenancy/RLS.** Hai công ty dùng chung nhân viên và chung
   dữ liệu; `Company` chỉ là nhãn pháp nhân để xuất hoá đơn.
-- **`projectCode` CỐ Ý free-format** theo từng người — đừng chuẩn hoá, đừng thêm FK.
+- **`projectCode` của nhân viên chỉ là PHẦN CHỮ** (`FP_A`) — **năm do hệ thống tự thêm**
+  (`nextProjectCode`: `FP_A` + 2026 → `FP_A26_001`, bộ đếm khoá theo (prefix, năm) nên tự
+  reset về `001` mỗi đầu năm). Ô nhập tự bóc `_NNN` và 2 số năm ở cuối. Vẫn **không có FK**
+  và không có ràng buộc unique — hai người đặt trùng prefix là hợp lệ và sẽ DÙNG CHUNG bộ đếm.
+  (Trước 2026-09-07 cột này free-format hoàn toàn và quản trị gõ tay cả năm vào — xem
+  migration `20260907120000_project_code_year`.)
 - **zod v4**: cú pháp v3 (`invalid_type_error`, `errorMap`) bị **bỏ qua âm thầm**,
   làm lọt thông báo tiếng Anh ra giao diện. Dùng tham số `error`.
 - **Tiền dùng `Decimal`**, không dùng float JS. Đổi sang `Number` là mất chính xác.

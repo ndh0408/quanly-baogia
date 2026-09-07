@@ -325,10 +325,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const isMember = (q.members || []).some((m) => m.id === me.id);
   const hasPerm = (p: string) => me.permissions.includes(p) || me.permissions.includes(p.replace(/:own$/, ":all"));
   const canUpdate = hasPerm("quote:update:all") || q.createdById === me.id || isMember || isNew;
-  // báo giá ĐÃ CHỐT/KHÔNG-CHỐT là TERMINAL — server (canEdit) chặn 403 → khoá UI cho khớp, tránh "sửa được" giả.
-  const isTerminal = q.status === "converted" || q.status === "lost";
+  // KHOÁ THEO HOÁ ĐƠN, KHÔNG THEO "khách chốt" (khớp canEdit + daXuatHoaDon ở server).
+  // Khách chốt xong vẫn phải sửa được (đổi hạng mục, giá thương lượng); chỉ khi ĐÃ XUẤT HOÁ ĐƠN
+  // thì con số mới đi ra chứng từ kế toán và không được đụng nữa.
+  const daXuatHoaDon = sheets.some((s) => String((s as { invoiceNo?: string | null }).invoiceNo ?? "").trim() !== "");
   // Ai có quyền "gửi khách" (admin/account) sửa được mọi trạng thái; còn lại chỉ nháp/trả-lại (khớp canEdit server).
-  const editable = isNew || (!isTerminal && canUpdate && (hasPerm("quote:send") || q.status === "draft" || q.status === "rejected"));
+  const editable = isNew || (!daXuatHoaDon && canUpdate && (hasPerm("quote:send") || q.status === "draft" || q.status === "rejected"));
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
 
@@ -577,7 +579,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
         <input className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!editable} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
-        <div className="quote-no">(Số: {q.quoteNumber || ""})</div>
+        {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
+            trang Hoá đơn. Số GN vẫn hiện mờ bên dưới: nó mới là khoá tra cứu thật của hệ thống
+            (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
+        <div className="quote-no">(Số: {M.sheetCode(q, M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
+        {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
         <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!editable} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
         {/* sheet tabs */}

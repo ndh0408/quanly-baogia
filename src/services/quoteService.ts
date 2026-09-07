@@ -9,7 +9,7 @@ import type { Request } from "express";
 import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, D } from "../money.js";
-import { nextQuoteNumber, nextProjectCode, syncQuoteCounter } from "../quoteNumber.js";
+import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
@@ -301,6 +301,18 @@ export async function createQuote(req: Request) {
       break;
     } catch (e) {
       const code = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : undefined;
+      // ĐỤNG MÃ DỰ ÁN, KHÔNG PHẢI SỐ BÁO GIÁ. `@@unique([projectCode, projectVersion])` cũng ném
+      // P2002, và khối dưới chỉ biết đẩy bộ đếm SỐ BÁO GIÁ — lượt sau sinh LẠI ĐÚNG mã dự án cũ,
+      // bốn lượt y hệt rồi 409 với nội dung sai hẳn. Ghi nhận mã vừa bị chiếm vào bộ đếm mã dự án
+      // (NGOÀI transaction, GREATEST nên không lùi) để lượt sau nhảy sang mã kế tiếp.
+      const dungMaDuAn = code === "P2002"
+        && String((e as Prisma.PrismaClientKnownRequestError)?.meta?.target ?? "").includes("projectCode");
+      if (dungMaDuAn && attempt < 3) {
+        if (draft.projectCode && creator?.projectCode) {
+          await syncProjectCodeCounter(String(draft.projectCode), creator.projectCode).catch(() => {});
+        }
+        continue;
+      }
       if (code === "P2002" && !b.quoteNumber && attempt < 3) {
         // Thử lại KHÔNG tự khỏi: transaction hỏng cuốn theo cả lần tăng bộ đếm (chủ ý "không đốt
         // số" của nextQuoteNumber), nên lượt sau sinh LẠI ĐÚNG số vừa đụng — bốn lượt cùng một số,
@@ -853,7 +865,7 @@ export async function listProjects(req: Request) {
           // giá, và người mở trang gồm cả kế toán (`invoice:page`).
           // LƯU Ý số block TOAST KHÔNG giảm: máy chủ vẫn phải giải TOAST cột đó để cắt `paidProof`.
           // Thứ bỏ đi là phần đi QUA DÂY và nằm trong heap của Node.
-          id: true, order: true, name: true, subtotal: true,
+          id: true, order: true, name: true, subtotal: true, codeNo: true,
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
           invoiceDate: true, paymentMethod: true, orderClosedAt: true, invoiceYear: true, invoiceCompany: true, invoiceDesc: true, invoiceNote: true,
@@ -895,6 +907,7 @@ export async function listProjects(req: Request) {
         return {
           id: sh.id,
           name: sh.name || null,
+          codeNo: sh.codeNo ?? null,      // số thứ tự mã ĐÃ ĐÓNG BĂNG (trang Dự án / Hoá đơn dựng mã từ đây)
           subtotal: Number(sh.subtotal),
           hcm: sumCat("hcm"),
           hanoi: sumCat("hanoi"),

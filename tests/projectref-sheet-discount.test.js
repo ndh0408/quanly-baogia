@@ -48,9 +48,9 @@ describe("buildProjectRef — Discount ở mức sheet", () => {
     }];
     h.items = [dong(101, 0, 30_000_000), dong(102, 0, 70_000_000)];
 
-    const out = await buildProjectRef(["DA-9_1", "DA-9_2"]);
-    expect(out.get("DA-9_1").preTaxAmount).toBe(0);            // khớp cột → khớp trang Dự án
-    expect(out.get("DA-9_2").preTaxAmount).toBe(70_000_000);
+    const out = await buildProjectRef(["DA-9_01", "DA-9_02"]);
+    expect(out.get("DA-9_01").preTaxAmount).toBe(0);            // khớp cột → khớp trang Dự án
+    expect(out.get("DA-9_02").preTaxAmount).toBe(70_000_000);
   });
 
   it("sheet giảm giá MỘT PHẦN mà cột chưa backfill → tính lại vẫn phải TRỪ discount", async () => {

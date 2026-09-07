@@ -1,3 +1,4 @@
+import { codeLabel, sheetCode, soMa } from "./quoteCode.js";
 import PDFDocument from "pdfkit";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -119,7 +120,10 @@ export async function renderQuotePdf(quote: any) {
     doc.moveDown(0.5);
 
     doc.font("body").fontSize(10);
-    doc.text(`Số: ${quote.quoteNumber}`, { continued: true });
+    // Mã dự án là thứ khách đối chiếu; số GN đi kèm vì nó mới là khoá tra cứu nội bộ.
+    const maBaoGia = codeLabel(quote) || quote.quoteNumber || "";
+    const soGN = quote.quoteNumber && quote.quoteNumber !== maBaoGia ? ` · ${quote.quoteNumber}` : "";
+    doc.text(`Số: ${maBaoGia}${soGN}`, { continued: true });
     doc.text(`     Ngày: ${new Date(quote.quoteDate).toLocaleDateString("vi-VN")}`, { align: "right" });
     doc.moveDown(0.5);
 
@@ -156,9 +160,12 @@ export async function renderQuotePdf(quote: any) {
     const tt = pdfTotals(quote);
     let runningIdx = 0;
     (quote.sheets || []).forEach((sh: any, i: number) => {
-      if (sh.name) {
+      // Mỗi sheet mang MÃ RIÊNG (chỉ khi báo giá có >1 sheet) — đúng chuỗi bên trang Hoá đơn.
+      const maSheet = sheetCode(quote, soMa(sh, i), (quote.sheets || []).length);
+      const nhan = [sh.name, maSheet && maSheet !== maBaoGia ? maSheet : ""].filter(Boolean).join(" — ");
+      if (nhan) {
         doc.moveDown(0.3);
-        doc.font("bold").fontSize(11).text(sh.name);
+        doc.font("bold").fontSize(11).text(nhan);
       }
       drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name });
       runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
