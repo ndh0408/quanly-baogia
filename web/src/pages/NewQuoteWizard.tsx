@@ -104,7 +104,13 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <p className="hint">Báo giá sẽ dùng letterhead / mẫu của công ty này.</p>
             <div className="pick-grid">
               {companies.map((c) => (
-                <div key={c.id} className={`pick-card ${c.id === companyId ? "selected" : ""}`} role="button" tabIndex={0} aria-pressed={c.id === companyId} onClick={() => pickCompany(c.id)}>
+                // BÀN PHÍM: role="button" một mình không đủ — <div> không tự nhận Enter/Space như
+                // <button> thật. Thiếu onKeyDown thì Tab dừng được ở đây nhưng bấm phím không chọn
+                // được gì, và bước 2 bắt buộc ≥1 mẫu nên cả wizard kẹt cứng với người chỉ dùng bàn
+                // phím. Cùng mẫu đã dùng ở QuoteEditor.tsx (sheet-tab).
+                <div key={c.id} className={`pick-card ${c.id === companyId ? "selected" : ""}`} role="button" tabIndex={0} aria-pressed={c.id === companyId}
+                  onClick={() => pickCompany(c.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickCompany(c.id); } }}>
                   <div className="pc-title">{c.shortName || c.name}</div>
                   <div className="pc-sub">{c.name}</div>
                   <div className="pc-sub">{templates.filter((t) => t.companyId === c.id).length} mẫu</div>
@@ -121,7 +127,9 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <p className="hint">Chọn 1 hoặc nhiều mẫu. Có thể đổi thứ tự / thêm sheet sau.</p>
             <div className="pick-grid">
               {coTemplates.map((t) => { const desc = tplDesc(t); return (
-                <div key={t.id} className={`pick-card ${templateIds.includes(t.id) ? "selected" : ""}`} role="button" tabIndex={0} aria-pressed={templateIds.includes(t.id)} onClick={() => toggleTpl(t.id)}>
+                <div key={t.id} className={`pick-card ${templateIds.includes(t.id) ? "selected" : ""}`} role="button" tabIndex={0} aria-pressed={templateIds.includes(t.id)}
+                  onClick={() => toggleTpl(t.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTpl(t.id); } }}>
                   <div className="pc-title">{t.name}</div>
                   {/* Mô tả thân thiện theo cấu trúc mẫu — thay codename nội bộ (unibenfood/marico_decor…). */}
                   {desc && <div className="pc-sub">{desc}</div>}
@@ -132,7 +140,9 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             {templateIds.length > 0 && (
               <div className="sheet-chips">
                 {templateIds.map((id, i) => { const t = coTemplates.find((x) => x.id === id); return (
-                  <span key={id} className="sheet-chip">{i + 1}. {t?.name} <span className="x" role="button" aria-label="Bỏ mẫu" onClick={() => toggleTpl(id)}>✕</span></span>); })}
+                  <span key={id} className="sheet-chip">{i + 1}. {t?.name} <span className="x" role="button" tabIndex={0} aria-label="Bỏ mẫu"
+                    onClick={() => toggleTpl(id)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTpl(id); } }}>✕</span></span>); })}
               </div>
             )}
           </>
@@ -204,7 +214,12 @@ function CustomerPicker({ onClose, onPick }: { onClose: () => void; onPick: (c: 
             : rows.length === 0 ? <p className="muted">Không có khách hàng khớp.</p> : (
               <div className="list-wrap">
                 <table className="list-table"><tbody>{rows.map((c) => (
-                  <tr key={c.id} className="qrow" style={{ cursor: "pointer" }} onClick={() => onPick(c)}>
+                  // Bàn phím: cùng mẫu hàng bảng của Projects.tsx (tabIndex + Enter) — trước đây
+                  // hàng này chỉ nghe onClick nên người dùng chỉ bàn phím không mở được, kẹt luôn
+                  // wizard vì bước 3 bắt buộc chọn khách hàng.
+                  <tr key={c.id} className="qrow" style={{ cursor: "pointer" }} tabIndex={0}
+                    onClick={() => onPick(c)}
+                    onKeyDown={(e) => { if (e.key === "Enter") onPick(c); }}>
                     <td><strong>{c.code}</strong></td><td>{c.name}</td><td className="muted">{c.phone || ""}</td>
                   </tr>))}</tbody></table>
               </div>
