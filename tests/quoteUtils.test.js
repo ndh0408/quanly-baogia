@@ -5,6 +5,7 @@ import {
   buildSheetsCreate,
   sanitizeExtraTables,
   extraTableSum,
+  tenFileXuat,
 } from "../src/quoteUtils.js";
 
 describe("quoteUtils (extracted pure helpers)", () => {
@@ -152,5 +153,59 @@ describe("quoteUtils (extracted pure helpers)", () => {
       expect(out[2].name).toBe("Bảng 3 trống");
       expect(out[2].items).toHaveLength(0);         // sheet trống vẫn còn
     });
+  });
+});
+
+// ── GIỜ VIỆT NAM ─────────────────────────────────────────────────────────────────────────────
+// Container production chạy UTC. Không quy về giờ VN thì bảy tiếng đầu ngày 1/1 (00:00–07:00 giờ
+// VN) vẫn nằm ở 31/12 năm cũ theo UTC ⇒ mã cấp trong khoảng đó mang NĂM CŨ và rơi vào ô bộ đếm
+// của năm cũ (số nhảy tiếp thay vì reset về 001).
+describe("vnTime — mốc thời gian theo giờ Việt Nam", async () => {
+  const { namVN, namNganVN, thangNgayVN } = await import("../src/vnTime.js");
+
+  it("00:30 ngày 1/1/2027 giờ VN (= 17:30 ngày 31/12/2026 UTC) phải ra NĂM 2027", () => {
+    const d = new Date("2026-12-31T17:30:00Z");
+    expect(namVN(d)).toBe(2027);
+    expect(namNganVN(d)).toBe("27");
+    expect(thangNgayVN(d)).toBe("0101");
+  });
+
+  it("23:30 ngày 31/12/2026 giờ VN (= 16:30 cùng ngày UTC) vẫn là NĂM 2026", () => {
+    const d = new Date("2026-12-31T16:30:00Z");
+    expect(namVN(d)).toBe(2026);
+    expect(thangNgayVN(d)).toBe("1231");
+  });
+
+  it("MMDD là THÁNG rồi tới NGÀY, đệm 0", () => {
+    expect(thangNgayVN(new Date("2026-09-07T03:00:00Z"))).toBe("0907");
+  });
+});
+
+// ── TÊN FILE TẢI VỀ ──────────────────────────────────────────────────────────────────────────
+// Hình dạng chốt với chủ dự án 2026-09-07: BaoGia_<Mã KH>_<tiêu đề rút gọn>_<MMDD>.<ext>
+describe("tenFileXuat", () => {
+  const q = { quoteNumber: "GN26003", title: "BẢNG BÁO GIÁ - Décor Premiere Phim Thỏ Ơi", shortTitle: "Décor Premiere", customer: { code: "KH26001" } };
+
+  it("ghép mã KH + tiêu đề rút gọn + ngày tải, BỎ DẤU tiếng Việt", () => {
+    expect(tenFileXuat(q, 7, "xlsx")).toMatch(/^BaoGia_KH26001_Decor_Premiere_\d{4}\.xlsx$/);
+  });
+
+  it("không có tiêu đề rút gọn → lùi về tiêu đề chính", () => {
+    // Dấu "-" trong tiêu đề được GIỮ (mã báo giá thật có dạng BG-2026-001, không được băm nát).
+    expect(tenFileXuat({ ...q, shortTitle: "  " }, 7, "pdf")).toMatch(/^BaoGia_KH26001_BANG_BAO_GIA_-_Decor_Premiere/);
+  });
+
+  it("không có cả mã KH lẫn tiêu đề → lùi về số báo giá (hành vi cũ)", () => {
+    expect(tenFileXuat({ quoteNumber: "GN26003", customer: null, title: null, shortTitle: null }, 7, "xlsx")).toBe("BaoGia_GN26003.xlsx");
+  });
+
+  it("chỗ gọi CŨ truyền thẳng chuỗi vẫn chạy như trước", () => {
+    expect(tenFileXuat("GN26003", 7, "xlsx")).toBe("BaoGia_GN26003.xlsx");
+    expect(tenFileXuat(null, 42, "pdf")).toBe("BaoGia_quote-42.pdf");
+  });
+
+  it("tên ra CHỈ còn [A-Za-z0-9_.-] — nó đi thẳng vào header Content-Disposition", () => {
+    const ten = tenFileXuat({ customer: { code: 'K"H;1' }, shortTitle: 'a/b\\c"d\r\nX-Injected: 1', quoteNumber: "X" }, 1, "xlsx");
+    expect(ten).toMatch(/^[A-Za-z0-9_.-]+$/);
   });
 });

@@ -198,6 +198,7 @@ export const processors = {
         where: { id: quoteId },
         include: {
           company: true,
+          customer: { select: { code: true } },   // tenFileXuat cần mã KH
           sheets: {
             orderBy: { order: "asc" },
             include: { template: true, items: { orderBy: { order: "asc" } } },
@@ -223,7 +224,7 @@ export const processors = {
         // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
         // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
         // chính lượt vá gộp hàm đã xoá.)
-        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "xlsx") });
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote, quoteId, "xlsx") });
         return { key, url, size: buf.length };
       }
       // KHÔNG nhét file vào giá trị trả về của job.
@@ -243,6 +244,7 @@ export const processors = {
         where: { id: quoteId },
         include: {
           company: true,
+          customer: { select: { code: true } },   // tenFileXuat cần mã KH
           sheets: { orderBy: { order: "asc" }, include: { template: true, items: { orderBy: { order: "asc" } } } },
         },
       });
@@ -271,7 +273,7 @@ export const processors = {
         // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
         // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
         // chính lượt vá gộp hàm đã xoá.)
-        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote.quoteNumber, quoteId, "pdf") });
+        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote, quoteId, "pdf") });
         return { key, url, size: buf.length };
       }
       // KHÔNG nhét file vào giá trị trả về của job.

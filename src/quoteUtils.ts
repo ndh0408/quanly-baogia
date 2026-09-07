@@ -6,6 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, qtyRound } from "./money.js";
+import { thangNgayVN } from "./vnTime.js";
 import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 
 // Data-URL ảnh base64 hợp lệ TOÀN CHUỖI (không chỉ tiền tố). Dùng để lọc cột "Hình ảnh" khi lưu —
@@ -28,10 +29,43 @@ const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/
  *
  * Bộ lọc `[^A-Za-z0-9_-]` cố ý HẸP: tên này đi thẳng vào một header HTTP
  * (`Content-Disposition: attachment; filename="..."`), nên mọi dấu nháy, chấm phẩy và dấu gạch
- * chéo phải chết ở đây. Đừng nới ra để "giữ dấu tiếng Việt" — đó là chèn header.
+ * chéo phải chết ở đây. Đừng nới ra để "giữ dấu tiếng Việt" — đó là chèn header. Dấu tiếng Việt
+ * được BỎ DẤU trước (NFD) chứ không bị thay bằng "_", nên "Décor" ra "Decor" chứ không "D_cor".
+ *
+ * HÌNH DẠNG (chốt với chủ dự án 2026-09-07):
+ *     BaoGia_<Mã khách hàng>_<tiêu đề rút gọn>_<MMDD>.xlsx
+ * Tiêu đề rút gọn trống thì lùi về tiêu đề chính. MMDD là NGÀY TẢI theo giờ Việt Nam (src/vnTime.ts)
+ * — TÍNH LẠI MỖI LẦN TẢI, nên tải lại hôm sau ra tên mới, không đè lên bản đã tải.
+ * Không có mã khách hàng lẫn tiêu đề thì lùi hẳn về số báo giá như trước.
  */
-export function tenFileXuat(quoteNumber: string | null | undefined, quoteId: number | string, ext: "xlsx" | "pdf"): string {
-  const an = String(quoteNumber || `quote-${quoteId}`).replace(/[^A-Za-z0-9_-]/g, "_");
+export type QuoteTenFile = {
+  quoteNumber?: string | null;
+  shortTitle?: string | null;
+  title?: string | null;
+  customer?: { code?: string | null } | null;
+  customerCode?: string | null;
+};
+
+/** Bỏ dấu tiếng Việt rồi gom mọi ký tự lạ thành "_" — chuỗi ra CHỈ còn [A-Za-z0-9_-]. */
+function anToanTenFile(s: string | null | undefined, tran = 60): string {
+  return String(s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d").replace(/Đ/g, "D")
+    // GIỮ "-" và "_": mã báo giá thật có dạng "BG-2026-001" và băm nát nó là người dùng
+    // không nhận ra file của mình nữa (tests/x1-xuat-nen-nguoi-dung-khong-ket.test.js chốt).
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, tran)
+    .replace(/_+$/g, "");
+}
+
+export function tenFileXuat(q: QuoteTenFile | string | null | undefined, quoteId: number | string, ext: "xlsx" | "pdf"): string {
+  // Client cũ / chỗ gọi cũ truyền thẳng chuỗi quoteNumber — vẫn cho ra tên như trước.
+  const quote: QuoteTenFile = typeof q === "string" || q == null ? { quoteNumber: q as string | null } : q;
+  const maKH = anToanTenFile(quote.customerCode ?? quote.customer?.code, 20);
+  const ten = anToanTenFile(quote.shortTitle?.trim() || quote.title, 60);
+  const phan = [maKH, ten, thangNgayVN()].filter(Boolean);
+  const an = phan.length > 1 ? phan.join("_") : anToanTenFile(quote.quoteNumber) || `quote-${quoteId}`;
   return `BaoGia_${an}.${ext}`;
 }
 

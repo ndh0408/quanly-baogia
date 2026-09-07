@@ -1,4 +1,5 @@
 import { prisma } from "./db.js";
+import { namVN, namNganVN } from "./vnTime.js";
 
 /**
  * Atomically allocate the next quote number for the given prefix and year.
@@ -11,7 +12,7 @@ import { prisma } from "./db.js";
  * legacy "GN90" style short while avoiding rollover surprises across decades.
  */
 export async function nextQuoteNumber(prefix = "GN", db = prisma) {
-  const year = new Date().getFullYear();
+  const year = namVN();   // NĂM THEO GIỜ VN (xem src/vnTime.ts)
   // upsert + atomic increment in one round-trip. When a `db` (tx) is passed the
   // counter increment shares the caller's transaction, so a failed quote.create
   // rolls back the number too (no "burned"/gap numbers).
@@ -20,7 +21,7 @@ export async function nextQuoteNumber(prefix = "GN", db = prisma) {
     create: { prefix, year, value: 1 },
     update: { value: { increment: 1 } },
   });
-  const yy = String(year).slice(-2);
+  const yy = namNganVN();
   const nn = String(counter.value).padStart(3, "0");
   return `${prefix}${yy}${nn}`;
 }
@@ -38,7 +39,7 @@ export async function nextQuoteNumber(prefix = "GN", db = prisma) {
  * theo khoá mới TỪ CHÍNH các mã đã cấp, xem SQL ở đó.)
  */
 export async function nextProjectCode(prefix: string, db = prisma) {
-  const year = new Date().getFullYear();
+  const year = namVN();   // NĂM THEO GIỜ VN (xem src/vnTime.ts)
   const counter = await db.quoteCounter.upsert({
     where: { prefix_year: { prefix, year } },
     create: { prefix, year, value: 1 },
@@ -65,8 +66,8 @@ export async function nextProjectCode(prefix: string, db = prisma) {
  * Gọi TRONG cùng transaction với `quote.create` để lần tạo hỏng cũng cuốn theo bộ đếm.
  */
 export async function syncQuoteCounter(quoteNumber: string, prefix = "GN", db = prisma) {
-  const year = new Date().getFullYear();
-  const yy = String(year).slice(-2);
+  const year = namVN();   // NĂM THEO GIỜ VN
+  const yy = namNganVN();
   const khuon = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${yy}(\\d{1,9})$`);
   const m = khuon.exec(String(quoteNumber ?? ""));
   if (!m) return;

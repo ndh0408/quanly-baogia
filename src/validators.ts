@@ -330,6 +330,8 @@ export const QuoteCreateSchema = z.object({
   customerId: z.coerce.number().int().positive().optional().nullable(),
   managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
   greeting: z.string().max(2000).optional(),
+  // Tiêu đề RÚT GỌN (tuỳ chọn) — dùng đặt tên file tải về; trống thì lùi về `title`.
+  shortTitle: z.string().max(120, "Tiêu đề rút gọn tối đa 120 ký tự").optional().nullable(),
   vatPercent: z.coerce.number({ error: "VAT phải là số" }).min(0, "VAT không được nhỏ hơn 0%").max(100, "VAT không được vượt quá 100%").default(8),
   // GIỮ ĐỂ KHÔNG VỠ CLIENT CŨ, NHƯNG BỊ BỎ QUA: giảm giá nay ở mức SHEET (`sheets[].discount`)
   // và `Quote.discount` là Σ các sheet, do computeQuoteTotals tính. Xem src/money.ts.
@@ -349,6 +351,7 @@ export const QuoteCreateSchema = z.object({
 export const QuoteUpdateSchema = z.object({
   quoteNumber: z.string().max(40).optional(),
   title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự").optional(),
+  shortTitle: z.string().max(120, "Tiêu đề rút gọn tối đa 120 ký tự").optional().nullable(),
   toCompany: z.string().min(1, "Vui lòng nhập tên khách hàng").max(500, "Tên khách hàng tối đa 500 ký tự").optional(),
   toContact: z.string().max(200).optional().nullable(),
   toEmail: z.string().max(200).optional().nullable(),

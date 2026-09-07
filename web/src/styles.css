@@ -3325,6 +3325,25 @@ textarea[aria-invalid="true"] {
 
 /* Khối tổng của SHEET đang mở (ngay dưới lưới) — đúng những hàng in ra Excel của sheet đó:
    Cộng / Discount / Tổng cộng / VAT / Thành tiền. Neo phải, hẹp, để không tranh chỗ với lưới. */
+/* Tiêu đề rút gọn — hàng phụ, nhỏ, canh giữa dưới tiêu đề chính. */
+.short-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+  font-size: 12.5px;
+}
+.short-title-input {
+  width: min(360px, 60%);
+  padding: 3px 8px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+  text-align: center;
+}
+
 /* Số GN dưới mã sản xuất — mờ và nhỏ: nó là khoá tra cứu nội bộ, không phải mã gửi khách. */
 .quote-no-gn {
   margin-top: -4px;

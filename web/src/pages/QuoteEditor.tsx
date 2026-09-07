@@ -579,6 +579,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
         <input className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!editable} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
+        {/* Tiêu đề RÚT GỌN — chỉ dùng đặt tên file tải về, KHÔNG in vào Excel/PDF gửi khách. */}
+        <div className="short-title-row">
+          <span className="muted">Tiêu đề rút gọn</span>
+          <input className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
+            disabled={!editable} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
+            onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
+        </div>
         {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
             trang Hoá đơn. Số GN vẫn hiện mờ bên dưới: nó mới là khoá tra cứu thật của hệ thống
             (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}

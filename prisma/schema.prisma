@@ -514,6 +514,9 @@ model Quote {
   // (_01/_02 dựng lúc hiển thị từ QuoteSheet.codeNo — xem src/quoteCode.ts)
   projectVersion Int         @default(1) // bản gửi khách v1/v2/v3 (cùng projectCode, mỗi bản 1 quoteNumber riêng)
   title          String
+  // Tiêu đề RÚT GỌN do người dùng tự đặt (tuỳ chọn) — dùng đặt TÊN FILE tải về và hiển thị
+  // gọn ở danh sách. Trống thì mọi nơi lùi về `title`.
+  shortTitle     String?
   toCompany      String // legacy free-text; kept for backwards compat
   toContact      String?
   toEmail        String? // recipient email for the "Kính gửi" block

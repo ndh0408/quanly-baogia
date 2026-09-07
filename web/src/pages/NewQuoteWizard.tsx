@@ -33,7 +33,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
   const [customer, setCustomer] = useState<{ id: number; code: string; name: string } | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [info, setInfo] = useState({
-    title: "", toCompany: "", toContact: "",
+    title: "", shortTitle: "", toCompany: "", toContact: "",
     fromContact: me.senderName || me.displayName || "", fromPhone: me.phone || "", fromTitle: me.title || "",
     fromAddress: "", vatPercent: 8, quoteDate: new Date().toISOString().slice(0, 10), customerLogo: "" as string,
   });
@@ -71,7 +71,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
     if (!info.toCompany.trim()) return toast("Nhập tên khách hàng", "error");
     const sheets = templateIds.map((tid) => { const t = templates.find((x) => x.id === tid); return { templateId: tid, name: t?.name || "Sheet", groupSubtotal: true, items: [{ kind: "item", name: "", detail: "", unit: "", quantity: 1, unitPrice: 0, days: null, notes: "" }] }; });
     const draft: QuoteFull = {
-      id: 0, _new: true, status: "draft", title: info.title, toCompany: info.toCompany, toContact: info.toContact,
+      id: 0, _new: true, status: "draft", title: info.title, shortTitle: info.shortTitle.trim() || null, toCompany: info.toCompany, toContact: info.toContact,
       fromContact: info.fromContact, fromPhone: info.fromPhone, fromTitle: info.fromTitle, fromAddress: info.fromAddress,
       vatPercent: Number(info.vatPercent) || 0, quoteDate: info.quoteDate, city: "TP. Hồ Chí Minh", discount: 0, showTotals: true,
       greeting: DEFAULT_GREETING, quoteNumber: "", companyId: companyId!, managerId, customerId: customer.id, customerCode: customer.code,
@@ -144,6 +144,10 @@ export function NewQuoteWizard({ me }: { me: Me }) {
             <p className="hint">Khách hàng, người gửi, VAT, ngày — và logo khách (chèn vào mẫu CLF).</p>
             <div className="form-grid">
               <label style={{ gridColumn: "1/-1" }}>Tiêu đề báo giá <span className="req">*</span><input value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
+              {/* Tiêu đề đầy đủ thường quá dài và đầy dấu để làm TÊN TỆP. Ô này là bản gọn do người
+                  dùng tự đặt; bỏ trống thì tên file lùi về tiêu đề chính. */}
+              <label style={{ gridColumn: "1/-1" }}>Tiêu đề rút gọn <em className="unit">(tuỳ chọn — dùng đặt tên file tải về)</em>
+                <input value={info.shortTitle} maxLength={120} placeholder="VD: Decor Premiere" onChange={(e) => set("shortTitle", e.target.value)} /></label>
               <label style={{ gridColumn: "1/-1" }}>Mã khách hàng <span className="req">*</span>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input value={customer ? `${customer.code} — ${customer.name}` : ""} placeholder="Chưa chọn — bấm nút bên phải" readOnly style={{ flex: 1 }} />

@@ -67,8 +67,10 @@ describe("cả hai đường xuất phải DÙNG CHUNG công thức đó", () =>
   // Chép tay lại là mở đường cho chúng lệch nhau lần nữa — đúng lỗi vừa vá.
   it("export.routes.ts (đồng bộ) gọi tenFileXuat, không tự dựng tên", () => {
     const src = boChuThich(doc("src/routes/export.routes.ts"));
-    expect(src).toMatch(/tenFileXuat\(quote\.quoteNumber, id, "xlsx"\)/);
-    expect(src).toMatch(/tenFileXuat\(quote\.quoteNumber, id, "pdf"\)/);
+    // Từ 2026-09-07 tên file cần CẢ mã khách hàng lẫn tiêu đề rút gọn, nên truyền nguyên
+    // `quote` thay vì mỗi `quote.quoteNumber`. Điều cần chốt vẫn y nguyên: route KHÔNG tự dựng tên.
+    expect(src).toMatch(/tenFileXuat\(quote, id, "xlsx"\)/);
+    expect(src).toMatch(/tenFileXuat\(quote, id, "pdf"\)/);
     expect(src, "chép tay lại công thức = mở đường cho hai đường lệch nhau lần nữa")
       .not.toMatch(/replace\(\/\[\^A-Za-z0-9_-\]/);
   });

@@ -116,7 +116,7 @@ export type EditorCompany = { id: number; name: string; shortName?: string; addr
 // không đồng nghĩa còn một cột Chi Tiết trên UI hay file Excel.
 export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; reserveDetail?: boolean; numberSubsections?: boolean } };
 export type QuoteFull = {
-  id: number; _new?: boolean; status: string; title?: string; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
+  id: number; _new?: boolean; status: string; title?: string; shortTitle?: string | null; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
   companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;
   greeting?: string; notes?: string; toCompany?: string; toContact?: string; toEmail?: string; toPhone?: string; toAddress?: string;
   fromContact?: string; fromTitle?: string; fromPhone?: string; fromAddress?: string; createdById?: number;

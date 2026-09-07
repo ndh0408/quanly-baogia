@@ -10,6 +10,7 @@ import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
+import { namVN, namNganVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
@@ -246,6 +247,7 @@ export async function createQuote(req: Request) {
   const creator = await prisma.user.findUnique({ where: { id: userId }, select: { projectCode: true } });
   const draft: Record<string, any> = {
     title: b.title,
+    shortTitle: b.shortTitle?.trim() || null,   // tuỳ chọn — dùng đặt tên file tải về
     toCompany: b.toCompany,
     toContact: b.toContact || null,
     toEmail: b.toEmail || null,
@@ -468,7 +470,7 @@ export async function updateQuote(req: Request) {
   for (const f of ["title", "toCompany", "fromContact", "fromAddress", "city", "greeting"]) {
     if (b[f] !== undefined && b[f] !== null) data[f] = b[f];
   }
-  for (const f of ["toContact", "toEmail", "toPhone", "toAddress", "fromPhone", "fromTitle", "notes"]) {
+  for (const f of ["toContact", "toEmail", "toPhone", "toAddress", "fromPhone", "fromTitle", "notes", "shortTitle"]) {
     if (b[f] !== undefined) data[f] = b[f] || null;
   }
   if (b.quoteDate) data.quoteDate = b.quoteDate;
@@ -782,11 +784,11 @@ export async function previewNextNumber(req: Request) {
     const company = await prisma.company.findFirst({ where: { id: Number(req.query.companyId) } });
     if (company) prefix = company.quotePrefix || "GN";
   }
-  const year = new Date().getFullYear();
+  const year = namVN();   // NĂM THEO GIỜ VN — phải khớp nextQuoteNumber, nếu không xem-trước lệch số thật
   const c = await prisma.quoteCounter.findUnique({
     where: { prefix_year: { prefix, year } },
   });
-  const yy = String(year).slice(-2);
+  const yy = namNganVN();
   const nn = String((c?.value ?? 0) + 1).padStart(3, "0");
   return { quoteNumber: `${prefix}${yy}${nn}`, prefix, note: "Số chính thức sẽ được cấp khi lưu" };
 }

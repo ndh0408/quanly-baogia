@@ -91,6 +91,7 @@ router.get(
       where: { id: id as unknown as number },
       include: {
         company: true,
+        customer: { select: { code: true } },   // tenFileXuat cần mã KH
         members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
@@ -118,7 +119,7 @@ router.get(
     }
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "xlsx")}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote, id, "xlsx")}"`);
     res.setHeader("Content-Length", buf.length);
     // Per-user, auth-gated download — must NOT be cached by the CDN (Cloudflare caches
     // .xlsx by extension) or the browser, else stale/other-user files get served.
@@ -138,6 +139,7 @@ router.get(
       where: { id: id as unknown as number },
       include: {
         company: true,
+        customer: { select: { code: true } },   // tenFileXuat cần mã KH
         members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
@@ -169,7 +171,7 @@ router.get(
     }
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote.quoteNumber, id, "pdf")}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${tenFileXuat(quote, id, "pdf")}"`);
     res.setHeader("Content-Length", buf.length);
     res.setHeader("Cache-Control", "no-store, private, max-age=0");   // per-user — never cache at CDN/browser
     res.end(buf);
