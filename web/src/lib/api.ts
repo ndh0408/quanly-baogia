@@ -251,7 +251,7 @@ const LA_LOI_CSRF = (b: unknown) =>
  * báo giá — dù họ không hề thao tác gì. Người dùng chỉ cần biết mình mất phiên vào ĐÚNG lúc họ làm
  * một việc thật (bấm Lưu, mở trang), và lúc đó lớp phủ đăng nhập lại giữ nguyên dữ liệu cho họ.
  */
-type ReqOpts = RequestInit & { im401?: boolean };
+export type ReqOpts = RequestInit & { im401?: boolean };
 
 /**
  * Thân phản hồi → JSON, KHÔNG BAO GIỜ ném.
@@ -319,6 +319,18 @@ async function req<T>(path: string, opts: ReqOpts = {}): Promise<T> {
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
+  // Bất kỳ lời gọi nào THÀNH CÔNG là bằng chứng phiên vẫn sống → báo App đóng lớp phủ nếu đang mở.
+  //
+  // VÌ SAO CẦN: hai request gần như đồng thời có thể ĐUA NHAU quanh một lượt đăng nhập lại. Một
+  // request NỀN bắn đi lúc phiên cũ sắp chết có thể về 401 SAU KHI request đăng nhập lại đã thành
+  // công (đã đổi cookie phiên) — tự nhiên do độ trễ mạng, không phải lỗi logic ở đâu cả. 401 muộn
+  // đó chạy `auth:expired` như bình thường, bật lại đúng lớp phủ mà người dùng vừa đóng bằng cách
+  // đăng nhập lại — họ thấy "Phiên đăng nhập đã hết" ngay sau khi vừa đăng nhập thành công.
+  //
+  // Đăng nhập TỰ NÓ cũng là một lời gọi thành công nên sự kiện này bắn cả ở đó — khỏi cần gọi hai
+  // nơi. Cho phép cả lời gọi NỀN (`im401`) bắn sự kiện này: một nhịp tim presence thành công cũng
+  // là bằng chứng hợp lệ, dù 401 của chính nó bị im lặng.
+  window.dispatchEvent(new Event("auth:ok"));
   return body as T;
 }
 
@@ -342,6 +354,7 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
     const msg = (body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null) ?? `Lỗi ${res.status}`;
     throw new ApiError(msg, res.status, body);
   }
+  window.dispatchEvent(new Event("auth:ok")); // xem chú thích ở req() — cùng lý do, cùng cơ chế
   return body as T;
 }
 
@@ -355,7 +368,11 @@ function periodQS(from?: string, to?: string, extra?: Record<string, string>): s
 }
 
 export const api = {
-  me: () => req<Me>("/auth/me"),
+  // `opts` để chỗ gọi truyền `im401` được. LẦN DÒ LÚC KHỞI ĐỘNG (App.tsx) PHẢI truyền cờ đó: mở
+  // app khi chưa đăng nhập thì 401 ở đây là chuyện BÌNH THƯỜNG, không phải "mất phiên giữa chừng".
+  // Mặc định (gọi `api.me()` trần) vẫn bắn "auth:expired" như cũ — đó là đường người dùng chủ động
+  // kiểm tra phiên, và web/src/lib/api401.test.ts chốt đúng hành vi đó.
+  me: (opts?: ReqOpts) => req<Me>("/auth/me", opts),
   // resetCsrfToken() SAU khi đổi phiên: server gọi session.regenerate() nên bí mật CSRF cũ chết theo.
   // Chú thích ở resetCsrfToken khẳng định điều này từ đầu nhưng KHÔNG chỗ nào gọi — mã cũ nằm lại
   // trong biến module, lần GHI kế tiếp ăn 403 rồi mới lấy mã mới và thử lại. Đường thử-lại đó cứu

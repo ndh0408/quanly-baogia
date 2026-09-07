@@ -46,23 +46,41 @@ export function App() {
   const [matPhien, setMatPhien] = useState(false);
 
   useEffect(() => {
-    api.me().then(setMe).catch(() => setMe(null)).finally(() => setLoading(false));
+    // `im401`: 401 Ở LẦN DÒ KHỞI ĐỘNG KHÔNG PHẢI LÀ MẤT PHIÊN.
+    //
+    // Mở app khi chưa đăng nhập thì lời gọi này 401 — đúng như thiết kế. Nhưng api.ts bắn
+    // "auth:expired" cho MỌI 401 không có cờ im401, nên cờ `matPhien` bị bật ngay lúc khởi động,
+    // trước cả khi người dùng kịp làm gì. Ở màn đăng nhập thường thì vô hại (nhánh `!me` phía dưới
+    // tự xoá cờ), nhưng ở #/onboard thì cờ đó NẰM LẠI: kích hoạt xong, người dùng đã đăng nhập
+    // hợp lệ mà vẫn bị hộp "Phiên đăng nhập đã hết" đè lên — tưởng kích hoạt hỏng.
+    api.me({ im401: true }).then(setMe).catch(() => setMe(null)).finally(() => setLoading(false));
     const onExpired = () => setMatPhien(true);
+    // ĐÓNG lớp phủ khi có bằng chứng phiên vẫn sống — xem chú thích "auth:ok" ở api.ts.
+    //
+    // Không có nhánh này thì lớp phủ là một CHỐT MỘT CHIỀU: chỉ tắt được bằng cách đăng nhập LẠI
+    // qua chính form trong lớp phủ. Một 401 ĐẾN TRỄ từ request nền (đua với chính lượt đăng nhập
+    // lại đó) bật cờ lên sau khi form vừa đóng nó — lớp phủ nhảy lại đè lên một phiên hoàn toàn
+    // hợp lệ, và mọi request kế tiếp đều 200 nhưng không có gì tắt nó được nữa.
+    const onOk = () => setMatPhien(false);
     const onHash = () => setHash(location.hash);
     // Xem thử: mỗi thao tác GHI (giả) → nhắc nhẹ (throttle) rằng không lưu thật.
     let last = 0;
     const onPreviewWrite = () => { const now = Date.now(); if (now - last > 2500) { last = now; toast("🔍 Xem thử — thao tác chạy thử, KHÔNG lưu thật", "info"); } };
     window.addEventListener("auth:expired", onExpired);
+    window.addEventListener("auth:ok", onOk);
     window.addEventListener("hashchange", onHash);
     window.addEventListener("preview:write", onPreviewWrite);
-    return () => { window.removeEventListener("auth:expired", onExpired); window.removeEventListener("hashchange", onHash); window.removeEventListener("preview:write", onPreviewWrite); };
+    return () => { window.removeEventListener("auth:expired", onExpired); window.removeEventListener("auth:ok", onOk); window.removeEventListener("hashchange", onHash); window.removeEventListener("preview:write", onPreviewWrite); };
   }, []);
 
   const enterPreview = (perms: string[], label: string) => { setPreview({ perms, label }); setPreviewMode(true); location.hash = "#/dashboard"; window.scrollTo(0, 0); };
   const exitPreview = () => { setPreviewMode(false); setPreview(null); };
 
   // Onboard (kích hoạt tài khoản mời) — hiện cả khi chưa đăng nhập; server gửi link tới /#/onboard?token=
-  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={setMe} />;
+  // XOÁ CỜ MẤT-PHIÊN y như nhánh <Login> ngay dưới. Kích hoạt xong là một lần ĐĂNG NHẬP THÀNH CÔNG,
+  // nên mọi nghi ngờ về phiên trước đó đều hết hiệu lực. Truyền thẳng `setMe` (bản cũ) thì cờ do lần
+  // dò khởi động bật lên còn nguyên, và lớp phủ đăng nhập lại nhảy ra đè lên phiên vừa tạo.
+  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { setMatPhien(false); setMe(m); }} />;
   if (loading) return <div className="center muted">Đang tải…</div>;
   // Chưa từng đăng nhập → màn đăng nhập đầy đủ. (Lớp phủ chỉ dành cho phiên MẤT giữa chừng.)
   if (!me) return <Login onLogin={(m) => { setMatPhien(false); setMe(m); }} />;

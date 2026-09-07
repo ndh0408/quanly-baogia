@@ -84,6 +84,28 @@ describe("401 ở lời gọi NỀN không được kéo cả ứng dụng về 
     expect(suKien).toEqual([]);
   });
 
+  // ── HỘP "PHIÊN ĐĂNG NHẬP ĐÃ HẾT" NHẢY RA NGAY SAU KHI KÍCH HOẠT TÀI KHOẢN ──────────────────
+  // Đo được trên production 2026-09-07 bằng Chrome DevTools, tài khoản mời mới:
+  //   GET /api/auth/invite/<token>  200   ← trang onboard nạp được
+  //   GET /api/auth/me              401   ← lần dò khởi động, ĐÚNG vì chưa đăng nhập
+  //   POST /api/auth/accept-invite  200   ← kích hoạt + đăng nhập THÀNH CÔNG
+  //   GET /api/quotes               200   ← đã có phiên, dữ liệu tải bình thường
+  // …vậy mà người dùng vẫn thấy hộp đăng nhập lại đè lên. Vì cái 401 ở bước 2 đã bật cờ `matPhien`
+  // trong App.tsx, và nhánh #/onboard trả <OnboardPage onLogin={setMe}> KHÔNG xoá cờ đó (nhánh
+  // <Login> ngay dưới thì có). Người mới được mời tưởng kích hoạt hỏng, gõ lại mật khẩu vô cớ.
+  //
+  // Vá hai lớp: (1) App.tsx dò khởi động bằng `api.me({ im401: true })` — bài này chốt lớp đó;
+  // (2) nhánh #/onboard tự `setMatPhien(false)` khi kích hoạt xong.
+  it("api.me({im401}) — lần dò LÚC KHỞI ĐỘNG gặp 401 → KHÔNG bắn auth:expired", async () => {
+    const { api } = await import("./api");
+    status = 401;
+    body = JSON.stringify({ error: "Chưa đăng nhập" });
+
+    await expect(api.me({ im401: true })).rejects.toThrow();   // vẫn ném để App biết mà setMe(null)
+    // Trước khi vá: ["auth:expired"] → cờ matPhien bật từ lúc khởi động và nằm lại qua #/onboard.
+    expect(suKien, "401 lúc chưa đăng nhập KHÔNG phải mất phiên giữa chừng").toEqual([]);
+  });
+
   it("lời gọi DO NGƯỜI DÙNG bấm gặp 401 → VẪN bắn auth:expired (không lỡ tay tắt hết)", async () => {
     const { api } = await import("./api");
     status = 401;
@@ -103,14 +125,16 @@ describe("401 ở lời gọi NỀN không được kéo cả ứng dụng về 
     expect(suKien).toEqual(["auth:expired"]);
   });
 
-  it("presence THÀNH CÔNG vẫn chạy bình thường (cờ im401 không phá đường đi đúng)", async () => {
+  it("presence THÀNH CÔNG vẫn chạy bình thường (cờ im401 không phá đường đi đúng) và bắn auth:ok", async () => {
     const { api } = await import("./api");
     status = 200;
     body = JSON.stringify({ editing: [{ id: 3, name: "Anh A" }] });
 
     const r = await api.presence(7, "open");
     expect(r.editing).toEqual([{ id: 3, name: "Anh A" }]);
-    expect(suKien).toEqual([]);
+    // auth:ok CHỦ Ý bắn cả ở lời gọi NỀN thành công — xem "HỘP ĐÈ LẠI PHIÊN VỪA ĐĂNG NHẬP LẠI"
+    // bên dưới: một nhịp tim thành công cũng là bằng chứng hợp lệ để đóng lớp phủ nếu đang mở.
+    expect(suKien).toEqual(["auth:ok"]);
   });
 
   // ── Mã CSRF phải chết theo phiên ────────────────────────────────────────────
