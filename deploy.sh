@@ -158,12 +158,24 @@ git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
 # mồ côi tham chiếu kiểu Prisma đã đổi là VỠ CẢ LẦN BUILD, ngay giữa deploy. Đúng như vậy ngày
 # 2026-09-01: `src/quoteService.ts(366,46): error TS2322` trên một file không còn trong repo.
 #
-# Nên chốt phải TỔNG QUÁT: giữ đúng những gì git đang theo dõi, xoá phần còn lại. `src/` và
-# `shared/` hoàn toàn do repo quản lý — không có gì sinh ra trong đó lúc chạy — nên phép so này an
-# toàn. Danh sách đi qua stdin để không đụng trần độ dài dòng lệnh.
-echo "▶ [2b/6] Dọn file mồ côi trong src/ + shared/ (tar không tự xoá)"
-git ls-tree -r --name-only "$REF" -- src shared | ssh "$SSH" "cat > $DIR/.tracked-src.txt && cd $DIR && \
-  find src shared -type f 2>/dev/null | sort > .onvm-src.txt && \
+# Nên chốt phải TỔNG QUÁT: giữ đúng những gì git đang theo dõi, xoá phần còn lại. `src/`,
+# `shared/` và `web/src/` hoàn toàn do repo quản lý — không có gì sinh ra trong đó lúc chạy (bundle
+# web ra `public/app2/`, KHÔNG ra `web/src/`) — nên phép so này an toàn. Danh sách đi qua stdin để
+# không đụng trần độ dài dòng lệnh.
+#
+# ── VÌ SAO `web/src` CŨNG PHẢI CÓ TRONG DANH SÁCH (2026-09-07) ─────────────────────────────
+# Bản trước chỉ quét `src shared`. Nhưng `web/` dính ĐÚNG cùng cái bẫy, và nó đã nổ thật: các
+# trang từng nằm phẳng ở `web/src/*.tsx` rồi được `git mv` vào `web/src/pages/` +
+# `web/src/components/`; 19 bản CŨ nằm lại trên VM và không lượt deploy nào xoá. Chúng vô hại
+# suốt nhiều tháng — cho tới lượt deploy đổi chữ ký một hàm DÙNG CHUNG (`quoteTotals` trong
+# shared/quote-math.ts), vì `web` build bằng `tsc --noEmit && vite build` mà `tsc` biên dịch TOÀN
+# BỘ cây `web/src`, kể cả file mồ côi:
+#     src/QuoteEditor.tsx(249,55): error TS2554: Expected 1-2 arguments, but got 3.
+# Deploy chết ở bước build, trên những file KHÔNG CÒN trong repo — đúng lớp lỗi khối này sinh ra
+# để chặn, chỉ khác thư mục.
+echo "▶ [2b/6] Dọn file mồ côi trong src/ + shared/ + web/src/ (tar không tự xoá)"
+git ls-tree -r --name-only "$REF" -- src shared web/src | ssh "$SSH" "cat > $DIR/.tracked-src.txt && cd $DIR && \
+  find src shared web/src -type f 2>/dev/null | sort > .onvm-src.txt && \
   sort .tracked-src.txt -o .tracked-src.txt && \
   comm -13 .tracked-src.txt .onvm-src.txt | while read -r f; do rm -f \"\$f\" && echo \"  gỡ mồ côi \$f\"; done; \
   rm -f .tracked-src.txt .onvm-src.txt; true"
