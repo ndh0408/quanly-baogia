@@ -473,3 +473,40 @@ describe("nhập file ngoài thiếu cột STT + ĐVT", () => {
     expect(kinds.filter((k) => k === "item").length).toBe(1);
   });
 });
+
+// LỖI THẬT (2026-09-07, file BaoGia_GN26073 - 0902.xlsx): buildQuoteBuffer đánh số tab khi báo giá
+// có NHIỀU sheet ("Banner" → "1. Banner"). Nạp lại mà giữ nguyên thì tên phình thêm một lớp mỗi
+// vòng xuất–nhập, và người dùng thấy đúng chuỗi rác đó trên tab lẫn trong file gửi khách lần sau.
+describe("vòng tròn xuất → nhập: TÊN TAB và THỨ TỰ sheet", () => {
+  const mucA = [{ kind: "item", name: "A", unit: "m2", quantity: 1, unitPrice: 1000000 }];
+  const nhieuSheet = (ten) => ten.map((name, i) => ({
+    order: i + 1, name, groupSubtotal: false, template: { code: "marico_decor" }, items: mucA,
+  }));
+
+  it("bóc tiền tố thứ tự '1. ' và GIỮ ĐÚNG thứ tự sheet", async () => {
+    const ten = ["Banner", "Ticketbox", "GN (không ngày)", "LCD", "Khu chờ SVH", "Backdrop", "Thiết kế", "Booth", "Booth hòm", "Cover bảng rạp"];
+    const buf = await buildQuoteBuffer(baseQuote("marico_decor", mucA, { sheets: nhieuSheet(ten) }));
+    const res = await parseQuoteWorkbook(buf);
+    const doc = res.sheets.filter((s) => !s.skipped);
+    expect(doc.map((s) => s.name)).toEqual(ten);          // đúng tên, đúng thứ tự, không còn "N. "
+  });
+
+  it("báo giá MỘT sheet: tên không bị đánh số nên cũng không bị bóc nhầm", async () => {
+    const buf = await buildQuoteBuffer(baseQuote("marico_decor", mucA, {
+      sheets: [{ order: 1, name: "2. Đợt hai", groupSubtotal: false, template: { code: "marico_decor" }, items: mucA }],
+    }));
+    const res = await parseQuoteWorkbook(buf);
+    const sheet = res.sheets.find((s) => !s.skipped);
+    // Một sheet → xuất KHÔNG thêm tiền tố, nên "2. " ở đây là tên THẬT của người dùng: phải giữ.
+    expect(sheet.name).toBe("2. Đợt hai");
+  });
+
+  it("xuất → nhập → xuất → nhập: tên KHÔNG phình thêm lớp nào", async () => {
+    const ten = ["Banner", "Ticketbox"];
+    const buf1 = await buildQuoteBuffer(baseQuote("marico_decor", mucA, { sheets: nhieuSheet(ten) }));
+    const doc1 = (await parseQuoteWorkbook(buf1)).sheets.filter((s) => !s.skipped);
+    const buf2 = await buildQuoteBuffer(baseQuote("marico_decor", mucA, { sheets: nhieuSheet(doc1.map((s) => s.name)) }));
+    const doc2 = (await parseQuoteWorkbook(buf2)).sheets.filter((s) => !s.skipped);
+    expect(doc2.map((s) => s.name)).toEqual(ten);
+  });
+});

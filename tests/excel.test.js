@@ -89,9 +89,10 @@ describe("buildQuoteBuffer (export generation)", () => {
     expect(found).toBe(false);
   });
 
-  // Sheet "Tổng Báo Giá": dòng từng sheet = "Cộng" của sheet đó (cộng lại đúng bằng dòng Cộng),
-  // dòng Discount trỏ THẲNG vào ô Discount của các sheet nên sửa ở sheet là tổng chạy theo.
-  it("sheet Tổng Báo Giá gom Discount của các sheet, VAT tính sau khi trừ", async () => {
+  // Sheet "Tổng Báo Giá": mỗi dòng là số ĐÃ TRỪ Discount của sheet đó (trỏ vào ô "Tổng Cộng" của
+  // chính sheet, nên sửa trong Excel là chạy theo). KHÔNG có dòng Discount ở đây — khoản giảm đã
+  // nằm trong con số từng dòng, lặp lại là người đọc tưởng bị trừ hai lần.
+  it("sheet Tổng Báo Giá: mỗi dòng là số ĐÃ TRỪ Discount, VAT tính trên tổng các dòng", async () => {
     const q = makeQuote("marico_decor");
     q.vatPercent = 8;
     q.sheets = [
@@ -105,12 +106,18 @@ describe("buildQuoteBuffer (export generation)", () => {
     const ws = wb.getWorksheet("Tổng Báo Giá");
     const rowOf = (label) => { let r = 0; ws.eachRow((row, i) => { if (String(row.getCell(1).value ?? "").trim() === label) r = r || i; }); return r; };
     const num = (r) => { const v = ws.getCell(`C${r}`).value; return Number(v && typeof v === "object" ? v.result : v); };
-    expect(num(rowOf("Cộng"))).toBe(300_994_900);
-    expect(num(rowOf("Discount"))).toBe(-3_000_000);
+    // Dòng sheet Banner = 294.988.400 − 3.000.000; Ticketbox không giảm giá.
+    expect(num(5)).toBe(291_988_400);
+    expect(num(6)).toBe(6_006_500);
     expect(num(rowOf("Tổng cộng"))).toBe(297_994_900);
     expect(num(rowOf("VAT (8%)"))).toBe(23_839_592);
     expect(num(rowOf("Thành tiền"))).toBe(321_834_492);
-    expect(ws.getCell(`C${rowOf("Discount")}`).value.formula).toMatch(/^'1\. Banner'!H\d+$/);
+    // KHÔNG được có dòng "Cộng" hay "Discount" riêng ở sheet tổng.
+    expect(rowOf("Cộng")).toBe(0);
+    expect(rowOf("Discount")).toBe(0);
+    // Dòng sheet phải là CÔNG THỨC trỏ vào ô "Tổng Cộng" của chính tab đó, không phải số chết.
+    expect(ws.getCell("C5").value.formula).toMatch(/^'1\. Banner'!H\d+$/);
+    expect(num(rowOf("Tổng cộng"))).toBe(num(5) + num(6));   // các dòng cộng ĐÚNG ra chân bảng
   });
 
   // Cột "Chi Tiết" bị XÓA khỏi bảng: không ẩn cột D, mà gộp C:D thành một cột Hạng Mục rộng.

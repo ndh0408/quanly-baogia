@@ -7,6 +7,7 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
+import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan } from "../lib/localDraft";
 
@@ -436,16 +437,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
     let nAdd = 0, nSheet = 0, nNew = 0, nRemoved = 0;
+    // Các sheet ĐẾN TỪ FILE, giữ ĐÚNG thứ tự trong file — dùng để sắp lại chỗ ở cuối hàm.
+    const theoFile: Sheet[] = [];
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
       // File có nhiều sheet hơn báo giá → TẠO THÊM sheet, đặt tên đúng tên tab trong file.
       if (p.targetIndex === NEW_SHEET) {
-        sheets.push({
+        const moi = {
           _k: nextK(), templateId: p.templateId ?? activeSheet.templateId,
           name: p.file.name, groupSubtotal: !!p.file.groupSubtotal,
           discount: p.discount ?? 0,
           items: stamped, extraTables: [],
-        } as Sheet);
+        } as Sheet;
+        sheets.push(moi); theoFile.push(moi);
         nAdd += stamped.length; nSheet++; nNew++;
         continue;
       }
@@ -454,17 +458,28 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (p.mode === "append") target.items.push(...stamped);
       else {
         target.items.splice(0, target.items.length, ...stamped);
+        // Chế độ THAY = "sheet này CHÍNH LÀ sheet kia trong file" → lấy luôn TÊN theo file.
+        // Không lấy thì sheet trắng của báo giá mới (tên rỗng) nuốt nội dung của một sheet trong
+        // file mà vẫn hiện tên mẫu ("GN (không ngày)"), còn tên thật thì biến mất.
+        if (p.file.name) target.name = p.file.name;
         // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file.
         target.groupSubtotal = !!p.file.groupSubtotal;
         // Discount đọc từ khối tổng của CHÍNH sheet đó trong file (chỉ chế độ Thay — xem modal).
         if (p.discount != null) target.discount = p.discount;
       }
+      theoFile.push(target);
       nAdd += stamped.length; nSheet++;
     }
     for (const idx of [...(payload.removeTargetIndexes || [])].sort((a, b) => b - a)) {
       if (idx < 0 || idx >= sheets.length) continue;
       sheets.splice(idx, 1); nRemoved++;
     }
+    // ── SẮP LẠI CHO ĐÚNG THỨ TỰ TRONG FILE ────────────────────────────────────────────────────
+    // Sheet ĐANG CÓ bị nạp đè thì GIỮ NGUYÊN chỗ, sheet mới thì nối vào cuối — nên nếu file ghép
+    // sheet thứ 3 vào chỗ trống sẵn có, nó nhảy lên đầu còn 1,2 tụt xuống sau. Cách chữa: lấy
+    // đúng những chỗ mà các sheet đến-từ-file đang chiếm, rồi ghi lại chúng vào đó THEO THỨ TỰ
+    // TRONG FILE. Sheet KHÔNG dính tới lượt nạp không xê dịch một ô nào.
+    sapXepTheoFile(sheets, theoFile);
     if (!sheets.length) sheets.push({ _k: nextK(), templateId: activeSheet.templateId, name: "", groupSubtotal: true, items: [], extraTables: [] } as Sheet);
     q._activeSheet = Math.max(0, Math.min(q._activeSheet, sheets.length - 1));
     // VAT là của CẢ báo giá; Discount đã đặt vào TỪNG sheet ở vòng lặp trên.
@@ -715,11 +730,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           <div className="quote-summary">
             <h3 style={{ margin: "18px 0 6px" }}>Tổng báo giá ({sheets.length} sheet)</h3>
             <table className="summary-table">
+              {/* Cột "Tổng (VNĐ)" của mỗi sheet là số ĐÃ TRỪ Discount — đúng con số sheet đó đóng
+                  góp vào báo giá, và đúng dòng "Tổng Cộng" trong khối tổng của chính sheet đó lẫn
+                  trên tab Excel của nó. Ở đây CỐ Ý không nhắc lại Discount: khoản giảm đã nằm
+                  trong con số từng dòng rồi, đưa lại lên đây chỉ khiến người đọc tưởng trừ hai lần. */}
               <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col">Khách duyệt</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
               <tbody>
-                {/* Con số mỗi dòng là "Cộng" của sheet (CHƯA trừ Discount) → các dòng cộng lại
-                    đúng bằng dòng "Cộng" ở dưới; Discount gom thành một dòng riêng. */}
-                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const st = perSheet[i] ?? { gross: 0, discount: 0, net: 0 }; const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}{st.discount > 0 && <span className="muted" style={{ fontSize: 12 }}> · discount {M.fmtMoney(st.discount)}</span>}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={`=TỔNG_SHEET("${name}")`} value={st.gross} /></td></tr>; })}
+                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const st = perSheet[i] ?? { gross: 0, discount: 0, net: 0 }; const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={st.discount > 0 ? `=TỔNG_SHEET("${name}")-Discount(${M.fmtMoney(st.discount)})` : `=TỔNG_SHEET("${name}")`} value={st.net} /></td></tr>; })}
               </tbody>
               <tfoot>
                 {/* Chỉ cộng các sheet KHÁCH ĐÃ DUYỆT — báo giá nhiều sheet hay chốt từng phần. */}
@@ -728,9 +745,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                     <SummaryFormula label="Tổng phần khách đã duyệt" formula="=SUM(Các sheet khách đã duyệt, đã trừ Discount)" value={sheets.reduce((acc, s, i) => (s.custStatus === "approved" ? acc + (perSheet[i]?.net ?? 0) : acc), 0)} />
                   </td></tr>
                 )}
-                <tr><td colSpan={3}>{tt.discount > 0 ? "Cộng" : "Tổng cộng"}</td><td style={{ textAlign: "right" }}><SummaryFormula label={tt.discount > 0 ? "Cộng" : "Tổng cộng"} formula="=SUM(Tổng từng sheet)" value={tt.gross} /></td></tr>
-                {tt.discount > 0 && <tr><td colSpan={3}>Discount</td><td style={{ textAlign: "right" }}><SummaryFormula label="Discount" formula="=SUM(Discount từng sheet)" value={tt.discount} prefix="-" /></td></tr>}
-                {tt.discount > 0 && <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=Cộng-Discount" value={tt.subtotal} /></td></tr>}
+                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=SUM(Tổng từng sheet)" value={tt.subtotal} /></td></tr>
                 <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}><SummaryFormula label="VAT" formula={`=ROUND(Tổng cộng*${Number(q.vatPercent) || 0}%;0)`} value={tt.vat} /></td></tr>
                 <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><SummaryFormula label="Thành tiền" formula="=Tổng cộng+VAT" value={tt.total} danger /></td></tr>
               </tfoot>

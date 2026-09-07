@@ -143,6 +143,7 @@ export type ImportedSheet = {
   hasDays: boolean; numberSubs: boolean; groupSubtotal: boolean; showImages: boolean;
   items: ImportedItem[];
   totals?: { subtotal?: number | null; vatPercent?: number | null; vat?: number | null; discount?: number | null; total?: number | null };
+  fromApp?: boolean;              // file do CHÍNH app xuất ra (có mã mẫu nhúng ở ô A1)
   warnings: string[];
   stats: { rows: number; items: number; sections: number; subsections: number; subs: number; infos: number; formulas: number; formulasDropped: number };
 };

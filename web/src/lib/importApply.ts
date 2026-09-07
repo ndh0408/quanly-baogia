@@ -60,6 +60,24 @@ export function autoTargetIndexes(
   return out;
 }
 
+/**
+ * SẮP LẠI các sheet ĐẾN TỪ FILE cho đúng thứ tự trong file, TẠI CHỖ.
+ *
+ * Vì sao cần: đường nạp giữ nguyên chỗ của sheet ĐANG CÓ bị ghi đè, và nối sheet MỚI vào cuối.
+ * Nên một file 10 sheet nạp vào báo giá mới (đang có đúng 1 sheet trắng) mà sheet thứ 3 của file
+ * là cái ghép được vào chỗ trống đó, thì thứ tự ra: [3, 1, 2, 4, 5, …] — đúng lỗi người dùng gặp.
+ *
+ * Cách chữa: lấy ĐÚNG những vị trí mà nhóm sheet đến-từ-file đang chiếm, rồi ghi lại chúng vào
+ * chính những vị trí đó theo thứ tự trong file. Sheet KHÔNG dính tới lượt nạp không xê dịch.
+ * Đây là một PHÉP HOÁN VỊ: không thêm, không bớt, không đổi độ dài mảng.
+ */
+export function sapXepTheoFile<T>(sheets: T[], theoFile: T[]): void {
+  if (theoFile.length < 2) return;
+  const cho = theoFile.map((sh) => sheets.indexOf(sh)).filter((i) => i >= 0).sort((a, b) => a - b);
+  if (cho.length !== theoFile.length) return;   // có sheet đã bị xoá khỏi mảng → không đụng vào
+  cho.forEach((viTri, k) => { sheets[viTri] = theoFile[k]; });
+}
+
 /** Sơ đồ địa chỉ ô A1 của lưới — PHẢI khớp mảng ADDR trong components/GridTable.tsx. */
 export function addrFields(opts: { addrDetail: boolean; usesDays: boolean; internalNote?: boolean }): string[] {
   return [

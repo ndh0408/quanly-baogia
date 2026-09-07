@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EditorTemplate, ImportedSheet } from "./api";
-import { autoTargetIndexes, NEW_IMPORT_SHEET, toGridItems } from "./importApply";
+import { autoTargetIndexes, NEW_IMPORT_SHEET, sapXepTheoFile, toGridItems } from "./importApply";
 
 const templates: EditorTemplate[] = [
   { id: 1, code: "marico_decor", name: "GN (không ngày)", layout: { hasDays: false, numberSubsections: false } },
@@ -79,5 +79,46 @@ describe("toGridItems — dịch công thức giữa cột Excel và cột web",
     const rows = [{ kind: "item" as const, name: "A", quantity: 0.9075, quantityExact: true, unitPrice: 2_200_000, row: 12 }];
     const out = toGridItems(rows, { usesDays: false, addrDetail: true });
     expect(out.items[0]).toMatchObject({ quantity: 0.9075, quantityExact: true });
+  });
+});
+
+// LỖI THẬT (2026-09-07, file BaoGia_GN26073): nạp file 10 sheet vào báo giá MỚI (đang có đúng một
+// sheet trắng). autoTargetIndexes ghép sheet thứ 3 của file vào chỗ trống đó (khớp tên+mẫu), 9
+// sheet còn lại được NỐI VÀO CUỐI → thứ tự hiện ra là [3, 1, 2, 4, 5, …]. Người dùng thấy tab đầu
+// mang tên mẫu "GN (không ngày)" còn các tab sau là "1. Banner", "2. Ticketbox", "4. LCD"…
+describe("sapXepTheoFile — trả các sheet đến từ file về đúng thứ tự trong file", () => {
+  it("sheet thứ 3 của file ghép vào chỗ trống, 9 sheet kia nối đuôi → sắp lại thành 1..10", () => {
+    const trong = { id: "trong" };                                  // sheet trắng của báo giá mới
+    const moi = Array.from({ length: 9 }, (_, i) => ({ id: `moi${i}` }));
+    const sheets = [trong, ...moi];                                  // đúng trạng thái sau vòng nạp
+    // Thứ tự TRONG FILE: f0, f1 là hai sheet mới đầu tiên; f2 chính là cái ghép vào chỗ trống.
+    const theoFile = [moi[0], moi[1], trong, ...moi.slice(2)];
+    sapXepTheoFile(sheets, theoFile);
+    expect(sheets).toEqual(theoFile);
+    expect(sheets[2]).toBe(trong);
+    expect(sheets).toHaveLength(10);                                 // hoán vị: không thêm/bớt
+  });
+
+  it("sheet KHÔNG dính tới lượt nạp thì không xê dịch", () => {
+    const a = { id: "a" }, b = { id: "b" }, c = { id: "c" }, d = { id: "d" };
+    const sheets = [a, b, c, d];
+    sapXepTheoFile(sheets, [c, b]);        // chỉ b và c đến từ file, và file xếp c trước b
+    expect(sheets).toEqual([a, c, b, d]);  // a, d đứng yên; b/c hoán đổi trong đúng hai chỗ cũ
+  });
+
+  it("đã đúng thứ tự thì không đổi gì", () => {
+    const a = { id: "a" }, b = { id: "b" };
+    const sheets = [a, b];
+    sapXepTheoFile(sheets, [a, b]);
+    expect(sheets).toEqual([a, b]);
+  });
+
+  it("dưới 2 sheet, hoặc có sheet đã bị xoá khỏi mảng → không đụng vào", () => {
+    const a = { id: "a" }, b = { id: "b" }, ngoai = { id: "ngoai" };
+    const s1 = [a, b];
+    sapXepTheoFile(s1, [b]);            // 1 phần tử
+    expect(s1).toEqual([a, b]);
+    sapXepTheoFile(s1, [b, ngoai]);     // `ngoai` không còn trong mảng (đã bị xoá)
+    expect(s1).toEqual([a, b]);
   });
 });

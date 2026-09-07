@@ -63,6 +63,8 @@ export type ImportedSheet = {
   showImages: boolean;
   items: ImportedItem[];
   totals?: { subtotal?: number | null; vatPercent?: number | null; vat?: number | null; discount?: number | null; total?: number | null };
+  /** File do CHÍNH app xuất ra (có mã mẫu nhúng ở ô A1) — xem bocTienToThuTu(). */
+  fromApp?: boolean;
   warnings: string[];
   stats: { rows: number; items: number; sections: number; subsections: number; subs: number; infos: number; formulas: number; formulasDropped: number };
 };
@@ -318,6 +320,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.showImages = colOf._images != null;
   base.columns = Object.fromEntries(Object.entries(colOf).map(([role, c]) => [role, colLetter(c)]));
   const markerCode = markedTemplate(ws, base.hasDays);
+  // Dấu mã mẫu nhúng ở ô A1 = bằng chứng file do CHÍNH app xuất ra. Dùng ở bocTienToThuTu().
+  base.fromApp = !!markerCode;
 
   // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
   // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
@@ -716,6 +720,33 @@ function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: str
  * Đọc file .xlsx báo giá → danh sách sheet + hạng mục theo đúng cấu trúc lưới của app.
  * KHÔNG ném lỗi vì 1 sheet hỏng: sheet nào không đọc được thì đánh dấu `skipped`.
  */
+/**
+ * BÓC TIỀN TỐ THỨ TỰ "N. " mà `buildQuoteBuffer` thêm vào TÊN TAB.
+ *
+ * Lúc xuất, báo giá NHIỀU sheet được đánh số tab: "Banner" → "1. Banner". Nạp lại mà giữ nguyên
+ * thì tên phình thêm một lớp sau MỖI vòng xuất–nhập ("1. 1. Banner"), và người dùng nhìn thấy
+ * đúng chuỗi rác đó trên tab lẫn trong file gửi khách lần sau. (Đo được 2026-09-07 trên
+ * BaoGia_GN26073 - 0902.xlsx: tab hiện "1. Banner", "2. Ticketbox", "4. LCD"…)
+ *
+ * BA ĐIỀU KIỆN, đủ chặt để KHÔNG BAO GIỜ cắt nhầm tên thật của khách:
+ *   1. file do CHÍNH app xuất — có mã mẫu nhúng ở ô A1 (`fromApp`);
+ *   2. có TỪ 2 sheet dữ liệu trở lên — một sheet thì `buildQuoteBuffer` KHÔNG đánh số, nên "2. "
+ *      trong tên là của người dùng;
+ *   3. con số phải ĐÚNG BẰNG vị trí của sheet đó trong file — "3. LCD" nằm ở vị trí 3 mới bóc.
+ * Thiếu bất kỳ điều nào thì để nguyên tên.
+ */
+function bocTienToThuTu(sheets: ImportedSheet[]): void {
+  const doc = sheets.filter((s) => !s.skipped);
+  if (doc.length < 2) return;
+  doc.forEach((s, i) => {
+    if (!s.fromApp) return;
+    const m = /^\s*(\d{1,3})\s*\.\s+(.+)$/.exec(s.name);
+    if (!m || Number(m[1]) !== i + 1) return;
+    const boc = m[2].trim();
+    if (boc) s.name = boc;
+  });
+}
+
 export async function parseQuoteWorkbook(buffer: Buffer): Promise<ImportResult> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as unknown as ArrayBuffer);
@@ -737,6 +768,7 @@ export async function parseQuoteWorkbook(buffer: Buffer): Promise<ImportResult> 
       });
     }
   });
+  bocTienToThuTu(sheets);
   if (!sheets.some((s) => !s.skipped && s.items.length)) {
     warnings.push("Không tìm thấy bảng báo giá nào trong file. File cần có hàng tiêu đề kiểu: STT | Hạng Mục | ĐVT | Số Lượng | Đơn Giá | Thành Tiền.");
   }
