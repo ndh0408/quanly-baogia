@@ -8,7 +8,13 @@ exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGU
 
 exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: discount 1`] = `
 {
-  "discount": "3e470fadf807a8c2",
+  "discount": "a5af642ed8a24720",
+}
+`;
+
+exports[`Excel xuất khách — REGRESSION LOCK (semantic snapshot) > giữ NGUYÊN output: discount-multi 1`] = `
+{
+  "discount-multi": "dd6a77a16af9aa4a",
 }
 `;
 

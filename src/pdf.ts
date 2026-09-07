@@ -28,6 +28,41 @@ function groupLetter(n: number) {
   while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); }
   return s;
 }
+// Tổng 1 sheet (chưa trừ Discount) — cùng luật với sheetSubtotalGrouped ở shared/quote-math.ts.
+export function sheetGross(items: any[], usesDays: boolean, groupSubtotal: boolean) {
+  let mult = 1, sum = 0;
+  for (const it of items || []) {
+    if (it?.kind === "section" || it?.kind === "subsection") { mult = groupSubtotal ? groupMult(it) : 1; continue; }
+    if (it?.kind === "info") continue;
+    sum += lineAmount(it, usesDays) * mult;
+  }
+  return Math.round(sum);
+}
+/**
+ * Khối tổng của PDF — MỘT nguồn cho cả phần in ra lẫn bài kiểm.
+ *
+ * Discount ở MỨC SHEET và trừ TRƯỚC khi tính VAT (giống src/money.ts + shared/quote-math.ts):
+ *   mỗi sheet: Cộng → Discount → Tổng Cộng · cả báo giá: Σ Tổng Cộng → VAT → Thành Tiền.
+ * CỐ Ý không đọc `quote.subtotal/vat/total` đã lưu: PDF phải khớp với các dòng nó VỪA VẼ, còn cột
+ * đã lưu có thể là của lần lưu trước (báo giá cũ chưa lưu lại sau khi đổi chính sách).
+ */
+export function pdfTotals(quote: any) {
+  const vatPct = Number(quote?.vatPercent) || 0;
+  const sheets = (quote?.sheets || []).map((sh: any) => {
+    // CÙNG phép suy với drawItemsTable (dòng có days > 0) — lệch là tiền lệch.
+    const usesDays = (sh?.items || []).some((it: any) => it && it.days != null && Number(it.days) > 0);
+    const gross = sheetGross(sh?.items || [], usesDays, !!sh?.groupSubtotal);
+    const dRaw = Math.round(Number(sh?.discount) || 0);
+    const discount = dRaw > 0 ? Math.min(dRaw, Math.max(0, gross)) : 0;
+    return { gross, discount, net: gross - discount };
+  });
+  const gross = sheets.reduce((a: number, x: any) => a + x.gross, 0);
+  const discount = sheets.reduce((a: number, x: any) => a + x.discount, 0);
+  const subtotal = gross - discount;
+  const vat = Math.round(subtotal * vatPct / 100);
+  return { vatPct, sheets, gross, discount, subtotal, vat, total: subtotal + vat };
+}
+
 const fmtNumCell = (v?: number | string, exact = false) => {
   const t = exact ? qtyExact(v) : qtyRound(v);
   if (!t || isNaN(t)) return "";
@@ -109,31 +144,46 @@ export async function renderQuotePdf(quote: any) {
       doc.moveDown(0.5);
     }
 
+    const vatPct = Number(quote.vatPercent ?? 0);
+    doc.fontSize(11);
+    const r = (label: string, val: number, bold = false) => {
+      doc.font(bold ? "bold" : "body");
+      doc.text(`${label}: ${fmt(val)} VND`, { align: "right" });
+    };
+
+    // Discount ở MỨC SHEET (xem pdfTotals): mỗi sheet in khối "Cộng / Discount / Tổng Cộng"
+    // của riêng nó ngay dưới bảng, y như file Excel — nhìn là biết trừ ở trang nào.
+    const tt = pdfTotals(quote);
     let runningIdx = 0;
-    for (const sh of quote.sheets || []) {
+    (quote.sheets || []).forEach((sh: any, i: number) => {
       if (sh.name) {
         doc.moveDown(0.3);
         doc.font("bold").fontSize(11).text(sh.name);
       }
       drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name });
       runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
-    }
+      const st = tt.sheets[i];
+      if (st && st.discount > 0) {
+        doc.fontSize(11);
+        r("Cộng", st.gross);
+        r("Discount", -st.discount);
+        r("Tổng cộng", st.net, true);
+      }
+    });
 
     doc.moveDown(0.5);
 
-    const sub = Number(quote.subtotal ?? 0);
-    const vat = Number(quote.vat ?? 0);
-    const total = Number(quote.total ?? 0);
-    const vatPct = Number(quote.vatPercent ?? 0);
-
+    // Tổng báo giá: VAT tính TRÊN số đã trừ Discount. Không sheet nào giảm giá → khối y như cũ.
     doc.fontSize(11);
-    const r = (label: string, val: number, bold = false) => {
-      doc.font(bold ? "bold" : "body");
-      doc.text(`${label}: ${fmt(val)} VND`, { align: "right" });
-    };
-    r("Tổng phụ", sub);
-    r(`VAT (${vatPct}%)`, vat);
-    r("Thành tiền", total, true);
+    if (tt.discount > 0) {
+      r("Cộng", tt.gross);
+      r("Discount", -tt.discount);
+      r("Tổng cộng", tt.subtotal);
+    } else {
+      r("Tổng phụ", tt.subtotal);
+    }
+    r(`VAT (${vatPct}%)`, tt.vat);
+    r("Thành tiền", tt.total, true);
 
     if (quote.notes) {
       doc.moveDown(0.6);

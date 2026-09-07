@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
-import { renderQuotePdf } from "../src/pdf.js";
+import { renderQuotePdf, pdfTotals } from "../src/pdf.js";
 
 const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fonts");
 /** Cùng cách chọn font với src/pdf.ts (registerFonts) — nếu không thì chiều cao đo ra lệch. */
@@ -247,5 +247,47 @@ describe.skipIf(!dejavu)("PDF — bản vá CÓ dàn lại trang (ghim con số 
     const usable = 841.89 - 40 - 40;
     expect(Math.ceil((2000 * 20) / usable)).toBe(53);
     expect(Math.ceil((2000 * 32) / usable)).toBe(85);
+  });
+});
+
+// PDF phải dùng ĐÚNG chính sách tiền của app: Discount ở MỨC SHEET, trừ TRƯỚC khi tính VAT.
+// Trước đây PDF đọc thẳng `quote.subtotal/vat/total` đã lưu — số cũ của lần lưu trước lọt ra
+// file gửi khách. Nay nó tự tính từ chính các dòng nó vẽ.
+describe("PDF — khối tổng: Cộng / Discount / Tổng cộng / VAT / Thành tiền", () => {
+  const sheet = (unitPrice, discount) => ({ name: "S", groupSubtotal: false, discount, items: [{ kind: "item", name: "A", unit: "m2", quantity: 1, unitPrice }] });
+
+  it("VAT tính TRÊN số đã trừ Discount (số thật của file khách)", () => {
+    const t = pdfTotals({ vatPercent: 8, sheets: [sheet(294_988_400, 3_000_000)] });
+    expect(t.sheets[0]).toEqual({ gross: 294_988_400, discount: 3_000_000, net: 291_988_400 });
+    expect(t.subtotal).toBe(291_988_400);
+    expect(t.vat).toBe(23_359_072);
+    expect(t.total).toBe(315_347_472);
+  });
+
+  it("gom Discount của nhiều sheet, sheet không giảm giá giữ nguyên", () => {
+    const t = pdfTotals({ vatPercent: 8, sheets: [sheet(294_988_400, 3_000_000), sheet(6_006_500)] });
+    expect(t.gross).toBe(300_994_900);
+    expect(t.discount).toBe(3_000_000);
+    expect(t.subtotal).toBe(297_994_900);
+    expect(t.total).toBe(321_834_492);
+  });
+
+  it("Discount lớn hơn tổng sheet bị kẹp; Discount âm coi như 0", () => {
+    expect(pdfTotals({ vatPercent: 0, sheets: [sheet(1_000_000, 9_999_999)] }).subtotal).toBe(0);
+    expect(pdfTotals({ vatPercent: 0, sheets: [sheet(1_000_000, -5)] }).discount).toBe(0);
+  });
+
+  it("KHÔNG đọc subtotal/vat/total đã lưu — số cũ không lọt vào file gửi khách", () => {
+    const t = pdfTotals({ vatPercent: 8, subtotal: 999, vat: 999, total: 999, discount: 999, sheets: [sheet(1_000_000)] });
+    expect(t.subtotal).toBe(1_000_000);
+    expect(t.total).toBe(1_080_000);
+  });
+
+  it("PDF thật vẫn dựng được khi sheet có Discount", async () => {
+    const buf = await renderQuotePdf({
+      quoteNumber: "PDFDISC", title: "Bao gia", quoteDate: new Date("2026-08-01"),
+      vatPercent: 8, sheets: [sheet(294_988_400, 3_000_000)],
+    });
+    expect(buf.subarray(0, 4).toString("latin1")).toBe("%PDF");
   });
 });

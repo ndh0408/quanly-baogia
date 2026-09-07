@@ -76,8 +76,11 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
           // thẳng cột, KHÔNG kéo items. Cùng nguồn số với trang Quản lý dự án (listProjects), nên
           // hai trang không hiện hai con số khác nhau cho cùng một mã sản xuất.
           subtotal: true,
-          // groupSubtotal chỉ dùng cho ĐƯỜNG LÙI bên dưới (hệ số nhóm khi tính lại từ items).
+          // groupSubtotal + discount chỉ dùng cho ĐƯỜNG LÙI bên dưới. THIẾU `discount` ở đây là
+          // đường lùi tính lại RA SỐ CHƯA TRỪ GIẢM GIÁ — và nó đánh trúng đúng sheet bị giảm giá
+          // về 0 (cột subtotal = 0 → bị coi là "chưa backfill" → luôn đi đường lùi).
           groupSubtotal: true,
+          discount: true,
         },
       },
     },
@@ -141,11 +144,14 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
       for (const id of lo) theoSheet.set(id, []);
       for (const it of items) theoSheet.get(it.sheetId)!.push(it);
       const gs = new Map<number, boolean>();
-      for (const { sh } of cho) if (theoSheet.has(sh.id)) gs.set(sh.id, !!sh.groupSubtotal);
+      const gg = new Map<number, unknown>();
+      for (const { sh } of cho) if (theoSheet.has(sh.id)) { gs.set(sh.id, !!sh.groupSubtotal); gg.set(sh.id, sh.discount); }
       // vatPercent 0: chỉ cần sheetTotals (tiền TRƯỚC thuế), không dùng vat/total.
+      // `discount` PHẢI truyền vào: sheetTotals[].subtotal là số ĐÃ TRỪ giảm giá của sheet, đúng
+      // nghĩa cột materialized mà đường nhanh phía trên đọc — hai đường phải ra cùng một số.
       const totals = computeQuoteTotals({
         vatPercent: 0,
-        sheets: [...theoSheet].map(([id, its]) => ({ id, groupSubtotal: gs.get(id) ?? false, items: its })),
+        sheets: [...theoSheet].map(([id, its]) => ({ id, groupSubtotal: gs.get(id) ?? false, discount: gg.get(id) as never, items: its })),
       });
       for (const t of totals.sheetTotals) tinhLai.set(t.sheetId, Number(t.subtotal.toString()) || 0);
     }

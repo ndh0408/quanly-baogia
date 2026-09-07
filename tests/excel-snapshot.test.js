@@ -31,7 +31,13 @@ const CASES = {
     item({ name: "Con 1", unitPrice: 200000 }),
     { kind: "info", name: "Dòng thông tin (không tính tiền)" },
   ], { groupSubtotal: true })] }),
-  "discount": q({ discount: 150000, sheets: [sheet([item({ name: "X", quantity: 2, unitPrice: 2000000 })])] }),
+  // Discount ở MỨC SHEET → khối tổng dài ra 2 hàng: Cộng / Discount / Tổng Cộng / VAT / Thành Tiền.
+  "discount": q({ sheets: [sheet([item({ name: "X", quantity: 2, unitPrice: 2000000 })], { discount: 150000 })] }),
+  // Chỉ MỘT trong nhiều sheet có Discount — sheet kia phải giữ NGUYÊN khối 3 hàng như cũ.
+  "discount-multi": q({ sheets: [
+    sheet([item({ name: "Có giảm", quantity: 2, unitPrice: 2000000 })], { name: "Banner", discount: 150000 }),
+    sheet([item({ name: "Không giảm" })], { order: 2, name: "Standee" }),
+  ] }),
   // Nhiều sheet: tab Excel đánh số "1. …/2. …" + tiêu đề mỗi sheet nối tên sheet ("… - Banner").
   "multi-sheet": q({ sheets: [
     sheet([item({ name: "Banner item" })], { name: "Banner" }),

@@ -36,6 +36,7 @@ export const KHOA_SHEET = [
   "order",
   "groupSubtotal",
   "showImages",
+  "discount",
   "subtotal",
   "items",
   "extraTables",
@@ -153,6 +154,7 @@ export function sheetKhongDoi(taoMoi: BanGhiSheet | null | undefined, cu: HangSh
   if (!bangChuoi(taoMoi.order, cu.order)) return false;
   if (!!taoMoi.groupSubtotal !== !!cu.groupSubtotal) return false;
   if (!!taoMoi.showImages !== !!cu.showImages) return false;
+  if (!bangSo(taoMoi.discount, cu.discount)) return false;
   if (!bangSo(taoMoi.subtotal, cu.subtotal)) return false;
   if (chuanJson(taoMoi.extraTables ?? null) !== chuanJson(cu.extraTables ?? null)) return false;
 

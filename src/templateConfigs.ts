@@ -68,6 +68,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       subtotal: {
         labelCells: [["F", "G"]],
         labelText: () => "Tổng Cộng",
+        // Sheet CÓ Discount → dòng này là số CHƯA trừ nên đổi nhãn thành "Cộng", còn nhãn
+        // "Tổng Cộng" tụt xuống dòng sau Discount (excel.ts dựng hai hàng đó).
+        labelTextGross: () => "Cộng",
         valueCell: "H",
         rowOffset: 1,
         formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
@@ -81,7 +84,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       },
       discount: {
         labelCells: [["F", "G"]],
-        labelText: () => "Giảm Giá",
+        labelText: () => "Discount",
         valueCell: "H",
       },
       total: {
@@ -203,6 +206,9 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       subtotal: {
         labelCells: [["B", "G"]],
         labelText: () => "Tổng Cộng",
+        // Sheet CÓ Discount → dòng này là số CHƯA trừ nên đổi nhãn thành "Cộng", còn nhãn
+        // "Tổng Cộng" tụt xuống dòng sau Discount (excel.ts dựng hai hàng đó).
+        labelTextGross: () => "Cộng",
         valueCell: "H",
         rowOffset: 1,
         formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
@@ -214,11 +220,12 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         rowOffset: 2,
         formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `H${subtotalRow}*${vatPct}%`,
       },
-      // Optional "Giảm Giá" row, inserted between VAT and Thành Tiền only when the
-      // quote has a discount. Total then subtracts it.
+      // Hàng "Discount" — CHỈ chèn khi sheet có Discount, nằm NGAY DƯỚI dòng "Cộng". Dòng
+      // "Tổng Cộng" kế tiếp = Cộng + Discount (ghi số ÂM), rồi VAT mới tính trên "Tổng Cộng".
+      // Xem khối tổng trong src/excel.ts.
       discount: {
         labelCells: [["B", "G"]],
-        labelText: () => "Giảm Giá",
+        labelText: () => "Discount",
         valueCell: "H",
       },
       total: {
@@ -305,6 +312,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       subtotal: {
         labelCells: [["B", "G"]],
         labelText: () => " Tổng",
+        labelTextGross: () => "Cộng",   // xem chú thích cùng tên ở marico_decor
         valueCell: "H",
         rowOffset: 1,
         formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
@@ -318,7 +326,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       },
       discount: {
         labelCells: [["B", "G"]],
-        labelText: () => "Giảm Giá",
+        labelText: () => "Discount",
         valueCell: "H",
       },
       total: {

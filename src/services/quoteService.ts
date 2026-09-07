@@ -262,7 +262,6 @@ export async function createQuote(req: Request) {
     customerId: b.customerId ?? null,
     greeting: b.greeting || undefined,
     vatPercent: D(b.vatPercent),
-    discount: D(b.discount || 0),
     showTotals: b.showTotals !== false,
     notes: b.notes || null,
     customerLogo: b.customerLogo || null,
@@ -271,11 +270,11 @@ export async function createQuote(req: Request) {
   };
 
   // Compute totals from sheets+items BEFORE writing so we store the snapshot.
-  const t = computeQuoteTotals({ vatPercent: draft.vatPercent, discount: draft.discount, sheets: b.sheets });
+  const t = computeQuoteTotals({ vatPercent: draft.vatPercent, sheets: b.sheets });
   assertTotalsStorable(t, b.sheets); // 400 nói rõ trang nào âm, thay vì 500 mất trắng lần Lưu
   draft.subtotal = t.subtotal;
   draft.vat = t.vat;
-  draft.discount = t.discount;
+  draft.discount = t.discount;   // = Σ giảm giá các sheet (suy ra, xem src/money.ts)
   draft.total = t.total;
 
   const prefix = company.quotePrefix || "GN";
@@ -464,7 +463,8 @@ export async function updateQuote(req: Request) {
   if (b.executionDate !== undefined) data.executionDate = b.executionDate || null;
   if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
   if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
-  if (b.discount !== undefined) data.discount = D(b.discount);
+  // `b.discount` (mức báo giá) CỐ Ý bị bỏ qua: giảm giá nay ở mức SHEET và `Quote.discount` được
+  // computeQuoteTotals suy ra = Σ các sheet. Nhận số client gửi ở đây là mở đường ghi đè nó.
   if (b.showTotals !== undefined) data.showTotals = b.showTotals;
   if (b.companyId !== undefined) data.companyId = b.companyId;
   if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
@@ -481,7 +481,7 @@ export async function updateQuote(req: Request) {
   }
 
   // Price-affecting edit on a quote already in the pipeline -> reopen to draft.
-  const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined || data.discount !== undefined;
+  const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined;
   if (priceAffecting) data.currentVersion = (existing.currentVersion ?? 1) + 1;
   const wasLocked = ["pending", "approved", "sent"].includes(existing.status);
   const reopened = wasLocked && priceAffecting;
@@ -503,7 +503,19 @@ export async function updateQuote(req: Request) {
     // Tiền KHÔNG phụ thuộc extraTables (computeQuoteTotals chỉ đọc `sh.items` — src/money.ts:54),
     // nên tính tổng ở NGOÀI transaction là an toàn và giữ transaction ngắn nhất có thể.
     const vatPct = data.vatPercent ?? existing.vatPercent;
-    const t = computeQuoteTotals({ vatPercent: vatPct, discount: data.discount ?? existing.discount, sheets: b.sheets });
+    // ── TAB CŨ KHÔNG ĐƯỢC XOÁ DISCOUNT ────────────────────────────────────────────────────────
+    // `sheets[].discount` là trường MỚI và là optional trong sheetSchema, nên một tab trình duyệt
+    // đang chạy bundle CŨ (mở trước lúc deploy) gửi payload KHÔNG có khoá đó. Không xử lý thì
+    // `undefined` → 0 → một lần bấm Lưu ở tab đó XOÁ SẠCH giảm giá của mọi sheet, mà vẫn báo
+    // "Đã lưu". Vắng mặt ⇒ GIỮ số đang có trong CSDL (ghép theo sheet.id); gửi 0 tường minh thì
+    // mới là "xoá", và chỉ bundle mới gửi được như vậy (nó luôn gửi một con số).
+    const discCu = new Map<number, unknown>((existing.sheets || []).map((sh: any) => [sh.id, sh.discount]));
+    for (const sh of b.sheets as any[]) {
+      if (sh && sh.discount === undefined && sh.id != null && discCu.has(Number(sh.id))) {
+        sh.discount = discCu.get(Number(sh.id));
+      }
+    }
+    const t = computeQuoteTotals({ vatPercent: vatPct, sheets: b.sheets });
     assertTotalsStorable(t, b.sheets);
     data.subtotal = t.subtotal;
     data.vat = t.vat;
@@ -576,8 +588,9 @@ export async function updateQuote(req: Request) {
       return u;
     });
   } else {
-    if (data.vatPercent !== undefined || data.discount !== undefined) {
-      const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, discount: data.discount ?? existing.discount, sheets: existing.sheets });
+    if (data.vatPercent !== undefined) {
+      // Đổi RIÊNG VAT: giảm giá từng sheet lấy từ CSDL (QUOTE_UPDATE_STATE_SELECT có `discount`).
+      const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, sheets: existing.sheets });
       assertTotalsStorable(t, existing.sheets);
       data.subtotal = t.subtotal;
       data.vat = t.vat;
@@ -1292,7 +1305,7 @@ export async function duplicateQuote(req: Request) {
   }
 
   const sameProject = req.body.sameProject === true;
-  const t = computeQuoteTotals({ vatPercent: src.vatPercent, discount: src.discount, sheets: src.sheets });
+  const t = computeQuoteTotals({ vatPercent: src.vatPercent, sheets: src.sheets });
 
   // Resolve title + project-code base. The version number is computed INSIDE the tx
   // (below) so a P2002 from the @@unique([projectCode, projectVersion]) constraint retries
@@ -1344,7 +1357,8 @@ export async function duplicateQuote(req: Request) {
         order: s.order != null ? s.order : sIdx + 1,
         groupSubtotal: s.groupSubtotal,
         showImages: !!s.showImages,
-        subtotal: t.sheetTotals[sIdx]?.subtotal ?? D(0),   // materialized (= subtotal nguồn)
+        discount: t.sheetTotals[sIdx]?.discount ?? D(0),   // Discount riêng của sheet (đã kẹp)
+        subtotal: t.sheetTotals[sIdx]?.subtotal ?? D(0),   // materialized (= subtotal ĐÃ trừ discount)
         items: {
           create: s.items.map((it: any, iIdx: number) => ({
             order: it.order != null ? it.order : iIdx + 1,

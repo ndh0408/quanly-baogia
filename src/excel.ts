@@ -875,7 +875,31 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // Totals — positions based on actual last row (changes only when we splice/duplicate)
   const t = cfg.totals;
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
-  const vatRow = actualLastRow + t.vat.rowOffset;
+
+  // ── DISCOUNT RIÊNG CỦA SHEET ────────────────────────────────────────────────────────────────
+  // Có Discount → khối tổng dài ra 2 hàng và VAT đổi gốc tính:
+  //     Cộng → Discount (số ÂM) → Tổng Cộng (= Cộng + Discount) → VAT(Tổng Cộng) → Thành Tiền
+  // Không có Discount → giữ NGUYÊN 3 hàng như cũ (Tổng Cộng → VAT → Thành Tiền), không chèn gì.
+  // Kẹp vào [0, tổng sheet] đúng như computeQuoteTotals (src/money.ts) và shared/quote-math.ts —
+  // ba chỗ này phải ra cùng một con số, nếu không file Excel nói khác cái đã lưu.
+  const discountRaw = Math.round(Number(sheet?.discount) || 0);
+  const discount = discountRaw > 0 ? Math.min(discountRaw, Math.max(0, Math.round(subtotal))) : 0;
+  const vatRow0 = actualLastRow + t.vat.rowOffset;
+  let discountRow: number | null = null;
+  let netRow: number | null = null;
+  let extraTotalsRows = 0;
+  if (discount > 0 && t.discount) {
+    // Nhân bản STYLE của hàng VAT gốc 2 lần rồi đẩy phần dưới xuống — hai hàng mới nằm NGAY DƯỚI
+    // hàng "Cộng", nên style viền/nền của khối tổng liền mạch.
+    ws.duplicateRow(vatRow0, 2, true);
+    discountRow = subtotalRow + 1;
+    netRow = subtotalRow + 2;
+    extraTotalsRows = 2;
+  }
+  const vatRow = vatRow0 + extraTotalsRows;
+  // Hàng mà VAT và Thành Tiền lấy làm gốc: "Tổng Cộng" khi có Discount, còn không thì chính "Cộng".
+  const baseRow = netRow ?? subtotalRow;
+  const netSubtotal = subtotal - discount;
 
   // When sections are present, a simple SUM(column) double-counts (mục con per-unit +
   // thành tiền nhóm), so write the computed value instead of a SUM formula.
@@ -890,41 +914,42 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (terms.length) subtotalFormula = terms.map((x) => x.expr).join("+");
   }
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
-    text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null,
+    // Có Discount thì hàng này chỉ còn là "Cộng" (chưa trừ) — nhãn "Tổng Cộng" chuyển xuống netRow.
+    text: discountRow ? (t.subtotal.labelTextGross ? t.subtotal.labelTextGross(vatPct) : "Cộng")
+                      : (t.subtotal.labelText ? t.subtotal.labelText(vatPct) : null),
     formula: subtotalFormula,
     result: subtotal,
     rawValue: subtotalFormula == null ? subtotal : null,
   });
+  if (discountRow && netRow) {
+    // Ghi số ÂM đúng như file khách đang dùng ("-3,000,000") → dòng Tổng Cộng là phép CỘNG,
+    // nhìn vào cột là thấy ngay tiền đi đâu.
+    applyTotalsRow(ws, t.discount, discountRow, {
+      text: t.discount.labelText ? t.discount.labelText(vatPct) : "Discount",
+      rawValue: -discount,
+    });
+    const vc = t.subtotal.valueCell;
+    applyTotalsRow(ws, t.subtotal, netRow, {
+      text: t.subtotal.labelText ? t.subtotal.labelText(vatPct) : "Tổng Cộng",
+      formula: `${vc}${subtotalRow}+${vc}${discountRow}`,
+      result: netSubtotal,
+    });
+  }
   // VAT làm tròn số nguyên (khớp tổng đã chốt ở server) — bọc ROUND để Excel cũng tính ra số nguyên.
-  const vatAmt = Math.round(subtotal * vatPct / 100);
+  // Gốc tính là `baseRow`: có Discount thì VAT chạy trên số ĐÃ TRỪ.
+  const vatAmt = Math.round(netSubtotal * vatPct / 100);
   applyTotalsRow(ws, t.vat, vatRow, {
     text: t.vat.labelText(vatPct),
-    formula: `ROUND(${t.vat.formula({ subtotalRow, vatPct })},0)`,
+    formula: `ROUND(${t.vat.formula({ subtotalRow: baseRow, vatPct })},0)`,
     result: vatAmt,
   });
 
-  // Optional "Giảm Giá" row. Only rendered on a sheet when this is the sole sheet
-  // (the quote-level discount belongs on the grand total; multi-sheet exports show
-  // it on the summary sheet instead). Inserting it pushes the total + footer down 1.
-  const discount = Number(quote.discount) || 0;
-  const onlySheet = (quote.sheets || []).length === 1;
-  let discountRow = null;
-  let extraTotalsRows = 0;
-  if (discount > 0 && onlySheet && t.discount) {
-    discountRow = vatRow + 1;
-    ws.duplicateRow(vatRow, 1, true);   // clone VAT row's styling for the new Giảm Giá row
-    extraTotalsRows = 1;
-    applyTotalsRow(ws, t.discount, discountRow, {
-      text: t.discount.labelText ? t.discount.labelText(vatPct) : "Giảm Giá",
-      rawValue: discount,
-    });
-  }
-
   const totalRow = actualLastRow + t.total.rowOffset + extraTotalsRows;
   applyTotalsRow(ws, t.total, totalRow, {
+    // `discountRow: null` là CỐ Ý: Discount đã bị trừ ở `baseRow` rồi, trừ lần nữa là trừ hai lần.
     text: t.total.labelText(vatPct),
-    formula: t.total.formula({ subtotalRow, vatRow, discountRow }),
-    result: subtotal + vatAmt - (discountRow ? discount : 0),   // = Cộng + VAT(đã tròn) − Giảm Giá
+    formula: t.total.formula({ subtotalRow: baseRow, vatRow, discountRow: null }),
+    result: netSubtotal + vatAmt,   // = Tổng Cộng + VAT(đã tròn)
   });
 
   // Footer merges (e.g. CLF "* Ghi chú" at C:D) ride the item splice/duplicate by
@@ -977,6 +1002,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (pal.totalsFill || pal.totalsValueColor) {
       const totalRows = [subtotalRow, vatRow, totalRow];
       if (discountRow) totalRows.push(discountRow);
+      if (netRow) totalRows.push(netRow);
       // chỉ tô các cột thuộc khối tổng (nhãn + giá trị) để không đè ô Ghi chú bên trái
       const tCols = new Set();
       for (const grp of [t.subtotal, t.vat, t.total]) {
@@ -1071,10 +1097,14 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
 
   return {
-    subtotal,
-    vat: subtotal * vatPct / 100,
-    total: subtotal * (1 + vatPct / 100),
+    subtotal,                       // "Cộng" — CHƯA trừ Discount
+    discount,                       // đã kẹp vào [0, subtotal]
+    netSubtotal,                    // "Tổng Cộng" của sheet = số nó đóng góp vào báo giá
+    vat: vatAmt,
+    total: netSubtotal + vatAmt,
     subtotalCell: `${t.subtotal.valueCell}${subtotalRow}`,
+    // Ô chứa Discount (số ÂM) — sheet "Tổng Báo Giá" tham chiếu để dòng Discount ở đó SỐNG.
+    discountCell: discountRow ? `${t.subtotal.valueCell}${discountRow}` : null,
   };
 }
 
@@ -1296,28 +1326,40 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
   });
 
   const totalsStart = headerRow + 1 + sheetTotals.length;
-  // LUÔN tính "Tổng cộng" từ tổng các sheet ĐANG hiển thị (subtotalAll = Σ subtotal từng sheet,
+  // LUÔN tính "Cộng" từ tổng các sheet ĐANG hiển thị (subtotalAll = Σ subtotal từng sheet,
   // đều đã cắt Số Lượng + làm tròn Thành Tiền) → khớp ĐÚNG tổng các dòng sheet ngay phía trên,
   // tự nhất quán. money.js cũng cắt + làm tròn nên với báo giá đã lưu mới, số này == tổng đã lưu;
   // báo giá CŨ (lưu theo Số Lượng chưa cắt) cũng không còn lệch dòng-vs-tổng trong file Excel.
-  const discountVal = Number(quote.discount) || 0;
-  const subtotalVal = subtotalAll;
+  //
+  // Discount sống ở MỨC SHEET, nên ở đây nó chỉ là TỔNG các sheet — và mỗi dòng sheet phía trên
+  // vẫn là số "Cộng" (chưa trừ) để các dòng cộng lại đúng bằng dòng "Cộng". Không có sheet nào
+  // giảm giá thì khối này y NGUYÊN như cũ: Tổng cộng → VAT → Thành tiền.
+  const discountVal = sheetTotals.reduce((a: number, st: any) => a + (Number(st.discount) || 0), 0);
+  const coDiscount = discountVal > 0;
+  const grossVal = subtotalAll;
+  const subtotalVal = grossVal - discountVal;          // = Σ "Tổng Cộng" từng sheet
   const vatVal = Math.round(subtotalVal * vatPct / 100);
-  const grandTotal = subtotalVal + vatVal - discountVal;
+  const grandTotal = subtotalVal + vatVal;
   const firstSheetRow = headerRow + 1;
   const lastSheetRow = headerRow + sheetTotals.length;
-  const subtotalSummaryRow = totalsStart;
-  const vatSummaryRow = totalsStart + 1;
-  const discountSummaryRow = discountVal > 0 ? totalsStart + 2 : null;
+  const grossSummaryRow = totalsStart;
+  const discountSummaryRow = coDiscount ? totalsStart + 1 : null;
+  const subtotalSummaryRow = coDiscount ? totalsStart + 2 : totalsStart;   // dòng "Tổng cộng"
+  const vatSummaryRow = subtotalSummaryRow + 1;
+  // Dòng Discount SỐNG: cộng thẳng các ô Discount (đã là số ÂM) của từng sheet — sửa số ở sheet
+  // nào là tổng ở đây tự chạy theo, không có con số chết nào để lệch.
+  const discountRefs = sheetTotals
+    .filter((st: any) => st.discountCell)
+    .map((st: any) => `'${String(st.name || "").replace(/'/g, "''")}'!${st.discountCell}`);
   const totalRows: { label: string; value: number; formula?: string }[] = [
-    { label: "Tổng cộng", value: subtotalVal, formula: sheetTotals.length ? `SUM(C${firstSheetRow}:C${lastSheetRow})` : "0" },
-    { label: `VAT (${vatPct}%)`, value: vatVal, formula: `ROUND(C${subtotalSummaryRow}*${vatPct}%,0)` },
+    { label: coDiscount ? "Cộng" : "Tổng cộng", value: grossVal, formula: sheetTotals.length ? `SUM(C${firstSheetRow}:C${lastSheetRow})` : "0" },
   ];
-  if (discountVal > 0) totalRows.push({ label: "Giảm giá", value: discountVal });
-  totalRows.push({
-    label: "Thành tiền", value: grandTotal,
-    formula: `C${subtotalSummaryRow}+C${vatSummaryRow}${discountSummaryRow ? `-C${discountSummaryRow}` : ""}`,
-  });
+  if (coDiscount) {
+    totalRows.push({ label: "Discount", value: -discountVal, formula: discountRefs.length ? discountRefs.join("+") : undefined });
+    totalRows.push({ label: "Tổng cộng", value: subtotalVal, formula: `C${grossSummaryRow}+C${discountSummaryRow}` });
+  }
+  totalRows.push({ label: `VAT (${vatPct}%)`, value: vatVal, formula: `ROUND(C${subtotalSummaryRow}*${vatPct}%,0)` });
+  totalRows.push({ label: "Thành tiền", value: grandTotal, formula: `C${subtotalSummaryRow}+C${vatSummaryRow}` });
   totalRows.forEach((tr, i: any) => {
     const r = totalsStart + i;
     ws.mergeCells(r, 1, r, 2);
@@ -1435,7 +1477,7 @@ export async function buildQuoteBuffer(quote: any) {
 
   const sheetBuffers: Buffer[] = [];
   const sheetNames: string[] = [];
-  const sheetTotals: { name: string; subtotal: number; vat: number; total: number; subtotalCell: string }[] = [];
+  const sheetTotals: { name: string; subtotal: number; discount: number; netSubtotal: number; vat: number; total: number; subtotalCell: string; discountCell: string | null }[] = [];
   // Excel ĐỐI CHIẾU TÊN TAB KHÔNG PHÂN BIỆT HOA/THƯỜNG (exceljs/lib/doc/worksheet.js:168 dùng
   // `.toLowerCase()`). Set phân biệt hoa/thường sẽ cho "Booth" và "booth" cùng lọt rồi ném ở setter.
   const usedNames = new Set<string>();

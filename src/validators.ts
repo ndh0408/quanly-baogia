@@ -241,6 +241,9 @@ const sheetSchema = z.object({
   order: z.coerce.number().int().optional(),
   groupSubtotal: z.boolean().optional(),
   showImages: z.boolean().optional(),   // BẬT cột "Hình ảnh" cho sheet này
+  // Giảm giá RIÊNG của sheet (VNĐ, ≥ 0) — trừ TRƯỚC khi tính VAT. Server kẹp lại theo tổng sheet
+  // trong computeQuoteTotals, ở đây chỉ chặn số vô lý/âm để báo lỗi tiếng Việt thay vì 500.
+  discount: z.coerce.number({ error: "Discount phải là số" }).min(0, "Discount không được nhỏ hơn 0").max(1e12, "Discount quá lớn").optional(),
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
   extraTables: z.array(extraTableSchema).max(20).optional().default([]),
 });
@@ -322,6 +325,8 @@ export const QuoteCreateSchema = z.object({
   managerId: z.coerce.number().int().positive().optional().nullable(), // quản lý phụ trách (bắt buộc khi nhân viên tạo)
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number({ error: "VAT phải là số" }).min(0, "VAT không được nhỏ hơn 0%").max(100, "VAT không được vượt quá 100%").default(8),
+  // GIỮ ĐỂ KHÔNG VỠ CLIENT CŨ, NHƯNG BỊ BỎ QUA: giảm giá nay ở mức SHEET (`sheets[].discount`)
+  // và `Quote.discount` là Σ các sheet, do computeQuoteTotals tính. Xem src/money.ts.
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
@@ -360,6 +365,7 @@ export const QuoteUpdateSchema = z.object({
   customerId: z.coerce.number().int().positive().optional().nullable(),
   greeting: z.string().max(2000).optional(),
   vatPercent: z.coerce.number().min(0).max(100).optional(),
+  // BỊ BỎ QUA — xem chú thích cùng tên ở QuoteCreateSchema.
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),

@@ -13,7 +13,7 @@ export type Item = {
   formulas?: Record<string, string>; order?: number;
   images?: string[];   // MẢNG ảnh base64 data-URL (cột "Hình ảnh", chỉ khi sheet.showImages)
 };
-export type Sheet = { id?: number; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; order?: number; items: Item[]; extraTables?: unknown[] };
+export type Sheet = { id?: number; templateId?: number; name?: string | null; groupSubtotal?: boolean; showImages?: boolean; discount?: number; order?: number; items: Item[]; extraTables?: unknown[] };
 export type TemplateLayout = { hasDays?: boolean; hasDetail?: boolean; numberSubsections?: boolean };
 export type Template = { id: number; code?: string; name: string; companyId?: number; layout?: TemplateLayout };
 export type Company = { id: number; name: string; shortName?: string; address?: string };
@@ -55,15 +55,31 @@ export function sheetSubtotalGrouped(items: Item[], usesDays: boolean, groupSubt
   }
   return sum;
 }
-// Tổng báo giá: làm tròn subtotal, VAT từ subtotal đã tròn, kẹp giảm giá vào [0, gross]. Mirror money.js.
-export function quoteTotals(subtotalRaw: number, vatPct?: number, discountRaw?: number) {
-  const subtotal = roundVnd(subtotalRaw);
+// ── GIẢM GIÁ (Discount) sống ở MỨC SHEET, và trừ TRƯỚC khi tính VAT ───────────────────────────
+//     Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền
+// Đây là bố cục file khách đang dùng, nên VAT PHẢI tính trên số đã trừ. `Quote.discount` chỉ còn
+// là TỔNG các sheet (suy ra). Mirror ở src/money.ts — sửa chính sách thì sửa CẢ HAI.
+/** Giảm giá của MỘT sheet, kẹp vào [0, tổng sheet] → Tổng Cộng của sheet không bao giờ âm vì Discount. */
+export function sheetDiscountOf(gross: number, raw?: number | null) {
+  const d = roundVnd(raw || 0);
+  if (d <= 0) return 0;
+  const cap = Math.max(0, roundVnd(gross));
+  return d > cap ? cap : d;
+}
+/** Khối tổng của MỘT sheet: Cộng (chưa trừ) · Discount · Tổng Cộng (= net, số sheet đóng góp). */
+export function sheetTotals(sheet: Pick<Sheet, "items" | "groupSubtotal" | "discount">, usesDays: boolean) {
+  const gross = roundVnd(sheetSubtotalGrouped(sheet.items || [], usesDays, sheet.groupSubtotal));
+  const discount = sheetDiscountOf(gross, sheet.discount);
+  return { gross, discount, net: gross - discount };
+}
+export type SheetTotals = ReturnType<typeof sheetTotals>;
+/** Tổng báo giá từ khối tổng của từng sheet. `subtotal` = Σ Tổng Cộng (ĐÃ trừ Discount) → VAT tính trên nó. */
+export function quoteTotals(per: SheetTotals[], vatPct?: number) {
+  const gross = roundVnd(per.reduce((a, x) => a + x.gross, 0));
+  const discount = roundVnd(per.reduce((a, x) => a + x.discount, 0));
+  const subtotal = roundVnd(per.reduce((a, x) => a + x.net, 0));
   const vat = roundVnd((subtotal * (Number(vatPct) || 0)) / 100);
-  const gross = subtotal + vat;
-  let discount = roundVnd(discountRaw || 0);
-  if (discount < 0) discount = 0;
-  if (discount > gross) discount = gross;
-  return { subtotal, vat, discount, total: gross - discount };
+  return { gross, discount, subtotal, vat, total: subtotal + vat };
 }
 // 0→"A", 25→"Z", 26→"AA". Chữ nhóm tự động.
 export function groupLetter(n: number) {

@@ -156,12 +156,71 @@ describe.runIf(dbAvailable)("quote workflow + RBAC (integration)", () => {
       expect(res.body.total).toBe(540_000); // 500,000 + 8% VAT
     });
 
-    it("REGRESSION: a discount-only PUT actually changes the total", async () => {
-      // Quote is now draft with total 540,000 (500,000 + 8% VAT).
-      const res = await manager.put(`/api/quotes/${quoteId}`).send({ discount: 40_000 });
+    // Discount nằm ở MỨC SHEET và trừ TRƯỚC khi tính VAT:
+    //   Cộng 500.000 − Discount 40.000 = 460.000 · VAT 8% = 36.800 · Thành Tiền = 496.800
+    it("REGRESSION: Discount của SHEET đổi tổng, và VAT tính trên số đã trừ", async () => {
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, discount: 40_000, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
       expect(res.status).toBe(200);
-      expect(res.body.discount).toBe(40_000);
-      expect(res.body.total).toBe(500_000); // 540,000 − 40,000
+      expect(res.body.discount).toBe(40_000);          // Quote.discount = Σ các sheet
+      expect(res.body.sheets[0].discount).toBe(40_000);
+      expect(res.body.subtotal).toBe(460_000);         // ĐÃ trừ Discount
+      expect(res.body.vat).toBe(36_800);               // 8% của 460.000, KHÔNG phải của 500.000
+      expect(res.body.total).toBe(496_800);
+    });
+
+    it("Discount ở MỨC BÁO GIÁ (client cũ) bị BỎ QUA — chỉ sheet mới quyết", async () => {
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({ discount: 999_000 });
+      expect(res.status).toBe(200);
+      expect(res.body.discount).toBe(40_000);          // vẫn là Σ discount các sheet
+      expect(res.body.total).toBe(496_800);
+    });
+
+    // Tab trình duyệt mở TRƯỚC lúc deploy chạy bundle CŨ, không biết trường `sheets[].discount`.
+    // Payload nó gửi thiếu hẳn khoá đó. Nếu server coi "vắng mặt" = 0 thì một lần bấm Lưu ở tab đó
+    // xoá sạch giảm giá của mọi sheet mà vẫn trả 200 "đã lưu".
+    it("payload KHÔNG có sheets[].discount (bundle cũ) thì GIỮ discount đang có, không xoá", async () => {
+      // Bundle cũ VẪN gửi `sheets[].id` (nó cần id để server bê trạng thái mức sheet sang bản mới),
+      // chỉ thiếu đúng khoá `discount`. Server ghép theo id đó để lấy lại số đang có trong CSDL.
+      const truoc = await manager.get(`/api/quotes/${quoteId}`);
+      expect(truoc.status).toBe(200);
+      const sheetId = truoc.body.sheets[0].id;
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ id: sheetId, templateId: template.id, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.sheets[0].discount).toBe(40_000);
+      expect(res.body.total).toBe(496_800);
+    });
+
+    it("gửi discount = 0 TƯỜNG MINH thì mới thật sự xoá", async () => {
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, discount: 0, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.discount).toBe(0);
+      expect(res.body.total).toBe(540_000);
+      // trả lại cho các bài sau
+      const back = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, discount: 40_000, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(back.status).toBe(200);
+    });
+
+    it("Discount lớn hơn tổng sheet bị KẸP về tổng sheet (không âm)", async () => {
+      const res = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, discount: 9_999_999, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.discount).toBe(500_000);
+      expect(res.body.subtotal).toBe(0);
+      expect(res.body.total).toBe(0);
+      // trả lại trạng thái cũ cho các bài sau (tổng 496.800)
+      const back = await manager.put(`/api/quotes/${quoteId}`).send({
+        sheets: [{ templateId: template.id, discount: 40_000, items: [{ name: "Hạng mục B", quantity: 1, unitPrice: 500_000 }] }],
+      });
+      expect(back.status).toBe(200);
     });
 
     it("a plain MEMBER (no quote:send) cannot terminal-close the deal → 403", async () => {

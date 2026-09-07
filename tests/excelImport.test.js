@@ -94,6 +94,30 @@ describe("parseQuoteWorkbook — vòng tròn xuất → nhập lại", () => {
     expect(withDays.columns.days).toBe("F");        // mẫu CÓ ngày: Số Ngày chen vào giữa
     expect(withDays.columns.unitPrice).toBe("G");
   });
+
+  // ── DISCOUNT THEO SHEET, VÒNG TRÒN ─────────────────────────────────────────────────────────
+  // File app xuất ra ghi Discount là số ÂM ngay dưới dòng "Cộng". Nhập lại phải ra ĐÚNG số dương
+  // đã nhập, và `totals.subtotal` phải là số CHƯA trừ (dòng "Cộng") để còn đối chiếu với các dòng.
+  it.each(["marico_decor", "clofull_decor", "unibenfood", "gn_banner"])(
+    "Discount ghi số ÂM trong file → nhập lại thành số DƯƠNG của sheet (%s)", async (code) => {
+      const items = [{ kind: "item", name: "A", unit: "m2", quantity: 1, unitPrice: 294988400 }];
+      const buf = await buildQuoteBuffer(baseQuote(code, items, {
+        sheets: [{ order: 1, name: "Décor", groupSubtotal: false, discount: 3000000, template: { code }, items }],
+      }));
+      const res = await parseQuoteWorkbook(buf);
+      const sheet = res.sheets.find((s) => !s.skipped);
+      expect(sheet.totals.discount).toBe(3000000);
+      expect(sheet.totals.subtotal).toBe(294988400);   // dòng "Cộng" — CHƯA trừ
+      expect(sheet.totals.vatPercent).toBe(8);
+      expect(sheet.totals.total).toBe(315347472);
+      // Không cảnh báo lệch tiền: tổng các dòng đọc được == dòng "Cộng" trong file.
+      expect(sheet.warnings.filter((w) => /lệch/i.test(w))).toEqual([]);
+    });
+
+  it("sheet KHÔNG có Discount → totals.discount vắng mặt (không bịa số 0)", async () => {
+    const { sheet } = await roundTrip("marico_decor", [{ kind: "item", name: "A", unit: "m2", quantity: 2, unitPrice: 1000000 }]);
+    expect(sheet.totals?.discount).toBeUndefined();
+  });
 });
 
 describe("parseQuoteWorkbook — công thức tham chiếu ô", () => {

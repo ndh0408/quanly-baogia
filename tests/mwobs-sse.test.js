@@ -19,7 +19,7 @@
 // ── LỖI 3: `emitChange` phát id thật cho MỌI phiên đang mở ───────────────────
 // `broadcast("changed", { entity, action, id })` đi tới mọi subscriber, không lọc quyền. Chỗ gọi là
 // src/db.ts sau mỗi lần ghi Quote/Customer/User, tức id báo giá thật được phát cho cả những tài
-// khoản không có quyền đọc báo giá đó. Client React (web/src/components/Shell.tsx:336) KHÔNG đọc
+// khoản không có quyền đọc báo giá đó. Client React (web/src/components/Shell.tsx:355) KHÔNG đọc
 // payload — nó chỉ kích hoạt re-fetch qua API đã gác quyền — nên id trong payload không phục vụ ai
 // ngoài người nghe lén.
 // HẬU QUẢ: dựng được nhịp làm việc + khoảng id báo giá theo thời gian thực chỉ bằng cách nghe SSE.

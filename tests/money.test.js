@@ -108,39 +108,68 @@ describe("computeQuoteTotals", () => {
   });
 });
 
-describe("computeQuoteTotals — discount", () => {
+// Discount ở MỨC SHEET và trừ TRƯỚC khi tính VAT:
+//   Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền
+describe("computeQuoteTotals — discount theo từng sheet", () => {
   const oneItem = (discount) => ({
     vatPercent: 0,
-    discount,
-    sheets: [{ items: [{ quantity: 1, unitPrice: 1000 }] }],
+    sheets: [{ discount, items: [{ quantity: 1, unitPrice: 1000 }] }],
   });
 
-  it("subtracts a normal discount from the grand total", () => {
+  it("trừ thẳng vào tổng của sheet đó", () => {
     const t = computeQuoteTotals(oneItem(300));
-    expect(t.discount.toNumber()).toBe(300);
+    expect(t.sheetTotals[0].gross.toNumber()).toBe(1000);
+    expect(t.sheetTotals[0].subtotal.toNumber()).toBe(700);   // ĐÃ trừ
+    expect(t.discount.toNumber()).toBe(300);                  // Quote.discount = Σ các sheet
+    expect(t.subtotal.toNumber()).toBe(700);
     expect(t.total.toNumber()).toBe(700);
   });
 
-  it("clamps discount to gross — total never goes negative", () => {
+  it("kẹp Discount về tổng SHEET — tổng sheet không bao giờ âm", () => {
     const t = computeQuoteTotals(oneItem(999999));
     expect(t.discount.toNumber()).toBe(1000);
+    expect(t.sheetTotals[0].subtotal.toNumber()).toBe(0);
     expect(t.total.toNumber()).toBe(0);
   });
 
-  it("negative discount is treated as zero", () => {
+  it("Discount âm → 0", () => {
     const t = computeQuoteTotals(oneItem(-500));
     expect(t.discount.toNumber()).toBe(0);
     expect(t.total.toNumber()).toBe(1000);
   });
 
-  it("discount applies after VAT (current policy: VAT on full subtotal)", () => {
+  it("VAT tính TRÊN số đã trừ Discount", () => {
     const t = computeQuoteTotals({
       vatPercent: 10,
-      discount: 100,
+      sheets: [{ discount: 100, items: [{ quantity: 1, unitPrice: 1000 }] }],
+    });
+    expect(t.subtotal.toNumber()).toBe(900);
+    expect(t.vat.toNumber()).toBe(90);      // 10% của 900, KHÔNG phải của 1000
+    expect(t.total.toNumber()).toBe(990);
+  });
+
+  it("`discount` ở MỨC BÁO GIÁ bị BỎ QUA — chỉ sheet mới quyết", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 0,
+      discount: 500,                                   // client cũ gửi lên
       sheets: [{ items: [{ quantity: 1, unitPrice: 1000 }] }],
     });
-    expect(t.vat.toNumber()).toBe(100);   // 10% of 1000 — NOT of (1000 - 100)
-    expect(t.total.toNumber()).toBe(1000); // 1000 + 100 - 100
+    expect(t.discount.toNumber()).toBe(0);
+    expect(t.total.toNumber()).toBe(1000);
+  });
+
+  it("nhiều sheet: mỗi sheet trừ riêng, VAT tính trên tổng đã trừ", () => {
+    const t = computeQuoteTotals({
+      vatPercent: 8,
+      sheets: [
+        { discount: 3_000_000, items: [{ quantity: 1, unitPrice: 294_988_400 }] },
+        { items: [{ quantity: 1, unitPrice: 6_006_500 }] },
+      ],
+    });
+    expect(t.discount.toNumber()).toBe(3_000_000);
+    expect(t.subtotal.toNumber()).toBe(297_994_900);
+    expect(t.vat.toNumber()).toBe(23_839_592);
+    expect(t.total.toNumber()).toBe(321_834_492);
   });
 });
 

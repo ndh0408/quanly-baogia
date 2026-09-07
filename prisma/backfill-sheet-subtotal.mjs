@@ -1,6 +1,9 @@
 // Backfill QuoteSheet.subtotal cho rows CŨ (chạy 1 lần sau migration quotesheet_subtotal).
 // Tính LẠI bằng CHÍNH computeQuoteTotals (như listProjects cũ) → giá trị materialized Y HỆT cách tính cũ
 // → trang Quản lý dự án không đổi 1 số nào. Chạy: node --import tsx prisma/backfill-sheet-subtotal.mjs
+//
+// Từ 2026-09-07 cột này mang nghĩa tổng sheet ĐÃ TRỪ Discount của sheet (xem migration
+// 20260907090000_quote_sheet_discount) — nên select phải kéo cả `discount`, xem chú thích bên dưới.
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -13,7 +16,10 @@ async function main() {
   const quotes = await prisma.quote.findMany({
     select: {
       id: true, vatPercent: true, discount: true,
-      sheets: { select: { id: true, groupSubtotal: true, items: { select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } } } },
+      // `discount` BẮT BUỘC có: cột QuoteSheet.subtotal mang nghĩa tổng sheet ĐÃ TRỪ Discount.
+      // Thiếu nó thì script này ghi đè số CHƯA trừ lên cột, thổi phồng tiền ở trang Quản lý dự án
+      // / Hoá đơn / Tổng quan / Nhân sự — đúng những trang đọc thẳng cột này thay vì tính lại.
+      sheets: { select: { id: true, groupSubtotal: true, discount: true, items: { select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } } } },
     },
   });
   let n = 0;

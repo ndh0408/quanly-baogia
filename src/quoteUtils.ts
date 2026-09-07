@@ -92,7 +92,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   sheets: {
     orderBy: { order: "asc" },
     select: {
-      id: true, name: true, order: true, groupSubtotal: true,
+      id: true, name: true, order: true, groupSubtotal: true, discount: true,
       items: {
         orderBy: { order: "asc" },
         select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
@@ -182,6 +182,10 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false, inte
     customerName: q.customer?.name ?? null,
     sheets: (q.sheets || []).map((s: any) => ({
       ...s,
+      // Decimal → number: editor lấy nguyên phản hồi làm state, để nguyên Decimal thì ô Discount
+      // nhận một object và hiện "[object Object]".
+      discount: s.discount != null ? Number(s.discount) : 0,
+      subtotal: s.subtotal != null ? Number(s.subtotal) : 0,
       extraTables: stripExtraProofs(s.extraTables),   // lược ảnh chứng từ thanh toán (gửi hasPaidProof)
       items: (s.items || []).map((it: any) => ({
         ...it,
@@ -356,7 +360,10 @@ export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Rec
     order: s.order != null ? Number(s.order) : sIdx + 1,
     groupSubtotal: !!s.groupSubtotal,
     showImages: !!s.showImages,   // BẬT cột "Hình ảnh" cho sheet
-    subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),
+    // Discount ĐÃ KẸP của computeQuoteTotals (không lấy thẳng số client gửi): kẹp ở đó thì
+    // cột trong CSDL luôn khớp với tổng đã chốt, không có cửa nào lưu discount > tổng sheet.
+    discount: sheetTotals?.[sIdx]?.discount ?? D(0),
+    subtotal: sheetTotals?.[sIdx]?.subtotal ?? D(0),   // ĐÃ trừ discount
     ...pickCarry(carry?.[sIdx]),
     items: {
       create: (s.items || []).map((it: any, iIdx: number) => ({

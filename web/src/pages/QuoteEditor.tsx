@@ -369,6 +369,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             // mức sheet sang bản mới (khách duyệt sheet, chữ ký, số hoá đơn…). Giá trị vẫn do
             // server quyết — client chỉ dùng id để ghép.
             id: s.id, templateId: s.templateId, name: s.name, order: i + 1, groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
+            discount: Math.max(0, Number(s.discount) || 0),   // Discount RIÊNG của sheet (server kẹp lại theo tổng sheet)
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
@@ -442,6 +443,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         sheets.push({
           _k: nextK(), templateId: p.templateId ?? activeSheet.templateId,
           name: p.file.name, groupSubtotal: !!p.file.groupSubtotal,
+          discount: p.discount ?? 0,
           items: stamped, extraTables: [],
         } as Sheet);
         nAdd += stamped.length; nSheet++; nNew++;
@@ -454,6 +456,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         target.items.splice(0, target.items.length, ...stamped);
         // Dòng nhóm trong file có ghi Thành Tiền ⇒ báo giá đó bật "tổng tiền theo nhóm" → theo file.
         target.groupSubtotal = !!p.file.groupSubtotal;
+        // Discount đọc từ khối tổng của CHÍNH sheet đó trong file (chỉ chế độ Thay — xem modal).
+        if (p.discount != null) target.discount = p.discount;
       }
       nAdd += stamped.length; nSheet++;
     }
@@ -463,10 +467,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     }
     if (!sheets.length) sheets.push({ _k: nextK(), templateId: activeSheet.templateId, name: "", groupSubtotal: true, items: [], extraTables: [] } as Sheet);
     q._activeSheet = Math.max(0, Math.min(q._activeSheet, sheets.length - 1));
-    if (payload.totals) {
-      if (payload.totals.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
-      if (payload.totals.discount != null) q.discount = payload.totals.discount;
-    }
+    // VAT là của CẢ báo giá; Discount đã đặt vào TỪNG sheet ở vòng lặp trên.
+    if (payload.totals?.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
     mark(); redraw();
     toast(`Đã nạp ${nAdd} dòng vào ${nSheet} sheet${nNew ? ` · thêm ${nNew} sheet` : ""}${nRemoved ? ` · xóa ${nRemoved} sheet` : ""} — kiểm tra lại rồi bấm Lưu`, "success");
   };
@@ -506,8 +508,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
 
   // ── summary tổng báo giá (mọi sheet) ─────────────────────────────────────────
-  const subtotalAll = sheets.reduce((acc, s) => { const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0);
-  const tt = M.quoteTotals(subtotalAll, q.vatPercent, q.discount);
+  // Mỗi sheet có khối riêng: Cộng → Discount → Tổng Cộng. Tổng báo giá cộng phần ĐÃ TRỪ của các
+  // sheet rồi mới tính VAT — cùng luật với src/money.ts và file Excel xuất ra.
+  const perSheet = sheets.map((s) => M.sheetTotals(s, !!templates.find((x) => x.id === s.templateId)?.layout?.hasDays));
+  const tt = M.quoteTotals(perSheet, q.vatPercent);
+  const stt = perSheet[ai] ?? { gross: 0, discount: 0, net: 0 };   // khối tổng của sheet ĐANG MỞ
+  const sheetVat = M.roundVnd(stt.net * (Number(q.vatPercent) || 0) / 100);
 
   return (
     <div>
@@ -550,7 +556,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
           <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!editable} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
           <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
-          <label>Giảm giá (VNĐ) <span className="muted" style={{ fontSize: 11 }}>(trừ vào tổng)</span><input type="number" step="1000" min="0" defaultValue={Number(q.discount) || 0} disabled={!editable} onInput={(e) => { setQ("discount", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
+          {/* Giảm giá KHÔNG còn ở đây: nay là "Discount" RIÊNG của từng sheet, nằm ngay dưới lưới
+              cạnh khối tổng của sheet đó — xem khối "Tổng sheet" bên dưới. */}
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
@@ -629,7 +636,58 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
+          sheetTotalLine={false}
           onChange={() => { mark(); redraw(); }} />
+
+        {/* KHỐI TỔNG CỦA SHEET ĐANG MỞ — đúng những hàng in ra file Excel của chính sheet này:
+            Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền.
+            Discount là của RIÊNG sheet; sửa ở đây chỉ đổi sheet này, sheet khác không đụng tới. */}
+        <table className="sheet-total-box">
+          <tbody>
+            <tr>
+              <td>{stt.discount > 0 ? "Cộng" : "Tổng sheet"}</td>
+              <td><SummaryFormula label="Cộng" formula="=SUM(Thành Tiền các hàng)" value={stt.gross} /></td>
+            </tr>
+            <tr>
+              <td>
+                Discount
+                {/* Ô TIỀN: gom dấu chấm nghìn NGAY LÚC GÕ (M.liveFormat) như mọi ô tiền trong lưới —
+                    "3000000" trần rất dễ đọc nhầm một số 0. Giữ caret theo SỐ CHỮ SỐ bên trái, nếu
+                    không thì mỗi lần chèn dấu chấm con trỏ nhảy về cuối.
+                    `key` phải theo DANH TÍNH sheet (`_k`), KHÔNG theo chỉ số `ai`: input này không
+                    kiểm soát (defaultValue chỉ đọc lúc mount), nên xoá sheet đang mở — chỉ số giữ
+                    nguyên mà sheet dưới nó trượt lên — sẽ để lại ô mang số của sheet VỪA BỊ XOÁ. */}
+                {editable
+                  ? <input key={`disc-${activeSheet._k ?? ai}`} type="text" inputMode="numeric" className="sheet-discount-input"
+                      aria-label="Discount trừ vào sheet này (VNĐ)" title="Trừ THẲNG vào sheet này, TRƯỚC khi tính VAT"
+                      defaultValue={M.fmtMoney(Number(activeSheet.discount) || 0)}
+                      onInput={(e) => {
+                        const el = e.target as HTMLInputElement;
+                        const raw = el.value;
+                        const truoc = raw.slice(0, el.selectionStart ?? raw.length).replace(/\D/g, "").length;
+                        // Discount luôn ≥ 0. `liveFormat` GIỮ dấu trừ, nên không cắt ở đây thì ô
+                        // hiện "-3.000.000" trong khi giá trị lưu là 0 — người dùng tưởng đã giảm giá.
+                        const formatted = M.liveFormat(raw).replace(/^-/, "");
+                        el.value = formatted;
+                        let pos = 0, seen = 0;
+                        while (pos < formatted.length && seen < truoc) { if (/\d/.test(formatted[pos])) seen++; pos++; }
+                        try { el.setSelectionRange(pos, pos); } catch { /* */ }
+                        activeSheet.discount = Math.max(0, M.parseVN(formatted));
+                        mark(); redrawMeta();
+                      }} />
+                  : null}
+              </td>
+              <td>{stt.discount > 0
+                ? <SummaryFormula label="Discount" formula="=Discount của sheet này" value={stt.discount} prefix="-" />
+                : <span className="muted">—</span>}</td>
+            </tr>
+            {stt.discount > 0 && (
+              <tr><td>Tổng cộng</td><td><SummaryFormula label="Tổng cộng sheet" formula="=Cộng-Discount" value={stt.net} /></td></tr>
+            )}
+            <tr><td>VAT ({Number(q.vatPercent) || 0}%)</td><td><SummaryFormula label="VAT sheet" formula={`=ROUND(${stt.discount > 0 ? "Tổng cộng" : "Tổng sheet"}*${Number(q.vatPercent) || 0}%;0)`} value={sheetVat} /></td></tr>
+            <tr><td><strong>Thành tiền</strong></td><td><SummaryFormula label="Thành tiền sheet" formula={`=${stt.discount > 0 ? "Tổng cộng" : "Tổng sheet"}+VAT`} value={stt.net + sheetVat} danger /></td></tr>
+          </tbody>
+        </table>
 
         {editable && (
           <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "16px 0 6px", fontSize: 13.5, cursor: "pointer" }}>
@@ -639,7 +697,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         )}
         {editable ? (
           <>
-            <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: để <strong>giảm giá</strong>, bấm “+ Thêm hàng”, ghi nội dung rồi nhập <strong>số tiền âm</strong> ở Đơn giá — sẽ tự trừ vào tổng.</div>
+            <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: <strong>Discount</strong> ở khối tổng ngay trên là của <strong>riêng sheet đang mở</strong> — trừ trước khi tính VAT, và in ra đúng như vậy trong Excel/PDF. Muốn giảm giá cho <strong>một hạng mục</strong> thì vẫn thêm hàng với <strong>số tiền âm</strong> ở Đơn giá.</div>
             <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "8px 0 4px", fontSize: 13.5, cursor: "pointer" }}>
               <input type="checkbox" defaultChecked={!!q.notes} onChange={(e) => {
                 if (e.target.checked) { if (!(q.notes || "").trim()) { setQ("notes", DEFAULT_NOTE); if (noteInputRef.current) noteInputRef.current.value = DEFAULT_NOTE; } if (noteWrapRef.current) noteWrapRef.current.style.display = ""; noteInputRef.current?.focus(); }
@@ -659,19 +717,22 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             <table className="summary-table">
               <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col">Khách duyệt</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
               <tbody>
-                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const sub = M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={`=TỔNG_SHEET("${name}")`} value={sub} /></td></tr>; })}
+                {/* Con số mỗi dòng là "Cộng" của sheet (CHƯA trừ Discount) → các dòng cộng lại
+                    đúng bằng dòng "Cộng" ở dưới; Discount gom thành một dòng riêng. */}
+                {sheets.map((s, i) => { const t = templates.find((x) => x.id === s.templateId); const st = perSheet[i] ?? { gross: 0, discount: 0, net: 0 }; const name = s.name || t?.name || `Sheet ${i + 1}`; return <tr key={s._k ?? i}><td style={{ textAlign: "center" }}>{i + 1}</td><td>{name}{st.discount > 0 && <span className="muted" style={{ fontSize: 12 }}> · discount {M.fmtMoney(st.discount)}</span>}</td><td>{s.custStatus ? <span className={`cust-chip ${s.custStatus}`}>{CUST_LABEL[s.custStatus]}</span> : <span className="muted">—</span>}</td><td style={{ textAlign: "right" }}><SummaryFormula label={`Tổng sheet ${name}`} formula={`=TỔNG_SHEET("${name}")`} value={st.gross} /></td></tr>; })}
               </tbody>
               <tfoot>
                 {/* Chỉ cộng các sheet KHÁCH ĐÃ DUYỆT — báo giá nhiều sheet hay chốt từng phần. */}
                 {sheets.some((s) => s.custStatus === "approved") && (
                   <tr><td colSpan={3}>Tổng phần khách đã duyệt</td><td style={{ textAlign: "right" }}>
-                    <SummaryFormula label="Tổng phần khách đã duyệt" formula="=SUM(Các sheet khách đã duyệt)" value={sheets.reduce((acc, s) => { if (s.custStatus !== "approved") return acc; const t = templates.find((x) => x.id === s.templateId); return acc + M.sheetSubtotalGrouped(s.items, !!t?.layout?.hasDays, s.groupSubtotal); }, 0)} />
+                    <SummaryFormula label="Tổng phần khách đã duyệt" formula="=SUM(Các sheet khách đã duyệt, đã trừ Discount)" value={sheets.reduce((acc, s, i) => (s.custStatus === "approved" ? acc + (perSheet[i]?.net ?? 0) : acc), 0)} />
                   </td></tr>
                 )}
-                <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=SUM(Tổng từng sheet)" value={tt.subtotal} /></td></tr>
+                <tr><td colSpan={3}>{tt.discount > 0 ? "Cộng" : "Tổng cộng"}</td><td style={{ textAlign: "right" }}><SummaryFormula label={tt.discount > 0 ? "Cộng" : "Tổng cộng"} formula="=SUM(Tổng từng sheet)" value={tt.gross} /></td></tr>
+                {tt.discount > 0 && <tr><td colSpan={3}>Discount</td><td style={{ textAlign: "right" }}><SummaryFormula label="Discount" formula="=SUM(Discount từng sheet)" value={tt.discount} prefix="-" /></td></tr>}
+                {tt.discount > 0 && <tr><td colSpan={3}>Tổng cộng</td><td style={{ textAlign: "right" }}><SummaryFormula label="Tổng cộng" formula="=Cộng-Discount" value={tt.subtotal} /></td></tr>}
                 <tr><td colSpan={3}>VAT ({Number(q.vatPercent) || 0}%)</td><td style={{ textAlign: "right" }}><SummaryFormula label="VAT" formula={`=ROUND(Tổng cộng*${Number(q.vatPercent) || 0}%;0)`} value={tt.vat} /></td></tr>
-                {tt.discount > 0 && <tr><td colSpan={3}>Giảm giá</td><td style={{ textAlign: "right" }}><SummaryFormula label="Giảm giá" formula="=Giảm giá đã nhập" value={tt.discount} prefix="-" /></td></tr>}
-                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><SummaryFormula label="Thành tiền" formula={`=Tổng cộng+VAT${tt.discount > 0 ? "-Giảm giá" : ""}`} value={tt.total} danger /></td></tr>
+                <tr><td colSpan={3}><strong>Thành tiền</strong></td><td style={{ textAlign: "right" }}><SummaryFormula label="Thành tiền" formula="=Tổng cộng+VAT" value={tt.total} danger /></td></tr>
               </tfoot>
             </table>
           </div>
@@ -756,7 +817,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   );
 }
 
-const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Giảm giá", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng" };
+const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng" };
 const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
 function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
   const sorted = [...versions].sort((a, b) => a.versionNo - b.versionNo);

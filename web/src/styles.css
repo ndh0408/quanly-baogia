@@ -3321,6 +3321,40 @@ textarea[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+/* Khối tổng của SHEET đang mở (ngay dưới lưới) — đúng những hàng in ra Excel của sheet đó:
+   Cộng / Discount / Tổng cộng / VAT / Thành tiền. Neo phải, hẹp, để không tranh chỗ với lưới. */
+.sheet-total-box {
+  margin: 6px 0 4px auto;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.sheet-total-box td {
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.sheet-total-box tr:last-child td {
+  border-bottom: 0;
+}
+.sheet-total-box td:first-child {
+  color: var(--text-soft);
+  text-align: right;
+}
+.sheet-total-box td:last-child {
+  font-weight: 600;
+  text-align: right;
+}
+.sheet-discount-input {
+  width: 116px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+  text-align: right;
+}
+
 .summary-formula-value {
   display: inline-flex;
   align-items: center;

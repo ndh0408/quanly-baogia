@@ -1,7 +1,7 @@
 // Test VECTOR VÀNG cho lõi toán tiền dùng chung (shared/quote-math.ts, qua re-export ./quoteMath).
 // Khóa CHÍNH SÁCH làm tròn/cắt/giảm-giá để KHÔNG ai đổi nhầm → lệch tiền khách. Đây là tiền khách.
 import { describe, it, expect } from "vitest";
-import { qtyRound, roundVnd, lineAmount, sheetSubtotalGrouped, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
+import { qtyRound, roundVnd, lineAmount, sheetSubtotalGrouped, sheetTotals, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
 
 describe("qtyRound — LÀM TRÒN Số Lượng về 1 chữ số thập phân", () => {
   it("làm tròn 1 số (7,378→7,4 · 6,42→6,4 · 5,65→5,7)", () => { expect(qtyRound(7.378)).toBeCloseTo(7.4); expect(qtyRound(6.42)).toBeCloseTo(6.4); expect(qtyRound(5.65)).toBeCloseTo(5.7); });
@@ -40,15 +40,40 @@ describe("sheetSubtotalGrouped — hệ số nhóm", () => {
   });
 });
 
-describe("quoteTotals — VAT + kẹp giảm giá", () => {
-  it("VAT tính TỪ subtotal đã làm tròn", () => {
-    expect(quoteTotals(6_000_000, 8, 0)).toEqual({ subtotal: 6_000_000, vat: 480_000, discount: 0, total: 6_480_000 });
+describe("sheetTotals — Discount RIÊNG của sheet, kẹp vào [0, tổng sheet]", () => {
+  const sheet = (discount?: number) => ({
+    groupSubtotal: false, discount,
+    items: [{ kind: "item" as const, quantity: 2, unitPrice: 3_000_000 }],
   });
-  it("giảm giá > tổng → kẹp về tổng (total không âm)", () => {
-    expect(quoteTotals(6_000_000, 8, 10_000_000)).toEqual({ subtotal: 6_000_000, vat: 480_000, discount: 6_480_000, total: 0 });
+  it("không có Discount → net = gross", () => {
+    expect(sheetTotals(sheet(), false)).toEqual({ gross: 6_000_000, discount: 0, net: 6_000_000 });
   });
-  it("giảm giá âm → 0", () => {
-    expect(quoteTotals(6_000_000, 8, -5).discount).toBe(0);
+  it("trừ đúng số đã nhập", () => {
+    expect(sheetTotals(sheet(1_000_000), false)).toEqual({ gross: 6_000_000, discount: 1_000_000, net: 5_000_000 });
+  });
+  it("Discount > tổng sheet → kẹp về tổng (net không âm)", () => {
+    expect(sheetTotals(sheet(9_000_000), false)).toEqual({ gross: 6_000_000, discount: 6_000_000, net: 0 });
+  });
+  it("Discount âm → 0", () => {
+    expect(sheetTotals(sheet(-5), false).discount).toBe(0);
+  });
+});
+
+describe("quoteTotals — VAT tính TRÊN số đã trừ Discount", () => {
+  it("không sheet nào giảm giá: VAT trên tổng", () => {
+    expect(quoteTotals([{ gross: 6_000_000, discount: 0, net: 6_000_000 }], 8))
+      .toEqual({ gross: 6_000_000, discount: 0, subtotal: 6_000_000, vat: 480_000, total: 6_480_000 });
+  });
+  // Đúng con số trong file khách gửi: 294.988.400 − 3.000.000 = 291.988.400 · VAT 8% = 23.359.072.
+  it("Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền", () => {
+    expect(quoteTotals([{ gross: 294_988_400, discount: 3_000_000, net: 291_988_400 }], 8))
+      .toEqual({ gross: 294_988_400, discount: 3_000_000, subtotal: 291_988_400, vat: 23_359_072, total: 315_347_472 });
+  });
+  it("cộng Discount của NHIỀU sheet", () => {
+    expect(quoteTotals([
+      { gross: 10_000_000, discount: 1_000_000, net: 9_000_000 },
+      { gross: 5_000_000, discount: 0, net: 5_000_000 },
+    ], 10)).toEqual({ gross: 15_000_000, discount: 1_000_000, subtotal: 14_000_000, vat: 1_400_000, total: 15_400_000 });
   });
 });
 

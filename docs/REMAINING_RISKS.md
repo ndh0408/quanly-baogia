@@ -790,7 +790,7 @@ nay chỉ còn đúng một nửa:
 ### Cái gì VẪN CÒN HỞ
 
 1. **`addImages` — chỗ pushUndo DUY NHẤT trong 19 chỗ không có cổng**
-   (`web/src/components/GridTable.tsx:1642`). Lý do đo được, không phải phỏng đoán:
+   (`web/src/components/GridTable.tsx:1653`). Lý do đo được, không phải phỏng đoán:
    `fileToImg` (`web/src/components/GridTable.tsx:1616`) chờ `im.onload` của `new Image()`
    với `src` là data-URL rồi vẽ vào canvas. jsdom KHÔNG giải mã ảnh nên `onload` không bao
    giờ bắn và promise treo vĩnh viễn. Giả lập được thì cũng chỉ là giả lập chính hàm mình
@@ -828,15 +828,15 @@ nay chỉ còn đúng một nửa:
 |---|---|
 | Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm đơn vị** |
 | Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **42 bài** |
-| `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx:175` |
-| `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:257` |
-| `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:258` |
-| `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:844` |
-| `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx:845-846` |
-| Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1149-1150` |
-| Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1009` |
-| `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1169` |
-| `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx:1642` |
+| `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx:193` |
+| `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:275` |
+| `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:276` |
+| `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:862` |
+| `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx:863-864` |
+| Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
+| Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1027` |
+| `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1187` |
+| `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx:1653` |
 
 Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần — `npm run check:refs` chỉ kiểm được số
 dòng khi tên file nằm CÙNG DÒNG với nó.

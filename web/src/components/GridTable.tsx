@@ -39,6 +39,11 @@ export type GridTableProps = {
   onShowImages?: (v: boolean) => void;
   onChange: () => void;
   fxBar?: boolean;                 // chỉ lưới chính bật thanh công thức
+  /** Dòng "Tổng sheet: …" dưới bảng. Tắt khi nơi gọi tự vẽ khối tổng đầy đủ của sheet
+   *  (QuoteEditor: Cộng / Discount / Tổng cộng / VAT / Thành tiền) — để khỏi hiện HAI con số
+   *  cùng nghĩa cạnh nhau. CỐ Ý không nhận `discount` vào đây: prop đổi theo từng phím gõ sẽ
+   *  phá `gridPropsEqual` và vẽ lại cả lưới mỗi ký tự. */
+  sheetTotalLine?: boolean;
   clfTheme?: boolean;              // lưới của Colorfull → giữ MÀU CŨ (web theo công ty, khớp Excel)
   /** Số ĐỔI MỖI KHI dữ liệu lưới có thể đã đổi (xem gridPropsEqual). Không khai = luôn vẽ lại. */
   dataVersion?: number;
@@ -182,7 +187,7 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 }
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
@@ -1842,7 +1847,7 @@ function GridTableInner(props: GridTableProps) {
         </table>
       </div>
       <div className="grid-stat hidden" ref={statRef} />
-      {fxBar && (
+      {fxBar && sheetTotalLine !== false && (
         <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
           Tổng sheet: <span style={{ color: "var(--danger)", cursor: "pointer" }} title={fxTitle} onDoubleClick={(e) => revealSheetTotal(e.currentTarget)}>{M.fmtMoney(M.sheetSubtotalGrouped(items, usesDays, groupSubtotal))}</span>
         </div>

@@ -103,7 +103,7 @@ const FILL_HEADER = new Set(["FFF3C9A1", "FFFFCC99"]);
 const TEMPLATE_MARKER_PREFIX = "__QUANLY_TEMPLATE__:";
 
 /** Chữ mở đầu các dòng TỔNG / chân trang → hết bảng hạng mục. */
-const RE_TOTALS = /^(TONG CONG|TONG|CONG|VAT|THANH TIEN|GIAM GIA|CHIET KHAU|TOTAL|SUBTOTAL|SUB TOTAL|GRAND TOTAL)\b/;
+const RE_TOTALS = /^(TONG CONG|TONG|CONG|VAT|THANH TIEN|GIAM GIA|CHIET KHAU|DISCOUNT|TOTAL|SUBTOTAL|SUB TOTAL|GRAND TOTAL)\b/;
 const RE_FOOTER = /^(GHI CHU|RAT MONG|TRAN TRONG|Y KIEN KHACH HANG|NGUOI LAP|DAI DIEN|XAC NHAN|KY TEN)\b/;
 
 function colLetter(n: number) {
@@ -594,7 +594,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   // Nhóm có ghi Thành Tiền ở dòng nhóm → báo giá này bật "tổng tiền theo nhóm".
   base.groupSubtotal = raws.some((x) => (x.kind === "section" || x.kind === "subsection") && !isBlank(cellAt(x.row, "_amount")));
 
-  // ── Khối TỔNG dưới bảng: Tổng Cộng / VAT % / Giảm Giá / Thành Tiền ──
+  // ── Khối TỔNG dưới bảng: Cộng / Discount / Tổng Cộng / VAT % / Thành Tiền ──
+  // File do app xuất ra (và file khách gửi) có Discount nằm NGAY DƯỚI dòng "Cộng", ghi số ÂM.
+  // `totals.subtotal` phải là số CHƯA trừ (dòng "Cộng") vì nó được đem so với tổng các dòng hạng
+  // mục đọc được — nên nhánh "TONG CONG" chỉ ghi khi chưa có gì (dòng "Cộng" luôn đến trước).
   const totals: NonNullable<ImportedSheet["totals"]> = {};
   const amountCol = colOf._amount || colOf.unitPrice || 1;
   const scanCols = Math.min(Math.max(ws.columnCount || 0, 10), 40);
@@ -612,7 +615,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       for (let c = 1; c <= scanCols; c++) pctText += " " + cellText(ws.getCell(r, c).value);
       const m = pctText.match(/(\d+(?:[.,]\d+)?)\s*%/);
       if (m) totals.vatPercent = Number(m[1].replace(",", "."));
-    } else if (/^(GIAM GIA|CHIET KHAU)/.test(label)) totals.discount = val;
+    } else if (/^(GIAM GIA|CHIET KHAU|DISCOUNT)/.test(label)) totals.discount = Math.abs(val);   // file ghi số ÂM
     else if (/^(THANH TIEN|GRAND TOTAL)/.test(label)) totals.total = val;
     else if (/^(TONG CONG|TONG|CONG|SUBTOTAL|SUB TOTAL|TOTAL)/.test(label) && totals.subtotal == null) totals.subtotal = val;
   }

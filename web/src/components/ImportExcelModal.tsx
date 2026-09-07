@@ -20,10 +20,15 @@ type SheetPlan = { targetIndex: number; mode: TargetMode };
 
 export type ImportApplyPayload = {
   /** Theo thứ tự sheet trong FILE — sheet nào bỏ qua thì không có mặt. */
-  plans: { file: ImportedSheet; targetIndex: number; mode: TargetMode; templateId?: number; items: M.Item[] }[];
+  plans: {
+    file: ImportedSheet; targetIndex: number; mode: TargetMode; templateId?: number; items: M.Item[];
+    /** Discount đọc được ở khối tổng của CHÍNH sheet đó trong file — null = không lấy theo file. */
+    discount?: number | null;
+  }[];
   /** Sheet đang có nhưng không xuất hiện trong file và người dùng chọn xóa. */
   removeTargetIndexes?: number[];
-  totals?: { vatPercent?: number | null; discount?: number | null };
+  /** Chỉ còn VAT: VAT là của CẢ báo giá, còn Discount đã theo từng sheet ở `plans[].discount`. */
+  totals?: { vatPercent?: number | null };
 };
 
 export function ImportExcelModal({
@@ -158,7 +163,12 @@ export function ImportExcelModal({
       const addrDetail = addrDetailOf(tplId);
       const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
       const conv = toGridItems(fs.items, { usesDays, addrDetail, baseRow });
-      out.push({ file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: conv.items });
+      out.push({
+        file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: conv.items,
+        // Chế độ "Nối" thì KHÔNG đụng Discount của sheet đích: khối tổng trong file là của riêng
+        // phần đang nối vào, áp lên cả sheet đã có là ghi đè một con số người dùng không hề đổi.
+        discount: applyTotals && plan.mode !== "append" ? (fs.totals?.discount ?? null) : null,
+      });
       const targetTemplate = templates.find((t) => t.id === tplId);
       if (fs.templateCode && targetTemplate?.code && fs.templateCode !== targetTemplate.code) templateRisk++;
       formulaRisk += fs.stats.formulasDropped + conv.droppedFormulas;
@@ -169,8 +179,9 @@ export function ImportExcelModal({
         const delta = importedTotal - fs.totals.subtotal;
         if (Math.abs(delta) > Math.max(2, Math.abs(fs.totals.subtotal) * 0.005)) moneyRisk++;
       }
-      // VAT/giảm giá lấy theo sheet ĐANG NẠP đầu tiên (không phải sheet đầu file — có thể bị bỏ qua).
-      if (!totals && applyTotals && fs.totals) totals = { vatPercent: fs.totals.vatPercent ?? null, discount: fs.totals.discount ?? null };
+      // VAT là của CẢ báo giá → lấy theo sheet ĐANG NẠP đầu tiên (không phải sheet đầu file — có
+      // thể bị bỏ qua). Discount thì đi theo từng sheet, đặt ngay trong `out.push` phía trên.
+      if (!totals && applyTotals && fs.totals) totals = { vatPercent: fs.totals.vatPercent ?? null };
     });
     if (!out.length) { toast("Chưa chọn sheet nào để nạp", "info"); return; }
     // Trần lưu của app (khớp sheetSchema server) — báo TRƯỚC khi nạp thay vì để lỗi lúc bấm Lưu.
@@ -395,7 +406,7 @@ export function ImportExcelModal({
                       <input type="checkbox" checked={applyTotals} onChange={(e) => setApplyTotals(e.target.checked)} />
                       <span>
                         Lấy luôn <strong>VAT {view.fs.totals.vatPercent ?? "—"}%</strong>
-                        {!!view.fs.totals.discount && <> và <strong>giảm giá {M.fmtMoney(view.fs.totals.discount)}</strong></>} theo file
+                        {!!view.fs.totals.discount && <> và <strong>Discount {M.fmtMoney(view.fs.totals.discount)}</strong> cho riêng sheet này</>} theo file
                       </span>
                     </label>
                   )}

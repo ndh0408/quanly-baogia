@@ -48,8 +48,69 @@ describe("buildQuoteBuffer (export generation)", () => {
 
   it("handles the CLF template (discount row)", async () => {
     const q = makeQuote("clofull_decor");
-    q.discount = 100_000;
+    q.sheets[0].discount = 100_000;
     expect(isXlsx(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))))).toBe(true);
+  });
+
+  // ── DISCOUNT THEO SHEET ───────────────────────────────────────────────────────────────────────
+  // Bố cục ĐÚNG như file khách đang dùng: Cộng → Discount (số ÂM) → Tổng Cộng → VAT(Tổng Cộng) →
+  // Thành Tiền. Số kiểm là số THẬT trong file khách: 294.988.400 − 3.000.000 → VAT 8% = 23.359.072.
+  it.each(["marico_decor", "gn_banner", "clofull_decor", "unibenfood"])(
+    "khối tổng khi sheet có Discount: Cộng / Discount / Tổng Cộng / VAT / Thành Tiền (%s)", async (code) => {
+      const q = makeQuote(code);
+      q.vatPercent = 8;
+      q.sheets[0].discount = 3_000_000;
+      q.sheets[0].items = [{ kind: "item", name: "A", detail: "", unit: "m2", quantity: 1, unitPrice: 294_988_400, days: null, notes: "" }];
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+      const ws = wb.worksheets[0];
+      // Tìm hàng "Discount" rồi đọc 4 hàng quanh nó — không hard-code số hàng theo từng mẫu.
+      let dRow = 0;
+      ws.eachRow((row, r) => row.eachCell((c) => { if (String(c.value ?? "").trim() === "Discount") dRow = dRow || r; }));
+      expect(dRow).toBeGreaterThan(0);
+      const num = (r) => { const v = ws.getCell(`H${r}`).value; return Number(v && typeof v === "object" ? v.result : v); };
+      expect(num(dRow - 1)).toBe(294_988_400);   // Cộng
+      expect(num(dRow)).toBe(-3_000_000);        // Discount ghi số ÂM
+      expect(num(dRow + 1)).toBe(291_988_400);   // Tổng Cộng = Cộng + Discount
+      expect(num(dRow + 2)).toBe(23_359_072);    // VAT 8% tính TRÊN Tổng Cộng
+      expect(num(dRow + 3)).toBe(315_347_472);   // Thành Tiền = Tổng Cộng + VAT
+      // Công thức phải SỐNG (sửa số trong Excel là cả khối chạy theo), không phải số chết.
+      expect(ws.getCell(`H${dRow + 1}`).value.formula).toBe(`H${dRow - 1}+H${dRow}`);
+      expect(ws.getCell(`H${dRow + 2}`).value.formula).toBe(`ROUND(H${dRow + 1}*8%,0)`);
+      expect(ws.getCell(`H${dRow + 3}`).value.formula).toBe(`H${dRow + 1}+H${dRow + 2}`);
+    });
+
+  it("KHÔNG có Discount → khối tổng giữ nguyên 3 hàng (không chèn hàng thừa)", async () => {
+    const q = makeQuote("marico_decor");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    let found = false;
+    wb.worksheets.forEach((ws) => ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? "").trim() === "Discount") found = true; })));
+    expect(found).toBe(false);
+  });
+
+  // Sheet "Tổng Báo Giá": dòng từng sheet = "Cộng" của sheet đó (cộng lại đúng bằng dòng Cộng),
+  // dòng Discount trỏ THẲNG vào ô Discount của các sheet nên sửa ở sheet là tổng chạy theo.
+  it("sheet Tổng Báo Giá gom Discount của các sheet, VAT tính sau khi trừ", async () => {
+    const q = makeQuote("marico_decor");
+    q.vatPercent = 8;
+    q.sheets = [
+      { order: 1, name: "Banner", groupSubtotal: false, discount: 3_000_000, template: { code: "marico_decor" },
+        items: [{ kind: "item", name: "A", detail: "", unit: "m2", quantity: 1, unitPrice: 294_988_400, days: null, notes: "" }] },
+      { order: 2, name: "Ticketbox", groupSubtotal: false, template: { code: "marico_decor" },
+        items: [{ kind: "item", name: "B", detail: "", unit: "bộ", quantity: 1, unitPrice: 6_006_500, days: null, notes: "" }] },
+    ];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
+    const ws = wb.getWorksheet("Tổng Báo Giá");
+    const rowOf = (label) => { let r = 0; ws.eachRow((row, i) => { if (String(row.getCell(1).value ?? "").trim() === label) r = r || i; }); return r; };
+    const num = (r) => { const v = ws.getCell(`C${r}`).value; return Number(v && typeof v === "object" ? v.result : v); };
+    expect(num(rowOf("Cộng"))).toBe(300_994_900);
+    expect(num(rowOf("Discount"))).toBe(-3_000_000);
+    expect(num(rowOf("Tổng cộng"))).toBe(297_994_900);
+    expect(num(rowOf("VAT (8%)"))).toBe(23_839_592);
+    expect(num(rowOf("Thành tiền"))).toBe(321_834_492);
+    expect(ws.getCell(`C${rowOf("Discount")}`).value.formula).toMatch(/^'1\. Banner'!H\d+$/);
   });
 
   // Cột "Chi Tiết" bị XÓA khỏi bảng: không ẩn cột D, mà gộp C:D thành một cột Hạng Mục rộng.

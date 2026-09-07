@@ -28,6 +28,11 @@ export function qtyRound(x: unknown) {
  *   - days > 0     → quantity × days × unitPrice
  *
  * Rounding policy: half-up to 0 dp for VAT and total (VND has no fractional units).
+ *
+ * GIẢM GIÁ (Discount) nằm ở MỨC SHEET và trừ TRƯỚC khi tính VAT — đúng bố cục khách đang dùng:
+ *   Cộng → Discount → Tổng Cộng → VAT(Tổng Cộng) → Thành Tiền
+ * `Quote.discount` trả về ở đây là SUY RA (Σ discount các sheet), không đọc từ input.
+ * Bản mirror thuần-number cho frontend ở shared/quote-math.ts — sửa chính sách thì sửa CẢ HAI.
  */
 // Structural shape of what the body actually reads. The full Prisma `Quote & {sheets:[...]}`
 // row satisfies this, and so does the slim `{ vatPercent, discount, sheets }` built by callers
@@ -35,10 +40,11 @@ export function qtyRound(x: unknown) {
 // type relaxation — no runtime change.
 type QuoteTotalsInput = {
   vatPercent: Prisma.Decimal.Value | null | undefined;
-  discount?: Prisma.Decimal.Value | null | undefined;
   sheets?: ({
     id?: number;
     groupSubtotal?: boolean | null;
+    // Giảm giá RIÊNG của sheet, trừ TRƯỚC khi tính VAT (xem khối chú thích của computeQuoteTotals).
+    discount?: Prisma.Decimal.Value | null | undefined;
     items?: {
       kind?: string | null;
       quantity?: Prisma.Decimal.Value | null | undefined;
@@ -53,7 +59,7 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
   const vatPct = D(quote.vatPercent);
   const sheetTotals = (quote.sheets || []).map((sh) => {
     let mult = 1;
-    const subtotal = (sh.items || []).reduce((acc, it) => {
+    const gross = (sh.items || []).reduce((acc, it) => {
       if (it.kind === "section" || it.kind === "subsection") {   // nhóm/nhóm con: header — đặt mult, không tự cộng. Item con vẫn vào tổng cộng.
         // Hệ số nhóm lấy SL ĐÃ làm tròn đúng như lưới hiển thị (cùng phép làm tròn với qty dòng
         // thường ngay dưới) — trước đây nhân số thô nên tổng lệch con số người dùng nhìn thấy.
@@ -71,21 +77,27 @@ export function computeQuoteTotals(quote: QuoteTotalsInput) {
       // → dòng cộng lại đúng bằng tổng, không lệch sub-đồng.
       const base = (days && days.gt(0) ? qty.times(days).times(price) : qty.times(price)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       return acc.plus(base.times(mult));
-    }, new Decimal(0));
-    return { sheetId: sh.id ?? 0, subtotal };
+    }, new Decimal(0)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    // Giảm giá RIÊNG của sheet, kẹp vào [0, tổng sheet] → "Tổng Cộng" của sheet không bao giờ âm
+    // chỉ vì Discount (âm là do dòng đơn giá âm, và assertTotalsStorable mới là chỗ chặn cái đó).
+    const dRaw = D(sh.discount).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const cap = Decimal.max(0, gross);
+    const discount = dRaw.lessThan(0) ? new Decimal(0) : (dRaw.greaterThan(cap) ? cap : dRaw);
+    // `subtotal` = số sheet ĐÓNG GÓP vào báo giá (đã trừ Discount) — cũng là cột materialized
+    // QuoteSheet.subtotal mà trang Dự án / Hoá đơn / Dashboard đọc.
+    return { sheetId: sh.id ?? 0, gross, discount, subtotal: gross.minus(discount) };
   });
   // Round subtotal to 0 dp too (VND has no fractional unit) so the stored
   // subtotal column matches what we recompute on read — no sub-đồng drift.
   const subtotal = sheetTotals
     .reduce((s, x) => s.plus(x.subtotal), new Decimal(0))
     .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  // VAT tính TRÊN SỐ ĐÃ TRỪ Discount: Cộng → Discount → Tổng Cộng → VAT → Thành Tiền.
   const vat = subtotal.times(vatPct).dividedBy(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  const gross = subtotal.plus(vat);
-  // Optional negotiated discount (giảm giá), in VNĐ, subtracted from the grand total.
-  // Clamped to the gross so the total never goes negative.
-  const discInput = D(quote.discount).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  const discount = discInput.greaterThan(gross) ? gross : (discInput.lessThan(0) ? new Decimal(0) : discInput);
-  const total = gross.minus(discount).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  // `Quote.discount` nay là SUY RA = Σ giảm giá các sheet (giữ cột để danh sách / lịch sử /
+  // diff phiên bản không phải đổi). Client gửi lên `discount` mức báo giá thì bị BỎ QUA.
+  const discount = sheetTotals.reduce((s, x) => s.plus(x.discount), new Decimal(0));
+  const total = subtotal.plus(vat).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   return { subtotal, vat, discount, total, sheetTotals };
 }
 
@@ -137,13 +149,19 @@ export function totalsToJson(t: {
   vat: Prisma.Decimal;
   discount?: Prisma.Decimal | null;
   total: Prisma.Decimal;
-  sheetTotals: { sheetId: number; subtotal: Prisma.Decimal }[];
+  sheetTotals: { sheetId: number; gross?: Prisma.Decimal; discount?: Prisma.Decimal; subtotal: Prisma.Decimal }[];
 }) {
   return {
     subtotal: t.subtotal.toNumber(),
     vat: t.vat.toNumber(),
     discount: (t.discount ?? new Decimal(0)).toNumber(),
     total: t.total.toNumber(),
-    sheetTotals: t.sheetTotals.map((s) => ({ sheetId: s.sheetId, subtotal: s.subtotal.toNumber() })),
+    // `subtotal` từng sheet = ĐÃ trừ Discount; `gross` là số trước khi trừ (dòng "Cộng").
+    sheetTotals: t.sheetTotals.map((s) => ({
+      sheetId: s.sheetId,
+      gross: (s.gross ?? s.subtotal).toNumber(),
+      discount: (s.discount ?? new Decimal(0)).toNumber(),
+      subtotal: s.subtotal.toNumber(),
+    })),
   };
 }

@@ -102,6 +102,7 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
     // snapshot or diffVersions can never show a discount change, and stored
     // subtotal+vat won't reconcile to total. (customerLogo is intentionally NOT
     // snapshotted: it's a large base64 blob and would bloat every version row.)
+    // Nay là Σ discount các sheet; số của TỪNG sheet nằm trong `sheets[].discount` bên dưới.
     discount: q.discount.toString(),
     total: q.total.toString(),
     sheets: q.sheets.map((s) => ({
@@ -111,6 +112,9 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
       order: s.order,
       groupSubtotal: s.groupSubtotal,
       showImages: s.showImages,
+      // Discount RIÊNG của sheet: đổi nó là đổi tiền → phải nằm trong snapshot, nếu không
+      // diffVersions không bao giờ chỉ ra được vì sao tổng đổi.
+      discount: s.discount?.toString() ?? "0",
       // KHÔNG chép ẢNH base64 vào snapshot phiên bản (item.images ở dòng item, paidProof trong
       // extraTables): ảnh nặng, mỗi lần lưu tạo snapshot → phình DB. Phiên bản chỉ lưu cấu trúc/giá
       // để đối chiếu; ảnh sống ở bản HIỆN TẠI của báo giá.
