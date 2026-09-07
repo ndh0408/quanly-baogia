@@ -84,6 +84,7 @@ export type Notif = { id: number; title: string; body: string; resource?: string
 
 // Danh sách báo giá (increment 8). Row linh hoạt (presentQuoteRow — thường + account_hn).
 export type QuoteRow = {
+  shortTitle?: string | null;   // tiêu đề rút gọn — bảng hiển thị ưu tiên nó (tieuDeHienThi)
   id: number; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
   title: string; status: string; quoteDate: string; createdById?: number;
   createdBy?: { id: number; displayName: string } | null;
@@ -105,6 +106,7 @@ export type ProjectSheet = {
   invoiceYear?: number | null; invoiceCompany?: string | null; invoiceDesc?: string | null; invoiceNote?: string | null;
 };
 export type ProjectQuote = {
+  shortTitle?: string | null;
   id: number; title: string; status: string; vatPercent?: number; subtotal?: number; executionDate?: string | null;
   quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null; customerCode?: string | null; customerName?: string | null; customerDebtDays?: number | null; hnStatus?: string | null;
   company?: { shortName?: string; name?: string } | null; createdBy?: { displayName?: string } | null; sheets?: ProjectSheet[];

@@ -18,7 +18,7 @@ const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/
  *
  * ── VÌ SAO PHẢI DÙNG CHUNG ──────────────────────────────────────────────────
  * Công thức này từng bị chép tay ở hai nơi và chúng ĐÃ LỆCH NHAU:
- *   · đường ĐỒNG BỘ (src/routes/export.routes.ts) cho ra "BaoGia_BG-2026-001.xlsx";
+ *   · đường ĐỒNG BỘ (src/routes/export.routes.ts) cho ra "BG-2026-001.xlsx";
  *   · đường NỀN (src/worker.ts) không truyền `filename` vào `presignDownload` nên kho object lấy
  *     phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu thời gian.
  * Cùng MỘT nút bấm mà ra hai kiểu tên, tuỳ báo giá to hay nhỏ — người dùng không hiểu vì sao.
@@ -33,7 +33,8 @@ const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/
  * được BỎ DẤU trước (NFD) chứ không bị thay bằng "_", nên "Décor" ra "Decor" chứ không "D_cor".
  *
  * HÌNH DẠNG (chốt với chủ dự án 2026-09-07):
- *     BaoGia_<Mã khách hàng>_<tiêu đề rút gọn>_<MMDD>.xlsx
+ *     <Mã khách hàng>_<tiêu đề rút gọn>_<MMDD>.xlsx
+ * KHÔNG còn tiền tố "BaoGia_": tệp nào cũng là báo giá, nói lại mỗi lần chỉ làm tên dài thêm.
  * Tiêu đề rút gọn trống thì lùi về tiêu đề chính. MMDD là NGÀY TẢI theo giờ Việt Nam (src/vnTime.ts)
  * — TÍNH LẠI MỖI LẦN TẢI, nên tải lại hôm sau ra tên mới, không đè lên bản đã tải.
  * Không có mã khách hàng lẫn tiêu đề thì lùi hẳn về số báo giá như trước.
@@ -66,7 +67,7 @@ export function tenFileXuat(q: QuoteTenFile | string | null | undefined, quoteId
   const ten = anToanTenFile(quote.shortTitle?.trim() || quote.title, 60);
   const phan = [maKH, ten, thangNgayVN()].filter(Boolean);
   const an = phan.length > 1 ? phan.join("_") : anToanTenFile(quote.quoteNumber) || `quote-${quoteId}`;
-  return `BaoGia_${an}.${ext}`;
+  return `${an}.${ext}`;
 }
 
 /**
@@ -255,7 +256,7 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false, inte
 // snapshot totals — no per-row recompute. Hot, frequently-refetched query.
 export const QUOTE_LIST_SELECT = {
   id: true, quoteNumber: true, projectCode: true, projectVersion: true,
-  title: true, toCompany: true, status: true, quoteDate: true,
+  title: true, shortTitle: true, toCompany: true, status: true, quoteDate: true,
   subtotal: true, vat: true, discount: true, total: true, vatPercent: true,
   createdAt: true, createdById: true, hnStatus: true, hnAssigneeId: true,
   company: { select: { id: true, name: true, shortName: true } },

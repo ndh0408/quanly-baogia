@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, shortTitle, sheetCode, soMa, statusLabel, dash, Stat } from "../lib/format";
+import { fmtMoney, fmtDate, tieuDeHienThi, sheetCode, soMa, statusLabel, dash, Stat } from "../lib/format";
 
 // Port "Quản lý dự án" (renderProjects) — bê ĐẦY ĐỦ: báo giá ĐÃ CHỐT, mỗi sheet 1 dòng, bảng 23
 // cột theo dõi hóa đơn (Trạng thái: Hóa đơn→Thanh toán→Hoàn tất) + sửa-tại-ô (admin: Số HĐ/Ngày TT/PO/
@@ -139,7 +139,7 @@ export function ProjectsPage({ me }: { me: Me }) {
                           onClick={open}
                           onKeyDown={(e) => { if (e.key === "Enter") open(e); }}>
                         <td>{r.q.status === "converted" ? <span className={`status ${inv.c}`}>{inv.l}</span> : <span className={`status ${r.q.status}`}>{statusLabel(r.q.status)}</span>}</td>
-                        <td title={r.q.title}><strong>{shortTitle(r.q.title)}</strong></td>
+                        <td title={r.q.title}><strong>{tieuDeHienThi(r.q)}</strong></td>
                         <td title={r.hangMuc || undefined}>{r.hangMuc || dash}</td>
                         <td className="num">{fmtMoney(r.baoGia)}</td>
                         <td className="num">{r.hcm ? fmtMoney(r.hcm) : dash}</td>

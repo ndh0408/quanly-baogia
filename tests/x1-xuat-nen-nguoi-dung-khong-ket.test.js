@@ -18,7 +18,7 @@
 //
 // ── LỖI 3: một nút, hai kiểu tên file ───────────────────────────────────────
 // Công thức tên file bị chép tay hai nơi rồi lệch nhau:
-//   · đường ĐỒNG BỘ đặt Content-Disposition = "BaoGia_<mã>.xlsx";
+//   · đường ĐỒNG BỘ đặt Content-Disposition = "<mã>.xlsx";
 //   · đường NỀN không truyền `filename` vào `presignDownload`, nên kho object lấy phần cuối của
 //     khoá — "<mã>-<dấu thời gian>.xlsx".
 // Chuyện này KHÔNG sửa được ở client: link tải của đường nền là URL đã ký trỏ vào kho object, tức
@@ -40,13 +40,13 @@ const boChuThich = (s) =>
 
 describe("tenFileXuat — MỘT công thức cho cả hai đường xuất", () => {
   it("dựng đúng tên mà người dùng thấy", () => {
-    expect(tenFileXuat("BG-2026-001", 7, "xlsx")).toBe("BaoGia_BG-2026-001.xlsx");
-    expect(tenFileXuat("BG-2026-001", 7, "pdf")).toBe("BaoGia_BG-2026-001.pdf");
+    expect(tenFileXuat("BG-2026-001", 7, "xlsx")).toBe("BG-2026-001.xlsx");
+    expect(tenFileXuat("BG-2026-001", 7, "pdf")).toBe("BG-2026-001.pdf");
   });
 
   it("thiếu mã báo giá thì rơi về id, không ra tên rỗng", () => {
-    expect(tenFileXuat(null, 42, "xlsx")).toBe("BaoGia_quote-42.xlsx");
-    expect(tenFileXuat("", 42, "pdf")).toBe("BaoGia_quote-42.pdf");
+    expect(tenFileXuat(null, 42, "xlsx")).toBe("quote-42.xlsx");
+    expect(tenFileXuat("", 42, "pdf")).toBe("quote-42.pdf");
   });
 
   // Tên này đi THẲNG vào header `Content-Disposition: attachment; filename="..."`. Một dấu nháy
@@ -54,12 +54,12 @@ describe("tenFileXuat — MỘT công thức cho cả hai đường xuất", () 
   it("chặn mọi ký tự có thể phá header", () => {
     for (const ban of ['a"b', "a;b", "a\r\nX-Injected: 1", "a/b", "../../etc/passwd", "a b"]) {
       const ra = tenFileXuat(ban, 1, "xlsx");
-      expect(ra, `lọt ký tự nguy hiểm: ${JSON.stringify(ban)} → ${ra}`).toMatch(/^BaoGia_[A-Za-z0-9_-]*\.xlsx$/);
+      expect(ra, `lọt ký tự nguy hiểm: ${JSON.stringify(ban)} → ${ra}`).toMatch(/^[A-Za-z0-9_-]*\.xlsx$/);
     }
   });
 
   it("giữ nguyên chữ số và dấu gạch — mã báo giá thật không bị băm nát", () => {
-    expect(tenFileXuat("GN_2026-07_v2", 1, "xlsx")).toBe("BaoGia_GN_2026-07_v2.xlsx");
+    expect(tenFileXuat("GN_2026-07_v2", 1, "xlsx")).toBe("GN_2026-07_v2.xlsx");
   });
 });
 

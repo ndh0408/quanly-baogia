@@ -4,7 +4,7 @@ import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-quer
 import { api, type Me, type QuoteRow } from "../lib/api";
 import { useDebouncedValue } from "../lib/query";
 import { toast, confirmModal, useEscClose } from "../lib/ui";
-import { statusLabel, fmtMoney, fmtDate, codeLabel, shortTitle, errMsg, dash } from "../lib/format";
+import { statusLabel, fmtMoney, fmtDate, codeLabel, tieuDeHienThi, errMsg, dash } from "../lib/format";
 import { xuatBaoGia } from "../lib/exportQuote";
 
 // Port "Danh sách báo giá" (renderList) — bê ĐẦY ĐỦ: tìm (debounce) + lọc trạng thái + SORT cột
@@ -137,7 +137,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                 <strong>{codeLabel(r)}</strong>
                 {isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}
               </div>
-              {r.title && <div className="ql-card-title">{shortTitle(r.title)}</div>}
+              {(r.shortTitle || r.title) && <div className="ql-card-title">{tieuDeHienThi(r)}</div>}
               <dl className="ql-card-body">
                 {(isAdmin || isInternalViewer) && <div className="ql-crow"><dt>Người tạo</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
                 {isAccountHn && <div className="ql-crow"><dt>Người giao</dt><dd>{r.createdBy?.displayName || dash}</dd></div>}
@@ -185,7 +185,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
                   <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a></td>
                   {(isAdmin || isInternalViewer) && <td>{r.createdBy?.displayName || dash}</td>}{isAccountHn && <td>{r.createdBy?.displayName || dash}</td>}
-                  <td title={r.title}>{shortTitle(r.title)}</td>
+                  <td title={r.title}>{tieuDeHienThi(r)}</td>
                   <td>{fmtDate(r.quoteDate) || dash}</td>
                   <td className="num">{isAccountHn ? (r.hnSheetCount ?? 0) : (r.sheetCount ?? 0)}</td>
                   {!stripped && <td className="num">{r.total == null ? dash : fmtMoney(r.total)}</td>}

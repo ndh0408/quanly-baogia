@@ -187,21 +187,21 @@ describe("tenFileXuat", () => {
   const q = { quoteNumber: "GN26003", title: "BẢNG BÁO GIÁ - Décor Premiere Phim Thỏ Ơi", shortTitle: "Décor Premiere", customer: { code: "KH26001" } };
 
   it("ghép mã KH + tiêu đề rút gọn + ngày tải, BỎ DẤU tiếng Việt", () => {
-    expect(tenFileXuat(q, 7, "xlsx")).toMatch(/^BaoGia_KH26001_Decor_Premiere_\d{4}\.xlsx$/);
+    expect(tenFileXuat(q, 7, "xlsx")).toMatch(/^KH26001_Decor_Premiere_\d{4}\.xlsx$/);
   });
 
   it("không có tiêu đề rút gọn → lùi về tiêu đề chính", () => {
     // Dấu "-" trong tiêu đề được GIỮ (mã báo giá thật có dạng BG-2026-001, không được băm nát).
-    expect(tenFileXuat({ ...q, shortTitle: "  " }, 7, "pdf")).toMatch(/^BaoGia_KH26001_BANG_BAO_GIA_-_Decor_Premiere/);
+    expect(tenFileXuat({ ...q, shortTitle: "  " }, 7, "pdf")).toMatch(/^KH26001_BANG_BAO_GIA_-_Decor_Premiere/);
   });
 
   it("không có cả mã KH lẫn tiêu đề → lùi về số báo giá (hành vi cũ)", () => {
-    expect(tenFileXuat({ quoteNumber: "GN26003", customer: null, title: null, shortTitle: null }, 7, "xlsx")).toBe("BaoGia_GN26003.xlsx");
+    expect(tenFileXuat({ quoteNumber: "GN26003", customer: null, title: null, shortTitle: null }, 7, "xlsx")).toBe("GN26003.xlsx");
   });
 
   it("chỗ gọi CŨ truyền thẳng chuỗi vẫn chạy như trước", () => {
-    expect(tenFileXuat("GN26003", 7, "xlsx")).toBe("BaoGia_GN26003.xlsx");
-    expect(tenFileXuat(null, 42, "pdf")).toBe("BaoGia_quote-42.pdf");
+    expect(tenFileXuat("GN26003", 7, "xlsx")).toBe("GN26003.xlsx");
+    expect(tenFileXuat(null, 42, "pdf")).toBe("quote-42.pdf");
   });
 
   it("tên ra CHỈ còn [A-Za-z0-9_.-] — nó đi thẳng vào header Content-Disposition", () => {

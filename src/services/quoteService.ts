@@ -851,7 +851,7 @@ export async function listProjects(req: Request) {
     take: 2000,
     select: {
       id: true, quoteNumber: true, projectCode: true, projectVersion: true,
-      title: true, status: true, hnStatus: true, quoteDate: true, executionDate: true, vatPercent: true,
+      title: true, shortTitle: true, status: true, hnStatus: true, quoteDate: true, executionDate: true, vatPercent: true,
       subtotal: true, total: true, discount: true,
       company: { select: { name: true, shortName: true } },
       customer: { select: { code: true, name: true, debtDays: true } },
@@ -891,6 +891,7 @@ export async function listProjects(req: Request) {
       projectCode: q.projectCode,
       projectVersion: q.projectVersion,
       title: q.title,
+      shortTitle: q.shortTitle ?? null,
       status: q.status,
       hnStatus: q.hnStatus || null,
       quoteDate: q.quoteDate,

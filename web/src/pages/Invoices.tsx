@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, toInputDate, shortTitle, sheetCode, soMa, dash, Stat } from "../lib/format";
+import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, sheetCode, soMa, dash, Stat } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
@@ -370,7 +370,7 @@ export function InvoicesPage({ me }: { me: Me }) {
                         <tr key={r.key} className="qrow" title="Bấm để mở báo giá" tabIndex={0}
                             onClick={(e) => { if ((e.target as HTMLElement).closest("button,a,input,select,[data-edit]")) return; location.hash = "#/quotes/" + r.q.id; }}
                             onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = "#/quotes/" + r.q.id; }}>
-                          <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || shortTitle(r.q.title)}</strong></td>
+                          <td title={r.q.title}><strong>{r.q.customerName || r.q.customerCode || tieuDeHienThi(r.q)}</strong></td>
                           <td>{r.q.customerCode || dash}</td>
                           <td><strong>{r.code}</strong></td>
                           {textCell(r, "invoiceDesc", 210)}

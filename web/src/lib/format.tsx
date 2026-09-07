@@ -37,6 +37,11 @@ export const inputToDdmm = (v: string): string => {
 };
 
 /* Bỏ tiền tố "Bảng báo giá –" cho gọn tiêu đề khi hiện trong bảng. */
+/** Tiêu đề để HIỂN THỊ: ưu tiên tiêu đề rút gọn người dùng tự đặt, không có thì lùi về tiêu đề
+ *  chính (đã cắt tiền tố "BẢNG BÁO GIÁ - "). Một chỗ quyết định cho mọi bảng. */
+export const tieuDeHienThi = (q: { shortTitle?: string | null; title?: string | null }) =>
+  String(q?.shortTitle ?? "").trim() || shortTitle(q?.title || "");
+
 export const shortTitle = (t: string) => {
   const s = String(t || "");
   return s.replace(/^\s*bảng\s+báo\s+giá\s*[-–—:|·]*\s*/i, "").trim() || s;
