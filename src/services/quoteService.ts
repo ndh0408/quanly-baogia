@@ -67,24 +67,61 @@ async function loadAuthorizedQuote(req: Request, action: string = "read") {
 // Duyệt theo HÀNG cho bảng nội bộ "hcm"/"khach": CHỈ ADMIN được đặt approved. Gọi TRƯỚC khi
 // lưu (buildSheetsCreate) để: non-admin → GIỮ NGUYÊN trạng thái duyệt cũ theo `rid` (chống tự
 // duyệt qua payload); admin → honor + đóng dấu approvedAt/approvedBy khi mới duyệt. Mutate sheets.
+// Dấu vân tay SỐ TIỀN của một hàng — CÙNG hàm với `reconcileExtraPayments` ngay dưới (giữ một chỗ,
+// đừng để hai bản trôi khỏi nhau). `null` = hàng KHÔNG GHI số tiền, khác hẳn "số tiền bằng 0".
+function soTienHang(it: any): string | null {
+  const q = it?.quantity, dg = it?.unitPrice;
+  if ((q === undefined || q === null) && (dg === undefined || dg === null)) return null;
+  return `${Number(q) || 0}|${Number(dg) || 0}|${it?.days != null ? Number(it.days) : ""}`;
+}
+
 export function reconcileExtraApprovals(sheets: any[], existingSheets: any[], isAdmin: boolean, approverId: number) {
   if (!Array.isArray(sheets)) return;
-  const prior = new Map();   // rid -> { approved, approvedAt, approvedBy }
+  const prior = new Map();   // rid -> { approved, approvedAt, approvedBy, tien }
   for (const s of (existingSheets || [])) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       if (!t || (t.category !== "hcm" && t.category !== "khach")) continue;
       for (const it of (t.items || [])) {
-        if (it && it.rid) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null });
+        if (it && it.rid) prior.set(it.rid, { approved: !!it.approved, approvedAt: it.approvedAt || null, approvedBy: it.approvedBy ?? null, tien: soTienHang(it) });
       }
     }
   }
   const now = new Date().toISOString();
+  // rid ĐÃ kế thừa MỘT lần — chép rid của hàng đã duyệt sang một hàng BỊA thứ hai thì hàng thứ hai
+  // không được ăn theo (cùng chốt "một lần" mà reconcileExtraPayments đã dùng, xem chú thích dưới).
+  const daDung = new Set<string>();
   for (const s of sheets) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
       if (!t || (t.category !== "hcm" && t.category !== "khach")) continue;
       for (const it of (t.items || [])) {
         if (!it) continue;
-        const p = it.rid ? prior.get(it.rid) : null;
+        let p = it.rid ? prior.get(it.rid) : null;
+        if (p && it.rid) {
+          if (daDung.has(it.rid)) p = null;
+          else {
+            daDung.add(it.rid);
+            // NGƯỜI KHÔNG CÓ QUYỀN DUYỆT SỬA SỐ TIỀN CỦA HÀNG ĐÃ DUYỆT → TỪ CHỐI CẢ LẦN LƯU.
+            //
+            // Lỗ đo được: người có `quote:update:own` nhưng KHÔNG có `quote:internal:approve` mở
+            // báo giá đã có hàng "hcm"/"khach" ĐÃ DUYỆT (approved:true), sửa unitPrice/quantity
+            // của đúng rid đó rồi Lưu. Bản trước không so số tiền nên nhánh non-admin CHỈ kế thừa
+            // `approved`/`approvedAt`/`approvedBy` theo rid — số tiền đi theo payload của họ, dấu
+            // duyệt của người khác vẫn đứng nguyên trên số tiền họ vừa bịa ra. Cùng lỗ y hệt đã vá
+            // ở `reconcileExtraPayments` (xem chú thích ở đó) — CHỈ khác chữ "thanh toán" → "duyệt".
+            //
+            // Cùng lý do chọn NÉM LỖI thay vì âm thầm khôi phục/xoá dấu duyệt: hỏng TO ngay lúc lưu,
+            // không mất dữ liệu, không nuốt thay đổi. `p.tien === null` (hàng ghi trước khi
+            // sanitizeExtraTables chuẩn hoá số) thì KHÔNG có gì để so — thiếu dữ liệu thì MỞ.
+            if (!isAdmin && p.approved && p.tien !== null && p.tien !== soTienHang(it)) {
+              throw httpError(
+                400,
+                `Không sửa được số tiền của hàng đã duyệt: "${String(it.name || "").slice(0, 80) || "(không tên)"}". ` +
+                  `Hàng này đã được duyệt nên số lượng / đơn giá / số ngày phải giữ nguyên. ` +
+                  `Cần đổi thì nhờ người có quyền duyệt bỏ duyệt trước, rồi sửa và duyệt lại.`
+              );
+            }
+          }
+        }
         if (!isAdmin) {   // non-admin: bỏ qua mọi thay đổi duyệt từ client → theo DB (mới = chưa duyệt)
           it.approved = p ? p.approved : false;
           it.approvedAt = p ? p.approvedAt : null;
@@ -139,11 +176,8 @@ export function reconcileExtraPayments(sheets: any[], existingSheets: any[], can
   // Nên: thiếu dữ liệu thì MỞ (không áp phép so), có dữ liệu thì SIẾT. Phần dư lại rất hẹp — kẻ
   // tấn công phải chép rid của một hàng vừa ĐÃ THANH TOÁN vừa KHÔNG GHI số tiền — và đánh đổi đó
   // đúng chiều: không bao giờ hi sinh dữ liệu thật để chặn một đường khai thác hẹp.
-  const soTien = (it: any) => {
-    const q = it?.quantity, dg = it?.unitPrice;
-    if ((q === undefined || q === null) && (dg === undefined || dg === null)) return null;
-    return `${Number(q) || 0}|${Number(dg) || 0}|${it?.days != null ? Number(it.days) : ""}`;
-  };
+  // (hàm chung `soTienHang` khai báo ở trên, ngay trước reconcileExtraApprovals — xem chú thích ở đó)
+  const soTien = soTienHang;
   const prior = new Map();   // rid -> { paid, paidAt, paidById, paidProof, tien }
   for (const s of (existingSheets || [])) {
     for (const t of (Array.isArray(s.extraTables) ? s.extraTables : [])) {
