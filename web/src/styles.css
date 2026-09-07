@@ -3181,7 +3181,9 @@ textarea[aria-invalid="true"] {
 }
 .import-check-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* auto-fit (không phải repeat(3)): thẻ "Công thức Excel" chỉ hiện khi có công thức không giữ
+     được, nên hàng này lúc 2 thẻ lúc 3 — cột cứng sẽ chừa một ô trống toang bên phải. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
 .import-check-card {

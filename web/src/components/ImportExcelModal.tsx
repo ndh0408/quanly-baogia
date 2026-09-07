@@ -328,13 +328,17 @@ export function ImportExcelModal({
                       <strong>{view.fs.stats.sections} nhóm chính · {view.fs.stats.subsections} nhóm phụ · {view.fs.stats.items + view.fs.stats.subs} hạng mục</strong>
                       <small>{view.fs.groupSubtotal ? "Có tính tổng và hệ số theo nhóm" : "Cộng trực tiếp từng hạng mục"}</small>
                     </div>
-                    <div className={`import-check-card ${view.formulaDropped ? "warn" : "ok"}`}>
-                      <span>Công thức Excel</span>
-                      <strong>{view.formulaDropped
-                        ? `Giữ ${view.fs.stats.formulas} · ${view.formulaDropped} chỉ giữ số`
-                        : view.fs.stats.formulas ? `Giữ đủ ${view.fs.stats.formulas} công thức` : "File không có công thức"}</strong>
-                      <small>{view.formulaDropped ? "Không tạo công thức sai; xem cảnh báo từng dòng" : view.fs.stats.formulas ? "Đã đổi sang đúng cột của web" : "Các ô số sẽ được nạp như giá trị thường"}</small>
-                    </div>
+                    {/* Thẻ công thức CHỈ hiện khi có công thức KHÔNG giữ được — lúc đó nó là một
+                        CẢNH BÁO cần đọc. Còn "giữ đủ 66 công thức / đã đổi sang đúng cột" là việc
+                        app phải làm được, nói ra mỗi lần chỉ làm loãng hai thẻ còn lại (cấu trúc
+                        dòng và đối chiếu tiền) — người nạp file thường xuyên không đọc nữa. */}
+                    {view.formulaDropped > 0 && (
+                      <div className="import-check-card warn">
+                        <span>Công thức Excel</span>
+                        <strong>{`Giữ ${view.fs.stats.formulas} · ${view.formulaDropped} chỉ giữ số`}</strong>
+                        <small>Không tạo công thức sai; xem cảnh báo từng dòng</small>
+                      </div>
+                    )}
                     <div className={`import-check-card ${view.moneyMismatch ? "danger" : view.fileTotal != null ? "ok" : ""}`}>
                       <span>Đối chiếu tiền</span>
                       <strong>{view.fileTotal == null
