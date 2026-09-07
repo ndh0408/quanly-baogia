@@ -16,7 +16,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";
-import speakeasy from "speakeasy";
 import { prisma } from "../src/db.js";
 
 const SECRET = "JBSWY3DPEHPK3PXP"; // cùng bí mật gán cho keToan bên dưới
@@ -85,28 +84,39 @@ describe.runIf(dbAvailable)("POST /api/users/:id/mfa-reset", () => {
   // đang giữ phiên/thiết bị nạn nhân (đúng mô hình đe doạ "mất điện thoại" mà chức năng này sinh ra
   // để phục vụ) tiếp tục dùng được phiên CŨ sau khi admin tưởng đã xử lý xong.
   //
-  // Nạn nhân RIÊNG cho bài này (không dùng chung `keToan`): bài "gỡ được MFA" ở trên đã TIÊU MỘT
-  // LẦN gỡ của keToan — gọi lại sẽ vướng nhánh "tài khoản chưa bật MFA" (400) và không chạy tới
-  // đoạn huỷ phiên đang muốn kiểm ở đây.
-  it("PHIÊN CŨ của nạn nhân chết ngay sau khi admin gỡ MFA hộ — không chỉ đổi cờ trong CSDL", async () => {
-    const nanNhan2 = await mk("accountant", "nannhan2", {
-      mfaEnabled: true, mfaSecret: SECRET, mfaBackupCodes: [], mfaLastStep: 22345,
-    });
-    const nanNhanA = agentWithCsrf(app);
-    const rP = await nanNhanA.post("/api/auth/login").send({ username: nanNhan2.username, password: PASSWORD });
-    expect(rP.body.mfaRequired).toBe(true);
-    const ma = speakeasy.totp({ secret: SECRET, encoding: "base32" });
-    const rM = await nanNhanA.post("/api/auth/login").send({ username: nanNhan2.username, password: PASSWORD, mfaToken: ma });
-    expect(rM.status, "đăng nhập kèm TOTP hợp lệ phải qua được").toBe(200);
+  // ── VÌ SAO BÀI NÀY KHÔNG ĐĂNG NHẬP RỒI KIỂM /auth/me QUA HTTP ────────────────────────────────
+  // Đã THỬ đúng cách đó trước, và nó XANH GIẢ theo chiều ngược: seed một hàng `user_sessions` giả
+  // cho nạn nhân rồi gọi mfa-reset qua HTTP — hàng biến mất (đúng), nhưng phiên HTTP CỦA CHÍNH
+  // request đăng nhập đó vẫn 200 sau khi gỡ, vì `src/app.ts` cố ý dùng MemoryStore (không phải
+  // PgSession/user_sessions) khi NODE_ENV=test ("Tests run against an in-memory store: no PG
+  // dependency"). Tức phiên HTTP thật trong bộ test này KHÔNG NẰM trong bảng mà destroyAllSessions
+  // xoá — kiểm qua HTTP đo nhầm store, không đo được hàm. Kiểm THẲNG hành vi SQL của
+  // destroyAllSessions thay vì đi vòng qua tầng HTTP/session-store của môi trường test.
+  it("resetMfa xoá THẬT hàng phiên (user_sessions) của nạn nhân — không chỉ đổi cờ trong CSDL", async () => {
+    const nanNhan2 = await mk("accountant", "nannhan2", { mfaEnabled: true, mfaSecret: SECRET });
+    const nguoiKhac = await mk("accountant", "nguoikhac", {});   // đối chứng — không được đụng tới
 
-    const truoc = await nanNhanA.get("/api/auth/me");
-    expect(truoc.status, "phiên nạn nhân phải đang sống trước khi gỡ").toBe(200);
+    // Giả lập ĐÚNG hình dạng một hàng mà PgSession (production) sẽ ghi: cột `sess` là JSON có khoá
+    // "userId" — chính là điều kiện `(sess ->> 'userId')::int` trong destroyAllSessions so khớp.
+    const seed = async (sid, userId) => prisma.$executeRawUnsafe(
+      `INSERT INTO user_sessions (sid, sess, expire) VALUES ($1, $2::json, now() + interval '7 days')`,
+      sid, JSON.stringify({ userId, cookie: {} }),
+    );
+    const sidNanNhan = `test-sid-nannhan-${nanNhan2.id}`;
+    const sidNguoiKhac = `test-sid-khac-${nguoiKhac.id}`;
+    await seed(sidNanNhan, nanNhan2.id);
+    await seed(sidNguoiKhac, nguoiKhac.id);
+
+    const con = async (sid) => prisma.$queryRawUnsafe(`SELECT 1 FROM user_sessions WHERE sid = $1`, sid);
+    expect((await con(sidNanNhan)).length, "hàng giả của nạn nhân phải tồn tại trước khi gỡ").toBe(1);
 
     const r = await adminA.post(`/api/users/${nanNhan2.id}/mfa-reset`);
     expect(r.status).toBe(200);
 
-    const sau = await nanNhanA.get("/api/auth/me");
-    expect(sau.status, "phiên cấp TRƯỚC khi gỡ MFA phải chết ngay, không chờ hết hạn tự nhiên").toBe(401);
+    expect((await con(sidNanNhan)).length, "resetMfa phải XOÁ hàng phiên của ĐÚNG nạn nhân").toBe(0);
+    expect((await con(sidNguoiKhac)).length, "và KHÔNG đụng tới phiên của người khác").toBe(1);
+
+    await prisma.$executeRawUnsafe(`DELETE FROM user_sessions WHERE sid = $1`, sidNguoiKhac);
   });
 
   it("sau khi gỡ, người đó đăng nhập lại được BẰNG MẬT KHẨU, không bị hỏi mã", async () => {
