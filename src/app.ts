@@ -411,17 +411,6 @@ export function createApp() {
   // (cookie sessions otherwise carry a stale role and never re-check `active`).
   app.use("/api/", enforceActiveUser);
 
-  // Cấp mã chống giả mạo (CSRF) cho SPA. Phải nằm TRƯỚC csrfGuard trong chuỗi, và là GET nên
-  // bản thân nó không bị guard chặn. Ghi vào phiên → express-session tự lưu và đặt cookie
-  // (saveUninitialized=false nên phiên ẩn danh chỉ được tạo khi thực sự có gì để ghi).
-  app.get("/api/csrf-token", (req, res) => {
-    if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
-    const token = issueCsrfToken(req);
-    // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
-    res.setHeader("Cache-Control", "no-store, private, max-age=0");
-    res.json({ token });
-  });
-
   // CSRF defence for the cookie-session path: reject state-changing requests whose
   // Origin/Referer isn't our own, AND require a session-bound token. Bearer-JWT
   // requests are exempt (tokens aren't auto-attached by browsers). Safe methods pass.
@@ -435,6 +424,32 @@ export function createApp() {
     message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
   });
   app.use("/api/", apiLimiter);
+
+  // Cấp mã chống giả mạo (CSRF) cho SPA. Là GET nên KHÔNG bị `csrfGuard` chặn (CSRF_SAFE_METHODS
+  // bỏ qua GET/HEAD/OPTIONS trước cả khi đọc Origin) — an toàn để đăng ký sau nó. Ghi vào phiên →
+  // express-session tự lưu và đặt cookie (saveUninitialized=false nên phiên ẩn danh chỉ được tạo
+  // khi thực sự có gì để ghi).
+  //
+  // TRƯỚC 2026-09-07: route này đăng ký NGAY TRƯỚC `apiLimiter` — nghĩa là NGOÀI trần đó, y hệt cái
+  // bẫy mà chú thích ở `/readyz` (trên) đã tự nhận diện cho chính nó ("endpoint này... nằm NGOÀI
+  // app.use apiLimiter"). Route trả lời và không gọi `next()` nên `apiLimiter` không bao giờ chạy
+  // tới. Khác `/readyz` (có cache 5 giây riêng), endpoint này KHÔNG có gì chặn — mỗi lượt gọi ẩn
+  // danh ghi `csrfSecret` vào `req.session`, và đó là chính xác điều kiện khiến express-session lưu
+  // một HÀNG PHIÊN MỚI (7 ngày) vào Postgres dù chưa đăng nhập gì cả. Vòng lặp gọi endpoint này —
+  // không cần đăng nhập, không cần CSRF hợp lệ (chính nó CẤP CSRF) — bơm vô hạn hàng vào bảng phiên.
+  //
+  // KHÔNG chặn hẳn khách ẩn danh: trang đăng nhập/kích hoạt/quên-mật-khẩu ĐỀU cần xin mã này TRƯỚC
+  // khi có phiên đăng nhập (chính POST /api/auth/login cũng đòi CSRF hợp lệ) — chặn theo `active`/
+  // `userId` sẽ phá luôn đường vào của MỌI người dùng. Chỉ cần đưa nó vào CÙNG một trần với phần còn
+  // lại của API — đúng việc di chuyển xuống dưới `apiLimiter` làm được, không cần logic mới.
+  app.get("/api/csrf-token", (req, res) => {
+    if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
+    const token = issueCsrfToken(req);
+    // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
+    res.json({ token });
+  });
+
 
   app.use("/api/auth", authRoutes);
   app.use("/api/users", usersRoutes);
