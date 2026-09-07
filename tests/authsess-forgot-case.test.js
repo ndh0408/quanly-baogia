@@ -109,4 +109,40 @@ describe.runIf(dbAvailable)("quên mật khẩu — không phân biệt hoa/thư
     }
   });
 
+  // ── LỖ VỪA MỞ RA BỞI CHÍNH BẢN VÁ TRÊN (2026-09-07, phát hiện qua ultracode audit cùng ngày) ──
+  // Gỡ thẳng `!user.active` cho CẢ hai ca "chưa từng kích hoạt" LẪN "đã bị admin khoá" (off-
+  // boarding) — hai ca đều là `active:false` như nhau. Nhân viên vừa bị khoá tài khoản (nghỉ việc,
+  // vi phạm…) mà còn giữ hộp thư cá nhân sẽ tự cấp lại được token kích hoạt, accept-invite tự đặt
+  // `active:true`, và họ quay lại với ĐÚNG role/permissions cũ — kể cả admin. Khoá tài khoản là
+  // đường off-boarding DUY NHẤT cho ai từng làm báo giá (`deleteUser` từ chối xoá khi có báo giá).
+  //
+  // Phân biệt hai ca bằng `passwordChangedAt`: null = chưa từng đặt mật khẩu thật = ca cần vá ở
+  // trên; có giá trị = đã từng kích hoạt ít nhất 1 lần = `active:false` bây giờ là admin CHỦ ĐỘNG
+  // khoá → phải im lặng, không cấp token nào, y hệt hành vi trước 2026-09-07.
+  it("tài khoản ĐÃ TỪNG kích hoạt rồi bị KHOÁ (off-boarding) — Quên mật khẩu KHÔNG cấp lại token", async () => {
+    const u = await prisma.user.create({
+      data: {
+        username: `${TAG}lk`, email: `${TAG}.bikhoa@example.vn`, displayName: "Bi Khoa",
+        passwordHash: bcrypt.hashSync("Abc12345", 4),
+        active: false,                         // admin vừa khoá (PUT /api/users/:id active:false)
+        passwordChangedAt: new Date(),          // ĐÃ từng đặt mật khẩu thật lúc kích hoạt — dấu hiệu phân biệt
+        inviteTokenHash: null, inviteExpiresAt: null,   // updateUser xoá token cũ khi khoá (đúng hành vi thật)
+      },
+    });
+    try {
+      sendPasswordReset({ body: { email: `${TAG}.bikhoa@example.vn` }, headers: {}, ip: "127.0.0.1" });
+      // Đối chứng ĐI SAU để chờ đủ thời gian tác vụ nền của ca trên chạy xong — cùng kỹ thuật mốc
+      // đồng bộ đã dùng ở bài "email KHÔNG tồn tại" phía trên, không phải sleep().
+      sendPasswordReset({ body: { email: EMAIL_DC.toLowerCase() }, headers: {}, ip: "127.0.0.1" });
+      expect(await doiCapToken(userDcId)).toBeTruthy();
+
+      const sau = await prisma.user.findUnique({ where: { id: u.id }, select: { inviteTokenHash: true, active: true } });
+      expect(sau.inviteTokenHash, "tài khoản đã bị khoá thì Quên mật khẩu không được cấp token mới").toBeNull();
+      expect(sau.active, "và chắc chắn không tự bật lại active").toBe(false);
+    } finally {
+      await prisma.auditEvent.deleteMany({ where: { actorId: u.id } }).catch(() => {});
+      await prisma.user.delete({ where: { id: u.id }, includeDeleted: true }).catch(() => {});
+    }
+  });
+
 });

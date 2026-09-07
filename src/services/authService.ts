@@ -123,7 +123,7 @@ export function sendPasswordReset(req: Request) {
     // phục hồi duy nhất hỏng theo đúng cách khó nhận ra nhất.
     const user = await findLoginUser(email);
     if (!user) return;
-    // TÀI KHOẢN CHƯA KÍCH HOẠT VẪN ĐƯỢC CẤP LIÊN KẾT.
+    // TÀI KHOẢN CHƯA KÍCH HOẠT VẪN ĐƯỢC CẤP LIÊN KẾT — NHƯNG TÀI KHOẢN ĐÃ BỊ KHOÁ THÌ KHÔNG.
     //
     // Trước 2026-09-07 nhánh này là `if (!user || !user.active) return;`. Mà endpoint LUÔN trả 200
     // (chống dò tài khoản), nên người được mời — lời mời đã hết hạn, chưa từng đặt mật khẩu — bấm
@@ -132,8 +132,24 @@ export function sendPasswordReset(req: Request) {
     // admin bấm "Gửi lại lời mời". Đo được trên production: minhhuy.gianguyen@gmail.com kẹt đúng
     // như vậy từ 22/06.
     //
-    // Vá được vì HAI luồng vốn dùng CHUNG hạ tầng: cùng cột `inviteTokenHash`, cùng trang
-    // `/#/onboard?token=`, và `acceptInvite` đã tự bật `active: true` + xoá khoá. Chỉ khác câu chữ.
+    // GỠ THẲNG `!user.active` (bản vá 2026-09-07, commit 37f6d0c) THÌ MỞ LẠI MỘT LỖ KHÁC, NẶNG HƠN:
+    // "chưa từng kích hoạt" và "ĐÃ bị admin khoá" đều là `active: false` như nhau — không phân biệt
+    // được thì nhân viên vừa bị khoá tài khoản (nghỉ việc, vi phạm…) tự bấm "Quên mật khẩu" trên
+    // chính hộp thư cá nhân của họ (đăng ký bằng gmail riêng, công ty không thu hồi được) là lấy
+    // được token kích hoạt MỚI → accept-invite tự đặt lại `active: true` (xem hàm bên dưới) và cấp
+    // phiên đầy đủ với ĐÚNG role/permissions CŨ — kể cả admin. Vòng khoá tài khoản ở updateUser trở
+    // thành vô nghĩa. Nghiêm trọng hơn vì `deleteUser` từ chối xoá tài khoản đã gắn báo giá ("Hãy
+    // khóa tài khoản thay vì xóa") — khoá là đường off-boarding DUY NHẤT cho ai từng làm báo giá.
+    //
+    // PHÂN BIỆT BẰNG `passwordChangedAt` — cột này CHỈ được set (authService.ts đường đổi mật khẩu,
+    // acceptInvite, và updateUser khi admin gõ mật khẩu mới), KHÔNG NƠI NÀO xoá về null. Vậy:
+    //   - null            → chưa từng đặt mật khẩu thật → CHƯA TỪNG KÍCH HOẠT → cấp token (ca cần vá).
+    //   - có giá trị      → đã từng đặt mật khẩu thật ít nhất 1 lần → nếu giờ `active:false` thì đó
+    //                       là admin CHỦ ĐỘNG khoá (off-boarding), không phải lời mời kẹt → im lặng,
+    //                       y hệt hành vi trước 2026-09-07.
+    // Không cần migration: tín hiệu có sẵn, không nhầm chiều, và giữ nguyên ca đã vá (tài khoản mời
+    // — kể cả acceptInvite dở dang do đổi ý — luôn có `passwordChangedAt: null` cho tới khi kích hoạt).
+    if (!user.active && user.passwordChangedAt) return;
     const chuaKichHoat = !user.active;
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
