@@ -771,7 +771,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
         )}
 
-        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} />
+        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
 
         <div className="actions">
           <div className="dock-slot" ref={setODock} />

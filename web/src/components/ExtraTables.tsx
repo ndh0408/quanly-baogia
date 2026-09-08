@@ -82,9 +82,11 @@ export async function removeExtraTableAt(
   return r.removed;
 }
 
-export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty }: {
+export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
   canPay?: boolean; quoteId?: number; onMarkDirty: () => void;
+  /** Mốc `updatedAt` MỚI sau khi route /pay bump — editor phải nhận để khỏi tự đâm 409 giả (xem ExtraPayDialog). */
+  onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
@@ -197,7 +199,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
         {tables.length === 0 && <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>}
       </div>
       {payRow && quoteId && sheet.id != null && (
-        <ExtraPayDialog quoteId={quoteId} sheetId={sheet.id} item={payRow}
+        <ExtraPayDialog quoteId={quoteId} sheetId={sheet.id} item={payRow} onQuoteTouched={onQuoteTouched}
           onClose={() => setPayRow(null)}
           onSaved={(paid, hasProof) => { (payRow as Record<string, unknown>).paid = paid; (payRow as Record<string, unknown>).paidAt = paid ? new Date().toISOString() : null; (payRow as Record<string, unknown>).hasPaidProof = hasProof; setPayRow(null); redraw(); }} />
       )}
@@ -206,8 +208,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
 }
 
 // Dialog tích "đã thanh toán" + up ẢNH chứng từ cho 1 HÀNG nội bộ (gọi API /pay — không lưu cả báo giá).
-export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
+export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuoteTouched }: {
   quoteId: number; sheetId: number; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
+  onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const it = item as Record<string, unknown>;
   const [paid, setPaid] = useState(!!it.paid);
@@ -225,7 +228,12 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
   const save = async () => {
     setSaving(true);
     try {
-      await api.markExtraPay(quoteId, sheetId, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
+      const r = await api.markExtraPay(quoteId, sheetId, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
+      // Route /pay BUMP `Quote.updatedAt` để chống lost-update chéo. Người tích ô này thường ĐANG MỞ
+      // chính báo giá đó, mà editor gửi `baseUpdatedAt` đã tải lúc Lưu — không nhận mốc mới thì lần
+      // Lưu kế tiếp ăn 409 "Báo giá vừa được người khác cập nhật" do CHÍNH HỌ, và phần vừa gõ có
+      // nguy cơ mất khi họ tải lại theo lời khuyên của thông báo.
+      if (r?.updatedAt) onQuoteTouched?.(r.updatedAt);
       toast("Đã lưu thanh toán", "success");
       onSaved(paid, paid ? (!!proof || !!existing) : false);
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); }

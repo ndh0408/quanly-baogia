@@ -1101,6 +1101,7 @@ export async function markExtraTableRowPayment(req: Request) {
   // 1 transaction để 2 request đánh dấu 2 HÀNG KHÁC NHAU của CÙNG sheet không cùng đọc 1 snapshot rồi
   // ghi đè mất bản ghi thanh toán (+ ảnh chứng từ) của nhau. Ngoài ra "chạm" báo giá cha để bump
   // updatedAt → khóa lạc quan của updateQuote phát hiện được thay đổi này (chống lost-update chéo).
+  let mocMoi: Date | undefined;
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE id = ${sheetId} AND "quoteId" = ${quoteId} FOR UPDATE`;
     const sheet = await tx.quoteSheet.findFirst({ where: { id: sheetId, quoteId }, select: { id: true, extraTables: true } });
@@ -1119,10 +1120,19 @@ export async function markExtraTableRowPayment(req: Request) {
     }
     if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
     await tx.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
-    await tx.quote.update({ where: { id: quoteId }, data: {} }); // bump Quote.updatedAt (khóa lạc quan)
+    // Bump Quote.updatedAt cho khoá lạc quan (chống lost-update CHÉO giữa hai người).
+    //
+    // PHẢI TRẢ MỐC MỚI VỀ CHO CLIENT. Người tích "đã thanh toán" thường ĐANG MỞ chính báo giá đó
+    // trong trình soạn, mà editor giữ `q.updatedAt` đã tải để gửi kèm `baseUpdatedAt` lúc Lưu. Bump
+    // xong mà không trả mốc mới thì mốc trong tay họ thành cũ ngay lập tức, và lần bấm Lưu kế tiếp
+    // ăn 409 "Báo giá vừa được người khác cập nhật" — do CHÍNH HỌ, trong CHÍNH cửa sổ đó. Người
+    // dùng không có cách nào hiểu, và phần vừa gõ có nguy cơ mất khi họ tải lại theo lời khuyên của
+    // thông báo. Phát hiện qua ultracode audit vòng 2.
+    const sau = await tx.quote.update({ where: { id: quoteId }, data: {}, select: { updatedAt: true } });
+    mocMoi = sau.updatedAt;
   });
   await audit(req, paid ? "quote.internal.pay" : "quote.internal.unpay", { resource: "quote", resourceId: quoteId, after: { sheetId, rid, hasProof: proof !== undefined ? !!proof : undefined } });
-  return { ok: true, rid, paid };
+  return { ok: true, rid, paid, updatedAt: mocMoi };
 }
 
 // Lấy ẢNH chứng từ 1 hàng nội bộ (on-demand) — quyền internal:view HOẶC internal:pay.
