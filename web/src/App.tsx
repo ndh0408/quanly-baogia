@@ -2,6 +2,7 @@ import { Component, useEffect, useState, type FormEvent, type ReactNode } from "
 import { api, ApiError, setPreviewMode, type Me } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { promptModal, toast } from "./lib/ui";
+import { xoaMoiBanNhap } from "./lib/localDraft";
 
 export type PreviewState = { perms: string[]; label: string };
 
@@ -105,7 +106,14 @@ export function App() {
             // ĐĂNG NHẬP LẠI BẰNG TÀI KHOẢN KHÁC thì KHÔNG được giữ màn hình cũ: phía sau lớp phủ
             // đang là dữ liệu + quyền của người trước. Nạp lại sạch. Cùng người → giữ nguyên,
             // đó chính là mục đích của lớp phủ này.
-            if (m.id !== me.id) { location.reload(); return; }
+            //
+            // XOÁ BẢN NHÁP CỤC BỘ trước khi reload — ultracode audit 2026-09-09 (finding M-DRAFT).
+            // Khoá bản nháp (localDraft.ts) suy theo SỐ BÁO GIÁ, không theo người dùng, nên nếu
+            // không xoá thì người B (vừa đăng nhập lại trên lớp phủ này, CHUNG MÁY với người A) mở
+            // đúng báo giá đó sẽ thấy modal "Khôi phục bản nháp?" chứa giá/khách/bảng nội bộ CỦA
+            // NGƯỜI A — hai đường xoá-nháp còn lại (nút Đăng xuất, sự kiện SSE session:revoked ở
+            // Shell.tsx) đều đã gọi hàm này; đây là đường thứ ba bị bỏ sót.
+            if (m.id !== me.id) { xoaMoiBanNhap(); location.reload(); return; }
             setMe(m);
           }}
         />

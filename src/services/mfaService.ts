@@ -7,8 +7,10 @@ import qrcode from "qrcode";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
-import { encryptSecret, generateBackupCodes, consumeBackupCode } from "../mfa.js";
-import { claimTotpStep } from "../authCore.js";
+import { encryptSecret, generateBackupCodes } from "../mfa.js";
+import { verifyMfaChallenge } from "../authCore.js";
+import { revokeAllForUser } from "../jwt.js";
+import { destroyAllSessions } from "../sessions.js";
 
 async function loadUser(req: Request) {
   const user = await prisma.user.findUnique({ where: { id: req.session.userId } });
@@ -89,20 +91,27 @@ export async function disableMfa(req: Request) {
   // Step-up: require the account password before allowing 2FA removal.
   const pwOk = await bcrypt.compare(req.body.password, user.passwordHash || "");
   if (!pwOk) throw httpError(401, "Mật khẩu không đúng");
-  // Mã TOTP phải được TIÊU THỤ y như ở đường đăng nhập (claimTotpStep tiến `mfaLastStep` một cách
-  // nguyên tử). Trước đây chỗ này gọi speakeasy.totp.verify TRẦN — không đọc, không tiến mfaLastStep
-  // — nên đúng mã 6 số vừa dùng để đăng nhập còn trình lại được trong cùng cửa sổ 30 giây để GỠ HẲN
-  // yếu tố thứ hai. Ai nhìn trộm màn hình một lần biến được cái liếc đó thành quyền truy cập lâu dài.
-  const totpOk = await claimTotpStep(user.id, user.mfaSecret, req.body.token);
-  // Backup code works even when the secret can't be decrypted (key rotation).
-  const backupOk = !totpOk && !!(await consumeBackupCode(user.mfaBackupCodes, req.body.token));
-  if (!totpOk && !backupOk) throw httpError(401, "Mã xác thực hoặc mã dự phòng không đúng");
+  // Mã TOTP/dự phòng phải được TIÊU THỤ qua ĐÚNG MỘT chốt dùng chung với đường đăng nhập
+  // (`verifyMfaChallenge`, authCore.ts) — ultracode audit 2026-09-09 (finding F2) bắt được: bản
+  // trước tự gọi `claimTotpStep` + `consumeBackupCode` riêng, và nhánh backup-code KHÔNG qua chốt
+  // nguyên tử `array_remove` mà authCore.ts đã có cho đường đăng nhập — TOCTOU hẹp: mã vừa bị một
+  // request khác (vd một lần đăng nhập) tiêu thụ đúng lúc này vẫn được coi là hợp lệ ở đây, vì hàm
+  // cũ chỉ so trên bản mảng đã đọc, không xác nhận lại tại thời điểm ghi. Gọi thẳng
+  // `verifyMfaChallenge` vừa đơn giản hơn vừa THỪA HƯỞNG chốt nguyên tử đó, không cần chép lại.
+  const mfaOk = await verifyMfaChallenge(user, req.body.token);
+  if (!mfaOk) throw httpError(401, "Mã xác thực hoặc mã dự phòng không đúng");
   await prisma.user.update({
     where: { id: user.id },
     // mfaLastStep về null: mốc đó chỉ có nghĩa với bí mật vừa bị xoá. Giữ lại thì lần BẬT MFA kế
     // tiếp sẽ từ chối mã hợp lệ đầu tiên của bí mật MỚI chỉ vì step của nó nhỏ hơn mốc cũ.
     data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], mfaLastStep: null },
   });
+  // THU HỒI PHIÊN/REFRESH TOKEN KHÁC — ultracode audit 2026-09-09 (finding F1). Cùng bất biến mà
+  // `resetMfa` (admin gỡ MFA hộ, userService.ts) và `changePassword` đã áp dụng: đổi trạng thái xác
+  // thực thì mọi phiên cấp TRƯỚC đó không còn phản ánh đúng trạng thái hiện tại. Giữ lại phiên HIỆN
+  // TẠI (`keepSid`) — người vừa tự gỡ MFA không nên tự đăng xuất chính mình.
+  await revokeAllForUser(user.id);
+  await destroyAllSessions(user.id, req.sessionID ?? null);
   await audit(req, "mfa.disable", { resource: "user", resourceId: user.id });
   return { ok: true };
 }
