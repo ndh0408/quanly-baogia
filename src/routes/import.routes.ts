@@ -213,21 +213,10 @@ router.post(
     if (!looksXlsx(req.file.buffer)) {
       return res.status(415).json({ error: "File không phải .xlsx. Nếu đang dùng .xls cũ, hãy mở bằng Excel rồi 'Lưu thành' .xlsx." });
     }
-    // ĐÂY là chỗ nguy hiểm nhất trong toàn hệ: buffer do người ngoài đưa vào sắp được GIẢI NÉN và
-    // phân tích XML ngay trong tiến trình ứng dụng. `PK\x03\x04` chỉ chứng minh "là zip" — nó khớp
-    // với cả bom giải nén (4 GB số 0 nén còn vài KB) lẫn zip 200.000 mục. Soi mục lục trước, không
-    // giải nén một byte nào (src/zipSafety.ts).
-    const zip = inspectXlsx(req.file.buffer);
-    if (!zip.ok) {
-      await audit(req, "quote.import.rejected", {
-        resource: "quote", resourceId: Number(req.body?.quoteId) || undefined,
-        after: { reason: zip.reason, file: String(req.file.originalname || "").slice(0, 120), size: req.file.size },
-      });
-      return res.status(415).json({ error: `Tệp Excel không hợp lệ: ${zip.reason}` });
-    }
 
     // Nạp vào báo giá CÓ SẴN → phải sửa được chính báo giá đó (chặn IDOR: người không liên quan
-    // không được dùng endpoint này để dò dữ liệu báo giá khác).
+    // không được dùng endpoint này để dò dữ liệu báo giá khác). Vẫn RẺ TIỀN (không giải nén gì) —
+    // giữ TRƯỚC xinSuat() để không giữ suất cho request đằng nào cũng bị từ chối.
     const quoteId = Number(req.body?.quoteId) || 0;
     if (quoteId) {
       const quote = await prisma.quote.findFirst({
@@ -246,8 +235,17 @@ router.post(
       }
     }
 
-    // Xin suất SAU mọi kiểm tra rẻ tiền (quyền, chữ ký zip, quyền trên báo giá) để không giữ
-    // chỗ cho những request đằng nào cũng bị từ chối.
+    // Xin suất SAU mọi kiểm tra rẻ tiền (quyền, quyền trên báo giá) để không giữ chỗ cho những
+    // request đằng nào cũng bị từ chối.
+    //
+    // ⚠️ TRƯỚC ultracode audit 2026-09-09 (finding H1), `inspectXlsx` chỉ ĐỌC MỤC LỤC (rẻ, không
+    // giải nén) nên đứng NGOÀI phễu này là đúng. Bản vá H1 làm nó GIẢI NÉN THẬT từng mục để không
+    // còn tin số khai gian trong mục lục — tức nó KHÔNG CÒN rẻ, mà chính là việc phễu này sinh ra
+    // để giới hạn. Đặt xinSuat() TRƯỚC inspectXlsx (không phải sau như bản cũ): nếu không, N request
+    // đồng thời vẫn giải nén thật CÙNG LÚC trước khi phễu kịp chặn — đúng lỗ mà phễu định đóng, chỉ
+    // là chuyển từ "giải nén trong worker" sang "giải nén lúc kiểm an toàn". Cái giá: một request
+    // đằng nào cũng bị 415 (file hỏng) có thể giữ suất một nhịp ngắn — chấp nhận được, vì hàng chờ
+    // có trần + hết hạn chờ (IMPORT_WAIT_MS) nên không treo được ai.
     try {
       await xinSuat();
     } catch (e) {
@@ -255,8 +253,25 @@ router.post(
       return res.status(429).json({ error: e instanceof LoiNhap ? e.message : "Máy chủ đang bận, hãy thử lại sau vài giây." });
     }
 
+    // ĐÂY là chỗ nguy hiểm nhất trong toàn hệ: buffer do người ngoài đưa vào sắp được GIẢI NÉN và
+    // phân tích XML ngay trong tiến trình ứng dụng. `PK\x03\x04` chỉ chứng minh "là zip" — nó khớp
+    // với cả bom giải nén (4 GB số 0 nén còn vài KB) lẫn zip 200.000 mục. Soi mục lục + giải nén
+    // thật có trần trước, không giao thẳng cho exceljs (src/zipSafety.ts).
+    //
+    // CẢ inspectXlsx LẪN docWorkbookTrongWorker giờ CÙNG nằm trong MỘT try/finally: `inspectXlsx`
+    // (H1) không còn là "đọc mục lục rẻ tiền" mà tự giải nén thật — một exception KHÔNG LƯỜNG
+    // TRƯỚC ở đó (không riêng gì {ok:false} nó tự trả) mà không có finally ở ngay tầng này thì suất
+    // rò vĩnh viễn, đúng lớp lỗi "phễu rò suất" mà bộ test b3-import-concurrency đã chốt.
     let result;
     try {
+      const zip = await inspectXlsx(req.file.buffer);
+      if (!zip.ok) {
+        await audit(req, "quote.import.rejected", {
+          resource: "quote", resourceId: quoteId || undefined,
+          after: { reason: zip.reason, file: String(req.file.originalname || "").slice(0, 120), size: req.file.size },
+        });
+        return res.status(415).json({ error: `Tệp Excel không hợp lệ: ${zip.reason}` });
+      }
       result = await docWorkbookTrongWorker(req.file.buffer);
     } catch (e) {
       const st = e instanceof LoiNhap ? e.status : 422;
@@ -268,7 +283,7 @@ router.post(
       // PHẢI ở finally: thiếu một đường thoát là suất bị ăn mòn dần cho tới khi không ai nhập
       // được nữa — kiểu hỏng chỉ lộ ra sau nhiều ngày chạy.
       //
-      // Trả suất ở ĐÂY nghĩa là phễu buông ngay khi worker xong, TRƯỚC `audit()` và
+      // Trả suất ở ĐÂY nghĩa là phễu buông ngay khi giải nén + worker xong, TRƯỚC `audit()` và
       // `res.json(result)` bên dưới. Đánh đổi: giữ suất qua lượt ghi DB thì một truy vấn chậm
       // khoá luôn cả hàng nhập, còn buông sớm như hiện nay thì `result` vẫn nằm trong RAM luồng
       // chính suốt hai bước đó mà KHÔNG được phễu tính — xem đoạn "PHẠM VI" ở khai báo phễu.

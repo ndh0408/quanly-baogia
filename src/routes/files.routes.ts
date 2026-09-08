@@ -159,7 +159,7 @@ router.post(
     }
     // .xlsx là zip — magic bytes chỉ nói "là zip". Kiểm cấu trúc trước khi cất giữ (xem src/zipSafety.ts).
     if (sniffed.mime === XLSX_MIME) {
-      const verdict = inspectXlsx(req.file.buffer);
+      const verdict = await inspectXlsx(req.file.buffer);
       if (!verdict.ok) return res.status(415).json({ error: `Tệp Excel không hợp lệ: ${verdict.reason}` });
     }
     const key = userUploadKey(req.session, sniffed.ext);
@@ -385,7 +385,7 @@ router.post(
     }
     // XLSX = tệp zip; magic bytes chỉ chứng minh "là zip". Kiểm cấu trúc thật (xem src/zipSafety.ts).
     if (sniffed.mime === XLSX_MIME) {
-      const verdict = inspectXlsx(body);
+      const verdict = await inspectXlsx(body);
       if (!verdict.ok) return reject(`xlsx không hợp lệ: ${verdict.reason}`, 415, `Tệp Excel không hợp lệ: ${verdict.reason}`);
     }
     const bamNoiDung = createHash("sha256").update(body).digest("hex");
