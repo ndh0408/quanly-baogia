@@ -24,6 +24,7 @@ import {
   QUOTE_UPDATE_STATE_SELECT,
   templatesBelongToCompany,
   buildSheetsCreate,
+  mocSoMaSheet,
   chuanHoaSoNgayTheoMau,
   sanitizeExtraTables,
   extraTableSum,
@@ -329,8 +330,11 @@ export async function createQuote(req: Request) {
         if (b.quoteNumber) await syncQuoteCounter(b.quoteNumber, prefix, tx as any);
         if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
         const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
+        const sheetsTaoMoi = buildSheetsCreate(b.sheets, t.sheetTotals);
         const created = await tx.quote.create({
-          data: { ...draft, quoteNumber, searchText, sheets: { create: buildSheetsCreate(b.sheets, t.sheetTotals) }, members: { connect: [{ id: userId }] } } as any,
+          // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
+          // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
+          data: { ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0), sheets: { create: sheetsTaoMoi }, members: { connect: [{ id: userId }] } } as any,
           include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
@@ -606,7 +610,10 @@ export async function updateQuote(req: Request) {
       // Giá HN đã chốt: lấy lại từ CSDL trước khi ghi (xem reconcileHanoiTables).
       reconcileHanoiTables(b.sheets, carry, can(req.session, P.QUOTE_HN_MANAGE), existing.hnStatus);
 
-      const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry);
+      const seqCu = Number((existing as any).sheetCodeSeq) || 0;
+      const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry, seqCu);
+      // Mốc nước CHỈ TĂNG: ghi lại để lượt lưu sau không cấp lại mã của sheet vừa bị xoá.
+      (data as any).sheetCodeSeq = mocSoMaSheet(sheetsGhi as any, seqCu);
 
       // ── GHI TĂNG DẦN Ở MỨC TRANG (cờ INCREMENTAL_QUOTE_SAVE) ──────────────
       // Trang nào ghi đè lên chính nó KHÔNG đổi một byte thì không xoá, không tạo lại. Lý lẽ và số

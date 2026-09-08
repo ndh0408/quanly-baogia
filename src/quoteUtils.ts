@@ -135,6 +135,9 @@ export const QUOTE_INCLUDE = {
  * số nhân cho các dòng SAU nó, nên đảo thứ tự là ra tổng tiền khác.
  */
 export const QUOTE_UPDATE_STATE_SELECT = {
+  // `sheetCodeSeq`: mốc nước mã sản xuất — đường ghi PHẢI đọc nó, nếu không capSoMaSheet lại rơi
+  // về `max(sheet còn lại)+1` và cấp lại mã của sheet vừa xoá (xem migration 20260908060000).
+  sheetCodeSeq: true,
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
@@ -418,13 +421,24 @@ export const SHEET_CARRY_FIELDS = [
  * tụt xuống thành "_02" — một mã đã phát hành bỗng trỏ sang sheet khác, im lặng. Đóng băng số
  * thì xoá 02 để lại 01 và 03, và sheet thêm mới là 04 chứ không tái dùng 02.
  */
-function capSoMaSheet(sheets: any, carry?: (Record<string, any> | undefined)[]): number[] {
+function capSoMaSheet(sheets: any, carry?: (Record<string, any> | undefined)[], seqDaCap = 0): number[] {
   const ds: (number | null)[] = (sheets || []).map((_s: any, i: number) => {
     const cu = carry?.[i]?.codeNo;
     return Number.isFinite(Number(cu)) && Number(cu) > 0 ? Number(cu) : null;
   });
-  let ke = Math.max(0, ...ds.filter((n): n is number => n != null)) + 1;
+  // MỐC XUẤT PHÁT phải là MAX(mốc nước đã lưu, số cao nhất đang còn) — không được chỉ nhìn sheet
+  // ĐANG CÒN. QuoteSheet bị XOÁ CỨNG mỗi lượt lưu (không nằm trong SOFT_DELETE_MODELS, src/db.ts),
+  // nên xoá sheet mang số cao nhất là số đó biến mất khỏi CSDL; `max(còn lại)+1` sẽ CẤP LẠI đúng
+  // mã ấy cho sheet mới — trong khi mã cũ có thể đã in lên hoá đơn và gửi khách.
+  // `Quote.sheetCodeSeq` (migration 20260908060000) giữ mốc đó và CHỈ TĂNG.
+  // seqDaCap = 0 (chỗ gọi chưa truyền / báo giá mới) → hành vi y hệt bản cũ.
+  let ke = Math.max(0, seqDaCap, ...ds.filter((n): n is number => n != null)) + 1;
   return ds.map((n) => (n != null ? n : ke++));
+}
+
+/** Mốc nước MỚI sau khi đã cấp — chỗ gọi ghi lại vào `Quote.sheetCodeSeq`. Chỉ tăng, không lùi. */
+export function mocSoMaSheet(sheetsGhi: { codeNo?: number | null }[], seqDaCap = 0): number {
+  return Math.max(0, seqDaCap, ...sheetsGhi.map((s) => Number(s?.codeNo) || 0));
 }
 
 /**
@@ -463,8 +477,8 @@ export async function chuanHoaSoNgayTheoMau(sheets: any[]) {
   chuanHoaSoNgayTheoCoNgay(sheets, coNgay);
 }
 
-export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[]) {
-  const soMa = capSoMaSheet(sheets, carry);
+export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[], seqDaCap = 0) {
+  const soMa = capSoMaSheet(sheets, carry, seqDaCap);
   return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,
