@@ -131,13 +131,24 @@ export async function verifyMfaChallenge(
   if (/^\d{6}$/.test(token)) return claimTotpStep(user.id, user.mfaSecret, token);
   const hit = await consumeBackupCode(user.mfaBackupCodes, token);
   if (!hit) return false;
-  // Dùng-một-lần NGUYÊN TỬ: chỉ thành công nếu CHÍNH request này là request gỡ mã ra khỏi mảng.
-  // Điều kiện `has: matched` khiến request song song trình cùng mã thấy nó đã biến mất (count 0).
-  const upd = await prisma.user.updateMany({
-    where: { id: user.id, mfaBackupCodes: { has: hit.matched } },
-    data: { mfaBackupCodes: { set: hit.remaining } },
-  });
-  return upd.count > 0;
+  // DÙNG-MỘT-LẦN NGUYÊN TỬ — GỠ ĐÚNG MỘT PHẦN TỬ, KHÔNG GHI ĐÈ CẢ MẢNG.
+  //
+  // Bản trước dùng `data: { mfaBackupCodes: { set: hit.remaining } }`, mà `hit.remaining` tính từ
+  // bản mảng ĐÃ ĐỌC TRƯỚC ĐÓ. Điều kiện `has: matched` chặn được hai request trình CÙNG MỘT mã,
+  // nhưng KHÔNG chặn được hai request trình HAI MÃ KHÁC NHAU — và ca đó làm SỐNG LẠI mã đã tiêu:
+  //     mảng [A,B,C]; req1 dùng A (remaining [B,C]); req2 dùng B (remaining [A,C]) — cả hai cùng
+  //     đọc [A,B,C]. req1 ghi [B,C]; req2 thấy `has: B` vẫn đúng nên ghi đè [A,C] → A QUAY LẠI dù
+  //     vừa được tiêu thụ. Mã dự phòng là chứng chỉ cuối cùng của tài khoản, một mã sống lại là một
+  //     đường vào còn hiệu lực. Phát hiện qua ultracode audit vòng 2.
+  //
+  // `array_remove` chạy TRÊN GIÁ TRỊ HIỆN TẠI của hàng ngay trong câu lệnh, nên hai request gỡ hai
+  // phần tử khác nhau đều cho kết quả đúng dù đọc từ cùng một bản cũ. `= ANY(...)` giữ nguyên tính
+  // dùng-một-lần: request thứ hai trình CÙNG mã thấy nó đã biến mất → 0 hàng → false.
+  const soHang = await prisma.$executeRaw`
+    UPDATE "User"
+    SET "mfaBackupCodes" = array_remove("mfaBackupCodes", ${hit.matched})
+    WHERE "id" = ${user.id} AND ${hit.matched} = ANY("mfaBackupCodes")`;
+  return soHang > 0;
 }
 
 /**
