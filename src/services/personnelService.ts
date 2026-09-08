@@ -103,13 +103,20 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  const [total, data, agg] = await Promise.all([
+  const [total, data, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
     prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
-    prisma.personnelRecord.aggregate({ where, _sum: { salary: true } }),
+    // Tổng lương PHẢI cộng trên giá trị ĐÃ GIẢI MÃ, không phải SQL SUM trên cột thô.
+    //
+    // ultracode audit 2026-09-09: `aggregate({_sum:{salary}})` cũ chạy thẳng trên cột `salary` thô —
+    // từ khi PII_PLAINTEXT_CUTOVER bật (fc053c2), cột thô của mọi hồ sơ tạo/sửa SAU đó = NULL, và SQL
+    // SUM bỏ qua NULL theo ngữ nghĩa chuẩn → tổng lương/thuế TNCN thiếu dần theo thời gian, không ai
+    // báo lỗi vì phép tính vẫn "chạy được", chỉ ra số sai. Chỉ SELECT 2 cột (không phải cả hồ sơ) nên
+    // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
+    prisma.personnelRecord.findMany({ where, select: { salary: true, salaryEnc: true } }),
   ]);
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
@@ -119,7 +126,7 @@ export async function listPersonnel(req: Request) {
   })).map((r) => r.id));
   const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
-  const salarySum = Number(agg._sum.salary ?? 0);
+  const salarySum = salaryRows.reduce((s, r) => s + Number(decodePiiOnRead("PersonnelRecord", r as any)?.salary ?? 0), 0);
   const tax = computeTax(salarySum);
   const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
   return { ...phanTrang(decorated, total, page, size), summary };
@@ -279,8 +286,15 @@ export async function getPaymentProof(req: Request) {
 }
 
 // TẢI HỢP ĐỒNG DỊCH VỤ (.docx) từ mẫu công ty — gác theo quyền XEM hồ sơ (owner-scope như read).
+//
+// PHẢI giải mã trước khi đưa cho buildContractDocx — ultracode audit 2026-09-09 bắt được: đây là
+// hàm DUY NHẤT trong file này quên gọi decodePiiOnRead (mọi hàm khác đều có). Từ khi
+// PII_PLAINTEXT_CUTOVER bật trên production (fc053c2), cột thô của MỌI hồ sơ tạo/sửa sau đó = NULL
+// — contractDocx.ts đọc thẳng `rec.salary`/`rec.idCard` nên hợp đồng xuất ra thiếu Lương, CCCD hiện
+// dấu chấm che. Đo trên production 2026-09-09: PersonnelRecord đang 0 dòng nên CHƯA ai bị ảnh hưởng
+// thật, nhưng sẽ vỡ ngay hồ sơ đầu tiên. Xem tests/pii-contract-decode.test.js.
 export async function downloadContract(req: Request) {
-  const rec = await loadAuthorized(req, "read");
+  const rec = decodePiiOnRead("PersonnelRecord", await loadAuthorized(req, "read"))!;
   const out = await buildContractDocx(rec);
   await audit(req, "personnel.contract-download", { resource: "personnel", resourceId: rec.id });
   return out;
