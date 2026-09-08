@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, bocAnhKhoiBaoGia,
+  khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, xoaMoiBanNhap, bocAnhKhoiBaoGia,
   TRAN_BYTE, HAN_MS,
 } from "./localDraft";
 
@@ -140,5 +140,33 @@ describe("localDraft — lưới cuối chống mất phần đang gõ", () => {
     ghiBanNhap(k, baoGia(), null);
     xoaBanNhap(k);
     expect(docBanNhap(k)).toBeNull();
+  });
+
+  // ── BẢN NHÁP SỐNG SÓT QUA ĐĂNG XUẤT (ultracode audit vòng 2, 2026-09-08) ────────────────────
+  // Khoá bản nháp gắn theo SỐ BÁO GIÁ, không theo người dùng, và sống 7 ngày trong localStorage —
+  // thứ không bị xoá khi đăng xuất. Máy dùng chung (văn phòng nhỏ): người tiếp theo mở đúng báo giá
+  // đó được ĐỀ NGHỊ khôi phục bản nháp của người trước — giá từng hạng mục, thông tin khách, bảng
+  // chi phí nội bộ. Nút Đăng xuất (và nhánh session:revoked) nay gọi xoaMoiBanNhap().
+  describe("xoaMoiBanNhap", () => {
+    it("xoá SẠCH mọi bản nháp, kể cả bản chưa quá hạn", () => {
+      ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Bảy" }, null);
+      ghiBanNhap(khoaBanNhap("moi"), { ...baoGia(), title: "Mới" }, null);
+      expect(docBanNhap(khoaBanNhap(7))).not.toBeNull();
+
+      expect(xoaMoiBanNhap()).toBe(2);
+      expect(docBanNhap(khoaBanNhap(7)), "bản nháp của người trước không được sống qua Đăng xuất").toBeNull();
+      expect(docBanNhap(khoaBanNhap("moi"))).toBeNull();
+    });
+
+    it("KHÔNG đụng khoá localStorage của thứ khác (theme, cờ giao diện…)", () => {
+      localStorage.setItem("theme", "dark");
+      ghiBanNhap(khoaBanNhap(9), baoGia(), null);
+      xoaMoiBanNhap();
+      expect(localStorage.getItem("theme"), "chỉ xoá khoá mang tiền tố bản nháp").toBe("dark");
+    });
+
+    it("không có gì để xoá → trả 0, không ném", () => {
+      expect(xoaMoiBanNhap()).toBe(0);
+    });
   });
 });

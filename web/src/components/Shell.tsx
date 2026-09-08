@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type Me } from "../lib/api";
 import { confirmModal } from "../lib/ui";
+import { xoaMoiBanNhap } from "../lib/localDraft";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
@@ -355,7 +356,9 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
         es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
         es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
         es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
-        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } location.reload(); });
+        // Phiên bị thu hồi (khoá tài khoản / gỡ MFA / đổi mật khẩu) — dọn luôn bản nháp cục bộ,
+        // cùng lý do như nút Đăng xuất bên dưới (máy dùng chung).
+        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); });
         es.onerror = () => {
           // CLOSED = bắt tay hỏng (429/401/5xx) → trình duyệt sẽ KHÔNG tự thử lại, ta phải tự hẹn.
           // CONNECTING = đứt giữa chừng → trình duyệt tự lo, đừng dựng thêm kết nối thứ hai.
@@ -442,7 +445,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } location.reload(); }}>Đăng xuất</button>
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isWizard ? (

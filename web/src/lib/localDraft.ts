@@ -138,6 +138,33 @@ export function xoaBanNhap(khoa: string): void {
 }
 
 /** Dọn MỌI bản nháp quá hạn của ứng dụng này (không đụng khoá của thứ khác trên cùng origin). */
+/**
+ * XOÁ SẠCH MỌI BẢN NHÁP — gọi khi ĐĂNG XUẤT (và khi phiên bị thu hồi).
+ *
+ * Bản nháp gắn khoá theo SỐ BÁO GIÁ, không theo người dùng, và sống 7 ngày trong localStorage — thứ
+ * KHÔNG bị xoá khi đăng xuất. Trên một máy dùng chung (chuyện thường ở văn phòng nhỏ này), người
+ * tiếp theo mở đúng báo giá đó sẽ được ĐỀ NGHỊ khôi phục bản nháp của người trước: giá từng hạng
+ * mục, thông tin khách, bảng chi phí nội bộ — dữ liệu mà phân quyền phía máy chủ đang cố giữ kín.
+ * Phát hiện qua ultracode audit vòng 2.
+ *
+ * Trả về số bản nháp đã xoá (để test đếm được).
+ */
+export function xoaMoiBanNhap(s: Storage | null = kho()): number {
+  if (!s) return 0;
+  let n = 0;
+  try {
+    const khoas: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && k.startsWith(TIEN_TO)) khoas.push(k);
+    }
+    for (const k of khoas) { try { s.removeItem(k); n++; } catch { /* bỏ qua */ } }
+  } catch {
+    /* localStorage bị chặn (chế độ riêng tư) — không có gì để xoá */
+  }
+  return n;
+}
+
 export function donBanNhapQuaHan(s: Storage | null = kho()): number {
   if (!s) return 0;
   let n = 0;
