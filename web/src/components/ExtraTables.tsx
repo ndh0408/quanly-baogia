@@ -3,7 +3,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable, safeImgSrc } from "./GridTable";
 import { api, ApiError, type EditorTemplate } from "../lib/api";
-import { confirmModal, toast } from "../lib/ui";
+import { confirmModal, toast, useEscClose } from "../lib/ui";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -213,6 +213,7 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved }: {
   const [paid, setPaid] = useState(!!it.paid);
   const [proof, setProof] = useState<string | null>(null);      // ảnh MỚI chọn
   const [existing, setExisting] = useState<string | null>(null); // ảnh đã có (fetch on-demand)
+  useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const [saving, setSaving] = useState(false);
   const rid = String(it.rid);
   useEffect(() => { if (it.hasPaidProof) api.getExtraProof(quoteId, sheetId, rid).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, rid, it.hasPaidProof]);

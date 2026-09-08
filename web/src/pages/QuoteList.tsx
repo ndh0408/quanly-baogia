@@ -132,7 +132,11 @@ export function QuoteListPage({ me }: { me: Me }) {
         /* MOBILE: thẻ React (không cuộn bảng rộng) — giữ nguyên cột/nút theo ROLE. */
         <div className="ql-cards">
           {rows.map((r) => (
-            <div className="ql-card" key={r.id} onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
+            // Bàn phím: bản bảng có <a href> nên mở được; bản thẻ trước đây chỉ nghe onClick → Tab chạy
+            // qua cả danh sách không dừng ở báo giá nào (chỉ dừng ở nút Xoá!). Cùng mẫu Projects.tsx.
+            <div className="ql-card" key={r.id} role="link" tabIndex={0} aria-label={`Mở báo giá ${codeLabel(r)}`}
+              onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("button,a")) open(r.id); }}>
               <div className="ql-card-head">
                 <strong>{codeLabel(r)}</strong>
                 {isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}

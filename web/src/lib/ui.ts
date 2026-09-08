@@ -107,6 +107,60 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
  * điểm cũng rơi về <body> thay vì nút vừa bấm.
  */
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const DIALOG_SEL = '[role="dialog"][aria-modal="true"]';
+
+/**
+ * GIAM TIÊU ĐIỂM TOÀN CỤC cho MỌI hộp thoại `role="dialog" aria-modal="true"` — 19 modal React + bất kỳ
+ * modal nào thêm sau này — mà không phải sửa từng file. Gọi MỘT lần ở main.tsx.
+ *
+ * `trapFocus` bên dưới chỉ được nối vào 2 modal dựng bằng DOM (confirmModal/promptModal); 19 modal
+ * JSX không có lớp này: Tab quá nút cuối là tiêu điểm chui ra sidebar/bảng phía sau lớp phủ, và đóng
+ * xong tiêu điểm rơi về <body>. Nặng nhất là SessionLostOverlay (cố ý không có nút đóng — Tab từ ô
+ * mật khẩu đi thẳng vào app phía sau, nơi mọi thao tác 401), ThietLapMfa (đang hiện mã dự phòng) và
+ * RecordForm nhân sự (CCCD/STK). Phát hiện qua ultracode audit 2026-09-07.
+ *
+ * Cách làm: một listener Tab (capture) trên document, luôn nhắm vào hộp thoại MỞ SAU CÙNG trong DOM;
+ * cộng một MutationObserver ghi nhớ phần tử đang có tiêu điểm lúc hộp thoại xuất hiện và trả lại khi
+ * hộp thoại bị gỡ. Hộp thoại DOM tự giam (data-focus-trap="own") thì bỏ qua để không xử lý hai lần.
+ */
+export function installGlobalFocusTrap() {
+  const hopTrenCung = (): HTMLElement | null => {
+    const all = document.querySelectorAll<HTMLElement>(DIALOG_SEL);
+    return all.length ? all[all.length - 1] : null;
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const box = hopTrenCung();
+    if (!box || box.dataset.focusTrap === "own") return;
+    const items = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    const cur = document.activeElement;
+    if (e.shiftKey && (cur === first || !box.contains(cur))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (cur === last || !box.contains(cur))) { e.preventDefault(); first.focus(); }
+  }, true);
+
+  const truocKhiMo = new WeakMap<Element, HTMLElement>();
+  const timHop = (n: Node): HTMLElement | null =>
+    n instanceof HTMLElement ? (n.matches(DIALOG_SEL) ? n : n.querySelector<HTMLElement>(DIALOG_SEL)) : null;
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) {
+        const d = timHop(n);
+        if (!d || d.dataset.focusTrap === "own" || truocKhiMo.has(d)) continue;
+        const a = document.activeElement as HTMLElement | null;
+        // Chỉ nhớ phần tử NGOÀI hộp: React có thể đã autoFocus vào ô nhập bên trong trước khi observer chạy.
+        if (a && a !== document.body && !d.contains(a)) truocKhiMo.set(d, a);
+      }
+      for (const n of m.removedNodes) {
+        const d = timHop(n);
+        const a = d ? truocKhiMo.get(d) : undefined;
+        if (d && a) { truocKhiMo.delete(d); if (document.contains(a)) a.focus(); }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 function trapFocus(box: HTMLElement) {
   const previous = document.activeElement as HTMLElement | null;
   const onTab = (e: KeyboardEvent) => {
@@ -137,7 +191,7 @@ export function confirmModal(
   return new Promise((resolve) => {
     const back = document.createElement("div");
     back.className = "modal-backdrop";
-    back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="${esc(title)}">
       <div class="modal-head"><h3>${esc(title)}</h3></div>
       <div class="modal-body"><p style="margin:0">${esc(message)}</p></div>
       <div class="modal-foot">
@@ -170,7 +224,7 @@ export function promptModal(
   return new Promise((resolve) => {
     const back = document.createElement("div");
     back.className = "modal-backdrop";
-    back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="${esc(title)}">
       <div class="modal-head"><h3>${esc(title)}</h3></div>
       <div class="modal-body"><p style="margin:0 0 8px">${esc(message)}</p>
         <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical"></textarea></div>

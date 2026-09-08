@@ -443,9 +443,25 @@ function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () =
   const paid = !!rec.paidAt;
   const [proof, setProof] = useState<string | null>(null);     // ảnh MỚI chọn (base64)
   const [existing, setExisting] = useState<string | null>(null); // ảnh ĐÃ CÓ (tải on-demand)
+  // Ba trạng thái TÁCH BẠCH cho ảnh đã có: đang tải / lỗi tải / thật sự không có. Trước đây catch
+  // nuốt im lặng nên tải hỏng (mạng chập chờn, ảnh nặng, 500 giải mã) rơi vào đúng nhánh "Chưa có
+  // ảnh chứng từ" — nói NGƯỢC với cái kẹp giấy 📎 vừa hiện ở bảng, và kế toán đi kết luận sai về
+  // một chứng từ TIỀN. Phát hiện qua ultracode audit 2026-09-07.
+  const [proofLoading, setProofLoading] = useState(false);
+  const [proofErr, setProofErr] = useState("");
+  const [proofTry, setProofTry] = useState(0);
   const [busy, setBusy] = useState(false);
   useEscClose(onClose); // ESC đóng — đồng bộ hành xử với RecordForm
-  useEffect(() => { if (rec.hasPaymentProof) api.getPaymentProof(rec.id).then((r) => setExisting(r.paymentProof)).catch(() => { /* ignore */ }); }, [rec]);
+  useEffect(() => {
+    if (!rec.hasPaymentProof) return;
+    let alive = true;
+    setProofLoading(true); setProofErr("");
+    api.getPaymentProof(rec.id)
+      .then((r) => { if (alive) setExisting(r.paymentProof); })
+      .catch((ex) => { if (alive) setProofErr(ex instanceof ApiError ? ex.message : "Không tải được ảnh chứng từ"); })
+      .finally(() => { if (alive) setProofLoading(false); });
+    return () => { alive = false; };
+  }, [rec, proofTry]);
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     if (!file.type.startsWith("image/")) { toast("Chỉ chọn ảnh (png/jpg/webp)", "error"); return; }
@@ -465,7 +481,11 @@ function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () =
           <p className="muted" style={{ marginTop: 0 }}>{paid ? `Trạng thái: ĐÃ thanh toán${(rec.paidBy as { displayName?: string } | undefined)?.displayName ? ` · ${(rec.paidBy as { displayName?: string }).displayName}` : ""}.` : "Trạng thái: CHƯA thanh toán."}</p>
           {!paid && <label className="full"><span>Ảnh chứng từ (tùy chọn — sẽ nén tự động)</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} /></label>}
           {shown && <div className="pay-proof"><img src={safeImgSrc(shown)} alt="ảnh chứng từ thanh toán" /></div>}
-          {paid && !shown && <p className="muted">Chưa có ảnh chứng từ.</p>}
+          {!shown && proofLoading && <div className="skeleton-wrap" aria-busy="true"><div className="skeleton-row" /><div className="skeleton-row" /></div>}
+          {!shown && !proofLoading && proofErr && (
+            <p className="err" role="alert">{proofErr} <button type="button" className="btn btn-sm" onClick={() => setProofTry((n) => n + 1)}>Thử lại</button></p>
+          )}
+          {paid && !shown && !proofLoading && !proofErr && !rec.hasPaymentProof && <p className="muted">Chưa có ảnh chứng từ.</p>}
         </div>
         <div className="modal-foot">
           <button className="btn" onClick={onClose}>Đóng</button>

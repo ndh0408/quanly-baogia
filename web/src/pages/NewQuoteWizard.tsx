@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "../lib/api";
-import { toast } from "../lib/ui";
+import { toast, useEscClose } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
@@ -202,6 +202,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
 
 function CustomerPicker({ onClose, onPick }: { onClose: () => void; onPick: (c: Customer) => void }) {
   const [q, setQ] = useState("");
+  useEscClose(onClose); // ESC đóng — trước đây modal này là ngõ cụt hoàn toàn cho bàn phím
   const [rows, setRows] = useState<Customer[] | null>(null);
   useEffect(() => { const t = setTimeout(() => { api.listCustomers(q, 1, 30).then((r) => setRows(r.data)).catch(() => setRows([])); }, 250); return () => clearTimeout(t); }, [q]);
   return (

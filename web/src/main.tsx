@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { queryClient, RealtimeBridge } from "./lib/query";
 import { installSafeModalBackdropClicks } from "./lib/safeModalBackdrop";
+import { installGlobalFocusTrap } from "./lib/ui";
 // Design-system dùng-chung (app cũ vẫn nạp tĩnh file này) — IMPORT vào bundle để VITE TỰ hash/cache-bust
 // → KHÔNG còn phải bump ?v= tay khi sửa CSS chung. Phải đứng TRƯỚC styles.css (React override thắng).
 import "../../public/style.css";
@@ -20,6 +21,8 @@ try {
 
 // Áp dụng cho mọi modal React, kể cả modal tạo động từ confirmModal/promptModal.
 installSafeModalBackdropClicks();
+// Giam Tab + trả tiêu điểm cho MỌI hộp thoại role="dialog" (19 modal React) — xem chú thích ở ui.ts.
+installGlobalFocusTrap();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

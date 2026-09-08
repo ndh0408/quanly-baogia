@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "../lib/api";
-import { toast, confirmModal, promptModal } from "../lib/ui";
+import { toast, confirmModal, promptModal, useEscClose } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
@@ -848,6 +848,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
 const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng" };
 const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
 function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
+  useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const sorted = [...versions].sort((a, b) => a.versionNo - b.versionNo);
   const [a, setA] = useState(sorted[0]?.versionNo ?? 0);
   const [b, setB] = useState(sorted[sorted.length - 1]?.versionNo ?? 0);
@@ -874,7 +875,7 @@ function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versio
               </div>
               {changes && (changes.length === 0 ? <p className="muted" style={{ marginTop: 8 }}>Hai phiên bản giống nhau.</p> : (
                 <table className="list-table" style={{ marginTop: 8 }}><thead><tr><th>Trường</th><th>#{a}</th><th>#{b}</th></tr></thead>
-                  <tbody>{changes.map((c) => <tr key={c.key}><td>{FIELD_VN[c.key] || c.key}</td><td style={{ color: "var(--danger)" }}>{diffVal(c.before)}</td><td style={{ color: "#0a7d28" }}>{diffVal(c.after)}</td></tr>)}</tbody></table>
+                  <tbody>{changes.map((c) => <tr key={c.key}><td>{FIELD_VN[c.key] || c.key}</td><td style={{ color: "var(--danger)" }}>{diffVal(c.before)}</td><td style={{ color: "var(--success)" }}>{diffVal(c.after)}</td></tr>)}</tbody></table>
               ))}
             </div>
           )}
@@ -887,6 +888,7 @@ function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versio
 
 const ROLE_LABEL_FULL: Record<string, string> = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội", hr: "Nhân sự (HR)", accountant: "Kế toán" };
 function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quoteId: number; createdById?: number; current: number[]; onClose: () => void; onSaved: (ids: number[]) => void }) {
+  useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const [users, setUsers] = useState<AssignableUser[] | null>(null);
   const [sel, setSel] = useState<number[]>(current);
   const [saving, setSaving] = useState(false);
