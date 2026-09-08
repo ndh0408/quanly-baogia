@@ -46,7 +46,7 @@ router.get(
   "/me/export",
   gdprSelfLimiter,
   asyncHandler(async (req: Request, res: Response) => {
-    const data = await svc.exportUser((req.session as any).userId);
+    const data = await svc.exportUser((req.session as any).userId, req.session);   // kẹp phạm vi quyền hiện tại
     noStoreExport(res, `user-${req.session.userId}-export.json`);
     res.end(svc.serializeExport(data));
     await audit(req, "gdpr.export", { resource: "user", resourceId: req.session.userId });

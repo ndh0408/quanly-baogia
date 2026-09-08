@@ -6,6 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
+import { quoteScopeWhere, readScopeWhere } from "../permissions.js";
 import { bangNoiBoTheoSheet } from "./quoteService.js";
 
 /**
@@ -52,8 +53,22 @@ function anonymizeUserOps(id: number) {
   ];
 }
 
-/** Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu. Tuần tự hoá: `serializeExport`. */
-export async function exportUser(userId: number) {
+/**
+ * Tổng hợp toàn bộ dữ liệu cá nhân của 1 user thành object xuất khẩu. Tuần tự hoá: `serializeExport`.
+ *
+ * `session` — PHIÊN CỦA NGƯỜI XIN BẢN XUẤT (đường tự-xuất /me/export). Có nó thì báo giá và khách hàng
+ * bị KẸP THÊM phạm vi quyền hiện tại: một nhân viên bị gỡ sạch quyền báo giá/khách hàng (chuyển sang
+ * tài khoản "chi phí"/kế toán) nhận 403 ở MỌI đường đọc bình thường (listQuotes/getQuote/listCustomers/
+ * listProjects đều fail-closed), nhưng trước 2026-09-08 đường này chỉ có requireAuth và truy vấn
+ * thẳng `createdById`/`ownerId` — một request tải về TOÀN BỘ báo giá họ từng tạo kèm giá từng hạng
+ * mục, bảng chi phí nội bộ, và 5000 khách hàng đầy đủ liên hệ — dữ liệu của BÊN THỨ BA. Cùng lập luận
+ * mà chú thích bên dưới đã dùng để loại customerLogo. Đường admin xuất hộ (/users/:id/export) không
+ * truyền session → giữ nguyên hành vi (admin có read:all).
+ */
+export async function exportUser(userId: number, session?: Parameters<typeof quoteScopeWhere>[0]) {
+  // null = KHÔNG có quyền đọc nhóm đó → nhóm đó rỗng trong bản xuất (fail-closed như mọi đường đọc).
+  const phamViBaoGia = session ? quoteScopeWhere(session) : {};
+  const phamViKhach = session ? readScopeWhere(session, "customer") : {};
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -82,8 +97,8 @@ export async function exportUser(userId: number) {
     // vẫn đi qua dây rồi mới bị bỏ (2,4 MB thay vì 0,36 MB cho cùng bộ dữ liệu). Nên dùng lại
     // `bangNoiBoTheoSheet` của quoteService — câu SQL DUY NHẤT trong repo cắt `paidProof` — thay vì
     // viết bản thứ hai. Hai bản chép của quy tắc cắt ấy chắc chắn sẽ trôi khỏi nhau.
-    prisma.quote.findMany({
-      where: { createdById: userId },
+    phamViBaoGia === null ? Promise.resolve([] as any[]) : prisma.quote.findMany({
+      where: { AND: [{ createdById: userId }, phamViBaoGia] },
       omit: { customerLogo: true },
       include: { sheets: { omit: { extraTables: true }, include: { items: { omit: { images: true } } } } },
       take: 1000,
@@ -97,7 +112,7 @@ export async function exportUser(userId: number) {
         sheets: (q.sheets || []).map((sh: any) => ({ ...sh, extraTables: theoSheet.get(sh.id) ?? [] })),
       }));
     }),
-    prisma.customer.findMany({ where: { ownerId: userId }, take: 5000 }),
+    phamViKhach === null ? Promise.resolve([] as any[]) : prisma.customer.findMany({ where: { AND: [{ ownerId: userId }, phamViKhach] }, take: 5000 }),
     prisma.auditEvent.findMany({
       where: { actorId: userId },
       orderBy: { createdAt: "desc" },
