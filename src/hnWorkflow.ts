@@ -171,7 +171,17 @@ export async function submitHn(req: Request) {
   return quote;
 }
 
-/** Manager DUYỆT / TRẢ phần HN → thông báo account. */
+/**
+ * Manager DUYỆT / TRẢ phần HN → thông báo account.
+ *
+ * NGUYÊN TỬ hoá bằng `updateMany` + kiểm `count` — ultracode audit 2026-09-09 (finding M-CONC).
+ * Bản trước là check-then-update: đọc `hnStatus` rồi `update` KHÔNG kèm lại điều kiện đó, nên hai
+ * lượt duyệt/trả gần như đồng thời (2 quản lý HN cùng bấm) đều đọc thấy "submitted" và đều ghi đè
+ * — người thắng cuối cùng quyết định kết quả, mà audit log + thông báo cho account lại ghi CẢ HAI
+ * quyết định như thể đều hợp lệ. `markConverted`/`markLost` (quoteService.ts) đã tự vá đúng khuôn
+ * này cho một chuyển trạng thái terminal tương tự; `reviewHn` xử lý cùng LOẠI chuyển trạng thái
+ * (submitted → approved/rejected) nhưng chưa áp dụng khuôn đó. Xem tests/zm-hn-review-atomic.test.js.
+ */
 export async function reviewHn(req: Request) {
   const id = (req.params as any).id;
   const decision = req.body?.decision;   // "approve" | "reject"
@@ -182,11 +192,17 @@ export async function reviewHn(req: Request) {
   if (existing.hnStatus !== "submitted") throw httpError(400, "Phần HN chưa được gửi duyệt");
   if (!["approve", "reject"].includes(decision)) throw httpError(400, "Quyết định không hợp lệ");
   const approved = decision === "approve";
-  const quote = await prisma.quote.update({
-    where: { id },
+  // Optimistic guard: chỉ ghi nếu hnStatus VẪN LÀ "submitted" tại thời điểm ghi, không phải lúc đọc
+  // ở trên — chặn đúng cửa sổ đua giữa findFirst và update.
+  const upd = await prisma.quote.updateMany({
+    where: { id, hnStatus: "submitted" },
     data: { hnStatus: approved ? "approved" : "rejected", hnReviewedAt: new Date(), hnReviewerId: req.session.userId, hnRejectNote: approved ? null : note },
-    include: QUOTE_INCLUDE,
   });
+  if (!upd.count) {
+    throw httpError(409, "Phần Hà Nội vừa được xử lý bởi người khác — vui lòng tải lại");
+  }
+  const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
+  if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (existing.hnAssigneeId) {
     await notify(existing.hnAssigneeId, approved
       ? { title: `Phần Hà Nội ĐÃ DUYỆT: ${quote.quoteNumber}`, body: quote.title, link: `/#/quotes/${id}`, resource: "quote", resourceId: id }
