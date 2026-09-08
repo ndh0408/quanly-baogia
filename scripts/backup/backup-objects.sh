@@ -63,7 +63,29 @@ if [ "${AVAIL_MB:-0}" -lt 500 ]; then
 fi
 
 # `mc` chạy trong container để host không phải cài gì. --quiet để log không ngập tên từng object.
+#
+# ── MẠNG (ultracode audit 2026-09-09, finding H5) ────────────────────────────────────────────────
+# TRƯỚC bản vá: `--network host` đặt container `mc` vào network namespace của HOST, bỏ qua hẳn DNS
+# nội bộ (127.0.0.11) mà chỉ thành viên network bridge của compose mới có. MinIO (docker-compose.
+# prod.yml, service `minio`) CHỈ publish `127.0.0.1:9001` (console) ra host — cổng S3 API 9000 CHƯA
+# BAO GIỜ mở ra ngoài network `internal` (đúng ý đồ, xem chú thích trong compose). Nghĩa là với
+# `--network host`, KHÔNG có `S3_ENDPOINT` nào (kể cả `http://minio:9000` lẫn `http://127.0.0.1:9000`)
+# mà `mc` trong container đó với tới được — toàn bộ chuỗi backup/restore-drill kho object CHƯA BAO
+# GIỜ hoạt động kể từ khi MinIO lên production (fc053c2), dù không lỗi nào từng hiện ra vì
+# `/etc/quanly-backup.env` cũng chưa được điền S3_* (script thoát sớm ở nhánh kiểm biến môi trường).
+#
+# CÁCH VÁ: gắn container `mc` vào ĐÚNG network mà `quanly-minio` đang tham gia — dò bằng
+# `docker inspect` thay vì hardcode tên network (`docker compose` đặt tên theo project, đổi tên thư
+# mục/`-p` là tên network đổi theo — dò động không phụ thuộc quy ước đặt tên đó). Trong network đó,
+# tên service `minio` là DNS hợp lệ (docker-compose tự alias) — `S3_ENDPOINT=http://minio:9000`
+# trong /etc/quanly-backup.env giờ mới thật sự resolve được.
 mc() {
+  local net
+  net="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' quanly-minio 2>/dev/null)"
+  if [ -z "$net" ]; then
+    alert "không xác định được network docker của quanly-minio (container có đang chạy không?) — không gọi được mc"
+    return 1
+  fi
   # `-e "MC_HOST_q=<url có access key + secret key>"` đặt cả cặp khoá kho object vào ARGV của
   # `docker run` — hiện ở `ps aux` trên host trong suốt thời gian mirror (có thể vài phút). Truyền
   # bằng BIẾN MÔI TRƯỜNG (`-e TÊN`, không kèm giá trị) thì docker đọc từ môi trường tiến trình cha,
@@ -76,7 +98,7 @@ mc() {
   # của ảnh `minio/mc`. Cả hai đều phải diễn tập bằng docker thật trước — chưa đo được, nên để nguyên
   # thay vì đổi mù một đường đang chạy thật. Đây là đường lộ CỤC BỘ TRÊN HOST (cần đã vào được host).
   MC_HOST_q="${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
-  docker run --rm --network host \
+  docker run --rm --network "$net" \
     -e MC_HOST_q \
     -v "$MIRROR_DIR":/mirror \
     "$MC_IMAGE" "$@"

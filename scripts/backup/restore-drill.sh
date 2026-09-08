@@ -96,9 +96,15 @@ NET="$(docker inspect "$PG_CONTAINER" -f '{{range $k,$v := .NetworkSettings.Netw
 # KHÁC một điểm CÓ CHỦ Ý: bản gương mount READ-ONLY. Diễn tập chỉ được ĐỌC bản sao lưu — một lệnh
 # gõ nhầm chiều (`mc mirror q/bucket /mirror` thay vì ngược lại) mà bản gương ghi được thì diễn tập
 # tự tay ghi đè chính bản sao lưu nó đang đi kiểm.
+#
+# MẠNG — ultracode audit 2026-09-09, finding H5 (cùng lỗi với backup-objects.sh, xem chú thích ở
+# đó): `--network host` không tới được MinIO vì cổng S3 API (9000) chưa từng publish ra host, chỉ
+# mở trong network `internal` của compose. Dùng LẠI `$NET` đã dò ở trên (từ chính $PG_CONTAINER) —
+# postgres và minio cùng khai `networks: [internal]` trong docker-compose.prod.yml nên là MỘT
+# network — không cần dò riêng lần hai.
 mc() {
   MC_HOST_q="${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
-  docker run --rm --network host \
+  docker run --rm --network "$NET" \
     -e MC_HOST_q \
     -v "$MIRROR_DIR":/mirror:ro \
     "$MC_IMAGE" "$@"
