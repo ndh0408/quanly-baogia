@@ -308,6 +308,23 @@ export function createApp() {
   });
   app.use("/api/", apiLimiter);
 
+  // Cache-Control: no-store MẶC ĐỊNH cho MỌI /api/* — ultracode audit 2026-09-09 (finding WEB-1).
+  //
+  // TRƯỚC bản vá: chỉ 5 route tự set no-store tại chỗ (csrf-token ngay dưới, admin, export ×2,
+  // gdpr, personnel) — phần còn lại (bao gồm GET /api/auth/me trả email/phone/permissions, 11 GET
+  // của /api/quotes, /api/users, /api/customers, /api/employees, /api/audit…) phụ thuộc HOÀN TOÀN
+  // vào MỘT rule Cloudflare NGOÀI repo (docs/operations/REVERSE_PROXY.md) để không bị lớp cache
+  // trung gian giữ lại và phục vụ NHẦM NGƯỜI KHÁC — mà chính tài liệu đó tự cảnh báo "đã có
+  // Cache-Control ở các route nhạy cảm nhưng đừng dựa vào MỘT LỚP". Đặt mặc định ở tầng ứng dụng để
+  // không còn là single point of failure phụ thuộc cấu hình hạ tầng không kiểm chứng được từ repo.
+  //
+  // Đặt NGAY SAU apiLimiter (trước mọi route) — route nào thật sự muốn cache (hiện CHƯA route nào)
+  // tự ghi đè `res.setHeader("Cache-Control", …)` sau, vì setHeader thay thế chứ không cộng dồn.
+  app.use("/api/", (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("Cache-Control", "no-store, private, max-age=0");
+    next();
+  });
+
   // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
   // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
   // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
