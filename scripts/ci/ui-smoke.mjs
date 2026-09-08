@@ -6,7 +6,7 @@
 //   node scripts/ci/ui-smoke.mjs --hien     # mở cửa sổ trình duyệt (gỡ lỗi trên máy có màn hình)
 //
 // ── VÌ SAO CẦN ─────────────────────────────────────────────────────────────
-// 293 bài vitest của web/ (22 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
+// 307 bài vitest của web/ (23 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
 // MẶC ĐỊNH: repo
 // KHÔNG cài jsdom, `web/vite.config.ts` không khai khối `test` nên vitest lấy mặc định `node`. Tức
 // chúng kiểm HÀM và ĐỌC MÃ NGUỒN — không có `document`, không mount nổi một component nào, và dĩ
