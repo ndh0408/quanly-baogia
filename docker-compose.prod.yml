@@ -160,6 +160,41 @@ services:
       timeout: 3s
       retries: 10
     networks: [internal]
+  minio:
+    # KHO OBJECT cho ảnh chứng từ thanh toán + file xuất. Trước 2026-09-08 production KHÔNG có
+    # service này, nên `S3_*` rỗng và mọi đường tải ảnh chứng từ trả 503 — trang Nhân sự dùng được
+    # một nửa (đánh dấu đã trả được, đính ảnh thì không). Dev đã chạy MinIO từ lâu (docker-compose.yml).
+    #
+    # GHIM theo RELEASE tag — cùng lý lẽ với postgres/redis ở trên (tag di động làm lượt dựng lại
+    # sau sự cố kéo về một bản khác bản đã chạy). Đây là tag mà docker-compose.yml (dev) KHAI;
+    # lưu ý container dev hiện đang chạy `minio/minio:latest` vì được tạo trước khi thêm ghim và
+    # chưa recreate — tức prod sẽ là môi trường ĐẦU TIÊN chạy đúng bản ghim này.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: quanly-minio
+    logging: *default-logging
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    # KHÔNG mở cổng ra ngoài. app/worker gọi qua mạng `internal` bằng tên `minio`; muốn vào bảng
+    # điều khiển thì SSH tunnel (`ssh -L 9001:localhost:9001 coolify-ts`) — bản thân cổng chỉ nghe
+    # trên loopback của VM. Khác dev ở chỗ dev còn mở 9000 cho công cụ chạy ngoài container.
+    ports:
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER chưa đặt trong .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD chưa đặt trong .env}
+    # Cùng mức siết với app/worker: MinIO nghe cổng >1024 dưới user của ảnh, không cần capability nào.
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - quanly-miniodata:/data
+    healthcheck:
+      # `mc ready local` là cách kiểm CHÍNH THỨC của ảnh; ảnh KHÔNG có curl nên đừng dùng curl.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [internal]
   app:
     build:
       context: .
@@ -217,6 +252,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
     networks: [internal, edge]
   worker:
     image: quanly-app:prod
@@ -260,10 +296,12 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
     networks: [internal]
 volumes:
   quanly-pgdata:
   quanly-redisdata:
+  quanly-miniodata:
 networks:
   internal:
   edge:

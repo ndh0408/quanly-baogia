@@ -50,9 +50,32 @@ function toStorable(v: unknown): string | null {
  * FAIL-CLOSED: mã hoá ném thì để nó nổi lên. Nuốt lỗi rồi ghi mỗi plaintext là kịch bản tệ nhất —
  * hệ thống báo "đã bật mã hoá" trong khi dữ liệu mới vẫn nằm thô.
  */
+/**
+ * CUTOVER: NGỪNG GHI CỘT THÔ (bước 2 của lộ trình ở prisma/schema.prisma).
+ *
+ * Giai đoạn ghi-song-song (mặc định) CỐ Ý giữ cột thô: nó cho phép so đối chiếu hai bên trước khi
+ * tin bản mã, và cho phép quay đầu nếu khoá có vấn đề. Nhưng chừng nào cột thô còn giá trị thì
+ * MÃ HOÁ CHƯA CHỐNG ĐƯỢC mối đe doạ nó nêu tên: một bản dump/backup CSDL vẫn lộ nguyên CCCD, số tài
+ * khoản và lương — chỉ khác là bây giờ lộ kèm cả bản mã nằm cạnh. Đo trực tiếp trên production
+ * 2026-09-08: bật PII_ENC_KEY xong, `encodePiiForWrite` vẫn trả `idCard: "079123456789"` y nguyên.
+ *
+ * Bật cờ này thì cột thô được ghi `null`, bản mã là nguồn sự thật duy nhất.
+ *
+ * ⚠️ ĐÁNH ĐỔI PHẢI HIỂU TRƯỚC KHI BẬT: mất `PII_ENC_KEY` = mất VĨNH VIỄN các trường này (không còn
+ * bản thô để cứu). Chỉ bật khi khoá đã được lưu ngoài máy chủ ở ít nhất một nơi.
+ *
+ * ĐỌC KHÔNG ĐỔI: `decodePiiOnRead` ưu tiên bản mã rồi mới rơi về cột thô, nên hàng CŨ chưa backfill
+ * (cột thô còn, bản mã rỗng) vẫn đọc bình thường sau khi bật — cờ này chỉ đổi đường GHI.
+ * Thời điểm rẻ nhất để bật là lúc bảng còn rỗng: không phải backfill, không phải đối chiếu gì cả.
+ */
+export function piiCutoverBat() {
+  return isPiiEncryptionEnabled() && /^(1|true|yes|on)$/i.test(String(process.env.PII_PLAINTEXT_CUTOVER || "").trim());
+}
+
 export function encodePiiForWrite(model: string, data: Record<string, any>): Record<string, any> {
   const fields = PII_FIELDS[model];
   if (!fields || !isPiiEncryptionEnabled()) return data;
+  const cutover = piiCutoverBat();
   const out = { ...data };
   let touched = false;
   for (const f of fields) {
@@ -60,6 +83,8 @@ export function encodePiiForWrite(model: string, data: Record<string, any>): Rec
     const raw = toStorable(data[f.plain]);
     out[f.enc] = raw == null ? null : encryptPii(raw, aadFor(model, f.plain));
     if (f.idx) out[f.idx] = raw == null ? null : blindIndex(raw);
+    // Sau cutover, cột thô KHÔNG còn giữ giá trị nào — kể cả khi client gửi lên.
+    if (cutover) out[f.plain] = null;
     touched = true;
   }
   if (touched) out.piiVersion = 1;
