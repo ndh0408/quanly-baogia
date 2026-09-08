@@ -24,6 +24,7 @@ import {
   QUOTE_UPDATE_STATE_SELECT,
   templatesBelongToCompany,
   buildSheetsCreate,
+  chuanHoaSoNgayTheoMau,
   sanitizeExtraTables,
   extraTableSum,
 } from "../quoteUtils.js";
@@ -306,6 +307,7 @@ export async function createQuote(req: Request) {
   };
 
   // Compute totals from sheets+items BEFORE writing so we store the snapshot.
+  await chuanHoaSoNgayTheoMau(b.sheets);   // mẫu không có cột Số Ngày → days=null TRƯỚC khi tính (xem quoteUtils)
   const t = computeQuoteTotals({ vatPercent: draft.vatPercent, sheets: b.sheets });
   assertTotalsStorable(t, b.sheets); // 400 nói rõ trang nào âm, thay vì 500 mất trắng lần Lưu
   draft.subtotal = t.subtotal;
@@ -563,6 +565,7 @@ export async function updateQuote(req: Request) {
         sh.discount = discCu.get(Number(sh.id));
       }
     }
+    await chuanHoaSoNgayTheoMau(b.sheets);   // mẫu không có cột Số Ngày → days=null TRƯỚC khi tính (xem quoteUtils)
     const t = computeQuoteTotals({ vatPercent: vatPct, sheets: b.sheets });
     assertTotalsStorable(t, b.sheets);
     data.subtotal = t.subtotal;

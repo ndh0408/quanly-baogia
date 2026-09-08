@@ -6,6 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, qtyRound } from "./money.js";
+import { getConfig } from "./templateConfigs.js";
 import { thangNgayVN } from "./vnTime.js";
 import { canOnQuote, can, PERMISSIONS } from "./permissions.js";
 
@@ -424,6 +425,42 @@ function capSoMaSheet(sheets: any, carry?: (Record<string, any> | undefined)[]):
   });
   let ke = Math.max(0, ...ds.filter((n): n is number => n != null)) + 1;
   return ds.map((n) => (n != null ? n : ke++));
+}
+
+/**
+ * CHUẨN HOÁ CỘT SỐ NGÀY THEO MẪU — ở SERVER, trước khi tính tiền và trước khi ghi.
+ *
+ * Ba đường từng tính hệ số Số Ngày theo BA CÁCH: money.ts (nguồn của cột subtotal/vat/total đã lưu)
+ * nhân `days` theo TỪNG DÒNG hễ dòng có days>0; excel.ts (file gửi khách) và lưới web chỉ nhân khi
+ * TEMPLATE có cột Số Ngày (`getConfig(code).items.columns.days`); pdf.ts suy từ chính các dòng.
+ * Hậu quả đo được từ code: gửi thẳng PUT /api/quotes/:id (không qua SPA) một sheet dùng mẫu KHÔNG
+ * có cột Số Ngày nhưng items mang days:30 → CSDL/danh sách/QLDA/KPI doanh số ghi GẤP 30 LẦN, trong khi
+ * Excel gửi khách vẫn ra số gốc — sale thổi được doanh số nội bộ mà chứng từ khách không đổi một
+ * đồng; và cùng báo giá xuất PDF với Excel ra hai con số khác nhau. Lớp bảo vệ duy nhất trước đây
+ * nằm ở CLIENT (QuoteEditor tự dọn `days` khi lưu/đổi mẫu). Phát hiện qua ultracode audit 2026-09-07.
+ *
+ * Nay: mẫu không có cột Số Ngày → ép `days = null` cho mọi hạng mục của sheet đó NGAY TRÊN PAYLOAD,
+ * trước computeQuoteTotals lẫn buildSheetsCreate — nên money.ts không cần biết template mà ba đường
+ * vẫn ra một số. Mẫu không tra được (id lạ / chưa có config) thì để nguyên, không đoán.
+ * Tách phần thuần (`chuanHoaSoNgayTheoCoNgay`) để test không cần CSDL.
+ */
+export function chuanHoaSoNgayTheoCoNgay(sheets: any[], coNgay: Map<number, boolean>) {
+  if (!Array.isArray(sheets)) return;
+  for (const s of sheets) {
+    if (coNgay.get(Number(s?.templateId)) !== false) continue;   // có ngày, hoặc không biết → giữ nguyên
+    for (const it of (s?.items || [])) if (it && it.days != null) it.days = null;
+  }
+}
+export async function chuanHoaSoNgayTheoMau(sheets: any[]) {
+  if (!Array.isArray(sheets) || !sheets.length) return;
+  const ids = [...new Set(sheets.map((s: any) => Number(s?.templateId)).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return;
+  const tpls = await prisma.quoteTemplate.findMany({ where: { id: { in: ids } }, select: { id: true, code: true } });
+  const coNgay = new Map<number, boolean>();
+  for (const t of tpls) {
+    try { coNgay.set(t.id, !!(getConfig(t.code) as any)?.items?.columns?.days); } catch { /* mẫu chưa có config → không đoán */ }
+  }
+  chuanHoaSoNgayTheoCoNgay(sheets, coNgay);
 }
 
 export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[]) {
