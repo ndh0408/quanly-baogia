@@ -243,6 +243,22 @@ if (config.NODE_ENV === "production" && !config.MFA_ENC_KEY) {
   process.exit(1);
 }
 
+// PII_ENC_KEY, KHI ĐÃ ĐẶT, phải mạnh NGANG SESSION_SECRET/JWT_SECRET — ultracode audit 2026-09-09
+// (finding PII-3): schema ở trên chỉ đòi ≥16 ký tự cho MỌI môi trường, dù đây là bí mật hậu quả
+// nặng nhất khi mất/yếu trong cả hệ ("MẤT KHOÁ = MẤT DỮ LIỆU VĨNH VIỄN", docs/architecture/
+// SECURITY_MODEL.md) — nặng hơn SESSION_SECRET (chỉ làm phiên bị giả mạo được, xoay được ngay) và
+// JWT_SECRET (tương tự). KHÔNG hạ xuống thành exit-khi-THIẾU: thiếu khoá đã là lựa chọn TỰ NHẬN có
+// cảnh báo to ở khối dưới (đúng chủ đích SECURITY_MODEL.md — im lặng tắt mã hoá, không chặn khởi
+// động). Ở ĐÂY chỉ chặn trường hợp khoá CÓ ĐẶT nhưng YẾU hoặc TRÙNG bí mật khác — một khoá yếu mà
+// tưởng là đã mã hoá còn nguy hiểm hơn biết rõ là chưa mã hoá.
+if (config.NODE_ENV === "production" && config.PII_ENC_KEY) {
+  const trung = [config.SESSION_SECRET, config.JWT_SECRET, config.MFA_ENC_KEY].filter(Boolean);
+  if (config.PII_ENC_KEY.length < 32 || trung.includes(config.PII_ENC_KEY)) {
+    console.error("❌ PII_ENC_KEY không đủ mạnh cho production (phải ≥ 32 ký tự và KHÁC SESSION_SECRET/JWT_SECRET/MFA_ENC_KEY). Sinh khoá mới: openssl rand -base64 48.");
+    process.exit(1);
+  }
+}
+
 // Rate limiters share their counters via Redis. Without REDIS_URL they silently fall
 // back to a per-process in-memory store, so on a multi-instance prod deploy the
 // login/API limits are multiplied per instance and brute-force lockout weakens.
