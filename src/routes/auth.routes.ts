@@ -20,13 +20,46 @@ const mfaTokenSchema = z.string().regex(/^([0-9]{6}|[0-9A-Fa-f]{10,20})$/).optio
 
 const router = Router();
 
-// Strict per-IP limit on login: blunt brute force at the network edge.
+// TRẦN ĐĂNG NHẬP KHOÁ THEO TÀI KHOẢN, KHÔNG THEO IP.
+//
+// Trước 2026-09-08 limiter này không khai keyGenerator → express-rate-limit dùng req.ip, tức MỘT bộ
+// đếm 10 lần/15 phút cho CẢ VĂN PHÒNG (mọi người ra Internet qua một địa chỉ công cộng duy nhất của
+// router MikroTik — chính file này đã ghi nhận điều đó ở acceptInviteLimiter bên dưới và đã vá cho
+// hai limiter khác, nhưng sót ở endpoint quan trọng nhất). Hai kịch bản vỡ, không cần kẻ tấn công:
+//   · 8 giờ sáng, 10 người có MFA đăng nhập trong 15 phút → người thứ 11 nhận 429 dù gõ đúng hết,
+//     vì lần POST đầu của mỗi người bật MFA LUÔN là 401 {mfaRequired} (SPA chỉ hiện ô mã sau đó) và
+//     `skipSuccessfulRequests` chỉ tha status < 400 — 401 ấy bị TÍNH.
+//   · Một người bất mãn trong mạng bắn 10 request sai là khoá đường đăng nhập của TOÀN CÔNG TY 15
+//     phút, lặp vô hạn — và cùng bộ đếm này cũng chặn /api/auth/token.
+//
+// Nay: khoá theo BĂM của username (hạ chữ, cắt khoảng trắng) — trần này sinh ra để chặn dò mật khẩu
+// của MỘT tài khoản, và bộ đếm khoá theo tài khoản (failedAttempts/lockedUntil, src/authCore.ts) mới
+// là lớp thật. Thiếu username (thân request hỏng) thì rơi về IP. Lớp thứ hai `loginIpLimiter` đặt
+// rộng (100/15 phút) để vẫn cắt được vòng lặp máy quét NHIỀU tài khoản từ một nguồn. Và 401
+// {mfaRequired} KHÔNG tính là "sai": handler đặt res.locals.mfaRequired, `requestWasSuccessful` đọc
+// cờ đó. Kẻ tấn công không lợi dụng được: mfaRequired chỉ trả về SAU KHI mật khẩu đã đúng.
 // Redis-backed when REDIS_URL is set so lockout holds across all instances.
+export function loginLimiterKey(req: Request): string {
+  const u = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
+  return u ? `lg:u:${createHash("sha256").update(u).digest("hex").slice(0, 32)}` : `lg:ip:${ipKeyGenerator(req.ip || "")}`;
+}
+export function loginRequestWasSuccessful(_req: Request, res: Response): boolean {
+  return res.statusCode < 400 || res.locals?.mfaRequired === true;
+}
 const loginLimiter = createLimiter("login", {
   windowMs: 15 * 60 * 1000,
   max: config.RATE_LIMIT_LOGIN_PER_15M,
+  keyGenerator: loginLimiterKey,
   skipSuccessfulRequests: true,
+  requestWasSuccessful: loginRequestWasSuccessful,
   message: { error: "Quá nhiều lần đăng nhập sai, thử lại sau 15 phút" },
+});
+const loginIpLimiter = createLimiter("login-ip", {
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: loginRequestWasSuccessful,
+  message: { error: "Quá nhiều lần đăng nhập sai từ mạng của bạn, thử lại sau 15 phút" },
 });
 
 // Per-IP cap on password-reset so the endpoint can't be abused to bomb a known
@@ -109,6 +142,7 @@ const tokenLimiter = createLimiter("auth-token", {
 // errorHandler) → route giữ phần map kết quả → response; credentials/lockout đã ở authCore.ts.
 router.post(
   "/login",
+  loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
   asyncHandler(async (req: Request, res: Response) => {
@@ -119,6 +153,7 @@ router.post(
     if (!result.ok) {
       // status luôn được set ở mọi nhánh ok:false của authenticateCredentials; ?? 401
       // chỉ để TS hài lòng (union làm status thành number|undefined), không bao giờ chạy.
+      if (result.mfaRequired) res.locals.mfaRequired = true;   // loginLimiter: không tính là đăng nhập sai
       return res.status(result.status ?? 401).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
@@ -201,6 +236,7 @@ router.post(
 
 router.post(
   "/token",
+  loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
   asyncHandler(async (req: Request, res: Response) => {
@@ -213,6 +249,7 @@ router.post(
     const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "token" });
     if (!result.ok) {
       // status luôn được set ở mọi nhánh ok:false; ?? 401 chỉ thỏa TS, không chạy runtime.
+      if (result.mfaRequired) res.locals.mfaRequired = true;   // loginLimiter: không tính là đăng nhập sai
       return res.status(result.status ?? 401).json({ error: result.error, ...(result.mfaRequired ? { mfaRequired: true } : {}) });
     }
     const user = result.user;
