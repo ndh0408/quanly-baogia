@@ -594,6 +594,18 @@ export const bullQueueDepth = new Gauge({
   registers: [registry],
 });
 
+// Tập HỮU HẠN nhãn `method` — ultracode audit 2026-09-09 (finding H6/PERF-DOS-01). `route` (dưới)
+// và `sseEvents.event` (nơi khác trong file này) đã được chuẩn hoá về tập hữu hạn để chống nổ
+// cardinality Prometheus; `method` là nhãn DUY NHẤT của middleware này còn dùng THẲNG `req.method`
+// — một chuỗi client tự đặt, không qua allowlist nào. Middleware mount TOÀN CỤC (app.ts, trước cả
+// apiLimiter), tức chạy trên MỌI request kể cả CHƯA đăng nhập: một kẻ ẩn danh gửi N request với N
+// chuỗi "method" khác nhau (HTTP cho phép method tuỳ ý, không giới hạn ở 9 từ chuẩn) tạo N chuỗi
+// nhãn khác nhau trong registry — registry KHÔNG BAO GIỜ co lại, chỉ phình. Đo được:
+// tests/mwobs-observability.test.js tự đặt "MWOBSA"/"MWOBSB"/"MWOBSC" làm method và cả ba đều lọt
+// nguyên văn vào registry — bằng chứng sống rằng middleware chấp nhận NGUYÊN VĂN bất kỳ chuỗi nào.
+const METHOD_HOP_LE = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+const chuanHoaMethod = (m: string) => (METHOD_HOP_LE.has(m) ? m : "other");
+
 /**
  * Express middleware that records request latency. Mount AFTER routing so that
  * req.route is populated; for routes that don't match any handler we tag as "unknown".
@@ -609,7 +621,7 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
     // Router mount tại "/api/search" với handler "/" ghép ra "/api/search/" — bỏ gạch chéo cuối để
     // không sinh HAI nhãn cho cùng một endpoint khi router khác khai "/api/search" trực tiếp.
     const route = tho.length > 1 ? tho.replace(/\/+$/, "") : tho;
-    const labels = { method: req.method, route, status: String(res.statusCode) };
+    const labels = { method: chuanHoaMethod(req.method), route, status: String(res.statusCode) };
     httpRequestsTotal.inc(labels);
     httpRequestDuration.observe(labels, dur);
   });

@@ -39,25 +39,74 @@ async function nhanRoute(method) {
 describe("metricsMiddleware — nhãn route", () => {
   beforeEach(() => { httpRequestsTotal.reset(); });
 
+  // `reset()` ở trên xoá SẠCH registry trước MỖI bài — filter theo "GET" (method thật) là đủ để
+  // cô lập kết quả trong từng bài, không cần method giả "MWOBSx" như bản trước (bản trước cần
+  // method giả vì khi đó `method` được ghi NGUYÊN VĂN; sau bản vá H6 mọi method không hợp lệ đều
+  // gộp về "other" nên dùng method giả sẽ làm ba bài này tự đụng nhãn lẫn nhau).
   it("router con mount dưới /api/search phải cho nhãn /api/search, không phải /", async () => {
-    const { req, res, ketThuc } = gia({ baseUrl: "/api/search", routePath: "/", method: "MWOBSA" });
+    const { req, res, ketThuc } = gia({ baseUrl: "/api/search", routePath: "/", method: "GET" });
     metricsMiddleware(req, res, () => {});
     ketThuc();
-    expect(await nhanRoute("MWOBSA")).toEqual(["/api/search"]);
+    expect(await nhanRoute("GET")).toEqual(["/api/search"]);
   });
 
   it("route có tham số vẫn giữ nguyên dạng pattern (không phình cardinality)", async () => {
-    const { req, res, ketThuc } = gia({ baseUrl: "/api/quotes", routePath: "/:id", method: "MWOBSB" });
+    const { req, res, ketThuc } = gia({ baseUrl: "/api/quotes", routePath: "/:id", method: "GET" });
     metricsMiddleware(req, res, () => {});
     ketThuc();
-    expect(await nhanRoute("MWOBSB")).toEqual(["/api/quotes/:id"]);
+    expect(await nhanRoute("GET")).toEqual(["/api/quotes/:id"]);
   });
 
   it("request không khớp handler nào vẫn có nhãn (không rỗng)", async () => {
-    const { req, res, ketThuc } = gia({ baseUrl: "", routePath: undefined, method: "MWOBSC", status: 404 });
+    const { req, res, ketThuc } = gia({ baseUrl: "", routePath: undefined, method: "GET", status: 404 });
     metricsMiddleware(req, res, () => {});
     ketThuc();
-    expect(await nhanRoute("MWOBSC")).toEqual(["unknown"]);
+    expect(await nhanRoute("GET")).toEqual(["unknown"]);
+  });
+});
+
+// ── H6 (ultracode audit 2026-09-09 / PERF-DOS-01) ────────────────────────────────────────────────
+// Nhãn `method` PHẢI là tập hữu hạn — trước bản vá, `req.method` (do CLIENT tự đặt, không qua bất
+// kỳ allowlist nào, và middleware này mount TOÀN CỤC nên chạy cả trên request CHƯA đăng nhập) được
+// ghi NGUYÊN VĂN vào registry Prometheus. Registry KHÔNG BAO GIỜ co lại — một kẻ ẩn danh gửi N
+// request với N chuỗi "method" tuỳ ý là N chuỗi nhãn mới vĩnh viễn, phình bộ nhớ tiến trình app.
+describe("metricsMiddleware — nhãn method PHẢI hữu hạn (H6)", () => {
+  beforeEach(() => { httpRequestsTotal.reset(); });
+
+  it("method HTTP chuẩn (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) giữ nguyên nhãn", async () => {
+    for (const m of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+      httpRequestsTotal.reset();
+      const { req, res, ketThuc } = gia({ baseUrl: "/api/x", routePath: "/", method: m });
+      metricsMiddleware(req, res, () => {});
+      ketThuc();
+      expect(await nhanRoute(m), `method ${m} phải giữ nguyên nhãn`).toEqual(["/api/x"]);
+    }
+  });
+
+  it("method KHÔNG chuẩn (do client tự đặt tuỳ ý) phải gộp về 'other', KHÔNG được ghi nguyên văn", async () => {
+    // Trước bản vá: bài này lẽ ra phải THẤY nhãn "MWOBS-LA"/"TRACE"/"FOOBAR" xuất hiện y nguyên
+    // trong registry (đúng cách audit chứng minh lỗ hổng) — sau bản vá, không method lạ nào được
+    // ghi nguyên văn nữa, tất cả rơi về đúng MỘT nhãn "other".
+    for (const m of ["MWOBS-LA", "TRACE", "FOOBAR", "connect", "get"]) {
+      httpRequestsTotal.reset();
+      const { req, res, ketThuc } = gia({ baseUrl: "/api/x", routePath: "/", method: m });
+      metricsMiddleware(req, res, () => {});
+      ketThuc();
+      expect(await nhanRoute(m), `method lạ "${m}" không được lọt nguyên văn vào registry`).toEqual([]);
+      expect(await nhanRoute("other"), `method lạ "${m}" phải gộp về nhãn 'other'`).toEqual(["/api/x"]);
+    }
+  });
+
+  it("1000 method khác nhau chỉ tạo ĐÚNG MỘT chuỗi nhãn 'other' — không phình cardinality", async () => {
+    for (let i = 0; i < 1000; i++) {
+      const { req, res, ketThuc } = gia({ baseUrl: "/api/x", routePath: "/", method: `RANDOM-METHOD-${i}` });
+      metricsMiddleware(req, res, () => {});
+      ketThuc();
+    }
+    const all = await registry.getMetricsAsJSON();
+    const m = all.find((x) => x.name === "http_requests_total");
+    const nhanMethodDocDuoc = new Set((m?.values || []).map((v) => v.labels.method));
+    expect([...nhanMethodDocDuoc]).toEqual(["other"]);
   });
 });
 
