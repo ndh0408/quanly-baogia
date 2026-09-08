@@ -129,6 +129,29 @@ describe("[infra-compose] compose production/staging", () => {
     }
   });
 
+  // ── HỘP ĐEN TRUY VẤN (thêm 2026-09-08) ────────────────────────────────────────────────────
+  // Đo trên production hôm nay: `SHOW shared_preload_libraries` trả về CHUỖI RỖNG, và
+  // `SELECT extname FROM pg_extension` chỉ có pg_trgm + plpgsql. Tức Postgres chạy xong câu nào
+  // là quên câu đó — không có bất kỳ số liệu nào về câu nào chạy nhiều/chậm. Hiện dữ liệu còn
+  // nhỏ (3 báo giá, máy chủ trả lời 5ms) nên chưa ai thấy; nhưng bật SAU khi đã chậm thì mất
+  // sạch số liệu của quãng trước đó, tức mất đúng thứ cần để so sánh.
+  // Bài này canh HAI điều mà chú thích trong compose không tự canh được:
+  //   1. dòng `command:` không bị ai gỡ trong một lượt dọn dẹp (nó trông như thừa nếu không
+  //      biết `shared_preload_libraries` chỉ đọc được lúc khởi động postmaster);
+  //   2. prod và staging KHÔNG trôi khỏi nhau — nếu chỉ prod có, thì mọi lượt diễn tập trên
+  //      staging đều chạy với cấu hình khác production, đúng cái bẫy mà cả khối chú thích
+  //      postgres ở trên đang cố tránh.
+  it("no-query-stats: postgres phải nạp pg_stat_statements ở CẢ prod lẫn staging", () => {
+    for (const f of ["docker-compose.prod.yml", "docker-compose.staging.yml"]) {
+      const pg = composeServices(readCode(f)).postgres;
+      expect(pg, `${f} · postgres không có \`command:\``).toMatch(/^\s+command:/m);
+      expect(
+        pg,
+        `${f} · postgres không nạp pg_stat_statements → không đo được truy vấn nào chậm`,
+      ).toMatch(/shared_preload_libraries=pg_stat_statements/);
+    }
+  });
+
   it("dev-compose-publishes-datastores-on-all-interfaces: cổng kho dữ liệu dev chỉ mở trên loopback", () => {
     const svcs = composeServices(read("docker-compose.yml"));
     for (const name of ["postgres", "redis", "minio", "mailhog"]) {

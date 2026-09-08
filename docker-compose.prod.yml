@@ -96,6 +96,27 @@ services:
         limits:
           memory: 2g
           cpus: "${POSTGRES_CPUS:-1.5}"
+    # HỘP ĐEN TRUY VẤN. `pg_stat_statements` gộp mọi câu lệnh về DẠNG chuẩn hoá (hằng số thành
+    # $1) rồi đếm số lần chạy + tổng/trung bình thời gian. Không bật thì Postgres chạy xong là
+    # QUÊN: lúc dữ liệu lớn lên và ai đó báo "trang báo giá chậm", không có cách nào biết câu nào
+    # gây ra ngoài việc đoán. Bật SAU khi chậm cũng vô ích — mất sạch số liệu quãng trước đó.
+    # PHẢI qua `command:` chứ không `ALTER SYSTEM` được: `shared_preload_libraries` là tham số
+    # postmaster, chỉ đọc lúc khởi động. Và phải nằm TRONG FILE NÀY vì `deploy.sh` ghi đè compose
+    # trên máy chủ mỗi lượt deploy (`git archive`) — sửa tay trên VM sẽ mất ở lần deploy kế.
+    # `command:` chỉ thay CMD, KHÔNG thay entrypoint: `docker-entrypoint.sh` vẫn chạy (nhận
+    # `postgres` làm đối số đầu như mặc định của ảnh) nên toàn bộ phần hạ quyền gosu + cap_add ở
+    # trên giữ nguyên hiệu lực.
+    # ĐÃ KIỂM trong chính ảnh đã ghim digest ở trên (2026-09-08, cả VM prod lẫn staging):
+    # `/usr/local/lib/postgresql/pg_stat_statements.so` có thật, 52616 byte. Điều này quan trọng:
+    # trỏ `shared_preload_libraries` vào thư viện KHÔNG tồn tại thì Postgres TỪ CHỐI khởi động —
+    # kho dữ liệu chết cứng, không phải suy giảm nhẹ.
+    # Bỏ qua `track = all` (mặc định `top`): `all` tính cả câu lồng trong hàm/trigger, repo này
+    # không có, chỉ tốn thêm. Bỏ qua `pg_stat_statements.max` vì mặc định đã là 5000 dạng câu.
+    # Bỏ qua `track_io_timing = on`: cho thêm thời gian đọc/ghi block nhưng phải đo
+    # `pg_test_timing` trên VM trước — chưa đo thì đừng bật.
+    # SAU KHI ĐỔI FILE NÀY phải chạy `CREATE EXTENSION pg_stat_statements;` một lần cho mỗi
+    # database (nạp thư viện ≠ tạo view). Đã chạy trên prod + staging 2026-09-08.
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: quanly
