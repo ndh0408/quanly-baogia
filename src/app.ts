@@ -284,6 +284,30 @@ export function createApp() {
   );
 
 
+  // ── TRẦN REQUEST ĐẶT TRƯỚC MỌI VIỆC NẶNG ─────────────────────────────────
+  // API-wide rate limit (DoS protection). Login route has its own stricter limit.
+  // Redis-backed when REDIS_URL is set so the limit is shared across instances.
+  //
+  // ĐẶT TRƯỚC decompressBody + express.json LÀ CÓ CHỦ Ý, KHÔNG PHẢI TIỆN TAY.
+  // Hai middleware ngay dưới làm việc NẶNG và ĐỒNG BỘ trên thân request: giải nén gzip rồi
+  // JSON.parse tối đa 16MB. Trước 2026-09-08 limiter đứng MÃI SAU chúng (cùng với bearerAuth và
+  // csrfGuard), nên một request CHƯA ĐĂNG NHẬP đã kịp tiêu CPU + heap trước khi có bất kỳ trần nào
+  // chạy: gói gzip vài trăm KB nở thành 16MB JSON hợp lệ, mỗi lượt chặn event loop hàng trăm ms —
+  // và không có gì giới hạn số lượt. Chú thích ngay dưới đây đã tự nhận ra điều đó ("middleware này
+  // chạy TRƯỚC auth/rate-limit nên trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB") nhưng chỉ
+  // thu hẹp trần xuống nhóm /api/quotes, không đưa limiter lên trước. Phát hiện qua ultracode audit
+  // vòng 2.
+  //
+  // An toàn để đặt sớm: limiter khoá theo `req.ip`, KHÔNG đọc session/body/cookie, nên không phụ
+  // thuộc middleware nào phía sau. Hệ quả phụ (đúng chiều): request 404 và request hỏng thân cũng
+  // được tính, tức trần phản ánh đúng tải thật mà máy chủ phải gánh.
+  const apiLimiter = createLimiter("api", {
+    windowMs: 60 * 1000,
+    max: config.RATE_LIMIT_API_PER_MIN,
+    message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
+  });
+  app.use("/api/", apiLimiter);
+
   // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
   // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
   // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
@@ -415,15 +439,6 @@ export function createApp() {
   // Origin/Referer isn't our own, AND require a session-bound token. Bearer-JWT
   // requests are exempt (tokens aren't auto-attached by browsers). Safe methods pass.
   app.use("/api/", csrfGuard);
-
-  // API-wide rate limit (DoS protection). Login route has its own stricter limit.
-  // Redis-backed when REDIS_URL is set so the limit is shared across instances.
-  const apiLimiter = createLimiter("api", {
-    windowMs: 60 * 1000,
-    max: config.RATE_LIMIT_API_PER_MIN,
-    message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
-  });
-  app.use("/api/", apiLimiter);
 
   // Cấp mã chống giả mạo (CSRF) cho SPA. Là GET nên KHÔNG bị `csrfGuard` chặn (CSRF_SAFE_METHODS
   // bỏ qua GET/HEAD/OPTIONS trước cả khi đọc Origin) — an toàn để đăng ký sau nó. Ghi vào phiên →

@@ -44,4 +44,34 @@ describe("GET /api/csrf-token phải nằm SAU apiLimiter trong ngăn xếp midd
     // muộn hơn nhiều, không liên quan chuỗi bảo mật/rate-limit đang xét ở đây.)
     expect(middlewareApiTruoc.length, "csrf-token phải đứng sau ĐỦ 4 middleware /api/ dùng chung, tức sau cả csrfGuard lẫn apiLimiter").toBe(4);
   });
+
+  // ── TRẦN PHẢI ĐỨNG TRƯỚC VIỆC NẶNG (ultracode audit vòng 2, 2026-09-08) ───────────────────
+  // `decompressBody` + `express.json` giải nén gzip rồi JSON.parse tối đa 16MB — việc NẶNG và ĐỒNG
+  // BỘ trên thân request. Trước bản vá, apiLimiter đứng MÃI SAU chúng (cạnh bearerAuth/csrfGuard),
+  // nên một request CHƯA ĐĂNG NHẬP đã kịp tiêu CPU + heap trước khi có bất kỳ trần nào chạy: gói
+  // gzip vài trăm KB nở thành 16MB JSON hợp lệ, mỗi lượt chặn event loop hàng trăm ms, và không có
+  // gì giới hạn số lượt. Chú thích ngay tại chỗ mount đã tự nhận ra điều đó nhưng chỉ thu hẹp trần
+  // 16MB xuống nhóm /api/quotes.
+  it("apiLimiter phải đứng TRƯỚC decompressBody và express.json", async () => {
+    const { createApp } = await import("../src/app.js");
+    const stack = createApp()._router.stack;
+    const ten = (l) => l.handle?.name || "";
+
+    // apiLimiter = middleware /api/ ĐẦU TIÊN (bearerAuth/enforceActiveUser/csrfGuard mang tên thật).
+    const idxLimiter = stack.findIndex((l) => !l.route && l.regexp?.source === "^\\/api\\/?(?=\\/|$)");
+    expect(idxLimiter, "không tìm thấy middleware /api/ nào").toBeGreaterThanOrEqual(0);
+    expect(ten(stack[idxLimiter]), "middleware /api/ đầu tiên phải là apiLimiter (hàm ẩn danh do express-rate-limit trả về), không phải bearerAuth").toBe("");
+
+    // `decompressBody` trả về hàm ẨN DANH nên không dò được theo tên — nhận diện bằng regexp mount
+    // riêng của nhóm /api/quotes, và loại `jsonParser` (mount cùng regexp đó, ngay sau).
+    const laQuotes = (l) => l.regexp?.source?.startsWith("^\\/api\\/quotes");
+    const idxGiaiNen = stack.findIndex((l) => !l.route && laQuotes(l) && ten(l) !== "jsonParser");
+    const idxJson = stack.findIndex((l) => !l.route && ten(l) === "jsonParser");
+    expect(idxGiaiNen, "không tìm thấy decompressBody (mount /api/quotes)").toBeGreaterThanOrEqual(0);
+    expect(idxJson, "không tìm thấy express.json").toBeGreaterThanOrEqual(0);
+
+    // Trước khi vá: idxLimiter (~20) LỚN HƠN cả hai → thân request đã được bung ra và parse xong.
+    expect(idxLimiter, "trần request phải chạy TRƯỚC khi giải nén thân").toBeLessThan(idxGiaiNen);
+    expect(idxLimiter, "trần request phải chạy TRƯỚC khi JSON.parse thân").toBeLessThan(idxJson);
+  });
 });
