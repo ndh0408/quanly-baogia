@@ -1083,7 +1083,15 @@ export async function signSheet(req: Request) {
 // sheet của báo giá trong thùng rác vẫn với tới được, trong khi `GET /api/quotes/:id` (lối vào duy
 // nhất của hai endpoint này) đã 404 từ lâu.
 async function assertQuoteInScope(req: Request, quoteId: number) {
-  const quote = await prisma.quote.findFirst({ where: { id: quoteId }, include: { members: { select: { id: true } } } });
+  // `select` CHỈ những cột `canOnQuote` thật sự đọc. Trước đây hàm này dùng `include` trần, tức kéo
+  // MỌI cột vô hướng của Quote — gồm `customerLogo` (data-URL base64, trần 3,5 MB ở validators.ts) —
+  // chỉ để đọc `createdById`/`status`. Nó chạy ở đầu MỌI thao tác bảng nội bộ (tích thanh toán, lấy
+  // ảnh chứng từ), tức đúng những nút bấm liên tục nhất của kế toán. Phát hiện qua ultracode audit
+  // vòng 2. `canOnQuote` chỉ đụng createdById/status/members (src/permissions.ts).
+  const quote = await prisma.quote.findFirst({
+    where: { id: quoteId },
+    select: { id: true, createdById: true, status: true, members: { select: { id: true } } },
+  });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "read", quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
 }

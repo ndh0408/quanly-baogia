@@ -27,7 +27,12 @@ const personnelSearchText = (r: Record<string, any>) =>
 
 // Tải bản ghi + 403 nếu caller không được làm `action` (read|manage) với nó (owner = createdById).
 async function loadAuthorized(req: Request, action: Action) {
-  const rec = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id } });
+  // `omit` ảnh chứng từ: hàm này chỉ cần `createdById` để kiểm quyền, nhưng `findFirst` trần kéo
+  // MỌI cột — gồm `paymentProof` (data-URL base64 tới ~900KB). Nó chạy ở đầu mọi đường đọc/ghi hồ
+  // sơ, và riêng với `getPaymentProof` thì cột đó bị đọc HAI LẦN cho một lượt xem ảnh (ở đây rồi
+  // lại ở truy vấn riêng ngay sau). Không caller nào của loadAuthorized dùng tới nó: markPayment và
+  // getPaymentProof đều tự truy vấn lấy cột này. Phát hiện qua ultracode audit vòng 2.
+  const rec = await prisma.personnelRecord.findFirst({ where: { id: (req.params as any).id }, omit: { paymentProof: true } });
   if (!rec) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   if (!canScoped(req.session, "personnel", action, rec, "createdById")) {
     throw httpError(403, "Bạn không có quyền với hồ sơ này");
