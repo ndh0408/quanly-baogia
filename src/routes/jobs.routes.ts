@@ -4,7 +4,8 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
-import { getQueue, QUEUES, isQueueEnabled } from "../queue.js";
+import type { Job } from "bullmq";
+import { getQueue, QUEUES, isQueueEnabled, xepViecCoHan } from "../queue.js";
 import { isStorageEnabled } from "../storage.js";
 import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
@@ -106,7 +107,20 @@ router.post(
         { quoteId: req.params.id, requestedBy: req.session.userId },
         { deduplication: { id: khoaGop, ttl: DEDUP_TTL_MS } }
       );
-    let job = await themViec();
+    // TRẦN THỜI GIAN cho lệnh Redis — ultracode audit 2026-09-09 (finding H4): trước bản vá, bốn
+    // lệnh Redis của route này (2 lần thêm việc, getState, remove) gọi THẲNG BullMQ, khác hẳn
+    // notifications.ts/webhooks.ts đã dùng xepViecCoHan cho đúng lớp lỗi này. `getQueue` đặt
+    // `maxRetriesPerRequest: null` (src/queue.ts) — đúng cấu hình khiến một lệnh Redis "TCP còn mở
+    // nhưng không hồi đáp" TREO VÔ HẠN, không bao giờ tự thất bại. Không có trần thì y hệt lỗi đã
+    // vá cho đường Lưu báo giá (f582296) tái diễn ở đây: request xuất/poll treo mãi, ăn một kết nối
+    // trong pool tới khi client bỏ cuộc.
+    let job = await xepViecCoHan<Job>(themViec, { queueName: QUEUES.EXPORT, jobName: req.body.format });
+    if (!job) {
+      return res.status(503).json({
+        error: "Không xếp được lượt xuất vào hàng đợi (Redis chậm/mất kết nối). Vui lòng thử lại sau ít giây.",
+        code: "export_async_unavailable",
+      });
+    }
 
     // THỬ LẠI SAU KHI JOB HỎNG PHẢI CHẠY THẬT.
     //
@@ -119,14 +133,16 @@ router.post(
     // này (trước đó không nút nào gọi tới), nên đây là lần đầu có người thật đi qua chỗ đó.
     //
     // Chốt: gặp job đã `failed` thì XOÁ nó — `job.remove()` dọn luôn khoá gộp — rồi xếp việc mới.
-    // Bọc try/catch vì `remove()` có thể đua với worker đang dọn (removeOnFail); hỏng thì cứ trả
-    // job cũ, đúng như trước, không làm request chết theo.
-    try {
-      if ((await job.getState()) === "failed") {
-        await job.remove();
-        job = await themViec();
+    // `xepViecCoHan` không ném (trả null) nên không cần try/catch nữa — chỉ cần kiểm null: hỏng
+    // hoặc quá hạn thì GIỮ NGUYÊN job cũ, đúng tinh thần "không xoá được thì vẫn tốt hơn 500".
+    const trangThai = await xepViecCoHan<string>(() => job!.getState(), { queueName: QUEUES.EXPORT, jobName: "getState" });
+    if (trangThai === "failed") {
+      const daXoa = await xepViecCoHan<boolean>(() => job!.remove().then(() => true), { queueName: QUEUES.EXPORT, jobName: "remove" });
+      if (daXoa) {
+        const viecMoi = await xepViecCoHan<Job>(themViec, { queueName: QUEUES.EXPORT, jobName: req.body.format });
+        if (viecMoi) job = viecMoi;
       }
-    } catch { /* không xoá được thì giữ nguyên job cũ — vẫn tốt hơn 500 */ }
+    }
 
     res.status(202).json({ jobId: job.id, queue: QUEUES.EXPORT, format: req.body.format });
   })
@@ -155,8 +171,13 @@ router.get(
     }
     const q = getQueue(req.params.queue);
     if (!q) return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
-    const job = await q.getJob(req.params.id);
-    if (!job) return res.status(404).json({ error: "Không tìm thấy tác vụ" });
+    // TRẦN THỜI GIAN — cùng lý do như nhánh POST ở trên: đây là lúc người dùng ĐANG POLL chờ kết
+    // quả, một lệnh Redis treo vô hạn ở đây có nghĩa là mọi lượt bấm "Tải" sau đó cũng treo theo.
+    const job = await xepViecCoHan<Job | undefined>(() => q.getJob(req.params.id), { queueName: req.params.queue, jobName: "getJob" });
+    // `null` ở đây gộp CHUNG hai khả năng: tác vụ thật sự không tồn tại, HOẶC Redis chậm/treo tới
+    // mức chạm trần QUEUE_ADD_TIMEOUT_MS. Không tách được hai ca (xepViecCoHan cố ý không phân biệt
+    // — xem src/queue.ts), nên nói THẬT cả hai khả năng thay vì khẳng định chắc "không tồn tại".
+    if (!job) return res.status(404).json({ error: "Không tìm thấy tác vụ (hoặc Redis đang chậm/mất kết nối — thử tải lại)" });
     // Only the user who requested the job (or a read-all holder) may read its
     // result — job.returnvalue contains a presigned download URL / document.
     const requestedBy = job.data?.requestedBy;
@@ -173,7 +194,9 @@ router.get(
     if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_EXPORT)) {
       return res.status(403).json({ error: "Bạn không có quyền tải file xuất của báo giá này" });
     }
-    const state = await job.getState();
+    // Trần thời gian — nếu Redis chậm/treo đúng lúc này, trả "unknown" thay vì để request treo
+    // theo; client vốn đã POLL định kỳ nên một lượt "unknown" chỉ trễ một nhịp, không mất dữ liệu.
+    const state = (await xepViecCoHan<string>(() => job.getState(), { queueName: req.params.queue, jobName: "getState" })) ?? "unknown";
     res.json({
       id: job.id,
       name: job.name,

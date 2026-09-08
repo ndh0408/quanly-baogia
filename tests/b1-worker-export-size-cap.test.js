@@ -11,7 +11,7 @@
 // ── LỖI (no-job-idempotency-no-async-export-limit, phần (c) còn mở) ─────────
 // Đường xuất ĐỒNG BỘ chặn sớm: src/routes/export.routes.ts `MAX_EXPORT_SHEETS = 100`,
 // `MAX_EXPORT_ITEMS = 20_000` → 413. Đường xuất NỀN thì không: đọc trọn route enqueue
-// (src/routes/jobs.routes.ts:31-96) không có một phép kiểm kích thước nào, và processor trong
+// (src/routes/jobs.routes.ts, route `POST /quotes/:id/export`) không có một phép kiểm kích thước nào, và processor trong
 // src/worker.ts nạp báo giá rồi lao thẳng vào sinh file. Trần duy nhất là trần THỜI GIAN 30s ở
 // generateInWorker — nghĩa là một báo giá khổng lồ vẫn đốt trọn 30s CPU của luồng worker (×3 luồng)
 // rồi mới hỏng, mỗi lần người dùng bấm Xuất.

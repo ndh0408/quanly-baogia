@@ -160,33 +160,42 @@ trên: `sinhFileXuat` đặt `choPhepNoiTuyen: false`, tức **bỏ hẳn đư�
 nhánh cần một cái trần thật — vì một đường lui không có trần thì vô hiệu hoá đúng
 cái trần vừa đặt, và lại làm nó im lặng.
 
-## Mã hoá PII: MẶC ĐỊNH TẮT, và cột thô vẫn được ghi — QUYẾT ĐỊNH GIỮ NGUYÊN (2026-08-26)
+## Mã hoá PII: ĐÃ CUTOVER TRÊN PRODUCTION (cập nhật 2026-09-09)
 
-Chủ dự án đã đọc và **chọn giữ nguyên**. Mục này không phải việc còn tồn — nó là bản ghi
-trạng thái thật, để không ai đọc tên biến `PII_ENC_KEY` rồi tưởng dữ liệu đã được bảo vệ.
+> **Mục này TỪNG ghi (quyết định 2026-08-26): "MẶC ĐỊNH TẮT, cột thô vẫn được ghi song song, mối đe
+> doạ chưa được giảm nhẹ ở cả hai trạng thái".** ultracode audit 2026-09-09 (finding
+> F1-pii-cutover-stale-docs) bắt được: câu đó đã SAI kể từ commit `fc053c2` (2026-09-08) — tài liệu
+> không theo kịp code trong 1 ngày. Giữ đoạn dưới làm bản ghi hiện trạng THẬT, không phải nói lại
+> quyết định cũ.
 
-**Ba điều đã kiểm bằng cách đọc mã, không suy đoán:**
+**Bốn điều đã kiểm bằng cách đọc mã HIỆN TẠI, không suy đoán:**
 
-1. `PII_ENC_KEY` là **tuỳ chọn** — khai `.optional()` trong `schema` của `src/config.ts` (grep `PII_ENC_KEY`). Không đặt khoá thì
-   `encodePiiForWrite` (`src/piiFields.ts:53-55`) trả `data` **nguyên xi**: không có mã hoá nào,
-   CCCD / số tài khoản / lương nằm thô trong CSDL.
-2. Ở production, thiếu khoá chỉ in **một dòng `console.warn`** (`src/config.ts`, khối `console.warn` về PII_ENC_KEY — grep `PII_ENC_KEY` trong file đó) rồi chạy
-   tiếp. Cố ý — chú thích ngay trên khối `console.warn` đó giải thích: chặn khởi động vì một tính năng phụ
-   còn tệ hơn. Đánh đổi hợp lý, nhưng hệ quả là **im lặng trong log của một lần deploy bình thường**.
-3. Kể cả khi ĐÃ đặt khoá, cột thô **vẫn được ghi song song** (`src/piiFields.ts:47-48`: "cột thô GIỮ
-   NGUYÊN cho tới khi cutover"). Giai đoạn đọc-song-song cần nó. Migration bỏ cột thô **chưa tồn
-   tại** — `scripts/migration/pii-backfill.mjs:29-31` ghi rõ đó là việc riêng, và việc riêng đó
-   chưa ai làm.
+1. `PII_ENC_KEY` **đã được đặt trên production**. `PII_PLAINTEXT_CUTOVER=1` **cũng đã bật**
+   (commit `fc053c2`) — `piiCutoverBat()` (`src/piiFields.ts`) trả `true` khi cả hai điều kiện đó
+   đúng.
+2. Khi cutover bật, `encodePiiForWrite` ghi `out[f.plain] = null` cho MỌI trường PII — nghĩa là cột
+   thô (`idCard`/`bankAccount`/`salary` của `PersonnelRecord`; `idCard`/`bankAccount` của
+   `Employee`) của **mọi hồ sơ tạo/sửa SAU 2026-09-08** giờ là `NULL`. Bản dump CSDL không còn lộ
+   PII cho dữ liệu MỚI.
+3. **Hồ sơ CŨ (ghi TRƯỚC cutover) vẫn còn cột thô** — cutover chỉ đổi đường GHI, không tự xoá dữ
+   liệu đã có. `npm run pii:backfill` (đã tồn tại) mã hoá hồ sơ cũ; migration bỏ HẲN 3 cột thô vẫn
+   **chưa viết** (đúng bước (d) cũ nói tới bên dưới) — đo được lúc audit: bảng `PersonnelRecord`
+   trên production đang **0 dòng**, nên bước này chưa cấp bách, nhưng sẽ cấp bách ngay khi có dữ
+   liệu cũ thật.
+4. **Dev/staging mặc định vẫn TẮT** (không đặt `PII_ENC_KEY`) — quyết định 2026-08-26 vẫn đúng
+   nguyên xi cho hai môi trường đó. Đừng nhầm "production đã cutover" thành "toàn hệ thống đã
+   cutover".
 
-**Nghĩa là:** mối đe doạ mà cả hệ con này sinh ra để chặn — *"bản dump CSDL bị lộ"* — **chưa được
-giảm nhẹ**, ở cả hai trạng thái. Chưa đặt khoá thì không có gì mã hoá. Đặt rồi thì bản dump vẫn
-chứa cột thô nguyên vẹn bên cạnh cột mã hoá.
+**Nghĩa là:** mối đe doạ *"bản dump CSDL bị lộ"* đã được giảm nhẹ **cho dữ liệu MỚI trên
+production**. Dữ liệu CŨ (nếu về sau có) và hai môi trường dev/staging vẫn ở nguyên trạng thái cũ.
 
-**Việc phải làm khi bạn quyết định làm:** (a) đặt `PII_ENC_KEY` trên production, (b) chạy
-`npm run pii:backfill` cho dữ liệu cũ, (c) xác minh bằng `dist/tools/verifyIntegrity.js`, (d) **rồi
-mới** viết migration bỏ ba cột thô. Bước (d) là **không hoàn tác được** — đừng chạy trước (c).
+**Việc còn lại:** (a) ~~đặt `PII_ENC_KEY` trên production~~ ĐÃ XONG, (b) chạy `npm run pii:backfill`
+**khi** có hồ sơ cũ cần xử lý (hiện chưa cần, bảng đang rỗng), (c) xác minh bằng
+`dist/tools/verifyIntegrity.js`, (d) **rồi mới** viết migration bỏ ba cột thô. Bước (d) là **không
+hoàn tác được** — đừng chạy trước (c).
 
-**Đừng ghi ở đâu rằng PII đã được mã hoá cho tới khi (d) xong.**
+**Đã có thể ghi rằng PII được mã hoá TRÊN PRODUCTION cho dữ liệu mới** — nhưng vẫn đừng ghi "đã mã
+hoá toàn bộ" cho tới khi (d) xong VÀ dev/staging cũng bật khoá.
 
 ## Báo giá > 20.000 dòng: có đường xuất, nhưng CHƯA có nút bấm (2026-08-26)
 
@@ -246,6 +255,8 @@ Không phải lỗi mã — là **mô tả không còn đúng**. Ghi ở đây �
 | `docs/archive/audits/SECURITY_AUDIT_2026-08.md` | toàn bộ danh sách phát hiện | Nhiều mục ĐÃ VÁ. File đã có khối chặn "TÀI LIỆU LỊCH SỬ" ở đầu; **nguồn sự thật là MÃ NGUỒN**. |
 | `docs/archive/performance/PERFORMANCE_BENCHMARK.md` | mọi con số | Đo trên cấu hình cũ. Số hiện hành cho đường LƯU nằm ở `docs/architecture/QUOTE_SAVE_PERFORMANCE.md`, đo lại được bằng `npm run bench:quote-save`. |
 | chú thích cũ trong `web/src/lib/exportQuote.ts` | trỏ `:108` và `:152` | Chính đợt vá kèm nó đã làm hai số thành 109 và 153. Nay trỏ theo TÊN HÀM; `scripts/ci/check-line-refs.mjs` canh phần còn lại. |
+| Bảng P1, mục `decompressbody-before-auth` | "vá một phần · mức thật: trung-binh" | **Đã fix hoàn toàn** ở commit `6a7bc05` (2026-09-08) — `apiLimiter` nay mount TRƯỚC `decompressBody`/`express.json` cho TOÀN BỘ `/api/*`, không chỉ nhóm quotes. Xem `tests/zc-csrf-token-rate-limit.test.js`. |
+| `SECURITY.md`, mục "Điều đã biết" | "Cột PII thô vẫn còn song song với cột mã hoá" | Đã cutover trên production từ `fc053c2` (2026-09-08) cho dữ liệu MỚI — xem mục "Mã hoá PII: ĐÃ CUTOVER" ở trên. |
 
 ## Cách đọc bảng
 
@@ -253,18 +264,41 @@ Không phải lỗi mã — là **mô tả không còn đúng**. Ghi ở đây �
 Cột "hệ quả nếu đúng" là lập luận của người rà soát, **chưa kiểm chứng**.
 
 
-## P1 — 8 mục còn lại
+## P1 — 9 mục còn lại
 
 | Mục | Vấn đề | Hệ quả nếu đúng | Trạng thái sau đối soát |
 |---|---|---|---|
 | `import-xlsx-oom-eventloop` | Nhập Excel: toàn bộ workbook được nạp vào RAM TRÊN EVENT LOOP trước khi mọi trần MAX_SHEETS/MAX_SCAN_ROWS có tác dụng — treo server + OOM | Một tài khoản có quyền quote:create tải lên file .xlsx 3 MB gồm 150k dòng: Node đơn luồng đứng im 5 giây (mọi request khác — SSE, lưu báo giá của người khác — treo theo), RSS +1 GB. importLi… | **vá một phần** · mức thật: trung-binh |
-| `decompressbody-before-auth` | decompressBody chạy TRƯỚC auth và TRƯỚC rate-limit, không có trần tỉ lệ nén → khuếch đại bộ nhớ ~1000× cho người CHƯA đăng nhập | Kẻ tấn công KHÔNG có tài khoản gửi `POST /api/quotes` với `Content-Encoding: gzip` và ~16 KB dữ liệu toàn số 0 (gzip nén ~1000×). Server bung ra 16 MB + `Buffer.concat` → ~32 MB đỉnh mỗi req… | **vá một phần** · mức thật: trung-binh |
+| `decompressbody-before-auth` | decompressBody chạy TRƯỚC auth và TRƯỚC rate-limit, không có trần tỉ lệ nén → khuếch đại bộ nhớ ~1000× cho người CHƯA đăng nhập | Kẻ tấn công KHÔNG có tài khoản gửi `POST /api/quotes` với `Content-Encoding: gzip` và ~16 KB dữ liệu toàn số 0 (gzip nén ~1000×). Server bung ra 16 MB + `Buffer.concat` → ~32 MB đỉnh mỗi req… | **đã fix hoàn toàn** (commit `6a7bc05`, 2026-09-08 — `apiLimiter` nay mount TRƯỚC `decompressBody`/`express.json`; kiểm bằng `tests/zc-csrf-token-rate-limit.test.js`) — mục này lỗi thời, xem "Tài liệu LỖI THỜI" |
 | `bullmq-export-blocks-worker-loop-stalls` | Async export processor runs exceljs/PDF on the BullMQ worker's main event loop → lock expiry, stalled re-delivery, duplicate exports | A user hits the 413 at export.routes.ts:67 on a 100-sheet / 20 000-item quote and follows the message to POST /api/quotes/:id/export. The worker picks it up and blocks its event loop inside … | **vá một phần** · mức thật: khong-dang-ke |
 | `optimistic-lock-advisory-and-racy` | Optimistic concurrency check is opt-in (legacy SPA omits it → silent overwrite) and is a TOCTOU even when sent | (a) Two managers open the same quote in the React editor at t0. Both press Lưu within the ~50-200 ms window between :254 (read) and :329 (transaction start). Both read the same `existing.upd… | **vá một phần** · mức thật: nho |
 | `hanoi-tables-unprotected-on-main-save` | Approved Hà Nội prices can be rewritten through the ordinary quote save, bypassing the hn approval state machine entirely | A manager assigns the Hà Nội part, the account fills it (5.000.000 đ), submits, the manager approves → hnStatus="approved", hnReviewedAt stamped. Any member with quote:update:own on that quo… | **vá một phần** · mức thật: khong-dang-ke |
-| `plaintext-pii-columns-still-authoritative` | Plaintext PII columns are still written on every request and there is no executable cutover — the stated threat (leaked DB dump) is not mitigated at all | The entire justification for this subsystem (src/piiBox.ts:1-2, "dành cho các trường có sức sát thương cao nhất nếu bản dump CSDL bị lộ") is currently unrealised: `backup-db.sh` produces a d… | **còn mở** · mức thật: trung-binh |
+| `plaintext-pii-columns-still-authoritative` | Plaintext PII columns are still written on every request and there is no executable cutover — the stated threat (leaked DB dump) is not mitigated at all | The entire justification for this subsystem (src/piiBox.ts:1-2, "dành cho các trường có sức sát thương cao nhất nếu bản dump CSDL bị lộ") is currently unrealised: `backup-db.sh` produces a d… | **đã fix cho dữ liệu MỚI trên production** (cutover `fc053c2`, 2026-09-08) · dữ liệu CŨ + dev/staging vẫn ở trạng thái mô tả — xem mục "Mã hoá PII: ĐÃ CUTOVER" ở trên |
 | `no-pii-key-rotation-path` | Key rotation is documented in the DR runbook but not implementable — no old-key support, no key id in the ciphertext, and backfill skips already-encrypted rows | An operator who suspects PII_ENC_KEY leaked follows the runbook: sets the new key, runs `npm run pii:backfill`. The script prints `còn 0` (every row has piiVersion=1) and exits 0 — a green r… | **vá một phần** · mức thật: khong-dang-ke |
 | `prod-deploy-bypasses-supply-chain` | Prod build image NGAY TRÊN VM — toàn bộ chuỗi cung ứng của CI (smoke image, SBOM, digest) bị bỏ qua | Deploy prod ngày 2026-08-25 từ ref X: image chạy ở gianguyen.cloud được dựng lại trên VM từ `git archive X`, không phải image mà CI đã smoke-test. Nếu VM có cache layer khác, npm registry tr… | **còn mở** · mức thật: trung-binh |
+| `bullmq-jobs-not-idempotent-on-stall` | EMAIL/WEBHOOK/NOTIFY không có chốt idempotent chống BullMQ tái xử lý job đã "stalled" — side-effect NGOÀI hệ (gửi email thật/POST webhook thật/gửi Telegram thật) có thể chạy hai lần | Redis rớt kết nối ĐÚNG lúc side-effect vừa xong nhưng chưa kịp báo BullMQ hoàn tất (khoảng hở giữa `await sendEmail(...)` và ack) → BullMQ coi job "stalled", một worker khác (hoặc cùng worker sau khi Redis nối lại) chạy lại TOÀN BỘ processor, gửi lại đúng email/webhook/tin Telegram đó lần thứ hai. Phát hiện qua ultracode audit 2026-09-09 (finding M-IDEM). | **còn mở, CỐ Ý CHƯA VÁ trong đợt 2026-09-09** — xem lý do ngay dưới |
+
+### Vì sao `bullmq-jobs-not-idempotent-on-stall` KHÔNG được vá trong đợt 2026-09-09
+
+Mọi finding khác của đợt audit đó (H1-H6, M-CONC, M-NOTIFY, F1/F2 MFA, PII-3, WEB-1, M-DRAFT,
+F1/F2 hạ tầng) là **thêm một điều kiện/thứ tự/lời gọi hàm đã có sẵn** — sửa xong là xong, kiểm ngược
+được ngay bằng cách gỡ đúng dòng vừa thêm. Mục này khác về LOẠI: không có "chốt" nào để thêm vào —
+nó đòi một CƠ CHẾ MỚI (bảng/khoá idempotency theo `job.id`, ghi trước khi gửi, đọc lại trước khi
+gửi lại, dọn dẹp sau TTL) chạm vào ĐÚNG đường gửi email/webhook/Telegram thật của production.
+
+Làm vội một cơ chế như vậy trong cùng một đợt vá với 15 thứ khác có rủi ro NGƯỢC LẠI thứ nó định
+sửa: một khoá idempotency cài sai có thể làm email/webhook/Telegram KHÔNG BAO GIỜ gửi lại được (coi
+nhầm là "đã gửi" khi thực ra job trước đó chết trước khi side-effect chạy) — tệ hơn hẳn so với hoạ
+hoằn gửi trùng một lần khi Redis rớt đúng lúc. Cửa sổ đua cũng hẹp (đúng khoảnh khắc giữa side-effect
+xong và ack, cộng với Redis phải rớt đúng lúc đó) — mức độ thật thấp hơn hẳn nhóm H1-H6.
+
+**Hình dạng đúng của bản vá (để người làm sau không phải nghĩ lại từ đầu):** thêm cột/bảng đánh dấu
+"job này đã hoàn tất" (khoá theo `job.id`, hoặc theo nội dung — vd `webhookId` cho WEBHOOK,
+`notificationId` cho NOTIFY), kiểm ĐÃ CÓ dấu đó chưa TRƯỚC khi gọi `sendEmail`/`deliverWebhook`/
+`sendTelegram`, và chỉ ghi dấu SAU khi side-effect thành công. `WebhookDelivery` (đã có trong schema,
+xem `src/retention.ts`) là điểm khởi đầu tự nhiên cho WEBHOOK; EMAIL/NOTIFY hiện chưa có bảng tương
+đương. Diễn tập kỹ bằng test đua thật (Promise.all + giữ khoá, cùng kỹ thuật
+`tests/zm-hn-review-atomic.test.js`) TRƯỚC khi đổi đường gửi thật.
 
 ## P2 — 39 mục còn lại
 
@@ -952,7 +986,7 @@ mới bỏ cột cũ ở một migration riêng.
 lại từ chối từ **20.000 item** (trả 413 ở `:67` và `:105`) với lời nhắn "vui lòng
 dùng xuất nền (async)". Nhưng **không client nào gọi đường nền**: `grep -rn
 "api/jobs\|/jobs" web/src` không ra kết quả nào — route `POST /api/quotes/:id/export`
-(`src/routes/jobs.routes.ts:17`) chỉ có thể gọi bằng tay, và nó còn trả 503 nếu
+(`src/routes/jobs.routes.ts`, route `POST /quotes/:id/export`) chỉ có thể gọi bằng tay, và nó còn trả 503 nếu
 thiếu Redis hoặc kho object. Người dùng lưu được báo giá rồi mới phát hiện không
 tải được, không có cảnh báo nào từ trước.
 
