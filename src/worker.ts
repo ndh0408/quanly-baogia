@@ -311,7 +311,16 @@ export const processors = {
     },
   },
   [QUEUES.NOTIFY]: {
-    "telegram": async (job: any) => sendTelegram(job.data),
+    // NÉM khi gửi hỏng — cùng bug với EMAIL ở trên, phát hiện bởi ultracode audit 2026-09-09
+    // (finding M-NOTIFY) MỘT NGÀY SAU khi EMAIL được vá cho đúng lỗi này (2026-09-07): `sendTelegram`
+    // cũng cố ý không ném (trả `{error}`) để chỗ gọi đồng bộ tự quyết, nhưng ở hàng đợi thì
+    // "resolve" = BullMQ đánh dấu job THÀNH CÔNG, không bao giờ thử lại dù Telegram trả lỗi (chat bị
+    // chặn, chat_id sai, rate-limit, timeout).
+    "telegram": async (job: any) => {
+      const r = await sendTelegram(job.data);
+      if (r && (r as { error?: string }).error) throw new Error(`gửi Telegram thất bại: ${(r as { error?: string }).error}`);
+      return r;
+    },
   },
   [QUEUES.MAINTENANCE]: {
     "prune": async () => pruneOldRecords(),
