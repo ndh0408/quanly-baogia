@@ -39,6 +39,14 @@ n=$(cat "$STUB_DIR/counter" 2>/dev/null || echo 0); n=$((n+1)); printf '%s' "$n"
 printf '%s\\0' "$@" > "$STUB_DIR/call-$n.argv"
 env -0 > "$STUB_DIR/call-$n.env"
 case "$1" in
+  inspect)
+    # backup-objects.sh dò network của quanly-minio bằng \`docker inspect -f ... quanly-minio\`
+    # (thay cho --network host, xem chú thích trong script) — giả một tên network THẬT để script
+    # đi tiếp tới \`docker run --network "$net" ... mc mirror\` (case run bên dưới).
+    case "$*" in
+      *quanly-minio*) echo "quanly_internal"; exit 0;;
+    esac
+    exit 0;;
   exec)
     case "$*" in
       *"printenv POSTGRES_USER"*) echo quanly; exit 0;;

@@ -25,7 +25,7 @@
 import { describe, it, expect } from "vitest";
 
 describe("GET /api/csrf-token phải nằm SAU apiLimiter trong ngăn xếp middleware", () => {
-  it("4 middleware /api/ dùng chung (bearerAuth, enforceActiveUser, csrfGuard, apiLimiter) đều đứng TRƯỚC route csrf-token", async () => {
+  it("5 middleware /api/ dùng chung (apiLimiter, Cache-Control mặc định, bearerAuth, enforceActiveUser, csrfGuard) đều đứng TRƯỚC route csrf-token", async () => {
     const { createApp } = await import("../src/app.js");
     const app = createApp();
     const stack = app._router.stack;
@@ -39,10 +39,13 @@ describe("GET /api/csrf-token phải nằm SAU apiLimiter trong ngăn xếp midd
       .slice(0, idxCsrfToken)
       .filter((l) => !l.route && l.regexp && l.regexp.source === RE_API_PREFIX);
 
-    // Trước khi vá: chỉ 2 (bearerAuth, enforceActiveUser) — csrfGuard VÀ apiLimiter đứng SAU route.
+    // Trước khi vá 2026-09-07: chỉ 2 (bearerAuth, enforceActiveUser) — csrfGuard VÀ apiLimiter đứng
+    // SAU route. Từ ultracode audit 2026-09-09 (finding WEB-1) có thêm middleware thứ 5: đặt
+    // Cache-Control: no-store mặc định cho MỌI /api/*, mount ngay sau apiLimiter (src/app.ts) — nên
+    // mốc đúng nay là 5, không phải 4.
     // (Không kiểm "không gì nằm sau" — layer /api/ generic còn có bộ định tuyến catch-all 404 mount
     // muộn hơn nhiều, không liên quan chuỗi bảo mật/rate-limit đang xét ở đây.)
-    expect(middlewareApiTruoc.length, "csrf-token phải đứng sau ĐỦ 4 middleware /api/ dùng chung, tức sau cả csrfGuard lẫn apiLimiter").toBe(4);
+    expect(middlewareApiTruoc.length, "csrf-token phải đứng sau ĐỦ 5 middleware /api/ dùng chung, tức sau cả csrfGuard lẫn apiLimiter và Cache-Control mặc định").toBe(5);
   });
 
   // ── TRẦN PHẢI ĐỨNG TRƯỚC VIỆC NẶNG (ultracode audit vòng 2, 2026-09-08) ───────────────────

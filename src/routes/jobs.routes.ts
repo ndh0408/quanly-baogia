@@ -117,7 +117,7 @@ router.post(
     let job = await xepViecCoHan<Job>(themViec, { queueName: QUEUES.EXPORT, jobName: req.body.format });
     if (!job) {
       return res.status(503).json({
-        error: "Không xếp được lượt xuất vào hàng đợi (Redis chậm/mất kết nối). Vui lòng thử lại sau ít giây.",
+        error: "Không xếp được lượt xuất vào hàng đợi (Redis chậm/mất kết nối). Hãy nhờ quản trị viên kiểm tra Redis, hoặc thử lại sau ít giây.",
         code: "export_async_unavailable",
       });
     }
