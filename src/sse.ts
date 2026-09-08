@@ -63,6 +63,30 @@ function localPublish(userId: number, event: string, data: unknown) {
   // lực ngược (`ghiAnToan` trả false) KHÔNG được tính: đó là sự kiện MẤT, đếm nó vào đây là tự nói
   // dối mình rằng đã giao xong.
   for (const res of [...set]) if (ghiAnToan(res, payload)) sseEvents.inc({ event: nhan }); // sao chép: ghiAnToan có thể gỡ phần tử
+  // THU HỒI PHIÊN = ĐÓNG SOCKET, không chỉ nhắn client "tự đăng xuất đi".
+  //
+  // Trước 2026-09-08 `revokeSession` chỉ publish một sự kiện; chỗ DUY NHẤT gọi res.end() là closeAllSse
+  // lúc tắt máy chủ. requireAuth/enforceActiveUser chỉ chạy MỘT LẦN lúc bắt tay (stream.routes.ts) và
+  // không bao giờ chạy lại trên luồng đang mở, nên tài khoản đã bị vô hiệu hoá/xoá/gỡ MFA — với một
+  // `curl -N -b qly.sid=…` mở sẵn ngoài trình duyệt — vẫn nhận `notification` kèm đầy đủ title+body
+  // và nhịp `changed` của cả công ty VÔ THỜI HẠN, vượt cả chốt SESSION_MAX_AGE_DAYS lẫn chốt "đổi mật
+  // khẩu giết mọi phiên" (đều nằm trong enforceActiveUser). Đặt ở localPublish để phủ luôn sự kiện
+  // đến qua backplane Redis (instance khác thu hồi) — publish() nào cũng đổ về đây.
+  if (event === "session:revoked") detachUser(userId);
+}
+
+/** Đóng MỌI kết nối SSE của một tài khoản (tiến trình này). Trả về số socket đã đóng. */
+export function detachUser(userId: number): number {
+  const set = subscribers.get(userId);
+  if (!set) return 0;
+  let n = 0;
+  for (const res of [...set]) { try { res.end(); n++; } catch { /* đã đóng */ } }
+  // Handler "close" của từng req (attach) sẽ tự clearInterval + gỡ khỏi set; xoá map ngay để
+  // publish kế tiếp không còn thấy tài khoản này.
+  subscribers.delete(userId);
+  clearUserPresence(userId);
+  recountClients();
+  return n;
 }
 function localBroadcast(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
@@ -187,6 +211,16 @@ if (config.REDIS_URL) {
  */
 export const SSE_MAX_PER_USER = Number(process.env.SSE_MAX_PER_USER) || 10;
 
+/**
+ * TUỔI THỌ TỐI ĐA của MỘT kết nối SSE. Hết hạn thì máy chủ chủ động end(); EventSource của trình
+ * duyệt tự nối lại (~3 giây) và lượt nối lại ĐI QUA requireAuth + enforceActiveUser một lần nữa —
+ * tức mọi thay đổi trạng thái tài khoản (khoá, đổi mật khẩu, quá SESSION_MAX_AGE_DAYS) được áp lên
+ * đường realtime chậm nhất là sau khoảng này, kể cả khi `detachUser` vì lý do nào đó không tới được
+ * (instance khác, backplane rớt). 30 phút: đủ dài để không ai thấy nháy, đủ ngắn để không thành
+ * "phiên vĩnh cửu". Nới bằng SSE_MAX_LIFETIME_MS.
+ */
+export const SSE_MAX_LIFETIME_MS = Number(process.env.SSE_MAX_LIFETIME_MS) || 30 * 60 * 1000;
+
 // ── ĐẾM NỐI LẠI (`sse_reconnects`) ──────────────────────────────────────────
 //
 // KHÔNG có cách đo CHÍNH XÁC ở phía máy chủ, và chỗ này phải nói thật về điều đó.
@@ -258,9 +292,13 @@ export function attach(req: Request, res: Response, userId: number) {
   const ka = setInterval(() => {
     ghiAnToan(res, `: keepalive\n\n`);
   }, 25_000);
+  // Hết tuổi thọ → đóng để client nối lại qua cổng xác thực (xem SSE_MAX_LIFETIME_MS).
+  const tuoiTho = setTimeout(() => { try { res.end(); } catch { /* đã đóng */ } }, SSE_MAX_LIFETIME_MS);
+  tuoiTho.unref?.();
 
   req.on("close", () => {
     clearInterval(ka);
+    clearTimeout(tuoiTho);
     set.delete(res);
     // đóng hết tab → gỡ presence, VÀ ghi mốc rớt để lượt `attach` kế tiếp trong cửa sổ được tính là
     // nối lại (xem khối chú thích ở `SSE_RECONNECT_WINDOW_MS`).
