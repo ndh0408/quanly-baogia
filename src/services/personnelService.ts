@@ -320,6 +320,10 @@ export async function markConfirm(req: Request) {
   const rec = await prisma.personnelRecord.update({
     where: { id },
     data: confirmed ? { confirmedAt: new Date(), confirmedById: req.session.userId } : { confirmedAt: null, confirmedById: null },
+    // `omit` này BỊ SÓT so với ba đường ghi anh em (markPayment dòng ~235, writeTeamNote, writeNoteField):
+    // không có nó, mỗi lượt bấm "Xác nhận đã ký" kéo về và trả cho client NGUYÊN ảnh chứng từ base64
+    // (tới ~900KB/hồ sơ) — dữ liệu client không dùng và người bấm xác nhận không cần thấy.
+    omit: { paymentProof: true },
     include: { ...ownerSelect, confirmedBy: { select: { id: true, displayName: true } } },
   });
   await audit(req, confirmed ? "personnel.confirm" : "personnel.unconfirm", {

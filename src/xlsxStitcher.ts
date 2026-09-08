@@ -355,7 +355,19 @@ export async function stitchXlsxBuffers(buffers: Buffer[], sheetNames: string[])
   let baseDrawingMax = maxNumberInPath(Object.keys(baseZip.files), "xl/drawings", "drawing", "xml");
   let baseImageMax = maxNumberInPath(Object.keys(baseZip.files), "xl/media", "image", "(png|jpe?g|gif|bmp|emf)");
 
-  let baseSheetCount = 1;
+  // SỐ SHEET KẾ TIẾP PHẢI TRÁNH MỌI TỆP SHEET ĐÃ CÓ TRONG ZIP NỀN — không được đoán bằng 1.
+  //
+  // Bản trước đặt cứng `= 1` với giả định "workbook nền luôn để worksheet ở sheet1.xml". Giả định
+  // đó SAI với mẫu đang dùng thật: `templates/Unibenfood.xlsx` đặt worksheet ở
+  // `xl/worksheets/sheet21.xml`, và ExcelJS GIỮ NGUYÊN đường dẫn ấy khi render lại (đã đo: load →
+  // writeBuffer → vẫn sheet21.xml), nên buffer nền vào đây cũng vậy. Sheet ghép thứ 20 khi đó nhận
+  // `newSheetNum = 21` và ghi đè ĐÚNG tệp của trang 1: báo giá 21 sheet trở lên gửi khách một file
+  // mà trang đầu bị thay bằng trang cuối, và tổng số sheet hụt đi một (đo trong
+  // tests/zf-stitch-ghi-de-sheet.test.js: 21 sheet vào, 20 sheet ra).
+  //
+  // Dùng lại đúng `maxNumberInPath` mà chính hàm này đã dùng cho drawings/images ngay trên — cùng
+  // một lớp lỗi (đừng đoán số lớn nhất, hãy đọc nó), nay áp cho cả worksheets.
+  let baseSheetCount = Math.max(1, maxNumberInPath(Object.keys(baseZip.files), "xl/worksheets", "sheet", "xml"));
 
   for (let i = 1; i < buffers.length; i++) {
     const srcZip = await JSZip.loadAsync(buffers[i]);

@@ -108,4 +108,34 @@ describe("token không được sang Sentry qua extra.path", () => {
   it("maskUrlSecrets vô hại với chuỗi không phải URL", () => {
     expect(maskUrlSecrets("Không tìm thấy báo giá")).toBe("Không tìm thấy báo giá");
   });
+
+  // ── TỪ KHOÁ TÌM KIẾM CŨNG LÀ PII (ultracode audit vòng 2, 2026-09-08) ──────────────────────
+  // Ô tìm kiếm trang Nhân sự / Danh bạ tra ĐÚNG bằng số CCCD (idCardLookupWhere, src/piiFields.ts),
+  // nên kế toán gõ số căn cước là chuyện thường ngày — và `q` nằm trong `req.url` của MỌI dòng log
+  // request. Kết quả trước khi vá: CCCD được mã hoá cẩn thận trong CSDL (PII_ENC_KEY + cutover) rồi
+  // lại nằm nguyên văn ở stdout container / hệ log tập trung, nơi có vòng đời và quyền đọc khác hẳn.
+  describe("giá trị tìm kiếm bị che (PII)", () => {
+    const CCCD = "079123456789";
+    it("che q= nhưng GIỮ tên tham số (vẫn biết request có tìm kiếm)", () => {
+      const ra = maskUrlSecrets(`/api/personnel?q=${CCCD}&page=1&size=50`);
+      expect(ra, "CCCD không được vào log").not.toContain(CCCD);
+      expect(ra).toContain("q=[da-che]");
+      expect(ra, "tham số không nhạy cảm phải giữ nguyên để còn gỡ lỗi").toContain("page=1");
+      expect(ra).toContain("size=50");
+    });
+    it("che cả search= và keyword=", () => {
+      expect(maskUrlSecrets(`/api/employees?search=${CCCD}`)).not.toContain(CCCD);
+      expect(maskUrlSecrets(`/api/x?keyword=Nguy%E1%BB%85n%20V%C4%83n%20A`)).toContain("keyword=[da-che]");
+    });
+    it("che tên khách / số điện thoại đi cùng đường đó", () => {
+      const ra = maskUrlSecrets("/api/customers?q=0912345678");
+      expect(ra).not.toContain("0912345678");
+    });
+    it("không đụng đường dẫn không có tham số tìm kiếm", () => {
+      expect(maskUrlSecrets("/api/quotes/123")).toBe("/api/quotes/123");
+    });
+    it("vẫn che token như cũ (không phá lớp vá trước)", () => {
+      expect(maskUrlSecrets("/api/auth/invite/abc123def456")).toBe("/api/auth/invite/[da-che]");
+    });
+  });
 });

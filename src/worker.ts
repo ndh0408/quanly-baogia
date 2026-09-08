@@ -201,6 +201,9 @@ export const processors = {
           customer: { select: { code: true } },   // tenFileXuat cần mã KH
           sheets: {
             orderBy: { order: "asc" },
+            // KHÔNG kéo `extraTables` (ảnh chứng từ base64) — excel.ts/pdf.ts không đọc nó.
+            // Xem chú thích đầy đủ ở src/routes/export.routes.ts.
+            omit: { extraTables: true },
             include: { template: true, items: { orderBy: { order: "asc" } } },
           },
         },
@@ -245,7 +248,8 @@ export const processors = {
         include: {
           company: true,
           customer: { select: { code: true } },   // tenFileXuat cần mã KH
-          sheets: { orderBy: { order: "asc" }, include: { template: true, items: { orderBy: { order: "asc" } } } },
+          // KHÔNG kéo `extraTables` — xem chú thích ở src/routes/export.routes.ts.
+          sheets: { orderBy: { order: "asc" }, omit: { extraTables: true }, include: { template: true, items: { orderBy: { order: "asc" } } } },
         },
       });
       if (!quote) throw new Error("Không tìm thấy báo giá");

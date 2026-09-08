@@ -18,7 +18,16 @@ const isProd = process.env.NODE_ENV === "production";
 export function maskUrlSecrets(url: string) {
   return String(url)
     .replace(/(\/(?:invite|reset)\/)[^/?#]+/gi, "$1[da-che]")
-    .replace(/([?&](?:token|inviteToken|resetToken|access_token|refreshToken)=)[^&#]+/gi, "$1[da-che]");
+    .replace(/([?&](?:token|inviteToken|resetToken|access_token|refreshToken)=)[^&#]+/gi, "$1[da-che]")
+    // TỪ KHOÁ TÌM KIẾM CŨNG LÀ PII — che luôn.
+    //
+    // `q` đi vào URL nên nó nằm trong `req.url` của MỌI dòng log request. Mà ô tìm kiếm của trang
+    // Nhân sự / Danh bạ tra ĐÚNG bằng số CCCD (`idCardLookupWhere`, src/piiFields.ts) — kế toán gõ
+    // số căn cước để tìm hồ sơ là chuyện thường ngày. Kết quả: CCCD được mã hoá cẩn thận trong CSDL
+    // (PII_ENC_KEY + cutover) rồi lại nằm NGUYÊN VĂN ở stdout container / hệ log tập trung — một
+    // tầng lưu trữ có vòng đời và quyền đọc khác hẳn. Tên khách, số điện thoại đi cùng đường đó.
+    // Giữ lại tên tham số để vẫn biết "request này CÓ tìm kiếm", chỉ bỏ giá trị.
+    .replace(/([?&](?:q|search|keyword)=)[^&#]+/gi, "$1[da-che]");
 }
 
 /**

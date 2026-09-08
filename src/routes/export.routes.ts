@@ -95,6 +95,12 @@ router.get(
         members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
+          // KHÔNG kéo cột jsonb `extraTables`: excel.ts/pdf.ts KHÔNG đọc nó (bảng nội bộ HCM/HN/Phí KH
+          // cố ý không vào file gửi khách — xem src/hnWorkflow.ts), nhưng nó chứa `paidProof` là
+          // ảnh base64 tới 900KB MỖI HÀNG. Kéo về là detoast + qua dây + giữ trong heap, rồi còn bị
+          // nhân bản thêm: plain() JSON.parse(JSON.stringify(...)) và structured-clone sang worker.
+          // Cùng cách mà gdprService.ts đã dùng. Phát hiện qua ultracode audit vòng 2.
+          omit: { extraTables: true },
           include: {
             template: true,
             items: { orderBy: { order: "asc" } },
@@ -143,6 +149,7 @@ router.get(
         members: { select: { id: true } },
         sheets: {
           orderBy: { order: "asc" },
+          omit: { extraTables: true },   // xem chú thích ở nhánh .xlsx phía trên
           include: { template: true, items: { orderBy: { order: "asc" } } },
         },
       },

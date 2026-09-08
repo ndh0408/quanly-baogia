@@ -163,6 +163,16 @@ router.get(
     if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_READ_ALL)) {
       return res.status(403).json({ error: "Bạn không có quyền xem tác vụ này" });
     }
+    // `returnvalue` của job xuất là URL ĐÃ KÝ tải file Excel/PDF ĐẦY ĐỦ GIÁ. Người xem hộ (nhánh
+    // QUOTE_READ_ALL ngay trên) vì thế phải có luôn năng lực XUẤT — đúng chốt mà cả ba đường tới
+    // cùng tệp đó đang dùng: export.routes.ts mount requirePermission(QUOTE_EXPORT), nhánh xếp việc
+    // ở CHÍNH file này cũng đòi nó, và canAccessKey của files.routes.ts vừa được siết cho khớp.
+    // Thiếu chốt này, người chỉ có quote:read:all lấy được link tải 24h của báo giá người khác mà
+    // không hề có quyền xuất — job id của BullMQ là số tăng dần nên dò cạn được.
+    // Người TỰ xếp việc (requestedBy === mình) không cần kiểm lại: nhánh xếp việc đã gác rồi.
+    if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_EXPORT)) {
+      return res.status(403).json({ error: "Bạn không có quyền tải file xuất của báo giá này" });
+    }
     const state = await job.getState();
     res.json({
       id: job.id,
