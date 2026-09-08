@@ -198,6 +198,41 @@ services:
     ports:
       - "127.0.0.1:8025:8025"
     networks: [internal]
+  minio:
+    # KHO OBJECT — ultracode audit 2026-09-09 (finding F2-staging-prod-minio-drift): thêm vào
+    # production ở fc053c2/497eaf2 nhưng bỏ sót staging, phá quy tắc "staging trước, prod sau"
+    # (docs/operations/DEPLOYMENT.md). Khối dưới đây CHÉP Y HỆT khối `minio:` của
+    # docker-compose.prod.yml (cùng digest, cùng trần, cùng siết đặc quyền) — staging phải PHẢN ÁNH
+    # ĐÚNG những gì production chạy, không phải một bản giản lược, nếu không mọi diễn tập trên
+    # staging chỉ chứng minh cấu hình KHÁC với cái đang bảo vệ dữ liệu thật.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: quanly-minio
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "${MINIO_CPUS:-0.5}"
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    # KHÔNG mở cổng ra ngoài. app/worker gọi qua mạng `internal` bằng tên `minio`; muốn vào bảng
+    # điều khiển thì SSH tunnel — cùng thế siết như production.
+    ports:
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER chưa đặt trong .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD chưa đặt trong .env}
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - quanly-miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [internal]
   app:
     build:
       context: .
@@ -257,6 +292,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
     networks: [internal]
   worker:
     image: quanly-app:staging
@@ -300,9 +336,11 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
     networks: [internal]
 volumes:
   quanly-pgdata:
   quanly-redisdata:
+  quanly-miniodata:
 networks:
   internal:
