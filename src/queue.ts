@@ -125,9 +125,53 @@ function honNhatBackoff(queueName: string, opts: Record<string, any>): Record<st
 }
 
 /** Run a job synchronously if the queue isn't available; otherwise enqueue it. */
+/**
+ * TRẦN THỜI GIAN CHO LƯỢT XẾP VIỆC — cùng lý lẽ với `QUEUE_DEPTH_TIMEOUT_MS` bên dưới.
+ *
+ * Kết nối BullMQ đặt `maxRetriesPerRequest: null` (BullMQ yêu cầu), tức lệnh xếp hàng VÔ HẠN khi
+ * Redis "chạy nhưng chết" (TCP còn nhận, lệnh không hồi đáp — đã đo trên dev, container vẫn
+ * `running` và /readyz vẫn xanh). `runOrQueue` được gọi NGAY TRÊN ĐƯỜNG XỬ LÝ REQUEST: thông báo
+ * (src/notifications.ts) và webhook (src/webhooks.ts) bắn trong lúc LƯU BÁO GIÁ. Không có trần thì
+ * một Redis hấp hối làm lượt bấm Lưu treo tới khi Cloudflare bỏ cuộc (524) — người dùng mất phần
+ * đang gõ vì một việc PHỤ.
+ *
+ * Quá hạn thì BỎ việc đó và đi tiếp: thông báo/webhook là best-effort, mất một cái còn hơn treo
+ * nghiệp vụ chính. Ghi log mức error để người vận hành thấy (đây là tín hiệu Redis đang hỏng).
+ */
+const QUEUE_ADD_TIMEOUT_MS = Number(process.env.QUEUE_ADD_TIMEOUT_MS) || 2000;
+
+/**
+ * Chạy một lượt xếp việc với TRẦN THỜI GIAN; quá hạn hoặc lỗi thì trả `null` và ghi log.
+ *
+ * Tách hàm để test được ĐÚNG thứ cần test: nếu test đi qua `runOrQueue` thì `getQueue` sẽ dựng kết
+ * nối Redis thật, và ở máy không có Redis nó lỗi NGAY — bài test sẽ xanh vì ECONNREFUSED chứ không
+ * phải vì cái trần này chạy đúng (đã mắc đúng bẫy đó một lần khi viết bài).
+ */
+export async function xepViecCoHan<T>(
+  themViec: () => Promise<T>,
+  ctx: { queueName: string; jobName: string },
+  hanMs: number = QUEUE_ADD_TIMEOUT_MS,
+): Promise<T | null> {
+  let hetGio: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      themViec(),
+      new Promise<never>((_r, rej) => { hetGio = setTimeout(() => rej(new Error("queue add timeout")), hanMs); }),
+    ]);
+  } catch (e) {
+    logger.error(
+      { err: e instanceof Error ? e.message : String(e), ...ctx, hanMs },
+      "không xếp được việc vào hàng đợi (Redis chậm/chết) — BỎ việc này để không treo request",
+    );
+    return null;
+  } finally {
+    if (hetGio) clearTimeout(hetGio);
+  }
+}
+
 export async function runOrQueue(queueName: string, jobName: string, data: any, opts: Record<string, any> = {}) {
   const q = getQueue(queueName);
-  if (q) return q.add(jobName, data, honNhatBackoff(queueName, opts));
+  if (q) return xepViecCoHan(() => q.add(jobName, data, honNhatBackoff(queueName, opts)), { queueName, jobName });
   // Fallback: inline execution (used when REDIS_URL not set, e.g. local dev)
   const { processors } = await import("./worker.js");
   const handler = (processors as unknown as Record<string, Record<string, (job: { data: any }) => any>>)[queueName]?.[jobName];
