@@ -97,12 +97,23 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
         toast((body as { error?: string } | null)?.error || "Không tải được hợp đồng", "error");
         return;
       }
+      // Cùng ba chốt mà `taiVe` ở web/src/lib/exportQuote.ts đã vá — đường này bị bỏ sót:
+      //  1. PHẢI gắn <a> vào DOM trước khi click: thẻ rời không kích hoạt tải trên Firefox.
+      //  2. Gỡ ở TICK SAU, không cùng tick với click() — gỡ ngay từng làm WebKit/Safari huỷ lượt
+      //     tải vừa bấm (bấm xong không có gì xảy ra, cũng không có lỗi).
+      //  3. `revokeObjectURL` phải HOÃN: thu hồi ngay trong cùng tick là rút URL khỏi tay trình
+      //     duyệt trước khi nó kịp đọc xong blob → file .docx tải hỏng/không tải được.
       const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = `HD DV - ${r.fullName || r.id}.docx`;
+      a.rel = "noopener";
+      a.style.display = "none";
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(a.href);
+      setTimeout(() => a.remove(), 0);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch { toast("Không tải được hợp đồng", "error"); }
   };
 

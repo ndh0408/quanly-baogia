@@ -362,8 +362,13 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   (async () => {
     const mq = getQueue(QUEUES.MAINTENANCE);
     if (mq) {
-      await mq.add("prune", {}, { repeat: { pattern: "0 3 * * *" } });
-      logger.info("retention prune scheduled (daily 03:00)");
+      // `tz` LÀ BẮT BUỘC, KHÔNG PHẢI TRANG TRÍ. Không khai thì BullMQ tính lịch theo giờ TIẾN
+      // TRÌNH, mà container chạy UTC → "0 3 * * *" nổ lúc 10:00 GIỜ VIỆT NAM, tức GIỮA CA LÀM: job
+      // prune quét/xoá trên bảng append-only (QuoteVersion, AuditEvent) đúng lúc mọi người đang
+      // lưu báo giá. Cả chú thích lẫn dòng log ngay dưới đều nói "03:00" nên đây là lệch giữa ý
+      // định và thực tế, không phải lựa chọn. Phát hiện qua ultracode audit vòng 2.
+      await mq.add("prune", {}, { repeat: { pattern: "0 3 * * *", tz: "Asia/Ho_Chi_Minh" } });
+      logger.info("retention prune scheduled (daily 03:00 giờ VN)");
     }
   })().catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "không đăng ký được prune lặp"));
 

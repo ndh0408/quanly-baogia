@@ -1467,8 +1467,8 @@ export async function duplicateQuote(req: Request) {
   // gets an initial QuoteVersion snapshot.
   let created;
   const prefixNhanBan = src.company?.quotePrefix || "GN";
-  // Số của LƯỢT VỪA HỎNG — cùng lý do như createQuote, xem khối catch bên dưới.
-  const capSoNhanBan: { so: string | null } = { so: null };
+  // Số VÀ MÃ DỰ ÁN của LƯỢT VỪA HỎNG — cùng lý do như createQuote, xem khối catch bên dưới.
+  const capSoNhanBan: { so: string | null; ma: string | null } = { so: null, ma: null };
   for (let attempt = 0; ; attempt++) {
     try {
       created = await prisma.$transaction(async (tx: any) => {
@@ -1483,6 +1483,7 @@ export async function duplicateQuote(req: Request) {
           projectVersion = Math.max(src.projectVersion || 1, agg._max.projectVersion || 0) + 1;
         } else {
           projectCode = dupCreatorProjectCode ? await nextProjectCode(dupCreatorProjectCode, tx) : null;
+          capSoNhanBan.ma = projectCode;
           projectVersion = 1;
         }
         const c = await tx.quote.create({ data: buildData(quoteNumber, projectCode, projectVersion), include: QUOTE_INCLUDE });
@@ -1499,6 +1500,15 @@ export async function duplicateQuote(req: Request) {
         // gì. Đẩy số đã bị chiếm vào bộ đếm NGOÀI transaction (GREATEST nên không lùi) để lượt sau
         // nhảy sang số kế tiếp.
         if (capSoNhanBan.so) await syncQuoteCounter(capSoNhanBan.so, prefixNhanBan).catch(() => {});
+        // ĐẨY CẢ BỘ ĐẾM MÃ DỰ ÁN — bị bỏ sót ở lượt vá trước, mà nhánh "nhân bản KHÔNG cùng dự án"
+        // cấp mã mới bằng `nextProjectCode` NGAY TRONG transaction. Transaction hỏng cuốn theo lần
+        // tăng bộ đếm đó, nên lượt thử lại sinh LẠI ĐÚNG mã vừa đụng `@@unique([projectCode,
+        // projectVersion])` — bốn lượt cùng một mã rồi 409, và mỗi lần bấm đốt 4 số báo giá cho một
+        // thao tác không bao giờ thành công. `createQuote` đã làm đúng (dòng ~354); đây là bản đối
+        // xứng. GREATEST trong syncProjectCodeCounter nên bộ đếm không bao giờ lùi.
+        if (capSoNhanBan.ma && dupCreatorProjectCode) {
+          await syncProjectCodeCounter(capSoNhanBan.ma, dupCreatorProjectCode).catch(() => {});
+        }
         continue;
       }
       if (code === "P2002") throw httpError(409, "Số báo giá bị trùng, vui lòng thử lại");
