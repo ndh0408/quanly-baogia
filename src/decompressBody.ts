@@ -21,9 +21,11 @@ import type { Request, Response, NextFunction } from "express";
  * TRẦN TỈ LỆ NÉN (số byte ra / số byte vào).
  *
  * ── VÌ SAO TRẦN TUYỆT ĐỐI THÔI LÀ CHƯA ĐỦ ───────────────────────────────────
- * Lớp này chạy TRƯỚC xác thực và TRƯỚC bộ giới hạn tần suất: src/app.ts:270-271 gắn nó ở dòng
- * 270/271, còn `bearerAuth` mãi tới :384 và `apiLimiter` cũng nằm sau. Nghĩa là người CHƯA đăng
- * nhập chạm được vào đây.
+ * Lớp này chạy TRƯỚC XÁC THỰC (`bearerAuth` trong src/app.ts) — người CHƯA đăng nhập chạm được vào
+ * đây. Từ commit `6a7bc05` (2026-09-08, ultracode audit vòng 2) nó KHÔNG còn đứng trước
+ * `apiLimiter`: trần tần suất nay mount NGAY ĐẦU `/api/`, trước cả decompressBody, nên số lượt gọi
+ * đã bị giới hạn. Trần tỉ lệ nén dưới đây vẫn cần — nó chặn một request ĐƠN LẺ (dù đã qua được rate
+ * limit) khuếch đại quá mức, khác với việc chặn SỐ LƯỢT gọi.
  *
  * Trần tuyệt đối (2MB chung, 16MB cho /api/quotes) chặn được "phình thành GB", nhưng KHÔNG chặn
  * được phần khuếch đại: gói gzip ~16KB nở ra đúng 16MB rồi mới bị cắt. Mỗi request như vậy giữ

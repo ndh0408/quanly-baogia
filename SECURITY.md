@@ -53,7 +53,10 @@ giờ chạy. Cổng duy nhất thật sự chạy là cổng gõ tay. Xem [AGEN
 
 Ghi đầy đủ trong [docs/REMAINING_RISKS.md](docs/REMAINING_RISKS.md). Hai điều đáng nêu ở đây:
 
-- **Cột PII thô vẫn còn** song song với cột mã hoá. Quyết định của chủ hệ thống: giữ nguyên, ghi rõ
-  rủi ro. Một bản dump CSDL vẫn lộ CCCD / STK / lương nếu `PII_ENC_KEY` chưa được đặt.
+- **PII đã cutover trên production** (từ commit `fc053c2`, 2026-09-08): với `PII_ENC_KEY` +
+  `PII_PLAINTEXT_CUTOVER=1` đang bật, cột thô của MỌI hồ sơ ghi/sửa SAU mốc đó = `NULL` — bản dump
+  CSDL không còn lộ CCCD/STK/lương cho dữ liệu MỚI. Hồ sơ CŨ (ghi trước cutover) vẫn còn cột thô
+  song song cho tới khi chạy backfill xoá — xem `docs/REMAINING_RISKS.md` mục PII để biết chính
+  xác trạng thái ở môi trường bạn đang xem (dev/staging mặc định vẫn TẮT mã hoá).
 - **Mật khẩu demo `GiaNguyenDemo2026` phải coi như ĐÃ LỘ** — nó từng nằm trong hai commit
   (`0d5ba969`, `83fc9234`). Đã gỡ khỏi cây làm việc; lịch sử thì không xoá được. Đừng dùng lại.

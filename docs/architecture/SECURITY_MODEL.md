@@ -126,11 +126,11 @@ trăm chỗ" là đếm nhầm đối tượng:
 
 | Đếm trên `web/src` | Số | Có bị CSP chặn không |
 |---|---|---|
-| `grep -ro "style=" web/src \| wc -l` | **197** | — |
-| trong đó `style={…}` (prop JSX của React) | **194** | **KHÔNG** |
+| `grep -ro "style=" web/src \| wc -l` | trước đợt `installGlobalFocusTrap` (2026-09-08): 197, nay **196** | — |
+| trong đó `style={…}` (prop JSX của React) | trước đợt đó: 194, nay **193** | **KHÔNG** |
 | trong đó `style="…"` (chuỗi HTML gán qua `innerHTML`) | **3** | **CÓ** |
 
-Vì sao 194 chỗ kia không tính: React **không** viết thuộc tính `style` lên DOM. Nó
+Vì sao số `style={…}` kia không tính: React **không** viết thuộc tính `style` lên DOM. Nó
 gán qua CSSOM — `setValueForStyles` ở `node_modules/react-dom/cjs/react-dom-client.production.js`
 làm `node.style[tên] = giá trị` / `node.style.setProperty(...)`. CSP điều chỉnh
 thuộc tính `style` **do bộ phân tích HTML tạo ra**, không điều chỉnh việc ghi CSSOM
@@ -138,9 +138,14 @@ bằng script. Nên số chỗ thật sự vướng CSP hôm nay là **3**, tấ
 `web/src/lib/ui.ts` (hai hàm `confirmModal` và `promptModal` dựng khung bằng
 `back.innerHTML = \`…\``):
 
-- `web/src/lib/ui.ts:142` — thẻ `<p>` chứa nội dung của `confirmModal` (đặt lề)
-- `web/src/lib/ui.ts:175` — thẻ `<p>` chứa nội dung của `promptModal` (đặt lề)
-- `web/src/lib/ui.ts:176` — ô `<textarea>` của `promptModal` (bề rộng, viền, cỡ chữ)
+- `web/src/lib/ui.ts`, hàm `confirmModal` — thẻ `<p style="margin:0">` chứa nội dung (đặt lề)
+- `web/src/lib/ui.ts`, hàm `promptModal` — thẻ `<p style="margin:0 0 8px">` chứa nội dung (đặt lề)
+- `web/src/lib/ui.ts`, hàm `promptModal` — ô `<textarea class="pm-input" style="…">` (bề rộng, viền, cỡ chữ)
+
+(Trỏ theo TÊN HÀM/THUỘC TÍNH thay vì số dòng — số dòng trôi mỗi lần ai đó thêm dòng phía trên
+trong cùng file, đã xảy ra đúng một lần ở đây khi `installGlobalFocusTrap` được thêm vào
+2026-09-08. `npm run check:refs` chỉ bắt được tham chiếu SỐ DÒNG sai, không bắt được việc này —
+đây là quy ước NÊN DÙNG mà chính công cụ đó khuyến nghị ở cuối output khi tìm thấy lỗi.)
 
 (Ba số dòng trên nằm trong phạm vi `npm run check:refs` — trôi là CI báo.)
 
