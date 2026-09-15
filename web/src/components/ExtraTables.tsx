@@ -147,7 +147,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
 
   return (
     <details className="extra-collapse">
-      <summary className="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— HCM {M.fmtMoney(catTotal("hcm"))} · HN {M.fmtMoney(catTotal("hanoi"))} · KH {M.fmtMoney(catTotal("khach"))} · {tables.length} sheet (bấm để mở)</span></summary>
+      <summary className="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— HCM {M.fmtMoney(catTotal("hcm"))} · KH {M.fmtMoney(catTotal("khach"))} · {tables.length} sheet (bấm để mở)</span></summary>
       <div className="extra-tables-wrap">
         <div className="extra-head"><div><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG; Tổng từng loại đổ riêng sang Quản lý dự án. Sheet đầy đủ như báo giá (template · công thức · nhóm · copy/paste) nhưng KHÔNG xuất Excel.</span></div></div>
 

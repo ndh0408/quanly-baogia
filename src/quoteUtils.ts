@@ -220,7 +220,10 @@ function presentQuoteForInternal(q: any) {
     createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
     internalSheets: (q.sheets || []).map((s: any) => ({
       sheetId: s.id, sheetName: s.name || null, order: s.order,
-      tables: stripExtraProofs(Array.isArray(s.extraTables) ? s.extraTables : []),
+      // BỎ QUA bản cũ của bảng Hà Nội còn nằm lại trong trang: migration 20260915140000 là
+      // EXPAND-ONLY (chép sang `Quote.hnTables`, CHƯA xoá chỗ cũ, để lùi ảnh còn an toàn). Không
+      // lọc thì phần HN hiện HAI LẦN trên màn nội bộ với mọi báo giá cũ.
+      tables: stripExtraProofs((Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t?.category !== "hanoi")),
     })),
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ, không thuộc trang nào (migration 20260915140000).
     hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []),
@@ -294,7 +297,9 @@ export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ (Quote.hnTables) — vẫn là bảng NỘI BỘ, nên người xem nội bộ
     // phải đếm cả nó. Bỏ sót là số hàng/số đã-trả trên màn của họ tụt xuống, im lặng.
     const allItems = [
-      ...(q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).flatMap((t: any) => t?.items || [])),
+      // Bỏ qua bản cũ của bảng HN còn trong trang (migration EXPAND-ONLY) — nếu không, hàng Hà
+      // Nội bị đếm hai lần trên dữ liệu cũ.
+      ...(q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t?.category !== "hanoi").flatMap((t: any) => t?.items || [])),
       ...(Array.isArray(q.hnTables) ? q.hnTables : []).flatMap((t: any) => t?.items || []),
     ];
     const rows = allItems.filter((it: any) => it && it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info");
@@ -323,7 +328,8 @@ export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }
       hnStatus: q.hnStatus ?? null,
       hnSheetCount: hanoi.length,
       hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t), 0),
-      sheetCount: q._count?.sheets ?? 0,
+      // KHÔNG trả `sheetCount`: đó là số trang của CHỦ báo giá — cùng loại thông tin với tên trang
+      // mà bản 2026-09-15 vừa bỏ khỏi màn account Hà Nội. Họ chỉ cần biết phần của chính mình.
       _accountHnRow: true,
     };
   }

@@ -209,11 +209,14 @@ const itemSchema = z.object({
 });
 
 // Bảng nội bộ CỦA MỘT TRANG (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
-// "hanoi" KHÔNG còn ở đây từ 2026-09-15: bảng Hà Nội lên `Quote.hnTables` (cấp báo giá). Để lại
-// giá trị đó trong enum là để ngỏ cửa ghi thứ hai — một tab cũ gửi bảng hanoi kèm `sheets` sẽ nằm
-// lại trong trang, vô hình với màn account HN, và bị cộng THÊM một lần vào tổng HN.
+//
+// "hanoi" VẪN được nhận ở tầng schema dù bảng Hà Nội đã lên `Quote.hnTables` (2026-09-15): một tab
+// chạy bundle CŨ còn gửi nó kèm `sheets`, và nếu zod chặn thì CẢ request Lưu hỏng với "Dữ liệu
+// không hợp lệ" — người dùng mất luôn phần báo giá chính vừa sửa, vì một bảng nội bộ họ không hề
+// đụng tới. Cửa ghi thứ hai được đóng ở tầng DƯỚI: `sanitizeExtraTables` (src/quoteUtils.ts) chỉ
+// nhận ["hcm","khach"] nên bảng hanoi lọt qua schema sẽ bị LOẠI trước khi chạm đĩa.
 const extraTableSchema = z.object({
-  category: z.enum(["hcm", "khach"]),
+  category: z.enum(["hcm", "khach", "hanoi"]),
   name: z.string().max(120).optional().nullable(),
   templateId: z.coerce.number().int().positive().optional().nullable(),   // mẫu cột (GN/CLF có/không ngày)
   groupSubtotal: z.boolean().optional(),
@@ -335,6 +338,9 @@ const quoteSheetsSchema = z
   .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang trong một báo giá`);
 
 export const QuoteCreateSchema = z.object({
+  // Trình soạn cho gõ phần Hà Nội ngay khi TẠO báo giá. Thiếu khoá này thì zod cắt sạch và người
+  // dùng mất phần vừa gõ mà không một lỗi nào hiện ra.
+  hnTables: z.array(extraTableSchema.omit({ category: true })).max(MAX_HN_TABLES).optional(),
   // quoteNumber is server-generated; allow override but not required
   quoteNumber: z.string().max(40).optional(),
   title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự"),

@@ -35,6 +35,9 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     return a;
   };
   const docChu = async () => (await (await dangNhap(chuU)).get(`/api/quotes/${quoteId}`)).body;
+  /** Chuẩn hoá payload y như trình soạn thật: `extraTables` null → [] (presentQuote trả null khi
+   *  trang không có bảng nội bộ nào, còn zod chỉ nhận mảng hoặc vắng mặt). */
+  const nhuClient = (q) => ({ ...q, sheets: (q.sheets || []).map((s) => ({ ...s, extraTables: Array.isArray(s.extraTables) ? s.extraTables : [] })) });
   const docHn = async () => (await (await dangNhap(hnU)).get(`/api/quotes/${quoteId}`)).body;
 
   beforeAll(async () => {
@@ -163,7 +166,124 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     expect((await docHn()).hnTables, "KHÔNG được xoá trắng vì payload rỗng của lượt bị chặn").toHaveLength(3);
   });
 
+  // ── Bốn lỗ do CHÍNH bản vá này đẻ ra, tìm thấy ở vòng soi đối kháng trước khi lên production ──
+  it("giá HN đã chốt: chủ bấm Lưu mà KHÔNG sửa gì → 200, không phải 409 giả", async () => {
+    // Lỗi cũ: chốt so `JSON.stringify(sanitizeHnTables(...))` hai vế. Payload client KHÔNG BAO GIỜ
+    // có `paidProof` (presentQuote cắt) còn CSDL thì có, và hàng thiếu `rid` được sinh UUID MỚI ở
+    // mỗi lần sanitize → hai chuỗi luôn khác → 409 VĨNH VIỄN, chủ không lưu nổi báo giá nữa.
+    const chu = await dangNhap(chuU);
+    await prisma.quote.update({ where: { id: quoteId }, data: {
+      status: "draft",   // bài trước đã mark-converted; canEdit chặn theo trạng thái, không phải thứ đang đo
+      hnStatus: "approved",
+      hnTables: [{ name: "HN đã chốt", templateId, groupSubtotal: true, items: [
+        { kind: "item", name: "Có ảnh", quantity: 1, unitPrice: 100, rid: "co-rid", paid: true, paidProof: "data:image/png;base64,AAAA" },
+        { kind: "item", name: "Hàng cũ thiếu rid", quantity: 2, unitPrice: 50 },
+      ] }],
+    } });
+    // Tài khoản KHÔNG có quote:hn:manage mới là ca bị gác — chuU là admin nên mượn phuU.
+    const phuU = await prisma.user.create({ data: {
+      username: `${TAG}-nochot`, displayName: `${TAG} nochot`, role: "manager",
+      passwordHash: (await prisma.user.findFirst({ where: { id: chuU.id }, select: { passwordHash: true } })).passwordHash,
+      permissions: [P.QUOTE_READ_OWN, P.QUOTE_UPDATE_OWN],
+    } });
+    expect((await chu.put(`/api/quotes/${quoteId}/members`).send({ members: [{ userId: phuU.id, scopes: ["main", "hcm", "hanoi", "khach"] }] })).status).toBe(200);
+
+    const phu = agentWithCsrf(app);
+    expect((await phu.post("/api/auth/login").send({ username: phuU.username, password: PWD })).status).toBe(200);
+    const q = (await phu.get(`/api/quotes/${quoteId}`)).body;
+    // Round-trip NGUYÊN VẸN những gì client nhận được — đúng thứ trình soạn gửi lên khi bấm Lưu.
+    const r = await phu.put(`/api/quotes/${quoteId}`).send({ ...nhuClient(q), hnTables: q.hnTables, baseUpdatedAt: q.updatedAt });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: null } });
+    await prisma.quoteMember.deleteMany({ where: { userId: phuU.id } });
+    await prisma.user.delete({ where: { id: phuU.id } }).catch(() => {});
+  });
+
+  it("TẠO báo giá mới kèm phần Hà Nội → không bị cắt mất", async () => {
+    const chu = await dangNhap(chuU);
+    const r = await chu.post("/api/quotes").send({
+      title: `${TAG} bg co HN`, companyId, toCompany: "Khách", vatPercent: 8,
+      sheets: [{ name: "T1", order: 0, templateId, items: [{ kind: "item", name: "x", quantity: 1, unitPrice: 1, order: 0 }] }],
+      hnTables: [{ name: "HN ngay khi tạo", templateId, items: [{ kind: "item", name: "Nhân công", quantity: 1, unitPrice: 900 }] }],
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const q = (await chu.get(`/api/quotes/${r.body.id}`)).body;
+    expect(q.hnTables.map((t) => t.name)).toEqual(["HN ngay khi tạo"]);
+  });
+
+  it("NHÂN BẢN mang theo phần Hà Nội, nhưng bỏ cờ đã-duyệt/đã-trả và ảnh chứng từ", async () => {
+    const chu = await dangNhap(chuU);
+    await prisma.quote.update({ where: { id: quoteId }, data: {
+      hnTables: [{ name: "HN gốc", templateId, items: [{ kind: "item", name: "Thuê xe", quantity: 1, unitPrice: 700, rid: "r-dup", paid: true, paidAt: "2026-08-01T00:00:00Z", paidProof: "data:image/png;base64,AAAA", approved: true }] }],
+    } });
+    const r = await chu.post(`/api/quotes/${quoteId}/duplicate`).send({});
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const ban = await prisma.quote.findFirst({ where: { id: r.body.id }, select: { hnTables: true } });
+    expect(ban.hnTables, "bản sao phải có phần HN").toHaveLength(1);
+    const hang = ban.hnTables[0].items[0];
+    expect(hang.name).toBe("Thuê xe");
+    expect(hang.paid, "bản sao là báo giá MỚI — chưa ai trả tiền").toBeFalsy();
+    expect(hang.paidProof, "không chép ảnh uỷ nhiệm chi sang báo giá khác").toBeFalsy();
+    expect(hang.approved, "chưa ai duyệt").toBeFalsy();
+    await prisma.quote.deleteMany({ where: { id: r.body.id }, hardDelete: true }).catch(() => {});
+  });
+
+  it("tab CŨ gửi bảng hanoi lồng trong sheets → vẫn lưu được phần chính, bảng lạc bị LOẠI", async () => {
+    // Trước khi vá: zod enum bỏ "hanoi" nên CẢ request 400 — người dùng mất luôn phần báo giá
+    // chính vừa sửa vì một bảng nội bộ họ không hề đụng tới.
+    const chu = await dangNhap(chuU);
+    const q = (await chu.get(`/api/quotes/${quoteId}`)).body;
+    const sheet = JSON.parse(JSON.stringify(q.sheets[0]));
+    sheet.extraTables = [...(sheet.extraTables || []), { category: "hanoi", name: "Bảng lạc của tab cũ", items: [] }];
+    const r = await chu.put(`/api/quotes/${quoteId}`).send({ ...nhuClient(q), sheets: [sheet], notes: "tab cu luu duoc", baseUpdatedAt: q.updatedAt });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const sau = (await chu.get(`/api/quotes/${quoteId}`)).body;
+    expect(sau.notes).toBe("tab cu luu duoc");
+    expect((sau.sheets[0].extraTables || []).some((t) => t.category === "hanoi"), "bảng lạc không được ghi vào trang").toBe(false);
+  });
+
+  it("EXPAND-ONLY: bản cũ còn trong trang KHÔNG làm phần HN bị đếm hai lần", async () => {
+    // Đây là hình dạng CSDL production ngay sau deploy: migration chép bảng HN sang
+    // `Quote.hnTables` nhưng CỐ Ý chưa xoá bản cũ khỏi `QuoteSheet.extraTables` (để lùi ảnh còn an
+    // toàn). Mọi chỗ đọc "mọi loại bảng" của trang phải bỏ qua category 'hanoi', nếu không người
+    // xem nội bộ thấy phần HN hai lần và số hàng/số tiền nội bộ nhân đôi.
+    const chu = await dangNhap(chuU);
+    const q0 = await docChu();
+    const sheetId = q0.sheets[0].id;
+    const banCu = { category: "hanoi", name: "HN bản cũ còn sót", templateId, items: [{ kind: "item", rid: "cu-1", name: "Thuê xe", quantity: 1, unitPrice: 700 }] };
+    const ex = Array.isArray(q0.sheets[0].extraTables) ? q0.sheets[0].extraTables : [];
+    await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: [...ex, banCu] } });
+    await prisma.quote.update({ where: { id: quoteId }, data: {
+      status: "draft", hnStatus: null,
+      hnTables: [{ name: "HN bản mới", templateId, items: [{ kind: "item", rid: "moi-1", name: "Thuê xe", quantity: 1, unitPrice: 700 }] }],
+    } });
+
+    // Người xem nội bộ: thấy ĐÚNG MỘT bảng Hà Nội.
+    const q = await docChu();
+    const tuTrang = (q.sheets[0].extraTables || []).filter((t) => t.category === "hanoi");
+    expect(tuTrang, "bản cũ vẫn nằm trong CSDL — chủ báo giá đọc bản đầy đủ nên vẫn thấy").toHaveLength(1);
+    expect(q.hnTables).toHaveLength(1);
+
+    const { presentQuote, presentQuoteRow } = await import("../src/quoteUtils.js");
+    const tho = await prisma.quote.findFirst({ where: { id: quoteId }, include: { sheets: true } });
+    const noiBo = presentQuote({ ...tho, hnTables: tho.hnTables }, { internalOnly: true });
+    const bangHanoiTrongInternalSheets = (noiBo.internalSheets || []).flatMap((x) => x.tables || []).filter((t) => t?.category === "hanoi");
+    expect(bangHanoiTrongInternalSheets, "bản cũ phải bị lược khỏi màn nội bộ").toHaveLength(0);
+    expect(noiBo.hnTables, "phần HN đến từ cột mới").toHaveLength(1);
+
+    const dong = presentQuoteRow({ ...tho, hnTables: tho.hnTables, _count: { sheets: tho.sheets.length } }, { internalOnly: true });
+    // Báo giá nền có 1 hàng HCM + 1 hàng HN (bản mới) = 2. Nếu bản cũ còn sót bị đếm nữa thì ra 3
+    // — đó đúng là thứ bài này canh.
+    expect(dong.internalRows, "1 hàng HCM + 1 hàng HN, KHÔNG được thành 3").toBe(2);
+
+    await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: ex } });
+  });
+
   it("đã gửi duyệt thì account HN không sửa nữa; chủ cũng không ghi đè qua đường lưu báo giá", async () => {
+    // Các bài phía trên có đổi hnStatus (approved → null) để đo chốt khác — đưa về "assigned" cho
+    // đúng tiền đề của bài này thay vì phụ thuộc thứ tự chạy.
+    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "assigned", hnAssigneeId: hnU.id, status: "draft" } });
     const hn = await dangNhap(hnU);
     expect((await hn.post(`/api/quotes/${quoteId}/hn/submit`)).status).toBe(200);
 
@@ -174,7 +294,7 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     // không có quyền đó thì mới là ca bị chặn; ca đó đã được chốt ở tests/quote-member-scopes.
     const chu = await dangNhap(chuU);
     const q = await docChu();
-    const r = await chu.put(`/api/quotes/${quoteId}`).send({ ...q, baseUpdatedAt: q.updatedAt, hnTables: [{ name: "Quản lý sửa", items: [] }] });
+    const r = await chu.put(`/api/quotes/${quoteId}`).send({ ...nhuClient(q), baseUpdatedAt: q.updatedAt, hnTables: [{ name: "Quản lý sửa", items: [] }] });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect((await docChu()).hnTables.map((t) => t.name)).toEqual(["Quản lý sửa"]);
   });

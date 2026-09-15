@@ -115,7 +115,9 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
       {t ? (
         <div className="extra-table extra-table-inline">
           <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
-            <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" aria-label="Tên sheet Hà Nội" disabled={!editable}
+            {/* `key` theo bảng: input uncontrolled (defaultValue) chỉ đọc giá trị lúc MOUNT, nên đổi
+                tab mà không đổi key thì ô tên vẫn hiện tên của bảng trước. */}
+            <input key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" aria-label="Tên sheet Hà Nội" disabled={!editable}
               style={{ minWidth: 180 }} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
             {editable && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
@@ -129,7 +131,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
             usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
             editable={editable} internalNote={false}
             approveCol={false} canApprove={!!canApprove}
-            payCol canPay={!!canPay && !!quoteId}
+            payCol={!!canPay && !!quoteId}
+            canPay={!!canPay && !!quoteId}
             onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu phần Hà Nội trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
             groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
           <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>

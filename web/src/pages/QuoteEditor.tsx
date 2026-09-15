@@ -267,6 +267,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             // nhánh thường bên dưới, rồi mới giao cho lưới.
             if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
             (kp.sheets as Sheet[]).forEach((sh) => { if (!Array.isArray(sh.extraTables)) sh.extraTables = []; });
+            // Bản nháp lưu TRƯỚC 2026-09-15 không có khoá `hnTables`. Không lấy lại bản vừa tải về
+            // thì lượt Lưu kế tiếp gửi mảng RỖNG và XOÁ TRẮNG phần Hà Nội của báo giá — im lặng.
+            if (!Array.isArray(kp.hnTables)) kp.hnTables = q.hnTables;
             q = kp;
             khoiPhuc = true;   // khôi phục xong LÀ đang có thay đổi chưa lưu → cờ bẩn bên dưới
           } else {

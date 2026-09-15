@@ -336,7 +336,14 @@ export async function createQuote(req: Request) {
         const created = await tx.quote.create({
           // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
           // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
-          data: { ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0), sheets: { create: sheetsTaoMoi }, members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } } } as any,
+          data: {
+            ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
+            // Phần Hà Nội gõ ngay lúc tạo. Cờ duyệt/thanh toán chưa thể có ở báo giá mới nên không
+            // cần reconcile — `sanitizeHnTables` đã loại mọi thứ ngoài hình dạng hợp lệ.
+            ...(b.hnTables !== undefined ? { hnTables: sanitizeHnTables(b.hnTables) } : {}),
+            sheets: { create: sheetsTaoMoi },
+            members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } },
+          } as any,
           include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
@@ -467,15 +474,47 @@ export function reconcileHnApprovals(list: any[], listDb: any[], canApprove: boo
   }
 }
 
+/**
+ * "Vân tay" của phần Hà Nội — CHỈ những gì NGƯỜI DÙNG sửa được.
+ *
+ * Không so được bằng `JSON.stringify(sanitizeHnTables(...))` của hai vế: ba thứ khác nhau một cách
+ * hợp lệ và sẽ làm mọi lần Lưu ăn 409 vĩnh viễn, kể cả khi người dùng không đụng gì:
+ *   · `paidProof` — CSDL có ảnh, payload thì KHÔNG BAO GIỜ có (presentQuote cắt, chỉ gửi cờ
+ *     `hasPaidProof`), nên hai chuỗi khác nhau ngay từ hàng đầu tiên có chứng từ;
+ *   · `rid` — hàng cũ chưa có rid thì `sanitizeHnTables` sinh UUID MỚI ở mỗi lần gọi, nên ngay cả
+ *     so bản CSDL với chính nó cũng ra khác;
+ *   · `paid*`/`approved*` — do server sở hữu, client gửi gì cũng bị reconcile ghi đè.
+ * Chỉ so phần người dùng gõ: tên bảng, mẫu, nhóm tổng, và nội dung từng hàng.
+ */
+function vanTayHn(tables: any): string {
+  return JSON.stringify((Array.isArray(tables) ? tables : []).map((t: any) => ({
+    name: t?.name ? String(t.name).trim() : null,
+    templateId: t?.templateId != null ? Number(t.templateId) : null,
+    groupSubtotal: !!t?.groupSubtotal,
+    items: (t?.items || []).map((it: any) => ({
+      kind: it?.kind ?? null,
+      label: it?.label ?? null,
+      name: (it?.name || "").trim(),
+      detail: it?.detail ?? null,
+      unit: it?.unit ?? null,
+      quantity: Number(it?.quantity) || 0,
+      quantityExact: !!it?.quantityExact,
+      unitPrice: Number(it?.unitPrice) || 0,
+      days: it?.days != null ? Number(it.days) : null,
+      notes: it?.notes ?? null,
+    })),
+  })));
+}
+
 function chotHnTables(b: any, existing: any, canManage: boolean) {
   if (b.hnTables === undefined) return;                       // client không gửi → không đụng
   if (canManage) return;                                      // người duyệt phần HN thì được sửa
   if (!["submitted", "approved"].includes(existing.hnStatus ?? "")) return;
   // Giá HN đã gửi duyệt / đã duyệt: KHÔNG ai ghi đè qua đường lưu báo giá.
-  // So bản đã chuẩn hoá với bản CSDL: GIỐNG thì im lặng bỏ qua (client round-trip nguyên vẹn,
-  // không có gì để báo), KHÁC thì 409 — tuyệt đối không vứt im lặng phần người ta vừa gõ.
-  const moiNhat = JSON.stringify(sanitizeHnTables(b.hnTables));
-  const cu = JSON.stringify(sanitizeHnTables(Array.isArray(existing.hnTables) ? existing.hnTables : []));
+  // GIỐNG thì im lặng bỏ qua (client round-trip nguyên vẹn, không có gì để báo), KHÁC thì 409 —
+  // tuyệt đối không vứt im lặng phần người ta vừa gõ.
+  const moiNhat = vanTayHn(b.hnTables);
+  const cu = vanTayHn(Array.isArray(existing.hnTables) ? existing.hnTables : []);
   if (moiNhat !== cu) {
     throw httpError(409, "Phần giá Hà Nội đã chốt nên không sửa được ở đây. Hãy chép lại phần vừa gõ, tải lại trang, rồi nhờ người phụ trách phần Hà Nội mở lại.");
   }
@@ -965,6 +1004,11 @@ export async function bangNoiBoTheoSheet(ids: number[]) {
                     ELSE e.t END AS t, e.ord AS ord
           FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s."extraTables") = 'array'
                                          THEN s."extraTables" ELSE '[]'::jsonb END) WITH ORDINALITY AS e(t, ord)
+         -- BO QUA ban cu cua bang Ha Noi con nam lai trong trang: migration 20260915140000 la
+         -- EXPAND-ONLY (chep sang Quote.hnTables, CHUA xoa cho cu de lui anh con an toan). Khong
+         -- loc thi phan HN bi dem HAI LAN tren du lieu cu. (Chu thich khong dau: nam trong
+         -- template literal, dau backtick se lam dut chuoi.)
+         WHERE NOT (jsonb_typeof(e.t) = 'object' AND e.t->>'category' = 'hanoi')
       ) x
      WHERE s."quoteId" = ANY(${ids})
      GROUP BY s."quoteId", s.id, s."order"`;
@@ -1171,6 +1215,13 @@ export async function listProjects(req: Request) {
         // tổng. Hiện cùng một số trên mọi dòng thì ai cộng cột sẽ ra gấp số-trang lần — con số sai
         // mà trông như tiền thật.
         const tongHnBaoGia = (hnTheoBaoGia.get(q.id) ?? []).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
+        // `hnInvoiceNo` (Số HĐ Hà Nội) vẫn là cột THEO TRANG, trong khi tổng HN nay dồn về dòng
+        // trang đầu. Trên dữ liệu CŨ, bảng HN thường nằm ở trang 2-3 và kế toán đã điền số hoá đơn
+        // vào ĐÚNG dòng đó — nếu dòng đầu chỉ đọc `hnInvoiceNo` của riêng nó thì cờ "thiếu số HĐ
+        // HN" (Projects.tsx + thẻ việc tồn đọng ở Dashboard) bật ĐỎ VĨNH VIỄN cho mọi dự án cũ,
+        // và không ai tắt được ngoài việc gõ lại số vào trang 1. Cho dòng đầu thấy số hoá đơn HN
+        // ĐẦU TIÊN tìm được trên cả báo giá — cùng phạm vi với con số tiền nó đang gánh.
+        const hnInvoiceChung = q.sheets.map((x: any) => x.hnInvoiceNo).find((v: any) => String(v ?? "").trim() !== "") ?? null;
         return {
           id: sh.id,
           name: sh.name || null,
@@ -1185,7 +1236,7 @@ export async function listProjects(req: Request) {
           invoiceNo: sh.invoiceNo || null,
           paidAt: sh.paidAt || null,
           poNumber: sh.poNumber || null,
-          hnInvoiceNo: sh.hnInvoiceNo || null,
+          hnInvoiceNo: (sIdx === 0 ? (sh.hnInvoiceNo || hnInvoiceChung) : sh.hnInvoiceNo) || null,
           invoiceLink: sh.invoiceLink || null,
           docSentAt: sh.docSentAt || null,
           docReturnedAt: sh.docReturnedAt || null,
@@ -1802,6 +1853,16 @@ export async function duplicateQuote(req: Request) {
     total: t.total,
     createdById: req.session.userId,
     members: { create: { userId: req.session.userId, scopes: [...QUOTE_SCOPES], addedById: req.session.userId } },
+    // Phần Hà Nội đi theo bản sao — bỏ sót là người dùng nhân bản báo giá rồi mất trắng phần HN,
+    // im lặng. CẮT trạng thái do server sở hữu (duyệt / đã thanh toán / ảnh chứng từ): bản sao là
+    // báo giá MỚI chưa ai duyệt, chưa ai trả tiền — cùng tinh thần với `carrySheetState`.
+    hnTables: (Array.isArray(src.hnTables) ? src.hnTables : []).map((t: any) => ({
+      name: t?.name ?? null, templateId: t?.templateId ?? null, groupSubtotal: !!t?.groupSubtotal,
+      items: (t?.items || []).map((it: any) => {
+        const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, ...con } = it || {};
+        return con;
+      }),
+    })),
     sheets: {
       create: src.sheets.map((s: any, sIdx: number) => ({
         templateId: s.templateId,

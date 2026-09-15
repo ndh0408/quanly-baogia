@@ -12,8 +12,9 @@
 -- Ở cấp báo giá, account HN có không gian riêng: tự tạo/xoá/đặt tên bảng như khi làm báo giá.
 --
 -- ── DI TRÚ KHÔNG ĐỔI MỘT ĐỒNG NÀO ───────────────────────────────────────────
--- Gom mọi phần tử category='hanoi' của MỌI trang thuộc một báo giá, GIỮ NGUYÊN thứ tự đang hiển
--- thị (trang theo "order" rồi "id", bảng theo thứ tự trong mảng), rồi mới xoá khỏi cột cũ. Mọi
+-- CHÉP mọi phần tử category='hanoi' của MỌI trang thuộc một báo giá sang cột mới, GIỮ NGUYÊN thứ
+-- tự đang hiển thị (trang theo "order" rồi "id", bảng theo thứ tự trong mảng). Bản cũ để nguyên
+-- tại chỗ (xem pha EXPAND bên dưới) nên đây là phép CHÉP, không phải phép DỜI. Mọi
 -- trường của từng bảng/hàng được bê nguyên xi — kể cả `rid`, `approved*`, `paid*` và `paidProof`
 -- (ảnh uỷ nhiệm chi) — nên tổng tiền, cờ đã duyệt, cờ đã thanh toán và ảnh chứng từ đều y nguyên.
 --
@@ -22,18 +23,40 @@
 --          jsonb_array_elements của QuoteSheet.extraTables lọc category='hanoi';
 --   sau:   đúng ba con số đó trên jsonb_array_elements(Quote."hnTables").
 --
+-- ── ĐÂY LÀ PHA "EXPAND" — KHÔNG XOÁ CHỖ CŨ ─────────────────────────────────
+-- `docs/operations/DEPLOYMENT.md` chốt quy ước của chính repo: "thêm cột trước, đổi mã sau, bỏ cột
+-- cũ ở một bản phát hành SAU NỮA", và "migration không tự rollback". Nếu bản này xoá luôn phần
+-- hanoi khỏi `QuoteSheet.extraTables` thì:
+--   · trong cửa sổ giữa bước [4/6] migrate và [5/6] recreate của deploy.sh, mã CŨ đọc bảng HN ở
+--     chỗ vừa bị xoá → mọi người thấy phần Hà Nội TRỐNG, và account HN bấm Lưu là ghi vào chỗ
+--     không ai còn đọc — im lặng, không lỗi nào hiện ra;
+--   · lệnh rollback mà chính deploy.sh in ra (lùi ẢNH, KHÔNG lùi CSDL) làm TOÀN BỘ phần Hà Nội
+--     biến mất khỏi mọi màn hình, và đường thoát duy nhất là restore bản dump.
+-- Để bản cũ nằm yên thì cả hai kịch bản đều vô hại. KHÔNG có chuyện cộng hai lần: từ bản này
+-- `sanitizeExtraTables` loại category "hanoi" khỏi đường ghi theo trang, và mọi phép cộng tiền HN
+-- (hnTotal, listProjects) chỉ đọc cột mới.
+--
+-- PHA "CONTRACT" là một migration RIÊNG ở bản phát hành SAU, khi bản mới đã chạy ổn định:
+--   UPDATE "QuoteSheet" s SET "extraTables" = (
+--     SELECT COALESCE(jsonb_agg(t ORDER BY o), '[]'::jsonb)
+--     FROM jsonb_array_elements(s."extraTables"::jsonb) WITH ORDINALITY AS x(t, o)
+--     WHERE NOT (jsonb_typeof(t) = 'object' AND t->>'category' = 'hanoi'))
+--   WHERE jsonb_typeof(s."extraTables"::jsonb) = 'array'
+--     AND s."extraTables"::jsonb @> '[{"category":"hanoi"}]'::jsonb;
+--
 -- ── ROLLBACK ────────────────────────────────────────────────────────────────
--- Bảng HN quay lại trang ĐẦU TIÊN của báo giá (không khôi phục được việc chúng từng nằm rải ở
--- nhiều trang — thông tin đó mất ngay khi gộp, và đó chính là thứ bản này CỐ Ý bỏ đi):
---   UPDATE "QuoteSheet" s SET "extraTables" =
---     COALESCE(s."extraTables"::jsonb, '[]'::jsonb) ||
---     (SELECT COALESCE(jsonb_agg(t || jsonb_build_object('category','hanoi')), '[]'::jsonb)
---        FROM jsonb_array_elements(COALESCE(q."hnTables"::jsonb,'[]'::jsonb)) t)
---   FROM "Quote" q
---   WHERE s."quoteId" = q."id" AND jsonb_typeof(q."hnTables"::jsonb) = 'array'
---     AND s."id" = (SELECT min(s2."id") FROM "QuoteSheet" s2 WHERE s2."quoteId" = q."id");
+-- Bản cũ CÒN NGUYÊN trong `QuoteSheet.extraTables`, nên lùi ẢNH một mình là chạy được ngay: mã cũ
+-- đọc lại đúng chỗ cũ. (Phần HN ai đó sửa bằng mã MỚI nằm ở `Quote.hnTables` nên mã cũ không thấy
+-- — chép tay lại nếu cần.) Muốn dọn hẳn:
 --   ALTER TABLE "Quote" DROP COLUMN "hnTables";
 --   DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260915140000_hn_tables_quote_level';
+-- Dòng thứ hai hay bị quên: thiếu nó thì lượt roll-forward sau coi migration này "đã chạy" và bỏ
+-- qua, để lại schema cũ với mã mới.
+--
+-- ── NẾU BƯỚC [4/6] HỎNG VÌ lock_timeout (55P03) ─────────────────────────────
+-- Prisma để lại hàng migration ở trạng thái FAILED, nên lần deploy sau KHÔNG tự thử lại mà báo
+-- P3009 và từ chối áp MỌI migration. Gỡ bằng đúng một lệnh trên VM rồi deploy lại:
+--   docker compose -f <compose> run --rm app npx prisma migrate resolve --rolled-back 20260915140000_hn_tables_quote_level
 
 -- Không xếp hàng sau transaction dài của người đang dùng: thà dừng sớm để deploy.sh `set -e` chặn
 -- lại, còn hơn khoá Quote + QuoteSheet cho tới hết thời gian chờ.
@@ -63,13 +86,3 @@ WITH hn AS (
 UPDATE "Quote" q SET "hnTables" = gom.tables
 FROM gom WHERE q."id" = gom.quote_id;
 
--- XOÁ khỏi chỗ cũ. Chỉ đụng trang THẬT SỰ có bảng hanoi (điều kiện @> ở WHERE) để không viết lại
--- hàng loạt jsonb của những trang không liên quan.
-UPDATE "QuoteSheet" s
-SET "extraTables" = (
-  SELECT COALESCE(jsonb_agg(t ORDER BY o), '[]'::jsonb)
-  FROM jsonb_array_elements(s."extraTables"::jsonb) WITH ORDINALITY AS x(t, o)
-  WHERE NOT (jsonb_typeof(t) = 'object' AND t->>'category' = 'hanoi')
-)
-WHERE jsonb_typeof(s."extraTables"::jsonb) = 'array'
-  AND s."extraTables"::jsonb @> '[{"category":"hanoi"}]'::jsonb;
