@@ -46,7 +46,11 @@ GOC="$PWD"
 #   · vế TRONG CONTAINER → miễn dịch theo TIỀN TỐ, đúng ba cái đang dùng;
 #   · vế CỦA MÁY → đưa sẵn về dạng Windows (`D:/QuanLY`) để MSYS không có gì để dịch.
 # Trên Linux/macOS/CI `pwd -W` không có nên GOC_MOUNT = GOC, và biến EXCL vô nghĩa — vô hại.
-export MSYS2_ARG_CONV_EXCL='/src;/repo;/root'
+# Tiền tố phải phủ CẢ dạng `--co=/duong-dan`: MSYS2_ARG_CONV_EXCL so khớp với ĐẦU của cả tham
+# số, nên mục `/repo` KHÔNG phủ `--source=/repo` (tham số đó bắt đầu bằng `--source=`). Đo được:
+# thiếu `--source=` thì gitleaks chết bằng "FTL stat C:/Program Files/Git/repo: no such file or
+# directory" và thoát 1 — cổng đỏ trông y hệt "tìm thấy bí mật".
+export MSYS2_ARG_CONV_EXCL='/src;/repo;/root;--source=;--ignorefile=;--report-path='
 duong_dan_may() { ( cd "$1" 2>/dev/null && { pwd -W 2>/dev/null || pwd; } ) || printf '%s' "$1"; }
 GOC_MOUNT=$(duong_dan_may "$GOC")
 
@@ -96,9 +100,42 @@ if chay_buoc secrets; then
   docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
     detect --source=/repo --redact --no-banner --exit-code 1 >/dev/null 2>&1
   ket $? "lịch sử git sạch (chi tiết: docker run --rm -v \"\$PWD:/repo\" $GITLEAKS detect --source=/repo --redact)"
+  # `--no-git` đi bộ trên HỆ TỆP, KHÔNG đọc .gitignore. Trên máy lập trình viên, thư mục đó chứa
+  # đủ thứ không thuộc repo: .env thật, .claude/ và .agents/ (bộ skill BMAD), graphify-out/, .scan/,
+  # và mấy chục script e2e-*.mjs dùng một lần. Đo được: 59 phát hiện trên 58 file — CẢ 58 đều bị
+  # .gitignore bỏ qua, tức không file nào có đường nào vào được lịch sử.
+  #
+  # Trên CI (clone sạch) chẳng file nào tồn tại, nên cổng xanh ở đó và đỏ vĩnh viễn ở đây. Một
+  # cảnh báo luôn-đỏ là một cảnh báo bị bỏ qua — nguy hiểm hơn không có cảnh báo (xem .gitleaks.toml).
+  #
+  # Nên LỌC THEO `git check-ignore` NGAY LÚC QUÉT, chứ không chép một danh sách đường dẫn vào
+  # .gitleaks.toml: danh sách chép tay sẽ trôi khỏi .gitignore, còn cách này thì không thể trôi.
+  # Cổng vẫn nguyên sức: một bí mật nằm trong file mà git THẬT SỰ theo dõi (hoặc sẽ theo dõi) vẫn
+  # làm đỏ như cũ.
+  bc_gl="$(mktemp)"
   docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
-    detect --source=/repo --no-git --redact --no-banner --exit-code 1 >/dev/null 2>&1
-  ket $? "cây làm việc sạch (kể cả thay đổi chưa commit)"
+    detect --source=/repo --no-git --redact --no-banner \
+    --report-format json --report-path /repo/.gl-worktree.json >/dev/null 2>&1
+  ma_gl=0
+  if [ -f "$GOC/.gl-worktree.json" ]; then
+    node -e '
+      const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const files = [...new Set(d.map((f) => f.File.replace(/^\/repo\//, "")))];
+      // PHẢI có xuống dòng CUỐI: `while read` bỏ rơi dòng cuối nếu nó không kết thúc bằng\n.
+      // Đã đo: cắm một bí mật vào src/quoteUtils.ts (xếp CUỐI bảng chữ cái) → cổng vẫn XANH.
+      for (const f of files) process.stdout.write(f + "\n");
+    ' "$GOC/.gl-worktree.json" > "$bc_gl" 2>/dev/null || ma_gl=1
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      git check-ignore -q -- "$f" || { echo "  bí mật trong file git CÓ theo dõi: $f"; ma_gl=1; }
+    done < "$bc_gl"
+    rm -f "$GOC/.gl-worktree.json"
+  else
+    echo "  gitleaks không sinh được báo cáo — coi như ĐỎ chứ không im lặng cho qua"
+    ma_gl=1
+  fi
+  rm -f "$bc_gl"
+  ket $ma_gl "cây làm việc sạch (bỏ qua thứ .gitignore đã bỏ qua)"
 fi
 
 # ── [S2] LỖ HỔNG PHỤ THUỘC + CẤU HÌNH SAI + BÍ MẬT TRONG CÂY LÀM VIỆC ──────

@@ -50,6 +50,9 @@ regexes = [
   # (tests/authsess-logger-redact.test.js, tests/authsess-sentry-url-scrub.test.js,
   #  tests/qua-token-in-flat-path-key.test.js)
   '''(asx|9f3c1d2e4b5a6789)0123456789abcdef0123456789abcd''',
+  # Khoá HKDF giả trong hai bài PII (tests/pii-contract-decode.test.js, tests/ze-pii-cutover.test.js).
+  # Tự mô tả là đồ test ngay trong tên, và chỉ đủ dài để qua ràng buộc >= 16 của zod.
+  '''khoa-test-[a-z-]*du-dai-cho-hkdf''',
 ]
 
 # ── Mật khẩu demo dùng chung, viết thẳng trong mã ───────────────────────────
@@ -73,6 +76,17 @@ regexes = [
   # nên nó là hằng số công khai chứ không phải bí mật của ai. Năm file test dùng nó để sinh mã
   # 6 số tất định (tests/authsess-*.test.js).
   '''JBSWY3DPEHPK3PXP''',
+  # THAM CHIẾU BIẾN, KHÔNG PHẢI CHUỖI VIẾT THẲNG. Lớp ký tự của regex trên có `$` (mật khẩu thật
+  # hay chứa `$`), nên `SECRET="$sessionSecret"` trong PowerShell — tức một biến đang được nội suy
+  # — trông y hệt một mật khẩu 14 ký tự. Đo được: deploy/windows/2-deploy-app.ps1 dòng 44 và 45
+  # (commit db977be7) bị bắt đúng vì lý do này; file đó nay đã bị xoá khỏi repo nhưng vẫn nằm
+  # trong lịch sử, nên cổng còn đỏ vì nó mãi. Một biến thì giá trị nằm chỗ khác — không có gì để
+  # rò ở đây. Phủ cả `$x`, `${x}` (shell/PowerShell) và `$env:X`.
+  '''["']\$\{?(env:)?[A-Za-z_]''',
+  # Chỗ giữ chỗ TỰ NÓI RÕ là chỗ giữ chỗ, nhưng viết bằng tiếng Việt nên dòng regex tiếng Anh ở
+  # trên (CHANGE_ME/placeholder/example) không phủ. `.env.example` là file mẫu công khai, giá trị
+  # trong đó không mở được gì.
+  '''thay-doi-chuoi-bi-mat''',
 ]
 # ── HAI COMMIT LỊCH SỬ: MẬT KHẨU DEMO ĐÃ BỊ ĐỐT ────────────────────────────
 # `gitleaks detect` quét TOÀN BỘ LỊCH SỬ (93 commit), không chỉ cây làm việc — CI cố ý đặt
@@ -83,9 +97,17 @@ regexes = [
 # ⚠️ COI NHƯ ĐÃ LỘ. Một chuỗi đã được commit thì vĩnh viễn đọc được từ lịch sử; đừng bao giờ dùng
 #    lại nó ở bất kỳ môi trường nào, kể cả demo.
 #
-# Miễn theo COMMIT chứ không theo giá trị hay đường dẫn: đây là dạng hẹp nhất có thể. Đúng hai
+# Miễn theo COMMIT chứ không theo giá trị hay đường dẫn: đây là dạng hẹp nhất có thể. Đúng ba
 # commit này được tha; CHÍNH chuỗi đó xuất hiện trong một commit MỚI vẫn bị bắt ngay.
+#
+# ⚠️ SỬA LẠI MỘT CÂU SAI (2026-09-15). Khối này trước ghi "hai commit". Sai:
+# `git log --all -S'GiaNguyenDemo2026'` trả về TÁM commit. Gitleaks chỉ báo ba, và đó KHÔNG phải
+# vì bảy commit kia sạch — mà vì gitleaks quét DIFF, nên chỉ commit nào THÊM đúng khuôn
+# `PWD = ... || "..."` mới khớp luật; các commit còn lại chỉ mang chuỗi đi theo. Nói cách khác
+# danh sách dưới đây là "những chỗ gitleaks nhìn thấy", KHÔNG phải "những chỗ chuỗi tồn tại".
+# Điều đó càng củng cố kết luận đã ghi ở trên: coi chuỗi này như ĐÃ LỘ VĨNH VIỄN.
 commits = [
   "0d5ba969190066ea73346f50ee174339e20e2441", # scripts/rc-qa.mjs (2026-08-11)
   "83fc9234442bb2074effb2793c6cadb554e725fc", # prisma/seed-demo.js (2026-08-11)
+  "150bfc50de15c6f2b54acdcb4fd1070de4acb6b8", # prisma/seed-demo.js (2026-06-22) — chỗ ĐẦU TIÊN
 ]
