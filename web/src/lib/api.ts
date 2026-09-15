@@ -129,7 +129,7 @@ export type QuoteFull = {
   companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;
   greeting?: string; notes?: string; toCompany?: string; toContact?: string; toEmail?: string; toPhone?: string; toAddress?: string;
   fromContact?: string; fromTitle?: string; fromPhone?: string; fromAddress?: string; createdById?: number;
-  members?: QuoteMemberLite[]; sheets?: unknown[]; hnTables?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
+  members?: QuoteMemberLite[]; sheets?: unknown[]; hnTables?: unknown[]; hnRev?: string; hnStatus?: string | null; [k: string]: unknown;
 };
 export type QuoteVersion = { id: string; versionNo: number; total: number; createdAt: string; createdById?: number | null };
 
@@ -576,7 +576,16 @@ export const api = {
   hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),
   hnReview: (id: number, decision: "approve" | "reject", note?: string) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
   // Bảng HN nay PHẲNG (cấp báo giá) + mốc khoá lạc quan thay cho phép suy đoán "trang đã chết".
-  saveHn: (id: number, hnTables: unknown[], baseUpdatedAt?: string) =>
-    req<unknown>(`/quotes/${id}/hn`, { method: "PUT", body: JSON.stringify({ hnTables, ...(baseUpdatedAt ? { baseUpdatedAt } : {}) }) }),
+  //
+  // `baseHnRev` là mốc THẬT: chuỗi ĐỤC lấy nguyên từ GET rồi gửi trả, chỉ đổi khi BẢNG HÀ NỘI
+  // đổi. `baseUpdatedAt` đổi mỗi lần CHỦ báo giá lưu bất cứ thứ gì, nên nếu chốt 409 bằng nó thì
+  // chủ bấm Lưu một cái là account HN mất trắng phần vừa gõ (màn đó không có bản nháp cục bộ).
+  // Vẫn gửi kèm `baseUpdatedAt` để máy chủ CHƯA vá còn mốc mà dùng.
+  saveHn: (id: number, hnTables: unknown[], baseUpdatedAt?: string, baseHnRev?: string) =>
+    req<unknown>(`/quotes/${id}/hn`, { method: "PUT", body: JSON.stringify({
+      hnTables,
+      ...(baseUpdatedAt ? { baseUpdatedAt } : {}),
+      ...(baseHnRev ? { baseHnRev } : {}),
+    }) }),
   submitHn: (id: number) => req<unknown>(`/quotes/${id}/hn/submit`, { method: "POST" }),
 };

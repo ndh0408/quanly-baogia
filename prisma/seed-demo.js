@@ -155,6 +155,21 @@ async function main() {
       approved: !!r.approved, approvedAt: r.approved ? ago(2).toISOString() : null, approvedBy: r.approved ? 1 : null,
     })),
   });
+  // BẢNG HÀ NỘI nay nằm ở `Quote.hnTables` (cấp BÁO GIÁ), không còn trong QuoteSheet.extraTables.
+  // Seed vẫn đẻ chúng vào chỗ CŨ tới 2026-09-16, nên dữ liệu demo có hnStatus="approved" mà Tổng HN
+  // hiện 0 ở mọi màn — và tệ hơn: `scripts/db/migration-rehearsal.sh` (guard duy nhất của repo cho
+  // migration đụng dữ liệu) seed bằng chính file này, nên buổi diễn tập chỉ chứng minh DDL chạy
+  // được chứ không chứng minh dữ liệu chuyển đúng.
+  //
+  // KHÔNG có `category` ở đây: cột mới chỉ chứa bảng HN nên trường đó thừa, và sanitizeHnTables
+  // cắt nó đi. Giữ `rid` vì nút thanh toán/ảnh chứng từ ghim theo rid.
+  const hntable = (name, rows) => ({
+    name,
+    items: rows.map((r, j) => ({
+      rid: `d${seq}_hn_${j}`, kind: "item", name: r.name,
+      quantity: r.qty, unitPrice: r.price, days: 1,
+    })),
+  });
   const sumItems = (items) => items.filter((it) => ["item", "sub"].includes(it.kind))
     .reduce((a, it) => a + Number(it.quantity) * Number(it.unitPrice) * Number(it.days || 1), 0);
 
@@ -196,6 +211,7 @@ async function main() {
       hnReviewedAt: ["approved", "rejected"].includes(o.hnStatus) ? ago(3) : null,
       hnReviewerId: ["approved", "rejected"].includes(o.hnStatus) ? 1 : null,
       hnRejectNote: o.hnStatus === "rejected" ? "Cần làm rõ đơn giá vách + bổ sung kích thước." : null,
+      hnTables: o.hnTables || undefined,
       sheets: { create: sheetsCreate },
     };
     if (o.hnAssignee) data.members = { create: { userId: o.hnAssignee.id, scopes: ["hanoi"] } };
@@ -234,20 +250,23 @@ async function main() {
 
   // 9) Đã chốt + Báo giá Hà Nội ĐÃ DUYỆT nhưng CHƯA có Số HĐ HN → ô Số HĐ HN ĐỎ
   await makeQuote({ creator: accA, customer: kh3, title: "Sự kiện phía Bắc — Số HĐ HN ĐỎ", status: "converted", hnStatus: "approved", hnAssignee: hn, exec: ago(4),
-    sheets: [{ items: std, invoiceNo: "HD-2026-0170",
-      extraTables: [xtable("hanoi", "Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 2, price: 4_500_000 }, { name: "Sàn gỗ", qty: 1, price: 7_605_000 }], 0)] }] });
+    hnTables: [hntable("Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 2, price: 4_500_000 }, { name: "Sàn gỗ", qty: 1, price: 7_605_000 }])],
+    sheets: [{ items: std, invoiceNo: "HD-2026-0170" }] });
   // 10) Đã chốt + HN duyệt + ĐÃ có Số HĐ HN → TRẮNG
   await makeQuote({ creator: accB, customer: kh1, title: "Sự kiện phía Bắc 2 — Số HĐ HN đủ", status: "converted", hnStatus: "approved", hnAssignee: hn, daysAgo: 22, exec: ago(9),
-    sheets: [{ items: std, invoiceNo: "HD-2026-0088", hnInvoiceNo: "HDHN-26-014",
-      extraTables: [xtable("hanoi", "Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 3, price: 4_500_000 }], 0)] }] });
+    hnTables: [hntable("Giá thuê Hà Nội", [{ name: "Vách 3x6", qty: 3, price: 4_500_000 }])],
+    sheets: [{ items: std, invoiceNo: "HD-2026-0088", hnInvoiceNo: "HDHN-26-014" }] });
 
   // 11–13) Luồng ACCOUNT HÀ NỘI (xem ở view account_hn): assigned / submitted / rejected
   await makeQuote({ creator: accA, customer: kh2, title: "Giao HN — ĐÃ GIAO (assigned)", status: "draft", hnStatus: "assigned", hnAssignee: hn,
-    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Khung backdrop", qty: 1, price: 5_000_000 }], 0)] }] });
+    hnTables: [hntable("Giá thuê HN", [{ name: "Khung backdrop", qty: 1, price: 5_000_000 }])],
+    sheets: [{ name: "Phần Hà Nội", items: std }] });
   await makeQuote({ creator: accA, customer: kh3, title: "Giao HN — ĐÃ GỬI DUYỆT (submitted)", status: "draft", hnStatus: "submitted", hnAssignee: hn,
-    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Vách", qty: 5, price: 1_200_000 }, { name: "Thảm", qty: 2, price: 900_000 }], 0)] }] });
+    hnTables: [hntable("Giá thuê HN", [{ name: "Vách", qty: 5, price: 1_200_000 }, { name: "Thảm", qty: 2, price: 900_000 }])],
+    sheets: [{ name: "Phần Hà Nội", items: std }] });
   await makeQuote({ creator: accB, customer: kh1, title: "Giao HN — BỊ TRẢ LẠI (rejected)", status: "draft", hnStatus: "rejected", hnAssignee: hn,
-    sheets: [{ name: "Phần Hà Nội", items: std, extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "LED", qty: 10, price: 600_000 }], 0)] }] });
+    hnTables: [hntable("Giá thuê HN", [{ name: "LED", qty: 10, price: 600_000 }])],
+    sheets: [{ name: "Phần Hà Nội", items: std }] });
 
   // 14) Đã chốt NHIỀU sheet + bảng nội bộ HCM/HN/Khách (có hàng DUYỆT, có hàng chưa) + ký 1 sheet
   await makeQuote({ creator: accA, customer: kh2, title: "Đại nhạc hội — đủ chi phí nội bộ + nhiều sheet", status: "converted", daysAgo: 18, exec: ago(7),
@@ -257,9 +276,12 @@ async function main() {
           xtable("hcm", "Chi phí HCM", [{ name: "Vận chuyển", qty: 1, price: 3_000_000, approved: true }, { name: "Phát sinh", qty: 1, price: 2_000_000, approved: false }], 0),
           xtable("khach", "Phí khách hàng", [{ name: "Quản lý dự án", qty: 1, price: 5_000_000, approved: true }], 0),
         ] },
-      { name: "Khu vực VIP", items: [item("Bàn ghế VIP", 30, 250_000), item("Hoa trang trí", 1, 4_000_000)],
-        extraTables: [xtable("hanoi", "Giá thuê HN", [{ name: "Backdrop VIP", qty: 1, price: 6_000_000 }], 1)] },
-    ] });
+      { name: "Khu vực VIP", items: [item("Bàn ghế VIP", 30, 250_000), item("Hoa trang trí", 1, 4_000_000)] },
+    ],
+    // Báo giá NHIỀU TRANG nhưng bảng HN chỉ có MỘT danh sách ở cấp báo giá — đúng hình dạng thật
+    // sau 2026-09-15. Giữ nguyên ca này trong seed vì nó là ca duy nhất trộn cả ba loại bảng nội
+    // bộ (hcm/khach theo trang) với bảng HN (cấp báo giá) trên cùng một báo giá.
+    hnTables: [hntable("Giá thuê HN", [{ name: "Backdrop VIP", qty: 1, price: 6_000_000 }])] });
 
   const total = await prisma.quote.count({ where: { title: { startsWith: TAG } } });
   console.log(`✓ Đã tạo ${total} báo giá demo (đủ trạng thái). Đăng nhập demo_acc_a / demo_hn… mật khẩu ${PWD}.`);

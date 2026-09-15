@@ -3,6 +3,7 @@
 // pieces are unit-testable in isolation. No Express here — callers pass plain
 // objects / sessions.
 
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 import { computeQuoteTotals, totalsToJson, D, qtyRound } from "./money.js";
@@ -165,6 +166,48 @@ export const QUOTE_UPDATE_STATE_SELECT = {
 // sheets/items/đơn giá/thành tiền/subtotal/vat/total/khách hàng (chống lộ nội dung báo giá
 // qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại
 // "hanoi" (kèm sheetId để map khi lưu).
+/**
+ * VÂN TAY của phần người dùng GÕ trong bảng Hà Nội — dùng cho khoá lạc quan.
+ *
+ * Cố ý BỎ QUA ba nhóm trường, nếu không thì so bản CSDL với chính nó cũng ra khác:
+ *   · `paidProof` — client không bao giờ nhận (đã bị cắt để khỏi lộ ảnh uỷ nhiệm chi);
+ *   · `rid`       — hàng cũ chưa có rid thì sanitizeHnTables sinh UUID MỚI mỗi lần gọi;
+ *   · `paid*`/`approved*` — server sở hữu, client gửi gì cũng bị reconcile ghi đè.
+ *
+ * Trước 2026-09-16 hàm này nằm riêng trong quoteService. Chuyển ra đây vì saveHn
+ * (hnWorkflow) nay cũng cần ĐÚNG phép so đó — hai bản chép tay sẽ trôi khỏi nhau, và khi
+ * chúng trôi thì triệu chứng là 409 oan, tức mất phần người dùng vừa gõ.
+ */
+export function vanTayHn(tables: any): string {
+  return JSON.stringify((Array.isArray(tables) ? tables : []).map((t: any) => ({
+    name: t?.name ? String(t.name).trim() : null,
+    templateId: t?.templateId != null ? Number(t.templateId) : null,
+    groupSubtotal: !!t?.groupSubtotal,
+    items: (t?.items || []).map((it: any) => ({
+      kind: it?.kind ?? null,
+      label: it?.label ?? null,
+      name: (it?.name || "").trim(),
+      detail: it?.detail ?? null,
+      unit: it?.unit ?? null,
+      quantity: Number(it?.quantity) || 0,
+      quantityExact: !!it?.quantityExact,
+      unitPrice: Number(it?.unitPrice) || 0,
+      days: it?.days != null ? Number(it.days) : null,
+      notes: it?.notes ?? null,
+    })),
+  })));
+}
+
+/**
+ * Mốc phiên bản của RIÊNG bảng Hà Nội, dạng ngắn để gửi qua lại với client.
+ *
+ * Băm chứ không gửi thẳng vân tay: vân tay là toàn bộ nội dung bảng, gửi đi gửi lại mỗi lần
+ * Lưu là nhân đôi payload vô ích. Client coi đây là chuỗi ĐỤC — chỉ nhận rồi gửi trả.
+ */
+export function hnRevCua(tables: any): string {
+  return createHash("sha256").update(vanTayHn(tables)).digest("hex").slice(0, 32);
+}
+
 function presentQuoteForAccountHn(q: any) {
   return {
     id: q.id,
@@ -181,6 +224,17 @@ function presentQuoteForAccountHn(q: any) {
     hnRejectNote: q.hnRejectNote || null,
     // Mốc cho khoá lạc quan của saveHn — thay cho phép suy đoán "sheet đã chết" đã bỏ.
     updatedAt: q.updatedAt,
+    // MỐC THẬT dùng để chốt 409, và nó KHÔNG phải `updatedAt`.
+    //
+    // `Quote.updatedAt` đổi khi CHỦ báo giá lưu bất cứ thứ gì — đổi tên khách, sửa một dòng ở
+    // trang 3, đánh dấu thanh toán. Nếu 409 dựa vào đó thì account HN gõ nửa tiếng, chủ bấm Lưu
+    // một cái là họ ăn 409 và MẤT TRẮNG: màn này không có bản nháp cục bộ như trình soạn báo giá.
+    // Đó đúng là kiểu hỏng mà cả đợt chuyển HN lên cấp báo giá sinh ra để diệt (trước đây nó đến
+    // từ `sheetId` đổi sau mỗi lần chủ lưu).
+    //
+    // `hnRev` chỉ đổi khi BẢNG HÀ NỘI đổi. Chủ lưu phần khác → rev giữ nguyên → account HN lưu
+    // được. Có người thật sự sửa bảng HN → rev đổi → 409 đúng lúc cần.
+    hnRev: hnRevCua(q.hnTables),
     // KHÔNG còn `hnSheets`: trước đây màn này lặp theo TRANG của chủ và kèm cả `sheetName` —
     // người chỉ được giao điền giá lại biết báo giá có mấy trang và tên từng trang. Nay là không
     // gian riêng của họ, phẳng, không dính gì tới trang của chủ.

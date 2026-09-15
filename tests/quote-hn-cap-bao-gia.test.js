@@ -166,6 +166,51 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     expect((await docHn()).hnTables, "KHÔNG được xoá trắng vì payload rỗng của lượt bị chặn").toHaveLength(3);
   });
 
+  // ── MỐC 409 PHẢI LÀ BẢNG HÀ NỘI, KHÔNG PHẢI `Quote.updatedAt` ──────────────────────────────
+  // Màn của account HN KHÔNG có bản nháp cục bộ (khác trình soạn báo giá), nên một lần 409 là
+  // mất trắng phần vừa gõ. Chốt bằng `updatedAt` của CẢ báo giá thì chủ bấm Lưu một cái — đổi tên
+  // khách, sửa một dòng ở trang 3 — là account HN mất việc, dù không ai đụng vào bảng HN.
+  it("chủ sửa phần KHÁC: mốc updatedAt thành cũ nhưng hnRev còn đúng → account HN VẪN lưu được", async () => {
+    const hn = await dangNhap(hnU);
+    const truoc = await docHn();
+    expect(truoc.hnRev, "server phải trả mốc riêng của bảng HN").toMatch(/^[0-9a-f]{32}$/);
+
+    // Chủ ghi xen vào một trường KHÔNG dính gì tới bảng Hà Nội.
+    const chu = await dangNhap(chuU);
+    const q = await docChu();
+    expect((await chu.put(`/api/quotes/${quoteId}`).send({ ...q, baseUpdatedAt: q.updatedAt, notes: "chủ sửa ghi chú" })).status).toBe(200);
+
+    // Mốc updatedAt trong tay account HN nay đã CŨ — bản trước sẽ 409 ở đây.
+    const r = await hn.put(`/api/quotes/${quoteId}/hn`).send({
+      baseUpdatedAt: truoc.updatedAt,
+      baseHnRev: truoc.hnRev,
+      hnTables: [...truoc.hnTables, { name: "Sheet HN D", templateId, items: [{ kind: "item", name: "Gõ nửa tiếng", quantity: 1, unitPrice: 777 }] }],
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const sau = await docHn();
+    expect(sau.hnTables.map((t) => t.name)).toContain("Sheet HN D");
+    expect(sau.hnRev, "bảng HN đổi thì mốc phải đổi theo").not.toBe(truoc.hnRev);
+  });
+
+  it("có người sửa THẬT bảng Hà Nội: hnRev cũ → 409, không ghi đè im lặng", async () => {
+    const hn = await dangNhap(hnU);
+    const truoc = await docHn();
+
+    // Chủ sửa ĐÚNG bảng Hà Nội (đường lưu báo giá, không phải đường /hn).
+    const chu = await dangNhap(chuU);
+    const q = await docChu();
+    const doi = q.hnTables.map((t, i) => (i === 0 ? { ...t, name: "Chủ đổi tên sheet HN" } : t));
+    expect((await chu.put(`/api/quotes/${quoteId}`).send({ ...q, baseUpdatedAt: q.updatedAt, hnTables: doi })).status).toBe(200);
+
+    const r = await hn.put(`/api/quotes/${quoteId}/hn`).send({
+      baseHnRev: truoc.hnRev,
+      hnTables: [],
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    expect(String(r.body.error || "")).toMatch(/Hà Nội|chép lại/i);
+    expect((await docHn()).hnTables.length, "payload rỗng của lượt bị chặn KHÔNG được xoá trắng").toBeGreaterThan(0);
+  });
+
   // ── Bốn lỗ do CHÍNH bản vá này đẻ ra, tìm thấy ở vòng soi đối kháng trước khi lên production ──
   it("giá HN đã chốt: chủ bấm Lưu mà KHÔNG sửa gì → 200, không phải 409 giả", async () => {
     // Lỗi cũ: chốt so `JSON.stringify(sanitizeHnTables(...))` hai vế. Payload client KHÔNG BAO GIỜ

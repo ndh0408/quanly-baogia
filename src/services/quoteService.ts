@@ -29,8 +29,7 @@ import {
   sanitizeExtraTables,
   sanitizeHnTables,
   extraTableSum,
-  phangThanhVien,
-} from "../quoteUtils.js";
+  phangThanhVien, vanTayHn } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
 
@@ -472,38 +471,6 @@ export function reconcileHnApprovals(list: any[], listDb: any[], canApprove: boo
       }
     }
   }
-}
-
-/**
- * "Vân tay" của phần Hà Nội — CHỈ những gì NGƯỜI DÙNG sửa được.
- *
- * Không so được bằng `JSON.stringify(sanitizeHnTables(...))` của hai vế: ba thứ khác nhau một cách
- * hợp lệ và sẽ làm mọi lần Lưu ăn 409 vĩnh viễn, kể cả khi người dùng không đụng gì:
- *   · `paidProof` — CSDL có ảnh, payload thì KHÔNG BAO GIỜ có (presentQuote cắt, chỉ gửi cờ
- *     `hasPaidProof`), nên hai chuỗi khác nhau ngay từ hàng đầu tiên có chứng từ;
- *   · `rid` — hàng cũ chưa có rid thì `sanitizeHnTables` sinh UUID MỚI ở mỗi lần gọi, nên ngay cả
- *     so bản CSDL với chính nó cũng ra khác;
- *   · `paid*`/`approved*` — do server sở hữu, client gửi gì cũng bị reconcile ghi đè.
- * Chỉ so phần người dùng gõ: tên bảng, mẫu, nhóm tổng, và nội dung từng hàng.
- */
-function vanTayHn(tables: any): string {
-  return JSON.stringify((Array.isArray(tables) ? tables : []).map((t: any) => ({
-    name: t?.name ? String(t.name).trim() : null,
-    templateId: t?.templateId != null ? Number(t.templateId) : null,
-    groupSubtotal: !!t?.groupSubtotal,
-    items: (t?.items || []).map((it: any) => ({
-      kind: it?.kind ?? null,
-      label: it?.label ?? null,
-      name: (it?.name || "").trim(),
-      detail: it?.detail ?? null,
-      unit: it?.unit ?? null,
-      quantity: Number(it?.quantity) || 0,
-      quantityExact: !!it?.quantityExact,
-      unitPrice: Number(it?.unitPrice) || 0,
-      days: it?.days != null ? Number(it.days) : null,
-      notes: it?.notes ?? null,
-    })),
-  })));
 }
 
 function chotHnTables(b: any, existing: any, canManage: boolean) {

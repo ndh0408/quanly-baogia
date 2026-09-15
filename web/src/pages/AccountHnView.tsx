@@ -54,7 +54,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
 
   const templates = _templates || [];
-  const q = qRef.current as QuoteFull & { hnStatus?: string; hnRejectNote?: string; companyName?: string; updatedAt?: string };
+  const q = qRef.current as QuoteFull & { hnStatus?: string; hnRejectNote?: string; companyName?: string; updatedAt?: string; hnRev?: string };
   const hnTables = q.hnTables as HnTable[];
   const hnStatus = q.hnStatus || "assigned";
   const editable = !q.hnStatus || ["assigned", "rejected"].includes(q.hnStatus);
@@ -102,7 +102,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
         name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
         items: (t.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
       }));
-      await api.saveHn(q.id, goi, q.updatedAt);
+      await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       if (thenSubmit) { await api.submitHn(q.id); toast("Đã gửi duyệt phần Hà Nội", "success"); }
       else toast("Đã lưu phần Hà Nội", "success");
@@ -149,6 +149,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
           usesDaysOf={usesDaysOf}
           addrDetailOf={addrDetailOf}
           newSheetTemplateId={newSheetTemplateId}
+          khongCoTongTien
           onApply={applyImport}
           onClose={() => setImportOpen(false)}
         />

@@ -260,6 +260,12 @@ export const MAX_HN_TABLES = MAX_SAVE_SHEETS;
 // Hình dạng đổi từ `hnSheets[{ sheetId, hnTables }]` sang `hnTables[]` PHẲNG: bảng HN không còn
 // thuộc trang nào của chủ báo giá. `baseUpdatedAt` thay cho phép suy đoán "trang đã chết" đã bỏ.
 export const HnSaveSchema = z.object({
+  // MỐC CHỐT 409 CỦA PHẦN HÀ NỘI. Client nhận `hnRev` ở GET rồi gửi trả nguyên văn.
+  // Chuỗi ĐỤC với client (băm sha256 của phần người dùng gõ — xem quoteUtils.hnRevCua), nên
+  // 32 ký tự hex; ràng buộc độ dài để không ai nhét cả bảng vào đây.
+  baseHnRev: z.string().trim().regex(/^[0-9a-f]{32}$/, "Mốc phần Hà Nội không hợp lệ").optional(),
+  // GIỮ LẠI cho tab cũ đang mở lúc deploy: bản trước chỉ có mốc này. Khi CẢ HAI cùng có thì
+  // `baseHnRev` thắng — xem lý do ở hnWorkflow.saveHn.
   baseUpdatedAt: z.string().max(40).optional(),
   // CỐ Ý KHÔNG `.default([])`: Zod v4 loại khoá lạ, nên một tab chạy bundle CŨ (gửi `hnSheets`)
   // sẽ parse ra `hnTables: []` — không phân biệt được với "người dùng vừa xoá hết bảng". Server

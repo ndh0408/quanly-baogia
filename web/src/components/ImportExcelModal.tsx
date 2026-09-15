@@ -32,7 +32,7 @@ export type ImportApplyPayload = {
 };
 
 export function ImportExcelModal({
-  quoteId, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, onApply, onClose,
+  quoteId, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId, onApply, onClose, khongCoTongTien,
 }: {
   quoteId?: number;
   /** Các sheet ĐANG CÓ trong báo giá (để chọn nạp vào đâu + đối chiếu trước/sau). */
@@ -44,6 +44,8 @@ export function ImportExcelModal({
   newSheetTemplateId: (fileTemplateCode?: string | null) => number | undefined;
   onApply: (payload: ImportApplyPayload) => void;
   onClose: () => void;
+  /** Màn gọi KHÔNG có VAT/Discount (phần Hà Nội) → ẩn hẳn ô tick "lấy theo file", đừng hứa suông. */
+  khongCoTongTien?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -51,7 +53,12 @@ export function ImportExcelModal({
   const [fileName, setFileName] = useState("");
   const [plans, setPlans] = useState<SheetPlan[]>([]);
   const [active, setActive] = useState(0);
-  const [applyTotals, setApplyTotals] = useState(true);
+  // `khongCoTongTien`: màn gọi KHÔNG có khái niệm VAT/Discount. Đúng một màn như vậy — phần Hà
+  // Nội (AccountHnView): VAT và Discount thuộc báo giá GỬI KHÁCH, còn bảng HN là số nội bộ.
+  // Trước 2026-09-16 modal vẫn hiện ô tick "Lấy luôn VAT …% theo file" ở màn đó, người dùng tick
+  // xong KHÔNG có gì xảy ra vì applyImport bên ấy bỏ qua cả `totals` lẫn `plans[].discount`.
+  // Một ô tick không làm gì tệ hơn một ô tick không có: nó dạy người ta rằng phần mềm nói dối.
+  const [applyTotals, setApplyTotals] = useState(!khongCoTongTien);
   const [showSame, setShowSame] = useState(false);
   const [removeTargets, setRemoveTargets] = useState<number[]>([]);
   const [drag, setDrag] = useState(false);
@@ -405,7 +412,7 @@ export function ImportExcelModal({
                     </table>
                   </div> : <div className="import-empty-change">Không có dòng nào thay đổi. Bật “Hiện dòng không thay đổi” nếu muốn đối chiếu toàn bộ.</div>}
 
-                  {view.fs.totals && (view.fs.totals.vatPercent != null || view.fs.totals.discount != null) && (
+                  {!khongCoTongTien && view.fs.totals && (view.fs.totals.vatPercent != null || view.fs.totals.discount != null) && (
                     <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13.5, cursor: "pointer" }}>
                       <input type="checkbox" checked={applyTotals} onChange={(e) => setApplyTotals(e.target.checked)} />
                       <span>

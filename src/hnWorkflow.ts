@@ -7,7 +7,7 @@ import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
 import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
-import { QUOTE_INCLUDE, sanitizeHnTables } from "./quoteUtils.js";
+import { QUOTE_INCLUDE, sanitizeHnTables, hnRevCua } from "./quoteUtils.js";
 import { reconcileExtraPayments, reconcileHnApprovals } from "./services/quoteService.js";
 
 const httpError = (status: number, message: string) => Object.assign(new Error(message), { status });
@@ -80,6 +80,7 @@ export async function saveHn(req: Request) {
   }
   const payload = req.body.hnTables;
   const mocClient = req.body?.baseUpdatedAt ? new Date(req.body.baseUpdatedAt) : null;
+  const revClient: string | null = typeof req.body?.baseHnRev === "string" ? req.body.baseHnRev.trim() : null;
 
   // CHỐT LẠI TRẠNG THÁI DO SERVER SỞ HỮU TRƯỚC KHI GHI.
   //
@@ -106,7 +107,25 @@ export async function saveHn(req: Request) {
     // Kiểm LẠI sau khi đã giữ khoá: giữa lần đọc đầu và đây, quản lý có thể vừa duyệt/giao lại.
     if (["submitted", "approved"].includes(tuoi.hnStatus ?? "")) throw httpError(400, "Phần HN vừa được gửi duyệt/duyệt — không sửa được nữa");
     if (tuoi.hnAssigneeId !== userId) throw httpError(403, "Phần Hà Nội vừa được giao cho người khác");
-    if (mocClient && tuoi.updatedAt && new Date(tuoi.updatedAt).getTime() !== mocClient.getTime()) {
+    // ── 409 PHẢI DỰA TRÊN BẢNG HÀ NỘI, KHÔNG DỰA TRÊN `Quote.updatedAt` ────────────────────
+    // `updatedAt` đổi khi CHỦ báo giá lưu BẤT CỨ thứ gì: đổi tên khách, sửa một dòng ở trang 3,
+    // tích một ô thanh toán. Lấy nó làm mốc thì account HN gõ nửa tiếng, chủ bấm Lưu một cái là
+    // họ ăn 409 — và màn của họ KHÔNG có bản nháp cục bộ như trình soạn báo giá, nên 409 ở đây
+    // đồng nghĩa MẤT TRẮNG. Đúng kiểu hỏng mà đợt chuyển HN lên cấp báo giá sinh ra để diệt
+    // (bản cũ nó đến từ `sheetId` đổi sau mỗi lần chủ lưu).
+    //
+    // `hnRev` chỉ đổi khi bảng HN đổi thật. Nó KHÔNG tính `paid*`/`approved*`/`paidProof`/`rid`
+    // (xem quoteUtils.vanTayHn) — mấy trường đó do server sở hữu và đã được
+    // reconcileExtraPayments/reconcileHnApprovals giữ nguyên bên dưới, nên người khác tích thanh
+    // toán KHÔNG được phép hất phần người này đang gõ.
+    //
+    // Tab mở TRƯỚC lần deploy này chỉ gửi `baseUpdatedAt`; vẫn tôn trọng nó để họ không mất việc,
+    // nhưng chỉ khi không có `baseHnRev`.
+    if (revClient) {
+      if (revClient !== hnRevCua(tuoi.hnTables)) {
+        throw httpError(409, "Bảng Hà Nội vừa được sửa ở nơi khác. Hãy chép lại phần vừa gõ, tải lại trang rồi nhập lại — đừng đóng tab trước khi chép.");
+      }
+    } else if (mocClient && tuoi.updatedAt && new Date(tuoi.updatedAt).getTime() !== mocClient.getTime()) {
       throw httpError(409, "Báo giá vừa được cập nhật ở nơi khác. Hãy chép lại phần vừa gõ, tải lại trang rồi nhập lại — đừng đóng tab trước khi chép.");
     }
 
