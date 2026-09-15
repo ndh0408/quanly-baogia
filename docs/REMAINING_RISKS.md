@@ -732,6 +732,43 @@ chép tay sẽ trôi khỏi `.gitignore`. `security-scan.sh` lọc phát hiện 
 > Chuỗi giả dùng một lần trong repo này theo quy ước `khong-phai-mat-khau-that-…`,
 > đã nằm sẵn trong allowlist; probe thì mô tả bằng lời là đủ.)
 
+## Tải lên LỚN bị từ chối SỚM → client nhận "mất mạng", không đọc được lý do (2026-09-16)
+
+**Chưa vá. Có sẵn từ lâu, không phải của bản phát hành này.** Phát hiện khi truy
+tận gốc `tests/b3-import-concurrency.test.js`.
+
+Khi một request CÓ THÂN LỚN bị từ chối ở **middleware** — tức trước khi thân được
+đọc hết — máy chủ trả lời rồi đóng socket trong lúc client **vẫn đang gửi**. Hệ
+điều hành gửi RST, và client nhận `ECONNRESET` thay vì đọc được mã trạng thái.
+
+Đo được, `POST /api/quotes/import-excel`, ba lượt song song:
+
+| Thân | Phía máy chủ | Phía client |
+|---|---|---|
+| 60 KB | 403 · `route: null` · 3ms | đọc được **403** bình thường |
+| 731 KB | 403 · `route: null` · 3ms | **`ECONNRESET` ở 27ms** — không đọc được gì |
+
+Ranh giới là **thân gửi xong trước hay sau lúc bị từ chối**, không phải hệ điều
+hành: 60 KB lọt vào bộ đệm socket nên gửi xong trước, 731 KB thì không. Trên
+Linux bộ đệm lớn hơn nên ngưỡng cao hơn — **che bớt chứ không hết**: tệp 10 MB
+(đúng trần `MAX_FILE_BYTES`) vượt mọi bộ đệm.
+
+**Vì sao đáng quan tâm:** repo viết rất kỹ các thông điệp từ chối — "Máy chủ đang
+bận đọc file Excel khác. Hãy thử lại sau vài giây.", "Quá nhiều yêu cầu, thử lại
+sau ít phút", phiên hết hạn → 401. Người nhập một tệp Excel lớn **không bao giờ
+đọc được câu nào trong số đó**: họ thấy "mất mạng". Chạm được qua `429` của
+`importLimiter`/`apiLimiter`, `401` phiên hết hạn, `403` CSRF.
+
+**Cách vá (chưa làm, cố ý):** trước khi trả lời ở đường từ chối sớm, **rút cạn**
+thân request (`req.resume()`) rồi mới `res.end()`, để client gửi xong và đọc được
+phản hồi. Phải có TRẦN (byte và thời gian) rồi `req.destroy()`, nếu không một
+thân vô hạn giữ kết nối mãi.
+
+Chưa gộp vào bản phát hành này vì nó đụng **đường phản hồi của MỌI request** trên
+một hệ đang chạy thật, trong khi triệu chứng là khó chịu chứ không mất dữ liệu
+hay thủng bảo mật. Đáng làm thành một thay đổi riêng, có bài kiểm riêng: gửi thân
+lớn kèm mã CSRF sai và khẳng định client đọc được **403**, không phải `ECONNRESET`.
+
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
 `infra/prometheus/alerts.yaml` — 19 quy tắc, 7 nhóm, mỗi cái bám một chế độ hỏng có
