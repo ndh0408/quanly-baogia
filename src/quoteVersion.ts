@@ -105,6 +105,11 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
     // Nay là Σ discount các sheet; số của TỪNG sheet nằm trong `sheets[].discount` bên dưới.
     discount: q.discount.toString(),
     total: q.total.toString(),
+    // Bảng Hà Nội cấp báo giá (từ 2026-09-15). Thiếu dòng này thì lịch sử phiên bản mất sạch phần
+    // HN — và `diffVersions` không bao giờ hiện được thay đổi giá HN. Cắt ảnh chứng từ y như
+    // extraTables của sheet (cùng hàm, để hai bản không trôi khỏi nhau).
+    hnTables: stripProofsForSnapshot((q as { hnTables?: unknown }).hnTables),
+    hnStatus: q.hnStatus,
     sheets: q.sheets.map((s) => ({
       templateCode: s.template?.code,
       templateName: s.template?.name,

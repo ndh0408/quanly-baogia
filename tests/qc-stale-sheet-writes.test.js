@@ -116,50 +116,48 @@ describe.runIf(dbAvailable)("ghi lên sheet cũ — không được mất im l�
   }, 30_000);
 
   // ── LỖI 2 ────────────────────────────────────────────────────────────────
-  it("account HN lưu bằng sheetId ĐÃ BỊ XOÁ-TẠO-LẠI → 409, KHÔNG được báo thành công suông", async () => {
-    const { id, sheetId } = await taoBaoGia("stalehn");
+  it("chủ báo giá lưu lại (sheet id đổi hết) KHÔNG còn làm account HN mất bài — phần HN nay ở cấp báo giá", async () => {
+    // HỢP ĐỒNG CŨ: bảng HN nằm trong trang, lưu phải ghép theo `sheetId`, mà lưu báo giá là
+    // XOÁ TRANG RỒI TẠO LẠI nên id chết → server trả 409 "hãy tải lại trang". Đúng nhưng khổ:
+    // account HN gõ xong mới biết, mỗi lần chủ bấm Lưu là một lần bị đuổi ra.
+    // HỢP ĐỒNG MỚI (2026-09-15): `Quote.hnTables` không dính gì tới trang, nên chuyện chủ lưu lại
+    // KHÔNG còn ảnh hưởng gì. Chống ghi đè chuyển sang khoá lạc quan thật (`baseUpdatedAt`).
+    const { id } = await taoBaoGia("stalehn");
     expect((await admin.post(`/api/quotes/${id}/hn/assign`).send({ accountId: accU.id })).status).toBe(200);
+    const sheetId = (await sheetHienTai(id)).id;
 
-    // Quản lý bấm Lưu → xoá sheet cũ, tạo lại với id MỚI. Màn hình account HN vẫn giữ id cũ.
+    const q0 = (await admin.get(`/api/quotes/${id}`)).body;
     const luu = await admin.put(`/api/quotes/${id}`).send({
+      ...q0, baseUpdatedAt: q0.updatedAt,
       title: `${TAG} stalehn v2`,
       sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
     });
     expect(luu.status, JSON.stringify(luu.body)).toBe(200);
-    const sheetMoi = await sheetHienTai(id);
-    expect(sheetMoi.id, "lưu báo giá phải sinh sheet id MỚI (đúng tiền đề của lỗi)").not.toBe(sheetId);
+    expect((await sheetHienTai(id)).id, "lưu báo giá vẫn sinh sheet id MỚI (tiền đề cũ vẫn đúng)").not.toBe(sheetId);
 
     const r = await acc.put(`/api/quotes/${id}/hn`).send({
-      hnSheets: [{ sheetId, hnTables: [{ category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 5_000_000 }] }] }],
-    });
-    expect(r.status, "trả 200 mà không ghi gì = mất trắng phần vừa gõ, kèm toast 'Đã lưu'").toBe(409);
-    expect(r.body.error).toMatch(/tải lại/i);
-  }, 30_000);
-
-  it("sheetId khớp thì vẫn lưu bình thường (không siết quá tay)", async () => {
-    const { id } = await taoBaoGia("hnok");
-    expect((await admin.post(`/api/quotes/${id}/hn/assign`).send({ accountId: accU.id })).status).toBe(200);
-    const s = await sheetHienTai(id);
-    const r = await acc.put(`/api/quotes/${id}/hn`).send({
-      hnSheets: [{ sheetId: s.id, hnTables: [{ category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 5_000_000 }] }] }],
+      hnTables: [{ name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 5_000_000 }] }],
     });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    const sau = await sheetHienTai(id);
-    expect(sau.extraTables.find((t) => t.category === "hanoi").items[0].unitPrice).toBe(5_000_000);
+    const q = await prisma.quote.findFirst({ where: { id }, select: { hnTables: true } });
+    expect(q.hnTables[0].items[0].unitPrice).toBe(5_000_000);
   }, 30_000);
 
-  it("sheetId BỊA (lớn hơn mọi sheet đang có) vẫn BỎ QUA + 200 — giữ hợp đồng cũ của endpoint", async () => {
-    // tests/hn-save-forgery.test.js chốt hành vi này: id trỏ ra ngoài báo giá thì bỏ qua, không 409.
-    // Phân biệt được với ca trên vì id sheet TĂNG DẦN: id nhỏ hơn mọi sheet hiện có = id đã CHẾT
-    // (xoá-tạo-lại), id lớn hơn = client bịa ra, chưa từng tồn tại.
-    const { id } = await taoBaoGia("hnbia");
+  it("mốc CŨ (người khác ghi xen vào) → 409, không ghi đè im lặng", async () => {
+    const { id } = await taoBaoGia("hnmoc");
     expect((await admin.post(`/api/quotes/${id}/hn/assign`).send({ accountId: accU.id })).status).toBe(200);
-    const s = await sheetHienTai(id);
+    const mocCu = (await acc.get(`/api/quotes/${id}`)).body.updatedAt;
+
+    const q0 = (await admin.get(`/api/quotes/${id}`)).body;
+    // Chỉ gửi ĐÚNG field cần đổi: payload đầy đủ kéo theo `sheets` đã nở ra (template/ids) và rơi 400.
+    const xen = await admin.put(`/api/quotes/${id}`).send({ baseUpdatedAt: q0.updatedAt, notes: "ghi xen" });
+    expect(xen.status, JSON.stringify(xen.body)).toBe(200);
+
     const r = await acc.put(`/api/quotes/${id}/hn`).send({
-      hnSheets: [{ sheetId: s.id + 999_999, hnTables: [{ category: "hanoi", name: "Lạ", templateId, items: [{ kind: "item", name: "chèn", quantity: 1, unitPrice: 1 }] }] }],
+      baseUpdatedAt: mocCu,
+      hnTables: [{ name: "Giá HN", templateId, items: [{ kind: "item", name: "x", quantity: 1, unitPrice: 1 }] }],
     });
-    expect(r.status).toBe(200);
-    const sau = await sheetHienTai(id);
-    expect((sau.extraTables || []).length, "không được ghi lẫn sang sheet khác").toBe(0);
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    expect(String(r.body.error || "")).toMatch(/chép lại/i);
   }, 30_000);
 });

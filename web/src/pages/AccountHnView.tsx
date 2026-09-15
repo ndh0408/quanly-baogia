@@ -3,18 +3,24 @@ import { api, ApiError, type EditorTemplate, type QuoteFull } from "../lib/api";
 import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
-import { GridTable } from "../components/GridTable";
-import { extraTableSum, removeTableFromList, type ExtraTable } from "../components/ExtraTables";
+import { extraTableSum } from "../components/ExtraTables";
+import { HnTables, type HnTable } from "../components/HnTables";
+import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 
-// Port "renderAccountHnView" — vai trò account_hn CHỈ điền giá Hà Nội (số nội bộ, không thấy báo giá khách).
-// Mỗi sheet báo giá → 1 khối; trong khối là các bảng HN dạng tab (tái dùng GridTable, category=hanoi).
-// Lưu (PUT /hn) + Gửi duyệt (POST /hn/submit). Sửa được khi status assigned/rejected.
+// MÀN CỦA ACCOUNT HÀ NỘI — từ 2026-09-15 là một TRÌNH SOẠN ĐẦY ĐỦ của riêng họ.
+//
+// Trước đây màn này lặp theo TRANG của chủ báo giá (`hnSheets`) và in cả tên trang: người chỉ được
+// giao điền giá lại biết báo giá có mấy trang, tên từng trang là gì. Lưu thì ghép theo `sheetId`,
+// mà chủ bấm Lưu một lần là mọi id đổi (lưu = xoá trang rồi tạo lại) → họ gõ nửa tiếng rồi nhận
+// 409 "hãy tải lại trang". Nay bảng HN ở `Quote.hnTables` (cấp báo giá): không gian riêng, phẳng,
+// tự thêm/xoá/đặt tên sheet, dán từ Excel, NHẬP tệp Excel, công thức — đúng bộ của lưới báo giá
+// chính (xem components/HnTables.tsx).
+//
+// KHÔNG hiện thông tin khách / người gửi / ngày / VAT / lời chào: những thứ đó theo báo giá gốc,
+// account HN không điền và không cần thấy. Server cũng không gửi (presentQuoteForAccountHn).
 
 let _templates: EditorTemplate[] | null = null;
 type WinDirty = Window & { __editorDirty?: boolean };
-type HnTable = ExtraTable;
-type HnSheet = { sheetId?: number | null; sheetName?: string | null; hnTables: HnTable[]; _activeHn?: number };
-const blankHnItem = (): ItemK => ({ kind: "item", name: "", detail: "", unit: "", quantity: 0, unitPrice: 0, days: null, notes: "", _k: nextK() });
 const STATUS: Record<string, string> = { assigned: "Đang làm", submitted: "Đã gửi — chờ quản lý duyệt", approved: "✓ Đã duyệt", rejected: "↩ Bị trả lại" };
 
 export function AccountHnView({ quoteId }: { quoteId: number }) {
@@ -26,20 +32,19 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
-  // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell
-  // chặn điều hướng menu (guardLeave) — giống QuoteEditor. Dọn cờ khi rời trang.
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", h);
-    return () => { window.removeEventListener("beforeunload", h); (window as WinDirty).__editorDirty = false; };
+    return () => window.removeEventListener("beforeunload", h);
   }, []);
 
   const load = useCallback(async () => {
     try {
       if (!_templates) _templates = await api.metaTemplates();
-      const q = await api.getQuote(quoteId) as QuoteFull & { hnSheets?: HnSheet[] };
-      if (!Array.isArray(q.hnSheets) || !q.hnSheets.length) q.hnSheets = [{ sheetId: null, sheetName: null, hnTables: [] }];
+      const q = await api.getQuote(quoteId);
+      if (!Array.isArray(q.hnTables)) q.hnTables = [];
       qRef.current = q; dirtyRef.current = false; (window as WinDirty).__editorDirty = false; setReady(true); redraw();
     } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải"); }
   }, [quoteId, redraw]);
@@ -49,40 +54,55 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
 
   const templates = _templates || [];
-  const q = qRef.current as QuoteFull & { hnSheets: HnSheet[]; hnStatus?: string; hnRejectNote?: string; companyName?: string };
+  const q = qRef.current as QuoteFull & { hnStatus?: string; hnRejectNote?: string; companyName?: string; updatedAt?: string };
+  const hnTables = q.hnTables as HnTable[];
   const hnStatus = q.hnStatus || "assigned";
   const editable = !q.hnStatus || ["assigned", "rejected"].includes(q.hnStatus);
+
   const tplList0 = templates.filter((x) => x.companyId === q.companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
-  const tplOf = (t: HnTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
-  const newHnTable = (tplId?: number): HnTable => ({ category: "hanoi", name: "", templateId: tplId || defTplId, groupSubtotal: true, items: [blankHnItem()], _k: nextK() });
+  const tplOf = (id?: number) => templates.find((x) => x.id === (id || defTplId)) || tplList[0];
+  const usesDaysOf = (id?: number) => !!tplOf(id)?.layout?.hasDays;
+  const addrDetailOf = (id?: number) => !!(tplOf(id)?.layout?.reserveDetail ?? tplOf(id)?.layout?.hasDetail);
+  const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? defTplId;
 
-  // Xoá 1 bảng HN trong sheet — hỏi xác nhận khi bảng đã có dữ liệu điền (không hoàn tác được).
-  // Dùng CHUNG lõi `removeTableFromList` với "Bảng nội bộ" của editor: trước đây chỗ này chép tay
-  // lại cả phép đo "bảng có dữ liệu chưa" lẫn bước dịch tab đang mở, nên nới phép đo bên kia
-  // (ghi chú/công thức/ảnh/cờ duyệt/cờ thanh toán cũng là dữ liệu) thì bảng HN vẫn xoá thẳng.
-  const removeTable = async (hs: HnSheet, ti: number) => {
-    const r = await removeTableFromList(hs.hnTables, ti, hs._activeHn || 0, (tbl) => confirmModal(
-      "Xoá bảng Hà Nội?",
-      `Bảng "${tbl.name || `Bảng ${ti + 1}`}" đã có dòng điền — xoá sẽ mất dữ liệu, không hoàn tác được. Tiếp tục?`,
-      { danger: true, confirmText: "Xoá bảng" },
-    ));
-    if (!r.removed) return;
-    hs._activeHn = r.active;
+  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never), 0);
+
+  // NẠP TỪ EXCEL — dùng CHUNG modal với trình soạn báo giá (xem trước từng tab rồi mới nạp).
+  // Bảng HN có đúng hình dạng { name, templateId, groupSubtotal, items } mà modal cần, nên truyền
+  // thẳng. Không có Discount/VAT ở đây: hai thứ đó thuộc báo giá gửi khách, không thuộc phần HN.
+  const applyImport = (payload: ImportApplyPayload) => {
+    let nAdd = 0, nBang = 0, nMoi = 0;
+    for (const p of payload.plans) {
+      const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
+      if (p.targetIndex === NEW_SHEET) {
+        hnTables.push({ _k: nextK(), templateId: p.templateId ?? defTplId, name: p.file.name, groupSubtotal: !!p.file.groupSubtotal, items: stamped });
+        nAdd += stamped.length; nBang++; nMoi++;
+        continue;
+      }
+      const target = hnTables[p.targetIndex];
+      if (!target) continue;
+      if (p.mode === "append") target.items.push(...stamped);
+      else target.items.splice(0, target.items.length, ...stamped);
+      if (p.templateId) target.templateId = p.templateId;
+      nAdd += stamped.length; nBang++;
+    }
+    for (const i of [...(payload.removeTargetIndexes || [])].sort((a, b) => b - a)) hnTables.splice(i, 1);
+    setImportOpen(false);
     mark(); redraw();
+    toast(`Đã nạp ${nAdd} dòng vào ${nBang} sheet${nMoi ? ` (${nMoi} sheet mới)` : ""} — nhớ bấm Lưu`, "success");
   };
-
-  // dọn days cũ cho bảng mẫu không có Số Ngày → Tổng HN không phồng
-  if (editable) { let cl = false; q.hnSheets.forEach((hs) => (hs.hnTables || []).forEach((t) => { if (!tplOf(t)?.layout?.hasDays) (t.items || []).forEach((it) => { if (it.days != null) { it.days = null; cl = true; } }); })); if (cl) mark(); }
-
-  const grandTotal = () => q.hnSheets.reduce((a, hs) => a + (hs.hnTables || []).reduce((b, t) => b + extraTableSum(t), 0), 0);
-  const totalSheets = () => q.hnSheets.reduce((a, hs) => a + (hs.hnTables || []).length, 0);
 
   const save = async (thenSubmit: boolean) => {
     setSaving(true);
     try {
-      await api.saveHn(q.id, q.hnSheets.map((hs) => ({ sheetId: hs.sheetId, hnTables: hs.hnTables || [] })));
+      // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
+      const goi = hnTables.map((t) => ({
+        name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
+        items: (t.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
+      }));
+      await api.saveHn(q.id, goi, q.updatedAt);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       if (thenSubmit) { await api.submitHn(q.id); toast("Đã gửi duyệt phần Hà Nội", "success"); }
       else toast("Đã lưu phần Hà Nội", "success");
@@ -100,55 +120,19 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
         <span className={`ahn-status ahn-${hnStatus}`}>{STATUS[hnStatus] || "Đang làm"}</span>
       </div>
       {q.hnStatus === "rejected" && q.hnRejectNote && <div className="ahn-reject">↩ <strong>Quản lý trả lại:</strong> {q.hnRejectNote}</div>}
-      <div className="muted" style={{ margin: "8px 0 4px" }}>Bạn chỉ điền <strong>giá Hà Nội</strong> (số nội bộ — KHÔNG xuất cho khách, không thấy phần báo giá khác).</div>
+      <div className="muted" style={{ margin: "8px 0 4px" }}>Bạn chỉ điền <strong>giá Hà Nội</strong> (số nội bộ — KHÔNG xuất cho khách, không thấy phần báo giá khác). Sheet ở đây là <strong>của riêng bạn</strong>: tự thêm, tự đặt tên, dán hoặc nạp từ Excel.</div>
 
-      {q.hnSheets.map((hs, si) => {
-        if (!Array.isArray(hs.hnTables) || !hs.hnTables.length) hs.hnTables = [newHnTable()];
-        hs.hnTables.forEach((t) => { if (t._k == null) t._k = nextK(); (t.items || []).forEach((it) => { if (it._k == null) it._k = nextK(); }); });
-        let active = Number.isInteger(hs._activeHn) ? (hs._activeHn as number) : 0;
-        if (active >= hs.hnTables.length) active = hs.hnTables.length - 1; if (active < 0) active = 0;
-        hs._activeHn = active;
-        const t = hs.hnTables[active];
-        if (!t.templateId) t.templateId = defTplId;
-        const tpl = tplOf(t);
-        const usesDays = !!tpl?.layout?.hasDays, showDetail = !!tpl?.layout?.hasDetail, numberSubs = !!tpl?.layout?.numberSubsections;
-        const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);   // giữ chỗ địa chỉ ô (xem QuoteEditor)
-        return (
-          <div key={hs.sheetId ?? si} className="extra-cat-group" style={{ marginTop: 10 }}>
-            <div className="extra-cat-grouphead">
-              <span className="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
-              {q.hnSheets.length > 1 && <span className="muted" style={{ fontSize: 12 }}>{hs.sheetName || `Sheet #${si + 1}`}</span>}
-              {editable && <button type="button" className="btn btn-sm" onClick={() => { const cur = hs.hnTables[hs._activeHn || 0]; hs.hnTables.push(newHnTable(cur?.templateId)); hs._activeHn = hs.hnTables.length - 1; mark(); redraw(); }}>+ Thêm bảng</button>}
-              <span className="muted" style={{ fontSize: 11.5 }}>{hs.hnTables.length} bảng</span>
-            </div>
-            <div className="sheet-tabs extra-sheet-tabs" role="tablist" aria-label="Các bảng giá Hà Nội">
-              {hs.hnTables.map((tt, ti) => (
-                <div key={tt._k ?? ti} className={`sheet-tab ${ti === active ? "active" : ""}`} role="tab" aria-selected={ti === active} tabIndex={0}
-                  onClick={() => { hs._activeHn = ti; redraw(); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); hs._activeHn = ti; redraw(); } }}>
-                  <span>{tt.name || `Bảng ${ti + 1}`}</span>
-                  {editable && hs.hnTables.length > 1 && <span className="rm-tab" role="button" tabIndex={0} aria-label="Xoá bảng này" title="Xoá bảng này"
-                    onClick={(e) => { e.stopPropagation(); void removeTable(hs, ti); }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); void removeTable(hs, ti); } }}>✕</span>}
-                </div>
-              ))}
-            </div>
-            <div className="extra-table">
-              <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
-                <input className="extra-name" value={t.name || ""} placeholder="Tên bảng (tuỳ chọn)" aria-label="Tên bảng Hà Nội" disabled={!editable} style={{ minWidth: 180 }} onChange={(e) => { t.name = e.target.value; mark(); redraw(); }} />
-                {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} onChange={(e) => { t.templateId = Number(e.target.value); mark(); redraw(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
-              </div>
-              <GridTable key={`hn-${si}-${active}-${t.templateId}-${t._k}`} items={t.items} usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs}
-                editable={editable} internalNote={false} groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; mark(); redraw(); }} onChange={() => { mark(); redraw(); }} />
-              <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>Tổng HN: <span style={{ color: "var(--danger)" }}>{M.fmtMoney(extraTableSum(t))}</span></div>
-            </div>
-          </div>
-        );
-      })}
-
-      {totalSheets() > 1 && (
-        <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {totalSheets()} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(grandTotal())}</span></div>
+      {editable && (
+        <div style={{ margin: "6px 0 2px" }}>
+          <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (xem trước rồi mới nạp)" onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
+        </div>
       )}
+
+      <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
+        editable={editable} canApprove={false} canPay={false} quoteId={q.id}
+        onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; }} />
+
+      <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>
 
       <div className="ahn-actions" style={{ marginTop: 14 }}>
         {editable ? <>
@@ -156,6 +140,19 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
           <button className="btn btn-sm btn-primary" onClick={submit} disabled={saving}>✓ Gửi duyệt</button>
         </> : <span className="muted">{hnStatus === "submitted" ? "Đã gửi, chờ quản lý duyệt — không sửa được lúc này." : hnStatus === "approved" ? "Phần Hà Nội đã được duyệt." : ""}</span>}
       </div>
+
+      {importOpen && (
+        <ImportExcelModal
+          quoteId={q.id}
+          sheets={hnTables as never}
+          templates={templates}
+          usesDaysOf={usesDaysOf}
+          addrDetailOf={addrDetailOf}
+          newSheetTemplateId={newSheetTemplateId}
+          onApply={applyImport}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </div>
   );
 }

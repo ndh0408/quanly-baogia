@@ -7,7 +7,7 @@ import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
 import { quoteScopeWhere, readScopeWhere } from "../permissions.js";
-import { bangNoiBoTheoSheet } from "./quoteService.js";
+import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "./quoteService.js";
 
 /**
  * Tuần tự hoá khối xuất — MỘT lần stringify duy nhất cho cả đường xuất, và là chỗ DUY NHẤT xử lý
@@ -99,16 +99,19 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     // viết bản thứ hai. Hai bản chép của quy tắc cắt ấy chắc chắn sẽ trôi khỏi nhau.
     phamViBaoGia === null ? Promise.resolve([] as any[]) : prisma.quote.findMany({
       where: { AND: [{ createdById: userId }, phamViBaoGia] },
-      omit: { customerLogo: true },
+      // `hnTables` (bảng Hà Nội cấp báo giá, từ 2026-09-15) cũng chứa `paidProof` → cắt cùng cách:
+      // omit ở đây, rồi nạp lại bản đã cắt ảnh qua câu SQL dùng chung.
+      omit: { customerLogo: true, hnTables: true },
       include: { sheets: { omit: { extraTables: true }, include: { items: { omit: { images: true } } } } },
       take: 1000,
     }).then(async (qs: any[]) => {
       if (!qs.length) return qs;
-      const bang = await bangNoiBoTheoSheet(qs.map((q) => q.id));
+      const [bang, hn] = await Promise.all([bangNoiBoTheoSheet(qs.map((q) => q.id)), bangHnTheoBaoGia(qs.map((q) => q.id))]);
       const theoSheet = new Map<number, any>();
       for (const r of bang) theoSheet.set(r.sheetId, r.tables);
       return qs.map((q) => ({
         ...q,
+        hnTables: hn.get(q.id) ?? [],
         sheets: (q.sheets || []).map((sh: any) => ({ ...sh, extraTables: theoSheet.get(sh.id) ?? [] })),
       }));
     }),

@@ -196,6 +196,9 @@ export const processors = {
       const { quoteId, requestedBy } = job.data;
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
+        // Cot jsonb hnTables (bang Ha Noi cap bao gia) cung KHONG vao file gui khach va cung
+        // chua paidProof base64 - omit ngang hang include, cung ly le voi extraTables cua sheet.
+        omit: { hnTables: true },
         include: {
           company: true,
           customer: { select: { code: true } },   // tenFileXuat cần mã KH
@@ -245,6 +248,9 @@ export const processors = {
       const { quoteId, requestedBy } = job.data;
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
+        // Cot jsonb hnTables (bang Ha Noi cap bao gia) cung KHONG vao file gui khach va cung
+        // chua paidProof base64 - omit ngang hang include, cung ly le voi extraTables cua sheet.
+        omit: { hnTables: true },
         include: {
           company: true,
           customer: { select: { code: true } },   // tenFileXuat cần mã KH

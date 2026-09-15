@@ -129,7 +129,7 @@ export type QuoteFull = {
   companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;
   greeting?: string; notes?: string; toCompany?: string; toContact?: string; toEmail?: string; toPhone?: string; toAddress?: string;
   fromContact?: string; fromTitle?: string; fromPhone?: string; fromAddress?: string; createdById?: number;
-  members?: QuoteMemberLite[]; sheets?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
+  members?: QuoteMemberLite[]; sheets?: unknown[]; hnTables?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
 };
 export type QuoteVersion = { id: string; versionNo: number; total: number; createdAt: string; createdById?: number | null };
 
@@ -515,6 +515,11 @@ export const api = {
     req<{ ok: boolean; rid: string; paid: boolean; updatedAt?: string }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/pay`, { method: "POST", body: JSON.stringify(paidProof !== undefined ? { paid, paidProof } : { paid }) }),
   getExtraProof: (quoteId: number, sheetId: number, rid: string) =>
     req<{ paidProof: string | null }>(`/quotes/${quoteId}/extra/${sheetId}/${rid}/proof`),
+  // Bảng HÀ NỘI ở cấp BÁO GIÁ (không thuộc trang nào) nên đường định vị không có sheetId.
+  markHnPay: (quoteId: number, rid: string, paid: boolean, paidProof?: string) =>
+    req<{ ok: boolean; rid: string; paid: boolean; updatedAt?: string }>(`/quotes/${quoteId}/hn/${rid}/pay`, { method: "POST", body: JSON.stringify(paidProof !== undefined ? { paid, paidProof } : { paid }) }),
+  getHnProof: (quoteId: number, rid: string) =>
+    req<{ paidProof: string | null }>(`/quotes/${quoteId}/hn/${rid}/proof`),
   // Thông báo (increment 6).
   listNotifications: () => req<{ data: Notif[] }>("/notifications?size=50"),
   markNotifRead: (id: number) => req<unknown>(`/notifications/${id}/read`, { method: "POST" }),
@@ -570,6 +575,8 @@ export const api = {
   hnAccounts: () => req<{ data: { id: number; displayName?: string; username?: string }[] }>("/quotes/hn/accounts"),
   hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),
   hnReview: (id: number, decision: "approve" | "reject", note?: string) => req<unknown>(`/quotes/${id}/hn/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
-  saveHn: (id: number, hnSheets: unknown[]) => req<unknown>(`/quotes/${id}/hn`, { method: "PUT", body: JSON.stringify({ hnSheets }) }),
+  // Bảng HN nay PHẲNG (cấp báo giá) + mốc khoá lạc quan thay cho phép suy đoán "trang đã chết".
+  saveHn: (id: number, hnTables: unknown[], baseUpdatedAt?: string) =>
+    req<unknown>(`/quotes/${id}/hn`, { method: "PUT", body: JSON.stringify({ hnTables, ...(baseUpdatedAt ? { baseUpdatedAt } : {}) }) }),
   submitHn: (id: number) => req<unknown>(`/quotes/${id}/hn/submit`, { method: "POST" }),
 };

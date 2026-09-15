@@ -27,7 +27,7 @@ giữ ranh giới là một **phép kiểm chạy được**.
 
 Và ranh giới thật sự của repo này **đang được giữ**, chỉ là chưa ai khoá lại: 19/19 service không
 cầm `Response`/`NextFunction`, không service nào import ngược lên `routes/`, không vòng phụ thuộc
-nào giữa các service. Đó không phải may — đó là ranh giới ADR 0001 khai, và nó đã sống qua 137
+nào giữa các service. Đó không phải may — đó là ranh giới ADR 0001 khai, và nó đã sống qua 140
 endpoint.
 
 ## Bảy câu của Phụ lục §19
@@ -40,7 +40,7 @@ migrate**. Áp cho chính đề xuất "đổi sang `src/modules/`":
 | **Why?** | Cho khớp sơ đồ trong §2. Không có yêu cầu nghiệp vụ hay vận hành nào đứng sau. |
 | **Vấn đề ĐO ĐƯỢC nào đang tồn tại?** | **Không có.** Không sự cố nào truy về "sai chỗ đặt file". Bốn luật ranh giới đo hôm nay đều PASS. |
 | **Vì sao cấu trúc hiện tại không giải quyết được?** | Nó ĐANG giải quyết. Cái thiếu là chốt chặn, và chốt chặn không cần đổi cây thư mục. |
-| **Chi phí migration** | Đụng gần như mọi file trong `src/` (đường dẫn import), 176 file test, `endpoint-inventory.mjs` (bộ phân tích bám mẫu `src/routes/*.routes.ts`), `lint-staged.config.mjs`, Dockerfile, và mọi chú thích trỏ đường dẫn. Một diff khổng lồ **không đổi một hành vi nào** — tức không bài test nào chứng minh được nó đúng, chỉ có "xanh" chứng minh nó chưa sai. |
+| **Chi phí migration** | Đụng gần như mọi file trong `src/` (đường dẫn import), 203 file test, `endpoint-inventory.mjs` (bộ phân tích bám mẫu `src/routes/*.routes.ts`), `lint-staged.config.mjs`, Dockerfile, và mọi chú thích trỏ đường dẫn. Một diff khổng lồ **không đổi một hành vi nào** — tức không bài test nào chứng minh được nó đúng, chỉ có "xanh" chứng minh nó chưa sai. |
 | **Chi phí vận hành** | Mọi tài liệu, ADR, chú thích và nhật ký điều tra sự cố cũ trỏ vào đường dẫn không còn tồn tại. `git log --follow` gãy ở chỗ đổi tên. |
 | **Đường lùi** | Revert một commit khổng lồ — về lý thuyết được, thực tế là xung đột với mọi nhánh đang mở. |
 | **Lợi ích mong đợi** | Trực quan hơn cho người mới. Thật, nhưng nhỏ: repo có 19 service với tên tự mô tả (`quoteService`, `personnelService`…). |

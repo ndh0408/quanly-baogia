@@ -7,7 +7,7 @@ Ai làm được gì, ở trạng thái nào, và cái gì chặn cái gì.
 > ngày 2026-06-22. Trong hệ hiện tại, "duyệt" là quyết định của **khách hàng**,
 > và nó nằm trên một trục hoàn toàn khác với `Quote.status`.
 
-Đối chiếu quyền: [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) (ma trận 137
+Đối chiếu quyền: [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) (ma trận 140
 endpoint). Nguồn sự thật của tài liệu này: `src/permissions.ts`,
 `src/quoteUtils.ts`, `src/services/quoteService.ts`, `src/hnWorkflow.ts`.
 Sơ đồ: [architecture/diagrams/quote-lifecycle.md](../architecture/diagrams/quote-lifecycle.md).

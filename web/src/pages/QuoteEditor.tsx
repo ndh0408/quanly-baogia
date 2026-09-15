@@ -6,6 +6,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
+import { HnTables, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
@@ -342,6 +343,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const coScope = (c: QuoteScope) => editable && phamVi.includes(c);
   const suaMain = coScope("main");
   const laPhu = !laChu && !!(q.members || []).some((m) => m.id === me.id);
+  // Bảng Hà Nội cấp báo giá. Mutate TẠI CHỖ như mọi state khác của editor (qRef giữ object).
+  if (!Array.isArray(q.hnTables)) q.hnTables = [];
+  const hnTables = q.hnTables as HnTable[];
+  // Giá HN đã chốt: chỉ người duyệt phần HN mới sửa được (mirror chotHnTables ở server).
+  const hnKhoa = ["submitted", "approved"].includes(String(q.hnStatus || "")) && !hasPerm("quote:hn:manage");
   const coSuaGiDo = editable && phamVi.length > 0;
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
@@ -395,6 +401,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           };
         }),
       };
+      // Bảng Hà Nội: dọn `_k` (khoá React nội bộ) y như hạng mục của lưới chính. Gửi kèm cả khi
+      // rỗng — người dùng xoá hết bảng HN thì server phải ghi lại mảng rỗng, không phải bỏ qua.
+      payload.hnTables = hnTables.map((x) => ({
+        ...x, _k: undefined,
+        items: (x.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
+      })).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
       delete payload._new; delete payload._activeSheet;
       // Khóa lạc quan: gửi mốc updatedAt đã tải → server chặn ghi đè nếu người khác vừa lưu (409).
       // Sau khi lưu, q được refresh từ `saved` (bên dưới) nên base luôn mới cho lần lưu kế.
@@ -785,6 +797,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
         <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
 
+        {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
+            Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
+            Khoá khi phần HN đã gửi duyệt/đã duyệt và người đang mở không phải người duyệt —
+            mirror chốt `chotHnTables` ở server, để không ai gõ xong mới nhận 409. */}
+        <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
+          editable={coScope("hanoi") && !hnKhoa}
+          canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")}
+          quoteId={isNew ? undefined : q.id} onMarkDirty={mark}
+          onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
+        {hnKhoa && <div className="muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
+
         <div className="actions">
           <div className="dock-slot" ref={setODock} />
           {coSuaGiDo && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
@@ -859,7 +882,7 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   );
 }
 
-const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng" };
+const FIELD_VN: Record<string, string> = { title: "Tiêu đề", toCompany: "Khách hàng", vatPercent: "VAT %", discount: "Discount (tổng các sheet)", notes: "Ghi chú", greeting: "Lời chào", sheets: "Nội dung sheet", quoteDate: "Ngày báo giá", showTotals: "Hiện tổng", hnTables: "Bảng Báo Giá Hà Nội", hnStatus: "Trạng thái phần Hà Nội" };
 const diffVal = (v: unknown) => { if (v == null) return "—"; if (typeof v === "object") { const s = JSON.stringify(v); return s.length > 80 ? s.slice(0, 80) + "…" : s; } return String(v); };
 function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versions: QuoteVersion[]; onClose: () => void }) {
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app

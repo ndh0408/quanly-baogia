@@ -26,8 +26,9 @@ const SO_BAO_GIA = 12;
 // ~300KB mỗi ảnh — cỡ thật của một ảnh chụp chứng từ chuyển khoản đã base64.
 const ANH = `data:image/png;base64,${"A".repeat(300_000)}`;
 
+// Bảng Hà Nội ở CẤP BÁO GIÁ từ 2026-09-15 — không còn khoá `category`.
 const bangHN = (ten) => ({
-  category: "hanoi", name: ten, templateId: null, groupSubtotal: false,
+  name: ten, templateId: null, groupSubtotal: false,
   items: [
     { kind: "section", name: "Nhóm A", quantity: 0, unitPrice: 0 },
     { kind: "item", rid: `${ten}-1`, name: "Thuê xe", quantity: 2, unitPrice: 1000, days: null, paid: true, paidAt: new Date().toISOString(), paidById: null, paidProof: ANH },
@@ -54,7 +55,8 @@ describe.runIf(dbAvailable)("Danh sách báo giá cho vai trò nội bộ — kh
       await prisma.quote.create({ data: {
         quoteNumber: `${TAG}-${i}`, title: `${TAG} bg ${i}`, searchText: TAG, toCompany: "Khách",
         companyId, fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh", quoteDate: new Date(), createdById: userId,
-        sheets: { create: [{ templateId, order: 1, name: "Trang 1", extraTables: [bangHN("A"), bangHN("B")] }] },
+        hnTables: [bangHN("A"), bangHN("B")],
+        sheets: { create: [{ templateId, order: 1, name: "Trang 1", extraTables: [] }] },
       } });
     }
   });

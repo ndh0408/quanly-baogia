@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 138 endpoint
+# Ma trận phân quyền — toàn bộ 140 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -72,6 +72,8 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
 | POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
 | GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
+| POST | `/:id/hn/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** phạm vi `hanoi` (account phụ) | hàng bảng HN nằm ở `Quote.hnTables` nên KHÔNG có `:sheetId` · `FOR UPDATE` khoá hàng Quote | $ | `quote-hn-cap-bao-gia` | OK |
+| GET | `/:id/hn/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` | ghi audit `quote.internal.proof-view` (cờ `hn`) | **PII** | `quote-hn-cap-bao-gia` | OK |
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
 | POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
@@ -269,6 +271,34 @@ oracle phân loại tài khoản) · `/api/auth/change-password` (xoay định d
 | **account phụ** (được thêm vào 1 báo giá) | xem đủ · sửa đúng vùng được tick | theo quyền riêng | theo quyền riêng | theo quyền riêng | theo quyền riêng | **403** (lọc `createdById`) | theo quyền riêng |
 
 Sáu ô **in đậm** ở hai hàng `hr` / `accountant` chính là những chỗ trước bản vá trả **200 kèm dữ liệu**.
+
+### Phần "Báo Giá Hà Nội" — từ 2026-09-15 ở CẤP BÁO GIÁ
+
+`Quote.hnTables` (migration `20260915140000`), KHÔNG còn nằm trong `QuoteSheet.extraTables` với
+`category:"hanoi"`. Ba lý do, cả ba là lỗi thật đã xảy ra:
+
+| Chỗ lưu cũ (theo TRANG) | Hệ quả |
+|---|---|
+| Màn account HN lặp theo trang của chủ, trả kèm `sheetName`/`sheetId` | Người chỉ được giao ĐIỀN GIÁ biết luôn báo giá có mấy trang và tên từng trang |
+| Lưu phải ghép theo `sheetId`, mà lưu báo giá là **xoá trang rồi tạo lại** | Chủ bấm Lưu một lần là account HN gõ xong nhận 409 "hãy tải lại trang" |
+| Bảng HN sống trong hàng `QuoteSheet` | Chủ xoá một trang là bảng HN trên trang đó **chết theo, im lặng** |
+
+Hợp đồng mới:
+
+- Account HN có **không gian riêng, phẳng**: tự thêm/xoá/đặt tên sheet, dán và **nhập từ Excel**,
+  công thức + thanh công thức (`fxBar`) — cùng bộ lưới với trình soạn báo giá
+  (`web/src/components/HnTables.tsx`, dùng chung cho cả màn của chủ).
+- **Không thấy** thông tin khách / người gửi / ngày / VAT / lời chào: những thứ đó theo báo giá gốc.
+- Chống ghi đè chuyển từ phép suy đoán "trang đã chết" sang **khoá lạc quan thật**: client gửi
+  `baseUpdatedAt`, lệch thì 409 kèm lời nhắc chép lại phần vừa gõ.
+- Giá HN **đã gửi duyệt/đã duyệt** thì đường lưu báo giá thường trả **409** (trước đây lặng lẽ lấy
+  lại bản CSDL rồi trả 200) — trừ người có `quote:hn:manage`.
+- Payload hình dạng **cũ** (`hnSheets`) bị **400** kèm hướng dẫn tải lại, KHÔNG hiểu thành "xoá hết
+  bảng" — nếu không, một tab cũ bấm Lưu là mất sạch phần Hà Nội.
+- Hàng bảng HN có đường thanh toán riêng vì không còn `:sheetId`:
+  `POST /:id/hn/:rid/pay` và `GET /:id/hn/:rid/proof`.
+- Trang **Quản lý dự án**: tổng HN là một số cho cả báo giá, **dồn vào dòng trang đầu**, các dòng
+  sau để 0 — cộng cả cột vẫn ra đúng tổng, không nhân lên theo số trang.
 
 ### "Account phụ": phạm vi theo CẶP (người, báo giá)
 

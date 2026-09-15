@@ -43,8 +43,9 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
 
   /** Đọc lại bảng "hanoi" THẲNG TỪ CSDL — không qua presentQuote (nó lược paidProof). */
   const hanoiTuDB = async () => {
-    const s = await prisma.quoteSheet.findFirst({ where: { id: sheetId }, select: { extraTables: true } });
-    return (s.extraTables || []).filter((t) => t.category === "hanoi");
+    // Từ 2026-09-15 bảng Hà Nội ở `Quote.hnTables` (cấp báo giá), không nằm trong trang nào.
+    const q = await prisma.quote.findFirst({ where: { id: quoteId }, select: { hnTables: true } });
+    return Array.isArray(q?.hnTables) ? q.hnTables : [];
   };
 
   /** Dựng lại báo giá về trạng thái gốc trước mỗi kịch bản (r1 chưa trả, chưa duyệt). */
@@ -54,16 +55,21 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
       data: {
         extraTables: [
           { category: "hcm", name: "Chi phí HCM", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hcm1", name: "Thuê kho", quantity: 1, unitPrice: 1000, approved: false, paid: false, paidAt: null, paidById: null, paidProof: null }] },
-          { category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "r1", name: "Thuê xe HN", quantity: 1, unitPrice: 2000, approved: false, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null }] },
         ],
       },
     });
-    await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "assigned", hnAssigneeId: accU.id } });
+    await prisma.quote.update({
+      where: { id: quoteId },
+      data: {
+        hnStatus: "assigned", hnAssigneeId: accU.id,
+        hnTables: [{ name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "r1", name: "Thuê xe HN", quantity: 1, unitPrice: 2000, approved: false, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null }] }],
+      },
+    });
   };
 
   const guiHn = (items) =>
     acc.put(`/api/quotes/${quoteId}/hn`).send({
-      hnSheets: [{ sheetId, hnTables: [{ category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items }] }],
+      hnTables: [{ name: "Giá HN", templateId, groupSubtotal: true, items }],
     });
 
   beforeAll(async () => {
@@ -135,11 +141,9 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
   it("hàng ĐÃ trả trước đó KHÔNG bị account HN xoá cờ khi lưu", async () => {
     await datLaiBaoGia();
     // Kế toán (quyền internal:pay) đã đánh dấu r1 đã trả — ghi thẳng vào CSDL cho gọn.
-    const tables = await prisma.quoteSheet.findFirst({ where: { id: sheetId }, select: { extraTables: true } });
-    const daTra = tables.extraTables.map((t) =>
-      t.category !== "hanoi" ? t : { ...t, items: t.items.map((it) => ({ ...it, paid: true, paidAt: "2026-08-01T00:00:00Z", paidById: adminU.id, paidProof: "data:image/png;base64,BBBB" })) }
-    );
-    await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: daTra } });
+    const q0 = await prisma.quote.findFirst({ where: { id: quoteId }, select: { hnTables: true } });
+    const daTra = (q0.hnTables || []).map((t) => ({ ...t, items: t.items.map((it) => ({ ...it, paid: true, paidAt: "2026-08-01T00:00:00Z", paidById: adminU.id, paidProof: "data:image/png;base64,BBBB" })) }));
+    await prisma.quote.update({ where: { id: quoteId }, data: { hnTables: daTra } });
 
     // Account sửa tên hàng rồi Lưu, gửi paid:false (client cũ không biết cờ này).
     const r = await guiHn([{ kind: "item", rid: "r1", name: "Thuê xe HN (sửa)", quantity: 1, unitPrice: 2000, paid: false }]);
@@ -179,10 +183,10 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
     await datLaiBaoGia();
     const bang = (n) => ({ category: "hanoi", name: "B", templateId, items: Array.from({ length: n }, (_, i) => ({ kind: "item", name: `d${i}`, quantity: 1, unitPrice: 1 })) });
 
-    const nhieuBang = await acc.put(`/api/quotes/${quoteId}/hn`).send({ hnSheets: [{ sheetId, hnTables: Array.from({ length: 21 }, () => bang(1)) }] });
-    expect(nhieuBang.status, "21 bảng > cap 20").toBe(400);
+    const nhieuBang = await acc.put(`/api/quotes/${quoteId}/hn`).send({ hnTables: Array.from({ length: 61 }, () => bang(1)) });
+    expect(nhieuBang.status, "61 bảng > trần 60 (MAX_HN_TABLES)").toBe(400);
 
-    const nhieuDong = await acc.put(`/api/quotes/${quoteId}/hn`).send({ hnSheets: [{ sheetId, hnTables: [bang(1001)] }] });
+    const nhieuDong = await acc.put(`/api/quotes/${quoteId}/hn`).send({ hnTables: [bang(1001)] });
     expect(nhieuDong.status, "1001 dòng > cap 1000").toBe(400);
 
     const anhKhungLo = await guiHn([{ kind: "item", rid: "r1", name: "x".repeat(2001), quantity: 1, unitPrice: 1 }]);
@@ -194,14 +198,18 @@ describe.runIf(dbAvailable)("PUT /quotes/:id/hn — account HN không giả mạ
     expect(items[0].name).toBe("Thuê xe HN");
   });
 
-  it("hnSheets trỏ sang sheet của báo giá KHÁC → bỏ qua, không ghi lẫn", async () => {
+  it("tab chạy bản CŨ (gửi `hnSheets`) → 400 kèm lời nhắc, TUYỆT ĐỐI không xoá trắng phần HN", async () => {
+    // Ca cũ ở đây là "hnSheets trỏ sang sheet của báo giá KHÁC → bỏ qua". Từ 2026-09-15 payload
+    // không còn sheetId; cái nguy hiểm mới là tab cũ gửi hình dạng cũ, và nếu server hiểu thành
+    // "mảng rỗng" thì một cú Lưu vô tình xoá sạch phần Hà Nội.
     await datLaiBaoGia();
     const r = await acc.put(`/api/quotes/${quoteId}/hn`).send({
-      hnSheets: [{ sheetId: sheetId + 999_999, hnTables: [{ category: "hanoi", name: "Lạ", templateId, items: [{ kind: "item", name: "chèn", quantity: 1, unitPrice: 1 }] }] }],
+      hnSheets: [{ sheetId, hnTables: [{ name: "Lạ", templateId, items: [{ kind: "item", name: "chèn", quantity: 1, unitPrice: 1 }] }] }],
     });
-    expect(r.status).toBe(200);
-    const items = (await hanoiTuDB())[0].items;
-    expect(items).toHaveLength(1);
-    expect(items[0].name).toBe("Thuê xe HN");
+    expect(r.status, JSON.stringify(r.body)).toBe(400);
+    expect(String(r.body.error || "")).toMatch(/tải lại trang/i);
+    const con = await hanoiTuDB();
+    expect(con, "phần Hà Nội phải còn nguyên").toHaveLength(1);
+    expect(con[0].items[0].rid).toBe("r1");
   });
 });

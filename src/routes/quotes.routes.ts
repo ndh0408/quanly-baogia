@@ -26,6 +26,8 @@ import {
   setSheetCustomerDecision,
   updateSheetInvoice,
   markExtraTableRowPayment,
+  markHnRowPayment,
+  getHnRowProof,
   getExtraTableRowProof,
   markConverted,
   markLost,
@@ -171,6 +173,24 @@ router.get(
   "/:id/extra/:sheetId/:rid/proof",
   validate({ params: z.object({ id: z.coerce.number().int().positive(), sheetId: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
   asyncHandler(async (req: Request, res: Response) => res.json(await getExtraTableRowProof(req)))
+);
+
+// THANH TOÁN 1 HÀNG bảng HÀ NỘI. Bảng HN ở cấp BÁO GIÁ (không thuộc trang nào) nên đường định vị
+// không có `:sheetId` — xem markHnRowPayment. Đặt TRƯỚC /:id.
+router.post(
+  "/:id/hn/:rid/pay",
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
+    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
+  }),
+  requirePermission(P.QUOTE_INTERNAL_PAY),
+  asyncHandler(async (req: Request, res: Response) => res.json(await markHnRowPayment(req)))
+);
+// Ảnh chứng từ 1 hàng Hà Nội (on-demand) — quyền check trong service (internal:view|pay).
+router.get(
+  "/:id/hn/:rid/proof",
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await getHnRowProof(req)))
 );
 
 // Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.

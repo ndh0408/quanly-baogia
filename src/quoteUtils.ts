@@ -143,6 +143,10 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  // Bảng Hà Nội cấp báo giá: đường lưu đọc bản CSDL để gác "giá HN đã chốt thì không ai ghi đè"
+  // (xem chotHnTables trong quoteService). Cột này KHÔNG chứa ảnh nặng như QuoteItem.images —
+  // ảnh chứng từ chỉ có khi kế toán tích thanh toán, và reconcileExtraPayments cần đúng bản CSDL đó.
+  hnTables: true,
   members: { select: { userId: true, scopes: true } },
   sheets: {
     orderBy: { order: "asc" },
@@ -162,15 +166,6 @@ export const QUOTE_UPDATE_STATE_SELECT = {
 // qua API/devtools). Chỉ gồm: định danh dự án + trạng thái luồng HN + các bảng nội bộ loại
 // "hanoi" (kèm sheetId để map khi lưu).
 function presentQuoteForAccountHn(q: any) {
-  const hnSheets = (q.sheets || []).map((s: any) => ({
-    sheetId: s.id,
-    sheetName: s.name || null,
-    order: s.order,
-    // stripExtraProofs: account Hà Nội KHÔNG có quote:internal:pay/internal:view, mà ảnh chứng từ
-    // (base64) VẪN nằm được trên hàng bảng "hanoi" — route /pay khớp theo `rid`, không lọc category.
-    // Hai presenter kia đều bọc; thiếu ở đây là vừa lộ chứng từ vừa phình payload mỗi lần mở báo giá.
-    hnTables: stripExtraProofs((Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi")),
-  }));
   return {
     id: q.id,
     quoteNumber: q.quoteNumber,
@@ -184,7 +179,14 @@ function presentQuoteForAccountHn(q: any) {
     hnSubmittedAt: q.hnSubmittedAt || null,
     hnReviewedAt: q.hnReviewedAt || null,
     hnRejectNote: q.hnRejectNote || null,
-    hnSheets,
+    // Mốc cho khoá lạc quan của saveHn — thay cho phép suy đoán "sheet đã chết" đã bỏ.
+    updatedAt: q.updatedAt,
+    // KHÔNG còn `hnSheets`: trước đây màn này lặp theo TRANG của chủ và kèm cả `sheetName` —
+    // người chỉ được giao điền giá lại biết báo giá có mấy trang và tên từng trang. Nay là không
+    // gian riêng của họ, phẳng, không dính gì tới trang của chủ.
+    // stripExtraProofs: account HN không có quote:internal:pay/internal:view mà ảnh chứng từ
+    // (base64) vẫn nằm được trên hàng — lộ ảnh uỷ nhiệm chi và phình payload mỗi lần mở.
+    hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []),
     _accountHnView: true,
   };
 }
@@ -220,6 +222,8 @@ function presentQuoteForInternal(q: any) {
       sheetId: s.id, sheetName: s.name || null, order: s.order,
       tables: stripExtraProofs(Array.isArray(s.extraTables) ? s.extraTables : []),
     })),
+    // Bảng Hà Nội nay ở CẤP BÁO GIÁ, không thuộc trang nào (migration 20260915140000).
+    hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []),
     _internalView: true,
   };
 }
@@ -243,6 +247,8 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false, inte
     // lại ở đây vì sẽ bị spread cuối ghi đè (giá trị cuối = totals đã tính lại, y hệt hành vi cũ).
     customerCode: q.customer?.code ?? null,
     customerName: q.customer?.name ?? null,
+    // Bảng Hà Nội: cấp báo giá, KHÔNG thuộc trang nào. Cắt ảnh chứng từ y như extraTables.
+    ...(q.hnTables !== undefined ? { hnTables: stripExtraProofs(Array.isArray(q.hnTables) ? q.hnTables : []) } : {}),
     // Hàng QuoteMember (khoá ghép quoteId+userId, KHÔNG có cột `id`) → dẹt về hình dạng client đã
     // dùng từ trước, cộng `scopes`. Bỏ bước này là `m.id` ở web/src thành undefined: account phụ
     // mất nút Lưu mà không một lỗi nào hiện ra.
@@ -285,7 +291,12 @@ export const QUOTE_LIST_SELECT = {
 export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }: { hnOnly?: boolean; internalOnly?: boolean } = {}) {
   // 🔒 quote:internal:view: danh sách CHỈ để chọn dự án quản thanh toán nội bộ — KHÔNG lộ giá/khách báo giá chính.
   if (internalOnly) {
-    const allItems = (q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).flatMap((t: any) => t?.items || []));
+    // Bảng Hà Nội nay ở CẤP BÁO GIÁ (Quote.hnTables) — vẫn là bảng NỘI BỘ, nên người xem nội bộ
+    // phải đếm cả nó. Bỏ sót là số hàng/số đã-trả trên màn của họ tụt xuống, im lặng.
+    const allItems = [
+      ...(q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).flatMap((t: any) => t?.items || [])),
+      ...(Array.isArray(q.hnTables) ? q.hnTables : []).flatMap((t: any) => t?.items || []),
+    ];
     const rows = allItems.filter((it: any) => it && it.kind !== "section" && it.kind !== "subsection" && it.kind !== "info");
     return {
       id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
@@ -302,7 +313,7 @@ export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }
   if (hnOnly) {
     // Số SHEET HN + TỔNG HN = đúng phần account TỰ LÀM (gộp các bảng "hanoi" của mọi sheet).
     // Đây là số NỘI BỘ của chính account → hiện cho họ OK; vẫn KHÔNG lộ tiền/khách báo giá chính.
-    const hanoi = (q.sheets || []).flatMap((s: any) => (Array.isArray(s.extraTables) ? s.extraTables : []).filter((t: any) => t && t.category === "hanoi"));
+    const hanoi = Array.isArray(q.hnTables) ? q.hnTables : [];
     return {
       id: q.id, quoteNumber: q.quoteNumber, projectCode: q.projectCode, projectVersion: q.projectVersion,
       title: q.title, status: q.status, quoteDate: q.quoteDate, createdAt: q.createdAt,
@@ -342,11 +353,21 @@ export async function templatesBelongToCompany(sheets: any[], companyId: number)
 
 // Làm sạch "bảng nội bộ" (extraTables) → JSON thuần cho cột Json của QuoteSheet.
 // KHÔNG tạo QuoteItem nên KHÔNG vào Excel/tổng báo giá. Trả undefined nếu rỗng.
-export function sanitizeExtraTables(tables: any) {
+/**
+ * Chuẩn hoá bảng nội bộ trước khi ghi.
+ *
+ * `hanoi` KHÔNG còn nằm ở đây từ 2026-09-15: bảng Hà Nội chuyển lên `Quote.hnTables` (migration
+ * 20260915140000). Giữ "hanoi" trong tập hợp lệ của đường TRANG là để ngỏ một cửa ghi thứ hai —
+ * một tab cũ còn mở vẫn gửi bảng hanoi kèm sheets và nó sẽ nằm lại trong trang, vô hình với màn
+ * account Hà Nội, và cộng THÊM một lần nữa vào tổng HN. Lọc bỏ ở đây là chốt duy nhất chặn được.
+ *
+ * `boCategory` dùng cho đường HN: cả cột `Quote.hnTables` đã là "hanoi" nên khoá đó thừa.
+ */
+export function sanitizeExtraTables(tables: any, { valid = ["hcm", "khach"], boCategory = false }: { valid?: string[]; boCategory?: boolean } = {}) {
   if (!Array.isArray(tables) || !tables.length) return undefined;
-  const VALID = new Set(["hcm", "hanoi", "khach"]);
-  const out = tables.filter((t: any) => t && VALID.has(t.category)).map((t: any) => ({
-    category: t.category,
+  const VALID = new Set(valid);
+  const out = tables.filter((t: any) => t && (boCategory || VALID.has(t.category))).map((t: any) => ({
+    ...(boCategory ? {} : { category: t.category }),
     name: t.name ? String(t.name).replace(/[\r\n]+/g, " ").trim().slice(0, 120) : null,
     templateId: t.templateId != null ? Number(t.templateId) : null,   // mẫu cột (GN/CLF có/không ngày)
     groupSubtotal: !!t.groupSubtotal,
@@ -385,6 +406,11 @@ export function sanitizeExtraTables(tables: any) {
 
 // Tổng tiền 1 bảng nội bộ (cùng quy tắc với item báo giá; section/info không cộng).
 // CHI PHÍ HCM + PHÍ KHÁCH HÀNG: CHỈ cộng hàng ĐÃ DUYỆT (approved). Hà Nội: cộng tất cả (luồng riêng).
+/** Bảng HÀ NỘI cấp báo giá (`Quote.hnTables`): cùng phép chuẩn hoá, nhưng không có `category`. */
+export function sanitizeHnTables(tables: any) {
+  return sanitizeExtraTables(tables, { boCategory: true }) ?? [];
+}
+
 export function extraTableSum(t: any) {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc: number, it: any) => {

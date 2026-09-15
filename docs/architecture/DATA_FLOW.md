@@ -37,22 +37,26 @@ Bảng đầy đủ (chặn gì · vì sao ở đúng chỗ đó) nằm ở
 Ở đây chỉ nhắc bốn chặng có thể **kết thúc** request trước khi nó chạm tới route:
 
 ```
-helmet → compression → requestId → pino-http → decompressBody → express.json
-  → session → metrics → bearerAuth → enforceActiveUser → csrfGuard → rate limit
+helmet → compression → requestId → pino-http → rate limit → decompressBody
+  → express.json → session → metrics → bearerAuth → enforceActiveUser → csrfGuard
   → ROUTES → notFound → static → SPA → errorHandler
 ```
 
-* **`decompressBody`** (`src/decompressBody.ts`) — chạy **trước** xác thực, nên
-  trần của nó ăn theo route chứ không dùng chung: nhóm `/api/quotes` là 16 MB,
-  mọi đường khác 2 MB. Dùng chung 16 MB nghĩa là người **chưa đăng nhập** bơm
-  được 16 MB vào bất kỳ endpoint nào.
+* **`apiLimiter`** (rate limit) — mặc định 120 request/phút (`RATE_LIMIT_API_PER_MIN`), dùng
+  kho đếm Redis khi có `REDIS_URL` để nhiều tiến trình chia chung một trần. **Từ 2026-09-08** đứng
+  **trước** `decompressBody`/`express.json`, không phải sau `csrfGuard` như trước: nó khoá theo
+  `req.ip`, không đọc session/body/cookie, nên an toàn để chạy sớm — và chạy sớm mới có tác dụng,
+  vì hai middleware ngay sau giải nén gzip rồi `JSON.parse` tới 16 MB **đồng bộ trên event loop**;
+  đứng sau chúng nghĩa là người **chưa đăng nhập** đã tiêu CPU/heap xong việc đó trước khi có bất
+  kỳ trần nào chặn.
+* **`decompressBody`** (`src/decompressBody.ts`) — chạy **trước** body parser vì nó thay thế luồng
+  thân, và **trước** xác thực nên trần của nó ăn theo route chứ không dùng chung: nhóm
+  `/api/quotes` là 16 MB, mọi đường khác 2 MB.
 * **`enforceActiveUser`** (`src/middleware.ts`) — nạp lại vai trò + tập quyền +
   trạng thái khoá **từ CSDL mỗi request**. Đây là lý do admin khoá một tài khoản
   thì có hiệu lực ở request KẾ TIẾP của người đó, không phải sau khi cookie hết hạn.
 * **`csrfGuard`** (`src/app.ts`) — miễn cho client Bearer JWT (trình duyệt không
   tự gắn token), nên phải đứng **sau** `bearerAuth`.
-* **`apiLimiter`** — mặc định 120 request/phút (`RATE_LIMIT_API_PER_MIN`), dùng
-  kho đếm Redis khi có `REDIS_URL` để nhiều tiến trình chia chung một trần.
 
 ### 1.3 Route → service → Prisma
 
@@ -76,7 +80,7 @@ Hai lớp phân quyền, và **không lớp nào thay được lớp kia**:
 | Năng lực | `requirePermission(...)` ở route | "Tài khoản này được phép làm hành động này không?" |
 | Phạm vi bản ghi | `canOnQuote` / `canScoped` / `quoteScopeWhereOrThrow` trong service | "Được phép làm nó **trên bản ghi cụ thể này** không?" |
 
-Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 138 endpoint:
+Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 140 endpoint:
 [ROLES_PERMISSIONS.md](../product/ROLES_PERMISSIONS.md).
 
 ### 1.4 Prisma → Postgres

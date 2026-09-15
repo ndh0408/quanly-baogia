@@ -5,8 +5,10 @@
 // thêm vào là sửa được TOÀN BỘ báo giá — mọi hạng mục, mọi đơn giá, thông tin khách, và cả dòng
 // "Người gửi" in ra Excel. Chủ dự án cần giao TỪNG PHẦN ("người này chỉ điền bảng Hà Nội") mà chỗ
 // đựng điều đó không tồn tại. Nay `QuoteMember.scopes` giữ tập con của 4 vùng:
-//   main (báo giá chính + thông tin khách) · hcm · hanoi · khach   ← ba khoá cuối TRÙNG TÊN
-//   `QuoteSheet.extraTables[].category`, cố ý, để không phải giữ một bảng ánh xạ thứ hai.
+//   main (báo giá chính + thông tin khách) · hcm · hanoi · khach
+// Hai khoá `hcm`/`khach` trùng tên `QuoteSheet.extraTables[].category` (bảng nội bộ theo TRANG);
+// còn `hanoi` từ 2026-09-15 trỏ tới cột RIÊNG `Quote.hnTables` ở cấp báo giá — cùng một tên vùng,
+// hai chỗ lưu khác nhau, nên đường ghi cũng khác (xem chotHnTables / ghiVungNoiBoDuocGiao).
 //
 // ── HAI LỚP, HAI KIỂU LỖI KHÁC NHAU ─────────────────────────────────────────
 // 1. Có vùng "main" nhưng thiếu vài bảng nội bộ → payload VẪN xoá-tạo-lại sheet như thường, nên
@@ -89,7 +91,9 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
   const datPhamVi = async (agent, members) =>
     agent.put(`/api/quotes/${quoteId}/members`).send({ members, memberIds: members.map((m) => m.userId) });
   const docBaoGia = async () => (await (await dangNhap(chuU)).get(`/api/quotes/${quoteId}`)).body;
-  const bang = (q, cat) => (q.sheets[0].extraTables || []).find((t) => t.category === cat);
+  const bang = (q, cat) => (cat === "hanoi"
+    ? (q.hnTables || [])[0]
+    : (q.sheets[0].extraTables || []).find((t) => t.category === cat));
 
   beforeAll(async () => {
     const { createApp } = await import("../src/app.js");
@@ -117,13 +121,19 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
         items: [{ kind: "item", name: "Màn LED GỐC", quantity: 1, unitPrice: 1000, order: 0 }],
         extraTables: [
           { category: "hcm", name: "HCM gốc", items: [{ kind: "item", name: "Thuê xe", quantity: 1, unitPrice: 500 }] },
-          { category: "hanoi", name: "HN gốc", items: [{ kind: "item", name: "Nhân công HN", quantity: 1, unitPrice: 700 }] },
           { category: "khach", name: "Khách gốc", items: [{ kind: "item", name: "Phí ship", quantity: 1, unitPrice: 300 }] },
         ],
       }],
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     quoteId = r.body.id;
+    // Bảng Hà Nội ở CẤP BÁO GIÁ nên gieo qua đường lưu, không nhét vào sheet được nữa.
+    const q0 = (await chu.get(`/api/quotes/${quoteId}`)).body;
+    const seed = await chu.put(`/api/quotes/${quoteId}`).send({
+      ...q0, baseUpdatedAt: q0.updatedAt,
+      hnTables: [{ name: "HN gốc", items: [{ kind: "item", name: "Nhân công HN", quantity: 1, unitPrice: 700 }] }],
+    });
+    expect(seed.status, JSON.stringify(seed.body)).toBe(200);
   });
 
   afterAll(async () => {
@@ -165,7 +175,9 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
     expect(r.status).toBe(200);
     expect(r.body.toCompany).toBe("Khách GỐC");
     expect(r.body.sheets[0].items[0].name).toBe("Màn LED GỐC");
-    expect((r.body.sheets[0].extraTables || []).map((t) => t.category).sort()).toEqual(["hanoi", "hcm", "khach"]);
+    // Bảng theo TRANG nay chỉ còn hai loại; "hanoi" ở cột riêng cấp báo giá.
+    expect((r.body.sheets[0].extraTables || []).map((t) => t.category).sort()).toEqual(["hcm", "khach"]);
+    expect(Array.isArray(r.body.hnTables) && r.body.hnTables.length, "vẫn thấy đủ phần Hà Nội").toBeTruthy();
     expect((await phu.get("/api/quotes")).body.data.some((q) => q.id === quoteId)).toBe(true);
   });
 
@@ -176,9 +188,11 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
     sheet.items[0].name = "Màn LED BỊ SỬA";
     sheet.items[0].unitPrice = 999999;
     for (const t of sheet.extraTables) t.name = `${t.category} BỊ SỬA`;
+    const hnSua = JSON.parse(JSON.stringify(truoc.hnTables || []));
+    hnSua[0].name = "hanoi BỊ SỬA";
     const r = await phu.put(`/api/quotes/${quoteId}`).send({
       ...truoc, toCompany: "Khách BỊ SỬA", fromContact: "Người gửi BỊ SỬA", vatPercent: 99,
-      sheets: [sheet], baseUpdatedAt: truoc.updatedAt,
+      sheets: [sheet], hnTables: hnSua, baseUpdatedAt: truoc.updatedAt,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
 
@@ -237,11 +251,13 @@ describe.runIf(dbAvailable)("PUT /api/quotes/:id/members + phạm vi khi account
 
     const truoc = await docBaoGia();
     const tenHnCu = bang(truoc, "hanoi").name;
-    const sheet = JSON.parse(JSON.stringify(truoc.sheets[0]));
-    bang({ sheets: [sheet] }, "hanoi").name = "HN GHI ĐÈ SAU KHI DUYỆT";
+    const hnSua = JSON.parse(JSON.stringify(truoc.hnTables || []));
+    hnSua[0].name = "HN GHI ĐÈ SAU KHI DUYỆT";
     const phu = await dangNhap(phuU);
-    const r = await phu.put(`/api/quotes/${quoteId}`).send({ ...truoc, sheets: [sheet], baseUpdatedAt: truoc.updatedAt });
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const r = await phu.put(`/api/quotes/${quoteId}`).send({ ...truoc, hnTables: hnSua, baseUpdatedAt: truoc.updatedAt });
+    // Nay chặn THẲNG bằng 409 thay vì âm thầm lấy lại bản CSDL: người ta vừa gõ, im lặng bỏ đi là
+    // kiểu mất dữ liệu tệ nhất (xem chotHnTables).
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
     expect(bang(await docBaoGia(), "hanoi").name, "giá HN đã duyệt phải giữ nguyên").toBe(tenHnCu);
 
     await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: null } });

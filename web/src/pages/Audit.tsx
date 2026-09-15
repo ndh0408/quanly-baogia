@@ -20,7 +20,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["quote.convert", "Chốt báo giá (thắng)"], ["quote.lost", "Đánh dấu không chốt"], ["quote.duplicate", "Nhân bản báo giá"],
     ["quote.reopened", "Mở lại để sửa"], ["quote.export", "Xuất Excel báo giá"], ["quote.export.pdf", "Xuất PDF báo giá"],
     ["quote.invoice", "Cập nhật hóa đơn / thanh toán"], ["quote.members.update", "Cập nhật thành viên phụ trách"],
-    ["quote.hn.assign", "Giao phần Hà Nội"], ["quote.hn.submit", "Gửi duyệt phần Hà Nội"], ["quote.hn.review", "Duyệt / trả phần Hà Nội"],
+    ["quote.hn.save", "Lưu phần Hà Nội"], ["quote.hn.assign", "Giao phần Hà Nội"], ["quote.hn.submit", "Gửi duyệt phần Hà Nội"], ["quote.hn.review", "Duyệt / trả phần Hà Nội"],
     ["quote.import.preview", "Xem trước nhập từ Excel"], ["quote.import.rejected", "Từ chối tệp Excel nhập vào"],
     ["quote.sheet.customerDecision", "Khách duyệt / từ chối sheet"],
     ["quote.internal.proof-view", "Xem ảnh ủy nhiệm chi (bảng nội bộ)"],

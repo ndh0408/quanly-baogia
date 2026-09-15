@@ -1,39 +1,51 @@
-// TRẦN TRANG CỦA `PUT /api/quotes/:id/hn` PHẢI ĐI THEO TRẦN CỦA ĐƯỜNG LƯU — chốt hồi quy.
+// TRẦN SỐ BẢNG CỦA `PUT /api/quotes/:id/hn` — chốt hồi quy.
 //
-// ── LỖI ─────────────────────────────────────────────────────────────────────
-// `HnSaveSchema` (src/validators.ts) từng viết tay `.max(50, "Tối đa 50 trang")`, trong khi đường
-// lưu báo giá cho `MAX_SAVE_SHEETS = 60`. Hai con số ở hai nơi thì sớm muộn cũng lệch, và lệch
-// theo chiều này thì mất chức năng:
+// ── LỖI CŨ (giữ lại lý lẽ, vì bẫy y hệt vẫn còn) ────────────────────────────
+// `HnSaveSchema` từng viết tay `.max(50, "Tối đa 50 trang")` trong khi đường lưu báo giá cho
+// `MAX_SAVE_SHEETS = 60`. Hai con số ở hai nơi thì sớm muộn cũng lệch, và lệch theo chiều đó thì
+// MẤT CHỨC NĂNG: sale lưu báo giá 55 trang → account Hà Nội mở đúng báo giá ấy, điền phần HN,
+// bấm Lưu và nhận 400 "Tối đa 50 trang". Họ không có cách nào tự thoát vì không được sửa số trang.
 //
-//   sale dựng và lưu một báo giá 55 trang  → OK (60 ≥ 55)
-//   account Hà Nội mở đúng báo giá đó, điền phần HN của mình, bấm Lưu → 400 "Tối đa 50 trang"
-//
-// Người đó không có cách nào tự thoát: họ KHÔNG được sửa số trang của báo giá (chỉ có
-// `quote:hn:fill`), và client gửi lên đủ mọi trang chứ không chỉ trang có bảng Hà Nội. Nghĩa là
-// mọi báo giá 51–60 trang đều KHÔNG điền được phần Hà Nội — đúng cỡ báo giá mà trần 60 sinh ra
-// để phục vụ.
-//
-// Bài này ghim hai điều: trần đúng bằng MAX_SAVE_SHEETS, và nó thật sự từ chối ở trang thứ 61.
+// ── ĐỔI HÌNH DẠNG 2026-09-15 ────────────────────────────────────────────────
+// Bảng Hà Nội lên CẤP BÁO GIÁ (`Quote.hnTables`) nên payload không còn theo trang: `hnSheets[]`
+// thành `hnTables[]` phẳng, và trần đếm SỐ BẢNG chứ không phải số trang. Trần cũ theo trang là 20
+// bảng/trang × 60 trang; gộp về một mảng mà giữ 20 là HẠ trần thật — đó là lý do `MAX_HN_TABLES`
+// bám vào `MAX_SAVE_SHEETS` chứ không phải một con số viết tay thứ hai.
 import { describe, it, expect } from "vitest";
-import { HnSaveSchema, MAX_SAVE_SHEETS } from "../src/validators.js";
+import { HnSaveSchema, MAX_HN_TABLES, MAX_SAVE_SHEETS } from "../src/validators.js";
 
-const trang = (n) => ({ hnSheets: Array.from({ length: n }, (_, i) => ({ sheetId: i + 1, hnTables: [] })) });
+const bang = (n) => ({ hnTables: Array.from({ length: n }, (_, i) => ({ name: `Bảng ${i + 1}`, items: [] })) });
 
-describe("HnSaveSchema — trần số trang", () => {
-  it(`nhận đủ ${MAX_SAVE_SHEETS} trang (bằng trần của đường lưu)`, () => {
-    const r = HnSaveSchema.safeParse(trang(MAX_SAVE_SHEETS));
+describe("HnSaveSchema — trần số bảng Hà Nội", () => {
+  it("trần bám vào trần của đường lưu, KHÔNG phải con số viết tay thứ hai", () => {
+    expect(MAX_HN_TABLES).toBe(MAX_SAVE_SHEETS);
+  });
+
+  it(`nhận đủ ${MAX_HN_TABLES} bảng`, () => {
+    const r = HnSaveSchema.safeParse(bang(MAX_HN_TABLES));
     expect(r.success, r.success ? "" : JSON.stringify(r.error.issues)).toBe(true);
-    expect(r.data.hnSheets).toHaveLength(MAX_SAVE_SHEETS);
+    expect(r.data.hnTables).toHaveLength(MAX_HN_TABLES);
   });
 
-  it("trang thứ 61 bị từ chối (trần vẫn còn hiệu lực, không phải bỏ trần)", () => {
-    const r = HnSaveSchema.safeParse(trang(MAX_SAVE_SHEETS + 1));
+  it("bảng thứ 61 bị từ chối (trần vẫn còn hiệu lực, không phải bỏ trần)", () => {
+    const r = HnSaveSchema.safeParse(bang(MAX_HN_TABLES + 1));
     expect(r.success).toBe(false);
-    expect(JSON.stringify(r.error.issues)).toMatch(new RegExp(`Tối đa ${MAX_SAVE_SHEETS} trang`));
+    expect(JSON.stringify(r.error.issues)).toMatch(new RegExp(`Tối đa ${MAX_HN_TABLES} bảng`));
   });
 
-  it("KHÔNG được thấp hơn trần lưu — đó chính là lỗi cũ", () => {
-    // 51 trang là con số nằm giữa trần cũ (50) và trần thật (60): bài này đỏ nếu ai đó hạ lại.
-    expect(HnSaveSchema.safeParse(trang(51)).success).toBe(true);
+  it("hình dạng CŨ `hnSheets` → `hnTables` VẮNG MẶT (để saveHn 400, không ghi rỗng)", () => {
+    // Zod v4 loại khoá lạ. Nếu schema `.default([])` thì payload cũ parse ra mảng rỗng và server
+    // ghi đè = XOÁ TRẮNG phần Hà Nội, im lặng. `optional()` giữ nguyên "vắng mặt" để saveHn phân
+    // biệt được và trả 400 kèm lời nhắc chép lại rồi tải lại trang.
+    const r = HnSaveSchema.safeParse({ hnSheets: [{ sheetId: 1, hnTables: [{ name: "x", items: [] }] }] });
+    expect(r.success).toBe(true);
+    expect(r.data.hnTables, "phải VẮNG MẶT, không phải []").toBeUndefined();
+    expect(r.data.hnSheets).toBeUndefined();
+  });
+
+  it("nhận mốc khoá lạc quan `baseUpdatedAt` (thay cho phép suy đoán 'trang đã chết')", () => {
+    const r = HnSaveSchema.safeParse({ baseUpdatedAt: "2026-09-15T07:00:00.000Z", hnTables: [] });
+    expect(r.success).toBe(true);
+    expect(r.data.baseUpdatedAt).toBe("2026-09-15T07:00:00.000Z");
   });
 });

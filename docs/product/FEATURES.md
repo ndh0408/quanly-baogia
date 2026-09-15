@@ -6,7 +6,7 @@ lại stack, cách dựng máy, bảng lệnh npm hay cây thư mục — nhữn
 - [README.md](../../README.md) — công nghệ và hai bài toán khó của sản phẩm
 - [docs/development/SETUP.md](../development/SETUP.md) — dựng môi trường, bảng npm script
 - [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — hệ thống ghép lại thế nào
-- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (138 endpoint)
+- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (140 endpoint)
 
 QuanLY là **công cụ nội bộ** của Gia Nguyễn / Colorfull. Không có khách hàng ngoài,
 không có gói cước, không có self-service đăng ký: tài khoản do admin mời.
@@ -96,7 +96,7 @@ VAT và Tổng cộng cập nhật ngay khi gõ. **Cùng một công thức ti�
 > và `pdf.ts` **khai lại công thức tại chỗ** vì runtime chạy trên `src/` nên đường
 > dẫn `../shared/quote-math.js` không resolve được trong container. Nghĩa là sửa
 > công thức phải sửa **cả bốn nơi**; chốt chặn là bộ **vector vàng**
-> `web/src/lib/quoteMath.test.ts` (18 bài, chạy bằng `npm run web:test`).
+> `web/src/lib/quoteMath.test.ts` (22 bài, chạy bằng `npm run web:test`).
 
 ### 1.4 Bên gửi / bên nhận
 
@@ -171,14 +171,14 @@ Cố ý không đẻ thêm đường ghi nào.
 
 | Mẫu (code) | Công ty | File | Đặc điểm |
 |---|---|---|---|
-| GN không ngày (`marico_decor`) | Gia Nguyễn | `templates/GN_KhongNgay.xlsx` | header tiếng Việt một dòng, không có cột Số ngày |
+| GN không ngày (`marico_decor`) | Gia Nguyễn | `templates/Marico_Decor.xlsx` | header tiếng Việt một dòng, không có cột Số ngày |
 | GN có ngày (`unibenfood`) | Gia Nguyễn | `templates/Unibenfood.xlsx` | có cột **Số ngày** |
-| GN Banner (`gn_banner`) | Gia Nguyễn | `templates/GN_KhongNgay.xlsx` | cùng file GN không ngày, **khác cách đánh STT** (nhóm con đánh 1,2,3; mục dưới không đánh số) |
+| GN Banner (`gn_banner`) | Gia Nguyễn | `templates/Marico_Decor.xlsx` | cùng file GN không ngày, **khác cách đánh STT** (nhóm con đánh 1,2,3; mục dưới không đánh số) |
 | CLF không ngày (`clofull_decor`) | Colorfull | `templates/CLF_KhongNgay.xlsx` | có cột Chi Tiết; khối "Kính gửi" + letterhead người gửi ở F1 |
 
 Ánh xạ bên gửi / bên nhận vào ô Excel:
 
-- **GN không ngày** — khách C2/C3, Tel C4, Địa chỉ C5; người gửi F3 (tên _ chức danh), SĐT F4, địa chỉ F5.
+- **GN không ngày** — khách: công ty C2, người liên hệ C3 (mẫu này không có ô riêng cho Tel/Địa chỉ khách); người gửi F3 (tên _ chức danh _ SĐT gộp một dòng), địa chỉ F4.
 - **GN có ngày** — khách C1/C2, Tel C3, Địa chỉ C4; người gửi E2, SĐT E3, địa chỉ E4.
 - **CLF** — khối "Kính gửi" (F3): công ty + người liên hệ + ĐT + Đ/c + email; letterhead (F1): tên công ty + địa chỉ + tên · chức danh · SĐT.
 
@@ -369,7 +369,7 @@ ghi đè ở hai mức:
 
 Cả hai được resolve lại **mỗi request** từ CSDL. Vì vậy **đừng đọc bảng vai trò như
 một danh sách cố định** — nguồn sự thật là
-[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 138 endpoint ở
+[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 140 endpoint ở
 [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md), có
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI.
 

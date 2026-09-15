@@ -9,7 +9,9 @@ import { confirmModal, toast, useEscClose } from "../lib/ui";
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
 // nhưng KHÔNG xuất Excel. Tổng từng loại đổ riêng sang "Quản lý dự án" (HCM/Phí-KH chỉ cộng hàng ĐÃ DUYỆT).
 
-const EXTRA_CATS: [string, string][] = [["hcm", "Chi Phí HCM"], ["hanoi", "Báo Giá Hà Nội"], ["khach", "Phí Khách Hàng"]];
+// "Báo Giá Hà Nội" KHÔNG còn ở đây từ 2026-09-15: nó lên cấp BÁO GIÁ (Quote.hnTables) và có màn
+// riêng — xem components/HnTables.tsx. Bảng theo TRANG nay chỉ còn hai loại.
+const EXTRA_CATS: [string, string][] = [["hcm", "Chi Phí HCM"], ["khach", "Phí Khách Hàng"]];
 
 export type ExtraTable = { category: string; templateId?: number; name?: string; groupSubtotal?: boolean; items: ItemK[]; _k?: number };
 type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; templateId?: number };
@@ -222,8 +224,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
 }
 
 // Dialog tích "đã thanh toán" + up ẢNH chứng từ cho 1 HÀNG nội bộ (gọi API /pay — không lưu cả báo giá).
-export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuoteTouched }: {
-  quoteId: number; sheetId: number; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
+export function ExtraPayDialog({ quoteId, sheetId, hn, item, onClose, onSaved, onQuoteTouched }: {
+  /** `hn` = hàng thuộc bảng Hà Nội (cấp báo giá, không có sheetId) → gọi cặp route /hn/:rid/*. */
+  quoteId: number; sheetId?: number | null; hn?: boolean; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
   onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const it = item as Record<string, unknown>;
@@ -233,7 +236,7 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuo
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const [saving, setSaving] = useState(false);
   const rid = String(it.rid);
-  useEffect(() => { if (it.hasPaidProof) api.getExtraProof(quoteId, sheetId, rid).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, rid, it.hasPaidProof]);
+  useEffect(() => { if (it.hasPaidProof) (hn ? api.getHnProof(quoteId, rid) : api.getExtraProof(quoteId, sheetId as number, rid)).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, hn, rid, it.hasPaidProof]);
   const onFile = async (f: File | undefined) => {
     if (!f) return;
     if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) { toast("Chỉ nhận ảnh PNG/JPG/WEBP", "error"); return; }
@@ -242,7 +245,9 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuo
   const save = async () => {
     setSaving(true);
     try {
-      const r = await api.markExtraPay(quoteId, sheetId, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
+      const r = hn
+        ? await api.markHnPay(quoteId, rid, paid, paid && proof ? proof : (paid ? undefined : ""))
+        : await api.markExtraPay(quoteId, sheetId as number, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
       // Route /pay BUMP `Quote.updatedAt` để chống lost-update chéo. Người tích ô này thường ĐANG MỞ
       // chính báo giá đó, mà editor gửi `baseUpdatedAt` đã tải lúc Lưu — không nhận mốc mới thì lần
       // Lưu kế tiếp ăn 409 "Báo giá vừa được người khác cập nhật" do CHÍNH HỌ, và phần vừa gõ có
