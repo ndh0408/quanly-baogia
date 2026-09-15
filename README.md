@@ -90,6 +90,16 @@ The same app grew two more modules the business needed:
 - **Project tracking** — closed quotations laid out by sheet/invoice, with
   internal cost grids (HCM cost / Hà Nội quote / customer fees) that are
   deliberately *excluded* from customer-facing Excel output.
+- **Per-quote collaborators** — the owner can add a colleague to *one*
+  quotation (`QuoteMember`) with a scope per area: `main` · `hcm` · `hanoi` ·
+  `khach`. The quotation stays entirely the owner's: a collaborator may export
+  but never duplicate it or close the deal, and an empty scope list means
+  read-only (deny by default — `src/permissions.ts`).
+- **Hà Nội pricing is its own workspace**, not a slice of the owner's sheets.
+  It lives in `Quote.hnTables` at *quotation* level, so the Hà Nội account gets
+  the full grid — add/rename/delete sheets, paste from Excel, import a file,
+  formulas — without ever seeing how many sheets the owner has or what they are
+  called. Customer details are inherited, never re-entered.
 
 Quotation lifecycle is intentionally not an internal approval chain — the only
 approval that matters is the customer's: `draft → converted` (they agreed) or

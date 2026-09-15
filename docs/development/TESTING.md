@@ -126,6 +126,37 @@ trình con `node dist/server.js` bind cổng mặc định `3000` của chính n
 `3999`. Trong CI thì không thấy, vì khối `env:` của bước đã export sẵn — đúng hình dạng
 của một cổng chỉ chạy được ở một nơi duy nhất.
 
+## Tầng migration — `bash scripts/db/migration-rehearsal.sh`
+
+Tầng này trả lời đúng một câu hỏi mà không tầng nào khác trả lời được: **dữ liệu
+production hiện có, sau khi chạy migration của bản phát hành, còn đúng không?**
+
+`prisma migrate deploy` trên CSDL **rỗng** chỉ chứng minh các migration chạy được
+cạnh nhau. Bốn bước của buổi diễn tập: đưa CSDL về đúng trạng thái production
+(chỉ migration có ở `master`) → nạp dữ liệu ở schema **cũ**
+(`migration-rehearsal-seed.mjs`) → nâng cấp bằng toàn bộ migration của bản phát
+hành → đối chiếu (`migration-rehearsal-check.mjs`).
+
+**Thêm migration đụng dữ liệu thì phải thêm cả seed lẫn check.** Tới 2026-09-16
+bộ seed chỉ có `User` + `PersonnelRecord`, nghĩa là buổi diễn tập cho một
+migration đụng **báo giá** chạy trên CSDL không có báo giá nào rồi báo ĐẠT — nó
+chứng minh DDL chạy được, không chứng minh dữ liệu chuyển đúng.
+
+Hai quy tắc rút ra, đều đã trả giá:
+
+- **Đối chiếu SỐ TIỀN, không phải số hàng.** Chép sót một hàng giá 0 đồng vẫn qua
+  được phép đếm. Check hiện tại khẳng định tiền Hà Nội khớp **tới từng đồng**
+  (`16605000`), và thêm: `category` đã bị cắt, bảng `hcm` không bị đụng, bản cũ
+  **còn nguyên** (expand-only), `QuoteMember` được **đủ 4 phạm vi**,
+  `_QuoteMembers` đã biến mất.
+- **Tự kiểm bộ check.** Sửa hỏng một con số trong CSDL diễn tập rồi chạy lại: phải
+  ra `✖` và **thoát mã 1**. Một bộ check không bao giờ đỏ là một bộ check không
+  tồn tại — cùng bài học với cổng `[S1]` gitleaks
+  ([REMAINING_RISKS.md](../REMAINING_RISKS.md)).
+
+Script chạy **trên VM dev**, dùng CSDL riêng `quanly_migtest`; không đụng dev
+chính, không đụng production.
+
 ## Tầng component React — jsdom, và nó **OPT-IN TỪNG TỆP**
 
 > **Đọc mục này TRƯỚC khi viết bài kiểm mới trong `web/`.** Người viết sau rất dễ tưởng
@@ -277,9 +308,9 @@ Nói thẳng:
   jsdom không giải mã ảnh nên promise treo), `onCopyCut`, chọn vùng bằng chuột, và
   mọi thứ cần layout thật. `ui-smoke` cũng vẫn không bấm Ctrl+Z lần nào. Danh
   sách đầy đủ: [../REMAINING_RISKS.md](../REMAINING_RISKS.md).
-- **Ba component còn lại chưa có bài kiểm mức component nào** —
+- **Bốn component còn lại chưa có bài kiểm mức component nào** —
   `web/src/components/ExtraTables.tsx`, `web/src/components/Shell.tsx`,
-  `web/src/components/ImportExcelModal.tsx`.
+  `web/src/components/ImportExcelModal.tsx`, `web/src/components/VenuePicker.tsx`.
 - **Chưa có test hiệu năng/tải.** Số trong `docs/archive/performance/` là lịch sử.
 - **Chưa có test khôi phục trong CI.** Diễn tập khôi phục chạy trên host
   production theo systemd timer, không chạy ở CI.

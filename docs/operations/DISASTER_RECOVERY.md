@@ -119,8 +119,8 @@ node dist/tools/verifyIntegrity.js --pii
 chưa xoay sẽ ghi một dòng `warn` — đó là cách biết còn tồn đọng. Chỉ khi bước 4 đạt mới **huỷ** khoá
 cũ khỏi kho bí mật.
 
-> `docs/operations/INCIDENT_RESPONSE.md` (mục "Khi nào leo thang") vẫn ghi **"Đừng xoay
-> `PII_ENC_KEY`"** — câu đó có từ thời chưa có `--rotate` và cần được thay bằng con trỏ về đây.
+> [`docs/operations/INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) (mục "Khi nào leo thang") trỏ về
+> đúng quy trình bốn bước này khi cần xoay `PII_ENC_KEY` lúc xử lý sự cố.
 
 ### Sao lưu kho object
 
@@ -147,8 +147,8 @@ Bốn sự thật đo được, và chỗ đọc lại được từng cái:
 
 | # | Sự thật | Đọc ở đâu |
 |---|---|---|
-| 1 | Kho object DEV chạy MinIO **một-node-một-ổ** (`server /data`, đúng một volume `quanly-miniodata`). Theo tài liệu MinIO, chế độ này **không hỗ trợ** versioning / object-lock / replication — không có gì để bật.¹ | `docker-compose.yml`, service `minio` |
-| 2 | **Production không dùng compose có MinIO**: `docker-compose.prod.yml` không có service `minio` nào. Provider kho object do `/etc/quanly-backup.env` quyết định và **repo không biết nó là gì** → phải ĐO lúc chạy, đó là toàn bộ lý do bước `[0/5]` tồn tại. | `docker-compose.prod.yml` |
+| 1 | Kho object DEV/staging/production đều chạy MinIO **một-node-một-ổ** (`server /data`, đúng một volume `quanly-miniodata`). Theo tài liệu MinIO, chế độ này **không hỗ trợ** versioning / object-lock / replication — không có gì để bật.¹ | `docker-compose.yml`, `docker-compose.staging.yml`, `docker-compose.prod.yml`, service `minio` |
+| 2 | Từ 2026-09-08, **production cũng chạy compose có MinIO** (trước đó thì không): `docker-compose.prod.yml` có service `minio`, cùng cấu hình một-node-một-ổ như dev. `/etc/quanly-backup.env` đặt `S3_ENDPOINT=http://minio:9000` trỏ đúng vào container đó qua mạng `internal` — provider không còn là ẩn số đọc từ repo được nữa, nhưng bước `[0/5]` vẫn ĐO lại mỗi đêm thay vì tin vào giả định này, phòng khi ai đó trỏ `S3_ENDPOINT` sang nơi khác qua env. | `docker-compose.prod.yml` |
 | 3 | Version nằm **cùng bucket, cùng hệ thống**. Mất bucket / mất host / xoá cả bucket thì mọi version đi theo. Nó chỉ bù được vế "ghi đè hoặc xoá nhầm MỘT object" — vế mà bản gương cộng dồn (`mc mirror` cố ý không có `--remove`) đã phủ. | `scripts/backup/backup-objects.sh` |
 | 4 | Bật versioning **không kèm quy tắc hết hạn phiên bản cũ** = dung lượng tăng không trần, đúng vào rủi ro mà cổng "đĩa còn < 500 MB thì dừng" trong chính script này đang canh. | `scripts/backup/backup-objects.sh` |
 
@@ -176,9 +176,10 @@ bảo vệ, không phải thêm lớp: cả hai đều nằm trong cùng một k
 
 > ¹ **Nói cho đúng mức độ chắc chắn:** dòng 1 của bảng trên là **giới hạn ghi trong tài liệu MinIO**
 > cho chế độ một-node-một-ổ, **không phải** số đo lấy từ chính cụm này (chưa chạy `mc version enable`
-> trên MinIO DEV để xác nhận). Dòng 2, 3, 4 thì đọc thẳng từ file trong repo. Nếu tài liệu MinIO sai,
-> hoặc bản phát hành đang dùng đã đổi hành vi, thì **bước `[0/5]` sẽ nói ra** — nó hỏi kho thật mỗi
-> đêm và ghi câu trả lời vào `.objects-versioning`. Kết quả đo đó là trọng tài, không phải đoạn văn này.
+> trên MinIO nào — DEV, staging hay production — để xác nhận). Dòng 2, 3, 4 thì đọc thẳng từ file
+> trong repo. Nếu tài liệu MinIO sai, hoặc bản phát hành đang dùng đã đổi hành vi, thì **bước `[0/5]`
+> sẽ nói ra** — nó hỏi kho thật mỗi đêm và ghi câu trả lời vào `.objects-versioning`. Kết quả đo đó
+> là trọng tài, không phải đoạn văn này.
 
 ### Thứ tự khôi phục
 

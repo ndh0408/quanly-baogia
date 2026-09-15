@@ -235,11 +235,27 @@ lần Lưu chết P2028 trong khi tiến trình vẫn khởi động bình thư�
 
 ### 3.4 Nhánh riêng: Account Hà Nội
 
-`PUT /api/quotes/:id/hn` → `saveHn` trong `src/hnWorkflow.ts`. Chỉ ghi bảng
-`extraTables` loại `"hanoi"` của từng sheet, chép nguyên phần `hcm`/`khach`.
-Lấy **cùng** khoá `FOR UPDATE` trên `QuoteSheet` theo **cùng thứ tự** với
-`updateQuote`, và bump `Quote.updatedAt` ở cuối để khoá lạc quan của quản lý
-nhìn thấy phần HN vừa lưu.
+`PUT /api/quotes/:id/hn` → `saveHn` trong `src/hnWorkflow.ts`. Từ 2026-09-15 nó
+chỉ ghi **một cột**: `Quote.hnTables` (cấp báo giá). Nó **không** còn đụng
+`QuoteSheet` nào — đó là điểm khác quan trọng nhất so với bản trước, vốn ghi
+`extraTables` loại `"hanoi"` của từng trang.
+
+Khoá: chỉ `SELECT id FROM "Quote" … FOR UPDATE`, và **không** lấy khoá
+`QuoteSheet` sau đó. Mọi đường ghi khác lấy khoá theo thứ tự `QuoteSheet → Quote`
+(`updateQuote`, `markExtraTableRowPayment`), nên lấy ngược chiều là deadlock.
+Dùng `$queryRaw` chứ không `updateMany`: extension realtime ở `src/db.ts` coi
+`updateMany` là WRITE nên bắn thêm một sự kiện SSE, mà SSE đã bắn thì rollback
+không rút lại được.
+
+**Khoá lạc quan chốt theo `hnRev`, không theo `Quote.updatedAt`.** `hnRev` là
+băm của vân tay bảng Hà Nội (`quoteUtils.vanTayHn` → `hnRevCua`) và cố ý bỏ qua
+`paidProof` / `rid` / `paid*` / `approved*` — những trường server sở hữu hoặc
+sinh lại mỗi lần sanitize, nếu tính vào thì so bản CSDL với chính nó cũng ra
+khác. Client nhận `hnRev` ở `GET` rồi gửi trả nguyên văn qua `baseHnRev`.
+Vì sao không dùng `updatedAt`: nó đổi mỗi lần **chủ báo giá** lưu bất cứ thứ gì,
+mà màn account HN **không có bản nháp cục bộ** — một lần 409 oan là mất trắng.
+Tab mở trước lần deploy này chỉ gửi `baseUpdatedAt`; đường đó vẫn được tôn trọng
+khi thiếu `baseHnRev`.
 
 Chi tiết vòng đời và ai làm được gì: [QUOTE_WORKFLOW.md](../product/QUOTE_WORKFLOW.md).
 

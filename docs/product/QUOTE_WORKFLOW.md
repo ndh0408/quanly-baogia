@@ -106,8 +106,27 @@ Không chốt ở trục 1. Đó là cố ý: ý kiến của khách trên một
 ## Trục 3 — giá Hà Nội
 
 Luồng riêng cho vai trò **Account Hà Nội**. Tiền Hà Nội là chi phí **nội bộ**:
-nó nằm trong `QuoteSheet.extraTables` với `category` là `"hanoi"`, nên **không
-bao giờ vào file Excel gửi khách**.
+nó nằm ở `Quote.hnTables` — một cột JSON ở **cấp báo giá** — nên **không bao giờ
+vào file Excel gửi khách**.
+
+> **Đổi chỗ từ 2026-09-15.** Trước đó bảng Hà Nội nằm trong
+> `QuoteSheet.extraTables` với `category = "hanoi"`, tức account HN phải làm việc
+> *bên trong* cấu trúc trang của chủ báo giá. Ba hệ quả đã đo được:
+> màn của họ in cả **tên từng trang** (lộ cấu trúc báo giá cho người chỉ được
+> giao điền giá); mỗi lần chủ bấm Lưu là **mọi `QuoteSheet.id` đổi** (lưu = xoá
+> trang rồi tạo lại) nên họ gõ nửa tiếng rồi nhận 409 "hãy tải lại trang"; và chủ
+> xoá một trang là bảng HN trên trang đó **chết theo**.
+>
+> Nay account HN có **không gian riêng, phẳng**: tự thêm/đặt tên/xoá sheet, dán
+> từ Excel, nhập tệp Excel, công thức — đúng bộ của lưới báo giá chính
+> (`web/src/components/HnTables.tsx`, dùng chung cho cả màn của chủ). Thông tin
+> khách **kế thừa** từ báo giá gốc, họ không điền và không thấy.
+>
+> Khoá lạc quan của đường `PUT /api/quotes/:id/hn` chốt theo **`hnRev`** — vân
+> tay của riêng bảng Hà Nội — chứ **không** theo `Quote.updatedAt`. Chủ báo giá
+> lưu phần khác thì `hnRev` không đổi, account HN vẫn lưu được; chỉ khi bảng HN
+> thật sự bị người khác sửa mới có 409. Quan trọng vì màn HN **không có bản nháp
+> cục bộ**, nên một lần 409 oan là mất trắng phần vừa gõ.
 
 ```
    (null = chưa giao)

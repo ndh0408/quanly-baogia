@@ -31,11 +31,12 @@ gần một nửa; không có nó thì bảng này sẽ sạch một cách giả
 | | |
 |---|---|
 | Đã vá, đã gỡ khỏi bảng | **72** |
-| Còn lại trong bảng | **59** (8 P1 · 39 P2 · 12 P3) |
+| Còn lại trong bảng | **60** (9 P1 · 39 P2 · 12 P3) |
 | — trong đó *còn mở hoàn toàn* | 11 |
-| — *vá một phần* (còn đường đi vòng) | 48 |
+| — *vá một phần* (còn đường đi vòng) | 46 |
+| — đã fix nhưng chưa gỡ khỏi bảng (xem "Tài liệu LỖI THỜI") | 3 |
 | Mức **nghiêm trọng** còn lại | **0** |
-| Mức trung bình | 11 |
+| Mức trung bình | 9 |
 
 Mỗi dòng còn lại nay mang nhãn **còn mở** / **vá một phần** cùng **mức thật** đo
 sau khi đọc mã — có thể khác hẳn nhãn P1/P2/P3 gốc, vốn là phỏng đoán của một lượt
@@ -113,6 +114,17 @@ trên kind/minikube, đọc log, xác nhận kết thúc bằng `OBJECT_BACKUP_D
 
 **Cho tới lúc đó: nhánh đang chạy thật là docker-compose +
 `scripts/backup/backup-objects.sh`.** Đừng ghi ở đâu rằng k8s đã sao lưu kho object.
+
+**Cập nhật 2026-09-09 (finding H5):** đến tận hôm đó, đường docker-compose ở trên CŨNG
+chưa từng hoạt động cho kho object. `mc()` trong `backup-objects.sh` gọi `docker run
+--network host`, đặt container `mc` vào network namespace của HOST — cổng S3 9000 của
+MinIO chỉ mở trong network `internal` của compose, không ra host, nên không `S3_ENDPOINT`
+nào (kể cả `http://minio:9000`) mà `mc` với tới được. Backup/restore-drill kho object
+**chưa bao giờ chạy được** kể từ khi MinIO lên production (`fc053c2`, 2026-09-08) — im
+lặng vì `/etc/quanly-backup.env` cũng chưa điền `S3_*`. Đã vá ở commit `19c5815`: `mc()`
+nay dò đúng network của container `quanly-minio` bằng `docker inspect` thay vì hardcode.
+**Vẫn chưa xác minh END-TO-END trên production thật** (không có Docker daemon ở đây để
+chạy — xem `tests/zk-backup-mc-network.test.js` cho phần soi mã nguồn).
 
 
 ### 3. Nhập Excel: đã rời event loop, nhưng CHƯA có hàng rào bộ nhớ thật
@@ -197,25 +209,22 @@ hoàn tác được** — đừng chạy trước (c).
 **Đã có thể ghi rằng PII được mã hoá TRÊN PRODUCTION cho dữ liệu mới** — nhưng vẫn đừng ghi "đã mã
 hoá toàn bộ" cho tới khi (d) xong VÀ dev/staging cũng bật khoá.
 
-## Báo giá > 20.000 dòng: có đường xuất, nhưng CHƯA có nút bấm (2026-08-26)
+## Báo giá > 20.000 dòng: có đường xuất — ĐÃ CÓ nút bấm từ 2026-08-27
+
+> **Mục này TỪNG ghi (2026-08-26): "SPA React chưa nối đường xuất nền — `grep -rn "/jobs"
+> web/src` không ra kết quả; QuoteEditor/QuoteList mở thẳng `/api/export/:id.xlsx|pdf`".**
+> Đã vá ngay hôm sau — xem mục "Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ĐÃ
+> NỐI đường nền (2026-08-27)" bên dưới, mục đó là bản ghi hiện trạng THẬT: `web/src/lib/
+> exportQuote.ts` nay được cả `QuoteEditor.tsx` lẫn `QuoteList.tsx` gọi, bắt 413 ở client và
+> tự chuyển sang `POST /api/quotes/:id/export` + poll `GET /api/jobs/export/:id`.
 
 Đường xuất ĐỒNG BỘ chặn ở 100 trang / 20.000 dòng rồi trả 413 kèm lời khuyên *"vui lòng
-dùng xuất nền (async)"*. Trước đợt này lời khuyên đó **không thực hiện được**, và một
+dùng xuất nền (async)"*. Trước đợt 2026-08-26 lời khuyên đó **không thực hiện được**, và một
 bản vá trong chính đợt này suýt làm nó tệ hơn — chi tiết ở đầu
 `tests/b2-quote-size-cap.test.js` và `src/validators.ts`.
 
 **Đã đóng:** đường xuất NỀN nay nhận trọn sức chứa của đường lưu (60 trang × 1000 dòng =
 60.000). Mọi báo giá **lưu được** đều **xuất được** qua `POST /api/quotes/:id/export`.
-
-**Chưa đóng:** SPA React **chưa nối** đường đó — `grep -rn "/jobs" web/src` không ra kết
-quả; hai chỗ xuất file (`QuoteEditor`, `QuoteList`) đều mở thẳng `/api/export/:id.xlsx|pdf`.
-Nên với người dùng cuối, báo giá 20.001–60.000 dòng vẫn là: bấm Xuất → nhận lỗi kèm một
-lời khuyên không bấm được ở đâu.
-
-**Việc phải làm:** bắt 413 ở client, gọi `POST /api/quotes/:id/export`, poll
-`GET /api/jobs/export/:id`, rồi mở `returnvalue.url`. Cần thêm: hàng đợi phải bật
-(`REDIS_URL`) và kho object phải có (`S3_*`) — thiếu một trong hai thì route trả 503 kèm
-`code: "export_async_unavailable"`, và client phải nói ra điều đó thay vì im lặng.
 
 **Đừng đóng lại bằng cách siết trần LƯU.** Trần đó chưa từng tồn tại, nên siết là khoá
 chủ những báo giá lớn đã lưu từ trước ra khỏi chính dữ liệu của họ — kể cả khỏi thao tác
@@ -257,6 +266,7 @@ Không phải lỗi mã — là **mô tả không còn đúng**. Ghi ở đây �
 | chú thích cũ trong `web/src/lib/exportQuote.ts` | trỏ `:108` và `:152` | Chính đợt vá kèm nó đã làm hai số thành 109 và 153. Nay trỏ theo TÊN HÀM; `scripts/ci/check-line-refs.mjs` canh phần còn lại. |
 | Bảng P1, mục `decompressbody-before-auth` | "vá một phần · mức thật: trung-binh" | **Đã fix hoàn toàn** ở commit `6a7bc05` (2026-09-08) — `apiLimiter` nay mount TRƯỚC `decompressBody`/`express.json` cho TOÀN BỘ `/api/*`, không chỉ nhóm quotes. Xem `tests/zc-csrf-token-rate-limit.test.js`. |
 | `SECURITY.md`, mục "Điều đã biết" | "Cột PII thô vẫn còn song song với cột mã hoá" | Đã cutover trên production từ `fc053c2` (2026-09-08) cho dữ liệu MỚI — xem mục "Mã hoá PII: ĐÃ CUTOVER" ở trên. |
+| Bảng P2, mục `object-mirror-count-check-silently-skipped` | "vá một phần · mức thật: khong-dang-ke" | **Đã fix hoàn toàn** ở commit `87d5954` — `mc ls` hỏng nay `alert(...); exit 1` thay vì đi tiếp báo OK, và cổng đổi từ so SỐ ĐẾM sang so THÀNH VIÊN. Xem `tests/hq3-backup-object-count.test.js`. |
 
 ## Cách đọc bảng
 
@@ -270,7 +280,7 @@ Cột "hệ quả nếu đúng" là lập luận của người rà soát, **ch�
 |---|---|---|---|
 | `import-xlsx-oom-eventloop` | Nhập Excel: toàn bộ workbook được nạp vào RAM TRÊN EVENT LOOP trước khi mọi trần MAX_SHEETS/MAX_SCAN_ROWS có tác dụng — treo server + OOM | Một tài khoản có quyền quote:create tải lên file .xlsx 3 MB gồm 150k dòng: Node đơn luồng đứng im 5 giây (mọi request khác — SSE, lưu báo giá của người khác — treo theo), RSS +1 GB. importLi… | **vá một phần** · mức thật: trung-binh |
 | `decompressbody-before-auth` | decompressBody chạy TRƯỚC auth và TRƯỚC rate-limit, không có trần tỉ lệ nén → khuếch đại bộ nhớ ~1000× cho người CHƯA đăng nhập | Kẻ tấn công KHÔNG có tài khoản gửi `POST /api/quotes` với `Content-Encoding: gzip` và ~16 KB dữ liệu toàn số 0 (gzip nén ~1000×). Server bung ra 16 MB + `Buffer.concat` → ~32 MB đỉnh mỗi req… | **đã fix hoàn toàn** (commit `6a7bc05`, 2026-09-08 — `apiLimiter` nay mount TRƯỚC `decompressBody`/`express.json`; kiểm bằng `tests/zc-csrf-token-rate-limit.test.js`) — mục này lỗi thời, xem "Tài liệu LỖI THỜI" |
-| `bullmq-export-blocks-worker-loop-stalls` | Async export processor runs exceljs/PDF on the BullMQ worker's main event loop → lock expiry, stalled re-delivery, duplicate exports | A user hits the 413 at export.routes.ts:67 on a 100-sheet / 20 000-item quote and follows the message to POST /api/quotes/:id/export. The worker picks it up and blocks its event loop inside … | **vá một phần** · mức thật: khong-dang-ke |
+| `bullmq-export-blocks-worker-loop-stalls` | Async export processor runs exceljs/PDF on the BullMQ worker's main event loop → lock expiry, stalled re-delivery, duplicate exports | A user hits the 413 at src/routes/export.routes.ts:116 on a 100-sheet / 20 000-item quote and follows the message to POST /api/quotes/:id/export. The worker picks it up and blocks its event loop inside … | **vá một phần** · mức thật: khong-dang-ke |
 | `optimistic-lock-advisory-and-racy` | Optimistic concurrency check is opt-in (legacy SPA omits it → silent overwrite) and is a TOCTOU even when sent | (a) Two managers open the same quote in the React editor at t0. Both press Lưu within the ~50-200 ms window between :254 (read) and :329 (transaction start). Both read the same `existing.upd… | **vá một phần** · mức thật: nho |
 | `hanoi-tables-unprotected-on-main-save` | Approved Hà Nội prices can be rewritten through the ordinary quote save, bypassing the hn approval state machine entirely | A manager assigns the Hà Nội part, the account fills it (5.000.000 đ), submits, the manager approves → hnStatus="approved", hnReviewedAt stamped. Any member with quote:update:own on that quo… | **vá một phần** · mức thật: khong-dang-ke |
 | `plaintext-pii-columns-still-authoritative` | Plaintext PII columns are still written on every request and there is no executable cutover — the stated threat (leaked DB dump) is not mitigated at all | The entire justification for this subsystem (src/piiBox.ts:1-2, "dành cho các trường có sức sát thương cao nhất nếu bản dump CSDL bị lộ") is currently unrealised: `backup-db.sh` produces a d… | **đã fix cho dữ liệu MỚI trên production** (cutover `fc053c2`, 2026-09-08) · dữ liệu CŨ + dev/staging vẫn ở trạng thái mô tả — xem mục "Mã hoá PII: ĐÃ CUTOVER" ở trên |
@@ -316,12 +326,12 @@ xem `src/retention.ts`) là điểm khởi đầu tự nhiên cho WEBHOOK; EMAIL
 | `update-quote-triple-full-read` | Một lần Lưu báo giá đọc toàn bộ sheets+items (kèm ảnh base64) BA lần | Với báo giá có cột "Hình ảnh" bật (`QuoteSheet.showImages`), mỗi item mang tới 10 ảnh base64 × 2.8MB (`src/validators.ts:147-149`). Một lần bấm Lưu kéo khối đó qua dây DB ba lượt, hai trong … | **vá một phần** · mức thật: trung-binh |
 | `no-bullmq-metrics-worker-unscraped` | Zero metrics on the BullMQ queues, and the worker process exposes no /metrics endpoint at all so its counters are never scraped | Every metric the worker produces — `export_jobs_total{status="error"}`, default process metrics, memory — is written to a registry no one ever reads and discarded when the pod restarts. Comb… | **vá một phần** · mức thật: trung-binh |
 | `sse-backplane-silent-degradation` | SSE Redis backplane can be absent or broken with no signal, and its publisher uses the infinite-retry options the codebase elsewhere documents as dangerous | With replicaCount 2, a failed or not-yet-ready backplane means a notification created on pod-1 (src/notifications.ts:71 `publish(userId, "notification", ...)`) and, more seriously, a `sessio… | **vá một phần** · mức thật: khong-dang-ke |
-| `no-job-idempotency-no-async-export-limit` | No jobId/idempotency key on any enqueue, and the async export route has neither a dedicated rate limit nor a size cap | The async export route sits behind only the generic 120/min per-IP api limiter (src/app.ts:250-256). A user double-clicking "xuất nền", or the SPA retrying a POST whose response was lost, pr… | **vá một phần** · mức thật: nho |
+| `no-job-idempotency-no-async-export-limit` | (mô tả cũ lỗi thời: nay ĐÃ có `deduplication` key theo quote+format+user+`updatedAt` VÀ `asyncExportLimiter` riêng 10/phút — `src/routes/jobs.routes.ts:26-30,85-109`) async export route vẫn KHÔNG có trần số dòng/sheet trước khi xếp việc vào hàng đợi | (ĐÃ LỖI THỜI — nay có `asyncExportLimiter` riêng 10/phút/IP, không chỉ limiter chung) A user double-clicking "xuất nền", or the SPA retrying a POST whose response was lost, pr… | **vá một phần** · mức thật: nho |
 | `uniform-job-options-across-queues` | One defaultJobOptions for five queues with different risk profiles; retention is count-only with no age bound, and maintenance inherits 3 retries | (a) Retention is count-only, so a queue that starts failing on a Friday keeps 5000 job payloads per queue in Redis indefinitely with no age ceiling — on the 256 MB instance, webhook payloads… | **vá một phần** · mức thật: khong-dang-ke |
 | `counter-row-locked-for-whole-create` | The quote-number counter row is held locked for the entire create transaction, serialising all quote creation behind the slowest write | Two people create quotes for the same company at the same time — say both importing a large Excel (50 sheets). A grabs the GN/2026 counter row and holds it while writing ~25,000 items and a … | **còn mở** · mức thật: nho |
 | `backup-files-world-readable` | DB dumps containing every CCCD/bank account/salary are created 0644 in a 0755 directory, contradicting the runbook's own claim | Any non-root local account or any container that bind-mounts a parent path on the Coolify host can `cat /opt/quanly-backups/quanly-*.sql.gz` and read the complete personnel database in clear… | **vá một phần** · mức thật: khong-dang-ke |
 | `nas-password-in-process-table` | NAS_PASS is interpolated into a docker run argv, exposing it in the host process table on every backup | Any local user on the Coolify host running `ps aux` during the 02:00/02:30 window (or `docker inspect` on the transient container) reads the SMB credential for the Synology share that stores… | **vá một phần** · mức thật: nho |
-| `object-mirror-count-check-silently-skipped` | backup-objects.sh's bucket↔mirror completeness check is silently skipped whenever `mc ls` fails | `mc mirror` (line 68) can succeed partially — e.g. it transfers what it can and returns 0 after a mid-run credential expiry or a transient endpoint error — while a subsequent `mc ls` fails o… | **vá một phần** · mức thật: khong-dang-ke |
+| `object-mirror-count-check-silently-skipped` | (mô tả cũ lỗi thời — xem trạng thái) backup-objects.sh's bucket↔mirror completeness check is silently skipped whenever `mc ls` fails | `mc mirror` (scripts/backup/backup-objects.sh:166) can succeed partially — e.g. it transfers what it can and returns 0 after a mid-run credential expiry or a transient endpoint error — while a subsequent `mc ls` fails o… | **đã fix hoàn toàn** (commit `87d5954`) — `mc ls` hỏng nay `alert(...); exit 1` thay vì đi tiếp báo OK, và cổng so THÀNH VIÊN (không phải so SỐ ĐẾM) nên vẫn đúng sau khi retention xoá object; kiểm bằng `tests/hq3-backup-object-count.test.js:76` |
 | `orphan-staging-objects-never-deleted` | Abandoned presigned uploads leave their staging objects in the bucket forever — retention deletes the DB row but never the object | A client that calls /sign-upload, PUTs up to 10 MB (files.routes.ts:18 MAX_UPLOAD_BYTES) and never calls /finalize leaves that object under `uploads/staging/uN/...` permanently. Twenty such … | **vá một phần** · mức thật: khong-dang-ke |
 | `exports-objects-never-pruned` | Every quote export is written to the bucket and never deleted — unbounded growth, now amplified into every backup | Every re-export of the same quote mints a new timestamped object (the key includes `Date.now()`), so a quote exported 50 times leaves 50 objects. Since 2026-08-11 the bucket is mirrored dail… | **vá một phần** · mức thật: trung-binh |
 | `restore-drill-fills-production-volume` | Weekly restore-test/restore-drill create a full second copy of the production DB inside the production Postgres container with no disk-space precheck | Both timers fire on Sunday (install-backup.sh:92-93: restore-test 03:00, restore-drill 03:30) and each materialises a full copy of the production database on the same volume as production da… | **vá một phần** · mức thật: nho |
@@ -352,7 +362,7 @@ xem `src/retention.ts`) là điểm khởi đầu tự nhiên cho WEBHOOK; EMAIL
 | `username-email-case-sensitivity` | Login/invite lookups are byte-exact, so email casing splits one human into two accounts and locks the other out with a generic 401 | Two failure modes, both real for an internal tool where accounts are created by typing an address into an invite form. (1) An admin invites `Nam.Tran@giaNguyen.vn` today and `nam.tran@giangu… | **vá một phần** · mức thật: nho |
 | `webp-logo-silently-dropped` | Logo WEBP được zod chấp nhận nhưng excel.ts bỏ qua im lặng, để lại chữ placeholder của mẫu trong file gửi khách | Khách gửi logo .webp (định dạng mặc định khi lưu ảnh từ Chrome). Thuộc tính `accept` của input chỉ là gợi ý — hệ điều hành vẫn cho chọn — và API thì chấp nhận, UI hiện logo bình thường. Nhưn… | **vá một phần** · mức thật: nho |
 | `emitchange-broadcast-not-authz-filtered` | emitChange broadcasts entity/action/id to every connected user — the same leak class that was already fixed for presence | Any logged-in account — including `account_hn`, which is explicitly barred from seeing pricing (src/routes/export.routes.ts:22-27) — can sit on the SSE stream and record that quote id 4711 w… | **vá một phần** · mức thật: khong-dang-ke |
-| `queue-dead-code-and-readyz-blind` | createQueueEvents is dead code and exportGateStats is exported but never used, so /readyz stays green on a saturated app pod | A pod whose export gate is completely full (3 active + 20 queued, exportQueue.ts:98-99) is answering /api/export/* with 503 for everyone, yet /readyz returns `{ ok: true }` (app.ts:290), so … | **vá một phần** · mức thật: khong-dang-ke |
+| `queue-dead-code-and-readyz-blind` | (mô tả cũ lỗi thời: `createQueueEvents` đã bị GỠ HẲN khỏi src/, và `exportGateStats` nay ĐÃ có chỗ gọi thật qua `/metrics` — xem `src/app.ts:440` + `tests/qs-queue-job-options.test.js:152`) /readyz vẫn không đọc trạng thái cổng xuất, nên vẫn xanh trên một pod đã bão hoà | A pod whose export gate is completely full (3 active + 20 queued, src/exportQueue.ts:150-151) is answering /api/export/* with 503 for everyone, yet /readyz returns `{ ok: true }` (src/app.ts:521), so … | **vá một phần** · mức thật: khong-dang-ke |
 | `savable-but-unexportable-quotes` | The save validator allows 3x more items than the synchronous export will accept, so a user can build a quote they can never export | A user builds the owner-described 50 sheets × 500 rows quote (25,000 items). It saves (under the 60/1000 caps). Then Xuất Excel returns 413 "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng… | **còn mở** · mức thật: nho |
 | `upload-objects-have-no-stored-hash` | uploads/ and exports/ objects store no content hash, so backup integrity can only ever be verified for payment proofs | After a bucket restore from the mirror, silent bit-rot or a partial `mc mirror` in an attachment or an export is undetectable — there is no recorded digest to compare against. The manifest s… | **vá một phần** · mức thật: nho |
 | `compose-mutable-tags-and-no-log-rotation` | Compose dùng tag di động (:latest, :16-alpine, :7-alpine) và không giới hạn log — đĩa VM prod đầy dần | (1) `docker compose pull` bất kỳ lúc nào có thể kéo postgres:16-alpine bản patch mới, khởi động lại prod với binary khác mà không ai chủ ý — trái với chính sách bất biến mà chart đang thi hà… | **vá một phần** · mức thật: khong-dang-ke |
@@ -439,7 +449,7 @@ Storage Adapter → kho object S3-compatible
 > Redis**:
 >
 > - `src/app.ts:11` — `import connectPgSimple from "connect-pg-simple";`
-> - `src/app.ts:304-317` — `session({ store: new PgSession({ conObject: conObjectPhien(),
+> - `src/app.ts:345-367` — `session({ store: new PgSession({ conObject: conObjectPhien(),
 >   createTableIfMissing: true, tableName: "user_sessions", pruneSessionInterval: 60 * 60 }) })`
 > - Toàn repo **không có** `connect-redis`: không trong `package.json`, không trong `src/`.
 >
@@ -632,8 +642,8 @@ chạy cả hai.
 Semgrep phân tích **dở dang** 3 file và vẫn kết thúc thành công, chỉ ghi một dòng
 "Partially scanned: N files" lẫn trong tổng kết:
 
-- `src/app.ts:470` — chú thích kiểu trong tham số arrow function
-- `src/quoteUtils.ts:65` — toán tử `satisfies` (TS 4.9)
+- `src/app.ts:540` — chú thích kiểu trong tham số arrow function
+- `src/quoteUtils.ts:115` — toán tử `satisfies` (TS 4.9)
 - `src/zodErrorMap.ts:14` — kiểu `import("zod").X`
 
 Cả ba là cú pháp TypeScript hợp lệ mà parser của semgrep 1.97 chưa hỗ trợ. **Không
@@ -644,6 +654,83 @@ con số 3; file thứ tư xuất hiện là đỏ.
 chỗ không parse được, KHÔNG phải cả file. Mẫu `new Function(req.query.body)` đặt vào
 `src/quoteUtils.ts` (file dở dang) **vẫn bị bắt**, đúng dòng. Đừng đọc mục này thành
 "ba file đó không được quét".
+
+## Chốt bảo mật thứ BA: cả nhóm chưa từng chạy nổi trên Windows (2026-09-16)
+
+Mục ở trên ("Hai chốt bảo mật TƯỞNG CÓ mà thật ra KHÔNG chạy") nói về hai
+**allowlist** vô tác dụng. Đợt này lộ ra một tầng sâu hơn: trên máy Windows —
+**chỗ duy nhất cổng này thật sự chạy**, vì tài khoản GitHub không bật Actions —
+cả ba bước gitleaks · trivy · semgrep đều **đỏ vì môi trường**, không phải vì có
+phát hiện:
+
+```
+[S1] gitleaks  FTL  stat C:/Program Files/Git/repo: no such file or directory
+[S2] trivy     FATAL  ignore file not found: C:/Program Files/Git/src/.trivyignore.yaml
+[S3] semgrep   SyntaxError: Unexpected end of JSON input   (container trả JSON rỗng)
+```
+
+Lớp MSYS của Git for Windows thấy tham số bắt đầu bằng `/` thì tưởng đường dẫn
+POSIX và tự dịch sang đường dẫn Windows **trước khi docker nhìn thấy** — nên
+`/src`, `/repo` (đường dẫn **trong container**) tới nơi thành
+`C:/Program Files/Git/...`.
+
+Ba điều đã đo, đừng vá lại theo trực giác:
+
+1. **`MSYS_NO_PATHCONV=1` là sai thuốc.** Nó tắt phép dịch cho **mọi** tham số
+   của **mọi** lệnh trong script, kể cả `node -e … "$RA_SG"` với
+   `/tmp/semgrep-$$.json` — node là chương trình Windows thuần, nhận `/tmp/…` sẽ
+   đi đọc `D:\tmp\…`. Vá được docker thì hỏng chỗ đọc kết quả.
+2. **`MSYS2_ARG_CONV_EXCL` so khớp ĐẦU của cả tham số.** Mục `/repo` **không**
+   phủ `--source=/repo`. Phải khai cả dạng `--co=`:
+   `'/src;/repo;/root;--source=;--ignorefile=;--report-path='`.
+3. **Vế của máy thì đưa sẵn về dạng Windows** (`pwd -W` → `D:/QuanLY`) để MSYS
+   không có gì để dịch.
+
+Thêm: trần thời gian mặc định **5 phút** của trivy đủ cho CI Linux nhưng không đủ
+khi `/src` là bind mount của Docker Desktop — bước quét cấu hình k8s chết giữa
+chừng với `context deadline exceeded`, mà **hết giờ trông y hệt một phát hiện
+thật** trong dòng tổng kết. Nay `--timeout ${TRIVY_TIMEOUT:-20m}`.
+
+**Vá xong thì kết quả không hề rỗng** — đó là lý do mục này đáng đọc:
+
+| Bước | Trước | Sau |
+|---|---|---|
+| gitleaks lịch sử | chết, không quét gì | 597 commit, **sạch** |
+| trivy | chết | **9 lỗ HIGH có bản vá**, cả 4 gói trong cây production |
+| semgrep | JSON rỗng | 413 file, **0 mức ERROR** — lần đầu SAST thật sự chạy |
+
+Chín lỗ đó đã vá (`multer` 2.4.0 · `nodemailer` 9.1.1 · `fast-uri` 3.1.8 ·
+`mysql2` 3.24.4, hai cái sau qua `overrides` vì prisma ghim cứng). **`npm audit`
+KHÔNG báo cái nào trong số đó** — hai công cụ dùng hai cơ sở dữ liệu khuyến cáo
+khác nhau, nên có cả hai mới đủ.
+
+### Lượt quét cây làm việc phải lọc theo `.gitignore`
+
+`gitleaks detect --no-git` đi bộ trên **hệ tệp**, không đọc `.gitignore`. Trên máy
+lập trình viên nó quét cả `.env` thật, `.claude/` + `.agents/` (bộ skill BMAD),
+`graphify-out/`, `.scan/` và mấy chục script `e2e-*.mjs` dùng một lần: **59 phát
+hiện trên 58 file, cả 58 đều bị `.gitignore` bỏ qua** — không file nào có đường
+nào vào được lịch sử. Trên CI (clone sạch) chẳng cái nào tồn tại, nên cổng xanh ở
+đó và đỏ vĩnh viễn ở đây.
+
+Cách vá **không** phải chép danh sách đường dẫn vào `.gitleaks.toml` — danh sách
+chép tay sẽ trôi khỏi `.gitignore`. `security-scan.sh` lọc phát hiện qua
+`git check-ignore` **ngay lúc quét**, nên nó không thể trôi.
+
+> **Đã thử phá chính bản vá này.** Cắm một hằng `PASSWORD` gán thẳng một chuỗi 18
+> ký tự trông như mật khẩu production — khớp luật `hardcoded-default-password` —
+> vào
+> `src/quoteUtils.ts` (file git **có** theo dõi) rồi chạy cổng: **vẫn xanh**. Bản
+> vá đầu có lỗi thật — `process.stdout.write(files.join("\n"))` không có xuống
+> dòng cuối, mà `while read` bỏ rơi dòng cuối nếu thiếu nó; `src/quoteUtils.ts`
+> xếp **cuối** bảng chữ cái nên rơi đúng chỗ đó. Sửa xong chạy lại: **đỏ**, kèm
+> đúng tên file. Không có bước thử phá này thì repo đã nhận một cổng bị vô hiệu
+> hoá mà vẫn in ✓.
+>
+> (Tài liệu này cố ý **không** chép nguyên chuỗi probe. Lần đầu viết mục này tôi có
+> chép, và cổng `[S1]` đỏ ngay ở chính commit tài liệu đó — đúng như nó phải thế.
+> Chuỗi giả dùng một lần trong repo này theo quy ước `khong-phai-mat-khau-that-…`,
+> đã nằm sẵn trong allowlist; probe thì mô tả bằng lời là đủ.)
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 

@@ -117,7 +117,7 @@ Thứ tự đề nghị:
 
 ## 7. Bộ test canh cái gì
 
-`tests/xc-incremental-quote-save.test.js` — 7 bài, tất cả chạy **cả hai chiều cờ**:
+`tests/xc-incremental-quote-save.test.js` — 8 bài. Bảy bài đầu chạy **cả hai chiều cờ**:
 
 * cờ TẮT vẫn xoá-tạo-lại mọi trang (hành vi cũ không đổi);
 * cờ BẬT, lưu lại y nguyên → **không đụng trang nào**;
@@ -127,6 +127,9 @@ Thứ tự đề nghị:
 * trạng thái mức trang sống sót ở CẢ trang giữ lẫn trang tạo lại;
 * đảo thứ tự: hai trang đổi chỗ bị tạo lại, trang đứng yên giữ id;
 * khoá lạc quan vẫn trả 409, không bị đường mới lách qua.
+
+Bài thứ tám orthogonal với cờ (chỉ chạy cờ BẬT): đã xuất hoá đơn cho một trang thì mọi lần Lưu sau
+đó bị chặn 403 — mốc khoá sửa là HOÁ ĐƠN, không phải "khách chốt" (chốt với chủ dự án 2026-09-07).
 
 ## 8. Chưa làm (có chủ ý)
 

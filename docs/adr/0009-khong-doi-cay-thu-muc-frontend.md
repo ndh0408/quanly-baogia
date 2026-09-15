@@ -37,11 +37,11 @@ grep -rn 'web/src/' --include=*.md --include=*.mjs --include=*.js --include=*.ts
 
 | Số đo | Giá trị |
 |---|---|
-| Tổng file `.ts`/`.tsx` trong `web/src` | **65** (44 không phải test + 21 test) |
+| Tổng file `.ts`/`.tsx` trong `web/src` | **67** (44 không phải test + 23 test) |
 | `pages/` | 17 trang + 1 test |
-| `components/` | 5 component + 2 test |
+| `components/` | 5 component + 3 test |
 | `lib/` | 19 module + 18 test |
-| Gốc `web/src/` | `App.tsx` · `main.tsx` · `bench.tsx` |
+| Gốc `web/src/` | `App.tsx` · `main.tsx` · `bench.tsx` + `App.draftleak.test.ts` |
 | Dòng `import` trong `web/src` | 233, trong đó **162 là đường dẫn tương đối** (108 dòng dùng `../`) |
 | Bí danh đường dẫn (`paths` trong tsconfig, `resolve.alias` của Vite) | **không có cái nào** |
 | Nhắc `web/src/...` từ NGOÀI `web/src` | **123** chỗ (tài liệu, chú thích trong `src/`, tests, `eslint.config.js`, `lint-staged.config.mjs`, `scripts/ci/ui-smoke.mjs`) |
@@ -148,7 +148,7 @@ và có thể làm bất cứ lúc nào **mà không cần** đụng tới cấu
    sau này rẻ hơn. Đó là trả chi phí hôm nay cho một thay đổi đã quyết là không làm.
 3. **Tách file khi FILE quá lớn, không phải khi thư mục quá phẳng.** Tiêu chí là
    kích thước và số trách nhiệm của một file, không phải hình dạng của cây. Ví
-   dụ đang có thật: `components/GridTable.tsx` là **1 884 dòng** — lớn gấp hơn
+   dụ đang có thật: `components/GridTable.tsx` là **1 912 dòng** — lớn gấp hơn
    hai lần file kế tiếp — và cách xử lý đúng là bóc từng mảnh thuần tuý ra
    `lib/` (đã làm với `clipboard`, `formula`, `rowEdit`, `gridSelect`,
    `gridUndo`), mỗi mảnh kèm test riêng. Việc đó **không cần** `features/`.

@@ -16,18 +16,35 @@ erDiagram
     Quote ||--o{ QuoteSheet : "sheets"
     Quote ||--o{ QuoteVersion : "lịch sử phiên bản"
     Quote ||--o{ Approval : "legacy, không còn ghi"
-    Quote }o--o{ User : "members m2m"
+    Quote ||--o{ QuoteMember : "members"
+    User ||--o{ QuoteMember : "userId"
     QuoteTemplate ||--o{ QuoteSheet : "templateId"
     QuoteSheet ||--o{ QuoteItem : "items"
     Product |o--o{ QuoteItem : "productId, tuỳ chọn"
 ```
 
-Bốn điều mà sơ đồ **không** nói ra được, và đều quan trọng:
+Sáu điều mà sơ đồ **không** nói ra được, và đều quan trọng:
 
-* **`QuoteSheet.extraTables` là JSON, không phải bảng.** Ba bảng nội bộ
-  (`category` là `"hcm"` / `"hanoi"` / `"khach"`) sống trong một cột `Json?`.
-  Đó là lý do mọi đường ghi nó đều là **read-modify-write nguyên khối** và phải
-  lấy khoá `FOR UPDATE` — xem [quote-save.md](quote-save.md).
+* **`QuoteSheet.extraTables` là JSON, không phải bảng.** Bảng nội bộ theo trang
+  (`category` là `"hcm"` / `"khach"`) sống trong một cột `Json?`. Đó là lý do mọi
+  đường ghi nó đều là **read-modify-write nguyên khối** và phải lấy khoá
+  `FOR UPDATE` — xem [quote-save.md](quote-save.md).
+* **Bảng Hà Nội KHÔNG nằm ở đó nữa.** Từ 2026-09-15 nó là `Quote.hnTables`, một
+  cột `Json?` ở **cấp báo giá**. Lý do: account Hà Nội cần không gian riêng,
+  không lặp theo trang của chủ (lộ số trang + tên trang), và mỗi lần chủ bấm Lưu
+  là toàn bộ `QuoteSheet.id` đổi (lưu = xoá trang rồi tạo lại) nên mọi thứ ghim
+  theo `sheetId` đều chết. Migration là **expand-only**: bản cũ còn nguyên trong
+  `extraTables` để lùi ảnh một mình vẫn chạy được; pha "contract" là bản sau.
+  Hệ quả cho người đọc mã: mọi phép cộng tiền HN chỉ đọc cột mới, và
+  `sanitizeExtraTables` loại `"hanoi"` khỏi đường ghi theo trang, nên **không có
+  chuyện cộng hai lần**.
+* **`QuoteMember` là bảng nối THẬT, không phải m2m ngầm.** Trước 2026-09-15 nó là
+  `_QuoteMembers` do Prisma tự sinh, chỉ có `(A, B)`. Nay có thêm
+  `scopes String[]` — bốn vùng một "account phụ" được sửa: `main` (báo giá
+  chính) · `hcm` · `hanoi` · `khach`. Khoá chính là `(quoteId, userId)`.
+  **`scopes` rỗng = chỉ đọc**, không phải toàn quyền — đây là mặc-định-từ-chối,
+  xem `src/permissions.ts`. Hàng chuyển từ bảng cũ được cấp **đủ bốn** phạm vi vì
+  bản cũ không có khái niệm phạm vi, cấp thiếu là âm thầm tước quyền người đang dùng.
 * **`QuoteItem.formulas` và `QuoteItem.images` cũng là JSON.** `formulas` là siêu
   dữ liệu của trình soạn (`{"unitPrice":"=2000+3000"}`), **không** dùng để tính
   tổng. `images` là mảng data-URL base64 — nặng, nên đường lưu cố ý không đọc nó.
