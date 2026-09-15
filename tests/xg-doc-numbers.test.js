@@ -268,7 +268,11 @@ describe.runIf(laGitRepo)("hàm đo — đối chiếu với phép đếm ĐỘC
     const ls = (...mau) => execFileSync("git", ["ls-files", ...mau], { cwd: GOC, encoding: "utf8" }).split("\n").filter(Boolean).length;
     expect(soThuc.adr).toBe(ls("docs/adr/[0-9][0-9][0-9][0-9]-*.md"));
     expect(soThuc["tep-test-backend"]).toBe(ls("tests/*.test.js"));
-    expect(soThuc["tep-test-web"]).toBe(ls("web/src/**/*.test.ts", "web/src/**/*.test.tsx"));
+    // `**` trong pathspec của git đòi ÍT NHẤT MỘT cấp thư mục → bỏ sót tệp nằm thẳng trong
+    // web/src. Liệt kê cả cây rồi lọc bằng đuôi tên: vẫn độc lập với hàm đo (đường git khác,
+    // phép lọc khác), nhưng không dính bẫy glob.
+    const lsLoc = (thuMuc, re) => execFileSync("git", ["ls-files", thuMuc], { cwd: GOC, encoding: "utf8" }).split("\n").filter((d) => re.test(d)).length;
+    expect(soThuc["tep-test-web"]).toBe(lsLoc("web/src", /\.test\.tsx?$/));
   });
 
   it("mỗi đại lượng khai một `lenh` đo lại, và `lenh` đó phải chạy ra ĐÚNG con số", () => {
