@@ -27,7 +27,9 @@
 import { describe, it, expect } from "vitest";
 import EXTRA from "./ExtraTables.tsx?raw";
 import QUOTE_EDITOR from "../pages/QuoteEditor.tsx?raw";
-import ACCOUNT_HN from "../pages/AccountHnView.tsx?raw";
+// Dải tab của màn account Hà Nội chuyển sang component DÙNG CHUNG `HnTables.tsx` (2026-09-15):
+// cùng một dải tab nay phục vụ cả màn account HN lẫn khối "Báo Giá Hà Nội" trong trình soạn.
+import HN_TABLES from "./HnTables.tsx?raw";
 
 /**
  * Tách các thẻ JSX MỞ ra thành { tag, attrs }.
@@ -66,7 +68,7 @@ const tabBamDuoc = (code: string) =>
 const NGUON = [
   ["ExtraTables.tsx", EXTRA],
   ["QuoteEditor.tsx", QUOTE_EDITOR],
-  ["AccountHnView.tsx", ACCOUNT_HN],
+  ["HnTables.tsx", HN_TABLES],
 ] as const;
 
 describe("dải tab sheet — mọi thứ bấm được phải dùng được bằng bàn phím", () => {

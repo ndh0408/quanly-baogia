@@ -58,7 +58,7 @@ lại mỗi request.
 **Quyền nằm ở SERVER.** Ẩn menu ở frontend là tiện lợi cho người dùng, không phải
 phân quyền. Mọi endpoint tự kiểm quyền.
 
-`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 138 endpoint và
+`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 140 endpoint và
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI — **một endpoint không
 có trong ma trận là một endpoint chưa ai soát quyền**.
 
@@ -88,6 +88,13 @@ tiến trình **thoát ngay**: `DATABASE_URL`, `SESSION_SECRET` (≥32 ký tự)
 Thiếu những thứ này thì **chạy được nhưng cảnh báo to**: `PII_ENC_KEY`,
 `S3_*`, `SMTP_HOST`. Cố ý không exit — làm cả ứng dụng không lên được vì một
 tính năng phụ còn tệ hơn, nhưng im lặng thì không được.
+
+Ngoại lệ: `PII_ENC_KEY` **khi đã đặt** (không phải khi thiếu) phải mạnh ngang
+`SESSION_SECRET`/`JWT_SECRET` — production **thoát ngay** nếu nó dưới 32 ký tự hoặc trùng
+`SESSION_SECRET`/`JWT_SECRET`/`MFA_ENC_KEY` (`src/config.ts`, vá 2026-09-09). Lý do siết riêng
+khoá này: mất/yếu nó là mất PII **vĩnh viễn** (xem cảnh báo MẤT KHOÁ ngay dưới), nặng hơn hệ quả
+của một `SESSION_SECRET`/`JWT_SECRET` yếu (xoay được ngay). Thiếu hẳn `PII_ENC_KEY` vẫn chỉ cảnh
+báo như trên — đó là lựa chọn TỰ NHẬN tắt mã hoá, khác với ĐẶT một khoá yếu mà tưởng đã an toàn.
 
 `tests/env-example.test.js` chặn `.env.example` trôi khỏi schema và chặn bí mật
 thật lọt vào file mẫu.
@@ -144,10 +151,9 @@ bằng script. Nên số chỗ thật sự vướng CSP hôm nay là **3**, tấ
 
 (Trỏ theo TÊN HÀM/THUỘC TÍNH thay vì số dòng — số dòng trôi mỗi lần ai đó thêm dòng phía trên
 trong cùng file, đã xảy ra đúng một lần ở đây khi `installGlobalFocusTrap` được thêm vào
-2026-09-08. `npm run check:refs` chỉ bắt được tham chiếu SỐ DÒNG sai, không bắt được việc này —
-đây là quy ước NÊN DÙNG mà chính công cụ đó khuyến nghị ở cuối output khi tìm thấy lỗi.)
-
-(Ba số dòng trên nằm trong phạm vi `npm run check:refs` — trôi là CI báo.)
+2026-09-08. `npm run check:refs` chỉ bắt tham chiếu SỐ DÒNG trỏ vào chỗ KHÔNG THỂ là đích — dòng
+trống, dấu đóng lẻ, dòng chú thích — chứ không kiểm được NGỮ NGHĨA có khớp không, nên trỏ theo
+tên là quy ước AN TOÀN HƠN ở đúng những chỗ hay đổi dòng phía trên như file này.)
 
 Cũng đã soát các đường khác và **không có**: không chỗ nào gọi
 `setAttribute("style", …)` trong `web/src`; không chỗ nào chèn thẻ `<style>` lúc
@@ -180,11 +186,11 @@ Google Fonts.
    `npm run smoke:ui` (`scripts/ci/ui-smoke.mjs`) đã mở trình duyệt thật và **đỏ khi
    có bất kỳ lỗi console nào** — một vi phạm CSP (*"Refused to apply inline style"*)
    tự khắc làm hỏng lượt chạy, không cần thêm assertion. Lượt smoke hiện tại **đã
-   đi qua `confirmModal`** (`scripts/ci/ui-smoke.mjs:359` bấm `[data-yes]` của hộp
-   "Có thay đổi chưa lưu từ lần trước"), tức dòng 142 đã được phủ. Còn thiếu đúng
-   **`promptModal`** — hộp nhập lý do "không chốt", nơi có hai chỗ còn lại. Thêm một
-   chặng chạm vào nó là đủ. Một ô lệch định dạng là hồi quy giao diện thật, và người
-   dùng sẽ gặp trước khi ta biết.
+   đi qua `confirmModal`** (`scripts/ci/ui-smoke.mjs:368` bấm `[data-yes]` của hộp
+   "Có thay đổi chưa lưu từ lần trước"), tức bullet `confirmModal` ở trên đã được phủ.
+   Còn thiếu đúng **`promptModal`** — hộp nhập lý do "không chốt", nơi có hai chỗ còn
+   lại. Thêm một chặng chạm vào nó là đủ. Một ô lệch định dạng là hồi quy giao diện
+   thật, và người dùng sẽ gặp trước khi ta biết.
 
 **Bước lui, nếu bước 5 lòi ra chỗ chưa tìm thấy:** giữ `style-src` có
 `'unsafe-inline'` làm nền, thêm `style-src-elem 'self' https://fonts.googleapis.com`

@@ -175,7 +175,10 @@ journalctl -u quanly-backup --since '3 days ago'
 - **Nghi mất dữ liệu** → dừng ghi, chụp bản backup hiện trạng **trước khi thử
   chữa**. Xem [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
 - **Nghi bị xâm nhập** → khoá tài khoản, thu thập log, xoay `SESSION_SECRET` +
-  `JWT_SECRET` (làm mọi người phải đăng nhập lại). **Đừng xoay `PII_ENC_KEY`** —
-  xoay mà không backfill là hoá đá toàn bộ dữ liệu đã mã hoá.
+  `JWT_SECRET` (làm mọi người phải đăng nhập lại). Cần xoay cả `PII_ENC_KEY` thì
+  **đừng đổi biến rồi khởi động lại tay** — làm vậy là hoá đá toàn bộ dữ liệu đã
+  mã hoá. Theo đúng quy trình bốn bước ở
+  [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md#xoay-pii_enc_key) (`piiRotate.js`
+  rồi `verifyIntegrity.js --pii`).
 - **Quá 30 phút chưa hiểu nguyên nhân** → rollback về bản đã biết là tốt, rồi
   điều tra ngoài giờ cao điểm.

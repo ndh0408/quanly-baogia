@@ -27,6 +27,33 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 GOC="$PWD"
 
+# ── GIT BASH TRÊN WINDOWS ĐỔI ĐƯỜNG DẪN SAU LƯNG MÌNH ──────────────────────
+# Ba bước dưới đây truyền cho docker cả đường dẫn CỦA MÁY (vế trái của `-v`) lẫn đường dẫn TRONG
+# CONTAINER (`/src`, `/repo`, `--ignorefile /src/...`). Lớp MSYS của Git for Windows thấy tham số
+# bắt đầu bằng `/` thì tưởng là đường dẫn POSIX và tự dịch sang đường dẫn Windows TRƯỚC khi docker
+# nhìn thấy — `--ignorefile /src/.trivyignore.yaml` tới nơi thành
+# `C:/Program Files/Git/src/.trivyignore.yaml`. Trivy chết với "ignore file not found", semgrep
+# (`-w /src`) trả JSON rỗng nên bước đọc kết quả ném "Unexpected end of JSON input". Cổng đỏ vì
+# MÔI TRƯỜNG, không phải vì có phát hiện — mà đỏ ở chỗ không ai đoán ra.
+#
+# Trên repo này chuyện đó nghiêm trọng hơn bình thường: GitHub Actions KHÔNG bật, nên máy Windows
+# này là chỗ DUY NHẤT cổng bảo mật thật sự chạy — và nó vốn không chạy được.
+#
+# CÁCH VÁ, và vì sao KHÔNG dùng `MSYS_NO_PATHCONV=1`: công tắc đó tắt phép dịch cho MỌI tham số
+# của mọi lệnh trong script, kể cả `node -e ... "$RA_SG"` với `$RA_SG=/tmp/semgrep-$$.json` —
+# node là chương trình Windows thuần, nhận `/tmp/...` sẽ đọc `D:\tmp\...` (không tồn tại). Tức là
+# vá được docker thì hỏng chỗ đọc kết quả. Nên tách đôi:
+#   · vế TRONG CONTAINER → miễn dịch theo TIỀN TỐ, đúng ba cái đang dùng;
+#   · vế CỦA MÁY → đưa sẵn về dạng Windows (`D:/QuanLY`) để MSYS không có gì để dịch.
+# Trên Linux/macOS/CI `pwd -W` không có nên GOC_MOUNT = GOC, và biến EXCL vô nghĩa — vô hại.
+# Tiền tố phải phủ CẢ dạng `--co=/duong-dan`: MSYS2_ARG_CONV_EXCL so khớp với ĐẦU của cả tham
+# số, nên mục `/repo` KHÔNG phủ `--source=/repo` (tham số đó bắt đầu bằng `--source=`). Đo được:
+# thiếu `--source=` thì gitleaks chết bằng "FTL stat C:/Program Files/Git/repo: no such file or
+# directory" và thoát 1 — cổng đỏ trông y hệt "tìm thấy bí mật".
+export MSYS2_ARG_CONV_EXCL='/src;/repo;/root;--source=;--ignorefile=;--report-path='
+duong_dan_may() { ( cd "$1" 2>/dev/null && { pwd -W 2>/dev/null || pwd; } ) || printf '%s' "$1"; }
+GOC_MOUNT=$(duong_dan_may "$GOC")
+
 NHANH=0
 [ "${1:-}" = "--nhanh" ] && NHANH=1
 CHI="${SCAN_CHI:-}"          # SCAN_CHI=secrets|deps|sast|sbom → chỉ chạy một bước
@@ -70,12 +97,45 @@ if chay_buoc secrets; then
   #                     phải là đã xử lý;
   #   · lượt cây làm việc: bắt trước khi nó kịp thành lịch sử.
   buoc "[S1] Bí mật (gitleaks — HAI lượt: lịch sử git + cây làm việc)"
-  docker run --rm -v "$GOC:/repo" "$GITLEAKS" \
+  docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
     detect --source=/repo --redact --no-banner --exit-code 1 >/dev/null 2>&1
   ket $? "lịch sử git sạch (chi tiết: docker run --rm -v \"\$PWD:/repo\" $GITLEAKS detect --source=/repo --redact)"
-  docker run --rm -v "$GOC:/repo" "$GITLEAKS" \
-    detect --source=/repo --no-git --redact --no-banner --exit-code 1 >/dev/null 2>&1
-  ket $? "cây làm việc sạch (kể cả thay đổi chưa commit)"
+  # `--no-git` đi bộ trên HỆ TỆP, KHÔNG đọc .gitignore. Trên máy lập trình viên, thư mục đó chứa
+  # đủ thứ không thuộc repo: .env thật, .claude/ và .agents/ (bộ skill BMAD), graphify-out/, .scan/,
+  # và mấy chục script e2e-*.mjs dùng một lần. Đo được: 59 phát hiện trên 58 file — CẢ 58 đều bị
+  # .gitignore bỏ qua, tức không file nào có đường nào vào được lịch sử.
+  #
+  # Trên CI (clone sạch) chẳng file nào tồn tại, nên cổng xanh ở đó và đỏ vĩnh viễn ở đây. Một
+  # cảnh báo luôn-đỏ là một cảnh báo bị bỏ qua — nguy hiểm hơn không có cảnh báo (xem .gitleaks.toml).
+  #
+  # Nên LỌC THEO `git check-ignore` NGAY LÚC QUÉT, chứ không chép một danh sách đường dẫn vào
+  # .gitleaks.toml: danh sách chép tay sẽ trôi khỏi .gitignore, còn cách này thì không thể trôi.
+  # Cổng vẫn nguyên sức: một bí mật nằm trong file mà git THẬT SỰ theo dõi (hoặc sẽ theo dõi) vẫn
+  # làm đỏ như cũ.
+  bc_gl="$(mktemp)"
+  docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
+    detect --source=/repo --no-git --redact --no-banner \
+    --report-format json --report-path /repo/.gl-worktree.json >/dev/null 2>&1
+  ma_gl=0
+  if [ -f "$GOC/.gl-worktree.json" ]; then
+    node -e '
+      const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const files = [...new Set(d.map((f) => f.File.replace(/^\/repo\//, "")))];
+      // PHẢI có xuống dòng CUỐI: `while read` bỏ rơi dòng cuối nếu nó không kết thúc bằng\n.
+      // Đã đo: cắm một bí mật vào src/quoteUtils.ts (xếp CUỐI bảng chữ cái) → cổng vẫn XANH.
+      for (const f of files) process.stdout.write(f + "\n");
+    ' "$GOC/.gl-worktree.json" > "$bc_gl" 2>/dev/null || ma_gl=1
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      git check-ignore -q -- "$f" || { echo "  bí mật trong file git CÓ theo dõi: $f"; ma_gl=1; }
+    done < "$bc_gl"
+    rm -f "$GOC/.gl-worktree.json"
+  else
+    echo "  gitleaks không sinh được báo cáo — coi như ĐỎ chứ không im lặng cho qua"
+    ma_gl=1
+  fi
+  rm -f "$bc_gl"
+  ket $ma_gl "cây làm việc sạch (bỏ qua thứ .gitignore đã bỏ qua)"
 fi
 
 # ── [S2] LỖ HỔNG PHỤ THUỘC + CẤU HÌNH SAI + BÍ MẬT TRONG CÂY LÀM VIỆC ──────
@@ -84,9 +144,16 @@ if chay_buoc deps; then
   # `--ignore-unfixed`: lỗ hổng CHƯA CÓ BẢN VÁ thì không có hành động nào để làm — gác nó chỉ tạo
   # một cổng đỏ không ai sửa được. `--trivyignores` phải khai TƯỜNG MINH: trivy KHÔNG tự nhặt
   # .trivyignore.yaml ở gốc repo (đã kiểm — thiếu cờ này thì miễn trừ vô tác dụng).
-  docker run --rm "${CA_ARGS[@]}" -v "$GOC:/src" -v "$CACHE/trivy:/root/.cache/trivy" "$TRIVY" \
+  #
+  # `--timeout`: mặc định của trivy là 5 phút — đủ trên CI Linux, KHÔNG đủ khi /src là bind mount
+  # của Docker Desktop trên Windows: mỗi lần đọc file đi qua lớp chia sẻ, và bước quét cấu hình
+  # k8s (23 tài nguyên trong 13 file + chart Helm) hết giờ giữa chừng với
+  # "kubernetes scan error: context deadline exceeded". Hết giờ trông Y HỆT một phát hiện thật
+  # trong dòng tổng kết, nên phải nới chứ không được để nguyên.
+  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/trivy"):/root/.cache/trivy" "$TRIVY" \
     fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
-       --ignorefile /src/.trivyignore.yaml --exit-code 1 --quiet /src >/tmp/trivy-out.$$ 2>&1
+       --ignorefile /src/.trivyignore.yaml --exit-code 1 --quiet \
+       --timeout "${TRIVY_TIMEOUT:-20m}" /src >/tmp/trivy-out.$$ 2>&1
   ma=$?
   ket $ma "không lỗ hổng HIGH/CRITICAL có bản vá, không cấu hình sai"
   [ $ma -eq 0 ] || { sed -n '1,60p' /tmp/trivy-out.$$; }
@@ -103,7 +170,7 @@ if chay_buoc sast && [ "$NHANH" -eq 0 ]; then
   # `--json`: KHÔNG chỉ để lấy kết quả cho đẹp. Phần quan trọng nhất nằm ở mảng `errors` — xem
   # khối "LỖ THỦNG IM LẶNG" bên dưới.
   RA_SG="${SEMGREP_OUT:-/tmp/semgrep-$$.json}"
-  docker run --rm "${CA_ARGS[@]}" -v "$GOC:/src" -v "$CACHE/semgrep:/root/.semgrep" -w /src "$SEMGREP" \
+  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/semgrep"):/root/.semgrep" -w /src "$SEMGREP" \
     semgrep scan \
       --config p/javascript --config p/typescript \
       --config p/nodejs --config p/expressjs --config p/react \

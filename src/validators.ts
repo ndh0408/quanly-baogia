@@ -208,9 +208,15 @@ const itemSchema = z.object({
   // giá (chống base64 chảy qua payload + chống giả mạo). reconcileExtraPayments luôn lấy ảnh từ CSDL.
 });
 
-// Bảng nội bộ (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
+// Bảng nội bộ CỦA MỘT TRANG (chỉ quản lý — không xuất Excel). Dùng cùng itemSchema với lưới chính.
+//
+// "hanoi" VẪN được nhận ở tầng schema dù bảng Hà Nội đã lên `Quote.hnTables` (2026-09-15): một tab
+// chạy bundle CŨ còn gửi nó kèm `sheets`, và nếu zod chặn thì CẢ request Lưu hỏng với "Dữ liệu
+// không hợp lệ" — người dùng mất luôn phần báo giá chính vừa sửa, vì một bảng nội bộ họ không hề
+// đụng tới. Cửa ghi thứ hai được đóng ở tầng DƯỚI: `sanitizeExtraTables` (src/quoteUtils.ts) chỉ
+// nhận ["hcm","khach"] nên bảng hanoi lọt qua schema sẽ bị LOẠI trước khi chạm đĩa.
 const extraTableSchema = z.object({
-  category: z.enum(["hcm", "hanoi", "khach"]),
+  category: z.enum(["hcm", "khach", "hanoi"]),
   name: z.string().max(120).optional().nullable(),
   templateId: z.coerce.number().int().positive().optional().nullable(),   // mẫu cột (GN/CLF có/không ngày)
   groupSubtotal: z.boolean().optional(),
@@ -234,24 +240,40 @@ export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET
 //
 // Schema chỉ chặn HÌNH DẠNG (kích thước payload, kiểu dữ liệu). Phần QUYỀN — cờ duyệt/thanh toán
 // phải lấy lại từ CSDL — do saveHn xử lý; hai lớp này bổ sung nhau, không thay thế nhau.
+// TRẦN của bảng Hà Nội ở CẤP BÁO GIÁ. Trước 2026-09-15 trần là 20 bảng/TRANG × 60 trang; gộp về
+// một mảng cho cả báo giá mà giữ 20 là HẠ trần thật. Đo trên dữ liệu đang chạy (2026-09-15): nhiều
+// nhất 2 bảng và 2 dòng HN trên một báo giá — nên 60 bảng × 1000 dòng vẫn rộng gấp nhiều lần nhu
+// cầu, và bằng đúng trần của đường lưu chính nên không đẻ ra một con số thứ hai phải nhớ.
+export const MAX_HN_TABLES = MAX_SAVE_SHEETS;
+
+// LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).
+//
+// Route này TRƯỚC ĐÂY không có body schema: `saveHn` đọc thẳng `req.body?.hnSheets` rồi đưa vào
+// `sanitizeExtraTables`, mà hàm đó persist NGUYÊN TRẠNG mọi cờ do server sở hữu (`approved*`,
+// `paid*`, `paidProof`). Người dùng duy nhất gọi được endpoint này là account Hà Nội — vai trò có
+// ĐÚNG BA quyền (`quote:read:own`, `quote:update:own`, `quote:hn:fill`), KHÔNG có
+// `quote:internal:pay` cũng KHÔNG có `quote:internal:approve`. Xem tests/hn-save-forgery.test.js.
+//
+// Schema chỉ chặn HÌNH DẠNG (kích thước payload, kiểu dữ liệu). Phần QUYỀN — cờ duyệt/thanh toán
+// phải lấy lại từ CSDL — do saveHn xử lý; hai lớp này bổ sung nhau, không thay thế nhau.
+//
+// Hình dạng đổi từ `hnSheets[{ sheetId, hnTables }]` sang `hnTables[]` PHẲNG: bảng HN không còn
+// thuộc trang nào của chủ báo giá. `baseUpdatedAt` thay cho phép suy đoán "trang đã chết" đã bỏ.
 export const HnSaveSchema = z.object({
-  hnSheets: z
-    .array(
-      z.object({
-        // Sheet mới chưa lưu → client gửi null; saveHn dò không thấy thì bỏ qua sheet đó.
-        sheetId: z.coerce.number().int().positive().optional().nullable(),
-        // category do server ép cứng thành "hanoi"; client cũ có gửi kèm nên vẫn chấp nhận.
-        hnTables: z
-          .array(extraTableSchema.extend({ category: z.literal("hanoi").optional() }))
-          .max(20, "Tối đa 20 bảng Hà Nội trong một trang")
-          .default([]),
-      })
-    )
-    // PHẢI ĐI THEO trần của đường lưu. Số 50 viết tay ở đây thấp hơn MAX_SAVE_SHEETS (60): sale lưu
-    // được báo giá 60 trang, rồi account Hà Nội mở đúng báo giá đó, điền phần HN, bấm Lưu và nhận
-    // 400 — mất chức năng cho mọi báo giá 51–60 trang, đúng cỡ mà trần 60 sinh ra để phục vụ.
-    .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang`)
-    .default([]),
+  // MỐC CHỐT 409 CỦA PHẦN HÀ NỘI. Client nhận `hnRev` ở GET rồi gửi trả nguyên văn.
+  // Chuỗi ĐỤC với client (băm sha256 của phần người dùng gõ — xem quoteUtils.hnRevCua), nên
+  // 32 ký tự hex; ràng buộc độ dài để không ai nhét cả bảng vào đây.
+  baseHnRev: z.string().trim().regex(/^[0-9a-f]{32}$/, "Mốc phần Hà Nội không hợp lệ").optional(),
+  // GIỮ LẠI cho tab cũ đang mở lúc deploy: bản trước chỉ có mốc này. Khi CẢ HAI cùng có thì
+  // `baseHnRev` thắng — xem lý do ở hnWorkflow.saveHn.
+  baseUpdatedAt: z.string().max(40).optional(),
+  // CỐ Ý KHÔNG `.default([])`: Zod v4 loại khoá lạ, nên một tab chạy bundle CŨ (gửi `hnSheets`)
+  // sẽ parse ra `hnTables: []` — không phân biệt được với "người dùng vừa xoá hết bảng". Server
+  // ghi mảng rỗng = XOÁ TRẮNG phần Hà Nội, im lặng. Để `optional()` thì saveHn nhận ra và 400.
+  hnTables: z
+    .array(extraTableSchema.omit({ category: true }))
+    .max(MAX_HN_TABLES, `Tối đa ${MAX_HN_TABLES} bảng Hà Nội trong một báo giá`)
+    .optional(),
 });
 
 const sheetSchema = z.object({
@@ -322,6 +344,9 @@ const quoteSheetsSchema = z
   .max(MAX_SAVE_SHEETS, `Tối đa ${MAX_SAVE_SHEETS} trang trong một báo giá`);
 
 export const QuoteCreateSchema = z.object({
+  // Trình soạn cho gõ phần Hà Nội ngay khi TẠO báo giá. Thiếu khoá này thì zod cắt sạch và người
+  // dùng mất phần vừa gõ mà không một lỗi nào hiện ra.
+  hnTables: z.array(extraTableSchema.omit({ category: true })).max(MAX_HN_TABLES).optional(),
   // quoteNumber is server-generated; allow override but not required
   quoteNumber: z.string().max(40).optional(),
   title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự"),
@@ -366,6 +391,10 @@ export const QuoteCreateSchema = z.object({
 // Here every field is truly optional with NO default: absent => undefined =>
 // the handler skips it, so only fields the client actually sent get updated.
 export const QuoteUpdateSchema = z.object({
+  // Bảng Hà Nội cấp báo giá. Chủ báo giá sửa phần HN qua ĐÚNG đường lưu này (khối "Báo Giá Hà Nội"
+  // trong trình soạn); account Hà Nội thì đi đường riêng PUT /:id/hn. Vắng mặt = KHÔNG đụng tới —
+  // client cũ không gửi khoá này nên phần HN của họ không bị xoá trắng.
+  hnTables: z.array(extraTableSchema.omit({ category: true })).max(MAX_HN_TABLES).optional(),
   quoteNumber: z.string().max(40).optional(),
   title: z.string().min(1, "Vui lòng nhập tiêu đề báo giá").max(500, "Tiêu đề tối đa 500 ký tự").optional(),
   shortTitle: z.string().max(120, "Tiêu đề rút gọn tối đa 120 ký tự").optional().nullable(),

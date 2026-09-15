@@ -35,13 +35,13 @@ React không có:
    quan khi trường đó có mặt (`src/services/quoteService.ts`), nên mọi lần lưu từ
    `/app` **không bao giờ** kích hoạt kiểm tra — hai người sửa cùng báo giá thì
    người bấm sau ghi đè người bấm trước, không có 409, không cảnh báo.
-   React thì gửi (`web/src/pages/QuoteEditor.tsx:230`).
+   React thì gửi (`web/src/pages/QuoteEditor.tsx:389`).
 
 2. **Mất số hoá đơn / ngày thanh toán / chữ ký / duyệt khách.** Cùng chỗ đó,
    payload sheet **không có `id: s.id`**. Lưu báo giá = xoá sheet rồi tạo lại, nên
    `updateQuote` phải bê `SHEET_CARRY_FIELDS` (`invoiceNo`, `paidAt`, `signedAt`,
    `custStatus`, `poNumber`, `hnInvoiceNo`… — 22 trường ở
-   `src/quoteUtils.ts:278`) sang bản mới. Không có `id`, nó phải ghép **theo vị
+   `src/quoteUtils.ts:403`) sang bản mới. Không có `id`, nó phải ghép **theo vị
    trí**; thêm sheet, xoá sheet hay đổi thứ tự là các mốc đó bê nhầm sheet hoặc
    mất trắng.
 
@@ -57,7 +57,7 @@ Gỡ hẳn:
   `public/grid-clipboard.js`.
 - Bỏ route `/app` · `/app/*` và hàm `sendOld` trong `src/app.ts`.
 - Giữ `public/style.css` — nó **không** thuộc SPA cũ: React import nó qua Vite
-  (`web/src/main.tsx:9`), nên Vite tự băm và cache-bust.
+  (`web/src/main.tsx:10`), nên Vite tự băm và cache-bust.
 
 Không có lớp tương thích, không có cờ bật/tắt. Một frontend, một đường.
 

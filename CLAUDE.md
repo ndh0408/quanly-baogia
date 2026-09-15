@@ -12,8 +12,9 @@
 
 ## BMAD (đã cài — 89 skill)
 
-BMAD v6 cài trong repo này ngày 2026-07-28. Skill nằm ở `.claude/skills/bmad-*` và `wds-*`,
-config ở `_bmad/`, sản phẩm sinh ra ghi vào `_bmad-output/`.
+BMAD v6 cài trong repo này ngày 2026-07-28. Skill nằm ở `.claude/skills/bmad-*` và `wds-*`
+(cộng 2 tool nội bộ của `wds` không theo tiền tố: `memory`, `sync`), config ở `_bmad/`, sản phẩm
+sinh ra ghi vào `_bmad-output/`.
 
 Module đã cài: `core` · `bmm` · `cis` · `tea` · `wds` · `bmb` · `bmad-loop` (**không** cài `gds`).
 
@@ -67,8 +68,9 @@ Muốn đổi cấu hình BMAD thì **chạy lại installer** với `--set`, đ
 **Đừng dùng** — trùng thứ repo đã có:
 - `bmad-code-review`, `bmad-review-adversarial-general` → đã có `coderabbit:code-review`,
   `/code-review`, `/security-review`, `AUDIT_REPORT.md`, `.scan/`.
-- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có 30 vitest + 39 script
-  `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác chỉ làm phình.
+- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có 205 test backend + 23 test web
+  (vitest) + 46 script `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác
+  chỉ làm phình.
 - `bmad-agent-*` (persona) → chỉ là menu router, gọi thẳng skill nhanh hơn.
 - Nhóm `bmad-cis-*` và `wds-*` → dựng cho sản phẩm bán ra thị trường có khách ngoài;
   QuanLY là công cụ nội bộ, không có thị trường/khách hàng/nhà đầu tư để phục vụ.
@@ -96,3 +98,13 @@ Nhân đôi tài liệu thì hai bản sẽ trôi khỏi nhau — câu hỏi ch�
 ước chung nằm ở **một chỗ** (`AGENTS.md`), còn đây giữ đúng phần thật sự riêng
 của Claude Code: bộ skill BMAD cài cục bộ (`.claude/` và `_bmad/` đều nằm trong
 `.gitignore` — chúng KHÔNG có trong bản clone).
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

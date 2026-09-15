@@ -4,6 +4,7 @@ import {
   presentQuoteRow,
   buildSheetsCreate,
   sanitizeExtraTables,
+  sanitizeHnTables,
   extraTableSum,
   tenFileXuat,
 } from "../src/quoteUtils.js";
@@ -78,10 +79,13 @@ describe("quoteUtils (extracted pure helpers)", () => {
         customer: { code: "KH26009", name: "Bí Mật" }, hnStatus: "assigned",
         company: { id: 2, name: "Gia Nguyễn", shortName: "GN" },
         createdBy: { id: 3, displayName: "Chị Quản Lý" }, _count: { sheets: 1 },
+        // Bảng Hà Nội ở CẤP BÁO GIÁ từ 2026-09-15; hcm vẫn theo trang và KHÔNG tính vào tổng HN.
+        hnTables: [
+          { items: [{ kind: "item", quantity: 2, unitPrice: 1000 }] },  // 2000
+          { items: [{ kind: "item", quantity: 1, unitPrice: 500, days: 3 }] }, // 1500
+        ],
         sheets: [{ extraTables: [
           { category: "hcm", items: [{ kind: "item", quantity: 9, unitPrice: 9999 }] },   // KHÔNG tính vào HN
-          { category: "hanoi", items: [{ kind: "item", quantity: 2, unitPrice: 1000 }] },  // 2000
-          { category: "hanoi", items: [{ kind: "item", quantity: 1, unitPrice: 500, days: 3 }] }, // 1500
         ] }],
       }, { hnOnly: true });
       // Phải có: định danh + người giao + trạng thái HN
@@ -124,6 +128,10 @@ describe("quoteUtils (extracted pure helpers)", () => {
     it("returns undefined for empty / drops invalid categories", () => {
       expect(sanitizeExtraTables([])).toBeUndefined();
       expect(sanitizeExtraTables([{ category: "bogus", items: [] }])).toBeUndefined();
+      // "hanoi" KHÔNG còn hợp lệ ở đường TRANG (từ 2026-09-15 nó là cột riêng `Quote.hnTables`).
+      // Chốt này chặn cửa ghi thứ hai: một tab cũ gửi bảng hanoi kèm `sheets` sẽ nằm lại trong
+      // trang, vô hình với màn account HN, và bị cộng THÊM một lần vào tổng HN.
+      expect(sanitizeExtraTables([{ category: "hanoi", items: [] }])).toBeUndefined();
     });
     it("keeps valid categories", () => {
       const out = sanitizeExtraTables([{ category: "hcm", name: "x", items: [{ kind: "item", name: "a", quantity: 1, unitPrice: 2 }] }]);
@@ -131,12 +139,12 @@ describe("quoteUtils (extracted pure helpers)", () => {
       expect(out[0].category).toBe("hcm");
     });
     it("giữ MỌI sheet Hà Nội + dữ liệu (account thêm nhiều sheet, kể cả sheet trống, không mất)", () => {
-      const out = sanitizeExtraTables([
-        { category: "hanoi", name: "Bảng 1", templateId: 3, groupSubtotal: true, items: [
+      const out = sanitizeHnTables([
+        { name: "Bảng 1", templateId: 3, groupSubtotal: true, items: [
           { kind: "item", name: "Vách", quantity: 2, unitPrice: 1000 },
           { kind: "section", label: "A", name: "Nhóm A", quantity: 3 },
         ] },
-        { category: "hanoi", name: "Bảng 2", templateId: 3, groupSubtotal: false, items: [
+        { name: "Bảng 2", templateId: 3, groupSubtotal: false, items: [
           { kind: "item", name: "Sàn", quantity: 5, unitPrice: 200, days: 2 },
         ] },
         { category: "hanoi", name: "Bảng 3 trống", templateId: 3, items: [] }, // sheet trống vẫn phải giữ → tab không biến mất

@@ -89,10 +89,13 @@ router.get(
     const { id } = req.params;
     const quote = await prisma.quote.findFirst({
       where: { id: id as unknown as number },
+      // Cột jsonb `hnTables` (bảng Hà Nội cấp báo giá, từ 2026-09-15) cũng KHÔNG vào file gửi khách
+      // và cũng chứa `paidProof` base64 — omit ngang hàng `include`, cùng lý lẽ với `extraTables`.
+      omit: { hnTables: true },
       include: {
         company: true,
         customer: { select: { code: true } },   // tenFileXuat cần mã KH
-        members: { select: { id: true } },
+        members: { select: { userId: true, scopes: true } },
         sheets: {
           orderBy: { order: "asc" },
           // KHÔNG kéo cột jsonb `extraTables`: excel.ts/pdf.ts KHÔNG đọc nó (bảng nội bộ HCM/HN/Phí KH
@@ -143,10 +146,13 @@ router.get(
     const { id } = req.params;
     const quote = await prisma.quote.findFirst({
       where: { id: id as unknown as number },
+      // Cột jsonb `hnTables` (bảng Hà Nội cấp báo giá, từ 2026-09-15) cũng KHÔNG vào file gửi khách
+      // và cũng chứa `paidProof` base64 — omit ngang hàng `include`, cùng lý lẽ với `extraTables`.
+      omit: { hnTables: true },
       include: {
         company: true,
         customer: { select: { code: true } },   // tenFileXuat cần mã KH
-        members: { select: { id: true } },
+        members: { select: { userId: true, scopes: true } },
         sheets: {
           orderBy: { order: "asc" },
           omit: { extraTables: true },   // xem chú thích ở nhánh .xlsx phía trên

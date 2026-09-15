@@ -119,3 +119,20 @@ dump.rdb
 # SBOM sinh ra bởi scripts/ci/security-scan.sh — dựng lại được từ package-lock.json,
 # không phải mã nguồn. Bản đi kèm mỗi lần phát hành thì lưu ở nơi phát hành, không lưu ở đây.
 sbom.cdx.json
+
+# Đồ hoạ tri thức do graphify sinh (graph.json + cache + bản .md chuyển từ .xlsx/.docx).
+# Dựng lại được bằng `/graphify .`, phình theo mỗi lần build — không phải mã nguồn.
+graphify-out/
+
+# Hook cục bộ do `graphify hook install` sinh — dựng lại graph sau commit/checkout.
+# graphify-out/ đã bị ignore nên graph là vật phẩm CỤC BỘ; hook nuôi nó cũng phải cục bộ,
+# không đẩy phụ thuộc graphify sang máy người khác.
+.husky/post-commit
+.husky/post-checkout
+
+# bản sao lưu .env do Claude tạo ngày 2026-09-15 (chứa bí mật THẬT — không bao giờ commit)
+.env.truoc-khi-claude-sua
+
+# Cấu hình hook CỤC BỘ của Codex CLI — cùng loại với .claude/ ngay trên: công cụ của MỘT máy,
+# không phải của dự án. Đẩy lên là bắt máy người khác chạy hook họ không cài.
+.codex/

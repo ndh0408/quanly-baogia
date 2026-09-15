@@ -95,6 +95,7 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 | `scripts/ci/check-shell-strict.mjs` | Script shell thiếu `set -euo pipefail` — lỗi giữa chừng đi tiếp im lặng (đã từng nuốt trọn một lượt migration hỏng) |
 | `scripts/ci/check-deps.mjs` | Phụ thuộc lệch giữa `package.json` và `package-lock.json`, hoặc gói chỉ-dev lọt vào `dependencies` |
 | `scripts/ci/repo-stats.mjs --check` | README công bố số liệu sai (đã từng ghi hai số model mâu thuẫn nhau) |
+| `scripts/ci/gen-changelog.mjs --check` | `CHANGELOG.md` lệch khỏi lịch sử `git log` — sửa tay hoặc quên sinh lại sau khi commit (sinh lại: `npm run check:changelog`) |
 | `tests/env-example.test.js` | `.env.example` thiếu biến mà production BẮT BUỘC phải có |
 | `REQUIRE_DB_TESTS=1` | Cổng xanh trong khi test tích hợp lặng lẽ bỏ qua |
 

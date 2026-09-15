@@ -250,9 +250,13 @@ export async function updateUser(req: Request) {
     await revokeAllForUser(id);
     await destroyAllSessions(id);
   }
-  // Off-boarding: a deactivated user must not linger in _QuoteMembers (it would
-  // keep stale references and, on a later hard-purge, drop silently via cascade).
-  // Drop their quote memberships explicitly + audit.
+  // Off-boarding: KHOÁ tài khoản KHÔNG còn gỡ họ khỏi các báo giá được phân công.
+  // Trước 2026-09-15 nhánh này xoá sạch membership, hồi đó chấp nhận được vì "là thành viên"
+  // chỉ là một BIT dựng lại bằng một cú tick. Nay mỗi hàng còn mang PHẠM VI do chủ báo giá tự
+  // tick (QuoteMember.scopes) — xoá là mất cấu hình, không có đường hoàn tác (nhật ký chỉ ghi
+  // `after`). Khoá một hôm rồi mở lại là phải tick lại toàn bộ.
+  // Chặn truy cập KHÔNG dựa vào việc xoá hàng này: phiên bị huỷ ngay dưới đây, refresh-token bị
+  // đốt, và `enforceActiveUser` chặn mọi request kế tiếp.
   if (before.active && user.active === false) {
     revokeSession(user.id, "deactivated");
     // Off-boarding containment (parity with the password branch): burn refresh-token
@@ -260,10 +264,12 @@ export async function updateUser(req: Request) {
     // enforceActiveUser tearing the session down on the next request.
     await revokeAllForUser(id);
     await destroyAllSessions(id);
-    const dropped = await prisma.quote.findMany({ where: { members: { some: { id } } }, select: { id: true } });
-    if (dropped.length) {
-      await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });
-      await audit(req, "user.memberships.cleared", { resource: "user", resourceId: id, after: { quoteIds: dropped.map((q) => q.id) } });
+    const giuLai = await prisma.quoteMember.findMany({ where: { userId: id }, select: { quoteId: true, scopes: true } });
+    if (giuLai.length) {
+      await audit(req, "user.memberships.retained", {
+        resource: "user", resourceId: id,
+        after: { quoteIds: giuLai.map((m) => m.quoteId), scopes: Object.fromEntries(giuLai.map((m) => [m.quoteId, m.scopes])) },
+      });
     }
   } else if (before.role !== user.role || JSON.stringify(before.permissions) !== JSON.stringify(user.permissions)) {
     // Đổi vai trò HOẶC tích quyền per-user → đẩy SSE để client tải lại /me, cập nhật ẩn/hiện ngay (server đã
@@ -340,9 +346,18 @@ export async function deleteUser(req: Request) {
     throw httpError(409, `Tài khoản đang gắn với ${count} báo giá. Hãy khóa tài khoản thay vì xóa.`);
   }
   const before = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
-  // Drop quote memberships before removing the user so the M2M carries no stale
-  // reference (and a later hard-purge can't drop it silently via cascade).
-  await prisma.user.update({ where: { id }, data: { memberQuotes: { set: [] } } });
+  // XOÁ hẳn tài khoản thì dọn phân công: `user.delete` là xoá MỀM (middleware) nên FK Cascade
+  // không bao giờ chạy — không dọn tay là hàng QuoteMember trỏ tới người không còn tồn tại.
+  // Chốt 409 phía trên chỉ đếm báo giá họ TẠO/DUYỆT, nên một tài khoản chỉ làm account phụ vẫn xoá
+  // được — ghi lại phạm vi sắp mất, nếu không nhật ký không trả lời được "ai đã được giao gì".
+  const phanCong = await prisma.quoteMember.findMany({ where: { userId: id }, select: { quoteId: true, scopes: true } });
+  if (phanCong.length) {
+    await audit(req, "user.memberships.cleared", {
+      resource: "user", resourceId: id,
+      before: { quoteIds: phanCong.map((m) => m.quoteId), scopes: Object.fromEntries(phanCong.map((m) => [m.quoteId, m.scopes])) },
+    });
+  }
+  await prisma.quoteMember.deleteMany({ where: { userId: id } });
   await prisma.user.delete({ where: { id } }); // soft-delete via middleware
   revokeSession(id, "deleted");
   await audit(req, "user.delete", { resource: "user", resourceId: id, before });

@@ -26,13 +26,25 @@ BASE="http://127.0.0.1:${PORT}"
 # là chạm vào CSDL thật. Ai chạy tay khi shell đang export DATABASE_URL của production thì lượt
 # này sẽ chạm đúng vào đó (một lần đăng nhập sai → một dòng nhật ký kiểm toán). `verify-local.sh`
 # đã chặn sẵn chuyện đó ở đầu file; chạy tay thì tự chịu trách nhiệm.
-: "${NODE_ENV:=production}"
+# NODE_ENV BỊ ÉP, không phải mặc định: cổng này tên là "artifact PRODUCTION chạy thật", ép thì mới
+# đúng tên. `verify-local.sh` export NODE_ENV=test cho cả lượt chạy (các bài test cần), nên nếu
+# dòng này là `: "${NODE_ENV:=production}"` thì lượt verify sẽ smoke bản production Ở CHẾ ĐỘ TEST:
+# vừa không kiểm được thứ cần kiểm, vừa ĐỎ GIẢ — ở chế độ test pino in ra dạng đẹp mắt, còn bước
+# kiểm worker bên dưới thì `grep '"msg":"worker registered"'` tức dạng JSON, không bao giờ khớp.
+NODE_ENV=production
 : "${APP_BASE_URL:=http://localhost:${PORT}}"
 : "${SESSION_SECRET:=smoke-session-secret-long-enough-for-the-validator}"
 : "${JWT_SECRET:=smoke-jwt-secret-different-from-session-and-long-enough}"
 : "${MFA_ENC_KEY:=smoke-mfa-encryption-key-for-ci-only}"
 : "${METRICS_TOKEN:=smoke-metrics-token}"
-export NODE_ENV APP_BASE_URL SESSION_SECRET JWT_SECRET MFA_ENC_KEY METRICS_TOKEN
+# PII_ENC_KEY cũng BỊ ÉP, cùng lý do với NODE_ENV ở trên. `verify-local.sh` export một khoá cỡ
+# test (`verify-local-pii-key-16+`) cho 165 file test dùng chung; ở NODE_ENV=production bộ kiểm
+# cấu hình đòi ≥ 32 ký tự nên khoá đó làm server CHẾT NGAY lúc khởi động — cổng đỏ vì khoá của
+# người gọi, không phải vì artifact hỏng. Khoá dưới đây là rác dùng một lần, đủ dài, và khác cả
+# ba khoá kia (bộ kiểm cũng đòi khác nhau). CI (ci.yml:208) không truyền biến này; đặt ở đây còn
+# chạy thêm được đường khởi tạo mã hoá PII mà CI đang bỏ trống.
+PII_ENC_KEY=smoke-pii-encryption-key-for-ci-only-32-plus-chars
+export NODE_ENV APP_BASE_URL SESSION_SECRET JWT_SECRET MFA_ENC_KEY METRICS_TOKEN PII_ENC_KEY
 
 LOG="$(mktemp)"
 WLOG="$(mktemp)"

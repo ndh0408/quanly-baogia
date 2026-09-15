@@ -122,7 +122,7 @@ async function canAccessKey(session: Request["session"], key: unknown) {
     if (!m) return false;
     const quote = await prisma.quote.findFirst({
       where: { quoteNumber: m[1] },
-      include: { members: { select: { id: true } } },
+      include: { members: { select: { userId: true, scopes: true } } },
     });
     // CÙNG MỘT ĐIỀU KIỆN với hai đường xuất kia (export.routes.ts mount requirePermission(QUOTE_EXPORT)
     // cho .xlsx/.pdf; jobs.routes.ts lặp lại chốt đó cho xuất nền). Trước đây nhánh này chỉ hỏi

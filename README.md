@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**29 Prisma models · 138 HTTP endpoints · 178 test files**
+**30 Prisma models · 140 HTTP endpoints · 205 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -65,7 +65,7 @@ The parts that took the actual work:
 | Layer | Technology |
 |---|---|
 | API | Node.js 22 · **TypeScript 5.7** · Express 4 · Zod 4 validation |
-| Data | PostgreSQL · **Prisma 7** (29 models) · Redis (ioredis) |
+| Data | PostgreSQL · **Prisma 7** (30 models) · Redis (ioredis) |
 | Auth | Cookie sessions + JWT access/refresh · bcrypt · TOTP 2FA (speakeasy) · role + per-user permissions |
 | Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) with a Redis Pub/Sub backplane |
 | Background work | BullMQ workers on Redis |
@@ -90,10 +90,22 @@ The same app grew two more modules the business needed:
 - **Project tracking** — closed quotations laid out by sheet/invoice, with
   internal cost grids (HCM cost / Hà Nội quote / customer fees) that are
   deliberately *excluded* from customer-facing Excel output.
+- **Per-quote collaborators** — the owner can add a colleague to *one*
+  quotation (`QuoteMember`) with a scope per area: `main` · `hcm` · `hanoi` ·
+  `khach`. The quotation stays entirely the owner's: a collaborator may export
+  but never duplicate it or close the deal, and an empty scope list means
+  read-only (deny by default — `src/permissions.ts`).
+- **Hà Nội pricing is its own workspace**, not a slice of the owner's sheets.
+  It lives in `Quote.hnTables` at *quotation* level, so the Hà Nội account gets
+  the full grid — add/rename/delete sheets, paste from Excel, import a file,
+  formulas — without ever seeing how many sheets the owner has or what they are
+  called. Customer details are inherited, never re-entered.
 
 Quotation lifecycle is intentionally not an internal approval chain — the only
-approval that matters is the customer's: `Draft → Customer confirmed / declined`.
-An earlier internal review queue was removed once it proved to be ceremony.
+approval that matters is the customer's: `draft → converted` (they agreed) or
+`draft → lost` (they declined). An earlier internal review chain
+(`pending → approved → sent`) was removed from the flow; those values stay in
+`QuoteStatus` (`prisma/schema.prisma`) only so old rows don't need a migration.
 
 ## Running it
 

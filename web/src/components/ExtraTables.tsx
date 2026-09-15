@@ -9,7 +9,9 @@ import { confirmModal, toast, useEscClose } from "../lib/ui";
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
 // nhưng KHÔNG xuất Excel. Tổng từng loại đổ riêng sang "Quản lý dự án" (HCM/Phí-KH chỉ cộng hàng ĐÃ DUYỆT).
 
-const EXTRA_CATS: [string, string][] = [["hcm", "Chi Phí HCM"], ["hanoi", "Báo Giá Hà Nội"], ["khach", "Phí Khách Hàng"]];
+// "Báo Giá Hà Nội" KHÔNG còn ở đây từ 2026-09-15: nó lên cấp BÁO GIÁ (Quote.hnTables) và có màn
+// riêng — xem components/HnTables.tsx. Bảng theo TRANG nay chỉ còn hai loại.
+const EXTRA_CATS: [string, string][] = [["hcm", "Chi Phí HCM"], ["khach", "Phí Khách Hàng"]];
 
 export type ExtraTable = { category: string; templateId?: number; name?: string; groupSubtotal?: boolean; items: ItemK[]; _k?: number };
 type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; templateId?: number };
@@ -82,13 +84,24 @@ export async function removeExtraTableAt(
   return r.removed;
 }
 
-export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
+  /**
+   * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
+   * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable`: cột THANH
+   * TOÁN cũng gác bằng nó, mà thanh toán là năng lực ĐỘC LẬP với việc báo giá còn sửa được hay
+   * không (kế toán vẫn tích được trên báo giá đã chốt). Không truyền → mọi loại đều trong phạm vi,
+   * hành vi y như trước (AccountHnView đang gọi như vậy). Là HÀM chứ không phải Set/mảng:
+   * gridPropsEqual bỏ qua prop hàm nên memo của lưới không bị phá.
+   */
+  editableCat?: (cat: string) => boolean;
   canPay?: boolean; quoteId?: number; onMarkDirty: () => void;
   /** Mốc `updatedAt` MỚI sau khi route /pay bump — editor phải nhận để khỏi tự đâm 409 giả (xem ExtraPayDialog). */
   onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const [, setTick] = useState(0);
+  const trongPhamVi = (cat: string) => (editableCat ? editableCat(cat) : true);
+  const suaDuoc = (cat: string) => editable && trongPhamVi(cat);
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
   const [payRow, setPayRow] = useState<ItemK | null>(null); // hàng đang mở dialog thanh toán
@@ -134,7 +147,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
 
   return (
     <details className="extra-collapse">
-      <summary className="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— HCM {M.fmtMoney(catTotal("hcm"))} · HN {M.fmtMoney(catTotal("hanoi"))} · KH {M.fmtMoney(catTotal("khach"))} · {tables.length} sheet (bấm để mở)</span></summary>
+      <summary className="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— HCM {M.fmtMoney(catTotal("hcm"))} · KH {M.fmtMoney(catTotal("khach"))} · {tables.length} sheet (bấm để mở)</span></summary>
       <div className="extra-tables-wrap">
         <div className="extra-head"><div><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG; Tổng từng loại đổ riêng sang Quản lý dự án. Sheet đầy đủ như báo giá (template · công thức · nhóm · copy/paste) nhưng KHÔNG xuất Excel.</span></div></div>
 
@@ -147,7 +160,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                 <div className="extra-cat-grouphead">
                   <span className={`extra-cat-badge cat-${cat}`}>{label}</span>
                   <span className="extra-cat-total" data-cat={cat}>Tổng: <strong>{M.fmtMoney(catTotal(cat))}</strong> <span className="muted">→ Quản lý dự án</span></span>
-                  {editable && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
+                  {suaDuoc(cat) && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
                   <span className="muted" style={{ fontSize: 11.5 }}>{idxs.length} sheet</span>
                 </div>
                 {idxs.length > 0 && (
@@ -167,7 +180,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
                         {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
                             handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
-                        {editable && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
+                        {suaDuoc(cat) && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
                           aria-label={`Xoá sheet nội bộ ${i + 1}`}
                           onClick={(e) => { e.stopPropagation(); void removeTable(i); }}
                           onKeyDown={(e) => e.stopPropagation()}>✕</button>}
@@ -180,14 +193,17 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                   <div className="extra-table extra-table-inline">
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
-                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
-                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
-                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
+                          bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
+                          xong mới báo là kiểu tệ nhất). */}
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.filter(([v]) => v === t.category || suaDuoc(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
                     <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
-                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
+                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false}
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
-                      payCol canPay={!!canPay && !!quoteId}
+                      payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}
                       onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
                   </div>
@@ -208,8 +224,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
 }
 
 // Dialog tích "đã thanh toán" + up ẢNH chứng từ cho 1 HÀNG nội bộ (gọi API /pay — không lưu cả báo giá).
-export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuoteTouched }: {
-  quoteId: number; sheetId: number; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
+export function ExtraPayDialog({ quoteId, sheetId, hn, item, onClose, onSaved, onQuoteTouched }: {
+  /** `hn` = hàng thuộc bảng Hà Nội (cấp báo giá, không có sheetId) → gọi cặp route /hn/:rid/*. */
+  quoteId: number; sheetId?: number | null; hn?: boolean; item: ItemK; onClose: () => void; onSaved: (paid: boolean, hasProof: boolean) => void;
   onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const it = item as Record<string, unknown>;
@@ -219,7 +236,7 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuo
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const [saving, setSaving] = useState(false);
   const rid = String(it.rid);
-  useEffect(() => { if (it.hasPaidProof) api.getExtraProof(quoteId, sheetId, rid).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, rid, it.hasPaidProof]);
+  useEffect(() => { if (it.hasPaidProof) (hn ? api.getHnProof(quoteId, rid) : api.getExtraProof(quoteId, sheetId as number, rid)).then((r) => setExisting(r.paidProof)).catch(() => {}); }, [quoteId, sheetId, hn, rid, it.hasPaidProof]);
   const onFile = async (f: File | undefined) => {
     if (!f) return;
     if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) { toast("Chỉ nhận ảnh PNG/JPG/WEBP", "error"); return; }
@@ -228,7 +245,9 @@ export function ExtraPayDialog({ quoteId, sheetId, item, onClose, onSaved, onQuo
   const save = async () => {
     setSaving(true);
     try {
-      const r = await api.markExtraPay(quoteId, sheetId, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
+      const r = hn
+        ? await api.markHnPay(quoteId, rid, paid, paid && proof ? proof : (paid ? undefined : ""))
+        : await api.markExtraPay(quoteId, sheetId as number, rid, paid, paid && proof ? proof : (paid ? undefined : ""));
       // Route /pay BUMP `Quote.updatedAt` để chống lost-update chéo. Người tích ô này thường ĐANG MỞ
       // chính báo giá đó, mà editor gửi `baseUpdatedAt` đã tải lúc Lưu — không nhận mốc mới thì lần
       // Lưu kế tiếp ăn 409 "Báo giá vừa được người khác cập nhật" do CHÍNH HỌ, và phần vừa gõ có

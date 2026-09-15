@@ -209,7 +209,29 @@ ssh "$SSH" "docker tag $IMAGE $IMAGE_SHA"
 # trong dependencies nên có trong image; migrate deploy tự lấy advisory-lock (an toàn nhiều instance).
 # Nếu FAIL → set -e dừng deploy TẠI ĐÂY, app cũ vẫn chạy (không kẹt nửa-vời).
 echo "▶ [4/6] DB migrate (prisma migrate deploy)"
-ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate deploy"
+if ! ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate deploy"; then
+  echo ""
+  echo "✖ [4/6] MIGRATE HỎNG. App CŨ vẫn đang chạy — chưa ai bị ảnh hưởng. ĐỌC HẾT TRƯỚC KHI GÕ LẠI."
+  echo ""
+  echo "  Vài migration đặt SET lock_timeout='10s' để không treo cả CSDL khi có ai đang giữ khoá"
+  echo "  bảng. Hết giờ thì Postgres huỷ lệnh (SQLSTATE 55P03) và Prisma ghi migration đó là"
+  echo "  FAILED. Điều quan trọng: chạy LẠI deploy.sh KHÔNG tự khỏi — prisma từ chối đi tiếp khi"
+  echo "  còn một migration FAILED, nên mọi lượt sau đều hỏng y hệt cho tới khi có người gỡ tay."
+  echo ""
+  echo "  1) Xem migration nào hỏng và vì sao:"
+  echo "       ssh $SSH \"cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate status\""
+  echo ""
+  echo "  2) Nếu hỏng vì lock_timeout (55P03) — migration KHÔNG ghi được gì, mọi lệnh nằm trong"
+  echo "     một transaction nên đã rollback sạch. Đánh dấu nó là đã-lùi rồi chạy lại deploy:"
+  echo "       ssh $SSH \"cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate resolve --rolled-back <ten_migration>\""
+  echo ""
+  echo "  3) Tìm ai đang giữ khoá trước khi thử lại, nếu không sẽ hết giờ lần nữa:"
+  echo "       SELECT pid, state, left(query,80) FROM pg_stat_activity WHERE datname='quanly' AND state<>'idle';"
+  echo ""
+  echo "  ĐỪNG dùng 'migrate resolve --applied': nó nói dối rằng migration ĐÃ chạy, và lượt sau sẽ"
+  echo "  bỏ qua nó — schema thiếu cột trong khi mã mới tưởng đã có."
+  exit 1
+fi
 
 echo "▶ [5/6] Recreate app + worker"
 # `--force-recreate` KHÔNG phải để cho chắc — nó vá một lỗi ĐÃ ĐO ĐƯỢC.

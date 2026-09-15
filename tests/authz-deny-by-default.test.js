@@ -23,7 +23,7 @@ describe("quoteScopeWhere — ba trạng thái tách bạch", () => {
 
   it("quote:read:own → lọc theo người tạo HOẶC thành viên", () => {
     expect(quoteScopeWhere(sess(7, [P.QUOTE_READ_OWN]))).toEqual({
-      OR: [{ createdById: 7 }, { members: { some: { id: 7 } } }],
+      OR: [{ createdById: 7 }, { members: { some: { userId: 7 } } }],
     });
   });
 

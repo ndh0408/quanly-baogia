@@ -9,8 +9,9 @@ Prompt §30 và Phụ lục §8 nói cùng một điều, theo hai hướng:
 > Không chuyển sang SSO nếu business chưa cần.
 > Nhưng **không được thiết kế auth khiến sau này không thể thêm SSO**.
 
-Hiện trạng đo được (`grep -rniE "oidc|openid|entra|keycloak|okta|saml|sso" src/ prisma/schema.prisma`
-→ **0 kết quả**): xác thực hoàn toàn là tài khoản nội bộ — `User.username` + `passwordHash` bcrypt,
+Hiện trạng đo được (`grep -rniE "\b(oidc|openid|entra|keycloak|okta|saml|sso)\b" src/ prisma/schema.prisma`
+→ **0 kết quả**; bản không có `\b` từng cho 0 nhưng nay khớp nhầm "processor", "central",
+"crossOrigin" — phải chặn biên từ mới còn đúng): xác thực hoàn toàn là tài khoản nội bộ — `User.username` + `passwordHash` bcrypt,
 phiên `express-session`, MFA TOTP, JWT Bearer cho client API.
 
 Business: hai công ty, vài chục người dùng, không có thư mục danh tính doanh nghiệp nào đang chạy.

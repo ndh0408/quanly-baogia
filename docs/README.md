@@ -53,6 +53,7 @@ docs/
 │   ├── DEPLOYMENT.md
 │   ├── MONITORING.md
 │   ├── REVERSE_PROXY.md    Cloudflare Tunnel · trust proxy · IP client thật
+│   ├── BACKUP_RESTORE.md   cơ chế sao lưu: cái gì chạy, khi nào, kiểm bằng cách nào
 │   ├── DISASTER_RECOVERY.md
 │   ├── INCIDENT_RESPONSE.md
 │   └── SLO.md

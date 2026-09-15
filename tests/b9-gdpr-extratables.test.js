@@ -46,7 +46,11 @@ describe("gdprService — giữ dữ liệu bảng nội bộ, và cắt ảnh �
   });
 
   it("vẫn cắt ẢNH khác như cũ: customerLogo và item.images", () => {
-    expect(boChuThich).toMatch(/omit:\s*\{\s*customerLogo:\s*true\s*\}/);
+    // `hnTables` (bảng Hà Nội cấp báo giá, 2026-09-15) cũng phải bị cắt ở CÙNG chỗ đó — nó cũng
+    // chứa paidProof base64. Nên khớp "có customerLogo: true trong khối omit" chứ không khớp khối
+    // omit CHỈ CÓ customerLogo, nếu không mọi cột nặng thêm về sau đều làm bài này đỏ oan.
+    expect(boChuThich).toMatch(/omit:\s*\{[^}]*customerLogo:\s*true/);
+    expect(boChuThich).toMatch(/omit:\s*\{[^}]*hnTables:\s*true/);
     expect(boChuThich).toMatch(/omit:\s*\{\s*images:\s*true\s*\}/);
   });
 

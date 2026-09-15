@@ -113,22 +113,34 @@ bash deploy.sh staging      # → VM staging
 bash deploy.sh prod         # → VM production, CHỈ sau khi staging đã duyệt
 ```
 
-Mỗi lượt:
+Mỗi lượt (số bước khớp comment `[n/6]` in ra khi chạy):
 
-1. **Backup CSDL** + gắn tag `:rollback` cho image hiện tại
-2. Ship file đã tracked (`git archive`), dọn `.js` cũ còn sót có `.ts` cùng tên
-3. `docker compose build app`
-4. **`prisma migrate deploy`** (`docker compose run --rm app …`) — hỏng ở đây thì
-   `set -e` dừng deploy, app cũ vẫn chạy
-5. Recreate `app` + `worker`, ghi `DEPLOYED_SHA`
-6. Verify `/livez`
+- **[1/6]** Backup CSDL + gắn tag `:rollback` cho image hiện tại
+- **[2/6]** Ship file đã tracked (`git archive`)
+- **[2b/6]** Dọn file mồ côi trong `src/`, `shared/`, `web/src/` — `tar` không tự xoá, nên file
+  đã bị xoá/đổi tên/di chuyển trong git nhưng còn sót từ lượt deploy trước (không chỉ riêng kiểu
+  `.js` cũ shadow `.ts` cùng tên) vẫn nằm lại trên VM và có thể làm build biên dịch nhầm mã đã gỡ
+- **[3/6]** `docker compose build app` trên VM, hoặc `docker pull` theo digest nếu đặt `IMAGE_REF`
+- **[3b/6]** Gắn tag bất biến `<tên>:<git-sha>` cho ảnh vừa lấy
+- **[4/6]** **`prisma migrate deploy`** (`docker compose run --rm app …`) — hỏng ở đây thì
+  `set -e` dừng deploy, app cũ vẫn chạy
+- **[5/6]** Recreate `app` + `worker` bằng `--force-recreate`, ghi `DEPLOYED_SHA`
+- **[5b/6]** Ghi sổ phát hành vào `RELEASES.log` (SHA, migration đã áp, digest ảnh, `image_tag`)
+- **[5c/6]** Đối chiếu ảnh container đang chạy khớp đúng ảnh vừa gắn tag ở [3b/6]
+- **[6/6]** Verify `/livez`
 
 Bước 4 đặt **trước** bước 5 là có chủ ý: schema phải có cột mới trước khi mã mới
 dùng tới.
 
+Bước **[5c/6]** tồn tại vì một lỗi đã đo được ngày 2026-09-01: `docker compose up -d` trên một
+service có khối `build:` không so ảnh mà tag đang trỏ tới với ảnh container đang chạy — nếu cấu
+hình service không đổi, nó kết luận "không có gì để làm" và thoát 0 dù container vẫn chạy ảnh CŨ.
+`--force-recreate` ở bước [5/6] và đối chiếu ở [5c/6] cùng vá lỗi này; bước [6/6] verify `/livez`
+KHÔNG bắt được ca đó vì app cũ vẫn trả 200.
+
 ## Diễn tập thay đổi postgres/redis
 
-Bước 5 **chỉ** `docker compose up -d app worker` — nó không bao giờ dựng lại
+Bước 5 **chỉ** `docker compose up -d --force-recreate app worker` — nó không bao giờ dựng lại
 `postgres`/`redis`. Nên câu "cứ deploy staging trước là mọi thay đổi đều được thử"
 là **sai một nửa**: hai service dữ liệu được chạm ở **bước 4**, gián tiếp.
 `docker compose run --rm app …` khởi động các service trong `depends_on`, và compose
@@ -219,6 +231,54 @@ phải production).
 - Migration đụng dữ liệu: diễn tập trước bằng `scripts/db/migration-rehearsal.sh`
   (dựng CSDL ở đúng schema production, nạp dữ liệu, rồi mới nâng cấp).
 
+### Diễn tập phải nạp ĐÚNG hình dạng dữ liệu mà migration sẽ đụng
+
+`migration-rehearsal-seed.mjs` nạp dữ liệu ở schema **cũ**, và
+`migration-rehearsal-check.mjs` đối chiếu **sau** khi nâng cấp. Tới 2026-09-16 bộ
+seed chỉ có `User` + `PersonnelRecord`, nghĩa là mọi buổi diễn tập cho một
+migration đụng **báo giá** đều chạy trên CSDL **không có báo giá nào** rồi báo
+ĐẠT. Nó chứng minh đúng một điều — lệnh DDL chạy không lỗi — chứ không chứng minh
+dữ liệu chuyển sang chỗ mới **đúng và đủ**, mà đó mới là thứ người ta sợ.
+
+Quy tắc: **thêm migration đụng dữ liệu thì thêm cả seed lẫn check.** Check phải
+đối chiếu **số tiền**, không phải số hàng — chép sót một hàng giá 0 đồng vẫn qua
+được phép đếm. Mẫu: bộ hiện tại nạp một báo giá có bảng `hanoi` trong
+`QuoteSheet.extraTables` cùng một hàng `_QuoteMembers`, rồi khẳng định sau nâng
+cấp: `Quote.hnTables` đúng 1 bảng, **tiền khớp tới từng đồng**, `category` đã bị
+cắt, bảng `hcm` không bị đụng, bản cũ **còn nguyên** (expand-only), `QuoteMember`
+được **đủ 4 phạm vi**, và `_QuoteMembers` đã biến mất.
+
+Tự kiểm bộ check: sửa hỏng một con số trong CSDL diễn tập rồi chạy lại — phải ra
+`✖` và **thoát mã 1**. Một bộ check không bao giờ đỏ là một bộ check không tồn tại.
+
+### Khi bước [4/6] migrate hỏng
+
+Nhiều migration đặt `SET lock_timeout = '10s'` để không treo cả CSDL khi có ai
+đang giữ khoá bảng. Hết giờ thì Postgres huỷ lệnh (SQLSTATE **55P03**) và Prisma
+ghi migration đó là **FAILED**.
+
+**Chạy lại `deploy.sh` KHÔNG tự khỏi.** Prisma từ chối đi tiếp khi còn một
+migration FAILED, nên mọi lượt sau hỏng y hệt cho tới khi có người gỡ tay. App cũ
+vẫn chạy suốt thời gian đó — không ai bị ảnh hưởng, nhưng cũng không có gì được
+deploy. `deploy.sh` nay in nguyên quy trình dưới đây ngay tại chỗ hỏng:
+
+```bash
+# 1) Xem migration nào hỏng
+docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate status
+
+# 2) Hỏng vì lock_timeout → mọi lệnh nằm trong một transaction nên đã rollback
+#    sạch, không ghi được gì. Đánh dấu đã-lùi rồi deploy lại:
+docker compose -f docker-compose.prod.yml run --rm app \
+  npx prisma migrate resolve --rolled-back <ten_migration>
+
+# 3) Tìm ai đang giữ khoá, nếu không sẽ hết giờ lần nữa
+psql -c "SELECT pid, state, left(query,80) FROM pg_stat_activity
+         WHERE datname='quanly' AND state<>'idle';"
+```
+
+> **ĐỪNG dùng `migrate resolve --applied`.** Nó nói dối rằng migration đã chạy;
+> lượt sau sẽ bỏ qua nó và để lại schema thiếu cột trong khi mã mới tưởng đã có.
+
 ## Rollback
 
 ```bash
@@ -251,6 +311,10 @@ Thiếu là tiến trình **thoát ngay** (`src/config.ts`):
 Thiếu là **cảnh báo to nhưng vẫn chạy**: `PII_ENC_KEY` (PII ghi thô), `S3_*`
 (chứng từ trả 503), `SMTP_HOST` (email bị bỏ im lặng), `METRICS_TOKEN`
 (`/metrics` trả 404 ở production).
+
+`PII_ENC_KEY` **khi đã đặt** thì bị siết ngang SESSION_SECRET/JWT_SECRET: phải ≥ 32 ký tự và
+**khác** cả ba khoá kia (SESSION_SECRET, JWT_SECRET, MFA_ENC_KEY), không chỉ ≥ 16 ký tự như schema
+chung — thiếu vẫn chỉ cảnh báo, nhưng **có mà yếu/trùng** thì tiến trình thoát ngay (`src/config.ts`).
 
 Danh sách đầy đủ có chú thích: `.env.example`, được `tests/env-example.test.js`
 giữ cho khớp với schema.

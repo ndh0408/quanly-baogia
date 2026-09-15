@@ -212,7 +212,10 @@ export const PHEP_DO = {
   "tep-test-web": {
     nhan: "tệp test web (web/src/**/*.test.ts[x])",
     do: () => demTepGit(/^web\/src\/.*\.test\.tsx?$/),
-    lenh: "git ls-files 'web/src/**/*.test.ts' 'web/src/**/*.test.tsx' | wc -l",
+    // KHÔNG dùng 'web/src/**/*.test.ts': trong pathspec của git, `**` đòi ÍT NHẤT MỘT cấp thư
+    // mục, nên nó bỏ sót tệp nằm THẲNG trong web/src (vd App.draftleak.test.ts thêm 2026-09-09) —
+    // lệnh ra 22 trong khi hàm đo ra 23, và xg-doc-numbers đỏ ở đúng phép đối chiếu này.
+    lenh: "git ls-files 'web/src' | grep -cE '\\.test\\.tsx?$'",
     donVi: [/^tệp/iu, /^files? test/iu],
     // Neo CỐ Ý chặt: chữ "web" trần xuất hiện khắp nơi ("web 163 xanh", "build backend + web").
     neo: [/web\/(?:src)?/iu, /file test web/iu, /test web/iu, /cd web/iu, /trong `web/iu],

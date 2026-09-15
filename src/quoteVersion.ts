@@ -105,6 +105,11 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
     // Nay là Σ discount các sheet; số của TỪNG sheet nằm trong `sheets[].discount` bên dưới.
     discount: q.discount.toString(),
     total: q.total.toString(),
+    // Bảng Hà Nội cấp báo giá (từ 2026-09-15). Thiếu dòng này thì lịch sử phiên bản mất sạch phần
+    // HN — và `diffVersions` không bao giờ hiện được thay đổi giá HN. Cắt ảnh chứng từ y như
+    // extraTables của sheet (cùng hàm, để hai bản không trôi khỏi nhau).
+    hnTables: stripProofsForSnapshot((q as { hnTables?: unknown }).hnTables),
+    hnStatus: q.hnStatus,
     sheets: q.sheets.map((s) => ({
       templateCode: s.template?.code,
       templateName: s.template?.name,
@@ -157,10 +162,32 @@ export async function snapshotQuoteVersion(tx: TxClient, quoteId: number, actorI
 }
 
 /** Compute a shallow diff between two version payloads. Returns array of changed keys with old/new. */
+/**
+ * "KHÔNG CÓ" và "RỖNG" là MỘT khi so hai phiên bản.
+ *
+ * Bản ghi phiên bản lưu trong CSDL là ảnh chụp tại thời điểm lưu, nên ảnh chụp TRƯỚC một lần
+ * thêm trường sẽ không có khoá đó (`undefined`), còn ảnh chụp SAU có `null` hoặc `[]`.
+ * `JSON.stringify(undefined)` ra `undefined` còn `JSON.stringify(null)` ra `"null"` → khác nhau,
+ * nên mọi lần so một phiên bản cũ với một phiên bản mới đều báo trường đó "đã đổi" dù người dùng
+ * không hề đụng vào. ĐO ĐƯỢC ở đợt thêm `hnTables`/`hnStatus` (2026-09-15): mọi báo giá cũ đều
+ * hiện hai dòng thay đổi ma. Nhiễu kiểu đó làm người ta thôi đọc bảng so sánh — mà bảng so sánh
+ * là thứ duy nhất trả lời được "ai đổi giá lúc nào".
+ *
+ * Gộp `undefined`/`null`/`[]`/`{}` về một giá trị. Không giấu thay đổi thật: một trường đi từ
+ * rỗng sang CÓ nội dung vẫn hiện, chỉ bỏ đúng cặp rỗng↔vắng mặt.
+ */
+function khongCoHayRong(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
 export function diffVersions(a: any, b: any) {
   const out: { key: string; before: unknown; after: unknown }[] = [];
   const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
   for (const k of keys) {
+    if (khongCoHayRong(a?.[k]) && khongCoHayRong(b?.[k])) continue;
     if (JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k])) {
       out.push({ key: k, before: a?.[k] ?? null, after: b?.[k] ?? null });
     }

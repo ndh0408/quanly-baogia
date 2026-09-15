@@ -50,14 +50,14 @@ mã nguồn và cùng một CSDL. Cố ý không tách microservice — quy mô 
 | 2 | `compression` | nén text | loại trừ SSE — compressor gom buffer làm mất sự kiện realtime |
 | 3 | `requestId` | gắn id cho request | phải trước logger, nếu không log đầu tiên không có id |
 | 4 | `pino-http` | log truy cập | |
-| 5 | `decompressBody` | giải nén thân gửi lên | **trước** body parser vì nó thay thế luồng thân. Trần theo route: nhóm `/api/quotes` 16MB, còn lại 2MB — dùng chung 16MB nghĩa là người CHƯA đăng nhập bơm được 16MB vào bất kỳ endpoint nào |
-| 6 | `express.json` | phân tích JSON | trần khớp lớp trên |
-| 7 | `session` | phiên cookie (kho PG) | phải trước mọi thứ đọc `req.session` |
-| 8 | `metricsMiddleware` | đo Prometheus | |
-| 9 | `bearerAuth` | JWT → giả lập phiên | **trước** csrfGuard: guard cần biết `req.viaJwt` để miễn cho client Bearer |
-| 10 | `enforceActiveUser` | nạp lại vai trò/trạng thái **từ CSDL** | mỗi request — admin khoá tài khoản là có hiệu lực ở request KẾ TIẾP |
-| 11 | `csrfGuard` | Origin/Referer + token gắn phiên | **sau** bearerAuth, **trước** route |
-| 12 | `rate limit` | chống dội | |
+| 5 | `rate limit` (`apiLimiter`) | chống dội | **từ 2026-09-08: chuyển lên TRƯỚC decompressBody + express.json** — khoá theo `req.ip`, không đọc session/body/cookie nên chạy được sớm. Trước đó limiter đứng sau cùng (vị trí 12 cũ), nghĩa là người CHƯA đăng nhập đã tiêu CPU + heap giải nén gzip rồi `JSON.parse` tới 16MB TRƯỚC KHI có bất kỳ trần nào chặn |
+| 6 | `decompressBody` | giải nén thân gửi lên | **trước** body parser vì nó thay thế luồng thân. Trần theo route: nhóm `/api/quotes` 16MB, còn lại 2MB |
+| 7 | `express.json` | phân tích JSON | trần khớp lớp trên |
+| 8 | `session` | phiên cookie (kho PG) | phải trước mọi thứ đọc `req.session` |
+| 9 | `metricsMiddleware` | đo Prometheus | |
+| 10 | `bearerAuth` | JWT → giả lập phiên | **trước** csrfGuard: guard cần biết `req.viaJwt` để miễn cho client Bearer |
+| 11 | `enforceActiveUser` | nạp lại vai trò/trạng thái **từ CSDL** | mỗi request — admin khoá tài khoản là có hiệu lực ở request KẾ TIẾP |
+| 12 | `csrfGuard` | Origin/Referer + token gắn phiên | **sau** bearerAuth, **trước** route |
 | 13 | routes | nghiệp vụ | |
 | 14 | `notFound` → static → SPA | | `notFound` đặt **trước** static nên `/api/*` không tồn tại trả 404 JSON, không rơi vào vỏ SPA |
 

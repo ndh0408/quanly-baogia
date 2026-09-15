@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 138 endpoint
+# Ma trận phân quyền — toàn bộ 140 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -12,7 +12,7 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 > ```
 >
 > **Vì sao**: README từng ghi *141 endpoint*, bản đầu của chính tài liệu này ghi *133*. Cả hai đều
-> đếm tay nên cả hai đều sai — con số thật là **138** (129 trong router + 8 khai báo thẳng trên
+> đếm tay nên cả hai đều sai — con số thật là **138** (130 trong router + 8 khai báo thẳng trên
 > `app`). Bản 133 đã bỏ sót các route phục vụ SPA vì tôi chỉ nhớ 4 endpoint hạ tầng.
 >
 > Từ 139 xuống 137 ngày 2026-08-26: bỏ `GET /app` và `GET /app/*` khi gỡ SPA vanilla cũ
@@ -72,6 +72,8 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
 | POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
 | GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
+| POST | `/:id/hn/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** phạm vi `hanoi` (account phụ) | hàng bảng HN nằm ở `Quote.hnTables` nên KHÔNG có `:sheetId` · `FOR UPDATE` khoá hàng Quote | $ | `quote-hn-cap-bao-gia` | OK |
+| GET | `/:id/hn/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` | ghi audit `quote.internal.proof-view` (cờ `hn`) | **PII** | `quote-hn-cap-bao-gia` | OK |
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
 | POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
@@ -80,15 +82,15 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt | $ | — | OK |
 | POST | `/:id/hn/submit` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chỉ `assigned`/`rejected` | — | — | OK |
 | POST | `/:id/hn/review` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | chỉ `submitted` | — | — | OK |
-| POST | `/:id/mark-converted` | ✓ | `quote:send` | all/own | `canOnQuote(update)` | CAS chống đua terminal | $ | `quotes.workflow` | OK |
-| POST | `/:id/mark-lost` | ✓ | `quote:send` | all/own | `canOnQuote(update)` | CAS chống đua terminal | — | `quotes.workflow` | OK |
+| POST | `/:id/mark-converted` | ✓ | `quote:send` | all/own | `canOnQuote(update)` | CAS chống đua terminal · **account phụ 403** | $ | `quotes.workflow` | OK |
+| POST | `/:id/mark-lost` | ✓ | `quote:send` | all/own | `canOnQuote(update)` | CAS chống đua terminal · **account phụ 403** | — | `quotes.workflow` | OK |
 | GET | `/:id/versions` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | $ | — | OK |
 | GET | `/:id/versions/:v` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | $ | — | OK |
 | GET | `/:id/versions/:a/diff/:b` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | $ | — | OK |
 | GET | `/:id/approvals` | ✓ | `quote:read:*` | all/own | `loadAuthorizedQuote` | — | — | — | OK |
-| PUT | `/:id/members` | ✓ | người tạo **hoặc** `quote:update:all` | own | so `createdById` | — | PII | — | OK |
+| PUT | `/:id/members` | ✓ | người tạo **hoặc** `quote:update:all` | own | so `createdById` | nhận `members[{userId,scopes}]` (client cũ gửi `memberIds` = đủ 4 vùng) | PII | — | OK |
 | DELETE | `/:id` | ✓ | `quote:delete:*` | all/own | `canOnQuote(delete)` | **`converted` không ai xoá được** | — | `quotes.workflow` | OK |
-| POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | — | $ | — | OK |
+| POST | `/:id/duplicate` | ✓ | `quote:create` **và** đọc được nguồn | own | `canOnQuote(read)` | **account phụ 403** (bản sao sẽ đứng tên người bấm + mang mã dự án của họ) | $ | — | OK |
 
 ⁴ `quote:internal:*` là **năng lực**, không phải phạm vi. Phạm vi báo giá do `assertQuoteInScope`
 (`src/services/quoteService.ts`) áp. Hàm này **cố ý** hỏi action `read` cho **cả** đường ghi `/pay`:
@@ -224,7 +226,7 @@ chặn `GET` mà để ngỏ `PUT` là hàng rào rỗng. Xem `src/routes/employ
 
 ³ Các queue khác (email/webhook/telegram) chứa địa chỉ nhận + URL + secret trong `job.data` → không bao giờ lộ, kể cả cho admin.
 
-## Ngoài router — 9 endpoint
+## Ngoài router — 8 endpoint
 
 Nhóm này **bị bỏ sót ở bản ma trận đầu** (chỉ liệt kê 4). Chúng không phục vụ dữ liệu nghiệp vụ,
 nhưng "không có dữ liệu" phải là kết luận sau khi kiểm, không phải lý do để không liệt kê.
@@ -244,8 +246,8 @@ nhưng "không có dữ liệu" phải là kết luận sau khi kiểm, không p
 
 | Trạng thái | Số endpoint |
 |---|---:|
-| `OK` — đã đúng từ trước | 105 |
-| **`VÁ`** — sửa trong hai đợt rà soát | **33** |
+| `OK` — đã đúng từ trước | 106 |
+| **`VÁ`** — sửa trong hai đợt rà soát | **32** |
 | `NỢ` — còn thiếu | 0 |
 | `UNKNOWN` | **0** |
 
@@ -266,5 +268,63 @@ oracle phân loại tài khoản) · `/api/auth/change-password` (xoay định d
 | **hr** | **403** | **403** | **403** | đọc all | 403 | 403 | 403 |
 | **accountant** | **403** | **403** | **403** | đọc all + đánh dấu TT | 403 | trang Hoá đơn | 403 |
 | **tài khoản bị gỡ sạch quyền** | **403** | **403** | **403** | **403** | **403** | **403** | **403** |
+| **account phụ** (được thêm vào 1 báo giá) | xem đủ · sửa đúng vùng được tick | theo quyền riêng | theo quyền riêng | theo quyền riêng | theo quyền riêng | **403** (lọc `createdById`) | theo quyền riêng |
 
-Sáu ô **in đậm** ở hai hàng cuối chính là những chỗ trước bản vá trả **200 kèm dữ liệu**.
+Sáu ô **in đậm** ở hai hàng `hr` / `accountant` chính là những chỗ trước bản vá trả **200 kèm dữ liệu**.
+
+### Phần "Báo Giá Hà Nội" — từ 2026-09-15 ở CẤP BÁO GIÁ
+
+`Quote.hnTables` (migration `20260915140000`), KHÔNG còn nằm trong `QuoteSheet.extraTables` với
+`category:"hanoi"`. Ba lý do, cả ba là lỗi thật đã xảy ra:
+
+| Chỗ lưu cũ (theo TRANG) | Hệ quả |
+|---|---|
+| Màn account HN lặp theo trang của chủ, trả kèm `sheetName`/`sheetId` | Người chỉ được giao ĐIỀN GIÁ biết luôn báo giá có mấy trang và tên từng trang |
+| Lưu phải ghép theo `sheetId`, mà lưu báo giá là **xoá trang rồi tạo lại** | Chủ bấm Lưu một lần là account HN gõ xong nhận 409 "hãy tải lại trang" |
+| Bảng HN sống trong hàng `QuoteSheet` | Chủ xoá một trang là bảng HN trên trang đó **chết theo, im lặng** |
+
+Hợp đồng mới:
+
+- Account HN có **không gian riêng, phẳng**: tự thêm/xoá/đặt tên sheet, dán và **nhập từ Excel**,
+  công thức + thanh công thức (`fxBar`) — cùng bộ lưới với trình soạn báo giá
+  (`web/src/components/HnTables.tsx`, dùng chung cho cả màn của chủ).
+- **Không thấy** thông tin khách / người gửi / ngày / VAT / lời chào: những thứ đó theo báo giá gốc.
+- Chống ghi đè chuyển từ phép suy đoán "trang đã chết" sang **khoá lạc quan thật**: client gửi
+  `baseUpdatedAt`, lệch thì 409 kèm lời nhắc chép lại phần vừa gõ.
+- Giá HN **đã gửi duyệt/đã duyệt** thì đường lưu báo giá thường trả **409** (trước đây lặng lẽ lấy
+  lại bản CSDL rồi trả 200) — trừ người có `quote:hn:manage`.
+- Payload hình dạng **cũ** (`hnSheets`) bị **400** kèm hướng dẫn tải lại, KHÔNG hiểu thành "xoá hết
+  bảng" — nếu không, một tab cũ bấm Lưu là mất sạch phần Hà Nội.
+- Hàng bảng HN có đường thanh toán riêng vì không còn `:sheetId`:
+  `POST /:id/hn/:rid/pay` và `GET /:id/hn/:rid/proof`.
+- Trang **Quản lý dự án**: tổng HN là một số cho cả báo giá, **dồn vào dòng trang đầu**, các dòng
+  sau để 0 — cộng cả cột vẫn ra đúng tổng, không nhân lên theo số trang.
+
+### "Account phụ": phạm vi theo CẶP (người, báo giá)
+
+Hàng cuối bảng trên KHÔNG phải một vai trò — `Role` là thuộc tính của TÀI KHOẢN nên không diễn
+đạt được "phụ ở báo giá X, chủ ở báo giá Y" của cùng một người. Nó là hàng `QuoteMember`
+(bảng tường minh từ migration `20260915090000`, trước đó là m2m ngầm `_QuoteMembers` chỉ đựng
+được MỘT BIT):
+
+| Cột | Ý nghĩa |
+|---|---|
+| `scopes` | tập con của `main` · `hcm` · `hanoi` · `khach` — **vùng được SỬA**. RỖNG = chỉ xem. Ba khoá cuối trùng tên `QuoteSheet.extraTables[].category`, cố ý, để không phải giữ bảng ánh xạ thứ hai |
+| `addedById` / `addedAt` | ai phân công, lúc nào (bảng ngầm cũ không lưu được) |
+
+Ba điều dễ hiểu nhầm:
+
+1. **Membership KHÔNG tự cấp quyền.** Nhánh thành viên trong `canOnQuote` nằm BÊN TRONG
+   `if (can(session, quote:<action>:own))`, nên thêm một tài khoản `hr`/`accountant` làm account
+   phụ là **vô tác dụng hoàn toàn im lặng**. Đó là chốt bảo mật cố ý
+   (`tests/security-regression.test.js`), không phải thiếu sót — giao diện cảnh báo trước bằng cờ
+   `coTheLamPhu` của `GET /api/quotes/assignable-users`.
+2. **XEM thì không lược gì**, chỉ GHI mới bị lọc. Khác hẳn `account_hn` (bị lược cả view) vì cờ
+   của `account_hn` là quyền TOÀN CỤC của phiên, không phải thuộc tính của cặp (người, báo giá).
+3. **Báo giá vẫn thuộc về người tạo trong mọi đường**: `createdById`, mã dự án và
+   `fromContact/fromTitle/fromPhone` ("Người gửi" in ra Excel) nằm trong vùng `main` và bị GỠ khỏi
+   payload nếu account phụ không được giao vùng đó; nhân bản + chốt/huỷ deal thì 403 thẳng.
+
+Thiếu vùng `main` thì đường lưu KHÔNG xoá-tạo-lại sheet mà đi theo khuôn `saveHn` — xem
+`ghiVungNoiBoDuocGiao` (`src/services/quoteService.ts`); còn có `main` mà thiếu vài bảng nội bộ thì
+`reconcilePhamViTables` lấy lại bản CSDL cho những bảng ngoài phạm vi.

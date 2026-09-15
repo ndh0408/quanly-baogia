@@ -26,6 +26,8 @@ import {
   setSheetCustomerDecision,
   updateSheetInvoice,
   markExtraTableRowPayment,
+  markHnRowPayment,
+  getHnRowProof,
   getExtraTableRowProof,
   markConverted,
   markLost,
@@ -173,6 +175,24 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => res.json(await getExtraTableRowProof(req)))
 );
 
+// THANH TOÁN 1 HÀNG bảng HÀ NỘI. Bảng HN ở cấp BÁO GIÁ (không thuộc trang nào) nên đường định vị
+// không có `:sheetId` — xem markHnRowPayment. Đặt TRƯỚC /:id.
+router.post(
+  "/:id/hn/:rid/pay",
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }),
+    body: z.object({ paid: z.boolean(), paidProof: z.string().max(900_000).regex(PAYMENT_PROOF_DATA_URL_RE, "Ảnh chứng từ không hợp lệ").optional() }),
+  }),
+  requirePermission(P.QUOTE_INTERNAL_PAY),
+  asyncHandler(async (req: Request, res: Response) => res.json(await markHnRowPayment(req)))
+);
+// Ảnh chứng từ 1 hàng Hà Nội (on-demand) — quyền check trong service (internal:view|pay).
+router.get(
+  "/:id/hn/:rid/proof",
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), rid: z.string().min(1).max(60) }) }),
+  asyncHandler(async (req: Request, res: Response) => res.json(await getHnRowProof(req)))
+);
+
 // Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). Đặt TRƯỚC /:id.
 router.get(
   "/hn/accounts",
@@ -299,11 +319,25 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => res.json(await listApprovals(req)))
 );
 
-// MEMBERS — add/remove the employees who may view & edit this quote.
+// MEMBERS — "account phụ": ai được vào làm cùng báo giá này, và được sửa VÙNG nào.
 // Only the creator (or an admin) may manage the member list.
+//
+// Hai hình dạng body cùng hợp lệ, cố ý: `members` (client mới, có phạm vi) và `memberIds`
+// (client CŨ đang mở sẵn trong tab người khác — hiểu là đủ 4 vùng, đúng hành vi trước bản này).
+// Zod v4 loại bỏ khoá lạ và `validate()` GÁN LẠI req.body, nên thiếu khai `members` ở đây là
+// phạm vi bị xoá im lặng trên đường vào service.
 router.put(
   "/:id/members",
-  validate({ params: idParam, body: z.object({ memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]) }) }),
+  validate({
+    params: idParam,
+    body: z.object({
+      memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]),
+      members: z.array(z.object({
+        userId: z.coerce.number().int().positive(),
+        scopes: z.array(z.enum(["main", "hcm", "hanoi", "khach"])).max(4).default([]),
+      })).max(50).optional(),
+    }),
+  }),
   asyncHandler(async (req: Request, res: Response) => res.json(await updateMembers(req)))
 );
 

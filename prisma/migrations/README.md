@@ -70,7 +70,7 @@ Prisma không biểu diễn được các object dưới đây, nên chúng tồ
 báo drift đều là schema.prisma đang thiếu khai báo — **sửa schema.prisma**, đừng chạy
 `migrate dev` rồi commit file `DROP INDEX` nó sinh ra.
 
-> **Danh sách này được ĐO, không phải nhớ.** Lần đo gần nhất: **2026-08-26**, trên Prisma 7.9.1,
+> **Danh sách này được ĐO, không phải nhớ.** Lần đo gần nhất: **2026-09-15**, trên Prisma 7.9.1,
 > bằng đúng quy trình ở mục "Đo lại drift" bên dưới. Đổi phiên bản Prisma hoặc thêm migration là
 > phải đo lại và cập nhật bảng — **cùng lúc** với hằng số `DRIFT_DUOC_PHEP` trong
 > `tests/vdb-schema-index-drift.test.js`. Bài test đó so tập trôi thực tế **BẰNG ĐÚNG** danh sách
@@ -80,7 +80,6 @@ báo drift đều là schema.prisma đang thiếu khai báo — **sửa schema.p
 |---|---|---|---|
 | `Customer_name_trgm`, `Customer_taxCode_trgm`, `Customer_searchText_trgm_idx`, `Product_name_trgm`, `Product_sku_trgm`, `Quote_title_trgm`, `Quote_toCompany_trgm`, `Quote_quoteNumber_trgm`, `Quote_searchText_trgm_idx`, `PersonnelRecord_searchText_trgm_idx` | GIN trigram (`gin_trgm_ops`) | **CÓ** — "Removed index on columns (…)" | |
 | `Venue_tags_idx` | GIN trên mảng | **CÓ** | |
-| `_QuoteMembers` (PK + unique `(A, B)`) | bảng nối m2m **NGẦM** (Quote ↔ User) | **CÓ** — "Added primary key…" + "Removed unique index…" | Prisma tự quản bảng này, không có model để khai |
 | `Customer_taxCode_live_key` | partial **UNIQUE** btree (`WHERE "taxCode" IS NOT NULL AND "deletedAt" IS NULL`) | không | Chống trùng MST; Prisma không khai được partial unique |
 | `Approval_pending_queue_idx` | partial btree (`WHERE "decision" = 'pending'`) | không | |
 | `Quote_createdAt_live_idx`, `Quote_createdById_createdAt_live_idx`, `Quote_projectCode_live_idx`, `Quote_quoteDate_live_idx`, `Quote_total_live_idx` | partial btree (`WHERE "deletedAt" IS NULL`) | không | |

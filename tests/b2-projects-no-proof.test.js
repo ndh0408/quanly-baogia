@@ -74,8 +74,11 @@ describe.runIf(dbAvailable)("Danh sách dự án — không kéo ảnh chứng t
         quoteNumber: `${TAG}-${i}`, title: `${TAG} bg ${i}`, searchText: TAG, toCompany: "Khách",
         companyId: co.id, fromContact: "x", fromAddress: "x", city: "TP. Hồ Chí Minh",
         quoteDate: new Date(), createdById: userId, status: "converted", subtotal: 1000, total: 1080,
+        // Bảng Hà Nội ở CẤP BÁO GIÁ từ 2026-09-15 (migration 20260915140000) — `category` không
+        // còn cần thiết ở đó; hcm/khach vẫn theo trang.
+        hnTables: [{ ...bang("hanoi", "B", 2000), category: undefined }],
         sheets: { create: [{ templateId: tpl.id, order: 1, name: "Trang 1", subtotal: 1000,
-          extraTables: [bang("hcm", "A", 1000), bang("hanoi", "B", 2000), bang("khach", "C", 3000)] }] },
+          extraTables: [bang("hcm", "A", 1000), bang("khach", "C", 3000)] }] },
       } });
       quoteIds.push(q.id);
     }
@@ -117,7 +120,6 @@ describe.runIf(dbAvailable)("Danh sách dự án — không kéo ảnh chứng t
       expect(d.sheets.length).toBe(1);
       const ex = tho.find((x) => x.quoteId === d.id).extraTables;
       expect(d.sheets[0].hcm).toBe(cong(ex, "hcm"));
-      expect(d.sheets[0].hanoi).toBe(cong(ex, "hanoi"));
       expect(d.sheets[0].khach).toBe(cong(ex, "khach"));
       expect(d.sheets[0].hcm).toBe(2000);
       expect(d.sheets[0].hanoi).toBe(4000);

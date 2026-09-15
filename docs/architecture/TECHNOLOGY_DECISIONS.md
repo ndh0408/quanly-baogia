@@ -18,19 +18,19 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
 | React | 19.0 (SPA, Vite) | **KEEP** | — | Ứng dụng nghiệp vụ nội bộ, **có xác thực**, không cần SSR/SEO. Phụ lục §11 cấm đổi sang Next.js đúng cảnh này. Lưới báo giá là DOM thủ công hiệu năng cao — đổi framework là viết lại nó. | — |
-| Vite | 8.1 | **KEEP** | — | Build 23 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
-| Express | 4.21 | **KEEP** | — | Phụ lục §11 cấm đổi sang NestJS chỉ vì DI/modules. Ranh giới module đạt được bằng cấu trúc thư mục TypeScript. Express 5 thì `DEFER` (xem dưới). | — |
-| Express | 4.21 | **DEFER** | Express 5 | Express 5 đổi cách xử lý lỗi async và pattern route. Lợi ích thật: bỏ được `asyncHandler`. Chưa đủ để đánh đổi rủi ro trên 138 endpoint. Xem lại khi Express 4 hết hỗ trợ. | Trung bình — mọi route phải test lại |
+| Vite | 8.1 | **KEEP** | — | Build 24 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
+| Express | 4.22 | **KEEP** | — | Phụ lục §11 cấm đổi sang NestJS chỉ vì DI/modules. Ranh giới module đạt được bằng cấu trúc thư mục TypeScript. Express 5 thì `DEFER` (xem dưới). | — |
+| Express | 4.22 | **DEFER** | Express 5 | Express 5 đổi cách xử lý lỗi async và pattern route. Lợi ích thật: bỏ được `asyncHandler`. Chưa đủ để đánh đổi rủi ro trên 140 endpoint. Xem lại khi Express 4 hết hỗ trợ. ⚠️ Đây là lý do **kiến trúc**, KHÔNG phải bảo mật: lỗ `qs` (GHSA-x5fp / GHSA-4mjr) vá được **trong nhánh 4** bằng `npm audit fix` (express 4.22.3 · qs 6.16.0 · body-parser 1.20.8) — đừng viện lỗ hổng để ép nâng Express 5. | Trung bình — mọi route phải test lại |
 | TypeScript | 5.7 | **KEEP** | — | `strict` đã bật, typecheck chạy trong cổng. | — |
 | Zod | 4.4 | **KEEP** | — | Đã migrate v3→v4 (cú pháp v3 bị **bỏ qua âm thầm** và làm lọt thông báo tiếng Anh ra giao diện — xem AGENTS.md). | — |
-| @tanstack/react-query | 5.10 | **KEEP** | — | Đang gánh cache + invalidation của SPA. | — |
+| @tanstack/react-query | 5.101 | **KEEP** | — | Đang gánh cache + invalidation của SPA. | — |
 
 ## Dữ liệu
 
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
 | PostgreSQL | 16-alpine | **KEEP** | — | Phụ lục §9: không đổi sang MongoDB/DynamoDB cho dữ liệu giao dịch. Tiền dùng `Decimal`; ràng buộc và transaction là yêu cầu nghiệp vụ. | — |
-| Prisma | 7.8 | **KEEP** | — | Phụ lục §10: chỉ thay ORM khi có vấn đề **mang tính hệ thống**. Hot path chậm thì dùng raw query của chính Prisma, không bỏ Prisma. | — |
+| Prisma | 7.10 | **KEEP** | — | Phụ lục §10: chỉ thay ORM khi có vấn đề **mang tính hệ thống**. Hot path chậm thì dùng raw query của chính Prisma, không bỏ Prisma. | — |
 | Tìm kiếm | Postgres GIN + pg_trgm + `searchText` bỏ dấu | **KEEP** | — | Phụ lục §14: chỉ thêm Elasticsearch khi benchmark chứng minh Postgres không đáp ứng. Chưa có benchmark nào cho thấy thế. ⚠️ 11 index GIN này tạo bằng **SQL thô** — `prisma migrate dev` sẽ muốn DROP chúng ở mọi lần chạy; `scripts/ci/check-destructive-sql.mjs` chặn. | — |
 | Redis (ioredis 5.11) | BullMQ · Pub/Sub (SSE) · rate-limit phân tán | **KEEP** | — | Phụ lục §5: đúng nhóm use case được khuyến nghị. **Không** dùng làm cache tuỳ tiện, **không** làm primary database. ⚠️ Ô *Current* trước đây còn ghi `session` — **sai và đã sửa**: kho phiên là `connect-pg-simple` → bảng `user_sessions` trong Postgres (`src/app.ts`), không có `connect-redis` ở đâu trong repo. Lý do CÓ CHỦ Ý và hệ quả cho DR: [ARCHITECTURE.md § Phiên nằm ở Postgres](ARCHITECTURE.md#phiên-nằm-ở-postgres--có-chủ-ý-không-phải-thiếu-sót). | — |
 | Mã hoá PII | AES-256-GCM (`src/piiBox.ts`) | **KEEP** | — | Khoá ngoài CSDL, có bản HMAC mù để tra cứu. ⚠️ Cột thô vẫn song song — **quyết định của chủ hệ thống là giữ nguyên**, ghi rõ ở `docs/REMAINING_RISKS.md`. | — |

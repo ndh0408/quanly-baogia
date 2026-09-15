@@ -10,7 +10,7 @@ import type { Request, Response } from "express";
 import multer from "multer";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { canOnQuote, requirePermission, can, PERMISSIONS as P } from "../permissions.js";
+import { canOnQuote, requireAnyPermission, PERMISSIONS as P } from "../permissions.js";
 import { daXuatHoaDon } from "../quoteUtils.js";
 import { createLimiter } from "../rateLimit.js";
 import { Worker } from "node:worker_threads";
@@ -201,14 +201,16 @@ const looksXlsx = (b: Buffer) => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b 
 router.post(
   "/import-excel",
   importLimiter,
-  requirePermission(P.QUOTE_CREATE),
+  // Account Hà Nội cũng cần nhập Excel — vào BẢNG CỦA HỌ, không phải lưới báo giá chính.
+  //
+  // Trước 2026-09-15 đường này 403 thẳng mọi người có `quote:hn:fill`, vì hồi đó họ điền bảng HN
+  // nằm TRONG trang của chủ nên "nạp file" dễ thành nạp đè lưới chính. Nay bảng HN là không gian
+  // riêng ở cấp báo giá, và endpoint này CHỈ PHÂN TÍCH tệp rồi trả hạng mục về cho client xem
+  // trước — nó KHÔNG ghi gì vào CSDL. Đường ghi vẫn gác như cũ: `PUT /api/quotes/:id` 403 cho ai
+  // có `quote:hn:fill` (quotes.routes.ts), còn `PUT /api/quotes/:id/hn` chỉ ghi `Quote.hnTables`.
+  requireAnyPermission(P.QUOTE_CREATE, P.QUOTE_HN_FILL),
   upload.single("file"),
   asyncHandler(async (req: Request, res: Response) => {
-    // Người điền HN chỉ được điền bảng Hà Nội — không nạp đè lưới báo giá chính (khớp PUT /:id).
-    // Theo QUYỀN chứ không theo chuỗi role: quote:hn:fill cấp được per-user. Xem quotes.routes.ts.
-    if (can(req.session, P.QUOTE_HN_FILL)) {
-      return res.status(403).json({ error: "Account Hà Nội không được nhập file vào báo giá chính." });
-    }
     if (!req.file) return res.status(400).json({ error: "Vui lòng chọn file Excel (.xlsx)" });
     if (!looksXlsx(req.file.buffer)) {
       return res.status(415).json({ error: "File không phải .xlsx. Nếu đang dùng .xls cũ, hãy mở bằng Excel rồi 'Lưu thành' .xlsx." });
@@ -221,7 +223,7 @@ router.post(
     if (quoteId) {
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
-        select: { id: true, createdById: true, status: true, members: { select: { id: true } },
+        select: { id: true, createdById: true, status: true, members: { select: { userId: true, scopes: true } },
                   sheets: { select: { invoiceNo: true } } },   // daXuatHoaDon đọc cột này
       });
       if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });

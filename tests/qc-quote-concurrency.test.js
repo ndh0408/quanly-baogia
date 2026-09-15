@@ -143,41 +143,47 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
   // ── LỖI 2 ────────────────────────────────────────────────────────────────
   describe("bảng giá Hà Nội đã duyệt", () => {
     const HANG_HN = { kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 5_000_000, approved: false, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null };
-    const bangHN = (unitPrice) => ({ category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items: [{ ...HANG_HN, unitPrice }] });
+    // Bảng Hà Nội ở CẤP BÁO GIÁ từ 2026-09-15 → không còn `category`, và đường lưu gửi nó ở
+    // khoá `hnTables` của payload chứ không lồng trong `sheets`.
+    const bangHN = (unitPrice) => ({ name: "Giá HN", templateId, groupSubtotal: true, items: [{ ...HANG_HN, unitPrice }] });
 
     /** Báo giá của SALE (emp) có sẵn bảng HN, đặt hnStatus theo yêu cầu. */
     const dungBaoGiaHN = async (hnStatus) => {
       const { id, sheetId } = await taoBaoGia(emp, `hn-${hnStatus}`);
-      await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: [bangHN(5_000_000)] } });
-      await prisma.quote.update({ where: { id }, data: { hnStatus, hnAssigneeId: accU.id } });
+      await prisma.quote.update({ where: { id }, data: { hnStatus, hnAssigneeId: accU.id, hnTables: [bangHN(5_000_000)] } });
       return { id, sheetId };
+    };
+
+    const hnCuaBaoGia = async (id) => {
+      const q = await prisma.quote.findFirst({ where: { id }, select: { hnTables: true } });
+      return Array.isArray(q?.hnTables) ? q.hnTables : [];
     };
 
     const luuDeGiaHN = (agent, id, sheetId, unitPrice) =>
       agent.put(`/api/quotes/${id}`).send({
-        sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }], extraTables: [bangHN(unitPrice)] }],
+        sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
+        hnTables: [bangHN(unitPrice)],
       });
 
+    // HỢP ĐỒNG ĐỔI 2026-09-15: trước đây payload sửa giá HN đã chốt bị LẤY LẠI bản CSDL rồi trả
+    // 200 — đúng về dữ liệu nhưng im lặng với người vừa gõ. Nay 409 nói thẳng (xem chotHnTables).
     it("người KHÔNG có quote:hn:manage KHÔNG sửa được giá HN đã duyệt", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
       const r = await luuDeGiaHN(emp, id, sheetId, 1);
-      expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const hn = (await bangCuaBaoGia(id)).find((t) => t.category === "hanoi");
-      expect(hn.items[0].unitPrice, "giá HN đã DUYỆT không được đổi qua đường lưu báo giá thường").toBe(5_000_000);
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice, "giá HN đã DUYỆT không được đổi").toBe(5_000_000);
     });
 
     it("người KHÔNG có quote:hn:manage KHÔNG sửa được giá HN đang CHỜ DUYỆT", async () => {
       const { id, sheetId } = await dungBaoGiaHN("submitted");
-      expect((await luuDeGiaHN(emp, id, sheetId, 7)).status).toBe(200);
-      const hn = (await bangCuaBaoGia(id)).find((t) => t.category === "hanoi");
-      expect(hn.items[0].unitPrice).toBe(5_000_000);
+      expect((await luuDeGiaHN(emp, id, sheetId, 7)).status).toBe(409);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice).toBe(5_000_000);
     });
 
     it("HN mới GIAO (chưa gửi duyệt) thì vẫn sửa được — không siết quá tay", async () => {
       const { id, sheetId } = await dungBaoGiaHN("assigned");
       expect((await luuDeGiaHN(emp, id, sheetId, 9)).status).toBe(200);
-      const hn = (await bangCuaBaoGia(id)).find((t) => t.category === "hanoi");
-      expect(hn.items[0].unitPrice, "giai đoạn này chưa có gì để bảo vệ").toBe(9);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice, "giai đoạn này chưa có gì để bảo vệ").toBe(9);
     });
 
     // Bảng HN THỪA trong payload trước đây bị VỨT IM LẶNG + 200: người dùng thêm/nhân bản một bảng
@@ -186,16 +192,13 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
     it("thêm bảng HN mới khi phần HN đã chốt → 409 nói rõ, KHÔNG vứt im lặng", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
       const r = await emp.put(`/api/quotes/${id}`).send({
-        sheets: [{
-          id: sheetId, templateId, name: "Trang 1", order: 1,
-          items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }],
-          extraTables: [bangHN(5_000_000), { ...bangHN(1_234), name: "Giá HN (bảng vừa thêm)" }],
-        }],
+        sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
+        hnTables: [bangHN(5_000_000), { ...bangHN(1_234), name: "Giá HN (bảng vừa thêm)" }],
       });
       expect(r.status, "bảng vừa thêm bị bỏ mà vẫn báo 200 = người dùng mất phần vừa gõ").toBe(409);
       expect(r.body.error).toMatch(/Hà Nội/i);
       // Bảng HN đã duyệt trong CSDL vẫn nguyên vẹn (409 ném ra trước mọi lệnh ghi).
-      const hn = (await bangCuaBaoGia(id)).filter((t) => t.category === "hanoi");
+      const hn = await hnCuaBaoGia(id);
       expect(hn).toHaveLength(1);
       expect(hn[0].items[0].unitPrice).toBe(5_000_000);
     });
@@ -206,15 +209,14 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
         sheets: [{ id: sheetId, templateId, name: "Trang 1", order: 1, items: [{ kind: "item", name: "Hạng mục", quantity: 1, unitPrice: 10_000, order: 1 }] }],
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const hn = (await bangCuaBaoGia(id)).filter((t) => t.category === "hanoi");
-      expect(hn, "bảng HN có trong CSDL mà payload bỏ sót phải được trả lại, không phải mất").toHaveLength(1);
+      const hn = await hnCuaBaoGia(id);
+      expect(hn, "payload không nhắc tới `hnTables` = KHÔNG ĐỤNG, không phải xoá").toHaveLength(1);
     });
 
     it("người CÓ quote:hn:manage (admin/quản lý) vẫn sửa được giá HN đã duyệt", async () => {
       const { id, sheetId } = await dungBaoGiaHN("approved");
       expect((await luuDeGiaHN(admin, id, sheetId, 3)).status).toBe(200);
-      const hn = (await bangCuaBaoGia(id)).find((t) => t.category === "hanoi");
-      expect(hn.items[0].unitPrice, "người duyệt phần HN thì được quyền sửa").toBe(3);
+      expect((await hnCuaBaoGia(id))[0].items[0].unitPrice, "người duyệt phần HN thì được quyền sửa").toBe(3);
     });
   });
 
@@ -222,8 +224,10 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
   it("account HN lưu phần HN KHÔNG xoá mất thanh toán bảng HCM mà kế toán vừa ghi", async () => {
     const { id, sheetId } = await taoBaoGia(admin, "savehn");
     const hcm = { category: "hcm", name: "Chi phí HCM", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hcm1", name: "Thuê kho", quantity: 1, unitPrice: 1000, approved: true, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null }] };
-    const hn = { category: "hanoi", name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 2000, approved: false, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null }] };
-    await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: [hcm, hn] } });
+    const hn = { name: "Giá HN", templateId, groupSubtotal: true, items: [{ kind: "item", rid: "hn1", name: "Thuê xe HN", quantity: 1, unitPrice: 2000, approved: false, approvedAt: null, approvedBy: null, paid: false, paidAt: null, paidById: null, paidProof: null }] };
+    // hcm vẫn theo TRANG; HN ở cấp BÁO GIÁ. Đúng cái làm hai đường ghi hết đụng nhau.
+    await prisma.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: [hcm] } });
+    await prisma.quote.update({ where: { id }, data: { hnTables: [hn] } });
     expect((await admin.post(`/api/quotes/${id}/hn/assign`).send({ accountId: accU.id })).status).toBe(200);
 
     const acc = agentWithCsrf(app);
@@ -233,11 +237,14 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
     try {
       // Kế toán đang đánh dấu ĐÃ TRẢ hàng hcm1 (route /pay khoá hàng sheet y như thế) — chưa commit.
       await keToan.query('SELECT id FROM "QuoteSheet" WHERE id = $1 FOR UPDATE', [sheetId]);
-      const daTra = [{ ...hcm, items: [{ ...hcm.items[0], paid: true, paidAt: "2026-08-01T00:00:00.000Z", paidById: adminU.id, paidProof: "data:image/png;base64,BBBB" }] }, hn];
+      const daTra = [{ ...hcm, items: [{ ...hcm.items[0], paid: true, paidAt: "2026-08-01T00:00:00.000Z", paidById: adminU.id, paidProof: "data:image/png;base64,BBBB" }] }];
       await keToan.query('UPDATE "QuoteSheet" SET "extraTables" = $2::jsonb WHERE id = $1', [sheetId, JSON.stringify(daTra)]);
 
+      // Payload phẳng (cấp báo giá). Đáng chú ý: hai đường ghi nay KHÔNG còn chung một hàng —
+      // account HN ghi cột của Quote, kế toán ghi cột của QuoteSheet — nên bài này từ chỗ chốt
+      // "không xoá mất của nhau" trở thành chốt "không khoá chéo nhau tới mức treo".
       const dangLuu = banNgay(acc.put(`/api/quotes/${id}/hn`).send({
-        hnSheets: [{ sheetId, hnTables: [{ ...hn, items: [{ ...hn.items[0], name: "Thuê xe HN (sửa)", unitPrice: 2500 }] }] }],
+        hnTables: [{ ...hn, items: [{ ...hn.items[0], name: "Thuê xe HN (sửa)", unitPrice: 2500 }] }],
       }));
       await nghi(500);
       await keToan.query("COMMIT");
@@ -253,7 +260,8 @@ describe.runIf(dbAvailable)("Lưu báo giá song song — không ai được ghi
     expect(hcmSau.items[0].paid, "cờ đã-trả của kế toán KHÔNG được biến mất").toBe(true);
     expect(hcmSau.items[0].paidById).toBe(adminU.id);
     expect(hcmSau.items[0].paidProof, "ảnh chứng từ phải còn").toBe("data:image/png;base64,BBBB");
-    const hnSau = bang.find((t) => t.category === "hanoi");
+    const qSau = await prisma.quote.findFirst({ where: { id }, select: { hnTables: true } });
+    const hnSau = (qSau.hnTables || [])[0];
     expect(hnSau.items[0].name, "phần account HN được sửa vẫn phải lưu").toBe("Thuê xe HN (sửa)");
     expect(hnSau.items[0].unitPrice).toBe(2500);
   }, 30_000);

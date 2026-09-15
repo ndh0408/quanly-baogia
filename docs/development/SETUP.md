@@ -53,7 +53,7 @@ Service `app` nằm sau profile `full`; ở môi trường dev thường chạy 
 | `npm run worker` | chạy `dist/worker.js` |
 | `npm run typecheck` | `tsc --noEmit` cho backend |
 | `npm run lint` / `lint:fix` | ESLint |
-| `npm run format` | Prettier (**chỉ** json/css/yml — không đụng TS/JS, xem `lint-staged.config.mjs`) |
+| `npm run format` | `prettier --write .` — đụng **cả** `.ts/.tsx/.js` (không bị chặn bởi `.prettierignore`); ràng buộc "chỉ json/css/yml" chỉ áp ở pre-commit qua `lint-staged.config.mjs`, không áp cho lệnh này gõ tay |
 | `npm test` / `test:run` | Vitest |
 | `npm run test:coverage` | Vitest + coverage |
 | `npm run web:build` | typecheck + build SPA React |
@@ -108,6 +108,6 @@ DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
 SPA React tự lo; nếu gọi API bằng curl thì lấy mã ở `GET /api/csrf-token` (hoặc
 dùng Bearer, được miễn).
 
-**Sửa `web/src` mà trình duyệt không thấy đổi** — chạy lại `npm run build:web`.
+**Sửa `web/src` mà trình duyệt không thấy đổi** — chạy lại `npm run web:build`.
 Vite tự băm tên file asset nên không còn phải bump `?v=` bằng tay (SPA cũ dùng `?v=`
 đã gỡ 2026-08-26).

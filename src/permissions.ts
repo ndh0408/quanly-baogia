@@ -433,10 +433,69 @@ export function can(session: SessionLike, permission: string) {
 // (Membership grants view + edit, but NOT delete.)
 const QUOTE_MEMBER_ACTIONS = new Set(["read", "update"]);
 
+// PHẠM VI SỬA của một "account phụ" trên MỘT báo giá. Bốn vùng, khớp 1-1 với thứ người dùng
+// nhìn thấy trên màn soạn thảo; ba khoá cuối TRÙNG TÊN với `QuoteSheet.extraTables[].category`
+// nên không có bảng ánh xạ nào phải giữ đồng bộ (xem src/quoteUtils.ts sanitizeExtraTables).
+export const QUOTE_SCOPES = ["main", "hcm", "hanoi", "khach"] as const;
+export type QuoteScope = (typeof QUOTE_SCOPES)[number];
+
+/** Nhãn tiếng Việt của từng vùng — dùng trong thông báo, nhật ký và giao diện. */
+export const TEN_PHAM_VI: Record<string, string> = {
+  main: "Báo giá chính",
+  hcm: "Chi phí HCM",
+  hanoi: "Giá Hà Nội",
+  khach: "Phí khách hàng",
+};
+export const tenPhamVi = (s: string) => TEN_PHAM_VI[s] ?? s;
+
+/** Lọc input người dùng về đúng tập vùng hợp lệ, bỏ trùng, giữ thứ tự khai báo. */
+export function locPhamVi(x: unknown): QuoteScope[] {
+  const co = new Set(Array.isArray(x) ? x.map(String) : []);
+  return QUOTE_SCOPES.filter((s) => co.has(s));
+}
+
+/** Một hàng thành viên như mọi chỗ đọc nó: model tường minh (userId), hoặc dạng cũ (id/số). */
+type MemberLike = { userId?: number; id?: number; scopes?: string[] } | number;
+const memberUserId = (m: any): number => (typeof m === "number" ? m : (m?.userId ?? m?.id));
+
+/**
+ * Phạm vi hiệu lực của phiên trên một báo giá:
+ *   · người tạo, hoặc `quote:update:all` → đủ 4 vùng
+ *   · thành viên                          → đúng `scopes` của hàng (rỗng = CHỈ XEM)
+ *   · không liên quan                     → null
+ * `scopes` vắng mặt (chỗ gọi cũ chỉ select userId) được hiểu là ĐỦ 4 VÙNG — giữ đúng hành vi
+ * trước khi có phạm vi, để một lần đọc thiếu cột không âm thầm khoá tay người đang làm.
+ */
+export function quoteScopesFor(
+  session: SessionLike,
+  quote: { createdById?: number | null; members?: MemberLike[] } | null | undefined,
+): QuoteScope[] | null {
+  if (!quote) return null;
+  if (quote.createdById === session.userId || can(session, "quote:update:all")) return [...QUOTE_SCOPES];
+  const row: any = Array.isArray(quote.members)
+    ? quote.members.find((m: any) => memberUserId(m) === session.userId)
+    : undefined;
+  if (row === undefined) return null;
+  if (!Array.isArray(row?.scopes)) return [...QUOTE_SCOPES];
+  return row.scopes.filter((s: string): s is QuoteScope => (QUOTE_SCOPES as readonly string[]).includes(s));
+}
+
+/**
+ * "Account phụ" = ĐƯỢC THÊM VÀO báo giá của người khác. Không phải chủ, không có quote:update:all.
+ * Ba việc họ KHÔNG được làm dù có đủ 4 vùng, vì cả ba mang báo giá RA KHỎI tầm chủ: nhân bản (bản
+ * sao đứng tên người bấm + mang mã dự án của họ), chốt/huỷ deal (trạng thái terminal, rơi vào KPI
+ * của chủ), và giao/duyệt phần Hà Nội (giao phần HN THÊM NGƯỜI vào danh sách thành viên).
+ */
+export function laAccountPhu(session: SessionLike, quote: { createdById?: number | null; members?: MemberLike[] } | null | undefined) {
+  if (!quote || quote.createdById === session?.userId) return false;
+  if (can(session, "quote:update:all")) return false;
+  return quoteScopesFor(session, quote) !== null;
+}
+
 export function canOnQuote(
   session: SessionLike,
   action: string,
-  quote: { createdById?: number; members?: any[] } | null | undefined,
+  quote: { createdById?: number; members?: MemberLike[] } | null | undefined,
 ) {
   if (can(session, `quote:${action}:all`)) return true; // quyền xem/sửa MỌI báo giá
   if (can(session, `quote:${action}:own`)) {
@@ -444,7 +503,11 @@ export function canOnQuote(
     if (quote.createdById === session.userId) return true;
     // Ai được thêm làm THÀNH VIÊN cũng với tới được (read/update).
     if (QUOTE_MEMBER_ACTIONS.has(action) && Array.isArray(quote.members)) {
-      return quote.members.some((m: any) => (m.id ?? m) === session.userId);
+      const row: any = quote.members.find((m: any) => memberUserId(m) === session.userId);
+      if (row === undefined) return false;
+      // Thành viên KHÔNG có vùng nào là thành viên CHỈ XEM: vẫn đọc được, không sửa được.
+      if (action === "update" && Array.isArray(row?.scopes) && row.scopes.length === 0) return false;
+      return true;
     }
   }
   return false;
@@ -464,7 +527,7 @@ export function canOnQuote(
 export function quoteScopeWhere(session: SessionLike): Record<string, any> | null {
   if (can(session, "quote:read:all")) return {}; // xem mọi báo giá
   if (can(session, "quote:read:own")) {
-    return { OR: [{ createdById: session.userId }, { members: { some: { id: session.userId } } }] };
+    return { OR: [{ createdById: session.userId }, { members: { some: { userId: session.userId } } }] };
   }
   return null; // fail closed
 }

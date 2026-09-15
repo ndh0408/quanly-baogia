@@ -37,22 +37,26 @@ Bảng đầy đủ (chặn gì · vì sao ở đúng chỗ đó) nằm ở
 Ở đây chỉ nhắc bốn chặng có thể **kết thúc** request trước khi nó chạm tới route:
 
 ```
-helmet → compression → requestId → pino-http → decompressBody → express.json
-  → session → metrics → bearerAuth → enforceActiveUser → csrfGuard → rate limit
+helmet → compression → requestId → pino-http → rate limit → decompressBody
+  → express.json → session → metrics → bearerAuth → enforceActiveUser → csrfGuard
   → ROUTES → notFound → static → SPA → errorHandler
 ```
 
-* **`decompressBody`** (`src/decompressBody.ts`) — chạy **trước** xác thực, nên
-  trần của nó ăn theo route chứ không dùng chung: nhóm `/api/quotes` là 16 MB,
-  mọi đường khác 2 MB. Dùng chung 16 MB nghĩa là người **chưa đăng nhập** bơm
-  được 16 MB vào bất kỳ endpoint nào.
+* **`apiLimiter`** (rate limit) — mặc định 120 request/phút (`RATE_LIMIT_API_PER_MIN`), dùng
+  kho đếm Redis khi có `REDIS_URL` để nhiều tiến trình chia chung một trần. **Từ 2026-09-08** đứng
+  **trước** `decompressBody`/`express.json`, không phải sau `csrfGuard` như trước: nó khoá theo
+  `req.ip`, không đọc session/body/cookie, nên an toàn để chạy sớm — và chạy sớm mới có tác dụng,
+  vì hai middleware ngay sau giải nén gzip rồi `JSON.parse` tới 16 MB **đồng bộ trên event loop**;
+  đứng sau chúng nghĩa là người **chưa đăng nhập** đã tiêu CPU/heap xong việc đó trước khi có bất
+  kỳ trần nào chặn.
+* **`decompressBody`** (`src/decompressBody.ts`) — chạy **trước** body parser vì nó thay thế luồng
+  thân, và **trước** xác thực nên trần của nó ăn theo route chứ không dùng chung: nhóm
+  `/api/quotes` là 16 MB, mọi đường khác 2 MB.
 * **`enforceActiveUser`** (`src/middleware.ts`) — nạp lại vai trò + tập quyền +
   trạng thái khoá **từ CSDL mỗi request**. Đây là lý do admin khoá một tài khoản
   thì có hiệu lực ở request KẾ TIẾP của người đó, không phải sau khi cookie hết hạn.
 * **`csrfGuard`** (`src/app.ts`) — miễn cho client Bearer JWT (trình duyệt không
   tự gắn token), nên phải đứng **sau** `bearerAuth`.
-* **`apiLimiter`** — mặc định 120 request/phút (`RATE_LIMIT_API_PER_MIN`), dùng
-  kho đếm Redis khi có `REDIS_URL` để nhiều tiến trình chia chung một trần.
 
 ### 1.3 Route → service → Prisma
 
@@ -76,7 +80,7 @@ Hai lớp phân quyền, và **không lớp nào thay được lớp kia**:
 | Năng lực | `requirePermission(...)` ở route | "Tài khoản này được phép làm hành động này không?" |
 | Phạm vi bản ghi | `canOnQuote` / `canScoped` / `quoteScopeWhereOrThrow` trong service | "Được phép làm nó **trên bản ghi cụ thể này** không?" |
 
-Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 138 endpoint:
+Bỏ lớp thứ hai là IDOR. Ma trận đầy đủ cho cả 140 endpoint:
 [ROLES_PERMISSIONS.md](../product/ROLES_PERMISSIONS.md).
 
 ### 1.4 Prisma → Postgres
@@ -231,11 +235,27 @@ lần Lưu chết P2028 trong khi tiến trình vẫn khởi động bình thư�
 
 ### 3.4 Nhánh riêng: Account Hà Nội
 
-`PUT /api/quotes/:id/hn` → `saveHn` trong `src/hnWorkflow.ts`. Chỉ ghi bảng
-`extraTables` loại `"hanoi"` của từng sheet, chép nguyên phần `hcm`/`khach`.
-Lấy **cùng** khoá `FOR UPDATE` trên `QuoteSheet` theo **cùng thứ tự** với
-`updateQuote`, và bump `Quote.updatedAt` ở cuối để khoá lạc quan của quản lý
-nhìn thấy phần HN vừa lưu.
+`PUT /api/quotes/:id/hn` → `saveHn` trong `src/hnWorkflow.ts`. Từ 2026-09-15 nó
+chỉ ghi **một cột**: `Quote.hnTables` (cấp báo giá). Nó **không** còn đụng
+`QuoteSheet` nào — đó là điểm khác quan trọng nhất so với bản trước, vốn ghi
+`extraTables` loại `"hanoi"` của từng trang.
+
+Khoá: chỉ `SELECT id FROM "Quote" … FOR UPDATE`, và **không** lấy khoá
+`QuoteSheet` sau đó. Mọi đường ghi khác lấy khoá theo thứ tự `QuoteSheet → Quote`
+(`updateQuote`, `markExtraTableRowPayment`), nên lấy ngược chiều là deadlock.
+Dùng `$queryRaw` chứ không `updateMany`: extension realtime ở `src/db.ts` coi
+`updateMany` là WRITE nên bắn thêm một sự kiện SSE, mà SSE đã bắn thì rollback
+không rút lại được.
+
+**Khoá lạc quan chốt theo `hnRev`, không theo `Quote.updatedAt`.** `hnRev` là
+băm của vân tay bảng Hà Nội (`quoteUtils.vanTayHn` → `hnRevCua`) và cố ý bỏ qua
+`paidProof` / `rid` / `paid*` / `approved*` — những trường server sở hữu hoặc
+sinh lại mỗi lần sanitize, nếu tính vào thì so bản CSDL với chính nó cũng ra
+khác. Client nhận `hnRev` ở `GET` rồi gửi trả nguyên văn qua `baseHnRev`.
+Vì sao không dùng `updatedAt`: nó đổi mỗi lần **chủ báo giá** lưu bất cứ thứ gì,
+mà màn account HN **không có bản nháp cục bộ** — một lần 409 oan là mất trắng.
+Tab mở trước lần deploy này chỉ gửi `baseUpdatedAt`; đường đó vẫn được tôn trọng
+khi thiếu `baseHnRev`.
 
 Chi tiết vòng đời và ai làm được gì: [QUOTE_WORKFLOW.md](../product/QUOTE_WORKFLOW.md).
 

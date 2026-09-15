@@ -163,7 +163,8 @@ model User {
 
   createdQuotes      Quote[]           @relation("CreatedBy")
   approvedQuotes     Quote[]           @relation("ApprovedBy")
-  memberQuotes       Quote[]           @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
+  memberQuotes       QuoteMember[]     @relation("QuoteMemberUser") // báo giá được thêm vào làm account phụ
+  addedMembers       QuoteMember[]     @relation("QuoteMemberAddedBy") // lượt phân công do mình thực hiện
   ownedCustomers     Customer[]
   auditEvents        AuditEvent[]
   notifications      Notification[]
@@ -559,7 +560,7 @@ model Quote {
   sheets    QuoteSheet[]
   versions  QuoteVersion[]
   approvals Approval[]
-  members   User[]         @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
+  members   QuoteMember[] // "account phụ": nhân viên được thêm vào để xem/sửa, có PHẠM VI riêng
 
   sentAt      DateTime?
   convertedAt DateTime?
@@ -567,6 +568,19 @@ model Quote {
   // ===== Phần GIÁ HÀ NỘI (role account_hn) — luồng RIÊNG, tách khỏi `status` báo giá chính.
   // Quản lý GIAO account điền bảng nội bộ loại "hanoi"; account chỉ thấy/sửa phần đó rồi
   // GỬI DUYỆT; quản lý DUYỆT/TRẢ. =====
+  // BẢNG GIÁ HÀ NỘI của CẢ BÁO GIÁ — mảng [{ name, templateId, groupSubtotal, items:[...] }].
+  //
+  // Trước 2026-09-15 những bảng này nằm trong `QuoteSheet.extraTables` với `category:"hanoi"`, tức
+  // THEO TỪNG TRANG của chủ báo giá. Ba hệ quả, cả ba đều là lỗi thật:
+  //   · màn account Hà Nội phải lặp theo trang của chủ và in cả TÊN TRANG → lộ cấu trúc báo giá;
+  //   · lưu phải ghép theo `sheetId`, mà lưu báo giá là XOÁ TRANG RỒI TẠO LẠI nên id đổi hết →
+  //     account HN gõ xong bấm Lưu nhận 409 "phải tải lại trang";
+  //   · chủ xoá một trang là bảng HN nằm trên trang đó CHẾT THEO, im lặng.
+  // Ở cấp báo giá thì account HN có không gian riêng: tự tạo/xoá/đặt tên bảng như khi làm báo giá,
+  // không đụng và không thấy trang của chủ. `category` không còn cần thiết (cả cột này là "hanoi").
+  //
+  // KHÔNG lọt ra Excel/PDF gửi khách: bốn đường xuất đều `omit` cột này (export.routes, worker).
+  hnTables      Json?
   hnAssigneeId  Int? // account_hn được giao (cũng được thêm vào members để thấy báo giá)
   hnStatus      String? // null=chưa giao · assigned · submitted · approved · rejected
   hnSubmittedAt DateTime? // account bấm "Gửi duyệt"
@@ -588,6 +602,35 @@ model Quote {
   @@index([createdById])
   @@index([approvedById])
   @@index([deletedAt])
+}
+
+// "ACCOUNT PHỤ" — người được CHỦ báo giá thêm vào làm cùng trên MỘT báo giá.
+//
+// VÌ SAO LÀ BẢNG CHỨ KHÔNG PHẢI VAI TRÒ: phạm vi thuộc về CẶP (người, báo giá) — cùng một
+// người là CHỦ báo giá A và là PHỤ ở báo giá B. Một vai trò trong enum `Role` là thuộc tính
+// của TÀI KHOẢN nên không diễn đạt được điều đó (đúng chỗ khuôn `account_hn` bị vỡ: ai mang
+// cờ `quote:hn:fill` thì MỌI báo giá đều bị lược, kể cả báo giá họ tự tạo).
+//
+// Trước 2026-09-15 đây là m2m NGẦM `_QuoteMembers(A,B)` — chỉ MỘT BIT, nên "được thêm vào" là
+// mở TOÀN BỘ báo giá. Bảng tường minh là chỗ đựng `scopes`. Di trú: mọi hàng cũ nhận đủ 4 vùng
+// (migration 20260915090000_quote_member_scopes) → không ai đang chạy bị mất quyền.
+model QuoteMember {
+  quoteId Int
+  quote   Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  userId  Int
+  user    User  @relation("QuoteMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Vùng ĐƯỢC SỬA: tập con của ["main","hcm","hanoi","khach"] (src/permissions.ts QUOTE_SCOPES).
+  // RỖNG = chỉ xem. Ba khoá cuối trùng tên `QuoteSheet.extraTables[].category` — cố ý, để không
+  // phải giữ đồng bộ một bảng ánh xạ thứ hai.
+  scopes String[] @default([])
+
+  addedById Int? // ai phân công (chủ báo giá hoặc quản trị) — SetNull khi người đó bị xoá
+  addedBy   User? @relation("QuoteMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  addedAt   DateTime @default(now())
+
+  @@id([quoteId, userId])
+  @@index([userId]) // "báo giá tôi được thêm vào" — đường đọc của quoteScopeWhere
 }
 
 model QuoteVersion {
@@ -632,7 +675,7 @@ model QuoteSheet {
   subtotal       Decimal       @default(0) @db.Decimal(18, 2) // materialized: tổng sheet ĐÃ TRỪ discount (= computeQuoteTotals.sheetTotals[].subtotal), ghi lúc save → trang Dự án không phải kéo items vào RAM
   items          QuoteItem[]
   // Bảng nội bộ (CHỈ quản lý — KHÔNG xuất Excel, KHÔNG cộng vào tổng báo giá). Mỗi phần tử:
-  // { category: "hcm"|"hanoi"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
+  // { category: "hcm"|"khach", name, items: [{kind,name,detail,unit,quantity,unitPrice,days,notes,formulas}] }.
   // Tổng theo từng loại đổ vào cột Chi Phí HCM / Báo Giá Hà Nội / Phí Khách Hàng ở trang Quản lý dự án.
   extraTables    Json?
   // Ký chứng từ theo từng sheet (chỉ quản lý — admin/người có canSign mới ký).

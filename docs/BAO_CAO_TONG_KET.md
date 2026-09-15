@@ -9,7 +9,7 @@
 ## A. Executive Summary
 
 **Trước.** Một hệ quản lý báo giá đang chạy thật, kiến trúc lành mạnh (React SPA → Express →
-Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 138 endpoint, tiền dùng `Decimal`. Nhưng
+Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 140 endpoint, tiền dùng `Decimal`. Nhưng
 lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml` khai đủ cổng mà **chưa bao giờ chạy**
 (tài khoản không bật GitHub Actions), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
@@ -46,15 +46,15 @@ ghi trong `CHANGELOG.md` và `docs/REMAINING_RISKS.md`.
 |---|---|---|---|---|---|
 | **Cao** | Bundle web là bản DEV của React (phình 65%, `<StrictMode>` chạy đôi effect → mất dữ liệu wizard) | **EXISTS** | Ghim `NODE_ENV=production` cho lệnh build ở hai lớp (đặt biến trước khi trả cấu hình + `define`); chỉ `define` không đủ | `web/vite.config.ts`, `scripts/ci/check-web-bundle.mjs` | cổng `check-web-bundle`, đã kiểm ngược 2 chiều |
 | **Cao** | Bàn giao bản nháp Wizard → trình soạn mất trắng khi effect chạy lại | **EXISTS** | Tách bất biến thành `giuBanNhap()`, giữ bản nháp trong ref theo đúng lần mount | `web/src/lib/pendingQuote.ts`, `web/src/pages/QuoteEditor.tsx` | `pendingQuote.test.ts` (4 bài, kiểm ngược: gỡ vá → đỏ) |
-| **Cao** | Mất phần đang gõ khi tab sập / máy mất điện (3 lớp sẵn có đều chỉ sống trong RAM tab) | **EXISTS** | Bản nháp cục bộ: gộp 1,2 s, trần 1 MB, hạn 7 ngày, tự bóc ảnh base64 khi quá trần **và nói ra** | `web/src/lib/localDraft.ts` (mới), `QuoteEditor.tsx` | `localDraft.test.ts` (11 bài) + E2E `[U10b]` |
+| **Cao** | Mất phần đang gõ khi tab sập / máy mất điện (3 lớp sẵn có đều chỉ sống trong RAM tab) | **EXISTS** | Bản nháp cục bộ: gộp 1,2 s, trần 1 MB, hạn 7 ngày, tự bóc ảnh base64 khi quá trần **và nói ra** | `web/src/lib/localDraft.ts` (mới), `QuoteEditor.tsx` | `localDraft.test.ts` (14 bài) + E2E `[U10b]` |
 | **Cao** | `check-alerts [A3]` xanh giả với tên metric có chữ hoa | **EXISTS** | Mở rộng bộ tách sang `[a-zA-Z_:]`; thêm bước `[A4]` soi PromQL của bảng điều khiển Grafana | `scripts/ci/check-alerts.mjs` | kiểm ngược 2 tên sai → đỏ đúng |
 | **Trung bình** | Trang Mã khách hàng: `ORDER BY createdAt` không index nào phục vụ → Seq Scan + Sort toàn bảng | **EXISTS** | Index PHẦN `WHERE deletedAt IS NULL` cho `createdAt` và `updatedAt` | `prisma/migrations/20260827140000_customer_sort_indexes/` | cổng `explain-hot-paths`, kiểm ngược: gỡ index → đỏ |
-| **Trung bình** | Lưu báo giá xoá-tạo-lại MỌI trang: 10.000 dòng = 3,3 s cho một ô sửa | **EXISTS** | Cờ `INCREMENTAL_QUOTE_SAVE` (mặc định TẮT) bỏ qua trang không đổi | `src/quoteSheetDiff.ts` (mới), `src/services/quoteService.ts`, `src/config.ts` | `xc-incremental-quote-save.test.js` (7 bài, chạy CẢ HAI chiều cờ) |
+| **Trung bình** | Lưu báo giá xoá-tạo-lại MỌI trang: 10.000 dòng = 3,3 s cho một ô sửa | **EXISTS** | Cờ `INCREMENTAL_QUOTE_SAVE` (mặc định TẮT) bỏ qua trang không đổi | `src/quoteSheetDiff.ts` (mới), `src/services/quoteService.ts`, `src/config.ts` | `xc-incremental-quote-save.test.js` (8 bài, chạy CẢ HAI chiều cờ) |
 | **Trung bình** | Log request thiếu `route` và `role` → gom log không nhóm được theo endpoint | **EXISTS** | Ghi mẫu route ngay trong `asyncHandler` (thời điểm duy nhất `req.baseUrl` còn đúng cho cả đường lỗi) | `src/middleware.ts`, `src/app.ts` | `xd-log-fields.test.js` (5 bài, dùng pino thật) |
 | **Trung bình** | §5 thiếu ca cuối "expired session"; cookie `HttpOnly`/`SameSite` chưa bài nào kiểm | **PARTIALLY FIXED** | Dựng app thứ hai với kho phiên trống → chốt 401 (KHÔNG 403) | `tests/csrf.test.js` | +1 bài (13 tổng) |
 | **Trung bình** | Bộ gõ tiếng Việt: điều kiện IME nằm ở 2 nơi, 2 cách viết, **0 bài kiểm** | **EXISTS** | Gộp về `dangGoIME()` thuần | `web/src/lib/gridShared.ts`, `GridTable.tsx`, `Venues.tsx` | `imeGuard.test.ts` (8 bài) |
 | **Trung bình** | `TRUST_PROXY` chỉ có chú thích, không bài nào chứng minh hậu quả đặt sai | **PARTIALLY FIXED** | Tài liệu topology + 5 bài đo qua bảng `LoginAttempt` thật | `docs/operations/REVERSE_PROXY.md` | `xb-trust-proxy.test.js` |
-| **Trung bình** | Không có sổ phát hành (§46 đòi 4 trường) | **EXISTS** | `deploy.sh` bước `[5b/13]` ghi `RELEASES.log`: SHA · migration ĐANG áp trong CSDL · digest image · mốc UTC máy chủ | `deploy.sh` | chạy thử với `docker` giả |
+| **Trung bình** | Không có sổ phát hành (§46 đòi 4 trường) | **EXISTS** | `deploy.sh` bước `[5b/6]` ghi `RELEASES.log`: SHA · migration ĐANG áp trong CSDL · digest image · mốc UTC máy chủ | `deploy.sh` | chạy thử với `docker` giả |
 | **Thấp** | 5 nơi tự tính `Math.ceil(total/size)`; `size=0` ra `Infinity` → JSON `null` | **EXISTS** | `src/pagination.ts`: `phanTrang()` + `skipTake()` (trần lấy từ `config`) | 5 service | `xe-pagination.test.js` (10 bài, đối chiếu với bản chép tay cũ) |
 | **Thấp** | `PRISMA_LOG_QUERIES` đọc thẳng `process.env` mà không khai ở đâu | **EXISTS** (cổng `b8-env-drift` bắt) | Ghi vào `.env.example` kèm cảnh báo không bật ở production | `.env.example` | cổng sẵn có |
 
@@ -233,9 +233,11 @@ npm run verify                     # 13 bước · 39 khẳng định
 > **Số khẳng định đọc từ script, KHÔNG từ một lượt chạy mới.** Lượt `npm run verify` trọn
 > gần nhất là 2026-08-27 và xanh ở **34** khẳng định. Đợt 2026-08-28 thêm đúng một cổng
 > (`check-doc-numbers`, một dòng `ket` trong bước `[8/13]`, không đổi mẫu số bước) → 35.
-> Đếm lại: `grep -cE '(^|;)\s*ket ' scripts/verify-local.sh` ra 34 dòng, trong đó một dòng
-> nằm trong hàm `do_toast` được gọi hai lần, nên 33 + 2 = 35. Chưa có lượt chạy trọn nào
-> sau 2026-08-27 xác nhận cả 35 cùng xanh — nó cần PostgreSQL + Redis + MinIO + Docker.
+> Đếm lại lúc đó: `grep -cE '(^|;)\s*ket ' scripts/verify-local.sh` ra 34 dòng, trong đó một
+> dòng nằm trong hàm `do_toast` được gọi hai lần, nên 33 + 2 = 35. Đếm lại hôm nay
+> (2026-09-09): nhiều cổng CI đã thêm vào từ đó tới nay, grep ra **38** dòng; cùng cách tính
+> do_toast thì 37 + 2 = **39**, khớp đúng số ở đầu mục. Chưa có lượt `npm run verify` trọn nào
+> xác nhận cả 39 cùng xanh cùng lúc — nó cần PostgreSQL + Redis + MinIO + Docker.
 
 | Lệnh | Kết quả |
 |---|---|
@@ -311,7 +313,7 @@ Chỉ những thứ **thật sự cần**, theo thứ tự.
 | **6–12 tháng** | Bật Loki/Grafana khi lên nhiều instance | Một VM thì `docker logs` còn đủ |
 | **6–12 tháng** | Chuyển sang kéo ảnh theo digest làm mặc định | Cần VM đăng nhập được registry |
 | **12–24 tháng** | Dựng `/api/v1` — **chỉ khi** có consumer ngoài repo | Phiên bản là lời hứa với người khác; hứa với không ai thì chỉ còn là chi phí |
-| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 138 endpoint. Xem lại khi Express 4 hết hỗ trợ |
+| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 140 endpoint. Xem lại khi Express 4 hết hỗ trợ |
 | **khi có áp lực TỔ CHỨC** | Ranh giới dọc (`src/modules/`) | Đọc lại bảng bảy câu ở ADR 0008: lúc đó cột "vấn đề đo được" mới không còn rỗng |
 
 **Không đề xuất:** microservices · NestJS · Next.js · Kafka · event sourcing/CQRS · Kubernetes bắt

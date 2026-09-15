@@ -35,6 +35,30 @@ const GHI = ["post", "put", "patch", "delete"];
 export function agentWithCsrf(app) {
   const a = request.agent(app);
 
+  // ── GỘP CÁC LƯỢT LẤY MÃ ĐANG BAY ─────────────────────────────────────────
+  // KHÔNG phải nhớ tạm (mục ở trên giải thích vì sao không nhớ): chỉ gộp những lượt lấy mã ĐANG
+  // CÙNG BAY thành MỘT. Xong lượt nào thì lượt ghi sau vẫn lấy mã mới như cũ.
+  //
+  // Vì sao cần: `issueCsrfToken` (src/app.ts:133) chỉ sinh bí mật KHI PHIÊN CHƯA CÓ. Đăng nhập gọi
+  // `session.regenerate()` nên bí mật biến mất. Nếu ngay sau đó có N lần ghi SONG SONG thì N lượt
+  // `GET /api/csrf-token` cùng thấy phiên trống, mỗi lượt sinh một bí mật RIÊNG rồi cùng ghi phiên
+  // — lượt ghi cuối thắng, N-1 mã đã phát ra thành vô hiệu, và N-1 request kia ăn 403.
+  //
+  // ĐO ĐƯỢC ở tests/b3-import-concurrency.test.js: 3 lần nhập song song thì 1 lần bị 403 ở
+  // middleware (`route: null`, 3ms). Tệ hơn: request đó đang tải lên 731KB, máy chủ trả lời khi
+  // thân CHƯA gửi xong nên client nhận `ECONNRESET` chứ KHÔNG đọc nổi cái 403 — bài test đỏ với
+  // một triệu chứng chẳng liên quan gì tới thứ nó định đo.
+  let dangBay = null;
+  const layMa = () => {
+    if (!dangBay) {
+      dangBay = a.get("/api/csrf-token").then(
+        (r) => { dangBay = null; return r; },
+        (e) => { dangBay = null; throw e; },
+      );
+    }
+    return dangBay;
+  };
+
   for (const m of GHI) {
     const goc = a[m].bind(a);
     a[m] = (url, ...rest) => {
@@ -49,7 +73,7 @@ export function agentWithCsrf(app) {
       t.then = (onOk, onErr) =>
         (async () => {
           if (!daDatTay) {
-            const r = await a.get("/api/csrf-token");
+            const r = await layMa();
             if (r.status === 200 && r.body?.token) gocSet("X-CSRF-Token", r.body.token);
           }
           return gocThen();

@@ -37,11 +37,11 @@ grep -rn 'web/src/' --include=*.md --include=*.mjs --include=*.js --include=*.ts
 
 | Số đo | Giá trị |
 |---|---|
-| Tổng file `.ts`/`.tsx` trong `web/src` | **65** (44 không phải test + 21 test) |
+| Tổng file `.ts`/`.tsx` trong `web/src` | **67** (44 không phải test + 23 test) |
 | `pages/` | 17 trang + 1 test |
-| `components/` | 5 component + 2 test |
+| `components/` | 5 component + 3 test |
 | `lib/` | 19 module + 18 test |
-| Gốc `web/src/` | `App.tsx` · `main.tsx` · `bench.tsx` |
+| Gốc `web/src/` | `App.tsx` · `main.tsx` · `bench.tsx` + `App.draftleak.test.ts` |
 | Dòng `import` trong `web/src` | 233, trong đó **162 là đường dẫn tương đối** (108 dòng dùng `../`) |
 | Bí danh đường dẫn (`paths` trong tsconfig, `resolve.alias` của Vite) | **không có cái nào** |
 | Nhắc `web/src/...` từ NGOÀI `web/src` | **123** chỗ (tài liệu, chú thích trong `src/`, tests, `eslint.config.js`, `lint-staged.config.mjs`, `scripts/ci/ui-smoke.mjs`) |
@@ -76,7 +76,7 @@ Nghĩa là cây `features/` sẽ ra thế này: một `shared/` chứa `ui` + `a
 | **Why?** | Cho khớp sơ đồ trong §24. Không có yêu cầu nghiệp vụ hay vận hành nào đứng sau. |
 | **Vấn đề ĐO ĐƯỢC nào đang tồn tại?** | **Không có.** Không sự cố nào trong 53 commit đụng `web/src` truy về "sai chỗ đặt file". Các lỗi thật ở frontend là lỗi **hành vi** — IME tiếng Việt nhảy ô, 401 xoá trắng báo giá đang soạn, bundle giao cho người dùng là bản DEV của React, proxy trả HTML bị nuốt lỗi. Không lỗi nào trong số đó bị thư mục gây ra, và không lỗi nào được thư mục ngăn. |
 | **Vì sao cấu trúc hiện tại không giải quyết được?** | Nó đang giải quyết. 17 trang phẳng với tên tự mô tả (`QuoteEditor`, `Invoices`, `Personnel`) tìm bằng mắt hết trong một màn hình. Cái thật sự thiếu là **cổng kiểm ranh giới cho frontend** — và cổng đó không cần đổi cây thư mục, y như kết luận của ADR 0008 ở backend. |
-| **Chi phí migration** | **162 dòng import tương đối** phải viết lại (không có bí danh đường dẫn nào để hấp thụ thay đổi), **23 file test đặt cạnh mã** đi theo, **123 tham chiếu `web/src/...` từ bên ngoài** — trong đó có `scripts/ci/ui-smoke.mjs` và chú thích ở chính `src/` backend — và `git log --follow` gãy ở chỗ đổi tên trên 53 commit lịch sử. Một diff khổng lồ **không đổi một hành vi nào**, tức không bài test nào chứng minh được nó đúng; chỉ có "xanh" chứng minh nó chưa sai. |
+| **Chi phí migration** | **162 dòng import tương đối** phải viết lại (không có bí danh đường dẫn nào để hấp thụ thay đổi), **24 file test đặt cạnh mã** đi theo, **123 tham chiếu `web/src/...` từ bên ngoài** — trong đó có `scripts/ci/ui-smoke.mjs` và chú thích ở chính `src/` backend — và `git log --follow` gãy ở chỗ đổi tên trên 53 commit lịch sử. Một diff khổng lồ **không đổi một hành vi nào**, tức không bài test nào chứng minh được nó đúng; chỉ có "xanh" chứng minh nó chưa sai. |
 | **Chi phí vận hành** | Frontend này **không có cổng kiểm cấu trúc nào** (`scripts/ci/check-architecture.mjs` chỉ soi `src/routes` và `src/services`). Nghĩa là sau khi đổi cây, không có gì giữ cho nó đúng — ba tháng sau lại có một `lib/` mọc ra bên trong một `features/`, và ta quay về đúng chỗ cũ nhưng sâu hơn hai tầng. |
 | **Đường lùi** | Revert một commit khổng lồ — về lý thuyết được, thực tế là xung đột với mọi nhánh đang mở. |
 | **Lợi ích mong đợi** | Trực quan hơn cho người mới, và gom được mã theo miền. **Thật, nhưng nhỏ ở quy mô này**: 44 file không phải test, một lập trình viên, không có hai đội chạm cùng lúc. |
@@ -148,7 +148,7 @@ và có thể làm bất cứ lúc nào **mà không cần** đụng tới cấu
    sau này rẻ hơn. Đó là trả chi phí hôm nay cho một thay đổi đã quyết là không làm.
 3. **Tách file khi FILE quá lớn, không phải khi thư mục quá phẳng.** Tiêu chí là
    kích thước và số trách nhiệm của một file, không phải hình dạng của cây. Ví
-   dụ đang có thật: `components/GridTable.tsx` là **1 884 dòng** — lớn gấp hơn
+   dụ đang có thật: `components/GridTable.tsx` là **1 912 dòng** — lớn gấp hơn
    hai lần file kế tiếp — và cách xử lý đúng là bóc từng mảnh thuần tuý ra
    `lib/` (đã làm với `clipboard`, `formula`, `rowEdit`, `gridSelect`,
    `gridUndo`), mỗi mảnh kèm test riêng. Việc đó **không cần** `features/`.
