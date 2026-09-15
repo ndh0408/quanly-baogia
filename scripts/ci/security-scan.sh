@@ -27,6 +27,29 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 GOC="$PWD"
 
+# ── GIT BASH TRÊN WINDOWS ĐỔI ĐƯỜNG DẪN SAU LƯNG MÌNH ──────────────────────
+# Ba bước dưới đây truyền cho docker cả đường dẫn CỦA MÁY (vế trái của `-v`) lẫn đường dẫn TRONG
+# CONTAINER (`/src`, `/repo`, `--ignorefile /src/...`). Lớp MSYS của Git for Windows thấy tham số
+# bắt đầu bằng `/` thì tưởng là đường dẫn POSIX và tự dịch sang đường dẫn Windows TRƯỚC khi docker
+# nhìn thấy — `--ignorefile /src/.trivyignore.yaml` tới nơi thành
+# `C:/Program Files/Git/src/.trivyignore.yaml`. Trivy chết với "ignore file not found", semgrep
+# (`-w /src`) trả JSON rỗng nên bước đọc kết quả ném "Unexpected end of JSON input". Cổng đỏ vì
+# MÔI TRƯỜNG, không phải vì có phát hiện — mà đỏ ở chỗ không ai đoán ra.
+#
+# Trên repo này chuyện đó nghiêm trọng hơn bình thường: GitHub Actions KHÔNG bật, nên máy Windows
+# này là chỗ DUY NHẤT cổng bảo mật thật sự chạy — và nó vốn không chạy được.
+#
+# CÁCH VÁ, và vì sao KHÔNG dùng `MSYS_NO_PATHCONV=1`: công tắc đó tắt phép dịch cho MỌI tham số
+# của mọi lệnh trong script, kể cả `node -e ... "$RA_SG"` với `$RA_SG=/tmp/semgrep-$$.json` —
+# node là chương trình Windows thuần, nhận `/tmp/...` sẽ đọc `D:\tmp\...` (không tồn tại). Tức là
+# vá được docker thì hỏng chỗ đọc kết quả. Nên tách đôi:
+#   · vế TRONG CONTAINER → miễn dịch theo TIỀN TỐ, đúng ba cái đang dùng;
+#   · vế CỦA MÁY → đưa sẵn về dạng Windows (`D:/QuanLY`) để MSYS không có gì để dịch.
+# Trên Linux/macOS/CI `pwd -W` không có nên GOC_MOUNT = GOC, và biến EXCL vô nghĩa — vô hại.
+export MSYS2_ARG_CONV_EXCL='/src;/repo;/root'
+duong_dan_may() { ( cd "$1" 2>/dev/null && { pwd -W 2>/dev/null || pwd; } ) || printf '%s' "$1"; }
+GOC_MOUNT=$(duong_dan_may "$GOC")
+
 NHANH=0
 [ "${1:-}" = "--nhanh" ] && NHANH=1
 CHI="${SCAN_CHI:-}"          # SCAN_CHI=secrets|deps|sast|sbom → chỉ chạy một bước
@@ -70,10 +93,10 @@ if chay_buoc secrets; then
   #                     phải là đã xử lý;
   #   · lượt cây làm việc: bắt trước khi nó kịp thành lịch sử.
   buoc "[S1] Bí mật (gitleaks — HAI lượt: lịch sử git + cây làm việc)"
-  docker run --rm -v "$GOC:/repo" "$GITLEAKS" \
+  docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
     detect --source=/repo --redact --no-banner --exit-code 1 >/dev/null 2>&1
   ket $? "lịch sử git sạch (chi tiết: docker run --rm -v \"\$PWD:/repo\" $GITLEAKS detect --source=/repo --redact)"
-  docker run --rm -v "$GOC:/repo" "$GITLEAKS" \
+  docker run --rm -v "$GOC_MOUNT:/repo" "$GITLEAKS" \
     detect --source=/repo --no-git --redact --no-banner --exit-code 1 >/dev/null 2>&1
   ket $? "cây làm việc sạch (kể cả thay đổi chưa commit)"
 fi
@@ -84,9 +107,16 @@ if chay_buoc deps; then
   # `--ignore-unfixed`: lỗ hổng CHƯA CÓ BẢN VÁ thì không có hành động nào để làm — gác nó chỉ tạo
   # một cổng đỏ không ai sửa được. `--trivyignores` phải khai TƯỜNG MINH: trivy KHÔNG tự nhặt
   # .trivyignore.yaml ở gốc repo (đã kiểm — thiếu cờ này thì miễn trừ vô tác dụng).
-  docker run --rm "${CA_ARGS[@]}" -v "$GOC:/src" -v "$CACHE/trivy:/root/.cache/trivy" "$TRIVY" \
+  #
+  # `--timeout`: mặc định của trivy là 5 phút — đủ trên CI Linux, KHÔNG đủ khi /src là bind mount
+  # của Docker Desktop trên Windows: mỗi lần đọc file đi qua lớp chia sẻ, và bước quét cấu hình
+  # k8s (23 tài nguyên trong 13 file + chart Helm) hết giờ giữa chừng với
+  # "kubernetes scan error: context deadline exceeded". Hết giờ trông Y HỆT một phát hiện thật
+  # trong dòng tổng kết, nên phải nới chứ không được để nguyên.
+  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/trivy"):/root/.cache/trivy" "$TRIVY" \
     fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
-       --ignorefile /src/.trivyignore.yaml --exit-code 1 --quiet /src >/tmp/trivy-out.$$ 2>&1
+       --ignorefile /src/.trivyignore.yaml --exit-code 1 --quiet \
+       --timeout "${TRIVY_TIMEOUT:-20m}" /src >/tmp/trivy-out.$$ 2>&1
   ma=$?
   ket $ma "không lỗ hổng HIGH/CRITICAL có bản vá, không cấu hình sai"
   [ $ma -eq 0 ] || { sed -n '1,60p' /tmp/trivy-out.$$; }
@@ -103,7 +133,7 @@ if chay_buoc sast && [ "$NHANH" -eq 0 ]; then
   # `--json`: KHÔNG chỉ để lấy kết quả cho đẹp. Phần quan trọng nhất nằm ở mảng `errors` — xem
   # khối "LỖ THỦNG IM LẶNG" bên dưới.
   RA_SG="${SEMGREP_OUT:-/tmp/semgrep-$$.json}"
-  docker run --rm "${CA_ARGS[@]}" -v "$GOC:/src" -v "$CACHE/semgrep:/root/.semgrep" -w /src "$SEMGREP" \
+  docker run --rm "${CA_ARGS[@]}" -v "$GOC_MOUNT:/src" -v "$(duong_dan_may "$CACHE/semgrep"):/root/.semgrep" -w /src "$SEMGREP" \
     semgrep scan \
       --config p/javascript --config p/typescript \
       --config p/nodejs --config p/expressjs --config p/react \
