@@ -732,42 +732,40 @@ chép tay sẽ trôi khỏi `.gitignore`. `security-scan.sh` lọc phát hiện 
 > Chuỗi giả dùng một lần trong repo này theo quy ước `khong-phai-mat-khau-that-…`,
 > đã nằm sẵn trong allowlist; probe thì mô tả bằng lời là đủ.)
 
-## Tải lên LỚN bị từ chối SỚM → client nhận "mất mạng", không đọc được lý do (2026-09-16)
+## Một giả thuyết TÔI ĐÃ VIẾT VÀO ĐÂY RỒI TỰ BÁC BỎ (2026-09-16)
 
-**Chưa vá. Có sẵn từ lâu, không phải của bản phát hành này.** Phát hiện khi truy
-tận gốc `tests/b3-import-concurrency.test.js`.
+Giữ lại mục này thay vì xoá, vì bài học nằm ở cách nó sai — và vì nó sẽ được viết
+lại y hệt nếu không có cảnh báo này.
 
-Khi một request CÓ THÂN LỚN bị từ chối ở **middleware** — tức trước khi thân được
-đọc hết — máy chủ trả lời rồi đóng socket trong lúc client **vẫn đang gửi**. Hệ
-điều hành gửi RST, và client nhận `ECONNRESET` thay vì đọc được mã trạng thái.
+**Giả thuyết ban đầu.** Khi truy `tests/b3-import-concurrency.test.js`, tôi thấy
+một request nhận `ECONNRESET` trong khi máy chủ đã trả `403` ở 3ms. Đo thêm hai ca
+thì thấy: thân **60 KB** đọc được `403`, thân **731 KB** thì `ECONNRESET`. Tôi kết
+luận: *máy chủ trả lời rồi đóng socket trong lúc client còn đang gửi → RST*, và
+suy ra người nhập tệp Excel lớn bị `429`/`401`/`403` sẽ thấy "mất mạng" thay vì
+đọc được lý do. Tôi viết hẳn mục đó vào tài liệu này, kèm cách vá.
 
-Đo được, `POST /api/quotes/import-excel`, ba lượt song song:
+**Kiểm rồi mới biết là SAI.** Dựng middleware rút cạn thân, rồi đo trên app THẬT —
+`POST /api/quotes/import-excel` với mã CSRF sai, ba cỡ thân:
 
-| Thân | Phía máy chủ | Phía client |
+| Thân | CÓ bản vá | KHÔNG có bản vá |
 |---|---|---|
-| 60 KB | 403 · `route: null` · 3ms | đọc được **403** bình thường |
-| 731 KB | 403 · `route: null` · 3ms | **`ECONNRESET` ở 27ms** — không đọc được gì |
+| 60 KB | đọc được `401` | đọc được `401` |
+| 2 MB | đọc được `401` | đọc được `401` |
+| **9 MB** (gần trần `MAX_FILE_BYTES`) | đọc được `401` | **đọc được `401`** |
 
-Ranh giới là **thân gửi xong trước hay sau lúc bị từ chối**, không phải hệ điều
-hành: 60 KB lọt vào bộ đệm socket nên gửi xong trước, 731 KB thì không. Trên
-Linux bộ đệm lớn hơn nên ngưỡng cao hơn — **che bớt chứ không hết**: tệp 10 MB
-(đúng trần `MAX_FILE_BYTES`) vượt mọi bộ đệm.
+Không có bản vá thì client **vẫn đọc được mã lỗi** ở mọi cỡ. Bản vá không sửa gì.
+Đã gỡ bỏ cả nó lẫn bài kiểm của nó.
 
-**Vì sao đáng quan tâm:** repo viết rất kỹ các thông điệp từ chối — "Máy chủ đang
-bận đọc file Excel khác. Hãy thử lại sau vài giây.", "Quá nhiều yêu cầu, thử lại
-sau ít phút", phiên hết hạn → 401. Người nhập một tệp Excel lớn **không bao giờ
-đọc được câu nào trong số đó**: họ thấy "mất mạng". Chạm được qua `429` của
-`importLimiter`/`apiLimiter`, `401` phiên hết hạn, `403` CSRF.
+**Nguyên nhân thật của `ECONNRESET`** là vụ đua ghi phiên trong helper CSRF của bộ
+test — đã vá ở commit `c509770`. Kích cỡ thân chỉ là **tương quan**: ca 60 KB tình
+cờ không rơi vào cửa sổ đua, ca 731 KB thì có.
 
-**Cách vá (chưa làm, cố ý):** trước khi trả lời ở đường từ chối sớm, **rút cạn**
-thân request (`req.resume()`) rồi mới `res.end()`, để client gửi xong và đọc được
-phản hồi. Phải có TRẦN (byte và thời gian) rồi `req.destroy()`, nếu không một
-thân vô hạn giữ kết nối mãi.
-
-Chưa gộp vào bản phát hành này vì nó đụng **đường phản hồi của MỌI request** trên
-một hệ đang chạy thật, trong khi triệu chứng là khó chịu chứ không mất dữ liệu
-hay thủng bảo mật. Đáng làm thành một thay đổi riêng, có bài kiểm riêng: gửi thân
-lớn kèm mã CSRF sai và khẳng định client đọc được **403**, không phải `ECONNRESET`.
+**Bài học, và vì sao mục này ở lại.** Tôi đã ghi một "lỗi production" vào tài liệu
+dựa trên hai phép đo tương quan mà **chưa hề thử gỡ nguyên nhân ra để xem triệu
+chứng có mất không**. Một bản vá không chứng minh được nó sửa cái gì thì không
+phải bản vá — nó là thay đổi suy đoán, và ở đây nó suýt được gắn vào đường phản
+hồi của **mọi** request trên một hệ đang chạy thật. Trước khi tin một giả thuyết
+kiểu này lần sau: **gỡ nguyên nhân nghi ngờ ra, đo lại, rồi mới viết.**
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
