@@ -28,7 +28,23 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   const [, setTick] = useState(0);
   const redraw = useCallback(() => setTick((t) => t + 1), []);
   const dirtyRef = useRef(false);
-  const mark = () => { dirtyRef.current = true; (window as WinDirty).__editorDirty = true; };
+  // `mark` PHẢI vẽ lại màn, không chỉ đánh dấu "đã sửa".
+  //
+  // ĐO ĐƯỢC bằng trình duyệt thật (Cốc Cốc) 2026-09-16: gõ một hàng giá 3 × 1.500.000 vào sheet
+  // mới thì đầu khối hiện `Tổng: 14.000.000 · 3 sheet` (đúng, vì HnTables tự vẽ lại) còn thẻ cuối
+  // màn vẫn `TỔNG TẤT CẢ 2 SHEET HÀ NỘI — 9.500.000`. Hai con số TIỀN đá nhau trên cùng một màn,
+  // và chỉ khớp lại sau khi Lưu rồi tải lại. Người đang gõ giá không biết tin con số nào.
+  //
+  // GOM NHỊP chứ không vẽ lại mỗi phím: một lượt gõ trong lưới bắn `mark` liên tục, mà vẽ lại cả
+  // màn mỗi phím thì lưới lớn giật. `GridTable` có `key` ổn định nên lượt vẽ lại này KHÔNG gắn lại
+  // nó — con trỏ và vùng chọn giữ nguyên (đã kiểm bằng trình duyệt thật).
+  const nhipVe = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mark = () => {
+    dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
+    if (nhipVe.current) return;
+    nhipVe.current = setTimeout(() => { nhipVe.current = null; redraw(); }, 120);
+  };
+  useEffect(() => () => { if (nhipVe.current) clearTimeout(nhipVe.current); }, []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
