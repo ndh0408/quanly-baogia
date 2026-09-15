@@ -3,6 +3,8 @@ import {
   roleCan,
   can,
   canOnQuote,
+  quoteScopesFor,
+  locPhamVi,
   quoteScopeWhere,
   canScoped,
   permissionsForRole,
@@ -95,6 +97,35 @@ describe("canOnQuote — ownership & membership", () => {
     expect(canOnQuote(member, "delete", quote)).toBe(false);
   });
 
+  // Từ 2026-09-15 hàng thành viên là model tường minh: khoá ghép (quoteId,userId), KHÔNG có cột
+  // `id`. Dạng cũ `[{ id }]` vẫn phải chạy — chỗ gọi cũ và dữ liệu test khác còn dùng.
+  it("thành viên khớp theo userId (model tường minh) lẫn id (dạng cũ)", () => {
+    const moi = { createdById: 1, members: [{ userId: 2, scopes: ["main", "hcm", "hanoi", "khach"] }] };
+    expect(canOnQuote(member, "read", moi)).toBe(true);
+    expect(canOnQuote(member, "update", moi)).toBe(true);
+    expect(canOnQuote(member, "delete", moi)).toBe(false);
+  });
+
+  it("account phụ KHÔNG được tick vùng nào = CHỈ XEM", () => {
+    const chiXem = { createdById: 1, members: [{ userId: 2, scopes: [] }] };
+    expect(canOnQuote(member, "read", chiXem)).toBe(true);
+    expect(canOnQuote(member, "update", chiXem)).toBe(false);
+  });
+
+  it("quoteScopesFor: chủ đủ 4 vùng · account phụ đúng phần được tick · người lạ null", () => {
+    const q = { createdById: 1, members: [{ userId: 2, scopes: ["hanoi"] }] };
+    expect(quoteScopesFor(owner, q)).toEqual(["main", "hcm", "hanoi", "khach"]);
+    expect(quoteScopesFor(member, q)).toEqual(["hanoi"]);
+    expect(quoteScopesFor(stranger, q)).toBe(null);
+    // `scopes` vắng mặt (chỗ đọc cũ chỉ select userId) = đủ 4 vùng, không âm thầm khoá tay ai.
+    expect(quoteScopesFor(member, { createdById: 1, members: [{ userId: 2 }] })).toEqual(["main", "hcm", "hanoi", "khach"]);
+  });
+
+  it("locPhamVi bỏ vùng bịa và giữ thứ tự khai báo", () => {
+    expect(locPhamVi(["khach", "main", "bia-dat"])).toEqual(["main", "khach"]);
+    expect(locPhamVi("khong-phai-mang")).toEqual([]);
+  });
+
   it("stranger gets nothing", () => {
     for (const a of ["read", "update", "delete"]) {
       expect(canOnQuote(stranger, a, quote)).toBe(false);
@@ -122,7 +153,7 @@ describe("quoteScopeWhere — list visibility", () => {
   });
   it("manager restricted to created OR member quotes", () => {
     expect(quoteScopeWhere({ userId: 7, role: "manager" })).toEqual({
-      OR: [{ createdById: 7 }, { members: { some: { id: 7 } } }],
+      OR: [{ createdById: 7 }, { members: { some: { userId: 7 } } }],
     });
   });
 });

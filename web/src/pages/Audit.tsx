@@ -38,7 +38,7 @@ const ACTION_GROUPS: [string, [string, string][]][] = [
     ["user.create", "Thêm nhân viên"], ["user.update", "Cập nhật nhân viên"], ["user.delete", "Xóa nhân viên"],
     ["user.invite", "Mời nhân viên"], ["user.invite.resend", "Gửi lại lời mời"], ["user.invite.accept", "Kích hoạt tài khoản (lời mời)"],
     ["user.invite.mfa.failed", "Nhập sai mã MFA (kích hoạt lời mời)"], ["user.invite.mfa.locked", "Khóa do sai mã MFA (kích hoạt lời mời)"],
-    ["user.profile.update", "Cập nhật hồ sơ cá nhân"], ["user.memberships.cleared", "Xóa phân công thành viên"],
+    ["user.profile.update", "Cập nhật hồ sơ cá nhân"], ["user.memberships.retained", "Giữ phân công thành viên khi khoá tài khoản"], ["user.memberships.cleared", "Xóa phân công thành viên (xoá tài khoản)"],
     ["user.breakglass.modify", "Sửa tài khoản khẩn cấp (break-glass)"],
     ["user.mfa.reset", "Gỡ xác thực hai bước hộ (admin)"],
   ]],

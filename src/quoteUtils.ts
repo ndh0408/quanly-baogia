@@ -111,7 +111,9 @@ export const QUOTE_INCLUDE = {
   },
   createdBy: { select: { id: true, username: true, displayName: true } },
   approvedBy: { select: { id: true, username: true, displayName: true } },
-  members: { select: { id: true, username: true, displayName: true } },
+  // Thành viên ("account phụ") + PHẠM VI của từng người. `presentQuote` dẹt lại thành
+  // { id, username, displayName, active, scopes } để client cũ không phải đổi hình dạng.
+  members: { select: { userId: true, scopes: true, user: { select: { id: true, username: true, displayName: true, active: true } } } },
 } satisfies Prisma.QuoteInclude;
 
 /**
@@ -141,7 +143,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
-  members: { select: { id: true } },
+  members: { select: { userId: true, scopes: true } },
   sheets: {
     orderBy: { order: "asc" },
     select: {
@@ -223,6 +225,13 @@ function presentQuoteForInternal(q: any) {
 }
 
 /** Re-serialize Decimal -> number for the API client. Adds computed totals snapshot. */
+/** Hàng QuoteMember → hình dạng cũ mà client đang dùng ({ id, … }) + `scopes`. */
+export function phangThanhVien(m: any) {
+  if (!m || typeof m !== "object") return m;
+  if (m.userId === undefined) return m; // đã dẹt sẵn (chỗ gọi cũ / dữ liệu test)
+  return { id: m.userId, username: m.user?.username, displayName: m.user?.displayName, active: m.user?.active, role: m.user?.role, scopes: m.scopes || [] };
+}
+
 export function presentQuote(q: any, { includeLogo = false, hnOnly = false, internalOnly = false }: { includeLogo?: boolean; hnOnly?: boolean; internalOnly?: boolean } = {}) {
   if (hnOnly) return presentQuoteForAccountHn(q);   // 🔒 quyền quote:hn:fill → lược chỉ còn phần HN
   if (internalOnly) return presentQuoteForInternal(q); // 🔒 quyền quote:internal:view → CHỈ bảng nội bộ
@@ -234,6 +243,10 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false, inte
     // lại ở đây vì sẽ bị spread cuối ghi đè (giá trị cuối = totals đã tính lại, y hệt hành vi cũ).
     customerCode: q.customer?.code ?? null,
     customerName: q.customer?.name ?? null,
+    // Hàng QuoteMember (khoá ghép quoteId+userId, KHÔNG có cột `id`) → dẹt về hình dạng client đã
+    // dùng từ trước, cộng `scopes`. Bỏ bước này là `m.id` ở web/src thành undefined: account phụ
+    // mất nút Lưu mà không một lỗi nào hiện ra.
+    ...(Array.isArray(q.members) ? { members: q.members.map(phangThanhVien) } : {}),
     sheets: (q.sheets || []).map((s: any) => ({
       ...s,
       // Decimal → number: editor lấy nguyên phản hồi làm state, để nguyên Decimal thì ô Discount

@@ -130,7 +130,7 @@ Chạy `npx prisma migrate dev` rồi commit thẳng file nó đẻ ra là **xo�
 sản xuất** — và mọi thứ vẫn xanh, chỉ có truy vấn chậm dần.
 
 Danh sách object rơi vào diện này (GIN trigram, GIN trên mảng, partial btree,
-partial unique, mọi ràng buộc `CHECK`, bảng nối m2m ngầm `_QuoteMembers`) được
+partial unique, mọi ràng buộc `CHECK`) được
 liệt kê **đích danh** ở `prisma/migrations/README.md`, mục "Drift ĐƯỢC PHÉP".
 
 **Cái gì KHÔNG có trong danh sách đó mà bị báo drift thì là `schema.prisma` đang
@@ -193,7 +193,7 @@ nhật ký.
 | Biến | Mặc định | Vì sao đáng quan tâm |
 |---|---|---|
 | `DB_POOL_MAX` | 20 | Mặc định của Prisma là 10/tiến trình — dễ thành nút thắt |
-| `DB_TX_MAX_WAIT` | — | Cũng là `connectionTimeoutMillis` của pool. node-pg mặc định chờ **vô hạn** khi pool cạn, tức mọi request (kể cả `/readyz` và đăng nhập) xếp hàng không có trần |
+| `DB_TX_MAX_WAIT` | 10 000 | Cũng là `connectionTimeoutMillis` của pool. node-pg tự nó mặc định chờ **vô hạn** khi pool cạn, tức mọi request (kể cả `/readyz` và đăng nhập) xếp hàng không có trần — `config.ts` đặt trần 10 000 để không rơi vào đó |
 | `DB_TX_TIMEOUT` | 60 000 | Đơn vị là **mili-giây**. Mặc định 5 giây của Prisma quá ngắn cho đường lưu báo giá lớn |
 
 Cả ba đi qua `src/config.ts` chứ không đọc thẳng `process.env`: gõ

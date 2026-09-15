@@ -16,7 +16,7 @@ import { audit } from "../audit.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
-import { can, canOnQuote, quoteScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
   QUOTE_INCLUDE,
@@ -28,6 +28,7 @@ import {
   chuanHoaSoNgayTheoMau,
   sanitizeExtraTables,
   extraTableSum,
+  phangThanhVien,
 } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
@@ -58,7 +59,7 @@ async function loadAuthorizedQuote(req: Request, action: string = "read") {
   const id = Number(req.params.id);
   const quote = await prisma.quote.findFirst({
     where: { id },
-    include: { members: { select: { id: true } } },
+    include: { members: { select: { userId: true, scopes: true } } },
   });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, action, quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
@@ -334,7 +335,7 @@ export async function createQuote(req: Request) {
         const created = await tx.quote.create({
           // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
           // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
-          data: { ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0), sheets: { create: sheetsTaoMoi }, members: { connect: [{ id: userId }] } } as any,
+          data: { ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0), sheets: { create: sheetsTaoMoi }, members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } } } as any,
           include: QUOTE_INCLUDE as any,
         });
         await snapshotQuoteVersion(tx, created.id, userId, "create");
@@ -452,6 +453,96 @@ function reconcileHanoiTables(sheets: any[], carry: (Record<string, any> | undef
   });
 }
 
+// ───────── PHẠM VI CỦA "ACCOUNT PHỤ" (QuoteMember.scopes) ─────────
+// Chủ báo giá tick cho từng người: Báo giá chính · Chi phí HCM · Giá Hà Nội · Phí khách hàng.
+// Không tick ô nào = chỉ xem (canOnQuote đã chặn từ trước, không xuống tới đây).
+
+/** Field thuộc vùng "main" — thông tin khách, đầu trang, và DANH TÍNH người gửi. */
+const FIELD_VUNG_MAIN = [
+  "title", "shortTitle", "greeting", "notes",
+  "toCompany", "toContact", "toEmail", "toPhone", "toAddress", "customerId", "customerLogo",
+  "fromContact", "fromAddress", "fromPhone", "fromTitle",
+  "city", "quoteDate", "executionDate", "vatPercent", "showTotals", "companyId", "quoteNumber", "discount",
+];
+
+/**
+ * Bảng thuộc category NGOÀI phạm vi → lấy lại bản CSDL, y khuôn `reconcileHanoiTables`.
+ * Dùng cho account phụ CÓ vùng "main" (payload vẫn xoá-tạo-lại sheet) nhưng thiếu vài bảng nội bộ.
+ */
+export function reconcilePhamViTables(sheets: any[], carry: (Record<string, any> | undefined)[], choPhep: Set<string>) {
+  const chan = ["hcm", "hanoi", "khach"].filter((c) => !choPhep.has(c));
+  if (!chan.length) return;
+  (sheets || []).forEach((s: any, i: number) => {
+    const list = Array.isArray(s?.extraTables) ? s.extraTables : [];
+    const dbAll = Array.isArray(carry[i]?.extraTables) ? carry[i]!.extraTables : [];
+    for (const cat of chan) {
+      const db = dbAll.filter((t: any) => t && t.category === cat);
+      const soTrongPayload = list.filter((t: any) => t && t.category === cat).length;
+      if (!db.length && !soTrongPayload) continue;
+      if (soTrongPayload > db.length) {
+        throw httpError(409, `Bạn không được giao phần "${tenPhamVi(cat)}" của báo giá này nên không thêm được bảng ở đó. Hãy chép lại phần vừa gõ rồi tải lại trang.`);
+      }
+    }
+    const conLai = dbAll.filter((t: any) => t && chan.includes(t.category));
+    const out: any[] = [];
+    let k = 0;
+    for (const t of list) {
+      if (t && chan.includes(t.category)) { if (k < conLai.length) out.push(conLai[k++]); }
+      else out.push(t);
+    }
+    while (k < conLai.length) out.push(conLai[k++]);
+    s.extraTables = out;
+  });
+}
+
+/**
+ * Account phụ KHÔNG có vùng "main": ghi ĐÚNG những bảng nội bộ được giao, không đụng sheet.
+ *
+ * Đi theo khuôn `saveHn` (src/hnWorkflow.ts) chứ KHÔNG theo đường xoá-sheet-tạo-lại của
+ * `updateQuote`, vì ba lý do đều là mất dữ liệu nếu làm khác:
+ *   · xoá-tạo-lại đổi mọi `QuoteSheet.id` và tiêu một số mã sản xuất cho việc không liên quan;
+ *   · tổng tiền được tính TRƯỚC transaction từ `items` của payload — mà người này không được
+ *     phép đổi items, nên để payload lái là mở đúng cửa hậu vừa khoá ở trên;
+ *   · `carrySheetState` bê trạng thái mức sheet (số hoá đơn, chữ ký) — không xoá thì không phải bê.
+ * Khoá QuoteSheet TRƯỚC Quote, đúng thứ tự mọi đường ghi khác đang dùng (chống deadlock).
+ */
+async function ghiVungNoiBoDuocGiao(tx: TxClient, id: number, ptSheets: any[], choPhep: Set<string>, req: Request, hnStatus: string | null | undefined) {
+  await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+  const sheetsDb: any[] = await tx.quoteSheet.findMany({ where: { quoteId: id }, orderBy: { id: "asc" }, select: { id: true, extraTables: true } });
+  // Sheet ĐÃ CHẾT (chủ báo giá vừa bấm Lưu → id đổi hết) → 409, tuyệt đối không im lặng trả 200.
+  // Cùng suy đoán theo dấu vết như saveHn: id NHỎ HƠN mọi sheet hiện có = dấu vết xoá-tạo-lại.
+  const idNhoNhat = sheetsDb.length ? Math.min(...sheetsDb.map((s) => s.id)) : 0;
+  const coSheetChet = (ptSheets || []).some((ps: any) => {
+    const sid = Number(ps?.id);
+    if (!Number.isFinite(sid) || sid <= 0) return false;
+    return sheetsDb.length > 0 && !sheetsDb.some((s) => s.id === sid) && sid < idNhoNhat;
+  });
+  if (coSheetChet) throw httpError(409, "Chủ báo giá vừa lưu lại nên các trang đã được tạo mới. Hãy tải lại trang rồi nhập lại phần của bạn (đừng đóng tab trước khi chép phần vừa gõ).");
+
+  const toWrite = sheetsDb.map((sdb) => {
+    const ps = (ptSheets || []).find((x: any) => Number(x?.id) === sdb.id);
+    const dbAll = Array.isArray(sdb.extraTables) ? sdb.extraTables : [];
+    // Payload KHÔNG nhắc tới trang này → giữ nguyên. (Chủ vừa thêm trang mới, hoặc client cũ.)
+    if (!ps) return { extraTables: dbAll };
+    const giuNguyen = dbAll.filter((t: any) => t && !choPhep.has(t.category));
+    const moi = sanitizeExtraTables((Array.isArray(ps.extraTables) ? ps.extraTables : []).filter((t: any) => t && choPhep.has(t.category))) || [];
+    return { extraTables: [...giuNguyen, ...moi] };
+  });
+
+  // Cờ duyệt / đã-thanh-toán / ảnh chứng từ vẫn theo CSDL trừ khi có quyền tương ứng — đúng bộ
+  // chốt mà đường lưu thường đang chạy, chỉ khác là chạy trên bản đã lọc theo phạm vi.
+  reconcileExtraApprovals(toWrite, sheetsDb, can(req.session, P.QUOTE_INTERNAL_APPROVE), req.session.userId!);
+  reconcileExtraPayments(toWrite, sheetsDb, can(req.session, P.QUOTE_INTERNAL_PAY), req.session.userId!);
+  // GIÁ HÀ NỘI ĐÃ CHỐT vẫn phải lấy lại từ CSDL — y như nhánh có `sheets`. Thiếu dòng này thì việc
+  // BỎ vùng "main" khỏi phạm vi lại NỚI quyền: người chỉ được giao bảng Hà Nội ghi đè được đúng
+  // phần giá đã gửi duyệt/đã duyệt, trong khi cùng người đó nếu có thêm "main" thì bị chặn.
+  reconcileHanoiTables(toWrite, sheetsDb, can(req.session, P.QUOTE_HN_MANAGE), hnStatus);
+
+  for (let i = 0; i < sheetsDb.length; i++) {
+    await tx.quoteSheet.update({ where: { id: sheetsDb[i].id }, data: { extraTables: toWrite[i].extraTables as any } });
+  }
+}
+
 /**
  * Update a quote from a validated body. Recomputes totals server-side; a
  * price-affecting edit to a quote already in the approval pipeline reopens it to
@@ -469,6 +560,27 @@ export async function updateQuote(req: Request) {
   const existing: any = await prisma.quote.findFirst({ where: { id }, select: QUOTE_UPDATE_STATE_SELECT as any });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canEdit(existing, req.session)) throw httpError(403, "Bạn không thể sửa báo giá này");
+
+  // ── PHẠM VI CỦA "ACCOUNT PHỤ" ─────────────────────────────────────────────────────────────
+  // Chủ báo giá (và quote:update:all) luôn đủ 4 vùng → `duPhamVi` = true và mọi thứ dưới đây là
+  // no-op, đường lưu chạy y hệt trước. Chỉ người ĐƯỢC THÊM VÀO mới bị lọc.
+  //
+  // Lọc ở ĐÂY chứ không ở trong transaction, vì ba thứ chạy trước đó và KHÔNG rollback được:
+  // `syncQuoteCounter` (ghi bộ đếm số báo giá của công ty), `priceAffecting` (bump currentVersion,
+  // kéo báo giá đã gửi về draft + báo cho người tạo), và `searchText` (nhiễm cả chỉ mục tìm kiếm).
+  const phamVi = quoteScopesFor(req.session, existing) ?? [...QUOTE_SCOPES];
+  const duPhamVi = QUOTE_SCOPES.every((c) => phamVi.includes(c));
+  const catChoPhep = new Set(phamVi.filter((c) => c !== "main"));
+  let vungNoiBo: any[] | null = null;
+  if (!duPhamVi && !phamVi.includes("main")) {
+    // Không được giao "Báo giá chính": mọi field danh tính/khách/đầu trang bị GỠ khỏi payload —
+    // kể cả `fromContact/fromTitle/fromPhone` ("Người gửi" in ra Excel) và `quoteNumber`. Báo giá
+    // phải vẫn là của chủ, đầy đủ.
+    for (const f of FIELD_VUNG_MAIN) delete (b as any)[f];
+    // Và BỎ HẲN `sheets` khỏi payload: nhánh dưới sẽ không xoá-tạo-lại sheet, không tính lại tiền.
+    // Phần bảng nội bộ được giao đi đường riêng (ghiVungNoiBoDuocGiao).
+    if (Array.isArray(b.sheets)) { vungNoiBo = b.sheets; delete (b as any).sheets; }
+  }
 
   // KHÓA LẠC QUAN (chống MẤT DỮ LIỆU): nếu client gửi mốc updatedAt đã tải mà DB đã thay đổi
   // (người khác lưu xen vào giữa lúc đang mở editor) → 409, KHÔNG ghi đè im lặng. Client cũ
@@ -577,7 +689,7 @@ export async function updateQuote(req: Request) {
     data.discount = t.discount;
     data.total = t.total;
     updated = await prisma.$transaction(async (tx) => {
-      // KHOÁ RỒI MỚI ĐỌC, TẤT CẢ TRONG TRANSACTION — y hệt saveHn (src/hnWorkflow.ts:112).
+      // KHOÁ RỒI MỚI ĐỌC, TẤT CẢ TRONG TRANSACTION — y hệt `saveHn` (src/hnWorkflow.ts).
       //
       // Vì sao KHÔNG dùng được `existing.sheets` (đọc ở đầu hàm, NGOÀI transaction): có BA đường ghi
       // QuoteSheet KHÔNG hề chạm Quote — customerDecision (custStatus…), signSheet (signedAt…),
@@ -609,6 +721,22 @@ export async function updateQuote(req: Request) {
       const carry = carrySheetState(b.sheets, sheetsTuoi);
       // Giá HN đã chốt: lấy lại từ CSDL trước khi ghi (xem reconcileHanoiTables).
       reconcileHanoiTables(b.sheets, carry, can(req.session, P.QUOTE_HN_MANAGE), existing.hnStatus);
+      // Account phụ CÓ vùng "main" nhưng thiếu vài bảng nội bộ: lấy lại bản CSDL cho những bảng đó.
+      if (!duPhamVi) reconcilePhamViTables(b.sheets, carry, catChoPhep);
+      // ...VÀ KHÔNG được thêm/xoá TRANG. Lưu là `deleteMany` rồi tạo lại: một người chỉ có vùng
+      // "main" bấm ✕ xoá trang là cuốn theo cả bảng hcm/hanoi/khach của trang đó — gồm hàng đã
+      // duyệt, đã đánh dấu thanh toán và ảnh chứng từ — mà `reconcilePhamViTables` không cứu được
+      // vì nó ghép theo VỊ TRÍ: trang biến mất thì không còn vị trí nào để lấy lại.
+      if (!duPhamVi) {
+        const idDb = new Set(sheetsTuoi.map((s: any) => Number(s.id)));
+        const idPayload = (b.sheets || []).map((s: any) => Number(s?.id)).filter((n: number) => Number.isFinite(n) && n > 0);
+        // So CẢ tổng số trang: trang MỚI chưa có `id` nên nó rơi khỏi `idPayload` — chỉ đếm id là
+        // chặn được xoá mà vẫn cho thêm (đúng lỗi bài test tvphu bắt được lúc 2026-09-15).
+        const tongPayload = (b.sheets || []).length;
+        if (tongPayload !== idDb.size || idPayload.length !== idDb.size || idPayload.some((i: number) => !idDb.has(i))) {
+          throw httpError(409, "Bạn được thêm vào làm cùng báo giá này nên chỉ sửa được nội dung, không thêm/xoá trang. Hãy nhờ người tạo báo giá làm việc đó.");
+        }
+      }
 
       const seqCu = Number((existing as any).sheetCodeSeq) || 0;
       const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry, seqCu);
@@ -656,6 +784,8 @@ export async function updateQuote(req: Request) {
       data.total = t.total;
     }
     updated = await prisma.$transaction(async (tx) => {
+      // Khoá QuoteSheet TRƯỚC Quote (chotKhoaLacQuan) — đúng thứ tự của mọi đường ghi khác.
+      if (vungNoiBo) await ghiVungNoiBoDuocGiao(tx, id, vungNoiBo, catChoPhep, req, existing.hnStatus);
       await chotKhoaLacQuan(tx);
       const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE as any });
       await snapshotQuoteVersion(tx, id, userId, "update");
@@ -843,10 +973,19 @@ export async function listAssignableUsers(req: Request) {
   // identifier (username) or phone of every employee to all authenticated users.
   const users = await prisma.user.findMany({
     where: { active: true },
-    select: { id: true, displayName: true, role: true, title: true, senderName: true },
+    select: { id: true, displayName: true, role: true, title: true, senderName: true, permissions: true, canSign: true },
     orderBy: { displayName: "asc" },
   });
-  return { data: users };
+  // Cờ `coTheLamPhu`: tư cách thành viên KHÔNG tự cấp quyền — nhánh thành viên trong `canOnQuote`
+  // nằm BÊN TRONG `if (can(…:own))` (chốt bảo mật cố ý, tests/security-regression.test.js). Nên
+  // thêm một tài khoản không có `quote:read:own`/`update:own` (hr, kế toán) là NO-OP hoàn toàn
+  // im lặng: họ vẫn không thấy báo giá. Trả cờ để giao diện nói trước thay vì để người dùng đoán.
+  const data = users.map((u) => {
+    const perms = new Set(resolveUserPermissions(u.role, u.permissions, u.canSign));
+    const { permissions: _bo, canSign: _bo2, ...cong } = u as any;
+    return { ...cong, coTheLamPhu: perms.has(P.QUOTE_READ_OWN) || perms.has(P.QUOTE_READ_ALL) };
+  });
+  return { data };
 }
 
 /** Danh sách tài khoản Account Hà Nội (cho manager chọn khi GIAO phần HN). */
@@ -997,15 +1136,21 @@ export async function listProjects(req: Request) {
  */
 export async function setSheetCustomerDecision(req: Request) {
   if (!can(req.session, P.QUOTE_SEND)) throw httpError(403, "Bạn không có quyền ghi nhận ý kiến khách");
+  // Ý kiến khách (duyệt/không duyệt từng trang) là dữ liệu của VÙNG MAIN — nó quyết định trang nào
+  // đi vào chứng từ. Account phụ chỉ được giao bảng nội bộ không được đụng, nếu không lời hứa
+  // "chỉ sửa phần được tick" thủng ngay ở endpoint này.
   const sheet = await prisma.quoteSheet.findUnique({
     where: { id: Number(req.params.sheetId) },
     select: {
       id: true, quoteId: true, name: true, order: true,
-      quote: { select: { id: true, deletedAt: true, createdById: true, members: { select: { id: true } } } },
+      quote: { select: { id: true, deletedAt: true, createdById: true, members: { select: { userId: true, scopes: true } } } },
     },
   });
   if (!sheet || sheet.quote?.deletedAt) throw httpError(404, "Không tìm thấy sheet");
   if (!canOnQuote(req.session, "update", sheet.quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
+  if (!(quoteScopesFor(req.session, sheet.quote) ?? []).includes("main")) {
+    throw httpError(403, 'Bạn không được giao phần "Báo giá chính" của báo giá này');
+  }
 
   // "" / null = gỡ đánh dấu (quay lại "chưa có ý kiến").
   const raw = req.body?.status;
@@ -1090,7 +1235,7 @@ async function assertQuoteInScope(req: Request, quoteId: number) {
   // vòng 2. `canOnQuote` chỉ đụng createdById/status/members (src/permissions.ts).
   const quote = await prisma.quote.findFirst({
     where: { id: quoteId },
-    select: { id: true, createdById: true, status: true, members: { select: { id: true } } },
+    select: { id: true, createdById: true, status: true, members: { select: { userId: true, scopes: true } } },
   });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "read", quote)) throw httpError(403, "Bạn không có quyền với báo giá này");
@@ -1105,6 +1250,11 @@ export async function markExtraTableRowPayment(req: Request) {
   const paid = req.body.paid !== false;
   const proof = typeof req.body.paidProof === "string" ? req.body.paidProof : undefined;
   await assertQuoteInScope(req, quoteId);
+  // PHẠM VI: account phụ chỉ tích được hàng thuộc bảng mình được giao. Không có chốt này thì
+  // đường /pay là một cửa hậu đi vòng qua toàn bộ lớp lọc của updateQuote — cùng một cột Json.
+  const qPv = await prisma.quote.findFirst({ where: { id: quoteId }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
+  const pvHang = quoteScopesFor(req.session, qPv) ?? [...QUOTE_SCOPES];
+  const catDuocTich = new Set<string>(pvHang.filter((c) => c !== "main"));
   // TUẦN TỰ HÓA read-modify-write khối JSON extraTables: khóa HÀNG sheet (SELECT … FOR UPDATE) trong
   // 1 transaction để 2 request đánh dấu 2 HÀNG KHÁC NHAU của CÙNG sheet không cùng đọc 1 snapshot rồi
   // ghi đè mất bản ghi thanh toán (+ ảnh chứng từ) của nhau. Ngoài ra "chạm" báo giá cha để bump
@@ -1118,6 +1268,9 @@ export async function markExtraTableRowPayment(req: Request) {
     let found = false;
     for (const t of tables) for (const it of (t?.items || [])) {
       if (it && it.rid === rid) {
+        if (!catDuocTich.has(String(t?.category))) {
+          throw httpError(403, `Bạn không được giao phần "${tenPhamVi(String(t?.category))}" của báo giá này`);
+        }
         found = true;
         if (paid) {
           if (!it.paid) { it.paidAt = new Date().toISOString(); it.paidById = req.session.userId; }
@@ -1211,11 +1364,12 @@ export async function updateSheetInvoice(req: Request) {
 /** Đánh dấu báo giá ĐÃ CHỐT (won) — terminal, immutable, feed KPI. Route present. */
 export async function markConverted(req: Request) {
   const id = Number(req.params.id);
-  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
+  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "update", existing)) {
     throw httpError(403, "Không có quyền chốt báo giá này");
   }
+  if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, nhưng việc chốt deal thuộc về người tạo báo giá");
   if (["converted", "lost"].includes(existing.status)) {
     throw httpError(400, "Báo giá đã chốt / không chốt rồi");
   }
@@ -1238,11 +1392,12 @@ export async function markConverted(req: Request) {
 /** MARK LOST — khách từ chối; ghi lý do cho báo cáo win/loss. Route present. */
 export async function markLost(req: Request) {
   const id = Number(req.params.id);
-  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
+  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!canOnQuote(req.session, "update", existing)) {
     throw httpError(403, "Không có quyền cập nhật báo giá này");
   }
+  if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, nhưng việc đánh dấu không chốt thuộc về người tạo báo giá");
   if (existing.status === "converted") {
     throw httpError(400, "Báo giá đã chốt, không thể đánh dấu thua");
   }
@@ -1320,29 +1475,98 @@ export async function listApprovals(req: Request) {
 }
 
 /**
- * MEMBERS — add/remove employees who may view & edit this quote.
+ * MEMBERS — "account phụ": ai được vào làm cùng trên báo giá này, và được sửa VÙNG NÀO.
  * Chỉ người tạo (hoặc admin) mới quản lý được danh sách thành viên.
+ *
+ * Báo giá vẫn thuộc về người tạo trong mọi đường: `createdById`, mã dự án và "Người gửi" không
+ * nằm trong tầm với của thành viên (xem lớp lọc theo phạm vi ở `updateQuote`).
  */
 export async function updateMembers(req: Request) {
   const id = Number(req.params.id);
-  const quote = await prisma.quote.findFirst({ where: { id } });
+  const quote = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   if (quote.createdById !== req.session.userId && !can(req.session, P.QUOTE_UPDATE_ALL)) {
     throw httpError(403, "Chỉ người tạo hoặc Quản trị mới quản lý được thành viên");
   }
-  // The creator is always kept as a member.
-  const ids = [...new Set([quote.createdById, ...req.body.memberIds])];
+
+  // HAI hình dạng payload cùng được nhận, cố ý:
+  //   · `members: [{ userId, scopes }]` — client mới, có tick phạm vi.
+  //   · `memberIds: number[]`           — client CŨ đang mở sẵn trong tab của ai đó. Nó không
+  //     biết phạm vi là gì, nên hiểu là ĐỦ 4 VÙNG = đúng hành vi trước bản này. Bỏ nhánh này là
+  //     mọi tab đang mở bỗng 400 giữa chừng.
+  const muon = new Map<number, string[]>();
+  for (const m of (req.body.members ?? [])) {
+    const uid = Number(m?.userId);
+    if (Number.isFinite(uid)) muon.set(uid, locPhamVi(m?.scopes));
+  }
+  // Client cũ không biết phạm vi là gì: người ĐANG là thành viên thì GIỮ NGUYÊN phạm vi đã tick
+  // (nếu không, một tab cũ bấm Lưu là âm thầm nới mọi account phụ lên đủ 4 vùng), người MỚI thêm
+  // mới nhận đủ 4 vùng — đúng hành vi trước bản này.
+  const phamViCu = new Map(quote.members.map((m) => [m.userId, m.scopes]));
+  for (const uid of (req.body.memberIds ?? [])) {
+    const u = Number(uid);
+    if (Number.isFinite(u) && !muon.has(u)) muon.set(u, locPhamVi(phamViCu.get(u) ?? [...QUOTE_SCOPES]));
+  }
+  muon.delete(quote.createdById); // người tạo xử lý riêng bên dưới, không tick bớt được
+
+  // Người MỚI thêm phải tồn tại và còn hoạt động. Không kiểm thì Prisma ném P2003/P2025 và
+  // errorHandler dịch thành 404 "Không tìm thấy bản ghi" — thông điệp trỏ sai chỗ, rất khó lần.
+  const dangCo = new Set(quote.members.map((m) => m.userId));
+  const themMoi = [...muon.keys()].filter((uid) => !dangCo.has(uid));
+  if (themMoi.length) {
+    const thay = await prisma.user.findMany({ where: { id: { in: themMoi }, active: true }, select: { id: true } });
+    const co = new Set(thay.map((u) => u.id));
+    const thieu = themMoi.filter((uid) => !co.has(uid));
+    if (thieu.length) throw httpError(400, `Tài khoản không tồn tại hoặc đã bị khoá: ${thieu.join(", ")}`);
+  }
+  muon.set(quote.createdById, [...QUOTE_SCOPES]); // chủ báo giá LUÔN đủ quyền trên báo giá của mình
+  // Người ĐANG được giao phần Hà Nội luôn giữ vùng "hanoi": luồng HN gác bằng `hnAssigneeId` chứ
+  // không bằng phạm vi (src/hnWorkflow.ts saveHn/submitHn), nên bỏ tick ở đây sẽ là một lời hứa
+  // sai — màn hình bảo đã khoá mà họ vẫn ghi được qua PUT /:id/hn. Muốn dừng thì GIAO LẠI phần HN.
+  if (quote.hnAssigneeId && muon.has(quote.hnAssigneeId) && !muon.get(quote.hnAssigneeId)!.includes("hanoi")) {
+    muon.set(quote.hnAssigneeId, locPhamVi([...muon.get(quote.hnAssigneeId)!, "hanoi"]));
+  }
+
+  const go = quote.members.filter((m) => !muon.has(m.userId)).map((m) => m.userId);
+  const truoc = quote.members.map((m) => ({ userId: m.userId, scopes: m.scopes }));
+
+  // MỘT lần ghi qua `prisma.quote.update`, không tách ra `prisma.quoteMember.*`: chỉ Quote nằm
+  // trong RT_ENTITY (src/db.ts) nên chỉ đường này mới bắn sự kiện realtime cho tab đang mở của
+  // người vừa được thêm. Ghi thẳng vào bảng con là phân công xong mà màn hình họ vẫn trống.
   await prisma.quote.update({
     where: { id },
-    data: { members: { set: ids.map((uid) => ({ id: uid })) } },
+    data: {
+      members: {
+        ...(go.length ? { deleteMany: { userId: { in: go } } } : {}),
+        upsert: [...muon].map(([userId, scopes]) => ({
+          where: { quoteId_userId: { quoteId: id, userId } },
+          create: { userId, scopes, addedById: req.session.userId },
+          update: { scopes },
+        })),
+      },
+    },
   });
-  await audit(req, "quote.members.update", { resource: "quote", resourceId: id, after: { members: ids } });
+
+  const sau = [...muon].map(([userId, scopes]) => ({ userId, scopes }));
+  await audit(req, "quote.members.update", { resource: "quote", resourceId: id, before: { members: truoc }, after: { members: sau } });
+
+  // Báo cho người vừa được thêm — trước đây họ chỉ biết nhờ tình cờ mở danh sách thấy báo giá lạ.
+  for (const uid of themMoi) {
+    if (uid === req.session.userId) continue;
+    const pv = muon.get(uid) ?? [];
+    await notify(uid, {
+      title: `Bạn được thêm vào báo giá: ${quote.quoteNumber}`,
+      body: `${quote.title} — ${pv.length ? "được sửa: " + pv.map(tenPhamVi).join(", ") : "chỉ xem"}.`,
+      link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true,
+    });
+  }
+
   const updated = await prisma.quote.findFirst({
     where: { id },
-    include: { members: { select: { id: true, username: true, displayName: true, role: true } } },
+    include: { members: { select: { userId: true, scopes: true, user: { select: { id: true, username: true, displayName: true, active: true, role: true } } } } },
   });
   if (!updated) throw httpError(404, "Không tìm thấy báo giá");
-  return { members: updated.members };
+  return { members: updated.members.map(phangThanhVien) };
 }
 
 /** SOFT DELETE báo giá (db middleware). Won deal terminal — không ai xoá được. */
@@ -1381,6 +1605,10 @@ export async function duplicateQuote(req: Request) {
   if (!can(req.session, P.QUOTE_CREATE)) {
     throw httpError(403, "Không có quyền tạo báo giá");
   }
+  // Bản sao mang `createdById` + mã dự án của NGƯỜI BẤM (xem phần tạo bản sao bên dưới). Với
+  // account phụ thì đó đúng là đường lách "báo giá vẫn của tôi": một cú bấm là báo giá của chủ
+  // thành báo giá của họ, mang mã dự án của họ.
+  if (laAccountPhu(req.session, src)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này nên không nhân bản được. Hãy nhờ người tạo báo giá bấm Nhân bản.");
 
   const sameProject = req.body.sameProject === true;
   const t = computeQuoteTotals({ vatPercent: src.vatPercent, sheets: src.sheets });
@@ -1427,7 +1655,7 @@ export async function duplicateQuote(req: Request) {
     discount: t.discount,
     total: t.total,
     createdById: req.session.userId,
-    members: { connect: [{ id: req.session.userId }] },
+    members: { create: { userId: req.session.userId, scopes: [...QUOTE_SCOPES], addedById: req.session.userId } },
     sheets: {
       create: src.sheets.map((s: any, sIdx: number) => ({
         templateId: s.templateId,

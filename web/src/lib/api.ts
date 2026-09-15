@@ -117,12 +117,19 @@ export type EditorCompany = { id: number; name: string; shortName?: string; addr
 // layout.hasDetail = CÓ hiện trường Chi Tiết · reserveDetail chỉ là khe địa chỉ công thức cũ,
 // không đồng nghĩa còn một cột Chi Tiết trên UI hay file Excel.
 export type EditorTemplate = { id: number; code?: string; name: string; companyId?: number; layout?: { hasDays?: boolean; hasDetail?: boolean; reserveDetail?: boolean; numberSubsections?: boolean } };
+// PHẠM VI của "account phụ" trên MỘT báo giá. Ba khoá cuối trùng tên category của bảng nội bộ
+// (QuoteSheet.extraTables[].category) — cố ý, để không phải giữ một bảng ánh xạ thứ hai.
+export type QuoteScope = "main" | "hcm" | "hanoi" | "khach";
+export const QUOTE_SCOPES: QuoteScope[] = ["main", "hcm", "hanoi", "khach"];
+export const TEN_PHAM_VI: Record<QuoteScope, string> = { main: "Báo giá chính", hcm: "Chi phí HCM", hanoi: "Giá Hà Nội", khach: "Phí khách hàng" };
+export type QuoteMemberLite = { id: number; displayName?: string; username?: string; role?: string; active?: boolean; scopes?: QuoteScope[] };
+
 export type QuoteFull = {
   id: number; _new?: boolean; status: string; title?: string; shortTitle?: string | null; quoteNumber?: string; projectCode?: string | null; projectVersion?: number | null;
   companyId?: number; city?: string; quoteDate?: string; executionDate?: string | null; vatPercent?: number; discount?: number; showTotals?: boolean;
   greeting?: string; notes?: string; toCompany?: string; toContact?: string; toEmail?: string; toPhone?: string; toAddress?: string;
   fromContact?: string; fromTitle?: string; fromPhone?: string; fromAddress?: string; createdById?: number;
-  members?: { id: number; displayName?: string }[]; sheets?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
+  members?: QuoteMemberLite[]; sheets?: unknown[]; hnStatus?: string | null; [k: string]: unknown;
 };
 export type QuoteVersion = { id: string; versionNo: number; total: number; createdAt: string; createdById?: number | null };
 
@@ -156,7 +163,7 @@ export type SheetDecision = {
   id: number; custStatus?: string | null; custStatusAt?: string | null; custNote?: string | null;
   custStatusBy?: { id: number; displayName: string } | null;
 };
-export type AssignableUser = { id: number; displayName: string; role?: string; title?: string | null; senderName?: string | null };
+export type AssignableUser = { id: number; displayName: string; role?: string; title?: string | null; senderName?: string | null; coTheLamPhu?: boolean };
 
 // Phân quyền (Permissions — increment 4).
 export type PermCatalog = {
@@ -555,7 +562,10 @@ export const api = {
     }>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`),
   versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),
   assignableUsers: () => req<{ data: AssignableUser[] }>("/quotes/assignable-users"),
-  setMembers: (id: number, memberIds: number[]) => req<unknown>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ memberIds }) }),
+  // Gửi CẢ HAI khoá: `members` (có phạm vi) cho server mới, `memberIds` để server cũ — hoặc một
+  // bản triển khai đang chạy song song — vẫn hiểu được danh sách người.
+  setMembers: (id: number, members: { userId: number; scopes: QuoteScope[] }[]) =>
+    req<{ members: QuoteMemberLite[] }>(`/quotes/${id}/members`, { method: "PUT", body: JSON.stringify({ members, memberIds: members.map((m) => m.userId) }) }),
   // Luồng HN (giao/duyệt phần Hà Nội cho Account HN) — increment 10 stage 5.
   hnAccounts: () => req<{ data: { id: number; displayName?: string; username?: string }[] }>("/quotes/hn/accounts"),
   hnAssign: (id: number, accountId: number) => req<unknown>(`/quotes/${id}/hn/assign`, { method: "POST", body: JSON.stringify({ accountId }) }),

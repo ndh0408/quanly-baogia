@@ -198,7 +198,7 @@ async function main() {
       hnRejectNote: o.hnStatus === "rejected" ? "Cần làm rõ đơn giá vách + bổ sung kích thước." : null,
       sheets: { create: sheetsCreate },
     };
-    if (o.hnAssignee) data.members = { connect: [{ id: o.hnAssignee.id }] };
+    if (o.hnAssignee) data.members = { create: { userId: o.hnAssignee.id, scopes: ["hanoi"] } };
     return prisma.quote.create({ data });
   }
 

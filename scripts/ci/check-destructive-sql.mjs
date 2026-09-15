@@ -44,6 +44,7 @@ export const CHO_PHEP = new Map([
   ["20260617000003_drop_approval_matrix", "bỏ bảng ma trận duyệt cũ, thay bằng luồng duyệt trong Quote"],
   ["20260619000001_drop_billing", "gỡ toàn bộ phần thanh toán/gói cước (Subscription/Plan/UsageRecord) — công cụ nội bộ, không bán"],
   ["20260619000002_drop_api_keys", "gỡ API key tĩnh, thay bằng JWT có hạn"],
+  ["20260915090000_quote_member_scopes", "bỏ bảng nối NGẦM _QuoteMembers sau khi đã CHÉP đủ sang QuoteMember (bảng tường minh có phạm vi). Đọc đầu file migration TRƯỚC KHI DEPLOY: có cửa sổ 500 giữa migrate và recreate, và lùi ẢNH một mình là hỏng — khối SQL dựng lại bảng cũ nằm ngay trong đó"],
 ]);
 
 /** Bỏ chú thích SQL (`-- …` và `/* … *\/`) để không bắt nhầm hướng dẫn ROLLBACK. */

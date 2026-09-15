@@ -78,7 +78,7 @@ describe.runIf(dbAvailable)("lịch sử phiên bản không được lách proj
     // Giao phần HN cho account → account thành THÀNH VIÊN (đây là điều mở đường cho rò rỉ).
     expect((await admin.post(`/api/quotes/${quoteId}/hn/assign`).send({ accountId: accU.id })).status).toBe(200);
     // Người internal:view cũng phải là thành viên mới với tới được báo giá.
-    await prisma.quote.update({ where: { id: quoteId }, data: { members: { connect: { id: intU.id } } } });
+    await prisma.quote.update({ where: { id: quoteId }, data: { members: { create: { userId: intU.id, scopes: ["main", "hcm", "hanoi", "khach"] } } } });
   });
 
   afterAll(async () => {

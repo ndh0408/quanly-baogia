@@ -43,7 +43,7 @@ router.post(
     // synchronous /api/export/:id route so this path is not an IDOR bypass.
     const quote = await prisma.quote.findFirst({
       where: { id: req.params.id as unknown as number },
-      include: { members: { select: { id: true } } },
+      include: { members: { select: { userId: true, scopes: true } } },
     });
     if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });
     if (!canOnQuote(req.session, "read", quote)) {

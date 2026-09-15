@@ -122,7 +122,7 @@ describe.runIf(dbAvailable)("hồi quy bảo mật — phân quyền ở server 
           companyId: company.id, fromContact: "x", fromAddress: "y", city: "HCM",
           quoteDate: new Date(), vatPercent: 8, subtotal: 1000, vat: 80, discount: 0, total: 1080,
           status: "draft", createdById: U.stripped.id,
-          members: { connect: [{ id: U.stripped.id }, { id: U.hr.id }] },   // hr là THÀNH VIÊN
+          members: { create: [{ userId: U.stripped.id, scopes: ["main"] }, { userId: U.hr.id, scopes: ["main"] }] },   // hr là THÀNH VIÊN
         },
       });
       strippedQuoteId = q.id;

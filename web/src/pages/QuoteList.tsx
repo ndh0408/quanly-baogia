@@ -31,6 +31,12 @@ export function QuoteListPage({ me }: { me: Me }) {
   // delete:own chỉ xóa báo giá CỦA MÌNH ở draft/rejected. (Trước đây short-circuit delete:all hiện nhầm nút trên 'Đã chốt'.)
   const canDelete = (q: QuoteRow) => q.status !== "converted" && (can("quote:delete:all") || (can("quote:delete:own") && q.createdById === me.id && (q.status === "draft" || q.status === "rejected")));
 
+  // "PHỤ": báo giá của người khác mà mình được thêm vào làm cùng (account phụ). quoteScopeWhere
+  // đã lọc danh sách nên ai còn thấy hàng này thì hoặc là chủ, hoặc là thành viên, hoặc xem-tất-cả
+  // — nên chỉ cần so người tạo, không phải hỏi thêm server. Quản trị/người xem nội bộ đã có cột
+  // "Người tạo" riêng nên không dán nhãn cho họ.
+  const laPhu = (r: QuoteRow) => !isAdmin && !isInternalViewer && !isAccountHn && r.createdById != null && r.createdById !== me.id;
+
   const sp0 = new URLSearchParams((location.hash.split("?")[1]) || "");
   const [q, setQ] = useState(sp0.get("q") || "");
   const [status, setStatus] = useState(sp0.get("status") || "");
@@ -158,8 +164,10 @@ export function QuoteListPage({ me }: { me: Me }) {
               {!stripped && (
                 <div className="ql-card-actions">
                   <button className="qa-btn" title="Tải file Excel" onClick={(e) => act("excel", r, e)}><span className="qa-ico">📥</span><span className="qa-label">Excel</span></button>
-                  <button className="qa-btn" title="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>
-                  <button className="qa-btn" title="Bản mới cùng mã dự án" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>
+                  {/* Account phụ: cả hai đường đều tạo báo giá MỚI đứng tên người bấm và mang mã
+                      dự án của họ — server 403 (duplicateQuote), nên ẩn thay vì để bấm rồi báo lỗi. */}
+                  {!laPhu(r) && <button className="qa-btn" title="Nhân bản" onClick={(e) => act("dup", r, e)}><span className="qa-ico">📋</span><span className="qa-label">Nhân bản</span></button>}
+                  {!laPhu(r) && <button className="qa-btn" title="Bản mới cùng mã dự án" onClick={(e) => act("revise", r, e)}><span className="qa-ico">➕</span><span className="qa-label">Bản mới</span></button>}
                   {canDelete(r) && <button className="qa-btn qa-danger" title="Xóa" onClick={(e) => act("del", r, e)}><span className="qa-ico">🗑</span><span className="qa-label">Xóa</span></button>}
                 </div>
               )}
@@ -187,7 +195,7 @@ export function QuoteListPage({ me }: { me: Me }) {
               {rows.map((r) => (
                 <tr key={r.id} className="qrow" title="Bấm để mở báo giá"
                     onClick={(e) => { if ((e.target as HTMLElement).closest("button,a")) return; open(r.id); }}>
-                  <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a></td>
+                  <td><a href={`#/quotes/${r.id}`}><strong>{codeLabel(r)}</strong></a>{laPhu(r) && <span className="muted" title="Bạn được thêm vào làm cùng — báo giá này của người khác" style={{ marginLeft: 6, fontSize: 11 }}>· phụ</span>}</td>
                   {(isAdmin || isInternalViewer) && <td>{r.createdBy?.displayName || dash}</td>}{isAccountHn && <td>{r.createdBy?.displayName || dash}</td>}
                   <td title={r.title}>{tieuDeHienThi(r)}</td>
                   <td>{fmtDate(r.quoteDate) || dash}</td>
@@ -198,7 +206,7 @@ export function QuoteListPage({ me }: { me: Me }) {
                   <td>{isAccountHn ? <span className={`status ${hnBadge(r.hnStatus).cls}`}>{hnBadge(r.hnStatus).label}</span> : <span className={`status ${r.status}`}>{statusLabel(r.status)}</span>}</td>
                   {!stripped && (
                     <td className="row-actions qa-cell">
-                      <RowMenu r={r} act={act} canDelete={canDelete(r)} />
+                      <RowMenu r={r} act={act} canDelete={canDelete(r)} canDuplicate={!laPhu(r)} />
                     </td>
                   )}
                 </tr>
@@ -226,7 +234,7 @@ export function QuoteListPage({ me }: { me: Me }) {
 
 // Thao tác 1 dòng (desktop): giữ Excel hiện sẵn (hay dùng), gộp Nhân bản/Bản mới/Xóa vào menu "⋯".
 // Menu render qua portal + position:fixed → KHÔNG bị .list-table overflow:hidden cắt mất.
-function RowMenu({ r, act, canDelete }: { r: QuoteRow; act: (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => void; canDelete: boolean }) {
+function RowMenu({ r, act, canDelete, canDuplicate }: { r: QuoteRow; act: (a: string, qr: QuoteRow, e?: { stopPropagation: () => void }) => void; canDelete: boolean; canDuplicate: boolean }) {
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const open = pos != null;
@@ -254,8 +262,8 @@ function RowMenu({ r, act, canDelete }: { r: QuoteRow; act: (a: string, qr: Quot
       {open && pos && createPortal(
         <div className="qa-menu" role="menu" style={{ top: pos.top, right: pos.right }}
              onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-          <button role="menuitem" onClick={run("dup")}>📋 Nhân bản</button>
-          <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng mã dự án</button>
+          {canDuplicate && <button role="menuitem" onClick={run("dup")}>📋 Nhân bản</button>}
+          {canDuplicate && <button role="menuitem" onClick={run("revise")}>➕ Bản mới cùng mã dự án</button>}
           {canDelete && <button role="menuitem" className="qa-menu-danger" onClick={run("del")}>🗑 Xóa</button>}
         </div>, document.body)}
     </>

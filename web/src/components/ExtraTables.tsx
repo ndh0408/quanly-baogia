@@ -82,13 +82,24 @@ export async function removeExtraTableAt(
   return r.removed;
 }
 
-export function ExtraTables({ sheet, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
+  /**
+   * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
+   * Nội). CỐ Ý chỉ trả lời "có được giao loại này không", KHÔNG nhân với `editable`: cột THANH
+   * TOÁN cũng gác bằng nó, mà thanh toán là năng lực ĐỘC LẬP với việc báo giá còn sửa được hay
+   * không (kế toán vẫn tích được trên báo giá đã chốt). Không truyền → mọi loại đều trong phạm vi,
+   * hành vi y như trước (AccountHnView đang gọi như vậy). Là HÀM chứ không phải Set/mảng:
+   * gridPropsEqual bỏ qua prop hàm nên memo của lưới không bị phá.
+   */
+  editableCat?: (cat: string) => boolean;
   canPay?: boolean; quoteId?: number; onMarkDirty: () => void;
   /** Mốc `updatedAt` MỚI sau khi route /pay bump — editor phải nhận để khỏi tự đâm 409 giả (xem ExtraPayDialog). */
   onQuoteTouched?: (updatedAt: string) => void;
 }) {
   const [, setTick] = useState(0);
+  const trongPhamVi = (cat: string) => (editableCat ? editableCat(cat) : true);
+  const suaDuoc = (cat: string) => editable && trongPhamVi(cat);
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
   const [payRow, setPayRow] = useState<ItemK | null>(null); // hàng đang mở dialog thanh toán
@@ -147,7 +158,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                 <div className="extra-cat-grouphead">
                   <span className={`extra-cat-badge cat-${cat}`}>{label}</span>
                   <span className="extra-cat-total" data-cat={cat}>Tổng: <strong>{M.fmtMoney(catTotal(cat))}</strong> <span className="muted">→ Quản lý dự án</span></span>
-                  {editable && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
+                  {suaDuoc(cat) && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
                   <span className="muted" style={{ fontSize: 11.5 }}>{idxs.length} sheet</span>
                 </div>
                 {idxs.length > 0 && (
@@ -167,7 +178,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
                         {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
                             handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
-                        {editable && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
+                        {suaDuoc(cat) && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
                           aria-label={`Xoá sheet nội bộ ${i + 1}`}
                           onClick={(e) => { e.stopPropagation(); void removeTable(i); }}
                           onKeyDown={(e) => e.stopPropagation()}>✕</button>}
@@ -180,14 +191,17 @@ export function ExtraTables({ sheet, templates, companyId, editable, canApprove,
                   <div className="extra-table extra-table-inline">
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
-                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
-                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
-                      {editable && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                      {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
+                          bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
+                          xong mới báo là kiểu tệ nhất). */}
+                      {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.filter(([v]) => v === t.category || suaDuoc(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
                     <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
-                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote={false}
+                      usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false}
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
-                      payCol canPay={!!canPay && !!quoteId}
+                      payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}
                       onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
                       groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
                   </div>

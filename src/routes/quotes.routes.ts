@@ -299,11 +299,25 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => res.json(await listApprovals(req)))
 );
 
-// MEMBERS — add/remove the employees who may view & edit this quote.
+// MEMBERS — "account phụ": ai được vào làm cùng báo giá này, và được sửa VÙNG nào.
 // Only the creator (or an admin) may manage the member list.
+//
+// Hai hình dạng body cùng hợp lệ, cố ý: `members` (client mới, có phạm vi) và `memberIds`
+// (client CŨ đang mở sẵn trong tab người khác — hiểu là đủ 4 vùng, đúng hành vi trước bản này).
+// Zod v4 loại bỏ khoá lạ và `validate()` GÁN LẠI req.body, nên thiếu khai `members` ở đây là
+// phạm vi bị xoá im lặng trên đường vào service.
 router.put(
   "/:id/members",
-  validate({ params: idParam, body: z.object({ memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]) }) }),
+  validate({
+    params: idParam,
+    body: z.object({
+      memberIds: z.array(z.coerce.number().int().positive()).max(50).default([]),
+      members: z.array(z.object({
+        userId: z.coerce.number().int().positive(),
+        scopes: z.array(z.enum(["main", "hcm", "hanoi", "khach"])).max(4).default([]),
+      })).max(50).optional(),
+    }),
+  }),
   asyncHandler(async (req: Request, res: Response) => res.json(await updateMembers(req)))
 );
 

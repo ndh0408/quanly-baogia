@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser } from "../lib/api";
+import { api, ApiError, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
 import { toast, confirmModal, promptModal, useEscClose } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
@@ -331,6 +331,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const daXuatHoaDon = sheets.some((s) => String((s as { invoiceNo?: string | null }).invoiceNo ?? "").trim() !== "");
   // Ai có quyền "gửi khách" (admin/account) sửa được mọi trạng thái; còn lại chỉ nháp/trả-lại (khớp canEdit server).
   const editable = isNew || (!daXuatHoaDon && canUpdate && (hasPerm("quote:send") || q.status === "draft" || q.status === "rejected"));
+  // ── PHẠM VI "ACCOUNT PHỤ" ────────────────────────────────────────────────────────────────
+  // `editable` ở trên là cổng CHUNG (hoá đơn / trạng thái / quyền). Phạm vi là lớp THỨ HAI, chỉ
+  // áp cho người ĐƯỢC THÊM VÀO báo giá của người khác: chủ báo giá và quote:update:all luôn đủ
+  // 4 vùng nên `suaMain`/`coScope` bằng đúng `editable` — màn hình của họ không đổi một pixel.
+  // Đây là BẢN SAO của luật ở server (quoteScopesFor + updateQuote); server vẫn là nơi chốt, đây
+  // chỉ để người dùng không gõ nửa tiếng rồi mới nhận 403.
+  const laChu = isNew || q.createdById === me.id || hasPerm("quote:update:all");
+  const phamVi: QuoteScope[] = laChu ? [...QUOTE_SCOPES] : ((q.members || []).find((m) => m.id === me.id)?.scopes ?? [...QUOTE_SCOPES]);
+  const coScope = (c: QuoteScope) => editable && phamVi.includes(c);
+  const suaMain = coScope("main");
+  const laPhu = !laChu && !!(q.members || []).some((m) => m.id === me.id);
+  const coSuaGiDo = editable && phamVi.length > 0;
   const senderCo = companies.find((c) => c.id === q.companyId);
   if (senderCo?.address) q.fromAddress = senderCo.address;
 
@@ -551,39 +563,39 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <div className="meta-2col">
           <fieldset className="meta-col">
             <legend>Bên nhận · Khách hàng</legend>
-            <label>Tên khách hàng<input defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!editable} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
-            <label>Người liên hệ<input defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!editable} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Email<input type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!editable} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!editable} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ<input defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!editable} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
+            <label>Tên khách hàng<input defaultValue={q.toCompany || ""} placeholder="Tên công ty khách" disabled={!suaMain} onInput={(e) => setQ("toCompany", (e.target as HTMLInputElement).value)} /></label>
+            <label>Người liên hệ<input defaultValue={q.toContact || ""} placeholder="Người liên hệ phía KH" disabled={!suaMain} onInput={(e) => setQ("toContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Email<input type="email" defaultValue={q.toEmail || ""} placeholder="Email khách (hiện ở 'Kính gửi')" disabled={!suaMain} onInput={(e) => setQ("toEmail", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input defaultValue={q.toPhone || ""} placeholder="SĐT khách hàng" disabled={!suaMain} onInput={(e) => setQ("toPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ<input defaultValue={q.toAddress || ""} placeholder="Địa chỉ khách hàng" disabled={!suaMain} onInput={(e) => setQ("toAddress", (e.target as HTMLInputElement).value)} /></label>
           </fieldset>
           <fieldset className="meta-col">
             <legend>Bên gửi · Công ty báo giá</legend>
             <label>Công ty <span className="muted" style={{ fontSize: 11 }}>(đã chọn lúc tạo)</span>
               <select value={q.companyId} disabled title="Công ty đã chọn khi tạo báo giá — không đổi ở đây">{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label>Người gửi<input defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!editable} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
-            <label>Chức danh<input defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!editable} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
-            <label>Điện thoại<input defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!editable} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
-            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!editable} /></label>
+            <label>Người gửi<input defaultValue={q.fromContact || ""} placeholder="Người phụ trách" disabled={!suaMain} onInput={(e) => setQ("fromContact", (e.target as HTMLInputElement).value)} /></label>
+            <label>Chức danh<input defaultValue={q.fromTitle || ""} placeholder="VD: Trưởng phòng KD" disabled={!suaMain} onInput={(e) => setQ("fromTitle", (e.target as HTMLInputElement).value)} /></label>
+            <label>Điện thoại<input defaultValue={q.fromPhone || ""} placeholder="SĐT người gửi" disabled={!suaMain} onInput={(e) => setQ("fromPhone", (e.target as HTMLInputElement).value)} /></label>
+            <label>Địa chỉ <span className="muted" style={{ fontSize: 11 }}>(tự theo công ty)</span><input value={q.fromAddress || ""} readOnly title="Tự lấy theo Công ty bên gửi" disabled={!suaMain} /></label>
           </fieldset>
         </div>
 
         <div className="meta-row">
-          <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!editable} /></label>
-          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!editable} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
-          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!editable} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
-          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!editable} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
+          <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!suaMain} /></label>
+          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!suaMain} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
+          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!suaMain} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
+          <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!suaMain} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
           {/* Giảm giá KHÔNG còn ở đây: nay là "Discount" RIÊNG của từng sheet, nằm ngay dưới lưới
               cạnh khối tổng của sheet đó — xem khối "Tổng sheet" bên dưới. */}
         </div>
 
         <div className="center-line">{M.vnDateText(q.quoteDate, q.city)}</div>
-        <input className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!editable} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
+        <input className="title-input" defaultValue={q.title || ""} placeholder="Tên báo giá (chung cho mọi sheet)" disabled={!suaMain} onInput={(e) => setQ("title", (e.target as HTMLInputElement).value)} />
         {/* Tiêu đề RÚT GỌN — chỉ dùng đặt tên file tải về, KHÔNG in vào Excel/PDF gửi khách. */}
         <div className="short-title-row">
           <span className="muted">Tiêu đề rút gọn</span>
           <input className="short-title-input" maxLength={120} defaultValue={(q.shortTitle as string) || ""} placeholder={q.title || "để trống → dùng tiêu đề chính"}
-            disabled={!editable} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
+            disabled={!suaMain} title="Dùng đặt tên file tải về: MãKH_TiêuĐềRútGọn_MMDD.xlsx"
             onInput={(e) => setQ("shortTitle", (e.target as HTMLInputElement).value)} />
         </div>
         {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
@@ -591,7 +603,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
         <div className="quote-no">(Số: {M.sheetCode(q, M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
         {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
-        <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!editable} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
+        <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
         {/* sheet tabs */}
         <div className="sheet-tabs">
@@ -611,21 +623,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
               )}
               {/* <button> thật: tự vào được thứ tự Tab, tự nhận Enter/Space, và có tên đọc lên được
                   ("Xóa sheet 2") thay vì chỉ một dấu ✕ mà trình đọc màn hình không diễn giải nổi. */}
-              {editable && sheets.length > 1 && (
+              {suaMain && sheets.length > 1 && (
                 <button type="button" className="rm-tab" title="Xóa sheet" aria-label={`Xóa sheet ${i + 1}`}
                   onClick={(e) => { e.stopPropagation(); removeSheet(i); }}
                   onKeyDown={(e) => e.stopPropagation()}>✕</button>
               )}
             </div>
           ))}
-          {editable && <button className="btn btn-sm add-sheet" onClick={addSheet}>+ Thêm sheet</button>}
+          {suaMain && <button className="btn btn-sm add-sheet" onClick={addSheet}>+ Thêm sheet</button>}
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!editable} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
-          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!editable} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!suaMain} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
+          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!suaMain} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
-          {editable && (
+          {suaMain && (
             <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
               onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
           )}
@@ -661,7 +673,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           dock={oDock}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
-          usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={editable} internalNote
+          usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaMain} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
           showImages={!!activeSheet.showImages} onShowImages={(v) => { activeSheet.showImages = v; mark(); redraw(); }}
           sheetTotalLine={false}
@@ -685,7 +697,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
                     `key` phải theo DANH TÍNH sheet (`_k`), KHÔNG theo chỉ số `ai`: input này không
                     kiểm soát (defaultValue chỉ đọc lúc mount), nên xoá sheet đang mở — chỉ số giữ
                     nguyên mà sheet dưới nó trượt lên — sẽ để lại ô mang số của sheet VỪA BỊ XOÁ. */}
-                {editable
+                {suaMain
                   ? <input key={`disc-${activeSheet._k ?? ai}`} type="text" inputMode="numeric" className="sheet-discount-input"
                       aria-label="Discount trừ vào sheet này (VNĐ)" title="Trừ THẲNG vào sheet này, TRƯỚC khi tính VAT"
                       defaultValue={M.fmtMoney(Number(activeSheet.discount) || 0)}
@@ -717,13 +729,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           </tbody>
         </table>
 
-        {editable && (
+        {suaMain && (
           <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "16px 0 6px", fontSize: 13.5, cursor: "pointer" }}>
             <input type="checkbox" defaultChecked={q.showTotals !== false} onChange={(e) => { setQ("showTotals", e.target.checked); redraw(); }} />
             <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả màn hình lẫn Excel/PDF)</span>
           </label>
         )}
-        {editable ? (
+        {suaMain ? (
           <>
             <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: <strong>Discount</strong> ở khối tổng ngay trên là của <strong>riêng sheet đang mở</strong> — trừ trước khi tính VAT, và in ra đúng như vậy trong Excel/PDF. Muốn giảm giá cho <strong>một hạng mục</strong> thì vẫn thêm hàng với <strong>số tiền âm</strong> ở Đơn giá.</div>
             <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "8px 0 4px", fontSize: 13.5, cursor: "pointer" }}>
@@ -771,13 +783,15 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
         )}
 
-        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={editable} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
+        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
 
         <div className="actions">
           <div className="dock-slot" ref={setODock} />
-          {editable && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
-          {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-success" onClick={convert}>✓ Khách chốt</button>}
-          {!isNew && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-danger" onClick={lost}>✗ Khách không chốt</button>}
+          {coSuaGiDo && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
+          {/* Chốt/huỷ deal là trạng thái TERMINAL không đảo lại được và rơi vào KPI của chủ báo
+              giá → account phụ không thấy hai nút này (server cũng 403, xem markConverted/markLost). */}
+          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-success" onClick={convert}>✓ Khách chốt</button>}
+          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-danger" onClick={lost}>✗ Khách không chốt</button>}
           {!isNew && (
             <div className="kebab-wrap" ref={moreRef} style={{ position: "relative" }}>
               <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
@@ -807,7 +821,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         />
       )}
       {versions && <VersionsModal quoteId={q.id} versions={versions} onClose={() => setVersions(null)} />}
-      {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={(q.members || []).map((m) => m.id)} onClose={() => setMembersOpen(false)} onSaved={(ids) => { q.members = ids.map((id) => ({ id })); setMembersOpen(false); }} />}
+      {membersOpen && <MembersModal quoteId={q.id} createdById={q.createdById} current={q.members || []} onClose={() => setMembersOpen(false)} onSaved={(ms) => { q.members = ms; setMembersOpen(false); redraw(); }} />}
     </div>
   );
 }
@@ -887,26 +901,81 @@ function VersionsModal({ quoteId, versions, onClose }: { quoteId: number; versio
 }
 
 const ROLE_LABEL_FULL: Record<string, string> = { admin: "Quản trị (Giám đốc)", manager: "Account", account_hn: "Account Hà Nội", hr: "Nhân sự (HR)", accountant: "Kế toán" };
-function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quoteId: number; createdById?: number; current: number[]; onClose: () => void; onSaved: (ids: number[]) => void }) {
+function MembersModal({ quoteId, createdById, current, onClose, onSaved }: { quoteId: number; createdById?: number; current: QuoteMemberLite[]; onClose: () => void; onSaved: (members: QuoteMemberLite[]) => void }) {
   useEscClose(onClose); // ESC đóng — đồng bộ với 12 modal còn lại của app
   const [users, setUsers] = useState<AssignableUser[] | null>(null);
-  const [sel, setSel] = useState<number[]>(current);
+  // Map người → PHẠM VI được sửa. Vắng mặt trong map = không phải thành viên.
+  // `scopes` RỖNG là giá trị hợp lệ (chỉ xem) nên phải phân biệt với "không có khoá" — rút gọn
+  // thành `m.scopes || [...]` là mỗi lần mở modal lại âm thầm mở lại quyền sửa cho họ.
+  const [sel, setSel] = useState<Record<number, QuoteScope[]>>(() =>
+    Object.fromEntries((current || []).filter((m) => m.id !== createdById).map((m) => [m.id, m.scopes ?? [...QUOTE_SCOPES]])));
   const [saving, setSaving] = useState(false);
   useEffect(() => { api.assignableUsers().then((r) => setUsers(r.data)).catch(() => setUsers([])); }, []);
-  const toggle = (id: number) => { if (id === createdById) return; setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); };
-  const save = async () => { setSaving(true); try { await api.setMembers(quoteId, sel.filter((id) => id !== createdById)); toast("Đã lưu thành viên", "success"); onSaved([...new Set([...(createdById ? [createdById] : []), ...sel])]); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); } };
+  const laTV = (id: number) => id === createdById || sel[id] !== undefined;
+  const toggle = (id: number) => {
+    if (id === createdById) return;
+    setSel((s) => {
+      const moi = { ...s };
+      if (moi[id] !== undefined) delete moi[id];
+      else moi[id] = [...QUOTE_SCOPES];   // vừa thêm → tick sẵn HẾT (giữ đúng hành vi trước đây)
+      return moi;
+    });
+  };
+  const togglePhamVi = (id: number, c: QuoteScope) => {
+    if (id === createdById) return;
+    setSel((s) => {
+      const cu = s[id];
+      if (cu === undefined) return s;
+      const co = cu.includes(c);
+      return { ...s, [id]: QUOTE_SCOPES.filter((x) => (x === c ? !co : cu.includes(x))) };
+    });
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await api.setMembers(quoteId, Object.entries(sel).map(([id, scopes]) => ({ userId: Number(id), scopes })));
+      toast("Đã lưu thành viên", "success");
+      onSaved(r.members);
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); setSaving(false); }
+  };
+  // Danh sách vẽ ra = người CHỌN ĐƯỢC (assignable-users, chỉ tài khoản còn hoạt động) CỘNG những
+  // người ĐANG là thành viên mà không còn trong đó — tức tài khoản đã bị khoá. Từ 2026-09-15 khoá
+  // tài khoản KHÔNG còn xoá phân công (phạm vi là cấu hình thật, mất là không dựng lại được), nên
+  // nếu chỉ vẽ theo assignable-users thì họ vô hình: chủ báo giá không thấy, không gỡ được, mà mỗi
+  // lần bấm Lưu modal vẫn gửi họ lên — phân công mắc kẹt vĩnh viễn.
+  const dsVe: AssignableUser[] = users === null ? [] : [
+    ...users,
+    ...(current || []).filter((m) => !users.some((u) => u.id === m.id))
+      .map((m) => ({ id: m.id, displayName: `${m.displayName || m.username || "#" + m.id} (đã khoá)`, role: m.role, title: null, senderName: null, coTheLamPhu: true })),
+  ];
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Thành viên phụ trách">
         <div className="modal-head"><h3>Thành viên phụ trách</h3><button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button></div>
         <div className="modal-body">
-          <p className="muted" style={{ marginTop: 0 }}>Cho phép xem & sửa báo giá này. Người tạo luôn là thành viên.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Người được thêm THẤY TOÀN BỘ báo giá này, còn SỬA thì chỉ trong phần bạn tick. Không tick ô nào = chỉ xem. Báo giá vẫn đứng tên bạn: họ không nhân bản, không chốt deal, không đổi &quot;Người gửi&quot; được.</p>
           {!users ? <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div> : (
-            <div className="list-wrap">{users.map((u) => { const isCreator = u.id === createdById; return (
-              <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: isCreator ? "default" : "pointer" }}>
-                <input type="checkbox" checked={isCreator || sel.includes(u.id)} disabled={isCreator} onChange={() => toggle(u.id)} />
-                <span>{u.displayName}<span className="muted"> · {ROLE_LABEL_FULL[u.role || ""] || u.role}{u.title ? " · " + u.title : ""}{isCreator ? " — người tạo" : ""}</span></span>
-              </label>); })}</div>
+            <div className="list-wrap">{dsVe.map((u) => { const isCreator = u.id === createdById; const tv = laTV(u.id); const khongDung = u.coTheLamPhu === false && !isCreator; return (
+              <div key={u.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isCreator || khongDung ? "default" : "pointer" }}>
+                  <input type="checkbox" checked={isCreator || tv} disabled={isCreator || khongDung} onChange={() => toggle(u.id)} />
+                  <span>{u.displayName}<span className="muted"> · {ROLE_LABEL_FULL[u.role || ""] || u.role}{u.title ? " · " + u.title : ""}{isCreator ? " — người tạo" : ""}</span></span>
+                </label>
+                {/* Thêm tài khoản KHÔNG có quyền xem báo giá là vô tác dụng hoàn toàn im lặng (tư
+                    cách thành viên không tự cấp quyền — xem canOnQuote ở server). Nói ra trước. */}
+                {khongDung && <div className="muted" style={{ fontSize: 12, paddingLeft: 24 }}>Tài khoản này chưa có quyền xem báo giá nên thêm vào cũng không thấy gì. Nhờ quản trị cấp &quot;Xem báo giá của mình&quot; trước.</div>}
+                {tv && !isCreator && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, paddingLeft: 24, marginTop: 2 }}>
+                    {QUOTE_SCOPES.map((c) => (
+                      <label key={c} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, cursor: "pointer" }}>
+                        <input type="checkbox" checked={(sel[u.id] || []).includes(c)} onChange={() => togglePhamVi(u.id, c)} />
+                        <span>{TEN_PHAM_VI[c]}</span>
+                      </label>
+                    ))}
+                    {(sel[u.id] || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>— chỉ xem</span>}
+                  </div>
+                )}
+              </div>); })}</div>
           )}
         </div>
         <div className="modal-foot"><button className="btn" onClick={onClose}>Hủy</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button></div>

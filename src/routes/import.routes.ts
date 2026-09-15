@@ -221,7 +221,7 @@ router.post(
     if (quoteId) {
       const quote = await prisma.quote.findFirst({
         where: { id: quoteId },
-        select: { id: true, createdById: true, status: true, members: { select: { id: true } },
+        select: { id: true, createdById: true, status: true, members: { select: { userId: true, scopes: true } },
                   sheets: { select: { invoiceNo: true } } },   // daXuatHoaDon đọc cột này
       });
       if (!quote) return res.status(404).json({ error: "Không tìm thấy báo giá" });

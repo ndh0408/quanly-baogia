@@ -80,8 +80,9 @@ function cotDaKhai(body) {
 }
 
 // Bảng KHÔNG phải model Prisma → không thể khai @@index cho chúng.
-// `_QuoteMembers` là bảng nối m2m NGẦM (quan hệ Quote↔User): Prisma tự quản, không khai được.
-const BANG_KHONG_PHAI_MODEL = new Set(["_QuoteMembers"]);
+// Từ 2026-09-15 danh sách này RỖNG: bảng nối ngầm duy nhất (`_QuoteMembers`) đã thành model
+// tường minh `QuoteMember` (migration 20260915090000), nên mọi index đều khai được trong schema.
+const BANG_KHONG_PHAI_MODEL = new Set([]);
 
 describe("LUẬT: mọi index btree THƯỜNG trong migration phải được khai trong schema.prisma", () => {
   const tatCa = quetIndexTuMigration();
@@ -122,7 +123,6 @@ const DRIFT_DUOC_PHEP = {
   Product: ["Removed index on columns (name)", "Removed index on columns (sku)"],
   Quote: ["Removed index on columns (quoteNumber)", "Removed index on columns (searchText)", "Removed index on columns (title)", "Removed index on columns (toCompany)"],
   Venue: ["Removed index on columns (tags)"],
-  _QuoteMembers: ["Added primary key on columns (A, B)", "Removed unique index on columns (A, B)"],
 };
 
 const BASE_URL = process.env.DATABASE_URL || "postgresql://quanly:quanly_pwd@localhost:5432/quanly_test?schema=public";

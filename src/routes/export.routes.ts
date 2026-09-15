@@ -92,7 +92,7 @@ router.get(
       include: {
         company: true,
         customer: { select: { code: true } },   // tenFileXuat cần mã KH
-        members: { select: { id: true } },
+        members: { select: { userId: true, scopes: true } },
         sheets: {
           orderBy: { order: "asc" },
           // KHÔNG kéo cột jsonb `extraTables`: excel.ts/pdf.ts KHÔNG đọc nó (bảng nội bộ HCM/HN/Phí KH
@@ -146,7 +146,7 @@ router.get(
       include: {
         company: true,
         customer: { select: { code: true } },   // tenFileXuat cần mã KH
-        members: { select: { id: true } },
+        members: { select: { userId: true, scopes: true } },
         sheets: {
           orderBy: { order: "asc" },
           omit: { extraTables: true },   // xem chú thích ở nhánh .xlsx phía trên

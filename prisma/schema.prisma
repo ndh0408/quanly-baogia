@@ -163,7 +163,8 @@ model User {
 
   createdQuotes      Quote[]           @relation("CreatedBy")
   approvedQuotes     Quote[]           @relation("ApprovedBy")
-  memberQuotes       Quote[]           @relation("QuoteMembers") // báo giá được thêm vào làm thành viên
+  memberQuotes       QuoteMember[]     @relation("QuoteMemberUser") // báo giá được thêm vào làm account phụ
+  addedMembers       QuoteMember[]     @relation("QuoteMemberAddedBy") // lượt phân công do mình thực hiện
   ownedCustomers     Customer[]
   auditEvents        AuditEvent[]
   notifications      Notification[]
@@ -559,7 +560,7 @@ model Quote {
   sheets    QuoteSheet[]
   versions  QuoteVersion[]
   approvals Approval[]
-  members   User[]         @relation("QuoteMembers") // nhân viên được thêm vào để xem/sửa
+  members   QuoteMember[] // "account phụ": nhân viên được thêm vào để xem/sửa, có PHẠM VI riêng
 
   sentAt      DateTime?
   convertedAt DateTime?
@@ -588,6 +589,35 @@ model Quote {
   @@index([createdById])
   @@index([approvedById])
   @@index([deletedAt])
+}
+
+// "ACCOUNT PHỤ" — người được CHỦ báo giá thêm vào làm cùng trên MỘT báo giá.
+//
+// VÌ SAO LÀ BẢNG CHỨ KHÔNG PHẢI VAI TRÒ: phạm vi thuộc về CẶP (người, báo giá) — cùng một
+// người là CHỦ báo giá A và là PHỤ ở báo giá B. Một vai trò trong enum `Role` là thuộc tính
+// của TÀI KHOẢN nên không diễn đạt được điều đó (đúng chỗ khuôn `account_hn` bị vỡ: ai mang
+// cờ `quote:hn:fill` thì MỌI báo giá đều bị lược, kể cả báo giá họ tự tạo).
+//
+// Trước 2026-09-15 đây là m2m NGẦM `_QuoteMembers(A,B)` — chỉ MỘT BIT, nên "được thêm vào" là
+// mở TOÀN BỘ báo giá. Bảng tường minh là chỗ đựng `scopes`. Di trú: mọi hàng cũ nhận đủ 4 vùng
+// (migration 20260915090000_quote_member_scopes) → không ai đang chạy bị mất quyền.
+model QuoteMember {
+  quoteId Int
+  quote   Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  userId  Int
+  user    User  @relation("QuoteMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Vùng ĐƯỢC SỬA: tập con của ["main","hcm","hanoi","khach"] (src/permissions.ts QUOTE_SCOPES).
+  // RỖNG = chỉ xem. Ba khoá cuối trùng tên `QuoteSheet.extraTables[].category` — cố ý, để không
+  // phải giữ đồng bộ một bảng ánh xạ thứ hai.
+  scopes String[] @default([])
+
+  addedById Int? // ai phân công (chủ báo giá hoặc quản trị) — SetNull khi người đó bị xoá
+  addedBy   User? @relation("QuoteMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  addedAt   DateTime @default(now())
+
+  @@id([quoteId, userId])
+  @@index([userId]) // "báo giá tôi được thêm vào" — đường đọc của quoteScopeWhere
 }
 
 model QuoteVersion {

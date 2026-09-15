@@ -26,7 +26,7 @@ router.post("/presence", requireAuth, async (req, res) => {
   // PHÂN QUYỀN: chỉ cho ghi/đọc presence của báo giá mà người dùng ĐƯỢC PHÉP đọc (chủ/thành viên/quyền
   // read:all). Không có check này thì bất kỳ ai đăng nhập cũng dò được quoteId bất kỳ để biết "ai đang
   // sửa" + displayName của họ (rò metadata) — mọi route đọc nội dung quote khác đều đã dùng canOnQuote.
-  const quote = await prisma.quote.findFirst({ where: { id: quoteId }, select: { id: true, createdById: true, members: { select: { id: true } } } });
+  const quote = await prisma.quote.findFirst({ where: { id: quoteId }, select: { id: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
   if (!quote || !canOnQuote(req.session, "read", quote)) {
     return res.status(403).json({ error: "Không có quyền với báo giá này" });
   }

@@ -103,7 +103,7 @@ describe.runIf(dbAvailable)("bảng nội bộ: /pay và /proof phải kiểm ph
     expect(pay.status, JSON.stringify(pay.body)).toBe(200);
 
     // Chỉ THÀNH VIÊN mới là người dùng hợp lệ của tính năng này.
-    await prisma.quote.update({ where: { id: quoteId }, data: { members: { connect: { id: thanhVienU.id } } } });
+    await prisma.quote.update({ where: { id: quoteId }, data: { members: { create: { userId: thanhVienU.id, scopes: ["main", "hcm", "hanoi", "khach"] } } } });
 
     // Báo giá THỨ HAI, dành riêng cho ca "đã xoá mềm" — dùng chung báo giá kia thì thứ tự chạy
     // của các `it` sẽ quyết định kết quả, che mất lỗi thật.

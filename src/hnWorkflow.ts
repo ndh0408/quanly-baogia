@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { prisma } from "./db.js";
 import { notify } from "./notifications.js";
 import { audit } from "./audit.js";
-import { canOnQuote, can, PERMISSIONS as P } from "./permissions.js";
+import { canOnQuote, can, laAccountPhu, PERMISSIONS as P } from "./permissions.js";
 import { QUOTE_INCLUDE, sanitizeExtraTables } from "./quoteUtils.js";
 import { reconcileExtraPayments } from "./services/quoteService.js";
 
@@ -53,9 +53,13 @@ const hnFillWhere = { OR: [{ role: "account_hn" as const }, { permissions: { has
 export async function assignHn(req: Request) {
   const id = (req.params as any).id;
   const accountId = Number(req.body?.accountId);
-  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
+  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_MANAGE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền giao phần Hà Nội");
+  // Vai trò `manager` mặc định CÓ quote:hn:manage, nên nếu không chặn ở đây thì một account phụ
+  // (dù chỉ được tick "Phí khách hàng") vẫn giao được phần HN — mà giao phần HN THÊM NGƯỜI vào
+  // danh sách thành viên. Phân công là việc của chủ báo giá.
+  if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, việc giao phần Hà Nội thuộc về người tạo báo giá");
   const acc = await prisma.user.findFirst({ where: { id: accountId, active: true, ...hnFillWhere }, select: { id: true } });
   if (!acc) throw httpError(400, "Tài khoản Account Hà Nội không hợp lệ");
   const quote = await prisma.quote.update({
@@ -63,7 +67,16 @@ export async function assignHn(req: Request) {
     data: {
       hnAssigneeId: acc.id, hnStatus: "assigned",
       hnSubmittedAt: null, hnReviewedAt: null, hnReviewerId: null, hnRejectNote: null,
-      members: { connect: { id: acc.id } },
+      // UPSERT chứ không create: `connect` của m2m ngầm vốn idempotent, `create` của model
+      // tường minh thì KHÔNG — giao lại phần HN cho cùng một account sẽ ném P2002. Nhánh
+      // `update` để RỖNG: nếu người này đã là account phụ với phạm vi rộng hơn thì giữ nguyên.
+      members: {
+        upsert: {
+          where: { quoteId_userId: { quoteId: Number(id), userId: acc.id } },
+          create: { userId: acc.id, scopes: ["hanoi"], addedById: req.session.userId },
+          update: {},
+        },
+      },
     },
     include: QUOTE_INCLUDE,
   });
@@ -186,9 +199,11 @@ export async function reviewHn(req: Request) {
   const id = (req.params as any).id;
   const decision = req.body?.decision;   // "approve" | "reject"
   const note = req.body?.note ? String(req.body.note).slice(0, 500) : null;
-  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { id: true } } } });
+  const existing = await prisma.quote.findFirst({ where: { id }, include: { members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_MANAGE) || !canOnQuote(req.session, "update", existing)) throw httpError(403, "Bạn không có quyền duyệt phần Hà Nội");
+  // Như assignHn: duyệt/trả phần HN mở lại quyền ghi lên giá đã chốt, không phải việc của phụ.
+  if (laAccountPhu(req.session, existing)) throw httpError(403, "Bạn được thêm vào làm cùng báo giá này, việc duyệt phần Hà Nội thuộc về người tạo báo giá");
   if (existing.hnStatus !== "submitted") throw httpError(400, "Phần HN chưa được gửi duyệt");
   if (!["approve", "reject"].includes(decision)) throw httpError(400, "Quyết định không hợp lệ");
   const approved = decision === "approve";
