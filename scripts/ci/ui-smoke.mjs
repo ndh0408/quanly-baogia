@@ -33,7 +33,7 @@
 // đăng nhập → danh sách → mở trình soạn → sửa ô → LƯU → tải lại + kiểm số đã lưu → MẤT TAB GIỮA
 // CHỪNG: khôi phục bản nháp cục bộ → TẠO báo giá mới (wizard 3 bước) → lưu bản mới → XUẤT Excel →
 // ĐĂNG XUẤT → ĐĂNG NHẬP tài khoản hạn chế → KIỂM QUYỀN → console sạch.
-// Tổng 18 bước: `grep -cE '^\s*(await )?buoc\("' scripts/ci/ui-smoke.mjs`.
+// Tổng 19 bước: `grep -cE '^\s*(await )?buoc\("' scripts/ci/ui-smoke.mjs`.
 //
 // ── DỮ LIỆU ────────────────────────────────────────────────────────────────
 // Tự tạo 2 user + công ty + mẫu + khách hàng + báo giá mang tiền tố `uismoke-<pid>`, và XOÁ CỨNG ở

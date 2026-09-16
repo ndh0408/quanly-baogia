@@ -15,7 +15,7 @@ lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
 **Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 39 khẳng định, gồm dựng + smoke image
-Docker thật, smoke giao diện Chromium 18 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
+Docker thật, smoke giao diện Chromium 19 bước đi hết luồng người dùng, `EXPLAIN ANALYZE` trên câu
 SQL Prisma thật sự chạy, quét bảo mật thật, và bốn luật ranh giới tầng. Đường lưu báo giá lần đầu
 được **đo**, rồi mới sửa: 10.000 dòng đi từ 3.255 ms xuống 931 ms. Bộ test đi từ ~1.271 lên
 **1.448 bài backend + 293 bài web** (cả hai đo 2026-08-28 trong cùng một lượt `npm run verify` trọn, sau khi thêm

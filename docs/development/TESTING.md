@@ -54,7 +54,7 @@ Chromium được tìm theo thứ tự `SMOKE_CHROMIUM` → thư mục `PLAYWRIG
 `scripts/ci/docker-smoke.sh` (bước `[11/13]`, chạy trong container). Ba script chia
 nhau ba vế — xem mục dưới để biết vì sao hai vế production không gộp làm một.
 
-**18 bước, đi hết một luồng người dùng thật:**
+**19 bước, đi hết một luồng người dùng thật:**
 
 | Bước | Kiểm gì |
 |---|---|
@@ -72,6 +72,7 @@ nhau ba vế — xem mục dưới để biết vì sao hai vế production khô
 | `U13` | xuất Excel từ menu ⋯ — file thật, không phải trang HTML |
 | `U14` | đăng xuất |
 | `U15` | phân quyền: `account_hn` gọi thẳng API của admin và phải nhận đúng 403 |
+| `U15b` | **account HN gõ giá rồi bấm Lưu MỘT lần — CSDL phải đổi** (kiểm ngược đã đo: gỡ hai luật `.account-hn-view .grid-stat` trong `web/src/styles.css` thì nút Lưu xê 28px khi ô nhận focus, `mouseup` trượt khỏi nút, trình duyệt không sinh `click`, và CSDL giữ nguyên số cũ) |
 | `U16` | **console sạch + không request nào hỏng, suốt cả lượt chạy** |
 
 `U16` là chốt đắt giá nhất: một smoke chỉ hỏi "có thấy chữ X không" vẫn xanh trong

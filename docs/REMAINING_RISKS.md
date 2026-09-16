@@ -389,7 +389,7 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
-| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 18 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
+| 9 · Final QA | **xong** (2026-08-27) | `npm run verify` nay **13 bước**, gồm cả quét bảo mật thật, dựng+smoke image Docker, smoke giao diện Chromium 19 bước, EXPLAIN ANALYZE, và cổng ranh giới tầng |
 
 ### PHASE 4 — đã đóng (2026-08-27)
 
@@ -398,7 +398,7 @@ bảng để thấy đã đóng bằng cái gì.
 
 | Đòi | Trước | Nay |
 |---|---|---|
-| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **18 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền), 0 lỗi console |
+| Playwright smoke | không có | `scripts/ci/ui-smoke.mjs` — Chromium thật, **19 bước** đi hết luồng người dùng (đăng nhập → sửa ô → Lưu → mất tab & khôi phục bản nháp → wizard tạo mới → xuất Excel → đăng xuất → kiểm quyền → account HN gõ giá rồi Lưu MỘT lần), 0 lỗi console |
 | Helm checks | chỉ `helm lint` | `scripts/ci/check-helm.mjs` — render đầy đủ + kubeconform + 4 bất biến |
 | Docker smoke | không có | `scripts/ci/docker-smoke.sh` dựng image, `smoke-image.sh` giữ MỌI khẳng định về image (kể cả **0 dòng stack trong log khởi động**) |
 | SBOM | chỉ là văn bản | `scripts/ci/security-scan.sh` sinh thật, cùng gitleaks (cả lịch sử git) · trivy · semgrep |
@@ -847,10 +847,10 @@ Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải p
 - **Chưa có Prometheus/Grafana chạy production** — nên mọi mục tiêu độ trễ trong
   [operations/SLO.md](operations/SLO.md) còn là giả định, chưa phải số đo.
 - **E2E trình duyệt CÓ, nhưng KHÔNG chạy trong CI** — `scripts/ci/ui-smoke.mjs`
-  lái Chromium THẬT qua 18 bước trên bundle ĐÃ BUILD, và nó là bước `[12/13]` của
+  lái Chromium THẬT qua 19 bước trên bundle ĐÃ BUILD, và nó là bước `[12/13]` của
   `scripts/verify-local.sh`. `.github/workflows/ci.yml` không có bước nào gọi nó,
   nên một thay đổi làm trắng màn hình vẫn xanh trên GitHub và chỉ bị bắt khi có
-  người gõ `npm run verify` trên máy mình. Chi tiết 18 bước:
+  người gõ `npm run verify` trên máy mình. Chi tiết 19 bước:
   [development/TESTING.md](development/TESTING.md).
 - **Ba đường của lưới mà `ui-smoke` KHÔNG đi qua** — smoke chỉ gõ phím thường
   (`keyboard.type` + `Enter`); không dán, không gõ Telex, không bấm Ctrl+Z. Cả ba
