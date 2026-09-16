@@ -65,6 +65,39 @@ Trước đợt 2026-08-27 hai con số này là **14 metric và 14 quy tắc**.
 * Ràng buộc giữa các file (tên job phải khớp `quanly.*`, đường mount phải khớp `rule_files:`, uid
   datasource phải khớp bảng điều khiển) được khoá bằng `tests/xf-observability-gaps.test.js`.
 
+## ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ
+
+Mọi cấu hình trong ngăn xếp này vào container bằng **mount thư mục**. Đây không phải sở thích —
+mount tệp lẻ đã gây ra một lỗi **im lặng** trên production, và nó được tìm ra ngày 2026-09-16:
+
+> Sau khi `deploy.sh` ship tệp `prometheus.yml` đã bỏ chú thích khối `alerting:`, Prometheus vẫn
+> đọc **bản cũ**. `POST /-/reload` cũng không cứu được. Tệp trên đĩa đúng, tệp trong container sai.
+
+Nguyên nhân: `deploy.sh` ship bằng `git archive | tar x`, tức nó **thay** tệp (inode mới) chứ không
+sửa tại chỗ. Bind-mount một **tệp** gắn vào inode, nên tệp mới không bao giờ tới được container.
+Bind-mount một **thư mục** thì mỗi lần mở tệp là một lần tra lại tên, nên bản mới hiện ra ngay.
+
+Đo trực tiếp trên VM production, hai mount cạnh nhau, cùng một phép thay tệp:
+
+```
+mount TỆP LẺ   → container thấy: CU
+mount THƯ MỤC  → container thấy: MOI
+```
+
+Hệ quả rộng hơn — và đây mới là phần đáng lo: `infra/prometheus/alerts.yaml` trước đó **cũng** là
+mount tệp lẻ. Nghĩa là **mọi thay đổi quy tắc cảnh báo từ trước tới nay chưa từng tới được
+Prometheus đang chạy**, và không có gì báo lỗi: container vẫn khoẻ, target vẫn `up`, bảng vẫn vẽ.
+
+Ràng buộc này nay được khoá bằng một cổng kiểm tổng quát trong
+`tests/am-canh-bao-den-nguoi.test.js`: **không service nào được mount một tệp có phần mở rộng**
+(`.yml`, `.yaml`, `.sh`, `.tpl`, `.json`, `.conf`, `.toml`, `.ini`). Và các bài cạnh đó không so
+chuỗi đường dẫn nữa mà **giải** đường dẫn trong container ngược về tệp trong repo, rồi kiểm tệp đó
+có thật.
+
+**Khi sửa cấu hình của ngăn xếp này, nhớ dựng lại container** (`up -d --force-recreate <service>`)
+nếu nó đang chạy từ trước lúc đổi sang mount thư mục — bản thân việc đổi kiểu mount cũng cần một
+lần dựng lại mới có hiệu lực.
+
 ## Vì sao Promtail đọc file log của Docker, không phải ứng dụng tự đẩy
 
 Ứng dụng **không được** phụ thuộc vào việc hệ log có sống hay không. Đẩy trực tiếp từ tiến trình

@@ -21,7 +21,7 @@
  * ============================================================================
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,21 @@ const GITATTR = doc(".gitattributes");
 
 /** Bỏ dòng chú thích TRỌN VẸN — chúng cố ý nhắc tới cú pháp hỏng để giải thích vì sao tránh nó. */
 const khongChuThich = (s) => s.split("\n").filter((d) => !/^\s*#/.test(d)).join("\n");
+
+/**
+ * Đổi một đường dẫn BÊN TRONG container thành đường dẫn trong repo, bằng cách đi ngược mount của
+ * compose. Trả về null nếu không mount nào phủ đường đó.
+ */
+function giaiDuongDan(trongContainer) {
+  const mounts = [...COMPOSE.matchAll(/^\s*-\s*\.\/([^\s:]+):(\/[^\s:]+)(?::ro)?$/gm)]
+    .map((m) => ({ may: m[1], container: m[2] }))
+    .sort((a, b) => b.container.length - a.container.length);
+  for (const m of mounts) {
+    if (trongContainer === m.container) return m.may;
+    if (trongContainer.startsWith(m.container + "/")) return m.may + trongContainer.slice(m.container.length);
+  }
+  return null;
+}
 
 /** Cắt đúng khối YAML của một service trong compose. */
 const khoiService = (ten) => {
@@ -64,11 +79,20 @@ describe("Cấu hình PHẢI đi qua bước dựng — không mount thẳng b�
   it("bản mẫu mang đuôi .tpl, không phải .yml", () => {
     // Đuôi .yml là lời mời trỏ `--config.file` vào nó. Và nếu ai làm vậy, Alertmanager KHỞI ĐỘNG
     // BÌNH THƯỜNG rồi gửi thư tới một máy chủ tên `${SMTP_HOST}` — im lặng, không lỗi ở đâu cả.
-    expect(COMPOSE).toMatch(/alertmanager\.yml\.tpl/);
+    const mau = ENTRY.match(/AM_TEMPLATE:-(\S+?)\}/);
+    expect(mau, "entrypoint không khai đường dẫn bản mẫu").toBeTruthy();
+    expect(mau[1]).toMatch(/\.tpl$/);
+    const goc = giaiDuongDan(mau[1]);
+    expect(goc, `entrypoint đọc bản mẫu ở ${mau[1]} nhưng không mount nào phủ đường đó`).toBeTruthy();
+    expect(existsSync(join(ROOT, goc)), `bản mẫu giải ra ${goc} — tệp không có trong repo`).toBe(true);
   });
 
-  it("compose chạy entrypoint dựng cấu hình, không gọi thẳng /bin/alertmanager", () => {
-    expect(khoiService("alertmanager")).toMatch(/entrypoint\.sh/);
+  it("compose chạy entrypoint dựng cấu hình, và tệp đó CÓ THẬT ở đường đã mount", () => {
+    const ep = khoiService("alertmanager").match(/entrypoint:\s*\["\/bin\/sh",\s*"([^"]+)"\]/);
+    expect(ep, "compose không khai entrypoint dạng /bin/sh <script>").toBeTruthy();
+    const goc = giaiDuongDan(ep[1]);
+    expect(goc, `entrypoint ${ep[1]} không nằm dưới mount nào → container không lên`).toBeTruthy();
+    expect(existsSync(join(ROOT, goc))).toBe(true);
     expect(ENTRY, "entrypoint phải kết thúc bằng exec sang alertmanager thật")
       .toMatch(/exec \/bin\/alertmanager/);
   });
@@ -195,6 +219,21 @@ describe("Những thứ sẽ hỏng ở máy chủ mà máy dev không thấy", 
     expect(COMPOSE).toMatch(/alertmanager-data:\/alertmanager/);
     expect(COMPOSE).toMatch(/^ {2}alertmanager-data:$/m);
     expect(COMPOSE).toMatch(/--storage\.path=\/alertmanager/);
+  });
+
+  it("KHÔNG service nào mount một TỆP LẺ làm cấu hình", () => {
+    // ĐÃ ĐO trên chính VM production, bằng hai mount cạnh nhau rồi thay tệp đúng cách mà
+    // `deploy.sh` thay (`git archive | tar x` → tệp MỚI, inode mới):
+    //     mount tệp lẻ   → container vẫn thấy bản CŨ
+    //     mount thư mục  → container thấy bản MỚI
+    // Chuyện này ĐÃ XẢY RA THẬT: Prometheus trên production đọc mãi khối `alerting:` đang bị chú
+    // thích dù tệp trên đĩa đã bỏ chú thích, và `/-/reload` cũng không cứu — nó đọc lại đúng inode
+    // cũ. Hệ quả rộng hơn: mọi thay đổi trong alerts.yaml cũng chưa từng tới được Prometheus.
+    // Hỏng theo kiểu IM LẶNG tuyệt đối, nên phải chặn ở đây chứ không dựa vào ai đó nhớ.
+    const xau = [...COMPOSE.matchAll(/^\s*-\s*(\.\/\S+?):(\/\S+?)(?::ro)?$/gm)]
+      .map((m) => m[1])
+      .filter((h) => /\.(ya?ml|sh|tpl|json|conf|toml|ini)$/.test(h));
+    expect(xau, `mount tệp lẻ → container giữ bản CŨ sau deploy: ${xau.join(", ")}`).toEqual([]);
   });
 
   it("Prometheus KHÔNG chờ alertmanager khoẻ mới chạy", () => {

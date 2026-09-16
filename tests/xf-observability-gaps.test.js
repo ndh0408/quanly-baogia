@@ -39,7 +39,7 @@
  * ============================================================================
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +52,28 @@ const ALERTS = doc("infra/prometheus/alerts.yaml");
 const ALERTS_TEST = doc("infra/prometheus/alerts.test.yaml");
 const DS = doc("infra/observability/grafana/provisioning/datasources/ds.yaml");
 const README = doc("infra/observability/README.md");
+
+/**
+ * Đổi một đường dẫn BÊN TRONG container thành đường dẫn trong repo, bằng cách đi ngược các mount
+ * của compose. Trả về null nếu không mount nào phủ đường đó.
+ *
+ * Vì sao cần: các mount nay là MOUNT THƯ MỤC, không phải mount tệp lẻ (xem chú thích trong
+ * compose — ĐÃ ĐO trên VM production rằng mount tệp lẻ giữ bản CŨ sau khi deploy thay tệp, khiến
+ * Prometheus đọc mãi cấu hình cũ). Nên không còn so chuỗi thẳng được nữa; phải giải đường dẫn.
+ */
+function giaiDuongDan(trongContainer) {
+  const mounts = [...COMPOSE.matchAll(/^\s*-\s*\.\/([^\s:]+):(\/[^\s:]+)(?::ro)?$/gm)]
+    .map((m) => ({ may: m[1], container: m[2] }))
+    // dài nhất trước: /etc/prometheus/rules phải thắng /etc/prometheus nếu cả hai cùng tồn tại
+    .sort((a, b) => b.container.length - a.container.length);
+  for (const m of mounts) {
+    if (trongContainer === m.container) return m.may;
+    if (trongContainer.startsWith(m.container + "/")) {
+      return m.may + trongContainer.slice(m.container.length);
+    }
+  }
+  return null;
+}
 
 // KHÔNG có REDIS_URL → `pub` của sse.ts giữ null → publish/broadcast đi đường CỤC BỘ, nên bài đo
 // `sse_events` là tất định dù máy chạy test có Redis hay không (CI có, máy dev thường không).
@@ -298,24 +320,30 @@ describe("Phải TỒN TẠI một máy chủ Prometheus trong repo", () => {
   it("Prometheus nạp ĐÚNG bản gốc infra/prometheus/alerts.yaml, không phải bản chép", () => {
     // Hai bản của cùng một tập quy tắc là hai bản sẽ trôi khỏi nhau — và `npm run check:alerts`
     // chỉ kiểm bản gốc, nên bản chép sẽ hỏng mà không cổng CI nào đỏ.
-    expect(COMPOSE).toMatch(/\.\/infra\/prometheus\/alerts\.yaml:/);
+    expect(COMPOSE).toMatch(/- \.\/infra\/prometheus:/);
   });
 
   it("đường mount quy tắc trong compose KHỚP `rule_files:` của prometheus.yml", () => {
     // Đây là mối nối im lặng nhất trong cả ngăn xếp: lệch một ký tự thì Prometheus khởi động bình
     // thường, /metrics vẫn được scrape, bảng vẫn vẽ — và KHÔNG quy tắc nào được đánh giá.
-    const mount = COMPOSE.match(/\.\/infra\/prometheus\/alerts\.yaml:([^\s:]+)/);
-    expect(mount, "compose không mount alerts.yaml").toBeTruthy();
     const rules = [...PROMYML.matchAll(/^\s*-\s*(\/etc\/prometheus\/[^\s#]+)/gm)].map((m) => m[1]);
-    expect(rules, `rule_files của prometheus.yml (${rules.join(", ")}) không chứa đích mount ${mount[1]}`)
-      .toContain(mount[1]);
+    expect(rules.length, "prometheus.yml không khai rule_files nào").toBeGreaterThan(0);
+    for (const r of rules) {
+      const goc = giaiDuongDan(r);
+      expect(goc, `rule_files trỏ ${r} nhưng không mount nào của compose phủ đường đó`).toBeTruthy();
+      expect(existsSync(join(ROOT, goc)), `rule_files trỏ ${r} → ${goc}, mà tệp đó không có trong repo`).toBe(true);
+    }
+    expect(rules.map(giaiDuongDan), "Prometheus phải nạp chính infra/prometheus/alerts.yaml")
+      .toContain("infra/prometheus/alerts.yaml");
   });
 
   it("prometheus.yml được mount vào đúng chỗ `--config.file` trỏ tới", () => {
     const cfg = COMPOSE.match(/--config\.file=(\S+)/);
     expect(cfg, "compose không truyền --config.file").toBeTruthy();
-    expect(COMPOSE, `prometheus.yml không được mount vào ${cfg[1]}`)
-      .toContain(`./infra/observability/prometheus.yml:${cfg[1]}`);
+    const goc = giaiDuongDan(cfg[1]);
+    expect(goc, `--config.file=${cfg[1]} không nằm dưới mount nào`).toBeTruthy();
+    expect(goc).toBe("infra/observability/prometheus.yml");
+    expect(existsSync(join(ROOT, goc))).toBe(true);
   });
 });
 

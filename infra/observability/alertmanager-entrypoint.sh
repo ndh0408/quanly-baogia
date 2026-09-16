@@ -16,7 +16,7 @@
 # chứa, nhưng đây là chỗ không đáng đánh cược.
 set -eu
 
-MAU="${AM_TEMPLATE:-/etc/alertmanager/alertmanager.yml.tpl}"
+MAU="${AM_TEMPLATE:-/etc/alertmanager/conf/alertmanager.yml.tpl}"
 RA="${AM_RENDERED:-/render/alertmanager.yml}"
 
 [ -r "$MAU" ] || { echo "alertmanager-entrypoint: KHÔNG đọc được bản mẫu $MAU" >&2; exit 78; }

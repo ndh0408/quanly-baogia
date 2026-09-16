@@ -49,9 +49,18 @@ services:
   promtail:
     image: grafana/promtail:3.3.2
     container_name: quanly-promtail
-    command: -config.file=/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/conf/promtail.yaml
     volumes:
-      - ./infra/observability/promtail.yaml:/etc/promtail/config.yaml:ro
+      # ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ. ĐÃ ĐO trên chính VM production:
+      #     mount tệp lẻ  → container thấy bản CŨ sau khi deploy thay tệp
+      #     mount thư mục → container thấy bản MỚI
+      # `deploy.sh` ship bằng `git archive | tar x`, tức nó THAY tệp (inode mới) chứ không sửa tại
+      # chỗ. Bind-mount một TỆP gắn vào inode, nên tệp mới không bao giờ tới được container: nó giữ
+      # cấu hình cũ cho tới khi có người dựng lại container. Chuyện này ĐÃ XẢY RA THẬT — Prometheus
+      # trên production vẫn đọc khối `alerting:` đang bị chú thích dù tệp trên đĩa đã bỏ chú thích,
+      # và `/-/reload` cũng không cứu được vì nó đọc lại đúng cái inode cũ.
+      # Hệ quả rộng hơn: MỌI thay đổi quy tắc cảnh báo từ trước tới nay cũng chưa từng tới nơi.
+      - ./infra/observability:/etc/promtail/conf:ro
       # CHỈ ĐỌC. Promtail không có việc gì phải ghi vào thư mục log của Docker.
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -77,7 +86,7 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: quanly-prometheus
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.file=/etc/prometheus/conf/prometheus.yml
       - --storage.tsdb.path=/prometheus
       # 15 ngày: đủ cho điều tra sự cố và cho việc "chạy hai tuần rồi đặt lại SLO theo phân vị thật"
       # mà docs/operations/SLO.md đang chờ. Muốn giữ lâu hơn thì cân RAM/đĩa của VM trước.
@@ -92,10 +101,21 @@ services:
       # `file: ./secrets/metrics-token` và tự tạo tệp đó, nhớ chmod 600 + thêm vào .gitignore).
       - metrics_token
     volumes:
-      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # MOUNT THẲNG bản gốc infra/prometheus/alerts.yaml — KHÔNG chép. `npm run check:alerts` chỉ
-      # kiểm bản gốc đó, nên một bản chép sẽ trôi khỏi nó mà không cổng CI nào đỏ.
-      - ./infra/prometheus/alerts.yaml:/etc/prometheus/rules/alerts.yaml:ro
+      # ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ. ĐÃ ĐO trên chính VM production:
+      #     mount tệp lẻ  → container thấy bản CŨ sau khi deploy thay tệp
+      #     mount thư mục → container thấy bản MỚI
+      # `deploy.sh` ship bằng `git archive | tar x`, tức nó THAY tệp (inode mới) chứ không sửa tại
+      # chỗ. Bind-mount một TỆP gắn vào inode, nên tệp mới không bao giờ tới được container: nó giữ
+      # cấu hình cũ cho tới khi có người dựng lại container. Chuyện này ĐÃ XẢY RA THẬT — Prometheus
+      # trên production vẫn đọc khối `alerting:` đang bị chú thích dù tệp trên đĩa đã bỏ chú thích,
+      # và `/-/reload` cũng không cứu được vì nó đọc lại đúng cái inode cũ.
+      # Hệ quả rộng hơn: MỌI thay đổi quy tắc cảnh báo từ trước tới nay cũng chưa từng tới nơi.
+      - ./infra/observability:/etc/prometheus/conf:ro
+      # MOUNT THẲNG thư mục chứa bản gốc alerts.yaml — KHÔNG chép nội dung sang chỗ khác.
+      # `npm run check:alerts` chỉ kiểm bản gốc đó, nên một bản chép sẽ trôi khỏi nó mà không cổng
+      # CI nào đỏ. `rule_files:` trong prometheus.yml trỏ đích danh alerts.yaml, nên alerts.test.yaml
+      # nằm cùng thư mục KHÔNG bị nạp làm quy tắc.
+      - ./infra/prometheus:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     # CHỈ mạng `internal`. Prometheus giữ toàn bộ số liệu vận hành và giao diện của nó KHÔNG có xác
     # thực — không publish cổng 9090 ra máy chủ, không nối vào mạng `edge`. Muốn xem thì đi qua
@@ -126,7 +146,7 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     container_name: quanly-alertmanager
-    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    entrypoint: ["/bin/sh", "/etc/alertmanager/conf/alertmanager-entrypoint.sh"]
     command:
       - --storage.path=/alertmanager
       # Liên kết trong thư trỏ về đây. Prometheus/Alertmanager KHÔNG mở ra Internet, nên đây là
@@ -152,8 +172,16 @@ services:
       # `smtp_auth_password_file` trỏ thẳng vào đây.
       - smtp_password
     volumes:
-      - ./infra/observability/alertmanager.yml.tpl:/etc/alertmanager/alertmanager.yml.tpl:ro
-      - ./infra/observability/alertmanager-entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      # ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ. ĐÃ ĐO trên chính VM production:
+      #     mount tệp lẻ  → container thấy bản CŨ sau khi deploy thay tệp
+      #     mount thư mục → container thấy bản MỚI
+      # `deploy.sh` ship bằng `git archive | tar x`, tức nó THAY tệp (inode mới) chứ không sửa tại
+      # chỗ. Bind-mount một TỆP gắn vào inode, nên tệp mới không bao giờ tới được container: nó giữ
+      # cấu hình cũ cho tới khi có người dựng lại container. Chuyện này ĐÃ XẢY RA THẬT — Prometheus
+      # trên production vẫn đọc khối `alerting:` đang bị chú thích dù tệp trên đĩa đã bỏ chú thích,
+      # và `/-/reload` cũng không cứu được vì nó đọc lại đúng cái inode cũ.
+      # Hệ quả rộng hơn: MỌI thay đổi quy tắc cảnh báo từ trước tới nay cũng chưa từng tới nơi.
+      - ./infra/observability:/etc/alertmanager/conf:ro
       # Silence + nhật ký đã-gửi. MẤT volume này = mọi cảnh báo đang im bỗng kêu lại sau khi khởi
       # động lại, và mọi `silence` người vận hành đặt trong lúc bảo trì biến mất.
       - alertmanager-data:/alertmanager
