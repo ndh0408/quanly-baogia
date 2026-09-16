@@ -418,9 +418,9 @@ if [ "$NHANH" -eq 0 ]; then
     ma_ds=$?
   if [ $ma_ds -ne 0 ]; then
     printf '\033[31m  ── 25 dòng cuối của docker-smoke ──\033[0m\n'
-    tail -25 "$log_ma_ds" | sed 's/^/  /'
+    tail -25 "$log_ds" | sed 's/^/  /'
   fi
-  rm -f "$log_ma_ds"
+  rm -f "$log_ds"
     ket $ma_ds "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
   else
     printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
