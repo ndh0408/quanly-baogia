@@ -409,7 +409,19 @@ ket $? "smoke-dist (chi tiết: bash scripts/ci/smoke-dist.sh)"
 if [ "$NHANH" -eq 0 ]; then
   buoc "[11/13] Image production (dựng + chạy thật)"
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    bash scripts/ci/docker-smoke.sh >/dev/null 2>&1;                  ket $? "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
+    # Cùng lý do đã ghi ở [13]: nuốt output thì cổng đỏ mà không nói gì, và người đọc chỉ còn cách
+    # đoán rồi chạy lại vài phút. ĐÃ TỐN THẬT: cổng này đỏ trong verify nhưng XANH khi chạy riêng
+    # (EXIT=0) nhiều lượt liền, và không có cách nào biết là "máy hết RAM giết tiến trình con" hay
+    # "image dựng hỏng" ngoài việc chạy lại.
+    log_ds="$(mktemp)"
+    bash scripts/ci/docker-smoke.sh > "$log_ds" 2>&1
+    ma_ds=$?
+  if [ $ma_ds -ne 0 ]; then
+    printf '\033[31m  ── 25 dòng cuối của docker-smoke ──\033[0m\n'
+    tail -25 "$log_ma_ds" | sed 's/^/  /'
+  fi
+  rm -f "$log_ma_ds"
+    ket $ma_ds "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
   else
     printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
   fi
@@ -428,7 +440,18 @@ fi
 if [ "$NHANH" -eq 0 ]; then
   buoc "[12/13] Smoke giao diện (Chromium thật)"
   if node -e 'import("playwright").then(()=>process.exit(0),()=>process.exit(1))' 2>/dev/null; then
-    node scripts/ci/ui-smoke.mjs >/dev/null 2>&1;                    ket $? "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
+    # Cùng lý do đã ghi ở [11] và [13]: nuốt output thì cổng đỏ mà không nói gì. ĐÃ TỐN THẬT —
+    # cổng này đỏ trong verify nhưng XANH khi chạy riêng (EXIT=0), và bước này in RẤT nhiều dòng
+    # khẳng định nên "chạy lại để xem" là vài phút mỗi lần.
+    log_ui="$(mktemp)"
+    node scripts/ci/ui-smoke.mjs > "$log_ui" 2>&1
+    ma_ui=$?
+    if [ $ma_ui -ne 0 ]; then
+      printf '\033[31m  ── 25 dòng cuối của ui-smoke ──\033[0m\n'
+      tail -25 "$log_ui" | sed 's/^/  /'
+    fi
+    rm -f "$log_ui"
+    ket $ma_ui "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
   else
     printf '  \033[33m— gói playwright chưa cài, bỏ qua smoke giao diện (npm ci)\033[0m\n'
   fi
