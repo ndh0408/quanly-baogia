@@ -363,6 +363,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   const lastSheetRow = ws.rowCount || hit.row;
   const scanEnd = Math.min(lastSheetRow, hit.row + MAX_SCAN_ROWS);
   let lastRow = hit.row;
+  // Số dòng BỊ CẮT vì vượt trần lưu — đếm để nói với người dùng, không để dựng đối tượng.
+  let daCat = 0;
   let blankRun = 0;
   let stopRow = 0;              // dòng làm bảng dừng (dòng tổng / chân trang / khoảng trống dài)
   const bodyRows: number[] = [];
@@ -494,6 +496,19 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     }
 
     if (warn.length) it.warn = warn;
+
+    // ── CẮT NGAY TẠI VÒNG QUÉT, KHÔNG DỰNG ĐỐI TƯỢNG CHO PHẦN DƯ ────────────
+    // Bản vá đầu cắt SAU vòng này (`raws.length = MAX_ITEMS_PER_SHEET`) và ĐÃ ĐO LÀ KHÔNG ĐỦ:
+    // đẩy file 8,79 MB (2 sheet × 200.000 dòng) lên dev thật thì tiến trình VẪN bị nhân giết —
+    // `oom-kill … Killed process (node) anon-rss 1.529.596 kB`. Cắt sau thì 400.000 đối tượng
+    // `ImportedItem` ĐÃ được dựng xong rồi mới bỏ đi; đỉnh bộ nhớ nằm ở CHÍNH LÚC DỰNG.
+    //
+    // `resourceLimits` của worker KHÔNG cứu được: nó chặn old-space của worker, còn Buffer/chuỗi
+    // do ExcelJS sinh ra nằm NGOÀI vùng đó, mà trần cgroup thì tính CẢ tiến trình.
+    //
+    // Vẫn ĐẾM TIẾP (`daCat++`) chứ không `break`: người dùng cần biết file có BAO NHIÊU dòng để
+    // quyết định tách thế nào. Đếm một biến số nguyên thì không tốn gì; dựng đối tượng mới tốn.
+    if (raws.length >= MAX_ITEMS_PER_SHEET) { daCat++; continue; }
     raws.push({ row: r, kind, it });
   }
 
@@ -610,11 +625,6 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     }
   }
 
-  // CẮT THẬT, không chỉ cảnh báo. Bản trước gán trọn `raws` rồi chỉ đẩy một dòng cảnh báo ở cuối
-  // hàm — tức toàn bộ 200.000 dòng vẫn nằm trong bộ nhớ, vẫn bị clone sang luồng chính, vẫn bị
-  // JSON.stringify. Phần dư KHÔNG lưu được (zod chặn ở 1000 dòng/trang) nên giữ lại chỉ để chết.
-  const daCat = Math.max(0, raws.length - MAX_ITEMS_PER_SHEET);
-  if (daCat) raws.length = MAX_ITEMS_PER_SHEET;   // cắt TẠI CHỖ để mảng gốc cũng nhả bộ nhớ
   base.items = raws.map((x) => x.it);
   const detailRows = base.items.filter((it) => String(it.detail || "").trim()).length;
   if (detailRows) base.warnings.push(`File có ${detailRows} dòng chứa cột Chi Tiết. Trường này đã bỏ khỏi báo giá nên nội dung đó sẽ không được nạp.`);

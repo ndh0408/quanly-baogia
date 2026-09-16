@@ -33,6 +33,31 @@ const LOCAL_SIG = 0x04034b50;
 const MAX_ENTRIES = 2_000;                    // xlsx bình thường vài chục mục
 const MAX_UNCOMPRESSED = 200 * 1024 * 1024;   // 200 MB tổng sau giải nén — nay là TRẦN THẬT, không phải số khai
 
+/**
+ * TRẦN SỐ DÒNG TRONG TOÀN BỘ WORKBOOK — chốt chặn BỘ NHỚ, đếm TRƯỚC khi exceljs nạp.
+ *
+ * ── VÌ SAO TRẦN THEO BYTE KHÔNG ĐỦ ────────────────────────────────────────
+ * ĐÃ ĐO: một file 8,79 MB chứa 2 sheet × 200.000 dòng chỉ bung ra 33,9 MB — DƯỚI xa trần 200 MB
+ * ở trên — vì exceljs gom mọi chuỗi trùng vào `sharedStrings.xml`, nên 400.000 dòng giống nhau
+ * gần như không tốn byte. Ấy thế mà nạp nó làm tiến trình BỊ NHÂN GIẾT trên dev thật:
+ *     oom-kill … Killed process (node) anon-rss 1.529.596 kB
+ * Byte sau giải nén vì thế là tín hiệu KHÔNG đáng tin cho chi phí bộ nhớ: dữ liệu lặp thì rẻ theo
+ * byte mà đắt theo đối tượng; dữ liệu đa dạng thì ngược lại. Số DÒNG mới là thứ tỉ lệ với số đối
+ * tượng JS mà exceljs dựng.
+ *
+ * ── VÌ SAO PHẢI CHẶN Ở ĐÂY, KHÔNG PHẢI TRONG excelImport ──────────────────
+ * ĐÃ THỬ HAI LẦN VÀ CẢ HAI ĐỀU KHÔNG ĐỦ: cắt sau vòng quét (đỉnh RSS 1.887 MB) rồi cắt ngay trong
+ * vòng quét (1.239 MB). Phần đắt nhất nằm ở `wb.xlsx.load()` — exceljs dựng TOÀN BỘ workbook
+ * thành đối tượng JS TRƯỚC KHI một dòng mã nào của repo này chạy. Muốn chặn thì phải chặn trước
+ * lúc trao buffer cho nó.
+ *
+ * ── CON SỐ ────────────────────────────────────────────────────────────────
+ * Đường nhập chỉ lưu được tối đa 30 sheet × 1.000 dòng = 30.000 dòng (MAX_SHEETS ×
+ * MAX_ITEMS_PER_SHEET, src/excelImport.ts). Trần 120.000 cho GẤP BỐN lần mức đó — dư cho file có
+ * tiêu đề, dòng trống, chân trang, nhiều bảng phụ — mà vẫn chặn đứng ca 400.000 đã đo.
+ */
+const MAX_ROWS = 120_000;
+
 // Mục BẮT BUỘC của một workbook OOXML. Thiếu bất kỳ cái nào thì đó không phải xlsx, bất kể đuôi tệp.
 const REQUIRED = ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml"];
 
@@ -107,7 +132,12 @@ function readCentralDirectory(buf: Buffer) {
  * lỗi inflate (dữ liệu nén hỏng), hoặc vượt `tran` (message cố định "vuot-tran" để nơi gọi phân
  * biệt được với lỗi cấu trúc).
  */
-function giaiNenThatCoTran(buf: Buffer, e: { comp: number; uncomp: number; method: number; localOffset: number }, tran: number): Promise<number> {
+function giaiNenThatCoTran(
+  buf: Buffer,
+  e: { name?: string; comp: number; uncomp: number; method: number; localOffset: number },
+  tran: number,
+  demDong?: (n: number) => void,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const off = e.localOffset;
     if (off < 0 || off + 30 > buf.length || buf.readUInt32LE(off) !== LOCAL_SIG) {
@@ -138,8 +168,19 @@ function giaiNenThatCoTran(buf: Buffer, e: { comp: number; uncomp: number; metho
       inflater.destroy();
       fn(a);
     };
+    // Đếm `<row` NGAY TRÊN LUỒNG, không giữ lại dữ liệu: chi phí là một lượt quét byte, còn bộ
+    // nhớ vẫn là hằng số. `duoi` giữ 4 byte cuối mỗi chunk phòng thẻ bị cắt ngang ranh giới chunk —
+    // thiếu nó là đếm hụt đúng những file lớn nhất (nhiều chunk nhất), tức hụt đúng chỗ cần chặn.
+    let duoi = "";
     inflater.on("data", (chunk: Buffer) => {
       tong += chunk.length;
+      if (demDong) {
+        const s = duoi + chunk.toString("latin1");
+        let i = 0, n = 0;
+        for (;;) { const k = s.indexOf("<row", i); if (k < 0) break; n++; i = k + 4; }
+        if (n) demDong(n);
+        duoi = s.slice(-4);
+      }
       // HUỶ NGAY tại đây — KHÔNG đợi 'end'. Đây chính là điều làm chi phí kiểm không tỉ lệ với
       // kích thước bom: một bom thật vượt `tran` trong vài chunk đầu, luồng bị destroy() ngay lập
       // tức, không bao giờ giải nén hết phần còn lại (có thể là hàng trăm MB/GB).
@@ -176,10 +217,21 @@ export async function inspectXlsx(buf: Buffer): Promise<ZipVerdict> {
   // running total dừng được NGAY khi mục hiện tại đã đủ vượt trần, không tốn công giải nén thêm
   // các mục còn lại.
   let totalUncomp = 0;
+  let tongDong = 0;
   for (const e of entries) {
     let thucTe: number;
+    // CHỈ đếm dòng trong XML của worksheet — sharedStrings/styles không có thẻ <row> nghiệp vụ, và
+    // quét chúng chỉ tốn công.
+    const ten = (e.name || "").toLowerCase();
+    const laSheet = ten.startsWith("xl/worksheets/") && ten.endsWith(".xml");
     try {
-      thucTe = await giaiNenThatCoTran(buf, e, MAX_UNCOMPRESSED - totalUncomp);
+      thucTe = await giaiNenThatCoTran(
+        buf, e, MAX_UNCOMPRESSED - totalUncomp,
+        laSheet ? (n) => { tongDong += n; } : undefined,
+      );
+      if (tongDong > MAX_ROWS) {
+        return { ok: false, reason: `file có quá nhiều dòng (hơn ${MAX_ROWS.toLocaleString("vi-VN")}) — hãy tách bớt sheet rồi thử lại` };
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === "vuot-tran") return { ok: false, reason: "tổng dung lượng sau giải nén quá lớn (nghi bom nén)" };
