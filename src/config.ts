@@ -145,6 +145,34 @@ const schema = z.object({
   DB_TX_MAX_WAIT: numEnv(z.coerce.number().int().positive().max(60_000).default(10_000)),
   DB_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000 (=1 giây)").max(300_000).default(60_000)),
 
+  // ── PHANH THỜI GIAN Ở CHÍNH POSTGRES (src/db.ts, src/app.ts) ──────────── ĐƠN VỊ: MILI-GIÂY.
+  //
+  // VÌ SAO CẦN, dù đã có DB_TX_TIMEOUT: trần kia là của PRISMA, và nó chỉ chi phối cái nằm TRONG
+  // một `$transaction`. Hai thứ nguy hiểm nhất lại nằm NGOÀI:
+  //   · một truy vấn lẻ chạy loạn (kế hoạch xấu, bảng phình) giữ kết nối tới khi nào xong;
+  //   · một transaction bị BỎ DỞ (tiến trình web chết, mạng đứt giữa chừng) giữ kết nối
+  //     VĨNH VIỄN — và kết nối "idle in transaction" còn chặn cả VACUUM dọn rác.
+  // ĐO ĐƯỢC trên production 2026-09-16: `statement_timeout = 0` và
+  // `idle_in_transaction_session_timeout = 0`, tức KHÔNG có phanh nào. Đó đúng là cơ chế biến
+  // 44/100 kết nối thành 100/100 sau vài tuần: chậm, âm thầm, rồi sập một lần.
+  //
+  // ĐẶT Ở ĐÂU: qua `options` của pg Pool (`-c statement_timeout=…`), KHÔNG phải `ALTER DATABASE`.
+  // Khác biệt quan trọng: cách này chỉ ràng buộc POOL CỦA ỨNG DỤNG, còn `prisma migrate deploy`
+  // dùng kết nối riêng nên một migration chạy lâu KHÔNG bị cắt giữa chừng. `ALTER DATABASE` thì
+  // trói cả migration — và một migration bị giết giữa chừng là đúng thứ "không được hư hỏng dữ
+  // liệu" cấm.
+  //
+  // DB_STATEMENT_TIMEOUT PHẢI ≥ DB_TX_TIMEOUT (có chốt chặn ngay sau khi parse, xem cuối file).
+  // ĐO ĐƯỢC: `statement_timeout` cắt CẢ lúc đang CHỜ KHOÁ — thử với hai kết nối tranh một hàng,
+  // bên chờ bị giết đúng 1.501 ms với mã `57014`. Đặt thấp hơn trần transaction là giết luôn
+  // những lần chờ khoá HỢP LỆ (hai người cùng lưu một báo giá), biến một lần chờ vài trăm mili
+  // giây thành một lỗi.
+  DB_STATEMENT_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_STATEMENT_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000").max(600_000).default(60_000)),
+  // Trần cho phiên NẰM IM GIỮA MỘT TRANSACTION. Gấp đôi trần transaction: phải rộng hơn khoảng
+  // nghỉ dài nhất mà mã JS thật sự có giữa hai câu lệnh trong cùng transaction (đường Lưu báo giá
+  // tính lại tổng tiền giữa chừng), nhưng vẫn đủ chặt để thu hồi một transaction đã bị bỏ rơi.
+  DB_IDLE_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_IDLE_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000").max(600_000).default(120_000)),
+
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
   EXPORT_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(500).default(20)),
@@ -198,6 +226,20 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data;
+
+// ── BẤT BIẾN: PHANH CÂU LỆNH KHÔNG ĐƯỢC CHẶT HƠN TRẦN TRANSACTION ─────────
+// Đặt DB_STATEMENT_TIMEOUT < DB_TX_TIMEOUT thì Postgres giết câu lệnh TRƯỚC khi Prisma kịp bỏ
+// transaction, nên người dùng nhận `57014` thay vì thông điệp "báo giá quá lớn" của P2028 — và
+// tệ hơn: mọi lần CHỜ KHOÁ dài hơn trần cũng chết, biến chuyện hai người cùng lưu (vốn chỉ chờ
+// vài trăm mili giây) thành lỗi. Chết ngay lúc khởi động kèm tên biến, đừng để phát hiện lúc
+// người dùng đang gõ.
+if (config.DB_STATEMENT_TIMEOUT < config.DB_TX_TIMEOUT) {
+  console.error(
+    `❌ DB_STATEMENT_TIMEOUT (${config.DB_STATEMENT_TIMEOUT}ms) phải ≥ DB_TX_TIMEOUT (${config.DB_TX_TIMEOUT}ms). ` +
+      "Phanh câu lệnh chặt hơn trần transaction sẽ giết cả những lần chờ khoá hợp lệ.",
+  );
+  process.exit(1);
+}
 
 // Hard fail in production if SESSION_SECRET is a known weak default
 if (

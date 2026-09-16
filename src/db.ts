@@ -29,10 +29,14 @@ const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 // nhập) sẽ xếp hàng KHÔNG có trần thời gian thay vì thất bại nhanh. `maxWait` của Prisma KHÔNG chi
 // phối hàng đợi này khi dùng driver adapter, nên trần phải đặt ở chính Pool. Lấy đúng DB_TX_MAX_WAIT
 // để hai hàng đợi cùng một ngưỡng chờ.
+// options: truyền thẳng xuống Postgres lúc BẮT TAY, nên ràng buộc MỌI câu lệnh đi qua pool này —
+// kể cả câu do Prisma sinh ra mà mã ở đây không nhìn thấy. Xem khối chú thích ở config.ts về vì
+// sao đặt tại pool chứ không `ALTER DATABASE` (migration phải được miễn).
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: config.DB_POOL_MAX,
   connectionTimeoutMillis: config.DB_TX_MAX_WAIT,
+  options: `-c statement_timeout=${config.DB_STATEMENT_TIMEOUT} -c idle_in_transaction_session_timeout=${config.DB_IDLE_TX_TIMEOUT}`,
 });
 const adapter = new PrismaPg(pool);
 // transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).

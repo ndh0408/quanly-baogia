@@ -63,7 +63,14 @@ const PgSession = connectPgSimple(session);
  * (web × số instance) + worker phải nhỏ hơn `max_connections` của Postgres.
  */
 export function conObjectPhien() {
-  return { connectionString: config.DATABASE_URL, max: Number(process.env.SESSION_POOL_MAX) || 4 };
+  return {
+    connectionString: config.DATABASE_URL,
+    max: Number(process.env.SESSION_POOL_MAX) || 4,
+    // Cùng phanh như pool Prisma. Kho phiên chỉ SELECT/UPSERT một hàng mỗi request nên sẽ không
+    // bao giờ chạm trần — nhưng chính vì thế, nếu nó chạm thì đó là dấu hiệu hỏng, và chết nhanh
+    // tốt hơn là giữ kết nối mãi.
+    options: `-c statement_timeout=${config.DB_STATEMENT_TIMEOUT} -c idle_in_transaction_session_timeout=${config.DB_IDLE_TX_TIMEOUT}`,
+  };
 }
 
 /**

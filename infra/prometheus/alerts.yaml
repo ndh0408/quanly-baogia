@@ -166,6 +166,40 @@ groups:
             xuất Excel/PDF.
           runbook: "docker-compose.prod.yml — x-logging; docs/operations/DISASTER_RECOVERY.md"
 
+      - alert: QuanlyKetNoiCsdlSapCan
+        # ── LỖ MÀ QUY TẮC NÀY LẤP ─────────────────────────────────────────
+        # `QuanlyCsdlKhongToiDuoc` (db_up == 0) chỉ kêu KHI ĐÃ SẬP. Hết slot kết nối không sập
+        # đột ngột: nó bò lên trong nhiều ngày rồi một sáng mọi request trả 500
+        # "sorry, too many clients already". Trước quy tắc này, giữa "khoẻ" và "sập" không có
+        # lấy một biển báo nào.
+        #
+        # NGƯỠNG THEO TỈ LỆ, không viết cứng "> 80": `max_connections` là cấu hình của MÁY CHỦ
+        # Postgres, người vận hành nâng 100 → 200 mà không ai sửa mã. Chia cho mẫu số do chính
+        # app phát ra thì ngưỡng luôn đúng — cùng khuôn với `QuanlyDiaSapDay` ở trên.
+        #
+        # `max()` vì con số là của CẢ CSDL: mọi instance app + worker cùng báo một giá trị, cộng
+        # lại là đếm trùng gấp mấy lần và quy tắc sẽ kêu oan ngay lần nhân bản đầu tiên.
+        #
+        # `> 0` ở mẫu số KHÔNG phải để tránh chia cho 0 (Prometheus trả +Inf, vẫn vượt ngưỡng nên
+        # vẫn kêu) mà để loại giá trị canh gác -1: src/observability.ts đặt CẢ HAI gauge về -1 khi
+        # không đo được, và -1/-1 = 1 tức 100% — một cảnh báo CRITICAL trên một CSDL hoàn toàn
+        # khoẻ, chỉ vì phép đo lỗi. Ca mất tín hiệu thật thuộc về `QuanlyKhongConTargetNao`.
+        #
+        # 15m: số kết nối dao động theo từng đợt lưu báo giá; ngắn hơn là kêu theo nhịp làm việc.
+        expr: max(db_connections_used) / max(db_connections_max > 0) > 0.80
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Kết nối Postgres đã dùng trên 80% trần max_connections"
+          description: >-
+            Kết nối là của TIẾN TRÌNH, không phải của người dùng — thêm người dùng KHÔNG làm tăng
+            con số này. Nên nếu nó dâng thì nguyên nhân nằm trong ba thứ: vừa nhân bản thêm
+            instance app (ngân sách mỗi tiến trình web là DB_POOL_MAX + SESSION_POOL_MAX, mặc định
+            20+4), một transaction bị bỏ dở đang giữ kết nối, hoặc rò rỉ kết nối thật. Xem ngay
+            `SELECT state, count(*) FROM pg_stat_activity GROUP BY 1` — nhiều hàng
+            `idle in transaction` là dấu hiệu của thứ hai.
+          runbook: "src/config.ts — DB_STATEMENT_TIMEOUT / DB_IDLE_TX_TIMEOUT; src/db.ts — DB_POOL_MAX"
+
   # ── Nhóm 1c: cấu hình bắt buộc ở production còn THIẾU ────────────────────
   #
   # ── LỖ MÀ NHÓM NÀY LẤP ────────────────────────────────────────────────────

@@ -187,6 +187,56 @@ tests:
         alertname: QuanlyDiaSapDay
         exp_alerts: []
 
+  - interval: 1m
+    name: "Kết nối CSDL vượt 80% trần → KÊU"
+    input_series:
+      - series: 'db_connections_used{instance="app-1", job="quanly"}'
+        values: "85x20"
+      - series: 'db_connections_max{instance="app-1", job="quanly"}'
+        values: "100x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyKetNoiCsdlSapCan
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "Kết nối Postgres đã dùng trên 80% trần max_connections"
+              description: >-
+                Kết nối là của TIẾN TRÌNH, không phải của người dùng — thêm người dùng KHÔNG làm tăng
+                con số này. Nên nếu nó dâng thì nguyên nhân nằm trong ba thứ: vừa nhân bản thêm
+                instance app (ngân sách mỗi tiến trình web là DB_POOL_MAX + SESSION_POOL_MAX, mặc định
+                20+4), một transaction bị bỏ dở đang giữ kết nối, hoặc rò rỉ kết nối thật. Xem ngay
+                `SELECT state, count(*) FROM pg_stat_activity GROUP BY 1` — nhiều hàng
+                `idle in transaction` là dấu hiệu của thứ hai.
+              runbook: "src/config.ts — DB_STATEMENT_TIMEOUT / DB_IDLE_TX_TIMEOUT; src/db.ts — DB_POOL_MAX"
+
+  - interval: 1m
+    name: "Trần được NÂNG lên 200 thì 85 kết nối KHÔNG được kêu (chốt chống ngưỡng viết cứng)"
+    # Nếu ai đó đổi quy tắc thành `db_connections_used > 80` cho "dễ đọc" thì bài này đỏ — đúng
+    # lúc, thay vì sau khi người vận hành nâng max_connections và bị đánh thức oan mỗi đêm.
+    input_series:
+      - series: 'db_connections_used{instance="app-1", job="quanly"}'
+        values: "85x20"
+      - series: 'db_connections_max{instance="app-1", job="quanly"}'
+        values: "200x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyKetNoiCsdlSapCan
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Phép đo HỎNG (cả hai gauge = -1) thì KHÔNG được kêu — -1/-1 = 1 tức 100%"
+    # Đây là ca mà một quy tắc viết ngây thơ sẽ bắn CRITICAL trên một CSDL hoàn toàn khoẻ.
+    input_series:
+      - series: 'db_connections_used{instance="app-1", job="quanly"}'
+        values: "-1x20"
+      - series: 'db_connections_max{instance="app-1", job="quanly"}'
+        values: "-1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyKetNoiCsdlSapCan
+        exp_alerts: []
+
   # ── 5xx: hành vi ở lưu lượng BẰNG KHÔNG ──────────────────────────────────
   - interval: 1m
     name: "Không có lưu lượng thì tỉ lệ 5xx KHÔNG được kêu (0/0)"

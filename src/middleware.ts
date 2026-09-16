@@ -212,6 +212,19 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     err.status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
     err.message = err.code === "LIMIT_FILE_SIZE" ? "File quá lớn (tối đa 10MB)" : "Tải file không hợp lệ";
   }
+  // Mã lỗi GỐC của Postgres, nằm sâu trong lỗi Prisma khi dùng driver adapter (Prisma 7).
+  // Prisma gói nó lại thành P2010 ("raw query failed") — một cái rọ quá rộng để phân loại.
+  // Đường dẫn này ĐÃ ĐO trên lỗi thật, không phải suy từ tài liệu:
+  //   err.meta.driverAdapterError.cause.code === "57014"
+  // Viết bằng chuỗi `?.` vì mọi mắt xích đều có thể vắng: lỗi Prisma KHÔNG đến từ driver
+  // adapter thì `meta` rỗng, và đọc thẳng sẽ ném TypeError NGAY TRONG bộ xử lý lỗi — biến một
+  // lỗi 503 xử lý được thành một lần sập không có lấy một dòng log.
+  const maPostgres = (e: unknown): string | null => {
+    const c = (e as { meta?: { driverAdapterError?: { cause?: { code?: unknown } } } })?.meta
+      ?.driverAdapterError?.cause?.code;
+    return typeof c === "string" ? c : null;
+  };
+
   // Map known Prisma errors to proper HTTP status codes instead of opaque 500s.
   // (Avoids unique-constraint races / FK violations leaking as "Lỗi server".)
   if (err && typeof err.code === "string" && /^P\d{4}$/.test(err.code) && !err.status) {
@@ -238,6 +251,23 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
       err.status = 503;
       err.retryAfter = err.retryAfter || 5;
       err.message = "Hệ thống đang bận (hết kết nối cơ sở dữ liệu). Vui lòng thử lại sau ít giây.";
+    } else if (err.code === "P2010" && maPostgres(err) === "57014") {
+      // `statement_timeout` của Postgres đã cắt câu lệnh (src/db.ts → DB_STATEMENT_TIMEOUT).
+      //
+      // VÌ SAO PHẢI CÓ NHÁNH RIÊNG: P2010 nghĩa là "raw query failed" — một cái rọ rất rộng, và
+      // nếu để nó rơi xuống 500 thì người dùng nhận "Lỗi server" cho một tình huống họ TỰ THOÁT
+      // được. ĐO ĐƯỢC hình dạng thật trước khi viết nhánh này (đừng đoán):
+      //   code  = "P2010"
+      //   meta.driverAdapterError.cause.code = "57014"
+      //   message: Raw query failed. Code: `57014`. Message: `canceling statement due to
+      //            statement timeout`
+      // Hai đường dẫn tới đây, và cả hai đều là 503-thử-lại chứ không phải hỏng hệ thống:
+      //   · một truy vấn chạy loạn (kế hoạch xấu trên bảng vừa phình);
+      //   · CHỜ KHOÁ quá lâu vì người khác đang giữ hàng đó — đã đo: bên chờ bị giết đúng
+      //     1.501 ms với trần 1.500 ms.
+      err.status = 503;
+      err.retryAfter = err.retryAfter || 5;
+      err.message = "Thao tác chạy quá lâu và đã bị dừng để không giữ tài nguyên. Vui lòng thử lại; nếu lặp lại, hãy tách bớt trang rồi lưu.";
     } else if (err.code === "P2034") {
       // Deadlock / write conflict: hai người ghi cùng một báo giá, Postgres giết một bên. Việc của
       // người dùng chỉ là bấm Lưu lại — cùng nhóm nghĩa với 409 khoá lạc quan, không phải lỗi 500.

@@ -335,6 +335,33 @@ export const dbUp = new Gauge({
  * Redis (`REDIS_URL` là `.optional()` trong src/config.ts) — và một cảnh báo kêu oan là một cảnh
  * báo sẽ bị tắt. Quy tắc đúng: `redis_configured == 1 and redis_up == 0`.
  */
+/**
+ * SỐ KẾT NỐI ĐANG MỞ TỚI CSDL, và TRẦN của Postgres — cặp đôi, không tách được.
+ *
+ * VÌ SAO CẦN, dù đã có `db_up`: `db_up` chỉ chuyển 1→0 KHI ĐÃ SẬP. Hết slot kết nối không sập
+ * đột ngột — nó bò lên trong nhiều ngày rồi một sáng mọi request trả 500
+ * "sorry, too many clients already". ĐO ĐƯỢC 2026-09-16: production dùng 1/100, dev 6/100, nhưng
+ * KHÔNG có quy tắc cảnh báo nào nhìn vào con số này. Đó là một vách đá không biển báo.
+ *
+ * VÌ SAO PHẢI CÓ CẢ MẪU SỐ: `max_connections` là cấu hình của MÁY CHỦ Postgres, không phải của
+ * ứng dụng — người vận hành đổi nó mà không ai sửa mã. Cảnh báo viết theo ngưỡng cứng ("> 80")
+ * sẽ sai ngay khi trần đổi thành 200. Phát cả hai rồi để quy tắc chia, thì ngưỡng luôn đúng.
+ *
+ * GIÁ TRỊ LÀ CỦA CẢ CSDL, không phải của riêng tiến trình này: mọi instance app + worker cùng
+ * báo một con số. Quy tắc cảnh báo phải dùng `max()` để khỏi đếm trùng.
+ */
+export const dbConnectionsUsed = new Gauge({
+  name: "db_connections_used",
+  help: "Số kết nối đang mở tới CSDL này (pg_stat_activity, đếm ở lần scrape gần nhất). -1 = không đo được",
+  registers: DK_SUCKHOE,
+  collect() { return capNhatSucKhoe(); },
+});
+export const dbConnectionsMax = new Gauge({
+  name: "db_connections_max",
+  help: "Trần max_connections của máy chủ Postgres — MẪU SỐ để tính tỉ lệ. -1 = không đo được",
+  registers: DK_SUCKHOE,
+  collect() { return capNhatSucKhoe(); },
+});
 export const redisConfigured = new Gauge({
   name: "redis_configured",
   help: "1 = tiến trình này được cấu hình REDIS_URL (hàng đợi BullMQ/rate-limit/backplane SSE — KHÔNG giữ phiên); 0 = cố ý chạy không Redis",
@@ -389,14 +416,30 @@ async function doCsdl(): Promise<void> {
   // Cả hai tiến trình mở /metrics (src/app.ts, src/worker.ts) đều đã `import { prisma } from
   // "./db.js"` ở đầu file, nên ở đó đây LUÔN là một lượt tra bộ nhớ đệm module, không phải một
   // lượt dựng PrismaClient mới.
-  const ok = await hanCho(
+  // GỘP vào chính câu thăm dò sẵn có, KHÔNG thêm câu thứ hai: mỗi lượt scrape mà bắn thêm một
+  // truy vấn là thêm một kết nối bị chiếm — đúng thứ phép đo này sinh ra để canh. Câu này vừa
+  // chứng minh CSDL trả lời, vừa cho luôn hai con số.
+  //
+  // `pg_stat_activity` đọc được bằng vai trò THƯỜNG (không cần superuser): Postgres giấu bớt vài
+  // CỘT của backend thuộc người khác, nhưng vẫn phát đủ HÀNG, nên `count(*)` là con số thật —
+  // đã đối chiếu trên dev và production.
+  const so = await hanCho(
     (async () => {
       const { prisma } = await import("./db.js");
-      await prisma.$queryRaw`SELECT 1`;
-      return true;
+      const r = await prisma.$queryRaw`
+        SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database())::int AS dung,
+               current_setting('max_connections')::int AS tran
+      ` as Array<{ dung: number; tran: number }>;
+      return r[0] ?? null;
     })(),
     SUCKHOE_HAN_MS
   );
+  const ok = so !== null;
+  // -1 chứ KHÔNG phải 0 khi không đo được. 0 là một con số HỢP LỆ và đọc lên như "khoẻ không còn
+  // kết nối nào" — đúng chiều ngược với sự thật. -1 không bao giờ lọt qua ngưỡng tỉ lệ, và nhìn
+  // vào biểu đồ là biết ngay đang mù.
+  dbConnectionsUsed.set(so ? so.dung : -1);
+  dbConnectionsMax.set(so ? so.tran : -1);
   // Quá hạn ĐƯỢC TÍNH LÀ CHẾT, khác hẳn cách `capNhatDoSauHangDoi` xử lý độ sâu hàng đợi (ở đó
   // "không đo được" giữ giá trị cũ). Lý do: `SELECT 1` mà không xong trong 2 giây thì với người
   // dùng, CSDL đã hỏng rồi — mọi request đều đang xếp hàng sau nó.
