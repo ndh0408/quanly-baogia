@@ -2452,6 +2452,35 @@ textarea[aria-invalid="true"] {
   align-self: flex-start;
 }
 
+/* ── MÀN ACCOUNT HÀ NỘI: THANH NÀY TỪNG NUỐT CÚ BẤM "LƯU" ────────────────────────────────
+   Luật ngay trên chỉ phủ `.editor`. Màn account HN mang class `.account-hn-view`, nên ở đó
+   `.grid-stat` nằm thẳng trong luồng và `.hidden { display: none }` làm nó co 0 ↔ 28,7px mỗi
+   lần một ô được/mất focus.
+
+   ĐO ĐƯỢC trên dev (2026-09-16, Chrome DevTools, báo giá GN26078):
+     mousedown  y=754  nút Lưu ở [713,1 – 741,1]   → trúng nút
+     (ô mất focus → grid-stat co lại → cả khối nhảy LÊN 28,7px)
+     mouseup    y=754  nút Lưu ở [712,1 – 740,1]   → rơi vào DIV.ahn-card
+   Trình duyệt chỉ sinh `click` khi mousedown và mouseup CÙNG một phần tử, nên KHÔNG có click
+   nào — `save()` không chạy, không một request nào rời máy. Người dùng gõ giá xong bấm Lưu
+   một lần, màn hình vẫn hiện con số mới, không báo lỗi, và TIN LÀ ĐÃ LƯU. Bấm lần hai mới ăn.
+   Trình soạn chính KHÔNG dính: ở đó nút Lưu xê đúng 0px (đã đo), vì khối bao ngoài hấp thụ
+   28,7px đó.
+
+   VÌ SAO KHÔNG DÙNG `position: sticky` NHƯ TRÊN: đã thử ngay trên trang dev — vẫn xê 28,7px.
+   Sticky vẫn chiếm chỗ trong luồng. Thứ khử được xê dịch là GIỮ CHỖ: hộp rỗng cao ĐÚNG BẰNG
+   hộp có chữ. `min-height` gốc là 26px trong khi hộp có chữ cao 28,7px (16,7 dòng + 12 đệm),
+   nên chỉ `visibility: hidden` thôi vẫn còn dư 2,7px — phải nâng `min-height` lên 29px.
+   ĐÃ ĐO SAU VÁ: xê dịch 0px (hai lượt), và gõ giá rồi bấm Lưu MỘT lần thì đúng 1 request PUT
+   rời máy, máy chủ ghi đúng số. */
+.account-hn-view .grid-stat {
+  min-height: 29px;
+}
+.account-hn-view .grid-stat.hidden {
+  display: flex;
+  visibility: hidden;
+}
+
 /* Màn hình THẤP (laptop 768p còn thanh bookmark + extension) hoặc HẸP: thanh dễ chiếm hai hàng.
    Cho phép cuộn ngang trong thanh thay vì xuống hàng, giữ chiều cao một hàng.
    Dấu phẩy = HOẶC; viết `or` trong một câu @media là cú pháp khác và im lặng không ăn. */

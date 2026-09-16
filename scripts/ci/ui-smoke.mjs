@@ -499,6 +499,62 @@ async function main() {
     });
     doi(maTao === 403, `POST /api/quotes bằng account_hn → ${maTao} (mong 403 — không tạo được báo giá)`);
 
+    // ── [U15b] GÕ GIÁ RỒI BẤM "LƯU" MỘT LẦN — PHẢI LƯU THẬT ──────────────────────────────
+    // LỖI ĐÃ ĐO TRÊN DEV (2026-09-16, GN26078): thanh `.grid-stat` ("Đếm/Trung bình/Tổng" của
+    // vùng đang quét) hiện khi một ô có focus và biến mất khi ô mất focus. Ở màn account HN nó
+    // nằm thẳng trong luồng, nên bấm nút Lưu làm ô mất focus → cả khối CO LẠI 28,7px → nút nhảy
+    // lên → `mouseup` rơi ra ngoài nút → trình duyệt KHÔNG sinh `click` → `save()` không chạy.
+    // Đo được: mousedown y=754 nút ở [713,1–741,1]; mouseup y=754 nút ở [712,1–740,1].
+    // Không request nào rời máy, không lỗi nào hiện, mà màn hình vẫn hiện con số mới — người
+    // dùng tin là đã lưu. Bấm lần thứ hai mới ăn.
+    //
+    // VÌ SAO PHẢI LÀ BÀI TRÌNH DUYỆT THẬT: jsdom không có bộ dựng hình, không có `getBoundingClientRect`
+    // thật, và không phân biệt được mousedown/mouseup khác phần tử. 205 bài backend + 24 bài web
+    // đều xanh trong khi lỗi vẫn nằm đó.
+    buoc("[U15b] Account HN: gõ giá rồi bấm Lưu MỘT lần — phải tới máy chủ");
+    // GIAO VIỆC PHẢI GIỐNG `assignHn` (src/hnWorkflow.ts): ngoài hai cột `hnAssigneeId`/`hnStatus`
+    // nó còn UPSERT một hàng `QuoteMember` với `scopes: ["hanoi"]` — ĐÓ mới là thứ cho account HN
+    // quyền mở báo giá. Bản đầu của bài này chỉ ghi hai cột, và nó ĐỎ VÌ LÝ DO SAI: `waitForSelector`
+    // hết giờ vì màn HN không dựng lên (getQuote trả 403), chứ không phải vì cú bấm Lưu bị nuốt.
+    await prisma.quote.update({ where: { id: bg.id }, data: {
+      hnAssigneeId: uHn.id, hnStatus: "assigned",
+      hnTables: [{ name: "Sheet HN smoke", templateId: id.template, groupSubtotal: true,
+        items: [{ kind: "item", name: "Hạng mục HN", quantity: 1, unitPrice: 1_000_000, days: 1 }] }],
+      members: { upsert: {
+        where: { quoteId_userId: { quoteId: bg.id, userId: uHn.id } },
+        create: { userId: uHn.id, scopes: ["hanoi"], addedById: u.id },
+        update: { scopes: ["hanoi"] },
+      } },
+    } });
+    await trang.evaluate((x) => { location.hash = x; }, `#/quotes/${bg.id}`);
+    await trang.waitForSelector(".account-hn-view", { timeout: 30_000 });
+    await trang.waitForSelector('.account-hn-view input[title*="công thức Excel"]', { timeout: 30_000 });
+
+    // 1) Nút Lưu KHÔNG được xê dịch khi một ô nhận/mất focus. Đây là nguyên nhân gốc, đo trực tiếp.
+    const xeDich = await trang.evaluate(() => {
+      const nut = [...document.querySelectorAll(".account-hn-view button")].find((b) => /Lưu/.test(b.textContent || ""));
+      const o = document.querySelector('.account-hn-view input[title*="công thức Excel"]');
+      o.blur(); const a = nut.getBoundingClientRect().top;
+      o.focus(); const b = nut.getBoundingClientRect().top;
+      o.blur();
+      return Math.abs(b - a);
+    });
+    doi(xeDich < 1, `nút Lưu xê ${xeDich.toFixed(1)}px khi ô nhận focus (mong < 1px — xê nhiều là mouseup trượt khỏi nút)`);
+
+    // 2) VÀ hệ quả người dùng thấy: gõ số rồi bấm ĐÚNG MỘT LẦN thì CSDL phải đổi.
+    // CHỈ ĐÍCH DANH CỘT, KHÔNG ĐẾM `nth()`: số ô số mỗi hàng đổi theo mẫu — mẫu không có
+    // cột "SỐ NGÀY" thì hàng chỉ có 2 ô và `nth(2)` KHÔNG tồn tại, bài sẽ hết giờ ở `click`
+    // rồi đỏ vì lý do sai. `data-f` là thứ chính GridTable dùng để tìm ô (GridTable.tsx:347).
+    const oGiaHn = trang.locator('.account-hn-view [data-f="unitPrice"]').first();
+    await oGiaHn.click();
+    await trang.keyboard.press("Control+A");
+    await trang.keyboard.type("7654321");
+    await trang.locator(".account-hn-view button", { hasText: "Lưu" }).first().click();
+    await trang.waitForTimeout(2000);
+    const hnSauLuu = await prisma.quote.findUnique({ where: { id: bg.id }, select: { hnTables: true } });
+    const giaSauLuu = Number(hnSauLuu?.hnTables?.[0]?.items?.[0]?.unitPrice ?? 0);
+    doi(giaSauLuu === 7_654_321, `CSDL: đơn giá HN = ${giaSauLuu} (mong 7654321 — MỘT cú bấm Lưu phải tới máy chủ)`);
+
     } catch (e) {
       xau(`kịch bản dừng giữa chừng: ${String(e).split("\n")[0]}`);
       neKichBan = e;
