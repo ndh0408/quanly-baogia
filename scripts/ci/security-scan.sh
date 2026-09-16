@@ -262,13 +262,23 @@ if chay_buoc sbom; then
   npm sbom --sbom-format=cyclonedx --omit=dev > "$RA" 2>/dev/null
   ket $? "sinh $RA"
   if [ -s "$RA" ]; then
-    n=$(node -e "const d=require('$RA');console.log((d.components||[]).length)" 2>/dev/null || echo 0)
+    # ĐƯỜNG DẪN PHẢI ĐỔI SANG DẠNG MÁY trước khi đưa cho node — cùng lý do với `GOC_MOUNT` ở đầu
+    # file, chỉ khác là chỗ này bị bỏ sót. Trên Windows, `$GOC` có thể mang dạng MSYS (`/d/QuanLY`)
+    # tuỳ cách gọi script: chạy thẳng từ thư mục repo thì `pwd` cho `D:/QuanLY`, nhưng chạy qua
+    # `bash -c "cd /d/QuanLY && …"` thì cho `/d/QuanLY`. Node không hiểu dạng sau: nó ghép thành
+    # `D:QuanLY/d/QuanLY/sbom.cdx.json` rồi ném "Cannot find module".
+    #
+    # ĐÃ ĐO: cùng một cây mã, cùng một SBOM 409 thành phần, chỉ đổi CÁCH GỌI verify là bước này
+    # đếm ra 0 và cổng bảo mật ĐỎ. Một cổng đổi kết quả theo cách người ta gõ lệnh là cổng không
+    # nói gì về mã.
+    RA_MAY="$(duong_dan_may "$(dirname "$RA")")/$(basename "$RA")"
+    n=$(node -e "const d=require('$RA_MAY');console.log((d.components||[]).length)" 2>/dev/null || echo 0)
     # Bảo hiểm: một SBOM rỗng/hỏng vẫn là JSON hợp lệ và vẫn "sinh thành công". Con số này chặn
     # chuyện đó — cây production hiện có hàng trăm gói, tụt xuống hai chữ số là có gì đó sai.
     [ "$n" -ge 100 ]
     ket $? "SBOM có $n thành phần (ngưỡng bảo hiểm: ≥ 100)"
     node -e "
-      const d = require('$RA');
+      const d = require('$RA_MAY');
       if (d.bomFormat !== 'CycloneDX') { console.error('bomFormat =', d.bomFormat); process.exit(1); }
       const thieu = (d.components||[]).filter((c) => !c.version || !c.purl);
       if (thieu.length) { console.error('thiếu version/purl:', thieu.slice(0,5).map(c=>c.name).join(', ')); process.exit(1); }
