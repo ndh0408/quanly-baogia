@@ -120,7 +120,18 @@ describe.runIf(dbAvailable)("POST /api/quotes/import-excel — phễu trên đư
     // Lần nào qua được phễu thì vẫn phải trả kết quả đúng.
     const ok = rs.find((r) => r.status === 200);
     expect(ok, `không lần nào thành công: ${ma.join(", ")}`).toBeTruthy();
-    expect(ok.body.sheets[0].items.length).toBe(1500);
+    // 1000 chứ KHÔNG phải 1500 — và đây là thay đổi CÓ CHỦ Ý, không phải hồi quy.
+    // Từ 2026-09-16 `parseSheet` CẮT tại MAX_ITEMS_PER_SHEET (= trần lưu thật, 1000) thay vì chỉ
+    // đẩy một dòng cảnh báo. Lý do: ĐÃ TÁI HIỆN được sập tiến trình bằng một file 8,79 MB (dưới
+    // trần upload 10 MB) chứa 2 sheet × 200.000 dòng — 400.000 hạng mục được clone sang luồng
+    // chính rồi JSON.stringify thành 412,5 MB, RSS 1.887 MB, vượt trần container 1.536 MB.
+    // Phần dư đằng nào cũng KHÔNG lưu được (zod chặn ở 1000 dòng/trang), nên giữ lại chỉ để chết.
+    // Bài này không kiểm việc cắt — nó kiểm PHỄU; con số 1500 ở đây chỉ là fixture.
+    expect(ok.body.sheets[0].items.length, "cắt tại trần lưu, xem MAX_ITEMS_PER_SHEET").toBe(1000);
+    expect(
+      (ok.body.sheets[0].warnings || []).some((w) => /ĐÃ CẮT/.test(w)),
+      "cắt mà KHÔNG nói với người dùng thì họ mất 500 dòng mà không hay",
+    ).toBe(true);
   }, 60_000);
 
   it("phễu KHÔNG rò suất: xong đợt trên thì bộ đếm về 0", async () => {

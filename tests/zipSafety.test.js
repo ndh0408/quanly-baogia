@@ -171,7 +171,12 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     ]));
     expect(v.ok, "tổng 2 mục = 120% trần, phải bị chặn dù từng mục riêng lẻ chỉ 60%").toBe(false);
     expect(v.reason).toMatch(/quá lớn|bom nén/i);
-  });
+    // 60s chứ không để mặc định 20s: bài này dựng rồi GIẢI NÉN THẬT ~240 MB (2 mục × 60% của trần
+    // 200 MB). Chạy riêng mất ~4s, nhưng trong một lượt `npm run verify` đầy đủ — hàng chục tiến
+    // trình song song tranh CPU và đĩa — nó ĐÃ hết giờ ở 20s và làm cả cổng [4/13] đỏ, trong khi
+    // chạy lại một mình thì 20/20 xanh. Một cổng đỏ vì máy bận chứ không vì mã sai là cổng dạy
+    // người đọc bỏ qua màu đỏ.
+  }, 60_000);
 
   it("tổng giải nén thật của workbook hợp lệ (nhỏ) vẫn qua bình thường", async () => {
     const v = await inspectXlsx(makeZip([...validEntries(), { name: "xl/vua-du.xml", rawBytes: 1024 * 1024 }]));

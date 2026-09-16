@@ -394,7 +394,12 @@ export const pgPoolTran = new Gauge({
   // TIÊN luôn về sau khi `collect()` đã trả, để lại mẫu số 0. Mẫu số 0 làm quy tắc cảnh báo (vốn
   // gác `pg_pool_max > 0`) lặng lẽ bỏ qua tiến trình đó — một cảnh báo im vì lý do kỹ thuật là
   // cảnh báo tệ hơn không có. Trần pool là hằng số cấu hình, không cần hỏi pool mới biết.
-  collect() { pgPoolTran.set(config.DB_POOL_MAX); },
+  // `?? -1` KHÔNG phải phòng thủ thừa. `Gauge.set(undefined)` NÉM ("Value is not a valid number"),
+  // và nó ném NGAY TRONG `collect()` — tức giữa một lượt scrape, làm HỎNG TOÀN BỘ /metrics chứ
+  // không chỉ gauge này. ĐÃ ĐO: tests/xf-observability-gaps.test.js nạp module này với một `config`
+  // chưa đủ khoá và `registry.metrics()` ném TypeError. Một phép đo làm sập chính đường quan sát
+  // là thứ tệ nhất có thể có: mất tín hiệu đúng lúc cần nhìn nhất.
+  collect() { pgPoolTran.set(Number.isFinite(config.DB_POOL_MAX) ? config.DB_POOL_MAX : -1); },
 });
 
 /**
@@ -439,10 +444,13 @@ function capNhatPool(): void {
     // import ĐỘNG cùng lý do với `doCsdl`: src/db.ts dựng Pool/PrismaClient ngay ở cấp module.
     void import("./db.js").then(({ thongKePool }) => {
       const t = thongKePool();
-      pgPoolTong.set(t.tong);
-      pgPoolRanh.set(t.ranh);
-      pgPoolDangCho.set(t.dangCho);
-      pgPoolTran.set(t.tran);
+      // Cùng lý do với `?? -1` ở `pgPoolTran`: pool có thể chưa dựng xong, và một `set(undefined)`
+      // ở đây ném giữa lượt scrape, hỏng cả /metrics.
+      const so = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : -1);
+      pgPoolTong.set(so(t.tong));
+      pgPoolRanh.set(so(t.ranh));
+      pgPoolDangCho.set(so(t.dangCho));
+      pgPoolTran.set(so(t.tran));
     }).catch(() => {});
   } catch { /* chưa nạp được db.js — để nguyên giá trị lượt trước */ }
 }
