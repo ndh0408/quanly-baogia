@@ -208,6 +208,20 @@ const schema = z.object({
   // BYTE), mà vẫn cắt trường hợp xấu nhất xuống ~11 lần so với kịch bản 90 MB.
   MAX_EXTRA_TABLES_BYTES: numEnv(z.coerce.number().int().min(64 * 1024).max(64 * 1024 * 1024).default(8 * 1024 * 1024)),
 
+  // ── TRẦN DÒNG CHO BẢN XUẤT GDPR (src/services/gdprService.ts) ─────────────
+  // Bản xuất trước đó chỉ có trần 1000 BÁO GIÁ, không có trần nào trên số DÒNG. Sức chứa schema là
+  // 60 trang × 1000 dòng mỗi báo giá → tối đa 60 TRIỆU dòng dựng thành đối tượng JS cùng lúc, rồi
+  // `serializeExport` còn `JSON.stringify(..., 2)` toàn bộ thành MỘT chuỗi. Cùng hình dạng với
+  // đường lưu và đường nhập Excel đã vá, chỉ khác là chưa ai chạm tới.
+  //
+  // 50.000 dòng ≈ 2,5× trần lưu MỘT báo giá (20.000), và theo hệ số đo được ở đường lưu
+  // (~36 MB / 1.000 dòng) thì ≈ 1,8 GB — vẫn quá lớn nếu đo thô, nhưng bản xuất GDPR KHÔNG đi qua
+  // đường dựng workbook: nó chỉ là hàng CSDL + JSON, nhẹ hơn hẳn mỗi dòng. Đây là mức chọn CÓ CĂN
+  // CỨ chứ chưa phải số ĐO: production hiện có 756 hạng mục trên TOÀN BỘ 12 báo giá, nên không có
+  // cách nào đo một lượt xuất thật sự lớn ở đây. Vượt trần thì bản xuất VẪN trả đủ danh sách báo
+  // giá, chỉ bỏ phần dòng chi tiết và nói rõ trong khối `gioiHan`.
+  GDPR_EXPORT_MAX_ROWS: numEnv(z.coerce.number().int().min(1_000).max(10_000_000).default(50_000)),
+
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
   EXPORT_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(500).default(20)),
