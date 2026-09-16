@@ -22,6 +22,11 @@
  * ============================================================================
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 import {
   QuoteUpdateSchema, MAX_EXPORT_ITEMS, MAX_ASYNC_EXPORT_ITEMS,
   MAX_SAVE_SHEETS, MAX_SAVE_ITEMS_PER_SHEET, demSoDong,
@@ -60,6 +65,36 @@ describe("trần LƯU không được siết sau lưng dữ liệu đã có", ()
   it("vẫn chặn quá 1000 dòng trong MỘT trang", () => {
     const r = QuoteUpdateSchema.safeParse({ title: "x", sheets: [trang(1001)] });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("Lối thoát 413 phải nối tới tận GIAO DIỆN, không dừng ở tầng API", () => {
+  // Đường đồng bộ trả 413 kèm lời khuyên "vui lòng dùng xuất nền (async)". Lời khuyên đó chỉ THẬT
+  // khi người dùng bấm được. Trước 2026-08-27 nó không thật: `grep -rn "/jobs" web/src` ra rỗng,
+  // cả hai trang mở thẳng `/api/export/:id.xlsx` nên còn không ĐỌC ĐƯỢC mã 413.
+  //
+  // Bài này khoá cả hai chiều: mã phải thật sự nối, VÀ chú thích không được khai ngược lại.
+  const doc = (p) => readFileSync(join(ROOT, p), "utf8");
+
+  it("client bắt 413 rồi tự chuyển sang đường nền", () => {
+    const eq = doc("web/src/lib/exportQuote.ts");
+    expect(eq, "không đọc mã 413 → không biết có lối thoát").toMatch(/413/);
+    expect(eq, "không gọi đường xuất nền").toMatch(/exportAsync/);
+    expect(eq, "xếp việc xong mà không hỏi trạng thái thì người dùng chờ mãi").toMatch(/choJob|\/jobs\//);
+  });
+
+  it("CẢ HAI nơi xuất file đều đi qua lối thoát đó", () => {
+    // Nối một trang mà quên trang kia thì lỗi chỉ hiện ở nửa số đường người dùng đi.
+    for (const f of ["web/src/pages/QuoteEditor.tsx", "web/src/pages/QuoteList.tsx"]) {
+      expect(doc(f), `${f} không dùng xuatBaoGia → mở thẳng /api/export và mất lối thoát 413`)
+        .toMatch(/xuatBaoGia/);
+    }
+  });
+
+  it("chú thích trong validators.ts KHÔNG còn khai là chưa nối", () => {
+    // Một chú thích khai còn-thiếu trong khi đã xong đẩy người đọc sau đi làm lại việc đã làm.
+    expect(doc("src/validators.ts"), "lời khai cũ vẫn còn — nó nói ngược mã nguồn")
+      .not.toMatch(/SPA chưa nối nút xuất nền — đường/);
   });
 });
 

@@ -348,8 +348,13 @@ export const MAX_EXPORT_ITEMS = 20_000;
  * `MAX_ASYNC_EXPORT_ITEMS` ở trên và `chanBaoGiaQuaLon` trong src/worker.ts). Khi đó lời khuyên
  * "dùng xuất nền" trong thông điệp 413 của src/routes/export.routes.ts mới là lời khuyên THẬT.
  *
- * CÒN LẠI (đã ghi vào docs/REMAINING_RISKS.md, không tự ý làm): SPA chưa nối nút xuất nền — đường
- * thoát hiện có ở tầng API chứ chưa có ở giao diện.
+ * ĐÃ NỐI XONG Ở GIAO DIỆN (2026-08-27) — chú thích này TỪNG ghi "SPA chưa nối nút xuất nền, đường
+ * thoát hiện có ở tầng API chứ chưa có ở giao diện", và lời khai đó nay SAI:
+ * `web/src/lib/exportQuote.ts` bắt 413 rồi tự chuyển sang `POST /api/quotes/:id/export` và hỏi
+ * `GET /api/jobs/export/:jobId`, và cả `QuoteEditor.tsx` lẫn `QuoteList.tsx` đều gọi nó.
+ * Một chú thích khai còn-thiếu trong khi đã xong thì đẩy người đọc sau đi làm lại việc đã làm —
+ * hoặc tệ hơn, dạy họ thôi tin tài liệu trong repo này. Ràng buộc được khoá ở
+ * tests/b9-export-escape-route.test.js.
  */
 
 // Bảng nội bộ (extraTables) KHÔNG tính vào đây: chúng không đi vào file xuất (xem extraTableSchema).
