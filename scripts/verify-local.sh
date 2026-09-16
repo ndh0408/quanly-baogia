@@ -445,7 +445,21 @@ fi
 # Mất ~25 giây khi image và cache đã có sẵn.
 if [ "$NHANH" -eq 0 ]; then
   buoc "[13/13] Bảo mật (gitleaks · trivy · semgrep · SBOM)"
-  bash scripts/ci/security-scan.sh >/dev/null 2>&1;                 ket $? "security-scan (chi tiết: npm run scan)"
+  # ── ĐỪNG NUỐT LÝ DO ───────────────────────────────────────────────────────
+  # `>/dev/null 2>&1` làm bước này in đúng một dòng "✗ security-scan" và KHÔNG một chữ nào về
+  # nguyên nhân — cùng khiếm khuyết đã phải vá ở `do_toast` phía trên. Hậu quả đã đo: cổng này đỏ
+  # BA lượt verify liên tiếp trong khi `npm run scan` chạy riêng thì XANH TOÀN BỘ, và không có
+  # cách nào biết đó là "trivy hết giờ vì máy đang bận" hay "có lỗ hổng thật" ngoài việc chạy lại
+  # cả hai mươi phút. Giữ `/dev/null` cho ca XANH (bốn bước con in rất dài), ca ĐỎ thì in ra.
+  log_bm="$(mktemp)"
+  bash scripts/ci/security-scan.sh > "$log_bm" 2>&1
+  ma_bm=$?
+  if [ $ma_bm -ne 0 ]; then
+    printf '\033[31m  ── 30 dòng cuối của npm run scan ──\033[0m\n'
+    tail -30 "$log_bm" | sed 's/^/  /'
+  fi
+  rm -f "$log_bm"
+  ket $ma_bm "security-scan (chi tiết: npm run scan)"
 else
   buoc "[13/13] Bỏ qua cổng bảo mật (--nhanh)"
 fi
