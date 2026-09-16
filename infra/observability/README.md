@@ -108,33 +108,81 @@ Grafana nội suy kiểu `os.ExpandEnv` (hiểu `$VAR` và `${VAR}`, **không** 
 shell) nên nó nở ra chuỗi RỖNG. Nay URL viết thẳng `http://prometheus:9090`; ràng buộc được khoá
 bằng `tests/xf-observability-gaps.test.js`.
 
-## KHÔNG CÓ ALERTMANAGER — cảnh báo dừng ở đâu
+## ALERTMANAGER — cảnh báo đi tới đâu
 
-Đây là thứ dễ đọc nhầm nhất trong cả thư mục, nên nói thẳng:
+**TRƯỚC 2026-09-16**, mục này mang tiêu đề "KHÔNG CÓ ALERTMANAGER" và nói thẳng rằng 22 quy tắc
+được đánh giá thật, chuyển sang `firing` thật, rồi **DỪNG LẠI** ở giao diện Prometheus — không
+email, không ai bị đánh thức. Đó là "có cảnh báo" theo nghĩa **kỹ thuật**, chưa phải theo nghĩa
+**vận hành**.
 
-> 22 quy tắc trong `infra/prometheus/alerts.yaml` **được Prometheus đánh giá thật** và **chuyển sang
-> trạng thái `firing` thật**. Rồi chúng **DỪNG LẠI** ở giao diện Prometheus (`/alerts`,
-> `/api/v1/alerts`). **Không Telegram. Không email. Không ai bị đánh thức.**
+Nay khoảng cách đó đã đóng: cảnh báo đi ra **email**, qua **chính máy chủ SMTP mà ứng dụng đang
+dùng để gửi thư thật**. Không dựng kênh mới — một kênh đã chạy và đã có người đọc thì đáng tin hơn
+một kênh vừa dựng mà chưa ai thử.
 
-Tức là ngăn xếp này cho bạn "có cảnh báo" theo nghĩa **kỹ thuật**, chưa phải theo nghĩa **vận
-hành**. Muốn biết một cảnh báo đang kêu thì vẫn phải có người MỞ ra xem — đúng cái vấn đề mà cảnh
-báo sinh ra để giải quyết.
+| tệp | vai trò |
+|---|---|
+| [`alertmanager.yml.tpl`](alertmanager.yml.tpl) | **bản mẫu**, không chạy trực tiếp được |
+| [`alertmanager-entrypoint.sh`](alertmanager-entrypoint.sh) | dựng cấu hình thật từ bản mẫu + `.env`, rồi `exec` |
+| khối `alerting:` trong [`prometheus.yml`](prometheus.yml) | trỏ Prometheus vào `alertmanager:9093` |
 
-Đường báo động **duy nhất đang chạy thật** trong repo là backup watchdog qua Telegram
-(`scripts/backup/backup-watchdog.sh`, chạy mỗi 6 giờ bằng cron của hệ điều hành). Nó **cố ý** không
-đi qua Prometheus: một hệ giám sát chết không được phép làm im luôn cả báo động về sao lưu.
+### Vì sao phải có bước "dựng cấu hình" thay vì một tệp YAML thường
 
-**Cách đóng khoảng cách**: thêm một service `alertmanager` vào file compose ở đây, rồi bỏ chú thích
-khối `alerting:` trong [`prometheus.yml`](prometheus.yml) (đã để sẵn chỗ + địa chỉ
-`alertmanager:9093`). Nối vào cùng bot Telegram mà watchdog đang dùng là hợp lý nhất — một kênh, một
-chỗ để tắt tiếng khi đang bảo trì.
+Alertmanager **không nội suy biến môi trường** trong tệp cấu hình — y hệt Prometheus. Điều này đã
+được **đo**, không phải suy đoán:
+
+```
+docker run -e SMTP_HOST=smtp.gmail.com prom/alertmanager:v0.28.1 --config.file=…
+GET /api/v2/status  →  smtp_smarthost: ${SMTP_HOST}:${SMTP_PORT}     ← nguyên văn, chưa thay
+amtool check-config …  →  SUCCESS                                     ← vẫn báo xanh
+```
+
+Nghĩa là trỏ thẳng `--config.file` vào bản mẫu sẽ cho một Alertmanager **khởi động bình thường**,
+**qua mọi phép kiểm cú pháp**, và gửi thư tới một máy chủ tên `${SMTP_HOST}` không tồn tại. Im
+lặng — đúng chế độ hỏng mà việc dựng Alertmanager sinh ra để chấm dứt. Nên entrypoint **từ chối
+khởi động** nếu thiếu biến bắt buộc hoặc còn sót một `${` nào sau khi thay.
+
+### Biến trong `.env` của máy chủ
+
+| biến | bắt buộc | ghi chú |
+|---|---|---|
+| `SMTP_HOST` `SMTP_PORT` `SMTP_FROM` | có | dùng chung với ứng dụng |
+| `SMTP_USER` | **không** | rỗng → gỡ hẳn `smtp_auth_*` và tắt `smtp_require_tls`. Đúng cho MailHog ở dev, **sai** cho Gmail |
+| `SMTP_PASS` | khi có `SMTP_USER` | vào bằng **đường tệp** (`/run/secrets/smtp_password`), không qua phép thay chuỗi |
+| `ALERT_EMAIL_TO` | có | bỏ trống thì mặc định về `SMTP_USER`. Nhiều người nhận: ngăn cách bằng dấu phẩy |
+
+`SMTP_USER` và `smtp_require_tls` **buộc chặt vào nhau** trong entrypoint: TLS ở đây tồn tại để che
+mật khẩu trên đường truyền, nên "có mật khẩu" và "bắt buộc TLS" phải bật/tắt cùng nhau. Cho chỉnh
+riêng lẻ là mở đúng cánh cửa dẫn tới một production gửi mật khẩu Gmail qua kết nối trần.
+
+### Nhịp gửi và luật nén im lặng
+
+* `group_by: [alertname, instance]` — gom quá rộng thì một sự cố đang diễn ra sẽ **nuốt mất** cảnh
+  báo thứ hai vừa nổ.
+* `critical` (11/22 quy tắc) đi nhánh riêng: `group_wait 10s`, nhắc lại mỗi giờ. `warning`:
+  `group_wait 30s`, nhắc lại mỗi 4 giờ.
+* Hai `inhibit_rules`: `QuanlyCsdlKhongToiDuoc` và `QuanlyTienTrinhKhoiDongLaiLienTuc` **nén** mọi
+  `warning` **cùng instance**. CSDL chết thì kéo theo hàng loạt cảnh báo hệ quả (tỉ lệ lỗi, độ trễ,
+  pool chờ); gửi hết là chôn nguyên nhân gốc dưới năm lá thư.
+
+### Đã chạy thử thật, không phải chỉ kiểm cú pháp
+
+Dựng MailHog + Alertmanager bằng đúng hai tệp trong thư mục này, đẩy một cảnh báo qua
+`POST /api/v2/alerts`, rồi **đọc thư nhận được**: tiêu đề, phần "cách xử lý" và tiếng Việt đều
+nguyên vẹn; một cảnh báo `warning` cùng instance với `critical` đang kêu thì ở trạng thái
+`suppressed` đúng như luật nén im lặng mô tả.
+
+Đường báo động **thứ hai** vẫn giữ nguyên và vẫn **cố ý** không đi qua Prometheus: backup watchdog
+qua Telegram (`scripts/backup/backup-watchdog.sh`, cron mỗi 6 giờ). Một hệ giám sát chết không được
+phép làm im luôn cả báo động về sao lưu — kể cả khi hệ giám sát đó nay đã biết gửi email.
 
 ## Chưa làm (có chủ ý)
 
-* **Chưa chạy thử bằng Docker thật.** Cấu hình đã qua `promtool check config --syntax-only`,
-  `promtool check rules`, `promtool test rules` và `docker compose config`. Nhưng chưa ai `up` cả
-  ngăn xếp lên để xem Prometheus có thật sự scrape được `/metrics` qua bearer token hay không.
-* **Không có Alertmanager** — xem mục ngay trên.
+* ~~**Chưa chạy thử bằng Docker thật.**~~ Đã bật trên production ngày 2026-09-16: 3/3 target
+  Prometheus `up`, 22 quy tắc được nạp. Phần Alertmanager cũng đã chạy thử end-to-end với MailHog
+  (xem mục trên) — thư thật sự tới nơi, không chỉ qua `check-config`.
+* **Cảnh báo chỉ có MỘT kênh (email).** Hòm thư chết hoặc Gmail chặn đăng nhập ứng dụng là mất
+  đường báo. Backup watchdog qua Telegram vẫn là đường thứ hai, nhưng nó chỉ canh sao lưu.
+* **Chưa có lịch trực.** Mọi cảnh báo đi về cùng một hòm thư, không phân ca, không leo thang.
 * **Không giữ log lâu.** Loki chạy cấu hình mặc định (giữ trong volume, không phân tầng). Cần giữ
   theo tháng thì phải cấu hình `limits_config.retention_period` + compactor.
 * **Prometheus giữ 15 ngày.** Đủ để điều tra sự cố và để rút phân vị thật cho

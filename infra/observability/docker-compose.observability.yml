@@ -100,10 +100,73 @@ services:
     # CHỈ mạng `internal`. Prometheus giữ toàn bộ số liệu vận hành và giao diện của nó KHÔNG có xác
     # thực — không publish cổng 9090 ra máy chủ, không nối vào mạng `edge`. Muốn xem thì đi qua
     # Grafana (đã có mật khẩu) hoặc `docker compose exec`.
+    depends_on:
+      # `service_started`, KHÔNG phải `service_healthy`: Prometheus vẫn thu thập số liệu và vẫn
+      # đánh giá quy tắc dù Alertmanager có chết — nó chỉ không gửi được ra ngoài. Buộc
+      # `service_healthy` là biến một trục trặc của KÊNH THÔNG BÁO thành mất luôn cả phần ĐO.
+      alertmanager: { condition: service_started }
     networks: [internal]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy | grep -q Healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── ALERTMANAGER ──────────────────────────────────────────────────────────
+  # MẢNH CUỐI của phần giám sát. Không có nó, 22 quy tắc cảnh báo vẫn được đánh giá và vẫn chuyển
+  # sang `firing` — nhưng DỪNG LẠI ở giao diện Prometheus. Có người mở mới thấy. Đó là "có cảnh
+  # báo" theo nghĩa kỹ thuật, không phải theo nghĩa vận hành.
+  #
+  # ⚠️ CẤU HÌNH PHẢI ĐƯỢC DỰNG TRƯỚC KHI CHẠY. Alertmanager KHÔNG nội suy biến môi trường trong
+  # cấu hình (ĐÃ ĐO trên v0.28.1 — `/api/v2/status` trả về nguyên chuỗi `${SMTP_HOST}`, mà
+  # `amtool check-config` vẫn in "SUCCESS"). Nên `entrypoint` dưới đây thay giá trị vào bản mẫu
+  # rồi mới `exec`, và nó TỪ CHỐI KHỞI ĐỘNG nếu thiếu biến hoặc còn sót `${`.
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: quanly-alertmanager
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    command:
+      - --storage.path=/alertmanager
+      # Liên kết trong thư trỏ về đây. Prometheus/Alertmanager KHÔNG mở ra Internet, nên đây là
+      # địa chỉ để `docker compose exec` hoặc đường hầm dùng — không phải để bấm từ điện thoại.
+      - --web.external-url=http://127.0.0.1:9093
+    environment:
+      # DÙNG LẠI đúng SMTP mà ứng dụng đang gửi thư thật (cùng `.env`), thay vì dựng kênh mới chưa
+      # ai thử. Thiếu biến bắt buộc → entrypoint thoát 78, container KHÔNG lên.
+      SMTP_HOST: ${SMTP_HOST:?đặt SMTP_HOST trong .env — Alertmanager gửi thư qua chính SMTP của ứng dụng}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:?đặt SMTP_FROM trong .env}
+      # KHÔNG bắt buộc, và đó là CỐ Ý: dev dùng MailHog (`SMTP_HOST=mailhog`, cổng 1025), vốn
+      # không xác thực và SMTP_USER rỗng. Rỗng → entrypoint gỡ hẳn hai dòng `smtp_auth_*` và tắt
+      # `smtp_require_tls`. Có giá trị → bắt buộc cả mật khẩu lẫn TLS.
+      SMTP_USER: ${SMTP_USER:-}
+      # Ở production, bỏ trống thì gửi về CHÍNH hòm thư đang dùng để gửi — không đoán địa chỉ
+      # người nhận, vì một cảnh báo gửi nhầm chỗ im lặng y như không gửi. Ở dev SMTP_USER rỗng nên
+      # PHẢI đặt ALERT_EMAIL_TO trong .env (bất kỳ địa chỉ nào, MailHog nhận hết).
+      # Nhiều người nhận: ngăn cách bằng dấu phẩy.
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-${SMTP_USER:-}}
+    secrets:
+      # Mật khẩu KHÔNG đi qua phép thay chuỗi và KHÔNG nằm trong file cấu hình đã dựng:
+      # `smtp_auth_password_file` trỏ thẳng vào đây.
+      - smtp_password
+    volumes:
+      - ./infra/observability/alertmanager.yml.tpl:/etc/alertmanager/alertmanager.yml.tpl:ro
+      - ./infra/observability/alertmanager-entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      # Silence + nhật ký đã-gửi. MẤT volume này = mọi cảnh báo đang im bỗng kêu lại sau khi khởi
+      # động lại, và mọi `silence` người vận hành đặt trong lúc bảo trì biến mất.
+      - alertmanager-data:/alertmanager
+    tmpfs:
+      # Chỗ ghi bản cấu hình ĐÃ DỰNG. Là tmpfs chứ không phải volume: nó sinh ra từ `.env`, không
+      # có lý do gì để sống sót qua một lần khởi động lại — dựng lại mỗi lần là cách bảo đảm nó
+      # luôn khớp `.env` hiện tại. (ĐÃ ĐO: thiếu dòng này thì container thoát ngay với
+      # `mkdir: can't create directory '/render': Permission denied` — ảnh chạy bằng `nobody`.)
+      - /render
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/-/healthy >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -140,6 +203,7 @@ services:
 
 volumes:
   loki-data:
+  alertmanager-data:
   promtail-positions:
   grafana-data:
   prometheus-data:
@@ -151,6 +215,11 @@ secrets:
     # `docker inspect` như một biến môi trường thường. Bản compose cũ hơn: đổi thành
     # `file: ./secrets/metrics-token`.
     environment: METRICS_TOKEN
+  smtp_password:
+    # Mật khẩu ứng dụng Gmail của chính hòm thư ứng dụng đang dùng. Vào bằng đường TỆP
+    # (/run/secrets/smtp_password) chứ không qua `environment:` — nên nó không lộ trong
+    # `docker inspect` và không bị phép thay chuỗi của entrypoint chạm tới.
+    environment: SMTP_PASS
 
 networks:
   internal:

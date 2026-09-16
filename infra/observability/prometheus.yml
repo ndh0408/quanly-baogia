@@ -46,21 +46,24 @@ rule_files:
   # kiểm bản gốc, nên bản chép sẽ hỏng mà không cổng nào đỏ.
   - /etc/prometheus/rules/alerts.yaml
 
-# ── ALERTMANAGER: CỐ Ý CHƯA CÓ ─────────────────────────────────────────────
-# Ngăn xếp này KHÔNG kèm Alertmanager. Hệ quả phải nói thẳng: quy tắc vẫn được ĐÁNH GIÁ và vẫn
-# chuyển sang trạng thái `firing`, nhưng chúng DỪNG LẠI ở giao diện Prometheus
-# (http://prometheus:9090/alerts) — KHÔNG có Telegram, KHÔNG có email, KHÔNG ai bị đánh thức. Đó là
-# "có cảnh báo" theo nghĩa kỹ thuật, KHÔNG phải theo nghĩa vận hành.
+# ── ALERTMANAGER: ĐÃ NỐI (2026-09-16) ──────────────────────────────────────
+# TRƯỚC NGÀY NÀY khối dưới bị chú thích và ngăn xếp không kèm Alertmanager. Hệ quả: quy tắc vẫn
+# được ĐÁNH GIÁ và vẫn chuyển sang `firing`, nhưng DỪNG LẠI ở giao diện Prometheus
+# (http://prometheus:9090/alerts) — không email, không ai bị đánh thức. "Có cảnh báo" theo nghĩa
+# kỹ thuật, không phải theo nghĩa vận hành.
 #
-# Đường báo động DUY NHẤT đang chạy thật là backup watchdog qua Telegram
-# (scripts/backup/backup-watchdog.sh) — cố ý tách khỏi Prometheus, vì đó là thứ không được phép im
-# lặng ngay cả khi hệ giám sát chết.
-#
-# Muốn nối: dựng thêm service alertmanager rồi bỏ chú thích khối dưới.
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets: ["alertmanager:9093"]
+# Nay cảnh báo đi ra email qua CHÍNH SMTP mà ứng dụng đang dùng thật
+# (infra/observability/alertmanager.yml.tpl). Ba thứ cần biết khi sửa:
+#   · Alertmanager KHÔNG nội suy biến môi trường trong cấu hình — y như Prometheus. Vì thế có
+#     `alertmanager-entrypoint.sh` dựng cấu hình trước, và nó TỪ CHỐI KHỞI ĐỘNG nếu sót `${`.
+#   · Mất service `alertmanager` thì Prometheus vẫn chạy và vẫn đánh giá quy tắc; nó chỉ không gửi
+#     được ra ngoài. `depends_on` trong compose vì thế là `service_started`, không phải `_healthy`.
+#   · Đường báo động backup watchdog qua Telegram (scripts/backup/backup-watchdog.sh) VẪN GIỮ tách
+#     khỏi Prometheus — đó là thứ không được phép im lặng ngay cả khi cả hệ giám sát này chết.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
 
 scrape_configs:
   # TÊN JOB PHẢI KHỚP `quanly.*`.
