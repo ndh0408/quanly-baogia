@@ -18,6 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { createApp, conObjectPhien } from "../src/app.js";
+import * as db from "../src/db.js";
 import { prisma } from "../src/db.js";
 
 let app;
@@ -26,7 +27,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 describe("/readyz", () => {
   it("nhiều lượt gọi liên tiếp chỉ tốn MỘT truy vấn CSDL (kết quả được nhớ tạm)", async () => {
-    const spy = vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ "?column?": 1 }]);
+    const spy = vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockResolvedValue(undefined);
     for (let i = 0; i < 20; i++) {
       const r = await request(app).get("/readyz");
       expect(r.status).toBe(200);
@@ -36,7 +37,7 @@ describe("/readyz", () => {
   });
 
   it("CSDL chết vẫn phải trả 503 và KHÔNG lộ chi tiết lỗi", async () => {
-    vi.spyOn(prisma, "$queryRaw").mockRejectedValue(new Error("password authentication failed for user quanly"));
+    vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockRejectedValue(new Error("password authentication failed for user quanly"));
     const app2 = createApp(); // app mới → bộ nhớ tạm rỗng
     const r = await request(app2).get("/readyz");
     expect(r.status).toBe(503);
@@ -45,15 +46,15 @@ describe("/readyz", () => {
   });
 
   it("bộ nhớ tạm KHÔNG dùng chung giữa các app (không rò trạng thái giữa test/instance)", async () => {
-    vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ "?column?": 1 }]);
+    vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockResolvedValue(undefined);
     await request(createApp()).get("/readyz");
-    vi.spyOn(prisma, "$queryRaw").mockRejectedValue(new Error("db down"));
+    vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockRejectedValue(new Error("db down"));
     const r = await request(createApp()).get("/readyz");
     expect(r.status).toBe(503);
   });
 
   it("/livez vẫn không đụng CSDL", async () => {
-    const spy = vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ "?column?": 1 }]);
+    const spy = vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockResolvedValue(undefined);
     const r = await request(app).get("/livez");
     expect(r.status).toBe(200);
     expect(spy).not.toHaveBeenCalled();

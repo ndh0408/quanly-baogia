@@ -20,7 +20,7 @@ import { capNhatDoSauHangDoi } from "./queue.js";
 import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
 import { registry, metricsMiddleware, khopTokenBearer } from "./observability.js";
 import { capNhatCongSuatXuat } from "./exportQueue.js";
-import { prisma } from "./db.js";
+import { prisma, kiemTraCsdlChoDoSanSang } from "./db.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -523,7 +523,11 @@ export function createApp() {
       return res.status(readyzCache.ok ? 200 : 503).json({ ok: readyzCache.ok });
     }
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      // ĐƯỜNG RIÊNG, không đi qua pool của lưu lượng người dùng. Dùng `prisma` ở đây thì một cơn
+      // lưu dồn dập làm cạn pool → phép dò hết giờ → kubelet RÚT pod khỏi Service dù pod vẫn phục
+      // vụ bình thường, rồi replica còn lại nhận trọn tải và cũng bị rút. Xem khối chú thích ở
+      // `kiemTraCsdlChoDoSanSang` (src/db.ts).
+      await kiemTraCsdlChoDoSanSang();
       readyzCache = { t: now, ok: true };
       res.json({ ok: true });
     } catch (e) {

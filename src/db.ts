@@ -39,6 +39,46 @@ const pool = new Pool({
   options: `-c statement_timeout=${config.DB_STATEMENT_TIMEOUT} -c idle_in_transaction_session_timeout=${config.DB_IDLE_TX_TIMEOUT}`,
 });
 const adapter = new PrismaPg(pool);
+
+// ── POOL RIÊNG CHO PHÉP DÒ SẴN SÀNG (/readyz) ─────────────────────────────
+// VẤN ĐỀ: `/readyz` dùng chung `pool` ở trên. Khi pool cạn — mà cạn là chuyện BÌNH THƯỜNG lúc
+// nhiều người cùng lưu báo giá lớn — phép dò của nó cũng xếp hàng rồi hết giờ, và kubelet đọc
+// thành "pod này chưa sẵn sàng" rồi RÚT pod khỏi Service.
+//
+// Đó là phản ứng ngược đúng lúc tệ nhất: pod vẫn đang phục vụ bình thường, chỉ là bận. Rút nó ra
+// thì toàn bộ lưu lượng dồn sang replica còn lại, replica đó cạn pool theo, rồi cũng bị rút —
+// MẤT DỊCH VỤ HOÀN TOÀN vì một cơn tải mà hệ thống lẽ ra chịu được. Càng đông người dùng càng dễ
+// xảy ra, tức nó chờ đúng lúc đông nhất để nổ.
+//
+// Phép dò sẵn sàng phải trả lời "CSDL còn tới được không", KHÔNG phải "pool có rảnh không". Hai
+// câu hỏi khác nhau, và chỉ câu đầu mới đáng để rút một pod ra khỏi tải. Nên nó cần đường đi
+// riêng, không xếp hàng sau lưu lượng của người dùng.
+//
+// max = 1: chỉ cần một kết nối, và `/readyz` đã có bộ nhớ đệm 5s (READYZ_TTL_MS, src/app.ts) nên
+// không có chuyện nhiều phép dò chạy cùng lúc. connectionTimeoutMillis ngắn (2s): dò sẵn sàng mà
+// chờ lâu thì kubelet hết giờ trước — thà trả lời "chưa sẵn sàng" nhanh và dứt khoát.
+const poolDoSanSang = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 1,
+  connectionTimeoutMillis: 2_000,
+  idleTimeoutMillis: 30_000,
+  options: `-c statement_timeout=2000`,
+});
+poolDoSanSang.on("error", (e) => logger.warn({ source: "readyz-pool" }, e.message));
+
+/**
+ * `SELECT 1` qua đường RIÊNG cho /readyz. Ném lỗi nếu CSDL không tới được.
+ *
+ * KHÔNG dùng `prisma` ở đây — dùng nó là quay lại đúng lỗi khối chú thích trên mô tả.
+ */
+export async function kiemTraCsdlChoDoSanSang() {
+  const c = await poolDoSanSang.connect();
+  try {
+    await c.query("SELECT 1");
+  } finally {
+    c.release();
+  }
+}
 // transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).
 // Đường LƯU báo giá gói cả việc nặng vào MỘT transaction: xoá sạch sheet → tạo lại toàn bộ item →
 // đọc lại báo giá qua QUOTE_INCLUDE → snapshot phiên bản (đọc thêm lần nữa + ghi khối jsonb). Trần
@@ -153,8 +193,12 @@ export type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
  *
  * VÌ SAO CẦN, dù đã có `db_connections_used`: gauge kia đếm `pg_stat_activity` của CẢ CSDL rồi
  * chia cho `max_connections` của MÁY CHỦ. Nhưng một tiến trình web cạn pool HOÀN TOÀN chỉ đóng
- * góp DB_POOL_MAX + SESSION_POOL_MAX = 24 kết nối; với hai replica là 48/100 = 48% — DƯỚI ngưỡng
- * cảnh báo 80%. Tức cảnh báo kia IM LẶNG đúng lúc mọi request đang xếp hàng rồi lỗi.
+ * góp DB_POOL_MAX + SESSION_POOL_MAX + 1 (pool dò sẵn sàng) = 25 kết nối; với hai replica là
+ * 50/100 = 50% — DƯỚI ngưỡng cảnh báo 80%. Tức cảnh báo kia IM LẶNG đúng lúc mọi request đang xếp
+ * hàng rồi lỗi.
+ *
+ * Kết nối thứ 25 là pool RIÊNG của `/readyz` (max 1) và nó CỐ Ý không nằm trong `thongKePool`:
+ * nó không phục vụ lưu lượng người dùng, gộp vào đây chỉ làm loãng đúng con số cần nhìn.
  *
  * `waitingCount` là con số trả lời được câu "nhiều người thì sao": nó > 0 nghĩa là ĐANG CÓ người
  * phải chờ mới có kết nối — triệu chứng xuất hiện TRƯỚC khi ai đó nhận lỗi.
@@ -170,4 +214,8 @@ export function thongKePool() {
 
 process.on("beforeExit", async () => {
   await base.$disconnect();
+  // Pool dò sẵn sàng KHÔNG đi qua Prisma nên `$disconnect()` không đụng tới nó. Bỏ sót dòng này
+  // là để lại một kết nối Postgres mở sau mỗi lần tắt — vô hại trên một VM, nhưng trên cụm thì
+  // mỗi vòng deploy rò thêm một kết nối cho tới khi chạm `max_connections`.
+  await poolDoSanSang.end().catch(() => {});
 });
