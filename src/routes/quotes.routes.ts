@@ -13,7 +13,7 @@ import {
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
 // Hai chốt của đường lưu — ĐẶT SAU `validate` (cần body đã parse để đếm dòng) và TRƯỚC handler.
-import { gacKichThuocLuu, gacNganSachLuu } from "../saveBudget.js";
+import { gacKichThuocLuu, gacNganSachLuu, gacNganSachDoc } from "../saveBudget.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
 import {
   createQuote,
@@ -206,6 +206,10 @@ router.get(
 router.get(
   "/:id",
   validate({ params: idParam }),
+  // Đường ĐỌC cũng phải có trần đồng thời: một GET 0 byte lặp lại được vô hạn và song song được
+  // vô hạn, trong khi mỗi lượt giữ BA bản sao báo giá trong heap. Cổng tự bỏ qua báo giá nhỏ
+  // (READ_GATE_THRESHOLD_ROWS) nên endpoint nóng nhất không trả phí cho một rủi ro chưa hoạt động.
+  gacNganSachDoc,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
     res.json(presentQuote(quote, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));

@@ -185,6 +185,10 @@ const schema = z.object({
   // Bao nhiêu request được XẾP HÀNG chờ ngân sách. Không phải cho đẹp: mỗi người đang chờ đã parse
   // xong payload và đang ÔM nó trong bộ nhớ, nên hàng đợi không trần là một đường OOM khác.
   SAVE_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(100).default(4)),
+  // Dưới ngưỡng này, GET /api/quotes/:id KHÔNG đi qua cổng ngân sách — xem `gacNganSachDoc`.
+  // 2.000 chọn theo số ĐO ĐƯỢC: production có 756 hạng mục trên TOÀN BỘ 12 báo giá, nên thực tế
+  // không lượt đọc nào chạm cổng; nó chỉ bật lên khi có báo giá thật sự lớn.
+  READ_GATE_THRESHOLD_ROWS: numEnv(z.coerce.number().int().min(0).max(1_000_000).default(2_000)),
 
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),

@@ -183,6 +183,54 @@ export async function gacKichThuocLuu(req: Request, _res: Response, next: NextFu
 }
 
 /**
+ * CHỐT 3 — NGÂN SÁCH CHO ĐƯỜNG ĐỌC. Đặt trên `GET /api/quotes/:id`.
+ *
+ * ── VÌ SAO ĐƯỜNG ĐỌC CŨNG CẦN ─────────────────────────────────────────────
+ * `getQuote` gọi `findFirst({ include: QUOTE_INCLUDE })` — `include` chứ không `select`, nên lấy
+ * MỌI cột của QuoteItem (kể cả `images`) và MỌI cột của QuoteSheet (kể cả `extraTables`). Rồi
+ * `presentQuote` CHÉP LẠI từng hạng mục một lần nữa, rồi `res.json` tuần tự hoá thành một chuỗi.
+ * BA bản sao sống cùng lúc trong heap.
+ *
+ * Điểm chí mạng so với đường ghi: một lần LƯU ít ra còn phải tải lên vài MB, còn đây là một GET
+ * `0 BYTE` — lặp lại bao nhiêu lần cũng được, song song bao nhiêu cũng được, và trước bản vá này
+ * KHÔNG có phễu nào (khác `xinSuat` của nhập Excel và `gate` của xuất file); chỉ có apiLimiter
+ * 120 lượt/phút/IP, mà nhiều người dùng là nhiều IP.
+ *
+ * ── VÌ SAO CÓ NGƯỠNG BỎ QUA ───────────────────────────────────────────────
+ * ĐO ĐƯỢC trên dữ liệu THẬT: production có 756 hạng mục trên TOÀN BỘ 12 báo giá, báo giá nặng
+ * nhất 41 kB, và 0/756 hạng mục có ảnh. Bắt mọi lượt đọc đi qua cổng ngân sách là trả giá cho một
+ * rủi ro chưa hề hoạt động, trên đúng endpoint nóng nhất. Nên: đếm (0,5 ms, đã đo bằng EXPLAIN
+ * ANALYZE) rồi CHỈ vào cổng khi thật sự lớn. Báo giá thường không chờ ai cả.
+ */
+export async function gacNganSachDoc(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isInteger(id) || id <= 0) return next();
+
+    const soDong = await prisma.quoteItem.count({ where: { sheet: { quoteId: id } } });
+    if (soDong <= config.READ_GATE_THRESHOLD_ROWS) return next();
+
+    const boDi = new AbortController();
+    const khiDut = () => boDi.abort();
+    req.once("aborted", khiDut);
+    const canKep = Math.min(soDong, config.SAVE_BUDGET_ROWS);
+    congLuu.xin(soDong, boDi.signal).then(
+      () => {
+        req.off("aborted", khiDut);
+        let daTra = false;
+        const tra = () => { if (!daTra) { daTra = true; congLuu.tra(canKep); } };
+        res.once("finish", tra);
+        res.once("close", tra);
+        next();
+      },
+      (e) => { req.off("aborted", khiDut); next(e); },
+    );
+  } catch (e) {
+    return next(e);
+  }
+}
+
+/**
  * CHỐT 2 — NGÂN SÁCH ĐỒNG THỜI. Đặt NGAY SAU `gacKichThuocLuu`.
  *
  * VÌ SAO KHÔNG ĐẶT TRƯỚC express.json: trước khi parse thì chưa biết số dòng, chỉ có
