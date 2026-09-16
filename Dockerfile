@@ -120,7 +120,7 @@ RUN mkdir -p fonts \
 # hiệu lực ngay trong RUN này, nên một lượt kiểm chạy trần luôn rơi vào nhánh "đã có sẵn, không
 # nối thêm". Đúng cái nhánh mà compose phụ thuộc — nhánh NỐI THÊM — sẽ KHÔNG BAO GIỜ được chạy
 # lúc build, tức phép tự kiểm không bảo vệ thứ nó tưởng nó bảo vệ. Lượt thứ hai ép NODE_OPTIONS
-# sang ĐÚNG giá trị mà docker-compose.prod.yml:202 gửi cho app (--max-old-space-size=1024) để
+# sang ĐÚNG giá trị mà docker-compose.prod.yml:288 gửi cho app (--max-old-space-size=2048) để
 # buộc đi vào nhánh
 # đó, rồi đòi kết quả chứa CẢ hai cờ. Gán biến ngay trước lệnh (không gọi `env`) để lượt kiểm
 # không phụ thuộc một applet busybox nào — sandbox không có Docker daemon nên `env` của alpine là
@@ -140,7 +140,7 @@ RUN printf '%s\n' \
     > /usr/local/bin/bat-source-map \
  && chmod 0755 /usr/local/bin/bat-source-map \
  && /usr/local/bin/bat-source-map node -e 'const c=(process.env.NODE_OPTIONS||"").split(" ").filter(Boolean),n=c.filter(f=>f==="--enable-source-maps").length;if(n!==1){console.error("bat-source-map: nhánh GIỮ NGUYÊN sai, NODE_OPTIONS="+process.env.NODE_OPTIONS);process.exit(1)}' \
- && NODE_OPTIONS=--max-old-space-size=1024 /usr/local/bin/bat-source-map node -e 'const c=(process.env.NODE_OPTIONS||"").split(" ").filter(Boolean),n=c.filter(f=>f==="--enable-source-maps").length;if(n!==1||!c.includes("--max-old-space-size=1024")){console.error("bat-source-map: nhánh NỐI THÊM sai, NODE_OPTIONS="+process.env.NODE_OPTIONS);process.exit(1)}'
+ && NODE_OPTIONS=--max-old-space-size=2048 /usr/local/bin/bat-source-map node -e 'const c=(process.env.NODE_OPTIONS||"").split(" ").filter(Boolean),n=c.filter(f=>f==="--enable-source-maps").length;if(n!==1||!c.includes("--max-old-space-size=2048")){console.error("bat-source-map: nhánh NỐI THÊM sai, NODE_OPTIONS="+process.env.NODE_OPTIONS);process.exit(1)}'
 
 # PHÁT HÀNH CHO SENTRY. @sentry/node tự đọc process.env.SENTRY_RELEASE khi `Sentry.init` không
 # truyền `release` (hàm getRelease → getSentryRelease trong gói @sentry/node-core) — src/observability.ts

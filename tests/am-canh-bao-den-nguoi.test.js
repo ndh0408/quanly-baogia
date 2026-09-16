@@ -183,6 +183,23 @@ describe("Luật định tuyến và nén im lặng phải trỏ vào thứ CÓ 
       .not.toMatch(/\{\{ if \.Annotations\.runbook \}\}/);
   });
 
+  it("dòng thời gian là GIỜ ĐỊA PHƯƠNG, không phải UTC thô", () => {
+    // `{{ .StartsAt }}` để trần in ra nguyên xi
+    //     2026-09-16 15:09:58.766619553 +0000 UTC m=+26.207115349
+    // tức giờ UTC (lệch 7 tiếng so với đồng hồ người đọc ở VN), kèm nano giây và số đọc đồng hồ
+    // đơn điệu nội bộ của Go. Người bị đánh thức lúc 2 giờ sáng phải tự trừ 7 tiếng — và sẽ trừ sai.
+    // ĐÃ ĐO: ảnh prom/alertmanager:v0.28.1 CÓ /usr/share/zoneinfo, nên `.Local` hoạt động thật;
+    // nhưng nó dựa vào biến TZ, thiếu TZ thì `.Local` lặng lẽ chính là UTC.
+    // Soi bản ĐÃ BỎ CHÚ THÍCH: khối giải thích ngay trên cố ý trích nguyên văn `{{ .StartsAt }}`
+    // để nói vì sao không dùng nó — soi cả chú thích thì bài này đỏ vì chính lời cảnh báo.
+    const than = khongChuThich(TPL);
+    expect(than, "còn `{{ .StartsAt }}` thô → thư in giờ UTC kèm đuôi m=+…")
+      .not.toMatch(/\{\{\s*\.StartsAt\s*\}\}/);
+    const dung = [...than.matchAll(/\.StartsAt\.Local\.Format/g)];
+    expect(dung.length, "cả bản HTML lẫn bản chữ thường đều phải đổi").toBe(2);
+    expect(khoiService("alertmanager"), "thiếu TZ thì .Local âm thầm trở lại UTC").toMatch(/TZ:\s*\$\{TZ:-[^}\s]+\}/);
+  });
+
   it("gửi cả thư KHI ĐÃ HẾT — im lặng không phải bằng chứng đã xong", () => {
     expect(TPL).toMatch(/send_resolved:\s*true/);
   });

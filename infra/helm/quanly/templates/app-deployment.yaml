@@ -54,6 +54,9 @@ spec:
           envFrom:
             - configMapRef: { name: {{ include "quanly.fullname" . }}-config }
             - secretRef:    { name: {{ include "quanly.secretName" . }} }
+          # Xem `app.heapMB` trong values.yaml — nó BUỘC CHẶT vào resources.limits.memory ngay dưới.
+          env:
+            - { name: NODE_OPTIONS, value: "--max-old-space-size={{ .Values.app.heapMB }}" }
           resources: {{- toYaml .Values.app.resources | nindent 12 }}
           livenessProbe:
             httpGet: { path: /livez, port: http }

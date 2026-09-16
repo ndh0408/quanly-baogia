@@ -18,7 +18,11 @@ app:
   replicaCount: 2
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { cpu: 1, memory: 1Gi }
+    limits: { cpu: 1, memory: 3Gi }
+  # ĐI CÙNG `resources.limits.memory` Ở TRÊN, KHÔNG ĐƯỢC CHỈNH RIÊNG. Node không đọc limit của
+  # cgroup để chỉnh heap — nó nới theo RAM của NODE rồi bị kubelet OOMKill CẢ POD. Giữ ~2/3 limit
+  # để V8 ném heap-OOM BẮT ĐƯỢC (một request lỗi) thay vì mất cả pod (mọi request đang bay đứt).
+  heapMB: 2048
   autoscaling:
     enabled: true
     minReplicas: 2
@@ -41,7 +45,9 @@ worker:
   terminationGracePeriodSeconds: 90
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { cpu: 1, memory: 1Gi }
+    limits: { cpu: 1, memory: 3Gi }
+  # Xem chú thích `heapMB` ở khối app — cùng lý do, cùng ràng buộc.
+  heapMB: 2048
   autoscaling:
     enabled: true
     minReplicas: 1

@@ -30,6 +30,8 @@ spec:
             - configMapRef: { name: {{ include "quanly.fullname" . }}-config }
             - secretRef:    { name: {{ include "quanly.secretName" . }} }
           env:
+            # Xem `worker.heapMB` trong values.yaml — BUỘC CHẶT vào resources.limits.memory.
+            - { name: NODE_OPTIONS, value: "--max-old-space-size={{ .Values.worker.heapMB }}" }
             - { name: WORKER_MODE, value: "true" }
             - { name: WORKER_CONCURRENCY, value: "{{ .Values.worker.concurrency }}" }
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}

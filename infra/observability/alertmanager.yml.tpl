@@ -66,6 +66,13 @@ receivers:
           Subject: '[QuanLY {{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.instance }} @ {{ . }}{{ end }}'
         # Thư phải trả lời được "tôi phải làm gì bây giờ" NGAY TRONG THÂN, không bắt mở Prometheus:
         # người bị đánh thức lúc 2 giờ sáng thường chỉ có điện thoại trong tay.
+        #
+        # GIỜ ĐỊA PHƯƠNG, ĐÃ CẮT ĐUÔI. `{{ .StartsAt }}` để trần in ra nguyên xi
+        #     2026-09-16 15:09:58.766619553 +0000 UTC m=+26.207115349
+        # — tức giờ UTC (lệch 7 tiếng so với đồng hồ người đọc), kèm nano giây và `m=+…` là số đọc
+        # đồng hồ ĐƠN ĐIỆU nội bộ của Go, hoàn toàn vô nghĩa với người nhận. Lúc 2 giờ sáng, bắt
+        # người ta tự trừ 7 tiếng là bắt họ tính nhầm. `.Local` dựa vào biến TZ của container —
+        # xem `TZ:` trong khối alertmanager của compose; thiếu nó thì `.Local` chính là UTC.
         # `with` chứ không phải `if`: 5/22 quy tắc không có `runbook`
         # (QuanlyTiLeLoi5xxCao, QuanlySsePublishThatBai, QuanlyXuatFileBiTuChoi,
         #  QuanlyWorkerXuatCangCung, QuanlyJobNenThatBai) — `if` sẽ in ra một ô rỗng.
@@ -80,7 +87,7 @@ receivers:
             severity={{ .Labels.severity }}
             {{ with .Labels.instance }}· instance={{ . }}{{ end }}
             {{ with .Labels.job }}· job={{ . }}{{ end }}<br>
-            bắt đầu: {{ .StartsAt }}
+            bắt đầu: {{ .StartsAt.Local.Format "15:04:05 02/01/2006" }}
           </small></p>
           {{ end }}
         text: |
@@ -89,7 +96,7 @@ receivers:
           * {{ .Annotations.summary }}
             {{ .Annotations.description }}
           {{ with .Annotations.runbook }}  Cách xử lý: {{ . }}
-          {{ end }}  severity={{ .Labels.severity }} bắt đầu={{ .StartsAt }}
+          {{ end }}  severity={{ .Labels.severity }} bắt đầu={{ .StartsAt.Local.Format "15:04:05 02/01/2006" }}
           {{ end }}
 
 inhibit_rules:

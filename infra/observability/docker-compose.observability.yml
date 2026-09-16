@@ -37,6 +37,11 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki-data:/loki
+    deploy:
+      resources:
+        limits:
+          # ĐO ĐƯỢC trên production lúc rảnh: 135 MB. Trần 1g (~7× mức đo — Loki gom log nên phình theo lưu lượng).
+          memory: 1g
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -65,6 +70,11 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - promtail-positions:/tmp/promtail
+    deploy:
+      resources:
+        limits:
+          # ĐO ĐƯỢC trên production lúc rảnh: 48 MB. Trần 256m (~5× mức đo — promtail chỉ đọc-và-đẩy, không giữ gì lâu).
+          memory: 256m
     depends_on:
       loki: { condition: service_healthy }
     networks: [internal]
@@ -125,6 +135,11 @@ services:
       # đánh giá quy tắc dù Alertmanager có chết — nó chỉ không gửi được ra ngoài. Buộc
       # `service_healthy` là biến một trục trặc của KÊNH THÔNG BÁO thành mất luôn cả phần ĐO.
       alertmanager: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          # ĐO ĐƯỢC trên production lúc rảnh: 41 MB. Trần 1g (TSDB 15 ngày nằm trên đĩa, RAM chủ yếu là chỉ mục nóng).
+          memory: 1g
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -155,6 +170,10 @@ services:
     environment:
       # DÙNG LẠI đúng SMTP mà ứng dụng đang gửi thư thật (cùng `.env`), thay vì dựng kênh mới chưa
       # ai thử. Thiếu biến bắt buộc → entrypoint thoát 78, container KHÔNG lên.
+      # MÚI GIỜ CHO DÒNG "bắt đầu:" TRONG THƯ. Không đặt thì container chạy UTC và thư ghi
+      # 15:09 trong khi đồng hồ người đọc là 22:10 — lệch 7 tiếng, đúng lúc người ta vừa bị đánh
+      # thức lúc 2 giờ sáng và không ở trạng thái tính nhẩm tốt nhất.
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
       SMTP_HOST: ${SMTP_HOST:?đặt SMTP_HOST trong .env — Alertmanager gửi thư qua chính SMTP của ứng dụng}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_FROM: ${SMTP_FROM:?đặt SMTP_FROM trong .env}
@@ -191,6 +210,11 @@ services:
       # luôn khớp `.env` hiện tại. (ĐÃ ĐO: thiếu dòng này thì container thoát ngay với
       # `mkdir: can't create directory '/render': Permission denied` — ảnh chạy bằng `nobody`.)
       - /render
+    deploy:
+      resources:
+        limits:
+          # ĐO ĐƯỢC trên production lúc rảnh: 20 MB. Trần 128m (nhỏ và ổn định; trần chỉ để nó không kéo cả VM nếu rò).
+          memory: 128m
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -226,6 +250,11 @@ services:
       # LOG đang chạy tốt. Healthcheck của prometheus vẫn giữ, nhưng để người vận hành nhìn, không
       # để chặn.
       prometheus: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          # ĐO ĐƯỢC trên production lúc rảnh: 88 MB. Trần 512m (chỉ phình khi có người mở nhiều bảng cùng lúc).
+          memory: 512m
     networks: [internal]
     restart: unless-stopped
 

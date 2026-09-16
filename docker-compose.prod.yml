@@ -244,7 +244,25 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *default-logging
     # exceljs/pdfkit dựng workbook trong bộ nhớ; vượt trần thì CHỈ app chết và tự restart.
-    # ⚠️ TRẦN NÀY LÀ SỐ PHỎNG ĐOÁN, CHƯA ĐO TRÊN VM THẬT. Đọc kỹ trước khi tin nó.
+    # ── TRẦN BỘ NHỚ: NAY LÀ SỐ ĐO ĐƯỢC, KHÔNG CÒN LÀ PHỎNG ĐOÁN ────────────
+    # Bản trước ghi thẳng "⚠️ TRẦN NÀY LÀ SỐ PHỎNG ĐOÁN, CHƯA ĐO TRÊN VM THẬT". Nay đã đo, và
+    # đo cả chế độ hỏng:
+    #   POST /api/quotes 10.000 dòng →  7,1s, đỉnh RSS   460 MB
+    #                    20.000 dòng → 13,1s, đỉnh RSS   756 MB   ← trần lưu hiện tại
+    #                    30.000 dòng → 18,1s, đỉnh RSS 1.154 MB   (77% trần 1536m)
+    #                    60.000 dòng → BỊ NHÂN GIẾT (oom-kill, anon-rss 1,5 GB), CẢ APP SẬP
+    #   lúc rảnh trên production: app 136 MB, worker 122 MB
+    #
+    # `MAX_SAVE_TOTAL_ROWS` + `SAVE_BUDGET_ROWS` (src/config.ts) nay chặn ở 20.000 dòng TỔNG
+    # ĐANG BAY, nên 756 MB là chặn trên THẬT cho đường lưu. Với trần 1536m thì 756 MB đã là 49% —
+    # không còn chỗ cho nền, cho phân mảnh, cho một lượt xuất file chạy cùng lúc.
+    #
+    # 3g là ~2× khoảng trống so với con số đo được, KHÔNG phải con số bốc. Và quan trọng hơn con
+    # số: `--max-old-space-size` giữ ở ~2/3 trần để V8 ném heap-OOM BẮT ĐƯỢC (errorHandler ghi log,
+    # trả 500 cho ĐÚNG MỘT request, container sống tiếp) TRƯỚC khi nhân hệ điều hành SIGKILL cả
+    # container — lúc đó mọi request đang bay của MỌI người đứt, SSE đứt, lần Lưu đang gửi dở mất
+    # trắng. Đặt heap CAO HƠN trần cgroup là đảo ngược đúng thứ tự đó.
+    # tests/mem-tran-bo-nho.test.js khoá tỉ lệ này ở cả hai file compose.
     #
     # Đặt cgroup limit mà KHÔNG bảo V8 biết là tự bắn vào chân: Node KHÔNG đọc cgroup limit để
     # chỉnh heap, nó nới heap theo RAM của HOST rồi bị kernel SIGKILL nguyên container. Lúc đó
@@ -261,13 +279,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 3g
           cpus: "${APP_CPUS:-2}"
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: "--max-old-space-size=1024" # ~70% trần 1536m — xem chú thích ở deploy.resources
+      NODE_OPTIONS: "--max-old-space-size=2048" # ~2/3 trần 3g — xem chú thích ở deploy.resources
       PORT: "3000"
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
@@ -301,7 +319,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g # worker dựng workbook exceljs/pdfkit — cao hơn app
+          memory: 3g # worker dựng workbook exceljs/pdfkit — cùng trần với app
           # Worker là việc NỀN: một job xuất chậm đi vài giây không ai thấy, còn app/Postgres bị
           # đói CPU thì mọi người thấy ngay. Nên worker là chỗ đặt trần chặt nhất.
           cpus: "${WORKER_CPUS:-1.5}"
@@ -323,7 +341,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: "--max-old-space-size=1400" # worker DỰNG workbook → trần cao hơn app
+      NODE_OPTIONS: "--max-old-space-size=2048" # ~2/3 trần 3g, xem khối lý do ở service app
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:

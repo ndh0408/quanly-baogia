@@ -266,13 +266,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536m
+          memory: 3g
           cpus: "${APP_CPUS:-2}"
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: "--max-old-space-size=1024" # ~70% trần 1536m — xem chú thích ở deploy.resources
+      NODE_OPTIONS: "--max-old-space-size=2048" # ~2/3 trần 3g — xem chú thích ở deploy.resources
       PORT: "3000"
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
@@ -308,7 +308,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g # worker dựng workbook exceljs/pdfkit — cao hơn app
+          memory: 3g # worker dựng workbook exceljs/pdfkit — cùng trần với app
           # Worker là việc NỀN: một job xuất chậm đi vài giây không ai thấy, còn app/Postgres bị
           # đói CPU thì mọi người thấy ngay. Nên worker là chỗ đặt trần chặt nhất.
           cpus: "${WORKER_CPUS:-1.5}"
@@ -330,7 +330,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: "--max-old-space-size=1400" # worker DỰNG workbook → trần cao hơn app
+      NODE_OPTIONS: "--max-old-space-size=2048" # ~2/3 trần 3g, xem khối lý do ở service app
       DATABASE_URL: postgresql://quanly:${POSTGRES_PASSWORD}@postgres:5432/quanly?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:

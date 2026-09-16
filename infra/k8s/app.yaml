@@ -41,9 +41,16 @@ spec:
           envFrom:
             - configMapRef: { name: quanly-config }
             - secretRef: { name: quanly-secrets }
+          # TRẦN HEAP PHẢI ĐI CÙNG TRẦN cgroup. Node KHÔNG đọc limit của cgroup để chỉnh heap —
+          # nó nới theo RAM của NODE (máy chủ k8s), rồi kubelet OOMKill cả pod. Trước dòng này,
+          # app/worker trên k8s có limit 1Gi mà KHÔNG có cờ nào: tức đường triển khai k8s được
+          # dựng sẵn ở đúng chế độ hỏng mà compose đã phải vá (oom-kill, xem
+          # tests/mem-tran-bo-nho.test.js). Giữ ~2/3 limit để V8 ném heap-OOM BẮT ĐƯỢC trước.
+          env:
+            - { name: NODE_OPTIONS, value: "--max-old-space-size=2048" }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 1, memory: 1Gi }
+            limits: { cpu: 1, memory: 3Gi }
           livenessProbe:
             httpGet: { path: /livez, port: http }
             initialDelaySeconds: 20
