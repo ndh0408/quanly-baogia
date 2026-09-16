@@ -13,6 +13,7 @@ import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCoun
 import { namVN, namNganVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
+import { randomUUID } from "node:crypto";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
@@ -324,6 +325,46 @@ export async function createQuote(req: Request) {
   for (let attempt = 0; ; attempt++) {
     try {
       quote = await prisma.$transaction(async (tx) => {
+        // ── VÌ SAO CẤP SỐ Ở CUỐI, KHÔNG PHẢI Ở ĐẦU ──────────────────────────
+        // `nextQuoteNumber` là một UPDATE lên MỘT hàng của `QuoteCounter` khoá theo (prefix, năm).
+        // Postgres giữ khoá hàng đó tới HẾT transaction. Đặt nó ở câu lệnh ĐẦU nghĩa là khoá được
+        // giữ suốt cả lượt tạo — và lượt tạo là phần nặng nhất của cả ứng dụng.
+        //
+        // ĐO ĐƯỢC (dev, 2026-09-16): một giao dịch giữ hàng bộ đếm 6 giây làm giao dịch xin số kế
+        // tiếp phải CHỜ 5.077 ms. Mà POST /api/quotes 20.000 dòng ĐO ĐƯỢC mất 13,1s — tức mọi
+        // người khác trong công ty không tạo nổi báo giá nào suốt 13 giây, vì MỘT người đang lưu
+        // một báo giá lớn. Tất cả dùng chung một hàng: prefix của công ty là "GN".
+        //
+        // Đáng chú ý: cùng 20.000 dòng đó, phần CHÈN ở tầng CSDL chỉ mất 752 ms (đo bằng
+        // `INSERT … SELECT generate_series` rồi ROLLBACK). Nghĩa là ~94% thời gian giữ khoá là
+        // vòng gọi Prisma và việc JS — công việc KHÔNG CẦN giữ khoá đó chút nào.
+        //
+        // Nên: tạo báo giá với SỐ TẠM trước (phần nặng, KHÔNG chạm bộ đếm), rồi mới cấp số thật và
+        // cập nhật một hàng. Khoá chỉ bị giữ từ lúc cấp tới lúc commit.
+        //
+        // VẪN KHÔNG "ĐỐT SỐ": cấp số vẫn nằm TRONG transaction, nên lượt tạo hỏng vẫn cuốn theo cả
+        // lần tăng bộ đếm — đúng tính chất mà `nextQuoteNumber` cố ý giữ. Số tạm cũng không bao giờ
+        // ra ngoài: nó chỉ tồn tại giữa hai câu lệnh của CÙNG một transaction chưa commit.
+        const soTam = `__TAM__${randomUUID()}`;
+        const sheetsTaoMoi = buildSheetsCreate(b.sheets, t.sheetTotals);
+        const created = await tx.quote.create({
+          // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
+          // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
+          data: {
+            ...draft, quoteNumber: soTam, searchText: "", sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
+            // Phần Hà Nội gõ ngay lúc tạo. Cờ duyệt/thanh toán chưa thể có ở báo giá mới nên không
+            // cần reconcile — `sanitizeHnTables` đã loại mọi thứ ngoài hình dạng hợp lệ.
+            ...(b.hnTables !== undefined ? { hnTables: sanitizeHnTables(b.hnTables) } : {}),
+            sheets: { create: sheetsTaoMoi },
+            members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } },
+          } as any,
+          // `include` NẶNG (toàn bộ sheet + item) nằm ở ĐÂY, tức NGOÀI vùng khoá. Đặt nó ở lượt
+          // `update` bên dưới là đọc lại cả báo giá trong lúc đang giữ khoá bộ đếm — ĐO ĐƯỢC là
+          // mất thêm ~13 điểm phần trăm thời gian giữ khoá.
+          include: QUOTE_INCLUDE as any,
+        });
+
+        // ── TỪ ĐÂY KHOÁ BỘ ĐẾM BỊ GIỮ. Giữ đoạn này NGẮN NHẤT CÓ THỂ. ────────
         const quoteNumber = b.quoteNumber ?? await nextQuoteNumber(prefix, tx as any);
         capSo.so = quoteNumber;
         // Số do client gửi không đi qua bộ đếm → phải đẩy bộ đếm theo, nếu không lần cấp TỰ ĐỘNG
@@ -331,22 +372,18 @@ export async function createQuote(req: Request) {
         if (b.quoteNumber) await syncQuoteCounter(b.quoteNumber, prefix, tx as any);
         if (creator?.projectCode) draft.projectCode = await nextProjectCode(creator.projectCode, tx as any);
         const searchText = normalizeSearch(quoteNumber, draft.projectCode, draft.title, draft.toCompany, draft.toContact);
-        const sheetsTaoMoi = buildSheetsCreate(b.sheets, t.sheetTotals);
-        const created = await tx.quote.create({
-          // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
-          // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
-          data: {
-            ...draft, quoteNumber, searchText, sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
-            // Phần Hà Nội gõ ngay lúc tạo. Cờ duyệt/thanh toán chưa thể có ở báo giá mới nên không
-            // cần reconcile — `sanitizeHnTables` đã loại mọi thứ ngoài hình dạng hợp lệ.
-            ...(b.hnTables !== undefined ? { hnTables: sanitizeHnTables(b.hnTables) } : {}),
-            sheets: { create: sheetsTaoMoi },
-            members: { create: { userId, scopes: [...QUOTE_SCOPES], addedById: userId } },
-          } as any,
-          include: QUOTE_INCLUDE as any,
+        // KHÔNG `include` ở đây: đây là câu lệnh nằm TRONG vùng khoá, nó chỉ cần ghi một hàng.
+        await tx.quote.update({
+          where: { id: created.id },
+          data: { quoteNumber, searchText, ...(draft.projectCode ? { projectCode: draft.projectCode } : {}) },
         });
+        // `snapshotQuoteVersion` đọc lại báo giá từ CSDL, nên phải chạy SAU lượt cập nhật trên —
+        // nếu không, lịch sử phiên bản v1 sẽ ghi lại SỐ TẠM.
         await snapshotQuoteVersion(tx, created.id, userId, "create");
-        return created;
+        // Trả về bản đã nạp đầy đủ từ lượt `create` (ngoài vùng khoá), vá lại đúng ba trường vừa
+        // ghi. Đọc lại lần nữa chỉ để lấy ba giá trị mình vừa tự viết ra là tốn một lượt quét cả
+        // báo giá — và tốn nó ở đúng chỗ đắt nhất.
+        return { ...created, quoteNumber, searchText, ...(draft.projectCode ? { projectCode: draft.projectCode } : {}) };
       });
       break;
     } catch (e) {
