@@ -180,7 +180,19 @@ do_toast() {
       try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
       catch { console.error("    (không đọc được báo cáo JSON — vitest chết trước khi kịp ghi)"); process.exit(0); }
       const hong = d.testResults.flatMap((r) => r.assertionResults).filter((t) => t.status === "failed");
-      if (!hong.length) console.error("    (vitest thoát khác 0 nhưng không bài nào ĐỎ — xem lỗi lúc nạp file)");
+      if (!hong.length) {
+        // KHÔNG bài nào đỏ mà vitest vẫn thoát khác 0 = file HỎNG LÚC NẠP: vitest báo suite thất
+        // bại nhưng không khẳng định nào kịp chạy, nên assertionResults RỖNG. Thông điệp thật nằm
+        // ở cấp SUITE. Bản trước chỉ in một dòng "xem lỗi lúc nạp file" rồi thôi — đúng kiểu gợi ý
+        // mà không đưa manh mối, và tôi đã mất một lượt verify vì nó.
+        console.error("    (không bài nào ĐỎ — file hỏng lúc NẠP, thông điệp ở cấp suite:)");
+        for (const r of d.testResults) {
+          if (r.message) console.error("      " + String(r.message).split("
+").slice(0, 12).join("
+      "));
+          if (r.status && r.status !== "passed") console.error("      suite " + (r.name || "?") + " → " + r.status);
+        }
+      }
       for (const t of hong) {
         console.error("    ✗ " + t.title);
         for (const m of t.failureMessages || [])
