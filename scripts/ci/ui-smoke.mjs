@@ -40,7 +40,7 @@
 // finally. Không đụng dữ liệu sẵn có, không phụ thuộc seed.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 // `pathToFileURL`: ESM chỉ nhận file:// URL. Đường dẫn tuyệt đối Windows (D:\…) làm `import()`
@@ -438,9 +438,20 @@ async function main() {
     // Chốt ĐẮT nhất của bước này: 200 KHÔNG bảo đảm đó là file. SPA fallback, proxy, hay trang đăng
     // nhập SSO đều trả 200 kèm HTML — web/src/lib/exportQuote.ts chặn đúng chuyện đó ở phía client.
     // .xlsx là gói ZIP nên hai byte đầu PHẢI là "PK".
-    const thanXuat = await phanHoiXuat.body();
+    //
+    // ĐỌC TỪ TỆP ĐÃ TẢI, KHÔNG PHẢI `response.body()`.
+    //
+    // Playwright 1.63 (nâng từ 1.62.1) KHÔNG còn trả thân qua `response.body()` cho một phản hồi
+    // kích hoạt TẢI XUỐNG: Chromium giao luồng cho tầng download nên tầng network không giữ lại
+    // thân nữa. Bước này ĐỎ với "0 byte" trong khi máy chủ hoàn toàn bình thường — đã kiểm bằng
+    // một lượt gọi HTTP thật vào `GET /api/export/:id.xlsx`: 54.676 byte, mở đầu `PK`.
+    //
+    // Đọc tệp đã tải vừa đúng hơn vừa MẠNH HƠN: nó kiểm đúng thứ người dùng thật nhận được trên
+    // đĩa, thay vì thứ tầng network tình cờ còn giữ.
+    const duongTai = await taiXuong.path();
+    const thanXuat = duongTai && existsSync(duongTai) ? readFileSync(duongTai) : Buffer.alloc(0);
     doi(thanXuat.length > 4 && thanXuat[0] === 0x50 && thanXuat[1] === 0x4b,
-        `thân trả về là gói OOXML thật (${thanXuat.length} byte, mở đầu ${thanXuat.slice(0, 2).toString("latin1")})`);
+        `tệp TẢI VỀ là gói OOXML thật (${thanXuat.length} byte, mở đầu ${thanXuat.slice(0, 2).toString("latin1")})`);
     doi(!!taiXuong, `trình duyệt bắt đầu tải: ${taiXuong.suggestedFilename()}`);
 
     buoc("[U14] Đăng xuất");
