@@ -101,7 +101,7 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 | Mức | Trạng thái |
 |---|---|
 | Quy tắc **được viết + kiểm logic** | ✅ 22 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
-| Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana), **không bật mặc định** |
+| Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana) — **ĐANG CHẠY trên production từ 2026-09-16**, ba target đều `up` |
 | Có ai **bị đánh thức** khi chúng kêu | ❌ **KHÔNG có Alertmanager** — xem dưới |
 
 | Cảnh báo | Quy tắc | Mức |
