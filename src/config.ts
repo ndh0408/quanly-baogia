@@ -177,11 +177,24 @@ const schema = z.object({
   // Đơn vị là DÒNG, không phải request: một lần lưu 20.000 dòng tốn bộ nhớ bằng HAI MƯƠI lần lưu
   // 1.000 dòng, nên đếm suất là đếm sai đơn vị.
   //
-  // Công thức, suy từ số ĐO ĐƯỢC (~36 MB mỗi 1.000 dòng, nền ~200 MB, container 1.536 MB):
-  //     dùng được = 1.536 − 200 = 1.336 MB  →  ÷ 36  ≈ 37.000 dòng đang bay
-  //     chừa 45% cho lưu lượng thường        ≈ 20.000
-  // Nâng trần container lên 4 GB thì đặt SAVE_BUDGET_ROWS=60000 qua biến môi trường.
-  SAVE_BUDGET_ROWS: numEnv(z.coerce.number().int().min(1_000).max(1_000_000).default(20_000)),
+  // Công thức, suy từ số ĐO ĐƯỢC (~36 MB mỗi 1.000 dòng, nền ~200 MB):
+  //
+  // RÀNG BUỘC THẬT LÀ HEAP V8, KHÔNG PHẢI TRẦN cgroup. Trần cgroup 3.072 MB chỉ là chỗ nhân hệ
+  // điều hành ra tay; V8 ném heap-OOM BẮT ĐƯỢC ở --max-old-space-size=2.048 MB TRƯỚC đó, và đó
+  // mới là con số phải chia. Lấy trần cgroup mà chia là tính ra một ngân sách mà tiến trình không
+  // bao giờ tiêu tới được — nó chết trước.
+  //     dùng được = 2.048 − 200 = 1.848 MB  →  ÷ 36  ≈ 51.000 dòng đang bay
+  //     chừa ~22% cho lưu lượng thường       ≈ 40.000
+  //
+  // 40.000 = ĐÚNG HAI lần lưu lớn nhất (MAX_SAVE_TOTAL_ROWS = 20.000) chạy song song. Đó là điểm
+  // đáng chọn, không phải con số tròn ngẫu nhiên: đo được 20.000 dòng → đỉnh 756 MB, nên hai lượt
+  // cùng lúc ≈ 1.512 MB, vẫn dưới heap 2.048 MB.
+  //
+  // ⚠️ ĐỪNG nâng lên 60.000. Bản trước của chú thích này khuyên đúng như vậy ("nâng trần container
+  // lên 4 GB thì đặt SAVE_BUDGET_ROWS=60000") — mà 60.000 CHÍNH LÀ con số đã tái hiện được
+  // oom-kill trên máy chủ thật. Muốn nâng thì nâng `--max-old-space-size` TRƯỚC, rồi chia lại
+  // theo đúng công thức trên, và đo lại.
+  SAVE_BUDGET_ROWS: numEnv(z.coerce.number().int().min(1_000).max(1_000_000).default(40_000)),
   // Bao nhiêu request được XẾP HÀNG chờ ngân sách. Không phải cho đẹp: mỗi người đang chờ đã parse
   // xong payload và đang ÔM nó trong bộ nhớ, nên hàng đợi không trần là một đường OOM khác.
   SAVE_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(100).default(4)),
