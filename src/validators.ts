@@ -223,10 +223,28 @@ const extraTableSchema = z.object({
   items: z.array(itemSchema).max(1000, "Tối đa 1000 dòng trong một trang").default([]),
 });
 
-// SỨC CHỨA TỐI ĐA CỦA ĐƯỜNG LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
+// SỨC CHỨA TỐI ĐA CỦA SCHEMA LƯU: 60 trang × 1000 dòng. Đường xuất NỀN phải nhận được TRỌN vẹn
 // ngần này — xem chú thích ngay dưới, và src/worker.ts dùng lại đúng hai hằng số này.
+//
+// (`MAX_SAVE_TOTAL_ROWS` = 20.000 ở cuối file là trần THẬT cho báo giá MỚI. Nhưng nó chặn theo
+// CHIỀU TĂNG, nên báo giá CŨ lớn hơn thế vẫn tồn tại và vẫn phải lấy dữ liệu ra được — đó chính là
+// lý do trần xuất nền phải bám theo sức chứa SCHEMA, không bám theo trần lưu hiện hành.)
 export const MAX_SAVE_SHEETS = 60;
 export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
+
+// ── TRẦN XUẤT NỀN: 60.000, VÀ ĐÃ ĐO LÀ KỊP ────────────────────────────────
+// ĐO TRONG container quanly-app trên VM (`buildQuoteBuffer` thật, template gn_banner):
+//     20.000 dòng →  7,6s →  9,5 MB
+//     40.000 dòng → 15,0s → 19,3 MB
+//     60.000 dòng → 23,0s → 29,0 MB
+//
+// 23,0s LỌT trần cứng 30s của `generateInWorker` — nhưng chỉ dư 23%, không đủ cho một VM bận hơn.
+// ĐÃ THỬ hạ hằng số này xuống 40.000 cho dư 100%: SAI, và ba cụm test (b1/b2/b9) bắt ngay. Báo giá
+// CŨ lớn hơn 40.000 sẽ không còn ĐƯỜNG NÀO lấy dữ liệu ra — nhốt người dùng lại với chính dữ liệu
+// của họ, đúng cái bẫy mà khối "ĐÃ GỠ. ĐỪNG ĐẶT LẠI" ở cuối file này ghi lại.
+//
+// Cách đúng là nới THỜI GIAN cho riêng đường nền (`EXPORT_GEN_TIMEOUT_NEN_MS`, src/exportQueue.ts):
+// ở đó không có request nào đang chờ, người dùng hỏi trạng thái job khi nào cũng được.
 export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
 
 // LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).

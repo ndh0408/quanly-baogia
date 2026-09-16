@@ -45,10 +45,15 @@ vi.mock("node:worker_threads", () => ({ Worker: WorkerCam }));
 
 let eq, sinhFileXuat, UnrecoverableError;
 const TRAN_CU = process.env.EXPORT_GEN_TIMEOUT_MS;
+// Đường NỀN có trần RIÊNG (mặc định 90s) từ 2026-09-16 — không hạ cả hai thì bài dưới treo 90 giây
+// và vitest cắt ở 20s. Đó cũng chính là điều bài này phải khẳng định: `sinhFileXuat` KHÔNG còn
+// dùng trần đồng bộ nữa.
+const TRAN_NEN_CU = process.env.EXPORT_GEN_TIMEOUT_NEN_MS;
 
 beforeAll(async () => {
   // Sàn của EXPORT_GEN_TIMEOUT_MS là 1_000 (Math.max) — đặt thấp hơn cũng bị kẹp lên 1s.
   process.env.EXPORT_GEN_TIMEOUT_MS = "1000";
+  process.env.EXPORT_GEN_TIMEOUT_NEN_MS = "1000";
   vi.resetModules();
   eq = await import("../src/exportQueue.js");
   ({ sinhFileXuat } = await import("../src/worker.js"));
@@ -57,6 +62,8 @@ beforeAll(async () => {
 afterAll(() => {
   if (TRAN_CU === undefined) delete process.env.EXPORT_GEN_TIMEOUT_MS;
   else process.env.EXPORT_GEN_TIMEOUT_MS = TRAN_CU;
+  if (TRAN_NEN_CU === undefined) delete process.env.EXPORT_GEN_TIMEOUT_NEN_MS;
+  else process.env.EXPORT_GEN_TIMEOUT_NEN_MS = TRAN_NEN_CU;
 });
 
 describe("[ht3] trần sinh file của job xuất nền", () => {
@@ -92,6 +99,8 @@ describe("[ht3] trần sinh file của job xuất nền", () => {
     expect(loi).toBeInstanceOf(UnrecoverableError);
     // Thông điệp phải đọc được ở GET /api/jobs/:queue/:id (failedReason) và chỉ đúng nút vặn.
     expect(loi.message).toMatch(/quá lớn/);
-    expect(loi.message).toMatch(/EXPORT_GEN_TIMEOUT_MS/);
+    // Phải chỉ đúng nút vặn CỦA ĐƯỜNG NỀN. Chỉ sang EXPORT_GEN_TIMEOUT_MS là bảo người đọc vặn
+    // một biến không còn tác dụng với lỗi họ vừa gặp.
+    expect(loi.message).toMatch(/EXPORT_GEN_TIMEOUT_NEN_MS/);
   });
 });

@@ -37,12 +37,12 @@ worker:
   replicaCount: 2
   concurrency: 4
   # Thời gian cho worker chạy nốt job đang xử lý khi bị dừng (SIGTERM → Worker.close()).
-  # 90 chứ không phải 60: riêng bước sinh file của job xuất đã có trần cứng 30s
-  # (`EXPORT_GEN_TIMEOUT_MS` ở src/exportQueue.ts, áp vào worker qua `sinhFileXuat` trong
+  # 150 chứ không phải 90: bước sinh file của job xuất NỀN nay có trần cứng RIÊNG 90s
+  # (`EXPORT_GEN_TIMEOUT_NEN_MS` ở src/exportQueue.ts, áp vào worker qua `sinhFileXuat` trong
   # src/worker.ts), còn phải cộng tải lên kho object và ghi CSDL.
   # Cùng con số với infra/k8s/worker.yaml và `stop_grace_period` của compose — ba đường triển
   # khai lệch nhau thì bản vá chỉ dời chỗ hỏng sang đường khác. CHƯA đo trên cụm thật.
-  terminationGracePeriodSeconds: 90
+  terminationGracePeriodSeconds: 150
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 1, memory: 3Gi }

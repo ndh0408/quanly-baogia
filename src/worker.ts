@@ -11,7 +11,7 @@ import { createWorker, getQueue, QUEUES, isQueueEnabled, capNhatDoSauHangDoi } f
 import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
-import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_MS, capNhatCongSuatXuat } from "./exportQueue.js";
+import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_NEN_MS, capNhatCongSuatXuat } from "./exportQueue.js";
 import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
@@ -135,12 +135,20 @@ async function withExportMetric(format: string, fn: () => Promise<any>) {
  */
 export async function sinhFileXuat(kind: "xlsx" | "pdf", quote: any, noiTuyen: () => any) {
   try {
-    return await runExportJob(kind, JSON.parse(JSON.stringify(quote)), noiTuyen, { choPhepNoiTuyen: false });
+    // `timeoutMs` RIÊNG: ở đây không có request nào đang treo, nên trần 30s của đường đồng bộ là
+    // quá chặt cho một báo giá 60.000 dòng (ĐO: 23,0s trên VM — lọt, nhưng chỉ dư 23%).
+    return await runExportJob(kind, JSON.parse(JSON.stringify(quote)), noiTuyen, {
+      choPhepNoiTuyen: false,
+      timeoutMs: EXPORT_GEN_TIMEOUT_NEN_MS,
+    });
   } catch (e) {
     if (isTimeoutError(e)) {
-      const giay = Math.round(EXPORT_GEN_TIMEOUT_MS / 1000);
+      // TÊN BIẾN TRONG THÔNG ĐIỆP PHẢI LÀ NÚT VẶN ĐANG ÁP DỤNG Ở ĐÂY. Đường nền dùng
+      // EXPORT_GEN_TIMEOUT_NEN_MS; chỉ tên biến kia là chỉ người đọc đi vặn một nút KHÔNG có tác
+      // dụng với lỗi họ vừa gặp — rồi kết luận là hệ thống hỏng.
+      const giay = Math.round(EXPORT_GEN_TIMEOUT_NEN_MS / 1000);
       throw new UnrecoverableError(
-        `Báo giá quá lớn: sinh file vượt trần ${giay}s. Nâng EXPORT_GEN_TIMEOUT_MS (và ân hạn dừng của worker) nếu đây là báo giá hợp lệ.`
+        `Báo giá quá lớn: sinh file vượt trần ${giay}s. Nâng EXPORT_GEN_TIMEOUT_NEN_MS (và ân hạn dừng của worker) nếu đây là báo giá hợp lệ.`
       );
     }
     throw e;

@@ -333,8 +333,12 @@ services:
     # chờ job đang chạy xong; bị cắt ngang thì BullMQ giữ khoá tới hết lockDuration (5 phút,
     # src/queue.ts) mới cho chạy lại — người dùng thấy bản xuất đứng im suốt lượt deploy. Đây là
     # đường ĐANG CHẠY THẬT (deploy.sh), nên nó quan trọng hơn hai đường k8s/Helm cùng sửa kèm.
-    # 90 khớp infra/k8s/worker.yaml và values.yaml. CHƯA đo trên VM thật — là mức chọn có căn cứ.
-    stop_grace_period: 90s
+    # 150 khớp infra/k8s/worker.yaml và values.yaml. TRƯỚC 2026-09-16 là 90, neo vào trần 30s của
+    # `EXPORT_GEN_TIMEOUT_MS`. Đường NỀN nay có trần riêng 90s (EXPORT_GEN_TIMEOUT_NEN_MS) vì một
+    # báo giá 60.000 dòng ĐO ĐƯỢC mất 23,0s trên VM — lọt 30s nhưng chỉ dư 23%. Ân hạn phải bao
+    # được trần MỚI cộng chỗ cho tải lên kho object và ghi CSDL, nếu không thì job bị cắt ngang
+    # và BullMQ giữ khoá tới hết lockDuration (5 phút) — đúng thứ ân hạn này sinh ra để tránh.
+    stop_grace_period: 150s
     # Worker nền (không HTTP) → tắt healthcheck HTTP kế thừa Dockerfile (luôn fail = unhealthy giả).
     healthcheck:
       disable: true

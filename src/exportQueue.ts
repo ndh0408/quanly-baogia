@@ -170,6 +170,30 @@ const isCapacityError = (e: unknown) => !!e && typeof e === "object" && (e as an
  */
 export const EXPORT_GEN_TIMEOUT_MS = Math.max(1_000, Number(process.env.EXPORT_GEN_TIMEOUT_MS) || 30_000);
 
+/**
+ * TRẦN CỨNG RIÊNG CHO ĐƯỜNG XUẤT NỀN (src/worker.ts).
+ *
+ * Hai đường xuất chịu sức ép hoàn toàn khác nhau, nên dùng chung một con số là ép cả hai vào chỗ
+ * sai:
+ *   · ĐỒNG BỘ — có một request HTTP đang treo. 30s đã là dài với người đang nhìn màn hình, và
+ *     trần kích thước ở đó (MAX_EXPORT_ITEMS = 20.000) ĐO ĐƯỢC là 7,6s, dư quá nhiều.
+ *   · NỀN — không ai đang chờ. Job nằm trong hàng đợi, người dùng hỏi trạng thái khi nào cũng
+ *     được. Trần kích thước ở đó là SỨC CHỨA SCHEMA (60.000 dòng), ĐO ĐƯỢC là 23,0s trên VM —
+ *     lọt 30s, nhưng chỉ dư 23%. Một VM bận hơn hoặc một báo giá nhiều công thức hơn là vượt, và
+ *     khi vượt thì `terminate()` giết luồng: người dùng chờ trọn 30 giây rồi nhận job hỏng.
+ *
+ * ĐÃ THỬ cách kia — hạ MAX_ASYNC_EXPORT_ITEMS xuống 40.000 cho dư 100%. Sai: báo giá CŨ lớn hơn
+ * thế mất luôn đường lấy dữ liệu ra. Nới thời gian ở ĐÚNG đường không ai chờ mới là chỗ trả giá rẻ.
+ *
+ * 90s = ~3,9× mức đo được ở trần kích thước. Đi kèm `stop_grace_period` / 
+ * `terminationGracePeriodSeconds` = 150s (90 + tải lên kho object + ghi CSDL) — ba con số đó neo
+ * vào chính hằng số này, đổi một là phải đổi cả ba.
+ */
+export const EXPORT_GEN_TIMEOUT_NEN_MS = Math.max(
+  EXPORT_GEN_TIMEOUT_MS,
+  Number(process.env.EXPORT_GEN_TIMEOUT_NEN_MS) || 90_000,
+);
+
 function generateInWorker(kind: string, quote: any, timeoutMs = EXPORT_GEN_TIMEOUT_MS) {
   return new Promise<any>((resolve, reject) => {
     let done = false;
@@ -208,7 +232,8 @@ export async function runExportJob(
   kind: string,
   plainQuote: any,
   inlineFn: () => any,
-  { signal, choPhepNoiTuyen = true }: { signal?: AbortSignal; choPhepNoiTuyen?: boolean } = {}
+  { signal, choPhepNoiTuyen = true, timeoutMs = EXPORT_GEN_TIMEOUT_MS }:
+    { signal?: AbortSignal; choPhepNoiTuyen?: boolean; timeoutMs?: number } = {}
 ) {
   // Xin chỗ NGOÀI try: lỗi hết công suất không được rơi vào nhánh "thử lại nội tuyến" bên dưới.
   await gate.acquire(signal);
@@ -221,7 +246,7 @@ export async function runExportJob(
       // Chờ trong hàng đợi xong mới tới lượt — trong lúc đó client có thể đã bỏ đi. Kiểm lại NGAY
       // trước khi tiêu CPU, thay vì sinh ra một file không ai nhận.
       if (signal?.aborted) throw abortedError();
-      buf = await generateInWorker(kind, plainQuote);
+      buf = await generateInWorker(kind, plainQuote, timeoutMs);
     } finally {
       gate.release();
       exportActiveWorkers.set(gate.active());

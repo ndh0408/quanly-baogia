@@ -22,11 +22,14 @@ spec:
       # và gọi thẳng buildQuoteBuffer — con số 90 khi đó neo vào một trần không tồn tại.)
       # Job bị cắt ngang không "chạy lại ngay": BullMQ giữ khoá tới hết lockDuration (5 phút,
       # src/queue.ts) rồi mới cho chạy lại — người dùng thấy bản xuất đứng im suốt lượt deploy.
-      # 90 = 3× trần 30s, đủ chỗ cho upload + ghi CSDL. Đây là con số CHỌN CÓ CĂN CỨ, KHÔNG phải
-      # số đo: sandbox không có cụm k8s nên chưa ai bấm giờ một lượt đóng worker thật.
+      # 150 = 90s (EXPORT_GEN_TIMEOUT_NEN_MS — trần sinh file của ĐƯỜNG NỀN, src/exportQueue.ts)
+      # cộng chỗ cho upload + ghi CSDL. TRƯỚC 2026-09-16 là 90, neo vào trần 30s dùng chung; đường
+      # nền nay có trần riêng vì báo giá 60.000 dòng ĐO ĐƯỢC mất 23,0s trên VM (lọt 30s, dư 23% —
+      # không đủ biên). Vẫn là con số CHỌN CÓ CĂN CỨ, KHÔNG phải số đo: chưa ai bấm giờ một lượt
+      # đóng worker thật trên cụm k8s.
       # Phải khớp với `worker.terminationGracePeriodSeconds` của chart Helm và `stop_grace_period`
       # của compose — ba đường triển khai cùng một hệ thống, lệch nhau là lỗi lại mọc ở đường kia.
-      terminationGracePeriodSeconds: 90
+      terminationGracePeriodSeconds: 150
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

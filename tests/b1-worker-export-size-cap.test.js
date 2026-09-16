@@ -23,15 +23,19 @@
 // rỗng khi NODE_ENV=test (chú thích sẵn ở src/routes/jobs.routes.ts:22-24).
 import { describe, it, expect, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ quote: null, daSinhFile: 0 }));
+const h = vi.hoisted(() => ({ quote: null, daSinhFile: 0, tranDaDung: undefined }));
 
 vi.mock("../src/db.js", () => ({
   prisma: { quote: { findFirst: async () => h.quote } },
 }));
 vi.mock("../src/exportQueue.js", () => ({
-  runExportJob: async () => { h.daSinhFile++; return Buffer.from("PK-gia-lap"); },
+  // GHI LẠI `timeoutMs` chứ không bỏ qua: đường NỀN phải truyền trần RIÊNG của nó (90s), không
+  // được lặng lẽ thừa hưởng trần 30s của đường đồng bộ — 60.000 dòng ĐO ĐƯỢC mất 23,0s trên VM,
+  // tức lọt 30s nhưng chỉ dư 23%.
+  runExportJob: async (_k, _q, _f, opts) => { h.daSinhFile++; h.tranDaDung = opts?.timeoutMs; return Buffer.from("PK-gia-lap"); },
   isTimeoutError: () => false,
   EXPORT_GEN_TIMEOUT_MS: 30_000,
+  EXPORT_GEN_TIMEOUT_NEN_MS: 90_000,
 }));
 vi.mock("../src/storage.js", () => ({
   isStorageEnabled: () => true,
@@ -93,6 +97,18 @@ describe("processor xuất nền — trần kích thước RỘNG HƠN đường
     const { UnrecoverableError } = await import("bullmq");
     await expect(processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } }))
       .rejects.toBeInstanceOf(UnrecoverableError);
+  });
+
+  // ── TRẦN THỜI GIAN: ĐƯỜNG NỀN PHẢI DÙNG TRẦN RIÊNG ───────────────────────
+  // Trần kích thước ở đây (60.000 dòng) ĐO ĐƯỢC là 23,0s trên VM. Trần đồng bộ là 30s — lọt, nhưng
+  // chỉ dư 23%. Nếu processor lặng lẽ dùng trần đồng bộ thì bài "60 × 1000 vẫn xuất nền được" ở
+  // trên vẫn XANH (nó mock `runExportJob`), trong khi chạy thật sẽ hỏng ở VM bận hơn. Nên phải
+  // kiểm CHÍNH con số được truyền xuống.
+  it("processor truyền trần NỀN xuống runExportJob, không thừa hưởng trần đồng bộ", async () => {
+    h.quote = baoGia(60, 1_000);
+    h.tranDaDung = undefined;
+    await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
+    expect(h.tranDaDung, "không truyền timeoutMs ⇒ dùng mặc định 30s của đường đồng bộ").toBe(90_000);
   });
 
   it("báo giá bình thường KHÔNG bị đụng tới (không phá hành vi nghiệp vụ)", async () => {
