@@ -38,6 +38,13 @@ NHANH=0
 export DATABASE_URL REDIS_URL S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_REGION \
        S3_FORCE_PATH_STYLE SESSION_SECRET PII_ENC_KEY NODE_ENV
 export REQUIRE_DB_TESTS=1
+# Pool CSDL của MỖI tiến trình test. Mặc định của ứng dụng là 20 (DB_POOL_MAX) — đúng cho một
+# tiến trình web phục vụ nhiều người, SAI cho vitest: nó chạy hàng chục tiến trình song song và
+# mỗi tiến trình dựng pool riêng. ĐO ĐƯỢC: 20 → đỉnh 95 kết nối, 5 → đỉnh 87. Hạ ở đây là thắt
+# đầu ỨNG DỤNG; nới max_connections=300 trong docker-compose.yml là thắt đầu MÁY CHỦ. Cần cả hai:
+# chỉ nới trần thì mỗi lần thêm bài test lại bò lên, chỉ hạ pool thì vẫn sát trần 100.
+export DB_POOL_MAX=${DB_POOL_MAX:-5}
+export SESSION_POOL_MAX=${SESSION_POOL_MAX:-2}
 
 # ══ CHỐT CHẶN: KHÔNG BAO GIỜ CHẠY LÊN HẠ TẦNG THẬT ══════════════════════════════════
 # Mấy dòng `: "${VAR:=...}"` ở trên chỉ đặt mặc định KHI BIẾN CHƯA CÓ. Ai đang export

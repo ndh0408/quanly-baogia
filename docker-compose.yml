@@ -23,6 +23,19 @@ services:
     # nghĩa là ai cùng mạng cũng đọc/ghi được Postgres, Redis, MinIO và hòm thư dev.
     ports:
       - "127.0.0.1:5432:5432"
+    # ── TRẦN KẾT NỐI: 100 (mặc định) KHÔNG ĐỦ CHO BỘ TEST ─────────────────────
+    # ĐO ĐƯỢC 2026-09-16: một lượt `npx vitest run` đầy đủ chạm ĐỈNH 95/100 kết nối. Vitest chạy
+    # hàng chục tiến trình song song, MỖI tiến trình dựng pool Prisma riêng — khác hẳn hình dạng
+    # của production (một tiến trình web, một worker, tổng ~44/100).
+    #
+    # Hệ quả của việc chạy sát trần: `npm run verify` ĐỎ NGẪU NHIÊN ở những cổng chẳng liên quan
+    # gì tới thay đổi đang kiểm — đã mất cả buổi truy ba lần đỏ khác nhau (`pii-rotate-backfill`,
+    # `xc-incremental-quote-save`, `zipSafety`, rồi `authsess-invite-mfa-lockout`) mà chạy
+    # riêng từng bài thì bài nào cũng XANH. Lỗi thật là `53300 sorry, too many clients already`.
+    #
+    # CHỈ nới ở đây. docker-compose.prod.yml KHÔNG đổi: production giữ 100 là đúng, và quy tắc
+    # cảnh báo `QuanlyKetNoiCsdlSapCan` gác ở 80% của trần THẬT dù trần là bao nhiêu.
+    command: ["postgres", "-c", "max_connections=300"]
     volumes:
       - quanly-pgdata:/var/lib/postgresql/data
     healthcheck:
