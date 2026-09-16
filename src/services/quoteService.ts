@@ -1379,6 +1379,31 @@ export async function markExtraTableRowPayment(req: Request) {
       }
     }
     if (!found) throw httpError(404, "Không tìm thấy dòng nội bộ");
+
+    // ── TRẦN TỔNG CHO CỘT extraTables ─────────────────────────────────────
+    // `paidProof` được zod chặn ở 900.000 ký tự — nhưng đó là trần cho MỘT LƯỢT, không phải cho
+    // CỘT. Không có chốt nào trên tổng, trong khi mỗi sheet nhận được 20 bảng × 1000 dòng, và
+    // chính handler này là ĐỌC–SỬA–GHI toàn khối: nạp cả cột, sửa tại chỗ, ghi cả cột trở lại,
+    // bên trong một transaction đang giữ `SELECT … FOR UPDATE` trên hàng sheet. Sau 100 ảnh trên
+    // một sheet, MỖI lượt /pay kế tiếp đọc ~90 MB, giữ ~90 MB, ghi ~90 MB trên luồng chính.
+    //
+    // ĐO ĐƯỢC ngày 2026-09-16 (vì sao đây là P1 chứ không phải P0): cột lớn nhất trên production
+    // là 424 BYTE, tổng 5,3 kB; trên dev là 92 kB. Chưa ai đính ảnh thật. Đây là lỗ TIỀM ẨN —
+    // chặn trước khi nó thành thói quen thì rẻ, chặn sau khi cột đã 90 MB thì không còn đường lùi.
+    //
+    // ÁP THEO CHIỀU TĂNG, cùng bài học với MAX_SAVE_TOTAL_ROWS (xem src/validators.ts): một trần
+    // tuyệt đối sẽ khoá luôn thao tác GỠ ảnh trên một cột đã quá lớn — tức nhốt người dùng lại với
+    // đúng dữ liệu họ đang cố dọn. Nên chỉ chặn khi cột PHÌNH THÊM quá trần; thu nhỏ thì luôn cho.
+    const coCu = JSON.stringify(Array.isArray(sheet.extraTables) ? sheet.extraTables : []).length;
+    const coMoi = JSON.stringify(tables).length;
+    if (coMoi > config.MAX_EXTRA_TABLES_BYTES && coMoi > coCu) {
+      throw httpError(
+        413,
+        `Bảng nội bộ của trang này đã ${(coMoi / 1048576).toFixed(1)} MB, vượt trần ${(config.MAX_EXTRA_TABLES_BYTES / 1048576).toFixed(0)} MB. ` +
+          "Hãy gỡ bớt ảnh chứng từ cũ rồi thử lại.",
+      );
+    }
+
     await tx.quoteSheet.update({ where: { id: sheetId }, data: { extraTables: tables } });
     // Bump Quote.updatedAt cho khoá lạc quan (chống lost-update CHÉO giữa hai người).
     //

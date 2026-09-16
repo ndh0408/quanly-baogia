@@ -189,6 +189,11 @@ const schema = z.object({
   // 2.000 chọn theo số ĐO ĐƯỢC: production có 756 hạng mục trên TOÀN BỘ 12 báo giá, nên thực tế
   // không lượt đọc nào chạm cổng; nó chỉ bật lên khi có báo giá thật sự lớn.
   READ_GATE_THRESHOLD_ROWS: numEnv(z.coerce.number().int().min(0).max(1_000_000).default(2_000)),
+  // Trần TỔNG cho cột jsonb `QuoteSheet.extraTables` (byte của chuỗi JSON). `paidProof` bị chặn
+  // 900.000 ký tự MỖI LƯỢT nhưng không có trần nào trên CỘT, mà /pay đọc–sửa–ghi cả khối mỗi lần.
+  // 8 MB ≈ 9 ảnh chứng từ cỡ tối đa trên một trang: rộng rãi cho dùng thật (production đang ở 424
+  // BYTE), mà vẫn cắt trường hợp xấu nhất xuống ~11 lần so với kịch bản 90 MB.
+  MAX_EXTRA_TABLES_BYTES: numEnv(z.coerce.number().int().min(64 * 1024).max(64 * 1024 * 1024).default(8 * 1024 * 1024)),
 
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
