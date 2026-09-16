@@ -28,8 +28,26 @@ const PWD = "Test1234!a";
 describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
   let app, user, token, envCu;
 
-  const demPhien = async () =>
-    Number((await prisma.$queryRawUnsafe("SELECT count(*)::int AS c FROM user_sessions"))[0].c);
+  /**
+   * Tập `sid` đang có trong bảng phiên.
+   *
+   * ── VÌ SAO KHÔNG ĐẾM SỐ HÀNG ───────────────────────────────────────────
+   * Bản trước là `SELECT count(*)` rồi khẳng định `sau - truoc === 0`. Bài kiểm đó CHẬP CHỜN, và
+   * đã đỏ thật trong verify với `expected -2 to be +0` — tức bảng MẤT 2 hàng giữa hai lần đếm.
+   *
+   * Thủ phạm không phải mã đang kiểm: `src/app.ts` dựng kho phiên với
+   * `pruneSessionInterval: 60 * 60`, và `connect-pg-simple` dọn phiên hết hạn NGAY khi kho được
+   * dựng. Mỗi `createApp()` trong bộ test đều kích một lượt dọn, xoá bớt hàng của những lượt chạy
+   * trước — ngay giữa `truoc` và `sau`.
+   *
+   * Hiệu số ròng vì thế KHÔNG phải thứ cần đo. Ý định thật của bài này là "đường Bearer không được
+   * SINH hàng phiên nào", và cái đó chỉ so được bằng TẬP `sid`: hàng bị dọn đi không liên quan.
+   */
+  const tapPhien = async () =>
+    new Set((await prisma.$queryRawUnsafe("SELECT sid FROM user_sessions")).map((r) => r.sid));
+
+  /** Những sid CÓ trong `sau` mà KHÔNG có trong `truoc` — tức hàng phiên vừa được sinh ra. */
+  const phienMoi = (truoc, sau) => [...sau].filter((x) => !truoc.has(x));
 
   beforeAll(async () => {
     // NODE_ENV=test dùng MemoryStore, không chạm bảng user_sessions → không đo được gì.
@@ -62,7 +80,7 @@ describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
   });
 
   it("nhiều request Bearer → KHÔNG thêm hàng user_sessions, KHÔNG có Set-Cookie", async () => {
-    const truoc = await demPhien();
+    const truoc = await tapPhien();
     let coCookie = 0;
     for (let i = 0; i < 5; i++) {
       const r = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${token}`);
@@ -71,20 +89,26 @@ describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
       if (r.headers["set-cookie"]) coCookie++;
     }
     await new Promise((r) => setTimeout(r, 600)); // kho phiên ghi bất đồng bộ
-    const sau = await demPhien();
+    const sau = await tapPhien();
 
     expect(coCookie, "KHÔNG được phát cookie cho client API").toBe(0);
-    expect(sau - truoc, "KHÔNG được sinh hàng phiên nào").toBe(0); // trước khi vá: 5
+    const moi = phienMoi(truoc, sau);
+    expect(moi, `sinh ${moi.length} hàng phiên cho request Bearer`).toEqual([]); // trước khi vá: 5
   });
 
   it("đăng nhập bằng COOKIE vẫn sinh phiên như cũ (không lỡ tay chặn nhầm trình duyệt)", async () => {
-    const truoc = await demPhien();
+    const truoc = await tapPhien();
     const agent = request.agent(app);
     const r = await agent.post("/api/auth/login").send({ username: user.username, password: PWD });
     expect(r.status).toBe(200);
     expect(r.headers["set-cookie"], "đường trình duyệt PHẢI có cookie").toBeTruthy();
     await new Promise((r) => setTimeout(r, 600));
-    expect(await demPhien(), "không tăng = app đang dùng MemoryStore, tức vi.resetModules() ở beforeAll không còn hiệu lực").toBeGreaterThan(truoc);
+    // Cũng so theo TẬP, không theo số lượng: lượt dọn phiên có thể xoá nhiều hơn số vừa sinh ra và
+    // làm phép so ">" đỏ oan — đúng lỗi chập chờn đã gặp ở bài trên.
+    expect(
+      phienMoi(truoc, await tapPhien()),
+      "không sinh phiên nào = app đang dùng MemoryStore, tức vi.resetModules() ở beforeAll không còn hiệu lực",
+    ).not.toEqual([]);
   });
 
   it("request Bearer KÈM cookie phiên vẫn đi qua phiên thật", async () => {
