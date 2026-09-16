@@ -25,7 +25,7 @@ chạm tới được.
 
 ### Metric có thật
 
-Bảng dưới đây là **toàn bộ 24 metric** do `src/observability.ts` khai. Nguồn sự
+Bảng dưới đây là **toàn bộ 29 metric** do `src/observability.ts` khai. Nguồn sự
 thật là file đó — `scripts/ci/check-alerts.mjs` đối chiếu mọi quy tắc cảnh báo và
 mọi panel Grafana với nó, nên metric đổi tên mà quên sửa là cổng CI đỏ.
 
@@ -196,7 +196,7 @@ Chưa bật mặc định vì production là một VM và ba container nữa ăn
   giả định. Chưa bật vì production là **một VM** và bốn container nữa ăn RAM của
   chính ứng dụng (xem
   [TECHNOLOGY_DECISIONS.md](../architecture/TECHNOLOGY_DECISIONS.md)).
-- **Chưa có Alertmanager — cảnh báo dừng ở giao diện Prometheus.** 20 quy tắc sẽ
+- **Chưa có Alertmanager — cảnh báo dừng ở giao diện Prometheus.** 22 quy tắc sẽ
   chuyển sang `firing` và nằm ở `/alerts`; **không** Telegram, **không** email,
   **không ai bị đánh thức**. Khối `alerting:` trong
   `infra/observability/prometheus.yml` đã để sẵn chỗ nối. Alert duy nhất đang

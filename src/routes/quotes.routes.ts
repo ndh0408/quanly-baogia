@@ -12,6 +12,8 @@ import {
   PAYMENT_PROOF_DATA_URL_RE,
 } from "../validators.js";
 import { requirePermission, requireAnyPermission, can, PERMISSIONS as P } from "../permissions.js";
+// Hai chốt của đường lưu — ĐẶT SAU `validate` (cần body đã parse để đếm dòng) và TRƯỚC handler.
+import { gacKichThuocLuu, gacNganSachLuu } from "../saveBudget.js";
 import { presentQuote, presentQuoteRow } from "../quoteUtils.js";
 import {
   createQuote,
@@ -220,6 +222,8 @@ router.post(
   "/",
   requirePermission(P.QUOTE_CREATE),
   validate({ body: QuoteCreateSchema }),
+  gacKichThuocLuu,
+  gacNganSachLuu,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await createQuote(req);
     res.status(201).json(presentQuote(quote, { includeLogo: true }));
@@ -230,6 +234,8 @@ router.post(
 router.put(
   "/:id",
   validate({ params: idParam, body: QuoteUpdateSchema }),
+  gacKichThuocLuu,
+  gacNganSachLuu,
   asyncHandler(async (req: Request, res: Response) => {
     // 🔒 Người ĐIỀN phần HN KHÔNG được sửa báo giá chính (chỉ điền phần HN qua endpoint riêng bên dưới).
     //

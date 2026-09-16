@@ -148,6 +148,26 @@ export const prisma = base.$extends({
 // accept THIS type so the inferred `tx` flows through without `as any`.
 export type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
+/**
+ * TRẠNG THÁI POOL — thứ THẬT SỰ chặn người dùng khi đông.
+ *
+ * VÌ SAO CẦN, dù đã có `db_connections_used`: gauge kia đếm `pg_stat_activity` của CẢ CSDL rồi
+ * chia cho `max_connections` của MÁY CHỦ. Nhưng một tiến trình web cạn pool HOÀN TOÀN chỉ đóng
+ * góp DB_POOL_MAX + SESSION_POOL_MAX = 24 kết nối; với hai replica là 48/100 = 48% — DƯỚI ngưỡng
+ * cảnh báo 80%. Tức cảnh báo kia IM LẶNG đúng lúc mọi request đang xếp hàng rồi lỗi.
+ *
+ * `waitingCount` là con số trả lời được câu "nhiều người thì sao": nó > 0 nghĩa là ĐANG CÓ người
+ * phải chờ mới có kết nối — triệu chứng xuất hiện TRƯỚC khi ai đó nhận lỗi.
+ */
+export function thongKePool() {
+  return {
+    tong: pool.totalCount,
+    ranh: pool.idleCount,
+    dangCho: pool.waitingCount,
+    tran: config.DB_POOL_MAX,
+  };
+}
+
 process.on("beforeExit", async () => {
   await base.$disconnect();
 });

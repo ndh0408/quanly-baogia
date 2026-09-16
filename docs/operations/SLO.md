@@ -90,7 +90,7 @@ sum by (event) (rate(sse_events[5m]))    # lưu lượng sự kiện thật sự
 
 ## Cảnh báo
 
-**20 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
+**22 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
 — chúng nằm ở [`infra/prometheus/alerts.yaml`](../../infra/prometheus/alerts.yaml),
 bài kiểm logic ở `infra/prometheus/alerts.test.yaml`, cổng CI là
 `npm run check:alerts`. Bản trước của tài liệu này viết "chưa cái nào được cấu
@@ -100,7 +100,7 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 
 | Mức | Trạng thái |
 |---|---|
-| Quy tắc **được viết + kiểm logic** | ✅ 20 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
+| Quy tắc **được viết + kiểm logic** | ✅ 22 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
 | Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana), **không bật mặc định** |
 | Có ai **bị đánh thức** khi chúng kêu | ❌ **KHÔNG có Alertmanager** — xem dưới |
 

@@ -6,6 +6,7 @@ import { statfs } from "node:fs/promises";
 import * as Sentry from "@sentry/node";
 import type { Request, Response, NextFunction } from "express";
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
+import { readFileSync } from "node:fs";
 import { config } from "./config.js";
 import { logger, maskUrlSecrets } from "./logger.js";
 
@@ -362,6 +363,90 @@ export const dbConnectionsMax = new Gauge({
   registers: DK_SUCKHOE,
   collect() { return capNhatSucKhoe(); },
 });
+/**
+ * ── POOL CỦA TIẾN TRÌNH: TÀI NGUYÊN CẠN TRƯỚC NHẤT ────────────────────────
+ * Xem khối chú thích ở `thongKePool` (src/db.ts) để biết vì sao `db_connections_used` KHÔNG thay
+ * thế được mấy gauge này: nó đo trần của MÁY CHỦ, còn thứ chặn người dùng là pool của TIẾN TRÌNH.
+ */
+export const pgPoolTong = new Gauge({
+  name: "pg_pool_total",
+  help: "Số kết nối pool của TIẾN TRÌNH này đang mở (rảnh + đang dùng)",
+  registers: DK_SUCKHOE,
+  collect() { capNhatPool(); },
+});
+export const pgPoolRanh = new Gauge({
+  name: "pg_pool_idle",
+  help: "Số kết nối trong pool đang RẢNH",
+  registers: DK_SUCKHOE,
+  collect() { capNhatPool(); },
+});
+export const pgPoolDangCho = new Gauge({
+  name: "pg_pool_waiting",
+  help: "Số request ĐANG XẾP HÀNG chờ một kết nối. > 0 nghĩa là pool đã cạn — triệu chứng xuất hiện TRƯỚC khi ai đó nhận lỗi",
+  registers: DK_SUCKHOE,
+  collect() { capNhatPool(); },
+});
+export const pgPoolTran = new Gauge({
+  name: "pg_pool_max",
+  help: "DB_POOL_MAX của tiến trình này — MẪU SỐ để tính tỉ lệ, đừng viết cứng trong quy tắc cảnh báo",
+  registers: DK_SUCKHOE,
+  // Đọc THẲNG từ config, KHÔNG đi qua `capNhatPool`: hàm kia dùng import ĐỘNG nên lượt scrape ĐẦU
+  // TIÊN luôn về sau khi `collect()` đã trả, để lại mẫu số 0. Mẫu số 0 làm quy tắc cảnh báo (vốn
+  // gác `pg_pool_max > 0`) lặng lẽ bỏ qua tiến trình đó — một cảnh báo im vì lý do kỹ thuật là
+  // cảnh báo tệ hơn không có. Trần pool là hằng số cấu hình, không cần hỏi pool mới biết.
+  collect() { pgPoolTran.set(config.DB_POOL_MAX); },
+});
+
+/**
+ * TRẦN BỘ NHỚ CỦA CONTAINER, đọc từ cgroup — MẪU SỐ cho cảnh báo bộ nhớ.
+ *
+ * VÌ SAO PHẢI PHÁT RA: chế độ hỏng DUY NHẤT đã ĐO ĐƯỢC của hệ này là OOM-kill (một file Excel
+ * 4,1 MB, hoặc một lần lưu 60.000 dòng, đủ giết tiến trình), mà trong 20 quy tắc cảnh báo KHÔNG có
+ * quy tắc nào về bộ nhớ. Thứ gần nhất, `QuanlyTienTrinhKhoiDongLaiLienTuc`, chỉ kêu sau 20 PHÚT
+ * crash-loop — tức sau khi đã mất dịch vụ nhiều lần.
+ *
+ * Đọc từ cgroup chứ không viết cứng 1536: người vận hành đổi `deploy.resources.limits.memory` mà
+ * không ai sửa mã, và một cảnh báo theo ngưỡng cứng sẽ sai ngay lần đó. -1 = không đọc được
+ * (chạy ngoài container) — quy tắc cảnh báo loại giá trị này bằng `> 0`.
+ */
+export const appMemLimit = new Gauge({
+  name: "app_memory_limit_bytes",
+  help: "Trần bộ nhớ cgroup của container (byte). -1 = không đọc được",
+  registers: DK_SUCKHOE,
+  collect() { appMemLimit.set(docTranBoNho()); },
+});
+
+let tranBoNhoCache: number | null = null;
+function docTranBoNho(): number {
+  if (tranBoNhoCache !== null) return tranBoNhoCache;
+  // Đọc MỘT LẦN rồi nhớ: trần cgroup không đổi trong đời một tiến trình, mà `collect()` chạy mỗi
+  // lượt scrape — đọc đĩa mỗi 15 giây cho một hằng số là lãng phí không có lý do.
+  const doc = (p: string): number | null => {
+    try {
+      const t = readFileSync(p, "utf8").trim();
+      if (t === "max") return null;            // cgroup v2 khi KHÔNG đặt trần
+      const n = Number(t);
+      return Number.isFinite(n) && n > 0 && n < 2 ** 53 ? n : null;
+    } catch { return null; }
+  };
+  tranBoNhoCache = doc("/sys/fs/cgroup/memory.max") ?? doc("/sys/fs/cgroup/memory/memory.limit_in_bytes") ?? -1;
+  return tranBoNhoCache;
+}
+
+/** Một lượt đọc pool dùng chung cho cả bốn gauge — `collect()` của chúng chạy cùng một lượt scrape. */
+function capNhatPool(): void {
+  try {
+    // import ĐỘNG cùng lý do với `doCsdl`: src/db.ts dựng Pool/PrismaClient ngay ở cấp module.
+    void import("./db.js").then(({ thongKePool }) => {
+      const t = thongKePool();
+      pgPoolTong.set(t.tong);
+      pgPoolRanh.set(t.ranh);
+      pgPoolDangCho.set(t.dangCho);
+      pgPoolTran.set(t.tran);
+    }).catch(() => {});
+  } catch { /* chưa nạp được db.js — để nguyên giá trị lượt trước */ }
+}
+
 export const redisConfigured = new Gauge({
   name: "redis_configured",
   help: "1 = tiến trình này được cấu hình REDIS_URL (hàng đợi BullMQ/rate-limit/backplane SSE — KHÔNG giữ phiên); 0 = cố ý chạy không Redis",

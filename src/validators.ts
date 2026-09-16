@@ -338,6 +338,60 @@ export const MAX_EXPORT_ITEMS = 20_000;
 export const demSoDong = (sheets: { items?: unknown[] }[]) =>
   sheets.reduce((n, s) => n + (Array.isArray(s?.items) ? s.items.length : 0), 0);
 
+/**
+ * ĐẾM TỔNG SỐ DÒNG MỘT LẦN LƯU THẬT SỰ MANG THEO — cả BA nguồn.
+ *
+ * Khác `demSoDong` ngay trên: hàm kia đếm cho đường XUẤT nên cố ý bỏ bảng nội bộ. Hàm này đếm cho
+ * BỘ NHỚ, mà bộ nhớ thì không phân biệt dòng nào xuất ra Excel — mọi dòng đều được parse, validate,
+ * sao chép vào payload Prisma, rồi chụp lại một lần nữa vào bản lưu phiên bản.
+ *
+ * VÌ SAO PHẢI ĐẾM CẢ BA: trần 1000 ở `sheetSchema.items` CHỈ áp cho `sheet.items`. Ngay dòng dưới,
+ * `extraTables` được `.max(20)` bảng — mà MỖI bảng lại có `items` riêng cũng `.max(1000)`. Cộng
+ * với `hnTables` (`.max(60)` bảng × 1000 dòng), sức chứa THẬT của schema là:
+ *     60 trang × (1000 + 20×1000)  +  60 bảng HN × 1000  =  1.320.000 dòng
+ * chứ không phải 60.000 như mọi chú thích và tài liệu vẫn khai.
+ */
+export const demTongDongLuu = (body: unknown): number => {
+  const b = body as {
+    sheets?: Array<{ items?: unknown[]; extraTables?: Array<{ items?: unknown[] }> }>;
+    hnTables?: Array<{ items?: unknown[] }>;
+  } | null;
+  let n = 0;
+  for (const s of b?.sheets ?? []) {
+    n += Array.isArray(s?.items) ? s.items.length : 0;
+    for (const t of s?.extraTables ?? []) n += Array.isArray(t?.items) ? t.items.length : 0;
+  }
+  for (const t of b?.hnTables ?? []) n += Array.isArray(t?.items) ? t.items.length : 0;
+  return n;
+};
+
+/**
+ * ── TRẦN TỔNG DÒNG MỖI LẦN LƯU ──────────────────────────────────────────────
+ *
+ * ĐO ĐƯỢC trên môi trường thật (container app 1.536 MB, heap V8 1.024 MB):
+ *     10.000 dòng →  7,1s, đỉnh RSS   460 MB
+ *     20.000 dòng → 13,1s, đỉnh RSS   756 MB
+ *     30.000 dòng → 18,1s, đỉnh RSS 1.154 MB  (77% trần — sống, nhưng KHÔNG còn chỗ cho ai khác)
+ *     60.000 dòng → tiến trình BỊ NHÂN GIẾT (oom-kill, anon-rss 1,5 GB) — CẢ APP SẬP cho mọi người
+ * Quy luật: ~36 MB mỗi 1.000 dòng, cộng nền ~200 MB.
+ *
+ * 20.000 là con số ĐO ĐƯỢC còn an toàn, không phải số chọn cho tròn.
+ *
+ * ── VÀ VÌ SAO NÓ ÁP THEO CHIỀU TĂNG, KHÔNG PHẢI TUYỆT ĐỐI ───────────────────
+ * Đọc khối "ĐÃ GỠ. ĐỪNG ĐẶT LẠI" ở ngay dưới trước khi đụng vào đây. Lần trước một trần tuyệt đối
+ * đã bị gỡ vì nó áp NGƯỢC lên dữ liệu đã có: chủ một báo giá 25.000 dòng lưu hợp lệ từ trước sẽ
+ * không sửa nổi chính báo giá của mình nữa, kể cả để TÁCH BỚT cho vừa trần (tách cũng là một lần
+ * Lưu). Đó là lý do đúng, và nó vẫn đúng.
+ *
+ * Nên trần này KHÔNG chặn theo con số tuyệt đối mà chặn theo HƯỚNG:
+ *   · TẠO MỚI  → chặn thẳng. Không mất gì: thứ chưa tồn tại thì không ai bị khoá khỏi nó, và thứ
+ *                vượt trần vốn dĩ lưu không nổi.
+ *   · LƯU LẠI  → cho qua nếu  dòng mới ≤ max(trần, số dòng ĐANG CÓ trong CSDL).
+ *                Chủ báo giá cũ vẫn sửa được, vẫn GIẢM được, chỉ không PHÌNH THÊM quá trần.
+ * Chốt chặn nằm ở src/saveBudget.ts (`gacKichThuocLuu`) vì nó cần đọc CSDL — zod không đọc được.
+ */
+export const MAX_SAVE_TOTAL_ROWS = Number(process.env.MAX_SAVE_TOTAL_ROWS) || 20_000;
+
 const quoteSheetsSchema = z
   .array(sheetSchema)
   .min(1, "Báo giá phải có ít nhất 1 trang")

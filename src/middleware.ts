@@ -225,6 +225,29 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     return typeof c === "string" ? c : null;
   };
 
+  // ── CẠN POOL: GẮN MÃ TRƯỚC KHI VÀO BẢNG ÁNH XẠ ────────────────────────────
+  // Nhánh `P2024` ngay dưới là MÃ CHẾT trên đường thật, và điều đó ĐÃ ĐO chứ không suy luận:
+  // dựng pool max=1, chiếm hết, rồi gọi Prisma → nhận về
+  //     name="Error"  code=undefined  meta=null  message="timeout exceeded when trying to connect"
+  // Lý do: node-pg ném một Error TRẦN (pg-pool/index.js). Adapter của Prisma thử phân loại trong
+  // `convertDriverError` — `isSocketError` đòi code+syscall+errno, `isDriverError` đòi
+  // code+message+severity — trượt hết, nhánh cuối `throw error` ném nguyên xi. Nên cổng vào bảng
+  // ánh xạ (`/^Pd{4}$/`) không khớp, và người dùng nhận 500 "Lỗi server" KHÔNG kèm Retry-After,
+  // cộng một sự kiện Sentry mỗi lượt.
+  //
+  // Hậu quả đúng vào lúc tệ nhất: N người làm cạn pool → mỗi người chờ DB_TX_MAX_WAIT rồi nhận một
+  // lỗi không nói gì, không biết chờ bao lâu nên client và mọi proxy ở giữa thử lại NGAY — chính
+  // cái bão retry tự duy trì mà chú thích Retry-After ở cuối hàm này viết ra để tránh.
+  //
+  // Bài test cũ vẫn xanh vì nó tự chế `{ code: "P2024" }` thay vì đi qua đường thật.
+  //
+  // Nhận diện theo THÔNG ĐIỆP là cách duy nhất còn lại — lỗi không mang gì khác để bám. Gắn mã rồi
+  // để nhánh P2024 sẵn có xử lý, thay vì nhân đôi thông điệp tiếng Việt ở hai chỗ.
+  if (err && !err.code && !err.status && typeof err.message === "string" &&
+      /timeout exceeded when trying to connect/i.test(err.message)) {
+    err.code = "P2024";
+  }
+
   // Map known Prisma errors to proper HTTP status codes instead of opaque 500s.
   // (Avoids unique-constraint races / FK violations leaking as "Lỗi server".)
   if (err && typeof err.code === "string" && /^P\d{4}$/.test(err.code) && !err.status) {
@@ -286,7 +309,10 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     { reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack },
     "request failed"
   );
-  if (status >= 500) {
+  // 503 kèm `retryAfter` là "quá tải thoáng qua do chính hệ thống tự khai", KHÔNG phải sự cố —
+  // bắn Sentry cho nó là biến một đợt bận thành một trận lụt cảnh báo, đúng lúc người trực cần
+  // nhìn thấy tín hiệu thật.
+  if (status >= 500 && !(status === 503 && err.retryAfter)) {
     // Lazy import so this module stays loadable when observability isn't initialized.
     import("./observability.js").then(({ captureError }) => {
       captureError(err, { reqId: req.id, path: req.path, method: req.method, userId: req.session?.userId });

@@ -173,6 +173,19 @@ const schema = z.object({
   // tính lại tổng tiền giữa chừng), nhưng vẫn đủ chặt để thu hồi một transaction đã bị bỏ rơi.
   DB_IDLE_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_IDLE_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000").max(600_000).default(120_000)),
 
+  // ── NGÂN SÁCH BỘ NHỚ CỦA ĐƯỜNG LƯU (src/saveBudget.ts) ────────────────────
+  // Đơn vị là DÒNG, không phải request: một lần lưu 20.000 dòng tốn bộ nhớ bằng HAI MƯƠI lần lưu
+  // 1.000 dòng, nên đếm suất là đếm sai đơn vị.
+  //
+  // Công thức, suy từ số ĐO ĐƯỢC (~36 MB mỗi 1.000 dòng, nền ~200 MB, container 1.536 MB):
+  //     dùng được = 1.536 − 200 = 1.336 MB  →  ÷ 36  ≈ 37.000 dòng đang bay
+  //     chừa 45% cho lưu lượng thường        ≈ 20.000
+  // Nâng trần container lên 4 GB thì đặt SAVE_BUDGET_ROWS=60000 qua biến môi trường.
+  SAVE_BUDGET_ROWS: numEnv(z.coerce.number().int().min(1_000).max(1_000_000).default(20_000)),
+  // Bao nhiêu request được XẾP HÀNG chờ ngân sách. Không phải cho đẹp: mỗi người đang chờ đã parse
+  // xong payload và đang ÔM nó trong bộ nhớ, nên hàng đợi không trần là một đường OOM khác.
+  SAVE_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(100).default(4)),
+
   // Trần công suất xuất file (src/exportQueue.ts). Hàng đợi đầy → 503 + Retry-After.
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
   EXPORT_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(500).default(20)),
@@ -239,6 +252,21 @@ if (config.DB_STATEMENT_TIMEOUT < config.DB_TX_TIMEOUT) {
       "Phanh câu lệnh chặt hơn trần transaction sẽ giết cả những lần chờ khoá hợp lệ.",
   );
   process.exit(1);
+}
+
+// ── BẤT BIẾN: TRẦN MỖI LẦN LƯU KHÔNG ĐƯỢC LỚN HƠN CẢ NGÂN SÁCH ────────────
+// MAX_SAVE_TOTAL_ROWS > SAVE_BUDGET_ROWS nghĩa là có những payload HỢP LỆ theo chốt kích thước mà
+// cổng ngân sách KHÔNG BAO GIỜ cấp chỗ được — người dùng gõ xong, bấm Lưu, và nhận 413 vĩnh viễn
+// dù hệ thống hoàn toàn rảnh. Chết ngay lúc khởi động kèm tên cả hai biến.
+{
+  const tranMoiLan = Number(process.env.MAX_SAVE_TOTAL_ROWS) || 20_000;
+  if (tranMoiLan > config.SAVE_BUDGET_ROWS) {
+    console.error(
+      `❌ MAX_SAVE_TOTAL_ROWS (${tranMoiLan}) phải ≤ SAVE_BUDGET_ROWS (${config.SAVE_BUDGET_ROWS}). ` +
+        "Lớn hơn nghĩa là có báo giá hợp lệ mà không bao giờ lưu được.",
+    );
+    process.exit(1);
+  }
 }
 
 // Hard fail in production if SESSION_SECRET is a known weak default

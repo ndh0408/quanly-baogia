@@ -237,6 +237,81 @@ tests:
         alertname: QuanlyKetNoiCsdlSapCan
         exp_alerts: []
 
+  - interval: 1m
+    name: "Có request xếp hàng chờ kết nối suốt 2 phút → KÊU"
+    input_series:
+      - series: 'pg_pool_waiting{instance="app-1", job="quanly"}'
+        values: "3x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyPoolCsdlCanNguoiDungPhaiCHO
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "app-1: có request đang XẾP HÀNG chờ kết nối CSDL suốt 2 phút"
+              description: >-
+                Pool của tiến trình đã cạn: request mới phải chờ tới DB_TX_MAX_WAIT (mặc định 10 giây)
+                rồi mới nhận được kết nối, hoặc thất bại. Người dùng thấy "app chậm" trước khi thấy lỗi.
+                Ba nguyên nhân theo thứ tự hay gặp: một truy vấn chậm giữ kết nối lâu, một transaction
+                bị bỏ dở (xem DB_IDLE_TX_TIMEOUT), hoặc lưu lượng thật đã vượt DB_POOL_MAX.
+              runbook: "src/db.ts — DB_POOL_MAX; src/config.ts — DB_STATEMENT_TIMEOUT / DB_IDLE_TX_TIMEOUT"
+
+  - interval: 1m
+    name: "Pool RẢNH (không ai chờ) thì KHÔNG được kêu"
+    input_series:
+      - series: 'pg_pool_waiting{instance="app-1", job="quanly"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyPoolCsdlCanNguoiDungPhaiCHO
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Bộ nhớ vượt 80% trần container → KÊU"
+    input_series:
+      - series: 'process_resident_memory_bytes{instance="app-1", job="quanly"}'
+        values: "1300000000x20"
+      - series: 'app_memory_limit_bytes{instance="app-1", job="quanly"}'
+        values: "1610612736x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyBoNhoSapChamTran
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: app-1, job: quanly }
+            exp_annotations:
+              summary: "app-1: bộ nhớ tiến trình đã dùng trên 80% trần container"
+              description: >-
+                Vượt trần là bị NHÂN GIẾT, không phải chậm đi: tiến trình chết ngay, mọi người đang
+                dùng mất phiên làm việc đang dở. Đo được ~36 MB cho mỗi 1.000 dòng báo giá đang xử lý,
+                nên nguyên nhân hay gặp nhất là một lần lưu hoặc một lần nhập Excel rất lớn. Chốt chặn
+                đã có ở src/saveBudget.ts (trần dòng + ngân sách đồng thời) và src/excelImport.ts
+                (cắt dòng khi nhập) — cảnh báo này canh phần lọt qua chúng.
+              runbook: "src/saveBudget.ts; src/excelImport.ts — MAX_IMPORT_TOTAL_ITEMS"
+
+  - interval: 1m
+    name: "Trần container được NÂNG lên 4 GB thì 1,3 GB KHÔNG được kêu (chốt chống ngưỡng viết cứng)"
+    input_series:
+      - series: 'process_resident_memory_bytes{instance="app-1", job="quanly"}'
+        values: "1300000000x20"
+      - series: 'app_memory_limit_bytes{instance="app-1", job="quanly"}'
+        values: "4294967296x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyBoNhoSapChamTran
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Chạy NGOÀI container (trần = -1) thì KHÔNG được kêu"
+    input_series:
+      - series: 'process_resident_memory_bytes{instance="app-1", job="quanly"}'
+        values: "1300000000x20"
+      - series: 'app_memory_limit_bytes{instance="app-1", job="quanly"}'
+        values: "-1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyBoNhoSapChamTran
+        exp_alerts: []
+
   # ── 5xx: hành vi ở lưu lượng BẰNG KHÔNG ──────────────────────────────────
   - interval: 1m
     name: "Không có lưu lượng thì tỉ lệ 5xx KHÔNG được kêu (0/0)"

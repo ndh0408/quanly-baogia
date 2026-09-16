@@ -200,6 +200,67 @@ groups:
             `idle in transaction` là dấu hiệu của thứ hai.
           runbook: "src/config.ts — DB_STATEMENT_TIMEOUT / DB_IDLE_TX_TIMEOUT; src/db.ts — DB_POOL_MAX"
 
+      - alert: QuanlyPoolCsdlCanNguoiDungPhaiCHO
+        # ── VÌ SAO QUY TẮC NÀY TỒN TẠI BÊN CẠNH QuanlyKetNoiCsdlSapCan ─────
+        # Quy tắc kia chia `db_connections_used / db_connections_max` — tức đếm CẢ CSDL rồi so với
+        # trần của MÁY CHỦ. Nhưng thứ THẬT SỰ chặn người dùng là pool của TIẾN TRÌNH: một tiến
+        # trình web cạn pool HOÀN TOÀN chỉ đóng góp DB_POOL_MAX + SESSION_POOL_MAX = 24 kết nối;
+        # với hai replica là 48/100 = 48%, DƯỚI ngưỡng 0,80. Nghĩa là quy tắc kia IM LẶNG đúng lúc
+        # mọi request đang xếp hàng rồi lỗi. Chính phần mô tả của nó cũng tự khai điều đó ("thêm
+        # người dùng KHÔNG làm tăng con số này").
+        #
+        # `pg_pool_waiting > 0` là con số trả lời được câu "nhiều người thì sao": nó lên TRƯỚC khi
+        # ai đó nhận lỗi — người dùng mới chỉ đang chờ. Đây là cảnh báo SỚM đúng nghĩa.
+        #
+        # `max()` KHÔNG dùng ở đây (khác quy tắc kia): con số này là CỦA TỪNG TIẾN TRÌNH, nên giữ
+        # nhãn instance để biết replica nào đang nghẽn.
+        #
+        # 2m: một đỉnh tải ngắn làm vài request chờ vài trăm mili giây là bình thường; chờ LIÊN TỤC
+        # suốt hai phút thì không.
+        expr: pg_pool_waiting > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }}: có request đang XẾP HÀNG chờ kết nối CSDL suốt 2 phút"
+          description: >-
+            Pool của tiến trình đã cạn: request mới phải chờ tới DB_TX_MAX_WAIT (mặc định 10 giây)
+            rồi mới nhận được kết nối, hoặc thất bại. Người dùng thấy "app chậm" trước khi thấy lỗi.
+            Ba nguyên nhân theo thứ tự hay gặp: một truy vấn chậm giữ kết nối lâu, một transaction
+            bị bỏ dở (xem DB_IDLE_TX_TIMEOUT), hoặc lưu lượng thật đã vượt DB_POOL_MAX.
+          runbook: "src/db.ts — DB_POOL_MAX; src/config.ts — DB_STATEMENT_TIMEOUT / DB_IDLE_TX_TIMEOUT"
+
+      - alert: QuanlyBoNhoSapChamTran
+        # ── LỖ MÀ QUY TẮC NÀY LẤP ─────────────────────────────────────────
+        # Chế độ hỏng DUY NHẤT đã ĐO ĐƯỢC của hệ này là OOM-kill, mà trong 21 quy tắc trước đó
+        # KHÔNG có quy tắc nào về bộ nhớ. Hai đường đã tái hiện được, cả hai đều giết CẢ APP cho
+        # MỌI người bằng một request bình thường của MỘT người:
+        #   · nhập một file .xlsx 4,1 MB (dưới trần upload 10 MB) chứa 2 sheet × 200.000 dòng;
+        #   · lưu một báo giá 60.000 dòng — đúng con số hệ thống TỰ QUẢNG CÁO là hợp lệ.
+        # Thứ gần nhất, QuanlyTienTrinhKhoiDongLaiLienTuc, chỉ kêu sau 20 PHÚT crash-loop, tức sau
+        # khi đã mất dịch vụ nhiều lần. Giữa "khoẻ" và "bị nhân giết" trước đây không có biển báo.
+        #
+        # MẪU SỐ do app phát ra (`app_memory_limit_bytes`, đọc từ cgroup) chứ không viết cứng 1536:
+        # người vận hành đổi `deploy.resources.limits.memory` mà không ai sửa mã, và ngưỡng cứng
+        # sẽ sai ngay lần đó — cùng khuôn với QuanlyDiaSapDay.
+        #
+        # `> 0` ở mẫu số loại giá trị canh gác -1 (chạy ngoài container): -1 làm tỉ lệ thành số ÂM
+        # nên không kêu, nhưng khai tường minh vẫn tốt hơn là dựa vào dấu.
+        #
+        # 5m chứ không 15m: từ 80% tới oom-kill là chuyện của vài giây khi một request lớn đang
+        # chạy. Cảnh báo này để người trực kịp nhìn, không phải để chờ xác nhận xu hướng.
+        expr: process_resident_memory_bytes / (app_memory_limit_bytes > 0) > 0.80
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }}: bộ nhớ tiến trình đã dùng trên 80% trần container"
+          description: >-
+            Vượt trần là bị NHÂN GIẾT, không phải chậm đi: tiến trình chết ngay, mọi người đang
+            dùng mất phiên làm việc đang dở. Đo được ~36 MB cho mỗi 1.000 dòng báo giá đang xử lý,
+            nên nguyên nhân hay gặp nhất là một lần lưu hoặc một lần nhập Excel rất lớn. Chốt chặn
+            đã có ở src/saveBudget.ts (trần dòng + ngân sách đồng thời) và src/excelImport.ts
+            (cắt dòng khi nhập) — cảnh báo này canh phần lọt qua chúng.
+          runbook: "src/saveBudget.ts; src/excelImport.ts — MAX_IMPORT_TOTAL_ITEMS"
+
   # ── Nhóm 1c: cấu hình bắt buộc ở production còn THIẾU ────────────────────
   #
   # ── LỖ MÀ NHÓM NÀY LẤP ────────────────────────────────────────────────────

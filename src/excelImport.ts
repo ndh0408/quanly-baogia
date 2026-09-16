@@ -131,8 +131,34 @@ const MAX_SHEETS = 30;          // số sheet đọc trong 1 file
 const MAX_SCAN_ROWS = 200_000;
 const MAX_HEADER_SCAN = 200;    // số hàng dò tìm hàng tiêu đề
 const MAX_SCAN_COLS = 60;
-/** Trần dòng/sheet khi LƯU — phải khớp sheetSchema trong src/validators.ts. */
-export const MAX_ITEMS_PER_SHEET = 2000;
+/**
+ * Trần dòng/sheet khi LƯU — PHẢI khớp `sheetSchema.items.max()` trong src/validators.ts.
+ *
+ * TRƯỚC 2026-09-16 hằng số này là 2000 trong khi trần lưu thật là 1000. Hai hậu quả, cả hai đã đo:
+ * (a) sheet 1.001–2.000 dòng KHÔNG nhận được cảnh báo nào ở bước xem trước rồi ăn lỗi 400 lúc bấm
+ * Lưu — người dùng đối chiếu cả file xong mới biết; (b) đây là con số app TỰ NÓI với người dùng mà
+ * không đúng sự thật. web/src/components/ImportExcelModal.tsx:14 đã dùng 1000 từ trước, nên hai đầu
+ * đang khai hai con số khác nhau.
+ */
+export const MAX_ITEMS_PER_SHEET = 1000;
+
+/**
+ * TRẦN TỔNG HẠNG MỤC CHO CẢ MỘT FILE — chốt chặn BỘ NHỚ, không phải chốt nghiệp vụ.
+ *
+ * ĐÃ TÁI HIỆN được sập tiến trình: một file .xlsx 4,1 MB (DƯỚI trần upload 10 MB) chứa 2 sheet ×
+ * 200.000 dòng làm LUỒNG CHÍNH chết với `FATAL ERROR: Reached heap limit`, exit 134 — ngã đúng
+ * lúc GIẢI structured-clone kết quả từ worker (`v8::ValueDeserializer::ReadValue`). Chuỗi khuếch
+ * đại: worker phân tích xong → `postMessage` clone TOÀN BỘ sang luồng chính → `res.json` lại
+ * `JSON.stringify` thành một chuỗi nữa. Trần heap của app ở production là 1024 MB
+ * (docker-compose.prod.yml: NODE_OPTIONS --max-old-space-size=1024).
+ *
+ * `MAX_SCAN_ROWS` KHÔNG đỡ được: nó là trần QUÉT mỗi sheet (200.000), nhân `MAX_SHEETS` (30) ra
+ * 6.000.000 hạng mục — trần trên giấy, không phải trần thật.
+ *
+ * 30.000 = MAX_SHEETS × MAX_ITEMS_PER_SHEET: đúng bằng lượng TỐI ĐA đường lưu có thể nhận từ một
+ * file, nên trần này không cắt mất thứ gì vốn lưu được.
+ */
+export const MAX_IMPORT_TOTAL_ITEMS = MAX_SHEETS * MAX_ITEMS_PER_SHEET;
 
 /** Giá trị ô (mọi kiểu ExcelJS) → chuỗi hiển thị. */
 function cellText(v: unknown): string {
@@ -584,6 +610,11 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     }
   }
 
+  // CẮT THẬT, không chỉ cảnh báo. Bản trước gán trọn `raws` rồi chỉ đẩy một dòng cảnh báo ở cuối
+  // hàm — tức toàn bộ 200.000 dòng vẫn nằm trong bộ nhớ, vẫn bị clone sang luồng chính, vẫn bị
+  // JSON.stringify. Phần dư KHÔNG lưu được (zod chặn ở 1000 dòng/trang) nên giữ lại chỉ để chết.
+  const daCat = Math.max(0, raws.length - MAX_ITEMS_PER_SHEET);
+  if (daCat) raws.length = MAX_ITEMS_PER_SHEET;   // cắt TẠI CHỖ để mảng gốc cũng nhả bộ nhớ
   base.items = raws.map((x) => x.it);
   const detailRows = base.items.filter((it) => String(it.detail || "").trim()).length;
   if (detailRows) base.warnings.push(`File có ${detailRows} dòng chứa cột Chi Tiết. Trường này đã bỏ khỏi báo giá nên nội dung đó sẽ không được nạp.`);
@@ -646,7 +677,11 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh KHÔNG nạp lại được, cần thêm ảnh thủ công sau khi nạp.");
   if (base.stats.formulasDropped) base.warnings.push(`${base.stats.formulasDropped} công thức không nạp được (đã giữ con số) — xem cột Cảnh báo từng dòng.`);
   if (!base.items.length) base.warnings.push("Không đọc được hạng mục nào trong bảng.");
-  if (base.items.length > MAX_ITEMS_PER_SHEET) base.warnings.push(`Bảng có ${base.items.length} dòng — app lưu tối đa ${MAX_ITEMS_PER_SHEET} dòng/sheet, phần dư cần tách sang sheet khác.`);
+  if (daCat)
+    base.warnings.push(
+      `Bảng có ${base.items.length + daCat} dòng, app lưu tối đa ${MAX_ITEMS_PER_SHEET} dòng/sheet — ` +
+        `ĐÃ CẮT ${daCat} dòng cuối. Phần dư cần tách sang sheet khác rồi nạp lại.`,
+    );
   // Thiếu cột thì app phải ĐOÁN cấu trúc, và đoán sai là mất tiền/mất nhóm mà người dùng không hay.
   // Nói thẳng ra ngay trên bảng đối chiếu để họ soi lại trước khi bấm nạp.
   {
