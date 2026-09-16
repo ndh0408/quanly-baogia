@@ -160,6 +160,26 @@ do_toast() {
       }
       if (dat.length === 0) { console.error("  KHÔNG bài nào chạy"); process.exit(1); }
     ' "$bc" || ma=1
+  else
+    # ── VÌ SAO PHẢI IN LẠI Ở ĐÂY ──────────────────────────────────────────
+    # `--reporter=json --outputFile` làm vitest KHÔNG in gì ra màn hình, kể cả khi bài ĐỎ: nó chỉ
+    # in đúng một dòng "JSON report written to ...". Nên khi bước này hỏng, log verify trước đây
+    # chỉ có "✗ vitest đo TOAST — b2" và TUYỆT ĐỐI không có lý do — muốn biết vì sao thì phải chạy
+    # tay lại từ đầu, mà đây lại đúng là bài chỉ đỏ TRONG ngữ cảnh verify. Báo cáo JSON đã nằm sẵn
+    # trong tay, chỉ việc moi `failureMessages` ra thay vì bắt người đọc đoán.
+    node -e '
+      const fs = require("node:fs");
+      let d;
+      try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+      catch { console.error("    (không đọc được báo cáo JSON — vitest chết trước khi kịp ghi)"); process.exit(0); }
+      const hong = d.testResults.flatMap((r) => r.assertionResults).filter((t) => t.status === "failed");
+      if (!hong.length) console.error("    (vitest thoát khác 0 nhưng không bài nào ĐỎ — xem lỗi lúc nạp file)");
+      for (const t of hong) {
+        console.error("    ✗ " + t.title);
+        for (const m of t.failureMessages || [])
+          console.error("      " + m.split("\n").slice(0, 8).join("\n      "));
+      }
+    ' "$bc"
   fi
   rm -f "$bc"
   ket $ma "$nhan"
