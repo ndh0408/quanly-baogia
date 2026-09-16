@@ -221,6 +221,49 @@ npx prettier --check "**/*.{json,css,yml,yaml}" >/dev/null;         ket $? "pret
 buoc "[4/13] Test backend (REQUIRE_DB_TESTS=1 — bỏ qua = ĐỎ)"
 npx vitest run;                                                     ket $? "vitest backend"
 
+# ── [4b] BÀI XOAY KHOÁ PII — CHẠY RIÊNG, CSDL PHẢI YÊN ─────────────────────
+# `tests/pii-rotate-backfill.test.js` bị LOẠI khỏi lượt chung ở vitest.config.js. Lý do đầy đủ
+# nằm ở đó; tóm tắt: nó đổi khoá PII rồi chạy một script QUÉT TOÀN BẢNG, nên bất kỳ bài nào chạy
+# song song tạo bản ghi bằng khoá chuẩn cũng làm nó đỏ. Cùng khuôn với bước [1b] phía trên.
+#
+# ĐỪNG bỏ bước này cho nhanh: đây là cổng DUY NHẤT kiểm việc xoay khoá mã hoá dữ liệu nhân sự —
+# gỡ khoá cũ ra mà vẫn đọc được, và chỉ mục mù được tính lại.
+# BỎ QUA ÂM THẦM Ở ĐÂY LÀ MẤT SẠCH Ý NGHĨA — cùng bài học với do_toast phía trên: file này bị
+# vitest.config.js loại khỏi lượt chung, và nếu cờ PII_ROTATE_TEST không tới nơi thì vitest loại
+# nó LUÔN CẢ KHI được gọi đích danh, chạy rỗng rồi thoát 0. Nên đừng chỉ tin mã thoát: đọc báo
+# cáo JSON và đòi CÓ bài đã chạy.
+buoc "[4b/13] Xoay khoá PII (chạy riêng, CSDL còn yên)"
+bc_pii="$(mktemp)"
+PII_ROTATE_TEST=1 npx vitest run tests/pii-rotate-backfill.test.js --reporter=json --outputFile="$bc_pii"
+ma_pii=$?
+if [ $ma_pii -eq 0 ]; then
+  node -e '
+    const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const b = d.testResults.flatMap((r) => r.assertionResults);
+    const dat = b.filter((t) => t.status === "passed");
+    if (dat.length === 0) {
+      console.error("  KHÔNG bài nào chạy — cờ PII_ROTATE_TEST không tới nơi, cổng xoay khoá PII đang RỖNG");
+      process.exit(1);
+    }
+    console.log(`  (${dat.length} bài xoay khoá PII đã chạy thật)`);
+  ' "$bc_pii" || ma_pii=1
+else
+  node -e '
+    const fs = require("node:fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(0); }
+    for (const t of d.testResults.flatMap((r) => r.assertionResults)) {
+      if (t.status === "failed") {
+        console.error("    ✗ " + t.title);
+        for (const m of t.failureMessages || []) console.error("      " + m.split("
+").slice(0, 8).join("
+      "));
+      }
+    }
+  ' "$bc_pii"
+fi
+rm -f "$bc_pii"
+ket $ma_pii "vitest xoay khoá PII"
+
 buoc "[5/13] EXPLAIN ANALYZE đường nóng (dựng 5.000 dòng thật rồi đo)"
 # Cần dist/ (bước [2b]) vì nó nghe câu SQL của CHÍNH client ứng dụng — xem chú thích trong script.
 # Vì sao là CỔNG chứ không phải báo cáo: truy vấn mất index không HỎNG, nó chỉ CHẬM DẦN theo số
