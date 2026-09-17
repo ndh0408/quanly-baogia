@@ -65,8 +65,44 @@ const username = z
   .regex(/^[a-zA-Z0-9_.-]+$/, "Tên đăng nhập chỉ được chứa chữ, số và các ký tự . _ -");
 
 const displayName = z.string().min(1, "Vui lòng nhập họ tên").max(120, "Họ tên tối đa 120 ký tự").trim();
-const phone = z.string().max(40, "Số điện thoại tối đa 40 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
-const title = z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => undefined));
+// ── Ô BỎ TRỐNG: HAI LUẬT, TUỲ FORM CÓ NẠP SẴN GIÁ TRỊ HIỆN TẠI HAY KHÔNG ─────────────────────
+//
+// Một luật duy nhất cho mọi đường ghi là bất khả, vì "ô rỗng" mang hai nghĩa trái ngược nhau tuỳ
+// người dùng nhìn thấy gì trước khi bấm Lưu:
+//
+//   Form CÓ nạp sẵn giá trị đang có  →  bỏ trống = XOÁ      (oXoaDuoc → null)
+//   Form KHÔNG nạp sẵn               →  bỏ trống = KHÔNG ĐỔI (oGiuLai  → undefined)
+//
+// VÌ SAO phải tách: coi "" là "không đổi" ở form CÓ nạp sẵn thì admin nhìn thấy "Chị Lan", xoá
+// trắng ô, bấm Lưu, giao diện báo "Đã lưu" mà cột vẫn nguyên — lưu mà không ăn, một lời nói dối
+// im lặng. Ngược lại, coi "" là "xoá" ở form KHÔNG nạp sẵn (màn Quên mật khẩu: ô luôn rỗng bất kể
+// CSDL đang có gì) thì mỗi lần đặt lại mật khẩu là xoá trắng hồ sơ người ta — chính sự cố đã xảy
+// ra trên production, hồ sơ 5/10 tài khoản (xem tests/dm-dat-lai-mat-khau-khong-xoa-ho-so.test.js).
+//
+// KHOÁ VẮNG MẶT luôn là "không đổi" ở CẢ HAI helper: zod chỉ đặt khoá vào kết quả khi khoá đó có
+// trong đầu vào, nên Prisma không bao giờ thấy cột mà client không gửi. Đo trên zod 4.6.5 đang cài:
+//   oGiuLai : {} → {} · {phone:""} → {} (khoá có mặt, giá trị undefined) · {phone:"0909"} → giữ
+//   oXoaDuoc: {} → {} · {phone:""} → {phone:null} · {phone:null} → {phone:null} · "0909" → giữ
+//
+// Cả hai phải là `.transform()` chứ KHÔNG phải `.or(z.literal("").transform(...))` như bản trước:
+// union thử nhánh ĐẦU trước, mà `z.string().trim().optional()` coi "" là chuỗi hợp lệ nên nhánh
+// `.or(...)` là CODE CHẾT — `parse({phone:""})` trả về `{phone:""}`, không phải null.
+const rongLaKhongDoi = (s?: string) => (s === "" ? undefined : s);
+const rongLaXoa = (s?: string | null) => (s === undefined ? undefined : s === "" || s === null ? null : s);
+/** Ô của form KHÔNG nạp sẵn: rỗng = không đổi. */
+const oGiuLai = (max: number, msg: string) => z.string().max(max, msg).trim().optional().transform(rongLaKhongDoi);
+/** Ô của form CÓ nạp sẵn: rỗng (hoặc `null`) = XOÁ hẳn về `null`. */
+const oXoaDuoc = (max: number, msg: string) => z.string().max(max, msg).trim().nullable().optional().transform(rongLaXoa);
+
+const phone = oGiuLai(40, "Số điện thoại tối đa 40 ký tự");
+const title = oGiuLai(120, "Chức danh tối đa 120 ký tự");
+// Ba nơi khai senderName phải cùng MỘT trần và MỘT câu chữ; đẻ định nghĩa riêng ở mỗi schema là để
+// chúng trôi khỏi nhau. (Trước đây dùng lại thẳng helper `title`, nên người gõ quá 120 ký tự tên
+// người gửi nhận được thông báo nói về "Chức danh".)
+const senderName = oGiuLai(120, "Tên người gửi tối đa 120 ký tự");
+const phoneXoaDuoc = oXoaDuoc(40, "Số điện thoại tối đa 40 ký tự");
+const titleXoaDuoc = oXoaDuoc(120, "Chức danh tối đa 120 ký tự");
+const senderNameXoaDuoc = oXoaDuoc(120, "Tên người gửi tối đa 120 ký tự");
 
 // A user's "Mã dự án" is each person's OWN unique PREFIX (vd FP_D26); the system then
 // auto-appends the per-quote sequence _001, _002… (nextProjectCode). So the prefix must
@@ -83,7 +119,13 @@ const projectCode = z
   .transform((s) => {
     let v = (s || "").trim();
     while (/_\d{3}$/.test(v)) v = v.replace(/_\d{3}$/, "");   // _NNN = the auto sequence (exactly 3 digits)
-    v = v.replace(/\d{2}$/, "");                              // YY = năm, do nextProjectCode thêm
+    // `while` chứ KHÔNG phải một lần — phép này phải BẤT BIẾN, vì modal "Sửa tài khoản" nạp sẵn mã
+    // đã lưu rồi gửi lại y nguyên MỖI LẦN Lưu, kể cả khi admin chỉ vào đổi số điện thoại. Cắt một
+    // lần thì mã bị BÀO MÒN dần qua từng lượt lưu: "FP_A2026" → "FP_A20" → "FP_A" (đã đo).
+    // Và mỗi lần đuôi đổi là `nextProjectCode` mở một hàng quoteCounter MỚI, nên dãy mã dự án của
+    // người đó gãy giữa chừng rồi đánh số lại từ _001.
+    // Lặp tới điểm dừng: kết quả không còn tận cùng 2 chữ số, nên chạy lại là không đổi gì nữa.
+    while (/\d{2}$/.test(v)) v = v.replace(/\d{2}$/, "");     // YY = năm, do nextProjectCode thêm
     return v.length ? v : null;
   })
   .nullable()
@@ -105,15 +147,24 @@ export const UserInviteSchema = z.object({
   displayName,
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]).default("manager"),
   projectCode,
+  // Admin đặt hộ "Người gửi" ngay từ lời mời — người nhận để trống lúc kích hoạt thì acceptInvite
+  // GIỮ giá trị này (`senderName?.trim() || user.senderName`), không xoá.
+  // Hàng MỚI nên không có gì để xoá; `oGiuLai` ở đây chỉ để `inviteUser` thấy `undefined` rồi tự
+  // `|| null` — và để ngày nào ai đó đổi create thành upsert thì đường này KHÔNG thành đường xoá.
+  senderName,
   permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user lúc mời
 });
 
 export const AcceptInviteSchema = z.object({
   token: z.string().min(10, "Mã lời mời không hợp lệ").max(200, "Mã lời mời không hợp lệ"),
   displayName: displayName.optional(),
+  // `oGiuLai` cho cả ba: màn #/onboard KHÔNG nạp sẵn ô nào trong ba ô này (`inviteInfo` chỉ trả
+  // email/displayName/role/datLaiMatKhau), nên ô rỗng KHÔNG có nghĩa "người dùng muốn xoá" — nó
+  // chỉ có nghĩa "màn này không biết giá trị đang có". Đổi sang `oXoaDuoc` là dựng lại đúng sự cố
+  // xoá trắng hồ sơ 5/10 tài khoản. Lớp thứ hai (`|| user.x` trong acceptInvite) vẫn giữ nguyên.
   phone,
   title,
-  senderName: title,
+  senderName,
   password: pwd,
   // Mã yếu tố thứ hai cho tài khoản ĐÃ bật MFA. Đường này kiêm "Quên mật khẩu" nên nó cấp phiên
   // đầy đủ — không hỏi mã ở đây thì chiếm được hộp thư là gỡ được luôn MFA. 6 chữ số = TOTP;
@@ -126,21 +177,54 @@ export const UserCreateSchema = z.object({
   password: pwd,
   displayName,
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]),
+  // Đường TẠO: hàng mới, chưa có gì để xoá → hai luật cho ra cùng một kết quả (`|| null` ở
+  // createUser). Dùng `oGiuLai` cho khớp với UserInviteSchema, cùng lý do "đừng để create-đổi-thành-
+  // upsert biến đây thành đường xoá".
   phone,
   title,
+  senderName,
   canSign: zbool.optional(),
 });
 
+// Modal "Sửa tài khoản" NẠP SẴN `phone` và `senderName` từ GET /api/users (USER_SELECT có hai cột
+// này) — admin NHÌN THẤY "0909123456" / "Chị Lan" rồi mới chủ động xoá. Đây đúng là chỗ ĐƯỢC PHÉP
+// xoá, nên hai trường đó dùng `oXoaDuoc`.
+//
+// `title` thì KHÔNG: USER_SELECT không có cột này, nên API không trả về, modal không dựng được ô,
+// và không client nào biết giá trị đang có. Ô không nhìn thấy được thì "" không phải ý định của
+// người dùng → giữ `oGiuLai`. Muốn cho admin sửa chức danh thì phải thêm `title: true` vào
+// USER_SELECT TRƯỚC, rồi mới thêm ô và đổi sang `oXoaDuoc` — làm ngược thứ tự là mỗi lần bấm Lưu
+// xoá sạch chức danh của người ta, đúng cái bẫy đã xoá trắng hồ sơ 5/10 tài khoản, chỉ đổi trường.
 export const UserUpdateSchema = z.object({
   displayName: displayName.optional(),
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]).optional(),
-  phone,
+  phone: phoneXoaDuoc,
   title,
+  senderName: senderNameXoaDuoc,
   active: z.boolean().optional(),
   password: pwd.optional(),
   projectCode,
   canSign: zbool.optional(),
   permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user (tập đầy đủ; [] = theo role)
+});
+
+// POST /api/auth/profile — trang "Tài khoản" tự sửa hồ sơ của CHÍNH MÌNH.
+//
+// Ở ĐÂY nằm trong validators.ts chứ không viết inline trong auth.routes.ts như trước: bản inline
+// đứng ngoài tầm mắt của mọi lượt rà "ba trường này đi qua những schema nào", nên nó là nơi DUY
+// NHẤT còn sót lại mẫu code chết `.or(z.literal("").transform(() => null))` sau khi bốn schema
+// trên đã được vá. Một luật thì để một chỗ.
+//
+// Cả ba ô đều NẠP SẴN từ GET /api/auth/me (Profile.tsx đọc `me.phone` / `me.title` /
+// `me.senderName`) → `oXoaDuoc` cho cả ba, và xoá phải ra CÙNG MỘT giá trị trống là `null`. Bản
+// trước cho ra ba kiểu khác nhau trong cùng một lệnh ghi: `phone` → null (nhờ `|| null` ở service,
+// không nhờ schema), `title`/`senderName` → chuỗi rỗng `""`. Hai giá trị khác nhau cho cùng một ý
+// "không có" sẽ cắn ở bất cứ chỗ nào so `=== null` hay `IS NULL`.
+export const ProfileUpdateSchema = z.object({
+  displayName,
+  phone: phoneXoaDuoc,
+  title: titleXoaDuoc,
+  senderName: senderNameXoaDuoc,
 });
 
 // Every status a quote can actually hold (mirror of prisma QuoteStatus enum).

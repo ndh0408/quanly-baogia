@@ -38,6 +38,10 @@ export function ProfilePage({ me, onMe }: { me: Me; onMe: (m: Me) => void }) {
 
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault(); setSavingP(true);
+    // LUÔN gửi đủ bốn khoá: cả bốn ô đều NẠP SẴN từ `me` (GET /api/auth/me trả đủ ba cột), nên ô
+    // rỗng ở đây là ý định XOÁ chứ không phải "màn này không biết giá trị cũ". ProfileUpdateSchema
+    // quy "" về `null` cho cả ba — tức bỏ trống ô nào là cột đó về `null` THẬT, không phải chuỗi
+    // rỗng như bản trước. (Ngược hẳn với màn #/onboard: ở đó ô không nạp sẵn nên rỗng thì bỏ khoá.)
     try { const u = await api.updateProfile({ displayName, senderName, phone, title }); onMe({ ...me, ...u }); toast("Đã lưu hồ sơ", "success"); }
     catch (ex) { toast(errMsg(ex, "Lỗi"), "error"); }
     finally { setSavingP(false); }

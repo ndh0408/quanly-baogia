@@ -245,6 +245,7 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label
 function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog; onClose: () => void; onInvited: (r: InviteResult) => void; onPreview?: (perms: string[], label: string) => void }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [senderName, setSenderName] = useState("");
   const [projectCode, setProjectCode] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [perms, setPerms] = useState<Set<string>>(new Set());
@@ -267,8 +268,13 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
     if (!displayName.trim() || !email.trim()) { setErr("Vui lòng nhập họ tên và email"); return; }
     setErr(""); setFieldErrors({}); setSaving(true);
     try {
+      // Ô "Tên người gửi" ở đây KHÔNG nạp sẵn (tài khoản chưa tồn tại) ⇒ rỗng thì BỎ HẲN KHOÁ, đừng
+      // gửi "". Hôm nay vô hại vì `inviteUser` là `prisma.user.create` và ném 409 nếu email đã có —
+      // không có giá trị cũ nào để xoá. Nhưng luật phải là MỘT luật chứ không phải một danh sách
+      // ngoại lệ: ngày nào ai đó đổi create thành upsert, form này lập tức thành đường xoá dữ liệu.
       onInvited(await api.inviteUser({
         email: email.trim(), displayName: displayName.trim(), projectCode: projectCode.trim() || null,
+        ...(senderName.trim() ? { senderName: senderName.trim() } : {}),
         role: isAdmin ? "admin" : "manager",
         permissions: isAdmin ? [] : [...perms],
       }));
@@ -284,6 +290,10 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
             <label className="full"><span>Họ tên <b className="req">*</b></span>
               <input ref={firstRef} value={displayName} placeholder="VD: Nguyễn Văn A" aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />
               {fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
+            {/* Cùng cụm danh tính với Họ tên. Câu chữ lấy NGUYÊN của trang Hồ sơ cá nhân và màn
+                kích hoạt (#/onboard) — ba nơi cùng một trường thì phải cùng một cách gọi tên. */}
+            <label className="full"><span>Tên người gửi trên báo giá</span>
+              <input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
             <label className="full"><span>Email cá nhân <b className="req">*</b></span>
               <input type="email" value={email} placeholder="email cá nhân của nhân viên" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
               {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
@@ -304,6 +314,7 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
 
 function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User; cat?: PermCatalog; onClose: () => void; onSaved: () => void; onPreview?: (perms: string[], label: string) => void }) {
   const [displayName, setDisplayName] = useState(user.displayName || "");
+  const [senderName, setSenderName] = useState(user.senderName || "");
   const [phone, setPhone] = useState(user.phone || "");
   const [projectCode, setProjectCode] = useState(user.projectCode || "");
   const [isAdmin, setIsAdmin] = useState(user.role === "admin");
@@ -324,9 +335,25 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
   const save = async () => {
     setErr(""); setFieldErrors({}); setSaving(true);
     try {
+      // `|| null` cho senderName/phone: modal này NẠP SẴN cả hai từ danh sách, nên admin xoá trắng ô
+      // là một ý định rõ ràng — gửi `null` để máy chủ XOÁ thật. Gửi "" cũng ra cùng kết quả
+      // (UserUpdateSchema quy "" về null), `null` chỉ nói thẳng ý định ra ở tầng payload.
+      // `projectCode` đã đi đúng mẫu này từ trước.
       await api.updateUser(user.id, {
-        username: user.username, displayName, phone, projectCode: projectCode.trim() || null,
-        role: isAdmin ? "admin" : "manager",
+        username: user.username, displayName,
+        senderName: senderName.trim() || null, phone: phone.trim() || null,
+        projectCode: projectCode.trim() || null,
+        // ── CHỈ GỬI `role` KHI Ô TÍCH "QUẢN TRỊ" THẬT SỰ ĐỔI ────────────────────────────────
+        // Modal này KHÔNG có ô chọn vai trò — chỉ có một ô tích "Quản trị". Gửi thẳng
+        // `isAdmin ? "admin" : "manager"` nghĩa là mọi tài khoản hr / accountant / account_hn bị
+        // ÂM THẦM hạ xuống "manager" chỉ vì admin vào sửa số điện thoại. Không có 400 nào chặn lại:
+        // "manager" là giá trị hợp lệ của enum trong UserUpdateSchema.
+        //
+        // Đây đúng luật đã chốt cho ba trường hồ sơ, áp cho cả vai trò: form KHÔNG hiện giá trị
+        // hiện tại thì KHÔNG được gửi trường đó lên. Chỉ khi ô tích đổi trạng thái mới là ý định
+        // rõ ràng — và lúc đó "manager" là mặc định duy nhất hợp lý cho việc gỡ quyền quản trị.
+        // (InviteModal ở trên thì NGƯỢC LẠI: hàng mới, chưa có vai trò nào để giữ, nên luôn gửi.)
+        ...(isAdmin !== (user.role === "admin") ? { role: isAdmin ? "admin" : "manager" } : {}),
         permissions: isAdmin ? [] : [...perms], // backend tự đồng bộ cờ canSign từ quote:sign:own
       });
       toast("Đã lưu", "success"); onSaved();
@@ -340,6 +367,11 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
           <div className="grid">
             <label className="full"><span>Tên đăng nhập</span><input value={user.username} disabled /></label>
             <label className="full"><span>Họ tên</span><input ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
+            {/* Ô NẠP SẴN giá trị đang có ⇒ xoá trắng là XOÁ THẬT. Admin nhìn thấy "Chị Lan", xoá đi,
+                bấm Lưu — kỳ vọng duy nhất là nó biến mất. Bản trước quy "" về "không đổi", nên
+                giao diện báo "Đã lưu" mà cột vẫn nguyên: lưu mà không ăn. (Luật ngược lại chỉ áp
+                cho ô KHÔNG nạp sẵn — vd màn Quên mật khẩu, nơi ô luôn rỗng bất kể CSDL có gì.) */}
+            <label className="full"><span>Tên người gửi trên báo giá</span><input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
             <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>

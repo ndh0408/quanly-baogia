@@ -256,7 +256,18 @@ export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
     if (form.password !== form.password2) { setErr("Mật khẩu nhập lại không khớp."); return; }
     setBusy(true);
     try {
-      const hoSo = datLai ? {} : { displayName: form.displayName, senderName: form.senderName, phone: form.phone, title: form.title };
+      // `displayName` CÓ nạp sẵn (từ `api.getInvite`) và ô đang `required` → luôn gửi. Ba ô còn lại
+      // thì KHÔNG: `inviteInfo` chỉ trả email/displayName/role/datLaiMatKhau, nên chúng RỖNG bất kể
+      // trong CSDL đang có gì — mà admin hoàn toàn có thể đã đặt hộ "Tên người gửi" ngay từ lời mời.
+      // Gửi "" từ một ô luôn rỗng là xoá thứ người khác vừa điền hộ ⇒ rỗng thì BỎ HẲN KHOÁ.
+      // (Hai lớp đỡ ở máy chủ — `oGiuLai` trong AcceptInviteSchema và `|| user.x` trong
+      // acceptInvite — vẫn giữ nguyên; đây là lớp thứ ba, chặn ngay tại tầng payload.)
+      const hoSo = datLai ? {} : {
+        displayName: form.displayName,
+        ...(form.senderName.trim() ? { senderName: form.senderName.trim() } : {}),
+        ...(form.phone.trim() ? { phone: form.phone.trim() } : {}),
+        ...(form.title.trim() ? { title: form.title.trim() } : {}),
+      };
       const m = await api.acceptInvite({ token, ...hoSo, password: form.password, mfaToken: mfaToken.trim() || undefined });
       location.hash = "#/list"; onLogin(m);
       toast(datLai ? "Đã đổi mật khẩu." : "Chào mừng! Tài khoản đã được kích hoạt.", "success");

@@ -6,7 +6,7 @@ import { createLimiter } from "../rateLimit.js";
 import { z } from "zod";
 import { config } from "../config.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { validate, LoginSchema, ChangePasswordSchema, AcceptInviteSchema } from "../validators.js";
+import { validate, LoginSchema, ChangePasswordSchema, AcceptInviteSchema, ProfileUpdateSchema } from "../validators.js";
 import { audit } from "../audit.js";
 import { logger } from "../logger.js";
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllForUser } from "../jwt.js";
@@ -212,16 +212,13 @@ router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
 // Route MỎNG: validate → gọi tầng service (logic ở authService.ts).
 router.get("/me", requireAuth, asyncHandler(async (req: Request, res: Response) => res.json(await svc.meProfile(req))));
 
-// Update own profile (display name + phone). Self-service for any logged-in user.
+// Update own profile (display name + phone + title + senderName). Self-service for any logged-in user.
+// Schema ở src/validators.ts cùng bốn schema user còn lại — bản inline trước đây là nơi duy nhất
+// còn sót mẫu union CHẾT `.or(z.literal("").transform(() => null))` sau khi các schema khác đã vá.
 router.post(
   "/profile",
   requireAuth,
-  validate({ body: z.object({
-    displayName: z.string().min(1, "Vui lòng nhập họ tên").max(120, "Họ tên tối đa 120 ký tự").trim(),
-    phone: z.string().max(40, "Số điện thoại tối đa 40 ký tự").trim().optional().or(z.literal("").transform(() => null)),
-    title: z.string().max(120, "Chức danh tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
-    senderName: z.string().max(120, "Tên người gửi tối đa 120 ký tự").trim().optional().or(z.literal("").transform(() => null)),
-  }) }),
+  validate({ body: ProfileUpdateSchema }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateProfile(req)))
 );
 

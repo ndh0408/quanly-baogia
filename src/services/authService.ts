@@ -50,13 +50,22 @@ export async function meProfile(req: Request) {
 export async function updateProfile(req: Request) {
   const user = await prisma.user.update({
     where: { id: req.session.userId },
+    // BA trường cùng MỘT luật: khoá có mặt thì ghi (ProfileUpdateSchema đã biến "" thành `null`),
+    // khoá vắng mặt thì KHÔNG đụng tới cột.
+    //
+    // Bản trước viết `phone: req.body.phone || null` — tức client nào KHÔNG gửi `phone` là bị XOÁ
+    // số điện thoại, trong khi không gửi `title`/`senderName` thì không đổi. Một route, hai luật
+    // ngược nhau cho ba ô nằm cạnh nhau. Chưa nổ chỉ vì web/src/lib/api.ts ép gửi đủ bốn chuỗi —
+    // một client di động, một script, hay một PATCH tương lai gửi thiếu là mất dữ liệu.
     data: {
       displayName: req.body.displayName,
-      phone: req.body.phone || null,
+      ...(req.body.phone !== undefined ? { phone: req.body.phone } : {}),
       ...(req.body.title !== undefined ? { title: req.body.title } : {}),
       ...(req.body.senderName !== undefined ? { senderName: req.body.senderName } : {}),
     },
-    select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, mfaEnabled: true, permissions: true, canSign: true },
+    // `senderName` phải có trong select: Profile.tsx làm `onMe({ ...me, ...u })`, thiếu trường thì
+    // state client giữ lại giá trị CŨ và người vừa lưu tưởng là không ăn.
+    select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, mfaEnabled: true, permissions: true, canSign: true },
   });
   req.session.displayName = user.displayName;
   await audit(req, "user.profile.update", { resource: "user", resourceId: user.id, actorId: user.id });
@@ -320,11 +329,27 @@ export async function acceptInvite(req: Request) {
   // Log the new user in immediately.
   await establishSession(req, updated as SessionSeed);
 
+  /* ── PHẢI TRẢ ĐỦ NHƯ /login, KHÔNG ĐƯỢC THIẾU MỘT TRƯỜNG NÀO ────────────────────────────────
+     Đây là đường CẤP PHIÊN, và SPA lấy THẲNG object này làm state `me` (App.tsx: `onLogin(m)` →
+     `setMe(m)`). Nó chỉ gọi lại `/auth/me` khi có sự kiện SSE "session:refresh" — tức suốt cả
+     phiên vừa tạo, `me` đúng bằng những gì trả về ở đây.
+
+     Bản trước thiếu `phone` và `title` (`/login` ngay dưới thì có đủ). Hậu quả KHÔNG dừng ở chỗ
+     hiển thị: trang Hồ sơ nạp ô bằng `me.phone || ""`, nên sau khi nhận lời mời HOẶC đặt lại mật
+     khẩu, hai ô đó HIỆN RỖNG dù trong CSDL đang có số. Người dùng chỉ sửa "Tên người gửi" rồi bấm
+     Lưu là gửi kèm hai ô rỗng ấy lên — và theo luật "ô có nạp sẵn thì bỏ trống = XOÁ", hệ thống
+     xoá thật. Đúng sự cố đã xảy ra trên production, chỉ đổi cửa vào.
+
+     Luật rút ra, áp cho mọi đường cấp phiên về sau: TRẢ ĐỦ những trường mà form Hồ sơ nạp sẵn.
+     Thiếu một trường ở đây là biến ô của trường đó thành một lệnh xoá ngầm.
+     Bài kiểm khoá: tests/hs-cap-phien-tra-du-truong.test.js */
   return {
     id: updated.id,
     username: updated.username,
     displayName: updated.displayName,
     role: updated.role,
+    phone: updated.phone,
+    title: updated.title,
     senderName: updated.senderName,
     permissions: permissionsForUser(updated.role, (updated as { permissions?: string[] }).permissions, (updated as { canSign?: boolean }).canSign),
   };

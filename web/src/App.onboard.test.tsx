@@ -138,6 +138,21 @@ describe("Màn #/onboard — đặt lại mật khẩu vs nhận lời mời", (
     expect(gui.title).toBe("Account");
   });
 
+  it("NHẬN LỜI MỜI: ô để trống thì BỎ HẲN khoá — admin có thể đã điền hộ", async () => {
+    // Ba ô này KHÔNG nạp sẵn: `getInvite` chỉ trả email/displayName/role/datLaiMatKhau, nên chúng
+    // rỗng bất kể CSDL đang có gì — mà admin hoàn toàn có thể đã đặt hộ "Tên người gửi" ngay từ lời
+    // mời. Gửi "" từ một ô luôn rỗng là xoá thứ người khác vừa điền hộ. `displayName` thì ngược lại:
+    // CÓ nạp sẵn (và đang `required`) nên vẫn gửi.
+    await dung({ email: "moi@gianguyen.vn", displayName: "Người Mới" });
+    await guiForm();
+
+    const gui = acceptInvite.mock.calls[0][0];
+    expect(gui.displayName).toBe("Người Mới");
+    for (const k of ["senderName", "phone", "title"]) {
+      expect(Object.hasOwn(gui, k), `ô "${k}" để trống mà vẫn gửi khoá lên`).toBe(false);
+    }
+  });
+
   it("thiếu cờ trong câu trả lời cũ → coi như NHẬN LỜI MỜI, không ẩn nhầm", async () => {
     // Máy chủ cũ (chưa có `datLaiMatKhau`) trả về thiếu khoá. Mặc định phải là đường an toàn: hỏi
     // đủ còn hơn ẩn mất ô của người đang cần khai.

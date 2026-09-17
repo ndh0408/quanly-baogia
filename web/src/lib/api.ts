@@ -68,6 +68,7 @@ export type VenueItemInput = {
 export type User = {
   id: number; username: string; displayName: string; role: string;
   phone?: string | null; projectCode?: string | null; email?: string | null;
+  senderName?: string | null;      // tên in ở ô "Người gửi" của báo giá (trống = dùng displayName)
   active: boolean; pending: boolean; canSign?: boolean;
   permissions?: string[];          // tích quyền per-user thô ([] = theo role mặc định)
   effectivePermissions?: string[]; // quyền HIỆU LỰC (để pre-fill ma trận)
@@ -453,7 +454,7 @@ export const api = {
   deleteVenueItem: (itemId: number) => req<{ ok: boolean }>(`/venues/items/${itemId}`, { method: "DELETE" }),
   // Quản lý nhân viên (increment 2) — gate user:manage (Shell nav đã lọc).
   listUsers: () => req<User[]>("/users"),
-  inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; permissions?: string[] }) =>
+  inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; senderName?: string; permissions?: string[] }) =>
     req<InviteResult>("/users/invite", { method: "POST", body: JSON.stringify(data) }),
   resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean; emailSkipped?: boolean; emailError?: string | null }>(`/users/${id}/resend-invite`, { method: "POST" }),
   updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),

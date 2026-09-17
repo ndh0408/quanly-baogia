@@ -3,6 +3,7 @@ import {
   LoginSchema,
   ChangePasswordSchema,
   UserCreateSchema,
+  UserUpdateSchema,
   QuoteCreateSchema,
   ListQuerySchema,
   zbool,
@@ -114,5 +115,41 @@ describe("ListQuerySchema", () => {
   });
   it("rejects size over MAX_PAGE_SIZE", () => {
     expect(() => ListQuerySchema.parse({ size: 9999 })).toThrow();
+  });
+});
+
+describe("Mã dự án — phép chuẩn hoá phải BẤT BIẾN", () => {
+  /* ── VÌ SAO ───────────────────────────────────────────────────────────────────────────────
+     Modal "Sửa tài khoản" NẠP SẴN mã dự án đã lưu rồi gửi lại y nguyên MỖI LẦN Lưu, kể cả khi
+     admin chỉ vào đổi số điện thoại. Nên phép chuẩn hoá chạy lại trên chính kết quả của nó, lần
+     này qua lần khác. Bản cũ cắt đuôi 2 chữ số ĐÚNG MỘT LẦN nên mã bị BÀO MÒN dần:
+
+         FP_A2026  →  FP_A20  →  FP_A        (mỗi mũi tên là một lần bấm Lưu)
+
+     Hậu quả không dừng ở cái tên: `nextProjectCode` khoá bộ đếm theo cặp (prefix, năm), nên mỗi
+     lần đuôi đổi là mở một hàng quoteCounter MỚI — dãy mã dự án của người đó gãy giữa chừng rồi
+     đánh số lại từ _001.
+
+     CHÍNH SÁCH "đuôi 2 chữ số luôn là năm gõ nhầm" GIỮ NGUYÊN (nó đã chữa một sự cố thật: cả 5
+     nhân viên mang đuôi "26"). Chỗ sửa chỉ là chạy tới ĐIỂM DỪNG thay vì cắt một nhát. */
+  const chuan = (v) => UserUpdateSchema.parse({ projectCode: v }).projectCode;
+
+  it("chạy lại lần hai KHÔNG đổi gì nữa", () => {
+    for (const goc of ["FP_A2026", "FP_A20", "FP_D26", "NV2024", "FP_A", "FP_A1", "FP_A26_001"]) {
+      const lan1 = chuan(goc);
+      const lan2 = chuan(lan1 ?? "");
+      expect(lan2, `"${goc}" → "${lan1}" → "${lan2}" — còn bào mòn qua mỗi lần Lưu`).toBe(lan1);
+    }
+  });
+
+  it("vẫn gỡ đúng phần máy tự thêm: dãy _NNN và hai số năm", () => {
+    // Vế đối trọng: sửa thành "không cắt gì" thì dán lại một mã đã cấp sẽ đẻ ra FP_A26_001_001.
+    expect(chuan("FP_A26_001")).toBe("FP_A");
+    expect(chuan("FP_D26")).toBe("FP_D");
+  });
+
+  it("đuôi MỘT chữ số không bị coi là năm", () => {
+    // Chính sách chỉ nói về HAI chữ số. Cắt tham hơn là đổi luật, không phải sửa lỗi.
+    expect(chuan("FP_A1")).toBe("FP_A1");
   });
 });

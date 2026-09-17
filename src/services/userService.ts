@@ -85,6 +85,9 @@ const USER_SELECT = {
   displayName: true,
   role: true,
   phone: true,
+  // Có GHI thì phải ĐỌC LẠI ĐƯỢC: modal "Sửa" pre-fill ô này từ GET /api/users, và nhật ký audit
+  // (before/after của updateUser) chỉ lưu được vết của cột nào có mặt trong select này.
+  senderName: true,
   projectCode: true,
   active: true,
   canSign: true,
@@ -128,7 +131,7 @@ export async function listUsers(_req: Request) {
 
 // Invite an employee by email — they self-onboard (set password + fill details).
 export async function inviteUser(req: Request) {
-  const { email, displayName, role, projectCode, permissions } = req.body;
+  const { email, displayName, role, projectCode, permissions, senderName } = req.body;
   // Giữ NGUYÊN tập trường được đối chiếu (email HOẶC username) — chỉ đổi phép so từ byte-for-byte
   // sang không-phân-biệt-hoa/thường. Nới tập trường sẽ đổi hành vi đang chạy.
   const exists = await timTaiKhoanTrung(email, ["email", "username"]);
@@ -141,6 +144,9 @@ export async function inviteUser(req: Request) {
       displayName,
       role,
       permissions: sanitizePerms(permissions), // tích quyền per-user lúc mời ([] = theo role)
+      // Hàng MỚI nên `|| null` ở đây không xoá được gì của ai. Đặt hộ ngay từ lời mời để wizard báo
+      // giá của người đó chạy đúng ngay lần đầu, thay vì bắt họ tự vào Hồ sơ cá nhân điền.
+      senderName: senderName || null,
       projectCode: projectCode ? String(projectCode).trim() : null,
       active: false,
       passwordHash: await bcrypt.hash(randomBytes(18).toString("hex"), config.BCRYPT_COST), // unusable until accept
@@ -177,7 +183,7 @@ export async function resendInvite(req: Request) {
 }
 
 export async function createUser(req: Request) {
-  const { username, password, displayName, role, phone, title } = req.body;
+  const { username, password, displayName, role, phone, title, senderName } = req.body;
   // includeDeleted: username is unique across soft-deleted rows too — a plain
   // check would miss a deleted holder and surface the DB constraint as a 500.
   // CHỈ đối chiếu cột `username` (KHÔNG kèm `email`) — giữ đúng tập trường cũ, chỉ đổi phép so.
@@ -192,6 +198,9 @@ export async function createUser(req: Request) {
       role,
       phone: phone || null,
       title: title || null,
+      // Destructure ở trên là TƯỜNG MINH, nên thêm trường vào UserCreateSchema thôi chưa đủ —
+      // thiếu dòng này thì zod cho qua mà hàng vẫn ghi thiếu, im lặng.
+      senderName: senderName || null,
     },
     select: USER_SELECT,
   });
