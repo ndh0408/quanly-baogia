@@ -236,8 +236,13 @@ phép làm im luôn cả báo động về sao lưu — kể cả khi hệ giám
 * ~~**Chưa chạy thử bằng Docker thật.**~~ Đã bật trên production ngày 2026-09-16: 3/3 target
   Prometheus `up`, 22 quy tắc được nạp. Phần Alertmanager cũng đã chạy thử end-to-end với MailHog
   (xem mục trên) — thư thật sự tới nơi, không chỉ qua `check-config`.
-* **Cảnh báo chỉ có MỘT kênh (email).** Hòm thư chết hoặc Gmail chặn đăng nhập ứng dụng là mất
-  đường báo. Backup watchdog qua Telegram vẫn là đường thứ hai, nhưng nó chỉ canh sao lưu.
+* ~~**Cảnh báo chỉ có MỘT kênh (email).**~~ Từ 2026-09-17 production và dev đều gửi cảnh báo hệ
+  thống vào NHÓM Telegram (bot `@GiaNguyenOpsBot`, `chat_id` âm = nhóm). Đã thử end-to-end trên
+  production, không chỉ qua `check-config`: bắn cảnh báo thật vào `/api/v2/alerts` → 0 lỗi gửi, và
+  một tin nhắn gửi bằng đúng cặp khoá của production trả `ok: true`.
+  Lưu ý kênh này vẫn là **kênh DUY NHẤT** — bật Telegram thì khối email bị gỡ khỏi cấu hình (xem
+  cảnh báo ở mục trên). Đổi lại: nhóm có nhiều người đọc, nên một người tắt thông báo không làm
+  cả đội mù như hòm thư cá nhân.
 * **Chưa có lịch trực.** Mọi cảnh báo đi về cùng một hòm thư, không phân ca, không leo thang.
 * **Không giữ log lâu.** Loki chạy cấu hình mặc định (giữ trong volume, không phân tầng). Cần giữ
   theo tháng thì phải cấu hình `limits_config.retention_period` + compactor.
