@@ -48,8 +48,21 @@ describe.runIf(dbAvailable)("Dọn nhật ký quá hạn phải chia lô", () =>
 
   it("không câu lệnh DELETE nào ôm quá một lô, và vẫn xoá hết phần quá hạn", async () => {
     const { pruneOldRecords } = await import("../src/retention.js");
-    const kq = await pruneOldRecords();
-    expect(kq.audit, "phải xoá đủ số hàng quá hạn").toBeGreaterThanOrEqual(SO_HANG);
+    await pruneOldRecords();
+
+    // ── KHÔNG khẳng định trên `kq.audit` ──────────────────────────────────
+    // Đó là số ĐẾM TOÀN CỤC của cả bảng. BỐN tệp test cùng gọi `pruneOldRecords()`
+    // (b1-retention-staging-fail · db3-retention-batch · qs-retention-objects · retention), mà
+    // vitest chạy các tệp SONG SONG — lượt prune của tệp khác xoá xong 12.000 hàng này trước thì
+    // lời gọi ở đây trả 0 và bài ĐỎ, dù mọi thứ đều đúng. ĐÃ ĐỎ THẬT ở một lượt chạy đầy đủ
+    // ("expected 0 to be greater than or equal to 12000"), chạy riêng thì xanh.
+    //
+    // Hai khẳng định bên dưới đã phủ TRỌN tên của bài này, và cả hai đều chỉ nhìn dữ liệu MANG
+    // TAG của chính nó:
+    //   · không còn hàng nào của bài này sót lại  → "xoá hết phần quá hạn";
+    //   · tổng theo trigger = đúng 12.000, câu lệnh lớn nhất ≤ một lô → "không lệnh nào ôm quá".
+    // Trigger nằm trên BẢNG nên nó ghi lại mọi lượt DELETE, kể cả lượt do tệp khác kích hoạt —
+    // mà lượt đó cũng là chính `pruneOldRecords`, nên tính chất cần chứng minh vẫn được chứng minh.
     expect(await prisma.auditEvent.count({ where: { action: { startsWith: TAG } } })).toBe(0);
 
     const lo = await prisma.$queryRawUnsafe(`SELECT n FROM "${BANG}" ORDER BY n DESC`);

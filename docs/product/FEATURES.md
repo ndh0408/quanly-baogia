@@ -172,7 +172,7 @@ Cố ý không đẻ thêm đường ghi nào.
 | Mẫu (code) | Công ty | File | Đặc điểm |
 |---|---|---|---|
 | GN không ngày (`marico_decor`) | Gia Nguyễn | `templates/Marico_Decor.xlsx` | header tiếng Việt một dòng, không có cột Số ngày |
-| GN có ngày (`unibenfood`) | Gia Nguyễn | `templates/Unibenfood.xlsx` | có cột **Số ngày** |
+| GN có ngày (`unibenfood`) | Gia Nguyễn | `templates/GN_CoNgay.xlsx` | **cùng nền với GN không ngày**, thay cột Chi Tiết bằng **Số ngày**; Thành Tiền = Đơn Giá × Số Lượng × Số Ngày. Dựng lại: `node scripts/dung-mau-co-ngay.mjs` |
 | GN Banner (`gn_banner`) | Gia Nguyễn | `templates/Marico_Decor.xlsx` | cùng file GN không ngày, **khác cách đánh STT** (nhóm con đánh 1,2,3; mục dưới không đánh số) |
 | CLF không ngày (`clofull_decor`) | Colorfull | `templates/CLF_KhongNgay.xlsx` | có cột Chi Tiết; khối "Kính gửi" + letterhead người gửi ở F1 |
 

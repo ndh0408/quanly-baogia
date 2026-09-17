@@ -350,6 +350,18 @@ describe("Phải TỒN TẠI một máy chủ Prometheus trong repo", () => {
 describe("Cấu hình scrape phải THẬT SỰ lấy được số liệu", () => {
   const jobs = [...PROMYML.matchAll(/^\s*-\s*job_name:\s*(\S+)/gm)].map((m) => m[1]);
 
+  // JOB HẠ TẦNG — scrape /metrics CỦA CHÍNH THÀNH PHẦN GIÁM SÁT, không đi qua ứng dụng. Chúng
+  // KHÔNG mang tiền tố `quanly` và KHÔNG gửi Bearer, và cả hai điều đó là CỐ Ý:
+  //   · không khớp `quanly.*` để `absent(up{job=~"quanly.*"})` vẫn đúng khi mất sạch target ứng
+  //     dụng — khớp thì quy tắc đó thành vô dụng vì luôn còn chuỗi `up` của hạ tầng;
+  //   · không Bearer vì /metrics của Prometheus/Alertmanager không nằm sau lớp xác thực của app.
+  // Danh sách này phải NGẮN và có lý do cho từng tên. Thêm bừa vào đây là tự mở đường cho một job
+  // ứng dụng lọt qua cả hai chốt bên dưới.
+  const JOB_HA_TANG = new Set([
+    "prometheus",    // Prometheus tự giám sát
+    "alertmanager",  // thêm 2026-09-17: Alertmanager chết thì phải có chuỗi `up` ghi lại
+  ]);
+
   it("scrape cả tiến trình app LẪN tiến trình worker", () => {
     // Bỏ worker thì `export_duration_seconds`, `export_jobs_total` và `bullmq_jobs` chỉ có số của
     // đường chạy nội tuyến trong API — tức phần KHÔNG phải đường chạy chính.
@@ -362,7 +374,7 @@ describe("Cấu hình scrape phải THẬT SỰ lấy được số liệu", () 
     // và ngay cả `QuanlyKhongConTargetNao` — thứ sinh ra để bắt "mất sạch target" — cũng im, vì
     // chính nó cũng lọc theo tên job.
     expect(ALERTS, "alerts.yaml không còn lọc theo quanly.* — sửa bài này cho khớp").toContain('job=~"quanly.*"');
-    const ungDung = jobs.filter((j) => j !== "prometheus");
+    const ungDung = jobs.filter((j) => !JOB_HA_TANG.has(j));
     expect(ungDung.length, "không có job ứng dụng nào").toBeGreaterThan(0);
     for (const j of ungDung) expect(j, `job "${j}" không khớp quanly.* → mọi quy tắc lọc theo job sẽ bỏ qua nó`).toMatch(/^quanly/);
   });
@@ -378,7 +390,7 @@ describe("Cấu hình scrape phải THẬT SỰ lấy được số liệu", () 
     // đều là "scrape hỏng mà không ai báo lỗi".
     for (const khoi of PROMYML.split(/^\s*-\s*job_name:/m).slice(1)) {
       const ten = khoi.split("\n")[0].trim();
-      if (ten === "prometheus") continue; // job tự giám sát, không đi qua /metrics của ứng dụng
+      if (JOB_HA_TANG.has(ten)) continue; // /metrics của chính thành phần giám sát, không qua app
       expect(khoi, `job "${ten}" scrape /metrics mà không gửi Bearer → production trả 404/401`).toMatch(/authorization:/);
     }
   });

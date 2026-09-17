@@ -81,6 +81,19 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // TRƯỚC KHI CẬP NHẬT HASH, đã đối chiếu nội dung ô của bản CŨ và bản MỚI: khác biệt đúng
       // HAI dòng — `B3 "Ms."` và `E3 "Ms."` biến mất, 63 ô còn 61, không gì khác. Cập nhật một
       // golden hash mà không đối chiếu là tự tay vô hiệu hoá chính chốt chặn này.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-17 (mẫu CÓ NGÀY) ───────────────────
+      // CHỈ fixture `gn-withdate` đổi — nó là fixture duy nhất dùng mẫu có-ngày. Bảy fixture còn
+      // lại giữ nguyên hash, tức bản không-ngày / banner / CLF không bị đụng.
+      //
+      // Mẫu có-ngày chuyển từ `templates/Unibenfood.xlsx` sang `templates/GN_CoNgay.xlsx` (dựng
+      // từ nền không-ngày). ĐÃ ĐỐI CHIẾU TỪNG Ô trước khi đổi hash — bản CŨ để lọt:
+      //   · DÒNG TIÊU ĐỀ TRÙNG ở r10 (r11 mới là hàng thật);
+      //   · HẠNG MỤC CỦA MỘT BÁO GIÁ KHÁCH KHÁC còn sót trong file mẫu: "Đá lạnh mỗi ngày",
+      //     "Thùng rác, túi rác, găn tay nilong…", "Vận chuyển hàng sampling đến Emart",
+      //     "Phí quản lý", "* Lấy hàng tại Emart" — đi vào MỌI file có-ngày gửi khách;
+      //   · ba công thức tổng trỏ RA NGOÀI bảng: =G25*E25 · =H26*8% · =SUM(H26:H27).
+      // 100 ô → 70 ô. Đối chiếu lại bất cứ lúc nào: node scripts/so-o-mau-co-ngay.mjs
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

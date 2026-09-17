@@ -253,106 +253,6 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     },
   },
 
-  unibenfood: {
-    sheetName: "Quotation",
-    filePath: "templates/Unibenfood.xlsx",
-    displayName: "GN (có ngày)",
-    cleanup: {
-      // Marico-specific text that was in the original template file. We strip it so the
-      // template behaves like a blank shell.
-      extraCellsToClear: [
-        "B8",          // leftover second-line greeting from original Unibenfood (we put full greeting into B7)
-        "B12", "C12",  // description block
-        // footer text
-        "B30", "C30", "B31", "C31", "B32", "C32", "B33", "C33", "B34", "C34", "B35", "C35",
-        "G30", "G31", "G32", "G33", "G34", "G35",
-        "H30", "H31", "H32", "H33", "I30", "I31", "I32", "I33",
-      ],
-      // Remove Marico-typed structural rows: description block (12), section headers (13, 17), Phí quản lý (25).
-      // After this, the template has 10 uniform white-bg item slots at rows 12-21 with totals at 22-24.
-      removeRows: [12, 13, 17, 25],
-      // Remove PG girl image (Marico-specific). Keep only company logo (above row 5).
-      keepImagesAboveRow: 5,
-    },
-    cells: {
-      toCompany:   "C1",
-      toContact:   "C2",
-      toPhone:     "C3",
-      toAddress:   "C4",
-      fromContactCell: "E2",
-      fromContactFormat: ({ contact, title }: { contact: string | null | undefined; title: string | null | undefined }) =>
-        [contact, title].filter(Boolean).join(" _ "),
-      fromPhone:   "E3",
-      fromAddress: "E4",
-      date:        "B5",
-      title:       "B6",
-      titleFormat: (title: string | null | undefined) => {
-        const t = (title || "").trim();
-        if (!t) return "BẢNG BÁO GIÁ";
-        // Strip Vietnamese diacritics + special variants of "Đ"/"đ" then compare in upper-case.
-        const ascii = t
-          .normalize("NFD")
-          .replace(/[̀-ͯ]/g, "")
-          .replace(/đ/gi, "d")
-          .toUpperCase();
-        if (/^BANG\s*BAO\s*GIA/.test(ascii)) return t;
-        return `BẢNG BÁO GIÁ - ${t}`;
-      },
-      greeting:    "B7",
-    },
-    items: {
-      // After removing 4 Marico-specific rows, 10 uniform item slots remain at rows 12-21.
-      // Same splice/duplicate behavior as Décor (compact output, no empty trailing rows).
-      firstRow: 12,
-      headerRow: 11,   // hàng tiêu đề cột → đổi nền qua code
-      lastRow:  21,
-      rowHeight: 30,
-      // Description column (C) is shown in italic, matching the original Unibenfood template style
-      italicColumns: ["C"],
-      columns: {
-        stt:       "B",
-        name:      "C",
-        unit:      "D",
-        quantity:  "E",
-        days:      "F",
-        unitPrice: "G",
-        amount:    "H",
-        notes:     "I",
-      },
-      // Amount = quantity × days × unit price (this is the only real difference from Décor)
-      amountFormula: (r: number) => `G${r}*E${r}*F${r}`,
-    },
-    totals: {
-      subtotal: {
-        labelCells: [["B", "G"]],
-        labelText: () => " Tổng",
-        labelTextGross: () => "Cộng",   // xem chú thích cùng tên ở marico_decor
-        valueCell: "H",
-        rowOffset: 1,
-        formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
-      },
-      vat: {
-        labelCells: [["B", "G"]],
-        labelText: (vatPct: number) => `VAT ${vatPct}%`,
-        valueCell: "H",
-        rowOffset: 2,
-        formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `H${subtotalRow}*${vatPct}%`,
-      },
-      discount: {
-        labelCells: [["B", "G"]],
-        labelText: () => "Discount",
-        valueCell: "H",
-      },
-      total: {
-        labelCells: [["B", "G"]],
-        labelText: () => "Thành tiền",
-        valueCell: "H",
-        rowOffset: 3,
-        formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
-          discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
-      },
-    },
-  },
 };
 
 // ===== GN (không ngày) — bản BANNER =====
@@ -369,6 +269,58 @@ TEMPLATE_CONFIGS.gn_banner = {
   displayName: "GN Banner (không ngày)",
   items: { ...TEMPLATE_CONFIGS.marico_decor.items, numberSubsections: true },
 };
+
+// ===== GN — CÓ NGÀY =====
+// BÊ NGUYÊN NỀN CỦA BẢN KHÔNG-NGÀY (`marico_decor`). Khác đúng hai thứ: có cột SỐ NGÀY, và Thành
+// Tiền nhân thêm thừa số đó. Mọi quy tắc còn lại — hàng, nhóm A/B/C, nhóm con, cách dọn mẫu, khối
+// Tổng/VAT/Thành tiền, vị trí ô thông tin khách, xoá nhãn "Ms." — đi theo bản không-ngày.
+//
+// ── VÌ SAO BỎ `templates/Unibenfood.xlsx` ─────────────────────────────────
+// Bản cũ hỏng ở hai chỗ độc lập, cả hai đo được trên file thật xuất từ production (báo giá #40,
+// trang "Premiere"):
+//   1. HAI DÒNG TIÊU ĐỀ TRÙNG NHAU (r10 và r11 y hệt). Lỗi nằm NGAY TRONG FILE MẪU nên mọi file
+//      khách nhận được đều mang theo. Marico_Decor.xlsx chỉ có đúng một dòng, ở r11.
+//   2. Bố cục lệch hẳn bản không-ngày → mọi bản vá phải làm HAI LẦN. Gần nhất: xoá nhãn "Ms."
+//      nhúng cứng ở B3/E3 chỉ vá được cho nền Marico, bản có-ngày không hưởng.
+// Dùng chung một nền thì cả hai lớp lỗi đó biến mất cùng lúc.
+//
+// ── BỐ CỤC ────────────────────────────────────────────────────────────────
+//   B     C          D     E          F         G        H            I
+//   STT   Hạng Mục   ĐVT   SỐ LƯỢNG   SỐ NGÀY   ĐƠN GIÁ  THÀNH TIỀN   GHI CHÚ
+//
+// Cột "Chi Tiết" KHÔNG tồn tại ở bản này — và đó KHÔNG phải bước lùi: bản không-ngày cũng không
+// hiện nó trong file xuất ra (`removeDetail: true` gộp C:D thành một cột Hạng Mục rộng), còn bản
+// có-ngày CŨ cũng chưa từng có. Ở đây cột đó biến mất THẬT, không phải bị ẩn.
+//
+// File mẫu dựng lại được: node scripts/dung-mau-co-ngay.mjs
+TEMPLATE_CONFIGS.unibenfood = {
+  ...TEMPLATE_CONFIGS.marico_decor,
+  filePath: "templates/GN_CoNgay.xlsx",
+  displayName: "GN (có ngày)",
+  items: {
+    ...TEMPLATE_CONFIGS.marico_decor.items,
+    // Cờ này ở bản không-ngày dùng để GỘP C:D cho khỏi lộ cột Chi Tiết. Ở đây để `false` cho khỏi
+    // gây hiểu nhầm, nhưng nó VÔ HIỆU dù đặt gì: mọi nhánh đọc nó trong src/excel.ts đều bị chặn
+    // bởi `cols.detail` (dòng 485, 525, 555, 783, 844), mà bảng `columns` bên dưới KHÔNG khai
+    // `detail`. Chính việc THIẾU khoá `detail` mới là thứ làm cột Chi Tiết biến mất — không phải
+    // cờ này. Ghi rõ ra vì một dòng cấu hình trông như đang điều khiển thứ gì đó mà thật ra không
+    // là loại chú thích tự nó sai.
+    removeDetail: false,
+    columns: {
+      stt:       "B",
+      name:      "C",
+      unit:      "D",
+      quantity:  "E",
+      days:      "F",
+      unitPrice: "G",
+      amount:    "H",
+      notes:     "I",
+    },
+    // Khác bản không-ngày (`G*F`) ĐÚNG ở thừa số `F` — số ngày.
+    amountFormula: (r: number) => `G${r}*E${r}*F${r}`,
+  },
+};
+
 
 export function getConfig(code: string) {
   const c = TEMPLATE_CONFIGS[code];

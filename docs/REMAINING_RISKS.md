@@ -1194,7 +1194,7 @@ png/jpeg/gif. Đợt này **chỉ vá phần tệ nhất**: ô C3 nay được x
 một ô trống thay vì thành chữ sai.
 
 Cố ý **không** gỡ `webp` khỏi validator: người dùng có thể đã lưu logo webp, và
-lưới hạng mục (`web/src/components/GridTable.tsx:89`) cũng nhận webp — siết
+lưới hạng mục (hằng `RE_ANH_HOP_LE` trong `web/src/components/GridTable.tsx`) cũng nhận webp — siết
 validator sẽ làm **hỏng nút Lưu** của những báo giá đó, tệ hơn hẳn một logo thiếu.
 
 **Chưa kiểm chứng:** ExcelJS ghi content-type `image/webp` một cách máy móc

@@ -201,8 +201,13 @@ describe("Luật định tuyến và nén im lặng phải trỏ vào thứ CÓ 
     const than = khongChuThich(TPL);
     expect(than, "còn `{{ .StartsAt }}` thô → thư in giờ UTC kèm đuôi m=+…")
       .not.toMatch(/\{\{\s*\.StartsAt\s*\}\}/);
-    const dung = [...than.matchAll(/\.StartsAt\.Local\.Format/g)];
-    expect(dung.length, "cả bản HTML lẫn bản chữ thường đều phải đổi").toBe(2);
+    // ĐẾM THEO TỈ LỆ, KHÔNG CHỐT CON SỐ: bản trước đòi đúng 2 (thân HTML + thân chữ của email) và
+    // ĐÃ ĐỎ ngay khi thêm kênh Telegram — dù kênh mới cũng dùng `.Local` đúng chuẩn. Chốt con số ở
+    // đây là chốt "có bao nhiêu kênh", trong khi điều cần khoá là "MỌI chỗ in giờ đều .Local".
+    const tatCa = [...than.matchAll(/\.StartsAt/g)].length;
+    const dung = [...than.matchAll(/\.StartsAt\.Local\.Format/g)].length;
+    expect(tatCa, "bản mẫu không in giờ ở đâu cả — chắc chắn sai").toBeGreaterThanOrEqual(2);
+    expect(dung, `có ${tatCa - dung} chỗ in .StartsAt mà KHÔNG qua .Local.Format`).toBe(tatCa);
     expect(khoiService("alertmanager"), "thiếu TZ thì .Local âm thầm trở lại UTC").toMatch(/TZ:\s*\$\{TZ:-[^}\s]+\}/);
   });
 

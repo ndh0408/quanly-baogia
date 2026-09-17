@@ -358,8 +358,10 @@ export async function stitchXlsxBuffers(buffers: Buffer[], sheetNames: string[])
   // SỐ SHEET KẾ TIẾP PHẢI TRÁNH MỌI TỆP SHEET ĐÃ CÓ TRONG ZIP NỀN — không được đoán bằng 1.
   //
   // Bản trước đặt cứng `= 1` với giả định "workbook nền luôn để worksheet ở sheet1.xml". Giả định
-  // đó SAI với mẫu đang dùng thật: `templates/Unibenfood.xlsx` đặt worksheet ở
-  // `xl/worksheets/sheet21.xml`, và ExcelJS GIỮ NGUYÊN đường dẫn ấy khi render lại (đã đo: load →
+  // đó SAI với mẫu đang dùng thật: `templates/GN_CoNgay.xlsx` đặt worksheet ở
+  // `xl/worksheets/sheet69.xml` (đo 2026-09-17; mẫu có-ngày CŨ `Unibenfood.xlsx` là sheet21.xml —
+  // tức đổi mẫu KHÔNG làm giả định "luôn là sheet1" đúng trở lại, chỉ đổi con số).
+  // ExcelJS GIỮ NGUYÊN đường dẫn ấy khi render lại (đã đo: load →
   // writeBuffer → vẫn sheet21.xml), nên buffer nền vào đây cũng vậy. Sheet ghép thứ 20 khi đó nhận
   // `newSheetNum = 21` và ghi đè ĐÚNG tệp của trang 1: báo giá 21 sheet trở lên gửi khách một file
   // mà trang đầu bị thay bằng trang cuối, và tổng số sheet hụt đi một (đo trong
