@@ -59,6 +59,37 @@ else
   XAC_THUC="KHÔNG (SMTP_USER rỗng) — đúng cho MailHog ở dev, SAI cho Gmail"
 fi
 
+# ── 1c. KÊNH THỨ HAI: TELEGRAM (TUỲ CHỌN, MẶC ĐỊNH TẮT) ───────────────────
+# Bật khi có ĐỦ CẢ HAI: chat id (biến) và token (tệp secret). Thiếu một trong hai thì GỠ TRỌN khối
+# `telegram_configs` khỏi bản mẫu — để lại một khối trỏ vào token rỗng thì Alertmanager vẫn khởi
+# động và vẫn THỬ gửi, rồi thất bại ở từng cảnh báo. Tức thêm một đường hỏng im lặng nữa, đúng thứ
+# script này sinh ra để chặn.
+#
+# BẬT MỘT NỬA LÀ LỖI, KHÔNG PHẢI "gần đủ": có token mà quên chat id (hoặc ngược lại) gần như chắc
+# chắn là người ta ĐỊNH bật kênh này. Im lặng bỏ qua thì họ tin là đã có hai kênh trong khi chỉ có
+# một — tệ hơn hẳn việc biết mình chỉ có một. Nên nửa vời thì THOÁT 78.
+# Khe để bài kiểm trỏ sang tệp token giả (cùng kiểu AM_TEMPLATE/AM_RENDERED/AM_BIN). Mặc định
+# vẫn là đường secret thật, nên production không đổi.
+KHOA_TG="${AM_TELEGRAM_TOKEN_FILE:-/run/secrets/telegram_bot_token}"
+co_tg_id=""
+[ -n "${TELEGRAM_CHAT_ID:-}" ] && co_tg_id=1
+co_tg_token=""
+[ -s "$KHOA_TG" ] && co_tg_token=1
+
+if [ -n "$co_tg_id" ] && [ -n "$co_tg_token" ]; then
+  TELEGRAM=1
+  TG_TRANG_THAI="BẬT (chat_id=$TELEGRAM_CHAT_ID)"
+elif [ -z "$co_tg_id" ] && [ -z "$co_tg_token" ]; then
+  TELEGRAM=""
+  TG_TRANG_THAI="tắt (không TELEGRAM_CHAT_ID, không $KHOA_TG) — cảnh báo chỉ đi bằng email"
+else
+  echo "alertmanager-entrypoint: Telegram bật NỬA VỜI — phải có ĐỦ CẢ HAI." >&2
+  [ -z "$co_tg_id" ]    && echo "  → thiếu TELEGRAM_CHAT_ID trong .env" >&2
+  [ -z "$co_tg_token" ] && echo "  → thiếu/rỗng $KHOA_TG (đặt TELEGRAM_BOT_TOKEN trong .env)" >&2
+  echo "  Bỏ qua im lặng thì bạn tin mình có hai kênh trong khi chỉ có một." >&2
+  exit 78
+fi
+
 # ── 2. THAY GIÁ TRỊ ───────────────────────────────────────────────────────
 mkdir -p "$(dirname "$RA")"
 # Không xác thực → GỠ hai dòng `smtp_auth_*` khỏi bản mẫu TRƯỚC khi thay giá trị, nhờ đó
@@ -68,6 +99,31 @@ if [ -n "${SMTP_USER:-}" ]; then
 else
   LOC="grep -v ^[[:space:]]*smtp_auth_"
 fi
+
+# ── GỠ KHỐI KÊNH KHÔNG DÙNG ───────────────────────────────────────────────
+# Bản mẫu mang CẢ HAI khối, mỗi khối kẹp giữa hai dấu mốc trong chú thích YAML. Đúng MỘT khối bị
+# gỡ ở đây, và gỡ theo MỐC chứ không theo tên trường: mỗi khối trải mấy chục dòng, có cả mẫu thư
+# nhiều dòng bên trong, nên lọc từng dòng theo tên trường sẽ để lại xác và cho ra YAML hỏng.
+#
+#   Telegram BẬT  → gỡ khối EMAIL    (cảnh báo hệ thống đi Telegram; email rút về đúng việc của nó
+#                                     là thông báo nghiệp vụ cho người dùng, xem src/notifications.ts)
+#   Telegram TẮT  → gỡ khối TELEGRAM (hành vi y như trước 2026-09-17)
+#
+# KHÔNG BAO GIỜ gỡ cả hai: receiver rỗng nghĩa là Alertmanager nhận cảnh báo rồi vứt đi, và nó
+# KHÔNG báo lỗi khi làm thế. Nhánh 1c ở trên đã bảo đảm điều đó — Telegram chỉ có hai trạng thái
+# đủ-hoặc-không, nửa vời thì thoát 78.
+if [ -n "$TELEGRAM" ]; then
+  MOC_BO="EMAIL"
+else
+  MOC_BO="TELEGRAM"
+fi
+bo_khoi() {
+  awk -v moc="$1" '
+    $0 ~ ("^[[:space:]]*#[[:space:]]*>>>" moc ">>>") { bo = 1 }
+    !bo
+    $0 ~ ("^[[:space:]]*#[[:space:]]*<<<" moc "<<<") { bo = 0 }
+  '
+}
 
 # ── ĐƯA GIÁ TRỊ VÀO AWK QUA MÔI TRƯỜNG, KHÔNG QUA `-v` ────────────────────
 # `awk -v ten="$gt"` DIỄN GIẢI CHUỖI THOÁT nằm trong giá trị. ĐÃ ĐO bằng chính awk của máy này:
@@ -88,8 +144,9 @@ export AM_V_SMTP_FROM="$SMTP_FROM"
 export AM_V_SMTP_USER="${SMTP_USER:-}"
 export AM_V_ALERT_EMAIL_TO="$ALERT_EMAIL_TO"
 export AM_V_SMTP_REQUIRE_TLS="$SMTP_REQUIRE_TLS"
+export AM_V_TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
-$LOC "$MAU" | awk '
+$LOC "$MAU" | bo_khoi "$MOC_BO" | awk '
   function thay(s, tim, the,   p, r) {
     r = ""
     while ((p = index(s, tim)) > 0) {
@@ -105,6 +162,7 @@ $LOC "$MAU" | awk '
     $0 = thay($0, "${SMTP_USER}",        ENVIRON["AM_V_SMTP_USER"])
     $0 = thay($0, "${ALERT_EMAIL_TO}",   ENVIRON["AM_V_ALERT_EMAIL_TO"])
     $0 = thay($0, "${SMTP_REQUIRE_TLS}", ENVIRON["AM_V_SMTP_REQUIRE_TLS"])
+    $0 = thay($0, "${TELEGRAM_CHAT_ID}",  ENVIRON["AM_V_TELEGRAM_CHAT_ID"])
     print
   }
   ' > "$RA"
@@ -129,6 +187,7 @@ echo "alertmanager-entrypoint: đã dựng $RA"
 echo "  smarthost = $SMTP_HOST:$SMTP_PORT"
 echo "  gửi tới   = $ALERT_EMAIL_TO"
 echo "  xác thực  = $XAC_THUC"
+echo "  telegram  = $TG_TRANG_THAI"
 # `AM_BIN` chỉ là KHE ĐỂ KIỂM ĐƯỢC, mặc định y như cũ. Không có nó thì bộ test không cách nào chạy
 # THẬT script này (máy dev không có /bin/alertmanager), và mọi bài kiểm buộc phải lùi về so khớp
 # VĂN BẢN của script — thứ không chứng minh được phép thay có chạy đúng hay không.

@@ -182,6 +182,29 @@ khởi động** nếu thiếu biến bắt buộc hoặc còn sót một `${` n
 | `SMTP_USER` | **không** | rỗng → gỡ hẳn `smtp_auth_*` và tắt `smtp_require_tls`. Đúng cho MailHog ở dev, **sai** cho Gmail |
 | `SMTP_PASS` | khi có `SMTP_USER` | vào bằng **đường tệp** (`/run/secrets/smtp_password`), không qua phép thay chuỗi |
 | `ALERT_EMAIL_TO` | có | bỏ trống thì mặc định về `SMTP_USER`. Nhiều người nhận: ngăn cách bằng dấu phẩy |
+| `TELEGRAM_BOT_TOKEN` | không | bật kênh Telegram. Vào bằng **đường tệp** (`/run/secrets/telegram_bot_token`), không qua phép thay chuỗi |
+| `TELEGRAM_CHAT_ID` | không | nơi NHẬN cảnh báo. Phải có **cùng lúc** với token, xem dưới |
+
+### Kênh Telegram cho cảnh báo hệ thống (mặc định TẮT)
+
+Có **đủ cả hai** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` → cảnh báo đi Telegram và khối
+`email_configs` bị **gỡ hẳn** khỏi cấu hình dựng ra. Không có cái nào → giữ nguyên email. Có
+**đúng một** → entrypoint thoát 78 và container KHÔNG lên: bật nửa vời khiến người ta tin mình có
+kênh mà thật ra không có, tệ hơn hẳn việc biết mình chỉ có một kênh.
+
+Vì sao tách khỏi email thay vì gửi cả hai: hộp thư của người vận hành **cũng** là hộp thư nhận
+thông báo nghiệp vụ (`src/notifications.ts` — báo giá được duyệt, job xong…). Cảnh báo hệ thống
+lẫn vào đó là cảnh báo bị lướt qua. Và 2 giờ sáng thì hộp thư không đánh thức ai.
+
+**Lấy `TELEGRAM_CHAT_ID`:** tạo nhóm → thêm bot vào → gửi một tin bất kỳ → mở
+`https://api.telegram.org/bot<TOKEN>/getUpdates` → đọc `message.chat.id`.
+
+**NÊN LÀ MỘT NHÓM, không phải chat riêng.** Chat riêng nghĩa là một chiếc điện thoại để im lặng
+là không ai biết hệ thống đang hỏng — đúng chế độ hỏng mà kênh này sinh ra để chặn. Id nhóm là số
+**âm**, bắt đầu bằng `-100`.
+
+⚠️ Bật Telegram thì **cảnh báo không còn đi email nữa**. Kênh này trở thành kênh duy nhất, nên
+token hết hạn hoặc bot bị xoá là cảnh báo câm — xem `docs/REMAINING_RISKS.md`.
 
 `SMTP_USER` và `smtp_require_tls` **buộc chặt vào nhau** trong entrypoint: TLS ở đây tồn tại để che
 mật khẩu trên đường truyền, nên "có mật khẩu" và "bắt buộc TLS" phải bật/tắt cùng nhau. Cho chỉnh

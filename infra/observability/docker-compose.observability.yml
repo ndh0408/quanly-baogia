@@ -186,10 +186,22 @@ services:
       # PHẢI đặt ALERT_EMAIL_TO trong .env (bất kỳ địa chỉ nào, MailHog nhận hết).
       # Nhiều người nhận: ngăn cách bằng dấu phẩy.
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-${SMTP_USER:-}}
+      # ── KÊNH THỨ HAI: TELEGRAM (TUỲ CHỌN, MẶC ĐỊNH TẮT) ───────────────────
+      # Có ĐỦ TELEGRAM_CHAT_ID + TELEGRAM_BOT_TOKEN → cảnh báo hệ thống đi Telegram và khối
+      # email bị GỠ khỏi cấu hình. Thiếu cả hai → giữ nguyên email. Có ĐÚNG MỘT → entrypoint
+      # thoát 78, vì bật nửa vời khiến người ta tin mình có kênh mà thật ra không có.
+      #
+      # Vì sao tách khỏi email: hộp thư của người vận hành CŨNG là hộp thư nhận thông báo nghiệp
+      # vụ từ src/notifications.ts (báo giá được duyệt, job xong…). Cảnh báo hệ thống lẫn vào đó
+      # là cảnh báo bị lướt qua. Và 2 giờ sáng thì hộp thư không đánh thức ai.
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     secrets:
       # Mật khẩu KHÔNG đi qua phép thay chuỗi và KHÔNG nằm trong file cấu hình đã dựng:
       # `smtp_auth_password_file` trỏ thẳng vào đây.
       - smtp_password
+      # Cùng lý do: `bot_token_file` trỏ thẳng vào secret, token KHÔNG nằm trong /render, không
+      # lọt vào `docker inspect`, không lọt vào log.
+      - telegram_bot_token
     volumes:
       # ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ. ĐÃ ĐO trên chính VM production:
       #     mount tệp lẻ  → container thấy bản CŨ sau khi deploy thay tệp
@@ -266,6 +278,10 @@ volumes:
   prometheus-data:
 
 secrets:
+  # Token bot Telegram cho cảnh báo hệ thống. RỖNG = kênh Telegram TẮT, cảnh báo đi bằng email —
+  # đó là mặc định và là hành vi từ trước 2026-09-17.
+  telegram_bot_token:
+    environment: TELEGRAM_BOT_TOKEN
   metrics_token:
     # Nguồn `environment` (Docker Compose ≥ 2.24): giá trị của biến METRICS_TOKEN được bày ra
     # /run/secrets/metrics_token trong container, KHÔNG nằm lại trên đĩa máy chủ và KHÔNG lộ trong

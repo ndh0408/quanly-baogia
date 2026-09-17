@@ -49,16 +49,23 @@ route:
   group_wait: 30s      # dồn vài cảnh báo cùng gốc vào MỘT thư thay vì ba
   group_interval: 5m   # có cảnh báo MỚI trong nhóm đã gửi → chờ ngần này rồi gửi bổ sung
   repeat_interval: 4h  # vẫn đang kêu → nhắc lại. Đủ để không quên, không đủ để thành rác.
-  receiver: email
+  receiver: canh-bao
   routes:
     # 11/22 quy tắc là `critical` — nhóm "mất dịch vụ hoặc mất dữ liệu". Cho nó nhịp gấp hơn.
     - matchers: ['severity="critical"']
-      receiver: email
+      receiver: canh-bao
       group_wait: 10s
       repeat_interval: 1h
 
 receivers:
-  - name: email
+  - name: canh-bao
+    # >>>EMAIL>>> (entrypoint GỠ TRỌN khối này khi Telegram BẬT — xem bên dưới)
+    # EMAIL LÀ KÊNH DỰ BỊ, KHÔNG PHẢI KÊNH CHÍNH. Hộp thư của người vận hành cũng là hộp thư
+    # nhận thông báo nghiệp vụ (báo giá được duyệt, job xong…) từ `src/notifications.ts`.
+    # Đổ thêm cảnh báo hệ thống vào đó là làm loãng đúng cái hộp thư cần đọc kỹ — và cảnh báo
+    # lẫn vào thông báo thường là cảnh báo bị lướt qua.
+    # Nên: có Telegram thì cảnh báo hệ thống đi Telegram, email rút về đúng việc của nó.
+    # Không có Telegram thì khối này ở lại, hành vi y như trước 2026-09-17.
     email_configs:
       - to: "${ALERT_EMAIL_TO}"
         send_resolved: true
@@ -98,6 +105,37 @@ receivers:
           {{ with .Annotations.runbook }}  Cách xử lý: {{ . }}
           {{ end }}  severity={{ .Labels.severity }} bắt đầu={{ .StartsAt.Local.Format "15:04:05 02/01/2006" }}
           {{ end }}
+    # <<<EMAIL<<<
+
+    # >>>TELEGRAM>>> (entrypoint GỠ TRỌN khối này khi thiếu token/chat id — xem bên dưới)
+    # KÊNH THỨ HAI, NẰM TRONG CÙNG RECEIVER chứ không phải một route riêng: mọi cảnh báo đi CẢ HAI
+    # đường, không phải chọn một. Tách route ra sẽ đẻ ra khả năng "gửi nhầm kênh" — một cảnh báo
+    # critical lọt vào nhánh chỉ-email là im lặng đúng lúc cần nhất.
+    #
+    # VÌ SAO CÓ KÊNH NÀY: email hỏng đúng vào những lúc nó cần nhất.
+    #   · `QuanlyEmailKhongGuiDuoc` nằm trong chính 22 quy tắc — khi nó nổ, email là kênh KHÔNG
+    #     dùng được để báo.
+    #   · 2 giờ sáng thì hộp thư không đánh thức ai; Telegram đẩy thẳng lên điện thoại.
+    # KHÔNG phải viết bot: `telegram_configs` có sẵn trong Alertmanager từ v0.26.
+    #
+    # `bot_token_file` chứ KHÔNG phải `bot_token`: cùng lý do với `smtp_auth_password_file` —
+    # token nằm trong file cấu hình đã dựng là token nằm trong `docker inspect`, trong log lỗi, và
+    # trong bất cứ ai đọc được /render.
+    telegram_configs:
+      - bot_token_file: /run/secrets/telegram_bot_token
+        chat_id: ${TELEGRAM_CHAT_ID}
+        send_resolved: true
+        parse_mode: HTML
+        # Ngắn hơn thư: điện thoại không phải chỗ đọc bảng. Đủ để quyết định có dậy hay không.
+        message: |
+          <b>{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}</b>
+          {{ range .Alerts }}
+          • {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ with .Annotations.runbook }}<i>Cách xử lý:</i> <code>{{ . }}</code>
+          {{ end }}<i>severity={{ .Labels.severity }}{{ with .Labels.instance }} · {{ . }}{{ end }} · bắt đầu {{ .StartsAt.Local.Format "15:04:05 02/01/2006" }}</i>
+          {{ end }}
+    # <<<TELEGRAM<<<
 
 inhibit_rules:
   # CSDL chết thì KÉO THEO một loạt cảnh báo khác (tỉ lệ lỗi, độ trễ, pool chờ…). Gửi hết là chôn

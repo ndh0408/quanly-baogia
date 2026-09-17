@@ -767,6 +767,36 @@ phải bản vá — nó là thay đổi suy đoán, và ở đây nó suýt đ�
 hồi của **mọi** request trên một hệ đang chạy thật. Trước khi tin một giả thuyết
 kiểu này lần sau: **gỡ nguyên nhân nghi ngờ ra, đo lại, rồi mới viết.**
 
+## Cảnh báo hệ thống: MỘT kênh tại một thời điểm (cập nhật 2026-09-17)
+
+Từ 2026-09-17, `alertmanager.yml.tpl` mang CẢ HAI khối receiver và entrypoint gỡ đúng một:
+
+| cấu hình | kênh cảnh báo | ghi chú |
+|---|---|---|
+| không `TELEGRAM_*` | email | mặc định, y như trước 2026-09-17 |
+| đủ `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Telegram | khối `email_configs` bị **gỡ hẳn** |
+| chỉ có MỘT trong hai | *(container không lên)* | thoát 78 — bật nửa vời là tin mình có kênh mà không có |
+
+**Vẫn là một kênh tại một thời điểm, và đó là lỗ còn mở.** Ba mặt:
+
+1. **Kênh báo tin chết cùng thứ nó phải báo.** Ở chế độ email: `QuanlyEmailKhongGuiDuoc` nằm trong
+   chính 22 quy tắc — khi nó nổ, email không dùng được để báo. Ở chế độ Telegram: token bị
+   `/revoke`, bot bị xoá khỏi nhóm, hoặc mạng chặn Telegram → cảnh báo câm y hệt, chỉ khác nguyên
+   nhân.
+2. **Alertmanager tự chết thì không kênh nào báo được.** `alertmanager-entrypoint.sh` cố ý thoát
+   78 khi cấu hình sai, mà compose đặt `restart: unless-stopped` → container quay vòng khởi động
+   lại mãi. Từ 2026-09-17 Prometheus có SCRAPE nó (`job_name: alertmanager`) nên trạng thái đó
+   thành một con số đo được (`up`) và vẽ được trên Grafana — nhưng **đo được không phải là được
+   báo**. Ai không mở Grafana thì vẫn không biết.
+3. **Chọn Telegram là chấp nhận mất đường email.** Đây là quyết định CÓ CHỦ Ý của chủ repo
+   (2026-09-17): hộp thư của người vận hành cũng là hộp thư nhận thông báo nghiệp vụ từ
+   `src/notifications.ts`, nên cảnh báo hệ thống lẫn vào đó là cảnh báo bị lướt qua; và 2 giờ sáng
+   thì hộp thư không đánh thức ai.
+
+**Cách đóng hẳn, nếu sau này muốn:** cho phép BẬT CẢ HAI cùng lúc (Alertmanager chịu được nhiều
+`*_configs` trong một receiver — bản dựng hiện tại đã có sẵn cấu trúc đó, chỉ là entrypoint đang
+gỡ bớt một). Lúc đó nên định tuyến theo `severity`: `critical` đi cả hai, `warning` chỉ Telegram.
+
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
 `infra/prometheus/alerts.yaml` — 22 quy tắc, 7 nhóm, mỗi cái bám một chế độ hỏng có
