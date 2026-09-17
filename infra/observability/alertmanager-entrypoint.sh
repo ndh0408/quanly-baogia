@@ -68,14 +68,28 @@ if [ -n "${SMTP_USER:-}" ]; then
 else
   LOC="grep -v ^[[:space:]]*smtp_auth_"
 fi
-$LOC "$MAU" | awk \
-  -v v_SMTP_HOST="$SMTP_HOST" \
-  -v v_SMTP_PORT="$SMTP_PORT" \
-  -v v_SMTP_FROM="$SMTP_FROM" \
-  -v v_SMTP_USER="$SMTP_USER" \
-  -v v_ALERT_EMAIL_TO="$ALERT_EMAIL_TO" \
-  -v v_SMTP_REQUIRE_TLS="$SMTP_REQUIRE_TLS" \
-  '
+
+# ── ĐƯA GIÁ TRỊ VÀO AWK QUA MÔI TRƯỜNG, KHÔNG QUA `-v` ────────────────────
+# `awk -v ten="$gt"` DIỄN GIẢI CHUỖI THOÁT nằm trong giá trị. ĐÃ ĐO bằng chính awk của máy này:
+# truyền một giá trị chứa hai ký tự dấu-chéo-ngược và chữ t, awk trả về một ký tự TAB THẬT.
+# Tức tài khoản/địa chỉ nào chứa dấu chéo ngược sẽ bị bóp méo IM LẶNG — và một cặp chéo-ngược-n
+# còn chèn được DÒNG MỚI vào giữa YAML, cho ra một cấu hình HỢP LỆ nhưng SAI. Đúng kiểu hỏng mà
+# cả script này sinh ra để chặn, trong khi khối chú thích đầu tệp lại khai "thay theo NGHĨA ĐEN".
+#
+# Mảng `ENVIRON` thì KHÔNG diễn giải gì cả — nó trả đúng byte của biến môi trường.
+#
+# `${SMTP_USER:-}` chứ không phải `$SMTP_USER`: dưới `set -u`, một biến CHƯA ĐẶT làm script chết
+# với "unbound variable" và mã thoát 1, thay vì 78 kèm thông điệp đã soạn sẵn. Compose luôn đặt
+# biến này nên đường đó không tới được từ compose — nhưng bộ test gọi THẲNG script này, và người
+# vận hành cũng chạy tay nó lúc dò lỗi.
+export AM_V_SMTP_HOST="$SMTP_HOST"
+export AM_V_SMTP_PORT="$SMTP_PORT"
+export AM_V_SMTP_FROM="$SMTP_FROM"
+export AM_V_SMTP_USER="${SMTP_USER:-}"
+export AM_V_ALERT_EMAIL_TO="$ALERT_EMAIL_TO"
+export AM_V_SMTP_REQUIRE_TLS="$SMTP_REQUIRE_TLS"
+
+$LOC "$MAU" | awk '
   function thay(s, tim, the,   p, r) {
     r = ""
     while ((p = index(s, tim)) > 0) {
@@ -85,12 +99,12 @@ $LOC "$MAU" | awk \
     return r s
   }
   {
-    $0 = thay($0, "${SMTP_HOST}",     v_SMTP_HOST)
-    $0 = thay($0, "${SMTP_PORT}",     v_SMTP_PORT)
-    $0 = thay($0, "${SMTP_FROM}",     v_SMTP_FROM)
-    $0 = thay($0, "${SMTP_USER}",     v_SMTP_USER)
-    $0 = thay($0, "${ALERT_EMAIL_TO}", v_ALERT_EMAIL_TO)
-    $0 = thay($0, "${SMTP_REQUIRE_TLS}", v_SMTP_REQUIRE_TLS)
+    $0 = thay($0, "${SMTP_HOST}",        ENVIRON["AM_V_SMTP_HOST"])
+    $0 = thay($0, "${SMTP_PORT}",        ENVIRON["AM_V_SMTP_PORT"])
+    $0 = thay($0, "${SMTP_FROM}",        ENVIRON["AM_V_SMTP_FROM"])
+    $0 = thay($0, "${SMTP_USER}",        ENVIRON["AM_V_SMTP_USER"])
+    $0 = thay($0, "${ALERT_EMAIL_TO}",   ENVIRON["AM_V_ALERT_EMAIL_TO"])
+    $0 = thay($0, "${SMTP_REQUIRE_TLS}", ENVIRON["AM_V_SMTP_REQUIRE_TLS"])
     print
   }
   ' > "$RA"
@@ -115,4 +129,7 @@ echo "alertmanager-entrypoint: đã dựng $RA"
 echo "  smarthost = $SMTP_HOST:$SMTP_PORT"
 echo "  gửi tới   = $ALERT_EMAIL_TO"
 echo "  xác thực  = $XAC_THUC"
-exec /bin/alertmanager --config.file="$RA" "$@"
+# `AM_BIN` chỉ là KHE ĐỂ KIỂM ĐƯỢC, mặc định y như cũ. Không có nó thì bộ test không cách nào chạy
+# THẬT script này (máy dev không có /bin/alertmanager), và mọi bài kiểm buộc phải lùi về so khớp
+# VĂN BẢN của script — thứ không chứng minh được phép thay có chạy đúng hay không.
+exec "${AM_BIN:-/bin/alertmanager}" --config.file="$RA" "$@"

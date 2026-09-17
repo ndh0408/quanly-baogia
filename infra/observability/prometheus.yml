@@ -109,3 +109,22 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # ── SCRAPE CHÍNH ALERTMANAGER ─────────────────────────────────────────────
+  # Trước đây Prometheus chỉ biết Alertmanager như NƠI GỬI cảnh báo tới (khối `alerting:` ở trên),
+  # chứ không đo nó. Hệ quả: Alertmanager chết thì KHÔNG chuỗi thời gian nào ghi lại chuyện đó —
+  # không có `up{job="alertmanager"}`, nên Grafana không vẽ được, và sau này nhìn lại cũng không
+  # biết nó đã câm từ lúc nào.
+  #
+  # Đây là chỗ dễ hỏng theo cách lặng nhất trong cả bộ giám sát: `alertmanager-entrypoint.sh` cố ý
+  # THOÁT 78 khi cấu hình sai, mà compose đặt `restart: unless-stopped` — nên container quay vòng
+  # khởi động lại mãi. Docker healthcheck có thấy, nhưng chỉ ai gõ `docker ps` mới biết.
+  #
+  # ⚠️ CÓ scrape KHÔNG có nghĩa là sẽ có ai được BÁO. Alertmanager chết thì chính nó là thứ lẽ ra
+  # phải gửi thư — không quy tắc nào cứu được chuyện đó bằng email. Việc scrape này làm ĐÚNG MỘT
+  # điều: biến "câm" thành một con số ĐO ĐƯỢC (`up`), để bảng Grafana và người trực thấy, và để
+  # kênh thứ hai (nếu sau này có) bắt được. Nói rõ ở đây để không ai đọc dòng này rồi tưởng lỗ
+  # "cảnh báo tự giám sát" đã đóng — nó CHƯA đóng.
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]

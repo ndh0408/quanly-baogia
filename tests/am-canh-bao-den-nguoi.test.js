@@ -93,8 +93,14 @@ describe("Cấu hình PHẢI đi qua bước dựng — không mount thẳng b�
     const goc = giaiDuongDan(ep[1]);
     expect(goc, `entrypoint ${ep[1]} không nằm dưới mount nào → container không lên`).toBeTruthy();
     expect(existsSync(join(ROOT, goc))).toBe(true);
+    // MẶC ĐỊNH phải là /bin/alertmanager. `AM_BIN` là khe để bài kiểm chạy trọn script trên máy
+    // dev (xem tests/ae-alertmanager-entrypoint-chay-that.test.js) — nhưng nếu ai đó đổi luôn giá
+    // trị MẶC ĐỊNH thì container production sẽ chạy nhầm thứ khác, nên chốt vào đúng mặc định chứ
+    // không chỉ chốt "có chữ exec".
     expect(ENTRY, "entrypoint phải kết thúc bằng exec sang alertmanager thật")
-      .toMatch(/exec \/bin\/alertmanager/);
+      .toMatch(/exec "\$\{AM_BIN:-\/bin\/alertmanager\}"/);
+    expect(ENTRY, "AM_BIN không được có giá trị mặc định nào khác /bin/alertmanager")
+      .not.toMatch(/AM_BIN:-(?!\/bin\/alertmanager)/);
   });
 
   it("MỌI biến trong bản mẫu đều được entrypoint thay — mối nối dễ đứt nhất", () => {
