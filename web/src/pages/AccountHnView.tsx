@@ -144,7 +144,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
         </div>
       )}
 
-      <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
+      <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
         editable={editable} canApprove={false} canPay={false} quoteId={q.id}
         onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; }} />
 

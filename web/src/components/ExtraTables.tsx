@@ -4,6 +4,7 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable, safeImgSrc } from "./GridTable";
 import { api, ApiError, type EditorTemplate } from "../lib/api";
 import { confirmModal, toast, useEscClose } from "../lib/ui";
+import { KhoiSheet } from "./KhoiSheet";
 
 // Port "Bảng nội bộ" (public/js/editor.js drawExtraTables). Mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG;
 // mỗi loại có N sheet (lưới ĐẦY ĐỦ như báo giá: template/công thức/nhóm/copy-paste/undo — qua GridTable)
@@ -105,6 +106,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
   const [payRow, setPayRow] = useState<ItemK | null>(null); // hàng đang mở dialog thanh toán
+  /* Khối nào đang mở. Chưa đụng tới thì theo mặc định: ĐÓNG HẾT — trang soạn báo giá vốn đã dài,
+     và tiêu đề đã nói đủ số sheet + số tiền nên đóng vẫn đọc được. Xem KhoiSheet.tsx. */
+  const [mo, setMo] = useState<Record<string, boolean>>({});
 
   if (!Array.isArray(sheet.extraTables)) sheet.extraTables = [];
   const tables = sheet.extraTables;
@@ -134,6 +138,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   const addTable = (cat: string) => {
     const it = M.blankItem(false) as ItemK; it._k = nextK();
     tables.push({ category: cat, templateId: defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
+    setMo((m) => ({ ...m, [cat]: true }));   // thêm vào khối đang đóng thì phải mở ra mới thấy
     sheet._activeExtra = tables.length - 1; onChange();
   };
   const removeTable = async (i: number) => {
@@ -145,24 +150,26 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
     if (ok) onChange();
   };
 
+  /* GẬP HAI TẦNG LÀ THỪA: trước đây cả cụm nằm trong một <details> "Bảng nội bộ", bên trong lại là
+     các loại luôn mở. Muốn tới một loại phải bấm hai lần, mà mở ra thì MỌI loại bung cùng lúc. Nay
+     bỏ tầng ngoài, mỗi LOẠI tự gập — đúng thứ người dùng xin ("có đóng mở từng cái"). */
   return (
-    <details className="extra-collapse">
-      <summary className="extra-collapse-sum"><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— HCM {M.fmtMoney(catTotal("hcm"))} · KH {M.fmtMoney(catTotal("khach"))} · {tables.length} sheet (bấm để mở)</span></summary>
+    <>
       <div className="extra-tables-wrap">
-        <div className="extra-head"><div><strong>Bảng nội bộ</strong> <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— mỗi LOẠI (HCM · HN · Phí KH) tách RIÊNG; Tổng từng loại đổ riêng sang Quản lý dự án. Sheet đầy đủ như báo giá (template · công thức · nhóm · copy/paste) nhưng KHÔNG xuất Excel.</span></div></div>
-
         <div className="extra-cat-groups">
           {EXTRA_CATS.map(([cat, label]) => {
             const idxs: number[] = []; tables.forEach((x, i) => { if (x?.category === cat) idxs.push(i); });
             const hasActive = t != null && idxs.includes(active);   // sheet ĐANG sửa thuộc loại này?
+            const dangMo = mo[cat] ?? false;
             return (
-              <div key={cat} className={`extra-cat-group${hasActive ? " is-active" : ""}`}>
-                <div className="extra-cat-grouphead">
-                  <span className={`extra-cat-badge cat-${cat}`}>{label}</span>
-                  <span className="extra-cat-total" data-cat={cat}>Tổng: <strong>{M.fmtMoney(catTotal(cat))}</strong> <span className="muted">→ Quản lý dự án</span></span>
-                  {suaDuoc(cat) && <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button>}
-                  <span className="muted" style={{ fontSize: 11.5 }}>{idxs.length} sheet</span>
-                </div>
+              <KhoiSheet key={cat}
+                loai={cat} nhan={label} soSheet={idxs.length} tong={catTotal(cat)}
+                duoiTong={<span className="muted">→ Quản lý dự án</span>}
+                dangSua={hasActive}
+                mo={dangMo} onDoiMo={() => setMo((m) => ({ ...m, [cat]: !dangMo }))}
+                giaiThich="Sheet đầy đủ như báo giá (mẫu · công thức · nhóm · copy/dán) nhưng KHÔNG xuất Excel. Tổng của loại này đổ riêng sang Quản lý dự án."
+                nutThem={suaDuoc(cat) ? <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button> : null}
+              >
                 {idxs.length > 0 && (
                   <div className="sheet-tabs extra-sheet-tabs">
                     {idxs.map((i) => (
@@ -178,6 +185,11 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                         onClick={() => { sheet._activeExtra = i; redraw(); }}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sheet._activeExtra = i; redraw(); } }}>
                         <span>{tables[i].name || ("Bảng " + (i + 1))}</span>
+                        {/* Trước đây loại có 5 sheet vẫn chỉ hiện MỘT con số — tổng của cả loại — nên
+                            muốn biết sheet nào góp bao nhiêu thì phải bấm qua từng tab rồi tự cộng
+                            nhẩm. Người dùng báo: "mỗi cái chưa có tổng các sheet như báo giá".
+                            Một sheet thì không in: "Tổng:" của loại ngay trên đã đúng bằng nó. */}
+                        {idxs.length > 1 && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(extraTableSum(tables[i]))}</span>}
                         {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
                             handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
                         {suaDuoc(cat) && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
@@ -193,7 +205,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                   <div className="extra-table extra-table-inline">
                     <div className="extra-table-head">
                       <span className={`extra-here cat-${cat}`}>📍 Đang ở: {label}</span>
-                      <input className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} style={{ minWidth: 160 }} />
+                      <input className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${active + 1}`}"`} disabled={!suaDuoc(cat)} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onChange(); }} />
                       {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu: <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>{tplList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
                       {/* "Chuyển loại" chỉ liệt kê loại người này ĐƯỢC PHÉP sửa — không thì họ kéo
                           bảng sang loại ngoài phạm vi rồi sửa ở đó (server sẽ 409, nhưng để họ gõ
@@ -205,21 +217,22 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
                       payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}
                       onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu báo giá trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
-                      groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
+                      groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
+                      sheetTotalLine={false} />
                   </div>
                 )}
-              </div>
+                {idxs.length === 0 && <div className="khoi-sheet-note muted">Chưa có sheet — bấm “+ Thêm sheet”.</div>}
+              </KhoiSheet>
             );
           })}
         </div>
-        {tables.length === 0 && <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet nội bộ — bấm “+ Thêm sheet” ở loại tương ứng phía trên.</div>}
       </div>
       {payRow && quoteId && sheet.id != null && (
         <ExtraPayDialog quoteId={quoteId} sheetId={sheet.id} item={payRow} onQuoteTouched={onQuoteTouched}
           onClose={() => setPayRow(null)}
           onSaved={(paid, hasProof) => { (payRow as Record<string, unknown>).paid = paid; (payRow as Record<string, unknown>).paidAt = paid ? new Date().toISOString() : null; (payRow as Record<string, unknown>).hasPaidProof = hasProof; setPayRow(null); redraw(); }} />
       )}
-    </details>
+    </>
   );
 }
 

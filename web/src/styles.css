@@ -3540,6 +3540,92 @@ textarea[aria-invalid="true"] {
      đọc lên được). Phải BỎ chrome mặc định của button để nhìn y hệt như trước.
    - `.sheet-tab` nay có role="button" + tabIndex → phải THẤY được viền focus, nếu không người
      dùng bàn phím không biết mình đang ở tab nào. */
+/* ── KHỐI GẬP CHO BA LUỒNG NỘI BỘ (HCM · Phí KH · Hà Nội) ─────────────────────────────────
+   Xem KhoiSheet.tsx. Cả tiêu đề là MỘT nút thật (<button aria-expanded>), không phải <div onClick>
+   — bàn phím Tab tới được, Enter/Space mở được, trình đọc màn hình đọc ra "đang mở / đang đóng". */
+.khoi-sheet-nut {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  padding: 2px 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border-radius: 8px;
+}
+.khoi-sheet-nut:hover .extra-cat-badge {
+  filter: brightness(0.96);
+}
+.khoi-sheet-nut:focus-visible {
+  outline: 2px solid var(--accent, #f5b400);
+  outline-offset: 2px;
+}
+/* Mũi chỉ hướng: ▸ khi đóng, quay xuống khi mở. Chuyển động ngắn để mắt bám được cái vừa bấm. */
+.khoi-sheet-mui {
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.55;
+  transition: transform 0.14s ease;
+}
+.khoi-sheet.dang-mo .khoi-sheet-mui {
+  transform: rotate(90deg);
+}
+/* Khối ĐÓNG mỏng hẳn lại — mục đích của cả việc gập là trang ngắn đi. */
+.khoi-sheet:not(.dang-mo) {
+  padding: 5px 12px;
+}
+.khoi-sheet-note {
+  font-size: 11.5px;
+  margin: 7px 0 2px;
+  line-height: 1.45;
+}
+
+/* ── KHỐI BẢNG NỘI BỘ / BÁO GIÁ HÀ NỘI: dọn bố cục ────────────────────────────────────────
+   MỌI luật dưới đây bọc trong `.extra-cat-group` — lưới báo giá CHÍNH dùng chung `.extra-name`,
+   `.extra-table-head`, `.sheet-tab`, nên không bọc là sửa nhầm cả trang soạn báo giá.
+
+   Người dùng báo "trình bày hơi rườm rà". Thủ phạm to nhất: `.extra-name` ở style.css nền
+   (ĐÓNG BĂNG, không sửa được) đặt `flex: 1`, nên ô "Tên sheet (tuỳ chọn)" — thứ ÍT quan trọng
+   nhất hàng đó — kéo dài gần 1500px, đẩy ô chọn Mẫu ra tận mép phải. Màn hình đọc ra như một cái
+   hộp rỗng khổng lồ. Trả nó về đúng bề rộng cần dùng, hai ô đứng cạnh nhau thành một cụm. */
+.extra-cat-group .extra-name {
+  flex: 0 1 260px;
+  min-width: 150px;
+}
+.extra-cat-group .extra-table-head {
+  gap: 8px 14px;
+}
+/* Nút "+ Thêm sheet" dạt hẳn về mép phải → hàng đầu đọc thành: đang ở loại nào · bao nhiêu tiền
+   ··· thêm sheet. Ba việc, ba vùng, không chen nhau ở giữa. */
+.extra-cat-group .extra-cat-grouphead .extra-add-in {
+  margin-left: auto;
+}
+/* Nhãn "Mẫu:" + ô chọn dính thành một khối, khỏi trôi rời khi hàng xuống dòng. */
+.extra-cat-group .extra-table-head label {
+  white-space: nowrap;
+}
+
+/* Số tiền của TỪNG sheet Hà Nội, in ngay trên tab của nó — chỉ hiện khi có từ 2 sheet trở lên
+   (xem chú thích trong HnTables.tsx). Nhạt hơn tên sheet để tên vẫn là thứ đọc trước. */
+.sheet-tab-tong {
+  margin-left: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+  opacity: 0.85;
+}
+.sheet-tab:not(.active) .sheet-tab-tong {
+  opacity: 0.6;
+}
+
 .sheet-tab .rm-tab {
   appearance: none;
   background: none;

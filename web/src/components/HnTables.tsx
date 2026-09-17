@@ -5,6 +5,7 @@ import { GridTable } from "./GridTable";
 import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
 import { extraTableSum, removeTableFromList, ExtraPayDialog, type ExtraTable } from "./ExtraTables";
+import { KhoiSheet } from "./KhoiSheet";
 
 // KHÔNG GIAN LÀM VIỆC "BÁO GIÁ HÀ NỘI" — cấp BÁO GIÁ, không thuộc trang nào.
 //
@@ -22,7 +23,7 @@ import { extraTableSum, removeTableFromList, ExtraPayDialog, type ExtraTable } f
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
@@ -34,12 +35,16 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   onMarkDirty: () => void;
   /** Mốc `updatedAt` MỚI sau khi route /pay bump — màn gọi phải nhận để khỏi tự đâm 409 giả. */
   onQuoteTouched?: (updatedAt: string) => void;
+  /** Mở sẵn khối. `AccountHnView` bật (cả trang chỉ có mỗi nó); trang soạn báo giá để TẮT, vì ở đó
+   *  khối này là một trong ba luồng và mở hết là trang dài ra mấy màn hình. */
+  moMacDinh?: boolean;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
   const onChange = () => { onMarkDirty(); redraw(); };
   const [payRow, setPayRow] = useState<ItemK | null>(null);
   const [active, setActive0] = useState(0);
+  const [mo, setMo] = useState(moMacDinh);
   const setActive = (i: number) => { setActive0(i); redraw(); };
 
   tables.forEach((x) => { if (x._k == null) x._k = nextK(); (x.items || []).forEach((it) => { if (it._k == null) it._k = nextK(); }); });
@@ -64,11 +69,27 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   const tpl = t ? tplOf(t) : null;
   const usesDays = !!tpl?.layout?.hasDays, showDetail = !!tpl?.layout?.hasDetail, numberSubs = !!tpl?.layout?.numberSubsections;
   const addrDetail = !!(tpl?.layout?.reserveDetail ?? tpl?.layout?.hasDetail);
-  const tong = tables.reduce((a, x) => a + extraTableSum(x as ExtraTable), 0);
+  /* ── MỘT CON SỐ MỘT CHỖ ───────────────────────────────────────────────────────────────────
+     Bản trước in CÙNG một số tiền ở BA nơi: "Tổng:" trên đầu khối, "Tổng sheet:" do GridTable tự
+     vẽ dưới lưới, rồi "Tổng sheet này:" do chính tệp này vẽ thêm — hai dòng cuối cách nhau đúng
+     một hàng nút, nhãn gần như giống hệt. Người dùng báo: "trình bày hơi rườm rà".
+
+     Mà khi có NHIỀU sheet thì lại thiếu đúng thứ cần: không thấy từng sheet góp bao nhiêu, phải
+     bấm qua từng tab mới biết ("chưa có tổng các sheet như báo giá").
+
+     Nay:
+       · 1 sheet  → chỉ "Tổng:" trên đầu. Đúng một con số, vì cả ba vốn bằng nhau.
+       · ≥2 sheet → "Tổng:" là tổng cộng, và MỖI TAB tự mang số của nó. Thông tin nằm ngay chỗ
+         mắt đang nhìn, không tốn thêm khối nào.
+     Dòng của GridTable tắt ở cả hai ca (`sheetTotalLine={false}`). */
+  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable));
+  const tong = tongBang.reduce((a, b) => a + b, 0);
+  const hienTongTab = tables.length > 1;
 
   const themBang = () => {
     const it = M.blankItem(false) as ItemK; it._k = nextK();
     tables.push({ templateId: t?.templateId || defTplId, name: "", groupSubtotal: true, items: [it], _k: nextK() });
+    setMo(true);   // bấm "+ Thêm sheet" khi khối đang đóng mà không mở ra thì tưởng nút hỏng
     setActive(tables.length - 1);
     onChange();
   };
@@ -84,14 +105,12 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   };
 
   return (
-    <div className="extra-cat-group" style={{ marginTop: 10 }}>
-      <div className="extra-cat-grouphead">
-        <span className="extra-cat-badge cat-hanoi">Báo Giá Hà Nội</span>
-        <span className="extra-cat-total" data-cat="hanoi">Tổng: <strong>{M.fmtMoney(tong)}</strong> <span className="muted">→ Quản lý dự án</span></span>
-        {editable && <button type="button" className="btn btn-sm extra-add-in" data-cat="hanoi" onClick={themBang}>+ Thêm sheet</button>}
-        <span className="muted" style={{ fontSize: 11.5 }}>{tables.length} sheet</span>
-      </div>
-
+    <KhoiSheet
+      loai="hanoi" nhan="Báo Giá Hà Nội" soSheet={tables.length} tong={tong}
+      duoiTong={<span className="muted">→ Quản lý dự án</span>}
+      mo={mo} onDoiMo={() => setMo((v) => !v)} dangSua
+      nutThem={editable ? <button type="button" className="btn btn-sm extra-add-in" data-cat="hanoi" onClick={themBang}>+ Thêm sheet</button> : null}
+    >
       {tables.length > 0 && (
         <div className="sheet-tabs extra-sheet-tabs" role="tablist" aria-label="Các sheet Hà Nội">
           {tables.map((tt, i) => (
@@ -102,6 +121,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
               onClick={() => setActive(i)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActive(i); } }}>
               <span>{tt.name || `Bảng ${i + 1}`}</span>
+              {hienTongTab && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(tongBang[i])}</span>}
               {editable && tables.length > 1 && (
                 <button type="button" className="rm-tab" title="Xoá sheet này" aria-label={`Xoá sheet Hà Nội ${i + 1}`}
                   onClick={(e) => { e.stopPropagation(); void xoaBang(i); }}
@@ -117,8 +137,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
           <div className="extra-table-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
             {/* `key` theo bảng: input uncontrolled (defaultValue) chỉ đọc giá trị lúc MOUNT, nên đổi
                 tab mà không đổi key thì ô tên vẫn hiện tên của bảng trước. */}
-            <input key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder="Tên sheet (tuỳ chọn)" aria-label="Tên sheet Hà Nội" disabled={!editable}
-              style={{ minWidth: 180 }} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
+            <input key={`ten-${t._k ?? ai}`} className="extra-name" defaultValue={t.name || ""} placeholder={`Tên sheet — đang hiện "${t.name || `Bảng ${ai + 1}`}"`} aria-label="Tên sheet Hà Nội" disabled={!editable} onInput={(e) => { t.name = (e.target as HTMLInputElement).value; onMarkDirty(); }} />
             {editable && (
               <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Mẫu:
                 <select value={t.templateId || defTplId} className="extra-tpl extra-add-cat" onChange={(e) => { t.templateId = Number(e.target.value); onChange(); }}>
@@ -134,10 +153,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
             payCol={!!canPay && !!quoteId}
             canPay={!!canPay && !!quoteId}
             onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu phần Hà Nội trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
-            groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange} />
-          <div style={{ textAlign: "right", fontWeight: 600, margin: "6px 2px", fontSize: 13.5 }}>
-            Tổng sheet này: <span style={{ color: "var(--danger)" }}>{M.fmtMoney(extraTableSum(t as ExtraTable))}</span>
-          </div>
+            groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
+            sheetTotalLine={false} />
         </div>
       ) : (
         <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet Hà Nội — bấm “+ Thêm sheet” phía trên.</div>
@@ -152,6 +169,6 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
             setPayRow(null); onChange();
           }} />
       )}
-    </div>
+    </KhoiSheet>
   );
 }
