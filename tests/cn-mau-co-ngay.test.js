@@ -340,6 +340,58 @@ describe("Thừa hưởng ĐỦ tuỳ biến của bản không-ngày", () => {
     expect(chuoi).toContain("Ý Kiến Khách Hàng");
   }, 120_000);
 
+  it("DƯỚI bảng, nền + viền GIỐNG HỆT bản không-ngày — không có khối màu rỗng nào", async () => {
+    // ── LỖI NGƯỜI DÙNG BÁO (ảnh chụp Excel, 2026-09-17) ──────────────────────────────────────
+    // Ba hàng tổng của bản có-ngày có thêm một khối nền be RỖNG ở cột E, nằm bên trái chữ
+    // "Tổng Cộng" và thò ra ngoài khung bảng. Bản không-ngày không có.
+    //
+    // Nguồn: `scripts/dung-mau-co-ngay.mjs` chép style E ← F cho MỌI hàng tới hết trang. Hàng 22–24
+    // là khối tổng, ở đó F là ô GỘP `F22:G22` mang nhãn "Tổng Cộng" — nền be + viền. Nên E22:E24
+    // thừa hưởng đúng khối màu đó.
+    //
+    // VÌ SAO `excel-snapshot.test.js` KHÔNG BẮT ĐƯỢC: nó duyệt `eachCell({ includeEmpty: false })`,
+    // tức bỏ qua ô KHÔNG CÓ GIÁ TRỊ. Khối màu thừa nằm đúng ở những ô rỗng — vô hình với hash đó.
+    //
+    // Bài này khoá BẤT BIẾN chứ không khoá một ô: từ hàng tổng trở xuống, hai file xuất ra phải
+    // trùng nhau từng ô về nền và viền. Mọi thứ đã đúng ở bản không-ngày (khối tổng, chân trang,
+    // chỗ ký) từ nay không có đường nào lệch một mình.
+    const [ws, wsGoc] = await Promise.all([
+      moFile(await buildQuoteBuffer(baoGia("unibenfood"))),
+      moFile(await buildQuoteBuffer(baoGia("marico_decor"))),
+    ]);
+
+    const hangTong = (sheet) => {
+      for (let r = HANG_TIEU_DE; r <= sheet.rowCount; r++) {
+        for (const c of ["E", "F", "G"]) if (chu(sheet.getCell(`${c}${r}`).value).trim() === "Tổng Cộng") return r;
+      }
+      return 0;
+    };
+    const r0 = hangTong(ws);
+    expect(r0, "không tìm thấy hàng Tổng Cộng ở bản có-ngày").toBeGreaterThan(HANG_TIEU_DE);
+    expect(hangTong(wsGoc), "hai bản đặt khối tổng ở hàng khác nhau").toBe(r0);
+
+    /** Dấu vân tay hình thức của một ô: nền + bốn cạnh viền. KHÔNG lấy giá trị — nhãn cột khác nhau
+     *  là chuyện đương nhiên, còn ở dưới bảng thì chữ cũng do cùng một bộ `totals` sinh ra. */
+    const van = (sheet, addr) => {
+      const o = sheet.getCell(addr);
+      const b = o.border || {};
+      return [
+        o.fill?.fgColor?.argb ?? o.fill?.pattern ?? "-",
+        ...["top", "left", "bottom", "right"].map((k) => b[k]?.style ?? "-"),
+      ].join("/");
+    };
+
+    const lech = [];
+    const het = Math.max(ws.rowCount, wsGoc.rowCount);
+    for (let r = r0; r <= het; r++) {
+      for (const c of ["B", "C", "D", "E", "F", "G", "H", "I"]) {
+        const a = van(ws, `${c}${r}`), b = van(wsGoc, `${c}${r}`);
+        if (a !== b) lech.push(`${c}${r}: có-ngày=${a} ≠ không-ngày=${b}`);
+      }
+    }
+    expect(lech, `dưới bảng có ${lech.length} ô lệch hình thức — ${lech.join(" ; ")}`).toEqual([]);
+  }, 120_000);
+
   it("KHÔNG còn nhãn 'Ms.' nhúng cứng — bản có-ngày CŨ vẫn còn", async () => {
     // Đây là lợi ích cụ thể nhất của việc dùng chung nền: bản vá xoá nhãn danh xưng làm cho bản
     // không-ngày ngày 2026-09-17 nay tự động áp cho cả bản có-ngày.

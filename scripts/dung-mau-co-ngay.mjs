@@ -29,6 +29,17 @@
 // LƯỢNG mới (E) chép của SỐ LƯỢNG cũ (F), SỐ NGÀY (F) cũng chép của SỐ LƯỢNG cũ — cùng là cột số.
 // Giữ nguyên vị trí mà không chép style thì cột ĐVT thừa hưởng canh-trái + bề rộng 30 của Chi Tiết.
 //
+// ── CHỈ ĐỘNG VÀO VÙNG BẢNG, TUYỆT ĐỐI KHÔNG ĐỘNG KHỐI TỔNG ────────────────
+// Bản đầu cho cả hai vòng chạy tới HẾT TRANG (dòng 33). Ba hàng tổng nằm ở 22–24, và ở đó nhãn
+// "Tổng Cộng"/"VAT"/"Thành Tiền" nằm trong ô GỘP `F22:G22` — tức cột F mang nền be + viền của ô
+// nhãn. Mà quy tắc chép style là E ← F, nên E22:E24 thừa hưởng luôn nền + viền đó: file khách nhận
+// được có một khối màu rỗng lơ lửng bên trái chữ "Tổng Cộng", thò ra ngoài khung bảng. Bản
+// không-ngày không có khối đó — người dùng báo đúng chỗ này.
+//
+// Nay hai vòng dừng ở hàng cuối của BẢNG. Bất biến sau khi sửa: ngoài vùng bảng, hai file mẫu
+// GIỐNG HỆT NHAU — mọi thứ đã đúng ở bản không-ngày (khối tổng, chân trang, vùng in) không có
+// đường nào để lệch nữa.
+//
 //   dùng:  node scripts/dung-mau-co-ngay.mjs
 // ============================================================================
 import ExcelJS from "exceljs";
@@ -53,7 +64,15 @@ await wb.xlsx.readFile(NGUON);
 const ws = wb.worksheets[0];
 
 const sao = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
-const CUOI = ws.rowCount;
+
+/** Hàng cuối của BẢNG = hàng cuối còn có số thứ tự ở cột B. Dò chứ không ghim cứng để đổi mẫu
+ *  nguồn không lặng lẽ sai. Dưới nó là khối tổng — vùng cấm, xem đầu file. */
+const CUOI = (() => {
+  let r = HANG_TIEU_DE;
+  while (r + 1 <= ws.rowCount && String(ws.getCell(`B${r + 1}`).value ?? "").trim() !== "") r++;
+  if (r <= HANG_TIEU_DE) throw new Error(`không dò được hàng cuối của bảng dưới tiêu đề ${HANG_TIEU_DE}`);
+  return r;
+})();
 
 // Chụp style NGUỒN TRƯỚC khi ghi đè — làm tuần tự sẽ đọc phải ô vừa bị sửa.
 const styleNguon = new Map();
@@ -93,6 +112,7 @@ datRong("F", rongSL);
 await wb.xlsx.writeFile(DICH);
 
 console.log(`da dung ${DICH}`);
+console.log(`  vung bang: hang ${HANG_TIEU_DE}..${CUOI} (khoi tong tu ${CUOI + 1} tro xuong: KHONG dung toi)`);
 console.log(`  doi style ${doiStyle} o, don ${donNoiDung} o con sot noi dung mau cu`);
 console.log(
   "  tieu de:",
