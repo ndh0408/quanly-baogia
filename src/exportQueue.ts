@@ -5,6 +5,8 @@
 // cap that degrades to 429 instead of timing out.
 import { Worker } from "node:worker_threads";
 import { logger } from "./logger.js";
+import { config } from "./config.js";
+import { createBudgetGate } from "./saveBudget.js";
 import { exportActiveWorkers, exportQueueDepth, exportRejectedTotal, exportDuration, exportMaxActiveWorkers, exportMaxQueueDepth } from "./observability.js";
 
 // ─── Cổng giới hạn đồng thời, CÓ TRẦN HÀNG ĐỢI ──────────────────────────────
@@ -155,6 +157,63 @@ const gate = createConcurrencyGate({
   onReject: () => exportRejectedTotal.inc({ reason: "gate_full" }),
 });
 
+// ─── CỔNG THỨ HAI: NGÂN SÁCH DÒNG ──────────────────────────────────────────
+//
+// Hai cổng, hai chế độ hỏng KHÁC NHAU — cùng cặp đã dựng cho đường lưu (src/saveBudget.ts:1-18):
+//   · `gate`     đếm SUẤT   → chặn số worker_thread cùng sống. Một lượt xuất 1.000 dòng và một
+//                             lượt 60.000 dòng tốn suất NHƯ NHAU, nên nó không biết gì về tải.
+//   · `congXuat` đếm DÒNG   → chặn TỔNG khối lượng đang bay.
+//
+// VÌ SAO CẦN CÁI THỨ HAI — ĐO THẬT, không suy đoán (ảnh production, 3 GB, 2 CPU, trần nền 90s):
+//     3 người cùng xuất 60.000 dòng, cổng suất = 3:
+//         #1 90,1s ✗ quá hạn · #2 90,1s ✗ · #3 90,2s ✗     → HỎNG 3/3, KHÔNG file nào
+//     cùng tải, cổng suất = 1:
+//         #1 74,4s ✓ · #2 151,0s ✓ · #3 226,8s ✓            → HỎNG 0/3
+// Ba lượt tranh 2 CPU nên không lượt nào kịp trần; hệ thống đốt trọn 90 giây để trả về con số
+// không. Đây KHÔNG phải lỗi bộ nhớ (3 × 416 MB vẫn lọt 3 GB) — nó là lỗi THỜI GIAN, và cổng đếm
+// suất mù trước nó vì ba suất vẫn đúng là ba suất.
+//
+// Nhưng hạ `EXPORT_MAX_ACTIVE` xuống 1 thì bắt lượt 1.000 dòng (0,9s) xếp sau lượt 60.000 dòng —
+// phạt số đông để chặn ca hiếm. Ngân sách theo dòng tách đúng hai ca đó ra: `EXPORT_BUDGET_ROWS`
+// mặc định 60.000 ⇒ MỘT lượt lớn nhất chạy một mình, mà ba lượt 20.000 dòng vẫn song song.
+const congXuat = createBudgetGate({
+  nganSach: config.EXPORT_BUDGET_ROWS,
+  toiDaCho: MAX_QUEUED,
+  onTuChoi: () => exportRejectedTotal.inc({ reason: "budget_full" }),
+  // Lỗi phải mang mã của ĐƯỜNG XUẤT. Mặc định của cổng là `save_budget_full` — mã đó KHÔNG khớp
+  // `isCapacityError`, nên lượt bị ngân sách chặn sẽ rơi xuống nhánh dự phòng NỘI TUYẾN và chạy
+  // tiếp: cổng vừa dựng bị chính đường dự phòng đi vòng qua. Bài kiểm cũ
+  // tests/qs-export-gate-abort.test.js bắt được đúng chỗ này.
+  loiDay: () =>
+    Object.assign(new Error("Hệ thống đang xuất file quá tải, vui lòng thử lại sau ít phút"), {
+      status: 503,
+      retryAfter: 30,
+      code: "export_capacity",
+    }),
+  loiHuy: () => abortedError(),
+});
+
+/**
+ * Trọng số của một lượt xuất = số DÒNG nó sẽ dựng.
+ *
+ * Đọc từ `plainQuote` — chính vật đã nằm sẵn trong bộ nhớ và sắp gửi sang worker, nên phép đếm
+ * không tốn thêm lượt truy vấn nào. Đường xuất `omit: { extraTables: true }` (src/routes/
+ * export.routes.ts) nên bảng phụ KHÔNG có ở đây và cũng KHÔNG vào file khách — không đếm.
+ * `hnTables` thì CÓ được kéo về, nhưng nó là bảng nội bộ, `excel.ts` không dựng hàng cho nó vào
+ * file gửi khách; đếm nó sẽ tính phí một khối lượng không ai dựng.
+ *
+ * Tối thiểu 1: báo giá rỗng vẫn tốn một lượt khởi động exceljs (~130 MB nền đã đo). Trọng số 0 sẽ
+ * cho phép vô hạn lượt như vậy lọt qua ngân sách — cổng suất có chặn, nhưng một cổng không nên
+ * dựa vào cổng kia để đúng.
+ */
+export function demDongXuat(plainQuote: unknown): number {
+  const q = plainQuote as { sheets?: Array<{ items?: unknown[] }> } | null | undefined;
+  const sheets = Array.isArray(q?.sheets) ? q.sheets : [];
+  let n = 0;
+  for (const s of sheets) n += Array.isArray(s?.items) ? s.items.length : 0;
+  return Math.max(1, n);
+}
+
 /** Ai đó vượt trần hàng đợi (503) — KHÔNG được nuốt rồi rơi về nội tuyến. */
 const isCapacityError = (e: unknown) => !!e && typeof e === "object" && (e as any).code === "export_capacity";
 
@@ -236,7 +295,32 @@ export async function runExportJob(
     { signal?: AbortSignal; choPhepNoiTuyen?: boolean; timeoutMs?: number } = {}
 ) {
   // Xin chỗ NGOÀI try: lỗi hết công suất không được rơi vào nhánh "thử lại nội tuyến" bên dưới.
+  //
+  // ── THỨ TỰ XIN: SUẤT TRƯỚC, NGÂN SÁCH SAU. ĐỪNG ĐẢO LẠI ────────────────────
+  // `gate.acquire` phải là thao tác ĐẦU TIÊN và phải chạy ĐỒNG BỘ ngay trong lời gọi: chỗ được
+  // chiếm (hoặc bị từ chối 503) ngay tại đây, phần thân mới nằm ở microtask kế. Chen bất kỳ
+  // `await` nào lên trước nó sẽ phá tính chất đó — hai lượt xuất khởi động trong CÙNG một khối
+  // đồng bộ (vd `Promise.all`) sẽ không còn thấy nhau, và trần suất thành lời nói suông. Đúng
+  // điều tests/qs-export-gate-abort.test.js khoá lại, và nó đã bắt được khi bản đầu của khối này
+  // đặt ngân sách lên trước.
+  //
+  // KHÔNG BẾ TẮC: ngân sách chỉ bị giữ bởi lượt đang giữ suất, mà `xin` kẹp `can` xuống bằng cả
+  // ngân sách (src/saveBudget.ts) nên một lượt đơn lẻ luôn xin được trọn — luôn có ai đó tiến
+  // được. Cái giá: một lượt lớn đang chờ ngân sách vẫn ôm một suất mà chưa làm gì. Với
+  // EXPORT_MAX_ACTIVE=3 thì nhiều nhất 2 suất nằm không, và thứ tự vẫn là đến trước phục vụ
+  // trước — đổi lại là bỏ hẳn ca 3/3 cùng quá hạn.
   await gate.acquire(signal);
+  const can = demDongXuat(plainQuote);
+  try {
+    await congXuat.xin(can, signal);
+  } catch (e) {
+    // Xin ngân sách hỏng (huỷ / quá tải) thì phải TRẢ suất vừa chiếm, không thì nó rò vĩnh viễn
+    // và sau vài lượt huỷ cổng đứng im dù máy hoàn toàn rảnh.
+    gate.release();
+    exportActiveWorkers.set(gate.active());
+    exportQueueDepth.set(gate.pending());
+    throw e;
+  }
   exportActiveWorkers.set(gate.active());
   exportQueueDepth.set(gate.pending());
   const startedAt = process.hrtime.bigint();
@@ -249,6 +333,10 @@ export async function runExportJob(
       buf = await generateInWorker(kind, plainQuote, timeoutMs);
     } finally {
       gate.release();
+      // Trả ngân sách ĐÚNG chỗ trả suất: xong việc nặng ở worker là hết phần khối lượng mà cổng
+      // này đang canh. `finally` của khối trong nên chạy đúng một lần trên mọi nhánh — kể cả khi
+      // worker ném, hết hạn, hay bị huỷ.
+      congXuat.tra(can);
       exportActiveWorkers.set(gate.active());
       exportQueueDepth.set(gate.pending());
     }
@@ -274,7 +362,17 @@ export async function runExportJob(
 }
 
 /** Trạng thái cổng xuất file — nguồn của cả 4 gauge công suất, và dùng cho test. */
-export const exportGateStats = () => ({ active: gate.active(), pending: gate.pending(), maxActive: MAX_WORKERS, maxPending: MAX_QUEUED });
+// `dongDangBay`/`nganSachDong` đi kèm: nhìn `active: 1/3` mà không thấy 60.000 dòng đang bay thì
+// người trực sẽ kết luận hệ thống rảnh, trong khi nó đang từ chối đúng vì ngân sách đã cạn.
+export const exportGateStats = () => ({
+  active: gate.active(),
+  pending: gate.pending(),
+  maxActive: MAX_WORKERS,
+  maxPending: MAX_QUEUED,
+  dongDangBay: congXuat.dangBay(),
+  dongDangCho: congXuat.dangCho(),
+  nganSachDong: config.EXPORT_BUDGET_ROWS,
+});
 
 /**
  * Đồng bộ 4 gauge công suất xuất file. Gọi ĐÚNG LÚC SCRAPE (từ handler /metrics), cùng lý do đã

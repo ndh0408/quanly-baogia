@@ -11,6 +11,7 @@ import { createWorker, getQueue, QUEUES, isQueueEnabled, capNhatDoSauHangDoi } f
 import { pruneOldRecords } from "./retention.js";
 import { buildQuoteBuffer } from "./excel.js";
 import { renderQuotePdf } from "./pdf.js";
+import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
 import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_NEN_MS, capNhatCongSuatXuat } from "./exportQueue.js";
 import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
 import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
@@ -350,6 +351,11 @@ if (_stripExt(import.meta.url) === _stripExt(_entryUrl) || process.env.WORKER_MO
   // Worker errors were previously invisible — initialize Sentry here too so a
   // failing export/email/webhook/telegram job is reported, not just logged.
   initSentry();
+
+  // Tiến trình worker LÀ nơi chạy đường xuất nền, nên nó cũng phải từ chối khởi động với cấu hình
+  // cổng mâu thuẫn — kiểm ở server mà bỏ qua ở đây thì đúng tiến trình sinh file lại là tiến
+  // trình không được canh.
+  kiemBatBienXuatLucKhoiDong();
 
   if (!isQueueEnabled()) {
     logger.error("REDIS_URL not set — worker has nothing to subscribe to");

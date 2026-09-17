@@ -9,8 +9,13 @@ import { createApp } from "./app.js";
 import { reloadRoleOverrides } from "./roleOverrides.js";
 import { ensureBucket, isStorageEnabled } from "./storage.js";
 import { closeAllSse } from "./sse.js";
+import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
 
 initSentry();
+
+// Cấu hình sai thì CHẾT NGAY LÚC KHỞI ĐỘNG, đừng để hỏng lúc có người bấm Xuất: trần một lượt
+// xuất lớn hơn cả ngân sách dòng nghĩa là có báo giá hợp lệ mà không bao giờ xuất được.
+kiemBatBienXuatLucKhoiDong();
 
 const app = createApp();
 

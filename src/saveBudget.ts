@@ -60,10 +60,25 @@ export function createBudgetGate({
   nganSach,
   toiDaCho,
   onTuChoi,
+  loiDay = () => loiQuaTai(5),
+  loiHuy = () => loiQuaTai(5),
 }: {
   nganSach: number;
   toiDaCho: number;
   onTuChoi?: (ly: "day" | "qua-to") => void;
+  /**
+   * LỖI THEO MIỀN CỦA NƠI GỌI. Cổng này vốn viết cho đường LƯU nên mặc định ném `loiQuaTai`
+   * ("save_budget_full", 503). Đường XUẤT dùng lại cổng nhưng phải ném lỗi CỦA NÓ, vì hai lý do
+   * cụ thể chứ không phải cho đẹp:
+   *   · `runExportJob` nhận diện "hết công suất" bằng `code === "export_capacity"`. Lỗi mang mã
+   *     lạ sẽ KHÔNG khớp, rơi thẳng xuống nhánh dự phòng NỘI TUYẾN — tức cổng vừa dựng lên bị
+   *     chính đường dự phòng đi vòng qua, và tải nặng vẫn chạy, chỉ là chạy ở chỗ tệ hơn.
+   *   · Người dùng bấm Huỷ phải nhận 499 "đã huỷ", không phải 503 "hệ thống đang bận xử lý các
+   *     lần LƯU lớn khác" — một câu nói sai cả việc lẫn nguyên nhân.
+   * Mặc định giữ nguyên hành vi cũ nên đường lưu không đổi một ly.
+   */
+  loiDay?: () => unknown;
+  loiHuy?: () => unknown;
 }): BudgetGate {
   let dangBay = 0;
   const hang: NguoiCho[] = [];
@@ -92,7 +107,7 @@ export function createBudgetGate({
       // có bao nhiêu dòng. Cổng này chỉ lo ĐỒNG THỜI, nên request lớn hơn cả ngân sách được kẹp
       // xuống bằng ngân sách: nó chiếm TRỌN chỗ và chạy MỘT MÌNH, thay vì treo hoặc bị loại.
       const can = Math.min(canGoc, nganSach);
-      if (signal?.aborted) return Promise.reject(loiQuaTai(5));
+      if (signal?.aborted) return Promise.reject(loiHuy());
       if (hang.length === 0 && dangBay + can <= nganSach) {
         dangBay += can;
         return Promise.resolve();
@@ -101,14 +116,14 @@ export function createBudgetGate({
         // Trần hàng đợi KHÔNG phải cho đẹp: mỗi người đang chờ đã parse xong payload và đang ÔM nó
         // trong bộ nhớ. Hàng đợi không trần là một đường OOM khác, chỉ chậm hơn.
         onTuChoi?.("day");
-        return Promise.reject(loiQuaTai(5));
+        return Promise.reject(loiDay());
       }
       return new Promise<void>((tra, bo) => {
         const huy = () => {
           const i = hang.indexOf(n);
           if (i >= 0) hang.splice(i, 1);
           n.thao();
-          bo(loiQuaTai(5));
+          bo(loiHuy());
         };
         const n: NguoiCho = {
           can,

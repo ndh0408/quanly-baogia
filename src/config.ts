@@ -226,6 +226,33 @@ const schema = z.object({
   EXPORT_MAX_ACTIVE: numEnv(z.coerce.number().int().positive().max(32).default(3)),
   EXPORT_MAX_PENDING: numEnv(z.coerce.number().int().min(0).max(500).default(20)),
 
+  // ── NGÂN SÁCH DÒNG CHO ĐƯỜNG XUẤT ────────────────────────────────────────
+  // `EXPORT_MAX_ACTIVE` đếm SUẤT: ba lượt xuất là ba lượt, dù mỗi lượt 1.000 dòng hay 60.000.
+  // Đó là cùng lỗ mà `SAVE_BUDGET_ROWS` sinh ra để bịt cho đường lưu (xem src/saveBudget.ts:56).
+  //
+  // ĐO THẬT trên ảnh production (container 3 GB, 2 CPU, heap 2 GB — khớp VM dev):
+  //      1.000 dòng →  0,9s · RSS đỉnh 140 MB
+  //     10.000 dòng → 13,9s · RSS đỉnh 240 MB
+  //     20.000 dòng → 26,4s · RSS đỉnh 336 MB
+  //     60.000 dòng → 77,1s · RSS đỉnh 416 MB   ← đúng trần MAX_ASYNC_EXPORT_ITEMS
+  //
+  // Hỏng KHÔNG phải vì bộ nhớ (3 × 416 MB vẫn lọt 3 GB) mà vì THỜI GIAN. Đo qua đúng đường chạy
+  // thật (runExportJob → worker_thread), 3 người cùng xuất 60.000 dòng, trần nền 90s:
+  //     3 suất → #1 90,1s ✗ · #2 90,1s ✗ · #3 90,2s ✗   HỎNG 3/3, RSS đỉnh 1.214 MB
+  //     1 suất → #1 74,4s ✓ · #2 151,0s ✓ · #3 226,8s ✓  HỎNG 0/3, RSS đỉnh   636 MB
+  // Ba lượt tranh 2 CPU nên KHÔNG lượt nào kịp trần: hệ thống đốt trọn 90 giây rồi trả về KHÔNG
+  // MỘT FILE NÀO. Xếp hàng thì lượt đầu xong ở 74s và cả ba đều có file.
+  //
+  // Nhưng đặt thẳng EXPORT_MAX_ACTIVE=1 lại bắt lượt xuất 1.000 dòng (0,9s) xếp sau lượt 60.000
+  // dòng — phạt đúng những người dùng bình thường. Nên: GIỮ cổng suất (nó chặn số worker_thread)
+  // và THÊM cổng ngân sách theo dòng, đúng cặp hai-cổng của đường lưu.
+  //
+  // 60.000 = đúng MAX_ASYNC_EXPORT_ITEMS, tức "một lượt xuất lớn nhất được phép, chạy một mình".
+  // Suy ra từ số đo: 1,285 ms/dòng, 2 CPU ⇒ để mọi lượt kịp trần 90s thì số dòng đang bay phải
+  // ≤ 90s × 2 / 1,285ms ≈ 140.000. Lấy 60.000 để còn biên an toàn cho máy bận và cho phần nền.
+  // Hệ quả: 3 lượt 20.000 dòng vẫn chạy SONG SONG (vừa đúng 60.000), 2 lượt 30.000 cũng vậy.
+  EXPORT_BUDGET_ROWS: numEnv(z.coerce.number().int().min(1_000).max(1_000_000).default(60_000)),
+
   // Tiến trình worker nền.
   WORKER_CONCURRENCY: numEnv(z.coerce.number().int().positive().max(64).default(4)),
   WORKER_MODE: z.string().optional(),

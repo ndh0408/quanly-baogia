@@ -247,6 +247,34 @@ export const MAX_SAVE_ITEMS_PER_SHEET = 1000;
 // ở đó không có request nào đang chờ, người dùng hỏi trạng thái job khi nào cũng được.
 export const MAX_ASYNC_EXPORT_ITEMS = MAX_SAVE_SHEETS * MAX_SAVE_ITEMS_PER_SHEET;   // 60 000
 
+// ── BẤT BIẾN: TRẦN MỘT LƯỢT XUẤT KHÔNG ĐƯỢC LỚN HƠN CẢ NGÂN SÁCH ──────────
+// Cùng luật, cùng lý do như cặp MAX_SAVE_TOTAL_ROWS ≤ SAVE_BUDGET_ROWS (src/config.ts). Nếu
+// `MAX_ASYNC_EXPORT_ITEMS > EXPORT_BUDGET_ROWS` thì tồn tại báo giá HỢP LỆ theo trần kích thước
+// mà cổng ngân sách KHÔNG BAO GIỜ cấp chỗ nổi — người dùng bấm Xuất và nhận 503 vĩnh viễn dù máy
+// hoàn toàn rảnh.
+//
+// LÀ HÀM THUẦN, GỌI LÚC KHỞI ĐỘNG — KHÔNG phải phép kiểm chạy lúc import. Bản đầu đặt thẳng
+// `process.exit(1)` ở thân module và nó tự bắn vào chân mình: mọi bài test muốn dựng cổng với
+// ngân sách nhỏ đều làm chết tiến trình vitest ngay ở câu `import`. Một chốt chặn mà không bài
+// nào chạm tới được thì cũng không bài nào chứng minh được là nó còn sống.
+export function loiBatBienNganSachXuat(tranMotLuot: number, nganSach: number): string | null {
+  if (tranMotLuot <= nganSach) return null;
+  return (
+    `❌ MAX_ASYNC_EXPORT_ITEMS (${tranMotLuot}) phải ≤ EXPORT_BUDGET_ROWS (${nganSach}). ` +
+    "Lớn hơn nghĩa là có báo giá hợp lệ mà không bao giờ xuất được."
+  );
+}
+
+/** Gọi ở MỌI điểm khởi động có đường xuất (server.ts, worker.ts). Sai cấu hình thì chết ngay,
+ *  kèm tên cả hai biến, còn hơn để hỏng lúc có người bấm Xuất. */
+export function kiemBatBienXuatLucKhoiDong() {
+  const loi = loiBatBienNganSachXuat(MAX_ASYNC_EXPORT_ITEMS, config.EXPORT_BUDGET_ROWS);
+  if (loi) {
+    console.error(loi);
+    process.exit(1);
+  }
+}
+
 // LƯU PHẦN HÀ NỘI — `PUT /api/quotes/:id/hn` (src/hnWorkflow.ts saveHn).
 //
 // Route này TRƯỚC ĐÂY không có body schema: `validate({ params: idParam })` chỉ kiểm `:id`, còn
