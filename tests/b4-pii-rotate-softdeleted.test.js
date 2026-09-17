@@ -4,8 +4,10 @@
  * TÁI HIỆN (đọc mã, đối chiếu ba file):
  *   · src/db.ts:16 `SOFT_DELETE_MODELS` chứa CẢ "PersonnelRecord" và "Employee" — đúng hai model
  *     duy nhất có PII (src/piiFields.ts PII_FIELDS).
- *   · src/db.ts:17 `READS` gồm `findMany` VÀ `count`; db.ts:80-88 tự chèn `where.deletedAt = null`
- *     cho mọi thao tác đọc trừ khi truyền `includeDeleted: true`.
+ *   · src/db.ts:17 `READS` gồm `findMany` VÀ `count`; nhánh `READS.has(operation)` trong phần mở
+ *     rộng `$extends` của db.ts tự chèn `where.deletedAt = null` cho mọi thao tác đọc, trừ khi
+ *     truyền `includeDeleted: true`. (Trỏ bằng TÊN chứ không bằng số dòng: bản trước ghi
+ *     "db.ts:80-88" và số đó đã trôi khi `poolDoSanSang` được thêm vào giữa file.)
  *   · src/tools/piiRotate.ts import `prisma` từ "../db.js" (bản ĐÃ mở rộng) rồi gọi
  *     `client.count(...)` / `client.findMany(...)` KHÔNG kèm `includeDeleted`.
  * HẬU QUẢ: hàng xoá mềm vẫn giữ nguyên bản mã dưới KHOÁ CŨ và không bao giờ được mã lại. Huỷ khoá cũ

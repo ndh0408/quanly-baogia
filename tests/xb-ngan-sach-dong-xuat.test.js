@@ -4,8 +4,9 @@
  *
  * ── LỖ ─────────────────────────────────────────────────────────────────────
  * `EXPORT_MAX_ACTIVE` (mặc định 3) đếm SUẤT: một lượt xuất 1.000 dòng và một lượt 60.000 dòng tốn
- * suất NHƯ NHAU. Đường LƯU đã có cổng đếm trọng số từ lâu (`SAVE_BUDGET_ROWS`), và chính
- * src/saveBudget.ts:56 tự khai sự lệch này — nhưng đường XUẤT chưa được vá theo.
+ * suất NHƯ NHAU. Đường LƯU đã có cổng đếm trọng số từ lâu (`SAVE_BUDGET_ROWS`), và khối chú thích
+ * ngay trên `createBudgetGate` (src/saveBudget.ts) tự khai sự lệch này — "cổng kia đếm SUẤT, cổng
+ * này đếm TRỌNG SỐ" — nhưng đường XUẤT chưa được vá theo.
  *
  * ── ĐO THẬT, KHÔNG SUY ĐOÁN ────────────────────────────────────────────────
  * Ảnh production, container 3 GB / 2 CPU / heap 2 GB, trần sinh file nền 90s, qua ĐÚNG đường chạy

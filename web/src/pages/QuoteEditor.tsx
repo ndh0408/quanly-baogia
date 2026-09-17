@@ -35,6 +35,27 @@ type Sheet = M.Sheet & {
 const CUST_LABEL: Record<string, string> = { approved: "Khách đã duyệt", rejected: "Khách không duyệt" };
 const CUST_DOT: Record<string, string> = { approved: "✓", rejected: "✗" };
 const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ";
+
+/**
+ * Giá trị cho `<input type="date">` — PHẢI đúng dạng `yyyy-MM-dd`.
+ *
+ * API trả `quoteDate` là DateTime, tức chuỗi ISO đầy đủ (`2026-09-17T02:39:36.399Z`). Nhét thẳng
+ * chuỗi đó vào ô date là giá trị KHÔNG hợp lệ theo chuẩn HTML, và ô phải hiện RỖNG.
+ *
+ * ĐO TRÊN TRÌNH DUYỆT THẬT (Chrome, dev, báo giá #278): Chrome tự cắt nên ô vẫn hiện đúng ngày,
+ * nhưng nó ghi vào console
+ *     The specified value "2026-09-17T02:39:36.399Z" does not conform to the required format,
+ *     "yyyy-MM-dd".
+ * Tức hiện đúng chỉ vì một trình duyệt dễ dãi. Đây là chỗ không nên dựa vào lòng tốt đó.
+ *
+ * CẮT 10 KÝ TỰ ĐẦU, KHÔNG ĐỔI MÚI GIỜ: ô date ghi ngược lại đúng `yyyy-MM-dd` và máy chủ đọc nó
+ * thành nửa đêm UTC, nên cắt phần ngày của chuỗi UTC mới là phép nghịch đảo ĐÚNG. Quy về giờ địa
+ * phương sẽ làm ngày nhảy một bậc với những bản ghi sát nửa đêm UTC.
+ */
+export const ngayChoO = (v: unknown): string => {
+  const s = typeof v === "string" ? v : v instanceof Date ? v.toISOString() : "";
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : "";
+};
 type WinDirty = Window & { __editorDirty?: boolean };
 
 function SummaryFormula({ label, formula, value, prefix = "", danger = false }: { label: string; formula: string; value: number; prefix?: string; danger?: boolean }) {
@@ -648,8 +669,8 @@ Lý do (không bắt buộc):`,
 
         <div className="meta-row">
           <label>Số xuất Excel <span className="muted" style={{ fontSize: 11 }}>(GN…)</span><input value={q.quoteNumber || ""} placeholder={isNew ? "Tự động cấp khi lưu" : ""} readOnly disabled={!suaMain} /></label>
-          <label>Ngày báo giá<input type="date" defaultValue={q.quoteDate} disabled={!suaMain} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
-          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={q.executionDate || ""} disabled={!suaMain} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
+          <label>Ngày báo giá<input type="date" defaultValue={ngayChoO(q.quoteDate)} disabled={!suaMain} onInput={(e) => { setQ("quoteDate", (e.target as HTMLInputElement).value); redrawMeta(); }} /></label>
+          <label>Ngày thi công <span className="muted" style={{ fontSize: 11 }}>(nội bộ)</span><input type="date" defaultValue={ngayChoO(q.executionDate)} disabled={!suaMain} onInput={(e) => setQ("executionDate", (e.target as HTMLInputElement).value)} /></label>
           <label>VAT (%)<input type="number" step="0.1" defaultValue={q.vatPercent} disabled={!suaMain} onInput={(e) => { setQ("vatPercent", Number((e.target as HTMLInputElement).value) || 0); redrawMeta(); }} /></label>
           {/* Giảm giá KHÔNG còn ở đây: nay là "Discount" RIÊNG của từng sheet, nằm ngay dưới lưới
               cạnh khối tổng của sheet đó — xem khối "Tổng sheet" bên dưới. */}
