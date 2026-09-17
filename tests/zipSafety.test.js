@@ -135,6 +135,14 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
   // ĐÚNG PoC đã dùng để tìm ra H1: khai "uncompressed" NHỎ hơn 1 byte so với ngưỡng miễn trừ cũ
   // (1MB) của bản trước, trong khi dữ liệu nén thật giải ra một buffer LỚN GẤP BỘI. Bản cũ (tin số
   // khai) trả {ok:true} ở đây — chính là cách JSZip/exceljs downstream ăn đủ bom thật.
+  
+  // ── TRẦN THỜI GIAN RIÊNG, 60s ─────────────────────────────────────────────
+  // Bài này GIẢI NÉN THẬT hàng chục MB — trên máy rảnh mất ~1–2s, nhưng vitest chạy các tệp test
+  // SONG SONG nên nó phải chia CPU với bất cứ thứ gì tình cờ chạy cùng lúc. ĐÃ THẤY ĐỎ THẬT ở một
+  // lượt `verify-local.sh`: hết giờ ở trần mặc định 20s, cùng lúc với hai bài nặng CPU của
+  // tests/import-worker-thread.test.js và một container quét bảo mật còn sót của lượt trước.
+  // Nới TRẦN, KHÔNG nới ngưỡng khẳng định: điều bài này chứng minh là "bom bị từ chối", không phải
+  // "từ chối nhanh". Một bài xanh-do-may-mắn ở 95% trần thì sớm muộn cũng đỏ vì lý do sai.
   it("PoC H1: khai NHỎ HƠN 1MB (né ngưỡng miễn trừ cũ) nhưng giải nén thật vượt trần → từ chối", async () => {
     const thatSu = TRAN + 10 * 1024 * 1024; // vượt trần thật một khoảng rõ ràng
     const v = await inspectXlsx(makeZip(
@@ -143,7 +151,7 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     ));
     expect(v.ok, "phải bị chặn dù metadata khai nhỏ — vì giờ đây kiểm THẬT, không đọc số khai").toBe(false);
     expect(v.reason).toMatch(/bom nén|quá lớn/i);
-  });
+  }, 60_000);
 
   it("khai metadata SAI (thấp hơn thật rất nhiều) nhưng nội dung thật KHÔNG PHẢI bom → vẫn được chấp nhận", async () => {
     // Đối chứng cho ca trên: metadata nói dối không còn là tiêu chí — chỉ khi nội dung THẬT vượt
@@ -159,7 +167,7 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     const v = await inspectXlsx(makeZip([...validEntries(), { name: "xl/mot-bom.xml", rawBytes: TRAN + 1024 }]));
     expect(v.ok).toBe(false);
     expect(v.reason).toMatch(/bom nén|quá lớn/i);
-  });
+  }, 60_000);
 
   it("KHÔNG mục nào một mình vượt trần, nhưng TỔNG cộng dồn nhiều mục thì vượt → từ chối", async () => {
     // Mỗi mục ~60% trần — không mục nào tự mình đủ để bị chặn — nhưng 2 mục cộng lại vượt hẳn.

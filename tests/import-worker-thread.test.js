@@ -71,6 +71,16 @@ describe("đọc file Excel phải chạy trong worker thread", () => {
   });
 
   it("LUỒNG CHÍNH KHÔNG BỊ CHIẾM trong lúc worker đọc file", async () => {
+    // ── TRẦN 60s, KHÔNG PHẢI 20s MẶC ĐỊNH ────────────────────────────────
+    // Bài này dựng workbook 4.000 dòng rồi đọc lại nó trong worker: máy rảnh mất ~8,7s, tức đã
+    // ăn 44% trần mặc định. vitest chạy các tệp SONG SONG nên nó phải chia CPU với bất cứ thứ gì
+    // chạy cùng lúc, và trong một lượt `verify-local.sh` đầy đủ nó ĐÃ hết giờ ở 20s rồi làm cả
+    // cổng [4/13] đỏ — trong khi chạy riêng thì xanh. Cùng lớp lỗi mà tests/zipSafety.test.js đã
+    // gặp và đã nới lên 60s (xem chú thích ở bài "TỔNG cộng dồn nhiều mục").
+    //
+    // NỚI TRẦN CHỨ KHÔNG NỚI NGƯỠNG: phép khẳng định thật là `treMax < 250ms` ở dưới, và nó
+    // KHÔNG ĐƯỢC nới — đó mới là điều bài này chứng minh. Trần thời gian chỉ là chỗ bài được phép
+    // chạy xong để tới được phép khẳng định đó.
     const buf = await buildQuoteBuffer(baoGia(4000));   // đủ nặng để thấy khác biệt
 
     // Đo độ TRỄ của event loop: đặt hẹn 10ms liên tục trong lúc worker chạy. Nếu việc đọc file
@@ -94,7 +104,7 @@ describe("đọc file Excel phải chạy trong worker thread", () => {
     // Ngưỡng rộng cho máy CI chậm — điều cần chứng minh là event loop VẪN QUAY, không phải nó
     // nhanh. Đọc cùng file này trên luồng chính làm độ trễ vọt lên hàng trăm ms tới hàng giây.
     expect(treMax, `độ trễ event loop tối đa ${treMax}ms — luồng chính bị chiếm?`).toBeLessThan(250);
-  });
+  }, 60_000);
 
   // ⚠️ KHÔNG có bài "chạm trần heap thì worker chết". Đã thử và ĐO ĐƯỢC rằng
   // `resourceLimits.maxOldGenerationSizeMb` KHÔNG chặn thứ tốn kém ở đây: với trần 32MB, một
@@ -112,7 +122,9 @@ describe("đọc file Excel phải chạy trong worker thread", () => {
     // chạy tiếp dòng này.
     expect(m).toBeTypeOf("object");
     expect(m.ok === true || typeof m.error === "string").toBe(true);
-  });
+    // 60s cùng lý do như bài trên: dựng workbook 3.000 dòng rồi đọc lại trong worker mất ~5,9s
+    // khi máy rảnh, và trần mặc định 20s không đủ biên cho lúc cả bộ test chạy song song.
+  }, 60_000);
 
   it("file KHÔNG PHẢI xlsx → lỗi có thông điệp, không làm sập worker runner", async () => {
     const m = await chayWorker(Buffer.from("đây không phải file excel"));
