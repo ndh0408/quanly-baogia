@@ -68,6 +68,7 @@ export type VenueItemInput = {
 export type User = {
   id: number; username: string; displayName: string; role: string;
   phone?: string | null; projectCode?: string | null; email?: string | null;
+  title?: string | null;           // chức danh in dưới tên người gửi trên báo giá (USER_SELECT có từ 2026-09-17)
   senderName?: string | null;      // tên in ở ô "Người gửi" của báo giá (trống = dùng displayName)
   active: boolean; pending: boolean; canSign?: boolean;
   permissions?: string[];          // tích quyền per-user thô ([] = theo role mặc định)

@@ -8,6 +8,7 @@ import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
 import { config } from "../config.js";
 import { quoteScopeWhere, readScopeWhere } from "../permissions.js";
+import { destroyAllSessions } from "../sessions.js";
 import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "./quoteService.js";
 
 /**
@@ -24,34 +25,115 @@ export function serializeExport(data: unknown): string {
 }
 
 /**
- * Prisma ops that erase a user's OWN personal data and lock the account.
- * Returns an array to be passed to prisma.$transaction([...]) so token revocation
- * and PII anonymization commit atomically. Shared by self-delete and admin-delete.
+ * ── XOÁ DANH TÍNH MỘT NGƯỜI (quyền-được-quên) ──────────────────────────────
+ * Sinh các prisma-op xoá dữ liệu cá nhân CỦA CHÍNH người đó rồi khoá tài khoản. Trả về mảng để
+ * `prisma.$transaction([...])` cam kết nguyên tử cùng lượt thu hồi token. Dùng chung cho đường
+ * tự-xoá và đường admin-xoá-hộ.
  *
- * Note: quotes/customers owned by the user are intentionally NOT touched here —
- * they are business records (and customer rows are other people's personal data),
- * so they are retained with their ownership link, not anonymized.
+ * ── KHỐI `data` PHẢI PHỦ MỌI CỘT CÁ NHÂN, KHÔNG PHẢI "NHỮNG CỘT NHỚ RA" ────
+ * Bản trước bỏ sót `senderName` — cột giữ TÊN THẬT của người đó và là nguồn ô "Người gửi" IN LÊN
+ * BÁO GIÁ GỬI RA NGOÀI (web/src/pages/NewQuoteWizard.tsx đọc `me.senderName || me.displayName`).
+ * Nên sau khi `deletedAt` đã đặt, tên người ấy vẫn nằm nguyên trong CSDL và vẫn đọc ra được. Cùng
+ * lối bỏ sót đó còn ba nhóm nữa:
+ *   · `projectCode` — prefix mã dự án RIÊNG của từng nhân viên (thường là viết tắt tên người), đóng
+ *     vào mã mọi báo giá họ tạo. Định danh giả gắn chặt với một con người vẫn là dữ liệu cá nhân.
+ *   · `lastLoginAt` / `lastLoginIp` — địa chỉ IP là dữ liệu cá nhân, và chính repo này đã công nhận
+ *     thế: `exportUser` trả `lastLoginIp` về cho chủ thể, còn gdpr.routes.ts gọi bản xuất là "gói
+ *     PII đầy đủ (… IP đăng nhập …)". Thứ đủ nhạy để chặn mọi tầng cache khi XUẤT thì cũng đủ nhạy
+ *     để phải xoá khi người ta đòi XOÁ.
+ *   · `inviteTokenHash` / `inviteExpiresAt` — chứng thư kích hoạt còn SỐNG. `updateUser` khi admin
+ *     KHOÁ tài khoản đã bắt buộc đốt hai cột này (accept-invite đặt `active: true`, nên token còn
+ *     sống là người bị khoá tự mở khoá lại được). Xoá là hành vi MẠNH HƠN khoá, không thể làm ít hơn.
+ * Và `passwordChangedAt`: đổi `passwordHash` thành "DELETED" mà không đóng mốc thì chốt chặn phiên
+ * ĐỘC LẬP với kho phiên (xem chú thích cột đó trong prisma/schema.prisma) không hề đóng — mọi access
+ * token JWT phát hành trước lúc xoá vẫn qua được phép so thời gian, chỉ còn `active: false` gác.
+ *
+ * ── NGOÀI BẢNG User: BA BẢN SAO DỮ LIỆU CÁ NHÂN CỦA CHÍNH NGƯỜI ĐÓ ────────
+ *   · RefreshToken.ip/userAgent — mỗi hàng một IP thật + một vân tay thiết bị, và `exportUser`
+ *     chính thức coi hai cột này là dữ liệu cá nhân của chủ thể (nó trả cả hai về). Thu hồi token
+ *     mà giữ nguyên dấu vết định vị của token là làm nửa việc.
+ *   · user_sessions — `sess` là JSON chứa `displayName` + `username` THẬT. Kho phiên nằm NGOÀI
+ *     Prisma nên không vào được transaction; `destroyAllSessions` chạy ngay sau đó (xem `xoaDanhTinh`).
+ *
+ * ── CỐ Ý GIỮ LẠI — NÓI THẲNG RA, ĐỪNG ĐỂ LÀ KHOẢNG LẶNG ───────────────────
+ * Những chỗ dưới đây KHÔNG bị đụng tới, và đó là quyết định chứ không phải bỏ sót. Chú thích cũ chỉ
+ * miễn trừ "quotes/customers" với lý lẽ "không phải dữ liệu cá nhân của người xoá" — lý lẽ đó KHÔNG
+ * phủ được mấy mục đầu trong danh sách này, nên phải kể tên từng chỗ:
+ *   · Quote.fromContact/fromPhone/fromTitle — bản sao ĐÔNG CỨNG tên/SĐT/chức danh người gửi tại thời
+ *     điểm tạo báo giá. Đây LÀ dữ liệu cá nhân của chính người xin xoá, nhưng báo giá là chứng từ
+ *     đã gửi ra ngoài cho khách: sửa nó là sửa một bản ghi kế toán đã phát hành.
+ *   · QuoteSheet.signedByName — bản chụp tên người ký, giữ có chủ ý (prisma/schema.prisma ghi rõ
+ *     "keep the snapshotted signedByName, just clear the link (audit-safe)").
+ *   · QuoteVersion.payload — mỗi hàng phiên bản chép lại fromContact/fromPhone/fromTitle của hàng
+ *     báo giá tương ứng; giữ hay bỏ phải đi CÙNG quyết định về Quote ở trên.
+ *   · AuditEvent.before/after — nhật ký `user.update` lưu nguyên `USER_SELECT`, tức một bản chụp đầy
+ *     đủ username/email/displayName/phone/title/senderName/projectCode. Giữ theo nghĩa vụ pháp lý,
+ *     nhưng đây là bản sao ĐẦY ĐỦ của đúng những cột vừa bị xoá ở trên — người rà tuân thủ phải biết.
+ *   · Customer — dữ liệu cá nhân của CHỦ THỂ KHÁC, không phải của người xin xoá.
+ *   · LoginAttempt — ĐÃ THỬ XOÁ VÀ ĐÃ GỠ BỎ, nói rõ để người sau khỏi làm lại. Bảng này không có
+ *     khoá ngoại tới User; đường duy nhất lần ra là chuỗi `username`. Nhưng phía GHI lưu ĐÚNG chuỗi
+ *     người dùng gõ (`authCore.ts`, `username: loginId`) còn phía ĐỌC khớp KHÔNG PHÂN BIỆT HOA
+ *     THƯỜNG và khớp cả cột `email`. Nên một phép `updateMany({ where: { username } })` so
+ *     byte-for-byte SÓT mọi hàng phát sinh từ lần gõ khác hoa/thường hoặc gõ email — giữ nguyên
+ *     email thật + IP + user-agent. Một phép xoá SÓT mà đọc vào tưởng đã xong còn tệ hơn không xoá:
+ *     nó tạo ra sự yên tâm sai trong đúng thứ cần chắc chắn nhất.
+ *     Và kể cả khớp đúng thì vẫn sai một nửa: ip/userAgent của những hàng `success: false` là dấu
+ *     vết của NGƯỜI KHÁC gõ vào tài khoản này, tức bằng chứng an ninh, không phải dữ liệu cá nhân
+ *     của người xin xoá. Retention tự dọn bảng sau 365 ngày (RETAIN_LOGIN_DAYS).
+ *   · AuditEvent.ip/userAgent — cùng lý lẽ với `before/after` ngay trên: nhật ký giữ theo nghĩa vụ
+ *     pháp lý. Nêu tên ở đây để người rà tuân thủ biết hai cột này CÒN, chứ không phải bị bỏ quên.
+ *
+ * Thêm một cột cá nhân mới vào `model User` mà quên khối `data` này là ĐỎ ở
+ * tests/gx-gdpr-xoa-sot-cot-pii.test.js (bài đó khoá theo QUAN HỆ với schema, không ghim danh sách).
  */
-function anonymizeUserOps(id: number) {
+function anonymizeUserOps(id: number, tenThayThe: string) {
+  const luc = new Date();
   return [
-    prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: new Date() } }),
+    prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: luc, ip: null, userAgent: null } }),
     prisma.user.update({
       where: { id },
       data: {
-        username: `deleted-${id}-${Date.now()}`,
+        username: tenThayThe,
         passwordHash: "DELETED",
         displayName: "(deleted user)",
         email: null,
         phone: null,
         title: null,
+        senderName: null,
+        projectCode: null,
+        lastLoginAt: null,
+        lastLoginIp: null,
+        inviteTokenHash: null,
+        inviteExpiresAt: null,
+        passwordChangedAt: luc,
         mfaSecret: null,
         mfaBackupCodes: [],
         mfaEnabled: false,
+        mfaLastStep: null,
         active: false,
-        deletedAt: new Date(),
+        deletedAt: luc,
       },
     }),
   ];
+}
+
+/**
+ * Đọc mốc cần thiết → transaction vô danh hoá → huỷ MỌI phiên cookie. Dùng chung cho hai đường xoá.
+ *
+ * `destroyAllSessions` phải gọi ở đây chứ không để route lo: route của đường TỰ xoá chỉ
+ * `req.session.destroy()` — tức đúng MỘT phiên, phiên của trình duyệt đang bấm nút — còn đường ADMIN
+ * xoá hộ thì không huỷ phiên nào của nạn nhân cả. Người bị admin xoá vẫn dùng tiếp tab đang mở cho
+ * tới khi request kế tiếp chạm `enforceActiveUser`, và hàng `user_sessions` (chứa `displayName` +
+ * `username` thật) vẫn nằm đó tới lúc hết hạn. Ba service khác (auth/mfa/user) đã gọi hàm này mỗi
+ * khi thông tin xác thực đổi; đường xoá là chỗ cần nó nhất mà lại là chỗ duy nhất quên.
+ */
+async function xoaDanhTinh(id: number) {
+  const truoc = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+  if (!truoc) throw httpError(404, "Không tìm thấy người dùng");
+  const tenThayThe = `deleted-${id}-${Date.now()}`;
+  await prisma.$transaction(anonymizeUserOps(id, tenThayThe));
+  // Nằm NGOÀI Prisma (bảng của connect-pg-simple) nên không vào được transaction ở trên.
+  await destroyAllSessions(id);
 }
 
 /**
@@ -102,9 +184,13 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
   const [user, quotes, customers, auditEvents, refreshTokens, notifications] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
+      // `senderName` + `projectCode` PHẢI có mặt: chúng là dữ liệu cá nhân (tên thật in lên báo giá,
+      // và prefix mã dự án gắn với một con người). Thiếu chúng ở đây thì chủ thể không có đường nào
+      // BIẾT hai cột đó tồn tại mà đi đòi — đúng cái luật mà chính tệp này đã đặt cho phần bị cắt:
+      // "Cắt mà im lặng là tệ hơn không cắt: người nhận tưởng mình đã có đủ dữ liệu".
       select: {
         id: true, username: true, displayName: true, email: true, phone: true,
-        title: true, role: true, active: true,
+        title: true, senderName: true, projectCode: true, role: true, active: true,
         lastLoginAt: true, lastLoginIp: true, createdAt: true,
       },
     }),
@@ -313,11 +399,13 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
 
 /**
  * Xoá tài khoản của CHÍNH user (right-to-erasure) — phần LOGIC THUẦN: transaction vô danh hoá + audit.
- * Việc destroy session + clearCookie GIỮ ở route (controller HTTP) vì thao tác res/session.
+ * `req.session.destroy()` + `clearCookie` GIỮ ở route (controller HTTP) vì thao tác res/session của
+ * CHÍNH request này. Còn việc xoá MỌI HÀNG phiên của người đó trong kho là một lệnh DELETE trên CSDL,
+ * không phải thao tác HTTP — nó thuộc `xoaDanhTinh`, và phải ở đó để đường admin-xoá-hộ cũng có.
  */
 export async function deleteSelf(req: Request) {
   const id = (req.session as any).userId;
-  await prisma.$transaction(anonymizeUserOps(id));
+  await xoaDanhTinh(id);
   await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
 }
 
@@ -328,7 +416,7 @@ export async function deleteByAdmin(req: Request) {
   }
   const target = await prisma.user.findUnique({ where: { id: (req.params as any).id }, select: { id: true } });
   if (!target) throw httpError(404, "Không tìm thấy người dùng");
-  await prisma.$transaction(anonymizeUserOps((req.params as any).id));
+  await xoaDanhTinh((req.params as any).id);
   await audit(req, "gdpr.delete.by_admin", { resource: "user", resourceId: (req.params as any).id });
   return { ok: true };
 }

@@ -24,8 +24,11 @@
  * Cộng VẾ BỎ TRỐNG, quan trọng không kém — và nó KHÔNG cùng một luật cho mọi cột:
  *
  *   `senderName`, `phone`  → modal Sửa NẠP SẴN từ GET /api/users ⇒ xoá trắng = XOÁ THẬT (null).
- *   `title`                → USER_SELECT không có cột này, API không trả về, modal không dựng nổi
- *                            ô ⇒ không client nào biết giá trị đang có ⇒ "" = KHÔNG ĐỔI.
+ *   `title`                → TỪ 2026-09-17 CŨNG VẬY. Trước đó USER_SELECT không có cột này nên API
+ *                            không trả về, modal không dựng nổi ô, không client nào biết giá trị
+ *                            đang có ⇒ "" = KHÔNG ĐỔI. Nay `title` đã vào USER_SELECT và modal Sửa
+ *                            có ô Chức danh NẠP SẴN từ `user.title`, nên điều kiện của luật đã đổi
+ *                            và vế bỏ trống phải đổi theo (tests/cd-quan-tri-sua-chuc-danh.test.js).
  *
  * Đây chính là luật đã chốt sau hai sự cố ngược chiều nhau: coi "" là "không đổi" ở ô CÓ nạp sẵn
  * thì admin xoá ô, bấm Lưu, thấy toast "Đã lưu" mà cột vẫn nguyên (lưu mà không ăn); còn coi "" là
@@ -123,16 +126,17 @@ describe.runIf(dbAvailable)("Quản trị đặt tên người gửi trên báo 
     expect(hang.senderName, "danh sách nhân viên KHÔNG kèm senderName").toBe("Chị Lan");
   }, 60_000);
 
-  it("SỬA + BỎ TRỐNG: ô NẠP SẴN xoá trắng là XOÁ THẬT; ô không nạp sẵn thì KHÔNG ĐỔI", async () => {
-    // Hai vế ngược nhau trong CÙNG một lệnh ghi, và ranh giới là "form có nhìn thấy giá trị cũ không".
+  it("SỬA + BỎ TRỐNG: ô NẠP SẴN xoá trắng là XOÁ THẬT", async () => {
+    // Ranh giới của luật là "form có nhìn thấy giá trị cũ không", chứ không phải tên cột.
     //
     // senderName + phone: modal Sửa pre-fill từ GET /api/users, admin NHÌN THẤY "Chị Lan" /
     //   "0909123456" rồi mới xoá ⇒ kỳ vọng duy nhất là nó biến mất. Bản trước quy "" về `undefined`,
     //   Prisma bỏ qua cột, mà giao diện vẫn toast "Đã lưu" — lưu mà không ăn, một lời nói dối im lặng.
-    // title: USER_SELECT không có cột này nên API không trả về và modal không có ô Chức danh. Ô
-    //   không nhìn thấy được thì "" không phải ý định của ai cả ⇒ phải GIỮ. Muốn cho admin sửa chức
-    //   danh thì thêm `title: true` vào USER_SELECT TRƯỚC, rồi mới thêm ô và đổi helper — làm ngược
-    //   thứ tự là mỗi lần bấm Lưu xoá sạch chức danh của người ta.
+    // title: hồi bài này ra đời, USER_SELECT không có cột đó nên API không trả về, modal không dựng
+    //   nổi ô Chức danh, và "" không phải ý định của ai cả ⇒ ca này khẳng định `title` phải CÒN.
+    //   Từ 2026-09-17 điều kiện đã đổi: `title` vào USER_SELECT và modal có ô nạp sẵn, nên giữ
+    //   khẳng định cũ là khoá lại đúng cái lỗi "lưu mà không ăn" ở một cột khác. Kỳ vọng đổi theo
+    //   luật, không đổi luật theo kỳ vọng — chi tiết ở tests/cd-quan-tri-sua-chuc-danh.test.js.
     await datMoc();
     const r = await quanTri.put(`/api/users/${nhanVienId}`).send({ senderName: "", phone: "", title: "", projectCode: "FE_A" });
     expect(r.status).toBe(200);
@@ -140,7 +144,7 @@ describe.runIf(dbAvailable)("Quản trị đặt tên người gửi trên báo 
     const sau = await doc(nhanVienId);
     expect(sau.senderName, "xoá trắng ô mà tên người gửi VẪN CÒN — lưu mà không ăn").toBe(null);
     expect(sau.phone, "xoá trắng ô mà SĐT vẫn còn").toBe(null);
-    expect(sau.title, "đã XOÁ chức danh dù không client nào đọc lại được cột này").toBe("Account");
+    expect(sau.title, "xoá trắng ô Chức danh mà cột vẫn còn — lưu mà không ăn").toBe(null);
     // Phản hồi phải nói đúng sự thật ngay: danh sách nhân viên dựng lại từ đây.
     expect(r.body.senderName, "phản hồi 200 vẫn trả giá trị CŨ").toBe(null);
     expect(r.body.phone).toBe(null);

@@ -316,6 +316,9 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
   const [displayName, setDisplayName] = useState(user.displayName || "");
   const [senderName, setSenderName] = useState(user.senderName || "");
   const [phone, setPhone] = useState(user.phone || "");
+  // NẠP SẴN từ `user.title` — bắt buộc, không phải tuỳ chọn. Ô trống mà payload vẫn gửi `null` là
+  // một đường xoá trắng mới: admin vào sửa mỗi SĐT là mất luôn chức danh in trên báo giá của người ta.
+  const [title, setTitle] = useState(user.title || "");
   const [projectCode, setProjectCode] = useState(user.projectCode || "");
   const [isAdmin, setIsAdmin] = useState(user.role === "admin");
   // Pre-fill ma trận từ quyền HIỆU LỰC hiện tại (per-user nếu có, else theo role mặc định).
@@ -335,13 +338,20 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
   const save = async () => {
     setErr(""); setFieldErrors({}); setSaving(true);
     try {
-      // `|| null` cho senderName/phone: modal này NẠP SẴN cả hai từ danh sách, nên admin xoá trắng ô
-      // là một ý định rõ ràng — gửi `null` để máy chủ XOÁ thật. Gửi "" cũng ra cùng kết quả
+      // `|| null` cho senderName/phone/title: modal này NẠP SẴN cả ba từ danh sách, nên admin xoá
+      // trắng ô là một ý định rõ ràng — gửi `null` để máy chủ XOÁ thật. Gửi "" cũng ra cùng kết quả
       // (UserUpdateSchema quy "" về null), `null` chỉ nói thẳng ý định ra ở tầng payload.
       // `projectCode` đã đi đúng mẫu này từ trước.
+      //
+      // `username` KHÔNG còn trong payload: ô của nó là `<input disabled>`, tức form không cho người
+      // dùng điều khiển — đúng hình dạng mà luật đã chốt cấm gửi. Hôm nay vô hại vì UserUpdateSchema
+      // không khai khoá này nên zod strip im lặng, nhưng ngày nào ai đó thêm `username` vào schema
+      // (vd cho đổi tên đăng nhập) thì dòng cũ lập tức thành lệnh ghi đè mỗi lần Lưu — và
+      // `updateUser` KHÔNG gọi `timTaiKhoanTrung`, nên không có chốt chống trùng nào chặn lại.
       await api.updateUser(user.id, {
-        username: user.username, displayName,
+        displayName,
         senderName: senderName.trim() || null, phone: phone.trim() || null,
+        title: title.trim() || null,
         projectCode: projectCode.trim() || null,
         // ── CHỈ GỬI `role` KHI Ô TÍCH "QUẢN TRỊ" THẬT SỰ ĐỔI ────────────────────────────────
         // Modal này KHÔNG có ô chọn vai trò — chỉ có một ô tích "Quản trị". Gửi thẳng
@@ -373,6 +383,13 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
                 cho ô KHÔNG nạp sẵn — vd màn Quên mật khẩu, nơi ô luôn rỗng bất kể CSDL có gì.) */}
             <label className="full"><span>Tên người gửi trên báo giá</span><input value={senderName} placeholder="Để trống = dùng Họ tên" onChange={(e) => mark(setSenderName)(e.target.value)} /></label>
             <label className="full"><span>SĐT</span><input type="tel" value={phone} onChange={(e) => mark(setPhone)(e.target.value)} /></label>
+            {/* Cùng luật, cùng câu chữ với trang Hồ sơ cá nhân (web/src/pages/Profile.tsx) và màn
+                #/onboard — một trường thì một cách gọi tên. Ô này IN LÊN BÁO GIÁ gửi khách (dòng
+                chức danh dưới tên người gửi), nhưng trước 2026-09-17 `USER_SELECT` không trả
+                `title` về nên modal không dựng nổi ô: admin ghi được qua API mà không đọc lại được,
+                và người được mời qua email bỏ trống ô Chức danh ở #/onboard thì không ai sửa hộ
+                được nữa. */}
+            <label className="full"><span>Chức danh</span><input value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
           <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={user.displayName || user.username} />

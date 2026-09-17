@@ -67,13 +67,19 @@ router.get(
 );
 
 /**
- * POST /api/gdpr/me/delete — user requests account deletion (right-to-erasure).
- * In one transaction: revokes all refresh tokens and anonymizes the user's OWN
- * PII (username/email/phone/title/MFA), then soft-deletes + deactivates the row.
- * Quotes and customers owned by the user are RETAINED as business records with
- * their ownership link intact — they are not the deleting user's personal data
- * (customer rows belong to other data subjects). The audit log is also retained
- * for legal obligation.
+ * POST /api/gdpr/me/delete — người dùng tự yêu cầu xoá tài khoản (quyền-được-quên).
+ *
+ * Danh sách cột thật sự bị xoá nằm ở MỘT chỗ: `anonymizeUserOps` trong src/services/gdprService.ts,
+ * kèm cả phần "cố ý giữ lại". Ở đây CHỈ nói phạm vi, không chép lại danh sách — bản trước chép, rồi
+ * bản chép trôi khỏi mã: nó ghi "anonymizes the user's OWN PII (username/email/phone/title/MFA)",
+ * tức thiếu `displayName` (có xoá thật) và bỏ qua `senderName`/`projectCode`/`lastLoginIp` (lúc đó
+ * KHÔNG xoá). Người đọc chú thích để rà tuân thủ sẽ kết luận sai theo đúng hướng trấn an.
+ *
+ * Trong một transaction: thu hồi + gỡ dấu vết định vị của refresh token, vô danh hoá dữ liệu cá
+ * nhân của CHÍNH người đó ở bảng User và LoginAttempt, rồi soft-delete + khoá hàng. Ngay sau đó
+ * huỷ mọi phiên cookie của người đó. Báo giá và khách hàng thì GIỮ như bản ghi nghiệp vụ (hàng
+ * khách hàng là dữ liệu cá nhân của chủ thể khác), và nhật ký kiểm toán giữ theo nghĩa vụ pháp lý —
+ * lưu ý nhật ký đó chứa bản chụp ĐẦY ĐỦ những cột vừa bị xoá (xem chú thích ở gdprService.ts).
  */
 router.post(
   "/me/delete",

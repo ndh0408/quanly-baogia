@@ -87,6 +87,13 @@ const USER_SELECT = {
   phone: true,
   // Có GHI thì phải ĐỌC LẠI ĐƯỢC: modal "Sửa" pre-fill ô này từ GET /api/users, và nhật ký audit
   // (before/after của updateUser) chỉ lưu được vết của cột nào có mặt trong select này.
+  //
+  // `title` nằm ở đây từ 2026-09-17. Trước đó nó là cột GHI-ĐƯỢC-KHÔNG-ĐỌC-ĐƯỢC duy nhất:
+  // UserCreateSchema/UserUpdateSchema đều nhận `title` và `createUser`/`updateUser` đều ghi được,
+  // nhưng không đường đọc nào của quản trị trả nó về — nên modal "Sửa" không dựng nổi ô Chức danh,
+  // và một lượt `PUT /api/users/:id` đổi chức danh IN LÊN BÁO GIÁ gửi khách để lại `before`/`after`
+  // GIỐNG HỆT NHAU trong nhật ký: đổi mà không có một vết nào.
+  title: true,
   senderName: true,
   projectCode: true,
   active: true,

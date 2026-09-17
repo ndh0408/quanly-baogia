@@ -186,20 +186,20 @@ export const UserCreateSchema = z.object({
   canSign: zbool.optional(),
 });
 
-// Modal "Sửa tài khoản" NẠP SẴN `phone` và `senderName` từ GET /api/users (USER_SELECT có hai cột
-// này) — admin NHÌN THẤY "0909123456" / "Chị Lan" rồi mới chủ động xoá. Đây đúng là chỗ ĐƯỢC PHÉP
-// xoá, nên hai trường đó dùng `oXoaDuoc`.
+// Modal "Sửa tài khoản" NẠP SẴN `phone`, `title` và `senderName` từ GET /api/users (USER_SELECT có
+// cả ba cột) — admin NHÌN THẤY "0909123456" / "Account" / "Chị Lan" rồi mới chủ động xoá. Đây đúng
+// là chỗ ĐƯỢC PHÉP xoá, nên cả ba dùng `oXoaDuoc`.
 //
-// `title` thì KHÔNG: USER_SELECT không có cột này, nên API không trả về, modal không dựng được ô,
-// và không client nào biết giá trị đang có. Ô không nhìn thấy được thì "" không phải ý định của
-// người dùng → giữ `oGiuLai`. Muốn cho admin sửa chức danh thì phải thêm `title: true` vào
-// USER_SELECT TRƯỚC, rồi mới thêm ô và đổi sang `oXoaDuoc` — làm ngược thứ tự là mỗi lần bấm Lưu
-// xoá sạch chức danh của người ta, đúng cái bẫy đã xoá trắng hồ sơ 5/10 tài khoản, chỉ đổi trường.
+// `title` chuyển từ `oGiuLai` sang `oXoaDuoc` ngày 2026-09-17, và ĐÚNG THỨ TỰ mà chú thích cũ ở
+// chính chỗ này đã bắt buộc: thêm `title: true` vào USER_SELECT TRƯỚC (src/services/userService.ts),
+// rồi mới thêm ô Chức danh vào modal với giá trị nạp sẵn từ `user.title`, rồi mới đổi helper ở đây.
+// Làm ngược thứ tự — đổi helper khi ô chưa nạp sẵn, hoặc thêm ô mà không nạp sẵn — là mỗi lần bấm
+// Lưu xoá sạch chức danh của người ta, đúng cái bẫy đã xoá trắng hồ sơ 5/10 tài khoản.
 export const UserUpdateSchema = z.object({
   displayName: displayName.optional(),
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]).optional(),
   phone: phoneXoaDuoc,
-  title,
+  title: titleXoaDuoc,
   senderName: senderNameXoaDuoc,
   active: z.boolean().optional(),
   password: pwd.optional(),
