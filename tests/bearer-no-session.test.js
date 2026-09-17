@@ -44,7 +44,19 @@ describe.runIf(dbAvailable)("Bearer không sinh phiên cookie", () => {
    * SINH hàng phiên nào", và cái đó chỉ so được bằng TẬP `sid`: hàng bị dọn đi không liên quan.
    */
   const tapPhien = async () =>
-    new Set((await prisma.$queryRawUnsafe("SELECT sid FROM user_sessions")).map((r) => r.sid));
+    new Set(
+      (await prisma.$queryRawUnsafe(
+        // LỌC THEO ĐÚNG NGƯỜI DÙNG CỦA BÀI NÀY. Bản trước quét TOÀN BỘ bảng và đã đỏ thật một lần
+        // nữa với `sinh 1 hàng phiên: ['test-sid-f1-khac-6508']` — một sid do BÀI TEST KHÁC chèn,
+        // không phải do request Bearer ở đây. Phép so theo TẬP bắt đúng "có hàng mới", nhưng phạm
+        // vi toàn cục biến mọi lượt đăng nhập của bài khác thành một lỗi của bài này.
+        //
+        // `sess` là cột json; `->>` lấy `userId` ra dạng chuỗi. Đây là cách DUY NHẤT gắn một hàng
+        // phiên với người dùng — bảng không có cột userId.
+        `SELECT sid FROM user_sessions WHERE sess->>'userId' = $1`,
+        String(user.id),
+      )).map((r) => r.sid),
+    );
 
   /** Những sid CÓ trong `sau` mà KHÔNG có trong `truoc` — tức hàng phiên vừa được sinh ra. */
   const phienMoi = (truoc, sau) => [...sau].filter((x) => !truoc.has(x));

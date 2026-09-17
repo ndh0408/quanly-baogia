@@ -16,7 +16,8 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
   // ===== Gia Nguyễn — không ngày (bố cục Marico_Decor: CÓ cột Chi Tiết) =====
   // Cột: STT | Hạng Mục | Chi Tiết | ĐVT | Số Lượng | Đơn Giá | Thành Tiền | Notes
   // Dùng chính file Marico_Decor.xlsx — đã baked sẵn: header/tổng peach, tên xanh
-  // #0070C0, Chi Tiết nghiêng, khối From có nhãn "From: / Ms. / Add:" + logo GIA NGUYỄN.
+  // #0070C0, Chi Tiết nghiêng, khối From có nhãn "From: / Add:" + logo GIA NGUYỄN.
+  // (Nhãn "Ms." nhúng cứng ở B3/E3 nay bị xoá lúc xuất — danh xưng do người dùng tự gõ.)
   // Code chỉ: đổ dữ liệu, tô xanh hàng nhóm A/B, đổi số tiền tổng sang đen, in "Ghi chú".
   marico_decor: {
     sheetName: "Décor",
@@ -25,14 +26,27 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     cleanup: {
       extraCellsToClear: [
         "J16",   // ghi chú lạc ở cột xa (mẫu Marico) — không thuộc bảng báo giá
+        // ── XOÁ NHÃN "Ms." NHÚNG CỨNG TRONG FILE MẪU ────────────────────────
+        // B3 và E3 của Marico_Decor.xlsx chứa đúng chuỗi "Ms." — hai Ô NHÃN riêng, không phải ô
+        // dữ liệu. Tên người đi vào C3 (bên nhận) và F3 (bên gửi), nên hai ô này KHÔNG BAO GIỜ bị
+        // ghi đè và file xuất ra luôn mang "Ms." dù thực tế là ai.
+        //
+        // ĐÃ THẤY TRÊN FILE THẬT: người dùng gõ "Mr. Tài" vào ô Người liên hệ, file xuất ra ghi
+        //     Ms.   Mr. Tài
+        // Vừa sai giới tính, vừa lặp danh xưng. Bên gửi cũng vậy: "Ms. Lan Anh _ Account_…".
+        //
+        // Danh xưng nay do NGƯỜI DÙNG TỰ GÕ vào ô Người liên hệ / Người gửi — họ biết khách là ai,
+        // template thì không. Xoá nhãn chứ không đoán hộ.
+        "B3",   // nhãn "Ms." của khối To (tên khách ở C3)
+        "E3",   // nhãn "Ms." của khối From (người gửi ở F3)
       ],
       keepImagesAboveRow: 11,   // giữ logo GIA NGUYỄN (F2); bỏ ảnh khác dưới header (nếu có)
     },
     cells: {
-      toCompany:   "C2",        // nhãn "To:" (B2) + "Ms." (B3) đã có sẵn trong template
+      toCompany:   "C2",        // nhãn "To:" ở B2. (B3 từng là nhãn "Ms." — nay xoá, xem extraCellsToClear)
       toContact:   "C3",
       fromContactCell: "F3",
-      // 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951" (nhãn "Ms." có sẵn ở E3)
+      // 1 dòng như mẫu: "Hồng Tôn _ AccountTeam_0914291951". (E3 từng là nhãn "Ms." — nay xoá.)
       fromContactFormat: ({ contact, title, phone }: { contact: string | null | undefined; title: string | null | undefined; phone: string | null | undefined }) =>
         [[contact, title].filter(Boolean).join(" _ "), phone].filter(Boolean).join("_"),
       fromAddress: "F4",        // nhãn "Add:" đã có sẵn ở E4; nhãn "From:" ở E2 + logo F2
@@ -342,7 +356,11 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 };
 
 // ===== GN (không ngày) — bản BANNER =====
-// Y HỆT GN không ngày (cùng file GN_KhongNgay.xlsx, cùng cột/công thức/cách xuất), CHỈ khác
+// Y HỆT GN không ngày (cùng cột/công thức/cách xuất), CHỈ khác
+// ── FILE MẪU: `templates/Marico_Decor.xlsx`, kế thừa qua phép spread bên dưới. KHÔNG phải
+// GN_KhongNgay.xlsx như chú thích cũ ghi — `excel.ts:1498` đọc `cfg.filePath`, tức đường dẫn
+// trong config này, chứ KHÔNG đọc `QuoteTemplate.filePath` dưới CSDL. Nên nhãn "Ms." nhúng cứng
+// ở B3/E3 của Marico_Decor.xlsx dính CẢ gn_banner, và bản vá xoá nhãn cũng theo spread mà sang.
 // cách đánh STT: NHÓM CON đánh số 1,2,3… (reset theo từng nhóm chính), các MỤC bên dưới
 // nhóm con KHÔNG đánh số. Bật bằng cờ items.numberSubsections (excel.js + editor.js đọc cờ này).
 TEMPLATE_CONFIGS.gn_banner = {

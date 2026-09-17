@@ -71,6 +71,16 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
     it(`giữ NGUYÊN output: ${name}`, async () => {
       const h = await snapshot(quote);
       // Golden hash sinh từ excel.ts (lần đầu in ra để chốt). Đổi output = test ĐỎ.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-17 ─────────────────────────────────
+      // `templates/Marico_Decor.xlsx` có hai Ô NHÃN nhúng cứng chữ "Ms." (B3 khối To, E3 khối
+      // From). Tên người đi vào C3/F3 nên hai ô đó không bao giờ bị ghi đè — file khách nhận được
+      // luôn ghi "Ms." dù thực tế là ai ("Ms.  Mr. Tài"). Nay chúng bị xoá lúc xuất
+      // (`extraCellsToClear`, src/templateConfigs.ts); danh xưng do người dùng tự gõ.
+      //
+      // TRƯỚC KHI CẬP NHẬT HASH, đã đối chiếu nội dung ô của bản CŨ và bản MỚI: khác biệt đúng
+      // HAI dòng — `B3 "Ms."` và `E3 "Ms."` biến mất, 63 ô còn 61, không gì khác. Cập nhật một
+      // golden hash mà không đối chiếu là tự tay vô hiệu hoá chính chốt chặn này.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }
