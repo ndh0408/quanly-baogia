@@ -66,6 +66,35 @@ function anonymizeUserOps(id: number) {
  * mà chú thích bên dưới đã dùng để loại customerLogo. Đường admin xuất hộ (/users/:id/export) không
  * truyền session → giữ nguyên hành vi (admin có read:all).
  */
+/**
+ * ── TRẦN SỐ BẢN GHI CHO TỪNG NHÓM ─────────────────────────────────────────
+ * Bốn nhóm dưới đây vốn có `take` cứng và cắt HOÀN TOÀN IM LẶNG: người nhận tải về một tệp tự
+ * khai là bản xuất đầy đủ, trong khi bản ghi thứ 1.001 (hoặc 5.001) đã bị bỏ mà không dòng nào
+ * nói ra. Chính tệp này đã đặt ra luật ngược lại — "Cắt mà im lặng là tệ hơn không cắt: người
+ * nhận tưởng mình đã có đủ dữ liệu" — nhưng luật đó mới chỉ áp cho phần DÒNG HẠNG MỤC.
+ *
+ * Tệ hơn, `huongDan` của khối `gioiHan` còn khẳng định thẳng "Danh sách báo giá vẫn ĐẦY ĐỦ".
+ * Với người dùng có hơn 1.000 báo giá, câu đó SAI — và nó sai theo hướng trấn an.
+ *
+ * Với một bản xuất GDPR thì đây không phải chuyện thẩm mỹ: bản xuất thiếu mà không khai là thiếu
+ * thì người nhận không có cách nào biết để đi đòi phần còn lại.
+ */
+export const TRAN_BAN_GHI = { baoGia: 1_000, khachHang: 5_000, nhatKy: 5_000, thongBao: 5_000 } as const;
+
+/** Một nhóm bị chạm trần — mô tả để đưa vào `gioiHan.danhSachBiCat`. */
+type NhomBiCat = { nhom: string; tran: number; huongDan: string };
+
+/**
+ * Lấy `tran + 1` bản ghi rồi cắt lại còn `tran`. Dư một bản ghi = ĐÃ chạm trần.
+ *
+ * Dùng cách này thay vì một câu `count()` riêng vì `count` trên bảng lớn tốn đúng một lượt quét
+ * nữa, mà ta chỉ cần biết "có nhiều hơn trần không" chứ không cần biết nhiều hơn bao nhiêu.
+ */
+export function catVaBao<T>(rows: T[], tran: number, nhom: string, huongDan: string): { rows: T[]; biCat: NhomBiCat | null } {
+  if (rows.length <= tran) return { rows, biCat: null };
+  return { rows: rows.slice(0, tran), biCat: { nhom, tran, huongDan } };
+}
+
 export async function exportUser(userId: number, session?: Parameters<typeof quoteScopeWhere>[0]) {
   // null = KHÔNG có quyền đọc nhóm đó → nhóm đó rỗng trong bản xuất (fail-closed như mọi đường đọc).
   const phamViBaoGia = session ? quoteScopeWhere(session) : {};
@@ -98,12 +127,12 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     // vẫn đi qua dây rồi mới bị bỏ (2,4 MB thay vì 0,36 MB cho cùng bộ dữ liệu). Nên dùng lại
     // `bangNoiBoTheoSheet` của quoteService — câu SQL DUY NHẤT trong repo cắt `paidProof` — thay vì
     // viết bản thứ hai. Hai bản chép của quy tắc cắt ấy chắc chắn sẽ trôi khỏi nhau.
-    phamViBaoGia === null ? Promise.resolve({ danhSach: [] as any[], gioiHan: null }) : napBaoGiaCoTran(userId, phamViBaoGia),
-    phamViKhach === null ? Promise.resolve([] as any[]) : prisma.customer.findMany({ where: { AND: [{ ownerId: userId }, phamViKhach] }, take: 5000 }),
+    phamViBaoGia === null ? Promise.resolve({ danhSach: [] as any[], gioiHan: null, biCat: null as NhomBiCat | null }) : napBaoGiaCoTran(userId, phamViBaoGia),
+    phamViKhach === null ? Promise.resolve([] as any[]) : prisma.customer.findMany({ where: { AND: [{ ownerId: userId }, phamViKhach] }, take: TRAN_BAN_GHI.khachHang + 1 }),
     prisma.auditEvent.findMany({
       where: { actorId: userId },
       orderBy: { createdAt: "desc" },
-      take: 5000,
+      take: TRAN_BAN_GHI.nhatKy + 1,
     }),
     prisma.refreshToken.findMany({
       where: { userId },
@@ -112,9 +141,26 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      take: 5000,
+      take: TRAN_BAN_GHI.thongBao + 1,
     }),
   ]);
+
+  // ── GOM MỌI CHỖ BỊ CẮT LẠI MỘT KHỐI ──────────────────────────────────────
+  // Ba nhóm dưới lấy dư một bản ghi ở trên; cắt lại đúng trần TẠI ĐÂY và ghi nhận nhóm nào chạm.
+  const cKhach = catVaBao(customers, TRAN_BAN_GHI.khachHang, "customers",
+    `Chỉ ${TRAN_BAN_GHI.khachHang.toLocaleString("vi-VN")} khách hàng có trong bản xuất này. Lấy phần còn lại qua GET /api/customers?page=…`);
+  const cNhatKy = catVaBao(auditEvents, TRAN_BAN_GHI.nhatKy, "auditEvents",
+    `Chỉ ${TRAN_BAN_GHI.nhatKy.toLocaleString("vi-VN")} bản ghi nhật ký MỚI NHẤT có trong bản xuất này.`);
+  const cThongBao = catVaBao(notifications, TRAN_BAN_GHI.thongBao, "notifications",
+    `Chỉ ${TRAN_BAN_GHI.thongBao.toLocaleString("vi-VN")} thông báo MỚI NHẤT có trong bản xuất này.`);
+
+  const danhSachBiCat = [quotes.biCat, cKhach.biCat, cNhatKy.biCat, cThongBao.biCat].filter(Boolean);
+  // `gioiHan` phải xuất hiện khi CÓ BẤT KỲ kiểu cắt nào — trước đây nó chỉ xuất hiện cho phần dòng
+  // hạng mục, nên bốn nhóm bị cắt theo SỐ BẢN GHI đi qua hoàn toàn im lặng.
+  const gioiHan =
+    quotes.gioiHan || danhSachBiCat.length
+      ? { ...(quotes.gioiHan ?? {}), ...(danhSachBiCat.length ? { danhSachBiCat } : {}) }
+      : null;
 
   return {
     exportedAt: new Date(),
@@ -123,12 +169,12 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     // `gioiHan` chỉ xuất hiện khi bản xuất BỊ CẮT. Có mặt = bản xuất này KHÔNG đầy đủ, và khối đó
     // nói rõ cắt ở đâu và lấy nốt bằng cách nào. Cắt mà im lặng là tệ hơn không cắt: người nhận
     // tưởng mình đã có đủ dữ liệu.
-    ...(quotes.gioiHan ? { gioiHan: quotes.gioiHan } : {}),
+    ...(gioiHan ? { gioiHan } : {}),
     quotes: quotes.danhSach,
-    customers,
-    auditEvents,
+    customers: cKhach.rows,
+    auditEvents: cNhatKy.rows,
     refreshTokens,
-    notifications,
+    notifications: cThongBao.rows,
   };
 }
 
@@ -162,9 +208,18 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
     where: { AND: [{ createdById: userId }, phamViBaoGia] },
     select: { id: true },
     orderBy: { id: "asc" },
-    take: 1000,
+    take: TRAN_BAN_GHI.baoGia + 1,
   })).map((q) => q.id);
-  if (!ids.length) return { danhSach: [] as any[], gioiHan: null };
+  // Lấy dư MỘT id để biết có chạm trần không, rồi cắt lại. Trước bản vá này chỗ đó là `take: 1000`
+  // trần trụi: người có 1.200 báo giá nhận về 1.000 và KHÔNG có dòng nào nói 200 cái kia đi đâu.
+  const catDs = catVaBao(
+    ids,
+    TRAN_BAN_GHI.baoGia,
+    "quotes",
+    `Chỉ ${TRAN_BAN_GHI.baoGia.toLocaleString("vi-VN")} báo giá CŨ NHẤT (theo id tăng dần) có trong bản xuất này. Lấy phần còn lại qua GET /api/quotes?page=…`,
+  );
+  const ids2 = catDs.rows;
+  if (!ids2.length) return { danhSach: [] as any[], gioiHan: null, biCat: catDs.biCat };
 
   // ── ĐẾM TRƯỚC, RỒI MỚI QUYẾT ĐỊNH NẠP GÌ ─────────────────────────────────
   // Bản đầu của hàm này chỉ xét ngân sách GIỮA CÁC LÔ, và bài kiểm bắt được ngay: 6 báo giá nằm
@@ -178,7 +233,7 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
     SELECT s."quoteId" AS "quoteId", count(i.id) AS "soDong"
       FROM "QuoteSheet" s
       LEFT JOIN "QuoteItem" i ON i."sheetId" = s.id
-     WHERE s."quoteId" = ANY(${ids})
+     WHERE s."quoteId" = ANY(${ids2})
      GROUP BY s."quoteId"`;
   const soDongCua = new Map<number, number>();
   for (const r of dem) soDongCua.set(Number(r.quoteId), Number(r.soDong));
@@ -186,7 +241,7 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
   const dayDu = new Set<number>();
   const thieuChiTiet: number[] = [];
   let tongDong = 0;
-  for (const id of ids) {
+  for (const id of ids2) {
     const n = soDongCua.get(id) ?? 0;
     // `tongDong + n <= TRAN` chứ không phải `tongDong < TRAN`: vế sau cho một báo giá KHỔNG LỒ lọt
     // qua chỉ vì nó tình cờ là báo giá đầu tiên.
@@ -195,8 +250,8 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
   }
 
   const danhSach: any[] = [];
-  for (let i = 0; i < ids.length; i += MOI_LO) {
-    const lo = ids.slice(i, i + MOI_LO);
+  for (let i = 0; i < ids2.length; i += MOI_LO) {
+    const lo = ids2.slice(i, i + MOI_LO);
     const loDu = lo.filter((id) => dayDu.has(id));
     const loThieu = lo.filter((id) => !dayDu.has(id));
 
@@ -246,11 +301,14 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
         soDongDaXuat: tongDong,
         soBaoGiaThieuChiTiet: thieuChiTiet.length,
         baoGiaThieuChiTiet: thieuChiTiet,
-        huongDan: "Danh sách báo giá vẫn ĐẦY ĐỦ; chỉ phần dòng hạng mục của các báo giá trên bị bỏ. Lấy nốt từng báo giá tại GET /api/quotes/:id.",
+        // Câu này TRƯỚC ĐÂY mở đầu bằng "Danh sách báo giá vẫn ĐẦY ĐỦ" — một lời trấn an SAI với
+        // người có hơn 1.000 báo giá, vì chính danh sách đó cũng bị cắt. Nay nói đúng phạm vi của
+        // nó, còn việc danh sách có bị cắt hay không thì `danhSachBiCat` khai riêng.
+        huongDan: "Với các báo giá liệt kê ở trên, phần dòng hạng mục bị bỏ — lấy nốt từng báo giá tại GET /api/quotes/:id. Xem thêm `danhSachBiCat` (nếu có) để biết bản xuất còn thiếu gì nữa.",
       }
     : null;
 
-  return { danhSach, gioiHan };
+  return { danhSach, gioiHan, biCat: catDs.biCat };
 }
 
 /**
