@@ -161,13 +161,25 @@ const prismaCli = (args, db) =>
 describe.runIf(shadowOk)("CỔNG THẬT: prisma migrate diff giữa CSDL đã deploy và schema.prisma", () => {
   let ketQua;
 
+  // ── TRẦN HOOK 180s, KHÔNG PHẢI 30s MẶC ĐỊNH ──────────────────────────────
+  // Hook này dựng MỘT CSDL BÓNG TỪ ĐẦU: `prisma migrate deploy` chạy trọn bộ migration (59 bản
+  // tính tới 2026-09-17) rồi `migrate diff` một lượt nữa. Đó là hai tiến trình prisma CLI đầy đủ,
+  // và chi phí TĂNG THEO số migration — tức nó bò lên mỗi lần ai thêm một bản.
+  //
+  // ĐÃ ĐỎ THẬT: một lượt `verify-local.sh` báo "Hook timed out in 30000ms" ở đây, tệp mất 33,5s.
+  // Không bài nào trong tệp đỏ — chỉ hook không kịp. Migration thứ 59 (convertedTotal) là bản đẩy
+  // nó qua mốc.
+  //
+  // Đặt 180s chứ không 60s: `prismaCli` đã tự có trần 120s cho MỖI lời gọi, nên trần hook phải
+  // LỚN HƠN tổng hai lời gọi đó, không thì trần trong cùng không bao giờ được dùng tới và ta mất
+  // luôn thông điệp lỗi cụ thể mà nó in ra.
   beforeAll(() => {
     const deploy = prismaCli(["migrate", "deploy"], SHADOW_DB);
     expect(deploy.status, `migrate deploy thất bại:\n${deploy.stdout}\n${deploy.stderr}`).toBe(0);
     // --exit-code: 0 = không trôi, 2 = có trôi. Ta CHỜ ĐỢI 2 (còn bộ miễn trừ), nên không dùng
     // exit code làm khẳng định chính — mà so TỪNG object bị báo với allowlist.
     ketQua = prismaCli(["migrate", "diff", "--from-config-datasource", "--to-schema", "prisma/schema.prisma", "--exit-code"], SHADOW_DB);
-  });
+  }, 180_000);
 
   afterAll(async () => {
     const c = new Client({ connectionString: urlCho("postgres") });
