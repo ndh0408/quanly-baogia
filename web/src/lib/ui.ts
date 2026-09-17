@@ -296,8 +296,8 @@ export function modalChotBaoGia(
     const back = document.createElement("div");
     back.className = "modal-backdrop";
     back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="Chốt báo giá">
-      <div class="modal-head"><h3>Chốt cả báo giá ${esc(soBaoGia)}</h3></div>
-      <div class="modal-body" data-than></div>
+      <div class="modal-head"><h3>Chốt cả báo giá ${esc(soBaoGia)} — ${trangs.length} trang</h3></div>
+      <div class="modal-body" data-than style="max-height:60vh;overflow:auto"></div>
       <div class="modal-foot">
         <button class="btn" data-no>Hủy</button>
         <button class="btn btn-success" data-yes></button>
@@ -306,47 +306,79 @@ export function modalChotBaoGia(
     const than = back.querySelector("[data-than]") as HTMLElement;
     const nutChot = back.querySelector("[data-yes]") as HTMLButtonElement;
 
-    const ve = () => {
-      const nhom = (st: string | null) => trangs.filter((t) => (nhap.get(t.id) ?? null) === st);
-      const duyet = nhom("approved"), chua = nhom(null), tuChoi = nhom("rejected");
-      const net = (ds: TrangChot[]) => ds.reduce((a, t) => a + t.net, 0);
-      // VAT tính LẠI trên phần giữ lại — đúng thứ tự Cộng → Discount → VAT của quote-math.
-      const giuLai = net(duyet) + net(chua);
-      const ghiNhan = giuLai + (giuLai * (Number(vatPct) || 0)) / 100;
-      const bo = net(tuChoi);
+    const NHAN: Record<string, string> = {
+      approved: "✓ đã duyệt",
+      rejected: "✗ không duyệt",
+      "": "○ chưa có ý kiến",
+    };
 
-      const dong = (t: TrangChot, nut: string) =>
-        `<li style="display:flex;align-items:center;gap:8px;padding:2px 0">
-           <span style="flex:1">${esc(t.ten)}</span>
-           <span class="muted" style="font-variant-numeric:tabular-nums">${esc(tienVN(t.net))}</span>
-           ${nut}</li>`;
+    const ve = () => {
+      // LIỆT KÊ MỌI TRANG theo đúng thứ tự tab, mỗi dòng TỰ NÓI trạng thái của nó. Gom theo nhóm
+      // thì trang nào đang ở nhóm nào phải suy ra từ vị trí — mà đây là màn hình quyết định tiền,
+      // không nên bắt ai suy luận.
+      const chuaYKien = trangs.filter((t) => !(nhap.get(t.id) ?? null));
+      const giuLai = trangs
+        .filter((t) => (nhap.get(t.id) ?? null) !== "rejected")
+        .reduce((a, t) => a + t.net, 0);
+      const bo = trangs
+        .filter((t) => (nhap.get(t.id) ?? null) === "rejected")
+        .reduce((a, t) => a + t.net, 0);
+      // VAT tính LẠI trên phần giữ lại — đúng thứ tự Cộng → Discount → VAT của quote-math.
+      const ghiNhan = giuLai + (giuLai * (Number(vatPct) || 0)) / 100;
+
+      const dong = (t: TrangChot) => {
+        const st = (nhap.get(t.id) ?? null) || "";
+        const nut =
+          st === "approved"
+            ? `<button type="button" class="btn btn-sm" data-dat="${t.id}|rejected">✗ Không duyệt</button>`
+            : st === "rejected"
+              ? `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Đồng ý lại</button>`
+              : `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Duyệt</button>
+                 <button type="button" class="btn btn-sm" data-dat="${t.id}|rejected">✗ Không duyệt</button>`;
+        const mau = st === "approved" ? "" : st === "rejected" ? "color:var(--danger,#c00)" : "font-weight:600";
+        return `<li style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--line,#eee)">
+            <span style="flex:1;${st === "rejected" ? "text-decoration:line-through;opacity:.65" : ""}">${esc(t.ten)}</span>
+            <span class="muted" style="font-variant-numeric:tabular-nums;min-width:110px;text-align:right">${esc(tienVN(t.net))}</span>
+            <span style="min-width:126px;${mau}">${NHAN[st]}</span>
+            <span style="display:flex;gap:4px">${nut}</span>
+          </li>`;
+      };
 
       than.innerHTML = `
-        ${duyet.length ? `<p style="margin:0 0 4px"><b>✓ Khách đã duyệt</b> — ${duyet.length} trang</p>
-          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${duyet.map((t) => dong(t, "")).join("")}</ul>` : ""}
-
-        ${chua.length ? `<p style="margin:0 0 4px"><b>○ Chưa có ý kiến</b> — ${chua.length} trang
-            <button type="button" class="btn btn-sm" data-duyet-het style="margin-left:6px">✓ Duyệt hết</button></p>
-          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${chua
-            .map((t) => dong(t, `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Duyệt</button>`))
-            .join("")}</ul>
-          <p class="muted" style="margin:-6px 0 10px;font-size:12.5px">Trang chưa có ý kiến VẪN được tính — khách chưa từ chối nó.</p>` : ""}
-
-        ${tuChoi.length ? `<p style="margin:0 0 4px"><b style="color:var(--danger,#c00)">✗ Khách KHÔNG duyệt</b> — ${tuChoi.length} trang · ${esc(tienVN(bo))} sẽ KHÔNG được tính</p>
-          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${tuChoi
-            .map((t) => dong(t, `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Đồng ý lại</button>`))
-            .join("")}</ul>` : ""}
-
+        <ul style="margin:0 0 10px;padding:0;list-style:none">${trangs.map(dong).join("")}</ul>
+        ${chuaYKien.length
+          ? `<div style="margin:0 0 10px;padding:8px;border:1px solid var(--warn,#e0a800);border-radius:6px">
+               <b>Còn ${chuaYKien.length} trang chưa có ý kiến khách.</b>
+               Phải chọn <i>duyệt</i> hay <i>không duyệt</i> cho từng trang thì mới chốt được —
+               chốt khi còn trang chưa quyết là ghi nhận một con số chưa ai xác nhận.
+               <div style="margin-top:6px">
+                 <button type="button" class="btn btn-sm" data-duyet-het>✓ Duyệt hết ${chuaYKien.length} trang còn lại</button>
+                 <button type="button" class="btn btn-sm" data-tuchoi-het>✗ Không duyệt hết ${chuaYKien.length} trang còn lại</button>
+               </div>
+             </div>`
+          : ""}
         <hr style="margin:10px 0">
         <p style="margin:0"><b>Doanh thu ghi nhận: ${esc(tienVN(ghiNhan))}</b>
           <span class="muted" style="font-size:12.5px"> (đã gồm VAT ${esc(String(vatPct || 0))}%)</span></p>
-        ${bo > 0 ? `<p class="muted" style="margin:2px 0 0;font-size:12.5px">Đã trừ ${esc(tienVN(bo))} của ${tuChoi.length} trang khách không duyệt.</p>` : ""}
+        ${bo > 0 ? `<p class="muted" style="margin:2px 0 0;font-size:12.5px">Đã trừ ${esc(tienVN(bo))} của các trang khách không duyệt.</p>` : ""}
         <p class="muted" style="margin:8px 0 0;font-size:12.5px">Thao tác này áp cho <b>CẢ báo giá</b> và <b>KHÔNG đảo lại được</b>.</p>`;
 
-      nutChot.textContent = `✓ Chốt — ghi nhận ${tienVN(ghiNhan)}`;
+      // CHẶN CHỐT khi còn trang chưa quyết — không chỉ nhắc. Một lời nhắc bỏ qua được thì đúng
+      // bằng không có, và hậu quả ở đây là một con số doanh thu chưa ai xác nhận.
+      nutChot.disabled = chuaYKien.length > 0;
+      nutChot.textContent = chuaYKien.length
+        ? `Còn ${chuaYKien.length} trang chưa quyết`
+        : `✓ Chốt — ghi nhận ${tienVN(ghiNhan)}`;
+      nutChot.title = chuaYKien.length
+        ? `Chọn duyệt hoặc không duyệt cho ${chuaYKien.length} trang còn lại rồi mới chốt được.`
+        : "";
 
       than.querySelector("[data-duyet-het]")?.addEventListener("click", () => {
-        for (const t of chua) nhap.set(t.id, "approved");
+        for (const t of chuaYKien) nhap.set(t.id, "approved");
+        ve();
+      });
+      than.querySelector("[data-tuchoi-het]")?.addEventListener("click", () => {
+        for (const t of chuaYKien) nhap.set(t.id, "rejected");
         ve();
       });
       for (const b of than.querySelectorAll<HTMLElement>("[data-dat]")) {
@@ -362,6 +394,7 @@ export function modalChotBaoGia(
     const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
     const huy = () => { cleanup(); resolve(null); };
     const chot = () => {
+      if (nutChot.disabled) return;
       // CHỈ trả về trang THẬT SỰ đổi — gửi lại trạng thái cũ là đẻ ra bản ghi audit rỗng.
       const doi = trangs
         .filter((t) => (nhap.get(t.id) ?? null) !== t.custStatus)
