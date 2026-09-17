@@ -293,6 +293,53 @@ function GridTableInner(props: GridTableProps) {
     focusPend.current = { i, f };
   };
 
+  const rk = M.computeRowKinds(items);
+
+  /* ── TỔNG THEO NHÓM, TÍNH TƯƠI MỖI LẦN HỎI ────────────────────────────────────────────────
+     Nhóm con = Σ mục con. Bản BANNER (numberSubs): nhóm CHA = Σ TẤT CẢ mục con (cuộn qua các nhóm
+     con) → "đơn giá hàng cha = tổng hàng con". Mẫu khác giữ cũ (nhóm con tổng riêng).
+
+     Vì sao là HÀM chứ không phải hằng dựng một lần lúc render: `recomputeAll()` chạy tối đa 8 lượt
+     và MỖI lượt sửa `items` tại chỗ. Dùng ảnh chụp lúc render thì lượt 2 trở đi đọc phải tổng CŨ —
+     công thức trỏ vào nhóm sẽ trễ đúng một lượt, và trong nhiều ca thì không bao giờ đuổi kịp.
+
+     `chuCua` / `chuConCua` = hàng nhóm (cha / con) đang chứa hàng i, dùng để bắt VÒNG LẶP: một mục
+     nằm TRONG nhóm X mà trỏ vào tổng của chính nhóm X thì tổng ấy phụ thuộc ngược lại vào nó. */
+  type TongNhom = { tong: Record<number, number>; chuCua: number[]; chuConCua: number[] };
+  const tinhTongNhom = (): TongNhom => {
+    const tong: Record<number, number> = {};
+    const chuCua: number[] = new Array(items.length).fill(-1);
+    const chuConCua: number[] = new Array(items.length).fill(-1);
+    let curSection = -1, curSub = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (rk[i] === "section") {
+        if (items[i].kind === "subsection") { curSub = i; tong[i] = 0; }
+        else { curSection = i; curSub = -1; tong[i] = 0; }
+        chuCua[i] = items[i].kind === "subsection" ? curSection : -1;
+      } else if (rk[i] === "head" || rk[i] === "sub") {
+        chuCua[i] = curSection; chuConCua[i] = curSub;
+        const amt = M.lineAmount(items[i], usesDays);
+        const parent = curSub >= 0 ? curSub : curSection;
+        if (parent >= 0) tong[parent] += amt;
+        if (numberSubs && curSub >= 0 && curSection >= 0) tong[curSection] += amt;   // banner: dồn lên nhóm cha
+      } else {
+        chuCua[i] = curSection; chuConCua[i] = curSub;
+      }
+    }
+    return { tong, chuCua, chuConCua };
+  };
+
+  /** Bật khi lượt eval vừa rồi gặp tham chiếu vòng. Đọc & dọn ngay sau mỗi `evalFormula`. */
+  const fxVongRef = useRef(false);
+
+  /** Ghi/xoá cờ ô đỏ theo kết quả cờ vòng lặp của lượt eval vừa xong. Dùng CHUNG `_fxWarn` với
+   *  lỗi "dán làm lệch tham chiếu" — cùng một ý nghĩa với người dùng: công thức này cần sửa tay. */
+  const ghiCoVong = (i: number, f: string) => {
+    const it = items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> };
+    if (fxVongRef.current) { (it._fxWarn || (it._fxWarn = {}))[f] = true; return; }
+    if (it._fxWarn?.[f]) { delete it._fxWarn[f]; if (!Object.keys(it._fxWarn).length) delete it._fxWarn; }
+  };
+
   // ── A1 addressing + công thức ───────────────────────────────────────────────
   const ADDR: { f: string; ro?: boolean; L: string }[] = [
     { f: "_stt", ro: true, L: "" }, { f: "name", L: "" },
@@ -312,18 +359,46 @@ function GridTableInner(props: GridTableProps) {
   const addrOf = (row: number, field: string) => { const L = letterOf(field); return L ? L + (row + 1) : ""; };
   // Nhận cả dạng khoá tuyệt đối "$E$3" — $ không đổi ô được trỏ tới, nó chỉ có nghĩa lúc copy/dán.
   const parseAddr = (a: string) => { const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(a.trim()); if (!m) return null; const L = m[1].toUpperCase(); const col = colByL[L]; if (!col) return null; const row = parseInt(m[2], 10) - 1; if (row < 0 || row >= items.length) return null; return { row, f: col.f, L }; };
-  const cellNum = (a: string): number => { const p = parseAddr(a); if (!p) return 0; const it = items[p.row] as Record<string, unknown>; if (!it) return 0; if (p.f === "_amount") return (items[p.row].kind === "section" || items[p.row].kind === "subsection" || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0;
+  /* ── TRỎ VÀO HÀNG NHÓM PHẢI RA ĐÚNG SỐ ĐANG HIỆN ──────────────────────────────────────────
+     Hàng nhóm KHÔNG để trống hai cột tiền: cột ĐƠN GIÁ hiện tổng của nhóm, cột THÀNH TIỀN hiện
+     tổng ấy nhân hệ số nhóm (khi bật "nhân tổng con"). Nhưng bản cũ trả thẳng 0 cho mọi hàng nhóm,
+     nên `=G3*20%` trỏ vào một nhóm ra 0 — IM LẶNG, không dấu hiệu gì.
+
+     Đã thấy trên production: báo giá #41, "Phí vận chuyển lắp đặt, tháo dở" giữ công thức
+     `{"unitPrice": "=G3*20%"}` và đơn giá nằm im ở 0. Người dùng báo đúng triệu chứng đó.
+
+     `info` vẫn là 0: hàng ghi chú không hiện số nào cả, nên 0 mới là số trung thực.
+
+     VÒNG LẶP: mục nằm TRONG nhóm X mà trỏ vào tổng của X thì tổng ấy lại phụ thuộc vào chính nó
+     (Excel báo "circular reference"). Ở đây không bịa số: bật cờ để ô tô ĐỎ, trả 0 cho khỏi dao
+     động qua 8 lượt của `recomputeAll`. Muốn cộng phần còn lại thì dùng dải, vd `=SUM(G4:G11)*20%`. */
+  const cellNum = (a: string, hangGoi = -1, tn?: TongNhom): number => { const p = parseAddr(a); if (!p) return 0; const it = items[p.row] as Record<string, unknown>; if (!it) return 0;
+    const laNhom = items[p.row].kind === "section" || items[p.row].kind === "subsection";
+    if (laNhom && (p.f === "_amount" || p.f === "unitPrice")) {
+      const t = tn ?? tinhTongNhom();
+      if (hangGoi >= 0 && (t.chuCua[hangGoi] === p.row || t.chuConCua[hangGoi] === p.row)) { fxVongRef.current = true; return 0; }
+      const tong = t.tong[p.row] || 0;
+      return p.f === "unitPrice" ? tong : (groupSubtotal ? tong * M.groupMult(items[p.row]) : 0);
+    }
+    if (p.f === "_amount") return (laNhom || items[p.row].kind === "info") ? 0 : M.lineAmount(items[p.row], usesDays); if (p.f === "_stt") return 0;
     // SỐ LƯỢNG: trả số ĐÃ LÀM TRÒN đúng như ô đang hiển thị (qtyRound 1 số lẻ, hoặc 4 số lẻ với
     // dòng quantityExact nạp từ Excel). Trước đây trả số THÔ nên =E3*G3 nhân 7,4213 trong khi ô
     // hiện 7,4 và Thành Tiền của hàng (lineAmount → qtyForAmount) nhân 7,4 → hai con số lệch nhau.
     if (p.f === "quantity") return M.qtyForAmount(items[p.row]);
     if (NUMERIC.has(p.f)) return Number(it[p.f]) || 0; return M.parseVN((it[p.f] as string) || ""); };
-  const refs: FormulaRefs = { cell: cellNum, range: (a, b) => { const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null; const ca = idxOfL(pa.L), cb = idxOfL(pb.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(pa.row, pb.row), r1 = Math.max(pa.row, pb.row); const out: number[] = []; for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(cellNum(ADDR[c].L + (r + 1))); return out; } };
+  /** Bộ giải tham chiếu GẮN với hàng đang hỏi — cần `hangGoi` để bắt vòng lặp, và cho truyền sẵn
+   *  `tn` để một lượt `recomputeAll` không phải dựng lại bảng tổng cho từng ô. */
+  const refsCho = (hangGoi: number, tn?: TongNhom): FormulaRefs => {
+    const t = tn ?? tinhTongNhom();
+    const oSo = (a: string) => cellNum(a, hangGoi, t);
+    return { cell: oSo, range: (a, b) => { const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null; const ca = idxOfL(pa.L), cb = idxOfL(pb.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(pa.row, pb.row), r1 = Math.max(pa.row, pb.row); const out: number[] = []; for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(oSo(ADDR[c].L + (r + 1))); return out; } };
+  };
   const recomputeAll = () => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
     for (let pass = 0; pass < 8; pass++) {
       let ch = false;
-      for (const it of items) { if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { const v = evalFormula(it.formulas[f], refs); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      const tn = tinhTongNhom();
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
@@ -338,7 +413,9 @@ function GridTableInner(props: GridTableProps) {
     if (raw.trim().startsWith("=")) {
       if (!it.formulas) it.formulas = {};
       (it.formulas as Record<string, string>)[f] = raw.trim();
-      const v = evalFormula(raw.trim(), refs);
+      fxVongRef.current = false;
+      const v = evalFormula(raw.trim(), refsCho(i));
+      ghiCoVong(i, f);
       it[f] = NUMERIC.has(f) ? (v ?? 0) : (v != null ? M.fmtNumCell(v) : raw.trim());
     } else {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }
@@ -526,7 +603,11 @@ function GridTableInner(props: GridTableProps) {
     const row = parseInt(tr.getAttribute("data-row") || "0", 10);
     const inp = td.querySelector("[data-f]"); let field = inp?.getAttribute("data-f") || null;
     if (field === "label") field = "_stt";   // nhãn nhóm A/B/1/2 ngồi trong ô STT → coi là cột STT
-    if (!field) { if (td.classList.contains("col-amount")) field = "_amount"; else if (td.classList.contains("col-stt")) field = "_stt"; else return null; }
+    // Hàng NHÓM không có ô nhập ở hai cột tiền — chúng chỉ là chữ trong <td>. Thiếu `col-price` ở
+    // đây thì bấm vào ô Đơn Giá của một nhóm KHÔNG chèn được tham chiếu (người dùng báo: "mấy cột
+    // đơn giá hay thành tiền nhóm con nhóm cha chưa cho click"). Cả ba lớp đều là cột có số/nhãn
+    // đọc được, nên đều trỏ tới được.
+    if (!field) { if (td.classList.contains("col-amount")) field = "_amount"; else if (td.classList.contains("col-price")) field = "unitPrice"; else if (td.classList.contains("col-stt")) field = "_stt"; else return null; }
     const L = letterOf(field); if (!L) return null;
     return { row, field, L };
   };
@@ -1367,7 +1448,9 @@ function GridTableInner(props: GridTableProps) {
       // Đang GÕ công thức: LƯU LIVE vào model + eval ngay (như SPA), KHÔNG xóa formula khi đang gõ.
       if (!it.formulas) it.formulas = {};
       (it.formulas as Record<string, string>)[f] = raw.trim();
-      const live = evalFormula(raw.trim(), refs);
+      fxVongRef.current = false;
+      const live = evalFormula(raw.trim(), refsCho(i));
+      ghiCoVong(i, f);
       if (live !== null) it[f] = NUMERIC.has(f) ? live : M.fmtNumCell(live);
       fxAutocomplete(el); highlightActiveFormulaRefs(raw); syncFxBar();
       recomputeAll(); onChange();   // re-eval ô tham chiếu chéo → lưu/hiển thị đúng
@@ -1532,23 +1615,7 @@ function GridTableInner(props: GridTableProps) {
   const tableMinW = COLS.reduce((a, c) => a + c.min, 0);
 
   // ── derived ───────────────────────────────────────────────────────────────────
-  const rk = M.computeRowKinds(items);
-  // Tổng theo nhóm. Nhóm con = Σ mục con. Bản BANNER (numberSubs): nhóm CHA = Σ TẤT CẢ mục con (cuộn
-  // qua các nhóm con) → "đơn giá hàng cha = tổng hàng con". Mẫu khác giữ cũ (nhóm con tổng riêng).
-  const sectionSum: Record<number, number> = {};
-  { let curSection = -1, curSub = -1;
-    for (let i = 0; i < items.length; i++) {
-      if (rk[i] === "section") {
-        if (items[i].kind === "subsection") { curSub = i; sectionSum[i] = 0; }
-        else { curSection = i; curSub = -1; sectionSum[i] = 0; }
-      } else if (rk[i] === "head" || rk[i] === "sub") {
-        const amt = M.lineAmount(items[i], usesDays);
-        const parent = curSub >= 0 ? curSub : curSection;
-        if (parent >= 0) sectionSum[parent] += amt;
-        if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
-      }
-    }
-  }
+  const sectionSum = tinhTongNhom().tong;
   const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
   // Chuỗi STT của từng hàng (A/B/C cho nhóm, 1/2/3 cho nhóm con khi mẫu đánh số, số thứ tự cho hàng

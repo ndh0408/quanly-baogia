@@ -977,7 +977,7 @@ nay chỉ còn đúng một nửa:
 
 1. **`addImages` — chỗ pushUndo DUY NHẤT trong 19 chỗ không có cổng**
    (`web/src/components/GridTable.tsx:1653`). Lý do đo được, không phải phỏng đoán:
-   `fileToImg` (`web/src/components/GridTable.tsx:1616`) chờ `im.onload` của `new Image()`
+   `fileToImg` (`web/src/components/GridTable.tsx`, hàm `fileToImg`) chờ `im.onload` của `new Image()`
    với `src` là data-URL rồi vẽ vào canvas. jsdom KHÔNG giải mã ảnh nên `onload` không bao
    giờ bắn và promise treo vĩnh viễn. Giả lập được thì cũng chỉ là giả lập chính hàm mình
    định kiểm, nên không làm. Chỗ song sinh của nó, `removeImage`
@@ -1018,7 +1018,7 @@ nay chỉ còn đúng một nửa:
 | `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:275` |
 | `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:276` |
 | `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:862` |
-| `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx:863-864` |
+| `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx` (hai hàm cùng tên) |
 | Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
 | Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1027` |
 | `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1187` |
