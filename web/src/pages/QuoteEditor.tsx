@@ -224,6 +224,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // ── load catalogs + quote ──────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
+    // ── QUAY VỀ KHUNG XƯƠNG KHI ĐỔI SANG BÁO GIÁ KHÁC ─────────────────────
+    // `ready` trước đây chỉ bật MỘT LẦN rồi không bao giờ tắt. Khi route đổi từ `#/quotes/new` sang
+    // `#/quotes/<id>` — chính việc `save()` tự làm sau khi lưu báo giá mới — component KHÔNG bị gỡ
+    // (Shell render <QuoteEditorPage> không có `key`), nên trong lúc `api.getQuote(id)` đang bay,
+    // màn hình vẫn vẽ BÁO GIÁ CŨ kèm ĐẦY ĐỦ NÚT BẤM SỐNG.
+    //
+    // Hậu quả đo được: bấm "Tải Excel gửi khách" ngay sau khi Lưu thì `q.id` vẫn là 0 (bản nháp
+    // wizard) → trình duyệt gọi `GET /api/export/0.xlsx` → 400, không có file nào tải về. Cổng
+    // [12] ui-smoke đỏ đúng vì chuyện này; chờ thêm 3 giây thì xanh, tức là một cuộc ĐUA chứ không
+    // phải selector lạc hậu.
+    //
+    // Đặt lại `false` là cách trung thực: chưa nạp xong thì đừng cho bấm gì lên dữ liệu cũ.
+    setReady(false);
     (async () => {
       try {
         if (!_companies || !_templates) {
