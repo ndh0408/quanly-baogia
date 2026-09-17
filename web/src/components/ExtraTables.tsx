@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as M from "../lib/quoteMath";
-import { type ItemK, nextK } from "../lib/gridShared";
+import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable, safeImgSrc } from "./GridTable";
 import { api, ApiError, type EditorTemplate } from "../lib/api";
 import { confirmModal, toast, useEscClose } from "../lib/ui";
@@ -85,7 +85,7 @@ export async function removeExtraTableAt(
   return r.removed;
 }
 
-export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched }: {
+export function ExtraTables({ sheet, templates, companyId, editable, editableCat, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, thanhChung }: {
   sheet: Sheet; templates: EditorTemplate[]; companyId?: number; editable: boolean; canApprove: boolean;
   /**
    * PHẠM VI theo TỪNG LOẠI bảng — dành cho "account phụ" chỉ được giao một phần (vd chỉ bảng Hà
@@ -97,6 +97,8 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
    */
   editableCat?: (cat: string) => boolean;
   canPay?: boolean; quoteId?: number; onMarkDirty: () => void;
+  /** Thanh "+ Thêm hàng…" dùng chung ở đáy trang. Vắng = mỗi lưới tự vẽ tại chỗ (đường cũ). */
+  thanhChung?: ThanhChung;
   /** Mốc `updatedAt` MỚI sau khi route /pay bump — editor phải nhận để khỏi tự đâm 409 giả (xem ExtraPayDialog). */
   onQuoteTouched?: (updatedAt: string) => void;
 }) {
@@ -125,6 +127,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
     if (cleaned) onMarkDirty();
   }
   const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x) : 0), 0);
+  const idLuoi = (cat: string) => `extra:${cat}`;
 
   let active = Number.isInteger(sheet._activeExtra) ? (sheet._activeExtra as number) : 0;
   if (active >= tables.length) active = tables.length - 1;
@@ -166,7 +169,14 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                 loai={cat} nhan={label} soSheet={idxs.length} tong={catTotal(cat)}
                 duoiTong={<span className="muted">→ Quản lý dự án</span>}
                 dangSua={hasActive}
-                mo={dangMo} onDoiMo={() => setMo((m) => ({ ...m, [cat]: !dangMo }))}
+                mo={dangMo}
+                onDoiMo={() => {
+                  // Đóng khối đang chiếm thanh nút ở đáy → trả thanh về báo giá chính, không thì
+                  // thanh trỏ vào một lưới đã tháo khỏi DOM và biến mất sạch.
+                  if (dangMo && thanhChung?.dangLam === idLuoi(cat)) thanhChung.datDangLam("chinh", "Báo giá chính");
+                  setMo((m) => ({ ...m, [cat]: !dangMo }));
+                }}
+                cacSheet={idxs.map((i, n) => ({ ten: tables[i].name || `Bảng ${n + 1}`, tong: extraTableSum(tables[i]) }))}
                 giaiThich="Sheet đầy đủ như báo giá (mẫu · công thức · nhóm · copy/dán) nhưng KHÔNG xuất Excel. Tổng của loại này đổ riêng sang Quản lý dự án."
                 nutThem={suaDuoc(cat) ? <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button> : null}
               >
@@ -212,7 +222,15 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                           xong mới báo là kiểu tệ nhất). */}
                       {suaDuoc(cat) && <label className="muted" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>Chuyển loại: <select value={t.category} className="extra-cat-sel extra-add-cat" onChange={(e) => { t.category = e.target.value; onChange(); }}>{EXTRA_CATS.filter(([v]) => v === t.category || suaDuoc(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     </div>
-                    <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items}
+                    {/* `fxBar`: THANH CÔNG THỨC. Trước đây chỉ lưới chính và sheet Hà Nội mới có,
+                        nên sheet HCM / Phí Khách Hàng thiếu hẳn ô địa chỉ + ô công thức, không xem
+                        được công thức của ô đang chọn, không bấm-kéo ô khác để chèn tham chiếu qua
+                        thanh, và không dùng được Alt+↓ gợi ý tên hạng mục. Cùng một thứ dữ liệu,
+                        cùng một người nhập — không có lý do gì để ba lưới khác bộ công cụ. */}
+                    <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items} fxBar
+                      dock={thanhChung ? thanhChung.dock : undefined}
+                      anThanhThem={!!thanhChung && thanhChung.dangLam !== idLuoi(cat)}
+                      onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}
                       usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaDuoc(cat)} internalNote={false}
                       approveCol={t.category === "hcm" || t.category === "khach"} canApprove={canApprove}
                       payCol canPay={!!canPay && !!quoteId && trongPhamVi(cat)}

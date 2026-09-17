@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as M from "../lib/quoteMath";
-import { type ItemK, nextK } from "../lib/gridShared";
+import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
 import { type EditorTemplate } from "../lib/api";
 import { confirmModal, toast } from "../lib/ui";
@@ -23,7 +23,7 @@ import { KhoiSheet } from "./KhoiSheet";
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
@@ -38,6 +38,8 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   /** Mở sẵn khối. `AccountHnView` bật (cả trang chỉ có mỗi nó); trang soạn báo giá để TẮT, vì ở đó
    *  khối này là một trong ba luồng và mở hết là trang dài ra mấy màn hình. */
   moMacDinh?: boolean;
+  /** Thanh "+ Thêm hàng…" dùng chung ở đáy trang soạn báo giá. Vắng = tự vẽ tại chỗ (AccountHnView). */
+  thanhChung?: ThanhChung;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
@@ -82,6 +84,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
        · ≥2 sheet → "Tổng:" là tổng cộng, và MỖI TAB tự mang số của nó. Thông tin nằm ngay chỗ
          mắt đang nhìn, không tốn thêm khối nào.
      Dòng của GridTable tắt ở cả hai ca (`sheetTotalLine={false}`). */
+  const ID_LUOI = "hn";
   const tongBang = tables.map((x) => extraTableSum(x as ExtraTable));
   const tong = tongBang.reduce((a, b) => a + b, 0);
   const hienTongTab = tables.length > 1;
@@ -108,7 +111,15 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
     <KhoiSheet
       loai="hanoi" nhan="Báo Giá Hà Nội" soSheet={tables.length} tong={tong}
       duoiTong={<span className="muted">→ Quản lý dự án</span>}
-      mo={mo} onDoiMo={() => setMo((v) => !v)} dangSua
+      mo={mo}
+      onDoiMo={() => setMo((v) => {
+        // Đóng khối trong khi nó đang chiếm thanh nút ở đáy → trả thanh về báo giá chính, không thì
+        // thanh trỏ vào một lưới đã tháo khỏi DOM và biến mất sạch.
+        if (v && thanhChung?.dangLam === ID_LUOI) thanhChung.datDangLam("chinh", "Báo giá chính");
+        return !v;
+      })}
+      dangSua
+      cacSheet={tables.map((x, i) => ({ ten: x.name || `Bảng ${i + 1}`, tong: tongBang[i] }))}
       nutThem={editable ? <button type="button" className="btn btn-sm extra-add-in" data-cat="hanoi" onClick={themBang}>+ Thêm sheet</button> : null}
     >
       {tables.length > 0 && (
@@ -154,7 +165,10 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
             canPay={!!canPay && !!quoteId}
             onPayRow={(it) => { if (!(it as Record<string, unknown>).rid) { toast("Lưu phần Hà Nội trước khi đánh dấu thanh toán", "error"); return; } setPayRow(it); }}
             groupSubtotal={!!t.groupSubtotal} onGroupSubtotal={(v) => { t.groupSubtotal = v; onChange(); }} onChange={onChange}
-            sheetTotalLine={false} />
+            sheetTotalLine={false}
+            dock={thanhChung ? thanhChung.dock : undefined}
+            anThanhThem={!!thanhChung && thanhChung.dangLam !== ID_LUOI}
+            onDangDung={thanhChung ? () => thanhChung.datDangLam(ID_LUOI, `Hà Nội · ${t.name || `Bảng ${ai + 1}`}`) : undefined} />
         </div>
       ) : (
         <div className="muted" style={{ padding: "6px 0 2px" }}>Chưa có sheet Hà Nội — bấm “+ Thêm sheet” phía trên.</div>

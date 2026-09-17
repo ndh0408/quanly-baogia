@@ -1015,7 +1015,7 @@ nay chỉ còn đúng một nửa:
 | Ngăn xếp thuần `createUndoStack` / `undoRedoKey` / `UNDO_LIMIT` | `web/src/lib/gridUndo.ts` — **có bài kiểm đơn vị** |
 | Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **42 bài** |
 | `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx:193` |
-| `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx:275` |
+| `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx` (hàm `snap`) |
 | `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:276` |
 | `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:862` |
 | `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx` (hai hàm cùng tên) |

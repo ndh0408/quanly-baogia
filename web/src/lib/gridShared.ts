@@ -127,3 +127,24 @@ export function caretIndexAtPoint(el: HTMLInputElement | HTMLTextAreaElement, x:
     return best;
   } catch { return null; } finally { d.remove(); }
 }
+
+/* ── MỘT THANH "+ THÊM HÀNG…" DÙNG CHUNG CHO NHIỀU LƯỚI ───────────────────────────────────────
+   Trang soạn báo giá có tới ba lưới cùng lúc: báo giá chính, sheet nội bộ (HCM / Phí KH) và sheet
+   Hà Nội. Trước đây mỗi lưới tự vẽ thanh nút của nó, nên màn hình có HAI hàng nút giống hệt nhau
+   cách nhau 40px mà tác động lên HAI bảng khác nhau — người dùng báo đúng chỗ này, và thêm nhầm
+   bảng là lỗi im lặng (số liệu vào sai chỗ, không ai biết).
+
+   Nay chỉ còn MỘT thanh, ở đáy trang cạnh nút Lưu, và nó phục vụ ĐÚNG cái bảng vừa được chạm vào:
+   bấm/Tab vào lưới nào thì lưới đó chiếm thanh, tên bảng hiện ngay trên thanh. "Bấm vào đâu thì
+   thêm hàng vào đó."
+
+   Vắng mặt (`undefined`) = mỗi lưới tự vẽ thanh tại chỗ, y như cũ — đường của AccountHnView (cả
+   trang chỉ có một lưới, không có thanh đáy), bench và bài kiểm mức component. */
+export type ThanhChung = {
+  /** Ô ở đáy trang để portal thanh nút vào. `null` = chưa gắn vào DOM. */
+  dock: HTMLElement | null;
+  /** id của lưới ĐANG chiếm thanh. */
+  dangLam: string;
+  /** Lưới báo "tôi vừa được chạm" — kèm tên để thanh nút ghi ra. */
+  datDangLam: (id: string, nhan: string) => void;
+};

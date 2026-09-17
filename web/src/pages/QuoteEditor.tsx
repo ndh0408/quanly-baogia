@@ -101,6 +101,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // lật sang true (trước đó component trả về khung xương), nên một `useEffect` deps [] sẽ chạy đúng
   // lượt render đầu — lúc chưa có gì để bắt — rồi không bao giờ chạy lại.
   const [oDock, setODock] = useState<HTMLElement | null>(null);
+  /* ── THANH "+ THÊM HÀNG…" PHỤC VỤ ĐÚNG BẢNG ĐANG ĐỨNG ────────────────────────────────────────
+     Trang này có tới ba lưới: báo giá chính, sheet nội bộ (HCM / Phí KH) và sheet Hà Nội. Trước
+     đây mỗi lưới tự vẽ thanh nút riêng, nên màn hình có hai hàng nút GIỐNG HỆT nhau cách nhau
+     40px mà tác động lên hai bảng khác nhau — thêm nhầm bảng là lỗi im lặng, số liệu vào sai chỗ
+     mà không ai biết. Người dùng báo đúng chỗ này.
+
+     Nay một thanh duy nhất ở đáy, cạnh nút Lưu, và nó theo bảng vừa được chạm vào (bấm chuột hoặc
+     Tab vào một ô). Nhãn ghi tên bảng ngay trên thanh — đó là lớp chặn nhầm, không phải trang trí. */
+  const [luoiDangLam, setLuoiDangLam] = useState({ id: "chinh", nhan: "Báo giá chính" });
+  const datDangLam = useCallback(
+    (id: string, nhan: string) => setLuoiDangLam((v) => (v.id === id && v.nhan === nhan ? v : { id, nhan })),
+    [],
+  );
   const gridVerRef = useRef(0);
   const redraw = useCallback(() => { gridVerRef.current++; setTick((t) => t + 1); }, []);
   const redrawMeta = useCallback(() => setTick((t) => t + 1), []);
@@ -767,6 +780,8 @@ Lý do (không bắt buộc):`,
 
         <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           dock={oDock}
+          anThanhThem={luoiDangLam.id !== "chinh"}
+          onDangDung={() => datDangLam("chinh", "Báo giá chính")}
           clfTheme={!!tpl?.code?.startsWith("clofull")}
           usesDays={usesDays} showDetail={showDetail} addrDetail={addrDetail} numberSubs={numberSubs} editable={suaMain} internalNote
           groupSubtotal={!!activeSheet.groupSubtotal} onGroupSubtotal={(v) => { activeSheet.groupSubtotal = v; mark(); redraw(); }}
@@ -878,7 +893,7 @@ Lý do (không bắt buộc):`,
             onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
         )}
 
-        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
+        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -888,10 +903,16 @@ Lý do (không bắt buộc):`,
           editable={coScope("hanoi") && !hnKhoa}
           canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")}
           quoteId={isNew ? undefined : q.id} onMarkDirty={mark}
-          onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} />
+          onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }}
+          thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
         {hnKhoa && <div className="muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
 
         <div className="actions">
+          {/* Nhãn NẰM TRONG thanh, không phải chú thích bên cạnh: nó là thứ cho biết nút "+ Thêm
+              hàng" ngay kế bên sẽ rơi vào bảng nào. */}
+          <span className="dock-nhan" title="Thanh nút bên cạnh đang thao tác lên bảng này">
+            Đang sửa: <strong>{luoiDangLam.nhan}</strong>
+          </span>
           <div className="dock-slot" ref={setODock} />
           {coSuaGiDo && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
           {/* Chốt/huỷ deal là trạng thái TERMINAL không đảo lại được và rơi vào KPI của chủ báo

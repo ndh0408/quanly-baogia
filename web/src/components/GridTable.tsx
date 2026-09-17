@@ -60,6 +60,12 @@ export type GridTableProps = {
    * không đi cây React — nên chỉ cần class `grid-add-bar` còn nằm trên tổ tiên của các nút.
    */
   dock?: HTMLElement | null;
+  /** ẨN HẲN thanh "+ Thêm hàng…" của lưới này. Dùng khi nhiều lưới cùng chia MỘT thanh ở đáy
+   *  trang: chỉ lưới ĐANG ĐƯỢC DÙNG mới vẽ thanh, các lưới còn lại im. Xem `onDangDung`. */
+  anThanhThem?: boolean;
+  /** Người dùng vừa chạm vào lưới này (bấm chuột hoặc Tab vào một ô). Nơi gọi dùng nó để biết
+   *  thanh nút ở đáy đang phải phục vụ bảng nào — "bấm vào đâu thì thêm hàng vào đó". */
+  onDangDung?: () => void;
 };
 
 type Addr = { row: number; field: string; L: string };
@@ -188,7 +194,7 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
 }
 
 function GridTableInner(props: GridTableProps) {
-  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine } = props;
+  const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
@@ -669,6 +675,9 @@ function GridTableInner(props: GridTableProps) {
   //   · nhấp đúp       → chế độ SỬA (EDIT), con trỏ ở cuối nội dung
   const onSelDragStart = (e: { button: number; target: EventTarget | null; shiftKey?: boolean; detail?: number; preventDefault(): void }) => {
     if (e.button !== 0 || pickingRef.current) return;
+    // Bấm chuột vào lưới = lưới này đang được dùng. Báo TRƯỚC mọi nhánh return bên dưới: bấm vào
+    // một chỗ "không phải ô" trong lưới (mép bảng, ô trống) vẫn là đang đứng ở bảng này.
+    onDangDung?.();
     const info = cellAddrFromEvent(e.target as HTMLElement);
     if (!info || !FIELDS.includes(info.field)) {
       // Ô nhập KHÔNG nằm trong lưới điều hướng (vd nhãn nhóm A/B ở cột STT): bấm lần đầu = chọn
@@ -1344,6 +1353,7 @@ function GridTableInner(props: GridTableProps) {
   const onGridFocus = (e: { target: EventTarget | null }) => {
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (!f || !tr) return;
+    onDangDung?.();   // Tab vào một ô cũng là "đang làm ở lưới này"
     const i = parseInt(tr.getAttribute("data-row") || "0", 10);
     focusRef.current = { i, f };
     if (!navigatingRef.current) { const sel = selRef.current; if (!sel || sel.anchor.row !== i || sel.anchor.field !== f) { selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); } }
@@ -1807,7 +1817,7 @@ function GridTableInner(props: GridTableProps) {
    * mỗi lần người dùng gõ một phím. Hàm trả JSX thì không có chuyện đó.
    */
   const datVaoDock = (nut: React.ReactNode) =>
-    dock === undefined ? nut : dock ? createPortal(nut, dock) : null;
+    anThanhThem ? null : dock === undefined ? nut : dock ? createPortal(nut, dock) : null;
 
   return (
     <>

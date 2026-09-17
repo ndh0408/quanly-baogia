@@ -3540,6 +3540,33 @@ textarea[aria-invalid="true"] {
      đọc lên được). Phải BỎ chrome mặc định của button để nhìn y hệt như trước.
    - `.sheet-tab` nay có role="button" + tabIndex → phải THẤY được viền focus, nếu không người
      dùng bàn phím không biết mình đang ở tab nào. */
+/* Nhãn "Đang sửa: <bảng>" trong thanh hành động đáy. Nằm TRƯỚC cụm nút "+ Thêm hàng…" vì nó cho
+   biết mấy nút ấy sẽ rơi vào bảng nào — xem QuoteEditor.tsx, khối `luoiDangLam`. */
+.dock-nhan {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.dock-nhan strong {
+  color: var(--text, #1b2034);
+}
+
+/* Bảng tổng của MỘT luồng nội bộ — dựng theo khuôn `.summary-table` của báo giá chính, chỉ thu nhỏ
+   lại cho vừa trong khối gập. Xem KhoiSheet.tsx → BangTongLuong. */
+.khoi-sheet-tong {
+  margin: 12px 0 2px;
+  max-width: 560px;
+}
+.khoi-sheet-tong h4 {
+  margin: 0 0 5px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.khoi-sheet-tong .summary-table {
+  font-size: 12.5px;
+}
+
 /* ── KHỐI GẬP CHO BA LUỒNG NỘI BỘ (HCM · Phí KH · Hà Nội) ─────────────────────────────────
    Xem KhoiSheet.tsx. Cả tiêu đề là MỘT nút thật (<button aria-expanded>), không phải <div onClick>
    — bàn phím Tab tới được, Enter/Space mở được, trình đọc màn hình đọc ra "đang mở / đang đóng". */

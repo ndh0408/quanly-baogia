@@ -22,6 +22,9 @@ import * as M from "../lib/quoteMath";
    `extra-cat-total`) — CSS nền ở public/style.css đang ĐÓNG BĂNG, và
    `AccountHnView.tongdongbo.test.tsx` đọc `.extra-cat-grouphead` để so số sheet. */
 
+/** Từ bao nhiêu sheet trở lên thì mới dựng bảng tổng — xem `BangTongLuong`. */
+const NGUONG_BANG_TONG = 2;
+
 export function KhoiSheet({
   loai,
   nhan,
@@ -33,6 +36,7 @@ export function KhoiSheet({
   onDoiMo,
   giaiThich,
   nutThem,
+  cacSheet,
   children,
 }: {
   /** hcm | khach | hanoi — quyết định màu badge (CSS nền đã có sẵn ba màu). */
@@ -50,8 +54,12 @@ export function KhoiSheet({
   giaiThich?: ReactNode;
   /** Nút "+ Thêm sheet" — nằm NGOÀI nút gập, vì <button> không lồng <button> được. */
   nutThem?: ReactNode;
+  /** Tên + tổng của TỪNG sheet trong luồng, để dựng bảng tổng giống hệt "Tổng báo giá (N sheet)"
+   *  của báo giá chính. Xem `BangTongLuong` bên dưới về lý do chỉ hiện khi có từ 2 sheet. */
+  cacSheet?: { ten: string; tong: number }[];
   children?: ReactNode;
 }) {
+  const coBangTong = !!cacSheet && cacSheet.length >= NGUONG_BANG_TONG;
   return (
     <div className={`extra-cat-group khoi-sheet${dangSua && mo ? " is-active" : ""}${mo ? " dang-mo" : ""}`}>
       <div className="extra-cat-grouphead">
@@ -60,7 +68,11 @@ export function KhoiSheet({
           <span className={`extra-cat-badge cat-${loai}`}>{nhan}</span>
           <span className="extra-cat-total" data-cat={loai}>
             {soSheet} sheet
-            {soSheet > 0 && <> · <strong>{M.fmtMoney(tong)}</strong> {duoiTong}</>}
+            {/* TIỀN CHỈ HIỆN Ở MỘT CHỖ, và chỗ đó đổi theo trạng thái:
+                 · ĐÓNG → ở đây, vì đó là cả mục đích của việc gập (không mở vẫn biết bao nhiêu);
+                 · MỞ + có bảng tổng → trong bảng, ngay dưới những con số mà nó cộng.
+                Mở mà in cả hai là lặp đúng kiểu người dùng đã kêu rườm rà. */}
+            {soSheet > 0 && !(mo && coBangTong) && <> · <strong>{M.fmtMoney(tong)}</strong> {duoiTong}</>}
           </span>
         </button>
         {nutThem}
@@ -69,8 +81,42 @@ export function KhoiSheet({
         <>
           {giaiThich && <div className="khoi-sheet-note muted">{giaiThich}</div>}
           {children}
+          {coBangTong && cacSheet && <BangTongLuong nhan={nhan} cacSheet={cacSheet} tong={tong} />}
         </>
       )}
+    </div>
+  );
+}
+
+/* ── BẢNG TỔNG CỦA MỘT LUỒNG ──────────────────────────────────────────────────────────────────
+   Dựng theo đúng khuôn "Tổng báo giá (N sheet)" của báo giá chính (`.summary-table`): liệt kê
+   từng sheet kèm số tiền, rồi một dòng Tổng cộng. Người dùng xin đúng cái này — "chưa có cái tổng
+   như cái của báo giá chính cho từng cái".
+
+   KHÔNG có VAT: đây là chi phí nội bộ, con số đổ sang Quản lý dự án là số trần (xem extraTableSum).
+
+   CHỈ hiện khi có TỪ 2 SHEET. Một sheet thì bảng này là một dòng cộng với một dòng tổng bằng đúng
+   dòng đó — và bằng luôn con số đã ghi ở tiêu đề khối. In lại lần thứ ba là quay về đúng chỗ người
+   dùng đã kêu rườm rà (số 4.204.000 từng hiện 3 lần trên một màn). */
+function BangTongLuong({ nhan, cacSheet, tong }: { nhan: string; cacSheet: { ten: string; tong: number }[]; tong: number }) {
+  return (
+    <div className="khoi-sheet-tong">
+      <h4>Tổng {nhan} ({cacSheet.length} sheet)</h4>
+      <table className="summary-table">
+        <thead><tr><th scope="col">STT</th><th scope="col">Sheet</th><th scope="col" style={{ textAlign: "right" }}>Tổng (VNĐ)</th></tr></thead>
+        <tbody>
+          {cacSheet.map((s, i) => (
+            <tr key={i}>
+              <td style={{ textAlign: "center" }}>{i + 1}</td>
+              <td>{s.ten}</td>
+              <td style={{ textAlign: "right" }}>{M.fmtMoney(s.tong)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr><td colSpan={2}><strong>Tổng cộng</strong></td><td style={{ textAlign: "right" }}><strong>{M.fmtMoney(tong)}</strong></td></tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
