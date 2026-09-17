@@ -119,6 +119,53 @@ describe("Thanh + Thêm hàng dùng chung", () => {
   });
 });
 
+describe("Gộp phần giao việc Hà Nội vào ĐÚNG một khối", () => {
+  /* ── NGƯỜI DÙNG BÁO ────────────────────────────────────────────────────────────────────────
+     "Phần Hà Nội (Account) / Account đang làm sao không nằm cùng với hà nội luôn đi".
+
+     Ba thứ cùng nói về phần Hà Nội từng nằm rải rác trong trang soạn báo giá, lại bị khối "Bảng
+     nội bộ" chen vào giữa: thẻ giao việc Ở TRÊN, khối sheet Ở DƯỚI, dòng báo khoá ở dưới nữa.
+
+     Luật: trạng thái lên TIÊU ĐỀ (liếc thấy cả khi khối đang đóng — đó là thứ quản lý cần biết
+     mà không phải mở), còn nút giao việc / duyệt / trả lại nằm trong THÂN (hành động thì mở ra
+     mới làm). */
+  const veCoSlot = (tables: HnTable[], mo: boolean) => {
+    act(() => {
+      goc.render(
+        <HnTables moMacDinh={mo} tables={tables} templates={MAU} companyId={1} editable onMarkDirty={() => {}}
+          phuHieu={<span className="ahn-status">Account đang làm</span>}
+          dieuKhien={<div className="hn-mgr-panel">Giao việc</div>} />,
+      );
+    });
+  };
+
+  it("ĐÓNG: trạng thái vẫn đọc được trên tiêu đề, nút giao việc thì KHÔNG", () => {
+    veCoSlot([bang("Bảng 1", [1_000_000])], false);
+    const dau = thung.querySelector(".extra-cat-grouphead");
+    expect(dau?.textContent, "đóng khối là mất luôn trạng thái phần HN").toContain("Account đang làm");
+    expect(thung.querySelector(".hn-mgr-panel"), "nút giao việc lộ ra khi khối đang đóng").toBeNull();
+  });
+
+  it("MỞ: nút giao việc nằm TRONG khối, ngay trên dải tab", () => {
+    veCoSlot([bang("Bảng 1", [1_000_000])], true);
+    const khoi = thung.querySelector(".khoi-sheet");
+    const gv = khoi?.querySelector(".hn-mgr-panel");
+    const tab = khoi?.querySelector(".sheet-tabs");
+    expect(gv, "mở khối mà không thấy phần giao việc").toBeTruthy();
+    expect(tab, "không thấy dải tab để so vị trí").toBeTruthy();
+    // Phải đứng TRƯỚC dải tab — giao việc là bước đầu, không phải thứ lục dưới đáy mới thấy.
+    const truocTab = !!(gv!.compareDocumentPosition(tab!) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(truocTab, "giao việc bị đẩy xuống dưới dải tab").toBe(true);
+  });
+
+  it("KHÔNG truyền slot (màn account HN) → không vẽ gì thêm", () => {
+    // Vế đối trọng: account HN không có quyền giao việc, và trang của họ không có hai thẻ đó.
+    ve([bang("Bảng 1", [1_000_000])], false);
+    expect(thung.querySelector(".hn-mgr-panel")).toBeNull();
+    expect(thung.querySelector(".ahn-status")).toBeNull();
+  });
+});
+
 describe("Bảng tổng của một luồng", () => {
   const bangTong = () => thung.querySelector(".khoi-sheet-tong");
   const moiSoTien = () => [...(thung.textContent || "").matchAll(/\d{1,3}(?:\.\d{3})+/g)].map((m) => Number(m[0].replace(/\./g, "")));

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
@@ -23,7 +23,7 @@ import { KhoiSheet } from "./KhoiSheet";
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
-export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung }: {
+export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
   templates: EditorTemplate[];
@@ -40,6 +40,10 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   moMacDinh?: boolean;
   /** Thanh "+ Thêm hàng…" dùng chung ở đáy trang soạn báo giá. Vắng = tự vẽ tại chỗ (AccountHnView). */
   thanhChung?: ThanhChung;
+  /** Thẻ trạng thái trên tiêu đề khối (vd "Account đang làm") — xem KhoiSheet. */
+  phuHieu?: ReactNode;
+  /** Khối giao việc / duyệt / trả lại, dán đầu thân khối — xem KhoiSheet. */
+  dieuKhien?: ReactNode;
 }) {
   const [, setTick] = useState(0);
   const redraw = () => setTick((t) => t + 1);
@@ -111,6 +115,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
     <KhoiSheet
       loai="hanoi" nhan="Báo Giá Hà Nội" soSheet={tables.length} tong={tong}
       duoiTong={<span className="muted">→ Quản lý dự án</span>}
+      phuHieu={phuHieu} dieuKhien={dieuKhien}
       mo={mo}
       onDoiMo={() => setMo((v) => {
         // Đóng khối trong khi nó đang chiếm thanh nút ở đáy → trả thanh về báo giá chính, không thì

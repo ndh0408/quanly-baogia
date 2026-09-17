@@ -888,31 +888,48 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        {!isNew && hasPerm("quote:hn:manage") && (
-          <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
-            onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
-        )}
-
         <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
             Khoá khi phần HN đã gửi duyệt/đã duyệt và người đang mở không phải người duyệt —
             mirror chốt `chotHnTables` ở server, để không ai gõ xong mới nhận 409. */}
+        {/* MỘT KHỐI, KHÔNG BA MẢNH RỜI. Trước đây ba thứ cùng nói về phần Hà Nội nằm rải rác và bị
+            khối "Bảng nội bộ" chen vào giữa: thẻ giao việc ở TRÊN, khối sheet ở DƯỚI, dòng báo khoá
+            ở dưới nữa. Người dùng hỏi thẳng: "Account đang làm sao không nằm cùng với hà nội luôn
+            đi". Nay trạng thái nằm trên TIÊU ĐỀ (liếc thấy cả khi khối đang đóng), còn giao việc /
+            duyệt / trả lại nằm trong THÂN (hành động thì mở ra mới làm). */}
         <HnTables tables={hnTables} templates={templates} companyId={q.companyId}
           editable={coScope("hanoi") && !hnKhoa}
           canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")}
           quoteId={isNew ? undefined : q.id} onMarkDirty={mark}
           onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }}
-          thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
-        {hnKhoa && <div className="muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
+          thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}
+          /* Account vừa gửi mà khối đóng thì việc chờ duyệt nằm khuất — mở sẵn cho quản lý thấy. */
+          moMacDinh={q.hnStatus === "submitted" && hasPerm("quote:hn:manage")}
+          phuHieu={!isNew && hasPerm("quote:hn:manage") ? <HnTrangThai st={q.hnStatus} /> : undefined}
+          dieuKhien={
+            <>
+              {!isNew && hasPerm("quote:hn:manage") && (
+                <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
+                  onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
+              )}
+              {hnKhoa && <div className="khoi-sheet-note muted">Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
+            </>
+          } />
 
         <div className="actions">
           {/* Nhãn NẰM TRONG thanh, không phải chú thích bên cạnh: nó là thứ cho biết nút "+ Thêm
               hàng" ngay kế bên sẽ rơi vào bảng nào. */}
-          <span className="dock-nhan" title={`Thanh nút bên cạnh đang thao tác lên: ${luoiDangLam.nhan}`}>
-            {/* "Đang sửa:" ẩn ở màn hẹp — tên bảng mới là thông tin, chữ dẫn chỉ là chữ dẫn. */}
-            <span className="dock-nhan-dan">Đang sửa: </span>
+          {/* ── CÂU CHỮ PHẢI CHO THẤY NÓ CHỈ CHI PHỐI NHÓM NÚT THÊM ──────────────────────────
+              Bản đầu viết "Đang sửa: <bảng>". Nhãn ấy đứng CÙNG thanh với nút Lưu nên đọc ra như
+              thể Lưu cũng chỉ lưu mỗi bảng đó — người dùng hỏi thẳng: "nút lưu có cùng với thanh
+              mấy cái kia luôn không vậy". Sự thật ngược lại: `save()` gói CẢ báo giá, `extraTables`
+              của từng sheet và `hnTables` vào MỘT payload, một cú bấm là một PUT ghi hết.
+              "Thêm vào: <bảng>" đọc liền mạch với "+ Thêm hàng" ngay kế bên, không còn chỗ hiểu lệch. */}
+          <span className="dock-nhan" title={`Các nút thêm bên cạnh sẽ thêm vào: ${luoiDangLam.nhan}. Nút Lưu thì lưu TOÀN BỘ báo giá.`}>
+            {/* "Thêm vào:" ẩn ở màn hẹp — tên bảng mới là thông tin, chữ dẫn chỉ là chữ dẫn. */}
+            <span className="dock-nhan-dan">Thêm vào: </span>
             <strong>{luoiDangLam.nhan}</strong>
           </span>
           <div className="dock-slot" ref={setODock} />
@@ -975,12 +992,24 @@ Lý do (không bắt buộc):`,
   );
 }
 
+/** Nhãn trạng thái phần Hà Nội. MỘT nguồn duy nhất — trước đây bảng nhãn này nằm trong thân
+ *  `HnManagerPanel`, mà nay chip hiện trên tiêu đề khối còn nút bấm nằm trong thân, hai chỗ. */
+const HN_NHAN: Record<string, string> = {
+  assigned: "Account đang làm",
+  submitted: "Account đã gửi — chờ bạn DUYỆT",
+  approved: "✓ Đã duyệt",
+  rejected: "↩ Đã trả lại",
+};
+function HnTrangThai({ st }: { st?: string | null }) {
+  const k = st || "";
+  return <span className={`ahn-status ahn-${k || "none"}`}>{HN_NHAN[k] || "Chưa giao"}</span>;
+}
+
 // Port renderManagerHnPanel — manager/admin GIAO phần Hà Nội cho Account HN + DUYỆT/TRẢ LẠI khi gửi.
 function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId: number; hnStatus?: string | null; hnRejectNote?: string | null; onReload: () => void }) {
   const [accounts, setAccounts] = useState<{ id: number; displayName?: string; username?: string }[]>([]);
   const [accId, setAccId] = useState("");
   const st = hnStatus || "";
-  const label = ({ assigned: "Account đang làm", submitted: "Account đã gửi — chờ bạn DUYỆT", approved: "✓ Đã duyệt", rejected: "↩ Đã trả lại" } as Record<string, string>)[st] || "Chưa giao";
   const canAssign = !st || st === "rejected" || st === "approved";
   useEffect(() => { if (canAssign) api.hnAccounts().then((r) => setAccounts(r.data || [])).catch(() => {}); }, [canAssign]);
   const assign = async () => {
@@ -993,9 +1022,10 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
     try { await api.hnReview(quoteId, decision, note); toast(decision === "approve" ? "Đã duyệt phần HN" : "Đã trả lại phần HN", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   return (
-    <div className="hn-mgr-panel" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "12px 0" }}>
-      <span className="extra-cat-badge cat-hanoi">Phần Hà Nội (Account)</span>
-      <span className={`ahn-status ahn-${st || "none"}`}>{label}</span>
+    /* KHÔNG còn badge "Phần Hà Nội (Account)" lẫn thẻ trạng thái ở đây: cả hai nay nằm trên tiêu đề
+       khối Báo Giá Hà Nội. In lại ở đây là hai badge cùng nghĩa cách nhau một hàng. */
+    <div className="hn-mgr-panel">
+      <span className="muted" style={{ fontSize: 12 }}>Giao việc:</span>
       {canAssign && (
         <>
           <select className="extra-add-cat" value={accId} onChange={(e) => setAccId(e.target.value)}><option value="">— chọn Account HN —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName || a.username}</option>)}</select>

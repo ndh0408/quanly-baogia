@@ -3612,6 +3612,23 @@ textarea[aria-invalid="true"] {
 .dock-nhan strong {
   color: var(--text, #1b2034);
 }
+/* Vạch ngăn giữa NHÓM THÊM (nhãn + các nút thêm) và NHÓM HÀNH ĐỘNG (Lưu / Khách chốt / ⋯).
+   Cùng một thanh nhưng hai phạm vi khác hẳn nhau: nhóm trái tác động lên MỘT bảng, nhóm phải
+   tác động lên CẢ báo giá. Một vạch mảnh nói điều đó rõ hơn mọi câu chú thích. */
+.editor .actions .btn-primary {
+  border-left: 1px solid var(--border, #d9dee6);
+  padding-left: 16px;
+  margin-left: auto;
+}
+
+/* Khối giao việc phần Hà Nội, nay nằm TRONG khối Báo Giá Hà Nội (xem QuoteEditor → dieuKhien). */
+.hn-mgr-panel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 0 2px;
+}
 
 /* Bảng tổng của MỘT luồng nội bộ — dựng theo khuôn `.summary-table` của báo giá chính, chỉ thu nhỏ
    lại cho vừa trong khối gập. Xem KhoiSheet.tsx → BangTongLuong. */

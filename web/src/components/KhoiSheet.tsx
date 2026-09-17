@@ -36,6 +36,8 @@ export function KhoiSheet({
   onDoiMo,
   giaiThich,
   nutThem,
+  phuHieu,
+  dieuKhien,
   cacSheet,
   children,
 }: {
@@ -54,6 +56,12 @@ export function KhoiSheet({
   giaiThich?: ReactNode;
   /** Nút "+ Thêm sheet" — nằm NGOÀI nút gập, vì <button> không lồng <button> được. */
   nutThem?: ReactNode;
+  /** Thẻ trạng thái đứng ngay sau số tiền trên TIÊU ĐỀ — thấy được cả khi khối đang đóng. Dành cho
+   *  thứ người ta cần liếc mà không phải mở, vd "Account đã gửi — chờ bạn DUYỆT". */
+  phuHieu?: ReactNode;
+  /** Khối điều khiển dán lên ĐẦU thân khối (giao việc / duyệt / trả lại). Trong thân chứ không
+   *  trên tiêu đề: đó là hành động, mở ra mới làm; tiêu đề chỉ để đọc. */
+  dieuKhien?: ReactNode;
   /** Tên + tổng của TỪNG sheet trong luồng, để dựng bảng tổng giống hệt "Tổng báo giá (N sheet)"
    *  của báo giá chính. Xem `BangTongLuong` bên dưới về lý do chỉ hiện khi có từ 2 sheet. */
   cacSheet?: { ten: string; tong: number }[];
@@ -75,10 +83,12 @@ export function KhoiSheet({
             {soSheet > 0 && !(mo && coBangTong) && <> · <strong>{M.fmtMoney(tong)}</strong> {duoiTong}</>}
           </span>
         </button>
+        {phuHieu}
         {nutThem}
       </div>
       {mo && (
         <>
+          {dieuKhien}
           {giaiThich && <div className="khoi-sheet-note muted">{giaiThich}</div>}
           {children}
           {coBangTong && cacSheet && <BangTongLuong nhan={nhan} cacSheet={cacSheet} tong={tong} />}
