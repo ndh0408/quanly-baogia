@@ -78,14 +78,26 @@ export function AnchoredPanel({
       onClose();
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // ── CUỘN BÊN TRONG HỘP KHÔNG ĐƯỢC LÀM ĐÓNG HỘP ─────────────────────────
+    // Bản đầu gắn thẳng `onClose` cho sự kiện `scroll` ở chế độ CAPTURE, tức bắt mọi lượt cuộn của
+    // MỌI phần tử — kể cả của chính hộp này, vốn có `maxHeight` + `overflow: auto` nên là một vùng
+    // cuộn thật sự. Hậu quả: menu dài, người dùng lăn chuột để đọc mục cuối → menu tự đóng.
+    //
+    // ĐÃ ĐỎ THẬT ở cổng [12] ui-smoke: Playwright tự cuộn mục vào tầm nhìn trước khi bấm, lượt cuộn
+    // đó xảy ra BÊN TRONG hộp → hộp đóng → `page.click` hết giờ 30s. Tức bài kiểm giao diện bắt
+    // đúng một lỗi dùng thật, không phải chuyện riêng của test.
+    const onScroll = (e: Event) => {
+      if (panelRef.current?.contains(e.target as Node)) return;   // cuộn TRONG hộp → kệ
+      onClose();                                                  // cuộn trang/khung ngoài → đóng
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onEsc);
-    document.addEventListener("scroll", onClose, true);
+    document.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onEsc);
-      document.removeEventListener("scroll", onClose, true);
+      document.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
   }, [open, onClose, anchorRef]);
