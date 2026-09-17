@@ -1348,6 +1348,18 @@ textarea[aria-invalid="true"] {
   font-size: 13px;
 }
 
+/* Hộp bung neo theo nút, render ở <body> qua portal (xem components/AnchoredPanel.tsx).
+   Toạ độ + max-height do JS đặt inline; ở đây chỉ những thứ cố định.
+   `margin: 0` là bắt buộc: .grid-keys-body có margin-top cho vị trí cũ trong luồng, giữ lại thì
+   hộp lệch khỏi đúng chỗ vừa tính. */
+.anchored-pop {
+  position: fixed;
+  z-index: 200;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 /* Menu "⋯" thao tác dòng (Danh sách báo giá) — render qua portal, position:fixed (khỏi bị bảng cắt). */
 .qa-menu {
   position: fixed;
@@ -2417,19 +2429,12 @@ textarea[aria-invalid="true"] {
 }
 
 /* Bảng phím tắt bung LÊN TRÊN. Nằm trong thanh đáy mà bung xuống thì rơi ra ngoài màn hình.
-   `.grid-add-bar` có sticky/stacking riêng nên z-index ở đây chỉ so với anh em trong thanh. */
-.editor .actions .grid-keys {
-  position: relative;
-}
-.editor .actions .grid-keys > .grid-keys-body {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 40;
+   TỪ 2026-09-17 hộp KHÔNG còn nằm trong `.grid-keys` nữa: nó render ở <body> qua AnchoredPanel,
+   vì `.editor .actions` dưới @media bên dưới là khung cuộn và cắt mất mọi thứ bung ra ngoài.
+   Vị trí + max-height do JS đặt inline; phần hình thức của hộp giữ ở đây. */
+.anchored-pop.grid-keys-body {
   width: max-content;
   max-width: min(900px, 92vw);
-  max-height: 60vh;
-  overflow: auto;
   background: var(--card);
   box-shadow: var(--shadow-md);
 }
@@ -2485,10 +2490,13 @@ textarea[aria-invalid="true"] {
    Cho phép cuộn ngang trong thanh thay vì xuống hàng, giữ chiều cao một hàng.
    Dấu phẩy = HOẶC; viết `or` trong một câu @media là cú pháp khác và im lặng không ăn. */
 @media (max-height: 700px), (max-width: 860px) {
+  /* ⚠️ `overflow-y: visible` ở đây KHÔNG có tác dụng và đừng thêm lại: chuẩn CSS Overflow ép
+     `visible` thành `auto` khi trục kia không phải `visible`. Nên thanh này LÀ khung cuộn cả hai
+     trục và cắt sạch mọi thứ bung ra ngoài nó. Mọi menu/hộp bung từ thanh phải render ở <body>
+     qua AnchoredPanel — đừng dùng position:absolute trong thanh. */
   .editor .actions {
     flex-wrap: nowrap;
     overflow-x: auto;
-    overflow-y: visible;
     scrollbar-width: thin;
   }
   .editor .actions .grid-add-bar {

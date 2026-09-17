@@ -8,6 +8,7 @@ import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
 import { HnTables, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
+import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan } from "../lib/localDraft";
@@ -171,18 +172,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // render và toàn bộ state của component lệch nhau. eslint (react-hooks/rules-of-hooks) bắt được;
   // đừng chuyển nó xuống lại cho "gần chỗ dùng".
   const [dangTai, setDangTai] = useState<"xlsx" | "pdf" | null>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
   const noteWrapRef = useRef<HTMLDivElement>(null);
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Kebab ⋯: đóng khi bấm ngoài cụm hoặc nhấn Esc (như SPA more-menu).
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onDoc = (e: MouseEvent) => { if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false); };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setMoreOpen(false); };
-    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onEsc);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); };
-  }, [moreOpen]);
+  // Kebab ⋯: đóng khi bấm ngoài / Esc / cuộn / đổi cỡ cửa sổ — AnchoredPanel lo hết, xem file đó.
+  const dongMenu = useCallback(() => setMoreOpen(false), []);
 
   // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell
   // chặn điều hướng menu (giống leaveEditorGuard SPA). Dọn cờ khi rời editor.
@@ -911,16 +906,16 @@ Lý do (không bắt buộc):`,
             >✗ Khách không chốt</button>
           )}
           {!isNew && (
-            <div className="kebab-wrap" ref={moreRef} style={{ position: "relative" }}>
-              <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
-              {moreOpen && (
-                <div className="kebab-menu" role="menu">
-                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>{dangTai === "xlsx" ? "Đang tạo Excel…" : "Tải Excel gửi khách"}</button>
-                  <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>{dangTai === "pdf" ? "Đang tạo PDF…" : "Tải PDF gửi khách"}</button>
-                  <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
-                  {(hasPerm("quote:update:all") || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
-                </div>
-              )}
+            <div className="kebab-wrap">
+              <button ref={moreBtnRef} className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>
+              {/* Menu render ở <body> qua portal: thanh .actions dưới màn thấp/hẹp là khung cuộn,
+                  để menu bên trong thì nó bị CẮT mất (xem AnchoredPanel.tsx). */}
+              <AnchoredPanel anchorRef={moreBtnRef} open={moreOpen} onClose={dongMenu} align="right" className="kebab-menu" role="menu" label="Thêm thao tác">
+                <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("xlsx"); }}>{dangTai === "xlsx" ? "Đang tạo Excel…" : "Tải Excel gửi khách"}</button>
+                <button role="menuitem" disabled={!!dangTai} onClick={() => { setMoreOpen(false); exportFile("pdf"); }}>{dangTai === "pdf" ? "Đang tạo PDF…" : "Tải PDF gửi khách"}</button>
+                <button role="menuitem" onClick={async () => { setMoreOpen(false); try { const r = await api.quoteVersions(q.id); setVersions(r.data); } catch (ex) { toast(errText(ex), "error"); } }}>Lịch sử phiên bản</button>
+                {(hasPerm("quote:update:all") || q.createdById === me.id) && <button role="menuitem" onClick={() => { setMoreOpen(false); setMembersOpen(true); }}>Thành viên phụ trách</button>}
+              </AnchoredPanel>
             </div>
           )}
         </div>

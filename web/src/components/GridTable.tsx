@@ -7,6 +7,7 @@ import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../li
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
+import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, undoRedoKey } from "../lib/gridUndo";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
@@ -257,6 +258,10 @@ function GridTableInner(props: GridTableProps) {
   type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
   const [sug, setSug] = useState<Sug | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Bảng phím tắt ⌨️ — nằm trong thanh đáy, mà thanh đó ở màn thấp/hẹp là khung cuộn nên cắt
+  // mất phần bung ra ngoài. Điều khiển bằng state rồi render qua AnchoredPanel (portal ra <body>).
+  const keysRef = useRef<HTMLDetailsElement>(null);
+  const [keysOpen, setKeysOpen] = useState(false);
   // Ảnh đang xem lớn. Phải xem TRONG app: ảnh của lưới luôn là data-URL (fileToImg nén bằng canvas)
   // mà trình duyệt CHẶN điều hướng cấp cao nhất tới data:, nên window.open chỉ mở ra tab trắng.
   const [zoom, setZoom] = useState<string | null>(null);
@@ -1861,17 +1866,17 @@ function GridTableInner(props: GridTableProps) {
           <button className="btn btn-sm" onClick={addInfo} title="Thêm dòng thông tin (không tính tiền)">+ Thông tin</button>
           <button className="btn btn-sm gf-venue-pick" title="Chèn hạng mục + kích thước có sẵn của rạp (quầy vé, quầy bắp, cover màn hình, bục soát vé…)" onClick={() => setPickerOpen(true)}>📐 Chèn từ rạp</button>
           <span className="spacer" />
-          <details className="grid-keys">
+          <details className="grid-keys" ref={keysRef} open={keysOpen} onToggle={(e) => setKeysOpen((e.currentTarget as HTMLDetailsElement).open)}>
             <summary title="Bảng chạy như Excel — xem danh sách phím tắt">⌨️</summary>
-            <div className="grid-keys-body">
+          </details>
+          <AnchoredPanel anchorRef={keysRef} open={keysOpen} onClose={() => setKeysOpen(false)} align="left" className="grid-keys-body" label="Phím tắt của bảng">
               <p><b>Chọn / sửa ô (như Excel):</b> bấm = chọn ô · <b>gõ là ĐÈ nội dung luôn</b> (không cần nhấp đúp) · <b>nhấp đúp</b>/<kbd>F2</kbd> = sửa trong chữ (mũi tên chạy trong chữ; bấm <kbd>F2</kbd> lần nữa để mũi tên chốt-và-đi) · <kbd>Esc</kbd> hủy sửa · <kbd>Delete</kbd> xóa vùng chọn · <kbd>Backspace</kbd> xóa ô rồi gõ luôn.</p>
               <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.</p>
               <p><b>Chọn vùng:</b> kéo chuột · <kbd>Shift</kbd>+bấm · <kbd>Shift</kbd>+mũi tên · <kbd>Shift+Space</kbd> cả hàng · <kbd>{modKey}+Space</kbd> cả cột · <kbd>{modKey}+A</kbd> cả bảng.</p>
               <p><b>Dữ liệu:</b> <kbd>{modKey}+C/V</kbd> copy–dán (qua lại Excel được) · <kbd>{modKey}+X</kbd> cắt kiểu Excel (viền nét đứt, <b>dán mới chuyển đi</b>, <kbd>Esc</kbd> huỷ) · <kbd>{modKey}+D</kbd> chép xuống · <kbd>{modKey}+R</kbd> chép phải · kéo (hoặc nhấp đúp) ô vuông góc dưới-phải · <kbd>{modKey}+Z</kbd>/<kbd>{modKey}+Y</kbd> hoàn tác–làm lại.</p>
               <p><b>Hàng:</b> <kbd>{modKey}+Shift++</kbd> chèn hàng dưới · <kbd>{modKey}+-</kbd> xóa hàng đang chọn · <kbd>Alt+Enter</kbd> xuống dòng trong ô · <kbd>Alt+↓</kbd> mở gợi ý hạng mục theo rạp.</p>
               <p className="muted">Công thức: gõ <b>=</b> thẳng vào ô · <b>mũi tên chọn ô tham chiếu</b> (Shift+mũi tên kéo thành vùng) hoặc bấm/kéo chuột · <kbd>Alt+=</kbd> tự chèn =SUM(dải phía trên) · ví dụ <b>=G3*E3</b>, <b>=SUM(H3:H8)</b>.</p>
-            </div>
-          </details>
+          </AnchoredPanel>
         </div>
       )}
       {pickerOpen && <VenuePicker onInsert={insertCatalogRows} onClose={() => setPickerOpen(false)} />}
