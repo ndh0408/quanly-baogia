@@ -2489,7 +2489,10 @@ textarea[aria-invalid="true"] {
 /* Màn hình THẤP (laptop 768p còn thanh bookmark + extension) hoặc HẸP: thanh dễ chiếm hai hàng.
    Cho phép cuộn ngang trong thanh thay vì xuống hàng, giữ chiều cao một hàng.
    Dấu phẩy = HOẶC; viết `or` trong một câu @media là cú pháp khác và im lặng không ăn. */
-@media (max-height: 700px), (max-width: 860px) {
+/* Ngưỡng 820px chứ không phải 700px: laptop 14" phổ biến là 1920×1080 để tỉ lệ hiển thị 150%,
+   ra ĐÚNG 720px CSS — lọt qua mốc 700 cũ, nên thanh vẫn phình hai hàng (đo được 113px ở 1280×720,
+   tức 15% chiều cao màn hình). 768p ở 100% cũng lọt. 820 phủ cả hai mà không đụng tới 1440×900. */
+@media (max-height: 820px), (max-width: 860px) {
   /* ⚠️ `overflow-y: visible` ở đây KHÔNG có tác dụng và đừng thêm lại: chuẩn CSS Overflow ép
      `visible` thành `auto` khi trục kia không phải `visible`. Nên thanh này LÀ khung cuộn cả hai
      trục và cắt sạch mọi thứ bung ra ngoài nó. Mọi menu/hộp bung từ thanh phải render ở <body>
@@ -2505,6 +2508,18 @@ textarea[aria-invalid="true"] {
   .editor .actions .btn {
     flex: 0 0 auto;
     white-space: nowrap;
+  }
+  /* Thanh đã là khung cuộn ngang → nhãn không được co nữa, co là chữ bị cắt giữa chừng. */
+  .editor .actions .dock-nhan {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+}
+
+/* Màn HẸP: bỏ chữ dẫn "Đang sửa:", giữ tên bảng — tên mới là thứ chặn bấm nhầm. */
+@media (max-width: 1180px) {
+  .dock-nhan-dan {
+    display: none;
   }
 }
 
@@ -3540,6 +3555,45 @@ textarea[aria-invalid="true"] {
      đọc lên được). Phải BỎ chrome mặc định của button để nhìn y hệt như trước.
    - `.sheet-tab` nay có role="button" + tabIndex → phải THẤY được viền focus, nếu không người
      dùng bàn phím không biết mình đang ở tab nào. */
+/* ── MÀN RỘNG: TRẢ LẠI CHỖ CHO TRANG NHIỀU CỘT ───────────────────────────────────────────────
+   `public/style.css` (ĐÓNG BĂNG) đặt `.main > * { max-width: 1320px }` cho MỌI trang, với lý do
+   "keep ultra-wide screens readable". Đúng với trang chữ, nhưng sai hẳn với trang bảng.
+
+   ĐO TRÊN DEV, màn 2560×1440 (27" 2K), bề rộng THẬT của bảng so với khung 1320px chứa nó:
+     Nhân sự            5031px
+     Quản lý dự án      3181px
+     Hóa đơn            2318px
+     Danh bạ nhân sự    1603px
+   Tức người dùng cuộn ngang trong một khung hẹp trong khi HAI BÊN bỏ trống ~1000px mỗi bên. Lưới
+   báo giá cũng vậy: 1262px giữa một màn 2550px.
+
+   Nới theo nấc, và CHỈ cho khối có bảng (`:has`) — trang chữ như Thông báo / Tài khoản giữ nguyên
+   1320px, vì dòng chữ dài 2200px thì mắt lạc hàng. Trình duyệt không hiểu `:has` sẽ bỏ qua cả luật
+   và rơi về đúng hành vi cũ, nên đây là bước nới an toàn một chiều.
+
+   ĐÃ ĐO SAU KHI NỚI (không màn nào tràn ngang):
+     1366×768   khung 1048px  — không đổi, dưới mọi ngưỡng
+     1920×1080  khung 1602px  — Danh bạ nhân sự vừa khít, hết cuộn ngang
+     2560×1440  khung 2200px  — lưới báo giá 1262 → 2142px */
+@media (min-width: 1600px) {
+  .main > *:has(table),
+  .main > .dash {
+    max-width: min(1680px, 100%);
+  }
+}
+@media (min-width: 1960px) {
+  .main > *:has(table),
+  .main > .dash {
+    max-width: min(1880px, 100%);
+  }
+}
+@media (min-width: 2300px) {
+  .main > *:has(table),
+  .main > .dash {
+    max-width: min(2200px, 100%);
+  }
+}
+
 /* Nhãn "Đang sửa: <bảng>" trong thanh hành động đáy. Nằm TRƯỚC cụm nút "+ Thêm hàng…" vì nó cho
    biết mấy nút ấy sẽ rơi vào bảng nào — xem QuoteEditor.tsx, khối `luoiDangLam`. */
 .dock-nhan {
@@ -3547,6 +3601,13 @@ textarea[aria-invalid="true"] {
   color: var(--muted, #6b7280);
   white-space: nowrap;
   margin-right: 2px;
+  /* CO ĐƯỢC. Không có hai dòng này thì nhãn giữ nguyên bề rộng nội dung và ĐẨY nhóm Lưu / Khách
+     chốt / ⋯ xuống hàng thứ hai trên màn hẹp — đúng cái bẫy `min-width: 0` đã ghi ở khối trên,
+     và nút ⋯ rơi xuống hàng dưới thì menu của nó bung lên đè chính thanh. */
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dock-nhan strong {
   color: var(--text, #1b2034);

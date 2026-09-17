@@ -910,8 +910,10 @@ Lý do (không bắt buộc):`,
         <div className="actions">
           {/* Nhãn NẰM TRONG thanh, không phải chú thích bên cạnh: nó là thứ cho biết nút "+ Thêm
               hàng" ngay kế bên sẽ rơi vào bảng nào. */}
-          <span className="dock-nhan" title="Thanh nút bên cạnh đang thao tác lên bảng này">
-            Đang sửa: <strong>{luoiDangLam.nhan}</strong>
+          <span className="dock-nhan" title={`Thanh nút bên cạnh đang thao tác lên: ${luoiDangLam.nhan}`}>
+            {/* "Đang sửa:" ẩn ở màn hẹp — tên bảng mới là thông tin, chữ dẫn chỉ là chữ dẫn. */}
+            <span className="dock-nhan-dan">Đang sửa: </span>
+            <strong>{luoiDangLam.nhan}</strong>
           </span>
           <div className="dock-slot" ref={setODock} />
           {coSuaGiDo && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
