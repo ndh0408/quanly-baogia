@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
-import { toast, confirmModal, promptModal, useEscClose } from "../lib/ui";
+import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
@@ -453,12 +453,63 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     } finally { setSaving(false); }
   };
   const convert = async () => {
-    if (!(await confirmModal("Khách chốt", "Khách đã đồng ý — đánh dấu báo giá này ĐÃ CHỐT?", { confirmText: "Đã chốt" }))) return;
-    try { const u = await api.markConverted(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); toast("Đã chốt báo giá", "success"); redraw(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+    // ── BÀY RA TỪNG TRANG TRƯỚC KHI CHỐT ────────────────────────────────────
+    // "Khách chốt" áp cho CẢ báo giá và KHÔNG đảo lại được, trong khi ngay trên lưới có cặp nút
+    // gần giống hệt chỉ áp cho MỘT trang. Và trước 2026-09-17, bấm chốt khi có trang khách đã TỪ
+    // CHỐI vẫn ghi nhận doanh thu bằng tổng CẢ MỌI TRANG — cao hơn mức khách đồng ý.
+    //
+    // Hộp dưới hiện ba nhóm (đã duyệt · chưa có ý kiến · khách KHÔNG duyệt), cho duyệt hết nhóm
+    // chưa có ý kiến, cho ĐỒNG Ý LẠI trang đang bị từ chối, và hiện SỐ TIỀN sẽ ghi nhận — cập nhật
+    // ngay theo từng lựa chọn.
+    // `sheets` (dòng ~318) đã là `q.sheets as Sheet[]` — dùng lại, đừng khai lại bằng `q.sheets ||
+    // []` vì bản đó mất kiểu và mọi phép đọc trường bên dưới thành `unknown`.
+    if (!sheets.length) { toast("Báo giá chưa có trang nào", "error"); return; }
+    const chuaLuu = sheets.filter((s) => !s.id).length;
+    if (chuaLuu) {
+      toast(`Còn ${chuaLuu} trang chưa lưu lần nào — bấm Lưu trước rồi chốt, nếu không ý kiến khách của các trang đó không ghi được`, "info");
+      return;
+    }
+    const trangs = sheets.map((s, i) => ({
+      id: s.id as number,
+      // Nhãn lấy ĐÚNG như trên tab để người đọc đối chiếu được — cùng công thức với dòng
+      // "Khách duyệt sheet …" ở trên lưới.
+      ten: `${i + 1}. ${s.name || templates.find((t) => t.id === s.templateId)?.name || `Sheet ${i + 1}`}`,
+      // `sheetTotals(...).net` = Cộng đã trừ Discount riêng của trang, khớp `QuoteSheet.subtotal`
+      // mà máy chủ dùng để tính lại. Tính ở đây chỉ để HIỂN THỊ; máy chủ không nhận số này.
+      // CÙNG công thức với `perSheet` ở dưới (dòng ~605) — hai chỗ tính khác nhau là hai con số
+      // tiền khác nhau trên cùng một màn hình.
+      net: M.sheetTotals(s, !!templates.find((x) => x.id === s.templateId)?.layout?.hasDays).net,
+      custStatus: (s.custStatus as string | null) ?? null,
+    }));
+
+    const doi = await modalChotBaoGia(q.quoteNumber || `#${q.id}`, trangs, Number(q.vatPercent) || 0);
+    if (doi === null) return;
+
+    try {
+      // Ghi trạng thái từng trang TRƯỚC — máy chủ tính doanh thu từ `custStatus` THẬT trong CSDL,
+      // không từ con số client gửi lên. Tuần tự chứ không song song: cùng một báo giá, và thứ tự
+      // trong nhật ký audit phải đọc được.
+      for (const d of doi) {
+        const r = await api.sheetCustomerDecision(d.id, (d.status ?? "") as "approved" | "rejected" | "");
+        const s = sheets.find((x) => x.id === d.id);
+        if (s) { s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy; }
+      }
+      const u = await api.markConverted(q.id);
+      qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
+      stampKeys(qRef.current);
+      const ghi = Number((u as { convertedTotal?: unknown }).convertedTotal ?? u.total);
+      toast(`Đã chốt báo giá — ghi nhận ${Math.round(ghi).toLocaleString("vi-VN")} đ`, "success");
+      redraw();
+    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   const lost = async () => {
-    const reason = await promptModal("Không chốt được đơn này", "Lý do (không bắt buộc):", { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" });
+    const reason = await promptModal(
+      "Không chốt được CẢ báo giá này",
+      `Đánh dấu CẢ báo giá — tất cả ${(q.sheets || []).length} trang — là không chốt được. KHÔNG đảo lại được.
+
+Lý do (không bắt buộc):`,
+      { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
+    );
     if (reason === null) return;
     try { const u = await api.markLost(q.id, reason); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
@@ -816,8 +867,28 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
           {coSuaGiDo && <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Đang lưu…" : "Lưu"}</button>}
           {/* Chốt/huỷ deal là trạng thái TERMINAL không đảo lại được và rơi vào KPI của chủ báo
               giá → account phụ không thấy hai nút này (server cũng 403, xem markConverted/markLost). */}
-          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-success" onClick={convert}>✓ Khách chốt</button>}
-          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && <button className="btn btn-danger" onClick={lost}>✗ Khách không chốt</button>}
+          {/* ── NHÃN PHẢI NÓI RÕ PHẠM VI ─────────────────────────────────────────
+              Ngay phía trên lưới có cặp nút "✓ Khách duyệt / ✗ Không duyệt" cho RIÊNG sheet đang
+              mở, kèm nhãn ghi rõ tên sheet. Cặp nút dưới đây áp cho CẢ BÁO GIÁ (mọi sheet) và
+              KHÔNG ĐẢO LẠI ĐƯỢC (server trả 400 "Báo giá đã chốt / không chốt rồi").
+              Trước đây hai cặp chỉ khác nhau ở một chữ — "duyệt" và "chốt" — cùng bắt đầu bằng
+              "Khách", cùng ✓ xanh / ✗ đỏ, cách nhau một màn hình cuộn. Người dùng vừa duyệt xong
+              sheet "Banner" rất dễ bấm tiếp nút dưới mà tưởng vẫn đang thao tác trên sheet đó —
+              và đó là một thao tác KHÔNG lùi được. */}
+          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && (
+            <button
+              className="btn btn-success"
+              onClick={convert}
+              title={`Đánh dấu CẢ báo giá này (${(q.sheets || []).length} trang) là đã chốt. KHÔNG đảo lại được. Muốn ghi ý kiến khách cho RIÊNG một trang thì dùng "Khách duyệt" ở ngay trên lưới.`}
+            >✓ Khách chốt cả báo giá</button>
+          )}
+          {!isNew && !laPhu && !["converted", "lost"].includes(q.status) && hasPerm("quote:send") && (
+            <button
+              className="btn btn-danger"
+              onClick={lost}
+              title={`Đánh dấu CẢ báo giá này (${(q.sheets || []).length} trang) là không chốt được. KHÔNG đảo lại được.`}
+            >✗ Khách không chốt</button>
+          )}
           {!isNew && (
             <div className="kebab-wrap" ref={moreRef} style={{ position: "relative" }}>
               <button className="btn kebab-btn" aria-haspopup="true" aria-expanded={moreOpen} title="Thêm thao tác" onClick={() => setMoreOpen((o) => !o)}>⋯</button>

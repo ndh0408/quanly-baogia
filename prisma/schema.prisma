@@ -562,8 +562,14 @@ model Quote {
   approvals Approval[]
   members   QuoteMember[] // "account phụ": nhân viên được thêm vào để xem/sửa, có PHẠM VI riêng
 
-  sentAt      DateTime?
-  convertedAt DateTime?
+  sentAt         DateTime?
+  convertedAt    DateTime?
+  // ===== DOANH THU THẬT SỰ CHỐT ĐƯỢC =====
+  // `total` ở trên là tổng của bản báo giá NHƯ NÓ ĐƯỢC SOẠN — số đi vào file Excel/PDF gửi khách.
+  // `convertedTotal` là số tiền THẬT SỰ chốt: tổng đó TRỪ những trang khách đã bấm "Không duyệt"
+  // (`QuoteSheet.custStatus = "rejected"`), VAT tính lại trên phần còn lại.
+  // NULL = chưa chốt, hoặc đã chốt TRƯỚC 2026-09-17. Mọi nơi đọc phải `?? total`.
+  convertedTotal Decimal?  @db.Decimal(18, 2)
 
   // ===== Phần GIÁ HÀ NỘI (role account_hn) — luồng RIÊNG, tách khỏi `status` báo giá chính.
   // Quản lý GIAO account điền bảng nội bộ loại "hanoi"; account chỉ thấy/sửa phần đó rồi
@@ -626,7 +632,7 @@ model QuoteMember {
   scopes String[] @default([])
 
   addedById Int? // ai phân công (chủ báo giá hoặc quản trị) — SetNull khi người đó bị xoá
-  addedBy   User? @relation("QuoteMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  addedBy   User?    @relation("QuoteMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
   addedAt   DateTime @default(now())
 
   @@id([quoteId, userId])

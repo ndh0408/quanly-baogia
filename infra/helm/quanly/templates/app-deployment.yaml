@@ -66,6 +66,11 @@ spec:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 5
             periodSeconds: 5
+            # TƯỜNG MINH, không để kubelet dùng mặc định 1 giây: pool dò của /readyz có ngân sách
+            # 2s (`connectionTimeoutMillis`/`query_timeout`, src/db.ts). Với mặc định 1s thì kubelet
+            # cắt TRƯỚC khi ứng dụng kịp trả lời, nên ngân sách kia không bao giờ dùng tới và một CSDL
+            # chỉ hơi chậm cũng bị đọc thành "pod chưa sẵn sàng". 3 > 2 để ứng dụng luôn nói được trước.
+            timeoutSeconds: 3
           # Khởi động lần đầu phải chạy `prisma migrate deploy` trước khi nghe cổng. Không có
           # startupProbe thì livenessProbe bắt đầu đếm ngay và giết pod giữa chừng migration trên
           # cụm chậm/migration dài → deploy không bao giờ lên được. (infra/k8s/app.yaml đã có, chart

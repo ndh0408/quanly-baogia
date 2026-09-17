@@ -14,6 +14,7 @@ import { namVN, namNganVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
 import { randomUUID } from "node:crypto";
+import { trungTren } from "../prismaLoi.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
@@ -351,7 +352,22 @@ export async function createQuote(req: Request) {
           // Báo giá MỚI: mốc nước xuất phát 0, và ghi luôn mốc sau khi cấp để lượt sửa đầu tiên
           // đã có sẵn (xem mocSoMaSheet / migration 20260908060000).
           data: {
-            ...draft, quoteNumber: soTam, searchText: "", sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
+            // `projectCode: null` PHẢI ĐÈ LÊN `...draft` — xem khối dưới, đây là lỗi đã tái hiện được.
+            //
+            // ── VÌ SAO ──────────────────────────────────────────────────────
+            // `draft.projectCode` chỉ được gán ở `nextProjectCode` bên dưới, tức SAU lượt `create`
+            // này. Ở LƯỢT THỬ LẠI, nó còn nguyên giá trị của lần vừa hỏng. Không đè thì `create`
+            // ghi thẳng mã đã đụng vào `@@unique([projectCode, projectVersion])` → P2002 ngay tại
+            // `create`, TRƯỚC khi `nextProjectCode` kịp cấp mã kế tiếp. Bốn lượt thử y hệt nhau rồi
+            // 409 "Số báo giá bị trùng" — sai hẳn nguyên nhân (đụng MÃ DỰ ÁN, không phải số báo
+            // giá), và mỗi lượt còn chèn rồi rollback TOÀN BỘ hạng mục (báo giá 20.000 dòng = 4
+            // lượt chèn vô ích).
+            //
+            // Trước khi dời việc cấp số xuống cuối transaction, `nextProjectCode` chạy TRƯỚC
+            // `create` nên mỗi lượt thử tự nhiên có mã mới. Dời xuống làm mất tính chất đó; dòng
+            // này trả lại nó. Mã thật được ghi ở lượt `update` bên dưới.
+            ...draft, projectCode: null,
+            quoteNumber: soTam, searchText: "", sheetCodeSeq: mocSoMaSheet(sheetsTaoMoi as any, 0),
             // Phần Hà Nội gõ ngay lúc tạo. Cờ duyệt/thanh toán chưa thể có ở báo giá mới nên không
             // cần reconcile — `sanitizeHnTables` đã loại mọi thứ ngoài hình dạng hợp lệ.
             ...(b.hnTables !== undefined ? { hnTables: sanitizeHnTables(b.hnTables) } : {}),
@@ -392,8 +408,9 @@ export async function createQuote(req: Request) {
       // P2002, và khối dưới chỉ biết đẩy bộ đếm SỐ BÁO GIÁ — lượt sau sinh LẠI ĐÚNG mã dự án cũ,
       // bốn lượt y hệt rồi 409 với nội dung sai hẳn. Ghi nhận mã vừa bị chiếm vào bộ đếm mã dự án
       // (NGOÀI transaction, GREATEST nên không lùi) để lượt sau nhảy sang mã kế tiếp.
-      const dungMaDuAn = code === "P2002"
-        && String((e as Prisma.PrismaClientKnownRequestError)?.meta?.target ?? "").includes("projectCode");
+      // `meta.target` là UNDEFINED với driver adapter (Prisma 7) — ĐÃ ĐO. Đọc thẳng nó là để nhánh
+      // này chết im lặng: bốn lượt thử y hệt nhau rồi 409 nói sai nguyên nhân. Xem src/prismaLoi.ts.
+      const dungMaDuAn = trungTren(e, "projectCode");
       if (dungMaDuAn && attempt < 3) {
         if (draft.projectCode && creator?.projectCode) {
           await syncProjectCodeCounter(String(draft.projectCode), creator.projectCode).catch(() => {});
@@ -1599,11 +1616,33 @@ export async function markConverted(req: Request) {
   if (["converted", "lost"].includes(existing.status)) {
     throw httpError(400, "Báo giá đã chốt / không chốt rồi");
   }
+  // ── DOANH THU GHI NHẬN = TỔNG TRỪ NHỮNG TRANG KHÁCH KHÔNG DUYỆT ─────────
+  // `QuoteSheet.custStatus` tồn tại từ lâu để ghi ý kiến khách cho TỪNG trang, nhưng trước
+  // 2026-09-17 KHÔNG một dòng mã nào đọc nó: hàm này chuyển cả báo giá sang `converted` rồi phát
+  // webhook kèm `Quote.total` — tổng của MỌI trang, gồm cả trang khách đã bấm "Không duyệt". Hệ
+  // thống vì thế ghi nhận một đơn đã chốt với số tiền CAO HƠN mức khách thật sự đồng ý.
+  //
+  // TÍNH Ở MÁY CHỦ, KHÔNG NHẬN TỪ CLIENT. Đây là con số tiền; nhận nó qua thân request là mở một
+  // đường cho bất kỳ ai gọi được API tự khai doanh thu của mình.
+  //
+  // `QuoteSheet.subtotal` là net ĐÃ TRỪ giảm giá của trang (xem chú thích ở chỗ ghi nó), nên chỉ
+  // cần cộng phần không bị từ chối rồi tính VAT trên đó — đúng thứ tự Cộng → Discount → VAT của
+  // shared/quote-math.ts. Trang `null` (chưa có ý kiến) VẪN TÍNH: khách chưa từ chối nó.
+  const trang = await prisma.quoteSheet.findMany({
+    where: { quoteId: id },
+    select: { subtotal: true, custStatus: true },
+  });
+  const netGiuLai = trang
+    .filter((t) => t.custStatus !== "rejected")
+    .reduce((a, t) => a + Number(t.subtotal ?? 0), 0);
+  const vatPct = Number(existing.vatPercent ?? 0);
+  const convertedTotal = Math.round(netGiuLai + (netGiuLai * vatPct) / 100);
+
   // Optimistic guard: only convert if not already terminal — prevents a race with
   // a concurrent mark-lost / edit from producing a wrong terminal transition.
   const upd = await prisma.quote.updateMany({
     where: { id, status: { notIn: ["converted", "lost"] } },
-    data: { status: "converted", convertedAt: new Date() },
+    data: { status: "converted", convertedAt: new Date(), convertedTotal },
   });
   if (!upd.count) {
     throw httpError(409, "Báo giá vừa đổi trạng thái — vui lòng tải lại");
@@ -1611,7 +1650,15 @@ export async function markConverted(req: Request) {
   const quote = await prisma.quote.findFirst({ where: { id }, include: QUOTE_INCLUDE });
   if (!quote) throw httpError(404, "Không tìm thấy báo giá");
   await audit(req, "quote.convert", { resource: "quote", resourceId: id, before: { status: existing.status } });
-  emitWebhook("quote.converted", { id, quoteNumber: quote.quoteNumber, total: Number(quote.total) }).catch(() => {});
+  // `total` GIỮ NGUYÊN trong webhook (bên nhận cũ vẫn đọc được), và thêm `convertedTotal` —
+  // số thật sự chốt. Đổi nghĩa `total` ở đây là làm sai mọi tích hợp đang chạy.
+  emitWebhook("quote.converted", {
+    id,
+    quoteNumber: quote.quoteNumber,
+    total: Number(quote.total),
+    convertedTotal: Number(quote.convertedTotal ?? quote.total),
+    soTrangKhachKhongDuyet: trang.filter((t) => t.custStatus === "rejected").length,
+  }).catch(() => {});
   return quote;
 }
 

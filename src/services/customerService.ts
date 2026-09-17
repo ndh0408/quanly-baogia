@@ -7,6 +7,7 @@ import { audit } from "../audit.js";
 import { nextCustomerCode } from "../codeAllocator.js";
 import { can, canScoped, readScopeWhereOrThrow, PERMISSIONS as P } from "../permissions.js";
 import { httpError } from "../httpError.js";
+import { tenRangBuocTrung } from "../prismaLoi.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { phanTrang } from "../pagination.js";
 
@@ -21,11 +22,15 @@ type Action = "read" | "edit" | "delete"; // NGUYÊN TỬ: edit/delete riêng (t
  * ra thì người thua cuộc nhận 500 "Lỗi server" thay vì câu tiếng Việt nói rõ MST thuộc về ai.
  */
 async function nem409TuP2002(e: unknown, taxCode?: string | null): Promise<never> {
-  const err = e as { code?: string; meta?: { target?: unknown } };
+  const err = e as { code?: string };
   if (err?.code !== "P2002") throw e;
   // `target` có thể là mảng cột (["taxCode"]) hoặc TÊN INDEX ("Customer_taxCode_live_key") tuỳ
   // ràng buộc là @unique của Prisma hay index thô — so trên chuỗi phủ được cả hai.
-  const target = String(err.meta?.target ?? "");
+  //
+  // KHÔNG đọc thẳng `err.meta.target`: với driver adapter (Prisma 7) trường đó là UNDEFINED, nên
+  // mọi phép so ở dưới trả false và hàm này tụt xuống `throw e` → 500 "Lỗi server", đúng cái nó
+  // sinh ra để tránh. `tenRangBuocTrung` đọc cả hai hình dạng — xem src/prismaLoi.ts.
+  const target = tenRangBuocTrung(e);
   if (target.includes("taxCode")) {
     if (taxCode) {
       const chu = await prisma.customer.findFirst({ where: { taxCode } });

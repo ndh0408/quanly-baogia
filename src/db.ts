@@ -54,13 +54,25 @@ const adapter = new PrismaPg(pool);
 // câu hỏi khác nhau, và chỉ câu đầu mới đáng để rút một pod ra khỏi tải. Nên nó cần đường đi
 // riêng, không xếp hàng sau lưu lượng của người dùng.
 //
-// max = 1: chỉ cần một kết nối, và `/readyz` đã có bộ nhớ đệm 5s (READYZ_TTL_MS, src/app.ts) nên
-// không có chuyện nhiều phép dò chạy cùng lúc. connectionTimeoutMillis ngắn (2s): dò sẵn sàng mà
-// chờ lâu thì kubelet hết giờ trước — thà trả lời "chưa sẵn sàng" nhanh và dứt khoát.
+// max = 1: chỉ cần một kết nối, và `/readyz` có bộ nhớ đệm 5s (READYZ_TTL_MS) cộng single-flight
+// (src/app.ts) nên không bao giờ có hai phép dò cùng lúc.
+//
+// ── NGÂN SÁCH 2s PHẢI NHỎ HƠN `timeoutSeconds` CỦA PROBE ──────────────────
+// kubelet mặc định `timeoutSeconds: 1` khi manifest không khai. Với mặc định đó, một phép dò chậm
+// bị kubelet cắt ở 1 giây — tức ngân sách 2s ở đây không bao giờ dùng tới, và lý lẽ "thà trả lời
+// chưa-sẵn-sàng nhanh" thành lời nói suông. Nên `infra/k8s/app.yaml` và chart Helm nay khai
+// `timeoutSeconds: 3` TƯỜNG MINH; 2 < 3 nên ứng dụng luôn kịp trả lời trước khi kubelet bỏ cuộc.
+// Đổi một trong hai số thì phải đổi số kia — tests/rz-readyz-pool-rieng.test.js khoá quan hệ đó.
+//
+// ── `query_timeout` LÀ TRẦN PHÍA CLIENT, KHÁC `statement_timeout` ─────────
+// `statement_timeout` trong `options` là trần PHÍA MÁY CHỦ: Postgres tự huỷ câu lệnh. Nó KHÔNG
+// cứu được ca socket chết im lặng — máy chủ không biết mình cần huỷ gì, còn client thì chờ mãi và
+// giữ luôn kết nối DUY NHẤT của pool này. `query_timeout` là đồng hồ phía node-pg, phủ đúng ca đó.
 const poolDoSanSang = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 1,
   connectionTimeoutMillis: 2_000,
+  query_timeout: 2_000,
   idleTimeoutMillis: 30_000,
   options: `-c statement_timeout=2000`,
 });
@@ -212,10 +224,19 @@ export function thongKePool() {
   };
 }
 
+/**
+ * Đóng pool dò sẵn sàng. PHẢI được gọi từ đường tắt êm của tiến trình (src/server.ts `shutdown`).
+ *
+ * ── VÌ SAO KHÔNG DỰA VÀO `beforeExit` ─────────────────────────────────────
+ * `beforeExit` chỉ bắn khi vòng lặp sự kiện CẠN việc. Tiến trình máy chủ luôn có một socket đang
+ * lắng nghe, nên nó KHÔNG BAO GIỜ bắn trên máy thật — và cũng không bắn khi tiến trình bị kết thúc
+ * bằng tín hiệu, tức đúng đường mà `docker stop` / kubelet dùng. Đặt việc dọn ở đó là viết một câu
+ * chưa từng chạy một lần nào.
+ */
+export async function dongPoolDoSanSang() {
+  await poolDoSanSang.end().catch(() => {});
+}
+
 process.on("beforeExit", async () => {
   await base.$disconnect();
-  // Pool dò sẵn sàng KHÔNG đi qua Prisma nên `$disconnect()` không đụng tới nó. Bỏ sót dòng này
-  // là để lại một kết nối Postgres mở sau mỗi lần tắt — vô hại trên một VM, nhưng trên cụm thì
-  // mỗi vòng deploy rò thêm một kết nối cho tới khi chạm `max_connections`.
-  await poolDoSanSang.end().catch(() => {});
 });

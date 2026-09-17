@@ -4,7 +4,7 @@
 import { config, featureStatus } from "./config.js";
 import { logger } from "./logger.js";
 import { initSentry, dangKyChanSuCoTienTrinh, flushSentry } from "./observability.js";
-import { prisma } from "./db.js";
+import { prisma, dongPoolDoSanSang } from "./db.js";
 import { createApp } from "./app.js";
 import { reloadRoleOverrides } from "./roleOverrides.js";
 import { ensureBucket, isStorageEnabled } from "./storage.js";
@@ -60,6 +60,10 @@ function shutdown(sig: string) {
 
   server.close(async () => {
     await prisma.$disconnect().catch(() => {});
+    // Pool dò sẵn sàng KHÔNG đi qua Prisma nên `$disconnect()` không đụng tới nó. Bỏ sót dòng này
+    // là để lại một kết nối Postgres mở sau mỗi lần tắt — vô hại trên một VM, nhưng trên cụm thì
+    // mỗi vòng deploy rò thêm một kết nối cho tới khi chạm `max_connections`.
+    await dongPoolDoSanSang().catch(() => {});
     // Đẩy nốt bộ đệm Sentry trước khi đi, y như src/worker.ts. Không có bước này thì lỗi ghi nhận
     // trong những giây cuối (thường là lỗi CỦA chính lần deploy) không bao giờ rời khỏi máy.
     await flushSentry();

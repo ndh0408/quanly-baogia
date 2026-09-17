@@ -247,3 +247,139 @@ export function promptModal(
     input.focus();
   });
 }
+
+// ============================================================================
+// HỘP CHỐT BÁO GIÁ — hiện TỪNG TRANG theo ý kiến khách, cho sửa ngay tại chỗ.
+//
+// ── VÌ SAO CẦN MỘT HỘP RIÊNG, KHÔNG DÙNG confirmModal ─────────────────────
+// "Khách chốt" là thao tác TERMINAL (server trả 400 nếu bấm lại) và áp cho CẢ báo giá. Ngay phía
+// trên lưới lại có cặp nút gần giống hệt — "✓ Khách duyệt / ✗ Không duyệt" — nhưng chỉ áp cho MỘT
+// trang. Hai cặp cùng bắt đầu bằng "Khách", cùng ✓ xanh / ✗ đỏ, cách nhau một màn hình cuộn.
+//
+// Và cho tới 2026-09-17, bấm "Khách chốt" khi có trang khách đã TỪ CHỐI thì hệ thống vẫn chốt
+// bình thường, ghi nhận doanh thu bằng TỔNG CẢ MỌI TRANG — kể cả phần khách không duyệt.
+//
+// Hộp này làm ba việc mà một hộp xác nhận một dòng không làm được:
+//   1. bày ra TỪNG trang theo ba nhóm (đã duyệt · chưa có ý kiến · khách KHÔNG duyệt);
+//   2. cho duyệt hết nhóm "chưa có ý kiến", và cho ĐỒNG Ý LẠI từng trang đang bị từ chối;
+//   3. hiện SỐ TIỀN sẽ ghi nhận, cập nhật ngay theo từng lựa chọn — để người bấm thấy hậu quả
+//      bằng con số TRƯỚC khi bấm, chứ không phải đọc lại sau.
+// ============================================================================
+
+export type TrangChot = {
+  id: number;
+  ten: string;
+  /** Net của trang, ĐÃ trừ giảm giá riêng (khớp `QuoteSheet.subtotal` ở máy chủ). */
+  net: number;
+  /** null = chưa có ý kiến · "approved" · "rejected" */
+  custStatus: string | null;
+};
+
+const tienVN = (n: number) => Math.round(n).toLocaleString("vi-VN") + " đ";
+
+/**
+ * Trả về danh sách trang cần ĐỔI trạng thái (chỉ những trang người dùng vừa sửa trong hộp), hoặc
+ * `null` nếu huỷ. Người gọi chịu trách nhiệm gửi từng thay đổi lên máy chủ TRƯỚC khi chốt.
+ *
+ * Số tiền hiển thị ở đây chỉ để NGƯỜI ĐỌC quyết định — máy chủ tự tính lại từ `custStatus` thật
+ * (xem `markConverted`). Không bao giờ gửi con số này lên.
+ */
+export function modalChotBaoGia(
+  soBaoGia: string,
+  trangs: TrangChot[],
+  vatPct: number,
+): Promise<Array<{ id: number; status: string | null }> | null> {
+  return new Promise((resolve) => {
+    // Bản nháp trạng thái trong hộp — chỉ áp ra ngoài khi bấm Chốt.
+    const nhap = new Map<number, string | null>(trangs.map((t) => [t.id, t.custStatus]));
+
+    const back = document.createElement("div");
+    back.className = "modal-backdrop";
+    back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="Chốt báo giá">
+      <div class="modal-head"><h3>Chốt cả báo giá ${esc(soBaoGia)}</h3></div>
+      <div class="modal-body" data-than></div>
+      <div class="modal-foot">
+        <button class="btn" data-no>Hủy</button>
+        <button class="btn btn-success" data-yes></button>
+      </div></div>`;
+
+    const than = back.querySelector("[data-than]") as HTMLElement;
+    const nutChot = back.querySelector("[data-yes]") as HTMLButtonElement;
+
+    const ve = () => {
+      const nhom = (st: string | null) => trangs.filter((t) => (nhap.get(t.id) ?? null) === st);
+      const duyet = nhom("approved"), chua = nhom(null), tuChoi = nhom("rejected");
+      const net = (ds: TrangChot[]) => ds.reduce((a, t) => a + t.net, 0);
+      // VAT tính LẠI trên phần giữ lại — đúng thứ tự Cộng → Discount → VAT của quote-math.
+      const giuLai = net(duyet) + net(chua);
+      const ghiNhan = giuLai + (giuLai * (Number(vatPct) || 0)) / 100;
+      const bo = net(tuChoi);
+
+      const dong = (t: TrangChot, nut: string) =>
+        `<li style="display:flex;align-items:center;gap:8px;padding:2px 0">
+           <span style="flex:1">${esc(t.ten)}</span>
+           <span class="muted" style="font-variant-numeric:tabular-nums">${esc(tienVN(t.net))}</span>
+           ${nut}</li>`;
+
+      than.innerHTML = `
+        ${duyet.length ? `<p style="margin:0 0 4px"><b>✓ Khách đã duyệt</b> — ${duyet.length} trang</p>
+          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${duyet.map((t) => dong(t, "")).join("")}</ul>` : ""}
+
+        ${chua.length ? `<p style="margin:0 0 4px"><b>○ Chưa có ý kiến</b> — ${chua.length} trang
+            <button type="button" class="btn btn-sm" data-duyet-het style="margin-left:6px">✓ Duyệt hết</button></p>
+          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${chua
+            .map((t) => dong(t, `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Duyệt</button>`))
+            .join("")}</ul>
+          <p class="muted" style="margin:-6px 0 10px;font-size:12.5px">Trang chưa có ý kiến VẪN được tính — khách chưa từ chối nó.</p>` : ""}
+
+        ${tuChoi.length ? `<p style="margin:0 0 4px"><b style="color:var(--danger,#c00)">✗ Khách KHÔNG duyệt</b> — ${tuChoi.length} trang · ${esc(tienVN(bo))} sẽ KHÔNG được tính</p>
+          <ul style="margin:0 0 10px;padding-left:14px;list-style:none">${tuChoi
+            .map((t) => dong(t, `<button type="button" class="btn btn-sm" data-dat="${t.id}|approved">✓ Đồng ý lại</button>`))
+            .join("")}</ul>` : ""}
+
+        <hr style="margin:10px 0">
+        <p style="margin:0"><b>Doanh thu ghi nhận: ${esc(tienVN(ghiNhan))}</b>
+          <span class="muted" style="font-size:12.5px"> (đã gồm VAT ${esc(String(vatPct || 0))}%)</span></p>
+        ${bo > 0 ? `<p class="muted" style="margin:2px 0 0;font-size:12.5px">Đã trừ ${esc(tienVN(bo))} của ${tuChoi.length} trang khách không duyệt.</p>` : ""}
+        <p class="muted" style="margin:8px 0 0;font-size:12.5px">Thao tác này áp cho <b>CẢ báo giá</b> và <b>KHÔNG đảo lại được</b>.</p>`;
+
+      nutChot.textContent = `✓ Chốt — ghi nhận ${tienVN(ghiNhan)}`;
+
+      than.querySelector("[data-duyet-het]")?.addEventListener("click", () => {
+        for (const t of chua) nhap.set(t.id, "approved");
+        ve();
+      });
+      for (const b of than.querySelectorAll<HTMLElement>("[data-dat]")) {
+        b.addEventListener("click", () => {
+          const [id, st] = (b.dataset.dat || "").split("|");
+          nhap.set(Number(id), st || null);
+          ve();
+        });
+      }
+    };
+
+    let releaseFocus = () => {};
+    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
+    const huy = () => { cleanup(); resolve(null); };
+    const chot = () => {
+      // CHỈ trả về trang THẬT SỰ đổi — gửi lại trạng thái cũ là đẻ ra bản ghi audit rỗng.
+      const doi = trangs
+        .filter((t) => (nhap.get(t.id) ?? null) !== t.custStatus)
+        .map((t) => ({ id: t.id, status: nhap.get(t.id) ?? null }));
+      cleanup();
+      resolve(doi);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      // KHÔNG chốt bằng Enter: đây là thao tác không đảo lại được, phải bấm đúng nút.
+      if (e.key === "Escape") huy();
+    };
+    back.addEventListener("click", (e) => { if (e.target === back) huy(); });
+    back.querySelector("[data-no]")?.addEventListener("click", huy);
+    nutChot.addEventListener("click", chot);
+    document.addEventListener("keydown", onKey);
+    ve();
+    document.body.appendChild(back);
+    releaseFocus = trapFocus(back);
+    (back.querySelector("[data-no]") as HTMLElement | null)?.focus();
+  });
+}

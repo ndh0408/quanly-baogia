@@ -51,13 +51,39 @@ describe("/readyz đi đường riêng", () => {
     // Chốt ở mức mã: một lần "dọn dẹp" đổi `kiemTraCsdlChoDoSanSang()` về `prisma.$queryRaw` sẽ
     // KHÔNG làm đỏ bất kỳ bài nào khác, vì hành vi thấy được từ ngoài giống hệt nhau — cho tới
     // lúc hệ thống đông người.
+    //
+    // KHÔNG giả lập `kiemTraCsdlChoDoSanSang`: giả lập chính hàm đang cần chứng minh thì thân nó
+    // không bao giờ chạy, và bài kiểm chỉ còn xác nhận rằng cái mock được gọi. Để nó chạy THẬT
+    // (CSDL đang có), và chỉ theo dõi `prisma.$queryRaw` — thứ KHÔNG được gọi.
     const spyPrisma = vi.spyOn(prisma, "$queryRaw");
-    const spyRieng = vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockResolvedValue(undefined);
     const r = await request(createApp()).get("/readyz");
     expect(r.status).toBe(200);
-    expect(spyRieng).toHaveBeenCalled();
     expect(spyPrisma, "/readyz vẫn đi qua pool dùng chung").not.toHaveBeenCalled();
   });
+
+  it("nhiều lượt dò ĐỒNG THỜI chỉ mở MỘT phép dò — không tự đầu độc bộ nhớ đệm", async () => {
+    // ── VÌ SAO CÓ BÀI NÀY ─────────────────────────────────────────────────
+    // Bộ nhớ đệm chỉ được GHI sau khi phép dò xong, nên mọi request đến TRONG lúc một phép dò đang
+    // chạy đều trượt đệm và cùng gọi `kiemTraCsdlChoDoSanSang()`. Pool riêng có `max: 1` → đúng
+    // một lượt cầm được kết nối, phần còn lại xếp hàng rồi hết hạn ở `connectionTimeoutMillis`
+    // (2s) và GHI `ok:false` vào đệm — kéo pod ra khỏi Service 5 giây trong khi CSDL hoàn toàn
+    // khoẻ. Tức chính bản vá "pool riêng" lại tự tạo ra đúng sự cố nó sinh ra để chặn.
+    let soLuotDo = 0;
+    const that = db.kiemTraCsdlChoDoSanSang;
+    vi.spyOn(db, "kiemTraCsdlChoDoSanSang").mockImplementation(async () => {
+      soLuotDo++;
+      // Chậm có chủ ý để 8 request sau chắc chắn rơi vào lúc phép dò còn đang bay.
+      await new Promise((r) => setTimeout(r, 300));
+      return that();
+    });
+
+    const app = createApp();
+    const rs = await Promise.all(Array.from({ length: 8 }, () => request(app).get("/readyz")));
+
+    expect(rs.map((r) => r.status), "có request nhận 503 dù CSDL khoẻ").toEqual(Array(8).fill(200));
+    expect(soLuotDo, `mở ${soLuotDo} phép dò cho 8 request đồng thời — pool max:1 sẽ làm 7 lượt hết giờ rồi ghi ok:false`)
+      .toBe(1);
+  }, 30_000);
 
   it("CSDL thật sự chết thì VẪN phải 503 — pool riêng không được biến nó thành mù", async () => {
     // Vế đối trọng: tách pool ra để pool cạn không làm pod bị rút, chứ KHÔNG phải để /readyz luôn

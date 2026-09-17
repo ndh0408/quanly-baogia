@@ -517,25 +517,42 @@ export function createApp() {
   // Health probes
   app.get("/livez", (_req, res) => res.json({ ok: true }));
   let readyzCache: { t: number; ok: boolean } = { t: 0, ok: false };
+  // ── MỘT PHÉP DÒ ĐANG BAY, DÙNG CHUNG CHO MỌI REQUEST ────────────────────
+  // Bộ nhớ đệm chỉ được GHI sau khi phép dò kết thúc, nên mọi request đến TRONG lúc một phép dò
+  // đang chạy đều trượt đệm và cùng gọi `kiemTraCsdlChoDoSanSang()`. Pool riêng có `max: 1` →
+  // đúng một lượt cầm được kết nối, phần còn lại xếp hàng rồi hết hạn ở `connectionTimeoutMillis`
+  // (2s) và GHI `ok:false` vào đệm — kéo pod ra khỏi Service suốt 5 giây trong khi CSDL hoàn toàn
+  // khoẻ. Tức chính bản vá "pool riêng" lại tự tạo ra đúng sự cố nó sinh ra để chặn.
+  //
+  // Giữ MỘT lời hứa dùng chung: ai đến trong lúc đó thì chờ cùng kết quả, không mở phép dò thứ hai.
+  let dangDo: Promise<void> | null = null;
   app.get("/readyz", async (_req, res) => {
     const now = Date.now();
     if (now - readyzCache.t < READYZ_TTL_MS) {
       return res.status(readyzCache.ok ? 200 : 503).json({ ok: readyzCache.ok });
     }
-    try {
+    if (!dangDo) {
       // ĐƯỜNG RIÊNG, không đi qua pool của lưu lượng người dùng. Dùng `prisma` ở đây thì một cơn
       // lưu dồn dập làm cạn pool → phép dò hết giờ → kubelet RÚT pod khỏi Service dù pod vẫn phục
       // vụ bình thường, rồi replica còn lại nhận trọn tải và cũng bị rút. Xem khối chú thích ở
       // `kiemTraCsdlChoDoSanSang` (src/db.ts).
-      await kiemTraCsdlChoDoSanSang();
-      readyzCache = { t: now, ok: true };
-      res.json({ ok: true });
-    } catch (e) {
-      readyzCache = { t: now, ok: false };
-      // Never leak DB error details on an unauthenticated endpoint.
-      logger.error({ err: e instanceof Error ? e.message : String(e) }, "readyz failed");
-      res.status(503).json({ ok: false });
+      dangDo = kiemTraCsdlChoDoSanSang()
+        .then(() => {
+          // Đóng dấu thời gian lúc phép dò KẾT THÚC, không phải lúc request tới: lấy `now` thì một
+          // phép dò chậm 2 giây đã ăn mất 2 trong 5 giây hiệu lực của đệm.
+          readyzCache = { t: Date.now(), ok: true };
+        })
+        .catch((e: unknown) => {
+          readyzCache = { t: Date.now(), ok: false };
+          // Never leak DB error details on an unauthenticated endpoint.
+          logger.error({ err: e instanceof Error ? e.message : String(e) }, "readyz failed");
+        })
+        .finally(() => {
+          dangDo = null;
+        });
     }
+    await dangDo;
+    res.status(readyzCache.ok ? 200 : 503).json({ ok: readyzCache.ok });
   });
   app.get("/api/health", (_req, res) => res.json({ ok: true, t: new Date() }));
 

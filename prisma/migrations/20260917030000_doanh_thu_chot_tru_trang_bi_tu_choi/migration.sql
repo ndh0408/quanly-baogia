@@ -1,0 +1,16 @@
+-- DOANH THU GHI NHẬN LÚC CHỐT — TRỪ PHẦN KHÁCH KHÔNG DUYỆT.
+--
+-- ── VÌ SAO ────────────────────────────────────────────────────────────────
+-- `QuoteSheet.custStatus` ("approved" / "rejected" / null) tồn tại từ lâu để ghi ý kiến khách cho
+-- TỪNG trang. Nhưng không một dòng mã nào ĐỌC nó: `markConverted` chuyển cả báo giá sang
+-- `converted` và phát webhook kèm `Quote.total` — tức TỔNG CỦA MỌI TRANG, gồm cả trang khách đã
+-- bấm "Không duyệt". Hệ thống ghi nhận một đơn đã chốt với số tiền CAO HƠN mức khách đồng ý.
+--
+-- ── CỘT MỚI, KHÔNG SỬA CỘT CŨ ─────────────────────────────────────────────
+-- `Quote.total` giữ NGUYÊN nghĩa: tổng của bản báo giá như nó được soạn và xuất ra file cho khách.
+-- Đổi nghĩa cột đó là làm sai mọi chỗ đang đọc nó (xuất Excel/PDF, lịch sử phiên bản, bản xuất
+-- GDPR). `convertedTotal` là một con số KHÁC: số tiền THẬT SỰ chốt được.
+--
+-- NULL = chưa chốt, HOẶC đã chốt TRƯỚC khi có cột này. Mọi nơi đọc phải dùng
+-- `COALESCE("convertedTotal", "total")` để bản ghi cũ vẫn ra đúng con số nó vẫn luôn mang.
+ALTER TABLE "Quote" ADD COLUMN "convertedTotal" DECIMAL(18,2);
