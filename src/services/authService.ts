@@ -198,7 +198,15 @@ export function sendPasswordReset(req: Request) {
 export async function inviteInfo(req: Request) {
   const user = await findInvitee(req.params.token);
   if (!user) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
-  return { email: user.email, displayName: user.displayName, role: user.role };
+  // `datLaiMatKhau` — MÀN NÀY KIÊM HAI VIỆC, và hai việc đó cần hai cái form khác nhau:
+  //   · tài khoản CHƯA kích hoạt (active=false) → nhận lời mời LẦN ĐẦU: hỏi họ tên / SĐT / chức
+  //     danh / tên người gửi là đúng, vì hồ sơ đang trống và đây là lúc duy nhất tiện hỏi;
+  //   · tài khoản ĐÃ kích hoạt → đây là "Quên mật khẩu": người ta chỉ muốn đổi mật khẩu. Bắt gõ
+  //     lại SĐT/chức danh ở đây vừa vô lý vừa nguy hiểm — bỏ trống một ô là mất dữ liệu đang có
+  //     (chính lỗi đã xoá trắng hồ sơ 5/10 tài khoản trên production).
+  // Trả cờ ra để SPA dựng đúng form. KHÔNG lộ thêm gì: người gọi được endpoint này đã cầm sẵn một
+  // token dùng-một-lần còn hạn của chính tài khoản đó.
+  return { email: user.email, displayName: user.displayName, role: user.role, datLaiMatKhau: user.active === true };
 }
 
 // Accept an invite: set own password + phone, activate, then log in.
@@ -277,10 +285,22 @@ export async function acceptInvite(req: Request) {
       // tài khoản (kể cả phiên kẻ tấn công đang giữ) vẫn sống sau khi nạn nhân đặt lại mật khẩu.
       passwordChangedAt: new Date(),
       active: true,
+      // ── BỎ TRỐNG = GIỮ NGUYÊN, KHÔNG PHẢI XOÁ ────────────────────────────
+      // Đường này KIÊM LUÔN "Quên mật khẩu" (xem chú thích `passwordChangedAt` ngay trên). Bản
+      // trước ghi `phone?.trim() || null`, tức mỗi lần một người đặt lại mật khẩu mà không gõ lại
+      // SĐT/chức danh/tên người gửi thì BA TRƯỜNG ĐÓ BỊ XOÁ TRẮNG — im lặng, không báo gì.
+      //
+      // ĐÃ THẤY TRÊN PRODUCTION: 5/10 tài khoản trống cả ba, trong đó có tài khoản tạo gần như
+      // toàn bộ báo giá. Hậu quả người dùng gặp: mọi báo giá mới không còn tự điền SĐT người gửi,
+      // phải gõ tay lại từng lần — và họ CHẮC CHẮN đã nhập lúc nhận lời mời.
+      //
+      // `displayName` ngay trên đã làm đúng từ đầu (`|| user.displayName`); ba dòng dưới chỉ là
+      // làm cho nhất quán với nó. Muốn XOÁ một trường thì vào Tài khoản → hồ sơ, nơi người dùng
+      // nhìn thấy giá trị hiện tại trước khi sửa — chứ không phải ở một form đặt lại mật khẩu.
       displayName: displayName?.trim() || user.displayName,
-      phone: phone?.trim() || null,
-      title: title?.trim() || null,
-      senderName: senderName?.trim() || null,
+      phone: phone?.trim() || user.phone,
+      title: title?.trim() || user.title,
+      senderName: senderName?.trim() || user.senderName,
       inviteTokenHash: null,
       inviteExpiresAt: null,
       // Đặt lại mật khẩu THÀNH CÔNG thì xoá bộ đếm khoá, y như đăng nhập thành công. Không xoá thì

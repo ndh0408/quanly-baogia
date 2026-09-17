@@ -219,9 +219,11 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
 }
 
 // Onboard — đọc token từ URL, tải lời mời, kích hoạt tài khoản + đăng nhập.
-function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
+/** Xuất ra để bài kiểm dựng thẳng được màn này — `web/src/App.onboard.test.tsx`. Ứng dụng vẫn chỉ
+ *  vào đây qua `#/onboard` ở `App`. */
+export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
   const token = new URLSearchParams(location.hash.split("?")[1] || "").get("token") || "";
-  const [info, setInfo] = useState<{ email: string; displayName?: string } | null>(null);
+  const [info, setInfo] = useState<{ email: string; displayName?: string; datLaiMatKhau?: boolean } | null>(null);
   const [loadErr, setLoadErr] = useState("");
   const [form, setForm] = useState({ displayName: "", senderName: "", phone: "", title: "", password: "", password2: "" });
   const [showPw, setShowPw] = useState(false);
@@ -240,14 +242,24 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
     api.getInvite(token).then((i) => { setInfo(i); setForm((f) => ({ ...f, displayName: i.displayName || "" })); }).catch((ex) => setLoadErr(ex instanceof ApiError ? ex.message : "Lời mời không hợp lệ hoặc đã hết hạn."));
   }, [token]);
 
+  // ── QUÊN MẬT KHẨU KHÔNG PHẢI LÀ KHAI LẠI HỒ SƠ ────────────────────────────────────────────
+  // Một đường `accept-invite` phục vụ hai việc khác hẳn nhau. Với người ĐÃ có tài khoản mà quên mật
+  // khẩu thì hỏi Họ tên / Tên người gửi / SĐT / Chức danh là vô nghĩa — họ khai rồi. Tệ hơn: form cũ
+  // nạp sẵn mỗi `displayName`, ba ô kia luôn RỖNG, nên bấm gửi là gửi ba chuỗi rỗng lên. Ghép với
+  // lỗi `|| null` ở authService (đã vá, xem tests/dm-dat-lai-mat-khau-khong-xoa-ho-so.test.js) thì
+  // mỗi lần đặt lại mật khẩu là xoá trắng hồ sơ. Ở đây chặn tận gốc: không hiện, và KHÔNG GỬI.
+  const datLai = info?.datLaiMatKhau === true;
+
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr("");
     if (form.password !== form.password2) { setErr("Mật khẩu nhập lại không khớp."); return; }
     setBusy(true);
     try {
-      const m = await api.acceptInvite({ token, displayName: form.displayName, senderName: form.senderName, phone: form.phone, title: form.title, password: form.password, mfaToken: mfaToken.trim() || undefined });
-      location.hash = "#/list"; onLogin(m); toast("Chào mừng! Tài khoản đã được kích hoạt.", "success");
+      const hoSo = datLai ? {} : { displayName: form.displayName, senderName: form.senderName, phone: form.phone, title: form.title };
+      const m = await api.acceptInvite({ token, ...hoSo, password: form.password, mfaToken: mfaToken.trim() || undefined });
+      location.hash = "#/list"; onLogin(m);
+      toast(datLai ? "Đã đổi mật khẩu." : "Chào mừng! Tài khoản đã được kích hoạt.", "success");
     } catch (ex) {
       const body = ex instanceof ApiError ? (ex.body as { mfaRequired?: boolean; details?: { message?: string }[] } | undefined) : undefined;
       // Server yêu cầu lớp 2 → lộ ô MFA và cho nhập lại, ĐÚNG như nhánh ở màn đăng nhập.
@@ -258,7 +270,7 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
         return;
       }
       const d = body?.details;
-      setErr((Array.isArray(d) && d[0]?.message) || (ex instanceof ApiError ? ex.message : "Lỗi kích hoạt")); setBusy(false);
+      setErr((Array.isArray(d) && d[0]?.message) || (ex instanceof ApiError ? ex.message : datLai ? "Lỗi đổi mật khẩu" : "Lỗi kích hoạt")); setBusy(false);
     }
   };
 
@@ -269,23 +281,25 @@ function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
           <><div className="err">{loadErr}</div><p className="login-hint">Liên hệ quản trị viên để được mời lại.</p></>
         ) : !info ? <div className="muted">Đang kiểm tra lời mời…</div> : (
           <>
-            <h1>Hoàn tất tài khoản</h1>
+            <h1>{datLai ? "Đặt lại mật khẩu" : "Hoàn tất tài khoản"}</h1>
             <p className="sub">{info.email}</p>
             {err && <div className="err" role="alert">{err}</div>}
             <form id="ob-form" onSubmit={submit}>
-              <label><span>Họ tên</span><input required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
-              <label><span>Tên người gửi trên báo giá</span><input placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
-              <label><span>Số điện thoại</span><input type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
-              <label><span>Chức danh</span><input placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
-              <label><span>Mật khẩu</span>
-                <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
+              {!datLai && <>
+                <label><span>Họ tên</span><input required value={form.displayName} autoFocus onChange={(e) => set("displayName", e.target.value)} /></label>
+                <label><span>Tên người gửi trên báo giá</span><input placeholder="Để trống = dùng Họ tên" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} /></label>
+                <label><span>Số điện thoại</span><input type="tel" inputMode="tel" autoComplete="tel" placeholder="09xx xxx xxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></label>
+                <label><span>Chức danh</span><input placeholder="VD: Account, Sale…" value={form.title} onChange={(e) => set("title", e.target.value)} /></label>
+              </>}
+              <label><span>Mật khẩu mới</span>
+                <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
                   <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
               <label><span>Nhập lại mật khẩu</span><input type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
               {/* Cùng pattern với ô MFA ở màn đăng nhập — khớp regex server, KHÔNG hẹp hơn, nếu
                   không thì trình duyệt tự chặn mã dự phòng và người dùng hết đường phục hồi. */}
               <label id="ob-mfa-field" style={{ display: mfaShown ? "" : "none" }}><span>Mã xác thực (MFA)</span>
                 <input name="mfaToken" autoComplete="one-time-code" pattern="[0-9]{6}|[0-9A-Fa-f]{10,20}" placeholder="Mã 6 số hoặc mã dự phòng" value={mfaToken} onChange={(e) => setMfaToken(e.target.value)} /></label>
-              <button type="submit" className="btn-login" disabled={busy} aria-busy={busy}>{busy ? "Đang kích hoạt…" : "Kích hoạt & đăng nhập"}</button>
+              <button type="submit" className="btn-login" disabled={busy} aria-busy={busy}>{busy ? (datLai ? "Đang đổi…" : "Đang kích hoạt…") : datLai ? "Đổi mật khẩu & đăng nhập" : "Kích hoạt & đăng nhập"}</button>
             </form>
           </>
         )}
