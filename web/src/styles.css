@@ -3686,6 +3686,11 @@ textarea[aria-invalid="true"] {
 .khoi-sheet:not(.dang-mo) {
   padding: 5px 12px;
 }
+/* Thẻ trạng thái trong tiêu đề khối — tách khỏi số tiền một nhịp để không dính thành một cụm chữ. */
+.extra-cat-total .ahn-status {
+  margin-left: 10px;
+}
+
 .khoi-sheet-note {
   font-size: 11.5px;
   margin: 7px 0 2px;

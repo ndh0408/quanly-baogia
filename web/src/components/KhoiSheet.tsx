@@ -81,9 +81,12 @@ export function KhoiSheet({
                  · MỞ + có bảng tổng → trong bảng, ngay dưới những con số mà nó cộng.
                 Mở mà in cả hai là lặp đúng kiểu người dùng đã kêu rườm rà. */}
             {soSheet > 0 && !(mo && coBangTong) && <> · <strong>{M.fmtMoney(tong)}</strong> {duoiTong}</>}
+            {/* Thẻ trạng thái nằm TRONG nút gập, ngay sau số tiền — cùng một cụm với tên khối.
+                Để ngoài thì nó bị đẩy dạt sang phải cạnh "+ Thêm sheet" và đọc ra như thể thuộc
+                về cái nút ấy. Thẻ chỉ là chữ, không bấm được, nên nằm trong <button> vô hại. */}
+            {phuHieu}
           </span>
         </button>
-        {phuHieu}
         {nutThem}
       </div>
       {mo && (
