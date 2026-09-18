@@ -314,6 +314,11 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
 
 function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User; cat?: PermCatalog; onClose: () => void; onSaved: () => void; onPreview?: (perms: string[], label: string) => void }) {
   const [displayName, setDisplayName] = useState(user.displayName || "");
+  // NẠP SẴN từ `user.email` (USER_SELECT trả cột này từ trước). Thứ tự vá là bắt buộc và ô này là
+  // mắt PHẢI CÓ TRƯỚC khi `UserUpdateSchema` nhận khoá `email`: thêm schema mà ô chưa nạp sẵn là mỗi
+  // lần bấm Lưu XOÁ TRẮNG email của người ta — biến thể NẶNG NHẤT của sự cố xoá trắng 5/10 hồ sơ,
+  // vì đây là định danh đăng nhập + đường nhận thư mời/đặt lại mật khẩu.
+  const [email, setEmail] = useState(user.email || "");
   const [senderName, setSenderName] = useState(user.senderName || "");
   const [phone, setPhone] = useState(user.phone || "");
   // NẠP SẴN từ `user.title` — bắt buộc, không phải tuỳ chọn. Ô trống mà payload vẫn gửi `null` là
@@ -350,6 +355,13 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
       // `updateUser` KHÔNG gọi `timTaiKhoanTrung`, nên không có chốt chống trùng nào chặn lại.
       await api.updateUser(user.id, {
         displayName,
+        // Ô Email NẠP SẴN ⇒ cùng luật với ba ô dưới: xoá trắng là XOÁ THẬT, gửi `null` để nói thẳng ý
+        // định. Khác ba ô kia ở HỆ QUẢ, nên nhãn ô phải nói ra (xem chú thích ở ô bên dưới) và máy chủ
+        // CHẶN đúng một ca: xoá email của tài khoản CHƯA kích hoạt, ca duy nhất làm tài khoản hết
+        // đường dùng (không còn địa chỉ nhận lời mời, mà chưa có mật khẩu để đăng nhập) → 400.
+        // KHÔNG gửi `null`: ô này không xoá được (xem chú thích ở ô nhập). Trống thì để `required`
+        // của trình duyệt chặn tại chỗ, còn nếu lọt tới máy chủ thì `updateUser` trả 400 có lời giải.
+        email: email.trim(),
         senderName: senderName.trim() || null, phone: phone.trim() || null,
         title: title.trim() || null,
         projectCode: projectCode.trim() || null,
@@ -377,6 +389,18 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
           <div className="grid">
             <label className="full"><span>Tên đăng nhập</span><input value={user.username} disabled /></label>
             <label className="full"><span>Họ tên</span><input ref={firstRef} value={displayName} aria-invalid={fieldErrors.displayName ? true : undefined} onChange={(e) => mark(setDisplayName)(e.target.value)} />{fieldErrors.displayName && <div className="field-err">{fieldErrors.displayName}</div>}</label>
+            {/* Trước 2026-09-18 email đặt được ĐÚNG MỘT LẦN lúc mời rồi khoá cứng: `USER_SELECT` trả
+                cột này về nên giao diện ĐỌC được, nhưng không schema quản trị nào NHẬN nó — ảnh gương
+                của ca `title` (ghi-được-không-đọc-được). Một địa chỉ gõ sai lúc mời là không ai sửa
+                nổi, mà đó là nơi nhận thư mời và thư đặt lại mật khẩu.
+                Ô này KHÔNG theo luật "bỏ trống = xoá" như ba ô dưới, và đó là ngoại lệ CÓ CHỦ Ý:
+                email là đường DUY NHẤT để đặt lại mật khẩu, mà endpoint quên-mật-khẩu luôn trả 200 để
+                chống dò tài khoản — nên email rỗng làm đường phục hồi chết IM LẶNG, người ta ngồi chờ
+                một lá thư không bao giờ tới. Máy chủ chặn 400; `required` ở đây chỉ để người dùng biết
+                trước khi bấm Lưu. Muốn bỏ một người thì KHOÁ tài khoản, đừng xoá email. */}
+            <label className="full"><span>Email <em className="unit">(địa chỉ nhận thư mời · đặt lại mật khẩu)</em></span>
+              <input type="email" required value={email} placeholder="vd: nhanvien@gianguyen.vn" aria-invalid={fieldErrors.email ? true : undefined} onChange={(e) => mark(setEmail)(e.target.value)} />
+              {fieldErrors.email && <div className="field-err">{fieldErrors.email}</div>}</label>
             {/* Ô NẠP SẴN giá trị đang có ⇒ xoá trắng là XOÁ THẬT. Admin nhìn thấy "Chị Lan", xoá đi,
                 bấm Lưu — kỳ vọng duy nhất là nó biến mất. Bản trước quy "" về "không đổi", nên
                 giao diện báo "Đã lưu" mà cột vẫn nguyên: lưu mà không ăn. (Luật ngược lại chỉ áp

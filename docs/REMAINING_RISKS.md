@@ -1133,7 +1133,7 @@ mới bỏ cột cũ ở một migration riêng.
 
 ## Lưu được 60.000 dòng nhưng xuất đồng bộ chỉ tới 20.000 — ĐÃ NỐI đường nền (2026-08-27)
 
-`src/validators.ts:270` cho **60 trang** × `:194` **1000 dòng/trang** = tối đa
+`src/validators.ts:355` cho **60 trang** × `:356` **1000 dòng/trang** = tối đa
 **60.000 item** một báo giá. Đường xuất đồng bộ `src/routes/export.routes.ts:35-41`
 lại từ chối từ **20.000 item** (trả 413 ở `:67` và `:105`) với lời nhắn "vui lòng
 dùng xuất nền (async)". Nhưng **không client nào gọi đường nền**: `grep -rn
@@ -1186,7 +1186,7 @@ chung rồi báo trong `src/services/quoteService.ts`.
 
 ## Logo khách hàng định dạng .webp vẫn KHÔNG hiện trong file Excel
 
-`src/validators.ts:139` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
+`src/validators.ts:278` và `web/src/pages/NewQuoteWizard.tsx:15` đều chấp nhận
 `data:image/webp`, còn `insertCustomerLogo` (`src/excel.ts`) chỉ nhúng được
 png/jpeg/gif. Đợt này **chỉ vá phần tệ nhất**: ô C3 nay được xoá trước khi hàm
 `return`, nên file gửi khách không còn in dòng hướng dẫn "logo cty khách hàng"

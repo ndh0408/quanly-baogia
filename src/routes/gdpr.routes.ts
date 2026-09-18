@@ -76,7 +76,11 @@ router.get(
  * KHÔNG xoá). Người đọc chú thích để rà tuân thủ sẽ kết luận sai theo đúng hướng trấn an.
  *
  * Trong một transaction: thu hồi + gỡ dấu vết định vị của refresh token, vô danh hoá dữ liệu cá
- * nhân của CHÍNH người đó ở bảng User và LoginAttempt, rồi soft-delete + khoá hàng. Ngay sau đó
+ * nhân của CHÍNH người đó ở bảng User và ở nhật ký đăng nhập (`LoginAttempt`, CHỈ hàng `success:
+ * true` — hàng thất bại là dấu vết người khác gõ vào tài khoản này; lý do ở gdprService.ts), rồi
+ * soft-delete + khoá hàng. Câu này ĐÚNG kể từ 2026-09-18: trước đó nó khẳng định có xoá
+ * `LoginAttempt` trong khi mã KHÔNG làm thế — một chú thích sai theo hướng TRẤN AN người rà tuân
+ * thủ, tức đúng lớp lỗi mà đoạn ngay trên vừa đặt luật để tránh. Ngay sau đó
  * huỷ mọi phiên cookie của người đó. Báo giá và khách hàng thì GIỮ như bản ghi nghiệp vụ (hàng
  * khách hàng là dữ liệu cá nhân của chủ thể khác), và nhật ký kiểm toán giữ theo nghĩa vụ pháp lý —
  * lưu ý nhật ký đó chứa bản chụp ĐẦY ĐỦ những cột vừa bị xoá (xem chú thích ở gdprService.ts).

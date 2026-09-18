@@ -104,6 +104,33 @@ const phoneXoaDuoc = oXoaDuoc(40, "Số điện thoại tối đa 40 ký tự");
 const titleXoaDuoc = oXoaDuoc(120, "Chức danh tối đa 120 ký tự");
 const senderNameXoaDuoc = oXoaDuoc(120, "Tên người gửi tối đa 120 ký tự");
 
+// Email của modal "Sửa tài khoản" — KHÔNG dùng lại được `oXoaDuoc`, và THỨ TỰ các phép ở đây là
+// phần mang tải, không phải thẩm mỹ:
+//
+//   · `.email()` chạy TRƯỚC `.transform()`. Viết `z.string().email().nullable().optional()
+//     .transform(rongLaXoa)` thì ô rỗng nhận 400 "Email không hợp lệ" — LỆNH XOÁ biến thành LỖI
+//     NHẬP LIỆU, và admin đọc thông báo sai bản chất rồi đi sửa thứ không sai.
+//   · `.email()` trước `.trim()` còn từ chối luôn địa chỉ dán kèm khoảng trắng (" a@b.com " → 400).
+//   · `oXoaDuoc` thì ngược lại: nó KHÔNG kiểm định dạng chút nào, nên "khong-phai-email" lọt xuống
+//     cột `@unique` là định danh đăng nhập.
+//
+// Nên: trần + `trim` TRƯỚC, quy `""`/`null` về `null`, RỒI mới kiểm định dạng trên giá trị còn lại
+// bằng `.refine` (bỏ qua `null`, vì `null` ở đây là ý định XOÁ chứ không phải một email sai).
+// Đã đo trên zod 4.6.5 đang cài: `{}` → `{}` (khoá vắng mặt KHÔNG lọt vào kết quả parse) ·
+// `{email:""}` → `null` · `{email:null}` → `null` · `" a@b.com "` → `"a@b.com"` ·
+// `"khong-phai-email"` → 400 ở path `["email"]` · 161 ký tự → 400 "Email tối đa 160 ký tự".
+//
+// Trần 160 và cả hai câu chữ phải TRÙNG `UserInviteSchema` — một trường thì một trần và một câu
+// chữ, đúng luật đã chốt cho `senderName` ở trên.
+const emailXoaDuoc = z
+  .string()
+  .max(160, "Email tối đa 160 ký tự")
+  .trim()
+  .nullable()
+  .optional()
+  .transform(rongLaXoa)
+  .refine((v) => v == null || z.string().email().safeParse(v).success, "Email không hợp lệ");
+
 // A user's "Mã dự án" is each person's OWN unique PREFIX (vd FP_D26); the system then
 // auto-appends the per-quote sequence _001, _002… (nextProjectCode). So the prefix must
 // NOT itself end in a sequence — otherwise you get FP_D26_001_001. Strip any trailing
@@ -195,9 +222,21 @@ export const UserCreateSchema = z.object({
 // rồi mới thêm ô Chức danh vào modal với giá trị nạp sẵn từ `user.title`, rồi mới đổi helper ở đây.
 // Làm ngược thứ tự — đổi helper khi ô chưa nạp sẵn, hoặc thêm ô mà không nạp sẵn — là mỗi lần bấm
 // Lưu xoá sạch chức danh của người ta, đúng cái bẫy đã xoá trắng hồ sơ 5/10 tài khoản.
+//
+// `email` vào đây ngày 2026-09-18, và vào SAU ô Email của modal — cùng thứ tự bắt buộc như `title`.
+// Trước đó nó là cột ĐỌC-ĐƯỢC-KHÔNG-GHI-ĐƯỢC duy nhất (ảnh gương của ca `title`): `USER_SELECT` trả
+// `email` về nên giao diện đọc ra được, nhưng KHÔNG schema quản trị nào nhận nó, nên một địa chỉ gõ
+// sai lúc mời là khoá cứng vĩnh viễn — `validate()` dùng `z.object` nên khoá lạ bị STRIP IM LẶNG,
+// admin gửi `email` lên và nhận 200 mà không có gì đổi.
+//
+// ĐÂY KHÔNG PHẢI "thêm một ô hồ sơ": `findLoginUser` khớp CẢ `username` LẪN `email`, nên đổi email
+// là đổi ĐỊNH DANH ĐĂNG NHẬP của người khác, và cùng lúc đổi đích của thư mời + thư đặt lại mật
+// khẩu + thông báo. Vì vậy `updateUser` phải có chốt chống trùng riêng (xem ở đó) — `@unique` một
+// mình chỉ cho ra 409 với câu chữ chung "Dữ liệu đã tồn tại", không nói trùng cột nào với ai.
 export const UserUpdateSchema = z.object({
   displayName: displayName.optional(),
   role: z.enum(["admin", "manager", "account_hn", "hr", "accountant"]).optional(),
+  email: emailXoaDuoc,
   phone: phoneXoaDuoc,
   title: titleXoaDuoc,
   senderName: senderNameXoaDuoc,

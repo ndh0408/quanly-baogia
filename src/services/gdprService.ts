@@ -9,6 +9,9 @@ import { httpError } from "../httpError.js";
 import { config } from "../config.js";
 import { quoteScopeWhere, readScopeWhere } from "../permissions.js";
 import { destroyAllSessions } from "../sessions.js";
+// `thoatLike` dùng CHUNG với phía đọc (findLoginUser) và phía chống trùng tài khoản — ba nửa của
+// cùng một quy tắc, và nửa nào tự chép lại phép thoát là nửa sẽ trôi khỏi hai nửa kia.
+import { thoatLike } from "../authCore.js";
 import { bangNoiBoTheoSheet, bangHnTheoBaoGia } from "./quoteService.js";
 
 /**
@@ -54,6 +57,45 @@ export function serializeExport(data: unknown): string {
  *     mà giữ nguyên dấu vết định vị của token là làm nửa việc.
  *   · user_sessions — `sess` là JSON chứa `displayName` + `username` THẬT. Kho phiên nằm NGOÀI
  *     Prisma nên không vào được transaction; `destroyAllSessions` chạy ngay sau đó (xem `xoaDanhTinh`).
+ *   · LoginAttempt — hàng `success: true`. Xem khối riêng ngay dưới: quyết định ở đây đã ĐẢO CHIỀU
+ *     ngày 2026-09-18, nên đừng đọc bản ghi lịch sử ở chỗ khác mà suy ra hành vi hôm nay.
+ *
+ * ── LoginAttempt: ĐÃ GỠ RỒI LÀM LẠI CHO ĐÚNG (2026-09-18) ──────────────────
+ * Bản trước CỐ Ý không đụng bảng này, và lý lẽ hồi đó không sai: một phép `updateMany({ where: {
+ * username } })` so BYTE-FOR-BYTE sẽ SÓT hàng, vì phía GHI lưu ĐÚNG chuỗi người dùng gõ (`authCore.ts`:
+ * `username: loginId`) còn phía ĐỌC (`findLoginUser`) khớp KHÔNG PHÂN BIỆT HOA/THƯỜNG và khớp CẢ cột
+ * `email`. Một phép xoá SÓT mà đọc vào tưởng đã xong thì tệ hơn không xoá.
+ *
+ * Chủ hệ thống nay YÊU CẦU xoá, nên lý lẽ đó không còn là cớ để không làm — nó thành BẢN ĐẶC TẢ của
+ * phép lọc. Bốn điều kiện, cả bốn đều bắt buộc:
+ *
+ *   (a) KHỚP CẢ `username` CŨ LẪN `email` CŨ. Bảng không có khoá ngoại về User; chuỗi `username` là
+ *       đường lần ra DUY NHẤT, và người ta đăng nhập được bằng cả hai. Hai giá trị ấy phải được đọc
+ *       TRƯỚC transaction (xem `xoaDanhTinh`) vì chính transaction này ghi đè `username` và đặt
+ *       `email = null` — đọc sau là khớp 0 hàng, và một bài kiểm chỉ đo văn bản nguồn vẫn xanh.
+ *   (b) KHỚP KHÔNG PHÂN BIỆT HOA/THƯỜNG (`mode: "insensitive"`). Đo được trên Prisma 7.10.0 +
+ *       adapter-pg: nó chạy trong `updateMany({ where })`.
+ *   (c) PHẢI ĐI QUA `thoatLike`. Đây là cái bẫy NGƯỢC CHIỀU với bẫy ở trên, và nó nặng hơn: Prisma
+ *       biên dịch `equals` + `mode: "insensitive"` thành ILIKE, KHÔNG phải `lower() = lower()`, nên
+ *       `_` và `%` trong chuỗi trở thành KÝ TỰ ĐẠI DIỆN. Regex `username` CHO PHÉP `_`, và tài khoản
+ *       mời qua email lấy thẳng email làm username. Đo thật: một tên chứa `_` quét trúng 2 hàng
+ *       (xoá dấu vết đăng nhập của NGƯỜI KHÁC — đúng thứ bản vá này phải tránh) và về 1 hàng khi có
+ *       `thoatLike`. Dùng CHUNG helper đã xuất khẩu ở authCore, đừng chép lại phép thoát.
+ *   (d) CHỈ CHẠM HÀNG `success: true`. `ip`/`userAgent` của hàng `success: false` là dấu vết của
+ *       NGƯỜI KHÁC gõ vào tài khoản này — `recordAttempt(false, "no_such_user")` ghi một hàng cho
+ *       MỌI chuỗi người lạ gõ — tức bằng chứng an ninh, không phải dữ liệu cá nhân của người xin xoá.
+ *       Hàng `success: true` thì người gõ đã chứng minh biết mật khẩu VÀ qua cổng MFA, nên đó chắc
+ *       chắn là chính chủ thể. Retention vẫn tự dọn cả bảng sau 365 ngày (RETAIN_LOGIN_DAYS).
+ *
+ * ĐỔI TÊN, KHÔNG XOÁ HÀNG: `username` là `String` NOT NULL nên không null được → ghi `tenThayThe`;
+ * `ip`/`userAgent` về `null`. Mirror đúng cách `RefreshToken` được xử lý ở dưới, và giữ SỐ HÀNG nên
+ * dòng thời gian an ninh (bao nhiêu lần đăng nhập thành công, lúc nào) còn nguyên.
+ *
+ * ⚠ HẠN CHẾ ĐÃ BIẾT, khai ra để không thành khoảng lặng: phép khớp chỉ lần ra được `username`/`email`
+ * HIỆN TẠI. Từ 2026-09-18 `UserUpdateSchema` nhận `email`, nên quản trị đổi được email của một người
+ * — và mọi hàng `LoginAttempt` sinh ra từ lần đăng nhập bằng email CŨ trở nên không lần ra được. Bảng
+ * không lưu `userId` nên không có đường nào khép kín chỗ này mà không đổi schema. Retention 365 ngày
+ * là lớp chặn cuối.
  *
  * ── CỐ Ý GIỮ LẠI — NÓI THẲNG RA, ĐỪNG ĐỂ LÀ KHOẢNG LẶNG ───────────────────
  * Những chỗ dưới đây KHÔNG bị đụng tới, và đó là quyết định chứ không phải bỏ sót. Chú thích cũ chỉ
@@ -70,26 +112,32 @@ export function serializeExport(data: unknown): string {
  *     đủ username/email/displayName/phone/title/senderName/projectCode. Giữ theo nghĩa vụ pháp lý,
  *     nhưng đây là bản sao ĐẦY ĐỦ của đúng những cột vừa bị xoá ở trên — người rà tuân thủ phải biết.
  *   · Customer — dữ liệu cá nhân của CHỦ THỂ KHÁC, không phải của người xin xoá.
- *   · LoginAttempt — ĐÃ THỬ XOÁ VÀ ĐÃ GỠ BỎ, nói rõ để người sau khỏi làm lại. Bảng này không có
- *     khoá ngoại tới User; đường duy nhất lần ra là chuỗi `username`. Nhưng phía GHI lưu ĐÚNG chuỗi
- *     người dùng gõ (`authCore.ts`, `username: loginId`) còn phía ĐỌC khớp KHÔNG PHÂN BIỆT HOA
- *     THƯỜNG và khớp cả cột `email`. Nên một phép `updateMany({ where: { username } })` so
- *     byte-for-byte SÓT mọi hàng phát sinh từ lần gõ khác hoa/thường hoặc gõ email — giữ nguyên
- *     email thật + IP + user-agent. Một phép xoá SÓT mà đọc vào tưởng đã xong còn tệ hơn không xoá:
- *     nó tạo ra sự yên tâm sai trong đúng thứ cần chắc chắn nhất.
- *     Và kể cả khớp đúng thì vẫn sai một nửa: ip/userAgent của những hàng `success: false` là dấu
- *     vết của NGƯỜI KHÁC gõ vào tài khoản này, tức bằng chứng an ninh, không phải dữ liệu cá nhân
- *     của người xin xoá. Retention tự dọn bảng sau 365 ngày (RETAIN_LOGIN_DAYS).
+ *   · LoginAttempt hàng `success: false` — ip/userAgent ở đó là dấu vết của NGƯỜI KHÁC gõ vào tài
+ *     khoản này (bằng chứng an ninh), không phải dữ liệu cá nhân của người xin xoá. Lý lẽ đầy đủ ở
+ *     điều kiện (d) của khối LoginAttempt bên trên. Retention tự dọn sau 365 ngày.
  *   · AuditEvent.ip/userAgent — cùng lý lẽ với `before/after` ngay trên: nhật ký giữ theo nghĩa vụ
  *     pháp lý. Nêu tên ở đây để người rà tuân thủ biết hai cột này CÒN, chứ không phải bị bỏ quên.
  *
  * Thêm một cột cá nhân mới vào `model User` mà quên khối `data` này là ĐỎ ở
  * tests/gx-gdpr-xoa-sot-cot-pii.test.js (bài đó khoá theo QUAN HỆ với schema, không ghim danh sách).
  */
-function anonymizeUserOps(id: number, tenThayThe: string) {
+function anonymizeUserOps(id: number, tenThayThe: string, danhTinhCu: { username: string; email: string | null }) {
   const luc = new Date();
+  // Tập chuỗi đăng nhập của người này. `new Set` vì tài khoản mời qua email có `username === email`
+  // — không lọc trùng thì OR có hai nhánh y hệt, vô hại nhưng đọc vào tưởng đang phủ hai thứ khác nhau.
+  const dinhDanhCu = [...new Set([danhTinhCu.username, danhTinhCu.email].filter((v): v is string => !!v))];
   return [
     prisma.refreshToken.updateMany({ where: { userId: id }, data: { revokedAt: luc, ip: null, userAgent: null } }),
+    // Bốn điều kiện (a)–(d) của khối LoginAttempt trong docblock trên, theo đúng thứ tự đó. Đặt op
+    // này TRƯỚC `prisma.user.update` để đọc tự nhiên: giá trị trong `where` đã chốt lúc dựng promise
+    // nên thứ tự không đổi kết quả, nhưng người đọc không phải tự trả lời "hàng đã bị đổi tên chưa".
+    prisma.loginAttempt.updateMany({
+      where: {
+        success: true,
+        OR: dinhDanhCu.map((v) => ({ username: { equals: thoatLike(v), mode: "insensitive" as const } })),
+      },
+      data: { username: tenThayThe, ip: null, userAgent: null },
+    }),
     prisma.user.update({
       where: { id },
       data: {
@@ -128,10 +176,14 @@ function anonymizeUserOps(id: number, tenThayThe: string) {
  * khi thông tin xác thực đổi; đường xoá là chỗ cần nó nhất mà lại là chỗ duy nhất quên.
  */
 async function xoaDanhTinh(id: number) {
-  const truoc = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+  // `username` + `email` PHẢI đọc Ở ĐÂY, TRƯỚC transaction. `LoginAttempt` không có khoá ngoại về
+  // User nên hai chuỗi này là đường lần ra DUY NHẤT của nhật ký đăng nhập, mà chính transaction bên
+  // dưới ghi đè `username` thành `tenThayThe` và đặt `email = null`. Đọc sau là khớp 0 hàng — và đó
+  // là kiểu thất bại IM LẶNG: `updateMany` trả `count: 0` chứ không ném, nên đường xoá vẫn trả 200.
+  const truoc = await prisma.user.findUnique({ where: { id }, select: { id: true, username: true, email: true } });
   if (!truoc) throw httpError(404, "Không tìm thấy người dùng");
   const tenThayThe = `deleted-${id}-${Date.now()}`;
-  await prisma.$transaction(anonymizeUserOps(id, tenThayThe));
+  await prisma.$transaction(anonymizeUserOps(id, tenThayThe, { username: truoc.username, email: truoc.email }));
   // Nằm NGOÀI Prisma (bảng của connect-pg-simple) nên không vào được transaction ở trên.
   await destroyAllSessions(id);
 }

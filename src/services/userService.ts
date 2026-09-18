@@ -38,15 +38,20 @@ import { thoatLike } from "../authCore.js";
  * KHÔNG chuẩn hoá giá trị đem LƯU: email/tên đăng nhập vẫn được lưu ĐÚNG như người dùng gõ. Đây chỉ
  * là phép TRA CỨU. Xem tests/b4-user-case-duplicate.test.js.
  */
-async function timTaiKhoanTrung(giaTri: string, truong: ("username" | "email")[], kemDaXoa = false) {
+async function timTaiKhoanTrung(giaTri: string, truong: ("username" | "email")[], kemDaXoa = false, boQuaId?: number) {
+  // `boQuaId` — LOẠI TRỪ CHÍNH HÀNG ĐANG SỬA. Chỉ đường TẠO/MỜI mới được phép bỏ trống tham số này:
+  // ở đó chưa có hàng nào của mình để tự đụng. Đường SỬA thì bắt buộc, vì modal "Sửa" gửi lại giá
+  // trị NẠP SẴN y nguyên mỗi lần bấm Lưu — không loại trừ self là 409 MỖI LẦN LƯU dù admin chỉ đổi
+  // số điện thoại, và cái 409 đó nói "email đã có tài khoản" trong khi tài khoản đó là chính họ.
+  const loaiTru = boQuaId === undefined ? {} : { id: { not: boQuaId } };
   const dungY = await prisma.user.findFirst({
-    where: { OR: truong.map((f) => ({ [f]: giaTri })) },
+    where: { ...loaiTru, OR: truong.map((f) => ({ [f]: giaTri })) },
     includeDeleted: kemDaXoa,
   } as any);
   if (dungY) return dungY;
   const mau = thoatLike(giaTri);
   return (await prisma.user.findFirst({
-    where: { OR: truong.map((f) => ({ [f]: { equals: mau, mode: "insensitive" } })) },
+    where: { ...loaiTru, OR: truong.map((f) => ({ [f]: { equals: mau, mode: "insensitive" } })) },
     orderBy: { id: "asc" },
     includeDeleted: kemDaXoa,
   } as any)) ?? null;
@@ -138,6 +143,9 @@ export async function listUsers(_req: Request) {
 
 // Invite an employee by email — they self-onboard (set password + fill details).
 export async function inviteUser(req: Request) {
+  // KHÔNG có `canSign` ở đây, và đó là chủ ý: `UserInviteSchema` cũng không khai nó, nên hai nửa
+  // NHẤT QUÁN — không có gì bị rơi im lặng như ở `createUser` trước bản vá 2026-09-18. Người tự
+  // onboard không được tự cấp quyền ký; quản trị cấp sau bằng ô "Ký chứng từ" trong ma trận.
   const { email, displayName, role, projectCode, permissions, senderName } = req.body;
   // Giữ NGUYÊN tập trường được đối chiếu (email HOẶC username) — chỉ đổi phép so từ byte-for-byte
   // sang không-phân-biệt-hoa/thường. Nới tập trường sẽ đổi hành vi đang chạy.
@@ -190,7 +198,7 @@ export async function resendInvite(req: Request) {
 }
 
 export async function createUser(req: Request) {
-  const { username, password, displayName, role, phone, title, senderName } = req.body;
+  const { username, password, displayName, role, phone, title, senderName, canSign } = req.body;
   // includeDeleted: username is unique across soft-deleted rows too — a plain
   // check would miss a deleted holder and surface the DB constraint as a 500.
   // CHỈ đối chiếu cột `username` (KHÔNG kèm `email`) — giữ đúng tập trường cũ, chỉ đổi phép so.
@@ -208,6 +216,24 @@ export async function createUser(req: Request) {
       // Destructure ở trên là TƯỜNG MINH, nên thêm trường vào UserCreateSchema thôi chưa đủ —
       // thiếu dòng này thì zod cho qua mà hàng vẫn ghi thiếu, im lặng.
       senderName: senderName || null,
+      // Và đúng cái bẫy mà chú thích ngay trên vừa cảnh báo đã tái diễn ở dòng dưới nó: `canSign`
+      // được `UserCreateSchema` khai từ lâu (tests/validators.test.js còn khẳng định zod quy chuỗi
+      // "false" về `false`), nhưng destructure không có nó nên cờ RƠI IM LẶNG — admin tích ô, nhận
+      // 201, và quyền ký không bao giờ được cấp. Bài kiểm zod xanh suốt vì nó đo tầng parse.
+      //
+      // ĐÂY LÀ QUYỀN THẬT, không phải cờ trang trí: `resolveUserPermissions` cộng `quote:sign:own`
+      // vào tập hiệu lực khi cờ này bật, và middleware resolve lại tập đó TỪ CSDL mỗi request.
+      //
+      // ⚠ HÔM NAY CHƯA CÓ ĐƯỜNG VÀO TỪ GIAO DIỆN. `web/src/lib/api.ts` không có hàm `createUser`
+      // nào, nên `POST /api/users` chỉ có người gọi API trực tiếp (và bài kiểm). Giao diện cấp quyền
+      // ký bằng cách tích ô "Ký chứng từ" trong ma trận rồi để `updateUser` tự suy cờ. Vá ở đây vẫn
+      // đúng — schema đã hứa nhận thì phải giữ lời, và một trường nhận-mà-không-ghi là cái bẫy chờ
+      // người sau — nhưng đừng đọc nó thành "sự cố đang xảy ra trên giao diện".
+      //
+      // Phải có `?? false` vì cột là `Boolean` NOT NULL và `zbool.optional()` cho ra `undefined` khi
+      // client không gửi khoá. Hàng MỚI nên không có gì để xoá — hai luật ô-bỏ-trống cho cùng một
+      // kết quả ở đây, đúng như chú thích của `phone`/`title` ngay trên.
+      canSign: canSign ?? false,
     },
     select: USER_SELECT,
   });
@@ -227,6 +253,76 @@ export async function updateUser(req: Request) {
     // Admin đặt lại mật khẩu = đổi thông tin xác thực → đóng mốc để MỌI phiên và access token cũ
     // của tài khoản đó chết ngay, không phụ thuộc việc xoá hàng trong kho phiên có thành công không.
     data.passwordChangedAt = new Date();
+  }
+  // ── ĐỔI EMAIL: CHỐT CHỐNG TRÙNG, VÀ MỘT LỆNH ĐỐT CHỨNG THƯ ─────────────────────────────────
+  //
+  // `if (data.email)` chứ KHÔNG phải `!== undefined`. Gọi chốt với `null` là tai hoạ hai chiều:
+  // Prisma dịch `{ email: null }` thành `IS NULL` nên nó khớp BẤT KỲ tài khoản nào đang không có
+  // email — mọi tài khoản đã vô danh hoá theo GDPR đều `email: null` — ra 409 GIẢ, tức không ai xoá
+  // được email nữa; còn nếu CSDL chưa có hàng null nào thì nó rơi xuống `thoatLike(null)`, tức
+  // `null.replace(...)` ⇒ TypeError ⇒ 500.
+  //
+  // Bốn vế của phép đối chiếu, thiếu vế nào cũng tự tạo một lỗi mới:
+  //   (a) loại trừ chính hàng đang sửa — modal gửi lại email nạp sẵn y nguyên mỗi lần Lưu;
+  //   (b) đối chiếu CẢ `email` LẪN `username` — index `User_email_key` chỉ phủ email-vs-email, nhưng
+  //       `findLoginUser` OR cả hai cột. Đặt email của A bằng `username` của B là HỢP LỆ với Postgres
+  //       mà làm hai hàng cùng khớp một chuỗi đăng nhập: bộ đếm `failedAttempts` cộng lên hàng
+  //       `findFirst` trả về, tức KHOÁ CHÉO tài khoản người khác. Và tài khoản mời qua email có
+  //       `username = email`, nên ca này không hiếm;
+  //   (c) `kemDaXoa = true` — hàng xoá mềm vẫn giữ email trong index unique (index KHÔNG partial
+  //       theo `deletedAt`), mà `find*` mặc định thêm `deletedAt: null` nên một chốt viết bình thường
+  //       KHÔNG THẤY hàng đó rồi ăn P2002; đó đúng lý do `createUser` cũng truyền cờ này;
+  //   (d) câu chữ nói rõ LÝ DO. Không có chốt thì P2002 → 409 "Dữ liệu đã tồn tại (trùng khóa duy
+  //       nhất)" (errorHandler, src/middleware.ts) — không nói trùng cột nào, với ai, hay "thuộc về
+  //       một tài khoản đã xoá".
+  if (data.email) {
+    const trung = await timTaiKhoanTrung(String(data.email), ["email", "username"], true, id);
+    if (trung) throw httpError(409, trung.deletedAt ? "Email thuộc về một tài khoản đã xóa" : "Email này đã có tài khoản");
+  }
+  // ── XOÁ TRẮNG EMAIL: CHO, TRỪ ĐÚNG MỘT CA LÀM TÀI KHOẢN HẾT ĐƯỜNG DÙNG ─────────────────────
+  //
+  // Ô Email trong modal "Sửa" NẠP SẴN giá trị đang có, nên theo luật của repo bỏ trống PHẢI là xoá
+  // thật — giữ luật ngược lại ở đây là "lưu mà không ăn". Nhưng xoá email KHÔNG vô hại như xoá chức
+  // danh: nó làm CHẾT ÂM THẦM ba đường (gửi lại lời mời → 400, thư đặt lại mật khẩu → `findLoginUser`
+  // không khớp rồi `return` im lặng sau khi endpoint đã trả 200, thông báo qua thư → bỏ qua không
+  // một dòng log). Nên quyết định được chọn TƯỜNG MINH thay vì để rơi vào mặc định:
+  //
+  //   · tài khoản ĐÃ kích hoạt → CHO xoá. Họ vẫn đăng nhập bằng `username` (và với mọi tài khoản mời
+  //     qua email thì `username` CHÍNH LÀ email cũ, nên chuỗi họ vẫn gõ vẫn chạy). Giao diện phải nói
+  //     rõ hệ quả — xem placeholder ở web/src/pages/Users.tsx, đừng để admin tự bắn vào chân mình.
+  //   · tài khoản CHƯA kích hoạt (pending) → CHẶN. Đây là ca DUY NHẤT xoá email làm tài khoản hết
+  //     đường dùng: không còn địa chỉ để gửi lời mời, mà chưa có mật khẩu để đăng nhập. Người đó
+  //     thành một hàng chết mà không ai hiểu vì sao.
+  //
+  // Truy vấn riêng cho `inviteTokenHash` chứ KHÔNG nhét cột đó vào `USER_SELECT`: `before`/`after`
+  // của `USER_SELECT` được ghi NGUYÊN VĂN vào nhật ký kiểm toán, và một hash chứng thư kích hoạt là
+  // thứ không được nhân bản thêm một bản sao nữa vào bảng nhật ký.
+  if (data.email === null && before.email) {
+    throw httpError(400, "Không xoá trắng được email: đó là đường DUY NHẤT để đặt lại mật khẩu. Đổi sang địa chỉ khác, hoặc khoá tài khoản nếu người này đã nghỉ.");
+  }
+  // ĐỔI EMAIL CỦA TÀI KHOẢN CHƯA KÍCH HOẠT → CHẶN, chỉ dẫn sang "Huỷ lời mời" rồi mời lại.
+  //
+  // Vì sao không cho: đổi email BUỘC phải đốt chứng thư đang sống (xem khối ngay dưới), nhưng
+  // `listUsers` tính `pending: !active && !!inviteTokenHash` và giao diện CHỈ hiện nút "Gửi lại lời
+  // mời" khi `pending`. Nên đốt token của một tài khoản chưa kích hoạt là làm nó rơi khỏi trạng thái
+  // "Chờ kích hoạt", mất luôn nút gửi lại, thành một hàng KẸT CỨNG mà admin không còn đường sửa.
+  //
+  // Và không mở nút "Gửi lại" cho mọi tài khoản `!active` được: `acceptInvite` đặt `active: true`,
+  // nên gửi lại lời mời cho một tài khoản ĐÃ KHOÁ là cho họ tự kích hoạt lại — đúng cái mà nhánh
+  // `active === false` bên dưới đang cố chặn bằng cách đốt token.
+  //
+  // Huỷ-rồi-mời-lại là đường đã có, đã đúng, và admin thấy ngay trên cùng một hàng.
+  if (data.email !== undefined && data.email !== before.email && !before.active) {
+    throw httpError(400, "Tài khoản chưa kích hoạt: hãy bấm \"Huỷ lời mời\" rồi mời lại bằng địa chỉ mới — đổi email lúc này sẽ vô hiệu hoá lời mời đang gửi đi.");
+  }
+  // ĐỔI EMAIL = ĐỔI ĐÍCH ĐẾN CỦA CHỨNG THƯ ĐANG SỐNG. Cùng lớp rủi ro với nhánh `active === false`
+  // ngay dưới: một token mời/đặt-lại còn hạn là đường TỰ ĐẶT MẬT KHẨU rồi `active: true`. Không đốt
+  // nó thì người giữ HỘP THƯ CŨ vẫn kích hoạt được tài khoản và tự đặt mật khẩu — chiếm tài khoản,
+  // bằng đúng đường mà việc đổi email lẽ ra phải cắt. Tới đây thì tài khoản CHẮC CHẮN đã kích hoạt
+  // (ca chưa kích hoạt bị chặn ở trên), nên đốt token không làm mất nút "Gửi lại lời mời" của ai.
+  if (data.email !== undefined && data.email !== before.email) {
+    data.inviteTokenHash = null;
+    data.inviteExpiresAt = null;
   }
   // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
   if (data.permissions !== undefined) {
@@ -287,9 +383,35 @@ export async function updateUser(req: Request) {
         after: { quoteIds: giuLai.map((m) => m.quoteId), scopes: Object.fromEntries(giuLai.map((m) => [m.quoteId, m.scopes])) },
       });
     }
-  } else if (before.role !== user.role || JSON.stringify(before.permissions) !== JSON.stringify(user.permissions)) {
+  } else if (
+    before.role !== user.role ||
+    JSON.stringify(before.permissions) !== JSON.stringify(user.permissions) ||
+    before.canSign !== user.canSign ||
+    id === req.session.userId
+  ) {
     // Đổi vai trò HOẶC tích quyền per-user → đẩy SSE để client tải lại /me, cập nhật ẩn/hiện ngay (server đã
     // áp dụng từ request kế nhờ middleware resolve mỗi request — cái này chỉ để UI mượt).
+    //
+    // `before.canSign !== user.canSign` — cùng lý lẽ, chỉ là cột khác: một lượt PUT chỉ đổi `canSign`
+    // (không kèm `role`, không kèm `permissions`) ĐỔI QUYỀN THẬT ở máy chủ ngay request kế, nhưng
+    // trước bản vá 2026-09-18 không sinh sự kiện nào — nút "Ký" không mọc ra cho tới khi họ F5.
+    //
+    // `id === req.session.userId` — ADMIN SỬA HỒ SƠ CỦA CHÍNH MÌNH. Đây không phải chuyện hiển thị
+    // cho đẹp, nó là một LỆNH XOÁ NGẦM đang chờ: `App.tsx` gọi `api.me()` đúng MỘT LẦN lúc đăng
+    // nhập, và `Shell.tsx` chỉ gọi lại khi nhận "session:refresh" — đường DUY NHẤT. Nên sau khi admin
+    // tự sửa mình qua modal "Sửa" (nút đó KHÔNG bị chặn cho chính mình), state `me` giữ giá trị CŨ
+    // tới hết phiên. Trang "Tài khoản" khởi tạo ô bằng `useState(me.phone || "")` MỘT LẦN, và ba ô
+    // đó là ô NẠP SẴN ⇒ nội dung ô CHÍNH LÀ lệnh ghi: mở trang Hồ sơ rồi bấm Lưu là ghi đè giá trị
+    // vừa sửa bằng giá trị cũ, hoặc XOÁ THẬT nếu trường vừa đi từ rỗng thành có. Cùng lớp lỗi mà
+    // tests/hs-cap-phien-tra-du-truong.test.js gọi là "một lệnh xoá ngầm", chỉ khác cửa vào.
+    //
+    // VÌ SAO SỬA Ở MÁY CHỦ, KHÔNG SỬA Ở CLIENT: client phải gọi lại `api.me()` để có payload CHUẨN
+    // (quyền HIỆU LỰC + `mfaEnabled`). Mẫu `onMe({ ...me, ...u })` của Profile.tsx ĐÚNG ở đó (đường
+    // /auth/profile trả quyền hiệu lực) nhưng SAI nếu bê sang trang Nhân viên: `USER_SELECT.permissions`
+    // là mảng quyền per-user THÔ (`[]` với người dùng quyền mặc định theo role), merge cái thô lên cái
+    // hiệu lực là admin mất sạch menu tới khi F5 — biến một lỗi hiển thị thành một lỗi chặn việc.
+    // Đường này thì dùng lại nguyên dây đã nối, một tệp, và có tiền lệ: `refreshRoleUsers`
+    // (src/routes/permissions.routes.ts) bắn đúng sự kiện này cho mọi user của một vai trò.
     refreshSession(user.id);
   }
   await audit(req, "user.update", {

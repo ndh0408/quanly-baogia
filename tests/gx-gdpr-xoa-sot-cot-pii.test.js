@@ -19,8 +19,11 @@
  * Repo CÓ sẵn `destroyAllSessions`, ba service khác đều gọi, riêng gdprService thì không — nên
  * đường ADMIN xoá hộ không huỷ MỘT phiên cookie nào của nạn nhân.
  *
- * `LoginAttempt` thì CỐ Ý ĐỂ NGUYÊN — đã thử xoá rồi gỡ bỏ; lý do đầy đủ nằm ở ca kiểm cuối tệp
- * này và ở docblock của `anonymizeUserOps`.
+ * `LoginAttempt` thì từ 2026-09-18 CÓ bị ẩn danh — hàng `success: true`, khớp không phân biệt hoa/
+ * thường trên cả `username` CŨ lẫn `email` CŨ. Quyết định trước đó là KHÔNG đụng, và chính tệp này
+ * từng khoá quyết định ấy lại; nay nó khoá quyết định MỚI. Tệp đo phạm vi ĐẦY ĐỦ của hành vi mới là
+ * tests/nd-gdpr-vo-danh-hoa-nhat-ky-dang-nhap.test.js (bốn hình dạng chuỗi, bẫy ký tự đại diện của
+ * ILIKE, và vế `success: false` còn nguyên); ở đây chỉ giữ vế tối thiểu cho đúng phạm vi tệp.
  *
  * ── VÌ SAO TRƯỚC ĐÓ KHÔNG AI THẤY ──────────────────────────────────────────
  * Không có bài kiểm nào gác đường xoá. Cả 5 tệp `*gdpr*` trong tests/ đều về đường XUẤT. Nên thêm
@@ -123,11 +126,22 @@ describe("Đường xoá GDPR phủ hết cột của model User", () => {
     // `[^)]*` chứ KHÔNG phải `[\s\S]*?`: mẫu bắc cầu qua nhiều dòng sẽ khớp `userAgent: null` của
     // MỘT LỆNH KHÁC nằm bên dưới, tức khẳng định không đo đúng thứ nó nói là đang đo.
     expect(NGUON_GDPR, "refresh token bị thu hồi mà vẫn giữ IP + user-agent của từng lần đăng nhập").toMatch(/refreshToken\.updateMany\([^)]*userAgent: null/u);
-    // LoginAttempt: CỐ Ý KHÔNG ĐỤNG. Khoá lại quyết định để người sau khỏi "sửa cho đủ" rồi tái
-    // phạm — lý do đầy đủ nằm trong docblock của `anonymizeUserOps`, tóm tắt: lọc theo `username`
-    // so byte-for-byte sẽ SÓT hàng (phía ghi lưu đúng chuỗi người gõ, phía đọc khớp không phân biệt
-    // hoa/thường và khớp cả email), mà một phép xoá sót đọc vào tưởng đã xong thì tệ hơn không xoá.
-    expect(NGUON_GDPR, "đã thêm lại phép xoá LoginAttempt — đọc docblock anonymizeUserOps trước khi làm").not.toMatch(/loginAttempt\.updateMany/u);
+    // LoginAttempt: từ 2026-09-18 PHẢI bị đụng (quyết định cũ "cố ý để nguyên" đã ĐẢO — xem docblock
+    // của `anonymizeUserOps`). Ba khẳng định chứ không một, vì mỗi vế chặn một cách làm sai KHÁC:
+    //   · `thoatLike` — Prisma biên dịch `mode: "insensitive"` thành ILIKE, nên `_`/`%` trong chuỗi
+    //     thành ký tự đại diện. Thiếu nó là phép xoá GDPR tự tay phá nhật ký của người khác;
+    //   · `success: true` — hàng thất bại là dấu vết của NGƯỜI KHÁC gõ vào tài khoản này;
+    //   · `updateMany` (không phải `deleteMany`) — đổi tên chứ không xoá hàng, giữ dòng thời gian an ninh.
+    //
+    // ⚠ BA KHẲNG ĐỊNH NÀY LÀ PHÉP SO VĂN BẢN NGUỒN, tức chốt YẾU: một bản vá khớp 0 hàng (đọc
+    // username/email SAU transaction, lúc chúng đã bị ghi đè) vẫn xanh ở đây. Sức nặng thật nằm ở
+    // Phần B của tệp này và ở tests/nd-gdpr-vo-danh-hoa-nhat-ky-dang-nhap.test.js, nơi đi HTTP thật
+    // rồi soi CSDL. Đừng coi việc đổi ba dòng dưới đây là đã chuyển xong quyết định.
+    const opNhatKy = NGUON_GDPR.match(/prisma\.loginAttempt\.updateMany\([\s\S]*?\}\),/u);
+    expect(opNhatKy, "đường xoá GDPR không còn đụng `LoginAttempt` — email thật + IP + vân tay thiết bị của người đã yêu cầu được quên vẫn nằm đó").toBeTruthy();
+    expect(opNhatKy[0], "phép lọc không đi qua `thoatLike` — `_`/`%` trong tên đăng nhập là ký tự đại diện của ILIKE, phép xoá này sẽ quét trúng nhật ký của NGƯỜI KHÁC").toMatch(/thoatLike\(/u);
+    expect(opNhatKy[0], "phép lọc không siết `success: true` — ip/userAgent của hàng thất bại là dấu vết người khác dò mật khẩu, tức bằng chứng an ninh").toMatch(/success:\s*true/u);
+    expect(NGUON_GDPR, "đã chuyển sang XOÁ HÀNG nhật ký đăng nhập — quyết định là ĐỔI TÊN + gỡ ip/userAgent, giữ số hàng để dòng thời gian an ninh còn nguyên").not.toMatch(/loginAttempt\.deleteMany/u);
     expect(NGUON_GDPR, "không huỷ phiên cookie: `sess` chứa displayName + username thật, và người bị admin xoá vẫn dùng tiếp tab đang mở").toMatch(/destroyAllSessions\(/u);
   });
 });
@@ -223,7 +237,10 @@ describe.runIf(dbAvailable)("Xoá tài khoản theo GDPR: không cột nào gi�
       await prisma.user.findMany({ where: { username: { contains: TAG } }, select: { id: true }, includeDeleted: true })
     ).map((u) => u.id);
     await prisma.$executeRawUnsafe(`DELETE FROM user_sessions WHERE sid LIKE $1`, `${TAG}%`).catch(() => {});
-    await prisma.loginAttempt.deleteMany({ where: { username: { contains: TAG } } }).catch(() => {});
+    // `contains: TAG` KHÔNG còn đủ từ 2026-09-18: hàng nhật ký của nạn nhân đã bị đổi tên thành
+    // `deleted-<id>-<ts>`, tức mất luôn TAG. Dọn thêm theo tên thay thế, nếu không mỗi lượt chạy để
+    // lại một hàng rác trong CSDL test — và rác đó mang đúng hình dạng mà bài khác có thể đếm trúng.
+    await prisma.loginAttempt.deleteMany({ where: { OR: [{ username: { contains: TAG } }, { username: { startsWith: `deleted-${nanNhanId}-` } }] } }).catch(() => {});
     await prisma.refreshToken.deleteMany({ where: { userId: { in: ids } } }).catch(() => {});
     await prisma.auditEvent.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { resourceId: { in: ids.map(String) } }] } }).catch(() => {});
     await prisma.user.deleteMany({ where: { id: { in: ids } }, hardDelete: true, includeDeleted: true }).catch(() => {});
@@ -256,22 +273,24 @@ describe.runIf(dbAvailable)("Xoá tài khoản theo GDPR: không cột nào gi�
     expect(t?.userAgent, "vân tay thiết bị vẫn nằm lại").toBe(null);
   }, 60_000);
 
-  it("nhật ký đăng nhập CỐ Ý còn nguyên — và đó là quyết định, không phải bỏ sót", async () => {
-    /* Đã thử xoá rồi GỠ BỎ. Hai lý do, cả hai đều đo được:
+  it("nhật ký đăng nhập THÀNH CÔNG bị ẩn danh — quyết định cũ đã ĐẢO (2026-09-18)", async () => {
+    /* Trước đây ca này khẳng định điều NGƯỢC LẠI ("cố ý còn nguyên"), và lý lẽ hồi đó không sai — nó
+       chỉ không phải một cái cớ: lọc `where: { username }` so BYTE-FOR-BYTE thì SÓT hàng, vì phía ghi
+       lưu đúng chuỗi người dùng gõ (`authCore.ts`: `username: loginId`) còn phía đọc (`findLoginUser`)
+       khớp KHÔNG phân biệt hoa/thường và khớp CẢ cột `email`. Chủ hệ thống nay yêu cầu xoá, nên lý lẽ
+       ấy thành BẢN ĐẶC TẢ của phép lọc thay vì lý do không làm.
 
-       1. Lọc `where: { username }` so BYTE-FOR-BYTE. Phía ghi lưu đúng chuỗi người dùng gõ
-          (`authCore.ts`: `username: loginId`), phía đọc khớp KHÔNG phân biệt hoa/thường và khớp cả
-          cột `email`. Nên hàng sinh ra từ lần gõ khác hoa/thường — hoặc gõ email khi email khác
-          username — KHÔNG bị chạm, giữ nguyên email thật + IP + user-agent. Một phép xoá SÓT mà
-          đọc vào tưởng đã xong còn tệ hơn không xoá: nó tạo sự yên tâm sai.
-       2. `ip`/`userAgent` của hàng `success: false` là dấu vết của NGƯỜI KHÁC gõ vào tài khoản này
-          — bằng chứng an ninh, không phải dữ liệu cá nhân của người xin xoá.
+       Hàng ở đây là `success: true` (xem beforeAll) nên nó PHẢI bị ẩn danh. Hai vế còn lại —
+       `success: false` còn nguyên cả IP, và nhật ký của người khác không bị ký tự đại diện của ILIKE
+       quét trúng — nằm ở tests/nd-gdpr-vo-danh-hoa-nhat-ky-dang-nhap.test.js, nơi dựng đủ dữ liệu cho
+       cả bốn hình dạng chuỗi. Retention vẫn tự dọn cả bảng sau 365 ngày (RETAIN_LOGIN_DAYS). */
+    expect(await prisma.loginAttempt.findMany({ where: { username: tenCu } }), "username thật của người đã yêu cầu được quên vẫn nằm trong nhật ký đăng nhập").toEqual([]);
 
-       Retention tự dọn bảng sau 365 ngày (RETAIN_LOGIN_DAYS). Bài này khoá QUYẾT ĐỊNH lại: ai
-       muốn đổi thì phải sửa cả bài kiểm và đọc lý do ở trên trước. */
-    const con = await prisma.loginAttempt.findMany({ where: { username: tenCu } });
-    expect(con.length, "hàng nhật ký đăng nhập bị đụng tới — xem lý do trong chính bài kiểm này").toBe(1);
-    expect(con[0].ip, "IP trong nhật ký đăng nhập bị xoá — đó có thể là dấu vết của người khác").toBe("203.0.113.7");
+    const sau = await prisma.user.findFirst({ where: { id: nanNhanId }, includeDeleted: true, select: { username: true } });
+    const con = await prisma.loginAttempt.findMany({ where: { username: sau.username } });
+    expect(con.length, "hàng nhật ký bị XOÁ thay vì đổi tên — quyết định là giữ số hàng để dòng thời gian an ninh còn nguyên").toBe(1);
+    expect(con[0].ip, "đổi tên mà giữ nguyên IP thật là làm nửa việc").toBe(null);
+    expect(con[0].userAgent, "vân tay thiết bị vẫn nằm lại").toBe(null);
   }, 60_000);
 
   it("mọi phiên cookie của người bị xoá bị huỷ — kể cả khi ADMIN xoá hộ", async () => {
