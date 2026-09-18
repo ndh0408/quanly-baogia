@@ -77,6 +77,13 @@ const baoGia = (templateCode) => ({
   ],
 });
 
+/** Bản CÓ NGÀY: thêm `days`, và mẫu clofull_conngay. */
+const baoGiaNgay = () => {
+  const q = baoGia("clofull_conngay");
+  q.sheets[0].items = q.sheets[0].items.map((it) => (it.kind === "item" ? { ...it, days: 3 } : it));
+  return q;
+};
+
 async function moFile(buf) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
@@ -198,5 +205,70 @@ describe("GN KHÔNG ĐỔI — Chi Tiết chỉ của Colorfull", () => {
     const cols = getConfig("unibenfood").items.columns;
     expect(cols.detail, "GN có ngày mọc thêm khe Chi Tiết → dịch hết chữ cột").toBeUndefined();
     expect(cols.unit).toBe("D");
+  });
+});
+
+describe("Colorfull đủ BA mẫu như GN — và mẫu nào cũng có Chi Tiết", () => {
+  // Yêu cầu: Colorfull có không-ngày · có-ngày · banner, cùng bộ quy tắc của GN, cộng cột Chi Tiết.
+  // GN giải bài "có ngày" bằng cách HY SINH cột Chi Tiết (D đổi nhãn thành ĐVT) để khỏi chèn cột.
+  // Colorfull không hy sinh được, nên bản có-ngày có file mẫu riêng 9 cột (B…J).
+  it("cả ba mẫu Colorfull đều khai cột Chi Tiết và đều HIỆN nó", () => {
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const items = getConfig(ma).items;
+      expect(items.columns.detail, `${ma}: mất khoá detail`).toBe("D");
+      expect(items.removeDetail, `${ma}: Chi Tiết lại bị gộp vào Hạng Mục`).toBe(false);
+    }
+  });
+
+  it("banner: y hệt bản không-ngày, CHỈ khác cách đánh số nhóm con", () => {
+    // Quan hệ này phải giống hệt gn_banner ↔ marico_decor: cùng file, cùng cột, cùng công thức.
+    const khong = getConfig("clofull_decor"), banner = getConfig("clofull_banner");
+    expect(banner.filePath, "banner mà dùng file khác thì mọi bản vá bố cục phải làm hai lần").toBe(khong.filePath);
+    expect(banner.items.columns).toEqual(khong.items.columns);
+    expect(banner.items.amountFormula(9)).toBe(khong.items.amountFormula(9));
+    expect(banner.items.numberSubsections, "banner phải đánh số nhóm con").toBe(true);
+    expect(khong.items.numberSubsections, "bản không-ngày KHÔNG đánh số nhóm con").toBeFalsy();
+    // Và đúng quan hệ ấy bên GN, để hai bên không trôi khỏi nhau.
+    expect(getConfig("gn_banner").items.numberSubsections).toBe(true);
+  });
+
+  it("có ngày: 9 cột B…J, Chi Tiết vẫn ở D, Số Ngày chen vào G", async () => {
+    const cols = getConfig("clofull_conngay").items.columns;
+    expect(cols).toEqual({ stt: "B", name: "C", detail: "D", unit: "E", quantity: "F", days: "G", unitPrice: "H", amount: "I", notes: "J" });
+    const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
+    const tieuDe = ["B", "C", "D", "E", "F", "G", "H", "I", "J"].map((c) =>
+      chu(ws.getCell(`${c}${HANG_TIEU_DE}`).value).replace(/\s+/g, " ").trim().toUpperCase());
+    expect(tieuDe).toEqual(["STT", "HẠNG MỤC", "CHI TIẾT", "ĐVT", "SỐ LƯỢNG", "SỐ NGÀY", "ĐƠN GIÁ", "THÀNH TIỀN", "GHI CHÚ"]);
+  }, 120_000);
+
+  it("có ngày: thành tiền = ĐƠN GIÁ × SỐ LƯỢNG × SỐ NGÀY (cùng ý nghĩa với GN có-ngày)", async () => {
+    const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
+    // So CHUỖI thẳng, không dùng regex: `*` trong công thức là ký tự lượng-từ của regex, và bản
+    // đầu của ca này đỏ oan đúng vì thế (escape `\*` rụng mất một lớp khi đi qua heredoc).
+    expect(chu(ws.getCell(`I${HANG_DAU}`).value)).toContain(`H${HANG_DAU}*F${HANG_DAU}*G${HANG_DAU}`);
+    // Số ngày phải RA TỚI FILE, không rơi đâu mất.
+    expect(chu(ws.getCell(`G${HANG_DAU}`).value)).toBe("3");
+    expect(chu(ws.getCell(`D${HANG_DAU}`).value), "Chi Tiết mất ở bản có-ngày").toBe(CT_1);
+  }, 120_000);
+
+  it("có ngày: nhãn khối tổng nới tới H, số tiền sang I — không chừa ô trắng giữa nhãn và số", async () => {
+    // Đây là chỗ `spliceColumns` bỏ quên: nó dời giá trị mà KHÔNG dời vùng gộp, nên nhãn
+    // "Tổng Cộng" từng biến mất khỏi B13 trong khi một ô gộp rỗng nằm đè lên chỗ cũ.
+    const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
+    let hangTong = null;
+    ws.eachRow({ includeEmpty: false }, (row, r) => {
+      if (hangTong == null && chu(row.getCell("B").value).trim() === "Tổng Cộng") hangTong = r;
+    });
+    expect(hangTong, "không tìm thấy hàng Tổng Cộng").toBeTruthy();
+    expect(oChu(ws, `H${hangTong}`), "vùng nhãn không phủ tới H → có ô trắng cạnh số tiền").toBe(`B${hangTong}`);
+    expect(chu(ws.getCell(`I${hangTong}`).value), "số tiền tổng không nằm ở cột I").toMatch(/^=SUM\(I\d+:I\d+\)$/);
+  }, 120_000);
+
+  it("GN có-ngày KHÔNG mọc thêm cột: vẫn 8 cột, vẫn không có Chi Tiết", () => {
+    // Vế đối trọng cho cả cụm trên: việc Colorfull dài thêm một cột không được lan sang GN.
+    const cols = getConfig("unibenfood").items.columns;
+    expect(cols.detail).toBeUndefined();
+    expect(cols.notes, "GN có-ngày bị đẩy sang 9 cột").toBe("I");
+    expect(getConfig("unibenfood").items.amountFormula(9)).toBe("G9*E9*F9");
   });
 });

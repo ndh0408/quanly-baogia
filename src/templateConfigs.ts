@@ -340,6 +340,92 @@ TEMPLATE_CONFIGS.unibenfood = {
   },
 };
 
+// ===== Colorfull — bản BANNER (không ngày) =====
+// Y HỆT `clofull_decor` (cùng FILE MẪU, cùng cột, cùng công thức, cùng cách xuất), CHỈ khác cách
+// đánh STT: nhóm con đánh số 1,2,3… còn mục bên dưới không đánh số. Đúng quan hệ mà `gn_banner` có
+// với `marico_decor` bên Gia Nguyễn — cùng một khái niệm "bản banner", nên cùng một cách làm.
+//
+// KHÔNG cần file mẫu riêng, và đó là chủ ý: hai mẫu chung một file thì mọi bản vá bố cục (bề rộng,
+// khối tổng, chân trang) tự động đúng cho cả hai. Bên GN cũng vậy — `gn_banner` dùng chính
+// `Marico_Decor.xlsx`.
+TEMPLATE_CONFIGS.clofull_banner = {
+  ...TEMPLATE_CONFIGS.clofull_decor,
+  sheetName: "CLF Banner",
+  displayName: "CLF Banner (không ngày)",
+  items: { ...TEMPLATE_CONFIGS.clofull_decor.items, numberSubsections: true },
+};
+
+// ===== Colorfull — CÓ NGÀY =====
+// ── VÌ SAO BẢN NÀY CÓ FILE MẪU RIÊNG, TRONG KHI BÊN GN THÌ KHÔNG ──────────
+// GN có-ngày (`unibenfood`) dùng lại nền không-ngày và CHỈ ĐỔI NHÃN CỘT — nó đủ chỗ vì đã HY SINH
+// cột Chi Tiết: ô "Chi Tiết" ở D bị đổi thẳng thành "ĐVT". Colorfull không hy sinh được, vì Chi
+// Tiết chính là cột kể nội dung của mẫu này (D rộng 50 — rộng nhất bảng). Cần CẢ Chi Tiết LẪN Số
+// Ngày ⇒ bảng dài thêm một cột thật: 8 cột (B…I) thành 9 cột (B…J).
+//
+//   B     C          D          E     F           G          H         I             J
+//   STT   Hạng Mục   Chi Tiết   ĐVT   SỐ LƯỢNG    SỐ NGÀY    ĐƠN GIÁ   THÀNH TIỀN    Ghi Chú
+//
+// File mẫu dựng lại được, và script tự soi lại đầu ra:  node scripts/dung-mau-clf-co-ngay.mjs
+//
+// MỌI TOẠ ĐỘ TỪ CỘT G TRỞ ĐI ĐỀU DỊCH MỘT CỘT so với bản không-ngày — kể cả những thứ không thuộc
+// bảng: ô ngày ở chân trang đi từ `G17` sang `H17`. Khai lại trọn bộ `cells`/`totals` thay vì
+// spread rồi sửa lẻ, để đọc một chỗ là thấy hết toạ độ thật của mẫu này.
+TEMPLATE_CONFIGS.clofull_conngay = {
+  ...TEMPLATE_CONFIGS.clofull_decor,
+  filePath: "templates/CLF_CoNgay.xlsx",
+  displayName: "CLF (có ngày)",
+  cells: {
+    ...TEMPLATE_CONFIGS.clofull_decor.cells,
+    date: "H17",   // bản không-ngày: G17 — dịch theo cột Số Ngày vừa chèn
+  },
+  items: {
+    ...TEMPLATE_CONFIGS.clofull_decor.items,
+    columns: {
+      stt:       "B",
+      name:      "C",
+      detail:    "D",
+      unit:      "E",
+      quantity:  "F",
+      days:      "G",
+      unitPrice: "H",
+      amount:    "I",
+      notes:     "J",
+    },
+    // Cùng ý nghĩa với GN có-ngày (`G*E*F` = đơn giá × số lượng × số ngày), chỉ khác chữ cột.
+    amountFormula: (r: number) => `H${r}*F${r}*G${r}`,
+  },
+  totals: {
+    subtotal: {
+      labelCells: [["B", "H"]],
+      labelText: () => "Tổng Cộng",
+      labelTextGross: () => "Cộng",
+      valueCell: "I",
+      rowOffset: 1,
+      formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(I${first}:I${last})`,
+    },
+    vat: {
+      labelCells: [["B", "H"]],
+      labelText: (vatPct: number) => `VAT(${vatPct}%)`,
+      valueCell: "I",
+      rowOffset: 2,
+      formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `I${subtotalRow}*${vatPct}%`,
+    },
+    discount: {
+      labelCells: [["B", "H"]],
+      labelText: () => "Discount",
+      valueCell: "I",
+    },
+    total: {
+      labelCells: [["B", "H"]],
+      labelText: () => "Thành Tiền",
+      valueCell: "I",
+      rowOffset: 3,
+      formula: ({ subtotalRow, vatRow, discountRow }: { subtotalRow: number; vatRow: number; discountRow: number | null }) =>
+        discountRow ? `I${subtotalRow}+I${vatRow}-I${discountRow}` : `I${subtotalRow}+I${vatRow}`,
+    },
+  },
+};
+
 
 export function getConfig(code: string) {
   const c = TEMPLATE_CONFIGS[code];

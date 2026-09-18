@@ -147,7 +147,40 @@ async function main() {
       filePath: "templates/CLF_KhongNgay.xlsx",
     },
   });
-  console.log(`✓ Template CLF: 1`);
+
+  // CLF Banner (không ngày): CÙNG file/cách xuất bản không-ngày, CHỈ khác cách đánh STT (nhóm con
+  // đánh số 1,2,3; mục bên dưới không đánh số) — đúng quan hệ gn_banner ↔ marico_decor bên GN.
+  await prisma.quoteTemplate.upsert({
+    where: { code: "clofull_banner" },
+    create: {
+      code: "clofull_banner",
+      name: "CLF Banner (không ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_KhongNgay.xlsx",
+    },
+    update: {
+      name: "CLF Banner (không ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_KhongNgay.xlsx",
+    },
+  });
+  // CLF (có ngày): file mẫu RIÊNG vì bảng dài thêm cột SỐ NGÀY mà vẫn GIỮ cột Chi Tiết (9 cột
+  // B…J). Dựng lại: node scripts/dung-mau-clf-co-ngay.mjs
+  await prisma.quoteTemplate.upsert({
+    where: { code: "clofull_conngay" },
+    create: {
+      code: "clofull_conngay",
+      name: "CLF (có ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_CoNgay.xlsx",
+    },
+    update: {
+      name: "CLF (có ngày)",
+      companyId: clofull.id,
+      filePath: "templates/CLF_CoNgay.xlsx",
+    },
+  });
+  console.log(`✓ Template CLF: 3`);
 
   // === Default notification channel preferences ===
   await prisma.setting.upsert({
