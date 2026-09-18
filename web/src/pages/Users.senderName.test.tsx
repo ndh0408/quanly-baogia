@@ -38,6 +38,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { PermCatalog } from "../lib/api";
 
 type GoiGui = Record<string, unknown>;
 const NHAN_VIEN = {
@@ -51,7 +52,10 @@ const updateUser = vi.fn(async (_id: number, _d: GoiGui) => NHAN_VIEN);
 const inviteUser = vi.fn(async (_d: GoiGui) => ({ user: { email: "moi@gianguyen.vn" }, inviteUrl: "http://x/#/onboard?token=abc", emailSent: true }));
 // Trả danh mục quyền RỖNG: ma trận quyền không phải việc của bài này, và để nó rỗng thì
 // PermSection chỉ in "Đang tải danh mục quyền…" — không kéo theo nội thất của PermMatrix.
-const permissionsCatalog = vi.fn(async () => ({ groups: [], editableRoles: [], adminOnlyPermissions: [], roles: [] }));
+// Kiểu khai TƯỜNG MINH: để TS suy ra từ `groups: []` thì nó ra `never[]`, và ca nào
+// `mockResolvedValueOnce` một danh mục quyền THẬT sẽ đỏ ở `tsc` (vitest chạy qua esbuild,
+// không typecheck — nên lỗi chỉ nổ ở cổng dựng image, xa chỗ gây ra nó).
+const permissionsCatalog = vi.fn(async (): Promise<PermCatalog> => ({ groups: [], editableRoles: [], adminOnlyPermissions: [], roles: [] }));
 
 vi.mock("../lib/api", () => {
   class ApiError extends Error {
@@ -257,5 +261,70 @@ describe("Quản lý nhân viên — trường form KHÔNG hiện thì KHÔNG đ
     await bam("Lưu");
     const gui = updateUser.mock.calls.at(-1)![1];
     expect(gui.role, "tích ô Quản trị mà payload không mang role").toBe("admin");
+  });
+});
+
+describe("Quản lý nhân viên — KHÔNG đổi ma trận quyền thì KHÔNG gửi `permissions`", () => {
+  /* ── VÌ SAO ĐÂY LÀ LỖI THẬT, KHÔNG PHẢI CHUYỆN GỌN GÀNG ───────────────────────────────────
+     `resolveUserPermissions(role, userPerms)`:
+         userPerms RỖNG  →  dùng bộ mặc định CỦA ROLE
+         userPerms CÓ     →  dùng đúng bộ đó, BỎ QUA role
+
+     Ma trận ở modal Sửa nạp sẵn từ quyền HIỆU LỰC. Với người CHƯA tuỳ biến, quyền hiệu lực CHÍNH
+     LÀ mặc định của role — nên gửi nó lên biến "theo role" thành một BẢN CHỤP đóng cứng.
+
+     Và quyền của role TUỲ BIẾN ĐƯỢC ngay trên giao diện: bảng `RolePermission` là thật, và
+     `effectiveRoleSet` đọc `roleOverrides` (override trong CSDL) TRƯỚC khi rơi về hằng số. Nên đây
+     không phải chuyện "nếu sau này đổi mặc định" — sửa quyền `manager` ở trang Phân quyền là việc
+     làm thường xuyên, và bất kỳ ai từng bị bấm Lưu ở trang Tài khoản sẽ KHÔNG nhận thay đổi đó.
+
+     Xảy ra chỉ vì admin vào sửa số điện thoại. Giao diện cũng biết: `permCustom` bật thành
+     "đã tuỳ biến". */
+
+  it("chỉ sửa SĐT → payload KHÔNG có khoá `permissions`", async () => {
+    await dung();
+    await bam("Sửa");
+    go(oTheoNhan("SĐT"), "0911222333");
+    await bam("Lưu");
+    const gui = updateUser.mock.calls.at(-1)![1];
+    expect(
+      "permissions" in gui,
+      `payload kèm permissions=${JSON.stringify(gui.permissions)} — người này vừa bị đóng cứng bản chụp quyền, thôi theo role`,
+    ).toBe(false);
+    expect(gui.phone).toBe("0911222333");
+  });
+
+  it("ĐỔI ma trận quyền → VẪN gửi `permissions`", async () => {
+    // Vế đối trọng: bỏ hẳn khoá thì không ai tuỳ biến quyền cho một người được nữa.
+    permissionsCatalog.mockResolvedValueOnce({
+      groups: [{ key: "bg", label: "Báo giá", perms: [{ key: "quote:read:own", label: "Xem báo giá của mình" }] }],
+      editableRoles: [], adminOnlyPermissions: [], roles: [],
+    });
+    await dung();
+    await bam("Sửa");
+    const o = document.querySelector<HTMLInputElement>('.perm-item input[type="checkbox"]');
+    expect(o, "không thấy ô tick nào trong ma trận quyền").toBeTruthy();
+    act(() => { o!.click(); });
+    await bam("Lưu");
+    const gui = updateUser.mock.calls.at(-1)![1];
+    expect(gui.permissions, "tick một ô quyền mà payload không mang permissions").toEqual(["quote:read:own"]);
+  });
+
+  it("bỏ tích ô Quản trị → gửi `permissions: []` TƯỜNG MINH", async () => {
+    // Ca này khoá nhánh thứ hai: đổi cờ Quản trị là ý định rõ ràng, `[]` nghĩa là "bỏ qua quyền
+    // per-user, quay về theo role". Không gửi thì người vừa bị gỡ quyền quản trị vẫn giữ bộ cũ.
+    NHAN_VIEN.role = "admin";
+    try {
+      await dung();
+      await bam("Sửa");
+      const tick = document.querySelector<HTMLInputElement>('.perm-admin-toggle input[type="checkbox"]');
+      act(() => { tick!.click(); });
+      await bam("Lưu");
+      const gui = updateUser.mock.calls.at(-1)![1];
+      expect(gui.role).toBe("manager");
+      expect(gui.permissions, "gỡ quyền quản trị mà không gửi permissions").toEqual([]);
+    } finally {
+      NHAN_VIEN.role = "manager";
+    }
   });
 });

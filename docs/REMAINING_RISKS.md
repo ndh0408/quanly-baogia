@@ -1059,8 +1059,10 @@ dòng khi tên file nằm CÙNG DÒNG với nó.
 
 ## Còn nợ sau đợt siết xác thực (cụm auth-session, 2026-08-26)
 
-Ba việc dưới đây KHÔNG được vá bằng mã trong đợt này. Ghi ra vì mỗi cái đều là
-rủi ro đang chạy thật, không phải giả định.
+BỐN việc dưới đây (mục thứ hai được thêm sau, câu "ba việc" cũ không còn đúng) KHÔNG
+được vá bằng mã trong đợt ấy. Ghi ra vì mỗi cái đều là rủi ro đang chạy thật, không
+phải giả định. Nay còn **ba**: mục "đặt lại MFA hộ người dùng" đã vá xong 2026-09-18,
+giữ lại nguyên văn kèm lý do vì nó là một ca sai kiểu mẫu (xem ngay dưới).
 
 - **Mã dự phòng MFA CŨ vẫn còn nguyên trong CSDL và vẫn dùng được.** Bản vá tăng
   entropy (`src/mfa.ts`: `randomBytes(5)` → `randomBytes(10)`, băm SHA-256 trần →
@@ -1075,14 +1077,24 @@ rủi ro đang chạy thật, không phải giả định.
   trước 2026-08-26 tắt rồi bật lại MFA (hoặc viết một endpoint sinh lại mã dự
   phòng). Danh sách:
   `SELECT id, username FROM "User" WHERE "mfaEnabled" AND EXISTS (SELECT 1 FROM unnest("mfaBackupCodes") c WHERE c !~ '^\$2');`
-- **Không có endpoint admin nào gỡ / đặt lại MFA hộ người dùng.** Từ khi
-  `/accept-invite` có cổng MFA, người bật MFA mà mất thiết bị **và** mất luôn mã
-  dự phòng thì không còn đường phục hồi nào trong sản phẩm — giao diện đã được vá
-  để nhập được mã dự phòng ở cả màn đăng nhập lẫn màn đặt-lại-mật-khẩu, nhưng ai
-  mất cả hai thì phải nhờ người có quyền vào CSDL:
-  `UPDATE "User" SET "mfaEnabled" = false, "mfaSecret" = NULL, "mfaBackupCodes" = '{}', "mfaLastStep" = NULL WHERE username = '...';`
-  (sau đó thu hồi refresh token của tài khoản đó). Nên làm hẳn một endpoint có
-  ghi nhật ký kiểm toán thay cho thao tác tay này.
+- ~~**Không có endpoint admin nào gỡ / đặt lại MFA hộ người dùng.**~~ **ĐÃ XONG
+  2026-09-18 — và lần này xong CẢ HAI NỬA.** Endpoint `POST /api/users/:id/mfa-reset`
+  (`svc.resetMfa`) có từ `e388cfe`: nó tắt `mfaEnabled`, xoá `mfaSecret` /
+  `mfaBackupCodes` / `mfaLastStep`, ghi nhật ký kiểm toán và thu hồi mọi phiên của
+  người đó (`revokeSession(id, "mfa_reset")`) — tức đúng thứ dòng rủi ro này đòi, kèm
+  cả bước "sau đó thu hồi refresh token" mà bản thao tác tay bằng SQL dễ quên.
+  Nhưng **giao diện không có nút nào gọi tới nó**, nên với người dùng thì đường thoát
+  vẫn không tồn tại: vẫn phải có người chạy SQL tay vào production. Nay trang "Quản lý
+  nhân viên" có nút **Đặt lại MFA** ở đúng những hàng `mfaEnabled = true`, sau một hộp
+  xác nhận (`web/src/pages/Users.tsx`: `onResetMfa`). `mfaEnabled` vì thế phải nằm
+  trong `USER_SELECT` — thiếu nó thì nút không bao giờ hiện, và đó là đúng trạng thái
+  trước bản vá này.
+  Bài gác: `web/src/pages/Users.mfaReset.test.tsx` (nút ở đúng hàng, huỷ xác nhận thì
+  không gọi API) cùng `tests/mfa-reset.test.js` và
+  `tests/zp-mfa-disable-revoke-atomic.test.js` ở tầng máy chủ.
+  *Bài học của dòng này:* một endpoint không có đường bấm tới thì tính là CHƯA CÓ.
+  Rủi ro được khai là "thiếu endpoint" nên khi endpoint xuất hiện, không ai kiểm lại
+  nửa còn lại, và dòng này nằm sai suốt từ `e388cfe` tới nay.
 - **`POST /auth/logout` thu hồi MỌI refresh token của tài khoản**, không riêng
   phiên đang đăng xuất. Hôm nay vô hại vì chưa client nào dùng `/auth/token`.
   Khi có client di động thì đăng xuất trên điện thoại sẽ giết luôn quyền gọi API

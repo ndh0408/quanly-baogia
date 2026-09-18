@@ -70,6 +70,7 @@ export type User = {
   phone?: string | null; projectCode?: string | null; email?: string | null;
   title?: string | null;           // chức danh in dưới tên người gửi trên báo giá (USER_SELECT có từ 2026-09-17)
   senderName?: string | null;      // tên in ở ô "Người gửi" của báo giá (trống = dùng displayName)
+  mfaEnabled?: boolean;            // CHỈ cờ bật/tắt — để trang Tài khoản hiện nút "Đặt lại MFA"
   active: boolean; pending: boolean; canSign?: boolean;
   permissions?: string[];          // tích quyền per-user thô ([] = theo role mặc định)
   effectivePermissions?: string[]; // quyền HIỆU LỰC (để pre-fill ma trận)
@@ -458,6 +459,10 @@ export const api = {
   inviteUser: (data: { email: string; displayName: string; role: string; projectCode: string | null; senderName?: string; permissions?: string[] }) =>
     req<InviteResult>("/users/invite", { method: "POST", body: JSON.stringify(data) }),
   resendInvite: (id: number) => req<{ inviteUrl: string; emailSent: boolean; emailSkipped?: boolean; emailError?: string | null }>(`/users/${id}/resend-invite`, { method: "POST" }),
+  /* Gỡ xác thực hai bước của MỘT người. Endpoint đã có từ trước nhưng KHÔNG hàm client nào gọi,
+     nên giao diện không có nút — nhân viên mất điện thoại hoặc xoá app Authenticator là KHÔNG
+     đăng nhập được nữa, và admin phải gọi API bằng tay hoặc sửa thẳng CSDL. */
+  resetMfa: (id: number) => req<{ ok: true }>(`/users/${id}/mfa-reset`, { method: "POST" }),
   updateUser: (id: number, data: Record<string, unknown>) => req<User>(`/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: "DELETE" }),
   // Nhật ký hoạt động (increment 3) — gate audit:view (Shell nav + server).

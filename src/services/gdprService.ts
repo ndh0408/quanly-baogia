@@ -240,9 +240,16 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
       // và prefix mã dự án gắn với một con người). Thiếu chúng ở đây thì chủ thể không có đường nào
       // BIẾT hai cột đó tồn tại mà đi đòi — đúng cái luật mà chính tệp này đã đặt cho phần bị cắt:
       // "Cắt mà im lặng là tệ hơn không cắt: người nhận tưởng mình đã có đủ dữ liệu".
+      // Danh sách này KHÔNG được liệt kê bằng tay nữa mà không ai gác: từ 2026-09-18 có cổng quan
+      // hệ đối chiếu nó với `model User` trong schema.prisma — thêm một cột cá nhân mới mà quên
+      // đưa vào đây là ĐỎ (tests/gx-gdpr-xoa-sot-cot-pii.test.js, describe "Đường XUẤT...").
+      // Chính cổng đó vừa tìm ra `mfaEnabled` đang thiếu.
       select: {
         id: true, username: true, displayName: true, email: true, phone: true,
         title: true, senderName: true, projectCode: true, role: true, active: true,
+        // CHỈ cờ bật/tắt, KHÔNG phải `mfaSecret`/`mfaBackupCodes` — trao hai cái đó ra là trao
+        // luôn khả năng sinh mã của người ta (xem MIEN_TRU_XUAT trong bài kiểm).
+        mfaEnabled: true,
         lastLoginAt: true, lastLoginIp: true, createdAt: true,
       },
     }),

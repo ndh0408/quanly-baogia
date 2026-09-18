@@ -58,6 +58,16 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
     try { await api.deleteUser(u.id); toast("Đã hủy lời mời", "success"); load(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
+  // ĐẶT LẠI MFA — đường thoát DUY NHẤT cho ca thật: người dùng mất điện thoại / xoá app
+  // Authenticator và đã dùng hết mã dự phòng. Không có nút này thì tài khoản bị khoá cứng, vì
+  // chính họ cũng không đăng nhập được để tự tắt MFA. HẠ MỘT LỚP BẢO MẬT nên phải xác nhận, và
+  // backend tự thu hồi mọi phiên của người đó (revokeSession "mfa_reset") — ai đang mượn phiên
+  // cũng bị đẩy ra. Nút chỉ hiện khi `u.mfaEnabled` (backend 400 nếu MFA vốn đã tắt).
+  const onResetMfa = async (u: User) => {
+    if (!(await confirmModal("Đặt lại bảo mật 2 lớp", `Tắt bảo mật 2 lớp của "${u.displayName || u.username}"? Người này sẽ đăng nhập chỉ bằng mật khẩu cho tới khi tự bật lại, và mọi phiên đang mở của họ bị đăng xuất. Chỉ làm khi đã xác minh đúng người qua kênh khác.`, { danger: true, confirmText: "Đặt lại MFA" }))) return;
+    try { await api.resetMfa(u.id); toast("Đã tắt bảo mật 2 lớp — nhắc người này bật lại ngay", "success"); load(); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+  };
 
   // Nhãn cột "Quyền": admin = Quản trị; đã tùy biến = Tùy chỉnh; còn lại = preset gốc.
   // Preset gốc dùng .neutral (xám) — vàng .pending dành riêng cho "Chờ kích hoạt" ở cột Trạng thái.
@@ -115,6 +125,7 @@ export function UsersPage({ me, onPreview }: { me: Me; onPreview?: (perms: strin
                     ) : (
                       <>
                         <button className="btn btn-sm" onClick={() => setModal({ t: "edit", user: u })}>Sửa</button>
+                        {u.mfaEnabled && <button className="btn btn-sm btn-warn btn-mfa-reset" onClick={() => onResetMfa(u)} title="Người này mất thiết bị xác thực và hết mã dự phòng">Đặt lại MFA</button>}
                         <button className={`btn btn-sm ${u.active ? "btn-warn" : "btn-success"}`} onClick={() => onToggleLock(u)}>{u.active ? "Khóa" : "Mở khóa"}</button>
                       </>
                     )}
@@ -328,6 +339,22 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
   const [isAdmin, setIsAdmin] = useState(user.role === "admin");
   // Pre-fill ma trận từ quyền HIỆU LỰC hiện tại (per-user nếu có, else theo role mặc định).
   const [perms, setPerms] = useState<Set<string>>(new Set(user.effectivePermissions ?? user.permissions ?? []));
+  /* ── MỐC BAN ĐẦU, ĐỂ BIẾT ADMIN CÓ THẬT SỰ ĐỔI Ô TÍCH HAY KHÔNG ──────────────────────────────
+     Ma trận này nạp sẵn từ quyền HIỆU LỰC. Với người CHƯA tuỳ biến, quyền hiệu lực CHÍNH LÀ bộ mặc
+     định của role — nên gửi nó lên là biến "theo mặc định của role" thành một BẢN CHỤP đóng cứng:
+
+         resolveUserPermissions(role, userPerms):
+             userPerms RỖNG  →  dùng bộ mặc định CỦA ROLE
+             userPerms CÓ     →  dùng đúng bộ đó, BỎ QUA role
+
+     Hậu quả: sau này đổi quyền mặc định của `manager`, người từng bị Lưu một lần KHÔNG được hưởng.
+     Và nó xảy ra chỉ vì admin vào sửa số điện thoại rồi bấm Lưu. Chính giao diện cũng biết —
+     `permCustom = permissions.length > 0` bật lên thành "đã tuỳ biến".
+
+     Nên áp đúng luật đã chốt cho `role` và ba trường hồ sơ: KHÔNG đổi thì KHÔNG gửi. */
+  const permGoc = useRef<Set<string>>(new Set(user.effectivePermissions ?? user.permissions ?? []));
+  const permDaDoi = () =>
+    perms.size !== permGoc.current.size || [...perms].some((p) => !permGoc.current.has(p));
   const [err, setErr] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -376,7 +403,11 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
         // rõ ràng — và lúc đó "manager" là mặc định duy nhất hợp lý cho việc gỡ quyền quản trị.
         // (InviteModal ở trên thì NGƯỢC LẠI: hàng mới, chưa có vai trò nào để giữ, nên luôn gửi.)
         ...(isAdmin !== (user.role === "admin") ? { role: isAdmin ? "admin" : "manager" } : {}),
-        permissions: isAdmin ? [] : [...perms], // backend tự đồng bộ cờ canSign từ quote:sign:own
+        // Gửi `permissions` CHỈ KHI có ý định thật: ô tích đổi, hoặc cờ Quản trị đổi (lúc đó `[]`
+        // là tường minh — admin bỏ qua quyền per-user). Không đổi gì thì bỏ hẳn khoá, để máy chủ
+        // giữ nguyên cột — xem `permGoc` ở trên. Backend tự đồng bộ cờ canSign từ quote:sign:own
+        // KHI VÀ CHỈ KHI khoá này có mặt, nên bỏ khoá cũng là giữ nguyên canSign.
+        ...(permDaDoi() || isAdmin !== (user.role === "admin") ? { permissions: isAdmin ? [] : [...perms] } : {}),
       });
       toast("Đã lưu", "success"); onSaved();
     } catch (ex) { const fe = fieldErrorsFrom(ex); setFieldErrors(fe); setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lỗi")); setSaving(false); }

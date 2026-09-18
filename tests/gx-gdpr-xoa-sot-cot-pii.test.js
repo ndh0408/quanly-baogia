@@ -329,3 +329,87 @@ describe.runIf(dbAvailable)("Xoá tài khoản theo GDPR: không cột nào gi�
     expect(n.length, "không ghi nhật ký cho lượt xoá theo GDPR").toBeGreaterThan(0);
   }, 60_000);
 });
+
+describe("Đường XUẤT dữ liệu GDPR cũng phải phủ hết cột", () => {
+  /* ── GDPR CÓ HAI QUYỀN, TRƯỚC ĐÂY CHỈ MỘT QUYỀN ĐƯỢC GÁC ─────────────────────────────────────
+     Quyền ĐƯỢC QUÊN đã có cổng quan hệ ở `describe` trên: thêm một cột cá nhân mới vào
+     `model User` mà quên xoá là ĐỎ.
+
+     Quyền ĐƯỢC TRUY CẬP (`exportUser` — người ta xin bản sao dữ liệu của chính mình) thì liệt kê
+     cột BẰNG TAY. Không cổng nào đối chiếu nó với schema. Hệ quả bất đối xứng: thêm một cột PII
+     mới → cổng xoá bắt được, cổng xuất KHÔNG → cột đó bị xoá khi người ta yêu cầu, nhưng KHÔNG
+     BAO GIỜ xuất hiện trong bản dữ liệu họ có quyền nhận.
+
+     Đã xảy ra thật: `senderName` và `projectCode` phải THÊM TAY vào select ấy trong cùng đợt vá
+     phát hiện ra chúng không bị xoá. Không ai bắt được hai cột đó thiếu trong bản xuất — chỉ tình
+     cờ cùng một người đọc cả hai chỗ.
+
+     Bài này dựng cổng thứ hai, cùng khuôn: mọi cột không-miễn-trừ phải có mặt trong `select` của
+     `exportUser`, hoặc được khai vào `MIEN_TRU_XUAT` kèm lý do. */
+
+  // Cột KHÔNG cần đưa vào bản xuất. Khác `MIEN_TRU` ở trên: đó là "không cần XOÁ", đây là
+  // "không cần TRAO". Một cột có thể cần xoá mà không cần trao (vd hash mật khẩu) và ngược lại.
+  const MIEN_TRU_XUAT = {
+    passwordHash: "băm mật khẩu — trao ra là tự tay phát cho người khác vật liệu để dò offline",
+    mfaSecret: "bí mật TOTP; trao ra là trao luôn khả năng sinh mã của người đó",
+    mfaBackupCodes: "mã dự phòng, cùng lý do với mfaSecret",
+    mfaLastStep: "chống phát lại mã TOTP; số kỹ thuật, không mô tả con người",
+    inviteTokenHash: "băm chứng thư kích hoạt — trao ra là trao đường đặt lại mật khẩu",
+    inviteExpiresAt: "hạn của chứng thư trên, vô nghĩa nếu không có nó",
+    failedAttempts: "bộ đếm chống dò mật khẩu, không phải dữ liệu cá nhân",
+    lockedUntil: "mốc khoá do bộ đếm trên sinh ra",
+    passwordChangedAt: "mốc vô hiệu hoá phiên; bản ghi vận hành",
+    permissions: "tập quyền per-user — mô tả cái tài khoản được làm, không mô tả con người",
+    canSign: "cờ quyền ký, cùng loại với `permissions`",
+    permCustom: "cờ dẫn xuất, không có trong CSDL",
+    deletedAt: "mốc xoá mềm; bản ghi vận hành của hệ thống",
+    updatedAt: "Prisma tự quản (@updatedAt)",
+  };
+
+  /** Khối `select` của `exportUser` trong mã nguồn. */
+  const selectXuat = (() => {
+    const i = NGUON_GDPR.indexOf("export async function exportUser");
+    if (i < 0) throw new Error("không tìm thấy exportUser trong gdprService.ts");
+    const m = NGUON_GDPR.slice(i).match(/select:\s*\{([\s\S]*?)\}/u);
+    if (!m) throw new Error("exportUser không còn khối `select` — bài kiểm này cần xem lại");
+    return m[1];
+  })();
+
+  /** Cột `ten` có được select trong bản xuất? So bằng CHUỖI, không regex: mẫu regex viết trong
+   *  template literal rất dễ nuốt dấu thoát (`` thành ký tự backspace) và khi đó nó không bao
+   *  giờ khớp — tức bài kiểm báo thiếu mọi cột, kể cả cột đang có. */
+  const daSelect = new Set(
+    selectXuat
+      // BỎ CHÚ THÍCH TRƯỚC KHI TÁCH: một dòng `//` ngay trên `mfaEnabled: true` làm token sau khi
+      // tách theo dấu phẩy mang cả câu chú thích, nên tên cột đọc ra thành "…chú thích… mfaEnabled".
+      // Bài kiểm khi đó báo THIẾU một cột đang CÓ — đúng kiểu sai làm người ta đi sửa nhầm chỗ.
+      .split("\n")
+      .map((d) => d.replace(/\/\/.*$/u, ""))
+      .join("\n")
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m.endsWith(": true"))
+      .map((m) => m.slice(0, -": true".length).trim()),
+  );
+  const coTrongSelect = (ten) => daSelect.has(ten);
+
+  it("mọi cột cá nhân của model User đều có trong bản xuất", () => {
+    const thieu = COT_USER
+      .filter((c) => !(c.ten in MIEN_TRU_XUAT))
+      .map((c) => c.ten)
+      .filter((ten) => !coTrongSelect(ten));
+    expect(
+      thieu,
+      `cột cá nhân KHÔNG có trong bản xuất GDPR: ${thieu.join(", ")} — người ta xin bản sao dữ liệu của mình mà không nhận được mấy cột này. Hoặc thêm vào select của exportUser, hoặc khai vào MIEN_TRU_XUAT kèm lý do`,
+    ).toEqual([]);
+  });
+
+  it("MIEN_TRU_XUAT không nở ra ngoài schema", () => {
+    // Cùng lý lẽ với vế đối trọng của `MIEN_TRU`: danh sách miễn trừ chứa tên cột đã biến mất thì
+    // dần thành một đống chữ không ai dám sửa, và che mất cột thật.
+    const khongCon = Object.keys(MIEN_TRU_XUAT)
+      .filter((t) => t !== "permCustom")
+      .filter((t) => !COT_USER.some((c) => c.ten === t));
+    expect(khongCon, `MIEN_TRU_XUAT kể tên cột không còn trong model User: ${khongCon.join(", ")}`).toEqual([]);
+  });
+});

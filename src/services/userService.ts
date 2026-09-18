@@ -100,6 +100,10 @@ const USER_SELECT = {
   // GIỐNG HỆT NHAU trong nhật ký: đổi mà không có một vết nào.
   title: true,
   senderName: true,
+  // CHỈ cờ bật/tắt, KHÔNG phải `mfaSecret`/`mfaBackupCodes`. Cần nó để trang Tài khoản biết ai
+  // đang bật xác thực hai bước mà hiện nút "Đặt lại MFA" — không có cột này thì nút hoặc hiện cho
+  // TẤT CẢ (bấm vào nhận 400 "chưa bật"), hoặc không hiện cho ai, và người mất thiết bị hết đường.
+  mfaEnabled: true,
   projectCode: true,
   active: true,
   canSign: true,
