@@ -106,6 +106,16 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       //     D6  "CLF item [gộp→C6]"   →  "chi tiết CLF"    (nội dung Chi Tiết ra đúng cột)
       //   bề rộng: C 38→21, D 10→50 (đúng số trong file mẫu).
       // Tổng cộng / VAT / Thành Tiền / ngày / chân trang: KHÔNG một ô nào đổi.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-18 lần 2 (xoá tên người ký nhúng cứng) ──
+      // Vẫn CHỈ fixture `clf` đổi. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác ĐÚNG MỘT ô trên 90 —
+      //     Sheet 1!G16  "Trần Thị Lan Anh"  →  (trống)
+      // Ô đó là tên người ký NHÚNG CỨNG trong `templates/CLF_KhongNgay.xlsx` (G22 ở toạ độ mẫu),
+      // không có đường nào ghi đè, nên mọi báo giá Colorfull ra file khách với tên một người cụ
+      // thể đứng chỗ ký trong khi người gửi thật nằm ở khối F1. Cùng lớp lỗi với nhãn "Ms." mà
+      // nhánh GN đã vá. Nay nằm trong `extraCellsToClear`.
+      // Khối `palette.note` thêm cùng lượt KHÔNG đổi ô nào ở đây — fixture này không có
+      // `quote.notes`, và nhánh ghi chú chỉ ghi khi có nội dung.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

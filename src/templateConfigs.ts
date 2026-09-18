@@ -150,7 +150,18 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // tùy chương trình", "tạo được những hàng con…"). They are NOT part of a real
       // quote — strip them so they never print. The program-info line is now an
       // optional editor row (kind:"info") the user can add/remove per quote.
-      extraCellsToClear: ["J5", "J8"],
+      // ── XOÁ TÊN NGƯỜI KÝ NHÚNG CỨNG TRONG FILE MẪU (G22) ───────────────────
+      // `templates/CLF_KhongNgay.xlsx` mang sẵn chuỗi "Trần Thị Lan Anh" ở ô G22, ngay dưới dòng
+      // "Công Ty TNHH Colorfull" của khối ký. Nó KHÔNG phải ô dữ liệu — không đường nào ghi đè —
+      // nên MỌI báo giá Colorfull, do bất kỳ ai gửi, đều ra file khách với tên một người cụ thể
+      // đứng ở chỗ ký, trong khi người gửi thật nằm ở khối F1 phía trên. Hai tên khác nhau trên
+      // cùng một tờ.
+      //
+      // ĐÚNG LỚP LỖI GN ĐÃ VÁ: nhãn "Ms." nhúng cứng ở B3/E3 của mẫu Marico (xem extraCellsToClear
+      // của `marico_decor`), và GN chốt hẳn `palette.footer.sign.showSender: false` — "KHÔNG in tên
+      // người gửi". Theo đúng quyết định đó: xoá tên, chừa chỗ trống để ký tay; dòng tên công ty
+      // ở G18 giữ nguyên.
+      extraCellsToClear: ["J5", "J8", "G22"],
       keepImagesAboveRow: 3,
     },
     cells: {
@@ -270,6 +281,21 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
           discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
+    // ── CHỈ KHAI `note`, CỐ Ý KHÔNG KHAI GÌ KHÁC ─────────────────────────────────────────
+    // Colorfull giữ nguyên màu baked của file mẫu (`paintHeader: false`, nền nhóm lấy từ
+    // `items.sectionFill/subFill`), nên KHÔNG dùng bảng màu của GN. Nhưng `cfg.palette` không chỉ
+    // là màu: `src/excel.ts` bọc CẢ khối in "Ghi chú" (quote.notes) trong `if (pal)`, và đó là chỗ
+    // DUY NHẤT đường xuất Excel đọc `quote.notes`. Không khai `palette` ⇒ ghi chú người dùng gõ
+    // KHÔNG BAO GIỜ ra file Excel — trong khi nhãn trên giao diện ghi rõ "(in vào file Excel/PDF)"
+    // và bản PDF thì vẫn in. Đo được: xuất cùng một báo giá có `notes` → 3/3 mẫu GN in ra, 0/3 mẫu
+    // CLF không có ô nào.
+    // Mọi nhánh khác trong khối đó đều có khoá canh riêng (headerFill/nameColor/totalsFill/
+    // totalsValueColor/footer), nên khai mỗi `note` KHÔNG kéo theo màu của GN.
+    // Vị trí: ngay dưới hàng "Thành Tiền" — đúng hàng trống duy nhất trước khối điều khoản
+    // "* Ghi chú: - Tất cả các hạng mục…" và dòng "XÁC NHẬN ĐỒNG Ý ĐẶT HÀNG" của mẫu.
+    palette: {
+      note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },
+    },
   },
 
 };
@@ -377,6 +403,19 @@ TEMPLATE_CONFIGS.clofull_conngay = {
   cells: {
     ...TEMPLATE_CONFIGS.clofull_decor.cells,
     date: "H17",   // bản không-ngày: G17 — dịch theo cột Số Ngày vừa chèn
+  },
+  // Bảng rộng thêm một cột nên vùng của dòng Ghi chú cũng nới tới J (xem `clofull_decor.palette`).
+  palette: {
+    note: { rowOffset: 1, colFrom: "B", colTo: "J", color: "FF843C0C" },
+  },
+  cleanup: {
+    ...TEMPLATE_CONFIGS.clofull_decor.cleanup,
+    // Toạ độ dịch theo cột Số Ngày đã chèn:
+    //   · tên người ký nhúng cứng  G22 → H22  (xem chú thích ở `clofull_decor`);
+    //   · hai ô chú thích cho lập trình viên J5/J8 → K5/K8. Script dựng mẫu đã dọn sẵn chúng, giữ
+    //     ở đây là lớp chắn thứ hai — VÀ để KHÔNG kế thừa "J5"/"J8" của bản không-ngày, vì ở mẫu
+    //     9 cột thì J chính là cột GHI CHÚ thật của người dùng, xoá nhầm là mất ghi chú hàng 3.
+    extraCellsToClear: ["K5", "K8", "H22"],
   },
   items: {
     ...TEMPLATE_CONFIGS.clofull_decor.items,

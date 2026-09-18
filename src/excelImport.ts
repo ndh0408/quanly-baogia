@@ -756,6 +756,21 @@ function guessTemplate(ws: ExcelJS.Worksheet, s: ImportedSheet, markerCode?: str
     let score = 0;
     if (!!cols.days === s.hasDays) { score += 3; why.push(s.hasDays ? "có cột Số Ngày" : "không có cột Số Ngày"); } else score -= 8;
     if (!!cfg.items?.numberSubsections === s.numberSubs) { score += 2; if (s.numberSubs) why.push("nhóm con đánh số"); } else score -= 3;
+    // CỘT CHI TIẾT — dấu hiệu DUY NHẤT tách nhóm mẫu Colorfull khỏi nhóm mẫu Gia Nguyễn.
+    //
+    // Trước đây vòng chấm này không nhìn tới nó, nên bằng chứng duy nhất còn lại là MÀU NỀN HÀNG
+    // NHÓM (+3) — thứ chỉ có ở file do chính app xuất ra. File Colorfull do khách/đối tác gửi tới,
+    // bảng phẳng không có hàng nhóm tô màu, sẽ về hoà điểm rồi rơi vào mẫu GN đứng trước trong
+    // `TEMPLATE_CONFIGS`. Hậu quả dây chuyền: cửa sổ nạp dán nhãn "Dạng file: GN (không ngày)",
+    // ghép sai sheet đích, và cảnh báo "cột Chi Tiết sẽ không được nạp" thì bật/tắt theo mẫu ĐOÁN
+    // SAI chứ không theo mẫu thật.
+    //
+    // Đặt +3/−6: cùng hạng với cột Số Ngày (+3/−8) vì cũng là khác biệt CẤU TRÚC BẢNG nhìn thấy
+    // được, không phải chuyện trình bày. `hienChiTiet` = mẫu thật sự IN cột đó ra (khai `detail`
+    // VÀ không gộp nó vào Hạng Mục) — đúng thứ người đọc file nhìn thấy.
+    const hienChiTiet = !!cols.detail && !cfg.items?.removeDetail;
+    const fileCoChiTiet = s.columns?.detail != null;
+    if (hienChiTiet === fileCoChiTiet) { score += 3; if (fileCoChiTiet) why.push("có cột Chi Tiết"); } else score -= 6;
     // Tên tab do người dùng tự đặt → bằng chứng YẾU hơn màu nhóm (màu do chính app tô lúc xuất).
     if (cfg.sheetName && sheetName.includes(normHdr(cfg.sheetName))) { score += 2; why.push(`tên sheet "${cfg.sheetName}"`); }
     for (const role of ["name", "unit", "quantity", "unitPrice"]) {

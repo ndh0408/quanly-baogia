@@ -71,11 +71,30 @@ const wb = new ExcelJS.Workbook();
 await wb.xlsx.readFile(NGUON);
 const ws = wb.worksheets[0];
 
-// 1) Nhớ rồi GỠ HẾT vùng gộp (xem bẫy ở đầu tệp).
+// 1) CHỤP STYLE TỪNG Ô — PHẢI LÀM TRƯỚC MỌI THỨ.
+// Hai lệnh dưới đây đều PHÁ style theo hai kiểu khác nhau:
+//   · `unMergeCells` XOÁ style của các ô KHÔNG phải ô chủ trong vùng gộp;
+//   · `mergeCells` thì ngược lại — chép style ô chủ ra CẢ vùng.
+// Excel không làm cả hai: file gốc có hàng 5 ("* Thông tin chương trình", gộp B5:I5) với viền
+// KHÔNG đồng nhất — B5 = trái+trên+dưới · C5…H5 = trên+dưới · I5 = trên+PHẢI+dưới, tức dải màu
+// đóng khung hai đầu, giữa không vạch dọc. Đo trên hai bản dựng hỏng trước đó:
+//     bản gốc      r5:  B:LT-B  C..H:-T-B  I:-TRB     ← đúng
+//     chụp SAU merge:   B..J:LT-B                     ← hở cạnh phải, mọc vạch dọc từng cột
+//     chụp SAU unmerge: B:LT-B  C..J:----             ← mất sạch viền, còn tệ hơn
+// Nên chụp NGAY BÂY GIỜ, lúc file còn nguyên, rồi trả lại sau khi đã chèn cột + gộp lại — trả về
+// toạ độ ĐÃ DỊCH, vì cột từ G trở đi đều dời một ô.
+const styleCu = new Map();
+ws.eachRow({ includeEmpty: true }, (row, r) => {
+  row.eachCell({ includeEmpty: true }, (cell, c) => {
+    styleCu.set(`${r}:${c}`, JSON.parse(JSON.stringify(cell.style ?? {})));
+  });
+});
+
+// 2) Nhớ rồi GỠ HẾT vùng gộp (xem bẫy ở đầu tệp).
 const gopCu = [...(ws.model.merges || [])];
 for (const m of gopCu) ws.unMergeCells(m);
 
-// 2) GỠ CÔNG THỨC CHIA SẺ — BẮT BUỘC LÀM TRƯỚC KHI CHÈN CỘT.
+// 3) GỠ CÔNG THỨC CHIA SẺ — BẮT BUỘC LÀM TRƯỚC KHI CHÈN CỘT.
 // File CLF dùng shared formula cho cột Thành Tiền (một ô master, các ô dưới là clone). Nếu chèn
 // cột trước thì:
 //   · ExcelJS TỪ CHỐI GHI: "Shared Formula master must exist above and or left of clone for cell I8";
@@ -92,10 +111,10 @@ ws.eachRow({ includeEmpty: false }, (row) => {
 });
 for (const [addr, { f, kq }] of congThucGoc) ws.getCell(addr).value = { formula: f, result: kq ?? undefined };
 
-// 3) Chèn cột trống trước G. Giá trị + style của G,H,I chạy sang H,I,J.
+// 4) Chèn cột trống trước G. Giá trị + style của G,H,I chạy sang H,I,J.
 ws.spliceColumns(CHEN_TAI, 0, []);
 
-// 4) THAM CHIẾU TRONG CÔNG THỨC KHÔNG TỰ DỊCH THEO CỘT ĐÃ CHÈN.
+// 5) THAM CHIẾU TRONG CÔNG THỨC KHÔNG TỰ DỊCH THEO CỘT ĐÃ CHÈN.
 // `=SUM(H6:H12)` vẫn trỏ H sau khi cột Thành Tiền đã sang I → dòng tổng lấy nhầm cột Đơn Giá.
 // App ghi đè phần lớn công thức này lúc xuất, nhưng một file mẫu mang sẵn công thức SAI là thứ sẽ
 // cắn vào một ngày nào đó — và nó hiện ra ngay khi ai đó mở file mẫu bằng Excel.
@@ -110,11 +129,17 @@ ws.eachRow({ includeEmpty: false }, (row) => {
   });
 });
 
-// 5) Gộp lại theo toạ độ đã dịch.
+// 6) Gộp lại theo toạ độ đã dịch.
 const gopMoi = gopCu.map(dichVung);
 for (const m of gopMoi) ws.mergeCells(m);
 
-// 6) Dựng cột SỐ NGÀY: nhãn + style chép từ cột SỐ LƯỢNG.
+// 7) TRẢ STYLE VỀ TỪNG Ô, theo toạ độ đã dịch (xem bước 1).
+for (const [khoa, st] of styleCu) {
+  const [r, c] = khoa.split(":").map(Number);
+  ws.getCell(r, dich(c)).style = st;
+}
+
+// 8) Dựng cột SỐ NGÀY: nhãn + style chép từ cột SỐ LƯỢNG.
 const colNguon = ws.getColumn(CHEP_STYLE_TU);
 const colMoi = ws.getColumn(CHEN_TAI);
 colMoi.width = colNguon.width;
@@ -127,7 +152,7 @@ const oTieuDe = ws.getCell(`${chuCot(CHEN_TAI)}${HANG_TIEU_DE}`);
 oTieuDe.value = NHAN_MOI;
 oTieuDe.style = JSON.parse(JSON.stringify(ws.getCell(`${chuCot(CHEP_STYLE_TU)}${HANG_TIEU_DE}`).style ?? {}));
 
-// 7) Hai ô chú thích cho lập trình viên trong file gốc ("hàng này có hoặc ko tùy chương trình",
+// 9) Hai ô chú thích cho lập trình viên trong file gốc ("hàng này có hoặc ko tùy chương trình",
 //    "tạo được những hàng con…") nằm ở J5/J8, sau khi chèn thì trôi sang K5/K8. Chúng KHÔNG phải
 //    nội dung báo giá — bản không-ngày phải dùng `extraCellsToClear` để xoá lúc xuất. Mẫu mới thì
 //    dọn thẳng ở đây, không mang rác sang.

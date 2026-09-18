@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EditorTemplate, ImportedSheet } from "./api";
-import { autoTargetIndexes, NEW_IMPORT_SHEET, sapXepTheoFile, toGridItems } from "./importApply";
+import { autoTargetIndexes, diffItems, NEW_IMPORT_SHEET, sapXepTheoFile, toGridItems } from "./importApply";
 
 const templates: EditorTemplate[] = [
   { id: 1, code: "marico_decor", name: "GN (không ngày)", layout: { hasDays: false, numberSubsections: false } },
@@ -120,5 +120,84 @@ describe("sapXepTheoFile — trả các sheet đến từ file về đúng thứ
     expect(s1).toEqual([a, b]);
     sapXepTheoFile(s1, [b, ngoai]);     // `ngoai` không còn trong mảng (đã bị xoá)
     expect(s1).toEqual([a, b]);
+  });
+});
+
+/**
+ * ============================================================================
+ * NẠP EXCEL PHẢI GIỮ CỘT CHI TIẾT — VÀ PHẢI NÓI RA KHI KHÔNG GIỮ.
+ *
+ * ── LỖI ĐÃ CHẠY THẬT ───────────────────────────────────────────────────────
+ * `toGridItems` từng ghi cứng `detail: ""` kèm chú thích "Trường Chi Tiết đã bỏ khỏi sản phẩm".
+ * Câu đó đúng ở thời điểm viết — hồi ấy không mẫu nào hiện cột này. Nhưng khi Colorfull bật cột
+ * Chi Tiết (mẫu CLF: cột D, rộng 50 — rộng nhất bảng, đựng "Backdrop: / . KT: 14mW x 5mH / …"),
+ * dòng cứng ấy biến việc "nạp lại chính file app vừa xuất" thành LỆNH XOÁ cột đó. Chế độ "Thay
+ * thế" còn xoá luôn Chi Tiết người dùng đã gõ trong sheet đang có.
+ *
+ * Tệ hơn: bảng đối chiếu trước/sau KHÔNG so trường `detail`, nên nó vẫn báo "N dòng không đổi"
+ * đúng lúc dữ liệu đang bị ghi đè — lớp bảo vệ "xem kỹ trước khi nạp" mù ngay chỗ hỏng.
+ *
+ * ── HAI VẾ, VÀ VẾ NÀO CŨNG PHẢI ĐÚNG ───────────────────────────────────────
+ *   mẫu đích HIỆN Chi Tiết   → NẠP nội dung, và bảng đối chiếu phải THẤY thay đổi;
+ *   mẫu đích KHÔNG hiện      → bỏ nội dung (không có chỗ mà chứa), nhưng phải ĐẾM ĐƯỢC để báo.
+ * ============================================================================
+ */
+describe("toGridItems — cột Chi Tiết", () => {
+  const imported = [
+    { kind: "item" as const, name: "Khu Vực Check In", detail: "Bàn check in: bàn dán AW", unit: "bộ", quantity: 3, unitPrice: 450_000, row: 6 },
+    { kind: "item" as const, name: "Booth cụm Typo", detail: "Backdrop:\n. KT: 14mW x 5mH", unit: "m2", quantity: 70, unitPrice: 360_000, row: 7 },
+  ];
+
+  it("mẫu đích HIỆN Chi Tiết → nạp nguyên nội dung, giữ cả ngắt dòng", () => {
+    const { items } = toGridItems(imported, { usesDays: false, addrDetail: true, showDetail: true });
+    expect(items[0].detail, "nạp lại chính file app vừa xuất mà mất cột Chi Tiết").toBe("Bàn check in: bàn dán AW");
+    expect(items[1].detail).toBe("Backdrop:\n. KT: 14mW x 5mH");
+  });
+
+  it("mẫu đích KHÔNG hiện Chi Tiết → bỏ nội dung (không có cột mà chứa)", () => {
+    // Vế đối trọng: nạp bừa vào mẫu GN thì chữ Chi Tiết sẽ nằm trong một cột KHÔNG BAO GIỜ in ra,
+    // vừa vô hình vừa làm lệch mọi phép so sánh về sau. Bỏ là đúng — nhưng phải báo, xem ca dưới.
+    const { items } = toGridItems(imported, { usesDays: false, addrDetail: true, showDetail: false });
+    expect(items[0].detail).toBe("");
+    expect(items[1].detail).toBe("");
+  });
+
+  it("KHÔNG truyền showDetail thì xử như không hiện — mặc định giữ nguyên hành vi cũ", () => {
+    const { items } = toGridItems(imported, { usesDays: false, addrDetail: true });
+    expect(items[0].detail).toBe("");
+  });
+
+  it("đếm được số dòng SẼ bị rơi Chi Tiết — đây là con số hộp Nạp đem đi cảnh báo", () => {
+    // Hộp thoại tính đúng phép này (ImportExcelModal: `detailDropped`), theo MẪU ĐÍCH người dùng
+    // chọn chứ không theo mẫu mà máy chủ đoán cho file — nạp file Colorfull vào sheet GN thì cảnh
+    // báo phía máy chủ im, chỉ phép đếm này bắt được.
+    const soRoi = imported.filter((it) => String(it.detail || "").trim()).length;
+    expect(soRoi).toBe(2);
+  });
+});
+
+describe("diffItems — bảng đối chiếu phải THẤY cột Chi Tiết", () => {
+  const truoc = toGridItems(
+    [{ kind: "item" as const, name: "A", detail: "chi tiết CŨ", unit: "bộ", quantity: 1, unitPrice: 100, row: 6 }],
+    { usesDays: false, addrDetail: true, showDetail: true },
+  ).items;
+  const sau = toGridItems(
+    [{ kind: "item" as const, name: "A", detail: "chi tiết MỚI", unit: "bộ", quantity: 1, unitPrice: 100, row: 6 }],
+    { usesDays: false, addrDetail: true, showDetail: true },
+  ).items;
+
+  it("đổi Chi Tiết mà mẫu có cột đó → phải hiện là 'changed', không phải 'same'", () => {
+    const rows = diffItems(truoc, sau, false, undefined, true);
+    expect(rows[0].kind, "bảng đối chiếu báo KHÔNG ĐỔI trong khi Chi Tiết đang bị ghi đè").toBe("changed");
+    const f = rows[0].fields.find((x) => x.field === "detail");
+    expect(f, `không có dòng Chi Tiết trong danh sách thay đổi: ${rows[0].fields.map((x) => x.field).join(",")}`).toBeTruthy();
+    expect(f!.label).toBe("Chi tiết");
+    expect(f!.before).toBe("chi tiết CŨ");
+    expect(f!.after).toBe("chi tiết MỚI");
+  });
+
+  it("mẫu KHÔNG hiện Chi Tiết → không đưa trường này vào bảng (hai bên đều rỗng, đưa vào chỉ tổ nhiễu)", () => {
+    const rows = diffItems(truoc, sau, false, undefined, false);
+    expect(rows[0].fields.some((x) => x.field === "detail")).toBe(false);
   });
 });

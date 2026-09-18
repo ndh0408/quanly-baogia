@@ -966,11 +966,35 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (!m) continue;
       const newRow = parseInt(m[2], 10) + shift;
       const startCol = m[1].charCodeAt(0), endCol = m[3].charCodeAt(0);
+      // GIỮ CHỮ LẠI TRƯỚC KHI ĐỤNG VÀO Ô PHỤ — nếu không, dọn ô phụ là XOÁ luôn chữ.
+      //
+      // Đo trực tiếp trên `templates/CLF_KhongNgay.xlsx` (ô "* Ghi chú" gộp C17:D17):
+      //   trước            C17="* Ghi chú: …"«C17   D17=…«C17   merges=["C17:D17"]
+      //   duplicateRow(12,1,true):
+      //                    C17=""   C18="* Ghi chú: …"«C18   D18=…«C18   merges=["C17:D17"]
+      // Chữ dời đúng sang hàng 18 và D18 thành Ô PHỤ của C18, NHƯNG danh sách gộp của workbook vẫn
+      // ghi C17:D17 — trạng thái mâu thuẫn. Hệ quả: `safeUnmerge("C18:D18")` không gỡ được gì (mô
+      // hình không có vùng đó), rồi `getCell("D18").value = null` — mà trong ExcelJS, GÁN GIÁ TRỊ
+      // CHO Ô PHỤ GHI XUYÊN SANG Ô CHỦ — nên chính dòng "dọn ô phụ" đã xoá trắng ô C18.
+      //
+      // Đo được trên file xuất thật: từ 8 hạng mục trở lên (vượt 7 khe hàng của mẫu CLF) thì khối
+      // "* Ghi chú: - Tất cả các hạng mục trên là cho thuê…" BIẾN MẤT khỏi file gửi khách; dưới 7
+      // hạng mục thì còn, vì lúc ấy bảng CO lại (spliceRows) chứ không nở.
+      //
+      // Cách chữa không phụ thuộc vào trạng thái gộp đang mâu thuẫn: đọc chữ ra, dọn, gộp lại, rồi
+      // ghi chữ về đúng ô chủ. `footerMerges` hiện chỉ có ở nhánh Colorfull (templateConfigs.ts:
+      // `clofull_decor` và hai bản kế thừa) — GN không đi qua đây.
+      const oChinh = `${m[1]}${newRow}`;
+      let chuGiuLai: unknown = null;
+      try { chuGiuLai = ws.getCell(oChinh).value; } catch { /* mẫu không có ô đó */ }
       safeUnmerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
       for (let cc = startCol + 1; cc <= endCol; cc++) {
         try { ws.getCell(`${String.fromCharCode(cc)}${newRow}`).value = null; } catch {}
       }
       safeMerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
+      if (chuGiuLai != null && chuGiuLai !== "") {
+        try { ws.getCell(oChinh).value = chuGiuLai as never; } catch { /* bỏ qua */ }
+      }
     }
   }
 

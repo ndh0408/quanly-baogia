@@ -101,13 +101,17 @@ export function ImportExcelModal({
     const targetTemplate = templates.find((t) => t.id === tplId);
     const usesDays = usesDaysOf(tplId);
     const addrDetail = addrDetailOf(tplId);
+    // Mẫu đích có HIỆN cột Chi Tiết không. KHÁC `addrDetail` (chỉ là "có chừa khe địa chỉ"): mẫu GN
+    // chừa khe mà ẩn cột, mẫu Colorfull thì hiện. Quyết định cả việc NẠP nội dung cột đó lẫn việc
+    // bảng đối chiếu có nhìn thấy nó hay không.
+    const showDetail = !!targetTemplate?.layout?.hasDetail;
     const gridFields = addrFields({ usesDays, addrDetail });
     const columnMoves = Object.entries(fs.columns || {}).map(([role, source]) => ({
       role, source, target: letterOfField(gridFields, role),
-    })).filter((x) => x.target && x.role !== "detail");
+    })).filter((x) => x.target && (showDetail || x.role !== "detail"));
     const before = target?.items || [];
     const baseRow = plan.mode === "append" ? before.length : 0;
-    const conv = toGridItems(fs.items, { usesDays, addrDetail, baseRow });
+    const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
     const after = plan.mode === "append" ? [...before, ...conv.items] : conv.items;
     const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     const effectiveGroupSubtotal = plan.mode === "append" ? !!target?.groupSubtotal : !!fs.groupSubtotal;
@@ -122,10 +126,15 @@ export function ImportExcelModal({
       const k = plan.mode === "append" ? i - before.length : i;
       return k >= 0 ? fs.items[k]?.warn : undefined;
     };
-    const rows = diffItems(before, after, usesDays, warnOf);
+    const rows = diffItems(before, after, usesDays, warnOf, showDetail);
+    // CHI TIẾT SẼ RƠI BAO NHIÊU DÒNG — tính theo MẪU ĐÍCH người dùng vừa chọn, không theo mẫu mà
+    // máy chủ ĐOÁN cho file. Máy chủ cũng có một cảnh báo cùng ý (src/excelImport.ts) nhưng nó chỉ
+    // biết mẫu của FILE: nạp một file Colorfull vào sheet GN thì Chi Tiết vẫn rơi mà cảnh báo kia
+    // im, vì file đó "có mẫu hiện Chi Tiết". Dòng dưới nhìn đúng thứ quyết định việc rơi hay không.
+    const detailDropped = showDetail ? 0 : fs.items.filter((it) => String(it.detail || "").trim()).length;
     const templateMismatch = !!fs.templateCode && !!targetTemplate?.code && fs.templateCode !== targetTemplate.code;
     return {
-      fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, columnMoves,
+      fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
       before, after, beforeTotal, afterTotal, importedTotal, fileTotal, moneyDelta, moneyMismatch,
       formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas,
     };
@@ -168,8 +177,11 @@ export function ImportExcelModal({
       const target = isNew ? null : sheets[plan.targetIndex];
       const usesDays = usesDaysOf(tplId);
       const addrDetail = addrDetailOf(tplId);
+      // Phải khớp ĐÚNG với nhánh xem-trước ở trên: xem trước một kiểu mà nạp thật một kiểu là
+      // biến bảng đối chiếu thành lời hứa suông.
+      const showDetail = !!templates.find((t) => t.id === tplId)?.layout?.hasDetail;
       const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
-      const conv = toGridItems(fs.items, { usesDays, addrDetail, baseRow });
+      const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
       out.push({
         file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: conv.items,
         // Chế độ "Nối" thì KHÔNG đụng Discount của sheet đích: khối tổng trong file là của riêng
@@ -356,7 +368,7 @@ export function ImportExcelModal({
                       <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file" : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
                     </div>
                   </div>
-                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0) && (
+                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0) && (
                     <ul className="import-warn">
                       {view.templateMismatch && <li>
                         Bạn đang đưa file dạng <strong>{view.fs.templateName || view.fs.templateCode}</strong> vào sheet dùng <strong>{view.targetTemplate?.name}</strong>. Hãy chọn đúng sheet đích để nhóm và số thứ tự không đổi kiểu.
@@ -365,6 +377,9 @@ export function ImportExcelModal({
                       {view.rowWarnings > 0 && <li>{view.rowWarnings} điểm cần kiểm tra nằm ngay tại từng dòng bên dưới.</li>}
                       {view.fs.warnings.map((w, i) => <li key={i}>{w}</li>)}
                       {view.dropped > 0 && <li>{view.dropped} công thức dùng cột không có trong sheet đích. App giữ nguyên con số đang thấy, không tạo công thức sai.</li>}
+                      {view.detailDropped > 0 && <li>
+                        <strong>{view.detailDropped} dòng trong file có cột “Chi Tiết”</strong>, nhưng mẫu <strong>{view.targetTemplate?.name || "của sheet đích"}</strong> không có cột đó — phần nội dung ấy sẽ KHÔNG được nạp. Muốn giữ thì chọn sheet đích dùng mẫu có cột Chi Tiết (các mẫu Colorfull).
+                      </li>}
                     </ul>
                   )}
 

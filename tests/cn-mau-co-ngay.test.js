@@ -50,7 +50,7 @@ const baoGia = (templateCode) => ({
   fromContact: "Lan Anh",
   fromTitle: "Account",
   fromPhone: "0914291951",
-  fromAddress: "34 Đào Trí, P.Phú Thuận, Q.7 TP.HCM",
+  fromAddress: "34 Đào Trí, P.Phú Thuận, TP.HCM",
   city: "TP. Hồ Chí Minh",
   quoteDate: new Date("2026-09-17T00:00:00Z"),
   vatPercent: 8,

@@ -57,7 +57,7 @@ const baoGia = (templateCode) => ({
   fromContact: "Lan Anh",
   fromTitle: "Account",
   fromPhone: "0914291951",
-  fromAddress: "34 Đào Trí, P.Phú Thuận, Q.7 TP.HCM",
+  fromAddress: "34 Đào Trí, P.Phú Thuận, TP.HCM",
   city: "TP. Hồ Chí Minh",
   quoteDate: new Date("2026-09-18T00:00:00Z"),
   vatPercent: 8,
@@ -271,4 +271,102 @@ describe("Colorfull đủ BA mẫu như GN — và mẫu nào cũng có Chi Ti�
     expect(cols.notes, "GN có-ngày bị đẩy sang 9 cột").toBe("I");
     expect(getConfig("unibenfood").items.amountFormula(9)).toBe("G9*E9*F9");
   });
+});
+
+/**
+ * ============================================================================
+ * NHỮNG CHỖ COLORFULL CHƯA THEO ĐÚNG QUY TẮC CỦA GN — TÌM BẰNG SOI CHÉO, VÁ THEO TỪNG SỐ ĐO.
+ *
+ * Bốn lỗi dưới đây do một đợt soi 5 mặt (cấu hình · xuất · nhập · lưới · hồi quy GN) tìm ra, mỗi
+ * cái đã qua một vòng phản biện bằng mã nguồn trước khi được nhận là thật. Ba trong bốn cái CÓ
+ * TRƯỚC bản vá Colorfull, nhưng hai mẫu mới (banner, có-ngày) vừa kế thừa nguyên xi chúng — nên
+ * chúng thuộc về bản vá này.
+ * ============================================================================
+ */
+describe("Colorfull — bốn lỗ hổng tìm được khi soi chéo với GN", () => {
+  const baoGiaN = (code, n, extra = {}) => ({
+    quoteNumber: "CLF26997", title: "T", toCompany: "K", city: "TP. Hồ Chí Minh",
+    fromContact: "Nguyễn Văn Khác", fromTitle: "Account", fromPhone: "0900000000",
+    quoteDate: new Date("2026-09-18"), vatPercent: 8, hnTables: [], ...extra,
+    sheets: [{
+      order: 1, name: "S", groupSubtotal: false, discount: extra.discount || 0, extraTables: [], templateCode: code,
+      items: Array.from({ length: n }, (_, i) => ({
+        order: i + 1, kind: "item", name: `Món ${i}`, detail: `chi tiết ${i}`,
+        unit: "bộ", quantity: 1, days: 2, unitPrice: 1000, notes: "",
+      })),
+    }],
+  });
+  const quetChu = (ws, mau) => {
+    const hit = [];
+    ws.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (c) => {
+      if (chu(c.value).includes(mau)) hit.push(c.address);
+    }));
+    return hit;
+  };
+
+  it("KHÔNG in tên người ký nhúng cứng trong file mẫu — ai gửi cũng vậy", async () => {
+    // `templates/CLF_KhongNgay.xlsx` mang sẵn "Trần Thị Lan Anh" ở G22 (bản có-ngày: H22, do script
+    // dựng chép sang), ngay dưới dòng "Công Ty TNHH Colorfull" của khối ký. Không đường nào ghi đè
+    // ô đó, nên mọi báo giá Colorfull ra file khách với tên một người cụ thể đứng chỗ ký — trong
+    // khi người gửi THẬT nằm ở khối F1 phía trên. Hai tên khác nhau trên cùng một tờ.
+    // GN đã vá đúng lớp lỗi này (nhãn "Ms." ở B3/E3 + `showSender: false`).
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      for (const n of [2, 12]) {
+        const ws = await moFile(await buildQuoteBuffer(baoGiaN(ma, n)));
+        expect(quetChu(ws, "Lan Anh"), `${ma} (${n} mục): còn tên người ký nhúng cứng`).toEqual([]);
+        // Vế đối trọng: tên CÔNG TY ở khối ký phải còn — xoá nhầm nó là mất nhận diện thương hiệu.
+        expect(quetChu(ws, "Công Ty TNHH Colorfull").length, `${ma}: mất luôn dòng tên công ty ở khối ký`).toBeGreaterThan(0);
+      }
+    }
+  }, 300_000);
+
+  it("Ghi chú người dùng gõ PHẢI ra file Excel — nhãn trên giao diện hứa 'in vào file Excel/PDF'", async () => {
+    // Đường xuất Excel đọc `quote.notes` ở ĐÚNG MỘT chỗ, và chỗ đó nằm trong `if (pal)` của
+    // src/excel.ts. Không mẫu CLF nào khai `palette` ⇒ ghi chú không bao giờ ra Excel, dù PDF vẫn
+    // in. Đo trước khi vá: 3/3 mẫu GN có, 0/3 mẫu CLF không.
+    const GHI = "DIEU KIEN RIENG CUA BAO GIA NAY";
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaN(ma, 3, { notes: GHI })));
+      expect(quetChu(ws, GHI).length, `${ma}: ghi chú người dùng KHÔNG ra file Excel`).toBeGreaterThan(0);
+    }
+    // Không có ghi chú thì KHÔNG để lại ô "Ghi chú:" rỗng lơ lửng.
+    const wsTrong = await moFile(await buildQuoteBuffer(baoGiaN("clofull_decor", 3, { notes: "" })));
+    expect(quetChu(wsTrong, "Ghi chú:").filter((a) => chu(wsTrong.getCell(a).value).trim() === "Ghi chú:")).toEqual([]);
+  }, 300_000);
+
+  it("khối điều khoản của mẫu KHÔNG được biến mất khi bảng nở thêm hàng hoặc có Discount", async () => {
+    // Mẫu CLF có sẵn khối "* Ghi chú: - Tất cả các hạng mục trên là cho thuê…" ở ô GỘP C17:D17.
+    // `duplicateRow` dời chữ xuống đúng hàng mới nhưng để lại danh sách gộp CŨ (C17:D17) — trạng
+    // thái mâu thuẫn. Bước "dọn ô phụ" sau đó gán null cho D(hàng mới), mà ExcelJS ghi XUYÊN từ ô
+    // phụ sang ô chủ ⇒ xoá trắng chính chữ đó. Đo trước khi vá: từ 8 mục trở lên là mất.
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      for (const [n, discount] of [[2, 0], [8, 0], [20, 0], [8, 50_000]]) {
+        const ws = await moFile(await buildQuoteBuffer(baoGiaN(ma, n, { discount })));
+        const hit = quetChu(ws, "Tất cả các hạng mục");
+        expect(hit.length, `${ma} (${n} mục${discount ? " + discount" : ""}): mất khối điều khoản`).toBeGreaterThan(0);
+        // và phải còn là MỘT ô gộp C:D, không phải chữ nhân đôi ra hai cột.
+        expect(oChu(ws, hit[hit.length - 1]), "khối điều khoản không còn gộp C:D").toBe(hit[0]);
+      }
+    }
+  }, 300_000);
+
+  it("file NGOÀI (không mang dấu mã mẫu) vẫn phải nhận ra là mẫu Colorfull, không rơi về GN", async () => {
+    // Bộ đoán mẫu vốn không chấm cột Chi Tiết — dấu hiệu DUY NHẤT tách CLF khỏi GN. Bằng chứng còn
+    // lại là MÀU nền hàng nhóm, mà màu chỉ có ở file do chính app xuất. File khách/đối tác gửi tới
+    // (bảng phẳng, không hàng nhóm) vì thế rơi về mẫu GN đứng trước trong TEMPLATE_CONFIGS — đo
+    // được: clofull_decor → đoán ra `marico_decor`.
+    const nhuFileNgoai = async (buf) => {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      const ws = wb.worksheets[0];
+      ws.getCell("A1").value = null;   // gỡ dấu mã mẫu app nhúng lúc xuất
+      ws.name = "Bang gia";            // và tên tab do người ngoài đặt
+      return Buffer.from(await wb.xlsx.writeBuffer());
+    };
+    for (const ma of ["clofull_decor", "clofull_conngay", "marico_decor", "unibenfood"]) {
+      const kq = await parseQuoteWorkbook(await nhuFileNgoai(await buildQuoteBuffer(baoGiaN(ma, 2))));
+      const sheet = kq.sheets.find((s) => !s.skipped);
+      expect(sheet?.templateCode, `file ngoài dạng ${ma} bị đoán thành ${sheet?.templateCode}`).toBe(ma);
+    }
+  }, 300_000);
 });

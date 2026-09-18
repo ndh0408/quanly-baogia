@@ -114,6 +114,12 @@ export type ApplyOpts = {
   /** Mẫu ĐÍCH: lưới có chừa cột Chi Tiết trong sơ đồ địa chỉ không / có cột Số Ngày không. */
   addrDetail: boolean;
   usesDays: boolean;
+  /**
+   * Mẫu đích có HIỆN cột Chi Tiết không (layout.hasDetail) — KHÁC `addrDetail`, vốn chỉ nói "có
+   * chừa khe địa chỉ". Mẫu ẩn cột thì chừa khe mà không hiện; mẫu Colorfull thì hiện.
+   * Quyết định việc nội dung Chi Tiết trong file có được NẠP hay bị bỏ — xem `toGridItems`.
+   */
+  showDetail?: boolean;
   /** Dòng đầu của khối trong lưới đích (0-based) — nạp NỐI THÊM thì ref phải dời theo. */
   baseRow?: number;
 };
@@ -130,7 +136,18 @@ export function toGridItems(imported: ImportedItem[], opts: ApplyOpts): ApplyRes
       ...M.blankItem(opts.usesDays),
       kind: src.kind,
       name: src.name || "",
-      detail: "", // Trường Chi Tiết đã bỏ khỏi sản phẩm; file cũ có dữ liệu ở đây cũng không nạp lại.
+      // CHI TIẾT: nạp khi mẫu đích HIỆN cột đó, bỏ khi không.
+      //
+      // Dòng này trước đây là `detail: ""` cứng, kèm chú thích "Trường Chi Tiết đã bỏ khỏi sản
+      // phẩm". Câu đó đúng ở thời điểm viết — hồi ấy KHÔNG mẫu nào hiện cột Chi Tiết. Nay Colorfull
+      // hiện nó ở cả ba mẫu (templateConfigs: `clofull_*` đặt `removeDetail: false`), và cột đó
+      // chính là cột rộng nhất của mẫu CLF (D = 50), nơi đựng "Backdrop: / . KT: 14mW x 5mH / …".
+      //
+      // Giữ nguyên dòng cứng thì người dùng Colorfull nạp lại CHÍNH FILE app vừa xuất cũng mất
+      // sạch cột D — và ở chế độ "Thay thế" thì Chi Tiết đang có trong sheet bị xoá trắng. Máy chủ
+      // đọc được cột này rồi (`src/excelImport.ts`, vai trò "CHI TIET" → `it.detail`); chỗ đánh rơi
+      // là ĐÚNG dòng này, ở tầng web.
+      detail: opts.showDetail ? src.detail || "" : "",
       unit: src.unit || "",
       quantity: Number(src.quantity) || 0,
       quantityExact: !!src.quantityExact,
@@ -190,7 +207,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 export const kindLabel = (k?: string) => KIND_LABEL[k || "item"] || k || "—";
 
-function diffFields(a: M.Item, b: M.Item, usesDays: boolean): DiffField[] {
+function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolean): DiffField[] {
   const out: DiffField[] = [];
   const push = (f: string, before: unknown, after: unknown) => out.push({ field: f, label: FIELD_LABEL[f] || f, before, after });
   if (norm(a.name) !== norm(b.name)) push("name", a.name || "", b.name || "");
@@ -203,6 +220,10 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean): DiffField[] {
   if (!!a.quantityExact !== !!b.quantityExact) push("quantityExact", !!a.quantityExact, !!b.quantityExact);
   if (!numEq(a.unitPrice, b.unitPrice)) push("unitPrice", Number(a.unitPrice) || 0, Number(b.unitPrice) || 0);
   if (usesDays && !numEq(a.days ?? 1, b.days ?? 1)) push("days", a.days ?? 1, b.days ?? 1);
+  // Chi Tiết chỉ so khi mẫu đích HIỆN cột đó — mẫu ẩn thì hai bên luôn rỗng, đưa vào chỉ tổ nhiễu.
+  // Thiếu dòng này thì bảng đối chiếu báo "không đổi" ĐÚNG LÚC Chi Tiết đang bị ghi đè: lớp bảo vệ
+  // "xem kỹ trước khi nạp" của hộp thoại mù ngay ở cột rộng nhất của mẫu Colorfull.
+  if (showDetail && norm(a.detail) !== norm(b.detail)) push("detail", a.detail || "", b.detail || "");
   if (norm(a.notes) !== norm(b.notes)) push("notes", a.notes || "", b.notes || "");
   if (norm(a.label) !== norm(b.label)) push("label", a.label || "", b.label || "");
   const fa = JSON.stringify(a.formulas || {}), fb = JSON.stringify(b.formulas || {});
@@ -214,13 +235,13 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean): DiffField[] {
 const LCS_MAX = 1200;
 
 /** So thẳng theo VỊ TRÍ khi bảng quá dài — vẫn thấy dòng nào đổi số, chỉ không dò được chèn/xoá. */
-function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined): DiffRow[] {
+function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
   const rows: DiffRow[] = [];
   const n = Math.max(before.length, after.length);
   for (let i = 0; i < n; i++) {
     const a = before[i], b = after[i];
     if (a && b) {
-      const fields = diffFields(a, b, usesDays);
+      const fields = diffFields(a, b, usesDays, showDetail);
       rows.push({ kind: fields.length ? "changed" : "same", beforeNo: i + 1, afterNo: i + 1, itemKind: b.kind, name: b.name || a.name || "", item: b, fields, warn: warnOf?.(i) });
     } else if (b) rows.push({ kind: "added", afterNo: i + 1, itemKind: b.kind, name: b.name || "", item: b, fields: [], warn: warnOf?.(i) });
     else if (a) rows.push({ kind: "removed", beforeNo: i + 1, itemKind: a.kind, name: a.name || "", item: a, fields: [] });
@@ -229,9 +250,9 @@ function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, wa
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */
-export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined): DiffRow[] {
+export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
   const n = before.length, m = after.length;
-  if (n > LCS_MAX || m > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf);
+  if (n > LCS_MAX || m > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf, showDetail);
   // LCS theo khoá dòng — bảng (n+1)×(m+1); trên LCS_MAX đã rẽ nhánh ở trên nên không phình.
   const keyA = before.map(rowKey), keyB = after.map(rowKey);
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
@@ -244,7 +265,7 @@ export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, 
   let i = 0, j = 0;
   while (i < n && j < m) {
     if (keyA[i] === keyB[j]) {
-      const fields = diffFields(before[i], after[j], usesDays);
+      const fields = diffFields(before[i], after[j], usesDays, showDetail);
       rows.push({
         kind: fields.length ? "changed" : "same",
         beforeNo: i + 1, afterNo: j + 1,

@@ -283,7 +283,12 @@ export async function createQuote(req: Request) {
     }
   }
 
-  const creator = await prisma.user.findUnique({ where: { id: userId }, select: { projectCode: true } });
+  // Người TẠO báo giá — nguồn của khối "Người gửi" in ra Excel/PDF. Lấy đủ trường ngay đây thay vì
+  // để `company.*` đỡ, xem chú thích ở `fromPhone` bên dưới.
+  const creator = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { projectCode: true, phone: true, title: true, senderName: true, displayName: true },
+  });
   const draft: Record<string, any> = {
     title: b.title,
     shortTitle: b.shortTitle?.trim() || null,   // tuỳ chọn — dùng đặt tên file tải về
@@ -293,9 +298,22 @@ export async function createQuote(req: Request) {
     toPhone: b.toPhone || null,
     toAddress: b.toAddress || null,
     companyId: company.id,
-    fromContact: b.fromContact || "",
-    fromPhone: b.fromPhone || company.phone || null,
-    fromTitle: b.fromTitle || null,
+    // ── KHỐI "NGƯỜI GỬI" PHẢI THEO NGƯỜI TẠO, KHÔNG PHẢI THEO CÔNG TY ────────────────────
+    // `fromPhone` trước đây lùi về `company.phone`. Hậu quả đo được trên production: báo giá do
+    // bất kỳ ai tạo mà không kèm sẵn SĐT đều in ra số tổng đài của công ty (0914291951) ở dòng
+    // "Người gửi" — khách gọi lại là gặp người khác, và trước đó đúng những tài khoản bị xoá
+    // trắng `phone` (sự cố hồ sơ) là những người rơi vào nhánh này nhiều nhất.
+    //
+    // Giao diện tạo báo giá đã điền đúng từ hồ sơ người dùng (NewQuoteWizard.tsx: `me.phone`,
+    // `me.senderName`, `me.title`), nên đường lùi này chỉ chạy khi client KHÔNG gửi trường đó —
+    // và khi ấy câu trả lời đúng là hồ sơ NGƯỜI TẠO, không phải số của công ty. Hết đường thì để
+    // TRỐNG: một dòng trống thì người đọc biết là thiếu, còn số của người khác thì không.
+    //
+    // `fromAddress` vẫn lùi về `company.address` — địa chỉ ĐÚNG là của công ty, không phải của
+    // cá nhân, nên chỗ đó không cùng loại.
+    fromContact: b.fromContact || creator?.senderName || creator?.displayName || "",
+    fromPhone: b.fromPhone || creator?.phone || null,
+    fromTitle: b.fromTitle || creator?.title || null,
     fromAddress: b.fromAddress || company.address,
     city: b.city || company.city || "TP. Hồ Chí Minh",
     quoteDate: b.quoteDate || new Date(),
