@@ -165,16 +165,11 @@ router.post(
     await audit(req, "login.success", { resource: "user", resourceId: user.id, actorId: user.id });
     logger.info({ userId: user.id, ip }, "login success");
 
-    res.json({
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role,
-      phone: user.phone,
-      title: user.title,
-      senderName: user.senderName,
-      permissions: permissionsForUser(user.role, (user as { permissions?: string[] }).permissions, (user as { canSign?: boolean }).canSign),
-    });
+    // HÌNH DẠNG `me` KHAI MỘT CHỖ — xem `HO_SO_PHIEN_SELECT` trong authService.
+    // Bản trước tự liệt kê tay và THIẾU `email` + `mfaEnabled`, mà Profile.tsx đọc thẳng
+    // `me.mfaEnabled` nên nó báo "Chưa bật" cho người ĐANG BẬT MFA — người dùng bị nói rằng tài
+    // khoản mình không được bảo vệ. Cùng lỗi với `acceptInvite` thiếu `phone`/`title` trước đó.
+    res.json(await svc.hoSoPhienTheoId(user.id));
   })
 );
 

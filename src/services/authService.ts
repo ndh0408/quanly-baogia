@@ -37,14 +37,44 @@ export async function establishSession(req: Request, user: SessionSeed) {
   );
 }
 
+/* ── MỘT NGUỒN DUY NHẤT CHO HÌNH DẠNG `me` ───────────────────────────────────────────────────
+   SPA lấy THẲNG phản hồi của đường cấp phiên làm state `me` (App.tsx: `onLogin(m)` → `setMe(m)`)
+   và chỉ gọi lại `/auth/me` khi có sự kiện SSE "session:refresh". Nên mọi đường cấp phiên PHẢI
+   trả cùng một bộ trường — thiếu một trường ở một đường là làm màn hình nói sai suốt cả phiên.
+
+   ĐÃ HỎNG THẬT HAI LẦN vì hai đường tự khai select riêng:
+     · `acceptInvite` thiếu `phone` + `title` → sau khi đặt lại mật khẩu, trang Hồ sơ hiện hai ô
+       RỖNG dù CSDL đang có số, và lần Lưu kế tiếp XOÁ chúng (đã vá).
+     · `/login` thiếu `email` + `mfaEnabled` → Profile.tsx đọc `me.mfaEnabled` nên báo "Chưa bật"
+       cho người ĐANG BẬT MFA, kèm nút "Bật bảo mật 2 lớp". Người ta bị nói rằng tài khoản mình
+       không được bảo vệ, và bấm vào là đi đăng ký lại từ đầu.
+
+   Nên hình dạng nay khai MỘT chỗ. Bài kiểm khoá QUAN HỆ: mọi đường cấp phiên phải trả đủ bộ
+   khoá của `/auth/me` — xem tests/hs-cap-phien-tra-du-truong.test.js. */
+export const HO_SO_PHIEN_SELECT = {
+  id: true, username: true, email: true, displayName: true, role: true,
+  phone: true, title: true, senderName: true,
+  canSign: true, mfaEnabled: true, lastLoginAt: true, permissions: true,
+} as const;
+
+/** Dựng object `me` từ một hàng User đã select theo `HO_SO_PHIEN_SELECT`. */
+export function hoSoPhien(user: { role: string; permissions?: string[]; canSign?: boolean }) {
+  return { ...user, permissions: permissionsForUser(user.role, user.permissions, user.canSign) };
+}
+
+/** Đọc `me` theo id. Route KHÔNG được tự truy vấn Prisma (cổng check-architecture gác ranh giới
+ *  tầng), nên đường `/login` gọi hàm này thay vì tự khai select. */
+export async function hoSoPhienTheoId(id: number) {
+  const user = await prisma.user.findUnique({ where: { id }, select: HO_SO_PHIEN_SELECT });
+  if (!user) throw httpError(404, "Không tìm thấy tài khoản");
+  return hoSoPhien(user);
+}
+
 export async function meProfile(req: Request) {
-  const user = await prisma.user.findUnique({
-    where: { id: req.session.userId },
-    select: { id: true, username: true, email: true, displayName: true, role: true, phone: true, title: true, senderName: true, canSign: true, mfaEnabled: true, lastLoginAt: true, permissions: true },
-  });
+  const user = await prisma.user.findUnique({ where: { id: req.session.userId }, select: HO_SO_PHIEN_SELECT });
   if (!user) throw httpError(404, "Không tìm thấy tài khoản");
   // Ship the authoritative capability list so the SPA gates UI from the server catalog.
-  return { ...user, permissions: permissionsForUser(user.role, user.permissions, user.canSign) };
+  return hoSoPhien(user);
 }
 
 export async function updateProfile(req: Request) {
@@ -343,14 +373,7 @@ export async function acceptInvite(req: Request) {
      Luật rút ra, áp cho mọi đường cấp phiên về sau: TRẢ ĐỦ những trường mà form Hồ sơ nạp sẵn.
      Thiếu một trường ở đây là biến ô của trường đó thành một lệnh xoá ngầm.
      Bài kiểm khoá: tests/hs-cap-phien-tra-du-truong.test.js */
-  return {
-    id: updated.id,
-    username: updated.username,
-    displayName: updated.displayName,
-    role: updated.role,
-    phone: updated.phone,
-    title: updated.title,
-    senderName: updated.senderName,
-    permissions: permissionsForUser(updated.role, (updated as { permissions?: string[] }).permissions, (updated as { canSign?: boolean }).canSign),
-  };
+  // Dùng CHUNG hình dạng với `/auth/me` và `/login` — xem `HO_SO_PHIEN_SELECT`.
+  const hoSo = await prisma.user.findUnique({ where: { id: updated.id }, select: HO_SO_PHIEN_SELECT });
+  return hoSoPhien(hoSo!);
 }

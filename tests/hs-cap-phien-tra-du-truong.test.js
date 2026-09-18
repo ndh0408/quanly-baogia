@@ -14,17 +14,21 @@
  * Ghép hai điều đó lại: một trường THIẾU trong phản hồi cấp phiên sẽ làm ô của nó hiện RỖNG dù
  * trong CSDL đang có giá trị — rồi lần Lưu hồ sơ kế tiếp biến chính ô rỗng ấy thành lệnh xoá.
  *
- * ── ĐÃ XẢY RA THẬT ─────────────────────────────────────────────────────────
- * `/login` trả đủ `phone` + `title`; `acceptInvite` (kiêm luôn "Quên mật khẩu") thì KHÔNG. Nên
- * người vừa đặt lại mật khẩu xong, vào Hồ sơ, thấy hai ô đó trống, sửa mỗi "Tên người gửi" rồi bấm
- * Lưu — mất luôn SĐT và chức danh. Đúng triệu chứng của sự cố đã vá ở
- * tests/dm-dat-lai-mat-khau-khong-xoa-ho-so.test.js, nhưng đi vào bằng CỬA KHÁC: lần đó mất ở
- * chính lệnh accept-invite, lần này mất ở lần Lưu hồ sơ ngay sau đó.
+ * ── ĐÃ XẢY RA THẬT, HAI LẦN, HAI ĐƯỜNG KHÁC NHAU ───────────────────────────
+ * 1. `acceptInvite` (kiêm luôn "Quên mật khẩu") thiếu `phone` + `title`. Người vừa đặt lại mật
+ *    khẩu vào Hồ sơ, thấy hai ô đó trống, sửa mỗi "Tên người gửi" rồi bấm Lưu — mất luôn SĐT và
+ *    chức danh. Cùng sự cố với tests/dm-dat-lai-mat-khau-khong-xoa-ho-so.test.js, cửa khác: lần
+ *    đó mất ở chính lệnh accept-invite, lần này mất ở lần Lưu hồ sơ ngay sau đó.
+ * 2. `/login` thiếu `email` + `mfaEnabled`. Profile.tsx đọc `me.mfaEnabled`, nên nó báo
+ *    "Trạng thái: Chưa bật" kèm nút "Bật bảo mật 2 lớp" cho người ĐANG BẬT MFA — người dùng bị
+ *    nói rằng tài khoản mình không được bảo vệ, và bấm vào là đi đăng ký lại từ đầu.
  *
- * ── BÀI NÀY KHOÁ QUAN HỆ, KHÔNG KHOÁ DANH SÁCH ─────────────────────────────
- * Ghim một danh sách trường thì thêm cột mới vào Hồ sơ là bài kiểm vẫn xanh trong khi lỗ hổng mở
- * lại. Nên bài này so `accept-invite` VỚI `/login`: hai đường cùng cấp phiên đầy đủ thì phải trả
- * cùng bộ khoá. Thêm cột vào một bên mà quên bên kia là ĐỎ ngay.
+ * ── BÀI NÀY KHOÁ QUAN HỆ, VÀ MỐC LÀ `/auth/me` ─────────────────────────────
+ * Bản đầu của bài này so `accept-invite` VỚI `/login` — và nó XANH trong khi CẢ HAI cùng thiếu
+ * `email` + `mfaEnabled`. So hai đường có thể sai cùng nhau thì không phát hiện được gì.
+ * `/auth/me` là hình dạng đầy đủ mà mọi màn đọc `me` trông vào, nên nó mới là mốc.
+ * Nay hình dạng khai MỘT chỗ (`HO_SO_PHIEN_SELECT` trong authService) và bài này gác việc mọi
+ * đường cấp phiên còn dùng đúng nó.
  * ============================================================================
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -82,18 +86,31 @@ describe.runIf(dbAvailable)("Đường cấp phiên trả đủ trường", () =
     return t;
   }
 
-  it("accept-invite trả ĐỦ BỘ KHOÁ như /login", async () => {
-    // Vế chính. So hai bộ khoá với nhau chứ không so với một danh sách ghim cứng.
-    const rLogin = await agentWithCsrf(app).post("/api/auth/login").send({ username: `${TAG}@thu.vn`, password: MK });
+  it("MỌI đường cấp phiên trả đủ bộ khoá của /auth/me", async () => {
+    /* So với `/auth/me` chứ KHÔNG so hai đường cấp phiên với nhau. Bản đầu của bài này so
+       accept-invite VỚI /login — và nó xanh trong khi CẢ HAI cùng thiếu `email` + `mfaEnabled`.
+       `/auth/me` là hình dạng đầy đủ mà mọi màn đọc `me` trông vào, nên nó mới là mốc.
+
+       `mfaEnabled` thiếu đã hỏng thật: Profile.tsx đọc `me.mfaEnabled`, nên sau khi đăng nhập
+       thường nó báo "Chưa bật" cho người ĐANG BẬT MFA, kèm nút "Bật bảo mật 2 lớp". */
+    const ag = agentWithCsrf(app);
+    const rLogin = await ag.post("/api/auth/login").send({ username: `${TAG}@thu.vn`, password: MK });
     expect(rLogin.status, JSON.stringify(rLogin.body).slice(0, 200)).toBe(200);
+
+    const rMe = await ag.get("/api/auth/me");
+    expect(rMe.status, JSON.stringify(rMe.body).slice(0, 200)).toBe(200);
+    const khoaChuan = Object.keys(rMe.body);
+    expect(khoaChuan.length, "mốc test sai: /auth/me trả quá ít trường").toBeGreaterThan(8);
 
     const rAccept = await agentWithCsrf(app)
       .post("/api/auth/accept-invite")
       .send({ token: await tokenMoi(), password: MK_MOI });
     expect(rAccept.status, JSON.stringify(rAccept.body).slice(0, 200)).toBe(200);
 
-    const thieu = Object.keys(rLogin.body).filter((k) => !(k in rAccept.body));
-    expect(thieu, `accept-invite thiếu khoá so với /login: ${thieu.join(", ")} — mỗi khoá thiếu là một ô Hồ sơ hiện rỗng, và lần Lưu kế tiếp sẽ xoá cột đó`).toEqual([]);
+    for (const [ten, body] of [["/login", rLogin.body], ["/accept-invite", rAccept.body]]) {
+      const thieu = khoaChuan.filter((k) => !(k in body));
+      expect(thieu, `${ten} thiếu khoá so với /auth/me: ${thieu.join(", ")} — mỗi khoá thiếu là một màn hình nói SAI suốt cả phiên (ô Hồ sơ rỗng, trạng thái MFA sai)`).toEqual([]);
+    }
   }, 60_000);
 
   it("accept-invite trả ĐÚNG GIÁ TRỊ đang có trong CSDL, không phải rỗng", async () => {
