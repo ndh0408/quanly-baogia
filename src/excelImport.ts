@@ -626,8 +626,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   }
 
   base.items = raws.map((x) => x.it);
-  const detailRows = base.items.filter((it) => String(it.detail || "").trim()).length;
-  if (detailRows) base.warnings.push(`File có ${detailRows} dòng chứa cột Chi Tiết. Trường này đã bỏ khỏi báo giá nên nội dung đó sẽ không được nạp.`);
+  // (Cảnh báo cột Chi Tiết dời xuống SAU bước đoán mẫu — nó phụ thuộc mẫu nào, xem bên dưới.)
   for (const x of raws) {
     if (x.kind === "item") base.stats.items++;
     else if (x.kind === "sub") base.stats.subs++;
@@ -673,6 +672,16 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.templateWhy = guess.why;
 
   // ── Cảnh báo mức sheet ──
+  // CỘT CHI TIẾT: cảnh báo hay không PHỤ THUỘC MẪU, nên phải đứng sau bước đoán mẫu ở trên.
+  // Colorfull nay HIỆN cột này (templateConfigs: `clofull_decor.items.removeDetail = false`) →
+  // nội dung nạp vào và in ra đúng chỗ, báo "sẽ không được nạp" là nói sai với người dùng.
+  // Các mẫu KHÔNG hiện cột thì giữ nguyên cảnh báo cũ, y nguyên câu chữ.
+  const detailRows = base.items.filter((it) => String(it.detail || "").trim()).length;
+  if (detailRows) {
+    const itemsCfgCuaMau = base.templateCode ? TEMPLATE_CONFIGS[base.templateCode]?.items : null;
+    const mauHienChiTiet = !!itemsCfgCuaMau?.columns?.detail && !itemsCfgCuaMau?.removeDetail;
+    if (!mauHienChiTiet) base.warnings.push(`File có ${detailRows} dòng chứa cột Chi Tiết. Trường này đã bỏ khỏi báo giá nên nội dung đó sẽ không được nạp.`);
+  }
   // CÒN HẠNG MỤC PHÍA DƯỚI? Bảng dừng ở dòng tổng / khoảng trống dài; nếu bên dưới vẫn còn dòng
   // trông như hạng mục (có ĐVT + Số Lượng) thì phải BÁO, tuyệt đối không bỏ qua âm thầm.
   if (stopRow) {

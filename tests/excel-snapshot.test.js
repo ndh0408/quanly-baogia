@@ -94,6 +94,18 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       //     "Phí quản lý", "* Lấy hàng tại Emart" — đi vào MỌI file có-ngày gửi khách;
       //   · ba công thức tổng trỏ RA NGOÀI bảng: =G25*E25 · =H26*8% · =SUM(H26:H27).
       // 100 ô → 70 ô. Đối chiếu lại bất cứ lúc nào: node scripts/so-o-mau-co-ngay.mjs
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-18 (Colorfull hiện cột Chi Tiết) ───
+      // CHỈ fixture `clf` đổi — nó là fixture duy nhất dùng mẫu Colorfull. Bảy fixture còn lại giữ
+      // nguyên hash, tức ba mẫu GN không bị đụng (yêu cầu: "Chi Tiết chỉ của Colorfull").
+      //
+      // ĐÃ ĐỐI CHIẾU TỪNG Ô trước khi đổi hash — khác biệt đúng BỐN ô trên 69, không gì khác:
+      //     C4  "Hạng Mục [gộp→C4]"   →  "Hạng Mục"        (nhả phần gộp sang D)
+      //     D4  "Hạng Mục [gộp→C4]"   →  "Chi Tiết"        (ô tiêu đề có sẵn trong file mẫu)
+      //     C6  "CLF item [gộp→C6]"   →  "CLF item"
+      //     D6  "CLF item [gộp→C6]"   →  "chi tiết CLF"    (nội dung Chi Tiết ra đúng cột)
+      //   bề rộng: C 38→21, D 10→50 (đúng số trong file mẫu).
+      // Tổng cộng / VAT / Thành Tiền / ngày / chân trang: KHÔNG một ô nào đổi.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

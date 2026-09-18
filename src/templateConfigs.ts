@@ -201,9 +201,28 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       sectionFill: "FFFCEFDB", subFill: "FFEAF1FB",
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
-      // Xóa trường Chi Tiết khỏi bảng; gộp phần rộng D vào Hạng Mục, không dùng hidden column.
-      removeDetail: true,
-      columnWidths: { C: 38, D: 10 },
+      // ── CỘT CHI TIẾT: BẬT, VÀ CHỈ RIÊNG COLORFULL ────────────────────────────────────────
+      // Mẫu này được DỰNG QUANH cột Chi Tiết, xem chính file `templates/CLF_KhongNgay.xlsx`:
+      //   · D4 là ô tiêu đề "Chi Tiết" có sẵn (không phải code sinh ra);
+      //   · bề rộng cột trong file: C = 21.2 mà D = 50 — D là cột RỘNG NHẤT của bảng;
+      //   · các dòng mẫu D6:D12 chứa đúng loại nội dung của cột này ("Bàn check in: bàn dán AW",
+      //     "Backdrop: / . KT: 14mW x 5mH / . Khung sắt…").
+      // Cấu hình cũ đặt `removeDetail: true` + bóp `D: 10` rồi gộp vào Hạng Mục, tức xoá đúng
+      // cột kể nội dung của mẫu. Và nó xoá THẬT dữ liệu người dùng đã có: đường nhập Excel
+      // (`excelImport.ts:460`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
+      // 64 hạng mục đang giữ nội dung Chi Tiết — nên file Colorfull gửi sang CÓ cột đó, app lưu
+      // lại, rồi trả về cho khách một file MẤT cột đó.
+      //
+      // BẬT LẠI KHÔNG DỊCH ĐỊA CHỈ Ô NÀO. `detail: "D"` vốn đã khai, nên `metaService` trả
+      // `reserveDetail: true` và `GridTable.tsx:354` (`keepDetailSlot`) vẫn chừa khe D từ trước:
+      // cờ này chỉ đổi việc HIỆN cột, không đổi sơ đồ chữ cột. Mọi công thức đã lưu giữ nguyên
+      // nghĩa, kể cả loại trỏ theo địa chỉ (`{"quantity":"=E3"}` — E vẫn là Số Lượng).
+      //
+      // GN KHÔNG ĐỔI: `clofull_decor` là object RIÊNG, không spread từ `marico_decor`. Hai mẫu
+      // spread từ GN là `gn_banner` và `unibenfood`, cả hai nằm ngoài khối này.
+      removeDetail: false,
+      // Trả về đúng bề rộng thiết kế trong file (C 21 / D 50) thay vì C 38 / D 10 của thời gộp cột.
+      columnWidths: { C: 21, D: 50 },
       columns: {
         stt:       "B",
         name:      "C",

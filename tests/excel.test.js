@@ -122,7 +122,15 @@ describe("buildQuoteBuffer (export generation)", () => {
 
   // Cột "Chi Tiết" bị XÓA khỏi bảng: không ẩn cột D, mà gộp C:D thành một cột Hạng Mục rộng.
   // Cột vật lý D chỉ là phần của ô gộp để không dịch địa chỉ công thức báo giá cũ.
-  it.each(["marico_decor", "gn_banner", "clofull_decor"])("KHÔNG còn cột Chi Tiết trong Excel (%s)", async (code) => {
+  //
+  // ── `clofull_decor` ĐÃ RA KHỎI DANH SÁCH NÀY (2026-09-18) ────────────────────────────────
+  // Colorfull nay HIỆN cột Chi Tiết: mẫu `templates/CLF_KhongNgay.xlsx` được dựng quanh cột đó
+  // (ô tiêu đề "Chi Tiết" nằm sẵn ở D4, bề rộng trong file C 21 / D 50), và đường nhập Excel vẫn
+  // đọc cột này vào `it.detail` — nên gộp nó lại là vừa xoá thiết kế của mẫu vừa chôn dữ liệu
+  // người dùng đã có. Bài kiểm riêng cho quyết định mới: tests/cf-colorfull-cot-chi-tiet.test.js,
+  // trong đó có cả vế đối trọng khoá hai mẫu GN dưới đây vẫn gộp C:D.
+  // GIỮ NGUYÊN hai mẫu GN ở đây — yêu cầu là "Chi Tiết chỉ của Colorfull".
+  it.each(["marico_decor", "gn_banner"])("KHÔNG còn cột Chi Tiết trong Excel (%s)", async (code) => {
     const q = makeQuote(code);
     q.sheets[0].items = [
       { kind: "item", name: "Hạng mục A", detail: "CHITIET_KHONG_DUOC_XUAT", unit: "cái", quantity: 1, unitPrice: 100_000, days: null, notes: "" },
@@ -130,8 +138,10 @@ describe("buildQuoteBuffer (export generation)", () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildQuoteBuffer(JSON.parse(JSON.stringify(q))));
     const ws = wb.worksheets[0];
-    const headerRow = code === "clofull_decor" ? 4 : 11;
-    const firstRow = code === "clofull_decor" ? 6 : 12;
+    // (Nhánh clofull_decor bỏ đi cùng lúc với việc mẫu đó ra khỏi danh sách — hai mẫu GN còn lại
+    //  dùng chung hàng 11/12.)
+    const headerRow = 11;
+    const firstRow = 12;
     let leaked = false;
     ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? "").includes("CHITIET_KHONG_DUOC_XUAT")) leaked = true; }));
     expect(leaked).toBe(false);
