@@ -145,7 +145,10 @@ function paintCell(cell: any, { fill, fontColor, bold }: { fill?: any; fontColor
   else if (fill) style.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
   if (fontColor != null || bold != null) {
     style.font = { ...(style.font || {}) };
-    if (fontColor != null) style.font.color = { argb: fontColor };
+    // Màu chữ nhận CẢ HAI dạng: chuỗi "FFRRGGBB" (argb) và đối tượng { theme, tint }. Tệp mẫu
+    // Colorfull do người dùng chỉnh tay khai màu chữ hàng nhóm bằng THEME (`theme5` tint -0.25),
+    // không phải argb — muốn ra đúng y tệp mẫu thì phải ghi lại đúng dạng đó.
+    if (fontColor != null) style.font.color = typeof fontColor === "string" ? { argb: fontColor } : { ...fontColor };
     if (bold != null) style.font.bold = bold;
   }
   cell.style = style;
@@ -832,7 +835,15 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
           // theo yêu cầu khách (hoán đổi so với trước). STT/Ghi Chú của nhóm con để trắng.
           fill: bareSubCell ? "none" : (isSubSection ? (itemsCfg.subFill || "FFC9D9EF") : (itemsCfg.sectionFill || "FFFAE9DB")),
           bold: true,
-          fontColor: isSubSection ? "FF1F4E79" : "FF9A5B14",
+          // MÀU CHỮ CŨNG PHẢI THEO MẪU, KHÔNG CHỈ MÀU NỀN.
+          // Đợt trước chỉ đổi `sectionFill`/`subFill` theo tệp mẫu người dùng chỉnh mà bỏ quên hai
+          // màu chữ vốn đóng cứng ở đây, nên hàng nhóm ra chữ CAM-NÂU và nhóm con ra chữ XANH
+          // DƯƠNG, trong khi tệp mẫu là đỏ gạch (theme5 tint -0.25) và xanh rêu (4F513E).
+          // Người dùng mở tệp thật rồi chỉ ra đúng chỗ này.
+          // Mặc định GIỮ NGUYÊN hai giá trị cũ ⇒ ba mẫu Gia Nguyễn không đổi một byte.
+          fontColor: isSubSection
+            ? (itemsCfg.subTextColor ?? "FF1F4E79")
+            : (itemsCfg.sectionTextColor ?? "FF9A5B14"),
         });
       }
     } else if (it && effKind[i] === "info") {
@@ -1107,7 +1118,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         dat(`${nhan0}${r}`, "left");
         dat(`${oTien}${r}`, "right");
       }
-      for (const L of [nhan0, oTien]) dat(`${L}${totalRow}`, "bottom");
+      // ĐÁY KHỐI TỔNG PHẢI LIỀN MỘT NÉT, KHÔNG MỎNG Ở GIỮA.
+      // Trước đây chỉ kẻ đáy cho ô nhãn ĐẦU và ô TIỀN, bỏ qua ô thứ hai của hộp nhãn — đáy ra
+      // dày·MẢNH·dày. Đo đối chiếu với Gia Nguyễn (hàng "Thành Tiền"):
+      //     GN   F:đáy dày   G:đáy dày   H:đáy dày
+      //     CLF  F:đáy dày   G:đáy MẢNH  H:đáy dày   ← chỗ lệch
+      // Người dùng yêu cầu "khung đậm nhạt học theo GN", nên kẻ đáy cho MỌI cột từ ô nhãn đầu
+      // tới ô tiền. GN không đi qua nhánh này (`outerFrame` chỉ của Colorfull).
+      for (let i = nhan0.charCodeAt(0); i <= oTien.charCodeAt(0); i++) {
+        dat(`${String.fromCharCode(i)}${totalRow}`, "bottom");
+      }
     }
   }
 

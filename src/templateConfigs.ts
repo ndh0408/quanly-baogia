@@ -228,6 +228,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // Tiêu đề cột · dải trên bảng · khối tổng vẫn dùng màu nền của file mẫu (theme8/tint .4),
       // nên không khai ở đây — `paintHeader: false` để app KHÔNG tô đè.
       sectionFill: "FFF6D479", subFill: "FFD5DDA2",
+      // MÀU CHỮ, đo từ cùng tệp mẫu ấy (đừng chỉ lấy màu nền — đợt trước bỏ quên đúng hai dòng
+      // này nên hàng nhóm ra chữ CAM-NÂU FF9A5B14 và nhóm con ra chữ XANH DƯƠNG FF1F4E79):
+      //     hàng NHÓM     = theme5 tint -0.25  (accent2 #C0504D → #953735, đỏ gạch)
+      //     hàng NHÓM CON = FF4F513E           (xanh rêu đậm)
+      // Giữ nguyên dạng THEME cho hàng nhóm thay vì đóng cứng #953735: tệp mẫu khai bằng theme,
+      // ghi lại y như vậy thì đổi bảng màu của tệp mẫu là chữ đi theo, không lệch ra.
+      sectionTextColor: { theme: 5, tint: -0.25 },
+      subTextColor: "FF4F513E",
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
       // ── CỘT CHI TIẾT: BẬT, VÀ CHỈ RIÊNG COLORFULL ────────────────────────────────────────

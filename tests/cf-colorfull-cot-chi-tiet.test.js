@@ -572,6 +572,49 @@ describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
     }
   }, 300_000);
 
+  it("ĐỘ DÀY khung học theo GIA NGUYỄN — lấy chính tệp GN làm chuẩn, không đóng cứng", async () => {
+    // Yêu cầu của người dùng: "khung đậm nhạt thì học theo của GN". Nên ca này KHÔNG khai sẵn
+    // "phải là medium" — nó DỰNG một tệp GN cùng dữ liệu rồi đòi Colorfull khớp.
+    //
+    // Đo lúc viết ca: bảng chính của hai bên đã giống nhau từng nét (tiêu đề tMtt/tttt/tttM,
+    // hàng nhóm, nhóm con, hạng mục, hàng cuối). Lệch duy nhất nằm ở ĐÁY khối tổng:
+    //     GN   hàng "Thành Tiền": F đáy DÀY · G đáy DÀY · H đáy DÀY
+    //     CLF  hàng "Thành Tiền": F đáy DÀY · G đáy MẢNH · H đáy DÀY   ← đáy mỏng ở giữa
+    // vì vòng kẻ đáy chỉ chạy cho ô nhãn ĐẦU và ô TIỀN, bỏ ô thứ hai của hộp nhãn.
+    const net = (ws, addr, canh) => ws.getCell(addr).border?.[canh]?.style ?? "-";
+    const timHang = (ws, re) => {
+      let r = null;
+      ws.eachRow({ includeEmpty: false }, (row, i) => {
+        if (r != null) return;
+        for (const L of ["B", "C", "D", "E", "F", "G", "H", "I", "J"]) {
+          if (re.test(chu(row.getCell(L).value).trim())) { r = i; return; }
+        }
+      });
+      return r;
+    };
+    /** Đáy hàng "Thành Tiền" đọc từ ô nhãn đầu → ô tiền: phải LIỀN một nét. */
+    const dayKhoiTong = async (ma, nhan0, oTien) => {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaKhung(ma, 5)));
+      const r = timHang(ws, /^Thành Tiền$/);
+      expect(r, `${ma}: không thấy hàng Thành Tiền`).toBeTruthy();
+      const day = [];
+      for (let i = nhan0.charCodeAt(0); i <= oTien.charCodeAt(0); i++) {
+        day.push(net(ws, `${String.fromCharCode(i)}${r}`, "bottom"));
+      }
+      return day;
+    };
+
+    const chuanGN = await dayKhoiTong("marico_decor", "F", "H");
+    expect(new Set(chuanGN).size, `GN tự nó phải có đáy LIỀN thì mới làm chuẩn được: ${chuanGN}`).toBe(1);
+    expect(chuanGN[0], "GN dùng nét dày ở đáy khối tổng").toBe("medium");
+
+    for (const [ma, nhan0, oTien] of [["clofull_decor", "F", "H"], ["clofull_banner", "F", "H"], ["clofull_conngay", "G", "I"]]) {
+      const day = await dayKhoiTong(ma, nhan0, oTien);
+      expect(day, `${ma}: đáy khối tổng KHÔNG liền nét như GN (GN: ${chuanGN.join(",")})`)
+        .toEqual(chuanGN.map(() => chuanGN[0]).slice(0, day.length));
+    }
+  }, 300_000);
+
   it("khung NGOÀI DỪNG ở hàng hạng mục cuối — không thò xuống khối tổng", async () => {
     // Người dùng khoanh ĐỎ đúng hai chỗ này trong ảnh chụp: kéo khung xuống hết khối tổng để lại
     // HAI VẠCH DỌC lơ lửng ở cột đầu và cột cuối, cùng một ô rỗng có viền bên dưới bảng — vì khối
@@ -703,6 +746,47 @@ describe("Colorfull — màu nền đúng như file mẫu người dùng chỉnh
       expect(nenCua(ws, `C${rCon}`), `${ma}: hàng NHÓM CON sai màu`).toBe(NHOM_CON);
       // Hàng hạng mục thường KHÔNG được tô — tô hết thì mất ý nghĩa phân nhóm.
       expect(nenCua(ws, `C${rNhom + 1}`), `${ma}: hàng hạng mục thường bị tô màu nhóm`).toBe("-");
+    }
+  }, 300_000);
+
+  it("MÀU CHỮ hàng nhóm / nhóm con cũng theo file mẫu — và GN GIỮ NGUYÊN màu cũ", async () => {
+    // Đợt trước đổi `sectionFill`/`subFill` theo tệp mẫu người dùng chỉnh mà BỎ QUÊN hai màu chữ
+    // vốn đóng cứng trong `src/excel.ts`, nên hàng nhóm ra chữ CAM-NÂU FF9A5B14 và nhóm con ra
+    // chữ XANH DƯƠNG FF1F4E79. Người dùng mở tệp thật rồi chỉ ra đúng chỗ đó.
+    // Đo trên tệp mẫu của họ: hàng nhóm = theme5 tint -0.25 (đỏ gạch) · nhóm con = FF4F513E.
+    //
+    // Vế thứ hai QUAN TRỌNG NGANG: ba mẫu Gia Nguyễn phải GIỮ NGUYÊN hai màu cũ. Bản vá gắn màu
+    // mới vào CẤU HÌNH và để `??` rơi về giá trị cũ, nên GN không đi qua nhánh nào mới — ca này
+    // khoá điều đó lại, vì "đọc code thấy không đụng" không phải bằng chứng đủ mạnh cho GN.
+    const mauChu = (ws, addr) => {
+      const f = ws.getCell(addr).font || {};
+      const c = f.color || {};
+      return c.argb ?? (c.theme != null ? `theme${c.theme}/t${Math.round((c.tint || 0) * 100) / 100}` : "(auto)");
+    };
+    const timHai = (ws) => {
+      let rNhom = null, rCon = null;
+      ws.eachRow({ includeEmpty: false }, (row, r) => {
+        const ten = chu(row.getCell("C").value).trim();
+        if (ten === "NHÓM A") rNhom = r;
+        if (ten === "Nhóm con B1") rCon = r;
+      });
+      return { rNhom, rCon };
+    };
+
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaNhom(ma)));
+      const { rNhom, rCon } = timHai(ws);
+      expect(rNhom && rCon, `${ma}: không thấy đủ hàng nhóm + nhóm con`).toBeTruthy();
+      expect(mauChu(ws, `C${rNhom}`), `${ma}: chữ hàng NHÓM không phải màu của file mẫu`).toBe("theme5/t-0.25");
+      expect(mauChu(ws, `C${rCon}`), `${ma}: chữ hàng NHÓM CON không phải màu của file mẫu`).toBe("FF4F513E");
+    }
+
+    for (const ma of ["marico_decor", "gn_banner", "unibenfood"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaNhom(ma)));
+      const { rNhom, rCon } = timHai(ws);
+      expect(rNhom && rCon, `${ma}: không thấy đủ hàng nhóm + nhóm con`).toBeTruthy();
+      expect(mauChu(ws, `C${rNhom}`), `${ma}: GN BỊ ĐỔI màu chữ hàng nhóm`).toBe("FF9A5B14");
+      expect(mauChu(ws, `C${rCon}`), `${ma}: GN BỊ ĐỔI màu chữ hàng nhóm con`).toBe("FF1F4E79");
     }
   }, 300_000);
 
