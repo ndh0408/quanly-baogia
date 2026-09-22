@@ -139,7 +139,26 @@ for (const [khoa, st] of styleCu) {
   ws.getCell(r, dich(c)).style = st;
 }
 
-// 7b) HỘP NHÃN KHỐI TỔNG: DỊCH, KHÔNG NỞ.
+// 8) Dựng cột SỐ NGÀY: nhãn + style chép từ cột SỐ LƯỢNG.
+const colNguon = ws.getColumn(CHEP_STYLE_TU);
+const colMoi = ws.getColumn(CHEN_TAI);
+colMoi.width = colNguon.width;
+ws.eachRow({ includeEmpty: true }, (row, r) => {
+  const nguon = row.getCell(CHEP_STYLE_TU);
+  const dichO = row.getCell(CHEN_TAI);
+  dichO.style = JSON.parse(JSON.stringify(nguon.style ?? {}));
+});
+const oTieuDe = ws.getCell(`${chuCot(CHEN_TAI)}${HANG_TIEU_DE}`);
+oTieuDe.value = NHAN_MOI;
+oTieuDe.style = JSON.parse(JSON.stringify(ws.getCell(`${chuCot(CHEP_STYLE_TU)}${HANG_TIEU_DE}`).style ?? {}));
+
+// 8b) HỘP NHÃN KHỐI TỔNG: DỊCH, KHÔNG NỞ.
+//
+// PHẢI CHẠY SAU BƯỚC 8. Bước 8 chép style cột SỐ LƯỢNG (F) sang cột SỐ NGÀY (G) cho MỌI hàng —
+// kể cả ba hàng tổng. Đặt khối này trước bước 8 thì nền vừa gán cho hộp nhãn G:H bị chép đè bằng
+// style của F, mà F ở hàng tổng đã bị dọn sạch nền (nó nằm ngoài hộp nhãn) ⇒ nhãn "Tổng Cộng /
+// VAT / Thành Tiền" ra TRẮNG TRƠN trong khi ô tiền vẫn có nền. Người dùng chụp màn hình đúng lỗi
+// này ở bản có-ngày.
 // Luật chung ở bước 6 làm RỘNG RA mọi vùng bắc qua điểm chèn — đúng cho những dải chạy hết bề
 // ngang (tiêu đề, thư đầu, dải thông tin chương trình), nhưng SAI cho hộp nhãn "Tổng Cộng / VAT /
 // Thành Tiền": hộp đó phải ôm đúng HAI cột ngay trước ô tiền, y như mẫu GN
@@ -159,19 +178,6 @@ for (const r of [13, 14, 15]) {
   ws.mergeCells(`G${r}:H${r}`);
   ws.getCell(`G${r}`).value = chu ?? null;
 }
-
-// 8) Dựng cột SỐ NGÀY: nhãn + style chép từ cột SỐ LƯỢNG.
-const colNguon = ws.getColumn(CHEP_STYLE_TU);
-const colMoi = ws.getColumn(CHEN_TAI);
-colMoi.width = colNguon.width;
-ws.eachRow({ includeEmpty: true }, (row, r) => {
-  const nguon = row.getCell(CHEP_STYLE_TU);
-  const dichO = row.getCell(CHEN_TAI);
-  dichO.style = JSON.parse(JSON.stringify(nguon.style ?? {}));
-});
-const oTieuDe = ws.getCell(`${chuCot(CHEN_TAI)}${HANG_TIEU_DE}`);
-oTieuDe.value = NHAN_MOI;
-oTieuDe.style = JSON.parse(JSON.stringify(ws.getCell(`${chuCot(CHEP_STYLE_TU)}${HANG_TIEU_DE}`).style ?? {}));
 
 // 9) Hai ô chú thích cho lập trình viên trong file gốc ("hàng này có hoặc ko tùy chương trình",
 //    "tạo được những hàng con…") nằm ở J5/J8, sau khi chèn thì trôi sang K5/K8. Chúng KHÔNG phải
@@ -195,7 +201,7 @@ const loi = [];
 if (tieuDe[5] !== NHAN_MOI) loi.push(`G${HANG_TIEU_DE} phải là "${NHAN_MOI}", đang là "${tieuDe[5]}"`);
 if (tieuDe[2] !== "Chi Tiết") loi.push(`D${HANG_TIEU_DE} mất cột Chi Tiết (đang là "${tieuDe[2]}")`);
 for (const [r, nhan] of [[13, "Tổng Cộng"], [14, "VAT(8%)"], [15, "Thành Tiền"]]) {
-  // Hộp nhãn gọn nằm ở G:H (hai cột ngay trước ô tiền I) — xem bước 7b.
+  // Hộp nhãn gọn nằm ở G:H (hai cột ngay trước ô tiền I) — xem bước 8b.
   const v = String(w2.getCell(`G${r}`).value ?? "").trim();
   if (v !== nhan) loi.push(`G${r} phải là nhãn "${nhan}", đang là "${v}" — hộp nhãn bị lệch`);
   if (!w2.model.merges.includes(`G${r}:H${r}`)) loi.push(`hàng ${r} phải gộp G:H, đang có ${w2.model.merges.filter((m) => /^[A-Z]+/.test(m) && m.includes(String(r))).join(",") || "không gì"}`);

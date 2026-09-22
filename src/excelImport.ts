@@ -97,9 +97,27 @@ const HEADER_ROLE: Record<string, string> = {
   "HINH ANH": "_images", "IMAGE": "_images", "IMAGES": "_images",
 };
 
-/** Màu nền hàng NHÓM / NHÓM CON do app tô lúc xuất (excel.ts) — dấu hiệu chắc nhất. */
-const FILL_SECTION = new Set(["FFFAE9DB", "FFFCEFDB", "FFE2EFDA"]);
-const FILL_SUB = new Set(["FFC9D9EF", "FFEAF1FB"]);
+/** Màu nền hàng NHÓM / NHÓM CON do app tô lúc xuất (excel.ts) — dấu hiệu chắc nhất.
+ *
+ * ── VÌ SAO SINH RA TỪ `TEMPLATE_CONFIGS` CHỨ KHÔNG CHÉP TAY ────────────────────────────────
+ * Hai tập này từng là hằng số chép tay, và đã LỆCH một lần: đổi màu nhóm của Colorfull sang
+ * F6D479 / D5DDA2 trong `templateConfigs.ts` mà quên sửa ở đây. Đo được hậu quả:
+ *   khách mở tệp, gõ SỐ đè lên ô Đơn Giá của hàng NHÓM CON (phá `=SUM(...)`) rồi gửi lại
+ *   → bộ nhập không còn nhận ra màu nên xếp hàng đó thành HẠNG MỤC THẬT
+ *   → đơn giá của nó (vốn là TỔNG các mục con) bị cộng LẦN THỨ HAI: 1.200.000 thay vì 800.000.
+ * App chỉ kêu "tổng lệch với số ghi trong file", không một chữ nào nói cấu trúc nhóm đã sai —
+ * nên người dùng đọc ra thành "khách sửa số". Sinh từ cấu hình thì đổi màu là hai đầu tự khớp.
+ *
+ * Những mã CHÉP TAY bên dưới là màu của các bản đã phát hành TRƯỚC: tệp khách đang giữ trong hộp
+ * thư vẫn mang màu cũ, nạp lại phải còn nhận ra. Đừng dọn.
+ */
+const mauTuCauHinh = (khoa: "sectionFill" | "subFill") =>
+  Object.values(TEMPLATE_CONFIGS as Record<string, any>)
+    .flatMap((t) => [t?.items?.[khoa], t?.palette?.[khoa]])
+    .filter((v): v is string => typeof v === "string" && /^[0-9A-Fa-f]{8}$/.test(v))
+    .map((v) => v.toUpperCase());
+const FILL_SECTION = new Set(["FFFAE9DB", "FFFCEFDB", "FFE2EFDA", ...mauTuCauHinh("sectionFill")]);
+const FILL_SUB = new Set(["FFC9D9EF", "FFEAF1FB", ...mauTuCauHinh("subFill")]);
 /** Màu nền hàng TIÊU ĐỀ CỘT — phụ trợ khi nhận diện hàng tiêu đề. */
 const FILL_HEADER = new Set(["FFF3C9A1", "FFFFCC99"]);
 const TEMPLATE_MARKER_PREFIX = "__QUANLY_TEMPLATE__:";

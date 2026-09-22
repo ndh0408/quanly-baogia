@@ -350,11 +350,25 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
     setCell(ws, c.toBlockCell, (txt || "").trim());
     ensureWrap(ws.getCell(c.toBlockCell));
-    // Canh GIỮA khi mẫu khai `toBlockCenter` (chỉ Colorfull): sau khi bỏ ô logo khách hàng, khối
-    // này phủ cả C3:I3 nên căn trái/phải đều lệch — giữa mới cân với tiêu đề ở hàng trên.
-    if (c.toBlockCenter) {
+    // ── MÀU CHỮ + CĂN LỀ CỦA KHỐI NÀY ────────────────────────────────────────────────────────
+    // CHỮ PHẢI VỀ MÀU MẶC ĐỊNH. Ô C3 của mẫu Colorfull VỐN là chữ mồi "logo cty khách hàng" màu
+    // ĐỎ TƯƠI — đo trong cả `CLF_KhongNgay.xlsx` lẫn `CLF_CoNgay.xlsx`: font.color.argb =
+    // FFFF0000. Bỏ tính năng logo khách hàng thì `extraCellsToClear` dọn GIÁ TRỊ nhưng GIỮ STYLE,
+    // rồi `headerMerges` nhân style đỏ ấy ra cả dải C3:I3, rồi khối "Kính gửi" được ghi vào đúng
+    // ô đó ⇒ MỌI báo giá Colorfull gửi khách in tên người nhận bằng CHỮ ĐỎ TƯƠI (đo trên cả ba
+    // mẫu CLF). Ô "Kính gửi" GỐC của mẫu (F3) dùng theme 1 — trả về đúng thế.
+    //
+    // PHẢI NHÂN BẢN CẢ STYLE, KHÔNG GÁN THẲNG `o.font`/`o.alignment`: ExcelJS gộp các style giống
+    // nhau thành MỘT đối tượng dùng chung cho nhiều ô, nên gán thẳng là sửa luôn mọi ô khác đang
+    // dùng chung style đó — đúng cái bẫy đã ghi ở hàm `dat` của khối khung ngoài bên dưới.
+    {
       const o = ws.getCell(c.toBlockCell);
-      o.alignment = { ...(o.alignment || {}), horizontal: "center", vertical: "middle", wrapText: true };
+      const st = JSON.parse(JSON.stringify(o.style || {}));
+      st.font = { ...(st.font || {}), color: { theme: 1 } };
+      // Canh GIỮA khi mẫu khai `toBlockCenter` (chỉ Colorfull): sau khi bỏ ô logo khách hàng, khối
+      // này phủ cả C3:I3 nên căn trái/phải đều lệch — giữa mới cân với tiêu đề ở hàng trên.
+      if (c.toBlockCenter) st.alignment = { ...(st.alignment || {}), horizontal: "center", vertical: "middle", wrapText: true };
+      o.style = st;
     }
   }
   if (c.fromContactCell) {
@@ -489,15 +503,43 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   }
   // Cột "HÌNH ẢNH" (bật theo sheet): nằm NGAY SAU cột cuối của template — không dịch cột nào,
   // không đụng công thức. Header + width chỉ thêm khi bật (mặc định tắt → file y như cũ).
+  /** Gán viền (và tuỳ chọn căn lề) cho MỘT ô mà không lem sang ô khác.
+   *
+   *  ExcelJS gộp các style giống hệt nhau thành MỘT đối tượng dùng chung cho nhiều ô, nên
+   *  `cell.border = {...}` sửa luôn mọi ô đang dùng chung style đó. Đo được trên mẫu Colorfull
+   *  CÓ NGÀY khi bật cột HÌNH ẢNH: đặt viền cho ô cột ảnh (K) làm cột L — NGOÀI bảng — mọc viền
+   *  theo, kể cả ở hàng dải "* Thông tin chương trình" đang rỗng ⇒ ô rỗng có khung lơ lửng cạnh
+   *  bảng. Cùng đúng cái bẫy mà hàm `dat` của khối khung ngoài đã ghi chú. */
+  const datVien = (cell: any, vien: any, canhLe?: any) => {
+    try {
+      const st = JSON.parse(JSON.stringify(cell.style || {}));
+      st.border = vien;
+      if (canhLe) st.alignment = { ...(st.alignment || {}), ...canhLe };
+      cell.style = st;
+    } catch { /* ô không tồn tại */ }
+  };
+
   const imgCol: string | null = sheet?.showImages
     ? idxToColLetter(Math.max(...Object.values(cols).map((L: any) => colLetterToIdx(String(L)))) + 1)
     : null;
   if (imgCol && itemsCfg.headerRow) {
     const hcell = ws.getCell(`${imgCol}${itemsCfg.headerRow}`);
+    // NỀN HEADER PHẢI THEO ĐÚNG CỜ `paintHeader` NHƯ CÁC CỘT KHÁC.
+    // Trước đây ô này luôn được tô peach F3C9A1, trong khi vòng tô ngay trên bỏ qua mọi mẫu khai
+    // `paintHeader: false` (Colorfull — giữ nền nướng sẵn trong tệp mẫu). Đo trên tệp xuất thật:
+    // B..I nền theme8/t0.4 (xanh ngọc của mẫu) mà J "HÌNH ẢNH" nền FFF3C9A1 ⇒ HÀNG TIÊU ĐỀ HAI
+    // MÀU. Mẫu nào để nền baked thì chép style ô tiêu đề cột cuối sang, cho liền một dải.
+    if (itemsCfg.paintHeader !== false) {
+      paintCell(hcell, { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+    } else {
+      const cotMau = (cols.notes || cols.amount) as string | undefined;
+      if (cotMau) {
+        try { hcell.style = JSON.parse(JSON.stringify(ws.getCell(`${cotMau}${itemsCfg.headerRow}`).style || {})); } catch { /* bỏ qua */ }
+      }
+    }
     hcell.value = "HÌNH ẢNH";
-    hcell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-    hcell.border = { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "medium" } };
-    paintCell(hcell, { fill: "FFF3C9A1", fontColor: "FF000000", bold: true });
+    datVien(hcell, { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "medium" } },
+      { vertical: "middle", horizontal: "center", wrapText: true });
     try { ws.getColumn(imgCol).width = 19; } catch { /* giữ mặc định */ }
   }
 
@@ -507,12 +549,15 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // số dòng SAU KHI XUỐNG HÀNG (wrap) theo ĐỘ RỘNG CỘT — không chỉ đếm \n — nên tên nhóm
   // / hạng mục dài (vd "Booth backdrop … (thay AW booth có sẵn)") không bị cắt mất chữ.
   const colWidthOf = (letter: any) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
-  const wrapLines = (text: any, letter: any) => {
+  const wrapLines = (text: any, letter: any, beRongEp?: number | null) => {
     if (text == null || text === "") return 1;
     const mergedNameWidth = itemsCfg.removeDetail && letter === cols.name && cols.detail
       ? (colWidthOf(cols.name) || 12) + (colWidthOf(cols.detail) || 12)
       : null;
-    const cw = mergedNameWidth || colWidthOf(letter) || 12;
+    // `beRongEp` dùng cho Ô GỘP NGANG ngoài bảng hạng mục (khối "Kính gửi" C3:I3, dải thông tin
+    // chương trình B5:I5, ô "* Ghi chú" C:D): bề rộng thật của chúng là TỔNG bề rộng các cột bị
+    // phủ, không phải bề rộng một cột.
+    const cw = beRongEp || mergedNameWidth || colWidthOf(letter) || 12;
     const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
     // NGẮT DÒNG THEO TỪ, KHÔNG THEO SỐ KÝ TỰ — Excel không cắt giữa từ.
     // Bản cũ tính `ceil(độ dài / perLine)`, tức coi mỗi dòng luôn được lấp đầy. Thực tế mỗi dòng
@@ -569,6 +614,38 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // Chặn trên 409 pt (giới hạn chiều cao hàng của Excel) để file không out-of-spec.
     ws.getRow(r).height = Math.min(409, Math.max(18, lines * 15 + 3));
   }
+
+  // ── CHIỀU CAO CÁC HÀNG GỘP NGANG NGOÀI BẢNG HẠNG MỤC ──────────────────────────────────────
+  // Vòng ngay trên chỉ đo HÀNG HẠNG MỤC. Hai hàng đầu trang của Colorfull giữ nguyên chiều cao
+  // nướng sẵn trong tệp mẫu, và nó KHÔNG đủ: đo trên tệp xuất thật, khối "Kính gửi" (C3:I3) cao
+  // 67pt trong khi `toBlockFormat` sinh 5 dòng cỡ 12pt ⇒ cần ≈75pt, nên DÒNG EMAIL BỊ CẮT ngay cả
+  // khi mọi trường đều ngắn. Cùng đúng lớp lỗi "xuống hàng bị che" đã chữa cho hàng hạng mục.
+  // GN không khai `toBlockCell`/`infoBannerCell` nên không đi qua đây.
+  const beRongVungGop = (addr: string): number | null => {
+    const vung = ((ws.model?.merges || []) as string[]).find((r) => r.startsWith(`${addr}:`));
+    const m = vung && /^([A-Z]+)\d+:([A-Z]+)\d+$/.exec(vung);
+    if (!m || m[1].length > 1 || m[2].length > 1) return null;
+    let tong = 0;
+    for (let i = m[1].charCodeAt(0); i <= m[2].charCodeAt(0); i++) tong += colWidthOf(String.fromCharCode(i)) || 0;
+    return tong > 0 ? tong : null;
+  };
+  const caoTheoChu = (addr: any) => {
+    if (!addr) return;
+    try {
+      const o = ws.getCell(addr);
+      const chu = typeof o.value === "string" ? o.value : "";
+      if (!chu) return;                       // ô rỗng: giữ nguyên (dải banner rỗng còn bị ẩn hàng)
+      const r = parseInt(String(addr).replace(/^[A-Z]+/, ""), 10);
+      if (!r) return;
+      const soDong = wrapLines(chu, null, beRongVungGop(addr));
+      const can = Math.min(409, Math.max(18, soDong * 15 + 3));
+      // CHỈ NỚI RA, KHÔNG BÓP LẠI: chiều cao trong tệp mẫu là chủ ý trình bày của người dùng.
+      const dangCo = ws.getRow(r).height;
+      if (dangCo == null || can > dangCo) ws.getRow(r).height = can;
+    } catch { /* mẫu không có ô đó */ }
+  };
+  caoTheoChu(c.toBlockCell);
+  caoTheoChu(c.infoBannerCell);
 
   // Per-section subtotal = sum of item/sub amounts until the next section. Shown only
   // when sheet.groupSubtotal is on. Section rows are letter-coded (A,B,C…) and never
@@ -840,7 +917,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // Hàng nhóm/nhóm con tô nền đồng bộ dải màu; ảnh giữ tỉ lệ, lưới 2 ảnh/hàng, editAs oneCell.
     if (imgCol && r != null) {
       const icell = ws.getCell(`${imgCol}${r}`);
-      icell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "medium" } };
+      datVien(icell, { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "medium" } });
       if (it && effKind[i] === "section") {
         paintCell(icell, { fill: it.kind === "subsection" ? (itemsCfg.subFill || "FFC9D9EF") : (itemsCfg.sectionFill || "FFFAE9DB") });
       }
@@ -977,7 +1054,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (itemsCfg.outerFrame && cols.stt && itemsCfg.headerRow) {
     const DAY = { style: "medium" as const };
     const cotDau = cols.stt;
-    const cotCuoi = cols.notes || cols.amount;
+    // CỘT CUỐI CỦA BẢNG = cột HÌNH ẢNH khi sheet bật nó. Trước đây luôn lấy Ghi Chú, nên bật cột
+    // ảnh thì cạnh phải 'medium' của khung kẻ ở Ghi Chú — tức MỘT VẠCH DÀY CHẠY DỌC GIỮA BẢNG,
+    // còn cột ảnh nằm ngoài khung. Đo được: hàng hạng mục có I[phải=medium] trong khi J là cột ảnh.
+    const cotCuoi = imgCol || cols.notes || cols.amount;
     const hangDau = itemsCfg.headerRow;
     // DỪNG Ở HÀNG HẠNG MỤC CUỐI, KHÔNG KÉO QUA KHỐI TỔNG.
     // Khối tổng chỉ chiếm ba cột (hộp nhãn + ô tiền), nên kéo khung xuống tới đó để lại hai vạch
@@ -1060,9 +1140,26 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // file thật: `quote.notes` = NULL mà ô C139 vẫn có chữ). Nay: có ghi chú thì in ghi chú của
       // người dùng vào đúng ô đó; không có thì để TRỐNG — giống hệt nếp của GN.
       if (cfg.noteFooterRange === range) {
-        const ghiChu = clean(quote.notes || "");
-        try { ws.getCell(oChinh).value = ghiChu ? `* Ghi chú: 
-${ghiChu}` : null; } catch { /* bỏ qua */ }
+        // GIỮ XUỐNG DÒNG NGƯỜI DÙNG GÕ. `clean()` gộp mọi xuống dòng thành DẤU CÁCH (xem chú thích
+        // của nó) — đo được: ghi chú 5 dòng có gạch đầu dòng ra tệp chỉ còn 2 dòng, mọi gạch đầu
+        // dòng dính liền nhau thành một khối chữ. Khối "Kính gửi" ngay trên đã cố ý KHÔNG dùng
+        // `clean()` vì đúng lý do này; ô ghi chú thì bị bỏ sót.
+        const ghiChu = String(quote.notes ?? "").trim();
+        try {
+          const oGC = ws.getCell(oChinh);
+          oGC.value = ghiChu ? `* Ghi chú: 
+${ghiChu}` : null;
+          if (ghiChu) {
+            ensureWrap(oGC);
+            // Và NỚI CHIỀU CAO theo chữ: hàng này bị mẫu khoá cứng 61pt, ghi chú dài hơn ~4 dòng
+            // là khách không đọc được phần còn lại.
+            const soDong = wrapLines(`* Ghi chú: 
+${ghiChu}`, null, beRongVungGop(oChinh));
+            const can = Math.min(409, Math.max(18, soDong * 15 + 3));
+            const dangCo = ws.getRow(newRow).height;
+            if (dangCo == null || can > dangCo) ws.getRow(newRow).height = can;
+          }
+        } catch { /* bỏ qua */ }
       } else if (chuGiuLai != null && chuGiuLai !== "") {
         try { ws.getCell(oChinh).value = chuGiuLai as never; } catch { /* bỏ qua */ }
       }

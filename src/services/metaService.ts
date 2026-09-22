@@ -11,8 +11,14 @@ function templateLayout(code: string) {
     const items = getConfig(code).items || {};
     const cols = items.columns || {};
     return {
-      // Trường Chi Tiết đã bỏ khỏi UI/Excel. `reserveDetail` chỉ là khe địa chỉ nội bộ để công thức
-      // báo giá cũ (=F3*E3…) giữ nguyên ý nghĩa; người dùng không còn thấy một cột riêng.
+      // HAI CỜ NÀY KHÁC NHAU, VÀ KHÁC THẬT:
+      //   `hasDetail`    = mẫu CÓ HIỆN cột Chi Tiết. Ba mẫu Colorfull: CÓ (`removeDetail: false`).
+      //                    Ba mẫu Gia Nguyễn: KHÔNG (`removeDetail: true` — cột D gộp vào Hạng Mục).
+      //   `reserveDetail`= mẫu có KHAI cột `detail`, tức khe địa chỉ ô phải được chừa DÙ CỘT ẨN,
+      //                    để công thức báo giá cũ (=F3*E3…) giữ nguyên ý nghĩa.
+      // Chính chỗ lệch giữa hai cờ này (GN: reserve=true, has=false) là thứ `GridTable.tsx`
+      // (`keepDetailSlot = addrDetail ?? showDetail`) phải tôn trọng; xem
+      // `web/src/components/GridTable.kheChiTiet.test.tsx`.
       hasDetail: !!cols.detail && !items.removeDetail,
       reserveDetail: !!cols.detail,
       hasDays: !!cols.days,

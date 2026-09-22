@@ -228,6 +228,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                         thanh, và không dùng được Alt+↓ gợi ý tên hạng mục. Cùng một thứ dữ liệu,
                         cùng một người nhập — không có lý do gì để ba lưới khác bộ công cụ. */}
                     <GridTable key={`extra-${active}-${t.templateId}-${t._k}`} items={t.items} fxBar
+                      clfTheme={!!tplOf(t)?.code?.startsWith("clofull")}   // bảng phụ của báo giá Colorfull phải cùng màu với lưới chính và với tệp Excel
                       dock={thanhChung ? thanhChung.dock : undefined}
                       anThanhThem={!!thanhChung && thanhChung.dangLam !== idLuoi(cat)}
                       onDangDung={thanhChung ? () => thanhChung.datDangLam(idLuoi(cat), `${label} · ${t.name || `Bảng ${active + 1}`}`) : undefined}

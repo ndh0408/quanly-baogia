@@ -3748,3 +3748,16 @@ textarea[aria-invalid="true"] {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* ── MÀU LƯỚI COLORFULL PHẢI KHỚP TỆP EXCEL XUẤT RA ────────────────────────────────────────
+   `public/style.css` (đóng băng — không sửa) đặt `.clf-theme` là #fcefdb / #eaf1fb, đúng màu
+   Colorfull CŨ. Nay màu lấy từ chính tệp mẫu người dùng chỉnh hoàn chỉnh và đã vào
+   `templateConfigs.ts` (`sectionFill: FFF6D479`, `subFill: FFD5DDA2`), nên tệp xuất ra một màu
+   mà lưới trên màn hình một màu khác — người soạn không còn thấy trước thứ khách sẽ nhận.
+   Tệp này nạp SAU `style.css` (web/src/main.tsx:10-11) nên cùng độ ưu tiên là bản dưới thắng. */
+.excel-table.clf-theme tr.section-row td {
+  background: #f6d479;
+}
+.excel-table.clf-theme tr.subgroup-row td {
+  background: #d5dda2;
+}

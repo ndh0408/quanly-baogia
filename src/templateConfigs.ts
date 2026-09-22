@@ -113,8 +113,11 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     // Header/tổng/tên đã baked sẵn màu trong template → chỉ cần: tô xanh hàng nhóm,
     // đổi số tiền tổng sang đen (mẫu gốc để đỏ), và in "Ghi chú" 1 dòng dưới phần tổng.
     palette: {
-      sectionFill:      "FFE2EFDA",   // xanh lá nhạt — hàng nhóm A/B/C
-      sectionTextColor: "FF000000",   // A/B + tên nhóm: đen đậm (đè màu baked của slot)
+      // KHÔNG khai `sectionFill`/`sectionTextColor` ở đây: `src/excel.ts` tô hàng nhóm bằng
+      // `itemsCfg.sectionFill` (nhánh `items`, KHÔNG phải `palette`), nên hai khoá đó từng nằm
+      // đây là KHOÁ CHẾT — không đường nào đọc, mà còn ghi sai màu thật: khai FFE2EFDA trong khi
+      // tệp GN xuất ra là FFFAE9DB (giá trị dự phòng đóng cứng ở excel.ts). Cấu hình nói một đằng
+      // mã làm một nẻo đúng là thứ đã gây ra lỗi cộng đôi tiền của Colorfull hôm nay, nên dọn.
       totalsValueColor: "FF000000",   // số tiền tổng: đen
       note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },  // "Ghi chú:" nâu (font nền → hiện ngay)
       // Cuối báo giá (cân đối kiểu GN gốc): lời chào canh TRÁI (cột B:F) + "Ý Kiến Khách
@@ -217,7 +220,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       paintHeader: false,      // giữ màu header baked riêng của Colorfull
       // Colorfull (CLF): GIỮ màu cũ — KHÔNG dùng màu Gia Nguyễn. Header để baked (không repaint),
       // nền nhóm dùng màu cũ #fcefdb/#eaf1fb.
-      sectionFill: "FFFCEFDB", subFill: "FFEAF1FB",
+      // MÀU LẤY TỪ CHÍNH FILE MẪU ANH ĐÃ CHỈNH HOÀN CHỈNH
+      // ("Copy of Copy of E2E_-_Nhap_tu_Excel_091-new4.xlsx", đọc bằng exceljs):
+      //     hàng NHÓM      = F6D479 (vàng nghệ)   · chữ Times 11 đậm
+      //     hàng NHÓM CON  = D5DDA2 (xanh ô-liu)  · chữ Times 11 đậm màu 4F513E
+      // Trước đó là FCEFDB / EAF1FB — hai màu nhạt hơn nhiều, không phải thứ đã chọn.
+      // Tiêu đề cột · dải trên bảng · khối tổng vẫn dùng màu nền của file mẫu (theme8/tint .4),
+      // nên không khai ở đây — `paintHeader: false` để app KHÔNG tô đè.
+      sectionFill: "FFF6D479", subFill: "FFD5DDA2",
       lastRow:  12,
       styleRow: 6,            // copy this clean row's borders/fonts to every item row
       // ── CỘT CHI TIẾT: BẬT, VÀ CHỈ RIÊNG COLORFULL ────────────────────────────────────────
@@ -228,12 +238,12 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       //     "Backdrop: / . KT: 14mW x 5mH / . Khung sắt…").
       // Cấu hình cũ đặt `removeDetail: true` + bóp `D: 10` rồi gộp vào Hạng Mục, tức xoá đúng
       // cột kể nội dung của mẫu. Và nó xoá THẬT dữ liệu người dùng đã có: đường nhập Excel
-      // (`excelImport.ts:460`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
+      // (`src/excelImport.ts:493`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
       // 64 hạng mục đang giữ nội dung Chi Tiết — nên file Colorfull gửi sang CÓ cột đó, app lưu
       // lại, rồi trả về cho khách một file MẤT cột đó.
       //
       // BẬT LẠI KHÔNG DỊCH ĐỊA CHỈ Ô NÀO. `detail: "D"` vốn đã khai, nên `metaService` trả
-      // `reserveDetail: true` và `GridTable.tsx:354` (`keepDetailSlot`) vẫn chừa khe D từ trước:
+      // `reserveDetail: true` và `web/src/components/GridTable.tsx:354` (`keepDetailSlot`) vẫn chừa khe D từ trước:
       // cờ này chỉ đổi việc HIỆN cột, không đổi sơ đồ chữ cột. Mọi công thức đã lưu giữ nguyên
       // nghĩa, kể cả loại trỏ theo địa chỉ (`{"quantity":"=E3"}` — E vẫn là Số Lượng).
       //
@@ -311,7 +321,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 // ===== GN (không ngày) — bản BANNER =====
 // Y HỆT GN không ngày (cùng cột/công thức/cách xuất), CHỈ khác
 // ── FILE MẪU: `templates/Marico_Decor.xlsx`, kế thừa qua phép spread bên dưới. KHÔNG phải
-// GN_KhongNgay.xlsx như chú thích cũ ghi — `excel.ts:1498` đọc `cfg.filePath`, tức đường dẫn
+// GN_KhongNgay.xlsx như chú thích cũ ghi — `src/excel.ts:1704` đọc `cfg.filePath`, tức đường dẫn
 // trong config này, chứ KHÔNG đọc `QuoteTemplate.filePath` dưới CSDL. Nên nhãn "Ms." nhúng cứng
 // ở B3/E3 của Marico_Decor.xlsx dính CẢ gn_banner, và bản vá xoá nhãn cũng theo spread mà sang.
 // cách đánh STT: NHÓM CON đánh số 1,2,3… (reset theo từng nhóm chính), các MỤC bên dưới

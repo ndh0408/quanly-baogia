@@ -572,6 +572,42 @@ describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
     }
   }, 300_000);
 
+  it("khung NGOÀI DỪNG ở hàng hạng mục cuối — không thò xuống khối tổng", async () => {
+    // Người dùng khoanh ĐỎ đúng hai chỗ này trong ảnh chụp: kéo khung xuống hết khối tổng để lại
+    // HAI VẠCH DỌC lơ lửng ở cột đầu và cột cuối, cùng một ô rỗng có viền bên dưới bảng — vì khối
+    // tổng chỉ chiếm ba cột giữa.
+    //
+    // Ca này sinh ra vì một lượt ĐỘT BIẾN cho thấy bộ kiểm KHÔNG gác điều đó: đổi `hangCuoi` từ
+    // `actualLastRow` về `totalRow` mà 32/32 vẫn xanh. Một bản vá không có ca nào giữ thì lần sau
+    // sẽ lặng lẽ trôi lại.
+    for (const [ma, cotCuoi] of [["clofull_decor", "I"], ["clofull_banner", "I"], ["clofull_conngay", "J"]]) {
+      for (const soMuc of [3, 20]) {
+        const ws = await moFile(await buildQuoteBuffer(baoGiaKhung(ma, soMuc)));
+        // MỐC PHẢI ĐỘC LẬP VỚI VIỀN. Lần đầu tôi neo vào "hàng cuối cùng còn viền dày" — mốc đó
+        // TRÔI THEO chính cái sai cần bắt, nên ca vẫn đỏ nhưng đỏ vì lý do NGƯỢC (báo "khung dừng
+        // sớm" trong khi nó thò xuống). Neo vào DỮ LIỆU: tên hạng mục cuối là "Mục N-1".
+        let cuoiMuc = null;
+        ws.eachRow({ includeEmpty: false }, (row, r) => {
+          if (chu(row.getCell("C").value).trim() === `Mục ${soMuc - 1}`) cuoiMuc = r;
+        });
+        expect(cuoiMuc, `${ma} (${soMuc} mục): không thấy hàng hạng mục cuối`).toBeTruthy();
+        // Vế 1 — khung KHÔNG được dừng sớm: hàng hạng mục cuối vẫn phải có khung hai bên.
+        expect(netVien(ws, `B${cuoiMuc}`, "left"), `${ma} (${soMuc} mục): khung dừng SỚM, hụt hàng cuối`).toBe("medium");
+        expect(netVien(ws, `${cotCuoi}${cuoiMuc}`, "right"), `${ma} (${soMuc} mục): khung dừng SỚM ở cột cuối`).toBe("medium");
+        // Vế 2 — và KHÔNG thò xuống: mọi hàng bên dưới, hai cột ngoài cùng phải sạch viền. Khối
+        // tổng có khung RIÊNG ở ba cột giữa (nhãn F:G + ô tiền H, conngay là G:H + I) nên hai cột
+        // ngoài cùng nằm ngoài nó.
+        const thua = [];
+        ws.eachRow({ includeEmpty: false }, (row, r) => {
+          if (r <= cuoiMuc) return;
+          if (netVien(ws, `B${r}`, "left") !== "-") thua.push(`B${r}`);
+          if (netVien(ws, `${cotCuoi}${r}`, "right") !== "-") thua.push(`${cotCuoi}${r}`);
+        });
+        expect(thua, `${ma} (${soMuc} mục): vạch dọc THỪA lơ lửng dưới bảng`).toEqual([]);
+      }
+    }
+  }, 300_000);
+
   it("GN vẫn y nguyên khung của nó — không bị bản vá này chạm vào", async () => {
     const ws = await moFile(await buildQuoteBuffer(baoGiaKhung("marico_decor", 12)));
     const { hd, muc } = timHang(ws);
@@ -609,5 +645,85 @@ describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
     }
     const canCao = dong * 15 + 3;
     expect(ws.getRow(muc).height, `chữ "${ten}" cần ${dong} dòng (~${canCao}pt) mà hàng chỉ cao ${ws.getRow(muc).height}pt → dòng cuối bị che`).toBeGreaterThanOrEqual(canCao);
+  }, 300_000);
+});
+
+/**
+ * ============================================================================
+ * MÀU CỦA COLORFULL — LẤY TỪ FILE MẪU NGƯỜI DÙNG TỰ CHỈNH, KHÔNG PHẢI TÔI CHỌN.
+ *
+ * Người dùng gửi "Copy of Copy of E2E_-_Nhap_tu_Excel_091-new4.xlsx" và nói đó là mẫu đã chỉnh
+ * hoàn chỉnh "cả màu sắc". Đọc file đó bằng exceljs lấy ra đúng hai màu:
+ *     hàng NHÓM      F6D479 (vàng nghệ)
+ *     hàng NHÓM CON  D5DDA2 (xanh ô-liu)
+ * Trước đó cấu hình để FCEFDB / EAF1FB — hai màu nhạt hơn hẳn, không phải thứ đã chọn.
+ *
+ * VÀ MỘT LỖI CỦA TÔI mà người dùng chụp màn hình chỉ ra: ở bản CÓ NGÀY, hộp nhãn "Tổng Cộng /
+ * VAT / Thành Tiền" ra TRẮNG TRƠN trong khi ô tiền vẫn có nền. Nguyên nhân trong script dựng mẫu:
+ * bước chép style cột SỐ LƯỢNG sang cột SỐ NGÀY chạy cho MỌI hàng, kể cả ba hàng tổng, và nó chạy
+ * SAU bước dời hộp nhãn → chép đè nền vừa đặt bằng style của cột F (ô đó đã dọn sạch nền vì nằm
+ * ngoài hộp nhãn). Đã đảo thứ tự hai bước.
+ * ============================================================================
+ */
+describe("Colorfull — màu nền đúng như file mẫu người dùng chỉnh", () => {
+  const NHOM = "F6D479";
+  const NHOM_CON = "D5DDA2";
+  const nenCua = (ws, addr) => {
+    const f = ws.getCell(addr).fill;
+    if (!f || f.type !== "pattern" || !f.fgColor) return "-";
+    const g = f.fgColor;
+    return g.argb ? g.argb.slice(2).toUpperCase() : `theme${g.theme}/t${Math.round((g.tint || 0) * 100) / 100}`;
+  };
+  const baoGiaNhom = (code) => ({
+    quoteNumber: "X", projectCode: "FP_A26_004", title: "T", toCompany: "K", city: "TP. Hồ Chí Minh",
+    quoteDate: new Date("2026-09-18"), vatPercent: 8, hnTables: [],
+    sheets: [{
+      order: 1, name: "S", groupSubtotal: false, discount: 0, extraTables: [], templateCode: code,
+      items: [
+        { order: 1, kind: "section", name: "NHÓM A", quantity: 1 },
+        { order: 2, kind: "item", name: "Backdrop", detail: "ct", unit: "m2", quantity: 12, days: 1, unitPrice: 250_000, notes: "" },
+        { order: 3, kind: "subsection", name: "Nhóm con B1", quantity: 1 },
+        { order: 4, kind: "item", name: "Bàn", detail: "", unit: "cái", quantity: 4, days: 1, unitPrice: 150_000, notes: "" },
+      ],
+    }],
+  });
+
+  it("hàng NHÓM và NHÓM CON dùng đúng hai màu đã chọn", async () => {
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaNhom(ma)));
+      let rNhom = null, rCon = null;
+      ws.eachRow({ includeEmpty: false }, (row, r) => {
+        const ten = chu(row.getCell("C").value).trim();
+        if (ten === "NHÓM A") rNhom = r;
+        if (ten === "Nhóm con B1") rCon = r;
+      });
+      expect(rNhom, `${ma}: không thấy hàng nhóm`).toBeTruthy();
+      expect(rCon, `${ma}: không thấy hàng nhóm con`).toBeTruthy();
+      expect(nenCua(ws, `C${rNhom}`), `${ma}: hàng NHÓM sai màu`).toBe(NHOM);
+      expect(nenCua(ws, `C${rCon}`), `${ma}: hàng NHÓM CON sai màu`).toBe(NHOM_CON);
+      // Hàng hạng mục thường KHÔNG được tô — tô hết thì mất ý nghĩa phân nhóm.
+      expect(nenCua(ws, `C${rNhom + 1}`), `${ma}: hàng hạng mục thường bị tô màu nhóm`).toBe("-");
+    }
+  }, 300_000);
+
+  it("hộp nhãn khối tổng CÓ nền, kể cả bản có-ngày", async () => {
+    // Bản có-ngày từng ra nhãn trắng trơn trong khi ô tiền có nền — người dùng chụp màn hình
+    // chỉ đúng chỗ này. Kiểm cả hai cỡ khối tổng (có và không có Discount).
+    for (const [ma, cotNhan, cotTien] of [["clofull_decor", "F", "H"], ["clofull_banner", "F", "H"], ["clofull_conngay", "G", "I"]]) {
+      for (const discount of [0, 50_000]) {
+        const q = baoGiaNhom(ma);
+        q.sheets[0].discount = discount;
+        const ws = await moFile(await buildQuoteBuffer(q));
+        const hang = [];
+        ws.eachRow({ includeEmpty: false }, (row, r) => {
+          if (/^(Tổng Cộng|Cộng|VAT|Thành Tiền|Discount)/.test(chu(row.getCell(cotNhan).value).trim())) hang.push(r);
+        });
+        expect(hang.length, `${ma}: không thấy hàng tổng nào`).toBeGreaterThanOrEqual(3);
+        for (const r of hang) {
+          expect(nenCua(ws, `${cotNhan}${r}`), `${ma}${discount ? " +discount" : ""} r${r}: hộp nhãn MẤT nền`).not.toBe("-");
+          expect(nenCua(ws, `${cotTien}${r}`), `${ma}${discount ? " +discount" : ""} r${r}: ô tiền mất nền`).not.toBe("-");
+        }
+      }
+    }
   }, 300_000);
 });

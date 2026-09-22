@@ -286,9 +286,15 @@ describe("Thừa hưởng ĐỦ tuỳ biến của bản không-ngày", () => {
   it("bảng màu giống hệt bản không-ngày", () => {
     expect(cfg().palette).toEqual(goc().palette);
     // Nêu đích danh vài khoá để nếu ai đó làm rỗng cả `palette` thì bài này vẫn nói ra cái gì mất.
-    expect(cfg().palette.sectionFill).toBeTruthy();
+    //
+    // KHÔNG nêu `sectionFill` nữa: khoá đó từng nằm trong `palette` nhưng là KHOÁ CHẾT —
+    // `src/excel.ts` tô hàng nhóm bằng `itemsCfg.sectionFill` (nhánh `items`), không đường nào
+    // đọc `palette.sectionFill`; mà giá trị khai ở đó (FFE2EFDA) còn KHÁC hẳn màu tệp GN thật sự
+    // xuất ra (FFFAE9DB, giá trị dự phòng đóng cứng trong excel.ts). Một khoá chết ghi sai màu
+    // đúng là thứ đã gây ra lỗi cộng đôi tiền của Colorfull, nên đã gỡ khỏi cấu hình.
+    // Ba khoá dưới đây đều được đọc thật, nên chốt chặn vẫn nguyên sức nặng.
     expect(cfg().palette.totalsValueColor).toBeTruthy();
-    expect(cfg().palette.note).toBeTruthy();
+    expect(cfg().palette.note.color).toBeTruthy();
     expect(cfg().palette.footer.customer.text).toBe("Ý Kiến Khách Hàng");
   });
 

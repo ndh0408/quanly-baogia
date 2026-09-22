@@ -34,6 +34,13 @@ export default [
       // lập trình viên. Không nằm trong git (nên CI không thấy), nhưng có mặt là `npm run lint` ở
       // máy đó đỏ ~23 lỗi — đủ để người chạy tưởng mình vừa làm hỏng gì đó.
       ".agents/**",
+      // `_*.mjs` / `_*.xlsx`: script dùng một lần để SOI file Excel (đọc màu nền, vùng gộp, bề
+      // rộng cột của một file mẫu khách gửi). `.gitignore:24` đã bỏ qua chúng nên CI không bao giờ
+      // thấy — nhưng ESLint thì thấy, và vì đường dẫn gốc repo không khớp khối `files` khai globals
+      // node bên dưới, mỗi `console.log` thành một LỖI `no-undef`. Đo được: một tệp `_domau.mjs`
+      // bỏ quên ở gốc repo làm bước [3/13] Lint ĐỎ với 8 lỗi, trong khi không có dòng mã nào của
+      // dự án đổi. Cùng loại với `e2e-*.mjs` và `.agents/**` ở trên.
+      "_*.mjs",
     ],
   },
   js.configs.recommended,
