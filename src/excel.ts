@@ -325,21 +325,15 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (c.infoBannerCell) {
     const infoLines = items.filter((it: any) => it.kind === "info").map((it: any) => (it.name || "").trim()).filter(Boolean);
     items = items.filter((it: any) => it.kind !== "info");
-    // ── DẢI NÀY GÁNH LUÔN MÃ DỰ ÁN VÀ LỜI CHÀO ──────────────────────────────────────────
-    // Mẫu GN có hai ô RIÊNG cho chúng (B8 mã, B9 lời chào — xem templateConfigs). Mẫu Colorfull
-    // KHÔNG có: r1 thư đầu, r2 tiêu đề, r3 khối "Kính gửi", r4 tiêu đề cột — dải "* Thông tin
-    // chương trình" ở r5 là hàng trống DUY NHẤT phía trên bảng. Không dùng nó thì file Colorfull
-    // gửi khách không hề có mã tra cứu (đo trên file thật: GN in "(Số://…)", CLF không in gì).
-    // `sheetCode` → `codeLabel` ưu tiên `projectCode` (mã dự án dùng CHUNG giữa GN và Colorfull,
-    // đếm theo tiền tố của NGƯỜI TẠO chứ không theo công ty), chỉ khi trống mới lùi về quoteNumber.
-    const maBanner = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
-    const phanSau = infoLines.length
-      ? `* Thông tin chương trình: ${infoLines.join("; ")}`
-      : clean(quote.greeting || "");
-    const noiDungBanner = [maBanner ? `(Số://${maBanner})` : "", phanSau].filter(Boolean).join("   ");
+    // ── DẢI NÀY CHỈ MANG "THÔNG TIN CHƯƠNG TRÌNH", KHÔNG GÌ KHÁC ────────────────────────
+    // Có một lượt tôi cho nó gánh thêm mã dự án + lời chào, vì mẫu Colorfull không còn hàng trống
+    // nào ở đầu trang (r1 thư đầu, r2 tiêu đề, r3 khối "Kính gửi", r4 tiêu đề cột) nên đây là chỗ
+    // duy nhất đặt được. Người dùng xem file thật rồi chốt BỎ dòng đó đi. Giữ nguyên quyết định:
+    // dải này chỉ in khi báo giá THẬT SỰ có dòng thông tin chương trình.
+    const noiDungBanner = infoLines.length ? `* Thông tin chương trình: ${infoLines.join("; ")}` : "";
     setCell(ws, c.infoBannerCell, noiDungBanner);
     ensureWrap(ws.getCell(c.infoBannerCell));
-    // TRỐNG HẲN THÌ ẨN HÀNG — để lại một dải màu rỗng vắt ngang bảng thì người nhận tưởng file lỗi.
+    // TRỐNG THÌ ẨN HÀNG — để lại một dải màu rỗng vắt ngang bảng thì người nhận tưởng file lỗi.
     const hangBanner = parseInt(String(c.infoBannerCell).replace(/^[A-Z]+/, ""), 10);
     if (hangBanner) ws.getRow(hangBanner).hidden = !noiDungBanner;
   }
@@ -985,7 +979,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     const cotDau = cols.stt;
     const cotCuoi = cols.notes || cols.amount;
     const hangDau = itemsCfg.headerRow;
-    const hangCuoi = totalRow;   // hết khối tổng
+    // DỪNG Ở HÀNG HẠNG MỤC CUỐI, KHÔNG KÉO QUA KHỐI TỔNG.
+    // Khối tổng chỉ chiếm ba cột (hộp nhãn + ô tiền), nên kéo khung xuống tới đó để lại hai vạch
+    // dọc lơ lửng ở cột đầu và cột cuối cùng một ô rỗng có viền bên dưới bảng — người dùng chụp
+    // màn hình chỉ ra đúng hai chỗ đó. Mẫu GN cũng dừng ở hàng cuối của bảng: các ô B..E của hàng
+    // tổng bên đó KHÔNG có viền nào.
+    const hangCuoi = actualLastRow;
     const dat = (addr: string, canh: "top" | "left" | "right" | "bottom") => {
       try {
         const o = ws.getCell(addr);
@@ -999,10 +998,23 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     };
     // Cạnh TRÊN của hàng tiêu đề, chạy hết bề ngang bảng.
     for (const L of Object.values(cols) as string[]) dat(`${L}${hangDau}`, "top");
-    // Cạnh TRÁI và PHẢI, chạy suốt từ tiêu đề xuống hết khối tổng.
+    // Cạnh TRÁI và PHẢI của BẢNG, từ hàng tiêu đề xuống hàng hạng mục cuối.
     for (let r = hangDau; r <= hangCuoi; r++) {
       dat(`${cotDau}${r}`, "left");
       if (cotCuoi) dat(`${cotCuoi}${r}`, "right");
+    }
+    // KHỐI TỔNG có khung riêng, cũng dày — đúng như mẫu GN: cạnh trái của hộp nhãn, cạnh phải của
+    // ô tiền, và đáy của hàng cuối cùng ("Thành Tiền"). KHÔNG kẻ cạnh trên: khối tổng nằm liền
+    // ngay dưới bảng nên cạnh trên của nó chính là đáy bảng.
+    const nhan0 = (t.total?.labelCells?.[0]?.[0]) as string | undefined;
+    const oTien = t.total?.valueCell as string | undefined;
+    if (nhan0 && oTien) {
+      const hangTongDau = actualLastRow + (t.subtotal?.rowOffset ?? 1);
+      for (let r = hangTongDau; r <= totalRow; r++) {
+        dat(`${nhan0}${r}`, "left");
+        dat(`${oTien}${r}`, "right");
+      }
+      for (const L of [nhan0, oTien]) dat(`${L}${totalRow}`, "bottom");
     }
   }
 

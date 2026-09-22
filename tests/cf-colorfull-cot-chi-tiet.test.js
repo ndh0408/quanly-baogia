@@ -435,24 +435,24 @@ describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn",
     return hit;
   };
 
-  it("in MÃ DỰ ÁN — mã dùng chung với Gia Nguyễn, KHÔNG phải số riêng của công ty", async () => {
-    // `codeLabel` ưu tiên `projectCode` (đếm theo tiền tố NGƯỜI TẠO, dùng chung cho cả hai công
-    // ty) và chỉ lùi về `quoteNumber` khi trống. Đo trên dev: tạo xen kẽ GN/CLF bằng một tài
-    // khoản ra FP_A26_001 → FP_A26_002 → FP_A26_003 → FP_A26_004, tức một dãy liên tục.
+  it("dải trên bảng CHỈ mang thông tin chương trình — không mã, không lời chào", async () => {
+    // Có một lượt dải này gánh thêm mã dự án + lời chào, vì mẫu Colorfull không còn hàng trống nào
+    // ở đầu trang. Người dùng xem file thật rồi chốt BỎ dòng đó. Bài này khoá quyết định ấy để bản
+    // sau không lặng lẽ nhét lại.
     for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
       const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
-      expect(tim(ws, "FP_A26_002").length, `${ma}: file không có mã dự án`).toBeGreaterThan(0);
-      expect(tim(ws, "CLF26070"), `${ma}: in số riêng của công ty thay vì mã dự án`).toEqual([]);
+      expect(tim(ws, "Số://"), `${ma}: dòng mã vẫn in ra trên bảng`).toEqual([]);
+      expect(tim(ws, "Chân thành cảm ơn"), `${ma}: lời chào vẫn in ra trên bảng`).toEqual([]);
+      // Và hàng đó phải ẨN, không để lại dải màu rỗng vắt ngang bảng.
+      expect(ws.getRow(5).hidden, `${ma}: dải rỗng vẫn hiện`).toBe(true);
     }
   }, 300_000);
 
-  it("in LỜI CHÀO; có dòng Thông tin chương trình thì nhường chỗ cho nó, mã dự án vẫn còn", async () => {
-    const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor")));
-    expect(tim(ws, "Chân thành cảm ơn").length, "mất lời chào").toBeGreaterThan(0);
-
-    const wsInfo = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor", { info: true })));
-    expect(tim(wsInfo, "Thông tin chương trình").length).toBeGreaterThan(0);
-    expect(tim(wsInfo, "FP_A26_002").length, "có thông tin chương trình thì mất luôn mã dự án").toBeGreaterThan(0);
+  it("CÓ dòng Thông tin chương trình thì dải hiện lại và in đúng nội dung đó", async () => {
+    const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor", { info: true })));
+    expect(tim(ws, "Thông tin chương trình").length, "mất dòng thông tin chương trình").toBeGreaterThan(0);
+    expect(ws.getRow(5).hidden, "có nội dung mà hàng vẫn bị ẩn").toBeFalsy();
+    expect(tim(ws, "Số://"), "mã lại bám theo dòng thông tin chương trình").toEqual([]);
   }, 300_000);
 
   it("KHÔNG còn chữ mồi \"logo cty khách hàng\" — tính năng logo khách đã gỡ", async () => {

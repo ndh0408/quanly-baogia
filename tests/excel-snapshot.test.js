@@ -127,6 +127,15 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       //     ô đó chỉ in khi người dùng bật ô "Thêm Ghi chú" (fixture này không bật).
       // Bề rộng C 21→34 và D 50→30 không hiện trong snapshot (nó chụp giá trị + style từng ô).
       //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-22 lần 2 (sửa theo ảnh chụp của người dùng) ──
+      // Vẫn CHỈ fixture `clf`. Ba thay đổi, tất cả do người dùng xem file thật rồi chốt:
+      //   · BỎ dòng "(Số://…)  Chân thành cảm ơn…" khỏi dải trên bảng — dải đó nay chỉ in khi báo
+      //     giá THẬT SỰ có dòng thông tin chương trình, không có thì ẨN HÀNG;
+      //   · khung ngoài DỪNG ở hàng hạng mục cuối. Kéo tới hết khối tổng để lại hai vạch dọc lơ
+      //     lửng ở cột đầu/cuối và một ô rỗng có viền bên dưới bảng — người dùng khoanh đỏ đúng
+      //     hai chỗ đó trong ảnh chụp;
+      //   · khối tổng có khung riêng (trái hộp nhãn · phải ô tiền · đáy hàng cuối), đúng như GN.
+      //
       // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-18 lần 3 (đồng bộ trình bày CLF với GN) ──
       // Vẫn CHỈ fixture `clf` đổi. Bản mới in mã tra cứu + lời chào ở B5, đưa khối Kính gửi vào
       // C3:I3, thu nhãn tổng về F:G và xoá ghi chú nhúng cứng khi người dùng không bật ghi chú.
