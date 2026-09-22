@@ -3768,3 +3768,23 @@ textarea[aria-invalid="true"] {
 .excel-table.clf-theme thead th {
   background: #93cddd;
 }
+/* MÀU CHỮ hàng nhóm / nhóm con — cũng phải khớp tệp Excel, không chỉ màu nền.
+   `public/style.css` tô chữ hàng nhóm #9a5b14 và nhóm con #1f4e79: đúng hai màu mà tệp Excel
+   CŨ dùng. Tệp nay theo mẫu người dùng chỉnh tay (`sectionTextColor` / `subTextColor` trong
+   `src/templateConfigs.ts`):
+     hàng nhóm     = theme5 tint -0.25 → accent2 #C0504D tối đi 25% = #953735 (đỏ gạch)
+     hàng nhóm con = #4F513E (xanh rêu)
+   Thêm lớp `.clf-theme` nên độ ưu tiên cao hơn bộ chọn gốc, thắng bất kể thứ tự nạp. */
+.excel-table.clf-theme tr.section-row input,
+.excel-table.clf-theme tr.section-row td.col-price,
+.excel-table.clf-theme tr.section-row td.col-amount,
+.excel-table.clf-theme tr.section-row td.col-notes textarea {
+  color: #953735;
+}
+.excel-table.clf-theme tr.subgroup-row input,
+.excel-table.clf-theme tr.subgroup-row td.col-hangmuc textarea,
+.excel-table.clf-theme tr.subgroup-row td.col-price,
+.excel-table.clf-theme tr.subgroup-row td.col-amount,
+.excel-table.clf-theme tr.subgroup-row td.col-notes textarea {
+  color: #4f513e;
+}

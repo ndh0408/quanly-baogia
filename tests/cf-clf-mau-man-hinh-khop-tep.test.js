@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import ExcelJS from "exceljs";
 import { getConfig } from "../src/templateConfigs.js";
 
 const CSS = fs.readFileSync(path.join(process.cwd(), "web/src/styles.css"), "utf8");
@@ -33,6 +34,60 @@ function nenCuoiCung(boChon) {
 
 /** "FFF6D479" (argb của ExcelJS) → "#f6d479" (css). */
 const argbSangCss = (argb) => "#" + String(argb).slice(-6).toLowerCase();
+
+/**
+ * Màu CHỮ cuối cùng thắng cho một bộ chọn. Khác `nenCuoiCung`: các luật màu chữ viết theo DANH
+ * SÁCH bộ chọn ("a, b, c { color: … }"), nên phải tách danh sách ra rồi so từng bộ chọn — dò kiểu
+ * "bộ chọn ngay trước {" sẽ chỉ thấy bộ chọn CUỐI của danh sách.
+ */
+function mauChuCuoiCung(boChon) {
+  const khongChuThich = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  const re = /([^{}]+)\{([^}]*)\}/g;
+  let m, cuoi = null;
+  while ((m = re.exec(khongChuThich))) {
+    const ds = m[1].split(",").map((x) => x.trim().replace(/\s+/g, " "));
+    const mau = /(?:^|;)\s*color:\s*(#[0-9A-Fa-f]{3,8})/.exec(m[2]);
+    if (mau && ds.includes(boChon)) cuoi = mau[1].toLowerCase();
+  }
+  return cuoi;
+}
+
+/**
+ * Giải một màu THEME của Excel ra "#rrggbb", đọc bảng màu từ CHÍNH tệp mẫu Colorfull.
+ * Chỉ số theme theo OOXML: 0 lt1 · 1 dk1 · 2 lt2 · 3 dk2 · 4..9 accent1..6.
+ * Tint âm = tối đi: L' = L·(1+tint); tint dương = sáng lên: L' = L·(1−tint)+tint (ECMA-376).
+ */
+async function giaiMauTheme({ theme, tint = 0 }) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(path.join(process.cwd(), "templates/CLF_KhongNgay.xlsx"));
+  const xml = String(Object.values(wb._themes || {})[0] || "");
+  const TEN = ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6"];
+  // `\\s\\S` gấp đôi gạch chéo: trong template literal, `\s` KHÔNG phải chuỗi thoát hợp lệ nên bị
+  // hiểu thành chữ "s" trần — regex ra `[sS]` và không khớp được khối màu nào.
+  const khoi = new RegExp(`<a:${TEN[theme]}>([\\s\\S]*?)</a:${TEN[theme]}>`).exec(xml);
+  const hex = khoi && (/srgbClr val="([0-9A-Fa-f]{6})"/.exec(khoi[1]) || /lastClr="([0-9A-Fa-f]{6})"/.exec(khoi[1]));
+  if (!hex) throw new Error(`không đọc được màu theme${theme} trong tệp mẫu`);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16) / 255);
+  // RGB → HLS
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h /= 6;
+  }
+  const l2 = Math.max(0, Math.min(1, tint < 0 ? l * (1 + tint) : l * (1 - tint) + tint));
+  // HLS → RGB
+  const q = l2 < 0.5 ? l2 * (1 + s) : l2 + s - l2 * s, p = 2 * l2 - q;
+  const kenh = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  const ra = s === 0 ? [l2, l2, l2] : [kenh(h + 1 / 3), kenh(h), kenh(h - 1 / 3)];
+  return "#" + ra.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join("");
+}
+
+/** Màu chữ trong cấu hình (argb hoặc theme) → "#rrggbb". */
+const mauCauHinhSangCss = async (v) => (typeof v === "string" ? argbSangCss(v) : giaiMauTheme(v));
 
 describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
   it("hàng NHÓM và NHÓM CON: CSS đè khớp đúng `items.sectionFill` / `items.subFill`", () => {
@@ -52,6 +107,40 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
       const x = getConfig(ma).items;
       expect(x.sectionFill, `${ma}: màu nhóm khác bản không-ngày`).toBe(goc.sectionFill);
       expect(x.subFill, `${ma}: màu nhóm con khác bản không-ngày`).toBe(goc.subFill);
+    }
+  });
+
+  it("MÀU CHỮ hàng nhóm / nhóm con: màn hình khớp đúng màu chữ trong tệp Excel", async () => {
+    // Đợt đổi màu chữ Excel theo tệp mẫu (`sectionTextColor` / `subTextColor`) đã TỰ TẠO RA một
+    // chỗ lệch mới: `public/style.css` vẫn tô chữ hàng nhóm #9a5b14 và nhóm con #1f4e79 — hai màu
+    // Excel CŨ. Ca soi màu nền ở trên vẫn XANH vì nó không nhìn màu chữ. Phát hiện khi tự kiểm lại
+    // trên dev sau deploy, trước khi người dùng thấy.
+    //
+    // Màu nhóm khai bằng THEME trong cấu hình, nên ca này GIẢI theme ngay từ tệp mẫu thay vì đóng
+    // cứng "#953735": đổi bảng màu tệp mẫu hay đổi `tint` trong cấu hình mà quên CSS là đỏ ngay.
+    const it0 = getConfig("clofull_decor").items;
+    expect(it0.sectionTextColor, "cấu hình phải khai màu chữ hàng nhóm").toBeTruthy();
+    expect(it0.subTextColor, "cấu hình phải khai màu chữ hàng nhóm con").toBeTruthy();
+
+    const chuNhom = await mauCauHinhSangCss(it0.sectionTextColor);
+    const chuCon = await mauCauHinhSangCss(it0.subTextColor);
+
+    for (const bc of [
+      ".excel-table.clf-theme tr.section-row input",
+      ".excel-table.clf-theme tr.section-row td.col-price",
+      ".excel-table.clf-theme tr.section-row td.col-amount",
+      ".excel-table.clf-theme tr.section-row td.col-notes textarea",
+    ]) {
+      expect(mauChuCuoiCung(bc), `${bc}: chữ hàng NHÓM trên màn hình lệch với tệp Excel`).toBe(chuNhom);
+    }
+    for (const bc of [
+      ".excel-table.clf-theme tr.subgroup-row input",
+      ".excel-table.clf-theme tr.subgroup-row td.col-hangmuc textarea",
+      ".excel-table.clf-theme tr.subgroup-row td.col-price",
+      ".excel-table.clf-theme tr.subgroup-row td.col-amount",
+      ".excel-table.clf-theme tr.subgroup-row td.col-notes textarea",
+    ]) {
+      expect(mauChuCuoiCung(bc), `${bc}: chữ hàng NHÓM CON trên màn hình lệch với tệp Excel`).toBe(chuCon);
     }
   });
 
