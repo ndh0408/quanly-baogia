@@ -3761,3 +3761,10 @@ textarea[aria-invalid="true"] {
 .excel-table.clf-theme tr.subgroup-row td {
   background: #d5dda2;
 }
+/* Hàng TIÊU ĐỀ: tệp Colorfull khai `paintHeader: false` nên nền giữ nguyên màu nướng sẵn trong
+   tệp mẫu — đọc ra là theme8 (accent5 #4BACC6) tint 0.4 = #93CDDD, xanh ngọc. Màn hình lại để
+   #ffcc99 (peach, màu header của Gia Nguyễn). Lệch này CÓ TRƯỚC đợt vá cột Chi Tiết, nhưng cùng
+   đúng một lớp với hai dòng trên: người soạn phải thấy được thứ khách sắp nhận. */
+.excel-table.clf-theme thead th {
+  background: #93cddd;
+}

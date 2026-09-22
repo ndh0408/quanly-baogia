@@ -369,6 +369,19 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // này phủ cả C3:I3 nên căn trái/phải đều lệch — giữa mới cân với tiêu đề ở hàng trên.
       if (c.toBlockCenter) st.alignment = { ...(st.alignment || {}), horizontal: "center", vertical: "middle", wrapText: true };
       o.style = st;
+      // PHẢI ĐẶT CHO CẢ Ô PHỤ CỦA VÙNG GỘP, không chỉ ô chủ.
+      // `headerMerges` gộp C3:I3 TRƯỚC khúc này, mà `mergeCells` của ExcelJS LÀM PHẲNG style ra
+      // toàn dải — tức màu đỏ của chữ mồi "logo cty khách hàng" đã kịp nhân ra D3..I3. Sửa mỗi ô
+      // chủ thì Excel hiển thị đúng (nó vẽ theo ô chủ) nhưng chữ đỏ vẫn NẰM TRONG TỆP: ai bỏ gộp
+      // trong Excel là nó hiện lại, và mọi công cụ đọc ô phụ vẫn thấy đỏ. Đo trên tệp do máy chủ
+      // dev xuất ra: C3 đã theme1 mà D3/E3/F3/G3/H3/I3 vẫn FFFF0000.
+      const vungKG = ((ws.model?.merges || []) as string[]).find((v) => v.startsWith(`${c.toBlockCell}:`));
+      const mKG = vungKG && /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(vungKG);
+      if (mKG) {
+        for (let i = mKG[1].charCodeAt(0) + 1; i <= mKG[3].charCodeAt(0); i++) {
+          try { ws.getCell(`${String.fromCharCode(i)}${mKG[2]}`).style = JSON.parse(JSON.stringify(st)); } catch { /* bỏ qua */ }
+        }
+      }
     }
   }
   if (c.fromContactCell) {

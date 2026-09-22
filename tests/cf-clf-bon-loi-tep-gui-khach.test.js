@@ -124,13 +124,51 @@ describe("Colorfull — bốn lỗi của tệp gửi khách", () => {
     }
   }, 300_000);
 
-  it("[2] khối 'Kính gửi' KHÔNG in ra chữ đỏ — đó là màu của chữ mồi logo đã bỏ", async () => {
+  it("[2] khối 'Kính gửi' KHÔNG in ra chữ đỏ — CẢ VÙNG GỘP, không chỉ ô chủ", async () => {
+    // Soi cả dải là có lý do đo được: bản vá đầu chỉ đặt lại màu cho Ô CHỦ, và ca này VẪN XANH
+    // trong khi tệp do máy chủ dev xuất ra còn D3/E3/F3/G3/H3/I3 mang FFFF0000. `headerMerges`
+    // gộp C3:I3 TRƯỚC, mà `mergeCells` của ExcelJS làm phẳng style ra toàn dải nên màu đỏ của
+    // chữ mồi "logo cty khách hàng" đã kịp nhân ra ô phụ. Excel vẽ theo ô chủ nên mắt thường
+    // không thấy — nhưng bỏ gộp trong Excel là đỏ hiện lại, và mọi công cụ đọc ô phụ vẫn thấy đỏ.
     for (const ma of CLF) {
       const ws = (await moFile(await buildQuoteBuffer(baoGia(ma)))).worksheets[0];
       const o = timO(ws, /^Kính gửi/);
       expect(o, `${ma}: không thấy khối Kính gửi`).toBeTruthy();
-      expect(o.font?.color?.argb, `${ma}: khối Kính gửi vẫn mang màu chữ mồi "logo cty khách hàng"`)
-        .not.toBe("FFFF0000");
+      const vung = (ws.model?.merges || []).find((v) => v.startsWith(`${o.address}:`));
+      expect(vung, `${ma}: khối Kính gửi không còn là vùng gộp — phép soi ô phụ mất nghĩa`).toBeTruthy();
+      const m = /^([A-Z]+)(\d+):([A-Z]+)\d+$/.exec(vung);
+      const conDo = [];
+      for (let i = m[1].charCodeAt(0); i <= m[3].charCodeAt(0); i++) {
+        const dc = `${String.fromCharCode(i)}${m[2]}`;
+        if (ws.getCell(dc).font?.color?.argb === "FFFF0000") conDo.push(dc);
+      }
+      expect(conDo, `${ma}: ô của khối Kính gửi vẫn mang màu chữ mồi "logo cty khách hàng"`).toEqual([]);
+    }
+  }, 300_000);
+
+  it("[2b] KHÔNG ô nào trong tệp vừa CÓ CHỮ vừa ĐỎ — cả sáu mẫu, kể cả khi hạng mục có ghi chú", async () => {
+    // Vế tổng quát của ca [2], và gác luôn phía Gia Nguyễn.
+    //
+    // Vì sao cần: quét tệp do máy chủ dev xuất ra thấy RẤT NHIỀU ô mang font đỏ — I10..I24 (cột
+    // Ghi Chú), B10, M13… Chúng là rác của tệp mẫu và đang RỖNG nên vô hình, nhưng nếu app ghi
+    // chữ vào đúng những ô ấy mà không đặt lại style thì ghi chú của từng hạng mục sẽ in ra ĐỎ
+    // trong tệp gửi khách. Đo: điền ghi chú cho cả hàng nhóm lẫn hạng mục → 6/6 mẫu sạch, vì
+    // vòng chép `styleRow` ghi đè style khi đặt nội dung. Ca này khoá điều đó lại.
+    const bgCoGhiChu = (ma) => {
+      const q = baoGia(ma);
+      q.sheets[0].items = q.sheets[0].items.map((x) => ({ ...x, notes: `Ghi chú cho ${x.name}` }));
+      return q;
+    };
+    for (const ma of [...CLF, ...GN]) {
+      const ws = (await moFile(await buildQuoteBuffer(bgCoGhiChu(ma)))).worksheets[0];
+      const do_ = [];
+      for (let r = 1; r <= ws.rowCount; r++) {
+        for (const L of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]) {
+          const c = ws.getCell(L + r);
+          if (c.font?.color?.argb === "FFFF0000" && chu(c.value).trim()) do_.push(`${L}${r}`);
+        }
+      }
+      expect(do_, `${ma}: có ô CHỮ ĐỎ trong tệp gửi khách`).toEqual([]);
     }
   }, 300_000);
 
