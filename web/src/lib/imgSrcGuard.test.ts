@@ -65,19 +65,16 @@ describe("mọi <img> của cụm này đều đi qua bộ lọc src", () => {
   const imgSrcExprs = (code: string) =>
     [...code.matchAll(/<img\b[^>]*?\ssrc=\{([^}]*)\}/g)].map((m) => m[1].trim());
 
-  for (const [ten, code] of [["GridTable.tsx", GRID], ["ExtraTables.tsx", EXTRA], ["Personnel.tsx", PERSONNEL], ["NewQuoteWizard.tsx", WIZARD]] as const) {
+  for (const [ten, code] of [["GridTable.tsx", GRID], ["ExtraTables.tsx", EXTRA], ["Personnel.tsx", PERSONNEL]] as const) {
     it(`${ten}: không còn <img src={…}> gán thô`, () => {
       const exprs = imgSrcExprs(code);
       expect(exprs.length).toBeGreaterThan(0);
-      for (const e of exprs) expect(e).toMatch(/^(safeImgSrc|safeLogo)\(/);
+      for (const e of exprs) expect(e).toMatch(/^safeImgSrc\(/);
     });
   }
 
-  it("bộ lọc logo của trình tạo báo giá cũng neo TOÀN CHUỖI, không chỉ tiền tố", () => {
-    // Cùng chuẩn với validators.customerLogo phía server — nếu không, hai đầu hiểu khác nhau.
-    const m = /const safeLogo = .*?\/(\^data:image.+)\/i\.test/.exec(WIZARD);
-    expect(m, "không tìm thấy safeLogo trong NewQuoteWizard.tsx").not.toBeNull();
-    expect(m![1]).toMatch(/\$$/);
-    expect(new RegExp(m![1], "i").test('data:image/png;base64,AAA"><a href=x>')).toBe(false);
+  it("trình tạo báo giá không khôi phục ngầm tính năng logo khách hàng đã gỡ", () => {
+    expect(WIZARD).not.toMatch(/customerLogo|safeLogo|onLogo|Logo khách hàng/);
+    expect(imgSrcExprs(WIZARD)).toHaveLength(0);
   });
 });

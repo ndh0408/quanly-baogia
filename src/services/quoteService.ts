@@ -323,7 +323,6 @@ export async function createQuote(req: Request) {
     vatPercent: D(b.vatPercent),
     showTotals: b.showTotals !== false,
     notes: b.notes || null,
-    customerLogo: b.customerLogo || null,
     status: "draft",
     createdById: userId,
   };
@@ -567,7 +566,7 @@ function chotHnTables(b: any, existing: any, canManage: boolean) {
 /** Field thuộc vùng "main" — thông tin khách, đầu trang, và DANH TÍNH người gửi. */
 const FIELD_VUNG_MAIN = [
   "title", "shortTitle", "greeting", "notes",
-  "toCompany", "toContact", "toEmail", "toPhone", "toAddress", "customerId", "customerLogo",
+  "toCompany", "toContact", "toEmail", "toPhone", "toAddress", "customerId",
   "fromContact", "fromAddress", "fromPhone", "fromTitle",
   "city", "quoteDate", "executionDate", "vatPercent", "showTotals", "companyId", "quoteNumber", "discount",
 ];
@@ -751,7 +750,6 @@ export async function updateQuote(req: Request) {
     data.hnTables = sanitizeHnTables(bocHn[0].extraTables);
   }
   if (b.companyId !== undefined) data.companyId = b.companyId;
-  if (b.customerLogo !== undefined) data.customerLogo = b.customerLogo || null;
   if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
     const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true } as any);
     if (dup) {

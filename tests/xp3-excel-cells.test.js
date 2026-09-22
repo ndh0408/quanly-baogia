@@ -2,9 +2,8 @@
 //  1) `writeMerged` (khối chữ ký cuối báo giá) gán thẳng `cell.value = value` — KHÔNG qua
 //     `neutralizeFormula` như `setCell`, dù nó nhận `quote.fromContact/fromTitle/fromPhone`
 //     là chữ người dùng gõ tự do.
-//  2) `insertCustomerLogo` chỉ nhận png/jpeg/gif, nhưng validators + web CHO PHÉP webp
-//     (src/validators.ts:278). Gặp webp thì hàm `return` NGAY — trước cả bước xoá chữ mồi —
-//     nên ô C3 của mẫu CLF còn nguyên dòng "logo cty khách hàng" trong file gửi khách.
+//  2) Tính năng logo khách hàng đã gỡ khỏi UI / máy chủ / Excel. Schema vẫn nhận trường cũ để
+//     client đang cache không vỡ, nhưng payload đó KHÔNG được đổi nội dung hay media file xuất.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import ExcelJS from "exceljs";
 import { buildQuoteBuffer } from "../src/excel.js";
@@ -70,24 +69,24 @@ describe("writeMerged (khối chữ ký) đi qua neutralizeFormula", () => {
   });
 });
 
-describe("insertCustomerLogo với định dạng ExcelJS không nhúng được", () => {
-  it("webp: không nhúng được thì ít nhất phải xoá chữ mồi 'logo cty khách hàng' ở C3", async () => {
-    // validators.ts:132 CHO PHÉP data:image/webp → payload này lưu được, tức tới được đây thật.
-    const webp = "data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA=";
-    const buf = await buildQuoteBuffer(makeQuote("clofull_decor", { customerLogo: webp }));
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-    const c3 = wb.worksheets[0].getCell("C3").value;
-    expect(c3 == null || String(c3).trim() === "").toBe(true);
-  });
+describe("payload customerLogo của client cũ không lọt vào file xuất", () => {
+  const cases = [
+    ["webp", "data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA="],
+    ["png", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="],
+  ];
 
-  it("png hợp lệ: vẫn nhúng ảnh và ô C3 trống (không hồi quy)", async () => {
-    // PNG 1x1 thật.
-    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-    const buf = await buildQuoteBuffer(makeQuote("clofull_decor", { customerLogo: png }));
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-    expect(wb.worksheets[0].getCell("C3").value == null).toBe(true);
-    expect(wb.model.media.some((m) => m.extension === "png")).toBe(true);
+  it.each(cases)("%s: file giống hệt về ô C3 và số media khi không gửi logo", async (_ext, customerLogo) => {
+    const [baseBuf, legacyBuf] = await Promise.all([
+      buildQuoteBuffer(makeQuote("clofull_decor")),
+      buildQuoteBuffer(makeQuote("clofull_decor", { customerLogo })),
+    ]);
+    const base = new ExcelJS.Workbook(), legacy = new ExcelJS.Workbook();
+    await Promise.all([base.xlsx.load(baseBuf), legacy.xlsx.load(legacyBuf)]);
+    const baseC3 = String(base.worksheets[0].getCell("C3").value || "");
+    const legacyC3 = String(legacy.worksheets[0].getCell("C3").value || "");
+    expect(legacyC3).toBe(baseC3);
+    expect(legacyC3).toContain("Kính gửi:");
+    expect(legacyC3).not.toContain("logo cty khách hàng");
+    expect(legacy.model.media).toHaveLength(base.model.media.length);
   });
 });

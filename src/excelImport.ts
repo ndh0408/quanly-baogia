@@ -348,6 +348,17 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   const markerCode = markedTemplate(ws, base.hasDays);
   // Dấu mã mẫu nhúng ở ô A1 = bằng chứng file do CHÍNH app xuất ra. Dùng ở bocTienToThuTu().
   base.fromApp = !!markerCode;
+  const appBannerCell = markerCode ? TEMPLATE_CONFIGS[markerCode]?.cells?.infoBannerCell : null;
+  const appBannerRow = appBannerCell ? Number(/\d+$/.exec(String(appBannerCell))?.[0] || 0) : 0;
+  let appBannerInfo: string | null = null;
+  if (appBannerCell) {
+    const raw = cellText(ws.getCell(String(appBannerCell)).value).trim();
+    // Colorfull dùng chung dải B5 cho mã tra cứu và nội dung chương trình. Chỉ phần có nhãn
+    // "Thông tin chương trình" là item; mã + lời chào chỉ là metadata đầu trang.
+    const body = raw.replace(/^\(\s*Số\s*:\/\/[^)]*\)\s*/iu, "");
+    const m = /^\*\s*Thông tin chương trình\s*:\s*(.+)$/iu.exec(body);
+    if (m) appBannerInfo = m[1].trim();
+  }
 
   // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
   // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
@@ -370,6 +381,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   const bodyRows: number[] = [];
   for (let r = hit.row + 1; r <= scanEnd; r++) {
     const stt = textAt(r, "_stt"), name = textAt(r, "name");
+    // File do app xuất có thể dùng hàng ngay sau tiêu đề chỉ để in mã + lời chào. Không đưa hàng
+    // metadata đó vào bảng; nếu có nội dung chương trình thật thì giữ lại để dựng item `info`.
+    if (r === appBannerRow && appBannerInfo == null) continue;
     const allBlank = !stt && !name && isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity"))
       && isBlank(cellAt(r, "unitPrice")) && isBlank(cellAt(r, "_amount"));
     if (allBlank) { if (++blankRun >= 4) { stopRow = r; break; } continue; }
@@ -425,7 +439,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     const prevKind = raws.length ? raws[raws.length - 1].kind : null;
     let kind: ImportedKind;
-    if (bannerText) { kind = "info"; name = bannerText.replace(/^\*\s*Thông tin chương trình\s*:\s*/i, "").trim(); }
+    if (r === appBannerRow && appBannerInfo != null) { kind = "info"; name = appBannerInfo; }
+    else if (bannerText) { kind = "info"; name = bannerText.replace(/^\*\s*Thông tin chương trình\s*:\s*/i, "").trim(); }
     else if (merged) kind = "sub";
     else if (FILL_SECTION.has(fill)) kind = "section";
     else if (FILL_SUB.has(fill)) kind = "subsection";

@@ -161,13 +161,20 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // của `marico_decor`), và GN chốt hẳn `palette.footer.sign.showSender: false` — "KHÔNG in tên
       // người gửi". Theo đúng quyết định đó: xoá tên, chừa chỗ trống để ký tay; dòng tên công ty
       // ở G18 giữ nguyên.
-      extraCellsToClear: ["J5", "J8", "G22"],
+      // C3 = chữ mồi "logo cty khách hàng" (chữ ĐỎ) nằm sẵn trong file mẫu. Tính năng logo khách
+      // đã gỡ khỏi cả giao diện lẫn máy chủ, nên chữ này phải biến mất — trước đây nó chỉ được thay
+      // khi báo giá CÓ logo, tức gần như mọi file gửi khách đều in nguyên dòng chữ đỏ đó.
+      extraCellsToClear: ["J5", "J8", "G22", "C3"],
       keepImagesAboveRow: 3,
     },
     cells: {
       title:       "B2",
       titleFormat: baoGiaTitle,
-      toBlockCell: "F3",
+      // KHỐI "KÍNH GỬI" RA GIỮA TRANG. Mẫu gốc đặt nó ở F3 (gộp F3:I3) để chừa chỗ bên trái cho ô
+      // logo khách hàng; nay tính năng đó đã gỡ nên khối này dạt sang phải một cách vô cớ, lệch hẳn
+      // bố cục của bản GN. `headerMerges` gộp lại C3:I3 và `toBlockCenter` canh giữa.
+      toBlockCell: "C3",
+      toBlockCenter: true,
       // 3-line recipient block matching the template (Cty / người liên hệ / Email).
       // Only lines with data are emitted, so it never prints empty "…" placeholders.
       toBlockFormat: ({ company, contact, email, phone, address }: { company: string | null | undefined; contact: string | null | undefined; email: string | null | undefined; phone: string | null | undefined; address: string | null | undefined }) => {
@@ -184,9 +191,6 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // "* Thông tin chương trình" banner (B5:I5). Filled from the quote's optional
       // info row(s); cleared when there are none so the "….." placeholder never prints.
       infoBannerCell: "B5",
-      // Customer logo replaces the "logo cty khách hàng" placeholder at C3.
-      customerLogoCell: "C3",
-      customerLogoExt: { width: 190, height: 80 },
       // Sender letterhead block (top-right, merged F1:I1). Was a hard-coded Colorfull
       // sample; now filled from the quote's company + sender fields so edits show up.
       fromBlockCell: "F1",
@@ -203,6 +207,10 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     // Footer "* Ghi chú" is a C:D merged cell that rides the item splice/duplicate;
     // re-merge it afterwards so the text doesn't duplicate across both columns.
     footerMerges: ["C17:D17"],
+    // Gộp lại đầu trang sau khi bỏ ô logo khách: khối "Kính gửi" phủ C3:I3 và canh giữa.
+    headerMerges: ["C3:I3"],
+    // Ô "* Ghi chú" có sẵn trong mẫu — nay CHỈ in khi người dùng bật ô Ghi chú ở màn soạn.
+    noteFooterRange: "C17:D17",
     items: {
       firstRow: 6,
       headerRow: 4,
@@ -232,8 +240,15 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // GN KHÔNG ĐỔI: `clofull_decor` là object RIÊNG, không spread từ `marico_decor`. Hai mẫu
       // spread từ GN là `gn_banner` và `unibenfood`, cả hai nằm ngoài khối này.
       removeDetail: false,
-      // Trả về đúng bề rộng thiết kế trong file (C 21 / D 50) thay vì C 38 / D 10 của thời gộp cột.
-      columnWidths: { C: 21, D: 50 },
+      // Khung ngoài DÀY như bản GN (đo trên file xuất: GN có viền 'medium' ở cạnh trên tiêu đề và
+      // hai cạnh bên; mẫu Colorfull vốn chỉ có 'thin' nên bảng trông mỏng hơn hẳn khi đặt cạnh).
+      outerFrame: true,
+      // BỀ RỘNG CÂN LẠI GIỮA HAI CỘT. File mẫu để C 21 / D 50 — hợp với cách Colorfull tự soạn
+      // (tên ngắn, mô tả dài nằm ở Chi Tiết). Nhưng dữ liệu thật chuyển từ nếp Gia Nguyễn sang thì
+      // ngược lại: tên dài ("Banner khu khách ngồi chờ: 8m2W x 2m9H") mà Chi Tiết ngắn (". PP in
+      // KTS") — đo trên file xuất: cột Hạng Mục rộng 21 làm chữ bị cắt mất dòng, còn Chi Tiết rộng
+      // 50 thì bỏ trống quá nửa. Chia lại cho hai bên cùng đủ chỗ; tổng bề ngang bảng KHÔNG tăng.
+      columnWidths: { C: 34, D: 30 },
       columns: {
         stt:       "B",
         name:      "C",
@@ -248,7 +263,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
     },
     totals: {
       subtotal: {
-        labelCells: [["B", "G"]],
+        labelCells: [["F", "G"]],
         labelText: () => "Tổng Cộng",
         // Sheet CÓ Discount → dòng này là số CHƯA trừ nên đổi nhãn thành "Cộng", còn nhãn
         // "Tổng Cộng" tụt xuống dòng sau Discount (excel.ts dựng hai hàng đó).
@@ -258,7 +273,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
         formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(H${first}:H${last})`,
       },
       vat: {
-        labelCells: [["B", "G"]],
+        labelCells: [["F", "G"]],
         labelText: (vatPct: number) => `VAT(${vatPct}%)`,
         valueCell: "H",
         rowOffset: 2,
@@ -268,12 +283,12 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // "Tổng Cộng" kế tiếp = Cộng + Discount (ghi số ÂM), rồi VAT mới tính trên "Tổng Cộng".
       // Xem khối tổng trong src/excel.ts.
       discount: {
-        labelCells: [["B", "G"]],
+        labelCells: [["F", "G"]],
         labelText: () => "Discount",
         valueCell: "H",
       },
       total: {
-        labelCells: [["B", "G"]],
+        labelCells: [["F", "G"]],
         labelText: () => "Thành Tiền",
         valueCell: "H",
         rowOffset: 3,
@@ -281,21 +296,14 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
           discountRow ? `H${subtotalRow}+H${vatRow}-H${discountRow}` : `H${subtotalRow}+H${vatRow}`,
       },
     },
-    // ── CHỈ KHAI `note`, CỐ Ý KHÔNG KHAI GÌ KHÁC ─────────────────────────────────────────
-    // Colorfull giữ nguyên màu baked của file mẫu (`paintHeader: false`, nền nhóm lấy từ
-    // `items.sectionFill/subFill`), nên KHÔNG dùng bảng màu của GN. Nhưng `cfg.palette` không chỉ
-    // là màu: `src/excel.ts` bọc CẢ khối in "Ghi chú" (quote.notes) trong `if (pal)`, và đó là chỗ
-    // DUY NHẤT đường xuất Excel đọc `quote.notes`. Không khai `palette` ⇒ ghi chú người dùng gõ
-    // KHÔNG BAO GIỜ ra file Excel — trong khi nhãn trên giao diện ghi rõ "(in vào file Excel/PDF)"
-    // và bản PDF thì vẫn in. Đo được: xuất cùng một báo giá có `notes` → 3/3 mẫu GN in ra, 0/3 mẫu
-    // CLF không có ô nào.
-    // Mọi nhánh khác trong khối đó đều có khoá canh riêng (headerFill/nameColor/totalsFill/
-    // totalsValueColor/footer), nên khai mỗi `note` KHÔNG kéo theo màu của GN.
-    // Vị trí: ngay dưới hàng "Thành Tiền" — đúng hàng trống duy nhất trước khối điều khoản
-    // "* Ghi chú: - Tất cả các hạng mục…" và dòng "XÁC NHẬN ĐỒNG Ý ĐẶT HÀNG" của mẫu.
-    palette: {
-      note: { rowOffset: 1, colFrom: "B", colTo: "I", color: "FF843C0C" },
-    },
+    // ── GHI CHÚ CUỐI BÁO GIÁ: DÙNG Ô CÓ SẴN CỦA MẪU, KHÔNG DỰNG DÒNG MỚI ──────────────────
+    // Mẫu Colorfull đã có sẵn ô "* Ghi chú" (gộp C17:D17) ngay dưới khối tổng — nhưng nó mang chữ
+    // NHÚNG CỨNG "- Tất cả các hạng mục trên là cho thuê, Colofull thu hồi sau khi tháo dỡ" (chú ý
+    // cả lỗi chính tả tên công ty trong file mẫu). Chữ đó in ra MỌI báo giá kể cả khi người dùng
+    // KHÔNG bật ô "Thêm Ghi chú" ở màn soạn — người dùng báo đúng chỗ này.
+    // Nay ô đó do `quote.notes` điều khiển: bật thì in ghi chú của người dùng, không bật thì KHÔNG
+    // in gì. Giống hệt cách GN làm, chỉ khác là GN dựng dòng mới còn đây dùng ô sẵn có.
+    // (Vì vậy KHÔNG khai `palette.note` — khai cả hai thì ghi chú in hai lần.)
   },
 
 };
@@ -404,10 +412,8 @@ TEMPLATE_CONFIGS.clofull_conngay = {
     ...TEMPLATE_CONFIGS.clofull_decor.cells,
     date: "H17",   // bản không-ngày: G17 — dịch theo cột Số Ngày vừa chèn
   },
-  // Bảng rộng thêm một cột nên vùng của dòng Ghi chú cũng nới tới J (xem `clofull_decor.palette`).
-  palette: {
-    note: { rowOffset: 1, colFrom: "B", colTo: "J", color: "FF843C0C" },
-  },
+  // Mọi toạ độ ngang đều dịch một cột theo cột SỐ NGÀY vừa chèn.
+  headerMerges: ["C3:J3"],
   cleanup: {
     ...TEMPLATE_CONFIGS.clofull_decor.cleanup,
     // Toạ độ dịch theo cột Số Ngày đã chèn:
@@ -435,7 +441,7 @@ TEMPLATE_CONFIGS.clofull_conngay = {
   },
   totals: {
     subtotal: {
-      labelCells: [["B", "H"]],
+      labelCells: [["G", "H"]],
       labelText: () => "Tổng Cộng",
       labelTextGross: () => "Cộng",
       valueCell: "I",
@@ -443,19 +449,19 @@ TEMPLATE_CONFIGS.clofull_conngay = {
       formula: ({ first, last }: { first: number; last: number; subtotalRow: number }) => `SUM(I${first}:I${last})`,
     },
     vat: {
-      labelCells: [["B", "H"]],
+      labelCells: [["G", "H"]],
       labelText: (vatPct: number) => `VAT(${vatPct}%)`,
       valueCell: "I",
       rowOffset: 2,
       formula: ({ subtotalRow, vatPct }: { subtotalRow: number; vatPct: number }) => `I${subtotalRow}*${vatPct}%`,
     },
     discount: {
-      labelCells: [["B", "H"]],
+      labelCells: [["G", "H"]],
       labelText: () => "Discount",
       valueCell: "I",
     },
     total: {
-      labelCells: [["B", "H"]],
+      labelCells: [["G", "H"]],
       labelText: () => "Thành Tiền",
       valueCell: "I",
       rowOffset: 3,

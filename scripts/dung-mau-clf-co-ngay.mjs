@@ -139,6 +139,27 @@ for (const [khoa, st] of styleCu) {
   ws.getCell(r, dich(c)).style = st;
 }
 
+// 7b) HỘP NHÃN KHỐI TỔNG: DỊCH, KHÔNG NỞ.
+// Luật chung ở bước 6 làm RỘNG RA mọi vùng bắc qua điểm chèn — đúng cho những dải chạy hết bề
+// ngang (tiêu đề, thư đầu, dải thông tin chương trình), nhưng SAI cho hộp nhãn "Tổng Cộng / VAT /
+// Thành Tiền": hộp đó phải ôm đúng HAI cột ngay trước ô tiền, y như mẫu GN
+// (Marico: F:G, tiền ở H). Bản không-ngày F:G → nở thành F:H là ba cột và trùm luôn cột SỐ NGÀY.
+// Ở đây tiền nằm ở I, nên hộp nhãn phải là G:H.
+for (const r of [13, 14, 15]) {
+  const dangCo = (ws.model.merges || []).find((m) => m === `F${r}:H${r}`);
+  if (!dangCo) continue;
+  const st = JSON.parse(JSON.stringify(ws.getCell(`F${r}`).style ?? {}));
+  const chu = ws.getCell(`F${r}`).value;
+  ws.unMergeCells(`F${r}:H${r}`);
+  // F trở thành ô trống như B..E (bên GN các ô trước hộp nhãn không có nền).
+  const oF = ws.getCell(`F${r}`);
+  const stF = JSON.parse(JSON.stringify(st)); delete stF.fill; delete stF.border;
+  oF.style = stF; oF.value = null;
+  for (const L of ["G", "H"]) ws.getCell(`${L}${r}`).style = JSON.parse(JSON.stringify(st));
+  ws.mergeCells(`G${r}:H${r}`);
+  ws.getCell(`G${r}`).value = chu ?? null;
+}
+
 // 8) Dựng cột SỐ NGÀY: nhãn + style chép từ cột SỐ LƯỢNG.
 const colNguon = ws.getColumn(CHEP_STYLE_TU);
 const colMoi = ws.getColumn(CHEN_TAI);
@@ -174,9 +195,11 @@ const loi = [];
 if (tieuDe[5] !== NHAN_MOI) loi.push(`G${HANG_TIEU_DE} phải là "${NHAN_MOI}", đang là "${tieuDe[5]}"`);
 if (tieuDe[2] !== "Chi Tiết") loi.push(`D${HANG_TIEU_DE} mất cột Chi Tiết (đang là "${tieuDe[2]}")`);
 for (const [r, nhan] of [[13, "Tổng Cộng"], [14, "VAT(8%)"], [15, "Thành Tiền"]]) {
-  const v = String(w2.getCell(`B${r}`).value ?? "").trim();
-  if (v !== nhan) loi.push(`B${r} phải là nhãn "${nhan}", đang là "${v}" — vùng gộp bị lệch`);
-  if (!w2.model.merges.includes(`B${r}:H${r}`)) loi.push(`hàng ${r} phải gộp B:H, đang có ${w2.model.merges.filter((m) => m.startsWith(`B${r}`)).join(",") || "không gì"}`);
+  // Hộp nhãn gọn nằm ở G:H (hai cột ngay trước ô tiền I) — xem bước 7b.
+  const v = String(w2.getCell(`G${r}`).value ?? "").trim();
+  if (v !== nhan) loi.push(`G${r} phải là nhãn "${nhan}", đang là "${v}" — hộp nhãn bị lệch`);
+  if (!w2.model.merges.includes(`G${r}:H${r}`)) loi.push(`hàng ${r} phải gộp G:H, đang có ${w2.model.merges.filter((m) => /^[A-Z]+/.test(m) && m.includes(String(r))).join(",") || "không gì"}`);
+  if (w2.getCell(`B${r}`).fill?.fgColor) loi.push(`B${r}: còn nền — bên GN các ô trước hộp nhãn để trống`);
 }
 if (loi.length) { console.error("✖ SAI:\n  - " + loi.join("\n  - ")); process.exit(1); }
 console.log("  ✓ tiêu đề, nhãn tổng và vùng gộp đều đúng");

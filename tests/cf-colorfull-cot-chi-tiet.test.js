@@ -141,12 +141,21 @@ describe("Colorfull — cột Chi Tiết hiện ra trong file xuất", () => {
     }
   }, 120_000);
 
-  it("bề rộng cột về đúng thiết kế của mẫu (D rộng hơn C)", async () => {
-    // Bản cũ: C 38 / D 10 — nghĩa là cột kể nội dung hẹp hơn cột tên bốn lần.
+  it("HAI cột Hạng Mục và Chi Tiết đều đủ rộng — không cột nào bị bỏ đói", async () => {
+    // Ba lần chỉnh, mỗi lần vì một số đo:
+    //   C 38 / D 10  — thời gộp cột: Chi Tiết chỉ là khe địa chỉ, không hiện.
+    //   C 21 / D 50  — theo đúng file mẫu: hợp cách Colorfull tự soạn (tên ngắn, mô tả dài ở Chi Tiết).
+    //   C 34 / D 30  — sau khi chạy dữ liệu THẬT chuyển từ nếp Gia Nguyễn sang: tên dài
+    //                  ("Banner khu khách ngồi chờ: 8m2W x 2m9H") mà Chi Tiết ngắn (". PP in KTS"),
+    //                  nên cột Hạng Mục rộng 21 bị CẮT CHỮ còn Chi Tiết bỏ trống quá nửa.
+    // Bài này vì thế không khoá "cột nào rộng hơn" — nó khoá điều thật sự quan trọng: cả hai đều
+    // đủ chỗ, và tổng bề ngang bảng không phình ra.
     const ws = await moFile(await buildQuoteBuffer(baoGia("clofull_decor")));
     const wC = ws.getColumn("C").width, wD = ws.getColumn("D").width;
-    expect(wD, `Chi Tiết còn hẹp (${wD}) — nội dung nhiều dòng sẽ bị bóp`).toBeGreaterThan(wC);
-    expect(wD).toBeGreaterThanOrEqual(40);
+    expect(wC, `Hạng Mục hẹp quá (${wC}) — tên dài sẽ bị cắt`).toBeGreaterThanOrEqual(28);
+    expect(wD, `Chi Tiết hẹp quá (${wD}) — nội dung nhiều dòng sẽ bị bóp`).toBeGreaterThanOrEqual(26);
+    const tong = ["B", "C", "D", "E", "F", "G", "H", "I"].reduce((a, L) => a + (ws.getColumn(L).width || 0), 0);
+    expect(tong, "bảng phình ngang hơn trước — sẽ tràn khổ giấy").toBeLessThanOrEqual(150);
   }, 120_000);
 
   it("nhập lại chính file vừa xuất: Chi Tiết quay về, và KHÔNG có cảnh báo 'sẽ không được nạp'", async () => {
@@ -251,17 +260,21 @@ describe("Colorfull đủ BA mẫu như GN — và mẫu nào cũng có Chi Ti�
     expect(chu(ws.getCell(`D${HANG_DAU}`).value), "Chi Tiết mất ở bản có-ngày").toBe(CT_1);
   }, 120_000);
 
-  it("có ngày: nhãn khối tổng nới tới H, số tiền sang I — không chừa ô trắng giữa nhãn và số", async () => {
-    // Đây là chỗ `spliceColumns` bỏ quên: nó dời giá trị mà KHÔNG dời vùng gộp, nên nhãn
-    // "Tổng Cộng" từng biến mất khỏi B13 trong khi một ô gộp rỗng nằm đè lên chỗ cũ.
+  it("có ngày: hộp nhãn khối tổng GỌN ở G:H, số tiền ở I — đúng nếp mẫu Gia Nguyễn", async () => {
+    // Mẫu GN để nhãn "Tổng Cộng / VAT / Thành Tiền" trong một hộp ôm ĐÚNG HAI CỘT ngay trước ô
+    // tiền (Marico: F:G, tiền ở H), còn các ô bên trái để trống KHÔNG tô nền. Mẫu Colorfull gốc
+    // thì gộp cả B:G thành một băng màu chạy suốt bảng — người dùng yêu cầu thu lại như GN.
+    // Bản có-ngày có thêm cột SỐ NGÀY nên hộp đó DỊCH sang G:H (tiền ở I), chứ không NỞ ra F:H.
     const ws = await moFile(await buildQuoteBuffer(baoGiaNgay()));
     let hangTong = null;
     ws.eachRow({ includeEmpty: false }, (row, r) => {
-      if (hangTong == null && chu(row.getCell("B").value).trim() === "Tổng Cộng") hangTong = r;
+      if (hangTong == null && chu(row.getCell("G").value).trim() === "Tổng Cộng") hangTong = r;
     });
-    expect(hangTong, "không tìm thấy hàng Tổng Cộng").toBeTruthy();
-    expect(oChu(ws, `H${hangTong}`), "vùng nhãn không phủ tới H → có ô trắng cạnh số tiền").toBe(`B${hangTong}`);
+    expect(hangTong, "không tìm thấy hàng Tổng Cộng ở hộp nhãn G:H").toBeTruthy();
+    expect(oChu(ws, `H${hangTong}`), "hộp nhãn không phủ G:H").toBe(`G${hangTong}`);
     expect(chu(ws.getCell(`I${hangTong}`).value), "số tiền tổng không nằm ở cột I").toMatch(/^=SUM\(I\d+:I\d+\)$/);
+    // Và các ô bên trái hộp nhãn phải SẠCH nền, đúng như bên GN.
+    expect(ws.getCell(`B${hangTong}`).fill?.fgColor, "ô trước hộp nhãn vẫn còn nền — băng màu chưa thu gọn").toBeFalsy();
   }, 120_000);
 
   it("GN có-ngày KHÔNG mọc thêm cột: vẫn 8 cột, vẫn không có Chi Tiết", () => {
@@ -334,18 +347,26 @@ describe("Colorfull — bốn lỗ hổng tìm được khi soi chéo với GN",
     expect(quetChu(wsTrong, "Ghi chú:").filter((a) => chu(wsTrong.getCell(a).value).trim() === "Ghi chú:")).toEqual([]);
   }, 300_000);
 
-  it("khối điều khoản của mẫu KHÔNG được biến mất khi bảng nở thêm hàng hoặc có Discount", async () => {
-    // Mẫu CLF có sẵn khối "* Ghi chú: - Tất cả các hạng mục trên là cho thuê…" ở ô GỘP C17:D17.
-    // `duplicateRow` dời chữ xuống đúng hàng mới nhưng để lại danh sách gộp CŨ (C17:D17) — trạng
-    // thái mâu thuẫn. Bước "dọn ô phụ" sau đó gán null cho D(hàng mới), mà ExcelJS ghi XUYÊN từ ô
-    // phụ sang ô chủ ⇒ xoá trắng chính chữ đó. Đo trước khi vá: từ 8 mục trở lên là mất.
+  it("ô \"* Ghi chú\" của mẫu ĐI THEO Ô TÍCH của người dùng, không tự hiện", async () => {
+    // Mẫu Colorfull nhúng cứng "* Ghi chú: - Tất cả các hạng mục trên là cho thuê, Colofull thu
+    // hồi sau khi tháo dỡ" (kể cả lỗi chính tả tên công ty) vào ô gộp C17:D17. Nó in ra MỌI báo
+    // giá, kể cả khi người dùng KHÔNG bật "Thêm Ghi chú" ở màn soạn — người dùng báo đúng chỗ này.
+    // Nay ô đó do `quote.notes` điều khiển, giống hệt nếp của GN.
+    //
+    // Ca này cũng gác luôn lỗi ĐÃ CÓ ở đường ghi: `duplicateRow` dời chữ xuống hàng mới và biến D
+    // thành ô PHỤ của C, nhưng để lại danh sách gộp CŨ — nên bước "dọn ô phụ" gán null cho D ghi
+    // XUYÊN sang ô chủ và xoá trắng chữ. Vì thế phải kiểm ở NHIỀU cỡ bảng, không chỉ cỡ nhỏ.
+    const GHI = "Bao gia co hieu luc 15 ngay";
     for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
       for (const [n, discount] of [[2, 0], [8, 0], [20, 0], [8, 50_000]]) {
-        const ws = await moFile(await buildQuoteBuffer(baoGiaN(ma, n, { discount })));
-        const hit = quetChu(ws, "Tất cả các hạng mục");
-        expect(hit.length, `${ma} (${n} mục${discount ? " + discount" : ""}): mất khối điều khoản`).toBeGreaterThan(0);
-        // và phải còn là MỘT ô gộp C:D, không phải chữ nhân đôi ra hai cột.
-        expect(oChu(ws, hit[hit.length - 1]), "khối điều khoản không còn gộp C:D").toBe(hit[0]);
+        const coGhi = await moFile(await buildQuoteBuffer(baoGiaN(ma, n, { discount, notes: GHI })));
+        const hit = quetChu(coGhi, GHI);
+        expect(hit.length, `${ma} (${n} mục${discount ? " + discount" : ""}): BẬT ghi chú mà file không có`).toBeGreaterThan(0);
+        expect(oChu(coGhi, hit[hit.length - 1]), "ô ghi chú không còn gộp C:D").toBe(hit[0]);
+
+        const khongGhi = await moFile(await buildQuoteBuffer(baoGiaN(ma, n, { discount })));
+        expect(quetChu(khongGhi, "Tất cả các hạng mục"), `${ma} (${n} mục): KHÔNG bật ghi chú mà câu nhúng cứng của mẫu vẫn in ra`).toEqual([]);
+        expect(quetChu(khongGhi, GHI)).toEqual([]);
       }
     }
   }, 300_000);
@@ -368,5 +389,225 @@ describe("Colorfull — bốn lỗ hổng tìm được khi soi chéo với GN",
       const sheet = kq.sheets.find((s) => !s.skipped);
       expect(sheet?.templateCode, `file ngoài dạng ${ma} bị đoán thành ${sheet?.templateCode}`).toBe(ma);
     }
+  }, 300_000);
+});
+
+/**
+ * ============================================================================
+ * ĐẦU TRANG & KHỐI TỔNG CỦA COLORFULL — CHO GIỐNG BẢN GIA NGUYỄN.
+ *
+ * Người dùng so hai file cạnh nhau và chỉ ra năm chỗ Colorfull chưa bằng GN:
+ *   1. không in MÃ DỰ ÁN (GN in "(Số://…)" ngay dưới tiêu đề);
+ *   2. không in LỜI CHÀO;
+ *   3. còn nguyên chữ mồi đỏ "logo cty khách hàng" của file mẫu;
+ *   4. dải "* Thông tin chương trình" rỗng vẫn tô màu vắt ngang bảng;
+ *   5. nhãn "Tổng Cộng / VAT / Thành Tiền" là một băng chạy suốt bảng, không phải hộp gọn như GN.
+ *
+ * VÀ MỘT LỖI DO CHÍNH BẢN VÁ ĐẺ RA, NẶNG NHẤT TRONG CỤM: thu nhãn về F:G bằng cách đổi mỗi
+ * `labelCells` làm file xuất ra MỞ KHÔNG ĐƯỢC — `mergeCells("F16:G16")` đè lên vùng B16:G16 sẵn có
+ * của mẫu, ExcelJS xé vùng cũ thành B16:F16 và để lại HAI VÙNG GỘP CHỒNG NHAU ở cột F. Ghi thì
+ * "thành công", mở lại thì hỏng. Ca cuối cụm này gác đúng điều đó ở mọi mẫu và mọi cỡ bảng.
+ * ============================================================================
+ */
+describe("Colorfull — đầu trang và khối tổng theo nếp Gia Nguyễn", () => {
+  const baoGiaDau = (code, over = {}) => ({
+    quoteNumber: "CLF26070", projectCode: "FP_A26_002", projectVersion: 1,
+    title: "Lên hương", toCompany: "CGV", toContact: "Mr. Toàn", city: "TP. Hồ Chí Minh",
+    fromContact: "Chị QA", fromTitle: "Account", fromPhone: "0938111222",
+    greeting: "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi",
+    quoteDate: new Date("2026-09-18"), vatPercent: 8, hnTables: [], ...over,
+    sheets: [{
+      order: 1, name: "Banner", groupSubtotal: false, discount: over.discount || 0, extraTables: [], templateCode: code,
+      items: [
+        ...(over.info ? [{ order: 0, kind: "info", name: "Premiere phim Thỏ Ơi 20/9" }] : []),
+        ...Array.from({ length: over.soMuc || 10 }, (_, i) => ({
+          order: i + 1, kind: "item", name: `Banner khu khách ngồi chờ: ${i}m2W x 2m9H`,
+          detail: ". PP in KTS", unit: "m2", quantity: 23.8, days: 2, unitPrice: 95000, notes: "",
+        })),
+      ],
+    }],
+  });
+  const tim = (ws, mau) => {
+    const hit = [];
+    ws.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (c) => {
+      if (chu(c.value).includes(mau)) hit.push(c.address);
+    }));
+    return hit;
+  };
+
+  it("in MÃ DỰ ÁN — mã dùng chung với Gia Nguyễn, KHÔNG phải số riêng của công ty", async () => {
+    // `codeLabel` ưu tiên `projectCode` (đếm theo tiền tố NGƯỜI TẠO, dùng chung cho cả hai công
+    // ty) và chỉ lùi về `quoteNumber` khi trống. Đo trên dev: tạo xen kẽ GN/CLF bằng một tài
+    // khoản ra FP_A26_001 → FP_A26_002 → FP_A26_003 → FP_A26_004, tức một dãy liên tục.
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
+      expect(tim(ws, "FP_A26_002").length, `${ma}: file không có mã dự án`).toBeGreaterThan(0);
+      expect(tim(ws, "CLF26070"), `${ma}: in số riêng của công ty thay vì mã dự án`).toEqual([]);
+    }
+  }, 300_000);
+
+  it("in LỜI CHÀO; có dòng Thông tin chương trình thì nhường chỗ cho nó, mã dự án vẫn còn", async () => {
+    const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor")));
+    expect(tim(ws, "Chân thành cảm ơn").length, "mất lời chào").toBeGreaterThan(0);
+
+    const wsInfo = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor", { info: true })));
+    expect(tim(wsInfo, "Thông tin chương trình").length).toBeGreaterThan(0);
+    expect(tim(wsInfo, "FP_A26_002").length, "có thông tin chương trình thì mất luôn mã dự án").toBeGreaterThan(0);
+  }, 300_000);
+
+  it("KHÔNG còn chữ mồi \"logo cty khách hàng\" — tính năng logo khách đã gỡ", async () => {
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
+      expect(tim(ws, "logo cty khách hàng"), `${ma}: chữ mồi đỏ của file mẫu vẫn in ra`).toEqual([]);
+    }
+  }, 300_000);
+
+  it("khối \"Kính gửi\" ra GIỮA trang (gộp C3:I3, canh giữa) sau khi bỏ ô logo", async () => {
+    const ws = await moFile(await buildQuoteBuffer(baoGiaDau("clofull_decor")));
+    expect(oChu(ws, "I3"), "khối Kính gửi chưa phủ tới I — vẫn dạt sang phải như cũ").toBe("C3");
+    expect(ws.getCell("C3").alignment?.horizontal, "khối Kính gửi không canh giữa").toBe("center");
+  }, 300_000);
+
+  it("hộp nhãn khối tổng GỌN ở F:G, các ô bên trái SẠCH nền — đúng như mẫu GN", async () => {
+    for (const ma of ["clofull_decor", "clofull_banner"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaDau(ma)));
+      let r = null;
+      ws.eachRow({ includeEmpty: false }, (row, i) => { if (r == null && chu(row.getCell("F").value).trim() === "Tổng Cộng") r = i; });
+      expect(r, `${ma}: không thấy nhãn Tổng Cộng ở hộp F:G`).toBeTruthy();
+      expect(oChu(ws, `G${r}`), `${ma}: hộp nhãn không phủ F:G`).toBe(`F${r}`);
+      expect(ws.getCell(`B${r}`).fill?.fgColor, `${ma}: ô trước hộp nhãn còn nền — băng màu chưa thu gọn`).toBeFalsy();
+    }
+  }, 300_000);
+
+  it("FILE MỞ LẠI ĐƯỢC ở mọi mẫu và mọi cỡ bảng — không có vùng gộp chồng nhau", async () => {
+    // Đây là ca tốn nhất của cụm. Thu nhãn tổng về F:G bằng cách đổi mỗi cấu hình làm ExcelJS xé
+    // vùng gộp B:G sẵn có của mẫu thành B16:F16, chồng lên F16:G16 — file GHI RA THÀNH CÔNG nhưng
+    // MỞ LẠI LÀ HỎNG ("Cannot merge already merged cells"), và Excel báo tệp lỗi. Không phát hiện
+    // được nếu chỉ kiểm giá trị từng ô: phải ĐỌC LẠI cả tệp.
+    // Cách chữa nằm ở FILE MẪU (scripts/sua-mau-clf-khoi-tong.mjs) chứ không ở tầng mã — sau
+    // `duplicateRow`, sổ ghi vùng gộp của ExcelJS lệch khỏi trạng thái thật của ô nên mọi cách gỡ
+    // dựa vào sổ đều trượt.
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay", "marico_decor", "gn_banner", "unibenfood"]) {
+      for (const over of [{ soMuc: 1 }, { soMuc: 8 }, { soMuc: 20 }, { soMuc: 8, discount: 50_000 }, { soMuc: 8, notes: "ghi chú" }]) {
+        const buf = await buildQuoteBuffer(baoGiaDau(ma, over));
+        const wb = new ExcelJS.Workbook();
+        await expect(
+          wb.xlsx.load(buf),
+          `${ma} (${over.soMuc} mục${over.discount ? " + discount" : ""}${over.notes ? " + ghi chú" : ""}): file mở lại KHÔNG được`,
+        ).resolves.toBeTruthy();
+      }
+    }
+  }, 400_000);
+});
+
+/**
+ * ============================================================================
+ * KHUNG VIỀN VÀ TRANG IN — HAI THỨ CHỈ LỘ RA KHI ĐẶT HAI FILE CẠNH NHAU.
+ *
+ * Người dùng so bản Colorfull với bản Gia Nguyễn và nhắc "độ dày của khung hay gì các thứ nữa"
+ * cùng "xuống hàng trong excel khi tải ra không bị che". Đo ra ba chuyện:
+ *
+ *   1. KHUNG NGOÀI. GN có viền 'medium' ở cạnh trên hàng tiêu đề và hai cạnh bên của bảng (ruột
+ *      'thin'); mẫu Colorfull thì mọi viền đều 'thin' → bảng trông mỏng và trôi.
+ *   2. TRANG IN. Mẫu Colorfull đặt `fitToPage` kèm `fitToHeight: 1`, nghĩa là Excel BÓP cả bảng
+ *      vào MỘT trang. Đo trên báo giá 120 hạng mục (143 hàng): in hoặc xuất PDF ra nhỏ tới mức
+ *      không đọc nổi. GN thì `fitToPage: false` + tỷ lệ 55 nên in nhiều trang, đọc được.
+ *      Bộ xuất chỉ CHÉP NGUYÊN `pageSetup` của file mẫu, nên lỗi nằm ở chính file mẫu.
+ *   3. CHIỀU CAO HÀNG. Hàm ước lượng chia chữ theo SỐ KÝ TỰ, còn Excel ngắt theo TỪ — nên số dòng
+ *      thật nhiều hơn ước lượng và dòng cuối bị che. Ca cuối cụm này khoá phép đếm dòng.
+ * ============================================================================
+ */
+describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
+  const baoGiaKhung = (code, soMuc = 10, tenDai = false) => ({
+    quoteNumber: "CLF26070", projectCode: "FP_A26_002", title: "T", toCompany: "CGV",
+    city: "TP. Hồ Chí Minh", quoteDate: new Date("2026-09-18"), vatPercent: 8, hnTables: [],
+    sheets: [{
+      order: 1, name: "S", groupSubtotal: false, discount: 0, extraTables: [], templateCode: code,
+      items: Array.from({ length: soMuc }, (_, i) => ({
+        order: i + 1, kind: "item",
+        name: tenDai ? "Banner hàng rào: 0m8W x 0m5H x 8 tấm" : `Mục ${i}`,
+        detail: ". PP in KTS", unit: "m2", quantity: 23.8, days: 2, unitPrice: 95_000, notes: "",
+      })),
+    }],
+  });
+  const netVien = (ws, addr, canh) => ws.getCell(addr).border?.[canh]?.style ?? "-";
+  /**
+   * Hàng tiêu đề + hàng hạng mục ĐẦU TIÊN.
+   *
+   * KHÔNG tìm hàng hạng mục theo `STT === "1"`: bản BANNER không đánh số mục cấp trên
+   * (`numberSubsections`), nên ô STT rỗng và phép tìm đó trượt — bài này từng đỏ vì lý do ấy.
+   * Dấu hiệu chắc chắn hơn: hàng nào có ĐVT thì là hàng hạng mục.
+   */
+  const timHang = (ws, cotDVT = "E") => {
+    let hd = null, muc = null;
+    ws.eachRow({ includeEmpty: false }, (row, r) => {
+      const b = chu(row.getCell("B").value).trim();
+      if (hd == null && b.toUpperCase() === "STT") hd = r;
+      else if (hd != null && muc == null) {
+        // Ô ĐVT phải là ô THẬT, không phải ô phụ của vùng gộp ngang: dải "* Thông tin chương
+        // trình" gộp B5:I5 nên đọc ô E5 ra đúng chữ của ô chủ → nhận nhầm dải đó là hàng hạng mục.
+        const o = row.getCell(cotDVT);
+        const laOThat = !o.isMerged || o.master?.address === o.address;
+        if (laOThat && chu(o.value).trim()) muc = r;
+      }
+    });
+    if (!hd || !muc) throw new Error(`không tìm được hàng tiêu đề (${hd}) hoặc hàng hạng mục (${muc})`);
+    return { hd, muc };
+  };
+
+  it("khung NGOÀI dày như GN: cạnh trên tiêu đề + hai cạnh bên đều 'medium'", async () => {
+    for (const [ma, cotCuoi] of [["clofull_decor", "I"], ["clofull_banner", "I"], ["clofull_conngay", "J"]]) {
+      for (const soMuc of [3, 20]) {
+        const ws = await moFile(await buildQuoteBuffer(baoGiaKhung(ma, soMuc)));
+        const { hd, muc } = timHang(ws);
+        expect(netVien(ws, `B${hd}`, "top"), `${ma} (${soMuc} mục): cạnh trên tiêu đề không dày`).toBe("medium");
+        expect(netVien(ws, `${cotCuoi}${hd}`, "top"), `${ma}: cạnh trên tiêu đề hụt ở cột cuối`).toBe("medium");
+        expect(netVien(ws, `B${hd}`, "left"), `${ma}: cạnh TRÁI bảng không dày`).toBe("medium");
+        expect(netVien(ws, `${cotCuoi}${hd}`, "right"), `${ma}: cạnh PHẢI bảng không dày`).toBe("medium");
+        expect(netVien(ws, `B${muc}`, "left"), `${ma}: hàng hạng mục mất cạnh trái dày`).toBe("medium");
+        expect(netVien(ws, `${cotCuoi}${muc}`, "right"), `${ma}: hàng hạng mục mất cạnh phải dày`).toBe("medium");
+        // Ruột bảng vẫn PHẢI mảnh — dày hết thì thành lưới đen kịt.
+        expect(netVien(ws, `C${muc}`, "left"), `${ma}: viền dày LEM vào ruột bảng`).toBe("thin");
+      }
+    }
+  }, 300_000);
+
+  it("GN vẫn y nguyên khung của nó — không bị bản vá này chạm vào", async () => {
+    const ws = await moFile(await buildQuoteBuffer(baoGiaKhung("marico_decor", 12)));
+    const { hd, muc } = timHang(ws);
+    expect(netVien(ws, `B${hd}`, "top")).toBe("medium");
+    expect(netVien(ws, `I${muc}`, "right")).toBe("medium");
+    expect(netVien(ws, `C${muc}`, "left")).toBe("thin");
+  }, 300_000);
+
+  it("TRANG IN không bóp cả bảng vào một trang", async () => {
+    // `fitToHeight: 0` = "vừa một trang NGANG, cao bao nhiêu trang cũng được". Đặt 1 là bóp hết
+    // vào một trang — đo trên 120 hạng mục thì chữ nhỏ tới mức vô dụng.
+    for (const ma of ["clofull_decor", "clofull_banner", "clofull_conngay"]) {
+      const ws = await moFile(await buildQuoteBuffer(baoGiaKhung(ma, 120)));
+      const p = ws.pageSetup || {};
+      expect(p.fitToHeight, `${ma}: fitToHeight=${p.fitToHeight} → Excel bóp cả bảng vào một trang`).toBe(0);
+      expect(p.fitToWidth, `${ma}: không ghim vừa một trang ngang → cột cuối bị cắt`).toBe(1);
+      expect(Number(p.margins?.left), `${ma}: lề trái sát mép quá, máy in thường cắt`).toBeGreaterThanOrEqual(0.7);
+    }
+  }, 300_000);
+
+  it("CHIỀU CAO HÀNG đủ cho chữ ngắt theo TỪ, không che dòng cuối", async () => {
+    // "Banner hàng rào: 0m8W x 0m5H x 8 tấm" trong cột Hạng Mục: Excel ngắt theo từ nên cần nhiều
+    // dòng hơn phép chia số ký tự. Bản cũ tính 2 dòng (cao 33) trong khi thật là 3 → mất dòng cuối.
+    // Khoá bằng BẤT BIẾN, không bằng con số cứng: chiều cao phải đủ cho số dòng do ngắt-theo-từ.
+    const ws = await moFile(await buildQuoteBuffer(baoGiaKhung("clofull_decor", 3, true)));
+    const { muc } = await timHang(ws);
+    const rong = ws.getColumn("C").width || 12;
+    const moiDong = Math.max(4, Math.floor(rong - 1));
+    const ten = chu(ws.getCell(`C${muc}`).value);
+    let dong = 1, dai = 0;
+    for (const w of ten.split(/\s+/).filter(Boolean)) {
+      const them = dai === 0 ? w.length : dai + 1 + w.length;
+      if (them <= moiDong) { dai = them; continue; }
+      dong++; dai = w.length;
+    }
+    const canCao = dong * 15 + 3;
+    expect(ws.getRow(muc).height, `chữ "${ten}" cần ${dong} dòng (~${canCao}pt) mà hàng chỉ cao ${ws.getRow(muc).height}pt → dòng cuối bị che`).toBeGreaterThanOrEqual(canCao);
   }, 300_000);
 });

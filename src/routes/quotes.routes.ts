@@ -212,7 +212,7 @@ router.get(
   gacNganSachDoc,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await getQuote(req);
-    res.json(presentQuote(quote, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));
+    res.json(presentQuote(quote, { hnOnly: can(req.session, P.QUOTE_HN_FILL), internalOnly: can(req.session, P.QUOTE_INTERNAL_VIEW) }));
   })
 );
 
@@ -230,7 +230,7 @@ router.post(
   gacNganSachLuu,
   asyncHandler(async (req: Request, res: Response) => {
     const quote = await createQuote(req);
-    res.status(201).json(presentQuote(quote, { includeLogo: true }));
+    res.status(201).json(presentQuote(quote));
   })
 );
 
@@ -254,7 +254,7 @@ router.put(
       return res.status(403).json({ error: "Account Hà Nội chỉ được điền phần Hà Nội, không sửa báo giá chính." });
     }
     const updated = await updateQuote(req);
-    res.json(presentQuote(updated, { includeLogo: true, hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
+    res.json(presentQuote(updated, { hnOnly: can(req.session, P.QUOTE_HN_FILL) }));
   })
 );
 

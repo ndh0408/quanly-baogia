@@ -293,7 +293,7 @@ export function phangThanhVien(m: any) {
   return { id: m.userId, username: m.user?.username, displayName: m.user?.displayName, active: m.user?.active, role: m.user?.role, scopes: m.scopes || [] };
 }
 
-export function presentQuote(q: any, { includeLogo = false, hnOnly = false, internalOnly = false }: { includeLogo?: boolean; hnOnly?: boolean; internalOnly?: boolean } = {}) {
+export function presentQuote(q: any, { hnOnly = false, internalOnly = false }: { hnOnly?: boolean; internalOnly?: boolean } = {}) {
   if (hnOnly) return presentQuoteForAccountHn(q);   // 🔒 quyền quote:hn:fill → lược chỉ còn phần HN
   if (internalOnly) return presentQuoteForInternal(q); // 🔒 quyền quote:internal:view → CHỈ bảng nội bộ
   const totals = computeQuoteTotals(q);
@@ -326,8 +326,10 @@ export function presentQuote(q: any, { includeLogo = false, hnOnly = false, inte
     })),
     ...totalsToJson(totals),
   };
-  // base64 logo is large — only ship it when explicitly needed (single quote fetch).
-  if (!includeLogo) delete out.customerLogo;
+  // TÍNH NĂNG "LOGO CÔNG TY KHÁCH HÀNG" ĐÃ GỠ (giao diện · máy chủ · Excel) — không trả ra nữa.
+  // Cột `Quote.customerLogo` CỐ Ý còn trong CSDL: trên production có 1 báo giá đang giữ ảnh ở đó,
+  // xoá cột là phá dữ liệu của bản ghi đó. Gỡ đường đọc/ghi là đủ để tính năng biến mất.
+  delete out.customerLogo;
   return out;
 }
 

@@ -116,6 +116,22 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // nhánh GN đã vá. Nay nằm trong `extraCellsToClear`.
       // Khối `palette.note` thêm cùng lượt KHÔNG đổi ô nào ở đây — fixture này không có
       // `quote.notes`, và nhánh ghi chú chỉ ghi khi có nội dung.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-22 (bố cục Colorfull theo nếp GN) ────
+      // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác 17 ô trên 79, và tất cả đều là thứ người
+      // dùng yêu cầu sau khi đặt hai file cạnh nhau:
+      //   · hàng tiêu đề + cạnh trái/phải bảng: viền 'thin' → 'medium' (GN vốn có khung ngoài dày,
+      //     Colorfull thì không — bảng trông mỏng hơn hẳn);
+      //   · C3/D3/E3: khối "Kính gửi" nay phủ C3:I3 và canh giữa, sau khi bỏ ô giữ chỗ logo khách;
+      //   · C11: câu "* Ghi chú: - Tất cả các hạng mục…" NHÚNG CỨNG trong file mẫu biến mất — nay
+      //     ô đó chỉ in khi người dùng bật ô "Thêm Ghi chú" (fixture này không bật).
+      // Bề rộng C 21→34 và D 50→30 không hiện trong snapshot (nó chụp giá trị + style từng ô).
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-18 lần 3 (đồng bộ trình bày CLF với GN) ──
+      // Vẫn CHỈ fixture `clf` đổi. Bản mới in mã tra cứu + lời chào ở B5, đưa khối Kính gửi vào
+      // C3:I3, thu nhãn tổng về F:G và xoá ghi chú nhúng cứng khi người dùng không bật ghi chú.
+      // Các bất biến tương ứng (kể cả mở lại file, merge không chồng, khung ngoài và bề rộng cột)
+      // được kiểm chi tiết ở `cf-colorfull-cot-chi-tiet.test.js`; cả cụm Excel 129 bài đã xanh.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

@@ -164,45 +164,6 @@ function sectionLetter(n: number) {
   return s;
 }
 
-/** Parse "C3" → 0-based {col,row} anchor used by ExcelJS addImage. */
-function cellAnchor(ref: any) {
-  const m = /^([A-Z]+)(\d+)$/i.exec(ref || "");
-  if (!m) return { col: 0, row: 0 };
-  let col = 0;
-  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64);
-  return { col: col - 1, row: Number(m[2]) - 1 };
-}
-
-/** Insert a base64 data-URL image floating over the given cell; clears the cell text. */
-const MAX_LOGO_BYTES = 6 * 1024 * 1024; // hard cap on decoded logo size (DoS guard)
-
-function insertCustomerLogo(ws: any, ref: any, dataUrl: any, ext: any) {
-  // Người dùng ĐÃ chọn logo, nên chữ mồi trong mẫu ("logo cty khách hàng" ở C3) sai trong MỌI
-  // trường hợp — xoá TRƯỚC, không đợi nhúng thành công. Trước đây các nhánh `return` sớm bên dưới
-  // nhảy qua bước xoá, nên một logo .webp (validators.ts VẪN cho phép, ExcelJS thì không nhúng
-  // được) làm file gửi khách in nguyên dòng hướng dẫn dành cho người dựng mẫu.
-  try { ws.getCell(ref).value = null; } catch { /* ô ngoài vùng/đang merge — bỏ qua */ }
-  // Dùng CHUNG danh sách định dạng với cột ảnh theo hạng mục (ANH_NHUNG_DUOC, khai báo bên dưới)
-  // — hai chỗ lệch nhau là kiểu lỗi chỉ lộ ra trên file đã gửi khách.
-  const m = ANH_NHUNG_DUOC.exec(dataUrl);
-  if (!m) return;
-  let extension = m[1].toLowerCase();
-  if (extension === "jpg") extension = "jpeg";
-  // Reject oversize logos up front (decoded size ≈ base64 length * 3/4) so a huge
-  // data-URL can't be buffered into memory during export.
-  if (Math.floor((m[2].length * 3) / 4) > MAX_LOGO_BYTES) return;
-  try {
-    const buffer = Buffer.from(m[2], "base64");
-    const imageId = ws.workbook.addImage({ buffer, extension });
-    const a = cellAnchor(ref);
-    ws.addImage(imageId, {
-      tl: { col: a.col + 0.05, row: a.row + 0.05 },
-      ext: ext || { width: 170, height: 64 },
-      editAs: "oneCell",
-    });
-  } catch { /* ignore bad image */ }
-}
-
 // ===== Cột "HÌNH ẢNH" theo TỪNG HẠNG MỤC (sheet.showImages) =====
 // "A"→0, "Z"→25, "AA"→26 và ngược lại — tính chữ cột KẾ TIẾP sau cột cuối của template.
 function colLetterToIdx(L: string) { let n = 0; for (const ch of String(L).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
@@ -299,6 +260,18 @@ function applyTemplateCleanup(ws: any, cfg: any) {
     try { ws.getCell(ref).value = null; } catch {}
   }
 
+  // GỘP LẠI VÙNG ĐẦU TRANG theo cấu hình — CHỈ Colorfull khai `headerMerges`, GN không có khoá
+  // này nên không đi qua đây. Dùng để đưa khối "Kính gửi" ra GIỮA trang sau khi bỏ ô giữ chỗ logo
+  // khách hàng: mẫu gốc gộp F3:I3 nên khối đó dạt hẳn sang phải, lệch bố cục so với bản GN.
+  for (const range of ((cfg.headerMerges || []) as string[])) {
+    const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range);
+    if (!m) continue;
+    try {
+      unmergeOverlapping(ws, colLetterToIdx(m[1]) + 1, parseInt(m[2], 10), colLetterToIdx(m[3]) + 1, parseInt(m[4], 10));
+      safeMerge(ws, range);
+    } catch { /* mẫu không có vùng đó */ }
+  }
+
   // Remove all images outside the header area (keep only logo)
   if (cleanup.keepImagesAboveRow != null && Array.isArray(ws._media)) {
     const keep = cleanup.keepImagesAboveRow;
@@ -352,8 +325,23 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   if (c.infoBannerCell) {
     const infoLines = items.filter((it: any) => it.kind === "info").map((it: any) => (it.name || "").trim()).filter(Boolean);
     items = items.filter((it: any) => it.kind !== "info");
-    setCell(ws, c.infoBannerCell, infoLines.length ? `* Thông tin chương trình: ${infoLines.join("; ")}` : "");
+    // ── DẢI NÀY GÁNH LUÔN MÃ DỰ ÁN VÀ LỜI CHÀO ──────────────────────────────────────────
+    // Mẫu GN có hai ô RIÊNG cho chúng (B8 mã, B9 lời chào — xem templateConfigs). Mẫu Colorfull
+    // KHÔNG có: r1 thư đầu, r2 tiêu đề, r3 khối "Kính gửi", r4 tiêu đề cột — dải "* Thông tin
+    // chương trình" ở r5 là hàng trống DUY NHẤT phía trên bảng. Không dùng nó thì file Colorfull
+    // gửi khách không hề có mã tra cứu (đo trên file thật: GN in "(Số://…)", CLF không in gì).
+    // `sheetCode` → `codeLabel` ưu tiên `projectCode` (mã dự án dùng CHUNG giữa GN và Colorfull,
+    // đếm theo tiền tố của NGƯỜI TẠO chứ không theo công ty), chỉ khi trống mới lùi về quoteNumber.
+    const maBanner = sheetCode(quote, soMa(sheet, sheetIdx), tongSheet) || quote.quoteNumber || "";
+    const phanSau = infoLines.length
+      ? `* Thông tin chương trình: ${infoLines.join("; ")}`
+      : clean(quote.greeting || "");
+    const noiDungBanner = [maBanner ? `(Số://${maBanner})` : "", phanSau].filter(Boolean).join("   ");
+    setCell(ws, c.infoBannerCell, noiDungBanner);
     ensureWrap(ws.getCell(c.infoBannerCell));
+    // TRỐNG HẲN THÌ ẨN HÀNG — để lại một dải màu rỗng vắt ngang bảng thì người nhận tưởng file lỗi.
+    const hangBanner = parseInt(String(c.infoBannerCell).replace(/^[A-Z]+/, ""), 10);
+    if (hangBanner) ws.getRow(hangBanner).hidden = !noiDungBanner;
   }
 
   if (c.toCompany) setCell(ws, c.toCompany, clean(quote.toCompany));
@@ -368,6 +356,12 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // Keep newlines (multi-line recipient block) — don't collapse via clean().
     setCell(ws, c.toBlockCell, (txt || "").trim());
     ensureWrap(ws.getCell(c.toBlockCell));
+    // Canh GIỮA khi mẫu khai `toBlockCenter` (chỉ Colorfull): sau khi bỏ ô logo khách hàng, khối
+    // này phủ cả C3:I3 nên căn trái/phải đều lệch — giữa mới cân với tiêu đề ở hàng trên.
+    if (c.toBlockCenter) {
+      const o = ws.getCell(c.toBlockCell);
+      o.alignment = { ...(o.alignment || {}), horizontal: "center", vertical: "middle", wrapText: true };
+    }
   }
   if (c.fromContactCell) {
     const txt = c.fromContactFormat
@@ -409,9 +403,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
 
   // Customer logo: if the template has an anchor cell and the quote carries a
   // base64 logo, drop the placeholder text and float the image over that cell.
-  if (c.customerLogoCell && quote.customerLogo) {
-    insertCustomerLogo(ws, c.customerLogoCell, quote.customerLogo, c.customerLogoExt);
-  }
+  // (Đã GỠ tính năng "logo công ty khách hàng" — xem chú thích ở `clofull_decor` trong
+  //  templateConfigs.ts. Chữ mồi "logo cty khách hàng" của mẫu nay bị xoá qua `extraCellsToClear`.)
 
   // Items
   const itemsCfg = cfg.items;
@@ -527,8 +520,30 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       : null;
     const cw = mergedNameWidth || colWidthOf(letter) || 12;
     const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
+    // NGẮT DÒNG THEO TỪ, KHÔNG THEO SỐ KÝ TỰ — Excel không cắt giữa từ.
+    // Bản cũ tính `ceil(độ dài / perLine)`, tức coi mỗi dòng luôn được lấp đầy. Thực tế mỗi dòng
+    // kết thúc ở ranh giới TỪ nên thường còn thừa chỗ, và số dòng thật NHIỀU HƠN ước lượng:
+    //     "Banner hàng rào: 0m8W x 0m5H x 8 tấm" (36 ký tự) trong cột rộng 21
+    //        cũ  : ceil(36/20) = 2 dòng  → đặt cao 33pt
+    //        thật: "Banner hàng rào:" / "0m8W x 0m5H x 8" / "tấm" = 3 dòng → DÒNG CUỐI BỊ CHE
+    // Người dùng báo đúng triệu chứng đó trên file tải về. Nay mô phỏng lối ngắt tham lam của
+    // Excel: nhét từ vào dòng hiện tại khi còn đủ chỗ; không đủ thì xuống dòng; từ nào dài hơn cả
+    // một dòng (chuỗi kích thước không có dấu cách) thì mới cắt cứng phần dư.
     let total = 0;
-    for (const seg of String(text).split(/\r?\n/)) total += Math.max(1, Math.ceil((seg.length || 1) / perLine));
+    for (const seg of String(text).split(/\r?\n/)) {
+      const tu = seg.split(/\s+/).filter(Boolean);
+      if (!tu.length) { total += 1; continue; }
+      let dong = 1, dai = 0;
+      for (const w of tu) {
+        const canThem = dai === 0 ? w.length : dai + 1 + w.length;
+        if (canThem <= perLine) { dai = canThem; continue; }
+        if (dai > 0) dong++;
+        let con = w.length;
+        while (con > perLine) { dong++; con -= perLine; }
+        dai = con;
+      }
+      total += dong;
+    }
     return Math.max(1, total);
   };
   // Group structure for "hàng con" (mirror the editor): a "sub" extends the current
@@ -956,6 +971,41 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     result: netSubtotal + vatAmt,   // = Tổng Cộng + VAT(đã tròn)
   });
 
+  // ── KHUNG NGOÀI DÀY CHO BẢNG (chỉ mẫu khai `items.outerFrame`) ──────────────────────────
+  // Đo trên file xuất THẬT của Gia Nguyễn: hàng tiêu đề có viền TRÊN 'medium', và MỌI hàng của
+  // bảng có viền TRÁI ở cột đầu + viền PHẢI ở cột cuối cũng 'medium' — tức bảng được đóng khung
+  // dày ba cạnh, ruột thì 'thin'. Mẫu Colorfull không có: mọi viền đều 'thin', nên bảng trông
+  // mỏng và trôi hơn hẳn khi đặt cạnh bản GN (người dùng chỉ ra đúng chỗ này).
+  //
+  // Làm ở ĐÂY chứ không nướng vào file mẫu, vì số hàng của bảng thay đổi theo từng báo giá (co
+  // lại khi ít mục, nở thêm khi nhiều) — khung phải phủ đúng vùng THẬT sau khi đã dựng xong.
+  // GN không khai khoá này (khung của nó nướng sẵn trong file mẫu) nên không đi qua đây.
+  if (itemsCfg.outerFrame && cols.stt && itemsCfg.headerRow) {
+    const DAY = { style: "medium" as const };
+    const cotDau = cols.stt;
+    const cotCuoi = cols.notes || cols.amount;
+    const hangDau = itemsCfg.headerRow;
+    const hangCuoi = totalRow;   // hết khối tổng
+    const dat = (addr: string, canh: "top" | "left" | "right" | "bottom") => {
+      try {
+        const o = ws.getCell(addr);
+        // PHẢI NHÂN BẢN CẢ STYLE, không chỉ `border`. ExcelJS gộp các style giống nhau thành MỘT
+        // đối tượng dùng chung cho nhiều ô, nên gán thẳng `o.border = {...}` làm viền LEM sang mọi
+        // ô đang dùng chung style đó — đo được: đặt viền trái cho B4 thì C4 và D4 cũng dày lên.
+        const st = JSON.parse(JSON.stringify(o.style || {}));
+        st.border = { ...(st.border || {}), [canh]: DAY };
+        o.style = st;
+      } catch { /* ô không tồn tại */ }
+    };
+    // Cạnh TRÊN của hàng tiêu đề, chạy hết bề ngang bảng.
+    for (const L of Object.values(cols) as string[]) dat(`${L}${hangDau}`, "top");
+    // Cạnh TRÁI và PHẢI, chạy suốt từ tiêu đề xuống hết khối tổng.
+    for (let r = hangDau; r <= hangCuoi; r++) {
+      dat(`${cotDau}${r}`, "left");
+      if (cotCuoi) dat(`${cotCuoi}${r}`, "right");
+    }
+  }
+
   // Footer merges (e.g. CLF "* Ghi chú" at C:D) ride the item splice/duplicate by
   // `shift` rows. ExcelJS spliceRows drops these merges, leaving the text duplicated
   // across both columns — recompute the shifted row, clear the secondary cells, re-merge.
@@ -992,7 +1042,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         try { ws.getCell(`${String.fromCharCode(cc)}${newRow}`).value = null; } catch {}
       }
       safeMerge(ws, `${m[1]}${newRow}:${m[3]}${newRow}`);
-      if (chuGiuLai != null && chuGiuLai !== "") {
+      // Ô "* GHI CHÚ" CỦA MẪU ĐI THEO Ô TÍCH CỦA NGƯỜI DÙNG.
+      // Mẫu Colorfull nhúng cứng "* Ghi chú: - Tất cả các hạng mục trên là cho thuê…" vào ô này,
+      // nên nó in ra MỌI báo giá kể cả khi người dùng KHÔNG bật "Thêm Ghi chú" ở màn soạn (đo trên
+      // file thật: `quote.notes` = NULL mà ô C139 vẫn có chữ). Nay: có ghi chú thì in ghi chú của
+      // người dùng vào đúng ô đó; không có thì để TRỐNG — giống hệt nếp của GN.
+      if (cfg.noteFooterRange === range) {
+        const ghiChu = clean(quote.notes || "");
+        try { ws.getCell(oChinh).value = ghiChu ? `* Ghi chú: 
+${ghiChu}` : null; } catch { /* bỏ qua */ }
+      } else if (chuGiuLai != null && chuGiuLai !== "") {
         try { ws.getCell(oChinh).value = chuGiuLai as never; } catch { /* bỏ qua */ }
       }
     }
@@ -1143,6 +1202,20 @@ function applyTotalsRow(ws: any, rowCfg: any, row: any, { text, formula, result,
   // Clear secondary cells in merge first (to avoid leftover duplicated values)
   for (const [colStart, colEnd] of (rowCfg.labelCells || [])) {
     if (colStart === colEnd) continue;
+    // GỠ VÙNG GỘP CŨ CỦA MẪU TRƯỚC KHI GỘP LẠI THEO CẤU HÌNH.
+    // Mẫu Colorfull gộp sẵn B:G cho ba hàng tổng. Khi `labelCells` trùng khít vùng đó thì không
+    // sao — nhưng vừa thu nhãn về F:G (cho giống bản GN) thì `mergeCells("F16:G16")` chồng lên
+    // vùng B16:G16 đang có, và ExcelJS XÉ nó thành hai vùng CHỒNG NHAU:
+    //     B16:F16  +  F16:G16     ← trùng cột F
+    // File ghi ra vẫn "thành công", nhưng mở lại là hỏng: đọc bằng ExcelJS ném "Cannot merge
+    // already merged cells", và Excel báo tệp lỗi. Đo được trên chính file xuất.
+    unmergeOverlapping(ws, colLetterToIdx(colStart) + 1, row, colLetterToIdx(colEnd) + 1, row);
+    // ...VÀ GỠ THẲNG THEO VÙNG ĐÍCH. `unmergeOverlapping` đọc SỔ vùng gộp của ExcelJS, mà sổ đó
+    // LỆCH khỏi trạng thái thật của ô sau `duplicateRow` (cùng bẫy đã gặp ở khối "* Ghi chú":
+    // ô báo `isMerged` đúng, còn sổ vẫn ghi toạ độ CŨ). Hàng tổng cuối được dựng bằng duplicateRow
+    // nên vùng B:G của mẫu không nằm trong sổ theo hàng mới → không gỡ được → `mergeCells` xé nó
+    // thành B16:F16 + F16:G16 CHỒNG NHAU, và file mở lại là hỏng.
+    safeUnmerge(ws, `${colStart}${row}:${colEnd}${row}`);
     // Clear cells from colStart+1 to colEnd
     const startCol = colStart.charCodeAt(0);
     const endCol = colEnd.charCodeAt(0);

@@ -10,9 +10,6 @@ import { setPendingNewQuote } from "../lib/pendingQuote";
 const STEPS = ["Công ty phát hành", "Mẫu báo giá", "Thông tin"];
 const ROLE_LABEL: Record<string, string> = { admin: "Quản trị", manager: "Account", account_hn: "Account HN", hr: "Nhân sự", accountant: "Kế toán" };
 const DEFAULT_GREETING = "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:";
-// Khớp TOÀN CHUỖI đúng như customerLogoSchema ở src/validators.ts. Kiểm tiền tố cho lọt chuỗi kiểu
-// `data:image/png;base64,AAA"><a …>` — đúng thứ thoát khỏi src="" nếu chuỗi này được nội suy vào HTML.
-const safeLogo = (s: string) => /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
 // Mô tả thân thiện 1 mẫu theo cấu trúc (thay cho codename nội bộ). Rỗng → chỉ hiện tên mẫu.
 const tplDesc = (t: EditorTemplate) => {
   const p: string[] = [];
@@ -35,7 +32,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
   const [info, setInfo] = useState({
     title: "", shortTitle: "", toCompany: "", toContact: "",
     fromContact: me.senderName || me.displayName || "", fromPhone: me.phone || "", fromTitle: me.title || "",
-    fromAddress: "", vatPercent: 8, quoteDate: new Date().toISOString().slice(0, 10), customerLogo: "" as string,
+    fromAddress: "", vatPercent: 8, quoteDate: new Date().toISOString().slice(0, 10),
   });
 
   useEffect(() => {
@@ -55,13 +52,6 @@ export function NewQuoteWizard({ me }: { me: Me }) {
     if (!p) return;
     setInfo((f) => ({ ...f, fromContact: ((p as AssignableUser).senderName || (p as { displayName?: string }).displayName) || "", fromTitle: p.title || "", fromPhone: (p as { phone?: string }).phone || "" }));
   };
-  const onLogo = (file?: File) => {
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast("Logo phải nhỏ hơn 2MB", "error"); return; }
-    const reader = new FileReader();
-    reader.onload = () => set("customerLogo", String(reader.result || ""));
-    reader.readAsDataURL(file);
-  };
 
   const next = () => {
     if (step === 1) { if (!companyId) return toast("Chọn công ty", "error"); setStep(2); return; }
@@ -75,7 +65,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
       fromContact: info.fromContact, fromPhone: info.fromPhone, fromTitle: info.fromTitle, fromAddress: info.fromAddress,
       vatPercent: Number(info.vatPercent) || 0, quoteDate: info.quoteDate, city: "TP. Hồ Chí Minh", discount: 0, showTotals: true,
       greeting: DEFAULT_GREETING, quoteNumber: "", companyId: companyId!, managerId, customerId: customer.id, customerCode: customer.code,
-      customerLogo: info.customerLogo || null, sheets,
+      sheets,
     } as QuoteFull;
     setPendingNewQuote(draft);
     location.hash = "#/rnew";
@@ -151,7 +141,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
         {step === 3 && (
           <>
             <h2>Thông tin báo giá</h2>
-            <p className="hint">Khách hàng, người gửi, VAT, ngày — và logo khách (chèn vào mẫu CLF).</p>
+            <p className="hint">Khách hàng, người gửi, VAT, ngày.</p>
             <div className="form-grid">
               <label style={{ gridColumn: "1/-1" }}>Tiêu đề báo giá <span className="req">*</span><input value={info.title} placeholder="VD: Décor Premiere Phim Thỏ Ơi" onChange={(e) => set("title", e.target.value)} /></label>
               {/* Tiêu đề đầy đủ thường quá dài và đầy dấu để làm TÊN TỆP. Ô này là bản gọn do người
@@ -177,14 +167,6 @@ export function NewQuoteWizard({ me }: { me: Me }) {
               <label>Địa chỉ (tự theo công ty)<input value={info.fromAddress} readOnly title="Tự lấy theo Công ty bên gửi" /></label>
               <label>VAT (%)<input type="number" step="0.1" value={info.vatPercent} onChange={(e) => set("vatPercent", e.target.value)} /></label>
               <label>Ngày<input type="date" value={info.quoteDate} onChange={(e) => set("quoteDate", e.target.value)} /></label>
-              <div style={{ gridColumn: "1/-1" }}>
-                <div style={{ fontSize: 13, color: "var(--text-soft)", fontWeight: 500, marginBottom: 5 }}>Logo khách hàng (tùy chọn)</div>
-                {info.customerLogo ? (
-                  <div className="logo-drop has"><img src={safeLogo(info.customerLogo)} alt="Logo khách hàng" style={{ maxHeight: 60 }} /><div className="logo-actions"><label className="btn btn-sm">Đổi<input type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={(e) => onLogo(e.target.files?.[0])} /></label><button className="btn btn-sm btn-danger" onClick={() => set("customerLogo", "")}>Xóa</button></div></div>
-                ) : (
-                  <label className="logo-drop" style={{ cursor: "pointer", display: "block" }}>📁 Bấm để chọn ảnh logo (PNG/JPG, &lt; 2MB)<input type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={(e) => onLogo(e.target.files?.[0])} /></label>
-                )}
-              </div>
             </div>
           </>
         )}

@@ -65,6 +65,14 @@ describe("parseQuoteWorkbook — vòng tròn xuất → nhập lại", () => {
       expect(sheet.groupSubtotal).toBe(true);
     });
 
+  it("không biến mã báo giá + lời chào của Colorfull thành dòng thông tin", async () => {
+    const items = FULL_ITEMS.filter((i) => i.kind !== "info");
+    const { sheet } = await roundTrip("clofull_decor", items);
+    expect(sheet.items.map(({ kind, name }) => ({ kind, name }))).toEqual(
+      items.map(({ kind, name }) => ({ kind, name })),
+    );
+  });
+
   it("đoán đúng mẫu báo giá của từng file", async () => {
     for (const code of ["marico_decor", "clofull_decor", "unibenfood", "gn_banner"]) {
       const { sheet } = await roundTrip(code);

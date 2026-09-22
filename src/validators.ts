@@ -608,6 +608,9 @@ export const QuoteCreateSchema = z.object({
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
+  // GIỮ ĐỂ KHÔNG VỠ CLIENT CŨ, NHƯNG BỊ BỎ QUA: tính năng "logo công ty khách hàng" đã gỡ khỏi
+  // giao diện, máy chủ và Excel. Client cũ còn trong cache mà gửi lên thì vẫn nhận 200, chỉ là
+  // không có gì được ghi (cùng nếp với `discount` ở trên).
   customerLogo: customerLogoSchema,
   sheets: quoteSheetsSchema,
 });
@@ -652,6 +655,9 @@ export const QuoteUpdateSchema = z.object({
   discount: z.coerce.number({ error: "Chiết khấu phải là số" }).min(0, "Chiết khấu không được nhỏ hơn 0").max(1e12, "Chiết khấu quá lớn").optional(),
   showTotals: zbool.optional(),
   notes: z.string().max(4000).optional().nullable(),
+  // GIỮ ĐỂ KHÔNG VỠ CLIENT CŨ, NHƯNG BỊ BỎ QUA: tính năng "logo công ty khách hàng" đã gỡ khỏi
+  // giao diện, máy chủ và Excel. Client cũ còn trong cache mà gửi lên thì vẫn nhận 200, chỉ là
+  // không có gì được ghi (cùng nếp với `discount` ở trên).
   customerLogo: customerLogoSchema,
   sheets: quoteSheetsSchema.optional(),
   // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
