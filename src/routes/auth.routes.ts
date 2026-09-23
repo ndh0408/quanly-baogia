@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { closeUserStreams } from "../sse.js";
 import { createHash } from "node:crypto";
 import { ipKeyGenerator } from "express-rate-limit";
 import type { Request, Response } from "express";
@@ -148,6 +149,12 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
+    // Bearer không kèm cookie → không có phiên thật để đăng nhập vào; establishSession sẽ gọi
+    // `req.session.regenerate` không tồn tại → TypeError → 500 sau khi mật khẩu ĐÃ đúng (HTTP-11).
+    // Chặn TRƯỚC khi kiểm mật khẩu để không tiêu lượt đăng nhập / không ghi login.failed.
+    if (!req.session || typeof req.session.regenerate !== "function") {
+      return res.status(400).json({ error: "Client dùng Bearer phải xác thực bằng POST /api/auth/token, không phải /api/auth/login", code: "dung_auth_token" });
+    }
 
     const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "login" });
     if (!result.ok) {
@@ -199,6 +206,9 @@ router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
     // động thì phải lưu "họ" token vào req.session lúc cấp rồi thu hồi theo họ — đã ghi vào
     // docs/REMAINING_RISKS.md. Muốn dọn sạch mọi thiết bị ngay bây giờ thì dùng /token/revoke-all.
     await revokeAllForUser(userId).catch(() => {});
+    // Luồng SSE của phiên vừa huỷ vẫn mở (không đi qua bảng phiên sau lúc bắt tay) — đóng lại
+    // (RT-04). Tab ở trình duyệt KHÁC của chính người này tự nối lại bằng phiên còn hợp lệ của nó.
+    closeUserStreams(userId);
     await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
   }
   res.json({ ok: true });

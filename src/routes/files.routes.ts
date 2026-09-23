@@ -422,6 +422,13 @@ router.delete(
   requireRole("admin"),
   validate({ query: z.object({ key: z.string().min(1).max(500) }) }),
   asyncHandler(async (req: Request, res: Response) => {
+    // Chứng từ thanh toán là bản DUY NHẤT (kho không versioning) và có hàng CSDL trỏ vào — xoá
+    // qua API tệp để lại hàng trỏ vào hư không (FILE-01). Web không gọi endpoint này.
+    // So trên bản đã chuẩn hoá: MinIO gộp "a/../" và "//" nên `x/../payment-proofs/…` cũng trúng.
+    if (/(^|\/)payment-proofs(\/|$)/.test(String(req.query.key).replace(/\/{2,}/g, "/"))) {
+      res.status(403).json({ error: "Không xoá chứng từ thanh toán qua API tệp" });
+      return;
+    }
     await deleteObject(req.query.key as string);
     await audit(req, "file.delete", { resource: "file", resourceId: req.query.key });
     res.json({ ok: true });

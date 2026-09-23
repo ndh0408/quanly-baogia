@@ -88,7 +88,12 @@ router.get(
 router.post(
   "/me/delete",
   gdprSelfLimiter,
-  validate({ body: z.object({ confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }) }) }),
+  // `password` BẮT BUỘC (FILE-10): thao tác không hoàn tác — một phiên bị đánh cắp/XSS không được
+  // tự huỷ tài khoản chỉ bằng cookie. Cùng kiểu xác thực lại như bật/tắt MFA.
+  validate({ body: z.object({
+    confirm: z.literal("DELETE-MY-ACCOUNT", { error: "Vui lòng nhập chính xác DELETE-MY-ACCOUNT để xác nhận" }),
+    password: z.string({ error: "Vui lòng nhập mật khẩu để xác nhận xoá tài khoản" }).min(1, "Vui lòng nhập mật khẩu để xác nhận xoá tài khoản").max(200),
+  }) }),
   asyncHandler(async (req: Request, res: Response) => {
     await svc.deleteSelf(req);
     await new Promise<void>((resolve) => req.session.destroy(() => resolve()));

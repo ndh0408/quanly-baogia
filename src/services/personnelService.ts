@@ -103,15 +103,14 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  // SẮP THEO LƯƠNG KHI ĐÃ MÃ HOÁ PII (DB-07, audit 2026-09-23): từ lúc PII_PLAINTEXT_CUTOVER bật, cột
-  // thô `salary` của hồ sơ ghi mới = NULL (giá trị thật ở `salaryEnc`), nên ORDER BY salary xếp các
-  // NULL thành một khối và thứ tự hiển thị không theo lương — sai mà không báo lỗi. Khi mã hoá bật,
-  // sắp trên giá trị ĐÃ GIẢI MÃ (tập id+lương vốn đã được nạp TOÀN BỘ để tính tổng bên dưới), rồi
-  // mới nạp đúng một trang theo thứ tự đó.
-  const sapLuongJs = sort === "salary" && isPiiEncryptionEnabled();
-  const [total, dataSql, salaryRows] = await Promise.all([
+  // SẮP THEO LƯƠNG khi đã mã hoá (FILE-07): ORDER BY "salary" chạy trên cột THÔ, mà sau cutover
+  // (PII_PLAINTEXT_CUTOVER) cột thô của mọi hồ sơ tạo/sửa sau đó là NULL → chúng dồn về một đầu theo
+  // thứ tự tuỳ ý, chỉ hàng cũ còn cột thô mới được xếp. Sắp trên giá trị ĐÃ GIẢI MÃ của toàn tập lọc
+  // (đúng tập 2 cột mà tổng lương bên dưới vốn đã phải quét), rồi lấy trang theo id.
+  const sapTheoLuongGiaiMa = sort === "salary" && isPiiEncryptionEnabled();
+  const [total, dataTheoCot, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
-    sapLuongJs ? Promise.resolve([] as any[]) : prisma.personnelRecord.findMany({
+    sapTheoLuongGiaiMa ? Promise.resolve(null) : prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
@@ -124,22 +123,27 @@ export async function listPersonnel(req: Request) {
     // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
     prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
-  let data = dataSql;
-  if (sapLuongJs) {
-    const luong = (r: any) => {
-      const v = decodePiiOnRead("PersonnelRecord", r as any)?.salary;
-      return v == null || v === "" ? null : Number(v);
-    };
-    const chieu = order === "asc" ? 1 : -1;
-    // NULL xếp CUỐI ở cả hai chiều; cùng lương thì theo id để phân trang TẤT ĐỊNH.
+  const luongGiaiMa = (r: any) => {
+    // Qua decodePiiList (không ném): một hàng hỏng không làm sập cả trang + tổng lương (FILE-12);
+    // hàng đó tính như chưa có lương và tự mang cờ piiLoi ở danh sách.
+    const v = decodePiiList("PersonnelRecord", [r])[0]?.salary;
+    return v == null || v === "" ? null : Number(v);
+  };
+  let data = dataTheoCot;
+  if (!data) {
+    // Cùng ngữ nghĩa NULL với Postgres: ASC → NULL cuối, DESC → NULL đầu. Hoà thì theo id cho ổn định.
+    const huong = order === "asc" ? 1 : -1;
     const idTrang = salaryRows
-      .map((r) => ({ id: r.id, l: luong(r) }))
-      .sort((a, b) => (a.l == null) !== (b.l == null) ? (a.l == null ? 1 : -1) : a.l !== b.l ? chieu * ((a.l as number) - (b.l as number)) : a.id - b.id)
+      .map((r) => ({ id: r.id, v: luongGiaiMa(r) }))
+      .sort((a, b) => {
+        if (a.v == null || b.v == null) return a.v == null && b.v == null ? a.id - b.id : (a.v == null ? 1 : -1) * huong;
+        return a.v === b.v ? a.id - b.id : (a.v - b.v) * huong;
+      })
       .slice((page - 1) * size, page * size)
       .map((x) => x.id);
-    const rows = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
-    const theoId = new Map(rows.map((r) => [r.id, r]));
-    data = idTrang.map((id) => theoId.get(id)).filter(Boolean) as typeof rows;
+    const hang = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
+    const theoId = new Map(hang.map((h) => [h.id, h]));
+    data = idTrang.map((id) => theoId.get(id)).filter((h): h is NonNullable<typeof h> => !!h);
   }
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
@@ -149,7 +153,7 @@ export async function listPersonnel(req: Request) {
   })).map((r) => r.id));
   const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
-  const salarySum = salaryRows.reduce((s, r) => s + Number(decodePiiOnRead("PersonnelRecord", r as any)?.salary ?? 0), 0);
+  const salarySum = salaryRows.reduce((s, r) => s + (luongGiaiMa(r) ?? 0), 0);
   const tax = computeTax(salarySum);
   const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
   return { ...phanTrang(decorated, total, page, size), summary };
@@ -274,7 +278,7 @@ export async function deletePersonnel(req: Request) {
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const coQuyenDoc = coPhamViDocPersonnel(req, before);   // quyết định HÌNH DẠNG phản hồi — xem chú thích ở hàm này
   const paid = (req.body as any).paid as boolean;
@@ -285,36 +289,54 @@ export async function markPayment(req: Request) {
     paymentProof: null, paymentProofKey: null, paymentProofMime: null,
     paymentProofSize: null, paymentProofSha256: null, paymentProofUploadedAt: null,
   };
+  // ẢNH CŨ KHÔNG BỊ XOÁ KHỎI KHO — cả khi thay ảnh lẫn khi "Bỏ đánh dấu" (FILE-01, FILE-03).
+  //
+  // Bản trước gọi `removeProof(before.paymentProofKey)` ở ba nhánh, và gọi TRƯỚC `update`:
+  //   · kho object là bản DUY NHẤT của ảnh (cột base64 bị null khi ghi mới; MinIO một ổ không có
+  //     versioning) → một cú bấm "Bỏ đánh dấu" là mất vĩnh viễn chứng từ uỷ nhiệm chi;
+  //   · `update` hỏng sau khi đã xoá (statement_timeout, pool cạn, hồ sơ vừa bị xoá mềm) → hàng
+  //     vẫn trỏ khoá cũ ĐÃ bị xoá, còn ảnh mới thành mồ côi: mất cả hai.
+  // Nay: CSDL là nguồn sự thật và được ghi TRƯỚC; object cũ nằm lại (khoá ghi vào audit để truy
+  // lại). Object không còn hàng nào trỏ tới là việc của một job dọn riêng, không phải của thao tác
+  // tài chính này. Chỉ object MỚI vừa PUT mới bị dọn — và chỉ khi CSDL từ chối nó.
+  let anhMoi: string | null = null;
   if (paid) {
     data.paidAt = new Date();
     data.paidById = req.session.userId;
     if (proof !== undefined) {
       if (proof) {
         const meta = await storeProof(id, proof);
+        anhMoi = meta.paymentProofKey;
         // Ảnh MỚI luôn vào kho; đồng thời XOÁ cột base64 để hàng này không còn giữ hai bản.
         Object.assign(data, meta, { paymentProof: null });
-        await removeProof(before.paymentProofKey);   // dọn ảnh cũ nếu thay ảnh
       } else {
         Object.assign(data, clearProofCols);
-        await removeProof(before.paymentProofKey);
       }
     }
   } else {
     Object.assign(data, { paidAt: null, paidById: null }, clearProofCols);
-    await removeProof(before.paymentProofKey);
   }
-  const rec = await prisma.personnelRecord.update({
-    where: { id }, data,
-    include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
-    omit: { paymentProof: true },   // không trả base64 về client
-  });
+  let rec;
+  try {
+    rec = await prisma.personnelRecord.update({
+      where: { id }, data,
+      include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
+      omit: { paymentProof: true },   // không trả base64 về client
+    });
+  } catch (e) {
+    await removeProof(anhMoi);   // CSDL không nhận → ảnh vừa PUT không ai trỏ tới
+    throw e;
+  }
   const newProof = paid
     ? (proof !== undefined ? (proof || null) : (before.paymentProofKey || before.paymentProof))
     : null;
   await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
     resource: "personnel", resourceId: id,
-    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
-    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
+    // hasProof phải xét CẢ khoá kho object: mọi ảnh ghi sau khi có storeProof có cột base64 = null,
+    // nên `!!before.paymentProof` luôn ra false và nhật ký nói "trước đó không có ảnh" (FILE-02).
+    // proofKey/proofSha256 là thứ duy nhất để tìm lại đúng object sau khi hàng đã bị null cột.
+    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!(before.paymentProofKey || before.paymentProof), proofKey: before.paymentProofKey ?? null, proofSha256: before.paymentProofSha256 ?? null },
+    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof, proofKey: rec.paymentProofKey ?? null },   // không lưu base64
   });
   if (!coQuyenDoc) {
     // KHÔNG decorate/decodePiiOnRead: người không đọc được hồ sơ này chỉ nhận đúng vài trường giao

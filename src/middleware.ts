@@ -332,7 +332,9 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
       captureError(err, { reqId: req.id, path: req.path, method: req.method, userId: req.session?.userId });
     }).catch(() => {});
   }
-  if (res.headersSent) return;
+  // Header đã gửi (vd đang stream file) thì không trả JSON được nữa — nhưng PHẢI chuyển tiếp cho
+  // finalhandler của Express để nó đóng socket. `return` trần để kết nối treo tới khi proxy bỏ cuộc.
+  if (res.headersSent) return _next(err);
   // Retry-After cho 429/503: nói cho client BAO LÂU thì thử lại. Không có header này thì client
   // (và mọi proxy ở giữa) chỉ biết thử lại ngay lập tức, đúng lúc hệ thống đang quá tải — biến
   // một đợt bận thoáng qua thành bão retry tự duy trì.
@@ -341,7 +343,9 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   }
   res.status(status).json({
     error: exposed ? err.message : "Lỗi server",
-    ...(err.code ? { code: err.code } : {}),
+    // `code` chỉ đi kèm lỗi ĐƯỢC PHÉP lộ. Với 5xx thật nó là mã nội bộ ("P2010", "ECONNREFUSED"…) —
+    // manh mối trinh sát, người dùng không làm gì được với nó; reqId đã đủ để tra log.
+    ...(exposed && err.code ? { code: err.code } : {}),
     reqId: req.id,
   });
 }

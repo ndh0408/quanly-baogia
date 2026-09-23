@@ -49,7 +49,7 @@ chứng minh **hậu quả** của `true`: IP giả thắng.
 | rate limit đếm đúng IP | ✅ | `src/rateLimit.ts` dùng khoá mặc định của `express-rate-limit` = `req.ip`, tức cùng nguồn |
 | header giả không lách được | ✅ | bài "client chèn nhiều chặng giả" — chỉ chặng phải cùng thắng |
 | phát hiện HTTPS đúng | ⚠️ **không dùng tới** | xem bên dưới |
-| cookie `Secure` đúng | ✅ nhưng **không phụ thuộc proxy** | `src/app.ts` đặt `secure: isProd` — theo `NODE_ENV`, không theo `req.secure` |
+| cookie `Secure` đúng | ✅ nhưng **CẦN `TRUST_PROXY`** | `src/app.ts` đặt `secure: isProd`, và express-session CHỈ phát cookie Secure khi `req.secure` — tức phải tin proxy. Thiếu `TRUST_PROXY` là không có cookie phiên nào; `src/server.ts` vì thế từ chối khởi động production khi thiếu biến này |
 
 ### Vì sao hai dòng cuối không giống mô tả §40
 
@@ -60,7 +60,9 @@ chứng minh **hậu quả** của `true`: IP giả thắng.
   client đặt được, và một liên kết đặt lại mật khẩu dựng từ header là lỗ đầu độc liên kết kinh
   điển. (Xem chú thích tại `.env.example`, mục `APP_BASE_URL`.)
 * Cờ `Secure` của cookie phiên đến từ `NODE_ENV=production`, không từ `req.secure`. Nên một
-  `X-Forwarded-Proto` giả **không** hạ được cờ đó xuống.
+  `X-Forwarded-Proto` giả **không** hạ được cờ đó xuống. NHƯNG việc cookie đó có được PHÁT hay không
+  thì phụ thuộc `req.secure` (express-session bỏ cookie Secure trên kết nối không an toàn), tức phụ
+  thuộc `TRUST_PROXY` — xem dòng "cookie `Secure` đúng" ở bảng trên.
 
 Kết quả: `req.secure` gần như không được đọc ở đâu. Đó là trạng thái AN TOÀN HƠN mô tả trong §40,
 không phải thiếu sót — nhưng ghi ra đây để lần sau ai định dùng `req.protocol` thì biết mình đang

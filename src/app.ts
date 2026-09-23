@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
 import { createLimiter } from "./rateLimit.js";
 import { capNhatDoSauHangDoi } from "./queue.js";
-import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
+import { verifyAccessToken } from "./jwt.js";
+import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser, asyncHandler } from "./middleware.js";
 import { registry, metricsMiddleware, khopTokenBearer } from "./observability.js";
 import { capNhatCongSuatXuat } from "./exportQueue.js";
 import { prisma, kiemTraCsdlChoDoSanSang } from "./db.js";
@@ -66,6 +67,9 @@ export function conObjectPhien() {
   return {
     connectionString: config.DATABASE_URL,
     max: Number(process.env.SESSION_POOL_MAX) || 4,
+    // Chờ LẤY kết nối có trần, như pool Prisma (DB_TX_MAX_WAIT). Không đặt thì node-pg chờ VÔ HẠN:
+    // CSDL nghẽn là mọi request cần phiên xếp hàng mãi sau 4 kết nối (HTTP-09).
+    connectionTimeoutMillis: config.DB_TX_MAX_WAIT,
     // Cùng phanh như pool Prisma. Kho phiên chỉ SELECT/UPSERT một hàng mỗi request nên sẽ không
     // bao giờ chạm trần — nhưng chính vì thế, nếu nó chạm thì đó là dấu hiệu hỏng, và chết nhanh
     // tốt hơn là giữ kết nối mãi.
@@ -215,13 +219,23 @@ export function createApp() {
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           "font-src": ["'self'", "https://fonts.gstatic.com"],
-          "img-src": ["'self'", "data:"],
+          // blob: — trang Nhân sự nén ảnh chứng từ bằng `URL.createObjectURL(file)` rồi gán vào
+          // <img>. Thiếu blob: thì trình duyệt chặn, img.onerror → "Ảnh không hợp lệ" và không
+          // đính được chứng từ nào (HTTP-02). blob: chỉ do chính trang này tạo ra, không mở đường
+          // tải ảnh từ origin khác.
+          "img-src": ["'self'", "data:", "blob:"],
           "connect-src": ["'self'"],
           "object-src": ["'none'"],
           "frame-ancestors": ["'self'"],
         },
       },
       crossOriginEmbedderPolicy: false,
+      // Mặc định helmet là `no-referrer`. Theo Fetch Standard, POST cùng origin từ tài liệu mang
+      // policy đó có thể gửi `Origin: null` (Gecko/WebKit) → csrfGuard Lớp 1 trả 403 csrf_origin
+      // cho MỌI thao tác ghi, kể cả đăng nhập, trên Firefox/Safari/iOS (HTTP-03). `same-origin`
+      // gửi Origin/Referer thật cho chính mình và KHÔNG gửi gì cho bên thứ ba (Google Fonts) —
+      // riêng tư ngang mức cũ. KHÔNG sửa bằng cách chấp nhận Origin 'null'.
+      referrerPolicy: { policy: "same-origin" },
     })
   );
 
@@ -332,23 +346,6 @@ export function createApp() {
     next();
   });
 
-  // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
-  // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
-  // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
-  // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC auth/rate-limit nên
-  // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
-  // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
-  app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
-  app.use(decompressBody(2 * 1024 * 1024));
-
-  // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
-  // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
-  // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
-  // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
-  app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
-  app.use(express.json({ limit: "2mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "2mb" }));
-
   const sessionMiddleware = session({
       name: "qly.sid",
       // Tests run against an in-memory store: no PG dependency, no prune timer
@@ -393,7 +390,11 @@ export function createApp() {
   // Điều kiện CỐ Ý hẹp: phải CÓ Bearer VÀ KHÔNG có cookie phiên. Trình duyệt gửi cả hai (vd SPA đã
   // đăng nhập lại thử gọi kèm token) vẫn phải đi qua phiên thật như cũ.
   const COOKIE_PHIEN = /(?:^|;\s*)qly\.sid=/;
-  app.use((req: Request, res: Response, next: NextFunction) => {
+  // CHỈ DƯỚI /api (HTTP-09). Không đường nào ngoài /api đọc `req.session` (SPA/asset tĩnh/probe), mà
+  // mount không kèm path thì MỖI asset tải kèm cookie tốn một SELECT + một UPDATE (rolling → touch)
+  // vào user_sessions qua pool phiên 4 kết nối — tải trang đầu là 10-20 cặp thừa, và khi CSDL nghẽn
+  // thì cả tệp JS cũng xếp hàng sau pool đó.
+  app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     const coBearer = /^Bearer\s+\S/i.test(req.headers.authorization || "");
     const coCookiePhien = COOKIE_PHIEN.test(req.headers.cookie || "");
     // Chỉ khi bề mặt JWT BẬT (AUTH-04): tắt thì bearerAuth không xác thực gì, nên request Bearer
@@ -401,6 +402,47 @@ export function createApp() {
     if (config.JWT_API_ENABLED && coBearer && !coCookiePhien) return next();
     return sessionMiddleware(req, res, next);
   });
+
+  // ── CHƯA CÓ DANH TÍNH THÌ KHÔNG BUNG THÂN 16MB (HTTP-05) ──────────────────────────────────
+  // Nhóm /api/quotes nhận thân tới 16MB (gzip tỉ lệ ~88 lọt trần tỉ lệ nén). Trước bản vá, bộ giải
+  // nén + JSON.parse chạy TRƯỚC mọi bước xác thực: POST /api/quotes KHÔNG cookie vẫn tốn 40-120ms CPU
+  // + vài chục MB heap rồi mới nhận 401 từ requireAuth của router — 120 lượt/phút/IP là 8-24% event
+  // loop, không cần tài khoản. Mọi route dưới /api/quotes (quotes, import, export nền) đều requireAuth,
+  // nên chặn sớm ở đây không đổi kết quả nào cho người dùng thật.
+  // Danh tính = phiên cookie ĐÃ đăng nhập (cổng phiên ngay trên đã nạp) HOẶC access token Bearer HỢP
+  // LỆ (verifyAccessToken chỉ là HMAC, rẻ). Kiểm chữ ký chứ không chỉ kiểm có header — chỉ có header
+  // thì kẻ tấn công thêm "Authorization: Bearer x" là lách được. Người dùng bị khoá/xoá vẫn do
+  // bearerAuth + enforceActiveUser phía sau xử lý như cũ.
+  app.use(["/api/quotes", "/api/quotes/*"], (req: Request, res: Response, next: NextFunction) => {
+    if (CSRF_SAFE_METHODS.has(req.method) || req.session?.userId) return next();
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || "");
+    if (m) {
+      try { verifyAccessToken(m[1]); return next(); } catch { /* token hỏng → như không có */ }
+    }
+    return res.status(401).json({ error: "Chưa đăng nhập" });
+  });
+
+  // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
+  // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
+  // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
+  // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC bearerAuth/requireAuth nên
+  // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
+  // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
+  //
+  // CHỈ DƯỚI /api (HTTP-01): không đường nào ngoài /api nhận thân request (chỉ có GET tĩnh/SPA/
+  // probe), vậy mà bản trước mount KHÔNG kèm path — POST /bat-ky, /readyz, /metrics với gzip 2MB
+  // được giải nén + JSON.parse trên luồng chính trong khi apiLimiter (chỉ ở /api/) không đếm lượt
+  // nào. Người chưa đăng nhập bơm vô hạn lượt, mỗi lượt ~5ms event loop.
+  app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
+  app.use("/api", decompressBody(2 * 1024 * 1024));
+
+  // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
+  // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
+  // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
+  // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
+  app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
+  app.use("/api", express.json({ limit: "2mb" }));
+  app.use("/api", express.urlencoded({ extended: true, limit: "2mb" }));
 
   // Prometheus metrics middleware (records all requests).
   app.use(metricsMiddleware);
@@ -429,7 +471,8 @@ export function createApp() {
 
   // Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
   // AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
-  app.get("/metrics", async (req, res) => {
+  // asyncHandler: `registry.metrics()` ném thì request không được treo (HTTP-06).
+  app.get("/metrics", asyncHandler(async (req, res) => {
     // Fail closed in production: if no METRICS_TOKEN is set, do NOT expose metrics.
     // Otherwise an internet-reachable deployment (e.g. behind a tunnel where the
     // network allowlist assumption doesn't hold) leaks route names, traffic volumes,
@@ -451,7 +494,7 @@ export function createApp() {
     capNhatCongSuatXuat();
     res.setHeader("Content-Type", registry.contentType);
     res.end(await registry.metrics());
-  });
+  }));
 
   // Accept Bearer JWT as an alternative to session cookies on every API call.
   app.use("/api/", bearerAuth);
@@ -479,12 +522,21 @@ export function createApp() {
   // một HÀNG PHIÊN MỚI (7 ngày) vào Postgres dù chưa đăng nhập gì cả. Vòng lặp gọi endpoint này —
   // không cần đăng nhập, không cần CSRF hợp lệ (chính nó CẤP CSRF) — bơm vô hạn hàng vào bảng phiên.
   //
-  // KHÔNG chặn hẳn khách ẩn danh: trang đăng nhập/kích hoạt/quên-mật-khẩu ĐỀU cần xin mã này TRƯỚC
-  // khi có phiên đăng nhập (chính POST /api/auth/login cũng đòi CSRF hợp lệ) — chặn theo `active`/
-  // `userId` sẽ phá luôn đường vào của MỌI người dùng. Chỉ cần đưa nó vào CÙNG một trần với phần còn
-  // lại của API — đúng việc di chuyển xuống dưới `apiLimiter` làm được, không cần logic mới.
+  // KHÔNG chặn hẳn khách ẩn danh: trang đăng nhập/kích hoạt/quên-mật-khẩu ĐỀU xin mã này TRƯỚC
+  // khi có phiên đăng nhập — chặn theo `active`/`userId` sẽ phá luôn đường vào của MỌI người dùng.
+  // LƯU Ý (HTTP-10): với POST CHƯA đăng nhập (login, accept-invite, forgot) csrfGuard chỉ kiểm Lớp 1
+  // Origin/Referer rồi cho qua — mã xin ở đây KHÔNG được kiểm cho các POST đó. Đừng bỏ Lớp 1 vì tưởng
+  // còn token đỡ.
   app.get("/api/csrf-token", (req, res) => {
-    if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
+    // Bearer không kèm cookie → cổng phiên bị bỏ qua, `req.session` là object trần (hoặc undefined).
+    // Đó là client API dùng sai đường, không phải sự cố máy chủ: 400 kèm lời chỉ đường (HTTP-11).
+    if (!req.session || typeof req.session.regenerate !== "function") {
+      return res.status(400).json({ error: "Client dùng Bearer không cần mã CSRF — xác thực bằng POST /api/auth/token", code: "bearer_khong_can_csrf" });
+    }
+    // Phiên ẨN DANH chỉ sống 30 phút (HTTP-10). Ghi csrfSecret làm express-session lưu một hàng
+    // phiên; với maxAge mặc định 7 ngày, vòng lặp gọi endpoint này (120 lượt/phút/IP) giữ tới ~1,2
+    // triệu hàng mỗi IP. Đăng nhập gọi regenerate → phiên mới nhận lại maxAge 7 ngày như cũ.
+    if (!req.session.userId) req.session.cookie.maxAge = 30 * 60 * 1000;
     const token = issueCsrfToken(req);
     // PHIÊN ẨN DANH SỐNG 1 GIỜ, không phải 7 ngày (AUTH-07). Ghi csrfSecret là tạo một hàng
     // user_sessions; với maxAge 7 ngày chung, một vòng lặp gọi endpoint này không cookie đẻ ra hàng

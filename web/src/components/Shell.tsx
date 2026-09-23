@@ -295,6 +295,23 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
   );
 }
 
+/**
+ * Xử lý sự kiện `open` của EventSource — NỐI LẠI thì kéo lại dữ liệu (RT-09).
+ *
+ * Máy chủ không ghi `id:` và không có Last-Event-ID, nên sự kiện `changed`/`notification` phát
+ * trong khoảng đứt (deploy, hết tuổi thọ 30 phút của luồng, rớt mạng, đóng luồng khi đổi mật khẩu)
+ * mất hẳn: danh sách và badge đứng yên tới lần tương tác kế. Lần `open` ĐẦU là bắt tay bình thường
+ * (trang vừa tự tải dữ liệu) — không làm gì; từ lần thứ hai trở đi coi như vừa lỡ sự kiện: làm mới
+ * badge và bắn `realtime:changed` để trang đang mở tự tải lại. Chi phí: một lượt tải mỗi lần nối lại.
+ */
+export function taoXuLyMoSse(lamMoi: { refreshBadge: () => void; batSuKienDoi: () => void }) {
+  let daMo = false;
+  return () => {
+    if (daMo) { lamMoi.refreshBadge(); lamMoi.batSuKienDoi(); }
+    daMo = true;
+  };
+}
+
 export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; onPreview?: (perms: string[], label: string) => void }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
@@ -347,6 +364,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
     let hen: number | null = null;
     let lan = 0;
     let song = true;
+    // Ngoài `noi()`: phải nhớ qua các lần dựng EventSource mới (nối lại do lùi dần) — xem taoXuLyMoSse.
+    const khiMo = taoXuLyMoSse({ refreshBadge, batSuKienDoi: () => window.dispatchEvent(new Event("realtime:changed")) });
 
     // NỐI LẠI KHI BẮT TAY HỎNG — không có lớp này thì mất realtime là mất VĨNH VIỄN cho tab đó.
     //
@@ -364,7 +383,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
       if (!song) return;
       try {
         es = new EventSource("/api/stream/events");
-        es.addEventListener("open", () => { lan = 0; });   // nối được thì quên lịch sử lùi
+        es.addEventListener("open", () => { lan = 0; khiMo(); });   // nối được thì quên lịch sử lùi; nối LẠI thì kéo lại dữ liệu
         es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
         // FE-18: chuyển tiếp payload {entity, action} để RealtimeBridge chỉ làm tươi query liên quan.
         es.addEventListener("changed", (ev) => { let detail: unknown = null; try { detail = JSON.parse((ev as MessageEvent).data); } catch { /* payload lạ → làm tươi tất cả */ } window.dispatchEvent(new CustomEvent("realtime:changed", { detail })); });

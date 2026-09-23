@@ -55,7 +55,13 @@ const schema = z.object({
   // CORS
   CORS_ORIGINS: z.string().optional(),
   // Trust proxy (Nginx, Cloudflare). Set 1 (one hop) or true for any.
-  TRUST_PROXY: z.string().optional(),
+  // KIỂM DẠNG (HTTP-12): `false`/`off`/`no` trước đây lọt qua rồi `app.set("trust proxy", "false")`
+  // làm proxy-addr ném "invalid IP address: false" trong createApp — tiến trình chết với lỗi không
+  // nói tên biến. Nhận: số chặng, `true`, `loopback`/`linklocal`/`uniquelocal`, hoặc danh sách IP/CIDR.
+  // Chuỗi rỗng (`TRUST_PROXY=` trong .env.example) = không đặt.
+  TRUST_PROXY: strEnv(z.string().trim().regex(/^(true|\d+|loopback|linklocal|uniquelocal|[0-9a-f:.,/ ]+)$/i, {
+    error: "TRUST_PROXY: số chặng proxy (vd 1), 'true', 'loopback'/'linklocal'/'uniquelocal', hoặc danh sách IP/CIDR — KHÔNG dùng 'false' (muốn tắt thì bỏ trống)",
+  }).optional()),
   // JWT
   JWT_SECRET: strEnv(z.string().min(16).optional()),
   JWT_ACCESS_TTL: z.string().default("15m"),
@@ -158,6 +164,14 @@ const schema = z.object({
   // thích. `-1` cũng lọt qua `||` vì số âm là truthy. `.min(1_000)` chặn cả hai kiểu gõ nhầm đó.
   DB_TX_MAX_WAIT: numEnv(z.coerce.number().int().positive().max(60_000).default(10_000)),
   DB_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000 (=1 giây)").max(300_000).default(60_000)),
+
+  // Hạn CƯỠNG BỨC khi tắt tiến trình web (src/server.ts shutdown). ĐƠN VỊ: MILI-GIÂY.
+  // Trước đây cứng 10s trong khi lượt lưu báo giá lớn đo được 13,1s và trần transaction là 60s
+  // (DB_TX_TIMEOUT) → mỗi lần deploy cắt ngang lượt lưu đang chạy (HTTP-08). 70s = 60s + chỗ ghi
+  // audit/phản hồi. PHẢI nhỏ hơn ân hạn của nền tảng: `stop_grace_period` của service app trong
+  // docker-compose.prod.yml và `terminationGracePeriodSeconds` (trừ 5s preStop) ở Helm/k8s —
+  // tests/ht8-an-han-tat-app.test.js khoá thứ tự đó.
+  SHUTDOWN_TIMEOUT_MS: numEnv(z.coerce.number().int().min(1_000, "SHUTDOWN_TIMEOUT_MS tính bằng MILI-GIÂY").max(600_000).default(70_000)),
 
   // ── PHANH THỜI GIAN Ở CHÍNH POSTGRES (src/db.ts, src/app.ts) ──────────── ĐƠN VỊ: MILI-GIÂY.
   //

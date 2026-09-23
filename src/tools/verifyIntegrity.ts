@@ -24,7 +24,8 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { prisma } from "../db.js";
-import { PII_FIELDS } from "../piiFields.js";
+import { PII_FIELDS, piiCutoverBat } from "../piiFields.js";
+import { demCotThoConLai } from "./piiScrub.js";
 import { moTheoKhoa, dangXoayKhoa, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
 import { getObjectBytes, isStorageEnabled } from "../storage.js";
 import { sha256, MAX_PROOF_BYTES, decodeDataUrl } from "../paymentProof.js";
@@ -90,14 +91,21 @@ async function kiemPii(): Promise<Ket> {
     }
   }
 
+  // CỘT THÔ CÒN SÓT (FILE-04). Bản mã đọc được mà cột thô vẫn nằm cạnh thì dump vẫn lộ nguyên
+  // CCCD/STK/lương — trước đây bước kiểm này in ✓ mà không ai biết còn bao nhiêu hàng như vậy.
+  // Chỉ là ✖ khi ĐÃ bật cutover: trước cutover cột thô còn là CỐ Ý (giai đoạn ghi song song).
+  // Đếm cả hàng xoá mềm (cùng lý do includeDeleted ở trên). Xoá bằng: node dist/tools/piiScrub.js
+  const thoConLai = await demCotThoConLai();
+  const cutover = piiCutoverBat();
+
   // Còn hàng nằm ở khoá cũ KHÔNG phải lỗi trong lúc cửa sổ xoay còn mở — đó là trạng thái mong đợi.
   // Nhưng nó PHẢI hiện ra, và phải là ĐỎ khi không hề đang xoay khoá (nghĩa là dữ liệu chỉ đọc được
   // nhờ một khoá mà cấu hình không còn khai — quả bom hẹn giờ).
   const dangXoay = dangXoayKhoa();
-  const dat = undecryptable === 0 && mismatch === 0 && (conKhoaCu === 0 || dangXoay);
-  const ghiChu = conKhoaCu > 0
+  const dat = undecryptable === 0 && mismatch === 0 && (conKhoaCu === 0 || dangXoay) && !(cutover && thoConLai > 0);
+  const ghiChu = (conKhoaCu > 0
     ? ` · ${conKhoaCu} trường CÒN Ở KHOÁ CŨ — chạy pii-backfill.mjs --rotate TRƯỚC KHI gỡ PII_ENC_KEY_OLD`
-    : "";
+    : "") + ` · ${thoConLai} ô PII THÔ còn trong CSDL${thoConLai > 0 ? (cutover ? " — ĐÃ cutover mà còn thô: chạy node dist/tools/piiScrub.js" : " (chưa cutover — ghi song song, chấp nhận)") : ""}`;
   return {
     ten: "PII",
     dat,

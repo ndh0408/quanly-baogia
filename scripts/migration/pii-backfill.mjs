@@ -28,6 +28,12 @@
 // 3. KHÔNG XOÁ CỘT THÔ. Backfill chỉ ĐIỀN thêm cột bản mã. Việc bỏ cột thô là một migration riêng,
 //    chạy sau khi đã xác minh và đã có bản sao lưu — không bao giờ gộp chung với bước điền.
 //
+// ── CHẠY Ở ĐÂU ──────────────────────────────────────────────────────────────
+// Script này import mã nguồn TypeScript (`../../src/*.js`) nên cần `node --import tsx` và thư mục
+// `src/` — image production KHÔNG có cả hai (chỉ có `dist/`). Chạy từ máy dev qua đường hầm SSH tới
+// Postgres. Hai việc cần chạy TRONG image đã có bản biên dịch: xoay khoá `node dist/tools/piiRotate.js`,
+// xoá cột thô đã có bản mã `node dist/tools/piiScrub.js`, kiểm `node dist/tools/verifyIntegrity.js --pii`.
+//
 // ── CHẶN CHẠY NHẦM PRODUCTION ────────────────────────────────────────────────
 // Mặc định script TỪ CHỐI chạy khi NODE_ENV=production. Muốn chạy thật trên production phải đặt
 // THÊM ALLOW_PII_BACKFILL_PROD=true — hai cờ, một chủ đích. Đây không phải thủ tục hành chính: lệnh
@@ -210,8 +216,15 @@ async function backfillModel(model, fields) {
         data[f.enc] = raw == null ? null : encryptPii(raw, aadFor(model, f.plain));
         if (f.idx) data[f.idx] = raw == null ? null : blindIndex(raw);
       }
-      // Cột thô KHÔNG bị đụng tới — xem nguyên tắc 3 ở đầu file.
-      await client.update({ where: { id: row.id }, data });
+      // Cột thô KHÔNG bị đụng tới — xem nguyên tắc 3 ở đầu file. (Xoá cột thô là việc RIÊNG của
+      // src/tools/piiScrub.ts, sau khi bản mã đã được xác minh.)
+      //
+      // COMPARE-AND-SET trên `piiVersion: 0` (FILE-14): giữa lúc đọc lô và lúc ghi, ứng dụng (đã có
+      // khoá) có thể sửa hàng này — nó ghi bản mã MỚI và đặt piiVersion = 1. `update` mù sẽ đè bản
+      // mã mới bằng bản mã của giá trị THÔ CŨ vừa đọc, và decodePiiOnRead ưu tiên bản mã → API trả
+      // STK/lương CŨ (chuyển lương sai tài khoản). Cùng lỗi mà rotateModel đã vá bằng CAS.
+      const kq = await client.updateMany({ where: { id: row.id, piiVersion: 0 }, data });
+      if (kq.count === 0) continue;   // ứng dụng đã ghi bản mã mới — bỏ qua là đúng
       written++;
     }
     process.stdout.write(`   … ${written}\r`);

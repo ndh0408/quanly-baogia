@@ -450,7 +450,7 @@ function compressImage(file: File, maxDim = 1280, quality = 0.7): Promise<string
 }
 
 // Dialog THANH TOÁN: kế toán đánh dấu đã/bỏ + đính/xem ẢNH chứng từ (nén client, lưu base64).
-function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () => void; onDone: () => void }) {
+export function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () => void; onDone: () => void }) {
   const paid = !!rec.paidAt;
   const [proof, setProof] = useState<string | null>(null);     // ảnh MỚI chọn (base64)
   const [existing, setExisting] = useState<string | null>(null); // ảnh ĐÃ CÓ (tải on-demand)
@@ -501,7 +501,10 @@ function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () =
         <div className="modal-foot">
           <button className="btn" onClick={onClose}>Đóng</button>
           {paid
-            ? <button className="btn btn-danger" disabled={busy} onClick={() => mark(false)}>{busy ? "…" : "Bỏ đánh dấu"}</button>
+            // Hỏi lại trước khi bỏ: nút đỏ nằm ngay trong hộp thoại, một cú bấm lỡ tay là hồ sơ về
+            // "Chưa thanh toán" và rời khỏi ảnh chứng từ (FILE-01). Ảnh vẫn còn trong kho, nhưng giao
+            // diện không còn đường nào mở lại nó.
+            ? <button className="btn btn-danger" disabled={busy} onClick={async () => { if (await confirmModal("Bỏ đánh dấu thanh toán", `Bỏ đánh dấu ĐÃ thanh toán cho "${rec.fullName}"? Ảnh chứng từ sẽ không còn gắn với hồ sơ này.`, { danger: true, confirmText: "Bỏ đánh dấu" })) mark(false); }}>{busy ? "…" : "Bỏ đánh dấu"}</button>
             : <button className="btn btn-primary" disabled={busy} onClick={() => mark(true)}>{busy ? "Đang lưu…" : "Đánh dấu đã thanh toán"}</button>}
         </div>
       </div>

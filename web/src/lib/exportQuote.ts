@@ -90,7 +90,21 @@ async function choJob(queue: string, jobId: string, hanMs = 5 * 60_000) {
   const het = Date.now() + hanMs;
   let cho = 700;
   for (;;) {
-    const j = await api.jobStatus(queue, jobId);
+    let j: Awaited<ReturnType<typeof api.jobStatus>>;
+    try {
+      j = await api.jobStatus(queue, jobId);
+    } catch (ex) {
+      // 503 job_state_timeout = Redis chậm một nhịp khi máy chủ hỏi trạng thái (RT-03). Job vẫn
+      // đang chạy — nghỉ rồi hỏi lại, KHÔNG bỏ chờ. (Trước đây máy chủ trả state "unknown" cho ca
+      // này và nhánh ngay dưới ném "không còn tồn tại".)
+      const ma = ex instanceof ApiError ? (ex.body as { code?: string } | null)?.code : undefined;
+      if (ex instanceof ApiError && ex.status === 503 && ma === "job_state_timeout" && Date.now() <= het) {
+        await nghi(cho);
+        cho = Math.min(cho * 1.4, 5_000);
+        continue;
+      }
+      throw ex;
+    }
     if (j.state === "completed") return j;
     if (j.state === "failed") throw new Error(j.failedReason || "Tạo file nền thất bại");
     // "unknown" là cách BullMQ nói "job này không nằm trong danh sách nào cả" — nó đã bị dọn, hoặc
@@ -209,11 +223,9 @@ async function chay(quoteId: number, ext: "xlsx" | "pdf"): Promise<boolean> {
     const job = await choJob(queue, jobId);
     const url = job.returnvalue?.url;
     if (!url) throw new Error("Tạo file xong nhưng không nhận được đường tải — hãy báo quản trị viên");
-    // `duPhong` ở đây gần như CHẮC CHẮN bị bỏ qua: URL đã ký trỏ vào kho object, tức KHÁC ORIGIN,
-    // mà trình duyệt bỏ qua thuộc tính `download` khi khác origin. Tên file thật do header
-    // Content-Disposition của kho quyết định — src/worker.ts nay truyền `filename` vào
-    // `presignDownload` đúng theo công thức của đường đồng bộ, nên hai đường cho ra CÙNG một tên.
-    // Vẫn đặt `download` vì nó vô hại và cứu được trường hợp kho chạy CÙNG origin (đứng sau proxy).
+    // `url` là đường CÙNG ORIGIN `/api/jobs/export/:id/file` — máy chủ phát file qua app (RT-02),
+    // không còn là URL đã ký trỏ vào kho nội bộ. Tên file do Content-Disposition của máy chủ quyết
+    // định (cùng `tenFileXuat` với đường đồng bộ); `duPhong` chỉ là lưới an toàn.
     taiVe(url, duPhong);
     toast("File đã sẵn sàng, đang tải về", "success");
     return true;

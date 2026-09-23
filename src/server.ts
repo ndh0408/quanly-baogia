@@ -17,6 +17,16 @@ initSentry();
 // xuất lớn hơn cả ngân sách dòng nghĩa là có báo giá hợp lệ mà không bao giờ xuất được.
 kiemBatBienXuatLucKhoiDong();
 
+// TRUST_PROXY BẮT BUỘC Ở TIẾN TRÌNH WEB PRODUCTION (HTTP-12). Cookie phiên đặt `secure: isProd`,
+// mà express-session CHỈ phát cookie Secure khi `req.secure` — sau TLS ở Cloudflare kết nối vào Node
+// là HTTP thuần, nên thiếu trust proxy thì `req.secure` = false và KHÔNG có Set-Cookie nào: đăng
+// nhập "thành công" rồi mọi request sau 401, không một dòng log. Kiểm ở ĐÂY (không ở config.ts) vì
+// tiến trình worker cũng nạp config mà không cần biến này.
+if (config.NODE_ENV === "production" && !config.TRUST_PROXY) {
+  console.error("❌ TRUST_PROXY phải đặt ở production (vd 1 cho Cloudflare Tunnel → cloudflared → app): cookie phiên Secure chỉ được phát khi req.secure, mà req.secure cần trust proxy.");
+  process.exit(1);
+}
+
 const app = createApp();
 
 // QUYỀN GHI ĐÈ VAI TRÒ PHẢI NẠP XONG TRƯỚC KHI NHẬN REQUEST (RBAC-09). Bản trước `void` nó bên trong
@@ -67,6 +77,15 @@ const server = app.listen(config.PORT, () => {
   }
 });
 
+// KEEP-ALIVE DÀI HƠN PROXY PHÍA TRƯỚC (HTTP-07). Mặc định Node đóng kết nối rỗi sau 5s, trong khi
+// cloudflared/Traefik giữ pool kết nối tới app ~90s. Proxy gửi request lên đúng socket Node vừa đóng
+// → EOF → Go transport chỉ tự thử lại request idempotent → POST (Lưu, đăng nhập) nhận 502 lẻ tẻ.
+// headersTimeout phải lớn hơn keepAliveTimeout (quy tắc của Node).
+const KEEP_ALIVE_TIMEOUT_MS = 95_000;
+const HEADERS_TIMEOUT_MS = 96_000;
+server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+server.headersTimeout = HEADERS_TIMEOUT_MS;
+
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
   // ĐÓNG SSE TRƯỚC. `server.close()` chờ mọi kết nối đang mở kết thúc, mà kết nối SSE thì theo
@@ -87,11 +106,12 @@ function shutdown(sig: string) {
     await flushSentry();
     process.exit(0);
   });
-  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
+  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày. Hạn đủ
+  // dài để một lượt lưu/xuất đồng bộ đang dở (trần transaction 60s) kịp xong — xem SHUTDOWN_TIMEOUT_MS.
   setTimeout(() => {
-    logger.error("tắt máy quá hạn 10s — thoát cưỡng bức (còn kết nối chưa đóng?)");
+    logger.error({ hanMs: config.SHUTDOWN_TIMEOUT_MS }, "tắt máy quá hạn — thoát cưỡng bức (còn kết nối chưa đóng?)");
     process.exit(1);
-  }, 10_000).unref();
+  }, config.SHUTDOWN_TIMEOUT_MS).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

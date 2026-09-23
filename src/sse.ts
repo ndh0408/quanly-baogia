@@ -49,13 +49,17 @@ function ghiAnToan(res: Response, payload: string): boolean {
  * Tập dưới đây là ĐÚNG những tên đang được phát (grep `publish(`/`broadcast(` toàn src/), phần còn
  * lại gộp vào "khac" — mất chi tiết ở một sự kiện lạ, đổi lại không bao giờ giết được Prometheus.
  */
-const TEN_SU_KIEN = new Set(["changed", "notification", "presence", "session:refresh", "session:revoked", "shutdown"]);
+const TEN_SU_KIEN = new Set(["changed", "notification", "presence", "session:refresh", "session:revoked", "session:close", "shutdown"]);
 const nhanSuKien = (event: string) => (TEN_SU_KIEN.has(event) ? event : "khac");
 
 // --- delivery to THIS process's connections only ---
 function localPublish(userId: number, event: string, data: unknown) {
   const set = subscribers.get(userId);
   if (!set || set.size === 0) return;
+  // "session:close" = CHỈ ĐÓNG socket, KHÔNG ghi gì cho client (RT-04). Khác "session:revoked": tab
+  // hợp lệ (giữ sid mới sau đổi mật khẩu) không được bị bảo đăng xuất — EventSource tự nối lại, đi
+  // qua enforceActiveUser; phiên cũ đã bị xoá thì lượt nối lại nhận 401.
+  if (event === "session:close") { detachUser(userId); return; }
   const payload = `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
   const nhan = nhanSuKien(event);
   // ĐẾM LẦN GHI THÀNH CÔNG, không đếm lần GỌI. Một broadcast tới 50 tab là 50 lần giao — đó mới là
@@ -368,13 +372,29 @@ export function backplaneDangDung(): boolean {
   return pub !== null;
 }
 
+/**
+ * PUBLISH trả về SỐ subscriber đã nhận (RT-08). 0 nghĩa là KHÔNG AI nhận — kể cả subscriber của
+ * CHÍNH tiến trình này (kết nối SUBSCRIBE đang nối lại, bị CLIENT KILL, rớt vì idle ở tầng mạng).
+ * Bản trước chỉ rơi về phát cục bộ khi lệnh NÉM lỗi, nên ca này mất sự kiện im lặng trong khi gauge
+ * vẫn báo backplane khoẻ. Một instance: phát cục bộ là đúng tuyệt đối; nhiều instance: 0 cũng có
+ * nghĩa không instance nào nhận, nên phát cục bộ vẫn không trùng.
+ */
+function khongAiNhan(op: "publish" | "broadcast", n: unknown, phatLai: () => void) {
+  if (n !== 0) return;
+  sseBackplaneErrors.inc({ op });
+  logger.warn(`sse ${op}: Redis không có subscriber nào nhận — phát cục bộ`);
+  phatLai();
+}
+
 /** Push an event to all open connections for a user (across instances when Redis is on). */
 export function publish(userId: number, event: string, data: unknown) {
   if (pub) {
     // KHÔNG nuốt lỗi im lặng nữa: publisher nay trượt nhanh khi Redis chết, nên lỗi ở đây là tín
     // hiệu duy nhất cho biết realtime đang hỏng. Đếm để /metrics thấy được, thay vì `catch(() => {})`.
-    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).catch((e) =>
-      roiVeCucBo("publish", e, () => localPublish(userId, event, data))
+    const phatLai = () => localPublish(userId, event, data);
+    pub.publish(CHANNEL, JSON.stringify({ userId, event, data })).then(
+      (n) => khongAiNhan("publish", n, phatLai),
+      (e) => roiVeCucBo("publish", e, phatLai),
     );
     return;
   }
@@ -384,8 +404,10 @@ export function publish(userId: number, event: string, data: unknown) {
 /** Broadcast to everyone connected (across instances when Redis is on). */
 export function broadcast(event: string, data: unknown) {
   if (pub) {
-    pub.publish(CHANNEL, JSON.stringify({ event, data })).catch((e) =>
-      roiVeCucBo("broadcast", e, () => localBroadcast(event, data))
+    const phatLai = () => localBroadcast(event, data);
+    pub.publish(CHANNEL, JSON.stringify({ event, data })).then(
+      (n) => khongAiNhan("broadcast", n, phatLai),
+      (e) => roiVeCucBo("broadcast", e, phatLai),
     );
     return;
   }
@@ -411,6 +433,16 @@ export function emitChange(entity: string, action: string, _id?: number | string
 /** Tell one user their session is no longer valid (locked/deactivated/deleted) → client logs out. */
 export function revokeSession(userId: number, reason?: string) {
   publish(userId, "session:revoked", { reason: reason || "revoked" });
+}
+
+/**
+ * ĐÓNG mọi luồng SSE của một tài khoản mà KHÔNG bảo client đăng xuất (RT-04). Gọi sau khi xoá phiên
+ * (đổi/đặt lại mật khẩu, nhận lời mời, gỡ MFA, đăng xuất): trước đây `destroyAllSessions` chỉ xoá
+ * hàng user_sessions, socket SSE đang mở của phiên CŨ vẫn nhận `notification`/`changed` tới hết
+ * SSE_MAX_LIFETIME_MS (30 phút). Tab hợp lệ tự nối lại; phiên đã chết nhận 401 khi nối lại.
+ */
+export function closeUserStreams(userId: number) {
+  publish(userId, "session:close", {});
 }
 
 /** Tell one user to re-pull their capabilities (role changed) → client re-renders. */

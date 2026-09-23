@@ -20,6 +20,7 @@
 import ExcelJS from "exceljs";
 import { TEMPLATE_CONFIGS } from "./templateConfigs.js";
 import { excelFormulaToEditor, unwrapRound, evalEditorFormula } from "./quoteFormula.js";
+import { nhanLamTronDong } from "./tienDong.js";
 
 // ===== Kiểu dữ liệu trả về =====
 export type ImportedKind = "item" | "sub" | "section" | "subsection" | "info";
@@ -269,6 +270,17 @@ function numOf(cell: Cell | null, decimal = false): number {
   return decimal ? parseLooseDecimal(t) : parseLooseNumber(t);
 }
 const isBlank = (cell: Cell | null) => !cell || cellText(cell.value).trim() === "";
+/**
+ * Mã lỗi Excel của ô (`#N/A`, `#REF!`, `#DIV/0!`…) — cả ô lỗi trần lẫn công thức có KẾT QUẢ lỗi.
+ * numOf/cellText coi chúng như ô TRỐNG (→ 0), nên không có dòng này thì một Đơn Giá `#N/A` nạp vào
+ * thành 0 mà không có cảnh báo nào phân biệt với ô bỏ trống thật (XLSX-08).
+ */
+function errOf(cell: Cell | null): string | null {
+  const v = cell?.value as Record<string, any> | null | undefined;
+  if (!v || typeof v !== "object") return null;
+  const e = v.error ?? v.result?.error;
+  return typeof e === "string" && e ? e : null;
+}
 /** Công thức của ô (ExcelJS tự dịch shared-formula khi khách kéo công thức xuống). */
 function fxOf(cell: Cell | null): string | null {
   if (!cell) return null;
@@ -510,6 +522,14 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"]] as const) {
       if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — đã để 0, cần nhập lại`);
     }
+    // Ô số đang LỖI trong Excel → numOf đọc thành 0. Nói rõ, đừng để lẫn với ô trống (XLSX-08).
+    if (kind !== "info") {
+      for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["_amount", "Thành Tiền"]] as const) {
+        if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
+        const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
+        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — đã để 0, cần nhập lại`);
+      }
+    }
 
     // Thành Tiền trong file có khớp SL × ĐG (× Ngày) không? Lệch = khách sửa tay ô tổng → cảnh báo,
     // KHÔNG tự ý sửa số của khách.
@@ -563,7 +583,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const it = x.it;
     if (field === "_amount") {
       if (x.kind === "section" || x.kind === "subsection") return NaN;   // tổng nhóm: app tự tính
-      return Math.round(qtyForAmount(it) * (colOf.days ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+      return nhanLamTronDong(qtyForAmount(it), colOf.days ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);   // chính xác — XLSX-06
     }
     if (field === "quantity") return qtyForAmount(it);
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
@@ -625,6 +645,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       const cell = cellAt(x.row, f.field);
       const raw = fxOf(cell);
       if (!raw) continue;
+      // Công thức ra LỖI: đã có cảnh báo "đang LỖI … đã để 0" ở vòng quét; câu "đã giữ con số" dưới
+      // đây sẽ sai (con số là 0) — XLSX-08.
+      if (errOf(cell)) continue;
       // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất.
       const rawBody = expandGroupRefs(raw.replace(/^=/, ""));
       const src = f.round1 ? unwrapRound(rawBody, 1) : rawBody;
@@ -685,6 +708,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       if (t && RE_TOTALS.test(t)) { label = t; break; }
     }
     if (!label) continue;
+    // Ô tổng đang LỖI (#REF!…) → KHÔNG ghi 0 vào tổng đối chiếu (XLSX-08): "Tổng cộng lệch với 0"
+    // là cảnh báo sai hướng; bỏ qua ô đó như không có.
+    if (errOf(ws.getCell(r, amountCol))) continue;
     const val = numOf(ws.getCell(r, amountCol));
     if (/^VAT/.test(label)) {
       totals.vat = val;
@@ -761,7 +787,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
 /** Tổng tiền của sheet theo đúng cách app tính (mục con cộng vào nhóm; nhóm ×SL khi bật). */
 export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal">): number {
-  const line = (it: ImportedItem) => Math.round(qtyForAmount(it) * (s.hasDays ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+  // Nhân CHÍNH XÁC rồi làm tròn — khớp src/money.ts (XLSX-06). Double lệch 1đ ở giá không chia hết 10.
+  const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {

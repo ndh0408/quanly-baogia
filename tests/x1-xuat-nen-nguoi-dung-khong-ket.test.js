@@ -90,13 +90,16 @@ describe("cả hai đường xuất phải DÙNG CHUNG công thức đó", () =>
       .not.toMatch(/"send":\s*async\s*\([^)]*\)\s*=>\s*sendEmail\(/);
   });
 
-  it("worker.ts (nền) TRUYỀN filename vào presignDownload, và cũng qua tenFileXuat", () => {
+  // Bản trước đòi worker TRUYỀN filename vào presignDownload. Từ RT-02 worker KHÔNG ký URL nữa
+  // (URL ký theo S3_ENDPOINT nội bộ, trình duyệt không mở được) — nó trả `filename` trong
+  // returnvalue và GET /api/jobs/export/:id/file đặt Content-Disposition theo đó. Điều bài này
+  // bảo vệ vẫn giữ nguyên: tên file của đường nền đi qua CHÍNH `tenFileXuat` như đường đồng bộ.
+  it("worker.ts (nền) trả filename qua tenFileXuat cho cả xlsx lẫn pdf", () => {
     const src = boChuThich(doc("src/worker.ts"));
-    const goi = [...src.matchAll(/presignDownload\([^)]*\)/g)].map((m) => m[0]);
-    expect(goi.length, "không còn lời gọi presignDownload nào ở worker?").toBeGreaterThanOrEqual(2);
-    for (const g of goi) {
-      expect(g, `presignDownload thiếu filename → kho object tự đặt tên theo khoá: ${g}`)
-        .toMatch(/filename:\s*tenFileXuat\(/);
+    const tra = [...src.matchAll(/return\s*\{\s*key[^}]*\}/g)].map((m) => m[0]);
+    expect(tra.length, "không còn lượt trả {key…} nào ở worker?").toBeGreaterThanOrEqual(2);
+    for (const t of tra) {
+      expect(t, `returnvalue thiếu filename → tải về mang tên theo khoá: ${t}`).toMatch(/filename:\s*tenFileXuat\(/);
     }
   });
 });
@@ -128,11 +131,16 @@ describe("503 của đường xuất nền không được bỏ người dùng �
     expect(k.length, "số nhánh 503 đổi — kiểm lại xem nhánh mới có mang code không").toBeGreaterThanOrEqual(3);
   });
 
+  // NGOẠI LỆ DUY NHẤT: `job_state_timeout` (RT-03) — 503 TẠM THỜI khi Redis chậm một nhịp lúc hỏi
+  // trạng thái. Nó KHÔNG phải "xuất nền chưa dùng được": client (choJob trong
+  // web/src/lib/exportQuote.ts) tự nghỉ rồi hỏi lại, chỉ khi quá hạn chờ mới rơi xuống nhánh bắt
+  // mọi 503. Trước RT-03 ca này trả state "unknown" và client bỏ chờ với lời nhắn sai.
   it("MỌI nhánh 503 mang code:'export_async_unavailable' — client dựa vào đúng nó", () => {
     for (const k of khoi503()) {
       expect(k, `một nhánh 503 thiếu code → client không phân biệt được, chỉ đổ nguyên văn kỹ thuật ra màn hình:\n${k}`)
-        .toMatch(/code:\s*"export_async_unavailable"/);
+        .toMatch(/code:\s*"(export_async_unavailable|job_state_timeout)"/);
     }
+    expect(khoi503().filter((k) => /"job_state_timeout"/.test(k)).length, "chỉ được MỘT nhánh tạm thời").toBeLessThanOrEqual(1);
   });
 
   it("KHÔNG nhánh nào bảo người dùng quay lại thứ vừa thất bại", () => {
@@ -172,7 +180,6 @@ describe("chú thích của exportQuote.ts trỏ tới TÊN CÓ THẬT ở máy 
     ["MAX_EXPORT_SHEETS", "src/validators.ts", /export const MAX_EXPORT_SHEETS\b/],
     ["MAX_EXPORT_ITEMS", "src/validators.ts", /export const MAX_EXPORT_ITEMS\b/],
     ["export_async_unavailable", "src/routes/jobs.routes.ts", /"export_async_unavailable"/],
-    ["presignDownload", "src/worker.ts", /presignDownload\(/],
   ];
 
   for (const [ten, file, re] of CAP) {

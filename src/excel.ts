@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
 import { buildFormulaContext } from "./quoteFormula.js";
+import { nhanLamTronDong } from "./tienDong.js";
+import { ngayThangNamVN } from "./vnTime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -43,9 +45,12 @@ function stampTemplateMarker(ws: any, templateCode: string) {
   cell.style = style;
 }
 
-function vnDateText(d: any, city: any) {
-  const dt = d instanceof Date ? d : new Date(d);
-  return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
+// Ngày THEO LỊCH VIỆT NAM, không theo múi giờ của tiến trình (XLSX-11): container chạy UTC, nên
+// báo giá nhân bản/tạo lúc 00:00–06:59 giờ VN (quoteDate = new Date() → 17:00–23:59Z hôm trước) in
+// lùi một ngày. Ngày nhập từ web ('YYYY-MM-DD' → 00:00Z) cho CÙNG kết quả như trước.
+export function vnDateText(d: any, city: any) {
+  const { ngay, thang, nam } = ngayThangNamVN(d);
+  return `${city || "TP. Hồ Chí Minh"}, ngày ${String(ngay).padStart(2, "0")} tháng ${String(thang).padStart(2, "0")} năm ${nam}`;
 }
 
 // Neutralize spreadsheet formula injection: a text cell whose value starts with
@@ -152,6 +157,22 @@ function paintCell(cell: any, { fill, fontColor, bold }: { fill?: any; fontColor
     if (bold != null) style.font.bold = bold;
   }
   cell.style = style;
+}
+
+/**
+ * Đổi style của MỘT ô mà không lan sang ô khác (XLSX-04).
+ *
+ * `ws.duplicateRow` (ExcelJS) gán CÙNG MỘT đối tượng style cho hàng nguồn và mọi hàng nhân bản
+ * (`rDst.getCell(c).style = cell.style`). Gán thẳng `cell.alignment = …` / `cell.font = …` là sửa
+ * đối tượng chung đó: một nhóm con hay dòng info rơi vào vùng nhân bản (báo giá dài hơn số khe của
+ * mẫu) làm MỌI tên hạng mục từ hàng cuối của mẫu trở xuống bị thụt lề / in nghiêng. Cùng bẫy mà
+ * `paintCell` đã tránh bằng cách nhân bản style trước khi sửa. Ô ngoài vùng nhân bản vốn đã có
+ * style riêng nên đầu ra của chúng không đổi (style được ghi theo GIÁ TRỊ, không theo danh tính).
+ */
+function datStyleRieng(cell: any, patch: (st: any) => Record<string, unknown>) {
+  const st = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+  Object.assign(st, patch(st));
+  cell.style = st;
 }
 
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
@@ -681,7 +702,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       } else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i]) {
         const it = items[i];
         const qty = qtyForAmount(it), days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        const amt = Math.round(cols.days ? qty * days * price : qty * price);
+        const amt = cols.days ? nhanLamTronDong(qty, days, price) : nhanLamTronDong(qty, price);   // chính xác — XLSX-06
         const parent = curSub >= 0 ? curSub : curSection;
         if (parent >= 0) sectionSum[parent] += amt;
         if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
@@ -752,6 +773,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const coveredSubRows = new Set<number>();   // hàng nhóm con đã được nhóm cha gom vào Tổng Cộng
   const looseAmtRows: number[] = [];   // hàng mục KHÔNG thuộc nhóm nào (trước nhóm đầu tiên)
   let seenSection = false;
+  // Có nhóm mang hệ số KHÔNG nguyên (SL nhóm 1,5) → Tổng Cộng có thể ra số lẻ .5 (XLSX-07). Xem chỗ dùng.
+  let coHeSoNhomLe = false;
   for (let i = 0; i < slotRows.length; i++) {
     const r = slotRows[i];
     const it = items[i];
@@ -775,7 +798,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.name) {
         const nameCell = ws.getCell(`${cols.name}${r}`);
         setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(nameCell);
-        if (isSubSection) nameCell.alignment = { ...(nameCell.alignment || {}), indent: 1 };   // thụt lề, KHÔNG dùng ký tự
+        if (isSubSection) datStyleRieng(nameCell, (st) => ({ alignment: { ...(st.alignment || {}), indent: 1 } }));   // thụt lề, KHÔNG dùng ký tự
       }
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
@@ -786,6 +809,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (gq || 0) || null;
       const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
       mult = gmult;
+      if (!Number.isInteger(gmult)) coHeSoNhomLe = true;
       seenSection = true;
       // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
       // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
@@ -856,7 +880,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.notes) { setCell(ws, `${cols.notes}${r}`, it.notes || ""); ensureWrap(ws.getCell(`${cols.notes}${r}`)); }
       if (cols.name) {
         const nameCell = ws.getCell(`${cols.name}${r}`);
-        nameCell.font = { ...(nameCell.font || {}), italic: true };
+        datStyleRieng(nameCell, (st) => ({ font: { ...(st.font || {}), italic: true } }));
       }
     } else if (it) {
       const isSub = effKind[i] === "sub";
@@ -866,13 +890,14 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const days = Number(it.days) || 1;
       const price = Number(it.unitPrice) || 0;
       let amt;
+      // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng). Nhân CHÍNH XÁC rồi mới làm
+      // tròn (XLSX-06): double cho 15 × 4,1 = 61,4999… → 61 trong khi số đã lưu (Decimal) là 62.
       if (cols.days) {
-        amt = price * qty * days;
+        amt = nhanLamTronDong(qty, days, price);
         putNum(it, r, "days", cols.days, days);
       } else {
-        amt = price * qty;
+        amt = nhanLamTronDong(qty, price);
       }
-      amt = Math.round(amt);   // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng)
       subtotal += amt * mult;
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.
@@ -990,6 +1015,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const t = cfg.totals;
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
 
+  // Hệ số nhóm lẻ → làm tròn tổng sheet TRƯỚC Discount/VAT, đúng thứ tự của src/money.ts (XLSX-07).
+  if (coHeSoNhomLe) subtotal = Math.round(subtotal);
+
   // ── DISCOUNT RIÊNG CỦA SHEET ────────────────────────────────────────────────────────────────
   // Có Discount → khối tổng dài ra 2 hàng và VAT đổi gốc tính:
   //     Cộng → Discount (số ÂM) → Tổng Cộng (= Cộng + Discount) → VAT(Tổng Cộng) → Thành Tiền
@@ -1026,6 +1054,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   } else {
     const terms = [...groupAmtTerms, ...looseAmtRows.map((rr) => ({ row: rr, expr: `${cols.amount}${rr}` }))].sort((a, b) => a.row - b.row);
     if (terms.length) subtotalFormula = terms.map((x) => x.expr).join("+");
+    // HỆ SỐ NHÓM LẺ (XLSX-07): ô nhóm = đơn giá × SL không làm tròn, nên Tổng Cộng thành 4.748.529,5
+    // trong khi máy chủ (src/money.ts) làm tròn tổng sheet về số nguyên — giá trị ô khác số đã lưu, và
+    // VAT = ROUND(Tổng Cộng × %) có thể lệch 1đ. Làm tròn ĐÚNG như máy chủ: ROUND tổng, không từng ô.
+    // CHỈ khi có hệ số lẻ: SL nhóm nguyên thì tổng vốn nguyên, tệp (kể cả GN) giữ nguyên từng byte.
+    if (coHeSoNhomLe && subtotalFormula) subtotalFormula = `ROUND(${subtotalFormula},0)`;
   }
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     // Có Discount thì hàng này chỉ còn là "Cộng" (chưa trừ) — nhãn "Tổng Cộng" chuyển xuống netRow.

@@ -6,7 +6,8 @@ import { asyncHandler, requireAuth } from "../middleware.js";
 import { validate } from "../validators.js";
 import type { Job } from "bullmq";
 import { getQueue, QUEUES, isQueueEnabled, xepViecCoHan } from "../queue.js";
-import { isStorageEnabled } from "../storage.js";
+import { isStorageEnabled, getObjectStream } from "../storage.js";
+import { pipeline } from "node:stream/promises";
 import { can, canOnQuote, biLuocView, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 
@@ -150,66 +151,130 @@ router.post(
   })
 );
 
+/**
+ * Tìm job xuất và GÁC QUYỀN — dùng chung cho GET trạng thái và GET tệp. Trả null khi đã tự trả lời
+ * (4xx/503). Hai đường phải gác Y HỆT nhau: đường tệp phát chính file đầy đủ giá mà `returnvalue`
+ * của đường trạng thái trỏ tới.
+ */
+async function layJobXuat(req: Request, res: Response): Promise<Job | null> {
+  // Nhánh này là lúc ĐANG HỎI kết quả, không phải lúc xếp việc — tức người dùng đã bấm Tải và
+  // đang chờ. Redis chết giữa chừng thì việc của họ mất luôn, mà lời nhắn cũ chỉ nói "chưa được
+  // cấu hình" như thể họ vừa gõ nhầm địa chỉ. Mang `code` giống hai nhánh kia để giao diện xử lý
+  // một kiểu duy nhất, và nói rõ ai khắc phục được.
+  if (!isQueueEnabled()) {
+    res.status(503).json({
+      error: "Hệ thống hàng đợi chưa được cấu hình (hoặc vừa mất kết nối Redis) nên không theo dõi được lượt tạo file. Hãy nhờ quản trị viên kiểm tra rồi bấm tải lại.",
+      code: "export_async_unavailable",
+    });
+    return null;
+  }
+  // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
+  // carry recipient addresses, target URLs and secrets in job.data — never expose
+  // them here, even to QUOTE_READ_ALL/admin callers.
+  if (req.params.queue !== QUEUES.EXPORT) {
+    res.status(404).json({ error: "Không tìm thấy hàng đợi" });
+    return null;
+  }
+  const q = getQueue(req.params.queue);
+  if (!q) { res.status(404).json({ error: "Không tìm thấy hàng đợi" }); return null; }
+  // TRẦN THỜI GIAN — cùng lý do như nhánh POST ở trên: đây là lúc người dùng ĐANG POLL chờ kết
+  // quả, một lệnh Redis treo vô hạn ở đây có nghĩa là mọi lượt bấm "Tải" sau đó cũng treo theo.
+  const job = await xepViecCoHan<Job | undefined>(() => q.getJob(req.params.id), { queueName: req.params.queue, jobName: "getJob" });
+  // `null` ở đây gộp CHUNG hai khả năng: tác vụ thật sự không tồn tại, HOẶC Redis chậm/treo tới
+  // mức chạm trần QUEUE_ADD_TIMEOUT_MS. Không tách được hai ca (xepViecCoHan cố ý không phân biệt
+  // — xem src/queue.ts), nên nói THẬT cả hai khả năng thay vì khẳng định chắc "không tồn tại".
+  if (!job) { res.status(404).json({ error: "Không tìm thấy tác vụ (hoặc Redis đang chậm/mất kết nối — thử tải lại)" }); return null; }
+  // Only the user who requested the job (or a read-all holder) may read its
+  // result — job.returnvalue trỏ tới file xuất đầy đủ giá.
+  const requestedBy = job.data?.requestedBy;
+  if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_READ_ALL)) {
+    res.status(403).json({ error: "Bạn không có quyền xem tác vụ này" });
+    return null;
+  }
+  // `returnvalue` của job xuất trỏ tới file Excel/PDF ĐẦY ĐỦ GIÁ. Người xem hộ (nhánh
+  // QUOTE_READ_ALL ngay trên) vì thế phải có luôn năng lực XUẤT — đúng chốt mà cả ba đường tới
+  // cùng tệp đó đang dùng: export.routes.ts mount requirePermission(QUOTE_EXPORT), nhánh xếp việc
+  // ở CHÍNH file này cũng đòi nó, và canAccessKey của files.routes.ts vừa được siết cho khớp.
+  // Thiếu chốt này, người chỉ có quote:read:all lấy được file của báo giá người khác mà không hề
+  // có quyền xuất — job id của BullMQ là số tăng dần nên dò cạn được.
+  // Người TỰ xếp việc (requestedBy === mình) không cần kiểm lại: nhánh xếp việc đã gác rồi.
+  if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_EXPORT)) {
+    res.status(403).json({ error: "Bạn không có quyền tải file xuất của báo giá này" });
+    return null;
+  }
+  return job;
+}
+
+/** Đường tải CÙNG ORIGIN của một job xuất đã xong — thay cho URL đã ký trỏ vào kho nội bộ. */
+const duongTaiFile = (queue: string, id: string | number | undefined) => `/api/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(String(id))}/file`;
+
 router.get(
   "/jobs/:queue/:id",
   requireAuth,
   validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
   asyncHandler(async (req: Request, res: Response) => {
-    // Nhánh này là lúc ĐANG HỎI kết quả, không phải lúc xếp việc — tức người dùng đã bấm Tải và
-    // đang chờ. Redis chết giữa chừng thì việc của họ mất luôn, mà lời nhắn cũ chỉ nói "chưa được
-    // cấu hình" như thể họ vừa gõ nhầm địa chỉ. Mang `code` giống hai nhánh kia để giao diện xử lý
-    // một kiểu duy nhất, và nói rõ ai khắc phục được.
-    if (!isQueueEnabled()) {
-      return res.status(503).json({
-        error: "Hệ thống hàng đợi chưa được cấu hình (hoặc vừa mất kết nối Redis) nên không theo dõi được lượt tạo file. Hãy nhờ quản trị viên kiểm tra rồi bấm tải lại.",
-        code: "export_async_unavailable",
-      });
+    const job = await layJobXuat(req, res);
+    if (!job) return;
+    // Trần thời gian cho getState. Quá hạn thì trả 503 + mã RIÊNG (RT-03), KHÔNG trả "unknown":
+    // client coi "unknown" là trạng thái KẾT THÚC (đúng nghĩa của BullMQ — job đã bị dọn) và bỏ chờ
+    // với lời nhắn "không còn tồn tại", trong khi job vẫn đang chạy. 503 job_state_timeout thì
+    // client (web/src/lib/exportQuote.ts) nghỉ một nhịp rồi hỏi lại.
+    const state = await xepViecCoHan<string>(() => job.getState(), { queueName: req.params.queue, jobName: "getState" });
+    if (state == null) {
+      res.setHeader("Retry-After", "2");
+      return res.status(503).json({ error: "Hàng đợi đang chậm nên chưa hỏi được trạng thái tệp — hệ thống tự thử lại. Nếu kéo dài, hãy nhờ quản trị viên kiểm tra Redis.", code: "job_state_timeout" });
     }
-    // Only the export queue is user-pollable. Other queues (email/webhook/telegram)
-    // carry recipient addresses, target URLs and secrets in job.data — never expose
-    // them here, even to QUOTE_READ_ALL/admin callers.
-    if (req.params.queue !== QUEUES.EXPORT) {
-      return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
-    }
-    const q = getQueue(req.params.queue);
-    if (!q) return res.status(404).json({ error: "Không tìm thấy hàng đợi" });
-    // TRẦN THỜI GIAN — cùng lý do như nhánh POST ở trên: đây là lúc người dùng ĐANG POLL chờ kết
-    // quả, một lệnh Redis treo vô hạn ở đây có nghĩa là mọi lượt bấm "Tải" sau đó cũng treo theo.
-    const job = await xepViecCoHan<Job | undefined>(() => q.getJob(req.params.id), { queueName: req.params.queue, jobName: "getJob" });
-    // `null` ở đây gộp CHUNG hai khả năng: tác vụ thật sự không tồn tại, HOẶC Redis chậm/treo tới
-    // mức chạm trần QUEUE_ADD_TIMEOUT_MS. Không tách được hai ca (xepViecCoHan cố ý không phân biệt
-    // — xem src/queue.ts), nên nói THẬT cả hai khả năng thay vì khẳng định chắc "không tồn tại".
-    if (!job) return res.status(404).json({ error: "Không tìm thấy tác vụ (hoặc Redis đang chậm/mất kết nối — thử tải lại)" });
-    // Only the user who requested the job (or a read-all holder) may read its
-    // result — job.returnvalue contains a presigned download URL / document.
-    const requestedBy = job.data?.requestedBy;
-    if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_READ_ALL)) {
-      return res.status(403).json({ error: "Bạn không có quyền xem tác vụ này" });
-    }
-    // `returnvalue` của job xuất là URL ĐÃ KÝ tải file Excel/PDF ĐẦY ĐỦ GIÁ. Người xem hộ (nhánh
-    // QUOTE_READ_ALL ngay trên) vì thế phải có luôn năng lực XUẤT — đúng chốt mà cả ba đường tới
-    // cùng tệp đó đang dùng: export.routes.ts mount requirePermission(QUOTE_EXPORT), nhánh xếp việc
-    // ở CHÍNH file này cũng đòi nó, và canAccessKey của files.routes.ts vừa được siết cho khớp.
-    // Thiếu chốt này, người chỉ có quote:read:all lấy được link tải 24h của báo giá người khác mà
-    // không hề có quyền xuất — job id của BullMQ là số tăng dần nên dò cạn được.
-    // Người TỰ xếp việc (requestedBy === mình) không cần kiểm lại: nhánh xếp việc đã gác rồi.
-    if (requestedBy !== req.session.userId && !can(req.session, P.QUOTE_EXPORT)) {
-      return res.status(403).json({ error: "Bạn không có quyền tải file xuất của báo giá này" });
-    }
-    // Trần thời gian — nếu Redis chậm/treo đúng lúc này, trả "unknown" thay vì để request treo
-    // theo; client vốn đã POLL định kỳ nên một lượt "unknown" chỉ trễ một nhịp, không mất dữ liệu.
-    const state = (await xepViecCoHan<string>(() => job.getState(), { queueName: req.params.queue, jobName: "getState" })) ?? "unknown";
+    // URL tải là đường CÙNG ORIGIN qua app (RT-02/FILE-08). URL đã ký cũ mang host của S3_ENDPOINT
+    // (`http://minio:9000` ở production) — trình duyệt không phân giải được. Job cũ còn trong Redis
+    // có `url` đã ký thì cũng bị thay: chỉ `key` là dùng được.
+    const rv = job.returnvalue as { key?: string; size?: number; filename?: string; url?: string } | null | undefined;
+    const returnvalue = rv && typeof rv === "object" && rv.key
+      ? { key: rv.key, size: rv.size, filename: rv.filename, url: duongTaiFile(req.params.queue, job.id) }
+      : rv ?? null;
     res.json({
       id: job.id,
       name: job.name,
       state,
       progress: job.progress,
       data: job.data,
-      returnvalue: job.returnvalue,
+      returnvalue,
       failedReason: job.failedReason,
       attemptsMade: job.attemptsMade,
       createdAt: job.timestamp ? new Date(job.timestamp) : null,
       finishedAt: job.finishedOn ? new Date(job.finishedOn) : null,
+    });
+  })
+);
+
+// PHÁT FILE XUẤT NỀN QUA APP (proxy), không đưa URL đã ký của kho cho trình duyệt.
+//
+// Kho object ở production chỉ nằm trong mạng docker `internal` (không publish cổng 9000), nên URL
+// đã ký theo S3_ENDPOINT không mở được từ Internet — đường xuất nền, lối thoát DUY NHẤT cho báo giá
+// quá 20.000 dòng, sinh file đủ mà người dùng không tải được. Proxy giữ kho đóng kín, không cần
+// biến môi trường mới, và gác quyền bằng CHÍNH hàm của đường trạng thái.
+router.get(
+  "/jobs/:queue/:id/file",
+  requireAuth,
+  validate({ params: z.object({ queue: z.string().min(1).max(40), id: z.string().min(1).max(40) }) }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const job = await layJobXuat(req, res);
+    if (!job) return;
+    const rv = job.returnvalue as { key?: string; filename?: string } | null | undefined;
+    // Chỉ phát khoá dưới exports/ — returnvalue nằm trong Redis, không để nó trỏ sang chứng từ.
+    if (!rv?.key || !/^exports\/[^/]+$/.test(rv.key)) {
+      return res.status(404).json({ error: "Tác vụ chưa có file để tải (chưa xong hoặc đã hỏng)" });
+    }
+    const obj = await getObjectStream(rv.key);
+    if (!obj) return res.status(404).json({ error: "File xuất đã hết hạn hoặc bị dọn — hãy bấm tải lại" });
+    // Cùng bộ lọc hẹp như tenFileXuat: tên đi thẳng vào header, mọi nháy/chấm phẩy phải chết.
+    const ten = String(rv.filename || rv.key.split("/").pop() || "download").replace(/[^A-Za-z0-9._-]/g, "_");
+    res.setHeader("Content-Type", obj.contentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${ten}"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (obj.contentLength != null) res.setHeader("Content-Length", String(obj.contentLength));
+    await pipeline(obj.body, res).catch((e: unknown) => {
+      // Header đã gửi → không trả JSON được nữa; cắt kết nối để trình duyệt báo tải hỏng.
+      res.destroy(e instanceof Error ? e : new Error(String(e)));
     });
   })
 );

@@ -4,6 +4,8 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
+import { nhanLamTronDong } from "./tienDong.js";
+import { ngayThangNamVN } from "./vnTime.js";
 
 // Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
 // KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
@@ -21,7 +23,8 @@ function qtyExact(x: unknown) {
 const qtyForAmount = (it: any) => (it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity));
 const lineAmount = (it: any, usesDays: boolean) => {
   const q = qtyForAmount(it), d = Number(it?.days) || 1, pr = Number(it?.unitPrice) || 0;
-  return Math.round(usesDays ? q * d * pr : q * pr);
+  // Nhân CHÍNH XÁC (không qua double) — khớp src/money.ts từng đồng (XLSX-06).
+  return usesDays ? nhanLamTronDong(q, d, pr) : nhanLamTronDong(q, pr);
 };
 const groupMult = (it: any) => Math.max(1, qtyForAmount(it) || 1);
 function groupLetter(n: number) {
@@ -124,7 +127,9 @@ export async function renderQuotePdf(quote: any) {
     const maBaoGia = codeLabel(quote) || quote.quoteNumber || "";
     const soGN = quote.quoteNumber && quote.quoteNumber !== maBaoGia ? ` · ${quote.quoteNumber}` : "";
     doc.text(`Số: ${maBaoGia}${soGN}`, { continued: true });
-    doc.text(`     Ngày: ${new Date(quote.quoteDate).toLocaleDateString("vi-VN")}`, { align: "right" });
+    // Theo lịch VN, không theo múi giờ tiến trình/ICU (XLSX-11) — cùng quy tắc với vnDateText của Excel.
+    const nd = ngayThangNamVN(quote.quoteDate);
+    doc.text(`     Ngày: ${nd.ngay}/${nd.thang}/${nd.nam}`, { align: "right" });
     doc.moveDown(0.5);
 
     const startY = doc.y;
@@ -181,16 +186,21 @@ export async function renderQuotePdf(quote: any) {
     doc.moveDown(0.5);
 
     // Tổng báo giá: VAT tính TRÊN số đã trừ Discount. Không sheet nào giảm giá → khối y như cũ.
-    doc.fontSize(11);
-    if (tt.discount > 0) {
-      r("Cộng", tt.gross);
-      r("Discount", -tt.discount);
-      r("Tổng cộng", tt.subtotal);
-    } else {
-      r("Tổng phụ", tt.subtotal);
+    // `showTotals === false` → BỎ khối tổng báo giá (XLSX-03), đúng như Excel bỏ sheet "Tổng Báo
+    // Giá" và UI hứa "ẩn cả màn hình lẫn Excel/PDF". Khối Cộng/Discount của từng sheet ở trên giữ
+    // nguyên — Excel cũng vẫn in khối tổng trong từng sheet.
+    if (quote.showTotals !== false) {
+      doc.fontSize(11);
+      if (tt.discount > 0) {
+        r("Cộng", tt.gross);
+        r("Discount", -tt.discount);
+        r("Tổng cộng", tt.subtotal);
+      } else {
+        r("Tổng phụ", tt.subtotal);
+      }
+      r(`VAT (${vatPct}%)`, tt.vat);
+      r("Thành tiền", tt.total, true);
     }
-    r(`VAT (${vatPct}%)`, tt.vat);
-    r("Thành tiền", tt.total, true);
 
     if (quote.notes) {
       doc.moveDown(0.6);
@@ -308,19 +318,19 @@ function drawItemsTable(
     }
     if (needHeader) { y = drawHeader(y); needHeader = false; }
   };
-  let sectionIdx = 0, subNo = 0, itemNo = baseIdx, mult = 1;
+  let sectionIdx = 0, subNo = 0, itemNo = baseIdx;
   items.forEach((it, idx) => {
     const kind = it?.kind || "item";
     const isGroup = kind === "section" || kind === "subsection";
     const isInfo = kind === "info";
-
-    // Hàng NHÓM đặt hệ số nhân cho các dòng dưới nó (chỉ khi bật "Thành Tiền nhóm") và tự nó không
-    // cộng tiền. Trước đây PDF in nhóm y như hàng thường rồi nhân luôn Số Lượng của nhóm vào tiền.
-    if (isGroup) mult = groupSubtotal ? groupMult(it) : 1;
+    // Hệ số nhóm (SL nhóm, khi bật "Thành Tiền nhóm") chỉ áp ở HÀNG NHÓM bên dưới, không nhân vào
+    // Thành Tiền từng mục — xem XLSX-02 ở nhánh mục thường.
 
     let stt = "", text = String(it?.name || ""), unit = "", qtyS = "", priceS = "", amtS = "";
     if (isGroup) {
-      if (kind === "section") { sectionIdx++; subNo = 0; stt = String(it.label || groupLetter(sectionIdx)); }
+      // Chữ nhóm LẤY TRƯỚC rồi mới tăng: groupLetter(0) = "A". Bản trước tăng trước nên nhóm đầu in
+      // "B" trong khi Excel (sectionLetter, bắt đầu từ -1 rồi ++) và màn hình in "A" (XLSX-01).
+      if (kind === "section") { stt = String(it.label || groupLetter(sectionIdx)); sectionIdx++; subNo = 0; }
       else stt = String(it.label || ++subNo);
       const gAmt = sectionSum[idx] || 0;
       priceS = fmtNumCell(gAmt);                                      // Đơn Giá nhóm = Σ mục con
@@ -331,7 +341,10 @@ function drawItemsTable(
       unit = it?.unit || "";
       qtyS = fmtNumCell(qtyForAmount(it), !!it?.quantityExact);       // ĐÚNG con số lưới hiển thị
       priceS = fmt(Number(it?.unitPrice) || 0);
-      amtS = fmt(lineAmount(it, usesDays) * mult);                    // cùng phép tính với web + Excel
+      // KHÔNG nhân hệ số nhóm ở hàng MỤC (XLSX-02): Excel (ROUND(SL×ĐG)) và lưới web đều in Thành
+      // Tiền mục = SL × ĐG, hệ số nhóm chỉ áp ở hàng NHÓM. Nhân ở đây làm dòng "1 × 100.000 = 300.000"
+      // và tổng Thành Tiền các mục ≠ Đơn Giá nhóm. Khối tổng dùng pdfTotals nên không đổi.
+      amtS = fmt(lineAmount(it, usesDays));
     }
 
     // Chiều cao hàng phải ĐO THẬT chứ không đếm "\n": chữ được vẽ CÓ ràng bề rộng cột ngay bên

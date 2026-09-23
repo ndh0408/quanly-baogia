@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 140 endpoint
+# Ma trận phân quyền — toàn bộ 141 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -189,14 +189,14 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 |---|---|---|---|---|---|---|---|---|---|
 | GET | `/gdpr/me/export` | ✓ | — | self | ghim `session.userId` | limiter 8/giờ · `no-store` · `nosniff` | **PII đầy đủ** | GDPR-001 | **VÁ** |
 | GET | `/gdpr/users/:id/export` | ✓ | `user:manage` | global | — | `no-store` · `nosniff` | **PII đầy đủ** | GDPR-001 | **VÁ** |
-| POST | `/gdpr/me/delete` | ✓ | — | self | đòi gõ `DELETE-MY-ACCOUNT` | transaction vô danh hoá + thu hồi token | — | — | OK |
+| POST | `/gdpr/me/delete` | ✓ | — | self | đòi gõ `DELETE-MY-ACCOUNT` **+ mật khẩu**; admin cuối cùng → 400 | transaction vô danh hoá + thu hồi token | — | `gd-gdpr-xoa-va-xuat-nhat-ky` | OK |
 | POST | `/gdpr/users/:id/delete` | ✓ | `user:manage` | global | chặn tự xoá mình | như trên | — | — | OK |
 | GET | `/audit/` | ✓ | `audit:view` | global | — | **lược `before`/`after`/`ip`/`ua`** nếu thiếu `audit:view:full` | PII | `gd1-audit-beforeafter` | OK |
 | GET | `/search/` | ✓ | **theo từng domain** | all/own | quote→scope · customer→`readScopeWhere` · product→`product:read` | domain thiếu quyền **biến mất** + liệt kê trong `denied` | $ PII | AUTH-004 | **VÁ** |
 | GET | `/analytics/overview` · `/funnel` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | — | $ | AUTH-006 | **VÁ** |
 | GET | `/analytics/revenue-by-day` · `/top-sales` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `seesAllQuotes()` | — | $ | AUTH-006 | **VÁ** |
 
-## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (2) · `/api/quotes/import-excel` (1)
+## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (3) · `/api/quotes/import-excel` (1)
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
@@ -212,7 +212,8 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 | POST | `/stream/presence` | ✓ | — | own | `canOnQuote(read)` | **gửi có địa chỉ**, không phát tán toàn hệ thống | PII | — | **VÁ** |
 | GET | `/export/:id.xlsx` · `:id.pdf` | ✓ | `quote:export` | all/own | `canOnQuote(read)` | trần 100 sheet / 20k dòng · limiter 30/ph · `no-store` | $ | — | OK |
 | POST | `/quotes/:id/export` (async) | ✓ | `quote:export` | all/own | `canOnQuote(read)` | — | $ | — | OK |
-| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** `quote:read:all` | **chỉ mở queue `export`** ³ | $ | — | OK |
+| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** (`quote:read:all` **+** `quote:export`) | **chỉ mở queue `export`** ³ · `url` trả về là đường cùng origin `…/file` | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
+| GET | `/jobs/:queue/:id/file` | ✓ | — | own | **cùng hàm gác** với dòng trên (`layJobXuat`) | chỉ khoá `exports/…` · stream từ kho qua app (kho không lộ ra Internet) | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
 | POST | `/quotes/import-excel` | ✓ | `quote:create` | own | `canOnQuote(update)` nếu có `quoteId` | chặn `account_hn` · terminal → 409 · magic bytes · limiter 12/ph | — | `excelImport.test.js` | OK |
 
 ² Danh bạ nhân sự **vẫn là kho dùng chung khi GHI** cho mọi tài khoản Account thật, nhưng phạm vi ghi
