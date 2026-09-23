@@ -3,15 +3,29 @@
 #
 #   bash deploy.sh staging [git-ref]   # → quanly-staging VM (Tailscale, test/demo)
 #   bash deploy.sh prod    [git-ref]   # → coolify VM (gianguyen.cloud, live)
+#   bash deploy.sh rollback <staging|prod> [git-sha|rollback]
+#                                      # → lùi ẢNH về tag bất biến <git-sha> (RELEASES.log) hoặc
+#                                      #   :rollback (bản chạy trước lượt deploy gần nhất). KHÔNG lùi
+#                                      #   migration — xem "Lùi schema" trong docs/operations/DEPLOYMENT.md.
 #
 # git-ref defaults to HEAD. Recommended flow:
-#   1) bash deploy.sh staging          # deploy current code to staging
-#   2) test at https://quanly-staging.tail24aeab.ts.net (login with real account)
-#   3) bash deploy.sh prod             # only after staging is verified OK
+#   1) npm run verify                  # đủ 13 bước trên cây SẠCH → ghi DẤU XANH cho commit HEAD
+#   2) bash deploy.sh staging          # deploy current code to staging
+#   3) test at https://quanly-staging.tail24aeab.ts.net (login with real account)
+#   4) bash deploy.sh prod             # only after staging is verified OK
 #
-# Each run: backup DB → tag :rollback → ship tracked files (git archive) →
-#           lấy image (pull digest HOẶC build trên VM) → recreate app+worker →
-#           write DEPLOYED_SHA → verify /livez.
+# ── CỔNG TRƯỚC KHI SHIP (audit 2026-09-22 INFRA-04; chủ repo chốt 2026-09-23: CI = verify-local) ──
+# Không cổng nào từng nối "mã đã kiểm" với "mã lên production": deploy.sh ship BẤT KỲ commit cục bộ
+# nào. Nay bước [0/6] đòi (1) commit có DẤU XANH do `npm run verify` ghi (chạy đủ, cây sạch), và
+# (2) cây làm việc sạch. Với `prod` đó là CHẶN; với `staging` chỉ CẢNH BÁO — staging là nơi thử.
+# Commit chưa có trên origin: chỉ cảnh báo (chủ repo làm việc local).
+# Khẩn cấp (vá nóng khi verify không chạy được): đặt LÝ DO, nó được ghi vào RELEASES.log:
+#   DEPLOY_KHAN_CAP="vá nóng lỗi X, verify hỏng vì Y" bash deploy.sh prod
+#
+# Each run: [0] cổng → backup DB → tag :rollback (ảnh ĐANG CHẠY) → ship tracked files (git archive) →
+#           lấy image (pull digest HOẶC build trên VM) → soát migration huỷ → migrate →
+#           recreate app+worker → đối chiếu ảnh → sổ phát hành → verify /livez + /readyz + worker +
+#           đường public.
 # Untracked server files (.env, DEPLOYED_SHA) are preserved.
 # ⚠️ docker-compose.*.yml KHÔNG nằm trong nhóm đó: cả ba file compose ĐỀU được git theo dõi
 #    (`git ls-files | grep docker-compose`), nên `git archive` ở dưới GHI ĐÈ chúng mỗi lượt
@@ -20,11 +34,20 @@
 #    `.env` — file đó mới thật sự untracked và được giữ nguyên.
 #
 #   IMAGE_REF="ghcr.io/ndh0408/quanly-baogia@sha256:…" bash deploy.sh prod
-#     → kéo đúng image CI đã dựng/quét/ký thay vì dựng lại trên VM (xem khối ở dưới).
+#     → kéo đúng image đã dựng sẵn, ghim digest, thay vì dựng lại trên VM (xem khối ở dưới).
+#     (Chưa có đường nào dựng image đó: GitHub Actions không dùng — xem AGENTS.md.)
 set -euo pipefail
 
-TARGET="${1:-}"
-REF="${2:-HEAD}"
+MODE=deploy
+if [ "${1:-}" = "rollback" ]; then
+  MODE=rollback
+  TARGET="${2:-}"
+  TO="${3:-rollback}"
+  REF=HEAD
+else
+  TARGET="${1:-}"
+  REF="${2:-HEAD}"
+fi
 DIR=/opt/stacks/quanly/quanly
 
 case "$TARGET" in
@@ -33,8 +56,107 @@ case "$TARGET" in
   staging)
     SSH=staging-ts;  COMPOSE=docker-compose.staging.yml; IMAGE=quanly-app:staging; URL=https://quanly-staging.tail24aeab.ts.net ;;
   *)
-    echo "Usage: bash deploy.sh <staging|prod> [git-ref]"; exit 1 ;;
+    echo "Usage: bash deploy.sh <staging|prod> [git-ref]"
+    echo "       bash deploy.sh rollback <staging|prod> [git-sha|rollback]"
+    exit 1 ;;
 esac
+
+# Chờ bao lâu để coi worker là "đã đứng vững" ở bước [6/6] (giây). Test đặt 0.
+CHO_WORKER_S="${DEPLOY_CHO_WORKER_S:-20}"
+
+# ── ĐỐI CHIẾU ẢNH ĐANG CHẠY (dùng chung cho deploy và rollback) ──────────────────────────────
+# Xem chú thích ở bước [5/6]: `compose up` có thể báo thành công mà container vẫn chạy ảnh cũ.
+doi_chieu_anh() {
+  ssh "$SSH" "
+    muon=\$(docker images $IMAGE --format '{{.ID}}' | head -1)
+    for c in quanly-app quanly-worker; do
+      dang=\$(docker inspect \$c --format '{{.Image}}' 2>/dev/null | cut -c8-19)
+      [ \"\$dang\" = \"\$muon\" ] || { echo \"✖ \$c đang chạy ảnh \$dang, đáng lẽ phải là \$muon\"; exit 1; }
+      echo \"   \$c → \$dang ✓\"
+    done"
+}
+
+# ── KIỂM SAU KHI THAY CONTAINER (audit 2026-09-22, INFRA-05) ─────────────────────────────────
+# Bản trước chỉ gọi /livez — `res.json({ok:true})`, không chạm CSDL/Redis — nên deploy báo ✅ khi app
+# không nối được Postgres, khi worker chết vòng ngay lúc khởi động (healthcheck của worker TẮT, nên
+# `Restarting` không làm gì đỏ), hoặc khi tunnel/hostname hỏng. Bốn lớp, mỗi lớp bắt một kiểu hỏng:
+#   1. app healthy + /livez   — tiến trình lên
+#   2. /readyz                — app CHẠM ĐƯỢC CSDL (pool riêng, xem src/app.ts)
+#   3. worker Running và RestartCount KHÔNG tăng sau ${CHO_WORKER_S}s, và log có "worker registered"
+#   4. đường PUBLIC ($URL/livez từ máy đang gõ lệnh) — tunnel/DNS/Cloudflare. prod: hỏng là đỏ;
+#      staging: chỉ cảnh báo (máy gõ lệnh có thể không ở trong tailnet). DEPLOY_BO_QUA_KIEM_PUBLIC=1
+#      để bỏ riêng lớp này khi biết chắc máy mình không tới được URL.
+kiem_sau_khi_thay() {
+  local kq
+  if ! kq=$(ssh "$SSH" "for i in \$(seq 1 20); do s=\$(docker inspect -f '{{.State.Health.Status}}' quanly-app 2>/dev/null); [ \"\$s\" = healthy ] && break; sleep 3; done; \
+    docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez"); then kq=""; fi
+  case "$kq" in *'"ok":true'*) echo "   livez OK" ;; *) echo "✖ /livez không trả ok"; return 1 ;; esac
+
+  if ! kq=$(ssh "$SSH" "docker exec quanly-app wget -qO- http://127.0.0.1:3000/readyz"); then kq=""; fi
+  case "$kq" in *'"ok":true'*) echo "   readyz OK (app chạm được CSDL)" ;; *) echo "✖ /readyz không trả ok — app không chạm được CSDL"; return 1 ;; esac
+
+  if ! kq=$(ssh "$SSH" "r0=\$(docker inspect -f '{{.RestartCount}}' quanly-worker 2>/dev/null) || { echo WORKER_KHONG_CO; exit 1; }; \
+    sleep $CHO_WORKER_S; \
+    st=\$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' quanly-worker 2>/dev/null); \
+    [ \"\$st\" = \"true \$r0\" ] || { echo \"WORKER_KHONG_ON trạng thái='\$st' RestartCount trước=\$r0\"; exit 1; }; \
+    docker logs --since 10m quanly-worker 2>&1 | grep -q 'worker registered' || { echo WORKER_CHUA_DANG_KY; exit 1; }; \
+    echo WORKER_OK"); then kq="${kq:-WORKER_LOI}"; fi
+  case "$kq" in *WORKER_OK*) echo "   worker OK (đang chạy, không khởi động lại, đã đăng ký hàng đợi)" ;;
+    *) echo "✖ worker hỏng: $kq"; echo "   Xem: ssh $SSH \"docker logs quanly-worker --tail 100\""; return 1 ;; esac
+
+  if [ "${DEPLOY_BO_QUA_KIEM_PUBLIC:-0}" = "1" ]; then
+    echo "   (bỏ qua kiểm đường public — DEPLOY_BO_QUA_KIEM_PUBLIC=1)"
+  elif curl -fsS -m 15 "$URL/livez" 2>/dev/null | grep -q '"ok":true'; then
+    echo "   đường public OK ($URL/livez)"
+  elif [ "$TARGET" = prod ]; then
+    echo "✖ $URL/livez KHÔNG tới được từ máy này — tunnel/DNS/Cloudflare hỏng, hoặc máy này mất mạng."
+    echo "   Container đã chạy bản mới và đã qua /readyz; kiểm tunnel trước khi rollback."
+    return 1
+  else
+    echo "   ⚠️  không tới được $URL/livez từ máy này (staging: chỉ cảnh báo — máy có ở trong tailnet không?)"
+  fi
+  return 0
+}
+
+in_duong_lui() {
+  echo "   Rollback 1 bước (về bản chạy trước lượt deploy này):  bash deploy.sh rollback $TARGET"
+  echo "   Rollback về BẤT KỲ bản đã phát hành (sha trong RELEASES.log):  bash deploy.sh rollback $TARGET <git-sha>"
+  echo "   ⚠️  Lùi ẢNH không lùi MIGRATION: bản cũ phải chạy được trên schema mới. Có migration DROP/RENAME"
+  echo "      thì đọc mục \"Lùi schema\" trong docs/operations/DEPLOYMENT.md trước."
+}
+
+# ══ ROLLBACK (audit 2026-09-22, DOC-02 / INFRA-02) ═══════════════════════════════════════════
+# Bản trước IN RA lệnh lùi `docker tag … && docker compose up -d app worker` — đúng mẫu mà bước [5/6]
+# đã ĐO là KHÔNG thay container (compose thấy cấu hình y nguyên, thoát 0, container vẫn chạy ảnh
+# lỗi). Lệnh lùi dùng đúng lúc sự cố mà báo thành công giả. Nay lùi là một lệnh con dùng CHUNG
+# `--force-recreate`, CHUNG phép đối chiếu ảnh và CHUNG bước kiểm của lượt deploy.
+if [ "$MODE" = rollback ]; then
+  case "$TO" in
+    rollback|[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) : ;;
+    *) echo "❌ đích lùi phải là 'rollback' hoặc một git sha (xem RELEASES.log), nhận: $TO"; exit 1 ;;
+  esac
+  echo "▶ ROLLBACK $TARGET → ${IMAGE%%:*}:$TO  [$SSH]"
+  if ! ssh "$SSH" "docker image inspect ${IMAGE%%:*}:$TO >/dev/null 2>&1"; then
+    echo "❌ không có ảnh ${IMAGE%%:*}:$TO trên máy chủ. Các tag bất biến hiện có:"
+    ssh "$SSH" "docker images ${IMAGE%%:*} --format '{{.Tag}}  {{.CreatedSince}}' | head -15" || true
+    exit 1
+  fi
+  echo "▶ [R1] Gắn tag + dựng lại app/worker (--no-deps --force-recreate)"
+  ssh "$SSH" "cd $DIR && docker tag ${IMAGE%%:*}:$TO $IMAGE && docker compose -f $COMPOSE up -d --no-deps --force-recreate app worker"
+  echo "▶ [R2] Đối chiếu ảnh đang chạy"
+  doi_chieu_anh
+  echo "▶ [R3] Kiểm sau khi lùi"
+  if ! kiem_sau_khi_thay; then
+    echo "❌ Đã lùi ảnh nhưng $TARGET vẫn CHƯA khoẻ — xem log: ssh $SSH \"docker logs quanly-app --tail 200\""
+    exit 1
+  fi
+  ssh "$SSH" "cd $DIR && printf '%s\n' '$TO' > DEPLOYED_SHA && \
+    printf '{\"ts\":\"%s\",\"target\":\"%s\",\"rollback_to\":\"%s\",\"image\":\"%s\"}\n' \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" '$TARGET' '$TO' \
+      \"\$(docker inspect --format '{{.Id}}' $IMAGE 2>/dev/null)\" >> RELEASES.log" || true
+  echo "✅ $TARGET đã lùi về ${IMAGE%%:*}:$TO"
+  echo "   ⚠️  Lùi ẢNH không lùi MIGRATION — nếu bản lỗi đã áp migration DROP/RENAME, xem \"Lùi schema\" trong docs/operations/DEPLOYMENT.md."
+  exit 0
+fi
 
 # ── CHUỖI CUNG ỨNG: image nên đến TỪ CI, ghim theo digest ──────────────────────────────────
 # .github/workflows/ci.yml dựng image, đẩy lên ghcr kèm `provenance: mode=max` + `sbom: true`,
@@ -80,6 +202,43 @@ IMAGE_SHA="${IMAGE%%:*}:$SHA"
 echo "▶ Deploy $SHA ($REF) → $TARGET  [$SSH]"
 echo "   tag bất biến: $IMAGE_SHA"
 
+# ── [0/6] CỔNG: mã sắp ship ĐÃ QUA verify-local chưa ────────────────────────────────────────
+# Xem khối "CỔNG TRƯỚC KHI SHIP" ở đầu tệp. Dấu xanh do scripts/verify-local.sh ghi (chạy đủ, cây
+# sạch) vào thư mục git chung — QUANLY_VERIFY_DIR ghi đè được (test dùng).
+echo "▶ [0/6] Cổng trước khi ship"
+DAU_DIR="${QUANLY_VERIFY_DIR:-$(git rev-parse --git-common-dir 2>/dev/null)/quanly-verify}"
+KHAN_CAP="${DEPLOY_KHAN_CAP:-}"
+# Bản đã bỏ ký tự phá chuỗi (nháy đơn/kép, gạch ngược, `, $) — nhét thẳng vào dòng JSON của RELEASES.log.
+KHAN_CAP_SACH="$(printf '%s' "$KHAN_CAP" | tr -d '"\\`$' | tr -d "'" | tr '\n' ' ')"
+CHAN=()
+CANH=()
+if [ -f "$DAU_DIR/ok-$SHA" ]; then
+  echo "   ✓ có dấu xanh của npm run verify ($(sed -n 's/^luc=//p' "$DAU_DIR/ok-$SHA" 2>/dev/null))"
+else
+  CHAN+=("commit $SHA CHƯA có dấu xanh của \`npm run verify\` (chạy ĐỦ 13 bước trên cây SẠCH ở đúng commit này)")
+fi
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  CHAN+=("cây làm việc BẨN — thay đổi chưa commit không được ship (git archive lấy commit), nhưng cũng chưa được kiểm cùng")
+fi
+if [ -z "$(git branch -r --contains "$SHA" 2>/dev/null)" ]; then
+  CANH+=("commit $SHA chưa có trên nhánh remote nào — mã đang chạy chỉ tồn tại trên máy này (push lên origin khi có thể)")
+fi
+for c in "${CANH[@]+"${CANH[@]}"}"; do echo "   ⚠️  $c"; done
+if [ "${#CHAN[@]}" -gt 0 ]; then
+  for c in "${CHAN[@]}"; do echo "   ⚠️  $c"; done
+  if [ "$TARGET" = prod ] && [ -z "$KHAN_CAP" ]; then
+    echo
+    echo "❌ prod: DỪNG trước khi đụng máy chủ. Sửa các mục trên, hoặc nếu THẬT SỰ khẩn cấp:"
+    echo "     DEPLOY_KHAN_CAP=\"<lý do>\" bash deploy.sh prod $REF"
+    echo "   (lý do được ghi vào RELEASES.log)"
+    exit 1
+  elif [ "$TARGET" = prod ]; then
+    echo "   ⚠️  KHẨN CẤP — bỏ qua cổng theo DEPLOY_KHAN_CAP: $KHAN_CAP"
+  else
+    echo "   (staging: chỉ cảnh báo)"
+  fi
+fi
+
 echo "▶ [1/6] Backup DB + tag :rollback"
 # Bản dump này chứa CCCD / số tài khoản / lương ở dạng THÔ — cùng nội dung mà
 # scripts/backup/backup-db.sh phải siết. Lệnh dưới chạy trong shell đăng nhập của máy chủ với
@@ -113,6 +272,10 @@ echo "▶ [1/6] Backup DB + tag :rollback"
 # home thành kho PII lớn dần mà không ai rà.
 # Dọn NẰM SAU `mv` và dùng `;` chứ không `&&`: lượt dọn hỏng KHÔNG được làm cả bước backup báo đỏ —
 # bản dump lúc đó đã yên vị và hợp lệ, mất nó vì một lỗi dọn dẹp là đánh đổi ngược.
+# `--no-owner --clean --if-exists` GIỐNG HỆT dump hằng đêm của backup-db.sh (audit 2026-09-22, DOC-06):
+# DEPLOYMENT.md bảo dùng CHÍNH bản này để lùi một migration hỏng, mà bản thiếu `--clean` thì lệnh CREATE
+# đầu tiên gặp "already exists" và `psql -v ON_ERROR_STOP=1` dừng ngay — runbook lúc 2 giờ sáng hỏng.
+# tests/ops-deploy.test.js khoá hai lệnh pg_dump cùng cờ.
 # Ghi vào `.partial` rồi mới đổi tên — cùng khuôn nguyên tử của backup-db.sh, và ở đây nó giải
 # một cái bẫy cụ thể: lượt hỏng mà để lại đúng cái tên `predeploy-….sql.gz` thì người trực lúc
 # 2 giờ sáng sẽ tưởng đó là điểm lùi và khôi phục từ một bản dump CỤT. Đổi tên chỉ xảy ra sau khi
@@ -120,7 +283,7 @@ echo "▶ [1/6] Backup DB + tag :rollback"
 if ! ssh "$SSH" "set -o pipefail 2>/dev/null || true; \
   umask 077 && install -d -m 0700 ~/quanly-backups && \
   F=~/quanly-backups/predeploy-\$(date +%F-%H%M%S).sql.gz && \
-  docker exec quanly-postgres pg_dump -U quanly -d quanly | gzip > \"\$F.partial\" && \
+  docker exec quanly-postgres pg_dump -U quanly -d quanly --no-owner --clean --if-exists | gzip > \"\$F.partial\" && \
   chmod 600 \"\$F.partial\" && \
   SZ=\$(stat -c%s \"\$F.partial\" 2>/dev/null || echo 0) && [ \"\$SZ\" -ge 1000 ] && \
   gzip -t \"\$F.partial\" && mv -f \"\$F.partial\" \"\$F\" && \
@@ -137,8 +300,14 @@ fi
 # `:rollback` là con trỏ MỘT bước lùi, và nó ĐƯỢC PHÉP hỏng: lượt deploy đầu tiên trên một máy
 # chủ mới chưa có ảnh `$IMAGE` nào để gắn nhãn. Hỏng thì chỉ mất đường lùi NHANH ở bước [6/6];
 # tag bất biến `<tên>:<git-sha>` ghi trong RELEASES.log vẫn lùi được, nên không đáng dừng deploy.
-if ssh "$SSH" "docker tag $IMAGE ${IMAGE%%:*}:rollback 2>/dev/null"; then
-  echo "   :rollback → ảnh $IMAGE đang chạy"
+#
+# Gắn từ ảnh của CONTAINER ĐANG CHẠY, không từ tag `$IMAGE` (audit 2026-09-22, INFRA-02): nếu lượt
+# trước hỏng ở [4/6] SAU KHI [3/6] đã gắn `$IMAGE` cho ảnh mới, thì `$IMAGE` đang trỏ một ảnh CHƯA TỪNG
+# CHẠY — và `:rollback` gắn theo tag sẽ "lùi" về đúng bản chưa ai kiểm. Chưa có container (lượt đầu)
+# thì rơi về tag như cũ.
+if ssh "$SSH" "IMG=\$(docker inspect quanly-app --format '{{.Image}}' 2>/dev/null); \
+    if [ -n \"\$IMG\" ]; then docker tag \"\$IMG\" ${IMAGE%%:*}:rollback; else docker tag $IMAGE ${IMAGE%%:*}:rollback; fi 2>/dev/null"; then
+  echo "   :rollback → ảnh của container quanly-app đang chạy"
 else
   echo "   ⚠️  chưa gắn được :rollback (lượt deploy đầu?) — lùi bằng tag <tên>:<git-sha> trong RELEASES.log"
 fi
@@ -173,12 +342,35 @@ git archive --format=tar.gz "$REF" | ssh "$SSH" "tar xzf - -C $DIR"
 #     src/QuoteEditor.tsx(249,55): error TS2554: Expected 1-2 arguments, but got 3.
 # Deploy chết ở bước build, trên những file KHÔNG CÒN trong repo — đúng lớp lỗi khối này sinh ra
 # để chặn, chỉ khác thư mục.
-echo "▶ [2b/6] Dọn file mồ côi trong src/ + shared/ + web/src/ (tar không tự xoá)"
-git ls-tree -r --name-only "$REF" -- src shared web/src | ssh "$SSH" "cat > $DIR/.tracked-src.txt && cd $DIR && \
-  find src shared web/src -type f 2>/dev/null | sort > .onvm-src.txt && \
+#
+# ── VÌ SAO THÊM `prisma` `templates` `public` (audit 2026-09-22, INFRA-09) ─────────────────
+# Cùng lớp lỗi, hậu quả nặng hơn: một thư mục `prisma/migrations/<tên cũ>` đã gỡ/đổi tên trong git vẫn
+# nằm trên VM → Dockerfile `COPY prisma` đưa nó vào image → `prisma migrate deploy` thấy một migration
+# "chưa áp" và CHẠY nó trên CSDL production. `templates/*.xlsx` và `public/*` cũ cũng vào image và được
+# phục vụ. `public/app2/` là bundle web SINH RA (không do git quản) nên loại khỏi phép dọn.
+echo "▶ [2b/6] Dọn file mồ côi trong src/ shared/ web/src/ prisma/ templates/ public/ (tar không tự xoá)"
+git ls-tree -r --name-only "$REF" -- src shared web/src prisma templates public | ssh "$SSH" "cat > $DIR/.tracked-src.txt && cd $DIR && \
+  find src shared web/src prisma templates public -type f ! -path 'public/app2/*' 2>/dev/null | sort > .onvm-src.txt && \
   sort .tracked-src.txt -o .tracked-src.txt && \
   comm -13 .tracked-src.txt .onvm-src.txt | while read -r f; do rm -f \"\$f\" && echo \"  gỡ mồ côi \$f\"; done; \
+  find prisma/migrations -mindepth 1 -type d -empty -delete 2>/dev/null; \
   rm -f .tracked-src.txt .onvm-src.txt; true"
+
+# ── [2c/6] BỘ SAO LƯU TRÊN HOST CÓ KHỚP REPO KHÔNG (audit 2026-09-22, INFRA-06) ───────────
+# Đo trên production: /opt/quanly/backup-db.sh KHÁC md5 với repo và chỉ có 2/5 timer — mọi bản vá
+# backup trong repo (atomic .partial, off-host, watchdog) chưa bao giờ tới host, vì deploy.sh không
+# đụng /opt/quanly. KHÔNG tự cài (cần sudo, và cài đè có thể mất bản vá chỉ có trên host) — chỉ NÓI RA.
+echo "▶ [2c/6] Bộ sao lưu trên host so với repo (chỉ cảnh báo)"
+LECH_BK=$(ssh "$SSH" "cd $DIR && for f in scripts/backup/*.sh; do t=/opt/quanly/\$(basename \$f); \
+    if cmp -s \$f \$t 2>/dev/null || sudo -n cmp -s \$f \$t 2>/dev/null; then :; \
+    elif [ -e \$t ] || sudo -n test -e \$t 2>/dev/null; then echo \"LỆCH \$t\"; \
+    else echo \"THIẾU/KHÔNG ĐỌC ĐƯỢC \$t\"; fi; done" 2>/dev/null || true)
+if [ -n "$LECH_BK" ]; then
+  printf '%s\n' "$LECH_BK" | sed 's/^/   ⚠️  /'
+  echo "   → bộ sao lưu đang chạy KHÔNG phải bản trong repo. Xem docs/operations/BACKUP_RESTORE.md, mục \"Đưa production về đúng cơ chế\"."
+else
+  echo "   ✓ khớp repo"
+fi
 
 if [ -n "$IMAGE_REF" ]; then
   echo "▶ [3/6] Kéo image đã ghim digest (KHÔNG dựng trên VM)"
@@ -204,6 +396,44 @@ fi
 echo "▶ [3b/6] Gắn tag bất biến"
 echo "   $IMAGE_SHA"
 ssh "$SSH" "docker tag $IMAGE $IMAGE_SHA"
+
+# ── [3c/6] MIGRATION HUỶ ĐANG CHỜ (audit 2026-09-22, INFRA-03) ──────────────────────────────
+# Migration chạy TRƯỚC khi thay app, và rollback chỉ lùi ẢNH. Với migration chỉ THÊM (đa số) thì app
+# cũ vẫn chạy trên schema mới. Với migration HUỶ/ĐỔI DẠNG (DROP TABLE/COLUMN, RENAME, đổi kiểu cột)
+# thì trong cửa sổ migrate→recreate VÀ sau mọi lần rollback, app cũ gọi vào thứ đã mất → 500; người
+# trực buộc phải restore dump trước-deploy và mất mọi ghi mới. Ví dụ thật: 20260915090000 đã
+# `DROP TABLE "_QuoteMembers"` mà code trước f84a4ff còn dùng.
+# Luật expand/contract (prisma/migrations/README.md): DROP/RENAME chỉ phát hành ở lượt SAU lượt đã
+# ngừng dùng thứ đó. Bước này đọc migration ĐANG CHỜ (có trong commit, chưa có trong _prisma_migrations
+# của máy chủ) và chặn nếu có lệnh huỷ — prod: chặn trừ khi CHO_PHEP_MIGRATION_HUY=1; staging: cảnh báo.
+echo "▶ [3c/6] Soát migration HUỶ đang chờ"
+DA_AP=$(ssh "$SSH" "docker exec quanly-postgres psql -U quanly -d quanly -tAc \
+  \"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL\"" 2>/dev/null) || DA_AP="__KHONG_DOC_DUOC__"
+if [ "$DA_AP" = "__KHONG_DOC_DUOC__" ]; then
+  echo "   ⚠️  không đọc được _prisma_migrations trên máy chủ (lượt deploy đầu?) — bỏ qua bước soát"
+else
+  HUY=()
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    printf '%s\n' "$DA_AP" | grep -qxF "$m" && continue
+    if git show "$REF:prisma/migrations/$m/migration.sql" 2>/dev/null \
+        | grep -v '^[[:space:]]*--' \
+        | grep -qiE 'DROP[[:space:]]+(TABLE|COLUMN)|RENAME[[:space:]]+(TO|COLUMN)|ALTER[[:space:]]+COLUMN[[:space:]]+[^[:space:]]+[[:space:]]+(SET[[:space:]]+DATA[[:space:]]+)?TYPE'; then
+      HUY+=("$m")
+    fi
+  done < <(git ls-tree --name-only "$REF" prisma/migrations/ 2>/dev/null | sed -n 's#^prisma/migrations/##p')
+  if [ "${#HUY[@]}" -eq 0 ]; then
+    echo "   ✓ không có migration huỷ đang chờ"
+  else
+    for m in "${HUY[@]}"; do echo "   ⚠️  migration HUỶ/ĐỔI DẠNG đang chờ: $m"; done
+    echo "      Sau lượt này, rollback ẢNH về bản cũ có thể hỏng (bản cũ còn dùng thứ bị huỷ)."
+    if [ "$TARGET" = prod ] && [ "${CHO_PHEP_MIGRATION_HUY:-0}" != "1" ]; then
+      echo "❌ prod: dừng. Đã theo luật expand/contract (bản ĐANG CHẠY đã ngừng dùng thứ bị huỷ)? thì:"
+      echo "     CHO_PHEP_MIGRATION_HUY=1 bash deploy.sh prod $REF"
+      exit 1
+    fi
+  fi
+fi
 
 # Chạy migration TRƯỚC khi recreate (schema thêm cột/bảng → code mới mới dùng được). prisma nằm
 # trong dependencies nên có trong image; migrate deploy tự lấy advisory-lock (an toàn nhiều instance).
@@ -251,16 +481,12 @@ echo "▶ [5/6] Recreate app + worker"
 # Bước [6/6] verify /livez cũng không bắt được: app CŨ vẫn trả 200.
 ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE up -d --force-recreate app worker && printf '%s\n' '$SHA' > DEPLOYED_SHA"
 
+
 # CHỐT: ảnh container ĐANG CHẠY phải khớp ảnh mà tag vừa trỏ tới. Không có bước này thì lần sau
-# Compose đổi hành vi lần nữa là ta lại không biết.
+# Compose đổi hành vi lần nữa là ta lại không biết. (Hàm `doi_chieu_anh` ở đầu tệp — dùng chung với
+# lệnh con rollback.)
 echo "▶ [5c/6] Đối chiếu ảnh đang chạy với ảnh vừa dựng"
-ssh "$SSH" "
-  muon=\$(docker images $IMAGE --format '{{.ID}}' | head -1)
-  for c in quanly-app quanly-worker; do
-    dang=\$(docker inspect \$c --format '{{.Image}}' 2>/dev/null | cut -c8-19)
-    [ \"\$dang\" = \"\$muon\" ] || { echo \"✖ \$c đang chạy ảnh \$dang, đáng lẽ phải là \$muon\"; exit 1; }
-    echo \"   \$c → \$dang ✓\"
-  done"
+doi_chieu_anh
 
 # ── SỔ PHÁT HÀNH ──────────────────────────────────────────────────────────────────────────
 # §46 đòi mỗi lần phát hành ghi lại BỐN thứ: git SHA · phiên bản migration · digest image ·
@@ -281,6 +507,9 @@ ssh "$SSH" "
 # về `local:sha256:…`, một chuỗi KHÔNG gọi lại được. `image_tag` là cái tên GÕ ĐƯỢC để quay về
 # đúng bản đó, kể cả sau nhiều lượt deploy nữa.
 #
+# Trường `khan_cap` = lý do bỏ qua cổng [0/6] (DEPLOY_KHAN_CAP), rỗng khi đi đường thường — để về sau
+# đọc sổ biết lượt nào lên production mà chưa qua verify.
+#
 # Ghi NỐI THÊM vào $DIR/RELEASES.log (untracked, `git archive` không đụng tới) — một dòng JSON
 # mỗi lần, đọc bằng `tail`/`jq` được, và không bao giờ mất lịch sử.
 echo "▶ [5b/6] Ghi sổ phát hành"
@@ -289,26 +518,40 @@ REL=$(ssh "$SSH" "cd $DIR && \
         \"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1\" 2>/dev/null || echo unknown) && \
   DG=\$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}local:{{.Id}}{{end}}' $IMAGE 2>/dev/null || echo unknown) && \
   TS=\$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
-  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\",\"image_tag\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\" '$IMAGE_SHA') && \
+  LINE=\$(printf '{\"ts\":\"%s\",\"target\":\"%s\",\"sha\":\"%s\",\"migration\":\"%s\",\"image\":\"%s\",\"image_tag\":\"%s\",\"khan_cap\":\"%s\"}' \"\$TS\" '$TARGET' '$SHA' \"\$MIG\" \"\$DG\" '$IMAGE_SHA' '$KHAN_CAP_SACH') && \
   printf '%s\n' \"\$LINE\" >> RELEASES.log && printf '%s' \"\$LINE\"")
 echo "   $REL"
+
+
+# ── [5d/6] NẠP LẠI CẤU HÌNH QUAN SÁT (audit 2026-09-22, OBS-13) ─────────────────────────────
+# `git archive` ship tệp mới (thư mục được mount nên tệp mới hiện ra trong container), nhưng Prometheus
+# chỉ đọc rule_files lúc khởi động hoặc khi /-/reload, và Alertmanager chỉ dựng cấu hình trong
+# entrypoint lúc khởi động container. Không có bước này thì sửa alerts.yaml rồi deploy → production
+# vẫn chạy bộ quy tắc CŨ cho tới khi có người reload tay. Ngăn quan sát không chạy (dev, staging chưa
+# bật) thì bỏ qua êm — nó KHÔNG được làm hỏng lượt deploy ứng dụng.
+echo "▶ [5d/6] Nạp lại Prometheus / Alertmanager (nếu đang chạy)"
+ssh "$SSH" "cd $DIR && \
+  if docker inspect quanly-prometheus >/dev/null 2>&1; then \
+    docker kill -s HUP quanly-prometheus >/dev/null 2>&1 && echo '   prometheus: đã gửi SIGHUP (nạp lại rule_files)' || echo '   ⚠️  prometheus: không nạp lại được'; \
+  else echo '   (không có quanly-prometheus — bỏ qua)'; fi; \
+  if docker inspect quanly-alertmanager >/dev/null 2>&1; then \
+    moi=\$(sha256sum infra/observability/alertmanager.yml.tpl infra/observability/alertmanager-entrypoint.sh 2>/dev/null | sha256sum | cut -c1-16); \
+    cu=\$(cat .alertmanager-tpl.sha 2>/dev/null); \
+    if [ \"\$moi\" != \"\$cu\" ]; then docker restart quanly-alertmanager >/dev/null 2>&1 && printf '%s\n' \"\$moi\" > .alertmanager-tpl.sha && echo '   alertmanager: bản mẫu đổi → đã khởi động lại' || echo '   ⚠️  alertmanager: không khởi động lại được'; \
+    else echo '   alertmanager: bản mẫu không đổi'; fi; \
+  fi" || echo "   ⚠️  bước nạp lại quan sát hỏng — nạp tay (docs/operations/MONITORING.md)"
 
 # `|| echo FAILED` ở bản trước NUỐT mã lỗi: `set -e` không bắt được, và dòng "✅ now running" phía
 # dưới in ra VÔ ĐIỀU KIỆN. Một lần deploy mà container không bao giờ healthy vẫn báo thành công —
 # người deploy đóng terminal, và sự cố chỉ lộ ra khi người dùng gọi điện.
-echo "▶ [6/6] Verify /livez"
-if ssh "$SSH" "for i in \$(seq 1 20); do s=\$(docker inspect -f '{{.State.Health.Status}}' quanly-app 2>/dev/null); [ \"\$s\" = healthy ] && break; sleep 3; done; \
-  docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez" | grep -q '\"ok\":true'; then
-  echo "   livez OK"
-else
+echo "▶ [6/6] Verify: /livez · /readyz · worker · đường public"
+if ! kiem_sau_khi_thay; then
   echo
-  echo "❌ $TARGET KHÔNG lên được sau khi deploy $SHA — /livez không trả ok."
+  echo "❌ $TARGET CHƯA khoẻ sau khi deploy $SHA."
   echo "   Xem log:  ssh $SSH \"docker logs quanly-app --tail 200\""
-  echo "   Rollback 1 bước: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""
-  echo "   Rollback về BẤT KỲ bản nào đã phát hành (tag bất biến; lấy sha trong RELEASES.log):"
-  echo "     ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:<git-sha> $IMAGE && docker compose -f $COMPOSE up -d app worker\""
+  in_duong_lui
   exit 1
 fi
 echo
 echo "✅ $TARGET now running $SHA  →  $URL"
-echo "   Rollback: ssh $SSH \"cd $DIR && docker tag ${IMAGE%%:*}:rollback $IMAGE && docker compose -f $COMPOSE up -d app worker\""
+in_duong_lui

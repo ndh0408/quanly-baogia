@@ -107,8 +107,9 @@ VAT và Tổng cộng cập nhật ngay khi gõ. **Cùng một công thức ti�
 
 ### 1.5 Bảng nội bộ và duyệt theo hàng
 
-Mỗi sheet báo giá có thêm các **bảng nội bộ** ba loại — **Chi Phí HCM**, **Báo Giá
-Hà Nội**, **Phí Khách Hàng**. Chúng là lưới đầy đủ (template, công thức, nhóm,
+Mỗi sheet báo giá có thêm các **bảng nội bộ** hai loại — **Chi Phí HCM**, **Phí Khách Hàng**
+(**Báo Giá Hà Nội** thì từ 2026-09-15 nằm ở cấp BÁO GIÁ, `Quote.hnTables`, không theo sheet — xem
+DATA_FLOW.md mục 3.4). Chúng là lưới đầy đủ (template, công thức, nhóm,
 copy/paste) nhưng **KHÔNG bao giờ xuất ra Excel/PDF cho khách**; tổng từng loại đổ
 sang trang Quản lý dự án.
 

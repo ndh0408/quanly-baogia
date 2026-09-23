@@ -71,7 +71,9 @@ for (const t of [...tuUngDung]) for (const h of ["_bucket", "_sum", "_count"]) t
 //   · `process_*` / `nodejs_*` do `collectDefaultMetrics()` của prom-client sinh (dòng gọi ở
 //     src/observability.ts — nếu ai đó gỡ dòng đó thì cả nhóm này biến mất, nên kiểm luôn).
 const coDefault = /collectDefaultMetrics\(/.test(obs);
-const laBuiltin = (t) => t === "up" || ((/^(process_|nodejs_)/.test(t)) && coDefault);
+// `alertmanager_*` do chính Alertmanager phát — prometheus.yml có job scrape `alertmanager` (dùng cho
+// quy tắc tự giám sát đường cảnh báo, audit 2026-09-22 OBS-01).
+const laBuiltin = (t) => t === "up" || ((/^(process_|nodejs_)/.test(t)) && coDefault) || /^alertmanager_/.test(t);
 if (!coDefault) xau("src/observability.ts không còn gọi collectDefaultMetrics() — mọi cảnh báo dùng process_*/nodejs_* sẽ im lặng");
 
 const rules = readFileSync(RULES, "utf8");
@@ -114,6 +116,8 @@ const TU_KHOA = new Set([
   // (src/observability.ts `labelNames`), không phải tên metric. `label_values(x, route)` của
   // Grafana đưa chúng ra ngoài dấu ngoặc nhọn nên bộ lọc `{...}` bên dưới không nuốt được.
   "le", "instance", "job", "mode", "state", "queue", "reason", "status", "route", "method",
+  "dep", "integration", "kind", "scope",
+  // `vector(1)` của QuanlyWatchdog: hàm PromQL có "(" nên đã loại; số 1 bị loại bởi luật chữ số.
 ]);
 const dung = new Set();
 for (const d of bieuThuc) {

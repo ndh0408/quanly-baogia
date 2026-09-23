@@ -16,6 +16,12 @@
 #   - backup CSDL thành công gần nhất   < 26h
 #   - sao lưu kho object gần nhất       < 26h
 #   - diễn tập khôi phục gần nhất       < 8 ngày
+#   - bản OFF-HOST gần nhất (CSDL + kho object) < 26h — CHỈ khi đã cấu hình đích off-host.
+#
+# OFF-HOST CHƯA CẤU HÌNH: KHÔNG tính là sự cố để gửi Telegram (chủ repo chốt 2026-09-23 — chuyện
+# đã biết, báo mỗi 6h chỉ làm nhờn kênh cảnh báo duy nhất). Nó vẫn được IN ra ở dòng tóm tắt và ghi
+# vào tệp trạng thái (backup_offhost_configured 0) để dashboard thấy. Đã cấu hình mà dấu off-host cũ
+# hoặc chưa từng có → đó là đẩy đang hỏng → cảnh báo như mọi hạng mục khác.
 # ============================================================================
 set -uo pipefail
 [ -f /etc/quanly-backup.env ] && set -a && . /etc/quanly-backup.env && set +a
@@ -24,7 +30,12 @@ BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
 MAX_DB_H="${WATCHDOG_MAX_DB_HOURS:-26}"
 MAX_OBJ_H="${WATCHDOG_MAX_OBJECT_HOURS:-26}"
 MAX_DRILL_D="${WATCHDOG_MAX_DRILL_DAYS:-8}"
+MAX_OFF_H="${WATCHDOG_MAX_OFFHOST_HOURS:-26}"
 PROBLEMS=()
+LIB="$(cd "$(dirname "$0")" && pwd)/offhost-lib.sh"
+CO_LIB=0
+# shellcheck source=offhost-lib.sh
+[ -f "$LIB" ] && . "$LIB" && CO_LIB=1
 
 alert_all() {
   local msg="$1"
@@ -65,6 +76,26 @@ elif [ "$DRILL_AGE" -gt $(( MAX_DRILL_D * 24 )) ]; then
   PROBLEMS+=("• DIỄN TẬP KHÔI PHỤC: lần thành công gần nhất $(( DRILL_AGE / 24 )) ngày trước (ngưỡng ${MAX_DRILL_D} ngày)")
 fi
 
+# Off-host: chỉ là SỰ CỐ khi đã cấu hình. Chưa cấu hình thì chỉ ghi nhận (xem đầu tệp).
+OFF_NOTE=""
+if [ "$CO_LIB" != 1 ]; then
+  PROBLEMS+=("• THIẾU $LIB — cài lại bằng scripts/backup/install-backup.sh")
+elif offhost_configured; then
+  for k in db objects; do
+    a="$(age_hours "$BACKUP_DIR/.offhost-$k-last-success")"
+    if [ "$a" = never ]; then
+      PROBLEMS+=("• OFF-HOST ($k): đã cấu hình nhưng CHƯA TỪNG đẩy thành công")
+    elif [ "$a" -gt "$MAX_OFF_H" ]; then
+      PROBLEMS+=("• OFF-HOST ($k): lần đẩy thành công gần nhất ${a}h trước (ngưỡng ${MAX_OFF_H}h)")
+    fi
+  done
+  OFF_NOTE=" · off-host: đã cấu hình"
+else
+  OFF_NOTE=" · ⚠ off-host: CHƯA cấu hình (mọi bản sao nằm trên cùng host)"
+  echo "⚠️  OFFHOST-CHUA-CAU-HINH: không có bản sao lưu nào nằm ngoài máy này." >&2
+fi
+[ "$CO_LIB" = 1 ] && backup_ghi_trang_thai
+
 # Timer có còn được bật không — bắt kiểu chết "ai đó disable rồi quên".
 for t in quanly-backup.timer quanly-backup-objects.timer quanly-restore-drill.timer; do
   if systemctl list-unit-files "$t" >/dev/null 2>&1 && ! systemctl is-enabled --quiet "$t" 2>/dev/null; then
@@ -77,4 +108,4 @@ if [ "${#PROBLEMS[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập $(( DRILL_AGE / 24 )) ngày"
+echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập $(( DRILL_AGE / 24 )) ngày${OFF_NOTE}"

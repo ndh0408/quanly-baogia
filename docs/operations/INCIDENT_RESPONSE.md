@@ -11,7 +11,11 @@ Số tham chiếu: `/livez` (tiến trình sống), `/readyz` (chạm được C
 ## API trả 5xx hàng loạt
 
 ```bash
-curl -s localhost:3000/livez; curl -s localhost:3000/readyz
+# Probe TỪ TRONG container: docker-compose.prod.yml KHÔNG publish cổng app ra host, và image không
+# có curl. `curl localhost:3000` gõ trên host LUÔN "connection refused" — theo cây quyết định ngay
+# dưới bạn sẽ tưởng tiến trình chết và đi restart, tức xoá mất bằng chứng (audit 2026-09-22, DOC-05).
+docker exec quanly-app wget -qO- http://127.0.0.1:3000/livez; echo
+docker exec quanly-app wget -qO- http://127.0.0.1:3000/readyz; echo
 docker logs quanly-app --tail 200 | grep -i error
 ```
 
@@ -20,8 +24,9 @@ docker logs quanly-app --tail 200 | grep -i error
 - Cả hai OK mà vẫn 5xx → lỗi ở tầng route. Lấy `reqId` từ response của người
   dùng rồi tìm đúng dòng log.
 
-**Deploy vừa xong?** Rollback trước, điều tra sau. Xem
-[DEPLOYMENT.md](DEPLOYMENT.md#rollback).
+**Deploy vừa xong?** Rollback trước, điều tra sau: `bash deploy.sh rollback prod` (từ máy dev) —
+lệnh con này `--force-recreate` và đối chiếu ảnh đang chạy; lệnh `docker tag … && up -d` trần KHÔNG
+thay container. Chi tiết và cảnh báo về migration: [DEPLOYMENT.md](DEPLOYMENT.md#rollback).
 
 ---
 
@@ -49,18 +54,21 @@ là **cho mỗi tiến trình**; nhân với số app + worker phải còn dư�
 (`User.failedAttempts` / `lockedUntil`), không phụ thuộc Redis. Lớp chống dò mật
 khẩu quan trọng nhất vẫn còn.
 
-**Điều gì hỏng:** rate-limit theo IP **bị bỏ qua** (đánh đổi có chủ ý — xem
-`src/rateLimit.ts`; lựa chọn còn lại là để mọi request treo, đã đo được là gây
-524 trên toàn bộ API trong khi container vẫn báo "running"). Job nền không chạy.
-SSE không lan giữa các instance.
+**Điều gì đổi:** rate-limit **KHÔNG bị bỏ qua** — mỗi limiter rơi về bộ đếm **trong bộ
+nhớ của từng tiến trình** (`src/rateLimit.ts`, `duPhong`). Production chỉ có một container
+app nên gần như không mất độ chính xác; bộ đếm reset khi app khởi động lại. (Hai lựa
+chọn đã loại: để mọi lệnh Redis treo — đo được gây 524 toàn API; và tắt hẳn limiter —
+biến /auth/forgot-password thành máy bơm email.)
+
+**Điều gì hỏng:** job nền không chạy. SSE không lan giữa các instance.
 
 ```bash
 docker ps | grep redis && docker exec quanly-redis redis-cli -a "$REDIS_PASSWORD" ping
 docker compose -f docker-compose.prod.yml restart redis
 ```
 
-Chấp nhận được trong thời gian ngắn. Nếu kéo dài, theo dõi log đăng nhập thất bại
-sát hơn vì hàng rào theo-IP đang không có.
+Chấp nhận được trong thời gian ngắn. Nếu kéo dài, lưu ý hàng rào theo-IP chỉ còn
+tính trong bộ nhớ (mất khi app khởi động lại).
 
 ---
 
@@ -70,7 +78,9 @@ Hàng đợi xuất file đã đầy (`src/exportQueue.ts`). Đây là **backpre
 ý**, không phải lỗi — nhưng nghĩa là người dùng đang bị từ chối.
 
 ```bash
-curl -s -H "Authorization: Bearer $METRICS_TOKEN" localhost:3000/metrics \
+# Từ TRONG container (app không publish cổng ra host; image không có curl). $METRICS_TOKEN nằm
+# trong môi trường của container nên để shell BÊN TRONG nó tự nội suy.
+docker exec quanly-app sh -c 'wget -qO- --header "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:3000/metrics' \
   | grep -E 'export_(queue_depth|active_workers|rejected_total)'
 ```
 
@@ -180,5 +190,6 @@ journalctl -u quanly-backup --since '3 days ago'
   mã hoá. Theo đúng quy trình bốn bước ở
   [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md#xoay-pii_enc_key) (`piiRotate.js`
   rồi `verifyIntegrity.js --pii`).
-- **Quá 30 phút chưa hiểu nguyên nhân** → rollback về bản đã biết là tốt, rồi
+- **Quá 30 phút chưa hiểu nguyên nhân** → rollback về bản đã biết là tốt
+  (`bash deploy.sh rollback prod <git-sha>`, sha lấy trong `RELEASES.log`), rồi
   điều tra ngoài giờ cao điểm.

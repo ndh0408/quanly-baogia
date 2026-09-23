@@ -5,18 +5,26 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "route",
         "label": "Route",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(http_requests_total, route)",
         "includeAll": true,
         "multi": true,
-        "refresh": 2
+        "refresh": 2,
+        "allValue": ".*",
+        "description": "Lọc panel 1–3 theo route (audit 2026-09-22, GAP1-06: trước đây biến này khai mà không panel nào dùng)."
       }
     ]
   },
@@ -26,28 +34,49 @@
       "type": "timeseries",
       "title": "Lưu lượng theo mã trạng thái (req/s)",
       "description": "Nhìn hình dạng trước, con số sau: một bậc thang ở 5xx nói nhiều hơn mọi cảnh báo.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (rate(http_requests_total[5m]))",
+          "expr": "sum by (status) (rate(http_requests_total{route=~\"$route\"}[5m]))",
           "legendFormat": "{{status}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Tỉ lệ lỗi 5xx (%)",
-      "description": "Cùng biểu thức mà quy tắc cảnh báo HttpErrorRateCao dùng (infra/prometheus/alerts.yaml) — bảng điều khiển và cảnh báo phải nói CÙNG một chuyện.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Cùng biểu thức với quy tắc cảnh báo QuanlyTiLeLoi5xxCao (infra/prometheus/alerts.yaml) khi chọn Route = All. LƯU Ý: lượt xuất file bị từ chối vì hết công suất trả 503 + Retry-After (gate_full/budget_full) và ĐƯỢC TÍNH vào đây — xem panel 5 trước khi kết luận là lỗi ứng dụng.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+          "expr": "100 * sum(rate(http_requests_total{status=~\"5..\", route=~\"$route\"}[5m])) / clamp_min(sum(rate(http_requests_total{route=~\"$route\"}[5m])), 0.001)",
           "legendFormat": "5xx"
         }
       ],
@@ -57,9 +86,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
             ]
           }
         },
@@ -70,108 +108,316 @@
       "id": 3,
       "type": "timeseries",
       "title": "Độ trễ p50 / p95 / p99 (giây)",
-      "description": "p95 mới là thứ người dùng cảm nhận; trung bình che mất đúng phần đuôi cần xem.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "p95 mới là thứ người dùng cảm nhận. KHÔNG gồm /api/stream/events (SSE sống 30 phút) và probe/scrape (/livez /readyz /metrics) — mã không ghi chúng vào histogram (ROUTE_KHONG_DO_DO_TRE trong src/observability.ts); trước đây một tab để mở qua đêm kéo p95/p99 lên trần 10s (audit 2026-09-22, GAP1-01).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route!=\"/api/stream/events\", route=~\"$route\"}[5m])))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route!=\"/api/stream/events\", route=~\"$route\"}[5m])))",
           "legendFormat": "p95"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{route!=\"/api/stream/events\", route=~\"$route\"}[5m])))",
           "legendFormat": "p99"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
       "type": "timeseries",
       "title": "Hàng đợi xuất file — worker đang chạy / hàng chờ / trần",
-      "description": "Hàng chờ chạm trần là lúc người dùng bắt đầu nhận 429 ở nút Tải. Vẽ cả trần để thấy còn cách bao xa.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Hàng chờ/worker chạm trần là lúc người dùng bắt đầu bị TỪ CHỐI ở nút Tải: 503 + Retry-After (gate_full/budget_full) — riêng hàng chờ nội tuyến đầy (inline_queue_full) là 429. Mỗi tiến trình (app, worker) một đường.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "expr": "export_active_workers", "legendFormat": "đang chạy" },
-        { "refId": "B", "expr": "export_queue_depth", "legendFormat": "đang chờ" },
-        { "refId": "C", "expr": "export_max_active_workers", "legendFormat": "trần worker" },
-        { "refId": "D", "expr": "export_max_queue_depth", "legendFormat": "trần hàng chờ" }
+        {
+          "refId": "A",
+          "expr": "export_active_workers",
+          "legendFormat": "đang chạy · {{service}}"
+        },
+        {
+          "refId": "B",
+          "expr": "export_queue_depth",
+          "legendFormat": "đang chờ · {{service}}"
+        },
+        {
+          "refId": "C",
+          "expr": "export_max_active_workers",
+          "legendFormat": "trần worker · {{service}}"
+        },
+        {
+          "refId": "D",
+          "expr": "export_max_queue_depth",
+          "legendFormat": "trần hàng chờ · {{service}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
       "type": "timeseries",
       "title": "Xuất file bị TỪ CHỐI (req/s)",
-      "description": "Khác 5xx: đây là từ chối CÓ CHỦ Ý khi hàng chờ đầy. Không phải lỗi, nhưng là tín hiệu phải nâng công suất.",
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "refId": "A", "expr": "sum(rate(export_rejected_total[5m]))", "legendFormat": "bị từ chối" }],
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+      "description": "Từ chối CÓ CHỦ Ý khi hết công suất — KHÔNG tách khỏi 5xx: gate_full/budget_full trả 503 nên có mặt trong panel 2 và trong cảnh báo QuanlyTiLeLoi5xxCao; inline_queue_full trả 429. Tín hiệu phải nâng EXPORT_MAX_ACTIVE / tách worker.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(export_rejected_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 6,
       "type": "timeseries",
       "title": "SSE — số client đang kết nối và trạng thái backplane",
-      "description": "backplane = 0 nghĩa là Redis pub/sub đứt: mỗi instance chỉ còn phát cho client của chính nó, và người dùng ở instance khác không nhận được thông báo nào.",
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Chỉ tiến trình app (service=\"app\") phục vụ SSE. Worker cũng nạp cùng module metric và phát sse_* = 0 thường trực — không lọc thì panel luôn có một đường \"backplane = 0\" giả (audit 2026-09-22, GAP1-02). backplane = 0 ở app nghĩa là Redis pub/sub đứt.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "expr": "sse_clients", "legendFormat": "client" },
-        { "refId": "B", "expr": "sse_backplane_up", "legendFormat": "backplane sống" },
-        { "refId": "C", "expr": "sum(rate(sse_backplane_errors_total[5m]))", "legendFormat": "lỗi backplane/s" }
+        {
+          "refId": "A",
+          "expr": "sse_clients{service=\"app\"}",
+          "legendFormat": "client"
+        },
+        {
+          "refId": "B",
+          "expr": "sse_backplane_up{service=\"app\"}",
+          "legendFormat": "backplane sống"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(sse_backplane_errors_total[5m]))",
+          "legendFormat": "lỗi backplane/s"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "BullMQ — việc theo trạng thái",
-      "description": "`failed` tăng đều mà `completed` đứng yên = worker chết hoặc job hỏng lặp lại.",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "refId": "A", "expr": "bullmq_jobs", "legendFormat": "{{queue}} · {{state}}" }],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "description": "App VÀ worker cùng đọc độ sâu từ CÙNG Redis → gộp bằng max, không cộng. `failed` là tồn (giữ tới removeOnFail.age); job hỏng MỚI xem đường \"hỏng hẳn/15 phút\" (bullmq_jobs_failed_total, cảnh báo QuanlyJobNenThatBai).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (queue, state) (bullmq_jobs)",
+          "legendFormat": "{{queue}} · {{state}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (queue) (increase(bullmq_jobs_failed_total[15m]))",
+          "legendFormat": "{{queue}} · hỏng hẳn/15 phút"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 8,
       "type": "logs",
-      "title": "Log LỖI gần nhất (Loki)",
-      "description": "Cùng một trang với biểu đồ, cố ý: nhìn thấy bậc thang 5xx rồi phải đọc được ngay dòng log của chính quãng đó, không phải mở tab khác rồi tự canh giờ.",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 23 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "title": "Log LỖI gần nhất — app + worker (Loki)",
+      "description": "Cùng một trang với biểu đồ, cố ý: thấy bậc thang 5xx thì đọc ngay dòng log của quãng đó. Gồm CẢ worker (job xuất file/email/webhook) — bản trước chỉ lọc quanly-app nên lỗi job nền không bao giờ hiện ở đây.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "{container=\"quanly-app\", level=\"error\"}",
+          "expr": "{container=~\"quanly-(app|worker)\", level=\"error\"}",
           "queryType": "range"
         }
       ],
-      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "Số dòng log theo mức (Loki)",
       "description": "Cầu nối giữa metric và log: mức warn/error nhảy vọt thường tới TRƯỚC khi tỉ lệ 5xx kịp đổi.",
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 33 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (level) (count_over_time({container=\"quanly-app\"}[5m]))",
-          "legendFormat": "{{level}}"
+          "expr": "sum by (container, level) (count_over_time({container=~\"quanly-(app|worker)\"}[5m]))",
+          "legendFormat": "{{container}} · {{level}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Sao lưu — tuổi bản thành công gần nhất (giờ) + có bản NGOÀI MÁY chưa",
+      "description": "Đọc tệp trạng thái do scripts/backup/* ghi trên host (BACKUP_STATUS_FILE, chỉ app phát). offhost = 0 nghĩa là MỌI bản sao nằm trên cùng máy production — mất máy là mất hết (audit 2026-09-22, INFRA-01). Không có số = tệp trạng thái chưa có (bộ sao lưu trong repo chưa được cài lên host).",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(time() - max by (kind) (backup_last_success_timestamp_seconds > 0)) / 3600",
+          "legendFormat": "{{kind}}"
+        },
+        {
+          "refId": "B",
+          "expr": "max(backup_offhost_configured)",
+          "legendFormat": "offhost đã cấu hình (1/0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 26
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

@@ -33,7 +33,7 @@ Tóm tắt các chốt và **nơi chúng được khoá bằng test**:
 | CSRF | Origin/Referer + token đồng bộ hoá gắn phiên; Bearer được miễn | `tests/csrf.test.js`, `tests/csrf-token-compare.test.js` |
 | Phân quyền | kiểm **phía máy chủ** ở mọi endpoint; ma trận sinh tự động | `scripts/ci/endpoint-inventory.mjs --check-guards` |
 | Chèn công thức | `neutralizeFormula` trên mọi đường ghi ô | `tests/x9-chen-cong-thuc-6-vector.test.js` |
-| Giới hạn tần suất | 15 limiter tách theo mục đích, đếm chung qua Redis | `tests/mwobs-ratelimit-fallback.test.js` |
+| Giới hạn tần suất | nhiều limiter tách theo mục đích (đếm: `grep -rn 'createLimiter("' src`), đếm chung qua Redis; Redis chết → bộ đếm trong bộ nhớ từng tiến trình, KHÔNG bỏ qua | `tests/mwobs-ratelimit-fallback.test.js` |
 | Nhật ký kiểm toán | `AuditEvent` kèm actor / target / IP / **request ID** | `tests/x8-lo-bao-mat-con-sot.test.js` (§42) |
 | PII | AES-256-GCM cho CCCD / STK / lương (`src/piiBox.ts`) | `tests/pii-*.test.js` |
 | Bí mật | quy ước `*_FILE` để dùng Docker/K8s secrets, Vault | `tests/x7-bi-mat-tu-file.test.js` |
@@ -43,11 +43,11 @@ Tóm tắt các chốt và **nơi chúng được khoá bằng test**:
 ```bash
 npm run scan          # gitleaks (lịch sử git + cây làm việc) · trivy · semgrep · SBOM
 npm run scan:secrets  # chỉ quét bí mật
-npm run verify        # toàn bộ 12 cổng, gồm cả cổng bảo mật
+npm run verify        # toàn bộ 13 bước, gồm cả cổng bảo mật
 ```
 
-⚠️ **GitHub Actions không bật trên tài khoản của repo này** — `.github/workflows/ci.yml` chưa bao
-giờ chạy. Cổng duy nhất thật sự chạy là cổng gõ tay. Xem [AGENTS.md](AGENTS.md).
+⚠️ **Repo này KHÔNG dùng GitHub Actions** — CI là `scripts/verify-local.sh` (`npm run verify`) chạy
+trên máy dev; `.github/workflows/ci.yml` chỉ chạy tay. Xem [AGENTS.md](AGENTS.md).
 
 ## Điều đã biết và CỐ Ý chấp nhận
 

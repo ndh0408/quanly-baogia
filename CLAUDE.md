@@ -68,8 +68,8 @@ Muốn đổi cấu hình BMAD thì **chạy lại installer** với `--set`, đ
 **Đừng dùng** — trùng thứ repo đã có:
 - `bmad-code-review`, `bmad-review-adversarial-general` → đã có `coderabbit:code-review`,
   `/code-review`, `/security-review`, `AUDIT_REPORT.md`, `.scan/`.
-- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có 205 test backend + 23 test web
-  (vitest) + 46 script `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác
+- `bmad-qa-generate-e2e-tests`, `bmad-testarch-ci` → đã có hàng trăm tệp test backend + web
+  (vitest — đếm: `npm run docnum`) + 46 script `e2e-*.mjs` + `.github/workflows/ci.yml`. Sinh thêm test bám selector khác
   chỉ làm phình.
 - `bmad-agent-*` (persona) → chỉ là menu router, gọi thẳng skill nhanh hơn.
 - Nhóm `bmad-cis-*` và `wds-*` → dựng cho sản phẩm bán ra thị trường có khách ngoài;

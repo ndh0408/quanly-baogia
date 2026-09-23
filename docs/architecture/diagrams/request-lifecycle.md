@@ -1,6 +1,10 @@
 # Vòng đời một request
 
 Nguồn: `src/app.ts` (thứ tự `app.use`), `src/middleware.ts`, `src/permissions.ts`.
+
+> Vẽ lại 2026-09-23 (audit DOC-09): bản trước đặt `apiLimiter` SAU `csrfGuard` — thứ tự CŨ trước bản
+> vá 6a7bc05. Nay limiter đứng TRƯỚC giải nén + parse JSON (chặn khuếch đại gzip/JSON 16MB trước khi
+> tốn CPU), và `metricsMiddleware` đứng ngay sau `requestId` (audit OBS-07).
 Diễn giải bằng lời: [DATA_FLOW.md](../DATA_FLOW.md#1-một-request-thường-trình-duyệt--postgres).
 
 ```mermaid
@@ -9,18 +13,18 @@ flowchart TD
     CF --> H["helmet — CSP, HSTS"]
     H --> C["compression<br/>LOẠI TRỪ text/event-stream"]
     C --> RID["requestId — gắn req.id"]
-    RID --> LOG["pino-http — log truy cập"]
-    LOG --> DEC["decompressBody<br/>/api/quotes 16MB · còn lại 2MB"]
+    RID --> MET["metricsMiddleware<br/>đếm MỌI request, kể cả bị chặn sớm"]
+    MET --> LOG["pino-http — log truy cập<br/>(bỏ /livez, /metrics)"]
+    LOG --> RL["apiLimiter /api/ — 120/phút<br/>Redis; Redis chết → bộ đếm trong bộ nhớ"]
+    RL --> DEC["decompressBody<br/>/api/quotes 16MB · còn lại 2MB"]
     DEC --> JSON["express.json — cùng cặp trần"]
     JSON --> SESS{"có Bearer<br/>và KHÔNG có cookie?"}
-    SESS -->|"có"| MET["metricsMiddleware"]
+    SESS -->|"có"| BA["bearerAuth — JWT thành phiên giả lập"]
     SESS -->|"không"| PG["express-session<br/>kho PG user_sessions"]
-    PG --> MET
-    MET --> BA["bearerAuth — JWT thành phiên giả lập"]
+    PG --> BA
     BA --> EAU["enforceActiveUser<br/>nạp LẠI vai trò + quyền TỪ CSDL"]
     EAU --> CSRF["csrfGuard<br/>miễn cho client Bearer"]
-    CSRF --> RL["apiLimiter — 120/phút"]
-    RL --> R["routes/*.routes.ts<br/>validate zod + requirePermission"]
+    CSRF --> R["routes/*.routes.ts<br/>validate zod + requirePermission"]
     R --> S["services/*.ts<br/>canOnQuote · canScoped · transaction"]
     S --> P["Prisma $extends<br/>xoá mềm + lọc deletedAt + emitChange"]
     P --> DB[("PostgreSQL<br/>qua pg.Pool, DB_POOL_MAX")]

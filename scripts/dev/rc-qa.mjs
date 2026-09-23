@@ -53,7 +53,9 @@ async function measure(role, path, n = 6) {
     // Nghỉ giữa các nhịp: limiter API là 120 req/phút. Đo mà tự đụng trần thì con số đo được là
     // thời gian bị chặn, không phải thời gian xử lý — và tệ hơn, dễ bị đọc thành "app chậm".
     await new Promise((r2) => setTimeout(r2, 700));
-    if (!r.ok && r.status !== 403) return { path, error: r.status };
+    // MỌI mã không-2xx là lỗi, kể cả 403 (audit 2026-09-22, GAP1-08): bản trước bỏ qua 403, tức một
+    // endpoint mà admin MẤT quyền vẫn in ra p50/p95 — đo thời gian của lời từ chối, báo "đạt".
+    if (!r.ok) return { path, error: r.status };
   }
   ms.sort((a, b) => a - b);
   return { path, p50: ms[Math.floor(n * 0.5)], p95: ms[Math.floor(n * 0.95)], max: ms[n - 1] };
@@ -69,6 +71,8 @@ for (const role of Object.keys(ACTORS)) {
 
 // ── §30 MA TRẬN VAI TRÒ: mỗi ô là một quyết định phân quyền đã tuyên bố ─────
 // Mong đợi: 200 = được, 403 = chặn đúng. Bảng này phải khớp docs/product/ROLES_PERMISSIONS.md.
+// Ô chấp nhận NHIỀU mã thì ghi tường minh dạng chuỗi "200|404" — KHÔNG còn luật ngầm "mong 200 thì
+// 404 cũng được" (audit 2026-09-22, GAP1-08): luật đó cho một route bị GỠ/đổi đường vẫn in ✓.
 const MATRIX = [
   // [đường dẫn,          admin, manager, accounthn, hr,  accountant]
   ["/api/quotes", 200, 200, 200, 403, 403],
@@ -86,7 +90,8 @@ const MATRIX = [
   ["/api/audit", 200, 200, 403, 403, 403],
   ["/api/admin/stats", 200, 403, 403, 403, 403],
   ["/api/venues", 200, 200, 403, 403, 403],
-  ["/api/settings/notif.channels", 200, 200, 200, 200, 200],
+  // Cấu hình chưa ai tạo → 404 "Không tìm thấy cấu hình" (src/services/settingService.ts) là hợp lệ.
+  ["/api/settings/notif.channels", "200|404", "200|404", "200|404", "200|404", "200|404"],
 ];
 const ORDER = ["admin", "manager", "accounthn", "hr", "accountant"];
 console.log("── §30 Ma trận vai trò (thực tế vs tuyên bố)");
@@ -96,7 +101,7 @@ for (const [path, ...want] of MATRIX) {
     const r = await call(ORDER[i], path);
     got.push(r.status);
   }
-  const ok = got.every((g, i) => g === want[i] || (want[i] === 200 && g === 404));
+  const ok = got.every((g, i) => String(want[i]).split("|").map(Number).includes(g));
   rec("ma-trận-vai-trò", path, ok, ok ? "" : `mong ${want.join("/")} · thực ${got.join("/")}`);
   console.log(`   ${ok ? "✓" : "✖"} ${path.padEnd(34)} ${got.join(" ")}${ok ? "" : `   (mong ${want.join(" ")})`}`);
 }

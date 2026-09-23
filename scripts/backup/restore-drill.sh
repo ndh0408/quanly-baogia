@@ -44,7 +44,7 @@ set -uo pipefail
 #   DRILL_RESTORE_MAX_MB  (256)  trần tổng dung lượng một lượt đẩy ngược
 #   DRILL_MAX_OBJ_MB      (64)   bỏ qua object đơn lẻ lớn hơn ngưỡng này khi lấy mẫu
 #   DRILL_SMOKE_WAIT_S    (60)   trần chờ app lên ở bước 7
-#   MC_IMAGE              (minio/mc:RELEASE.2024-11-21T17-21-54Z)
+#   MC_IMAGE              (quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:… — Docker Hub đã gỡ minio/mc)
 #
 # ⛔ KHÔNG đụng PRODUCTION. Ba lớp cách ly, và cả ba đều có trap dọn dẹp ở EXIT:
 #     CSDL   → CSDL TẠM riêng ($TESTDB), DROP khi thoát.
@@ -61,7 +61,7 @@ APP_DIR="${APP_DIR:-/opt/stacks/quanly/quanly}"
 APP_CONTAINER="${APP_CONTAINER:-quanly-app}"
 TESTDB="quanly_restore_drill"
 MIRROR_DIR="$BACKUP_DIR/objects"
-MC_IMAGE="${MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}"
+MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112}"
 BUCKET="${S3_BUCKET:-quanly}"
 DRILL_BUCKET="${DRILL_RESTORE_BUCKET:-$BUCKET-restore-drill}"
 DRILL_RESTORE_N="${DRILL_RESTORE_N:-20}"

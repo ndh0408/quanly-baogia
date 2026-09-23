@@ -1,10 +1,24 @@
 // Vá cấu hình @openai/codex-security (công cụ quét bảo mật, CHỈ dùng khi lập trình) cho 9router.
-// Chạy tự động qua `postinstall`.
 //
-// ⚠️ Gói này nằm ở devDependencies → BẢN CÀI PRODUCTION (`npm ci --omit=dev` trong Dockerfile)
-// KHÔNG có nó, nhưng npm VẪN chạy postinstall. Vì vậy thiếu gói thì phải im lặng thoát 0,
-// nếu ném lỗi là gãy nguyên lượt build Docker (app không deploy được).
-import { readFile, writeFile } from "node:fs/promises";
+// ── CHẠY TAY, KHÔNG CÒN LÀ HOOK CÀI ĐẶT (audit 2026-09-22, GAP1-07 / DEP-05) ────────────────────
+// Chú thích cũ ghi "chạy tự động qua `postinstall`" — SAI: khoá `postinstall` đã bị gỡ khỏi
+// package.json (tests/qs-postinstall-hook.test.js giữ cho nó không quay lại). Không đường tự động nào
+// gọi tệp này; nó chỉ chạy khi có người gõ tay.
+//
+// ⚠️ NÓ LÀM GÌ, ĐỌC TRƯỚC KHI CHẠY: ghi đè `dist/*.js` trong node_modules/@openai/codex-security và
+// codex-sdk để agent quét chạy với `sandbox_mode = "danger-full-access"` và `approvalPolicy: "never"`
+// (không sandbox, không hỏi duyệt), qua router cục bộ http://127.0.0.1:20128/v1. Agent đó ĐỌC nội dung
+// repo (gồm tệp Excel/tài liệu do khách gửi) rồi chạy lệnh shell với TOÀN QUYỀN tài khoản Windows —
+// trên máy giữ SSH/Tailscale tới production. Đó là một đường prompt-injection → thực thi lệnh.
+// Nên script TỪ CHỐI chạy nếu không có xác nhận tường minh:
+//     QUANLY_VA_CODEX_KHONG_SANDBOX=toi-hieu-rui-ro node scripts/patch-codex-security-9router.mjs
+//
+// ── KHÔNG BAO GIỜ ĐỂ node_modules NỬA VÁ ─────────────────────────────────────────────────────────
+// Bản trước ghi từng tệp NGAY khi vá xong, rồi mọi `throw` ở giữa bị `softExit` nuốt thành exit 0 —
+// tức có thể dừng giữa chừng (config.js đã ghi, api.js chưa) mà vẫn báo thành công. Nay mọi lần ghi
+// được GOM lại và chỉ thực hiện ở CUỐI, khi TẤT CẢ các bước vá đều khớp; hỏng ở đâu thì thoát 1 và
+// không tệp nào bị đụng.
+import { readFile, writeFile as ghiThat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -21,11 +35,23 @@ import { fileURLToPath } from "node:url";
 //      (spawn `codex.cmd`, đường dẫn runtime Windows, chính sách chặn shell sandbox).
 //   2. Mọi lỗi ngoài dự kiến → CẢNH BÁO rồi thoát 0, không bao giờ exit khác 0.
 const softExit = (why) => {
-  console.warn(`⚠️  Bỏ qua vá codex-security (không ảnh hưởng ứng dụng): ${why}`);
-  process.exit(0);
+  // Thoát 1, không còn 0: đây là lệnh chạy TAY, hỏng thì người gõ phải thấy. (Thoát 0 là quy tắc
+  // của thời còn là hook `postinstall` — hỏng không được làm gãy `npm ci`.) Chưa tệp nào bị ghi.
+  console.error(`✖ KHÔNG vá codex-security — chưa tệp nào bị đổi: ${why}`);
+  process.exit(1);
 };
 process.on("uncaughtException", (e) => softExit(e?.message || String(e)));
 process.on("unhandledRejection", (e) => softExit(e?.message || String(e)));
+
+if (process.env.QUANLY_VA_CODEX_KHONG_SANDBOX !== "toi-hieu-rui-ro") {
+  console.error("✖ Từ chối: script này vá công cụ quét để chạy KHÔNG sandbox, KHÔNG hỏi duyệt (xem đầu tệp).");
+  console.error("  Chạy có chủ ý: QUANLY_VA_CODEX_KHONG_SANDBOX=toi-hieu-rui-ro node scripts/patch-codex-security-9router.mjs");
+  process.exit(1);
+}
+
+// Mọi lần ghi gom vào đây, chỉ thực hiện ở cuối tệp khi mọi bước vá đều khớp.
+const choGhi = [];
+const writeFile = async (duongDan, noiDung) => { choGhi.push([duongDan, noiDung]); };
 
 if (process.platform !== "win32") {
   console.log("Bỏ qua vá codex-security: bản vá chỉ dành cho Windows.");
@@ -497,6 +523,8 @@ if (!patchedRankInput.includes(rankInputEncoding)) {
 if (patchedRankInput !== rankInputSource) {
   await writeFile(rankInputPath, patchedRankInput, "utf8");
 }
+
+for (const [duongDan, noiDung] of choGhi) await ghiThat(duongDan, noiDung, "utf8");
 
 console.log(
   `Configured Codex Security for 9router: ${targetModel}, ${targetReasoningEffort}, ${targetContextWindow}-token context, unsandboxed scan (Windows policy blocks sandboxed shells), Windows cwd/runtime paths, UTF-8 Git and Python runtime.`,

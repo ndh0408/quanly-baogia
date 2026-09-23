@@ -21,7 +21,7 @@ sequenceDiagram
     RT->>RT: chặn ai có quote:hn:fill<br/>(chỉ được điền phần HN)
     RT->>SV: QuoteUpdateSchema đã hợp lệ
     SV->>DB: đọc RÚT GỌN (không kéo images / extraTables)
-    SV->>SV: canEdit — converted/lost là BẤT BIẾN
+    SV->>SV: canEdit — khoá khi ĐÃ XUẤT HOÁ ĐƠN (daXuatHoaDon)
     SV->>SV: khoá lạc quan lần 1 (ngoài transaction)
     SV->>SV: computeQuoteTotals — tính tiền TRƯỚC, giữ transaction ngắn
 
@@ -63,29 +63,28 @@ vì `emit` nằm ngoài vòng đời transaction.
 
 `deleteMany` khoá theo thứ tự quét vật lý (không xác định). Thiếu `ORDER BY id`
 thì `updateQuote` và `saveHn` có thể lấy khoá **ngược chiều nhau** trên cùng một
-báo giá → deadlock 40P01 → Prisma P2034. Ba đường ghi
-(`updateQuote`, `saveHn`, `markExtraTableRowPayment`) đều lấy khoá `QuoteSheet`
-**trước** `Quote`, cùng một thứ tự.
+báo giá → deadlock 40P01 → Prisma P2034. Hai đường ghi `updateQuote` và
+`markExtraTableRowPayment` lấy khoá `QuoteSheet` **trước** `Quote`, cùng một thứ tự. `saveHn` từ
+2026-09-15 **chỉ** khoá hàng `Quote` và KHÔNG đụng `QuoteSheet` (xem nhánh dưới) — nên không có cặp
+khoá ngược chiều nào với hai đường kia.
 
 ## Nhánh Account Hà Nội
 
+Vẽ lại 2026-09-23 theo `src/hnWorkflow.ts` và DATA_FLOW.md mục 3.4 (audit DOC-10). Bản trước mô tả
+mô hình CŨ (trước 2026-09-15): khoá `QuoteSheet`, suy đoán 409 theo `sheetId`, ghi bảng `category=hanoi`
+trong `extraTables` của từng trang — mâu thuẫn với mã.
+
 ```mermaid
 flowchart LR
-    A["PUT /api/quotes/:id/hn<br/>saveHn"] --> L["cùng khoá FOR UPDATE trên QuoteSheet,<br/>cùng thứ tự với updateQuote"]
-    L --> C{"sheetId client gửi<br/>có còn tồn tại?"}
-    C -->|"nhỏ hơn mọi id hiện có<br/>= dấu vết xoá-tạo-lại"| E409["409 — quản lý vừa lưu, tải lại"]
-    C -->|"lớn hơn = client bịa"| SKIP["bỏ qua, 200 (hành vi cũ)"]
-    C -->|"khớp"| W["ghi RIÊNG bảng category=hanoi,<br/>chép nguyên hcm/khach"]
-    W --> BUMP["chạm Quote để bump updatedAt"]
-    BUMP --> OK["200"]
+    A["PUT /api/quotes/:id/hn<br/>saveHn"] --> L["SELECT id FROM Quote … FOR UPDATE<br/>CHỈ khoá Quote, không đụng QuoteSheet"]
+    L --> G{"hnStatus submitted/approved?<br/>hnAssigneeId khác người gửi?"}
+    G -->|"có"| E4["400 / 403"]
+    G -->|"không"| R{"baseHnRev client gửi<br/>== hnRevCua(Quote.hnTables)?"}
+    R -->|"lệch"| E409["409 — bảng HN vừa đổi ở nơi khác"]
+    R -->|"khớp (hoặc tab cũ chỉ gửi baseUpdatedAt và khớp)"| W["ghi Quote.hnTables<br/>(giữ paid*/approved* do server sở hữu)"]
+    W --> OK["200"]
 ```
 
-`BUMP` không phải trang trí: ghi bảng HN là ghi hàng **con**, nên `Quote.updatedAt`
-không tự đổi. Không bump thì khoá lạc quan của quản lý không thấy phần HN vừa
-lưu, và lần `deleteMany` + tạo lại kế tiếp ghi đè nó **im lặng**.
-
-Nhánh `E409` là **suy đoán theo dấu vết**, và mã nguồn nói thẳng điều đó: id của
-`QuoteSheet` tăng dần theo sequence, nên id nhỏ hơn mọi id hiện có gần như chắc
-chắn là dấu vết xoá-tạo-lại. Hợp đồng đúng đắn cần client gửi `baseUpdatedAt`
-cho cả đường này. Nhưng suy đoán này **không bao giờ làm mất dữ liệu**: sai thì
-cùng lắm bắt tải lại một lần thừa.
+Khoá lạc quan theo **`hnRev`** — băm vân tay bảng Hà Nội, bỏ qua `paid*`/`approved*`/`paidProof`/`rid`
+— nên chủ báo giá lưu thứ khác KHÔNG làm account HN ăn 409. `baseUpdatedAt` chỉ còn là đường tương
+thích cho tab mở trước lần deploy đó.

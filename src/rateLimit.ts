@@ -46,8 +46,9 @@ export function createLimiter(prefix: string, options: Partial<import("express-r
         // LƯỢT LỆNH ĐẦU TIÊN ĐƯỢC CHỜ KẾT NỐI LÊN, mọi lượt sau trượt nhanh như cũ.
         //
         // `new RedisStore(...)` → `store.init()` bắn ngay hai lệnh `SCRIPT LOAD`, mà lúc `createApp()`
-        // dựng 15 limiter thì ioredis chưa nối xong và kết nối này cố ý KHÔNG xếp hàng ngoại tuyến →
-        // 15 vết stack ở đầu mỗi log khởi động production (đo trong scripts/ci/smoke-image.sh).
+        // dựng mọi limiter (hơn chục cái — đừng chép số, nó trôi) thì ioredis chưa nối xong và kết nối
+        // này cố ý KHÔNG xếp hàng ngoại tuyến → mỗi limiter một vết stack ở đầu log khởi động production
+        // (đo trong scripts/ci/smoke-image.sh).
         //
         // Chờ ở đây KHÔNG làm chậm đường xử lý request: handler bên dưới chỉ gọi `limiterRedis` khi
         // `isRateLimitRedisReady()` đã đúng, nên `cho` luôn đã được tiêu thụ và gán null từ lúc khởi

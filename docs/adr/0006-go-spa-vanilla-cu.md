@@ -41,7 +41,7 @@ React không có:
    payload sheet **không có `id: s.id`**. Lưu báo giá = xoá sheet rồi tạo lại, nên
    `updateQuote` phải bê `SHEET_CARRY_FIELDS` (`invoiceNo`, `paidAt`, `signedAt`,
    `custStatus`, `poNumber`, `hnInvoiceNo`… — 22 trường ở
-   `src/quoteUtils.ts:403`) sang bản mới. Không có `id`, nó phải ghép **theo vị
+   `src/quoteUtils.ts`, hằng `SHEET_CARRY_FIELDS`) sang bản mới. Không có `id`, nó phải ghép **theo vị
    trí**; thêm sheet, xoá sheet hay đổi thứ tự là các mốc đó bê nhầm sheet hoặc
    mất trắng.
 
@@ -74,7 +74,9 @@ Không có lớp tương thích, không có cờ bật/tắt. Một frontend, m�
 
 - Không còn đường lui nếu bản build React hỏng. Đổi lại bằng: `index.html` phục
   vụ `no-cache` nên rollback ảnh Docker là có hiệu lực ngay, và
-  `docs/operations/DEPLOYMENT.md` đã có quy trình rollback theo digest.
+  `docs/operations/DEPLOYMENT.md` đã có quy trình rollback theo tag bất biến `<tên>:<git-sha>`
+  (`bash deploy.sh rollback <prod|staging> <git-sha>`). Bản trước ghi "theo digest" — sai: ảnh dựng
+  trên VM không có digest registry; lùi đi theo tag (sửa 2026-09-23, audit DOC-02).
 
 **Lớp phủ test — không tụt:**
 

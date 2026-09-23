@@ -1,5 +1,10 @@
-# ⚠️ WORKFLOW NÀY KHÔNG CHẠY. Tài khoản GitHub của dự án không bật Actions, nên KHÔNG có lượt
-# chạy nào cả — không phải "thỉnh thoảng đỏ", mà là KHÔNG BAO GIỜ CHẠY.
+# ⚠️ WORKFLOW NÀY CHỈ CHẠY TAY (`workflow_dispatch`). CI CỦA REPO LÀ `scripts/verify-local.sh`.
+#
+# Chủ repo chốt ngày 2026-09-23: KHÔNG dùng GitHub Actions. Tài khoản bị khoá vì lỗi billing, nên
+# mọi lượt `push`/`pull_request` từng kích hoạt đều hỏng sau 2–3 giây (không phải "chưa bao giờ
+# chạy" như bản trước ghi — chúng CÓ được kích hoạt, chỉ là chết ngay) và để lại một cột ✖ đỏ vô
+# nghĩa trên mọi commit. Bỏ trigger tự động để không còn job đỏ vì billing; GIỮ tệp vì nó vẫn là mô
+# tả đầy đủ các cổng, và bật lại chỉ cần thêm `push:`/`pull_request:` vào khối `on:` khi có billing.
 #
 # Vì thế đừng bao giờ nói "cứ đẩy lên, CI sẽ bắt". Ở repo này câu đó luôn sai. File này là TÀI LIỆU
 # về những cổng cần chạy; cổng THẬT SỰ chạy chỉ có hai, và cả hai đều phải gõ tay:
@@ -16,11 +21,11 @@
 
 name: CI
 
+# Chỉ chạy tay — xem khối chú thích đầu tệp. Trigger cũ (để bật lại khi có billing):
+#   push:         branches: [master, main, develop, "harden/**", "feat/**", "fix/**", "chore/**", "claude/**"]
+#   pull_request: branches: [master, main, develop]
 on:
-  push:
-    branches: [master, main, develop, "harden/**", "feat/**", "fix/**", "chore/**", "claude/**"]
-  pull_request:
-    branches: [master, main, develop]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -64,22 +69,10 @@ jobs:
           --health-timeout 3s
           --health-retries 5
 
-      # KHO OBJECT cho test. Không có nó, tests/personnel-fields.test.js (ảnh chứng từ thanh toán)
-      # nhận 503 "Chưa cấu hình lưu trữ tệp" và CI ĐỎ — nghĩa là toàn bộ đường ghi/đọc chứng từ
-      # hiện KHÔNG được kiểm ở CI. Cách sửa đúng là cấp kho thật cho test chạy, không phải cho
-      # test bỏ qua.
-      minio:
-        image: bitnami/minio:2024
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: quanly-test
-        ports: ["9000:9000"]
-        options: >-
-          --health-cmd "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
+      # KHO OBJECT: KHÔNG còn là `services:` (audit 2026-09-22, DEP-01). `bitnami/minio:2024` đã bị gỡ
+      # khỏi Docker Hub (404), và ảnh chính thức (quay.io/minio/minio) cần tham số `server /data` mà
+      # `services:` của Actions không cho ghi đè command; MINIO_DEFAULT_BUCKETS là tính năng riêng của
+      # bitnami. Nên dựng bằng một bước `docker run` ở đầu `steps:` (bước "Kho object (MinIO)").
 
     env:
       DATABASE_URL: postgresql://quanly:quanly_pwd@localhost:5432/quanly_test?schema=public
@@ -103,9 +96,22 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # KHO OBJECT cho test. Không có nó, tests/personnel-fields.test.js (ảnh chứng từ thanh toán)
+      # nhận 503 "Chưa cấu hình lưu trữ tệp" — toàn bộ đường ghi/đọc chứng từ không được kiểm.
+      # Cùng ảnh + digest với docker-compose*.yml (quay.io — Docker Hub đã gỡ minio/*).
+      - name: Kho object (MinIO)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data
+          for i in $(seq 1 30); do docker exec minio mc ready local >/dev/null 2>&1 && break; sleep 2; done
+          docker exec minio mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
+          docker exec minio mc mb --ignore-existing local/quanly-test
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version-file: ".nvmrc"
           cache: "npm"
 
       - name: Install
@@ -332,7 +338,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version-file: ".nvmrc"
           cache: "npm"
 
       # KHÔNG kéo devDependencies về đây. Job này chỉ chạy `npm audit --omit=dev` ngay bên dưới —
@@ -374,7 +380,7 @@ jobs:
 
       # Trivy `scan-type: fs` ở job security chỉ soi cây làm việc — nó KHÔNG thấy các gói OS mà
       # Dockerfile `apk add` (openssl, libc6-compat, tini, postgresql16-client, font-dejavu) lẫn
-      # tầng nền node:22-alpine. Đúng chỗ CVE nghiêm trọng hay nằm.
+      # tầng nền node:<NODE_IMAGE>-alpine. Đúng chỗ CVE nghiêm trọng hay nằm.
       - name: Quét lỗ hổng IMAGE (trivy)
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:

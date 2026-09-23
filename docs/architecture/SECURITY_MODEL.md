@@ -120,11 +120,12 @@ Nói thẳng — đây là hạn chế thật, không phải danh sách mong mu�
 - **Chưa có SSO / OIDC.** Đăng nhập cục bộ. Kiến trúc không cản việc thêm sau.
 - **Presence SSE là in-process** — chạy nhiều replica thì danh sách "ai đang sửa"
   không đầy đủ.
-- **Chưa có tổng hợp log tập trung.** Log ra stdout; chưa có Loki hay tương đương.
-- **Rate limit bỏ qua khi Redis chết.** Đánh đổi có chủ ý (xem
-  `src/rateLimit.ts`): lựa chọn còn lại là để mọi request treo. Khoá tài khoản khi
-  sai mật khẩu nhiều lần nằm ở **CSDL**, không phụ thuộc Redis, nên lớp chống dò
-  mật khẩu quan trọng nhất vẫn còn.
+- **Log tập trung: có** (Loki, từ 2026-09-16 — hiện trạng ở
+  [MONITORING.md](../operations/MONITORING.md)). Dòng cũ ở đây ghi "chưa có Loki" — lỗi thời.
+- **Redis chết thì rate-limit rơi về bộ đếm TRONG BỘ NHỚ của từng tiến trình**, KHÔNG bị bỏ qua
+  (`src/rateLimit.ts`, limiter `duPhong`). Production có một container app nên gần như không mất độ
+  chính xác; bộ đếm reset khi app khởi động lại. Khoá tài khoản khi sai mật khẩu nhiều lần nằm ở
+  **CSDL**, không phụ thuộc Redis. (Bản trước ghi "bỏ qua khi Redis chết" — sai với mã.)
 
 ## Lộ trình gỡ `style-src 'unsafe-inline'`
 

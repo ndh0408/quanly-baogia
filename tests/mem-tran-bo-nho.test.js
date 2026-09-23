@@ -12,8 +12,10 @@
  * ĐÃ XẢY RA THẬT, đo trên dev: một POST /api/quotes 60.000 dòng (con số hệ thống TỰ QUẢNG CÁO là
  * hợp lệ) →  `oom-kill … Killed process (node) anon-rss 1.529.596 kB`.
  *
- * Đặt heap ở ~2/3 trần thì V8 GC gắt trước rồi ném heap-OOM BẮT ĐƯỢC: errorHandler ghi log và trả
- * 500 cho ĐÚNG MỘT request, container sống tiếp. Đó là khác biệt giữa "một người gặp lỗi" và "cả
+ * Đặt heap ở ~2/3 trần thì V8 GC gắt trước rồi abort CÓ DÒNG LOG "FATAL ERROR: Reached heap limit"
+ * thay vì bị cgroup SIGKILL im lặng. (Sửa 2026-09-23, audit OBS-03: bản trước ghi heap-OOM "BẮT ĐƯỢC,
+ * trả 500 cho ĐÚNG MỘT request" — SAI, đã đo exit 134; tỉ lệ vẫn đáng khoá vì nó cho log chẩn đoán.)
+ * Trước đây câu này được hiểu là khác biệt giữa "một người gặp lỗi" và "cả
  * công ty mất việc đang làm".
  *
  * ── VÌ SAO CẦN CỔNG KIỂM ───────────────────────────────────────────────────
@@ -95,8 +97,8 @@ describe("Tiến trình Node: heap V8 phải nằm DƯỚI trần cgroup", () =>
         const tran = tranMB(sv[ten]);
         const heap = heapMB(sv[ten]);
         // Vế QUAN TRỌNG NHẤT: heap ≥ trần là đảo ngược thứ tự bảo vệ — nhân giết cả container
-        // TRƯỚC khi V8 kịp ném lỗi bắt được.
-        expect(heap, `${ten}: heap ${heap} MB ≥ trần ${tran} MB → nhân giết cả container, không ai bắt được`)
+        // TRƯỚC khi V8 kịp abort kèm dòng log chẩn đoán.
+        expect(heap, `${ten}: heap ${heap} MB ≥ trần ${tran} MB → nhân giết cả container, không để lại dấu vết`)
           .toBeLessThan(tran);
         const ti = heap / tran;
         expect(ti, `${ten}: heap chiếm ${(ti * 100).toFixed(0)}% trần — quá sát, không còn chỗ cho phần ngoài heap (buffer, native, phân mảnh)`)

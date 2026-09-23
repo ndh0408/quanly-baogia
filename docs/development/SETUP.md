@@ -2,7 +2,8 @@
 
 ## Yêu cầu
 
-- **Node.js 22+** (xem `.nvmrc` và `engines` trong `package.json`)
+- **Node.js 24** — đúng major trong `.nvmrc` (cũng là major của image production và `engines`
+  trong `package.json`). `npm run verify` dừng nếu máy chạy major khác.
 - **Docker** (cho Postgres / Redis / MinIO / MailHog ở môi trường dev)
 
 ## Các bước
