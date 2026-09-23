@@ -3152,6 +3152,13 @@ textarea[aria-invalid="true"] {
 .modal.import-modal {
   max-width: 1120px;
   width: 96vw;
+  /* NEO MÉP TRÊN (L76): nền mờ căn giữa theo chiều dọc, nên khi phần giới thiệu + vùng kéo thả (~360px)
+     được thay bằng bảng kế hoạch + xem trước (tới 92vh), mép trên nhảy lên (cao mới − cao cũ)/2 — đo ở
+     cửa sổ 950px: 297px → 38px (CLS 0,188), nút ✕ chạy theo. Neo ở đúng chỗ mép trên của hộp cỡ tối đa
+     khi còn căn giữa: 20px padding nền + (100vh − 40px − 92vh)/2 = 4vh → hộp chỉ dài xuống. Chỉ hộp
+     này — .modal-backdrop dùng chung vẫn căn giữa mọi hộp khác. */
+  align-self: start;
+  margin-top: max(0px, calc(4vh - 20px));
 }
 /* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
    dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
@@ -3926,6 +3933,15 @@ textarea[aria-invalid="true"] {
 :root[data-theme="light"] {
   color-scheme: light;
 }
+/* Chữ gợi ý mặc định của Chrome là #757575 ở CẢ hai color-scheme: trên nền tối chỉ 3.58–3.92:1 (ô tìm
+   thanh công cụ, ô trong hộp thoại, phần đầu báo giá, "(không xuất Excel)"…). --text-muted tối #9aa3b3
+   ≈ 6.5–7.1:1, vẫn nhạt hơn chữ thật. `:where` → độ ưu tiên chỉ còn của `::placeholder` (0,0,1): luật
+   riêng (#fx-input, hàng nhóm tối, ô tìm thanh bên) vẫn thắng. Chỉ chế độ tối: #9aa3b3 trên nền trắng
+   chỉ 2.5:1. opacity: Firefox mặc định làm mờ placeholder 0.54. */
+:where(:root[data-theme="dark"]) ::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
 
 /* ── Khung soạn + phần đầu báo giá ── */
 :root[data-theme="dark"] .editor {
@@ -4078,8 +4094,13 @@ textarea[aria-invalid="true"] {
 :root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea) {
   color: var(--chu);
 }
+/* Chữ gợi ý ("Tên nhóm (vd: Wallsticker)", "Ghi chú nhóm", "(không xuất Excel)"): pha 90% — thấp nhất là
+   hàng nhóm Colorfull 4.97:1 trên --nen, vẫn nhạt hơn chữ thật (5.96–8.34:1). Pha 55% trước đây chỉ
+   2.32–3.08:1, kém cả bản sáng; 85% vừa chạm 4.5 nên không chừa dư. opacity: Firefox mặc định làm mờ
+   placeholder 0.54, cộng dồn sẽ tụt dưới ngưỡng. */
 :root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea)::placeholder {
-  color: color-mix(in srgb, var(--chu) 55%, var(--surface));
+  color: color-mix(in srgb, var(--chu) 90%, var(--surface));
+  opacity: 1;
 }
 :root[data-theme="dark"] .excel-table tfoot :is(td.label, td.value) {
   background: color-mix(in srgb, #ffcc99 20%, var(--surface));
@@ -4242,8 +4263,17 @@ textarea[aria-invalid="true"] {
 }
 /* Ô chọn / ô nhập TRẦN trong hộp thoại (lịch sử phiên bản, chọn khách, nhập Excel…): không nằm trong
    <label> nên không ăn luật `.modal label select`, rơi về ô xám #3b3b3b của trình duyệt. Cả cụm bọc
-   trong :where → độ ưu tiên 0, không đè luật riêng nào. */
-:where(:root[data-theme="dark"] .modal :is(select, textarea, input[type="search"])) {
+   trong :where → độ ưu tiên 0, không đè luật riêng nào.
+   Ngoài hộp thoại còn đúng ba ô trần (quét input/select/textarea trên 15 trang ở dev, L65): ô tìm + ô
+   chọn vai trò trang Phân quyền (lớp gắn ở Permissions.tsx) và ô "Ghi chú cuối báo giá" của trình soạn
+   — style nội tuyến chỉ có viền; bắt theo cấu trúc (ô nằm ngay trong khối đứng sau nhãn tick "Thêm Ghi
+   chú") vì QuoteEditor.tsx không gắn lớp. Không mở rộng thành "mọi ô trong main": ô có nền riêng mà
+   không khai viền (ô lưới…) sẽ bị gắn thêm viền. */
+:where(
+  :root[data-theme="dark"] .modal :is(select, textarea, input[type="search"]),
+  :root[data-theme="dark"] :is(.perm-user-search, .perm-user-role),
+  :root[data-theme="dark"] .editor .toggle-totals + div > textarea
+) {
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -4269,4 +4299,32 @@ textarea[aria-invalid="true"] {
 .summary-table.clf-theme thead th,
 .summary-table.clf-theme tfoot td {
   background: #f4cfb0;
+}
+
+/* VÙNG CHỌN NHIỀU Ô TRÊN HÀNG NHÓM / NHÓM CON (cả hai chế độ, GN lẫn Colorfull).
+   Ý định của public/style.css (luật `.excel-table td.cell-selected`) là lớp xanh BÁN TRONG SUỐT phủ lên
+   màu hàng, nhưng luật đó (0,2,1) thua màu hàng nhóm `.excel-table tr.section-row td` (0,2,2), các luật
+   `.clf-theme` và luật tối có `:not(#nhom-toi)`: ô nhóm vẫn mang lớp cell-selected mà nền y như ô chưa
+   chọn — người dùng không thấy ô nhóm nào nằm trong vùng sắp copy / xoá / điền.
+   Phủ bằng background-IMAGE nên không đụng background-color của hàng (phân cấp nhóm vẫn lộ ra), cùng
+   độ đậm 13% với hàng thường. `:not(#nhom-toi)` (không phần tử nào mang id này) cộng độ ưu tiên cấp id
+   → (1,5,2) thắng luật tối (1,4,2); hàng nhóm con cũng mang lớp section-row nên một bộ chọn phủ cả hai.
+   `:not(.cell-anchor)`: ô neo giữ nền gốc như Excel, chỉ có viền. */
+:root .excel-table tr.section-row:not(#nhom-toi) td.cell-selected:not(.cell-anchor) {
+  background-image: linear-gradient(rgb(23 105 214 / 0.13), rgb(23 105 214 / 0.13));
+}
+
+/* GIẢM CHUYỂN ĐỘNG: KHÔNG tạo transition nào (L74). public/style.css (đóng băng) đặt
+   `transition-duration: 0.001ms !important` cho `*` — transition-property mặc định là `all`, nên duration
+   > 0 biến MỌI phần tử thành có transition: bấm đổi sáng/tối khi đang mở báo giá lớn là mỗi thuộc tính đổi
+   màu của hàng nghìn ô sinh transitionrun/start/end, cả ba đi qua listener gốc của React — đo trên #284:
+   9.676 transitionrun mỗi lần, INP 224–256 ms. `none` = không transition, không sự kiện; nhìn thì y hệt
+   0.001ms (đổi tức thì). Không mã nào chờ transitionend (đã rà web/src). Animation giữ luật gốc (rút còn
+   0.001ms, một vòng). Cùng độ ưu tiên + cùng !important, tệp này nạp sau → thắng. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
 }

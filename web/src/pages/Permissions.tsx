@@ -175,7 +175,7 @@ export function PermissionsPage({ me }: { me: Me }) {
 
       <h3 style={{ marginTop: 26 }}>Gán vai trò nhân viên</h3>
       <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0" }}>
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên hoặc username…" aria-label="Tìm nhân viên" />
+        <input type="search" className="perm-user-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm theo tên hoặc username…" aria-label="Tìm nhân viên" />
         <button className="btn btn-sm btn-ghost" disabled={!q} onClick={() => setQ("")}>Xóa lọc</button>
       </div>
       <div className="list-wrap">
@@ -190,7 +190,7 @@ export function PermissionsPage({ me }: { me: Me }) {
                 <td>{u.displayName}</td>
                 <td>{u.username}</td>
                 <td>
-                  <select value={u.role} disabled={u.id === me.id} aria-label={`Vai trò của ${u.displayName}`}
+                  <select className="perm-user-role" value={u.role} disabled={u.id === me.id} aria-label={`Vai trò của ${u.displayName}`}
                           title={u.id === me.id ? "Không thể đổi vai trò của chính bạn" : undefined}
                           onChange={(e) => onChangeRole(u, e.target.value, e.target)}>
                     {cat.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}

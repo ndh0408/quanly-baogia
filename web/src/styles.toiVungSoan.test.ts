@@ -66,6 +66,21 @@ describe("Chế độ tối của vùng soạn báo giá — đọc được và
     }
   });
 
+  // L66 (soát toàn diện): bài trên chỉ kiểm cặp --nen/--chu nên bỏ lọt chữ gợi ý — pha 55% đo trên dev
+  // chỉ 2.32–3.08:1 ("Ghi chú nhóm", "(không xuất Excel)", "Tên nhóm (vd: Wallsticker)" chìm vào nền).
+  it("chữ gợi ý (placeholder) trên hàng nhóm / nhóm con ≥ 4.5:1 trên ĐÚNG nền của hàng, vẫn nhạt hơn chữ thật", () => {
+    const m = /tr\.section-row:not\(#nhom-toi\) td :is\(input, textarea\)::placeholder \{[^}]*color: color-mix\(in srgb, var\(--chu\) (\d+)%, var\(--surface\)\)/.exec(khoi);
+    expect(m, "phải còn luật placeholder riêng của hàng nhóm tối").toBeTruthy();
+    const pGoiY = Number(m![1]) / 100;
+    const cap = capMau("--nen", "--chu");
+    expect(cap.length).toBe(4);
+    for (const { mau, p, chu } of cap) {
+      const nen = pha(mau, p, SURFACE), goiY = pha(chu, pGoiY, SURFACE);
+      expect(tuongPhan(goiY, nen), `gợi ý ${goiY} trên ${nen}`).toBeGreaterThanOrEqual(4.5);
+      expect(tuongPhan(goiY, nen), "gợi ý phải nhạt hơn chữ thật để còn phân biệt").toBeLessThan(tuongPhan(chu, nen));
+    }
+  });
+
   it("tiêu đề cột (GN + Colorfull) và dòng tổng của bảng Tổng báo giá ≥ 4.5:1, nền vẫn tối", () => {
     const cap = [...capMau("--tieu-de-nen", "--tieu-de-chu"), ...capMau("--tong-nen", "--tong-chu")];
     expect(cap.length).toBe(4);
