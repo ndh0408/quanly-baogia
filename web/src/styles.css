@@ -651,7 +651,9 @@ legend {
   display: flex;
   flex-direction: column-reverse;
   gap: 8px;
-  z-index: 100;
+  /* 1100 > .modal-backdrop 1000 (GAP1-04, xem khối lớp chồng ở cuối tệp): lỗi Lưu trong form phải nổi
+     TRÊN modal. Chỉ MỘT khối #toast-host — khối thứ hai ghi đè khối này (GAP1-05). */
+  z-index: 1100;
   max-width: min(380px, 92vw);
 }
 #toast-host > .toast {
@@ -3873,6 +3875,4 @@ textarea[aria-invalid="true"] {
 .modal-backdrop {
   z-index: 1000;
 }
-#toast-host {
-  z-index: 1100;
-}
+/* #toast-host: z-index 1100 đặt ngay trong khối chính của nó (GAP1-05 cấm khối #toast-host thứ hai). */
