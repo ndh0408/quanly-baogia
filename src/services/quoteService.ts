@@ -8,7 +8,7 @@ import { Prisma } from "@prisma/client";
 import type { Request } from "express";
 import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
-import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, D } from "../money.js";
+import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, chuanHoaTheoCot, chuanHoaVat, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
 import { namVN, namNganVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
@@ -320,7 +320,7 @@ export async function createQuote(req: Request) {
     executionDate: b.executionDate || null,
     customerId: b.customerId ?? null,
     greeting: b.greeting || undefined,
-    vatPercent: D(b.vatPercent),
+    vatPercent: chuanHoaVat(b.vatPercent),   // đúng thang Decimal(5,2) — MONEY-02
     showTotals: b.showTotals !== false,
     notes: b.notes || null,
     status: "draft",
@@ -329,6 +329,7 @@ export async function createQuote(req: Request) {
 
   // Compute totals from sheets+items BEFORE writing so we store the snapshot.
   await chuanHoaSoNgayTheoMau(b.sheets);   // mẫu không có cột Số Ngày → days=null TRƯỚC khi tính (xem quoteUtils)
+  chuanHoaTheoCot(b.sheets);   // SL/đơn giá/ngày về đúng thang cột CSDL → tổng lưu = tổng đọc lại (MONEY-02)
   const t = computeQuoteTotals({ vatPercent: draft.vatPercent, sheets: b.sheets });
   assertTotalsStorable(t, b.sheets); // 400 nói rõ trang nào âm, thay vì 500 mất trắng lần Lưu
   draft.subtotal = t.subtotal;
@@ -734,7 +735,7 @@ export async function updateQuote(req: Request) {
   if (b.quoteDate) data.quoteDate = b.quoteDate;
   if (b.executionDate !== undefined) data.executionDate = b.executionDate || null;
   if (b.customerId !== undefined) data.customerId = b.customerId ?? null;
-  if (b.vatPercent !== undefined) data.vatPercent = D(b.vatPercent);
+  if (b.vatPercent !== undefined) data.vatPercent = chuanHoaVat(b.vatPercent);   // đúng thang Decimal(5,2) — MONEY-02
   // `b.discount` (mức báo giá) CỐ Ý bị bỏ qua: giảm giá nay ở mức SHEET và `Quote.discount` được
   // computeQuoteTotals suy ra = Σ các sheet. Nhận số client gửi ở đây là mở đường ghi đè nó.
   if (b.showTotals !== undefined) data.showTotals = b.showTotals;
@@ -798,6 +799,7 @@ export async function updateQuote(req: Request) {
       }
     }
     await chuanHoaSoNgayTheoMau(b.sheets);   // mẫu không có cột Số Ngày → days=null TRƯỚC khi tính (xem quoteUtils)
+    chuanHoaTheoCot(b.sheets);   // SL/đơn giá/ngày về đúng thang cột CSDL → tổng lưu = tổng đọc lại (MONEY-02)
     const t = computeQuoteTotals({ vatPercent: vatPct, sheets: b.sheets });
     assertTotalsStorable(t, b.sheets);
     data.subtotal = t.subtotal;
