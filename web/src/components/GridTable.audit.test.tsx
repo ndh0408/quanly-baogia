@@ -228,3 +228,47 @@ describe("GRID-04 — tham chiếu vòng bị phát hiện, số đứng yên", 
   });
 });
 
+// ── GRID-02: đi tới cột STT không dời tiêu điểm → phím gõ kế tiếp đè lên ô CŨ ────────────────
+describe("GRID-02 — vùng chọn nhìn thấy và ô nhận phím không được tách nhau", () => {
+  const baHang = () => {
+    const a = hang("Banner A", "cái", 1, 50000); a.internalNote = "NCC Minh — giá gốc 70k";
+    return [a, hang("Standee B", "bộ", 2, 70000), hang("Cổng", "bộ", 1, 90000)];
+  };
+  it("Tab ở cột CUỐI → tiêu điểm vào Hạng Mục hàng kế; gõ không đụng ô cũ", () => {
+    const items = baHang();
+    moLuoi(items, { internalNote: true });
+    vaoO(o(0, "internalNote"));
+    phim(o(0, "internalNote"), "Tab");
+    expect(document.activeElement).toBe(o(1, "name"));
+    phim(document.activeElement!, "C");
+    expect(items[0].internalNote).toBe("NCC Minh — giá gốc 70k");
+  });
+
+  it("Ctrl+Home từ Đơn giá rồi gõ '5' → Đơn giá hàng 2 KHÔNG đổi", () => {
+    const items = baHang();
+    moLuoi(items);
+    vaoO(o(2, "unitPrice"));
+    phim(o(2, "unitPrice"), "Home", { ctrl: true });
+    expect(document.activeElement).toBe(o(0, "name"));
+    phim(document.activeElement!, "5");
+    expect(items[2].unitPrice).toBe(90000);
+  });
+
+  it("Shift+Tab từ Hạng Mục → cột CUỐI của hàng trước (không kẹt)", () => {
+    const items = baHang();
+    moLuoi(items);
+    vaoO(o(1, "name"));
+    phim(o(1, "name"), "Tab", { shift: true });
+    expect(document.activeElement).toBe(o(0, "notes"));
+  });
+
+  it("Shift+← từ Hạng Mục vẫn chọn được vùng gồm STT (copy nguyên hàng)", () => {
+    const items = baHang();
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), "ArrowLeft", { shift: true });
+    expect(hop!.querySelector('tr[data-row="0"] td.col-stt')!.classList.contains("cell-selected")).toBe(true);
+    expect(document.activeElement).toBe(o(0, "name"));
+  });
+});
+

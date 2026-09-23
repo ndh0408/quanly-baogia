@@ -624,12 +624,17 @@ function GridTableInner(props: GridTableProps) {
     row = clampRow(row, items.length);
     const ci = clampCol(fieldIdx(field), FIELDS.length);
     let f2 = FIELDS[ci];
-    // Cột STT: ô TÍNH — dời vùng chọn tới đó nhưng giữ nguyên ô đang focus, để mũi tên/Shift+mũi tên
-    // quét qua được mà không "rơi" con trỏ vào ô không nhập được.
+    // Cột STT: ô TÍNH, không có ô nhập. Shift+… (mở rộng vùng) vẫn quét tới đó được — copy nguyên
+    // hàng cần nó — và giữ nguyên ô đang focus. Di chuyển TRƠN (Tab ở cột cuối, Home, Ctrl+Home,
+    // Ctrl+←, ← từ Hạng Mục) thì về ô nhập đầu tiên của hàng (GRID-02): bản cũ chỉ dời vùng chọn tới
+    // STT hàng khác trong khi tiêu điểm nằm lại ô CŨ, phím gõ kế tiếp đè lên ô cũ (kể cả Đơn giá).
     if (f2 === "_stt") {
-      selRef.current = nextSel(selRef.current, row, f2, extend);
-      paintSel();
-      return;
+      if (extend) {
+        selRef.current = nextSel(selRef.current, row, f2, extend);
+        paintSel();
+        return;
+      }
+      f2 = "name";
     }
     if (!cellEl(row, f2)) {
       let found: string | null = null;
@@ -1203,6 +1208,18 @@ function GridTableInner(props: GridTableProps) {
     const i = parseInt(tr.getAttribute("data-row") || "0", 10);
     const ci = FIELDS.indexOf(f);
     const isMultiline = MULTILINE.has(f);
+    // LỚP CHẶN GHI NHẦM Ô (GRID-02): phím sắp GHI (ký tự, cụm IME, Backspace) mà ô đang giữ tiêu điểm
+    // lại nằm NGOÀI vùng chọn đang tô → vùng người dùng nhìn thấy và ô thật sự nhận phím đã tách
+    // nhau. Không ghi; đưa tiêu điểm về ô neo của vùng và bỏ phím đó. Đặt TRƯỚC nhánh IME, và KHÔNG
+    // chuyển focus rồi ghi ngay trong cùng keydown — đổi focus giữa chừng làm vỡ composition tiếng Việt.
+    const rcG = rectOf(selRef.current);
+    const seGhi = !ctrl && !e.nativeEvent?.altKey && !editingRef.current && (e.key.length === 1 || e.key === "Backspace" || dangGoIME(e));
+    if (seGhi && rcG && !(i >= rcG.r0 && i <= rcG.r1 && ci >= rcG.c0 && ci <= rcG.c1)) {
+      e.preventDefault(); e.stopPropagation();
+      const neo = selRef.current!.anchor;
+      moveTo(neo.row, neo.field === "_stt" ? "name" : neo.field, false);
+      return;
+    }
     if (!ctrl && dangGoIME(e)) {
       // IME (gõ tiếng Việt trên macOS, Trung/Nhật/Hàn…): phím đầu tiên rơi vào ô đang KHÓA →
       // mở khóa + xoá NGAY TRONG keydown (trước khi composition bắt đầu) để cụm chữ đè nội dung
@@ -1395,8 +1412,11 @@ function GridTableInner(props: GridTableProps) {
         selRef.current = keep; paintSel();
         return;
       }
-      if (!e.shiftKey && (ci < FIELDS.length - 1 || i < items.length - 1)) { e.preventDefault(); e.stopPropagation(); if (ci < FIELDS.length - 1) moveTo(i, FIELDS[ci + 1], false, 1); else moveTo(i + 1, FIELDS[0], false, 1); }
-      else if (e.shiftKey && (ci > 0 || i > 0)) { e.preventDefault(); e.stopPropagation(); if (ci > 0) moveTo(i, FIELDS[ci - 1], false, -1); else moveTo(i - 1, FIELDS[FIELDS.length - 1], false, -1); }
+      // Biên của Tab là cột Hạng Mục (ô nhập đầu), KHÔNG phải cột STT: vòng về STT là dừng ở ô không
+      // nhập được (GRID-02), còn Shift+Tab từ Hạng Mục mà lùi về STT rồi bị đẩy lại Hạng Mục thì kẹt.
+      const colDau = FIELDS.indexOf("name");
+      if (!e.shiftKey && (ci < lastCol || i < items.length - 1)) { e.preventDefault(); e.stopPropagation(); if (ci < lastCol) moveTo(i, FIELDS[ci + 1], false, 1); else moveTo(i + 1, FIELDS[colDau], false, 1); }
+      else if (e.shiftKey && (ci > colDau || i > 0)) { e.preventDefault(); e.stopPropagation(); if (ci > colDau) moveTo(i, FIELDS[ci - 1], false, -1); else moveTo(i - 1, FIELDS[lastCol], false, -1); }
       return;
     }
     // Alt+↓ — mở danh sách gợi ý của ô (như Excel mở dropdown trong ô): ô Hạng Mục → gợi ý theo rạp.
