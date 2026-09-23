@@ -1917,12 +1917,28 @@ export async function duplicateQuote(req: Request) {
     dupCreatorProjectCode = dupCreator?.projectCode || null;
   }
 
+  // CẮT TRẠNG THÁI DO SERVER SỞ HỮU khỏi một hàng bảng nội bộ (HN / HCM / phí khách): duyệt, đã
+  // thanh toán, ảnh chứng từ, và `rid` (khoá khớp trạng thái — giữ rid cũ là mở cửa cho
+  // reconcileExtra* kế thừa nhầm). Bản sao là báo giá MỚI chưa ai duyệt, chưa ai trả tiền.
+  // MỘT hàm cho cả hnTables lẫn extraTables để hai chỗ không trôi khỏi nhau — đúng cái đã xảy ra:
+  // hnTables được cắt từ lâu còn extraTables thì bị chép nguyên văn (MONEY-05/RBAC-02, 2026-09-23).
+  const catTrangThai = (it: any) => {
+    const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, ...con } = it || {};
+    return con;
+  };
+
   const buildData = (quoteNumber: string, projectCode: string | null, projectVersion: number) => ({
     quoteNumber,
     projectCode,
     projectVersion,
     searchText: normalizeSearch(quoteNumber, projectCode, newTitle, src.toCompany, src.toContact),
     title: newTitle,
+    // Ba trường từng bị RƠI khi nhân bản: mất liên kết khách (tên tệp xuất mất mã KH), mất tên
+    // ngắn, và `showTotals` về mặc định true — bản gốc đã ẩn bảng tổng thì bản sao lại hiện nó
+    // trên tệp gửi khách.
+    customerId: src.customerId ?? null,
+    shortTitle: src.shortTitle ?? null,
+    showTotals: src.showTotals,
     toCompany: src.toCompany,
     toContact: src.toContact,
     companyId: src.companyId,
@@ -1950,10 +1966,7 @@ export async function duplicateQuote(req: Request) {
     // báo giá MỚI chưa ai duyệt, chưa ai trả tiền — cùng tinh thần với `carrySheetState`.
     hnTables: (Array.isArray(src.hnTables) ? src.hnTables : []).map((t: any) => ({
       name: t?.name ?? null, templateId: t?.templateId ?? null, groupSubtotal: !!t?.groupSubtotal,
-      items: (t?.items || []).map((it: any) => {
-        const { rid: _rid, paid: _p, paidAt: _pa, paidById: _pb, paidProof: _pp, approved: _a, approvedAt: _aa, approvedBy: _ab, ...con } = it || {};
-        return con;
-      }),
+      items: (t?.items || []).map(catTrangThai),
     })),
     sheets: {
       create: src.sheets.map((s: any, sIdx: number) => ({
@@ -1983,7 +1996,10 @@ export async function duplicateQuote(req: Request) {
             images: (Array.isArray(it.images) && it.images.length) ? it.images : undefined,
           })),
         },
-        extraTables: s.extraTables ?? undefined,
+        // sanitizeExtraTables sinh rid MỚI (rid đã bị cắt ở trên) và trả undefined khi rỗng.
+        extraTables: sanitizeExtraTables((Array.isArray(s.extraTables) ? s.extraTables : []).map((t: any) => ({
+          ...t, items: (t?.items || []).map(catTrangThai),
+        }))),
       })),
     },
   });
