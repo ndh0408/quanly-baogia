@@ -206,7 +206,10 @@ function goiHam(ten: string, trong: string): string {
   const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
-  return r === null || !isFinite(r) ? "NaN" : String(r);
+  // BỌC NGOẶC (L37): trả chuỗi trần thì kết quả dính vào chữ số đứng cạnh — "=2SUM(F2;F3)" thành
+  // "2"+"1113000" = 21.113.000, "=SUM(F2)SUM(F3)" thành 105.000.063.000, ô không đỏ. "(1113000)" đứng
+  // sát "2" là lỗi cú pháp như Excel; biểu thức đúng ("2*(…)", "-(…)") không đổi nghĩa.
+  return r === null || !isFinite(r) ? "NaN" : "(" + String(r) + ")";
 }
 
 export function evalFormula(input: string, refs?: FormulaRefs): number | null {

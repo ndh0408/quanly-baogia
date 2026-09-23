@@ -213,7 +213,8 @@ function goiHam(ten: string, trong: string): string {
   const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
-  return (r === null || !isFinite(r)) ? "NaN" : String(r);
+  // Bọc ngoặc như web (L37): "=2SUM(F2;F3)" không còn ghép thành 21.113.000 mà là lỗi.
+  return (r === null || !isFinite(r)) ? "NaN" : "(" + String(r) + ")";
 }
 
 /** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân — dấu phẩy tách đối
@@ -315,6 +316,11 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   // ngoặc/dấu phẩy nên bỏ hết đi không đổi nghĩa — tệp không bao giờ mang khoảng trắng nào.
   if (/[A-Za-z0-9.)%]\s+[A-Za-z0-9.($]/.test(s)) return null;
   s = s.replace(/\s+/g, "");
+  // Chốt chặn THIẾU TOÁN TỬ (L37): số / ")" / "%" đứng sát tên hàm, ô tham chiếu hay "(", hoặc ")" /
+  // "%" đứng sát một số — "2SUM(…)", "SUM(…)SUM(…)", "2(G13)", "ROUND(G13,-3)5" — Excel không đọc được
+  // (tệp phải "sửa chữa", công thức bị xoá). Trước đây lọt cả chốt ký tự lẫn soDoiSoHopLe, và bộ tự
+  // kiểm cũng ghép số y như lưới nên khớp nhau.
+  if (/[\d.)%][A-Za-z($]|[)%][\d.]/.test(s)) return null;
 
   // Chốt chặn: chỉ còn ký tự hợp lệ của công thức Excel.
   if (!/^[A-Za-z0-9.,:%+\-*/()$]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
