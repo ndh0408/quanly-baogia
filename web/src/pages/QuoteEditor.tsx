@@ -421,8 +421,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   };
 
   // ── save ───────────────────────────────────────────────────────────────────
-  const save = async () => {
-    if (saving) return;
+  // Trả `true` CHỈ khi bản đang soạn đã nằm trên máy chủ VÀ editor vẫn đứng ở báo giá này. Mọi
+  // đường khác trả `false`: đang lưu dở, lỗi, 409 (kể cả khi người dùng bấm Hủy ở hộp xung đột — lúc
+  // đó phần đang soạn vẫn CHƯA được lưu), và báo giá mới (hash đổi, editor sắp nạp lại từ đầu).
+  // `luuTruocNeuCan` dựa vào giá trị này để quyết định có chốt tiếp hay không.
+  const save = async (): Promise<boolean> => {
+    if (saving) return false;
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -478,6 +482,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // 40 phút mất trắng. Lưới an toàn chỉ còn hiệu lực cho phiên chưa từng bấm Lưu.
         baseNhapRef.current = (saved as { updatedAt?: string }).updatedAt ?? null;
       }
+      return !isNew;
     } catch (ex) {
       // Khóa lạc quan: server trả 409 khi NGƯỜI KHÁC vừa lưu báo giá này (baseUpdatedAt lệch) →
       // KHÔNG ghi đè ngầm. Hỏi rõ + cho TẢI LẠI bản mới (reload đảm bảo nạp đúng toàn bộ luồng load).
@@ -492,7 +497,24 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       } else {
         toast(errText(ex), "error");
       }
+      return false;
     } finally { setSaving(false); }
+  };
+  /* ── CÒN THAY ĐỔI CHƯA LƯU THÌ PHẢI LƯU TRƯỚC KHI CHỐT / KHÔNG CHỐT (FE-01) ─────────────────
+     Máy chủ tính `convertedTotal` từ `QuoteSheet.subtotal` ĐÃ LƯU, còn hộp chốt lại cộng từ lưới ĐANG
+     SOẠN. Sửa giá cuối rồi bấm chốt ngay (kịch bản rất tự nhiên) là người dùng xác nhận số X mà hệ
+     thống ghi Y — một con số không sửa được, nuôi KPI doanh thu. Sau đó qRef bị thay bằng bản máy
+     chủ: phần vừa sửa biến mất, ô meta (input không kiểm soát) vẫn HIỆN chữ mới trong khi model đã
+     về giá trị cũ, và bản nháp cục bộ mang mốc cũ nên lần mở sau bị bỏ qua im lặng.
+     Lưu trước thì con số trong hộp chốt chính là con số máy chủ sẽ ghi, và không còn gì để mất. */
+  const luuTruocNeuCan = async (viec: string): Promise<boolean> => {
+    if (!dirtyRef.current) return true;
+    const ok = await confirmModal(
+      "Còn thay đổi chưa lưu",
+      `Phải Lưu trước khi ${viec} — số ghi nhận lấy từ bản ĐÃ LƯU trên máy chủ, không phải từ phần đang soạn.`,
+      { confirmText: "Lưu rồi tiếp tục" },
+    );
+    return ok && (await save());
   };
   const convert = async () => {
     // ── BÀY RA TỪNG TRANG TRƯỚC KHI CHỐT ────────────────────────────────────
@@ -503,8 +525,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     // Hộp dưới hiện ba nhóm (đã duyệt · chưa có ý kiến · khách KHÔNG duyệt), cho duyệt hết nhóm
     // chưa có ý kiến, cho ĐỒNG Ý LẠI trang đang bị từ chối, và hiện SỐ TIỀN sẽ ghi nhận — cập nhật
     // ngay theo từng lựa chọn.
-    // `sheets` (dòng ~318) đã là `q.sheets as Sheet[]` — dùng lại, đừng khai lại bằng `q.sheets ||
-    // []` vì bản đó mất kiểu và mọi phép đọc trường bên dưới thành `unknown`.
+    if (!(await luuTruocNeuCan("chốt báo giá"))) return;
+    // Đọc LẠI từ qRef: vừa Lưu xong thì qRef đã là bản máy chủ mới (id sheet mới, số đã lưu), còn
+    // `q`/`sheets` của lượt render này vẫn trỏ vào object cũ. Giữ `as Sheet[]` — `q.sheets || []`
+    // mất kiểu và mọi phép đọc trường bên dưới thành `unknown`.
+    const q = qRef.current as QuoteFull & { _activeSheet: number };
+    const sheets = q.sheets as Sheet[];
+    const ai = q._activeSheet;
     if (!sheets.length) { toast("Báo giá chưa có trang nào", "error"); return; }
     const chuaLuu = sheets.filter((s) => !s.id).length;
     if (chuaLuu) {
@@ -539,12 +566,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       const u = await api.markConverted(q.id);
       qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
       stampKeys(qRef.current);
+      // Chốt ghi vào hàng Quote → updatedAt đổi. Mốc bản nháp phải theo, không thì bản nháp ghi sau
+      // này mang mốc cũ và lần mở sau bị bỏ qua im lặng.
+      baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
       const ghi = Number((u as { convertedTotal?: unknown }).convertedTotal ?? u.total);
       toast(`Đã chốt báo giá — ghi nhận ${Math.round(ghi).toLocaleString("vi-VN")} đ`, "success");
       redraw();
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   const lost = async () => {
+    // markLost không đụng tiền, nhưng sau đó qRef bị thay bằng bản máy chủ → phần chưa lưu mất.
+    if (!(await luuTruocNeuCan("đánh dấu không chốt"))) return;
+    const q = qRef.current as QuoteFull & { _activeSheet: number };
+    const ai = q._activeSheet;
     const reason = await promptModal(
       "Không chốt được CẢ báo giá này",
       `Đánh dấu CẢ báo giá — tất cả ${(q.sheets || []).length} trang — là không chốt được. KHÔNG đảo lại được.
@@ -553,8 +587,36 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null) return;
-    try { const u = await api.markLost(q.id, reason); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
+  };
+  /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
+     Trước đây thay NGUYÊN qRef bằng bản máy chủ → mọi thay đổi chưa lưu trên lưới biến mất, y như
+     lỗi của chốt. Nhưng ép Lưu ở đây là quá tay: assignHn/reviewHn (src/hnWorkflow.ts) chỉ ghi
+     trạng thái HN + thành viên, KHÔNG đụng hnTables hay lưới.
+     · Không có gì chưa lưu → thay nguyên như cũ (an toàn, và lấy luôn bảng HN mới nhất).
+     · Đang có thay đổi → chỉ VÁ các trường HN. `updatedAt` + mốc bản nháp BẮT BUỘC đi theo, không
+       thì lần Lưu sau nhận 409 (hộp 409 dẫn tới reload — lại mất dữ liệu). Mẫu y hệt onQuoteTouched.
+       NGOẠI LỆ: bảng HN trên máy chủ khác bảng HN đang có ở đây (account vừa gửi giá sau lúc mở
+       trang, hoặc chính mình đang sửa dở bảng HN) — khi đó KHÔNG đẩy mốc updatedAt, để khoá lạc
+       quan vẫn chặn việc lượt Lưu kế tiếp đè bảng HN cũ lên phần account vừa gửi. */
+  const napLaiSauHn = async () => {
+    const cur = qRef.current as QuoteFull & { _activeSheet: number } | null;
+    if (!cur) return;
+    try {
+      const u = await api.getQuote(cur.id);
+      if (!dirtyRef.current) {
+        qRef.current = { ...u, _activeSheet: cur._activeSheet } as QuoteFull; stampKeys(qRef.current);
+        baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
+        redraw(); return;
+      }
+      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...(t as object), _k: undefined, items: ((t as { items?: unknown[] }).items || []).map((it) => ({ ...(it as object), _k: undefined })) })));
+      const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
+      const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
+      for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];
+      if (giongHn) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; }
+      redrawMeta();
+    } catch { /* ignore */ }
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
@@ -912,7 +974,7 @@ Lý do (không bắt buộc):`,
             <>
               {!isNew && hasPerm("quote:hn:manage") && (
                 <HnManagerPanel quoteId={q.id} hnStatus={q.hnStatus} hnRejectNote={(q as Record<string, unknown>).hnRejectNote as string | undefined}
-                  onReload={async () => { try { const u = await api.getQuote(q.id); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw(); } catch { /* ignore */ } }} />
+                  onReload={napLaiSauHn} />
               )}
               {hnKhoa && <div className="khoi-sheet-note muted">Phần Hà Nội đã {q.hnStatus === "approved" ? "duyệt" : "gửi duyệt"} — chỉ người phụ trách phần Hà Nội mở lại được.</div>}
             </>

@@ -1,0 +1,173 @@
+/** @vitest-environment jsdom */
+//
+// FE-01: CHỐT / KHÔNG CHỐT / GIAO-DUYỆT PHẦN HN KHI CÒN THAY ĐỔI CHƯA LƯU.
+//
+// Máy chủ tính `convertedTotal` từ bản ĐÃ LƯU, hộp chốt thì cộng từ lưới ĐANG SOẠN. Bấm chốt khi còn
+// thay đổi chưa lưu = xác nhận số X, hệ thống ghi số Y (không sửa được, nuôi KPI), rồi qRef bị thay
+// bằng bản máy chủ và phần vừa sửa biến mất. Ba điều gác ở đây:
+//   1. dirty → phải hỏi, và Lưu (updateQuote) phải chạy TRƯỚC markConverted/markLost.
+//   2. Hủy hộp, hoặc Lưu thất bại (409 / lỗi) → KHÔNG chốt.
+//   3. Giao / duyệt phần HN khi dirty → không đè phần đang soạn, và mốc updatedAt đi theo máy chủ
+//      để lần Lưu sau không dính 409 giả.
+// Cùng khuôn createRoot + act với GridTable.component.test.tsx (không @testing-library).
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+
+const MAU = [{ id: 1, code: "gn", name: "GN", companyId: 7, layout: { hasDays: false } }];
+const CTY = [{ id: 7, name: "Gia Nguyễn" }];
+
+const baoGia = (over: Record<string, unknown> = {}) => ({
+  id: 11, quoteNumber: "GN26011", title: "Sự kiện", status: "sent", companyId: 7, createdById: 1,
+  toCompany: "Khách cũ", vatPercent: 0, discount: 0, showTotals: true, quoteDate: "2026-09-20",
+  updatedAt: "2026-09-20T00:00:00.000Z", hnStatus: "submitted", hnTables: [], members: [],
+  sheets: [{ id: 101, templateId: 1, name: "Trang 1", groupSubtotal: false, items: [{ kind: "item", name: "Backdrop", unit: "cái", quantity: 1, unitPrice: 1000 }], extraTables: [] }],
+  ...over,
+});
+
+const thuTu: string[] = [];
+const h = vi.hoisted(() => ({
+  updateQuote: null as unknown as ReturnType<typeof vi.fn>,
+  confirmTraVe: true,
+}));
+
+vi.mock("../lib/api", async (goc) => {
+  const that = await goc<typeof import("../lib/api")>();
+  const fns: Record<string, ReturnType<typeof vi.fn>> = {
+    metaCompanies: vi.fn(async () => CTY),
+    metaTemplates: vi.fn(async () => MAU),
+    getQuote: vi.fn(async () => baoGia()),
+    presence: vi.fn(async () => ({ editing: [] })),
+    hnAccounts: vi.fn(async () => ({ data: [] })),
+    updateQuote: vi.fn(async (_id: number, p: Record<string, unknown>) => { thuTu.push("updateQuote"); return baoGia({ toCompany: p.toCompany, updatedAt: "2026-09-21T00:00:00.000Z" }); }),
+    markConverted: vi.fn(async () => { thuTu.push("markConverted"); return baoGia({ status: "converted", updatedAt: "2026-09-22T00:00:00.000Z" }); }),
+    markLost: vi.fn(async () => { thuTu.push("markLost"); return baoGia({ status: "lost", updatedAt: "2026-09-22T00:00:00.000Z" }); }),
+    sheetCustomerDecision: vi.fn(async () => ({ custStatus: "approved" })),
+    hnReview: vi.fn(async () => { thuTu.push("hnReview"); return {}; }),
+  };
+  h.updateQuote = fns.updateQuote;
+  const api = new Proxy(fns, { get: (t, k: string) => t[k] ?? (t[k] = vi.fn(async () => ({}))) });
+  return { ...that, api };
+});
+vi.mock("../lib/ui", async (goc) => ({
+  ...(await goc<typeof import("../lib/ui")>()),
+  toast: vi.fn(),
+  confirmModal: vi.fn(async () => h.confirmTraVe),
+  promptModal: vi.fn(async () => "lý do"),
+  modalChotBaoGia: vi.fn(async () => []),
+}));
+vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("../lib/venueCatalog")>()), loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) }));
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+import { QuoteEditorPage } from "./QuoteEditor";
+import { api, ApiError } from "../lib/api";
+import * as ui from "../lib/ui";
+
+const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
+
+let root: Root | null = null;
+let hop: HTMLDivElement | null = null;
+const cho = async (ms = 0) => { await act(async () => { await new Promise((r) => setTimeout(r, ms)); }); };
+
+async function moEditor() {
+  hop = document.createElement("div");
+  document.body.appendChild(hop);
+  root = createRoot(hop);
+  await act(async () => { root!.render(<QuoteEditorPage me={ME} quoteId={11} isNew={false} />); });
+  await cho(10);
+}
+const nut = (chu: string) => {
+  const b = [...hop!.querySelectorAll("button")].find((x) => x.textContent?.includes(chu));
+  if (!b) throw new Error("không thấy nút " + chu);
+  return b as HTMLButtonElement;
+};
+const oTenKhach = () => hop!.querySelector('input[placeholder="Tên công ty khách"]') as HTMLInputElement;
+function goTenKhach(chu: string) {
+  act(() => { const el = oTenKhach(); el.value = chu; el.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+const bam = async (b: HTMLButtonElement) => { await act(async () => { b.click(); }); await cho(10); };
+
+beforeEach(() => {
+  thuTu.length = 0;
+  h.confirmTraVe = true;
+  vi.clearAllMocks();
+  localStorage.clear();
+});
+afterEach(async () => {
+  await cho(1300);   // hẹn giờ ghi bản nháp 1,2s — cho nổ trong act rồi mới tháo cây
+  if (root) act(() => root!.unmount());
+  root = null; hop?.remove(); hop = null; document.body.innerHTML = "";
+});
+
+describe("FE-01 — chốt khi còn thay đổi chưa lưu", () => {
+  it("dirty → hỏi, Lưu CHẠY TRƯỚC markConverted, và payload Lưu mang đúng phần vừa gõ", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    await bam(nut("Khách chốt cả báo giá"));
+    expect(ui.confirmModal).toHaveBeenCalledWith("Còn thay đổi chưa lưu", expect.any(String), expect.objectContaining({ confirmText: "Lưu rồi tiếp tục" }));
+    expect(thuTu).toEqual(["updateQuote", "markConverted"]);
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).toCompany).toBe("Khách MỚI");
+  });
+
+  it("Hủy hộp → KHÔNG lưu, KHÔNG chốt", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.confirmTraVe = false;
+    await bam(nut("Khách chốt cả báo giá"));
+    expect(thuTu).toEqual([]);
+    expect(api.markConverted).not.toHaveBeenCalled();
+  });
+
+  it("Lưu dính 409 (người dùng bấm Hủy ở hộp xung đột) → KHÔNG chốt", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.updateQuote.mockImplementationOnce(async () => { thuTu.push("updateQuote"); throw new ApiError("xung đột", 409, {}); });
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(async () => true)     // "Lưu rồi tiếp tục"
+      .mockImplementationOnce(async () => false);   // hộp 409: Hủy
+    await bam(nut("Khách chốt cả báo giá"));
+    expect(thuTu).toEqual(["updateQuote"]);
+    expect(ui.confirmModal).toHaveBeenCalledTimes(2);   // đã tới đúng hộp 409, không phải nhánh lỗi thường
+    expect(api.markConverted).not.toHaveBeenCalled();
+  });
+
+  it("KHÔNG dirty → chốt thẳng, không hỏi Lưu", async () => {
+    await moEditor();
+    await bam(nut("Khách chốt cả báo giá"));
+    expect(thuTu).toEqual(["markConverted"]);
+    expect(ui.confirmModal).not.toHaveBeenCalled();
+  });
+
+  it("Khách không chốt: dirty → Lưu chạy TRƯỚC markLost", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    await bam(nut("Khách không chốt"));
+    expect(thuTu).toEqual(["updateQuote", "markLost"]);
+  });
+
+  it("Khách không chốt: Hủy hộp Lưu → không gọi markLost", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    h.confirmTraVe = false;
+    await bam(nut("Khách không chốt"));
+    expect(api.markLost).not.toHaveBeenCalled();
+  });
+});
+
+describe("FE-01 — giao / duyệt phần Hà Nội khi còn thay đổi chưa lưu", () => {
+  it("Duyệt HN khi dirty: phần đang soạn còn nguyên và lần Lưu sau gửi updatedAt MỚI (không 409 giả)", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    (api.getQuote as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => baoGia({ hnStatus: "approved", updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    expect(api.hnReview).toHaveBeenCalled();
+    expect(api.updateQuote).not.toHaveBeenCalled();         // không ép Lưu cho thao tác HN
+    expect(oTenKhach().value).toBe("Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls[0][1] as Record<string, unknown>;
+    expect(p.toCompany).toBe("Khách MỚI");                  // bản cũ: qRef bị thay → gửi "Khách cũ"
+    expect(p.baseUpdatedAt).toBe("2026-09-21T05:00:00.000Z");
+    expect(p.hnStatus).toBe("approved");
+  });
+});
