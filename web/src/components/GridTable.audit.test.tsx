@@ -84,6 +84,8 @@ function goEnter(row: number, field: string, chu: string) {
   phim(o(row, field), "Enter");
 }
 const coDo = (row: number, field: string) => o(row, field).closest("td")!.classList.contains("cell-fx-error");
+/** Chữ của mọi toast đang hiện (afterEach dọn body nên mỗi bài bắt đầu trống). */
+const toastChu = () => document.getElementById("toast-host")?.textContent ?? "";
 async function xaHen() {
   await act(async () => { await new Promise((r) => setTimeout(r, 220)); });
 }
@@ -187,12 +189,99 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     gia.forEach((v, k) => expect(items[k].unitPrice).toBe(v));
   });
 
-  it("GRID-01: khối KHÔNG suy được quy ước (SL '1.500' + giá '90') → giữ cách cũ: SL thập phân 1,5", () => {
+  // Tên cũ ghi "giữ cách cũ" là sai: master đọc khối này ra SL 1500. Đây là ĐÁNH ĐỔI của GRID-01 (không
+  // phân định được thì chọn thập phân), và từ grid#8 nó không còn im lặng — có cảnh báo để Ctrl+Z.
+  it("GRID-01: khối KHÔNG suy được quy ước (SL '1.500' + giá '90'), không có text/html → SL thập phân 1,5 + cảnh báo", () => {
     const items = [hang("A", "cái", 1, 1)];
     moLuoi(items);
     vaoO(o(0, "quantity"));
     dan(o(0, "quantity"), "1.500\t90");
     expect(items[0].quantity).toBeCloseTo(1.5, 6);
+    expect(toastChu()).toMatch(/"1\.500" đã đọc là 1,5.*Ctrl\+Z/);
+  });
+
+  // ── Soát chéo grid#8: ô SL mơ hồ ("1.000", "1,500") dán một ô / điền vùng / khối không tín hiệu ──
+  // Excel/Sheets/Calc để GIÁ TRỊ GỐC của ô số trong text/html cùng lần chép → phân định được.
+  const excelHtml = (hang: [string, number | null][][]) =>
+    `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><body><table>\r\n<!--StartFragment-->\r\n` +
+    hang.map((r) => ` <tr height=20>` + r.map(([chu, so]) => `<td${so == null ? "" : ` align=right x:num="${so}"`}>${chu}</td>`).join("") + `</tr>\r\n`).join("") +
+    `<!--EndFragment-->\r\n</table></body></html>`;
+  it("grid#8 — dán MỘT ô SL '1.500' từ Excel VN (x:num=1500) → 1500, không cảnh báo", () => {
+    const items = [hang("Tờ rơi", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "1.500\r\n", "text/html": excelHtml([[["1.500", 1500]]]) });
+    expect(items[0].quantity).toBe(1500);
+    expect(toastChu()).not.toMatch(/Ctrl\+Z/);
+  });
+  it("grid#8 — dán MỘT ô SL '2,675' từ Excel VN (x:num=2.6749999999999998) → 2,675", () => {
+    const items = [hang("Vách", "m2", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "2,675\r\n", "text/html": excelHtml([[["2,675", 2.6749999999999998]]]) });
+    expect(items[0].quantity).toBeCloseTo(2.675, 9);
+  });
+  it("grid#8 — dán ô '1,500' từ Excel máy US (x:num=1500) → 1500", () => {
+    const items = [hang("Tờ rơi", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "1,500\r\n", "text/html": excelHtml([[["1,500", 1500]]]) });
+    expect(items[0].quantity).toBe(1500);
+  });
+  it("grid#8 — dán CỘT SL không tín hiệu ['1.000','2.000','500'] từ Excel VN → 1000 / 2000 / 500", () => {
+    const items = [hang("A", "tờ", 1, 1), hang("B", "tờ", 1, 1), hang("C", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "1.000\r\n2.000\r\n500\r\n", "text/html": excelHtml([[["1.000", 1000]], [["2.000", 2000]], [["500", null]]]) });
+    expect(items.map((i) => i.quantity)).toEqual([1000, 2000, 500]);
+  });
+  it("grid#8 — dán khối [Hạng mục | ĐVT | SL] từ brief Excel VN → SL 1000 / 2000", () => {
+    const items = [hang("", "", 0, 0), hang("", "", 0, 0)];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    dan(o(0, "name"), {
+      "text/plain": "Tờ rơi\ttờ\t1.000\r\nBanner\tcái\t2.000\r\n",
+      "text/html": excelHtml([[["Tờ rơi", null], ["tờ", null], ["1.000", 1000]], [["Banner", null], ["cái", null], ["2.000", 2000]]]),
+    });
+    expect(items.map((i) => [i.name, i.unit, i.quantity])).toEqual([["Tờ rơi", "tờ", 1000], ["Banner", "cái", 2000]]);
+  });
+  it("grid#8 — điền cả VÙNG SL bằng một ô '1.500' từ Google Sheets (data-sheets-value) → 1500 mọi ô", () => {
+    const items = [hang("A", "tờ", 1, 1), hang("B", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    phim(o(0, "quantity"), "ArrowDown", { shift: true });
+    dan(o(1, "quantity"), { "text/plain": "1.500", "text/html": `<google-sheets-html-origin><span data-sheets-root="1" data-sheets-value="{&quot;1&quot;:3,&quot;3&quot;:1500}">1.500</span>` });
+    expect([items[0].quantity, items[1].quantity]).toEqual([1500, 1500]);
+  });
+  it("grid#8 — giá trị gốc của ô đứng trên quy ước khối: SL '2.675' (gốc 2,675) cạnh giá '250.000' → 2,675", () => {
+    const items = [hang("Vách", "m2", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "2.675\t250.000\r\n", "text/html": excelHtml([[["2.675", 2.675], ["250.000", 250000]]]) });
+    expect([items[0].quantity, items[0].unitPrice]).toEqual([2.675, 250000]);
+  });
+  it("grid#8 — HTML lệch hàng so với TSV thì bỏ qua (không đoán), rơi về thập phân + cảnh báo", () => {
+    const items = [hang("A", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), { "text/plain": "1.500", "text/html": excelHtml([[["1.500", 1500]], [["9", 9]]]) });
+    expect(items[0].quantity).toBeCloseTo(1.5, 6);
+    expect(toastChu()).toMatch(/Ctrl\+Z/);
+  });
+  it("grid#8 — giá trị gốc chỉ PHÂN ĐỊNH, không thay chuỗi: Đơn giá '15%' (gốc 0,15) vẫn đọc như trước", () => {
+    const items = [hang("A", "gói", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "unitPrice"));
+    dan(o(0, "unitPrice"), { "text/plain": "15%", "text/html": excelHtml([[["15%", 0.15]]]) });
+    expect(items[0].unitPrice).toBe(15);
+  });
+  it("grid#8 — dán MỘT ô SL '1.500' không có text/html (Zalo/Word) → 1,5 nhưng CÓ cảnh báo, không im lặng", () => {
+    const items = [hang("Tờ rơi", "tờ", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), "1.500");
+    expect(items[0].quantity).toBeCloseTo(1.5, 6);
+    expect(toastChu()).toMatch(/"1\.500" đã đọc là 1,5.*nếu ý là 1500.*Ctrl\+Z/);
   });
 
   // Soát chéo grid#9: payload nội bộ chỉ nói "chép trong app", KHÔNG nói ô nguồn là số. Ô Ghi chú

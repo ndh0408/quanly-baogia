@@ -16,6 +16,9 @@ import {
   suyQuyUocSo,
   parseTheoQuyUoc,
   khopQuyUoc,
+  giaTriGocTuHtml,
+  quyUocTheoGiaTriGoc,
+  soMoHoNghin,
 } from "../web/src/lib/clipboard.ts";
 // NGUỒN ĐÃ ĐỔI 2026-08-26: `public/grid-clipboard.js` bị gỡ cùng SPA cũ. Bản React
 // `web/src/lib/clipboard.ts` là port THUẦN của nó và export ĐÚNG 13 hàm y hệt, nên bộ test này
@@ -353,6 +356,65 @@ describe("suyQuyUocSo / parseTheoQuyUoc — quy ước số của cả khối", 
     expect(b.unitPrice).toBe(250000);
     const [c] = reconstructExportRows([["1", "Ghế", "", "cái", "1.500", "95.000", "142.500.000"]], R, N);
     expect(c.quantity).toBe(1500);   // ô khớp khuôn vẫn theo quy ước khối như cũ
+  });
+});
+
+// Soát chéo grid#8: chuỗi text/plain chỉ là cái ô HIỆN ra ở máy nguồn — "1.500" từ Excel VN (1500 cái)
+// và "1.500" từ Excel US (1,5 m²) giống hệt nhau. Phần text/html cùng lần chép mang giá trị gốc.
+describe("giaTriGocTuHtml / quyUocTheoGiaTriGoc / soMoHoNghin — grid#8", () => {
+  // Dựng theo khuôn "HTML Format" Excel Windows đặt lên clipboard (CHƯA đối chiếu bản chụp clipboard
+  // thật): x:num có giá trị khi chuỗi hiện khác giá trị gốc, x:num trống khi trùng; <!--table …--> trong
+  // <style> không được tính là bảng; thuộc tính có ">" trong ngoặc kép không cắt ngang thẻ.
+  const EXCEL = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><style><!--table {mso-displayed-decimal-separator:"\\,"; mso-displayed-thousand-separator:"\\.";} td {mso-number-format:General;} --></style></head><body>
+<table border=0 cellpadding=0 cellspacing=0 width=192>
+<!--StartFragment-->
+ <col width=64 span=3>
+ <tr height=20 style='height:15.0pt'>
+  <td height=20 width=64 style='height:15.0pt;width:48pt'>Tờ rơi</td>
+  <td class=xl65 align=right x:num="1500">1.500</td>
+  <td class=xl66 align=right x:num="2.6749999999999998">2,675</td>
+ </tr>
+ <tr height=20>
+  <td colspan=2 x:str="a > b">a &gt; b</td>
+  <td align=right x:num>12</td>
+ </tr>
+<!--EndFragment-->
+</table></body></html>`;
+  it("Excel: đọc x:num theo đúng hàng/cột (giãn colspan); x:num trống và ô chữ → null", () => {
+    expect(giaTriGocTuHtml(EXCEL)).toEqual([[null, 1500, 2.675], [null, null, null]]);
+  });
+  it("Google Sheets: data-sheets-value kiểu số (\"1\":3), cả bảng lẫn một ô (<span>)", () => {
+    const bang = `<google-sheets-html-origin><style><!--td {border: 1px solid #ccc;}--></style><table data-sheets-root="1"><colgroup><col width="100"/></colgroup><tbody><tr><td data-sheets-value="{&quot;1&quot;:3,&quot;3&quot;:1500}">1.500</td><td data-sheets-value="{&quot;1&quot;:2,&quot;2&quot;:&quot;1.500&quot;}">1.500</td></tr></tbody></table>`;
+    expect(giaTriGocTuHtml(bang)).toEqual([[1500, null]]);
+    const motO = `<google-sheets-html-origin><span style="font-size:10pt" data-sheets-root="1" data-sheets-value="{&quot;1&quot;:3,&quot;3&quot;:1.5}">1.500</span>`;
+    expect(giaTriGocTuHtml(motO)).toEqual([[1.5]]);
+  });
+  it("LibreOffice Calc: sdval; rowspan giữ đúng cột của các ô hàng dưới", () => {
+    const html = `<table><tr><td rowspan="2">Gộp</td><td sdval="1500" sdnum="1066;0;#.##0">1.500</td></tr><tr><td sdval="2.5">2,5</td></tr></table>`;
+    expect(giaTriGocTuHtml(html)).toEqual([[null, 1500], [null, 2.5]]);
+  });
+  it("không có bảng, hai bảng, hay chuỗi rỗng → null (không đoán)", () => {
+    expect(giaTriGocTuHtml("")).toBeNull();
+    expect(giaTriGocTuHtml(null)).toBeNull();
+    expect(giaTriGocTuHtml("<p>1.500</p>")).toBeNull();
+    expect(giaTriGocTuHtml("<table><tr><td x:num=\"1\">1</td></tr></table><table><tr><td>2</td></tr></table>")).toBeNull();
+  });
+  it("quyUocTheoGiaTriGoc chỉ PHÂN ĐỊNH cách đọc chuỗi hiện ra, không thay chuỗi bằng giá trị gốc", () => {
+    expect(quyUocTheoGiaTriGoc("1.500", 1500)).toBe("vn");
+    expect(quyUocTheoGiaTriGoc("1.500", 1.5)).toBe("us");
+    expect(quyUocTheoGiaTriGoc("1,500", 1500)).toBe("us");
+    expect(quyUocTheoGiaTriGoc("2,675", 2.6749999999999998)).toBe("vn");
+    expect(quyUocTheoGiaTriGoc("1.500", 1500.4)).toBe("vn");      // định dạng #,##0 làm tròn hiển thị
+    expect(quyUocTheoGiaTriGoc("2,68", 2.675)).toBe("vn");        // định dạng 0,00
+    expect(quyUocTheoGiaTriGoc("(1.500)", -1500)).toBe("vn");
+    expect(quyUocTheoGiaTriGoc("1500", 1500)).toBeNull();          // hai cách đọc trùng nhau — không cần phân định
+    expect(quyUocTheoGiaTriGoc("15%", 0.15)).toBeNull();           // phần trăm: không cách đọc nào khớp → giữ cách cũ
+    expect(quyUocTheoGiaTriGoc("23/09/2026", 46288)).toBeNull();   // ngày (số seri)
+    expect(quyUocTheoGiaTriGoc("1.500", null)).toBeNull();
+  });
+  it("soMoHoNghin: một dấu kèm đúng 3 chữ số, phần nguyên không bắt đầu bằng 0", () => {
+    for (const s of ["1.500", "1,500", "13.524", "-1.500", "(1.500)", "999,999"]) expect(soMoHoNghin(s)).toBe(true);
+    for (const s of ["0,125", "0.500", "2.5", "1.500.000", "1500", "1.234,5", "12.50", ""]) expect(soMoHoNghin(s)).toBe(false);
   });
 });
 
