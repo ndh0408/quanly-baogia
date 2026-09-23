@@ -144,10 +144,12 @@ export async function rotateRefreshToken(
   // Verify account state BEFORE issuing the new token so we never create an
   // orphaned, still-valid refresh token for a locked/deleted account.
   //
-  // `lockedUntil` phải được kiểm ở đây y như bearerAuth và enforceActiveUser (src/middleware.ts)
-  // đã làm: thiếu nó thì tài khoản đang bị khoá vì dò mật khẩu vẫn tiếp tục làm mới được thông tin
-  // đăng nhập của mình suốt cửa sổ khoá — khoá không cắt được chuỗi credential, chỉ hoãn nó.
+  // `lockedUntil` phải được kiểm ở đây: đây là nơi CẤP chứng thư mới, cùng vai với
+  // authCore.authenticateCredentials. Thiếu nó thì tài khoản đang bị khoá vì dò mật khẩu vẫn tiếp
+  // tục làm mới được thông tin đăng nhập của mình suốt cửa sổ khoá.
   // Token cũ đã bị CAS tiêu thụ ở trên nên caller buộc phải đăng nhập lại, đúng ý muốn.
+  // (bearerAuth/enforceActiveUser ở src/middleware.ts CỐ Ý không kiểm lockedUntil nữa — AUTH-02:
+  // khoá tạm chặn CẤP mới, không thu hồi chứng thư đang sống.)
   const user = await prisma.user.findUnique({ where: { id: row.userId } });
   if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
     throw Object.assign(new Error("Tài khoản đã bị khóa"), { status: 401 });

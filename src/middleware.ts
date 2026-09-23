@@ -59,13 +59,17 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
     // Number() trả số ↔ chính nó; bám đúng giá trị id runtime để Prisma where nhận number.
     const sub = typeof payload === "string" ? payload : payload.sub;
     // SECURITY: never trust role/active from the token claim. Re-load the user on
-    // every request so a deactivated / demoted / locked account loses access
+    // every request so a deactivated / demoted account loses access
     // immediately (within the access-token TTL the token is otherwise valid).
+    //
+    // `lockedUntil` KHÔNG thu hồi chứng thư đã cấp (AUTH-02) — xem chú thích ở enforceActiveUser.
+    // Chốt lockedUntil nằm ở nơi CẤP chứng thư mới: authCore.authenticateCredentials và
+    // jwt.rotateRefreshToken.
     const user = await prisma.user.findUnique({
       where: { id: Number(sub) },
-      select: { id: true, role: true, username: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
+      select: { id: true, role: true, username: true, active: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
-    if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
+    if (!user || !user.active) {
       return next(); // fall through unauthenticated → requireAuth/requireRole reject
     }
     // Access token phát hành TRƯỚC lần đổi mật khẩu gần nhất → coi như không có token.
@@ -121,9 +125,16 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { role: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
+      select: { role: true, active: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
-    if (!user || user.active === false || (user.lockedUntil && user.lockedUntil > new Date())) {
+    // KHOÁ TẠM DO GÕ SAI (`lockedUntil`) KHÔNG GIẾT PHIÊN ĐANG MỞ (AUTH-02, audit 2026-09-23).
+    //
+    // lockedUntil là tín hiệu "ai đó đang đoán mật khẩu", không phải "phiên này bị đánh cắp". Nó chặn
+    // việc CẤP chứng thư mới (/login, /token/refresh) — đúng mục đích của lockout. Trước đây chốt
+    // này còn huỷ luôn phiên đã xác thực bằng mật khẩu (+MFA), nên một kẻ lạ ngoài Internet chỉ cần
+    // 5 lần gõ sai ẩn danh là đá văng chủ tài khoản giữa lúc soạn báo giá, rồi lặp lại mỗi 15 phút.
+    // Thu hồi phiên thật sự vẫn đủ đường: active=false, đổi mật khẩu (passwordChangedAt), xoá tài khoản.
+    if (!user || user.active === false) {
       return req.session.destroy(() =>
         res.status(401).json({
           error: "Phiên đã kết thúc — tài khoản bị khóa hoặc vô hiệu hóa",
