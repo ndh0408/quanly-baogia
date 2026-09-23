@@ -4293,3 +4293,16 @@ textarea[aria-invalid="true"] {
 .summary-table.clf-theme tfoot td {
   background: #f4cfb0;
 }
+
+/* VÙNG CHỌN NHIỀU Ô TRÊN HÀNG NHÓM / NHÓM CON (cả hai chế độ, GN lẫn Colorfull).
+   Ý định của public/style.css (luật `.excel-table td.cell-selected`) là lớp xanh BÁN TRONG SUỐT phủ lên
+   màu hàng, nhưng luật đó (0,2,1) thua màu hàng nhóm `.excel-table tr.section-row td` (0,2,2), các luật
+   `.clf-theme` và luật tối có `:not(#nhom-toi)`: ô nhóm vẫn mang lớp cell-selected mà nền y như ô chưa
+   chọn — người dùng không thấy ô nhóm nào nằm trong vùng sắp copy / xoá / điền.
+   Phủ bằng background-IMAGE nên không đụng background-color của hàng (phân cấp nhóm vẫn lộ ra), cùng
+   độ đậm 13% với hàng thường. `:not(#nhom-toi)` (không phần tử nào mang id này) cộng độ ưu tiên cấp id
+   → (1,5,2) thắng luật tối (1,4,2); hàng nhóm con cũng mang lớp section-row nên một bộ chọn phủ cả hai.
+   `:not(.cell-anchor)`: ô neo giữ nền gốc như Excel, chỉ có viền. */
+:root .excel-table tr.section-row:not(#nhom-toi) td.cell-selected:not(.cell-anchor) {
+  background-image: linear-gradient(rgb(23 105 214 / 0.13), rgb(23 105 214 / 0.13));
+}
