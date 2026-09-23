@@ -229,7 +229,8 @@ function GridTableInner(props: GridTableProps) {
   const editModeRef = useRef<"enter" | "edit" | null>(null);   // null khi READY
   // CẮT kiểu Excel: Ctrl+X chỉ ĐÁNH DẤU vùng nguồn (viền nét đứt) — dữ liệu chỉ bị xoá khi DÁN
   // xong (di chuyển), Esc thì huỷ. Không như cut của trình soạn thảo (xoá ngay).
-  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean } | null>(null);
+  // keys: `_k` của từng hàng nguồn — finishCutMove tìm lại hàng theo khoá, không theo chỉ số (L7).
+  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean; keys?: (number | undefined)[] } | null>(null);
   // Point-mode BÀN PHÍM: đang gõ công thức, ký tự trước con trỏ là toán tử → mũi tên CHỌN Ô THAM
   // CHIẾU (=  ↑ → "=H3", Shift+mũi tên kéo thành vùng "=H3:H5") — đúng thao tác gõ công thức Excel.
   const kbRefRef = useRef<{ el: HTMLInputElement | HTMLTextAreaElement; base: string; after: string; start: { row: number; col: number }; cur: { row: number; col: number }; fresh: boolean } | null>(null);
@@ -308,6 +309,7 @@ function GridTableInner(props: GridTableProps) {
     const m = editUndoRef.current;
     if (m && m.i === i && m.f === f) return;
     pushUndo(); editUndoRef.current = { i, f };
+    cancelCut();   // gõ vào bảng = Excel bỏ chế độ cắt; dán sau đó chỉ CHÉP, không xoá nội dung vừa gõ (L7)
   };
   // dongBo: thao tác vừa GHI ĐÈ model hàng loạt (dán khối / dựng lại) — lượt vẽ kế tiếp kéo ô đang giữ
   // tiêu điểm về model TRƯỚC khi dời tiêu điểm (xem effect đồng bộ ô, soát toàn diện L6).
@@ -954,20 +956,28 @@ function GridTableInner(props: GridTableProps) {
     copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0, images };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
-    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images };
+    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k) };
     else cutPendingRef.current = null;
     paintSel();
   };
   const cancelCut = () => { if (cutPendingRef.current) { cutPendingRef.current = null; paintSel(); } };
   // Dán xong khối CẮT nội bộ → xoá vùng nguồn (trừ các ô đã bị chính khối dán đè lên) = DI CHUYỂN.
+  // HÀNG NGUỒN TÌM THEO `_k` (soát toàn diện L7): chỉ số lưu lúc Ctrl+X lệch ngay khi bảng chèn/xoá
+  // hàng — dán lên hàng NHÓM tự chèn hàng trống dưới nhóm, nguồn nằm dưới trôi xuống, xoá theo chỉ số
+  // cũ là xoá trắng hạng mục KHÁC. Hàng nguồn đã bị xoá khỏi bảng thì thôi. Các thao tác sửa bảng
+  // khác (gõ, chèn/xoá hàng) huỷ hẳn chế độ cắt như Excel — xem cancelCut ở markEditUndo, removeRow…
   const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }) => {
     const cp = cutPendingRef.current; if (!cp) return;
     cutPendingRef.current = null;
-    for (let r = cp.r0; r <= cp.r1; r++) {
+    const viTri = new Map<number, number>(); items.forEach((it, i) => { if (it._k != null) viTri.set(it._k, i); });
+    for (let k = 0; k <= cp.r1 - cp.r0; k++) {
+      const key = cp.keys?.[k];
+      const r = key != null ? (viTri.get(key) ?? -1) : cp.r0 + k;
       const it = items[r] as Record<string, unknown> | undefined; if (!it) continue;
       for (let c = cp.c0; c <= cp.c1; c++) {
         if (r >= dest.r0 && r <= dest.r1 && c >= dest.c0 && c <= dest.c1) continue;   // ô nguồn nằm trong vùng dán
         const f = FIELDS[c];
+        if (RO_FIELDS.has(f)) continue;   // STT là ô tính — ghi vào là để lại thuộc tính rác `_stt` trên hạng mục
         it[f] = NUMERIC.has(f) ? 0 : ""; boCoO(it, f);
         const fx = it.formulas as Record<string, string> | undefined;
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
@@ -1062,12 +1072,13 @@ function GridTableInner(props: GridTableProps) {
   // thức trỏ sai hạng mục, tức SAI TIỀN, không cảnh báo. Nay muốn chèn thì phải qua hai hàm này.
   const chen = (at: number, rows: ItemK[]) => insertRows(items as unknown as RowLike[], at, rows as unknown as RowLike[], adjustRefsForRowEdit);
   const xoa = (at: number, n: number) => removeRows(items as unknown as RowLike[], at, n, adjustRefsForRowEdit);
-  const pushItem = (it: ItemK) => { pushUndo(); it._k = nextK(); const at = insertIndex(); chen(at, [it]); recomputeAll(); onChange(); focusCell(at, "name"); };
+  // Chèn/xoá hàng huỷ chế độ cắt đang chờ (như Excel): toạ độ viền nét đứt đã lệch khỏi hàng nguồn (L7).
+  const pushItem = (it: ItemK) => { pushUndo(); cancelCut(); it._k = nextK(); const at = insertIndex(); chen(at, [it]); recomputeAll(); onChange(); focusCell(at, "name"); };
   const addItem = () => pushItem(M.blankItem(usesDays));
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const removeRow = (i: number) => { pushUndo(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
+  const removeRow = (i: number) => { pushUndo(); cancelCut(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
   const closeSug = () => setSug(null);
@@ -1106,7 +1117,7 @@ function GridTableInner(props: GridTableProps) {
   // Chèn hàng loạt từ modal "Chèn từ rạp" — mỗi hạng mục 1 dòng, đã điền sẵn kích thước.
   const insertCatalogRows = (list: VenueEntry[]) => {
     if (!list.length) return;
-    pushUndo();
+    pushUndo(); cancelCut();
     const at = insertIndex();
     const rows = list.map((en) => {
       const it = M.blankItem(usesDays) as ItemK; it._k = nextK();
@@ -1570,12 +1581,12 @@ function GridTableInner(props: GridTableProps) {
       e.preventDefault(); e.stopPropagation();
       if (e.key === "-") {
         const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1;
-        const xoaNgay = () => { pushUndo(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
+        const xoaNgay = () => { pushUndo(); cancelCut(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
         // Nhiều hàng (vd Ctrl+A rồi Ctrl+- định thu nhỏ trang) → hỏi trước, như hộp Delete của Excel.
         if (n > 1) void confirmModal("Xóa nhiều hàng", `Xóa ${n} hàng đang chọn? (Ctrl+Z hoàn tác được)`, { danger: true, confirmText: `Xóa ${n} hàng` }).then((ok) => { if (ok) xoaNgay(); });
         else xoaNgay();
       }
-      else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
+      else { pushUndo(); cancelCut(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
     const uz = undoRedoKey(ctrl, e.shiftKey, e.key);
@@ -1907,7 +1918,7 @@ function GridTableInner(props: GridTableProps) {
   const toggleApprove = (i: number, checked: boolean) => { pushUndo(); const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
   xuLyRef.current = {
     so: onNumInput, chu: onTxtInput, ta: onTaInput,
-    tenNhom: (i, el) => { (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); },
+    tenNhom: (i, el) => { cancelCut(); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); },
     tenHang: (i, el) => { editingRef.current = true; markEditUndo(i, "name"); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); },
     anh: (i, el) => { addImages(i, el.files); el.value = ""; },
     duyet: toggleApprove,
