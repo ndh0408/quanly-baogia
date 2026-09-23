@@ -87,9 +87,32 @@ import { DashboardPage } from "../pages/Dashboard";
 import { QuoteListPage } from "../pages/QuoteList";
 import { ProjectsPage } from "../pages/Projects";
 import { InvoicesPage } from "../pages/Invoices";
+// CHỈ lấy kiểu — `import type` bị xoá khi biên dịch nên trình soạn vẫn ở chunk riêng.
+import type { QuoteEditorPage as QuoteEditorThat } from "../pages/QuoteEditor";
 // Lazy-load các trang NẶNG/route-riêng (editor + lưới + công thức/clipboard, wizard, view HN) → tách
 // thành chunk riêng, KHÔNG vào bundle chính: HR/Account-list không phải tải editor mới mở app.
-const QuoteEditorPage = lazy(() => import("../pages/QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
+// L72 — TRÌNH SOẠN NẠP TRƯỚC, KHÔNG CHỜ KHUNG XƯƠNG. lazy() LUÔN treo ở lần dựng đầu, kể cả khi chunk
+// về từ service worker sau vài ms, và React 19 giữ khung chờ tối thiểu FALLBACK_THROTTLE_MS = 300 ms rồi
+// mới thay bằng trang thật (trace trên dev: bộ hẹn giờ 260 ms, luồng chính rảnh suốt khoảng đó) — mỗi
+// lần mở báo giá ĐẦU TIÊN của phiên / sau F5. Nên nạp chunk TRƯỚC khi cần: mở thẳng link #/quotes/:id
+// thì nạp ngay lúc tải module này (song song với /api/auth/me), còn lại thì lúc rảnh sau khi vào app
+// (effect trong Shell, chỉ cho ai mở được trình soạn). Chunk đã sẵn → dựng THẲNG component, không treo.
+let editorSan: typeof QuoteEditorThat | null = null;
+let dangNapEditor: Promise<typeof QuoteEditorThat> | null = null;
+function napEditor() {
+  // Lỗi (ChunkLoadError…) thì quên promise hỏng để lần mở thật nạp lại — LazyBoundary lo phần báo lỗi.
+  return (dangNapEditor ??= import("../pages/QuoteEditor").then((m) => (editorSan = m.QuoteEditorPage), (e: unknown) => { dangNapEditor = null; throw e; }));
+}
+const napEditorNgam = () => { napEditor().catch(() => { /* nạp trước hỏng: lúc mở thật lazy() tự nạp lại */ }); };
+if (typeof location !== "undefined" && /^#\/?(?:(?:quotes|redit)\/\d|rnew)/.test(location.hash)) napEditorNgam();
+const QuoteEditorLazy = lazy(() => napEditor().then((C) => ({ default: C })));
+/** Chốt MỘT lần lúc dựng (mỗi route một lần — LazyBoundary có key): chunk sẵn → component thật, chưa →
+ *  lazy. KHÔNG đổi qua lại khi đang hiển thị: đổi kiểu phần tử là React dựng lại trình soạn từ đầu,
+ *  mất phần đang gõ. */
+function QuoteEditorPage(props: Parameters<typeof QuoteEditorThat>[0]) {
+  const [C] = useState(() => editorSan ?? QuoteEditorLazy);
+  return <C {...props} />;
+}
 const NewQuoteWizard = lazy(() => import("../pages/NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
 const AccountHnView = lazy(() => import("../pages/AccountHnView").then((m) => ({ default: m.AccountHnView })));
 const InternalQuoteView = lazy(() => import("../pages/InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
@@ -440,6 +463,16 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   const isWizard = key === "new" && !isAccountHn && !isInternalViewer;
   const hnEditId = isAccountHn && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // account_hn mở BG → view điền HN React
   const internalViewId = isInternalViewer && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
+  // L72: nạp trước chunk trình soạn lúc rảnh — báo giá đầu tiên mở từ Danh sách không phải chờ khung
+  // xương. Chỉ cho ai mở được trình soạn (account HN / tài khoản chi phí có view riêng).
+  const moDuocTrinhSoan = has("quote:read:own") && !isAccountHn && !isInternalViewer;
+  useEffect(() => {
+    if (!moDuocTrinhSoan || editorSan) return;
+    const w: Partial<Pick<Window, "requestIdleCallback" | "cancelIdleCallback">> = window;
+    if (w.requestIdleCallback) { const id = w.requestIdleCallback(napEditorNgam, { timeout: 5000 }); return () => w.cancelIdleCallback?.(id); }
+    const hen = window.setTimeout(napEditorNgam, 2000);   // Safari chưa có requestIdleCallback
+    return () => clearTimeout(hen);
+  }, [moDuocTrinhSoan]);
 
   return (
     <>
