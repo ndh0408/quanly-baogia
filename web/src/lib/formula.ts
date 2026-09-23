@@ -92,40 +92,81 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
  * vì 554.000, rồi lúc xuất Excel bước tự kiểm thấy lệch nên BỎ công thức, chỉ ghi số (người dùng
  * báo 2026-09-23, production quote #47).
  *
- * Chỉ đổi dấu phẩy nằm NGAY TRONG danh sách đối số của một HÀM, và chỉ khi nó KHÔNG THỂ là dấu
- * thập phân: sát ô tham chiếu / dấu âm / ngoặc / chữ ("E2,E3", ",-3"), hoặc là dấu phẩy DUY NHẤT
- * của ROUND/ROUNDUP/ROUNDDOWN (Excel bắt buộc hai đối số). Công thức đã có ";" là kiểu Việt → giữ
- * nguyên; "," ngoài hàm ("=E3*1,5") vẫn là thập phân.
+ * Chỉ xét dấu phẩy nằm NGAY TRONG danh sách đối số của một HÀM ("," ngoài hàm — "=E3*1,5" — vẫn là
+ * thập phân). Mỗi dấu phẩy thuộc một trong hai loại:
+ *   • KHÔNG THỂ là dấu thập phân (sát ô tham chiếu / dấu âm / ngoặc / chữ: "E2,E3", ",-3") → đổi
+ *     thành ";". Kể cả khi công thức ĐÃ có ";" (L29): "=ROUND(SUM(F1,F2);-3)" trước đây bị bỏ qua cả
+ *     công thức, "F1,F2" thành số 58000,57 → lưới 58.000 còn Excel (đọc "G13.G14" là dải) 115.000.
+ *   • Kẹp giữa HAI CHỮ SỐ ("1,5") — có thể là số 1,5 (kiểu Việt) hoặc hai đối số (kiểu Anh):
+ *       - công thức đã có ";" → kiểu Việt chắc chắn → thập phân;
+ *       - hàm MỘT đối số (INT/ABS) → chỉ có thể là thập phân;
+ *       - hàm HAI đối số (ROUND/ROUNDUP/ROUNDDOWN): đã có đúng một dấu tách chắc chắn
+ *         ("ROUND(E2*1,1,-3)") → thập phân; "…,0)" → tách (hai cách đọc cùng ra một số); còn lại
+ *         ("ROUND(F1*0,5)") là MƠ HỒ THẬT (L30): app cũ nhận ROUND một đối số nên công thức ĐÃ LƯU
+ *         kiểu này mang nghĩa ROUND(F1*0,5) = 525.000; đọc theo Excel tiếng Anh lại là ROUND(F1*0;5)
+ *         = 0 — lưới ghi đè số đã lưu thành 0 mà không báo. Không chọn thay người dùng: trả null;
+ *       - hàm NHIỀU đối số (SUM/MIN/MAX/…): giữ thập phân như quy ước Việt, TRỪ khi trông rõ là kiểu
+ *         Anh (L34): phần sau có từ 4 chữ số hoặc tận cùng bằng 0 ("MIN(F2*1000,500000)",
+ *         "PRODUCT(-500000,20%)"), hoặc công thức đã có dấu phẩy khác vừa được đổi thành ";". Khi đó
+ *         cũng là mơ hồ → null. Bản cũ đọc "MIN(F2*1000,500000)" thành F2*1000,5 → 1.050.525.000.
+ * null = "công thức không đọc được": lưới tô ĐỎ khi gõ, còn công thức ĐÃ LƯU thì recomputeAll giữ
+ * nguyên số đang có, lúc xuất Excel ghi số — không bao giờ âm thầm ra một con số khác.
+ *
+ * Sau cùng: dấu "," / "." còn DÍNH ô tham chiếu ("=F1,5", "=F1.5", "(F1,F2)") → null. Bước thay tham
+ * chiếu sẽ biến nó thành "58000,5" (một con số ghép), còn tệp Excel mang "G13.5" → #NAME? (L29).
+ * Đổi "x" nhân ("2x1,5") thành "*" TRƯỚC khi gọi hàm này, kẻo "x1" bị coi là ô tham chiếu (L30).
  * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa quy tắc thì sửa CẢ HAI.
  */
-export function chuanHoaDauTachDoiSo(s: string): string {
-  if (s.includes(";") || !s.includes(",")) return s;
-  const out = s.split("");
-  const khung: { fn: string | null; phay: number[] }[] = [];
-  const quyet = (k: { fn: string | null; phay: number[] }) => {
-    if (!k.fn || !k.phay.length) return;
-    const batHai = /^ROUND(UP|DOWN)?$/.test(k.fn) && k.phay.length === 1;
-    for (const i of k.phay) {
-      const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
-      const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-      const soSau = /^\d/.test(sau);
-      if (batHai || !(soTruoc && soSau)) out[i] = ";";
+const HAM_HAI_DOI_SO = /^ROUND(UP|DOWN)?$/;
+const HAM_MOT_DOI_SO = /^(INT|ABS)$/;
+export function chuanHoaDauTachDoiSo(s: string): string | null {
+  let kq = s;
+  if (s.includes(",")) {
+    const kieuViet = s.includes(";");
+    const out = s.split("");
+    const khung: { fn: string | null; phay: number[] }[] = [];
+    let moHo = false, daDoi = false;
+    const nghiNgo: string[] = [];   // phần sau các dấu phẩy "số,số" trong hàm nhiều đối số
+    const quyet = (k: { fn: string | null; phay: number[] }) => {
+      if (!k.fn || !k.phay.length) return;
+      const ds = k.phay.map((i) => {
+        const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
+        const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
+        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+      });
+      const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
+      for (const p of chac) { out[p.i] = ";"; daDoi = true; }
+      if (!soSo.length || kieuViet || HAM_MOT_DOI_SO.test(k.fn)) return;
+      if (HAM_HAI_DOI_SO.test(k.fn)) {
+        if (chac.length) return;   // đã đủ dấu tách: phần còn lại là thập phân (thừa đối số thì chốt ở translateFormula)
+        if (soSo.length === 1 && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
+        moHo = true;
+        return;
+      }
+      for (const p of soSo) nghiNgo.push(p.sau);
+    };
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === "(") { const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i)); khung.push({ fn: m ? m[1].toUpperCase() : null, phay: [] }); }
+      else if (ch === ")") { const k = khung.pop(); if (k) quyet(k); }
+      else if (ch === "," && khung.length) khung[khung.length - 1].phay.push(i);
     }
-  };
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === "(") { const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i)); khung.push({ fn: m ? m[1].toUpperCase() : null, phay: [] }); }
-    else if (ch === ")") { const k = khung.pop(); if (k) quyet(k); }
-    else if (ch === "," && khung.length) khung[khung.length - 1].phay.push(i);
+    for (const sau of nghiNgo) { const duoi = /^\d+/.exec(sau)![0]; if (daDoi || duoi.length >= 4 || duoi.endsWith("0")) moHo = true; }
+    if (moHo) return null;
+    kq = out.join("");
   }
-  return out.join("");
+  if (/[A-Za-z]\$?\d+\s*[.,]|[.,]\s*\$?[A-Za-z]+\$?\d/.test(kq)) return null;
+  return kq;
 }
 
 export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
-  s = chuanHoaDauTachDoiSo(s);
+  // "x" nhân TRƯỚC chuẩn hoá dấu phẩy: "2x1,5" để sau thì "x1" bị coi là ô tham chiếu (L30).
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  const chuan = chuanHoaDauTachDoiSo(s);
+  if (chuan === null) return null;   // dấu phẩy mơ hồ / dính ô tham chiếu → ô đỏ, không đoán
+  s = chuan;
   if (refs) {
     // Dấu "," tách đối số ("=SUM(E1,E2)", "=ROUND(G3,2)") đã được chuanHoaDauTachDoiSo ở trên đổi
     // thành ";" — CÙNG một hàm với src/quoteFormula.ts, để bước tự kiểm lúc xuất Excel (so số máy chủ
