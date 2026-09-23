@@ -240,12 +240,19 @@ export async function updatePersonnel(req: Request) {
   if (req.body.projectCode !== undefined && req.body.projectCode !== before.projectCode) {
     await assertProjectCodeInScope(req, req.body.projectCode);
   }
-  // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
-  const merged = { ...before, ...req.body };
-  const rec = await prisma.personnelRecord.update({
-    where: { id: (req.params as any).id },
-    data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
-    include: ownerSelect,
+  // searchText tính trên giá trị SẼ ghi (merge bản TƯƠI + body) → update phần lẻ không làm stale index.
+  // Bản tươi đọc TRONG transaction sau khi khoá hàng (DB-10): hai lượt sửa song song khác trường không
+  // còn làm cột tìm kiếm thiếu thay đổi của lượt kia. PII giải mã trước khi ghép (bản thô có thể NULL).
+  const id = Number((req.params as any).id);
+  const rec = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PersonnelRecord" WHERE id = ${id} FOR UPDATE`;
+    const tuoi = await tx.personnelRecord.findFirst({ where: { id }, omit: { paymentProof: true } });
+    const merged = { ...(decodePiiOnRead("PersonnelRecord", (tuoi ?? before) as any) as any), ...req.body };
+    return tx.personnelRecord.update({
+      where: { id },
+      data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
+      include: ownerSelect,
+    });
   });
   await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);

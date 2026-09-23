@@ -139,10 +139,19 @@ export async function updateCustomer(req: Request) {
   }
   // Tính lại searchText theo giá trị SẼ ghi: field có trong payload thì dùng nó (KỂ CẢ null = xóa),
   // không thì giữ giá trị cũ. Dùng `k in data` thay `?? before` để xóa-rỗng phản ánh đúng (không stale).
-  const pick = (k: string) => (k in data ? data[k] : (before as any)[k]);
-  data.searchText = normalizeSearch(pick("name"), pick("code"), pick("phone"), pick("email"), pick("taxCode"), pick("contactName"));
-  const customer = await prisma.customer.update({ where: { id: (req.params as any).id }, data })
-    .catch((e) => nem409TuP2002(e, data.taxCode));
+  //
+  // TÍNH TRÊN BẢN TƯƠI, TRONG TRANSACTION CÓ KHOÁ HÀNG (DB-10, audit 2026-09-23): `before` đọc NGOÀI
+  // transaction, nên hai người sửa cùng khách song song (A đổi tên, B đổi SĐT) mỗi bên tính searchText
+  // từ bản cũ + phần của mình — người ghi sau thắng và cột tìm kiếm thiếu thay đổi của người kia.
+  // Khoá hàng rồi đọc lại thì lượt sau phải chờ và thấy đúng bản đã có thay đổi của lượt trước.
+  const id = Number((req.params as any).id);
+  const customer = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Customer" WHERE id = ${id} FOR UPDATE`;
+    const tuoi = (await tx.customer.findFirst({ where: { id } })) ?? before;
+    const pick = (k: string) => (k in data ? data[k] : (tuoi as any)[k]);
+    data.searchText = normalizeSearch(pick("name"), pick("code"), pick("phone"), pick("email"), pick("taxCode"), pick("contactName"));
+    return tx.customer.update({ where: { id }, data });
+  }).catch((e) => nem409TuP2002(e, data.taxCode));
   await audit(req, "customer.update", { resource: "customer", resourceId: customer.id, before, after: customer });
   return customer;
 }
