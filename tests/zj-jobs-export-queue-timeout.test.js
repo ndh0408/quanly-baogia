@@ -19,7 +19,9 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import bcrypt from "bcryptjs";
 import { agentWithCsrf } from "./helpers/agent.js";
 
-const hangQueue = { add: () => new Promise(() => {}), getJob: () => new Promise(() => {}) };
+// Id "khong-co" mô phỏng BullMQ trả `undefined` (Job.fromId: hash rỗng → undefined) = job THẬT SỰ
+// không tồn tại; mọi id khác treo vĩnh viễn = Redis chạy-nhưng-chết.
+const hangQueue = { add: () => new Promise(() => {}), getJob: (id) => (id === "khong-co" ? Promise.resolve(undefined) : new Promise(() => {})) };
 
 vi.mock("../src/queue.js", async (importOriginal) => {
   const that = await importOriginal();
@@ -69,12 +71,30 @@ describe.runIf(dbAvailable)("jobs.routes.ts — Redis chạy-nhưng-chết khôn
     expect(ms, `phải trả lời quanh 150ms, đo được ${ms}ms`).toBeLessThan(5_000);
   });
 
-  it("GET /jobs/export/:id: Redis treo mãi → 404 (kèm gợi ý Redis) quanh mốc trần, KHÔNG treo request", async () => {
+  // Soát chéo files#3 (RT-03 mới sửa một nửa): getJob là lệnh ĐẦU của mỗi lượt poll, nên Redis treo
+  // thì nó chạm trần TRƯỚC getState. Bản trước trả 404 cho ca này → choJob (web/src/lib/exportQuote.ts)
+  // chỉ thử lại với 503 job_state_timeout nên ném lỗi ngay, người dùng mất lượt chờ trong khi worker
+  // vẫn sinh file. Quá trần phải là 503 job_state_timeout + Retry-After, y như nhánh getState.
+  it("GET /jobs/export/:id: Redis treo mãi → 503 job_state_timeout + Retry-After quanh mốc trần, KHÔNG treo request", async () => {
     const t0 = Date.now();
     const r = await mgr.get("/api/jobs/export/999");
     const ms = Date.now() - t0;
-    expect(r.status, JSON.stringify(r.body)).toBe(404);
+    expect(r.status, JSON.stringify(r.body)).toBe(503);
+    expect(r.body.code).toBe("job_state_timeout");
+    expect(r.headers["retry-after"]).toBe("2");
     expect(String(r.body.error)).toMatch(/redis|chậm|mất kết nối/i);
     expect(ms, `phải trả lời quanh 150ms, đo được ${ms}ms`).toBeLessThan(5_000);
+  });
+
+  it("GET /jobs/export/:id/file: Redis treo → cũng 503 job_state_timeout (dùng chung layJobXuat), không phải 404", async () => {
+    const r = await mgr.get("/api/jobs/export/999/file");
+    expect(r.status, JSON.stringify(r.body)).toBe(503);
+    expect(r.body.code).toBe("job_state_timeout");
+  });
+
+  it("GET /jobs/export/:id: BullMQ trả undefined (job thật sự không có) → vẫn 404", async () => {
+    const r = await mgr.get("/api/jobs/export/khong-co");
+    expect(r.status, JSON.stringify(r.body)).toBe(404);
+    expect(r.body.code).toBeUndefined();
   });
 });

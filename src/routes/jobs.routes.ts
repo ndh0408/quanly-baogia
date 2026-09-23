@@ -152,6 +152,16 @@ router.post(
 );
 
 /**
+ * 503 TẠM THỜI "hàng đợi chậm một nhịp" (RT-03) — client (choJob trong web/src/lib/exportQuote.ts) nghỉ
+ * theo Retry-After rồi hỏi lại, KHÔNG bỏ chờ. Một chỗ duy nhất cho cả hai lệnh Redis của một lượt poll
+ * (getJob ở layJobXuat và getState ở route trạng thái), để hai nhánh không trôi khỏi nhau.
+ */
+function traHangDoiCham(res: Response): void {
+  res.setHeader("Retry-After", "2");
+  res.status(503).json({ error: "Hàng đợi đang chậm nên chưa hỏi được trạng thái tệp — hệ thống tự thử lại. Nếu kéo dài, hãy nhờ quản trị viên kiểm tra Redis.", code: "job_state_timeout" });
+}
+
+/**
  * Tìm job xuất và GÁC QUYỀN — dùng chung cho GET trạng thái và GET tệp. Trả null khi đã tự trả lời
  * (4xx/503). Hai đường phải gác Y HỆT nhau: đường tệp phát chính file đầy đủ giá mà `returnvalue`
  * của đường trạng thái trỏ tới.
@@ -180,10 +190,12 @@ async function layJobXuat(req: Request, res: Response): Promise<Job | null> {
   // TRẦN THỜI GIAN — cùng lý do như nhánh POST ở trên: đây là lúc người dùng ĐANG POLL chờ kết
   // quả, một lệnh Redis treo vô hạn ở đây có nghĩa là mọi lượt bấm "Tải" sau đó cũng treo theo.
   const job = await xepViecCoHan<Job | undefined>(() => q.getJob(req.params.id), { queueName: req.params.queue, jobName: "getJob" });
-  // `null` ở đây gộp CHUNG hai khả năng: tác vụ thật sự không tồn tại, HOẶC Redis chậm/treo tới
-  // mức chạm trần QUEUE_ADD_TIMEOUT_MS. Không tách được hai ca (xepViecCoHan cố ý không phân biệt
-  // — xem src/queue.ts), nên nói THẬT cả hai khả năng thay vì khẳng định chắc "không tồn tại".
-  if (!job) { res.status(404).json({ error: "Không tìm thấy tác vụ (hoặc Redis đang chậm/mất kết nối — thử tải lại)" }); return null; }
+  // HAI ca tách được (soát chéo files#3): BullMQ `getJob` → `Job.fromId` trả `undefined` khi hash của
+  // job rỗng (không tồn tại / đã bị dọn), còn xepViecCoHan trả `null` khi quá trần hoặc lệnh lỗi.
+  // Bản trước gộp cả hai thành 404 — mà getJob là lệnh ĐẦU của mỗi lượt poll nên Redis treo thì nó
+  // chạm trần TRƯỚC getState: client nhận 404, bỏ chờ ngay trong khi worker vẫn đang sinh file.
+  if (job === null) { traHangDoiCham(res); return null; }
+  if (!job) { res.status(404).json({ error: "Không tìm thấy tác vụ (đã bị dọn hoặc hàng đợi vừa khởi động lại) — hãy bấm tải lại" }); return null; }
   // Only the user who requested the job (or a read-all holder) may read its
   // result — job.returnvalue trỏ tới file xuất đầy đủ giá.
   const requestedBy = job.data?.requestedBy;
@@ -229,10 +241,7 @@ router.get(
     // với lời nhắn "không còn tồn tại", trong khi job vẫn đang chạy. 503 job_state_timeout thì
     // client (web/src/lib/exportQuote.ts) nghỉ một nhịp rồi hỏi lại.
     const state = await xepViecCoHan<string>(() => job.getState(), { queueName: req.params.queue, jobName: "getState" });
-    if (state == null) {
-      res.setHeader("Retry-After", "2");
-      return res.status(503).json({ error: "Hàng đợi đang chậm nên chưa hỏi được trạng thái tệp — hệ thống tự thử lại. Nếu kéo dài, hãy nhờ quản trị viên kiểm tra Redis.", code: "job_state_timeout" });
-    }
+    if (state == null) return traHangDoiCham(res);
     // URL tải là đường CÙNG ORIGIN qua app (RT-02/FILE-08). URL đã ký cũ mang host của S3_ENDPOINT
     // (`http://minio:9000` ở production) — trình duyệt không phân giải được. Job cũ còn trong Redis
     // có `url` đã ký thì cũng bị thay: chỉ `key` là dùng được.
