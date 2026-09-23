@@ -50,11 +50,22 @@ const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
   return m ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
+// PHẦN TRĂM (soát toàn diện L15): Excel/Sheets chép ô định dạng % dưới dạng CHỮ "10%" (giá trị gốc
+// 0,1). Bộ lọc ký tự của các hàm đọc số bỏ "%" nên "10%" dán vào SL/Đơn giá thành 10 — dòng "Phí quản
+// lý 10% × 50.000.000" ra 500.000.000. Chỉ nhận "%" đứng CUỐI một chuỗi toàn số ("12,5%", "(10%)"):
+// "10% VAT" vẫn đọc như cũ. Nhánh công thức vốn đã hiểu "=10%" là 0,1 — nay hai đường nhất quán.
+const PHAN_TRAM = /^-?[\d.,\s]*\d[\d.,\s]*%$/;
+const boPhanTram = (s: string): string | null => { const t = String(s ?? "").trim(); return PHAN_TRAM.test(t) ? t.slice(0, -1) : null; };
+const chia100 = (n: number) => Number((n / 100).toPrecision(12));   // 12,5 / 100 không kéo theo đuôi dấu phẩy động
+/** Ô là một số phần trăm ("10%", "(12,5%)") — nơi gọi cần biết để giữ đủ số lẻ (xem GridTable pasteCellVal). */
+export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? "")).s) != null;
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
-// "(1.500.000)" → -1500000 (âm kiểu kế toán).
+// "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
   s = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
@@ -75,6 +86,7 @@ export function parseLooseNumber(s: string): number {
 export function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -144,6 +156,7 @@ export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
@@ -310,6 +323,8 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
       if (numSet.has(role)) {
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
         else it[role] = (role === "quantity" || role === "days") ? soDo(v) : soTien(v);   // SL/Ngày = số đo → thập phân (khi không suy được quy ước)
+        // SL phần trăm cần hơn 1 số lẻ ("12,5%" → 0,125) → cờ SL chính xác, như lưới (L15).
+        if (role === "quantity" && laPhanTram(v)) { const a = Math.abs(Number(it[role]) || 0); if (Math.round(a * 10 + 1e-6) / 10 !== Math.round(a * 1e4 + 1e-8) / 1e4) it.quantityExact = true; }
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
       else it[role] = v.trim();
     });

@@ -268,12 +268,21 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     expect(items[0].quantity).toBeCloseTo(1.5, 6);
     expect(toastChu()).toMatch(/Ctrl\+Z/);
   });
-  it("grid#8 — giá trị gốc chỉ PHÂN ĐỊNH, không thay chuỗi: Đơn giá '15%' (gốc 0,15) vẫn đọc như trước", () => {
+  it("grid#8 — giá trị gốc chỉ PHÂN ĐỊNH, không thay chuỗi: ô ngày '18/9' (gốc là số seri) vẫn đọc như trước", () => {
+    const items = [hang("A", "gói", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "unitPrice"));
+    dan(o(0, "unitPrice"), { "text/plain": "18/9", "text/html": excelHtml([[["18/9", 45918]]]) });
+    expect(items[0].unitPrice).toBe(189);
+  });
+  // Bài cũ ở đây chốt "15%" → 15 — đúng lỗi soát toàn diện L15 (dán % từ Excel phình 100 lần). Nay
+  // hàm đọc số hiểu hậu tố % nên ra 0,15 — do đọc chuỗi, KHÔNG phải do lấy giá trị gốc thay chuỗi.
+  it("L15 — Đơn giá '15%' (gốc 0,15) đọc là 0,15", () => {
     const items = [hang("A", "gói", 1, 1)];
     moLuoi(items);
     vaoO(o(0, "unitPrice"));
     dan(o(0, "unitPrice"), { "text/plain": "15%", "text/html": excelHtml([[["15%", 0.15]]]) });
-    expect(items[0].unitPrice).toBe(15);
+    expect(items[0].unitPrice).toBeCloseTo(0.15, 10);
   });
   it("grid#8 — dán MỘT ô SL '1.500' không có text/html (Zalo/Word) → 1,5 nhưng CÓ cảnh báo, không im lặng", () => {
     const items = [hang("Tờ rơi", "tờ", 1, 1)];

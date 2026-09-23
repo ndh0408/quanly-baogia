@@ -4,7 +4,7 @@ import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, laPhanTram, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
@@ -1246,6 +1246,10 @@ function GridTableInner(props: GridTableProps) {
     }
     if (it.formulas && (it.formulas as Record<string, string>)[f]) delete (it.formulas as Record<string, string>)[f];
     it[f] = NUMERIC.has(f) ? (val.trim() === "" ? 0 : parseSoDan(f, val, noiBo, quyUoc, moHo)) : (MULTILINE.has(f) ? val : val.trim().replace(/\s+/g, " "));
+    // SL là PHẦN TRĂM ("12,5%" → 0,125): Excel tính Thành Tiền theo đúng 12,5%, còn SL thường bị làm tròn
+    // 1 số lẻ (0,1) → lệch tiền. Bật cờ SL chính xác (4 số lẻ) — đúng nghĩa cờ này: dòng Excel ngoài có
+    // Thành Tiền tính theo số gốc (L15). "10%" = 0,1 vốn đã đủ 1 số lẻ thì không cần.
+    if (f === "quantity" && !noiBo && laPhanTram(val)) { const n = Number(it[f]) || 0; if (M.qtyRound(n) !== M.qtyExact(n)) it.quantityExact = true; }
   };
   const onPaste = (e: { clipboardData: DataTransfer; target: EventTarget | null; preventDefault(): void }) => {
     if (!editable) return;
