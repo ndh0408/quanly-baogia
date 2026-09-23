@@ -138,3 +138,103 @@ describe("L56 — khoá Discount / Ghi chú / Hiện tổng trong lúc đang Lư
     expect(hopCheckbox("Hiển thị bảng").disabled).toBe(false);
   });
 });
+
+// L61: promptModal / confirmModal là DOM gắn thẳng vào body, không tự đóng khi Back đổi hash. Shell gỡ
+// editor #11 (đổi `key`), dựng #12 phía sau hộp; người dùng trả lời hộp tưởng là cho #12.
+describe("L61 — hộp lý do còn treo sau khi rời báo giá không được chạy thao tác lên báo giá cũ", () => {
+  const promptMock = () => ui.promptModal as unknown as ReturnType<typeof vi.fn>;
+  async function roiSang12() {
+    dongEditor();
+    h.getQuote.mockImplementationOnce(async () => baoGia({ id: 12, quoteNumber: "GN26012" }));
+    await moEditor(12);
+  }
+  const treo = () => {
+    let traLoi!: (v: string | null) => void;
+    promptMock().mockImplementationOnce(() => new Promise<string | null>((r) => { traLoi = r; }));
+    return async (v: string | null) => { await act(async () => { traLoi(v); }); await cho(10); };
+  };
+
+  it("'✗ Khách không chốt' của #11 còn treo khi đã sang #12: xác nhận KHÔNG gọi markLost(11)", async () => {
+    await moEditor();
+    const traLoi = treo();
+    await bam(nut("Khách không chốt"));
+    expect(String(promptMock().mock.calls[0][0]), "hộp không nói báo giá nào").toContain("GN26011");
+    await roiSang12();
+    await traLoi("lý do");
+    expect(api.markLost).not.toHaveBeenCalled();
+  });
+
+  it("'↩ Trả lại' phần HN của #11 còn treo: xác nhận KHÔNG gọi hnReview(11, reject)", async () => {
+    await moEditor();
+    const traLoi = treo();
+    await bam(nut("↩ Trả lại"));
+    await roiSang12();
+    await traLoi("thiếu giá");
+    expect(api.hnReview).not.toHaveBeenCalled();
+  });
+
+  it("'✗ Không duyệt' sheet của #11 còn treo: xác nhận KHÔNG ghi ý kiến khách cho sheet của #11", async () => {
+    await moEditor();
+    const traLoi = treo();
+    await bam(nut("✗ Không duyệt"));
+    await roiSang12();
+    await traLoi("giá cao");
+    expect(api.sheetCustomerDecision).not.toHaveBeenCalled();
+  });
+
+  it("'✕' xoá sheet của #11 còn treo: xác nhận KHÔNG bật cờ 'chưa lưu' của #12 đang sạch", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101), trang(102)] }));
+    await moEditor();
+    let traLoi!: (v: boolean) => void;
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    await bam(hop!.querySelector('button[aria-label="Xóa sheet 1"]') as HTMLButtonElement);
+    await roiSang12();
+    expect((window as WinDirty).__editorDirty).toBe(false);
+    await act(async () => { traLoi(true); });
+    await cho(10);
+    expect((window as WinDirty).__editorDirty, "hộp treo của #11 bật cờ chặn rời trang trên #12").toBe(false);
+  });
+
+  it("đối chứng: không rời trang → xác nhận 'Khách không chốt' vẫn gọi markLost(11)", async () => {
+    await moEditor();
+    await bam(nut("Khách không chốt"));
+    expect(api.markLost).toHaveBeenCalledWith(11, "lý do");
+  });
+});
+
+// L62: save() của instance ĐÃ GỠ chạy tiếp sau khi máy chủ trả lời: tắt cờ chặn rời trang của editor
+// đang mở và (báo giá mới) kéo hash sang báo giá vừa tạo mà người dùng đã chọn bỏ.
+describe("L62 — Lưu xong sau khi editor đã bị gỡ không được đụng trang đang mở", () => {
+  it("báo giá MỚI: POST trả về sau khi đã sang #12 và gõ dở → hash giữ #/quotes/12, cờ bẩn của #12 còn", async () => {
+    let xong!: (v: unknown) => void;
+    h.createQuote.mockImplementationOnce(() => new Promise((r) => { xong = r; }));
+    await moEditor(undefined, true);
+    go(oTenKhach(), "Khách báo giá mới");
+    await bam(nut("Lưu"));
+    dongEditor();                                                   // "Rời, bỏ thay đổi" → Shell gỡ editor
+    location.hash = "#/quotes/12";
+    h.getQuote.mockImplementationOnce(async () => baoGia({ id: 12 }));
+    await moEditor(12);
+    go(oTenKhach(), "Đang sửa 12");
+    expect((window as WinDirty).__editorDirty).toBe(true);
+    await act(async () => { xong({ id: 99 }); });
+    await cho(10);
+    expect(location.hash, "instance đã gỡ kéo người dùng sang báo giá vừa tạo").toBe("#/quotes/12");
+    expect((window as WinDirty).__editorDirty, "instance đã gỡ tắt cờ chặn rời trang của #12").toBe(true);
+  });
+
+  it("báo giá CŨ: PUT trả về sau khi đã sang #12 và gõ dở → cờ bẩn của #12 còn", async () => {
+    let xong!: (v: unknown) => void;
+    h.updateQuote.mockImplementationOnce(() => new Promise((r) => { xong = r; }));
+    await moEditor();
+    go(oTenKhach(), "Sửa 11");
+    await bam(nut("Lưu"));
+    dongEditor();
+    h.getQuote.mockImplementationOnce(async () => baoGia({ id: 12 }));
+    await moEditor(12);
+    go(oTenKhach(), "Đang sửa 12");
+    await act(async () => { xong(baoGia({ updatedAt: "2026-09-21T00:00:00.000Z" })); });
+    await cho(10);
+    expect((window as WinDirty).__editorDirty).toBe(true);
+  });
+});

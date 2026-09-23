@@ -216,6 +216,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
   const vanTayMainRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
+  // L61/L62: editor này CÒN GẮN không. Hộp hỏi (confirm/promptModal) là DOM tự dựng, không đóng khi
+  // Back đổi hash; và PUT/POST vẫn bay sau khi Shell đã gỡ editor (đổi `key` theo route). Trả lời hộp
+  // treo hay nhận phản hồi muộn mà không hỏi cờ này là chạy thao tác lên báo giá người dùng đã rời,
+  // bật/tắt cờ `__editorDirty` DÙNG CHUNG của editor đang mở, hoặc kéo hash sang báo giá khác.
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
   const draftRef = useRef<QuoteFull | null>(null);
@@ -616,7 +622,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // app#15: thêm / xoá trang / nạp Excel trong lúc PUT đang bay là ghi vào mảng `sheets` CŨ, rồi save()
   // thay qRef bằng bản máy chủ và hạ cờ bẩn → thay đổi biến mất mà vẫn báo "Đã lưu". Nút bị khoá theo
   // `saving`; chặn thêm trong mã qua `savingRef` và qRef đã bị thay (closure cũ sau một `await`).
-  const dangLuuHoacDaDoi = () => savingRef.current || qRef.current !== q;
+  // L61: cả khi editor đã bị gỡ (trả lời hộp "Xóa sheet" treo sau khi rời trang) — mark() bật cờ toàn cục.
+  const dangLuuHoacDaDoi = () => !songRef.current || savingRef.current || qRef.current !== q;
   const addSheet = () => {
     if (dangLuuHoacDaDoi()) return;
     const t = templates.filter((x) => x.companyId === q.companyId)[0] || templates[0];
@@ -626,6 +633,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const removeSheet = async (i: number) => {
     if (sheets.length <= 1 || dangLuuHoacDaDoi()) return;
     if (!(await confirmModal("Xóa sheet", `Xóa sheet "${sheets[i].name || "Sheet " + (i + 1)}"?`, { danger: true, confirmText: "Xóa" }))) return;
+    if (!songRef.current) return;   // hộp treo sau khi đã rời báo giá này
     if (dangLuuHoacDaDoi()) { toast("Báo giá vừa được lưu trong lúc hỏi — chưa xoá sheet, hãy bấm xoá lại", "info"); return; }
     sheets.splice(i, 1);
     // L55/L5: xoá tab đứng TRƯỚC sheet đang mở thì lùi chỉ số theo (như removeTableFromList), không thì
@@ -683,6 +691,15 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       payload.baseUpdatedAt = (q as { updatedAt?: string }).updatedAt;
       if (isNew) { delete payload.quoteNumber; delete payload.baseUpdatedAt; }
       const saved = isNew ? await api.createQuote(payload) : await api.updateQuote(q.id, payload);
+      if (!songRef.current) {
+        // L62: máy chủ trả lời SAU khi người dùng đã rời editor này ("Rời, bỏ thay đổi" lúc PUT/POST còn
+        // bay). Chỉ dọn bản nháp của CHÍNH nó và báo đã lưu. Cờ `__editorDirty` giờ là của editor đang
+        // mở, hash là trang người dùng đang đứng — đụng vào là tắt chặn rời trang của họ, hoặc kéo họ
+        // sang báo giá vừa tạo mà họ đã chọn bỏ.
+        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        toast(isNew ? `Đã lưu báo giá mới${(saved as { quoteNumber?: string }).quoteNumber ? " " + (saved as { quoteNumber?: string }).quoteNumber : ""}` : "Đã lưu", "success");
+        return false;
+      }
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       // Lưu xong thì bản nháp cục bộ hết lý do tồn tại. Giữ lại là lần mở sau hỏi khôi phục một
       // thứ CŨ HƠN bản trên máy chủ — đúng kiểu "tính năng chống mất dữ liệu tự gây mất dữ liệu".
@@ -710,6 +727,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     } catch (ex) {
       // Khóa lạc quan: server trả 409 khi NGƯỜI KHÁC vừa lưu báo giá này (baseUpdatedAt lệch) →
       // KHÔNG ghi đè ngầm. Hỏi rõ + cho TẢI LẠI bản mới (reload đảm bảo nạp đúng toàn bộ luồng load).
+      // L62: editor đã bị gỡ (người dùng chọn "Rời, bỏ thay đổi" lúc đang lưu) → không hỏi hộp 409 trên
+      // trang khác, không `location.reload()` trang đang đứng, không giữ lại phần họ đã chọn bỏ.
+      if (!songRef.current) { toast(`Báo giá vừa rời chưa lưu được: ${errText(ex)}`, "error"); return false; }
       if (ex instanceof ApiError && ex.status === 409) {
         // GRID-08: giữ phần đang soạn vào khoá `…:xungdot` (đường nạp sẽ hỏi mở lại). Huỷ hẹn giờ ghi
         // nháp thường để nó không ghi đè gì sau đó.
@@ -727,6 +747,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             : "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy) — hãy chép phần cần giữ trước. Tải lại ngay?",
           { danger: true, confirmText: "Tải lại bản mới" }
         );
+        // L62: hộp treo, trả lời sau khi đã rời báo giá này → đừng reload / hạ cờ của trang đang đứng.
+        // Bản giữ lại (nếu ghi được) cứ để đó: lần mở lại báo giá này sẽ hỏi mở hay bỏ.
+        if (!songRef.current) return false;
         if (reload) {
           dirtyRef.current = false; (window as WinDirty).__editorDirty = false; location.reload();
         } else if (khoaXd && giuDuoc) {
@@ -755,7 +778,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       `Phải Lưu trước khi ${viec} — số ghi nhận lấy từ bản ĐÃ LƯU trên máy chủ, không phải từ phần đang soạn.`,
       { confirmText: "Lưu rồi tiếp tục" },
     );
-    return ok && (await save());
+    return ok && songRef.current && (await save());
   };
   const convert = async () => {
     // ── BÀY RA TỪNG TRANG TRƯỚC KHI CHỐT ────────────────────────────────────
@@ -793,7 +816,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     }));
 
     const doi = await modalChotBaoGia(q.quoteNumber || `#${q.id}`, trangs, Number(q.vatPercent) || 0);
-    if (doi === null) return;
+    if (doi === null || !songRef.current) return;   // L61: hộp treo sau khi đã rời báo giá này
 
     try {
       // Ghi trạng thái từng trang TRƯỚC — máy chủ tính doanh thu từ `custStatus` THẬT trong CSDL,
@@ -823,14 +846,15 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     if (!(await luuTruocNeuCan("đánh dấu không chốt"))) return;
     const q = qRef.current as QuoteFull & { _activeSheet: number };
     const ai = q._activeSheet;
+    // L61: tiêu đề mang SỐ báo giá — hộp không tự đóng khi Back, nên phải tự nói nó hỏi cho báo giá nào.
     const reason = await promptModal(
-      "Không chốt được CẢ báo giá này",
+      `Không chốt được CẢ báo giá ${q.quoteNumber || "#" + q.id}`,
       `Đánh dấu CẢ báo giá — tất cả ${(q.sheets || []).length} trang — là không chốt được. KHÔNG đảo lại được.
 
 Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
-    if (reason === null) return;
+    if (reason === null || !songRef.current) return;   // L61: markLost KHÔNG đảo lại được
     try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); const moi = { ...u, _activeSheet: ai } as QuoteFull; giuDanhTinhSheet(q, moi, false); qRef.current = moi; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
@@ -944,7 +968,7 @@ Lý do (không bắt buộc):`,
     let note: string | undefined;
     if (status === "rejected") {
       const n = await promptModal("Khách không duyệt sheet này", "Lý do (không bắt buộc):", { placeholder: "VD: giá cao, đổi phương án, gộp sang sheet khác…" });
-      if (n === null) return;
+      if (n === null || !songRef.current) return;   // L61: hộp treo sau khi đã rời báo giá này
       note = n;
     }
     try {
@@ -958,6 +982,7 @@ Lý do (không bắt buộc):`,
   const exportFile = async (ext: "xlsx" | "pdf") => {
     if (dangTai) return;
     if (dirtyRef.current && !(await confirmModal("Có thay đổi chưa lưu", "File tải về là BẢN ĐÃ LƯU gần nhất — KHÔNG gồm thay đổi vừa sửa. Hãy Lưu trước rồi tải lại.", { confirmText: "Vẫn tải bản cũ" }))) return;
+    if (!songRef.current) return;
     // Xem web/src/lib/exportQuote.ts: đường đồng bộ trước, gặp 413 thì tự chuyển sang xuất nền.
     // Bản cũ dùng window.open nên KHÔNG BAO GIỜ thấy 413 — báo giá quá 20.000 dòng chỉ ra một tab
     // in JSON lỗi, dù báo giá 60.000 dòng là LƯU ĐƯỢC.
@@ -1344,13 +1369,16 @@ function HnManagerPanel({ quoteId, hnStatus, hnRejectNote, onReload }: { quoteId
   const st = hnStatus || "";
   const canAssign = !st || st === "rejected" || st === "approved";
   useEffect(() => { if (canAssign) api.hnAccounts().then((r) => setAccounts(r.data || [])).catch(() => {}); }, [canAssign]);
+  // L61: hộp lý do "Trả lại" không tự đóng khi Back — trả lời nó sau khi editor đã gỡ thì bỏ qua.
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
   const assign = async () => {
     if (!accId) return toast("Chọn Account HN trước", "error");
     try { await api.hnAssign(quoteId, Number(accId)); toast("Đã giao phần HN cho Account", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi giao", "error"); }
   };
   const review = async (decision: "approve" | "reject") => {
     let note: string | undefined;
-    if (decision === "reject") { const n = await promptModal("Trả lại phần Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư mục 3…" }); if (n === null) return; note = n; }
+    if (decision === "reject") { const n = await promptModal("Trả lại phần Hà Nội", "Lý do trả lại (Account sẽ thấy):", { placeholder: "VD: thiếu giá vật tư mục 3…" }); if (n === null || !songRef.current) return; note = n; }
     try { await api.hnReview(quoteId, decision, note); toast(decision === "approve" ? "Đã duyệt phần HN" : "Đã trả lại phần HN", "success"); onReload(); } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   return (
