@@ -1,7 +1,7 @@
 // Test VECTOR VÀNG cho lõi toán tiền dùng chung (shared/quote-math.ts, qua re-export ./quoteMath).
 // Khóa CHÍNH SÁCH làm tròn/cắt/giảm-giá để KHÔNG ai đổi nhầm → lệch tiền khách. Đây là tiền khách.
 import { describe, it, expect } from "vitest";
-import { qtyRound, roundVnd, lineAmount, sheetSubtotalGrouped, sheetTotals, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
+import { qtyRound, qtyExact, roundVnd, lineAmount, sheetSubtotalGrouped, sheetTotals, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
 
 describe("qtyRound — LÀM TRÒN Số Lượng về 1 chữ số thập phân", () => {
   it("làm tròn 1 số (7,378→7,4 · 6,42→6,4 · 5,65→5,7)", () => { expect(qtyRound(7.378)).toBeCloseTo(7.4); expect(qtyRound(6.42)).toBeCloseTo(6.4); expect(qtyRound(5.65)).toBeCloseTo(5.7); });
@@ -111,5 +111,30 @@ describe("định dạng VN", () => {
     expect(groupLetter(0)).toBe("A");
     expect(groupLetter(25)).toBe("Z");
     expect(groupLetter(26)).toBe("AA");
+  });
+});
+
+// GRID-10: fmtNumCell dựng Intl.NumberFormat MỚI mỗi lần (toLocaleString có options) — ~16µs/lần,
+// ~43ms mỗi lượt vẽ lưới 378 dòng. Bản dùng lại bộ định dạng phải cho ĐÚNG Y chuỗi của cách cũ.
+describe("fmtNumCell — đầu ra y hệt cách cũ, nhanh hơn rõ", () => {
+  const cu = (v: number, exact: boolean) => {
+    const t = exact ? qtyExact(v) : qtyRound(v);
+    if (!t || isNaN(t)) return "";
+    return t.toLocaleString("vi-VN", { maximumFractionDigits: exact ? 4 : 1 });
+  };
+  it("10.000 giá trị ngẫu nhiên (âm, 0, thập phân, lớn; exact và không) khớp từng chuỗi", () => {
+    let seed = 42; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let k = 0; k < 10_000; k++) {
+      const v = [0, -1, 1][k % 3] * (rnd() * 10 ** Math.floor(rnd() * 10)) + (k % 7 === 0 ? 0 : rnd());
+      for (const exact of [false, true]) expect(fmtNumCell(v, exact), `v=${v} exact=${exact}`).toBe(cu(v, exact));
+    }
+    expect(fmtNumCell(0)).toBe("");
+    expect(fmtNumCell(1234567.89)).toBe(cu(1234567.89, false));
+  });
+  it("2.600 lần gọi (một lượt vẽ 378 dòng) dưới 25ms — bản cũ ~43ms", () => {
+    fmtNumCell(1);
+    const t0 = performance.now();
+    for (let k = 0; k < 2600; k++) fmtNumCell(k * 1234.5, k % 2 === 0);
+    expect(performance.now() - t0).toBeLessThan(25);
   });
 });
