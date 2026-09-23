@@ -1372,7 +1372,12 @@ function GridTableInner(props: GridTableProps) {
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
     // theo tên trường để dán được sang sheet dùng mẫu khác.
     const wholeRowBlock = internal?.fields?.[0] === "_stt";
-    const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? (internal?.kinds ?? copyBufRef.current?.kinds ?? null) : null;
+    // Loại hàng (nhóm/hạng mục) chỉ đi theo khối MANG NHẬN DẠNG HÀNG: phủ nguyên hàng, hoặc có cột Hạng
+    // Mục (tên nhóm đi theo nên hàng đích thành nhóm là đúng ý). Khối chỉ có cột số mà vẫn mang loại
+    // hàng thì dán cột SL chép qua một hàng nhóm biến hạng mục đích thành NHÓM — tiền của nó rơi khỏi
+    // tổng, các hàng dưới bị nhân theo hệ số "nhóm" mới (soát toàn diện L10).
+    const mangCauTruc = wholeRowBlock || !!internal?.fields?.includes("name");
+    const kinds = sameBlock && mangCauTruc && !(startKind === "section" || startKind === "subsection") ? (internal?.kinds ?? copyBufRef.current?.kinds ?? null) : null;
     const labels = kinds ? (internal?.labels ?? copyBufRef.current?.labels ?? null) : null;
     // Ảnh của từng hàng trong khối (onCopyCut chỉ gửi kèm khi khối có cột Hạng Mục). Đích phải
     // đang bật cột Hình ảnh — cột ẩn thì không gắn ảnh vào nơi người dùng không nhìn thấy.
