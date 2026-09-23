@@ -1093,9 +1093,9 @@ Lý do (không bắt buộc):`,
             {hasPerm("quote:send") && daXuatHoaDon && <span className="muted" style={{ fontSize: 12 }}>· đã xuất hoá đơn — không đổi ý kiến khách được</span>}
             {hasPerm("quote:send") && !daXuatHoaDon && (
               <>
-                {activeSheet.custStatus !== "approved" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("approved")}>✓ Khách duyệt</button>}
-                {activeSheet.custStatus !== "rejected" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("rejected")}>✗ Không duyệt</button>}
-                {activeSheet.custStatus && <button type="button" className="btn btn-sm btn-ghost" onClick={() => decideSheet("")}>Gỡ đánh dấu</button>}
+                {activeSheet.custStatus !== "approved" && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => decideSheet("approved")}>✓ Khách duyệt</button>}
+                {activeSheet.custStatus !== "rejected" && <button type="button" className="btn btn-sm" disabled={saving} onClick={() => decideSheet("rejected")}>✗ Không duyệt</button>}
+                {activeSheet.custStatus && <button type="button" className="btn btn-sm btn-ghost" disabled={saving} onClick={() => decideSheet("")}>Gỡ đánh dấu</button>}
               </>
             )}
           </div>
@@ -1136,7 +1136,7 @@ Lý do (không bắt buộc):`,
                 {suaMain
                   // L54: `_k` nay được đóng cho MỌI sheet (stampKeys, addSheet); trước đó sheet nạp từ
                   // máy chủ không có nên key rơi về `ai` và ô giữ số của sheet vừa xoá.
-                  ? <input key={`disc-${activeSheet._k}`} type="text" inputMode="numeric" className="sheet-discount-input"
+                  ? <input key={`disc-${activeSheet._k}`} type="text" inputMode="numeric" className="sheet-discount-input" disabled={saving}
                       aria-label="Discount trừ vào sheet này (VNĐ)" title="Trừ THẲNG vào sheet này, TRƯỚC khi tính VAT"
                       defaultValue={M.fmtMoney(Number(activeSheet.discount) || 0)}
                       onInput={(e) => {
@@ -1167,9 +1167,11 @@ Lý do (không bắt buộc):`,
           </tbody>
         </table>
 
+        {/* L56: Discount (ở trên), Hiện tổng, Ghi chú khoá theo `saving` cùng khuôn GRID-07 — sửa lúc PUT
+            đang bay là ghi vào qRef CŨ, rồi bản máy chủ thay vào, cờ bẩn tắt, ô vẫn hiện chữ mới. */}
         {suaMain && (
           <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "16px 0 6px", fontSize: 13.5, cursor: "pointer" }}>
-            <input type="checkbox" defaultChecked={q.showTotals !== false} onChange={(e) => { setQ("showTotals", e.target.checked); redraw(); }} />
+            <input type="checkbox" defaultChecked={q.showTotals !== false} disabled={saving} onChange={(e) => { setQ("showTotals", e.target.checked); redraw(); }} />
             <span>Hiển thị bảng <strong>Tổng cộng / VAT / Thành tiền</strong> (cả màn hình lẫn Excel/PDF)</span>
           </label>
         )}
@@ -1177,14 +1179,14 @@ Lý do (không bắt buộc):`,
           <>
             <div className="muted" style={{ margin: "4px 0 6px", fontSize: 12.5 }}>Mẹo: <strong>Discount</strong> ở khối tổng ngay trên là của <strong>riêng sheet đang mở</strong> — trừ trước khi tính VAT, và in ra đúng như vậy trong Excel/PDF. Muốn giảm giá cho <strong>một hạng mục</strong> thì vẫn thêm hàng với <strong>số tiền âm</strong> ở Đơn giá.</div>
             <label className="toggle-totals" style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "8px 0 4px", fontSize: 13.5, cursor: "pointer" }}>
-              <input type="checkbox" defaultChecked={!!q.notes} onChange={(e) => {
+              <input type="checkbox" defaultChecked={!!q.notes} disabled={saving} onChange={(e) => {
                 if (e.target.checked) { if (!(q.notes || "").trim()) { setQ("notes", DEFAULT_NOTE); if (noteInputRef.current) noteInputRef.current.value = DEFAULT_NOTE; } if (noteWrapRef.current) noteWrapRef.current.style.display = ""; noteInputRef.current?.focus(); }
                 else { setQ("notes", ""); if (noteInputRef.current) noteInputRef.current.value = ""; if (noteWrapRef.current) noteWrapRef.current.style.display = "none"; }
               }} />
               <span>Thêm <strong>Ghi chú</strong> cuối báo giá (in vào file Excel/PDF)</span>
             </label>
             <div ref={noteWrapRef} style={{ display: q.notes ? "" : "none", margin: "0 0 10px" }}>
-              <textarea ref={noteInputRef} rows={2} defaultValue={q.notes || ""} placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid var(--border,#ccc)", borderRadius: 6, font: "inherit", resize: "vertical" }} onInput={(e) => setQ("notes", (e.target as HTMLTextAreaElement).value)} />
+              <textarea ref={noteInputRef} rows={2} defaultValue={q.notes || ""} disabled={saving} placeholder="VD: Tất cả các hạng mục trên là thuê, Gia Nguyễn thu hồi toàn bộ sau khi tháo dỡ" style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid var(--border,#ccc)", borderRadius: 6, font: "inherit", resize: "vertical" }} onInput={(e) => setQ("notes", (e.target as HTMLTextAreaElement).value)} />
             </div>
           </>
         ) : (q.notes ? <div className="muted" style={{ margin: "8px 0" }}><strong>Ghi chú:</strong> {q.notes}</div> : null)}
