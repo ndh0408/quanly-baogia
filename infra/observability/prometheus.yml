@@ -9,10 +9,11 @@
 # nào thu thập được số liệu, không cảnh báo nào KÊU ĐƯỢC, và datasource của Grafana trỏ vào một chỗ
 # không tồn tại. Cả ba thứ kia chỉ là giấy tờ cho tới khi có file này.
 #
-# Số HIỆN TẠI, đo lại bằng lệnh chứ đừng chép tay:
-#   grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   → 21 metric ứng dụng
-#   grep -c '^      - alert:' infra/prometheus/alerts.yaml    → 17 quy tắc cảnh báo
-# (trước đợt 2026-08-27: 14 metric và 14 quy tắc.)
+# Số HIỆN TẠI: đừng chép tay vào đây (bản trước ghi "17 quy tắc" và trôi ngay — audit 2026-09-22,
+# OBS-13). Đo lại:
+#   grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   → số metric ứng dụng
+#   grep -c '^      - alert:' infra/prometheus/alerts.yaml    → số quy tắc cảnh báo
+# hoặc `npm run docnum`.
 #
 # ── /metrics CÓ BẢO VỆ — ĐỌC KỸ TRƯỚC KHI SỬA ──────────────────────────────
 # src/app.ts (và src/worker.ts, gác y hệt):
@@ -36,9 +37,11 @@ global:
   # bắt tiến trình app phải kết xuất số liệu liên tục.
   evaluation_interval: 15s
   external_labels:
-    # Nhãn này đi kèm MỌI cảnh báo gửi ra ngoài. Đổi khi dựng thêm môi trường thứ hai, kẻo cảnh báo
-    # của staging và của prod trông y hệt nhau trên cùng một kênh.
-    environment: prod
+    # Nhãn này đi kèm MỌI cảnh báo gửi ra ngoài và được in ĐẦU tin Telegram/email. Trước đây viết
+    # cứng `prod` — mà tệp này dùng CHUNG cho mọi máy, nên cảnh báo của staging/dev cũng tự xưng prod
+    # (audit 2026-09-22, OBS-06). Prometheus 3 nội suy biến môi trường trong external_labels (đã đo
+    # trên v3.1.0; cờ `expand-external-labels` của v2 nay là mặc định). Compose đặt QUANLY_ENV.
+    environment: ${QUANLY_ENV}
 
 rule_files:
   # ĐÚNG file infra/prometheus/alerts.yaml, mount vào đây — KHÔNG chép nội dung sang.

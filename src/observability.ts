@@ -66,15 +66,36 @@ export function scrubSentryEvent<T extends { request?: { headers?: Record<string
   }
   return event;
 }
+/**
+ * Tuỳ chọn Sentry. Tách khỏi `initSentry` để test được mà không cần DSN thật.
+ *
+ * ── ba chỗ dở dang đã vá (audit 2026-09-22, OBS-14) ──────────────────────────
+ * · `environment` = NODE_ENV thì staging và production CÙNG là "production" — lỗi của hai máy trộn
+ *   vào một luồng. Nay đọc SENTRY_ENVIRONMENT trước (đặt trong `.env` từng máy), rơi về NODE_ENV.
+ * · `release` rỗng thì không gom được lỗi theo bản phát hành. Đọc SENTRY_RELEASE (Dockerfile đã có
+ *   ARG cùng tên).
+ * · Tracing mặc định 10% mà `beforeSend` chỉ áp cho sự kiện LỖI: tên/URL transaction HTTP (có thể
+ *   chứa /invite/:token, /reset/:token) rời máy không qua bộ che. Nay mặc định 0 (bật có chủ ý bằng
+ *   SENTRY_TRACES_SAMPLE_RATE), và `beforeSendTransaction` che cùng một cách với sự kiện lỗi.
+ */
+export function tuyChonSentry() {
+  return {
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.SENTRY_ENVIRONMENT || config.NODE_ENV,
+    release: process.env.SENTRY_RELEASE || undefined,
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0),
+    profilesSampleRate: Number(process.env.SENTRY_PROFILES_SAMPLE_RATE || 0),
+    beforeSend: <T>(event: T): T => scrubSentryEvent(event as never) as T,
+    beforeSendTransaction: <T extends { transaction?: string }>(event: T): T => {
+      if (event && typeof event.transaction === "string") event.transaction = maskUrlSecrets(event.transaction);
+      return scrubSentryEvent(event as never) as T;
+    },
+  };
+}
+
 export function initSentry() {
   if (!process.env.SENTRY_DSN) return false;
-  Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    environment: config.NODE_ENV,
-    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0.1),
-    profilesSampleRate: Number(process.env.SENTRY_PROFILES_SAMPLE_RATE || 0),
-    beforeSend: (event) => scrubSentryEvent(event) as typeof event,
-  });
+  Sentry.init(tuyChonSentry() as Parameters<typeof Sentry.init>[0]);
   sentryReady = true;
   logger.info("Sentry initialized");
   return true;
@@ -128,7 +149,9 @@ export function dangKyChanSuCoTienTrinh(
 
   proc.on("unhandledRejection", (reason: unknown) => {
     const err = chuanHoa(reason);
-    logger.error({ err: err.message }, "unhandledRejection");
+    // Kèm STACK (audit 2026-09-22, OBS-11): Sentry tắt ở production nên log là nguồn chẩn đoán DUY
+    // NHẤT, và `err.message` một mình không nói được promise lạc đến từ đâu.
+    logger.error({ err: err.message, stack: err.stack }, "unhandledRejection");
     capture(err, { kind: "unhandledRejection" });
     void flush().catch(() => {});
   });
@@ -184,6 +207,21 @@ export const httpRequestDuration = new Histogram({
 // /metrics phát ra với giá trị 0 vĩnh viễn, và 0 ở đây đọc thành "không có báo giá nào được tạo/
 // duyệt/gửi" — sai lệch nguy hiểm hơn hẳn việc không có số liệu đó. Cần đo lại thì khai lại KÈM
 // chỗ tăng, đừng khai trước rồi để đó.
+// Phụ thuộc NGOÀI trên đường đồng bộ (audit 2026-09-22, OBS-09): SMTP (quên mật khẩu, mời), Telegram,
+// kho object. Hỏng thì trước đây chỉ có một dòng log — không metric, không cảnh báo; SMTP hỏng
+// (Gmail 535 đã xảy ra) nghĩa là người dùng kẹt ngoài tài khoản mà không ai được báo.
+// Nhãn HỮU HẠN: dep ∈ {smtp, telegram, s3}, status ∈ {ok, error}.
+export const dependencyCallsTotal = new Counter({
+  name: "dependency_calls_total",
+  help: "Lượt gọi phụ thuộc ngoài theo kết quả (dep: smtp|telegram|s3; status: ok|error)",
+  labelNames: ["dep", "status"],
+  registers: [registry],
+});
+/** Ghi một lượt gọi phụ thuộc ngoài. Không bao giờ ném. */
+export function ghiPhuThuoc(dep: "smtp" | "telegram" | "s3", ok: boolean) {
+  try { dependencyCallsTotal.inc({ dep, status: ok ? "ok" : "error" }); } catch { /* metric không được làm hỏng nghiệp vụ */ }
+}
+
 export const exportJobsTotal = new Counter({
   name: "export_jobs_total",
   help: "Export jobs by format and status",
@@ -516,14 +554,18 @@ async function doCsdl(): Promise<void> {
   // `pg_stat_activity` đọc được bằng vai trò THƯỜNG (không cần superuser): Postgres giấu bớt vài
   // CỘT của backend thuộc người khác, nhưng vẫn phát đủ HÀNG, nên `count(*)` là con số thật —
   // đã đối chiếu trên dev và production.
+  //
+  // ── ĐƯỜNG RIÊNG, KHÔNG QUA POOL NGƯỜI DÙNG (audit 2026-09-22, OBS-02) ─────────────────────────
+  // Bản trước đo bằng `prisma.$queryRaw` — tức đi qua CHÍNH pool phục vụ người dùng. Pool cạn (nhiều
+  // người lưu báo giá lớn — chuyện bình thường) thì phép đo xếp hàng, quá 2s → `db_up 0` → sau 3 phút
+  // QuanlyCsdlKhongToiDuoc (CRITICAL) báo "không chạm được Postgres" trong khi Postgres khoẻ, và
+  // inhibit_rules NÉN luôn cảnh báo ĐÚNG (QuanlyPoolCsdlCanNguoiDungPhaiCHO). Người trực bị đẩy đi
+  // restart Postgres — cắt mọi lần Lưu đang chạy. Mỗi lượt scrape còn thêm một waiter vào pool đang cạn.
+  // Nay dùng pool RIÊNG max 1 của /readyz (src/db.ts) — cùng lập luận db.ts đã viết cho /readyz.
   const so = await hanCho(
     (async () => {
-      const { prisma } = await import("./db.js");
-      const r = await prisma.$queryRaw`
-        SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database())::int AS dung,
-               current_setting('max_connections')::int AS tran
-      ` as Array<{ dung: number; tran: number }>;
-      return r[0] ?? null;
+      const { doSoKetNoiCsdl } = await import("./db.js");
+      return await doSoKetNoiCsdl();
     })(),
     SUCKHOE_HAN_MS
   );
@@ -774,10 +816,17 @@ export const exportDuration = new Histogram({
 // Nhãn `state` lấy đúng tên trạng thái của BullMQ (waiting/active/delayed/failed/…), là tập HỮU HẠN
 // và cố định nên cardinality bị chặn ở (số hàng đợi × số trạng thái).
 //
-// CHƯA KIỂM CHỨNG Ở PRODUCTION: bộ số này mới chỉ được đo qua Redis cục bộ trong test. Repo NAY đã
-// có định nghĩa Prometheus (infra/observability/ — service `prometheus` scrape cả app lẫn worker),
-// nhưng ngăn xếp đó KHÔNG bật mặc định, nên vẫn chưa có chuỗi số liệu production nào để đối chiếu.
-// Xem docs/REMAINING_RISKS.md và infra/observability/README.md.
+// Ngăn quan sát (infra/observability/) chạy trên production từ 2026-09-16 và scrape CẢ app lẫn
+// worker — mà CẢ HAI tiến trình đều phát bullmq_jobs (đọc cùng một Redis). Nên quy tắc cảnh báo và
+// panel phải gộp bằng `max by (queue, state)`, KHÔNG `sum` (cộng đôi — audit 2026-09-22, OBS-05).
+/** Job nền hỏng HẲN (đã hết lượt thử) — theo sự kiện, chỉ tiến trình worker phát (src/queue.ts createWorker). */
+export const bullJobsFailedTotal = new Counter({
+  name: "bullmq_jobs_failed_total",
+  help: "Số job BullMQ hỏng HẲN (đã hết attempts), theo hàng đợi",
+  labelNames: ["queue"],
+  registers: [registry],
+});
+
 export const bullQueueDepth = new Gauge({
   name: "bullmq_jobs",
   help: "Số job trong mỗi hàng đợi BullMQ, tách theo trạng thái",
@@ -795,11 +844,25 @@ export const bullQueueDepth = new Gauge({
 // tests/mwobs-observability.test.js tự đặt "MWOBSA"/"MWOBSB"/"MWOBSC" làm method và cả ba đều lọt
 // nguyên văn vào registry — bằng chứng sống rằng middleware chấp nhận NGUYÊN VĂN bất kỳ chuỗi nào.
 const METHOD_HOP_LE = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
+/**
+ * Route KHÔNG ghi vào histogram độ trễ (vẫn ĐẾM vào http_requests_total — lỗi của chúng vẫn thấy).
+ *
+ * `/api/stream/events` (audit 2026-09-22, GAP1-01 / OBS-08): kết nối SSE sống tới 30 phút rồi máy chủ
+ * `res.end()` — một quan sát ~1800s rơi vào bucket +Inf. Với ~10 người dùng, khung 5 phút yên (tối,
+ * trưa) mà có một tab để mở thì gần như quan sát DUY NHẤT là lần kết thúc SSE → p50/p95/p99 nhảy lên
+ * trần 10s, và QuanlyDoTreP95Cao (cùng biểu thức) kêu mà không request nào chậm.
+ * `/livez` `/readyz` `/metrics`: probe/scrape vài lần mỗi phút, nhanh và đều — kéo phân vị về phía
+ * "khoẻ" đúng lúc lưu lượng thật thấp, che độ trễ thật.
+ */
+export const ROUTE_KHONG_DO_DO_TRE = new Set(["/api/stream/events", "/livez", "/readyz", "/metrics"]);
 const chuanHoaMethod = (m: string) => (METHOD_HOP_LE.has(m) ? m : "other");
 
 /**
- * Express middleware that records request latency. Mount AFTER routing so that
- * req.route is populated; for routes that don't match any handler we tag as "unknown".
+ * Đếm request + đo độ trễ. Nhãn route tính lúc `finish` (khi req.route đã có), nên middleware mount
+ * SỚM — ngay sau requestId (src/app.ts) — để request bị chặn TRƯỚC routing (429 của apiLimiter, 413/400
+ * parse body, lỗi kho phiên khi Postgres chết) cũng được đếm (audit 2026-09-22, OBS-07). Không khớp
+ * handler nào thì route = "unknown".
  */
 export function metricsMiddleware(req: Request, res: Response, next: NextFunction) {
   const start = process.hrtime.bigint();
@@ -814,7 +877,7 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
     const route = tho.length > 1 ? tho.replace(/\/+$/, "") : tho;
     const labels = { method: chuanHoaMethod(req.method), route, status: String(res.statusCode) };
     httpRequestsTotal.inc(labels);
-    httpRequestDuration.observe(labels, dur);
+    if (!ROUTE_KHONG_DO_DO_TRE.has(route)) httpRequestDuration.observe(labels, dur);
   });
   next();
 }

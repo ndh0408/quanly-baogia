@@ -3,7 +3,7 @@ import type { Job, JobsOptions, Processor, WorkerOptions } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { bullQueueDepth } from "./observability.js";
+import { bullQueueDepth, bullJobsFailedTotal } from "./observability.js";
 
 let connection: any = null;
 export function getRedis() {
@@ -202,6 +202,13 @@ const QUEUE_DEPTH_TIMEOUT_MS = Number(process.env.QUEUE_DEPTH_TIMEOUT_MS) || 200
  */
 export async function capNhatDoSauHangDoi(): Promise<boolean> {
   if (!isQueueEnabled()) return false;
+  // Redis CHƯA sẵn sàng thì KHÔNG gửi lệnh (audit 2026-09-22, OBS-12). Kết nối BullMQ đặt
+  // `maxRetriesPerRequest: null` + offline queue: `getJobCounts` gửi lúc Redis chết nằm lại trong hàng
+  // đợi ngoại tuyến VÔ HẠN (Promise.race dưới chỉ bỏ mặc, lệnh vẫn còn) — mỗi 15s × 2 tiến trình × 5
+  // hàng đợi, tích cả đêm rồi xả dồn khi Redis sống lại. Đúng lý lẽ `doRedis` (src/observability.ts)
+  // đã viết cho PING. `status` là thuộc tính đọc tại chỗ, không tốn gì.
+  const ketNoi = getRedis() as { status?: string } | null;
+  if (!ketNoi || ketNoi.status !== "ready") return false;
   const quaHan = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("getJobCounts quá hạn")), QUEUE_DEPTH_TIMEOUT_MS).unref?.()
   );
@@ -315,7 +322,13 @@ export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerO
 export function createWorker(name: string, handler: Processor, concurrency = 4) {
   if (!isQueueEnabled()) return null;
   const w = new Worker(name, handler, { connection: getRedis(), ...workerOptionsFor(name, concurrency) });
-  w.on("failed", (job: Job | undefined, err: Error) => logger.error({ job: job?.id, err: err.message }, `${name} job failed`));
+  w.on("failed", (job: Job | undefined, err: Error) => {
+    logger.error({ job: job?.id, err: err.message }, `${name} job failed`);
+    // Đếm theo SỰ KIỆN, chỉ khi đã hết lượt thử (audit 2026-09-22, OBS-05). Quy tắc cũ đọc gauge
+    // bullmq_jobs{state="failed"} — job hỏng nằm trong tập failed tới removeOnFail.age (7–90 ngày), nên
+    // MỘT sự cố đã qua kêu Telegram mỗi 4h suốt cả tuần. Counter chỉ tăng đúng lúc hỏng.
+    if (job && job.attemptsMade >= (job.opts?.attempts ?? 1)) bullJobsFailedTotal.inc({ queue: name });
+  });
   w.on("completed", (job: Job) => logger.info({ job: job.id }, `${name} job done`));
   return w;
 }

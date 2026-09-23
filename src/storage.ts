@@ -2,6 +2,13 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, Head
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { ghiPhuThuoc } from "./observability.js";
+
+/** Lỗi S3 là KẾT QUẢ BÌNH THƯỜNG, không phải phụ thuộc hỏng (404 của HeadObject/GetObject khi hỏi xem object có không). */
+export function laLoiS3BinhThuong(e: unknown) {
+  const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  return x?.$metadata?.httpStatusCode === 404 || x?.name === "NotFound" || x?.name === "NoSuchKey";
+}
 
 let client: S3Client | null = null;
 
@@ -46,6 +53,22 @@ export function getClient() {
     requestHandler: { requestTimeout: S3_REQUEST_TIMEOUT_MS, connectionTimeout: S3_CONNECT_TIMEOUT_MS },
     maxAttempts: S3_MAX_ATTEMPTS,
   });
+  // Đếm MỌI lệnh tới kho object ở MỘT chỗ (audit 2026-09-22, OBS-09): trước đây MinIO chết chỉ lộ qua
+  // 5xx nếu đủ lưu lượng. Middleware của SDK bọc mọi `send()` — kể cả lệnh thêm sau này.
+  // `?.`: bài test giả lập S3Client (không có middlewareStack) — đếm là phụ, không được làm hỏng việc dựng client.
+  client.middlewareStack?.add(
+    (next) => async (args) => {
+      try {
+        const r = await next(args);
+        ghiPhuThuoc("s3", true);
+        return r;
+      } catch (e) {
+        ghiPhuThuoc("s3", laLoiS3BinhThuong(e));
+        throw e;
+      }
+    },
+    { step: "initialize", name: "quanlyDemPhuThuocS3" }
+  );
   return client;
 }
 

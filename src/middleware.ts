@@ -305,10 +305,14 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   // là xoá đúng phần thông tin người dùng cần để tự thoát (chờ rồi thử lại / tách bớt trang), và
   // biến một tình huống có cách xử lý thành một lỗi bí ẩn.
   const exposed = status < 500 || (status === 503 && !!err.retryAfter);
-  logger.error(
-    { reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack },
-    "request failed"
-  );
+  // 4xx là KẾT QUẢ nghiệp vụ dự kiến (403/404/409/422…), không phải sự cố: ghi `warn`, KHÔNG stack.
+  // Trước đây mọi lỗi đều `error` + stack, nên panel "Log LỖI gần nhất" (level=error) và nguồn chẩn
+  // đoán duy nhất ở production (Sentry tắt) ngập 4xx, lỗi thật khó thấy (audit 2026-09-22, OBS-11).
+  if (status >= 500) {
+    logger.error({ reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack }, "request failed");
+  } else {
+    logger.warn({ reqId: req.id, path: req.path, method: req.method, status, err: err.message }, "request failed");
+  }
   // 503 kèm `retryAfter` là "quá tải thoáng qua do chính hệ thống tự khai", KHÔNG phải sự cố —
   // bắn Sentry cho nó là biến một đợt bận thành một trận lụt cảnh báo, đúng lúc người trực cần
   // nhìn thấy tín hiệu thật.

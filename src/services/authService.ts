@@ -14,7 +14,7 @@ import { revokeAllForUser } from "../jwt.js";
 import { findLoginUser, verifyMfaChallenge } from "../authCore.js";
 import { destroyAllSessions } from "../sessions.js";
 import { permissionsForUser, resolveUserPermissions } from "../permissions.js";
-import { sendEmail, brandedEmailHtml } from "../email.js";
+import { sendEmail, brandedEmailHtml, mienNguoiNhan } from "../email.js";
 
 type SessionSeed = { id: number; username: string; role: string; displayName: string; permissions?: string[]; canSign?: boolean };
 
@@ -224,8 +224,9 @@ export function sendPasswordReset(req: Request) {
     // nhận được thư" sẽ không có gì để tra — đúng cảnh vừa xảy ra với thư mời trên production.
     const loiGui = (gui as { error?: string } | null)?.error;
     const boQua = (gui as { skipped?: boolean } | null)?.skipped;
-    if (loiGui) logger.error({ err: loiGui, to: user.email || email, chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
-    else if (boQua) logger.warn({ to: user.email || email }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
+    // Chỉ tên miền người nhận: email là PII, log có vòng đời khác CSDL (audit 2026-09-22, OBS-16).
+    if (loiGui) logger.error({ err: loiGui, toDomain: mienNguoiNhan(user.email || email), chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
+    else if (boQua) logger.warn({ toDomain: mienNguoiNhan(user.email || email) }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
     await audit(req, "password.forgot", {
       resource: "user", resourceId: user.id,
       after: { chuaKichHoat, emailSent: !loiGui && !boQua, emailError: loiGui ?? null },

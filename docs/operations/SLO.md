@@ -93,7 +93,7 @@ sum by (event) (rate(sse_events[5m]))    # lưu lượng sự kiện thật sự
 
 ## Cảnh báo
 
-**22 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
+**26 quy tắc đã được VIẾT và đã qua `promtool check rules` + `promtool test rules`**
 — chúng nằm ở [`infra/prometheus/alerts.yaml`](../../infra/prometheus/alerts.yaml),
 bài kiểm logic ở `infra/prometheus/alerts.test.yaml`, cổng CI là
 `npm run check:alerts`. Bản trước của tài liệu này viết "chưa cái nào được cấu
@@ -103,9 +103,9 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 
 | Mức | Trạng thái |
 |---|---|
-| Quy tắc **được viết + kiểm logic** | ✅ 22 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
+| Quy tắc **được viết + kiểm logic** | ✅ 26 quy tắc, cổng `npm run check:alerts` chặn hồi quy |
 | Có Prometheus **để nạp** chúng | ✅ `infra/observability/` (Prometheus + Loki + Promtail + Grafana) — **ĐANG CHẠY trên production từ 2026-09-16**, ba target đều `up` |
-| Có ai **bị đánh thức** khi chúng kêu | ❌ **KHÔNG có Alertmanager** — xem dưới |
+| Có ai **bị đánh thức** khi chúng kêu | ✅ Alertmanager → **nhóm Telegram** từ 2026-09-17 (hiện trạng: [MONITORING.md](MONITORING.md)). ⚠️ Chưa có giám sát từ NGOÀI — xem dưới |
 
 | Cảnh báo | Quy tắc | Mức |
 |---|---|---|
@@ -127,8 +127,12 @@ Nhưng phải phân biệt ba mức, vì gộp chúng lại là cách tự lừa
 | Job nền thất bại | `QuanlyJobNenThatBai` | warning |
 | Không worker nào chạy job | `QuanlyKhongCoWorkerNao` | critical |
 | Tiến trình khởi động lại liên tục | `QuanlyTienTrinhKhoiDongLaiLienTuc` | critical |
+| Tiến trình vừa khởi động lại MỘT lần (deploy, heap-OOM, sập) | `QuanlyTienTrinhVuaKhoiDongLai` | warning |
+| Phụ thuộc ngoài lỗi (SMTP / Telegram / kho object) | `QuanlyPhuThuocNgoaiLoi` | warning |
+| Alertmanager gửi thất bại | `QuanlyCanhBaoGuiThatBai` | warning |
+| Nhịp tim ra dịch vụ ngoài (LUÔN kêu, không tới người) | `QuanlyWatchdog` | heartbeat |
 | Event loop nghẽn | `QuanlyEventLoopNgheN` | warning |
-| Backup quá hạn | `scripts/backup/backup-watchdog.sh` | **đang chạy thật**, qua Telegram |
+| Backup quá hạn | `scripts/backup/backup-watchdog.sh` | ⚠️ **CHƯA cài trên production** (đo 2026-09-22) — xem BACKUP_RESTORE.md |
 
 Ba dòng in đậm là bổ sung của §28 và chúng lấp đúng ba điểm mù: `up` vẫn bằng 1
 khi CSDL chết (tiến trình Node vẫn trả `/metrics`); quy tắc Redis cũ chỉ nói về
@@ -147,19 +151,14 @@ này, vì nó gác trên `redis_configured == 1` còn "quên đặt REDIS_URL" c
 
 ### Cảnh báo dừng lại ở đâu (đọc kỹ)
 
-**Không có Alertmanager.** Quy tắc được đánh giá và chuyển sang `firing`, rồi
-**dừng ở giao diện Prometheus** (`/alerts`). Không Telegram, không email, **không
-ai bị đánh thức**. Đó là "có cảnh báo" theo nghĩa kỹ thuật, chưa phải theo nghĩa
-vận hành.
+Bản trước của mục này ghi "không có Alertmanager" — đã lỗi thời từ 2026-09-17 (audit 2026-09-22,
+DOC-08). Hiện trạng duy nhất nằm ở [MONITORING.md](MONITORING.md): Prometheus → Alertmanager → nhóm
+Telegram, trên CHÍNH máy production.
 
-Đường báo động **duy nhất đang chạy thật** là backup watchdog qua Telegram — cố
-ý tách khỏi Prometheus, vì đó là thứ không được phép im lặng ngay cả khi hệ giám
-sát chết.
-
-Việc còn lại để đóng khoảng cách: dựng Alertmanager (một service nữa trong
-`infra/observability/docker-compose.observability.yml`, khối `alerting:` trong
-`infra/observability/prometheus.yml` đã để sẵn chỗ) và nối vào cùng bot Telegram
-mà watchdog đang dùng.
+Chỗ hở còn lại là **giám sát từ ngoài**: VM chết, docker chết, tunnel chết hay Alertmanager hỏng thì
+không cảnh báo nào được gửi. Repo đã có nhịp tim (`QuanlyWatchdog` + route `nhip-tim`); chủ repo cần
+đặt `HEARTBEAT_URL` và một HTTP check ngoài vào `/livez` (MONITORING.md). Backup watchdog (đường báo
+động cố ý tách khỏi Prometheus) **chưa được cài** trên production.
 
 ## Ngân sách lỗi, với đội một người
 

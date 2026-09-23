@@ -45,6 +45,24 @@ export const redactConfig = {
     "*.passwordHash",
     "*.newPassword",
     "*.oldPassword",
+    // Mở rộng (audit 2026-09-22, OBS-16): fast-redact KHÔNG đệ quy — `*.password` chỉ phủ độ sâu 1,
+    // nên `{ password }` ở GỐC và `{ user: { profile: { password } } }` lọt nguyên văn (đã đo). Hôm nay
+    // không chỗ gọi nào log các khoá này, nên đây là lớp phòng cho dòng log THÊM SAU. Khoá bí mật
+    // thường gặp ở gốc, độ sâu 1 và 2; thân request thì bỏ hẳn.
+    "password",
+    "passwordHash",
+    "*.*.password",
+    "token",
+    "*.token",
+    "*.*.token",
+    "refreshToken",
+    "*.refreshToken",
+    "mfaSecret",
+    "*.mfaSecret",
+    "secret",
+    "*.secret",
+    "req.body",
+    "*.body",
     "req.url",
     // `path` PHẲNG, KHÔNG PHẢI `req.path`. Trình xử lý lỗi ghi `{ reqId, path: req.path, … }`
     // (src/middleware.ts) — một khoá ở GỐC đối tượng log, nên `req.url` ở trên KHÔNG phủ nó.

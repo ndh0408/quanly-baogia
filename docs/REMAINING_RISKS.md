@@ -385,7 +385,7 @@ Mỗi dòng đều kiểm bằng file thật, không kiểm bằng trí nhớ.
 | 2 · Security | **xong** | ADR-0005 CSRF · `ROLES_PERMISSIONS.md` + `endpoint-inventory.mjs` (137/137 hai chiều) · break-glass ở `userService.ts` |
 | 3 · Production Runtime | **xong** | `tsconfig.build.json` · 4 khối `cap_drop` trong compose · `exportGateStats` |
 | 4 · CI/CD | **xong** (2026-08-27) | `.github/workflows/ci.yml` vẫn không chạy (tài khoản không bật Actions) — nhưng cả 5 thứ nó khai nay chạy trong `npm run verify`: xem bảng ngay dưới |
-| 5 · Observability | **xong** (2026-08-27) | 22 rule cảnh báo + 40 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana chạy được ở `infra/observability/` (opt-in) · log đủ 7 trường §27 |
+| 5 · Observability | **xong** (2026-08-27) | 26 rule cảnh báo + 47 bài `promtool test rules` · ngăn xếp Loki+Promtail+Grafana+Alertmanager ĐANG CHẠY trên production (từ 2026-09-16) · log đủ 7 trường §27 |
 | 6 · Performance | **xong** | 92 lệnh `CREATE INDEX` · bench frontend · lưu báo giá ghép sheet thay vì xoá-tạo |
 | 7 · Architecture Cleanup | **xong** | tách service/route, `quoteUtils`/`money`/`permissions` tách bạch, ADR ghi ranh giới |
 | 8 · Repository Cleanup | **xong** | gỡ SPA cũ, dọn gốc repo, `docs/` tái cấu trúc, `repo-stats --check` canh số |
@@ -419,7 +419,7 @@ tích `DATABASE_URL`/`REDIS_URL` để kiểm đúng máy, có `npm ci --dry-run
 ### Định nghĩa HOÀN THÀNH (mục 52)
 
 - **Security → security scans pass**: ✅ chạy thật trong `verify` bước [13/13].
-- **Operations → dashboards, alerts**: ✅ 22 rule + 40 bài kiểm logic; bảng điều khiển
+- **Operations → dashboards, alerts**: ✅ 26 rule + 47 bài kiểm logic; bảng điều khiển
   Grafana ở `infra/observability/` (opt-in, chưa bật ở production — quyết định vận hành,
   xem `TECHNOLOGY_DECISIONS.md`).
 - **Backup → off-host copy**: ⚠️ **vẫn chưa** có bằng chứng đã chạy trên máy chủ thật.
@@ -779,8 +779,9 @@ Từ 2026-09-17, `alertmanager.yml.tpl` mang CẢ HAI khối receiver và entryp
 
 **Vẫn là một kênh tại một thời điểm, và đó là lỗ còn mở.** Ba mặt:
 
-1. **Kênh báo tin chết cùng thứ nó phải báo.** Ở chế độ email: `QuanlyEmailKhongGuiDuoc` nằm trong
-   chính 22 quy tắc — khi nó nổ, email không dùng được để báo. Ở chế độ Telegram: token bị
+1. **Kênh báo tin chết cùng thứ nó phải báo.** Ở chế độ email: SMTP hỏng (`QuanlyPhuThuocNgoaiLoi`
+   dep=smtp — quy tắc "QuanlyEmailKhongGuiDuoc" từng được viện dẫn ở đây CHƯA TỪNG tồn tại, audit
+   2026-09-22 OBS-09) thì email không dùng được để báo. Ở chế độ Telegram: token bị
    `/revoke`, bot bị xoá khỏi nhóm, hoặc mạng chặn Telegram → cảnh báo câm y hệt, chỉ khác nguyên
    nhân.
 2. **Alertmanager tự chết thì không kênh nào báo được.** `alertmanager-entrypoint.sh` cố ý thoát
@@ -799,12 +800,12 @@ gỡ bớt một). Lúc đó nên định tuyến theo `severity`: `critical` đ
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
-`infra/prometheus/alerts.yaml` — 22 quy tắc, 7 nhóm, mỗi cái bám một chế độ hỏng có
+`infra/prometheus/alerts.yaml` — 26 quy tắc, 9 nhóm, mỗi cái bám một chế độ hỏng có
 thật và `runbook` trỏ tới đúng file. Trước đó repo **không có quy tắc cảnh báo nào**
 (`find infra -iname '*alert*'` rỗng): 14 metric (số của mốc đó — nay là 21) chỉ dùng được khi có người đang mở
 dashboard — mà lúc hỏng thì không ai đang mở.
 
-`infra/prometheus/alerts.test.yaml` — 40 bài `promtool test rules`, gồm cả vế **chống
+`infra/prometheus/alerts.test.yaml` — 47 bài `promtool test rules`, gồm cả vế **chống
 kêu oan** (triển khai một tiến trình không được kêu; lưu lượng 0 không được kêu; nâng
 trần hàng đợi thì cảnh báo phải tự tắt). Vế đó mới là thứ giữ cho cảnh báo không bị
 người ta tắt đi.

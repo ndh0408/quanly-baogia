@@ -4,7 +4,7 @@
 # Kiểm cú pháp + PromQL:  npm run check:alerts   (scripts/ci/check-alerts.sh, dùng promtool)
 #
 # ── VÌ SAO CÓ FILE NÀY ─────────────────────────────────────────────────────
-# src/observability.ts phát 21 metric riêng cộng bộ mặc định của prom-client. Trước file này,
+# src/observability.ts phát metric riêng (đếm: npm run docnum) cộng bộ mặc định của prom-client. Trước file này,
 # KHÔNG có một quy tắc cảnh báo nào trong repo (`find infra -iname '*alert*'` không ra gì). Nghĩa
 # là số liệu chỉ dùng được khi đã có người MỞ dashboard ra xem — mà lúc hệ thống hỏng thì không ai
 # đang xem. Có metric mà không có cảnh báo là có hộp đen kèm đèn báo không ai nối dây.
@@ -14,13 +14,11 @@
 # trong mã nguồn hoặc trong docs/REMAINING_RISKS.md, và `annotations.runbook` chỉ tới chỗ đó.
 #
 # ── ĐIỀU KIỆN ĐỂ CHÚNG CHẠY ĐƯỢC ───────────────────────────────────────────
-# ✔ CÓ định nghĩa Prometheus trong repo: `infra/observability/prometheus.yml` +
-#   service `prometheus` trong `infra/observability/docker-compose.observability.yml`, đã nạp sẵn
-#   ĐÚNG file này qua `rule_files:`. Nhưng ngăn xếp đó KHÔNG bật mặc định (xem README ở thư mục
-#   ấy) — nên câu đúng là "đã dựng được bằng một lệnh", KHÔNG phải "đang chạy ở production".
-# ⚠️ KHÔNG CÓ ALERTMANAGER. Quy tắc dưới đây chuyển sang `firing` và DỪNG LẠI ở giao diện
-#    Prometheus (/alerts). Không Telegram, không email, KHÔNG AI BỊ ĐÁNH THỨC. Đường báo động duy
-#    nhất đang chạy thật là backup watchdog qua Telegram, cố ý tách khỏi Prometheus.
+# ✔ Ngăn quan sát `infra/observability/` (Prometheus + Alertmanager + Grafana + Loki) CHẠY trên
+#   production từ 2026-09-16; Alertmanager gửi Telegram từ 2026-09-17 (xem MONITORING.md). Bản chú
+#   thích cũ ở đây ghi "KHÔNG có Alertmanager" — lỗi thời (audit 2026-09-22, OBS-13).
+# ⚠️ Sửa tệp này rồi deploy: `deploy.sh` [5d/6] gửi SIGHUP cho quanly-prometheus để nạp lại —
+#    trước đó Prometheus chạy bộ quy tắc CŨ cho tới khi có người reload tay.
 # ⚠️ `/metrics` ở production TRẢ 404 khi thiếu METRICS_TOKEN (src/app.ts), và 401 khi Bearer sai.
 #    Không đặt token thì Prometheus scrape ra 404 và MỌI quy tắc dưới đây im lặng vĩnh viễn —
 #    `QuanlyMetricsKhongScrapeDuoc` sinh ra để bắt đúng chuyện đó.
@@ -84,8 +82,12 @@ groups:
             NaN — quy tắc sẽ KHÔNG kêu đúng lúc mọi request đều hỏng nhưng chỉ có vài request.
 
       - alert: QuanlyDoTreP95Cao
+        # Bỏ route SSE (audit 2026-09-22, GAP1-01): kết nối SSE sống 30 phút rồi kết thúc → một quan
+        # sát ~1800s ở bucket +Inf; đêm vắng thì đó gần như là quan sát duy nhất và p95 dính trần 10s.
+        # Mã (ROUTE_KHONG_DO_DO_TRE) đã ngừng ghi SSE vào histogram; bộ lọc ở đây giữ cho chuỗi CŨ
+        # (trước lượt deploy đó) và mọi bản chạy lệch không kéo quy tắc kêu oan.
         expr: |
-          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 2
+          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route!="/api/stream/events"}[5m]))) > 2
         for: 15m
         labels: { severity: warning }
         annotations:
@@ -378,7 +380,9 @@ groups:
   - name: quanly.hang-doi
     rules:
       - alert: QuanlyJobNenChatDong
-        expr: sum by (queue) (bullmq_jobs{state="waiting"}) > 100
+        # `max`, KHÔNG `sum` (audit 2026-09-22, OBS-05 / GAP1-02): app VÀ worker cùng phát bullmq_jobs
+        # đọc từ CÙNG Redis — `sum` cộng đôi, ngưỡng 100 thành 50 và tóm tắt báo gấp đôi số thật.
+        expr: max by (queue) (bullmq_jobs{state="waiting"}) > 100
         for: 15m
         labels: { severity: warning }
         annotations:
@@ -389,22 +393,24 @@ groups:
           runbook: "src/queue.ts — bullQueueDepth"
 
       - alert: QuanlyJobNenThatBai
-        expr: sum by (queue) (bullmq_jobs{state="failed"}) > 0
-        for: 10m
+        # Theo SỰ KIỆN (audit 2026-09-22, OBS-05). Bản cũ đọc gauge tồn `bullmq_jobs{state="failed"}` —
+        # job hỏng nằm trong tập failed tới removeOnFail.age (7–90 ngày), nên MỘT đợt SMTP lỗi đã qua
+        # kêu Telegram mỗi 4h suốt cả tuần (~42 tin) — cách nhanh nhất để người trực tắt tiếng kênh.
+        expr: sum by (queue) (increase(bullmq_jobs_failed_total[15m])) > 0
         labels: { severity: warning }
         annotations:
-          summary: "Hàng đợi {{ $labels.queue }} có {{ $value }} job THẤT BẠI"
+          summary: "Hàng đợi {{ $labels.queue }} vừa có job hỏng HẲN (hết lượt thử) trong 15 phút qua"
           description: >-
-            Job thất bại nằm lại trong Redis chứ không tự biến mất. Đây là gauge ĐẾM TỒN, không
-            phải tốc độ — số không tự về 0 cho tới khi ai đó dọn hoặc thử lại.
+            Đếm theo sự kiện, tự im khi không còn job hỏng mới. Xem job hỏng trong log worker
+            ("<queue> job failed") hoặc trong Redis (tập failed giữ tới removeOnFail.age).
 
       - alert: QuanlyKhongCoWorkerNao
         # Cả `waiting` lẫn `active` đều tồn tại nhưng KHÔNG job nào chuyển sang active: dấu hiệu
         # kinh điển của "app còn sống, worker chết". `QuanlyJobNenChatDong` cần 15 phút và ngưỡng
         # 100 job; cái này bắt sớm hơn ở mọi mức tải.
         expr: |
-          sum(bullmq_jobs{state="waiting"}) > 0
-            and sum(bullmq_jobs{state="active"}) == 0
+          max(bullmq_jobs{state="waiting"}) > 0
+            and max(bullmq_jobs{state="active"}) == 0
         for: 10m
         labels: { severity: critical }
         annotations:
@@ -417,6 +423,22 @@ groups:
   # ── Nhóm 5: tiến trình Node ──────────────────────────────────────────────
   - name: quanly.tien-trinh
     rules:
+      - alert: QuanlyTienTrinhVuaKhoiDongLai
+        # MỘT lần khởi động lại cũng phải có người biết (audit 2026-09-22, OBS-03). Heap-OOM của V8
+        # KHÔNG bắt được (đã đo: abort, exit 134 — không qua errorHandler, không qua
+        # uncaughtException) → Docker dựng lại container, mọi request đang bay của MỌI người đứt.
+        # Quy tắc crash-loop bên dưới cần 20 phút liên tục; QuanlyBoNhoSapChamTran cần 5 phút > 80%
+        # — một đỉnh vài giây rồi abort không kích quy tắc nào. Deploy cũng kích quy tắc này: đó là
+        # chủ ý (một tin mỗi lượt deploy), và đọc `ExitCode`/`OOMKilled` là phân biệt được.
+        expr: changes(process_start_time_seconds{job=~"quanly.*"}[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }} vừa khởi động lại (deploy, hết bộ nhớ, hoặc sập)"
+          description: >-
+            Không phải deploy thì xem mã thoát: 134 + dòng "FATAL ERROR: Reached heap limit" trong log
+            là heap-OOM của V8; OOMKilled=true là cgroup giết; còn lại là uncaughtException.
+          runbook: "docker inspect quanly-app | grep -E 'ExitCode|OOMKilled'; docker logs quanly-app --since 30m | grep -m5 'FATAL ERROR\\|uncaughtException'"
+
       - alert: QuanlyTienTrinhKhoiDongLaiLienTuc
         # `process_start_time_seconds` do collectDefaultMetrics của prom-client phát. Tuổi tiến
         # trình liên tục dưới 10 phút = vòng lặp khởi động lại (crash loop).
@@ -441,3 +463,48 @@ groups:
             Node chạy MỘT luồng: event loop nghẽn thì MỌI request chậm, kể cả /readyz. Nguyên nhân
             đã gặp trong repo này là công việc nặng chạy nội tuyến thay vì đẩy sang worker thread.
           runbook: "src/exportQueue.ts, src/importWorker.ts"
+
+  # ── Nhóm 6: phụ thuộc ngoài trên đường đồng bộ ───────────────────────────
+  - name: quanly.phu-thuoc-ngoai
+    rules:
+      - alert: QuanlyPhuThuocNgoaiLoi
+        # (audit 2026-09-22, OBS-09) SMTP hỏng (Gmail 535 đã xảy ra) = người dùng quên mật khẩu không
+        # bao giờ nhận thư; trước đây chỉ có một dòng log. Tài liệu cũ viện dẫn "QuanlyEmailKhongGuiDuoc"
+        # — quy tắc đó CHƯA TỪNG tồn tại; đây là quy tắc thật.
+        expr: sum by (dep) (increase(dependency_calls_total{status="error"}[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Phụ thuộc ngoài {{ $labels.dep }} đang lỗi (15 phút qua)"
+          description: >-
+            smtp: thư mời / đặt lại mật khẩu không tới người dùng. telegram: thông báo không tới.
+            s3: ảnh chứng từ / tệp xuất không đọc-ghi được (404 không tính là lỗi).
+          runbook: "docker logs quanly-app --since 30m | grep -m20 'email send failed\\|telegram\\|S3'"
+
+  # ── Nhóm 7: nhịp tim + tự giám sát đường cảnh báo (audit 2026-09-22, OBS-01) ──
+  # Mọi mắt xích (Prometheus, Alertmanager, VM) nằm trên CHÍNH máy production: VM chết, docker chết,
+  # tunnel chết, Alertmanager hỏng, token Telegram bị thu hồi → KHÔNG cảnh báo nào được gửi. Cách duy
+  # nhất để bên ngoài biết là bên trong phát tín hiệu KHI BÌNH THƯỜNG và bên ngoài kêu khi tín hiệu
+  # ngừng (dead-man switch). Alertmanager đẩy QuanlyWatchdog tới một URL ping ngoài (healthchecks.io
+  # hoặc tương đương) mỗi phút — chỉ khi chủ repo đặt HEARTBEAT_URL (xem alertmanager.yml.tpl).
+  - name: quanly.nhip-tim
+    rules:
+      - alert: QuanlyWatchdog
+        expr: vector(1)
+        labels: { severity: heartbeat }
+        annotations:
+          summary: "Nhịp tim của hệ cảnh báo — LUÔN kêu. Không phải sự cố."
+          description: >-
+            Route riêng trong Alertmanager đẩy nhịp này ra dịch vụ ngoài; dịch vụ đó báo khi mất nhịp.
+            Không bao giờ đi Telegram/email.
+
+      - alert: QuanlyCanhBaoGuiThatBai
+        expr: sum by (integration) (rate(alertmanager_notifications_failed_total[10m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Alertmanager gửi {{ $labels.integration }} THẤT BẠI"
+          description: >-
+            Kênh cảnh báo đang hỏng (token Telegram bị thu hồi, SMTP sai mật khẩu…). Cảnh báo này có
+            thể chính nó cũng không tới được — nó hiện trên giao diện Prometheus/Grafana, và nhịp tim
+            ngoài là lớp bắt thay khi cả kênh chết.
+          runbook: "docker logs quanly-alertmanager --tail 100"

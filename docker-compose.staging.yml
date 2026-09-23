@@ -258,8 +258,9 @@ services:
     # Lưu báo giá đang gửi dở mất trắng; `restart: unless-stopped` dựng lại rồi người dùng bấm
     # lại là chết lại. Trước khi có trần, cùng đầu vào đó chỉ làm VM chậm.
     #
-    # Nên `--max-old-space-size` đặt ở ~70% trần: V8 GC gắt trước, rồi ném heap-OOM BẮT ĐƯỢC —
-    # errorHandler ghi log và trả 500 cho đúng một request, container sống tiếp.
+    # Nên `--max-old-space-size` đặt ở ~70% trần: V8 GC gắt trước, rồi abort CÓ DÒNG LOG "FATAL ERROR:
+    # Reached heap limit" thay vì bị SIGKILL im lặng. KHÔNG bắt được (đã đo, exit 134 — audit
+    # 2026-09-22, OBS-03): mọi request đang bay vẫn đứt; cảnh báo QuanlyTienTrinhVuaKhoiDongLai báo lại.
     #
     # Repo BIẾT còn đường tiêu bộ nhớ chưa chặn (nhập Excel nạp cả workbook trên event loop).
     # Việc phải làm: chạy `docker stats` một tuần, xem đỉnh RSS thật khi xuất báo giá lớn nhất,

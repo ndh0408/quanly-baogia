@@ -91,6 +91,25 @@ export async function kiemTraCsdlChoDoSanSang() {
     c.release();
   }
 }
+/**
+ * Số kết nối đang dùng / trần `max_connections` — cho gauge `db_up` + `db_connections_*` của /metrics.
+ *
+ * Đi qua pool RIÊNG của /readyz (max 1), KHÔNG qua pool người dùng (audit 2026-09-22, OBS-02): pool
+ * người dùng cạn thì phép đo xếp hàng và bị đọc thành "CSDL chết". Hai người dùng pool này đều
+ * single-flight + nhớ đệm 5s nên không tranh nhau đáng kể.
+ */
+export async function doSoKetNoiCsdl(): Promise<{ dung: number; tran: number } | null> {
+  const c = await poolDoSanSang.connect();
+  try {
+    const r = await c.query(
+      "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database())::int AS dung, current_setting('max_connections')::int AS tran"
+    );
+    return (r.rows[0] as { dung: number; tran: number }) ?? null;
+  } finally {
+    c.release();
+  }
+}
+
 // transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).
 // Đường LƯU báo giá gói cả việc nặng vào MỘT transaction: xoá sạch sheet → tạo lại toàn bộ item →
 // đọc lại báo giá qua QUOTE_INCLUDE → snapshot phiên bản (đọc thêm lần nữa + ghi khối jsonb). Trần

@@ -66,6 +66,10 @@ export function conObjectPhien() {
   return {
     connectionString: config.DATABASE_URL,
     max: Number(process.env.SESSION_POOL_MAX) || 4,
+    // Trần CHỜ kết nối (audit 2026-09-22, OBS-10). node-pg mặc định 0 = chờ VÔ HẠN: Postgres chậm/khoá
+    // là mọi request đã đăng nhập (store.get + touch vì rolling) xếp hàng không trần tới khi Cloudflare
+    // cắt 524 — cả app treo thay vì trả lỗi nhanh. Cùng ngưỡng với pool Prisma (src/db.ts).
+    connectionTimeoutMillis: config.DB_TX_MAX_WAIT,
     // Cùng phanh như pool Prisma. Kho phiên chỉ SELECT/UPSERT một hàng mỗi request nên sẽ không
     // bao giờ chạm trần — nhưng chính vì thế, nếu nó chạm thì đó là dấu hiệu hỏng, và chết nhanh
     // tốt hơn là giữ kết nối mãi.
@@ -251,9 +255,17 @@ export function createApp() {
   );
 
   app.use(requestId);
+  // Mount NGAY SAU requestId, TRƯỚC mọi thứ có thể chặn request (audit 2026-09-22, OBS-07): trước đây
+  // nằm sau kho phiên, nên 429 của apiLimiter, 413/400 của parse body và 500 khi kho phiên PG hỏng
+  // (express-session `next(err)` bỏ qua mọi middleware thường) KHÔNG vào http_requests_total — cảnh
+  // báo tỉ lệ 5xx mù đúng lúc Postgres chết. Nhãn route vẫn tính lúc `finish` nên cardinality không đổi.
+  app.use(metricsMiddleware);
   app.use(
     (pinoHttp as any)({
       logger,
+      // Probe/scrape (~6 lượt/phút, ~8.640 dòng/ngày) không ghi log truy cập — chúng nhấn chìm dòng
+      // thật trong Loki (audit 2026-09-22, OBS-08). Lỗi của chúng vẫn thấy qua metric và qua log lỗi.
+      autoLogging: { ignore: (req: Request) => req.url === "/livez" || req.url === "/metrics" },
       customLogLevel: (_req: Request, res: Response, err: Error | undefined) => {
         if (err || res.statusCode >= 500) return "error";
         if (res.statusCode >= 400) return "warn";
@@ -400,8 +412,7 @@ export function createApp() {
     return sessionMiddleware(req, res, next);
   });
 
-  // Prometheus metrics middleware (records all requests).
-  app.use(metricsMiddleware);
+  // (metricsMiddleware đã mount ngay sau requestId ở trên — xem chú thích ở đó.)
 
   // TRẦN CHO PROBE. `app.use("/api/", apiLimiter)` chỉ phủ tiền tố /api/, nên /readyz và /metrics
   // nằm NGOÀI mọi giới hạn — mà /readyz thì truy vấn CSDL. Phải mount TRƯỚC các handler đó: Express

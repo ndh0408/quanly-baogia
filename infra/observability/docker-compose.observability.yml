@@ -34,8 +34,12 @@ services:
   loki:
     image: grafana/loki:3.3.2
     container_name: quanly-loki
-    command: -config.file=/etc/loki/local-config.yaml
+    # Cấu hình RIÊNG có retention 30 ngày (infra/observability/loki.yaml — audit 2026-09-22, OBS-15).
+    # Cấu hình mặc định của ảnh không xoá log nào: volume lớn mãi trên cùng đĩa với pgdata.
+    command: -config.file=/etc/loki/conf/loki.yaml
     volumes:
+      # MOUNT THƯ MỤC, không mount tệp lẻ — cùng lý do ở khối promtail bên dưới.
+      - ./infra/observability:/etc/loki/conf:ro
       - loki-data:/loki
     deploy:
       resources:
@@ -84,9 +88,9 @@ services:
   # Trước service này, repo đã có metric ứng dụng, quy tắc cảnh báo đã qua `promtool test rules` và
   # một bảng Grafana — mà KHÔNG có một định nghĩa Prometheus nào ở bất kỳ đâu. Tức không môi trường
   # nào thu thập được số liệu, không cảnh báo nào KÊU ĐƯỢC, và datasource của Grafana trỏ vào hư
-  # không. Số HIỆN TẠI: 21 metric (`grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l`) và 17
-  # quy tắc (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) — trước đợt 2026-08-27 là 14
-  # và 14. Đo lại bằng hai lệnh đó, đừng tin con số chép tay ở đây.
+  # không. Số metric/quy tắc HIỆN TẠI: đo bằng `npm run docnum` (hoặc
+  # `grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l` và `grep -c '^      - alert:'
+  # infra/prometheus/alerts.yaml`) — đừng chép số vào đây, bản trước chép và đã trôi.
   #
   # ⚠️ ĐIỀU KIỆN BẮT BUỘC: `.env` của máy chủ PHẢI có METRICS_TOKEN, và app/worker phải nhận CÙNG
   # token đó (chúng đọc từ cùng `.env` qua `env_file` trong docker-compose.prod.yml). Không có
@@ -103,6 +107,11 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle # POST /-/reload để nạp lại quy tắc, không phải restart cả container
     environment:
+      # Nhãn `environment` của MỌI cảnh báo (external_labels trong prometheus.yml — Prometheus 3 tự nội
+      # suy biến môi trường ở đó, đã đo trên v3.1.0). Đặt QUANLY_ENV=prod / staging / dev trong .env
+      # của từng máy. Quên đặt thì cảnh báo mang nhãn `chua-dat-QUANLY_ENV` — thấy ngay, thay vì mọi
+      # máy cùng tự xưng "prod" như trước (audit 2026-09-22, OBS-06).
+      QUANLY_ENV: ${QUANLY_ENV:-chua-dat-QUANLY_ENV}
       METRICS_TOKEN: ${METRICS_TOKEN:?đặt METRICS_TOKEN trong .env — thiếu nó thì /metrics trả 404 và MỌI cảnh báo im lặng}
     secrets:
       # Prometheus KHÔNG nội suy biến môi trường trong file cấu hình, nên token phải đi bằng ĐƯỜNG
@@ -202,6 +211,9 @@ services:
       # Cùng lý do: `bot_token_file` trỏ thẳng vào secret, token KHÔNG nằm trong /render, không
       # lọt vào `docker inspect`, không lọt vào log.
       - telegram_bot_token
+      # URL ping của dịch vụ giám sát NGOÀI (healthchecks.io hoặc tương đương) — xem route `nhip-tim`
+      # trong alertmanager.yml.tpl. Rỗng = không có giám sát từ bên ngoài (audit 2026-09-22, OBS-01).
+      - heartbeat_url
     volumes:
       # ⚠️ MOUNT THƯ MỤC, KHÔNG MOUNT TỆP LẺ. ĐÃ ĐO trên chính VM production:
       #     mount tệp lẻ  → container thấy bản CŨ sau khi deploy thay tệp
@@ -282,6 +294,8 @@ secrets:
   # đó là mặc định và là hành vi từ trước 2026-09-17.
   telegram_bot_token:
     environment: TELEGRAM_BOT_TOKEN
+  heartbeat_url:
+    environment: HEARTBEAT_URL
   metrics_token:
     # Nguồn `environment` (Docker Compose ≥ 2.24): giá trị của biến METRICS_TOKEN được bày ra
     # /run/secrets/metrics_token trong container, KHÔNG nằm lại trên đĩa máy chủ và KHÔNG lộ trong

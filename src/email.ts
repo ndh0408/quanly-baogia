@@ -1,5 +1,12 @@
 import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
+import { ghiPhuThuoc } from "./observability.js";
+
+/** Chỉ tên miền người nhận — email là PII, không ghi nguyên văn vào log (audit 2026-09-22, OBS-16). */
+export function mienNguoiNhan(to: unknown): string[] {
+  const ds = Array.isArray(to) ? to : String(to ?? "").split(",");
+  return ds.map((x) => String(x).trim().split("@")[1] || "?").filter(Boolean);
+}
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let configured = false;
@@ -19,6 +26,12 @@ function init() {
     auth: process.env.SMTP_USER
       ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
       : undefined,
+    // Trần thời gian (audit 2026-09-22, OBS-09). Nodemailer mặc định chờ ~2 phút cho kết nối/lời chào
+    // và 10 phút cho socket: SMTP nuốt gói tin là request "quên mật khẩu" (gửi thư ĐỒNG BỘ) treo tới khi
+    // Cloudflare cắt 524. Thà báo lỗi sau 10–20s.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
   return transporter;
 }
@@ -91,7 +104,7 @@ export function brandedEmailHtml({ name, paragraphs = [], button, note }: { name
 export async function sendEmail({ to, subject, html, text, attachments }: { to?: any; subject?: any; html?: any; text?: any; attachments?: any }) {
   const t = init();
   if (!t) {
-    logger.info({ to, subject }, "email skipped (no SMTP)");
+    logger.info({ toDomain: mienNguoiNhan(to), subject }, "email skipped (no SMTP)");
     return { skipped: true };
   }
   try {
@@ -103,10 +116,12 @@ export async function sendEmail({ to, subject, html, text, attachments }: { to?:
       text,
       attachments,
     });
+    ghiPhuThuoc("smtp", true);
     return { messageId: info.messageId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error({ err: msg, to, subject }, "email send failed");
+    ghiPhuThuoc("smtp", false);
+    logger.error({ err: msg, toDomain: mienNguoiNhan(to), subject }, "email send failed");
     return { error: msg };
   }
 }

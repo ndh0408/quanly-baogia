@@ -95,6 +95,18 @@ else
   exit 78
 fi
 
+# ── 1d. NHỊP TIM RA NGOÀI (TUỲ CHỌN) — audit 2026-09-22, OBS-01 ───────────
+# Có tệp secret heartbeat_url (HEARTBEAT_URL trong .env) → giữ khối webhook của receiver `nhip-tim`.
+# Không có → gỡ khối đó; receiver rỗng nuốt nhịp tim (không bao giờ để nó rơi sang Telegram/email).
+KHOA_HB="${AM_HEARTBEAT_URL_FILE:-/run/secrets/heartbeat_url}"
+if [ -s "$KHOA_HB" ]; then
+  HB_BO=""
+  HB_TRANG_THAI="BẬT — nhịp tim đẩy ra URL ngoài mỗi phút"
+else
+  HB_BO="HEARTBEAT"
+  HB_TRANG_THAI="tắt (không có $KHOA_HB) — KHÔNG có giám sát từ bên ngoài: VM/Alertmanager chết thì im lặng"
+fi
+
 # ── 2. THAY GIÁ TRỊ ───────────────────────────────────────────────────────
 mkdir -p "$(dirname "$RA")"
 # Không xác thực → GỠ hai dòng `smtp_auth_*` khỏi bản mẫu TRƯỚC khi thay giá trị, nhờ đó
@@ -151,7 +163,9 @@ export AM_V_ALERT_EMAIL_TO="$ALERT_EMAIL_TO"
 export AM_V_SMTP_REQUIRE_TLS="$SMTP_REQUIRE_TLS"
 export AM_V_TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
-$LOC "$MAU" | bo_khoi "$MOC_BO" | awk '
+# `bo_khoi ""` (chuỗi rỗng) không khớp mốc nào → giữ nguyên, nên nhịp tim bật thì lượt lọc thứ hai
+# là phép đi qua.
+$LOC "$MAU" | bo_khoi "$MOC_BO" | bo_khoi "${HB_BO:-KHONG_GO_GI}" | awk '
   function thay(s, tim, the,   p, r) {
     r = ""
     while ((p = index(s, tim)) > 0) {
@@ -193,6 +207,7 @@ echo "  smarthost = $SMTP_HOST:$SMTP_PORT"
 echo "  gửi tới   = $ALERT_EMAIL_TO"
 echo "  xác thực  = $XAC_THUC"
 echo "  telegram  = $TG_TRANG_THAI"
+echo "  nhịp tim  = $HB_TRANG_THAI"
 # `AM_BIN` chỉ là KHE ĐỂ KIỂM ĐƯỢC, mặc định y như cũ. Không có nó thì bộ test không cách nào chạy
 # THẬT script này (máy dev không có /bin/alertmanager), và mọi bài kiểm buộc phải lùi về so khớp
 # VĂN BẢN của script — thứ không chứng minh được phép thay có chạy đúng hay không.

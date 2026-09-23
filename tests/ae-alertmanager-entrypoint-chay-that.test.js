@@ -198,3 +198,39 @@ describe.runIf(coSh)("Kênh Telegram — mặc định TẮT, bật thì thay h�
     }
   });
 });
+
+// ── NHỊP TIM RA NGOÀI (audit 2026-09-22, OBS-01) ─────────────────────────────
+// Mọi mắt xích cảnh báo nằm trên chính máy production: VM/docker/Alertmanager chết thì im lặng. Route
+// `nhip-tim` đẩy QuanlyWatchdog ra URL ngoài; không có URL thì receiver rỗng — nhịp tim KHÔNG BAO GIỜ
+// được rơi sang kênh người đọc (Telegram mỗi phút).
+describe.runIf(coSh)("alertmanager-entrypoint.sh — nhịp tim", () => {
+  function urlGia() {
+    const d = mkdtempSync(join(tmpdir(), "am-hb-"));
+    const p = join(d, "heartbeat_url");
+    writeFileSync(p, "https://hc-ping.example/uuid-gia\n");
+    return p;
+  }
+  const KHONG_CO = join(tmpdir(), "khong-bao-gio-ton-tai-heartbeat-url");
+
+  it("có HEARTBEAT_URL → receiver nhip-tim có webhook url_file, route heartbeat đứng trước critical", () => {
+    const r = chay({ ...DU, AM_HEARTBEAT_URL_FILE: urlGia() });
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.config).toMatch(/- name: nhip-tim\s*\n(\s*#.*\n)*\s*webhook_configs:\s*\n(\s*#.*\n)*\s*- url_file: \/run\/secrets\/heartbeat_url/);
+    const routes = r.config.slice(r.config.indexOf("routes:"));
+    expect(routes.indexOf('severity="heartbeat"')).toBeLessThan(routes.indexOf('severity="critical"'));
+    expect(r.stdout).toMatch(/nhịp tim\s+= BẬT/);
+  });
+
+  it("KHÔNG có HEARTBEAT_URL → receiver nhip-tim RỖNG (nuốt nhịp tim), vẫn nói ra là tắt", () => {
+    const r = chay({ ...DU, AM_HEARTBEAT_URL_FILE: KHONG_CO });
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.config).toMatch(/- name: nhip-tim/);
+    expect(r.config).not.toMatch(/webhook_configs:/);
+    expect(r.stdout).toMatch(/nhịp tim\s+= tắt/);
+  });
+
+  it("tiêu đề/tin nhắn mang nhãn môi trường (OBS-06)", () => {
+    const r = chay({ ...DU, AM_HEARTBEAT_URL_FILE: KHONG_CO });
+    expect(r.config).toMatch(/Subject: '\{\{ with \.CommonLabels\.environment \}\}\[\{\{ \. \| toUpper \}\}\]/);
+  });
+});
