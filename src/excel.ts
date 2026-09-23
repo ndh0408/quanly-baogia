@@ -1871,6 +1871,16 @@ function renumberSheetIds(wb: any) {
 const MAX_SHEET_NAME = 31;
 
 /**
+ * Cắt còn tối đa `max` đơn vị UTF-16 mà KHÔNG chẻ đôi cặp surrogate (L45).
+ * Trần 31 của Excel đếm theo UTF-16, nên vẫn cắt theo đơn vị đó; chỉ bỏ nửa đầu của cặp surrogate
+ * nếu nó đứng lẻ ở cuối. Bản cũ `.slice(0, 31)` để lại nửa đó với tên toàn emoji ('🎉'×20 → 15
+ * emoji + 0xD83C), ghi ra XML UTF-8 thành U+FFFD: tab hiện '🎉…🎉�', dòng tên ở "Tổng Báo Giá" cũng vậy.
+ */
+function catDonViUtf16(s: string, max: number) {
+  return s.slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
+}
+
+/**
  * Tên tab Excel HỢP LỆ từ chuỗi người dùng gõ tự do.
  *
  * Setter `ws.name` của ExcelJS (node_modules/exceljs/lib/doc/worksheet.js:140-170) NÉM lỗi với
@@ -1889,16 +1899,17 @@ const MAX_SHEET_NAME = 31;
  * `/` `:` thành khoảng trắng giữ nguyên ý nghĩa đọc được, còn ném lỗi thì chặn cả lần xuất.
  */
 export function safeSheetName(raw: unknown, duPhong: string) {
-  const s = String(raw ?? "")
+  const s0 = String(raw ?? "")
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001F\u007F]/g, " ")   // ký tự điều khiển: XML 1.0 không cho, làm hỏng workbook.xml
     .replace(/[*?:/\\[\]]/g, " ")             // tập ký tự Excel cấm
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^'+|'+$/g, "")                   // nháy đơn đầu/cuối
-    .trim()
-    .slice(0, MAX_SHEET_NAME)
-    .trim();                                   // slice có thể để lại khoảng trắng cuối
+    .trim();
+  // Cắt 31 KHÔNG chẻ emoji (L45). Cắt có thể để lại khoảng trắng cuối — và cả dấu nháy đơn cuối
+  // ("…x'y" cắt còn "…x'"), mà setter của ExcelJS NÉM với tên kết thúc bằng nháy ⇒ lọc lại lần nữa.
+  const s = catDonViUtf16(s0, MAX_SHEET_NAME).trim().replace(/'+$/, "").trim();
   // So không phân biệt hoa/thường: Excel giữ chỗ "History" bất kể cách viết, dù ExcelJS chỉ chặn
   // đúng một cách viết.
   if (!s || s.toLowerCase() === "history") return duPhong.slice(0, MAX_SHEET_NAME);
@@ -1923,7 +1934,7 @@ export async function buildQuoteBuffer(quote: any) {
     while (usedNames.has(n.toLowerCase())) {
       const hau = ` (${i++})`;
       // Cắt lại SAU khi nối hậu tố. Bản cũ nối vào tên ĐÃ cắt 31 nên kết quả vượt trần trở lại.
-      n = `${name.slice(0, MAX_SHEET_NAME - hau.length).trim()}${hau}`;
+      n = `${catDonViUtf16(name, MAX_SHEET_NAME - hau.length).trim()}${hau}`;   // không chẻ emoji (L45)
     }
     usedNames.add(n.toLowerCase());
     return n;
