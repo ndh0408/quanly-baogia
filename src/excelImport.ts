@@ -761,7 +761,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       base.warnings.push(`Còn ${tail.length} dòng trông như hạng mục nằm DƯỚI phần tổng (dòng ${tail[0]}…) — app chỉ nạp phần bảng phía trên, hãy kiểm tra lại file.`);
     }
   }
-  if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh KHÔNG nạp lại được, cần thêm ảnh thủ công sau khi nạp.");
+  // Chế độ Thay trên web giữ ảnh đang có của dòng còn khớp (importApply.giuTruongChiApp, L48) — câu này
+  // chỉ còn nói phần đúng: ảnh NẰM TRONG FILE không đọc được, dòng mới phải thêm ảnh tay.
+  if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh trong file KHÔNG nạp lại được. Dòng còn khớp với sheet đích giữ nguyên ảnh đang có; dòng mới cần thêm ảnh thủ công sau khi nạp.");
   if (base.stats.formulasDropped) base.warnings.push(`${base.stats.formulasDropped} công thức không nạp được (đã giữ con số) — xem cột Cảnh báo từng dòng.`);
   if (!base.items.length) base.warnings.push("Không đọc được hạng mục nào trong bảng.");
   if (daCat)
