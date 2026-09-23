@@ -197,6 +197,13 @@ export async function resendInvite(req: Request) {
   const u = await prisma.user.findFirst({ where: { id } });
   if (!u) throw httpError(404, "Không tìm thấy tài khoản");
   if (u.active) throw httpError(400, "Tài khoản đã được kích hoạt, không cần gửi lại lời mời");
+  // ĐÃ TỪNG KÍCH HOẠT mà nay `active: false` = bị KHOÁ, không phải đang chờ (soát chéo auth#6).
+  // Chốt lớp hai của acceptInvite (authService.ts) trả 404 cho đúng tập này, nên gửi lời mời ở
+  // đây là phát đi một liên kết CHẮC CHẮN chết trong khi vẫn báo `emailSent: true` cho admin.
+  // Điều kiện phải KHỚP TỪNG CHỮ với chốt bên đó — lệch là quay lại cảnh báo thành công giả.
+  if (u.passwordChangedAt || u.lastLoginAt) {
+    throw httpError(400, "Tài khoản này đã từng kích hoạt và đang bị khoá — hãy dùng \"Mở khóa\", không gửi lời mời (liên kết mời không mở lại được tài khoản đã khoá).");
+  }
   if (!u.email) throw httpError(400, "Tài khoản không có email");
   const token = randomBytes(24).toString("hex");
   await prisma.user.update({
@@ -265,17 +272,41 @@ export async function updateUser(req: Request) {
   const { password, ...rest } = req.body;
   const data = { ...rest };
   if (password) {
+    // ĐẶT MẬT KHẨU LÊN TÀI KHOẢN ĐANG CHỜ LỜI MỜI → TỪ CHỐI (soát chéo auth#6, AUTH-01 × AUTH-06).
+    //
+    // Dòng đóng mốc `passwordChangedAt` ngay dưới biến tài khoản thành "ĐÃ TỪNG kích hoạt" theo đúng
+    // định nghĩa mà chốt lớp hai của acceptInvite (authService.ts) và sendPasswordReset dùng để nhận
+    // ra tài khoản bị KHOÁ. Nên nếu cho qua thì: liên kết mời đang gửi đi → 404; "Gửi lại lời mời" →
+    // liên kết mới cũng 404; "Quên mật khẩu" → im lặng. Trong khi hàng vẫn hiện "Chờ kích hoạt"
+    // (listUsers: `!active && inviteTokenHash`) — một hàng kẹt vĩnh viễn, và không đường nào gỡ mốc
+    // đó ra. Bản trước giữ token lại "để khỏi thành hàng kẹt", nhưng token còn mà liên kết chết thì
+    // vẫn là hàng kẹt. Chọn MỘT nghĩa: tài khoản đang chờ thì chỉ có hai lối — "Gửi lại lời mời"
+    // (người được mời tự đặt mật khẩu), hoặc mở khoá (`active: true`) cùng lúc với đặt mật khẩu.
+    //
+    // "Đang chờ" dùng ĐÚNG hai tín hiệu của sendPasswordReset: chưa từng kích hoạt (không
+    // passwordChangedAt, không lastLoginAt) VÀ còn lời mời (inviteTokenHash hoặc inviteExpiresAt).
+    // Tài khoản khoá mà không còn lời mời thì không có liên kết nào để làm chết — cho đặt như cũ.
+    //
+    // Truy vấn riêng chứ KHÔNG nhét vào `USER_SELECT`: before/after của select đó được ghi nguyên văn
+    // vào nhật ký kiểm toán, và hash chứng thư kích hoạt không được nhân bản sang bảng nhật ký.
+    if (!before.active && rest.active !== true) {
+      const moc = await prisma.user.findUnique({ where: { id }, select: { passwordChangedAt: true, inviteTokenHash: true, inviteExpiresAt: true } });
+      const daTungKichHoat = !!(moc?.passwordChangedAt || before.lastLoginAt);
+      const dangChoMoi = !!(moc?.inviteTokenHash || moc?.inviteExpiresAt);
+      if (!daTungKichHoat && dangChoMoi) {
+        throw httpError(400, "Tài khoản đang chờ kích hoạt: hãy bấm \"Gửi lại lời mời\" để người đó tự đặt mật khẩu (hoặc mở khoá tài khoản cùng lúc) — đặt mật khẩu lúc này sẽ vô hiệu hoá lời mời.");
+      }
+    }
     data.passwordHash = await bcrypt.hash(password, config.BCRYPT_COST);
     // Admin đặt lại mật khẩu = đổi thông tin xác thực → đóng mốc để MỌI phiên và access token cũ
     // của tài khoản đó chết ngay, không phụ thuộc việc xoá hàng trong kho phiên có thành công không.
     data.passwordChangedAt = new Date();
-    // Đốt token đặt-lại đang sống (AUTH-06) — cùng lý do như changePassword. CHỈ với tài khoản ĐÃ
-    // kích hoạt: tài khoản chưa kích hoạt mà mất token là mất nút "Gửi lại lời mời" (listUsers tính
-    // `pending` theo inviteTokenHash) và thành hàng kẹt.
-    if (before.active) {
-      data.inviteTokenHash = null;
-      data.inviteExpiresAt = null;
-    }
+    // Đốt token đặt-lại đang sống (AUTH-06) — cùng lý do như changePassword. VÔ ĐIỀU KIỆN: ca duy
+    // nhất mà việc đốt làm mất lời mời của ai đó (tài khoản đang chờ, vẫn khoá sau lệnh này) đã bị
+    // chặn ngay trên. Mọi ca còn lại, kể cả mở khoá + đặt mật khẩu cùng lúc, admin đã GIAO mật khẩu
+    // — một token đặt-lại còn sống là cửa thứ hai vào tài khoản mà không ai định mở.
+    data.inviteTokenHash = null;
+    data.inviteExpiresAt = null;
   }
   // ── ĐỔI EMAIL: CHỐT CHỐNG TRÙNG, VÀ MỘT LỆNH ĐỐT CHỨNG THƯ ─────────────────────────────────
   //
