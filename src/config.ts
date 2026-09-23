@@ -286,7 +286,8 @@ const schema = z.object({
   WORKER_MODE: z.string().optional(),
 
   // Lấy mẫu Sentry.
-  SENTRY_TRACES_SAMPLE_RATE: numEnv(z.coerce.number().min(0).max(1).default(0.1)),
+  // Mặc định 0 = tắt tracing (OBS-12): src/observability.ts đọc biến với mặc định 0 — hai nơi phải cùng số.
+  SENTRY_TRACES_SAMPLE_RATE: numEnv(z.coerce.number().min(0).max(1).default(0)),
   SENTRY_PROFILES_SAMPLE_RATE: numEnv(z.coerce.number().min(0).max(1).default(0)),
 
   // Tài khoản KHẨN CẤP: vẫn hiện trong danh sách, vẫn hạ quyền/khoá được; cờ chỉ để admin nhận ra
