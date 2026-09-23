@@ -223,6 +223,39 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     await cho(20);
     expect(coXd()).toBe(true);
   });
+
+  // X1 (hồi quy của chính bản sửa trên): bản giữ lại nay SỐNG qua nhiều phiên, mà đường nạp từng hỏi nó
+  // TRƯỚC và `else if` chặn luôn bản nháp THƯỜNG — phần gõ mới hơn (mốc hnRev KHỚP máy chủ) không bao giờ
+  // được đề nghị, và phím gõ đầu tiên của phiên sau ghi đè mất nó. Phiên 1 giữ bản ':xungdot', gõ 8.800.000
+  // rồi rời trang; phiên 2 mở lại.
+  async function phien1GiuXdRoiGo() {
+    ghiXd();
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);   // Hủy, Hủy → giữ
+    await mo();
+    goGia("8800000");
+    await cho(250);
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+    act(() => root!.unmount()); root = null; host?.remove();
+    expect(giaTrongNhap(KHOA)).toBe(8_800_000);
+    expect(coXd()).toBe(true);
+    confirmMock().mockClear();
+  }
+
+  it("X1: còn giữ bản ':xungdot' mà có bản nháp thường mới hơn (mốc khớp) → vẫn hỏi khôi phục bản nháp thường", async () => {
+    await phien1GiuXdRoiGo();
+    await mo();                                                      // h.confirm = true → Khôi phục
+    expect(confirmMock().mock.calls.map((c) => c[0])[0], "bản nháp thường bị bản giữ lại che mất").toBe("Có giá Hà Nội chưa lưu từ lần trước");
+    expect(host!.textContent).toContain("8.800.000");
+    expect(coXd(), "đã khôi phục bản nháp thường thì chưa đụng tới bản giữ lại").toBe(true);
+  });
+
+  it("X1: Hủy bản nháp thường (đồng bộ QuoteEditor: nó bị bỏ) → mới hỏi tới bản ':xungdot'", async () => {
+    await phien1GiuXdRoiGo();
+    confirmMock().mockImplementationOnce(async () => false);          // Hủy bản nháp thường
+    await mo();                                                      // rồi "Mở bản của tôi"
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Có giá Hà Nội chưa lưu từ lần trước", "Giá Hà Nội bạn gõ trước khi bị xung đột"]);
+    expect(host!.textContent).toContain("6.600.000");
+  });
 });
 
 // L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",
