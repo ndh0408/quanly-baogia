@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, tieuDeHienThi, sheetCode, soMa, statusLabel, dash, Stat } from "../lib/format";
+import { fmtMoney, fmtDate, tieuDeHienThi, sheetCode, soMa, statusLabel, dash, Stat, trangKhachTuChoi } from "../lib/format";
 
 // Port "Quản lý dự án" (renderProjects) — bê ĐẦY ĐỦ: báo giá ĐÃ CHỐT, mỗi sheet 1 dòng, bảng 23
 // cột theo dõi hóa đơn (Trạng thái: Hóa đơn→Thanh toán→Hoàn tất) + sửa-tại-ô (admin: Số HĐ/Ngày TT/PO/
@@ -22,12 +22,13 @@ type Row = {
   invoiceDate: string | null; invoiceCompany: string | null;   // tham chiếu từ trang Hóa đơn
 };
 
-function buildRows(quotes: ProjectQuote[]): Row[] {
+export function buildRows(quotes: ProjectQuote[]): Row[] {
   const out: Row[] = [];
   for (const q of quotes) {
     const sheets = q.sheets && q.sheets.length ? q.sheets : [{ name: null, subtotal: q.subtotal }];
     const multi = sheets.length > 1;
     sheets.forEach((sh, i) => {
+      if (trangKhachTuChoi(q, sh)) return;   // FE-09 — không vào Số tiền / Tổng VAT / Đã thu
       const baoGia = Number(sh.subtotal) || 0;
       const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
       out.push({

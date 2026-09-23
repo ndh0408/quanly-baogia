@@ -77,6 +77,15 @@ export const ROLE_LABEL: Record<string, string> = {
 export const roleLabel = (r?: string | null) => ROLE_LABEL[r || ""] || r || "—";
 
 /* Thông điệp lỗi từ ApiError — thay chuỗi `error instanceof ApiError ? …` lặp mọi trang. */
+/**
+ * FE-09: trang khách KHÔNG duyệt của một báo giá ĐÃ CHỐT không phải việc cần xuất hoá đơn / thu tiền.
+ * `convertedTotal` (doanh thu ghi nhận, quoteService.markConverted) đã trừ nó; Hóa đơn / Quản lý dự án /
+ * "Cần xử lý" mà vẫn cộng thì công nợ phải thu phồng và kế toán có thể đòi tiền hạng mục khách đã từ chối.
+ * Báo giá CHƯA chốt thì giữ nguyên — trang bị từ chối lúc đó vẫn có thể được đồng ý lại.
+ */
+export const trangKhachTuChoi = (q: { status?: string }, sh: { custStatus?: string | null }) =>
+  q.status === "converted" && sh.custStatus === "rejected";
+
 export const errMsg = (e: unknown, fallback = "Lỗi tải dữ liệu") => (e instanceof ApiError ? e.message : fallback);
 
 /* Ô trống — dùng thống nhất thay vì mỗi trang tự chế. */
