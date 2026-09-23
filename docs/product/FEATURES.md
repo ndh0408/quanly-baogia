@@ -342,7 +342,7 @@ liệu" — thiếu `quote:read:own` thì các endpoint analytics trả 403.
 | **Tìm kiếm không dấu** | Cột `searchText` chuẩn-hoá bỏ dấu + chỉ mục GIN trigram (`pg_trgm`) trên báo giá, khách hàng, nhân sự → gõ sai dấu / không dấu vẫn ra. Thêm `GET /api/search` tìm toàn cục. |
 | **Thông báo trong app** | Danh sách thẻ đã/chưa đọc, lọc, "đánh dấu đã đọc tất cả", bấm vào là deep-link sang đúng báo giá. Khử trùng lặp ở **cả hai đầu**: backend bỏ qua bản giống hệt chưa đọc trong 5 phút, frontend gộp lại lần nữa cho dữ liệu cũ. |
 | **Realtime** | SSE (`/api/stream/events`) đẩy tín hiệu để client làm mới cache — không phải WebSocket, xem [ADR 0004](../adr/0004-sse-not-websocket.md). |
-| **Webhook ra ngoài** | Đăng ký endpoint theo sự kiện (`quote.created`, `quote.updated`, `quote.converted`, `customer.created`…), xem lại lịch sử gửi (`/:id/deliveries`). |
+| **Webhook ra ngoài** | Đăng ký endpoint theo sự kiện (`quote.created`, `quote.converted` — hai sự kiện duy nhất hệ thống thật sự bắn), mỗi lượt gửi mang `X-QLY-Delivery` ổn định qua các lần thử lại để bên nhận khử trùng; xem lại lịch sử gửi (`/:id/deliveries`). |
 | **Email / Telegram** | Gửi qua hàng đợi nền khi có Redis; kênh và mức độ ồn cấu hình ở `Setting` `notif.channels`. |
 | **Nhật ký hoạt động** | Lọc theo hoạt động / đối tượng / khoảng ngày, phân trang, nhãn tiếng Việt. Danh sách mã hoạt động ở frontend bị khoá hai chiều với backend bằng test `w2-auditActionCoverage` — thiếu **hoặc thừa** một mã đều làm CI đỏ. Quyền xem chi tiết (`audit:view:full`) tách riêng khỏi quyền xem danh sách. |
 | **Phân quyền động** | Admin sửa được ma trận **vai trò × quyền** ngay trên giao diện, và tick **quyền cho từng tài khoản**. Vai trò `admin` **khoá cứng** (luôn đủ quyền — chống tự khoá mình ra ngoài). |
