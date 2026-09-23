@@ -34,6 +34,35 @@ export function evalArith(input: string | number): number | null {
   return result;
 }
 
+/**
+ * LÀM TRÒN KIỂU EXCEL (ROUND / ROUNDUP / ROUNDDOWN / INT).
+ *
+ * Bản cũ tính thẳng Math.round/ceil/trunc(x * 10^d) trên double nên dính sai số dấu phẩy động:
+ * 3000*1,1 = 3300,0000000000005 → ROUNDUP(…;-2) ra 3.400; 6000*1,15 = 6899,999999999999 →
+ * ROUNDDOWN(…;-2) ra 6.800; 4,35*100 = 434,99999999999994 → INT ra 434. Excel ra 3.300 / 6.900 / 435
+ * vì nó làm tròn toán hạng về 15 CHỮ SỐ CÓ NGHĨA trước. Thêm nữa Math.round đẩy nửa về phía +∞ nên
+ * ROUND(-52500;-3) ra -52.000, Excel đi XA SỐ 0 → -53.000. Tệp xuất có fullCalcOnLoad nên Excel tính
+ * lại khi mở: Thành tiền/Tổng trong Excel lệch app/PDF mà bước tự kiểm không bắt được (cùng bộ tính).
+ *
+ * Cách làm: chuẩn hoá về 15 chữ số, làm tròn TRỊ TUYỆT ĐỐI rồi trả dấu (ROUND nửa đi xa số 0,
+ * ROUNDUP xa số 0, ROUNDDOWN về phía 0 — đúng Excel), và dịch dấu phẩy bằng số mũ thập phân ("e")
+ * chứ không nhân 10^d. Số chữ số lẻ bị CẮT về số nguyên như Excel (ROUND(x;1,7) = ROUND(x;1)).
+ * Đối chiếu Excel 16 thật qua COM: 3.010 ca (gồm CEILING/FLOOR) khớp hết, bản cũ lệch 1.323.
+ * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa thì sửa CẢ HAI.
+ */
+const so15 = (x: number) => Number(x.toPrecision(15));
+/** x × 10^d bằng số mũ thập phân — không qua phép nhân double ("2.675e2" = 267,5 đúng tuyệt đối). */
+const dichThapPhan = (x: number, d: number) => { const [m, e] = String(x).split("e"); return Number(m + "e" + (Number(e || 0) + d)); };
+function lamTronExcel(x: number, soChuSo: number, kieu: "tron" | "len" | "xuong"): number {
+  const n = so15(x), d = Math.trunc(soChuSo);
+  if (!isFinite(n) || !isFinite(d)) return NaN;
+  const v = dichThapPhan(Math.abs(n), d);
+  if (!isFinite(v)) return n;   // số chữ số lẻ quá lớn: không còn gì để làm tròn
+  const r = kieu === "tron" ? Math.round(v) : kieu === "len" ? Math.ceil(v) : Math.floor(v);
+  const kq = Math.sign(n) * dichThapPhan(r, -d);
+  return kq === 0 ? 0 : kq;     // không để lọt -0
+}
+
 const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   SUM: (a) => a.reduce((x, y) => x + y, 0),
   PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
@@ -41,10 +70,10 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
   MIN: (a) => (a.length ? Math.min(...a) : 0),
   MAX: (a) => (a.length ? Math.max(...a) : 0),
-  ROUND: (a) => { const p = 10 ** (a[1] || 0); return Math.round((a[0] || 0) * p) / p; },
-  ROUNDUP: (a) => { const p = 10 ** (a[1] || 0); return Math.ceil((a[0] || 0) * p) / p; },
-  ROUNDDOWN: (a) => { const p = 10 ** (a[1] || 0); return Math.trunc((a[0] || 0) * p) / p; },
-  INT: (a) => Math.floor(a[0] || 0),
+  ROUND: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "tron"),
+  ROUNDUP: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "len"),
+  ROUNDDOWN: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "xuong"),
+  INT: (a) => Math.floor(so15(a[0] || 0)),
   ABS: (a) => Math.abs(a[0] || 0),
   CEILING: (a) => Math.ceil(a[0] || 0),
   FLOOR: (a) => Math.floor(a[0] || 0),

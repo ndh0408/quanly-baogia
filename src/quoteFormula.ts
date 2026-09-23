@@ -75,6 +75,23 @@ function evalArith(input: string) {
   return result;
 }
 
+// LÀM TRÒN KIỂU EXCEL — y hệt web/src/lib/formula.ts (xem chú thích đầy đủ ở đó). Tóm tắt: chuẩn hoá
+// toán hạng về 15 chữ số có nghĩa (3000*1,1 = 3300,0000000000005 → 3300), làm tròn TRỊ TUYỆT ĐỐI rồi
+// trả dấu (ROUND(-52500;-3) = -53.000 như Excel, không phải -52.000), dịch dấu phẩy bằng số mũ thập
+// phân. Bản cũ lệch Excel ở 1.323/3.010 ca đo bằng Excel thật; vì bước tự kiểm dùng CHÍNH bộ tính này
+// nên tệp xuất ghi công thức kèm result sai, Excel (fullCalcOnLoad) mở ra số khác app/PDF.
+const so15 = (x: number) => Number(x.toPrecision(15));
+const dichThapPhan = (x: number, d: number) => { const [m, e] = String(x).split("e"); return Number(m + "e" + (Number(e || 0) + d)); };
+function lamTronExcel(x: number, soChuSo: number, kieu: "tron" | "len" | "xuong"): number {
+  const n = so15(x), d = Math.trunc(soChuSo);
+  if (!isFinite(n) || !isFinite(d)) return NaN;
+  const v = dichThapPhan(Math.abs(n), d);
+  if (!isFinite(v)) return n;
+  const r = kieu === "tron" ? Math.round(v) : kieu === "len" ? Math.ceil(v) : Math.floor(v);
+  const kq = Math.sign(n) * dichThapPhan(r, -d);
+  return kq === 0 ? 0 : kq;
+}
+
 const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   SUM: (a) => a.reduce((x, y) => x + y, 0),
   PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
@@ -82,10 +99,10 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
   MIN: (a) => (a.length ? Math.min(...a) : 0),
   MAX: (a) => (a.length ? Math.max(...a) : 0),
-  ROUND: (a) => { const p = 10 ** (a[1] || 0); return Math.round((a[0] || 0) * p) / p; },
-  ROUNDUP: (a) => { const p = 10 ** (a[1] || 0); return Math.ceil((a[0] || 0) * p) / p; },
-  ROUNDDOWN: (a) => { const p = 10 ** (a[1] || 0); return Math.trunc((a[0] || 0) * p) / p; },
-  INT: (a) => Math.floor(a[0] || 0),
+  ROUND: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "tron"),
+  ROUNDUP: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "len"),
+  ROUNDDOWN: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "xuong"),
+  INT: (a) => Math.floor(so15(a[0] || 0)),
   ABS: (a) => Math.abs(a[0] || 0),
   CEILING: (a) => Math.ceil(a[0] || 0),
   FLOOR: (a) => Math.floor(a[0] || 0),
