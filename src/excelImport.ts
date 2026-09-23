@@ -437,6 +437,22 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     bodyRows.push(r);
     lastRow = r;
   }
+  // Sheet TỔNG nhận theo CẤU TRÚC, không chỉ theo chữ ở A1 (soát toàn diện L50). Khách đổi tiêu đề
+  // ("TỔNG HỢP BÁO GIÁ") hay chèn một hàng logo lên đầu là luật A1 ở trên trượt, còn hàng
+  // "STT | Hạng mục | Thành tiền" vẫn đủ làm hàng tiêu đề → mỗi sheet con thành một hạng mục 0đ, mẫu
+  // đoán GN kể cả tệp Colorfull, modal mặc định "Thay toàn bộ" → sheet rác hoặc ĐÈ một sheet GN.
+  // Bảng KHÔNG có cột ĐVT / Số Lượng / Đơn Giá mới xét, và phải thêm một trong hai:
+  //   · tên tab là "Tổng Báo Giá" (app đặt; khách dán giá trị đè công thức thì chỉ còn dấu hiệu này);
+  //   · mọi ô Thành Tiền có chữ đều là công thức trỏ sang SHEET KHÁC ('Décor'!H20) — đúng thứ app
+  //     ghi; bảng chỉ-có-Thành-Tiền của tệp ngoài ghi số thường thì vẫn nạp như cũ.
+  if (!colOf.unit && !colOf.quantity && !colOf.unitPrice && colOf._amount && bodyRows.length) {
+    const coChu = bodyRows.filter((r) => !isBlank(cellAt(r, "_amount")));
+    const troSheetKhac = coChu.length > 0 && coChu.every((r) => (fxOf(cellAt(r, "_amount")) || "").includes("!"));
+    if (troSheetKhac || /^TONG BAO GIA/.test(normHdr(ws.name))) {
+      return { ...emptySheet(index, base.name), skipped: "Sheet tổng hợp do app tự sinh — không cần nạp" };
+    }
+  }
+
   base.firstRow = bodyRows[0];
   base.lastRow = lastRow;
   base.stats.rows = bodyRows.length;
