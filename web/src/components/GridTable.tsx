@@ -1349,6 +1349,12 @@ function GridTableInner(props: GridTableProps) {
       }
       // 1 ô SỐ → parseSoDan (nội bộ đọc số thô; ngoài: SL/Ngày thập phân, Đơn giá nghìn VN/US), KHÔNG để trình duyệt+onNumInput đọc sai (1,000,000→1.0).
       if (f0 && NUMERIC.has(f0)) {
+        // ĐANG GÕ DỞ CÔNG THỨC ("=D1*") → để trình duyệt chèn tại con trỏ như Excel ở chế độ sửa; onNumInput
+        // tự ghi công thức live + tính lại. Bản cũ ghi đè cả ô: công thức đang gõ mất, Đơn giá = số vừa
+        // dán (soát toàn diện L23). Đang sửa SỐ THƯỜNG thì vẫn ghi đè bằng số đã đọc — để trình duyệt
+        // chèn chuỗi thô thì liveFormat/onNumInput đọc sai "1,000,000".
+        const oSua = e.target as HTMLInputElement | null;
+        if (editingRef.current && oSua === ae && (oSua?.value || "").trim().startsWith("=")) return;
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
         pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), moHo); coSlTheoNguon(i0, 0, f0, fSrc1);
