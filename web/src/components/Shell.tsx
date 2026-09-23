@@ -366,7 +366,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
         es = new EventSource("/api/stream/events");
         es.addEventListener("open", () => { lan = 0; });   // nối được thì quên lịch sử lùi
         es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
-        es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+        // FE-18: chuyển tiếp payload {entity, action} để RealtimeBridge chỉ làm tươi query liên quan.
+        es.addEventListener("changed", (ev) => { let detail: unknown = null; try { detail = JSON.parse((ev as MessageEvent).data); } catch { /* payload lạ → làm tươi tất cả */ } window.dispatchEvent(new CustomEvent("realtime:changed", { detail })); });
         es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
         es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
         // Phiên bị thu hồi (khoá tài khoản / gỡ MFA / đổi mật khẩu) — dọn luôn bản nháp cục bộ,
