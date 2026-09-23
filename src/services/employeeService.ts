@@ -105,11 +105,28 @@ function thayDoiDanhBa(truoc: Record<string, any>, than: Record<string, any>) {
 }
 
 export async function updateEmployee(req: Request) {
-  const before = await prisma.employee.findFirst({ where: { id: (req.params as any).id } });
-  if (!before) throw httpError(404, "Không tìm thấy nhân viên");
-  assertEmployeeInReadScope(req, before);
-  const rec = await prisma.employee.update({ where: { id: (req.params as any).id }, data: encodePiiForWrite("Employee", req.body) as any, include: ownerSelect });
-  const { before: truoc, after: sau } = thayDoiDanhBa(decodePiiOnRead("Employee", before) as Record<string, any>, req.body);
+  const id = Number((req.params as any).id);
+  // GIẢI MÃ BẢN CŨ TRƯỚC KHI GHI, trong CÙNG transaction (hồi quy do gộp FILE-12 × RBAC-04, soát chéo
+  // 2026-09-23). FILE-12 cho danh sách trả hàng có bản mã hỏng với CCCD/STK = null + cờ piiLoi; form
+  // Sửa gửi lại NGUYÊN form nên hai ô trống đi lên thành null. Bản trước GHI trước (encodePiiForWrite
+  // null → xoá bản mã) rồi mới giải mã `before` cho nhật ký — ném 500 SAU khi lệnh ghi đã commit: bản
+  // mã duy nhất (khôi phục được nếu đặt lại khoá cũ) mất vĩnh viễn, nhật ký trống. Nay hàng không giải
+  // mã được bị từ chối 409, KHÔNG ghi byte nào — cùng nếp updatePersonnel.
+  const { rec, truoc, sau } = await prisma.$transaction(async (tx) => {
+    const before = await tx.employee.findFirst({ where: { id } });
+    if (!before) throw httpError(404, "Không tìm thấy nhân viên");
+    assertEmployeeInReadScope(req, before);
+    let cu: Record<string, any>;
+    try {
+      cu = decodePiiOnRead("Employee", before) as Record<string, any>;
+    } catch (e) {
+      if (!(e as { piiIntegrity?: boolean })?.piiIntegrity) throw e;
+      throw httpError(409, "Hồ sơ này có CCCD/số tài khoản đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá) — không sửa được để khỏi xoá mất dữ liệu. Báo quản trị khôi phục khoá.");
+    }
+    const ghi = await tx.employee.update({ where: { id }, data: encodePiiForWrite("Employee", req.body) as any, include: ownerSelect });
+    const doi = thayDoiDanhBa(cu, req.body);
+    return { rec: ghi, truoc: doi.before, sau: doi.after };
+  });
   await audit(req, "employee.update", { resource: "employee", resourceId: rec.id, before: truoc, after: sau });
   return decodePiiOnRead("Employee", rec);
 }

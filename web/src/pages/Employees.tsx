@@ -182,9 +182,12 @@ export function EmployeesPage({ me, query, onQuery }: { me: Me; query: string; o
   );
 }
 
-function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
+export function EmployeeForm({ rec, readOnly: readOnlyTheoQuyen, onClose, onSaved }: {
   rec: Employee | null; readOnly: boolean; onClose: () => void; onSaved: () => void;
 }) {
+  // Hàng có bản mã PII hỏng (piiLoi — máy chủ trả CCCD/STK = null) chỉ được XEM: gửi lại form sẽ ghi hai
+  // ô trống đè lên bản mã (máy chủ đã chặn 409; đây là lớp thứ hai để người dùng hiểu vì sao).
+  const readOnly = readOnlyTheoQuyen || !!rec?.piiLoi;
   const buildInitial = () => {
     const init: Record<string, string> = {};
     for (const f of EMP_FIELDS) {
@@ -239,6 +242,12 @@ function EmployeeForm({ rec, readOnly, onClose, onSaved }: {
           <button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
+          {rec?.piiLoi ? (
+            <div className="err" role="alert" data-testid="pii-loi">
+              ⚠️ CCCD / số tài khoản của hồ sơ này đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá). Hồ sơ
+              tạm chỉ xem được để khỏi xoá mất dữ liệu — báo quản trị khôi phục khoá rồi sửa lại.
+            </div>
+          ) : null}
           <div className="grid">
             {EMP_FIELDS.map((f, idx) => {
               const fErr = fieldErrors[f.key];
