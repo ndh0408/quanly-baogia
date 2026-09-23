@@ -16,13 +16,18 @@
  * tests/b7-deploy-image-digest.test.js), đọc log lệnh gửi sang máy chủ.
  * ============================================================================
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
+
+// Mỗi ca chạy deploy.sh THẬT bằng bash (spawnSync, trần 30s/lượt). Chạy riêng mất 1–3s, nhưng trong lượt
+// test đầy đủ (vitest song song, CPU tranh nhau) một ca đo được 23,8s — vượt testTimeout mặc định 20s
+// của repo và đỏ dù mã không đổi (2026-09-24). Trần của tệp phải lớn hơn trần spawnSync bên trong.
+vi.setConfig({ testTimeout: 60_000 });
 const SHA = "1111111111111111111111111111111111111111";
 
 const STUB_SSH = `#!/usr/bin/env bash
