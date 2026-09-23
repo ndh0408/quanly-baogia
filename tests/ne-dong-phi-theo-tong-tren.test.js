@@ -78,3 +78,65 @@ describe("L46: dòng phí =SUM(các dòng TRÊN)*10% là HẠNG MỤC, không ph
     expect(sheet.items[0]).toMatchObject({ kind: "section", name: "NHÓM A", unitPrice: 0 });
   });
 });
+
+// ── Hồi quy của chính bản sửa trên (phản biện độc lập đo) ───────────────────────────────────────
+// Bản đầu siết HÌNH DẠNG bằng một danh sách trắng: chỉ nhận `SUM(..)`, `=Hx`, `=Hx+Hy`. Tệp NGOÀI viết
+// Đơn Giá nhóm bằng `=SUBTOTAL(9,F5:F6)`, `=ROUND(SUM(F5:F6),0)`, `=+SUM(F5:F6)` hay `=(F5+F6)` nên
+// hết được nhận là nhóm → dòng nhóm (có ĐVT + SL) nạp thành HẠNG MỤC mang đơn giá bằng tổng các mục
+// bên dưới → tiền CỘNG ĐÔI (2.400.000 thay vì 1.200.000), không cảnh báo dòng nào. STT số ("1" / mục
+// "1.1") còn lật numberSubs true → false và đổi mẫu đoán. Bản cũ nhận cả bốn dạng này vì mọi tham
+// chiếu đều ở cột Thành Tiền — cái SAI của nó chỉ là không xét HƯỚNG và phép NHÂN hệ số.
+const HDR_NGOAI = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];
+/** Tệp ngoài hai nhóm: nhóm 1 (hàng 4) gồm hàng 5–6 = 700.000; nhóm 2 (hàng 7) gồm hàng 8 = 500.000. */
+async function tepNgoai(fx, { sttNhom, sttMuc }) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Báo giá ngoài");
+  ws.addRow(["BÁO GIÁ ÂM THANH ÁNH SÁNG"]); ws.addRow([]);
+  ws.addRow(HDR_NGOAI);
+  const nhom = (r, stt, ten, a, b, tong) => ws.addRow([stt, ten, "gói", 1,
+    { formula: fx(a, b), result: tong }, { formula: `E${r}*D${r}`, result: tong }]);
+  const muc = (r, stt, ten, sl, dg) => ws.addRow([stt, ten, "cái", sl, dg, { formula: `D${r}*E${r}`, result: sl * dg }]);
+  nhom(4, sttNhom[0], "Nhóm âm thanh", 5, 6, 700000);
+  muc(5, sttMuc[0], "Loa", 2, 200000);
+  muc(6, sttMuc[1], "Micro", 3, 100000);
+  nhom(7, sttNhom[1], "Nhóm ánh sáng", 8, 8, 500000);
+  muc(8, sttMuc[2], "Đèn", 5, 100000);
+  ws.addRow(["", "Tổng cộng", "", "", "", { formula: "F4+F7", result: 1200000 }]);
+  const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+  return res.sheets[0];
+}
+const DANG_NHOM = {
+  "SUBTOTAL(9,..)": (a, b) => `SUBTOTAL(9,F${a}:F${b})`,
+  "SUBTOTAL(109,..)": (a, b) => `SUBTOTAL(109,F${a}:F${b})`,
+  "ROUND(SUM(..),0)": (a, b) => `ROUND(SUM(F${a}:F${b}),0)`,
+  "=+SUM(..)": (a, b) => `+SUM(F${a}:F${b})`,
+  "=(Fa+Fb)": (a, b) => (a === b ? `(F${a})` : `(F${a}+F${b})`),
+  "SUM(..) thuần": (a, b) => `SUM(F${a}:F${b})`,
+};
+const STT_NGOAI = {
+  "STT chữ I/II": { sttNhom: ["I", "II"], sttMuc: ["1", "2", "1"], kind: "section" },
+  "STT số 1/2 + mục 1.1": { sttNhom: ["1", "2"], sttMuc: ["1.1", "1.2", "2.1"], kind: "subsection" },
+};
+const CA_NGOAI = [];
+for (const dang of Object.keys(DANG_NHOM)) for (const stt of Object.keys(STT_NGOAI)) CA_NGOAI.push([dang, stt]);
+
+describe("L46 (hồi quy): Đơn Giá nhóm của tệp ngoài viết kiểu khác SUM thuần vẫn là NHÓM", () => {
+  it.each(CA_NGOAI)("%s · %s", async (dang, stt) => {
+    const { sttNhom, sttMuc, kind } = STT_NGOAI[stt];
+    const sheet = await tepNgoai(DANG_NHOM[dang], { sttNhom, sttMuc });
+    expect(sheet.items.map((i) => [i.kind, i.name])).toEqual([
+      [kind, "Nhóm âm thanh"], ["item", "Loa"], ["item", "Micro"], [kind, "Nhóm ánh sáng"], ["item", "Đèn"],
+    ]);
+    expect(sheet.items.filter((i) => i.kind === kind).map((i) => i.unitPrice)).toEqual([0, 0]);
+    expect(sheet.numberSubs, "STT số của nhóm phải lật sang kiểu đánh số nhóm con").toBe(kind === "subsection");
+    expect(computeSubtotal(sheet), "dòng nhóm nạp thành hạng mục → tiền cộng đôi").toBe(1200000);
+    expect(sheet.warnings.join(" | ")).not.toMatch(/lệch/);
+  });
+
+  it("Đơn Giá = tổng các dòng DƯỚI mà NHÂN hệ số (phí %) vẫn là HẠNG MỤC — nhân hệ số không phải tổng nhóm", async () => {
+    const sheet = await tepNgoai((a, b) => (a === 5 ? `SUM(F${a}:F${b})*10%` : `SUM(F${a}:F${b})`),
+      { sttNhom: ["1", "II"], sttMuc: ["1", "2", "1"] });
+    expect(sheet.items[0]).toMatchObject({ kind: "item", name: "Nhóm âm thanh", unitPrice: 700000 });
+    expect(sheet.numberSubs).toBe(false);
+  });
+});

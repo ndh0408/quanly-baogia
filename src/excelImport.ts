@@ -455,21 +455,25 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
   // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
   //
-  // Chỉ nhận ĐÚNG hình dạng tổng nhóm: CỘNG THUẦN (`SUM(..)`, `=Hx`, `=Hx+Hy`) các ô Thành Tiền nằm
-  // ở dòng BÊN DƯỚI. Trước đây chỉ hỏi "mọi tham chiếu có ở cột Thành Tiền không", nên dòng PHÍ tính
-  // theo các mục BÊN TRÊN (`=SUM(H7:H8)*10%` — "Phí quản lý 10%" có ĐVT + SL) bị xếp thành nhóm con,
-  // Đơn Giá ép 0, mất tiền phí; STT là số thì còn lật numberSubs của CẢ sheet → đoán ra mẫu Banner
-  // → web không ghép được vào sheet đang có và mặc định TẠO SHEET MỚI (soát toàn diện L46).
+  // Hai điều kiện cho "tổng nhóm" (soát toàn diện L46):
+  //   · HƯỚNG — mọi tham chiếu nằm ở dòng BÊN DƯỚI. Trước đây chỉ hỏi "mọi tham chiếu có ở cột Thành
+  //     Tiền không", nên dòng PHÍ tính theo các mục BÊN TRÊN (`=SUM(H7:H8)*10%` — "Phí quản lý 10%" có
+  //     ĐVT + SL) bị xếp thành nhóm con, Đơn Giá ép 0, mất tiền phí; STT là số thì còn lật numberSubs
+  //     của CẢ sheet → đoán ra mẫu Banner → web không ghép được vào sheet đang có, mặc định TẠO SHEET MỚI.
+  //   · KHÔNG NHÂN / CHIA hệ số (`*` `/` `%` `^`) — "10% tổng các mục dưới" là PHÍ, không phải tổng nhóm.
+  // Hình dạng còn lại để MỞ, CÓ CHỦ Ý: tệp ngoài viết tổng nhóm đủ kiểu — `SUBTOTAL(9,F5:F6)`,
+  // `ROUND(SUM(F5:F6),0)`, `=+SUM(..)`, `=(F5+F6)`. Bản đầu của chốt này dùng danh sách TRẮNG (chỉ
+  // `SUM(..)` / `=Hx` / `=Hx+Hy`) và các dạng đó rơi xuống nhánh hạng mục: dòng nhóm mang đơn giá bằng
+  // tổng các mục bên dưới → tiền CỘNG ĐÔI, không một cảnh báo dòng nào.
   const amountLetter = colOf._amount ? colLetter(colOf._amount) : "";
-  const REF = String.raw`\$?[A-Z]{1,3}\$?\d+`, RNG = `${REF}(?:\\s*:\\s*${REF})?`;
-  const TERM = String.raw`(?:SUM\(\s*${RNG}(?:\s*[,;]\s*${RNG})*\s*\)|${REF})`;
-  const RE_TONG_NHOM = new RegExp(String.raw`^\s*=?\s*${TERM}(?:\s*\+\s*${TERM})*\s*$`, "i");
-  const hasGroupPriceFormula = (r: number) => {
+  /** Đơn Giá dòng r là công thức gom các ô ở dòng BÊN DƯỚI, chỉ trong các cột `cot`, không nhân hệ số. */
+  const tongCacDongDuoi = (r: number, cot: string[]) => {
     const fx = fxOf(cellAt(r, "unitPrice"));
-    if (!fx || !amountLetter || !RE_TONG_NHOM.test(fx)) return false;
+    if (!fx || /[*/%^]/.test(fx)) return false;
     const refs = [...fx.matchAll(/\$?([A-Z]{1,3})\$?(\d+)/gi)];
-    return refs.length > 0 && refs.every((m) => m[1].toUpperCase() === amountLetter && Number(m[2]) > r);
+    return refs.length > 0 && refs.every((m) => cot.includes(m[1].toUpperCase()) && Number(m[2]) > r);
   };
+  const hasGroupPriceFormula = (r: number) => !!amountLetter && tongCacDongDuoi(r, [amountLetter]);
 
   // ── Quét thô: chốt dòng cuối của bảng + nhận diện kiểu BANNER (nhóm con đánh SỐ) ──
   const lastSheetRow = ws.rowCount || hit.row;
