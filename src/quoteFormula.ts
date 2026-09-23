@@ -55,14 +55,16 @@ function evalArith(input: string) {
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];
+  // Mọi kết quả trung gian phải hữu hạn — y hệt web (L36): "=2/(1/0)" từng ra 0 (x/∞) và tự kiểm khớp,
+  // tệp ghi công thức mà Excel ra #DIV/0! lan xuống tổng.
   function expr(): number | null {
     let v = term();
-    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; }
+    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; if (!isFinite(v)) return null; }
     return v;
   }
   function term(): number | null {
     let v = factor();
-    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; }
+    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; if (!isFinite(v)) return null; }
     return v;
   }
   function factor(): number | null {
@@ -71,7 +73,7 @@ function evalArith(input: string) {
     if (peek() === "+") { pos++; return factor(); }
     let num = "";
     while (pos < s.length && /[0-9.]/.test(s[pos])) num += s[pos++];
-    if (!num || isNaN(Number(num))) return null;
+    if (!num || !isFinite(Number(num))) return null;
     return Number(num);
   }
   const result = expr();

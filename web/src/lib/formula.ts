@@ -16,14 +16,17 @@ export function evalArith(input: string | number): number | null {
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];
+  // Mọi kết quả TRUNG GIAN phải hữu hạn (L36): bản cũ chỉ kiểm ở kết quả cuối, mà x/∞ = 0 là số hữu hạn
+  // nên "=2/(1/0)" hay "=G3/(H3/D3)" với D3 = 0 ra 0, ô không đỏ — còn Excel ra #DIV/0! rồi lan xuống
+  // Thành tiền, Tổng cộng, VAT. Chia 0 (±∞ hoặc 0/0 = NaN) hay tràn số ở bất cứ bước nào → lỗi.
   function expr(): number | null {
     let v = term();
-    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; }
+    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; if (!isFinite(v)) return null; }
     return v;
   }
   function term(): number | null {
     let v = factor();
-    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; }
+    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; if (!isFinite(v)) return null; }
     return v;
   }
   function factor(): number | null {
@@ -32,7 +35,7 @@ export function evalArith(input: string | number): number | null {
     if (peek() === "+") { pos++; return factor(); }
     let num = "";
     while (pos < s.length && /[0-9.]/.test(s[pos])) num += s[pos++];
-    if (!num || isNaN(Number(num))) return null;
+    if (!num || !isFinite(Number(num))) return null;
     return Number(num);
   }
   const result = expr();
