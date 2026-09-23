@@ -397,12 +397,27 @@ function sessionPermSet(session: SessionLike): Set<string> {
   return effectiveRoleSet(session?.role) ?? new Set();
 }
 
+/**
+ * PHẦN TỬ CANH GÁC "đã tuỳ biến thành rỗng" trong `User.permissions` (RBAC-01, audit 2026-09-23).
+ *
+ * Trước đây admin bỏ tích MỌI ô quyền của một tài khoản → lưu `permissions = []` → middleware hiểu
+ * `[]` là "chưa tuỳ biến" và trả lại NGUYÊN bộ quyền mặc định của vai trò (manager: 30 quyền, gồm
+ * đọc toàn bộ khách hàng và danh bạ CCCD/số tài khoản). Thao tác "tước hết quyền" làm điều ngược lại.
+ * Không thêm cột để khỏi cần migration: một chuỗi KHÔNG nằm trong PERMISSIONS nên `can()` không
+ * bao giờ khớp nó, và resolveUserPermissions gỡ nó ra khỏi tập hiệu lực.
+ */
+export const KHONG_CO_QUYEN = "__none__";
+
 /** Resolve tập quyền của 1 TÀI KHOẢN để nạp vào session (gọi ở middleware mỗi request).
  *  admin → luôn full (chống tự khóa). Có quyền-riêng-user → dùng đúng tập đó. Chưa có → quyền role mặc định.
  *  canSign (cờ cũ "được Ký Chứng từ") → BẮC CẦU thành quyền quote:sign:own để hợp nhất vào ma trận. */
 export function resolveUserPermissions(role: string | undefined, userPerms?: string[] | null, canSign = false): string[] {
   if (role === "admin") return [...ROLE_PERMISSIONS.admin];
+  // Mảng RỖNG = "chưa tuỳ biến → theo vai trò". Muốn biểu diễn "tuỳ biến thành KHÔNG CÓ QUYỀN NÀO"
+  // thì userService.updateUser ghi phần tử canh gác KHONG_CO_QUYEN (RBAC-01): mảng khác rỗng nên
+  // KHÔNG rơi về bộ mặc định của vai trò, và phần tử đó bị gỡ ra khỏi tập hiệu lực ngay dưới.
   const set = new Set<string>(userPerms && userPerms.length ? userPerms : [...(effectiveRoleSet(role) ?? [])]);
+  set.delete(KHONG_CO_QUYEN);
   if (canSign) set.add(PERMISSIONS.QUOTE_SIGN_OWN);
   // Bắc cầu quyền GỘP cũ → quyền nguyên tử (tương thích user đã lưu quyền cũ trước khi tách).
   const Pm = PERMISSIONS;

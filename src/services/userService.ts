@@ -13,7 +13,7 @@ import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
 import { httpError } from "../httpError.js";
-import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, permissionsForUser } from "../permissions.js";
+import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, KHONG_CO_QUYEN, permissionsForUser } from "../permissions.js";
 import { thoatLike } from "../authCore.js";
 
 /**
@@ -333,10 +333,19 @@ export async function updateUser(req: Request) {
     data.inviteExpiresAt = null;
   }
   // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
-  if (data.permissions !== undefined) {
+  if (data.permissions === null) {
+    // BỎ TUỲ BIẾN → quay về bộ mặc định của vai trò. Không đụng canSign: đó là cờ riêng.
+    data.permissions = [];
+  } else if (data.permissions !== undefined) {
     data.permissions = sanitizePerms(data.permissions);
     // "Ký chứng từ" giờ là ô trong ma trận (quote:sign:own) → đồng bộ cờ canSign cũ cho khớp (legacy reads).
     if (data.canSign === undefined) data.canSign = data.permissions.includes(PERMISSIONS.QUOTE_SIGN_OWN);
+    // BỎ TÍCH HẾT = TƯỚC HẾT QUYỀN, không phải "về mặc định" (RBAC-01). Lưu `[]` thì resolveUserPermissions
+    // trả lại nguyên bộ quyền của vai trò — admin bấm "Đã lưu" mà người kia vẫn đọc được danh bạ,
+    // khách hàng, báo giá của mình. Ca này gồm cả khi admin chỉ tích quyền ADMIN_ONLY (bị lọc về rỗng).
+    // Vai trò admin thì bỏ qua: admin luôn full quyền, và giao diện gửi `[]` khi bật cờ Quản trị.
+    const roleSau = rest.role ?? before.role;
+    if (data.permissions.length === 0 && roleSau !== "admin") data.permissions = [KHONG_CO_QUYEN];
   }
   // Deactivating an account must also burn any live invite/reset token —
   // otherwise the locked-out user could re-activate themselves through the
