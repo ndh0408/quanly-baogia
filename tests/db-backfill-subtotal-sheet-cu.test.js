@@ -77,6 +77,8 @@ describe.runIf(dbAvailable)("DB-01 — backfill subtotal sheet cũ", () => {
     expect(await cot(id.dung)).toBe(700_000);
     expect(await cot(id.rong)).toBe(0);
     expect(await keHoachBackfillSubtotal({ quoteIds: [q.id] })).toEqual([]);
+    // Đối chứng money#5: chốt TRƯỚC khi có cột (convertedTotal NULL) → giữ NULL, nơi đọc COALESCE về total.
+    expect((await prisma.quote.findUnique({ where: { id: q.id }, select: { convertedTotal: true } })).convertedTotal).toBeNull();
   });
 
   it("một lần Lưu chen giữa lập kế hoạch và áp dụng → nhường, không đè số mới hơn", async () => {
@@ -85,5 +87,62 @@ describe.runIf(dbAvailable)("DB-01 — backfill subtotal sheet cũ", () => {
     await prisma.quoteSheet.update({ where: { id: id.cu }, data: { subtotal: 1_234_000 } });   // người dùng vừa Lưu
     expect(await apDungBackfillSubtotal(kh)).toBe(0);
     expect(await cot(id.cu)).toBe(1_234_000);
+  });
+});
+
+// Soát chéo money#5: markConverted tính convertedTotal bằng cách CỘNG CỘT QuoteSheet.subtotal. Báo giá
+// lưu lần cuối trước 25/06 mà được chốt sau 17/09 (không Lưu lại) thì doanh thu chốt = 0 — khác NULL,
+// nên không COALESCE nào cứu. Công cụ sửa cột subtotal mà bỏ qua cột dẫn xuất từ nó thì trang Hoá đơn
+// hiện đúng tiền còn Doanh số đã chốt / Top sales thiếu trọn báo giá đó, mãi mãi.
+describe.runIf(dbAvailable)("money#5 — backfill subtotal tính lại convertedTotal đã tính từ subtotal 0", () => {
+  let company, template, user, q;
+  const id = {};
+
+  beforeAll(async () => {
+    company = await prisma.company.create({ data: { code: `${TAG}c-co`, name: "Co", address: "x", quotePrefix: "BC" } });
+    template = await prisma.quoteTemplate.create({ data: { code: `${TAG}c-tpl`, name: "T", companyId: company.id, filePath: "templates/Unibenfood.xlsx" } });
+    user = await prisma.user.create({ data: { username: `${TAG}c-u`, displayName: "U", role: "admin", passwordHash: await bcrypt.hash("x", 4) } });
+    q = await prisma.quote.create({
+      data: {
+        quoteNumber: `${TAG}c-Q`, title: `${TAG} chot`, toCompany: "K", companyId: company.id, createdById: user.id,
+        fromContact: "x", fromAddress: "x", city: "x", quoteDate: new Date(), status: "converted", convertedAt: new Date(),
+        vatPercent: 10, subtotal: 3_000_000, vat: 300_000, total: 3_300_000, convertedTotal: 0,
+        sheets: {
+          create: [
+            { templateId: template.id, name: "duyet", order: 1, subtotal: 0, items: { create: [{ order: 1, kind: "item", name: "A", quantity: 1, unitPrice: 2_000_000 }] } },
+            // Trang khách không duyệt: cột vẫn được sửa, nhưng KHÔNG vào doanh thu chốt.
+            { templateId: template.id, name: "tuchoi", order: 2, subtotal: 0, custStatus: "rejected", items: { create: [{ order: 1, kind: "item", name: "B", quantity: 1, unitPrice: 1_000_000 }] } },
+          ],
+        },
+      },
+      include: { sheets: true },
+    });
+    for (const s of q.sheets) id[s.name] = s.id;
+  }, 60_000);
+
+  afterAll(async () => {
+    await prisma.quote.deleteMany({ where: { title: { startsWith: `${TAG} chot` } }, hardDelete: true, includeDeleted: true }).catch(() => {});
+    await prisma.user.deleteMany({ where: { username: { startsWith: `${TAG}c-` } }, hardDelete: true, includeDeleted: true }).catch(() => {});
+    await prisma.quoteTemplate.deleteMany({ where: { code: { startsWith: `${TAG}c-` } }, hardDelete: true }).catch(() => {});
+    await prisma.company.deleteMany({ where: { code: { startsWith: `${TAG}c-` } }, hardDelete: true }).catch(() => {});
+  });
+
+  const chot = async () => prisma.quote.findUnique({ where: { id: q.id }, select: { convertedTotal: true, updatedAt: true } });
+
+  it("chế độ khô in doanh thu chốt cũ → mới, không ghi gì", async () => {
+    const kh = await keHoachBackfillSubtotal({ quoteIds: [q.id] });
+    expect(kh.map((d) => [d.sheetId, d.moi, d.convertedCu, d.convertedMoi]).sort((a, b) => a[0] - b[0])).toEqual([
+      [id.duyet, "2000000", "0", "2200000"],
+      [id.tuchoi, "1000000", "0", "2200000"],
+    ]);
+    expect(Number((await chot()).convertedTotal)).toBe(0);
+  });
+
+  it("áp dụng: doanh thu chốt tính lại từ subtotal mới (trừ trang bị từ chối), không bump updatedAt", async () => {
+    const truoc = await chot();
+    expect(await apDungBackfillSubtotal(await keHoachBackfillSubtotal({ quoteIds: [q.id] }))).toBe(2);
+    const sau = await chot();
+    expect(Number(sau.convertedTotal), "subtotal đã sửa mà doanh thu chốt vẫn 0").toBe(2_200_000);
+    expect(sau.updatedAt.getTime(), "editor đang mở báo giá sẽ ăn 409 giả").toBe(truoc.updatedAt.getTime());
   });
 });
