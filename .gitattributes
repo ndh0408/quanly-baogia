@@ -15,6 +15,10 @@
 *.sql  text eol=lf
 *.sh   text eol=lf
 *.tpl  text eol=lf
+# Snapshot của vitest: vitest ghi lại tệp bằng LF. Checkout CRLF (autocrlf trên Windows) thì mỗi lượt
+# test excel-snapshot làm git báo `M` dù nội dung y hệt — và verify-local chỉ ghi dấu xanh (cổng
+# deploy prod) khi cây SẠCH, nên deploy bị chặn oan. Ép LF để tệp vitest ghi ra trùng từng byte.
+*.snap text eol=lf
 .editorconfig    text eol=lf
 .gitattributes   text eol=lf
 .gitignore       text eol=lf
