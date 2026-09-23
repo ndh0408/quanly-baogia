@@ -29,6 +29,16 @@ async function mo() {
   return hop;
 }
 
+// FE-17: nút hiện/ẩn mật khẩu có tabIndex=-1 → người dùng bàn phím không bật/tắt được.
+import appSrc from "./App.tsx?raw";
+describe("FE-17 — nút hiện mật khẩu", () => {
+  it("không nút .pw-toggle nào bị loại khỏi thứ tự Tab", () => {
+    const nut = appSrc.match(/<button[^>]*className="pw-toggle"[^>]*>/g) || [];
+    expect(nut.length).toBeGreaterThan(0);
+    for (const n of nut) expect(n).not.toMatch(/tabIndex=\{-1\}/);
+  });
+});
+
 describe("FE-11 — khởi động", () => {
   it("lỗi MẠNG (TypeError) → màn 'Không kết nối được' + nút Thử lại, KHÔNG hiện form đăng nhập", async () => {
     h.me = async () => { throw new TypeError("Failed to fetch"); };

@@ -50,14 +50,25 @@ export function fieldErrorsFrom(ex: unknown): Record<string, string> {
   return out;
 }
 
-export function toast(message: string, type: "success" | "error" | "info" = "info") {
+/**
+ * Vùng thông báo (live region). FE-17: trước đây chỉ được tạo lúc có toast ĐẦU TIÊN — trình đọc màn
+ * hình thường không đọc nội dung chèn vào một live region VỪA sinh ra cùng lúc, nên thông báo đầu
+ * (hay là lỗi Lưu) bị câm. main.tsx gọi hàm này ngay lúc khởi động.
+ */
+export function dungToastHost(): HTMLElement {
   let host = document.getElementById("toast-host");
   if (!host) {
     host = document.createElement("div");
     host.id = "toast-host";
     host.setAttribute("aria-atomic", "false");
+    host.setAttribute("aria-live", "polite");
     document.body.appendChild(host);
   }
+  return host;
+}
+
+export function toast(message: string, type: "success" | "error" | "info" = "info") {
+  const host = dungToastHost();
   // aria-live so screen readers announce toasts (errors = assertive). Trước đây React
   // hoàn toàn câm với screen reader — đây là sửa a11y.
   host.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
@@ -95,6 +106,9 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
   x.addEventListener("click", () => { disarm(); dismiss(); });
   el.addEventListener("mouseenter", disarm);
   el.addEventListener("mouseleave", arm);
+  // FE-17 (WCAG 2.2.1): người dùng BÀN PHÍM cũng phải dừng được đồng hồ tự tắt — Tab tới nút × là dừng.
+  el.addEventListener("focusin", disarm);
+  el.addEventListener("focusout", arm);
   arm();
 }
 

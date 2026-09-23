@@ -6,8 +6,8 @@
 //   (b) Hộp nguy hiểm (danger) phải để tiêu điểm mặc định ở "Hủy".
 //   (c) Form bẩn nghe Esc ở document → Esc lần 1 mở "Bỏ thay đổi?", Esc lần 2 đóng hộp NHƯNG listener
 //       của form cũng chạy và mở hộp MỚI → kẹt vô hạn. Esc phải đóng hộp và dừng ở đó.
-import { describe, it, expect, afterEach } from "vitest";
-import { confirmModal, promptModal } from "./ui";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { confirmModal, promptModal, toast, dungToastHost } from "./ui";
 
 const phim = (key: string, el: Element | Document = document.activeElement || document.body) =>
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -72,5 +72,28 @@ describe("FE-02 — confirmModal", () => {
       expect(await p).toBe(null);
       expect(lot).toBe(0);
     } finally { document.removeEventListener("keydown", duoi); }
+  });
+});
+
+// FE-17: toast lỗi tự tắt sau 6s mà người dùng BÀN PHÍM không dừng được; vùng thông báo chỉ sinh ra
+// cùng lúc với thông báo đầu tiên (trình đọc màn hình hay bỏ qua).
+describe("FE-17 — thông báo", () => {
+  it("Tab tới toast (focusin) → dừng đồng hồ tự tắt; rời ra (focusout) → chạy lại", () => {
+    vi.useFakeTimers();
+    try {
+      toast("Lưu thất bại", "error");
+      const el = document.querySelector("#toast-host .toast") as HTMLElement;
+      el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      vi.advanceTimersByTime(20_000);
+      expect(document.querySelector("#toast-host .toast"), "toast không được tự tắt khi đang có tiêu điểm").not.toBeNull();
+      el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      vi.advanceTimersByTime(7_000);
+      expect(document.querySelector("#toast-host .toast")).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+  it("dungToastHost dựng sẵn vùng aria-live TRƯỚC thông báo đầu tiên", () => {
+    const host = dungToastHost();
+    expect(host.getAttribute("aria-live")).toBe("polite");
+    expect(host.children.length).toBe(0);
   });
 });

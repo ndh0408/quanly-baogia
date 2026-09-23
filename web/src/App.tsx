@@ -226,7 +226,7 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
           <label><span>Mật khẩu</span>
             <span className="pw-wrap">
               <input type={showPw ? "text" : "password"} name="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-              <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
+              <button type="button" className="pw-toggle" aria-label="Hiện / ẩn mật khẩu" aria-pressed={showPw} onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
             </span>
           </label>
           {/* pattern PHẢI khớp regex của server (src/validators.ts): 6 chữ số = TOTP, 10–20 ký tự
@@ -331,7 +331,7 @@ export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
               </>}
               <label><span>Mật khẩu mới</span>
                 <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
-                  <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
+                  <button type="button" className="pw-toggle" aria-label="Hiện / ẩn mật khẩu" aria-pressed={showPw} onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
               <label><span>Nhập lại mật khẩu</span><input type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
               {/* Cùng pattern với ô MFA ở màn đăng nhập — khớp regex server, KHÔNG hẹp hơn, nếu
                   không thì trình duyệt tự chặn mã dự phòng và người dùng hết đường phục hồi. */}
