@@ -530,7 +530,10 @@ function GridTableInner(props: GridTableProps) {
     // Chưa dàn trang (mép đo ra ≤ bề rộng ô) thì bỏ qua mức chặn, kẻo ra bề rộng âm.
     const max = mep > el.clientWidth ? mep : Infinity;
     el.classList.add("cell-grow");
-    el.style.width = `${Math.min(el.scrollWidth + 8, max)}px`;
+    // scrollWidth của <input> KHÔNG tính đệm phải — ô công thức chừa 15px cho dấu ƒ, thiếu nó là
+    // ký tự cuối lại bị che (đo trên dev: "…*0.5*8" còn "…*0.5*ε").
+    const dem = parseFloat(getComputedStyle(el).paddingRight) || 0;
+    el.style.width = `${Math.min(el.scrollWidth + dem + 8, max)}px`;
   };
   // Point-mode BÀN PHÍM (Excel): đang gõ công thức (chế độ ENTER) mà ký tự trước con trỏ là
   // "="/toán tử/"("/","… → mũi tên CHÈN THAM CHIẾU Ô rồi di chuyển nó ("=" ↑ → "=H3");
