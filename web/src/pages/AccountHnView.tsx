@@ -99,10 +99,17 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); window.removeEventListener("editor:discard", boThayDoi); };
   }, []);
 
-  const load = useCallback(async () => {
+  // L58: hộp hỏi (confirmModal) là DOM tự dựng, KHÔNG tự đóng khi rời trang — Back lúc hộp đang mở thì
+  // Shell gỡ view này (đổi `key`) mà hộp vẫn nằm đè lên trang mới. Trả lời hộp treo đó từng xoá bản
+  // nháp giá HN của báo giá CŨ và bật/tắt cờ "chưa lưu" của trang MỚI. Mỗi lượt nạp nhận một hàm
+  // `conSong`; sau MỌI `await` hỏi lại nó rồi mới đụng bản nháp / qRef / cờ (khuôn 01b07dc bên QuoteEditor).
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  const load = useCallback(async (conSong: () => boolean = () => songRef.current) => {
     try {
       if (!_templates) _templates = await api.metaTemplates();
       const q = await api.getQuote(quoteId);
+      if (!conSong()) return;
       if (!Array.isArray(q.hnTables)) q.hnTables = [];
       const khoa = khoaBanNhap(`hn${quoteId}`, meId);
       const moc = String((q as { hnRev?: string }).hnRev ?? (q as { updatedAt?: string }).updatedAt ?? "");
@@ -112,22 +119,37 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       const xd = docBanNhap(khoa + ":xungdot", meId);
       const nhap = docBanNhap(khoa, meId);
       if (xd && suaDuoc) {
-        if (await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi.", { confirmText: "Mở bản của tôi", danger: true })) {
+        const moLai = await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi. Hủy thì bản này vẫn được giữ, bạn sẽ được hỏi có xoá không.", { confirmText: "Mở bản của tôi", danger: true });
+        if (!conSong()) return;
+        if (moLai) {
           q.hnTables = ((xd.quote as { hnTables?: unknown[] }).hnTables) ?? q.hnTables; khoiPhuc = true;
+          xoaBanNhap(khoa + ":xungdot");   // đã mở → bản nháp THƯỜNG (mốc mới) tiếp quản lưới an toàn
+        } else {
+          // X1 (cùng dạng app#13 bên QuoteEditor): tiêu điểm mặc định của hộp danger ở "Hủy" — Enter theo
+          // phản xạ, Esc, bấm ra ngoài đều về đây, và nhánh này từng XOÁ VĨNH VIỄN bản sao duy nhất của
+          // phần đã gõ. Chỉ xoá khi người dùng chọn rõ ràng; giữ thì hạn 7 ngày / Đăng xuất vẫn dọn nó.
+          const bo = await confirmModal(
+            "Bỏ bản của bạn?",
+            "Giá Hà Nội bạn gõ trước khi bị xung đột sẽ bị XOÁ vĩnh viễn khỏi máy này. Chọn Hủy để giữ lại — lần mở sau sẽ hỏi lại (tối đa 7 ngày).",
+            { danger: true, confirmText: "Xoá bản này" },
+          );
+          if (!conSong()) return;
+          if (bo) xoaBanNhap(khoa + ":xungdot");
         }
-        xoaBanNhap(khoa + ":xungdot");
       } else if (nhap && nhap.baseUpdatedAt === moc && suaDuoc) {
-        if (await confirmModal("Có giá Hà Nội chưa lưu từ lần trước", `Lần trước bạn rời trang lúc ${new Date(nhap.luuLuc).toLocaleString("vi-VN")} khi còn giá CHƯA LƯU. Khôi phục?`, { confirmText: "Khôi phục" })) {
+        const dong = await confirmModal("Có giá Hà Nội chưa lưu từ lần trước", `Lần trước bạn rời trang lúc ${new Date(nhap.luuLuc).toLocaleString("vi-VN")} khi còn giá CHƯA LƯU. Khôi phục?`, { confirmText: "Khôi phục" });
+        if (!conSong()) return;
+        if (dong) {
           q.hnTables = ((nhap.quote as { hnTables?: unknown[] }).hnTables) ?? q.hnTables; khoiPhuc = true;
         } else xoaBanNhap(khoa);
       }
       khoaNhapRef.current = khoa; mocNhapRef.current = moc;
       qRef.current = q; dirtyRef.current = khoiPhuc; (window as WinDirty).__editorDirty = khoiPhuc; setReady(true); redraw();
-    } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải"); }
+    } catch (ex) { if (conSong()) setErr(ex instanceof ApiError ? ex.message : "Lỗi tải"); }
   }, [quoteId, redraw, meId]);
   const ghiNhapNgayRef = useRef(ghiNhapNgay);
   ghiNhapNgayRef.current = ghiNhapNgay;
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { let alive = true; load(() => alive); return () => { alive = false; }; }, [load]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <button type="button" className="btn btn-sm" onClick={() => { setErr(""); load(); }}>Thử lại</button> <a className="btn btn-sm" href="#/list">Về danh sách</a></div>;
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;

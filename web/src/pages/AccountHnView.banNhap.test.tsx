@@ -147,3 +147,80 @@ describe("soát chéo — màn Account Hà Nội", () => {
     expect(docBanNhap(KHOA, 5)).toBeNull();
   });
 });
+
+// Soát toàn diện L58 + X1 — hộp hỏi ở đường nạp của màn Account Hà Nội.
+describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà Nội)", () => {
+  const confirmMock = () => ui.confirmModal as unknown as ReturnType<typeof vi.fn>;
+  // clearAllMocks KHÔNG xoá hàng đợi mockImplementationOnce — bài trước dùng thiếu thì dư sang bài sau.
+  beforeEach(() => { confirmMock().mockReset(); confirmMock().mockImplementation(async () => h.confirm); });
+  const KHOA12 = khoaBanNhap("hn12", 5);
+  const nhap12 = () => ghiBanNhap(KHOA12, { hnTables: [{ ...baoGia().hnTables[0], items: [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 9_900_000, days: 1 }] }] }, "a".repeat(32), 5);
+  /** Mở #12 (hộp "Khôi phục?" treo), rồi Back → Shell gỡ view #12, dựng #11 sạch phía sau hộp. */
+  async function hopTreoCua12() {
+    nhap12();
+    let traLoi!: (v: boolean) => void;
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    h.getQuote = async () => baoGia({ id: 12 });
+    host = document.createElement("div"); document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(<AccountHnView quoteId={12} meId={5} />); });
+    await cho(20);
+    expect(confirmMock()).toHaveBeenCalledWith("Có giá Hà Nội chưa lưu từ lần trước", expect.any(String), expect.anything());
+    act(() => root!.unmount()); host.remove();
+    h.getQuote = async () => baoGia();
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await mo();
+    return async (v: boolean) => { await act(async () => { traLoi(v); }); await cho(20); };
+  }
+
+  it("L58: hộp 'Khôi phục?' của #12 còn treo khi đã sang #11 — bấm Hủy KHÔNG xoá bản nháp giá HN của #12", async () => {
+    const traLoi = await hopTreoCua12();
+    await traLoi(false);
+    expect(giaTrongNhap(KHOA12), "giá HN chưa lưu của #12 bị hộp treo xoá").toBe(9_900_000);
+  });
+
+  it("L58: bấm Khôi phục trên hộp treo KHÔNG bật cờ 'chưa lưu' của trang #11 đang sạch", async () => {
+    const traLoi = await hopTreoCua12();
+    await traLoi(true);
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty).toBe(false);
+  });
+
+  // X1 (cùng dạng app#13 bên QuoteEditor): tiêu điểm mặc định của hộp danger ở "Hủy" — Enter theo phản
+  // xạ, Esc, bấm ra ngoài đều về Hủy, và nhánh đó từng XOÁ VĨNH VIỄN bản giữ lại lúc 409.
+  const coXd = () => docBanNhap(KHOA + ":xungdot", 5) != null;
+  const ghiXd = () => ghiBanNhap(KHOA + ":xungdot", { hnTables: [{ ...baoGia().hnTables[0], items: [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 6_600_000, days: 1 }] }] }, "a".repeat(32), 5);
+
+  it("X1: Hủy ở hộp 'Mở bản của tôi', rồi Hủy ở hộp 'Bỏ bản của bạn?' → bản giữ lại còn nguyên", async () => {
+    ghiXd();
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);
+    await mo();
+    expect(coXd(), "Hủy ở hộp mở lại đã xoá vĩnh viễn bản giữ lại").toBe(true);
+    expect(host!.textContent).toContain("5.000.000");
+  });
+
+  it("X1: Hủy rồi xác nhận 'Xoá bản này' → bản giữ lại bị xoá", async () => {
+    ghiXd();
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => true);
+    await mo();
+    expect(confirmMock().mock.calls.map((c) => c[0])).toContain("Bỏ bản của bạn?");
+    expect(coXd()).toBe(false);
+  });
+
+  it("X1: Mở bản của tôi → thấy giá đã giữ, khoá ':xungdot' bị xoá (bản nháp thường tiếp quản)", async () => {
+    ghiXd();
+    await mo();
+    expect(host!.textContent).toContain("6.600.000");
+    expect(coXd()).toBe(false);
+  });
+
+  it("X1: hộp 'Mở bản của tôi' treo rồi rời trang — trả lời hộp treo không xoá bản giữ lại", async () => {
+    ghiXd();
+    let traLoi!: (v: boolean) => void;
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    await mo();
+    act(() => root!.unmount()); root = null; host?.remove();
+    await act(async () => { traLoi(true); });
+    await cho(20);
+    expect(coXd()).toBe(true);
+  });
+});
