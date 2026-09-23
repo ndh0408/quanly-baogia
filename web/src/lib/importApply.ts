@@ -200,7 +200,7 @@ const numEq = (a: unknown, b: unknown) => Math.abs((Number(a) || 0) - (Number(b)
 const FIELD_LABEL: Record<string, string> = {
   name: "Hạng mục", unit: "ĐVT", quantity: "Số lượng", unitPrice: "Đơn giá",
   days: "Số ngày", notes: "Ghi chú", detail: "Chi tiết", kind: "Loại dòng", label: "Chữ nhóm",
-  formulas: "Công thức", quantityExact: "Cách tính Số lượng",
+  formulas: "Công thức", quantityExact: "Cách tính Số lượng", images: "Hình ảnh",
 };
 const KIND_LABEL: Record<string, string> = {
   item: "Hạng mục", sub: "Dòng phụ", section: "Nhóm chính", subsection: "Nhóm phụ", info: "Thông tin",
@@ -228,6 +228,11 @@ function diffFields(a: M.Item, b: M.Item, usesDays: boolean, showDetail?: boolea
   if (norm(a.label) !== norm(b.label)) push("label", a.label || "", b.label || "");
   const fa = JSON.stringify(a.formulas || {}), fb = JSON.stringify(b.formulas || {});
   if (fa !== fb) push("formulas", Object.values(a.formulas || {}).join(" ") || "—", Object.values(b.formulas || {}).join(" ") || "—");
+  // ẢNH: tệp Excel không chở được ảnh, nên dòng nạp vào không có ảnh. Không so thì dòng sắp MẤT ảnh
+  // hiện "Giữ nguyên" (soát toàn diện L48). Dòng khớp ở chế độ Thay đã được `giuTruongChiApp` mang
+  // ảnh sang nên vẫn "Giữ nguyên" thật; còn lại (vd so theo vị trí khi bảng quá dài) thì phải lộ ra.
+  const na = a.images?.length || 0, nb = b.images?.length || 0;
+  if (na !== nb) push("images", na, nb);
   return out;
 }
 
@@ -249,11 +254,16 @@ function diffByPosition(before: M.Item[], after: M.Item[], usesDays: boolean, wa
   return rows;
 }
 
-/** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */
-export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
+type BuocGhep = { k: "pair"; i: number; j: number } | { k: "removed"; i: number } | { k: "added"; j: number };
+
+/**
+ * Dò LCS theo khoá dòng → chuỗi bước ghép (cặp / xoá / thêm). DÙNG CHUNG cho bảng đối chiếu
+ * (`diffItems`) và việc mang ảnh sang khi nạp thật (`giuTruongChiApp`): xem trước ghép một kiểu mà
+ * nạp thật ghép một kiểu là biến bảng đối chiếu thành lời hứa suông.
+ */
+function buocGhepLcs(before: M.Item[], after: M.Item[]): BuocGhep[] {
   const n = before.length, m = after.length;
-  if (n > LCS_MAX || m > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf, showDetail);
-  // LCS theo khoá dòng — bảng (n+1)×(m+1); trên LCS_MAX đã rẽ nhánh ở trên nên không phình.
+  // LCS theo khoá dòng — bảng (n+1)×(m+1); nơi gọi đã rẽ nhánh trên LCS_MAX nên không phình.
   const keyA = before.map(rowKey), keyB = after.map(rowKey);
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
@@ -261,29 +271,97 @@ export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, 
       dp[i][j] = keyA[i] === keyB[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  const rows: DiffRow[] = [];
+  const out: BuocGhep[] = [];
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (keyA[i] === keyB[j]) {
-      const fields = diffFields(before[i], after[j], usesDays, showDetail);
-      rows.push({
-        kind: fields.length ? "changed" : "same",
-        beforeNo: i + 1, afterNo: j + 1,
-        itemKind: after[j].kind, name: after[j].name || before[i].name || "", item: after[j],
-        fields, warn: warnOf?.(j),
-      });
-      i++; j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", item: before[i], fields: [] });
-      i++;
-    } else {
-      rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", item: after[j], fields: [], warn: warnOf?.(j) });
-      j++;
-    }
+    if (keyA[i] === keyB[j]) { out.push({ k: "pair", i, j }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ k: "removed", i }); i++; }
+    else { out.push({ k: "added", j }); j++; }
   }
-  while (i < n) { rows.push({ kind: "removed", beforeNo: i + 1, itemKind: before[i].kind, name: before[i].name || "", item: before[i], fields: [] }); i++; }
-  while (j < m) { rows.push({ kind: "added", afterNo: j + 1, itemKind: after[j].kind, name: after[j].name || "", item: after[j], fields: [], warn: warnOf?.(j) }); j++; }
-  return rows;
+  while (i < n) out.push({ k: "removed", i: i++ });
+  while (j < m) out.push({ k: "added", j: j++ });
+  return out;
+}
+
+/** Các cặp [dòng cũ, dòng mới] (0-based) cùng khoá dòng — đúng phép ghép của bảng đối chiếu. */
+export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] {
+  if (before.length > LCS_MAX || after.length > LCS_MAX) {
+    // Bảng quá dài: đối chiếu so theo VỊ TRÍ — chỉ coi là một dòng khi khoá cũng khớp.
+    const out: [number, number][] = [];
+    for (let i = 0; i < Math.min(before.length, after.length); i++) if (rowKey(before[i]) === rowKey(after[i])) out.push([i, i]);
+    return out;
+  }
+  return buocGhepLcs(before, after).flatMap((b) => (b.k === "pair" ? [[b.i, b.j] as [number, number]] : []));
+}
+
+/**
+ * Chế độ THAY: mang những trường CHỈ APP CÓ — tệp Excel không chở được — từ dòng cũ sang dòng mới
+ * cùng khoá. Trả mảng item MỚI (không sửa tại chỗ) + số ảnh SẼ MẤT (ảnh của dòng cũ không ghép được).
+ *
+ * Soát toàn diện L48: trước đây item nạp vào dựng từ `blankItem` nên KHÔNG có ảnh; trang gọi
+ * `target.items.splice(0, len, ...stamped)` rồi bấm Lưu là ảnh của CẢ sheet mất vĩnh viễn — kể cả
+ * khi khách chỉ sửa một đơn giá — trong khi bảng đối chiếu vẫn ghi "Giữ nguyên" và tệp xuất lúc tắt
+ * cột ảnh thì máy chủ không cảnh báo gì.
+ *   · `images`       — ảnh hạng mục (tệp xuất không bao giờ chở ngược lại được).
+ *   · `productId`    — liên kết danh mục sản phẩm; không có trong `M.Item` nhưng máy chủ trả kèm dòng
+ *                      và lưu lại nguyên (src/quoteUtils.ts) — mất là gãy lịch sử theo sản phẩm.
+ *   · `internalNote` — ghi chú NỘI BỘ, KHÔNG BAO GIỜ xuất ra Excel. Chỉ mang sang khi tệp KHÔNG có cột
+ *                      đó (`giuGhiChuNoiBo`); tệp có cột thì theo tệp, kể cả ô trống (người sửa cố ý xoá).
+ *   · `rid` + cờ duyệt / thanh toán — chỉ hàng bảng HÀ NỘI có (AccountHnView truyền thẳng hnTables vào
+ *                      modal). Máy chủ khớp dấu duyệt, cờ đã trả và ẢNH CHỨNG TỪ theo `rid`
+ *                      (reconcileHnApprovals / reconcileExtraPayments, src/services/quoteService.ts);
+ *                      thiếu rid là máy chủ cấp rid mới → hàng vẫn khớp đúng nội dung mất sạch trạng
+ *                      thái, ảnh uỷ nhiệm chi mất VĨNH VIỄN, không một lời báo. Mang sang KHÔNG nới gì:
+ *                      rid là thứ client vốn có; mỗi cặp ghép là một-một nên không nhân bản rid, và máy
+ *                      chủ vẫn tự quyết cờ theo CSDL + ghim số tiền hàng đã duyệt / đã trả (đổi số tiền
+ *                      → từ chối cả lần lưu, hỏng TO chứ không âm thầm). Cờ mang theo để màn hình khỏi
+ *                      nói sai trước khi Lưu, và để người CÓ quyền không vô tình bỏ dấu đã trả.
+ * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
+ */
+const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
+const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid || it.hasPaidProof || it.paidAt);
+
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number } {
+  type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
+  const items = after.slice();
+  const daGhep = new Set<number>();
+  for (const [i, j] of ghepDong(before, after)) {
+    daGhep.add(i);
+    const cu = before[i] as ItemApp, moi = { ...items[j] } as ItemApp;
+    if (cu.images?.length && !moi.images?.length) moi.images = cu.images.slice();
+    if (cu.productId != null && moi.productId == null) moi.productId = cu.productId;
+    if (opts.giuGhiChuNoiBo && cu.internalNote && !moi.internalNote) moi.internalNote = cu.internalNote;
+    if (typeof cu.rid === "string" && cu.rid && moi.rid == null) {
+      const nguon = cu as Record<string, unknown>, dich = moi as Record<string, unknown>;
+      for (const k of TRUONG_TRANG_THAI) if (nguon[k] !== undefined) dich[k] = nguon[k];
+    }
+    items[j] = moi;
+  }
+  let anhMat = 0, trangThaiMat = 0;
+  before.forEach((cu, i) => {
+    if (daGhep.has(i)) return;
+    anhMat += cu.images?.length || 0;
+    if (coTrangThai(cu as ItemApp)) trangThaiMat++;
+  });
+  return { items, anhMat, trangThaiMat };
+}
+
+/** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */
+export function diffItems(before: M.Item[], after: M.Item[], usesDays: boolean, warnOf?: (i: number) => string[] | undefined, showDetail?: boolean): DiffRow[] {
+  if (before.length > LCS_MAX || after.length > LCS_MAX) return diffByPosition(before, after, usesDays, warnOf, showDetail);
+  return buocGhepLcs(before, after).map((b): DiffRow => {
+    if (b.k === "pair") {
+      const fields = diffFields(before[b.i], after[b.j], usesDays, showDetail);
+      return {
+        kind: fields.length ? "changed" : "same",
+        beforeNo: b.i + 1, afterNo: b.j + 1,
+        itemKind: after[b.j].kind, name: after[b.j].name || before[b.i].name || "", item: after[b.j],
+        fields, warn: warnOf?.(b.j),
+      };
+    }
+    if (b.k === "removed") return { kind: "removed", beforeNo: b.i + 1, itemKind: before[b.i].kind, name: before[b.i].name || "", item: before[b.i], fields: [] };
+    return { kind: "added", afterNo: b.j + 1, itemKind: after[b.j].kind, name: after[b.j].name || "", item: after[b.j], fields: [], warn: warnOf?.(b.j) };
+  });
 }
 
 export const diffCounts = (rows: DiffRow[]) => ({
