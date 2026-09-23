@@ -399,12 +399,83 @@ function GridTableInner(props: GridTableProps) {
     const oSo = (a: string) => cellNum(a, hangGoi, t);
     return { cell: oSo, range: (a, b) => { const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null; const ca = idxOfL(pa.L), cb = idxOfL(pb.L); const c0 = Math.min(ca, cb), c1 = Math.max(ca, cb), r0 = Math.min(pa.row, pb.row), r1 = Math.max(pa.row, pb.row); const out: number[] = []; for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(oSo(ADDR[c].L + (r + 1))); return out; } };
   };
+  /* ── THAM CHIẾU VÒNG GIỮA CÁC Ô (GRID-04) ──────────────────────────────────────────────────
+     `cellNum` chỉ bắt được vòng đi qua TỔNG NHÓM. Ô trỏ vào CHÍNH NÓ (`=E1*1,1` gõ trong E1) hay hai
+     ô trỏ vào nhau (E1 `=E2`, E2 `=E1+1`) thì mỗi lượt `recomputeAll` lại nhân/cộng thêm một lần:
+     đo được 1.000.000 → 13.109.994 ngay khi Enter, rồi 28.102.437 sau một lần sửa ô KHÁC. Excel báo
+     "circular reference" và GIỮ nguyên số; ở đây làm y vậy: dựng đồ thị phụ thuộc giữa các ô có công
+     thức, ô nằm trong một chu trình (SCC > 1 ô, hoặc tự trỏ) thì KHÔNG tính lại — giữ giá trị đang có
+     và tô đỏ (`_fxWarn` → cell-fx-error). Ô chỉ ĐỌC từ vòng thì vẫn tính bình thường từ số đã đứng yên.
+     Tham chiếu được thu bằng CHÍNH evalFormula (refs ghi sổ) nên cú pháp ô/dải/$ khớp tuyệt đối với lúc
+     tính thật. `_amount` của hàng thường phụ thuộc SL/Ngày/Đơn giá của hàng đó; tổng NHÓM phụ thuộc mọi
+     hàng trong nhóm — trừ ca hàng gọi nằm TRONG nhóm ấy, vốn đã có cờ riêng ở cellNum. */
+  const khoaO = (r: number, f: string) => r + ":" + f;
+  const oVongLap = (): Set<string> => {
+    const coFx = (r: number, f: string) => !!items[r]?.formulas?.[f];
+    const nut: string[] = []; const ke = new Map<string, string[]>();
+    let tn: TongNhom | null = null;
+    const thuocNhom = (j: number, g: number) => { tn = tn ?? tinhTongNhom(); return tn.chuCua[j] === g || tn.chuConCua[j] === g; };
+    for (let i = 0; i < items.length; i++) {
+      const fx = items[i].formulas; if (!fx) continue;
+      for (const f in fx) {
+        const k = khoaO(i, f); nut.push(k);
+        const dich = new Set<string>();
+        const them = (r: number, g: string) => { if (coFx(r, g)) dich.add(khoaO(r, g)); };
+        const ghi = (a: string) => {
+          const p = parseAddr(a); if (!p) return 0;
+          const kind = items[p.row].kind;
+          if ((kind === "section" || kind === "subsection") && (p.f === "_amount" || p.f === "unitPrice")) {
+            if (thuocNhom(i, p.row)) return 0;   // vòng qua tổng nhóm của chính mình: cellNum đã xử lý
+            them(p.row, "quantity");
+            for (let j = 0; j < items.length; j++) if (thuocNhom(j, p.row)) NUMERIC.forEach((g) => them(j, g));
+            return 0;
+          }
+          if (p.f === "_amount") { NUMERIC.forEach((g) => them(p.row, g)); return 0; }
+          them(p.row, p.f); return 0;
+        };
+        evalFormula(fx[f], { cell: ghi, range: (a, b) => { const pa = parseAddr(a), pb = parseAddr(b); if (!pa || !pb) return null; const ca = idxOfL(pa.L), cb = idxOfL(pb.L); for (let r = Math.min(pa.row, pb.row); r <= Math.max(pa.row, pb.row); r++) for (let c = Math.min(ca, cb); c <= Math.max(ca, cb); c++) ghi(ADDR[c].L + (r + 1)); return [0]; } });
+        ke.set(k, [...dich]);
+      }
+    }
+    // Tarjan dạng LẶP (không đệ quy) — chuỗi công thức dài cả nghìn ô không được làm tràn ngăn xếp.
+    const vong = new Set<string>();
+    const chiSo = new Map<string, number>(), thap = new Map<string, number>(), trenNgan = new Set<string>(); const ngan: string[] = []; let dem = 0;
+    for (const goc of nut) {
+      if (chiSo.has(goc)) continue;
+      const khung: { v: string; j: number }[] = [{ v: goc, j: 0 }];
+      chiSo.set(goc, dem); thap.set(goc, dem); dem++; ngan.push(goc); trenNgan.add(goc);
+      while (khung.length) {
+        const top = khung[khung.length - 1]; const ds = ke.get(top.v) || [];
+        if (top.j < ds.length) {
+          const w = ds[top.j++];
+          if (!chiSo.has(w)) { chiSo.set(w, dem); thap.set(w, dem); dem++; ngan.push(w); trenNgan.add(w); khung.push({ v: w, j: 0 }); }
+          else if (trenNgan.has(w)) thap.set(top.v, Math.min(thap.get(top.v)!, chiSo.get(w)!));
+          continue;
+        }
+        khung.pop();
+        if (khung.length) { const cha = khung[khung.length - 1].v; thap.set(cha, Math.min(thap.get(cha)!, thap.get(top.v)!)); }
+        if (thap.get(top.v) === chiSo.get(top.v)) {
+          const scc: string[] = []; let w: string;
+          do { w = ngan.pop()!; trenNgan.delete(w); scc.push(w); } while (w !== top.v);
+          if (scc.length > 1 || (ke.get(top.v) || []).includes(top.v)) scc.forEach((x) => vong.add(x));
+        }
+      }
+    }
+    return vong;
+  };
+  const datCoVong = (i: number, f: string) => { const it = items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> }; (it._fxWarn || (it._fxWarn = {}))[f] = true; };
+  // Trần số lượt: khi đã loại ô vòng, mỗi lượt đẩy giá trị đi ít nhất MỘT bậc của chuỗi phụ thuộc,
+  // nên (số ô công thức + 1) lượt là đủ để hội tụ. Bản cũ cố định 8 lượt nên chuỗi tham chiếu NGƯỢC
+  // dài hơn 8 (E1=E2, E2=E3 … E12=500) để lại số cũ, bấm Lưu là lưu số chưa hội tụ (GRID-14). Thực tế
+  // vòng lặp dừng ngay lượt đầu tiên không còn ô nào đổi.
   const recomputeAll = () => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
-    for (let pass = 0; pass < 8; pass++) {
+    const vong = oVongLap();
+    const soFx = items.reduce((n, it) => n + (it.formulas ? Object.keys(it.formulas).length : 0), 0);
+    for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
@@ -419,6 +490,7 @@ function GridTableInner(props: GridTableProps) {
     if (raw.trim().startsWith("=")) {
       if (!it.formulas) it.formulas = {};
       (it.formulas as Record<string, string>)[f] = raw.trim();
+      if (oVongLap().has(khoaO(i, f))) { datCoVong(i, f); return; }   // vòng: giữ nguyên số đang có, tô đỏ
       fxVongRef.current = false;
       const v = evalFormula(raw.trim(), refsCho(i));
       ghiCoVong(i, f);
@@ -1470,10 +1542,13 @@ function GridTableInner(props: GridTableProps) {
       // Đang GÕ công thức: LƯU LIVE vào model + eval ngay (như SPA), KHÔNG xóa formula khi đang gõ.
       if (!it.formulas) it.formulas = {};
       (it.formulas as Record<string, string>)[f] = raw.trim();
-      fxVongRef.current = false;
-      const live = evalFormula(raw.trim(), refsCho(i));
-      ghiCoVong(i, f);
-      if (live !== null) it[f] = NUMERIC.has(f) ? live : M.fmtNumCell(live);
+      if (oVongLap().has(khoaO(i, f))) datCoVong(i, f);   // vòng: KHÔNG ghi số live (mỗi phím sẽ nhân thêm một lần)
+      else {
+        fxVongRef.current = false;
+        const live = evalFormula(raw.trim(), refsCho(i));
+        ghiCoVong(i, f);
+        if (live !== null) it[f] = NUMERIC.has(f) ? live : M.fmtNumCell(live);
+      }
       fxAutocomplete(el); highlightActiveFormulaRefs(raw); syncFxBar();
       recomputeAll(); onChange();   // re-eval ô tham chiếu chéo → lưu/hiển thị đúng
       return;

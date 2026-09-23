@@ -74,6 +74,16 @@ function dan(el: HTMLElement, kho: Kho | string) {
   act(() => { el.dispatchEvent(ev); });
   return ev;
 }
+function go(el: HTMLInputElement | HTMLTextAreaElement, chu: string) {
+  act(() => { el.value = chu; el.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+/** Gõ rồi Enter — đi đúng đường người dùng chốt một ô (onNumInput → commitCell → recomputeAll). */
+function goEnter(row: number, field: string, chu: string) {
+  vaoO(o(row, field));
+  go(o(row, field), chu);
+  phim(o(row, field), "Enter");
+}
+const coDo = (row: number, field: string) => o(row, field).closest("td")!.classList.contains("cell-fx-error");
 async function xaHen() {
   await act(async () => { await new Promise((r) => setTimeout(r, 220)); });
 }
@@ -151,6 +161,70 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     vaoO(o(0, "unitPrice"));
     dan(o(0, "unitPrice"), "(1.500.000)");
     expect(items[0].unitPrice).toBe(-1500000);
+  });
+});
+
+// ── GRID-04 / GRID-14: tham chiếu vòng + chuỗi phụ thuộc dài ──────────────────────────────────
+// Mẫu không ngày, không Chi Tiết: A=STT B=Hạng mục C=ĐVT D=SL E=Đơn giá F=Thành tiền.
+const hangFx = (unitPrice: number, fx?: string): ItemK => {
+  const h = hang("x", "cái", 1, unitPrice);
+  if (fx) h.formulas = { unitPrice: fx };
+  return h;
+};
+describe("GRID-04 — tham chiếu vòng bị phát hiện, số đứng yên", () => {
+  it("ô tự trỏ =E1*1,1: giữ 1.000.000, tô đỏ, không phình qua các lần sửa ô khác", async () => {
+    const items = [hang("Vách", "m2", 1, 1000000), hang("Sàn", "m2", 1, 5)];
+    moLuoi(items);
+    goEnter(0, "unitPrice", "=E1*1,1");
+    await xaHen();
+    expect(items[0].unitPrice).toBe(1000000);
+    expect(coDo(0, "unitPrice")).toBe(true);
+    for (const v of ["6", "7", "8"]) { goEnter(1, "unitPrice", v); await xaHen(); }
+    expect(items[0].unitPrice).toBe(1000000);
+    expect(coDo(0, "unitPrice")).toBe(true);
+  });
+
+  it("vòng hai ô E1=E2, E2=E1+1: cả hai đỏ, giá trị không đổi qua 3 lần recompute", async () => {
+    const items = [hangFx(8, "=E2"), hangFx(9, "=E1+1"), hang("Khác", "cái", 1, 1)];
+    moLuoi(items);
+    for (const v of ["2", "3", "4"]) { goEnter(2, "unitPrice", v); await xaHen(); }
+    expect([items[0].unitPrice, items[1].unitPrice]).toEqual([8, 9]);
+    expect(coDo(0, "unitPrice") && coDo(1, "unitPrice")).toBe(true);
+  });
+
+  it("sửa hết vòng thì hết đỏ và tính lại bình thường", async () => {
+    const items = [hang("Vách", "m2", 1, 1000000), hang("Sàn", "m2", 1, 5)];
+    moLuoi(items);
+    goEnter(0, "unitPrice", "=E1*1,1");
+    await xaHen();
+    goEnter(0, "unitPrice", "=E2*2");
+    await xaHen();
+    expect(items[0].unitPrice).toBe(10);
+    expect(coDo(0, "unitPrice")).toBe(false);
+  });
+
+  it("ô chỉ ĐỌC từ một vòng vẫn tính từ số đã đứng yên (không đỏ)", async () => {
+    const items = [hangFx(8, "=E2"), hangFx(9, "=E1+1"), hangFx(0, "=E1*10"), hang("Khác", "cái", 1, 1)];
+    moLuoi(items);
+    goEnter(3, "unitPrice", "2");
+    await xaHen();
+    expect(items[2].unitPrice).toBe(80);
+    expect(coDo(2, "unitPrice")).toBe(false);
+  });
+
+  // Một lần Enter chạy recomputeAll hai lần (commit + chốt), mỗi lần 8 lượt ở bản cũ → chuỗi phải dài
+  // hơn 16 bậc thì mới lộ lỗi qua đúng thao tác người dùng. 25 hàng = 24 bậc.
+  it("GRID-14: chuỗi tham chiếu NGƯỢC 25 hàng (E1=E2 … E24=E25) hội tụ đúng sau MỘT thao tác", async () => {
+    const N = 25;
+    const items: ItemK[] = [];
+    for (let k = 0; k < N - 1; k++) items.push(hangFx(0, `=E${k + 2}`));
+    items.push(hang("Cuối", "cái", 1, 1));
+    moLuoi(items);
+    goEnter(N - 1, "unitPrice", "500");
+    await xaHen();
+    // Enter ở hàng CUỐI đẻ thêm một hàng trống (nếp của lưới) — chỉ so N hàng của chuỗi.
+    expect(items.slice(0, N).map((it) => it.unitPrice)).toEqual(Array(N).fill(500));
+    expect(items.some((_, k) => k < N - 1 && coDo(k, "unitPrice"))).toBe(false);
   });
 });
 
