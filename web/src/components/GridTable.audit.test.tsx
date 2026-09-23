@@ -246,6 +246,27 @@ describe("GRID-03 — công thức không tính được thì tô đỏ", () => 
   });
 });
 
+// ── GRID-05: dán văn bản nhiều dòng vào ô chữ ĐANG SỬA ghi đè Hạng Mục các hàng dưới ─────────
+describe("GRID-05 — dán nhiều dòng vào ô đang sửa", () => {
+  it("F2 ô Hạng Mục rồi dán 'a\\nb' → hàng dưới KHÔNG đổi, để trình duyệt chèn (không preventDefault)", () => {
+    const items = [hang("Banner A"), hang("Standee B")];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), "F2");
+    const ev = dan(o(0, "name"), "Banner cổng chính\nIn hiflex 2 mặt");
+    expect(ev.defaultPrevented).toBe(false);
+    expect(items[1].name).toBe("Standee B");
+    expect(items.length).toBe(2);
+  });
+  it("ô đang CHỌN (chưa sửa) → vẫn dán khối phủ 2 hàng như Excel", () => {
+    const items = [hang("Banner A"), hang("Standee B")];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    dan(o(0, "name"), "Một\nHai");
+    expect(items.map((x) => x.name)).toEqual(["Một", "Hai"]);
+  });
+});
+
 // ── GRID-02: đi tới cột STT không dời tiêu điểm → phím gõ kế tiếp đè lên ô CŨ ────────────────
 describe("GRID-02 — vùng chọn nhìn thấy và ô nhận phím không được tách nhau", () => {
   const baHang = () => {

@@ -1097,6 +1097,11 @@ function GridTableInner(props: GridTableProps) {
     let hdrRoles: string[] | null = null;
     if (rows.length > 1 && isHeaderRow(rows[0])) { hdrRoles = headerToRoles(rows[0]); rows.splice(0, 1); }
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
+    // GRID-05: ĐANG SỬA một ô nhiều dòng (Hạng Mục / Ghi chú) mà dán văn bản nhiều dòng MỘT cột (mô tả
+    // chép từ Zalo/Word) → để trình duyệt chèn nguyên văn tại con trỏ, như Excel ở chế độ sửa. Bản cũ
+    // coi là khối nhiều hàng và GHI ĐÈ Hạng Mục của các hàng bên dưới. Ô đang CHỌN (chưa sửa) thì vẫn
+    // dán khối phủ nhiều hàng như Excel.
+    if (isGrid && editingRef.current && !internal && f0 && MULTILINE.has(f0) && rows.every((r) => r.length === 1)) return;
 
     // 1 giá trị đơn lẻ.
     if (!isGrid) {
