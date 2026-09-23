@@ -62,7 +62,9 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 
 import { QuoteEditorPage } from "./QuoteEditor";
 import { api, ApiError } from "../lib/api";
+import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
 import * as ui from "../lib/ui";
+import shellSrc from "../components/Shell.tsx?raw";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
 
@@ -193,6 +195,39 @@ describe("GRID-08 — xung đột 409 giữ lại phần đang soạn", () => {
     const p = h.updateQuote.mock.calls[0][1] as Record<string, unknown>;
     expect(p.toCompany).toBe("Khách CỦA TÔI");
     expect(p.baseUpdatedAt).toBe("2026-09-21T09:00:00.000Z");
+  });
+});
+
+// FE-12: hẹn giờ ghi nháp không huỷ khi đổi báo giá trong CÙNG instance editor; "Rời, bỏ thay đổi"
+// không xoá nháp.
+describe("FE-12 — bản nháp khi đổi báo giá / khi chủ động bỏ", () => {
+  it("đổi #11 → #12 lúc còn hẹn giờ ghi nháp: bản nháp của #12 KHÔNG bị ghi nội dung #11", async () => {
+    const khoa12 = khoaBanNhap(12, 1);
+    ghiBanNhap(khoa12, { ...baoGia({ id: 12, toCompany: "Nháp của 12" }) }, "2026-09-20T00:00:00.000Z", 1);
+    await moEditor();
+    goTenKhach("Chữ của 11");                                      // mark() → hẹn giờ 1,2s
+    (api.getQuote as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => baoGia({ id: 12, toCompany: "Bản máy chủ 12" }));
+    // Hộp "Khôi phục?" của #12 treo 1,5s — đúng cửa sổ mà hẹn giờ cũ bắn.
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(false), 1500)));
+    await act(async () => { root!.render(<QuoteEditorPage me={ME} quoteId={12} isNew={false} />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 1300)); });
+    const d = docBanNhap(khoa12, 1);
+    expect((d?.quote as { toCompany?: string } | undefined)?.toCompany, "khoá #12 bị ghi đè bằng dữ liệu #11").toBe("Nháp của 12");
+    await cho(400);
+  });
+
+  it("chọn 'Rời, bỏ thay đổi' (editor:discard) → bản nháp cục bộ bị xoá", async () => {
+    await moEditor();
+    goTenKhach("Sẽ bỏ");
+    await cho(1300);                                               // bản nháp đã ghi
+    expect(docBanNhap(khoaBanNhap(11, 1), 1)).not.toBeNull();
+    await act(async () => { window.dispatchEvent(new Event("editor:discard")); });
+    expect(docBanNhap(khoaBanNhap(11, 1), 1)).toBeNull();
+  });
+
+  it("dây nối: Shell.guardLeave bắn editor:discard khi người dùng chọn bỏ", () => {
+    const i = shellSrc.indexOf("async function guardLeave");
+    expect(shellSrc.slice(i, shellSrc.indexOf("\n}", i))).toMatch(/if \(ok\) \{[^}]*dispatchEvent\(new Event\("editor:discard"\)\)/);
   });
 });
 

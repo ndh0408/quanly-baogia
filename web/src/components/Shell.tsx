@@ -10,7 +10,9 @@ async function guardLeave(): Promise<boolean> {
   const w = window as Window & { __editorDirty?: boolean };
   if (!w.__editorDirty) return true;
   const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
-  if (ok) w.__editorDirty = false;
+  // FE-12: chọn bỏ → báo editor xoá bản nháp cục bộ (không thì lần mở sau lại hỏi khôi phục đúng phần
+  // người dùng vừa quyết định bỏ).
+  if (ok) { w.__editorDirty = false; window.dispatchEvent(new Event("editor:discard")); }
   return ok;
 }
 

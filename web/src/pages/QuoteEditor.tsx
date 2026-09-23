@@ -215,8 +215,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", h);
+    // FE-12: người dùng CHỦ ĐỘNG chọn "Rời, bỏ thay đổi" (Shell.guardLeave bắn editor:discard) → xoá luôn
+    // bản nháp. Để lại thì lần mở sau bị hỏi "Khôi phục?" đúng phần họ vừa quyết định bỏ.
+    const boThayDoi = () => {
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+      dirtyRef.current = false;
+      if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+    };
+    window.addEventListener("editor:discard", boThayDoi);
     return () => {
       window.removeEventListener("beforeunload", h);
+      window.removeEventListener("editor:discard", boThayDoi);
       (window as WinDirty).__editorDirty = false;
       // Hẹn giờ ghi bản nháp phải huỷ theo: để nó bắn sau khi component đã rời là ghi đè bản nháp
       // của báo giá VỪA MỞ bằng dữ liệu của báo giá CŨ.
@@ -268,6 +277,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     //
     // Đặt lại `false` là cách trung thực: chưa nạp xong thì đừng cho bấm gì lên dữ liệu cũ.
     setReady(false);
+    // FE-12: CÙNG một instance editor đổi sang báo giá khác (ô tìm toàn cục, hash đổi). Hẹn giờ ghi nháp
+    // của báo giá CŨ còn treo sẽ bắn giữa lúc nạp — dirtyRef vẫn true, qRef vẫn là báo giá cũ, còn khoá
+    // thì đã trỏ báo giá mới → ghi nội dung báo giá #1 vào bản nháp của #2. Huỷ và dọn sạch trước.
+    if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+    dirtyRef.current = false;
+    khoaNhapRef.current = null;
     (async () => {
       try {
         if (!_companies || !_templates) {
@@ -301,17 +316,19 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
         let khoiPhuc = false;
         chuyenBanNhapCu(isNew ? "moi" : quoteId!, meIdRef.current);   // bản nháp ghi trước FE-04 (khoá không có người dùng)
-        khoaNhapRef.current = khoaBanNhap(isNew ? "moi" : quoteId!, meIdRef.current);
+        // FE-12: khoá bản nháp chỉ gán vào ref SAU khi qRef đã là báo giá này (xem dưới) — gán sớm thì
+        // trong lúc chờ hộp "Khôi phục?" ref đã trỏ báo giá MỚI mà qRef còn là báo giá CŨ.
+        const khoa = khoaBanNhap(isNew ? "moi" : quoteId!, meIdRef.current);
         baseNhapRef.current = (q as { updatedAt?: string }).updatedAt ?? null;
         donBanNhapQuaHan();   // rẻ, và giữ hạn ngạch localStorage sạch cho cả origin
-        const nhapCu = docBanNhap(khoaNhapRef.current, meIdRef.current);
+        const nhapCu = docBanNhap(khoa, meIdRef.current);
         // CHỈ đề nghị khi bản nháp dựa trên ĐÚNG bản máy chủ vừa tải. Lệch `updatedAt` nghĩa là
         // người khác đã lưu đè trong lúc đó — khôi phục lúc ấy là âm thầm cán lên việc của họ,
         // đúng thứ mà khoá lạc quan (409) sinh ra để chặn. Bản nháp lệch bị bỏ đi, không hỏi.
         // ĐẾN TỪ WIZARD thì KHÔNG hỏi: người dùng vừa chọn công ty/mẫu/khách xong, hỏi "khôi phục
         // bản nháp cũ?" ngay lúc đó là mời họ ĐÈ LÊN lựa chọn vừa làm. Bản nháp "moi" bỏ dở của
         // lần trước bị xoá luôn — nó đã hết ý nghĩa từ lúc wizard chạy lại.
-        if (tuWizard && khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        if (tuWizard && khoa) xoaBanNhap(khoa);
         else if (alive && nhapCu && nhapCu.baseUpdatedAt === baseNhapRef.current) {
           const luc = new Date(nhapCu.luuLuc).toLocaleString("vi-VN");
           const canhBaoAnh = nhapCu.bocAnh
@@ -334,14 +351,14 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             q = kp;
             khoiPhuc = true;   // khôi phục xong LÀ đang có thay đổi chưa lưu → cờ bẩn bên dưới
           } else {
-            xoaBanNhap(khoaNhapRef.current);
+            xoaBanNhap(khoa);
           }
         }
         // GRID-08: BẢN GIỮ LẠI LÚC XUNG ĐỘT 409. Nhánh 409 của save() ghi phần đang soạn vào khoá
         // `…:xungdot` rồi mới tải lại. Bản nháp thường thì bị bỏ ở đây vì mốc lệch (người khác đã lưu),
         // nên trước đây chọn "Tải lại bản mới" là mất trắng phần của mình. Hỏi một lần rồi xoá khoá dù
         // chọn gì; mở ra thì mang mốc updatedAt MỚI của máy chủ — Lưu sau đó là CHỦ ĐỘNG ghi đè.
-        const khoaXd = khoaNhapRef.current ? khoaNhapRef.current + ":xungdot" : null;
+        const khoaXd = khoa ? khoa + ":xungdot" : null;
         const nhapXd = !tuWizard && khoaXd ? docBanNhap(khoaXd, meIdRef.current) : null;
         if (alive && khoaXd && nhapXd && !khoiPhuc) {
           const luc = new Date(nhapXd.luuLuc).toLocaleString("vi-VN");
@@ -364,6 +381,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         (q as QuoteFull & { _activeSheet: number })._activeSheet = 0;
         stampKeys(q);
         qRef.current = q;
+        khoaNhapRef.current = khoa;
         if (alive) {
           dirtyRef.current = khoiPhuc;
           (window as WinDirty).__editorDirty = khoiPhuc;
@@ -441,7 +459,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   if (senderCo?.address) q.fromAddress = senderCo.address;
 
   const back = async () => {
-    if (dirtyRef.current && !(await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" }))) return;
+    if (dirtyRef.current) {
+      if (!(await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" }))) return;
+      window.dispatchEvent(new Event("editor:discard"));   // FE-12: bỏ thì xoá luôn bản nháp
+    }
     location.hash = "#/list";
   };
 
