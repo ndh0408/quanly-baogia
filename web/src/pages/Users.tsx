@@ -210,7 +210,7 @@ function PermPreview({ cat, isAdmin, perms }: { cat?: PermCatalog; isAdmin: bool
   if (isAdmin) return (
     <div className="perm-preview">
       <div className="perm-preview-h">👁 Tài khoản này sẽ làm được:</div>
-      <div className="perm-preview-row"><b style={{ color: "var(--gold-d)" }}>TOÀN QUYỀN</b> — thấy mọi menu & làm mọi thứ (kể cả quản lý tài khoản, cấu hình).</div>
+      <div className="perm-preview-row"><b className="perm-all">TOÀN QUYỀN</b> — thấy mọi menu & làm mọi thứ (kể cả quản lý tài khoản, cấu hình).</div>
     </div>
   );
   const hasP = (k: string) => perms.has(k) || perms.has(k.replace(/:own$/, ":all"));

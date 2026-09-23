@@ -1867,13 +1867,13 @@ function GridTableInner(props: GridTableProps) {
   const toggleCellFormula = (td: HTMLElement, addr: string, formula: string) => {
     if (td.dataset.fxShown) {
       td.textContent = td.dataset.fxVal || "";
-      td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+      td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
       delete td.dataset.fxShown; delete td.dataset.fxVal; td.removeAttribute("title");
       setFxBar(null, null);
     } else {
       td.dataset.fxVal = td.textContent || ""; td.dataset.fxShown = "1";
       td.textContent = formula; td.title = formula;
-      td.style.color = "#15803d"; td.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace"; td.style.fontWeight = "600"; td.style.fontSize = "11.5px"; td.style.whiteSpace = "nowrap";
+      /* màu chữ công thức: CSS `[data-fx-shown]` theo sáng/tối (styles.css --fx-cell) */ td.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace"; td.style.fontWeight = "600"; td.style.fontSize = "11.5px"; td.style.whiteSpace = "nowrap";
       setFxBar(addr, formula);
     }
   };
@@ -1976,7 +1976,7 @@ function GridTableInner(props: GridTableProps) {
       shown.forEach((td) => {
         if (td === target || td.contains(target)) return;   // bấm trong chính ô đó → giữ
         td.textContent = td.getAttribute("data-fx-val") || "";
-        td.style.color = ""; td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
+        td.style.fontFamily = ""; td.style.fontWeight = ""; td.style.fontSize = ""; td.style.whiteSpace = "";
         td.removeAttribute("data-fx-shown"); td.removeAttribute("data-fx-val"); td.removeAttribute("title");
       });
       if (!document.querySelector("[data-fx-shown]")) {

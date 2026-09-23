@@ -84,6 +84,28 @@ describe("Chế độ tối của vùng soạn báo giá — đọc được và
     }
   });
 
+  it("công thức hiện trong ô khi bấm đúp (--fx-cell) đọc được trên MỌI nền, cả hai chế độ", () => {
+    const sang = /:root \{\s*--fx-cell: (#[0-9a-fA-F]{6})/.exec(khoi)?.[1] ?? "";
+    const toi = /:root\[data-theme="dark"\] \{\s*--fx-cell: (#[0-9a-fA-F]{6})/.exec(khoi)?.[1] ?? "";
+    expect(khoi).toMatch(/\[data-fx-shown\] \{\s*color: var\(--fx-cell\) !important/);
+    // Sáng: giấy trắng + nền nhóm/nhóm con của GN và Colorfull (màu in, khớp Excel).
+    for (const n of ["#ffffff", "#fae9db", "#c9d9ef", "#f4cfb0", "#cad8aa"]) expect(tuongPhan(sang, n), `sáng ${sang} trên ${n}`).toBeGreaterThanOrEqual(4.5);
+    // Tối: nền thường + bản tối của mọi màu nhóm.
+    const nenToi = [SURFACE, ...capMau("--nen", "--chu").map(({ mau, p }) => pha(mau, p, SURFACE))];
+    for (const n of nenToi) expect(tuongPhan(toi, n), `tối ${toi} trên ${n}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("số đỏ 'Thành tiền' trên dòng tổng tối, và nút ✕ khi rê chuột ≥ 4.5:1", () => {
+    const do_ = /\.summary-table tfoot \.summary-formula-value\.danger \{\s*color: (#[0-9a-fA-F]{6})/.exec(khoi)?.[1] ?? "";
+    for (const { mau, p } of capMau("--tong-nen", "--tong-chu")) {
+      const nen = pha(mau, p, SURFACE);
+      expect(tuongPhan(do_, nen), `${do_} trên ${nen}`).toBeGreaterThanOrEqual(4.5);
+    }
+    const hover = /button\.rm-row:hover \{\s*background: (#[0-9a-fA-F]{6});\s*[^}]*color: (#[0-9a-fA-F]{6})/.exec(khoi);
+    expect(hover, "phải có luật hover riêng cho nút ✕ ở dark").toBeTruthy();
+    expect(tuongPhan(hover![2], hover![1])).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("bảng Tổng báo giá của Colorfull ở bản SÁNG = F4CFB0 (khớp sheet 'Tổng Báo Giá' của tệp Excel)", () => {
     expect(khoi).toMatch(/\.summary-table\.clf-theme thead th,\s*\.summary-table\.clf-theme tfoot td \{\s*background: #f4cfb0/);
     // và màn soạn thật sự gắn lớp đó khi báo giá có sheet Colorfull (cùng quy tắc với src/excel.ts `isClf`)

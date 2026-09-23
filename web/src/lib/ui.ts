@@ -271,7 +271,7 @@ export function promptModal(
     back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="${esc(title)}">
       <div class="modal-head"><h3>${esc(title)}</h3></div>
       <div class="modal-body"><p style="margin:0 0 8px">${esc(message)}</p>
-        <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
+        <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
       <div class="modal-foot"><button class="btn" data-no>Hủy</button><button class="btn btn-primary" data-yes>${esc(opts.confirmText ?? "Xác nhận")}</button></div></div>`;
     const input = back.querySelector(".pm-input") as HTMLTextAreaElement;
     let releaseFocus = () => {};

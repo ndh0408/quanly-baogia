@@ -83,7 +83,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
         {STEPS.map((s, i) => { const n = i + 1; const state = n === step ? "active" : n < step ? "done" : ""; return (
           <button key={s} className={`step-dot ${state}`} disabled={n > step} onClick={() => n < step && setStep(n)}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border-strong)", background: n === step ? "var(--accent, #1a73e8)" : n < step ? "var(--surface)" : "transparent", color: n === step ? "var(--on-primary)" : "inherit", cursor: n < step ? "pointer" : "default", fontWeight: 600, fontSize: 13 }}>
-            <span style={{ display: "inline-flex", width: 20, height: 20, borderRadius: 999, background: n <= step ? "rgba(0,0,0,.15)" : "var(--surface-2)", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{n < step ? "✓" : n}</span>{s}
+            <span style={{ display: "inline-flex", width: 20, height: 20, borderRadius: 999, background: n < step ? "color-mix(in srgb, currentColor 15%, transparent)" : n === step ? "rgba(0,0,0,.15)" : "var(--surface-2)", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{n < step ? "✓" : n}</span>{s}
           </button>); })}
       </div>
 
