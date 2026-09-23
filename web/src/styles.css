@@ -4306,3 +4306,18 @@ textarea[aria-invalid="true"] {
 :root .excel-table tr.section-row:not(#nhom-toi) td.cell-selected:not(.cell-anchor) {
   background-image: linear-gradient(rgb(23 105 214 / 0.13), rgb(23 105 214 / 0.13));
 }
+
+/* GIẢM CHUYỂN ĐỘNG: KHÔNG tạo transition nào (L74). public/style.css (đóng băng) đặt
+   `transition-duration: 0.001ms !important` cho `*` — transition-property mặc định là `all`, nên duration
+   > 0 biến MỌI phần tử thành có transition: bấm đổi sáng/tối khi đang mở báo giá lớn là mỗi thuộc tính đổi
+   màu của hàng nghìn ô sinh transitionrun/start/end, cả ba đi qua listener gốc của React — đo trên #284:
+   9.676 transitionrun mỗi lần, INP 224–256 ms. `none` = không transition, không sự kiện; nhìn thì y hệt
+   0.001ms (đổi tức thì). Không mã nào chờ transitionend (đã rà web/src). Animation giữ luật gốc (rút còn
+   0.001ms, một vòng). Cùng độ ưu tiên + cùng !important, tệp này nạp sau → thắng. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
