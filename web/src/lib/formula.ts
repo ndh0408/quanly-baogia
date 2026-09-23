@@ -50,9 +50,47 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   FLOOR: (a) => Math.floor(a[0] || 0),
 };
 
+/**
+ * DẤU PHẨY TÁCH ĐỐI SỐ KIỂU EXCEL TIẾNG ANH → ";" (quy ước của app).
+ *
+ * App theo Excel tiếng Việt: ";" tách đối số, "," là dấu thập phân. Nhưng người dùng chép công
+ * thức từ Excel tiếng Anh: "=ROUND(E2*63000,-3)" bị đọc thành ROUND(E2*63000.-3) = 554.397 thay
+ * vì 554.000, rồi lúc xuất Excel bước tự kiểm thấy lệch nên BỎ công thức, chỉ ghi số (người dùng
+ * báo 2026-09-23, production quote #47).
+ *
+ * Chỉ đổi dấu phẩy nằm NGAY TRONG danh sách đối số của một HÀM, và chỉ khi nó KHÔNG THỂ là dấu
+ * thập phân: sát ô tham chiếu / dấu âm / ngoặc / chữ ("E2,E3", ",-3"), hoặc là dấu phẩy DUY NHẤT
+ * của ROUND/ROUNDUP/ROUNDDOWN (Excel bắt buộc hai đối số). Công thức đã có ";" là kiểu Việt → giữ
+ * nguyên; "," ngoài hàm ("=E3*1,5") vẫn là thập phân.
+ * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa quy tắc thì sửa CẢ HAI.
+ */
+export function chuanHoaDauTachDoiSo(s: string): string {
+  if (s.includes(";") || !s.includes(",")) return s;
+  const out = s.split("");
+  const khung: { fn: string | null; phay: number[] }[] = [];
+  const quyet = (k: { fn: string | null; phay: number[] }) => {
+    if (!k.fn || !k.phay.length) return;
+    const batHai = /^ROUND(UP|DOWN)?$/.test(k.fn) && k.phay.length === 1;
+    for (const i of k.phay) {
+      const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
+      const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
+      const soSau = /^\d/.test(sau);
+      if (batHai || !(soTruoc && soSau)) out[i] = ";";
+    }
+  };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") { const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i)); khung.push({ fn: m ? m[1].toUpperCase() : null, phay: [] }); }
+    else if (ch === ")") { const k = khung.pop(); if (k) quyet(k); }
+    else if (ch === "," && khung.length) khung[khung.length - 1].phay.push(i);
+  }
+  return out.join("");
+}
+
 export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
+  s = chuanHoaDauTachDoiSo(s);
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
