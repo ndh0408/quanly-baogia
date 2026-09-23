@@ -203,6 +203,31 @@ describe("L61 — hộp lý do còn treo sau khi rời báo giá không được
     await bam(nut("Khách không chốt"));
     expect(api.markLost).toHaveBeenCalledWith(11, "lý do");
   });
+
+  // Cùng họ, sót ở back(): trả lời hộp treo từng hạ cờ bẩn DÙNG CHUNG, bắn editor:discard (editor đang mở
+  // nghe thấy và xoá bản nháp CỦA NÓ) rồi kéo hash về #/list mà không hỏi.
+  it("'Rời khỏi mà chưa lưu?' của nút ← Quay lại (#11) còn treo khi đã sang #12: trả lời KHÔNG xoá bản nháp #12, không kéo về #/list", async () => {
+    await moEditor();
+    go(oTenKhach(), "Sửa 11");
+    let traLoi!: (v: boolean) => void;
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    await bam(nut("← Quay lại"));
+    // Back của trình duyệt: Shell.guardLeave hỏi, người dùng chọn rời → hạ cờ, bắn editor:discard, gỡ #11.
+    (window as WinDirty).__editorDirty = false;
+    await act(async () => { window.dispatchEvent(new Event("editor:discard")); });
+    dongEditor();
+    location.hash = "#/quotes/12";
+    const KHOA12 = khoaBanNhap(12, 1);
+    ghiBanNhap(KHOA12, baoGia({ id: 12, toCompany: "Khách #12 CHƯA LƯU" }), MOC_CU, 1);
+    h.getQuote.mockImplementationOnce(async () => baoGia({ id: 12 }));
+    await moEditor(12);                                             // hộp "Khôi phục?" của #12 → Khôi phục
+    expect(oTenKhach().value).toBe("Khách #12 CHƯA LƯU");
+    await act(async () => { traLoi(true); });                       // "Rời, bỏ thay đổi" trên hộp treo của #11
+    await cho(10);
+    expect(location.hash, "hộp treo của #11 kéo người dùng về danh sách").toBe("#/quotes/12");
+    expect((window as WinDirty).__editorDirty, "hộp treo của #11 tắt cờ chặn rời trang của #12").toBe(true);
+    expect(docBanNhap(KHOA12, 1), "hộp treo của #11 xoá bản nháp của #12").not.toBeNull();
+  });
 });
 
 // L62: save() của instance ĐÃ GỠ chạy tiếp sau khi máy chủ trả lời: tắt cờ chặn rời trang của editor

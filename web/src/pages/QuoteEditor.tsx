@@ -639,6 +639,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const back = async () => {
     if (dirtyRef.current) {
       if (!(await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" }))) return;
+      // L61: hộp treo sau khi đã rời báo giá này (Back của trình duyệt lúc hộp đang mở). Chạy tiếp là hạ cờ
+      // bẩn DÙNG CHUNG, bắn editor:discard — editor ĐANG MỞ nghe và xoá bản nháp của nó — rồi kéo về #/list.
+      if (!songRef.current) return;
       // app#14: hạ cờ toàn cục TRƯỚC khi đổi hash. Để nguyên thì handler hashchange của Shell hỏi LẠI
       // cùng câu; Hủy ở lần hai giữ editor lại với dirtyRef=false và bản nháp đã bị xoá — đóng tab là
       // mất im lặng (không beforeunload, pagehide không ghi nháp).
