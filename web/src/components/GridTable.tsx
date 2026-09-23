@@ -206,6 +206,14 @@ const AN_O = { display: "none" } as const;
  */
 const DongNho = memo(function DongNho({ ve }: { sig: string; ve: () => ReactNode }) { return <>{ve()}</>; }, (a, b) => a.sig === b.sig);
 
+/* ── MÃ CẮT DUY NHẤT TRÊN CẢ TRANG (soát toàn diện L20) ──────────────────────────────────────
+   `token` chép là bộ đếm RIÊNG của từng lưới (bắt đầu từ 0), nên token của lưới khác có thể trùng
+   token cắt đang chờ của lưới này — dán khối của lưới kia lại xoá vùng cắt của lưới này. Cắt thì cấp
+   thêm `catId` duy nhất; chỉ khối mang ĐÚNG catId đang chờ mới là di chuyển. CAT_DA_XONG nhớ các lần
+   cắt đã dán xong (di chuyển rồi) để dán lại lần nữa không bị báo nhầm "nguồn vẫn giữ nguyên". */
+let demCat = 0;
+const CAT_DA_XONG = new Set<string>();
+
 function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
@@ -230,7 +238,7 @@ function GridTableInner(props: GridTableProps) {
   // CẮT kiểu Excel: Ctrl+X chỉ ĐÁNH DẤU vùng nguồn (viền nét đứt) — dữ liệu chỉ bị xoá khi DÁN
   // xong (di chuyển), Esc thì huỷ. Không như cut của trình soạn thảo (xoá ngay).
   // keys: `_k` của từng hàng nguồn — finishCutMove tìm lại hàng theo khoá, không theo chỉ số (L7).
-  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean; keys?: (number | undefined)[] } | null>(null);
+  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean; keys?: (number | undefined)[]; catId?: string } | null>(null);
   // Point-mode BÀN PHÍM: đang gõ công thức, ký tự trước con trỏ là toán tử → mũi tên CHỌN Ô THAM
   // CHIẾU (=  ↑ → "=H3", Shift+mũi tên kéo thành vùng "=H3:H5") — đúng thao tác gõ công thức Excel.
   const kbRefRef = useRef<{ el: HTMLInputElement | HTMLTextAreaElement; base: string; after: string; start: { row: number; col: number }; cur: { row: number; col: number }; fresh: boolean } | null>(null);
@@ -958,11 +966,12 @@ function GridTableInner(props: GridTableProps) {
     // qexact: cờ SL CHÍNH XÁC (quantityExact — SL 4 số lẻ nạp từ Excel) của từng hàng. Không mang theo thì
     // hàng dán tính Thành Tiền theo SL làm tròn 1 số lẻ: 0,9075 × 1.000.000 ra 900.000 (soát toàn diện L19).
     const qexact = Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => !!items[rc.r0 + k]?.quantityExact);
-    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact })); } catch { /* */ }
+    const catId = cut && editable ? `${Date.now().toString(36)}-${++demCat}` : undefined;   // xem CAT_DA_XONG
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact, catId })); } catch { /* */ }
     copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
-    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k) };
+    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k), catId };
     else cutPendingRef.current = null;
     paintSel();
   };
@@ -978,6 +987,7 @@ function GridTableInner(props: GridTableProps) {
   const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false) => {
     const cp = cutPendingRef.current; if (!cp) return;
     cutPendingRef.current = null;
+    if (cp.catId) { CAT_DA_XONG.add(cp.catId); if (CAT_DA_XONG.size > 50) CAT_DA_XONG.delete(CAT_DA_XONG.values().next().value as string); }
     const viTri = new Map<number, number>(); items.forEach((it, i) => { if (it._k != null) viTri.set(it._k, i); });
     for (let k = 0; k <= cp.r1 - cp.r0; k++) {
       const key = cp.keys?.[k];
@@ -1247,8 +1257,18 @@ function GridTableInner(props: GridTableProps) {
     const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
-    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[] } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[]; catId?: string } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
+    // Khối là vùng CẮT đang chờ của CHÍNH lưới này → dán = DI CHUYỂN. So bằng mã cắt duy nhất, không
+    // bằng token (bộ đếm riêng từng lưới — trùng giữa hai lưới). Tính TRƯỚC finishCutMove (nó xoá dấu cắt).
+    const laCatCuaLuoi = !!(internal?.catId && cutPendingRef.current?.catId === internal.catId);
+    // Khối CẮT ở nơi khác — sheet khác (đổi sheet dựng lại lưới, dấu cắt mất), bảng khác trên trang — hoặc
+    // chế độ cắt đã huỷ (Esc, gõ, chèn/xoá hàng): dán ở đây chỉ là CHÉP, nguồn không bị xoá. Bản cũ im
+    // lặng, viền nét đứt đã biến mất nên người dùng tưởng đã di chuyển → hạng mục tính tiền HAI lần (L20).
+    const baoChiChep = () => {
+      if (!internal?.catId || laCatCuaLuoi || CAT_DA_XONG.has(internal.catId)) return;
+      toast("⚠️ Đã CHÉP sang đây, KHÔNG phải di chuyển — vùng vừa cắt (ở sheet/bảng khác, hoặc chế độ cắt đã huỷ) vẫn giữ nguyên; xoá tay ở đó nếu muốn chuyển đi", "error");
+    };
     // SL chép TỪ ô SL trong app → cờ SL chính xác theo hàng nguồn (L19): nguồn có cờ thì bật, nguồn là
     // hàng thường thì bỏ (dán đè lên hàng đang có cờ). Dán từ ngoài / từ cột khác thì không đụng cờ.
     const coSlTheoNguon = (ri: number, r: number, f: string, fSrc: string | undefined) => {
@@ -1301,8 +1321,8 @@ function GridTableInner(props: GridTableProps) {
     if (!isGrid) {
       const val = rows[0][0];
       const rc = rectOf(sel);
-      // Đang có khối CẮT nội bộ trùng token → dán = DI CHUYỂN (xoá nguồn sau khi ghi đích).
-      const movingCut = !!(sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token);
+      // Khối là vùng CẮT đang chờ của chính lưới này (laCatCuaLuoi) → dán = DI CHUYỂN (xoá nguồn sau khi ghi đích).
+      const movingCut = sameBlock && laCatCuaLuoi;
       // CHÉP MỘT Ô công thức trong app → dịch tham chiếu theo ô ĐÍCH như Excel (soát toàn diện L9): bản
       // cũ luôn dịch 0 hàng/0 cột nên "=D1*1000" dán xuống cả cột vẫn trỏ về hàng nguồn, Thành Tiền sai
       // mà không báo gì (Ctrl+D thì dịch đúng). CẮT–dán là DI CHUYỂN → giữ nguyên tham chiếu (Excel).
@@ -1320,7 +1340,7 @@ function GridTableInner(props: GridTableProps) {
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
         syncActiveCell();   // ô đang focus nằm trong vùng (Shift+↓ đã dời tiêu điểm xuống) — L6
-        baoSoMoHo();
+        baoSoMoHo(); baoChiChep();
         return;
       }
       // 1 ô SỐ → parseSoDan (nội bộ đọc số thô; ngoài: SL/Ngày thập phân, Đơn giá nghìn VN/US), KHÔNG để trình duyệt+onNumInput đọc sai (1,000,000→1.0).
@@ -1334,7 +1354,7 @@ function GridTableInner(props: GridTableProps) {
         // Dán CÔNG THỨC vào ô đang chọn: nhánh trên bỏ qua ô có công thức → ô kẹt số cũ, rời ô là
         // công thức mất (L6). Ô đang focus hiện đúng thứ onGridFocus hiện: công thức nếu có.
         syncActiveCell();
-        baoSoMoHo();
+        baoSoMoHo(); baoChiChep();
         return;
       }
       // 1 ô CHỮ: đang SỬA → để trình duyệt chèn tại con trỏ; đang CHỌN (ô khóa) → ghi đè cả ô.
@@ -1349,7 +1369,7 @@ function GridTableInner(props: GridTableProps) {
         // chọn lại bị lượt đồng bộ bỏ qua → dán "Booth…⏎HCM…⏎HN…" chỉ thấy dòng đầu tới khi bấm Lưu.
         const el = cellEl(i0, fld); if (el) { el.value = String((items[i0] as Record<string, unknown>)[fld] ?? ""); if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
         syncActiveCell();   // mốc Esc theo nội dung vừa dán — F2 rồi Esc không được trả về chữ trước khi dán (L6)
-        baoSoMoHo();
+        baoSoMoHo(); baoChiChep();
       }
       return;
     }
@@ -1476,7 +1496,7 @@ function GridTableInner(props: GridTableProps) {
     const dc0 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotDau : startCol;
     const dc1 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
-    if (sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token) {
+    if (sameBlock && laCatCuaLuoi) {
       finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
@@ -1485,7 +1505,7 @@ function GridTableInner(props: GridTableProps) {
     selRef.current = { anchor: { row: startRow, field: FIELDS[dc0] }, focus: { row: startRow + rows.length - 1, field: FIELDS[dc1] } };
     focusCell(startRow, FIELDS[startCol], true, true);
     toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
-    baoSoMoHo();
+    baoSoMoHo(); baoChiChep();
   };
 
   // ── bàn phím trong ô (Enter/Tab/Arrow/Esc/Ctrl) ────────────────────────────────
