@@ -1312,7 +1312,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`}sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { void nhanMocThanhToan(u); }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { void nhanMocThanhToan(u); }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
