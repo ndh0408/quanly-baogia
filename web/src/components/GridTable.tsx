@@ -4,7 +4,7 @@ import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
@@ -1401,6 +1401,16 @@ function GridTableInner(props: GridTableProps) {
     const blockImgs = sameBlock && showImages ? (internal?.images ?? null) : null;
     // Quy ước số của khối NGOÀI (GRID-01); khối chép trong lưới luôn đọc số thô.
     const quDan = internal ? null : suyQuyUocSo(rows, (c) => FIELDS[startCol + c] === "unitPrice");
+    // Khối NGOÀI (Excel/Sheets) chép theo cột ĐANG HIỆN — có Thành Tiền ngay sau Đơn Giá, cột mà FIELDS
+    // (cột nhập) không có. Ghép theo thứ tự hiển thị đó khi cột ở vị trí TT đúng là SL × ĐG (× Ngày):
+    // ô TT bị bỏ (ô tính), Ghi Chú vào đúng Ghi Chú — không rơi sang Ghi chú nội bộ (soát toàn diện L12).
+    let vaiNgoai: string[] | null = null;
+    if (!internal && !ghepTheoTen) {
+      const hienThi = FIELDS.flatMap((f) => (f === "unitPrice" ? [f, "_amount"] : [f]));
+      const vs = hienThi.indexOf(FIELDS[startCol]);
+      const vai = Array.from({ length: Math.max(...rows.map((r) => r.length)) }, (_, c) => hienThi[vs + c] ?? "");
+      if (vs >= 0 && vai.includes("_amount") && khopCotThanhTien(rows, vai, quDan)) vaiNgoai = vai;
+    }
     // Khối tràn đáy bảng → nới bảng ĐỦ hàng TRƯỚC khi dán ô nào (soát toàn diện L8). shiftFormulaRefs
     // chặn biên theo items.length; nới dần từng hàng thì công thức ở hàng đầu khối trỏ xuống hàng SẮP
     // dán (copy A "=E2*2" + B, dán vào hàng cuối) bị coi là ra ngoài bảng và kẹt "=E2*2" — dù dán xong
@@ -1419,7 +1429,7 @@ function GridTableInner(props: GridTableProps) {
         // Ghép theo vị trí thì Đơn Giá của mẫu này rơi vào Ghi Chú của mẫu kia. Trường đích không
         // có (vd Chi Tiết) thì bỏ ô đó, phần còn lại vẫn vào đúng chỗ.
         const fSrcName = ghepTheoTen ? fNguon?.[c] : null;
-        const f = fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : FIELDS[startCol + c];
+        const f = fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : vaiNgoai ? (vaiNgoai[c] || null) : FIELDS[startCol + c];
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
         { const ci = FIELDS.indexOf(f); if (ci < cotDau) cotDau = ci; if (ci > cotCuoi) cotCuoi = ci; }
         // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
@@ -1435,9 +1445,9 @@ function GridTableInner(props: GridTableProps) {
         pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quGoc(r, c) ?? quDan, moHo);
       });
     });
-    // Vùng đích: ghép theo tên thì là các cột thật sự được ghi, còn lại tính theo số cột của khối.
-    const dc0 = ghepTheoTen && cotCuoi >= 0 ? cotDau : startCol;
-    const dc1 = ghepTheoTen && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
+    // Vùng đích: ghép theo tên / theo thứ tự hiển thị thì là các cột thật sự được ghi, còn lại tính theo số cột.
+    const dc0 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotDau : startCol;
+    const dc1 = (ghepTheoTen || vaiNgoai) && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token) {
       finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);

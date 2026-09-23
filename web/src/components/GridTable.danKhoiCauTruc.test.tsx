@@ -128,3 +128,48 @@ describe("L14 — chép Hạng Mục → Ghi Chú sang báo giá KHÁC MẪU: gh
     expect([items[0].unitPrice, items[1].unitPrice]).toEqual([7, 1]);
   });
 });
+
+describe("L12 — khối từ Excel có cột Thành Tiền (giữa Đơn Giá và Ghi Chú) không làm lệch Ghi Chú", () => {
+  it("dán Hạng Mục → Ghi Chú (7 ô, có TT) vào Hạng Mục: Ghi Chú đúng, TT bị bỏ (ô tính)", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true, internalNote: true });
+    vao(o(0, "name"));
+    dan("Hallway 2m75W\tPP in KTS\tm2\t5,6\t95.000\t532.000\tgiao 18/9");
+    const x = items[0];
+    expect({ n: x.name, d: x.detail, u: x.unit, q: x.quantity, p: x.unitPrice }).toEqual({ n: "Hallway 2m75W", d: "PP in KTS", u: "m2", q: 5.6, p: 95000 });
+    expect(x.notes, "Thành Tiền rơi vào Ghi Chú").toBe("giao 18/9");
+    expect(x.internalNote ?? "", "Ghi chú thật rơi vào Ghi chú NỘI BỘ (không xuất Excel)").toBe("");
+  });
+
+  it("cột Ghi chú nội bộ TẮT: ghi chú thật không bị bỏ mất", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true });
+    vao(o(0, "name"));
+    dan("Hallway 2m75W\tPP in KTS\tm2\t5,6\t95.000\t532.000\tgiao 18/9");
+    expect(items[0].notes).toBe("giao 18/9");
+  });
+
+  it("dán SL | ĐG | TT | Ghi chú (nhiều dòng) vào ô SL", () => {
+    const items = [mk({ name: "A" }), mk({ name: "B" })];
+    const o = moLuoi(items, { internalNote: true });
+    vao(o(0, "quantity"));
+    dan("2\t150.000\t300.000\tghi A\r\n3\t10.000\t30.000\tghi B\r\n");
+    expect(items.map((x) => [x.quantity, x.unitPrice, x.notes, x.internalNote ?? ""])).toEqual([[2, 150000, "ghi A", ""], [3, 10000, "ghi B", ""]]);
+  });
+
+  it("khối KHÔNG có cột TT (6 ô) vẫn ghép theo vị trí như cũ", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true, internalNote: true });
+    vao(o(0, "name"));
+    dan("Hallway\tPP in KTS\tm2\t5,6\t95.000\tgiao 18/9");
+    expect([items[0].unitPrice, items[0].notes]).toEqual([95000, "giao 18/9"]);
+  });
+
+  it("ô ở vị trí TT KHÔNG khớp SL × ĐG (vd hai cột ghi chú) → không đoán, giữ theo vị trí", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true, internalNote: true });
+    vao(o(0, "name"));
+    dan("Hallway\tPP\tm2\t5,6\t95.000\t12\tnội bộ");
+    expect([items[0].notes, items[0].internalNote]).toEqual(["12", "nội bộ"]);
+  });
+});

@@ -242,6 +242,35 @@ export function soMoHoNghin(s: string): boolean {
   return /^[1-9]\d{0,2}[.,]\d{3}$/.test(loiSo(s));
 }
 
+// ── KHỐI NGOÀI CÓ CỘT THÀNH TIỀN? (soát toàn diện L12) ────────────────────────────────────────
+// Lưới và file Excel xuất ra đều hiện Thành Tiền GIỮA Đơn Giá và Ghi Chú, nhưng cột này không nhập
+// được nên không nằm trong danh sách cột dán. Người dùng bôi Hạng Mục → Ghi Chú trên file báo giá rồi
+// dán: ghép theo vị trí đẩy Thành Tiền vào Ghi Chú, Ghi Chú thật sang Ghi chú NỘI BỘ (không xuất Excel)
+// hoặc mất hẳn. `roles` là vai trò từng cột của khối KHI COI một cột là "_amount". Chỉ nhận khi đa số
+// hàng có số ở cột đó khớp SL × ĐG (× Ngày) — không chắc thì nơi gọi giữ ghép theo vị trí như cũ.
+export function khopCotThanhTien(matrix: string[][], roles: string[], qu: QuyUocSo | null = null): boolean {
+  const iA = roles.indexOf("_amount"), iQ = roles.indexOf("quantity"), iP = roles.indexOf("unitPrice"), iD = roles.indexOf("days");
+  if (iA < 0 || iQ < 0 || iP < 0) return false;
+  const soDo = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+  const soTien = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
+  const laSo = (v: string) => /\d/.test(v) && /^[-(]?[\d.,\s]+\)?\s*[₫đ$]?$/i.test(v.trim());
+  let xet = 0, khop = 0;
+  for (const row of matrix) {
+    const a = String(row[iA] ?? "").trim(), q = String(row[iQ] ?? "").trim(), p = String(row[iP] ?? "").trim();
+    const d = iD >= 0 ? String(row[iD] ?? "").trim() : "";
+    if (!laSo(a)) continue;            // ô trống / chữ / công thức ở cột TT → hàng này không phân định được
+    const tt = soTien(a); if (!tt) continue;
+    xet++;
+    if (!laSo(q) || !laSo(p) || (d && !laSo(d))) continue;
+    const sl = soDo(q), gia = soTien(p), ngay = d ? soDo(d) || 1 : 1;
+    // Thành Tiền của app nhân SL đã làm tròn 1 số lẻ (qtyRound) — nhận cả hai cách tính.
+    const sl1 = Math.round(sl * 10) / 10;
+    const lech = Math.max(2, Math.abs(tt) * 0.005);
+    if (Math.abs(sl * ngay * gia - tt) <= lech || Math.abs(sl1 * ngay * gia - tt) <= lech) khop++;
+  }
+  return khop > 0 && khop * 2 > xet;
+}
+
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
 export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
