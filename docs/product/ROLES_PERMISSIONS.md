@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 140 endpoint
+# Ma trận phân quyền — toàn bộ 141 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -196,7 +196,7 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 | GET | `/analytics/overview` · `/funnel` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | — | $ | AUTH-006 | **VÁ** |
 | GET | `/analytics/revenue-by-day` · `/top-sales` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `seesAllQuotes()` | — | $ | AUTH-006 | **VÁ** |
 
-## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (2) · `/api/quotes/import-excel` (1)
+## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (3) · `/api/quotes/import-excel` (1)
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
@@ -212,7 +212,8 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 | POST | `/stream/presence` | ✓ | — | own | `canOnQuote(read)` | **gửi có địa chỉ**, không phát tán toàn hệ thống | PII | — | **VÁ** |
 | GET | `/export/:id.xlsx` · `:id.pdf` | ✓ | `quote:export` | all/own | `canOnQuote(read)` | trần 100 sheet / 20k dòng · limiter 30/ph · `no-store` | $ | — | OK |
 | POST | `/quotes/:id/export` (async) | ✓ | `quote:export` | all/own | `canOnQuote(read)` | — | $ | — | OK |
-| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** `quote:read:all` | **chỉ mở queue `export`** ³ | $ | — | OK |
+| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** (`quote:read:all` **+** `quote:export`) | **chỉ mở queue `export`** ³ · `url` trả về là đường cùng origin `…/file` | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
+| GET | `/jobs/:queue/:id/file` | ✓ | — | own | **cùng hàm gác** với dòng trên (`layJobXuat`) | chỉ khoá `exports/…` · stream từ kho qua app (kho không lộ ra Internet) | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
 | POST | `/quotes/import-excel` | ✓ | `quote:create` | own | `canOnQuote(update)` nếu có `quoteId` | chặn `account_hn` · terminal → 409 · magic bytes · limiter 12/ph | — | `excelImport.test.js` | OK |
 
 ² Danh bạ nhân sự **vẫn là kho dùng chung khi GHI** cho mọi tài khoản Account thật, nhưng phạm vi ghi

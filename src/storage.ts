@@ -223,6 +223,28 @@ export async function getObjectBytes(key: string, maxBytes: number, bucket = con
   }
 }
 
+/**
+ * Mở object thành LUỒNG để ứng dụng tự phát cho trình duyệt (proxy tải), không kéo cả file vào RAM.
+ *
+ * Vì sao cần: URL đã ký của `presignDownload` mang host của S3_ENDPOINT — ở production là
+ * `http://minio:9000`, tên chỉ phân giải được trong mạng docker. Trình duyệt người dùng không mở
+ * được nó (RT-02/FILE-08). Proxy qua app giữ MinIO đóng kín, và dùng được cookie phiên để gác quyền.
+ *
+ * null khi chưa cấu hình kho hoặc object không tồn tại; lỗi khác (kho chết, hết giờ) ném ra.
+ */
+export async function getObjectStream(key: string, bucket = config.S3_BUCKET): Promise<{ body: NodeJS.ReadableStream; contentType: string; contentLength: number | undefined } | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const r = await c.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!r.Body) return null;
+    return { body: r.Body as unknown as NodeJS.ReadableStream, contentType: r.ContentType || "", contentLength: r.ContentLength == null ? undefined : Number(r.ContentLength) };
+  } catch (e: any) {
+    if (e?.name === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404) return null;
+    throw e;
+  }
+}
+
 /** Đọc N byte ĐẦU của object — đủ để nhận dạng magic bytes mà không kéo cả file về. */
 export async function getObjectHeadBytes(key: string, n = 16, bucket = config.S3_BUCKET): Promise<Buffer | null> {
   const c = getClient();

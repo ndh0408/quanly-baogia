@@ -571,7 +571,7 @@ export const api = {
   jobStatus: (queue: string, id: string) =>
     req<{
       id: string; state: string; progress: unknown;
-      returnvalue: { url?: string; key?: string; size?: number } | null;
+      returnvalue: { url?: string; key?: string; size?: number; filename?: string } | null;
       failedReason: string | null;
     }>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`),
   versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),
