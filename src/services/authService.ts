@@ -188,7 +188,22 @@ export function sendPasswordReset(req: Request) {
     //                       y hệt hành vi trước 2026-09-07.
     // Không cần migration: tín hiệu có sẵn, không nhầm chiều, và giữ nguyên ca đã vá (tài khoản mời
     // — kể cả acceptInvite dở dang do đổi ý — luôn có `passwordChangedAt: null` cho tới khi kích hoạt).
-    if (!user.active && user.passwordChangedAt) return;
+    //
+    // AUTH-01 (audit 2026-09-23): `passwordChangedAt` MỘT MÌNH KHÔNG ĐỦ. Cột này NULL ở cả những tài
+    // khoản ĐÃ dùng hệ thống thật: mọi hàng có từ trước migration 20260811160000 (cố ý để NULL) mà
+    // chưa đổi mật khẩu, tài khoản tạo bằng `createUser` trước bản vá cùng ngày, admin seed. Khoá một
+    // người thuộc nhóm đó rồi họ bấm "Quên mật khẩu" là họ tự mở lại được — đúng lỗ vừa kể ở trên.
+    // Nên ghép hai tín hiệu:
+    //   · ĐÃ TỪNG KÍCH HOẠT = passwordChangedAt HOẶC lastLoginAt (lastLoginAt chỉ được ghi ở nhánh
+    //     đăng nhập THÀNH CÔNG, authCore.ts — người được mời chưa kích hoạt không thể có nó);
+    //   · ĐANG CHỜ LỜI MỜI = còn inviteTokenHash hoặc inviteExpiresAt. Lệnh khoá ở updateUser LUÔN
+    //     đốt cả hai, và không job nào dọn lời mời hết hạn, nên tài khoản khoá mà hai cột đều trống
+    //     là tài khoản bị admin khoá — kể cả khi người đó chưa đăng nhập lần nào (tạo tay rồi khoá,
+    //     hoặc GDPR đã đưa lastLoginAt về null).
+    // Chỉ ca "khoá + chưa từng kích hoạt + đang chờ lời mời" mới được cấp token — đúng ca ngõ cụt đã vá.
+    const daTungKichHoat = !!(user.passwordChangedAt || user.lastLoginAt);
+    const dangChoMoi = !!(user.inviteTokenHash || user.inviteExpiresAt);
+    if (!user.active && (daTungKichHoat || !dangChoMoi)) return;
     const chuaKichHoat = !user.active;
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
@@ -253,6 +268,11 @@ export async function acceptInvite(req: Request) {
   const { token, displayName, phone, title, senderName, password, mfaToken } = req.body;
   const user = await findInvitee(token);
   if (!user) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
+  // CHỐT LỚP HAI (AUTH-01): tài khoản đang KHOÁ mà đã từng kích hoạt thì không token nào được mở
+  // lại nó — kể cả token còn hạn phát ra theo lỗ cũ của sendPasswordReset trước bản vá. Trả CÙNG
+  // câu 404 như token sai để không lộ trạng thái khoá. Đặt TRƯỚC cổng MFA: không cho người bị khoá
+  // dùng đường này làm máy thử mã TOTP.
+  if (!user.active && (user.passwordChangedAt || user.lastLoginAt)) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
 
   // CỔNG MFA cho đường ĐẶT LẠI MẬT KHẨU.
   //

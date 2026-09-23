@@ -213,6 +213,10 @@ export async function createUser(req: Request) {
     data: {
       username,
       passwordHash: await bcrypt.hash(password, config.BCRYPT_COST),
+      // Admin đặt mật khẩu THẬT cho tài khoản này — đóng mốc như mọi đường đặt mật khẩu khác. Thiếu
+      // mốc thì tài khoản rơi vào nhóm `passwordChangedAt IS NULL`, nhóm mà sendPasswordReset từng
+      // hiểu là "chưa từng kích hoạt" (AUTH-01). Hàng MỚI nên không có phiên cũ nào bị đá.
+      passwordChangedAt: new Date(),
       displayName,
       role,
       phone: phone || null,
