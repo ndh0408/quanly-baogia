@@ -247,7 +247,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       //     "Backdrop: / . KT: 14mW x 5mH / . Khung sắt…").
       // Cấu hình cũ đặt `removeDetail: true` + bóp `D: 10` rồi gộp vào Hạng Mục, tức xoá đúng
       // cột kể nội dung của mẫu. Và nó xoá THẬT dữ liệu người dùng đã có: đường nhập Excel
-      // (`src/excelImport.ts:493`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
+      // (`src/excelImport.ts`, dòng `it.detail = textAt(r, "detail")`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
       // 64 hạng mục đang giữ nội dung Chi Tiết — nên file Colorfull gửi sang CÓ cột đó, app lưu
       // lại, rồi trả về cho khách một file MẤT cột đó.
       //
