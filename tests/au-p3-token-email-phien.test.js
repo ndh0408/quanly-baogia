@@ -121,16 +121,54 @@ describe.runIf(dbAvailable)("AUTH-05/06/07", () => {
     expect(r.status, "token đặt-lại sống sót qua lần đổi mật khẩu").toBe(404);
   }, 60_000);
 
-  it("AUTH-06: admin đặt lại mật khẩu tài khoản ĐÃ kích hoạt → đốt token; tài khoản CHƯA kích hoạt giữ lời mời", async () => {
+  // Soát chéo auth#6 (AUTH-01 × AUTH-06): bản trước của ca này cho `PUT {password}` lên tài khoản
+  // CHƯA kích hoạt trả 200 rồi chỉ kiểm `inviteTokenHash` còn nguyên — xanh mà không gác mục đích.
+  // Mục đích là LIÊN KẾT MỜI CÒN DÙNG ĐƯỢC, mà sau lệnh đó thì không: updateUser đóng mốc
+  // `passwordChangedAt`, và chốt lớp hai của acceptInvite (`!active && passwordChangedAt`) trả 404.
+  // Hàng vẫn hiện "Chờ kích hoạt" + nút "Gửi lại lời mời", nhưng mọi liên kết đều chết vĩnh viễn.
+  // Nên nay đi HẾT ĐƯỜNG: đặt mật khẩu lên tài khoản đang chờ phải bị TỪ CHỐI, và lời mời phải còn nhận được.
+  it("AUTH-06: admin đặt lại mật khẩu tài khoản ĐÃ kích hoạt → đốt token; tài khoản CHƯA kích hoạt → 400, lời mời vẫn nhận được", async () => {
     const ad = await taoUser("ad", { role: "admin" });
     const ag = agentWithCsrf(app);
     expect((await ag.post("/api/auth/login").send({ username: ad.username, password: MAT_KHAU })).status).toBe(200);
     const kichHoat = await taoUser("kh", { inviteTokenHash: bam(`a-${TAG}`), inviteExpiresAt: new Date(Date.now() + 3_600_000) });
     const choMoi = await taoUser("cm", { active: false, inviteTokenHash: bam(`b-${TAG}`), inviteExpiresAt: new Date(Date.now() + 3_600_000) });
     expect((await ag.put(`/api/users/${kichHoat.id}`).send({ password: "DatLai123456x" })).status).toBe(200);
-    expect((await ag.put(`/api/users/${choMoi.id}`).send({ password: "DatLai123456x" })).status).toBe(200);
     expect((await prisma.user.findUnique({ where: { id: kichHoat.id }, select: { inviteTokenHash: true } })).inviteTokenHash).toBeNull();
-    expect((await prisma.user.findUnique({ where: { id: choMoi.id }, select: { inviteTokenHash: true } })).inviteTokenHash).toBe(bam(`b-${TAG}`));
+
+    const r = await ag.put(`/api/users/${choMoi.id}`).send({ password: "DatLai123456x" });
+    expect(r.status, "đặt mật khẩu lên tài khoản đang chờ → liên kết mời chết mà hàng vẫn 'Chờ kích hoạt'").toBe(400);
+    expect(r.body.error).toMatch(/Gửi lại lời mời/);
+    const sau = await prisma.user.findUnique({ where: { id: choMoi.id }, select: { inviteTokenHash: true, passwordChangedAt: true, active: true } });
+    expect(sau.inviteTokenHash).toBe(bam(`b-${TAG}`));
+    expect(sau.passwordChangedAt, "400 mà vẫn đóng mốc = vẫn giết lời mời").toBeNull();
+    const nhan = await agentWithCsrf(app).post("/api/auth/accept-invite").send({ token: `b-${TAG}`, password: "NhanLoiMoi123x" });
+    expect(nhan.status, `liên kết mời của tài khoản đang chờ phải còn dùng được: ${JSON.stringify(nhan.body)}`).toBe(200);
+  }, 60_000);
+
+  it("AUTH-06: MỞ KHOÁ cùng lúc đặt mật khẩu cho tài khoản đang chờ → 200, tài khoản dùng được, lời mời bị đốt", async () => {
+    const ad = await taoUser("ad2", { role: "admin" });
+    const ag = agentWithCsrf(app);
+    expect((await ag.post("/api/auth/login").send({ username: ad.username, password: MAT_KHAU })).status).toBe(200);
+    const choMoi = await taoUser("cm2", { active: false, inviteTokenHash: bam(`c-${TAG}`), inviteExpiresAt: new Date(Date.now() + 3_600_000) });
+    expect((await ag.put(`/api/users/${choMoi.id}`).send({ active: true, password: "DatLai123456x" })).status).toBe(200);
+    const sau = await prisma.user.findUnique({ where: { id: choMoi.id }, select: { inviteTokenHash: true, active: true } });
+    expect(sau.active).toBe(true);
+    expect(sau.inviteTokenHash, "admin đã giao mật khẩu — token đặt-lại còn sống là cửa thứ hai vào tài khoản").toBeNull();
+    expect((await agentWithCsrf(app).post("/api/auth/login").send({ username: choMoi.username, password: "DatLai123456x" })).status).toBe(200);
+  }, 60_000);
+
+  it("AUTH-06: 'Gửi lại lời mời' cho tài khoản bị khoá ĐÃ TỪNG đăng nhập → 400, không phát liên kết chắc chắn 404", async () => {
+    const ad = await taoUser("ad3", { role: "admin" });
+    const ag = agentWithCsrf(app);
+    expect((await ag.post("/api/auth/login").send({ username: ad.username, password: MAT_KHAU })).status).toBe(200);
+    const khoa = await taoUser("kd", { active: false, email: `${TAG}.kd@example.vn`, lastLoginAt: new Date(Date.now() - 86_400_000) });
+    const r = await ag.post(`/api/users/${khoa.id}/resend-invite`);
+    expect(r.status, `resendInvite báo emailSent trong khi acceptInvite sẽ 404: ${JSON.stringify(r.body)}`).toBe(400);
+    expect((await prisma.user.findUnique({ where: { id: khoa.id }, select: { inviteTokenHash: true } })).inviteTokenHash).toBeNull();
+    // Đối chứng: tài khoản đang chờ THẬT (chưa từng kích hoạt) vẫn gửi lại được.
+    const cho = await taoUser("cm3", { active: false, email: `${TAG}.cm3@example.vn`, inviteTokenHash: bam(`d-${TAG}`), inviteExpiresAt: new Date(Date.now() + 3_600_000) });
+    expect((await ag.post(`/api/users/${cho.id}/resend-invite`)).status).toBe(200);
   }, 60_000);
 
   it("AUTH-07: phiên ẩn danh của /api/csrf-token sống 1 giờ; sau đăng nhập về 7 ngày", async () => {

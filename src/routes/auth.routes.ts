@@ -139,22 +139,36 @@ const tokenLimiter = createLimiter("auth-token", {
   message: { error: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút" },
 });
 
+// ĐƯỜNG CẤP PHIÊN COOKIE ĐÒI PHIÊN THẬT (HTTP-11, soát chéo auth#7).
+//
+// Bearer không kèm cookie (khi JWT_API_ENABLED bật) → cổng phiên ở src/app.ts bỏ qua middleware
+// phiên → không có `req.session.regenerate` → establishSession ném. Chặn bằng MỘT middleware dùng
+// chung, và ĐẶT NÓ TRƯỚC MỌI LIMITER:
+//   · /login: `loginRequestWasSuccessful` chỉ tha status < 400, nên một chốt nằm SAU limiter (như bản
+//     trước, trong handler) vẫn tính mỗi lần 400 là một lần đăng nhập SAI. Client cấu hình sai lặp
+//     ~10 lần là khoá /login LẪN /token của chính username đó 15 phút (hai limiter dùng chung).
+//   · /accept-invite: phải chặn TRƯỚC svc.acceptInvite — hàm đó ghi CSDL (kích hoạt, đổi mật khẩu,
+//     tiêu token mời) rồi mới tới establishSession. Bản trước: token mời mất, client nhận 500.
+// /change-password KHÔNG dùng chốt này: đổi mật khẩu là tính năng hợp lệ của client Bearer, và
+// authService.changePassword có nhánh riêng cho nó (trả `reauth: true`).
+function canPhienThat(req: Request, res: Response, next: () => void) {
+  if (!svc.coPhienThat(req)) {
+    return res.status(400).json({ error: `Client dùng Bearer phải xác thực bằng POST /api/auth/token, không phải ${req.baseUrl}${req.path}`, code: "dung_auth_token" });
+  }
+  next();
+}
+
 // Đăng nhập/token KHÔNG bê được hết vào service: body lỗi cần thêm cờ `mfaRequired` (khác shape
 // errorHandler) → route giữ phần map kết quả → response; credentials/lockout đã ở authCore.ts.
 router.post(
   "/login",
+  canPhienThat,
   loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
   asyncHandler(async (req: Request, res: Response) => {
     const { username, password, mfaToken } = req.body;
     const ip = clientIp(req);
-    // Bearer không kèm cookie → không có phiên thật để đăng nhập vào; establishSession sẽ gọi
-    // `req.session.regenerate` không tồn tại → TypeError → 500 sau khi mật khẩu ĐÃ đúng (HTTP-11).
-    // Chặn TRƯỚC khi kiểm mật khẩu để không tiêu lượt đăng nhập / không ghi login.failed.
-    if (!req.session || typeof req.session.regenerate !== "function") {
-      return res.status(400).json({ error: "Client dùng Bearer phải xác thực bằng POST /api/auth/token, không phải /api/auth/login", code: "dung_auth_token" });
-    }
 
     const result = await authenticateCredentials(req, { username, password, mfaToken, flow: "login" });
     if (!result.ok) {
@@ -368,6 +382,7 @@ router.get("/invite/:token", tokenLimiter, asyncHandler(async (req: Request, res
 // Accept an invite: set own password + phone, activate, then log in.
 router.post(
   "/accept-invite",
+  canPhienThat,
   acceptInviteIpLimiter,
   acceptInviteLimiter,
   validate({ body: AcceptInviteSchema }),

@@ -18,9 +18,27 @@ import { sendEmail, brandedEmailHtml, mienNguoiNhan } from "../email.js";
 
 type SessionSeed = { id: number; username: string; role: string; displayName: string; permissions?: string[]; canSign?: boolean };
 
+/**
+ * Request này có PHIÊN THẬT của express-session (xoay/lưu được) không?
+ *
+ * KHÔNG, khi JWT_API_ENABLED bật và request mang Bearer mà không kèm cookie `qly.sid`: cổng phiên ở
+ * src/app.ts bỏ qua middleware phiên, nên `req.session` hoặc vắng mặt hoặc chỉ là object trần do
+ * `bearerAuth` dựng — không có `regenerate`/`save`. Mọi đường CẤP PHIÊN phải hỏi câu này TRƯỚC khi
+ * ghi CSDL (soát chéo auth#7): hỏi muộn là đã đổi mật khẩu / tiêu token mời rồi mới báo lỗi.
+ */
+export function coPhienThat(req: Request): boolean {
+  return !!req.session && typeof req.session.regenerate === "function";
+}
+
 // Thiết lập session sau xác thực thành công: regenerate (chống session fixation) → gán → save.
-// Dùng chung cho /login và /accept-invite.
+// Dùng chung cho /login, /change-password và /accept-invite.
 export async function establishSession(req: Request, user: SessionSeed) {
+  // Lưới cuối (soát chéo auth#7): không có phiên thật thì `req.session.regenerate(...)` là TypeError
+  // → 500 "Lỗi server". Ném 400 có mã để client biết mình đi nhầm đường. Đây KHÔNG thay được việc
+  // kiểm sớm — tới được đây thì nơi gọi thường đã ghi CSDL xong (xem coPhienThat).
+  if (!coPhienThat(req)) {
+    throw Object.assign(httpError(400, "Client dùng Bearer phải xác thực bằng POST /api/auth/token — đường này cấp phiên cookie"), { code: "dung_auth_token" });
+  }
   await new Promise<void>((resolve, reject) =>
     req.session.regenerate((err: unknown) => (err ? reject(err) : resolve()))
   );
@@ -120,6 +138,18 @@ export async function changePassword(req: Request) {
   });
   // Thu hồi mọi refresh token — chúng sống độc lập với cookie nên không tự chết theo phiên.
   await revokeAllForUser(user.id);
+
+  // CLIENT BEARER (không cookie) — soát chéo auth#7. Không có phiên nào để xoay: bản trước vẫn gọi
+  // establishSession, ném TypeError → 500 SAU KHI mật khẩu đã đổi và refresh token đã bị thu hồi.
+  // Client tin là đổi thất bại, rồi thử lại bằng mật khẩu cũ. Đổi mật khẩu là tính năng hợp lệ của
+  // client di động nên không chặn: trả `reauth: true` — access token đang cầm đã chết theo
+  // passwordChangedAt (bearerAuth so iat), client lấy cặp mới qua POST /api/auth/token.
+  // Không có sid "của mình" để giữ, nên dọn MỌI phiên cookie của tài khoản.
+  if (!coPhienThat(req)) {
+    await destroyAllSessions(user.id);
+    await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
+    return { ok: true, reauth: true };
+  }
 
   // XOAY ĐỊNH DANH PHIÊN của chính người vừa đổi mật khẩu.
   //

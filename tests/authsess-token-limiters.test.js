@@ -46,6 +46,13 @@ describe("endpoint token/invite phải nằm sau một limiter riêng", () => {
     const { default: authRoutes } = await import("../src/routes/auth.routes.js");
     app = express();
     app.use(express.json());
+    // Phiên GIẢ có `regenerate` cho request KHÔNG mang Bearer — đứng thay middleware phiên của app
+    // thật. Thiếu nó thì mọi /login ở đây rơi vào chốt `canPhienThat` (đứng TRƯỚC limiter) và ca
+    // "limiter login không dùng chung bộ đếm" bên dưới xanh mà không hề đi qua limiter nào.
+    app.use((req, _res, next) => {
+      if (!req.headers.authorization) req.session = { regenerate: (cb) => cb(), save: (cb) => cb() };
+      next();
+    });
     app.use("/api/auth", authRoutes);
     // errorHandler tối giản: chỉ để lỗi CSDL không thành throw chưa bắt làm nhiễu.
     app.use((err, _req, res, _next) => res.status(err?.status || 500).json({ error: String(err?.message || err) }));
@@ -73,5 +80,19 @@ describe("endpoint token/invite phải nằm sau một limiter riêng", () => {
   it("limiter của login KHÔNG dùng chung bộ đếm với nhóm token (mỗi limiter một kho riêng)", async () => {
     const r = await request(app).post("/api/auth/login").send({ username: "khong-ton-tai", password: "sai" });
     expect(r.status).not.toBe(429);
+  });
+
+  // Soát chéo auth#7: chốt 400 "dung_auth_token" của /login (HTTP-11) từng nằm TRONG handler, tức
+  // SAU loginIpLimiter + loginLimiter — mà `loginRequestWasSuccessful` chỉ tha status < 400, nên mỗi
+  // lần 400 bị tính là một lần đăng nhập SAI. Client cấu hình sai lặp /login ~10 lần là khoá /login lẫn
+  // /token của chính username đó 15 phút (hai limiter dùng chung với /token). App ở đây không mount
+  // middleware phiên (chỉ phiên giả cho request KHÔNG Bearer), nên ở đây `req.session` vắng mặt y
+  // như request Bearer không cookie ở app thật.
+  it("/login không có phiên thật → 400 'dung_auth_token' mà KHÔNG tiêu lượt của limiter đăng nhập", async () => {
+    for (let i = 0; i < 4; i++) {
+      const r = await request(app).post("/api/auth/login").set("Authorization", "Bearer x").send({ username: "bearer-lap", password: "Dung1234!a" });
+      expect(r.status, `lần ${i + 1}: ${JSON.stringify(r.body)}`).toBe(400);
+      expect(r.body.code).toBe("dung_auth_token");
+    }
   });
 });

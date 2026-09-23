@@ -10,6 +10,7 @@ import { reloadRoleOverrides, napRoleOverridesKhiKhoiDong } from "./roleOverride
 import { ensureBucket, isStorageEnabled } from "./storage.js";
 import { closeAllSse } from "./sse.js";
 import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
+import { ganTatMayEm } from "./tatMayHttp.js";
 
 initSentry();
 
@@ -85,6 +86,9 @@ const KEEP_ALIVE_TIMEOUT_MS = 95_000;
 const HEADERS_TIMEOUT_MS = 96_000;
 server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
 server.headersTimeout = HEADERS_TIMEOUT_MS;
+// Keep-alive 95s dài hơn hạn tắt 70s: `server.close()` trần sẽ để socket của request đang dở sống
+// qua hạn cưỡng bức ở MỌI lượt deploy có người đang dùng. Tắt qua đường êm — src/tatMayHttp.ts.
+const tatMayHttp = ganTatMayEm(server);
 
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
@@ -95,7 +99,7 @@ function shutdown(sig: string) {
   const n = closeAllSse();
   if (n) logger.info({ sse: n }, "đã đóng kết nối SSE");
 
-  server.close(async () => {
+  tatMayHttp.tat(async () => {
     await prisma.$disconnect().catch(() => {});
     // Pool dò sẵn sàng KHÔNG đi qua Prisma nên `$disconnect()` không đụng tới nó. Bỏ sót dòng này
     // là để lại một kết nối Postgres mở sau mỗi lần tắt — vô hại trên một VM, nhưng trên cụm thì

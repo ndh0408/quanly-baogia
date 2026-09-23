@@ -13,6 +13,7 @@ import request from "supertest";
 vi.hoisted(() => { process.env.JWT_API_ENABLED = "true"; });
 import session from "express-session";
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 
 const { prisma } = await import("../src/db.js");
 const { conObjectPhien } = await import("../src/app.js");
@@ -74,7 +75,8 @@ describe.runIf(dbAvailable)("HTTP-11 — Bearer không kèm cookie gọi đườ
   });
   afterAll(async () => {
     await prisma.loginAttempt.deleteMany({ where: { username: { startsWith: TAG } } }).catch(() => {});
-    await prisma.auditEvent.deleteMany({ where: { actorId: u?.id } }).catch(() => {});
+    const ids = (await prisma.user.findMany({ where: { username: { startsWith: TAG } }, select: { id: true } })).map((x) => x.id);
+    await prisma.auditEvent.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { resourceId: { in: ids.map(String) } }] } }).catch(() => {});
     await prisma.user.deleteMany({ where: { username: { startsWith: TAG } }, hardDelete: true }).catch(() => {});
   });
 
@@ -82,6 +84,42 @@ describe.runIf(dbAvailable)("HTTP-11 — Bearer không kèm cookie gọi đườ
     const r = await request(app).post("/api/auth/login").set("Authorization", "Bearer x").send({ username: u.username, password: PWD });
     expect(r.status, JSON.stringify(r.body)).toBe(400);
     expect(r.body.error).toMatch(/\/api\/auth\/token/);
+  });
+
+  // ── Soát chéo auth#7: HTTP-11 chỉ vá /login và /csrf-token ─────────────────────────────────
+  // Hai đường cấp phiên còn lại cùng gốc lỗi (establishSession gọi `req.session.regenerate` không
+  // tồn tại) nhưng TỆ HƠN /login: chúng GHI CSDL trước khi tới establishSession. Nên mỗi ca kiểm cả
+  // status LẪN CSDL — status nói một đằng, CSDL một nẻo là đúng cái lỗi đang gác.
+  it("POST /api/auth/change-password qua Bearer (không cookie) → 200 reauth, CSDL khớp status, không 500 sau khi đã đổi", async () => {
+    const MOI = "DoiQuaBearer123x";
+    const v = await prisma.user.create({ data: { username: `${TAG}-cp`, displayName: TAG, role: "manager", passwordHash: await bcrypt.hash(PWD, 4) } });
+    const tk = await request(app).post("/api/auth/token").send({ username: v.username, password: PWD });
+    expect(tk.status, JSON.stringify(tk.body)).toBe(200);
+    const r = await request(app).post("/api/auth/change-password").set("Authorization", `Bearer ${tk.body.accessToken}`).send({ oldPassword: PWD, newPassword: MOI });
+    const daDoi = await bcrypt.compare(MOI, (await prisma.user.findUnique({ where: { id: v.id }, select: { passwordHash: true } })).passwordHash);
+    expect(daDoi, "mật khẩu phải đổi thật khi trả 200").toBe(true);
+    expect(r.status, `CSDL đã đổi mật khẩu mà client nhận ${r.status}: ${JSON.stringify(r.body)}`).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, reauth: true });
+    expect(r.headers["set-cookie"], "client Bearer không được nhận cookie phiên").toBeUndefined();
+    // Chứng thư cũ chết theo passwordChangedAt / revokeAllForUser — client phải lấy cặp mới bằng mật khẩu mới.
+    expect((await request(app).get("/api/auth/me").set("Authorization", `Bearer ${tk.body.accessToken}`)).status).toBe(401);
+    expect((await request(app).post("/api/auth/token/refresh").send({ refreshToken: tk.body.refreshToken })).status).toBe(401);
+    expect((await request(app).post("/api/auth/token").send({ username: v.username, password: MOI })).status).toBe(200);
+  });
+
+  it("POST /api/auth/accept-invite kèm Bearer (không cookie) → 400 TRƯỚC khi tiêu token mời, tài khoản chưa bị kích hoạt", async () => {
+    const token = `tok-${TAG}-ai`;
+    const bam = createHash("sha256").update(token).digest("hex");
+    const w = await prisma.user.create({ data: { username: `${TAG}-ai`, displayName: TAG, role: "manager", active: false, passwordHash: "x", inviteTokenHash: bam, inviteExpiresAt: new Date(Date.now() + 3_600_000) } });
+    const r = await request(app).post("/api/auth/accept-invite").set("Authorization", "Bearer x").send({ token, password: "NhanLoiMoi123x" });
+    const sau = await prisma.user.findUnique({ where: { id: w.id }, select: { inviteTokenHash: true, active: true, passwordChangedAt: true } });
+    expect(sau.inviteTokenHash, `token mời bị tiêu dù client nhận ${r.status}`).toBe(bam);
+    expect(sau.active).toBe(false);
+    expect(sau.passwordChangedAt).toBeNull();
+    expect(r.status, JSON.stringify(r.body)).toBe(400);
+    expect(r.body.code).toBe("dung_auth_token");
+    // Đối chứng: cùng token, đi đường trình duyệt (không Bearer) vẫn nhận được lời mời.
+    expect((await request(app).post("/api/auth/accept-invite").send({ token, password: "NhanLoiMoi123x" })).status).toBe(200);
   });
 
   it("GET /api/csrf-token với Bearer → 400, không 500", async () => {
@@ -96,5 +134,18 @@ describe.runIf(dbAvailable)("HTTP-11 — Bearer không kèm cookie gọi đườ
       const r = await request(app).get("/api/csrf-token").set("Authorization", "Bearer x");
       expect(r.status).toBe(200);
     } finally { config.JWT_API_ENABLED = cu; }
+  });
+});
+
+describe("establishSession không có phiên thật → 400 có mã, không TypeError 500 (soát chéo auth#7)", () => {
+  it("req.session là object trần (bearerAuth) hoặc undefined → ném httpError 400 'dung_auth_token'", async () => {
+    const { establishSession } = await import("../src/services/authService.js");
+    const seed = { id: 1, username: "x", role: "manager", displayName: "x" };
+    for (const req of [{ session: {} }, {}]) {
+      const e = await establishSession(req, seed).then(() => null, (err) => err);
+      expect(e, "phải từ chối").toBeTruthy();
+      expect(e.status, String(e?.message)).toBe(400);
+      expect(e.code).toBe("dung_auth_token");
+    }
   });
 });
