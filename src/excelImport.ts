@@ -460,7 +460,12 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const groupPriceFormula = hasGroupPriceFormula(r);
 
     // Ô Hạng Mục GỘP DỌC và dòng này không phải dòng đầu ô gộp → HÀNG CON (tên nằm ở dòng cha).
-    const merged = !!nameCell?.isMerged && coordNum(nameCell.master?.row, false) < r;
+    // Cũng là hàng con khi Ô STT là ô phụ của vùng gộp dọc từ hàng trên mà ô tên TRỐNG: tệp
+    // Colorfull xuất trước bản sửa L47 có hàng con ở hàng 17–18 chỉ gộp được STT (ô Hạng Mục là
+    // ô trống riêng) — nhận theo ô tên thì ra hạng mục TÊN RỖNG, xuất lại thành STT mới trống.
+    const sttGopDoc = !!sttCell?.isMerged && coordNum(sttCell.master?.row, false) < r;
+    const merged = (!!nameCell?.isMerged && coordNum(nameCell.master?.row, false) < r)
+      || (sttGopDoc && cellText(nameCell?.value).trim() === "");
     let name = merged ? "" : cellText(nameCell?.value).trim();
 
     // Dòng CHỮ TỰ DO chạy ngang cả bảng (mẫu CLF gộp B5:I5 "* Thông tin chương trình: …") — chữ
