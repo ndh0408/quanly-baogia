@@ -204,3 +204,28 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
   });
 });
+
+describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {
+  const info = (name: string): ItemK => ({ ...mk({ name }), kind: "info", days: null } as unknown as ItemK);
+
+  it("dán 'Banner | m2 | 2 | 100.000' lên dòng thông tin: dòng thành hạng mục, 200.000 vào tổng", () => {
+    const items = [info("Chương trình X"), mk({ name: "Standee", unit: "cái", quantity: 1, unitPrice: 50000 })];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("Banner\tm2\t2\t100.000\r\nStandee 2\tcái\t1\t50.000\r\n");
+    expect(items.map((x) => x.kind), "dòng thông tin giữ nguyên → SL/ĐG bị ẩn").toEqual(["item", "item"]);
+    expect([items[0].name, items[0].quantity, items[0].unitPrice]).toEqual(["Banner", 2, 100000]);
+    expect(M.sheetSubtotalGrouped(items, false, false)).toBe(250000);
+    expect(hop0(o).querySelector('tr[data-row="0"] [data-f="unitPrice"]'), "ô Đơn giá không hiện").not.toBeNull();
+  });
+
+  it("dán CHỈ chữ (một cột) lên dòng thông tin: vẫn là dòng thông tin", () => {
+    const items = [info("Chương trình X"), mk({ name: "Standee" })];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("Dòng A\r\nDòng B\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["info:Dòng A", "item:Dòng B"]);
+  });
+});
+/** Bảng chứa một ô — để hỏi ô khác trong cùng lưới sau khi dòng vẽ lại. */
+function hop0(o: (row: number, f: string) => HTMLElement) { return o(0, "name").closest("table")!; }

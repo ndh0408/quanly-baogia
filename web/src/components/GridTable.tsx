@@ -1419,20 +1419,32 @@ function GridTableInner(props: GridTableProps) {
     // dán (copy A "=E2*2" + B, dán vào hàng cuối) bị coi là ra ngoài bảng và kẹt "=E2*2" — dù dán xong
     // hàng đó có thật và Excel cho "=E4*2".
     while (items.length < startRow + rows.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
+    // Trường đích của cột thứ c trong khối.
+    // Khối phủ NGUYÊN HÀNG (bắt đầu từ cột STT) → ghép cột theo TÊN TRƯỜNG, không theo vị trí:
+    // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
+    // Ghép theo vị trí thì Đơn Giá của mẫu này rơi vào Ghi Chú của mẫu kia. Trường đích không
+    // có (vd Chi Tiết) thì bỏ ô đó, phần còn lại vẫn vào đúng chỗ.
+    const truongDich = (c: number): string | null => {
+      const fSrcName = ghepTheoTen ? fNguon?.[c] : null;
+      return fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : vaiNgoai ? (vaiNgoai[c] || null) : (FIELDS[startCol + c] ?? null);
+    };
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       const it = items[ri] as Record<string, unknown>;
       if (kinds && kinds[r]) it.kind = kinds[r];
+      // DÒNG THÔNG TIN chỉ vẽ ô tên và không vào tổng: khối (không mang loại hàng) rơi số/ĐVT/ghi chú vào
+      // nó thì SL/ĐG vừa dán bị ẩn, tiền của dòng lặng lẽ không cộng (soát toàn diện L18). Có dữ liệu
+      // ngoài cột Hạng Mục → dòng thành hạng mục (Ctrl+Z trả lại được); chỉ có chữ ở tên thì vẫn là
+      // dòng thông tin.
+      else if (it.kind === "info" && cells.some((v, c) => { const f = truongDich(c); return !!f && f !== "name" && !RO_FIELDS.has(f) && String(v ?? "").trim() !== ""; })) {
+        it.kind = "item";
+        if (usesDays && it.days == null) it.days = 1;
+      }
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
       if (blockImgs) { const im = blockImgs[r] || []; if (im.length) it.images = [...im]; else delete it.images; }
       cells.forEach((val, c) => {
-        // Khối phủ NGUYÊN HÀNG (bắt đầu từ cột STT) → ghép cột theo TÊN TRƯỜNG, không theo vị trí:
-        // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
-        // Ghép theo vị trí thì Đơn Giá của mẫu này rơi vào Ghi Chú của mẫu kia. Trường đích không
-        // có (vd Chi Tiết) thì bỏ ô đó, phần còn lại vẫn vào đúng chỗ.
-        const fSrcName = ghepTheoTen ? fNguon?.[c] : null;
-        const f = fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : vaiNgoai ? (vaiNgoai[c] || null) : FIELDS[startCol + c];
+        const f = truongDich(c);
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
         { const ci = FIELDS.indexOf(f); if (ci < cotDau) cotDau = ci; if (ci > cotCuoi) cotCuoi = ci; }
         // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
