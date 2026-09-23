@@ -24,6 +24,16 @@ function PageFallback() {
 // CHẶN Ở FRONTEND (defense-in-depth): trang chứa dữ liệu nhạy cảm (Nhân sự/Danh bạ: căn cước, MST,
 // STK…) đã được API gác quyền, nhưng nếu gõ thẳng #/personnel không quyền thì KHÔNG được render page
 // rồi mới lỗi API — hiện thẳng màn "không có quyền". Áp cho MỌI trang nav có `perm`.
+function NotFound() {
+  return (
+    <div className="access-denied">
+      <div className="ad-ico" aria-hidden="true">🧭</div>
+      <h2>Không tìm thấy trang</h2>
+      <p className="muted">Đường dẫn này không tồn tại. Chọn một mục ở menu bên trái.</p>
+    </div>
+  );
+}
+
 function AccessDenied() {
   return (
     <div className="access-denied">
@@ -479,7 +489,10 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />
               : key === "new" ? <AccessDenied />
-              : <PersonnelPage me={me} query={query} onQuery={setQuery} />}
+              : key === "personnel" ? <PersonnelPage me={me} query={query} onQuery={setQuery} />
+              // FE-14: hash lạ (#/abc, gõ sai, link cũ) trước đây rơi vào trang Nhân sự mà KHÔNG qua cổng
+              // quyền (key không có trong NAV → denied=false) → người không có quyền nhân sự thấy lỗi 403.
+              : <NotFound />}
           </main>
         )}
       </div>

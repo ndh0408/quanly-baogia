@@ -177,7 +177,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
         </div>
       </div>
 
-      {pickOpen && <CustomerPicker onClose={() => setPickOpen(false)} onPick={(c) => { setCustomer({ id: c.id, code: c.code, name: c.name || "" }); setPickOpen(false); }} />}
+      {pickOpen && <CustomerPicker onClose={() => setPickOpen(false)} onPick={(c) => { setCustomer({ id: c.id, code: c.code, name: c.name || "" }); setInfo((f) => ({ ...f, toCompany: f.toCompany || c.name || "" })); setPickOpen(false); }} />}   {/* FE-14: chọn mã khách thì điền sẵn "Khách hàng (To)" nếu còn trống */}
     </div>
   );
 }
