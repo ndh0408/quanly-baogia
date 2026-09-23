@@ -92,3 +92,56 @@ describe("L49: hàng chèn dưới hàng nhóm (mang màu nhóm) mà có đủ h
     }
   });
 });
+
+// ── Hồi quy của chính bản sửa trên (phản biện độc lập đo) ───────────────────────────────────────
+// Nhóm CHÍNH đặt nhãn SỐ ("1" — hợp lệ: GridTable ghi "nhãn nhóm A/B/1/2 ngồi trong ô STT") + có ĐVT
+// + SL + có nhóm con, xuất theo mẫu BANNER: app ghi Đơn Giá nhóm cha là `=SUM(G7,G9)` — trỏ cột ĐƠN GIÁ
+// của các nhóm con (src/excel.ts subSectionRows), không phải cột Thành Tiền. hasGroupPriceFormula chưa
+// bao giờ nhận dạng này, nên bản sửa đầu coi dòng là "đủ bốn điều kiện hạng mục" và hạ màu nhóm →
+// "NHÓM A" thành HẠNG MỤC 1.400.000 + các mục con vẫn cộng → tổng 2.800.000 (đúng 1.400.000).
+// ĐÃ ĐO: lệch cả 4 ca (2 mẫu banner × có/không A1); bản trước 5fa78e1 ra section, tổng 1.400.000.
+const MUC_BANNER = (label) => [
+  { kind: "section", name: "NHÓM A", unit: "gói", quantity: 1, ...(label ? { label } : {}) },
+  { kind: "subsection", name: "CGV 1" },
+  { kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000 },
+  { kind: "subsection", name: "CGV 2" },
+  { kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000 },
+];
+
+describe("L49 (hồi quy): nhóm chính bản BANNER nhãn số + ĐVT + SL + nhóm con vẫn là NHÓM", () => {
+  const CA = [];
+  for (const code of ["clofull_banner", "gn_banner"]) for (const boA1 of [false, true]) CA.push([code, boA1]);
+  it.each(CA)("%s · bỏ mã A1=%s", async (code, boA1) => {
+    const { wb, ws, c, hang } = await moTep(code, MUC_BANNER("1"));
+    const r = hang("NHÓM A");
+    // Tiền đề: Đơn Giá nhóm cha trỏ cột ĐƠN GIÁ của nhóm con, dòng đủ STT số + ĐVT + SL.
+    expect(String(ws.getCell(`${c.stt}${r}`).value)).toBe("1");
+    expect(ws.getCell(`${c.unitPrice}${r}`).formula).toMatch(new RegExp(String.raw`^SUM\(${c.unitPrice}\d+,${c.unitPrice}\d+\)$`));
+    if (boA1) ws.getCell("A1").value = null;
+    const sheet = await doc(wb);
+    expect(sheet.items.map((i) => i.kind), "nhóm chính bị hạ thành hạng mục → tiền cộng đôi")
+      .toEqual(["section", "subsection", "item", "subsection", "item"]);
+    expect(sheet.items[0]).toMatchObject({ name: "NHÓM A", label: "1", unitPrice: 0 });
+    expect(sheet.items[0].warn).toBeUndefined();
+    expect(computeSubtotal(sheet)).toBe(500000 + 900000);
+    // Không đổi cách đánh số / mẫu đoán so với cùng tệp để nhãn mặc định "A".
+    const { wb: wbGoc } = await moTep(code, MUC_BANNER(""));
+    if (boA1) wbGoc.worksheets[0].getCell("A1").value = null;
+    const goc = await doc(wbGoc);
+    expect(sheet.numberSubs).toBe(goc.numberSubs);
+    expect(sheet.templateCode).toBe(goc.templateCode);
+  });
+
+  it.each(CA)("%s · bỏ mã A1=%s · nhóm cha có CẢ mục lẻ lẫn nhóm con (=SUM(H..)+SUM(G..,G..))", async (code, boA1) => {
+    const muc = MUC_BANNER("1");
+    muc.splice(1, 0, { kind: "item", name: "Thảm", unit: "m2", quantity: 4, unitPrice: 50000 });
+    const { wb, ws, c, hang } = await moTep(code, muc);
+    const r = hang("NHÓM A");
+    expect(ws.getCell(`${c.unitPrice}${r}`).formula).toMatch(new RegExp(String.raw`^SUM\(${c.amount}\d+:${c.amount}\d+\)\+SUM\(${c.unitPrice}\d+,${c.unitPrice}\d+\)$`));
+    if (boA1) ws.getCell("A1").value = null;
+    const sheet = await doc(wb);
+    expect(sheet.items.map((i) => i.kind)).toEqual(["section", "item", "subsection", "item", "subsection", "item"]);
+    expect(sheet.items[0]).toMatchObject({ name: "NHÓM A", label: "1", unitPrice: 0 });
+    expect(computeSubtotal(sheet)).toBe(200000 + 500000 + 900000);
+  });
+});

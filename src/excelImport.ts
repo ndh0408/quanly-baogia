@@ -546,9 +546,14 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   }
   const qu = suyQuyUocSo(bangChuSo, (c) => c >= 2);
 
-  /** Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG (không phải tổng các dòng dưới) — hình dạng hạng mục. */
+  // Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG — hình dạng hạng mục. "Không thường" = Đơn Giá gom các ô ở
+  // dòng BÊN DƯỚI, tính cả cột ĐƠN GIÁ chứ không chỉ Thành Tiền: nhóm CHÍNH bản BANNER có nhóm con được
+  // app ghi `=SUM(G7,G9)` (Đơn Giá các nhóm con — src/excel.ts subSectionRows), hoặc
+  // `=SUM(H6:H6)+SUM(G7,G9)` khi có cả mục lẻ. Chỉ xét cột Thành Tiền thì nhóm chính nhãn SỐ ("1" — nhãn
+  // tự đặt hợp lệ) + ĐVT + SL bị coi là hạng mục, hạ màu nhóm → tiền cộng đôi (soát toàn diện L49).
+  const priceLetter = colOf.unitPrice ? colLetter(colOf.unitPrice) : "";
   const dangHangMuc = (r: number) => !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"))
-    && !isBlank(cellAt(r, "unitPrice")) && !hasGroupPriceFormula(r);
+    && !isBlank(cellAt(r, "unitPrice")) && !tongCacDongDuoi(r, [amountLetter, priceLetter].filter(Boolean));
 
   // Bản BANNER: nhóm con đánh SỐ (STT số + có tên + KHÔNG ĐVT + có giá) → hàng STT-trống là MỤC.
   // Nền nhóm con chỉ được tính khi dòng KHÔNG mang hình dạng hạng mục: hàng khách chèn dưới nhóm
@@ -591,9 +596,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // Excel "Format Same As Above" → hàng mới mang nền nhóm. Xét màu trước hình dạng là "1 | Hạng mục
     // mới | cái | 2 | 500.000" thành NHÓM: Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới.
     // Chỉ để màu THUA khi đủ cả bốn: STT là số + ĐVT + SL + Đơn Giá thường (không phải tổng các dòng
-    // dưới). Nhóm thật của app không bao giờ đủ bốn: nhóm chính mang chữ A/B, nhóm con thường để
-    // trống STT — trừ nhóm con bản BANNER (đánh số), nên nền nhóm con + banner vẫn để màu thắng
-    // (khách gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp).
+    // dưới — xem dangHangMuc). Nhóm thật của app CÓ THỂ mang STT số (nhãn tự đặt "1"/"2") và có ĐVT +
+    // SL, nhưng khi đó Đơn Giá của nó là công thức gom các dòng dưới (Thành Tiền mục con, hoặc Đơn Giá
+    // nhóm con ở bản BANNER) nên không đủ bốn. Nhóm con bản BANNER (đánh số) thì màu luôn thắng: khách
+    // gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp.
     const mauNhomMaLaHangMuc = (FILL_SECTION.has(fill) || FILL_SUB.has(fill)) && /^\d+$/.test(stt) && dangHangMuc(r)
       && !(FILL_SUB.has(fill) && effectiveNumberSubs);
 
