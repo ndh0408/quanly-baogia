@@ -441,12 +441,18 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.lastRow = lastRow;
   base.stats.rows = bodyRows.length;
 
+  /** Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG (không phải tổng các dòng dưới) — hình dạng hạng mục. */
+  const dangHangMuc = (r: number) => !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"))
+    && !isBlank(cellAt(r, "unitPrice")) && !hasGroupPriceFormula(r);
+
   // Bản BANNER: nhóm con đánh SỐ (STT số + có tên + KHÔNG ĐVT + có giá) → hàng STT-trống là MỤC.
+  // Nền nhóm con chỉ được tính khi dòng KHÔNG mang hình dạng hạng mục: hàng khách chèn dưới nhóm
+  // con ("Format Same As Above") mang nền đó + STT "1" không được lật cách đánh số của CẢ sheet (L49).
   const numberedSub = bodyRows.some((r) => {
     const stt = textAt(r, "_stt"), name = textAt(r, "name");
     if (!/^\d+$/.test(stt) || !name) return false;
     const fill = fillOf(cellAt(r, "name")) || fillOf(cellAt(r, "_stt"));
-    return FILL_SUB.has(fill) || hasGroupPriceFormula(r)
+    return (FILL_SUB.has(fill) && !dangHangMuc(r)) || hasGroupPriceFormula(r)
       || (isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity")) && !isBlank(cellAt(r, "unitPrice")));
   });
   const effectiveNumberSubs = markerCode ? !!TEMPLATE_CONFIGS[markerCode]?.items?.numberSubsections : numberedSub;
@@ -476,13 +482,23 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // nằm ở ô chủ thuộc cột STT. Đây chính là dòng kind="info" của app → trả về đúng dạng đó.
     const bannerText = (!name && stt && stt.length > 12 && !hasUnit && !hasQty && !hasPrice && !hasAmt) ? stt : "";
 
+    // MÀU NHÓM MÀ HÌNH DẠNG HẠNG MỤC (soát toàn diện L49): khách Insert Row ngay dưới hàng nhóm thì
+    // Excel "Format Same As Above" → hàng mới mang nền nhóm. Xét màu trước hình dạng là "1 | Hạng mục
+    // mới | cái | 2 | 500.000" thành NHÓM: Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới.
+    // Chỉ để màu THUA khi đủ cả bốn: STT là số + ĐVT + SL + Đơn Giá thường (không phải tổng các dòng
+    // dưới). Nhóm thật của app không bao giờ đủ bốn: nhóm chính mang chữ A/B, nhóm con thường để
+    // trống STT — trừ nhóm con bản BANNER (đánh số), nên nền nhóm con + banner vẫn để màu thắng
+    // (khách gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp).
+    const mauNhomMaLaHangMuc = (FILL_SECTION.has(fill) || FILL_SUB.has(fill)) && /^\d+$/.test(stt) && dangHangMuc(r)
+      && !(FILL_SUB.has(fill) && effectiveNumberSubs);
+
     const prevKind = raws.length ? raws[raws.length - 1].kind : null;
     let kind: ImportedKind;
     if (r === appBannerRow && appBannerInfo != null) { kind = "info"; name = appBannerInfo; }
     else if (bannerText) { kind = "info"; name = bannerText.replace(/^\*\s*Thông tin chương trình\s*:\s*/i, "").trim(); }
     else if (merged) kind = "sub";
-    else if (FILL_SECTION.has(fill)) kind = "section";
-    else if (FILL_SUB.has(fill)) kind = "subsection";
+    else if (FILL_SECTION.has(fill) && !mauNhomMaLaHangMuc) kind = "section";
+    else if (FILL_SUB.has(fill) && !mauNhomMaLaHangMuc) kind = "subsection";
     // STT chữ A/B thường là nhóm; nếu dòng vẫn có ĐVT thì chỉ coi là nhóm khi Đơn Giá tổng hợp
     // từ cột Thành Tiền. Tránh nuốt file ngoài dùng A/B/C để đánh số hạng mục thường.
     else if (/^[A-Z]{1,2}$/.test(stt) && (!hasUnit || groupPriceFormula)) kind = "section";
@@ -499,6 +515,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     const it: ImportedItem = { kind, name: kind === "sub" ? "" : name, quantity: 0, unitPrice: 0, row: r };
     const warn: string[] = [];
+    if (mauNhomMaLaHangMuc && kind === "item") warn.push("Dòng tô màu nhóm nhưng có STT số + ĐVT + Số Lượng + Đơn Giá — đã nạp thành hạng mục, kiểm tra lại");
 
     // Chữ nhóm: app tự đánh A/B/C (banner: nhóm con 1/2/3) → chỉ giữ label khi khách đặt KHÁC.
     if (kind === "section") {
