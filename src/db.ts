@@ -159,7 +159,9 @@ export const prisma = base.$extends({
           const aa = { ...a };
           delete aa.hardDelete; delete aa.includeDeleted;
           if (a.hardDelete === true) {
-            result = await (base as any)[lc(model)][operation](aa); // xoá thật
+            // Xoá thật: phép KHÔNG đổi nên chạy qua `query()` — giữ đúng ngữ cảnh transaction của
+            // người gọi (bản cũ gọi `base`, tức chạy ngoài tx và không rollback theo tx — DB-04/DB-06).
+            result = await query(aa); // xoá thật
           } else {
             action = operation === "delete" ? "update" : "updateMany";
             const data = { ...(aa.data || {}), deletedAt: new Date() };
