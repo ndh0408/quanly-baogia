@@ -3812,14 +3812,21 @@ textarea[aria-invalid="true"] {
    `fitCell` trong GridTable.tsx. Bề rộng do JS đặt; đây chỉ lo nổi lên trên, có nền và khung để
    không lẫn với chữ của ô bị đè. Canh TRÁI để đầu công thức ("=0.8*…") luôn nằm ngay chỗ ô gốc. */
 .excel-table td input.cell-grow {
-  position: relative;
+  /* Phủ trọn ô (td là position: relative) và kéo dài sang phải — trông như ô Excel đang sửa, không
+     phải một hộp nhỏ lệch khỏi ô. Viền trong 2px cùng màu viền ô đang chọn nên hai viền liền nhau. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  box-sizing: border-box;
+  padding-left: 8px;
   z-index: 6;
   max-width: none;
   text-align: left;
   background: #fffbe8;
   box-shadow:
-    0 0 0 1px #1769d6,
-    0 2px 6px rgba(0, 0, 0, 0.18);
+    inset 0 0 0 2px #1769d6,
+    2px 2px 6px rgba(0, 0, 0, 0.18);
 }
 
 /* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
@@ -3978,6 +3985,9 @@ textarea[aria-invalid="true"] {
 }
 :root[data-theme="dark"] .excel-table td input.cell-grow {
   background: var(--surface-2);
+  box-shadow:
+    inset 0 0 0 2px #60a5fa,
+    2px 2px 6px rgba(0, 0, 0, 0.45);
 }
 :root[data-theme="dark"] .excel-table td.col-amount {
   background: transparent;

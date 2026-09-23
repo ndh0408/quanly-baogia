@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
@@ -194,6 +194,18 @@ export function gridPropsEqual(a: GridTableProps, b: GridTableProps): boolean {
   return true;
 }
 
+/** Style cố định dùng chung — object nội tuyến mới mỗi lần vẽ cũng khiến React so lại ô. */
+const AN_O = { display: "none" } as const;
+
+/**
+ * MỘT DÒNG LƯỚI CÓ GHI NHỚ. React 19 luôn ghi lại name/type/defaultValue của MỌI <input>/<textarea>
+ * được vẽ lại, kể cả khi không prop nào đổi — nên cách duy nhất để lưới dài không ì là KHÔNG vẽ lại
+ * dòng không đổi. `sig` gom mọi thứ dòng hiển thị (dữ liệu hạng mục + số thứ tự + tổng nhóm + cấu
+ * hình cột); trùng thì React bỏ qua cả dòng. `ve` chỉ được gọi khi thật sự vẽ. Mọi nút/ô trong dòng
+ * đi qua hàm xử lý CỐ ĐỊNH (xuLyO / xuLyBam → xuLyRef) nên dòng bị bỏ qua vẫn gọi đúng hàm mới nhất.
+ */
+const DongNho = memo(function DongNho({ ve }: { sig: string; ve: () => ReactNode }) { return <>{ve()}</>; }, (a, b) => a.sig === b.sig);
+
 function GridTableInner(props: GridTableProps) {
   const { items, usesDays, showDetail, addrDetail, numberSubs, editable, internalNote, approveCol, canApprove, payCol, canPay, onPayRow, groupSubtotal, onGroupSubtotal, showImages, onShowImages, onChange, fxBar, clfTheme, dock, sheetTotalLine, anThanhThem, onDangDung } = props;
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
@@ -261,7 +273,7 @@ function GridTableInner(props: GridTableProps) {
   const dblFromLockedRef = useRef(false);   // nhấp đúp vào ô CHƯA sửa → chỉ đặt con trỏ, không bôi từ
   const scrollRef = useRef<HTMLDivElement | null>(null);   // vùng cuộn bao lưới — mốc đo bề ngang
   const [wrapW, setWrapW] = useState(0);                   // bề ngang vùng chứa (0 = chưa đo)
-  const [, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
+  const [imgVer, setImgVer] = useState(0);   // ép vẽ lại khi thêm/xoá ảnh (input không kiểm soát vẫn giữ nguyên)
   // Gợi ý kích thước theo rạp: dropdown dưới ô Hạng Mục + modal "Chèn từ rạp".
   type Sug = { i: number; el: HTMLTextAreaElement; items: VenueEntry[]; idx: number; rect: { left: number; top: number; width: number } };
   const [sug, setSug] = useState<Sug | null>(null);
@@ -611,11 +623,19 @@ function GridTableInner(props: GridTableProps) {
     const mep = tbl ? tbl.getBoundingClientRect().right - el.getBoundingClientRect().left - 2 : 0;
     // Chưa dàn trang (mép đo ra ≤ bề rộng ô) thì bỏ qua mức chặn, kẻo ra bề rộng âm.
     const max = mep > el.clientWidth ? mep : Infinity;
+    // Ô nới PHỦ TRỌN Ô từ mép trái, cao bằng ô, viền nối liền viền ô đang chọn (CSS `.cell-grow`:
+    // position absolute trong td). Bản đầu để input nằm trong dòng chảy + nới sang phải → thành một
+    // hộp riêng thấp hơn ô, viền xanh riêng, thừa khoảng trống đè ô bên (người dùng chụp màn hình).
+    // Bề rộng = chữ + đệm của ô nới (trái 8px như đệm td, phải = đệm cũ — ô công thức chừa 15px
+    // cho dấu ƒ) + 4px thở, không hẹp hơn chính ô. scrollWidth của <input> không gồm đệm phải.
+    const cs = getComputedStyle(el);
+    const chu = el.scrollWidth - (parseFloat(cs.paddingLeft) || 0);
+    const td = el.closest("td") as HTMLElement | null;
+    const rongO = td ? td.clientWidth : el.clientWidth;
+    const mepO = td && tbl ? tbl.getBoundingClientRect().right - td.getBoundingClientRect().left - 2 : 0;
+    const tran = mepO > rongO ? mepO : max;
     el.classList.add("cell-grow");
-    // scrollWidth của <input> KHÔNG tính đệm phải — ô công thức chừa 15px cho dấu ƒ, thiếu nó là
-    // ký tự cuối lại bị che (đo trên dev: "…*0.5*8" còn "…*0.5*ε").
-    const dem = parseFloat(getComputedStyle(el).paddingRight) || 0;
-    el.style.width = `${Math.min(el.scrollWidth + dem + 8, max)}px`;
+    el.style.width = `${Math.min(Math.max(chu + 8 + (parseFloat(cs.paddingRight) || 0) + 4, rongO), tran)}px`;
   };
   // Point-mode BÀN PHÍM (Excel): đang gõ công thức (chế độ ENTER) mà ký tự trước con trỏ là
   // "="/toán tử/"("/","… → mũi tên CHÈN THAM CHIẾU Ô rồi di chuyển nó ("=" ↑ → "=H3");
@@ -1190,7 +1210,9 @@ function GridTableInner(props: GridTableProps) {
         pasteCellVal(i0, fld, val, 0, 0, !!internal);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(fld), c1: FIELDS.indexOf(fld) });
         recomputeAll(); onChange(); paintSel();
-        const el = cellEl(i0, fld); if (el) el.value = String((items[i0] as Record<string, unknown>)[fld] ?? "");
+        // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
+        // chọn lại bị lượt đồng bộ bỏ qua → dán "Booth…⏎HCM…⏎HN…" chỉ thấy dòng đầu tới khi bấm Lưu.
+        const el = cellEl(i0, fld); if (el) { el.value = String((items[i0] as Record<string, unknown>)[fld] ?? ""); if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
       }
       return;
     }
@@ -1687,6 +1709,51 @@ function GridTableInner(props: GridTableProps) {
     }
     onChangeSoft(true);
   };
+  // ── HÀM XỬ LÝ Ô CỐ ĐỊNH (đo trên dev 2026-09-23, lưới 503 dòng) ─────────────────────────────
+  // Mỗi ô từng nhận `onInput={(e) => …(i, f …)}` — một hàm MỚI ở mỗi lần vẽ. React thấy prop đổi
+  // nên "cập nhật" lại MỌI ô nhập của MỌI dòng dù không gì đổi: ghi lại thuộc tính name/type trên
+  // ~4.000 <input>, ghi lại nội dung ~1.500 <textarea>. Mỗi lần vẽ lại (180ms sau mỗi phím gõ) như
+  // thế bắt trình duyệt tính lại kiểu chữ cả bảng: 250–325ms, cộng ~110ms React → gõ thấy ì rõ.
+  // Nay mọi ô dùng CHUNG một hàm cố định (useCallback []), đọc dòng từ `tr[data-row]`, cột từ
+  // `data-f`, vai trò từ `data-xl` của chính ô; việc thật đi qua `xuLyRef` (luôn trỏ closure của lần
+  // vẽ mới nhất). Prop không đổi → React bỏ qua dòng không đổi → hết đợt ghi DOM thừa.
+  const xuLyRef = useRef<{
+    so: (i: number, f: string, el: HTMLInputElement) => void;
+    chu: (i: number, f: string, el: HTMLInputElement) => void;
+    ta: (i: number, f: string, el: HTMLTextAreaElement) => void;
+    tenNhom: (i: number, el: HTMLTextAreaElement) => void;
+    tenHang: (i: number, el: HTMLTextAreaElement) => void;
+    anh: (i: number, el: HTMLInputElement) => void;
+    duyet: (i: number, checked: boolean) => void;
+    bam: (vai: string, i: number, el: HTMLElement) => void;
+  } | null>(null);
+  const xuLyO = useCallback((e: { target: EventTarget | null }) => {
+    const el = e.target as (HTMLInputElement & HTMLTextAreaElement) | null;
+    const h = xuLyRef.current;
+    if (!el || !h) return;
+    const tr = el.closest("tr[data-row]");
+    const i = tr ? parseInt(tr.getAttribute("data-row") || "-1", 10) : -1;
+    if (i < 0) return;
+    const f = el.getAttribute("data-f") || "";
+    const vai = el.getAttribute("data-xl");
+    if (vai === "so") h.so(i, f, el);
+    else if (vai === "chu") h.chu(i, f, el);
+    else if (vai === "ta") h.ta(i, f, el);
+    else if (vai === "ten-nhom") h.tenNhom(i, el);
+    else if (vai === "ten-hang") h.tenHang(i, el);
+    else if (vai === "anh") h.anh(i, el);
+    else if (vai === "duyet") h.duyet(i, el.checked);
+  }, []);
+  /** Bấm / bấm đúp trong dòng (xoá dòng, xem công thức, ảnh, thanh toán) — cố định như xuLyO. */
+  const xuLyBam = useCallback((e: { currentTarget: EventTarget | null }) => {
+    const el = e.currentTarget as HTMLElement | null;
+    const h = xuLyRef.current;
+    if (!el || !h) return;
+    const tr = el.closest("tr[data-row]");
+    const i = tr ? parseInt(tr.getAttribute("data-row") || "-1", 10) : -1;
+    if (i < 0) return;
+    h.bam(el.getAttribute("data-xl") || "", i, el);
+  }, []);
   const numInput = (i: number, f: "quantity" | "unitPrice" | "days") => {
     const it = items[i]; const fx = it.formulas?.[f]; const val = fmtField(i, f, it[f]);
     // KEY CỐ ĐỊNH (chỉ _k+field): KHÔNG để công thức/giá-trị lật key gây REMOUNT (mất focus khi gõ đè).
@@ -1694,20 +1761,44 @@ function GridTableInner(props: GridTableProps) {
     return (<>
       <input key={`${it._k}-${f}`} data-f={f} inputMode="decimal" defaultValue={val} disabled={!editable}
         title="Số hoặc công thức Excel: =G3*E3, =SUM(H3:H8), 8% — bấm/kéo ô để chèn tham chiếu"
-        onInput={(e) => onNumInput(i, f, e.target as HTMLInputElement)} />
-      {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} onClick={() => peekFx(fx, val)}>ƒ</button>}
+        data-xl="so" onInput={xuLyO} />
+      {fx && <button type="button" className="fx-peek-badge" title={"Công thức: " + fx} data-fx-cot={f} data-xl="xem-fx" onClick={xuLyBam}>ƒ</button>}
     </>);
   };
   const txtInput = (i: number, f: string, ph?: string) => (
     <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); }} />
+      data-xl="chu" onInput={xuLyO} />
   );
+  const onTxtInput = (i: number, f: string, el: HTMLInputElement) => { editingRef.current = true; markEditUndo(i, f); fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); };
   const taInput = (i: number, f: string, ph?: string) => (
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); }} />
+      ref={autoGrow} data-xl="ta" onInput={xuLyO} />
   );
+  const onTaInput = (i: number, f: string, el: HTMLTextAreaElement) => { editingRef.current = true; markEditUndo(i, f); (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); };
   const fcls = (i: number, f: string, base: string) => base + (items[i].formulas?.[f] ? " has-formula" : "") + ((items[i] as Record<string, unknown> & { _fxWarn?: Record<string, boolean> })._fxWarn?.[f] ? " cell-fx-error" : "");
   const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
+  xuLyRef.current = {
+    so: onNumInput, chu: onTxtInput, ta: onTaInput,
+    tenNhom: (i, el) => { (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); },
+    tenHang: (i, el) => { editingRef.current = true; markEditUndo(i, "name"); (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); },
+    anh: (i, el) => { addImages(i, el.files); el.value = ""; },
+    duyet: toggleApprove,
+    bam: (vai, i, el) => {
+      if (vai === "xoa-dong") removeRow(i);
+      else if (vai === "xem-tt") revealAmount(i, el);
+      else if (vai === "xem-gia-nhom") revealSectionPrice(i, el);
+      else if (vai === "thanh-toan") onPayRow?.(items[i]);
+      else if (vai === "xem-fx") {
+        const f = el.getAttribute("data-fx-cot") || "";
+        const fx = items[i].formulas?.[f];
+        if (fx) peekFx(fx, fmtField(i, f, (items[i] as Record<string, unknown>)[f]));
+      } else if (vai === "phong-anh" || vai === "xoa-anh") {
+        const k = Number(el.getAttribute("data-k"));
+        if (vai === "xoa-anh") removeImage(i, k);
+        else { const src = ((items[i].images || []) as string[])[k]; if (src) setZoom(safeImgSrc(src)); }
+      }
+    },
+  };
 
   // Sau mỗi render: (1) ĐỒNG BỘ mọi ô KHÔNG-focus về model (như SPA redraw — dán/undo/recompute hiển
   // thị đúng mà KHÔNG remount → không mất focus); (2) focus ô đích (paste/nav/undo); (3) tô lại vùng chọn.
@@ -1828,6 +1919,15 @@ function GridTableInner(props: GridTableProps) {
   const sectionSum = tinhTongNhom().tong;
   const extraCols = (internalNote ? 1 : 0) + (approveCol ? 1 : 0) + (payCol ? 1 : 0);
   const infoColspan = 6 + (showDetail ? 1 : 0) + (usesDays ? 1 : 0) + extraCols;
+  // Chữ ký dòng cho DongNho: cấu hình cột (đổi là vẽ lại MỌI dòng) + mọi trường dòng hiển thị.
+  const cauHinhSig = [editable, showDetail, usesDays, internalNote, showImages, approveCol, canApprove, payCol, canPay, groupSubtotal, numberSubs, fxBar, infoColspan, imgVer, !!onPayRow].join("|");
+  const chuKy = (i: number, them: string) => {
+    const it = items[i] as Record<string, unknown>;
+    return [cauHinhSig, i, them, it.kind, it.label, it.name, it.detail, it.unit, it.quantity, it.quantityExact, it.days, it.unitPrice,
+      it.notes, it.internalNote, it.approved, it.approvedAt, it.paid, it.paidAt, it.hasPaidProof,
+      JSON.stringify(it.formulas || null), JSON.stringify(it._fxWarn || null),
+      ((it.images as string[] | undefined) || []).map((x) => x.length).join(",")].join("\u0001");
+  };
   // Chuỗi STT của từng hàng (A/B/C cho nhóm, 1/2/3 cho nhóm con khi mẫu đánh số, số thứ tự cho hàng
   // thường) — dựng sẵn để CHÉP được cột STT, và để dán ở nơi khác vẫn đọc ra được loại hàng.
   const sttText: string[] = [];
@@ -1952,13 +2052,13 @@ function GridTableInner(props: GridTableProps) {
       <div className="cell-images">
         {imgs.map((src, k) => (
           <span className="cell-img" key={k}>
-            <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" onClick={() => setZoom(safeImgSrc(src))} />
-            {editable && <button type="button" className="img-rm" title="Xoá ảnh" onClick={() => removeImage(i, k)}>✕</button>}
+            <img src={safeImgSrc(src)} alt="" loading="lazy" title="Bấm để xem lớn" data-k={k} data-xl="phong-anh" onClick={xuLyBam} />
+            {editable && <button type="button" className="img-rm" title="Xoá ảnh" data-k={k} data-xl="xoa-anh" onClick={xuLyBam}>✕</button>}
           </span>
         ))}
         {editable && imgs.length < IMG_MAX && (
           <label className="img-add" title="Thêm ảnh (chọn 1 hoặc nhiều)">＋
-            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { addImages(i, e.target.files); (e.target as HTMLInputElement).value = ""; }} />
+            <input type="file" accept="image/*" multiple style={AN_O} data-xl="anh" onChange={xuLyO} />
           </label>
         )}
       </div>
@@ -1995,17 +2095,17 @@ function GridTableInner(props: GridTableProps) {
       <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
       {usesDays && <td className={fcls(i, "days", "col-qty")} style={{ position: "relative" }}>{numInput(i, "days")}</td>}
       <td className={fcls(i, "unitPrice", "col-price")} style={{ position: "relative" }}>{numInput(i, "unitPrice")}</td>
-      <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
+      <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{M.fmtNumCell(M.lineAmount(items[i], usesDays))}</td>
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
-      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} onChange={(e) => toggleApprove(i, e.target.checked)} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
-        ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} onClick={() => onPayRow?.(items[i])}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
+        ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
         : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
         {(items[i] as Record<string, unknown>).paid && (items[i] as Record<string, unknown>).paidAt ? <span className="ap-date"> {M.fmtDate(String((items[i] as Record<string, unknown>).paidAt))}</span> : null}
         {(items[i] as Record<string, unknown>).hasPaidProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</td>}
-      {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" onClick={() => removeRow(i)}>✕</button></td>}
+      {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
     </>
   );
 
@@ -2087,45 +2187,46 @@ function GridTableInner(props: GridTableProps) {
                 else if (numberSubs) { letter = String(++subNo); }
                 sttNo = 0;
                 const subAmt = sectionSum[i] || 0;
-                return (
-                  <tr key={it._k ?? i} data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
+                return <DongNho key={it._k ?? i} sig={chuKy(i, `S|${isSub}|${letter}|${subAmt}|${M.groupMult(it)}`)} ve={() => (
+                  <tr data-row={i} className={`section-row${isSub ? " subgroup-row" : ""}`}>
                     <td className="col-stt">{String(it.label || letter)}</td>
-                    <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChangeSoft(); }} /></td>
+                    <td className="col-hangmuc"><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder={isSub ? "Tên nhóm con" : "Tên nhóm (vd: Wallsticker)"} disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showDetail && <td className="col-detail" />}
                     <td className="col-dvt">{txtInput(i, "unit")}</td>
                     <td className={fcls(i, "quantity", "col-qty")} style={{ position: "relative" }}>{numInput(i, "quantity")}</td>
                     {usesDays && <td className="col-qty" />}
-                    <td className="col-price" title={fxTitle} onDoubleClick={(e) => revealSectionPrice(i, e.currentTarget)}>{M.fmtNumCell(subAmt)}</td>
-                    <td className="col-amount" title={fxTitle} onDoubleClick={(e) => revealAmount(i, e.currentTarget)}>{groupSubtotal ? M.fmtNumCell(subAmt * M.groupMult(it)) : ""}</td>
+                    <td className="col-price" title={fxTitle} data-xl="xem-gia-nhom" onDoubleClick={xuLyBam}>{M.fmtNumCell(subAmt)}</td>
+                    <td className="col-amount" title={fxTitle} data-xl="xem-tt" onDoubleClick={xuLyBam}>{groupSubtotal ? M.fmtNumCell(subAmt * M.groupMult(it)) : ""}</td>
                     <td className="col-notes">{taInput(i, "notes", "Ghi chú nhóm")}</td>
                     {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
                     {approveCol && <td className="col-approve" />}
                     {payCol && <td className="col-pay" />}
-                    {editable && <td className="col-action"><button className="rm-row" title={isSub ? "Xóa nhóm con" : "Xóa nhóm"} onClick={() => removeRow(i)}>✕</button></td>}
+                    {editable && <td className="col-action"><button className="rm-row" title={isSub ? "Xóa nhóm con" : "Xóa nhóm"} data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
                   </tr>
-                );
+                )} />;
               }
               if (rk[i] === "info") {
-                return (
-                  <tr key={it._k ?? i} data-row={i} className="info-row">
+                return <DongNho key={it._k ?? i} sig={chuKy(i, "I")} ve={() => (
+                  <tr data-row={i} className="info-row">
                     <td className="col-stt" />
-                    <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} onInput={(e) => { (items[i] as Record<string, unknown>).name = (e.target as HTMLTextAreaElement).value; autoGrow(e.target as HTMLTextAreaElement); onChangeSoft(); }} /></td>
+                    <td className="col-info" colSpan={infoColspan}><textarea data-f="name" rows={1} defaultValue={it.name || ""} placeholder="Dòng thông tin chương trình (không tính tiền)" disabled={!editable} ref={autoGrow} data-xl="ten-nhom" onInput={xuLyO} /></td>
                     {showImages && <td className="col-images">{imagesCell(i)}</td>}
-                    {editable && <td className="col-action"><button className="rm-row" title="Xóa" onClick={() => removeRow(i)}>✕</button></td>}
+                    {editable && <td className="col-action"><button className="rm-row" title="Xóa" data-xl="xoa-dong" onClick={xuLyBam}>✕</button></td>}
                   </tr>
-                );
+                )} />;
               }
-              if (rk[i] === "sub") return <tr key={it._k ?? i} data-row={i} className="sub-row">{dataCells(i)}</tr>;
+              if (rk[i] === "sub") return <DongNho key={it._k ?? i} sig={chuKy(i, "U")} ve={() => <tr data-row={i} className="sub-row">{dataCells(i)}</tr>} />;
               sttNo++;
               const span = M.rowspanOf(rk, i);
-              return (
-                <tr key={it._k ?? i} data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
-                  <td className="col-stt" rowSpan={span}>{numberSubs ? "" : sttNo}</td>
-                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} onInput={(e) => { editingRef.current = true; markEditUndo(i, "name"); const el = e.target as HTMLTextAreaElement; (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); nameSuggest(i, el); }} /></td>
+              const stt = numberSubs ? "" : sttNo;   // CHỐT giá trị: ve() chạy SAU khi vòng map đã đếm xong
+              return <DongNho key={it._k ?? i} sig={chuKy(i, `H|${span}|${stt}`)} ve={() => (
+                <tr data-row={i} className={`grp-head${span > 1 ? " has-subs" : ""}`}>
+                  <td className="col-stt" rowSpan={span}>{stt}</td>
+                  <td className="col-hangmuc" rowSpan={span}><textarea data-f="name" rows={1} defaultValue={it.name || ""} disabled={!editable} ref={autoGrow} data-xl="ten-hang" onInput={xuLyO} /></td>
                   {dataCells(i)}
                 </tr>
-              );
+              )} />;
             })}
             {items.length === 0 && <tr><td colSpan={12} className="muted" style={{ textAlign: "center", padding: 18 }}>Chưa có hàng nào — bấm “+ Thêm hàng” bên dưới.</td></tr>}
           </tbody>
