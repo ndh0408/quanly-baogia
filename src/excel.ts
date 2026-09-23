@@ -1111,6 +1111,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     if (r1 == null || r2 == null || r2 - r1 !== span - 1) continue;
     for (const col of [cols.stt, ...(itemsCfg.removeDetail ? [] : [cols.name])]) {
       if (!col) continue;
+      // GỠ VÙNG GỘP CŨ CÒN SÓT TRONG SỔ TRƯỚC KHI GỘP (L47).
+      // Mẫu Colorfull gộp sẵn C17:D17 cho ô "* Ghi chú". Báo giá dài hơn số khe thì `duplicateRow`
+      // đẩy chữ xuống nhưng SỔ vùng gộp của ExcelJS vẫn giữ khoá "C17" (cùng bẫy đã ghi ở khối
+      // footerMerges bên dưới) ⇒ `mergeCells("C16:C17")` ném "Cannot merge already merged cells",
+      // `safeMerge` nuốt lỗi: STT gộp được mà Hạng Mục thì không — tệp gửi khách có ô tên hàng con
+      // là một ô trống riêng, nạp lại thành hạng mục TÊN RỖNG. Trong vùng hạng mục không có vùng
+      // gộp hợp lệ nào khác phủ cột này (dải thông tin ở trên, ô ghi chú dựng lại ở dưới), nên gỡ
+      // mọi vùng chạm là an toàn.
+      const ci = colLetterToIdx(col) + 1;
+      unmergeOverlapping(ws, ci, r1, ci, r2);
       safeMerge(ws, `${col}${r1}:${col}${r2}`);
       const cell = ws.getCell(`${col}${r1}`);
       cell.alignment = { ...(cell.alignment || {}), vertical: "middle" };
