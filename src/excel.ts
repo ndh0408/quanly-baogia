@@ -7,6 +7,7 @@ import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
 import { buildFormulaContext } from "./quoteFormula.js";
 import { nhanLamTronDong } from "./tienDong.js";
+import { ngayThangNamVN } from "./vnTime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -44,9 +45,12 @@ function stampTemplateMarker(ws: any, templateCode: string) {
   cell.style = style;
 }
 
-function vnDateText(d: any, city: any) {
-  const dt = d instanceof Date ? d : new Date(d);
-  return `${city || "TP. Hồ Chí Minh"}, ngày ${String(dt.getDate()).padStart(2, "0")} tháng ${String(dt.getMonth() + 1).padStart(2, "0")} năm ${dt.getFullYear()}`;
+// Ngày THEO LỊCH VIỆT NAM, không theo múi giờ của tiến trình (XLSX-11): container chạy UTC, nên
+// báo giá nhân bản/tạo lúc 00:00–06:59 giờ VN (quoteDate = new Date() → 17:00–23:59Z hôm trước) in
+// lùi một ngày. Ngày nhập từ web ('YYYY-MM-DD' → 00:00Z) cho CÙNG kết quả như trước.
+export function vnDateText(d: any, city: any) {
+  const { ngay, thang, nam } = ngayThangNamVN(d);
+  return `${city || "TP. Hồ Chí Minh"}, ngày ${String(ngay).padStart(2, "0")} tháng ${String(thang).padStart(2, "0")} năm ${nam}`;
 }
 
 // Neutralize spreadsheet formula injection: a text cell whose value starts with

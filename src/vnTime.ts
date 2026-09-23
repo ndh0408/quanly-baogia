@@ -25,6 +25,21 @@ export const namVN = (d?: Date) => nowVN(d).getUTCFullYear();
 /** Hai số cuối của năm VN: 2026 → "26". */
 export const namNganVN = (d?: Date) => String(namVN(d)).slice(-2);
 
+/** Ngày/tháng/năm theo lịch Việt Nam của một mốc thời gian (XLSX-11 — ngày in trên tệp gửi khách). */
+export function ngayThangNamVN(d: Date | string | number) {
+  const t = nowVN(d instanceof Date ? d : new Date(d));
+  return { ngay: t.getUTCDate(), thang: t.getUTCMonth() + 1, nam: t.getUTCFullYear() };
+}
+
+/**
+ * "Hôm nay" theo lịch VN, dưới dạng 00:00 UTC của ngày đó — đúng hình dạng mà cột ngày nhận từ web
+ * ('YYYY-MM-DD'). `new Date()` trần lúc 00:00–06:59 giờ VN là ngày HÔM TRƯỚC theo UTC (XLSX-11).
+ */
+export function homNayVN(d?: Date) {
+  const { ngay, thang, nam } = ngayThangNamVN(d ?? new Date());
+  return new Date(Date.UTC(nam, thang - 1, ngay));
+}
+
 /** "MMDD" theo lịch Việt Nam — dùng đặt tên file tải về (tháng rồi tới ngày). */
 export function thangNgayVN(d?: Date) {
   const t = nowVN(d);

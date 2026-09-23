@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
-import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia } from "../lib/ui";
+import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia, toLocalInputDate } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
@@ -266,7 +266,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             const firstTpl = _templates![0];
             q = {
               id: 0, _new: true, status: "draft", title: "", quoteNumber: "", companyId: firstTpl?.companyId,
-              city: "TP. Hồ Chí Minh", quoteDate: new Date().toISOString().slice(0, 10), vatPercent: 0, discount: 0, showTotals: true,
+              // quoteDate theo ngày ĐỊA PHƯƠNG — toISOString().slice(0,10) là ngày UTC, lùi một ngày trước 07:00 giờ VN (XLSX-11).
+              city: "TP. Hồ Chí Minh", quoteDate: toLocalInputDate(new Date()), vatPercent: 0, discount: 0, showTotals: true,
               greeting: "Chân thành cảm ơn Quí khách hàng đã quan tâm đến dịch vụ của chúng tôi, chúng tôi xin gởi bảng báo giá theo yêu cầu như sau:",
               sheets: [{ templateId: firstTpl?.id, groupSubtotal: true, items: [], extraTables: [] }],
             };

@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
 import { nhanLamTronDong } from "./tienDong.js";
+import { ngayThangNamVN } from "./vnTime.js";
 
 // Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
 // KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
@@ -126,7 +127,9 @@ export async function renderQuotePdf(quote: any) {
     const maBaoGia = codeLabel(quote) || quote.quoteNumber || "";
     const soGN = quote.quoteNumber && quote.quoteNumber !== maBaoGia ? ` · ${quote.quoteNumber}` : "";
     doc.text(`Số: ${maBaoGia}${soGN}`, { continued: true });
-    doc.text(`     Ngày: ${new Date(quote.quoteDate).toLocaleDateString("vi-VN")}`, { align: "right" });
+    // Theo lịch VN, không theo múi giờ tiến trình/ICU (XLSX-11) — cùng quy tắc với vnDateText của Excel.
+    const nd = ngayThangNamVN(quote.quoteDate);
+    doc.text(`     Ngày: ${nd.ngay}/${nd.thang}/${nd.nam}`, { align: "right" });
     doc.moveDown(0.5);
 
     const startY = doc.y;
