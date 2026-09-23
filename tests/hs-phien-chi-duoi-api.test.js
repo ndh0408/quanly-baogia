@@ -7,6 +7,10 @@
 //   (mật khẩu ĐÚNG) và GET /api/csrf-token trả 500 thay vì 4xx.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import request from "supertest";
+
+// HTTP-11 chỉ có nghĩa khi bề mặt Bearer đang BẬT (AUTH-04: mặc định tắt, header Bearer bị bỏ qua).
+// Bật TRƯỚC khi config.ts được nạp; ca "cờ tắt" ở cuối tệp tự tắt lại lúc chạy.
+vi.hoisted(() => { process.env.JWT_API_ENABLED = "true"; });
 import session from "express-session";
 import bcrypt from "bcryptjs";
 
@@ -83,5 +87,14 @@ describe.runIf(dbAvailable)("HTTP-11 — Bearer không kèm cookie gọi đườ
   it("GET /api/csrf-token với Bearer → 400, không 500", async () => {
     const r = await request(app).get("/api/csrf-token").set("Authorization", "Bearer x");
     expect(r.status).toBe(400);
+  });
+
+  it("cờ JWT_API_ENABLED TẮT: header Bearer bị bỏ qua hẳn — đăng nhập bằng mật khẩu chạy như thường", async () => {
+    const cu = config.JWT_API_ENABLED;
+    config.JWT_API_ENABLED = false;   // cờ đọc lúc request (src/app.ts, src/middleware.ts)
+    try {
+      const r = await request(app).get("/api/csrf-token").set("Authorization", "Bearer x");
+      expect(r.status).toBe(200);
+    } finally { config.JWT_API_ENABLED = cu; }
   });
 });

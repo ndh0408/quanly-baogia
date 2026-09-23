@@ -138,8 +138,9 @@ describe.runIf(dbAvailable)("AUTH-05/06/07", () => {
     const ag = request.agent(app);
     const r = await ag.get("/api/csrf-token");
     const maxAge = conSong(r);
-    expect(maxAge, `phiên ẩn danh sống ${maxAge}s`).toBeLessThanOrEqual(3600);
-    expect(maxAge).toBeGreaterThan(3500);
+    // 30 phút — AUTH-07 và HTTP-10 sửa cùng lỗi, khi gộp chốt một con số (xem src/app.ts /api/csrf-token).
+    expect(maxAge, `phiên ẩn danh sống ${maxAge}s`).toBeLessThanOrEqual(1800);
+    expect(maxAge).toBeGreaterThan(1700);
     const l = await ag.post("/api/auth/login").set("x-csrf-token", r.body.token).send({ username: u.username, password: MAT_KHAU });
     expect(l.status).toBe(200);
     const sau = conSong(l);

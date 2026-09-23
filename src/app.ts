@@ -533,16 +533,13 @@ export function createApp() {
     if (!req.session || typeof req.session.regenerate !== "function") {
       return res.status(400).json({ error: "Client dùng Bearer không cần mã CSRF — xác thực bằng POST /api/auth/token", code: "bearer_khong_can_csrf" });
     }
-    // Phiên ẨN DANH chỉ sống 30 phút (HTTP-10). Ghi csrfSecret làm express-session lưu một hàng
-    // phiên; với maxAge mặc định 7 ngày, vòng lặp gọi endpoint này (120 lượt/phút/IP) giữ tới ~1,2
-    // triệu hàng mỗi IP. Đăng nhập gọi regenerate → phiên mới nhận lại maxAge 7 ngày như cũ.
+    // Phiên ẨN DANH chỉ sống 30 phút (HTTP-10 / AUTH-07 — hai bản sửa cùng lỗi, gộp làm một). Ghi
+    // csrfSecret làm express-session lưu một hàng phiên; với maxAge mặc định 7 ngày, vòng lặp gọi
+    // endpoint này (120 lượt/phút/IP) giữ tới ~1,2 triệu hàng mỗi IP. Đăng nhập gọi regenerate → phiên
+    // mới nhận lại maxAge 7 ngày như cũ. Ngồi ở trang đăng nhập quá 30 phút không kẹt: POST chưa đăng
+    // nhập chỉ kiểm Lớp 1 Origin/Referer, và web/src/lib/api.ts tự xin lại mã khi gặp csrf_token_*.
     if (!req.session.userId) req.session.cookie.maxAge = 30 * 60 * 1000;
     const token = issueCsrfToken(req);
-    // PHIÊN ẨN DANH SỐNG 1 GIỜ, không phải 7 ngày (AUTH-07). Ghi csrfSecret là tạo một hàng
-    // user_sessions; với maxAge 7 ngày chung, một vòng lặp gọi endpoint này không cookie đẻ ra hàng
-    // sống cả tuần (prune chỉ dọn hàng hết hạn). Đăng nhập gọi regenerate() nên phiên đăng nhập nhận
-    // cookie MỚI theo cấu hình 7 ngày — không bị ảnh hưởng.
-    if (!req.session.userId) req.session.cookie.maxAge = 60 * 60 * 1000;
     // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
     res.setHeader("Cache-Control", "no-store, private, max-age=0");
     res.json({ token });
