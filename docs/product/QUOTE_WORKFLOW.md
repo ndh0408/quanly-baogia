@@ -97,6 +97,10 @@ POST /api/quotes/sheets/{sheetId}/customer-decision
 Cần `quote:send` **và** `canOnQuote(update)` trên báo giá. Ghi kèm người đánh
 dấu (`custStatusById`), thời điểm, và ghi chú/lý do — rồi vào nhật ký kiểm toán.
 
+Báo giá **đã xuất hoá đơn** (có ít nhất một sheet mang số HĐ — `daXuatHoaDon`) thì
+endpoint trả **409**: cùng mốc khoá với `canEdit`, vì đổi ý kiến khách sau khi chốt sẽ
+tính lại `convertedTotal`, tức đổi doanh thu sau khi con số đã ra chứng từ kế toán.
+
 `Quote.status` **không** tự đổi theo. Nó chỉ đổi khi người phụ trách bấm Chốt /
 Không chốt ở trục 1. Đó là cố ý: ý kiến của khách trên một sheet không phải quyết
 định thương mại về cả báo giá.

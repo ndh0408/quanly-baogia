@@ -920,7 +920,9 @@ Lý do (không bắt buộc):`,
               </span>
             )}
             {activeSheet.custNote && <span className="muted" style={{ fontSize: 12 }}>· lý do: {activeSheet.custNote}</span>}
-            {hasPerm("quote:send") && (
+            {/* Đã có số HĐ → máy chủ khoá ý kiến khách (409), cùng mốc khoá với sửa giá — soát chéo money#1. */}
+            {hasPerm("quote:send") && daXuatHoaDon && <span className="muted" style={{ fontSize: 12 }}>· đã xuất hoá đơn — không đổi ý kiến khách được</span>}
+            {hasPerm("quote:send") && !daXuatHoaDon && (
               <>
                 {activeSheet.custStatus !== "approved" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("approved")}>✓ Khách duyệt</button>}
                 {activeSheet.custStatus !== "rejected" && <button type="button" className="btn btn-sm" onClick={() => decideSheet("rejected")}>✗ Không duyệt</button>}

@@ -21,6 +21,7 @@ import { emit as emitWebhook } from "../webhooks.js";
 import { can, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
+  daXuatHoaDon,
   QUOTE_INCLUDE,
   QUOTE_LIST_SELECT,
   QUOTE_UPDATE_STATE_SELECT,
@@ -1303,6 +1304,24 @@ export async function listProjects(req: Request) {
   }
   const data = quotes.map((q: any) => {
     // subtotal/sheet ĐÃ materialized (ghi lúc save) → KHÔNG kéo items + computeQuoteTotals nữa (perf).
+    // Tổng HÀ NỘI nay là MỘT số cho cả báo giá (cột Quote.hnTables), còn bảng này liệt kê MỘT
+    // DÒNG MỖI TRANG. Dồn trọn vào MỘT dòng, các dòng khác để 0: cộng cả cột vẫn ra đúng tổng.
+    // Hiện cùng một số trên mọi dòng thì ai cộng cột sẽ ra gấp số-trang lần — con số sai mà trông
+    // như tiền thật.
+    const tongHnBaoGia = (hnTheoBaoGia.get(q.id) ?? []).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
+    // `hnInvoiceNo` (Số HĐ Hà Nội) vẫn là cột THEO TRANG. Trên dữ liệu CŨ, bảng HN thường nằm ở
+    // trang 2-3 và kế toán đã điền số hoá đơn vào ĐÚNG dòng đó — nếu dòng gánh tổng chỉ đọc
+    // `hnInvoiceNo` của riêng nó thì cờ "thiếu số HĐ HN" (Projects.tsx + thẻ việc tồn đọng ở
+    // Dashboard) bật ĐỎ VĨNH VIỄN cho mọi dự án cũ. Cho dòng đó thấy số hoá đơn HN ĐẦU TIÊN tìm
+    // được trên cả báo giá — cùng phạm vi với con số tiền nó đang gánh.
+    const hnInvoiceChung = q.sheets.map((x: any) => x.hnInvoiceNo).find((v: any) => String(v ?? "").trim() !== "") ?? null;
+    // DÒNG GÁNH = trang ĐẦU mà giao diện KHÔNG ẩn (soát chéo money#4). Trang Dự án / "Cần xử lý" bỏ
+    // dòng trang khách không duyệt (trangKhachTuChoi, web/src/lib/format.tsx) TRƯỚC khi đọc `hanoi`:
+    // gánh vào trang 1 bị từ chối là mất cột "Báo Giá Hà Nội" lẫn cờ thiếu số HĐ HN, dù chi phí HN
+    // vẫn là của cả báo giá. Điều kiện ẩn phải KHỚP hàm đó. Mọi trang đều bị ẩn → trang đầu, như cũ.
+    const biAnTrenGiaoDien = (x: any) =>
+      q.status === "converted" && x.custStatus === "rejected" && !String(x.invoiceNo ?? "").trim() && !x.paidAt;
+    const idxGanHn = Math.max(0, q.sheets.findIndex((x: any) => !biAnTrenGiaoDien(x)));
     return {
       id: q.id,
       quoteNumber: q.quoteNumber,
@@ -1325,18 +1344,6 @@ export async function listProjects(req: Request) {
       sheets: q.sheets.map((sh: any, sIdx: number) => {
         const ex = bangTheoSheet.get(sh.id) ?? [];
         const sumCat = (cat: string) => ex.filter((t: any) => t && t.category === cat).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
-        // Tổng HÀ NỘI nay là MỘT số cho cả báo giá (cột Quote.hnTables), còn bảng này liệt kê MỘT
-        // DÒNG MỖI TRANG. Dồn trọn vào dòng trang ĐẦU, các dòng sau để 0: cộng cả cột vẫn ra đúng
-        // tổng. Hiện cùng một số trên mọi dòng thì ai cộng cột sẽ ra gấp số-trang lần — con số sai
-        // mà trông như tiền thật.
-        const tongHnBaoGia = (hnTheoBaoGia.get(q.id) ?? []).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
-        // `hnInvoiceNo` (Số HĐ Hà Nội) vẫn là cột THEO TRANG, trong khi tổng HN nay dồn về dòng
-        // trang đầu. Trên dữ liệu CŨ, bảng HN thường nằm ở trang 2-3 và kế toán đã điền số hoá đơn
-        // vào ĐÚNG dòng đó — nếu dòng đầu chỉ đọc `hnInvoiceNo` của riêng nó thì cờ "thiếu số HĐ
-        // HN" (Projects.tsx + thẻ việc tồn đọng ở Dashboard) bật ĐỎ VĨNH VIỄN cho mọi dự án cũ,
-        // và không ai tắt được ngoài việc gõ lại số vào trang 1. Cho dòng đầu thấy số hoá đơn HN
-        // ĐẦU TIÊN tìm được trên cả báo giá — cùng phạm vi với con số tiền nó đang gánh.
-        const hnInvoiceChung = q.sheets.map((x: any) => x.hnInvoiceNo).find((v: any) => String(v ?? "").trim() !== "") ?? null;
         return {
           id: sh.id,
           name: sh.name || null,
@@ -1344,7 +1351,7 @@ export async function listProjects(req: Request) {
           subtotal: Number(sh.subtotal),
           custStatus: sh.custStatus ?? null,   // "approved" | "rejected" | null — xem chú thích ở select (FE-09)
           hcm: sumCat("hcm"),
-          hanoi: sIdx === 0 ? tongHnBaoGia : 0,
+          hanoi: sIdx === idxGanHn ? tongHnBaoGia : 0,
           khach: sumCat("khach"),
           cty: sh.template?.company?.shortName || sh.template?.company?.name || null,
           signedAt: sh.signedAt,
@@ -1352,7 +1359,7 @@ export async function listProjects(req: Request) {
           invoiceNo: sh.invoiceNo || null,
           paidAt: sh.paidAt || null,
           poNumber: sh.poNumber || null,
-          hnInvoiceNo: (sIdx === 0 ? (sh.hnInvoiceNo || hnInvoiceChung) : sh.hnInvoiceNo) || null,
+          hnInvoiceNo: (sIdx === idxGanHn ? (sh.hnInvoiceNo || hnInvoiceChung) : sh.hnInvoiceNo) || null,
           invoiceLink: sh.invoiceLink || null,
           docSentAt: sh.docSentAt || null,
           docReturnedAt: sh.docReturnedAt || null,
@@ -1414,6 +1421,13 @@ export async function setSheetCustomerDecision(req: Request) {
   // convertedTotal NULL (chốt trước khi có cột) → giữ null như updateQuote.
   const updated = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${sheet.quoteId} ORDER BY id FOR UPDATE`;
+    // ĐÃ XUẤT HOÁ ĐƠN → KHOÁ, cùng mốc với canEdit (soát chéo money#1). Nhánh dưới tính lại
+    // convertedTotal, nên đổi ý kiến lúc này là đổi doanh thu KPI sau khi con số đã đi ra chứng từ
+    // kế toán — đúng thứ canEdit cấm với sửa giá. Kiểm SAU khoá: một lần nhập số HĐ đang chen vào
+    // (updateSheetInvoice ghi hàng QuoteSheet) phải chờ khoá này, nên không lọt qua giữa kiểm và ghi.
+    if (daXuatHoaDon({ sheets: await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { invoiceNo: true } }) })) {
+      throw httpError(409, "Báo giá đã xuất hoá đơn — không đổi ý kiến khách được nữa");
+    }
     const u = await tx.quoteSheet.update({
       where: { id: sheet.id },
       data: status
@@ -1752,7 +1766,13 @@ export async function markConverted(req: Request) {
       where: { quoteId: id },
       select: { subtotal: true, custStatus: true },
     });
-    const convertedTotal = tinhConvertedTotal(trang, existing.vatPercent);
+    // VAT cũng phải đọc SAU khoá (soát chéo money#7): `existing` đọc ngoài transaction, và một lượt
+    // đổi RIÊNG VAT của updateQuote có thể commit đúng khe đó — lúc ấy báo giá chưa converted nên
+    // nó không tính convertedTotal, còn ở đây lại nhân VAT cũ. Cùng cách setSheetCustomerDecision
+    // và nhánh có sheets của updateQuote đọc lại VAT sau khoá. Chiều ngược lại đã an toàn: lượt đổi
+    // VAT đến sau phải chờ khoá này, rồi thấy converted và tự tính lại theo VAT mới.
+    const [vq] = await tx.$queryRaw<{ vatPercent: unknown }[]>`SELECT "vatPercent" FROM "Quote" WHERE id = ${id}`;
+    const convertedTotal = tinhConvertedTotal(trang, (vq?.vatPercent ?? existing.vatPercent) as any);
     // Optimistic guard: only convert if not already terminal — prevents a race with
     // a concurrent mark-lost / edit from producing a wrong terminal transition.
     const upd = await tx.quote.updateMany({

@@ -122,6 +122,63 @@ describe.runIf(dbAvailable)("MONEY-01 — convertedTotal đi theo giá mới sau
     expect((await ctDb(q.id)).ct).toBe(0);
   }, 60_000);
 
+  // Soát chéo money#1: canEdit khoá mọi sửa giá khi đã có số HĐ ("con số đã đi ra chứng từ kế toán"),
+  // nhưng endpoint ý kiến khách vẫn nhận và TÍNH LẠI convertedTotal — doanh thu KPI đổi sau mốc khoá.
+  it("đã xuất hoá đơn → đổi / gỡ ý kiến khách bị 409, không đụng custStatus lẫn doanh thu chốt", async () => {
+    const q = await taoBaoGia(10_000_000, 5_000_000);
+    expect((await admin.post(`/api/quotes/${q.id}/mark-converted`).send({})).status).toBe(200);
+    const doc = (await admin.get(`/api/quotes/${q.id}`)).body;
+    expect((await admin.put(`/api/quotes/sheets/${doc.sheets[0].id}/invoice`).send({ invoiceNo: "HD0001" })).status).toBe(200);
+    const truoc = await ctDb(q.id);
+
+    const tuChoi = await admin.post(`/api/quotes/sheets/${doc.sheets[1].id}/customer-decision`).send({ status: "rejected" });
+    expect(tuChoi.status, JSON.stringify(tuChoi.body)).toBe(409);
+    const go = await admin.post(`/api/quotes/sheets/${doc.sheets[0].id}/customer-decision`).send({ status: "" });
+    expect(go.status, JSON.stringify(go.body)).toBe(409);
+
+    const trang = await prisma.quoteSheet.findMany({ where: { quoteId: q.id }, orderBy: { id: "asc" }, select: { custStatus: true } });
+    expect(trang.map((t) => t.custStatus)).toEqual([null, null]);
+    expect((await ctDb(q.id)).ct, "doanh thu chốt đổi sau khi đã xuất hoá đơn").toBe(truoc.ct);
+  }, 60_000);
+
+  // Soát chéo money#7: markConverted đọc `existing` (kèm VAT) NGOÀI transaction, rồi mới khoá
+  // QuoteSheet. Một lượt đổi RIÊNG VAT commit đúng khe đó (lúc ấy báo giá chưa converted nên nó không
+  // tính convertedTotal) → doanh thu chốt tính theo VAT CŨ, lệch khỏi total mãi mãi.
+  it("VAT đổi giữa lúc đọc báo giá và lúc khoá trang → doanh thu chốt theo VAT MỚI đã commit", async () => {
+    const q = await taoBaoGia(10_000_000, 5_000_000);   // VAT 8 → net 15.000.000
+    let moCua;
+    const cua = new Promise((r) => { moCua = r; });
+    let daKhoa;
+    const khoaXong = new Promise((r) => { daKhoa = r; });
+    // Lượt "đổi VAT" giữ khoá QuoteSheet như updateQuote, ghi VAT 10 nhưng CHƯA commit.
+    const doiVat = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${q.id} ORDER BY id FOR UPDATE`;
+      await tx.$executeRaw`UPDATE "Quote" SET "vatPercent" = 10, vat = 1500000, total = 16500000 WHERE id = ${q.id}`;
+      daKhoa();
+      await cua;
+    }, { timeout: 20_000 });
+    await khoaXong;
+
+    const chot = admin.post(`/api/quotes/${q.id}/mark-converted`).send({}).then((r) => r);
+    // Chờ tới khi markConverted ĐANG ĐỢI khoá QuoteSheet — tức đã đọc xong `existing` (VAT 8).
+    const han = Date.now() + 10_000;
+    for (;;) {
+      const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%QuoteSheet%FOR UPDATE%'`;
+      if (n > 0) break;
+      if (Date.now() > han) throw new Error("markConverted không tới chỗ đợi khoá QuoteSheet");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    moCua();
+    await doiVat;
+
+    const r = await chot;
+    expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
+    const sau = await ctDb(q.id);
+    expect(sau.total).toBe(16_500_000);
+    expect(sau.ct, "doanh thu chốt tính theo VAT đọc TRƯỚC khoá").toBe(16_500_000);
+  }, 60_000);
+
   it("báo giá chốt TRƯỚC khi có cột (convertedTotal NULL) → sửa giá vẫn để NULL, nơi đọc COALESCE về total", async () => {
     const q = await taoBaoGia(1_000_000, 1_000_000);
     await prisma.quote.update({ where: { id: q.id }, data: { status: "converted", convertedAt: new Date(), convertedTotal: null } });
