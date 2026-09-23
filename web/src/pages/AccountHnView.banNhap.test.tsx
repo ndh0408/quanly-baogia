@@ -23,7 +23,7 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { AccountHnView } from "./AccountHnView";
-import { ApiError } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 import { khoaBanNhap, docBanNhap, ghiBanNhap } from "../lib/localDraft";
 import * as ui from "../lib/ui";
 
@@ -86,5 +86,64 @@ describe("GRID-16 / FE-13 — bản nháp cục bộ cho màn Account Hà Nội"
     await cho(30);
     expect(ui.confirmModal).toHaveBeenCalledWith("Giá Hà Nội bạn gõ trước khi bị xung đột", expect.any(String), expect.anything());
     expect(host!.textContent).toContain("6.000.000");
+  });
+});
+
+// Soát chéo app#12 (B), app#15, app#17 — cùng màn Account Hà Nội.
+const nutLuu = () => [...host!.querySelectorAll("button")].find((b) => /Lưu/.test(b.textContent || "") && !/Gửi/.test(b.textContent || ""))!;
+describe("soát chéo — màn Account Hà Nội", () => {
+  it("app#12: 409 mà không ghi được bản giữ lại (bộ nhớ đầy) → KHÔNG tải lại, phần đang gõ còn nguyên, báo phải chép tay", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(250);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("đầy", "QuotaExceededError"); });
+    h.saveHn = async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); };
+    h.getQuote = async () => baoGia({ hnRev: "b".repeat(32) });
+    const soLanTai = (api.getQuote as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    vi.restoreAllMocks();
+    expect((api.getQuote as unknown as ReturnType<typeof vi.fn>).mock.calls.length, "không được tải lại").toBe(soLanTai);
+    expect(host!.textContent).toContain("6.000.000");
+    const loi = (ui.toast as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).join(" | ");
+    expect(loi).toMatch(/chép/);
+    expect(ui.confirmModal).not.toHaveBeenCalledWith("Phần Hà Nội đã thay đổi ở nơi khác", expect.stringMatching(/GIỮ LẠI/), expect.anything());
+  });
+
+  it("app#12: 409 rồi Hủy → không để lại khoá ':xungdot'", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(250);
+    h.saveHn = async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); };
+    h.confirm = false;
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(docBanNhap(KHOA + ":xungdot", 5)).toBeNull();
+    expect(host!.textContent).toContain("6.000.000");
+  });
+
+  it("app#15: trong lúc Lưu đang chờ máy chủ → nút 'Nhập từ Excel' bị khoá", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(250);
+    let xong!: () => void;
+    h.saveHn = () => new Promise((r) => { xong = () => r({}); });
+    await act(async () => { nutLuu().click(); });
+    await cho(10);
+    const nhap = [...host!.querySelectorAll("button")].find((b) => /Nhập từ Excel/.test(b.textContent || "")) as HTMLButtonElement;
+    expect(nhap.disabled).toBe(true);
+    await act(async () => { xong(); });
+    await cho(30);
+  });
+
+  it("app#17: chọn 'Rời, bỏ thay đổi' (editor:discard) → bản nháp HN bị xoá, không ghi lại khi pagehide", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(1600);
+    expect(docBanNhap(KHOA, 5)).not.toBeNull();
+    await act(async () => { window.dispatchEvent(new Event("editor:discard")); });
+    expect(docBanNhap(KHOA, 5)).toBeNull();
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+    expect(docBanNhap(KHOA, 5)).toBeNull();
   });
 });

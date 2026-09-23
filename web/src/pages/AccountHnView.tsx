@@ -75,6 +75,8 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  // app#15: bản sao của `saving` cho closure cũ (hàm onApply mà ImportExcelModal giữ khi chờ hộp xác nhận).
+  const savingRef = useRef(false);
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
@@ -85,7 +87,16 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     const khiAn = () => { if (document.visibilityState === "hidden") ghi(); };
     window.addEventListener("pagehide", ghi);
     document.addEventListener("visibilitychange", khiAn);
-    return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); };
+    // app#17 (như FE-12 ở QuoteEditor): người dùng CHỦ ĐỘNG chọn "Rời, bỏ thay đổi" (Shell.guardLeave bắn
+    // editor:discard) → xoá luôn bản nháp, không thì lần mở sau bị mời khôi phục đúng phần vừa bỏ.
+    // Hạ dirtyRef TRƯỚC để pagehide/visibilitychange ngay sau đó không ghi lại bản nháp.
+    const boThayDoi = () => {
+      if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
+      dirtyRef.current = false;
+      if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+    };
+    window.addEventListener("editor:discard", boThayDoi);
+    return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); window.removeEventListener("editor:discard", boThayDoi); };
   }, []);
 
   const load = useCallback(async () => {
@@ -141,6 +152,9 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // Bảng HN có đúng hình dạng { name, templateId, groupSubtotal, items } mà modal cần, nên truyền
   // thẳng. Không có Discount/VAT ở đây: hai thứ đó thuộc báo giá gửi khách, không thuộc phần HN.
   const applyImport = (payload: ImportApplyPayload) => {
+    // app#15: đang Lưu, hoặc Lưu xong `load()` đã thay qRef → `hnTables` của closure này là mảng CŨ,
+    // nạp vào đó là mất im lặng.
+    if (savingRef.current || qRef.current !== q) { toast("Phần Hà Nội đang lưu / vừa lưu — mở lại hộp Nhập từ Excel rồi nạp lại", "info"); return; }
     let nAdd = 0, nBang = 0, nMoi = 0;
     for (const p of payload.plans) {
       const stamped = p.items.map((it) => { const o = { ...it } as ItemK; o._k = nextK(); return o; });
@@ -167,7 +181,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     // !saving) — gõ thêm lúc đang chờ thì `load()` sau đó thay qRef và phần đó mất im lặng.
     const dangGo = document.activeElement as HTMLElement | null;
     if (dangGo && dangGo !== document.body && typeof dangGo.blur === "function") dangGo.blur();
-    setSaving(true);
+    setSaving(true); savingRef.current = true;
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
       const goi = hnTables.map((t) => ({
@@ -187,16 +201,24 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       // không lối tải lại, mà tự tải lại thì mất phần đang gõ. Nay giữ phần đang gõ vào khoá `…:xungdot`
       // rồi mới tải lại; đường nạp hỏi có mở lại không (y như GRID-08 ở trình soạn báo giá).
       if (ex instanceof ApiError && ex.status === 409 && khoaNhapRef.current && qRef.current) {
-        const tai = await confirmModal("Phần Hà Nội đã thay đổi ở nơi khác", `${ex.message}. Tải lại bản mới nhất? Phần bạn đang gõ được GIỮ LẠI trên máy này và bạn sẽ được hỏi mở lại.`, { danger: true, confirmText: "Tải lại bản mới" });
-        if (tai) {
-          if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
-          ghiBanNhap(khoaNhapRef.current + ":xungdot", { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
-          dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
-          await load();
+        // app#12: ghi bản giữ lại TRƯỚC khi hỏi và chọn đường theo KẾT QUẢ ghi. Không ghi được (bộ nhớ
+        // đầy / bị chặn / quá lớn) thì KHÔNG hứa "được GIỮ LẠI" và KHÔNG tải lại — quay về hành vi cũ:
+        // báo lỗi, giữ nguyên màn hình để người dùng chép phần đang gõ.
+        if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
+        const khoaXd = khoaNhapRef.current + ":xungdot";
+        const kq = ghiBanNhap(khoaXd, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
+        if (kq !== "da-ghi" && kq !== "da-ghi-bo-anh") {
+          toast(`${ex.message}. Trình duyệt không giữ được bản tạm trên máy này — hãy chép phần đang gõ trước khi tải lại trang.`, "error");
+        } else {
+          const tai = await confirmModal("Phần Hà Nội đã thay đổi ở nơi khác", `${ex.message}. Tải lại bản mới nhất? Phần bạn đang gõ được GIỮ LẠI trên máy này và bạn sẽ được hỏi mở lại.`, { danger: true, confirmText: "Tải lại bản mới" });
+          if (tai) {
+            dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+            await load();
+          } else xoaBanNhap(khoaXd);   // Hủy → ở lại; bỏ bản giữ lại để lần mở sau không hỏi một bản cũ
         }
       } else toast(ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN", "error");
     }
-    finally { setSaving(false); }
+    finally { setSaving(false); savingRef.current = false; }
   };
   saveRef.current = editable && !saving ? () => save(false) : null;
   const submit = async () => { if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) save(true); };
@@ -213,7 +235,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
 
       {editable && (
         <div style={{ margin: "6px 0 2px" }}>
-          <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (xem trước rồi mới nạp)" onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
+          <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (xem trước rồi mới nạp)" disabled={saving} onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
         </div>
       )}
 

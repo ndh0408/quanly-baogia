@@ -207,3 +207,40 @@ describe("FE-04 — bản nháp gắn theo người dùng", () => {
     expect(d.baseUpdatedAt).toBe("2026-08-27T00:00:00.000Z");
   });
 });
+
+// app#16 (soát chéo): lần xác lập danh tính ĐẦU TIÊN trên trình duyệt (`quanly:lastUser` còn null) mà là
+// một lượt ĐĂNG NHẬP MỚI từ màn Login → không biết bản nháp khoá cũ (trước FE-04) là của ai, nên phải
+// xoá; chỉ đường khởi động có phiên sẵn (cùng cookie phiên) mới được chuyển nó sang khoá người dùng.
+describe("app#16 — khoá cũ ở lần đăng nhập đầu sau deploy", () => {
+  it("đăng nhập MỚI khi chưa có lastUser → nháp khoá cũ của người trước KHÔNG lọt sang người này", () => {
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Của A" }, "2026-08-27T00:00:00.000Z");
+    ghiBanNhap(khoaBanNhap("moi"), { ...baoGia(), title: "Mới của A" }, null);
+    ghiNhanNguoiDung(2, { dangNhapMoi: true });
+    chuyenBanNhapCu(7, 2);
+    chuyenBanNhapCu("moi", 2);
+    expect(docBanNhap(khoaBanNhap(7, 2), 2)).toBeNull();
+    expect(docBanNhap(khoaBanNhap("moi", 2), 2)).toBeNull();
+    expect(docBanNhap(khoaBanNhap(7))).toBeNull();
+  });
+
+  it("đăng nhập MỚI khi chưa có lastUser → KHÔNG đụng khoá mới đã gắn người dùng", () => {
+    ghiBanNhap(khoaBanNhap(7, 2), { ...baoGia(), title: "Của 2" }, null, 2);
+    ghiNhanNguoiDung(2, { dangNhapMoi: true });
+    expect((docBanNhap(khoaBanNhap(7, 2), 2)!.quote as { title: string }).title).toBe("Của 2");
+  });
+
+  it("đối chứng: khởi động có phiên sẵn (không dangNhapMoi) → vẫn chuyển được nháp khoá cũ", () => {
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Cũ" }, "2026-08-27T00:00:00.000Z");
+    ghiNhanNguoiDung(5);
+    chuyenBanNhapCu(7, 5);
+    expect((docBanNhap(khoaBanNhap(7, 5), 5)!.quote as { title: string }).title).toBe("Cũ");
+  });
+
+  it("đối chứng: đã có lastUser là chính người này → đăng nhập mới vẫn giữ và chuyển được nháp khoá cũ", () => {
+    ghiNhanNguoiDung(5);
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Cũ" }, "2026-08-27T00:00:00.000Z");
+    ghiNhanNguoiDung(5, { dangNhapMoi: true });
+    chuyenBanNhapCu(7, 5);
+    expect((docBanNhap(khoaBanNhap(7, 5), 5)!.quote as { title: string }).title).toBe("Cũ");
+  });
+});
