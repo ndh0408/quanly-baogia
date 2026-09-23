@@ -1373,7 +1373,10 @@ function GridTableInner(props: GridTableProps) {
     const startKind = items[startRow]?.kind;
     if (startKind === "section" || startKind === "subsection") {
       chen(startRow + 1, rows.map(() => { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); return nit; }));
-      startRow += 1; startCol = COL_NAME;
+      // GIỮ cột đang chọn (soát toàn diện L13): bản cũ ép về Hạng Mục, nên chép SL + ĐG rồi dán vào ô SL
+      // của nhóm thì số rơi vào Hạng Mục / ĐVT, SL/ĐG = 0. Ô chọn ở cột chỉ đọc (STT/TT) đã được đưa về
+      // Hạng Mục ở đầu onPaste; khối nguyên hàng ghép theo tên trường nên không phụ thuộc startCol.
+      startRow += 1;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
     // theo tên trường để dán được sang sheet dùng mẫu khác.

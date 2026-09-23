@@ -173,3 +173,34 @@ describe("L12 — khối từ Excel có cột Thành Tiền (giữa Đơn Giá v
     expect([items[0].notes, items[0].internalNote]).toEqual(["12", "nội bộ"]);
   });
 });
+
+describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ cột đang chọn", () => {
+  it("chép SL + ĐG rồi dán vào ô SL của hàng nhóm: hàng mới có SL/ĐG đúng cột", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "quantity")); moRong("ArrowRight", 1);
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect(items.map((x) => x.kind)).toEqual(["section", "item", "item"]);
+    expect({ n: items[1].name, u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice }, "số rơi vào cột chữ").toEqual({ n: "", u: "", q: 2, p: 150000 });
+  });
+
+  it("dán khối ngoài 'SL ⇥ ĐG' vào ô SL của hàng nhóm", () => {
+    const items = [nhom({ name: "Nhóm" })];
+    const o = moLuoi(items);
+    vao(o(0, "quantity"));
+    dan("2\t150000");
+    expect([items[1].name, items[1].quantity, items[1].unitPrice]).toEqual(["", 2, 150000]);
+  });
+
+  it("dán khối nguyên hàng lên hàng nhóm vẫn ghép theo tên (không đổi)", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "name")); phim(document.activeElement!, { key: " ", code: "Space", shiftKey: true });
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
+  });
+});
