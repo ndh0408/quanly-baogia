@@ -791,6 +791,30 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   caoTheoChu(c.toBlockCell);
   caoTheoChu(c.infoBannerCell);
 
+  // ── TIÊU ĐỀ DÀI: XUỐNG DÒNG + NỚI CAO HÀNG (L44) ─────────────────────────────────────────────
+  // Ô tiêu đề GỘP NGANG (CLF B2:I2 · 18 đậm · 27,5pt; GN B7:I7 · 14 đậm · 17,5pt), canh giữa, không
+  // wrap. Ô gộp không tràn chữ sang ô bên cạnh ⇒ "BẢNG BÁO GIÁ - <tiêu đề> - <tên sheet>" dài hơn
+  // vùng gộp bị Excel cắt CẢ HAI ĐẦU (đo: ~83 ký tự ở CLF, ~88 ở GN là bắt đầu cụt). Chỉ khi chữ
+  // THẬT SỰ tràn mới bật wrap và nới hàng — tiêu đề vừa một dòng giữ nguyên từng thuộc tính của tệp
+  // mẫu. Đặt SAU khối cột ảnh vì vùng gộp tiêu đề có thể vừa nối dài sang cột HÌNH ẢNH. Không đi qua
+  // `caoTheoChu`: nó tính 15pt/dòng (chữ 11), còn Excel cần ~1,3 × cỡ chữ mỗi dòng (22,5pt ở cỡ 18).
+  if (c.title) {
+    try {
+      const o = ws.getCell(c.title);
+      const chu = typeof o.value === "string" ? o.value : "";
+      const rong = beRongVungGop(c.title);
+      const f = fontDo(c.title);
+      const soDong = chu && rong ? wrapLines(chu, null, rong, f) : 1;
+      const r = parseInt(String(c.title).replace(/^[A-Z]+/, ""), 10);
+      if (soDong > 1 && r) {
+        datStyleRieng(o, (st) => ({ alignment: { ...(st.alignment || {}), wrapText: true, vertical: "middle" } }));
+        const can = Math.min(409, Math.ceil(soDong * f.co * 1.35 + 2));
+        const dangCo = ws.getRow(r).height;
+        if (dangCo == null || can > dangCo) ws.getRow(r).height = can;
+      }
+    } catch { /* mẫu không có ô tiêu đề */ }
+  }
+
   // Per-section subtotal = sum of item/sub amounts until the next section. Shown only
   // when sheet.groupSubtotal is on. Section rows are letter-coded (A,B,C…) and never
   // count toward the grand subtotal (their qty/price are 0).
