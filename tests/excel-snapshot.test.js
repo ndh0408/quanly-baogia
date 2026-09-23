@@ -149,6 +149,11 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       //   · B4:I4 tiêu đề cột   theme8/t0.4 → FF9DCCC9
       //   · F7:H9 khối tổng     theme8/t0.4 → FF9DCCC9
       // Màu lấy từ tệp mẫu người dùng chỉnh lại sáng 2026-09-23 (xem scripts/doi-mau-clf.mjs).
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-23 lần 2 (sheet Tổng Báo Giá của Colorfull) ──
+      // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác 12 ô trên 109, TẤT CẢ ở sheet "Tổng Báo
+      // Giá" và chỉ là màu nền — A4:C4 tiêu đề + A6:C8 khối tổng: FFFFCC99 → FFF4CFB0 (người dùng
+      // chốt bằng ảnh chụp: cùng màu hàng nhóm Colorfull). Giá trị, định dạng số, chữ đậm giữ nguyên.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

@@ -1532,9 +1532,12 @@ function addSummarySheet(wb: any, sheetTotals: any, quote: any, vatPct: any) {
   ws.getCell("A2").font = { name: "Times New Roman", family: 1, size: 11, italic: true };
   ws.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
 
-  // Màu header sheet Tổng theo công ty: Gia Nguyễn = #f3c9a1 (mới); Colorfull (clofull) = peach cũ.
+  // Màu header + khối tổng sheet Tổng theo công ty: Gia Nguyễn = #f3c9a1; Colorfull (clofull) =
+  // #F4CFB0, cùng màu hàng NHÓM của bảng màu Colorfull mới (người dùng chốt bằng ảnh chụp
+  // 2026-09-23; trước đó là peach #FFCC99). Bộ nhập bỏ qua sheet này theo TIÊU ĐỀ (excelImport.ts
+  // "TONG BAO GIA"), không theo màu — nên đổi màu ở đây không làm nó nhận nhầm hàng nhóm.
   const isClf = (quote.sheets || []).some((s: any) => String(s.template?.code || s.templateCode || "").startsWith("clofull"));
-  const sumHeaderFill = isClf ? "FFFFCC99" : "FFF3C9A1";
+  const sumHeaderFill = isClf ? "FFF4CFB0" : "FFF3C9A1";
   const headerRow = 4;
   const headers = ["STT", "Hạng mục", "Thành tiền (VNĐ)"];
   headers.forEach((h: any, i: any) => {
