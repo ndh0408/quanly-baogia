@@ -80,3 +80,51 @@ describe("L10 — khối KHÔNG phủ nguyên hàng không mang 'loại hàng' s
     expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm G", "item:X", "section:Nhóm G", "item:X"]);
   });
 });
+
+describe("L14 — chép Hạng Mục → Ghi Chú sang báo giá KHÁC MẪU: ghép cột theo tên trường", () => {
+  it("nguồn CÓ Số Ngày → đích KHÔNG ngày: Đơn Giá không nhận Số Ngày", () => {
+    const nguon = [mk({ name: "Hallway", unit: "m2", quantity: 5.6, days: 2, unitPrice: 95000, notes: "giao 18/9" })];
+    const dich = [mk({})];
+    const oN = moLuoi(nguon, { usesDays: true });
+    const oD = moLuoi(dich, { usesDays: false });
+    vao(oN(0, "name")); moRong("ArrowRight", 5);   // name → notes
+    const kho = chep();
+    vao(oD(0, "name"));
+    dan(kho);
+    expect({ q: dich[0].quantity, p: dich[0].unitPrice, n: dich[0].notes }, "cột lệch: Số Ngày rơi vào Đơn Giá").toEqual({ q: 5.6, p: 95000, n: "giao 18/9" });
+  });
+
+  it("nguồn KHÔNG ngày → đích CÓ ngày: Số Ngày của đích giữ nguyên, Đơn Giá đúng cột", () => {
+    const nguon = [mk({ name: "Hallway", unit: "m2", quantity: 5.6, unitPrice: 95000, notes: "giao 18/9" })];
+    const dich = [mk({ days: 3 })];
+    const oN = moLuoi(nguon, { usesDays: false });
+    const oD = moLuoi(dich, { usesDays: true });
+    vao(oN(0, "name")); moRong("ArrowRight", 4);
+    const kho = chep();
+    vao(oD(0, "name"));
+    dan(kho);
+    expect({ q: dich[0].quantity, d: dich[0].days, p: dich[0].unitPrice, n: dich[0].notes }).toEqual({ q: 5.6, d: 3, p: 95000, n: "giao 18/9" });
+  });
+
+  it("nguồn CÓ Chi Tiết → đích KHÔNG Chi Tiết: ĐVT/SL/ĐG vào đúng chỗ", () => {
+    const nguon = [mk({ name: "Hallway", detail: "PP in KTS", unit: "m2", quantity: 5.6, unitPrice: 95000, notes: "ghi" })];
+    const dich = [mk({})];
+    const oN = moLuoi(nguon, { showDetail: true });
+    const oD = moLuoi(dich, { showDetail: false });
+    vao(oN(0, "name")); moRong("ArrowRight", 5);
+    const kho = chep();
+    vao(oD(0, "name"));
+    dan(kho);
+    expect({ u: dich[0].unit, q: dich[0].quantity, p: dich[0].unitPrice, n: dich[0].notes }).toEqual({ u: "m2", q: 5.6, p: 95000, n: "ghi" });
+  });
+
+  it("dán LỆCH cột có chủ ý (chép cột SL, dán vào cột Đơn Giá) vẫn ghép theo vị trí", () => {
+    const items = [mk({ quantity: 7 }), mk({ quantity: 1, unitPrice: 5 })];
+    const o = moLuoi(items);
+    vao(o(0, "quantity")); moRong("ArrowDown", 1);
+    const kho = chep();
+    vao(o(0, "unitPrice"));
+    dan(kho);
+    expect([items[0].unitPrice, items[1].unitPrice]).toEqual([7, 1]);
+  });
+});

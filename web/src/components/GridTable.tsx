@@ -1378,6 +1378,14 @@ function GridTableInner(props: GridTableProps) {
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
     // theo tên trường để dán được sang sheet dùng mẫu khác.
     const wholeRowBlock = internal?.fields?.[0] === "_stt";
+    // GHÉP CỘT THEO TÊN TRƯỜNG cả khi khối KHÔNG kèm STT mà dán vào ĐÚNG cột bắt đầu của nó, trong khi
+    // bố cục hai bên khác nhau (soát toàn diện L14): kéo chọn Hạng Mục → Ghi Chú ở báo giá CÓ Số Ngày
+    // rồi dán sang báo giá KHÔNG ngày thì ghép theo vị trí đưa Số Ngày vào Đơn Giá, Đơn Giá vào Ghi Chú
+    // — Thành Tiền sai hàng vạn lần. Dán vào cột KHÁC cột nguồn (chép cột SL dán sang cột Đơn Giá) là
+    // cố ý lệch cột kiểu Excel → vẫn theo vị trí. Bố cục trùng nhau thì hai cách ra cùng một kết quả.
+    const fNguon = internal?.fields;
+    const ghepTheoTen = !!fNguon?.length && (wholeRowBlock || (fNguon[0] === FIELDS[startCol] && fNguon.some((f, c) => FIELDS[startCol + c] !== f)));
+    let cotDau = Infinity, cotCuoi = -1;   // cột đích THẬT được ghi (ghép theo tên thì không liền với startCol)
     // Loại hàng (nhóm/hạng mục) chỉ đi theo khối MANG NHẬN DẠNG HÀNG: phủ nguyên hàng, hoặc có cột Hạng
     // Mục (tên nhóm đi theo nên hàng đích thành nhóm là đúng ý). Khối chỉ có cột số mà vẫn mang loại
     // hàng thì dán cột SL chép qua một hàng nhóm biến hạng mục đích thành NHÓM — tiền của nó rơi khỏi
@@ -1410,9 +1418,10 @@ function GridTableInner(props: GridTableProps) {
         // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
         // Ghép theo vị trí thì Đơn Giá của mẫu này rơi vào Ghi Chú của mẫu kia. Trường đích không
         // có (vd Chi Tiết) thì bỏ ô đó, phần còn lại vẫn vào đúng chỗ.
-        const fSrcName = wholeRowBlock ? internal?.fields?.[c] : null;
+        const fSrcName = ghepTheoTen ? fNguon?.[c] : null;
         const f = fSrcName ? (FIELDS.includes(fSrcName) ? fSrcName : null) : FIELDS[startCol + c];
         if (!f || RO_FIELDS.has(f)) return;   // STT / Thành Tiền là ô TÍNH — dán đè vào là hỏng model
+        { const ci = FIELDS.indexOf(f); if (ci < cotDau) cotDau = ci; if (ci > cotCuoi) cotCuoi = ci; }
         // Khối copy TRONG lưới → biết được nó dời bao nhiêu hàng/cột, dịch tham chiếu như Excel.
         // (Khối dán từ file Excel NGOÀI đi đường riêng: retargetPastedFormulas dò mốc neo.)
         let dR = 0, dC = 0;
@@ -1426,14 +1435,17 @@ function GridTableInner(props: GridTableProps) {
         pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quGoc(r, c) ?? quDan, moHo);
       });
     });
+    // Vùng đích: ghép theo tên thì là các cột thật sự được ghi, còn lại tính theo số cột của khối.
+    const dc0 = ghepTheoTen && cotCuoi >= 0 ? cotDau : startCol;
+    const dc1 = ghepTheoTen && cotCuoi >= 0 ? cotCuoi : Math.min(FIELDS.length - 1, startCol + rows[0].length - 1);
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token) {
-      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: startCol, c1: Math.min(FIELDS.length - 1, startCol + rows[0].length - 1) }, !!blockImgs);
+      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: dc0, c1: dc1 }, !!blockImgs);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
     if (blockImgs) setImgVer((v) => v + 1);   // ô ảnh không tự vẽ lại theo items (xem addImages)
-    selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
+    selRef.current = { anchor: { row: startRow, field: FIELDS[dc0] }, focus: { row: startRow + rows.length - 1, field: FIELDS[dc1] } };
     focusCell(startRow, FIELDS[startCol], true, true);
     toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
     baoSoMoHo();
