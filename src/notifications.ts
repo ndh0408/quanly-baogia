@@ -1,4 +1,5 @@
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { publish } from "./sse.js";
 import { runOrQueue, QUEUES } from "./queue.js";
@@ -95,13 +96,18 @@ export async function notify(
         ? (prefs as Record<string, unknown>)[key]
         : undefined;
 
+    // Link cho kênh NGOÀI app phải TUYỆT ĐỐI (RT-05). `notif.link` là "/#/quotes/5" — đúng cho điều
+    // hướng trong SPA và cho hàng Notification/SSE, nhưng trong email/Telegram không có base URL:
+    // Gmail/Outlook bỏ đi hoặc trỏ sai, nút "Mở" thành link chết. Dựng từ APP_BASE_URL (cấu hình,
+    // KHÔNG từ header request — xem .env.example).
+    const linkNgoai = notif.link ? new URL(notif.link, `${config.APP_BASE_URL}/`).toString() : null;
     if (user?.email && shouldDeliver(prefOf("email"))) {
       await runOrQueue(QUEUES.EMAIL, "send", {
         to: user.email,
         subject: notif.title,
-        text: `${notif.body}\n\n${notif.link ? `Link: ${notif.link}\n\n` : ""}— Quản lý Báo Giá`,
+        text: `${notif.body}\n\n${linkNgoai ? `Link: ${linkNgoai}\n\n` : ""}— Quản lý Báo Giá`,
         html: `<p><strong>${escapeHtml(notif.title)}</strong></p><p>${escapeHtml(notif.body)}</p>${
-          notif.link ? `<p><a href="${escapeHtml(notif.link)}">Mở</a></p>` : ""
+          linkNgoai ? `<p><a href="${escapeHtml(linkNgoai)}">Mở</a></p>` : ""
         }`,
       });
     }
@@ -114,7 +120,7 @@ export async function notify(
         chatId: tgChatId,
         // Plain text (telegram.js mặc định không parse_mode): tiêu đề/nội dung do người dùng
         // nhập → gửi thô, tránh inject Markdown (link giả / định dạng) vào kênh Telegram nội bộ.
-        text: `${notif.title}\n${notif.body}${notif.link ? `\n${notif.link}` : ""}`,
+        text: `${notif.title}\n${notif.body}${linkNgoai ? `\n${linkNgoai}` : ""}`,
       });
     }
   } catch (e) {

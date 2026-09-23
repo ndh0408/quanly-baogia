@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+export const SMTP_TIMEOUT_MS = Math.max(1_000, Number(process.env.SMTP_TIMEOUT_MS) || 10_000);
 let configured = false;
 
 function init() {
@@ -13,6 +14,14 @@ function init() {
     return null;
   }
   transporter = nodemailer.createTransport({
+    // TRẦN THỜI GIAN (RT-11). Mặc định nodemailer: connectionTimeout 120s, greetingTimeout 30s,
+    // socketTimeout 600s. Đường MỜI thành viên gửi thư ĐỒNG BỘ trong request (userService) — SMTP
+    // nuốt gói tin (tường lửa/NAT DROP) là admin chờ tới khi Cloudflare cắt 524, không thấy
+    // `inviteUrl` dự phòng, bấm lại thì nhận 409 vì tài khoản đã được tạo. Job email ở worker cũng
+    // chiếm slot tới 10 phút. SMTP_TIMEOUT_MS chỉnh trần kết nối/chào (mặc định 10s); socket ×3.
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS * 3,
     host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
