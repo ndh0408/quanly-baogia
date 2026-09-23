@@ -161,7 +161,11 @@ export async function xepViecCoHan<T>(
   } catch (e) {
     logger.error(
       { err: e instanceof Error ? e.message : String(e), ...ctx, hanMs },
-      "không xếp được việc vào hàng đợi (Redis chậm/chết) — BỎ việc này để không treo request",
+      // KHÔNG nói "đã bỏ việc" (RT-13): Promise.race chỉ NGỪNG CHỜ, không huỷ lệnh. Kết nối BullMQ
+      // dùng maxRetriesPerRequest:null + hàng đợi offline của ioredis, nên lệnh add vẫn nằm đó và có
+      // thể được thực hiện khi Redis hồi phục — email/thông báo tới MUỘN chứ không mất, và một lượt
+      // xuất đã báo 503 vẫn có thể được sinh. Log cũ khiến người trực tưởng việc đã mất.
+      "quá hạn chờ hàng đợi (Redis chậm/chết) — request đi tiếp; lệnh có thể VẪN được thực hiện khi Redis hồi phục",
     );
     return null;
   } finally {
@@ -298,7 +302,13 @@ const EXPORT_LOCK_MS = Number(process.env.EXPORT_JOB_LOCK_MS) || 300_000;
 // `concurrency` do src/worker.ts truyền vào từ WORKER_CONCURRENCY (mặc định 4). Đặt biến này = 8 vẫn
 // cho ra 4 — muốn NÂNG thông lượng xuất file thì phải nâng WORKER_CONCURRENCY. Cố ý giữ trần trên như
 // vậy: đây là việc nặng CPU trong MỘT tiến trình, nới rộng chỉ làm mọi job cùng chậm và cùng chẹn.
-const EXPORT_WORKER_CONCURRENCY = Number(process.env.EXPORT_WORKER_CONCURRENCY) || 2;
+//
+// MẶC ĐỊNH 1 (RT-12, trước là 2). Hai job cỡ tối đa chạy song song vượt ân hạn dừng 150s của worker:
+// job 1 sinh file ~77-90s trong khi job 2 CHỜ ngân sách dòng (EXPORT_BUDGET_ROWS tuần tự hoá job lớn)
+// rồi tới lượt thêm 90s sinh + ~40s tải lên → SIGKILL giữa chừng, khoá 5 phút, người dùng chờ 5-6 phút
+// đúng lúc deploy. Cổng ngân sách vốn đã chạy job lớn lần lượt, và đường nền chỉ dành cho báo giá
+// lớn, nên suất thứ hai gần như không mang lại thông lượng mà chỉ nới ca xấu nhất.
+const EXPORT_WORKER_CONCURRENCY = Number(process.env.EXPORT_WORKER_CONCURRENCY) || 1;
 
 export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerOptions> & { concurrency: number } {
   if (name === QUEUES.EXPORT) {

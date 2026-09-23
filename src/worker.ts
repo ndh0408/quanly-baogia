@@ -224,7 +224,9 @@ export const processors = {
       chanBaoGiaQuaLon(quote);
       const buf = await sinhFileXuat("xlsx", quote, () => buildQuoteBuffer(quote));
       if (isStorageEnabled()) {
-        const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
+        // Khoá THEO JOB (RT-12): job bị cắt rồi chạy lại (stalled) GHI ĐÈ đúng object của nó thay vì đẻ
+        // thêm một object mồ côi mỗi lượt (RETAIN_EXPORT_DAYS mặc định 0 = không bao giờ dọn).
+        const key = `exports/${quote.quoteNumber}-${job.id ?? Date.now()}.xlsx`;
         await putObject({
           key, body: buf,
           contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -272,7 +274,7 @@ export const processors = {
       };
       const buf: any = await sinhFileXuat("pdf", pdfQuote, () => renderQuotePdf(pdfQuote));
       if (isStorageEnabled()) {
-        const key = `exports/${quote.quoteNumber}-${Date.now()}.pdf`;
+        const key = `exports/${quote.quoteNumber}-${job.id ?? Date.now()}.pdf`;   // theo job — xem nhánh xlsx
         await putObject({
           key, body: buf, contentType: "application/pdf",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
