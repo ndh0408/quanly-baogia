@@ -45,6 +45,18 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
     nhipVe.current = setTimeout(() => { nhipVe.current = null; redraw(); }, 120);
   };
   useEffect(() => () => { if (nhipVe.current) clearTimeout(nhipVe.current); }, []);
+  // GRID-17: Ctrl/⌘+S = Lưu (không gửi duyệt), như trình soạn báo giá. Xem QuoteEditor.
+  const saveRef = useRef<(() => unknown) | null>(null);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || (e.key !== "s" && e.key !== "S")) return;
+      e.preventDefault();
+      if (document.querySelector('[data-focus-trap="own"]')) return;
+      saveRef.current?.();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -130,6 +142,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
     } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN", "error"); }
     finally { setSaving(false); }
   };
+  saveRef.current = editable && !saving ? () => save(false) : null;
   const submit = async () => { if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) save(true); };
 
   return (

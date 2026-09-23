@@ -194,6 +194,22 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // Kebab ⋯: đóng khi bấm ngoài / Esc / cuộn / đổi cỡ cửa sổ — AnchoredPanel lo hết, xem file đó.
   const dongMenu = useCallback(() => setMoreOpen(false), []);
 
+  // GRID-17: Ctrl/⌘+S = Lưu. Người quen bảng tính bấm theo phản xạ; bản cũ để trình duyệt mở hộp
+  // "Lưu trang thành HTML" và báo giá KHÔNG được lưu. `saveRef` trỏ tới save() của lượt vẽ mới nhất
+  // (null khi người này không có quyền sửa gì — nút Lưu cũng không hiện). Hook phải đứng TRƯỚC hai
+  // lệnh return sớm bên dưới.
+  const saveRef = useRef<(() => unknown) | null>(null);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || (e.key !== "s" && e.key !== "S")) return;
+      e.preventDefault();
+      if (document.querySelector('[data-focus-trap="own"]')) return;   // đang có hộp thoại mở
+      saveRef.current?.();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell
   // chặn điều hướng menu (giống leaveEditorGuard SPA). Dọn cờ khi rời editor.
   useEffect(() => {
@@ -546,6 +562,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
      chủ: phần vừa sửa biến mất, ô meta (input không kiểm soát) vẫn HIỆN chữ mới trong khi model đã
      về giá trị cũ, và bản nháp cục bộ mang mốc cũ nên lần mở sau bị bỏ qua im lặng.
      Lưu trước thì con số trong hộp chốt chính là con số máy chủ sẽ ghi, và không còn gì để mất. */
+  saveRef.current = coSuaGiDo ? save : null;
   const luuTruocNeuCan = async (viec: string): Promise<boolean> => {
     if (!dirtyRef.current) return true;
     const ok = await confirmModal(

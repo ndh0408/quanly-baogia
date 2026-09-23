@@ -196,6 +196,20 @@ describe("GRID-08 — xung đột 409 giữ lại phần đang soạn", () => {
   });
 });
 
+// GRID-17: Ctrl+S mở hộp "Lưu trang" của trình duyệt, báo giá không được lưu.
+describe("GRID-17 — Ctrl/⌘+S lưu báo giá", () => {
+  it("Ctrl+S → gọi updateQuote đúng một lần và chặn hộp lưu trang của trình duyệt", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    const ev = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => { oTenKhach().dispatchEvent(ev); });
+    await cho(10);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(h.updateQuote).toHaveBeenCalledTimes(1);
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).toCompany).toBe("Khách MỚI");
+  });
+});
+
 // GRID-07: gõ tiếp trong lúc PUT đang bay → phần gõ thêm không nằm trong payload, rồi bị bản máy chủ
 // đè, cờ bẩn về false, bản nháp bị xoá. Nay lưới + ô meta khoá suốt lúc lưu.
 describe("GRID-07 — không sửa được trong lúc đang Lưu", () => {
