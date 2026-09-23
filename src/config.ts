@@ -93,6 +93,16 @@ const schema = z.object({
   INCREMENTAL_QUOTE_SAVE: z
     .preprocess((v) => (typeof v === "string" ? /^(1|true|yes|on)$/i.test(v) : !!v), z.boolean())
     .default(false),
+  // JWT_API_ENABLED — mở bề mặt Bearer JWT (POST /api/auth/token, /token/refresh và việc nhận header
+  // `Authorization: Bearer` thay cho cookie phiên). MẶC ĐỊNH TẮT (AUTH-04, audit 2026-09-23): không
+  // client nào dùng nó (web/src chỉ dùng cookie, không script/e2e nào gọi), mà mỗi chốt xác thực phải
+  // viết hai lần cho hai đường và lịch sử cho thấy đã lệch nhiều lần. Tắt bằng cờ thay vì xoá mã để
+  // khi thật sự có client di động thì chỉ cần bật — mã và bộ test JWT vẫn nguyên.
+  // Khi tắt: /token và /token/refresh trả 404, header Bearer bị bỏ qua (request đi đường cookie như
+  // mọi request ẩn danh). /token/revoke và /token/revoke-all VẪN chạy — chúng chỉ HUỶ chứng thư.
+  JWT_API_ENABLED: z
+    .preprocess((v) => (typeof v === "string" ? /^(1|true|yes|on)$/i.test(v) : !!v), z.boolean())
+    .default(false),
   // Key used to encrypt MFA TOTP secrets at rest (AES-256-GCM). Strongly recommended
   // in production; if absent, secrets fall back to plaintext (legacy) with a warning.
   MFA_ENC_KEY: strEnv(z.string().min(16).optional()),

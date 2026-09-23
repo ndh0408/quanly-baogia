@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "./logger.js";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import { resolveUserPermissions } from "./permissions.js";
 
 // Hình dạng id truy vết được CHẤP NHẬN từ client. Cố ý hẹp: chữ-số cùng `. _ -`, tối đa 64 ký tự —
@@ -49,6 +50,8 @@ export function requestId(req: Request, res: Response, next: NextFunction) {
  * This lets the same route handlers serve browser (session) and API/mobile (JWT) clients.
  */
 export async function bearerAuth(req: Request, _res: Response, next: NextFunction) {
+  // Cờ đọc LÚC REQUEST (không phải lúc mount) để bật/tắt không cần dựng lại app — xem JWT_API_ENABLED.
+  if (!config.JWT_API_ENABLED) return next();
   if (req.session?.userId) return next();
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer\s+(.+)$/i);

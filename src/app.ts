@@ -396,7 +396,9 @@ export function createApp() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const coBearer = /^Bearer\s+\S/i.test(req.headers.authorization || "");
     const coCookiePhien = COOKIE_PHIEN.test(req.headers.cookie || "");
-    if (coBearer && !coCookiePhien) return next();
+    // Chỉ khi bề mặt JWT BẬT (AUTH-04): tắt thì bearerAuth không xác thực gì, nên request Bearer
+    // phải đi đường phiên như mọi request khác thay vì lọt vào một nhánh không ai gác.
+    if (config.JWT_API_ENABLED && coBearer && !coCookiePhien) return next();
     return sessionMiddleware(req, res, next);
   });
 

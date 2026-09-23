@@ -246,8 +246,16 @@ router.post(
 
 // === JWT API surface (for mobile / SDK / public API clients) ===
 
+// Cổng cờ JWT_API_ENABLED (AUTH-04). Đứng TRƯỚC limiter và validate: khi tắt, endpoint trông y như
+// không tồn tại (cùng thân 404 với notFound) thay vì trả 400/401 lộ ra rằng có một cửa đăng nhập thứ hai.
+function chiKhiBatJwt(_req: Request, res: Response, next: () => void) {
+  if (!config.JWT_API_ENABLED) return res.status(404).json({ error: "Không tìm thấy tài nguyên" });
+  next();
+}
+
 router.post(
   "/token",
+  chiKhiBatJwt,
   loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
@@ -282,6 +290,7 @@ router.post(
 
 router.post(
   "/token/refresh",
+  chiKhiBatJwt,
   tokenLimiter,
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req: Request, res: Response) => {

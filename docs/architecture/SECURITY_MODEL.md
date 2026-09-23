@@ -7,6 +7,10 @@
 | Phiên cookie | trình duyệt (app React ở `web/`) | cookie `qly.sid`, kho phiên trong PG |
 | Bearer JWT | client API / script | header `Authorization` |
 
+**Đường Bearer JWT MẶC ĐỊNH TẮT** (`JWT_API_ENABLED`, audit 2026-09-23 AUTH-04): chưa client nào
+dùng nó, nên khi cờ tắt `POST /api/auth/token` và `/token/refresh` trả 404 và header `Bearer` bị bỏ
+qua. Bật cờ khi thật sự có client di động/API — mã và bộ test JWT vẫn còn nguyên.
+
 **Vai trò và quyền KHÔNG BAO GIỜ lấy từ claim trong token.** Cả hai đường đều nạp
 lại người dùng từ CSDL trên **mỗi request** (`src/middleware.ts` — `bearerAuth`
 cho Bearer, `enforceActiveUser` cho cookie). `signAccessToken` có đặt `role` vào
