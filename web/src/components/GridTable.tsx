@@ -215,7 +215,7 @@ function GridTableInner(props: GridTableProps) {
   const editModeRef = useRef<"enter" | "edit" | null>(null);   // null khi READY
   // CẮT kiểu Excel: Ctrl+X chỉ ĐÁNH DẤU vùng nguồn (viền nét đứt) — dữ liệu chỉ bị xoá khi DÁN
   // xong (di chuyển), Esc thì huỷ. Không như cut của trình soạn thảo (xoá ngay).
-  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number } | null>(null);
+  const cutPendingRef = useRef<{ token: number; r0: number; c0: number; r1: number; c1: number; images?: boolean } | null>(null);
   // Point-mode BÀN PHÍM: đang gõ công thức, ký tự trước con trỏ là toán tử → mũi tên CHỌN Ô THAM
   // CHIẾU (=  ↑ → "=H3", Shift+mũi tên kéo thành vùng "=H3:H5") — đúng thao tác gõ công thức Excel.
   const kbRefRef = useRef<{ el: HTMLInputElement | HTMLTextAreaElement; base: string; after: string; start: { row: number; col: number }; cur: { row: number; col: number }; fresh: boolean } | null>(null);
@@ -226,7 +226,7 @@ function GridTableInner(props: GridTableProps) {
   const coarsePointer = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Nhãn phím lệnh theo máy: macOS ⌘ · Windows/Linux Ctrl (mọi phím tắt nhận CẢ HAI).
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
-  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; labels?: string[]; c0?: number; r0?: number } | null>(null);
+  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; labels?: string[]; c0?: number; r0?: number; images?: string[][] } | null>(null);
   const copyTokenRef = useRef(0);
   const autoRef = useRef<{ input: HTMLInputElement | HTMLTextAreaElement; items: string[]; idx: number } | null>(null);
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
@@ -789,11 +789,19 @@ function GridTableInner(props: GridTableProps) {
     // tsv nằm TRONG payload: dán sang lưới khác (bảng nội bộ, tab khác) vẫn dựng lại đúng khối này.
     // Trước đây chỉ có token, mà mỗi lưới đếm token riêng từ 0 → token trùng nhau, dán nhầm khối cũ.
     // r0/c0: mốc nguồn để DỊCH THAM CHIẾU công thức theo kiểu Excel khi dán chỗ khác.
-    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1) })); } catch { /* */ }
-    copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
+    // ẢNH ĐI THEO HÀNG. Cột Hình ảnh không nằm trong FIELDS (không chọn/gõ được) nên trước đây
+    // copy/cắt một hàng có ảnh rồi dán chỗ khác thì chữ + số sang, ảnh ở lại hàng cũ; dán đè lên
+    // hàng đang có ảnh thì hàng đó giữ ảnh CŨ — ảnh lệch khỏi hạng mục của nó (người dùng báo
+    // 2026-09-23). Khối có cột Hạng Mục = đang copy "cái hạng mục" → mang ảnh theo. Chỉ khi cột
+    // Hình ảnh đang bật: cột ẩn thì người dùng không thấy ảnh, mang theo là gắn ảnh lén.
+    const images = showImages && FIELDS.slice(rc.c0, rc.c1 + 1).includes("name")
+      ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => [...((items[rc.r0 + k]?.images || []) as string[])])
+      : undefined;
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images })); } catch { /* */ }
+    copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0, images };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
-    if (cut && editable) cutPendingRef.current = { token, ...rc };
+    if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images };
     else cutPendingRef.current = null;
     paintSel();
   };
@@ -811,6 +819,8 @@ function GridTableInner(props: GridTableProps) {
         const fx = it.formulas as Record<string, string> | undefined;
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
       }
+      // Ảnh đã theo khối sang đích (xem onCopyCut) → hàng nguồn nằm ngoài vùng dán thì bỏ ảnh.
+      if (cp.images && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
     }
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
@@ -1002,7 +1012,7 @@ function GridTableInner(props: GridTableProps) {
     const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
-    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[] } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][] } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
     const text = e.clipboardData.getData("text/plain") || e.clipboardData.getData("text") || "";
     if (!text && !internal) return;
@@ -1089,6 +1099,9 @@ function GridTableInner(props: GridTableProps) {
     const wholeRowBlock = internal?.fields?.[0] === "_stt";
     const kinds = sameBlock && !(startKind === "section" || startKind === "subsection") ? (internal?.kinds ?? copyBufRef.current?.kinds ?? null) : null;
     const labels = kinds ? (internal?.labels ?? copyBufRef.current?.labels ?? null) : null;
+    // Ảnh của từng hàng trong khối (onCopyCut chỉ gửi kèm khi khối có cột Hạng Mục). Đích phải
+    // đang bật cột Hình ảnh — cột ẩn thì không gắn ảnh vào nơi người dùng không nhìn thấy.
+    const blockImgs = sameBlock && showImages ? (internal?.images ?? copyBufRef.current?.images ?? null) : null;
     rows.forEach((cells, r) => {
       const ri = startRow + r;
       if (ri >= items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); }
@@ -1096,6 +1109,7 @@ function GridTableInner(props: GridTableProps) {
       if (kinds && kinds[r]) it.kind = kinds[r];
       // Nhãn nhóm người dùng TỰ đặt thì mang theo; nhãn tự động (A/B/1/2) để render tính lại theo vị trí mới.
       if (labels && labels[r]) it.label = labels[r];
+      if (blockImgs) { const im = blockImgs[r] || []; if (im.length) it.images = [...im]; else delete it.images; }
       cells.forEach((val, c) => {
         // Khối phủ NGUYÊN HÀNG (bắt đầu từ cột STT) → ghép cột theo TÊN TRƯỜNG, không theo vị trí:
         // sheet nguồn và sheet đích có thể khác mẫu (bên có cột Chi Tiết / Số Ngày, bên không).
@@ -1121,6 +1135,7 @@ function GridTableInner(props: GridTableProps) {
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();
+    if (blockImgs) setImgVer((v) => v + 1);   // ô ảnh không tự vẽ lại theo items (xem addImages)
     selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
     focusCell(startRow, FIELDS[startCol], true);
     toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
