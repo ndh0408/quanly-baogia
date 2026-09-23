@@ -8,9 +8,11 @@
 #                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
 # ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
-# CI trên GitHub KHÔNG chạy được (tài khoản không bật Actions). Nghĩa là mọi câu kiểu
-# "cứ đẩy lên, CI sẽ bắt" đều SAI ở repo này: cổng duy nhất thật sự chạy là cổng bạn
-# gõ tay. File này gom đúng những gì .github/workflows/ci.yml khai, để một lệnh là đủ.
+# ĐÂY LÀ CI CỦA REPO (chủ repo chốt 2026-09-23): GitHub Actions không dùng — tài khoản bị khoá vì
+# billing, và .github/workflows/ci.yml nay chỉ chạy tay. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều
+# SAI ở repo này: cổng duy nhất thật sự chạy là cổng bạn gõ tay. File này gom đúng những gì
+# ci.yml khai, để một lệnh là đủ — và khi chạy ĐỦ trên cây SẠCH thì ghi DẤU XANH cho commit HEAD mà
+# `deploy.sh prod` đòi (xem cuối tệp).
 #
 # ── ĐIỂM KHÁC BIỆT QUAN TRỌNG SO VỚI `npm run test:run` ────────────────────
 # Đặt REQUIRE_DB_TESTS=1. Không có nó, các bài đụng CSDL hoặc KHO OBJECT tự BỎ QUA khi
@@ -114,6 +116,14 @@ redis-cli -h "${RD_HOST:-127.0.0.1}" -p "${RD_PORT:-6379}" ping >/dev/null 2>&1
 ket $? "Redis tại ${RD_HOST:-?}:${RD_PORT:-?} (nếu đỏ: redis-server --daemonize yes)"
 curl -fsS --noproxy '*' -o /dev/null "$S3_ENDPOINT/minio/health/live" 2>/dev/null
 ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data --address :9000)"
+# Node của máy PHẢI cùng major với production (audit 2026-09-22, DEP-04 / INFRA-12). Trước đây máy
+# này chạy Node 24 còn image production là node:22 — toàn bộ test kiểm một runtime KHÁC thứ đang
+# chạy thật, mà không dòng nào nói ra. .nvmrc, `engines`, Dockerfile (ARG NODE_IMAGE) và @types/node
+# nay cùng một major — tests/ops-deps-node.test.js khoá điều đó; ở đây khoá MÁY đang chạy cổng.
+NODE_CAN="$(tr -d '[:space:]' < .nvmrc 2>/dev/null)"
+NODE_DANG="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+[ -n "$NODE_CAN" ] && [ "$NODE_DANG" = "$NODE_CAN" ]
+ket $? "Node của máy (v${NODE_DANG:-?}) cùng major với .nvmrc/production (v${NODE_CAN:-?}) — đổi bằng nvm/fnm/volta"
 [ "$do" -eq 0 ] || { printf '\n\033[31mDỪNG: thiếu hạ tầng. Chạy tiếp cũng chỉ ra một dòng "skipped" trông như xanh.\033[0m\n'; exit 1; }
 
 # ── CÂY PHỤ THUỘC PHẢI KHỚP LOCKFILE ──────────────────────────────────────
@@ -328,7 +338,7 @@ node scripts/ci/check-doc-numbers.mjs --check >/dev/null;          ket $? "check
 node scripts/ci/check-architecture.mjs >/dev/null;                  ket $? "check-architecture (ranh giới tầng)"
 # CHANGELOG.md sinh từ `git log`, không viết tay (§34: không ghi số liệu dễ trôi bằng tay). Cổng
 # này bắt lúc nó lệch khỏi lịch sử — tức lúc ai đó sửa tay hoặc quên sinh lại sau khi commit.
-node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run check:changelog)"
+node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run changelog)"
 
 buoc "[9/13] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
@@ -501,6 +511,26 @@ fi
 
 if [ "$do" -eq 0 ]; then
   printf '\n\033[32m✅ TẤT CẢ CỔNG XANH\033[0m\n'
+  # ── DẤU XANH CHO deploy.sh (audit 2026-09-22, INFRA-04; chủ repo chốt 2026-09-23: CI = verify-local)
+  # GitHub Actions không dùng, nên đây là nơi DUY NHẤT nối "commit X đã qua đủ cổng" với lượt deploy
+  # commit X. `deploy.sh prod` từ chối commit không có dấu (có cờ khẩn cấp), staging chỉ cảnh báo.
+  # Chỉ ghi khi: chạy ĐỦ (không --nhanh — --nhanh bỏ test web, smoke image, smoke UI, quét bảo mật)
+  # VÀ cây làm việc SẠCH — cổng chạy trên cây làm việc, còn deploy ship `git archive <commit>`; cây
+  # bẩn thì thứ vừa kiểm KHÔNG phải thứ sẽ ship.
+  # Nằm trong thư mục git chung (--git-common-dir) chứ không trong cây: không commit nhầm được, và mọi
+  # worktree cùng thấy.
+  if [ "$NHANH" -eq 0 ] && [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+    SHA_XANH="$(git rev-parse HEAD 2>/dev/null)"
+    THU_MUC_DAU="${QUANLY_VERIFY_DIR:-$(git rev-parse --git-common-dir 2>/dev/null)/quanly-verify}"
+    if [ -n "$SHA_XANH" ] && mkdir -p "$THU_MUC_DAU" 2>/dev/null && \
+       printf 'sha=%s\nluc=%s\nnode=%s\nmay=%s\n' "$SHA_XANH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(node -v)" "$(hostname)" > "$THU_MUC_DAU/ok-$SHA_XANH"; then
+      printf '  dấu xanh: %s (deploy.sh prod đọc dấu này)\n' "$THU_MUC_DAU/ok-$SHA_XANH"
+    fi
+  elif [ "$NHANH" -eq 1 ]; then
+    printf '  (--nhanh: KHÔNG ghi dấu xanh cho deploy.sh prod — chạy đủ npm run verify)\n'
+  else
+    printf '  \033[33m(cây làm việc BẨN: KHÔNG ghi dấu xanh — commit hết rồi chạy lại để deploy.sh prod nhận)\033[0m\n'
+  fi
 else
   printf '\n\033[31m❌ CÓ CỔNG ĐỎ — xem các dòng ✗ ở trên\033[0m\n'
 fi

@@ -10,8 +10,10 @@ Claude Code và trỏ ngược về đây.
 
 Hệ quản lý nội bộ **đang chạy production** tại `gianguyen.cloud`: báo giá, hồ sơ
 nhân sự, theo dõi dự án cho hai công ty (Gia Nguyễn + Colorfull). Brownfield, một
-lập trình viên. Node 22 + TypeScript + Express + Prisma + Postgres + Redis, deploy
-Docker qua Coolify. Frontend là **React 19 + Vite** ở `web/src`. SPA vanilla cũ
+lập trình viên. Node 24 + TypeScript + Express + Prisma + Postgres + Redis, deploy
+Docker bằng `deploy.sh` lên VM tại chỗ (Coolify có trên host nhưng không quản stack này).
+Node: MỘT major cho mọi nơi — `.nvmrc`, `engines`, `ARG NODE_IMAGE` (ghim digest) và `@types/node`
+cùng major; `npm run verify` chặn khi máy chạy Node khác major. Frontend là **React 19 + Vite** ở `web/src`. SPA vanilla cũ
 (`public/js`) đã **gỡ hẳn 2026-08-26** — xem
 [docs/adr/0006-go-spa-vanilla-cu.md](docs/adr/0006-go-spa-vanilla-cu.md).
 
@@ -67,9 +69,18 @@ quy là làm hỏng công việc của người khác.
 
 ## Chốt chặn — đừng vô hiệu hoá
 
-⚠️ **GitHub Actions KHÔNG bật trên tài khoản của repo này.** `.github/workflows/ci.yml` khai
-đầy đủ nhưng **chưa bao giờ chạy**. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều SAI ở đây. Cổng
-duy nhất thật sự chạy là cổng bạn gõ tay: `npm run verify`.
+⚠️ **CI của repo này LÀ `scripts/verify-local.sh` (`npm run verify`), chạy trên máy dev. KHÔNG
+dùng GitHub Actions** (chủ repo chốt 2026-09-23). Tài khoản GitHub bị khoá vì billing nên mọi lượt
+Actions từng kích hoạt đều hỏng sau 2–3 giây; `.github/workflows/ci.yml` nay chỉ chạy tay
+(`workflow_dispatch`) và được giữ làm mô tả cổng. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều SAI ở đây.
+
+GitHub vẫn là **nơi lưu trữ mã**: push đầy đủ lên origin sau mỗi lượt làm việc — mã đang chạy
+production không được chỉ nằm trên một laptop.
+
+`npm run verify` chạy ĐỦ trên cây SẠCH thì ghi **dấu xanh** cho commit HEAD (trong
+`.git/quanly-verify/`, không vào git). `bash deploy.sh prod` **từ chối** commit không có dấu xanh
+hoặc cây bẩn (khẩn cấp: `DEPLOY_KHAN_CAP="<lý do>"`, lý do vào `RELEASES.log`); `staging` chỉ cảnh
+báo; commit chưa có trên origin chỉ cảnh báo.
 
 Cái giá của việc đó không phải giả định: lượt chạy thật đầu tiên của job `security` (2026-08-27)
 lộ ra `.gitleaks.toml` viết allowlist bằng cú pháp gitleaks BỎ QUA, và `.trivyignore.yaml` ghi ID
@@ -101,8 +112,8 @@ Mỗi cái dưới đây ra đời từ một lỗi có thật.
 
 ### Cổng chỉ sống trong `ci.yml` là cổng KHÔNG AI CHẠY
 
-Actions không bật, nên một bước chỉ được khai trong `.github/workflows/ci.yml` không phải chốt —
-nó là ghi chú. Lượt rà 2026-08-31 tìm thấy bốn bước như vậy; cả bốn nay có đường cục bộ:
+Actions không dùng, nên một bước chỉ được khai trong `.github/workflows/ci.yml` không phải chốt —
+nó là ghi chú. Lượt rà 2026-08-31 tìm thấy bốn bước như vậy (thêm quét image ngày 2026-09-23); tất cả nay có đường cục bộ:
 
 | Từng mồ côi | Nay chạy ở | Ghi chú |
 |---|---|---|
@@ -110,12 +121,12 @@ nó là ghi chú. Lượt rà 2026-08-31 tìm thấy bốn bước như vậy; c
 | `check-destructive-sql.mjs --check` (`.github/workflows/ci.yml:194`) | `[8/13]` | Gác trôi schema coi `DROP COLUMN` viết trong migration là HỢP LỆ — schema khớp CSDL, chỉ dữ liệu là mất |
 | `smoke-dist.sh` (`.github/workflows/ci.yml:217`) | `[10b/13]` | Lượt chạy tay đầu tiên lộ ngay lỗi: script gán `PORT` mà không `export`, nên tiến trình con bind cổng `3000` còn script gõ cửa `3999`. CI không thấy vì khối `env:` của bước đã export sẵn |
 | `kubeconform` trên `infra/k8s/` (`.github/workflows/ci.yml:283`) | `[9/13]` | `check-helm.mjs` chỉ chạy kubeconform trên bản RENDER của chart; manifest thô trong `infra/k8s/` chưa từng được kiểm schema. Bản cục bộ dùng **glob** chứ không chép lại danh sách tệp — danh sách chép tay là danh sách sẽ trôi |
+| `trivy` quét **IMAGE** (`.github/workflows/ci.yml:377`) | `[11/13]` qua `scripts/ci/docker-smoke.sh` bước `[D3]` | Từ audit 2026-09-22 (INFRA-11). Cổng cứng cho gói OS + `node_modules` của ứng dụng; npm đi kèm ảnh node chỉ CẢNH BÁO (lỗ nằm trong ảnh gốc — nâng `NODE_IMAGE` khi có bản vá). Máy không cài trivy thì bước báo vàng "bỏ qua" |
 
-Bốn thứ dưới đây **vẫn chỉ chạy khi Actions bật**. Đừng tính chúng là chốt của repo này:
+Ba thứ dưới đây **chỉ có trong `ci.yml`** (không ai chạy). Đừng tính chúng là chốt của repo này:
 
 | Chỉ có ở CI | Vì sao chưa nối vào máy | Rủi ro còn lại |
 |---|---|---|
-| `trivy` quét **IMAGE** (`.github/workflows/ci.yml:377` và `.github/workflows/ci.yml:446`) | `security-scan.sh` mới quét `fs` — tức cây làm việc. Gói OS mà `Dockerfile` `apk add` và cả tầng nền `node:22-alpine` nằm ngoài tầm nó; `docker-smoke.sh` có dựng image cục bộ nhưng không ai quét | Lỗ hổng trong tầng nền image đi thẳng ra production, không cổng chạy được nào thấy |
 | SBOM của **image** (`.github/workflows/ci.yml:458`) và `provenance`/`sbom` đính kèm digest (`.github/workflows/ci.yml:434`) | Bước `[S4]` của `security-scan.sh` sinh SBOM từ `npm sbom --omit=dev` — chỉ cây phụ thuộc npm, không có gói OS | CVE mới công bố thì không tra được image đang chạy chứa gói OS bản nào |
 | `npm --prefix web ci` (nằm trong `npm run web:build`) | `verify-local.sh` chỉ chạy `npx vite build` trong `web/`; bước `[0b/13]` kiểm lockfile gốc chứ **không** kiểm `web/package-lock.json` | Sửa `web/package.json` mà quên `npm install` thì bundle cục bộ dựng trên cây phụ thuộc khác với bản Docker dựng |
 | Toàn bộ job `build-image` (đăng nhập ghcr, đẩy digest, tag `type=sha`) | Cần registry và `GITHUB_TOKEN`; không tái hiện được trên máy | Chỉ ảnh hưởng đường phát hành, không ảnh hưởng cây mã |

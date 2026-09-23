@@ -1,31 +1,73 @@
 # DR Runbook — QuanLY (khôi phục thảm họa)
 
+## ⚠️ Trạng thái production ĐÃ ĐO (2026-09-22) — đọc TRƯỚC mọi mục bên dưới
+
+Phần còn lại của tài liệu mô tả **cơ chế có trong repo**. Production **chưa chạy đủ** cơ chế đó. Người
+trực lúc sự cố phải biết mình đang có gì THẬT, không phải repo hứa gì:
+
+| Hạng mục | Repo có | Production đo ngày 2026-09-22 |
+|---|---|---|
+| Dump CSDL hằng đêm (`quanly-backup`, 02:00 UTC) | có | ✅ chạy, ghi `/opt/quanly-backups` **trên cùng máy** |
+| Restore-test hằng tuần (`quanly-restore-test`) | có | ✅ chạy thành công (chỉ CSDL, nạp vào chính instance Postgres đó) |
+| Bản sao **ngoài máy** (NAS hoặc rclone crypt) | có (tuỳ chọn) | ❌ **KHÔNG CÓ** — `/etc/quanly-backup.env` không có `NAS_*` |
+| Sao lưu **kho object** (`quanly-backup-objects`) | có | ❌ **KHÔNG CÓ timer** — ảnh chứng từ thanh toán **không có bản sao nào** |
+| Diễn tập đầy đủ (`quanly-restore-drill`) | có | ❌ không có timer |
+| Watchdog độ tươi (`quanly-backup-watchdog`) | có | ❌ không có timer |
+| Script trên host = script trong repo | — | ❌ `/opt/quanly/backup-db.sh` **khác md5** với repo |
+| Proxmox backup cả VM lên NAS | chỉ là lời khẳng định trong tài liệu cũ | ❓ **chưa kiểm chứng được** từ repo |
+
+Hệ quả, nói thẳng: **mất máy "coolify" (đĩa hỏng, cháy, ransomware) là mất CSDL cùng mọi bản dump, và
+mất vĩnh viễn toàn bộ ảnh chứng từ.** RPO khi mất host hiện là **vô hạn**, không phải 24h.
+
+Việc chủ repo phải làm tay trên host để đóng khoảng trống này: mục **"Đưa production về đúng cơ chế"**
+trong [BACKUP_RESTORE.md](BACKUP_RESTORE.md). Cập nhật bảng này (kèm ngày đo) sau mỗi lần thay đổi.
+
 ## Mục tiêu
-- **RPO** (mất tối đa bao nhiêu data): ≤ 24h (backup hằng ngày 02:00) — hoặc tới lần deploy gần nhất nếu mới deploy.
+- **RPO** (mất tối đa bao nhiêu data) — **mục tiêu**: ≤ 24h (backup hằng ngày 02:00) — hoặc tới lần deploy gần nhất nếu mới deploy. **Thực tế hôm nay** (bảng trên): ≤ 24h cho CSDL **khi host còn sống**; vô hạn khi mất host; vô hạn cho kho object.
 - **RTO** (thời gian khôi phục): ≤ 1h cho khôi phục DB; ≤ 4h nếu phải dựng lại VM.
 
 ## Backup tự động (cài bằng `scripts/backup/install-backup.sh`)
 - **Lịch:** `quanly-backup.timer` hằng ngày 02:00 → `pg_dump` (read-only) → `gzip` → `/opt/quanly-backups/quanly-<ngày>.sql.gz`, giữ **14 bản** local.
-- **Off-host:** nếu điền `NAS_*` trong `/etc/quanly-backup.env` → đẩy lên **NAS Synology** (192.168.1.100) qua docker smbclient (host coolify CŨNG được Proxmox backup cả VM lên NAS → 2 lớp off-host).
+- **Off-host — hai đích, cấu hình đích nào đẩy đích đó** (chi tiết: [BACKUP_RESTORE.md](BACKUP_RESTORE.md), mục Off-host):
+  - **NAS** trong LAN (`NAS_*`, docker smbclient) — bản **thô**, và vẫn cùng toà nhà: off-host, chưa phải off-site.
+  - **rclone remote kiểu `crypt`** (`OFFHOST_RCLONE_*`) — mã hoá phía máy trước khi rời host, đích ngoài toà nhà (R2/B2/S3…). Remote không phải crypt thì script **từ chối** đẩy.
+  - **Chưa cấu hình đích nào** (tình trạng production hôm nay): backup vẫn chạy, exit 0, nhưng log in `OFFHOST-CHUA-CAU-HINH` và metric `backup_offhost_configured{scope="host"} 0`. Không gửi Telegram mỗi đêm (chủ repo chốt 2026-09-23).
+  - Lời khẳng định cũ "Proxmox backup cả VM lên NAS → 2 lớp off-host" **chưa được kiểm chứng**: repo không có gì chứng minh, và audit 2026-09-22 không đo được. Nếu có thật, ghi lịch + lần khôi phục thử gần nhất vào đây.
 - **Restore-test:** `quanly-restore-test.timer` hằng tuần → nạp dump mới nhất vào DB tạm + đếm User/Quote → DROP. Lỗi → **alert Telegram**.
 - **Alert:** mọi lỗi backup/restore-test → Telegram (cấu hình `TELEGRAM_BOT_TOKEN`+`TELEGRAM_ALERT_CHAT`).
 
 ## Khôi phục DB (mất data / rollback hỏng)
+
+Hai giả định ngầm của bản trước đều SAI và đều cắn đúng lúc 2 giờ sáng (audit 2026-09-22, DOC-06):
+**app/worker vẫn chạy trong lúc nạp** (DROP TABLE chờ khoá của app, còn app chèn dữ liệu xen vào bảng
+vừa tạo lại → trạng thái trộn cũ/mới), và **dump nào cũng có `--clean`** (dump trước-deploy tạo trước
+2026-09-23 KHÔNG có → lệnh CREATE đầu tiên gặp "already exists" và `ON_ERROR_STOP` dừng ngay).
+
 ```bash
-# 1. Chọn bản backup (local hoặc kéo từ NAS)
-ls -lt /opt/quanly-backups/quanly-*.sql.gz
-# 2. (khuyến nghị) dump hiện trạng trước khi ghi đè
-docker exec quanly-postgres pg_dump -U quanly -d quanly | gzip > /opt/quanly-backups/before-restore-$(date +%F-%H%M%S).sql.gz
-# 3. Nạp lại (dump tạo bằng --clean --if-exists nên tự DROP+CREATE object)
-gunzip -c /opt/quanly-backups/quanly-<NGÀY>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
+cd /opt/stacks/quanly/quanly
+# 0. DỪNG app + worker — không ai được ghi vào CSDL trong lúc nạp.
+docker compose -f docker-compose.prod.yml stop app worker
+# 1. Chọn bản backup (local, hoặc kéo từ off-host — mục "Kéo bản off-host về" trong BACKUP_RESTORE.md)
+ls -lt /opt/quanly-backups/quanly-*.sql.gz ~/quanly-backups/predeploy-*.sql.gz
+# 2. (khuyến nghị) chụp hiện trạng trước khi ghi đè
+docker exec quanly-postgres pg_dump -U quanly -d quanly --no-owner --clean --if-exists | gzip > /opt/quanly-backups/before-restore-$(date +%F-%H%M%S).sql.gz
+# 3. Nạp lại. Kiểm dump có --clean không (có DROP ở đầu tệp):
+gunzip -c <TỆP>.sql.gz | head -200 | grep -c '^DROP '
+#   3a. > 0 (dump hằng đêm; dump trước-deploy từ 2026-09-23) → nạp thẳng:
+gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
+#   3b. = 0 (dump trước-deploy CŨ, không --clean) → tạo lại CSDL rỗng rồi nạp (bước 2 đã chụp hiện trạng):
+docker exec quanly-postgres psql -U quanly -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE quanly;' -c 'CREATE DATABASE quanly OWNER quanly;'
+gunzip -c <TỆP>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
 # 4. Kiểm
 docker exec quanly-postgres psql -U quanly -d quanly -tAc 'SELECT count(*) FROM "User";'
-# 5. Khởi động lại app để dọn cache/pool
-cd /opt/stacks/quanly/quanly && docker compose -f docker-compose.prod.yml restart app worker
+# 5. Dựng lại app + worker (--force-recreate: xem DEPLOYMENT.md#rollback vì sao `up -d` trần không đủ)
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker
 ```
 
 ## Dựng lại toàn bộ (mất host)
-Thứ tự: Proxmox restore VM coolify từ NAS **→** (hoặc) dựng VM mới + cài Docker + Coolify **→** `git clone` repo **→** điền `.env` (secret) + `docker-compose.prod.yml` (đã trong repo, secret qua `${VAR}`) **→** `docker compose up -d postgres redis` **→** restore DB (mục trên) **→** `prisma migrate deploy` **→** `up -d app worker` **→** verify `/livez` **→** cài lại cloudflared tunnel **→** `install-backup.sh`.
+Thứ tự: (nếu Proxmox thật sự có backup VM — xem bảng đầu tài liệu, **chưa kiểm chứng**) restore VM coolify **→** (hoặc) dựng VM mới + cài Docker **→** `git clone` repo (GitHub là nơi lưu trữ mã — mọi commit đang chạy phải đã được push) **→** điền `.env` từ **kho khoá của chủ repo** — khoá cần để dựng lại server được giữ NGOÀI repo, ở kho khoá riêng của chủ repo, và không bao giờ vào git (không lấy từ máy cũ, vì mất máy là mất luôn `.env` trên đó): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_*`, `PII_ENC_KEY`, `MFA_ENC_KEY`, `SESSION_SECRET`, `JWT_SECRET`… **→** `docker compose -f docker-compose.prod.yml up -d postgres redis minio` (ảnh MinIO kéo từ **quay.io** — Docker Hub đã gỡ `minio/*`) **→** kéo bản off-host về (BACKUP_RESTORE.md) **→** restore DB (mục trên) **→** khôi phục kho object (mục "Thứ tự khôi phục" bên dưới, bước 3) **→** `prisma migrate deploy` **→** `up -d app worker` **→** verify `/livez` + `/readyz` **→** cài lại cloudflared tunnel **→** `install-backup.sh`.
+
+> Không có bản off-host thì mục này **không thực hiện được** — xem bảng trạng thái đầu tài liệu.
 
 ## Lưu ý
 - Backup `pg_dump` KHÔNG đụng app đang chạy (read-only, có advisory-lock của Postgres).
@@ -59,7 +101,9 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 `PII_ENC_KEY` **phải** được sao lưu **tách khỏi** nơi để bản dump CSDL. Để chung một chỗ thì kẻ lấy
 được bản dump cũng lấy luôn khoá — mã hoá thành vô nghĩa; mà mất chỗ đó thì mất cả hai.
 
-* Nơi lưu: trình quản lý bí mật của tổ chức, hoặc phong bì niêm phong cất két (khoá không dài).
+* Nơi lưu: khoá cần để dựng lại server được giữ **ngoài repo, ở kho khoá của chủ repo** (đã sao
+  lưu riêng, không bao giờ vào git — tuyệt đối không ghi giá trị khoá vào bất kỳ tệp nào trong repo).
+  Kho đó phải nằm ở nơi KHÁC máy production và khác nơi để bản dump.
 * Mỗi môi trường một khoá riêng. Khoá DEV **không** dùng cho production.
 
 ### Xoay `PII_ENC_KEY`
@@ -132,9 +176,12 @@ cũ khỏi kho bí mật.
 * **Manifest SHA-256** mỗi lượt (`objects-manifest-<ngày>.tsv`) — về sau đối chiếu được bản gương có
   đúng nội dung không, chứ không chỉ đúng số file.
 * **Đối chiếu số lượng** bucket ↔ bản gương ngay sau khi mirror; thiếu object là dừng + alert.
-* **Off-host** lên NAS như bản dump CSDL (đóng gói `.tar.gz` khi bản gương còn dưới ngưỡng
-  `OBJ_TARBALL_MAX_MB`, vượt ngưỡng thì chỉ đẩy manifest và cảnh báo).
-* Cần `S3_*` trong `/etc/quanly-backup.env`. Thiếu → script dừng và alert, KHÔNG im lặng bỏ qua.
+* **Off-host**: NAS như bản dump CSDL (đóng gói `.tar.gz` khi bản gương còn dưới ngưỡng
+  `OBJ_TARBALL_MAX_MB`, vượt ngưỡng thì chỉ đẩy manifest), và/hoặc rclone crypt (`rclone copy`
+  cộng dồn bản gương + manifest, rồi `cryptcheck`). Chưa cấu hình → log `OFFHOST-CHUA-CAU-HINH`.
+* `S3_*`: đọc từ `/etc/quanly-backup.env`; thiếu thì **đọc từ container app** (`quanly-app`). Không
+  lấy được từ cả hai → script dừng và alert, KHÔNG im lặng bỏ qua.
+* ⚠️ **Production 2026-09-22 chưa có timer này** (bảng đầu tài liệu) — kho chứng từ chưa từng được sao lưu.
 
 ### Versioning kho object — QUYẾT ĐỊNH, không phải bỏ sót
 
@@ -171,7 +218,7 @@ mc ilm rule add --noncurrent-expire-days 30 <alias>/<bucket>
 cat /opt/quanly-backups/.objects-versioning
 ```
 
-⚠️ Versioning **không thay** bản off-host. Bật nó rồi bỏ NAS đi là đổi một lớp bảo vệ lấy một lớp
+⚠️ Versioning **không thay** bản off-host. Bật nó rồi bỏ đích off-host đi là đổi một lớp bảo vệ lấy một lớp
 bảo vệ, không phải thêm lớp: cả hai đều nằm trong cùng một kho, và kịch bản mất kho thì cả hai cùng mất.
 
 > ¹ **Nói cho đúng mức độ chắc chắn:** dòng 1 của bảng trên là **giới hạn ghi trong tài liệu MinIO**
@@ -192,11 +239,19 @@ người đọc cần nó nhất. Nay có lệnh thật, và `restore-drill.sh` 
 
 ```bash
 set -a; . /etc/quanly-backup.env; set +a
+# S3_* không có trong tệp env thì lấy của app (giống backup-objects.sh):
+for v in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET; do
+  [ -n "${!v:-}" ] || printf -v "$v" '%s' "$(docker exec quanly-app printenv "$v" 2>/dev/null)"
+done
+# KHÔNG `--network host`: cổng S3 9000 của MinIO chỉ mở trong mạng docker `internal` — gắn `mc` vào
+# đúng mạng của quanly-minio (bản trước dùng --network host nên KHÔNG BAO GIỜ với tới được MinIO).
+# Ảnh `mc` kéo từ quay.io theo digest: Docker Hub đã gỡ minio/mc (2026-09-23).
+NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' quanly-minio)"
 mc() {
   MC_HOST_q="${S3_ENDPOINT/:\/\//://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@}" \
-  docker run --rm --network host -e MC_HOST_q \
+  docker run --rm --network "$NET" -e MC_HOST_q \
     -v /opt/quanly-backups/objects:/mirror:ro \
-    minio/mc:RELEASE.2024-11-21T17-21-54Z "$@"
+    quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112 "$@"
 }
 ```
 
@@ -268,7 +323,7 @@ docker compose -f docker-compose.prod.yml exec app node dist/tools/verifyIntegri
 
 | | Con số | Trạng thái | Ghi chú |
 |---|---|---|---|
-| RPO (mất tối đa bao nhiêu dữ liệu) | 24h | **suy ra từ lịch** | dump CSDL 02:00 + kho object 02:30, cùng nhịp hằng ngày; watchdog canh độ tươi < 26h |
+| RPO (mất tối đa bao nhiêu dữ liệu) | 24h | **mục tiêu, suy ra từ lịch — production CHƯA đạt** | chỉ đúng khi đủ: dump CSDL 02:00 + kho object 02:30 + bản off-host + watchdog. Production 2026-09-22 chỉ có dump CSDL trên cùng máy → RPO khi mất host / cho kho object là **vô hạn** (bảng đầu tài liệu) |
 | RTO (bao lâu chạy lại được) | ~30 phút | ⚠️ **số DEV — CHƯA kiểm chứng ở production** | xem ngay bên dưới trước khi trích con số này đi đâu |
 | RTO — mục tiêu cam kết | ≤ 1h (khôi phục DB) · ≤ 4h (dựng lại VM) | **mục tiêu, chưa đo** | trùng mục "Mục tiêu" đầu tài liệu |
 
@@ -312,7 +367,8 @@ cat /opt/quanly-backups/.drill-last-duration    # <epoch><TAB><số giây của 
 
 ## Diễn tập khôi phục tự động
 
-`scripts/backup/restore-drill.sh` — CN 03:30 hằng tuần (`quanly-restore-drill.timer`).
+`scripts/backup/restore-drill.sh` — CN 03:30 hằng tuần (`quanly-restore-drill.timer`). ⚠️ **Chưa cài
+trên production** (đo 2026-09-22) — production chỉ có `restore-test.sh`.
 
 Khác `restore-test.sh` ở chỗ nó kiểm **đủ ba thứ**, không chỉ "dump có nạp được không":
 
@@ -353,7 +409,8 @@ S3 không có quyền `CreateBucket` thì tạo sẵn một bucket **rỗng** r�
 
 ## Canh độ tươi (watchdog)
 
-`scripts/backup/backup-watchdog.sh` — mỗi 6h (`quanly-backup-watchdog.timer`).
+`scripts/backup/backup-watchdog.sh` — mỗi 6h (`quanly-backup-watchdog.timer`). ⚠️ **Chưa cài trên
+production** (đo 2026-09-22) — tức "chốt tự động" này hiện KHÔNG canh gì ở đó.
 
 Mọi script backup chỉ alert **khi chúng chạy và hỏng**. Không cái nào alert được khi chúng **không
 chạy**: timer bị disable sau một lần cập nhật, host mất điện đúng khung 02:00, docker daemon chết,
@@ -363,4 +420,5 @@ cho tới hôm cần khôi phục thì bản mới nhất đã sáu tuần tuổ
 Watchdog soi **dấu thời gian thành công** (`.db-last-success`, `.objects-last-success`,
 `.drill-last-success`) và trạng thái enable của từng timer, nên bắt được cả kiểu chết mà bản thân
 script backup không bao giờ báo được. Ngưỡng theo `docs/operations/SLO.md`: CSDL < 26h, kho object
-< 26h, diễn tập < 8 ngày.
+< 26h, diễn tập < 8 ngày, bản off-host < 26h (**chỉ khi đã cấu hình** off-host; chưa cấu hình thì
+watchdog in cảnh báo vào log và tệp trạng thái chứ không gửi Telegram).

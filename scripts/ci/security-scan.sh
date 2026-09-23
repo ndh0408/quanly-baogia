@@ -36,7 +36,7 @@ GOC="$PWD"
 # (`-w /src`) trả JSON rỗng nên bước đọc kết quả ném "Unexpected end of JSON input". Cổng đỏ vì
 # MÔI TRƯỜNG, không phải vì có phát hiện — mà đỏ ở chỗ không ai đoán ra.
 #
-# Trên repo này chuyện đó nghiêm trọng hơn bình thường: GitHub Actions KHÔNG bật, nên máy Windows
+# Trên repo này chuyện đó nghiêm trọng hơn bình thường: GitHub Actions KHÔNG dùng, nên máy Windows
 # này là chỗ DUY NHẤT cổng bảo mật thật sự chạy — và nó vốn không chạy được.
 #
 # CÁCH VÁ, và vì sao KHÔNG dùng `MSYS_NO_PATHCONV=1`: công tắc đó tắt phép dịch cho MỌI tham số

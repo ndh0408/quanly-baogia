@@ -54,6 +54,14 @@ esac
 exit 0
 `;
 
+/** Thư mục chứa dấu xanh verify cho SHA giả 1111… (xem scripts/verify-local.sh, cuối tệp). */
+function dauXanh(goc) {
+  const d = join(goc, "verify");
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "ok-1111111111111111111111111111111111111111"), "sha=1111\n");
+  return d;
+}
+
 let sb;
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), "b7-deploy-"));
@@ -72,7 +80,10 @@ beforeAll(() => {
   }
   try {
     execFileSync("bash", [join(ROOT, "deploy.sh"), "prod"], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, HOME: home },
+      // QUANLY_VERIFY_DIR + dấu xanh: từ audit 2026-09-22 (INFRA-04) `deploy.sh prod` DỪNG ở bước
+      // [0/6] khi commit chưa có dấu xanh của `npm run verify` — chưa kịp tới bước [1/6] mà bài này
+      // đo. Cấp dấu cho đúng SHA mà stub `git rev-parse` trả về để đi qua cổng như một lượt thật.
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, HOME: home, QUANLY_VERIFY_DIR: dauXanh(dir) },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 20_000,
     });

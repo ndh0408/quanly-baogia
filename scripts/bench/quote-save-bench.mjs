@@ -40,6 +40,23 @@ const LAP = Number(process.env.BENCH_LAP || 5);
 const TAG = `bench${Date.now()}`;
 const PWD = "Bench1234!a";
 
+// ── CHỐT CHẶN: CHỈ CHẠY TRÊN CSDL TEST CỤC BỘ (audit 2026-09-22, DEP-11) ────────────────────
+// Bench tạo user/công ty/mẫu/báo giá 100–5000 dòng rồi `deleteMany` cứng. dist/config nạp `.env` qua
+// dotenv — máy dev còn `.env` trỏ production (hoặc shell còn export DATABASE_URL của prod) là bench
+// GHI và XOÁ CỨNG trên production. Cùng luật với chốt đầu scripts/verify-local.sh: máy chủ cục bộ VÀ
+// tên CSDL có chữ "test"/"bench". Nạp `.env` TRƯỚC khi kiểm để kiểm đúng thứ sẽ được dùng.
+// Hàm kiểm nằm ở tệp riêng để test được mà không chạy bench.
+{
+  const { kiemHaTangBench } = await import("./chan-ha-tang.mjs");
+  await import("dotenv/config");
+  const loi = kiemHaTangBench(process.env.DATABASE_URL);
+  if (loi && process.env.BENCH_CHO_PHEP_HA_TANG_LA !== "1") {
+    console.error(`✖ bench chỉ chạy trên CSDL test cục bộ: ${loi}`);
+    console.error("  Thật sự cố ý: BENCH_CHO_PHEP_HA_TANG_LA=1 npm run bench:quote-save");
+    process.exit(1);
+  }
+}
+
 const { prisma } = await import("../../dist/db.js");
 const { TEMPLATE_CONFIGS, getConfig } = await import("../../dist/templateConfigs.js");
 const { createApp } = await import("../../dist/app.js");

@@ -34,8 +34,13 @@ Cần Postgres + Redis + kho object tương thích S3 (MinIO là đủ). Chi ti�
 
 ```bash
 npm run verify:nhanh   # vòng lặp sửa nhanh (~2 phút)
-npm run verify         # TRƯỚC KHI COI LÀ XONG — 12 cổng, ~8 phút
+npm run verify         # TRƯỚC KHI COI LÀ XONG — 13 bước, ~9 phút (ĐÂY là CI của repo)
 ```
+
+**CI = `npm run verify`**, không phải GitHub Actions (chủ repo chốt 2026-09-23 — Actions không dùng,
+`.github/workflows/ci.yml` chỉ chạy tay). Chạy đủ trên cây sạch thì verify ghi **dấu xanh** cho commit
+HEAD; `bash deploy.sh prod` đòi dấu đó. Sau đó **push lên GitHub** — GitHub là nơi lưu trữ mã, và
+mã đang chạy production không được chỉ nằm trên một máy.
 
 `verify` từ chối chạy nếu `DATABASE_URL` / `REDIS_URL` / `S3_*` không trông như hạ tầng test: bộ
 test có `deleteMany` và `obliterate`, chạy nhầm lên production là **mất dữ liệu**, không phải bất

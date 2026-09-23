@@ -130,7 +130,7 @@ function chayVaLayDockerRun(script, themEnv) {
       STUB_DIR: sb.stub,
       BACKUP_DIR: sb.backups,
       PG_CONTAINER: "quanly-postgres",
-      NAS_SHARE: "//192.168.1.100/QuanlyBackup",
+      NAS_SHARE: "//nas.example/QuanlyBackup",
       NAS_USER: "backup-user",
       NAS_PASS: MAT_KHAU,
       NAS_SUBDIR: "db",

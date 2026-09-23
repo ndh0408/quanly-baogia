@@ -229,7 +229,7 @@ file nào.
 Chi tiết cách chạy, cách đặt tên, và những gì không test được trên máy Windows:
 [TESTING.md](TESTING.md).
 
-⚠️ **GitHub Actions không bật trên tài khoản của repo này.** Mọi câu kiểu "cứ đẩy
+⚠️ **Repo này KHÔNG dùng GitHub Actions — CI là `scripts/verify-local.sh`.** Mọi câu kiểu "cứ đẩy
 lên, CI sẽ bắt" đều SAI ở đây. Cổng duy nhất thật sự chạy là cổng bạn gõ tay:
 
 ```bash

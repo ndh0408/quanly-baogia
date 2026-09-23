@@ -1,6 +1,17 @@
 import pino from "pino";
+import { createRequire } from "node:module";
 
 const isProd = process.env.NODE_ENV === "production";
+
+/**
+ * pino-pretty là devDependency (audit 2026-09-22, DEP-10) — image production không cài nó. Chạy image
+ * với NODE_ENV khác "production" (vd docker-compose.yml đặt NODE_ENV=development) mà pino vẫn đòi
+ * transport "pino-pretty" thì tiến trình chết ngay lúc khởi động. Có gói thì dùng, không có thì log
+ * JSON thường — không bao giờ để một công cụ làm đẹp log làm sập ứng dụng.
+ */
+function coPinoPretty() {
+  try { createRequire(import.meta.url).resolve("pino-pretty"); return true; } catch { return false; }
+}
 
 /**
  * Che bí mật NẰM TRONG URL trước khi nó được ghi ra nhật ký.
@@ -45,6 +56,24 @@ export const redactConfig = {
     "*.passwordHash",
     "*.newPassword",
     "*.oldPassword",
+    // Mở rộng (audit 2026-09-22, OBS-16): fast-redact KHÔNG đệ quy — `*.password` chỉ phủ độ sâu 1,
+    // nên `{ password }` ở GỐC và `{ user: { profile: { password } } }` lọt nguyên văn (đã đo). Hôm nay
+    // không chỗ gọi nào log các khoá này, nên đây là lớp phòng cho dòng log THÊM SAU. Khoá bí mật
+    // thường gặp ở gốc, độ sâu 1 và 2; thân request thì bỏ hẳn.
+    "password",
+    "passwordHash",
+    "*.*.password",
+    "token",
+    "*.token",
+    "*.*.token",
+    "refreshToken",
+    "*.refreshToken",
+    "mfaSecret",
+    "*.mfaSecret",
+    "secret",
+    "*.secret",
+    "req.body",
+    "*.body",
     "req.url",
     // `path` PHẲNG, KHÔNG PHẢI `req.path`. Trình xử lý lỗi ghi `{ reqId, path: req.path, … }`
     // (src/middleware.ts) — một khoá ở GỐC đối tượng log, nên `req.url` ở trên KHÔNG phủ nó.
@@ -65,7 +94,7 @@ export const redactConfig = {
 export const logger = pino({
   level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
   redact: redactConfig,
-  transport: isProd
+  transport: isProd || !coPinoPretty()
     ? undefined
     : {
         target: "pino-pretty",

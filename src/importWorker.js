@@ -33,7 +33,7 @@ import { parentPort, workerData } from "node:worker_threads";
 // ký hook phải xảy ra TRONG chính luồng worker.
 //
 // Ở `dist/` thì KHÔNG làm gì: mọi file đã là `.js` (phân giải chuẩn của Node là đủ) và image
-// production không cài tsx — nó là devDependency.
+// production không cài tsx — nó là devDependency (đúng từ audit 2026-09-22, DEP-10; trước đó tsx nằm nhầm ở dependencies nên image VẪN có nó).
 async function napTsxNeuChayTuNguon() {
   if (import.meta.url.includes("/dist/")) return;
   try {

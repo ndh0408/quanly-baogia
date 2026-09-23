@@ -105,6 +105,10 @@ spec:
                   #
                   # `| wc -l` chứ không `grep -c .`: với bucket RỖNG, `grep -c .` in "0" NHƯNG
                   # thoát mã 1, nên `|| echo 0` in thêm một "0" nữa và biến thành chuỗi "0\n0".
+                  # ⚠️ CHƯA VÁ (audit 2026-09-22, INFRA-08): so SỐ ĐẾM tự vô hiệu khi retention xoá
+                  # object khỏi bucket (gương cộng dồn chỉ tăng) — xem lập luận + cách so THÀNH VIÊN ở
+                  # scripts/backup/backup-objects.sh bước [2/5] và chart Helm templates/backup-objects-cronjob.yaml.
+                  # Đường k8s không chạy ở production; chép bản vá khi nào thật sự dùng đường này.
                   REMOTE_N=$(mc ls --recursive --quiet "q/$S3_BUCKET" | wc -l | tr -d ' ')
                   LOCAL_N=$(mc ls --recursive --quiet /objects | grep -v '/manifest_' | wc -l | tr -d ' ')
                   echo "bucket=$REMOTE_N gương=$LOCAL_N"

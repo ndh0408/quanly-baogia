@@ -51,7 +51,17 @@ route:
   repeat_interval: 4h  # vẫn đang kêu → nhắc lại. Đủ để không quên, không đủ để thành rác.
   receiver: canh-bao
   routes:
-    # 11/22 quy tắc là `critical` — nhóm "mất dịch vụ hoặc mất dữ liệu". Cho nó nhịp gấp hơn.
+    # NHỊP TIM (audit 2026-09-22, OBS-01). QuanlyWatchdog (infra/prometheus/alerts.yaml) LUÔN kêu;
+    # route này đẩy nó tới một URL ping NGOÀI mỗi phút, và dịch vụ ngoài báo khi mất nhịp — cách
+    # DUY NHẤT để biết VM/docker/Alertmanager/Telegram đã chết, vì mọi mắt xích khác nằm trên chính
+    # máy production. ĐỨNG ĐẦU danh sách và KHÔNG `continue`: nhịp tim không bao giờ được rơi xuống
+    # receiver `canh-bao` (Telegram mỗi phút).
+    - matchers: ['severity="heartbeat"']
+      receiver: nhip-tim
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+    # Nhóm `critical` — "mất dịch vụ hoặc mất dữ liệu". Cho nó nhịp gấp hơn.
     - matchers: ['severity="critical"']
       receiver: canh-bao
       group_wait: 10s
@@ -70,7 +80,10 @@ receivers:
       - to: "${ALERT_EMAIL_TO}"
         send_resolved: true
         headers:
-          Subject: '[QuanLY {{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.instance }} @ {{ . }}{{ end }}'
+          # Môi trường ĐẦU tiêu đề (audit 2026-09-22, OBS-06): nhãn `environment` đến từ external_labels
+          # của prometheus.yml = QUANLY_ENV của máy. Không có nó thì "QuanlyCsdlKhongToiDuoc @ app:3000"
+          # của staging và của production trông y hệt nhau trong cùng một kênh.
+          Subject: '{{ with .CommonLabels.environment }}[{{ . | toUpper }}] {{ end }}[QuanLY {{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.instance }} @ {{ . }}{{ end }}'
         # Thư phải trả lời được "tôi phải làm gì bây giờ" NGAY TRONG THÂN, không bắt mở Prometheus:
         # người bị đánh thức lúc 2 giờ sáng thường chỉ có điện thoại trong tay.
         #
@@ -84,7 +97,7 @@ receivers:
         # (QuanlyTiLeLoi5xxCao, QuanlySsePublishThatBai, QuanlyXuatFileBiTuChoi,
         #  QuanlyWorkerXuatCangCung, QuanlyJobNenThatBai) — `if` sẽ in ra một ô rỗng.
         html: |
-          <h3>{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}</h3>
+          <h3>{{ with .CommonLabels.environment }}[{{ . | toUpper }}] {{ end }}{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}</h3>
           {{ range .Alerts }}
           <hr>
           <p><b>{{ .Annotations.summary }}</b></p>
@@ -98,7 +111,7 @@ receivers:
           </small></p>
           {{ end }}
         text: |
-          {{ .Status | toUpper }} — {{ .CommonLabels.alertname }}
+          {{ with .CommonLabels.environment }}[{{ . | toUpper }}] {{ end }}{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}
           {{ range .Alerts }}
           * {{ .Annotations.summary }}
             {{ .Annotations.description }}
@@ -113,8 +126,9 @@ receivers:
     # critical lọt vào nhánh chỉ-email là im lặng đúng lúc cần nhất.
     #
     # VÌ SAO CÓ KÊNH NÀY: email hỏng đúng vào những lúc nó cần nhất.
-    #   · `QuanlyEmailKhongGuiDuoc` nằm trong chính 22 quy tắc — khi nó nổ, email là kênh KHÔNG
-    #     dùng được để báo.
+    #   · SMTP hỏng (`QuanlyPhuThuocNgoaiLoi{dep="smtp"}`) thì email là kênh KHÔNG dùng được để báo.
+    #     (Bản trước viện dẫn "QuanlyEmailKhongGuiDuoc" — quy tắc đó CHƯA TỪNG tồn tại; audit
+    #     2026-09-22, OBS-09.)
     #   · 2 giờ sáng thì hộp thư không đánh thức ai; Telegram đẩy thẳng lên điện thoại.
     # KHÔNG phải viết bot: `telegram_configs` có sẵn trong Alertmanager từ v0.26.
     #
@@ -128,7 +142,7 @@ receivers:
         parse_mode: HTML
         # Ngắn hơn thư: điện thoại không phải chỗ đọc bảng. Đủ để quyết định có dậy hay không.
         message: |
-          <b>{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}</b>
+          <b>{{ with .CommonLabels.environment }}[{{ . | toUpper }}] {{ end }}{{ .Status | toUpper }} — {{ .CommonLabels.alertname }}</b>
           {{ range .Alerts }}
           • {{ .Annotations.summary }}
           {{ .Annotations.description }}
@@ -136,6 +150,16 @@ receivers:
           {{ end }}<i>severity={{ .Labels.severity }}{{ with .Labels.instance }} · {{ . }}{{ end }} · bắt đầu {{ .StartsAt.Local.Format "15:04:05 02/01/2006" }}</i>
           {{ end }}
     # <<<TELEGRAM<<<
+
+  # Receiver của nhịp tim. KHÔNG có HEARTBEAT_URL thì entrypoint gỡ khối webhook bên dưới và receiver
+  # này RỖNG — nhịp tim bị bỏ đi (đúng ý: không bao giờ được rơi sang Telegram/email).
+  - name: nhip-tim
+    # >>>HEARTBEAT>>>
+    webhook_configs:
+      # `url_file`: URL ping chứa khoá bí mật của dịch vụ ngoài — đi bằng TỆP secret như token Telegram.
+      - url_file: /run/secrets/heartbeat_url
+        send_resolved: false
+    # <<<HEARTBEAT<<<
 
 inhibit_rules:
   # CSDL chết thì KÉO THEO một loạt cảnh báo khác (tỉ lệ lỗi, độ trễ, pool chờ…). Gửi hết là chôn

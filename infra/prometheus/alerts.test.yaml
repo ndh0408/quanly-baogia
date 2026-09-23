@@ -593,20 +593,138 @@ tests:
               runbook: "src/queue.ts — bullQueueDepth"
 
   - interval: 1m
-    name: "Có job THẤT BẠI tồn đọng → kêu"
+    name: "Job hỏng HẲN mới xảy ra → kêu (theo sự kiện)"
     input_series:
-      - series: 'bullmq_jobs{queue="webhook", state="failed"}'
-        values: "3x30"
+      - series: 'bullmq_jobs_failed_total{queue="webhook", instance="worker:9091", job="quanly-worker"}'
+        values: "0 0 0 0 0 1 2 3 3 3 3 3 3 3 3 3"
     alert_rule_test:
-      - eval_time: 15m
+      - eval_time: 10m
         alertname: QuanlyJobNenThatBai
         exp_alerts:
           - exp_labels: { severity: warning, queue: webhook }
             exp_annotations:
-              summary: "Hàng đợi webhook có 3 job THẤT BẠI"
+              summary: "Hàng đợi webhook vừa có job hỏng HẲN (hết lượt thử) trong 15 phút qua"
               description: >-
-                Job thất bại nằm lại trong Redis chứ không tự biến mất. Đây là gauge ĐẾM TỒN, không
-                phải tốc độ — số không tự về 0 cho tới khi ai đó dọn hoặc thử lại.
+                Đếm theo sự kiện, tự im khi không còn job hỏng mới. Xem job hỏng trong log worker
+                ("<queue> job failed") hoặc trong Redis (tập failed giữ tới removeOnFail.age).
+
+  - interval: 1m
+    name: "Sự cố job hỏng ĐÃ QUA (counter đứng yên) → KHÔNG kêu mãi như gauge tồn cũ"
+    # Gauge tồn cũ (bullmq_jobs{state=failed}) giữ >0 tới 7–90 ngày → cùng một sự cố kêu mỗi 4h cả tuần.
+    input_series:
+      - series: 'bullmq_jobs_failed_total{queue="email", instance="worker:9091", job="quanly-worker"}'
+        values: "3x60"
+      - series: 'bullmq_jobs{queue="email", state="failed", instance="app:3000", job="quanly-app"}'
+        values: "3x60"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: QuanlyJobNenThatBai
+        exp_alerts: []
+
+  - interval: 1m
+    name: "App VÀ worker cùng phát bullmq_jobs 60 job chờ → KHÔNG được cộng đôi thành 120"
+    input_series:
+      - series: 'bullmq_jobs{queue="export", state="waiting", instance="app:3000", job="quanly-app"}'
+        values: "60x30"
+      - series: 'bullmq_jobs{queue="export", state="waiting", instance="worker:9091", job="quanly-worker"}'
+        values: "60x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QuanlyJobNenChatDong
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Tiến trình khởi động lại MỘT lần (vd heap-OOM) → kêu; đứng yên → im"
+    input_series:
+      - series: 'process_start_time_seconds{instance="app:3000", job="quanly-app"}'
+        values: "1000x10 1700x20"
+      - series: 'process_start_time_seconds{instance="worker:9091", job="quanly-worker"}'
+        values: "1000x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: QuanlyTienTrinhVuaKhoiDongLai
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: "app:3000", job: quanly-app }
+            exp_annotations:
+              summary: "app:3000 vừa khởi động lại (deploy, hết bộ nhớ, hoặc sập)"
+              description: >-
+                Không phải deploy thì xem mã thoát: 134 + dòng "FATAL ERROR: Reached heap limit" trong log
+                là heap-OOM của V8; OOMKilled=true là cgroup giết; còn lại là uncaughtException.
+              runbook: "docker inspect quanly-app | grep -E 'ExitCode|OOMKilled'; docker logs quanly-app --since 30m | grep -m5 'FATAL ERROR\\|uncaughtException'"
+      - eval_time: 29m
+        alertname: QuanlyTienTrinhVuaKhoiDongLai
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SSE kết thúc sau 30 phút (quan sát +Inf) KHÔNG được kéo p95 lên"
+    input_series:
+      # Request thật đều nhanh (< 1s); route SSE có vài quan sát rơi vào +Inf.
+      - series: 'http_request_duration_seconds_bucket{le="1", route="/api/quotes", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="10", route="/api/quotes", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="+Inf", route="/api/quotes", job="quanly"}'
+        values: "0+10x40"
+      - series: 'http_request_duration_seconds_bucket{le="1", route="/api/stream/events", job="quanly"}'
+        values: "0x40"
+      - series: 'http_request_duration_seconds_bucket{le="10", route="/api/stream/events", job="quanly"}'
+        values: "0x40"
+      - series: 'http_request_duration_seconds_bucket{le="+Inf", route="/api/stream/events", job="quanly"}'
+        values: "0+20x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QuanlyDoTreP95Cao
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SMTP lỗi → kêu theo từng phụ thuộc; ok thì im"
+    input_series:
+      - series: 'dependency_calls_total{dep="smtp", status="error", instance="app:3000", job="quanly-app"}'
+        values: "0 0 1 2 2 2"
+      - series: 'dependency_calls_total{dep="s3", status="ok", instance="app:3000", job="quanly-app"}'
+        values: "0+5x5"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QuanlyPhuThuocNgoaiLoi
+        exp_alerts:
+          - exp_labels: { severity: warning, dep: smtp }
+            exp_annotations:
+              summary: "Phụ thuộc ngoài smtp đang lỗi (15 phút qua)"
+              description: >-
+                smtp: thư mời / đặt lại mật khẩu không tới người dùng. telegram: thông báo không tới.
+                s3: ảnh chứng từ / tệp xuất không đọc-ghi được (404 không tính là lỗi).
+              runbook: "docker logs quanly-app --since 30m | grep -m20 'email send failed\\|telegram\\|S3'"
+
+  - interval: 1m
+    name: "Nhịp tim luôn kêu, KHÔNG mang severity nào đi tới người"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: QuanlyWatchdog
+        exp_alerts:
+          - exp_labels: { severity: heartbeat }
+            exp_annotations:
+              summary: "Nhịp tim của hệ cảnh báo — LUÔN kêu. Không phải sự cố."
+              description: >-
+                Route riêng trong Alertmanager đẩy nhịp này ra dịch vụ ngoài; dịch vụ đó báo khi mất nhịp.
+                Không bao giờ đi Telegram/email.
+
+  - interval: 1m
+    name: "Alertmanager gửi thất bại liên tục → kêu"
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{integration="telegram", instance="alertmanager:9093", job="alertmanager"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QuanlyCanhBaoGuiThatBai
+        exp_alerts:
+          - exp_labels: { severity: warning, integration: telegram }
+            exp_annotations:
+              summary: "Alertmanager gửi telegram THẤT BẠI"
+              description: >-
+                Kênh cảnh báo đang hỏng (token Telegram bị thu hồi, SMTP sai mật khẩu…). Cảnh báo này có
+                thể chính nó cũng không tới được — nó hiện trên giao diện Prometheus/Grafana, và nhịp tim
+                ngoài là lớp bắt thay khi cả kênh chết.
+              runbook: "docker logs quanly-alertmanager --tail 100"
 
   - interval: 1m
     name: "Event loop trễ P99 vượt 0,5s → kêu"
