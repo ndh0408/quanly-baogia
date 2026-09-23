@@ -13,10 +13,13 @@
  * hiện đúng ngày — tức tính năng này đang chạy đúng chỉ nhờ một trình duyệt dễ dãi, và bài kiểm
  * đơn vị nào cũng không thấy vì không bài nào chạm tới phép gán đó.
  *
- * ── VÌ SAO CẮT CHUỖI CHỨ KHÔNG QUY MÚI GIỜ ─────────────────────────────────
- * Ô date ghi ngược lại đúng `yyyy-MM-dd`, máy chủ đọc thành nửa đêm UTC. Nên phép nghịch đảo ĐÚNG
- * là lấy phần ngày của chuỗi UTC. Dùng `toLocaleDateString` hay `getDate()` sẽ cộng thêm lệch múi
- * giờ và làm ngày NHẢY MỘT BẬC với bản ghi sát nửa đêm UTC — bài áp chót khoá đúng điều đó.
+ * ── NGÀY THEO LỊCH VIỆT NAM (+7 CỐ ĐỊNH), KHÔNG THEO MÚI GIỜ MÁY ─────────────
+ * Ô date ghi ngược lại đúng `yyyy-MM-dd`, máy chủ lưu nửa đêm UTC; cộng 7 giờ vẫn cùng ngày nên giá
+ * trị do web ghi đi một vòng không đổi. Nhưng bản ghi cũ tạo/nhân bản trước MONEY-07/XLSX-11 lưu
+ * THỜI ĐIỂM đầy đủ (vd 2026-06-13T20:00Z = 03:00 sáng 14/06 giờ VN), và Excel/PDF nay đọc ngày theo
+ * lịch VN (src/vnTime.ts ngayThangNamVN) nên in 14. Cắt 10 ký tự UTC thì ô hiện 13, và lần Lưu kế
+ * tiếp ghi đè 13 — ngày trên chứng từ đổi qua lại theo một lần Lưu không liên quan (soát chéo
+ * excel#10). Dùng `getDate()` thì sai kiểu khác: phụ thuộc múi giờ của máy đang mở.
  * ============================================================================
  */
 import { describe, it, expect } from "vitest";
@@ -40,10 +43,34 @@ describe("ngayChoO", () => {
     expect(ngayChoO(new Date("2026-01-05T10:00:00.000Z"))).toBe("2026-01-05");
   });
 
-  it("KHÔNG quy về múi giờ địa phương — ngày sát nửa đêm UTC không được nhảy bậc", () => {
-    // Máy chạy ở Asia/Ho_Chi_Minh (UTC+7). `new Date("2026-03-31T23:30:00Z").getDate()` ra NGÀY 1
-    // THÁNG 4 theo giờ địa phương. Máy chủ lưu 31/3 nên ô phải hiện 31/3.
-    expect(ngayChoO("2026-03-31T23:30:00.000Z")).toBe("2026-03-31");
+  // Bài cũ ở đây đòi "2026-03-31T23:30Z" → "2026-03-31" với lý do "máy chủ lưu 31/3". Sau XLSX-11 máy
+  // chủ ĐỌC mốc đó là 01/04 (06:30 sáng giờ VN) khi in Excel/PDF, trang danh sách cũng hiện 01/04 —
+  // bài cũ khoá đúng chỗ lệch màn soạn ↔ tệp gửi khách (soát chéo excel#10), nên sửa theo lịch VN.
+  it("mốc có giờ → ngày theo LỊCH VN, khớp Excel/PDF (ngayThangNamVN)", () => {
+    expect(ngayChoO("2026-06-13T20:00:00.000Z")).toBe("2026-06-14");   // 03:00 sáng 14/06 giờ VN
+    expect(ngayChoO("2026-03-31T23:30:00.000Z")).toBe("2026-04-01");   // 06:30 sáng 01/04 giờ VN
+    expect(ngayChoO("2026-12-31T17:00:00.000Z")).toBe("2027-01-01");   // qua năm
+    expect(ngayChoO("2026-06-13T16:59:59.999Z")).toBe("2026-06-13");   // 23:59 giờ VN — chưa sang ngày
+  });
+
+  it("nửa đêm UTC (mọi giá trị web/máy chủ ghi) → GIỮ NGUYÊN ngày, đi một vòng không đổi", () => {
+    expect(ngayChoO("2026-06-13T00:00:00.000Z")).toBe("2026-06-13");
+    expect(ngayChoO(new Date("2026-06-13T00:00:00.000Z"))).toBe("2026-06-13");
+  });
+
+  it("KHÔNG phụ thuộc múi giờ của máy đang mở", () => {
+    // tsconfig web chỉ nạp kiểu vite/client (không có @types/node) — đọc process qua globalThis.
+    const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+    const goc = env.TZ;
+    try {
+      for (const tz of ["UTC", "America/New_York", "Asia/Ho_Chi_Minh"]) {
+        env.TZ = tz;
+        expect(ngayChoO("2026-06-13T20:00:00.000Z"), tz).toBe("2026-06-14");
+        expect(ngayChoO("2026-06-13T00:00:00.000Z"), tz).toBe("2026-06-13");
+      }
+    } finally {
+      if (goc === undefined) delete env.TZ; else env.TZ = goc;
+    }
   });
 
   it("rác không đúng dạng → rỗng, không ném", () => {

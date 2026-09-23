@@ -1,6 +1,6 @@
 // Test VECTOR VÀNG cho lõi toán tiền dùng chung (shared/quote-math.ts, qua re-export ./quoteMath).
 // Khóa CHÍNH SÁCH làm tròn/cắt/giảm-giá để KHÔNG ai đổi nhầm → lệch tiền khách. Đây là tiền khách.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { qtyRound, qtyExact, roundVnd, lineAmount, sheetSubtotalGrouped, sheetTotals, quoteTotals, fmtNumCell, parseVN, fmtMoney, statusLabel, groupLetter } from "./quoteMath";
 
 describe("qtyRound — LÀM TRÒN Số Lượng về 1 chữ số thập phân", () => {
@@ -23,6 +23,18 @@ describe("lineAmount — Thành Tiền 1 dòng", () => {
     expect(lineAmount({ kind: "item", quantity: 0.35, quantityExact: true, unitPrice: 550_000 }, false)).toBe(192_500);
     expect(lineAmount({ kind: "item", quantity: 0.9075, quantityExact: true, unitPrice: 2_200_000 }, false)).toBe(1_996_500);
     expect(fmtNumCell(0.9075, true)).toBe("0,9075");
+  });
+  // Soát chéo money#6 / excel#11: nhân CHÍNH XÁC như src/tienDong.ts (PDF/Excel/số lưu). Double cho
+  // 0,7×163.845 = 114691,4999… → 114.691 và 4,1×15 = 61,4999… → 61, lệch 1đ với tệp gửi khách.
+  it("nhân chính xác, không qua double — khớp PDF/Excel/số lưu từng đồng", () => {
+    expect(lineAmount({ kind: "item", quantity: 0.7, unitPrice: 163_845 }, false)).toBe(114_692);
+    expect(lineAmount({ kind: "item", quantity: 4.1, unitPrice: 15 }, false)).toBe(62);
+    expect(lineAmount({ kind: "item", quantity: 0.0029, quantityExact: true, unitPrice: 5_000 }, false)).toBe(15);
+    expect(sheetTotals({ items: [{ kind: "item", quantity: 4.1, unitPrice: 15 }] }, false).gross).toBe(62);
+  });
+  it("số âm: nửa làm tròn XA số 0 như Decimal ROUND_HALF_UP (-2,5 → -3), không bao giờ -0", () => {
+    expect(lineAmount({ kind: "item", quantity: 0.5, unitPrice: -5 }, false)).toBe(-3);
+    expect(Object.is(lineAmount({ kind: "item", quantity: -0.1, unitPrice: 1 }, false), -0)).toBe(false);
   });
 });
 
@@ -135,6 +147,35 @@ describe("fmtNumCell — đầu ra y hệt cách cũ, nhanh hơn rõ", () => {
     fmtNumCell(1);
     const t0 = performance.now();
     for (let k = 0; k < 2600; k++) fmtNumCell(k * 1234.5, k % 2 === 0);
+    expect(performance.now() - t0).toBeLessThan(25);
+  });
+});
+
+// Soát chéo money#6: phép nhân chính xác dùng BigInt, mà build web nhắm es2017 (Safari 11+) — BigInt
+// chỉ có từ Safari 14. Không có BigInt thì lưới phải VẪN chạy và vẫn ra đúng số, không được sập.
+describe("lineAmount — trình duyệt KHÔNG có BigInt (nhánh dự phòng)", () => {
+  it("vẫn ra đúng số đã lưu, không ném lỗi", async () => {
+    vi.resetModules();
+    vi.stubGlobal("BigInt", undefined);
+    try {
+      const M = await import("./quoteMath");
+      expect(M.lineAmount({ kind: "item", quantity: 0.7, unitPrice: 163_845 }, false)).toBe(114_692);
+      expect(M.lineAmount({ kind: "item", quantity: 4.1, unitPrice: 15 }, false)).toBe(62);
+      expect(M.lineAmount({ kind: "item", quantity: 0.5, unitPrice: -5 }, false)).toBe(-3);
+      expect(M.lineAmount({ kind: "item", quantity: 2, days: 3, unitPrice: 1_000_000 }, true)).toBe(6_000_000);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+});
+
+// Nhánh chính xác không được làm chậm lưới: đường tắt double lo gần như mọi dòng, BigInt chỉ chạy
+// khi tích rơi sát ,5.
+describe("lineAmount — tốc độ một lượt vẽ lưới", () => {
+  it("2.600 dòng (có dòng sát ,5) dưới 25ms", () => {
+    const t0 = performance.now();
+    for (let k = 0; k < 2600; k++) lineAmount({ kind: "item", quantity: (k % 99 + 1) / 10, unitPrice: 15 + k * 10 }, false);
     expect(performance.now() - t0).toBeLessThan(25);
   });
 });

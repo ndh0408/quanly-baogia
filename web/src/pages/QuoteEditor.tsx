@@ -49,13 +49,18 @@ const DEFAULT_NOTE = "Tất cả các hạng mục trên là thuê, Gia Nguyễn
  *     "yyyy-MM-dd".
  * Tức hiện đúng chỉ vì một trình duyệt dễ dãi. Đây là chỗ không nên dựa vào lòng tốt đó.
  *
- * CẮT 10 KÝ TỰ ĐẦU, KHÔNG ĐỔI MÚI GIỜ: ô date ghi ngược lại đúng `yyyy-MM-dd` và máy chủ đọc nó
- * thành nửa đêm UTC, nên cắt phần ngày của chuỗi UTC mới là phép nghịch đảo ĐÚNG. Quy về giờ địa
- * phương sẽ làm ngày nhảy một bậc với những bản ghi sát nửa đêm UTC.
+ * NGÀY THEO LỊCH VIỆT NAM (+7 CỐ ĐỊNH), CÙNG QUY TẮC VỚI EXCEL/PDF (src/vnTime.ts ngayThangNamVN,
+ * XLSX-11). Chuỗi đã là `yyyy-MM-dd` (người dùng vừa gõ) thì để nguyên. Mốc ISO đầy đủ thì cộng 7 giờ
+ * rồi lấy ngày: web và máy chủ ghi nửa đêm UTC, +7 vẫn cùng ngày nên đi một vòng không đổi; còn bản
+ * ghi CŨ lưu thời điểm đầy đủ (nhân bản lúc 03:00 sáng 14/06 giờ VN → 2026-06-13T20:00Z) thì Excel/PDF
+ * in 14 — cắt 10 ký tự UTC ra 13, và lần Lưu kế tiếp ghi đè 13 (soát chéo excel#10). Bù cố định chứ
+ * không `getDate()`: kết quả không được phụ thuộc múi giờ của máy đang mở.
  */
 export const ngayChoO = (v: unknown): string => {
   const s = typeof v === "string" ? v : v instanceof Date ? v.toISOString() : "";
-  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : "";
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return "";
+  const t = s.length > 10 ? Date.parse(s) : NaN;
+  return Number.isFinite(t) ? new Date(t + 7 * 3600e3).toISOString().slice(0, 10) : s.slice(0, 10);
 };
 type WinDirty = Window & { __editorDirty?: boolean };
 
@@ -320,7 +325,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         } else {
           q = await api.getQuote(quoteId!);
         }
-        if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = q.quoteDate.slice(0, 10);
+        // Ngày theo lịch VN như Excel/PDF (ngayChoO) — cắt 10 ký tự là ngày UTC, lệch bản ghi cũ (excel#10).
+        if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = ngayChoO(q.quoteDate) || q.quoteDate.slice(0, 10);
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
