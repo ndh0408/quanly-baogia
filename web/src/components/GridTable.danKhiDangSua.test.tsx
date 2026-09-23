@@ -91,3 +91,44 @@ describe("L23 — đang gõ dở công thức trong ô số mà Ctrl+V: chèn t�
     expect(items[0].unitPrice).toBe(1000000);
   });
 });
+
+describe("L24 — đang sửa ô chữ, dán MỘT ô chép trong app: chèn đúng chữ, không kèm dấu ngoặc của TSV", () => {
+  it("ô Hạng Mục 'Booth⏎HCM' dán vào ô đang F2: chèn đúng hai dòng, không có dấu \"", () => {
+    const items = [mk({ name: "Booth\nHCM" }), mk({ name: "Standee " })];
+    moLuoi(items);
+    act(() => { o(0, "name").focus(); });
+    const kho = chep();
+    expect(kho["text/plain"]).toBe('"Booth\nHCM"');   // TSV RFC-4180 — đúng thứ Excel cần
+    const el = o(1, "name");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    const ev = dan(kho);
+    if (!ev.defaultPrevented) trinhDuyetChen(el, kho["text/plain"]);   // trình duyệt chèn nguyên văn text/plain
+    expect(el.value, "ô nhận nguyên văn TSV kèm dấu ngoặc kép").toBe("Standee Booth\nHCM");
+    phim(el, { key: "Enter" });
+    expect(items[1].name).toBe("Standee Booth\nHCM");
+  });
+
+  it("ô chữ có dấu \" ('Ke 2\" inch') dán vào ô ĐVT đang sửa: không thành '\"Ke 2\"\" inch\"'", () => {
+    const items = [mk({ unit: 'Ke 2" inch' }), mk({ unit: "" })];
+    moLuoi(items);
+    act(() => { o(0, "unit").focus(); });
+    const kho = chep();
+    const el = o(1, "unit");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    const ev = dan(kho);
+    if (!ev.defaultPrevented) trinhDuyetChen(el, kho["text/plain"]);
+    expect(el.value).toBe('Ke 2" inch');
+  });
+
+  it("dán chữ từ NGOÀI app khi đang sửa: vẫn để trình duyệt chèn (không đoán)", () => {
+    const items = [mk({ name: "A" })];
+    moLuoi(items);
+    const el = o(0, "name");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    const ev = dan('"trích dẫn"');
+    expect(ev.defaultPrevented).toBe(false);
+  });
+});

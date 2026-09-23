@@ -1380,6 +1380,20 @@ function GridTableInner(props: GridTableProps) {
         const el = cellEl(i0, fld); if (el) { el.value = String((items[i0] as Record<string, unknown>)[fld] ?? ""); if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
         syncActiveCell();   // mốc Esc theo nội dung vừa dán — F2 rồi Esc không được trả về chữ trước khi dán (L6)
         baoSoMoHo(); baoChiChep();
+      } else if (internal && val !== text) {
+        // ĐANG SỬA mà dán MỘT ô chép TRONG app: text/plain là TSV RFC-4180 (cho Excel), ô có xuống dòng
+        // hay dấu " bị bọc "…" và nhân đôi dấu " bên trong — trình duyệt chèn nguyên văn thì ô nhận thêm
+        // dấu ngoặc (soát toàn diện L24). Tự chèn GIÁ TRỊ đã đọc tại con trỏ rồi phát input để đường gõ
+        // sẵn có ghi vào model. Ô một dòng (<input>) thì xuống dòng thành khoảng trắng. Chữ dán từ NGOÀI
+        // app vẫn để trình duyệt chèn — không biết dấu ngoặc là của TSV hay của người dùng.
+        const oSua = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+        if (oSua && oSua === ae && typeof oSua.setRangeText === "function") {
+          e.preventDefault();
+          const chu = oSua.tagName === "TEXTAREA" ? val : val.replace(/\r\n|\r|\n/g, " ");
+          const s = oSua.selectionStart ?? oSua.value.length, t = oSua.selectionEnd ?? s;
+          oSua.setRangeText(chu, s, t, "end");
+          oSua.dispatchEvent(new Event("input", { bubbles: true }));
+        }
       }
       return;
     }
