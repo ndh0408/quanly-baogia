@@ -104,15 +104,23 @@ export async function overview(req: Request) {
  *  cộng cả approved/sent (enum cũ đã chết theo luồng rút gọn 2026-06-22) → lệch số với KPI. */
 export async function revenueByDay(req: Request) {
   const { from, to } = defaultRange(req.query);
-  // admin sees all; manager/employee scoped to their own created quotes for this chart.
   const allScope = seesAllQuotes(req.session);
-  // Conditional fragment via Prisma.sql so the value stays parameterized.
-  const scope = allScope ? Prisma.empty : Prisma.sql`AND "createdById" = ${req.session.userId}`;
+  // CÙNG PHẠM VI VỚI overview() (DB-05, audit 2026-09-23): quoteScopeWhere cho người chỉ có
+  // read:own gồm báo giá mình TẠO và báo giá mình là THÀNH VIÊN. Bản trước ở đây chỉ lấy
+  // `createdById`, nên tổng các cột biểu đồ không cộng khớp ô "Doanh số đã chốt" ngay bên cạnh.
+  // Viết lại đúng hai vế của quoteScopeWhere; Prisma.sql giữ giá trị ở dạng tham số.
+  const uid = req.session.userId;
+  const scope = allScope
+    ? Prisma.empty
+    : Prisma.sql`AND ("createdById" = ${uid} OR EXISTS (SELECT 1 FROM "QuoteMember" m WHERE m."quoteId" = "Quote".id AND m."userId" = ${uid}))`;
 
+  // GOM THEO NGÀY GIỜ VIỆT NAM, không phải ngày UTC (DB-05). Cột TIMESTAMP(3) lưu giờ UTC không kèm
+  // múi, nên phải gắn UTC rồi mới đổi sang Asia/Ho_Chi_Minh — báo giá tạo 00:00–06:59 giờ VN từng
+  // rơi sang ngày hôm trước trên biểu đồ.
   const rows = await prisma.$queryRaw`
       -- COALESCE("convertedTotal","total"): số tiền THẬT SỰ chốt, đã trừ trang khách không duyệt.
       -- NULL = chốt trước 2026-09-17 (chưa có cột) → rơi về "total". Xem khối chú thích ở overview().
-      SELECT DATE("createdAt") AS d, COALESCE(SUM(COALESCE("convertedTotal", "total")), 0)::float AS amount, COUNT(*)::int AS n
+      SELECT DATE(("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Ho_Chi_Minh') AS d, COALESCE(SUM(COALESCE("convertedTotal", "total")), 0)::float AS amount, COUNT(*)::int AS n
       FROM "Quote"
       WHERE "createdAt" >= ${from} AND "createdAt" <= ${to}
         AND "status" = 'converted'
