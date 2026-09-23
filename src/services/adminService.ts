@@ -49,12 +49,13 @@ export async function purgeSoftDeleted(req: Request) {
     // hàng loạt đặt actorId = NULL trên mọi nhật ký của người đó: dòng còn, người mất.
     //
     // PHẠM VI cửa này RỘNG, không phải một nhóm vai trò hẹp, và cũng không chỉ là đăng nhập THÀNH
-    // CÔNG. MƯỜI vị trí gọi dưới đây (chín mã hành động) đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
+    // CÔNG. MƯỜI MỘT vị trí gọi dưới đây (chín mã hành động) đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
     // AuditEvent mang tên chính chủ tài khoản:
-    //   · src/routes/auth.routes.ts:93/135/186 — login.success / logout / login.token
+    //   · src/routes/auth.routes.ts (POST /login, /logout, /token) — login.success / logout / login.token
     //   · src/authCore.ts:173/214/245          — login.locked / login.failed / login.mfa.failed
-    //   · src/services/authService.ts:248      — user.invite.accept
-    //   · src/services/authService.ts:62/72/96 — profile.update / password.change.*
+    //   · src/services/authService.ts `acceptInvite`   — user.invite.accept
+    //   · src/services/authService.ts `updateProfile`, `changePassword` (hai nhánh thành công: phiên
+    //     cookie và client Bearer) — user.profile.update / password.change.failed / password.change.success
     // Nghĩa là gõ SAI mật khẩu đúng một lần, hoặc chỉ bấm nhận lời mời, là đã đủ để không qua được
     // bước "user" của purge nữa — cho tới khi `pruneOldRecords` (src/retention.ts) dọn hết nhật ký của họ theo
     // RETAIN_AUDIT_DAYS (mặc định 730 ngày — khai trong schema zod ở src/config.ts). Trên thực tế bước "user" chỉ xoá
