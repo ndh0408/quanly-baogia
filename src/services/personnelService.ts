@@ -212,7 +212,7 @@ export async function deletePersonnel(req: Request) {
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const coQuyenDoc = coPhamViDocPersonnel(req, before);   // quyết định HÌNH DẠNG phản hồi — xem chú thích ở hàm này
   const paid = (req.body as any).paid as boolean;
@@ -223,36 +223,54 @@ export async function markPayment(req: Request) {
     paymentProof: null, paymentProofKey: null, paymentProofMime: null,
     paymentProofSize: null, paymentProofSha256: null, paymentProofUploadedAt: null,
   };
+  // ẢNH CŨ KHÔNG BỊ XOÁ KHỎI KHO — cả khi thay ảnh lẫn khi "Bỏ đánh dấu" (FILE-01, FILE-03).
+  //
+  // Bản trước gọi `removeProof(before.paymentProofKey)` ở ba nhánh, và gọi TRƯỚC `update`:
+  //   · kho object là bản DUY NHẤT của ảnh (cột base64 bị null khi ghi mới; MinIO một ổ không có
+  //     versioning) → một cú bấm "Bỏ đánh dấu" là mất vĩnh viễn chứng từ uỷ nhiệm chi;
+  //   · `update` hỏng sau khi đã xoá (statement_timeout, pool cạn, hồ sơ vừa bị xoá mềm) → hàng
+  //     vẫn trỏ khoá cũ ĐÃ bị xoá, còn ảnh mới thành mồ côi: mất cả hai.
+  // Nay: CSDL là nguồn sự thật và được ghi TRƯỚC; object cũ nằm lại (khoá ghi vào audit để truy
+  // lại). Object không còn hàng nào trỏ tới là việc của một job dọn riêng, không phải của thao tác
+  // tài chính này. Chỉ object MỚI vừa PUT mới bị dọn — và chỉ khi CSDL từ chối nó.
+  let anhMoi: string | null = null;
   if (paid) {
     data.paidAt = new Date();
     data.paidById = req.session.userId;
     if (proof !== undefined) {
       if (proof) {
         const meta = await storeProof(id, proof);
+        anhMoi = meta.paymentProofKey;
         // Ảnh MỚI luôn vào kho; đồng thời XOÁ cột base64 để hàng này không còn giữ hai bản.
         Object.assign(data, meta, { paymentProof: null });
-        await removeProof(before.paymentProofKey);   // dọn ảnh cũ nếu thay ảnh
       } else {
         Object.assign(data, clearProofCols);
-        await removeProof(before.paymentProofKey);
       }
     }
   } else {
     Object.assign(data, { paidAt: null, paidById: null }, clearProofCols);
-    await removeProof(before.paymentProofKey);
   }
-  const rec = await prisma.personnelRecord.update({
-    where: { id }, data,
-    include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
-    omit: { paymentProof: true },   // không trả base64 về client
-  });
+  let rec;
+  try {
+    rec = await prisma.personnelRecord.update({
+      where: { id }, data,
+      include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
+      omit: { paymentProof: true },   // không trả base64 về client
+    });
+  } catch (e) {
+    await removeProof(anhMoi);   // CSDL không nhận → ảnh vừa PUT không ai trỏ tới
+    throw e;
+  }
   const newProof = paid
     ? (proof !== undefined ? (proof || null) : (before.paymentProofKey || before.paymentProof))
     : null;
   await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
     resource: "personnel", resourceId: id,
-    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
-    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
+    // hasProof phải xét CẢ khoá kho object: mọi ảnh ghi sau khi có storeProof có cột base64 = null,
+    // nên `!!before.paymentProof` luôn ra false và nhật ký nói "trước đó không có ảnh" (FILE-02).
+    // proofKey/proofSha256 là thứ duy nhất để tìm lại đúng object sau khi hàng đã bị null cột.
+    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!(before.paymentProofKey || before.paymentProof), proofKey: before.paymentProofKey ?? null, proofSha256: before.paymentProofSha256 ?? null },
+    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof, proofKey: rec.paymentProofKey ?? null },   // không lưu base64
   });
   if (!coQuyenDoc) {
     // KHÔNG decorate/decodePiiOnRead: người không đọc được hồ sơ này chỉ nhận đúng vài trường giao
