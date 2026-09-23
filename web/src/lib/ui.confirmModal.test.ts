@@ -52,6 +52,16 @@ describe("FE-02 — confirmModal", () => {
     } finally { document.removeEventListener("keydown", formEsc); }
   });
 
+  it("hai hộp chồng nhau: Esc đóng hộp TRÊN, hộp dưới vẫn mở", async () => {
+    const duoi = confirmModal("Dưới", "…");
+    const tren = confirmModal("Trên", "…");
+    phim("Escape");
+    expect(await tren).toBe(false);
+    expect(soHop()).toBe(1);
+    phim("Escape");
+    expect(await duoi).toBe(false);
+  });
+
   it("promptModal: Esc cũng không lọt xuống listener bên dưới", async () => {
     let lot = 0;
     const duoi = (e: KeyboardEvent) => { if (e.key === "Escape") lot++; };

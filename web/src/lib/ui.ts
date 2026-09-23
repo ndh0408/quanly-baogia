@@ -185,6 +185,17 @@ function trapFocus(box: HTMLElement) {
 
 /** Esc đã được hộp thoại xử lý → không để listener Esc nào khác (form/modal bên dưới) nhận nữa. */
 const chanEsc = (e: KeyboardEvent) => { e.preventDefault(); e.stopImmediatePropagation(); };
+/**
+ * Chỉ hộp thoại TRÊN CÙNG được xử lý phím. Listener của mọi hộp cùng nằm ở pha capture của window,
+ * chạy theo thứ tự ĐĂNG KÝ — tức hộp mở TRƯỚC (nằm dưới) chạy trước. Không có cổng này thì với hai hộp
+ * chồng nhau, Esc đóng hộp DƯỚI rồi chanEsc chặn luôn hộp trên. Hộp đã bị gỡ khỏi DOM mà chưa kịp
+ * dọn listener cũng không được ăn phím.
+ */
+const laHopTrenCung = (back: HTMLElement) => {
+  if (!back.isConnected) return false;
+  const tren = [...document.querySelectorAll('[data-focus-trap="own"]')].pop();
+  return !tren || back.contains(tren);
+};
 
 export function confirmModal(
   title: string,
@@ -202,14 +213,16 @@ export function confirmModal(
         <button class="btn ${opts.danger ? "btn-danger" : "btn-primary"}" data-yes>${esc(opts.confirmText ?? "Đồng ý")}</button>
       </div></div>`;
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey, true); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const done = (v: boolean) => { cleanup(); resolve(v); };
     // FE-02: Enter trước đây LUÔN = "Đồng ý" bất kể tiêu điểm đang ở đâu — Tab sang "Hủy" rồi Enter
     // vẫn Xoá / Khoá / Đặt lại MFA / "Rời, bỏ thay đổi". Nay Enter kích hoạt ĐÚNG nút đang có tiêu
     // điểm (như mọi nút HTML), tiêu điểm ở chỗ khác thì Enter không làm gì.
-    // Esc: nghe ở pha CAPTURE và chặn lan truyền — không thì listener Esc của form bên dưới (đăng ký
+    // Esc: nghe ở pha CAPTURE của WINDOW (chạy trước mọi listener ở document) và chặn lan truyền —
+    // không thì listener Esc của form bên dưới (đăng ký
     // trước, pha bubble) chạy tiếp và mở lại hộp "Bỏ thay đổi?" mỗi lần Esc, người dùng kẹt vô hạn.
     const onKey = (e: KeyboardEvent) => {
+      if (!laHopTrenCung(back)) return;
       if (e.key === "Escape") { chanEsc(e); done(false); }
       else if (e.key === "Enter") {
         const a = document.activeElement as HTMLElement | null;
@@ -220,7 +233,7 @@ export function confirmModal(
     back.addEventListener("click", (e) => { if (e.target === back) done(false); });
     back.querySelector("[data-no]")?.addEventListener("click", () => done(false));
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(true));
-    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey, true);
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);
     // Hành động phá huỷ: tiêu điểm mặc định ở "Hủy" — Enter theo phản xạ không được xoá gì.
@@ -244,17 +257,18 @@ export function promptModal(
       <div class="modal-foot"><button class="btn" data-no>Hủy</button><button class="btn btn-primary" data-yes>${esc(opts.confirmText ?? "Xác nhận")}</button></div></div>`;
     const input = back.querySelector(".pm-input") as HTMLTextAreaElement;
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey, true); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const done = (v: string | null) => { cleanup(); resolve(v); };
     // Ctrl/⌘+Enter gửi (Enter trần phải để xuống dòng vì ô là textarea) — khớp thói quen soạn thảo.
     const onKey = (e: KeyboardEvent) => {
+      if (!laHopTrenCung(back)) return;
       if (e.key === "Escape") { chanEsc(e); done(null); }
       else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value.trim()); }
     };
     back.addEventListener("click", (e) => { if (e.target === back) done(null); });
     back.querySelector("[data-no]")?.addEventListener("click", () => done(null));
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(input.value.trim()));
-    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey, true);
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);
     input.focus();
@@ -404,7 +418,7 @@ export function modalChotBaoGia(
     };
 
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey, true); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const huy = () => { cleanup(); resolve(null); };
     const chot = () => {
       if (nutChot.disabled) return;
@@ -416,13 +430,14 @@ export function modalChotBaoGia(
       resolve(doi);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (!laHopTrenCung(back)) return;
       // KHÔNG chốt bằng Enter: đây là thao tác không đảo lại được, phải bấm đúng nút.
       if (e.key === "Escape") { chanEsc(e); huy(); }
     };
     back.addEventListener("click", (e) => { if (e.target === back) huy(); });
     back.querySelector("[data-no]")?.addEventListener("click", huy);
     nutChot.addEventListener("click", chot);
-    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey, true);
     ve();
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);
