@@ -267,6 +267,21 @@ describe("GRID-05 — dán nhiều dòng vào ô đang sửa", () => {
   });
 });
 
+// ── GRID-12: thanh công thức xử lý Enter của IME như Enter chốt ô ─────────────────────────────
+describe("GRID-12 — thanh công thức không cướp Enter của bộ gõ", () => {
+  it("Enter kèm keyCode 229 (đang chốt cụm chữ IME) → KHÔNG chốt ô; Enter thường thì chốt", () => {
+    const items = [hang("Banner", "cái", 1, 1000)];
+    moLuoi(items, { fxBar: true });
+    vaoO(o(0, "unitPrice"));
+    const fx = hop!.querySelector("#fx-input") as HTMLInputElement;
+    act(() => { fx.focus(); fx.value = "=5*2"; fx.dispatchEvent(new Event("input", { bubbles: true })); });
+    phim(fx, "Enter", { keyCode: 229 });
+    expect(items[0].unitPrice).toBe(1000);
+    phim(fx, "Enter");
+    expect(items[0].unitPrice).toBe(10);
+  });
+});
+
 // ── GRID-15: Ctrl+Enter / dán một giá trị ra vùng gồm cột STT ghi rác `_stt` vào model ──────────
 describe("GRID-15 — vùng chọn gồm STT không ghi trường rác", () => {
   it("Shift+Space rồi dán '7' → không có _stt trong item", () => {

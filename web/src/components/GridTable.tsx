@@ -1962,6 +1962,9 @@ function GridTableInner(props: GridTableProps) {
           <input type="text" id="fx-input" className="fx-input" ref={fxInputRef} autoComplete="off" spellCheck={false} disabled={!editable}
             placeholder="Công thức… vd =SUM(H3:H8) · =G3*E3 — bấm/kéo ô để chèn tham chiếu"
             onKeyDown={(e) => {
+              // GRID-12: Enter/↑↓ đang CHỐT cụm chữ của bộ gõ (Telex macOS…) là của IME — không được hiểu
+              // thành Enter chốt ô rồi nhảy hàng. Lưới chính đã có chốt này, thanh công thức thì bị sót.
+              if (dangGoIME(e)) return;
               if (autoRef.current) { if (e.key === "ArrowDown") { e.preventDefault(); moveAuto(1); return; } if (e.key === "ArrowUp") { e.preventDefault(); moveAuto(-1); return; } if (e.key === "Tab") { e.preventDefault(); acceptAuto(); return; } if (e.key === "Escape") { e.preventDefault(); closeAuto(); return; } if (e.key === "Enter") closeAuto(); }
               if (e.key === "Enter") { e.preventDefault(); applyFxBar(true); } else if (e.key === "Escape") { e.preventDefault(); syncFxBar(); (e.target as HTMLInputElement).blur(); }
             }}
