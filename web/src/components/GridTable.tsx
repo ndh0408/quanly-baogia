@@ -247,6 +247,9 @@ function GridTableInner(props: GridTableProps) {
   const fxInputRef = useRef<HTMLInputElement | null>(null);
   const statRef = useRef<HTMLDivElement | null>(null);
   const softRef = useRef(0);
+  // Hàng có ô Thành Tiền vừa bị onNumInput GHI THẲNG vào DOM (ngoài tầm React). Lượt vẽ kế tiếp
+  // kéo lại theo model — xem effect đồng bộ ô (soát toàn diện L3).
+  const amtTayRef = useRef(new Set<number>());
   // Gõ vào ô CHỮ (Hạng Mục / Chi Tiết / Ghi Chú) không làm đổi tiền, số thứ tự hay cấu trúc nhóm —
   // model đã được ghi ngay ở onInput, chỉ việc VẼ LẠI là hoãn được. Lưới báo giá thật có ~560 ô
   // nhập; vẽ lại toàn bộ sau mỗi ký tự tốn ~30ms nên gõ nhanh là thấy khựng. Gộp lại còn 1 lần
@@ -1780,7 +1783,7 @@ function GridTableInner(props: GridTableProps) {
     const k = items[i].kind;
     if (k !== "section" && k !== "subsection" && k !== "info") {
       const amtTd = tdOf(i, "_amount");
-      if (amtTd) amtTd.textContent = M.fmtNumCell(M.lineAmount(items[i], usesDays));
+      if (amtTd) { amtTd.textContent = M.fmtNumCell(M.lineAmount(items[i], usesDays)); amtTayRef.current.add(i); }
     }
     onChangeSoft(true);
   };
@@ -1890,6 +1893,18 @@ function GridTableInner(props: GridTableProps) {
     // giá trị đúng, các ô khác không hề đổi. Bỏ được lượt quét này là bỏ luôn phần O(n) mỗi phím.
     const boQuaLanNay = skipCellSync.current;
     skipCellSync.current = false;
+    // Ô THÀNH TIỀN ĐÃ GHI TAY (onNumInput) → khớp lại model. Gõ SL "5" (ô nhảy 5.000) rồi Esc/Ctrl+Z
+    // TRƯỚC lượt vẽ hoãn 180ms: model về 1, nhưng React so với chữ nó vẽ lần trước ("1.000") chứ không
+    // so DOM thật ("5.000") nên không ghi gì — ô kẹt số đã huỷ tới khi dòng đổi dữ liệu. Chỉ duyệt
+    // các hàng vừa gõ nên chi phí O(số hàng vừa gõ), đường gõ không chậm thêm.
+    if (amtTayRef.current.size) {
+      for (const i of amtTayRef.current) {
+        const it = items[i]; if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") continue;
+        const td = tdOf(i, "_amount"); const want = M.fmtNumCell(M.lineAmount(it, usesDays));
+        if (td && td.textContent !== want) td.textContent = want;
+      }
+      amtTayRef.current.clear();
+    }
     if (tb && !boQuaLanNay) {
       tb.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-f]").forEach((el) => {
         // Textarea đã nhận nội dung mới mà chưa đo lại chiều cao (ô trống "chưa bẩn" tự nhận
