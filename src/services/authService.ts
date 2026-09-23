@@ -113,7 +113,10 @@ export async function changePassword(req: Request) {
   }
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST), passwordChangedAt: new Date() },
+    // Đốt luôn token mời/đặt-lại đang sống (AUTH-06): đổi mật khẩu là lúc người dùng nói "tôi nghi bị
+    // lộ" — một liên kết đặt lại còn hạn trong hộp thư (có thể chính kẻ kia vừa bấm "Quên mật khẩu")
+    // không được sống sót qua đó. Tài khoản đang đổi mật khẩu thì đã kích hoạt, không có lời mời nào để mất.
+    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST), passwordChangedAt: new Date(), inviteTokenHash: null, inviteExpiresAt: null },
   });
   // Thu hồi mọi refresh token — chúng sống độc lập với cookie nên không tự chết theo phiên.
   await revokeAllForUser(user.id);
@@ -162,6 +165,14 @@ export function sendPasswordReset(req: Request) {
     // phục hồi duy nhất hỏng theo đúng cách khó nhận ra nhất.
     const user = await findLoginUser(email);
     if (!user) return;
+    // TÀI KHOẢN KHÔNG CÓ EMAIL THÌ KHÔNG CÓ ĐÍCH GỬI HỢP LỆ (AUTH-05). findLoginUser OR cả cột
+    // `username`, và bản trước gửi tới `user.email || email` — tức tới ĐỊA CHỈ DO NGƯỜI GỌI GÕ. Tài
+    // khoản mời có username = email cũ, nên tài khoản bị xoá email (GDPR, hay trước khi updateUser
+    // chặn xoá trắng) vẫn nhận thư đặt lại ở HỘP THƯ CŨ — đúng hộp thư mà admin muốn cắt.
+    if (!user.email) {
+      logger.warn({ userId: user.id }, "quên mật khẩu: tài khoản không có email — bỏ");
+      return;
+    }
     // TÀI KHOẢN CHƯA KÍCH HOẠT VẪN ĐƯỢC CẤP LIÊN KẾT — NHƯNG TÀI KHOẢN ĐÃ BỊ KHOÁ THÌ KHÔNG.
     //
     // Trước 2026-09-07 nhánh này là `if (!user || !user.active) return;`. Mà endpoint LUÔN trả 200
@@ -221,7 +232,7 @@ export function sendPasswordReset(req: Request) {
           html: "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới.",
           text: "Bạn vừa yêu cầu đặt lại mật khẩu cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để tạo mật khẩu mới" };
     const gui = await sendEmail({
-      to: user.email || email,
+      to: user.email,
       subject: nhan.subject,
       text: `Chào ${user.displayName || ""},\n\n${nhan.text} (hết hạn sau 2 giờ):\n${url}\n\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`,
       html: brandedEmailHtml({
@@ -239,8 +250,8 @@ export function sendPasswordReset(req: Request) {
     // nhận được thư" sẽ không có gì để tra — đúng cảnh vừa xảy ra với thư mời trên production.
     const loiGui = (gui as { error?: string } | null)?.error;
     const boQua = (gui as { skipped?: boolean } | null)?.skipped;
-    if (loiGui) logger.error({ err: loiGui, to: user.email || email, chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
-    else if (boQua) logger.warn({ to: user.email || email }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
+    if (loiGui) logger.error({ err: loiGui, to: user.email, chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
+    else if (boQua) logger.warn({ to: user.email }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
     await audit(req, "password.forgot", {
       resource: "user", resourceId: user.id,
       after: { chuaKichHoat, emailSent: !loiGui && !boQua, emailError: loiGui ?? null },

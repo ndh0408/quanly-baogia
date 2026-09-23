@@ -261,6 +261,13 @@ export async function updateUser(req: Request) {
     // Admin đặt lại mật khẩu = đổi thông tin xác thực → đóng mốc để MỌI phiên và access token cũ
     // của tài khoản đó chết ngay, không phụ thuộc việc xoá hàng trong kho phiên có thành công không.
     data.passwordChangedAt = new Date();
+    // Đốt token đặt-lại đang sống (AUTH-06) — cùng lý do như changePassword. CHỈ với tài khoản ĐÃ
+    // kích hoạt: tài khoản chưa kích hoạt mà mất token là mất nút "Gửi lại lời mời" (listUsers tính
+    // `pending` theo inviteTokenHash) và thành hàng kẹt.
+    if (before.active) {
+      data.inviteTokenHash = null;
+      data.inviteExpiresAt = null;
+    }
   }
   // ── ĐỔI EMAIL: CHỐT CHỐNG TRÙNG, VÀ MỘT LỆNH ĐỐT CHỨNG THƯ ─────────────────────────────────
   //
@@ -291,8 +298,8 @@ export async function updateUser(req: Request) {
   //
   // Ô Email trong modal "Sửa" NẠP SẴN giá trị đang có, nên theo luật của repo bỏ trống PHẢI là xoá
   // thật — giữ luật ngược lại ở đây là "lưu mà không ăn". Nhưng xoá email KHÔNG vô hại như xoá chức
-  // danh: nó làm CHẾT ÂM THẦM ba đường (gửi lại lời mời → 400, thư đặt lại mật khẩu → `findLoginUser`
-  // không khớp rồi `return` im lặng sau khi endpoint đã trả 200, thông báo qua thư → bỏ qua không
+  // danh: nó làm CHẾT ÂM THẦM ba đường (gửi lại lời mời → 400, thư đặt lại mật khẩu → sendPasswordReset
+  // bỏ tài khoản không có email (AUTH-05) sau khi endpoint đã trả 200, thông báo qua thư → bỏ qua không
   // một dòng log). Nên quyết định được chọn TƯỜNG MINH thay vì để rơi vào mặc định:
   //
   //   · tài khoản ĐÃ kích hoạt → CHO xoá. Họ vẫn đăng nhập bằng `username` (và với mọi tài khoản mời

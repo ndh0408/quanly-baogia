@@ -16,6 +16,10 @@ function init() {
     host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
+    // Không dùng TLS ngầm (465) thì BẮT BUỘC STARTTLS (AUTH-08). Thiếu cờ này nodemailer chỉ nâng
+    // cấp khi máy chủ quảng bá STARTTLS — kẻ MITM gỡ lời quảng bá là đọc được token đặt lại mật khẩu
+    // trong thư. Máy chủ SMTP không hỗ trợ TLS thì gửi thư sẽ LỖI (ghi log) thay vì gửi trần.
+    requireTLS: process.env.SMTP_SECURE !== "true",
     auth: process.env.SMTP_USER
       ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
       : undefined,
