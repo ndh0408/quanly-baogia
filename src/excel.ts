@@ -154,6 +154,22 @@ function paintCell(cell: any, { fill, fontColor, bold }: { fill?: any; fontColor
   cell.style = style;
 }
 
+/**
+ * Đổi style của MỘT ô mà không lan sang ô khác (XLSX-04).
+ *
+ * `ws.duplicateRow` (ExcelJS) gán CÙNG MỘT đối tượng style cho hàng nguồn và mọi hàng nhân bản
+ * (`rDst.getCell(c).style = cell.style`). Gán thẳng `cell.alignment = …` / `cell.font = …` là sửa
+ * đối tượng chung đó: một nhóm con hay dòng info rơi vào vùng nhân bản (báo giá dài hơn số khe của
+ * mẫu) làm MỌI tên hạng mục từ hàng cuối của mẫu trở xuống bị thụt lề / in nghiêng. Cùng bẫy mà
+ * `paintCell` đã tránh bằng cách nhân bản style trước khi sửa. Ô ngoài vùng nhân bản vốn đã có
+ * style riêng nên đầu ra của chúng không đổi (style được ghi theo GIÁ TRỊ, không theo danh tính).
+ */
+function datStyleRieng(cell: any, patch: (st: any) => Record<string, unknown>) {
+  const st = cell.style ? JSON.parse(JSON.stringify(cell.style)) : {};
+  Object.assign(st, patch(st));
+  cell.style = st;
+}
+
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
 function clean(s: any) {
   if (s == null) return "";
@@ -775,7 +791,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.name) {
         const nameCell = ws.getCell(`${cols.name}${r}`);
         setCell(ws, `${cols.name}${r}`, it.name || ""); ensureWrap(nameCell);
-        if (isSubSection) nameCell.alignment = { ...(nameCell.alignment || {}), indent: 1 };   // thụt lề, KHÔNG dùng ký tự
+        if (isSubSection) datStyleRieng(nameCell, (st) => ({ alignment: { ...(st.alignment || {}), indent: 1 } }));   // thụt lề, KHÔNG dùng ký tự
       }
       if (cols.detail) ws.getCell(`${cols.detail}${r}`).value = null;
       if (cols.days) ws.getCell(`${cols.days}${r}`).value = null;
@@ -856,7 +872,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.notes) { setCell(ws, `${cols.notes}${r}`, it.notes || ""); ensureWrap(ws.getCell(`${cols.notes}${r}`)); }
       if (cols.name) {
         const nameCell = ws.getCell(`${cols.name}${r}`);
-        nameCell.font = { ...(nameCell.font || {}), italic: true };
+        datStyleRieng(nameCell, (st) => ({ font: { ...(st.font || {}), italic: true } }));
       }
     } else if (it) {
       const isSub = effKind[i] === "sub";
