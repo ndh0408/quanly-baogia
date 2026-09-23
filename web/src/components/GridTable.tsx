@@ -241,7 +241,7 @@ function GridTableInner(props: GridTableProps) {
   const coarsePointer = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Nhãn phím lệnh theo máy: macOS ⌘ · Windows/Linux Ctrl (mọi phím tắt nhận CẢ HAI).
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
-  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; labels?: string[]; c0?: number; r0?: number; images?: string[][] } | null>(null);
+  const copyBufRef = useRef<{ tsv: string; token: number; kinds?: string[]; labels?: string[]; c0?: number; r0?: number } | null>(null);
   const copyTokenRef = useRef(0);
   const autoRef = useRef<{ input: HTMLInputElement | HTMLTextAreaElement; items: string[]; idx: number } | null>(null);
   const fxAddrRef = useRef<HTMLSpanElement | null>(null);
@@ -953,7 +953,7 @@ function GridTableInner(props: GridTableProps) {
       ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => [...((items[rc.r0 + k]?.images || []) as string[])])
       : undefined;
     try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images })); } catch { /* */ }
-    copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0, images };
+    copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
     if (cut && editable) cutPendingRef.current = { token, ...rc, images: !!images, keys: items.slice(rc.r0, rc.r1 + 1).map((it) => it._k) };
@@ -1381,7 +1381,10 @@ function GridTableInner(props: GridTableProps) {
     const labels = kinds ? (internal?.labels ?? copyBufRef.current?.labels ?? null) : null;
     // Ảnh của từng hàng trong khối (onCopyCut chỉ gửi kèm khi khối có cột Hạng Mục). Đích phải
     // đang bật cột Hình ảnh — cột ẩn thì không gắn ảnh vào nơi người dùng không nhìn thấy.
-    const blockImgs = sameBlock && showImages ? (internal?.images ?? copyBufRef.current?.images ?? null) : null;
+    // CHỈ lấy ảnh của CHÍNH payload (soát toàn diện L11): khối từ lưới tắt ảnh (bảng nội bộ, báo giá
+    // khác) không có `images`, mà bản cũ rơi về bộ đệm chép CŨ của lưới đích → hàng đầu nhận ảnh của lần
+    // chép trước, các hàng sau bị xoá ảnh đang có. Payload không mang ảnh → không đụng ảnh đích.
+    const blockImgs = sameBlock && showImages ? (internal?.images ?? null) : null;
     // Quy ước số của khối NGOÀI (GRID-01); khối chép trong lưới luôn đọc số thô.
     const quDan = internal ? null : suyQuyUocSo(rows, (c) => FIELDS[startCol + c] === "unitPrice");
     // Khối tràn đáy bảng → nới bảng ĐỦ hàng TRƯỚC khi dán ô nào (soát toàn diện L8). shiftFormulaRefs
