@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
 import { createLimiter } from "./rateLimit.js";
 import { capNhatDoSauHangDoi } from "./queue.js";
-import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser } from "./middleware.js";
+import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser, asyncHandler } from "./middleware.js";
 import { registry, metricsMiddleware, khopTokenBearer } from "./observability.js";
 import { capNhatCongSuatXuat } from "./exportQueue.js";
 import { prisma, kiemTraCsdlChoDoSanSang } from "./db.js";
@@ -442,7 +442,8 @@ export function createApp() {
 
   // Metrics endpoint. Protect at the network level (NetworkPolicy/Nginx allowlist)
   // AND, if METRICS_TOKEN is set, require a bearer token (defence-in-depth).
-  app.get("/metrics", async (req, res) => {
+  // asyncHandler: `registry.metrics()` ném thì request không được treo (HTTP-06).
+  app.get("/metrics", asyncHandler(async (req, res) => {
     // Fail closed in production: if no METRICS_TOKEN is set, do NOT expose metrics.
     // Otherwise an internet-reachable deployment (e.g. behind a tunnel where the
     // network allowlist assumption doesn't hold) leaks route names, traffic volumes,
@@ -464,7 +465,7 @@ export function createApp() {
     capNhatCongSuatXuat();
     res.setHeader("Content-Type", registry.contentType);
     res.end(await registry.metrics());
-  });
+  }));
 
   // Accept Bearer JWT as an alternative to session cookies on every API call.
   app.use("/api/", bearerAuth);
