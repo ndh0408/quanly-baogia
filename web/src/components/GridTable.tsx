@@ -1157,14 +1157,16 @@ function GridTableInner(props: GridTableProps) {
   // theo số mới, mà onGridBlur luôn chốt `el.value` → rời ô là số cũ đè ngược vào model, công thức
   // vừa dán mất. Đọc hàng từ `data-row` nên chỉ gọi khi chỉ số hàng chưa lệch (không chèn/xoá hàng
   // từ lần vẽ trước) — dán khối có thể chèn hàng nên đi đường focusCell(…, dongBo) trong effect.
-  const syncActiveCell = () => {
+  // hang: chỉ số hàng MỚI của ô đang focus khi nơi gọi đã biết (restore dò lại theo `_k`) — `data-row`
+  // chỉ đúng tới lượt vẽ kế tiếp.
+  const syncActiveCell = (hang?: number) => {
     const el = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
     const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
     if (!f || !tr || !el || !tableRef.current?.contains(el)) return;   // ô của lưới KHÁC → không phải việc của lưới này
-    const rec = items[parseInt(tr.getAttribute("data-row") || "-1", 10)] as Record<string, unknown> | undefined;
+    const i = hang ?? parseInt(tr.getAttribute("data-row") || "-1", 10);
+    const rec = items[i] as Record<string, unknown> | undefined;
     if (!rec) return;
     const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
-    const i = parseInt(tr.getAttribute("data-row") || "-1", 10);
     const want = fx ?? (NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? ""));
     if (el.value !== want) {
       el.value = want;
@@ -1190,13 +1192,23 @@ function GridTableInner(props: GridTableProps) {
   });
   const restore = (json: string) => {
     const anhTruoc = new Map(items.map((it) => [it._k, (it.images || []) as string[]]));
+    // Hạng mục của ô đang focus, nhận theo `_k` TRƯỚC khi thay model. Lùi một lần chèn/xoá hàng làm chỉ
+    // số dời đi mà `data-row` của ô chưa kịp vẽ lại: đọc theo `data-row` là vẽ chữ của hạng mục KHÁC vào
+    // ô, rời ô là chữ đó bị chốt đè lên hạng mục đang focus (chèn hàng → bấm hàng dưới → Ctrl+Z: X
+    // thành Y). Cùng họ với soát toàn diện L6.
+    const trDangChon = (document.activeElement as HTMLElement | null)?.closest?.("tr[data-row]");
+    const kDangChon = trDangChon && tableRef.current?.contains(trDangChon) ? items[parseInt(trDangChon.getAttribute("data-row") || "-1", 10)]?._k : undefined;
     const arr = khoAnhRef.current.parse<ItemK[]>(json); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
     items.splice(0, items.length, ...arr);
     const last = Math.max(0, items.length - 1);
     const sel = selRef.current;
     if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
     cutPendingRef.current = null;
-    recomputeAll(); onChange(); syncActiveCell();
+    recomputeAll(); onChange();
+    // Hàng của ô đã mất (lùi lần chèn chính nó) → ô sắp bị gỡ; vẫn đồng bộ theo `data-row` như cũ để
+    // nếu trình duyệt kịp phát blur lúc gỡ thì chữ chốt lại đúng là chữ của hàng mang chỉ số đó.
+    const moi = kDangChon == null ? -1 : items.findIndex((it) => it._k === kDangChon);
+    syncActiveCell(moi >= 0 ? moi : undefined);
     if (anhDoiCungDoDai(anhTruoc)) setImgVer((v) => v + 1);
   };
   const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
