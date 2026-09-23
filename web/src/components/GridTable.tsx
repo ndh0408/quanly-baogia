@@ -1851,7 +1851,12 @@ function GridTableInner(props: GridTableProps) {
   );
   const onTaInput = (i: number, f: string, el: HTMLTextAreaElement) => { editingRef.current = true; markEditUndo(i, f); (items[i] as Record<string, unknown>)[f] = el.value; autoGrow(el); onChangeSoft(); };
   const fcls = (i: number, f: string, base: string) => { const c = items[i] as CoDo; return base + (items[i].formulas?.[f] ? " has-formula" : "") + (c._fxWarn?.[f] || c._fxLoi?.[f] ? " cell-fx-error" : ""); };
-  const toggleApprove = (i: number, checked: boolean) => { const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
+  // Mốc hoàn tác RIÊNG cho thao tác duyệt (soát toàn diện L2): thiếu nó thì Ctrl+Z quay về mốc TRƯỚC
+  // lần sửa ô liền trước, lùi âm thầm cả thao tác duyệt lẫn lần sửa đó. Ô tích là checkbox CÓ KIỂM
+  // SOÁT (`checked`, xem dataCells): `defaultChecked` chỉ ghi thuộc tính HTML, mà ô người dùng đã
+  // bấm thì trình duyệt thôi nghe thuộc tính đó (dirty checkedness) → sau Ctrl+Z ô vẫn hiện ✓ trong
+  // khi model đã bỏ duyệt, Lưu là lưu ngược cái đang thấy. onChange ở đây luôn vẽ lại nên ô bám model.
+  const toggleApprove = (i: number, checked: boolean) => { pushUndo(); const it = items[i] as Record<string, unknown>; it.approved = checked; it.approvedAt = checked ? new Date().toISOString() : null; onChange(); };
   xuLyRef.current = {
     so: onNumInput, chu: onTxtInput, ta: onTaInput,
     tenNhom: (i, el) => { (items[i] as Record<string, unknown>).name = el.value; autoGrow(el); onChangeSoft(); },
@@ -2174,7 +2179,7 @@ function GridTableInner(props: GridTableProps) {
       <td className="col-notes">{taInput(i, "notes")}</td>
       {internalNote && <td className="col-internal-note">{taInput(i, "internalNote", "(không xuất Excel)")}</td>}
       {showImages && <td className="col-images">{imagesCell(i)}</td>}
-      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" defaultChecked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
+      {approveCol && <td className="col-approve">{editable ? <label className="ap-wrap"><input type="checkbox" checked={!!items[i].approved} disabled={!canApprove} data-xl="duyet" onChange={xuLyO} /> Duyệt</label> : (items[i].approved ? "✓" : "")}{items[i].approved && items[i].approvedAt ? <span className="ap-date"> ✓ {M.fmtDate(items[i].approvedAt)}</span> : null}</td>}
       {payCol && <td className="col-pay">{canPay
         ? <button type="button" className={`btn btn-xs ${(items[i] as Record<string, unknown>).paid ? "btn-success" : ""}`} data-xl="thanh-toan" onClick={xuLyBam}>{(items[i] as Record<string, unknown>).paid ? "✓ Đã TT" : "Thanh toán"}</button>
         : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
