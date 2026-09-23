@@ -162,7 +162,10 @@ export async function listProjects(req: Request) {
   const { q } = req.query as any;
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;   // Account: chỉ dự án của mình
+  // + cột searchText đã chuẩn hoá của Quote (có GIN trgm) để gõ KHÔNG DẤU vẫn ra tên dự án (DB-08);
+  // giữ các vế ILIKE cũ để không mất kết quả nào (vd mã sản xuất có hậu tố).
   if (q) where.OR = [
+    { searchText: searchTextFilter(q) },
     { title: { contains: q, mode: "insensitive" } },
     { projectCode: { contains: q, mode: "insensitive" } },
     { quoteNumber: { contains: q, mode: "insensitive" } },

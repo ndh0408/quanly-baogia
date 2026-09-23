@@ -9,6 +9,7 @@ import { httpError } from "../httpError.js";
 import { canScoped, readScopeWhereOrThrow } from "../permissions.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere } from "../piiFields.js";
 import { phanTrang } from "../pagination.js";
+import { normalizeSearch } from "../searchText.js";
 
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 
@@ -24,7 +25,17 @@ export async function listEmployees(req: Request) {
     // Đổi sang khớp CHÍNH XÁC qua chỉ mục mù cho CCCD; số tài khoản bỏ khỏi tìm kiếm (không ai tìm
     // nhân viên theo một phần số tài khoản). Chưa bật mã hoá thì giữ nguyên hành vi cũ.
     const byIdCard = idCardLookupWhere(q);
+    // TÌM KHÔNG DẤU (DB-08, audit 2026-09-23): trang Báo giá/Khách hàng/Nhân sự tìm trên cột
+    // searchText đã chuẩn hoá ("nguyen" ra "Nguyễn"), còn Danh bạ thì ILIKE cột thô — gõ không dấu
+    // là không ra ai. Employee KHÔNG có cột searchText; thêm cột thì phải backfill bằng một script
+    // tay nằm ngoài quy trình deploy (đúng loại bước bị quên — xem DB-01/DB-02). Danh bạ là bảng nhỏ
+    // (một công ty), nên chuẩn hoá ngay trong bộ nhớ trên TẬP ĐÃ LỌC PHẠM VI rồi lọc theo id. Giữ
+    // nguyên các vế cũ (MST/SĐT chứa chuỗi thô, CCCD qua chỉ mục mù) để không mất kết quả nào.
+    const nq = normalizeSearch(q);
+    const ungVien = nq ? await prisma.employee.findMany({ where: { ...where }, select: { id: true, fullName: true, taxCode: true, phone: true } }) : [];
+    const idKhop = ungVien.filter((e) => normalizeSearch(e.fullName, e.taxCode, e.phone).includes(nq)).map((e) => e.id);
     where.OR = [
+      { id: { in: idKhop } },
       { fullName: { contains: q, mode: "insensitive" } },
       { taxCode: { contains: q } },
       { phone: { contains: q } },
