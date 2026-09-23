@@ -969,7 +969,8 @@ ra đúng 19 chỗ), rồi khôi phục nguyên trạng.
 
 Đường tới 18 chỗ đó đều là thao tác người dùng thật: gõ ô chữ, gõ ô số, Ctrl+`-`,
 Ctrl+`+`, Ctrl+D, Ctrl+R, Delete, Enter ở hàng cuối, Ctrl+Enter điền cả vùng, bốn nhánh
-dán (một số / một chữ / fill ra vùng / khối 2×2), nút "+ Thêm hàng", nút "↳", nút "✕",
+dán (một số / một chữ / fill ra vùng / khối 2×2), nút "+ Thêm hàng", nút "↳" (đã bỏ khỏi lưới
+2026-09-23 — bài của nó nay khẳng định nút không còn), nút "✕",
 chọn gợi ý rạp (`applySug`), modal "📐 Chèn từ rạp" (`insertCatalogRows`), và xoá ảnh
 (`removeImage`). Thêm một bài cho `dropMark()`: Esc huỷ phiên gõ thì bỏ luôn mốc của nó.
 
@@ -996,7 +997,7 @@ nay chỉ còn đúng một nửa:
    với `src` là data-URL rồi vẽ vào canvas. jsdom KHÔNG giải mã ảnh nên `onload` không bao
    giờ bắn và promise treo vĩnh viễn. Giả lập được thì cũng chỉ là giả lập chính hàm mình
    định kiểm, nên không làm. Chỗ song sinh của nó, `removeImage`
-   (`web/src/components/GridTable.tsx:1647`), thì ĐÃ có cổng.
+   (`web/src/components/GridTable.tsx`, hàm `removeImage`), thì ĐÃ có cổng.
 2. **`onCopyCut` chưa có cổng.** Nó GHI vào `e.clipboardData.setData(...)` và quản
    `cutPendingRef` (viền nét đứt, di chuyển khi dán). Stub hiện có chỉ ĐỌC được; viết một
    stub ghi được thì bài kiểm hoá ra chỉ kiểm chính stub đó.

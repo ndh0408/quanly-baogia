@@ -586,13 +586,11 @@ describe("GridTable — pushUndo() chụp ảnh TRƯỚC khi ghi vào items", ()
     expect(items.length).toBe(1);
   });
 
-  it("nút '↳' thêm hàng con (addSubAfter)", () => {
+  it("nút '↳' thêm hàng con ĐÃ BỎ (người dùng 2026-09-23: \"chức năng này không còn cần sử dụng\")", () => {
     const items = [hang("Banner")];
     moLuoi(items);
-    vaoO(o(0, "name"));
-    const nut = hop!.querySelector("tr[data-row='0'] button.add-sub") as HTMLButtonElement;
-    mocPhaiChupTruoc(items, () => act(() => nut.click()), () => o(0, "name"));
-    expect(items.length).toBe(1);
+    expect(hop!.querySelector("button.add-sub")).toBeNull();
+    expect(hop!.querySelector("tr[data-row='0'] button.rm-row"), "nút ✕ xoá hàng vẫn phải còn").not.toBeNull();
   });
 
   it("nút '✕' xoá hàng (removeRow)", () => {

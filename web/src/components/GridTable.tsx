@@ -1009,7 +1009,6 @@ function GridTableInner(props: GridTableProps) {
   const addSection = () => pushItem(M.blankSection());
   const addSubSection = () => pushItem(M.blankSubSection());
   const addInfo = () => pushItem(M.blankInfo());
-  const addSubAfter = (i: number) => { pushUndo(); const it = M.blankSub(usesDays) as ItemK; it._k = nextK(); chen(i + 1, [it]); recomputeAll(); onChange(); focusCell(i + 1, showDetail ? "detail" : "unit"); };
   const removeRow = (i: number) => { pushUndo(); xoa(i, 1); recomputeAll(); const sel = selRef.current; if (sel) { const max = items.length - 1; if (max < 0) selRef.current = null; else { sel.anchor.row = Math.min(sel.anchor.row, max); sel.focus.row = Math.min(sel.focus.row, max); } } onChange(); toast("Đã xóa dòng — nhấn Ctrl+Z để hoàn tác", "info"); };
 
   // ── gợi ý kích thước theo rạp (danh mục từ /api/venues/catalog) ───────────────
@@ -1770,7 +1769,7 @@ function GridTableInner(props: GridTableProps) {
       ...(showImages ? [{ ideal: 150, floor: 110 }] : []),       // HÌNH ẢNH — thumbnail 44px + nút
       ...(approveCol ? [{ ideal: 120, floor: 92 }] : []),        // DUYỆT
       ...(payCol ? [{ ideal: 140, floor: 104 }] : []),           // THANH TOÁN
-      ...(editable ? [{ ideal: 56, floor: 46 }] : []),           // nút ↳ ✕ (36px cũ không đủ 2 nút)
+      ...(editable ? [{ ideal: 40, floor: 36 }] : []),           // nút ✕ (nút ↳ thêm hàng con đã bỏ 2026-09-23 → còn 1 nút 26px)
     ];
     const idealFixed = fixed.reduce((a, c) => a + c.ideal, 0);
     const floorFixed = fixed.reduce((a, c) => a + c.floor, 0);
@@ -2006,7 +2005,7 @@ function GridTableInner(props: GridTableProps) {
         : ((items[i] as Record<string, unknown>).paid ? <span className="ap-date">✓ Đã TT</span> : "")}
         {(items[i] as Record<string, unknown>).paid && (items[i] as Record<string, unknown>).paidAt ? <span className="ap-date"> {M.fmtDate(String((items[i] as Record<string, unknown>).paidAt))}</span> : null}
         {(items[i] as Record<string, unknown>).hasPaidProof ? <span title="Có ảnh chứng từ"> 📎</span> : null}</td>}
-      {editable && <td className="col-action"><button className="add-sub" title="Thêm hàng con" onClick={() => addSubAfter(i)}>↳</button><button className="rm-row" title="Xóa hàng" onClick={() => removeRow(i)}>✕</button></td>}
+      {editable && <td className="col-action"><button className="rm-row" title="Xóa hàng" onClick={() => removeRow(i)}>✕</button></td>}
     </>
   );
 

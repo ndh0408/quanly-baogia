@@ -5,7 +5,8 @@
 // thành "E6", nếu không nó lặng lẽ trỏ sang hạng mục KHÁC — và đây là ô tiền, nên sai là sai tiền,
 // không có thông báo nào.
 //
-// `GridTable.tsx` có BỐN đường chèn/xoá. Ba đường (`pushItem`, `addSubAfter`, `removeRow`) gọi hàm
+// `GridTable.tsx` có BỐN đường chèn/xoá (nay còn ba — nút "↳ thêm hàng con" / `addSubAfter` đã bỏ
+// 2026-09-23). Ba đường (`pushItem`, `addSubAfter`, `removeRow`) gọi hàm
 // dịch; đường thứ tư — `insertCatalogRows` ("Chèn từ rạp", chèn hàng LOẠT) — thì KHÔNG, và cũng
 // không gọi `recomputeAll()`. Đó là lỗi P1 "catalog-insert-breaks-formulas": chèn 5 hạng mục từ
 // danh mục rạp là mọi công thức bên dưới trỏ lệch đúng 5 hàng.
