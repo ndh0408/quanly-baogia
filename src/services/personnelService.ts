@@ -103,9 +103,14 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  const [total, data, salaryRows] = await Promise.all([
+  // SẮP THEO LƯƠNG khi đã mã hoá (FILE-07): ORDER BY "salary" chạy trên cột THÔ, mà sau cutover
+  // (PII_PLAINTEXT_CUTOVER) cột thô của mọi hồ sơ tạo/sửa sau đó là NULL → chúng dồn về một đầu theo
+  // thứ tự tuỳ ý, chỉ hàng cũ còn cột thô mới được xếp. Sắp trên giá trị ĐÃ GIẢI MÃ của toàn tập lọc
+  // (đúng tập 2 cột mà tổng lương bên dưới vốn đã phải quét), rồi lấy trang theo id.
+  const sapTheoLuongGiaiMa = sort === "salary" && isPiiEncryptionEnabled();
+  const [total, dataTheoCot, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
-    prisma.personnelRecord.findMany({
+    sapTheoLuongGiaiMa ? Promise.resolve(null) : prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
@@ -116,8 +121,28 @@ export async function listPersonnel(req: Request) {
     // SUM bỏ qua NULL theo ngữ nghĩa chuẩn → tổng lương/thuế TNCN thiếu dần theo thời gian, không ai
     // báo lỗi vì phép tính vẫn "chạy được", chỉ ra số sai. Chỉ SELECT 2 cột (không phải cả hồ sơ) nên
     // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
-    prisma.personnelRecord.findMany({ where, select: { salary: true, salaryEnc: true } }),
+    prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
+  const luongGiaiMa = (r: any) => {
+    const v = decodePiiOnRead("PersonnelRecord", r as any)?.salary;
+    return v == null || v === "" ? null : Number(v);
+  };
+  let data = dataTheoCot;
+  if (!data) {
+    // Cùng ngữ nghĩa NULL với Postgres: ASC → NULL cuối, DESC → NULL đầu. Hoà thì theo id cho ổn định.
+    const huong = order === "asc" ? 1 : -1;
+    const idTrang = salaryRows
+      .map((r) => ({ id: r.id, v: luongGiaiMa(r) }))
+      .sort((a, b) => {
+        if (a.v == null || b.v == null) return a.v == null && b.v == null ? a.id - b.id : (a.v == null ? 1 : -1) * huong;
+        return a.v === b.v ? a.id - b.id : (a.v - b.v) * huong;
+      })
+      .slice((page - 1) * size, page * size)
+      .map((x) => x.id);
+    const hang = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
+    const theoId = new Map(hang.map((h) => [h.id, h]));
+    data = idTrang.map((id) => theoId.get(id)).filter((h): h is NonNullable<typeof h> => !!h);
+  }
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
   // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
@@ -126,7 +151,7 @@ export async function listPersonnel(req: Request) {
   })).map((r) => r.id));
   const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
-  const salarySum = salaryRows.reduce((s, r) => s + Number(decodePiiOnRead("PersonnelRecord", r as any)?.salary ?? 0), 0);
+  const salarySum = salaryRows.reduce((s, r) => s + (luongGiaiMa(r) ?? 0), 0);
   const tax = computeTax(salarySum);
   const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
   return { ...phanTrang(decorated, total, page, size), summary };
