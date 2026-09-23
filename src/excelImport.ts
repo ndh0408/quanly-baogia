@@ -485,6 +485,14 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // File do app xuất có thể dùng hàng ngay sau tiêu đề chỉ để in mã + lời chào. Không đưa hàng
     // metadata đó vào bảng; nếu có nội dung chương trình thật thì giữ lại để dựng item `info`.
     if (r === appBannerRow && appBannerInfo == null) continue;
+    // Nửa dưới của hàng TIÊU ĐỀ cao 2 hàng (ô gộp dọc 3:4 — kiểu rất hay gặp ở báo giá VN): ExcelJS
+    // trả giá trị ô chủ cho ô phụ, cellAt chỉ loại ô gộp NGANG, nên hàng này đọc ra STT="STT",
+    // ĐVT="ĐVT", Ghi chú="Ghi chú" và ô Hạng Mục gộp dọc → thành "hàng con" rác đứng đầu danh sách
+    // nạp (soát toàn diện L52). Ô Hạng Mục thuộc vùng gộp có ô chủ ở chính hàng tiêu đề → bỏ qua.
+    if (colOf.name) {
+      const nc = ws.getCell(r, colOf.name);
+      if (nc.isMerged && coordNum(nc.master?.row, false) === hit.row) continue;
+    }
     const allBlank = !stt && !name && isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity"))
       && isBlank(cellAt(r, "unitPrice")) && isBlank(cellAt(r, "_amount"));
     if (allBlank) { if (++blankRun >= 4) { stopRow = r; break; } continue; }
@@ -873,6 +881,20 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   }
   // Chế độ Thay trên web giữ ảnh đang có của dòng còn khớp (importApply.giuTruongChiApp, L48) — câu này
   // chỉ còn nói phần đúng: ảnh NẰM TRONG FILE không đọc được, dòng mới phải thêm ảnh tay.
+  // TIÊU ĐỀ 2 TẦNG (L52): ô tiêu đề một cột SỐ gộp NGANG nhiều cột, hàng ngay dưới chia cột con
+  // ("Đơn giá" → "Vật tư | Nhân công"). App chỉ đọc được cột con ĐẦU — Đơn Giá hụt phần còn lại. Dòng
+  // lệch đã có cảnh báo Thành Tiền riêng, nhưng không câu nào nói VÌ SAO; nói ở cấp sheet.
+  for (const [role, vn] of [["quantity", "Số Lượng"], ["days", "Số Ngày"], ["unitPrice", "Đơn Giá"], ["_amount", "Thành Tiền"]] as const) {
+    const c = colOf[role];
+    if (!c) continue;
+    const ben = ws.getCell(hit.row, c + 1), m = ben.isMerged ? ben.master : null;
+    if (!m || coordNum(m.row, false) !== hit.row || coordNum(m.col, true) !== c) continue;
+    const duoi = ws.getCell(hit.row + 1, c);
+    if (duoi.isMerged && coordNum(duoi.master?.row, false) === hit.row) continue;
+    const t = cellText(duoi.value).trim();
+    if (!t || /^[\d\s.,()%₫đ$-]+$/i.test(t)) continue;   // hàng dưới là SỐ (dữ liệu) → không phải tiêu đề con
+    base.warnings.push(`Tiêu đề nhiều tầng: cột ${vn} (${colLetter(c)}) gộp ngang nhiều cột con — app chỉ đọc cột con đầu tiên “${t}”, các cột con còn lại KHÔNG được cộng vào. Kiểm tra lại ${vn} từng dòng.`);
+  }
   if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh trong file KHÔNG nạp lại được. Dòng còn khớp với sheet đích giữ nguyên ảnh đang có; dòng mới cần thêm ảnh thủ công sau khi nạp.");
   if (base.stats.formulasDropped) base.warnings.push(`${base.stats.formulasDropped} công thức không nạp được (đã giữ con số) — xem cột Cảnh báo từng dòng.`);
   if (!base.items.length) base.warnings.push("Không đọc được hạng mục nào trong bảng.");
