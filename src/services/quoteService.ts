@@ -2141,7 +2141,12 @@ export async function duplicateQuote(req: Request) {
         // LẠI ĐÚNG số vừa đụng — bốn lượt cùng một số rồi 409, tức vòng thử lại không có tác dụng
         // gì. Đẩy số đã bị chiếm vào bộ đếm NGOÀI transaction (GREATEST nên không lùi) để lượt sau
         // nhảy sang số kế tiếp.
-        if (capSoNhanBan.so) await syncQuoteCounter(capSoNhanBan.so, prefixNhanBan).catch(() => {});
+        //
+        // CHỈ KHI ĐỤNG ĐÚNG CỘT quoteNumber (MONEY-09). P2002 của `@@unique([projectCode,
+        // projectVersion])` — hai người cùng bấm "Bản mới cùng dự án" — KHÔNG làm số báo giá bị
+        // chiếm: số vừa cấp chưa ai dùng, rollback đã trả nó về bộ đếm. Đẩy bộ đếm lên số đó ở ca này
+        // là ĐỐT một số báo giá, tạo lỗ trong dãy chứng từ. Cùng cách phân biệt createQuote đã dùng.
+        if (capSoNhanBan.so && trungTren(e, "quoteNumber")) await syncQuoteCounter(capSoNhanBan.so, prefixNhanBan).catch(() => {});
         // ĐẨY CẢ BỘ ĐẾM MÃ DỰ ÁN — bị bỏ sót ở lượt vá trước, mà nhánh "nhân bản KHÔNG cùng dự án"
         // cấp mã mới bằng `nextProjectCode` NGAY TRONG transaction. Transaction hỏng cuốn theo lần
         // tăng bộ đếm đó, nên lượt thử lại sinh LẠI ĐÚNG mã vừa đụng `@@unique([projectCode,
