@@ -66,12 +66,40 @@ function assertEmployeeInReadScope(req: Request, rec: { createdById: number | nu
   }
 }
 
+// Trường tài chính/định danh: nhật ký chỉ giữ 4 ký tự cuối — đủ để truy "ai đổi số tài khoản nhận
+// lương từ …1234 sang …9876", không nhân bản PII đầy đủ sang bảng nhật ký (bảng đó không mã hoá).
+const CHE_TRONG_NHAT_KY = new Set(["bankAccount", "idCard"]);
+const cheBot = (v: unknown) => {
+  if (v == null || v === "") return v ?? null;
+  const s = String(v);
+  return s.length <= 4 ? "•".repeat(s.length) : "…" + s.slice(-4);
+};
+const soSanhDuoc = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
+
+/**
+ * Giá trị TRƯỚC/SAU của đúng những trường vừa đổi (RBAC-04, audit 2026-09-23). Trước đây nhật ký
+ * chỉ ghi "employee.update #id" — một Account đổi số tài khoản ngân hàng của người trong danh bạ
+ * (kho dùng chung) rồi kế toán trả lương vào đó, mà không còn gì để truy giá trị cũ.
+ */
+function thayDoiDanhBa(truoc: Record<string, any>, than: Record<string, any>) {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const k of Object.keys(than)) {
+    if (soSanhDuoc(truoc[k]) === soSanhDuoc(than[k])) continue;
+    const che = CHE_TRONG_NHAT_KY.has(k);
+    before[k] = che ? cheBot(truoc[k]) : truoc[k] ?? null;
+    after[k] = che ? cheBot(than[k]) : than[k] ?? null;
+  }
+  return { before, after };
+}
+
 export async function updateEmployee(req: Request) {
   const before = await prisma.employee.findFirst({ where: { id: (req.params as any).id } });
   if (!before) throw httpError(404, "Không tìm thấy nhân viên");
   assertEmployeeInReadScope(req, before);
   const rec = await prisma.employee.update({ where: { id: (req.params as any).id }, data: encodePiiForWrite("Employee", req.body) as any, include: ownerSelect });
-  await audit(req, "employee.update", { resource: "employee", resourceId: rec.id });
+  const { before: truoc, after: sau } = thayDoiDanhBa(decodePiiOnRead("Employee", before) as Record<string, any>, req.body);
+  await audit(req, "employee.update", { resource: "employee", resourceId: rec.id, before: truoc, after: sau });
   return decodePiiOnRead("Employee", rec);
 }
 
