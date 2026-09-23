@@ -3926,6 +3926,15 @@ textarea[aria-invalid="true"] {
 :root[data-theme="light"] {
   color-scheme: light;
 }
+/* Chữ gợi ý mặc định của Chrome là #757575 ở CẢ hai color-scheme: trên nền tối chỉ 3.58–3.92:1 (ô tìm
+   thanh công cụ, ô trong hộp thoại, phần đầu báo giá, "(không xuất Excel)"…). --text-muted tối #9aa3b3
+   ≈ 6.5–7.1:1, vẫn nhạt hơn chữ thật. `:where` → độ ưu tiên chỉ còn của `::placeholder` (0,0,1): luật
+   riêng (#fx-input, hàng nhóm tối, ô tìm thanh bên) vẫn thắng. Chỉ chế độ tối: #9aa3b3 trên nền trắng
+   chỉ 2.5:1. opacity: Firefox mặc định làm mờ placeholder 0.54. */
+:where(:root[data-theme="dark"]) ::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
 
 /* ── Khung soạn + phần đầu báo giá ── */
 :root[data-theme="dark"] .editor {
