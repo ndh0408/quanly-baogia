@@ -42,8 +42,20 @@ export function QuoteListPage({ me }: { me: Me }) {
   const [status, setStatus] = useState(sp0.get("status") || "");
   const [sort, setSort] = useState(QUOTE_SORTS.includes(sp0.get("sort") || "") ? sp0.get("sort")! : "createdAt");
   const [order, setOrder] = useState<"asc" | "desc">(sp0.get("order") === "asc" ? "asc" : "desc");
-  const [page, setPage] = useState(Math.max(1, parseInt(sp0.get("page") || "1", 10) || 1));
   const busy = useRef(false);
+
+  // Tải qua TanStack Query. Ô tìm debounce 300ms như cũ (chỉ debounce theo q).
+  const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
+  // TRANG GẮN VỚI BỘ LỌC NÓ THUỘC VỀ (L75). Trước đây `useEffect(() => setPage(1), [debouncedQ, status,
+  // sort, order])` chạy cả lúc MOUNT: F5 / Back về #/list?page=3 luôn nhảy về trang 1 (kèm một request
+  // page=3 bỏ phí); còn đổi bộ lọc thì lượt dựng đầu vẫn mang trang CŨ → hai request (page=2 với từ khoá
+  // mới rồi page=1). Nay trang đi cùng khoá bộ lọc: khoá đổi thì NGAY lượt dựng đó trang là 1 — một
+  // request; lúc mount khoá khớp nên giữ trang đọc từ URL.
+  const boLoc = JSON.stringify([debouncedQ, status, sort, order]);
+  const [trang, setTrang] = useState(() => ({ boLoc, so: Math.max(1, parseInt(sp0.get("page") || "1", 10) || 1) }));
+  if (trang.boLoc !== boLoc) setTrang({ boLoc, so: 1 });   // đồng bộ ngay trong lượt dựng: đổi lọc rồi đổi LẠI vẫn ở trang 1
+  const page = trang.boLoc === boLoc ? trang.so : 1;
+  const setPage = (f: (p: number) => number) => setTrang({ boLoc, so: Math.max(1, f(page)) });
 
   // Ghi filter lên URL bằng replaceState (không bắn hashchange → React shell không re-route).
   useEffect(() => {
@@ -57,16 +69,17 @@ export function QuoteListPage({ me }: { me: Me }) {
     try { history.replaceState(null, "", "#/list" + (qs ? "?" + qs : "")); } catch { /* ignore */ }
   }, [q, status, sort, order, page]);
 
-  // Tải qua TanStack Query. Ô tìm debounce 300ms như cũ (chỉ debounce theo q).
-  const debouncedQ = useDebouncedValue(q, q ? 300 : 0);
-  useEffect(() => { setPage(1); }, [debouncedQ, status, sort, order]);
-  const { data, isPending, error, refetch } = useQuery({
+  const { data, isPending, isPlaceholderData, error, refetch } = useQuery({
     queryKey: ["quotes", { q: debouncedQ, status, sort, order, page }],
     queryFn: () => api.listQuotes({ q: debouncedQ, status, sort, order, page, size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
   const rows = data?.data ?? [];
   const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
+  // Trang từ URL nay được GIỮ, nên có thể trỏ quá số trang hiện có (báo giá bị xoá bớt từ lúc lưu link):
+  // máy chủ không kẹp trang, trả danh sách rỗng và thanh phân trang ẩn theo — kéo về trang cuối.
+  const soTrangThat = data && !isPlaceholderData ? data.meta.pageCount : undefined;   // bản giữ tạm (keepPreviousData) là của khoá CŨ
+  useEffect(() => { if (soTrangThat !== undefined && page > Math.max(1, soTrangThat)) setTrang({ boLoc, so: Math.max(1, soTrangThat) }); }, [soTrangThat, page, boLoc]);
   const loading = isPending;
   const err = error ? errMsg(error) : "";
   const reload = () => { qc.invalidateQueries({ queryKey: ["quotes"] }); };
