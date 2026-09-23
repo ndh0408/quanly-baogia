@@ -175,6 +175,77 @@ function datStyleRieng(cell: any, patch: (st: any) => Record<string, unknown>) {
   cell.style = st;
 }
 
+// ── ƯỚC LƯỢNG SỐ DÒNG KHI EXCEL XUỐNG HÀNG — THEO BỀ RỘNG THẬT CỦA TỪNG KÝ TỰ (L40) ─────────────
+// Bản cũ coi MỖI KÝ TỰ = 1 đơn vị bề rộng cột (tức bằng chữ số '0' của font mặc định, 7px). Ô Hạng
+// Mục là Times New Roman 11 ĐẬM: chữ HOA, W/M/m, dấu tiếng Việt rộng hơn hẳn đơn vị đó, nên câu
+// nhiều chữ HOA hoặc kích thước kiểu "0m8W" bị ước lượng thiếu một dòng và hàng (cao cố định) che
+// mất dòng cuối. Đo bằng Excel thật (Rows.AutoFit): "Banner hàng rào: 0m8W x 0m5H x 8 tấm" ở cột
+// 38 cần 2 dòng — app đặt 1; "HẠNG MỤC SÂN KHẤU VÀ TRANG TRÍ KHU VỰC ĐÓN KHÁCH" cần 3 — app đặt 2.
+//
+// BẢNG DƯỚI ĐÂY ĐO TRÊN EXCEL THẬT, không lấy từ bảng metric của font: bề rộng (px, 96dpi) mỗi
+// ký tự Times New Roman 11pt, đậm và thường. Metric Adobe Times lệch khá xa bản Microsoft đã hint
+// (vd 'e' đậm: metric 6,7px, Excel vẽ 8px). Mô phỏng ngắt-theo-từ bằng bảng này, so với Excel
+// AutoFit trên 523 chuỗi (đậm 11 · thường 11 · thường 10 · nghiêng 10; 9 bề rộng cột lấy từ các
+// mẫu): 0 ca thiếu dòng, ~15% ca thừa một dòng. Nhân thêm HE_SO_AN_TOAN và chừa biên để máy khác
+// DPI/Excel khác bản vẫn không cắt chữ ("thà cao còn hơn cắt chữ").
+// Chữ có dấu tra theo chữ gốc (NFD); móc ơ/ư và gạch đ rộng hơn chữ gốc ~1px. Ký tự lạ (emoji,
+// chữ CJK…) tính 15px — rộng như 'M'.
+const RONG_TNR11_PX: Record<"dam" | "thuong", Record<number, string>> = {
+  dam:    { 3: "|", 4: " ,./fijl", 5: "!()-:;[]t'`\\‘’", 6: "Irz{}", 7: "acsy", 8: "\"#$*0123456789?JS_bdeghnopquvx~–“”", 9: "+<=>FPZ^k×", 10: "ELTVXYw", 11: "ABCDGNRU", 12: "HKOQm", 13: "&", 14: "@W", 15: "%M—…" },
+  thuong: { 3: ",:ijl|'", 4: " ./;t`\\", 5: "!\"()-I[]fr‘’", 6: "J^sz“", 7: "$*0123456789?abcdeghknopquvxy{}”", 8: "#+<=>FS_~–×", 9: "ELPTZ", 10: "BCGRX", 11: "ADHKNOQUVYmw", 13: "%M", 14: "@W", 15: "—…" },
+};
+const BANG_RONG = { dam: new Map<string, number>(), thuong: new Map<string, number>() };
+for (const k of ["dam", "thuong"] as const) {
+  for (const [px, chuoi] of Object.entries(RONG_TNR11_PX[k])) for (const ch of chuoi) BANG_RONG[k].set(ch, Number(px));
+}
+const HE_SO_AN_TOAN = 1.05;   // biên cho máy khác DPI/bản Excel khác — xem đo đạc ở trên
+const PX_MOI_DON_VI_COT = 7;  // 1 đơn vị bề rộng cột = chữ số '0' của font mặc định (Calibri 11 / Arial 10)
+// Bề rộng LƯU trong .xlsx (thứ ExcelJS đọc/ghi) ĐÃ GỒM 5px đệm của Excel: cột lưu 38 rộng đúng
+// 266px, còn Excel hiển thị "37,29". Phần chữ dùng được = 7 × bề rộng lưu − 5px đệm − 3px biên.
+const DEM_EXCEL_PX = 5;
+const LE_O_PX = 3;
+function rongKyTuPx(ch: string, dam: boolean): number {
+  const bang = dam ? BANG_RONG.dam : BANG_RONG.thuong;
+  const co = bang.get(ch);
+  if (co != null) return co;
+  if (ch === "đ") return (bang.get("d") ?? 8) + 1;
+  if (ch === "Đ") return bang.get("D") ?? 11;
+  const nfd = ch.normalize("NFD");
+  const goc = nfd.length > 1 ? bang.get(nfd[0]) : undefined;
+  if (goc != null) return goc + (nfd.includes("̛") ? 1 : 0);   // U+031B = móc của ơ/ư
+  return 15;
+}
+/**
+ * Số dòng Excel cần để hiện `text` trong ô rộng `beRongCot` đơn vị cột, chữ Times New Roman cỡ `co`
+ * (đậm hay thường). Mô phỏng lối ngắt tham lam của Excel: ngắt theo TỪ, từ dài hơn cả dòng mới cắt
+ * cứng. Xuất ra cho test (tests/xl-cao-hang-theo-be-rong-chu.test.js đối chiếu với số đo Excel thật).
+ */
+export function soDongKhiXuongHang(text: unknown, beRongCot: number, { dam = true, co = 11 }: { dam?: boolean; co?: number } = {}): number {
+  if (text == null || text === "") return 1;
+  const tiLe = ((Number(co) || 11) / 11) * HE_SO_AN_TOAN;
+  const doRong = (s: string) => { let px = 0; for (const ch of s) px += rongKyTuPx(ch, dam); return px * tiLe; };
+  // Chặn dưới 4 chữ số: cột quá hẹp (hoặc bề rộng hỏng) không được làm vòng cắt-cứng chạy vô hạn.
+  const moiDong = Math.max(4 * PX_MOI_DON_VI_COT, Math.trunc(PX_MOI_DON_VI_COT * beRongCot + 0.5) - DEM_EXCEL_PX - LE_O_PX);
+  const dauCach = doRong(" ");
+  let total = 0;
+  for (const seg of String(text).split(/\r?\n/)) {
+    const tu = seg.split(/\s+/).filter(Boolean);
+    if (!tu.length) { total += 1; continue; }
+    let dong = 1, dai = 0;
+    for (const w of tu) {
+      const rw = doRong(w);
+      const canThem = dai === 0 ? rw : dai + dauCach + rw;
+      if (canThem <= moiDong) { dai = canThem; continue; }
+      if (dai > 0) dong++;
+      let con = rw;
+      while (con > moiDong) { dong++; con -= moiDong; }
+      dai = con;
+    }
+    total += dong;
+  }
+  return Math.max(1, total);
+}
+
 /** Strip leading/trailing whitespace AND collapse internal newlines to spaces. */
 function clean(s: any) {
   if (s == null) return "";
@@ -626,7 +697,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // số dòng SAU KHI XUỐNG HÀNG (wrap) theo ĐỘ RỘNG CỘT — không chỉ đếm \n — nên tên nhóm
   // / hạng mục dài (vd "Booth backdrop … (thay AW booth có sẵn)") không bị cắt mất chữ.
   const colWidthOf = (letter: any) => { try { const w = ws.getColumn(letter).width; return (w && w > 0) ? w : null; } catch { return null; } };
-  const wrapLines = (text: any, letter: any, beRongEp?: number | null) => {
+  /** Font của một ô để đo bề rộng chữ: đậm/thường + cỡ (mặc định 11). */
+  const fontDo = (addr: string, epDam = false) => {
+    try { const f = ws.getCell(addr).font || {}; return { dam: epDam || !!f.bold, co: Number(f.size) || 11 }; } catch { return { dam: true, co: 11 }; }
+  };
+  const wrapLines = (text: any, letter: any, beRongEp?: number | null, font?: { dam?: boolean; co?: number }) => {
     if (text == null || text === "") return 1;
     const mergedNameWidth = itemsCfg.removeDetail && letter === cols.name && cols.detail
       ? (colWidthOf(cols.name) || 12) + (colWidthOf(cols.detail) || 12)
@@ -635,32 +710,14 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     // chương trình B5:I5, ô "* Ghi chú" C:D): bề rộng thật của chúng là TỔNG bề rộng các cột bị
     // phủ, không phải bề rộng một cột.
     const cw = beRongEp || mergedNameWidth || colWidthOf(letter) || 12;
-    const perLine = Math.max(4, Math.floor(cw - 1));   // chừa 1 ký tự lề → ưu tiên cao hơn (thà cao còn hơn cắt chữ)
     // NGẮT DÒNG THEO TỪ, KHÔNG THEO SỐ KÝ TỰ — Excel không cắt giữa từ.
-    // Bản cũ tính `ceil(độ dài / perLine)`, tức coi mỗi dòng luôn được lấp đầy. Thực tế mỗi dòng
-    // kết thúc ở ranh giới TỪ nên thường còn thừa chỗ, và số dòng thật NHIỀU HƠN ước lượng:
-    //     "Banner hàng rào: 0m8W x 0m5H x 8 tấm" (36 ký tự) trong cột rộng 21
+    // Bản cũ hơn tính `ceil(độ dài / perLine)`, tức coi mỗi dòng luôn được lấp đầy:
+    //     "Banner hàng rào: 0m8W x 0m5H x 8 tấm" trong cột rộng 21
     //        cũ  : ceil(36/20) = 2 dòng  → đặt cao 33pt
     //        thật: "Banner hàng rào:" / "0m8W x 0m5H x 8" / "tấm" = 3 dòng → DÒNG CUỐI BỊ CHE
-    // Người dùng báo đúng triệu chứng đó trên file tải về. Nay mô phỏng lối ngắt tham lam của
-    // Excel: nhét từ vào dòng hiện tại khi còn đủ chỗ; không đủ thì xuống dòng; từ nào dài hơn cả
-    // một dòng (chuỗi kích thước không có dấu cách) thì mới cắt cứng phần dư.
-    let total = 0;
-    for (const seg of String(text).split(/\r?\n/)) {
-      const tu = seg.split(/\s+/).filter(Boolean);
-      if (!tu.length) { total += 1; continue; }
-      let dong = 1, dai = 0;
-      for (const w of tu) {
-        const canThem = dai === 0 ? w.length : dai + 1 + w.length;
-        if (canThem <= perLine) { dai = canThem; continue; }
-        if (dai > 0) dong++;
-        let con = w.length;
-        while (con > perLine) { dong++; con -= perLine; }
-        dai = con;
-      }
-      total += dong;
-    }
-    return Math.max(1, total);
+    // Bản kế đó ngắt theo từ nhưng vẫn coi mỗi ký tự rộng 1 đơn vị cột, nên ở cột 38 câu ấy vẫn bị
+    // che (L40). Nay đo theo bề rộng THẬT của từng ký tự — xem `soDongKhiXuongHang`.
+    return soDongKhiXuongHang(text, cw, font);
   };
   // Group structure for "hàng con" (mirror the editor): a "sub" extends the current
   // group only when the previous row was a head/sub, else it starts its own group.
@@ -684,8 +741,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       // không đo chiều cao theo tên (tránh hàng cao vô ích).
       const nameForHeight = effKind[hi] === "sub" ? null : it.name;
       const measured = [[nameForHeight, cols.name], ...(!itemsCfg.removeDetail ? [[it.detail, cols.detail]] : []), [it.notes, cols.notes]];
+      // Hàng NHÓM được tô đậm SAU vòng này (paintCell bold) — đo theo chữ đậm luôn cho khớp.
+      const laNhom = effKind[hi] === "section";
       for (const [t, letter] of measured) {
-        if (t && letter) lines = Math.max(lines, wrapLines(t, letter));
+        if (t && letter) lines = Math.max(lines, wrapLines(t, letter, null, fontDo(`${letter}${r}`, laNhom)));
       }
     }
     // Chặn trên 409 pt (giới hạn chiều cao hàng của Excel) để file không out-of-spec.
@@ -714,7 +773,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (!chu) return;                       // ô rỗng: giữ nguyên (dải banner rỗng còn bị ẩn hàng)
       const r = parseInt(String(addr).replace(/^[A-Z]+/, ""), 10);
       if (!r) return;
-      const soDong = wrapLines(chu, null, beRongVungGop(addr));
+      const soDong = wrapLines(chu, null, beRongVungGop(addr), fontDo(addr));
       const can = Math.min(409, Math.max(18, soDong * 15 + 3));
       // CHỈ NỚI RA, KHÔNG BÓP LẠI: chiều cao trong tệp mẫu là chủ ý trình bày của người dùng.
       const dangCo = ws.getRow(r).height;
@@ -1267,7 +1326,7 @@ ${ghiChu}` : null;
             // Và NỚI CHIỀU CAO theo chữ: hàng này bị mẫu khoá cứng 61pt, ghi chú dài hơn ~4 dòng
             // là khách không đọc được phần còn lại.
             const soDong = wrapLines(`* Ghi chú: 
-${ghiChu}`, null, beRongVungGop(oChinh));
+${ghiChu}`, null, beRongVungGop(oChinh), fontDo(oChinh));
             const can = Math.min(409, Math.max(18, soDong * 15 + 3));
             const dangCo = ws.getRow(newRow).height;
             if (dangCo == null || can > dangCo) ws.getRow(newRow).height = can;
