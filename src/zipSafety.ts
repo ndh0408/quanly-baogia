@@ -58,6 +58,16 @@ const MAX_UNCOMPRESSED = 200 * 1024 * 1024;   // 200 MB tổng sau giải nén �
  */
 const MAX_ROWS = 120_000;
 
+/**
+ * TRẦN SỐ Ô (XLSX-05). Số DÒNG là thước đo gián tiếp: bề ngang của dòng không bị giới hạn. ĐÃ ĐO:
+ * tệp 6,7 MB, 20.000 dòng × 150 cột (3 triệu ô) qua mọi kiểm tra ở đây (bung 79 MB, 20k dòng),
+ * đốt 14 s CPU rồi worker chết OOM ở trần heap 512 MB. 1.500.000 = 30.000 dòng (sức chứa tối đa
+ * của đường nhập) × 50 cột — rộng gấp nhiều lần báo giá thật (~15-20 cột), bằng nửa mức đã đo là chết.
+ * Đếm thẻ mở `<c ` / `<c>` trên chính luồng giải nén đang đếm `<row` — không tốn thêm một lượt quét.
+ */
+const MAX_CELLS = 1_500_000;
+export const _TRAN_O_THAT_TEST = MAX_CELLS;
+
 // Mục BẮT BUỘC của một workbook OOXML. Thiếu bất kỳ cái nào thì đó không phải xlsx, bất kể đuôi tệp.
 const REQUIRED = ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml"];
 
@@ -136,7 +146,7 @@ function giaiNenThatCoTran(
   buf: Buffer,
   e: { name?: string; comp: number; uncomp: number; method: number; localOffset: number },
   tran: number,
-  demDong?: (n: number) => void,
+  demDong?: (n: number, soO: number) => void,
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const off = e.localOffset;
@@ -176,9 +186,11 @@ function giaiNenThatCoTran(
       tong += chunk.length;
       if (demDong) {
         const s = duoi + chunk.toString("latin1");
-        let i = 0, n = 0;
+        let i = 0, n = 0, o = 0;
         for (;;) { const k = s.indexOf("<row", i); if (k < 0) break; n++; i = k + 4; }
-        if (n) demDong(n);
+        // `<c ` / `<c>` là thẻ Ô; `<col`, `<cfRule`… không khớp vì ký tự thứ ba khác dấu cách/`>`.
+        for (let j = 0; ;) { const k = s.indexOf("<c", j); if (k < 0) break; const t = s.charCodeAt(k + 2); if (t === 32 || t === 62) o++; j = k + 2; }
+        if (n || o) demDong(n, o);
         duoi = s.slice(-4);
       }
       // HUỶ NGAY tại đây — KHÔNG đợi 'end'. Đây chính là điều làm chi phí kiểm không tỉ lệ với
@@ -218,6 +230,7 @@ export async function inspectXlsx(buf: Buffer): Promise<ZipVerdict> {
   // các mục còn lại.
   let totalUncomp = 0;
   let tongDong = 0;
+  let tongO = 0;
   for (const e of entries) {
     let thucTe: number;
     // CHỈ đếm dòng trong XML của worksheet — sharedStrings/styles không có thẻ <row> nghiệp vụ, và
@@ -227,10 +240,13 @@ export async function inspectXlsx(buf: Buffer): Promise<ZipVerdict> {
     try {
       thucTe = await giaiNenThatCoTran(
         buf, e, MAX_UNCOMPRESSED - totalUncomp,
-        laSheet ? (n) => { tongDong += n; } : undefined,
+        laSheet ? (n, o) => { tongDong += n; tongO += o; } : undefined,
       );
       if (tongDong > MAX_ROWS) {
         return { ok: false, reason: `file có quá nhiều dòng (hơn ${MAX_ROWS.toLocaleString("vi-VN")}) — hãy tách bớt sheet rồi thử lại` };
+      }
+      if (tongO > MAX_CELLS) {
+        return { ok: false, reason: `file có quá nhiều ô (hơn ${MAX_CELLS.toLocaleString("vi-VN")}) — hãy bớt cột hoặc tách bớt sheet rồi thử lại` };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
