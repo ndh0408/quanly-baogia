@@ -6,7 +6,7 @@ import { logger } from "./logger.js";
 import { initSentry, dangKyChanSuCoTienTrinh, flushSentry } from "./observability.js";
 import { prisma, dongPoolDoSanSang } from "./db.js";
 import { createApp } from "./app.js";
-import { reloadRoleOverrides } from "./roleOverrides.js";
+import { reloadRoleOverrides, napRoleOverridesKhiKhoiDong } from "./roleOverrides.js";
 import { ensureBucket, isStorageEnabled } from "./storage.js";
 import { closeAllSse } from "./sse.js";
 import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
@@ -19,6 +19,20 @@ kiemBatBienXuatLucKhoiDong();
 
 const app = createApp();
 
+// QUYỀN GHI ĐÈ VAI TRÒ PHẢI NẠP XONG TRƯỚC KHI NHẬN REQUEST (RBAC-09). Bản trước `void` nó bên trong
+// callback của listen và nuốt lỗi → phục vụ với quyền mặc định cứng nếu CSDL chậm lúc khởi động.
+try {
+  await napRoleOverridesKhiKhoiDong();
+} catch (e) {
+  logger.fatal({ err: e instanceof Error ? e.message : String(e) }, "KHÔNG nạp được quyền ghi đè vai trò — dừng tiến trình thay vì chạy với quyền mặc định");
+  process.exit(1);
+}
+// Nạp lại định kỳ: phòng khi sau này chạy nhiều tiến trình (admin lưu ở tiến trình A thì B không
+// biết). Lỗi giữ nguyên bản tốt gần nhất — không bao giờ rơi về mặc định.
+setInterval(() => {
+  reloadRoleOverrides().catch((e) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "nạp lại quyền ghi đè vai trò thất bại — giữ bản cũ"));
+}, 5 * 60_000).unref();
+
 // (Quote expiry was removed entirely by request — no auto-expiry sweep, no
 // "expired" status, and no validUntil field. Quotes stay in their last status
 // until a user transitions them.)
@@ -29,7 +43,6 @@ const server = app.listen(config.PORT, () => {
   // hoá PII không", "email có thật sự gửi không" thì phải đi đọc mã nguồn hoặc so biến môi trường
   // bằng tay. Nay một dòng log trả lời hết.
   logger.info({ features: featureStatus() }, "cấu hình tính năng");
-  void reloadRoleOverrides(); // phân quyền động: nạp quyền ghi-đè vai trò từ DB (lỗi → dùng mặc định)
 
   // KIỂM KHO OBJECT NGAY LÚC KHỞI ĐỘNG.
   //
