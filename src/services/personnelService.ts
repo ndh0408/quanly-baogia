@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
-import { buildProjectRef, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
+import { buildProjectRef, nguoiTaoCuaMaSanXuat, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
@@ -169,7 +169,28 @@ export async function listProjects(req: Request) {
   return { data };
 }
 
+/**
+ * MÃ DỰ ÁN GHI VÀO HỒ SƠ PHẢI THUỘC PHẠM VI NGƯỜI GHI (RBAC-03, audit 2026-09-23).
+ *
+ * Picker ở GET /api/personnel/projects chỉ đưa ra dự án CỦA MÌNH cho người không có read:all, nhưng
+ * đường ghi nhận `projectCode` tuỳ ý — và phản hồi được `decorate` bằng buildProjectRef (không lọc
+ * người dùng): số HĐ bán, PO, ngày ký, tiền trước thuế của DỰ ÁN NGƯỜI KHÁC. Mã sản xuất đoán được
+ * (FE_A26_001, GN26050…), nên manager chỉ có quote:read:own vẫn đọc ngang doanh số của Account khác.
+ *
+ * Luật đúng bằng picker: người có personnel:read:all ghi mã nào cũng được; người khác chỉ bị chặn khi
+ * mã trỏ vào dự án đã chốt của NGƯỜI KHÁC mà không trỏ vào dự án nào của chính mình. Mã không khớp
+ * dự án nào (nhập tay tự do) vẫn cho — buildProjectRef không trả gì cho mã đó nên không có gì để lộ.
+ */
+async function assertProjectCodeInScope(req: Request, code: unknown) {
+  if (typeof code !== "string" || !code.trim() || can(req.session, P.PERSONNEL_READ_ALL)) return;
+  const chu = await nguoiTaoCuaMaSanXuat(code);
+  if (chu.length && !chu.includes(Number(req.session.userId))) {
+    throw httpError(403, "Mã dự án không thuộc dự án của bạn");
+  }
+}
+
 export async function createPersonnel(req: Request) {
+  await assertProjectCodeInScope(req, req.body.projectCode);
   const rec = await prisma.personnelRecord.create({
     data: encodePiiForWrite("PersonnelRecord", { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) }) as any,   // người tạo = chủ sở hữu
     include: ownerSelect,
@@ -189,6 +210,10 @@ export async function getPersonnel(req: Request) {
 
 export async function updatePersonnel(req: Request) {
   const before = await loadAuthorized(req, "edit");   // hr/accountant không có edit → 403
+  // Chỉ kiểm khi mã ĐỔI: hồ sơ cũ đã mang sẵn mã (ghi trước bản vá) vẫn sửa được các trường khác.
+  if (req.body.projectCode !== undefined && req.body.projectCode !== before.projectCode) {
+    await assertProjectCodeInScope(req, req.body.projectCode);
+  }
   // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
   const merged = { ...before, ...req.body };
   const rec = await prisma.personnelRecord.update({
