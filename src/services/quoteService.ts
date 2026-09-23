@@ -677,7 +677,9 @@ export async function updateQuote(req: Request) {
   // Bảng Hà Nội nay là MỘT CỘT của báo giá, không nằm trong trang nào → không đi qua
   // `ghiVungNoiBoDuocGiao`/`reconcilePhamViTables` nữa mà xử lý thẳng ở đây.
   if (b.hnTables !== undefined && !phamVi.includes("hanoi")) delete (b as any).hnTables;
-  chotHnTables(b, existing, can(req.session, P.QUOTE_HN_MANAGE));
+  // Account PHỤ có quote:hn:manage (mọi manager đều có) KHÔNG được sửa thẳng giá HN đã duyệt
+  // (RBAC-07): reviewHn đã cấm phụ duyệt/trả phần HN, mà sửa thẳng số đã chốt còn nặng hơn.
+  chotHnTables(b, existing, can(req.session, P.QUOTE_HN_MANAGE) && !laAccountPhu(req.session, existing));
   let vungNoiBo: any[] | null = null;
   if (!duPhamVi && !phamVi.includes("main")) {
     // Không được giao "Báo giá chính": mọi field danh tính/khách/đầu trang bị GỠ khỏi payload —
