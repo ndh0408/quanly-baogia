@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type Me } from "../lib/api";
-import { confirmModal } from "../lib/ui";
+import { confirmModal, toast } from "../lib/ui";
 import { xoaMoiBanNhap } from "../lib/localDraft";
+import { dangXuat, phatDangXuat } from "../lib/authSync";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
@@ -445,7 +446,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); }}>Đăng xuất</button>
+            {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isWizard ? (

@@ -1,8 +1,9 @@
-import { Component, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, setPreviewMode, type Me } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { promptModal, toast } from "./lib/ui";
 import { xoaMoiBanNhap, ghiNhanNguoiDung } from "./lib/localDraft";
+import { ngheAuth, phatDangNhap } from "./lib/authSync";
 
 export type PreviewState = { perms: string[]; label: string };
 
@@ -45,6 +46,12 @@ export function App() {
   // Nay: giữ nguyên cây đang mount, phủ một hộp đăng nhập lại lên trên. Đăng nhập xong đóng hộp,
   // dữ liệu trong state editor còn nguyên vẹn, bấm Lưu lại là xong.
   const [matPhien, setMatPhien] = useState(false);
+  // FE-05: tab khác vừa đăng xuất / đăng nhập người KHÁC → danh tính của tab này đã sai (cookie phiên
+  // dùng chung) → nạp lại sạch. `useRef` để listener đọc được `me` mới nhất mà không phải đăng ký lại.
+  const meIdRef = useRef<number | null>(null);
+  meIdRef.current = me?.id ?? null;
+  useEffect(() => ngheAuth(() => meIdRef.current, () => location.reload()), []);
+  const daDangNhap = (m: Me) => { ghiNhanNguoiDung(m.id); phatDangNhap(m.id); };
 
   useEffect(() => {
     // `im401`: 401 Ở LẦN DÒ KHỞI ĐỘNG KHÔNG PHẢI LÀ MẤT PHIÊN.
@@ -83,10 +90,10 @@ export function App() {
   // XOÁ CỜ MẤT-PHIÊN y như nhánh <Login> ngay dưới. Kích hoạt xong là một lần ĐĂNG NHẬP THÀNH CÔNG,
   // nên mọi nghi ngờ về phiên trước đó đều hết hiệu lực. Truyền thẳng `setMe` (bản cũ) thì cờ do lần
   // dò khởi động bật lên còn nguyên, và lớp phủ đăng nhập lại nhảy ra đè lên phiên vừa tạo.
-  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { ghiNhanNguoiDung(m.id); setMatPhien(false); setMe(m); }} />;
+  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   if (loading) return <div className="center muted">Đang tải…</div>;
   // Chưa từng đăng nhập → màn đăng nhập đầy đủ. (Lớp phủ chỉ dành cho phiên MẤT giữa chừng.)
-  if (!me) return <Login onLogin={(m) => { ghiNhanNguoiDung(m.id); setMatPhien(false); setMe(m); }} />;
+  if (!me) return <Login onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   // Khi xem thử: GIỮ identity admin (server) nhưng ĐỔI permissions sang tài khoản đang xem → UI hiện đúng quyền đó.
   const shellMe: Me = preview ? { ...me, permissions: preview.perms } : me;
   return (
@@ -115,7 +122,8 @@ export function App() {
             // đúng báo giá đó sẽ thấy modal "Khôi phục bản nháp?" chứa giá/khách/bảng nội bộ CỦA
             // NGƯỜI A — hai đường xoá-nháp còn lại (nút Đăng xuất, sự kiện SSE session:revoked ở
             // Shell.tsx) đều đã gọi hàm này; đây là đường thứ ba bị bỏ sót.
-            if (m.id !== me.id) { xoaMoiBanNhap(); ghiNhanNguoiDung(m.id); location.reload(); return; }
+            if (m.id !== me.id) { xoaMoiBanNhap(); daDangNhap(m); location.reload(); return; }
+            phatDangNhap(m.id);
             setMe(m);
           }}
         />
