@@ -3788,6 +3788,18 @@ textarea[aria-invalid="true"] {
 .excel-table.clf-theme tr.subgroup-row td.col-notes textarea {
   color: #4f513e;
 }
+/* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
+   `.excel-table td.col-hangmuc textarea` / `td.col-stt` = #0066cc (xanh dương) của public/style.css,
+   trong khi src/excel.ts tô sectionTextColor / subTextColor cho MỌI cột của hàng nhóm, kể cả tên và
+   STT. Commit c450a46 đo màu chữ trên ô <input> (ĐVT) nên kết luận "khớp". CHỈ Colorfull: Gia Nguyễn
+   để yên theo chủ repo. `:not(.subgroup-row)` vì hàng nhóm con cũng mang lớp section-row. */
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-stt,
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-hangmuc textarea {
+  color: #953735;
+}
+.excel-table.clf-theme tr.subgroup-row td.col-stt {
+  color: #4f513e;
+}
 
 /* FE-06 BẮT ĐẦU — TƯƠNG PHẢN WCAG AA (4.5:1) cho nút/chữ trạng thái.
    Token gốc ở public/style.css (tệp đóng băng) đo được: chữ trắng trên nút cảnh báo #e9920b 2.45:1,
