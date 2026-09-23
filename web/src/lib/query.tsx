@@ -34,8 +34,13 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
 // Khoá nào hiện TÊN của thực thể kia (tên khách trên danh sách báo giá, tên người tạo trên Dashboard)
 // cũng nằm trong danh sách. Nhật ký hoạt động đổi theo mọi lần ghi. Không rõ thực thể → làm tươi tất cả
 // (hành vi cũ) — thà thừa còn hơn hiện số cũ.
+// "personnel" nằm trong entity=quote (soát chéo files#5): danh sách Nhân sự ghép cột "Tiền trước thuế"
+// và tham chiếu dự án từ báo giá ĐÃ CHỐT (personnelService.listPersonnel → buildProjectRef) — lưu, chốt,
+// bỏ chốt, xoá báo giá đều làm đổi các cột đó. invalidateQueries chỉ refetch query ĐANG MỞ, nên chỉ tốn
+// khi có người đang ở trang Nhân sự. KHÔNG cần ở customer/user: accountName/company được CHÉP vào hồ sơ
+// lúc chọn dự án, danh sách không hiện tên người tạo báo giá.
 export const KHOA_THEO_THUC_THE: Record<string, string[]> = {
-  quote: ["quotes", "quoteProjects", "dashboard", "quote-internal", "audit"],
+  quote: ["quotes", "quoteProjects", "dashboard", "quote-internal", "audit", "personnel"],
   customer: ["customers", "quotes", "quoteProjects", "dashboard", "audit"],
   user: ["users", "permissions", "perm-catalog", "quotes", "quoteProjects", "dashboard", "audit"],
 };

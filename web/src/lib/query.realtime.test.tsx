@@ -34,6 +34,18 @@ describe("FE-18 — RealtimeBridge làm tươi theo thực thể", () => {
     expect(ds).not.toContain("personnel");
     expect(ds).not.toContain("employees");
   });
+  // Soát chéo files#5 (hồi quy do FE-18): danh sách Nhân sự ghép cột "Tiền trước thuế" / tham chiếu dự án
+  // từ báo giá đã chốt (personnelService.listPersonnel → buildProjectRef). Trước FE-18 mọi 'changed' làm
+  // tươi tất cả nên trang Nhân sự đang mở tự cập nhật khi Sales lưu/chốt/bỏ chốt/xoá báo giá; bản FE-18
+  // bỏ "personnel" khỏi entity=quote nên HR nhìn số cũ tới khi tự F5.
+  it("entity=quote → làm tươi cả danh sách Nhân sự (cột tham chiếu dự án đọc từ báo giá)", async () => {
+    const spy = await mo();
+    act(() => { window.dispatchEvent(new CustomEvent("realtime:changed", { detail: { entity: "quote", action: "update" } })); });
+    const ds = khoa(spy as unknown as ReturnType<typeof vi.fn>);
+    expect(ds).toContain("quotes");
+    expect(ds).toContain("personnel");
+    expect(ds).not.toContain("*TẤT CẢ*");
+  });
   it("không rõ thực thể (payload lạ / bản Shell cũ) → làm tươi tất cả như trước", async () => {
     const spy = await mo();
     act(() => { window.dispatchEvent(new Event("realtime:changed")); });

@@ -19,6 +19,11 @@ const PAGE_SIZE = 50;
 //  giá, kéo cả engine lưới vào trang Nhân sự chỉ vì một regex là phình bundle chính.)
 const safeImgSrc = (s: string | null | undefined) =>
   typeof s === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(s) ? s : "";
+// Ba trường PII đã mã hoá của hồ sơ (src/piiFields.ts). Hàng có bản mã hỏng (`piiLoi`, FILE-12) tới đây
+// với ba trường này = null — hiện nhãn lỗi thay cho ô trống, để không ai tưởng là hồ sơ chưa nhập.
+const PII_COLS = new Set(["salary", "idCard", "bankAccount"]);
+const PII_LOI_TITLE = "Đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá) — báo quản trị khôi phục khoá";
+const nhanPiiLoi = () => <span className="status danger" data-testid="pii-loi-o" title={PII_LOI_TITLE}>⚠ Lỗi khoá</span>;
 // Field LẤY TỪ DỰ ÁN — KHÔNG hiện ô nhập trong form, chỉ điền qua "Chọn dự án" (bắt buộc) rồi hiện "đã chọn".
 const PROJECT_FIELDS = new Set(["projectName", "projectCode", "accountName", "company"]);
 
@@ -63,7 +68,11 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
       else if (field === "accountingNote") await api.setAccountingNote(r.id, v);
       else if (field === "note") await api.setPersonnelNote(r.id, v);
       toast("Đã lưu", "success"); reload();
-    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lưu thất bại", "error"); }
+    } catch (ex) {
+      // Nạp lại cả khi lỗi (soát chéo files#2): máy chủ có thể đã ghi rồi mới hỏng ở bước trả về —
+      // không nạp lại thì ô cứ hiện giá trị cũ và người dùng ghi lại lần nữa.
+      toast(ex instanceof ApiError ? ex.message : "Lưu thất bại", "error"); reload();
+    }
   };
 
   // Tải qua TanStack Query (cache + dedupe + SSE invalidate). Ô tìm debounce 300ms như cũ.
@@ -77,6 +86,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
   const rows = data?.data ?? [];
   const meta = data?.meta ?? { total: 0, page: 1, pageCount: 1 };
   const summary: Summary = data?.summary ?? { salary: 0, pit: 0, taxableIncome: 0 };
+  const soPiiLoi = summary.piiLoi ?? 0;
   const loading = isPending;
   const err = error ? (error instanceof ApiError ? error.message : "Lỗi tải dữ liệu") : "";
   const reload = () => { qc.invalidateQueries({ queryKey: ["personnel"] }); };
@@ -128,7 +138,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
     );
     if (!ok) return;
     try { await api.markConfirm(r.id, !signed); toast(signed ? "Đã bỏ xác nhận" : "Đã xác nhận đã ký", "success"); reload(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); }
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); reload(); }   // xem saveField
   };
 
   const toggleSort = (k: string) => {
@@ -213,7 +223,8 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
     }
 
     let content: ReactNode;
-    if (f?.type === "money") content = fmtMoney(v);
+    if (r.piiLoi && PII_COLS.has(k)) content = nhanPiiLoi();
+    else if (f?.type === "money") content = fmtMoney(v);
     else if (f?.type === "date") content = fmtDate(v);
     else if (f?.type === "status") content = v ? <span className={`status ${statusClass(v)}`}>{String(v)}</span> : <span className="muted">—</span>;
     else content = v == null || v === "" ? "" : String(v);
@@ -242,6 +253,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
         ? <span className="inline-edit" role="button" tabIndex={0} title="Bấm để sửa" onClick={() => setEditCell({ id: r.id, field: k })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditCell({ id: r.id, field: k }); } }}>{text || <span className="muted ie-add">+ ghi…</span>}</span>
         : (text || <span className="muted">—</span>);
     }
+    if (r.piiLoi && PII_COLS.has(k)) return nhanPiiLoi();
     if (f?.type === "money") return v ? fmtMoney(v) + " đ" : <span className="muted">—</span>;
     if (f?.type === "date") return fmtDate(v) || <span className="muted">—</span>;
     return v == null || v === "" ? <span className="muted">—</span> : String(v);
@@ -281,7 +293,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
               <div className="prs-card-head">
                 <strong>{STT_OF(idx)}. {r.fullName}</strong>
                 <span className="prs-card-actions">
-                  <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
+                  <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) && !r.piiLoi ? "Sửa" : "Xem"}</button>
                   <button className="btn btn-sm" title="Tải Hợp đồng dịch vụ (.docx)" onClick={() => downloadContract(r)}>Tải HĐ</button>
                   {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
                 </span>
@@ -337,7 +349,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                   {TABLE_COLS.map((k, i) => renderCell(k, r, i === 0))}
                   <td className="muted">{r.createdBy?.displayName ?? ""}</td>
                   <td className="row-actions">
-                    <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) ? "Sửa" : "Xem"}</button>
+                    <button className="btn btn-sm" onClick={() => setEditing(r)}>{canEditRow(r) && !r.piiLoi ? "Sửa" : "Xem"}</button>
                     <button className="btn btn-sm" title="Tải Hợp đồng dịch vụ (.docx) — điền sẵn từ hồ sơ; phiếu chi chỉ kèm khi đã thanh toán" onClick={() => downloadContract(r)}>Tải HĐ</button>
                     {/* Xóa theo quyền DELETE (khớp thẻ mobile + backend) — không dùng quyền edit. */}
                     {canDeleteRow(r) && <button className="btn btn-sm btn-danger" onClick={() => onDelete(r)}>Xóa</button>}
@@ -351,7 +363,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
                 {/* GHIM tổng vào ô sticky (luôn hiện) — vì cột Lương/Thuế/TN nằm xa phải, cuộn ngang mới thấy. */}
                 <td className="sticky-2 sum-label">
                   <strong>Tổng (toàn bộ lọc)</strong>
-                  <span className="sum-inline">Σ Lương {fmtMoney(summary.salary)} · Thuế {fmtMoney(summary.pit)} · TNCT {fmtMoney(summary.taxableIncome)}</span>
+                  <span className="sum-inline">Σ Lương {fmtMoney(summary.salary)} · Thuế {fmtMoney(summary.pit)} · TNCT {fmtMoney(summary.taxableIncome)}{soPiiLoi > 0 ? ` · ⚠ thiếu ${soPiiLoi} hồ sơ lỗi khoá` : ""}</span>
                 </td>
                 {TABLE_COLS.slice(1).map((k) => (
                   <td key={k} className={FIELD_BY_KEY[k]?.type === "money" ? "num" : ""}>
@@ -370,6 +382,14 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
 
       {/* TỔNG (toàn bộ lọc) — luôn hiện rõ DƯỚI bảng/thẻ, không bị cuộn ngang che như dòng tổng trong bảng.
           CHỐT pattern: .prs-total là "tổng-CUỐI-bảng" của trang này (khác .stat-row/<Stat> đầu trang ở Hóa đơn) — cố ý giữ, đừng đổi sang stat-card. */}
+      {/* Tổng THIẾU (soát chéo files#1): hồ sơ có bản mã không giải mã được bị cộng như 0. Trước FILE-12
+          cả trang lỗi 500 nên ai cũng biết; nay phải nói ra, nếu không số thiếu trông y như số thật. */}
+      {soPiiLoi > 0 && (
+        <div className="err" role="alert" data-testid="pii-loi-tong">
+          ⚠ Tổng THIẾU lương của {soPiiLoi} hồ sơ có dữ liệu mã hoá KHÔNG giải mã được (sai hoặc thiếu khoá) — Σ Lương,
+          Σ Thuế TNCN, Σ Thu nhập chịu thuế dưới đây chưa gồm các hồ sơ đó. Báo quản trị khôi phục khoá.
+        </div>
+      )}
       <div className="prs-total" role="status">
         <span><b>{meta.total}</b> hồ sơ</span>
         <span>Σ Lương: <b>{fmtMoney(summary.salary)} đ</b></span>
@@ -398,7 +418,7 @@ export function PersonnelPage({ me, query, onQuery }: { me: Me; query: string; o
         />
       )}
 
-      {payFor && <PaymentDialog rec={payFor} onClose={() => setPayFor(null)} onDone={() => { setPayFor(null); reload(); }} />}
+      {payFor && <PaymentDialog rec={payFor} onClose={() => setPayFor(null)} onDone={() => { setPayFor(null); reload(); }} onLoi={reload} />}
     </div>
   );
 }
@@ -450,7 +470,7 @@ function compressImage(file: File, maxDim = 1280, quality = 0.7): Promise<string
 }
 
 // Dialog THANH TOÁN: kế toán đánh dấu đã/bỏ + đính/xem ẢNH chứng từ (nén client, lưu base64).
-export function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClose: () => void; onDone: () => void }) {
+export function PaymentDialog({ rec, onClose, onDone, onLoi }: { rec: Personnel; onClose: () => void; onDone: () => void; onLoi?: () => void }) {
   const paid = !!rec.paidAt;
   const [proof, setProof] = useState<string | null>(null);     // ảnh MỚI chọn (base64)
   const [existing, setExisting] = useState<string | null>(null); // ảnh ĐÃ CÓ (tải on-demand)
@@ -481,7 +501,9 @@ export function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClos
   const mark = async (markPaid: boolean) => {
     setBusy(true);
     try { await api.markPayment(rec.id, markPaid, markPaid ? (proof || undefined) : undefined); toast(markPaid ? "Đã đánh dấu thanh toán" : "Đã bỏ đánh dấu", "success"); onDone(); }
-    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); setBusy(false); }
+    // Lỗi: hộp thoại GIỮ NGUYÊN (còn ảnh vừa chọn để thử lại) nhưng danh sách phía sau nạp lại — máy
+    // chủ có thể đã ghi paidAt rồi mới hỏng ở bước trả về (soát chéo files#2).
+    catch (ex) { toast(ex instanceof ApiError ? ex.message : "Thao tác thất bại", "error"); setBusy(false); onLoi?.(); }
   };
   const shown = proof || existing;
   return (
@@ -512,9 +534,12 @@ export function PaymentDialog({ rec, onClose, onDone }: { rec: Personnel; onClos
   );
 }
 
-function RecordForm({ rec, readOnly, onClose, onSaved }: {
+function RecordForm({ rec, readOnly: readOnlyTheoQuyen, onClose, onSaved }: {
   rec: Personnel | null; readOnly: boolean; onClose: () => void; onSaved: () => void;
 }) {
+  // Hồ sơ có bản mã PII hỏng (piiLoi — lương/CCCD/STK tới đây = null) chỉ được XEM, cùng nếp EmployeeForm:
+  // gửi lại form là gửi ba ô trống đè lên bản mã (máy chủ chặn 409; đây là lớp thứ hai để người dùng hiểu vì sao).
+  const readOnly = readOnlyTheoQuyen || !!rec?.piiLoi;
   const buildInitial = () => {
     const init: Record<string, string> = {};
     for (const f of INPUT_FIELDS) {
@@ -570,6 +595,12 @@ function RecordForm({ rec, readOnly, onClose, onSaved }: {
           <button className="x" onClick={() => void guardedClose()} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
+          {rec?.piiLoi ? (
+            <div className="err" role="alert" data-testid="pii-loi">
+              ⚠️ Lương / CCCD / số tài khoản của hồ sơ này đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá). Hồ
+              sơ tạm chỉ xem được để khỏi xoá mất dữ liệu — báo quản trị khôi phục khoá rồi sửa lại.
+            </div>
+          ) : null}
           {/* Chọn DỰ ÁN (BẮT BUỘC) — hiện cả khi tạo/sửa/xem. Chọn xong hiện "✓ đã chọn"; KHÔNG hiện ô riêng cho Tên/Mã dự án·Account·CTY (tự điền ngầm). */}
           <ProjectPicker
             selected={{ projectCode: form.projectCode, projectName: form.projectName, accountName: form.accountName, company: form.company }}
