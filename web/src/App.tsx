@@ -46,6 +46,7 @@ export function App() {
   // Nay: giữ nguyên cây đang mount, phủ một hộp đăng nhập lại lên trên. Đăng nhập xong đóng hộp,
   // dữ liệu trong state editor còn nguyên vẹn, bấm Lưu lại là xong.
   const [matPhien, setMatPhien] = useState(false);
+  const [loiKhoiDong, setLoiKhoiDong] = useState(false);
   // FE-05: tab khác vừa đăng xuất / đăng nhập người KHÁC → danh tính của tab này đã sai (cookie phiên
   // dùng chung) → nạp lại sạch. `useRef` để listener đọc được `me` mới nhất mà không phải đăng ký lại.
   const meIdRef = useRef<number | null>(null);
@@ -63,7 +64,12 @@ export function App() {
     // hợp lệ mà vẫn bị hộp "Phiên đăng nhập đã hết" đè lên — tưởng kích hoạt hỏng.
     // ghiNhanNguoiDung: người khác người dùng lần trước trên trình duyệt này → xoá bản nháp của họ
     // NGAY, trước khi kịp mở báo giá nào (FE-04). Gọi ở mọi đường xác lập danh tính bên dưới.
-    api.me({ im401: true }).then((m) => { ghiNhanNguoiDung(m.id); setMe(m); }).catch(() => setMe(null)).finally(() => setLoading(false));
+    // FE-11: CHỈ 401/403 mới là "chưa đăng nhập". Mất mạng hay 502 lúc máy chủ đang khởi động lại (khung
+    // deploy) trước đây cũng rơi về màn Login — người có phiên hợp lệ tưởng bị đăng xuất, đăng nhập lại
+    // thì báo "Đăng nhập thất bại" (vì máy chủ vẫn chưa lên). Nay nói đúng nguyên nhân + cho thử lại.
+    api.me({ im401: true }).then((m) => { ghiNhanNguoiDung(m.id); setMe(m); })
+      .catch((e) => { if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setMe(null); else setLoiKhoiDong(true); })
+      .finally(() => setLoading(false));
     const onExpired = () => setMatPhien(true);
     // ĐÓNG lớp phủ khi có bằng chứng phiên vẫn sống — xem chú thích "auth:ok" ở api.ts.
     //
@@ -92,6 +98,15 @@ export function App() {
   // dò khởi động bật lên còn nguyên, và lớp phủ đăng nhập lại nhảy ra đè lên phiên vừa tạo.
   if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   if (loading) return <div className="center muted">Đang tải…</div>;
+  if (loiKhoiDong && !me) {
+    return (
+      <div className="center" role="alert" style={{ flexDirection: "column", gap: 12, padding: 24, textAlign: "center" }}>
+        <h2>Không kết nối được máy chủ</h2>
+        <p className="muted">Có thể mạng đang chập chờn hoặc hệ thống đang cập nhật. Phiên đăng nhập của bạn KHÔNG bị mất — thử lại sau ít giây.</p>
+        <button className="btn btn-primary" onClick={() => location.reload()}>Thử lại</button>
+      </div>
+    );
+  }
   // Chưa từng đăng nhập → màn đăng nhập đầy đủ. (Lớp phủ chỉ dành cho phiên MẤT giữa chừng.)
   if (!me) return <Login onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   // Khi xem thử: GIỮ identity admin (server) nhưng ĐỔI permissions sang tài khoản đang xem → UI hiện đúng quyền đó.
