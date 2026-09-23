@@ -360,11 +360,23 @@ git ls-tree -r --name-only "$REF" -- src shared web/src prisma templates public 
 # Đo trên production: /opt/quanly/backup-db.sh KHÁC md5 với repo và chỉ có 2/5 timer — mọi bản vá
 # backup trong repo (atomic .partial, off-host, watchdog) chưa bao giờ tới host, vì deploy.sh không
 # đụng /opt/quanly. KHÔNG tự cài (cần sudo, và cài đè có thể mất bản vá chỉ có trên host) — chỉ NÓI RA.
+#
+# Soát chéo ops#7: duyệt ĐÚNG các tệp install-backup.sh cài (không glob — glob gồm cả install-backup.sh,
+# thứ không bao giờ được cài vào /opt/quanly, nên trước đây cảnh báo KHÔNG BAO GIỜ tắt kể cả khi host
+# khớp repo). tests/ops-deploy.test.js khoá danh sách này bằng với tập tệp install-backup.sh cài.
+# Chỉ báo LỆCH khi `cmp` THẬT SỰ so được và khác (mã 1); không đọc được (mã 2, thiếu quyền/sudo) thì
+# nói đúng là không đọc được. Host chưa từng cài → một dòng, không phải một dòng mỗi tệp.
+BK_TEP="backup-db.sh backup-objects.sh restore-test.sh restore-drill.sh backup-watchdog.sh offhost-lib.sh"
 echo "▶ [2c/6] Bộ sao lưu trên host so với repo (chỉ cảnh báo)"
-LECH_BK=$(ssh "$SSH" "cd $DIR && for f in scripts/backup/*.sh; do t=/opt/quanly/\$(basename \$f); \
-    if cmp -s \$f \$t 2>/dev/null || sudo -n cmp -s \$f \$t 2>/dev/null; then :; \
-    elif [ -e \$t ] || sudo -n test -e \$t 2>/dev/null; then echo \"LỆCH \$t\"; \
-    else echo \"THIẾU/KHÔNG ĐỌC ĐƯỢC \$t\"; fi; done" 2>/dev/null || true)
+LECH_BK=$(ssh "$SSH" "cd $DIR && BK=/opt/quanly; \
+  if [ ! -d \$BK ] && ! sudo -n test -d \$BK 2>/dev/null; then echo \"CHƯA CÀI bộ sao lưu trên host này (\$BK không tồn tại)\"; exit 0; fi; \
+  for n in $BK_TEP; do f=scripts/backup/\$n; t=\$BK/\$n; \
+    cmp -s \$f \$t 2>/dev/null; rc=\$?; \
+    if [ \$rc -gt 1 ]; then sudo -n cmp -s \$f \$t 2>/dev/null; rc=\$?; fi; \
+    if [ \$rc -eq 0 ]; then :; \
+    elif [ \$rc -eq 1 ]; then echo \"LỆCH \$t\"; \
+    elif [ -e \$t ] || sudo -n test -e \$t 2>/dev/null; then echo \"KHÔNG ĐỌC ĐƯỢC \$t (thiếu quyền/sudo -n)\"; \
+    else echo \"THIẾU \$t\"; fi; done" 2>/dev/null || true)
 if [ -n "$LECH_BK" ]; then
   printf '%s\n' "$LECH_BK" | sed 's/^/   ⚠️  /'
   echo "   → bộ sao lưu đang chạy KHÔNG phải bản trong repo. Xem docs/operations/BACKUP_RESTORE.md, mục \"Đưa production về đúng cơ chế\"."
@@ -416,9 +428,13 @@ else
   while IFS= read -r m; do
     [ -n "$m" ] || continue
     printf '%s\n' "$DA_AP" | grep -qxF "$m" && continue
+    # KHÔNG dùng `grep -q` ở cuối ống (soát chéo ops#6): với `set -o pipefail`, `grep -q` thoát ngay ở
+    # dòng khớp đầu, `git show`/`grep -v` phía trước còn đang ghi thì nhận SIGPIPE → ống trả 141 → `if`
+    # hiểu là KHÔNG khớp → migration DROP ở đầu một tệp SQL lớn (đo: ~284KB) lọt chốt. `>/dev/null` để
+    # grep đọc hết đầu vào.
     if git show "$REF:prisma/migrations/$m/migration.sql" 2>/dev/null \
         | grep -v '^[[:space:]]*--' \
-        | grep -qiE 'DROP[[:space:]]+(TABLE|COLUMN)|RENAME[[:space:]]+(TO|COLUMN)|ALTER[[:space:]]+COLUMN[[:space:]]+[^[:space:]]+[[:space:]]+(SET[[:space:]]+DATA[[:space:]]+)?TYPE'; then
+        | grep -iE 'DROP[[:space:]]+(TABLE|COLUMN)|RENAME[[:space:]]+(TO|COLUMN)|ALTER[[:space:]]+COLUMN[[:space:]]+[^[:space:]]+[[:space:]]+(SET[[:space:]]+DATA[[:space:]]+)?TYPE' >/dev/null; then
       HUY+=("$m")
     fi
   done < <(git ls-tree --name-only "$REF" prisma/migrations/ 2>/dev/null | sed -n 's#^prisma/migrations/##p')
@@ -435,6 +451,22 @@ else
   fi
 fi
 
+# ── [3d/6] KÉO ẢNH PHỤ THUỘC TRƯỚC MIGRATE (soát chéo ops#10) ───────────────────────────────
+# `compose run --rm app …` ở [4/6] khởi động phụ thuộc của app và recreate những cái lệch cấu hình.
+# DEP-01 đổi ảnh minio sang quay.io, nên lượt deploy kế tiếp phải kéo manifest từ quay.io NGAY TRONG
+# [4/6] — kéo hỏng thì `run` thoát ≠ 0 và khối "MIGRATE HỎNG … migrate resolve" bên dưới in ra, dù
+# migration CHƯA HỀ chạy. Kéo riêng ở đây, với thông báo riêng. `--policy missing`: ảnh đã có sẵn thì
+# không gọi registry (không bắt mọi lượt deploy phụ thuộc Docker Hub/quay.io).
+echo "▶ [3d/6] Kéo ảnh phụ thuộc còn thiếu (postgres · redis · minio)"
+if ! ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE pull --policy missing postgres redis minio"; then
+  echo ""
+  echo "✖ [3d/6] KÉO ẢNH PHỤ THUỘC HỎNG (quay.io / Docker Hub không tới được?)."
+  echo "   Migration CHƯA chạy, chưa container nào bị đụng — app CŨ vẫn chạy. KHÔNG làm theo hướng dẫn"
+  echo "   'migrate resolve' nào cả. Kiểm mạng từ VM rồi chạy lại deploy:"
+  echo "       ssh $SSH \"cd $DIR && docker compose -f $COMPOSE pull postgres redis minio\""
+  exit 1
+fi
+
 # Chạy migration TRƯỚC khi recreate (schema thêm cột/bảng → code mới mới dùng được). prisma nằm
 # trong dependencies nên có trong image; migrate deploy tự lấy advisory-lock (an toàn nhiều instance).
 # Nếu FAIL → set -e dừng deploy TẠI ĐÂY, app cũ vẫn chạy (không kẹt nửa-vời).
@@ -442,6 +474,9 @@ echo "▶ [4/6] DB migrate (prisma migrate deploy)"
 if ! ssh "$SSH" "cd $DIR && docker compose -f $COMPOSE run --rm app npx prisma migrate deploy"; then
   echo ""
   echo "✖ [4/6] MIGRATE HỎNG. App CŨ vẫn đang chạy — chưa ai bị ảnh hưởng. ĐỌC HẾT TRƯỚC KHI GÕ LẠI."
+  echo ""
+  echo "  Trước tiên phân loại: lỗi NGAY PHÍA TRÊN là pull/manifest/'dependency failed to start' (phụ"
+  echo "  thuộc postgres/redis/minio không lên) thì migration CHƯA chạy — sửa phụ thuộc, BỎ QUA bước 2-3."
   echo ""
   echo "  Vài migration đặt SET lock_timeout='10s' để không treo cả CSDL khi có ai đang giữ khoá"
   echo "  bảng. Hết giờ thì Postgres huỷ lệnh (SQLSTATE 55P03) và Prisma ghi migration đó là"
@@ -532,7 +567,17 @@ echo "   $REL"
 echo "▶ [5d/6] Nạp lại Prometheus / Alertmanager (nếu đang chạy)"
 ssh "$SSH" "cd $DIR && \
   if docker inspect quanly-prometheus >/dev/null 2>&1; then \
-    docker kill -s HUP quanly-prometheus >/dev/null 2>&1 && echo '   prometheus: đã gửi SIGHUP (nạp lại rule_files)' || echo '   ⚠️  prometheus: không nạp lại được'; \
+    if [ -z \"\$(docker exec quanly-prometheus printenv QUANLY_ENV 2>/dev/null)\" ]; then \
+      echo '   ⚠️  prometheus: container KHÔNG có biến QUANLY_ENV (tạo từ compose cũ) → nhãn environment trong prometheus.yml sẽ RỖNG.'; \
+      echo '       Tạo lại ngăn quan sát (người vận hành quyết, kiểm .env có HEARTBEAT_URL= trước — xem MONITORING.md):'; \
+      echo '       docker compose -f $COMPOSE -f infra/observability/docker-compose.observability.yml up -d prometheus alertmanager loki'; \
+    fi; \
+    if docker kill -s HUP quanly-prometheus >/dev/null 2>&1; then \
+      sleep 2; \
+      if docker exec quanly-prometheus wget -qO- http://127.0.0.1:9090/metrics 2>/dev/null | grep -q '^prometheus_config_last_reload_successful 1'; then \
+        echo '   prometheus: đã nạp lại cấu hình (SIGHUP, prometheus_config_last_reload_successful 1)'; \
+      else echo '   ⚠️  prometheus: đã gửi SIGHUP nhưng nạp cấu hình HỎNG (prometheus_config_last_reload_successful ≠ 1) — xem docker logs quanly-prometheus'; fi; \
+    else echo '   ⚠️  prometheus: không gửi được SIGHUP để nạp lại'; fi; \
   else echo '   (không có quanly-prometheus — bỏ qua)'; fi; \
   if docker inspect quanly-alertmanager >/dev/null 2>&1; then \
     moi=\$(sha256sum infra/observability/alertmanager.yml.tpl infra/observability/alertmanager-entrypoint.sh 2>/dev/null | sha256sum | cut -c1-16); \

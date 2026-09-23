@@ -30,6 +30,7 @@ shift
 printf '%s\\n---\\n' "$*" >> "$STUB_DIR/ssh.log"
 case "$*" in
   *"image inspect"*) exit "\${STUB_ANH_RC:-0}";;
+  *"pull --policy"*) exit "\${STUB_PULL_RC:-0}";;
   *readyz*) [ "\${STUB_READYZ:-ok}" = ok ] && echo '{"ok":true}' || exit 8; exit 0;;
   *livez*) echo '{"ok":true}';;
   *RestartCount*) [ "\${STUB_WORKER:-ok}" = ok ] && echo WORKER_OK || { echo "WORKER_KHONG_ON trạng thái='false 3'"; exit 1; };;
@@ -50,7 +51,10 @@ case "$1" in
     exit 0;;
   show)
     case "$*" in
-      *20990101000000_huy/migration.sql*) printf '%s\\n' "\${STUB_SQL:-ALTER TABLE \\"X\\" ADD COLUMN \\"y\\" TEXT;}";;
+      *20990101000000_huy/migration.sql*)
+        # STUB_SQL_FILE: SQL lớn (hàng trăm KB) không đi qua biến môi trường được (Windows trần 32K).
+        if [ -n "\${STUB_SQL_FILE:-}" ]; then cat "$STUB_SQL_FILE"
+        else printf '%s\\n' "\${STUB_SQL:-ALTER TABLE \\"X\\" ADD COLUMN \\"y\\" TEXT;}"; fi;;
       *) exit 128;;
     esac
     exit 0;;
@@ -266,5 +270,147 @@ describe("INFRA-09 / DOC-06 / OBS-13", () => {
   it("nạp lại quy tắc Prometheus sau deploy (không chờ ai reload tay)", () => {
     const r = chay(["prod"]);
     expect(r.log).toMatch(/docker kill -s HUP quanly-prometheus/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// Soát chéo 2026-09-24 (nhóm g8): ops#6, ops#7, ops#8, ops#10.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Lệnh đã gửi sang máy chủ (qua ssh giả) có chứa `dau`. */
+const lenhTuXa = (log, dau) => log.split("\n---\n").find((c) => c.includes(dau)) ?? "";
+const posix = (p) => p.replace(/\\/g, "/");
+
+/** Chạy TẠI CHỖ một lệnh deploy.sh gửi sang máy chủ, sau khi thay đường dẫn máy chủ bằng thư mục tạm. */
+function chayTaiCho(lenh, thayThe, { stubDocker = null, env = {} } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "ops-deploy-taicho-"));
+  rac.push(dir);
+  let s = lenh;
+  for (const [a, b] of thayThe) s = s.split(a).join(b);
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  if (stubDocker) {
+    writeFileSync(join(bin, "docker"), stubDocker);
+    chmodSync(join(bin, "docker"), 0o755);
+  }
+  const r = spawnSync("bash", ["-c", s], {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe("ops#6 — [3c/6] không bỏ lọt DROP trong migration LỚN (pipefail + grep -q → SIGPIPE 141)", () => {
+  it("DROP ở đầu một tệp SQL ~400KB → prod vẫn dừng trước migrate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ops-sql-lon-"));
+    rac.push(dir);
+    const f = join(dir, "migration.sql");
+    writeFileSync(f, 'ALTER TABLE "x" DROP COLUMN "y";\n' + "INSERT INTO t VALUES (1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');\n".repeat(10000));
+    const r = chay(["prod"], { STUB_SQL_FILE: f });
+    expect(r.code, "migration huỷ lọt qua chốt [3c/6] vì SIGPIPE").not.toBe(0);
+    expect(r.out).toMatch(/migration HUỶ\/ĐỔI DẠNG đang chờ: 20990101000000_huy/);
+    expect(r.log).not.toMatch(/prisma migrate deploy/);
+  });
+});
+
+describe("ops#7 — [2c/6] chỉ so đúng các tệp install-backup.sh cài, tách 'lệch' khỏi 'không đọc được'", () => {
+  const CAI = [...readFileSync(join(ROOT, "scripts/backup/install-backup.sh"), "utf8")
+    .matchAll(/^install -m \d+ "\$SRC\/([a-z-]+\.sh)"/gm)].map((m) => m[1]).sort();
+
+  function chuanBiHost(danhSach, sua = {}) {
+    const bk = mkdtempSync(join(tmpdir(), "ops-bk-host-"));
+    rac.push(bk);
+    for (const n of danhSach) {
+      writeFileSync(join(bk, n), sua[n] ?? readFileSync(join(ROOT, "scripts/backup", n)));
+    }
+    return bk;
+  }
+  function chay2c(bk) {
+    const lenh = lenhTuXa(chay(["prod"]).log, "/opt/quanly");
+    expect(lenh, "không thấy lệnh [2c/6] gửi sang máy chủ").not.toBe("");
+    return chayTaiCho(lenh, [["cd /opt/stacks/quanly/quanly", `cd '${posix(ROOT)}'`], ["BK=/opt/quanly", `BK='${posix(bk)}'`]]);
+  }
+
+  it("install-backup.sh cài đúng 6 tệp, và install-backup.sh KHÔNG nằm trong số đó", () => {
+    expect(CAI).toEqual(["backup-db.sh", "backup-objects.sh", "backup-watchdog.sh", "offhost-lib.sh", "restore-drill.sh", "restore-test.sh"]);
+  });
+
+  it("danh sách deploy.sh [2c/6] duyệt TRÙNG tập tệp install-backup.sh cài (không trôi khỏi nhau)", () => {
+    const m = readFileSync(join(ROOT, "deploy.sh"), "utf8").match(/^BK_TEP="([^"]+)"/m);
+    expect(m, "deploy.sh không khai BK_TEP").not.toBeNull();
+    expect(m[1].split(/\s+/).sort()).toEqual(CAI);
+  });
+
+  it("host đã cài ĐÚNG bản repo → không một dòng cảnh báo nào (trước đây luôn báo THIẾU install-backup.sh)", () => {
+    const r = chay2c(chuanBiHost(CAI));
+    expect(r.out.trim(), r.out).toBe("");
+  });
+
+  it("một tệp khác nội dung → LỆCH đúng tệp đó; thiếu một tệp → THIẾU", () => {
+    const bk = chuanBiHost(CAI.filter((n) => n !== "restore-test.sh"), { "backup-db.sh": "#!/bin/sh\necho cu\n" });
+    const r = chay2c(bk);
+    expect(r.out).toMatch(/^LỆCH \S*backup-db\.sh$/m);
+    expect(r.out).toMatch(/^THIẾU \S*restore-test\.sh$/m);
+    expect(r.out).not.toMatch(/backup-objects\.sh/);
+  });
+
+  it("host chưa từng cài bộ sao lưu → MỘT dòng, không phải 6–7 dòng THIẾU", () => {
+    const r = chay2c(join(tmpdir(), "khong-ton-tai-ops-bk-" + Date.now()));
+    expect(r.out.trim().split("\n")).toHaveLength(1);
+    expect(r.out).toMatch(/CHƯA CÀI/);
+  });
+});
+
+describe("ops#8 — [5d/6] cảnh báo khi container Prometheus cũ thiếu QUANLY_ENV, kiểm nạp cấu hình sau HUP", () => {
+  const STUB_DOCKER_QS = `#!/usr/bin/env bash
+case "$*" in
+  "inspect "*) exit 0;;
+  *"printenv QUANLY_ENV"*) [ -n "\${STUB_QENV:-}" ] && { echo "$STUB_QENV"; exit 0; }; exit 1;;
+  *prometheus_config_last_reload_successful*|*"wget"*) echo "prometheus_config_last_reload_successful \${STUB_RELOAD:-1}"; exit 0;;
+esac
+exit 0
+`;
+  function chay5d(env) {
+    const lenh = lenhTuXa(chay(["prod"]).log, "quanly-prometheus");
+    expect(lenh).not.toBe("");
+    const tam = mkdtempSync(join(tmpdir(), "ops-5d-"));
+    rac.push(tam);
+    return chayTaiCho(lenh, [["cd /opt/stacks/quanly/quanly", `cd '${posix(tam)}'`], ["sleep 2", "true"]], { stubDocker: STUB_DOCKER_QS, env });
+  }
+
+  it("container không có QUANLY_ENV → cảnh báo to kèm lệnh up -d, không chỉ 'đã gửi SIGHUP'", () => {
+    const r = chay5d({ STUB_QENV: "" });
+    expect(r.out).toMatch(/QUANLY_ENV/);
+    expect(r.out).toMatch(/up -d prometheus/);
+  });
+
+  it("container có QUANLY_ENV và nạp thành công → không cảnh báo", () => {
+    const r = chay5d({ STUB_QENV: "prod" });
+    expect(r.out).not.toMatch(/⚠️/);
+    expect(r.out).toMatch(/prometheus: đã nạp lại/);
+  });
+
+  it("nạp cấu hình HỎNG sau HUP (prometheus_config_last_reload_successful 0) → cảnh báo", () => {
+    const r = chay5d({ STUB_QENV: "prod", STUB_RELOAD: "0" });
+    expect(r.out).toMatch(/⚠️.*prometheus.*nạp/);
+  });
+});
+
+describe("ops#10 — kéo ảnh phụ thuộc (minio quay.io) TRƯỚC migrate, lỗi kéo ảnh không bị báo là 'MIGRATE HỎNG'", () => {
+  it("có bước kéo ảnh phụ thuộc riêng, đứng trước prisma migrate deploy", () => {
+    const r = chay(["prod"]);
+    const iPull = r.log.search(/compose -f docker-compose\.prod\.yml pull --policy missing[^\n]*minio/);
+    const iMig = r.log.indexOf("prisma migrate deploy");
+    expect(iPull, "không có bước kéo ảnh phụ thuộc riêng").toBeGreaterThan(-1);
+    expect(iPull).toBeLessThan(iMig);
+  });
+
+  it("kéo ảnh hỏng → dừng với thông báo RIÊNG, không chạy migrate, không in hướng dẫn migrate resolve", () => {
+    const r = chay(["prod"], { STUB_PULL_RC: "1" });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/KÉO ẢNH PHỤ THUỘC HỎNG/);
+    expect(r.out).not.toMatch(/MIGRATE HỎNG/);
+    expect(r.log).not.toMatch(/prisma migrate deploy/);
   });
 });
