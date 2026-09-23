@@ -23,8 +23,30 @@ const RONG: never[] = [];
 // GridTable. Ô nhập UNCONTROLLED + key _k giữ focus; qRef + tick để vẽ lại tổng.
 // ───────────────────────────────────────────────────────────────────────────────
 
+// Sheet cũng mang `_k` (danh tính trong phiên soạn): lưới chính, ô Discount và ExtraTables lấy nó làm
+// `key`. Key theo CHỈ SỐ sheet thì xoá sheet đang mở (chỉ số giữ nguyên, sheet dưới trượt lên) để lại
+// instance lưới CŨ cùng ngăn Ctrl+Z của sheet đã xoá — Ctrl+Z chép hàng sheet đó đè lên sheet khác
+// (soát toàn diện L53/L0). Không ghi đè `_k` sẵn có: `giuDanhTinhSheet` đã nối nó từ bản trước.
 const stampKeys = (q: QuoteFull) => {
-  (q.sheets as Sheet[] | undefined)?.forEach((s) => (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); }));
+  (q.sheets as Sheet[] | undefined)?.forEach((s) => {
+    if (s._k == null) s._k = nextK();
+    (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); });
+  });
+};
+/**
+ * Thay qRef bằng bản máy chủ (sau Lưu / chốt / không chốt / nạp lại HN) mà sheet VẪN LÀ sheet đó thì
+ * giữ `_k` cũ — không thì lưới bị gắn lại và mất lịch sử Ctrl+Z qua mốc Lưu (hành vi sẵn có). Sau Lưu
+ * máy chủ xoá-tạo-lại sheet (id mới) nhưng giữ đúng thứ tự payload → nối theo VỊ TRÍ; các đường khác
+ * nối theo id (id lệch = người khác đã lưu, nội dung đã khác → gắn lại lưới là đúng).
+ */
+const giuDanhTinhSheet = (cu: QuoteFull | null, moi: QuoteFull, theoViTri: boolean) => {
+  const a = (cu?.sheets as Sheet[] | undefined) || [];
+  const b = (moi.sheets as Sheet[] | undefined) || [];
+  const viTri = theoViTri && a.length === b.length;
+  b.forEach((s, i) => {
+    const g = viTri ? a[i] : a.find((x) => x.id != null && x.id === s.id);
+    if (g?._k != null) s._k = g._k;
+  });
 };
 // Ý kiến khách theo TỪNG SHEET (khách chốt sheet này, chưa chốt sheet kia) — server giữ, đổi bằng
 // endpoint riêng (không đi qua Lưu) nên không lẫn với trạng thái CẢ báo giá (q.status).
@@ -598,7 +620,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const addSheet = () => {
     if (dangLuuHoacDaDoi()) return;
     const t = templates.filter((x) => x.companyId === q.companyId)[0] || templates[0];
-    sheets.push({ templateId: t?.id, name: "", groupSubtotal: true, items: [], extraTables: [] });
+    sheets.push({ _k: nextK(), templateId: t?.id, name: "", groupSubtotal: true, items: [], extraTables: [] });
     q._activeSheet = sheets.length - 1; mark(); redraw();
   };
   const removeSheet = async (i: number) => {
@@ -606,7 +628,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     if (!(await confirmModal("Xóa sheet", `Xóa sheet "${sheets[i].name || "Sheet " + (i + 1)}"?`, { danger: true, confirmText: "Xóa" }))) return;
     if (dangLuuHoacDaDoi()) { toast("Báo giá vừa được lưu trong lúc hỏi — chưa xoá sheet, hãy bấm xoá lại", "info"); return; }
     sheets.splice(i, 1);
-    if (q._activeSheet >= sheets.length) q._activeSheet = sheets.length - 1;
+    // L55/L5: xoá tab đứng TRƯỚC sheet đang mở thì lùi chỉ số theo (như removeTableFromList), không thì
+    // màn nhảy sang sheet đứng sau và người dùng gõ tiếp vào sheet khác mà không biết.
+    if (i < q._activeSheet) q._activeSheet--;
+    else if (q._activeSheet >= sheets.length) q._activeSheet = sheets.length - 1;
     mark(); redraw();
   };
 
@@ -668,7 +693,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
         vanTayMainRef.current = vanTayMain(saved);
-        qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw();
+        const moi = { ...saved, _activeSheet: ai } as QuoteFull;
+        giuDanhTinhSheet(q, moi, true);
+        qRef.current = moi; stampKeys(qRef.current); redraw();
         // MỐC của bản nháp phải đi theo bản máy chủ VỪA lưu. `baseNhapRef` chỉ được gán một lần
         // lúc nạp; không làm tươi ở đây thì mọi bản nháp ghi SAU lần Lưu đầu tiên đều mang
         // `baseUpdatedAt` CŨ, và điều kiện `nhapCu.baseUpdatedAt === baseNhapRef.current` ở đường
@@ -779,7 +806,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       }
       const u = await api.markConverted(q.id);
       vanTayMainRef.current = vanTayMain(u);
-      qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
+      const moi = { ...u, _activeSheet: ai } as QuoteFull;
+      giuDanhTinhSheet(q, moi, false);
+      qRef.current = moi;
       stampKeys(qRef.current);
       // Chốt ghi vào hàng Quote → updatedAt đổi. Mốc bản nháp phải theo, không thì bản nháp ghi sau
       // này mang mốc cũ và lần mở sau bị bỏ qua im lặng.
@@ -802,7 +831,7 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null) return;
-    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); const moi = { ...u, _activeSheet: ai } as QuoteFull; giuDanhTinhSheet(q, moi, false); qRef.current = moi; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
@@ -822,7 +851,9 @@ Lý do (không bắt buộc):`,
       const u = await api.getQuote(cur.id);
       if (!dirtyRef.current) {
         vanTayMainRef.current = vanTayMain(u);
-        qRef.current = { ...u, _activeSheet: cur._activeSheet } as QuoteFull; stampKeys(qRef.current);
+        const moi = { ...u, _activeSheet: cur._activeSheet } as QuoteFull;
+        giuDanhTinhSheet(cur, moi, false);
+        qRef.current = moi; stampKeys(qRef.current);
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
       }
@@ -890,7 +921,10 @@ Lý do (không bắt buộc):`,
     // TRONG FILE. Sheet KHÔNG dính tới lượt nạp không xê dịch một ô nào.
     sapXepTheoFile(sheets, theoFile);
     if (!sheets.length) sheets.push({ _k: nextK(), templateId: activeSheet.templateId, name: "", groupSubtotal: true, items: [], extraTables: [] } as Sheet);
-    q._activeSheet = Math.max(0, Math.min(q._activeSheet, sheets.length - 1));
+    // L5: xoá / sắp lại sheet khi nạp thì đi THEO sheet đang mở tới chỗ mới của nó; chỉ khi chính nó bị
+    // xoá mới kẹp chỉ số (lưới gắn lại theo `_k` của sheet mới, không mang ngăn Ctrl+Z của sheet cũ).
+    const conDo = sheets.indexOf(activeSheet);
+    q._activeSheet = conDo >= 0 ? conDo : Math.max(0, Math.min(q._activeSheet, sheets.length - 1));
     // VAT là của CẢ báo giá; Discount đã đặt vào TỪNG sheet ở vòng lặp trên.
     if (payload.totals?.vatPercent != null) q.vatPercent = payload.totals.vatPercent;
     mark(); redraw();
@@ -1067,7 +1101,10 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <GridTable key={`main-${ai}-${activeSheet.templateId}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
+        {/* key theo DANH TÍNH sheet (`_k`), không theo chỉ số: xoá sheet đang mở hay một tab đứng trước
+            nó mà giữ instance cũ là giữ luôn ngăn Ctrl+Z của sheet khác — `restore()` chép ảnh chụp
+            đó đè lên items của sheet đang hiện (L53/L0). Đổi mẫu vẫn gắn lại như trước. */}
+        <GridTable key={`main-${activeSheet.templateId}-${activeSheet._k}`} items={activeSheet.items as ItemK[]} fxBar dataVersion={gridVerRef.current}
           dock={oDock}
           anThanhThem={luoiDangLam.id !== "chinh"}
           onDangDung={() => datDangLam("chinh", "Báo giá chính")}
@@ -1097,7 +1134,9 @@ Lý do (không bắt buộc):`,
                     kiểm soát (defaultValue chỉ đọc lúc mount), nên xoá sheet đang mở — chỉ số giữ
                     nguyên mà sheet dưới nó trượt lên — sẽ để lại ô mang số của sheet VỪA BỊ XOÁ. */}
                 {suaMain
-                  ? <input key={`disc-${activeSheet._k ?? ai}`} type="text" inputMode="numeric" className="sheet-discount-input"
+                  // L54: `_k` nay được đóng cho MỌI sheet (stampKeys, addSheet); trước đó sheet nạp từ
+                  // máy chủ không có nên key rơi về `ai` và ô giữ số của sheet vừa xoá.
+                  ? <input key={`disc-${activeSheet._k}`} type="text" inputMode="numeric" className="sheet-discount-input"
                       aria-label="Discount trừ vào sheet này (VNĐ)" title="Trừ THẲNG vào sheet này, TRƯỚC khi tính VAT"
                       defaultValue={M.fmtMoney(Number(activeSheet.discount) || 0)}
                       onInput={(e) => {
@@ -1179,7 +1218,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${ai}`} sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`}sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
