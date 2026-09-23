@@ -90,6 +90,49 @@ export function parseLooseDecimal(s: string): number {
   return neg ? -n : n;
 }
 
+// ── SUY QUY ƯỚC SỐ TỪ CẢ KHỐI DÁN (nguồn NGOÀI) ────────────────────────────────────────────────
+// Một ô "1.500" đứng riêng thì mơ hồ: Excel máy locale VN hiện 1500 cái là "1.500" (dấu nghìn), còn
+// máy locale US hiện 1,5 m² là "1.5". parseLooseDecimal chọn "thập phân" cho cột SL/Ngày (tránh
+// 2,675 m² thành 2675) — nhưng thế là SL 1.500 cái dán từ Excel VN bị HỤT 1000 lần. Cả khối dán
+// thì thường có ô KHÔNG mơ hồ để đọc ra máy nguồn dùng quy ước nào:
+//   · VN ("." nghìn, "," thập phân): ô dạng 1.500.000 (≥ 2 nhóm nghìn bằng "."), hoặc có cả hai dấu
+//     mà "," đứng SAU cùng (1.234,5).
+//   · US ("," nghìn, "." thập phân): 1,500,000, hoặc "." đứng sau "," (1,234.5).
+//   · Cột TIỀN (Đơn giá / Thành tiền, nếu nơi gọi cho biết): tiền VND không có 3 số lẻ, nên ở cột
+//     này ngay cả MỘT nhóm "250.000" cũng đã là dấu nghìn VN ("250,000" là US).
+// Không có tín hiệu, hoặc tín hiệu hai phía mâu thuẫn → null: nơi gọi giữ cách đọc cũ.
+export type QuyUocSo = "vn" | "us";
+export function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): QuyUocSo | null {
+  let vn = false, us = false;
+  for (const row of matrix) {
+    row.forEach((raw, c) => {
+      const v0 = String(raw ?? "").trim();
+      if (!v0 || v0.startsWith("=")) return;
+      const s = tachNgoacKeToan(v0).s.replace(/[\s₫đ$]/gi, "").replace(/^-/, "");
+      if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return;
+      const d = s.lastIndexOf("."), p = s.lastIndexOf(",");
+      if (d >= 0 && p >= 0) { if (p > d) vn = true; else us = true; return; }
+      if (/^\d{1,3}(\.\d{3}){2,}$/.test(s)) { vn = true; return; }
+      if (/^\d{1,3}(,\d{3}){2,}$/.test(s)) { us = true; return; }
+      if (laCotTien?.(c)) {
+        if (/^\d{1,3}\.\d{3}$/.test(s)) vn = true;
+        else if (/^\d{1,3},\d{3}$/.test(s)) us = true;
+      }
+    });
+  }
+  return vn === us ? null : vn ? "vn" : "us";
+}
+
+/** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".". */
+export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (!str || str === "-") return 0;
+  str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  return Number(str) || 0;
+}
+
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
 export function reconstructExportRows(matrix: string[][], roles: string[], numericRoles: Set<string>, numberSubs = false): RebuiltItem[] {
   const numSet = numericRoles instanceof Set ? numericRoles : new Set(["quantity", "unitPrice", "days"]);
@@ -99,6 +142,11 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
   // BANNER xuất ra có NHÓM CON đánh SỐ + KHÔNG ĐVT (vd "1  CGV Kim Cúc"). Nếu DATA có kiểu đó → nguồn là
   // banner → hàng STT-trống là MỤC (không phải nhóm con). Nếu KHÔNG có → nguồn là GN-không-ngày → hàng
   // STT-trống + có tên = NHÓM CON (vd "Chi phí vận chuyển"). Phân biệt để mỗi template hiểu đúng paste.
+  // Quy ước số của CẢ khối (VN/US) — cột tiền là Đơn giá + Thành tiền. Suy được thì mọi ô số đọc theo
+  // nó; không thì giữ cách cũ (SL/Ngày thập phân, tiền đoán nghìn).
+  const qu = suyQuyUocSo(matrix, (c) => roles[c] === "unitPrice" || roles[c] === "_amount");
+  const soDo = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+  const soTien = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
   const hasNumberedSub = matrix.some((r) => /^\d+$/.test(cell(r, sttI).trim()) && cell(r, nameI).trim() !== "" && cell(r, unitI).trim() === "" && cell(r, priceI).trim() !== "");
   const out: RebuiltItem[] = [];
   for (const row of matrix) {
@@ -122,14 +170,14 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
       const v = cell(row, i);
       if (numSet.has(role)) {
         if (v.trim().startsWith("=")) { (it.formulas || (it.formulas = {}))[role] = v.trim(); it[role] = 0; }
-        else it[role] = (role === "quantity" || role === "days") ? parseLooseDecimal(v) : parseLooseNumber(v);   // SL/Ngày = số đo → thập phân
+        else it[role] = (role === "quantity" || role === "days") ? soDo(v) : soTien(v);   // SL/Ngày = số đo → thập phân (khi không suy được quy ước)
       } else if (role === "detail" || role === "notes" || role === "name" || role === "label" || role === "internalNote") it[role] = v;
       else it[role] = v.trim();
     });
     if (kind === "section" || kind === "subsection") {
       it.unitPrice = 0;
       if (it.formulas) delete it.formulas.unitPrice;
-      if (!(it.formulas && it.formulas.quantity)) it.quantity = parseLooseDecimal(cell(row, qtyI));
+      if (!(it.formulas && it.formulas.quantity)) it.quantity = soDo(cell(row, qtyI));
     }
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; delete it.formulas; }
     if (it.formulas && !Object.keys(it.formulas).length) delete it.formulas;

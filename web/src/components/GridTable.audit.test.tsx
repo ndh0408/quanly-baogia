@@ -155,6 +155,29 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     expect([items[0].quantity, items[0].unitPrice]).toEqual([0.125, 95000]);
   });
 
+  // Suy quy ước số từ CẢ khối dán ngoài: SL "1.500" cái từ Excel máy VN không được hụt 1000 lần.
+  it.each([
+    ["khối VN: SL '1.500' + Đơn giá '250.000'", "1.500\t250.000", 1500, 250000],
+    ["khối VN: SL '2,675' + Đơn giá '1.500.000'", "2,675\t1.500.000", 2.675, 1500000],
+    ["khối US: SL '1,500' + Đơn giá '250,000.00'", "1,500\t250,000.00", 1500, 250000],
+    ["khối VN nhiều hàng: '1.500' hàng 1 đọc theo '1.234,5' hàng 2", "1.500\t90\n1.234,5\t10", 1500, 90],
+  ])("GRID-01 suy quy ước: %s", (_ten, chu, sl, gia) => {
+    const items = [hang("A", "cái", 1, 1), hang("B", "cái", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), chu);
+    expect(items[0].quantity).toBeCloseTo(sl, 6);
+    expect(items[0].unitPrice).toBe(gia);
+  });
+
+  it("GRID-01: khối KHÔNG suy được quy ước (SL '1.500' + giá '90') → giữ cách cũ: SL thập phân 1,5", () => {
+    const items = [hang("A", "cái", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), "1.500\t90");
+    expect(items[0].quantity).toBeCloseTo(1.5, 6);
+  });
+
   it("GRID-13: dán '(1.500.000)' (âm kiểu kế toán) vào Đơn giá ra SỐ ÂM", () => {
     const items = [hang("Giảm giá", "gói", 1, 0)];
     moLuoi(items);
