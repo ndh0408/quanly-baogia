@@ -9,7 +9,7 @@ import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntr
 import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
-import { createUndoStack, undoRedoKey } from "../lib/gridUndo";
+import { createUndoStack, createImagePool, undoRedoKey } from "../lib/gridUndo";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
@@ -198,6 +198,7 @@ function GridTableInner(props: GridTableProps) {
   const keepDetailSlot = addrDetail ?? showDetail;   // chừa chỗ trong sơ đồ địa chỉ ô (xem prop)
   // Ngăn xếp undo/redo RIÊNG của lưới này (xem web/src/lib/gridUndo.ts — phần thuần, có bài kiểm).
   const histRef = useRef(createUndoStack());
+  const khoAnhRef = useRef(createImagePool());   // GRID-09: mốc undo giữ MÃ ảnh, không chép lại base64
   const focusRef = useRef<{ i: number; f: string } | null>(null);
   const focusPend = useRef<{ i: number; f: string } | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -283,7 +284,7 @@ function GridTableInner(props: GridTableProps) {
   const DATA_FIELD_COUNT = FIELDS.length - 1;       // số cột DỮ LIỆU (không tính _stt) — cho nhận dạng khối dán
   const NUMERIC = new Set(["quantity", "unitPrice", "days"]);
   const fmtField = (i: number, f: string, v: unknown) => M.fmtNumCell(v as number, f === "quantity" && !!items[i]?.quantityExact);
-  const snap = () => JSON.stringify(items);
+  const snap = () => khoAnhRef.current.snap(items);
   const pushUndo = () => { histRef.current.mark(snap()); };
   // Ghi mốc undo cho ô đang gõ — CHỈ ở ký tự đầu của phiên, và PHẢI gọi TRƯỚC khi ghi giá trị mới
   // vào items (onNumInput ghi thẳng vào model mỗi lần gõ, chụp sau là dính luôn số mới).
@@ -1039,7 +1040,7 @@ function GridTableInner(props: GridTableProps) {
     el.dataset.escVal = el.value;      // mốc ESC phải theo giá trị SAU khi lùi
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
-  const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
+  const restore = (json: string) => { const arr = khoAnhRef.current.parse<ItemK[]>(json); arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
   const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
   const doRedo = () => { flushSoft(); const next = histRef.current.stepForward(snap); if (next !== null) restore(next); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.

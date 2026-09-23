@@ -86,6 +86,40 @@ export function createUndoStack(limit: number = UNDO_LIMIT): UndoStack {
 }
 
 /**
+ * KHO ẢNH DÙNG CHUNG CHO MỐC UNDO (GRID-09).
+ *
+ * Mốc undo là `JSON.stringify(items)`, mà `items[].images` là data-URL base64 (~150–400KB/ảnh, tới
+ * 10 ảnh/ô). Đo được: 10 ảnh × 250KB → mỗi mốc 2,56MB, 100 mốc ≈ 500MB; 30 ảnh → ≈ 1,5GB — tab sập
+ * ('Aw, Snap') sau khoảng 100 lần sửa ô trên sheet bật cột Hình ảnh. Ảnh gần như không đổi giữa các
+ * mốc mà bị chép nguyên 100 lần.
+ *
+ * Giữ nguyên dạng CHUỖI của mốc (ngăn xếp ở trên và mọi ngữ nghĩa lùi/tiến không đổi), chỉ thay mỗi
+ * chuỗi ảnh bằng một mã ngắn trỏ vào kho dùng chung; khôi phục thì đổi mã về đúng chuỗi cũ. Mảng
+ * `images` luôn được THAY cả mảng khi sửa (thêm/xoá ảnh), không sửa tại chỗ, nên mã hoá theo nội dung
+ * từng chuỗi là đủ. Kho chỉ lớn theo số ảnh KHÁC NHAU từng xuất hiện trong phiên lưới.
+ */
+export function createImagePool() {
+  const maCua = new Map<string, string>();
+  const anhCua = new Map<string, string>();
+  const TIEN_TO = "\u0001anh#";
+  const sangMa = (s: unknown) => {
+    if (typeof s !== "string") return s;
+    let m = maCua.get(s);
+    if (m === undefined) { m = TIEN_TO + maCua.size; maCua.set(s, m); anhCua.set(m, s); }
+    return m;
+  };
+  const sangAnh = (m: unknown) => (typeof m === "string" && m.startsWith(TIEN_TO) ? anhCua.get(m) ?? m : m);
+  return {
+    /** JSON của `items`, ảnh thay bằng mã. */
+    snap: (items: unknown) => JSON.stringify(items, (k, v) => (k === "images" && Array.isArray(v) ? v.map(sangMa) : v)),
+    /** Đọc lại một mốc, mã ảnh đổi về đúng chuỗi ảnh ban đầu. */
+    parse: <T>(json: string): T => JSON.parse(json, (k, v) => (k === "images" && Array.isArray(v) ? v.map(sangAnh) : v)) as T,
+    /** Số ảnh khác nhau đang giữ — cho bài kiểm. */
+    get size() { return anhCua.size; },
+  };
+}
+
+/**
  * Tổ hợp phím này có phải lệnh LÙI/TIẾN không? — `null` nếu không phải.
  *
  * `ctrl` là Ctrl HOẶC ⌘ (nơi gọi đã gộp `ctrlKey || metaKey`), nên cùng một bảng phím chạy đúng
