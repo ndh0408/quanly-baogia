@@ -22,7 +22,8 @@ vi.mock("../pages/Audit", trang("audit", "AuditPage"));
 vi.mock("../pages/Permissions", trang("permissions", "PermissionsPage"));
 vi.mock("../pages/Profile", trang("profile", "ProfilePage"));
 vi.mock("../pages/Notifications", trang("notifications", "NotificationsPage"));
-vi.mock("../pages/Dashboard", trang("dashboard", "DashboardPage"));
+// Trang Tổng quan HỎNG khi render — cho bài FE-16.
+vi.mock("../pages/Dashboard", () => ({ DashboardPage: () => { throw new Error("hỏng render"); } }));
 vi.mock("../pages/QuoteList", trang("list", "QuoteListPage"));
 vi.mock("../pages/Projects", trang("projects", "ProjectsPage"));
 vi.mock("../pages/Invoices", trang("invoices", "InvoicesPage"));
@@ -45,6 +46,19 @@ async function mo(hash: string, permissions: string[]) {
   await act(async () => { root!.render(<Shell me={me} onMe={() => {}} onPreview={() => {}} />); });
   return hop;
 }
+
+describe("FE-16 — lỗi render của một trang không khoá cả phiên", () => {
+  it("trang A hỏng → báo lỗi ngay trong khung; đổi sang trang B thì B hiện bình thường", async () => {
+    const loi = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const hop = await mo("#/dashboard", ["quote:create", "quote:read:own"]);
+      expect(hop.textContent).toContain("Không tải được trang");
+      expect(hop.querySelector(".sidebar"), "menu vẫn còn — lỗi không thay cả app").not.toBeNull();
+      await act(async () => { location.hash = "#/list"; await new Promise((r) => setTimeout(r, 20)); });
+      expect(hop.querySelector('[data-trang="list"]')).not.toBeNull();
+    } finally { loi.mockRestore(); }
+  });
+});
 
 describe("FE-14 — hash lạ", () => {
   it("#/abc → trang 'Không tìm thấy', KHÔNG rơi vào trang Nhân sự", async () => {

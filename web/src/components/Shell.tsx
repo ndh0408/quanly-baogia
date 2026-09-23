@@ -464,17 +464,21 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
         </aside>
         {isWizard ? (
           // Chặn quyền CẢ nhánh wizard (trước đây gõ thẳng #/new không có quote:create vẫn render rồi mới lỗi API).
-          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary>}</main>
+          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary key={key}><NewQuoteWizard me={me} /></LazyBoundary>}</main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} meId={me.id} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><AccountHnView quoteId={hnEditId} meId={me.id} /></LazyBoundary></main>
         ) : internalViewId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            {editorDenied ? <AccessDenied /> : <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
+            {editorDenied ? <AccessDenied /> : <LazyBoundary key={key}><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
           </main>
         ) : (
           <main className="main" id="main" tabIndex={-1}>
+            {/* FE-16: lỗi render của MỘT trang chỉ khoá trang đó. `key={key}` dựng lại ranh giới lỗi mỗi khi
+                đổi route — trước đây lỗi ở trang thường làm ErrorBoundary cấp App thay CẢ app (phải F5), còn
+                LazyBoundary không key thì giữ failed=true sang route lazy kế tiếp cùng vị trí cây. */}
+            <LazyBoundary key={key}>
             {denied ? <AccessDenied />
               : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
@@ -493,6 +497,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               // FE-14: hash lạ (#/abc, gõ sai, link cũ) trước đây rơi vào trang Nhân sự mà KHÔNG qua cổng
               // quyền (key không có trong NAV → denied=false) → người không có quyền nhân sự thấy lỗi 403.
               : <NotFound />}
+            </LazyBoundary>
           </main>
         )}
       </div>
