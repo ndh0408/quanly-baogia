@@ -769,6 +769,8 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const coveredSubRows = new Set<number>();   // hàng nhóm con đã được nhóm cha gom vào Tổng Cộng
   const looseAmtRows: number[] = [];   // hàng mục KHÔNG thuộc nhóm nào (trước nhóm đầu tiên)
   let seenSection = false;
+  // Có nhóm mang hệ số KHÔNG nguyên (SL nhóm 1,5) → Tổng Cộng có thể ra số lẻ .5 (XLSX-07). Xem chỗ dùng.
+  let coHeSoNhomLe = false;
   for (let i = 0; i < slotRows.length; i++) {
     const r = slotRows[i];
     const it = items[i];
@@ -803,6 +805,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       if (cols.quantity) ws.getCell(`${cols.quantity}${r}`).value = (gq || 0) || null;
       const gmult = showGroupSub ? Math.max(1, gq || 1) : 1;   // ×SL chỉ khi bật "thành tiền nhóm"
       mult = gmult;
+      if (!Number.isInteger(gmult)) coHeSoNhomLe = true;
       seenSection = true;
       // Đơn Giá nhóm = SUM Thành Tiền các mục con (CÔNG THỨC SỐNG). Thành Tiền nhóm = Đơn Giá nhóm ×
       // Số Lượng nhóm (sống, chỉ khi bật). Không có mục con → ghi số như cũ (an toàn).
@@ -1008,6 +1011,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const t = cfg.totals;
   const subtotalRow = actualLastRow + t.subtotal.rowOffset;
 
+  // Hệ số nhóm lẻ → làm tròn tổng sheet TRƯỚC Discount/VAT, đúng thứ tự của src/money.ts (XLSX-07).
+  if (coHeSoNhomLe) subtotal = Math.round(subtotal);
+
   // ── DISCOUNT RIÊNG CỦA SHEET ────────────────────────────────────────────────────────────────
   // Có Discount → khối tổng dài ra 2 hàng và VAT đổi gốc tính:
   //     Cộng → Discount (số ÂM) → Tổng Cộng (= Cộng + Discount) → VAT(Tổng Cộng) → Thành Tiền
@@ -1044,6 +1050,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   } else {
     const terms = [...groupAmtTerms, ...looseAmtRows.map((rr) => ({ row: rr, expr: `${cols.amount}${rr}` }))].sort((a, b) => a.row - b.row);
     if (terms.length) subtotalFormula = terms.map((x) => x.expr).join("+");
+    // HỆ SỐ NHÓM LẺ (XLSX-07): ô nhóm = đơn giá × SL không làm tròn, nên Tổng Cộng thành 4.748.529,5
+    // trong khi máy chủ (src/money.ts) làm tròn tổng sheet về số nguyên — giá trị ô khác số đã lưu, và
+    // VAT = ROUND(Tổng Cộng × %) có thể lệch 1đ. Làm tròn ĐÚNG như máy chủ: ROUND tổng, không từng ô.
+    // CHỈ khi có hệ số lẻ: SL nhóm nguyên thì tổng vốn nguyên, tệp (kể cả GN) giữ nguyên từng byte.
+    if (coHeSoNhomLe && subtotalFormula) subtotalFormula = `ROUND(${subtotalFormula},0)`;
   }
   applyTotalsRow(ws, t.subtotal, subtotalRow, {
     // Có Discount thì hàng này chỉ còn là "Cộng" (chưa trừ) — nhãn "Tổng Cộng" chuyển xuống netRow.
