@@ -70,7 +70,17 @@ elif [ "$OBJ_AGE" -gt "$MAX_OBJ_H" ]; then
   PROBLEMS+=("• KHO OBJECT: lần thành công gần nhất ${OBJ_AGE}h trước (ngưỡng ${MAX_OBJ_H}h)")
 fi
 
-if [ "$DRILL_AGE" = never ]; then
+# ÂN HẠN SAU KHI CÀI (soát chéo ops#2): install-backup.sh ghi mốc .installed-at MỘT lần. Diễn tập chỉ
+# chạy CN 03:30 (hoặc ngay lúc cài nếu không đặt INSTALL_SKIP_DRILL=1), nên trong MAX_DRILL_D ngày đầu
+# "chưa từng đạt" là chuyện đương nhiên — báo Telegram lúc đó là báo ngay lúc cài rồi lặp mỗi 6h tới
+# Chủ nhật, làm nhờn kênh cảnh báo. Quá hạn mà vẫn chưa đạt thì lại là sự cố như cũ. Không có mốc
+# (host cài bằng bản cũ) → giữ hành vi cũ.
+INSTALL_AGE="$(age_hours "$BACKUP_DIR/.installed-at")"
+DRILL_NOTE="$(( ${DRILL_AGE/never/0} / 24 )) ngày"
+if [ "$DRILL_AGE" = never ] && [ "$INSTALL_AGE" != never ] && [ "$INSTALL_AGE" -le $(( MAX_DRILL_D * 24 )) ]; then
+  DRILL_NOTE="chưa chạy (mới cài ${INSTALL_AGE}h, lượt đầu CN 03:30)"
+  echo "ℹ️  diễn tập khôi phục chưa chạy lần nào — mới cài ${INSTALL_AGE}h trước, còn trong ân hạn ${MAX_DRILL_D} ngày" >&2
+elif [ "$DRILL_AGE" = never ]; then
   PROBLEMS+=("• DIỄN TẬP KHÔI PHỤC: CHƯA TỪNG chạy thành công — bản sao lưu chưa được chứng minh là dùng được")
 elif [ "$DRILL_AGE" -gt $(( MAX_DRILL_D * 24 )) ]; then
   PROBLEMS+=("• DIỄN TẬP KHÔI PHỤC: lần thành công gần nhất $(( DRILL_AGE / 24 )) ngày trước (ngưỡng ${MAX_DRILL_D} ngày)")
@@ -108,4 +118,4 @@ if [ "${#PROBLEMS[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập $(( DRILL_AGE / 24 )) ngày${OFF_NOTE}"
+echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập ${DRILL_NOTE}${OFF_NOTE}"

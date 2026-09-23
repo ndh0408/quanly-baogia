@@ -124,6 +124,12 @@ systemctl enable --now \
   quanly-restore-drill.timer \
   quanly-backup-watchdog.timer
 
+# Mốc cài đặt cho ân hạn của watchdog (soát chéo ops#2): trong WATCHDOG_MAX_DRILL_DAYS ngày đầu,
+# "diễn tập chưa từng đạt" KHÔNG gửi Telegram. Chỉ ghi MỘT lần — cài lại không được kéo dài ân hạn mãi.
+BK_DIR="$(set -a; . /etc/quanly-backup.env >/dev/null 2>&1; printf '%s' "${BACKUP_DIR:-/opt/quanly-backups}")"
+install -d -m 0700 "$BK_DIR"
+[ -f "$BK_DIR/.installed-at" ] || date +%s > "$BK_DIR/.installed-at" || true
+
 echo "▶ Verify: backup CSDL..."
 /opt/quanly/backup-db.sh
 
