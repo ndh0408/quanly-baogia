@@ -4242,8 +4242,17 @@ textarea[aria-invalid="true"] {
 }
 /* Ô chọn / ô nhập TRẦN trong hộp thoại (lịch sử phiên bản, chọn khách, nhập Excel…): không nằm trong
    <label> nên không ăn luật `.modal label select`, rơi về ô xám #3b3b3b của trình duyệt. Cả cụm bọc
-   trong :where → độ ưu tiên 0, không đè luật riêng nào. */
-:where(:root[data-theme="dark"] .modal :is(select, textarea, input[type="search"])) {
+   trong :where → độ ưu tiên 0, không đè luật riêng nào.
+   Ngoài hộp thoại còn đúng ba ô trần (quét input/select/textarea trên 15 trang ở dev, L65): ô tìm + ô
+   chọn vai trò trang Phân quyền (lớp gắn ở Permissions.tsx) và ô "Ghi chú cuối báo giá" của trình soạn
+   — style nội tuyến chỉ có viền; bắt theo cấu trúc (ô nằm ngay trong khối đứng sau nhãn tick "Thêm Ghi
+   chú") vì QuoteEditor.tsx không gắn lớp. Không mở rộng thành "mọi ô trong main": ô có nền riêng mà
+   không khai viền (ô lưới…) sẽ bị gắn thêm viền. */
+:where(
+  :root[data-theme="dark"] .modal :is(select, textarea, input[type="search"]),
+  :root[data-theme="dark"] :is(.perm-user-search, .perm-user-role),
+  :root[data-theme="dark"] .editor .toggle-totals + div > textarea
+) {
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border-strong);
