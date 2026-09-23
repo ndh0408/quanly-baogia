@@ -246,9 +246,15 @@ export function InvoicesPage({ me }: { me: Me }) {
     if (e.key === "Enter") (e.target as HTMLElement).blur();
     else if (e.key === "Escape") { e.stopPropagation(); setEditKey(null); }
   };
+  // FE-07: trước đây CHỈ nhấp đúp chuột mới mở được ô — kế toán nhập liệu bằng bàn phím (Tab/Enter
+  // như Excel) không có đường nào để sửa, ô cũng không nhận tiêu điểm. Nay ô sửa-được nằm trong thứ tự
+  // Tab và mở bằng Enter hoặc F2 (phím sửa ô của Excel). Nhấp MỘT lần vẫn không mở — giữ nguyên lớp
+  // chống sửa nhầm ở trên. stopPropagation: Enter ở ô không được rơi xuống hàng (hàng Enter = mở báo giá).
   const viewTd = (r: Row, field: string, content: React.ReactNode, extraCls = "") => (
     <td className={["cell-edit", extraCls, missCls(r[field as keyof Row])].filter(Boolean).join(" ")} data-edit
-        title="Nhấp đúp để sửa" onDoubleClick={() => setEditKey(ck(r, field))}>{content}</td>
+        title="Nhấp đúp (hoặc Enter / F2) để sửa" tabIndex={0} role="button" aria-label={`Sửa ${fieldLabel(field, r)}`}
+        onDoubleClick={() => setEditKey(ck(r, field))}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); e.stopPropagation(); setEditKey(ck(r, field)); } }}>{content}</td>
   );
 
   const textCell = (r: Row, field: keyof Row, w = 110) => {
