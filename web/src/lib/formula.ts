@@ -99,11 +99,13 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
   MIN: (a) => (a.length ? Math.min(...a) : 0),
   MAX: (a) => (a.length ? Math.max(...a) : 0),
-  ROUND: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "tron"),
-  ROUNDUP: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "len"),
-  ROUNDDOWN: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "xuong"),
-  INT: (a) => Math.floor(so15(a[0] || 0)),
-  ABS: (a) => Math.abs(a[0] || 0),
+  // Hàm MỘT giá trị nhận đúng số đối số của nó; thừa (thường do DẢI ô bị bung: "=ABS(F1:F3)" → ABS(a;b;c))
+  // → lỗi như Excel #VALUE!, không lặng lẽ lấy a[0]. ROUND* một đối số là cách viết cũ app vẫn nhận.
+  ROUND: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "tron")),
+  ROUNDUP: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "len")),
+  ROUNDDOWN: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "xuong")),
+  INT: (a) => (a.length !== 1 ? NaN : Math.floor(so15(a[0]))),
+  ABS: (a) => (a.length !== 1 ? NaN : Math.abs(a[0])),
   CEILING: (a) => boiSoExcel(a, "len"),
   FLOOR: (a) => boiSoExcel(a, "xuong"),
 };
@@ -236,6 +238,12 @@ function goiHam(ten: string, trong: string): string {
   return r === null || !isFinite(r) ? "NaN" : "(" + String(r) + ")";
 }
 
+/** Dải ô "F1:F3" ở vị trí `viTri` có đứng NGUYÊN làm một đối số không: trước là "(" / ";" / đầu chuỗi,
+ *  sau là ")" / ";" / cuối chuỗi (bỏ qua khoảng trắng). BẢN SAO ở src/quoteFormula.ts. */
+function daiNguyenDoiSo(ca: string, viTri: number, dai: number): boolean {
+  const truoc = ca.slice(0, viTri).replace(/\s+$/, "").slice(-1), sau = ca.slice(viTri + dai).replace(/^\s+/, "").charAt(0);
+  return (truoc === "" || truoc === "(" || truoc === ";") && (sau === "" || sau === ")" || sau === ";");
+}
 /** Trần số ô khi tự bung một dải (cùng trần MAX_REF_ROWS của bộ tự kiểm ở src/quoteFormula.ts). */
 const TRAN_O_BUNG = 20_000;
 const soCot = (L: string) => { let n = 0; for (const ch of L.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
@@ -266,17 +274,20 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
     // thành ";" — CÙNG một hàm với src/quoteFormula.ts, để bước tự kiểm lúc xuất Excel (so số máy chủ
     // với số web đã lưu) không lệch. Đừng thêm luật dấu phẩy riêng ở đây mà không thêm ở máy chủ.
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
-    let daiQuaLon = false;
-    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => {
+    let daiLoi = false;
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (m, a, b, viTri: number, ca: string) => {
+      // Dải phải là NGUYÊN MỘT đối số (hoặc cả công thức): "SUM(F1:F3*2)" / "SUM(-F1:F3)" bung ra thành
+      // SUM(a;b;c*2) — nghĩa khác hẳn, còn Excel ra #VALUE! (hoặc mảng) → tệp lệch app.
+      if (!daiNguyenDoiSo(ca, viTri, m.length)) { daiLoi = true; return "0"; }
       // Bộ giải của lưới trả null khi MỘT đầu dải nằm ngoài bảng ("=SUM(F1:F50)" trên bảng 4 hàng) —
       // bản cũ thay cả dải bằng "0": mất cả tổng mà ô không đỏ, còn Excel / bộ tự kiểm máy chủ ra
       // 115.000 (L33). Khi đó bung dải qua refs.cell: ô ngoài bảng = 0 y như ô trống Excel và y như
       // tham chiếu ô đơn ("=F1+F9").
       const list = refs.range(a, b) ?? bungDai(a, b, refs);
-      if (list === null) { daiQuaLon = true; return "0"; }
+      if (list === null) { daiLoi = true; return "0"; }
       return list.length ? list.join(";") : "0";
     });
-    if (daiQuaLon) return null;
+    if (daiLoi) return null;
     s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
   }
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(String(n).replace(",", ".")) / 100));
