@@ -172,6 +172,30 @@ describe("FE-01 — giao / duyệt phần Hà Nội khi còn thay đổi chưa l
   });
 });
 
+// GRID-08: 409 → "Tải lại bản mới" → phần đang soạn mất trắng (bản nháp mang mốc cũ bị bỏ qua).
+describe("GRID-08 — xung đột 409 giữ lại phần đang soạn", () => {
+  it("409 + Tải lại → giữ bản; mở lại editor → hỏi mở bản của tôi; Lưu gửi phần đã soạn với mốc MỚI", async () => {
+    await moEditor();
+    goTenKhach("Khách CỦA TÔI");
+    h.updateQuote.mockImplementationOnce(async () => { throw new ApiError("xung đột", 409, {}); });
+    await bam(nut("Lưu"));                                         // hộp 409 → mock trả true (Tải lại)
+    expect(Object.keys(localStorage).some((k) => k.endsWith(":xungdot")), "phải giữ bản đang soạn trước khi tải lại").toBe(true);
+
+    act(() => root!.unmount()); root = null; hop?.remove();
+    (api.getQuote as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => baoGia({ toCompany: "Khách của NGƯỜI KHÁC", updatedAt: "2026-09-21T09:00:00.000Z" }));
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockClear();
+    await moEditor();
+    expect(ui.confirmModal).toHaveBeenCalledWith("Bản bạn soạn trước khi bị xung đột", expect.any(String), expect.objectContaining({ confirmText: "Mở bản của tôi" }));
+    expect(oTenKhach().value).toBe("Khách CỦA TÔI");
+    expect(Object.keys(localStorage).some((k) => k.endsWith(":xungdot")), "hỏi xong thì xoá khoá").toBe(false);
+    h.updateQuote.mockClear();
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls[0][1] as Record<string, unknown>;
+    expect(p.toCompany).toBe("Khách CỦA TÔI");
+    expect(p.baseUpdatedAt).toBe("2026-09-21T09:00:00.000Z");
+  });
+});
+
 // GRID-07: gõ tiếp trong lúc PUT đang bay → phần gõ thêm không nằm trong payload, rồi bị bản máy chủ
 // đè, cờ bẩn về false, bản nháp bị xoá. Nay lưới + ô meta khoá suốt lúc lưu.
 describe("GRID-07 — không sửa được trong lúc đang Lưu", () => {

@@ -321,6 +321,30 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             xoaBanNhap(khoaNhapRef.current);
           }
         }
+        // GRID-08: BẢN GIỮ LẠI LÚC XUNG ĐỘT 409. Nhánh 409 của save() ghi phần đang soạn vào khoá
+        // `…:xungdot` rồi mới tải lại. Bản nháp thường thì bị bỏ ở đây vì mốc lệch (người khác đã lưu),
+        // nên trước đây chọn "Tải lại bản mới" là mất trắng phần của mình. Hỏi một lần rồi xoá khoá dù
+        // chọn gì; mở ra thì mang mốc updatedAt MỚI của máy chủ — Lưu sau đó là CHỦ ĐỘNG ghi đè.
+        const khoaXd = khoaNhapRef.current ? khoaNhapRef.current + ":xungdot" : null;
+        const nhapXd = !tuWizard && khoaXd ? docBanNhap(khoaXd, meIdRef.current) : null;
+        if (alive && khoaXd && nhapXd && !khoiPhuc) {
+          const luc = new Date(nhapXd.luuLuc).toLocaleString("vi-VN");
+          const mo = await confirmModal(
+            "Bản bạn soạn trước khi bị xung đột",
+            `Lúc ${luc} bạn bấm Lưu nhưng người khác đã lưu báo giá này trước, và bạn chọn tải lại. Phần bạn đang soạn khi đó được giữ lại trên máy này. Mở lại bản đó? Nếu mở rồi bấm Lưu, bản của bạn sẽ GHI ĐÈ thay đổi của người kia — hãy xem kỹ trước.${nhapXd.bocAnh ? " LƯU Ý: bản này KHÔNG kèm ảnh trong các dòng." : ""}`,
+            { confirmText: "Mở bản của tôi", danger: true },
+          );
+          if (mo) {
+            const kp = nhapXd.quote as QuoteFull;
+            if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
+            (kp.sheets as Sheet[]).forEach((sh) => { if (!Array.isArray(sh.extraTables)) sh.extraTables = []; });
+            if (!Array.isArray(kp.hnTables)) kp.hnTables = q.hnTables;
+            (kp as { updatedAt?: string }).updatedAt = (q as { updatedAt?: string }).updatedAt;
+            q = kp;
+            khoiPhuc = true;
+          }
+          xoaBanNhap(khoaXd);
+        }
         (q as QuoteFull & { _activeSheet: number })._activeSheet = 0;
         stampKeys(q);
         qRef.current = q;
@@ -498,10 +522,16 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (ex instanceof ApiError && ex.status === 409) {
         const reload = await confirmModal(
           "Báo giá đã bị người khác sửa",
-          "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất — hãy chép phần cần giữ trước. Tải lại ngay?",
+          "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Tải lại để xem bản mới nhất — phần bạn đang soạn được GIỮ LẠI trên máy này, và sau khi tải lại bạn sẽ được hỏi có mở lại để chép / ghi đè không. Tải lại ngay?",
           { danger: true, confirmText: "Tải lại bản mới" }
         );
-        if (reload) { dirtyRef.current = false; (window as WinDirty).__editorDirty = false; location.reload(); }
+        if (reload) {
+          // GRID-08: giữ phần đang soạn TRƯỚC khi tải lại (đường nạp sẽ hỏi mở lại). Huỷ hẹn giờ ghi nháp
+          // thường để nó không ghi đè gì sau khi đã quyết định tải lại.
+          if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+          if (khoaNhapRef.current && qRef.current) ghiBanNhap(khoaNhapRef.current + ":xungdot", qRef.current, baseNhapRef.current, meIdRef.current);
+          dirtyRef.current = false; (window as WinDirty).__editorDirty = false; location.reload();
+        }
         // Hủy → giữ nguyên màn hình + thay đổi của bạn (chưa lưu) để bạn tự xem/chép rồi tải lại sau.
       } else {
         toast(errText(ex), "error");
