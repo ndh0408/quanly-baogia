@@ -21,6 +21,7 @@ import { emit as emitWebhook } from "../webhooks.js";
 import { can, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
+  daXuatHoaDon,
   QUOTE_INCLUDE,
   QUOTE_LIST_SELECT,
   QUOTE_UPDATE_STATE_SELECT,
@@ -1414,6 +1415,13 @@ export async function setSheetCustomerDecision(req: Request) {
   // convertedTotal NULL (chốt trước khi có cột) → giữ null như updateQuote.
   const updated = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${sheet.quoteId} ORDER BY id FOR UPDATE`;
+    // ĐÃ XUẤT HOÁ ĐƠN → KHOÁ, cùng mốc với canEdit (soát chéo money#1). Nhánh dưới tính lại
+    // convertedTotal, nên đổi ý kiến lúc này là đổi doanh thu KPI sau khi con số đã đi ra chứng từ
+    // kế toán — đúng thứ canEdit cấm với sửa giá. Kiểm SAU khoá: một lần nhập số HĐ đang chen vào
+    // (updateSheetInvoice ghi hàng QuoteSheet) phải chờ khoá này, nên không lọt qua giữa kiểm và ghi.
+    if (daXuatHoaDon({ sheets: await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { invoiceNo: true } }) })) {
+      throw httpError(409, "Báo giá đã xuất hoá đơn — không đổi ý kiến khách được nữa");
+    }
     const u = await tx.quoteSheet.update({
       where: { id: sheet.id },
       data: status

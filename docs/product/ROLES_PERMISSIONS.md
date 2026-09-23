@@ -68,7 +68,7 @@ Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`
 | GET | `/assignable-users` | ✓ | `quote:create` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/projects` | ✓ | `user:manage`\|`invoice:read`\|`invoice:page` **hoặc** `quote:read:own` | all/own | — | chỉ `converted` | $ PII | AUTH-005 | **VÁ** |
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
-| POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá | — | — | OK |
+| POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá · đã xuất HĐ → 409 | — | — | OK |
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
 | POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
 | GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
