@@ -170,6 +170,23 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     expect(items[0].unitPrice).toBe(gia);
   });
 
+  // Soát chéo grid#7: quy ước của khối chỉ áp cho ô khớp khuôn của nó. Người Việt hay gõ SL "2.5"
+  // mà vẫn ghi giá "250.000" (bảng Word/Zalo/email); bản trước bỏ mọi "." nên SL "13.5" thành 135.
+  it.each([
+    ["SL '13.5' + giá '250.000'", "13.5\t250.000", [13.5], [250000]],
+    ["SL '0.5' + giá '2.500.000'", "0.5\t2.500.000", [0.5], [2500000]],
+    ["SL '2,5' + giá '250,000' (khối US)", "2,5\t250,000", [2.5], [250000]],
+    ["SL '12.25' + giá '1.200.000'", "12.25\t1.200.000", [12.25], [1200000]],
+    ["nhiều hàng: '1.500' hàng 1 theo quy ước, '2.5' hàng 2 không bị phóng", "1.500\t250.000\n2.5\t1.200.000", [1500, 2.5], [250000, 1200000]],
+  ])("grid#7 — ô lệch khuôn quy ước khối: %s", (_ten, chu, sl, gia) => {
+    const items = [hang("A", "cái", 1, 1), hang("B", "cái", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    dan(o(0, "quantity"), chu);
+    sl.forEach((v, k) => expect(items[k].quantity).toBeCloseTo(v, 6));
+    gia.forEach((v, k) => expect(items[k].unitPrice).toBe(v));
+  });
+
   it("GRID-01: khối KHÔNG suy được quy ước (SL '1.500' + giá '90') → giữ cách cũ: SL thập phân 1,5", () => {
     const items = [hang("A", "cái", 1, 1)];
     moLuoi(items);

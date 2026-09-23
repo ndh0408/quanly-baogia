@@ -15,6 +15,7 @@ import {
   adjustRefsForRowEdit,
   suyQuyUocSo,
   parseTheoQuyUoc,
+  khopQuyUoc,
 } from "../web/src/lib/clipboard.ts";
 // NGUỒN ĐÃ ĐỔI 2026-08-26: `public/grid-clipboard.js` bị gỡ cùng SPA cũ. Bản React
 // `web/src/lib/clipboard.ts` là port THUẦN của nó và export ĐÚNG 13 hàm y hệt, nên bộ test này
@@ -332,6 +333,26 @@ describe("suyQuyUocSo / parseTheoQuyUoc — quy ước số của cả khối", 
     expect(vn.unitPrice).toBe(95000);
     const [cu] = reconstructExportRows([["1", "Banner", "Hiflex", "m2", "13.524", "65000", "879060"]], R, N);
     expect(cu.quantity).toBeCloseTo(13.524);
+  });
+  // Soát chéo grid#7: quy ước của KHỐI chỉ áp cho ô KHỚP khuôn của nó. "13.5" không thể là số có
+  // dấu nghìn VN (nhóm sau dấu chỉ 1 chữ số) — bản trước vẫn bỏ "." và đọc thành 135.
+  it("khopQuyUoc: ô chỉ theo quy ước khi đúng khuôn nhóm nghìn 3 chữ số", () => {
+    for (const s of ["1.500", "1.500.000", "1.234,5", "2,5", "1500", "(1.500.000)", "-95.000", "250.000 ₫", "2.675"]) expect(khopQuyUoc(s, "vn")).toBe(true);
+    for (const s of ["13.5", "0.5", "12.25", "1,234.5", "1.5000"]) expect(khopQuyUoc(s, "vn")).toBe(false);
+    for (const s of ["1,500", "1,500,000", "1,234.5", "2.5", "1500"]) expect(khopQuyUoc(s, "us")).toBe(true);
+    for (const s of ["2,5", "0,5", "1.234,5"]) expect(khopQuyUoc(s, "us")).toBe(false);
+  });
+  it("reconstructExportRows: khối VN (giá '250.000') mà SL '13.5' → 13.5, không phải 135", () => {
+    const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+    const N = new Set(["quantity", "unitPrice", "days"]);
+    const [a] = reconstructExportRows([["1", "Vách", "", "m2", "13.5", "250.000", "3.375.000"]], R, N);
+    expect(a.quantity).toBeCloseTo(13.5);
+    expect(a.unitPrice).toBe(250000);
+    const [b] = reconstructExportRows([["1", "Vách", "", "m2", "2,5", "250,000", "625,000"]], R, N);
+    expect(b.quantity).toBeCloseTo(2.5);
+    expect(b.unitPrice).toBe(250000);
+    const [c] = reconstructExportRows([["1", "Ghế", "", "cái", "1.500", "95.000", "142.500.000"]], R, N);
+    expect(c.quantity).toBe(1500);   // ô khớp khuôn vẫn theo quy ước khối như cũ
   });
 });
 

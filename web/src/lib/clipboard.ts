@@ -123,7 +123,21 @@ export function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boole
   return vn === us ? null : vn ? "vn" : "us";
 }
 
-/** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".". */
+// Quy ước suy từ KHỐI chỉ đúng cho ô có khuôn của nó. Khối lẫn quy ước là chuyện thường ở bảng gõ
+// tay (Word/Zalo/email): người Việt viết SL "13.5" mà vẫn ghi giá "250.000". Ô "13.5" không thể là
+// số có dấu nghìn VN (nhóm sau dấu chỉ 1 chữ số) — áp quy ước "vn" cho nó là bỏ "." rồi đọc 135,
+// phóng Thành tiền 10 lần mà không ai hay (soát chéo grid#7). Ô lệch khuôn → nơi gọi đọc theo cột.
+// "2.675" thì khớp khuôn nghìn VN nên vẫn theo khối (2675): đánh đổi đã chọn ở GRID-01 — khối có
+// giá "250.000" là khối từ máy locale VN, nơi "2.675" đúng là hai nghìn sáu trăm bảy lăm.
+export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
+  const t = tachNgoacKeToan(String(s ?? "").trim()).s.trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
+  return qu === "vn"
+    ? /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t) || /^\d+(,\d+)?$/.test(t)
+    : /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t) || /^\d+(\.\d+)?$/.test(t);
+}
+
+/** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".".
+ *  Chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần. */
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
@@ -142,11 +156,12 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
   // BANNER xuất ra có NHÓM CON đánh SỐ + KHÔNG ĐVT (vd "1  CGV Kim Cúc"). Nếu DATA có kiểu đó → nguồn là
   // banner → hàng STT-trống là MỤC (không phải nhóm con). Nếu KHÔNG có → nguồn là GN-không-ngày → hàng
   // STT-trống + có tên = NHÓM CON (vd "Chi phí vận chuyển"). Phân biệt để mỗi template hiểu đúng paste.
-  // Quy ước số của CẢ khối (VN/US) — cột tiền là Đơn giá + Thành tiền. Suy được thì mọi ô số đọc theo
-  // nó; không thì giữ cách cũ (SL/Ngày thập phân, tiền đoán nghìn).
+  // Quy ước số của CẢ khối (VN/US) — cột tiền là Đơn giá + Thành tiền. Suy được thì ô số KHỚP khuôn
+  // của nó đọc theo nó; không suy được, hoặc ô lệch khuôn (SL "13.5" trong khối VN — xem khopQuyUoc),
+  // thì giữ cách cũ (SL/Ngày thập phân, tiền đoán nghìn).
   const qu = suyQuyUocSo(matrix, (c) => roles[c] === "unitPrice" || roles[c] === "_amount");
-  const soDo = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
-  const soTien = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
+  const soDo = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+  const soTien = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
   const hasNumberedSub = matrix.some((r) => /^\d+$/.test(cell(r, sttI).trim()) && cell(r, nameI).trim() !== "" && cell(r, unitI).trim() === "" && cell(r, priceI).trim() !== "");
   const out: RebuiltItem[] = [];
   for (const row of matrix) {

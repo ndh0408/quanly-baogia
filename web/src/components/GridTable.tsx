@@ -4,7 +4,7 @@ import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
@@ -1135,9 +1135,11 @@ function GridTableInner(props: GridTableProps) {
   // Excel VN ra 1500, không hụt 1000 lần. Chỉ khi KHÔNG suy được (ô đơn lẻ, khối không có ô nào rõ
   // ràng, hoặc tín hiệu mâu thuẫn) mới rơi về cách đoán theo cột ở trên — lúc đó SL "1.500" vẫn là
   // 1,5: sai về phía nhỏ thì Thành Tiền tụt rõ ràng, còn đọc nhầm 2,675 thành 2675 thì phình nghìn lần.
+  // Quy ước của khối chỉ áp cho ô KHỚP khuôn của nó (khopQuyUoc): khối gõ tay lẫn "13.5" với
+  // "250.000" thì SL 13.5 vẫn là 13.5, không bị bỏ "." thành 135.
   const parseSoDan = (f: string, v: string, noiBo: boolean, quyUoc: QuyUocSo | null = null): number => {
     if (noiBo) { const n = Number(v.trim()); if (Number.isFinite(n)) return n; }
-    if (quyUoc) return parseTheoQuyUoc(v, quyUoc);
+    if (quyUoc && khopQuyUoc(v, quyUoc)) return parseTheoQuyUoc(v, quyUoc);
     return f === "unitPrice" ? parseLooseNumber(v) : parseLooseDecimal(v);
   };
   const pasteCellVal = (i: number, f: string, val: string, dRow = 0, dCol = 0, noiBo = false, quyUoc: QuyUocSo | null = null) => {
