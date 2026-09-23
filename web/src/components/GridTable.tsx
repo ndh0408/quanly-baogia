@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
-import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
+import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
 import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
@@ -1892,12 +1892,17 @@ function GridTableInner(props: GridTableProps) {
     skipCellSync.current = false;
     if (tb && !boQuaLanNay) {
       tb.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-f]").forEach((el) => {
-        if (document.activeElement === el) return;   // ô đang gõ → để yên
+        // Textarea đã nhận nội dung mới mà chưa đo lại chiều cao (ô trống "chưa bẩn" tự nhận
+        // defaultValue khi dòng vẽ lại — dán khối, Ctrl+D, Undo/Redo… — soát toàn diện L1) → đo lại.
+        // Áp cả ô đang focus: đo chiều cao không đụng chữ đang gõ.
+        const laTa = el.tagName === "TEXTAREA";
+        if (document.activeElement === el) { if (laTa && chuaDoCao(el as HTMLTextAreaElement)) autoGrow(el as HTMLTextAreaElement); return; }   // ô đang gõ → không ghi đè chữ
         const tr = el.closest("tr[data-row]"); if (!tr) return;
         const i = parseInt(tr.getAttribute("data-row") || "-1", 10); if (i < 0 || i >= items.length) return;
         const f = el.getAttribute("data-f") as string; const rec = items[i] as Record<string, unknown>;
         const want = NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? "");
-        if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
+        if (el.value !== want) { el.value = want; if (laTa) autoGrow(el as HTMLTextAreaElement); }
+        else if (laTa && chuaDoCao(el as HTMLTextAreaElement)) autoGrow(el as HTMLTextAreaElement);
       });
     }
     if (focusPend.current && tableRef.current) {
