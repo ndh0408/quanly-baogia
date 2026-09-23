@@ -252,7 +252,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       // lại, rồi trả về cho khách một file MẤT cột đó.
       //
       // BẬT LẠI KHÔNG DỊCH ĐỊA CHỈ Ô NÀO. `detail: "D"` vốn đã khai, nên `metaService` trả
-      // `reserveDetail: true` và `web/src/components/GridTable.tsx:354` (`keepDetailSlot`) vẫn chừa khe D từ trước:
+      // `reserveDetail: true` và `web/src/components/GridTable.tsx` (`keepDetailSlot`) vẫn chừa khe D từ trước:
       // cờ này chỉ đổi việc HIỆN cột, không đổi sơ đồ chữ cột. Mọi công thức đã lưu giữ nguyên
       // nghĩa, kể cả loại trỏ theo địa chỉ (`{"quantity":"=E3"}` — E vẫn là Số Lượng).
       //

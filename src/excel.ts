@@ -578,6 +578,36 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     datVien(hcell, { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "medium" } },
       { vertical: "middle", horizontal: "center", wrapText: true });
     try { ws.getColumn(imgCol).width = 19; } catch { /* giữ mặc định */ }
+
+    // ── CỘT ẢNH LÀ CỘT CUỐI MỚI CỦA BẢNG → MỌI DẢI KÉO NGANG CẢ BẢNG PHẢI NỐI DÀI SANG NÓ ──────
+    // Người dùng báo 2026-09-23 (ảnh chụp tệp Colorfull): dải tiêu đề "BẢNG BÁO GIÁ" và dải "Thông
+    // tin chương trình" dừng ở cột Ghi Chú, cột HÌNH ẢNH bên cạnh trắng trơn — "chưa kéo màu hoàn
+    // chỉnh". Đo trên tệp xuất: CLF gộp F1:I1 · B2:I2 · C3:I3 · B5:I5, GN gộp B6:I6 · B7:I7 · B8:I8,
+    // tất cả dừng ở cột cuối CŨ. Luật chung (không liệt kê theo mẫu): vùng gộp nào kết thúc đúng ở
+    // cột cuối cũ và nằm TRÊN hàng tiêu đề cột (hoặc là dải thông tin chương trình) → gỡ gộp, chép
+    // style ô cuối (nền, viền phải/dưới) sang cột ảnh, gộp lại tới cột ảnh. Chữ canh giữa tự về giữa
+    // bảng mới. Vùng gộp trong thân bảng / khối tổng KHÔNG đụng (dựng lại theo hàng ở bên dưới).
+    const cotCuoiCu = Math.max(...Object.values(cols).map((L: any) => colLetterToIdx(String(L)))) + 1;   // 1-based
+    const cotAnh = colLetterToIdx(imgCol) + 1;
+    const hangBannerAnh = c.infoBannerCell ? parseInt(String(c.infoBannerCell).replace(/^[A-Z]+/, ""), 10) : null;
+    const giaiVung = (m: string) => {
+      const x = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m);
+      return x ? { c1: colLetterToIdx(x[1]) + 1, r1: +x[2], c2: colLetterToIdx(x[3]) + 1, r2: +x[4] } : null;
+    };
+    for (const m of [...((ws.model.merges || []) as string[])]) {
+      const v = giaiVung(m);
+      if (!v || v.c2 !== cotCuoiCu) continue;
+      const laDaiDauTrang = v.r2 < itemsCfg.headerRow;
+      const laDaiThongTin = hangBannerAnh != null && v.r1 === hangBannerAnh && v.r2 === hangBannerAnh;
+      if (!laDaiDauTrang && !laDaiThongTin) continue;
+      try {
+        ws.unMergeCells(m);
+        for (let r = v.r1; r <= v.r2; r++) {
+          ws.getCell(r, cotAnh).style = JSON.parse(JSON.stringify(ws.getCell(r, v.c2).style || {}));
+        }
+        ws.mergeCells(v.r1, v.c1, v.r2, cotAnh);
+      } catch { /* vùng gộp lạ → để nguyên còn hơn làm hỏng tệp */ }
+    }
   }
 
   // Row heights: use the configured uniform height; otherwise size each row to fit its
@@ -963,12 +993,19 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       }
     }
     // Cột "HÌNH ẢNH": kẻ khung ô cho MỌI hàng trong bảng + nhúng ảnh của hạng mục (nếu có).
-    // Hàng nhóm/nhóm con tô nền đồng bộ dải màu; ảnh giữ tỉ lệ, lưới 2 ảnh/hàng, editAs oneCell.
+    // Ảnh giữ tỉ lệ, lưới 2 ảnh/hàng, editAs oneCell.
+    // NỀN = ĐÚNG NỀN Ô GHI CHÚ CÙNG HÀNG, không tự tô theo loại hàng. Trước đây hàng nhóm con tô
+    // subFill cho ô ảnh trong khi mẫu để TRẮNG ô Ghi Chú của hàng đó (tệp mẫu Colorfull người dùng
+    // chỉnh: nhóm con chỉ tô C..H) → ô ảnh xanh lẻ loi cạnh ô Ghi Chú trắng. Chép nền cột cuối cũ thì
+    // mẫu nào tô tới đâu, cột ảnh theo tới đó — GN lẫn Colorfull, nhóm lẫn nhóm con.
     if (imgCol && r != null) {
       const icell = ws.getCell(`${imgCol}${r}`);
       datVien(icell, { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "medium" } });
-      if (it && effKind[i] === "section") {
-        paintCell(icell, { fill: it.kind === "subsection" ? (itemsCfg.subFill || "FFC9D9EF") : (itemsCfg.sectionFill || "FFFAE9DB") });
+      const nenCuoi = ws.getCell(`${(cols.notes || cols.amount) as string}${r}`).fill;
+      if (nenCuoi && nenCuoi.type === "pattern" && nenCuoi.fgColor) {
+        icell.fill = JSON.parse(JSON.stringify(nenCuoi));
+      } else if (icell.fill) {
+        icell.fill = { type: "pattern", pattern: "none" };
       }
       if (it && Array.isArray(it.images) && it.images.length) insertItemImages(ws, imgCol, r, it.images);
     }

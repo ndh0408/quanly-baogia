@@ -1016,7 +1016,9 @@ Lý do (không bắt buộc):`,
         {q.showTotals !== false && (
           <div className="quote-summary">
             <h3 style={{ margin: "18px 0 6px" }}>Tổng báo giá ({sheets.length} sheet)</h3>
-            <table className="summary-table">
+            {/* clf-theme: cùng quy tắc với sheet "Tổng Báo Giá" của tệp Excel (src/excel.ts `isClf`) —
+                có MỘT sheet Colorfull là cả bảng theo màu Colorfull. */}
+            <table className={`summary-table${sheets.some((s) => templates.find((x) => x.id === s.templateId)?.code?.startsWith("clofull")) ? " clf-theme" : ""}`}>
               {/* Cột "Tổng (VNĐ)" của mỗi sheet là số ĐÃ TRỪ Discount — đúng con số sheet đó đóng
                   góp vào báo giá, và đúng dòng "Tổng Cộng" trong khối tổng của chính sheet đó lẫn
                   trên tab Excel của nó. Ở đây CỐ Ý không nhắc lại Discount: khoản giảm đã nằm

@@ -237,7 +237,43 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
 
   // Chốt chặn: chỉ còn ký tự hợp lệ của công thức Excel.
   if (!/^[A-Za-z0-9.,:%+\-*/()$ ]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
+  // Chốt chặn: SỐ ĐỐI SỐ đúng như Excel đòi. Excel gặp hàm sai số đối số thì coi cả công thức là
+  // hỏng: lúc mở tệp báo "We found a problem… Removed Records: Formula" rồi XOÁ công thức. Đo được
+  // ở production 2026-09-23: "=ROUND(E2*63000,-3)" (dấu phẩy kiểu Excel tiếng Anh) bị đọc thành
+  // thập phân → ghi ra "ROUND(F13*63000.-3)" — ROUND chỉ còn MỘT đối số — và bước tự kiểm ở
+  // cellFormula KHÔNG bắt được, vì bộ tính cũ cũng đọc sai y như vậy nên hai con số khớp nhau.
+  // Chặn theo cú pháp thì không phụ thuộc bộ tính: sai số đối số → ghi số, tệp luôn mở sạch.
+  if (!soDoiSoHopLe(s)) return null;
   return s;
+}
+
+/** Số đối số Excel cho phép của từng hàm trong SAFE_FNS: [ít nhất, nhiều nhất]. */
+const SO_DOI_SO: Record<string, [number, number]> = {
+  ROUND: [2, 2], ROUNDUP: [2, 2], ROUNDDOWN: [2, 2], INT: [1, 1], ABS: [1, 1],
+  SUM: [1, 255], PRODUCT: [1, 255], AVERAGE: [1, 255], MIN: [1, 255], MAX: [1, 255],
+};
+/** Đếm đối số từng lời gọi hàm trong công thức ĐÃ ở cú pháp Excel ("," tách đối số). */
+export function soDoiSoHopLe(s: string): boolean {
+  const khung: { fn: string | null; soDauPhay: number; rong: boolean }[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") {
+      const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i));
+      khung.push({ fn: m ? m[1].toUpperCase() : null, soDauPhay: 0, rong: /^\s*\)/.test(s.slice(i + 1)) });
+    } else if (ch === ")") {
+      const k = khung.pop();
+      if (!k) return false;                                   // ngoặc đóng thừa
+      if (!k.fn) { if (k.soDauPhay) return false; continue; } // "(a,b)" không phải lời gọi hàm
+      const gioiHan = SO_DOI_SO[k.fn];
+      if (!gioiHan) continue;
+      const n = k.rong ? 0 : k.soDauPhay + 1;
+      if (n < gioiHan[0] || n > gioiHan[1]) return false;
+    } else if (ch === "," ) {
+      if (!khung.length) return false;                        // dấu phẩy ngoài mọi ngoặc
+      khung[khung.length - 1].soDauPhay++;
+    }
+  }
+  return khung.length === 0;                                  // ngoặc mở thiếu đóng
 }
 
 // ===== CHIỀU NGƯỢC: công thức Excel (file khách gửi lại) → công thức EDITOR =====

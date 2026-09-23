@@ -79,7 +79,7 @@ Có Ctrl+Z / Ctrl+Y và fill-down (Ctrl+D); hoàn tác vẫn đúng sau khi dán
 |---|---|---|---|
 | **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật |
 | **Nhóm con** | ❌ | ✅ | thụt lề + dấu `↳`; **không chiếm chữ A/B/C** |
-| **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục |
+| **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục. **Nút "↳ thêm hàng con" trên lưới đã bỏ (2026-09-23, chủ repo: "không còn cần sử dụng")** — hàng con có sẵn trong báo giá cũ vẫn hiển thị, tính tiền và xuất Excel như trước |
 | **Dòng thông tin** | ❌ | ❌ | ghi chú thuần, không tính tiền |
 
 Giảm giá = nhập **đơn giá âm**. Khi xuất Excel, nhóm con hiển thị **giống hệt trên

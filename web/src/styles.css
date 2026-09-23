@@ -1676,7 +1676,7 @@ textarea[aria-invalid="true"] {
 }
 .perm-preview-count {
   font-weight: 700;
-  color: var(--gold-d);
+  color: var(--primary-hover); /* --gold-d trên nền vàng 22%: 1.8:1 sáng, 3.3:1 tối */
   font-size: 11.5px;
   background: color-mix(in srgb, var(--gold) 22%, transparent);
   padding: 1px 7px;
@@ -1687,6 +1687,10 @@ textarea[aria-invalid="true"] {
 }
 .perm-preview-row b {
   color: var(--soft);
+}
+/* "TOÀN QUYỀN" (Users.tsx) — trước là style nội tuyến var(--gold-d): 2.0:1 ở chế độ sáng. */
+.perm-preview-row b.perm-all {
+  color: var(--primary-hover);
 }
 .perm-preview-caps {
   margin-top: 5px;
@@ -2663,6 +2667,7 @@ textarea[aria-invalid="true"] {
 .vs-line1 {
   font-weight: 600;
   font-size: 13px;
+  color: var(--text); /* #24303f cứng của public/style.css: 1.3:1 ở chế độ tối */
 }
 .vs-venue {
   color: var(--soft);
@@ -2674,7 +2679,7 @@ textarea[aria-invalid="true"] {
   margin-top: 1px;
 }
 .vs-cat {
-  opacity: 0.75;
+  color: var(--muted); /* #aab2bd × opacity .75 cũ: 1.7:1 ở chế độ sáng */
 }
 .vs-hint {
   padding: 5px 10px;
@@ -2757,7 +2762,7 @@ textarea[aria-invalid="true"] {
 .vs-pick-head .btn-link {
   background: none;
   border: none;
-  color: var(--gold-d);
+  color: var(--primary); /* --gold-d #e0a200 trên nền gần trắng: 2.1:1 ở chế độ sáng */
   cursor: pointer;
   padding: 0;
   font: inherit;
@@ -2912,7 +2917,7 @@ textarea[aria-invalid="true"] {
 }
 .vn-vsub em {
   font-style: normal;
-  color: var(--gold-d);
+  color: var(--primary-hover); /* --gold-d: 2.0–2.25:1 ở chế độ sáng */
   font-weight: 600;
 }
 .vn-none {
@@ -3738,10 +3743,16 @@ textarea[aria-invalid="true"] {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--danger);
-  opacity: 0.85;
 }
+/* Làm nhạt bằng MÀU, không bằng opacity: opacity .6/.85 pha đỏ vào nền tab → 2.8–3.8:1 cả hai chế độ. */
 .sheet-tab:not(.active) .sheet-tab-tong {
-  opacity: 0.6;
+  color: var(--text-soft);
+}
+.sheet-tab.active .sheet-tab-tong {
+  color: #a61b1b; /* đỏ --danger #c62828 trên tab cam #ffcc99 chỉ 3.8:1 */
+}
+:root[data-theme="dark"] .sheet-tab.active .sheet-tab-tong {
+  color: var(--danger);
 }
 
 .sheet-tab .rm-tab {
@@ -3801,14 +3812,21 @@ textarea[aria-invalid="true"] {
    `fitCell` trong GridTable.tsx. Bề rộng do JS đặt; đây chỉ lo nổi lên trên, có nền và khung để
    không lẫn với chữ của ô bị đè. Canh TRÁI để đầu công thức ("=0.8*…") luôn nằm ngay chỗ ô gốc. */
 .excel-table td input.cell-grow {
-  position: relative;
+  /* Phủ trọn ô (td là position: relative) và kéo dài sang phải — trông như ô Excel đang sửa, không
+     phải một hộp nhỏ lệch khỏi ô. Viền trong 2px cùng màu viền ô đang chọn nên hai viền liền nhau. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  box-sizing: border-box;
+  padding-left: 8px;
   z-index: 6;
   max-width: none;
   text-align: left;
   background: #fffbe8;
   box-shadow:
-    0 0 0 1px #1769d6,
-    0 2px 6px rgba(0, 0, 0, 0.18);
+    inset 0 0 0 2px #1769d6,
+    2px 2px 6px rgba(0, 0, 0, 0.18);
 }
 
 /* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
@@ -3876,3 +3894,379 @@ textarea[aria-invalid="true"] {
   z-index: 1000;
 }
 /* #toast-host: z-index 1100 đặt ngay trong khối chính của nó (GAP1-05 cấm khối #toast-host thứ hai). */
+
+/* ══ CHẾ ĐỘ TỐI CHO VÙNG SOẠN BÁO GIÁ — DỊU MẮT ═════════════════════════════════════════════════
+   public/style.css (đóng băng) giữ "tờ giấy" (.editor, .excel-table, .summary-table) luôn nền trắng
+   "vì nó là tài liệu in". Người dùng chốt 2026-09-23: sáng/tối chỉ là GIAO DIỆN WEB, không dính gì
+   tới Excel, và tối thì phải "dễ chịu". Để giấy trắng thì hỏng thật, đo trên dev bằng tương phản:
+     · chữ ô nhập (tên khách, người liên hệ, ghi chú…) = --text sáng #e8eaf0 trên giấy trắng: 1.2:1;
+     · dòng của bảng "Tổng báo giá" = mực giấy #1b2034 trên --surface-2 tối #1a1f2a: 1.02:1.
+   Hàng mang MÀU CỦA MẪU (tiêu đề cột, nhóm/nhóm con, dòng tổng) KHÔNG giữ nguyên màu in — cam đào /
+   ô-liu / xanh ngọc sáng giữa nền tối là mấy dải chói. Dùng BẢN TỐI của chính màu đó (pha ~20% với nền)
+   + chữ tông SÁNG cùng họ màu: vẫn nhận ra mẫu nào, nhóm hay nhóm con, mà không chói. Excel không đổi.
+
+   `:root[data-theme="dark"]` để thắng các luật `.excel-table … td` nhiều tầng của public/style.css.
+   Riêng hàng nhóm / tiêu đề có thêm `:not(#nhom-toi)` — KHÔNG phần tử nào mang id này nên nó luôn
+   khớp; nó chỉ cộng độ ưu tiên cấp id, thắng các luật tô màu hàng nhóm theo từng cột / từng mẫu (tới
+   (0,5,3)) mà không phải rải !important. */
+
+/* Ô nhập / ô chọn / thanh cuộn gốc của trình duyệt theo NÚT sáng/tối của app, không theo Windows:
+   index.html khai `color-scheme: light dark` nên máy để Windows sáng mà app bật tối thì ô tìm kiếm
+   (trang Phân quyền…) vẫn nền trắng của trình duyệt với chữ sáng của app — đọc không ra. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Ba nền "-soft" chưa từng có giá trị dark → nút ƒ (chữ --success sáng) nằm trên nền xanh NHẠT
+     #e2f6e9 của bản sáng: 2.7:1. Chữ đi kèm (--success / --warn / --danger) ở dark đều là màu sáng. */
+  --success-soft: #15301f;
+  --warn-soft: #3a2a10;
+  --danger-soft: #3a1616;
+  /* Viền lưới: đen #000 của giấy → xám dịu, vẫn đủ thấy khung ô. */
+  --luoi-vien: #434c5c;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* ── Khung soạn + phần đầu báo giá ── */
+:root[data-theme="dark"] .editor {
+  background: var(--surface);
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row) label {
+  color: var(--text-soft);
+}
+/* Phần đầu báo giá (QuoteEditor: .meta-2col > fieldset.meta-col, .meta-row) + ô chọn Template. Không có
+   luật nền riêng → trước chỉ nhờ color-scheme mà thành ô xám #3b3b3b của trình duyệt, lệch tông app.
+   Khai CẢ `border` (không chỉ màu): ô có nền riêng thì Chrome vẽ viền mặc định 2px lõm hai màu. */
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row, .sheet-meta) :is(input, select, textarea) {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 3px;
+}
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row, .sheet-meta) :is(input, select):focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--ring);
+  outline: none;
+}
+:root[data-theme="dark"] .editor :is(.center-line, .quote-no, .greeting) {
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .editor .greeting {
+  border-bottom-color: var(--border);
+}
+:root[data-theme="dark"] .editor .title-input {
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor .title-input:is(:hover, :focus) {
+  border-color: var(--border-strong);
+}
+
+/* ── Lưới: hàng thường ── */
+:root[data-theme="dark"] .excel-table {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea) {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc),
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc) :is(input, textarea) {
+  color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
+}
+:root[data-theme="dark"] .excel-table td.col-internal-note textarea {
+  color: #d9b36a;
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea):focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] .excel-table td input.cell-grow {
+  background: var(--surface-2);
+  box-shadow:
+    inset 0 0 0 2px #60a5fa,
+    2px 2px 6px rgba(0, 0, 0, 0.45);
+}
+:root[data-theme="dark"] .excel-table td.col-amount {
+  background: transparent;
+}
+:root[data-theme="dark"] .excel-table td.cell-fx-error input {
+  background: #3a1616;
+  color: #fca5a5;
+}
+:root[data-theme="dark"] .excel-table td.cell-anchor {
+  box-shadow: inset 0 0 0 2px #60a5fa; /* #1769d6 chỉ 2.0–2.5:1 trên nền hàng nhóm tối */
+}
+:root[data-theme="dark"] .excel-table td.cell-ref-pick {
+  background: rgba(47, 168, 90, 0.22);
+  box-shadow: inset 0 0 0 2px #4ade80;
+}
+/* Ô được công thức trỏ tới: REF_COLORS (GridTable.tsx) là xanh lá đậm chọn cho giấy trắng. */
+:root[data-theme="dark"] .excel-table td.cell-ref-active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ref-color, #1769d6) 45%, #bbf7d0);
+  background: color-mix(in srgb, var(--ref-color, #1769d6) 24%, transparent);
+}
+:root[data-theme="dark"] .fill-handle {
+  background: #60a5fa;
+}
+:root[data-theme="dark"] .excel-table td.col-action {
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table td.col-action button.rm-row {
+  color: #f87171;
+}
+:root[data-theme="dark"] .excel-table td.col-action button.rm-row:hover {
+  background: #7f1d1d; /* nền đỏ #c0392b của bản sáng + chữ #f87171 = 2:1, ✕ biến mất lúc sắp bấm */
+  color: #fecaca;
+}
+/* Cột HÌNH ẢNH: ô "＋" thêm ảnh và khung ảnh — #fafbfc / #c9ccd4 cứng = một cột ô sáng ở mọi hàng. */
+:root[data-theme="dark"] .img-add {
+  background: var(--surface-2);
+  border-color: var(--luoi-vien);
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] .img-add:hover {
+  background: #1b2740;
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .cell-img img {
+  border-color: var(--luoi-vien);
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table thead tr.col-letters th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* ── Lưới: tiêu đề cột + hàng nhóm theo MÀU MẪU, bản tối ──
+   --nen: màu mẫu pha ~20% với nền; --chu: tông sáng cùng họ màu. Gia Nguyễn trước, Colorfull đè sau. */
+:root[data-theme="dark"] .excel-table {
+  --tieu-de-nen: color-mix(in srgb, #f3c9a1 22%, var(--surface));
+  --tieu-de-chu: #f3c9a1;
+}
+:root[data-theme="dark"] .excel-table.clf-theme {
+  --tieu-de-nen: color-mix(in srgb, #9dccc9 22%, var(--surface));
+  --tieu-de-chu: #b4dcd9;
+}
+:root[data-theme="dark"] .excel-table:not(#nhom-toi) thead tr:not(.col-letters) th {
+  background: var(--tieu-de-nen);
+  color: var(--tieu-de-chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #fae9db 16%, var(--surface));
+  --chu: #f0b877;
+}
+:root[data-theme="dark"] .excel-table tr.subgroup-row {
+  --nen: color-mix(in srgb, #9dbde6 16%, var(--surface));
+  --chu: #a9c9ef;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --chu: #f2b39a;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.subgroup-row {
+  --nen: color-mix(in srgb, #cad8aa 17%, var(--surface));
+  --chu: #d2dfaa;
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td {
+  background: var(--nen);
+  color: var(--chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea) {
+  color: var(--chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea)::placeholder {
+  color: color-mix(in srgb, var(--chu) 55%, var(--surface));
+}
+:root[data-theme="dark"] .excel-table tfoot :is(td.label, td.value) {
+  background: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  color: #f5d0a9;
+}
+:root[data-theme="dark"] .excel-table tfoot td.value {
+  color: #fca5a5; /* #f87171 trên nền cam pha tối chỉ 3.9:1 */
+}
+
+/* ── Thanh công thức, gợi ý hàm / rạp, khung xem công thức ── */
+:root[data-theme="dark"] .fx-bar {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+:root[data-theme="dark"] .fx-addr {
+  background: var(--surface-2);
+  color: #93c5fd;
+  border-right-color: var(--border-strong);
+}
+:root[data-theme="dark"] #fx-input {
+  background: var(--surface); /* luật theo id ở public/style.css: #fff + chữ #111 */
+  color: var(--text);
+}
+:root[data-theme="dark"] #fx-input:focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] #fx-input::placeholder {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] #fx-input[readonly] {
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .fx-fx {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-right-color: var(--border);
+}
+:root[data-theme="dark"] :is(.fx-auto, .vs-auto, .fx-peek) {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-auto-item {
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .fx-auto-item span {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] :is(.fx-auto-item.active, .fx-auto-item:hover) {
+  background: #1e2a44;
+}
+:root[data-theme="dark"] .fx-peek-f {
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-peek-v {
+  color: #93c5fd;
+  border-top-color: var(--border);
+}
+:root[data-theme="dark"] .fx-peek-h {
+  color: #4ade80;
+}
+
+/* ── Bảng phụ / tab sheet ── */
+:root[data-theme="dark"] .extra-del-table {
+  background: transparent;
+  border-color: #7f3a3a;
+  color: #f87171;
+}
+:root[data-theme="dark"] .extra-del-table:hover {
+  background: #3a1616;
+}
+:root[data-theme="dark"] .extra-here.cat-hcm {
+  background: #1b2740;
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .extra-here.cat-hanoi {
+  background: #15301f;
+  color: #86efac;
+}
+:root[data-theme="dark"] .extra-here.cat-khach {
+  background: #2e2615;
+  color: #e3b765;
+}
+:root[data-theme="dark"] .extra-table-inline {
+  border-top-color: color-mix(in srgb, #f0c674 35%, var(--surface)); /* vạch vàng sáng → dịu */
+}
+:root[data-theme="dark"] .extra-cat-group .sheet-tab {
+  border-bottom-color: var(--border-strong);
+}
+:root[data-theme="dark"] .sheet-tabs {
+  border-bottom-color: color-mix(in srgb, #ffcc99 35%, var(--surface)); /* vạch cam sáng → dịu */
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab {
+  color: #f87171;
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab:hover {
+  background: var(--surface-hover);
+}
+
+/* ── Bảng "Tổng báo giá" ── */
+:root[data-theme="dark"] .summary-table {
+  color: var(--text);
+  --tong-nen: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  --tong-chu: #f5d0a9;
+}
+:root[data-theme="dark"] .summary-table.clf-theme {
+  --tong-nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --tong-chu: #f2c7a8;
+}
+:root[data-theme="dark"] .summary-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .summary-table:not(#nhom-toi) :is(thead th, tfoot td) {
+  background: var(--tong-nen);
+  color: var(--tong-chu);
+}
+:root[data-theme="dark"] .summary-table tfoot .summary-formula-value.danger {
+  color: #fca5a5; /* "Thành tiền": #f87171 trên --tong-nen chỉ 3.9:1 */
+}
+
+/* ── Công thức hiện ngay trong ô khi BẤM ĐÚP (GridTable toggleCellFormula) ──
+   Trước là style nội tuyến #15803d: 3.5:1 trên nền tối, 2.1–2.6:1 trên hàng nhóm tối, và cả bản SÁNG
+   trên nền nhóm con / nhóm Colorfull cũng chỉ 3.3–3.5:1. !important vì luật tô chữ hàng nhóm (có id)
+   và các luật màu theo cột đều thắng một bộ chọn thuộc tính. */
+:root {
+  --fx-cell: #166534;
+}
+:root[data-theme="dark"] {
+  --fx-cell: #4ade80;
+}
+[data-fx-shown] {
+  color: var(--fx-cell) !important;
+}
+
+/* ── Chỗ lẻ ngoài vùng soạn (đo trên dev + rà mã) ── */
+/* Link "Bỏ qua tới nội dung" (Tab lần đầu): chữ trắng trên vàng --primary của dark = 1.67:1. */
+:root[data-theme="dark"] .skip-link {
+  color: var(--on-primary);
+}
+/* Nhãn nhóm "CÔNG VIỆC / QUẢN TRỊ / TÀI KHOẢN" ở thanh bên (nền thanh bên tối ở CẢ hai chế độ):
+   #6b7488 trên #111726 = 3.8:1 → #8a93a8 ≈ 5.6:1, vẫn nhạt hơn chữ menu #c2c8d6. */
+.sidebar .menu .nav-group-label {
+  color: #8a93a8;
+}
+/* "Thành tiền" đỏ trên dòng tổng màu cam (bản SÁNG): --danger #c62828 trên #ffcc99 / #f4cfb0 = 3.8:1. */
+.summary-table tfoot .summary-formula-value.danger {
+  color: #a61b1b;
+}
+/* Số thông báo chưa đọc ở thanh bên: chữ trắng trên vàng --accent = 1.7–1.8:1 CẢ hai chế độ. */
+.badge-num:not(:empty) {
+  color: var(--on-primary);
+}
+/* Tooltip biểu đồ doanh số: bản đảo màu (nền = --text) thành hộp gần trắng chói giữa trang tối. */
+:root[data-theme="dark"] .chart-tip {
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+/* Ô chọn / ô nhập TRẦN trong hộp thoại (lịch sử phiên bản, chọn khách, nhập Excel…): không nằm trong
+   <label> nên không ăn luật `.modal label select`, rơi về ô xám #3b3b3b của trình duyệt. Cả cụm bọc
+   trong :where → độ ưu tiên 0, không đè luật riêng nào. */
+:where(:root[data-theme="dark"] .modal :is(select, textarea, input[type="search"])) {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+/* Nhãn "fx" của thanh công thức: #8a94a3 trên #fafbfc = 2.96:1 ở bản SÁNG. */
+.fx-fx {
+  color: var(--text-muted);
+}
+/* Dấu "–" (không có quyền) ở ma trận Phân quyền: --border-strong chỉ 1.4–1.6:1 ở CẢ hai chế độ. */
+.perm-no {
+  color: var(--text-muted);
+}
+/* Số của bước đang làm (khuôn .num cũ của public/style.css): chữ trắng trên vàng 1.7–1.8:1. Thanh bước
+   của NewQuoteWizard.tsx tô bằng style nội tuyến nên sửa ở chính tệp đó. */
+.step-dot.active .num {
+  color: var(--on-primary);
+}
+
+/* BẢNG "TỔNG BÁO GIÁ" CỦA COLORFULL (bản SÁNG) — khớp sheet "Tổng Báo Giá" của tệp Excel
+   (src/excel.ts `sumHeaderFill`: có sheet clofull → F4CFB0), người dùng chốt bằng ảnh chụp
+   2026-09-23. Cùng quy tắc nhận diện với tệp: MỘT sheet Colorfull là đủ. Gia Nguyễn giữ nguyên. */
+.summary-table.clf-theme thead th,
+.summary-table.clf-theme tfoot td {
+  background: #f4cfb0;
+}
