@@ -151,6 +151,11 @@ export async function inviteUser(req: Request) {
   // NHẤT QUÁN — không có gì bị rơi im lặng như ở `createUser` trước bản vá 2026-09-18. Người tự
   // onboard không được tự cấp quyền ký; quản trị cấp sau bằng ô "Ký chứng từ" trong ma trận.
   const { email, displayName, role, projectCode, permissions, senderName } = req.body;
+  const quyenLuuKhiMoi = (raw: unknown, vaiTro: string) => {
+    if (raw === undefined || raw === null) return [];
+    const loc = sanitizePerms(raw as string[]);
+    return loc.length === 0 && vaiTro !== "admin" ? [KHONG_CO_QUYEN] : loc;
+  };
   // Giữ NGUYÊN tập trường được đối chiếu (email HOẶC username) — chỉ đổi phép so từ byte-for-byte
   // sang không-phân-biệt-hoa/thường. Nới tập trường sẽ đổi hành vi đang chạy.
   const exists = await timTaiKhoanTrung(email, ["email", "username"]);
@@ -162,7 +167,10 @@ export async function inviteUser(req: Request) {
       email,
       displayName,
       role,
-      permissions: sanitizePerms(permissions), // tích quyền per-user lúc mời ([] = theo role)
+      // Tích quyền per-user lúc mời. KHÔNG gửi khoá = theo vai trò ([]). GỬI mà lọc ra rỗng ("Bỏ hết",
+      // hoặc chỉ tích quyền admin-tier) = TƯỚC HẾT QUYỀN — cùng luật với updateUser (RBAC-01; soát chéo
+      // 2026-09-23: cửa Mời từng hiểu [] là "theo vai trò", người được mời nhận đủ quyền manager).
+      permissions: quyenLuuKhiMoi(permissions, role),
       // Hàng MỚI nên `|| null` ở đây không xoá được gì của ai. Đặt hộ ngay từ lời mời để wizard báo
       // giá của người đó chạy đúng ngay lần đầu, thay vì bắt họ tự vào Hồ sơ cá nhân điền.
       senderName: senderName || null,

@@ -71,6 +71,17 @@ describe.runIf(dbAvailable)("RBAC-06 — view lược không xuất, không nhâ
     expect((await luoc.post(`/api/quotes/${quoteId}/export`).send({ format: "xlsx" })).status).toBe(403);
   });
 
+  // Hồi quy do gộp RBAC-06 × RT-02 (soát chéo 2026-09-23): route MỚI GET /api/jobs/:queue/:id/file
+  // phát thẳng file đầy đủ giá qua cùng origin; job id của BullMQ tăng dần nên dò được job của người khác.
+  it.runIf(!!process.env.REDIS_URL && !!process.env.S3_ENDPOINT)("job xuất nền của NGƯỜI KHÁC: trạng thái + /file → 403 cho tài khoản lược; tài khoản thường vẫn xem được", async () => {
+    const x = await admin.post(`/api/quotes/${quoteId}/export`).send({ format: "xlsx" });
+    expect(x.status, JSON.stringify(x.body)).toBe(202);
+    const jid = x.body.jobId;
+    expect((await luoc.get(`/api/jobs/export/${jid}`)).status, "đọc được trạng thái/khoá file của job").toBe(403);
+    expect((await luoc.get(`/api/jobs/export/${jid}/file`)).status, "tải được file đầy đủ giá").toBe(403);
+    expect((await thuong.get(`/api/jobs/export/${jid}`)).status).toBe(200);
+  }, 60_000);
+
   it("nhân bản → 403; vế đối trọng: tài khoản cùng quyền nhưng KHÔNG lược thì nhân bản được", async () => {
     expect((await luoc.post(`/api/quotes/${quoteId}/duplicate`).send({})).status, "nhân bản ra bản sao đầy đủ của mình").toBe(403);
     expect((await thuong.post(`/api/quotes/${quoteId}/duplicate`).send({})).status).toBe(201);

@@ -202,6 +202,15 @@ async function layJobXuat(req: Request, res: Response): Promise<Job | null> {
     res.status(403).json({ error: "Bạn không có quyền tải file xuất của báo giá này" });
     return null;
   }
+  // VIEW BỊ LƯỢC (RBAC-06) không lấy được file đầy đủ giá qua đường nào — nay là BỐN đường tới cùng
+  // một tệp: export.routes.ts, nhánh xếp việc ở file này, canAccessKey (files.routes.ts), và GET
+  // /jobs/:queue/:id[/file] ở đây (hồi quy do gộp RBAC-06 × RT-02, soát chéo 2026-09-23: route /file
+  // cùng origin biến job id tăng dần thành đường tải thật). Không điều kiện requestedBy: tài khoản
+  // lược không tự xếp việc được, còn job xếp TRƯỚC khi bị gán internal:view vẫn sống tới 6 giờ.
+  if (biLuocView(req.session)) {
+    res.status(403).json({ error: "Bạn chỉ được xem phần được giao của báo giá này" });
+    return null;
+  }
   return job;
 }
 

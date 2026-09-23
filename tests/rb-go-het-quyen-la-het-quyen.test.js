@@ -71,6 +71,25 @@ describe.runIf(dbAvailable)("RBAC-01 — permissions [] là tước hết quyề
     expect((await mgr.get("/api/users")).status).toBe(403);
   });
 
+  // Cửa MỜI phải hiểu [] giống cửa SỬA (soát chéo 2026-09-23: inviteUser vẫn lưu [] = "theo vai trò",
+  // nên "Bỏ hết" rồi Mời tạo tài khoản đủ quyền manager trong khi phần xem trước báo "chưa làm được gì").
+  it("MỜI với permissions [] → tài khoản HẾT quyền; mời không gửi khoá → theo vai trò; admin + [] → vẫn full", async () => {
+    const moi = async (hau, than) => {
+      const r = await quanTri.post("/api/users/invite").send({ email: `${TAG}-${hau}@vd.test`, displayName: hau, ...than });
+      expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBeLessThan(300);
+      return prisma.user.findFirst({ where: { email: `${TAG}-${hau}@vd.test` } });
+    };
+    const rong = await moi("rong", { role: "manager", permissions: [] });
+    expect(resolveUserPermissions(rong.role, rong.permissions), "mời 'Bỏ hết' mà vẫn đủ quyền manager").toEqual([]);
+    const chiAdmin = await moi("chiadmin", { role: "manager", permissions: [PERMISSIONS.USER_MANAGE] });
+    expect(resolveUserPermissions(chiAdmin.role, chiAdmin.permissions)).toEqual([]);
+    const macDinh = await moi("macdinh", { role: "manager" });
+    expect(macDinh.permissions).toEqual([]);
+    expect(resolveUserPermissions(macDinh.role, macDinh.permissions)).toContain(PERMISSIONS.QUOTE_READ_OWN);
+    const qt = await moi("qt", { role: "admin", permissions: [] });
+    expect(qt.permissions).toEqual([]);
+  });
+
   it("PUT permissions null → quay về bộ mặc định của vai trò", async () => {
     const r = await quanTri.put(`/api/users/${mgrU.id}`).send({ permissions: null });
     expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
