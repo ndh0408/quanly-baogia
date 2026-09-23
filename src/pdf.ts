@@ -175,7 +175,22 @@ export async function renderQuotePdf(quote: any) {
       drawItemsTable(doc, sh.items || [], runningIdx, !!sh.groupSubtotal, { quoteNumber: quote.quoteNumber, sheetName: sh.name });
       runningIdx += (sh.items || []).filter((it: any) => it?.kind !== "section" && it?.kind !== "subsection" && it?.kind !== "info").length;
       const st = tt.sheets[i];
-      if (st && st.discount > 0) {
+      if (st && quote.showTotals === false) {
+        // Tắt bảng tổng (soát chéo money#3): Excel CHỈ bỏ sheet "Tổng Báo Giá", còn trong từng sheet
+        // fillSheetData vẫn ghi đủ Tổng Cộng → VAT → Thành Tiền, màn hình cũng vẫn hiện khối đó. Chỉ
+        // in Cộng/Discount/Tổng cộng như trước thì PDF gửi khách mất hẳn VAT, và có Discount thì dòng
+        // đậm cuối cùng là số CHƯA VAT — khách đọc nó thành số phải trả.
+        doc.fontSize(11);
+        if (st.discount > 0) {
+          r("Cộng", st.gross);
+          r("Discount", -st.discount);
+        }
+        r("Tổng cộng", st.net);
+        // CÙNG phép tính với excel.ts (vatAmt = ROUND(Tổng Cộng × %)) — VAT theo TỪNG sheet.
+        const vatSheet = Math.round(st.net * tt.vatPct / 100);
+        r(`VAT (${tt.vatPct}%)`, vatSheet);
+        r("Thành tiền", st.net + vatSheet, true);
+      } else if (st && st.discount > 0) {
         doc.fontSize(11);
         r("Cộng", st.gross);
         r("Discount", -st.discount);
@@ -187,8 +202,8 @@ export async function renderQuotePdf(quote: any) {
 
     // Tổng báo giá: VAT tính TRÊN số đã trừ Discount. Không sheet nào giảm giá → khối y như cũ.
     // `showTotals === false` → BỎ khối tổng báo giá (XLSX-03), đúng như Excel bỏ sheet "Tổng Báo
-    // Giá" và UI hứa "ẩn cả màn hình lẫn Excel/PDF". Khối Cộng/Discount của từng sheet ở trên giữ
-    // nguyên — Excel cũng vẫn in khối tổng trong từng sheet.
+    // Giá" và UI hứa "ẩn cả màn hình lẫn Excel/PDF". Khi đó khối tổng ĐẦY ĐỦ của từng sheet (có VAT,
+    // Thành tiền) đã in ở trên — Excel cũng vẫn in khối tổng trong từng sheet.
     if (quote.showTotals !== false) {
       doc.fontSize(11);
       if (tt.discount > 0) {
