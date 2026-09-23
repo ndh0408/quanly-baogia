@@ -213,7 +213,7 @@ function GridTableInner(props: GridTableProps) {
   const histRef = useRef(createUndoStack());
   const khoAnhRef = useRef(createImagePool());   // GRID-09: mốc undo giữ MÃ ảnh, không chép lại base64
   const focusRef = useRef<{ i: number; f: string } | null>(null);
-  const focusPend = useRef<{ i: number; f: string } | null>(null);
+  const focusPend = useRef<{ i: number; f: string; dongBo?: boolean } | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const selRef = useRef<Sel | null>(null);
   const clearOutsideRef = useRef<() => void>(() => {});
@@ -309,11 +309,13 @@ function GridTableInner(props: GridTableProps) {
     if (m && m.i === i && m.f === f) return;
     pushUndo(); editUndoRef.current = { i, f };
   };
-  const focusCell = (i: number, f: string, preserveSelection = false) => {
+  // dongBo: thao tác vừa GHI ĐÈ model hàng loạt (dán khối / dựng lại) — lượt vẽ kế tiếp kéo ô đang giữ
+  // tiêu điểm về model TRƯỚC khi dời tiêu điểm (xem effect đồng bộ ô, soát toàn diện L6).
+  const focusCell = (i: number, f: string, preserveSelection = false, dongBo = false) => {
     if (!preserveSelection) selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
     editingRef.current = false;
     editModeRef.current = null;
-    focusPend.current = { i, f };
+    focusPend.current = { i, f, dongBo };
   };
 
   const rk = M.computeRowKinds(items);
@@ -1000,6 +1002,7 @@ function GridTableInner(props: GridTableProps) {
     } }
     autoEnableGroupSub(rc.r0, rc.r1);
     recomputeAll(); onChange();
+    syncActiveCell();   // Shift+↓ đã dời tiêu điểm xuống hàng DƯỚI — ô đó vừa bị điền đè (L6)
   };
   // Ctrl/⌘+R — chép ô TRÁI NHẤT của vùng sang các cột còn lại (Excel: Fill Right).
   const fillRight = () => {
@@ -1027,6 +1030,7 @@ function GridTableInner(props: GridTableProps) {
     }
     autoEnableGroupSub(rc.r0, rc.r1);
     recomputeAll(); onChange();
+    syncActiveCell();   // Shift+→ đã dời tiêu điểm sang ô PHẢI — ô đó vừa bị điền đè (L6)
   };
   // Delete/Backspace khi đang CHỌN ô (không sửa) → xoá sạch nội dung vùng chọn, như Excel.
   const clearRange = () => {
@@ -1118,16 +1122,24 @@ function GridTableInner(props: GridTableProps) {
   // ── undo/redo + dán Excel khối ─────────────────────────────────────────────────
   // Ô ĐANG focus bị effect đồng-bộ-ô BỎ QUA (để không cướp chữ người dùng đang gõ) → sau undo/redo
   // nó vẫn hiện chữ cũ trong khi cả bảng đã lùi. Tự vẽ lại đúng một ô đó cho khớp model.
+  // Dán / điền hàng loạt cũng phải gọi (soát toàn diện L6): ô đang chọn hiện số CŨ trong khi model đã
+  // theo số mới, mà onGridBlur luôn chốt `el.value` → rời ô là số cũ đè ngược vào model, công thức
+  // vừa dán mất. Đọc hàng từ `data-row` nên chỉ gọi khi chỉ số hàng chưa lệch (không chèn/xoá hàng
+  // từ lần vẽ trước) — dán khối có thể chèn hàng nên đi đường focusCell(…, dongBo) trong effect.
   const syncActiveCell = () => {
     const el = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
     const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
-    if (!f || !tr || !el) return;
+    if (!f || !tr || !el || !tableRef.current?.contains(el)) return;   // ô của lưới KHÁC → không phải việc của lưới này
     const rec = items[parseInt(tr.getAttribute("data-row") || "-1", 10)] as Record<string, unknown> | undefined;
     if (!rec) return;
     const fx = (rec.formulas as Record<string, string> | undefined)?.[f];
     const i = parseInt(tr.getAttribute("data-row") || "-1", 10);
     const want = fx ?? (NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? ""));
-    if (el.value !== want) { el.value = want; if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
+    if (el.value !== want) {
+      el.value = want;
+      if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement);
+      fitCell(el); highlightActiveFormulaRefs(want);   // như lúc vào ô (onGridFocus): ô nới theo chữ, sáng ô tham chiếu
+    }
     el.dataset.escVal = el.value;      // mốc ESC phải theo giá trị SAU khi lùi
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
@@ -1269,6 +1281,7 @@ function GridTableInner(props: GridTableProps) {
         if (movingCut) finishCutMove(rc);
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
+        syncActiveCell();   // ô đang focus nằm trong vùng (Shift+↓ đã dời tiêu điểm xuống) — L6
         baoSoMoHo();
         return;
       }
@@ -1280,6 +1293,9 @@ function GridTableInner(props: GridTableProps) {
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
+        // Dán CÔNG THỨC vào ô đang chọn: nhánh trên bỏ qua ô có công thức → ô kẹt số cũ, rời ô là
+        // công thức mất (L6). Ô đang focus hiện đúng thứ onGridFocus hiện: công thức nếu có.
+        syncActiveCell();
         baoSoMoHo();
         return;
       }
@@ -1294,6 +1310,7 @@ function GridTableInner(props: GridTableProps) {
         // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
         // chọn lại bị lượt đồng bộ bỏ qua → dán "Booth…⏎HCM…⏎HN…" chỉ thấy dòng đầu tới khi bấm Lưu.
         const el = cellEl(i0, fld); if (el) { el.value = String((items[i0] as Record<string, unknown>)[fld] ?? ""); if (el.tagName === "TEXTAREA") autoGrow(el as HTMLTextAreaElement); }
+        syncActiveCell();   // mốc Esc theo nội dung vừa dán — F2 rồi Esc không được trả về chữ trước khi dán (L6)
         baoSoMoHo();
       }
       return;
@@ -1317,8 +1334,8 @@ function GridTableInner(props: GridTableProps) {
       autoEnableGroupSub(startRow, startRow + built.length - 1);
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[COL_NAME] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
-      focusCell(startRow, FIELDS[COL_NAME], true);
-      const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      focusCell(startRow, FIELDS[COL_NAME], true, true);
+      const nGrp =built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
       if (nWarn) toast(`⚠️ ${nWarn} ô công thức KHÔNG tự dịch được từ Excel — ô viền ĐỎ, bấm vào kiểm tra/sửa tay`, "error");
@@ -1382,7 +1399,7 @@ function GridTableInner(props: GridTableProps) {
     recomputeAll(); onChange();
     if (blockImgs) setImgVer((v) => v + 1);   // ô ảnh không tự vẽ lại theo items (xem addImages)
     selRef.current = { anchor: { row: startRow, field: FIELDS[startCol] }, focus: { row: startRow + rows.length - 1, field: FIELDS[Math.min(FIELDS.length - 1, startCol + rows[0].length - 1)] } };
-    focusCell(startRow, FIELDS[startCol], true);
+    focusCell(startRow, FIELDS[startCol], true, true);
     toast(`Đã dán ${rows.length} dòng × ${rows[0].length} cột`, "success");
     baoSoMoHo();
   };
@@ -1949,7 +1966,13 @@ function GridTableInner(props: GridTableProps) {
       });
     }
     if (focusPend.current && tableRef.current) {
-      const { i, f } = focusPend.current; focusPend.current = null;
+      const { i, f, dongBo } = focusPend.current; focusPend.current = null;
+      // Dán khối / dựng lại vừa ghi đè model — có thể ghi cả ô ĐANG giữ tiêu điểm, ô mà lượt quét trên
+      // bỏ qua. Kéo nó về model TRƯỚC khi dời tiêu điểm, kẻo blur chốt số cũ đè lên số vừa dán, hoặc ô
+      // đích đang focus sẵn (el.focus() không phát sự kiện) kẹt số cũ thay cho công thức vừa dán (L6).
+      // Làm ở đây chứ không ngay trong onPaste: dán lên hàng NHÓM chèn hàng, `data-row` chỉ đúng sau
+      // lượt vẽ này.
+      if (dongBo) syncActiveCell();
       const el = tableRef.current.querySelector(`tr[data-row="${i}"] [data-f="${f}"]`) as HTMLInputElement | HTMLTextAreaElement | null;
       if (el) {
         // Ô đích (paste/nav) có thể vừa là activeElement → paintCells đã SKIP nên còn giá trị CŨ.
