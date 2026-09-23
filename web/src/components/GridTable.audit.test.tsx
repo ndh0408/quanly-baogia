@@ -195,6 +195,52 @@ describe("GRID-01 — dán số vào cột SỐ LƯỢNG / ĐƠN GIÁ không đ�
     expect(items[0].quantity).toBeCloseTo(1.5, 6);
   });
 
+  // Soát chéo grid#9: payload nội bộ chỉ nói "chép trong app", KHÔNG nói ô nguồn là số. Ô Ghi chú
+  // gõ "95.000" được chép nguyên văn; đọc bằng Number() thì ra 95 — Đơn giá hụt 1000 lần.
+  it("grid#9 — chép ô GHI CHÚ '95.000' trong lưới rồi dán vào Đơn giá → 95.000, không phải 95", () => {
+    const items = [{ ...hang("A", "cái", 1, 1), notes: "95.000" } as ItemK];
+    moLuoi(items);
+    vaoO(o(0, "notes"));
+    const kho = chep(o(0, "notes"));
+    expect(JSON.parse(kho["application/x-quanly-grid"]).fields).toEqual(["notes"]);
+    vaoO(o(0, "unitPrice"));
+    dan(o(0, "unitPrice"), kho);
+    expect(items[0].unitPrice).toBe(95000);
+  });
+
+  it("grid#9 — ô Ghi chú '95.000' dán ĐIỀN cả vùng Đơn giá → 95.000 mọi ô", () => {
+    const items = [{ ...hang("A", "cái", 1, 1), notes: "95.000" } as ItemK, hang("B", "cái", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "notes"));
+    const kho = chep(o(0, "notes"));
+    vaoO(o(0, "unitPrice"));
+    phim(o(0, "unitPrice"), "ArrowDown", { shift: true });
+    dan(o(1, "unitPrice"), kho);
+    expect([items[0].unitPrice, items[1].unitPrice]).toEqual([95000, 95000]);
+  });
+
+  it("grid#9 — KHỐI hai ô Ghi chú ('95.000', '250.000') dán sang cột Đơn giá → 95.000 / 250.000", () => {
+    const items = [{ ...hang("A", "cái", 1, 1), notes: "95.000" } as ItemK, { ...hang("B", "cái", 1, 1), notes: "250.000" } as ItemK];
+    moLuoi(items);
+    vaoO(o(0, "notes"));
+    phim(o(0, "notes"), "ArrowDown", { shift: true });
+    const kho = chep(o(1, "notes"));
+    expect(kho["text/plain"]).toBe("95.000\r\n250.000");
+    vaoO(o(0, "unitPrice"));
+    dan(o(0, "unitPrice"), kho);
+    expect([items[0].unitPrice, items[1].unitPrice]).toEqual([95000, 250000]);
+  });
+
+  it("grid#9 — ô nguồn là SỐ thì vẫn đọc số thô: SL 2,675 chép sang Đơn giá là 2,675", () => {
+    const items = [hang("A", "m2", 2.675, 1), hang("B", "m2", 1, 1)];
+    moLuoi(items);
+    vaoO(o(0, "quantity"));
+    const kho = chep(o(0, "quantity"));
+    vaoO(o(1, "unitPrice"));
+    dan(o(1, "unitPrice"), kho);
+    expect(items[1].unitPrice).toBe(2.675);
+  });
+
   it("GRID-13: dán '(1.500.000)' (âm kiểu kế toán) vào Đơn giá ra SỐ ÂM", () => {
     const items = [hang("Giảm giá", "gói", 1, 0)];
     moLuoi(items);

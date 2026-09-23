@@ -1124,7 +1124,8 @@ function GridTableInner(props: GridTableProps) {
   // thức đúng nếp Excel ("=G3*E3" copy ở hàng 3 dán xuống hàng 7 thành "=G7*E7"; $ khoá thì giữ).
   // Dịch ra ngoài bảng (Excel trả #REF!) → giữ nguyên công thức gốc và đánh dấu ô ĐỎ để người dùng
   // thấy mà sửa, thay vì âm thầm tính ra số sai.
-  // noiBo: khối chép TỪ CHÍNH LƯỚI (có payload application/x-quanly-grid). cellRawForCopy xuất số
+  // noiBo: ô chép TỪ CHÍNH LƯỚI (có payload application/x-quanly-grid) VÀ ô nguồn là trường số
+  // (xem soThoNguon trong onPaste). cellRawForCopy xuất số
   // THÔ bằng String(number) ("2.675", "1500000") → đọc thẳng bằng Number(), KHÔNG đoán nghìn/thập
   // phân. Trước đây mọi ô số đi qua parseLooseNumber → "2.675" (SL 2,675 m²) khớp mẫu nghìn VN và
   // thành 2675: chép-dán NGAY TRONG app đã nhân Thành Tiền lên 1000 lần.
@@ -1168,6 +1169,11 @@ function GridTableInner(props: GridTableProps) {
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
     let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][] } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
+    // Số THÔ (Number()) chỉ đúng khi ô NGUỒN là trường số: cellRawForCopy xuất String(number) cho
+    // SL/Đơn giá/Ngày, còn ô chữ (Ghi chú gõ "95.000") và ô tính (Thành tiền đã gom nghìn) đi
+    // nguyên văn — đọc chúng bằng Number() thì "95.000" thành 95, Đơn giá hụt 1000 lần (soát chéo
+    // grid#9). Ô nguồn không phải số → đọc như nguồn ngoài.
+    const soThoNguon = (c: number) => !!internal && NUMERIC.has(internal.fields?.[c] ?? "");
     const text = e.clipboardData.getData("text/plain") || e.clipboardData.getData("text") || "";
     if (!text && !internal) return;
     // Khối nội bộ mang theo LUÔN nội dung TSV → dán sang lưới khác/tab khác vẫn dựng đúng khối đó.
@@ -1194,7 +1200,7 @@ function GridTableInner(props: GridTableProps) {
       const movingCut = !!(sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token);
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
-        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, 0, 0, !!internal); }   // GRID-15: STT là ô tính, không ghi
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, 0, 0, soThoNguon(0)); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
@@ -1204,7 +1210,7 @@ function GridTableInner(props: GridTableProps) {
       if (f0 && NUMERIC.has(f0)) {
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
-        pasteCellVal(i0, f0, val, 0, 0, !!internal);
+        pasteCellVal(i0, f0, val, 0, 0, soThoNguon(0));
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
@@ -1215,7 +1221,7 @@ function GridTableInner(props: GridTableProps) {
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
         const fld = f0 || FIELDS[rc ? rc.c0 : 0];
-        pasteCellVal(i0, fld, val, 0, 0, !!internal);
+        pasteCellVal(i0, fld, val, 0, 0, soThoNguon(0));
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(fld), c1: FIELDS.indexOf(fld) });
         recomputeAll(); onChange(); paintSel();
         // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
@@ -1291,7 +1297,7 @@ function GridTableInner(props: GridTableProps) {
           const fSrc = internal.fields?.[c];
           if (fSrc) { const a = addrIdxOfField(f), b = addrIdxOfField(fSrc); if (a >= 0 && b >= 0) dC = a - b; }
         }
-        pasteCellVal(ri, f, val, dR, dC, !!internal, quDan);
+        pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quDan);
       });
     });
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
