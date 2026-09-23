@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "../lib/api";
-import { toast, useEscClose } from "../lib/ui";
+import { toast, useEscClose, toLocalInputDate } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
@@ -32,7 +32,9 @@ export function NewQuoteWizard({ me }: { me: Me }) {
   const [info, setInfo] = useState({
     title: "", shortTitle: "", toCompany: "", toContact: "",
     fromContact: me.senderName || me.displayName || "", fromPhone: me.phone || "", fromTitle: me.title || "",
-    fromAddress: "", vatPercent: 8, quoteDate: new Date().toISOString().slice(0, 10),
+    // Ngày ĐỊA PHƯƠNG (giờ VN), như QuoteEditor #/rnew — toISOString().slice(0,10) là ngày UTC, lùi một
+    // ngày trước 07:00 sáng. Draft luôn mang quoteDate nên homNayVN() của máy chủ không đỡ được (excel#9).
+    fromAddress: "", vatPercent: 8, quoteDate: toLocalInputDate(new Date()),
   });
 
   useEffect(() => {
