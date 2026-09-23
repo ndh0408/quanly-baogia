@@ -35,7 +35,7 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 | **N.CẢM** | mức dữ liệu trả về: `PII` · `$` tiền/giá · `SEC` bí mật hệ thống · `—` thường |
 | **TT** | `OK` đúng sẵn · `VÁ` sửa trong đợt này · `NỢ` còn thiếu, đã ghi nhận |
 
-Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (nạp lại vai trò + quyền + trạng thái khoá từ DB **mỗi request**) → `csrfGuard` → `apiLimiter` (120/phút).
+Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`: `apiLimiter` (120/phút, đứng TRƯỚC giải nén + parse thân) → phiên → `bearerAuth` → `enforceActiveUser` (nạp lại vai trò + quyền + trạng thái khoá từ DB **mỗi request**) → `csrfGuard`.
 
 ---
 
@@ -77,7 +77,7 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
 | POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
-| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` | terminal bất biến + khoá lạc quan | $ | `quotes.workflow` | OK |
+| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan | $ | `quotes.workflow` | OK |
 | POST | `/:id/hn/assign` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | — | — | — | OK |
 | PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt | $ | — | OK |
 | POST | `/:id/hn/submit` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chỉ `assigned`/`rejected` | — | — | OK |
@@ -290,7 +290,8 @@ Hợp đồng mới:
   (`web/src/components/HnTables.tsx`, dùng chung cho cả màn của chủ).
 - **Không thấy** thông tin khách / người gửi / ngày / VAT / lời chào: những thứ đó theo báo giá gốc.
 - Chống ghi đè chuyển từ phép suy đoán "trang đã chết" sang **khoá lạc quan thật**: client gửi
-  `baseUpdatedAt`, lệch thì 409 kèm lời nhắc chép lại phần vừa gõ.
+  `baseHnRev` (băm bảng Hà Nội — chủ lưu thứ khác KHÔNG làm lệch), lệch thì 409 kèm lời nhắc chép
+  lại phần vừa gõ. `baseUpdatedAt` chỉ còn là đường tương thích cho tab mở trước lần deploy đó.
 - Giá HN **đã gửi duyệt/đã duyệt** thì đường lưu báo giá thường trả **409** (trước đây lặng lẽ lấy
   lại bản CSDL rồi trả 200) — trừ người có `quote:hn:manage`.
 - Payload hình dạng **cũ** (`hnSheets`) bị **400** kèm hướng dẫn tải lại, KHÔNG hiểu thành "xoá hết

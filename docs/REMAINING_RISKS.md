@@ -78,6 +78,9 @@ phải lỗi có sẵn — chúng là chỗ bản vá đi xa hơn mức đã đo
 
 ### 1. Trần RAM container là số PHỎNG ĐOÁN, chưa đo trên VM thật
 
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** trần nay là app **3g**, worker **3g**, và đã có số ĐO (xem
+> chú thích `deploy.resources` trong `docker-compose.prod.yml`). Giữ mục dưới làm lịch sử.
+
 `docker-compose.prod.yml` / `.staging.yml` nay đặt `deploy.resources.limits.memory`
 (app 1536m, worker 2g). **Chưa ai đo đỉnh RSS thật.**
 
@@ -460,7 +463,8 @@ Storage Adapter → kho object S3-compatible
 > ngược nhau về vận hành. Nếu phiên ở Redis thì Redis rơi = mọi người bị đăng xuất,
 > và instance Redis 256 MB phải được tính thêm chỗ cho phiên. Thật ra Redis rơi thì
 > **phiên vẫn sống** — mất SSE, mất hàng đợi, và rate limit thì mở (xem
-> "Rate limit bỏ qua khi Redis chết"). Ngược lại, thứ thật sự phải canh dung lượng
+> "Rate limit bỏ qua khi Redis chết" — ⚠️ câu đó LỖI THỜI: Redis chết thì limiter rơi về bộ đếm
+> trong bộ nhớ từng tiến trình, KHÔNG bỏ qua; xem `src/rateLimit.ts`). Ngược lại, thứ thật sự phải canh dung lượng
 > là **bảng `user_sessions` trong PostgreSQL**, dọn bằng `pruneSessionInterval` mỗi
 > giờ chứ không bằng TTL của Redis.
 >
@@ -499,6 +503,10 @@ Storage Adapter → kho object S3-compatible
 
 ### 16 · Observability — thiếu nửa sau của chuỗi
 
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** Prometheus + Alertmanager (→ Telegram) + Loki + Grafana ĐANG
+> CHẠY trên production từ 2026-09-16/17, `infra/prometheus/alerts.yaml` có quy tắc cảnh báo kèm bài
+> `promtool test rules`. Hiện trạng: docs/operations/MONITORING.md. Đoạn dưới là ảnh chụp 2026-08-26.
+
 Có: Pino (`src/logger.ts`), Prometheus (`src/observability.ts`, `/metrics` cho cả app lẫn
 worker), Sentry, `SLO.md`.
 
@@ -512,7 +520,8 @@ trực. `SLO.md` mô tả mục tiêu mà không có thứ gì đo được vi p
 ### 17 · Secrets — chưa có lớp trừu tượng
 
 Phụ lục đòi thiết kế abstraction để production dùng được Docker secrets / Kubernetes
-Secrets / Vault. Hiện `src/config.ts` chỉ đọc `process.env`; không có quy ước `*_FILE`
+Secrets / Vault. ⚠️ LỖI THỜI (đối soát 2026-09-23): nay CÓ quy ước `*_FILE` — `src/secretFiles.ts`,
+xem mục "Bí mật đọc từ file" bên dưới. Ảnh chụp cũ: `src/config.ts` chỉ đọc `process.env`; không có quy ước `*_FILE`
 (cách chuẩn để nhận Docker/K8s secret dạng file), không có lớp nạp thay thế.
 
 Hệ quả thực tế hôm nay: hẹp — mọi bí mật đi qua `.env` trên VM. Nhưng nó chặn đường lên
@@ -800,6 +809,9 @@ gỡ bớt một). Lúc đó nên định tuyến theo `severity`: `critical` đ
 
 ## Quy tắc cảnh báo Prometheus: đã SẴN SÀNG, chưa CHẠY (2026-08-27)
 
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** đã CHẠY trên production từ 2026-09-16, Alertmanager → Telegram
+> từ 2026-09-17. Mục dưới là ảnh chụp 2026-08-27.
+
 `infra/prometheus/alerts.yaml` — 26 quy tắc, 9 nhóm, mỗi cái bám một chế độ hỏng có
 thật và `runbook` trỏ tới đúng file. Trước đó repo **không có quy tắc cảnh báo nào**
 (`find infra -iname '*alert*'` rỗng): 14 metric (số của mốc đó — nay là 21) chỉ dùng được khi có người đang mở
@@ -871,7 +883,8 @@ kèm vào một đợt siết hạ tầng.
 Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải phát hiện lại:
 
 - **`style-src 'unsafe-inline'` vẫn bật** — SPA React render nhiều `style=""`.
-  Bỏ nó đòi refactor hàng trăm chỗ. `script-src` thì đã `'self'` thuần.
+  Bỏ nó đòi refactor (ảnh chụp cũ ghi "hàng trăm chỗ" — LỖI THỜI; số hiện tại ở
+  docs/architecture/SECURITY_MODEL.md, mục lộ trình gỡ `style-src 'unsafe-inline'`). `script-src` thì đã `'self'` thuần.
 - **Presence SSE là in-process** — nhiều replica thì danh sách "ai đang sửa"
   không đầy đủ. Bản thân sự kiện SSE thì đã lan qua Redis Pub/Sub.
 - **Chưa có tổng hợp log tập trung** (Loki hoặc tương đương). Log dừng ở stdout.
@@ -897,8 +910,9 @@ Những cái này là lựa chọn có chủ ý, ghi ra để không ai phải p
     `web/src/components/GridTable.component.test.tsx` (42 bài, chạy jsdom) cho dây
     nối bàn phím THẬT — **mới có từ 2026-08-28**. Phần còn hở của đường này (đáng kể
     nhất: `addImages`, và mọi thứ cần layout thật) ghi ở mục riêng ngay sau danh sách.
-- **Rate limit bỏ qua khi Redis chết** — đánh đổi có chủ ý; khoá tài khoản khi
-  sai mật khẩu nhiều lần nằm ở CSDL nên vẫn còn.
+- ~~**Rate limit bỏ qua khi Redis chết**~~ — LỖI THỜI (đối soát 2026-09-23): Redis chết thì mỗi
+  limiter rơi về bộ đếm TRONG BỘ NHỚ của từng tiến trình (`src/rateLimit.ts`), không bỏ qua. Khoá tài
+  khoản khi sai mật khẩu nhiều lần nằm ở CSDL.
 - **VM production là điểm hỏng đơn** — xem
   [operations/DEPLOYMENT.md](operations/DEPLOYMENT.md).
 
@@ -1218,6 +1232,9 @@ thẳng webp. **Việc nên làm:** tái mã hoá logo sang JPEG ngay ở client
 
 ## Số liệu hàng đợi BullMQ: CHƯA có ai scrape ở production
 
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** Prometheus scrape cả app lẫn worker từ 2026-09-16. Cả hai tiến
+> trình cùng phát `bullmq_jobs` → quy tắc/panel gộp bằng `max` (audit OBS-05/GAP1-02).
+
 `/metrics` nay có gauge `bullmq_jobs{queue,state}` (đọc `getJobCounts()` của cả 5
 hàng đợi ngay tại thời điểm scrape — `src/queue.ts` `capNhatDoSauHangDoi`). Đã đo
 được qua Redis cục bộ trong `tests/hq3-bullmq-metrics.test.js`.
@@ -1257,6 +1274,9 @@ tải với .xlsx) để băm — thêm một lượt GET tối đa 10 MB mỗi 
 đời tệp đó.
 
 ## Ân hạn dừng worker = 90s là số CHỌN, không phải số ĐO (cụm ha-tang-trienkhai)
+
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** ân hạn worker nay là **150s** (2026-09-16, theo trần sinh file
+> nền 90s); app có `stop_grace_period: 30s` riêng từ 2026-09-23 (audit INFRA-10). Mục dưới là lịch sử.
 
 `docker-compose.prod.yml` / `.staging.yml` nay khai `stop_grace_period: 90s` cho
 service `worker`, và `infra/k8s/worker.yaml` + `values.yaml` khai
@@ -1329,6 +1349,9 @@ trùng nay THOÁT ra được — trước đó nó vô tác dụng vì lần t�
 hỏng, nên bốn lượt thử đều sinh lại đúng một số.
 
 ## Truy vấn `existing` khi LƯU báo giá vẫn kéo toàn bộ hạng mục + ảnh (cụm csdl-truyvan)
+
+> ⚠️ **LỖI THỜI — đối soát lại 2026-09-23 (audit DOC-13):** `updateQuote` nay đọc rút gọn qua `QUOTE_UPDATE_STATE_SELECT`
+> (không kéo `images` lẫn `extraTables`) — xem docs/architecture/DATA_FLOW.md mục 3.1. Mục dưới là lịch sử.
 
 `updateQuote` (`src/services/quoteService.ts`) mở đầu bằng `findFirst({ include: QUOTE_INCLUDE })`,
 tức đọc mọi sheet, mọi hạng mục và cả cột `images` (base64) — trong khi phần lớn chỉ dùng vài

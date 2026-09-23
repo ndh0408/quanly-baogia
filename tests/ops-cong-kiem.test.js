@@ -58,3 +58,11 @@ describe("INFRA-11 — docker-smoke quét lỗ hổng của image", () => {
     expect(s).toMatch(/trivy image[^\n]*\\\n[^\n]*--ignorefile \.trivyignore\.yaml[^\n]*\\\n[^\n]*--exit-code 1/);
   });
 });
+
+describe("INFRA-08 — CronJob backup (k8s) không bị NetworkPolicy của chính repo chặn", () => {
+  it("pod template của quanly-db-backup mang nhãn app: quanly mà postgres-allow-app-only cho vào", () => {
+    const cron = doc("infra/k8s/backup-cronjob.yaml");
+    expect(doc("infra/k8s/networkpolicy.yaml")).toMatch(/matchLabels: \{ app: quanly \}/);
+    expect(cron).toMatch(/template:\s*\n(?:\s*#.*\n)*\s*metadata:\s*\n\s*labels: \{ app: quanly, component: db-backup \}/);
+  });
+});

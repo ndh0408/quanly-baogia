@@ -19,7 +19,10 @@ stateDiagram-v2
     lost --> [*]: xoá mềm được
 
     note right of converted
-        BẤT BIẾN. canEdit trả false.
+        KHÔNG xoá được. VẪN SỬA được
+        (người có quote:send) cho tới khi
+        có invoiceNo — canEdit khoá theo
+        daXuatHoaDon, không theo status.
         Từ đây mới mở được luồng
         ký chứng từ và hoá đơn.
     end note
@@ -89,9 +92,9 @@ stateDiagram-v2
     end note
 ```
 
-Tiền Hà Nội nằm trong `QuoteSheet.extraTables` với `category` là `"hanoi"` — tức
-là **nội bộ**, nên nó không bao giờ vào file Excel gửi khách (`src/excel.ts` chỉ
-đọc `sheet.items`, không hề đụng `extraTables`).
+Tiền Hà Nội nằm ở cột cấp báo giá **`Quote.hnTables`** (từ 2026-09-15; trước đó là `extraTables`
+loại `"hanoi"` của từng trang) — tức là **nội bộ**, nên nó không bao giờ vào file Excel gửi khách
+(`src/excel.ts` chỉ đọc `sheet.items`).
 
 Người điền phần HN bị chặn ở `PUT /api/quotes/:id` bằng một guard đặt **trước**
 service: ai có `quote:hn:fill` thì nhận 403 ở đường lưu báo giá chính. Không có

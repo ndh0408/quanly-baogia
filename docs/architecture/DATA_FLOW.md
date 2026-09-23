@@ -178,8 +178,9 @@ việc của người khác. Mỗi bước dưới đây tồn tại vì một c
 1. **Đọc rút gọn.** `QUOTE_UPDATE_STATE_SELECT` cố ý **không** kéo `images` của
    hạng mục lẫn `extraTables` của sheet — cả hai chứa base64 nặng mà đường lưu
    không đọc tới. Ảnh vẫn về đủ ở phản hồi cuối hàm.
-2. **`canEdit`** (`src/quoteUtils.ts`) — `converted`/`lost` là **bất biến**,
-   không ai sửa được. Người không có `quote:send` chỉ sửa được `draft`/`rejected`.
+2. **`canEdit`** (`src/quoteUtils.ts`) — mốc khoá là **đã xuất hoá đơn** (`daXuatHoaDon`: có
+   `invoiceNo` ở bất kỳ sheet nào) → không ai sửa. Chưa xuất: người có `quote:send` sửa mọi trạng
+   thái (kể cả `converted`/`lost`); người không có chỉ sửa `draft`/`rejected`.
 3. **Khoá lạc quan lần 1.** Client gửi `baseUpdatedAt` (mốc lúc mở editor); khác
    mốc trong CSDL → 409. Client cũ không gửi → bỏ qua (tương thích ngược).
 4. **Tính tiền NGOÀI transaction.** `computeQuoteTotals` chỉ đọc `sheets[].items`

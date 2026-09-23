@@ -1,6 +1,6 @@
 # Fonts for PDF generation
 
-The PDF renderer in `src/pdf.js` looks for these files in this directory:
+The PDF renderer in `src/pdf.ts` looks for these files in this directory:
 
 - `Times.ttf` — regular
 - `Times-Bold.ttf` — bold
@@ -29,16 +29,12 @@ copy C:\Windows\Fonts\timesi.ttf  fonts\Times-Italic.ttf
 
 Use **Noto Serif Vietnamese** or **DejaVu Serif** — both freely redistributable.
 
-```bash
-# Inside Dockerfile
-apt-get install -y fonts-noto-serif fonts-dejavu
-# OR mount a font volume / build step:
-curl -L https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSerif/full/ttf/NotoSerif-Regular.ttf  -o fonts/Times.ttf
-curl -L https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSerif/full/ttf/NotoSerif-Bold.ttf     -o fonts/Times-Bold.ttf
-curl -L https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSerif/full/ttf/NotoSerif-Italic.ttf  -o fonts/Times-Italic.ttf
-```
+**Image production đã tự làm việc này** — không cần bước tay nào: `Dockerfile` (tầng runtime)
+`apk add font-dejavu` rồi chép `DejaVuSerif{,-Bold,-Italic}.ttf` thành `fonts/Times{,-Bold,-Italic}.ttf`.
+`scripts/ci/smoke-image.sh` kiểm phông có mặt trong image. (Bản trước của mục này hướng dẫn
+`apt-get` — image là alpine, không có apt.)
 
 ## Fallback
 
-If none of these files exist, `src/pdf.js` falls back to PDFKit's built-in
+If none of these files exist, `src/pdf.ts` falls back to PDFKit's built-in
 Times font, which **does not** render Vietnamese diacritics correctly.

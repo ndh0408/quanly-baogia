@@ -33,7 +33,7 @@ spec:
   # (worker.yaml), và `minAvailable: 1` trên một Deployment đang có đúng 1 pod làm eviction API
   # từ chối VĨNH VIỄN → `kubectl drain` treo, node không bao giờ rút được, cụm kẹt giữa lúc bảo
   # trì. Đúng cái bẫy đã phải gỡ ở chart Helm (templates/pdb.yaml). Với maxUnavailable thì drain
-  # luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds: 90 ở worker.yaml.
+  # luôn kết thúc, còn job đang chạy vẫn đóng êm nhờ terminationGracePeriodSeconds ở worker.yaml (150 — số cũ 90 ghi ở đây đã trôi, audit 2026-09-22 INFRA-08).
   maxUnavailable: 1
   selector:
     matchLabels: { app: quanly, component: worker }

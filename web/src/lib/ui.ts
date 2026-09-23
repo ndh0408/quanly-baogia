@@ -58,6 +58,10 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
     host.setAttribute("aria-atomic", "false");
     document.body.appendChild(host);
   }
+  // Đang ở trình soạn báo giá thì thanh nút dính đáy chiếm đúng góc phải-dưới: nâng toast lên TRÊN
+  // thanh để nó không đè nút "⋯" (Tải Excel/PDF) — luồng "Lưu → ⋯ → Tải" mất cú bấm đầu tiên
+  // (audit 2026-09-22, GAP1-05). Đọc MỘT LẦN lúc tạo toast, không dùng selector CSS `:has()` động.
+  host.style.bottom = document.querySelector(".editor .actions") ? "84px" : "";
   // aria-live so screen readers announce toasts (errors = assertive). Trước đây React
   // hoàn toàn câm với screen reader — đây là sửa a11y.
   host.setAttribute("aria-live", type === "error" ? "assertive" : "polite");

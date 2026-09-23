@@ -53,7 +53,7 @@ Nghĩa là việc dựng `/api/v1` sau này chỉ còn là **gắn thêm mount**
 ### Cách gắn khi tới lúc
 
 1. Mount lặp lại các router dưới tiền tố `/api/v1` **sau** toàn bộ chuỗi gác hiện có
-   (`bearerAuth` → `enforceActiveUser` → `csrfGuard` → `apiLimiter` đều gắn ở `app.use("/api/", …)`
+   (`apiLimiter` → `bearerAuth` → `enforceActiveUser` → `csrfGuard` đều gắn ở `app.use("/api/", …)`
    nên tự phủ `/api/v1/`).
 2. Nhân đôi hai middleware gắn theo ĐƯỜNG DẪN CỤ THỂ — nếu quên, lưu báo giá lớn qua v1 sẽ 413:
    `decompressBody(16MB)` và `express.json({ limit: "16mb" })`, cả hai đang gắn ở

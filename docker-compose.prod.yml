@@ -317,6 +317,8 @@ services:
       #
       # Đặt "1" chứ KHÔNG đặt "true": "true" tin mọi chặng, nghĩa là client tự thêm X-Forwarded-For
       # là giả được IP nguồn và lách rate-limit.
+      # ⚠️ "Đúng MỘT chặng" là THIẾT KẾ, CHƯA ĐO trên host thật (có Coolify/Traefik trên mạng `edge`
+      # dùng chung) — audit 2026-09-22 DOC-14/INFRA-07. Cách đo + cách sửa: docs/operations/REVERSE_PROXY.md.
       TRUST_PROXY: "1"
       # Tệp trạng thái sao lưu do scripts/backup/* ghi TRÊN HOST (chỉ dấu thời gian, không dữ liệu) —
       # app phơi ra /metrics: backup_last_success_timestamp_seconds, backup_offhost_configured. Chỉ
