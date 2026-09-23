@@ -8,7 +8,7 @@ import { Prisma } from "@prisma/client";
 import type { Request } from "express";
 import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
-import { computeQuoteTotals, assertTotalsStorable, D } from "../money.js";
+import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
 import { namVN, namNganVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
@@ -835,6 +835,20 @@ export async function updateQuote(req: Request) {
       // Lưu = XOÁ sheet rồi TẠO LẠI → phải BÊ trạng thái mức sheet sang bản mới (khách duyệt sheet,
       // chữ ký, số hoá đơn/thanh toán…), nếu không mỗi lần bấm Lưu là mất sạch.
       const carry = carrySheetState(b.sheets, sheetsTuoi);
+      // DOANH THU CHỐT ĐI THEO GIÁ MỚI (MONEY-01/RBAC-05). canEdit cho sửa báo giá đã chốt tới khi
+      // có hoá đơn ("cập nhật giá thương lượng"), mà trước đây convertedTotal chỉ được ghi MỘT lần ở
+      // markConverted → Dashboard/Top sales lệch khỏi tổng thật sau mỗi lần thương lượng lại.
+      // Tính NGAY TRONG lệnh update chính (không thêm lệnh ghi Quote thứ hai: extension realtime bắn
+      // một sự kiện SSE cho mỗi lần ghi, kể cả khi rollback). Trạng thái đọc SAU khi đã giữ khoá
+      // QuoteSheet — markConverted khoá cùng hàng nên không chen được giữa đây và lúc commit.
+      // `convertedTotal` NULL (chốt trước khi có cột) → giữ null, nơi đọc vẫn COALESCE về total.
+      const [qTuoi] = await tx.$queryRaw<{ status: string; convertedTotal: unknown }[]>`SELECT status, "convertedTotal" FROM "Quote" WHERE id = ${id}`;
+      if (qTuoi?.status === "converted" && qTuoi.convertedTotal != null) {
+        (data as any).convertedTotal = tinhConvertedTotal(
+          t.sheetTotals.map((st, i) => ({ subtotal: st.subtotal, custStatus: (carry[i] as any)?.custStatus ?? null })),
+          vatPct
+        );
+      }
       // Account phụ CÓ vùng "main" nhưng thiếu vài bảng nội bộ: lấy lại bản CSDL cho những bảng đó.
       if (!duPhamVi) reconcilePhamViTables(b.sheets, carry, catChoPhep);
       // ...VÀ KHÔNG được thêm/xoá TRANG. Lưu là `deleteMany` rồi tạo lại: một người chỉ có vùng
@@ -888,6 +902,7 @@ export async function updateQuote(req: Request) {
       return u;
     });
   } else {
+    let tVat: ReturnType<typeof computeQuoteTotals> | null = null;
     if (data.vatPercent !== undefined) {
       // Đổi RIÊNG VAT: giảm giá từng sheet lấy từ CSDL (QUOTE_UPDATE_STATE_SELECT có `discount`).
       const t = computeQuoteTotals({ vatPercent: data.vatPercent ?? existing.vatPercent, sheets: existing.sheets });
@@ -896,10 +911,21 @@ export async function updateQuote(req: Request) {
       data.vat = t.vat;
       data.discount = t.discount;
       data.total = t.total;
+      tVat = t;
     }
     updated = await prisma.$transaction(async (tx) => {
       // Khoá QuoteSheet TRƯỚC Quote (chotKhoaLacQuan) — đúng thứ tự của mọi đường ghi khác.
       if (vungNoiBo) await ghiVungNoiBoDuocGiao(tx, id, vungNoiBo, catChoPhep, req);
+      // Đổi VAT trên báo giá đã chốt → doanh thu chốt đi theo (MONEY-01), cùng luật với nhánh trên.
+      if (tVat) {
+        const [qTuoi] = await tx.$queryRaw<{ status: string; convertedTotal: unknown }[]>`SELECT status, "convertedTotal" FROM "Quote" WHERE id = ${id}`;
+        if (qTuoi?.status === "converted" && qTuoi.convertedTotal != null) {
+          (data as any).convertedTotal = tinhConvertedTotal(
+            tVat.sheetTotals.map((st, i) => ({ subtotal: st.subtotal, custStatus: existing.sheets?.[i]?.custStatus ?? null })),
+            data.vatPercent
+          );
+        }
+      }
       await chotKhoaLacQuan(tx);
       const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE as any });
       await snapshotQuoteVersion(tx, id, userId, "update");
@@ -1325,12 +1351,28 @@ export async function setSheetCustomerDecision(req: Request) {
   const raw = req.body?.status;
   const status = raw === "approved" || raw === "rejected" ? raw : null;
   const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : null;
-  const updated = await prisma.quoteSheet.update({
-    where: { id: sheet.id },
-    data: status
-      ? { custStatus: status, custStatusAt: new Date(), custStatusById: req.session.userId, custNote: note || null }
-      : { custStatus: null, custStatusAt: null, custStatusById: null, custNote: null },
-    select: { id: true, custStatus: true, custStatusAt: true, custNote: true, custStatusBy: { select: { id: true, displayName: true } } },
+  // KHÁCH ĐỔI Ý MỘT TRANG SAU KHI ĐÃ CHỐT → doanh thu chốt phải tính lại (MONEY-01/RBAC-05).
+  // Trong MỘT transaction, khoá QuoteSheet (ORDER BY id) TRƯỚC — cùng thứ tự khoá với updateQuote/
+  // saveHn/markConverted để không đẻ deadlock 40P01 — rồi mới đọc lại các trang và ghi Quote.
+  // Ghi convertedTotal bằng câu RAW: không đụng `updatedAt` (@updatedAt là phía client Prisma), nên
+  // editor đang mở báo giá đó KHÔNG ăn 409 khoá lạc quan ở lần Lưu kế chỉ vì vừa bấm nút ý kiến khách.
+  // convertedTotal NULL (chốt trước khi có cột) → giữ null như updateQuote.
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${sheet.quoteId} ORDER BY id FOR UPDATE`;
+    const u = await tx.quoteSheet.update({
+      where: { id: sheet.id },
+      data: status
+        ? { custStatus: status, custStatusAt: new Date(), custStatusById: req.session.userId, custNote: note || null }
+        : { custStatus: null, custStatusAt: null, custStatusById: null, custNote: null },
+      select: { id: true, custStatus: true, custStatusAt: true, custNote: true, custStatusBy: { select: { id: true, displayName: true } } },
+    });
+    const [q] = await tx.$queryRaw<{ status: string; convertedTotal: unknown; vatPercent: unknown }[]>`SELECT status, "convertedTotal", "vatPercent" FROM "Quote" WHERE id = ${sheet.quoteId}`;
+    if (q?.status === "converted" && q.convertedTotal != null) {
+      const trang = await tx.quoteSheet.findMany({ where: { quoteId: sheet.quoteId }, select: { subtotal: true, custStatus: true } });
+      const moi = tinhConvertedTotal(trang, q.vatPercent as any);
+      await tx.$executeRaw`UPDATE "Quote" SET "convertedTotal" = ${moi} WHERE id = ${sheet.quoteId}`;
+    }
+    return u;
   });
   await audit(req, "quote.sheet.customerDecision", {
     resource: "quote", resourceId: sheet.quoteId,
@@ -1644,21 +1686,25 @@ export async function markConverted(req: Request) {
   // `QuoteSheet.subtotal` là net ĐÃ TRỪ giảm giá của trang (xem chú thích ở chỗ ghi nó), nên chỉ
   // cần cộng phần không bị từ chối rồi tính VAT trên đó — đúng thứ tự Cộng → Discount → VAT của
   // shared/quote-math.ts. Trang `null` (chưa có ý kiến) VẪN TÍNH: khách chưa từ chối nó.
-  const trang = await prisma.quoteSheet.findMany({
-    where: { quoteId: id },
-    select: { subtotal: true, custStatus: true },
-  });
-  const netGiuLai = trang
-    .filter((t) => t.custStatus !== "rejected")
-    .reduce((a, t) => a + Number(t.subtotal ?? 0), 0);
-  const vatPct = Number(existing.vatPercent ?? 0);
-  const convertedTotal = Math.round(netGiuLai + (netGiuLai * vatPct) / 100);
-
-  // Optimistic guard: only convert if not already terminal — prevents a race with
-  // a concurrent mark-lost / edit from producing a wrong terminal transition.
-  const upd = await prisma.quote.updateMany({
-    where: { id, status: { notIn: ["converted", "lost"] } },
-    data: { status: "converted", convertedAt: new Date(), convertedTotal },
+  //
+  // ĐỌC TRANG VÀ GHI TRONG CÙNG MỘT TRANSACTION, khoá QuoteSheet (ORDER BY id) trước (MONEY-01):
+  // bản trước đọc trang NGOÀI transaction rồi mới updateMany — một lần Lưu chen giữa làm doanh thu
+  // chốt tính từ giá CŨ. Cùng thứ tự khoá với updateQuote/saveHn → không deadlock.
+  // Tính bằng tinhConvertedTotal (Decimal, kẹp ≥ 0) — CÙNG hàm mà các đường tính lại sau khi chốt dùng.
+  const { upd, trang } = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+    const trang = await tx.quoteSheet.findMany({
+      where: { quoteId: id },
+      select: { subtotal: true, custStatus: true },
+    });
+    const convertedTotal = tinhConvertedTotal(trang, existing.vatPercent);
+    // Optimistic guard: only convert if not already terminal — prevents a race with
+    // a concurrent mark-lost / edit from producing a wrong terminal transition.
+    const upd = await tx.quote.updateMany({
+      where: { id, status: { notIn: ["converted", "lost"] } },
+      data: { status: "converted", convertedAt: new Date(), convertedTotal },
+    });
+    return { upd, trang };
   });
   if (!upd.count) {
     throw httpError(409, "Báo giá vừa đổi trạng thái — vui lòng tải lại");

@@ -165,3 +165,29 @@ export function totalsToJson(t: {
     })),
   };
 }
+
+/**
+ * DOANH THU GHI NHẬN KHI ĐÃ CHỐT (`Quote.convertedTotal`) = (Σ subtotal các trang KHÁCH KHÔNG TỪ
+ * CHỐI, kẹp ≥ 0) + VAT trên số đó. Trang `custStatus` null (chưa có ý kiến) VẪN tính.
+ *
+ * MỘT hàm cho mọi đường ghi cột này — markConverted, updateQuote (sửa giá sau khi chốt) và
+ * setSheetCustomerDecision (khách đổi ý một trang sau khi chốt) — để ba chỗ không tính ba kiểu
+ * (MONEY-01/RBAC-05, audit 2026-09-23). Làm tròn Decimal ROUND_HALF_UP, VAT làm tròn RIÊNG rồi mới
+ * cộng — đúng thứ tự của computeQuoteTotals, nên khi không trang nào bị từ chối thì kết quả BẰNG
+ * `total`. Bản trước ở markConverted dùng Math.round trên float.
+ *
+ * KẸP ≥ 0: trang giảm trừ có subtotal âm, còn trang dương bị khách từ chối → net âm, mà doanh thu
+ * chốt âm là vô nghĩa (và cột có CHECK ≥ 0 từ migration 20260923092000).
+ */
+export function tinhConvertedTotal(
+  trang: { subtotal: Prisma.Decimal.Value | null | undefined; custStatus?: string | null }[],
+  vatPercent: Prisma.Decimal.Value | null | undefined
+) {
+  const net = trang
+    .filter((t) => t.custStatus !== "rejected")
+    .reduce((a, t) => a.plus(D(t.subtotal)), new Decimal(0))
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const netKep = Decimal.max(0, net);
+  const vat = netKep.times(D(vatPercent)).dividedBy(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  return netKep.plus(vat);
+}
