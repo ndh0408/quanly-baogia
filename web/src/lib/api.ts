@@ -200,7 +200,9 @@ export type SearchResp = {
   };
 };
 
-export type Summary = { salary: number; pit: number; taxableIncome: number };
+// `piiLoi` = số hồ sơ trong tập lọc có bản mã không giải mã được — lương của chúng KHÔNG nằm trong tổng
+// (soát chéo files#1). Tuỳ chọn: máy chủ cũ không gửi trường này.
+export type Summary = { salary: number; pit: number; taxableIncome: number; piiLoi?: number };
 export type ListResult = {
   data: Personnel[];
   meta: { total: number; page: number; size: number; pageCount: number };
