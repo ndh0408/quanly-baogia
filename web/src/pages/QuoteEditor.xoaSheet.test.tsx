@@ -30,6 +30,7 @@ const baoGia = (over: Record<string, unknown> = {}) => ({
 const h = vi.hoisted(() => ({
   updateQuote: null as unknown as ReturnType<typeof vi.fn>,
   getQuote: null as unknown as ReturnType<typeof vi.fn>,
+  napExcel: null as unknown,   // payload mà hộp "Nhập từ Excel" giả trao cho onApply
 }));
 
 vi.mock("../lib/api", async (goc) => {
@@ -56,6 +57,13 @@ vi.mock("../lib/ui", async (goc) => ({
   modalChotBaoGia: vi.fn(async () => []),
 }));
 vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("../lib/venueCatalog")>()), loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) }));
+// Hộp "Nhập từ Excel" thật cần tệp xlsx + máy chủ đọc tệp; thứ cần kiểm là applyImport của editor, nên
+// thay hộp bằng một nút trao thẳng payload cho onApply — đúng chỗ hộp thật gọi sau khi người dùng bấm Nạp.
+vi.mock("../components/ImportExcelModal", async (goc) => {
+  const that = await goc<typeof import("../components/ImportExcelModal")>();
+  const { createElement } = await import("react");
+  return { ...that, ImportExcelModal: (p: { onApply: (x: unknown) => void }) => createElement("button", { type: "button", onClick: () => p.onApply(h.napExcel) }, "Nạp giả") };
+});
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -228,6 +236,66 @@ describe("L54 — ô Discount theo danh tính sheet", () => {
     await xoaSheet(1);
     expect(tab(1).className).toContain("active");
     expect(oDisc().value, "ô Discount của M còn số của N vừa xoá").toBe("0");
+  });
+});
+
+// L5 (phần applyImport): nạp Excel có xoá / sắp lại / thêm sheet thì màn phải đi THEO sheet đang mở tới
+// chỗ mới của nó; trước đây chỉ kẹp chỉ số nên nhảy sang sheet khác, và lưới cũ (key theo chỉ số) mang
+// ngăn Ctrl+Z của sheet cũ sang.
+describe("L5 — nạp Excel xoá / sắp lại / thêm sheet vẫn đứng ở sheet đang mở", () => {
+  const hang = (ten: string, gia: number) => ({ kind: "item", name: ten, unit: "cái", quantity: 1, unitPrice: gia });
+  const ke = (ten: string, targetIndex: number, items: unknown[], mode = "replace") => ({ file: { name: ten, groupSubtotal: false }, targetIndex, mode, templateId: 1, items });
+  async function napExcel(payload: unknown) {
+    h.napExcel = payload;
+    await bam(nut("Nhập từ Excel"));
+    await bam(nut("Nạp giả"));
+  }
+
+  it("đang ở B, file không còn A (xoá A) → vẫn ở B", async () => {
+    await moEditor();
+    await bam(tab(1));
+    await napExcel({ plans: [ke("B", 1, [hang("Banner B", 5000)]), ke("C", 2, [hang("Standee C", 7000)])], removeTargetIndexes: [0] });
+    expect(tabDangMo(), "nạp xoá sheet đứng trước làm màn nhảy sang sheet khác").toContain("B");
+    expect(o(0, "name").value).toBe("Banner B");
+  });
+
+  it("đang ở C, file đưa C lên đầu (sắp lại) → vẫn ở C, giờ là tab 1", async () => {
+    await moEditor();
+    await bam(tab(2));
+    await napExcel({ plans: [ke("C", 2, [hang("Standee C", 7000)]), ke("A", 0, [hang("Backdrop A", 1000)]), ke("B", 1, [hang("Banner B", 5000)])] });
+    expect(tabDangMo()).toBe("1. C");
+    expect(o(0, "name").value).toBe("Standee C");
+  });
+
+  it("đang ở B, file có thêm sheet MỚI đứng trước B → vẫn ở B", async () => {
+    await moEditor();
+    await bam(tab(1));
+    await napExcel({ plans: [ke("D", -1, [hang("Decal D", 9000)]), ke("B", 1, [hang("Banner B", 5000)], "append")] });
+    expect(tabDangMo()).toContain("B");
+    expect(o(0, "name").value).toBe("Banner B");
+  });
+
+  it("đang ở B, sửa B, file xoá chính B → sang C; Ctrl+Z không chép hàng của B vào C, Lưu giữ nguyên A và C", async () => {
+    await moEditor();
+    await bam(tab(1));
+    await suaTen("Banner B đã sửa");
+    await napExcel({ plans: [ke("A", 0, [hang("Backdrop A", 1000)]), ke("C", 2, [hang("Standee C", 7000)])], removeTargetIndexes: [1] });
+    expect(tabDangMo()).toContain("C");
+    await ctrlZ();
+    expect(o(0, "name").value).toBe("Standee C");
+    expect(await luuVaDocPayload()).toEqual(["101:A:Backdrop A", "103:C:Standee C"]);
+  });
+});
+
+describe("L53 — đối chứng: Ctrl+Z qua mốc Lưu trên sheet KHÔNG phải sheet đầu", () => {
+  it("đang ở C, sửa C, Lưu rồi Ctrl+Z → lùi được trên C (`_k` nối theo vị trí sau Lưu)", async () => {
+    await moEditor();
+    await bam(tab(2));
+    await suaTen("Standee C đã sửa");
+    await bam(nut("Lưu"));
+    expect(tabDangMo()).toContain("C");
+    await ctrlZ();
+    expect(o(0, "name").value).toBe("Standee C");
   });
 });
 
