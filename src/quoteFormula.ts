@@ -552,7 +552,12 @@ export function buildFormulaContext(
     // editor.js cellNumByAddr). Trả số thô thì self-check ở dưới lệch quá dung sai → cellFormula
     // trả null → công thức sống của người dùng bị âm thầm bỏ khỏi file Excel, chỉ còn số chết.
     if (field === "quantity") return it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity);
-    if (field === "unitPrice" || field === "days") return Number(it[field]) || 0;
+    // SỐ NGÀY trống (0 / null): đọc là 1 — ĐÚNG số excel.ts ghi vào ô Số Ngày (days||1, cùng quy ước
+    // Thành Tiền của amountOf ở trên). Đọc 0 thì công thức "=E2*50000" tự kiểm khớp số 0 của lưới và
+    // được ghi sống; Excel (fullCalcOnLoad) tính lại trên ô Số Ngày = 1 ra 50.000 → tệp khác app (L35).
+    // Lưới web (GridTable cellNum) còn đọc 0 → tự kiểm lệch → ghi SỐ, tệp vẫn khớp app.
+    if (field === "days") return Number(it.days) || 1;
+    if (field === "unitPrice") return Number(it.unitPrice) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
   // Xem MAX_REF_ROWS: ngân sách ref còn lại cho LẦN DỊCH công thức đang chạy (cellFormula đặt lại).
