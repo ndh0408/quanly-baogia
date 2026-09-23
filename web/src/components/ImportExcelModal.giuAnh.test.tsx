@@ -87,3 +87,24 @@ describe("L48: Thay toàn bộ không được âm thầm vứt ảnh", () => {
     expect(loiXacNhan.join(" | ")).not.toMatch(/ảnh/);
   });
 });
+
+// Bảng HÀ NỘI (AccountHnView truyền thẳng hnTables vào modal): hàng mang `rid` + cờ duyệt / thanh toán
+// do máy chủ giữ. Thay toàn bộ mà rơi rid là máy chủ cấp rid mới → mất dấu duyệt, cờ đã trả và ảnh
+// chứng từ của cả những hàng vẫn khớp; hàng đã duyệt / đã trả bị xoá thật thì phải được NÓI RA.
+describe("L48 (bảng HN): Thay toàn bộ không được âm thầm vứt rid / trạng thái duyệt – thanh toán", () => {
+  it("dòng khớp giữ rid + cờ đã trả; hàng đã trả bị xoá thật được báo trong hộp xác nhận", async () => {
+    const hang = (x: Record<string, unknown>) => x as unknown as M.Item;
+    const { payload, html } = await napTep([
+      hang({ kind: "item", name: "Backdrop", unit: "m2", quantity: 2, unitPrice: 250000, rid: "r-1", paid: true, hasPaidProof: true }),
+      hang({ kind: "item", name: "Standee", unit: "cái", quantity: 3, unitPrice: 300000, rid: "r-2" }),
+      hang({ kind: "item", name: "Bàn bị khách xoá", unit: "cái", quantity: 1, unitPrice: 100000, rid: "r-3", paid: true }),
+    ]);
+    expect(payload, "không nạp").toBeTruthy();
+    const items = payload!.plans[0].items as unknown as Record<string, unknown>[];
+    expect(items.map((x) => x.rid), "rid của dòng khớp bị vứt → máy chủ cấp rid mới").toEqual(["r-1", "r-2"]);
+    expect(items[0]).toMatchObject({ paid: true, hasPaidProof: true });
+    expect(loiXacNhan.join(" | ")).toMatch(/1 hàng đã duyệt \/ đã thanh toán .*sẽ bị xoá/);
+    // Xem trước cũng nói — không đợi tới hộp xác nhận.
+    expect(html).toMatch(/1 hàng đã duyệt \/ đã thanh toán sẽ bị xoá/);
+  });
+});

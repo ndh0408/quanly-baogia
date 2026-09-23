@@ -307,22 +307,43 @@ export function ghepDong(before: M.Item[], after: M.Item[]): [number, number][] 
  *                      và lưu lại nguyên (src/quoteUtils.ts) — mất là gãy lịch sử theo sản phẩm.
  *   · `internalNote` — ghi chú NỘI BỘ, KHÔNG BAO GIỜ xuất ra Excel. Chỉ mang sang khi tệp KHÔNG có cột
  *                      đó (`giuGhiChuNoiBo`); tệp có cột thì theo tệp, kể cả ô trống (người sửa cố ý xoá).
+ *   · `rid` + cờ duyệt / thanh toán — chỉ hàng bảng HÀ NỘI có (AccountHnView truyền thẳng hnTables vào
+ *                      modal). Máy chủ khớp dấu duyệt, cờ đã trả và ẢNH CHỨNG TỪ theo `rid`
+ *                      (reconcileHnApprovals / reconcileExtraPayments, src/services/quoteService.ts);
+ *                      thiếu rid là máy chủ cấp rid mới → hàng vẫn khớp đúng nội dung mất sạch trạng
+ *                      thái, ảnh uỷ nhiệm chi mất VĨNH VIỄN, không một lời báo. Mang sang KHÔNG nới gì:
+ *                      rid là thứ client vốn có; mỗi cặp ghép là một-một nên không nhân bản rid, và máy
+ *                      chủ vẫn tự quyết cờ theo CSDL + ghim số tiền hàng đã duyệt / đã trả (đổi số tiền
+ *                      → từ chối cả lần lưu, hỏng TO chứ không âm thầm). Cờ mang theo để màn hình khỏi
+ *                      nói sai trước khi Lưu, và để người CÓ quyền không vô tình bỏ dấu đã trả.
+ * `trangThaiMat` = số hàng đã duyệt / đã thanh toán KHÔNG ghép được (sẽ mất cùng dòng) — hộp xác nhận nói ra.
  */
-export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number } {
-  type ItemApp = M.Item & { productId?: unknown };
+const TRUONG_TRANG_THAI = ["rid", "approved", "approvedAt", "approvedBy", "paid", "paidAt", "paidById", "hasPaidProof"] as const;
+const coTrangThai = (it: Record<string, unknown>) => !!(it.approved || it.paid || it.hasPaidProof || it.paidAt);
+
+export function giuTruongChiApp(before: M.Item[], after: M.Item[], opts: { giuGhiChuNoiBo: boolean }): { items: M.Item[]; anhMat: number; trangThaiMat: number } {
+  type ItemApp = M.Item & { productId?: unknown } & Record<string, unknown>;
   const items = after.slice();
   const daGhep = new Set<number>();
   for (const [i, j] of ghepDong(before, after)) {
     daGhep.add(i);
-    const cu = before[i] as ItemApp, moi: ItemApp = { ...items[j] };
+    const cu = before[i] as ItemApp, moi = { ...items[j] } as ItemApp;
     if (cu.images?.length && !moi.images?.length) moi.images = cu.images.slice();
     if (cu.productId != null && moi.productId == null) moi.productId = cu.productId;
     if (opts.giuGhiChuNoiBo && cu.internalNote && !moi.internalNote) moi.internalNote = cu.internalNote;
+    if (typeof cu.rid === "string" && cu.rid && moi.rid == null) {
+      const nguon = cu as Record<string, unknown>, dich = moi as Record<string, unknown>;
+      for (const k of TRUONG_TRANG_THAI) if (nguon[k] !== undefined) dich[k] = nguon[k];
+    }
     items[j] = moi;
   }
-  let anhMat = 0;
-  before.forEach((cu, i) => { if (!daGhep.has(i)) anhMat += cu.images?.length || 0; });
-  return { items, anhMat };
+  let anhMat = 0, trangThaiMat = 0;
+  before.forEach((cu, i) => {
+    if (daGhep.has(i)) return;
+    anhMat += cu.images?.length || 0;
+    if (coTrangThai(cu as ItemApp)) trangThaiMat++;
+  });
+  return { items, anhMat, trangThaiMat };
 }
 
 /** So sánh lưới ĐANG CÓ với lưới SẼ NẠP (đã đổi sang item của lưới). */

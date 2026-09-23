@@ -112,11 +112,12 @@ export function ImportExcelModal({
     const before = target?.items || [];
     const baseRow = plan.mode === "append" ? before.length : 0;
     const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
-    // Chế độ Thay: ảnh / liên kết sản phẩm / ghi chú nội bộ của dòng khớp đi theo sang (L48) — PHẢI
-    // gọi y như nhánh nạp thật trong `apply` để bảng đối chiếu nói đúng thứ sẽ xảy ra.
+    // Chế độ Thay: ảnh / liên kết sản phẩm / ghi chú nội bộ (bảng HN: cả rid + trạng thái duyệt – thanh
+    // toán) của dòng khớp đi theo sang (L48) — PHẢI gọi y như nhánh nạp thật trong `apply` để bảng
+    // đối chiếu nói đúng thứ sẽ xảy ra.
     const giu = plan.mode !== "append" && target ? giuTruongChiApp(before, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote }) : null;
     const after = plan.mode === "append" ? [...before, ...conv.items] : (giu?.items ?? conv.items);
-    const anhMat = giu?.anhMat ?? 0;
+    const anhMat = giu?.anhMat ?? 0, trangThaiMat = giu?.trangThaiMat ?? 0;
     const beforeTotal = M.sheetSubtotalGrouped(before, usesDays, !!target?.groupSubtotal);
     const effectiveGroupSubtotal = plan.mode === "append" ? !!target?.groupSubtotal : !!fs.groupSubtotal;
     const afterTotal = M.sheetSubtotalGrouped(after, usesDays, effectiveGroupSubtotal);
@@ -140,7 +141,7 @@ export function ImportExcelModal({
     return {
       fs, plan, target, targetTemplate, templateMismatch, isNew, usesDays, addrDetail, showDetail, detailDropped, columnMoves,
       before, after, beforeTotal, afterTotal, importedTotal, fileTotal, moneyDelta, moneyMismatch,
-      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat,
+      formulaDropped, rowWarnings, rows, counts: diffCounts(rows), dropped: conv.droppedFormulas, anhMat, trangThaiMat,
     };
   }, [usable, plans, active, sheets, templates, usesDaysOf, addrDetailOf, newSheetTemplateId]);
 
@@ -172,7 +173,7 @@ export function ImportExcelModal({
     const effectiveRemovals = removeTargets.filter((i) => unmatchedTargets.includes(i));
     const out: ImportApplyPayload["plans"] = [];
     let totals: ImportApplyPayload["totals"];
-    let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0;
+    let moneyRisk = 0, formulaRisk = 0, templateRisk = 0, rowRisk = 0, sheetRisk = 0, anhRisk = 0, trangThaiRisk = 0;
     usable.forEach((fs, i) => {
       const plan = plans[i];
       if (!plan || plan.mode === "skip") return;
@@ -186,10 +187,13 @@ export function ImportExcelModal({
       const showDetail = !!templates.find((t) => t.id === tplId)?.layout?.hasDetail;
       const baseRow = !isNew && plan.mode === "append" ? (target?.items || []).length : 0;
       const conv = toGridItems(fs.items, { usesDays, addrDetail, showDetail, baseRow });
-      // Thay toàn bộ: dòng khớp giữ ảnh (+ productId, ghi chú nội bộ khi tệp không có cột đó) — tệp
-      // Excel không chở được chúng. Ảnh của dòng bị xoá thật thì đếm để NÓI RA ở hộp xác nhận (L48).
+      // Thay toàn bộ: dòng khớp giữ ảnh (+ productId, ghi chú nội bộ khi tệp không có cột đó; bảng HN:
+      // rid + cờ duyệt / thanh toán) — tệp Excel không chở được chúng. Ảnh của dòng bị xoá thật thì
+      // đếm để NÓI RA ở hộp xác nhận (L48).
       const giu = plan.mode === "replace" && target ? giuTruongChiApp(target.items, conv.items, { giuGhiChuNoiBo: !fs.columns?.internalNote }) : null;
       anhRisk += giu?.anhMat ?? 0;
+      // Bảng HN: hàng đã duyệt / đã thanh toán không còn trong tệp → mất dấu duyệt, cờ đã trả, ảnh chứng từ.
+      trangThaiRisk += giu?.trangThaiMat ?? 0;
       out.push({
         file: fs, targetIndex: plan.targetIndex, mode: plan.mode, templateId: tplId, items: giu?.items ?? conv.items,
         // Chế độ "Nối" thì KHÔNG đụng Discount của sheet đích: khối tổng trong file là của riêng
@@ -222,6 +226,7 @@ export function ImportExcelModal({
       sheetRisk ? `${sheetRisk} cảnh báo chung của sheet` : "",
       effectiveRemovals.length ? `${effectiveRemovals.length} sheet hiện có sẽ bị xóa` : "",
       anhRisk ? `${anhRisk} ảnh hạng mục ở sheet đích sẽ bị xoá (dòng có ảnh không còn trong file)` : "",
+      trangThaiRisk ? `${trangThaiRisk} hàng đã duyệt / đã thanh toán ở sheet đích sẽ bị xoá (mất dấu duyệt, thanh toán và ảnh chứng từ)` : "",
     ].filter(Boolean);
     if (risks.length && !(await confirmModal(
       "Nạp khi vẫn còn điểm cần kiểm tra?",
@@ -377,7 +382,7 @@ export function ImportExcelModal({
                       <small>{view.fileTotal == null ? "Không tìm thấy dòng Tổng cộng trong file" : `Excel ${M.fmtMoney(view.fileTotal)} · sau nạp ${M.fmtMoney(view.importedTotal)}`}</small>
                     </div>
                   </div>
-                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0) && (
+                  {(view.fs.warnings.length > 0 || view.dropped > 0 || view.templateMismatch || view.moneyMismatch || view.rowWarnings > 0 || view.detailDropped > 0 || view.anhMat > 0 || view.trangThaiMat > 0) && (
                     <ul className="import-warn">
                       {view.templateMismatch && <li>
                         Bạn đang đưa file dạng <strong>{view.fs.templateName || view.fs.templateCode}</strong> vào sheet dùng <strong>{view.targetTemplate?.name}</strong>. Hãy chọn đúng sheet đích để nhóm và số thứ tự không đổi kiểu.
@@ -388,6 +393,9 @@ export function ImportExcelModal({
                       {view.dropped > 0 && <li>{view.dropped} công thức dùng cột không có trong sheet đích. App giữ nguyên con số đang thấy, không tạo công thức sai.</li>}
                       {view.anhMat > 0 && <li>
                         <strong>{view.anhMat} ảnh hạng mục sẽ bị xoá</strong> cùng các dòng không còn trong file. Dòng còn khớp thì giữ nguyên ảnh đang có.
+                      </li>}
+                      {view.trangThaiMat > 0 && <li>
+                        <strong>{view.trangThaiMat} hàng đã duyệt / đã thanh toán sẽ bị xoá</strong> cùng các dòng không còn trong file — mất luôn dấu duyệt, thanh toán và ảnh chứng từ. Dòng còn khớp thì giữ nguyên trạng thái.
                       </li>}
                       {view.detailDropped > 0 && <li>
                         <strong>{view.detailDropped} dòng trong file có cột “Chi Tiết”</strong>, nhưng mẫu <strong>{view.targetTemplate?.name || "của sheet đích"}</strong> không có cột đó — phần nội dung ấy sẽ KHÔNG được nạp. Muốn giữ thì chọn sheet đích dùng mẫu có cột Chi Tiết (các mẫu Colorfull).
