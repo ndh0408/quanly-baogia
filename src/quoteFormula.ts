@@ -19,9 +19,10 @@
 import { nhanLamTronDong } from "./tienDong.js";
 
 // Hàm Excel có tên + ngữ nghĩa khớp 1:1 với bộ eval của editor → an toàn để xuất.
-// CEILING/FLOOR bị LOẠI: editor coi là ceil/floor 1 đối số, còn Excel BẮT BUỘC có
-// đối số "significance" → xuất ra sẽ lỗi ô. Công thức như vậy quay về ghi số.
-const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS"]);
+// CEILING/FLOOR: bộ tính nay tính bội số ĐÚNG như Excel (L32, đo bằng Excel 16 thật) nên được xuất —
+// nhưng chỉ dạng HAI đối số (SO_DOI_SO): Excel bắt buộc có "significance", dạng một đối số của app cũ
+// quay về ghi số.
+const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"]);
 // TRUNC(number,digits) và ROUNDDOWN(number,digits) cùng cắt phần dư về phía 0. File báo giá cũ
 // dùng TRUNC rất nhiều, còn editor chuẩn hoá về ROUNDDOWN để chỉ giữ một cách viết.
 const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE", TRUNC: "ROUNDDOWN" };
@@ -48,18 +49,23 @@ export function colLetter(n: number) {
 // CHỈ dùng để TỰ KIỂM: công thức dịch xong có còn cho ra đúng giá trị đã lưu không.
 // Phải giữ khớp với frontend; có test ghim. (Nếu lệch → tự kiểm trượt → ghi số: an toàn.)
 function evalArith(input: string) {
+  // Khoảng trắng kẹp giữa hai phần của số ("1 000 000", "100, 0") = lỗi, y hệt web (L28): Excel đọc
+  // dấu cách giữa hai toán hạng là toán tử giao vùng, tệp chứa nó KHÔNG mở được.
+  if (/[\d.,]\s+[\d.,]/.test(String(input))) return null;
   const s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
   const peek = () => s[pos];
+  // Mọi kết quả trung gian phải hữu hạn — y hệt web (L36): "=2/(1/0)" từng ra 0 (x/∞) và tự kiểm khớp,
+  // tệp ghi công thức mà Excel ra #DIV/0! lan xuống tổng.
   function expr(): number | null {
     let v = term();
-    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; }
+    while (peek() === "+" || peek() === "-") { const op = s[pos++]; const r = term(); if (v === null || r === null) return null; v = op === "+" ? v + r : v - r; if (!isFinite(v)) return null; }
     return v;
   }
   function term(): number | null {
     let v = factor();
-    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; }
+    while (peek() === "*" || peek() === "/") { const op = s[pos++]; const r = factor(); if (v === null || r === null) return null; v = op === "*" ? v * r : v / r; if (!isFinite(v)) return null; }
     return v;
   }
   function factor(): number | null {
@@ -68,12 +74,42 @@ function evalArith(input: string) {
     if (peek() === "+") { pos++; return factor(); }
     let num = "";
     while (pos < s.length && /[0-9.]/.test(s[pos])) num += s[pos++];
-    if (!num || isNaN(Number(num))) return null;
+    if (!num || !isFinite(Number(num))) return null;
     return Number(num);
   }
   const result = expr();
   if (pos !== s.length || result === null || !isFinite(result)) return null;
   return result;
+}
+
+// LÀM TRÒN KIỂU EXCEL — y hệt web/src/lib/formula.ts (xem chú thích đầy đủ ở đó). Tóm tắt: chuẩn hoá
+// toán hạng về 15 chữ số có nghĩa (3000*1,1 = 3300,0000000000005 → 3300), làm tròn TRỊ TUYỆT ĐỐI rồi
+// trả dấu (ROUND(-52500;-3) = -53.000 như Excel, không phải -52.000), dịch dấu phẩy bằng số mũ thập
+// phân. Bản cũ lệch Excel ở 1.323/3.010 ca đo bằng Excel thật; vì bước tự kiểm dùng CHÍNH bộ tính này
+// nên tệp xuất ghi công thức kèm result sai, Excel (fullCalcOnLoad) mở ra số khác app/PDF.
+const so15 = (x: number) => Number(x.toPrecision(15));
+const dichThapPhan = (x: number, d: number) => { const [m, e] = String(x).split("e"); return Number(m + "e" + (Number(e || 0) + d)); };
+function lamTronExcel(x: number, soChuSo: number, kieu: "tron" | "len" | "xuong"): number {
+  const n = so15(x), d = Math.trunc(soChuSo);
+  if (!isFinite(n) || !isFinite(d)) return NaN;
+  const v = dichThapPhan(Math.abs(n), d);
+  if (!isFinite(v)) return n;
+  const r = kieu === "tron" ? Math.round(v) : kieu === "len" ? Math.ceil(v) : Math.floor(v);
+  const kq = Math.sign(n) * dichThapPhan(r, -d);
+  return kq === 0 ? 0 : kq;
+}
+
+// CEILING / FLOOR(số; bội số) kiểu Excel — y hệt web/src/lib/formula.ts (chú thích đầy đủ ở đó).
+// Bản cũ bỏ qua bội số: "=CEILING(1234567;1000)" ra 1.234.567, Excel 1.235.000 (L32). Một đối số giữ
+// nghĩa cũ (bội số 1) cho công thức đã lưu; xuất Excel thì SO_DOI_SO đòi hai đối số → ghi số.
+function boiSoExcel(a: number[], kieu: "len" | "xuong"): number {
+  if (a.length < 1 || a.length > 2) return NaN;
+  const x = a[0], boi = a.length === 2 ? a[1] : 1;
+  if (boi === 0) return kieu === "len" || x === 0 ? 0 : NaN;
+  if (x > 0 && boi < 0) return NaN;
+  const q = so15(x / boi);
+  const kq = (kieu === "len" ? Math.ceil(q) : Math.floor(q)) * boi;
+  return kq === 0 ? 0 : kq;
 }
 
 const FORMULA_FNS: Record<string, (a: number[]) => number> = {
@@ -83,13 +119,15 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   AVG: (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0),
   MIN: (a) => (a.length ? Math.min(...a) : 0),
   MAX: (a) => (a.length ? Math.max(...a) : 0),
-  ROUND: (a) => { const p = 10 ** (a[1] || 0); return Math.round((a[0] || 0) * p) / p; },
-  ROUNDUP: (a) => { const p = 10 ** (a[1] || 0); return Math.ceil((a[0] || 0) * p) / p; },
-  ROUNDDOWN: (a) => { const p = 10 ** (a[1] || 0); return Math.trunc((a[0] || 0) * p) / p; },
-  INT: (a) => Math.floor(a[0] || 0),
-  ABS: (a) => Math.abs(a[0] || 0),
-  CEILING: (a) => Math.ceil(a[0] || 0),
-  FLOOR: (a) => Math.floor(a[0] || 0),
+  // Hàm MỘT giá trị nhận đúng số đối số của nó; thừa (thường do DẢI ô bị bung: "=ABS(F1:F3)" → ABS(a;b;c))
+  // → lỗi như Excel #VALUE!, không lặng lẽ lấy a[0]. ROUND* một đối số là cách viết cũ app vẫn nhận.
+  ROUND: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "tron")),
+  ROUNDUP: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "len")),
+  ROUNDDOWN: (a) => (a.length < 1 || a.length > 2 ? NaN : lamTronExcel(a[0], a[1] || 0, "xuong")),
+  INT: (a) => (a.length !== 1 ? NaN : Math.floor(so15(a[0]))),
+  ABS: (a) => (a.length !== 1 ? NaN : Math.abs(a[0])),
+  CEILING: (a) => boiSoExcel(a, "len"),
+  FLOOR: (a) => boiSoExcel(a, "xuong"),
 };
 
 /** Giải tham chiếu ô theo HỆ TOẠ ĐỘ EDITOR (cho bộ tự kiểm). */
@@ -99,40 +137,109 @@ type EditorRefs = {
 };
 
 /**
- * DẤU PHẨY TÁCH ĐỐI SỐ KIỂU EXCEL TIẾNG ANH → ";" (quy ước của app).
+ * DẤU PHẨY TÁCH ĐỐI SỐ KIỂU EXCEL TIẾNG ANH → ";" (quy ước của app). BẢN SAO của
+ * web/src/lib/formula.ts — luật và lý do đầy đủ ghi ở đó; sửa quy tắc thì sửa CẢ HAI.
  *
- * App theo Excel tiếng Việt: ";" tách đối số, "," là dấu thập phân. Nhưng người dùng chép công
- * thức từ Excel tiếng Anh: "=ROUND(E2*63000,-3)" bị đọc thành ROUND(E2*63000.-3) = 554.397 thay
- * vì 554.000, rồi lúc xuất Excel bước tự kiểm thấy lệch nên BỎ công thức, chỉ ghi số (người dùng
- * báo 2026-09-23, production quote #47).
- *
- * Chỉ đổi dấu phẩy nằm NGAY TRONG danh sách đối số của một HÀM, và chỉ khi nó KHÔNG THỂ là dấu
- * thập phân: sát ô tham chiếu / dấu âm / ngoặc / chữ ("E2,E3", ",-3"), hoặc là dấu phẩy DUY NHẤT
- * của ROUND/ROUNDUP/ROUNDDOWN (Excel bắt buộc hai đối số). Công thức đã có ";" là kiểu Việt → giữ
- * nguyên; "," ngoài hàm ("=E3*1,5") vẫn là thập phân.
- * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa quy tắc thì sửa CẢ HAI.
+ * Tóm tắt: chỉ xét "," trong danh sách đối số của một HÀM. "," không thể là thập phân (sát ô tham
+ * chiếu / dấu âm / ngoặc) → ";" — kể cả khi công thức đã có ";" (L29: "=ROUND(SUM(F1,F2);-3)"). ","
+ * giữa hai chữ số: công thức đã có ";" / hàm một đối số → thập phân; ROUND/CEILING/FLOOR chỉ một dấu
+ * phẩy "số,số" → MƠ HỒ (L30, trừ ROUND "…,0)"); hàm nhiều đối số → thập phân trừ khi trông rõ là kiểu
+ * Anh (L34: phần sau ≥ 4 chữ số / tận cùng 0 / đã có dấu phẩy khác bị đổi). Mơ hồ, hoặc "," / "."
+ * còn dính ô tham chiếu ("=F1,5", "=F1.5") → null: bộ tự kiểm trả null → xuất Excel ghi SỐ, không ghi
+ * "G13.5" hay công thức mang nghĩa khác số app đang hiện. Gọi SAU khi đã đổi "x" nhân thành "*".
  */
-export function chuanHoaDauTachDoiSo(s: string): string {
-  if (s.includes(";") || !s.includes(",")) return s;
-  const out = s.split("");
-  const khung: { fn: string | null; phay: number[] }[] = [];
-  const quyet = (k: { fn: string | null; phay: number[] }) => {
-    if (!k.fn || !k.phay.length) return;
-    const batHai = /^ROUND(UP|DOWN)?$/.test(k.fn) && k.phay.length === 1;
-    for (const i of k.phay) {
-      const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
-      const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-      const soSau = /^\d/.test(sau);
-      if (batHai || !(soTruoc && soSau)) out[i] = ";";
+const HAM_HAI_DOI_SO = /^(ROUND(UP|DOWN)?|CEILING|FLOOR)$/;   // Excel bắt buộc đúng hai đối số
+const HAM_MOT_DOI_SO = /^(INT|ABS)$/;
+export function chuanHoaDauTachDoiSo(s: string): string | null {
+  let kq = s;
+  if (s.includes(",")) {
+    const kieuViet = s.includes(";");
+    const out = s.split("");
+    const khung: { fn: string | null; phay: number[] }[] = [];
+    let moHo = false, daDoi = false;
+    const nghiNgo: string[] = [];   // phần sau các dấu phẩy "số,số" trong hàm nhiều đối số
+    const quyet = (k: { fn: string | null; phay: number[] }) => {
+      if (!k.fn || !k.phay.length) return;
+      const ds = k.phay.map((i) => {
+        const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
+        const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
+        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+      });
+      const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
+      for (const p of chac) { out[p.i] = ";"; daDoi = true; }
+      if (!soSo.length || kieuViet || HAM_MOT_DOI_SO.test(k.fn)) return;
+      if (HAM_HAI_DOI_SO.test(k.fn)) {
+        if (chac.length) return;   // đã đủ dấu tách: phần còn lại là thập phân (thừa đối số thì chốt ở translateFormula)
+        if (soSo.length === 1 && k.fn.startsWith("ROUND") && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
+        moHo = true;
+        return;
+      }
+      for (const p of soSo) nghiNgo.push(p.sau);
+    };
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === "(") { const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i)); khung.push({ fn: m ? m[1].toUpperCase() : null, phay: [] }); }
+      else if (ch === ")") { const k = khung.pop(); if (k) quyet(k); }
+      else if (ch === "," && khung.length) khung[khung.length - 1].phay.push(i);
     }
-  };
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === "(") { const m = /([A-Za-z]+)\s*$/.exec(s.slice(0, i)); khung.push({ fn: m ? m[1].toUpperCase() : null, phay: [] }); }
-    else if (ch === ")") { const k = khung.pop(); if (k) quyet(k); }
-    else if (ch === "," && khung.length) khung[khung.length - 1].phay.push(i);
+    for (const sau of nghiNgo) { const duoi = /^\d+/.exec(sau)![0]; if (daDoi || duoi.length >= 4 || duoi.endsWith("0")) moHo = true; }
+    if (moHo) return null;
+    kq = out.join("");
   }
-  return out.join("");
+  if (/[A-Za-z]\$?\d+\s*[.,]|[.,]\s*\$?[A-Za-z]+\$?\d/.test(kq)) return null;
+  return kq;
+}
+
+/**
+ * Rút gọn lời gọi hàm từ TRONG CÙNG ra — y hệt rutGonHam ở web/src/lib/formula.ts (xem chú thích ở
+ * đó): đối số được phép có ngoặc thường ("ROUND(F1*(1+8%);0)", L31), tách đối số theo ";" ở tầng
+ * ngoài cùng của lời gọi, ngoặc lệch → null.
+ */
+function rutGonHam(s: string): string | null {
+  const reHam = /([A-Za-z]+)\s*\(/g;
+  for (let guard = 0; /[A-Za-z]+\s*\(/.test(s); guard++) {
+    if (guard > 100) return null;
+    let chon: { dau: number; ten: string; trong: string; cuoi: number } | null = null;
+    reHam.lastIndex = 0;
+    for (let m = reHam.exec(s); m; m = reHam.exec(s)) {
+      const mo = m.index + m[0].length - 1;
+      let sau = 0, dong = -1;
+      for (let k = mo; k < s.length; k++) { if (s[k] === "(") sau++; else if (s[k] === ")" && --sau === 0) { dong = k; break; } }
+      if (dong < 0) return null;
+      const trong = s.slice(mo + 1, dong);
+      if (/[A-Za-z]+\s*\(/.test(trong)) continue;
+      chon = { dau: m.index, ten: m[1], trong, cuoi: dong };
+      break;
+    }
+    if (!chon) return null;
+    s = s.slice(0, chon.dau) + goiHam(chon.ten, chon.trong) + s.slice(chon.cuoi + 1);
+  }
+  return s;
+}
+function goiHam(ten: string, trong: string): string {
+  const fn = FORMULA_FNS[ten.toUpperCase()];
+  if (!fn) return "NaN";
+  const doiSo: string[] = [];
+  let sau = 0, dau = 0;
+  for (let k = 0; k < trong.length; k++) {
+    const c = trong[k];
+    if (c === "(") sau++; else if (c === ")") sau--; else if (c === ";" && sau === 0) { doiSo.push(trong.slice(dau, k)); dau = k + 1; }
+  }
+  doiSo.push(trong.slice(dau));
+  // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web: không lọc bỏ im lặng rồi tính
+  // tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
+  let hong = false;
+  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  if (hong) return "NaN";
+  const r = fn(vals);
+  // Bọc ngoặc như web (L37): "=2SUM(F2;F3)" không còn ghép thành 21.113.000 mà là lỗi.
+  return (r === null || !isFinite(r)) ? "NaN" : "(" + String(r) + ")";
+}
+
+/** Dải ô đứng NGUYÊN làm một đối số — y hệt daiNguyenDoiSo ở web/src/lib/formula.ts. */
+function daiNguyenDoiSo(ca: string, viTri: number, dai: number): boolean {
+  const truoc = ca.slice(0, viTri).replace(/\s+$/, "").slice(-1), sau = ca.slice(viTri + dai).replace(/^\s+/, "").charAt(0);
+  return (truoc === "" || truoc === "(" || truoc === ";") && (sau === "" || sau === ")" || sau === ";");
 }
 
 /** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân — dấu phẩy tách đối
@@ -140,38 +247,28 @@ export function chuanHoaDauTachDoiSo(s: string): string {
 export function evalEditorFormula(input: string, refs?: EditorRefs) {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
-  s = chuanHoaDauTachDoiSo(s);
-  s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");   // TRƯỚC chuẩn hoá dấu phẩy (L30)
+  const chuan = chuanHoaDauTachDoiSo(s);
+  if (chuan === null) return null;
+  s = chuan;
   if (refs) {
-    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => {
+    let daiSaiCho = false;
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (m: string, a: string, b: string, viTri: number, ca: string) => {
+      // Dải phải là NGUYÊN một đối số, y hệt web ("SUM(F1:F3*2)" → lỗi, không bung thành SUM(a;b;c*2)).
+      if (!daiNguyenDoiSo(ca, viTri, m.length)) { daiSaiCho = true; return "0"; }
       const list = refs.range(a, b);
       return (list && list.length) ? list.join(";") : "0";
     });
+    if (daiSaiCho) return null;
     s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => {
       const v = refs.cell(a);
       return (v === null || v === undefined || isNaN(v)) ? "0" : String(v);
     });
   }
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(n.replace(",", ".")) / 100));
-  let guard = 0;
-  while (/[A-Za-z]+\s*\(/.test(s)) {
-    if (guard++ > 100) return null;
-    let changed = false;
-    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m: string, name: string, args: string) => {
-      changed = true;
-      const fn = FORMULA_FNS[name.toUpperCase()];
-      if (!fn) return "NaN";
-      // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web/src/lib/formula.ts: không lọc bỏ
-      // im lặng rồi tính tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
-      let hong = false;
-      const vals = args.split(";").filter((a: string) => a.trim() !== "").map((a: string) => evalArith(a)).filter((v: number | null): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
-      if (hong) return "NaN";
-      const r = fn(vals);
-      return (r === null || !isFinite(r)) ? "NaN" : String(r);
-    });
-    if (!changed) return null;
-  }
-  return evalArith(s);
+  const rutGon = rutGonHam(s);
+  if (rutGon === null) return null;
+  return evalArith(rutGon);
 }
 
 /** Bộ toạ độ + kiểm hợp lệ để dịch công thức editor → Excel cho MỘT sheet. */
@@ -198,10 +295,13 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   if (raw == null) return null;
   let s = String(raw).trim().replace(/^=/, "");
   if (!s) return null;
-  s = chuanHoaDauTachDoiSo(s);   // "," tách đối số kiểu Excel EN → ";" TRƯỚC khi "," bị đọc là thập phân
-
-  // "×" và "x"/"X" giữa hai chữ số = nhân (giống editor).
+  // "×" và "x"/"X" giữa hai chữ số = nhân (giống editor) — TRƯỚC chuẩn hoá dấu phẩy, kẻo "2x1,5" có
+  // "x1" bị coi là ô tham chiếu (L30).
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
+  // "," tách đối số kiểu Excel EN → ";" TRƯỚC khi "," bị đọc là thập phân. Mơ hồ → không dịch.
+  const chuan = chuanHoaDauTachDoiSo(s);
+  if (chuan === null) return null;
+  s = chuan;
 
   // Đổi tham chiếu ô (đơn lẻ HOẶC dải) sang toạ độ Excel — quét 1 lượt để dải không
   // bị xử lý hai lần. Tên hàm (SUM…) không có chữ số đuôi nên KHÔNG bị bắt nhầm.
@@ -226,6 +326,9 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   // Số kiểu VN: dấu thập phân "," → "."; rồi dấu tách đối số ";" → "," (chuẩn công thức Excel).
   // (editor chỉ dùng ";" tách đối số nên mọi "," còn lại đều là thập phân.)
   s = s.replace(/,/g, ".").replace(/;/g, ",");
+  // Dấu "." dính ô tham chiếu ("G13.5", "G13.G14") — Excel đọc là dải kiểu Lotus hoặc #NAME? (L29).
+  // chuanHoaDauTachDoiSo đã chặn từ trước; chốt lại ở đây theo cú pháp để không phụ thuộc bộ tính.
+  if (/[A-Za-z]\$?\d+\.|\.\$?[A-Za-z]+\$?\d/.test(s)) return null;
 
   // Tên hàm: đổi bí danh (AVG→AVERAGE) + chỉ cho phép hàm an toàn; gặp hàm lạ → null.
   let bad = false;
@@ -236,8 +339,26 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   });
   if (bad) return null;
 
+  // Chốt chặn KHOẢNG TRẮNG (L28): dấu cách GIỮA hai toán hạng ("MAX(G13-100. 0)", "1 000 000*8%",
+  // "G12 G13") là toán tử giao vùng của Excel → sai cú pháp → Excel KHÔNG MỞ ĐƯỢC cả tệp (đo bằng
+  // Excel COM, kể cả chế độ sửa chữa). Gặp là ghi số. Khoảng trắng còn lại chỉ nằm cạnh toán tử/
+  // ngoặc/dấu phẩy nên bỏ hết đi không đổi nghĩa — tệp không bao giờ mang khoảng trắng nào.
+  if (/[A-Za-z0-9.)%]\s+[A-Za-z0-9.($]/.test(s)) return null;
+  s = s.replace(/\s+/g, "");
+  // Chốt chặn DẢI: dải ô phải là NGUYÊN một đối số ("SUM(G12:G14)", "MIN(0,G12:G14)"). Nằm trong phép
+  // tính ("SUM(G12:G14*2)", "-G12:G14") thì Excel ra #VALUE! hoặc mảng — khác số app → ghi số.
+  for (const m of s.matchAll(/\$?[A-Za-z]+\$?\d+:\$?[A-Za-z]+\$?\d+/g)) {
+    const truoc = s.charAt(m.index - 1), sau = s.charAt(m.index + m[0].length);
+    if (!(truoc === "" || truoc === "(" || truoc === ",") || !(sau === "" || sau === ")" || sau === ",")) return null;
+  }
+  // Chốt chặn THIẾU TOÁN TỬ (L37): số / ")" / "%" đứng sát tên hàm, ô tham chiếu hay "(", hoặc ")" /
+  // "%" đứng sát một số — "2SUM(…)", "SUM(…)SUM(…)", "2(G13)", "ROUND(G13,-3)5" — Excel không đọc được
+  // (tệp phải "sửa chữa", công thức bị xoá). Trước đây lọt cả chốt ký tự lẫn soDoiSoHopLe, và bộ tự
+  // kiểm cũng ghép số y như lưới nên khớp nhau.
+  if (/[\d.)%][A-Za-z($]|[)%][\d.]/.test(s)) return null;
+
   // Chốt chặn: chỉ còn ký tự hợp lệ của công thức Excel.
-  if (!/^[A-Za-z0-9.,:%+\-*/()$ ]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
+  if (!/^[A-Za-z0-9.,:%+\-*/()$]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
   // Chốt chặn: SỐ ĐỐI SỐ đúng như Excel đòi. Excel gặp hàm sai số đối số thì coi cả công thức là
   // hỏng: lúc mở tệp báo "We found a problem… Removed Records: Formula" rồi XOÁ công thức. Đo được
   // ở production 2026-09-23: "=ROUND(E2*63000,-3)" (dấu phẩy kiểu Excel tiếng Anh) bị đọc thành
@@ -250,7 +371,7 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
 
 /** Số đối số Excel cho phép của từng hàm trong SAFE_FNS: [ít nhất, nhiều nhất]. */
 const SO_DOI_SO: Record<string, [number, number]> = {
-  ROUND: [2, 2], ROUNDUP: [2, 2], ROUNDDOWN: [2, 2], INT: [1, 1], ABS: [1, 1],
+  ROUND: [2, 2], ROUNDUP: [2, 2], ROUNDDOWN: [2, 2], INT: [1, 1], ABS: [1, 1], CEILING: [2, 2], FLOOR: [2, 2],
   SUM: [1, 255], PRODUCT: [1, 255], AVERAGE: [1, 255], MIN: [1, 255], MAX: [1, 255],
 };
 /** Đếm đối số từng lời gọi hàm trong công thức ĐÃ ở cú pháp Excel ("," tách đối số). */
@@ -327,7 +448,7 @@ export function excelFormulaToEditor(raw: string | null | undefined, ctx: ExcelR
   // đều là dấu tách đối số. Ref đã thành {field:row} nên không dính dấu nào.)
   s = s.replace(/,/g, ";");
 
-  // Tên hàm: chỉ nhận hàm editor hiểu ĐÚNG ngữ nghĩa; hàm lạ (IF/VLOOKUP/CEILING 2 đối số…) → bỏ,
+  // Tên hàm: chỉ nhận hàm editor hiểu ĐÚNG ngữ nghĩa; hàm lạ (IF/VLOOKUP/CEILING.MATH…) → bỏ,
   // ô đó giữ nguyên con số Excel đã tính (an toàn hơn là dịch sai tiền).
   let bad = false;
   s = s.replace(/([A-Za-z]+)\s*\(/g, (m, name) => {
@@ -454,7 +575,12 @@ export function buildFormulaContext(
     // editor.js cellNumByAddr). Trả số thô thì self-check ở dưới lệch quá dung sai → cellFormula
     // trả null → công thức sống của người dùng bị âm thầm bỏ khỏi file Excel, chỉ còn số chết.
     if (field === "quantity") return it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity);
-    if (field === "unitPrice" || field === "days") return Number(it[field]) || 0;
+    // SỐ NGÀY trống (0 / null): đọc là 1 — ĐÚNG số excel.ts ghi vào ô Số Ngày (days||1, cùng quy ước
+    // Thành Tiền của amountOf ở trên). Đọc 0 thì công thức "=E2*50000" tự kiểm khớp số 0 của lưới và
+    // được ghi sống; Excel (fullCalcOnLoad) tính lại trên ô Số Ngày = 1 ra 50.000 → tệp khác app (L35).
+    // Lưới web (GridTable cellNum) còn đọc 0 → tự kiểm lệch → ghi SỐ, tệp vẫn khớp app.
+    if (field === "days") return Number(it.days) || 1;
+    if (field === "unitPrice") return Number(it.unitPrice) || 0;
     return 0;   // _stt / cột chữ: không nằm trong công thức xuất được (allowedRef đã chặn)
   };
   // Xem MAX_REF_ROWS: ngân sách ref còn lại cho LẦN DỊCH công thức đang chạy (cellFormula đặt lại).

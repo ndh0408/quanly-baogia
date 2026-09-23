@@ -69,8 +69,9 @@ describe("Chốt chặn số đối số — Excel không bao giờ phải 'sử
       colToField: { E: "quantity", F: "unitPrice" }, fieldToCol: { quantity: "E", unitPrice: "F" },
       allowedRef: new Set(["quantity", "unitPrice"]), rowToExcel: (n) => n + 5, rangeOk: () => true,
     };
-    // "=ROUND(E2*1,5)" — kiểu Việt thiếu đối số số chữ số: chuẩn hoá coi "," là tách đối số → hợp lệ.
-    expect(translateFormula("=ROUND(E2*1,5)", ctx)).toBe("ROUND(E7*1,5)");
+    // "=ROUND(E2*1,5)" — MƠ HỒ (L30): app cũ nhận ROUND một đối số nên công thức đã lưu mang nghĩa
+    // ROUND(E2*1,5); đọc kiểu Excel tiếng Anh lại là ROUND(E2*1;5). Không chọn thay → không dịch, ghi số.
+    expect(translateFormula("=ROUND(E2*1,5)", ctx)).toBeNull();
     // "=ROUND(E2*1,5)*2" kiểu Việt ĐÚNG nghĩa thập phân + có ";" → ROUND(E7*1.5,0)*2
     expect(translateFormula("=ROUND(E2*1,5;0)*2", ctx)).toBe("ROUND(E7*1.5,0)*2");
     // ROUND chỉ MỘT đối số (bộ tính của lưới vẫn tính được: số chữ số mặc định 0) nhưng Excel coi là
