@@ -171,6 +171,51 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
   return kq;
 }
 
+/**
+ * Rút gọn lời gọi hàm từ TRONG CÙNG ra — y hệt rutGonHam ở web/src/lib/formula.ts (xem chú thích ở
+ * đó): đối số được phép có ngoặc thường ("ROUND(F1*(1+8%);0)", L31), tách đối số theo ";" ở tầng
+ * ngoài cùng của lời gọi, ngoặc lệch → null.
+ */
+function rutGonHam(s: string): string | null {
+  const reHam = /([A-Za-z]+)\s*\(/g;
+  for (let guard = 0; /[A-Za-z]+\s*\(/.test(s); guard++) {
+    if (guard > 100) return null;
+    let chon: { dau: number; ten: string; trong: string; cuoi: number } | null = null;
+    reHam.lastIndex = 0;
+    for (let m = reHam.exec(s); m; m = reHam.exec(s)) {
+      const mo = m.index + m[0].length - 1;
+      let sau = 0, dong = -1;
+      for (let k = mo; k < s.length; k++) { if (s[k] === "(") sau++; else if (s[k] === ")" && --sau === 0) { dong = k; break; } }
+      if (dong < 0) return null;
+      const trong = s.slice(mo + 1, dong);
+      if (/[A-Za-z]+\s*\(/.test(trong)) continue;
+      chon = { dau: m.index, ten: m[1], trong, cuoi: dong };
+      break;
+    }
+    if (!chon) return null;
+    s = s.slice(0, chon.dau) + goiHam(chon.ten, chon.trong) + s.slice(chon.cuoi + 1);
+  }
+  return s;
+}
+function goiHam(ten: string, trong: string): string {
+  const fn = FORMULA_FNS[ten.toUpperCase()];
+  if (!fn) return "NaN";
+  const doiSo: string[] = [];
+  let sau = 0, dau = 0;
+  for (let k = 0; k < trong.length; k++) {
+    const c = trong[k];
+    if (c === "(") sau++; else if (c === ")") sau--; else if (c === ";" && sau === 0) { doiSo.push(trong.slice(dau, k)); dau = k + 1; }
+  }
+  doiSo.push(trong.slice(dau));
+  // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web: không lọc bỏ im lặng rồi tính
+  // tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
+  let hong = false;
+  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  if (hong) return "NaN";
+  const r = fn(vals);
+  return (r === null || !isFinite(r)) ? "NaN" : String(r);
+}
+
 /** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân — dấu phẩy tách đối
  *  số kiểu Excel tiếng Anh được đổi trước bằng chuanHoaDauTachDoiSo). refs giải tham chiếu ô. */
 export function evalEditorFormula(input: string, refs?: EditorRefs) {
@@ -191,25 +236,9 @@ export function evalEditorFormula(input: string, refs?: EditorRefs) {
     });
   }
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(n.replace(",", ".")) / 100));
-  let guard = 0;
-  while (/[A-Za-z]+\s*\(/.test(s)) {
-    if (guard++ > 100) return null;
-    let changed = false;
-    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m: string, name: string, args: string) => {
-      changed = true;
-      const fn = FORMULA_FNS[name.toUpperCase()];
-      if (!fn) return "NaN";
-      // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web/src/lib/formula.ts: không lọc bỏ
-      // im lặng rồi tính tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
-      let hong = false;
-      const vals = args.split(";").filter((a: string) => a.trim() !== "").map((a: string) => evalArith(a)).filter((v: number | null): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
-      if (hong) return "NaN";
-      const r = fn(vals);
-      return (r === null || !isFinite(r)) ? "NaN" : String(r);
-    });
-    if (!changed) return null;
-  }
-  return evalArith(s);
+  const rutGon = rutGonHam(s);
+  if (rutGon === null) return null;
+  return evalArith(rutGon);
 }
 
 /** Bộ toạ độ + kiểm hợp lệ để dịch công thức editor → Excel cho MỘT sheet. */

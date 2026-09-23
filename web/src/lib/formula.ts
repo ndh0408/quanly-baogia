@@ -159,6 +159,56 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
   return kq;
 }
 
+/**
+ * Thay từng lời gọi hàm bằng kết quả của nó, bắt đầu từ lời gọi TRONG CÙNG (không còn hàm con bên
+ * trong). Đối số ĐƯỢC PHÉP có ngoặc tròn thường — "ROUND(F1*(1+8%);0)", "MAX((F2-F3);0)" — vì
+ * evalArith tự tính ngoặc. Bản cũ dùng regex ([A-Za-z]+)\s*\(([^()]*)\) chỉ khớp lời gọi KHÔNG có
+ * ngoặc nào bên trong, nên mẫu "giá × (1 + VAT)" trong hàm ra null: ô đỏ, đơn giá 0 (L31).
+ * Đối số tách theo ";" ở TẦNG NGOÀI CÙNG của lời gọi; ";" nằm trong ngoặc thường ("SUM((1;2))") không
+ * phải đối số hợp lệ của Excel → evalArith trả null → lỗi. Ngoặc lệch → null.
+ * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa thì sửa CẢ HAI.
+ */
+function rutGonHam(s: string): string | null {
+  const reHam = /([A-Za-z]+)\s*\(/g;
+  for (let guard = 0; /[A-Za-z]+\s*\(/.test(s); guard++) {
+    if (guard > 100) return null;
+    let chon: { dau: number; ten: string; trong: string; cuoi: number } | null = null;
+    reHam.lastIndex = 0;
+    for (let m = reHam.exec(s); m; m = reHam.exec(s)) {
+      const mo = m.index + m[0].length - 1;
+      let sau = 0, dong = -1;
+      for (let k = mo; k < s.length; k++) { if (s[k] === "(") sau++; else if (s[k] === ")" && --sau === 0) { dong = k; break; } }
+      if (dong < 0) return null;                              // thiếu ngoặc đóng
+      const trong = s.slice(mo + 1, dong);
+      if (/[A-Za-z]+\s*\(/.test(trong)) continue;             // còn hàm con → rút hàm con trước
+      chon = { dau: m.index, ten: m[1], trong, cuoi: dong };
+      break;
+    }
+    if (!chon) return null;
+    s = s.slice(0, chon.dau) + goiHam(chon.ten, chon.trong) + s.slice(chon.cuoi + 1);
+  }
+  return s;
+}
+/** Kết quả MỘT lời gọi hàm (đối số đã là số/biểu thức số) dưới dạng chuỗi, lỗi → "NaN". */
+function goiHam(ten: string, trong: string): string {
+  const fn = FORMULA_FNS[ten.toUpperCase()];
+  if (!fn) return "NaN";
+  const doiSo: string[] = [];
+  let sau = 0, dau = 0;
+  for (let k = 0; k < trong.length; k++) {
+    const c = trong[k];
+    if (c === "(") sau++; else if (c === ")") sau--; else if (c === ";" && sau === 0) { doiSo.push(trong.slice(dau, k)); dau = k + 1; }
+  }
+  doiSo.push(trong.slice(dau));
+  // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
+  // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
+  let hong = false;
+  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  if (hong) return "NaN";
+  const r = fn(vals);
+  return r === null || !isFinite(r) ? "NaN" : String(r);
+}
+
 export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
@@ -176,23 +226,7 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
     s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
   }
   s = s.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (_m, n) => String(Number(String(n).replace(",", ".")) / 100));
-  let guard = 0;
-  while (/[A-Za-z]+\s*\(/.test(s)) {
-    if (guard++ > 100) return null;
-    let changed = false;
-    s = s.replace(/([A-Za-z]+)\s*\(([^()]*)\)/, (_m, name, args) => {
-      changed = true;
-      const fn = FORMULA_FNS[String(name).toUpperCase()];
-      if (!fn) return "NaN";
-      // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
-      // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
-      let hong = false;
-      const vals = String(args).split(";").filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
-      if (hong) return "NaN";
-      const r = fn(vals);
-      return r === null || !isFinite(r) ? "NaN" : String(r);
-    });
-    if (!changed) return null;
-  }
-  return evalArith(s);
+  const rutGon = rutGonHam(s);
+  if (rutGon === null) return null;
+  return evalArith(rutGon);
 }
