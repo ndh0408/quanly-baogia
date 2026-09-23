@@ -313,5 +313,6 @@ Nói thẳng:
   `web/src/components/ExtraTables.tsx`, `web/src/components/Shell.tsx`,
   `web/src/components/ImportExcelModal.tsx`, `web/src/components/VenuePicker.tsx`.
 - **Chưa có test hiệu năng/tải.** Số trong `docs/archive/performance/` là lịch sử.
-- **Chưa có test khôi phục trong CI.** Diễn tập khôi phục chạy trên host
-  production theo systemd timer, không chạy ở CI.
+- **Chưa có test khôi phục trong CI.** Trên production (đo 2026-09-22) chỉ `restore-test.sh`
+  chạy theo systemd timer hằng tuần (nạp dump vào CSDL tạm). Diễn tập ĐẦY ĐỦ (`restore-drill.sh`:
+  dump + khoá + kho object) **chưa được cài** ở đó — xem bảng đầu docs/operations/DISASTER_RECOVERY.md.

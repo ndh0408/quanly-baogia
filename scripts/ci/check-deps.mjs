@@ -22,6 +22,7 @@
 // Bỏ sót ba kiểu này thì cổng báo động giả, và một cổng hay báo động giả sẽ bị tắt.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const GOC = path.resolve(import.meta.dirname, "../..");
 const BO_QUA_THU_MUC = new Set(["node_modules", "dist", ".git", "coverage", "_bmad", "_bmad-output", ".claude", "public"]);
@@ -96,4 +97,8 @@ function main() {
   console.log(`✓ ${deps.length} phụ thuộc runtime — đều tìm được nơi dùng`);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();
+// So bằng `pathToFileURL`, KHÔNG ghép chuỗi `file://${argv[1]}` (audit 2026-09-22, DEP-02): trên Windows
+// argv[1] là `D:\QuanLY\…` còn import.meta.url là `file:///D:/QuanLY/…` — hai chuỗi không bao giờ bằng
+// nhau, main() không chạy, script thoát 0 với stdout RỖNG và verify-local in ✓. Máy Windows lại là
+// nơi DUY NHẤT cổng thật sự chạy. tests/ops-ci-guard-windows.test.js chốt lớp lỗi này.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

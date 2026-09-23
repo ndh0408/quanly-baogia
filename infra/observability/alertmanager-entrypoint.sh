@@ -14,7 +14,12 @@
 # Phép thay dùng awk với index/substr — THAY THEO NGHĨA ĐEN, không qua regex. `sed s|…|…|` sẽ diễn
 # giải `&` trong vế phải và vỡ nếu giá trị chứa ký tự phân cách; một địa chỉ email hôm nay chưa
 # chứa, nhưng đây là chỗ không đáng đánh cược.
-set -eu
+#
+# `pipefail`: bước dựng cấu hình ở dưới là một ống `$LOC | bo_khoi | awk` — thiếu pipefail thì mã
+# thoát lấy từ `awk` (luôn 0), khâu đầu hỏng vẫn ra một tệp cấu hình cụt mà container vẫn lên.
+# /bin/sh của ảnh prom/alertmanager v0.28.1 là busybox ash và CÓ hỗ trợ — đã đo 2026-09-23:
+# `set -euo pipefail; false | true` thoát 1 trong chính ảnh đó (audit DEP-02 / DOC-03).
+set -euo pipefail
 
 MAU="${AM_TEMPLATE:-/etc/alertmanager/conf/alertmanager.yml.tpl}"
 RA="${AM_RENDERED:-/render/alertmanager.yml}"

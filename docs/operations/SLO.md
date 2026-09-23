@@ -32,12 +32,15 @@ Số đo hiệu năng cũ nằm ở
 
 ## Mục tiêu sao lưu / khôi phục
 
-Khác với nhóm trên, nhóm này **đã được đo và có chốt tự động** — ngưỡng nằm trong
-`scripts/backup/backup-watchdog.sh`, chạy mỗi 6 giờ và alert khi vượt.
+Ngưỡng của nhóm này nằm trong `scripts/backup/backup-watchdog.sh` (mỗi 6 giờ, alert khi vượt) —
+**nhưng watchdog CHƯA được cài trên production** (đo 2026-09-22: chỉ có timer `quanly-backup` và
+`quanly-restore-test`; không có timer kho object, không có bản sao ngoài máy). Nên cột "Chốt bởi" dưới
+đây là chốt **có trong repo**, chưa phải chốt đang chạy. Trạng thái thật: bảng đầu
+[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
 
 | Mục | Mục tiêu | Chốt bởi |
 |---|---|---|
-| RPO (mất tối đa bao nhiêu dữ liệu) | ≤ 24h | lịch dump 02:00 + kho object 02:30 |
+| RPO (mất tối đa bao nhiêu dữ liệu) | ≤ 24h — **production chưa đạt** cho kho object và khi mất host | lịch dump 02:00 + kho object 02:30 + off-host (hai thứ sau chưa có trên production) |
 | RTO (bao lâu chạy lại được) | ~30 phút khôi phục CSDL | đo trên DEV, xem DISASTER_RECOVERY.md |
 | Backup CSDL thành công gần nhất | < 26h | watchdog |
 | Sao lưu kho object gần nhất | < 26h | watchdog |

@@ -43,7 +43,7 @@ hỏng tệ nhất của một hệ giám sát.
 **Số liệu HIỆN TẠI** (đo lại bằng lệnh, đừng chép tay — số ở đây trôi rất nhanh):
 
 ```bash
-grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 29 metric ứng dụng
+grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 31 metric ứng dụng
 grep -c '^      - alert:' infra/prometheus/alerts.yaml    # 22 quy tắc cảnh báo
 ```
 

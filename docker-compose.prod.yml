@@ -189,10 +189,20 @@ services:
     # GHIM THEO DIGEST — cùng lý lẽ với postgres/redis ở trên, và cổng b7-compose-hardening bắt buộc:
     # tag (kể cả RELEASE.*) vẫn có thể bị đẩy lại, digest thì không. Đọc từ registry 2026-09-08 bằng
     #   docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z   (dòng Digest)
-    # Làm mới CÓ CHỦ Ý bằng `docker buildx imagetools inspect minio/minio:<tag mới>`.
-    # Lưu ý: container dev đang chạy `minio/minio:latest` (tạo trước khi compose dev thêm ghim, chưa
-    # recreate) — prod là môi trường ĐẦU TIÊN chạy đúng bản ghim này.
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    #
+    # ── REGISTRY: quay.io, KHÔNG phải Docker Hub (audit 2026-09-23, DEP-01) ──────────────────────
+    # Docker Hub đã GỠ minio/minio và minio/mc (đo 2026-09-23: hub.docker.com/v2/repositories/
+    # minio/minio → 404, kéo theo digest → 401). Máy prod hiện sống nhờ ảnh CÒN TRONG CACHE — dựng
+    # máy mới (đúng kịch bản khôi phục thảm hoạ) thì `compose up` hỏng ở bước kéo ảnh, và vì app/worker
+    # `depends_on: minio (service_healthy)` nên TOÀN BỘ ứng dụng không lên. quay.io vẫn phát hành
+    # đúng bản này với CÙNG digest sha256:14cea493… — tức cùng từng byte, chỉ đổi nơi kéo. Đã
+    # `docker pull` theo digest ngày 2026-09-23.
+    # ⛔ ĐỪNG `docker image prune -a` trên host production trước khi lượt deploy có dòng này đã chạy:
+    #    ảnh cũ mang tên docker.io/minio/minio là bản DUY NHẤT còn trên máy nếu quay.io có sự cố.
+    # Làm mới CÓ CHỦ Ý bằng `docker buildx imagetools inspect quay.io/minio/minio:<tag mới>`.
+    # Bản cộng đồng MinIO đã lưu trữ upstream và còn advisory HIGH sau bản này (cổng S3 9000 KHÔNG
+    # publish — chỉ mạng internal tới được). Hướng dài hạn ghi ở docs/operations/DISASTER_RECOVERY.md.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: quanly-minio
     logging: *default-logging
     # TRẦN TÀI NGUYÊN — bắt buộc bởi cổng b7-compose-hardening (mọi service phải có cả RAM lẫn CPU).
@@ -300,6 +310,13 @@ services:
       # Đặt "1" chứ KHÔNG đặt "true": "true" tin mọi chặng, nghĩa là client tự thêm X-Forwarded-For
       # là giả được IP nguồn và lách rate-limit.
       TRUST_PROXY: "1"
+      # Tệp trạng thái sao lưu do scripts/backup/* ghi TRÊN HOST (chỉ dấu thời gian, không dữ liệu) —
+      # app phơi ra /metrics: backup_last_success_timestamp_seconds, backup_offhost_configured. Chỉ
+      # service app, KHÔNG đặt cho worker (hai tiến trình phát cùng chuỗi = nhân đôi, xem bullmq_jobs).
+      # Thư mục chưa có trên host thì Docker tự tạo rỗng → không có chuỗi nào, app vẫn chạy bình thường.
+      BACKUP_STATUS_FILE: /run/quanly-backup/quanly_backup.prom
+    volumes:
+      - /var/lib/quanly-backup:/run/quanly-backup:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

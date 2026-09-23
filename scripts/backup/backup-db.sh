@@ -2,13 +2,21 @@
 # ============================================================================
 # QuanLY — backup DB hằng ngày (chạy trên host coolify qua systemd timer).
 #   pg_dump (read-only, KHÔNG đụng app đang chạy) → gzip → giữ GFS local
-#   + (tuỳ chọn) đẩy OFF-HOST lên NAS qua docker smbclient.
+#   + OFF-HOST: NAS (docker smbclient, bản thô trong LAN) và/hoặc rclone remote kiểu CRYPT
+#     (mã hoá phía máy trước khi rời host) — xem offhost-lib.sh.
 #   Alert Telegram khi LỖI. Dump rỗng/quá nhỏ cũng coi là lỗi.
+#
+# OFF-HOST CHƯA CẤU HÌNH (tình trạng production đo ngày 2026-09-22): lượt vẫn exit 0 — bản local
+# vẫn là bản sao lưu tốt — nhưng in cảnh báo OFFHOST-CHUA-CAU-HINH vào log và ghi
+# backup_offhost_configured 0 vào tệp trạng thái. KHÔNG gửi Telegram mỗi đêm (chủ repo chốt
+# 2026-09-23: nhờn cảnh báo). Đã cấu hình mà đẩy HỎNG → Telegram + exit 1 ở CUỐI lượt (sau khi
+# bản local đã yên vị, đã ghi .db-last-success và đã chạy retention).
 #
 # Cấu hình qua /etc/quanly-backup.env (KHÔNG hardcode secret):
 #   BACKUP_DIR (mặc định /opt/quanly-backups)  KEEP_DAILY (14)  PG_CONTAINER (quanly-postgres)
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT     (alert — tuỳ chọn)
-#   NAS_SHARE (vd //192.168.1.100/QuanlyBackup), NAS_USER, NAS_PASS, NAS_SUBDIR  (off-host — tuỳ chọn)
+#   NAS_SHARE (vd //<nas-host>/<share>), NAS_USER, NAS_PASS, NAS_SUBDIR          (off-host NAS)
+#   OFFHOST_RCLONE_REMOTE, OFFHOST_RCLONE_CONFIG, OFFHOST_KEEP_DAYS             (off-host rclone crypt)
 # ============================================================================
 set -uo pipefail
 # Bản dump chứa CCCD / số tài khoản / lương ở dạng THÔ. umask kế thừa của systemd là 0022 →
@@ -22,6 +30,14 @@ KEEP_DAILY="${KEEP_DAILY:-14}"
 PG_CONTAINER="${PG_CONTAINER:-quanly-postgres}"
 TS="$(date +%F-%H%M%S)"
 FILE="$BACKUP_DIR/quanly-$TS.sql.gz"
+# Thư viện off-host + tệp trạng thái. THIẾU nó (ai đó chỉ chép riêng tệp này lên host) thì KHÔNG
+# được bỏ lượt dump — §39: không bao giờ đánh đổi bản sao lưu lấy một lỗi cài đặt. Cảnh báo ở bước
+# off-host bên dưới, còn dump vẫn chạy.
+LIB="$(cd "$(dirname "$0")" && pwd)/offhost-lib.sh"
+CO_LIB=0
+# shellcheck source=offhost-lib.sh
+[ -f "$LIB" ] && . "$LIB" && CO_LIB=1
+OFFHOST_LOI=0
 
 alert() { # gửi Telegram nếu có cấu hình; không bao giờ làm script fail vì alert
   if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_ALERT_CHAT:-}" ]; then
@@ -95,27 +111,45 @@ if ! chmod 600 "$FILE" "$FILE.sha256"; then
   exit 1
 fi
 
-# 2) Off-host → NAS (tuỳ chọn). Dùng docker smbclient để KHÔNG cần cài gì lên host.
-if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
-  B="$(basename "$FILE")"
-  # Mật khẩu KHÔNG đi qua argv và cũng KHÔNG đi qua `-e NAS_PASS`. Hai đường lộ KHÁC NHAU:
-  #   • argv — chuỗi lệnh hiện nguyên văn ở `ps aux` trên host và /proc/<pid>/cmdline.
-  #   • `-e NAS_PASS` (cờ TRẦN, không kèm giá trị) — docker CLI đọc giá trị từ môi trường của chính
-  #     nó rồi NẠP vào `Config.Env` của container, nên `docker inspect quanly-…` và
-  #     /proc/<pid>/environ BÊN TRONG container vẫn trả về mật khẩu suốt cửa sổ chạy. Bản trước bịt
-  #     đường thứ nhất và chú thích ghi là đã bịt cả `docker inspect` — điều đó KHÔNG đúng.
-  # Cách còn lại: đẩy nguyên nội dung file credentials qua STDIN (`docker run -i`). Ống stdin không
-  # nằm trong argv lẫn Config.Env. `cat > /tmp/cred` chạy TRƯỚC `apk add` để không có lệnh nào khác
-  # kịp nuốt mất stdin; `umask 077` cho file 0600 ngay lúc tạo.
-  if ! printf 'username=%s\npassword=%s\n' "$NAS_USER" "${NAS_PASS:-}" |
-      NAS_SHARE="$NAS_SHARE" NAS_SUBDIR="${NAS_SUBDIR:-.}" B="$B" \
-      docker run --rm -i -e NAS_SHARE -e NAS_SUBDIR -e B \
-      -v "$BACKUP_DIR":/data:ro alpine sh -c \
-      'umask 077; cat > /tmp/cred
-       apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
-       smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "cd $NAS_SUBDIR; put /data/$B $B; put /data/$B.sha256 $B.sha256"'; then
-    alert "đẩy NAS thất bại ($FILE) — bản local vẫn giữ"
+# 2) OFF-HOST. Hai đích độc lập, cấu hình đích nào thì đẩy đích đó:
+#    • NAS — docker smbclient, KHÔNG cần cài gì lên host. Bản THÔ (LAN của công ty).
+#    • rclone remote kiểu crypt — mã hoá phía máy, đích ngoài toà nhà (R2/B2/S3…).
+#    Dấu .offhost-db-last-success CHỈ ghi khi MỌI đích đã cấu hình đều đẩy xong: watchdog canh nó.
+B="$(basename "$FILE")"
+if [ "$CO_LIB" != 1 ]; then
+  alert "thiếu $LIB — KHÔNG đẩy được off-host. Cài lại bằng scripts/backup/install-backup.sh (bản dump local vẫn giữ)"
+  OFFHOST_LOI=1
+elif offhost_configured; then
+  if offhost_nas_configured; then
+    # Mật khẩu KHÔNG đi qua argv và cũng KHÔNG đi qua `-e NAS_PASS`. Hai đường lộ KHÁC NHAU:
+    #   • argv — chuỗi lệnh hiện nguyên văn ở `ps aux` trên host và /proc/<pid>/cmdline.
+    #   • `-e NAS_PASS` (cờ TRẦN, không kèm giá trị) — docker CLI đọc giá trị từ môi trường của chính
+    #     nó rồi NẠP vào `Config.Env` của container, nên `docker inspect quanly-…` và
+    #     /proc/<pid>/environ BÊN TRONG container vẫn trả về mật khẩu suốt cửa sổ chạy. Bản trước bịt
+    #     đường thứ nhất và chú thích ghi là đã bịt cả `docker inspect` — điều đó KHÔNG đúng.
+    # Cách còn lại: đẩy nguyên nội dung file credentials qua STDIN (`docker run -i`). Ống stdin không
+    # nằm trong argv lẫn Config.Env. `cat > /tmp/cred` chạy TRƯỚC `apk add` để không có lệnh nào khác
+    # kịp nuốt mất stdin; `umask 077` cho file 0600 ngay lúc tạo.
+    if ! printf 'username=%s\npassword=%s\n' "$NAS_USER" "${NAS_PASS:-}" |
+        NAS_SHARE="$NAS_SHARE" NAS_SUBDIR="${NAS_SUBDIR:-.}" B="$B" \
+        docker run --rm -i -e NAS_SHARE -e NAS_SUBDIR -e B \
+        -v "$BACKUP_DIR":/data:ro alpine sh -c \
+        'umask 077; cat > /tmp/cred
+         apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
+         smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "cd $NAS_SUBDIR; put /data/$B $B; put /data/$B.sha256 $B.sha256"'; then
+      alert "đẩy NAS thất bại ($FILE) — bản local vẫn giữ"
+      OFFHOST_LOI=1
+    fi
   fi
+  if offhost_rclone_configured; then
+    if ! LY="$(offhost_rclone_day_tep db "$B" "$B.sha256")"; then
+      alert "đẩy off-host rclone thất bại ($B): $LY — bản local vẫn giữ"
+      OFFHOST_LOI=1
+    fi
+  fi
+  [ "$OFFHOST_LOI" = 0 ] && date +%s > "$BACKUP_DIR/.offhost-db-last-success"
+else
+  offhost_canh_bao_chua_cau_hinh "Bản dump CSDL"
 fi
 
 # 3) GFS retention local — giữ KEEP_DAILY bản mới nhất, xoá cũ hơn.
@@ -129,5 +163,12 @@ find "$BACKUP_DIR" -name 'quanly-*.sql.gz.partial' -mmin +180 -delete 2>/dev/nul
 
 # Dấu vết cho watchdog kiểm "backup có còn tươi không" (timer chết im lặng thì không ai biết).
 date +%s > "$BACKUP_DIR/.db-last-success"
+[ "$CO_LIB" = 1 ] && backup_ghi_trang_thai
 
 echo "✓ backup OK: $FILE ($(du -h "$FILE" | cut -f1)) — giữ $KEEP_DAILY bản local"
+# Đẩy off-host ĐÃ CẤU HÌNH mà hỏng: bản local tốt và đã được đánh dấu ở trên, nhưng unit systemd
+# phải hiện FAILED — `systemctl --failed` là chỗ người trực nhìn đầu tiên.
+if [ "$OFFHOST_LOI" != 0 ]; then
+  echo "✖ off-host THẤT BẠI ở lượt này — xem cảnh báo phía trên" >&2
+  exit 1
+fi

@@ -205,7 +205,8 @@ services:
     # docker-compose.prod.yml (cùng digest, cùng trần, cùng siết đặc quyền) — staging phải PHẢN ÁNH
     # ĐÚNG những gì production chạy, không phải một bản giản lược, nếu không mọi diễn tập trên
     # staging chỉ chứng minh cấu hình KHÁC với cái đang bảo vệ dữ liệu thật.
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # quay.io thay Docker Hub (đã gỡ minio/*) — cùng digest với prod, xem chú thích ở docker-compose.prod.yml.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: quanly-minio
     logging: *default-logging
     deploy:
@@ -287,6 +288,13 @@ services:
       # Đặt "1" chứ KHÔNG đặt "true": "true" tin mọi chặng, nghĩa là client tự thêm X-Forwarded-For
       # là giả được IP nguồn và lách rate-limit.
       TRUST_PROXY: "1"
+      # Tệp trạng thái sao lưu do scripts/backup/* ghi TRÊN HOST (chỉ dấu thời gian, không dữ liệu) —
+      # app phơi ra /metrics: backup_last_success_timestamp_seconds, backup_offhost_configured. Chỉ
+      # service app, KHÔNG đặt cho worker (hai tiến trình phát cùng chuỗi = nhân đôi, xem bullmq_jobs).
+      # Thư mục chưa có trên host thì Docker tự tạo rỗng → không có chuỗi nào, app vẫn chạy bình thường.
+      BACKUP_STATUS_FILE: /run/quanly-backup/quanly_backup.prom
+    volumes:
+      - /var/lib/quanly-backup:/run/quanly-backup:ro
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

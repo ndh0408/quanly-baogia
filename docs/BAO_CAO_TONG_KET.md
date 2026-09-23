@@ -172,8 +172,8 @@ quét đắt nhất.
 
 | Hạng mục | Trạng thái |
 |---|---|
-| Sao lưu CSDL tự động | ✅ `scripts/backup/backup-db.sh`, có watchdog Telegram |
-| Sao lưu kho object | ✅ `scripts/backup/backup-objects.sh` |
+| Sao lưu CSDL tự động | ✅ `scripts/backup/backup-db.sh` chạy trên production — ⚠️ nhưng bản trên host khác md5 với repo, và watchdog CHƯA cài ở đó (đo 2026-09-22) |
+| Sao lưu kho object | ⚠️ script có (`scripts/backup/backup-objects.sh`) nhưng **chưa chạy trên production** — không có timer, kho chứng từ chưa từng được sao lưu (đo 2026-09-22) |
 | Diễn tập khôi phục | ✅ `scripts/backup/restore-test.sh` |
 | Kiểm toàn vẹn | ✅ `src/tools/verifyIntegrity.ts` |
 | Diễn tập migration | ✅ `scripts/db/migration-rehearsal.sh` (đã vá lỗi nuốt migration hỏng qua `\| grep \| tail` không có `pipefail`) |

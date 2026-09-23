@@ -25,7 +25,7 @@ chạm tới được.
 
 ### Metric có thật
 
-Bảng dưới đây là **toàn bộ 29 metric** do `src/observability.ts` khai. Nguồn sự
+Bảng dưới đây là **toàn bộ 31 metric** do `src/observability.ts` khai. Nguồn sự
 thật là file đó — `scripts/ci/check-alerts.mjs` đối chiếu mọi quy tắc cảnh báo và
 mọi panel Grafana với nó, nên metric đổi tên mà quên sửa là cổng CI đỏ.
 
@@ -53,6 +53,8 @@ mọi panel Grafana với nó, nên metric đổi tên mà quên sửa là cổn
 | `disk_free_bytes` | Gauge | mountpoint | byte trống của hệ tệp `DISK_METRICS_PATH` |
 | `disk_total_bytes` | Gauge | mountpoint | **mẫu số** để tính tỉ lệ trống |
 | `config_missing` | Gauge | key | 1 = biến bắt buộc-ở-production CHƯA đặt. Nhãn `key`: `REDIS_URL` · `S3_ENDPOINT` · `S3_ACCESS_KEY` · `S3_SECRET_KEY` · `SMTP_HOST` · `PII_ENC_KEY`. **Chỉ phát khi `NODE_ENV=production`** |
+| `backup_last_success_timestamp_seconds` | Gauge | kind | lần sao lưu thành công gần nhất (`db` · `objects` · `offhost_db` · `offhost_objects` · `drill`; 0 = chưa từng). Đọc từ tệp trạng thái do `scripts/backup/*` ghi trên host — **chỉ app phát**, và chỉ khi đặt `BACKUP_STATUS_FILE` |
+| `backup_offhost_configured` | Gauge | scope | 1 = đã cấu hình đích sao lưu ngoài máy; **0 = mọi bản sao nằm trên cùng host**. Thiếu tệp trạng thái thì KHÔNG có chuỗi nào |
 
 Cộng thêm metric mặc định của `prom-client` (CPU, bộ nhớ, event loop, GC).
 

@@ -666,6 +666,61 @@ export function capNhatCauHinhThieu(laProd = config.NODE_ENV === "production") {
 }
 capNhatCauHinhThieu();
 
+// === Trạng thái sao lưu (audit 2026-09-22, INFRA-01 / DOC-01) ===
+// Script sao lưu chạy bằng systemd TRÊN HOST, ngoài mọi container — Prometheus không có đường nào
+// thấy chúng. Đo trên production: bản dump và kho chứng từ CHỈ nằm trên cùng một máy, và không một
+// tín hiệu nào nói ra điều đó. scripts/backup/offhost-lib.sh nay ghi một tệp textfile (chỉ dấu thời
+// gian, không dữ liệu) sau mỗi lượt; app đọc nó qua bind mount chỉ-đọc và phơi ra /metrics để
+// dashboard hiện "chưa có bản off-host" / "backup đã cũ".
+//
+// CHỈ app đọc (compose chỉ đặt BACKUP_STATUS_FILE cho service app) — worker cũng nạp module này, và
+// hai tiến trình cùng phát một chuỗi là đúng lỗi nhân đôi đã gặp ở bullmq_jobs.
+// Cả hai gauge đều CÓ NHÃN: prom-client không phát mẫu mặc định cho metric có nhãn, nên thiếu tệp
+// = KHÔNG có chuỗi nào (không phải "0" bịa ra đọc thành "chưa cấu hình").
+export const BACKUP_STATUS_FILE = process.env.BACKUP_STATUS_FILE || "";
+const DK_SAOLUU = BACKUP_STATUS_FILE ? [registry] : [];
+const KIND_SAOLUU = new Set(["db", "objects", "offhost_db", "offhost_objects", "drill"]);
+
+export const backupLastSuccess = new Gauge({
+  name: "backup_last_success_timestamp_seconds",
+  help: "Lần sao lưu thành công gần nhất theo loại (epoch giây, 0 = chưa từng) — đọc từ tệp trạng thái của scripts/backup/",
+  labelNames: ["kind"],
+  registers: DK_SAOLUU,
+  collect() { docTrangThaiSaoLuu(); },
+});
+export const backupOffhostConfigured = new Gauge({
+  name: "backup_offhost_configured",
+  help: "1 = đã cấu hình đích sao lưu ngoài máy (NAS hoặc rclone crypt); 0 = MỌI bản sao nằm trên cùng host",
+  labelNames: ["scope"],
+  registers: DK_SAOLUU,
+  collect() { docTrangThaiSaoLuu(); },
+});
+
+/**
+ * Đọc tệp textfile rồi đặt hai gauge. Hàm THUẦN phía parse (nhận nội dung) để test được.
+ * Chỉ nhận đúng dạng mà offhost-lib.sh ghi và đúng tập `kind` đã biết — tệp nằm ngoài container,
+ * không để một dòng lạ nào nở thành chuỗi nhãn tuỳ ý trong registry.
+ */
+export function apDungTrangThaiSaoLuu(noiDung: string | null) {
+  backupLastSuccess.reset();
+  backupOffhostConfigured.reset();
+  if (noiDung == null) return;
+  for (const dong of noiDung.split("\n")) {
+    const a = /^backup_last_success_timestamp_seconds\{kind="([a-z_]+)"\} (\d{1,12})$/.exec(dong.trim());
+    if (a && KIND_SAOLUU.has(a[1])) { backupLastSuccess.set({ kind: a[1] }, Number(a[2])); continue; }
+    const b = /^backup_offhost_configured\{scope="host"\} ([01])$/.exec(dong.trim());
+    if (b) backupOffhostConfigured.set({ scope: "host" }, Number(b[1]));
+  }
+}
+
+function docTrangThaiSaoLuu() {
+  if (!BACKUP_STATUS_FILE) return;
+  let noiDung: string | null;
+  // Không bao giờ ném: `collect()` ném là CẢ /metrics trả 500 (xem khối sức khoẻ ở trên).
+  try { noiDung = readFileSync(BACKUP_STATUS_FILE, "utf8"); } catch { noiDung = null; }
+  apDungTrangThaiSaoLuu(noiDung);
+}
+
 // === Cổng xuất file (Excel/PDF) ===
 // Không có mấy số này thì quá tải xuất file là một hộp đen: người dùng báo "chậm", còn hệ thống
 // không nói được là đang bận bao nhiêu, xếp hàng bao sâu, hay đã từ chối bao nhiêu lượt.

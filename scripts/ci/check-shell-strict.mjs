@@ -21,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const GOC = path.resolve(import.meta.dirname, "../..");
 
@@ -36,6 +37,7 @@ export const CHO_PHEP_KHONG_E = new Map([
   ["scripts/backup/backup-db.sh", "§39: dump hỏng thì phải ĐI TIẾP tới nhánh cảnh báo và TUYỆT ĐỐI không xoá bản sao lưu cũ — `-e` thoát ngay sẽ bỏ cả hai"],
   ["scripts/backup/backup-watchdog.sh", "kiểm BA điều kiện tươi mới (CSDL / kho object / diễn tập) rồi mới cảnh báo; `-e` dừng ở điều kiện hỏng đầu tiên và giấu hai cái còn lại"],
   ["scripts/backup/restore-test.sh", "diễn tập khôi phục nhiều bước, có `trap cleanup EXIT` phải chạy được kể cả khi một phép đo hỏng"],
+  ["scripts/backup/offhost-lib.sh", "thư viện được `source` bởi backup-db.sh/backup-objects.sh/backup-watchdog.sh — `-e` ở đây LAN sang ba script cố ý không có `-e` ở trên"],
   ["test-on-dev.sh", "chạy bộ test trên VM dev rồi báo cáo — mục đích là THẤY hết bài đỏ, không phải dừng ở bài đầu"],
 ]);
 
@@ -119,4 +121,8 @@ function main() {
   console.log(`✓ ${kq.length} script shell — đều có -u + pipefail; ${CHO_PHEP_KHONG_E.size} script miễn -e kèm lý do`);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();
+// So bằng `pathToFileURL`, KHÔNG ghép chuỗi `file://${argv[1]}` (audit 2026-09-22, DEP-02): trên Windows
+// argv[1] là `D:\QuanLY\…` còn import.meta.url là `file:///D:/QuanLY/…` — hai chuỗi không bao giờ bằng
+// nhau, main() không chạy, script thoát 0 với stdout RỖNG và verify-local in ✓. Máy Windows lại là
+// nơi DUY NHẤT cổng thật sự chạy. tests/ops-ci-guard-windows.test.js chốt lớp lỗi này.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();
