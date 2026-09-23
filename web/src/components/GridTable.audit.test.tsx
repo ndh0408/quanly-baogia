@@ -228,6 +228,24 @@ describe("GRID-04 — tham chiếu vòng bị phát hiện, số đứng yên", 
   });
 });
 
+// ── GRID-03: công thức lỗi → ô đỏ, không lặng lẽ ra 0 ────────────────────────────────────────
+describe("GRID-03 — công thức không tính được thì tô đỏ", () => {
+  it("=E1* rồi Enter → ô đỏ; đỏ còn nguyên sau khi sửa ô khác; sửa lại đúng thì hết đỏ", async () => {
+    const items = [hang("A", "cái", 1, 100000), hang("B", "cái", 1, 250000), hang("C", "cái", 1, 5)];
+    moLuoi(items);
+    goEnter(2, "unitPrice", "=E1*");
+    await xaHen();
+    expect(coDo(2, "unitPrice")).toBe(true);
+    goEnter(0, "unitPrice", "200000");
+    await xaHen();
+    expect(coDo(2, "unitPrice")).toBe(true);
+    goEnter(2, "unitPrice", "=SUM(E1,E2)");
+    await xaHen();
+    expect(items[2].unitPrice).toBe(450000);
+    expect(coDo(2, "unitPrice")).toBe(false);
+  });
+});
+
 // ── GRID-02: đi tới cột STT không dời tiêu điểm → phím gõ kế tiếp đè lên ô CŨ ────────────────
 describe("GRID-02 — vùng chọn nhìn thấy và ô nhận phím không được tách nhau", () => {
   const baHang = () => {

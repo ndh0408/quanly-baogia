@@ -475,17 +475,21 @@ function GridTableInner(props: GridTableProps) {
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) continue; /* GRID-03: công thức lỗi giữ nguyên cờ đỏ do commitCell đặt */ ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
   const peekFx = (fx: string, val: string) => toast(`Công thức: ${fx}  =  ${val}`, "info");
 
+  // Ctrl+Enter / điền vùng gọi commitCell cho cả trăm ô — chỉ báo MỘT lần mỗi nhịp.
+  const fxLoiLucRef = useRef(0);
+  const baoFxLoi = () => { const now = Date.now(); if (now - fxLoiLucRef.current < 1500) return; fxLoiLucRef.current = now; toast("Công thức không tính được — ô viền đỏ. Kiểm tra cú pháp; tách đối số bằng dấu ;", "error"); };
   // commitCell: áp "=" → công thức cho MỌI cột; số/chữ thường ngược lại. Tự bật toggle nhóm khi SL nhóm>1.
   const commitCell = (i: number, f: string, raw: string) => {
     const it = items[i] as Record<string, unknown>; raw = String(raw);
     // Người dùng đã sửa ô → bỏ cờ "công thức Excel chưa dịch được" (ô đỏ) của ô này.
     const fw = it._fxWarn as Record<string, boolean> | undefined;
+    const daDo = !!(fw && fw[f]);   // đã đỏ từ trước (rời ô một công thức lỗi cũ) → không báo lại
     if (fw && fw[f]) { delete fw[f]; if (!Object.keys(fw).length) delete it._fxWarn; }
     if (raw.trim().startsWith("=")) {
       if (!it.formulas) it.formulas = {};
@@ -494,6 +498,10 @@ function GridTableInner(props: GridTableProps) {
       fxVongRef.current = false;
       const v = evalFormula(raw.trim(), refsCho(i));
       ghiCoVong(i, f);
+      // GRID-03: công thức KHÔNG tính được (sai cú pháp "=E1*", hàm lạ "=TONG(…)", chia cho 0…) trước
+      // đây ra 0 và vẫn lưu mà ô không đỏ — đơn giá bằng 0 không một tín hiệu. Excel từ chối chốt
+      // hoặc hiện #VALUE!/#DIV/0!. Ở đây giữ công thức để người dùng sửa, ô tô ĐỎ, báo một lần.
+      if (v === null && NUMERIC.has(f)) { datCoVong(i, f); if (!daDo) baoFxLoi(); }
       it[f] = NUMERIC.has(f) ? (v ?? 0) : (v != null ? M.fmtNumCell(v) : raw.trim());
     } else {
       if (it.formulas) { delete (it.formulas as Record<string, string>)[f]; if (!Object.keys(it.formulas).length) delete it.formulas; }

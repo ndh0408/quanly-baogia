@@ -55,6 +55,13 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   if (!s) return null;
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
+    // DẤU PHẨY CẠNH MỘT THAM CHIẾU Ô LÀ DẤU TÁCH ĐỐI SỐ (GRID-03). Excel ở máy đặt vùng US tách đối số
+    // bằng ",", người dùng gõ theo thói quen: "=SUM(E1,E2)". Bản cũ thay ref thành số TRƯỚC rồi mới
+    // đọc "," là dấu thập phân → "SUM(100000,250000)" = 100000,25 (đúng phải 350000); "=ROUND(G3,2)"
+    // → "123.45,2" không đọc được → đối số bị lọc bỏ → 0, im lặng. Dấu thập phân không bao giờ đứng
+    // sát một chữ cái, nên "," ngay sau hoặc ngay trước một ô/dải là tách đối số, không mơ hồ.
+    // "=E3*1,1" (thập phân giữa hai CHỮ SỐ) không bị đụng.
+    s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*,/g, "$1;").replace(/,\s*(?=\$?[A-Za-z]+\$?\d+)/g, ";");
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
     s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => { const list = refs.range(a, b); return list && list.length ? list.join(";") : "0"; });
     s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
@@ -68,7 +75,11 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
       changed = true;
       const fn = FORMULA_FNS[String(name).toUpperCase()];
       if (!fn) return "NaN";
-      const vals = String(args).split(";").map((a) => evalArith(a)).filter((v): v is number => v !== null && isFinite(v));
+      // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
+      // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
+      let hong = false;
+      const vals = String(args).split(";").filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+      if (hong) return "NaN";
       const r = fn(vals);
       return r === null || !isFinite(r) ? "NaN" : String(r);
     });
