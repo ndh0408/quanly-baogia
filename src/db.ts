@@ -20,6 +20,18 @@ const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upse
 
 const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
 
+// Cột User chỉ mang trạng thái PHIÊN/BẢO MẬT — ghi vào chúng KHÔNG đổi gì mà màn hình nào hiển thị
+// theo danh sách (RT-10). Trước đây mọi lượt đăng nhập, mọi lượt SAI mật khẩu (kể cả của người CHƯA
+// đăng nhập) và mỗi mã TOTP đều emitChange('user','update') → broadcast tới MỌI phiên → mọi tab
+// invalidateQueries() toàn bộ. Người ngoài điều khiển được tải đọc của cả công ty, và mọi phiên thấy
+// nhịp đăng nhập của người khác.
+const USER_COT_PHIEN = new Set(["lastLoginAt", "lastLoginIp", "failedAttempts", "lockedUntil", "mfaLastStep"]);
+export function chiGhiCotPhienUser(model: string, action: string, a: any): boolean {
+  if (model !== "User" || (action !== "update" && action !== "updateMany")) return false;
+  const khoa = a?.data && typeof a.data === "object" ? Object.keys(a.data) : [];
+  return khoa.length > 0 && khoa.every((k) => USER_COT_PHIEN.has(k));
+}
+
 // Prisma 7: kết nối qua driver adapter @prisma/adapter-pg (pg Pool) — engine TS, không còn engine Rust.
 // max: nâng trần kết nối từ mặc định 10/process (dễ thành nút thắt concurrency khi đông user) lên cấu-hình-được
 // qua DB_POOL_MAX (mặc định 20). CHỈ đổi capacity hạ tầng, KHÔNG đổi hành vi nghiệp vụ.
@@ -184,7 +196,7 @@ export const prisma = base.$extends({
 
         // Realtime: sau WRITE vào Quote/Customer/User → bắn SSE (soft-delete đã thành 'update').
         const entity = RT_ENTITY[model];
-        if (entity && RT_WRITES.has(action)) {
+        if (entity && RT_WRITES.has(action) && !chiGhiCotPhienUser(model, action, a)) {
           import("./sse.js").then(({ emitChange }) => emitChange(entity, action, result?.id)).catch(() => {});
         }
         return result;
