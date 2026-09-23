@@ -95,6 +95,14 @@ fi
 [ "${1:-}" = "--kiem-hatang" ] && { printf 'hạ tầng trông như hạ tầng test\n'; exit 0; }
 
 do=0
+# ── ĐIỀU KIỆN CỦA DẤU XANH, CHỤP LÚC BẮT ĐẦU (soát chéo ops#3 + ops#5) ──────────────────────
+# BO_QUA: bước nào bị BỎ QUA vì máy thiếu công cụ (docker, playwright) thì ghi vào đây. Bỏ qua ≠ đỏ
+# (vẫn in vàng, `do` không đổi), nhưng cũng KHÔNG phải "chạy ĐỦ" — dấu xanh không được ghi.
+# SHA_DAU/BAN_DAU: dấu phải gắn với commit và cây LÚC BẮT ĐẦU. Chụp ở cuối thì một commit B chen vào
+# giữa lượt (hoặc cây bẩn lúc đầu rồi bị stash) sẽ nhận dấu dù chưa từng qua đủ các bước.
+BO_QUA=()
+SHA_DAU="$(git rev-parse HEAD 2>/dev/null)"
+BAN_DAU="$(git status --porcelain 2>/dev/null)"
 buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
 
@@ -446,6 +454,7 @@ if [ "$NHANH" -eq 0 ]; then
     ket $ma_ds "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
   else
     printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
+    BO_QUA+=("[11] smoke image — docker không chạy")
   fi
 else
   buoc "[11/13] Bỏ qua smoke image (--nhanh)"
@@ -476,6 +485,7 @@ if [ "$NHANH" -eq 0 ]; then
     ket $ma_ui "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
   else
     printf '  \033[33m— gói playwright chưa cài, bỏ qua smoke giao diện (npm ci)\033[0m\n'
+    BO_QUA+=("[12] smoke giao diện — thiếu playwright")
   fi
 else
   buoc "[12/13] Bỏ qua smoke giao diện (--nhanh)"
@@ -496,6 +506,10 @@ if [ "$NHANH" -eq 0 ]; then
   # BA lượt verify liên tiếp trong khi `npm run scan` chạy riêng thì XANH TOÀN BỘ, và không có
   # cách nào biết đó là "trivy hết giờ vì máy đang bận" hay "có lỗ hổng thật" ngoài việc chạy lại
   # cả hai mươi phút. Giữ `/dev/null` cho ca XANH (bốn bước con in rất dài), ca ĐỎ thì in ra.
+  # Không docker thì security-scan.sh tự lùi về CHỈ SBOM (bỏ gitleaks/trivy/semgrep) mà vẫn thoát 0 —
+  # giữ nguyên hành vi đó cho `npm run scan` chạy riêng, nhưng ở đây ghi nhận là BỎ QUA (ops#3).
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 \
+    || BO_QUA+=("[13] gitleaks/trivy/semgrep — docker không chạy, chỉ còn SBOM")
   log_bm="$(mktemp)"
   bash scripts/ci/security-scan.sh > "$log_bm" 2>&1
   ma_bm=$?
@@ -519,17 +533,29 @@ if [ "$do" -eq 0 ]; then
   # bẩn thì thứ vừa kiểm KHÔNG phải thứ sẽ ship.
   # Nằm trong thư mục git chung (--git-common-dir) chứ không trong cây: không commit nhầm được, và mọi
   # worktree cùng thấy.
-  if [ "$NHANH" -eq 0 ] && [ -z "$(git status --porcelain 2>/dev/null)" ]; then
-    SHA_XANH="$(git rev-parse HEAD 2>/dev/null)"
+  # Soát chéo ops#3: bước bị BỎ QUA (docker/playwright không có) cũng là "chưa chạy đủ".
+  # Soát chéo ops#5: dấu ghi cho commit LÚC BẮT ĐẦU, và chỉ khi cây sạch cả lúc đầu lẫn lúc cuối và HEAD
+  # không đổi giữa lượt.
+  SHA_CUOI="$(git rev-parse HEAD 2>/dev/null)"
+  if [ "$NHANH" -eq 1 ]; then
+    printf '  (--nhanh: KHÔNG ghi dấu xanh cho deploy.sh prod — chạy đủ npm run verify)\n'
+  elif [ ${#BO_QUA[@]} -gt 0 ]; then
+    printf '  \033[33mKHÔNG ghi dấu xanh — các cổng sau CHƯA CHẠY trên máy này:\033[0m\n'
+    printf '  \033[33m  · %s\033[0m\n' "${BO_QUA[@]}"
+    printf '  \033[33m  Bật Docker Desktop (hoặc npm ci) rồi chạy lại; thật sự khẩn thì DEPLOY_KHAN_CAP.\033[0m\n'
+  elif [ -n "$BAN_DAU" ]; then
+    printf '  \033[33m(cây làm việc BẨN lúc bắt đầu: KHÔNG ghi dấu xanh — thứ vừa kiểm không phải một commit; commit hết rồi chạy lại)\033[0m\n'
+  elif [ -z "$SHA_DAU" ] || [ "$SHA_CUOI" != "$SHA_DAU" ]; then
+    printf '  \033[33m(HEAD đổi trong lúc verify (%s → %s): KHÔNG ghi dấu xanh — chạy lại trên commit mới)\033[0m\n' "${SHA_DAU:0:9}" "${SHA_CUOI:0:9}"
+  elif [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    printf '  \033[33m(cây làm việc BẨN lúc kết thúc: KHÔNG ghi dấu xanh — commit hết rồi chạy lại để deploy.sh prod nhận)\033[0m\n'
+  else
+    SHA_XANH="$SHA_DAU"
     THU_MUC_DAU="${QUANLY_VERIFY_DIR:-$(git rev-parse --git-common-dir 2>/dev/null)/quanly-verify}"
-    if [ -n "$SHA_XANH" ] && mkdir -p "$THU_MUC_DAU" 2>/dev/null && \
+    if mkdir -p "$THU_MUC_DAU" 2>/dev/null && \
        printf 'sha=%s\nluc=%s\nnode=%s\nmay=%s\n' "$SHA_XANH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(node -v)" "$(hostname)" > "$THU_MUC_DAU/ok-$SHA_XANH"; then
       printf '  dấu xanh: %s (deploy.sh prod đọc dấu này)\n' "$THU_MUC_DAU/ok-$SHA_XANH"
     fi
-  elif [ "$NHANH" -eq 1 ]; then
-    printf '  (--nhanh: KHÔNG ghi dấu xanh cho deploy.sh prod — chạy đủ npm run verify)\n'
-  else
-    printf '  \033[33m(cây làm việc BẨN: KHÔNG ghi dấu xanh — commit hết rồi chạy lại để deploy.sh prod nhận)\033[0m\n'
   fi
 else
   printf '\n\033[31m❌ CÓ CỔNG ĐỎ — xem các dòng ✗ ở trên\033[0m\n'
