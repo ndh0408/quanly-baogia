@@ -1572,17 +1572,34 @@ function GridTableInner(props: GridTableProps) {
       if (editing) {
         e.preventDefault();
         if (esc && esc.dataset && esc.dataset.escVal != null) {
-          esc.value = esc.dataset.escVal;
+          const escVal = esc.dataset.escVal;
+          esc.value = escVal;
           // Trả cả MODEL về giá trị lúc vào ô rồi tính lại NGAY. onNumInput đã ghi live vào items
           // mỗi lần gõ, nên nếu chỉ trả esc.value thì Thành Tiền/tổng nhóm/Tổng sheet vẫn treo số
           // đang gõ dở cho tới khi rời ô — người dùng thấy tổng sai ngay sau khi bấm Esc.
-          commitCell(i, f, esc.dataset.escVal);
-          recomputeAll();
+          // NHƯNG chỉ khi model THẬT SỰ lệch (soát toàn diện L69): F2 → Esc không gõ gì mà vẫn chạy
+          // commit + recomputeAll + onChange là đánh dấu báo giá "chưa lưu", ghi bản nháp cục bộ, và
+          // tính lại mọi công thức ra số lệch dấu phẩy động (5.637499999999999 thay 5.6375 đã lưu).
+          // Model còn khớp giá trị lúc vào ô → không đụng gì (kể cả không chạy lại công thức, không
+          // gỡ cờ đỏ). Còn lệch → commit như cũ, và chỉ tính lại + báo đổi khi commit có đổi thật —
+          // đúng cách nhánh blur đang làm.
+          const rec = items[i] as Record<string, unknown>;
+          const fxNay = items[i].formulas?.[f];
+          const khopMoc = escVal.trim().startsWith("=") ? fxNay === escVal.trim() : (!fxNay && (NUMERIC.has(f) ? fmtField(i, f, rec[f]) : String(rec[f] ?? "")) === escVal);
+          if (!khopMoc) {
+            const moc = () => JSON.stringify(items[i].formulas || null) + "|" + String(rec[f]);
+            const truoc = moc();
+            // Huỷ phiên gõ trên ô ĐỎ vì tham chiếu hỏng: trả lại công thức gốc thì trả luôn cờ —
+            // commitCell coi đó là người dùng sửa ô và gỡ cờ, ô hỏng thành ô "sạch" im lặng (L8).
+            const coRef = coThamChieuHong(rec, f);
+            commitCell(i, f, escVal);
+            if (coRef && items[i].formulas?.[f] === escVal.trim()) { const c = rec as CoDo; (c._fxWarn || (c._fxWarn = {}))[f] = true; }
+            if (moc() !== truoc) { recomputeAll(); onChange(); }
+          }
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
           // một nhịp rỗng thay vì lùi thao tác thật trước đó.
           const m = editUndoRef.current;
           if (m && m.i === i && m.f === f) { histRef.current.dropMark(); editUndoRef.current = null; }
-          onChange();
         }
         lockCell(esc);
         selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } };
