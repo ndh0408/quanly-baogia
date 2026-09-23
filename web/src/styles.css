@@ -3152,6 +3152,13 @@ textarea[aria-invalid="true"] {
 .modal.import-modal {
   max-width: 1120px;
   width: 96vw;
+  /* NEO MÉP TRÊN (L76): nền mờ căn giữa theo chiều dọc, nên khi phần giới thiệu + vùng kéo thả (~360px)
+     được thay bằng bảng kế hoạch + xem trước (tới 92vh), mép trên nhảy lên (cao mới − cao cũ)/2 — đo ở
+     cửa sổ 950px: 297px → 38px (CLS 0,188), nút ✕ chạy theo. Neo ở đúng chỗ mép trên của hộp cỡ tối đa
+     khi còn căn giữa: 20px padding nền + (100vh − 40px − 92vh)/2 = 4vh → hộp chỉ dài xuống. Chỉ hộp
+     này — .modal-backdrop dùng chung vẫn căn giữa mọi hộp khác. */
+  align-self: start;
+  margin-top: max(0px, calc(4vh - 20px));
 }
 /* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
    dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
