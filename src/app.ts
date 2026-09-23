@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
 import { createLimiter } from "./rateLimit.js";
 import { capNhatDoSauHangDoi } from "./queue.js";
+import { verifyAccessToken } from "./jwt.js";
 import { requestId, notFound, errorHandler, bearerAuth, enforceActiveUser, asyncHandler } from "./middleware.js";
 import { registry, metricsMiddleware, khopTokenBearer } from "./observability.js";
 import { capNhatCongSuatXuat } from "./exportQueue.js";
@@ -345,28 +346,6 @@ export function createApp() {
     next();
   });
 
-  // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
-  // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
-  // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
-  // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC auth/rate-limit nên
-  // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
-  // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
-  //
-  // CHỈ DƯỚI /api (HTTP-01): không đường nào ngoài /api nhận thân request (chỉ có GET tĩnh/SPA/
-  // probe), vậy mà bản trước mount KHÔNG kèm path — POST /bat-ky, /readyz, /metrics với gzip 2MB
-  // được giải nén + JSON.parse trên luồng chính trong khi apiLimiter (chỉ ở /api/) không đếm lượt
-  // nào. Người chưa đăng nhập bơm vô hạn lượt, mỗi lượt ~5ms event loop.
-  app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
-  app.use("/api", decompressBody(2 * 1024 * 1024));
-
-  // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
-  // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
-  // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
-  // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
-  app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
-  app.use("/api", express.json({ limit: "2mb" }));
-  app.use("/api", express.urlencoded({ extended: true, limit: "2mb" }));
-
   const sessionMiddleware = session({
       name: "qly.sid",
       // Tests run against an in-memory store: no PG dependency, no prune timer
@@ -421,6 +400,47 @@ export function createApp() {
     if (coBearer && !coCookiePhien) return next();
     return sessionMiddleware(req, res, next);
   });
+
+  // ── CHƯA CÓ DANH TÍNH THÌ KHÔNG BUNG THÂN 16MB (HTTP-05) ──────────────────────────────────
+  // Nhóm /api/quotes nhận thân tới 16MB (gzip tỉ lệ ~88 lọt trần tỉ lệ nén). Trước bản vá, bộ giải
+  // nén + JSON.parse chạy TRƯỚC mọi bước xác thực: POST /api/quotes KHÔNG cookie vẫn tốn 40-120ms CPU
+  // + vài chục MB heap rồi mới nhận 401 từ requireAuth của router — 120 lượt/phút/IP là 8-24% event
+  // loop, không cần tài khoản. Mọi route dưới /api/quotes (quotes, import, export nền) đều requireAuth,
+  // nên chặn sớm ở đây không đổi kết quả nào cho người dùng thật.
+  // Danh tính = phiên cookie ĐÃ đăng nhập (cổng phiên ngay trên đã nạp) HOẶC access token Bearer HỢP
+  // LỆ (verifyAccessToken chỉ là HMAC, rẻ). Kiểm chữ ký chứ không chỉ kiểm có header — chỉ có header
+  // thì kẻ tấn công thêm "Authorization: Bearer x" là lách được. Người dùng bị khoá/xoá vẫn do
+  // bearerAuth + enforceActiveUser phía sau xử lý như cũ.
+  app.use(["/api/quotes", "/api/quotes/*"], (req: Request, res: Response, next: NextFunction) => {
+    if (CSRF_SAFE_METHODS.has(req.method) || req.session?.userId) return next();
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || "");
+    if (m) {
+      try { verifyAccessToken(m[1]); return next(); } catch { /* token hỏng → như không có */ }
+    }
+    return res.status(401).json({ error: "Chưa đăng nhập" });
+  });
+
+  // Thân request NÉN: client tự nén gói lớn (web/src/lib/api.ts) vì trình duyệt không tự nén thân
+  // GỬI LÊN. Đặt TRƯỚC mọi express.json — xem src/decompressBody.ts.
+  // Trần giải nén ĂN THEO ROUTE, không dùng chung: chỉ nhóm báo giá cần gói lớn (16MB), phần còn
+  // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC bearerAuth/requireAuth nên
+  // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
+  // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
+  //
+  // CHỈ DƯỚI /api (HTTP-01): không đường nào ngoài /api nhận thân request (chỉ có GET tĩnh/SPA/
+  // probe), vậy mà bản trước mount KHÔNG kèm path — POST /bat-ky, /readyz, /metrics với gzip 2MB
+  // được giải nén + JSON.parse trên luồng chính trong khi apiLimiter (chỉ ở /api/) không đếm lượt
+  // nào. Người chưa đăng nhập bơm vô hạn lượt, mỗi lượt ~5ms event loop.
+  app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
+  app.use("/api", decompressBody(2 * 1024 * 1024));
+
+  // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
+  // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
+  // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
+  // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
+  app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
+  app.use("/api", express.json({ limit: "2mb" }));
+  app.use("/api", express.urlencoded({ extended: true, limit: "2mb" }));
 
   // Prometheus metrics middleware (records all requests).
   app.use(metricsMiddleware);
