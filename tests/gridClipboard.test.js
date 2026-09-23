@@ -289,6 +289,18 @@ describe("parseLooseDecimal — cột SỐ LƯỢNG/SỐ NGÀY (số đo, KHÔNG
   });
 });
 
+// GRID-13: Excel định dạng Accounting hiện số âm trong NGOẶC. Bộ lọc ký tự cũ bỏ ngoặc → dòng giảm giá
+// (đơn giá âm) dán ra DƯƠNG, tổng lệch gấp đôi khoản giảm.
+describe("số âm kiểu kế toán '(…)' — GRID-13", () => {
+  it("parseLooseNumber '(1.500.000)' → -1500000", () => expect(parseLooseNumber("(1.500.000)")).toBe(-1500000));
+  it("parseLooseNumber '(1,500,000)' → -1500000", () => expect(parseLooseNumber("(1,500,000)")).toBe(-1500000));
+  it("parseLooseNumber '(95.000 ₫)' → -95000", () => expect(parseLooseNumber("(95.000 ₫)")).toBe(-95000));
+  it("parseLooseDecimal '(2,5)' → -2.5", () => expect(parseLooseDecimal("(2,5)")).toBeCloseTo(-2.5));
+  it("dấu trừ thường vẫn như cũ", () => { expect(parseLooseNumber("-1.500.000")).toBe(-1500000); expect(parseLooseDecimal("-2,5")).toBeCloseTo(-2.5); });
+  it("ngoặc KHÔNG bao trọn giá trị thì không đảo dấu", () => expect(parseLooseNumber("1.500 (VAT)")).toBe(1500));
+  it("'()' rỗng → 0", () => expect(parseLooseNumber("()")).toBe(0));
+});
+
 describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {
   const GN = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
   const NUM = new Set(["quantity", "unitPrice", "days"]);

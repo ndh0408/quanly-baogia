@@ -40,8 +40,21 @@ export function cellsToHTML(matrix: string[][]): string {
   return out + "</table>";
 }
 
+// Số âm kiểu KẾ TOÁN: Excel để định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Bộ lọc
+// ký tự bên dưới bỏ ngoặc nên trước đây số âm bị dán ra DƯƠNG — dòng giảm giá (đơn giá âm) thành
+// dòng cộng thêm, tổng lệch gấp đôi khoản giảm. Nhận ra ngoặc bao TRỌN giá trị thì đảo dấu.
+const AM_KE_TOAN = /^\((.*)\)$/;
+const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
+  const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
+  const m = AM_KE_TOAN.exec(t);
+  return m ? { s: m[1], am: true } : { s: String(s), am: false };
+};
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
+// "(1.500.000)" → -1500000 (âm kiểu kế toán).
 export function parseLooseNumber(s: string): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   s = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
@@ -60,6 +73,8 @@ export function parseLooseNumber(s: string): number {
 // Riêng cột SỐ LƯỢNG / SỐ NGÀY: là SỐ ĐO NHỎ (vd 13.524 m2). 1 dấu "." hoặc "," → THẬP PHÂN
 // (KHÔNG đoán "nghìn" như parseLooseNumber); NHIỀU dấu → ngăn nghìn. Tránh "13.524"→13524.
 export function parseLooseDecimal(s: string): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
