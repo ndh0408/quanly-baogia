@@ -120,8 +120,13 @@ export function docBanNhap(khoa: string, userId?: number): BanNhapCuc | null {
 /**
  * Bản nháp ghi TRƯỚC FE-04 nằm ở khoá kiểu cũ (không có người dùng). Chuyển nguyên văn sang khoá
  * của người đang dùng — giữ lưới an toàn cho ai đang có phần chưa lưu đúng lúc triển khai bản vá.
- * An toàn vì `ghiNhanNguoiDung` đã xoá sạch mọi bản nháp ngay khi một NGƯỜI KHÁC đăng nhập trên máy
- * này, nên bản cũ còn sống tới đây chỉ có thể là của người dùng liên tục của trình duyệt.
+ *
+ * Chỉ an toàn nhờ `ghiNhanNguoiDung` đã chạy trước (app#16):
+ *   · người KHÁC người dùng lần trước đăng nhập → mọi bản nháp đã bị xoá;
+ *   · `lastUser` còn trống (lần đầu sau deploy) mà là một lượt ĐĂNG NHẬP MỚI → không biết khoá cũ là
+ *     của ai, nên khoá cũ đã bị xoá;
+ *   · còn lại là cùng người với lần trước, hoặc danh tính đến từ một phiên CÒN SỐNG lúc khởi động
+ *     (cùng cookie phiên) — bản cũ gần như chắc chắn là của chính người này.
  */
 export function chuyenBanNhapCu(id: string | number, userId: number): void {
   const s = kho();
@@ -143,8 +148,14 @@ const KHOA_NGUOI_CUOI = "quanly:lastUser";
  * nhập khác người dùng lần trước trên trình duyệt này → xoá sạch bản nháp trước khi họ kịp mở gì.
  * Trước đây chỉ Đăng xuất / session:revoked / lớp phủ đổi người mới xoá; màn Login sau khi phiên hết
  * hạn thì không. Trả `true` khi đã xoá.
+ *
+ * `dangNhapMoi` (app#16): lượt đăng nhập từ màn Login / kích hoạt tài khoản, KHÔNG phải khởi động với
+ * phiên còn sống. Lần đầu trên trình duyệt này (`lastUser` còn trống — đúng tình trạng ngay sau khi
+ * triển khai FE-04) thì không biết bản nháp KHOÁ CŨ là của ai: phiên của A hết hạn, B đăng nhập, rồi
+ * `chuyenBanNhapCu` chép nháp của A sang khoá của B. Nên xoá khoá cũ (khoá mới `u<id>:` giữ nguyên).
+ * Khởi động có phiên sẵn thì giữ: cùng cookie phiên, bản cũ gần như chắc chắn là của người này.
  */
-export function ghiNhanNguoiDung(userId: number): boolean {
+export function ghiNhanNguoiDung(userId: number, opts: { dangNhapMoi?: boolean } = {}): boolean {
   const s = kho();
   if (!s) return false;
   let doiNguoi = false;
@@ -152,6 +163,7 @@ export function ghiNhanNguoiDung(userId: number): boolean {
     const cu = s.getItem(KHOA_NGUOI_CUOI);
     doiNguoi = cu != null && cu !== String(userId);
     if (doiNguoi) xoaMoiBanNhap(s);
+    else if (cu == null && opts.dangNhapMoi) xoaBanNhapKhoaCu(s);
     s.setItem(KHOA_NGUOI_CUOI, String(userId));
   } catch {
     /* bỏ qua */
@@ -219,6 +231,22 @@ export function xoaMoiBanNhap(s: Storage | null = kho()): number {
     for (const k of khoas) { try { s.removeItem(k); n++; } catch { /* bỏ qua */ } }
   } catch {
     /* localStorage bị chặn (chế độ riêng tư) — không có gì để xoá */
+  }
+  return n;
+}
+
+/** Xoá các bản nháp KHOÁ CŨ (trước FE-04, không gắn người dùng) — khoá mới `…u<id>:` không đụng. */
+function xoaBanNhapKhoaCu(s: Storage): number {
+  let n = 0;
+  try {
+    const khoas: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && k.startsWith(TIEN_TO) && !/^u\d+:/.test(k.slice(TIEN_TO.length))) khoas.push(k);
+    }
+    for (const k of khoas) { try { s.removeItem(k); n++; } catch { /* bỏ qua */ } }
+  } catch {
+    /* bỏ qua */
   }
   return n;
 }

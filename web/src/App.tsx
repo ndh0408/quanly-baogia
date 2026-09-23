@@ -52,7 +52,9 @@ export function App() {
   const meIdRef = useRef<number | null>(null);
   meIdRef.current = me?.id ?? null;
   useEffect(() => ngheAuth(() => meIdRef.current, () => location.reload()), []);
-  const daDangNhap = (m: Me) => { ghiNhanNguoiDung(m.id); phatDangNhap(m.id); };
+  // app#16: đăng nhập từ màn Login / kích hoạt = lượt ĐĂNG NHẬP MỚI (khác đường khởi động có phiên sẵn
+  // bên dưới) — lần đầu trên trình duyệt thì bản nháp khoá cũ không rõ chủ, bị xoá (xem localDraft.ts).
+  const daDangNhap = (m: Me) => { ghiNhanNguoiDung(m.id, { dangNhapMoi: true }); phatDangNhap(m.id); };
 
   useEffect(() => {
     // `im401`: 401 Ở LẦN DÒ KHỞI ĐỘNG KHÔNG PHẢI LÀ MẤT PHIÊN.
