@@ -18,7 +18,7 @@ import { trungTren } from "../prismaLoi.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
-import { can, canOnQuote, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
   QUOTE_INCLUDE,
@@ -41,7 +41,7 @@ import { sheetKhongDoi } from "../quoteSheetDiff.js";
  *   quote:internal:view → presentQuoteForInternal (chỉ các bảng nội bộ)
  * Cả hai CỐ Ý giấu tên/liên hệ khách, đơn giá bán và subtotal/vat/total.
  */
-const viewBiLuoc = (session: any) => can(session, P.QUOTE_HN_FILL) || can(session, P.QUOTE_INTERNAL_VIEW);
+const viewBiLuoc = (session: any) => biLuocView(session);
 
 /**
  * Tải báo giá theo :id và THROW 403/404 nếu caller không được `action`. Dùng cho sub-resource.
@@ -1942,6 +1942,9 @@ export async function duplicateQuote(req: Request) {
   if (!can(req.session, P.QUOTE_CREATE)) {
     throw httpError(403, "Không có quyền tạo báo giá");
   }
+  // View bị lược thì không nhân bản được (RBAC-06): bản sao là báo giá CỦA HỌ nên GET không còn lược,
+  // và chính phản hồi 201 đã trả presentQuote đầy đủ — một cú bấm là đọc trọn giá bán/khách.
+  if (viewBiLuoc(req.session)) throw httpError(403, "Bạn chỉ được xem phần được giao của báo giá này");
   // Bản sao mang `createdById` + mã dự án của NGƯỜI BẤM (xem phần tạo bản sao bên dưới). Với
   // account phụ thì đó đúng là đường lách "báo giá vẫn của tôi": một cú bấm là báo giá của chủ
   // thành báo giá của họ, mang mã dự án của họ.

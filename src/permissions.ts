@@ -429,6 +429,17 @@ export function resolveUserPermissions(role: string | undefined, userPerms?: str
   return [...set];
 }
 
+/**
+ * VIEW BỊ LƯỢC: tài khoản có `quote:hn:fill` hoặc `quote:internal:view` chỉ được thấy PHẦN ĐƯỢC GIAO
+ * của báo giá (presentQuoteForAccountHn / presentQuoteForInternal giấu giá bán, khách, tổng).
+ * MỘT hàm cho mọi đường có thể lộ báo giá đầy đủ — GET chi tiết, lịch sử phiên bản, XUẤT FILE (đồng
+ * bộ + nền + tải lại qua khoá exports/), NHÂN BẢN — vì quyền cấp per-user nên tổ hợp
+ * "internal:view + export" tích được trên ma trận mà không có cảnh báo nào (RBAC-06).
+ */
+export function biLuocView(session: SessionLike) {
+  return can(session, PERMISSIONS.QUOTE_HN_FILL) || can(session, PERMISSIONS.QUOTE_INTERNAL_VIEW);
+}
+
 /** Does this role hold the given permission? (`:all` implies `:own`.) Giữ cho các đường chỉ có role. */
 export function roleCan(role: string | undefined, permission: string) {
   const set = effectiveRoleSet(role);

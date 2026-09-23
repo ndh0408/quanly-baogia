@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, requireAuth } from "../middleware.js";
-import { canOnQuote, requirePermission, PERMISSIONS as P } from "../permissions.js";
+import { canOnQuote, biLuocView, requirePermission, PERMISSIONS as P } from "../permissions.js";
 import { validate, MAX_EXPORT_SHEETS, MAX_EXPORT_ITEMS } from "../validators.js";
 import { buildQuoteBuffer } from "../excel.js";
 import { renderQuotePdf } from "../pdf.js";
@@ -115,6 +115,8 @@ router.get(
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
     }
+    // View bị lược không được tải bản đầy đủ, kể cả khi có quote:export per-user (RBAC-06).
+    if (biLuocView(req.session)) return res.status(403).json({ error: "Bạn chỉ được xem phần được giao của báo giá này" });
     if (exportTooBig(quote)) {
       return res.status(413).json({ error: "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng xuất nền (async)" });
     }
@@ -164,6 +166,8 @@ router.get(
     if (!canOnQuote(req.session, "read", quote)) {
       return res.status(403).json({ error: "Bạn không có quyền tải báo giá này" });
     }
+    // View bị lược không được tải bản đầy đủ, kể cả khi có quote:export per-user (RBAC-06).
+    if (biLuocView(req.session)) return res.status(403).json({ error: "Bạn chỉ được xem phần được giao của báo giá này" });
     if (exportTooBig(quote)) {
       return res.status(413).json({ error: "Báo giá quá lớn để xuất trực tiếp — vui lòng dùng xuất nền (async)" });
     }

@@ -8,7 +8,7 @@ import { asyncHandler, requireAuth, requireRole } from "../middleware.js";
 import { validate } from "../validators.js";
 import { putObject, presignDownload, presignUpload, deleteObject, isStorageEnabled, headObject, getObjectHeadBytes, getObjectBytes, copyObject } from "../storage.js";
 import { audit } from "../audit.js";
-import { canOnQuote, can, requirePermission, PERMISSIONS as P } from "../permissions.js";
+import { canOnQuote, can, biLuocView, requirePermission, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 import { inspectXlsx } from "../zipSafety.js";
 
@@ -130,7 +130,7 @@ async function canAccessKey(session: Request["session"], key: unknown) {
     // đúng để GIẤU họ bảng giá đầy đủ: ai biết/đoán được khoá `exports/<số>-<ms>.xlsx` là ký được
     // URL tải bản Excel giá đầy đủ, đi vòng qua chốt duy nhất mà hai đường kia có. Ba đường tới cùng
     // một file phải có cùng điều kiện, nếu không đường yếu nhất định nghĩa mức bảo vệ thật.
-    return !!quote && canOnQuote(session, "read", quote) && can(session, P.QUOTE_EXPORT);
+    return !!quote && canOnQuote(session, "read", quote) && can(session, P.QUOTE_EXPORT) && !biLuocView(session);
   }
   return false;
 }

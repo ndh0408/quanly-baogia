@@ -7,7 +7,7 @@ import { validate } from "../validators.js";
 import type { Job } from "bullmq";
 import { getQueue, QUEUES, isQueueEnabled, xepViecCoHan } from "../queue.js";
 import { isStorageEnabled } from "../storage.js";
-import { can, canOnQuote, PERMISSIONS as P } from "../permissions.js";
+import { can, canOnQuote, biLuocView, PERMISSIONS as P } from "../permissions.js";
 import { createLimiter } from "../rateLimit.js";
 
 const router = Router();
@@ -54,6 +54,8 @@ router.post(
     if (!can(req.session, P.QUOTE_EXPORT)) {
       return res.status(403).json({ error: "Bạn không có quyền xuất báo giá" });
     }
+    // Cùng chốt với xuất đồng bộ (RBAC-06).
+    if (biLuocView(req.session)) return res.status(403).json({ error: "Bạn chỉ được xem phần được giao của báo giá này" });
     const q = getQueue(QUEUES.EXPORT);
     // LỜI NHẮN CŨ LÀ MỘT VÒNG CỤT. Nó bảo "vui lòng dùng chức năng xuất file trực tiếp" — mà người
     // dùng tới được đây CHÍNH VÌ đường trực tiếp vừa từ chối họ bằng 413 (báo giá quá lớn).
