@@ -140,6 +140,8 @@ const schema = z.object({
   // 0 là giá trị HỢP LỆ và có nghĩa, còn số ÂM thì `days(-n)` cho ra mốc trong TƯƠNG LAI, tức
   // xoá sạch — phải chết ngay lúc khởi động thay vì im lặng.
   RETAIN_EXPORT_DAYS: numEnv(z.coerce.number().int().nonnegative().default(0)),
+  // Thông báo ĐÃ ĐỌC cũ hơn N ngày thì xoá (DB-09). Thông báo CHƯA đọc không bao giờ bị xoá.
+  RETAIN_NOTIF_DAYS: numEnv(z.coerce.number().int().positive().default(180)),
 
   // Kích thước pool kết nối Postgres CỦA MỘT TIẾN TRÌNH (src/db.ts). Nhân với số instance app +
   // worker phải còn nằm dưới max_connections của Postgres.
