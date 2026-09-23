@@ -1281,6 +1281,10 @@ export async function listProjects(req: Request) {
           signedAt: true, signedByName: true, invoiceNo: true, paidAt: true,
           poNumber: true, hnInvoiceNo: true, invoiceLink: true, docSentAt: true, docReturnedAt: true,
           invoiceDate: true, paymentMethod: true, orderClosedAt: true, invoiceYear: true, invoiceCompany: true, invoiceDesc: true, invoiceNote: true,
+          // Ý kiến khách theo TRANG (FE-09): trang Hoá đơn / Dự án / "Cần xử lý" phải loại trang khách
+          // "Không duyệt" khỏi Số tiền, Chưa thu, Tổng — đúng như convertedTotal đã loại. Thiếu cột này
+          // thì bộ lọc phía giao diện không có gì để lọc.
+          custStatus: true,
           template: { select: { company: { select: { shortName: true, name: true } } } },
         },
       },
@@ -1338,6 +1342,7 @@ export async function listProjects(req: Request) {
           name: sh.name || null,
           codeNo: sh.codeNo ?? null,      // số thứ tự mã ĐÃ ĐÓNG BĂNG (trang Dự án / Hoá đơn dựng mã từ đây)
           subtotal: Number(sh.subtotal),
+          custStatus: sh.custStatus ?? null,   // "approved" | "rejected" | null — xem chú thích ở select (FE-09)
           hcm: sumCat("hcm"),
           hanoi: sIdx === 0 ? tongHnBaoGia : 0,
           khach: sumCat("khach"),
