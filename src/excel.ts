@@ -249,6 +249,16 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
   const row = ws.getRow(rowNum);
   row.height = Math.max(row.height || 0, rowPx * 0.75);   // px → pt (1pt = 4/3px)
   const c0 = colLetterToIdx(colLetter);
+  // TOẠ ĐỘ GỐC (EMU), KHÔNG ĐƯA PHÂN SỐ HÀNG CHO EXCELJS QUY ĐỔI (L39).
+  // Bản cũ đặt `tl.row = hàng-1 + k/n + 0.015`. Setter `Anchor.row` của ExcelJS 4.4.0
+  // (node_modules/exceljs/lib/doc/anchor.js) đổi phần lẻ ra EMU theo `row.height * 10000`, trong khi
+  // DrawingML tính 1pt = 12700 EMU ⇒ mọi độ lệch dọc chỉ còn ~78,7% dự tính, còn `ext` (9525 EMU/px)
+  // thì đúng — nên các tầng bị kéo sát lại và CHỒNG nhau. Đo bằng Excel thật: 2 ảnh vuông trong hàng
+  // 120pt đè nhau 8,3pt; 10 ảnh dồn lên trên, đáy hàng 405pt trống ~77pt. Nay tự tính EMU: tầng k
+  // bắt đầu ở k/n chiều cao hàng THẬT (≥ rowPx vì Math.max ở trên ⇒ mỗi tầng ≥ box+6 px, ảnh cao
+  // ≤ box ⇒ giữa hai ảnh luôn còn ≥ 6px, ảnh cuối kết thúc trước đáy hàng).
+  const EMU_MOI_PT = 12700, EMU_MOI_PX = 9525;
+  const tangEmu = (Number(row.height) * EMU_MOI_PT) / n;
   for (let k = 0; k < n; k++) {
     const m = list[k];
     let extension = m[1].toLowerCase(); if (extension === "jpg") extension = "jpeg";
@@ -258,10 +268,10 @@ function insertItemImages(ws: any, colLetter: string, rowNum: number, images: an
       let w = box, h = box;
       if (d && d.w > 0 && d.h > 0) { const s = Math.min(box / d.w, box / d.h); w = Math.max(8, Math.round(d.w * s)); h = Math.max(8, Math.round(d.h * s)); }
       const imageId = ws.workbook.addImage({ buffer, extension });
-      // tl.row: tầng k trên n tầng — fraction của CHIỀU CAO HÀNG THẬT (≥ rowPx vì Math.max ở trên)
-      // → mỗi tầng ≥ box+6 px, ảnh cao ≤ box → không chạm nhau. tl.col cố định (không offset ngang).
+      // Tầng k: đỉnh = k × (chiều cao hàng / n) + 2px đệm. Ngang: lệch 1px vào trong ô (bằng
+      // `col + 0.05` cũ ở cột rộng 19).
       ws.addImage(imageId, {
-        tl: { col: c0 + 0.05, row: rowNum - 1 + k / n + 0.015 },
+        tl: { nativeCol: c0, nativeColOff: EMU_MOI_PX, nativeRow: rowNum - 1, nativeRowOff: Math.round(k * tangEmu + 2 * EMU_MOI_PX) },
         ext: { width: w, height: h },
         editAs: "oneCell",
       });
