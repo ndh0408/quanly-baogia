@@ -26,22 +26,21 @@ const RONG: never[] = [];
 // Sheet cũng mang `_k` (danh tính trong phiên soạn): lưới chính, ô Discount và ExtraTables lấy nó làm
 // `key`. Key theo CHỈ SỐ sheet thì xoá sheet đang mở (chỉ số giữ nguyên, sheet dưới trượt lên) để lại
 // instance lưới CŨ cùng ngăn Ctrl+Z của sheet đã xoá — Ctrl+Z chép hàng sheet đó đè lên sheet khác
-// (soát toàn diện L53/L0). Không ghi đè `_k` sẵn có: `giuDanhTinhSheet` đã nối nó từ bản trước.
-const stampKeys = (q: QuoteFull) => {
-  (q.sheets as Sheet[] | undefined)?.forEach((s) => {
-    if (s._k == null) s._k = nextK();
+// (soát toàn diện L53/L0). Luôn đóng `_k` MỚI: `_k` đi kèm bản nháp (JSON của phiên trước) có thể trùng
+// bộ đếm nextK của phiên này → hai sheet chung key.
+//
+// `cu`: thay qRef bằng bản máy chủ (sau Lưu / chốt / không chốt / nạp lại HN) mà sheet VẪN LÀ sheet đó
+// thì nối lại `_k` của bản trước — không thì lưới bị gắn lại và mất lịch sử Ctrl+Z qua mốc Lưu (hành vi
+// sẵn có). Sau Lưu máy chủ xoá-tạo-lại sheet (id mới) nhưng giữ đúng thứ tự payload → nối theo VỊ TRÍ;
+// các đường khác nối theo id (id lệch = người khác đã lưu, nội dung đã khác → gắn lại lưới là đúng).
+const stampKeys = (q: QuoteFull, cu?: QuoteFull | null, theoViTri = false) => {
+  const b = (q.sheets as Sheet[] | undefined) || [];
+  b.forEach((s) => {
+    s._k = nextK();
     (s.items || []).forEach((it) => { (it as ItemK)._k = nextK(); });
   });
-};
-/**
- * Thay qRef bằng bản máy chủ (sau Lưu / chốt / không chốt / nạp lại HN) mà sheet VẪN LÀ sheet đó thì
- * giữ `_k` cũ — không thì lưới bị gắn lại và mất lịch sử Ctrl+Z qua mốc Lưu (hành vi sẵn có). Sau Lưu
- * máy chủ xoá-tạo-lại sheet (id mới) nhưng giữ đúng thứ tự payload → nối theo VỊ TRÍ; các đường khác
- * nối theo id (id lệch = người khác đã lưu, nội dung đã khác → gắn lại lưới là đúng).
- */
-const giuDanhTinhSheet = (cu: QuoteFull | null, moi: QuoteFull, theoViTri: boolean) => {
-  const a = (cu?.sheets as Sheet[] | undefined) || [];
-  const b = (moi.sheets as Sheet[] | undefined) || [];
+  if (!cu) return;
+  const a = (cu.sheets as Sheet[] | undefined) || [];
   const viTri = theoViTri && a.length === b.length;
   b.forEach((s, i) => {
     const g = viTri ? a[i] : a.find((x) => x.id != null && x.id === s.id);
@@ -740,9 +739,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
         vanTayMainRef.current = vanTayMain(saved); vanTayHnRef.current = vanTayHnNoiDung(saved.hnTables);
-        const moi = { ...saved, _activeSheet: ai } as QuoteFull;
-        giuDanhTinhSheet(q, moi, true);
-        qRef.current = moi; stampKeys(qRef.current); redraw();
+        qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current, q, true); redraw();
         // MỐC của bản nháp phải đi theo bản máy chủ VỪA lưu. `baseNhapRef` chỉ được gán một lần
         // lúc nạp; không làm tươi ở đây thì mọi bản nháp ghi SAU lần Lưu đầu tiên đều mang
         // `baseUpdatedAt` CŨ, và điều kiện `nhapCu.baseUpdatedAt === baseNhapRef.current` ở đường
@@ -859,10 +856,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       }
       const u = await api.markConverted(q.id);
       vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
-      const moi = { ...u, _activeSheet: ai } as QuoteFull;
-      giuDanhTinhSheet(q, moi, false);
-      qRef.current = moi;
-      stampKeys(qRef.current);
+      qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
+      stampKeys(qRef.current, q);
       // Chốt ghi vào hàng Quote → updatedAt đổi. Mốc bản nháp phải theo, không thì bản nháp ghi sau
       // này mang mốc cũ và lần mở sau bị bỏ qua im lặng.
       baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
@@ -885,7 +880,7 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null || !songRef.current) return;   // L61: markLost KHÔNG đảo lại được
-    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); const moi = { ...u, _activeSheet: ai } as QuoteFull; giuDanhTinhSheet(q, moi, false); qRef.current = moi; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current, q); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
@@ -905,9 +900,7 @@ Lý do (không bắt buộc):`,
       const u = await api.getQuote(cur.id);
       if (!dirtyRef.current) {
         vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
-        const moi = { ...u, _activeSheet: cur._activeSheet } as QuoteFull;
-        giuDanhTinhSheet(cur, moi, false);
-        qRef.current = moi; stampKeys(qRef.current);
+        qRef.current = { ...u, _activeSheet: cur._activeSheet } as QuoteFull; stampKeys(qRef.current, cur);
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
       }

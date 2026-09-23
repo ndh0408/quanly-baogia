@@ -60,6 +60,7 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { QuoteEditorPage } from "./QuoteEditor";
+import { khoaBanNhap, ghiBanNhap } from "../lib/localDraft";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
 
@@ -155,6 +156,24 @@ describe("L53/L0 — xoá sheet rồi Ctrl+Z không được ghi đè sheet KHÁ
     await ctrlZ();
     expect(o(0, "name").value).toBe("Backdrop A");
     expect(tabDangMo()).toContain("A");
+  });
+});
+
+describe("L53 — `_k` đi kèm bản nháp (phiên trước) không được dùng làm danh tính sheet", () => {
+  it("bản nháp khôi phục mang `_k` trùng nhau / trùng bộ đếm phiên này → xoá A rồi Ctrl+Z vẫn không đè B", async () => {
+    // Bản nháp là JSON của qRef phiên TRƯỚC — `_k` trong đó đếm theo bộ đếm của phiên ấy, có thể trùng
+    // `_k` phiên này cấp cho sheet khác. Dựng thẳng ca xấu nhất: hai sheet cùng một `_k`.
+    const nhap = baoGia({ sheets: [
+      { ...trang(101, "A", "Backdrop A", 1000), _k: 42 },
+      { ...trang(102, "B", "Banner B", 5000), _k: 42 },
+    ] });
+    ghiBanNhap(khoaBanNhap(11, 1), nhap, "2026-09-20T00:00:00.000Z", 1);
+    await moEditor();                                                // confirmModal → true: Khôi phục
+    await suaTen("Backdrop A đã sửa");
+    await xoaSheet(0);
+    await ctrlZ();
+    expect(o(0, "name").value).toBe("Banner B");
+    expect(await luuVaDocPayload()).toEqual(["102:B:Banner B"]);
   });
 });
 
