@@ -158,6 +158,9 @@ export async function listPersonnel(req: Request) {
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
 // Account / CTY. Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
 // người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
+/** Trần số báo giá của ô chọn dự án (DB-12). */
+export const TRAN_CHON_DU_AN = 300;
+
 export async function listProjects(req: Request) {
   const { q } = req.query as any;
   const where: Record<string, any> = { status: "converted", deletedAt: null };
@@ -171,7 +174,7 @@ export async function listProjects(req: Request) {
     { quoteNumber: { contains: q, mode: "insensitive" } },
   ];
   const quotes = await prisma.quote.findMany({
-    where, take: 300, orderBy: { createdAt: "desc" },
+    where, take: TRAN_CHON_DU_AN, orderBy: { createdAt: "desc" },
     select: {
       quoteNumber: true, projectCode: true, projectVersion: true, title: true,
       company: { select: { name: true } },
@@ -192,7 +195,8 @@ export async function listProjects(req: Request) {
       });
     });
   }
-  return { data };
+  // Chạm trần thì dự án cũ hơn không có trong ô chọn — báo để giao diện nhắc gõ thêm từ khoá (DB-12).
+  return { data, truncated: quotes.length >= TRAN_CHON_DU_AN };
 }
 
 /**

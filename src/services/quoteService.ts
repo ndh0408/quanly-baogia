@@ -1197,6 +1197,9 @@ export async function getQuote(req: Request) {
  * PROJECTS (admin) — báo giá ĐÃ DUYỆT cho trang "Quản lý dự án", kèm breakdown theo
  * từng sheet (tên + subtotal). ⚠️ GIỮ NGUYÊN take:2000 (chỉ DI CHUYỂN, không đổi).
  */
+/** Trần số báo giá của trang Quản lý dự án / Hoá đơn (DB-12 — xem cờ `truncated` ở cuối hàm). */
+export const TRAN_DU_AN = 2000;
+
 export async function listProjects(req: Request) {
   // CHỈ Admin (user:manage) → xem TẤT CẢ dự án đã duyệt. Mọi người khác — kể cả người có
   // canSign (vd Lan Anh) lẫn quản lý thường → CHỈ XEM dự án đã duyệt do CHÍNH MÌNH tạo.
@@ -1213,7 +1216,7 @@ export async function listProjects(req: Request) {
     // Safety cap: this endpoint pulls every sheet+item into memory to compute
     // per-sheet subtotals. Bound it so a very large history can't blow up RAM
     // (newest 2000 approved projects; raise + paginate if ever needed).
-    take: 2000,
+    take: TRAN_DU_AN,
     select: {
       id: true, quoteNumber: true, projectCode: true, projectVersion: true,
       title: true, shortTitle: true, status: true, hnStatus: true,
@@ -1321,7 +1324,9 @@ export async function listProjects(req: Request) {
       }),
     };
   });
-  return { data };
+  // BÁO KHI BỊ CẮT (DB-12): chạm trần thì dự án cũ nhất biến mất khỏi trang Hoá đơn/Quản lý dự án
+  // (công nợ cũ chưa thu) mà không có dấu hiệu nào. Cờ này để giao diện hiện cảnh báo.
+  return { data, truncated: quotes.length >= TRAN_DU_AN };
 }
 
 /**
