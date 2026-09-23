@@ -955,7 +955,10 @@ function GridTableInner(props: GridTableProps) {
     const images = showImages && rc.c1 > rc.c0 && FIELDS.slice(rc.c0, rc.c1 + 1).includes("name")
       ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => [...((items[rc.r0 + k]?.images || []) as string[])])
       : undefined;
-    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images })); } catch { /* */ }
+    // qexact: cờ SL CHÍNH XÁC (quantityExact — SL 4 số lẻ nạp từ Excel) của từng hàng. Không mang theo thì
+    // hàng dán tính Thành Tiền theo SL làm tròn 1 số lẻ: 0,9075 × 1.000.000 ra 900.000 (soát toàn diện L19).
+    const qexact = Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => !!items[rc.r0 + k]?.quantityExact);
+    try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images, qexact })); } catch { /* */ }
     copyBufRef.current = { tsv, token, kinds, labels, c0: rc.c0, r0: rc.r0 };
     // CẮT kiểu Excel: chưa xoá gì — chỉ đánh dấu vùng nguồn (viền nét đứt). Dán xong mới xoá
     // nguồn (= DI CHUYỂN); Esc huỷ cắt. Copy thường thì bỏ dấu cắt cũ (nếu có).
@@ -985,6 +988,7 @@ function GridTableInner(props: GridTableProps) {
         const f = FIELDS[c];
         if (RO_FIELDS.has(f)) continue;   // STT là ô tính — ghi vào là để lại thuộc tính rác `_stt` trên hạng mục
         it[f] = NUMERIC.has(f) ? 0 : ""; boCoO(it, f);
+        if (f === "quantity") delete it.quantityExact;   // SL đã dời đi — gõ lại SL ở hàng trống này là số thường (L19)
         const fx = it.formulas as Record<string, string> | undefined;
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
       }
@@ -1243,8 +1247,15 @@ function GridTableInner(props: GridTableProps) {
     const COL_NAME = FIELDS.indexOf("name");   // cột DỮ LIỆU đầu tiên (FIELDS[0] là "_stt", ô tính)
     let startCol = f0 && FIELDS.includes(f0) ? FIELDS.indexOf(f0) : (sel ? rectOf(sel)!.c0 : COL_NAME);
     if (RO_FIELDS.has(FIELDS[startCol])) startCol = COL_NAME;   // vùng chọn bắt đầu ở cột STT → dán từ Hạng Mục
-    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][] } | null = null;
+    let internal: { token: number; kinds?: string[]; labels?: string[]; tsv?: string; cols?: number; c0?: number; r0?: number; fields?: string[]; images?: string[][]; qexact?: boolean[] } | null = null;
     try { const raw = e.clipboardData.getData("application/x-quanly-grid"); if (raw) internal = JSON.parse(raw); } catch { /* */ }
+    // SL chép TỪ ô SL trong app → cờ SL chính xác theo hàng nguồn (L19): nguồn có cờ thì bật, nguồn là
+    // hàng thường thì bỏ (dán đè lên hàng đang có cờ). Dán từ ngoài / từ cột khác thì không đụng cờ.
+    const coSlTheoNguon = (ri: number, r: number, f: string, fSrc: string | undefined) => {
+      if (f !== "quantity" || fSrc !== "quantity" || !internal?.qexact) return;
+      const it = items[ri] as Record<string, unknown> | undefined; if (!it) return;
+      if (internal.qexact[r]) it.quantityExact = true; else delete it.quantityExact;
+    };
     // Số THÔ (Number()) chỉ đúng khi ô NGUỒN là trường số: cellRawForCopy xuất String(number) cho
     // SL/Đơn giá/Ngày, còn ô chữ (Ghi chú gõ "95.000") và ô tính (Thành tiền đã gom nghìn) đi
     // nguyên văn — đọc chúng bằng Number() thì "95.000" thành 95, Đơn giá hụt 1000 lần (soát chéo
@@ -1304,7 +1315,7 @@ function GridTableInner(props: GridTableProps) {
       };
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
-        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, ...dich1(r, FIELDS[c]), soThoNguon(0), quGoc(0, 0), moHo); }   // GRID-15: STT là ô tính, không ghi
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, ...dich1(r, FIELDS[c]), soThoNguon(0), quGoc(0, 0), moHo); coSlTheoNguon(r, 0, FIELDS[c], fSrc1); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
@@ -1316,7 +1327,7 @@ function GridTableInner(props: GridTableProps) {
       if (f0 && NUMERIC.has(f0)) {
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
-        pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), moHo);
+        pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), moHo); coSlTheoNguon(i0, 0, f0, fSrc1);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
@@ -1458,6 +1469,7 @@ function GridTableInner(props: GridTableProps) {
         // Giá trị gốc của CHÍNH ô (HTML) đứng trên quy ước suy từ cả khối: SL "2.675" cạnh giá "250.000"
         // mà gốc là 2,675 thì đọc 2,675, không theo khối VN ra 2675.
         pasteCellVal(ri, f, val, dR, dC, soThoNguon(c), quGoc(r, c) ?? quDan, moHo);
+        coSlTheoNguon(ri, r, f, internal?.fields?.[c]);
       });
     });
     // Vùng đích: ghép theo tên / theo thứ tự hiển thị thì là các cột thật sự được ghi, còn lại tính theo số cột.
