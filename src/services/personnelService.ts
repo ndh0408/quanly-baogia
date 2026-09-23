@@ -124,7 +124,9 @@ export async function listPersonnel(req: Request) {
     prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
   const luongGiaiMa = (r: any) => {
-    const v = decodePiiOnRead("PersonnelRecord", r as any)?.salary;
+    // Qua decodePiiList (không ném): một hàng hỏng không làm sập cả trang + tổng lương (FILE-12);
+    // hàng đó tính như chưa có lương và tự mang cờ piiLoi ở danh sách.
+    const v = decodePiiList("PersonnelRecord", [r])[0]?.salary;
     return v == null || v === "" ? null : Number(v);
   };
   let data = dataTheoCot;
