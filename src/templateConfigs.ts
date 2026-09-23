@@ -329,7 +329,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 // ===== GN (không ngày) — bản BANNER =====
 // Y HỆT GN không ngày (cùng cột/công thức/cách xuất), CHỈ khác
 // ── FILE MẪU: `templates/Marico_Decor.xlsx`, kế thừa qua phép spread bên dưới. KHÔNG phải
-// GN_KhongNgay.xlsx như chú thích cũ ghi — `src/excel.ts:1704` đọc `cfg.filePath`, tức đường dẫn
+// GN_KhongNgay.xlsx như chú thích cũ ghi — `src/excel.ts` (chỗ đọc `cfg.filePath`) đọc `cfg.filePath`, tức đường dẫn
 // trong config này, chứ KHÔNG đọc `QuoteTemplate.filePath` dưới CSDL. Nên nhãn "Ms." nhúng cứng
 // ở B3/E3 của Marico_Decor.xlsx dính CẢ gn_banner, và bản vá xoá nhãn cũng theo spread mà sang.
 // cách đánh STT: NHÓM CON đánh số 1,2,3… (reset theo từng nhóm chính), các MỤC bên dưới

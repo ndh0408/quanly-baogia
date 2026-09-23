@@ -449,7 +449,7 @@ Storage Adapter → kho object S3-compatible
 > Redis**:
 >
 > - `src/app.ts:11` — `import connectPgSimple from "connect-pg-simple";`
-> - `src/app.ts:345-367` — `session({ store: new PgSession({ conObject: conObjectPhien(),
+> - `src/app.ts` (khối `sessionMiddleware`) — `session({ store: new PgSession({ conObject: conObjectPhien(),
 >   createTableIfMissing: true, tableName: "user_sessions", pruneSessionInterval: 60 * 60 }) })`
 > - Toàn repo **không có** `connect-redis`: không trong `package.json`, không trong `src/`.
 >
@@ -1021,8 +1021,8 @@ nay chỉ còn đúng một nửa:
 | `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:862` |
 | `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx` (hai hàm cùng tên) |
 | Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
-| Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1027` |
-| `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx:1187` |
+| Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx` (grep `dangGoIME(e)`) |
+| `dropMark()` khi Esc huỷ phiên gõ | `web/src/components/GridTable.tsx` (grep `dropMark()`) |
 | `addImages` — **chỗ duy nhất chưa có cổng** | `web/src/components/GridTable.tsx:1653` |
 
 Mỗi dòng ghi ĐỦ đường dẫn, không phải `:257` trần — `npm run check:refs` chỉ kiểm được số

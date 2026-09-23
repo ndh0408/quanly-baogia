@@ -219,7 +219,7 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 bám theo **phạm vi ĐỌC**, không theo `employee:edit:*`. `:own` trong TÊN QUYỀN `employee:edit:own` /
 `employee:delete:own` vẫn không phải phạm vi dữ liệu; phạm vi dữ liệu do `assertEmployeeInReadScope`
 (`src/services/employeeService.ts`) áp bằng `employee:read:*`. Vì EMPLOYEE nền — và MANAGER/ADMIN kế
-thừa — đều có `employee:read:all` (`src/permissions.ts:266`), sửa/xoá chéo **không đổi**; chỉ tập
+thừa — đều có `employee:read:all` (`src/permissions.ts`, hằng `EMPLOYEE`), sửa/xoá chéo **không đổi**; chỉ tập
 quyền per-user bị bó về `employee:read:own` mới hết PUT/DELETE mục người khác. Bỏ chốt đó thì `PUT`
 chính là một kênh **ĐỌC PII đầy đủ** — nó trả bản ghi đã giải mã và body rỗng `{}` vẫn hợp lệ, nên
 chặn `GET` mà để ngỏ `PUT` là hàng rào rỗng. Xem `src/routes/employees.routes.ts`.

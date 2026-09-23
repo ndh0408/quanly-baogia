@@ -14,7 +14,7 @@
  * ba khoá nội dung ["data","payload","body"] trong `extra`, nên `extra.path` đi thẳng.
  *
  * ── VÌ SAO ĐÁNG COI LÀ BẢO MẬT ──────────────────────────────────────────────
- * Token nằm NGAY TRONG ĐƯỜNG DẪN: GET /api/auth/invite/:token (src/routes/auth.routes.ts:261).
+ * Token nằm NGAY TRONG ĐƯỜNG DẪN: GET /api/auth/invite/:token (src/routes/auth.routes.ts, route `/invite/:token`).
  * Nó là đầu vào DUY NHẤT của POST /api/auth/accept-invite — ai đọc được là ĐẶT LẠI ĐƯỢC MẬT KHẨU,
  * tức chiếm tài khoản. Bất kỳ 5xx nào trên route đó đẩy token nguyên văn vào stdout container và
  * sang Sentry — hai tầng lưu trữ có vòng đời và quyền đọc khác hẳn CSDL.

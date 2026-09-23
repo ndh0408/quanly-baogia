@@ -39,6 +39,21 @@ describe("DEP-03 — gói được import phải được khai", () => {
   });
 });
 
+describe("DEP-10 / DEP-12 — công cụ dev không vào image production", () => {
+  it("tsx và pino-pretty là devDependency (image chạy dist/, logger chỉ dùng pino-pretty ngoài production)", () => {
+    for (const g of ["tsx", "pino-pretty"]) {
+      expect(pkg.dependencies[g], `${g} nằm ở dependencies → vào image production`).toBeUndefined();
+      expect(pkg.devDependencies[g]).toBeTruthy();
+    }
+  });
+  it("logger không sập khi thiếu pino-pretty (image chạy với NODE_ENV khác production)", () => {
+    expect(doc("src/logger.ts")).toMatch(/transport: isProd \|\| !coPinoPretty\(\)/);
+  });
+  it("@types/bcryptjs (stub thừa — bcryptjs 3 tự mang typings) đã gỡ", () => {
+    expect(pkg.devDependencies["@types/bcryptjs"]).toBeUndefined();
+  });
+});
+
 describe("DEP-04 — một phiên bản Node, ghim digest", () => {
   const nodeImage = /^ARG NODE_IMAGE=(\S+)$/m.exec(doc("Dockerfile"))?.[1] ?? "";
   const major = (s) => /(\d+)/.exec(s)?.[1];

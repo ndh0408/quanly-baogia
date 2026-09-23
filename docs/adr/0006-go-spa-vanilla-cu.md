@@ -41,7 +41,7 @@ React không có:
    payload sheet **không có `id: s.id`**. Lưu báo giá = xoá sheet rồi tạo lại, nên
    `updateQuote` phải bê `SHEET_CARRY_FIELDS` (`invoiceNo`, `paidAt`, `signedAt`,
    `custStatus`, `poNumber`, `hnInvoiceNo`… — 22 trường ở
-   `src/quoteUtils.ts:403`) sang bản mới. Không có `id`, nó phải ghép **theo vị
+   `src/quoteUtils.ts`, hằng `SHEET_CARRY_FIELDS`) sang bản mới. Không có `id`, nó phải ghép **theo vị
    trí**; thêm sheet, xoá sheet hay đổi thứ tự là các mốc đó bê nhầm sheet hoặc
    mất trắng.
 

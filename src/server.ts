@@ -54,6 +54,8 @@ const server = app.listen(config.PORT, () => {
   }
 });
 
+const THOI_HAN_TAT_MS = 25_000;
+
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
   // ĐÓNG SSE TRƯỚC. `server.close()` chờ mọi kết nối đang mở kết thúc, mà kết nối SSE thì theo
@@ -75,10 +77,14 @@ function shutdown(sig: string) {
     process.exit(0);
   });
   // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
+  // 25s (audit 2026-09-22, INFRA-10): bản trước 10s — BẰNG ân hạn mặc định của Docker, nên một lần Lưu
+  // báo giá lớn (đo được tới ~13s cho 20.000 dòng) đang chạy lúc deploy bị cắt ngang. Nay compose khai
+  // `stop_grace_period: 30s` cho app, và lưới này phải NHỎ HƠN nó để app tự đóng êm trước khi Docker
+  // SIGKILL. tests/ops-cong-kiem.test.js khoá quan hệ đó.
   setTimeout(() => {
-    logger.error("tắt máy quá hạn 10s — thoát cưỡng bức (còn kết nối chưa đóng?)");
+    logger.error({ han_ms: THOI_HAN_TAT_MS }, "tắt máy quá hạn — thoát cưỡng bức (còn kết nối chưa đóng?)");
     process.exit(1);
-  }, 10_000).unref();
+  }, THOI_HAN_TAT_MS).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

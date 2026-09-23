@@ -244,6 +244,10 @@ services:
       dockerfile: Dockerfile
     image: quanly-app:prod
     container_name: quanly-app
+    # ÂN HẠN DỪNG CHO APP (audit 2026-09-22, INFRA-10). Không khai thì Docker SIGKILL sau 10s mặc định —
+    # một lần Lưu báo giá lớn (đo ~13s cho 20.000 dòng) đang chạy lúc deploy bị cắt ngang. 30s > lưới
+    # tắt cưỡng bức 25s trong src/server.ts, để app tự đóng êm TRƯỚC khi Docker giết.
+    stop_grace_period: 30s
     # Siết đặc quyền: container này chỉ nghe cổng 3000 (>1024) dưới user `app` nên KHÔNG cần
     # bất kỳ Linux capability nào. Bỏ sạch + cấm leo thang biến một RCE giả định từ "toàn quyền
     # trong container" thành "một tiến trình không đặc quyền". Đường k8s/Helm đã siết như vậy

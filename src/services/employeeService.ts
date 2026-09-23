@@ -54,7 +54,7 @@ export async function createEmployee(req: Request) {
  * sạch CCCD + số tài khoản toàn công ty qua đúng cái endpoint GHI, đi vòng qua lớp chặn ở GET.
  *
  * Cố ý gác theo phạm vi ĐỌC (`employee:read:*`) chứ KHÔNG theo `employee:edit:*`: EMPLOYEE nền —
- * và MANAGER/ADMIN kế thừa — đều có `employee:read:all` (src/permissions.ts:266), nên kho danh bạ
+ * và MANAGER/ADMIN kế thừa — đều có `employee:read:all` (src/permissions.ts, hằng EMPLOYEE), nên kho danh bạ
  * DÙNG CHUNG khi ghi vẫn y nguyên cho mọi tài khoản Account thật. Nếu gác theo `edit:*` thì mọi
  * người chỉ có `edit:own` sẽ mất luôn việc sửa mục đồng nghiệp thêm — đổi hành vi đang chạy.
  * Chỉ tập quyền per-user bị bó về "Xem danh bạ của mình" mới hết ghi chéo, mà tài khoản đó vốn

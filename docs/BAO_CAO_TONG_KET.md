@@ -283,7 +283,7 @@ Không che giấu. Đầy đủ ở `docs/REMAINING_RISKS.md`; những mục cò
    Ghi `DEFER` trong bảng công nghệ.
 9. **Lưới báo giá: phần cần layout hoặc ảnh THẬT vẫn không có cổng.** Đợt 2026-08-28 đóng được
    dây nối bàn phím — đo được rằng **18 trong 19** chỗ gọi `pushUndo()` đều chụp ảnh TRƯỚC khi
-   ghi vào `items`. Chỗ thứ 19 là `addImages` (`web/src/components/GridTable.tsx:1642`): nó chờ
+   ghi vào `items`. Chỗ thứ 19 là `addImages` (`web/src/components/GridTable.tsx`, hàm `addImages`): nó chờ
    `Image.onload`, mà jsdom không giải mã ảnh nên promise treo — giả lập được thì cũng chỉ là
    giả lập chính hàm mình định kiểm. Cùng nhóm chưa có cổng: `onCopyCut` (chiều GHI vào
    clipboard), chọn vùng bằng chuột, `caretIndexAtPoint`, nút kéo-fill, và mọi phép tính bề

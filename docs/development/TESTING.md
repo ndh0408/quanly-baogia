@@ -305,7 +305,7 @@ Nói thẳng:
   KHÔNG.** `web/src/components/GridTable.component.test.tsx` (42 bài, 2026-08-28)
   dựng `<GridTable />` thật và đo được rằng **18 trong 19** chỗ gọi `pushUndo()`
   đều chụp ảnh TRƯỚC khi ghi vào `items`. Còn hở: `addImages`
-  (`web/src/components/GridTable.tsx:1642` — `fileToImg` chờ `Image.onload`, mà
+  (`web/src/components/GridTable.tsx`, hàm `fileToImg` chờ `Image.onload`, mà
   jsdom không giải mã ảnh nên promise treo), `onCopyCut`, chọn vùng bằng chuột, và
   mọi thứ cần layout thật. `ui-smoke` cũng vẫn không bấm Ctrl+Z lần nào. Danh
   sách đầy đủ: [../REMAINING_RISKS.md](../REMAINING_RISKS.md).

@@ -684,7 +684,10 @@ export function validate(schemas: { body?: z.ZodType; query?: z.ZodType; params?
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       if (schemas.body) req.body = schemas.body.parse(req.body ?? {});
-      if (schemas.query) req.query = schemas.query.parse(req.query ?? {}) as any;
+      // defineProperty chứ KHÔNG gán (audit 2026-09-22, DEP-08): Express 5 khai `req.query` là getter
+      // KHÔNG có setter trên prototype — phép gán ném TypeError trong ESM strict và 16 route có
+      // query-schema trả 400 cho mọi request. Cách này chạy đúng trên cả Express 4 lẫn 5.
+      if (schemas.query) Object.defineProperty(req, "query", { value: schemas.query.parse(req.query ?? {}), writable: true, configurable: true, enumerable: true });
       if (schemas.params) req.params = schemas.params.parse(req.params ?? {}) as any;
       next();
     } catch (e) {

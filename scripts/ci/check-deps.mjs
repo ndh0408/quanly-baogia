@@ -95,6 +95,14 @@ export function goiDuocImport(maNguon) {
   return ra;
 }
 
+/**
+ * Gói DEV mà src/ được phép import, kèm lý do. Chỉ hợp lệ khi lời gọi nằm trong nhánh KHÔNG BAO GIỜ
+ * chạy ở image production — và gói vẫn phải được khai (ở devDependencies).
+ */
+export const DEV_DUOC_PHEP_TRONG_SRC = new Map([
+  ["tsx", "src/exportWorker.js + src/importWorker.js chỉ `import(\"tsx/esm/api\")` khi chạy TỪ NGUỒN .ts (dev/test), trong try/catch; image production chạy dist/ nên không bao giờ tới nhánh đó"],
+]);
+
 /** Lượt import gói KHÔNG khai. `tepTheoThuMuc` = [{ tep: đường dẫn tương đối gốc repo, noiDung }]. Hàm THUẦN. */
 export function timGoiMa(tepTheoThuMuc, pkg) {
   const deps = new Set(Object.keys(pkg.dependencies || {}));
@@ -103,7 +111,8 @@ export function timGoiMa(tepTheoThuMuc, pkg) {
   for (const { tep, noiDung } of tepTheoThuMuc) {
     const runtime = /^(src|shared)\//.test(tep);
     for (const g of goiDuocImport(noiDung)) {
-      if (runtime ? !deps.has(g) : !tatCa.has(g)) loi.push({ tep, goi: g, can: runtime ? "dependencies" : "dependencies/devDependencies" });
+      const hopLe = runtime ? deps.has(g) || (DEV_DUOC_PHEP_TRONG_SRC.has(g) && tatCa.has(g)) : tatCa.has(g);
+      if (!hopLe) loi.push({ tep, goi: g, can: runtime ? "dependencies" : "dependencies/devDependencies" });
     }
   }
   return loi;
