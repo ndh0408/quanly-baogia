@@ -198,7 +198,24 @@ function cellText(v: unknown): string {
 }
 
 // Số kiểu VN/US — PORT từ web/src/lib/clipboard.ts (giữ khớp hành vi dán tay).
+//
+// GIỮ KHỚP CẢ BA MẢNH của clipboard.ts: tachNgoacKeToan (GRID-13), suyQuyUocSo + parseTheoQuyUoc.
+// Trước soát toàn diện L51 bản port dừng ở hai hàm đầu: dán vào lưới đọc "(500.000)" = −500.000 và
+// SL "1.500" (bảng quy ước VN) = 1500, còn nạp CÙNG dữ liệu từ tệp (ô định dạng Text) ra +500.000 và
+// 1,5 — chiết khấu thành khoản CỘNG mà không một cảnh báo dòng nào (Đơn Giá lẫn Thành Tiền cùng sai dấu).
+
+// Số âm kiểu KẾ TOÁN: định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Ngoặc bao TRỌN giá
+// trị thì đảo dấu (bộ lọc ký tự bên dưới bỏ ngoặc, không có bước này là số âm thành DƯƠNG).
+const AM_KE_TOAN = /^\((.*)\)$/;
+const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
+  const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
+  const m = AM_KE_TOAN.exec(t);
+  return m ? { s: m[1], am: true } : { s: String(s), am: false };
+};
+
 function parseLooseNumber(s: string): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   if (str.includes(",") && str.includes(".")) {
@@ -215,6 +232,8 @@ function parseLooseNumber(s: string): number {
 }
 /** Cột SỐ LƯỢNG / SỐ NGÀY là SỐ ĐO NHỎ: 1 dấu chấm/phẩy = THẬP PHÂN (13.5 ≠ 13500). */
 function parseLooseDecimal(s: string): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -224,6 +243,45 @@ function parseLooseDecimal(s: string): number {
   else str = str.replace(",", ".");
   const n = Number(str) || 0;
   return neg ? -n : n;
+}
+
+/**
+ * QUY ƯỚC SỐ của cả bảng, suy từ những ô số dạng CHỮ không mơ hồ (PORT suyQuyUocSo). "1.500" đứng
+ * riêng thì mơ hồ (1500 cái máy VN hay 1,5 m² máy US), nhưng bảng thường có ô rõ ràng: "1.500.000"
+ * (≥ 2 nhóm nghìn) / "1.234,5" → VN; "1,500,000" / "1,234.5" → US; ở cột TIỀN, một nhóm "250.000"
+ * đã là nghìn VN (tiền VND không có 3 số lẻ). Không tín hiệu hoặc hai phía mâu thuẫn → null: giữ
+ * cách đọc cũ (SL/Ngày thập phân, tiền đoán nghìn).
+ */
+type QuyUocSo = "vn" | "us";
+function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): QuyUocSo | null {
+  let vn = false, us = false;
+  for (const row of matrix) {
+    row.forEach((raw, c) => {
+      const v0 = String(raw ?? "").trim();
+      if (!v0 || v0.startsWith("=")) return;
+      const s = tachNgoacKeToan(v0).s.replace(/[\s₫đ$]/gi, "").replace(/^-/, "");
+      if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return;
+      const d = s.lastIndexOf("."), p = s.lastIndexOf(",");
+      if (d >= 0 && p >= 0) { if (p > d) vn = true; else us = true; return; }
+      if (/^\d{1,3}(\.\d{3}){2,}$/.test(s)) { vn = true; return; }
+      if (/^\d{1,3}(,\d{3}){2,}$/.test(s)) { us = true; return; }
+      if (laCotTien?.(c)) {
+        if (/^\d{1,3}\.\d{3}$/.test(s)) vn = true;
+        else if (/^\d{1,3},\d{3}$/.test(s)) us = true;
+      }
+    });
+  }
+  return vn === us ? null : vn ? "vn" : "us";
+}
+
+/** Đọc số theo quy ước ĐÃ BIẾT của bảng: bỏ dấu nghìn, đổi dấu thập phân thành "." (PORT parseTheoQuyUoc). */
+function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (!str || str === "-") return 0;
+  str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  return Number(str) || 0;
 }
 
 /** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). */
@@ -255,8 +313,11 @@ const isDateCell = (cell: Cell | null) => {
   return typeof v === "number" && !!fmt && DATE_FMT_RE.test(fmt);
 };
 
-/** Số của 1 ô: ưu tiên số thật / kết quả công thức; chuỗi thì đọc kiểu VN. */
-function numOf(cell: Cell | null, decimal = false): number {
+/**
+ * Số của 1 ô: ưu tiên số thật / kết quả công thức; chuỗi thì đọc kiểu VN — theo `qu` (quy ước của cả
+ * bảng, suyQuyUocSo) khi đã suy ra được. Ô số thật KHÔNG bao giờ đi qua nhánh chữ.
+ */
+function numOf(cell: Cell | null, decimal = false, qu: QuyUocSo | null = null): number {
   if (!cell) return 0;
   const v = cell.value as unknown;
   if (typeof v === "number") return v;
@@ -267,6 +328,7 @@ function numOf(cell: Cell | null, decimal = false): number {
   }
   const t = cellText(v).trim();
   if (!t) return 0;
+  if (qu) return parseTheoQuyUoc(t, qu);
   return decimal ? parseLooseDecimal(t) : parseLooseNumber(t);
 }
 const isBlank = (cell: Cell | null) => !cell || cellText(cell.value).trim() === "";
@@ -457,6 +519,21 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   base.lastRow = lastRow;
   base.stats.rows = bodyRows.length;
 
+  // Quy ước số của CẢ bảng (L51) — suy từ ô số dạng CHỮ của cột SL / Ngày / Đơn Giá / Thành Tiền; hai
+  // cột sau là cột tiền. Tệp app xuất ghi số THẬT nên không có ô nào ở đây → qu = null, y như cũ.
+  const chuSo = (cell: Cell | null): string => {
+    const v = cell?.value as unknown;
+    if (v == null || typeof v === "number" || v instanceof Date) return "";
+    if (typeof v === "object" && ((v as { formula?: unknown }).formula !== undefined || (v as { sharedFormula?: unknown }).sharedFormula !== undefined)) return "";
+    return cellText(v).trim();
+  };
+  const bangChuSo: string[][] = [];
+  for (const r of bodyRows) {
+    const hang = (["quantity", "days", "unitPrice", "_amount"] as const).map((role) => chuSo(cellAt(r, role)));
+    if (hang.some(Boolean)) bangChuSo.push(hang);
+  }
+  const qu = suyQuyUocSo(bangChuSo, (c) => c >= 2);
+
   /** Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG (không phải tổng các dòng dưới) — hình dạng hạng mục. */
   const dangHangMuc = (r: number) => !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"))
     && !isBlank(cellAt(r, "unitPrice")) && !hasGroupPriceFormula(r);
@@ -555,9 +632,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     // Số. Dòng NHÓM: Đơn Giá / Thành Tiền là TỔNG do app tự tính → KHÔNG nạp (app cộng lại),
     // chỉ giữ SỐ LƯỢNG (hệ số nhân của nhóm).
-    it.quantity = numOf(cellAt(r, "quantity"), true);
-    it.unitPrice = isGroup ? 0 : numOf(cellAt(r, "unitPrice"));
-    if (colOf.days) it.days = isGroup ? null : (numOf(cellAt(r, "days"), true) || null);
+    it.quantity = numOf(cellAt(r, "quantity"), true, qu);
+    it.unitPrice = isGroup ? 0 : numOf(cellAt(r, "unitPrice"), false, qu);
+    if (colOf.days) it.days = isGroup ? null : (numOf(cellAt(r, "days"), true, qu) || null);
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; }
 
     // Ô SỐ mà lại là NGÀY THÁNG (khách gõ nhầm ô) → numOf trả 0, phải nói rõ để không âm thầm mất tiền.
@@ -576,7 +653,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // Thành Tiền trong file có khớp SL × ĐG (× Ngày) không? Lệch = khách sửa tay ô tổng → cảnh báo,
     // KHÔNG tự ý sửa số của khách.
     if ((kind === "item" || kind === "sub") && hasAmt) {
-      const amt = numOf(cellAt(r, "_amount"));
+      const amt = numOf(cellAt(r, "_amount"), false, qu);
       const factor = (colOf.days ? (Number(it.days) || 1) : 1) * it.unitPrice;
       const rounded = Math.round(qtyRound(it.quantity) * factor);
       const exact = Math.round(qtyExact(it.quantity) * factor);
@@ -753,7 +830,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // Ô tổng đang LỖI (#REF!…) → KHÔNG ghi 0 vào tổng đối chiếu (XLSX-08): "Tổng cộng lệch với 0"
     // là cảnh báo sai hướng; bỏ qua ô đó như không có.
     if (errOf(ws.getCell(r, amountCol))) continue;
-    const val = numOf(ws.getCell(r, amountCol));
+    const val = numOf(ws.getCell(r, amountCol), false, qu);
     if (/^VAT/.test(label)) {
       totals.vat = val;
       let pctText = "";
