@@ -10,7 +10,7 @@ import { prisma, type TxClient } from "../db.js";
 import { config } from "../config.js";
 import { computeQuoteTotals, assertTotalsStorable, tinhConvertedTotal, chuanHoaTheoCot, chuanHoaVat, D } from "../money.js";
 import { nextQuoteNumber, nextProjectCode, syncQuoteCounter, syncProjectCodeCounter } from "../quoteNumber.js";
-import { namVN, namNganVN } from "../vnTime.js";
+import { namVN, namNganVN, homNayVN } from "../vnTime.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { audit } from "../audit.js";
 import { randomUUID } from "node:crypto";
@@ -316,7 +316,7 @@ export async function createQuote(req: Request) {
     fromTitle: b.fromTitle || creator?.title || null,
     fromAddress: b.fromAddress || company.address,
     city: b.city || company.city || "TP. Hồ Chí Minh",
-    quoteDate: b.quoteDate || new Date(),
+    quoteDate: b.quoteDate || homNayVN(),   // ngày VN, không phải ngày UTC (MONEY-07)
     executionDate: b.executionDate || null,
     customerId: b.customerId ?? null,
     greeting: b.greeting || undefined,
@@ -2039,7 +2039,7 @@ export async function duplicateQuote(req: Request) {
     fromTitle: src.fromTitle,
     fromAddress: src.fromAddress,
     city: src.city,
-    quoteDate: new Date(),
+    quoteDate: homNayVN(),   // ngày VN — nhân bản lúc 00:00–06:59 giờ VN từng mang ngày hôm qua (MONEY-07)
     greeting: src.greeting,
     vatPercent: src.vatPercent,
     toEmail: src.toEmail,
