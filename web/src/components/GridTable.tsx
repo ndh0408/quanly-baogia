@@ -966,7 +966,10 @@ function GridTableInner(props: GridTableProps) {
   // hàng — dán lên hàng NHÓM tự chèn hàng trống dưới nhóm, nguồn nằm dưới trôi xuống, xoá theo chỉ số
   // cũ là xoá trắng hạng mục KHÁC. Hàng nguồn đã bị xoá khỏi bảng thì thôi. Các thao tác sửa bảng
   // khác (gõ, chèn/xoá hàng) huỷ hẳn chế độ cắt như Excel — xem cancelCut ở markEditUndo, removeRow…
-  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }) => {
+  // anhDaSang: ảnh của khối THỰC SỰ đã được ghi sang đích (soát toàn diện L21). cp.images chỉ chốt lúc
+  // Ctrl+X; tới lúc dán mà cột Hình ảnh đã tắt, hay khối rơi vào nhánh 1 ô (không bao giờ chép ảnh) thì
+  // ảnh không sang được — xoá ở nguồn là ảnh mất hẳn. Không sang → ảnh ở lại hàng nguồn.
+  const finishCutMove = (dest: { r0: number; c0: number; r1: number; c1: number }, anhDaSang = false) => {
     const cp = cutPendingRef.current; if (!cp) return;
     cutPendingRef.current = null;
     const viTri = new Map<number, number>(); items.forEach((it, i) => { if (it._k != null) viTri.set(it._k, i); });
@@ -983,7 +986,7 @@ function GridTableInner(props: GridTableProps) {
         if (fx) { delete fx[f]; if (!Object.keys(fx).length) delete it.formulas; }
       }
       // Ảnh đã theo khối sang đích (xem onCopyCut) → hàng nguồn nằm ngoài vùng dán thì bỏ ảnh.
-      if (cp.images && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
+      if (cp.images && anhDaSang && !(r >= dest.r0 && r <= dest.r1)) delete it.images;
     }
   };
   // Tự BẬT "Hiện Thành Tiền nhóm" khi vùng [lo..hi] có nhóm (section/subsection) SL>1 — nếu không,
@@ -1422,7 +1425,7 @@ function GridTableInner(props: GridTableProps) {
     });
     // Khối này là khối vừa CẮT → xoá vùng nguồn (di chuyển xong).
     if (sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token) {
-      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: startCol, c1: Math.min(FIELDS.length - 1, startCol + rows[0].length - 1) });
+      finishCutMove({ r0: startRow, r1: startRow + rows.length - 1, c0: startCol, c1: Math.min(FIELDS.length - 1, startCol + rows[0].length - 1) }, !!blockImgs);
     }
     autoEnableGroupSub(startRow, startRow + rows.length - 1);
     recomputeAll(); onChange();

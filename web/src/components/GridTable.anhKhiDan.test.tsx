@@ -80,3 +80,28 @@ describe("L11 — dán khối từ lưới KHÔNG mang ảnh: không gắn ảnh
     expect(itemsA[2].images, "ảnh của hàng đích bị xoá").toEqual([ANH_C]);
   });
 });
+
+describe("L21 — cắt rồi dán mà ảnh KHÔNG sang được đích: ảnh phải ở lại hàng nguồn", () => {
+  it("cắt nguyên hàng có ảnh → TẮT cột Hình ảnh → dán: ảnh không mất", () => {
+    const items = [mk({ name: "Backdrop", images: [ANH_A] }), mk({ name: "" })];
+    const A = moLuoi(items, true);
+    chonHang(A, 0, 0); const kho = chep("cut");
+    A.datAnh(false);
+    vao(A.o(1, "name"));
+    dan(kho);
+    expect(items[1].name).toBe("Backdrop");
+    const conAnh = [...(items[0].images ?? []), ...(items[1].images ?? [])];
+    expect(conAnh, "ảnh A không còn ở hàng nào").toEqual([ANH_A]);
+  });
+
+  it("cắt MỘT ô Hạng Mục (cột ảnh vẫn bật) rồi dán vào Hạng Mục hàng khác: ảnh nguồn không bị xoá", () => {
+    const items = [mk({ name: "Backdrop", images: [ANH_A] }), mk({ name: "Standee" })];
+    const A = moLuoi(items, true);
+    vao(A.o(0, "name")); const kho = chep("cut");
+    vao(A.o(1, "name"));
+    dan(kho);
+    expect([items[0].name, items[1].name]).toEqual(["", "Backdrop"]);
+    const conAnh = [...(items[0].images ?? []), ...(items[1].images ?? [])];
+    expect(conAnh, "ảnh A không còn ở hàng nào").toEqual([ANH_A]);
+  });
+});
