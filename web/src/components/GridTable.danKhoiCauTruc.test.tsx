@@ -229,3 +229,29 @@ describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán
 });
 /** Bảng chứa một ô — để hỏi ô khác trong cùng lưới sau khi dòng vẽ lại. */
 function hop0(o: (row: number, f: string) => HTMLElement) { return o(0, "name").closest("table")!; }
+
+describe("L16 — danh sách tên 1–2 chữ cái (S/M/L/XL) không bị hiểu là báo giá app xuất", () => {
+  it("dán một cột 'S⏎M⏎L⏎XL' vào Hạng Mục: 4 hạng mục đúng tên, không thành nhóm rỗng tên", () => {
+    const items = [mk({}), mk({}), mk({}), mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("S\r\nM\r\nL\r\nXL\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["item:S", "item:M", "item:L", "item:XL"]);
+  });
+
+  it("khối cỡ áo 'S ⇥ ⇥ cái ⇥ 10 ⇥ 50.000' (3 dòng): tên, ĐVT, SL, ĐG vào đúng cột", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true });
+    vao(o(0, "name"));
+    dan("S\t\tcái\t10\t50.000\r\nM\t\tcái\t12\t50.000\r\nL\t\tcái\t8\t55.000\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}:${x.unit}:${x.quantity}:${x.unitPrice}`)).toEqual(["item:S:cái:10:50000", "item:M:cái:12:50000", "item:L:cái:8:55000"]);
+  });
+
+  it("khối báo giá THẬT (chữ nhóm A + hàng hạng mục đánh số) vẫn được dựng lại", () => {
+    const items = [mk({})];
+    const o = moLuoi(items, { showDetail: true });
+    vao(o(0, "name"));
+    dan("A\tHCM\t\t\t\t95,000\t\t\r\n1\tHallway\tPP\tm2\t1\t95,000\t95,000\t\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:HCM", "item:Hallway"]);
+  });
+});
