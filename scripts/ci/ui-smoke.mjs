@@ -358,7 +358,8 @@ async function main() {
     const truocNhap = await soCuaO('tr[data-row="0"] .col-amount');
     doi(truocNhap === 1_200_000, `gõ 400.000 → Thành Tiền = ${truocNhap.toLocaleString("vi-VN")} (chưa lưu)`);
     // Chờ ĐÚNG cái mốc chương trình tạo ra, không ngủ một con số đoán: ghi bản nháp gộp 1,2 giây.
-    const khoaNhap = `quanly:draft:quote:${bg.id}`;
+    // Khoá gắn theo NGƯỜI DÙNG (FE-04, web/src/lib/localDraft.ts khoaBanNhap): `u<id>:<số báo giá>`.
+    const khoaNhap = `quanly:draft:quote:u${u.id}:${bg.id}`;
     await trang.waitForFunction((k) => !!window.localStorage.getItem(k), khoaNhap, { timeout: 15_000 }).catch(() => {});
     doi(await trang.evaluate((k) => !!window.localStorage.getItem(k), khoaNhap), "bản nháp đã nằm trong localStorage");
 

@@ -23,7 +23,9 @@ import doc from "./App.tsx?raw";
 
 describe("SessionLostOverlay.onLogin — nhánh đổi người dùng phải xoá bản nháp", () => {
   it("import xoaMoiBanNhap từ lib/localDraft", () => {
-    expect(doc).toMatch(/import\s*\{\s*xoaMoiBanNhap\s*\}\s*from\s*["']\.\/lib\/localDraft["']/);
+    // Cho phép import thêm tên khác cùng dòng (FE-04 thêm ghiNhanNguoiDung) — điều cần gác là
+    // xoaMoiBanNhap vẫn được import từ đúng module.
+    expect(doc).toMatch(/import\s*\{[^}]*\bxoaMoiBanNhap\b[^}]*\}\s*from\s*["']\.\/lib\/localDraft["']/);
   });
 
   it("nhánh `m.id !== me.id` gọi xoaMoiBanNhap() TRƯỚC location.reload()", () => {

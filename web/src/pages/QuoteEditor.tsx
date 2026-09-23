@@ -11,7 +11,7 @@ import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../compone
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
 import { giuBanNhap } from "../lib/pendingQuote";
-import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan } from "../lib/localDraft";
+import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, chuyenBanNhapCu } from "../lib/localDraft";
 
 // Mảng rỗng DÙNG CHUNG, identity cố định — để `_templates || []` không đẻ mảng mới mỗi lần render.
 const RONG: never[] = [];
@@ -150,6 +150,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // nguyên tắc "im lặng thất bại ở đây tệ hơn không có tính năng", nhưng `mark()` lại vứt giá trị
   // trả về — người dùng tưởng mình có lưới an toàn trong khi thực tế không có gì.
   const nhapQuaLonRef = useRef(false);
+  const meIdRef = useRef(me.id);   // mark() là useCallback([]) — đọc người ghi bản nháp qua ref
+  meIdRef.current = me.id;
   const mark = useCallback(() => {
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
     if (nhapQuaLonRef.current) return;   // đã biết không ghi nổi — đừng tốn CPU nữa
@@ -157,7 +159,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     hnNhapRef.current = setTimeout(() => {
       hnNhapRef.current = null;
       if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
-      const kq = ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current);
+      const kq = ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current, meIdRef.current);
       if (kq === "qua-lon" || kq === "khong-ghi-duoc") {
         nhapQuaLonRef.current = true;
         toast(
@@ -282,10 +284,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
         let khoiPhuc = false;
-        khoaNhapRef.current = khoaBanNhap(isNew ? "moi" : quoteId!);
+        chuyenBanNhapCu(isNew ? "moi" : quoteId!, meIdRef.current);   // bản nháp ghi trước FE-04 (khoá không có người dùng)
+        khoaNhapRef.current = khoaBanNhap(isNew ? "moi" : quoteId!, meIdRef.current);
         baseNhapRef.current = (q as { updatedAt?: string }).updatedAt ?? null;
         donBanNhapQuaHan();   // rẻ, và giữ hạn ngạch localStorage sạch cho cả origin
-        const nhapCu = docBanNhap(khoaNhapRef.current);
+        const nhapCu = docBanNhap(khoaNhapRef.current, meIdRef.current);
         // CHỈ đề nghị khi bản nháp dựa trên ĐÚNG bản máy chủ vừa tải. Lệch `updatedAt` nghĩa là
         // người khác đã lưu đè trong lúc đó — khôi phục lúc ấy là âm thầm cán lên việc của họ,
         // đúng thứ mà khoá lạc quan (409) sinh ra để chặn. Bản nháp lệch bị bỏ đi, không hỏi.
