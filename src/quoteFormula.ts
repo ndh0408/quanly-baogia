@@ -97,23 +97,12 @@ type EditorRefs = {
   range: (a: string, b: string) => number[];
 };
 
-/**
- * DẤU PHẨY CẠNH MỘT THAM CHIẾU Ô LÀ DẤU TÁCH ĐỐI SỐ — khớp GRID-03 của lưới web
- * (web/src/lib/formula.ts evalFormula). Người dùng quen Excel vùng US gõ "=SUM(E1,E2)", "=ROUND(G3,2)".
- * Dấu thập phân không bao giờ đứng SÁT một chữ cái, nên "," ngay sau hoặc ngay trước một ô/dải là
- * tách đối số. "=E3*1,1" ("," giữa hai CHỮ SỐ) vẫn là thập phân. Hai phía (lưới tính giá trị, máy chủ
- * tự kiểm + dịch sang Excel) phải cùng MỘT quy tắc: lệch là bước tự kiểm trượt và ô Excel chỉ còn số.
- */
-const phayCanhThamChieuLaTachDoiSo = (s: string) =>
-  s.replace(/(\$?[A-Za-z]+\$?\d+)\s*,/g, "$1;").replace(/,\s*(?=\$?[A-Za-z]+\$?\d+)/g, ";");
-
-/** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân — trừ "," sát tham chiếu ô, xem trên). refs giải tham chiếu ô. */
+/** Đánh giá công thức editor (cú pháp ";" tách đối số, "," là dấu thập phân). refs giải tham chiếu ô. */
 export function evalEditorFormula(input: string, refs?: EditorRefs) {
   let s = String(input).trim().replace(/^=/, "");
   if (!s) return null;
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
-    s = phayCanhThamChieuLaTachDoiSo(s);
     s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => {
       const list = refs.range(a, b);
       return (list && list.length) ? list.join(";") : "0";
@@ -132,11 +121,7 @@ export function evalEditorFormula(input: string, refs?: EditorRefs) {
       changed = true;
       const fn = FORMULA_FNS[name.toUpperCase()];
       if (!fn) return "NaN";
-      // Đối số KHÔNG đọc được → cả công thức lỗi (khớp GRID-03 phía web): không lọc bỏ im lặng rồi
-      // tính tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
-      let hong = false;
-      const vals = args.split(";").filter((a: string) => a.trim() !== "").map((a: string) => evalArith(a)).filter((v: number | null): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
-      if (hong) return "NaN";
+      const vals = args.split(";").map((a: string) => evalArith(a)).filter((v: number | null): v is number => v !== null && isFinite(v));
       const r = fn(vals);
       return (r === null || !isFinite(r)) ? "NaN" : String(r);
     });
@@ -172,10 +157,6 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
 
   // "×" và "x"/"X" giữa hai chữ số = nhân (giống editor).
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
-  // "," sát tham chiếu ô = tách đối số (GRID-03) — đổi sang ";" TRƯỚC khi mọi "," còn lại bị coi là
-  // thập phân ở dưới. Thiếu bước này "SUM(E1,E2)" thành "SUM(F12.F13)" — công thức Excel hỏng — trong
-  // khi bước tự kiểm (evalEditorFormula, cùng quy tắc) lại khớp và cho ghi nó ra tệp.
-  s = phayCanhThamChieuLaTachDoiSo(s);
 
   // Đổi tham chiếu ô (đơn lẻ HOẶC dải) sang toạ độ Excel — quét 1 lượt để dải không
   // bị xử lý hai lần. Tên hàm (SUM…) không có chữ số đuôi nên KHÔNG bị bắt nhầm.
