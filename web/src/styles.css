@@ -4078,8 +4078,13 @@ textarea[aria-invalid="true"] {
 :root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea) {
   color: var(--chu);
 }
+/* Chữ gợi ý ("Tên nhóm (vd: Wallsticker)", "Ghi chú nhóm", "(không xuất Excel)"): pha 90% — thấp nhất là
+   hàng nhóm Colorfull 4.97:1 trên --nen, vẫn nhạt hơn chữ thật (5.96–8.34:1). Pha 55% trước đây chỉ
+   2.32–3.08:1, kém cả bản sáng; 85% vừa chạm 4.5 nên không chừa dư. opacity: Firefox mặc định làm mờ
+   placeholder 0.54, cộng dồn sẽ tụt dưới ngưỡng. */
 :root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea)::placeholder {
-  color: color-mix(in srgb, var(--chu) 55%, var(--surface));
+  color: color-mix(in srgb, var(--chu) 90%, var(--surface));
+  opacity: 1;
 }
 :root[data-theme="dark"] .excel-table tfoot :is(td.label, td.value) {
   background: color-mix(in srgb, #ffcc99 20%, var(--surface));
