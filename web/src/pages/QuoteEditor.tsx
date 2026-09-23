@@ -352,6 +352,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             `Lần trước bạn rời trang lúc ${luc} khi còn thay đổi CHƯA LƯU. Khôi phục phần đang soạn đó?${canhBaoAnh}`,
             { confirmText: "Khôi phục", danger: nhapCu.bocAnh },
           );
+          // Hộp hỏi KHÔNG tự đóng khi người dùng rời báo giá này (nút Back của trình duyệt đổi hash
+          // khi hộp còn mở — đo trên dev 2026-09-23: hộp của #286 vẫn nằm đè lên #285). Trả lời
+          // hộp treo đó thì đừng làm gì: bấm "Hủy" từng XOÁ bản nháp chưa lưu của báo giá kia trong
+          // khi người dùng tưởng mình đang trả lời cho báo giá đang xem. Giữ bản nháp → lần mở lại
+          // báo giá đó được hỏi lại.
+          if (!alive) return;
           if (dong) {
             const kp = nhapCu.quote as QuoteFull;
             // Bản nháp đi qua JSON nên mất `_k` và có thể thiếu mảng con — chuẩn hoá đúng như
@@ -380,6 +386,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             `Lúc ${luc} bạn bấm Lưu nhưng người khác đã lưu báo giá này trước, và bạn chọn tải lại. Phần bạn đang soạn khi đó được giữ lại trên máy này. Mở lại bản đó? Nếu mở rồi bấm Lưu, bản của bạn sẽ GHI ĐÈ thay đổi của người kia — hãy xem kỹ trước.${nhapXd.bocAnh ? " LƯU Ý: bản này KHÔNG kèm ảnh trong các dòng." : ""}`,
             { confirmText: "Mở bản của tôi", danger: true },
           );
+          if (!alive) return;   // hộp treo sau khi đã rời báo giá — như trên, giữ nguyên bản giữ lại
           if (mo) {
             const kp = nhapXd.quote as QuoteFull;
             if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
