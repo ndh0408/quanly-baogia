@@ -1136,7 +1136,17 @@ function GridTableInner(props: GridTableProps) {
   // trang" (người dùng báo 2026-09-23, quote #284 trên dev). Co vùng chọn về số hàng còn lại, bỏ
   // dấu cắt đang chờ (toạ độ của nó cũng đã mất nghĩa).
   // Mốc undo lưu ảnh dưới dạng mã trỏ vào kho ảnh dùng chung (GRID-09) → giải bằng khoAnhRef.
+  // ẢNH ĐỔI MÀ CHỮ KÝ DÒNG KHÔNG THẤY (soát toàn diện L4): chuKy chỉ lấy ĐỘ DÀI từng ảnh, còn imgVer
+  // chỉ tăng khi thêm/xoá/dán ảnh. Lùi/tiến trả một hàng về ảnh KHÁC nhưng dài đúng bằng (mọi ô khác
+  // như cũ) thì DongNho bỏ qua dòng — <img> hiện ảnh cũ, bấm phóng lại ra ảnh trong model. Chỉ tăng
+  // imgVer đúng ca đó: tăng mỗi lần undo là vẽ lại MỌI dòng (imgVer nằm trong cauHinhSig). So ===
+  // giữa chuỗi ảnh rẻ: thường cùng một thực thể từ kho ảnh, khác thì dừng ở ký tự khác đầu tiên.
+  const anhDoiCungDoDai = (truoc: Map<number | undefined, string[]>) => items.some((it) => {
+    const a = truoc.get(it._k), b = (it.images || []) as string[];
+    return !!a && a.length === b.length && a.some((x, j) => x !== b[j] && x.length === b[j].length);
+  });
   const restore = (json: string) => {
+    const anhTruoc = new Map(items.map((it) => [it._k, (it.images || []) as string[]]));
     const arr = khoAnhRef.current.parse<ItemK[]>(json); arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
     items.splice(0, items.length, ...arr);
     const last = Math.max(0, items.length - 1);
@@ -1144,6 +1154,7 @@ function GridTableInner(props: GridTableProps) {
     if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
     cutPendingRef.current = null;
     recomputeAll(); onChange(); syncActiveCell();
+    if (anhDoiCungDoDai(anhTruoc)) setImgVer((v) => v + 1);
   };
   const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
   const doRedo = () => { flushSoft(); const next = histRef.current.stepForward(snap); if (next !== null) restore(next); };
