@@ -217,6 +217,13 @@ export const dependencyCallsTotal = new Counter({
   labelNames: ["dep", "status"],
   registers: [registry],
 });
+// Khởi tạo đủ 3×2 chuỗi về 0 (soát chéo ops#9). prom-client không phát chuỗi nào của Counter có nhãn
+// cho tới lần inc() đầu, nên chuỗi `status="error"` xuất hiện lần đầu ở giá trị 1 — `increase(…[15m])`
+// trên chuỗi mới xuất hiện = 0, và lỗi SMTP ĐẦU TIÊN sau mỗi lần khởi động (tức sau mỗi deploy) không
+// kích QuanlyPhuThuocNgoaiLoi. Tập nhãn hữu hạn nên cardinality không đổi.
+for (const dep of ["smtp", "telegram", "s3"] as const) {
+  for (const status of ["ok", "error"] as const) dependencyCallsTotal.inc({ dep, status }, 0);
+}
 /** Ghi một lượt gọi phụ thuộc ngoài. Không bao giờ ném. */
 export function ghiPhuThuoc(dep: "smtp" | "telegram" | "s3", ok: boolean) {
   try { dependencyCallsTotal.inc({ dep, status: ok ? "ok" : "error" }); } catch { /* metric không được làm hỏng nghiệp vụ */ }

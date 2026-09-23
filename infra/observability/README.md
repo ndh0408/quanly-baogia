@@ -7,6 +7,9 @@
 > Biến cần trong `.env` của máy (ngoài METRICS_TOKEN/GRAFANA_PASSWORD/SMTP_*/TELEGRAM_*):
 > `QUANLY_ENV` (prod | staging | dev — in đầu mọi cảnh báo) và `HEARTBEAT_URL` (URL ping của dịch vụ
 > giám sát NGOÀI; trống = không có ai bên ngoài biết khi cả máy chết).
+> **Dòng `HEARTBEAT_URL=` phải CÓ trong `.env`** (để trống được): thiếu hẳn dòng thì compose dựng lại
+> alertmanager rồi không start được (`environment variable "HEARTBEAT_URL" required by secret
+> "heartbeat_url" is not set`) — không còn cảnh báo nào. Chi tiết: `docs/operations/MONITORING.md`.
 
 ```text
 ứng dụng (pino → stdout)              ứng dụng /metrics  ←── app:3000

@@ -332,6 +332,10 @@ export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerO
 export function createWorker(name: string, handler: Processor, concurrency = 4) {
   if (!isQueueEnabled()) return null;
   const w = new Worker(name, handler, { connection: getRedis(), ...workerOptionsFor(name, concurrency) });
+  // Chuỗi 0 ngay khi worker của hàng đợi này lên (soát chéo ops#9): không có mẫu 0 thì job hỏng HẲN
+  // đầu tiên sau mỗi lần khởi động làm chuỗi xuất hiện ở giá trị 1, `increase()` = 0, và
+  // QuanlyJobNenThatBai im. Chỉ tiến trình worker phát counter này nên khởi tạo ở đây, không ở module init.
+  bullJobsFailedTotal.inc({ queue: name }, 0);
   w.on("failed", (job: Job | undefined, err: Error) => {
     logger.error({ job: job?.id, err: err.message }, `${name} job failed`);
     // Đếm theo SỰ KIỆN, chỉ khi đã hết lượt thử (audit 2026-09-22, OBS-05). Quy tắc cũ đọc gauge

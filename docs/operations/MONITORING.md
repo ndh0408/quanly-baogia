@@ -192,14 +192,23 @@ Ba lỗ còn mở (audit 2026-09-22), việc chủ repo làm tay:
   tương đương, cấu hình "báo khi mất nhịp > 5 phút") trong `.env` rồi dựng lại alertmanager. Thêm một
   HTTP check ngoài (UptimeRobot/Cloudflare Health Check) vào `https://gianguyen.cloud/livez` để bắt
   tunnel chết.
-- **Nhãn môi trường** (OBS-06): đặt `QUANLY_ENV=prod` (staging: `staging`) trong `.env` của từng máy —
-  thiếu thì cảnh báo mang nhãn `chua-dat-QUANLY_ENV`.
-- **Thay đổi quy tắc tự nạp khi deploy** (OBS-13): `deploy.sh` [5d/6] gửi SIGHUP cho Prometheus và
-  khởi động lại Alertmanager khi bản mẫu đổi. Đổi `docker-compose.observability.yml` (vd cấu hình Loki
-  mới) thì vẫn phải `up -d` lại ngăn xếp bằng tay.
+- **Nhãn môi trường** (OBS-06): đặt `QUANLY_ENV=prod` (staging: `staging`) trong `.env` của từng máy,
+  RỒI tạo lại container Prometheus (`up -d prometheus`, lệnh dưới). Container tạo lại mà `.env` thiếu
+  biến thì nhãn là `chua-dat-QUANLY_ENV`; còn container CŨ (tạo trước khi compose có `QUANLY_ENV`) thì
+  nhãn `environment` bị **RỖNG** — Prometheus nội suy biến chưa đặt thành chuỗi rỗng. `deploy.sh` [5d/6]
+  cảnh báo khi gặp container cũ như vậy.
+- **Thay đổi quy tắc tự nạp khi deploy** (OBS-13): `deploy.sh` [5d/6] gửi SIGHUP cho Prometheus, kiểm
+  `prometheus_config_last_reload_successful`, và khởi động lại Alertmanager khi bản mẫu đổi. Đổi
+  `docker-compose.observability.yml` (vd cấu hình Loki mới) thì vẫn phải `up -d` lại ngăn xếp bằng tay.
+- **`HEARTBEAT_URL=` PHẢI có dòng trong `.env`, để trống cũng được.** Secret `heartbeat_url` của
+  alertmanager lấy từ biến này; thiếu HẲN dòng thì `up -d` dựng lại alertmanager (danh sách secret đổi)
+  rồi container mới KHÔNG start được — `environment variable "HEARTBEAT_URL" required by secret
+  "heartbeat_url" is not set` — và từ lúc đó không còn cảnh báo nào được gửi. Kiểm trước (lệnh dưới).
 
 ```bash
-# .env của máy chủ phải có METRICS_TOKEN và GRAFANA_PASSWORD
+# .env của máy chủ phải có METRICS_TOKEN và GRAFANA_PASSWORD, và DÒNG HEARTBEAT_URL= (trống được).
+# Kiểm TRƯỚC khi up -d — dừng trước khi container alertmanager cũ bị gỡ:
+grep -q '^HEARTBEAT_URL=' .env || { echo 'thiếu dòng HEARTBEAT_URL= trong .env (để trống cũng được)'; exit 1; }
 docker compose -f docker-compose.prod.yml \
   -f infra/observability/docker-compose.observability.yml up -d
 ```
