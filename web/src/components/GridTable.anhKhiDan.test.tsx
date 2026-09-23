@@ -105,3 +105,40 @@ describe("L21 — cắt rồi dán mà ảnh KHÔNG sang được đích: ảnh 
     expect(conAnh, "ảnh A không còn ở hàng nào").toEqual([ANH_A]);
   });
 });
+
+describe("L22 — chép / cắt CHỈ cột Hạng Mục (≥ 2 hàng) là sửa tên, không mang ảnh", () => {
+  it("chép tên 2 hàng rồi dán lên 2 hàng khác: ảnh của hàng đích giữ nguyên (như dán 1 ô)", () => {
+    const items = [mk({ name: "Tên A", images: [ANH_A] }), mk({ name: "Tên B" }), mk({ name: "C", images: [ANH_C] }), mk({ name: "D", images: [ANH_D] })];
+    const A = moLuoi(items, true);
+    vao(A.o(0, "name")); phim(document.activeElement!, { key: "ArrowDown", shiftKey: true });
+    const kho = chep();
+    vao(A.o(2, "name"));
+    dan(kho);
+    expect([items[2].name, items[3].name]).toEqual(["Tên A", "Tên B"]);
+    expect(items[2].images, "ảnh hàng đích bị thay").toEqual([ANH_C]);
+    expect(items[3].images, "ảnh hàng đích bị xoá").toEqual([ANH_D]);
+  });
+
+  it("cắt tên 2 hàng rồi dán chỗ khác: ảnh ở lại hàng nguồn", () => {
+    const items = [mk({ name: "Tên A", images: [ANH_A] }), mk({ name: "Tên B" }), mk({ name: "" }), mk({ name: "" })];
+    const A = moLuoi(items, true);
+    vao(A.o(0, "name")); phim(document.activeElement!, { key: "ArrowDown", shiftKey: true });
+    const kho = chep("cut");
+    vao(A.o(2, "name"));
+    dan(kho);
+    expect(items.map((x) => x.name)).toEqual(["", "", "Tên A", "Tên B"]);
+    expect(items[0].images, "cắt chữ mà ảnh bị dời theo").toEqual([ANH_A]);
+  });
+
+  it("khối Hạng Mục → Ghi Chú (không kèm STT) vẫn là chép cả hạng mục: ảnh đi theo", () => {
+    const items = [mk({ name: "Backdrop", images: [ANH_A] }), mk({ name: "Standee", images: [ANH_B] })];
+    const A = moLuoi(items, true);
+    vao(A.o(0, "name"));
+    for (let k = 0; k < 6; k++) phim(document.activeElement!, { key: "ArrowRight", shiftKey: true });
+    const kho = chep();
+    vao(A.o(1, "name"));
+    dan(kho);
+    expect(items[1].name).toBe("Backdrop");
+    expect(items[1].images).toEqual([ANH_A]);
+  });
+});

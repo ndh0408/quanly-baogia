@@ -949,7 +949,10 @@ function GridTableInner(props: GridTableProps) {
     // hàng đang có ảnh thì hàng đó giữ ảnh CŨ — ảnh lệch khỏi hạng mục của nó (người dùng báo
     // 2026-09-23). Khối có cột Hạng Mục = đang copy "cái hạng mục" → mang ảnh theo. Chỉ khi cột
     // Hình ảnh đang bật: cột ẩn thì người dùng không thấy ảnh, mang theo là gắn ảnh lén.
-    const images = showImages && FIELDS.slice(rc.c0, rc.c1 + 1).includes("name")
+    // Khối CHỈ gồm cột Hạng Mục (dù nhiều hàng) là đang chép/sửa TÊN, không phải chép hạng mục — không
+    // mang ảnh, như chép một ô tên (soát toàn diện L22). Bản cũ mang ảnh cả khi đó: dán tên của 2 hàng
+    // lên 2 hàng khác thì ảnh hàng đích bị thay hoặc xoá, cắt tên thì ảnh bị dời theo.
+    const images = showImages && rc.c1 > rc.c0 && FIELDS.slice(rc.c0, rc.c1 + 1).includes("name")
       ? Array.from({ length: rc.r1 - rc.r0 + 1 }, (_, k) => [...((items[rc.r0 + k]?.images || []) as string[])])
       : undefined;
     try { e.clipboardData.setData("application/x-quanly-grid", JSON.stringify({ token, kinds, labels, tsv, cols: rc.c1 - rc.c0 + 1, c0: rc.c0, r0: rc.r0, fields: FIELDS.slice(rc.c0, rc.c1 + 1), images })); } catch { /* */ }
