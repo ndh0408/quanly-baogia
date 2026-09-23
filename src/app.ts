@@ -66,6 +66,9 @@ export function conObjectPhien() {
   return {
     connectionString: config.DATABASE_URL,
     max: Number(process.env.SESSION_POOL_MAX) || 4,
+    // Chờ LẤY kết nối có trần, như pool Prisma (DB_TX_MAX_WAIT). Không đặt thì node-pg chờ VÔ HẠN:
+    // CSDL nghẽn là mọi request cần phiên xếp hàng mãi sau 4 kết nối (HTTP-09).
+    connectionTimeoutMillis: config.DB_TX_MAX_WAIT,
     // Cùng phanh như pool Prisma. Kho phiên chỉ SELECT/UPSERT một hàng mỗi request nên sẽ không
     // bao giờ chạm trần — nhưng chính vì thế, nếu nó chạm thì đó là dấu hiệu hỏng, và chết nhanh
     // tốt hơn là giữ kết nối mãi.
@@ -408,7 +411,11 @@ export function createApp() {
   // Điều kiện CỐ Ý hẹp: phải CÓ Bearer VÀ KHÔNG có cookie phiên. Trình duyệt gửi cả hai (vd SPA đã
   // đăng nhập lại thử gọi kèm token) vẫn phải đi qua phiên thật như cũ.
   const COOKIE_PHIEN = /(?:^|;\s*)qly\.sid=/;
-  app.use((req: Request, res: Response, next: NextFunction) => {
+  // CHỈ DƯỚI /api (HTTP-09). Không đường nào ngoài /api đọc `req.session` (SPA/asset tĩnh/probe), mà
+  // mount không kèm path thì MỖI asset tải kèm cookie tốn một SELECT + một UPDATE (rolling → touch)
+  // vào user_sessions qua pool phiên 4 kết nối — tải trang đầu là 10-20 cặp thừa, và khi CSDL nghẽn
+  // thì cả tệp JS cũng xếp hàng sau pool đó.
+  app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     const coBearer = /^Bearer\s+\S/i.test(req.headers.authorization || "");
     const coCookiePhien = COOKIE_PHIEN.test(req.headers.cookie || "");
     if (coBearer && !coCookiePhien) return next();
@@ -493,12 +500,21 @@ export function createApp() {
   // một HÀNG PHIÊN MỚI (7 ngày) vào Postgres dù chưa đăng nhập gì cả. Vòng lặp gọi endpoint này —
   // không cần đăng nhập, không cần CSRF hợp lệ (chính nó CẤP CSRF) — bơm vô hạn hàng vào bảng phiên.
   //
-  // KHÔNG chặn hẳn khách ẩn danh: trang đăng nhập/kích hoạt/quên-mật-khẩu ĐỀU cần xin mã này TRƯỚC
-  // khi có phiên đăng nhập (chính POST /api/auth/login cũng đòi CSRF hợp lệ) — chặn theo `active`/
-  // `userId` sẽ phá luôn đường vào của MỌI người dùng. Chỉ cần đưa nó vào CÙNG một trần với phần còn
-  // lại của API — đúng việc di chuyển xuống dưới `apiLimiter` làm được, không cần logic mới.
+  // KHÔNG chặn hẳn khách ẩn danh: trang đăng nhập/kích hoạt/quên-mật-khẩu ĐỀU xin mã này TRƯỚC
+  // khi có phiên đăng nhập — chặn theo `active`/`userId` sẽ phá luôn đường vào của MỌI người dùng.
+  // LƯU Ý (HTTP-10): với POST CHƯA đăng nhập (login, accept-invite, forgot) csrfGuard chỉ kiểm Lớp 1
+  // Origin/Referer rồi cho qua — mã xin ở đây KHÔNG được kiểm cho các POST đó. Đừng bỏ Lớp 1 vì tưởng
+  // còn token đỡ.
   app.get("/api/csrf-token", (req, res) => {
-    if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
+    // Bearer không kèm cookie → cổng phiên bị bỏ qua, `req.session` là object trần (hoặc undefined).
+    // Đó là client API dùng sai đường, không phải sự cố máy chủ: 400 kèm lời chỉ đường (HTTP-11).
+    if (!req.session || typeof req.session.regenerate !== "function") {
+      return res.status(400).json({ error: "Client dùng Bearer không cần mã CSRF — xác thực bằng POST /api/auth/token", code: "bearer_khong_can_csrf" });
+    }
+    // Phiên ẨN DANH chỉ sống 30 phút (HTTP-10). Ghi csrfSecret làm express-session lưu một hàng
+    // phiên; với maxAge mặc định 7 ngày, vòng lặp gọi endpoint này (120 lượt/phút/IP) giữ tới ~1,2
+    // triệu hàng mỗi IP. Đăng nhập gọi regenerate → phiên mới nhận lại maxAge 7 ngày như cũ.
+    if (!req.session.userId) req.session.cookie.maxAge = 30 * 60 * 1000;
     const token = issueCsrfToken(req);
     // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
     res.setHeader("Cache-Control", "no-store, private, max-age=0");

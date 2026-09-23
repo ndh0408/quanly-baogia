@@ -45,7 +45,20 @@ describe("GET /api/csrf-token phải nằm SAU apiLimiter trong ngăn xếp midd
     // mốc đúng nay là 5, không phải 4.
     // (Không kiểm "không gì nằm sau" — layer /api/ generic còn có bộ định tuyến catch-all 404 mount
     // muộn hơn nhiều, không liên quan chuỗi bảo mật/rate-limit đang xét ở đây.)
-    expect(middlewareApiTruoc.length, "csrf-token phải đứng sau ĐỦ 5 middleware /api/ dùng chung, tức sau cả csrfGuard lẫn apiLimiter và Cache-Control mặc định").toBe(5);
+    //
+    // KHÔNG đếm cứng tổng số layer /api nữa: từ HTTP-01/HTTP-09 bộ giải nén thân, express.json,
+    // express.urlencoded và cổng phiên cũng mount dưới "/api" (cùng regexp) — đó là thu hẹp phạm vi,
+    // không phải thêm lớp bảo mật. Điều bài này bảo vệ là ĐỦ 5 lớp dưới đây đứng trước route:
+    //   · apiLimiter + Cache-Control mặc định: hai hàm ẨN DANH ĐẦU TIÊN mount ở /api (đứng trước mọi
+    //     parser — bài ngay dưới khoá thứ tự đó);
+    //   · bearerAuth, enforceActiveUser, csrfGuard: dò theo TÊN.
+    const ten = (l) => l.handle?.name || "";
+    const tenTruoc = middlewareApiTruoc.map(ten);
+    for (const t of ["bearerAuth", "enforceActiveUser", "csrfGuard"]) {
+      expect(tenTruoc, `csrf-token phải đứng SAU ${t}`).toContain(t);
+    }
+    expect(tenTruoc.slice(0, 2), "apiLimiter + Cache-Control mặc định phải là hai middleware /api đầu tiên").toEqual(["", ""]);
+    expect(middlewareApiTruoc.length, "csrf-token phải đứng sau ĐỦ 5 middleware /api/ dùng chung").toBeGreaterThanOrEqual(5);
   });
 
   // ── TRẦN PHẢI ĐỨNG TRƯỚC VIỆC NẶNG (ultracode audit vòng 2, 2026-09-08) ───────────────────
