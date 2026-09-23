@@ -230,6 +230,53 @@ export function catVaBao<T>(rows: T[], tran: number, nhom: string, huongDan: str
   return { rows: rows.slice(0, tran), biCat: { nhom, tran, huongDan } };
 }
 
+/**
+ * Nhóm nhật ký mang BẢN CHỤP dữ liệu của người khác trong before/after, và cách xác định phạm vi đọc
+ * HIỆN TẠI của nhóm đó (quyền `<quyen>:read:*`, cột chủ sở hữu, bảng để tra chủ).
+ *
+ * Soát chéo files#4 (RBAC-04 × FILE-11): FILE-11 chỉ che nhật ký `customer` và chỉ khi phạm vi = null.
+ * RBAC-04 sau đó cho `employee.update` ghi before/after (SĐT, địa chỉ, MST, năm sinh, nơi cấp CCCD…),
+ * còn `personnel.*-note` vốn đã ghi từ trước — nên người bị gỡ quyền (hoặc hạ xuống "của mình") vẫn lấy
+ * lại được qua bản xuất GDPR đúng thứ mọi đường đọc thường đã chặn. Một bảng duy nhất để lần sau thêm
+ * before/after cho nhóm mới thì thêm MỘT dòng ở đây, không phải nhớ ra một nhánh `?:` nữa.
+ */
+const PHAM_VI_NHAT_KY: Record<string, { quyen: string; cotChu: string; bang: "customer" | "employee" | "personnelRecord" }> = {
+  customer: { quyen: "customer", cotChu: "ownerId", bang: "customer" },
+  employee: { quyen: "employee", cotChu: "createdById", bang: "employee" },
+  personnel: { quyen: "personnel", cotChu: "createdById", bang: "personnelRecord" },
+};
+
+/**
+ * Bỏ before/after của những sự kiện mà phiên HIỆN TẠI không còn được đọc bản ghi đích:
+ *   · phạm vi null (không có quyền đọc nhóm) → bỏ mọi bản chụp của nhóm;
+ *   · read:all → giữ nguyên;
+ *   · read:own → chỉ giữ bản chụp của bản ghi mình sở hữu (tra một lần mỗi nhóm; gồm cả bản ghi đã xoá
+ *     mềm — xoá không đổi chủ). Chỉ che "nhóm có trong bảng khi phạm vi null" là không đủ: hạ quyền
+ *     xuống "Xem … của mình" là ca thực tế hơn gỡ hẳn.
+ * Hành động, thời điểm, resourceId luôn giữ — đó là dữ liệu CỦA người yêu cầu.
+ */
+async function kepBanChupNhatKy(rows: any[], session: Parameters<typeof quoteScopeWhere>[0]): Promise<any[]> {
+  const giu = new Map<string, Set<string> | "tatCa">();
+  for (const [resource, cfg] of Object.entries(PHAM_VI_NHAT_KY)) {
+    const scope = readScopeWhere(session, cfg.quyen, cfg.cotChu);
+    if (scope && !Object.keys(scope).length) { giu.set(resource, "tatCa"); continue; }
+    const ids = scope
+      ? [...new Set(rows.filter((e) => e?.resource === resource && (e.before != null || e.after != null)).map((e) => Number(e.resourceId)).filter(Number.isSafeInteger))]
+      : [];
+    if (!ids.length) { giu.set(resource, new Set()); continue; }
+    const args = { where: { AND: [{ id: { in: ids } }, scope] }, select: { id: true }, includeDeleted: true } as any;
+    const cuaMinh: { id: number }[] = cfg.bang === "customer" ? await prisma.customer.findMany(args)
+      : cfg.bang === "employee" ? await prisma.employee.findMany(args)
+      : await prisma.personnelRecord.findMany(args);
+    giu.set(resource, new Set(cuaMinh.map((r) => String(r.id))));
+  }
+  return rows.map((e) => {
+    const g = e?.resource ? giu.get(e.resource) : undefined;
+    if (!g || g === "tatCa" || g.has(String(Number(e.resourceId)))) return e;
+    return { ...e, before: undefined, after: undefined };
+  });
+}
+
 export async function exportUser(userId: number, session?: Parameters<typeof quoteScopeWhere>[0]) {
   // null = KHÔNG có quyền đọc nhóm đó → nhóm đó rỗng trong bản xuất (fail-closed như mọi đường đọc).
   const phamViBaoGia = session ? quoteScopeWhere(session) : {};
@@ -300,6 +347,9 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
   const cThongBao = catVaBao(notifications, TRAN_BAN_GHI.thongBao, "notifications",
     `Chỉ ${TRAN_BAN_GHI.thongBao.toLocaleString("vi-VN")} thông báo MỚI NHẤT có trong bản xuất này.`);
 
+  // Đường admin (không truyền session) giữ nguyên hành vi: không kẹp theo phạm vi.
+  const nhatKy = session ? await kepBanChupNhatKy(cNhatKy.rows, session) : cNhatKy.rows;
+
   const danhSachBiCat = [quotes.biCat, cKhach.biCat, cNhatKy.biCat, cThongBao.biCat].filter(Boolean);
   // `gioiHan` phải xuất hiện khi CÓ BẤT KỲ kiểu cắt nào — trước đây nó chỉ xuất hiện cho phần dòng
   // hạng mục, nên bốn nhóm bị cắt theo SỐ BẢN GHI đi qua hoàn toàn im lặng.
@@ -318,13 +368,10 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     ...(gioiHan ? { gioiHan } : {}),
     quotes: quotes.danhSach,
     customers: cKhach.rows,
-    // Chốt kẹp phạm vi khách hàng phải phủ CẢ nhật ký (FILE-11): audit customer.create/update/delete
-    // lưu before/after là bản chụp ĐẦY ĐỦ hàng khách (tên, MST, email, SĐT, người liên hệ). Người đã bị
-    // gỡ quyền khách hàng (phamViKhach === null) vẫn nhận lại toàn bộ qua đây — đúng thứ khối `customers`
-    // ngay trên vừa chặn. Giữ hành động + thời điểm (đó là dữ liệu CỦA người yêu cầu), bỏ bản chụp.
-    auditEvents: phamViKhach === null
-      ? cNhatKy.rows.map((e: any) => (e?.resource === "customer" ? { ...e, before: undefined, after: undefined } : e))
-      : cNhatKy.rows,
+    // Chốt kẹp phạm vi phải phủ CẢ nhật ký (FILE-11, mở rộng ở soát chéo files#4): audit của khách hàng,
+    // danh bạ, hồ sơ nhân sự lưu before/after là bản chụp dữ liệu của NGƯỜI KHÁC. Người đã bị gỡ/hạ quyền
+    // vẫn nhận lại toàn bộ qua đây — đúng thứ mọi đường đọc thường đã chặn. Xem kepBanChupNhatKy.
+    auditEvents: nhatKy,
     refreshTokens,
     notifications: cThongBao.rows,
   };
