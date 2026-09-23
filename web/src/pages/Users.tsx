@@ -231,8 +231,18 @@ function PermPreview({ cat, isAdmin, perms }: { cat?: PermCatalog; isAdmin: bool
   );
 }
 
+/* ── "VỀ THEO VAI TRÒ" (soát chéo rbac#10) ─────────────────────────────────────────────────────
+   RBAC-01 đổi nghĩa `permissions: []` thành TƯỚC HẾT QUYỀN và thêm `null` = BỎ TUỲ BIẾN (máy chủ
+   userService.updateUser). Trước bản vá này web không nút nào gửi `null`: "Bỏ hết" là tước quyền,
+   "Điền nhanh" là một BẢN CHỤP mới (vẫn Tùy chỉnh), đổi vai trò ở trang Phân quyền không đụng cột
+   permissions — tài khoản Tùy chỉnh không còn đường nào về theo ma trận vai trò.
+   CHỈ modal Sửa truyền prop này (tài khoản mới chưa có gì để bỏ). `hoiGiuKy`: nhánh `null` ở máy chủ
+   cố ý không đụng cờ `canSign`, mà resolveUserPermissions BẮC CẦU canSign → quote:sign:own — không
+   hỏi thì quyền Ký của bản chụp cũ lọt lại NGOÀI vai trò mà trang Phân quyền ghi "Theo vai trò". */
+type VeTheoVaiTro = { nhanVaiTro: string; dangBat: boolean; bat: () => void; hoiGiuKy: boolean; giuKy: boolean; doiGiuKy: (v: boolean) => void };
+
 // Hàng "Toàn quyền quản trị" + ma trận + XEM TRƯỚC — dùng chung cho Mời & Sửa.
-function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label }: { cat?: PermCatalog; isAdmin: boolean; setAdmin: (v: boolean) => void; perms: Set<string>; setPerms: (s: Set<string>) => void; onPreview?: (perms: string[], label: string) => void; label?: string; }) {
+function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label, veTheoVaiTro }: { cat?: PermCatalog; isAdmin: boolean; setAdmin: (v: boolean) => void; perms: Set<string>; setPerms: (s: Set<string>) => void; onPreview?: (perms: string[], label: string) => void; label?: string; veTheoVaiTro?: VeTheoVaiTro; }) {
   const tryIt = () => {
     if (!onPreview) return;
     const eff = isAdmin ? (cat?.roles.find((r) => r.key === "admin")?.permissions ?? []) : [...perms];
@@ -244,6 +254,22 @@ function PermSection({ cat, isAdmin, setAdmin, perms, setPerms, onPreview, label
         <input type="checkbox" checked={isAdmin} onChange={(e) => setAdmin(e.target.checked)} />
         <span><strong>Toàn quyền quản trị</strong> <span className="muted" style={{ fontSize: 11 }}>(thấy & làm mọi thứ; quản lý tài khoản/cấu hình)</span></span>
       </label>
+      {!isAdmin && veTheoVaiTro && (veTheoVaiTro.dangBat ? (
+        <div className="perm-ve-vai-tro" style={{ margin: "8px 0" }}>
+          <p className="muted" style={{ margin: "0 0 6px" }}>↺ Lưu xong, tài khoản này <b>bỏ quyền Tùy chỉnh</b> và theo ma trận vai trò <b>{veTheoVaiTro.nhanVaiTro}</b> (trang Phân quyền) — đổi quyền của vai trò đó sẽ áp cho họ. Tích / bỏ ô bất kỳ bên dưới là quay lại quyền Tùy chỉnh.</p>
+          {veTheoVaiTro.hoiGiuKy && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
+              <input type="checkbox" checked={veTheoVaiTro.giuKy} onChange={(e) => veTheoVaiTro.doiGiuKy(e.target.checked)} />
+              <span>Giữ quyền Ký chứng từ riêng <span className="muted">(vai trò {veTheoVaiTro.nhanVaiTro} không có quyền này; bỏ tích = mất quyền Ký)</span></span>
+            </label>
+          )}
+        </div>
+      ) : (
+        <p className="muted perm-ve-vai-tro" style={{ margin: "8px 0" }}>
+          Tài khoản đang dùng quyền <b>Tùy chỉnh</b> — đổi quyền vai trò ở trang Phân quyền không áp cho họ.{" "}
+          <button type="button" className="btn btn-sm btn-ghost" onClick={veTheoVaiTro.bat}>↺ Về theo vai trò (bỏ tùy chỉnh)</button>
+        </p>
+      ))}
       <PermPreview cat={cat} isAdmin={isAdmin} perms={perms} />
       {onPreview && <button type="button" className="btn btn-sm btn-preview" onClick={tryIt}>👁 Xem thử app với quyền này (chạy thử, không lưu thật)</button>}
       {cat ? <PermMatrix cat={cat} isAdmin={isAdmin} value={perms} onChange={setPerms} />
@@ -360,6 +386,28 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
   const permGoc = useRef<Set<string>>(new Set(user.effectivePermissions ?? user.permissions ?? []));
   const permDaDoi = () =>
     perms.size !== permGoc.current.size || [...perms].some((p) => !permGoc.current.has(p));
+  /* ── "VỀ THEO VAI TRÒ" (soát chéo rbac#10) — xem chú thích ở kiểu `VeTheoVaiTro` ────────────
+     Bật cờ này là gửi `permissions: null` (bỏ tuỳ biến). MỌI thao tác tích tay / Điền nhanh / Bỏ hết
+     sau đó tắt cờ (`setPermsTay`) — ma trận lúc đó lại là một ý định Tùy chỉnh tường minh.
+     Vai trò SẼ THEO là vai trò SAU khi lưu: nút chỉ hiện khi đã bỏ cờ Quản trị, và bỏ cờ Quản trị
+     thì payload hạ về "manager" (xem khối `role` trong save). */
+  const [veTheoVaiTro, setVeTheoVaiTro] = useState(false);
+  const [giuKy, setGiuKy] = useState(false);
+  const vaiTroSau = cat?.roles.find((r) => r.key === (user.role === "admin" ? "manager" : user.role));
+  const vaiTroCoKy = !!vaiTroSau?.permissions.some((p) => p === "quote:sign:own" || p === "quote:sign:all");
+  const hoiGiuKy = !!user.canSign && !vaiTroCoKy;
+  // Tập quyền HIỆU LỰC sau khi bỏ tuỳ biến — dựng như máy chủ dựng `effectivePermissions` (bộ của vai
+  // trò, mở `:all` → `:own`, cộng quyền Ký nếu giữ cờ canSign) để phần XEM TRƯỚC nói đúng sự thật.
+  const quyenTheoVaiTro = (giu: boolean) => {
+    const adminOnly = new Set(cat?.adminOnlyPermissions ?? []);
+    const s = new Set((vaiTroSau?.permissions ?? []).filter((p) => !adminOnly.has(p)));
+    for (const p of [...s]) if (p.endsWith(":all")) s.add(p.replace(/:all$/, ":own"));
+    if (giu) s.add("quote:sign:own");
+    return s;
+  };
+  const batVeTheoVaiTro = () => { dirty.current = true; setVeTheoVaiTro(true); setGiuKy(false); setPerms(quyenTheoVaiTro(false)); };
+  const doiGiuKy = (v: boolean) => { dirty.current = true; setGiuKy(v); setPerms(quyenTheoVaiTro(v)); };
+  const setPermsTay = (s: Set<string>) => { dirty.current = true; setVeTheoVaiTro(false); setPerms(s); };
   const [err, setErr] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -417,7 +465,13 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
         // là tường minh — admin bỏ qua quyền per-user). Không đổi gì thì bỏ hẳn khoá, để máy chủ
         // giữ nguyên cột — xem `permGoc` ở trên. Backend tự đồng bộ cờ canSign từ quote:sign:own
         // KHI VÀ CHỈ KHI khoá này có mặt, nên bỏ khoá cũng là giữ nguyên canSign.
-        ...(permDaDoi() || isAdmin !== (user.role === "admin") ? { permissions: isAdmin ? [] : [...perms] } : {}),
+        //
+        // "Về theo vai trò" (rbac#10): `null` = bỏ tuỳ biến — KHÁC `[]` (tước hết quyền, RBAC-01).
+        // Nhánh `null` ở máy chủ KHÔNG đồng bộ canSign, nên gửi tường minh: chỉ giữ khi quản trị tích
+        // "Giữ quyền Ký chứng từ riêng"; vai trò đã có quyền Ký thì cờ riêng là thừa → false.
+        ...(veTheoVaiTro && !isAdmin
+          ? { permissions: null, canSign: hoiGiuKy && giuKy }
+          : permDaDoi() || isAdmin !== (user.role === "admin") ? { permissions: isAdmin ? [] : [...perms] } : {}),
       });
       toast("Đã lưu", "success"); onSaved();
     } catch (ex) { const fe = fieldErrorsFrom(ex); setFieldErrors(fe); setErr(Object.keys(fe).length ? "Vui lòng kiểm tra các ô được tô đỏ." : (ex instanceof ApiError ? ex.message : "Lỗi")); setSaving(false); }
@@ -457,7 +511,8 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
             <label className="full"><span>Chức danh</span><input value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={xemThu} label={user.displayName || user.username} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={setPermsTay} onPreview={xemThu} label={user.displayName || user.username}
+            veTheoVaiTro={user.permCustom && vaiTroSau ? { nhanVaiTro: vaiTroSau.label, dangBat: veTheoVaiTro, bat: batVeTheoVaiTro, hoiGiuKy, giuKy, doiGiuKy } : undefined} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">

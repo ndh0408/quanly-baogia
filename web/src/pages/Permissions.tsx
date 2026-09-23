@@ -76,11 +76,17 @@ export function PermissionsPage({ me }: { me: Me }) {
       el.value = u.role; // hủy → trả select về giá trị cũ
       return;
     }
+    // NÂNG LÊN QUẢN TRỊ thì gửi kèm `permissions: []` — y hệt modal Sửa ở trang Quản lý nhân viên khi
+    // bật cờ Quản trị (máy chủ giữ `[]` cho admin, không chèn phần tử canh gác). Chỉ gửi `{ role }` là
+    // để lại bản chụp cũ trên một tài khoản admin: vô hình khi họ còn là admin (toàn quyền), rồi SỐNG
+    // LẠI nguyên vẹn ngày họ bị hạ vai trò (soát chéo rbac#12). Đổi giữa các vai trò thường thì vẫn
+    // CHỈ gửi `{ role }` — không được xoá bộ quyền người khác đã tuỳ biến chỉ vì đổi nhãn vai trò.
+    const lenQuanTri = role === "admin";
     try {
-      await api.updateUser(u.id, { role });
+      await api.updateUser(u.id, lenQuanTri ? { role, permissions: [] } : { role });
       toast("Đã cập nhật vai trò", "success");
       qc.setQueryData(["permissions"], (old: { cat: PermCatalog; users: User[] } | undefined) =>
-        old ? { ...old, users: old.users.map((x) => x.id === u.id ? { ...x, role } : x) } : old);
+        old ? { ...old, users: old.users.map((x) => x.id === u.id ? { ...x, role, ...(lenQuanTri ? { permCustom: false } : {}) } : x) } : old);
     }
     catch (ex) { toast(errMsg(ex, "Lỗi"), "error"); qc.invalidateQueries({ queryKey: ["permissions"] }); }
   };
@@ -88,10 +94,15 @@ export function PermissionsPage({ me }: { me: Me }) {
   if (err) return <div><h1>Phân quyền</h1><div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div></div>;
   if (loading || !cat) return <div><h1>Phân quyền</h1><div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div></div>;
 
-  const soTuyChinh = users.filter((u) => u.permCustom).length;
+  // "Tùy chỉnh" = cột permissions KHÁC RỖNG **và vai trò không phải admin**. `permCustom` của máy chủ
+  // (listUsers) không xét vai trò, còn resolveUserPermissions trả TOÀN QUYỀN cho admin, bỏ qua cột
+  // permissions — gắn nhãn Tùy chỉnh cho admin là nói ngược trang Quản lý nhân viên (ghi "Quản trị")
+  // và đếm sai vào banner lẫn cột Quản trị (soát chéo rbac#12). MỘT hàm cho cả ba chỗ dùng.
+  const laTuyChinh = (u: User) => u.role !== "admin" && !!u.permCustom;
+  const soTuyChinh = users.filter(laTuyChinh).length;
   const demVaiTro = (role: string) => {
     const cung = users.filter((u) => u.role === role);
-    const tuyChinh = cung.filter((u) => u.permCustom).length;
+    const tuyChinh = cung.filter(laTuyChinh).length;
     return { theo: cung.length - tuyChinh, tuyChinh };
   };
   const qn = q.trim().toLowerCase();
@@ -110,7 +121,7 @@ export function PermissionsPage({ me }: { me: Me }) {
           trong khi người "Tùy chỉnh" vẫn giữ nguyên. */}
       {soTuyChinh > 0 && (
         <div className="err" role="note" style={{ background: "var(--warn-bg)", color: "var(--text)", borderColor: "var(--warn-border)" }}>
-          ⚠ {soTuyChinh} tài khoản đang dùng quyền <b>Tùy chỉnh</b> (đặt riêng ở trang Người dùng) — đổi quyền vai trò hay đổi vai trò ở đây KHÔNG có tác dụng với họ. Xem cột "Nguồn quyền" bên dưới.
+          ⚠ {soTuyChinh} tài khoản đang dùng quyền <b>Tùy chỉnh</b> (đặt riêng ở trang Quản lý nhân viên) — đổi quyền của vai trò ở bảng trên KHÔNG có tác dụng với họ; đổi vai trò cũng vậy, trừ khi nâng lên <b>Quản trị</b> (toàn quyền). Xem cột "Nguồn quyền" bên dưới; muốn đưa ai về theo vai trò: trang Quản lý nhân viên → <b>Sửa</b> → <b>Về theo vai trò</b>.
         </div>
       )}
 
@@ -185,8 +196,10 @@ export function PermissionsPage({ me }: { me: Me }) {
                     {cat.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </td>
-                <td>{u.permCustom
-                  ? <span className="status draft" title="Bộ quyền đặt riêng ở trang Người dùng — ma trận vai trò phía trên KHÔNG áp cho người này">Tùy chỉnh — không theo vai trò</span>
+                <td>{u.role === "admin"
+                  ? <span className="muted" title="Vai trò Quản trị luôn đủ quyền — không theo ma trận, không có bộ quyền riêng">Toàn quyền (Quản trị)</span>
+                  : laTuyChinh(u)
+                  ? <span className="status draft" title="Bộ quyền đặt riêng ở trang Quản lý nhân viên — ma trận vai trò phía trên KHÔNG áp cho người này. Đưa về: Quản lý nhân viên → Sửa → Về theo vai trò">Tùy chỉnh — không theo vai trò</span>
                   : <span className="muted">Theo vai trò</span>}</td>
                 <td>{u.active ? <span className="status approved">Hoạt động</span> : <span className="status rejected">Khóa</span>}</td>
               </tr>
