@@ -31,7 +31,8 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object   =   khôi phục 
 - Thiếu **kho object** → mọi hàng chứng từ thanh toán trỏ vào object không tồn
   tại. Đây là **chứng từ tài chính**.
 
-Khoá phải được cất **ở nơi khác** với bản dump. Để chung một chỗ thì kẻ lấy được
+Khoá phải được cất **ở nơi khác** với bản dump — khoá cần để dựng lại server được giữ ngoài repo, ở
+kho khoá của chủ repo (không bao giờ vào git). Để chung một chỗ thì kẻ lấy được
 dump lấy luôn khoá (mã hoá thành vô nghĩa), mà mất chỗ đó là mất cả hai.
 
 ## Cài đặt
@@ -106,8 +107,8 @@ sudo docker run --rm -it -v /etc/quanly-rclone.conf:/cfg/rclone.conf \
 #    - remote thứ nhất, vd `r2`, kiểu s3 (provider Cloudflare/…): khoá ở bước 1.
 #    - remote thứ hai TÊN `quanly-offsite`, kiểu `crypt`, remote = `r2:<bucket>/quanly`,
 #      filename_encryption = off (tên tệp không nhạy cảm, khôi phục dễ tra), đặt password + password2.
-# 3. KÝ GỬI password + password2 của crypt vào kho mật khẩu của chủ doanh nghiệp, CÙNG PII_ENC_KEY,
-#    MFA_ENC_KEY, POSTGRES_PASSWORD, MINIO_ROOT_* — TÁCH khỏi máy này. Mất máy mà không còn mật khẩu
+# 3. KÝ GỬI password + password2 của crypt vào kho khoá của chủ repo (ngoài repo, không bao giờ vào
+#    git), CÙNG PII_ENC_KEY, MFA_ENC_KEY, POSTGRES_PASSWORD, MINIO_ROOT_* — TÁCH khỏi máy này. Mất máy mà không còn mật khẩu
 #    crypt thì bản off-host là một khối mã không mở được.
 # 4. Khai trong /etc/quanly-backup.env:
 #      OFFHOST_RCLONE_REMOTE=quanly-offsite:
@@ -121,7 +122,7 @@ cat /var/lib/quanly-backup/quanly_backup.prom
 ### Kéo bản off-host về (khi mất máy)
 
 ```bash
-# Trên máy MỚI: dựng lại /etc/quanly-rclone.conf từ kho mật khẩu (cùng password/password2 crypt).
+# Trên máy MỚI: dựng lại /etc/quanly-rclone.conf từ kho khoá của chủ repo (cùng password/password2 crypt).
 R="docker run --rm -v /etc/quanly-rclone.conf:/cfg/rclone.conf:ro -v /opt/quanly-backups:/data \
    rclone/rclone:1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5 --config /cfg/rclone.conf"
 $R lsl quanly-offsite:db | sort -k2,3 | tail -5                    # bản dump mới nhất

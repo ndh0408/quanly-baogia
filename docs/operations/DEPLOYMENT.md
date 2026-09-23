@@ -12,9 +12,10 @@ node dist/worker.js       worker nền
 
 Docker, docker-compose, Helm và manifest k8s **đều gọi đúng lệnh đó**.
 `scripts/ci/check-runtime-command.sh` bắt chúng lệch nhau — và nó chạy ở bước **[9/13] của
-`npm run verify`**, KHÔNG phải ở CI. GitHub Actions không bật trên tài khoản này
-(`.github/workflows/ci.yml` khai đủ nhưng chưa bao giờ chạy — xem `AGENTS.md`), nên mọi câu
-kiểu "CI sẽ bắt" đều sai ở repo này.
+`npm run verify`**. **CI của repo này LÀ `scripts/verify-local.sh`** (chủ repo chốt 2026-09-23):
+GitHub Actions không dùng — tài khoản bị khoá vì billing nên mọi lượt từng kích hoạt đều hỏng sau
+2–3 giây, và `.github/workflows/*.yml` nay chỉ chạy tay (`workflow_dispatch`). Mọi câu kiểu "CI sẽ
+bắt" đều sai ở repo này — xem `AGENTS.md`.
 
 Lý do có chốt này rất cụ thể: Dockerfile từng chạy `node --import tsx src/server.js`
 trong khi Helm và `infra/k8s/app.yaml` chạy `node src/server.js` — **file đó không
@@ -109,25 +110,42 @@ VM là mất dịch vụ cho tới khi khôi phục xong — xem
 ## Deploy (mức 1) — `deploy.sh`
 
 ```bash
-bash deploy.sh staging      # → VM staging
-bash deploy.sh prod         # → VM production, CHỈ sau khi staging đã duyệt
+npm run verify              # đủ 13 bước, cây SẠCH → ghi DẤU XANH cho commit HEAD
+bash deploy.sh staging      # → VM staging (không có dấu xanh: chỉ cảnh báo)
+bash deploy.sh prod         # → VM production, CHỈ sau khi staging đã duyệt (không có dấu xanh: DỪNG)
 ```
 
 Mỗi lượt (số bước khớp comment `[n/6]` in ra khi chạy):
 
-- **[1/6]** Backup CSDL + gắn tag `:rollback` cho image hiện tại
+- **[0/6]** Cổng trước khi ship (audit 2026-09-22, INFRA-04). `scripts/verify-local.sh` chạy ĐỦ trên
+  cây SẠCH thì ghi dấu `ok-<sha>` vào `$(git rev-parse --git-common-dir)/quanly-verify/`. `prod`:
+  commit không có dấu, hoặc cây làm việc bẩn → **dừng trước khi đụng máy chủ**. `staging`: chỉ cảnh
+  báo. Commit chưa có trên origin: chỉ cảnh báo (chủ repo làm việc local). Khẩn cấp:
+  `DEPLOY_KHAN_CAP="<lý do>" bash deploy.sh prod` — lý do được ghi vào `RELEASES.log` (trường `khan_cap`).
+- **[1/6]** Backup CSDL (`pg_dump --no-owner --clean --if-exists`, cùng cờ với dump hằng đêm) + gắn
+  tag `:rollback` cho ảnh của **container đang chạy** (không phải ảnh mà tag đang trỏ — có thể là ảnh
+  chưa từng chạy nếu lượt trước hỏng giữa chừng)
 - **[2/6]** Ship file đã tracked (`git archive`)
-- **[2b/6]** Dọn file mồ côi trong `src/`, `shared/`, `web/src/` — `tar` không tự xoá, nên file
-  đã bị xoá/đổi tên/di chuyển trong git nhưng còn sót từ lượt deploy trước (không chỉ riêng kiểu
-  `.js` cũ shadow `.ts` cùng tên) vẫn nằm lại trên VM và có thể làm build biên dịch nhầm mã đã gỡ
+- **[2b/6]** Dọn file mồ côi trong `src/`, `shared/`, `web/src/`, `prisma/`, `templates/`, `public/`
+  (trừ `public/app2/` do build sinh) — `tar` không tự xoá, nên file đã bị xoá/đổi tên/di chuyển trong
+  git vẫn nằm lại trên VM: có thể làm build biên dịch nhầm mã đã gỡ, và một thư mục migration đã gỡ
+  khỏi git sẽ bị `prisma migrate deploy` CHẠY trên CSDL
+- **[2c/6]** So bộ sao lưu trên host (`/opt/quanly/*.sh`) với `scripts/backup/` — **chỉ cảnh báo**,
+  không tự cài (cần sudo). Xem [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
 - **[3/6]** `docker compose build app` trên VM, hoặc `docker pull` theo digest nếu đặt `IMAGE_REF`
 - **[3b/6]** Gắn tag bất biến `<tên>:<git-sha>` cho ảnh vừa lấy
+- **[3c/6]** Soát migration HUỶ đang chờ (DROP TABLE/COLUMN, RENAME, đổi kiểu cột) — `prod` dừng trừ
+  khi `CHO_PHEP_MIGRATION_HUY=1`; xem mục "Lùi schema"
 - **[4/6]** **`prisma migrate deploy`** (`docker compose run --rm app …`) — hỏng ở đây thì
   `set -e` dừng deploy, app cũ vẫn chạy
 - **[5/6]** Recreate `app` + `worker` bằng `--force-recreate`, ghi `DEPLOYED_SHA`
-- **[5b/6]** Ghi sổ phát hành vào `RELEASES.log` (SHA, migration đã áp, digest ảnh, `image_tag`)
 - **[5c/6]** Đối chiếu ảnh container đang chạy khớp đúng ảnh vừa gắn tag ở [3b/6]
-- **[6/6]** Verify `/livez`
+- **[5b/6]** Ghi sổ phát hành vào `RELEASES.log` (SHA, migration đã áp, digest ảnh, `image_tag`, `khan_cap`)
+- **[5d/6]** Nạp lại quy tắc Prometheus (`SIGHUP`) và khởi động lại Alertmanager khi bản mẫu đổi —
+  nếu ngăn quan sát đang chạy
+- **[6/6]** Verify: `/livez` · **`/readyz`** (app chạm được CSDL) · **worker** đang chạy, không khởi
+  động lại, log có `worker registered` · **đường public** `$URL/livez` từ máy gõ lệnh (prod: hỏng là
+  đỏ; staging: cảnh báo; `DEPLOY_BO_QUA_KIEM_PUBLIC=1` để bỏ riêng lớp này)
 
 Bước 4 đặt **trước** bước 5 là có chủ ý: schema phải có cột mới trước khi mã mới
 dùng tới.
@@ -282,19 +300,45 @@ psql -c "SELECT pid, state, left(query,80) FROM pg_stat_activity
 ## Rollback
 
 ```bash
-# App (deploy.sh in ra lệnh này ở cuối mỗi lượt)
-ssh <host> "cd /opt/stacks/quanly/quanly && \
-  docker tag quanly-app:rollback quanly-app:prod && \
-  docker compose -f docker-compose.prod.yml up -d app worker"
-
-# Helm
-helm rollback quanly
+bash deploy.sh rollback prod              # về :rollback — bản chạy TRƯỚC lượt deploy gần nhất
+bash deploy.sh rollback prod <git-sha>    # về BẤT KỲ bản đã phát hành (image_tag trong RELEASES.log)
 ```
 
-**Migration không tự rollback.** Nếu bản phát hành có migration phá tương thích
-ngược thì rollback mã thôi là chưa đủ — phải khôi phục từ bản backup trước deploy
-(deploy.sh đã tạo ở bước 1). Vì thế migration phải theo hướng expand/contract:
-thêm cột trước, đổi mã sau, bỏ cột cũ ở một bản phát hành sau nữa.
+Lệnh con này làm đúng những gì bước [5/6]–[6/6] làm: gắn tag, `up -d --no-deps --force-recreate app
+worker`, **đối chiếu** ảnh container đang chạy, rồi kiểm `/livez` · `/readyz` · worker · đường public.
+
+> **Vì sao không còn in lệnh `docker tag … && docker compose up -d app worker` trần** (audit
+> 2026-09-22, DOC-02): chính deploy.sh đã ĐO (staging 2026-09-01) rằng `up -d` trên service có khối
+> `build:` KHÔNG thay container khi chỉ tag đổi — lệnh thoát 0, container vẫn chạy ảnh lỗi, và
+> `/livez` của bản cũ lẫn bản mới đều trả 200. Lệnh lùi dùng đúng lúc sự cố mà báo thành công giả là
+> tệ hơn không có. Phải gõ tay thì BẮT BUỘC kèm `--force-recreate` rồi đối chiếu:
+>
+> ```bash
+> ssh <host> "cd /opt/stacks/quanly/quanly && docker tag quanly-app:<sha> quanly-app:prod && docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate app worker"
+> ssh <host> "docker images quanly-app:prod --format '{{.ID}}'; for c in quanly-app quanly-worker; do docker inspect \$c --format '{{.Image}}'; done"
+> ```
+
+### Lùi schema
+
+**Migration không tự rollback** — lùi ẢNH không lùi schema (`prisma migrate deploy` chỉ đi tiến). Với
+migration chỉ THÊM (đa số) thì bản cũ chạy được trên schema mới và lùi ảnh là đủ. Với migration
+HUỶ/ĐỔI DẠNG thì bản cũ gọi vào thứ đã mất → 500 (ví dụ thật: `20260915090000_quote_member_scopes`
+`DROP TABLE "_QuoteMembers"` mà code trước `f84a4ff` còn dùng). Lúc đó phải khôi phục bản dump trước
+deploy (bước [1/6], `~/quanly-backups/predeploy-*.sql.gz`) — **mất mọi ghi mới từ lúc deploy**:
+
+```bash
+cd /opt/stacks/quanly/quanly
+docker compose -f docker-compose.prod.yml stop app worker
+gunzip -c ~/quanly-backups/predeploy-<ts>.sql.gz | docker exec -i quanly-postgres psql -U quanly -d quanly -v ON_ERROR_STOP=1
+bash deploy.sh rollback prod <git-sha-bản-trước>     # (chạy từ máy dev)
+```
+
+(Dump trước-deploy tạo **trước 2026-09-23** không có `--clean` — xem DISASTER_RECOVERY.md, mục
+"Khôi phục DB", nhánh 3b.)
+
+Vì thế migration phải theo **expand/contract** (prisma/migrations/README.md): thêm cột trước, đổi mã
+sau, bỏ cột cũ ở một bản phát hành SAU lượt đã ngừng dùng nó. Bước [3c/6] chặn migration huỷ trên prod
+cho tới khi người deploy xác nhận điều đó bằng `CHO_PHEP_MIGRATION_HUY=1`.
 
 ## Biến môi trường BẮT BUỘC ở production
 
@@ -321,18 +365,20 @@ giữ cho khớp với schema.
 
 ## Danh sách kiểm trước khi phát hành
 
-- [ ] `npm run verify` **xanh trên đúng commit sẽ deploy** — 13 bước, gõ tay.
+- [ ] `npm run verify` **xanh trên đúng commit sẽ deploy** — 13 bước, gõ tay, cây sạch.
+      `deploy.sh prod` nay KIỂM điều này (dấu xanh `ok-<sha>`, bước [0/6]) và dừng nếu thiếu.
       Mục này trước đây ghi "CI xanh", tức trỏ vào một cổng **không bao giờ chạy**: GitHub
-      Actions không bật trên tài khoản này. Không có gì chạy thay bạn.
-      Cần nhanh thì `npm run verify:nhanh`, nhưng nó **bỏ** smoke image + smoke giao diện +
-      cổng bảo mật — đừng dùng bản nhanh cho lượt deploy prod.
+      Actions không dùng ở repo này. CI là `verify-local.sh`.
+      `npm run verify:nhanh` **không** ghi dấu xanh — nó bỏ smoke image + smoke giao diện +
+      cổng bảo mật.
 - [ ] Có migration đụng dữ liệu → đã diễn tập
 - [ ] Backup gần nhất < 24h (`/opt/quanly/backup-watchdog.sh`)
 - [ ] Đã deploy staging và duyệt bằng tay
 - [ ] Có sửa `cap_*` / `security_opt` / `deploy.resources` của `postgres` hoặc `redis`
       → đã diễn tập tay (mục "Diễn tập thay đổi postgres/redis"), vì bước 5 của
       `deploy.sh` không dựng lại hai service đó
-- [ ] Biết trước lệnh rollback **và biết lùi về bản nào**: `tail $DIR/RELEASES.log` trên máy chủ
-      cho `image_tag` = `quanly-app:<git-sha>` — tag bất biến `deploy.sh` gắn ở bước [3b/6].
+- [ ] Biết trước lệnh rollback (`bash deploy.sh rollback prod [<git-sha>]`) **và biết lùi về bản
+      nào**: `tail $DIR/RELEASES.log` trên máy chủ cho `image_tag` = `quanly-app:<git-sha>` — tag bất
+      biến `deploy.sh` gắn ở bước [3b/6].
       `:rollback` chỉ lùi được đúng một bước và bị ghi đè mỗi lượt deploy; tag theo SHA thì không.
 - [ ] Không deploy chiều thứ Sáu, trừ khi đang chữa sự cố

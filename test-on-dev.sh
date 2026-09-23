@@ -3,7 +3,7 @@
 # DEV/STAGING. Con số test CỐ Ý không ghi ở đây: nó trôi mỗi lượt và một con số cũ trong
 # tiêu đề chỉ làm người đọc tin nhầm — `npm run verify` in ra số thật mỗi lần chạy.
 #
-# ⚠️ CI TRÊN GITHUB KHÔNG CHẠY (tài khoản không bật Actions). Nên .github/workflows/ci.yml là
+# ⚠️ REPO KHÔNG DÙNG GITHUB ACTIONS (CI là scripts/verify-local.sh). Nên .github/workflows/ci.yml là
 # TÀI LIỆU về những cổng cần chạy, KHÔNG phải thứ đang chạy. Cổng thật sự chạy chỉ có hai:
 #   · `npm run verify`  — chạy TẤT CẢ ngay trên máy đang ngồi (scripts/verify-local.sh)
 #   · file này          — chạy trên hạ tầng Docker của VM dev, khi máy local không có Postgres/Redis/MinIO
@@ -12,20 +12,37 @@
 #   SSH=staging-ts bash test-on-dev.sh
 #
 # Cách hoạt động: SSH vào VM dev → tạo DB test RIÊNG (quanly_test, không đụng data dev) →
-# chạy 1 container node:22 trên ĐÚNG mạng + ĐÚNG Postgres + Redis của dev + code đã ship (git
-# archive ở $DIR) → npm ci + prisma migrate + vitest (REQUIRE_DB_TESTS=1) → dọn sạch.
-# KHÔNG hardcode bí mật: lấy mật khẩu Postgres + REDIS_URL ĐỘNG từ container đang chạy.
+# chạy 1 container Node (ĐÚNG ảnh nền của Dockerfile) trên ĐÚNG mạng + ĐÚNG Postgres của dev + code
+# đã ship (git archive ở $DIR) → npm ci + prisma migrate + vitest (REQUIRE_DB_TESTS=1) → dọn sạch.
+# KHÔNG hardcode bí mật: lấy mật khẩu Postgres ĐỘNG từ container đang chạy.
+#
+# ── BA CHỖ ĐÃ VÁ (audit 2026-09-22, INFRA-14) ─────────────────────────────
+#   1. LUÔN THOÁT 0: lệnh cuối là `echo "✅ xong (exit $?)"`, nên người gọi (và mọi script bọc ngoài)
+#      thấy xanh kể cả khi bộ test đỏ. Nay thoát bằng đúng mã của lượt chạy trên VM.
+#   2. KHÔNG CHẶN ĐÍCH PRODUCTION: `SSH=coolify-ts bash test-on-dev.sh` sẽ DROP/CREATE quanly_test
+#      trên Postgres PRODUCTION và chạy test với khoá PII của production. Nay từ chối.
+#   3. DÙNG REDIS CỦA WORKER ĐANG SỐNG: job test đưa vào hàng đợi bị worker staging THẬT nhặt và chạy
+#      trên CSDL staging. Nay dùng redis-server CỤC BỘ trong container test (đã bật sẵn ở dưới).
 set -uo pipefail
 SSH="${SSH:-staging-ts}"
 DIR=/opt/stacks/quanly/quanly
-echo "▶ Chạy test trên Docker dev qua [$SSH] ..."
+case "$SSH" in
+  coolify*|*prod*)
+    echo "❌ từ chối: '$SSH' là máy PRODUCTION. Script này DROP/CREATE CSDL và chạy bộ test (deleteMany,"
+    echo "   obliterate hàng đợi) — chỉ dành cho VM dev/staging."
+    exit 1 ;;
+esac
+# Ảnh Node = đúng ảnh nền của Dockerfile (ghim digest) — không để bộ test chạy một major khác production.
+NODE_IMG="$(sed -n 's/^ARG NODE_IMAGE=//p' "$(dirname "$0")/Dockerfile" | head -1)"
+[ -n "$NODE_IMG" ] || { echo "❌ không đọc được ARG NODE_IMAGE trong Dockerfile"; exit 1; }
+MC_IMG="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112"
+echo "▶ Chạy test trên Docker dev qua [$SSH] ($NODE_IMG) ..."
 
-ssh "$SSH" '
+ssh "$SSH" "NODE_IMG='$NODE_IMG'; MC_IMG='$MC_IMG';"'
   set -uo pipefail
   DIR=/opt/stacks/quanly/quanly
   PGUSER=$(docker exec quanly-postgres printenv POSTGRES_USER 2>/dev/null || echo quanly)
   PGPASS=$(docker exec quanly-postgres printenv POSTGRES_PASSWORD)
-  REDIS=$(docker exec quanly-app printenv REDIS_URL)
   # Nạp KHO OBJECT + KHOÁ PII của DEV vào bộ test. Thiếu chúng thì test đụng lưu trữ lặng lẽ đi
   # nhánh "chưa cấu hình" (503) và test PII chạy ở chế độ không-mã-hoá — xanh mà không kiểm gì.
   # Dùng BUCKET RIÊNG (quanly-test) để không đụng dữ liệu DEV.
@@ -38,7 +55,7 @@ ssh "$SSH" '
   # Bucket RIÊNG cho bộ test. Không tạo sẵn thì mọi test đụng lưu trữ đỏ vì "NoSuchBucket" — và
   # tệ hơn, dễ bị hiểu nhầm là lỗi ứng dụng. Tạo trước, dọn nội dung sau mỗi lượt chạy.
   if [ -n "$S3EP" ]; then
-    docker run --rm --network "$NET" --entrypoint sh minio/mc:latest -c "
+    docker run --rm --network "$NET" --entrypoint sh "$MC_IMG" -c "
       mc alias set t $S3EP $S3AK $S3SK >/dev/null 2>&1 &&
       mc mb -p t/quanly-test >/dev/null 2>&1;
       mc anonymous set none t/quanly-test >/dev/null 2>&1; true" >/dev/null 2>&1
@@ -47,17 +64,17 @@ ssh "$SSH" '
   docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "DROP DATABASE IF EXISTS quanly_test;" >/dev/null 2>&1
   docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "CREATE DATABASE quanly_test;" >/dev/null 2>&1
 
-  echo "▶ [2/3] cài deps + migrate + chạy test (container node:22 trên mạng $NET)"
+  echo "▶ [2/3] cài deps + migrate + chạy test (container $NODE_IMG trên mạng $NET)"
   docker run --rm --network "$NET" -v "$DIR":/app -w /app \
     -e DATABASE_URL="postgresql://$PGUSER:$PGPASS@quanly-postgres:5432/quanly_test?schema=public" \
-    -e REDIS_URL="$REDIS" \
+    -e REDIS_URL="redis://127.0.0.1:6379/0" \
     -e SESSION_SECRET="ondev-test-secret-needs-to-be-at-least-32-characters-long-ok" \
     -e NODE_ENV="test" -e REQUIRE_DB_TESTS="1" \
     -e S3_ENDPOINT="$S3EP" -e S3_ACCESS_KEY="$S3AK" -e S3_SECRET_KEY="$S3SK" \
     -e S3_BUCKET="quanly-test" -e S3_REGION="us-east-1" -e S3_FORCE_PATH_STYLE="true" \
     -e PII_ENC_KEY="$PIIK" \
     -e APP_BASE_URL="http://localhost:3000" -e PORT="3000" \
-    node:22-alpine sh -c "
+    "$NODE_IMG" sh -c "
       # ── CHUẨN BỊ: mỗi bước tự báo, KHÔNG nối bằng && ─────────────────────────
       # Trước đây cả khối là một chuỗi \`a && b && c && npm run test:run\`, nên một bước hỏng ở
       # giữa làm vitest KHÔNG chạy mà mã thoát vẫn có thể là 0 — cổng báo XANH trong khi không
@@ -124,4 +141,6 @@ ssh "$SSH" '
   docker exec quanly-postgres psql -U "$PGUSER" -d "$PGUSER" -c "DROP DATABASE IF EXISTS quanly_test;" >/dev/null 2>&1
   exit $rc
 '
-echo "✅ xong (exit $?)"
+rc=$?
+if [ "$rc" -eq 0 ]; then echo "✅ xong — bộ test XANH trên $SSH"; else echo "❌ xong — exit $rc (xem FILE DO / LY DO ở trên)"; fi
+exit "$rc"

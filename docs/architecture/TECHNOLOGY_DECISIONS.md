@@ -80,7 +80,7 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 |---|---|---|---|---|---|
 | Vitest | 4.1 (backend + web) | **KEEP** | — | Một runner cho cả hai phía. | — |
 | Playwright | 1.62 | **KEEP** | — | Dùng cho smoke giao diện chạy **cục bộ** (`scripts/ci/ui-smoke.mjs`), không phải bộ E2E đầy đủ. | — |
-| GitHub Actions | `ci.yml` có, **chưa bao giờ chạy** | **REPLACE** ✔ | `npm run verify` cục bộ | Tài khoản không bật Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 13 bước gõ tay. | Đã hoàn tất |
+| GitHub Actions | `ci.yml` có, **chỉ chạy tay** (`workflow_dispatch`) | **REPLACE** ✔ | `npm run verify` cục bộ (= CI, ghi dấu xanh cho `deploy.sh prod`) | Tài khoản bị khoá vì billing — mọi lượt từng kích hoạt đều hỏng sau 2–3 giây; chủ repo chốt 2026-09-23 không dùng Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 13 bước gõ tay. | Đã hoàn tất |
 | gitleaks · trivy · semgrep | ghim theo tag, chạy qua Docker | **KEEP** | — | Phụ lục §22: không phụ thuộc `latest` cho image quét. | — |
 | Ký ảnh (Cosign) | **chưa có** | **DEFER** | Cosign + OIDC | §22 nói "nếu infrastructure hỗ trợ". Không có registry nào đang phát hành ảnh đã ký, và production dựng ảnh **trên VM** — không có gì để ký. Bật cùng lúc với đường digest. | Thấp |
 

@@ -74,7 +74,9 @@ Không có lớp tương thích, không có cờ bật/tắt. Một frontend, m�
 
 - Không còn đường lui nếu bản build React hỏng. Đổi lại bằng: `index.html` phục
   vụ `no-cache` nên rollback ảnh Docker là có hiệu lực ngay, và
-  `docs/operations/DEPLOYMENT.md` đã có quy trình rollback theo digest.
+  `docs/operations/DEPLOYMENT.md` đã có quy trình rollback theo tag bất biến `<tên>:<git-sha>`
+  (`bash deploy.sh rollback <prod|staging> <git-sha>`). Bản trước ghi "theo digest" — sai: ảnh dựng
+  trên VM không có digest registry; lùi đi theo tag (sửa 2026-09-23, audit DOC-02).
 
 **Lớp phủ test — không tụt:**
 

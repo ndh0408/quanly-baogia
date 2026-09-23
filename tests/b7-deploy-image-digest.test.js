@@ -38,7 +38,8 @@ const STUB_SSH = `#!/usr/bin/env bash
 shift
 printf '%s\\n' "$*" >> "$STUB_DIR/ssh.log"
 case "$*" in
-  *livez*) echo '{"ok":true}';;
+  *livez*|*readyz*) echo '{"ok":true}';;
+  *RestartCount*) echo WORKER_OK;;
 esac
 exit 0
 `;
@@ -46,6 +47,13 @@ const STUB_GIT = `#!/usr/bin/env bash
 case "$1" in rev-parse) echo 1111111111111111111111111111111111111111; exit 0;; esac
 exit 0
 `;
+
+function dauXanh(goc) {
+  const d = join(goc, "verify");
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "ok-1111111111111111111111111111111111111111"), "sha=1111\nluc=test\n");
+  return d;
+}
 
 const rac = [];
 afterEach(() => {
@@ -69,7 +77,13 @@ function chayDeploy(env) {
   let out;
   try {
     out = execFileSync("bash", [join(ROOT, "deploy.sh"), "prod"], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, HOME: dir, ...env },
+      // Từ audit 2026-09-22: bước [0/6] đòi dấu xanh verify (INFRA-04) và bước [6/6] kiểm thêm
+      // /readyz + worker + đường public (INFRA-05). Stub trả lời đủ cho các bước đó; bài này vẫn chỉ
+      // đo đường lấy image — dấu xanh cấp cho đúng SHA giả, lớp public bỏ qua (không gọi mạng thật).
+      env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`, STUB_DIR: stub, HOME: dir,
+        QUANLY_VERIFY_DIR: dauXanh(dir), DEPLOY_CHO_WORKER_S: "0", DEPLOY_BO_QUA_KIEM_PUBLIC: "1", ...env,
+      },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 20_000,

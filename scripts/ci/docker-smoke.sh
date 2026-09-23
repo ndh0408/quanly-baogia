@@ -11,8 +11,8 @@
 # nó ở ba chỗ (`.github/workflows/ci.yml`).
 #
 # Nó nhận image qua biến `IMAGE` và KHÔNG tự dựng. Thiếu đúng một mảnh: trên máy dev không có ai
-# dựng image cả, nên trên thực tế nó chỉ chạy trong CI — mà CI của repo này KHÔNG CHẠY (tài khoản
-# không bật Actions). File này lấp đúng mảnh đó và KHÔNG lặp lại bất kỳ khẳng định nào:
+# dựng image cả, nên trên thực tế nó chỉ chạy trong ci.yml — mà repo này KHÔNG dùng GitHub Actions
+# (CI là verify-local.sh). File này lấp đúng mảnh đó và KHÔNG lặp lại bất kỳ khẳng định nào:
 #
 #   docker-smoke.sh  =  dựng image từ cây làm việc  →  IMAGE=… smoke-image.sh
 #
@@ -38,15 +38,19 @@ command -v docker >/dev/null 2>&1 || { printf '\033[31mDỪNG: không có docker
 docker info >/dev/null 2>&1 || { printf '\033[31mDỪNG: docker daemon không chạy (thử: dockerd &).\033[0m\n'; exit 1; }
 
 # ── Ảnh nền: chèn CA của proxy MITM nếu máy này nằm sau một cái ─────────────
-NEN="node:22-alpine"
+# ĐỌC từ chính Dockerfile, không chép cứng: bản trước ghi `NEN="node:22-alpine"` ở đây rồi TRUYỀN nó
+# qua --build-arg — tức smoke dựng image trên một ảnh nền KHÁC ảnh mà Dockerfile (và production) dùng,
+# và đổi ARG NODE_IMAGE trong Dockerfile không hề đổi thứ được smoke (audit 2026-09-22, DEP-04).
+NEN="$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile | head -1)"
+[ -n "$NEN" ] || { printf '\033[31mDỪNG: không đọc được ARG NODE_IMAGE trong Dockerfile.\033[0m\n'; exit 1; }
 CA="${SMOKE_CA_BUNDLE:-/root/.ccr/ca-bundle.crt}"
 if [ -f "$CA" ]; then
   TAM="$(mktemp -d)"
   cp "$CA" "$TAM/ca.crt"
   # `apk` và `wget` của alpine đọc /etc/ssl/certs/ca-certificates.crt; Node đọc NODE_EXTRA_CA_CERTS.
   # NỐI THÊM chứ không thay, để CA công cộng vẫn còn.
-  cat > "$TAM/Dockerfile" <<'EOF'
-FROM node:22-alpine
+  printf 'FROM %s\n' "$NEN" > "$TAM/Dockerfile"
+  cat >> "$TAM/Dockerfile" <<'EOF'
 COPY ca.crt /usr/local/share/ca-certificates/agent-proxy.crt
 RUN cat /usr/local/share/ca-certificates/agent-proxy.crt >> /etc/ssl/certs/ca-certificates.crt
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/agent-proxy.crt

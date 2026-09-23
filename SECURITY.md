@@ -43,11 +43,11 @@ Tóm tắt các chốt và **nơi chúng được khoá bằng test**:
 ```bash
 npm run scan          # gitleaks (lịch sử git + cây làm việc) · trivy · semgrep · SBOM
 npm run scan:secrets  # chỉ quét bí mật
-npm run verify        # toàn bộ 12 cổng, gồm cả cổng bảo mật
+npm run verify        # toàn bộ 13 bước, gồm cả cổng bảo mật
 ```
 
-⚠️ **GitHub Actions không bật trên tài khoản của repo này** — `.github/workflows/ci.yml` chưa bao
-giờ chạy. Cổng duy nhất thật sự chạy là cổng gõ tay. Xem [AGENTS.md](AGENTS.md).
+⚠️ **Repo này KHÔNG dùng GitHub Actions** — CI là `scripts/verify-local.sh` (`npm run verify`) chạy
+trên máy dev; `.github/workflows/ci.yml` chỉ chạy tay. Xem [AGENTS.md](AGENTS.md).
 
 ## Điều đã biết và CỐ Ý chấp nhận
 

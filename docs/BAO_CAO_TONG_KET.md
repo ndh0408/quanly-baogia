@@ -11,7 +11,7 @@
 **Trước.** Một hệ quản lý báo giá đang chạy thật, kiến trúc lành mạnh (React SPA → Express →
 Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 140 endpoint, tiền dùng `Decimal`. Nhưng
 lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml` khai đủ cổng mà **chưa bao giờ chạy**
-(tài khoản không bật GitHub Actions), không có E2E, không có quy tắc cảnh báo, không ai đo đường
+(tài khoản GitHub bị khoá vì billing — mọi lượt Actions hỏng sau vài giây; nay CI là `verify-local.sh`), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
 **Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 39 khẳng định, gồm dựng + smoke image

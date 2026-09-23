@@ -65,7 +65,7 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate app worker
 ```
 
 ## Dựng lại toàn bộ (mất host)
-Thứ tự: (nếu Proxmox thật sự có backup VM — xem bảng đầu tài liệu, **chưa kiểm chứng**) restore VM coolify **→** (hoặc) dựng VM mới + cài Docker **→** `git clone` repo **→** điền `.env` từ **kho mật khẩu** (không phải từ máy cũ): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_*`, `PII_ENC_KEY`, `MFA_ENC_KEY`, `SESSION_SECRET`, `JWT_SECRET`… **→** `docker compose -f docker-compose.prod.yml up -d postgres redis minio` (ảnh MinIO kéo từ **quay.io** — Docker Hub đã gỡ `minio/*`) **→** kéo bản off-host về (BACKUP_RESTORE.md) **→** restore DB (mục trên) **→** khôi phục kho object (mục "Thứ tự khôi phục" bên dưới, bước 3) **→** `prisma migrate deploy` **→** `up -d app worker` **→** verify `/livez` + `/readyz` **→** cài lại cloudflared tunnel **→** `install-backup.sh`.
+Thứ tự: (nếu Proxmox thật sự có backup VM — xem bảng đầu tài liệu, **chưa kiểm chứng**) restore VM coolify **→** (hoặc) dựng VM mới + cài Docker **→** `git clone` repo (GitHub là nơi lưu trữ mã — mọi commit đang chạy phải đã được push) **→** điền `.env` từ **kho khoá của chủ repo** — khoá cần để dựng lại server được giữ NGOÀI repo, ở kho khoá riêng của chủ repo, và không bao giờ vào git (không lấy từ máy cũ, vì mất máy là mất luôn `.env` trên đó): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_*`, `PII_ENC_KEY`, `MFA_ENC_KEY`, `SESSION_SECRET`, `JWT_SECRET`… **→** `docker compose -f docker-compose.prod.yml up -d postgres redis minio` (ảnh MinIO kéo từ **quay.io** — Docker Hub đã gỡ `minio/*`) **→** kéo bản off-host về (BACKUP_RESTORE.md) **→** restore DB (mục trên) **→** khôi phục kho object (mục "Thứ tự khôi phục" bên dưới, bước 3) **→** `prisma migrate deploy` **→** `up -d app worker` **→** verify `/livez` + `/readyz` **→** cài lại cloudflared tunnel **→** `install-backup.sh`.
 
 > Không có bản off-host thì mục này **không thực hiện được** — xem bảng trạng thái đầu tài liệu.
 
@@ -101,7 +101,9 @@ bản dump CSDL   +   PII_ENC_KEY   +   bản sao kho object
 `PII_ENC_KEY` **phải** được sao lưu **tách khỏi** nơi để bản dump CSDL. Để chung một chỗ thì kẻ lấy
 được bản dump cũng lấy luôn khoá — mã hoá thành vô nghĩa; mà mất chỗ đó thì mất cả hai.
 
-* Nơi lưu: trình quản lý bí mật của tổ chức, hoặc phong bì niêm phong cất két (khoá không dài).
+* Nơi lưu: khoá cần để dựng lại server được giữ **ngoài repo, ở kho khoá của chủ repo** (đã sao
+  lưu riêng, không bao giờ vào git — tuyệt đối không ghi giá trị khoá vào bất kỳ tệp nào trong repo).
+  Kho đó phải nằm ở nơi KHÁC máy production và khác nơi để bản dump.
 * Mỗi môi trường một khoá riêng. Khoá DEV **không** dùng cho production.
 
 ### Xoay `PII_ENC_KEY`
