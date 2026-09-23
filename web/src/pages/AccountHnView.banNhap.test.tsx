@@ -23,7 +23,7 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { AccountHnView } from "./AccountHnView";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, setPreviewMode } from "../lib/api";
 import { khoaBanNhap, docBanNhap, ghiBanNhap } from "../lib/localDraft";
 import * as ui from "../lib/ui";
 
@@ -222,5 +222,24 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     await act(async () => { traLoi(true); });
     await cho(20);
     expect(coXd()).toBe(true);
+  });
+});
+
+// L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",
+// còn khoá bản nháp vẫn theo id admin THẬT.
+describe("L63 — xem thử quyền không đụng bản nháp giá HN thật", () => {
+  afterEach(() => { setPreviewMode(false); });
+  it("có bản nháp thật: xem thử → không hỏi khôi phục, Hủy/Lưu/gõ thử đều không xoá hay ghi đè nó", async () => {
+    ghiBanNhap(KHOA, { hnTables: [{ ...baoGia().hnTables[0], items: [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 7_700_000, days: 1 }] }] }, "a".repeat(32), 5);
+    setPreviewMode(true);
+    h.confirm = false;
+    await mo();
+    expect(ui.confirmModal).not.toHaveBeenCalledWith("Có giá Hà Nội chưa lưu từ lần trước", expect.anything(), expect.anything());
+    goGia("1000");
+    await cho(1600);
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+    await act(async () => { nutLuu().click(); });
+    await cho(20);
+    expect(giaTrongNhap(KHOA)).toBe(7_700_000);
   });
 });

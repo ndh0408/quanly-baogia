@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
+import { api, ApiError, isPreviewMode, QUOTE_SCOPES, TEN_PHAM_VI, type Me, type QuoteFull, type EditorCompany, type EditorTemplate, type QuoteVersion, type AssignableUser, type QuoteScope, type QuoteMemberLite } from "../lib/api";
 import { toast, confirmModal, promptModal, useEscClose, modalChotBaoGia, toLocalInputDate } from "../lib/ui";
 import { xuatBaoGia } from "../lib/exportQuote";
 import * as M from "../lib/quoteMath";
@@ -431,13 +431,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
         let khoiPhuc = false;
-        chuyenBanNhapCu(isNew ? "moi" : quoteId!, meIdRef.current);   // bản nháp ghi trước FE-04 (khoá không có người dùng)
+        // L63: XEM THỬ QUYỀN — mọi lệnh ghi chỉ "thành công giả" (api.req), còn me.id vẫn là admin THẬT,
+        // nên khoá bản nháp là khoá thật: Lưu giả rồi xoá bản nháp thật, Hủy "Khôi phục?" xoá nó, gõ thử
+        // ghi rác vào nó. Lúc xem thử thì KHÔNG đụng bản nháp: không đọc, không hỏi, khoá = null — mark(),
+        // ghiNgay, boThayDoi, save() vốn đã bỏ qua ghi/xoá khi không có khoá.
+        const xemThu = isPreviewMode();
+        if (!xemThu) chuyenBanNhapCu(isNew ? "moi" : quoteId!, meIdRef.current);   // bản nháp ghi trước FE-04 (khoá không có người dùng)
         // FE-12: khoá bản nháp chỉ gán vào ref SAU khi qRef đã là báo giá này (xem dưới) — gán sớm thì
         // trong lúc chờ hộp "Khôi phục?" ref đã trỏ báo giá MỚI mà qRef còn là báo giá CŨ.
-        const khoa = khoaBanNhap(isNew ? "moi" : quoteId!, meIdRef.current);
+        const khoa = xemThu ? null : khoaBanNhap(isNew ? "moi" : quoteId!, meIdRef.current);
         baseNhapRef.current = (q as { updatedAt?: string }).updatedAt ?? null;
         donBanNhapQuaHan();   // rẻ, và giữ hạn ngạch localStorage sạch cho cả origin
-        const nhapCu = docBanNhap(khoa, meIdRef.current);
+        const nhapCu = khoa ? docBanNhap(khoa, meIdRef.current) : null;
         // CHỈ đề nghị khi bản nháp dựa trên ĐÚNG bản máy chủ vừa tải. Lệch `updatedAt` nghĩa là
         // người khác đã lưu đè trong lúc đó — khôi phục lúc ấy là âm thầm cán lên việc của họ,
         // đúng thứ mà khoá lạc quan (409) sinh ra để chặn. Bản nháp lệch bị bỏ đi, không hỏi.
@@ -445,7 +450,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // bản nháp cũ?" ngay lúc đó là mời họ ĐÈ LÊN lựa chọn vừa làm. Bản nháp "moi" bỏ dở của
         // lần trước bị xoá luôn — nó đã hết ý nghĩa từ lúc wizard chạy lại.
         if (tuWizard && khoa) xoaBanNhap(khoa);
-        else if (alive && nhapCu && nhapCu.baseUpdatedAt === baseNhapRef.current) {
+        else if (alive && khoa && nhapCu && nhapCu.baseUpdatedAt === baseNhapRef.current) {
           const luc = new Date(nhapCu.luuLuc).toLocaleString("vi-VN");
           const canhBaoAnh = nhapCu.bocAnh
             ? " LƯU Ý: bản nháp này KHÔNG kèm ảnh trong các dòng (quá lớn để giữ trên máy) — khôi phục rồi bấm Lưu sẽ XOÁ ảnh đang có trên máy chủ."

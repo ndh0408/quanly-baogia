@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type EditorTemplate, type QuoteFull } from "../lib/api";
+import { api, ApiError, isPreviewMode, type EditorTemplate, type QuoteFull } from "../lib/api";
 import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
@@ -111,14 +111,16 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       const q = await api.getQuote(quoteId);
       if (!conSong()) return;
       if (!Array.isArray(q.hnTables)) q.hnTables = [];
-      const khoa = khoaBanNhap(`hn${quoteId}`, meId);
+      // L63 (như QuoteEditor): XEM THỬ QUYỀN — lệnh ghi chỉ "thành công giả" mà meId vẫn là admin THẬT →
+      // không đọc / hỏi / ghi / xoá bản nháp. Khoá null thì mark, ghiNhapNgay, save đều tự bỏ qua.
+      const khoa = isPreviewMode() ? null : khoaBanNhap(`hn${quoteId}`, meId);
       const moc = String((q as { hnRev?: string }).hnRev ?? (q as { updatedAt?: string }).updatedAt ?? "");
       const suaDuoc = !q.hnStatus || ["assigned", "rejected"].includes(String(q.hnStatus));
       let khoiPhuc = false;
       // Bản giữ lại lúc xung đột 409 (xem save) — mở ra thì mang mốc MỚI, Lưu là chủ động ghi đè.
-      const xd = docBanNhap(khoa + ":xungdot", meId);
-      const nhap = docBanNhap(khoa, meId);
-      if (xd && suaDuoc) {
+      const xd = khoa ? docBanNhap(khoa + ":xungdot", meId) : null;
+      const nhap = khoa ? docBanNhap(khoa, meId) : null;
+      if (khoa && xd && suaDuoc) {
         const moLai = await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi. Hủy thì bản này vẫn được giữ, bạn sẽ được hỏi có xoá không.", { confirmText: "Mở bản của tôi", danger: true });
         if (!conSong()) return;
         if (moLai) {
@@ -136,7 +138,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
           if (!conSong()) return;
           if (bo) xoaBanNhap(khoa + ":xungdot");
         }
-      } else if (nhap && nhap.baseUpdatedAt === moc && suaDuoc) {
+      } else if (khoa && nhap && nhap.baseUpdatedAt === moc && suaDuoc) {
         const dong = await confirmModal("Có giá Hà Nội chưa lưu từ lần trước", `Lần trước bạn rời trang lúc ${new Date(nhap.luuLuc).toLocaleString("vi-VN")} khi còn giá CHƯA LƯU. Khôi phục?`, { confirmText: "Khôi phục" });
         if (!conSong()) return;
         if (dong) {

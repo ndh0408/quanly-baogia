@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 //
 // SOÁT TOÀN DIỆN (nhóm soạn báo giá) — các lỗi của trình soạn KHÔNG thuộc chuyện xoá sheet
-// (xoá sheet ở QuoteEditor.xoaSheet.test.tsx, chế độ xem thử quyền ở QuoteEditor.xemThu.test.tsx):
+// (xoá sheet ở QuoteEditor.xoaSheet.test.tsx):
 //   L56 — Discount / Ghi chú / Hiện tổng còn sửa được trong lúc PUT đang bay → mất im lặng.
 //   L61 — hộp lý do "Khách không chốt" / "↩ Trả lại" / "Khách không duyệt" còn treo sau khi rời báo giá.
 //   L62 — Lưu báo giá MỚI rồi rời trang trước khi máy chủ trả lời: instance đã gỡ kéo hash, tắt cờ.
+//   L63 — chế độ "Xem thử quyền" đọc/ghi/xoá bản nháp THẬT của admin.
 //   L64 — đổi mẫu có ngày → không ngày → có ngày làm mất số Ngày.
 //   X2  — hộp thanh toán nhận mốc updatedAt mới mà không kiểm người khác đã lưu chen vào.
 // Cùng giàn dựng createRoot + act với QuoteEditor.soatCheo.test.tsx.
@@ -69,8 +70,9 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { QuoteEditorPage } from "./QuoteEditor";
-import { api } from "../lib/api";
+import { api, setPreviewMode } from "../lib/api";
 import * as ui from "../lib/ui";
+import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay"] };
 type WinDirty = Window & { __editorDirty?: boolean };
@@ -106,6 +108,7 @@ beforeEach(() => {
   location.hash = "";
 });
 afterEach(async () => {
+  setPreviewMode(false);
   await cho(1300);
   if (root) act(() => root!.unmount());
   root = null; hop?.remove(); hop = null; document.body.innerHTML = "";
@@ -236,5 +239,47 @@ describe("L62 — Lưu xong sau khi editor đã bị gỡ không được đụn
     await act(async () => { xong(baoGia({ updatedAt: "2026-09-21T00:00:00.000Z" })); });
     await cho(10);
     expect((window as WinDirty).__editorDirty).toBe(true);
+  });
+});
+
+// L63: xem thử quyền → api.req trả "thành công giả" cho mọi lệnh ghi, nhưng khoá bản nháp vẫn theo id
+// admin THẬT. Lưu giả rồi xoá bản nháp thật; Hủy ở hộp Khôi phục xoá bản nháp thật; gõ thử ghi rác vào
+// khoá thật và lần mở sau (hết xem thử) bị mời khôi phục đúng phần rác đó.
+describe("L63 — chế độ Xem thử quyền không đọc / ghi / xoá bản nháp thật", () => {
+  const KHOA = khoaBanNhap(11, 1);
+  const nhapThat = () => ghiBanNhap(KHOA, baoGia({ toCompany: "Phần CHƯA LƯU thật" }), MOC_CU, 1);
+  const tenTrongNhap = () => (docBanNhap(KHOA, 1)?.quote as { toCompany?: string } | undefined)?.toCompany;
+
+  it("có bản nháp thật: vào xem thử, mở #11 → KHÔNG hỏi khôi phục; Lưu (giả) không xoá bản nháp thật", async () => {
+    nhapThat();
+    setPreviewMode(true);
+    await moEditor();
+    expect(ui.confirmModal).not.toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.anything(), expect.anything());
+    go(oTenKhach(), "gõ thử");
+    await bam(nut("Lưu"));
+    expect(tenTrongNhap(), "Lưu giả đã xoá bản nháp thật").toBe("Phần CHƯA LƯU thật");
+  });
+
+  it("Hủy hộp Khôi phục (nếu có hỏi) trong lúc xem thử không xoá bản nháp thật", async () => {
+    nhapThat();
+    setPreviewMode(true);
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => false);
+    await moEditor();
+    expect(tenTrongNhap()).toBe("Phần CHƯA LƯU thật");
+  });
+
+  it("gõ thử lúc xem thử KHÔNG ghi vào khoá bản nháp thật (kể cả khi rời trang)", async () => {
+    setPreviewMode(true);
+    await moEditor();
+    go(oTenKhach(), "gõ thử quyền — rác");
+    await cho(1300);
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+    expect(docBanNhap(KHOA, 1), "phần gõ thử bị ghi vào bản nháp thật").toBeNull();
+  });
+
+  it("đối chứng: KHÔNG xem thử thì vẫn hỏi khôi phục bản nháp thật như cũ", async () => {
+    nhapThat();
+    await moEditor();
+    expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
   });
 });
