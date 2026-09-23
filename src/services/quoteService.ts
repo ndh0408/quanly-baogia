@@ -753,6 +753,7 @@ export async function updateQuote(req: Request) {
     data.hnTables = sanitizeHnTables(bocHn[0].extraTables);
   }
   if (b.companyId !== undefined) data.companyId = b.companyId;
+  let dongBoSo: { so: string; prefix: string } | null = null;
   if (b.quoteNumber !== undefined && b.quoteNumber !== existing.quoteNumber) {
     const dup = await prisma.quote.findFirst({ where: { quoteNumber: b.quoteNumber }, includeDeleted: true } as any);
     if (dup) {
@@ -761,8 +762,12 @@ export async function updateQuote(req: Request) {
     data.quoteNumber = b.quoteNumber;
     // ĐỔI số cũng làm lệch bộ đếm y như lúc tạo: số mới có thể nằm CAO hơn vùng đã cấp, và lần
     // cấp tự động kế tiếp sẽ đâm vào nó. Prefix lấy theo công ty SẼ ghi (payload có thể đổi công ty).
+    //
+    // ĐẨY BỘ ĐẾM TRONG TRANSACTION GHI, KHÔNG PHẢI TRƯỚC NÓ (MONEY-08): bản trước gọi ngay đây, NGOÀI
+    // transaction — lần Lưu sau đó hỏng (409 khoá lạc quan, 400 tổng âm…) vẫn để bộ đếm nhảy lên số
+    // vừa gõ, và GREATEST không bao giờ lùi. Nay chỉ ghi nhớ; hai nhánh ghi bên dưới gọi trong tx.
     const cty = await prisma.company.findFirst({ where: { id: data.companyId ?? existing.companyId }, select: { quotePrefix: true } });
-    await syncQuoteCounter(b.quoteNumber, cty?.quotePrefix || "GN");
+    dongBoSo = { so: b.quoteNumber, prefix: cty?.quotePrefix || "GN" };
   }
 
   // Price-affecting edit on a quote already in the pipeline -> reopen to draft.
@@ -912,6 +917,7 @@ export async function updateQuote(req: Request) {
         where: { quoteId: id, ...(giuLai.length ? { id: { notIn: giuLai } } : {}) },
       });
       await chotKhoaLacQuan(tx);
+      if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
       const u = await tx.quote.update({
         where: { id },
         data: { ...data, sheets: { create: sheetsTao } },
@@ -965,6 +971,7 @@ export async function updateQuote(req: Request) {
         }
       }
       await chotKhoaLacQuan(tx);
+      if (dongBoSo) await syncQuoteCounter(dongBoSo.so, dongBoSo.prefix, tx as any);
       const u = await tx.quote.update({ where: { id }, data, include: QUOTE_INCLUDE as any });
       await snapshotQuoteVersion(tx, id, userId, "update");
       return u;
