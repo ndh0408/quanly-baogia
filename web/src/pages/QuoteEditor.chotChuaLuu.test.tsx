@@ -216,6 +216,51 @@ describe("FE-12 — bản nháp khi đổi báo giá / khi chủ động bỏ", 
     await cho(400);
   });
 
+  // Hộp "Khôi phục?" KHÔNG tự đóng khi rời báo giá (nút Back đổi hash lúc hộp còn mở — đo trên dev
+  // 2026-09-23: hộp của #286 nằm đè lên #285). Người dùng trả lời hộp treo đó tưởng là cho báo giá
+  // đang xem. Bản cũ: "Hủy" XOÁ bản nháp chưa lưu của báo giá kia (tái hiện được trên dev).
+  // "Khôi phục" thì gán bản nháp đó vào qRef — hôm nay vô hại vì Shell gắn `key` theo route nên đổi
+  // báo giá là DỰNG LẠI editor, nhưng nếu editor được dùng lại (cùng instance) thì Lưu ghi nhầm báo
+  // giá: bài thứ hai gác đúng trường hợp đó.
+  const moHopTreo12 = async () => {
+    const khoa12 = khoaBanNhap(12, 1);
+    ghiBanNhap(khoa12, baoGia({ id: 12, toCompany: "Nháp của 12" }), "2026-09-20T00:00:00.000Z", 1);
+    let traLoi!: (v: boolean) => void;
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    (api.getQuote as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => baoGia({ id: 12, toCompany: "Bản máy chủ 12" }));
+    hop = document.createElement("div");
+    document.body.appendChild(hop);
+    root = createRoot(hop);
+    await act(async () => { root!.render(<QuoteEditorPage me={ME} quoteId={12} isNew={false} />); });
+    await cho(10);
+    expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
+    // Back → #11 trong lúc hộp của #12 còn mở.
+    await act(async () => { root!.render(<QuoteEditorPage me={ME} quoteId={11} isNew={false} />); });
+    await cho(10);
+    return { khoa12, traLoi: async (v: boolean) => { await act(async () => { traLoi(v); }); await cho(10); } };
+  };
+
+  it("hộp 'Khôi phục?' của #12 còn treo khi đã sang #11: bấm Hủy KHÔNG xoá bản nháp của #12", async () => {
+    const { khoa12, traLoi } = await moHopTreo12();
+    await traLoi(false);
+    const d = docBanNhap(khoa12, 1);
+    expect((d?.quote as { toCompany?: string } | undefined)?.toCompany, "bản nháp chưa lưu của #12 bị xoá bởi hộp treo").toBe("Nháp của 12");
+    expect(oTenKhach().value).toBe("Khách cũ");
+  });
+
+  it("hộp treo của #12: bấm Khôi phục KHÔNG đưa bản nháp #12 vào editor đang mở #11", async () => {
+    const { traLoi } = await moHopTreo12();
+    await traLoi(true);
+    // Một lần vẽ lại bất kỳ (ngoài đời: Shell vẽ lại mỗi nhịp hỏi thông báo) → editor đọc lại qRef.
+    await act(async () => { root!.render(<QuoteEditorPage me={ME} quoteId={11} isNew={false} />); });
+    await cho(10);
+    goTenKhach("Sửa trên 11");
+    await bam(nut("Lưu"));
+    expect(h.updateQuote).toHaveBeenCalledTimes(1);
+    expect(h.updateQuote.mock.calls[0][0], "Lưu ghi vào báo giá khác với báo giá đang xem").toBe(11);
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).toCompany).toBe("Sửa trên 11");
+  });
+
   it("chọn 'Rời, bỏ thay đổi' (editor:discard) → bản nháp cục bộ bị xoá", async () => {
     await moEditor();
     goTenKhach("Sẽ bỏ");
