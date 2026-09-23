@@ -59,6 +59,69 @@ export const ngayChoO = (v: unknown): string => {
 };
 type WinDirty = Window & { __editorDirty?: boolean };
 
+/**
+ * app#11 — VÂN TAY PHẦN NGOÀI HÀ NỘI của một bản báo giá MÁY CHỦ trả về: các trường đầu trang dạng
+ * giá trị đơn, và từng trang (id · mẫu · tên · Discount · cờ · hạng mục). Bỏ `updatedAt`, `members`,
+ * mọi trường `hn*` — đúng những thứ giao/duyệt phần HN được phép đổi (src/hnWorkflow.ts).
+ *
+ * Dùng để trả lời MỘT câu: giữa lần nạp/lưu gần nhất và bây giờ, có ai lưu phần chính không? Có
+ * (id trang đổi vì lưu = xoá-tạo-lại trang, hoặc nội dung đổi) thì KHÔNG được nhận mốc updatedAt mới
+ * — nhận là vô hiệu khoá lạc quan và lần Lưu kế đè im lặng lên bản người kia.
+ *
+ * Ngày (`…Date`) cắt 10 ký tự: đường nạp tự cắt `quoteDate`/`executionDate` về yyyy-MM-dd còn GET
+ * trả chuỗi ISO đủ. Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
+ */
+export const vanTayMain = (q: unknown): string => {
+  const r = (q || {}) as Record<string, unknown>;
+  const dau: Record<string, unknown> = {};
+  for (const k of Object.keys(r).sort()) {
+    if (k === "updatedAt" || k === "members" || k.startsWith("hn") || k.startsWith("_")) continue;
+    const v = r[k];
+    if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      dau[k] = typeof v === "string" && /Date$/.test(k) ? v.slice(0, 10) : v;
+    }
+  }
+  const trang = ((r.sheets as Sheet[] | undefined) || []).map((s) => ({
+    id: s.id ?? null, templateId: s.templateId ?? null, name: s.name ?? "", discount: Number(s.discount) || 0,
+    groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
+    items: (s.items || []).map((it) => ({ ...it, _k: undefined })),
+  }));
+  return JSON.stringify({ dau, trang });
+};
+
+/**
+ * app#10 — BẢN GIỮ LẠI LÚC 409 MANG ID TRANG CŨ. Người kia Lưu = máy chủ xoá-tạo-lại trang nên id đổi
+ * hết; gửi id cũ thì carrySheetState không ghép được trang nào → khách duyệt / chữ ký / mã sản xuất /
+ * PO của MỌI trang bị xoá im lặng và bị cấp mã mới.
+ *
+ * Đặt nội dung SOẠN ĐƯỢC của bản giữ lại (tên, mẫu, Discount, cờ, hạng mục, bảng nội bộ) lên KHUNG
+ * trang của bản máy chủ vừa tải, để id và trạng thái mức trang lấy từ máy chủ:
+ *   · id của trang còn sống trên máy chủ → ghép theo id;
+ *   · không thì, khi số trang bằng nhau và cùng mẫu ở cùng vị trí → ghép theo vị trí;
+ *   · còn lại → trang MỚI (bỏ id), đếm vào `khongGhep` để hộp hỏi nói rõ.
+ */
+export function ghepTrangXungDot(nhap: Sheet[], tuoi: Sheet[]): { sheets: Sheet[]; khongGhep: number } {
+  const theoId = new Map(tuoi.filter((s) => s.id != null).map((s) => [s.id, s]));
+  const daDung = new Set<unknown>();
+  let khongGhep = 0;
+  const sheets = nhap.map((s, i) => {
+    let goc: Sheet | undefined = s.id != null ? theoId.get(s.id) : undefined;
+    if (!goc && nhap.length === tuoi.length && tuoi[i]?.templateId === s.templateId) goc = tuoi[i];
+    if (goc && goc.id != null && daDung.has(goc.id)) goc = undefined;   // hai trang soạn không được giành một id
+    const soan = { templateId: s.templateId, name: s.name, discount: s.discount, groupSubtotal: s.groupSubtotal, showImages: s.showImages, items: s.items, extraTables: s.extraTables };
+    if (!goc) {
+      khongGhep++;
+      const moi = { ...s };
+      delete moi.id;
+      for (const k of ["custStatus", "custStatusAt", "custNote", "custStatusBy"] as const) delete moi[k];
+      return moi;
+    }
+    daDung.add(goc.id);
+    return { ...goc, ...soan } as Sheet;
+  });
+  return { sheets, khongGhep };
+}
+
 function SummaryFormula({ label, formula, value, prefix = "", danger = false }: { label: string; formula: string; value: number; prefix?: string; danger?: boolean }) {
   const show = () => toast(`${label}: ${formula} = ${prefix}${M.fmtMoney(value)}`, "info");
   return <span className={`summary-formula-value${danger ? " danger" : ""}`} onDoubleClick={show} title={`Bấm đúp hoặc bấm ƒ để xem: ${formula}`}>
@@ -120,6 +183,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  // app#15: bản sao của `saving` đọc được trong closure cũ (hàm onApply mà ImportExcelModal giữ lúc
+  // chờ hộp xác nhận, removeSheet sau `await confirmModal`) — `saving` trong closure có thể đã cũ.
+  const savingRef = useRef(false);
+  // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
+  const vanTayMainRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
@@ -324,6 +392,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
+        const vanTayMay = vanTayMain(q);   // app#11: của bản MÁY CHỦ, trước khi bản nháp nào phủ lên
         // ── BẢN NHÁP CỤC BỘ: có gì để khôi phục không? ───────────────────────
         // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
@@ -374,26 +443,47 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         const khoaXd = khoa ? khoa + ":xungdot" : null;
         const nhapXd = !tuWizard && khoaXd ? docBanNhap(khoaXd, meIdRef.current) : null;
         if (alive && khoaXd && nhapXd && !khoiPhuc) {
+          // app#10: ghép trang của bản giữ lại vào khung trang MÁY CHỦ vừa tải (id sống) TRƯỚC khi hỏi,
+          // để hộp nói được trang nào sẽ mất trạng thái.
+          const kpXd = nhapXd.quote as QuoteFull;
+          const ghep = kpXd.sheets && (kpXd.sheets as Sheet[]).length ? ghepTrangXungDot(kpXd.sheets as Sheet[], q.sheets as Sheet[]) : null;
+          const canhBaoTrang = ghep && ghep.khongGhep > 0
+            ? ` LƯU Ý: ${ghep.khongGhep} trang của bản này không ghép được với trang nào trên máy chủ — mở rồi Lưu thì các trang đó thành trang MỚI và trạng thái trang (khách duyệt, chữ ký, mã sản xuất, PO…) của trang cũ sẽ MẤT.`
+            : "";
           const luc = new Date(nhapXd.luuLuc).toLocaleString("vi-VN");
           const mo = await confirmModal(
             "Bản bạn soạn trước khi bị xung đột",
-            `Lúc ${luc} bạn bấm Lưu nhưng người khác đã lưu báo giá này trước, và bạn chọn tải lại. Phần bạn đang soạn khi đó được giữ lại trên máy này. Mở lại bản đó? Nếu mở rồi bấm Lưu, bản của bạn sẽ GHI ĐÈ thay đổi của người kia — hãy xem kỹ trước.${nhapXd.bocAnh ? " LƯU Ý: bản này KHÔNG kèm ảnh trong các dòng." : ""}`,
+            `Lúc ${luc} bạn bấm Lưu nhưng người khác đã lưu báo giá này trước, và bạn chọn tải lại. Phần bạn đang soạn khi đó được giữ lại trên máy này. Mở lại bản đó? Nếu mở rồi bấm Lưu, bản của bạn sẽ GHI ĐÈ thay đổi của người kia — hãy xem kỹ trước. Hủy thì bản này vẫn được giữ, bạn sẽ được hỏi có xoá không.${canhBaoTrang}${nhapXd.bocAnh ? " LƯU Ý: bản này KHÔNG kèm ảnh trong các dòng." : ""}`,
             { confirmText: "Mở bản của tôi", danger: true },
           );
           if (mo) {
-            const kp = nhapXd.quote as QuoteFull;
+            const kp = kpXd;
+            if (ghep) kp.sheets = ghep.sheets;
             if (!kp.sheets || !(kp.sheets as Sheet[]).length) kp.sheets = q.sheets;
             (kp.sheets as Sheet[]).forEach((sh) => { if (!Array.isArray(sh.extraTables)) sh.extraTables = []; });
             if (!Array.isArray(kp.hnTables)) kp.hnTables = q.hnTables;
             (kp as { updatedAt?: string }).updatedAt = (q as { updatedAt?: string }).updatedAt;
             q = kp;
             khoiPhuc = true;
+            // Đã mở → cờ bẩn bật, bản nháp THƯỜNG (mốc mới khớp máy chủ) tiếp quản lưới an toàn.
+            xoaBanNhap(khoaXd);
+          } else {
+            // app#13: tiêu điểm mặc định của hộp trên ở "Hủy" (danger) — Enter theo phản xạ, Esc hay bấm
+            // ra ngoài đều về đây. Trước đây nhánh này XOÁ VĨNH VIỄN bản sao duy nhất của phần đã soạn.
+            // Nay chỉ xoá khi người dùng chọn rõ ràng; giữ thì hạn 7 ngày / Đăng xuất vẫn dọn nó.
+            const bo = await confirmModal(
+              "Bỏ bản của bạn?",
+              "Bản bạn soạn trước khi bị xung đột sẽ bị XOÁ vĩnh viễn khỏi máy này. Chọn Hủy để giữ lại — lần mở sau sẽ hỏi lại (tối đa 7 ngày).",
+              { danger: true, confirmText: "Xoá bản này" },
+            );
+            if (!alive) return;
+            if (bo) xoaBanNhap(khoaXd);
           }
-          xoaBanNhap(khoaXd);
         }
         (q as QuoteFull & { _activeSheet: number })._activeSheet = 0;
         stampKeys(q);
         qRef.current = q;
+        vanTayMainRef.current = vanTayMay;
         khoaNhapRef.current = khoa;
         if (alive) {
           dirtyRef.current = khoiPhuc;
@@ -474,6 +564,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const back = async () => {
     if (dirtyRef.current) {
       if (!(await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" }))) return;
+      // app#14: hạ cờ toàn cục TRƯỚC khi đổi hash. Để nguyên thì handler hashchange của Shell hỏi LẠI
+      // cùng câu; Hủy ở lần hai giữ editor lại với dirtyRef=false và bản nháp đã bị xoá — đóng tab là
+      // mất im lặng (không beforeunload, pagehide không ghi nháp).
+      (window as WinDirty).__editorDirty = false;
       window.dispatchEvent(new Event("editor:discard"));   // FE-12: bỏ thì xoá luôn bản nháp
     }
     location.hash = "#/list";
@@ -484,14 +578,20 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
 
   // ── sheet ops ──────────────────────────────────────────────────────────────
   const switchSheet = (i: number) => { q._activeSheet = i; redraw(); };
+  // app#15: thêm / xoá trang / nạp Excel trong lúc PUT đang bay là ghi vào mảng `sheets` CŨ, rồi save()
+  // thay qRef bằng bản máy chủ và hạ cờ bẩn → thay đổi biến mất mà vẫn báo "Đã lưu". Nút bị khoá theo
+  // `saving`; chặn thêm trong mã qua `savingRef` và qRef đã bị thay (closure cũ sau một `await`).
+  const dangLuuHoacDaDoi = () => savingRef.current || qRef.current !== q;
   const addSheet = () => {
+    if (dangLuuHoacDaDoi()) return;
     const t = templates.filter((x) => x.companyId === q.companyId)[0] || templates[0];
     sheets.push({ templateId: t?.id, name: "", groupSubtotal: true, items: [], extraTables: [] });
     q._activeSheet = sheets.length - 1; mark(); redraw();
   };
   const removeSheet = async (i: number) => {
-    if (sheets.length <= 1) return;
+    if (sheets.length <= 1 || dangLuuHoacDaDoi()) return;
     if (!(await confirmModal("Xóa sheet", `Xóa sheet "${sheets[i].name || "Sheet " + (i + 1)}"?`, { danger: true, confirmText: "Xóa" }))) return;
+    if (dangLuuHoacDaDoi()) { toast("Báo giá vừa được lưu trong lúc hỏi — chưa xoá sheet, hãy bấm xoá lại", "info"); return; }
     sheets.splice(i, 1);
     if (q._activeSheet >= sheets.length) q._activeSheet = sheets.length - 1;
     mark(); redraw();
@@ -510,7 +610,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     // false, bản nháp bị xoá — mất im lặng, không lớp nào cứu được.
     const dangGo = document.activeElement as HTMLElement | null;
     if (dangGo && dangGo !== document.body && typeof dangGo.blur === "function") dangGo.blur();
-    setSaving(true);
+    setSaving(true); savingRef.current = true;
     try {
       const payload: Record<string, unknown> = {
         ...q,
@@ -554,6 +654,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
+        vanTayMainRef.current = vanTayMain(saved);
         qRef.current = { ...saved, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); redraw();
         // MỐC của bản nháp phải đi theo bản máy chủ VỪA lưu. `baseNhapRef` chỉ được gán một lần
         // lúc nạp; không làm tươi ở đây thì mọi bản nháp ghi SAU lần Lưu đầu tiên đều mang
@@ -570,24 +671,34 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // Khóa lạc quan: server trả 409 khi NGƯỜI KHÁC vừa lưu báo giá này (baseUpdatedAt lệch) →
       // KHÔNG ghi đè ngầm. Hỏi rõ + cho TẢI LẠI bản mới (reload đảm bảo nạp đúng toàn bộ luồng load).
       if (ex instanceof ApiError && ex.status === 409) {
+        // GRID-08: giữ phần đang soạn vào khoá `…:xungdot` (đường nạp sẽ hỏi mở lại). Huỷ hẹn giờ ghi
+        // nháp thường để nó không ghi đè gì sau đó.
+        // app#12: ghi TRƯỚC khi hỏi, rồi chọn lời hộp theo KẾT QUẢ ghi. Báo giá lớn (~3.000 dòng trở lên
+        // chạm trần 1MB), localStorage đầy hay bị chặn thì không ghi được byte nào — hứa "được GIỮ LẠI"
+        // lúc đó là dẫn người dùng thẳng tới mất trắng khi tải lại.
+        if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+        const khoaXd = khoaNhapRef.current && qRef.current ? khoaNhapRef.current + ":xungdot" : null;
+        const kq = khoaXd ? ghiBanNhap(khoaXd, qRef.current, baseNhapRef.current, meIdRef.current) : "khong-ghi-duoc";
+        const giuDuoc = kq === "da-ghi" || kq === "da-ghi-bo-anh";
         const reload = await confirmModal(
           "Báo giá đã bị người khác sửa",
-          "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Tải lại để xem bản mới nhất — phần bạn đang soạn được GIỮ LẠI trên máy này, và sau khi tải lại bạn sẽ được hỏi có mở lại để chép / ghi đè không. Tải lại ngay?",
+          giuDuoc
+            ? `Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Tải lại để xem bản mới nhất — phần bạn đang soạn được GIỮ LẠI trên máy này${kq === "da-ghi-bo-anh" ? " (KHÔNG kèm ảnh trong các dòng)" : ""}, và sau khi tải lại bạn sẽ được hỏi có mở lại để chép / ghi đè không. Tải lại ngay?`
+            : "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy) — hãy chép phần cần giữ trước. Tải lại ngay?",
           { danger: true, confirmText: "Tải lại bản mới" }
         );
         if (reload) {
-          // GRID-08: giữ phần đang soạn TRƯỚC khi tải lại (đường nạp sẽ hỏi mở lại). Huỷ hẹn giờ ghi nháp
-          // thường để nó không ghi đè gì sau khi đã quyết định tải lại.
-          if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
-          if (khoaNhapRef.current && qRef.current) ghiBanNhap(khoaNhapRef.current + ":xungdot", qRef.current, baseNhapRef.current, meIdRef.current);
           dirtyRef.current = false; (window as WinDirty).__editorDirty = false; location.reload();
+        } else if (khoaXd && giuDuoc) {
+          // Hủy → giữ nguyên màn hình + thay đổi của bạn (chưa lưu) để bạn tự xem/chép rồi tải lại sau.
+          // Bỏ bản giữ lại: để nó nằm đó thì lần mở sau bị hỏi "Mở bản của tôi" với một bản CŨ.
+          xoaBanNhap(khoaXd);
         }
-        // Hủy → giữ nguyên màn hình + thay đổi của bạn (chưa lưu) để bạn tự xem/chép rồi tải lại sau.
       } else {
         toast(errText(ex), "error");
       }
       return false;
-    } finally { setSaving(false); }
+    } finally { setSaving(false); savingRef.current = false; }
   };
   /* ── CÒN THAY ĐỔI CHƯA LƯU THÌ PHẢI LƯU TRƯỚC KHI CHỐT / KHÔNG CHỐT (FE-01) ─────────────────
      Máy chủ tính `convertedTotal` từ `QuoteSheet.subtotal` ĐÃ LƯU, còn hộp chốt lại cộng từ lưới ĐANG
@@ -654,6 +765,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (s) { s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy; }
       }
       const u = await api.markConverted(q.id);
+      vanTayMainRef.current = vanTayMain(u);
       qRef.current = { ...u, _activeSheet: ai } as QuoteFull;
       stampKeys(qRef.current);
       // Chốt ghi vào hàng Quote → updatedAt đổi. Mốc bản nháp phải theo, không thì bản nháp ghi sau
@@ -677,7 +789,7 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null) return;
-    try { const u = await api.markLost(q.id, reason); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); qRef.current = { ...u, _activeSheet: ai } as QuoteFull; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
@@ -696,6 +808,7 @@ Lý do (không bắt buộc):`,
     try {
       const u = await api.getQuote(cur.id);
       if (!dirtyRef.current) {
+        vanTayMainRef.current = vanTayMain(u);
         qRef.current = { ...u, _activeSheet: cur._activeSheet } as QuoteFull; stampKeys(qRef.current);
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
@@ -704,12 +817,21 @@ Lý do (không bắt buộc):`,
       const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
       const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
       for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];
-      if (giongHn) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; }
+      // app#11: bảng HN giống CHƯA ĐỦ. Người khác lưu phần chính (máy chủ xoá-tạo-lại trang, hoặc sửa đầu
+      // trang) trước lúc giao/duyệt HN thì mốc mới của `u` đã bao cả lượt lưu đó — nhận nó là vô hiệu
+      // khoá lạc quan và lần Lưu kế ĐÈ IM LẶNG bản người kia (kèm mất trạng thái trang vì id cũ). Chỉ
+      // nhận khi phần ngoài HN của `u` trùng bản máy chủ gần nhất trang này đã nạp/lưu; lệch thì giữ
+      // mốc cũ → lần Lưu kế nhận 409 đúng (phần đang soạn được giữ qua khoá ":xungdot").
+      const giongMain = vanTayMainRef.current != null && vanTayMainRef.current === vanTayMain(u);
+      if (giongHn && giongMain) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; }
       redrawMeta();
     } catch { /* ignore */ }
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
+    // app#15: hộp nạp có thể chờ hộp xác nhận rủi ro (async) và giữ hàm này của lượt vẽ CŨ — nạp vào
+    // mảng cũ sau khi Lưu đã thay qRef là mất im lặng.
+    if (dangLuuHoacDaDoi()) { toast("Báo giá đang lưu / vừa lưu — mở lại hộp Nhập từ Excel rồi nạp lại", "info"); return; }
     let nAdd = 0, nSheet = 0, nNew = 0, nRemoved = 0;
     // Các sheet ĐẾN TỪ FILE, giữ ĐÚNG thứ tự trong file — dùng để sắp lại chỗ ở cuối hàm.
     const theoFile: Sheet[] = [];
@@ -884,13 +1006,13 @@ Lý do (không bắt buộc):`,
               {/* <button> thật: tự vào được thứ tự Tab, tự nhận Enter/Space, và có tên đọc lên được
                   ("Xóa sheet 2") thay vì chỉ một dấu ✕ mà trình đọc màn hình không diễn giải nổi. */}
               {suaMain && sheets.length > 1 && (
-                <button type="button" className="rm-tab" title="Xóa sheet" aria-label={`Xóa sheet ${i + 1}`}
+                <button type="button" className="rm-tab" title="Xóa sheet" aria-label={`Xóa sheet ${i + 1}`} disabled={saving}
                   onClick={(e) => { e.stopPropagation(); removeSheet(i); }}
                   onKeyDown={(e) => e.stopPropagation()}>✕</button>
               )}
             </div>
           ))}
-          {suaMain && <button className="btn btn-sm add-sheet" onClick={addSheet}>+ Thêm sheet</button>}
+          {suaMain && <button className="btn btn-sm add-sheet" onClick={addSheet} disabled={saving}>+ Thêm sheet</button>}
         </div>
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
@@ -899,7 +1021,7 @@ Lý do (không bắt buộc):`,
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {suaMain && (
             <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
-              onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
+              disabled={saving} onClick={() => setImportOpen(true)}>⬆ Nhập từ Excel</button>
           )}
         </div>
 
