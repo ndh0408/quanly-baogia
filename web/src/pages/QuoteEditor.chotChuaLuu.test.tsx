@@ -225,6 +225,15 @@ describe("FE-12 — bản nháp khi đổi báo giá / khi chủ động bỏ", 
     expect(docBanNhap(khoaBanNhap(11, 1), 1)).toBeNull();
   });
 
+  it("FE-13: gõ rồi rời trang NGAY (pagehide, chưa đủ 1,2s) → bản nháp đã được ghi", async () => {
+    await moEditor();
+    goTenKhach("Gõ xong đóng tab");
+    expect(docBanNhap(khoaBanNhap(11, 1), 1)).toBeNull();          // chưa tới hẹn giờ
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+    const d = docBanNhap(khoaBanNhap(11, 1), 1);
+    expect((d?.quote as { toCompany?: string } | undefined)?.toCompany).toBe("Gõ xong đóng tab");
+  });
+
   it("dây nối: Shell.guardLeave bắn editor:discard khi người dùng chọn bỏ", () => {
     const i = shellSrc.indexOf("async function guardLeave");
     expect(shellSrc.slice(i, shellSrc.indexOf("\n}", i))).toMatch(/if \(ok\) \{[^}]*dispatchEvent\(new Event\("editor:discard"\)\)/);

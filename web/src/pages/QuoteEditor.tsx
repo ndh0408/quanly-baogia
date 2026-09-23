@@ -223,9 +223,21 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
     };
     window.addEventListener("editor:discard", boThayDoi);
+    // FE-13: bản nháp chỉ được ghi sau 1,2s NGỪNG gõ — đúng lúc dễ mất nhất (gõ xong đóng tab / chuyển
+    // app / máy sập) thì phần cuối chưa kịp ghi. Trang sắp ẩn hoặc sắp rời → ghi NGAY.
+    const ghiNgay = () => {
+      if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current || nhapQuaLonRef.current) return;
+      if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
+      ghiBanNhap(khoaNhapRef.current, qRef.current, baseNhapRef.current, meIdRef.current);
+    };
+    const khiAn = () => { if (document.visibilityState === "hidden") ghiNgay(); };
+    window.addEventListener("pagehide", ghiNgay);
+    document.addEventListener("visibilitychange", khiAn);
     return () => {
       window.removeEventListener("beforeunload", h);
       window.removeEventListener("editor:discard", boThayDoi);
+      window.removeEventListener("pagehide", ghiNgay);
+      document.removeEventListener("visibilitychange", khiAn);
       (window as WinDirty).__editorDirty = false;
       // Hẹn giờ ghi bản nháp phải huỷ theo: để nó bắn sau khi component đã rời là ghi đè bản nháp
       // của báo giá VỪA MỞ bằng dữ liệu của báo giá CŨ.

@@ -456,7 +456,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
           // Chặn quyền CẢ nhánh wizard (trước đây gõ thẳng #/new không có quote:create vẫn render rồi mới lỗi API).
           <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary>}</main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} meId={me.id} /></LazyBoundary></main>
         ) : internalViewId !== undefined ? (
           <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
