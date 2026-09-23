@@ -123,7 +123,24 @@ export function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boole
   return vn === us ? null : vn ? "vn" : "us";
 }
 
-/** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".". */
+// Quy ước suy từ KHỐI chỉ đúng cho ô có khuôn của nó. Khối lẫn quy ước là chuyện thường ở bảng gõ
+// tay (Word/Zalo/email): người Việt viết SL "13.5" mà vẫn ghi giá "250.000". Ô "13.5" không thể là
+// số có dấu nghìn VN (nhóm sau dấu chỉ 1 chữ số) — áp quy ước "vn" cho nó là bỏ "." rồi đọc 135,
+// phóng Thành tiền 10 lần mà không ai hay (soát chéo grid#7). Ô lệch khuôn → nơi gọi đọc theo cột.
+// "2.675" thì khớp khuôn nghìn VN nên vẫn theo khối (2675): đánh đổi đã chọn ở GRID-01 — khối có
+// giá "250.000" là khối từ máy locale VN, nơi "2.675" đúng là hai nghìn sáu trăm bảy lăm.
+// Phần CHỮ SỐ + DẤU của một ô (bỏ ngoặc kế toán, ký hiệu tiền, chữ, dấu trừ đầu) — đúng phần mà
+// parseTheoQuyUoc / parseLooseDecimal thật sự đọc, để khuôn được kiểm trên chính thứ sẽ được đọc.
+const loiSo = (s: string) => tachNgoacKeToan(String(s ?? "").trim()).s.trim().replace(/[^\d.,-]/g, "").replace(/^-/, "");
+export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
+  const t = loiSo(s);
+  return qu === "vn"
+    ? /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t) || /^\d+(,\d+)?$/.test(t)
+    : /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t) || /^\d+(\.\d+)?$/.test(t);
+}
+
+/** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".".
+ *  Chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần. */
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
@@ -131,6 +148,98 @@ export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   if (!str || str === "-") return 0;
   str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
   return Number(str) || 0;
+}
+
+// ── GIÁ TRỊ GỐC CỦA Ô TRONG text/html (soát chéo grid#8) ────────────────────────────────────────
+// text/plain chỉ là chuỗi ô HIỆN ra ở máy nguồn: "1.500" từ Excel VN (1500 cái) và "1.500" từ Excel
+// US (1,5 m²) giống hệt nhau, và ô đơn lẻ / cột SL không có tín hiệu nào để suyQuyUocSo bám vào. Phần
+// text/html của cùng lần chép thì mang giá trị gốc của ô số:
+//   · Excel: <td x:num="1500">1.500</td> — x:num TRỐNG khi chuỗi hiện trùng giá trị (không dùng được)
+//   · Google Sheets: data-sheets-value="{"1":3,"3":1500}" (khoá 1 = kiểu, 3 = số); chép MỘT ô thì
+//     Sheets gửi <span data-sheets-value=…> chứ không phải bảng
+//   · LibreOffice Calc: sdval="1500"
+// Trả ma trận giá trị gốc (null = ô không có) xếp theo hàng/cột như TSV — colspan/rowspan được giãn
+// ra để cột khớp. Không có đúng MỘT bảng (và không phải ca một-ô của Sheets) → null: không đoán.
+const THE_BANG = /<(\/?)(table|tr|td|th)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const THE_BAT_KY = /<([a-z][\w:-]*)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const THUOC_TINH = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+const THUC_THE: Record<string, string> = { quot: '"', "#34": '"', "#x22": '"', apos: "'", "#39": "'", "#x27": "'", lt: "<", gt: ">", amp: "&" };
+const giaiMaHtml = (s: string) => s.replace(/&(quot|#34|#x22|apos|#39|#x27|lt|gt|amp);/gi, (m, k: string) => THUC_THE[k.toLowerCase()] ?? m);
+function docThuocTinh(chuoi: string): Record<string, string | undefined> {
+  const at: Record<string, string | undefined> = {};
+  let m: RegExpExecArray | null; THUOC_TINH.lastIndex = 0;
+  while ((m = THUOC_TINH.exec(chuoi))) { const v = m[2] ?? m[3] ?? m[4]; at[m[1].toLowerCase()] = v == null ? undefined : giaiMaHtml(v); }
+  return at;
+}
+function giaTriGocCuaO(at: Record<string, string | undefined>): number | null {
+  for (const k of ["x:num", "sdval"]) {
+    const v = at[k]?.trim();
+    if (v) { const n = Number(v); if (Number.isFinite(n)) return n; }
+  }
+  const gs = at["data-sheets-value"];
+  if (gs) {
+    try { const o = JSON.parse(gs) as Record<string, unknown>; if (o && o["1"] === 3 && typeof o["3"] === "number" && Number.isFinite(o["3"])) return o["3"]; } catch { /* không phải JSON → coi như không có */ }
+  }
+  return null;
+}
+export function giaTriGocTuHtml(html: string | null | undefined): (number | null)[][] | null {
+  const h = String(html ?? "");
+  if (!h.trim()) return null;
+  const the = [...h.matchAll(THE_BANG)];
+  const soBang = the.filter((m) => !m[1] && m[2].toLowerCase() === "table").length;
+  if (soBang === 0) {
+    // Google Sheets chép MỘT ô: <span data-sheets-value=…>. Đúng một phần tử mang giá trị gốc mới nhận.
+    const coGoc = [...h.matchAll(THE_BAT_KY)].map((m) => docThuocTinh(m[2])).filter((at) => at["data-sheets-value"] != null);
+    return coGoc.length === 1 ? [[giaTriGocCuaO(coGoc[0])]] : null;
+  }
+  if (soBang !== 1) return null;   // bảng lồng / nhiều bảng: không chắc ô nào ứng với ô TSV nào
+  const out: (number | null)[][] = [];
+  const chiem: boolean[][] = [];   // ô đã bị rowspan của hàng trên chiếm chỗ
+  let r = -1, c = 0;
+  for (const m of the) {
+    if (m[1]) continue;
+    const ten = m[2].toLowerCase();
+    if (ten === "tr") { r++; c = 0; out[r] ??= []; continue; }
+    if (ten !== "td" && ten !== "th") continue;
+    if (r < 0) { r = 0; out[0] ??= []; }
+    while (chiem[r]?.[c]) c++;
+    const at = docThuocTinh(m[3]);
+    const cs = Math.min(Math.max(parseInt(at.colspan ?? "1", 10) || 1, 1), 1000);
+    const rs = Math.min(Math.max(parseInt(at.rowspan ?? "1", 10) || 1, 1), 1000);
+    const v = giaTriGocCuaO(at);
+    for (let dr = 0; dr < rs; dr++) {
+      const rr = r + dr; out[rr] ??= []; chiem[rr] ??= [];
+      for (let dc = 0; dc < cs; dc++) { out[rr][c + dc] = dr === 0 && dc === 0 ? v : null; chiem[rr][c + dc] = true; }
+    }
+    c += cs;
+  }
+  if (r < 0) return null;
+  // Rowspan tràn quá hàng cuối không có hàng TSV tương ứng → cắt; lỗ thưa (mảng sparse) → null.
+  return out.slice(0, r + 1).map((row) => Array.from(row, (v) => v ?? null));
+}
+
+// Quy ước của MỘT ô theo giá trị gốc: cách đọc nào (vn/us) của chuỗi HIỆN ra khớp giá trị gốc — sai
+// lệch trong phạm vi làm tròn hiển thị — thì dùng quy ước đó. Chỉ PHÂN ĐỊNH, không thay chuỗi bằng giá
+// trị gốc: ô "15%" (gốc 0,15) hay ô ngày (gốc là số seri) không khớp cách đọc nào → null, nơi gọi đọc
+// như trước; ô hiện "2,68" mà gốc 2,675 vẫn ra đúng số người dùng nhìn thấy. Hai cách đọc cùng khớp
+// (ô chỉ có chữ số) → null: không có gì cần phân định.
+export function quyUocTheoGiaTriGoc(s: string, goc: number | null | undefined): QuyUocSo | null {
+  if (goc == null || !Number.isFinite(goc)) return null;
+  const t = loiSo(s);
+  const khop = (qu: QuyUocSo) => {
+    if (!khopQuyUoc(s, qu)) return false;
+    const soLe = t.split(qu === "vn" ? "," : ".")[1]?.length ?? 0;
+    return Math.abs(parseTheoQuyUoc(s, qu) - goc) <= 0.5 * 10 ** -soLe + 1e-9 * Math.max(1, Math.abs(goc));
+  };
+  const vn = khop("vn"), us = khop("us");
+  return vn === us ? null : vn ? "vn" : "us";
+}
+
+// Ô SL/Ngày MƠ HỒ khi không còn gì để phân định: một dấu "." hoặc "," kèm đúng 3 chữ số ("1.500",
+// "1,500", "13.524") — nghìn hay thập phân đều hợp lệ. Phần nguyên bắt đầu bằng 0 ("0,125") thì chắc
+// chắn là thập phân. Nơi gọi dùng để CẢNH BÁO sau khi đọc thập phân, thay vì hụt tiền 1000 lần im lặng.
+export function soMoHoNghin(s: string): boolean {
+  return /^[1-9]\d{0,2}[.,]\d{3}$/.test(loiSo(s));
 }
 
 export type RebuiltItem = Record<string, unknown> & { kind: string; formulas?: Record<string, string> };
@@ -142,11 +251,12 @@ export function reconstructExportRows(matrix: string[][], roles: string[], numer
   // BANNER xuất ra có NHÓM CON đánh SỐ + KHÔNG ĐVT (vd "1  CGV Kim Cúc"). Nếu DATA có kiểu đó → nguồn là
   // banner → hàng STT-trống là MỤC (không phải nhóm con). Nếu KHÔNG có → nguồn là GN-không-ngày → hàng
   // STT-trống + có tên = NHÓM CON (vd "Chi phí vận chuyển"). Phân biệt để mỗi template hiểu đúng paste.
-  // Quy ước số của CẢ khối (VN/US) — cột tiền là Đơn giá + Thành tiền. Suy được thì mọi ô số đọc theo
-  // nó; không thì giữ cách cũ (SL/Ngày thập phân, tiền đoán nghìn).
+  // Quy ước số của CẢ khối (VN/US) — cột tiền là Đơn giá + Thành tiền. Suy được thì ô số KHỚP khuôn
+  // của nó đọc theo nó; không suy được, hoặc ô lệch khuôn (SL "13.5" trong khối VN — xem khopQuyUoc),
+  // thì giữ cách cũ (SL/Ngày thập phân, tiền đoán nghìn).
   const qu = suyQuyUocSo(matrix, (c) => roles[c] === "unitPrice" || roles[c] === "_amount");
-  const soDo = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
-  const soTien = (v: string) => (qu ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
+  const soDo = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+  const soTien = (v: string) => (qu && khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseNumber(v));
   const hasNumberedSub = matrix.some((r) => /^\d+$/.test(cell(r, sttI).trim()) && cell(r, nameI).trim() !== "" && cell(r, unitI).trim() === "" && cell(r, priceI).trim() !== "");
   const out: RebuiltItem[] = [];
   for (const row of matrix) {
