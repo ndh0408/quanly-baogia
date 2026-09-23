@@ -6,7 +6,7 @@
 //   node scripts/ci/ui-smoke.mjs --hien     # mở cửa sổ trình duyệt (gỡ lỗi trên máy có màn hình)
 //
 // ── VÌ SAO CẦN ─────────────────────────────────────────────────────────────
-// 447 bài vitest của web/ (42 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
+// 563 bài vitest của web/ (59 tệp — `cd web && npx vitest run`) chạy ở environment `node` theo
 // MẶC ĐỊNH: repo
 // KHÔNG cài jsdom, `web/vite.config.ts` không khai khối `test` nên vitest lấy mặc định `node`. Tức
 // chúng kiểm HÀM và ĐỌC MÃ NGUỒN — không có `document`, không mount nổi một component nào, và dĩ
@@ -358,7 +358,8 @@ async function main() {
     const truocNhap = await soCuaO('tr[data-row="0"] .col-amount');
     doi(truocNhap === 1_200_000, `gõ 400.000 → Thành Tiền = ${truocNhap.toLocaleString("vi-VN")} (chưa lưu)`);
     // Chờ ĐÚNG cái mốc chương trình tạo ra, không ngủ một con số đoán: ghi bản nháp gộp 1,2 giây.
-    const khoaNhap = `quanly:draft:quote:${bg.id}`;
+    // Khoá gắn theo NGƯỜI DÙNG (FE-04, web/src/lib/localDraft.ts khoaBanNhap): `u<id>:<số báo giá>`.
+    const khoaNhap = `quanly:draft:quote:u${u.id}:${bg.id}`;
     await trang.waitForFunction((k) => !!window.localStorage.getItem(k), khoaNhap, { timeout: 15_000 }).catch(() => {});
     doi(await trang.evaluate((k) => !!window.localStorage.getItem(k), khoaNhap), "bản nháp đã nằm trong localStorage");
 

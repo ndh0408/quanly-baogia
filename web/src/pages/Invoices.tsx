@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Me, type ProjectQuote } from "../lib/api";
 import { toast } from "../lib/ui";
-import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, sheetCode, soMa, dash, Stat } from "../lib/format";
+import { fmtMoney, fmtDate, toInputDate, tieuDeHienThi, sheetCode, soMa, dash, Stat, trangKhachTuChoi } from "../lib/format";
 import { smartTextMatch } from "../lib/filterText";
 
 // Trang HÓA ĐƠN (kế toán) — thay bảng Excel theo dõi hóa đơn. CÙNG NGUỒN dữ liệu với Quản lý dự án
@@ -50,12 +50,13 @@ type Row = {
   signedAt: string | null; signedByName: string | null;   // Ký chứng từ — hành động ở trang Quản lý dự án
 };
 
-function buildRows(quotes: ProjectQuote[]): Row[] {
+export function buildRows(quotes: ProjectQuote[]): Row[] {
   const out: Row[] = [];
   for (const q of quotes) {
     if (q.status !== "converted") continue;   // hóa đơn chỉ theo dự án ĐÃ CHỐT
     const sheets = q.sheets && q.sheets.length ? q.sheets : [];
     sheets.forEach((sh, i) => {
+      if (trangKhachTuChoi(q, sh)) return;   // FE-09 — giữ `i` gốc để mã sản xuất các trang còn lại không trượt
       const baoGia = Number(sh.subtotal) || 0;
       const vat = Math.round((baoGia * (Number(q.vatPercent) || 0)) / 100);
       out.push({
@@ -246,9 +247,15 @@ export function InvoicesPage({ me }: { me: Me }) {
     if (e.key === "Enter") (e.target as HTMLElement).blur();
     else if (e.key === "Escape") { e.stopPropagation(); setEditKey(null); }
   };
+  // FE-07: trước đây CHỈ nhấp đúp chuột mới mở được ô — kế toán nhập liệu bằng bàn phím (Tab/Enter
+  // như Excel) không có đường nào để sửa, ô cũng không nhận tiêu điểm. Nay ô sửa-được nằm trong thứ tự
+  // Tab và mở bằng Enter hoặc F2 (phím sửa ô của Excel). Nhấp MỘT lần vẫn không mở — giữ nguyên lớp
+  // chống sửa nhầm ở trên. stopPropagation: Enter ở ô không được rơi xuống hàng (hàng Enter = mở báo giá).
   const viewTd = (r: Row, field: string, content: React.ReactNode, extraCls = "") => (
     <td className={["cell-edit", extraCls, missCls(r[field as keyof Row])].filter(Boolean).join(" ")} data-edit
-        title="Nhấp đúp để sửa" onDoubleClick={() => setEditKey(ck(r, field))}>{content}</td>
+        title="Nhấp đúp (hoặc Enter / F2) để sửa" tabIndex={0} role="button" aria-label={`Sửa ${fieldLabel(field, r)}`}
+        onDoubleClick={() => setEditKey(ck(r, field))}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); e.stopPropagation(); setEditKey(ck(r, field)); } }}>{content}</td>
   );
 
   const textCell = (r: Row, field: keyof Row, w = 110) => {

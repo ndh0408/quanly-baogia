@@ -3802,3 +3802,71 @@ textarea[aria-invalid="true"] {
     0 0 0 1px #1769d6,
     0 2px 6px rgba(0, 0, 0, 0.18);
 }
+
+/* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
+   `.excel-table td.col-hangmuc textarea` / `td.col-stt` = #0066cc (xanh dương) của public/style.css,
+   trong khi src/excel.ts tô sectionTextColor / subTextColor cho MỌI cột của hàng nhóm, kể cả tên và
+   STT. Commit c450a46 đo màu chữ trên ô <input> (ĐVT) nên kết luận "khớp". CHỈ Colorfull: Gia Nguyễn
+   để yên theo chủ repo. `:not(.subgroup-row)` vì hàng nhóm con cũng mang lớp section-row. */
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-stt,
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-hangmuc textarea {
+  color: #953735;
+}
+.excel-table.clf-theme tr.subgroup-row td.col-stt {
+  color: #4f513e;
+}
+
+/* FE-06 BẮT ĐẦU — TƯƠNG PHẢN WCAG AA (4.5:1) cho nút/chữ trạng thái.
+   Token gốc ở public/style.css (tệp đóng băng) đo được: chữ trắng trên nút cảnh báo #e9920b 2.45:1,
+   nút thành công #2fa85a 3.06:1, nút nguy hiểm #e5484d 3.91:1; chữ lỗi #e5484d trên nền hồng 3.3:1.
+   Ba biến `--warn-bg` / `--warn-border` / `--danger-bg` được dùng mà KHÔNG định nghĩa ở đâu: banner
+   "đang có người khác mở báo giá này" rơi về nền #fff7e6 cả ở dark mode, chữ #e8eaf0 trên đó 1.13:1 —
+   đúng thông điệp giúp tránh ghi đè nhau thì không đọc được; khung .err mất nền.
+   Kiểm bằng web/src/styles.contrast.test.ts. Chỉ đổi token GIAO DIỆN ỨNG DỤNG — màu của mẫu báo giá
+   (GN/Colorfull) trên lưới là mã màu cứng riêng, không đi qua các biến này. */
+:root {
+  --danger: #c62828;
+  --success: #166534;
+  --warn: #9a4a06;
+  --danger-bg: #fdecea;
+  --warn-bg: #fff7e6;
+  --warn-border: #ffd591;
+}
+[data-theme="dark"] {
+  --danger: #f87171;
+  --success: #2fa85a;
+  --warn: #e9920b;
+  --danger-bg: #3a1616;
+  --warn-bg: #3a2a10;
+  --warn-border: #7a5a1a;
+}
+/* Nền nút chữ trắng: tách khỏi token chữ để dark mode giữ được chữ sáng mà nút vẫn đủ tương phản. */
+.btn-danger,
+.btn-danger:hover {
+  background: #c62828;
+}
+.btn-success,
+.btn-success:hover {
+  background: #15803d;
+}
+.btn-warn,
+.btn-warn:hover {
+  background: #b45309;
+}
+.toast-success {
+  background: #0f7a34;
+}
+/* FE-06 HẾT */
+
+/* GAP1-04 — LỚP CHỒNG: modal phải nằm TRÊN thanh đầu trang mobile và sidebar.
+   `.modal-backdrop` ở trên đặt z-index 50, thấp hơn `.mobile-topbar` (sticky, 60), `.sidebar` (70) và
+   `.sidebar-backdrop` (65) của public/style.css ở màn ≤920px. Modal không portal, không tạo stacking
+   context riêng, nên so thẳng ở gốc: đo ở 456×800, elementFromPoint tại nút ✕ của modal cao trả về
+   `.mobile-topbar` — không đóng được form dài, còn bấm xuyên được nút mở sidebar để điều hướng đi.
+   1000 = đúng giá trị gốc của public/style.css. Toast phải nổi TRÊN modal (lỗi Lưu trong form). */
+.modal-backdrop {
+  z-index: 1000;
+}
+#toast-host {
+  z-index: 1100;
+}

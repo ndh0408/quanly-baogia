@@ -107,6 +107,9 @@ export type ProjectSheet = {
   // Trang Hóa đơn (kế toán nhập — Quản lý dự án chỉ tham chiếu)
   invoiceDate?: string | null; paymentMethod?: string | null; orderClosedAt?: string | null;
   invoiceYear?: number | null; invoiceCompany?: string | null; invoiceDesc?: string | null; invoiceNote?: string | null;
+  // Ý kiến khách cho trang này (approved | rejected | null). Máy chủ cần trả kèm trong /quotes/projects —
+  // thiếu thì các trang dưới coi như chưa có ý kiến (hành vi cũ). Xem trangKhachTuChoi ở lib/format.
+  custStatus?: string | null;
 };
 export type ProjectQuote = {
   shortTitle?: string | null;

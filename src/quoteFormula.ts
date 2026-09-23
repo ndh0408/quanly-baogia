@@ -160,7 +160,11 @@ export function evalEditorFormula(input: string, refs?: EditorRefs) {
       changed = true;
       const fn = FORMULA_FNS[name.toUpperCase()];
       if (!fn) return "NaN";
-      const vals = args.split(";").map((a: string) => evalArith(a)).filter((v: number | null): v is number => v !== null && isFinite(v));
+      // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web/src/lib/formula.ts: không lọc bỏ
+      // im lặng rồi tính tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
+      let hong = false;
+      const vals = args.split(";").filter((a: string) => a.trim() !== "").map((a: string) => evalArith(a)).filter((v: number | null): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+      if (hong) return "NaN";
       const r = fn(vals);
       return (r === null || !isFinite(r)) ? "NaN" : String(r);
     });

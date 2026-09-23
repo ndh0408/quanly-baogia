@@ -93,6 +93,9 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
   s = chuanHoaDauTachDoiSo(s);
   s = s.replace(/×/g, "*").replace(/(\d)\s*[xX]\s*(?=\d)/g, "$1*");
   if (refs) {
+    // Dấu "," tách đối số ("=SUM(E1,E2)", "=ROUND(G3,2)") đã được chuanHoaDauTachDoiSo ở trên đổi
+    // thành ";" — CÙNG một hàm với src/quoteFormula.ts, để bước tự kiểm lúc xuất Excel (so số máy chủ
+    // với số web đã lưu) không lệch. Đừng thêm luật dấu phẩy riêng ở đây mà không thêm ở máy chủ.
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
     s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (_m, a, b) => { const list = refs.range(a, b); return list && list.length ? list.join(";") : "0"; });
     s = s.replace(/(?<![A-Za-z0-9_.$])(\$?[A-Za-z]+\$?\d+)/g, (_m, a) => { const v = refs.cell(a); return v === null || v === undefined || isNaN(v) ? "0" : String(v); });
@@ -106,7 +109,11 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
       changed = true;
       const fn = FORMULA_FNS[String(name).toUpperCase()];
       if (!fn) return "NaN";
-      const vals = String(args).split(";").map((a) => evalArith(a)).filter((v): v is number => v !== null && isFinite(v));
+      // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
+      // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
+      let hong = false;
+      const vals = String(args).split(";").filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+      if (hong) return "NaN";
       const r = fn(vals);
       return r === null || !isFinite(r) ? "NaN" : String(r);
     });

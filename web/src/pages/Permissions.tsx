@@ -88,6 +88,12 @@ export function PermissionsPage({ me }: { me: Me }) {
   if (err) return <div><h1>Phân quyền</h1><div className="err">⚠ {err} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div></div>;
   if (loading || !cat) return <div><h1>Phân quyền</h1><div className="skeleton-wrap">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div></div>;
 
+  const soTuyChinh = users.filter((u) => u.permCustom).length;
+  const demVaiTro = (role: string) => {
+    const cung = users.filter((u) => u.role === role);
+    const tuyChinh = cung.filter((u) => u.permCustom).length;
+    return { theo: cung.length - tuyChinh, tuyChinh };
+  };
   const qn = q.trim().toLowerCase();
   const shownUsers = qn
     ? users.filter((u) => u.displayName.toLowerCase().includes(qn) || u.username.toLowerCase().includes(qn))
@@ -97,8 +103,16 @@ export function PermissionsPage({ me }: { me: Me }) {
     <div>
       <h1>Phân quyền</h1>
       <p className="muted page-sub">
-        Tick/bỏ quyền cho từng vai trò rồi bấm <b>Lưu</b> (có hiệu lực ngay cho người đang đăng nhập). Vai trò <b>admin</b> luôn đủ quyền — không sửa được.
+        Tick/bỏ quyền cho từng vai trò rồi bấm <b>Lưu</b> (có hiệu lực ngay cho người đang đăng nhập <b>theo vai trò đó</b>). Vai trò <b>admin</b> luôn đủ quyền — không sửa được.
       </p>
+      {/* FE-08: máy chủ (src/permissions.ts) BỎ QUA vai trò của tài khoản đã có bộ quyền riêng. Trang này
+          trước đây không nói gì về chuyện đó — admin bỏ một quyền khỏi vai trò và tin là đã thu hồi,
+          trong khi người "Tùy chỉnh" vẫn giữ nguyên. */}
+      {soTuyChinh > 0 && (
+        <div className="err" role="note" style={{ background: "var(--warn-bg)", color: "var(--text)", borderColor: "var(--warn-border)" }}>
+          ⚠ {soTuyChinh} tài khoản đang dùng quyền <b>Tùy chỉnh</b> (đặt riêng ở trang Người dùng) — đổi quyền vai trò hay đổi vai trò ở đây KHÔNG có tác dụng với họ. Xem cột "Nguồn quyền" bên dưới.
+        </div>
+      )}
 
       <div className="list-wrap">
         <table className="perm-matrix">
@@ -110,6 +124,7 @@ export function PermissionsPage({ me }: { me: Me }) {
                   <div className="role-head">
                     <span>{r.label}{r.overridden && <span className="rh-pill" title="Đang khác mặc định gốc" style={{ marginLeft: 4 }}>tùy chỉnh</span>}</span>
                     <span className="rh-pill">{r.key}</span>
+                    <span className="muted" style={{ fontSize: 11 }} title="Người theo vai trò này / người cùng vai trò nhưng quyền Tùy chỉnh (không bị bảng này ảnh hưởng)">{demVaiTro(r.key).theo} theo vai trò · {demVaiTro(r.key).tuyChinh} tùy chỉnh</span>
                     {editableSet.has(r.key) ? (
                       <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: "center" }}>
                         <button className="btn btn-sm" disabled={!isDirty(r.key) || busyRole === r.key} onClick={() => save(r.key)}>{busyRole === r.key ? "Đang lưu…" : "Lưu"}</button>
@@ -154,10 +169,10 @@ export function PermissionsPage({ me }: { me: Me }) {
       </div>
       <div className="list-wrap">
         <table className="list-table">
-          <thead><tr><th scope="col">Nhân viên</th><th scope="col">Username</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th></tr></thead>
+          <thead><tr><th scope="col">Nhân viên</th><th scope="col">Username</th><th scope="col">Vai trò</th><th scope="col">Nguồn quyền</th><th scope="col">Trạng thái</th></tr></thead>
           <tbody>
             {shownUsers.length === 0 && (
-              <tr><td colSpan={4} className="muted">{q ? "Không có nhân viên khớp bộ lọc" : "Chưa có nhân viên"}</td></tr>
+              <tr><td colSpan={5} className="muted">{q ? "Không có nhân viên khớp bộ lọc" : "Chưa có nhân viên"}</td></tr>
             )}
             {shownUsers.map((u) => (
               <tr key={u.id}>
@@ -170,6 +185,9 @@ export function PermissionsPage({ me }: { me: Me }) {
                     {cat.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </td>
+                <td>{u.permCustom
+                  ? <span className="status draft" title="Bộ quyền đặt riêng ở trang Người dùng — ma trận vai trò phía trên KHÔNG áp cho người này">Tùy chỉnh — không theo vai trò</span>
+                  : <span className="muted">Theo vai trò</span>}</td>
                 <td>{u.active ? <span className="status approved">Hoạt động</span> : <span className="status rejected">Khóa</span>}</td>
               </tr>
             ))}

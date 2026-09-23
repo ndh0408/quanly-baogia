@@ -13,6 +13,8 @@ import {
   retargetPastedFormulas,
   shiftFormulaRefs,
   adjustRefsForRowEdit,
+  suyQuyUocSo,
+  parseTheoQuyUoc,
 } from "../web/src/lib/clipboard.ts";
 // NGUỒN ĐÃ ĐỔI 2026-08-26: `public/grid-clipboard.js` bị gỡ cùng SPA cũ. Bản React
 // `web/src/lib/clipboard.ts` là port THUẦN của nó và export ĐÚNG 13 hàm y hệt, nên bộ test này
@@ -287,6 +289,62 @@ describe("parseLooseDecimal — cột SỐ LƯỢNG/SỐ NGÀY (số đo, KHÔNG
     expect(it.quantity).toBeCloseTo(13.524);
     expect(it.unitPrice).toBe(65000);
   });
+});
+
+// GRID-01 (tiếp): suy quy ước số (VN/US) từ CẢ khối dán ngoài.
+describe("suyQuyUocSo / parseTheoQuyUoc — quy ước số của cả khối", () => {
+  const tien = (cot) => (c) => cot.includes(c);
+  it("≥2 nhóm nghìn bằng '.' → VN; bằng ',' → US", () => {
+    expect(suyQuyUocSo([["1.500", "1.500.000"]])).toBe("vn");
+    expect(suyQuyUocSo([["1,500", "1,500,000"]])).toBe("us");
+  });
+  it("có cả hai dấu: ',' sau cùng → VN; '.' sau cùng → US", () => {
+    expect(suyQuyUocSo([["1.234,5"]])).toBe("vn");
+    expect(suyQuyUocSo([["1,234.5"]])).toBe("us");
+  });
+  it("cột TIỀN một nhóm nghìn cũng là tín hiệu (tiền VND không có 3 số lẻ); cột thường thì không", () => {
+    expect(suyQuyUocSo([["1.500", "250.000"]], tien([1]))).toBe("vn");
+    expect(suyQuyUocSo([["1,500", "250,000"]], tien([1]))).toBe("us");
+    expect(suyQuyUocSo([["1.500", "250.000"]])).toBeNull();
+  });
+  it("không tín hiệu (ô đơn lẻ, số không dấu) → null", () => {
+    expect(suyQuyUocSo([["2.675"]])).toBeNull();
+    expect(suyQuyUocSo([["12", "95000", "Banner"]])).toBeNull();
+  });
+  it("tín hiệu MÂU THUẪN → null (giữ cách cũ)", () => {
+    expect(suyQuyUocSo([["1.500.000", "1,234.5"]])).toBeNull();
+  });
+  it("công thức và chữ bị bỏ qua", () => {
+    expect(suyQuyUocSo([["=SUM(E1,E2)", "Cổng 1,234.5m"]])).toBeNull();
+  });
+  it("parseTheoQuyUoc đọc đúng theo quy ước đã biết (kể cả âm kế toán)", () => {
+    expect(parseTheoQuyUoc("1.500", "vn")).toBe(1500);
+    expect(parseTheoQuyUoc("2,675", "vn")).toBeCloseTo(2.675);
+    expect(parseTheoQuyUoc("1,500", "us")).toBe(1500);
+    expect(parseTheoQuyUoc("250,000.00", "us")).toBe(250000);
+    expect(parseTheoQuyUoc("(1.500.000)", "vn")).toBe(-1500000);
+  });
+  it("reconstructExportRows: khối VN có giá '95.000' → SL '1.500' là 1500; khối không tín hiệu → '13.524' vẫn thập phân", () => {
+    const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
+    const N = new Set(["quantity", "unitPrice", "days"]);
+    const [vn] = reconstructExportRows([["1", "Ghế", "", "cái", "1.500", "95.000", "142.500.000"]], R, N);
+    expect(vn.quantity).toBe(1500);
+    expect(vn.unitPrice).toBe(95000);
+    const [cu] = reconstructExportRows([["1", "Banner", "Hiflex", "m2", "13.524", "65000", "879060"]], R, N);
+    expect(cu.quantity).toBeCloseTo(13.524);
+  });
+});
+
+// GRID-13: Excel định dạng Accounting hiện số âm trong NGOẶC. Bộ lọc ký tự cũ bỏ ngoặc → dòng giảm giá
+// (đơn giá âm) dán ra DƯƠNG, tổng lệch gấp đôi khoản giảm.
+describe("số âm kiểu kế toán '(…)' — GRID-13", () => {
+  it("parseLooseNumber '(1.500.000)' → -1500000", () => expect(parseLooseNumber("(1.500.000)")).toBe(-1500000));
+  it("parseLooseNumber '(1,500,000)' → -1500000", () => expect(parseLooseNumber("(1,500,000)")).toBe(-1500000));
+  it("parseLooseNumber '(95.000 ₫)' → -95000", () => expect(parseLooseNumber("(95.000 ₫)")).toBe(-95000));
+  it("parseLooseDecimal '(2,5)' → -2.5", () => expect(parseLooseDecimal("(2,5)")).toBeCloseTo(-2.5));
+  it("dấu trừ thường vẫn như cũ", () => { expect(parseLooseNumber("-1.500.000")).toBe(-1500000); expect(parseLooseDecimal("-2,5")).toBeCloseTo(-2.5); });
+  it("ngoặc KHÔNG bao trọn giá trị thì không đảo dấu", () => expect(parseLooseNumber("1.500 (VAT)")).toBe(1500));
+  it("'()' rỗng → 0", () => expect(parseLooseNumber("()")).toBe(0));
 });
 
 describe("GN KHÔNG NGÀY — nhóm con STT TRỐNG (kể cả có ĐVT/giá); Banner nhóm con ĐÁNH SỐ", () => {

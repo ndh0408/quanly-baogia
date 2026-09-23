@@ -130,10 +130,17 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
       ".excel-table.clf-theme tr.section-row td.col-price",
       ".excel-table.clf-theme tr.section-row td.col-amount",
       ".excel-table.clf-theme tr.section-row td.col-notes textarea",
+      // GAP1-03: TÊN NHÓM (textarea) và chữ STT (A/B/C) — chữ to nhất của hàng — trước đây rơi về
+      // luật chung `td.col-hangmuc textarea` / `td.col-stt` #0066cc (xanh dương). src/excel.ts tô
+      // sectionTextColor cho MỌI cột của hàng nhóm, kể cả tên và STT. `:not(.subgroup-row)` vì hàng
+      // nhóm con cũng mang lớp section-row.
+      ".excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-stt",
+      ".excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-hangmuc textarea",
     ]) {
       expect(mauChuCuoiCung(bc), `${bc}: chữ hàng NHÓM trên màn hình lệch với tệp Excel`).toBe(chuNhom);
     }
     for (const bc of [
+      ".excel-table.clf-theme tr.subgroup-row td.col-stt",   // GAP1-03: số nhóm con của mẫu banner
       ".excel-table.clf-theme tr.subgroup-row input",
       ".excel-table.clf-theme tr.subgroup-row td.col-hangmuc textarea",
       ".excel-table.clf-theme tr.subgroup-row td.col-price",

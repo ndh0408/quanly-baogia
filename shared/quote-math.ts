@@ -88,10 +88,16 @@ export function groupLetter(n: number) {
   return s;
 }
 // Ô số: dấu chấm nghìn VN, RỖNG khi 0 (tránh ô đầy "0"); Số Lượng làm tròn 1 chữ số thập phân (7,4).
+// GRID-10: toLocaleString CÓ options dựng một bộ định dạng ICU MỚI mỗi lần gọi (đo: 16µs/lần, so với
+// 0,38µs khi dùng lại) — một lượt vẽ lưới 378 dòng gọi ~2.600 lần = ~43ms chỉ để định dạng số, lặp lại
+// ở mỗi Enter / dán / phím công thức. Dùng lại hai bộ định dạng dựng sẵn: cùng locale, cùng options
+// nên đầu ra y hệt (có bài kiểm so từng giá trị với cách cũ).
+const NF_1 = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 });
+const NF_4 = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 4 });
 export function fmtNumCell(v?: number | string, exact = false) {
   const t = exact ? qtyExact(Number(v) || 0) : qtyRound(Number(v) || 0);
   if (!t || isNaN(t)) return "";
-  return t.toLocaleString("vi-VN", { maximumFractionDigits: exact ? 4 : 1 });
+  return (exact ? NF_4 : NF_1).format(t);
 }
 // "1.234.567" / "12,5" / "-5.000" → số.
 export function parseVN(s: string | number) {

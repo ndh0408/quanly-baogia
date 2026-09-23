@@ -37,10 +37,19 @@ export type BanNhapCuc = {
   /** Ảnh base64 đã bị bóc để lọt trần dung lượng. */
   bocAnh: boolean;
   quote: unknown;
+  /** Người GHI bản nháp. Bản ghi trước FE-04 không có trường này. */
+  userId?: number;
 };
 
-/** `id` là số báo giá, hoặc "moi" cho bản chưa từng lưu (#/rnew). */
-export const khoaBanNhap = (id: string | number) => `${TIEN_TO}${id}`;
+/**
+ * `id` là số báo giá, hoặc "moi" cho bản chưa từng lưu (#/rnew).
+ *
+ * FE-04: khoá nay gắn theo NGƯỜI DÙNG. Khoá cũ chỉ theo số báo giá, nên trên máy dùng chung mà phiên
+ * của A hết hạn (không bấm Đăng xuất — đường duy nhất xoá nháp), B đăng nhập từ màn Login rồi mở đúng
+ * báo giá đó là được đề nghị khôi phục phần CHƯA LƯU của A (giá, khách, bảng nội bộ) và Lưu dưới tên B.
+ * Không truyền `userId` = khoá kiểu cũ — chỉ còn dùng để đọc/chuyển bản nháp ghi trước bản vá.
+ */
+export const khoaBanNhap = (id: string | number, userId?: number) => (userId != null ? `${TIEN_TO}u${userId}:${id}` : `${TIEN_TO}${id}`);
 
 /** localStorage NÉM ở chế độ riêng tư của một số trình duyệt — chỉ chạm vào nó qua đây. */
 function kho(): Storage | null {
@@ -70,10 +79,10 @@ export function bocAnhKhoiBaoGia<T>(q: T): T {
 
 export type KetQuaGhi = "da-ghi" | "da-ghi-bo-anh" | "qua-lon" | "khong-ghi-duoc";
 
-export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string | null): KetQuaGhi {
+export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string | null, userId?: number): KetQuaGhi {
   const s = kho();
   if (!s) return "khong-ghi-duoc";
-  const dong = (q: unknown, bocAnh: boolean): BanNhapCuc => ({ luuLuc: Date.now(), baseUpdatedAt, bocAnh, quote: q });
+  const dong = (q: unknown, bocAnh: boolean): BanNhapCuc => ({ luuLuc: Date.now(), baseUpdatedAt, bocAnh, quote: q, ...(userId != null ? { userId } : {}) });
   let than: string;
   let bocAnh = false;
   try {
@@ -101,7 +110,56 @@ export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string |
   return bocAnh ? "da-ghi-bo-anh" : "da-ghi";
 }
 
-export function docBanNhap(khoa: string): BanNhapCuc | null {
+export function docBanNhap(khoa: string, userId?: number): BanNhapCuc | null {
+  const d = docBanNhapTho(khoa);
+  // Bản nháp mang tên người KHÁC thì không bao giờ trả ra — kể cả khi khoá trùng vì lý do nào đó.
+  if (d && userId != null && d.userId != null && d.userId !== userId) return null;
+  return d;
+}
+
+/**
+ * Bản nháp ghi TRƯỚC FE-04 nằm ở khoá kiểu cũ (không có người dùng). Chuyển nguyên văn sang khoá
+ * của người đang dùng — giữ lưới an toàn cho ai đang có phần chưa lưu đúng lúc triển khai bản vá.
+ * An toàn vì `ghiNhanNguoiDung` đã xoá sạch mọi bản nháp ngay khi một NGƯỜI KHÁC đăng nhập trên máy
+ * này, nên bản cũ còn sống tới đây chỉ có thể là của người dùng liên tục của trình duyệt.
+ */
+export function chuyenBanNhapCu(id: string | number, userId: number): void {
+  const s = kho();
+  if (!s) return;
+  try {
+    const cu = s.getItem(khoaBanNhap(id));
+    if (cu == null) return;
+    const moi = khoaBanNhap(id, userId);
+    if (s.getItem(moi) == null) s.setItem(moi, cu);
+    s.removeItem(khoaBanNhap(id));
+  } catch {
+    /* hạn ngạch / chế độ riêng tư — bỏ qua, bản cũ tự hết hạn sau 7 ngày */
+  }
+}
+
+const KHOA_NGUOI_CUOI = "quanly:lastUser";
+/**
+ * Gọi MỖI LẦN xác lập danh tính (khởi động có phiên sẵn, đăng nhập, kích hoạt tài khoản). Người đăng
+ * nhập khác người dùng lần trước trên trình duyệt này → xoá sạch bản nháp trước khi họ kịp mở gì.
+ * Trước đây chỉ Đăng xuất / session:revoked / lớp phủ đổi người mới xoá; màn Login sau khi phiên hết
+ * hạn thì không. Trả `true` khi đã xoá.
+ */
+export function ghiNhanNguoiDung(userId: number): boolean {
+  const s = kho();
+  if (!s) return false;
+  let doiNguoi = false;
+  try {
+    const cu = s.getItem(KHOA_NGUOI_CUOI);
+    doiNguoi = cu != null && cu !== String(userId);
+    if (doiNguoi) xoaMoiBanNhap(s);
+    s.setItem(KHOA_NGUOI_CUOI, String(userId));
+  } catch {
+    /* bỏ qua */
+  }
+  return doiNguoi;
+}
+
+function docBanNhapTho(khoa: string): BanNhapCuc | null {
   const s = kho();
   if (!s) return null;
   let than: string | null;

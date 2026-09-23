@@ -6,6 +6,7 @@ import { type ItemK, nextK } from "../lib/gridShared";
 import { extraTableSum } from "../components/ExtraTables";
 import { HnTables, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
+import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
 
 // MÀN CỦA ACCOUNT HÀ NỘI — từ 2026-09-15 là một TRÌNH SOẠN ĐẦY ĐỦ của riêng họ.
 //
@@ -23,7 +24,7 @@ let _templates: EditorTemplate[] | null = null;
 type WinDirty = Window & { __editorDirty?: boolean };
 const STATUS: Record<string, string> = { assigned: "Đang làm", submitted: "Đã gửi — chờ quản lý duyệt", approved: "✓ Đã duyệt", rejected: "↩ Bị trả lại" };
 
-export function AccountHnView({ quoteId }: { quoteId: number }) {
+export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: number }) {
   const qRef = useRef<QuoteFull | null>(null);
   const [, setTick] = useState(0);
   const redraw = useCallback(() => setTick((t) => t + 1), []);
@@ -39,12 +40,38 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   // màn mỗi phím thì lưới lớn giật. `GridTable` có `key` ổn định nên lượt vẽ lại này KHÔNG gắn lại
   // nó — con trỏ và vùng chọn giữ nguyên (đã kiểm bằng trình duyệt thật).
   const nhipVe = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── BẢN NHÁP CỤC BỘ (GRID-16 / FE-13) ────────────────────────────────────────────────────────
+  // Màn này là nơi gõ giá hàng loạt, vậy mà trước đây KHÔNG có lưới an toàn nào ngoài beforeunload:
+  // tab sập / mất điện là mất trắng. Dùng lại localDraft: khoá riêng `hn<id>` theo người dùng, mốc là
+  // `hnRev` (máy chủ đổi hnRev mỗi lần phần HN được ghi) — lệch mốc thì không đề nghị khôi phục.
+  const khoaNhapRef = useRef<string | null>(null);
+  const mocNhapRef = useRef<string | null>(null);
+  const henNhapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ghiNhapNgay = () => {
+    if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
+    if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
+    ghiBanNhap(khoaNhapRef.current, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
+  };
   const mark = () => {
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
+    if (henNhapRef.current) clearTimeout(henNhapRef.current);
+    henNhapRef.current = setTimeout(ghiNhapNgay, 1200);
     if (nhipVe.current) return;
     nhipVe.current = setTimeout(() => { nhipVe.current = null; redraw(); }, 120);
   };
-  useEffect(() => () => { if (nhipVe.current) clearTimeout(nhipVe.current); }, []);
+  useEffect(() => () => { if (nhipVe.current) clearTimeout(nhipVe.current); if (henNhapRef.current) clearTimeout(henNhapRef.current); }, []);
+  // GRID-17: Ctrl/⌘+S = Lưu (không gửi duyệt), như trình soạn báo giá. Xem QuoteEditor.
+  const saveRef = useRef<(() => unknown) | null>(null);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || (e.key !== "s" && e.key !== "S")) return;
+      e.preventDefault();
+      if (document.querySelector('[data-focus-trap="own"]')) return;
+      saveRef.current?.();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -53,7 +80,12 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
+    // FE-13: sắp rời / ẩn trang → ghi bản nháp NGAY, không đợi 1,2s ngừng gõ.
+    const ghi = () => ghiNhapNgayRef.current();
+    const khiAn = () => { if (document.visibilityState === "hidden") ghi(); };
+    window.addEventListener("pagehide", ghi);
+    document.addEventListener("visibilitychange", khiAn);
+    return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); };
   }, []);
 
   const load = useCallback(async () => {
@@ -61,9 +93,29 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
       if (!_templates) _templates = await api.metaTemplates();
       const q = await api.getQuote(quoteId);
       if (!Array.isArray(q.hnTables)) q.hnTables = [];
-      qRef.current = q; dirtyRef.current = false; (window as WinDirty).__editorDirty = false; setReady(true); redraw();
+      const khoa = khoaBanNhap(`hn${quoteId}`, meId);
+      const moc = String((q as { hnRev?: string }).hnRev ?? (q as { updatedAt?: string }).updatedAt ?? "");
+      const suaDuoc = !q.hnStatus || ["assigned", "rejected"].includes(String(q.hnStatus));
+      let khoiPhuc = false;
+      // Bản giữ lại lúc xung đột 409 (xem save) — mở ra thì mang mốc MỚI, Lưu là chủ động ghi đè.
+      const xd = docBanNhap(khoa + ":xungdot", meId);
+      const nhap = docBanNhap(khoa, meId);
+      if (xd && suaDuoc) {
+        if (await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi.", { confirmText: "Mở bản của tôi", danger: true })) {
+          q.hnTables = ((xd.quote as { hnTables?: unknown[] }).hnTables) ?? q.hnTables; khoiPhuc = true;
+        }
+        xoaBanNhap(khoa + ":xungdot");
+      } else if (nhap && nhap.baseUpdatedAt === moc && suaDuoc) {
+        if (await confirmModal("Có giá Hà Nội chưa lưu từ lần trước", `Lần trước bạn rời trang lúc ${new Date(nhap.luuLuc).toLocaleString("vi-VN")} khi còn giá CHƯA LƯU. Khôi phục?`, { confirmText: "Khôi phục" })) {
+          q.hnTables = ((nhap.quote as { hnTables?: unknown[] }).hnTables) ?? q.hnTables; khoiPhuc = true;
+        } else xoaBanNhap(khoa);
+      }
+      khoaNhapRef.current = khoa; mocNhapRef.current = moc;
+      qRef.current = q; dirtyRef.current = khoiPhuc; (window as WinDirty).__editorDirty = khoiPhuc; setReady(true); redraw();
     } catch (ex) { setErr(ex instanceof ApiError ? ex.message : "Lỗi tải"); }
-  }, [quoteId, redraw]);
+  }, [quoteId, redraw, meId]);
+  const ghiNhapNgayRef = useRef(ghiNhapNgay);
+  ghiNhapNgayRef.current = ghiNhapNgay;
   useEffect(() => { load(); }, [load]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <button type="button" className="btn btn-sm" onClick={() => { setErr(""); load(); }}>Thử lại</button> <a className="btn btn-sm" href="#/list">Về danh sách</a></div>;
@@ -111,6 +163,10 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   };
 
   const save = async (thenSubmit: boolean) => {
+    // GRID-07: chốt ô đang gõ vào model trước khi gói dữ liệu; bảng khoá suốt lúc lưu (editable &&
+    // !saving) — gõ thêm lúc đang chờ thì `load()` sau đó thay qRef và phần đó mất im lặng.
+    const dangGo = document.activeElement as HTMLElement | null;
+    if (dangGo && dangGo !== document.body && typeof dangGo.blur === "function") dangGo.blur();
     setSaving(true);
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
@@ -120,12 +176,29 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
       }));
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+      // Đã lên máy chủ → bản nháp hết lý do tồn tại (giữ lại là lần mở sau hỏi khôi phục thứ cũ hơn).
+      if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
+      if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
       if (thenSubmit) { await api.submitHn(q.id); toast("Đã gửi duyệt phần Hà Nội", "success"); }
       else toast("Đã lưu phần Hà Nội", "success");
       await load();
-    } catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN", "error"); }
+    } catch (ex) {
+      // GRID-16: 409 = phần HN vừa được ghi ở nơi khác (hnRev/updatedAt lệch). Trước đây chỉ là toast:
+      // không lối tải lại, mà tự tải lại thì mất phần đang gõ. Nay giữ phần đang gõ vào khoá `…:xungdot`
+      // rồi mới tải lại; đường nạp hỏi có mở lại không (y như GRID-08 ở trình soạn báo giá).
+      if (ex instanceof ApiError && ex.status === 409 && khoaNhapRef.current && qRef.current) {
+        const tai = await confirmModal("Phần Hà Nội đã thay đổi ở nơi khác", `${ex.message}. Tải lại bản mới nhất? Phần bạn đang gõ được GIỮ LẠI trên máy này và bạn sẽ được hỏi mở lại.`, { danger: true, confirmText: "Tải lại bản mới" });
+        if (tai) {
+          if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
+          ghiBanNhap(khoaNhapRef.current + ":xungdot", { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
+          dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+          await load();
+        }
+      } else toast(ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN", "error");
+    }
     finally { setSaving(false); }
   };
+  saveRef.current = editable && !saving ? () => save(false) : null;
   const submit = async () => { if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) save(true); };
 
   return (
@@ -145,7 +218,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
       )}
 
       <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
-        editable={editable} canApprove={false} canPay={false} quoteId={q.id}
+        editable={editable && !saving} canApprove={false} canPay={false} quoteId={q.id}
         onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; }} />
 
       <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>

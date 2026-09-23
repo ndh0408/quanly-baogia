@@ -273,6 +273,11 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
     if (dirty.current && !(await confirmModal("Bỏ thay đổi?", "Bạn có thay đổi chưa lưu. Đóng và bỏ hết?", { danger: true, confirmText: "Đóng, bỏ thay đổi" }))) return;
     onClose();
   }, [onClose]);
+  // FE-15: "Xem thử" chuyển sang #/dashboard → trang này gỡ, form đang sửa mất KHÔNG hỏi. Hỏi như Đóng.
+  const xemThu = onPreview ? async (p: string[], l: string) => {
+    if (dirty.current && !(await confirmModal("Bỏ thay đổi để xem thử?", "Xem thử sẽ rời trang này và BỎ các thay đổi chưa lưu trong form. Muốn giữ thì Hủy, bấm Lưu trước rồi mới xem thử.", { danger: true, confirmText: "Bỏ thay đổi, xem thử" }))) return;
+    onPreview(p, l);
+  } : undefined;
   useEscClose(() => void guardedClose());
   const mark = <T,>(setter: (v: T) => void) => (v: T) => { dirty.current = true; setter(v); };
   const save = async () => {
@@ -311,7 +316,7 @@ function InviteModal({ cat, onClose, onInvited, onPreview }: { cat?: PermCatalog
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: báo giá của họ năm nay là FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span>
               <input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={displayName.trim() || "tài khoản mới"} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={xemThu} label={displayName.trim() || "tài khoản mới"} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">
@@ -365,6 +370,11 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
     if (dirty.current && !(await confirmModal("Bỏ thay đổi?", "Bạn có thay đổi chưa lưu. Đóng và bỏ hết?", { danger: true, confirmText: "Đóng, bỏ thay đổi" }))) return;
     onClose();
   }, [onClose]);
+  // FE-15: "Xem thử" chuyển sang #/dashboard → trang này gỡ, form đang sửa mất KHÔNG hỏi. Hỏi như Đóng.
+  const xemThu = onPreview ? async (p: string[], l: string) => {
+    if (dirty.current && !(await confirmModal("Bỏ thay đổi để xem thử?", "Xem thử sẽ rời trang này và BỎ các thay đổi chưa lưu trong form. Muốn giữ thì Hủy, bấm Lưu trước rồi mới xem thử.", { danger: true, confirmText: "Bỏ thay đổi, xem thử" }))) return;
+    onPreview(p, l);
+  } : undefined;
   useEscClose(() => void guardedClose());
   const mark = <T,>(setter: (v: T) => void) => (v: T) => { dirty.current = true; setter(v); };
   const save = async () => {
@@ -447,7 +457,7 @@ function EditUserModal({ user, cat, onClose, onSaved, onPreview }: { user: User;
             <label className="full"><span>Chức danh</span><input value={title} placeholder="VD: Account, Sale…" onChange={(e) => mark(setTitle)(e.target.value)} /></label>
             <label className="full"><span>Mã dự án <em className="unit">(chỉ phần chữ, vd FE_A — hệ thống tự thêm năm: FE_A{String(new Date().getFullYear()).slice(-2)}_001…)</em></span><input value={projectCode} placeholder="VD: FE_A" onChange={(e) => mark(setProjectCode)(e.target.value)} /></label>
           </div>
-          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={onPreview} label={user.displayName || user.username} />
+          <PermSection cat={cat} isAdmin={isAdmin} setAdmin={mark(setIsAdmin)} perms={perms} setPerms={mark(setPerms)} onPreview={xemThu} label={user.displayName || user.username} />
         </div>
         {err && <div className="err">⚠ {err}</div>}
         <div className="modal-foot">

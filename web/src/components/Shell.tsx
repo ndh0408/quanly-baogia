@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type Me } from "../lib/api";
-import { confirmModal } from "../lib/ui";
+import { confirmModal, toast } from "../lib/ui";
 import { xoaMoiBanNhap } from "../lib/localDraft";
+import { dangXuat, phatDangXuat } from "../lib/authSync";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
@@ -9,7 +10,9 @@ async function guardLeave(): Promise<boolean> {
   const w = window as Window & { __editorDirty?: boolean };
   if (!w.__editorDirty) return true;
   const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
-  if (ok) w.__editorDirty = false;
+  // FE-12: chọn bỏ → báo editor xoá bản nháp cục bộ (không thì lần mở sau lại hỏi khôi phục đúng phần
+  // người dùng vừa quyết định bỏ).
+  if (ok) { w.__editorDirty = false; window.dispatchEvent(new Event("editor:discard")); }
   return ok;
 }
 
@@ -21,6 +24,16 @@ function PageFallback() {
 // CHẶN Ở FRONTEND (defense-in-depth): trang chứa dữ liệu nhạy cảm (Nhân sự/Danh bạ: căn cước, MST,
 // STK…) đã được API gác quyền, nhưng nếu gõ thẳng #/personnel không quyền thì KHÔNG được render page
 // rồi mới lỗi API — hiện thẳng màn "không có quyền". Áp cho MỌI trang nav có `perm`.
+function NotFound() {
+  return (
+    <div className="access-denied">
+      <div className="ad-ico" aria-hidden="true">🧭</div>
+      <h2>Không tìm thấy trang</h2>
+      <p className="muted">Đường dẫn này không tồn tại. Chọn một mục ở menu bên trái.</p>
+    </div>
+  );
+}
+
 function AccessDenied() {
   return (
     <div className="access-denied">
@@ -353,7 +366,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
         es = new EventSource("/api/stream/events");
         es.addEventListener("open", () => { lan = 0; });   // nối được thì quên lịch sử lùi
         es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
-        es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+        // FE-18: chuyển tiếp payload {entity, action} để RealtimeBridge chỉ làm tươi query liên quan.
+        es.addEventListener("changed", (ev) => { let detail: unknown = null; try { detail = JSON.parse((ev as MessageEvent).data); } catch { /* payload lạ → làm tươi tất cả */ } window.dispatchEvent(new CustomEvent("realtime:changed", { detail })); });
         es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
         es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
         // Phiên bị thu hồi (khoá tài khoản / gỡ MFA / đổi mật khẩu) — dọn luôn bản nháp cục bộ,
@@ -445,22 +459,27 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); }}>Đăng xuất</button>
+            {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isWizard ? (
           // Chặn quyền CẢ nhánh wizard (trước đây gõ thẳng #/new không có quote:create vẫn render rồi mới lỗi API).
-          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary>}</main>
+          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary key={key}><NewQuoteWizard me={me} /></LazyBoundary>}</main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><AccountHnView quoteId={hnEditId} meId={me.id} /></LazyBoundary></main>
         ) : internalViewId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            {editorDenied ? <AccessDenied /> : <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
+            {editorDenied ? <AccessDenied /> : <LazyBoundary key={key}><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
           </main>
         ) : (
           <main className="main" id="main" tabIndex={-1}>
+            {/* FE-16: lỗi render của MỘT trang chỉ khoá trang đó. `key={key}` dựng lại ranh giới lỗi mỗi khi
+                đổi route — trước đây lỗi ở trang thường làm ErrorBoundary cấp App thay CẢ app (phải F5), còn
+                LazyBoundary không key thì giữ failed=true sang route lazy kế tiếp cùng vị trí cây. */}
+            <LazyBoundary key={key}>
             {denied ? <AccessDenied />
               : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
@@ -475,7 +494,11 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />
               : key === "new" ? <AccessDenied />
-              : <PersonnelPage me={me} query={query} onQuery={setQuery} />}
+              : key === "personnel" ? <PersonnelPage me={me} query={query} onQuery={setQuery} />
+              // FE-14: hash lạ (#/abc, gõ sai, link cũ) trước đây rơi vào trang Nhân sự mà KHÔNG qua cổng
+              // quyền (key không có trong NAV → denied=false) → người không có quyền nhân sự thấy lỗi 403.
+              : <NotFound />}
+            </LazyBoundary>
           </main>
         )}
       </div>
