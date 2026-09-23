@@ -55,7 +55,13 @@ const schema = z.object({
   // CORS
   CORS_ORIGINS: z.string().optional(),
   // Trust proxy (Nginx, Cloudflare). Set 1 (one hop) or true for any.
-  TRUST_PROXY: z.string().optional(),
+  // KIỂM DẠNG (HTTP-12): `false`/`off`/`no` trước đây lọt qua rồi `app.set("trust proxy", "false")`
+  // làm proxy-addr ném "invalid IP address: false" trong createApp — tiến trình chết với lỗi không
+  // nói tên biến. Nhận: số chặng, `true`, `loopback`/`linklocal`/`uniquelocal`, hoặc danh sách IP/CIDR.
+  // Chuỗi rỗng (`TRUST_PROXY=` trong .env.example) = không đặt.
+  TRUST_PROXY: strEnv(z.string().trim().regex(/^(true|\d+|loopback|linklocal|uniquelocal|[0-9a-f:.,/ ]+)$/i, {
+    error: "TRUST_PROXY: số chặng proxy (vd 1), 'true', 'loopback'/'linklocal'/'uniquelocal', hoặc danh sách IP/CIDR — KHÔNG dùng 'false' (muốn tắt thì bỏ trống)",
+  }).optional()),
   // JWT
   JWT_SECRET: strEnv(z.string().min(16).optional()),
   JWT_ACCESS_TTL: z.string().default("15m"),

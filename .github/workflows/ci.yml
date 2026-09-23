@@ -214,6 +214,7 @@ jobs:
           JWT_SECRET: smoke-jwt-secret-different-from-session-and-long-enough
           MFA_ENC_KEY: smoke-mfa-encryption-key-for-ci-only
           METRICS_TOKEN: smoke-metrics-token
+          TRUST_PROXY: "1"
         run: bash scripts/ci/smoke-dist.sh
 
   helm:

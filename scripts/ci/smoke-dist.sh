@@ -44,7 +44,9 @@ NODE_ENV=production
 # ba khoá kia (bộ kiểm cũng đòi khác nhau). CI (ci.yml:208) không truyền biến này; đặt ở đây còn
 # chạy thêm được đường khởi tạo mã hoá PII mà CI đang bỏ trống.
 PII_ENC_KEY=smoke-pii-encryption-key-for-ci-only-32-plus-chars
-export NODE_ENV APP_BASE_URL SESSION_SECRET JWT_SECRET MFA_ENC_KEY METRICS_TOKEN PII_ENC_KEY
+# Tiến trình web production BẮT BUỘC có TRUST_PROXY (src/server.ts) — đúng giá trị compose prod ghim.
+: "${TRUST_PROXY:=1}"
+export NODE_ENV APP_BASE_URL SESSION_SECRET JWT_SECRET MFA_ENC_KEY METRICS_TOKEN PII_ENC_KEY TRUST_PROXY
 
 LOG="$(mktemp)"
 WLOG="$(mktemp)"

@@ -17,6 +17,16 @@ initSentry();
 // xuất lớn hơn cả ngân sách dòng nghĩa là có báo giá hợp lệ mà không bao giờ xuất được.
 kiemBatBienXuatLucKhoiDong();
 
+// TRUST_PROXY BẮT BUỘC Ở TIẾN TRÌNH WEB PRODUCTION (HTTP-12). Cookie phiên đặt `secure: isProd`,
+// mà express-session CHỈ phát cookie Secure khi `req.secure` — sau TLS ở Cloudflare kết nối vào Node
+// là HTTP thuần, nên thiếu trust proxy thì `req.secure` = false và KHÔNG có Set-Cookie nào: đăng
+// nhập "thành công" rồi mọi request sau 401, không một dòng log. Kiểm ở ĐÂY (không ở config.ts) vì
+// tiến trình worker cũng nạp config mà không cần biến này.
+if (config.NODE_ENV === "production" && !config.TRUST_PROXY) {
+  console.error("❌ TRUST_PROXY phải đặt ở production (vd 1 cho Cloudflare Tunnel → cloudflared → app): cookie phiên Secure chỉ được phát khi req.secure, mà req.secure cần trust proxy.");
+  process.exit(1);
+}
+
 const app = createApp();
 
 // (Quote expiry was removed entirely by request — no auto-expiry sweep, no

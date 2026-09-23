@@ -44,6 +44,8 @@ ENVS=(
   -e JWT_SECRET=smoke-jwt-secret-different-from-session-and-long-enough
   -e MFA_ENC_KEY=smoke-mfa-encryption-key-for-ci-only
   -e APP_BASE_URL=http://localhost:3000
+  # Tiến trình web production BẮT BUỘC có TRUST_PROXY (src/server.ts) — đúng giá trị compose prod ghim.
+  -e TRUST_PROXY=1
 )
 
 echo "▶ migrate schema bằng CHÍNH image (chứng minh prisma CLI có trong image production)"
