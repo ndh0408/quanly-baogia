@@ -73,6 +73,7 @@ import { QuoteEditorPage } from "./QuoteEditor";
 import { api, setPreviewMode } from "../lib/api";
 import * as ui from "../lib/ui";
 import { khoaBanNhap, ghiBanNhap, docBanNhap } from "../lib/localDraft";
+import { setPendingNewQuote } from "../lib/pendingQuote";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all", "quote:internal:pay"] };
 type WinDirty = Window & { __editorDirty?: boolean };
@@ -306,6 +307,46 @@ describe("L63 — chế độ Xem thử quyền không đọc / ghi / xoá bản
     nhapThat();
     await moEditor();
     expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
+  });
+
+  /** "✕ Thoát xem thử" của App: setPreviewMode(false) rồi setPreview(null) → Shell nhận `me` MỚI (bỏ bộ
+   *  quyền xem thử) và vẽ lại editor TẠI CHỖ — cùng `key` route nên KHÔNG gắn lại. */
+  async function thoatXemThu(quoteId: number | undefined = 11, isNew = false) {
+    setPreviewMode(false);
+    await act(async () => { root!.render(<QuoteEditorPage me={{ ...ME }} quoteId={quoteId} isNew={isNew} />); });
+    await cho(10);
+  }
+
+  it("thoát xem thử ngay trên trình soạn → sửa THẬT sau đó vẫn có bản nháp cục bộ", async () => {
+    setPreviewMode(true);
+    await moEditor();
+    await thoatXemThu();
+    go(oTenKhach(), "Sửa thật sau xem thử");
+    await cho(1300);
+    expect(tenTrongNhap(), "thoát xem thử xong bản nháp vẫn tắt tới khi rời trang").toBe("Sửa thật sau xem thử");
+  });
+
+  it("bản nháp thật KHÔNG được hỏi lúc xem thử → thoát xem thử trên trình soạn thì được hỏi khôi phục (không bị sửa thật ghi đè im lặng)", async () => {
+    nhapThat();
+    setPreviewMode(true);
+    await moEditor();
+    go(oTenKhach(), "gõ thử quyền — rác");
+    await thoatXemThu();
+    expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
+    expect(oTenKhach().value).toBe("Phần CHƯA LƯU thật");
+  });
+
+  it("báo giá MỚI dựng từ wizard lúc xem thử, thoát xem thử trên #/rnew → bản nháp 'moi' THẬT không bị nhánh 'đến từ wizard' xoá", async () => {
+    const KHOA_MOI = khoaBanNhap("moi", 1);
+    ghiBanNhap(KHOA_MOI, baoGia({ id: 0, _new: true, updatedAt: undefined, toCompany: "Báo giá mới CHƯA LƯU thật" }), null, 1);
+    setPreviewMode(true);
+    setPendingNewQuote(baoGia({ id: 0, _new: true, updatedAt: undefined, toCompany: "Khách chọn lúc xem thử" }) as never);
+    await moEditor(undefined, true);
+    expect(oTenKhach().value).toBe("Khách chọn lúc xem thử");
+    await thoatXemThu(undefined, true);
+    expect(docBanNhap(KHOA_MOI, 1), "thoát xem thử xoá bản nháp báo giá mới THẬT").not.toBeNull();
+    expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
+    expect(oTenKhach().value).toBe("Báo giá mới CHƯA LƯU thật");
   });
 });
 

@@ -396,10 +396,23 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // là nói dối React (đổi giá trị không hề kích hoạt render).
   const templates = _templates || RONG;
   const companies = _companies || RONG;
+  // L63: cờ XEM THỬ QUYỀN của lượt vẽ này — là phụ thuộc của effect nạp ngay dưới. "✕ Thoát xem thử" (App)
+  // tắt cờ rồi đổi `me` nên editor vẽ lại TẠI CHỖ (cùng `key` route, KHÔNG gắn lại); không có phụ thuộc
+  // này thì khoá bản nháp giữ nguyên null của lượt nạp lúc xem thử, mọi sửa THẬT sau đó không có bản nháp
+  // tới khi rời trang. Bật xem thử thì App chuyển về #/dashboard nên editor không đứng đó lúc cờ bật.
+  const xemThu = isPreviewMode();
+  const xemThuLanNapRef = useRef(xemThu);
 
   // ── load catalogs + quote ──────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
+    // L63: vừa thoát xem thử → nạp lại như MỞ MỚI báo giá này: khoá bản nháp thật, bản nháp thật (chưa được
+    // hỏi lúc xem thử) được hỏi khôi phục, phần gõ lúc xem thử (vốn "không lưu thật") bỏ đi. Báo giá mới
+    // dựng từ wizard chạy lúc xem thử cũng bỏ theo (đi đường #/rnew thường) — giữ nó thì nhánh "đến từ
+    // wizard" bên dưới xoá bản nháp "moi" THẬT của người dùng.
+    const vuaThoatXemThu = xemThuLanNapRef.current && !xemThu;
+    xemThuLanNapRef.current = xemThu;
+    if (vuaThoatXemThu) draftRef.current = null;
     // ── QUAY VỀ KHUNG XƯƠNG KHI ĐỔI SANG BÁO GIÁ KHÁC ─────────────────────
     // `ready` trước đây chỉ bật MỘT LẦN rồi không bao giờ tắt. Khi route đổi từ `#/quotes/new` sang
     // `#/quotes/<id>` — chính việc `save()` tự làm sau khi lưu báo giá mới — component KHÔNG bị gỡ
@@ -462,8 +475,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // L63: XEM THỬ QUYỀN — mọi lệnh ghi chỉ "thành công giả" (api.req), còn me.id vẫn là admin THẬT,
         // nên khoá bản nháp là khoá thật: Lưu giả rồi xoá bản nháp thật, Hủy "Khôi phục?" xoá nó, gõ thử
         // ghi rác vào nó. Lúc xem thử thì KHÔNG đụng bản nháp: không đọc, không hỏi, khoá = null — mark(),
-        // ghiNgay, boThayDoi, save() vốn đã bỏ qua ghi/xoá khi không có khoá.
-        const xemThu = isPreviewMode();
+        // ghiNgay, boThayDoi, save() vốn đã bỏ qua ghi/xoá khi không có khoá. Thoát xem thử → effect chạy
+        // lại (xem `xemThu` ở trên) và lượt nạp đó có khoá thật.
         if (!xemThu) chuyenBanNhapCu(isNew ? "moi" : quoteId!, meIdRef.current);   // bản nháp ghi trước FE-04 (khoá không có người dùng)
         // FE-12: khoá bản nháp chỉ gán vào ref SAU khi qRef đã là báo giá này (xem dưới) — gán sớm thì
         // trong lúc chờ hộp "Khôi phục?" ref đã trỏ báo giá MỚI mà qRef còn là báo giá CŨ.
@@ -570,8 +583,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       }
     })();
     return () => { alive = false; };
-     
-  }, [quoteId, isNew]);
+
+  }, [quoteId, isNew, xemThu]);
 
   // Ba hàm truyền cho <ImportExcelModal>. TRƯỚC ĐÂY viết inline ngay trong JSX nên identity đổi mỗi
   // lần QuoteEditor render — mà editor render lại theo TỪNG PHÍM gõ ở ô Ngày báo giá / VAT / Giảm
