@@ -1,0 +1,154 @@
+/** @vitest-environment jsdom */
+/**
+ * ============================================================================
+ * CỜ ĐỎ "THAM CHIẾU HỎNG" PHẢI SỐNG QUA recomputeAll — soát toàn diện L8.
+ *
+ * Ba đường bật cờ #REF (dán dịch ra ngoài bảng, Ctrl+D ra ngoài bảng, xoá hàng bị trỏ tới) và
+ * đường dán khối Excel app xuất (retargetPastedFormulas → markWarn) đều GIỮ công thức gốc + bật
+ * `_fxWarn` để ô tô đỏ. Nhưng ngay sau đó recomputeAll → ghiCoVong xoá `_fxWarn` của mọi công thức
+ * tính ra số — mà công thức giữ nguyên dạng gốc thì gần như luôn tính ra số (trỏ sang hàng khác, hay
+ * cột không có thì cellNum trả 0). Ô không đỏ, số sai được lưu mà không có dấu hiệu nào.
+ *
+ * Sơ đồ địa chỉ trong tệp (showDetail + addrDetail, không ngày):
+ *   A=STT  B=Hạng Mục  C=Chi Tiết  D=ĐVT  E=Số Lượng  F=Đơn Giá  G=Thành Tiền  H=Ghi Chú
+ * ============================================================================
+ */
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { GridTable } from "./GridTable";
+import { nextK, type ItemK } from "../lib/gridShared";
+
+vi.mock("../lib/venueCatalog", async (nhapGoc) => {
+  const goc = await nhapGoc<typeof import("../lib/venueCatalog")>();
+  return { ...goc, loadCatalog: () => Promise.resolve({ entries: [], venues: [] }) };
+});
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const mk = (o: Partial<ItemK>): ItemK =>
+  ({ _k: nextK(), kind: "item", name: "", detail: "", unit: "m2", quantity: 1, days: 1, unitPrice: 1000, notes: "", ...o }) as ItemK;
+
+let root: Root | null = null;
+let hop: HTMLDivElement | null = null;
+afterEach(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 220)); });
+  if (root) act(() => root!.unmount());
+  hop?.remove(); root = null; hop = null; document.body.innerHTML = "";
+});
+
+/** onChange vẽ lại như màn soạn thật — không vẽ lại thì class ô đỏ không bao giờ lên DOM. */
+function Vo({ items }: { items: ItemK[] }) {
+  const [, buoc] = useState(0);
+  return (
+    <GridTable items={items} usesDays={false} showDetail addrDetail numberSubs={false} editable
+      internalNote={false} groupSubtotal={false} fxBar onChange={() => buoc((v) => v + 1)} />
+  );
+}
+function moLuoi(items: ItemK[]) {
+  hop = document.createElement("div");
+  document.body.appendChild(hop);
+  root = createRoot(hop);
+  act(() => root!.render(<Vo items={items} />));
+}
+const o = (row: number, f: string) => hop!.querySelector(`tr[data-row="${row}"] [data-f="${f}"]`) as HTMLInputElement & HTMLTextAreaElement;
+const phim = (el: Element, init: KeyboardEventInit) => act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+const coDo = (row: number, f: string) => !!o(row, f).closest("td")?.classList.contains("cell-fx-error");
+const coWarn = (it: ItemK, f: string) => !!(it as unknown as { _fxWarn?: Record<string, boolean> })._fxWarn?.[f];
+
+type Kho = Record<string, string>;
+function suKienClip(loai: "copy" | "paste", kho: Kho) {
+  const ev = new Event(loai, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: { getData: (k: string) => kho[k] ?? "", setData: (k: string, v: string) => { kho[k] = v; } } });
+  return ev;
+}
+/** Chọn nguyên các hàng [r0..r1] (Shift+↓ rồi Shift+Space) và chép. */
+function chepHang(r0: number, r1: number): Kho {
+  act(() => { o(r0, "name").focus(); });
+  for (let r = r0; r < r1; r++) phim(document.activeElement!, { key: "ArrowDown", shiftKey: true });
+  phim(document.activeElement!, { key: " ", code: "Space", shiftKey: true });
+  const kho: Kho = {};
+  act(() => { document.activeElement!.dispatchEvent(suKienClip("copy", kho)); });
+  return kho;
+}
+function dan(row: number, kho: Kho) {
+  const el = o(row, "name");
+  act(() => { el.focus(); });
+  act(() => { el.dispatchEvent(suKienClip("paste", kho)); });
+}
+
+describe("L8 — cờ đỏ tham chiếu hỏng không bị recomputeAll gỡ", () => {
+  it("dán khối có công thức trỏ xuống vào CUỐI bảng: tham chiếu dịch theo bảng SAU khi nới (=E4*2), không kẹt =E2*2", () => {
+    const items = [mk({ name: "A", quantity: 10, formulas: { quantity: "=E2*2" } }), mk({ name: "B", quantity: 5 }), mk({ name: "C", quantity: 9 })];
+    moLuoi(items);
+    const kho = chepHang(0, 1);
+    items[1].quantity = 7;   // sửa SL hàng B sau khi chép → công thức kẹt hàng cũ sẽ ra 14 thay vì 10
+    dan(2, kho);
+    expect(items.length).toBe(4);
+    expect(items[2].formulas?.quantity, "tham chiếu không dịch theo khối dán (Excel: =E4*2)").toBe("=E4*2");
+    expect(items[2].quantity).toBe(10);
+    expect(coWarn(items[2], "quantity")).toBe(false);
+  });
+
+  it("dán công thức dịch ra NGOÀI bảng (lên trên hàng 1): giữ công thức gốc, ô ĐỎ, không tính số từ hàng khác", () => {
+    const items = [mk({ name: "X", quantity: 5 }), mk({ name: "Y", quantity: 4 }), mk({ name: "Z", quantity: 6, formulas: { quantity: "=E2*2" } })];
+    moLuoi(items);
+    dan(0, chepHang(2, 2));
+    expect(items[0].formulas?.quantity).toBe("=E2*2");
+    expect(coWarn(items[0], "quantity"), "cờ #REF bị recomputeAll gỡ").toBe(true);
+    expect(coDo(0, "quantity"), "ô dịch ra ngoài bảng không tô đỏ").toBe(true);
+    expect(items[0].quantity, "công thức #REF vẫn lặng lẽ lấy SL của hàng Y").not.toBe(8);
+  });
+
+  it("xoá hàng bị trỏ tới: ô trỏ vào nó ĐỎ và KHÔNG lặng lẽ lấy SL của hàng kế bên", () => {
+    const items = [mk({ name: "A", quantity: 6 }), mk({ name: "B", quantity: 4 }), mk({ name: "C", quantity: 6, formulas: { quantity: "=E1" } })];
+    moLuoi(items);
+    act(() => { (hop!.querySelector('tr[data-row="0"] .rm-row') as HTMLButtonElement).click(); });
+    expect(items.map((x) => x.name)).toEqual(["B", "C"]);
+    expect(items[1].formulas?.quantity).toBe("=E1");
+    expect(coWarn(items[1], "quantity"), "cờ #REF của hàng xoá bị gỡ ngay").toBe(true);
+    expect(coDo(1, "quantity")).toBe(true);
+    expect(items[1].quantity, "C lặng lẽ lấy SL của B").toBe(6);
+  });
+
+  it("Ctrl+D chép công thức xuống làm tham chiếu vượt đáy bảng: ô đích ĐỎ", () => {
+    const items = [mk({ name: "A", quantity: 8, formulas: { quantity: "=E3*2" } }), mk({ name: "B", quantity: 1 }), mk({ name: "C", quantity: 4 })];
+    moLuoi(items);
+    act(() => { o(0, "quantity").focus(); });
+    phim(document.activeElement!, { key: "ArrowDown", shiftKey: true });
+    phim(document.activeElement!, { key: "d", ctrlKey: true });
+    expect(items[1].formulas?.quantity).toBe("=E3*2");
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    expect(coDo(1, "quantity"), "ô Ctrl+D ra ngoài bảng không tô đỏ").toBe(true);
+  });
+
+  it("dán khối Excel app xuất có '=Z99*2' (không dịch được): toast báo ô đỏ thì ô PHẢI đỏ", () => {
+    const items = [mk({ name: "Cũ" })];
+    moLuoi(items);
+    const tsv = [
+      "STT\tHạng Mục\tChi Tiết\tĐVT\tSố Lượng\tĐơn Giá\tThành Tiền\tGhi Chú",
+      "A\tNhóm 1\t\t\t1\t\t\t",
+      "1\tBanner\t\tm2\t2\t=Z99*2\t200.000\t",
+    ].join("\n");
+    act(() => { o(0, "name").focus(); });
+    act(() => { o(0, "name").dispatchEvent(suKienClip("paste", { "text/plain": tsv })); });
+    const hang = items.findIndex((x) => x.name === "Banner");
+    expect(hang).toBeGreaterThanOrEqual(0);
+    expect(items[hang].formulas?.unitPrice).toBe("=Z99*2");
+    expect(coWarn(items[hang], "unitPrice"), "cờ 'không dịch được' bị gỡ").toBe(true);
+    expect(coDo(hang, "unitPrice")).toBe(true);
+  });
+
+  it("sửa tay ô đỏ thành công thức đúng → hết đỏ (commitCell vẫn là nơi gỡ cờ)", () => {
+    const items = [mk({ name: "A", quantity: 6 }), mk({ name: "B", quantity: 4 }), mk({ name: "C", quantity: 6, formulas: { quantity: "=E1" } })];
+    moLuoi(items);
+    act(() => { (hop!.querySelector('tr[data-row="0"] .rm-row') as HTMLButtonElement).click(); });
+    const el = o(1, "quantity");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=E1*2"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    phim(el, { key: "Enter" });
+    expect(items[1].quantity).toBe(8);
+    expect(coWarn(items[1], "quantity")).toBe(false);
+    expect(coDo(1, "quantity")).toBe(false);
+  });
+});
