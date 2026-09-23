@@ -115,7 +115,9 @@ export function App() {
     <ErrorBoundary>
       {preview && (
         <div className="preview-banner">
-          <span>🔍 ĐANG XEM THỬ với quyền của <b>{preview.label}</b> — mọi thao tác chỉ chạy thử, <b>KHÔNG lưu thật</b>.</span>
+          {/* FE-15: menu/nút theo quyền xem thử, nhưng DỮ LIỆU vẫn do máy chủ trả theo phiên admin (vd quyền
+              chỉ-của-mình vẫn thấy mọi báo giá). Không nói ra thì admin kết luận sai "tài khoản này thấy gì". */}
+          <span>🔍 ĐANG XEM THỬ với quyền của <b>{preview.label}</b> — mọi thao tác chỉ chạy thử, <b>KHÔNG lưu thật</b>. Chỉ menu và nút theo quyền này; <b>dữ liệu hiển thị vẫn theo phạm vi của bạn (admin)</b>.</span>
           <button className="btn btn-sm" onClick={exitPreview}>✕ Thoát xem thử</button>
         </div>
       )}
