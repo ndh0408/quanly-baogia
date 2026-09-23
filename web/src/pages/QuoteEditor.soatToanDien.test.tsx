@@ -283,3 +283,40 @@ describe("L63 — chế độ Xem thử quyền không đọc / ghi / xoá bản
     expect(ui.confirmModal).toHaveBeenCalledWith("Có thay đổi chưa lưu từ lần trước", expect.any(String), expect.anything());
   });
 });
+
+// L64: onChange của ô Template null hoá `days` MỌI dòng ngay khi chọn mẫu không ngày; chọn lại mẫu có
+// ngày thì số Ngày đã mất, Thành tiền rơi từ 30 triệu về 10 triệu, lưới gắn lại nên Ctrl+Z không cứu.
+describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () => {
+  const chonMau = (id: number) => act(() => {
+    const sel = [...hop!.querySelectorAll(".sheet-meta label")].find((l) => l.textContent?.includes("Template"))!.querySelector("select") as HTMLSelectElement;
+    sel.value = String(id); sel.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const oNgay = () => hop!.querySelector('.editor tr[data-row="0"] [data-f="days"]') as HTMLInputElement | null;
+  const thanhTien = () => [...hop!.querySelectorAll(".sheet-total-box tr")].at(-1)!.textContent || "";
+
+  it("có ngày (10 × 3 ngày × 1.000.000) → không ngày → có ngày: vẫn 3 ngày, 30.000.000", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { templateId: 2, items: [{ kind: "item", name: "Sàn", unit: "m2", quantity: 10, days: 3, unitPrice: 1_000_000 }] })] }));
+    await moEditor();
+    expect(oNgay()!.value).toBe("3");
+    expect(thanhTien()).toContain("30.000.000");
+    chonMau(1);
+    await cho(10);
+    expect(oNgay()).toBeNull();                                     // mẫu không ngày: không có cột Ngày
+    expect(thanhTien()).toContain("10.000.000");                    // và tiền không nhân ngày
+    chonMau(2);
+    await cho(10);
+    expect(oNgay()!.value, "số Ngày bị xoá khi đổi mẫu qua lại").toBe("3");
+    expect(thanhTien()).toContain("30.000.000");
+  });
+
+  it("Lưu khi đang ở mẫu KHÔNG ngày vẫn gửi days: null (máy chủ không nhận số Ngày cũ)", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { templateId: 2, items: [{ kind: "item", name: "Sàn", unit: "m2", quantity: 10, days: 3, unitPrice: 1_000_000 }] })] }));
+    await moEditor();
+    chonMau(1);
+    await cho(10);
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { sheets: { templateId: number; items: { days: unknown }[] }[] };
+    expect(p.sheets[0].templateId).toBe(1);
+    expect(p.sheets[0].items[0].days).toBeNull();
+  });
+});

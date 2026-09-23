@@ -1094,7 +1094,12 @@ Lý do (không bắt buộc):`,
 
         <div className="sheet-meta" style={{ display: "flex", gap: 14, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 13 }}>Tên sheet: <input value={activeSheet.name || ""} disabled={!suaMain || saving} onChange={(e) => { activeSheet.name = e.target.value; mark(); redrawMeta(); }} style={{ padding: "6px 10px", border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "var(--surface)" }} /></label>
-          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => { activeSheet.templateId = Number(e.target.value); const t = templates.find((x) => x.id === activeSheet.templateId); if (!t?.layout?.hasDays) activeSheet.items.forEach((it) => { if (it.days != null) it.days = null; }); mark(); redraw(); }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label style={{ fontSize: 13 }}>Template: <select value={activeSheet.templateId} disabled={!suaMain || saving} onChange={(e) => {
+            // L64: KHÔNG null hoá `days` ở đây. Chọn nhầm mẫu không ngày rồi chọn lại là mất sạch số Ngày
+            // (lưới gắn lại theo mẫu nên Ctrl+Z không cứu). Mẫu không ngày thì tiền vốn không nhân ngày
+            // (lineAmount/sheetTotals theo `usesDays`) và save() đã tự gửi `days: null`.
+            activeSheet.templateId = Number(e.target.value); mark(); redraw();
+          }}>{templates.filter((t) => t.companyId === q.companyId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           {/* Nạp file Excel khách gửi lại — khỏi gõ tay/copy-paste; xem trước rồi mới nạp vào lưới. */}
           {suaMain && (
             <button type="button" className="btn btn-sm" title="Nạp hạng mục từ file Excel (bản khách đã sửa hoặc file ngoài)"
