@@ -3,6 +3,7 @@
 // LƯU Ý: thao tác res (setHeader/end/clearCookie) và session.destroy GIỮ trong route — đó là controller
 // HTTP, không phải logic thuần. Service chỉ trả DỮ LIỆU / thực thi transaction + audit. Mẫu theo customerService.ts.
 import type { Request } from "express";
+import bcrypt from "bcryptjs";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { httpError } from "../httpError.js";
@@ -317,7 +318,13 @@ export async function exportUser(userId: number, session?: Parameters<typeof quo
     ...(gioiHan ? { gioiHan } : {}),
     quotes: quotes.danhSach,
     customers: cKhach.rows,
-    auditEvents: cNhatKy.rows,
+    // Chốt kẹp phạm vi khách hàng phải phủ CẢ nhật ký (FILE-11): audit customer.create/update/delete
+    // lưu before/after là bản chụp ĐẦY ĐỦ hàng khách (tên, MST, email, SĐT, người liên hệ). Người đã bị
+    // gỡ quyền khách hàng (phamViKhach === null) vẫn nhận lại toàn bộ qua đây — đúng thứ khối `customers`
+    // ngay trên vừa chặn. Giữ hành động + thời điểm (đó là dữ liệu CỦA người yêu cầu), bỏ bản chụp.
+    auditEvents: phamViKhach === null
+      ? cNhatKy.rows.map((e: any) => (e?.resource === "customer" ? { ...e, before: undefined, after: undefined } : e))
+      : cNhatKy.rows,
     refreshTokens,
     notifications: cThongBao.rows,
   };
@@ -464,6 +471,18 @@ async function napBaoGiaCoTran(userId: number, phamViBaoGia: any) {
  */
 export async function deleteSelf(req: Request) {
   const id = (req.session as any).userId;
+  // XÁC THỰC LẠI + CHỐT QUẢN TRỊ VIÊN CUỐI (FILE-10). userService chặn khoá/hạ quyền admin cuối
+  // ("ràng buộc DUY NHẤT") nhưng đường tự xoá này đi vòng qua: admin duy nhất tự xoá — hoặc một phiên
+  // admin bị chiếm gọi hộ — là hệ thống không còn ai quản trị, phải sửa CSDL tay.
+  const u = await prisma.user.findUnique({ where: { id }, select: { role: true, active: true, passwordHash: true } });
+  if (!u) throw httpError(404, "Không tìm thấy tài khoản");
+  if (!(await bcrypt.compare(String((req.body as any)?.password ?? ""), u.passwordHash || ""))) {
+    throw httpError(401, "Mật khẩu không đúng");
+  }
+  if (u.role === "admin" && u.active) {
+    const adminKhac = await prisma.user.count({ where: { role: "admin", active: true, id: { not: id } } });
+    if (adminKhac === 0) throw httpError(400, "Không thể xoá quản trị viên cuối cùng. Hãy chỉ định một quản trị viên khác trước.");
+  }
   await xoaDanhTinh(id);
   await audit(req, "gdpr.delete.self", { resource: "user", resourceId: id, actorId: id });
 }
