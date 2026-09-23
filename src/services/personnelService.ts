@@ -103,9 +103,15 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  const [total, data, salaryRows] = await Promise.all([
+  // SẮP THEO LƯƠNG KHI ĐÃ MÃ HOÁ PII (DB-07, audit 2026-09-23): từ lúc PII_PLAINTEXT_CUTOVER bật, cột
+  // thô `salary` của hồ sơ ghi mới = NULL (giá trị thật ở `salaryEnc`), nên ORDER BY salary xếp các
+  // NULL thành một khối và thứ tự hiển thị không theo lương — sai mà không báo lỗi. Khi mã hoá bật,
+  // sắp trên giá trị ĐÃ GIẢI MÃ (tập id+lương vốn đã được nạp TOÀN BỘ để tính tổng bên dưới), rồi
+  // mới nạp đúng một trang theo thứ tự đó.
+  const sapLuongJs = sort === "salary" && isPiiEncryptionEnabled();
+  const [total, dataSql, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
-    prisma.personnelRecord.findMany({
+    sapLuongJs ? Promise.resolve([] as any[]) : prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
@@ -116,8 +122,25 @@ export async function listPersonnel(req: Request) {
     // SUM bỏ qua NULL theo ngữ nghĩa chuẩn → tổng lương/thuế TNCN thiếu dần theo thời gian, không ai
     // báo lỗi vì phép tính vẫn "chạy được", chỉ ra số sai. Chỉ SELECT 2 cột (không phải cả hồ sơ) nên
     // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
-    prisma.personnelRecord.findMany({ where, select: { salary: true, salaryEnc: true } }),
+    prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
+  let data = dataSql;
+  if (sapLuongJs) {
+    const luong = (r: any) => {
+      const v = decodePiiOnRead("PersonnelRecord", r as any)?.salary;
+      return v == null || v === "" ? null : Number(v);
+    };
+    const chieu = order === "asc" ? 1 : -1;
+    // NULL xếp CUỐI ở cả hai chiều; cùng lương thì theo id để phân trang TẤT ĐỊNH.
+    const idTrang = salaryRows
+      .map((r) => ({ id: r.id, l: luong(r) }))
+      .sort((a, b) => (a.l == null) !== (b.l == null) ? (a.l == null ? 1 : -1) : a.l !== b.l ? chieu * ((a.l as number) - (b.l as number)) : a.id - b.id)
+      .slice((page - 1) * size, page * size)
+      .map((x) => x.id);
+    const rows = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
+    const theoId = new Map(rows.map((r) => [r.id, r]));
+    data = idTrang.map((id) => theoId.get(id)).filter(Boolean) as typeof rows;
+  }
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
   // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
