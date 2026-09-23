@@ -1766,7 +1766,13 @@ export async function markConverted(req: Request) {
       where: { quoteId: id },
       select: { subtotal: true, custStatus: true },
     });
-    const convertedTotal = tinhConvertedTotal(trang, existing.vatPercent);
+    // VAT cũng phải đọc SAU khoá (soát chéo money#7): `existing` đọc ngoài transaction, và một lượt
+    // đổi RIÊNG VAT của updateQuote có thể commit đúng khe đó — lúc ấy báo giá chưa converted nên
+    // nó không tính convertedTotal, còn ở đây lại nhân VAT cũ. Cùng cách setSheetCustomerDecision
+    // và nhánh có sheets của updateQuote đọc lại VAT sau khoá. Chiều ngược lại đã an toàn: lượt đổi
+    // VAT đến sau phải chờ khoá này, rồi thấy converted và tự tính lại theo VAT mới.
+    const [vq] = await tx.$queryRaw<{ vatPercent: unknown }[]>`SELECT "vatPercent" FROM "Quote" WHERE id = ${id}`;
+    const convertedTotal = tinhConvertedTotal(trang, (vq?.vatPercent ?? existing.vatPercent) as any);
     // Optimistic guard: only convert if not already terminal — prevents a race with
     // a concurrent mark-lost / edit from producing a wrong terminal transition.
     const upd = await tx.quote.updateMany({
