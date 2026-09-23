@@ -217,17 +217,45 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateProfile(req)))
 );
 
+// TRẦN THỬ MẬT KHẨU CŨ, KHOÁ THEO TÀI KHOẢN (AUTH-03, audit 2026-09-23).
+//
+// /change-password so `oldPassword` bằng bcrypt mà trước đây không có trần nào ngoài apiLimiter
+// 120/phút/IP — tức một phiên bị bỏ quên trên máy dùng chung (hoặc một lỗ XSS) là một máy dò mật
+// khẩu cũ ~170.000 lần/ngày. Biết mật khẩu là leo từ "chiếm phiên tạm" lên "chiếm tài khoản lâu dài".
+//
+// CHỈ ĐẾM 401 (sai mật khẩu cũ): mật khẩu MỚI bị chính sách từ chối (400) là người dùng thật đang
+// gõ, không phải dò — đếm nó thì người chọn mật khẩu yếu vài lần là tự khoá mình.
+// KHÔNG dùng failedAttempts/lockedUntil: bộ đếm đó khoá cả đường /login, tức kẻ cầm phiên tự khoá
+// được chủ tài khoản ra ngoài.
+const changePasswordLimiter = createLimiter("change-pw", {
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req: Request) => `cpw:${req.session.userId}`,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: (_req: Request, res: Response) => res.statusCode !== 401,
+  message: { error: "Quá nhiều lần nhập sai mật khẩu cũ, thử lại sau 15 phút" },
+});
+
 router.post(
   "/change-password",
   requireAuth,
+  changePasswordLimiter,
   validate({ body: ChangePasswordSchema }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.changePassword(req)))
 );
 
 // === JWT API surface (for mobile / SDK / public API clients) ===
 
+// Cổng cờ JWT_API_ENABLED (AUTH-04). Đứng TRƯỚC limiter và validate: khi tắt, endpoint trông y như
+// không tồn tại (cùng thân 404 với notFound) thay vì trả 400/401 lộ ra rằng có một cửa đăng nhập thứ hai.
+function chiKhiBatJwt(_req: Request, res: Response, next: () => void) {
+  if (!config.JWT_API_ENABLED) return res.status(404).json({ error: "Không tìm thấy tài nguyên" });
+  next();
+}
+
 router.post(
   "/token",
+  chiKhiBatJwt,
   loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
@@ -262,6 +290,7 @@ router.post(
 
 router.post(
   "/token/refresh",
+  chiKhiBatJwt,
   tokenLimiter,
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req: Request, res: Response) => {

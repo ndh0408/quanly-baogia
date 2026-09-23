@@ -10,7 +10,10 @@
 // Phạm vi CỐ Ý hẹp — chỉ request xác thực bằng PHIÊN COOKIE. Đó đúng là tập request mà trình duyệt
 // tự đính kèm thông tin đăng nhập, tức tập bị CSRF. Client Bearer và request chưa đăng nhập không
 // bị ảnh hưởng (bộ test dưới chốt cả hai điều đó, để lần siết sau không lỡ tay chặn nhầm).
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+// Một phần bài này đo bề mặt Bearer JWT, mà từ AUTH-04 (2026-09-23) bề mặt đó MẶC ĐỊNH TẮT
+// (JWT_API_ENABLED). Bật cờ TRƯỚC khi config.ts được nạp — vi.hoisted chạy trước mọi import tĩnh.
+vi.hoisted(() => { process.env.JWT_API_ENABLED = "true"; });
 import request from "supertest";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/db.js";

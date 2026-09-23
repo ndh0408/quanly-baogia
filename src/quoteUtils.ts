@@ -144,6 +144,9 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  // Sửa giá SAU KHI CHỐT phải tính lại doanh thu chốt (MONEY-01) — cần biết cột đang null (chốt
+  // trước khi có cột, giữ hành vi COALESCE) hay đã có số.
+  convertedTotal: true,
   // Bảng Hà Nội cấp báo giá: đường lưu đọc bản CSDL để gác "giá HN đã chốt thì không ai ghi đè"
   // (xem chotHnTables trong quoteService). Cột này KHÔNG chứa ảnh nặng như QuoteItem.images —
   // ảnh chứng từ chỉ có khi kế toán tích thanh toán, và reconcileExtraPayments cần đúng bản CSDL đó.
@@ -154,6 +157,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
     select: {
       id: true, name: true, order: true, groupSubtotal: true, discount: true,
       invoiceNo: true,   // canEdit khoá theo HOÁ ĐƠN — thiếu cột này là khoá không bao giờ đóng
+      custStatus: true,  // nhánh chỉ-đổi-VAT tính lại doanh thu chốt trừ trang khách từ chối (MONEY-01)
       items: {
         orderBy: { order: "asc" },
         select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },

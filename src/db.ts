@@ -12,7 +12,8 @@ import { config } from "./config.js";
 //  • sau mỗi WRITE vào Quote/Customer/User → bắn SSE để client tự refresh list.
 // LƯU Ý: chuyển delete→update gọi `base.<model>.update()` (vì $extends không đổi được op qua query()).
 // AN TOÀN vì codebase KHÔNG soft-delete BÊN TRONG $transaction (đã kiểm: chỉ dùng prisma.x.delete
-// top-level). NẾU sau này cần soft-delete trong transaction → phải xử khác (dùng thư viện chuyên).
+// top-level). NẾU sau này cần soft-delete trong transaction → dùng `tx.<model>.update({ data: { deletedAt } })`.
+// Chốt bằng tests/db-mem-trong-transaction.test.js (cấm `tx.<model-mềm>.delete`).
 const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord", "Employee"]);
 const READS = new Set(["findUnique", "findFirst", "findMany", "findUniqueOrThrow", "findFirstOrThrow", "count", "aggregate", "groupBy"]);
 const RT_ENTITY: Record<string, string> = { Quote: "quote", Customer: "customer", User: "user" };
@@ -158,7 +159,9 @@ export const prisma = base.$extends({
           const aa = { ...a };
           delete aa.hardDelete; delete aa.includeDeleted;
           if (a.hardDelete === true) {
-            result = await (base as any)[lc(model)][operation](aa); // xoá thật
+            // Xoá thật: phép KHÔNG đổi nên chạy qua `query()` — giữ đúng ngữ cảnh transaction của
+            // người gọi (bản cũ gọi `base`, tức chạy ngoài tx và không rollback theo tx — DB-04/DB-06).
+            result = await query(aa); // xoá thật
           } else {
             action = operation === "delete" ? "update" : "updateMany";
             const data = { ...(aa.data || {}), deletedAt: new Date() };
@@ -170,9 +173,12 @@ export const prisma = base.$extends({
           delete aa.includeDeleted;
           const where = aa.where || {};
           if (where.deletedAt === undefined) aa.where = { ...where, deletedAt: null };
-          if (operation === "findUnique") result = await (base as any)[lc(model)].findFirst(aa);
-          else if (operation === "findUniqueOrThrow") result = await (base as any)[lc(model)].findFirstOrThrow(aa);
-          else result = await query(aa);
+          // findUnique GIỮ NGUYÊN là findUnique, chạy qua `query()` (DB-04, audit 2026-09-23). Bản cũ đổi
+          // sang `base.findFirst` — tức chạy trên client GỐC, NGOÀI interactive transaction: trong
+          // `prisma.$transaction(async tx => …)`, `tx.user.findUnique` không thấy hàng tx vừa tạo và không
+          // chờ khoá của tx. Prisma ≥5 nhận trường thường (deletedAt) cạnh khoá unique trong where của
+          // findUnique, nên không cần đổi phép nữa.
+          result = await query(aa);
         } else {
           // op khác: strip cờ điều khiển còn sót (chỉ cho model soft-delete, như bản cũ) rồi chạy.
           let aa = a;

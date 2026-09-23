@@ -14,7 +14,9 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 const CustomerCreate = z.object({
   code: z.string().max(40, "Mã khách hàng tối đa 40 ký tự").optional(),
   name: z.string().min(1, "Vui lòng nhập tên khách hàng").max(200, "Tên khách hàng tối đa 200 ký tự"),
-  taxCode: z.string().max(40).optional().nullable(),
+  // Chuỗi rỗng / toàn khoảng trắng = KHÔNG CÓ MST → null (DB-11). Lưu "" thì index unique một phần
+  // `WHERE taxCode IS NOT NULL` coi "" là một MST thật: khách thứ hai bỏ trống MST nhận 409 sai.
+  taxCode: z.string().trim().max(40).transform((v) => v || null).optional().nullable(),
   email: z.string().email("Email không hợp lệ").max(120, "Email tối đa 120 ký tự").optional().nullable().or(z.literal("").transform(() => null)),
   phone: z.string().max(40).optional().nullable(),
   address: z.string().max(500).optional().nullable(),

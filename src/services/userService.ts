@@ -13,7 +13,7 @@ import { revokeSession, refreshSession } from "../sse.js";
 import { revokeAllForUser } from "../jwt.js";
 import { destroyAllSessions } from "../sessions.js";
 import { httpError } from "../httpError.js";
-import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, permissionsForUser } from "../permissions.js";
+import { PERMISSIONS, ADMIN_ONLY_PERMISSIONS, KHONG_CO_QUYEN, permissionsForUser } from "../permissions.js";
 import { thoatLike } from "../authCore.js";
 
 /**
@@ -213,6 +213,10 @@ export async function createUser(req: Request) {
     data: {
       username,
       passwordHash: await bcrypt.hash(password, config.BCRYPT_COST),
+      // Admin đặt mật khẩu THẬT cho tài khoản này — đóng mốc như mọi đường đặt mật khẩu khác. Thiếu
+      // mốc thì tài khoản rơi vào nhóm `passwordChangedAt IS NULL`, nhóm mà sendPasswordReset từng
+      // hiểu là "chưa từng kích hoạt" (AUTH-01). Hàng MỚI nên không có phiên cũ nào bị đá.
+      passwordChangedAt: new Date(),
       displayName,
       role,
       phone: phone || null,
@@ -257,6 +261,13 @@ export async function updateUser(req: Request) {
     // Admin đặt lại mật khẩu = đổi thông tin xác thực → đóng mốc để MỌI phiên và access token cũ
     // của tài khoản đó chết ngay, không phụ thuộc việc xoá hàng trong kho phiên có thành công không.
     data.passwordChangedAt = new Date();
+    // Đốt token đặt-lại đang sống (AUTH-06) — cùng lý do như changePassword. CHỈ với tài khoản ĐÃ
+    // kích hoạt: tài khoản chưa kích hoạt mà mất token là mất nút "Gửi lại lời mời" (listUsers tính
+    // `pending` theo inviteTokenHash) và thành hàng kẹt.
+    if (before.active) {
+      data.inviteTokenHash = null;
+      data.inviteExpiresAt = null;
+    }
   }
   // ── ĐỔI EMAIL: CHỐT CHỐNG TRÙNG, VÀ MỘT LỆNH ĐỐT CHỨNG THƯ ─────────────────────────────────
   //
@@ -287,8 +298,8 @@ export async function updateUser(req: Request) {
   //
   // Ô Email trong modal "Sửa" NẠP SẴN giá trị đang có, nên theo luật của repo bỏ trống PHẢI là xoá
   // thật — giữ luật ngược lại ở đây là "lưu mà không ăn". Nhưng xoá email KHÔNG vô hại như xoá chức
-  // danh: nó làm CHẾT ÂM THẦM ba đường (gửi lại lời mời → 400, thư đặt lại mật khẩu → `findLoginUser`
-  // không khớp rồi `return` im lặng sau khi endpoint đã trả 200, thông báo qua thư → bỏ qua không
+  // danh: nó làm CHẾT ÂM THẦM ba đường (gửi lại lời mời → 400, thư đặt lại mật khẩu → sendPasswordReset
+  // bỏ tài khoản không có email (AUTH-05) sau khi endpoint đã trả 200, thông báo qua thư → bỏ qua không
   // một dòng log). Nên quyết định được chọn TƯỜNG MINH thay vì để rơi vào mặc định:
   //
   //   · tài khoản ĐÃ kích hoạt → CHO xoá. Họ vẫn đăng nhập bằng `username` (và với mọi tài khoản mời
@@ -329,10 +340,19 @@ export async function updateUser(req: Request) {
     data.inviteExpiresAt = null;
   }
   // Tích quyền per-user: lọc về quyền hợp lệ + bỏ nhóm admin-tier (chống leo thang). [] = về mặc định theo role.
-  if (data.permissions !== undefined) {
+  if (data.permissions === null) {
+    // BỎ TUỲ BIẾN → quay về bộ mặc định của vai trò. Không đụng canSign: đó là cờ riêng.
+    data.permissions = [];
+  } else if (data.permissions !== undefined) {
     data.permissions = sanitizePerms(data.permissions);
     // "Ký chứng từ" giờ là ô trong ma trận (quote:sign:own) → đồng bộ cờ canSign cũ cho khớp (legacy reads).
     if (data.canSign === undefined) data.canSign = data.permissions.includes(PERMISSIONS.QUOTE_SIGN_OWN);
+    // BỎ TÍCH HẾT = TƯỚC HẾT QUYỀN, không phải "về mặc định" (RBAC-01). Lưu `[]` thì resolveUserPermissions
+    // trả lại nguyên bộ quyền của vai trò — admin bấm "Đã lưu" mà người kia vẫn đọc được danh bạ,
+    // khách hàng, báo giá của mình. Ca này gồm cả khi admin chỉ tích quyền ADMIN_ONLY (bị lọc về rỗng).
+    // Vai trò admin thì bỏ qua: admin luôn full quyền, và giao diện gửi `[]` khi bật cờ Quản trị.
+    const roleSau = rest.role ?? before.role;
+    if (data.permissions.length === 0 && roleSau !== "admin") data.permissions = [KHONG_CO_QUYEN];
   }
   // Deactivating an account must also burn any live invite/reset token —
   // otherwise the locked-out user could re-activate themselves through the

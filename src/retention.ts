@@ -27,6 +27,8 @@ const VERSION_KEEP = config.RETAIN_VERSION_KEEP;   // giữ N bản mới nhất
 // Dọn file xuất trong kho object: TẮT MẶC ĐỊNH (0 = tắt). Xem khối chú thích ở chỗ dùng bên dưới —
 // đây là thao tác XOÁ VĨNH VIỄN dữ liệu production và nó còn làm hỏng một cổng kiểm sao lưu.
 const EXPORT_DAYS = config.RETAIN_EXPORT_DAYS;
+const NOTIF_DAYS = config.RETAIN_NOTIF_DAYS;       // thông báo ĐÃ ĐỌC
+const REFRESH_EXPIRED_DAYS = 30;                   // refresh token đã hết hạn quá N ngày
 
 // Trần MỖI LƯỢT cho nhánh dọn object. Vì sao phải có: prune chạy trong tiến trình worker, nạp cả
 // bảng vào mảng rồi bắn từng lệnh S3 tuần tự là tự tay làm cạn RAM + giữ khoá job quá hạn.
@@ -88,10 +90,36 @@ async function xoaTheoLo(bang: "AuditEvent" | "LoginAttempt" | "WebhookDelivery"
   }
 }
 
+/** Như xoaTheoLo nhưng điều kiện do chính file này viết (hằng chuỗi, không đầu vào người dùng). */
+async function xoaTheoLoDieuKien(bang: "Notification" | "RefreshToken", dieuKien: string, cutoff: Date) {
+  let tong = 0;
+  for (;;) {
+    const n = await prisma.$executeRawUnsafe(
+      `DELETE FROM "${bang}" WHERE id IN (SELECT id FROM "${bang}" WHERE ${dieuKien} LIMIT ${PRUNE_BATCH})`,
+      cutoff
+    );
+    tong += n;
+    if (n < PRUNE_BATCH) return tong;
+  }
+}
+
+/**
+ * Notification và RefreshToken từng KHÔNG có nhánh dọn nào — hai bảng chỉ lớn lên (DB-09).
+ * Thông báo: chỉ xoá hàng ĐÃ ĐỌC (chưa đọc là việc người dùng còn phải làm). Refresh token: hàng đã
+ * hết hạn thì vô dụng cho xác thực; giữ thêm 30 ngày để còn tra "họ" token khi điều tra sự cố.
+ * Export riêng để kiểm được mà không chạy cả lượt prune toàn cục.
+ */
+export async function donThongBaoVaRefreshToken() {
+  const notif = await xoaTheoLoDieuKien("Notification", `"readAt" IS NOT NULL AND "createdAt" < $1`, days(NOTIF_DAYS));
+  const refresh = await xoaTheoLoDieuKien("RefreshToken", `"expiresAt" < $1`, days(REFRESH_EXPIRED_DAYS));
+  return { notif, refresh };
+}
+
 export async function pruneOldRecords() {
   const audit = { count: await xoaTheoLo("AuditEvent", days(AUDIT_DAYS)) };
   const login = { count: await xoaTheoLo("LoginAttempt", days(LOGIN_DAYS)) };
   const webhook = { count: await xoaTheoLo("WebhookDelivery", days(WEBHOOK_DAYS)) };
+  const { notif, refresh } = await donThongBaoVaRefreshToken();
   // QuoteVersion: giữ VERSION_KEEP bản MỚI NHẤT mỗi quote, xoá bản cũ hơn (raw — keep-top-N theo partition).
   const ver = await prisma.$executeRawUnsafe(
     `DELETE FROM "QuoteVersion" WHERE id IN (
@@ -202,7 +230,7 @@ export async function pruneOldRecords() {
       removed[where.status] = del.count;
     }
   }
-  const result = { audit: audit.count, login: login.count, webhook: webhook.count, quoteVersion: ver, staleUploads: removed.pending, rejectedUploads: removed.rejected, exports: exportsPruned, staleObjects };
+  const result = { audit: audit.count, login: login.count, webhook: webhook.count, notification: notif, refreshToken: refresh, quoteVersion: ver, staleUploads: removed.pending, rejectedUploads: removed.rejected, exports: exportsPruned, staleObjects };
   logger.info(result, "retention prune done");
   return result;
 }

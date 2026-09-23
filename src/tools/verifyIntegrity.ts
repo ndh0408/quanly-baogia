@@ -21,6 +21,8 @@
 //
 // Thoát 0 = đạt. Thoát 1 = có thứ không khôi phục được.
 // KHÔNG in ra giá trị PII nào — chỉ đếm.
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { prisma } from "../db.js";
 import { PII_FIELDS } from "../piiFields.js";
 import { moTheoKhoa, dangXoayKhoa, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
@@ -103,8 +105,11 @@ async function kiemPii(): Promise<Ket> {
   };
 }
 
-/** Tải object chứng từ về và đối chiếu SHA-256 với hash lưu trong CSDL. */
-async function kiemChungTu(): Promise<Ket> {
+/**
+ * Tải object chứng từ về và đối chiếu SHA-256 với hash lưu trong CSDL.
+ * `chiId` chỉ để bài kiểm khoanh đúng hàng của nó; diễn tập khôi phục gọi không tham số.
+ */
+export async function kiemChungTu({ chiId }: { chiId?: number[] } = {}): Promise<Ket> {
   if (!isStorageEnabled()) {
     return {
       ten: "Chứng từ",
@@ -113,10 +118,15 @@ async function kiemChungTu(): Promise<Ket> {
     };
   }
 
+  // KỂ CẢ HỒ SƠ ĐÃ XOÁ MỀM (DB-13, audit 2026-09-23) — cùng lý lẽ phần PII ở trên đã dùng
+  // includeDeleted: hàng xoá mềm vẫn là dữ liệu có thể phải khôi phục, và chứng từ của nó vẫn phải
+  // còn nguyên trong kho. Bản trước lọc `deletedAt: null` nên object của hồ sơ xoá mềm không bao giờ
+  // được đối chiếu.
   const rows = await prisma.personnelRecord.findMany({
-    where: { paymentProofKey: { not: null }, deletedAt: null },
+    where: { paymentProofKey: { not: null }, ...(chiId ? { id: { in: chiId } } : {}) },
     select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true },
-  });
+    includeDeleted: true,
+  } as never) as unknown as { id: number; paymentProof: string | null; paymentProofKey: string | null; paymentProofSha256: string | null }[];
 
   let ok = 0, missing = 0, hashMismatch = 0, noHash = 0;
   for (const r of rows) {
@@ -141,6 +151,12 @@ async function kiemChungTu(): Promise<Ket> {
   };
 }
 
+// CHỈ chạy như CLI khi được gọi trực tiếp (node dist/tools/verifyIntegrity.js) — để bài kiểm import
+// được kiemChungTu mà không kích process.exit.
+const laCli = !!process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (laCli) await chayCli();
+
+async function chayCli() {
 const args = process.argv.slice(2);
 const chiPii = args.includes("--pii");
 const chiProof = args.includes("--proof");
@@ -156,3 +172,4 @@ for (const k of ketQua) {
 
 await prisma.$disconnect().catch(() => {});
 process.exit(ketQua.every((k) => k.dat) ? 0 : 1);
+}

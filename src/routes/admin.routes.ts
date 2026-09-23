@@ -109,7 +109,10 @@ router.get("/stats", asyncHandler(async (req: Request, res: Response) => res.jso
 /** Hard-delete soft-deleted rows older than N days. */
 router.post(
   "/purge-soft-deleted",
-  validate({ body: z.object({ days: z.coerce.number().int().min(0).max(3650).default(30) }).default({} as any) }),
+  // TỐI THIỂU 30 NGÀY (DB-06): `days: 0` từng xoá cứng NGAY mọi báo giá vừa xoá mềm — kèm số hoá đơn,
+  // ngày thanh toán, lịch sử phiên bản — không có đường khôi phục, trong khi bản dump cục bộ chỉ giữ
+  // 14 ngày. Xoá mềm tồn tại chính là để còn "lấy lại"; cửa sổ đó phải dài hơn vòng đời bản dump.
+  validate({ body: z.object({ days: z.coerce.number().int().min(30, "Tối thiểu 30 ngày").max(3650).default(90) }).default({} as any) }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.purgeSoftDeleted(req)))
 );
 

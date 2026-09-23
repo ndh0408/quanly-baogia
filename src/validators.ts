@@ -244,7 +244,9 @@ export const UserUpdateSchema = z.object({
   password: pwd.optional(),
   projectCode,
   canSign: zbool.optional(),
-  permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user (tập đầy đủ; [] = theo role)
+  // Tích quyền per-user (tập đầy đủ). `[]` = KHÔNG CÒN QUYỀN NÀO (RBAC-01); `null` = bỏ tuỳ biến,
+  // quay về bộ mặc định của vai trò. Hai ý khác nhau nên phải có hai cách nói.
+  permissions: z.array(z.string().max(60)).max(100).nullable().optional(),
 });
 
 // POST /api/auth/profile — trang "Tài khoản" tự sửa hồ sơ của CHÍNH MÌNH.
@@ -294,7 +296,7 @@ const itemSchema = z.object({
   quantity: z.coerce.number({ error: "Số lượng phải là số" }).gte(-1e12, "Số lượng không hợp lệ").lte(1e12, "Số lượng không hợp lệ").default(0),
   quantityExact: z.boolean().optional().default(false),
   unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
-  days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").optional().nullable(),
+  days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").max(9_999_999, "Số ngày quá lớn").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   internalNote: z.string().max(2000).optional().nullable(),   // ghi chú nội bộ — KHÔNG xuất Excel
   // Raw Excel-style formulas per numeric field (editor metadata only, e.g.

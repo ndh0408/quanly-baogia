@@ -16,6 +16,9 @@
  * vitest song song sẽ gây 429 GIẢ) — nên KHÔNG thể khẳng định 429 thật của production từ đây.
  */
 import { describe, it, expect, beforeAll, vi } from "vitest";
+// Bài này đo bề mặt Bearer JWT, mà từ AUTH-04 (2026-09-23) bề mặt đó MẶC ĐỊNH TẮT (JWT_API_ENABLED).
+// Bật cờ TRƯỚC khi config.ts được nạp — vi.hoisted chạy trước mọi import tĩnh.
+vi.hoisted(() => { process.env.JWT_API_ENABLED = "true"; });
 import express from "express";
 import request from "supertest";
 import realRateLimit from "express-rate-limit";

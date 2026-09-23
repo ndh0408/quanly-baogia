@@ -329,6 +329,14 @@ describe.runIf(dbAvailable)("Phần Hà Nội ở cấp báo giá — không l�
     // Các bài phía trên có đổi hnStatus (approved → null) để đo chốt khác — đưa về "assigned" cho
     // đúng tiền đề của bài này thay vì phụ thuộc thứ tự chạy.
     await prisma.quote.update({ where: { id: quoteId }, data: { hnStatus: "assigned", hnAssigneeId: hnU.id, status: "draft" } });
+    // Bài "tab cũ" phía trên THAY danh sách thành viên bằng [phuU] — tức đã GỠ account HN khỏi báo
+    // giá. Từ RBAC-08 (2026-09-23) người bị gỡ không còn lưu/gửi duyệt phần HN được, nên tiền đề
+    // "account HN đang được giao" phải khôi phục CẢ tư cách thành viên, không chỉ hnAssigneeId.
+    await prisma.quoteMember.upsert({
+      where: { quoteId_userId: { quoteId, userId: hnU.id } },
+      create: { quoteId, userId: hnU.id, scopes: ["hanoi"] },
+      update: { scopes: ["hanoi"] },
+    });
     const hn = await dangNhap(hnU);
     expect((await hn.post(`/api/quotes/${quoteId}/hn/submit`)).status).toBe(200);
 

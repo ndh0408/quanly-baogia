@@ -396,7 +396,9 @@ export function createApp() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const coBearer = /^Bearer\s+\S/i.test(req.headers.authorization || "");
     const coCookiePhien = COOKIE_PHIEN.test(req.headers.cookie || "");
-    if (coBearer && !coCookiePhien) return next();
+    // Chỉ khi bề mặt JWT BẬT (AUTH-04): tắt thì bearerAuth không xác thực gì, nên request Bearer
+    // phải đi đường phiên như mọi request khác thay vì lọt vào một nhánh không ai gác.
+    if (config.JWT_API_ENABLED && coBearer && !coCookiePhien) return next();
     return sessionMiddleware(req, res, next);
   });
 
@@ -484,6 +486,11 @@ export function createApp() {
   app.get("/api/csrf-token", (req, res) => {
     if (!req.session) return res.status(500).json({ error: "Phiên chưa sẵn sàng" });
     const token = issueCsrfToken(req);
+    // PHIÊN ẨN DANH SỐNG 1 GIỜ, không phải 7 ngày (AUTH-07). Ghi csrfSecret là tạo một hàng
+    // user_sessions; với maxAge 7 ngày chung, một vòng lặp gọi endpoint này không cookie đẻ ra hàng
+    // sống cả tuần (prune chỉ dọn hàng hết hạn). Đăng nhập gọi regenerate() nên phiên đăng nhập nhận
+    // cookie MỚI theo cấu hình 7 ngày — không bị ảnh hưởng.
+    if (!req.session.userId) req.session.cookie.maxAge = 60 * 60 * 1000;
     // Không được để proxy/CDN cache — mỗi phiên một mã khác nhau.
     res.setHeader("Cache-Control", "no-store, private, max-age=0");
     res.json({ token });

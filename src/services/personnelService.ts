@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
-import { buildProjectRef, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
+import { buildProjectRef, nguoiTaoCuaMaSanXuat, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
@@ -103,9 +103,15 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  const [total, data, salaryRows] = await Promise.all([
+  // SẮP THEO LƯƠNG KHI ĐÃ MÃ HOÁ PII (DB-07, audit 2026-09-23): từ lúc PII_PLAINTEXT_CUTOVER bật, cột
+  // thô `salary` của hồ sơ ghi mới = NULL (giá trị thật ở `salaryEnc`), nên ORDER BY salary xếp các
+  // NULL thành một khối và thứ tự hiển thị không theo lương — sai mà không báo lỗi. Khi mã hoá bật,
+  // sắp trên giá trị ĐÃ GIẢI MÃ (tập id+lương vốn đã được nạp TOÀN BỘ để tính tổng bên dưới), rồi
+  // mới nạp đúng một trang theo thứ tự đó.
+  const sapLuongJs = sort === "salary" && isPiiEncryptionEnabled();
+  const [total, dataSql, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
-    prisma.personnelRecord.findMany({
+    sapLuongJs ? Promise.resolve([] as any[]) : prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
@@ -116,8 +122,25 @@ export async function listPersonnel(req: Request) {
     // SUM bỏ qua NULL theo ngữ nghĩa chuẩn → tổng lương/thuế TNCN thiếu dần theo thời gian, không ai
     // báo lỗi vì phép tính vẫn "chạy được", chỉ ra số sai. Chỉ SELECT 2 cột (không phải cả hồ sơ) nên
     // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
-    prisma.personnelRecord.findMany({ where, select: { salary: true, salaryEnc: true } }),
+    prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
+  let data = dataSql;
+  if (sapLuongJs) {
+    const luong = (r: any) => {
+      const v = decodePiiOnRead("PersonnelRecord", r as any)?.salary;
+      return v == null || v === "" ? null : Number(v);
+    };
+    const chieu = order === "asc" ? 1 : -1;
+    // NULL xếp CUỐI ở cả hai chiều; cùng lương thì theo id để phân trang TẤT ĐỊNH.
+    const idTrang = salaryRows
+      .map((r) => ({ id: r.id, l: luong(r) }))
+      .sort((a, b) => (a.l == null) !== (b.l == null) ? (a.l == null ? 1 : -1) : a.l !== b.l ? chieu * ((a.l as number) - (b.l as number)) : a.id - b.id)
+      .slice((page - 1) * size, page * size)
+      .map((x) => x.id);
+    const rows = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
+    const theoId = new Map(rows.map((r) => [r.id, r]));
+    data = idTrang.map((id) => theoId.get(id)).filter(Boolean) as typeof rows;
+  }
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
   // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
@@ -135,17 +158,23 @@ export async function listPersonnel(req: Request) {
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
 // Account / CTY. Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
 // người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
+/** Trần số báo giá của ô chọn dự án (DB-12). */
+export const TRAN_CHON_DU_AN = 300;
+
 export async function listProjects(req: Request) {
   const { q } = req.query as any;
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;   // Account: chỉ dự án của mình
+  // + cột searchText đã chuẩn hoá của Quote (có GIN trgm) để gõ KHÔNG DẤU vẫn ra tên dự án (DB-08);
+  // giữ các vế ILIKE cũ để không mất kết quả nào (vd mã sản xuất có hậu tố).
   if (q) where.OR = [
+    { searchText: searchTextFilter(q) },
     { title: { contains: q, mode: "insensitive" } },
     { projectCode: { contains: q, mode: "insensitive" } },
     { quoteNumber: { contains: q, mode: "insensitive" } },
   ];
   const quotes = await prisma.quote.findMany({
-    where, take: 300, orderBy: { createdAt: "desc" },
+    where, take: TRAN_CHON_DU_AN, orderBy: { createdAt: "desc" },
     select: {
       quoteNumber: true, projectCode: true, projectVersion: true, title: true,
       company: { select: { name: true } },
@@ -166,10 +195,32 @@ export async function listProjects(req: Request) {
       });
     });
   }
-  return { data };
+  // Chạm trần thì dự án cũ hơn không có trong ô chọn — báo để giao diện nhắc gõ thêm từ khoá (DB-12).
+  return { data, truncated: quotes.length >= TRAN_CHON_DU_AN };
+}
+
+/**
+ * MÃ DỰ ÁN GHI VÀO HỒ SƠ PHẢI THUỘC PHẠM VI NGƯỜI GHI (RBAC-03, audit 2026-09-23).
+ *
+ * Picker ở GET /api/personnel/projects chỉ đưa ra dự án CỦA MÌNH cho người không có read:all, nhưng
+ * đường ghi nhận `projectCode` tuỳ ý — và phản hồi được `decorate` bằng buildProjectRef (không lọc
+ * người dùng): số HĐ bán, PO, ngày ký, tiền trước thuế của DỰ ÁN NGƯỜI KHÁC. Mã sản xuất đoán được
+ * (FE_A26_001, GN26050…), nên manager chỉ có quote:read:own vẫn đọc ngang doanh số của Account khác.
+ *
+ * Luật đúng bằng picker: người có personnel:read:all ghi mã nào cũng được; người khác chỉ bị chặn khi
+ * mã trỏ vào dự án đã chốt của NGƯỜI KHÁC mà không trỏ vào dự án nào của chính mình. Mã không khớp
+ * dự án nào (nhập tay tự do) vẫn cho — buildProjectRef không trả gì cho mã đó nên không có gì để lộ.
+ */
+async function assertProjectCodeInScope(req: Request, code: unknown) {
+  if (typeof code !== "string" || !code.trim() || can(req.session, P.PERSONNEL_READ_ALL)) return;
+  const chu = await nguoiTaoCuaMaSanXuat(code);
+  if (chu.length && !chu.includes(Number(req.session.userId))) {
+    throw httpError(403, "Mã dự án không thuộc dự án của bạn");
+  }
 }
 
 export async function createPersonnel(req: Request) {
+  await assertProjectCodeInScope(req, req.body.projectCode);
   const rec = await prisma.personnelRecord.create({
     data: encodePiiForWrite("PersonnelRecord", { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) }) as any,   // người tạo = chủ sở hữu
     include: ownerSelect,
@@ -189,12 +240,23 @@ export async function getPersonnel(req: Request) {
 
 export async function updatePersonnel(req: Request) {
   const before = await loadAuthorized(req, "edit");   // hr/accountant không có edit → 403
-  // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
-  const merged = { ...before, ...req.body };
-  const rec = await prisma.personnelRecord.update({
-    where: { id: (req.params as any).id },
-    data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
-    include: ownerSelect,
+  // Chỉ kiểm khi mã ĐỔI: hồ sơ cũ đã mang sẵn mã (ghi trước bản vá) vẫn sửa được các trường khác.
+  if (req.body.projectCode !== undefined && req.body.projectCode !== before.projectCode) {
+    await assertProjectCodeInScope(req, req.body.projectCode);
+  }
+  // searchText tính trên giá trị SẼ ghi (merge bản TƯƠI + body) → update phần lẻ không làm stale index.
+  // Bản tươi đọc TRONG transaction sau khi khoá hàng (DB-10): hai lượt sửa song song khác trường không
+  // còn làm cột tìm kiếm thiếu thay đổi của lượt kia. PII giải mã trước khi ghép (bản thô có thể NULL).
+  const id = Number((req.params as any).id);
+  const rec = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PersonnelRecord" WHERE id = ${id} FOR UPDATE`;
+    const tuoi = await tx.personnelRecord.findFirst({ where: { id }, omit: { paymentProof: true } });
+    const merged = { ...(decodePiiOnRead("PersonnelRecord", (tuoi ?? before) as any) as any), ...req.body };
+    return tx.personnelRecord.update({
+      where: { id },
+      data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
+      include: ownerSelect,
+    });
   });
   await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);

@@ -123,6 +123,16 @@ export function assertTotalsStorable(
   t: { subtotal: Prisma.Decimal; vat: Prisma.Decimal; total: Prisma.Decimal; sheetTotals: { subtotal: Prisma.Decimal }[] },
   sheets?: ({ name?: string | null } | null)[] | null
 ) {
+  // TRẦN ĐỘ LỚN (MONEY-02): cột tiền là Decimal(18,2) → < 1e16. Validator cho SL/đơn giá tới 1e12
+  // nên tích của chúng vượt cột được; trước đây đó là lỗi numeric overflow của Postgres → 500, mất
+  // trắng lần Lưu. Chặn ở 1e15 (một bậc dưới trần cột) và nói rõ bằng 400.
+  const TRAN = new Decimal("1e15");
+  if (t.total.abs().gte(TRAN) || t.subtotal.abs().gte(TRAN) || t.sheetTotals.some((s) => s.subtotal.abs().gte(TRAN))) {
+    throw Object.assign(
+      new Error("Không lưu được: tổng tiền vượt giới hạn lưu trữ (từ 1.000.000.000.000.000 đ trở lên). Kiểm tra lại Số Lượng / Đơn Giá / Số Ngày."),
+      { status: 400, code: "quote_total_overflow" }
+    );
+  }
   if (t.subtotal.gte(0) && t.vat.gte(0) && t.total.gte(0)) return;
 
   const badSheets = t.sheetTotals
@@ -164,4 +174,60 @@ export function totalsToJson(t: {
       subtotal: s.subtotal.toNumber(),
     })),
   };
+}
+
+/**
+ * CHUẨN HOÁ PAYLOAD VỀ ĐÚNG THANG CỘT CSDL TRƯỚC KHI TÍNH VÀ GHI (MONEY-02, audit 2026-09-23).
+ *
+ * Ô lưới bắt đầu bằng "=" lưu KẾT QUẢ FLOAT nguyên văn (=10/3 → 3.3333333333333335). Trước bản vá,
+ * tổng LƯU (Quote.total, QuoteSheet.subtotal — nguồn của danh sách, trang Dự án/Hoá đơn, KPI) được
+ * tính trên số thô đó, còn Postgres làm tròn từng cột lúc ghi (quantity/unitPrice Decimal(18,4), days
+ * Decimal(10,2)) — và màn chi tiết, Excel, PDF tính lại TỪ HÀNG CSDL. Đo được: ngày =10/3 × 1.000.000,
+ * VAT 8% → tổng lưu 3.600.000, tổng đọc lại 3.596.400. SL 1,04996 còn bị làm tròn KÉP (CSDL 1,0500
+ * → computeQuoteTotals làm tròn 1 số → 1,1).
+ *
+ * Làm tròn Decimal ROUND_HALF_UP (xa 0) — cùng quy tắc với numeric của Postgres — nên sau bước này
+ * số đem tính BẰNG ĐÚNG số sẽ nằm trong CSDL, và tổng lưu = tổng đọc lại. Giữ kiểu number cho mã
+ * phía sau (đầu vào vốn đã là number sau zod, nên không mất gì thêm).
+ */
+export function chuanHoaTheoCot(sheets: unknown) {
+  if (!Array.isArray(sheets)) return;
+  const lam = (v: unknown, soLe: number) => Number(D(v as Prisma.Decimal.Value).toDecimalPlaces(soLe, Decimal.ROUND_HALF_UP).toString());
+  for (const s of sheets as any[]) {
+    for (const it of (s?.items || []) as any[]) {
+      if (!it) continue;
+      if (it.quantity != null && it.quantity !== "") it.quantity = lam(it.quantity, 4);
+      if (it.unitPrice != null && it.unitPrice !== "") it.unitPrice = lam(it.unitPrice, 4);
+      if (it.days != null && it.days !== "") it.days = lam(it.days, 2);
+    }
+  }
+}
+
+/** VAT% về đúng thang cột `Quote.vatPercent` Decimal(5,2) — cùng lý do như chuanHoaTheoCot. */
+export const chuanHoaVat = (v: Prisma.Decimal.Value | null | undefined) => D(v).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+
+/**
+ * DOANH THU GHI NHẬN KHI ĐÃ CHỐT (`Quote.convertedTotal`) = (Σ subtotal các trang KHÁCH KHÔNG TỪ
+ * CHỐI, kẹp ≥ 0) + VAT trên số đó. Trang `custStatus` null (chưa có ý kiến) VẪN tính.
+ *
+ * MỘT hàm cho mọi đường ghi cột này — markConverted, updateQuote (sửa giá sau khi chốt) và
+ * setSheetCustomerDecision (khách đổi ý một trang sau khi chốt) — để ba chỗ không tính ba kiểu
+ * (MONEY-01/RBAC-05, audit 2026-09-23). Làm tròn Decimal ROUND_HALF_UP, VAT làm tròn RIÊNG rồi mới
+ * cộng — đúng thứ tự của computeQuoteTotals, nên khi không trang nào bị từ chối thì kết quả BẰNG
+ * `total`. Bản trước ở markConverted dùng Math.round trên float.
+ *
+ * KẸP ≥ 0: trang giảm trừ có subtotal âm, còn trang dương bị khách từ chối → net âm, mà doanh thu
+ * chốt âm là vô nghĩa (và cột có CHECK ≥ 0 từ migration 20260923092000).
+ */
+export function tinhConvertedTotal(
+  trang: { subtotal: Prisma.Decimal.Value | null | undefined; custStatus?: string | null }[],
+  vatPercent: Prisma.Decimal.Value | null | undefined
+) {
+  const net = trang
+    .filter((t) => t.custStatus !== "rejected")
+    .reduce((a, t) => a.plus(D(t.subtotal)), new Decimal(0))
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const netKep = Decimal.max(0, net);
+  const vat = netKep.times(D(vatPercent)).dividedBy(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  return netKep.plus(vat);
 }
