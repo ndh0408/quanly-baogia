@@ -136,6 +136,10 @@ Mỗi lượt (số bước khớp comment `[n/6]` in ra khi chạy):
 - **[3b/6]** Gắn tag bất biến `<tên>:<git-sha>` cho ảnh vừa lấy
 - **[3c/6]** Soát migration HUỶ đang chờ (DROP TABLE/COLUMN, RENAME, đổi kiểu cột) — `prod` dừng trừ
   khi `CHO_PHEP_MIGRATION_HUY=1`; xem mục "Lùi schema"
+- **[3d/6]** Kéo ảnh phụ thuộc còn thiếu (`compose pull --policy missing postgres redis minio`) — hỏng
+  thì dừng với thông báo riêng (migration CHƯA chạy). Lượt deploy đầu tiên sau DEP-01 (minio đổi sang
+  `quay.io/minio/minio@sha256:…`) cần VM kéo được từ quay.io, và `quanly-minio` sẽ bị dừng rồi dựng lại
+  ngay ở bước 4 (vài giây app cũ không đọc/ghi được chứng từ)
 - **[4/6]** **`prisma migrate deploy`** (`docker compose run --rm app …`) — hỏng ở đây thì
   `set -e` dừng deploy, app cũ vẫn chạy
 - **[5/6]** Recreate `app` + `worker` bằng `--force-recreate`, ghi `DEPLOYED_SHA`

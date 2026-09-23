@@ -169,6 +169,10 @@ sao lưu.
 
 **Kiểm chỗ trống đĩa trước khi dump.** Backup làm đầy đĩa thì kéo sập luôn
 Postgres đang chạy cùng host — sự cố lớn hơn nhiều so với việc bỏ một lượt backup.
+Với kho object, `backup-objects.sh` liệt kê bucket TRƯỚC khi mirror, cộng cỡ các object chưa có
+trong bản gương, và chỉ mirror khi đĩa còn đủ chỗ cho phần đó cộng `OBJ_DISK_RESERVE_MB` (mặc định
+1024). **Lượt đầu cần chỗ trống bằng cỡ cả bucket**, trên cùng đĩa với pgdata và miniodata — không đủ
+thì script cảnh báo và dừng, không mirror.
 
 ## Kiểm tra thủ công
 

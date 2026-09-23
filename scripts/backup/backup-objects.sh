@@ -85,12 +85,6 @@ BUCKET="${S3_BUCKET:-quanly}"
 
 mkdir -p "$MIRROR_DIR"
 
-# Chỗ trống đĩa: sao lưu mà làm đầy đĩa thì kéo sập luôn Postgres đang chạy cùng host.
-AVAIL_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2{print $4}')"
-if [ "${AVAIL_MB:-0}" -lt 500 ]; then
-  alert "đĩa chứa backup chỉ còn ${AVAIL_MB}MB — dừng trước khi làm đầy đĩa"; exit 1
-fi
-
 # `mc` chạy trong container để host không phải cài gì. --quiet để log không ngập tên từng object.
 #
 # ── MẠNG (ultracode audit 2026-09-09, finding H5) ────────────────────────────────────────────────
@@ -151,7 +145,41 @@ mc() {
 #      chỉ bù được vế "ghi đè hoặc xoá nhầm MỘT object", mà vế đó bản gương cộng dồn đã phủ.
 # Bật thì đặt OBJ_VERSIONING=1 (kèm OBJ_VERSIONING_KEEP_DAYS, mặc định 30) — script sẽ bật versioning
 # VÀ đặt quy tắc hết hạn phiên bản cũ. Bật mà không có quy tắc hết hạn thì dung lượng tăng không
-# trần, đúng vào cái rủi ro mà cổng "còn < 500MB thì dừng" bên trên đang canh.
+# trần, đúng vào cái rủi ro mà chốt chỗ trống đĩa bên trên đang canh.
+# ── CHỖ TRỐNG ĐĨA (soát chéo ops#4) ─────────────────────────────────────────────────────────────
+# Sao lưu mà làm đầy đĩa thì kéo sập luôn Postgres đang chạy cùng host: bản gương nằm CÙNG đĩa với
+# volume pgdata và miniodata. Chốt cũ chỉ đòi "còn ≥ 500MB lúc bắt đầu" — lượt ĐẦU (chép cả bucket)
+# với bucket 6GB trên đĩa còn 4GB vẫn qua, rồi `mc mirror` ghi tới khi đầy đĩa. `mc` chạy bằng root
+# nên còn lấn vào 5% dự trữ của ext4 mà Postgres (không phải root) không dùng được → Postgres hết chỗ
+# ghi WAL trước khi mc gặp ENOSPC. `mc mirror` không tự kiểm chỗ trống.
+# Nên: liệt kê bucket TRƯỚC khi mirror, cộng cỡ các object CHƯA có trong bản gương — đúng cho cả lượt
+# đầu (thiếu cả bucket) lẫn lượt đêm (chỉ phần mới) — rồi đòi còn đủ chỗ cho phần đó CỘNG một khoản
+# dự trữ OBJ_DISK_RESERVE_MB (mặc định 1024). Không có gì mới để chép thì giữ sàn cũ 500MB, để không
+# biến một đêm không có gì mới thành cảnh báo. Phân tích "key"/"size" bằng awk trên HOST (ảnh mc không
+# có jq), không phụ thuộc thứ tự trường trong JSON.
+OBJ_DISK_RESERVE_MB="${OBJ_DISK_RESERVE_MB:-1024}"
+PRE_LIST="$(mktemp)"
+if ! mc ls --recursive --json "q/$BUCKET" > "$PRE_LIST" 2>"$PRE_LIST.err"; then
+  alert "mc ls thất bại — không đo được cỡ phần sắp chép, KHÔNG mirror: $(head -c 300 "$PRE_LIST.err" | tr '\n' ' ')"
+  rm -f "$PRE_LIST" "$PRE_LIST.err"; exit 1
+fi
+MISSING_MB="$(awk '
+  match($0, /"key":"[^"]*"/) { k = substr($0, RSTART + 7, RLENGTH - 8); s = 0
+    if (match($0, /"size":[0-9]+/)) s = substr($0, RSTART + 7, RLENGTH - 7)
+    print k "\t" s }' "$PRE_LIST" \
+  | while IFS=$'\t' read -r k s; do [ -n "$k" ] && [ ! -f "$MIRROR_DIR/$k" ] && printf '%s\n' "${s:-0}"; done \
+  | awk '{ t += $1 } END { if (t > 0) print int((t + 1048575) / 1048576); else print 0 }')"
+rm -f "$PRE_LIST" "$PRE_LIST.err"
+AVAIL_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2{print $4}' | tr -cd '0-9')"
+[ -n "$AVAIL_MB" ] || { alert "không đọc được chỗ trống đĩa của $BACKUP_DIR — KHÔNG mirror"; exit 1; }
+if [ "${MISSING_MB:-0}" -gt 0 ]; then NEED_MB=$(( MISSING_MB + OBJ_DISK_RESERVE_MB )); else NEED_MB=0; fi
+[ "$NEED_MB" -lt 500 ] && NEED_MB=500
+if [ "$AVAIL_MB" -lt "$NEED_MB" ]; then
+  alert "bản gương cần chép thêm ~${MISSING_MB}MB + giữ dự trữ ${OBJ_DISK_RESERVE_MB}MB, đĩa chứa backup chỉ còn ${AVAIL_MB}MB — KHÔNG mirror (tránh làm đầy đĩa chung với Postgres)"
+  exit 1
+fi
+echo "   đĩa còn ${AVAIL_MB}MB · phần sắp chép ~${MISSING_MB}MB · dự trữ ${OBJ_DISK_RESERVE_MB}MB"
+
 echo "▶ [0/5] Versioning bucket q/$BUCKET"
 VER_OUT="$(mc version info "q/$BUCKET" 2>&1)"; VER_RC=$?
 # THỨ TỰ QUAN TRỌNG: xét mã thoát TRƯỚC rồi mới đọc chữ. Đọc chữ trước thì một thông báo lỗi có
