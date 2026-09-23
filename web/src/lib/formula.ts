@@ -1,6 +1,7 @@
 // Port THUẦN máy tính công thức Excel từ public/js/editor.js (evalArith + evalFormula + FORMULA_FNS).
 // Hỗ trợ số học + ( ) + × + phần trăm (8%→0.08) + hàm SUM/AVERAGE/AVG/PRODUCT/MIN/MAX/ROUND/
-// ROUNDUP/ROUNDDOWN/INT/ABS/CEILING/FLOOR. Tham số ngăn bởi ";" (Excel VN); "," = dấu thập phân.
+// ROUNDUP/ROUNDDOWN/INT/ABS/CEILING/FLOOR (CEILING/FLOOR có bội số như Excel). Tham số ngăn bởi ";"
+// (Excel VN); "," = dấu thập phân.
 // refs (chỉ lưới cấp): resolve "G3"/"H3:H8" về số. Vắng refs = hành vi cũ (export/test).
 
 export type FormulaRefs = { cell: (a: string) => number; range: (a: string, b: string) => number[] | null };
@@ -68,6 +69,26 @@ function lamTronExcel(x: number, soChuSo: number, kieu: "tron" | "len" | "xuong"
   return kq === 0 ? 0 : kq;     // không để lọt -0
 }
 
+/**
+ * CEILING / FLOOR(số; bội số) KIỂU EXCEL. Bản cũ là Math.ceil/floor(a[0]) — BỎ QUA bội số, nên
+ * "=CEILING(1234567;1000)" ra 1.234.567 (Excel 1.235.000) mà ô không đỏ (L32). Luật Excel (đo bằng
+ * Excel 16 thật): bội số 0 → CEILING ra 0, FLOOR ra #DIV/0! (trừ số 0); số dương mà bội số âm →
+ * #NUM!; số âm + bội số dương: CEILING về phía 0, FLOOR xa số 0; cả hai âm thì ngược lại — tức luôn
+ * là bội × ceil/floor(số / bội). Thương chuẩn hoá 15 chữ số như lamTronExcel (3000*1,1 / 100 =
+ * 33,000000000000004 → 33). Tích KHÔNG chuẩn hoá: Excel cũng trả 0,30000000000000004 cho CEILING(0,3;0,1).
+ * Một đối số (app cũ cho phép): giữ nghĩa cũ = bội số 1, trùng Excel CEILING(x;1)/FLOOR(x;1) — công thức
+ * đã lưu không đổi số; lúc xuất Excel thì thiếu đối số nên ghi số (SO_DOI_SO ở src/quoteFormula.ts).
+ */
+function boiSoExcel(a: number[], kieu: "len" | "xuong"): number {
+  if (a.length < 1 || a.length > 2) return NaN;
+  const x = a[0], boi = a.length === 2 ? a[1] : 1;
+  if (boi === 0) return kieu === "len" || x === 0 ? 0 : NaN;
+  if (x > 0 && boi < 0) return NaN;
+  const q = so15(x / boi);
+  const kq = (kieu === "len" ? Math.ceil(q) : Math.floor(q)) * boi;
+  return kq === 0 ? 0 : kq;
+}
+
 const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   SUM: (a) => a.reduce((x, y) => x + y, 0),
   PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
@@ -80,8 +101,8 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   ROUNDDOWN: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "xuong"),
   INT: (a) => Math.floor(so15(a[0] || 0)),
   ABS: (a) => Math.abs(a[0] || 0),
-  CEILING: (a) => Math.ceil(a[0] || 0),
-  FLOOR: (a) => Math.floor(a[0] || 0),
+  CEILING: (a) => boiSoExcel(a, "len"),
+  FLOOR: (a) => boiSoExcel(a, "xuong"),
 };
 
 /**
@@ -100,8 +121,8 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
  *   • Kẹp giữa HAI CHỮ SỐ ("1,5") — có thể là số 1,5 (kiểu Việt) hoặc hai đối số (kiểu Anh):
  *       - công thức đã có ";" → kiểu Việt chắc chắn → thập phân;
  *       - hàm MỘT đối số (INT/ABS) → chỉ có thể là thập phân;
- *       - hàm HAI đối số (ROUND/ROUNDUP/ROUNDDOWN): đã có đúng một dấu tách chắc chắn
- *         ("ROUND(E2*1,1,-3)") → thập phân; "…,0)" → tách (hai cách đọc cùng ra một số); còn lại
+ *       - hàm HAI đối số (ROUND/ROUNDUP/ROUNDDOWN/CEILING/FLOOR): đã có đúng một dấu tách chắc chắn
+ *         ("ROUND(E2*1,1,-3)") → thập phân; ROUND* "…,0)" → tách (hai cách đọc cùng ra một số); còn lại
  *         ("ROUND(F1*0,5)") là MƠ HỒ THẬT (L30): app cũ nhận ROUND một đối số nên công thức ĐÃ LƯU
  *         kiểu này mang nghĩa ROUND(F1*0,5) = 525.000; đọc theo Excel tiếng Anh lại là ROUND(F1*0;5)
  *         = 0 — lưới ghi đè số đã lưu thành 0 mà không báo. Không chọn thay người dùng: trả null;
@@ -117,7 +138,7 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
  * Đổi "x" nhân ("2x1,5") thành "*" TRƯỚC khi gọi hàm này, kẻo "x1" bị coi là ô tham chiếu (L30).
  * BẢN SAO: web/src/lib/formula.ts ↔ src/quoteFormula.ts — sửa quy tắc thì sửa CẢ HAI.
  */
-const HAM_HAI_DOI_SO = /^ROUND(UP|DOWN)?$/;
+const HAM_HAI_DOI_SO = /^(ROUND(UP|DOWN)?|CEILING|FLOOR)$/;   // Excel bắt buộc đúng hai đối số
 const HAM_MOT_DOI_SO = /^(INT|ABS)$/;
 export function chuanHoaDauTachDoiSo(s: string): string | null {
   let kq = s;
@@ -139,7 +160,7 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       if (!soSo.length || kieuViet || HAM_MOT_DOI_SO.test(k.fn)) return;
       if (HAM_HAI_DOI_SO.test(k.fn)) {
         if (chac.length) return;   // đã đủ dấu tách: phần còn lại là thập phân (thừa đối số thì chốt ở translateFormula)
-        if (soSo.length === 1 && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
+        if (soSo.length === 1 && k.fn.startsWith("ROUND") && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
         moHo = true;
         return;
       }

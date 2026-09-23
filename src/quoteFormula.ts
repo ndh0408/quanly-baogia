@@ -18,9 +18,10 @@
 // QUAY VỀ ghi số như cũ. Vì vậy thay đổi này CHỈ tốt hơn, không bao giờ làm hỏng export.
 
 // Hàm Excel có tên + ngữ nghĩa khớp 1:1 với bộ eval của editor → an toàn để xuất.
-// CEILING/FLOOR bị LOẠI: editor coi là ceil/floor 1 đối số, còn Excel BẮT BUỘC có
-// đối số "significance" → xuất ra sẽ lỗi ô. Công thức như vậy quay về ghi số.
-const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS"]);
+// CEILING/FLOOR: bộ tính nay tính bội số ĐÚNG như Excel (L32, đo bằng Excel 16 thật) nên được xuất —
+// nhưng chỉ dạng HAI đối số (SO_DOI_SO): Excel bắt buộc có "significance", dạng một đối số của app cũ
+// quay về ghi số.
+const SAFE_FNS = new Set(["SUM", "PRODUCT", "AVERAGE", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"]);
 // TRUNC(number,digits) và ROUNDDOWN(number,digits) cùng cắt phần dư về phía 0. File báo giá cũ
 // dùng TRUNC rất nhiều, còn editor chuẩn hoá về ROUNDDOWN để chỉ giữ một cách viết.
 const FN_ALIAS: Record<string, string> = { AVG: "AVERAGE", TRUNC: "ROUNDDOWN" };
@@ -95,6 +96,19 @@ function lamTronExcel(x: number, soChuSo: number, kieu: "tron" | "len" | "xuong"
   return kq === 0 ? 0 : kq;
 }
 
+// CEILING / FLOOR(số; bội số) kiểu Excel — y hệt web/src/lib/formula.ts (chú thích đầy đủ ở đó).
+// Bản cũ bỏ qua bội số: "=CEILING(1234567;1000)" ra 1.234.567, Excel 1.235.000 (L32). Một đối số giữ
+// nghĩa cũ (bội số 1) cho công thức đã lưu; xuất Excel thì SO_DOI_SO đòi hai đối số → ghi số.
+function boiSoExcel(a: number[], kieu: "len" | "xuong"): number {
+  if (a.length < 1 || a.length > 2) return NaN;
+  const x = a[0], boi = a.length === 2 ? a[1] : 1;
+  if (boi === 0) return kieu === "len" || x === 0 ? 0 : NaN;
+  if (x > 0 && boi < 0) return NaN;
+  const q = so15(x / boi);
+  const kq = (kieu === "len" ? Math.ceil(q) : Math.floor(q)) * boi;
+  return kq === 0 ? 0 : kq;
+}
+
 const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   SUM: (a) => a.reduce((x, y) => x + y, 0),
   PRODUCT: (a) => a.reduce((x, y) => x * y, 1),
@@ -107,8 +121,8 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
   ROUNDDOWN: (a) => lamTronExcel(a[0] || 0, a[1] || 0, "xuong"),
   INT: (a) => Math.floor(so15(a[0] || 0)),
   ABS: (a) => Math.abs(a[0] || 0),
-  CEILING: (a) => Math.ceil(a[0] || 0),
-  FLOOR: (a) => Math.floor(a[0] || 0),
+  CEILING: (a) => boiSoExcel(a, "len"),
+  FLOOR: (a) => boiSoExcel(a, "xuong"),
 };
 
 /** Giải tham chiếu ô theo HỆ TOẠ ĐỘ EDITOR (cho bộ tự kiểm). */
@@ -123,13 +137,13 @@ type EditorRefs = {
  *
  * Tóm tắt: chỉ xét "," trong danh sách đối số của một HÀM. "," không thể là thập phân (sát ô tham
  * chiếu / dấu âm / ngoặc) → ";" — kể cả khi công thức đã có ";" (L29: "=ROUND(SUM(F1,F2);-3)"). ","
- * giữa hai chữ số: công thức đã có ";" / hàm một đối số → thập phân; ROUND* chỉ một dấu phẩy "số,số"
- * → MƠ HỒ (L30, trừ "…,0)"); hàm nhiều đối số → thập phân trừ khi trông rõ là kiểu Anh (L34: phần sau
- * ≥ 4 chữ số / tận cùng 0 / đã có dấu phẩy khác bị đổi). Mơ hồ, hoặc "," / "." còn dính ô tham chiếu
- * ("=F1,5", "=F1.5") → null: bộ tự kiểm trả null → xuất Excel ghi SỐ, không ghi "G13.5" hay công thức
- * mang nghĩa khác số app đang hiện. Gọi SAU khi đã đổi "x" nhân thành "*".
+ * giữa hai chữ số: công thức đã có ";" / hàm một đối số → thập phân; ROUND/CEILING/FLOOR chỉ một dấu
+ * phẩy "số,số" → MƠ HỒ (L30, trừ ROUND "…,0)"); hàm nhiều đối số → thập phân trừ khi trông rõ là kiểu
+ * Anh (L34: phần sau ≥ 4 chữ số / tận cùng 0 / đã có dấu phẩy khác bị đổi). Mơ hồ, hoặc "," / "."
+ * còn dính ô tham chiếu ("=F1,5", "=F1.5") → null: bộ tự kiểm trả null → xuất Excel ghi SỐ, không ghi
+ * "G13.5" hay công thức mang nghĩa khác số app đang hiện. Gọi SAU khi đã đổi "x" nhân thành "*".
  */
-const HAM_HAI_DOI_SO = /^ROUND(UP|DOWN)?$/;
+const HAM_HAI_DOI_SO = /^(ROUND(UP|DOWN)?|CEILING|FLOOR)$/;   // Excel bắt buộc đúng hai đối số
 const HAM_MOT_DOI_SO = /^(INT|ABS)$/;
 export function chuanHoaDauTachDoiSo(s: string): string | null {
   let kq = s;
@@ -151,7 +165,7 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       if (!soSo.length || kieuViet || HAM_MOT_DOI_SO.test(k.fn)) return;
       if (HAM_HAI_DOI_SO.test(k.fn)) {
         if (chac.length) return;   // đã đủ dấu tách: phần còn lại là thập phân (thừa đối số thì chốt ở translateFormula)
-        if (soSo.length === 1 && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
+        if (soSo.length === 1 && k.fn.startsWith("ROUND") && /^0+\s*\)/.test(soSo[0].sau)) { out[soSo[0].i] = ";"; daDoi = true; return; }
         moHo = true;
         return;
       }
@@ -336,7 +350,7 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
 
 /** Số đối số Excel cho phép của từng hàm trong SAFE_FNS: [ít nhất, nhiều nhất]. */
 const SO_DOI_SO: Record<string, [number, number]> = {
-  ROUND: [2, 2], ROUNDUP: [2, 2], ROUNDDOWN: [2, 2], INT: [1, 1], ABS: [1, 1],
+  ROUND: [2, 2], ROUNDUP: [2, 2], ROUNDDOWN: [2, 2], INT: [1, 1], ABS: [1, 1], CEILING: [2, 2], FLOOR: [2, 2],
   SUM: [1, 255], PRODUCT: [1, 255], AVERAGE: [1, 255], MIN: [1, 255], MAX: [1, 255],
 };
 /** Đếm đối số từng lời gọi hàm trong công thức ĐÃ ở cú pháp Excel ("," tách đối số). */
@@ -413,7 +427,7 @@ export function excelFormulaToEditor(raw: string | null | undefined, ctx: ExcelR
   // đều là dấu tách đối số. Ref đã thành {field:row} nên không dính dấu nào.)
   s = s.replace(/,/g, ";");
 
-  // Tên hàm: chỉ nhận hàm editor hiểu ĐÚNG ngữ nghĩa; hàm lạ (IF/VLOOKUP/CEILING 2 đối số…) → bỏ,
+  // Tên hàm: chỉ nhận hàm editor hiểu ĐÚNG ngữ nghĩa; hàm lạ (IF/VLOOKUP/CEILING.MATH…) → bỏ,
   // ô đó giữ nguyên con số Excel đã tính (an toàn hơn là dịch sai tiền).
   let bad = false;
   s = s.replace(/([A-Za-z]+)\s*\(/g, (m, name) => {
