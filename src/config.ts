@@ -121,6 +121,8 @@ const schema = z.object({
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: numEnv(z.coerce.number().int().positive().max(65535).default(587)),
   SMTP_SECURE: z.string().optional(),
+  // Tắt bắt buộc STARTTLS (mặc định BẬT khi không dùng TLS ngầm) — xem canBatStartTls ở src/email.ts.
+  SMTP_REQUIRE_TLS: z.string().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),

@@ -3,7 +3,8 @@
  *   AUTH-05 — tài khoản KHÔNG có email: "Quên mật khẩu" không được gửi thư tới địa chỉ do người gọi gõ.
  *   AUTH-06 — token đặt-lại đang sống phải chết khi người dùng đổi mật khẩu / admin đặt lại mật khẩu.
  *   AUTH-07 — GET /api/csrf-token ẩn danh không được tạo phiên sống 7 ngày.
- *   AUTH-08 — SMTP không dùng TLS ngầm thì phải BẮT BUỘC STARTTLS (requireTLS).
+ *   AUTH-08 — SMTP không dùng TLS ngầm thì phải BẮT BUỘC STARTTLS (requireTLS), trừ máy bắt thư cục bộ
+ *             (mailhog/localhost/*.local) và khi SMTP_REQUIRE_TLS=false.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import request from "supertest";
@@ -22,25 +23,50 @@ const TAG = `aup3${Date.now()}`;
 const MAT_KHAU = "AuthP3x1234!ok";
 const bam = (t) => createHash("sha256").update(String(t)).digest("hex");
 
-describe("AUTH-08 — SMTP bắt buộc STARTTLS", () => {
-  it("SMTP_PORT 587, không SMTP_SECURE → requireTLS true; SMTP_SECURE=true → không ép", async () => {
+describe("AUTH-08 — SMTP bắt buộc STARTTLS (trừ máy bắt thư cục bộ)", () => {
+  // Dựng transporter THẬT qua sendEmail với nodemailer giả, để đo đúng options đi vào createTransport.
+  const doOptions = async (env) => {
     const opts = [];
     vi.resetModules();
     vi.doMock("nodemailer", () => ({ default: { createTransport: (o) => { opts.push(o); return { sendMail: async () => ({ messageId: "x" }) }; } } }));
-    const cu = { h: process.env.SMTP_HOST, p: process.env.SMTP_PORT, s: process.env.SMTP_SECURE };
+    const khoa = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_REQUIRE_TLS"];
+    const cu = Object.fromEntries(khoa.map((k) => [k, process.env[k]]));
     try {
-      process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; delete process.env.SMTP_SECURE;
-      await (await import("../src/email.js")).sendEmail({ to: "a@example.test", subject: "s", text: "t" });
-      vi.resetModules();
-      process.env.SMTP_SECURE = "true"; process.env.SMTP_PORT = "465";
+      for (const k of khoa) { if (env[k] === undefined) delete process.env[k]; else process.env[k] = env[k]; }
       await (await import("../src/email.js")).sendEmail({ to: "a@example.test", subject: "s", text: "t" });
     } finally {
-      for (const [k, v] of [["SMTP_HOST", cu.h], ["SMTP_PORT", cu.p], ["SMTP_SECURE", cu.s]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      for (const k of khoa) { if (cu[k] === undefined) delete process.env[k]; else process.env[k] = cu[k]; }
       vi.doUnmock("nodemailer");
       vi.resetModules();
     }
-    expect(opts[0]?.requireTLS, "cổng 587 không ép STARTTLS — MITM gỡ được lời quảng bá").toBe(true);
-    expect(opts[1]?.requireTLS).toBe(false);
+    return opts[0];
+  };
+
+  it("gmail:587, SMTP_SECURE=false (cấu hình production) → requireTLS true", async () => {
+    const o = await doOptions({ SMTP_HOST: "smtp.gmail.com", SMTP_PORT: "587", SMTP_SECURE: "false" });
+    expect(o?.requireTLS, "cổng 587 không ép STARTTLS — MITM gỡ được lời quảng bá").toBe(true);
+  });
+
+  it("mailhog:1025 (dev/staging) → requireTLS false — MailHog không hỗ trợ STARTTLS", async () => {
+    const o = await doOptions({ SMTP_HOST: "mailhog", SMTP_PORT: "1025", SMTP_SECURE: "false" });
+    expect(o?.requireTLS, "ép STARTTLS với MailHog là mọi thư trên dev đều lỗi").toBe(false);
+  });
+
+  it("SMTP_REQUIRE_TLS=false → requireTLS false (tắt tường minh)", async () => {
+    const o = await doOptions({ SMTP_HOST: "relay.noibo.example", SMTP_PORT: "25", SMTP_REQUIRE_TLS: "false" });
+    expect(o?.requireTLS).toBe(false);
+  });
+
+  it("các máy cục bộ khác và TLS ngầm", async () => {
+    const { canBatStartTls } = await import("../src/email.js");
+    for (const host of ["localhost", "127.0.0.1", "::1", "LOCALHOST", "mail.dev.local"]) {
+      expect(canBatStartTls({ SMTP_HOST: host }), host).toBe(false);
+    }
+    expect(canBatStartTls({ SMTP_HOST: "smtp.gmail.com", SMTP_SECURE: "true" })).toBe(false);
+    expect(canBatStartTls({ SMTP_HOST: "smtp.gmail.com" })).toBe(true);
+    expect(canBatStartTls({ SMTP_HOST: "smtp.gmail.com", SMTP_REQUIRE_TLS: "true" })).toBe(true);
+    // Tên chỉ CHỨA "local" mà không kết thúc bằng ".local" thì KHÔNG được miễn.
+    expect(canBatStartTls({ SMTP_HOST: "localmail.example.com" })).toBe(true);
   });
 });
 
