@@ -245,8 +245,13 @@ export const PERMISSION_GROUPS = [
   // Nhóm "Sản phẩm" ĐÃ BỎ khỏi ma trận: app KHÔNG có tính năng sản phẩm (price book chưa làm) — quyền
   // product:* là tàn dư RBAC gốc, không route/trang/check nào dùng → ẩn cho khỏi rối giám đốc.
   // (Hằng số quyền + role default vẫn giữ để không vỡ test/SPA cũ; chỉ bỏ HIỂN THỊ.)
+  // role:assign / template:manage / company:manage ĐÃ BỎ KHỎI MA TRẬN (RBAC-10, audit 2026-09-23):
+  // không endpoint nào kiểm chúng (không có trang quản lý mẫu/công ty; phân vai trò đi qua
+  // user:manage). Ô không có tác dụng làm người cấp quyền hiểu sai hệ thống. Hằng số + ADMIN_ONLY
+  // vẫn giữ — y như product:* — để không vỡ dữ liệu quyền đã lưu. Khoá bằng
+  // tests/rb-ma-tran-quyen-co-tac-dung.test.js.
   { key: "admin", label: "Quản trị", perms: [
-    P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
+    P.USER_MANAGE,
     P.AUDIT_VIEW, P.AUDIT_VIEW_FULL, P.SETTINGS_MANAGE,
   ] },
   { key: "personnel", label: "Nhân sự (hồ sơ)", perms: [
