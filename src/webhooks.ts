@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import net from "node:net";
 import dns from "node:dns/promises";
 import http from "node:http";
@@ -80,6 +80,17 @@ function isPrivateIPv6(ip: string) {
   if (isMapped || isNat64) {
     return isPrivateIPv4(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
   }
+  // Các dải còn lọt trước RT-07 (đo bằng assertPublicHttpUrl thật): `[::7f00:1]`, `[2002:7f00:1::]`,
+  // `[fec0::1]`, `[64:ff9b:1::a00:1]`.
+  //   · IPv4-compatible ::/96 (đã bỏ nhưng stack vẫn có thể định tuyến) — nhúng IPv4 ở 4 byte cuối;
+  //   · 6to4 2002::/16 — nhúng IPv4 ở byte 2..5.
+  // Hai dải đó phân loại bằng luật IPv4; mọi dải còn lại NGOÀI 2000::/3 (global unicast) đều chặn —
+  // kể cả fec0::/10 (site-local cũ) và 64:ff9b:1::/48 (NAT64 dùng cục bộ, RFC 8215).
+  if (b.slice(0, 12).every((v) => v === 0)) return isPrivateIPv4(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
+  if (b[0] === 0x20 && b[1] === 0x02) return isPrivateIPv4(`${b[2]}.${b[3]}.${b[4]}.${b[5]}`);
+  if ((b[0] & 0xe0) !== 0x20) return true;
+  // Trong 2000::/3: Teredo 2001:0::/32 (địa chỉ IPv4 bị che, đường hầm) và tài liệu 2001:db8::/32.
+  if (b[0] === 0x20 && b[1] === 0x01 && ((b[2] === 0 && b[3] === 0) || (b[2] === 0x0d && b[3] === 0xb8))) return true;
   return false;
 }
 function isBlockedIp(ip: string) {
@@ -159,16 +170,15 @@ function postToPinnedIp({ url, address }: { url: URL; address: string }, body: s
  * Public domain events emitted by the app. Listed here so admins can wire
  * webhooks UI and we can statically validate event names.
  */
+// CHỈ những sự kiện THẬT SỰ được bắn (RT-06). Bản trước công bố 9 sự kiện qua /api/webhooks/events
+// và zod nhận cả 9, nhưng grep `emitWebhook(` toàn src/ chỉ ra hai: quote.created (quoteService,
+// tạo báo giá) và quote.converted (chốt). Luồng duyệt nội bộ đã bỏ từ 2026-06-22 nên
+// submitted/approved/rejected không còn nơi nào phát — tích hợp đăng ký chúng im lặng mãi mãi.
+// Webhook cũ trong CSDL còn lưu tên cũ thì chỉ không khớp gì — vô hại.
+// tests/rt-webhook-su-kien-va-ssrf.test.js khoá: mỗi phần tử ở đây phải có chỗ gọi emitWebhook.
 export const EVENTS = [
   "quote.created",
-  "quote.updated",
-  "quote.submitted",
-  "quote.approved",
-  "quote.rejected",
-  "quote.sent",
   "quote.converted",
-  "customer.created",
-  "customer.updated",
 ];
 
 function sign(payload: string, secret: string) {
@@ -187,11 +197,16 @@ export async function emit(event: string, payload: any) {
     webhookId: h.id,
     event,
     payload,
+    // MÃ GIAO NHẬN sinh MỘT LẦN ở đây, nằm trong job.data → mọi lần thử lại (attempts 5, hoặc worker
+    // chạy lại job bị stalled) gửi CÙNG mã. Bên nhận khử trùng theo header X-QLY-Delivery (RT-06).
+    deliveryId: randomUUID(),
   }, { attempts: 5, backoff: { type: "exponential", delay: 5_000 } })));
 }
 
 /** Delivery handler invoked by worker (or inline if no Redis). */
-export async function deliverWebhook({ webhookId, event, payload }: { webhookId: number; event: string; payload: any }) {
+export async function deliverWebhook({ webhookId, event, payload, deliveryId }: { webhookId: number; event: string; payload: any; deliveryId?: string }) {
+  // Job xếp TRƯỚC bản vá không có mã — sinh tại chỗ (khử trùng được trong phạm vi một lần thử).
+  const maGiao = deliveryId || randomUUID();
   const h = await prisma.webhook.findUnique({ where: { id: webhookId } });
   if (!h || !h.active) return { skipped: true };
 
@@ -219,6 +234,7 @@ export async function deliverWebhook({ webhookId, event, payload }: { webhookId:
       "Content-Type": "application/json",
       "X-QLY-Event": event,
       "X-QLY-Signature": sig,
+      "X-QLY-Delivery": maGiao,
     });
     status = res.status;
     if (status >= 300 && status < 400) {
