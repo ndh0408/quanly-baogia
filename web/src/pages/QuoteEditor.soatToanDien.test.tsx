@@ -365,5 +365,17 @@ describe("X2 — nhận mốc updatedAt sau khi tích thanh toán chỉ khi khô
     expect(await luuRoiDocMoc()).toBe(MOC_TT);
   });
 
+  // Báo giá CŨ lưu quoteDate là thời điểm đầy đủ (excel#10): đường nạp đổi nó sang ngày VN (+7h, qua ngày
+  // khi ≥17:00 UTC). Vân tay lúc nạp mà tính SAU bước đó thì ra 14/06, còn bản GET kiểm tra cắt ra 13/06 →
+  // lần nào cũng tưởng người khác đã lưu, không nhận mốc, lần Lưu kế tự đâm 409.
+  it("báo giá cũ có quoteDate là mốc giờ ≥17:00 UTC, chỉ thanh toán đổi → vẫn nhận mốc MỚI", async () => {
+    const NGAY_CU = "2026-06-13T20:00:00.000Z";
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo(), quoteDate: NGAY_CU }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true, paidAt: MOC_TT, paidById: 1 }), updatedAt: MOC_TT, quoteDate: NGAY_CU }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc(), "quoteDate cũ làm vân tay lúc nạp lệch bản GET → 409 giả").toBe(MOC_TT);
+  });
+
   afterEach(() => { h.getQuote.mockReset(); h.getQuote.mockImplementation(async () => baoGia()); });
 });

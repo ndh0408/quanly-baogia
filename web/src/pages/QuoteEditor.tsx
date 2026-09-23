@@ -94,8 +94,9 @@ type WinDirty = Window & { __editorDirty?: boolean };
  * (id trang đổi vì lưu = xoá-tạo-lại trang, hoặc nội dung đổi) thì KHÔNG được nhận mốc updatedAt mới
  * — nhận là vô hiệu khoá lạc quan và lần Lưu kế đè im lặng lên bản người kia.
  *
- * Ngày (`…Date`) cắt 10 ký tự: đường nạp tự cắt `quoteDate`/`executionDate` về yyyy-MM-dd còn GET
- * trả chuỗi ISO đủ. Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
+ * Mọi bản đem so đều phải là JSON THÔ của máy chủ: đường nạp lấy vân tay TRƯỚC khi chuẩn hoá ngày
+ * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
+ * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
 export const vanTayMain = (q: unknown): string => {
   const r = (q || {}) as Record<string, unknown>;
@@ -443,13 +444,17 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         } else {
           q = await api.getQuote(quoteId!);
         }
+        // app#11 / X2: vân tay của bản MÁY CHỦ — lấy TRƯỚC khi bản nháp phủ lên VÀ trước bước chuẩn hoá
+        // ngay dưới. Mọi bản đem ra so sau này (bản GET kiểm tra, bản PUT/chốt trả về) đều là JSON thô
+        // của máy chủ; tính sau ngayChoO thì báo giá CŨ có quoteDate ≥17:00 UTC ra ngày +1 (14/06 so với
+        // 13/06 của bản GET) → lần nào cũng tưởng có người lưu chen, không nhận mốc, Lưu kế đâm 409 giả.
+        const vanTayMay = vanTayMain(q);
+        const vanTayHnMay = vanTayHnNoiDung(q.hnTables);
         // Ngày theo lịch VN như Excel/PDF (ngayChoO) — cắt 10 ký tự là ngày UTC, lệch bản ghi cũ (excel#10).
         if (q.quoteDate && q.quoteDate.length > 10) q.quoteDate = ngayChoO(q.quoteDate) || q.quoteDate.slice(0, 10);
         if (q.executionDate && q.executionDate.length > 10) q.executionDate = q.executionDate.slice(0, 10);
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
-        const vanTayMay = vanTayMain(q);   // app#11: của bản MÁY CHỦ, trước khi bản nháp nào phủ lên
-        const vanTayHnMay = vanTayHnNoiDung(q.hnTables);   // X2: cùng thời điểm
         // ── BẢN NHÁP CỤC BỘ: có gì để khôi phục không? ───────────────────────
         // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
