@@ -3876,3 +3876,282 @@ textarea[aria-invalid="true"] {
   z-index: 1000;
 }
 /* #toast-host: z-index 1100 đặt ngay trong khối chính của nó (GAP1-05 cấm khối #toast-host thứ hai). */
+
+/* ══ CHẾ ĐỘ TỐI CHO VÙNG SOẠN BÁO GIÁ — DỊU MẮT ═════════════════════════════════════════════════
+   public/style.css (đóng băng) giữ "tờ giấy" (.editor, .excel-table, .summary-table) luôn nền trắng
+   "vì nó là tài liệu in". Người dùng chốt 2026-09-23: sáng/tối chỉ là GIAO DIỆN WEB, không dính gì
+   tới Excel, và tối thì phải "dễ chịu". Để giấy trắng thì hỏng thật, đo trên dev bằng tương phản:
+     · chữ ô nhập (tên khách, người liên hệ, ghi chú…) = --text sáng #e8eaf0 trên giấy trắng: 1.2:1;
+     · dòng của bảng "Tổng báo giá" = mực giấy #1b2034 trên --surface-2 tối #1a1f2a: 1.02:1.
+   Hàng mang MÀU CỦA MẪU (tiêu đề cột, nhóm/nhóm con, dòng tổng) KHÔNG giữ nguyên màu in — cam đào /
+   ô-liu / xanh ngọc sáng giữa nền tối là mấy dải chói. Dùng BẢN TỐI của chính màu đó (pha ~20% với nền)
+   + chữ tông SÁNG cùng họ màu: vẫn nhận ra mẫu nào, nhóm hay nhóm con, mà không chói. Excel không đổi.
+
+   `:root[data-theme="dark"]` để thắng các luật `.excel-table … td` nhiều tầng của public/style.css.
+   Riêng hàng nhóm / tiêu đề có thêm `:not(#nhom-toi)` — KHÔNG phần tử nào mang id này nên nó luôn
+   khớp; nó chỉ cộng độ ưu tiên cấp id, thắng các luật tô màu hàng nhóm theo từng cột / từng mẫu (tới
+   (0,5,3)) mà không phải rải !important. */
+
+/* Ô nhập / ô chọn / thanh cuộn gốc của trình duyệt theo NÚT sáng/tối của app, không theo Windows:
+   index.html khai `color-scheme: light dark` nên máy để Windows sáng mà app bật tối thì ô tìm kiếm
+   (trang Phân quyền…) vẫn nền trắng của trình duyệt với chữ sáng của app — đọc không ra. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Ba nền "-soft" chưa từng có giá trị dark → nút ƒ (chữ --success sáng) nằm trên nền xanh NHẠT
+     #e2f6e9 của bản sáng: 2.7:1. Chữ đi kèm (--success / --warn / --danger) ở dark đều là màu sáng. */
+  --success-soft: #15301f;
+  --warn-soft: #3a2a10;
+  --danger-soft: #3a1616;
+  /* Viền lưới: đen #000 của giấy → xám dịu, vẫn đủ thấy khung ô. */
+  --luoi-vien: #434c5c;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* ── Khung soạn + phần đầu báo giá ── */
+:root[data-theme="dark"] .editor {
+  background: var(--surface);
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor .meta-grid label {
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .editor .meta-grid :is(input, textarea, select) {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor :is(.center-line, .quote-no, .greeting) {
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .editor .greeting {
+  border-bottom-color: var(--border);
+}
+:root[data-theme="dark"] .editor .title-input {
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor .title-input:is(:hover, :focus) {
+  border-color: var(--border-strong);
+}
+
+/* ── Lưới: hàng thường ── */
+:root[data-theme="dark"] .excel-table {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea) {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc),
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc) :is(input, textarea) {
+  color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
+}
+:root[data-theme="dark"] .excel-table td.col-internal-note textarea {
+  color: #d9b36a;
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea):focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] .excel-table td input.cell-grow {
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table td.col-amount {
+  background: transparent;
+}
+:root[data-theme="dark"] .excel-table td.cell-fx-error input {
+  background: #3a1616;
+  color: #fca5a5;
+}
+:root[data-theme="dark"] .excel-table td.cell-ref-pick {
+  background: rgba(47, 168, 90, 0.22);
+}
+:root[data-theme="dark"] .excel-table td.col-action {
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table td.col-action button.rm-row {
+  color: #f87171;
+}
+:root[data-theme="dark"] .excel-table thead tr.col-letters th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* ── Lưới: tiêu đề cột + hàng nhóm theo MÀU MẪU, bản tối ──
+   --nen: màu mẫu pha ~20% với nền; --chu: tông sáng cùng họ màu. Gia Nguyễn trước, Colorfull đè sau. */
+:root[data-theme="dark"] .excel-table {
+  --tieu-de-nen: color-mix(in srgb, #f3c9a1 22%, var(--surface));
+  --tieu-de-chu: #f3c9a1;
+}
+:root[data-theme="dark"] .excel-table.clf-theme {
+  --tieu-de-nen: color-mix(in srgb, #9dccc9 22%, var(--surface));
+  --tieu-de-chu: #b4dcd9;
+}
+:root[data-theme="dark"] .excel-table:not(#nhom-toi) thead tr:not(.col-letters) th {
+  background: var(--tieu-de-nen);
+  color: var(--tieu-de-chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #fae9db 16%, var(--surface));
+  --chu: #f0b877;
+}
+:root[data-theme="dark"] .excel-table tr.subgroup-row {
+  --nen: color-mix(in srgb, #9dbde6 16%, var(--surface));
+  --chu: #a9c9ef;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --chu: #f2b39a;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.subgroup-row {
+  --nen: color-mix(in srgb, #cad8aa 17%, var(--surface));
+  --chu: #d2dfaa;
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td {
+  background: var(--nen);
+  color: var(--chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea) {
+  color: var(--chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea)::placeholder {
+  color: color-mix(in srgb, var(--chu) 55%, var(--surface));
+}
+:root[data-theme="dark"] .excel-table tfoot :is(td.label, td.value) {
+  background: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  color: #f5d0a9;
+}
+:root[data-theme="dark"] .excel-table tfoot td.value {
+  color: #f87171;
+}
+
+/* ── Thanh công thức, gợi ý hàm / rạp, khung xem công thức ── */
+:root[data-theme="dark"] .fx-bar {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+:root[data-theme="dark"] .fx-addr {
+  background: var(--surface-2);
+  color: #93c5fd;
+  border-right-color: var(--border-strong);
+}
+:root[data-theme="dark"] #fx-input {
+  background: var(--surface); /* luật theo id ở public/style.css: #fff + chữ #111 */
+  color: var(--text);
+}
+:root[data-theme="dark"] #fx-input:focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] #fx-input::placeholder {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] #fx-input[readonly] {
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .fx-fx {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-right-color: var(--border);
+}
+:root[data-theme="dark"] :is(.fx-auto, .vs-auto, .fx-peek) {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-auto-item {
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .fx-auto-item span {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] :is(.fx-auto-item.active, .fx-auto-item:hover) {
+  background: #1e2a44;
+}
+:root[data-theme="dark"] .fx-peek-f {
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-peek-v {
+  color: #93c5fd;
+  border-top-color: var(--border);
+}
+:root[data-theme="dark"] .fx-peek-h {
+  color: #4ade80;
+}
+
+/* ── Bảng phụ / tab sheet ── */
+:root[data-theme="dark"] .extra-del-table {
+  background: transparent;
+  border-color: #7f3a3a;
+  color: #f87171;
+}
+:root[data-theme="dark"] .extra-del-table:hover {
+  background: #3a1616;
+}
+:root[data-theme="dark"] .extra-here.cat-hcm {
+  background: #1b2740;
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .extra-here.cat-hanoi {
+  background: #15301f;
+  color: #86efac;
+}
+:root[data-theme="dark"] .extra-here.cat-khach {
+  background: #2e2615;
+  color: #e3b765;
+}
+:root[data-theme="dark"] .extra-cat-group .sheet-tab {
+  border-bottom-color: var(--border-strong);
+}
+:root[data-theme="dark"] .sheet-tabs {
+  border-bottom-color: color-mix(in srgb, #ffcc99 35%, var(--surface)); /* vạch cam sáng → dịu */
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab {
+  color: #f87171;
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab:hover {
+  background: var(--surface-hover);
+}
+
+/* ── Bảng "Tổng báo giá" ── */
+:root[data-theme="dark"] .summary-table {
+  color: var(--text);
+  --tong-nen: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  --tong-chu: #f5d0a9;
+}
+:root[data-theme="dark"] .summary-table.clf-theme {
+  --tong-nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --tong-chu: #f2c7a8;
+}
+:root[data-theme="dark"] .summary-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .summary-table:not(#nhom-toi) :is(thead th, tfoot td) {
+  background: var(--tong-nen);
+  color: var(--tong-chu);
+}
+
+/* ── Chỗ lẻ ngoài vùng soạn (đo trên dev) ── */
+/* Nhãn "fx" của thanh công thức: #8a94a3 trên #fafbfc = 2.96:1 ở bản SÁNG. */
+.fx-fx {
+  color: var(--text-muted);
+}
+/* Dấu "–" (không có quyền) ở ma trận Phân quyền: --border-strong chỉ 1.4–1.6:1 ở CẢ hai chế độ. */
+.perm-no {
+  color: var(--text-muted);
+}
+/* Số của bước đang làm (khuôn .num cũ của public/style.css): chữ trắng trên vàng 1.7–1.8:1. Thanh bước
+   của NewQuoteWizard.tsx tô bằng style nội tuyến nên sửa ở chính tệp đó. */
+.step-dot.active .num {
+  color: var(--on-primary);
+}
+
+/* BẢNG "TỔNG BÁO GIÁ" CỦA COLORFULL (bản SÁNG) — khớp sheet "Tổng Báo Giá" của tệp Excel
+   (src/excel.ts `sumHeaderFill`: có sheet clofull → F4CFB0), người dùng chốt bằng ảnh chụp
+   2026-09-23. Cùng quy tắc nhận diện với tệp: MỘT sheet Colorfull là đủ. Gia Nguyễn giữ nguyên. */
+.summary-table.clf-theme thead th,
+.summary-table.clf-theme tfoot td {
+  background: #f4cfb0;
+}
