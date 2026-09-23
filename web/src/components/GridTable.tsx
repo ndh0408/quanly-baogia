@@ -1112,7 +1112,7 @@ function GridTableInner(props: GridTableProps) {
       const movingCut = !!(sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token);
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
-        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) pasteCellVal(r, FIELDS[c], val, 0, 0, !!internal);
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, 0, 0, !!internal); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
@@ -1342,7 +1342,7 @@ function GridTableInner(props: GridTableProps) {
           const raw = ae!.value;
           const m = editUndoRef.current;
           if (!(m && m.i === i && m.f === f)) pushUndo();   // phiên gõ đã có mốc thì snapshot cũ phủ đủ
-          for (let r = rcFill.r0; r <= rcFill.r1; r++) { if (items[r]?.kind === "info") continue; for (let c = rcFill.c0; c <= rcFill.c1; c++) commitCell(r, FIELDS[c], raw); }
+          for (let r = rcFill.r0; r <= rcFill.r1; r++) { if (items[r]?.kind === "info") continue; for (let c = rcFill.c0; c <= rcFill.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; commitCell(r, FIELDS[c], raw); } }   // GRID-15: bỏ cột STT (ô tính)
           recomputeAll(); onChange(); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
           return;
         }

@@ -267,6 +267,29 @@ describe("GRID-05 — dán nhiều dòng vào ô đang sửa", () => {
   });
 });
 
+// ── GRID-15: Ctrl+Enter / dán một giá trị ra vùng gồm cột STT ghi rác `_stt` vào model ──────────
+describe("GRID-15 — vùng chọn gồm STT không ghi trường rác", () => {
+  it("Shift+Space rồi dán '7' → không có _stt trong item", () => {
+    const items = [hang("Banner", "cái", 1, 1000)];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), " ", { shift: true });
+    dan(o(0, "name"), "7");
+    expect("_stt" in items[0]).toBe(false);
+    expect(items[0].unitPrice).toBe(7);
+  });
+  it("Shift+Space, gõ '=E1*2', Ctrl+Enter → formulas không có _stt", () => {
+    const items = [hang("Banner", "cái", 1, 1000)];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), " ", { shift: true });
+    go(o(0, "name"), "=E1*2");
+    phim(o(0, "name"), "Enter", { ctrl: true });
+    expect("_stt" in items[0]).toBe(false);
+    expect(items[0].formulas && "_stt" in items[0].formulas).toBeFalsy();
+  });
+});
+
 // ── GRID-06: phím zoom của trình duyệt xoá/chèn hàng ─────────────────────────────────────────
 describe("GRID-06 — Ctrl+'-' / Ctrl+'=' trơn là zoom, không đụng hàng", () => {
   it("Ctrl+'-' khi CHƯA chọn nguyên hàng → không xoá, không chặn phím (trình duyệt zoom)", () => {
