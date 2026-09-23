@@ -656,8 +656,16 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       }
     }
     hcell.value = "HÌNH ẢNH";
-    datVien(hcell, { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "medium" } },
-      { vertical: "middle", horizontal: "center", wrapText: true });
+    // ĐỈNH/ĐÁY THEO Ô TIÊU ĐỀ CỘT CUỐI CŨ, không đặt cứng (L42): bản cũ ghi đáy 'medium' trong khi
+    // đáy mọi ô tiêu đề khác là 'thin' (GN I11, CLF I4) ⇒ riêng dưới ô HÌNH ẢNH có một đoạn đáy dày.
+    // Thiếu thì lui về nét cũ. Colorfull kẻ đỉnh dày ở khối `outerFrame` bên dưới — cột ảnh cũng đi qua đó.
+    const vienTieuDeCu = ws.getCell(`${(cols.notes || cols.amount) as string}${itemsCfg.headerRow}`).border || {};
+    datVien(hcell, {
+      top: vienTieuDeCu.top ? { ...vienTieuDeCu.top } : { style: "medium" },
+      left: { style: "thin" },
+      bottom: vienTieuDeCu.bottom ? { ...vienTieuDeCu.bottom } : { style: "thin" },
+      right: { style: "medium" },
+    }, { vertical: "middle", horizontal: "center", wrapText: true });
     try { ws.getColumn(imgCol).width = 19; } catch { /* giữ mặc định */ }
 
     // ── CỘT ẢNH LÀ CỘT CUỐI MỚI CỦA BẢNG → MỌI DẢI KÉO NGANG CẢ BẢNG PHẢI NỐI DÀI SANG NÓ ──────
@@ -1215,6 +1223,23 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
     result: netSubtotal + vatAmt,   // = Tổng Cộng + VAT(đã tròn)
   });
 
+  // ── BẬT CỘT ẢNH Ở MẪU CÓ KHUNG NƯỚNG SẴN (GN): CỘT CUỐI CŨ TRẢ CẠNH PHẢI DÀY VỀ NÉT MỎNG (L42) ──
+  // Mẫu GN nướng khung ngoài vào tệp mẫu: cột Ghi chú mang viền PHẢI 'medium' ở mọi hàng từ tiêu
+  // đề tới hạng mục cuối. Bật cột ảnh thì cột ảnh mới là cạnh phải của bảng (đã kẻ 'medium' ở trên),
+  // còn nét dày ở Ghi chú thành MỘT VẠCH DÀY CHẠY DỌC GIỮA BẢNG — đo bằng Excel: I12 phải=DÀY,
+  // J12 trái=DÀY. Colorfull không cần bước này: khung của nó dựng ở khối `outerFrame` ngay dưới và
+  // đã lấy cột ảnh làm cột cuối. Chỉ hạ nét DÀY; nét mỏng/không viền giữ nguyên.
+  if (imgCol && !itemsCfg.outerFrame && itemsCfg.headerRow) {
+    const cotCu = (cols.notes || cols.amount) as string;
+    for (let r = itemsCfg.headerRow; r <= actualLastRow; r++) {
+      const o = ws.getCell(`${cotCu}${r}`);
+      const phai = o.border?.right;
+      if (phai && (phai.style === "medium" || phai.style === "thick" || phai.style === "double")) {
+        datVien(o, { ...(o.border || {}), right: { ...phai, style: "thin" } });
+      }
+    }
+  }
+
   // ── KHUNG NGOÀI DÀY CHO BẢNG (chỉ mẫu khai `items.outerFrame`) ──────────────────────────
   // Đo trên file xuất THẬT của Gia Nguyễn: hàng tiêu đề có viền TRÊN 'medium', và MỌI hàng của
   // bảng có viền TRÁI ở cột đầu + viền PHẢI ở cột cuối cũng 'medium' — tức bảng được đóng khung
@@ -1249,8 +1274,9 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         o.style = st;
       } catch { /* ô không tồn tại */ }
     };
-    // Cạnh TRÊN của hàng tiêu đề, chạy hết bề ngang bảng.
-    for (const L of Object.values(cols) as string[]) dat(`${L}${hangDau}`, "top");
+    // Cạnh TRÊN của hàng tiêu đề, chạy hết bề ngang bảng — gồm cả cột HÌNH ẢNH khi bật (ô tiêu đề
+    // của nó lấy đỉnh theo ô tiêu đề cột cuối cũ, tức nét MỎNG của tệp mẫu Colorfull trước bước này).
+    for (const L of [...(Object.values(cols) as string[]), ...(imgCol ? [imgCol] : [])]) dat(`${L}${hangDau}`, "top");
     // Cạnh TRÁI và PHẢI của BẢNG, từ hàng tiêu đề xuống hàng hạng mục cuối.
     for (let r = hangDau; r <= hangCuoi; r++) {
       dat(`${cotDau}${r}`, "left");
