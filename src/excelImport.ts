@@ -20,6 +20,7 @@
 import ExcelJS from "exceljs";
 import { TEMPLATE_CONFIGS } from "./templateConfigs.js";
 import { excelFormulaToEditor, unwrapRound, evalEditorFormula } from "./quoteFormula.js";
+import { nhanLamTronDong } from "./tienDong.js";
 
 // ===== Kiểu dữ liệu trả về =====
 export type ImportedKind = "item" | "sub" | "section" | "subsection" | "info";
@@ -563,7 +564,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const it = x.it;
     if (field === "_amount") {
       if (x.kind === "section" || x.kind === "subsection") return NaN;   // tổng nhóm: app tự tính
-      return Math.round(qtyForAmount(it) * (colOf.days ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+      return nhanLamTronDong(qtyForAmount(it), colOf.days ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);   // chính xác — XLSX-06
     }
     if (field === "quantity") return qtyForAmount(it);
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
@@ -761,7 +762,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
 /** Tổng tiền của sheet theo đúng cách app tính (mục con cộng vào nhóm; nhóm ×SL khi bật). */
 export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal">): number {
-  const line = (it: ImportedItem) => Math.round(qtyForAmount(it) * (s.hasDays ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+  // Nhân CHÍNH XÁC rồi làm tròn — khớp src/money.ts (XLSX-06). Double lệch 1đ ở giá không chia hết 10.
+  const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {

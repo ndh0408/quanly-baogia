@@ -4,6 +4,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger.js";
+import { nhanLamTronDong } from "./tienDong.js";
 
 // Toán tiền GIỐNG HỆT lưới web + file Excel (shared/quote-math.ts, src/excel.ts). Khai cục bộ chứ
 // KHÔNG import shared/: runtime chạy tsx trên src/ nên "../shared/quote-math.js" không resolve được
@@ -21,7 +22,8 @@ function qtyExact(x: unknown) {
 const qtyForAmount = (it: any) => (it?.quantityExact ? qtyExact(it.quantity) : qtyRound(it?.quantity));
 const lineAmount = (it: any, usesDays: boolean) => {
   const q = qtyForAmount(it), d = Number(it?.days) || 1, pr = Number(it?.unitPrice) || 0;
-  return Math.round(usesDays ? q * d * pr : q * pr);
+  // Nhân CHÍNH XÁC (không qua double) — khớp src/money.ts từng đồng (XLSX-06).
+  return usesDays ? nhanLamTronDong(q, d, pr) : nhanLamTronDong(q, pr);
 };
 const groupMult = (it: any) => Math.max(1, qtyForAmount(it) || 1);
 function groupLetter(n: number) {

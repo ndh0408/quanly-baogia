@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./templateConfigs.js";
 import { stitchXlsxBuffers } from "./xlsxStitcher.js";
 import { buildFormulaContext } from "./quoteFormula.js";
+import { nhanLamTronDong } from "./tienDong.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -697,7 +698,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       } else if ((effKind[i] === "head" || effKind[i] === "sub") && items[i]) {
         const it = items[i];
         const qty = qtyForAmount(it), days = Number(it.days) || 1, price = Number(it.unitPrice) || 0;
-        const amt = Math.round(cols.days ? qty * days * price : qty * price);
+        const amt = cols.days ? nhanLamTronDong(qty, days, price) : nhanLamTronDong(qty, price);   // chính xác — XLSX-06
         const parent = curSub >= 0 ? curSub : curSection;
         if (parent >= 0) sectionSum[parent] += amt;
         if (numberSubs && curSub >= 0 && curSection >= 0) sectionSum[curSection] += amt;   // banner: dồn lên nhóm cha
@@ -882,13 +883,14 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const days = Number(it.days) || 1;
       const price = Number(it.unitPrice) || 0;
       let amt;
+      // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng). Nhân CHÍNH XÁC rồi mới làm
+      // tròn (XLSX-06): double cho 15 × 4,1 = 61,4999… → 61 trong khi số đã lưu (Decimal) là 62.
       if (cols.days) {
-        amt = price * qty * days;
+        amt = nhanLamTronDong(qty, days, price);
         putNum(it, r, "days", cols.days, days);
       } else {
-        amt = price * qty;
+        amt = nhanLamTronDong(qty, price);
       }
-      amt = Math.round(amt);   // Thành Tiền làm tròn về số nguyên (khớp web + dòng cộng = tổng)
       subtotal += amt * mult;
       // STT + Hạng Mục: only the group head writes them; sub-rows leave them blank,
       // then get covered by the vertical merge applied after this loop.
