@@ -36,10 +36,63 @@ export function qtyExact(x: number) {
 }
 export const qtyForAmount = (it: Pick<Item, "quantity" | "quantityExact">) =>
   it.quantityExact ? qtyExact(Number(it.quantity) || 0) : qtyRound(Number(it.quantity) || 0);
+
+// ── NHÂN TIỀN CHÍNH XÁC (soát chéo money#6 / excel#11) ───────────────────────────────────────
+// XLSX-06 đưa PDF, số cache trong ô Excel và bảng nhập Excel sang phép nhân của src/tienDong.ts
+// (khớp Decimal ROUND_HALF_UP của src/money.ts từng đồng). Lưới web mà còn `Math.round(q * p)` thì
+// 0,7 × 163.845 = 114691,4999… hiện 114.691 trong khi tệp gửi khách ghi 114.692.
+// BẢN SAO của src/tienDong.ts — shared/ không import được src/ và ngược lại (rootDir=src, container
+// không có shared/). tests/xt-luoi-web-tien-dong.test.js chạy hai bản trên cùng dữ liệu.
+// Viết `BigInt(0)` chứ KHÔNG viết literal `0n`: web build target es2017 (vite.config.ts), literal
+// BigInt không có ở target đó (esbuild cảnh báo "may crash at run-time") — trình duyệt cũ vấp lỗi cú
+// pháp là sập CẢ bundle. Gọi hàm thì chỉ cần tránh gọi: không có BigInt (Safari < 14) → nhánh dự phòng.
+const CO_BIGINT = typeof BigInt === "function";
+
+/** Số → [phần nguyên đã bỏ dấu phẩy (BigInt, có dấu), số chữ số thập phân] — y như src/tienDong.ts. */
+function tachSo(x: number): [bigint, number] {
+  if (!Number.isFinite(x) || x === 0) return [BigInt(0), 0];
+  let s = String(x);
+  if (/e/i.test(s)) s = Math.abs(x) < 1 ? x.toFixed(20).replace(/0+$/, "").replace(/\.$/, "") : BigInt(Math.round(x)).toString();
+  const am = s.startsWith("-");
+  if (am) s = s.slice(1);
+  const [nguyen, le = ""] = s.split(".");
+  const m = BigInt(nguyen + le || "0");
+  return [am ? -m : m, le.length];
+}
+
+/** Tích các thừa số, làm tròn nửa-lên theo độ lớn (ROUND_HALF_UP, -2,5 → -3) — khớp src/tienDong.ts. */
+export function nhanLamTronDong(...thuaSo: number[]): number {
+  // ĐƯỜNG TẮT: hàm chạy ~2.600 lần mỗi lượt vẽ lưới. Sai số của tích double chỉ cỡ 1e-15 tương
+  // đối, nên phần lẻ cách ,5 xa hơn ngưỡng dưới đây thì làm tròn double cho ĐÚNG kết quả của phép
+  // nhân chính xác. Chỉ tích rơi sát ,5 (hoặc số khổng lồ) mới đi đường BigInt.
+  let x = 1;
+  for (const t of thuaSo) x *= Number(t) || 0;
+  const ax = Math.abs(x);
+  if (Math.abs(ax - Math.floor(ax) - 0.5) > 1e-9 + ax * 1e-12) return Math.round(x) || 0;   // `|| 0`: không trả -0
+  if (!CO_BIGINT) {
+    const r = Number(x.toPrecision(15));   // khử nhiễu double: 61,49999999999999 → 61,5
+    return (r < 0 ? -Math.round(-r) : Math.round(r)) || 0;
+  }
+  let m = BigInt(1);
+  let thapPhan = 0;
+  for (const t of thuaSo) {
+    const [a, b] = tachSo(Number(t) || 0);
+    m *= a;
+    thapPhan += b;
+  }
+  if (thapPhan === 0) return Number(m) || 0;
+  const chia = BigInt(10) ** BigInt(thapPhan);
+  const am = m < BigInt(0);
+  const tri = am ? -m : m;
+  let thuong = tri / chia;
+  if ((tri % chia) * BigInt(2) >= chia) thuong += BigInt(1);
+  return Number(am ? -thuong : thuong) || 0;
+}
+
 // Thành Tiền 1 dòng: mặc định SL làm tròn 1 số; dòng quantityExact dùng tối đa 4 số lẻ theo file Excel.
 export function lineAmount(it: Item, usesDays: boolean) {
   const q = qtyForAmount(it), d = Number(it.days) || 1, p = Number(it.unitPrice) || 0;
-  return Math.round(usesDays ? q * d * p : q * p);
+  return usesDays ? nhanLamTronDong(q, d, p) : nhanLamTronDong(q, p);
 }
 /** Hệ số nhân của hàng NHÓM = Số Lượng của nhóm, lấy ĐÚNG con số đang hiển thị trên lưới
  *  (qtyRound 1 số lẻ, hoặc 4 số lẻ với dòng quantityExact). Lấy số thô thì ô hiện "2,4" mà tiền

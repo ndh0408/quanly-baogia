@@ -16,6 +16,7 @@
 // TỰ KIỂM (đánh giá lại bằng bộ eval port từ frontend, so với giá trị đã lưu). Bất cứ
 // nghi ngờ nào (hàm lạ, ref ngoài bảng, ref trỏ vào hàng nhóm/chữ, kết quả lệch) →
 // QUAY VỀ ghi số như cũ. Vì vậy thay đổi này CHỈ tốt hơn, không bao giờ làm hỏng export.
+import { nhanLamTronDong } from "./tienDong.js";
 
 // Hàm Excel có tên + ngữ nghĩa khớp 1:1 với bộ eval của editor → an toàn để xuất.
 // CEILING/FLOOR bị LOẠI: editor coi là ceil/floor 1 đối số, còn Excel BẮT BUỘC có
@@ -438,7 +439,9 @@ export function buildFormulaContext(
   const amountOf = (it: EditorItem | undefined) => {
     if (!it || it.kind === "section" || it.kind === "subsection" || it.kind === "info") return 0;
     const q = it.quantityExact ? qtyExact4(it.quantity) : qtyRound1(it.quantity), p = Number(it.unitPrice) || 0;
-    return Math.round(usesDays ? q * (Number(it.days) || 1) * p : q * p);
+    // Nhân CHÍNH XÁC như lưới web (shared/quote-math.ts lineAmount) — double cho 4,1 × 15 = 61 trong
+    // khi web hiện 62, công thức tham chiếu ô đó lệch tự kiểm và bị hạ về số chết (soát chéo excel#11).
+    return usesDays ? nhanLamTronDong(q, Number(it.days) || 1, p) : nhanLamTronDong(q, p);
   };
   const editorCellNum = (addr: string) => {
     const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(String(addr).trim());
