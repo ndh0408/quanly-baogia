@@ -215,13 +215,23 @@ export function createApp() {
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           "font-src": ["'self'", "https://fonts.gstatic.com"],
-          "img-src": ["'self'", "data:"],
+          // blob: — trang Nhân sự nén ảnh chứng từ bằng `URL.createObjectURL(file)` rồi gán vào
+          // <img>. Thiếu blob: thì trình duyệt chặn, img.onerror → "Ảnh không hợp lệ" và không
+          // đính được chứng từ nào (HTTP-02). blob: chỉ do chính trang này tạo ra, không mở đường
+          // tải ảnh từ origin khác.
+          "img-src": ["'self'", "data:", "blob:"],
           "connect-src": ["'self'"],
           "object-src": ["'none'"],
           "frame-ancestors": ["'self'"],
         },
       },
       crossOriginEmbedderPolicy: false,
+      // Mặc định helmet là `no-referrer`. Theo Fetch Standard, POST cùng origin từ tài liệu mang
+      // policy đó có thể gửi `Origin: null` (Gecko/WebKit) → csrfGuard Lớp 1 trả 403 csrf_origin
+      // cho MỌI thao tác ghi, kể cả đăng nhập, trên Firefox/Safari/iOS (HTTP-03). `same-origin`
+      // gửi Origin/Referer thật cho chính mình và KHÔNG gửi gì cho bên thứ ba (Google Fonts) —
+      // riêng tư ngang mức cũ. KHÔNG sửa bằng cách chấp nhận Origin 'null'.
+      referrerPolicy: { policy: "same-origin" },
     })
   );
 
@@ -338,16 +348,21 @@ export function createApp() {
   // lại giữ đúng trần 2MB như express.json của nó — middleware này chạy TRƯỚC auth/rate-limit nên
   // trần chung 16MB sẽ cho người CHƯA đăng nhập bơm 16MB vào bất kỳ endpoint nào. Mount nhóm quotes
   // trước; sau khi xử lý xong nó xoá header Content-Encoding nên lớp chung phía dưới tự bỏ qua.
+  //
+  // CHỈ DƯỚI /api (HTTP-01): không đường nào ngoài /api nhận thân request (chỉ có GET tĩnh/SPA/
+  // probe), vậy mà bản trước mount KHÔNG kèm path — POST /bat-ky, /readyz, /metrics với gzip 2MB
+  // được giải nén + JSON.parse trên luồng chính trong khi apiLimiter (chỉ ở /api/) không đếm lượt
+  // nào. Người chưa đăng nhập bơm vô hạn lượt, mỗi lượt ~5ms event loop.
   app.use(["/api/quotes", "/api/quotes/*"], decompressBody(16 * 1024 * 1024));
-  app.use(decompressBody(2 * 1024 * 1024));
+  app.use("/api", decompressBody(2 * 1024 * 1024));
 
   // Báo giá lớn (thực tế tới 50 trang × vài trăm dòng) vượt xa 2MB: 50×200 dòng đã là ~1,6MB,
   // 50×500 là ~4MB. Trần 2MB cho TOÀN BỘ API khiến lưu báo giá lớn hỏng với lỗi 413 khó hiểu.
   // Nâng trần RIÊNG cho nhóm route báo giá (mount TRƯỚC nên thân đã được đọc xong, middleware
   // chung phía dưới bỏ qua), phần API còn lại vẫn giữ 2MB để không mở rộng bề mặt tấn công.
   app.use(["/api/quotes", "/api/quotes/*"], express.json({ limit: "16mb" }));
-  app.use(express.json({ limit: "2mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+  app.use("/api", express.json({ limit: "2mb" }));
+  app.use("/api", express.urlencoded({ extended: true, limit: "2mb" }));
 
   const sessionMiddleware = session({
       name: "qly.sid",
