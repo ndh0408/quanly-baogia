@@ -10,6 +10,7 @@ import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
 import { insertRows, removeRows, type RowLike } from "../lib/rowEdit";
 import { createUndoStack, undoRedoKey } from "../lib/gridUndo";
+import { doanBoCot } from "../lib/doanBoCot";
 import { type Sel, clampRow, clampCol, nextSel, rectOfSel, arrowStep } from "../lib/gridSelect";
 
 // Lưới Excel DÙNG CHUNG (lưới chính + bảng nội bộ). Bê ĐẦY ĐỦ drawItems + UX công thức Excel:
@@ -481,7 +482,7 @@ function GridTableInner(props: GridTableProps) {
       let sum = 0, cnt = 0;
       // Cộng đúng con số ĐANG HIỂN THỊ: bôi 10 ô Số Lượng thì "Tổng" phải bằng tổng 10 số nhìn thấy,
       // không phải tổng các số thô 4 số lẻ nằm dưới.
-      if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (!NUMERIC.has(f)) continue; const v = f === "quantity" ? M.qtyForAmount(items[r]) : Number((items[r] as Record<string, unknown>)?.[f]); if (v) { sum += v; cnt++; } }
+      if (rc) for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { const f = FIELDS[c]; if (!NUMERIC.has(f) || !items[r]) continue; const v = f === "quantity" ? M.qtyForAmount(items[r]) : Number((items[r] as Record<string, unknown>)?.[f]); if (v) { sum += v; cnt++; } }
       if (cnt >= 1) { statRef.current.classList.remove("hidden"); statRef.current.innerHTML = `Đếm: <b>${cnt}</b> · TB: <b>${M.fmtNumCell(Math.round(sum / cnt))}</b> · Tổng: <b>${M.fmtNumCell(sum)}</b>`; }
       else { statRef.current.classList.add("hidden"); statRef.current.textContent = ""; }
     }
@@ -736,7 +737,15 @@ function GridTableInner(props: GridTableProps) {
         paintSel();
         return;
       }
-      // Bấm 1 lần (kể cả bấm lại ô đang chọn) = CHỌN + KHÓA ô. Muốn sửa: nhấp đúp hoặc F2.
+      // ĐANG SỬA chính ô này mà bấm vào chỗ khác trong chữ → để trình duyệt ĐẶT CON TRỎ ngay chỗ
+      // bấm (nếp Excel), chuyển sang chế độ EDIT (mũi tên chạy trong chữ). Trước đây nhánh dưới
+      // khoá ô + chặn mặc định, nên đang gõ "…0m5H x 8 tấm" muốn sửa "0m8W" ở giữa thì bấm không
+      // vào được — người dùng báo 2026-09-23.
+      if (document.activeElement === el && editingRef.current && !el.readOnly) {
+        editModeRef.current = "edit";
+        return;
+      }
+      // Bấm 1 lần vào ô KHÁC (hoặc ô đang chọn mà chưa sửa) = CHỌN + KHÓA ô. Muốn sửa: nhấp đúp hoặc F2.
       e.preventDefault();
       if (document.activeElement !== el) { navigatingRef.current = true; el.focus(); navigatingRef.current = false; }
       lockCell(el);
@@ -983,7 +992,19 @@ function GridTableInner(props: GridTableProps) {
     el.dataset.escVal = el.value;      // mốc ESC phải theo giá trị SAU khi lùi
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
-  const restore = (json: string) => { const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); }); items.splice(0, items.length, ...arr); recomputeAll(); onChange(); syncActiveCell(); };
+  // SAU KHI LÙI/TIẾN, SỐ HÀNG CÓ THỂ ÍT ĐI (lùi một lần dán 129 dòng) nhưng vùng chọn vẫn trỏ tới
+  // các hàng vừa mất → ô "Đếm/TB/Tổng" đọc `items[r]` = undefined và cả trang sập "Không tải được
+  // trang" (người dùng báo 2026-09-23, quote #284 trên dev). Co vùng chọn về số hàng còn lại, bỏ
+  // dấu cắt đang chờ (toạ độ của nó cũng đã mất nghĩa).
+  const restore = (json: string) => {
+    const arr = JSON.parse(json) as ItemK[]; arr.forEach((it) => { if (it._k == null) it._k = nextK(); });
+    items.splice(0, items.length, ...arr);
+    const last = Math.max(0, items.length - 1);
+    const sel = selRef.current;
+    if (sel) { sel.anchor.row = Math.min(sel.anchor.row, last); sel.focus.row = Math.min(sel.focus.row, last); }
+    cutPendingRef.current = null;
+    recomputeAll(); onChange(); syncActiveCell();
+  };
   const doUndo = () => { flushSoft(); const prev = histRef.current.stepBack(snap); if (prev !== null) restore(prev); };
   const doRedo = () => { flushSoft(); const next = histRef.current.stepForward(snap); if (next !== null) restore(next); };
   // đặt 1 ô khi dán: công thức "=…" giữ nguyên; số dùng parseLooseNumber (VN/US an toàn); text gọn dòng.
@@ -1072,7 +1093,9 @@ function GridTableInner(props: GridTableProps) {
     // DATA_FIELD_COUNT: đếm cột DỮ LIỆU như trước khi thêm "_stt" vào FIELDS — nhận dạng khối dán từ
     // file Excel ngoài phải giữ nguyên ngưỡng cũ, không thì khối 7 cột bỗng bị coi là thiếu cột.
     if (!internal && (hdrRoles || looksLikeExportPaste(rows, startCol - COL_NAME, DATA_FIELD_COUNT))) {
-      const roles = hdrRoles || ADDR.map((c) => c.f);
+      // Không có hàng tiêu đề → ĐOÁN bố cục của FILE NGUỒN (không ngày / có ngày, CLF / GN) bằng
+      // chính số liệu trong khối, thay vì mặc định nó trùng bố cục sheet đích — xem lib/doanBoCot.ts.
+      const roles = hdrRoles || doanBoCot(rows, ADDR.map((c) => c.f));
       const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
       // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
       // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).

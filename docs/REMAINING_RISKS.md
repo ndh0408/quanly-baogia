@@ -998,7 +998,7 @@ nay chỉ còn đúng một nửa:
    `matchMedia`). Mã đã tự phòng bằng `typeof ResizeObserver === "undefined"` nên nhánh đó
    chạy — chỉ là không được kiểm.
 5. **Một trong 18 chỗ tới được bằng đường TẮT so với đời thực.** Ctrl+Enter điền cả vùng
-   (`web/src/components/GridTable.tsx:1116`) chỉ tới lượt `pushUndo` sau chuỗi
+   (`web/src/components/GridTable.tsx`, nhánh Ctrl+Enter trong `onGridKeyDown`) chỉ tới lượt `pushUndo` sau chuỗi
    Shift+↓ → gõ → Ctrl+Z (xoá mốc phiên gõ mà vẫn giữ cờ đang-sửa). Chuỗi đó hợp lệ bằng
    bàn phím nhưng hiếm; ai đổi logic `editUndoRef` thì bài này có thể đổi màu vì lý do khác
    với ý định ban đầu.
@@ -1016,8 +1016,8 @@ nay chỉ còn đúng một nửa:
 | Bài kiểm mức component (jsdom, opt-in) | `web/src/components/GridTable.component.test.tsx` — **42 bài** |
 | `histRef = useRef(createUndoStack())` | `web/src/components/GridTable.tsx:193` |
 | `snap()` = `JSON.stringify(items)` | `web/src/components/GridTable.tsx` (hàm `snap`) |
-| `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx:276` |
-| `restore(json)` — `JSON.parse` + cấp lại `_k` + `recomputeAll()` | `web/src/components/GridTable.tsx:862` |
+| `pushUndo()` → `histRef.current.mark(snap())` | `web/src/components/GridTable.tsx` (hàm `pushUndo`) |
+| `restore(json)` — `JSON.parse` + cấp lại `_k` + co vùng chọn + `recomputeAll()` | `web/src/components/GridTable.tsx` (hàm `restore`) |
 | `doUndo()` / `doRedo()` | `web/src/components/GridTable.tsx` (hai hàm cùng tên) |
 | Phím tắt Ctrl+Z · Ctrl+Y · Ctrl+Shift+Z (hỏi `undoRedoKey`) | `web/src/components/GridTable.tsx:1167-1168` |
 | Cổng IME `!ctrl && dangGoIME(e)` | `web/src/components/GridTable.tsx:1027` |
