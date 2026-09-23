@@ -767,7 +767,10 @@ export async function updateQuote(req: Request) {
 
   // Price-affecting edit on a quote already in the pipeline -> reopen to draft.
   const priceAffecting = Array.isArray(b.sheets) || data.vatPercent !== undefined;
-  if (priceAffecting) data.currentVersion = (existing.currentVersion ?? 1) + 1;
+  // `increment` NGUYÊN TỬ thay vì `existing + 1` đọc ngoài transaction (MONEY-06): hai lần Lưu đồng
+  // thời (client không gửi mốc) từng cùng ra một versionNo → snapshotQuoteVersion upsert đè mất một
+  // phiên bản lịch sử. snapshotQuoteVersion đọc lại currentVersion TRONG tx sau lệnh update.
+  if (priceAffecting) data.currentVersion = { increment: 1 };
   const wasLocked = ["pending", "approved", "sent"].includes(existing.status);
   const reopened = wasLocked && priceAffecting;
   if (reopened) {
@@ -787,7 +790,7 @@ export async function updateQuote(req: Request) {
   if (Array.isArray(b.sheets)) {
     // Tiền KHÔNG phụ thuộc extraTables (computeQuoteTotals chỉ đọc `sh.items` — src/money.ts:54),
     // nên tính tổng ở NGOÀI transaction là an toàn và giữ transaction ngắn nhất có thể.
-    const vatPct = data.vatPercent ?? existing.vatPercent;
+    let vatPct = data.vatPercent ?? existing.vatPercent;
     // ── TAB CŨ KHÔNG ĐƯỢC XOÁ DISCOUNT ────────────────────────────────────────────────────────
     // `sheets[].discount` là trường MỚI và là optional trong sheetSchema, nên một tab trình duyệt
     // đang chạy bundle CŨ (mở trước lúc deploy) gửi payload KHÔNG có khoá đó. Không xử lý thì
@@ -823,6 +826,18 @@ export async function updateQuote(req: Request) {
       // lý (không xác định), nên thiếu câu này thì nó và saveHn có thể lấy khoá ngược chiều nhau
       // trên cùng báo giá → deadlock 40P01 → Prisma P2034.
       await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+      // VAT TƯƠI (MONEY-06): `vatPct` lấy từ `existing` đọc NGOÀI transaction. Một lần đổi RIÊNG VAT
+      // chen giữa sẽ bị lần Lưu này ghi đè tổng bằng VAT cũ (Quote.vatPercent = 10 mà total tính 8%).
+      // Mọi đường ghi đều khoá QuoteSheet trước, nên đọc SAU khoá là thấy VAT đã commit của lượt kia.
+      if (data.vatPercent === undefined) {
+        const [vq] = await tx.$queryRaw<{ vatPercent: unknown }[]>`SELECT "vatPercent" FROM "Quote" WHERE id = ${id}`;
+        if (vq && !D(vq.vatPercent as any).equals(D(vatPct))) {
+          const t2 = computeQuoteTotals({ vatPercent: vq.vatPercent as any, sheets: b.sheets });
+          data.vat = t2.vat;
+          data.total = t2.total;
+          vatPct = vq.vatPercent as any;
+        }
+      }
       // Cờ BẬT thì phải đọc kèm `items` để so được "trang này có đổi không". Đo được
       // (scripts/bench/quote-save-bench.mjs): 94,7 ms cho 10.000 dòng — rẻ hơn hai bậc độ lớn so
       // với 3.940 ms của lần ghi mà nó giúp tránh. Cờ TẮT thì KHÔNG đọc, để đường mặc định không
@@ -920,12 +935,31 @@ export async function updateQuote(req: Request) {
     updated = await prisma.$transaction(async (tx) => {
       // Khoá QuoteSheet TRƯỚC Quote (chotKhoaLacQuan) — đúng thứ tự của mọi đường ghi khác.
       if (vungNoiBo) await ghiVungNoiBoDuocGiao(tx, id, vungNoiBo, catChoPhep, req);
-      // Đổi VAT trên báo giá đã chốt → doanh thu chốt đi theo (MONEY-01), cùng luật với nhánh trên.
       if (tVat) {
+        // TÍNH LẠI TỔNG TỪ HẠNG MỤC TƯƠI, SAU KHI ĐÃ KHOÁ QuoteSheet (MONEY-06). `existing` đọc NGOÀI
+        // transaction: một lần Lưu sheet chen giữa lúc đó và lúc ghi làm lần đổi VAT này ghi tổng tính
+        // từ hạng mục CŨ — Quote.total lệch hạng mục cho tới lần Lưu sau. Lần tính ngoài tx ở trên chỉ
+        // còn là kiểm sớm (400 trước khi mở transaction).
+        await tx.$queryRaw`SELECT id FROM "QuoteSheet" WHERE "quoteId" = ${id} ORDER BY id FOR UPDATE`;
+        const sheetsTuoi = await tx.quoteSheet.findMany({
+          where: { quoteId: id },
+          orderBy: { order: "asc" },
+          select: {
+            id: true, name: true, groupSubtotal: true, discount: true, custStatus: true,
+            items: { orderBy: { order: "asc" }, select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true } },
+          },
+        });
+        const t = computeQuoteTotals({ vatPercent: data.vatPercent, sheets: sheetsTuoi as any });
+        assertTotalsStorable(t, sheetsTuoi);
+        data.subtotal = t.subtotal;
+        data.vat = t.vat;
+        data.discount = t.discount;
+        data.total = t.total;
+        // Đổi VAT trên báo giá đã chốt → doanh thu chốt đi theo (MONEY-01), cùng luật với nhánh trên.
         const [qTuoi] = await tx.$queryRaw<{ status: string; convertedTotal: unknown }[]>`SELECT status, "convertedTotal" FROM "Quote" WHERE id = ${id}`;
         if (qTuoi?.status === "converted" && qTuoi.convertedTotal != null) {
           (data as any).convertedTotal = tinhConvertedTotal(
-            tVat.sheetTotals.map((st, i) => ({ subtotal: st.subtotal, custStatus: existing.sheets?.[i]?.custStatus ?? null })),
+            t.sheetTotals.map((st, i) => ({ subtotal: st.subtotal, custStatus: sheetsTuoi[i]?.custStatus ?? null })),
             data.vatPercent
           );
         }
