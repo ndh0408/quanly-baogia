@@ -1286,9 +1286,19 @@ function GridTableInner(props: GridTableProps) {
       const rc = rectOf(sel);
       // Đang có khối CẮT nội bộ trùng token → dán = DI CHUYỂN (xoá nguồn sau khi ghi đích).
       const movingCut = !!(sameBlock && cutPendingRef.current && internal && internal.token === cutPendingRef.current.token);
+      // CHÉP MỘT Ô công thức trong app → dịch tham chiếu theo ô ĐÍCH như Excel (soát toàn diện L9): bản
+      // cũ luôn dịch 0 hàng/0 cột nên "=D1*1000" dán xuống cả cột vẫn trỏ về hàng nguồn, Thành Tiền sai
+      // mà không báo gì (Ctrl+D thì dịch đúng). CẮT–dán là DI CHUYỂN → giữ nguyên tham chiếu (Excel).
+      // Dán từ Excel ngoài (không có payload nội bộ) thì không biết ô nguồn ở đâu → không dịch.
+      const fSrc1 = internal?.cols === 1 ? internal.fields?.[0] : undefined;
+      const dich1 = (r: number, f: string): [number, number] => {
+        if (movingCut || !internal || internal.r0 == null || !fSrc1) return [0, 0];
+        const a = addrIdxOfField(f), b = addrIdxOfField(fSrc1);
+        return [r - internal.r0, a >= 0 && b >= 0 ? a - b : 0];
+      };
       if (rc && (rc.r0 !== rc.r1 || rc.c0 !== rc.c1)) {   // có vùng chọn → fill ra TOÀN vùng (Excel)
         e.preventDefault(); pushUndo();
-        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, 0, 0, soThoNguon(0), quGoc(0, 0), moHo); }   // GRID-15: STT là ô tính, không ghi
+        for (let r = rc.r0; r <= rc.r1; r++) for (let c = rc.c0; c <= rc.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; pasteCellVal(r, FIELDS[c], val, ...dich1(r, FIELDS[c]), soThoNguon(0), quGoc(0, 0), moHo); }   // GRID-15: STT là ô tính, không ghi
         if (movingCut) finishCutMove(rc);
         autoEnableGroupSub(rc.r0, rc.r1);   // fill SL>1 ra hàng nhóm → tự bật (chống lệch tiền)
         recomputeAll(); onChange(); paintSel();
@@ -1300,7 +1310,7 @@ function GridTableInner(props: GridTableProps) {
       if (f0 && NUMERIC.has(f0)) {
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
-        pasteCellVal(i0, f0, val, 0, 0, soThoNguon(0), quGoc(0, 0), moHo);
+        pasteCellVal(i0, f0, val, ...dich1(i0, f0), soThoNguon(0), quGoc(0, 0), moHo);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(f0), c1: FIELDS.indexOf(f0) });
         recomputeAll(); onChange(); paintSel();
         const el = cellEl(i0, f0); if (el && !items[i0].formulas?.[f0]) el.value = fmtField(i0, f0, (items[i0] as Record<string, unknown>)[f0]);
@@ -1315,7 +1325,7 @@ function GridTableInner(props: GridTableProps) {
         e.preventDefault(); pushUndo();
         const i0 = rc ? rc.r0 : (focusRef.current?.i ?? 0);
         const fld = f0 || FIELDS[rc ? rc.c0 : 0];
-        pasteCellVal(i0, fld, val, 0, 0, soThoNguon(0), quGoc(0, 0), moHo);
+        pasteCellVal(i0, fld, val, ...dich1(i0, fld), soThoNguon(0), quGoc(0, 0), moHo);
         if (movingCut) finishCutMove({ r0: i0, r1: i0, c0: FIELDS.indexOf(fld), c1: FIELDS.indexOf(fld) });
         recomputeAll(); onChange(); paintSel();
         // Ô chữ nhiều dòng (Hạng Mục/Chi Tiết/Ghi Chú) phải CAO LẠI ngay: trước chỉ ghi value, mà ô đang
