@@ -329,9 +329,11 @@ describe("GridTable — lưới CHỈ ĐỌC thì phím tắt không được đ
     const items = [hang("Banner"), hang("Standee")];
     moLuoi(items, { editable: false });
     const el = o(0, "name");
+    // Đi đúng cử chỉ thật của hai phím (GRID-06): chọn nguyên hàng rồi Ctrl+'-'; Ctrl+Shift+'+'.
+    phim(el, " ", { shift: true });
     phim(el, "-", { ctrl: true });
     expect(items.length).toBe(2);
-    phim(el, "+", { ctrl: true });
+    phim(el, "+", { ctrl: true, shift: true });
     expect(items.length).toBe(2);
   });
 
@@ -503,19 +505,22 @@ describe("GridTable — pushUndo() chụp ảnh TRƯỚC khi ghi vào items", ()
     expect(items[0].unitPrice).toBe(1000);
   });
 
-  it("Ctrl+'-' xoá hàng đang chọn", () => {
+  // GRID-06: Ctrl+'-' / Ctrl+'+' TRƠN là phím zoom của trình duyệt — xoá hàng nay đòi chọn NGUYÊN
+  // HÀNG trước (Shift+Space), chèn hàng đòi Shift. Hai bài dưới đi đúng cử chỉ mới.
+  it("Shift+Space rồi Ctrl+'-' xoá hàng đang chọn", () => {
     const items = [hang("Banner"), hang("Standee"), hang("Backdrop")];
     moLuoi(items);
     vaoO(o(1, "name"));
+    phim(o(1, "name"), " ", { shift: true });
     mocPhaiChupTruoc(items, () => phim(o(1, "name"), "-", { ctrl: true }), () => o(1, "name"));
     expect(items.map((i) => i.name)).toEqual(["Banner", "Standee", "Backdrop"]);
   });
 
-  it("Ctrl+'+' chèn hàng dưới", () => {
+  it("Ctrl+Shift+'+' chèn hàng dưới", () => {
     const items = [hang("Banner"), hang("Standee")];
     moLuoi(items);
     vaoO(o(0, "name"));
-    mocPhaiChupTruoc(items, () => phim(o(0, "name"), "+", { ctrl: true }), () => o(0, "name"));
+    mocPhaiChupTruoc(items, () => phim(o(0, "name"), "+", { ctrl: true, shift: true }), () => o(0, "name"));
     expect(items.length).toBe(2);
   });
 

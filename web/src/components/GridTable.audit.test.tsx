@@ -267,6 +267,45 @@ describe("GRID-05 — dán nhiều dòng vào ô đang sửa", () => {
   });
 });
 
+// ── GRID-06: phím zoom của trình duyệt xoá/chèn hàng ─────────────────────────────────────────
+describe("GRID-06 — Ctrl+'-' / Ctrl+'=' trơn là zoom, không đụng hàng", () => {
+  it("Ctrl+'-' khi CHƯA chọn nguyên hàng → không xoá, không chặn phím (trình duyệt zoom)", () => {
+    const items = [hang("Banner A"), hang("Standee B"), hang("Cổng")];
+    moLuoi(items);
+    vaoO(o(1, "unitPrice"));
+    const ev = phim(o(1, "unitPrice"), "-", { ctrl: true });
+    expect(items.length).toBe(3);
+    expect(ev.defaultPrevented).toBe(false);
+  });
+  it("Ctrl+A rồi Ctrl+'-' (định thu nhỏ trang) → HỎI trước, Hủy thì không xoá gì", async () => {
+    const items = [hang("Banner A"), hang("Standee B")];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), "a", { ctrl: true });
+    phim(o(0, "name"), "-", { ctrl: true });
+    expect(items.length).toBe(2);
+    const huy = document.querySelector('[data-focus-trap="own"] [data-no]') as HTMLButtonElement;
+    expect(huy, "phải có hộp xác nhận xoá nhiều hàng").not.toBeNull();
+    await act(async () => { huy.click(); });
+    expect(items.length).toBe(2);
+  });
+  it("Ctrl+'=' / Ctrl+'+' trơn (phóng to trang) → không chèn", () => {
+    const items = [hang("Banner A"), hang("Standee B")];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), "=", { ctrl: true });
+    phim(o(0, "name"), "+", { ctrl: true });
+    expect(items.length).toBe(2);
+  });
+  it("Ctrl+Shift+'+' → chèn", () => {
+    const items = [hang("Banner A")];
+    moLuoi(items);
+    vaoO(o(0, "name"));
+    phim(o(0, "name"), "+", { ctrl: true, shift: true });
+    expect(items.length).toBe(2);
+  });
+});
+
 // ── GRID-02: đi tới cột STT không dời tiêu điểm → phím gõ kế tiếp đè lên ô CŨ ────────────────
 describe("GRID-02 — vùng chọn nhìn thấy và ô nhận phím không được tách nhau", () => {
   const baHang = () => {

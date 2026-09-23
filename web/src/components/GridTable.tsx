@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { toast, useEscClose } from "../lib/ui";
+import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
@@ -1366,10 +1366,23 @@ function GridTableInner(props: GridTableProps) {
       else { onChange(); moveTo(i + 1, f, false); }
       return;
     }
-    // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa hàng đang chọn (Excel).
-    if (ctrl && editable && (e.key === "+" || e.key === "=" || e.key === "-")) {
+    // Ctrl/⌘+Shift+"+" = chèn hàng dưới · Ctrl/⌘+"-" = xóa các hàng đang chọn NGUYÊN HÀNG (Excel).
+    // GRID-06: Ctrl+'-' / Ctrl+'=' (và '+' bàn phím số) là phím THU/PHÓNG trang của trình duyệt — phổ
+    // biến nhất với người dùng laptop nhỏ. Bản cũ bắt cả hai: đứng ở một ô bấm Ctrl+- để thu nhỏ là
+    // XOÁ HÀNG ngay (cả vùng nếu đang Ctrl+A). Nay chỉ nhận đúng nếp Excel không-hộp-thoại:
+    //   · chèn: Ctrl+Shift+"+" (shiftKey bắt buộc — '+' bàn phím số không có Shift, để trình duyệt phóng);
+    //   · xoá: chỉ khi vùng chọn là NGUYÊN HÀNG (Shift+Space). Còn lại không chặn phím → trình duyệt zoom.
+    const rcHang = rectOf(selRef.current);
+    const nguyenHang = !!rcHang && rcHang.c0 === 0 && rcHang.c1 === lastCol;
+    if (ctrl && editable && ((e.shiftKey && (e.key === "+" || e.key === "=")) || (e.key === "-" && nguyenHang && !editing))) {
       e.preventDefault(); e.stopPropagation();
-      if (e.key === "-") { const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1; pushUndo(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); }
+      if (e.key === "-") {
+        const rc = rectOf(selRef.current); const from = rc ? rc.r0 : i, n = rc ? rc.r1 - rc.r0 + 1 : 1;
+        const xoaNgay = () => { pushUndo(); xoa(from, n); recomputeAll(); if (!items.length) { const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); items.push(nit); } selRef.current = { anchor: { row: Math.min(from, items.length - 1), field: f }, focus: { row: Math.min(from, items.length - 1), field: f } }; onChange(); toast(`Đã xóa ${n} hàng — Ctrl+Z để hoàn tác`, "info"); };
+        // Nhiều hàng (vd Ctrl+A rồi Ctrl+- định thu nhỏ trang) → hỏi trước, như hộp Delete của Excel.
+        if (n > 1) void confirmModal("Xóa nhiều hàng", `Xóa ${n} hàng đang chọn? (Ctrl+Z hoàn tác được)`, { danger: true, confirmText: `Xóa ${n} hàng` }).then((ok) => { if (ok) xoaNgay(); });
+        else xoaNgay();
+      }
       else { pushUndo(); const nit = M.blankItem(usesDays) as ItemK; nit._k = nextK(); chen(i + 1, [nit]); recomputeAll(); focusCell(i + 1, "name"); onChange(); }
       return;
     }
@@ -2071,7 +2084,7 @@ function GridTableInner(props: GridTableProps) {
               <p><b>Di chuyển:</b> mũi tên · <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> · <kbd>Enter</kbd> xuống · <kbd>Shift+Enter</kbd> lên · <kbd>{modKey}+Enter</kbd> chốt tại chỗ (chọn vùng thì điền cả vùng) · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> · <kbd>{modKey}</kbd>+mũi tên nhảy tới biên.</p>
               <p><b>Chọn vùng:</b> kéo chuột · <kbd>Shift</kbd>+bấm · <kbd>Shift</kbd>+mũi tên · <kbd>Shift+Space</kbd> cả hàng · <kbd>{modKey}+Space</kbd> cả cột · <kbd>{modKey}+A</kbd> cả bảng.</p>
               <p><b>Dữ liệu:</b> <kbd>{modKey}+C/V</kbd> copy–dán (qua lại Excel được) · <kbd>{modKey}+X</kbd> cắt kiểu Excel (viền nét đứt, <b>dán mới chuyển đi</b>, <kbd>Esc</kbd> huỷ) · <kbd>{modKey}+D</kbd> chép xuống · <kbd>{modKey}+R</kbd> chép phải · kéo (hoặc nhấp đúp) ô vuông góc dưới-phải · <kbd>{modKey}+Z</kbd>/<kbd>{modKey}+Y</kbd> hoàn tác–làm lại.</p>
-              <p><b>Hàng:</b> <kbd>{modKey}+Shift++</kbd> chèn hàng dưới · <kbd>{modKey}+-</kbd> xóa hàng đang chọn · <kbd>Alt+Enter</kbd> xuống dòng trong ô · <kbd>Alt+↓</kbd> mở gợi ý hạng mục theo rạp.</p>
+              <p><b>Hàng:</b> <kbd>{modKey}+Shift++</kbd> chèn hàng dưới · <kbd>Shift+Space</kbd> rồi <kbd>{modKey}+-</kbd> xóa các hàng đang chọn · <kbd>Alt+Enter</kbd> xuống dòng trong ô · <kbd>Alt+↓</kbd> mở gợi ý hạng mục theo rạp.</p>
               <p className="muted">Công thức: gõ <b>=</b> thẳng vào ô · <b>mũi tên chọn ô tham chiếu</b> (Shift+mũi tên kéo thành vùng) hoặc bấm/kéo chuột · <kbd>Alt+=</kbd> tự chèn =SUM(dải phía trên) · ví dụ <b>=G3*E3</b>, <b>=SUM(H3:H8)</b>.</p>
           </AnchoredPanel>
         </div>
