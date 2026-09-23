@@ -171,3 +171,22 @@ describe("FE-01 — giao / duyệt phần Hà Nội khi còn thay đổi chưa l
     expect(p.hnStatus).toBe("approved");
   });
 });
+
+// GRID-07: gõ tiếp trong lúc PUT đang bay → phần gõ thêm không nằm trong payload, rồi bị bản máy chủ
+// đè, cờ bẩn về false, bản nháp bị xoá. Nay lưới + ô meta khoá suốt lúc lưu.
+describe("GRID-07 — không sửa được trong lúc đang Lưu", () => {
+  it("trong lúc updateQuote treo: ô lưới và ô meta bị khoá; lưu xong mở lại", async () => {
+    await moEditor();
+    goTenKhach("Khách MỚI");
+    let xong!: () => void;
+    h.updateQuote.mockImplementationOnce((_id: number, p: Record<string, unknown>) => new Promise((r) => { xong = () => r(baoGia({ toCompany: p.toCompany, updatedAt: "2026-09-21T00:00:00.000Z" })); }));
+    await bam(nut("Lưu"));
+    const oGia = () => hop!.querySelector('tr[data-row="0"] [data-f="unitPrice"]') as HTMLInputElement;
+    expect(oGia().disabled, "ô Đơn giá phải khoá trong lúc đang lưu").toBe(true);
+    expect(oTenKhach().disabled, "ô meta phải khoá trong lúc đang lưu").toBe(true);
+    await act(async () => { xong(); });
+    await cho(10);
+    expect(oGia().disabled).toBe(false);
+    expect(oTenKhach().disabled).toBe(false);
+  });
+});

@@ -111,6 +111,10 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
   };
 
   const save = async (thenSubmit: boolean) => {
+    // GRID-07: chốt ô đang gõ vào model trước khi gói dữ liệu; bảng khoá suốt lúc lưu (editable &&
+    // !saving) — gõ thêm lúc đang chờ thì `load()` sau đó thay qRef và phần đó mất im lặng.
+    const dangGo = document.activeElement as HTMLElement | null;
+    if (dangGo && dangGo !== document.body && typeof dangGo.blur === "function") dangGo.blur();
     setSaving(true);
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
@@ -145,7 +149,7 @@ export function AccountHnView({ quoteId }: { quoteId: number }) {
       )}
 
       <HnTables moMacDinh tables={hnTables} templates={templates} companyId={q.companyId}
-        editable={editable} canApprove={false} canPay={false} quoteId={q.id}
+        editable={editable && !saving} canApprove={false} canPay={false} quoteId={q.id}
         onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; }} />
 
       <div className="ahn-grand-card"><span className="ahn-grand-label">Tổng tất cả {hnTables.length} sheet Hà Nội</span><span className="ahn-grand-val">{M.fmtMoney(tong)}</span></div>
