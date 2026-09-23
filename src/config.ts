@@ -145,6 +145,14 @@ const schema = z.object({
   DB_TX_MAX_WAIT: numEnv(z.coerce.number().int().positive().max(60_000).default(10_000)),
   DB_TX_TIMEOUT: numEnv(z.coerce.number().int().min(1_000, "DB_TX_TIMEOUT tính bằng MILI-GIÂY, tối thiểu 1000 (=1 giây)").max(300_000).default(60_000)),
 
+  // Hạn CƯỠNG BỨC khi tắt tiến trình web (src/server.ts shutdown). ĐƠN VỊ: MILI-GIÂY.
+  // Trước đây cứng 10s trong khi lượt lưu báo giá lớn đo được 13,1s và trần transaction là 60s
+  // (DB_TX_TIMEOUT) → mỗi lần deploy cắt ngang lượt lưu đang chạy (HTTP-08). 70s = 60s + chỗ ghi
+  // audit/phản hồi. PHẢI nhỏ hơn ân hạn của nền tảng: `stop_grace_period` của service app trong
+  // docker-compose.prod.yml và `terminationGracePeriodSeconds` (trừ 5s preStop) ở Helm/k8s —
+  // tests/ht8-an-han-tat-app.test.js khoá thứ tự đó.
+  SHUTDOWN_TIMEOUT_MS: numEnv(z.coerce.number().int().min(1_000, "SHUTDOWN_TIMEOUT_MS tính bằng MILI-GIÂY").max(600_000).default(70_000)),
+
   // ── PHANH THỜI GIAN Ở CHÍNH POSTGRES (src/db.ts, src/app.ts) ──────────── ĐƠN VỊ: MILI-GIÂY.
   //
   // VÌ SAO CẦN, dù đã có DB_TX_TIMEOUT: trần kia là của PRISMA, và nó chỉ chi phối cái nằm TRONG

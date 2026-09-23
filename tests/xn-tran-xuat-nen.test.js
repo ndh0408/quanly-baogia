@@ -95,8 +95,12 @@ describe("Ân hạn dừng phải BAO ĐƯỢC trần sinh file của đường 
     "infra/helm/quanly/values.yaml": /terminationGracePeriodSeconds:\s*(\d+)/,
   };
 
+  // Compose: CẮT về đúng service `worker` trước khi dò. Bản trước dò `stop_grace_period` đầu tiên
+  // của CẢ tệp — đúng chừng nào chỉ worker khai nó. Từ HTTP-08 service app cũng khai (75s, ân hạn
+  // tắt tiến trình WEB), và nó đứng trước worker trong tệp.
+  const phamVi = (f, t) => (f.startsWith("docker-compose") ? t.slice(t.indexOf("\n  worker:")) : t);
   const doc2 = (f) => {
-    const m = NGUON[f].exec(doc(f));
+    const m = NGUON[f].exec(phamVi(f, doc(f)));
     if (!m) throw new Error(`${f}: không đọc được ân hạn dừng`);
     return Number(m[1]);
   };

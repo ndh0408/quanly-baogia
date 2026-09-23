@@ -243,6 +243,9 @@ services:
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     logging: *default-logging
+    # Ân hạn DỪNG > SHUTDOWN_TIMEOUT_MS (70s, src/config.ts) > trần transaction 60s. Mặc định 10s
+    # của Docker SIGKILL ngay giữa lượt lưu báo giá lớn đang chạy lúc deploy (HTTP-08).
+    stop_grace_period: 75s
     # exceljs/pdfkit dựng workbook trong bộ nhớ; vượt trần thì CHỈ app chết và tự restart.
     # ── TRẦN BỘ NHỚ: NAY LÀ SỐ ĐO ĐƯỢC, KHÔNG CÒN LÀ PHỎNG ĐOÁN ────────────
     # Bản trước ghi thẳng "⚠️ TRẦN NÀY LÀ SỐ PHỎNG ĐOÁN, CHƯA ĐO TRÊN VM THẬT". Nay đã đo, và

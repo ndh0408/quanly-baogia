@@ -54,6 +54,15 @@ const server = app.listen(config.PORT, () => {
   }
 });
 
+// KEEP-ALIVE DÀI HƠN PROXY PHÍA TRƯỚC (HTTP-07). Mặc định Node đóng kết nối rỗi sau 5s, trong khi
+// cloudflared/Traefik giữ pool kết nối tới app ~90s. Proxy gửi request lên đúng socket Node vừa đóng
+// → EOF → Go transport chỉ tự thử lại request idempotent → POST (Lưu, đăng nhập) nhận 502 lẻ tẻ.
+// headersTimeout phải lớn hơn keepAliveTimeout (quy tắc của Node).
+const KEEP_ALIVE_TIMEOUT_MS = 95_000;
+const HEADERS_TIMEOUT_MS = 96_000;
+server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+server.headersTimeout = HEADERS_TIMEOUT_MS;
+
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
   // ĐÓNG SSE TRƯỚC. `server.close()` chờ mọi kết nối đang mở kết thúc, mà kết nối SSE thì theo
@@ -74,11 +83,12 @@ function shutdown(sig: string) {
     await flushSentry();
     process.exit(0);
   });
-  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
+  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày. Hạn đủ
+  // dài để một lượt lưu/xuất đồng bộ đang dở (trần transaction 60s) kịp xong — xem SHUTDOWN_TIMEOUT_MS.
   setTimeout(() => {
-    logger.error("tắt máy quá hạn 10s — thoát cưỡng bức (còn kết nối chưa đóng?)");
+    logger.error({ hanMs: config.SHUTDOWN_TIMEOUT_MS }, "tắt máy quá hạn — thoát cưỡng bức (còn kết nối chưa đóng?)");
     process.exit(1);
-  }, 10_000).unref();
+  }, config.SHUTDOWN_TIMEOUT_MS).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

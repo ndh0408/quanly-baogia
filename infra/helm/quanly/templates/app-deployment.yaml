@@ -37,9 +37,9 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "quanly.serviceAccountName" . }}
-      # > 5s (preStop) + 10s (lưới an toàn cứng trong src/server.ts shutdown()) để pod không bị
-      # SIGKILL giữa lúc đang đóng êm.
-      terminationGracePeriodSeconds: 45
+      # > 5s (preStop) + 70s (SHUTDOWN_TIMEOUT_MS — hạn cưỡng bức trong src/server.ts shutdown())
+      # để pod không bị SIGKILL giữa lúc đang đóng êm một lượt lưu dài (trần transaction 60s).
+      terminationGracePeriodSeconds: 80
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
