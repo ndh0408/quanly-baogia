@@ -516,6 +516,22 @@ function GridTableInner(props: GridTableProps) {
     el.readOnly = true; el.classList.add("cell-lock");
     try { el.setSelectionRange(0, 0); } catch { /* */ }
   };
+  // Ô NHẬP NỚI SANG PHẢI KHI CHỮ DÀI HƠN Ô (như Excel): cột Số Lượng/Đơn Giá hẹp, nên chọn một ô
+  // công thức "=0.8*0.5*8" thì chỉ thấy "=0.8*0.5'" — muốn xem/sửa phải lên thanh fx. Nay ô đang
+  // focus mà chữ tràn thì <input> dài ra đè lên các ô bên phải (td vốn `position: relative`, lớp
+  // `.cell-grow` nâng z-index), tối đa tới mép phải bảng. Rời ô (`on=false`) là trả về 100%.
+  // Chỉ <input>: <textarea> đã tự cao lên theo chữ (autoGrow).
+  const fitCell = (el: HTMLInputElement | HTMLTextAreaElement | null, on = true) => {
+    if (!el || el.tagName !== "INPUT") return;
+    el.style.width = ""; el.classList.remove("cell-grow");
+    if (!on || el.scrollWidth <= el.clientWidth + 1) return;
+    const tbl = el.closest("table");
+    const mep = tbl ? tbl.getBoundingClientRect().right - el.getBoundingClientRect().left - 2 : 0;
+    // Chưa dàn trang (mép đo ra ≤ bề rộng ô) thì bỏ qua mức chặn, kẻo ra bề rộng âm.
+    const max = mep > el.clientWidth ? mep : Infinity;
+    el.classList.add("cell-grow");
+    el.style.width = `${Math.min(el.scrollWidth + 8, max)}px`;
+  };
   // Point-mode BÀN PHÍM (Excel): đang gõ công thức (chế độ ENTER) mà ký tự trước con trỏ là
   // "="/toán tử/"("/","… → mũi tên CHÈN THAM CHIẾU Ô rồi di chuyển nó ("=" ↑ → "=H3");
   // Shift+mũi tên kéo thành VÙNG ("=SUM(" ↑ Shift+↑ → "=SUM(H3:H2"). Gõ ký tự thường tiếp theo
@@ -1359,6 +1375,7 @@ function GridTableInner(props: GridTableProps) {
     if (!navigatingRef.current) { const sel = selRef.current; if (!sel || sel.anchor.row !== i || sel.anchor.field !== f) { selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); } }
     const fx = items[i]?.formulas?.[f]; if (fx && el) el.value = fx;   // ô có công thức → hiện =… để sửa
     if (el) el.dataset.escVal = el.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
+    fitCell(el);
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
   const onGridBlur = (e: { target: EventTarget | null; relatedTarget?: EventTarget | null }) => {
@@ -1377,6 +1394,7 @@ function GridTableInner(props: GridTableProps) {
       const rec = items[i] as Record<string, unknown>;
       const want = NUMERIC.has(f) ? fmtField(i, f, rec[f]) : ((rec[f] as string) ?? "");
       if (el.value !== want) el.value = want;
+      fitCell(el, false);
     }
     clearActiveRefs(); setTimeout(closeAuto, 150);
     setTimeout(closeSug, 150);   // chờ cú click chọn gợi ý kịp "đáp đất" rồi mới đóng
@@ -1453,6 +1471,7 @@ function GridTableInner(props: GridTableProps) {
   const onNumInput = (i: number, f: string, el: HTMLInputElement) => {
     editingRef.current = true;   // có gõ = đang SỬA (kể cả gõ tiếng Việt qua IME — keydown không bắt được)
     markEditUndo(i, f);          // Ctrl+Z lùi được cả ô (trước đây gõ tay KHÔNG hề ghi undo)
+    fitCell(el);
     const raw = el.value; const it = items[i] as Record<string, unknown>;
     if (raw.trim().startsWith("=")) {
       // Đang GÕ công thức: LƯU LIVE vào model + eval ngay (như SPA), KHÔNG xóa formula khi đang gõ.
@@ -1500,7 +1519,7 @@ function GridTableInner(props: GridTableProps) {
   };
   const txtInput = (i: number, f: string, ph?: string) => (
     <input data-f={f} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}
-      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); }} />
+      onInput={(e) => { editingRef.current = true; markEditUndo(i, f); const el = e.target as HTMLInputElement; fitCell(el); const fx = el.value.trim().startsWith("="); if (fx) { fxAutocomplete(el); highlightActiveFormulaRefs(el.value); } else { (items[i] as Record<string, unknown>)[f] = el.value; closeAuto(); clearActiveRefs(); } syncFxBar(); if (fx) onChange(); else onChangeSoft(); }} />
   );
   const taInput = (i: number, f: string, ph?: string) => (
     <textarea data-f={f} rows={1} defaultValue={(items[i][f as keyof M.Item] as string) || ""} placeholder={ph} disabled={!editable}

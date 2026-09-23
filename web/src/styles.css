@@ -3788,3 +3788,17 @@ textarea[aria-invalid="true"] {
 .excel-table.clf-theme tr.subgroup-row td.col-notes textarea {
   color: #4f513e;
 }
+
+/* Ô nhập đang focus mà chữ dài hơn ô → nới sang phải, đè lên ô bên cạnh (như Excel) — xem
+   `fitCell` trong GridTable.tsx. Bề rộng do JS đặt; đây chỉ lo nổi lên trên, có nền và khung để
+   không lẫn với chữ của ô bị đè. Canh TRÁI để đầu công thức ("=0.8*…") luôn nằm ngay chỗ ô gốc. */
+.excel-table td input.cell-grow {
+  position: relative;
+  z-index: 6;
+  max-width: none;
+  text-align: left;
+  background: #fffbe8;
+  box-shadow:
+    0 0 0 1px #1769d6,
+    0 2px 6px rgba(0, 0, 0, 0.18);
+}
