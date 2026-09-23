@@ -47,6 +47,9 @@ export function colLetter(n: number) {
 // CHỈ dùng để TỰ KIỂM: công thức dịch xong có còn cho ra đúng giá trị đã lưu không.
 // Phải giữ khớp với frontend; có test ghim. (Nếu lệch → tự kiểm trượt → ghi số: an toàn.)
 function evalArith(input: string) {
+  // Khoảng trắng kẹp giữa hai phần của số ("1 000 000", "100, 0") = lỗi, y hệt web (L28): Excel đọc
+  // dấu cách giữa hai toán hạng là toán tử giao vùng, tệp chứa nó KHÔNG mở được.
+  if (/[\d.,]\s+[\d.,]/.test(String(input))) return null;
   const s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
@@ -252,8 +255,15 @@ export function translateFormula(raw: string | null | undefined, ctx: FormulaCon
   });
   if (bad) return null;
 
+  // Chốt chặn KHOẢNG TRẮNG (L28): dấu cách GIỮA hai toán hạng ("MAX(G13-100. 0)", "1 000 000*8%",
+  // "G12 G13") là toán tử giao vùng của Excel → sai cú pháp → Excel KHÔNG MỞ ĐƯỢC cả tệp (đo bằng
+  // Excel COM, kể cả chế độ sửa chữa). Gặp là ghi số. Khoảng trắng còn lại chỉ nằm cạnh toán tử/
+  // ngoặc/dấu phẩy nên bỏ hết đi không đổi nghĩa — tệp không bao giờ mang khoảng trắng nào.
+  if (/[A-Za-z0-9.)%]\s+[A-Za-z0-9.($]/.test(s)) return null;
+  s = s.replace(/\s+/g, "");
+
   // Chốt chặn: chỉ còn ký tự hợp lệ của công thức Excel.
-  if (!/^[A-Za-z0-9.,:%+\-*/()$ ]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
+  if (!/^[A-Za-z0-9.,:%+\-*/()$]+$/.test(s)) return null;   // $ = khoá tuyệt đối, hợp lệ trong Excel
   // Chốt chặn: SỐ ĐỐI SỐ đúng như Excel đòi. Excel gặp hàm sai số đối số thì coi cả công thức là
   // hỏng: lúc mở tệp báo "We found a problem… Removed Records: Formula" rồi XOÁ công thức. Đo được
   // ở production 2026-09-23: "=ROUND(E2*63000,-3)" (dấu phẩy kiểu Excel tiếng Anh) bị đọc thành

@@ -6,6 +6,11 @@
 export type FormulaRefs = { cell: (a: string) => number; range: (a: string, b: string) => number[] | null };
 
 export function evalArith(input: string | number): number | null {
+  // Khoảng trắng KẸP GIỮA hai phần của một số ("1 000 000", "100, 0", "1 .5", hai ô dính nhau
+  // "58000 57000") là LỖI cú pháp — Excel coi dấu cách giữa hai toán hạng là toán tử giao vùng. Bản cũ
+  // xoá sạch khoảng trắng nên lưới vẫn ra số, ô không đỏ, còn tệp xuất chứa đúng chuỗi đó và Excel từ
+  // chối mở CẢ tệp (L28). Khoảng trắng quanh toán tử/ngoặc vẫn được bỏ như cũ.
+  if (/[\d.,]\s+[\d.,]/.test(String(input))) return null;
   const s = String(input).replace(/,/g, ".").replace(/\s+/g, "");
   if (!s || !/^[-+*/().0-9]+$/.test(s)) return null;
   let pos = 0;
