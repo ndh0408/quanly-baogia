@@ -320,3 +320,50 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     expect(p.sheets[0].items[0].days).toBeNull();
   });
 });
+
+// X2: hộp thanh toán (route /pay bump updatedAt) gọi onQuoteTouched(mốc MỚI) và editor nhận thẳng mốc đó.
+// Người khác đã lưu chen vào giữa lần nạp và cú tích thanh toán thì mốc mới đã bao lượt lưu của họ —
+// nhận là vô hiệu khoá lạc quan, lần Lưu kế ĐÈ IM LẶNG bản người kia. Cùng dạng app#11 (napLaiSauHn).
+describe("X2 — nhận mốc updatedAt sau khi tích thanh toán chỉ khi không ai khác lưu chen", () => {
+  const MOC_TT = "2026-09-21T08:00:00.000Z";
+  const hnCo = (over: Record<string, unknown> = {}) => [{ name: "HN", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "cái", quantity: 1, unitPrice: 5000, rid: "r1", ...over }] }];
+  async function tichThanhToan() {
+    (api.markHnPay as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => ({ ok: true, rid: "r1", paid: true, updatedAt: MOC_TT }));
+    await bam(hop!.querySelector('button[data-xl="thanh-toan"]') as HTMLButtonElement);
+    act(() => { (hop!.querySelector(".modal input[type=checkbox]") as HTMLInputElement).click(); });
+    await bam(hop!.querySelector(".modal .btn-primary") as HTMLButtonElement);
+    await cho(10);
+  }
+  async function luuRoiDocMoc() {
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    return (h.updateQuote.mock.calls.at(-1)![1] as Record<string, unknown>).baseUpdatedAt;
+  }
+
+  it("người khác đã lưu phần chính (id trang đổi) trước cú tích → lần Lưu kế vẫn gửi mốc CŨ (để nhận 409)", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true }), updatedAt: MOC_TT, sheets: [trang(202)] }));
+    await tichThanhToan();
+    expect(api.markHnPay).toHaveBeenCalled();
+    expect(await luuRoiDocMoc()).toBe(MOC_CU);
+  });
+
+  it("account HN đã lưu bảng Hà Nội chen vào → vẫn gửi mốc CŨ", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true, unitPrice: 9000 }), updatedAt: MOC_TT }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc()).toBe(MOC_CU);
+  });
+
+  it("đối chứng: không ai khác lưu (chỉ thanh toán đổi) → nhận mốc MỚI, không tự đâm 409", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true, paidAt: MOC_TT, paidById: 1 }), updatedAt: MOC_TT }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc()).toBe(MOC_TT);
+  });
+
+  afterEach(() => { h.getQuote.mockReset(); h.getQuote.mockImplementation(async () => baoGia()); });
+});

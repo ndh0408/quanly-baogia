@@ -117,6 +117,27 @@ export const vanTayMain = (q: unknown): string => {
 };
 
 /**
+ * X2 — VÂN TAY NỘI DUNG BẢNG HÀ NỘI của một bản máy chủ: chỉ phần người dùng GÕ (tên, mẫu, nhóm, hạng
+ * mục). Bỏ các trường máy chủ sở hữu — thanh toán (`paid*`, `hasPaidProof`), duyệt (`approved*`), `rid`,
+ * `_k` — đúng như quoteUtils.vanTayHn ở máy chủ: người khác tích thanh toán KHÔNG làm nó đổi, còn account
+ * HN lưu giá thì đổi.
+ */
+export const vanTayHnNoiDung = (ts: unknown): string => {
+  type Hang = { kind?: unknown; label?: unknown; name?: unknown; detail?: unknown; unit?: unknown; quantity?: unknown; quantityExact?: unknown; unitPrice?: unknown; days?: unknown; notes?: unknown };
+  type Bang = { name?: unknown; templateId?: unknown; groupSubtotal?: unknown; items?: Hang[] };
+  return JSON.stringify((Array.isArray(ts) ? ts as Bang[] : []).map((t) => ({
+    name: t?.name ? String(t.name).trim() : null,
+    templateId: t?.templateId != null ? Number(t.templateId) : null,
+    groupSubtotal: !!t?.groupSubtotal,
+    items: (t?.items || []).map((it) => ({
+      kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
+      unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
+      unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
+    })),
+  })));
+};
+
+/**
  * app#10 — BẢN GIỮ LẠI LÚC 409 MANG ID TRANG CŨ. Người kia Lưu = máy chủ xoá-tạo-lại trang nên id đổi
  * hết; gửi id cũ thì carrySheetState không ghép được trang nào → khách duyệt / chữ ký / mã sản xuất /
  * PO của MỌI trang bị xoá im lặng và bị cấp mã mới.
@@ -215,6 +236,8 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const savingRef = useRef(false);
   // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
   const vanTayMainRef = useRef<string | null>(null);
+  // X2: cùng mốc với vanTayMainRef, cho NỘI DUNG bảng Hà Nội (xem vanTayHnNoiDung).
+  const vanTayHnRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   // L61/L62: editor này CÒN GẮN không. Hộp hỏi (confirm/promptModal) là DOM tự dựng, không đóng khi
   // Back đổi hash; và PUT/POST vẫn bay sau khi Shell đã gỡ editor (đổi `key` theo route). Trả lời hộp
@@ -427,6 +450,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (!q.sheets || !(q.sheets as Sheet[]).length) q.sheets = [{ templateId: _templates![0]?.id, groupSubtotal: true, items: [], extraTables: [] }];
         (q.sheets as Sheet[]).forEach((s) => { if (!Array.isArray(s.extraTables)) s.extraTables = []; });
         const vanTayMay = vanTayMain(q);   // app#11: của bản MÁY CHỦ, trước khi bản nháp nào phủ lên
+        const vanTayHnMay = vanTayHnNoiDung(q.hnTables);   // X2: cùng thời điểm
         // ── BẢN NHÁP CỤC BỘ: có gì để khôi phục không? ───────────────────────
         // `khoaBanNhap("moi")` cho bản chưa từng lưu (#/rnew) — nó KHÔNG có id, mà dùng id 0 thì
         // đụng khoá của một báo giá thật id 0 nếu sau này có.
@@ -530,6 +554,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         stampKeys(q);
         qRef.current = q;
         vanTayMainRef.current = vanTayMay;
+        vanTayHnRef.current = vanTayHnMay;
         khoaNhapRef.current = khoa;
         if (alive) {
           dirtyRef.current = khoiPhuc;
@@ -714,7 +739,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
-        vanTayMainRef.current = vanTayMain(saved);
+        vanTayMainRef.current = vanTayMain(saved); vanTayHnRef.current = vanTayHnNoiDung(saved.hnTables);
         const moi = { ...saved, _activeSheet: ai } as QuoteFull;
         giuDanhTinhSheet(q, moi, true);
         qRef.current = moi; stampKeys(qRef.current); redraw();
@@ -833,7 +858,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         if (s) { s.custStatus = r.custStatus; s.custStatusAt = r.custStatusAt; s.custNote = r.custNote; s.custStatusBy = r.custStatusBy; }
       }
       const u = await api.markConverted(q.id);
-      vanTayMainRef.current = vanTayMain(u);
+      vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
       const moi = { ...u, _activeSheet: ai } as QuoteFull;
       giuDanhTinhSheet(q, moi, false);
       qRef.current = moi;
@@ -860,7 +885,7 @@ Lý do (không bắt buộc):`,
       { placeholder: "VD: Khách chọn nhà cung cấp khác, giá cao…" },
     );
     if (reason === null || !songRef.current) return;   // L61: markLost KHÔNG đảo lại được
-    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); const moi = { ...u, _activeSheet: ai } as QuoteFull; giuDanhTinhSheet(q, moi, false); qRef.current = moi; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
+    try { const u = await api.markLost(q.id, reason); vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); const moi = { ...u, _activeSheet: ai } as QuoteFull; giuDanhTinhSheet(q, moi, false); qRef.current = moi; stampKeys(qRef.current); baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null; toast("Đã đánh dấu không chốt", "success"); redraw(); }
     catch (ex) { toast(ex instanceof ApiError ? ex.message : "Lỗi", "error"); }
   };
   /* ── SAU KHI GIAO / DUYỆT / TRẢ PHẦN HÀ NỘI (FE-01 b) ─────────────────────────────────────
@@ -879,7 +904,7 @@ Lý do (không bắt buộc):`,
     try {
       const u = await api.getQuote(cur.id);
       if (!dirtyRef.current) {
-        vanTayMainRef.current = vanTayMain(u);
+        vanTayMainRef.current = vanTayMain(u); vanTayHnRef.current = vanTayHnNoiDung(u.hnTables);
         const moi = { ...u, _activeSheet: cur._activeSheet } as QuoteFull;
         giuDanhTinhSheet(cur, moi, false);
         qRef.current = moi; stampKeys(qRef.current);
@@ -896,9 +921,27 @@ Lý do (không bắt buộc):`,
       // nhận khi phần ngoài HN của `u` trùng bản máy chủ gần nhất trang này đã nạp/lưu; lệch thì giữ
       // mốc cũ → lần Lưu kế nhận 409 đúng (phần đang soạn được giữ qua khoá ":xungdot").
       const giongMain = vanTayMainRef.current != null && vanTayMainRef.current === vanTayMain(u);
-      if (giongHn && giongMain) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; }
+      if (giongHn && giongMain) { rec.updatedAt = moi.updatedAt; baseNhapRef.current = (moi.updatedAt as string | undefined) ?? null; vanTayHnRef.current = vanTayHnNoiDung(u.hnTables); }
       redrawMeta();
     } catch { /* ignore */ }
+  };
+  /* ── MỐC MỚI SAU KHI TÍCH THANH TOÁN (X2) ───────────────────────────────────────────────────────
+     Route /pay bump `Quote.updatedAt` và trả mốc mới để người tích khỏi tự đâm 409 lần Lưu kế. Nhưng
+     nhận thẳng là sai khi NGƯỜI KHÁC đã lưu chen vào giữa lần nạp và cú tích: mốc mới đã bao lượt lưu
+     đó → khoá lạc quan vô hiệu, lần Lưu kế đè im lặng bản người kia (y như app#11 ở napLaiSauHn).
+     Đọc lại bản máy chủ và chỉ nhận khi phần ngoài HN (vanTayMain) và NỘI DUNG bảng HN (vanTayHnNoiDung
+     — không tính trường thanh toán/duyệt) vẫn trùng bản gần nhất trang này đã nạp/lưu. Lệch, hoặc đọc
+     lỗi → giữ mốc cũ: lần Lưu kế nhận 409 đúng, phần đang soạn được giữ qua ":xungdot". */
+  const nhanMocThanhToan = async (moc: string) => {
+    const cur = qRef.current;
+    if (!cur || !cur.id) return;
+    try {
+      const may = await api.getQuote(cur.id);
+      if (!songRef.current || qRef.current !== cur) return;   // đã Lưu / tải lại → đường đó tự làm tươi mốc
+      const giongMain = vanTayMainRef.current != null && vanTayMainRef.current === vanTayMain(may);
+      const giongHn = vanTayHnRef.current != null && vanTayHnRef.current === vanTayHnNoiDung(may.hnTables);
+      if (giongMain && giongHn) { (cur as { updatedAt?: string }).updatedAt = moc; baseNhapRef.current = moc; }
+    } catch { /* giữ mốc cũ — an toàn */ }
   };
   // ── NẠP dữ liệu đọc từ file Excel vào lưới (chưa ghi DB — bấm Lưu mới ghi) ──────────────────
   const applyImport = (payload: ImportApplyPayload) => {
@@ -1255,7 +1298,7 @@ Lý do (không bắt buộc):`,
           </div>
         )}
 
-        <ExtraTables key={`extra-sheet-${activeSheet._k}`}sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
+        <ExtraTables key={`extra-sheet-${activeSheet._k}`}sheet={activeSheet as Parameters<typeof ExtraTables>[0]["sheet"]} templates={templates} companyId={q.companyId} editable={coSuaGiDo && !saving} editableCat={(cat) => phamVi.includes(cat as QuoteScope)} canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")} quoteId={q.id} onMarkDirty={mark} onQuoteTouched={(u) => { void nhanMocThanhToan(u); }} thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }} />
 
         {/* BÁO GIÁ HÀ NỘI — cấp BÁO GIÁ, không thuộc trang nào (Quote.hnTables, từ 2026-09-15).
             Cùng một component với màn của account Hà Nội: hai bên phải thấy ĐÚNG một thứ.
@@ -1270,7 +1313,7 @@ Lý do (không bắt buộc):`,
           editable={coScope("hanoi") && !hnKhoa && !saving}
           canApprove={hasPerm("quote:internal:approve")} canPay={hasPerm("quote:internal:pay")}
           quoteId={isNew ? undefined : q.id} onMarkDirty={mark}
-          onQuoteTouched={(u) => { (q as { updatedAt?: string }).updatedAt = u; baseNhapRef.current = u; }}
+          onQuoteTouched={(u) => { void nhanMocThanhToan(u); }}
           thanhChung={{ dock: oDock, dangLam: luoiDangLam.id, datDangLam }}
           /* Account vừa gửi mà khối đóng thì việc chờ duyệt nằm khuất — mở sẵn cho quản lý thấy. */
           moMacDinh={q.hnStatus === "submitted" && hasPerm("quote:hn:manage")}
