@@ -116,8 +116,8 @@ const mauTuCauHinh = (khoa: "sectionFill" | "subFill") =>
     .flatMap((t) => [t?.items?.[khoa], t?.palette?.[khoa]])
     .filter((v): v is string => typeof v === "string" && /^[0-9A-Fa-f]{8}$/.test(v))
     .map((v) => v.toUpperCase());
-const FILL_SECTION = new Set(["FFFAE9DB", "FFFCEFDB", "FFE2EFDA", ...mauTuCauHinh("sectionFill")]);
-const FILL_SUB = new Set(["FFC9D9EF", "FFEAF1FB", ...mauTuCauHinh("subFill")]);
+const FILL_SECTION = new Set(["FFFAE9DB", "FFFCEFDB", "FFE2EFDA", "FFF6D479", ...mauTuCauHinh("sectionFill")]);
+const FILL_SUB = new Set(["FFC9D9EF", "FFEAF1FB", "FFD5DDA2", ...mauTuCauHinh("subFill")]);
 /** Màu nền hàng TIÊU ĐỀ CỘT — phụ trợ khi nhận diện hàng tiêu đề. */
 const FILL_HEADER = new Set(["FFF3C9A1", "FFFFCC99"]);
 const TEMPLATE_MARKER_PREFIX = "__QUANLY_TEMPLATE__:";

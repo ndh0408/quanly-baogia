@@ -8,7 +8,7 @@
  * Đã lệch thật, hai lần, đo được trên tệp do máy chủ dev xuất ra:
  *   · hàng nhóm / nhóm con — đổi sang F6D479 / D5DDA2 trong cấu hình mà `.clf-theme` trong
  *     `public/style.css` vẫn #fcefdb / #eaf1fb (màu Colorfull CŨ).
- *   · hàng tiêu đề — tệp giữ nền nướng sẵn (`paintHeader: false`) là theme8 tint 0.4 = #93CDDD
+ *   · hàng tiêu đề — tệp giữ nền nướng sẵn (`paintHeader: false`), khi ấy là theme8 tint 0.4 = #93CDDD
  *     xanh ngọc, còn màn hình để #ffcc99 peach (màu header của Gia Nguyễn). Lệch này có TRƯỚC
  *     đợt vá cột Chi Tiết.
  *
@@ -144,14 +144,44 @@ describe("Colorfull — màu lưới khớp màu tệp Excel", () => {
     }
   });
 
-  it("hàng TIÊU ĐỀ: màn hình dùng đúng màu nướng sẵn của tệp mẫu, không dùng màu Gia Nguyễn", () => {
-    // #93cddd = theme8 (accent5 #4BACC6) tint 0.4 — đọc thẳng từ `xl/theme/theme1.xml` của tệp do
-    // app xuất ra. Đóng cứng ở đây thay vì giải mã theme trong bài kiểm: phép giải mã tint của
-    // OOXML dài hơn cả thứ nó gác, còn con số này chỉ đổi khi ai đó thay tệp mẫu — lúc ấy ca
-    // `paintHeader` bên `cf-clf-cot-hinh-anh.test.js` cũng đỏ theo.
+  it("hàng TIÊU ĐỀ: màn hình dùng đúng màu nướng sẵn của tệp mẫu, không dùng màu Gia Nguyễn", async () => {
+    // Đọc nền ô tiêu đề cột NGAY TỪ tệp mẫu thay vì đóng cứng: lần đổi màu 2026-09-23 (theme8 tint
+    // 0.4 = #93cddd → 9DCCC9) cho thấy con số này có đổi thật, và đổi thì CSS phải theo.
+    // Tệp mẫu khai bằng argb (scripts/doi-mau-clf.mjs) — quay lại màu theme thì giải bằng `giaiMauTheme`.
     expect(getConfig("clofull_decor").items.paintHeader,
       "mẫu phải để nền header nướng sẵn thì ca này mới đúng vấn đề").toBe(false);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(path.join(process.cwd(), "templates/CLF_KhongNgay.xlsx"));
+    const g = wb.worksheets[0].getCell("C4").fill?.fgColor || {};
+    const nenTep = g.argb ? argbSangCss(g.argb) : await giaiMauTheme(g);
     expect(nenCuoiCung(".excel-table.clf-theme thead th"),
-      "màu hàng TIÊU ĐỀ trên màn hình lệch với nền nướng sẵn trong tệp Excel").toBe("#93cddd");
+      "màu hàng TIÊU ĐỀ trên màn hình lệch với nền nướng sẵn trong tệp Excel").toBe(nenTep);
+  });
+
+  it("nền NƯỚNG SẴN của hai tệp mẫu đúng bảng màu người dùng chỉnh (2026-09-23)", async () => {
+    // Nguồn: "Copy of Copy of E2E_-_Nhap_tu_Excel_091-new4.xlsx" bản sửa 2026-09-23.
+    //   dải tiêu đề 9CCDC9 · chữ 243139 — tiêu đề cột 9DCCC9 — khối tổng 9DCCC9
+    // Bản CÓ NGÀY dựng lại từ bản không-ngày (scripts/dung-mau-clf-co-ngay.mjs) — quên dựng lại là
+    // hai bản lệch màu, ca này bắt được.
+    const doc = async (tep) => {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.readFile(path.join(process.cwd(), "templates", tep));
+      return wb.worksheets[0];
+    };
+    const nen = (ws, a) => String(ws.getCell(a).fill?.fgColor?.argb || "-").toUpperCase();
+    for (const [tep, cotCuoi, oTong] of [
+      ["CLF_KhongNgay.xlsx", "I", ["F", "G", "H"]],
+      ["CLF_CoNgay.xlsx", "J", ["G", "H", "I"]],
+    ]) {
+      const ws = await doc(tep);
+      expect(nen(ws, "B2"), `${tep}: nền dải tiêu đề`).toBe("FF9CCDC9");
+      expect(String(ws.getCell("B2").font?.color?.argb).toUpperCase(), `${tep}: chữ dải tiêu đề`).toBe("FF243139");
+      for (const c of ["B", "C", "D", "E", "F", "G", "H", "I", cotCuoi]) {
+        expect(nen(ws, `${c}4`), `${tep}: nền tiêu đề cột ${c}4`).toBe("FF9DCCC9");
+      }
+      for (const r of [13, 14, 15]) for (const c of oTong) {
+        expect(nen(ws, `${c}${r}`), `${tep}: nền khối tổng ${c}${r}`).toBe("FF9DCCC9");
+      }
+    }
   });
 });

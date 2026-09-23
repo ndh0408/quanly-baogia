@@ -700,6 +700,7 @@ describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
  *     hàng NHÓM      F6D479 (vàng nghệ)
  *     hàng NHÓM CON  D5DDA2 (xanh ô-liu)
  * Trước đó cấu hình để FCEFDB / EAF1FB — hai màu nhạt hơn hẳn, không phải thứ đã chọn.
+ * Ngày 2026-09-23 người dùng sửa lại chính tệp đó: nhóm F4CFB0 · nhóm con CAD8AA (hằng số dưới).
  *
  * VÀ MỘT LỖI CỦA TÔI mà người dùng chụp màn hình chỉ ra: ở bản CÓ NGÀY, hộp nhãn "Tổng Cộng /
  * VAT / Thành Tiền" ra TRẮNG TRƠN trong khi ô tiền vẫn có nền. Nguyên nhân trong script dựng mẫu:
@@ -709,8 +710,8 @@ describe("Colorfull — khung viền, trang in, chiều cao hàng", () => {
  * ============================================================================
  */
 describe("Colorfull — màu nền đúng như file mẫu người dùng chỉnh", () => {
-  const NHOM = "F6D479";
-  const NHOM_CON = "D5DDA2";
+  const NHOM = "F4CFB0";
+  const NHOM_CON = "CAD8AA";
   const nenCua = (ws, addr) => {
     const f = ws.getCell(addr).fill;
     if (!f || f.type !== "pattern" || !f.fgColor) return "-";

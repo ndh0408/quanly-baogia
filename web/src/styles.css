@@ -3752,21 +3752,21 @@ textarea[aria-invalid="true"] {
 /* ── MÀU LƯỚI COLORFULL PHẢI KHỚP TỆP EXCEL XUẤT RA ────────────────────────────────────────
    `public/style.css` (đóng băng — không sửa) đặt `.clf-theme` là #fcefdb / #eaf1fb, đúng màu
    Colorfull CŨ. Nay màu lấy từ chính tệp mẫu người dùng chỉnh hoàn chỉnh và đã vào
-   `templateConfigs.ts` (`sectionFill: FFF6D479`, `subFill: FFD5DDA2`), nên tệp xuất ra một màu
+   `templateConfigs.ts` (`sectionFill: FFF4CFB0`, `subFill: FFCAD8AA`), nên tệp xuất ra một màu
    mà lưới trên màn hình một màu khác — người soạn không còn thấy trước thứ khách sẽ nhận.
    Tệp này nạp SAU `style.css` (web/src/main.tsx:10-11) nên cùng độ ưu tiên là bản dưới thắng. */
 .excel-table.clf-theme tr.section-row td {
-  background: #f6d479;
+  background: #f4cfb0;
 }
 .excel-table.clf-theme tr.subgroup-row td {
-  background: #d5dda2;
+  background: #cad8aa;
 }
 /* Hàng TIÊU ĐỀ: tệp Colorfull khai `paintHeader: false` nên nền giữ nguyên màu nướng sẵn trong
-   tệp mẫu — đọc ra là theme8 (accent5 #4BACC6) tint 0.4 = #93CDDD, xanh ngọc. Màn hình lại để
+   tệp mẫu — nay là #9DCCC9 (trước 2026-09-23: theme8 tint 0.4 = #93CDDD). Màn hình lại để
    #ffcc99 (peach, màu header của Gia Nguyễn). Lệch này CÓ TRƯỚC đợt vá cột Chi Tiết, nhưng cùng
    đúng một lớp với hai dòng trên: người soạn phải thấy được thứ khách sắp nhận. */
 .excel-table.clf-theme thead th {
-  background: #93cddd;
+  background: #9dccc9;
 }
 /* MÀU CHỮ hàng nhóm / nhóm con — cũng phải khớp tệp Excel, không chỉ màu nền.
    `public/style.css` tô chữ hàng nhóm #9a5b14 và nhóm con #1f4e79: đúng hai màu mà tệp Excel

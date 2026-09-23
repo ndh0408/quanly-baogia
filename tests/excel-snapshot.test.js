@@ -141,6 +141,14 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // C3:I3, thu nhãn tổng về F:G và xoá ghi chú nhúng cứng khi người dùng không bật ghi chú.
       // Các bất biến tương ứng (kể cả mở lại file, merge không chồng, khung ngoài và bề rộng cột)
       // được kiểm chi tiết ở `cf-colorfull-cot-chi-tiet.test.js`; cả cụm Excel 129 bài đã xanh.
+      //
+      // ── LẦN ĐỔI HASH CÓ CHỦ Ý: 2026-09-23 (bảng màu Colorfull mới) ─────────
+      // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác 25 ô trên 109, TẤT CẢ chỉ là màu —
+      // giá trị, định dạng số, chữ đậm không đổi ô nào:
+      //   · B2:I2 dải tiêu đề   theme8/t0.4 → nền FF9CCDC9 · chữ FF243139
+      //   · B4:I4 tiêu đề cột   theme8/t0.4 → FF9DCCC9
+      //   · F7:H9 khối tổng     theme8/t0.4 → FF9DCCC9
+      // Màu lấy từ tệp mẫu người dùng chỉnh lại sáng 2026-09-23 (xem scripts/doi-mau-clf.mjs).
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

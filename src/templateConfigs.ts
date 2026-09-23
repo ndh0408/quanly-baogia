@@ -219,15 +219,16 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       headerRow: 4,
       paintHeader: false,      // giữ màu header baked riêng của Colorfull
       // Colorfull (CLF): GIỮ màu cũ — KHÔNG dùng màu Gia Nguyễn. Header để baked (không repaint),
-      // nền nhóm dùng màu cũ #fcefdb/#eaf1fb.
+      // nền nhóm theo bảng màu riêng của Colorfull (bên dưới).
       // MÀU LẤY TỪ CHÍNH FILE MẪU ANH ĐÃ CHỈNH HOÀN CHỈNH
-      // ("Copy of Copy of E2E_-_Nhap_tu_Excel_091-new4.xlsx", đọc bằng exceljs):
-      //     hàng NHÓM      = F6D479 (vàng nghệ)   · chữ Times 11 đậm
-      //     hàng NHÓM CON  = D5DDA2 (xanh ô-liu)  · chữ Times 11 đậm màu 4F513E
-      // Trước đó là FCEFDB / EAF1FB — hai màu nhạt hơn nhiều, không phải thứ đã chọn.
-      // Tiêu đề cột · dải trên bảng · khối tổng vẫn dùng màu nền của file mẫu (theme8/tint .4),
-      // nên không khai ở đây — `paintHeader: false` để app KHÔNG tô đè.
-      sectionFill: "FFF6D479", subFill: "FFD5DDA2",
+      // ("Copy of Copy of E2E_-_Nhap_tu_Excel_091-new4.xlsx", bản sửa 2026-09-23, đọc bằng exceljs):
+      //     hàng NHÓM      = F4CFB0 (cam đào)     · chữ Times 11 đậm
+      //     hàng NHÓM CON  = CAD8AA (xanh ô-liu)  · chữ Times 11 đậm màu 4F513E
+      // Lịch sử: FCEFDB / EAF1FB → F6D479 / D5DDA2 → nay. Đổi ở đây là `excelImport.ts` tự nhận màu
+      // mới; màu cũ đã phát hành phải giữ trong danh sách chép tay ở đó (tệp khách còn giữ).
+      // Tiêu đề cột · dải tiêu đề · khối tổng là nền NƯỚNG SẴN trong file mẫu (9DCCC9 / 9CCDC9 —
+      // xem scripts/doi-mau-clf.mjs), nên không khai ở đây — `paintHeader: false` để app KHÔNG tô đè.
+      sectionFill: "FFF4CFB0", subFill: "FFCAD8AA",
       // MÀU CHỮ, đo từ cùng tệp mẫu ấy (đừng chỉ lấy màu nền — đợt trước bỏ quên đúng hai dòng
       // này nên hàng nhóm ra chữ CAM-NÂU FF9A5B14 và nhóm con ra chữ XANH DƯƠNG FF1F4E79):
       //     hàng NHÓM     = theme5 tint -0.25  (accent2 #C0504D → #953735, đỏ gạch)
