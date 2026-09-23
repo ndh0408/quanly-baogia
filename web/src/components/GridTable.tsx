@@ -634,8 +634,14 @@ function GridTableInner(props: GridTableProps) {
     const rongO = td ? td.clientWidth : el.clientWidth;
     const mepO = td && tbl ? tbl.getBoundingClientRect().right - td.getBoundingClientRect().left - 2 : 0;
     const tran = mepO > rongO ? mepO : max;
+    // Đệm phải: ô vừa gõ "=" chưa kịp nhận lớp has-formula (React gắn ở lần vẽ sau) nên đệm 15px cho
+    // dấu ƒ chưa có — tính trước, kẻo lần vẽ sau thêm đệm là chữ hụt ~3px (đo trên dev).
+    const demPhai = Math.max(parseFloat(cs.paddingRight) || 0, el.value.trim().startsWith("=") ? 15 : 0);
     el.classList.add("cell-grow");
-    el.style.width = `${Math.min(Math.max(chu + 8 + (parseFloat(cs.paddingRight) || 0) + 4, rongO), tran)}px`;
+    el.style.width = `${Math.min(Math.max(chu + 8 + demPhai + 4, rongO), tran)}px`;
+    // Đo lại một lần ở trạng thái đã nới: còn tràn (phông/đệm khác dự tính) thì bù đúng phần thiếu.
+    const thieu = el.scrollWidth - el.clientWidth;
+    if (thieu > 0) el.style.width = `${Math.min(parseFloat(el.style.width) + thieu + 2, tran)}px`;
   };
   // Point-mode BÀN PHÍM (Excel): đang gõ công thức (chế độ ENTER) mà ký tự trước con trỏ là
   // "="/toán tử/"("/","… → mũi tên CHÈN THAM CHIẾU Ô rồi di chuyển nó ("=" ↑ → "=H3");
