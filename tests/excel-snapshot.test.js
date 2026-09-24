@@ -154,6 +154,14 @@ describe("Excel xuất khách — REGRESSION LOCK (semantic snapshot)", () => {
       // Vẫn CHỈ fixture `clf`. ĐÃ ĐỐI CHIẾU TỪNG Ô: khác 12 ô trên 109, TẤT CẢ ở sheet "Tổng Báo
       // Giá" và chỉ là màu nền — A4:C4 tiêu đề + A6:C8 khối tổng: FFFFCC99 → FFF4CFB0 (người dùng
       // chốt bằng ảnh chụp: cùng màu hàng nhóm Colorfull). Giá trị, định dạng số, chữ đậm giữ nguyên.
+      //
+      // ── ĐỔI CÓ CHỦ Ý NHƯNG HASH KHÔNG ĐỔI: 2026-09-24 (chiều cao hàng, soát toàn diện đợt 3) ──
+      // Bản chụp này KHÔNG chụp chiều cao hàng, nên đợt nới chiều cao dưới đây không làm đổi hash nào.
+      // Đã so TOÀN BỘ chiều cao hàng + giá trị/căn lề/cỡ chữ từng ô của 72 sheet (6 mẫu × có/không
+      // cột ảnh × tiêu đề ngắn/dài) trước và sau: khác ĐÚNG hai loại hàng, không ô nào đổi —
+      //   · GN (marico_decor / unibenfood / gn_banner), hàng 7 tiêu đề một dòng: 17,5 → 18,75pt;
+      //   · Colorfull (cả ba mẫu), hàng 4 tiêu đề cột: 25 → 34,5pt ("THÀNH TIỀN" xuống hai dòng).
+      // Chốt riêng cho hai thay đổi đó: tests/xl-cao-hang-tieu-de-cot.test.js.
       expect({ [name]: h }).toMatchSnapshot();
     });
   }

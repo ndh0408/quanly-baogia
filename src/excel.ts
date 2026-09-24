@@ -843,6 +843,11 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
         const can = Math.min(409, Math.ceil(soDong * f.co * 1.35 + 2));
         const dangCo = ws.getRow(r).height;
         if (dangCo == null || can > dangCo) ws.getRow(r).height = can;
+      } else if (chu && r) {
+        // TIÊU ĐỀ MỘT DÒNG vẫn phải đủ cao cho MỘT dòng: GN nướng sẵn 17,5pt cho chữ 14 đậm trong khi
+        // Excel cần 18,75pt (đo COM) — hụt 1,25pt ngay cả với tiêu đề ngắn. Chỉ nới, không bóp.
+        const dangCo = ws.getRow(r).height;
+        if (dangCo != null && caoMotDongPt(f.co) > dangCo) ws.getRow(r).height = caoMotDongPt(f.co);
       }
     } catch { /* mẫu không có ô tiêu đề */ }
   }
@@ -1555,6 +1560,35 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
         }
       }
     }
+  }
+
+  // ── HÀNG TIÊU ĐỀ CỘT: NỚI THEO CHỮ ─────────────────────────────────────────────────────────
+  // Hàng này giữ chiều cao NƯỚNG SẴN trong tệp mẫu, và ở Colorfull nó không đủ cho chính chữ của
+  // mẫu: "THÀNH TIỀN " (Times New Roman 12 đậm, bật wrap) không vừa bề rộng cột nên Excel ngắt hai
+  // dòng, cần 31,5pt (đo COM) mà hàng chỉ cao 25pt — cả hai dòng bị xén. Đo mọi ô của hàng theo cùng
+  // bộ ước lượng với hàng hạng mục; ô không bật wrap chỉ chiếm một dòng. CHỈ NỚI RA, KHÔNG BÓP LẠI:
+  // GN (33pt, chữ 10) đã đủ nên giữ nguyên. Đặt cuối cùng, sau mọi bước đổi nhãn/gộp ô/cột ảnh.
+  if (itemsCfg.headerRow) {
+    const hr = itemsCfg.headerRow;
+    const gop = ((ws.model?.merges || []) as string[]).map((m) => /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m)).filter(Boolean) as RegExpExecArray[];
+    let can = 0;
+    for (const L of new Set([...Object.values(cols) as string[], ...(imgCol ? [imgCol] : [])])) {
+      const ci = colLetterToIdx(L);
+      // Ô PHỤ của vùng gộp và ô ở cột bị ẩn: Excel không vẽ chữ của chúng.
+      if (gop.some((m) => +m[2] <= hr && hr <= +m[4] && colLetterToIdx(m[1]) < ci && ci <= colLetterToIdx(m[3]))) continue;
+      try {
+        if (ws.getColumn(L).hidden) continue;
+        const o = ws.getCell(`${L}${hr}`);
+        const v = o.value;
+        const chu = typeof v === "string" ? v : Array.isArray(v?.richText) ? v.richText.map((x: any) => x.text).join("") : "";
+        if (!chu.trim()) continue;
+        const f = fontDo(`${L}${hr}`);
+        const soDong = o.alignment?.wrapText ? wrapLines(chu, L, beRongVungGop(`${L}${hr}`), f) : 1;
+        can = Math.max(can, soDong > 1 ? soDong * caoMotDongPt(f.co) + 3 : caoMotDongPt(f.co));
+      } catch { /* bỏ qua ô lạ */ }
+    }
+    const dangCo = ws.getRow(hr).height;
+    if (can > 0 && dangCo != null && can > dangCo) ws.getRow(hr).height = Math.min(409, can);
   }
 
   return {

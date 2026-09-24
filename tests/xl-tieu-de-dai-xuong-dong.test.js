@@ -47,10 +47,12 @@ describe("L44: tiêu đề dài xuống dòng và hàng đủ cao, tiêu đề n
       });
     }
 
-    it(`${code}: tiêu đề ngắn — không đổi căn lề, không đổi chiều cao của tệp mẫu`, async () => {
+    // Chiều cao: giữ của tệp mẫu, TRỪ KHI nó thấp hơn một dòng Excel — GN nướng sẵn 17,5pt cho chữ 14
+    // đậm cần 18,75pt, nên từ đợt soát 3 (1d) hàng này được nới đúng lên 18,75. CLF 27,5pt ≥ 22,5 giữ nguyên.
+    it(`${code}: tiêu đề ngắn — không đổi căn lề, chiều cao = tệp mẫu (hoặc đủ một dòng nếu mẫu thấp hơn)`, async () => {
       const { o, cao } = await oTieuDe(code, "Moana", "Booth");
       expect(o.alignment?.wrapText ?? false).toBe(false);
-      expect(cao).toBe(goc);
+      expect(cao).toBe(Math.max(goc, moiDong));
     });
   }
 
