@@ -235,3 +235,53 @@ describe("đợt 4 việc 1: ô CHỮ ở cột số đọc ra 0 phải có cả
     expect(chuKhongRaSo("12 m2", parseLooseDecimal("12 m2"))).toBe(false);
   });
 });
+
+// Soát toàn diện đợt 4 (việc 2): ngoặc kế toán đòi phần trong ngoặc là SỐ thuần (đợt 3, để "(Tạm tính) 500.000
+// (chưa VAT)" không thành số âm), nhưng danh sách chữ được gỡ trước khi xét chỉ có VNĐ / USD / đồng / ₫ / $.
+// Âm kế toán kèm đơn vị hay tiền khác đọc thành DƯƠNG — khoản giảm giá thành khoản cộng, không cảnh báo:
+//   ĐÃ ĐO (fed1461): "(1.500.000 đ/bộ)" / "(1.500.000 VND/bộ)" / "(1.500.000 k)" → +1.500.000;
+//   "(€1.500)" / "(1.500 EUR)" / "(1.500)€" → +1.500; "(1.5tr)" → +1,5 (ở 2f591e0 đều là số âm).
+// Luật: ô trong ngoặc đọc đúng bằng ô đó bỏ ngoặc, ĐỔI DẤU — đọc không ngoặc vốn đã bỏ qua các chữ này.
+describe("đợt 4 việc 2: ngoặc kế toán kèm đơn vị '/bộ' / EUR / € / k / nghìn / tr vẫn là số âm — hai phía khớp", () => {
+  const NGOAC = [
+    "(1.500.000 đ/bộ)", "(1.500.000 VND/bộ)", "(1.500.000/cái)", "(1.500.000 đ / suất)", "(1.500.000 đ/m²)",
+    "(1.500.000 đồng/m2)", "(1.500.000 k)", "(€1.500)", "(1.500 EUR)", "(1.500€)", "(1.500)€", "€(1.500)",
+    "(1.5tr)", "(1,5 tr)", "(500 nghìn)", "(500 ngàn)", "(2 triệu)",
+  ];
+  const boNgoac = (x) => x.replace(/[()]/g, "");
+
+  it("clipboard.ts: parseLooseNumber / parseTheoQuyUoc đọc = −(cùng ô bỏ ngoặc); parseLooseDecimal cũng âm", () => {
+    for (const x of NGOAC) {
+      expect(parseLooseNumber(x), x).toBe(-parseLooseNumber(boNgoac(x)));
+      expect(parseLooseNumber(x), x).toBeLessThan(0);
+      expect(parseTheoQuyUoc(x, "vn"), x).toBe(-parseTheoQuyUoc(boNgoac(x), "vn"));
+      expect(parseLooseDecimal(x), x).toBe(-parseLooseDecimal(boNgoac(x)));
+    }
+    expect(parseLooseNumber("(1.500.000 đ/bộ)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500 EUR)")).toBe(-1500);
+    expect(parseLooseDecimal("(2,5 /bộ)")).toBeCloseTo(-2.5);
+    // Chữ tổ hợp NFD (dán từ máy Mac / trình duyệt khác): "ì" / "ồ" là hai điểm mã, vẫn phải nhận ra.
+    expect(parseLooseNumber("(500 nghìn)".normalize("NFD"))).toBe(-500);
+    expect(parseLooseNumber("(1.500.000 đồng)".normalize("NFD"))).toBe(-1500000);
+  });
+
+  it("không nới quá tay: chú thích hai đầu, '/' theo sau là SỐ, ngoặc chỉ có chữ đơn vị — vẫn không phải số âm", () => {
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+    expect(parseLooseNumber("(tạm k) 500.000 (chưa tr)")).toBe(500000);
+    expect(parseLooseNumber("(1/2)")).toBeGreaterThanOrEqual(0);
+    expect(parseLooseNumber("(k)")).toBe(0);
+    expect(parseLooseNumber("(/bộ)")).toBe(0);
+    // Chữ đơn vị phải đứng riêng: "kg" / "trọn" không phải "k" / "tr".
+    expect(parseLooseNumber("(1.500 kg)")).toBeGreaterThanOrEqual(0);
+    expect(parseLooseNumber("(1.500 trọn gói)")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("nạp tệp (src/excelImport.ts) ra ĐÚNG những con số đó — hai phía giữ khớp", async () => {
+    const rows = NGOAC.map((g, k) => [String(k + 1), `Giảm ${k + 1}`, "gói", "1", g]);
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 1);
+    expect(s.items.map((i) => i.unitPrice)).toEqual(rows.map((r) => (qu ? parseTheoQuyUoc(r[4], qu) : parseLooseNumber(r[4]))));
+    s.items.forEach((it, k) => expect(it.unitPrice, NGOAC[k]).toBeLessThan(0));
+    expect(s.items.map((i) => i.warn)).toEqual(s.items.map(() => undefined));
+  });
+});
