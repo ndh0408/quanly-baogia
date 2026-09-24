@@ -135,6 +135,11 @@ const FORMULA_FNS: Record<string, (a: number[]) => number> = {
  *         Anh (L34): phần sau có từ 4 chữ số hoặc tận cùng bằng 0 ("MIN(F2*1000,500000)",
  *         "PRODUCT(-500000,20%)"), hoặc công thức đã có dấu phẩy khác vừa được đổi thành ";". Khi đó
  *         cũng là mơ hồ → null. Bản cũ đọc "MIN(F2*1000,500000)" thành F2*1000,5 → 1.050.525.000.
+ *         "=SUM(1,2)" vì thế là 1,2 — CÓ CHỦ ĐÍCH: mơ hồ thật với SUM(1;2) kiểu Anh, nhưng đổi đi là
+ *         hỏng ca Việt hợp lệ "SUM(1,5)" = 1,5 (chốt bằng test ở tests/ct-dau-phay-mo-ho.test.js).
+ *   • Công thức đã có ";" mà "," đứng ĐẦU một số (sau toán tử / "(" / ";": "ROUND(F1*,5;0)") → thập
+ *     phân viết tắt 0,5 như ngoài hàm ("=F1*,5"), không phải dấu tách (soát toàn diện đợt 3 — bản sửa
+ *     L29 đổi nó thành ";" nên công thức từng tính đúng ra null).
  * null = "công thức không đọc được": lưới tô ĐỎ khi gõ, còn công thức ĐÃ LƯU thì recomputeAll giữ
  * nguyên số đang có, lúc xuất Excel ghi số — không bao giờ âm thầm ra một con số khác.
  *
@@ -158,7 +163,9 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       const ds = k.phay.map((i) => {
         const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
         const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+        // Kiểu Việt: "," đứng ĐẦU một số (sau toán tử / "(" / ";") là thập phân viết tắt — ",5" = 0,5.
+        const dauSoViet = kieuViet && /(^|[-+*/(;])$/.test(truoc);
+        return { i, sau, soSo: (soTruoc || dauSoViet) && /^\d/.test(sau) };
       });
       const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
       for (const p of chac) { out[p.i] = ";"; daDoi = true; }

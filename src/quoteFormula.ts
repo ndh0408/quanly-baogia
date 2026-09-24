@@ -163,7 +163,9 @@ export function chuanHoaDauTachDoiSo(s: string): string | null {
       const ds = k.phay.map((i) => {
         const truoc = s.slice(0, i).replace(/\s+$/, ""), sau = s.slice(i + 1).replace(/^\s+/, "");
         const soTruoc = /\d$/.test(truoc) && !/[A-Za-z]\$?\d+$/.test(truoc);   // chữ số KHÔNG thuộc ô tham chiếu
-        return { i, sau, soSo: soTruoc && /^\d/.test(sau) };
+        // Kiểu Việt: "," đứng ĐẦU một số (sau toán tử / "(" / ";") là thập phân viết tắt — ",5" = 0,5.
+        const dauSoViet = kieuViet && /(^|[-+*/(;])$/.test(truoc);
+        return { i, sau, soSo: (soTruoc || dauSoViet) && /^\d/.test(sau) };
       });
       const chac = ds.filter((p) => !p.soSo), soSo = ds.filter((p) => p.soSo);
       for (const p of chac) { out[p.i] = ";"; daDoi = true; }
