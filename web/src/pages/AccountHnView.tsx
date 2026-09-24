@@ -105,6 +105,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // `conSong`; sau MỌI `await` hỏi lại nó rồi mới đụng bản nháp / qRef / cờ (khuôn 01b07dc bên QuoteEditor).
   const songRef = useRef(true);
   useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  // X1 (đợt 3): bản giữ lại ':xungdot' chỉ hỏi ở lượt nạp ĐẦU của mỗi lần gắn view, và lại sau một 409
+  // mới (save → "Tải lại"). Hủy không còn xoá nó, mà save() nạp lại qua load() → trước đây MỖI lần Lưu
+  // bật lại hai hộp danger; lỡ bấm "Mở bản của tôi" ngay sau Lưu là giá VỪA LƯU bị thay bằng giá cũ lúc
+  // xung đột. Hộp hứa "lần mở sau sẽ hỏi lại", không phải sau mỗi lần Lưu.
+  const daHoiXdRef = useRef(false);
   const load = useCallback(async (conSong: () => boolean = () => songRef.current) => {
     try {
       if (!_templates) _templates = await api.metaTemplates();
@@ -129,8 +134,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         } else xoaBanNhap(khoa);
       }
       // Bản giữ lại lúc xung đột 409 (xem save) — mở ra thì mang mốc MỚI, Lưu là chủ động ghi đè. Đã khôi
-      // phục bản nháp thường thì không hỏi (bản giữ lại vẫn nằm đó, lần mở sau hỏi tiếp).
-      const xd = khoa && !khoiPhuc ? docBanNhap(khoa + ":xungdot", meId) : null;
+      // phục bản nháp thường thì không hỏi (bản giữ lại vẫn nằm đó, lần mở sau hỏi tiếp). Lượt nạp sau Lưu
+      // cũng không hỏi (daHoiXdRef).
+      const hoiXd = !daHoiXdRef.current;
+      daHoiXdRef.current = true;
+      const xd = khoa && !khoiPhuc && hoiXd ? docBanNhap(khoa + ":xungdot", meId) : null;
       if (khoa && xd && suaDuoc) {
         const moLai = await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi. Hủy thì bản này vẫn được giữ, bạn sẽ được hỏi có xoá không.", { confirmText: "Mở bản của tôi", danger: true });
         if (!conSong()) return;
@@ -156,7 +164,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   }, [quoteId, redraw, meId]);
   const ghiNhapNgayRef = useRef(ghiNhapNgay);
   ghiNhapNgayRef.current = ghiNhapNgay;
-  useEffect(() => { let alive = true; load(() => alive); return () => { alive = false; }; }, [load]);
+  useEffect(() => { let alive = true; daHoiXdRef.current = false; load(() => alive); return () => { alive = false; }; }, [load]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <button type="button" className="btn btn-sm" onClick={() => { setErr(""); load(); }}>Thử lại</button> <a className="btn btn-sm" href="#/list">Về danh sách</a></div>;
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
@@ -242,6 +250,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
           const tai = await confirmModal("Phần Hà Nội đã thay đổi ở nơi khác", `${ex.message}. Tải lại bản mới nhất? Phần bạn đang gõ được GIỮ LẠI trên máy này và bạn sẽ được hỏi mở lại.`, { danger: true, confirmText: "Tải lại bản mới" });
           if (tai) {
             dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+            daHoiXdRef.current = false;   // vừa ghi bản giữ lại → lượt nạp này phải hỏi mở lại
             await load();
           } else xoaBanNhap(khoaXd);   // Hủy → ở lại; bỏ bản giữ lại để lần mở sau không hỏi một bản cũ
         }

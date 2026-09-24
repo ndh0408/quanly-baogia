@@ -256,6 +256,50 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Có giá Hà Nội chưa lưu từ lần trước", "Giá Hà Nội bạn gõ trước khi bị xung đột"]);
     expect(host!.textContent).toContain("6.600.000");
   });
+
+  // Đợt 3 X1 (hồi quy của chính bản sửa X1): Hủy không còn xoá bản giữ lại, mà save() nạp lại qua
+  // load() — đường nạp hỏi bản ':xungdot' ở MỌI lượt → sau mỗi lần Lưu lại bật hai hộp danger. Lỡ bấm
+  // "Mở bản của tôi" ngay sau Lưu là giá VỪA LƯU bị thay bằng giá cũ lúc xung đột, cờ bẩn bật.
+  it("X1 đợt 3: giữ bản ':xungdot' (Hủy, Hủy) rồi Lưu hai lần → KHÔNG hỏi lại hộp nào, bản giữ lại vẫn còn", async () => {
+    ghiXd();
+    h.confirm = false;                                               // Hủy, Hủy → giữ
+    await mo();
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Giá Hà Nội bạn gõ trước khi bị xung đột", "Bỏ bản của bạn?"]);
+    confirmMock().mockClear();
+    goGia("7000000");
+    await cho(250);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]), "Lưu lần 1 bật lại hộp hỏi bản ':xungdot'").toEqual([]);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]), "Lưu lần 2 bật lại hộp hỏi bản ':xungdot'").toEqual([]);
+    expect(coXd(), "bản giữ lại vẫn phải còn — lần MỞ sau hỏi tiếp").toBe(true);
+  });
+
+  it("X1 đợt 3: Lưu xong, dù hộp (nếu có) được trả lời 'Mở bản của tôi' → màn vẫn là giá vừa lưu, không bẩn", async () => {
+    ghiXd();
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);   // lúc mở: Hủy, Hủy
+    await mo();
+    goGia("7000000");
+    await cho(250);
+    h.getQuote = async () => baoGia({ hnRev: "c".repeat(32), hnTables: [{ ...baoGia().hnTables[0], items: [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 7_000_000, days: 1 }] }] });
+    await act(async () => { nutLuu().click(); });                   // h.confirm = true → "Mở bản của tôi"
+    await cho(30);
+    expect(host!.textContent).toContain("7.000.000");
+    expect(host!.textContent, "giá cũ lúc xung đột đè lên giá vừa lưu").not.toContain("6.600.000");
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty).toBe(false);
+  });
+
+  it("X1 đợt 3: đã khôi phục bản nháp thường (bản ':xungdot' chưa hỏi) → Lưu KHÔNG hỏi bản ':xungdot' giữa chừng", async () => {
+    await phien1GiuXdRoiGo();
+    await mo();                                                      // Khôi phục bản nháp thường
+    confirmMock().mockClear();
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual([]);
+    expect(coXd(), "lần mở sau hỏi tiếp").toBe(true);
+  });
 });
 
 // L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",
