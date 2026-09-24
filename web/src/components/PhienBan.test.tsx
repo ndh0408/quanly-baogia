@@ -91,7 +91,7 @@ describe("dải thông báo bản mới", () => {
     expect(dai()).not.toBeNull();
   });
 
-  it("còn thay đổi CHƯA LƯU → câu nhắc lưu trước; bấm Tải bản mới thì HỎI (Lưu rồi tải / Tải luôn / Hủy), không tải ngay", () => {
+  it("còn thay đổi CHƯA LƯU → câu nhắc lưu trước; bấm Tải bản mới thì HỎI (Lưu rồi tải / Hủy) — KHÔNG có 'Tải luôn'", () => {
     (window as Window & { __editorDirty?: boolean }).__editorDirty = true;
     act(() => _datLai(BAN_MOI));
     ve(<ThongBaoBanMoi />);
@@ -99,9 +99,9 @@ describe("dải thông báo bản mới", () => {
     act(() => nut("Tải bản mới")!.click());
     expect(h.taiBanMoi).not.toHaveBeenCalled();
     expect(nut("Lưu rồi tải bản mới")).toBeDefined();
-    expect(nut("Tải luôn")).toBeDefined();
-    expect(dai()?.textContent, "nói thật — không hứa 'được giữ' (bản nháp có thể không khôi phục được)").toContain("có thể MẤT");
+    expect(nut("Tải luôn"), "iPhone/iPad không có hộp 'Tải lại trang?' — tải luôn ở đó là mất ngay (soát vòng 3)").toBeUndefined();
     expect(dai()?.textContent).not.toContain("giữ tạm");
+    expect(dai()?.textContent, "không hứa trình duyệt sẽ hỏi lại").not.toContain("trình duyệt sẽ hỏi");
     act(() => nut("Hủy")!.click());
     expect(nut("Lưu rồi tải bản mới")).toBeUndefined();
     expect(h.taiBanMoi).not.toHaveBeenCalled();

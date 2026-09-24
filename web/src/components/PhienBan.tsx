@@ -17,9 +17,11 @@ const CAU_DO: Record<Exclude<DangDo, null>, string> = {
   "chua-ro": "",
 };
 // Câu hỏi lại khi người dùng bấm Tải bản mới lúc đang dở. NÓI THẬT: không hứa "được giữ" — bản nháp tạm
-// có thể không khôi phục được (người khác vừa lưu, báo giá quá lớn, có ảnh), soát vòng 2.
+// có thể không khôi phục được (người khác vừa lưu, báo giá quá lớn, có ảnh), soát vòng 2. Còn thay đổi
+// chưa lưu thì KHÔNG có nút "Tải luôn": hộp "Tải lại trang?" của trình duyệt không có trên iPhone/iPad
+// (WebKit không chạy beforeunload) — tải luôn ở đó là mất ngay, không một lời hỏi (soát vòng 3).
 const CAU_HOI: Record<Exclude<DangDo, null>, [string, string]> = {
-  "chua-luu": ["Còn thay đổi chưa lưu.", "Bấm “Lưu rồi tải bản mới” để không mất gì. Tải luôn thì trình duyệt sẽ hỏi lại — phần chưa lưu có thể MẤT."],
+  "chua-luu": ["Còn thay đổi chưa lưu.", "Bấm “Lưu rồi tải bản mới”: lưu phần đang soạn xong mới tải, không mất gì. (Muốn bỏ thay đổi thì rời báo giá, chọn “Rời, bỏ thay đổi”, rồi bấm Tải bản mới.)"],
   "form-mo": ["Đang mở một form.", "Tải bản mới bây giờ thì nội dung đang nhập trong form sẽ mất."],
   "dang-go": ["Đang gõ dở.", "Tải bản mới bây giờ thì phần đang gõ sẽ mất."],
   "dang-tao-file": ["Đang tạo file.", "Tải bản mới bây giờ thì lượt tạo file đang chạy bị huỷ — phải bấm tải file lại."],
@@ -79,8 +81,9 @@ export function ThongBaoBanMoi() {
           <button type="button" className="btn btn-sm btn-primary" disabled>Đang tải bản mới…</button>
         ) : hoi ? (
           <>
-            {hoi === "chua-luu" && <button type="button" className="btn btn-sm btn-primary" onClick={() => void luuRoiTai()}>Lưu rồi tải bản mới</button>}
-            <button type="button" className="btn btn-sm btn-danger" onClick={() => void tai()}>Tải luôn</button>
+            {hoi === "chua-luu"
+              ? <button type="button" className="btn btn-sm btn-primary" onClick={() => void luuRoiTai()}>Lưu rồi tải bản mới</button>
+              : <button type="button" className="btn btn-sm btn-danger" onClick={() => void tai()}>Tải luôn</button>}
             <button type="button" className="btn btn-sm" onClick={() => setHoi(null)}>Hủy</button>
           </>
         ) : (

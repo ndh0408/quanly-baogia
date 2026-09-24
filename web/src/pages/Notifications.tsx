@@ -27,9 +27,11 @@ function dedupNotifs(list: Notif[]): Notif[] {
 }
 
 export function NotificationsPage({ onBadge }: { onBadge?: () => void }) {
-  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const qc = useQueryClient();
   const [filter, setFilter] = useState(""); // "" = tất cả · "unread" = chưa đọc (lọc client-side)
+  // Dải "Có bản mới" (lib/phienBan.ts): chỉ xem — nhưng bộ lọc chỉ nằm trong state, tải lại là về "Tất
+  // cả". Chỉ khai an toàn khi chưa lọc (như Nhật ký, soát vòng 3).
+  useTrangAnToan(() => !filter);
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.listNotifications(),

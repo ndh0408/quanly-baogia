@@ -25,6 +25,7 @@ function cuaSoGia() {
   const unregister = vi.fn(async () => true);
   const xoaCache = vi.fn(async () => true);
   const suKien: string[] = [];
+  const nghe = new Map<string, Set<() => void>>();
   const w = {
     document,
     navigator: { onLine: true, serviceWorker: { getRegistrations: async () => [{ unregister }] } },
@@ -34,12 +35,15 @@ function cuaSoGia() {
     setTimeout: (f: () => void, ms: number) => window.setTimeout(f, ms),
     setInterval: (f: () => void, ms: number) => window.setInterval(f, ms),
     clearInterval: (t: number) => window.clearInterval(t),
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (loai: string, f: () => void) => { if (!nghe.has(loai)) nghe.set(loai, new Set()); nghe.get(loai)!.add(f); },
+    removeEventListener: (loai: string, f: () => void) => { nghe.get(loai)?.delete(f); },
     dispatchEvent: (e: Event) => { suKien.push(e.type); return true; },
     __editorDirty: false,
   } as unknown as Window;
-  return { w, reload, unregister, xoaCache, suKien };
+  /** Trang thật sự rời đi (trình duyệt bắn pagehide). */
+  const roiTrang = () => { for (const f of [...(nghe.get("pagehide") ?? [])]) f(); };
+  const soNghe = (loai: string) => nghe.get(loai)?.size ?? 0;
+  return { w, reload, unregister, xoaCache, suKien, roiTrang, soNghe };
 }
 
 beforeEach(() => {
@@ -213,6 +217,15 @@ describe("nenTuTai — chỉ tự tải khi AN TOÀN", () => {
     expect(dangDo()).toBe("xem-thu");
     expect(nenTuTai()).toBe(false);
   });
+  it("xem thử được xét TRƯỚC chưa-lưu / form / đang gõ — câu hỏi phải nói 'sẽ thoát xem thử', không mời 'Lưu rồi tải' (lưu lúc xem thử là giả)", () => {
+    dangKyTrangAnToan();
+    h.xemThu = true;
+    (window as WinDirty).__editorDirty = true;
+    expect(dangDo()).toBe("xem-thu");
+    (window as WinDirty).__editorDirty = false;
+    document.body.innerHTML = '<div class="modal-backdrop"></div>';
+    expect(dangDo()).toBe("xem-thu");
+  });
   it("lượt tạo file Excel/PDF đang chạy → 'dang-tao-file', không tự tải; xong (gọi hai lần vô hại) thì hết", () => {
     coBanMoi(); dangKyTrangAnToan(); datVisibility("hidden");
     const xong = batDauViecNen();
@@ -236,7 +249,21 @@ describe("taiBanMoi", () => {
     expect(g.suKien, "không còn sự kiện nào bảo màn soạn hạ chốt beforeunload (soát vòng 2)").toEqual([]);
     expect(g.reload).toHaveBeenCalledTimes(1);
     expect((g.w as WinDirty).__editorDirty, "hạ cờ ở đây = hết chặn rời trang nếu người dùng Hủy hộp của trình duyệt").toBe(true);
+    expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi"), "chưa rời trang thật thì chưa ghi khoá").toBeNull();
+    g.roiTrang();
     expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi")).toBe("index-MoiBBB22");
+  });
+  it("hộp 'Tải lại trang?' bị Hủy (không có pagehide) → KHÔNG để lại khoá chống vòng tròn — tab đó vẫn tự lên bản này được về sau", async () => {
+    vi.useFakeTimers();
+    coBanMoi();
+    const g = cuaSoGia();
+    expect(await taiBanMoi(g.w)).toBe(true);
+    expect(g.soNghe("pagehide")).toBe(1);
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(g.soNghe("pagehide"), "trình ghi khoá phải được gỡ").toBe(0);
+    g.roiTrang();   // rời trang về sau (không phải do lần tải này)
+    expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi")).toBeNull();
+    expect(layTrangThai().dangTai).toBe(false);
   });
   it("hỏi lại máy chủ KHÔNG được (mất mạng / đang khởi động lại) → không gỡ SW, không tải lại, trả dải về bình thường", async () => {
     coBanMoi();

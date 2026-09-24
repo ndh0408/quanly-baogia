@@ -110,17 +110,20 @@ export function batDauViecNen(): () => void {
 export type DangDo = "chua-luu" | "form-mo" | "dang-go" | "dang-tao-file" | "xem-thu" | "chua-ro" | null;
 /**
  * Người dùng có đang làm dở gì không — tải lại lúc này có làm mất gì không.
+ *   · "xem-thu" : admin đang XEM THỬ quyền — chế độ này chỉ sống trong bộ nhớ; tải lại là rớt về quyền
+ *     THẬT mà người dùng có thể không để ý (lệnh "thử" thành lệnh ghi thật). Xét ĐẦU TIÊN: đang xem thử
+ *     thì mọi lệnh Lưu chỉ là "thành công giả", câu "Lưu rồi tải" hay "form sẽ mất" đều nói sai chỗ
+ *     quan trọng nhất (soát vòng 3).
  *   · "chua-luu": trình soạn báo giá / màn Account HN còn thay đổi chưa lưu (cờ dùng chung __editorDirty)
  *   · "form-mo" : đang mở một hộp thoại / form (thêm-sửa Nhân sự, Danh bạ, Khách, Thanh toán…)
  *   · "dang-go" : tiêu điểm đang ở một ô nhập ĐƯỢC SỬA và ĐÃ CÓ CHỮ (ô hoá đơn đang gõ, ô tìm…).
  *     Ô TRỐNG thì không mất gì: trang đăng nhập tự đặt con trỏ vào ô tên — tính ô trống là "đang gõ"
  *     thì dải hiện "Rời ô đang gõ…" vô lý, và tab đăng nhập để nằm nền không bao giờ tự lên bản mới.
  *   · "dang-tao-file": lượt tạo file Excel/PDF đang chạy (tải lại là file không bao giờ về, không báo gì)
- *   · "xem-thu" : admin đang XEM THỬ quyền — chế độ này chỉ sống trong bộ nhớ; tải lại là rớt về quyền
- *     THẬT mà người dùng có thể không để ý (lệnh "thử" thành lệnh ghi thật).
  *   · "chua-ro" : trang đang mở KHÔNG tự khai an toàn (useTrangAnToan) — có thể còn dữ liệu trong bộ nhớ.
  */
 export function dangDo(win: Window = window, doc: Document = document): DangDo {
+  if (isPreviewMode()) return "xem-thu";
   if ((win as Window & { __editorDirty?: boolean }).__editorDirty) return "chua-luu";
   if (doc.querySelector('.modal-backdrop, [role="dialog"][aria-modal="true"]')) return "form-mo";
   const a = doc.activeElement as (HTMLInputElement & HTMLTextAreaElement) | null;
@@ -131,7 +134,6 @@ export function dangDo(win: Window = window, doc: Document = document): DangDo {
     if (!khongPhaiGo && !a.readOnly && !a.disabled && coChu) return "dang-go";
   }
   if (viecNen > 0) return "dang-tao-file";
-  if (isPreviewMode()) return "xem-thu";
   if (!laTrangAnToan()) return "chua-ro";
   return null;
 }
@@ -212,10 +214,11 @@ const ngu = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  *     trang lỗi của trình duyệt, mất luôn vỏ offline — giữ nguyên, lát thử lại;
  *   · máy chủ hoá ra đang phát đúng bản này (vd vừa lùi bản) — không có gì để tải;
  *   · `tuDong` mà ngay trước lúc tải điều kiện tự tải không còn (người dùng quay lại tab, bắt đầu gõ…).
- * KHÔNG đụng cờ chưa-lưu: còn thay đổi chưa lưu thì hộp "Tải lại trang?" của trình duyệt vẫn hỏi lần cuối
- * (và rời trang thì màn soạn vẫn ghi bản nháp như mọi lần F5). Soát vòng 2: bản trước hạ chốt đó sau khi
- * ghi bản nháp — nhưng bản nháp lệch mốc (người khác vừa lưu, account HN vừa gửi giá) bị bỏ im lặng lúc
- * mở lại, bản nháp quá 1MB thì bị bóc ảnh: hạ chốt là mất dữ liệu đúng lúc app vừa hứa "được giữ".
+ * KHÔNG đụng cờ chưa-lưu: dải KHÔNG cho "Tải luôn" khi còn thay đổi chưa lưu (chỉ "Lưu rồi tải"), và nếu
+ * vì lý do gì vẫn tới đây lúc còn chưa lưu thì hộp "Tải lại trang?" của trình duyệt hỏi lần cuối (máy
+ * tính; iPhone/iPad KHÔNG có hộp đó — nên dải mới không cho "Tải luôn", soát vòng 3). Soát vòng 2: bản
+ * trước hạ chốt đó sau khi ghi bản nháp — nhưng bản nháp lệch mốc (người khác vừa lưu, account HN vừa gửi
+ * giá) bị bỏ im lặng lúc mở lại, quá 1MB thì bị bóc ảnh: hạ chốt là mất dữ liệu đúng lúc app hứa "được giữ".
  */
 export async function taiBanMoi(win: Window = window, { tuDong = false }: { tuDong?: boolean } = {}): Promise<boolean> {
   if (st.dangTai) return false;
@@ -228,11 +231,15 @@ export async function taiBanMoi(win: Window = window, { tuDong = false }: { tuDo
   if ((await kiemTraBanMoi()) !== true) return thoi();
   await goBoNhoDem(win);
   if (tuDong && !tuTaiDuocLucNay(win.document, win, Date.now())) return thoi();   // SW đã gỡ không sao — lần tải sau tự đăng ký lại
-  try { if (st.mayChu?.banGiaoDien) win.sessionStorage.setItem(KHOA_DA_TAI, st.mayChu.banGiaoDien); } catch { /* */ }
+  // Khoá chống tải vòng tròn chỉ ghi khi trang THẬT SỰ rời đi: ghi trước reload mà hộp "Tải lại trang?"
+  // bị Hủy thì khoá nằm lại và tab đó không bao giờ tự lên bản này nữa (soát vòng 3).
+  const dich = st.mayChu?.banGiaoDien;
+  const ghiKhoa = () => { try { if (dich) win.sessionStorage.setItem(KHOA_DA_TAI, dich); } catch { /* */ } };
+  win.addEventListener("pagehide", ghiKhoa, { once: true });
   win.location.reload();
-  // Hộp "Tải lại trang?" của trình duyệt (còn thay đổi chưa lưu) bị bấm Hủy → trang ở lại: trả dải về
-  // bình thường, đừng kẹt mãi ở "Đang tải bản mới…".
-  win.setTimeout(() => dat({ dangTai: false }), 3000);
+  // Hộp "Tải lại trang?" của trình duyệt bị bấm Hủy → trang ở lại: trả dải về bình thường, đừng kẹt mãi ở
+  // "Đang tải bản mới…", và gỡ trình ghi khoá (rời trang sau này không phải do lần tải này).
+  win.setTimeout(() => { win.removeEventListener("pagehide", ghiKhoa); dat({ dangTai: false }); }, 3000);
   return true;
 }
 
