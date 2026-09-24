@@ -531,14 +531,17 @@ function GridTableInner(props: GridTableProps) {
   // Công thức ở cột SỐ mà KHÔNG tính được (null: mơ hồ dấu phẩy, khoảng trắng giữa số, dải sai chỗ,
   // chia 0…) → GIỮ số đang có nhưng tô ĐỎ (GRID-03, như commitCell). Bản trước chỉ `continue`: công thức
   // ĐÃ LƯU nay trả null đứng im với số cũ khi ô đầu vào đổi, không một dấu hiệu gì (soát toàn diện đợt 3).
-  const recomputeAll = () => {
+  // TRỪ `oDangGo` — ô onNumInput đang gõ LIVE: công thức gõ dở ("=", "=F1*", "=ROUND(") vốn chưa tính được,
+  // tô đỏ ở đó là nháy đỏ mỗi phím, và cờ bật khi gõ làm commitCell lúc chốt tưởng ô "đã đỏ từ trước" nên
+  // nuốt lời báo GRID-03 (tách đối số bằng ;). Ô đó để commitCell tô + báo lúc chốt (phản biện đợt 3).
+  const recomputeAll = (oDangGo?: string) => {
     if (!items.some((it) => it.formulas && Object.keys(it.formulas).length)) return;
     const vong = oVongLap();
     const soFx = items.reduce((n, it) => n + (it.formulas ? Object.keys(it.formulas).length : 0), 0);
     for (let pass = 0; pass < Math.max(8, soFx + 1); pass++) {
       let ch = false;
       const tn = tinhTongNhom();
-      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f)) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
+      for (let i = 0; i < items.length; i++) { const it = items[i]; if (!it.formulas) continue; const rec = it as Record<string, unknown>; for (const f in it.formulas) { if (vong.has(khoaO(i, f))) { datCoVong(i, f); continue; } if (coThamChieuHong(it, f)) continue; fxVongRef.current = false; const v = evalFormula(it.formulas[f], refsCho(i, tn)); if (v === null && !fxVongRef.current) { if (NUMERIC.has(f) && khoaO(i, f) !== oDangGo) datCoVong(i, f); continue; } ghiCoVong(i, f); if (v === null) continue; if (NUMERIC.has(f)) { if (rec[f] !== v) { rec[f] = v; ch = true; } } else { const sv = M.fmtNumCell(v); if (rec[f] !== sv) { rec[f] = sv; ch = true; } } } }
       if (!ch) break;
     }
   };
@@ -1921,9 +1924,13 @@ function GridTableInner(props: GridTableProps) {
     const daGo = !!f && daGoO(i, f);  // đọc TRƯỚC khi xoá mốc: rời ô đỏ mà không gõ gì thì giữ cờ (L8)
     editUndoRef.current = null;       // hết phiên gõ — vào lại chính ô này lần sau phải ghi mốc MỚI
     if (f && tr && el) {
-      const before = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
+      // Mốc so gồm cả CỜ ĐỎ của ô: gõ "=F1*" vào ô đang 0 thì công thức đã được ghi live, số trước/sau cùng
+      // là 0 — chỉ còn cờ `_fxLoi` đổi. Không tính cờ thì không vẽ lại → ô không đỏ dù đã báo lỗi; ngược lại
+      // sửa đúng công thức mà ra đúng số cũ thì ô cứ đỏ mãi (phản biện đợt 3).
+      const moc = () => { const c = items[i] as CoDo; return JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]) + "|" + !!c._fxWarn?.[f] + !!c._fxLoi?.[f]; };
+      const before = moc();
       commitCell(i, f, el.value, !daGo);
-      const after = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
+      const after = moc();
       if (before !== after) { recomputeAll(); onChange(); }
       // RỜI focus → vẽ ô về GIÁ TRỊ HIỂN THỊ (kết quả nếu là công thức, hoặc số gom nghìn) — vì onGridFocus
       // đã set =… lúc focus; nếu dữ liệu không đổi sẽ không re-render nên phải tự set lại el.value ở đây.
@@ -2005,7 +2012,7 @@ function GridTableInner(props: GridTableProps) {
         if (live !== null) it[f] = NUMERIC.has(f) ? live : M.fmtNumCell(live);
       }
       fxAutocomplete(el); highlightActiveFormulaRefs(raw); syncFxBar();
-      recomputeAll(); onChange();   // re-eval ô tham chiếu chéo → lưu/hiển thị đúng
+      recomputeAll(khoaO(i, f)); onChange();   // re-eval ô tham chiếu chéo → lưu/hiển thị đúng; ô đang gõ không bị tô đỏ
       return;
     }
     const before = el.selectionStart ?? raw.length;
