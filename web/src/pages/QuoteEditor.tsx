@@ -86,6 +86,18 @@ export const ngayChoO = (v: unknown): string => {
 type WinDirty = Window & { __editorDirty?: boolean };
 
 /**
+ * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
+ * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
+ * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
+ * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
+ */
+const boKhoaPhien = (o: unknown): Record<string, unknown> => {
+  const r: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
+  return r;
+};
+
+/**
  * app#11 — VÂN TAY PHẦN NGOÀI HÀ NỘI của một bản báo giá MÁY CHỦ trả về: các trường đầu trang dạng
  * giá trị đơn, và từng trang (id · mẫu · tên · Discount · cờ · hạng mục). Bỏ `updatedAt`, `members`,
  * mọi trường `hn*` — đúng những thứ giao/duyệt phần HN được phép đổi (src/hnWorkflow.ts).
@@ -98,18 +110,6 @@ type WinDirty = Window & { __editorDirty?: boolean };
  * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
  * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
-/**
- * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
- * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
- * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
- * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
- */
-const boKhoaPhien = (o: unknown): Record<string, unknown> => {
-  const r: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
-  return r;
-};
-
 export const vanTayMain = (q: unknown): string => {
   const r = (q || {}) as Record<string, unknown>;
   const dau: Record<string, unknown> = {};
@@ -281,7 +281,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // treo hay nhận phản hồi muộn mà không hỏi cờ này là chạy thao tác lên báo giá người dùng đã rời,
   // bật/tắt cờ `__editorDirty` DÙNG CHUNG của editor đang mở, hoặc kéo hash sang báo giá khác.
   const songRef = useRef(true);
-  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  // Đợt 5: LÚC editor này gỡ — mốc để nhánh L62 của save() biết bản nháp ở khoá dùng chung (theo số báo giá /
+  // "moi") còn là của editor này không (xem đó). Sau khi gỡ, editor này không ghi được gì nữa: mark chặn theo
+  // songRef, hẹn giờ và pagehide/visibilitychange đã huỷ cùng cleanup.
+  const goLucRef = useRef(0);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; goLucRef.current = Date.now(); }; }, []);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
   const draftRef = useRef<QuoteFull | null>(null);
@@ -806,7 +810,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // bay). Chỉ dọn bản nháp của CHÍNH nó và báo đã lưu. Cờ `__editorDirty` giờ là của editor đang
         // mở, hash là trang người dùng đang đứng — đụng vào là tắt chặn rời trang của họ, hoặc kéo họ
         // sang báo giá vừa tạo mà họ đã chọn bỏ.
-        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        // Đợt 5: khoá bản nháp DÙNG CHUNG cho mọi lần mở cùng báo giá — rời rồi mở lại ngay và gõ trước khi
+        // PUT/POST này trả lời thì bản nháp ở khoá là của lần mở MỚI. Chỉ xoá bản ghi TRƯỚC lúc editor này gỡ.
+        const khoa = khoaNhapRef.current;
+        const nhap = khoa ? docBanNhap(khoa, meIdRef.current) : null;
+        if (khoa && !(nhap && nhap.luuLuc > goLucRef.current)) xoaBanNhap(khoa);
         toast(isNew ? `Đã lưu báo giá mới${(saved as { quoteNumber?: string }).quoteNumber ? " " + (saved as { quoteNumber?: string }).quoteNumber : ""}` : "Đã lưu", "success");
         return false;
       }

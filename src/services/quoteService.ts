@@ -1048,6 +1048,10 @@ export async function listQuotes(req: Request) {
   // ảnh chứng từ base64 hàng trăm KB mỗi cái — mà presentQuoteRow không hề đọc tới. Một trang danh
   // sách 12 báo giá đo được 7,2 MB base64 kéo về rồi vứt. Xem `bangNoiBoTheoBaoGia` bên dưới.
   const canBangNoiBo = can(req.session, P.QUOTE_HN_FILL) || can(req.session, P.QUOTE_INTERNAL_VIEW);
+  // Đợt 5: danh sách mẫu CHỈ nhánh hnOnly của presentQuoteRow đọc (tính hnTotal). Route truyền
+  // internalOnly = can(INTERNAL_VIEW) và presentQuoteRow xét nó TRƯỚC hnOnly → có INTERNAL_VIEW là không
+  // bao giờ tới nhánh hnOnly; nạp mẫu cho họ là một truy vấn bỏ phí trên đường nóng, refetch thường xuyên.
+  const canMauHn = can(req.session, P.QUOTE_HN_FILL) && !can(req.session, P.QUOTE_INTERNAL_VIEW);
   const [total, rows] = await Promise.all([
     prisma.quote.count({ where }),
     prisma.quote.findMany({
@@ -1061,11 +1065,11 @@ export async function listQuotes(req: Request) {
   if (canBangNoiBo && rows.length) {
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ nên phải nạp riêng — `presentQuoteRow` nhánh hnOnly đọc
     // `q.hnTables`. Cũng cắt ảnh ngay tại SQL, cùng lý do với bảng theo trang.
-    const [hnTheoBaoGia, dsMau] = await Promise.all([bangHnTheoBaoGia(rows.map((r: any) => r.id)), dsMauBangNoiBo()]);
+    const [hnTheoBaoGia, dsMau] = await Promise.all([bangHnTheoBaoGia(rows.map((r: any) => r.id)), canMauHn ? dsMauBangNoiBo() : null]);
     // Đợt 4: `hnTotal` của account HN tính theo mẫu của từng bảng như màn soạn (xem bangNoiBoCoNgay).
     // An toàn để gắn: người có bảng nội bộ luôn đi nhánh hnOnly/internalOnly của presentQuoteRow — hai
     // nhánh đó chọn trường tường minh, không trải `...q` ra phản hồi.
-    for (const r of rows as any[]) { r.hnTables = hnTheoBaoGia.get(r.id) ?? []; r._mauBangNoiBo = dsMau; }
+    for (const r of rows as any[]) { r.hnTables = hnTheoBaoGia.get(r.id) ?? []; if (dsMau) r._mauBangNoiBo = dsMau; }
     const theoBaoGia = await bangNoiBoTheoBaoGia(rows.map((r: any) => r.id));
     // Gắn vào ĐÚNG hình dạng mà presentQuoteRow vẫn đọc (`q.sheets[].extraTables`): cả hai nhánh
     // của nó đều flatMap qua MỌI sheet rồi mới đếm/cộng, nên gộp về một phần tử không đổi kết quả.

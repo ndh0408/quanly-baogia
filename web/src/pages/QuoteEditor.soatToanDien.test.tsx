@@ -291,6 +291,44 @@ describe("L62 — Lưu xong sau khi editor đã bị gỡ không được đụn
     await cho(10);
     expect((window as WinDirty).__editorDirty).toBe(true);
   });
+
+  // Đợt 5 (d5-soan 3, cùng khuôn với AccountHnView): khoá bản nháp theo SỐ báo giá DÙNG CHUNG cho mọi lần mở.
+  // Rời ("Rời, bỏ thay đổi") khi PUT đang bay, mở lại NGAY báo giá đó và gõ trước khi PUT cũ trả lời → nhánh
+  // L62 của instance đã gỡ xoá luôn bản nháp của lần mở MỚI.
+  it("PUT cũ trả lời SAU khi đã mở lại CÙNG báo giá và gõ → bản nháp của lần mở mới còn nguyên", async () => {
+    const KHOA11 = khoaBanNhap(11, 1);
+    const tenTrongNhap = () => (docBanNhap(KHOA11, 1)?.quote as { toCompany?: string } | undefined)?.toCompany;
+    let xong!: (v: unknown) => void;
+    h.updateQuote.mockImplementationOnce(() => new Promise((r) => { xong = r; }));
+    await moEditor();
+    go(oTenKhach(), "Sửa 11");
+    await cho(1300);
+    await bam(nut("Lưu"));
+    await act(async () => { window.dispatchEvent(new Event("editor:discard")); });   // Shell.guardLeave "Rời, bỏ thay đổi"
+    dongEditor();
+    await moEditor();                                               // mở lại #11 — instance MỚI
+    go(oTenKhach(), "Sửa lại 11 CHƯA LƯU");
+    await cho(1300);
+    expect(tenTrongNhap()).toBe("Sửa lại 11 CHƯA LƯU");
+    await act(async () => { xong(baoGia({ toCompany: "Sửa 11", updatedAt: "2026-09-21T00:00:00.000Z" })); });
+    await cho(10);
+    expect(tenTrongNhap(), "PUT cũ của instance đã gỡ xoá bản nháp của lần mở mới").toBe("Sửa lại 11 CHƯA LƯU");
+  });
+
+  it("không mở lại → PUT trả lời muộn vẫn dọn bản nháp ghi TRƯỚC khi rời (hành vi L62 giữ nguyên)", async () => {
+    const KHOA11 = khoaBanNhap(11, 1);
+    let xong!: (v: unknown) => void;
+    h.updateQuote.mockImplementationOnce(() => new Promise((r) => { xong = r; }));
+    await moEditor();
+    go(oTenKhach(), "Sửa 11");
+    await cho(1300);
+    expect(docBanNhap(KHOA11, 1)).not.toBeNull();
+    await bam(nut("Lưu"));
+    dongEditor();
+    await act(async () => { xong(baoGia({ toCompany: "Sửa 11", updatedAt: "2026-09-21T00:00:00.000Z" })); });
+    await cho(10);
+    expect(docBanNhap(KHOA11, 1), "đã lên máy chủ thì bản nháp #11 hết lý do tồn tại").toBeNull();
+  });
 });
 
 // L63: xem thử quyền → api.req trả "thành công giả" cho mọi lệnh ghi, nhưng khoá bản nháp vẫn theo id

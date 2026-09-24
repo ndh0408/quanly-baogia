@@ -108,7 +108,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // nháp giá HN của báo giá CŨ và bật/tắt cờ "chưa lưu" của trang MỚI. Mỗi lượt nạp nhận một hàm
   // `conSong`; sau MỌI `await` hỏi lại nó rồi mới đụng bản nháp / qRef / cờ (khuôn 01b07dc bên QuoteEditor).
   const songRef = useRef(true);
-  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  // Đợt 5: LÚC view này gỡ — mốc để nhánh L62 của save() biết bản nháp ở khoá dùng chung `hn<id>` còn là của
+  // view này không (xem đó). Sau khi gỡ view này không ghi được gì nữa: mark chặn theo songRef, hẹn giờ và
+  // pagehide/visibilitychange đã huỷ cùng cleanup.
+  const goLucRef = useRef(0);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; goLucRef.current = Date.now(); }; }, []);
   // X1 (đợt 3): bản giữ lại ':xungdot' chỉ hỏi ở lượt nạp ĐẦU của mỗi lần gắn view, và lại sau một 409
   // mới (save → "Tải lại"). Hủy không còn xoá nó, mà save() nạp lại qua load() → trước đây MỖI lần Lưu
   // bật lại hai hộp danger; lỡ bấm "Mở bản của tôi" ngay sau Lưu là giá VỪA LƯU bị thay bằng giá cũ lúc
@@ -241,7 +245,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         // L62 (như QuoteEditor): máy chủ trả lời SAU khi người dùng đã rời màn này ("Rời, bỏ thay đổi" lúc
         // PUT còn bay). Chỉ dọn bản nháp của CHÍNH báo giá này và báo đã lưu. Cờ `__editorDirty` giờ là của
         // trang đang mở — hạ nó là mất lời nhắc chưa lưu ở đó. Không gửi duyệt: người dùng đã bỏ đi giữa chừng.
-        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        // Đợt 5: khoá `hn<id>` DÙNG CHUNG cho mọi lần mở cùng báo giá — rời rồi mở lại ngay và gõ trước khi
+        // PUT này trả lời thì bản nháp ở khoá là của lần mở MỚI. Chỉ xoá bản ghi TRƯỚC lúc view này gỡ.
+        const khoa = khoaNhapRef.current;
+        const nhap = khoa ? docBanNhap(khoa, meId) : null;
+        if (khoa && !(nhap && nhap.luuLuc > goLucRef.current)) xoaBanNhap(khoa);
         toast(thenSubmit ? "Đã lưu phần Hà Nội — CHƯA gửi duyệt vì bạn đã rời trang" : "Đã lưu phần Hà Nội", "success");
         return;
       }
