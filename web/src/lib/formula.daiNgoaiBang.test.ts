@@ -42,4 +42,22 @@ describe("L33 — dải có đầu nằm ngoài bảng", () => {
     expect(evalFormula("=SUM(F1:F4000000)", refs)).toBeNull();
     expect(soLanGoiO).toBe(0);
   });
+
+  // Soát toàn diện đợt 3: trần 20.000 ô trước đây tính cho TỪNG dải. Công thức dài nhiều dải vượt bảng
+  // ("=SUM(F1:F20000;F1:F20000;…)" 150 dải — 1.505 ký tự, lưu được) bung 3 triệu ô MỖI lần evalFormula
+  // (đo 809 ms) mà lưới gọi nhiều lượt mỗi phím gõ → đứng hình. Máy chủ (evalBudget) cộng dồn cho cả
+  // công thức; web nay cũng vậy.
+  it("trần 20.000 ô là CỘNG DỒN cho cả công thức, không phải cho từng dải", () => {
+    soLanGoiO = 0;
+    expect(evalFormula("=SUM(F1:F15000;F1:F15000;F1:F15000)", refs)).toBeNull();
+    expect(soLanGoiO, "vẫn bung hết mọi dải dưới trần từng dải").toBeLessThanOrEqual(20_000);
+    soLanGoiO = 0;
+    expect(evalFormula("=SUM(" + Array(150).fill("F1:F20000").join(";") + ")", refs)).toBeNull();
+    expect(soLanGoiO).toBeLessThanOrEqual(20_000);
+  });
+
+  it("tổng số ô dưới trần vẫn tính bình thường (kể cả nhiều dải)", () => {
+    expect(evalFormula("=SUM(F1:F9000;F1:F9000)", refs)).toBe(230000);
+    expect(evalFormula("=SUM(F1:F4;F1:F50;D1:D9)", refs)).toBe(230010);
+  });
 });

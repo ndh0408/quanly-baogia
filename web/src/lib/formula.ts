@@ -244,18 +244,21 @@ function daiNguyenDoiSo(ca: string, viTri: number, dai: number): boolean {
   const truoc = ca.slice(0, viTri).replace(/\s+$/, "").slice(-1), sau = ca.slice(viTri + dai).replace(/^\s+/, "").charAt(0);
   return (truoc === "" || truoc === "(" || truoc === ";") && (sau === "" || sau === ")" || sau === ";");
 }
-/** Trần số ô khi tự bung một dải (cùng trần MAX_REF_ROWS của bộ tự kiểm ở src/quoteFormula.ts). */
+/** Trần TỔNG số ô mà MỘT lần evalFormula được bung ra qua mọi dải — CỘNG DỒN như evalBudget /
+ *  MAX_REF_ROWS của bộ tự kiểm ở src/quoteFormula.ts. Bản trước kiểm TỪNG dải: "=SUM(F1:F20000;…)" 150
+ *  dải vượt bảng (1.505 ký tự, lưu được) bung 3 triệu ô mỗi lần gọi (đo 809 ms), mà lưới gọi nhiều lượt
+ *  mỗi phím gõ / mỗi lần tính lại → đứng hình cho mọi người mở báo giá đó (soát toàn diện đợt 3). */
 const TRAN_O_BUNG = 20_000;
 const soCot = (L: string) => { let n = 0; for (const ch of L.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
 const chuCot = (n: number) => { let s = "", x = n + 1; while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26); } return s; };
 /** Bung dải "F1:F50" thành từng ô qua refs.cell (cột A,B,C… liên tiếp như sơ đồ địa chỉ của lưới).
- *  null = dải vượt trần → cả công thức lỗi, không bung hàng triệu ô ra bộ nhớ. */
-function bungDai(a: string, b: string, refs: FormulaRefs): number[] | null {
+ *  null = dải vượt phần ngân sách còn lại (`tran`) → cả công thức lỗi, không bung hàng triệu ô ra bộ nhớ. */
+function bungDai(a: string, b: string, refs: FormulaRefs, tran: number): number[] | null {
   const pa = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(a), pb = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(b);
   if (!pa || !pb) return [];
   const c0 = Math.min(soCot(pa[1]), soCot(pb[1])), c1 = Math.max(soCot(pa[1]), soCot(pb[1]));
   const r0 = Math.min(Number(pa[2]), Number(pb[2])), r1 = Math.max(Number(pa[2]), Number(pb[2]));
-  if ((c1 - c0 + 1) * (r1 - r0 + 1) > TRAN_O_BUNG) return null;
+  if ((c1 - c0 + 1) * (r1 - r0 + 1) > tran) return null;
   const out: number[] = [];
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const v = refs.cell(chuCot(c) + r); out.push(v === null || v === undefined || isNaN(v) ? 0 : v); }
   return out;
@@ -275,7 +278,9 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
     // với số web đã lưu) không lệch. Đừng thêm luật dấu phẩy riêng ở đây mà không thêm ở máy chủ.
     // $ chỉ có ý nghĩa lúc COPY/DÁN (khoá không cho dịch); khi TÍNH thì bỏ qua, y như Excel.
     let daiLoi = false;
+    let nganSach = TRAN_O_BUNG;   // cộng dồn qua MỌI dải của công thức này (dải trong bảng lẫn dải phải bung)
     s = s.replace(/(\$?[A-Za-z]+\$?\d+)\s*:\s*(\$?[A-Za-z]+\$?\d+)/g, (m, a, b, viTri: number, ca: string) => {
+      if (daiLoi) return "0";   // đã hỏng: khỏi giải tiếp các dải sau
       // Dải phải là NGUYÊN MỘT đối số (hoặc cả công thức): "SUM(F1:F3*2)" / "SUM(-F1:F3)" bung ra thành
       // SUM(a;b;c*2) — nghĩa khác hẳn, còn Excel ra #VALUE! (hoặc mảng) → tệp lệch app.
       if (!daiNguyenDoiSo(ca, viTri, m.length)) { daiLoi = true; return "0"; }
@@ -283,8 +288,8 @@ export function evalFormula(input: string, refs?: FormulaRefs): number | null {
       // bản cũ thay cả dải bằng "0": mất cả tổng mà ô không đỏ, còn Excel / bộ tự kiểm máy chủ ra
       // 115.000 (L33). Khi đó bung dải qua refs.cell: ô ngoài bảng = 0 y như ô trống Excel và y như
       // tham chiếu ô đơn ("=F1+F9").
-      const list = refs.range(a, b) ?? bungDai(a, b, refs);
-      if (list === null) { daiLoi = true; return "0"; }
+      const list = refs.range(a, b) ?? bungDai(a, b, refs, nganSach);
+      if (list === null || (nganSach -= list.length) < 0) { daiLoi = true; return "0"; }
       return list.length ? list.join(";") : "0";
     });
     if (daiLoi) return null;
