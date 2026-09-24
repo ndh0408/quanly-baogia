@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
-import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal, parseLooseNumber } from "../web/src/lib/clipboard.ts";
+import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal, parseLooseNumber, chuKhongRaSo } from "../web/src/lib/clipboard.ts";
 
 const HDR = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];
 async function tep(rows, hdr = HDR) {
@@ -164,5 +164,159 @@ describe("L17 (đợt 3): chữ số dính sau chữ cái trong ô CHỮ không 
     const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[2, 1500000], [3, 1500]]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
+  });
+});
+
+// Soát toàn diện đợt 4 (việc 1): sau L17 ô CHỮ có chữ cái dính liền trước/sau số ("ĐG1.500.000", "gia1.500",
+// "SL12", "x.5", "1e3", "12m2") đọc 0 — đúng luật "không đoán", nhưng KHÔNG một cảnh báo dòng nào (chỉ có
+// cảnh báo NGÀY THÁNG / ô LỖI). Tệp không có cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy.
+//   ĐÃ ĐO (fed1461): 6 dòng dưới đều nạp số 0 với warn = undefined.
+describe("đợt 4 việc 1: ô CHỮ ở cột số đọc ra 0 phải có cảnh báo dòng", () => {
+  const HDR5 = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"];
+
+  it("không có cột Thành Tiền: 'ĐG1.500.000' / 'gia1.500' / 'SL12' / 'x.5' / '1e3' / '12m2' → 0 KÈM cảnh báo đúng ô", async () => {
+    const rows = [
+      ["1", "Sân khấu", "gói", "1", "ĐG1.500.000"],
+      ["2", "Loa", "cái", "2", "gia1.500"],
+      ["3", "Ghế", "cái", "SL12", "50.000"],
+      ["4", "Thảm", "m2", "x.5", "200.000"],
+      ["5", "Đèn", "cái", "1e3", "10.000"],
+      ["6", "Vách", "m2", "12m2", "95.000"],
+    ];
+    const s = await tep(rows, HDR5);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[1, 0], [2, 0], [0, 50000], [0, 200000], [0, 10000], [0, 95000]]);
+    s.items.forEach((it, k) => expect(it.warn?.join(" | "), rows[k][1]).toMatch(/không đọc được số/));
+    expect(s.items[0].warn.join(" | ")).toMatch(/Đơn Giá.*ĐG1\.500\.000/);
+    expect(s.items[2].warn.join(" | ")).toMatch(/Số Lượng.*SL12/);
+    expect(s.items[0].warn.join(" | ")).not.toMatch(/Số Lượng/);
+  });
+
+  it("chữ KHÔNG có chữ số ('Liên hệ', 'Theo thực tế') ở Đơn Giá cũng về 0 → cảnh báo", async () => {
+    const s = await tep([["1", "Âm thanh", "gói", "1", "Liên hệ"], ["2", "Ánh sáng", "gói", "1", "Theo thực tế"]], HDR5);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([0, 0]);
+    s.items.forEach((it) => expect(it.warn?.join(" | ")).toMatch(/Đơn Giá.*không đọc được số/));
+  });
+
+  it("KHÔNG cảnh báo giả: số 0 viết bằng chữ ('0', '0đ', '-', '(0)', '0,00'), ô trống, ô chữ đọc ra số, ô SỐ thật 0", async () => {
+    const s = await tep([
+      ["1", "Tặng kèm", "cái", "1", "0"],
+      ["2", "Khuyến mãi", "cái", "2", "0đ"],
+      ["3", "Miễn phí", "cái", "3", "-"],
+      ["4", "Bù trừ", "cái", "1", "(0)"],
+      ["5", "Phí 0", "cái", "1", "0,00"],
+      ["6", "Để trống giá", "cái", "1", ""],
+      ["7", "Vách", "m2", "12 m2", "95.000đ/m2"],
+      ["8", "Ghế", "cái", "x2", "VNĐ1.500.000"],
+      ["9", "Bàn", "cái", 0, 0],
+      ["10", "Thảm", "m2", "0 m2", "USD1,500"],
+    ], HDR5);
+    expect(s.items.map((i) => i.warn)).toEqual(s.items.map(() => undefined));
+  });
+
+  it("Số Ngày chữ 'cả tuần' → cảnh báo; Đơn Giá chữ của hàng NHÓM không xét (app tự cộng lại, vốn không nạp)", async () => {
+    const s = await tep([
+      ["A", "Hạng mục chính", "", "", "", "Trọn gói"],
+      ["1", "Nhân sự", "người", "2", "cả tuần", "500.000"],
+    ], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"]);
+    const [nhom, ns] = s.items;
+    expect(nhom.kind).toBe("section");
+    expect(nhom.warn).toBeUndefined();
+    expect(ns).toMatchObject({ quantity: 2, unitPrice: 500000, days: null });
+    expect(ns.warn?.join(" | ")).toMatch(/Số Ngày.*cả tuần.*không đọc được số/);
+  });
+
+  // Phản biện đợt 4: bản đầu miễn cảnh báo cho mọi ô còn sót MỘT chữ số BẤT KỲ sau bước bỏ cụm, trong khi ý định
+  // chỉ là "số 0 viết bằng chữ". Khoảng giá đọc NaN → 0 mà vẫn im lặng — đúng lớp "Đơn Giá về 0 không ai thấy".
+  //   ĐÃ ĐO (2721ffb, tệp không cột Thành Tiền): "1.500.000 - 2.000.000" → unitPrice 0, warn undefined;
+  //   "1,2,3.4.5" → 0, warn undefined.
+  it("còn chữ số KHÁC 0 mà đọc ra 0 ('1.500.000 - 2.000.000', '1,2,3.4.5') → cảnh báo; chỉ còn chữ số 0 thì không", async () => {
+    const khoang = ["1.500.000 - 2.000.000", "1,2,3.4.5"];
+    const so0 = ["0.000", "-0", "0 (tặng)", "ĐG: 0", "0%", "0 m2"];
+    const s = await tep([...khoang, ...so0].map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([...khoang, ...so0].map(() => 0));
+    khoang.forEach((g, k) => expect(s.items[k].warn?.join(" | "), g).toMatch(/Đơn Giá.*không đọc được số, đã để 0/));
+    expect(s.items.slice(khoang.length).map((i) => i.warn)).toEqual(so0.map(() => undefined));
+    // Phía web (đường dán) cùng kết luận.
+    for (const g of khoang) expect(chuKhongRaSo(g, parseLooseNumber(g)), g).toBe(true);
+    for (const g of so0) expect(chuKhongRaSo(g, parseLooseNumber(g)), g).toBe(false);
+  });
+
+  // Phản biện đợt 4: SL của hàng NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày
+  // trống = ×1) — câu "đã để 0" nói sai con số app thật sự dùng.
+  //   ĐÃ ĐO (2721ffb): nhóm SL "Trọn gói" → warn "… không đọc được số, đã để 0, cần nhập lại".
+  it("câu cảnh báo nói đúng con số: SL hàng NHÓM / Số Ngày không đọc được → 'tính như 1', dòng thường → 'đã để 0'", async () => {
+    const s = await tep([
+      ["A", "Nhóm SL chữ", "", "Trọn gói", "", ""],
+      ["1", "Nhân sự", "người", "2", "cả tuần", "500.000"],
+      ["2", "Loa", "cái", "Liên hệ", "2", "100.000"],
+    ], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"]);
+    const [nhom, ns, loa] = s.items;
+    expect(nhom.kind).toBe("section");
+    expect(nhom.warn?.join(" | ")).toMatch(/Số Lượng.*Trọn gói.*không đọc được số, đã bỏ trống \(tính như 1\)/);
+    expect(ns.days).toBeNull();
+    expect(ns.warn?.join(" | ")).toMatch(/Số Ngày.*cả tuần.*không đọc được số, đã bỏ trống \(tính như 1\)/);
+    expect(loa.quantity).toBe(0);
+    expect(loa.warn?.join(" | ")).toMatch(/Số Lượng.*Liên hệ.*không đọc được số, đã để 0/);
+    for (const it of [nhom, ns]) expect(it.warn.join(" | ")).not.toMatch(/đã để 0/);
+  });
+
+  it("KHỚP phía web: chuKhongRaSo ở clipboard.ts (dùng cho đường dán) cho cùng kết luận với bộ nhập", async () => {
+    const giaChu = ["ĐG1.500.000", "gia1.500", "Liên hệ", "0", "0đ", "-", "(0)", "95.000đ/m2", "VNĐ1.500.000", "1e3"];
+    const s = await tep(giaChu.map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);
+    expect(s.items.map((i) => !!i.warn)).toEqual(giaChu.map((g) => chuKhongRaSo(g, parseLooseNumber(g))));
+    expect(giaChu.map((g) => chuKhongRaSo(g, parseLooseNumber(g)))).toEqual([true, true, true, false, false, false, false, false, false, true]);
+    expect(chuKhongRaSo("SL12", parseLooseDecimal("SL12"))).toBe(true);
+    expect(chuKhongRaSo("", 0)).toBe(false);
+    expect(chuKhongRaSo("12 m2", parseLooseDecimal("12 m2"))).toBe(false);
+  });
+});
+
+// Soát toàn diện đợt 4 (việc 2): ngoặc kế toán đòi phần trong ngoặc là SỐ thuần (đợt 3, để "(Tạm tính) 500.000
+// (chưa VAT)" không thành số âm), nhưng danh sách chữ được gỡ trước khi xét chỉ có VNĐ / USD / đồng / ₫ / $.
+// Âm kế toán kèm đơn vị hay tiền khác đọc thành DƯƠNG — khoản giảm giá thành khoản cộng, không cảnh báo:
+//   ĐÃ ĐO (fed1461): "(1.500.000 đ/bộ)" / "(1.500.000 VND/bộ)" / "(1.500.000 k)" → +1.500.000;
+//   "(€1.500)" / "(1.500 EUR)" / "(1.500)€" → +1.500; "(1.5tr)" → +1,5 (ở 2f591e0 đều là số âm).
+// Luật: ô trong ngoặc đọc đúng bằng ô đó bỏ ngoặc, ĐỔI DẤU — đọc không ngoặc vốn đã bỏ qua các chữ này.
+describe("đợt 4 việc 2: ngoặc kế toán kèm đơn vị '/bộ' / EUR / € / k / nghìn / tr vẫn là số âm — hai phía khớp", () => {
+  const NGOAC = [
+    "(1.500.000 đ/bộ)", "(1.500.000 VND/bộ)", "(1.500.000/cái)", "(1.500.000 đ / suất)", "(1.500.000 đ/m²)",
+    "(1.500.000 đồng/m2)", "(1.500.000 k)", "(€1.500)", "(1.500 EUR)", "(1.500€)", "(1.500)€", "€(1.500)",
+    "(1.5tr)", "(1,5 tr)", "(500 nghìn)", "(500 ngàn)", "(2 triệu)",
+  ];
+  const boNgoac = (x) => x.replace(/[()]/g, "");
+
+  it("clipboard.ts: parseLooseNumber / parseTheoQuyUoc đọc = −(cùng ô bỏ ngoặc); parseLooseDecimal cũng âm", () => {
+    for (const x of NGOAC) {
+      expect(parseLooseNumber(x), x).toBe(-parseLooseNumber(boNgoac(x)));
+      expect(parseLooseNumber(x), x).toBeLessThan(0);
+      expect(parseTheoQuyUoc(x, "vn"), x).toBe(-parseTheoQuyUoc(boNgoac(x), "vn"));
+      expect(parseLooseDecimal(x), x).toBe(-parseLooseDecimal(boNgoac(x)));
+    }
+    expect(parseLooseNumber("(1.500.000 đ/bộ)")).toBe(-1500000);
+    expect(parseLooseNumber("(1.500 EUR)")).toBe(-1500);
+    expect(parseLooseDecimal("(2,5 /bộ)")).toBeCloseTo(-2.5);
+    // Chữ tổ hợp NFD (dán từ máy Mac / trình duyệt khác): "ì" / "ồ" là hai điểm mã, vẫn phải nhận ra.
+    expect(parseLooseNumber("(500 nghìn)".normalize("NFD"))).toBe(-500);
+    expect(parseLooseNumber("(1.500.000 đồng)".normalize("NFD"))).toBe(-1500000);
+  });
+
+  it("không nới quá tay: chú thích hai đầu, '/' theo sau là SỐ, ngoặc chỉ có chữ đơn vị — vẫn không phải số âm", () => {
+    expect(parseLooseNumber("(Tạm tính) 500.000 (chưa VAT)")).toBe(500000);
+    expect(parseLooseNumber("(tạm k) 500.000 (chưa tr)")).toBe(500000);
+    expect(parseLooseNumber("(1/2)")).toBeGreaterThanOrEqual(0);
+    expect(parseLooseNumber("(k)")).toBe(0);
+    expect(parseLooseNumber("(/bộ)")).toBe(0);
+    // Chữ đơn vị phải đứng riêng: "kg" / "trọn" không phải "k" / "tr".
+    expect(parseLooseNumber("(1.500 kg)")).toBeGreaterThanOrEqual(0);
+    expect(parseLooseNumber("(1.500 trọn gói)")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("nạp tệp (src/excelImport.ts) ra ĐÚNG những con số đó — hai phía giữ khớp", async () => {
+    const rows = NGOAC.map((g, k) => [String(k + 1), `Giảm ${k + 1}`, "gói", "1", g]);
+    const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 1);
+    expect(s.items.map((i) => i.unitPrice)).toEqual(rows.map((r) => (qu ? parseTheoQuyUoc(r[4], qu) : parseLooseNumber(r[4]))));
+    s.items.forEach((it, k) => expect(it.unitPrice, NGOAC[k]).toBeLessThan(0));
+    expect(s.items.map((i) => i.warn)).toEqual(s.items.map(() => undefined));
   });
 });

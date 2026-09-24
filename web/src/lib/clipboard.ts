@@ -46,14 +46,18 @@ export function cellsToHTML(matrix: string[][]): string {
 // Phần TRONG ngoặc phải là SỐ thuần (chữ số, dấu tách, ký hiệu tiền, %): "(Tạm tính) 500.000 (chưa VAT)"
 // cũng mở "(" đóng ")" nhưng là hai chú thích — bản trước đọc thành −500.000, hạng mục thành khoản TRỪ
 // mà không cảnh báo (soát toàn diện đợt 3). Chữ tiền được gỡ trước khi xét gồm cả "đồng" / "dong" / "US$":
-// thiếu chúng thì "(1.500.000 đồng)" bị coi là chú thích, đọc +1.500.000 (phản biện đợt 3). PHẢI khớp bản
-// port ở src/excelImport.ts.
+// thiếu chúng thì "(1.500.000 đồng)" bị coi là chú thích, đọc +1.500.000 (phản biện đợt 3). Đợt 4 gỡ thêm
+// đơn vị sau "/" ("/bộ", "/cái", "/m²" — chữ cái đứng đầu), "EUR" / "€" và bội số đứng riêng "k" / "nghìn" /
+// "ngàn" / "tr" / "triệu": đọc không ngoặc vốn bỏ qua chúng, nên "(1.500.000 đ/bộ)" phải là −1.500.000 như
+// trước đợt 3, không phải +1.500.000. "/2", "kg", "trọn gói" không thuộc danh sách. PHẢI khớp bản port ở
+// src/excelImport.ts.
 const AM_KE_TOAN = /^\((.*)\)$/;
 const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
+const DON_VI_TRONG_NGOAC = /\s*\/\s*\p{L}[\p{L}\p{N}]*\s*$|(?<!\p{L})(?:eur|nghìn|ngàn|triệu|tr|k)(?!\p{L})/giu;
 const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
-  const t = String(s).trim().replace(/\s*[₫đ$]$|^[₫đ$]\s*/gi, "").trim();
+  const t = String(s).trim().replace(/\s*[₫đ$€]$|^[₫đ$€]\s*/gi, "").trim();
   const m = AM_KE_TOAN.exec(t);
-  return m && SO_TRONG_NGOAC.test(m[1].replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
+  return m && SO_TRONG_NGOAC.test(m[1].normalize("NFC").replace(DON_VI_TRONG_NGOAC, "").replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
 };
 
 // PHẦN TRĂM (soát toàn diện L15): Excel/Sheets chép ô định dạng % dưới dạng CHỮ "10%" (giá trị gốc
@@ -76,6 +80,22 @@ export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? 
 // vẫn bỏ. PHẢI khớp bản port ở src/excelImport.ts.
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+
+// Ô CHỮ ở cột số mà ĐỌC RA 0 (soát toàn diện đợt 4): luật L17 không đoán nên "ĐG1.500.000", "SL12", "12m2",
+// "1e3" đọc 0 — đúng, nhưng phải NÓI ra: bộ nhập Excel không có cảnh báo dòng nào cho ca này, tệp không có
+// cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Sau bước bỏ cụm mà còn
+// chữ số KHÁC 0 thì ô có số nhưng đọc hỏng → báo (khoảng giá "1.500.000 - 2.000.000", "1,2,3.4.5" đọc NaN → 0 —
+// phản biện đợt 4: bản đầu miễn cho mọi chữ số nên hai ca này lọt). Chỉ còn chữ số 0 = số 0 thật ("0", "0đ",
+// "(0)", "0 m2") → không báo; ô chỉ có gạch / ký hiệu tiền ("-" kiểu kế toán) là ô trống → không báo; còn lại
+// ("Liên hệ", "gia1.500") → báo. PHẢI khớp bản port ở src/excelImport.ts.
+export const chuKhongRaSo = (s: string, n: number): boolean => {
+  const t = String(s ?? "").trim();
+  if (!t || n) return false;
+  const conLai = boCumChuSo(tachNgoacKeToan(t).s);
+  if (/[1-9]/.test(conLai)) return true;
+  if (/\d/.test(conLai)) return false;
+  return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
+};
 
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
