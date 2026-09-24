@@ -237,6 +237,14 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         };
       });
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
+      if (!songRef.current) {
+        // L62 (như QuoteEditor): máy chủ trả lời SAU khi người dùng đã rời màn này ("Rời, bỏ thay đổi" lúc
+        // PUT còn bay). Chỉ dọn bản nháp của CHÍNH báo giá này và báo đã lưu. Cờ `__editorDirty` giờ là của
+        // trang đang mở — hạ nó là mất lời nhắc chưa lưu ở đó. Không gửi duyệt: người dùng đã bỏ đi giữa chừng.
+        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        toast(thenSubmit ? "Đã lưu phần Hà Nội — CHƯA gửi duyệt vì bạn đã rời trang" : "Đã lưu phần Hà Nội", "success");
+        return;
+      }
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       // Đã lên máy chủ → bản nháp hết lý do tồn tại (giữ lại là lần mở sau hỏi khôi phục thứ cũ hơn).
       if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
@@ -245,6 +253,9 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       else toast("Đã lưu phần Hà Nội", "success");
       await load();
     } catch (ex) {
+      // L62: đã rời màn này → không bật hộp 409 lên trang khác, không hạ cờ / tải lại trang đang đứng, không
+      // giữ bản ':xungdot' của phần người dùng đã chọn bỏ (như QuoteEditor).
+      if (!songRef.current) { toast(`Phần Hà Nội của báo giá vừa rời chưa lưu được: ${ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN"}`, "error"); return; }
       // GRID-16: 409 = phần HN vừa được ghi ở nơi khác (hnRev/updatedAt lệch). Trước đây chỉ là toast:
       // không lối tải lại, mà tự tải lại thì mất phần đang gõ. Nay giữ phần đang gõ vào khoá `…:xungdot`
       // rồi mới tải lại; đường nạp hỏi có mở lại không (y như GRID-08 ở trình soạn báo giá).

@@ -357,6 +357,48 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
   });
 });
 
+// Đợt 4 (họ L62 bên QuoteEditor): save() không kiểm view còn gắn sau `await api.saveHn(...)`. Back khi PUT đang
+// bay → "Rời, bỏ thay đổi" → view gỡ; máy chủ trả lời sau đó thì instance đã gỡ hạ cờ `__editorDirty` DÙNG
+// CHUNG của trang đang mở (mất lời nhắc chưa lưu ở đó), gửi duyệt tiếp, hoặc bật hộp 409 lên trang khác.
+describe("L62 — Lưu phần HN xong sau khi view đã gỡ không được đụng trang đang mở", () => {
+  const WD = window as Window & { __editorDirty?: boolean };
+  async function luuTreoRoiRoiTrang(ketQua: () => Promise<unknown>, nut: () => HTMLButtonElement = nutLuu) {
+    await mo();
+    goGia("6000000");
+    await cho(1600);                                                // bản nháp #11 đã ghi
+    expect(docBanNhap(KHOA, 5)).not.toBeNull();
+    let xong!: () => void;
+    h.saveHn = () => new Promise((r, loi) => { xong = () => { ketQua().then(r, loi); }; });
+    await act(async () => { nut().click(); });
+    await cho(10);
+    act(() => root!.unmount()); root = null; host?.remove();         // "Rời, bỏ thay đổi" → Shell gỡ view
+    WD.__editorDirty = true;                                         // trang mới đang có thay đổi chưa lưu
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockClear();
+    await act(async () => { xong(); });
+    await cho(30);
+  }
+
+  it("Lưu thành công sau khi đã rời → cờ bẩn của trang đang mở còn, bản nháp CỦA #11 được dọn", async () => {
+    await luuTreoRoiRoiTrang(async () => ({}));
+    expect(WD.__editorDirty, "instance đã gỡ hạ cờ chặn rời trang của trang đang mở").toBe(true);
+    expect(docBanNhap(KHOA, 5), "đã lên máy chủ thì bản nháp #11 hết lý do tồn tại").toBeNull();
+  });
+
+  it("Lưu + Gửi duyệt: rời trang khi đang lưu → KHÔNG gửi duyệt báo giá đã rời", async () => {
+    const nutGui = () => [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))! as HTMLButtonElement;
+    await luuTreoRoiRoiTrang(async () => ({}), nutGui);
+    expect(api.submitHn, "instance đã gỡ vẫn gửi duyệt").not.toHaveBeenCalled();
+    expect(WD.__editorDirty).toBe(true);
+  });
+
+  it("409 sau khi đã rời → không bật hộp xung đột lên trang khác, không hạ cờ, không giữ bản đã chọn bỏ", async () => {
+    await luuTreoRoiRoiTrang(async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); });
+    expect(ui.confirmModal).not.toHaveBeenCalled();
+    expect(WD.__editorDirty).toBe(true);
+    expect(docBanNhap(KHOA + ":xungdot", 5)).toBeNull();
+  });
+});
+
 // L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",
 // còn khoá bản nháp vẫn theo id admin THẬT.
 describe("L63 — xem thử quyền không đụng bản nháp giá HN thật", () => {
