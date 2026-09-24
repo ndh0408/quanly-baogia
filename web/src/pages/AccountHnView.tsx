@@ -4,7 +4,7 @@ import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { extraTableSum } from "../components/ExtraTables";
-import { HnTables, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
 
@@ -53,6 +53,10 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     ghiBanNhap(khoaNhapRef.current, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
   };
   const mark = () => {
+    // L61 (đợt 3): hộp hỏi trong component con (lưới "Xóa nhiều hàng", "Xoá sheet Hà Nội") trả lời SAU khi
+    // view đã gỡ vẫn gọi về đây — bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản
+    // nháp giá HN của báo giá đã rời sau khi cleanup đã huỷ hẹn giờ. Cờ còn gắn khai ở dưới (songRef).
+    if (!songRef.current) return;
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
     if (henNhapRef.current) clearTimeout(henNhapRef.current);
     henNhapRef.current = setTimeout(ghiNhapNgay, 1200);
@@ -105,6 +109,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   // `conSong`; sau MỌI `await` hỏi lại nó rồi mới đụng bản nháp / qRef / cờ (khuôn 01b07dc bên QuoteEditor).
   const songRef = useRef(true);
   useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  // X1 (đợt 3): bản giữ lại ':xungdot' chỉ hỏi ở lượt nạp ĐẦU của mỗi lần gắn view, và lại sau một 409
+  // mới (save → "Tải lại"). Hủy không còn xoá nó, mà save() nạp lại qua load() → trước đây MỖI lần Lưu
+  // bật lại hai hộp danger; lỡ bấm "Mở bản của tôi" ngay sau Lưu là giá VỪA LƯU bị thay bằng giá cũ lúc
+  // xung đột. Hộp hứa "lần mở sau sẽ hỏi lại", không phải sau mỗi lần Lưu.
+  const daHoiXdRef = useRef(false);
   const load = useCallback(async (conSong: () => boolean = () => songRef.current) => {
     try {
       if (!_templates) _templates = await api.metaTemplates();
@@ -129,8 +138,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         } else xoaBanNhap(khoa);
       }
       // Bản giữ lại lúc xung đột 409 (xem save) — mở ra thì mang mốc MỚI, Lưu là chủ động ghi đè. Đã khôi
-      // phục bản nháp thường thì không hỏi (bản giữ lại vẫn nằm đó, lần mở sau hỏi tiếp).
-      const xd = khoa && !khoiPhuc ? docBanNhap(khoa + ":xungdot", meId) : null;
+      // phục bản nháp thường thì không hỏi (bản giữ lại vẫn nằm đó, lần mở sau hỏi tiếp). Lượt nạp sau Lưu
+      // cũng không hỏi (daHoiXdRef).
+      const hoiXd = !daHoiXdRef.current;
+      daHoiXdRef.current = true;
+      const xd = khoa && !khoiPhuc && hoiXd ? docBanNhap(khoa + ":xungdot", meId) : null;
       if (khoa && xd && suaDuoc) {
         const moLai = await confirmModal("Giá Hà Nội bạn gõ trước khi bị xung đột", "Phần Hà Nội vừa được ghi ở nơi khác trong lúc bạn đang gõ. Phần bạn gõ khi đó được giữ lại trên máy này. Mở lại? Lưu sau khi mở sẽ GHI ĐÈ bản vừa được ghi. Hủy thì bản này vẫn được giữ, bạn sẽ được hỏi có xoá không.", { confirmText: "Mở bản của tôi", danger: true });
         if (!conSong()) return;
@@ -156,7 +168,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   }, [quoteId, redraw, meId]);
   const ghiNhapNgayRef = useRef(ghiNhapNgay);
   ghiNhapNgayRef.current = ghiNhapNgay;
-  useEffect(() => { let alive = true; load(() => alive); return () => { alive = false; }; }, [load]);
+  useEffect(() => { let alive = true; daHoiXdRef.current = false; load(() => alive); return () => { alive = false; }; }, [load]);
 
   if (err) return <div className="err" style={{ margin: 24 }}>⚠ {err} <button type="button" className="btn btn-sm" onClick={() => { setErr(""); load(); }}>Thử lại</button> <a className="btn btn-sm" href="#/list">Về danh sách</a></div>;
   if (!ready || !qRef.current) return <div className="skeleton-wrap" style={{ padding: 24 }}>{Array.from({ length: 5 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
@@ -170,12 +182,13 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const tplList0 = templates.filter((x) => x.companyId === q.companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
-  const tplOf = (id?: number) => templates.find((x) => x.id === (id || defTplId)) || tplList[0];
+  const tplOf = (id?: number) => mauBangHn({ templateId: id }, templates, q.companyId);
   const usesDaysOf = (id?: number) => !!tplOf(id)?.layout?.hasDays;
   const addrDetailOf = (id?: number) => !!(tplOf(id)?.layout?.reserveDetail ?? tplOf(id)?.layout?.hasDetail);
   const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? defTplId;
 
-  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never), 0);
+  // L64: chỉ nhân Số Ngày khi mẫu của bảng CÓ ngày — cùng luật với tổng đầu khối của HnTables.
+  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never, usesDaysOf(t.templateId)), 0);
 
   // NẠP TỪ EXCEL — dùng CHUNG modal với trình soạn báo giá (xem trước từng tab rồi mới nạp).
   // Bảng HN có đúng hình dạng { name, templateId, groupSubtotal, items } mà modal cần, nên truyền
@@ -213,10 +226,15 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     setSaving(true); savingRef.current = true;
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
-      const goi = hnTables.map((t) => ({
-        name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
-        items: (t.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
-      }));
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — máy chủ (tổng HN đổ sang Quản lý dự án) nhân
+      // days bất kể mẫu. Việc dọn này trước đây làm ngay LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
+      const goi = hnTables.map((t) => {
+        const coNgay = usesDaysOf(t.templateId);
+        return {
+          name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
+          items: (t.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+        };
+      });
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       // Đã lên máy chủ → bản nháp hết lý do tồn tại (giữ lại là lần mở sau hỏi khôi phục thứ cũ hơn).
@@ -242,6 +260,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
           const tai = await confirmModal("Phần Hà Nội đã thay đổi ở nơi khác", `${ex.message}. Tải lại bản mới nhất? Phần bạn đang gõ được GIỮ LẠI trên máy này và bạn sẽ được hỏi mở lại.`, { danger: true, confirmText: "Tải lại bản mới" });
           if (tai) {
             dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
+            daHoiXdRef.current = false;   // vừa ghi bản giữ lại → lượt nạp này phải hỏi mở lại
             await load();
           } else xoaBanNhap(khoaXd);   // Hủy → ở lại; bỏ bản giữ lại để lần mở sau không hỏi một bản cũ
         }
@@ -250,7 +269,13 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     finally { setSaving(false); savingRef.current = false; }
   };
   saveRef.current = editable && !saving ? () => save(false) : null;
-  const submit = async () => { if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) save(true); };
+  // Đợt 3 (họ L58/L61): hộp không tự đóng khi Back — xác nhận nó sau khi view đã gỡ từng Lưu + GỬI DUYỆT
+  // báo giá CŨ (account không tự rút lại được) và hạ cờ bẩn DÙNG CHUNG của trang đang mở.
+  const submit = async () => {
+    if (!(await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" }))) return;
+    if (!songRef.current) return;
+    save(true);
+  };
 
   return (
     <div className="account-hn-view ahn-card">

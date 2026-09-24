@@ -6,7 +6,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
-import { HnTables, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
@@ -112,9 +112,34 @@ export const vanTayMain = (q: unknown): string => {
     id: s.id ?? null, templateId: s.templateId ?? null, name: s.name ?? "", discount: Number(s.discount) || 0,
     groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
     items: (s.items || []).map((it) => ({ ...it, _k: undefined })),
+    noiBo: noiDungBangNoiBo(s.extraTables),
   }));
   return JSON.stringify({ dau, trang });
 };
+
+/**
+ * Đợt 3 (kẽ hở X2) — NỘI DUNG bảng nội bộ của một trang, cho vanTayMain. Account phụ (phạm vi riêng) lưu
+ * bảng nội bộ qua ghiVungNoiBoDuocGiao (src/services/quoteService.ts): chỉ ghi `extraTables`, GIỮ id
+ * trang, bump updatedAt. Thiếu phần này thì lượt lưu đó không làm vân tay đổi, và mốc mới (tích thanh
+ * toán / duyệt HN đến sau) nuốt luôn nó — lần Lưu kế đè im lặng bảng người kia vừa lưu.
+ * Bỏ đúng các trường route /pay được đổi (`paid*`, `hasPaidProof`) cùng `rid`, `_k`: người khác tích
+ * thanh toán KHÔNG làm nó đổi. GIỮ `approved` — không có route nào đổi nó ngoài đường Lưu, nên nó đổi là
+ * đã có người lưu chen (chặt hơn vanTayHnNoiDung, nơi duyệt HN ở cấp báo giá).
+ */
+function noiDungBangNoiBo(ts: unknown) {
+  type Hang = Record<string, unknown>;
+  type Bang = { category?: unknown; name?: unknown; templateId?: unknown; groupSubtotal?: unknown; items?: Hang[] };
+  return (Array.isArray(ts) ? ts as Bang[] : []).map((t) => ({
+    category: t?.category ?? null, name: t?.name ? String(t.name).trim() : null,
+    templateId: t?.templateId != null ? Number(t.templateId) : null, groupSubtotal: !!t?.groupSubtotal,
+    items: (t?.items || []).map((it) => ({
+      kind: it?.kind ?? null, label: it?.label ?? null, name: String(it?.name || "").trim(), detail: it?.detail ?? null,
+      unit: it?.unit ?? null, quantity: Number(it?.quantity) || 0, quantityExact: !!it?.quantityExact,
+      unitPrice: Number(it?.unitPrice) || 0, days: it?.days != null ? Number(it.days) : null, notes: it?.notes ?? null,
+      formulas: it?.formulas ?? null, approved: !!it?.approved,
+    })),
+  }));
+}
 
 /**
  * X2 — VÂN TAY NỘI DUNG BẢNG HÀ NỘI của một bản máy chủ: chỉ phần người dùng GÕ (tên, mẫu, nhóm, hạng
@@ -277,6 +302,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const meIdRef = useRef(me.id);   // mark() là useCallback([]) — đọc người ghi bản nháp qua ref
   meIdRef.current = me.id;
   const mark = useCallback(() => {
+    // L61 (đợt 3): hộp hỏi trong component CON (lưới "Xóa nhiều hàng", "Xoá sheet nội bộ / Hà Nội") không
+    // tự đóng khi Back; trả lời nó sau khi editor đã gỡ thì onChange/onMarkDirty gọi về đây. Chạy tiếp là
+    // bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản nháp báo giá cũ SAU cleanup.
+    // Chặn một chỗ cho mọi đường.
+    if (!songRef.current) return;
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
     if (nhapQuaLonRef.current) return;   // đã biết không ghi nổi — đừng tốn CPU nữa
     if (hnNhapRef.current) clearTimeout(hnNhapRef.current);
@@ -434,6 +464,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     khoaNhapRef.current = null;
     (async () => {
       try {
+        // L72 (phần mạng): bắt đầu GET báo giá SONG SONG với meta. Lần mở đầu tiên của phiên (cache meta
+        // còn trống) từng chờ xong meta rồi mới gọi getQuote — thêm trọn một vòng mạng trước khi thấy báo
+        // giá. Kết quả vẫn chỉ được đọc ở `await pQ` bên dưới, đúng chỗ cũ: thứ tự xử lý bản nháp / khoá
+        // không đổi, lỗi thật vẫn vào catch. `.catch` rỗng chỉ để meta hỏng TRƯỚC (thoát khỏi try khi
+        // chưa tới `await pQ`) thì promise này không thành "unhandled rejection".
+        const pQ = isNew ? null : api.getQuote(quoteId!);
+        pQ?.catch(() => {});
         if (!_companies || !_templates) {
           const [cs, ts] = await Promise.all([api.metaCompanies(), api.metaTemplates()]);
           _companies = cs; _templates = ts;
@@ -455,7 +492,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             };
           }
         } else {
-          q = await api.getQuote(quoteId!);
+          q = await pQ!;
         }
         // app#11 / X2: vân tay của bản MÁY CHỦ — lấy TRƯỚC khi bản nháp phủ lên VÀ trước bước chuẩn hoá
         // ngay dưới. Mọi bản đem ra so sau này (bản GET kiểm tra, bản PUT/chốt trả về) đều là JSON thô
@@ -731,10 +768,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       };
       // Bảng Hà Nội: dọn `_k` (khoá React nội bộ) y như hạng mục của lưới chính. Gửi kèm cả khi
       // rỗng — người dùng xoá hết bảng HN thì server phải ghi lại mảng rỗng, không phải bỏ qua.
-      payload.hnTables = hnTables.map((x) => ({
-        ...x, _k: undefined,
-        items: (x.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
-      })).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (máy chủ nhân days bất kể mẫu) — bước này
+      // trước đây làm ngay LÚC VẼ trong HnTables nên đổi mẫu qua lại là mất số Ngày. CHỈ khi phần HN sửa
+      // được ở đây (đúng điều kiện bước dọn cũ): phần HN đã chốt thì máy chủ so NGUYÊN VĂN với CSDL
+      // (chotHnTables) — dọn thêm là lệch, cả lần Lưu báo giá ăn 409.
+      const hnSuaDuoc = coScope("hanoi") && !hnKhoa;
+      payload.hnTables = hnTables.map((x) => {
+        const coNgay = !hnSuaDuoc || !!mauBangHn(x, templates, q.companyId)?.layout?.hasDays;
+        return {
+          ...x, _k: undefined,
+          items: (x.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+        };
+      }).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
       delete payload._new; delete payload._activeSheet;
       // Khóa lạc quan: gửi mốc updatedAt đã tải → server chặn ghi đè nếu người khác vừa lưu (409).
       // Sau khi lưu, q được refresh từ `saved` (bên dưới) nên base luôn mới cho lần lưu kế.

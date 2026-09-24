@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-const MAU = [{ id: 1, code: "gn", name: "GN (có ngày)", companyId: 7, layout: { hasDays: true } }];
+// Mẫu 2 (không ngày) để kiểm L64 — mẫu mặc định (đầu danh sách) vẫn là mẫu 1 như các bài cũ.
+const MAU = [{ id: 1, code: "gn", name: "GN (có ngày)", companyId: 7, layout: { hasDays: true } }, { id: 2, code: "gnk", name: "GN (không ngày)", companyId: 7, layout: { hasDays: false } }];
 const baoGia = (over: Record<string, unknown> = {}) => ({
   id: 11, quoteNumber: "GN26D011", title: "Giao HN", companyId: 7, hnStatus: "assigned",
   updatedAt: "2026-09-16T00:00:00.000Z", hnRev: "a".repeat(32),
@@ -179,6 +180,60 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect(giaTrongNhap(KHOA12), "giá HN chưa lưu của #12 bị hộp treo xoá").toBe(9_900_000);
   });
 
+  // Đợt 3 (cùng họ L58/L61): hộp "Gửi duyệt phần Hà Nội" cũng không tự đóng khi Back. Xác nhận nó sau khi
+  // view #12 đã gỡ từng Lưu + GỬI DUYỆT báo giá CŨ (account không tự rút lại được) và hạ cờ bẩn của #11.
+  it("hộp 'Gửi duyệt' của #12 còn treo khi đã sang #11 — xác nhận KHÔNG lưu, KHÔNG gửi duyệt #12", async () => {
+    let traLoi!: (v: boolean) => void;
+    h.getQuote = async () => baoGia({ id: 12 });
+    await mo();
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const nutGui = [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))!;
+    await act(async () => { nutGui.click(); });
+    expect(confirmMock()).toHaveBeenCalledWith("Gửi duyệt phần Hà Nội", expect.any(String), expect.anything());
+    act(() => root!.unmount()); host!.remove();
+    h.getQuote = async () => baoGia();
+    await mo();
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = true;   // #11 đang có thay đổi chưa lưu
+    await act(async () => { traLoi(true); });
+    await cho(30);
+    expect(api.saveHn, "hộp treo lưu phần HN của báo giá đã rời").not.toHaveBeenCalled();
+    expect(api.submitHn, "hộp treo gửi duyệt báo giá đã rời").not.toHaveBeenCalled();
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "cờ bẩn của #11 bị hạ").toBe(true);
+  });
+
+  // Đợt 3 (L61 phần component con): hộp "Xóa nhiều hàng" của lưới HN gọi ngược mark() của view. View đã gỡ
+  // mà mark() vẫn chạy thì bật cờ `__editorDirty` DÙNG CHUNG của #11 và hẹn giờ ghi bản nháp giá HN #12.
+  it("'Xóa nhiều hàng' trong lưới HN #12 còn treo khi đã sang #11: xác nhận KHÔNG bật cờ của #11, KHÔNG ghi bản nháp #12", async () => {
+    let traLoi!: (v: boolean) => void;
+    const hai = [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 5_000_000, days: 1 }, { kind: "item", name: "Bạt", quantity: 1, unitPrice: 1_000_000, days: 1 }];
+    h.getQuote = async () => baoGia({ id: 12, hnTables: [{ ...baoGia().hnTables[0], items: hai }] });
+    await mo();
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const phim = (init: KeyboardEventInit) => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+    act(() => { (host!.querySelector('tr[data-row="0"] [data-f="name"]') as HTMLElement).focus(); });
+    phim({ key: "ArrowDown", shiftKey: true });
+    phim({ key: " ", code: "Space", shiftKey: true });
+    phim({ key: "-", ctrlKey: true });
+    expect(confirmMock()).toHaveBeenCalledWith("Xóa nhiều hàng", expect.any(String), expect.anything());
+    act(() => root!.unmount()); host!.remove();
+    h.getQuote = async () => baoGia();
+    await mo();
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await act(async () => { traLoi(true); });
+    await cho(1300);
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "hộp treo của #12 bật cờ chặn rời trang trên #11").toBe(false);
+    expect(docBanNhap(KHOA12, 5), "hộp treo của #12 ghi bản nháp giá HN #12 sau khi view đã gỡ").toBeNull();
+  });
+
+  it("đối chứng: view còn gắn, xác nhận 'Gửi duyệt' → lưu rồi gửi duyệt đúng báo giá đang mở", async () => {
+    await mo();
+    const nutGui = [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))!;
+    await act(async () => { nutGui.click(); });
+    await cho(30);
+    expect((api.saveHn as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    expect(api.submitHn).toHaveBeenCalledWith(11);
+  });
+
   it("L58: bấm Khôi phục trên hộp treo KHÔNG bật cờ 'chưa lưu' của trang #11 đang sạch", async () => {
     const traLoi = await hopTreoCua12();
     await traLoi(true);
@@ -256,6 +311,50 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Có giá Hà Nội chưa lưu từ lần trước", "Giá Hà Nội bạn gõ trước khi bị xung đột"]);
     expect(host!.textContent).toContain("6.600.000");
   });
+
+  // Đợt 3 X1 (hồi quy của chính bản sửa X1): Hủy không còn xoá bản giữ lại, mà save() nạp lại qua
+  // load() — đường nạp hỏi bản ':xungdot' ở MỌI lượt → sau mỗi lần Lưu lại bật hai hộp danger. Lỡ bấm
+  // "Mở bản của tôi" ngay sau Lưu là giá VỪA LƯU bị thay bằng giá cũ lúc xung đột, cờ bẩn bật.
+  it("X1 đợt 3: giữ bản ':xungdot' (Hủy, Hủy) rồi Lưu hai lần → KHÔNG hỏi lại hộp nào, bản giữ lại vẫn còn", async () => {
+    ghiXd();
+    h.confirm = false;                                               // Hủy, Hủy → giữ
+    await mo();
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Giá Hà Nội bạn gõ trước khi bị xung đột", "Bỏ bản của bạn?"]);
+    confirmMock().mockClear();
+    goGia("7000000");
+    await cho(250);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]), "Lưu lần 1 bật lại hộp hỏi bản ':xungdot'").toEqual([]);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]), "Lưu lần 2 bật lại hộp hỏi bản ':xungdot'").toEqual([]);
+    expect(coXd(), "bản giữ lại vẫn phải còn — lần MỞ sau hỏi tiếp").toBe(true);
+  });
+
+  it("X1 đợt 3: Lưu xong, dù hộp (nếu có) được trả lời 'Mở bản của tôi' → màn vẫn là giá vừa lưu, không bẩn", async () => {
+    ghiXd();
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);   // lúc mở: Hủy, Hủy
+    await mo();
+    goGia("7000000");
+    await cho(250);
+    h.getQuote = async () => baoGia({ hnRev: "c".repeat(32), hnTables: [{ ...baoGia().hnTables[0], items: [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 7_000_000, days: 1 }] }] });
+    await act(async () => { nutLuu().click(); });                   // h.confirm = true → "Mở bản của tôi"
+    await cho(30);
+    expect(host!.textContent).toContain("7.000.000");
+    expect(host!.textContent, "giá cũ lúc xung đột đè lên giá vừa lưu").not.toContain("6.600.000");
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty).toBe(false);
+  });
+
+  it("X1 đợt 3: đã khôi phục bản nháp thường (bản ':xungdot' chưa hỏi) → Lưu KHÔNG hỏi bản ':xungdot' giữa chừng", async () => {
+    await phien1GiuXdRoiGo();
+    await mo();                                                      // Khôi phục bản nháp thường
+    confirmMock().mockClear();
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual([]);
+    expect(coXd(), "lần mở sau hỏi tiếp").toBe(true);
+  });
 });
 
 // L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",
@@ -274,5 +373,45 @@ describe("L63 — xem thử quyền không đụng bản nháp giá HN thật", 
     await act(async () => { nutLuu().click(); });
     await cho(20);
     expect(giaTrongNhap(KHOA)).toBe(7_700_000);
+  });
+});
+
+// L64 (đợt 3, phần bảng Hà Nội): HnTables từng xoá `days` LÚC VẼ khi bảng dùng mẫu không ngày — đổi mẫu qua
+// lại là mất số Ngày. Bước dọn nay dời sang lúc Lưu (máy chủ nhân days bất kể mẫu), và tổng cuối màn chỉ
+// nhân ngày khi mẫu CÓ ngày.
+describe("L64 — bảng Hà Nội đổi mẫu qua lại không mất số Ngày", () => {
+  const hang = () => ({ kind: "item", name: "Khung backdrop", quantity: 2, unitPrice: 1_000_000, days: 3 });   // MỚI mỗi bài: bản cũ bị dọn days tại chỗ
+  const theCuoi = () => host!.querySelector(".ahn-grand-card")?.textContent || "";
+  const chonMau = async (id: number) => {
+    act(() => {
+      const sel = host!.querySelector("select.extra-tpl") as HTMLSelectElement;
+      sel.value = String(id); sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await cho(200);                                                  // mark() gom nhịp vẽ 120ms
+  };
+
+  it("có ngày (6.000.000) → không ngày (2.000.000) → có ngày: vẫn 3 ngày; Lưu lúc ở mẫu không ngày gửi days: null", async () => {
+    h.getQuote = async () => baoGia({ hnTables: [{ name: "Giá thuê HN", templateId: 1, groupSubtotal: false, items: [hang()] }] });
+    await mo();
+    expect(theCuoi()).toContain("6.000.000");
+    await chonMau(2);
+    expect(theCuoi(), "mẫu không ngày mà tổng vẫn nhân ngày").toContain("2.000.000");
+    await chonMau(1);
+    expect(theCuoi(), "đổi mẫu qua lại làm mất số Ngày").toContain("6.000.000");
+    await chonMau(2);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    const goi = (api.saveHn as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as { templateId: number; items: { days: unknown }[] }[];
+    expect(goi[0].templateId).toBe(2);
+    expect(goi[0].items[0].days, "máy chủ nhân days bất kể mẫu — Lưu phải dọn").toBeNull();
+  });
+
+  it("mở bảng mẫu KHÔNG ngày còn days cũ → tổng không nhân ngày, không bị coi là đã sửa", async () => {
+    h.getQuote = async () => baoGia({ hnTables: [{ name: "Giá thuê HN", templateId: 2, groupSubtotal: false, items: [hang()] }] });
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await mo();
+    await cho(200);
+    expect(theCuoi()).toContain("2.000.000");
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "mới mở đã bật cờ chưa lưu").toBe(false);
   });
 });

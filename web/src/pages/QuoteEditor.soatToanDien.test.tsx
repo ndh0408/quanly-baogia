@@ -199,6 +199,29 @@ describe("L61 — hộp lý do còn treo sau khi rời báo giá không được
     expect((window as WinDirty).__editorDirty, "hộp treo của #11 bật cờ chặn rời trang trên #12").toBe(false);
   });
 
+  // Đợt 3: hộp hỏi nằm trong component CON (lưới "Xóa nhiều hàng", "Xoá sheet nội bộ/Hà Nội") gọi ngược
+  // mark() của editor. Editor đã gỡ mà mark() vẫn chạy thì bật cờ `__editorDirty` DÙNG CHUNG của #12 và hẹn
+  // giờ ghi bản nháp #11 (sau khi cleanup đã huỷ hẹn giờ) — lần mở #11 sau bị mời khôi phục phần đã bỏ.
+  it("'Xóa nhiều hàng' trong lưới #11 còn treo khi đã sang #12: xác nhận KHÔNG bật cờ 'chưa lưu' của #12, KHÔNG ghi bản nháp #11", async () => {
+    const hai = [{ kind: "item", name: "Backdrop", unit: "cái", quantity: 1, unitPrice: 1000 }, { kind: "item", name: "Standee", unit: "cái", quantity: 1, unitPrice: 2000 }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { items: hai })] }));
+    await moEditor();
+    let traLoi!: (v: boolean) => void;
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const phim = (init: KeyboardEventInit) => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+    act(() => { (hop!.querySelector('.editor tr[data-row="0"] [data-f="name"]') as HTMLElement).focus(); });
+    phim({ key: "ArrowDown", shiftKey: true });
+    phim({ key: " ", code: "Space", shiftKey: true });
+    phim({ key: "-", ctrlKey: true });
+    expect(ui.confirmModal).toHaveBeenCalledWith("Xóa nhiều hàng", expect.any(String), expect.anything());
+    await roiSang12();
+    expect((window as WinDirty).__editorDirty).toBe(false);
+    await act(async () => { traLoi(true); });
+    await cho(1300);
+    expect((window as WinDirty).__editorDirty, "hộp treo của lưới #11 bật cờ chặn rời trang trên #12").toBe(false);
+    expect(docBanNhap(khoaBanNhap(11, 1), 1), "hộp treo của lưới #11 ghi bản nháp #11 sau khi editor đã gỡ").toBeNull();
+  });
+
   it("đối chứng: không rời trang → xác nhận 'Khách không chốt' vẫn gọi markLost(11)", async () => {
     await moEditor();
     await bam(nut("Khách không chốt"));
@@ -385,6 +408,36 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     expect(p.sheets[0].templateId).toBe(1);
     expect(p.sheets[0].items[0].days).toBeNull();
   });
+
+  // Đợt 3 — phần bảng nội bộ / Hà Nội: bước dọn `days` lúc VẼ (ExtraTables / HnTables) đã bỏ để đổi mẫu qua
+  // lại không mất số Ngày. Máy chủ (extraTableSum, tổng đổ sang Quản lý dự án) nhân days bất kể mẫu, nên
+  // Lưu PHẢI tự gửi days: null cho bảng dùng mẫu không ngày — cả bảng HN lẫn bảng nội bộ.
+  it("Lưu: bảng HN và bảng nội bộ dùng mẫu KHÔNG ngày còn days cũ → gửi days: null; mẫu có ngày giữ days", async () => {
+    const hangNgay = (over: Record<string, unknown> = {}) => ({ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid: "x", ...over });
+    h.getQuote.mockImplementationOnce(async () => baoGia({
+      hnTables: [{ name: "HN không ngày", templateId: 1, groupSubtotal: false, items: [hangNgay({ rid: "h1" })] }, { name: "HN có ngày", templateId: 2, groupSubtotal: false, items: [hangNgay({ rid: "h2" })] }],
+      sheets: [trang(101, { extraTables: [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [hangNgay({ rid: "e1", approved: true })] }, { category: "khach", name: "KH", templateId: 2, groupSubtotal: false, items: [hangNgay({ rid: "e2", approved: true })] }] })],
+    }));
+    await moEditor();
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[]; sheets: { extraTables: { items: { days: unknown }[] }[] }[] };
+    expect(p.hnTables.map((t) => t.items[0].days), "bảng HN").toEqual([null, 3]);
+    expect(p.sheets[0].extraTables.map((t) => t.items[0].days), "bảng nội bộ").toEqual([null, 3]);
+  });
+
+  it("phần HN đã chốt mà người mở KHÔNG quản phần HN → Lưu gửi bảng HN NGUYÊN VĂN (máy chủ so với CSDL — dọn days là 409 cả lần Lưu)", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "submitted", hnTables: [{ name: "HN không ngày", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid: "h1" }] }] }));
+    hop = document.createElement("div"); document.body.appendChild(hop);
+    root = createRoot(hop);
+    const khongQuanHn = { ...ME, permissions: ME.permissions.filter((x) => x !== "quote:hn:manage") };
+    await act(async () => { root!.render(<QuoteEditorPage me={khongQuanHn} quoteId={11} isNew={false} />); });
+    await cho(10);
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[] };
+    expect(p.hnTables[0].items[0].days).toBe(3);
+  });
 });
 
 // X2: hộp thanh toán (route /pay bump updatedAt) gọi onQuoteTouched(mốc MỚI) và editor nhận thẳng mốc đó.
@@ -427,6 +480,26 @@ describe("X2 — nhận mốc updatedAt sau khi tích thanh toán chỉ khi khô
     h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo() }));
     await moEditor();
     h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true, paidAt: MOC_TT, paidById: 1 }), updatedAt: MOC_TT }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc()).toBe(MOC_TT);
+  });
+
+  // Đợt 3 — kẽ hở X2: vanTayMain không gồm extraTables. Account phụ (phạm vi riêng) lưu bảng nội bộ đi qua
+  // ghiVungNoiBoDuocGiao: chỉ ghi extraTables, GIỮ id trang, bump updatedAt → cả hai vân tay vẫn trùng và
+  // mốc mới (tích thanh toán đến sau) nuốt luôn lượt lưu của người kia.
+  const noiBo = (over: Record<string, unknown> = {}) => [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Xe", unit: "chuyến", quantity: 1, unitPrice: 1000, rid: "e1", approved: true, paid: false, hasPaidProof: false, ...over }] }];
+  it("account phụ lưu bảng nội bộ chen vào (id trang giữ nguyên, chỉ extraTables đổi) → vẫn gửi mốc CŨ", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo(), sheets: [trang(101, { extraTables: noiBo() })] }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true }), updatedAt: MOC_TT, sheets: [trang(101, { extraTables: noiBo({ unitPrice: 9000 }) })] }));
+    await tichThanhToan();
+    expect(await luuRoiDocMoc(), "mốc mới nuốt lượt lưu bảng nội bộ của account phụ").toBe(MOC_CU);
+  });
+
+  it("đối chứng: bảng nội bộ chỉ đổi trường THANH TOÁN (paid / paidAt / paidById / hasPaidProof) → nhận mốc MỚI", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnCo(), sheets: [trang(101, { extraTables: noiBo() })] }));
+    await moEditor();
+    h.getQuote.mockImplementation(async () => baoGia({ hnTables: hnCo({ paid: true }), updatedAt: MOC_TT, sheets: [trang(101, { extraTables: noiBo({ paid: true, paidAt: MOC_TT, paidById: 3, hasPaidProof: true }) })] }));
     await tichThanhToan();
     expect(await luuRoiDocMoc()).toBe(MOC_TT);
   });

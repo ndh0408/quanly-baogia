@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable, safeImgSrc } from "./GridTable";
@@ -19,13 +19,18 @@ type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; t
 
 // Tổng 1 bảng nội bộ — KHỚP src/quoteUtils.js extraTableSum (số đổ sang Quản lý dự án): bỏ
 // section/subsection/info; HCM/Phí-KH chỉ cộng hàng đã DUYỆT; qty×(days nếu>0)×price làm tròn từng dòng.
-export function extraTableSum(t: ExtraTable): number {
+//
+// `usesDays` (L64, đợt 3): mẫu của bảng có cột Số Ngày không. `false` → KHÔNG nhân days: bảng đang soạn
+// dùng mẫu không ngày vẫn GIỮ số Ngày cũ (đổi mẫu qua lại không mất — trước đây bị xoá ngay lúc vẽ), và
+// đường Lưu (QuoteEditor / AccountHnView) mới gửi days: null. Không truyền → như máy chủ (nhân days > 0):
+// dữ liệu đã lưu vốn đã được dọn lúc Lưu (InternalQuoteView gọi kiểu này).
+export function extraTableSum(t: ExtraTable, usesDays?: boolean): number {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc, it) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;
     if (approvedOnly && !it.approved) return acc;
     const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0;
-    const days = it.days != null ? Number(it.days) : null;
+    const days = usesDays !== false && it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);
   }, 0);
 }
@@ -111,6 +116,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   /* Khối nào đang mở. Chưa đụng tới thì theo mặc định: ĐÓNG HẾT — trang soạn báo giá vốn đã dài,
      và tiêu đề đã nói đủ số sheet + số tiền nên đóng vẫn đọc được. Xem KhoiSheet.tsx. */
   const [mo, setMo] = useState<Record<string, boolean>>({});
+  // L61: component còn gắn không — hộp hỏi xoá bảng không tự đóng khi rời trang (xem removeTable).
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
 
   if (!Array.isArray(sheet.extraTables)) sheet.extraTables = [];
   const tables = sheet.extraTables;
@@ -120,13 +128,11 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id || sheet.templateId;
   const tplOf = (t: ExtraTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
-  // Dọn 'days' cũ cho bảng có template KHÔNG có Số Ngày (giống drawExtraTables SPA) → tổng không phồng.
-  if (editable) {
-    let cleaned = false;
-    tables.forEach((x) => { if (!tplOf(x)?.layout?.hasDays) (x.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } }); });
-    if (cleaned) onMarkDirty();
-  }
-  const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x) : 0), 0);
+  // L64 (đợt 3): KHÔNG còn xoá `days` lúc vẽ khi bảng dùng mẫu không ngày (bản cũ, theo drawExtraTables
+  // SPA) — đổi mẫu qua lại là mất số Ngày vĩnh viễn, và mở bảng còn days cũ là bị coi "đã sửa". Tổng chỉ
+  // nhân ngày khi mẫu CÓ ngày (`coNgay`), còn save() của QuoteEditor gửi days: null cho mẫu không ngày.
+  const coNgay = (x: ExtraTable) => !!tplOf(x)?.layout?.hasDays;
+  const catTotal = (cat: string) => tables.reduce((a, x) => a + (x?.category === cat ? extraTableSum(x, coNgay(x)) : 0), 0);
   const idLuoi = (cat: string) => `extra:${cat}`;
 
   let active = Number.isInteger(sheet._activeExtra) ? (sheet._activeExtra as number) : 0;
@@ -145,11 +151,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
     sheet._activeExtra = tables.length - 1; onChange();
   };
   const removeTable = async (i: number) => {
+    // L61 (đợt 3): trả lời hộp treo sau khi đã gỡ (Back lúc hộp đang mở) = coi như Hủy — không xoá bảng
+    // của báo giá đã rời, không gọi mark() của editor đã gỡ (bật cờ `__editorDirty` DÙNG CHUNG trang mới).
     const ok = await removeExtraTableAt(sheet, i, (tbl) => confirmModal(
       "Xoá sheet nội bộ?",
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá sheet" },
-    ));
+    ).then((dong) => dong && songRef.current));
     if (ok) onChange();
   };
 
@@ -176,7 +184,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                   if (dangMo && thanhChung?.dangLam === idLuoi(cat)) thanhChung.datDangLam("chinh", "Báo giá chính");
                   setMo((m) => ({ ...m, [cat]: !dangMo }));
                 }}
-                cacSheet={idxs.map((i, n) => ({ ten: tables[i].name || `Bảng ${n + 1}`, tong: extraTableSum(tables[i]) }))}
+                cacSheet={idxs.map((i, n) => ({ ten: tables[i].name || `Bảng ${n + 1}`, tong: extraTableSum(tables[i], coNgay(tables[i])) }))}
                 giaiThich="Sheet đầy đủ như báo giá (mẫu · công thức · nhóm · copy/dán) nhưng KHÔNG xuất Excel. Tổng của loại này đổ riêng sang Quản lý dự án."
                 nutThem={suaDuoc(cat) ? <button type="button" className="btn btn-sm extra-add-in" data-cat={cat} onClick={() => addTable(cat)}>+ Thêm sheet</button> : null}
               >
@@ -199,7 +207,7 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
                             muốn biết sheet nào góp bao nhiêu thì phải bấm qua từng tab rồi tự cộng
                             nhẩm. Người dùng báo: "mỗi cái chưa có tổng các sheet như báo giá".
                             Một sheet thì không in: "Tổng:" của loại ngay trên đã đúng bằng nó. */}
-                        {idxs.length > 1 && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(extraTableSum(tables[i]))}</span>}
+                        {idxs.length > 1 && <span className="sheet-tab-tong" title="Tổng của sheet này">{M.fmtMoney(extraTableSum(tables[i], coNgay(tables[i])))}</span>}
                         {/* onKeyDown chặn nổi bọt: nếu không, Enter trên nút xoá còn kích hoạt luôn
                             handler của tab cha ở trên → vừa xoá vừa đổi sheet trong một nhịp phím. */}
                         {suaDuoc(cat) && <button type="button" className="rm-tab" title="Xoá sheet nội bộ này"
