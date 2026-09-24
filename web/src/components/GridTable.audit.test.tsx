@@ -420,6 +420,9 @@ describe("GRID-03 — công thức không tính được thì tô đỏ", () => 
     goEnter(2, "unitPrice", "=E1*");
     await xaHen();
     expect(coDo(2, "unitPrice")).toBe(true);
+    // Lời báo là chỗ DUY NHẤT dạy quy tắc tách đối số bằng ';' — ô đỏ mà im lặng thì người dùng không biết
+    // sửa gì (phản biện đợt 3: cờ bật khi đang gõ làm commitCell tưởng "đã đỏ từ trước", nuốt lời báo).
+    expect(toastChu()).toContain("Công thức không tính được");
     goEnter(0, "unitPrice", "200000");
     await xaHen();
     expect(coDo(2, "unitPrice")).toBe(true);

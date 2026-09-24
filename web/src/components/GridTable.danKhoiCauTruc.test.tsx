@@ -216,6 +216,60 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:X", "item:X"]);
     expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice }, "tên hạng mục rơi vào ô SL").toEqual({ u: "m2", q: 2, p: 150000 });
   });
+
+  // Soát toàn diện đợt 3 (hồi quy do 235374f): bản 667191b ép MỌI khối về Hạng Mục nên hai ca dưới đúng;
+  // 235374f giữ cột đang chọn cho mọi khối trừ khối trong app bắt đầu từ Hạng Mục.
+  it("khối NGOÀI có cột đầu là chữ 'Banner ⇥ m2 ⇥ 2 ⇥ 100.000' dán vào ô SL của nhóm: vào từ Hạng Mục", () => {
+    const items = [nhom({ name: "Nhóm" })];
+    const o = moLuoi(items);
+    vao(o(0, "quantity"));
+    dan("Banner\tm2\t2\t100.000\r\nStandee\tcái\t1\t50.000\r\n");
+    expect(items.map((x) => x.kind)).toEqual(["section", "item", "item"]);
+    expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice], "chữ 'Banner' đọc thành SL 0, 'm2' thành ĐG 2").toEqual(["Banner", "m2", 2, 100000]);
+    expect([items[2].name, items[2].unit, items[2].quantity, items[2].unitPrice]).toEqual(["Standee", "cái", 1, 50000]);
+  });
+
+  it("khối trong app bắt đầu từ ĐVT (ĐVT → ĐG) dán vào ô SL của nhóm: vào đúng cột nguồn", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "unit")); moRong("ArrowRight", 2);
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:", "item:X"]);
+    expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice, g: items[1].notes }, "ĐVT rơi vào SL, ĐG vào Ghi chú").toEqual({ u: "m2", q: 2, p: 150000, g: "" });
+  });
+
+  it("khối ngoài CHỮ dán vào ô Ghi chú của nhóm vẫn vào Ghi chú (cột chữ đang chọn được giữ)", () => {
+    const items = [nhom({ name: "Nhóm" })];
+    const o = moLuoi(items);
+    vao(o(0, "notes"));
+    dan("Giao trước 5h\r\nKèm VAT\r\n");
+    expect([items[1].name, items[1].notes, items[2].notes]).toEqual(["", "Giao trước 5h", "Kèm VAT"]);
+  });
+
+  // Phản biện đợt 3: luật "khối trong app vào từ cột NGUỒN" chỉ cần cho ô SỐ (SL) của nhóm — nơi dán theo
+  // vị trí làm chữ đọc thành số. Người dùng CỐ Ý chọn ô CHỮ (Hạng Mục / ĐVT / Ghi chú) thì dán theo vị trí
+  // như Excel, như cả 667191b lẫn 235374f.
+  it("khối trong app chép từ Ghi chú dán vào ô HẠNG MỤC của nhóm: vào Hạng Mục (cột chữ đang chọn được giữ)", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", notes: "g1" }), mk({ name: "Y", notes: "g2" })];
+    const o = moLuoi(items);
+    vao(o(1, "notes")); moRong("ArrowDown", 1);
+    const kho = chep();
+    vao(o(0, "name"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}|${x.name}|${x.notes}`), "chữ bị kéo về cột Ghi chú nguồn").toEqual(["section|Nhóm|", "item|g1|", "item|g2|", "item|X|g1", "item|Y|g2"]);
+  });
+
+  it("khối trong app BẮT ĐẦU từ Hạng Mục dán vào ô ĐVT của nhóm: vẫn vào từ Hạng Mục (như 667191b, 235374f)", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "name")); moRong("ArrowRight", 3);
+    const kho = chep();
+    vao(o(0, "unit"));
+    dan(kho);
+    expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
+  });
 });
 
 describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {
@@ -284,5 +338,27 @@ describe("L16 — danh sách tên 1–2 chữ cái (S/M/L/XL) không bị hiểu
     vao(o(0, "name"));
     dan("S\tÁo thun\r\nM\tÁo thun\r\n");
     expect(items.map((x) => `${x.kind}:${x.name}:${x.unit}`)).toEqual(["item:S:Áo thun", "item:M:Áo thun"]);
+  });
+
+  // Soát toàn diện đợt 3 (hồi quy do 689cfc4): ngoại lệ "khối chỉ gồm hàng nhóm" nhận cả danh sách cỡ áo
+  // ĐỦ cột (dài hơn số cột nhập) — mọi hàng thành NHÓM 'Áo thun', ĐG 0.
+  it.each([
+    ["7 cột (có TT + ghi chú)", "S\tÁo thun\tcái\t10\t50.000\t500.000\tx\r\nM\tÁo thun\tcái\t12\t50.000\t600.000\tx\r\nL\tÁo thun\tcái\t8\t55.000\t440.000\tx\r\n"],
+    ["6 cột (không TT)", "S\tÁo thun\tcái\t10\t50.000\tx\r\nM\tÁo thun\tcái\t12\t50.000\tx\r\nL\tÁo thun\tcái\t8\t55.000\tx\r\n"],
+  ])("danh sách cỡ áo có tên ở cột 2, %s: vẫn là HẠNG MỤC, không thành nhóm", (_ten, khoi) => {
+    const items = [mk({}), mk({}), mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan(khoi);
+    expect(items.map((x) => x.kind), "mọi hàng thành NHÓM").toEqual(["item", "item", "item"]);
+    expect(items.map((x) => x.name)).toEqual(["S", "M", "L"]);
+  });
+
+  it("khối chỉ gồm hàng nhóm bắt đầu giữa bản xuất (C | D | E, liên tiếp) vẫn dựng lại thành nhóm", () => {
+    const items = [mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("C\tNhóm 3\t\t\t\t\t\r\nD\tNhóm 4\t\t\t\t\t\r\nE\tNhóm 5\t\t\t\t\t\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm 3", "section:Nhóm 4", "section:Nhóm 5"]);
   });
 });
