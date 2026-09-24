@@ -271,6 +271,9 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // app#15: bản sao của `saving` đọc được trong closure cũ (hàm onApply mà ImportExcelModal giữ lúc
   // chờ hộp xác nhận, removeSheet sau `await confirmModal`) — `saving` trong closure có thể đã cũ.
   const savingRef = useRef(false);
+  // KÉO ĐỔI THỨ TỰ SHEET: chỉ số tab đang kéo + chỗ sắp thả (trước/sau tab nào) để vẽ vạch báo.
+  const keoTuRef = useRef<number | null>(null);
+  const [thaTai, setThaTai] = useState<{ i: number; truoc: boolean } | null>(null);
   // app#11: vân tay phần NGOÀI Hà Nội của bản MÁY CHỦ gần nhất mà trang này đã nạp/lưu (xem vanTayMain).
   const vanTayMainRef = useRef<string | null>(null);
   // X2: cùng mốc với vanTayMainRef, cho NỘI DUNG bảng Hà Nội (xem vanTayHnNoiDung).
@@ -746,6 +749,28 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     mark(); redraw();
   };
 
+  // KÉO ĐỔI THỨ TỰ SHEET (chuột: kéo tab; bàn phím: Alt+←/→ trên tab). Sheet đang mở vẫn là sheet đang
+  // mở — giữ theo ĐỐI TƯỢNG, không theo chỉ số. Lưới gắn theo `_k` của sheet nên không dựng lại, ngăn
+  // Ctrl+Z vẫn là của đúng sheet đó. Thứ tự đi vào `order` khi Lưu; máy chủ ghép trạng thái mức sheet
+  // theo `id` nên khách duyệt / hoá đơn / chữ ký đi theo sheet. Cờ `_danhLaiMaSheet` xin máy chủ đánh
+  // lại mã sản xuất (_01, _02…) theo vị trí mới — máy chủ chỉ làm khi mã chưa dùng trên hoá đơn/nhân sự.
+  const moveSheet = (from: number, to: number) => {
+    if (!suaMain || dangLuuHoacDaDoi()) return false;
+    if (from === to || from < 0 || to < 0 || from >= sheets.length || to >= sheets.length) return false;
+    const dangMo = sheets[q._activeSheet];
+    const [s] = sheets.splice(from, 1);
+    sheets.splice(to, 0, s);
+    q._activeSheet = Math.max(0, sheets.indexOf(dangMo));
+    (q as { _danhLaiMaSheet?: boolean })._danhLaiMaSheet = true;
+    mark(); redraw();
+    return true;
+  };
+  // Vị trí thả: nửa trái tab = chèn TRƯỚC tab đó, nửa phải = chèn SAU. Trả chỉ số đích sau khi đã rút
+  // tab đang kéo ra khỏi mảng (kéo từ trái sang phải thì mọi chỉ số phía sau lùi một).
+  const viTriTha = (tu: number, i: number, truoc: boolean) => { let den = truoc ? i : i + 1; if (den > tu) den--; return den; };
+  const truocNuaTab = (e: { clientX: number; currentTarget: HTMLElement }) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; };
+  const keoDuoc = suaMain && sheets.length > 1 && !saving;
+
   // ── save ───────────────────────────────────────────────────────────────────
   // Trả `true` CHỈ khi bản đang soạn đã nằm trên máy chủ VÀ editor vẫn đứng ở báo giá này. Mọi
   // đường khác trả `false`: đang lưu dở, lỗi, 409 (kể cả khi người dùng bấm Hủy ở hộp xung đột — lúc
@@ -800,6 +825,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         };
       }).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
       delete payload._new; delete payload._activeSheet;
+      // Vừa kéo đổi thứ tự sheet → xin đánh lại mã sản xuất theo vị trí (máy chủ tự kiểm có an toàn không).
+      const xinDanhLaiMa = (q as { _danhLaiMaSheet?: boolean })._danhLaiMaSheet === true && !isNew;
+      delete payload._danhLaiMaSheet;
+      if (xinDanhLaiMa) payload.danhLaiMaSheet = true;
       // Khóa lạc quan: gửi mốc updatedAt đã tải → server chặn ghi đè nếu người khác vừa lưu (409).
       // Sau khi lưu, q được refresh từ `saved` (bên dưới) nên base luôn mới cho lần lưu kế.
       payload.baseUpdatedAt = (q as { updatedAt?: string }).updatedAt;
@@ -824,6 +853,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
       if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
       toast("Đã lưu", "success");
+      if (xinDanhLaiMa) {
+        const ss = (saved as { sheets?: { codeNo?: number | null }[] }).sheets || [];
+        if (ss.length > 1 && ss.some((sh, i) => sh.codeNo != null && sh.codeNo !== i + 1)) {
+          toast("Đã đổi thứ tự sheet. Mã sản xuất (_01, _02…) được GIỮ NGUYÊN vì mã của báo giá này đã dùng trên hoá đơn / hồ sơ nhân sự.", "info");
+        }
+      }
       // chuyển sang chế độ sửa bản đã lưu (hash → #/quotes/:id) — F5/back resolve đúng.
       if (isNew) location.hash = "#/quotes/" + saved.id;
       else {
@@ -1200,7 +1235,7 @@ Lý do (không bắt buộc):`,
         {/* MÃ SẢN XUẤT CỦA SHEET ĐANG MỞ — đúng chuỗi in ra tab Excel tương ứng và đúng mã bên
             trang Hoá đơn. Số GN vẫn hiện mờ bên dưới: nó mới là khoá tra cứu thật của hệ thống
             (phân quyền tải file, webhook, nhật ký), bỏ hẳn thì lúc cần đối soát không tìm ra. */}
-        <div className="quote-no">(Số: {M.sheetCode(q, M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
+        <div className="quote-no">(Số: {M.sheetCode(q, (q as { _danhLaiMaSheet?: boolean })._danhLaiMaSheet ? ai + 1 : M.soMa(activeSheet, ai), sheets.length) || q.quoteNumber || ""})</div>
         {q.quoteNumber && <div className="quote-no-gn">{q.quoteNumber}</div>}
         <textarea className="greeting" rows={2} defaultValue={q.greeting || ""} disabled={!suaMain || saving} onInput={(e) => setQ("greeting", (e.target as HTMLTextAreaElement).value)} />
 
@@ -1211,9 +1246,41 @@ Lý do (không bắt buộc):`,
             // <div> thì không nhận focus. Nghĩa là người dùng chỉ bàn phím (hoặc dùng trình đọc màn
             // hình) KHÔNG chuyển được sheet — tab là thao tác cốt lõi của editor, không phải trang
             // trí. Thêm role + tabIndex + Enter/Space là đủ, không phải dựng lại component.
-            <div key={s._k ?? i} role="button" tabIndex={0} className={`sheet-tab ${i === ai ? "active" : ""}`} aria-pressed={i === ai}
+            <div key={s._k ?? i} role="button" tabIndex={0} data-sheet-tab={i} aria-pressed={i === ai}
+              className={`sheet-tab ${i === ai ? "active" : ""}${keoDuoc ? " keo-duoc" : ""}${keoTuRef.current === i ? " dang-keo" : ""}${thaTai && thaTai.i === i ? (thaTai.truoc ? " tha-truoc" : " tha-sau") : ""}`}
+              draggable={keoDuoc}
+              title={keoDuoc ? "Kéo để đổi thứ tự sheet (bàn phím: Alt + ← / →)" : undefined}
               onClick={() => switchSheet(i)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); switchSheet(i); } }}>
+              onDragStart={(e) => {
+                if (!keoDuoc) { e.preventDefault(); return; }
+                keoTuRef.current = i;
+                e.dataTransfer.effectAllowed = "move";
+                try { e.dataTransfer.setData("text/plain", String(i)); } catch { /* Firefox cần setData mới cho kéo */ }
+              }}
+              onDragOver={(e) => {
+                if (keoTuRef.current == null) return;   // kéo thứ khác (tệp, chữ) qua tab → không nhận
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const truoc = truocNuaTab(e);
+                if (!thaTai || thaTai.i !== i || thaTai.truoc !== truoc) setThaTai({ i, truoc });
+              }}
+              onDrop={(e) => {
+                const tu = keoTuRef.current;
+                keoTuRef.current = null; setThaTai(null);
+                if (tu == null) return;
+                e.preventDefault();
+                moveSheet(tu, viTriTha(tu, i, truocNuaTab(e)));
+              }}
+              onDragEnd={() => { keoTuRef.current = null; setThaTai(null); }}
+              onKeyDown={(e) => {
+                if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                  e.preventDefault();
+                  const den = i + (e.key === "ArrowLeft" ? -1 : 1);
+                  if (moveSheet(i, den)) requestAnimationFrame(() => (document.querySelector(`.sheet-tabs [data-sheet-tab="${den}"]`) as HTMLElement | null)?.focus());
+                  return;
+                }
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); switchSheet(i); }
+              }}>
               <span>{sheets.length > 1 ? `${i + 1}. ` : ""}{s.name || templates.find((t) => t.id === s.templateId)?.name || "Sheet " + (i + 1)}</span>
               {/* Khách đã cho ý kiến sheet này → dấu ✓/✗ ngay trên tab để nhìn phát thấy */}
               {s.custStatus && (

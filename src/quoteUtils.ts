@@ -616,8 +616,13 @@ export async function chuanHoaSoNgayTheoMau(sheets: any[]) {
   chuanHoaSoNgayTheoCoNgay(sheets, coNgay);
 }
 
-export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[], seqDaCap = 0) {
-  const soMa = capSoMaSheet(sheets, carry, seqDaCap);
+/**
+ * `soMaTheoViTri`: ĐÁNH LẠI mã sản xuất theo vị trí (1..n) thay vì giữ số đóng băng — chỉ dùng khi
+ * người dùng kéo đổi thứ tự sheet VÀ updateQuote đã kiểm mã của báo giá chưa đi vào hoá đơn / hồ sơ
+ * nhân sự (coTheDanhLaiMaSheet). Mặc định false = luật đóng băng như cũ.
+ */
+export function buildSheetsCreate(sheets: any, sheetTotals?: any[], carry?: (Record<string, any> | undefined)[], seqDaCap = 0, soMaTheoViTri = false) {
+  const soMa = soMaTheoViTri ? (sheets || []).map((_s: any, i: number) => i + 1) : capSoMaSheet(sheets, carry, seqDaCap);
   return (sheets || []).map((s: any, sIdx: number) => ({
     templateId: Number(s.templateId),
     name: s.name?.replace(/[\r\n]+/g, " ").trim() || null,

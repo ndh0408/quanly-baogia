@@ -4366,3 +4366,21 @@ textarea[aria-invalid="true"] {
     transition: none !important;
   }
 }
+
+/* KÉO ĐỔI THỨ TỰ SHEET (trình soạn báo giá) — tab kéo được có con trỏ kéo, tab đang kéo mờ đi, và một
+   vạch dọc màu --primary báo chỗ sẽ thả (mép trái = chèn trước tab đó, mép phải = chèn sau). */
+.sheet-tab.keo-duoc {
+  cursor: grab;
+}
+.sheet-tab.keo-duoc:active {
+  cursor: grabbing;
+}
+.sheet-tab.dang-keo {
+  opacity: 0.45;
+}
+.sheet-tab.tha-truoc {
+  box-shadow: inset 3px 0 0 var(--primary, #a16207);
+}
+.sheet-tab.tha-sau {
+  box-shadow: inset -3px 0 0 var(--primary, #a16207);
+}

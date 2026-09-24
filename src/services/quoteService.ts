@@ -18,6 +18,7 @@ import { trungTren } from "../prismaLoi.js";
 import { snapshotQuoteVersion, diffVersions } from "../quoteVersion.js";
 import { notify } from "../notifications.js";
 import { emit as emitWebhook } from "../webhooks.js";
+import { codeLabel } from "../quoteCode.js";
 import { can, canOnQuote, biLuocView, quoteScopeWhereOrThrow, quoteScopesFor, laAccountPhu, locPhamVi, tenPhamVi, resolveUserPermissions, QUOTE_SCOPES, PERMISSIONS as P } from "../permissions.js";
 import {
   canEdit,
@@ -469,6 +470,37 @@ export async function createQuote(req: Request) {
  * đổi + cùng mẫu (đúng ca "chỉ sửa hạng mục"); mọi ca khác bỏ qua, thà mất mốc còn hơn gán nhầm
  * "khách đã duyệt" sang sheet khác.
  */
+/** Trường mức sheet cho thấy mã sản xuất của báo giá ĐÃ ĐI RA NGOÀI (hoá đơn, PO, thu tiền, chứng từ). */
+const DAU_MA_DA_PHAT_HANH = ["invoiceNo", "hnInvoiceNo", "poNumber", "paidAt", "invoiceDate", "invoiceLink", "docSentAt", "orderClosedAt"] as const;
+
+/**
+ * Được ĐÁNH LẠI mã sản xuất (_01, _02…) theo thứ tự sheet mới không? — người dùng vừa kéo đổi thứ tự.
+ *
+ * Mã đóng băng (capSoMaSheet) để một mã đã phát hành không bao giờ trỏ sang sheet khác. Đánh lại chỉ
+ * an toàn khi CHƯA mã nào của báo giá này được dùng: không sheet nào có số hoá đơn / PO / ngày thu /
+ * chứng từ, và không hồ sơ nhân sự nào (kể cả đã xoá mềm) lưu mã của báo giá (`PersonnelRecord.projectCode`
+ * lưu CỨNG chuỗi mã và buildProjectRef khớp BẰNG-ĐÚNG). Sai một trong hai → giữ mã cũ, chỉ đổi thứ tự.
+ * Chạy TRONG transaction, sau khi đã khoá QuoteSheet (sheetsTuoi đọc sau khoá).
+ */
+async function coTheDanhLaiMaSheet(tx: any, quoteId: number, sheetsTuoi: any[]): Promise<boolean> {
+  for (const s of sheetsTuoi || []) {
+    for (const f of DAU_MA_DA_PHAT_HANH) {
+      const v = s?.[f];
+      if (v != null && String(v).trim() !== "") return false;
+    }
+  }
+  const q = await tx.quote.findUnique({ where: { id: quoteId }, select: { projectCode: true, projectVersion: true, quoteNumber: true } });
+  const base = q ? codeLabel(q) : "";
+  if (!base) return true;
+  const ds: { projectCode: string | null }[] = await tx.personnelRecord.findMany({
+    where: { projectCode: { startsWith: base } }, select: { projectCode: true }, includeDeleted: true,
+  } as any);
+  return !ds.some((r) => {
+    const duoi = String(r.projectCode || "").slice(base.length);
+    return duoi === "" || /^_\d{2,}$/.test(duoi);   // đúng mã của báo giá này, không bắt nhầm bản _v2
+  });
+}
+
 function carrySheetState(incoming: any[], existingSheets: any[]): (Record<string, any> | undefined)[] {
   const list = Array.isArray(incoming) ? incoming : [];
   const byId = new Map<number, any>((existingSheets || []).map((s: any) => [Number(s.id), s]));
@@ -894,9 +926,13 @@ export async function updateQuote(req: Request) {
       }
 
       const seqCu = Number((existing as any).sheetCodeSeq) || 0;
-      const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry, seqCu);
-      // Mốc nước CHỈ TĂNG: ghi lại để lượt lưu sau không cấp lại mã của sheet vừa bị xoá.
-      (data as any).sheetCodeSeq = mocSoMaSheet(sheetsGhi as any, seqCu);
+      // KÉO ĐỔI THỨ TỰ SHEET: mã sản xuất đi theo vị trí mới — nhưng CHỈ khi chưa mã nào của báo giá
+      // được dùng (coTheDanhLaiMaSheet); account phụ (không đủ phạm vi) không được đánh lại mã.
+      const danhLaiMa = b.danhLaiMaSheet === true && duPhamVi && (await coTheDanhLaiMaSheet(tx, id, sheetsTuoi));
+      const sheetsGhi = buildSheetsCreate(b.sheets, t.sheetTotals, carry, seqCu, danhLaiMa);
+      // Mốc nước CHỈ TĂNG: ghi lại để lượt lưu sau không cấp lại mã của sheet vừa bị xoá. Đánh lại mã
+      // (đã kiểm không mã nào được dùng) thì mốc về đúng số sheet — sheet thêm sau nối tiếp liền mạch.
+      (data as any).sheetCodeSeq = danhLaiMa ? sheetsGhi.length : mocSoMaSheet(sheetsGhi as any, seqCu);
 
       // ── GHI TĂNG DẦN Ở MỨC TRANG (cờ INCREMENTAL_QUOTE_SAVE) ──────────────
       // Trang nào ghi đè lên chính nó KHÔNG đổi một byte thì không xoá, không tạo lại. Lý lẽ và số

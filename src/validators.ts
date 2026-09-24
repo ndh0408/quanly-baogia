@@ -662,6 +662,9 @@ export const QuoteUpdateSchema = z.object({
   // không có gì được ghi (cùng nếp với `discount` ở trên).
   customerLogo: customerLogoSchema,
   sheets: quoteSheetsSchema.optional(),
+  // Người dùng vừa KÉO ĐỔI THỨ TỰ sheet → xin đánh lại mã sản xuất (_01, _02…) theo vị trí mới. Máy
+  // chủ CHỈ làm khi mã chưa được dùng ở đâu (xem coTheDanhLaiMaSheet); không thì giữ mã đóng băng.
+  danhLaiMaSheet: z.boolean().optional(),
   // Khóa LẠC QUAN: mốc updatedAt mà client đã tải. Server chặn ghi đè nếu DB đã đổi (người khác lưu xen vào).
   baseUpdatedAt: z.coerce.date().optional(),
 });
