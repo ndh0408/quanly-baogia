@@ -2,7 +2,11 @@
  * DB-12 — TRANG QUẢN LÝ DỰ ÁN / HOÁ ĐƠN (trần 2000) VÀ Ô CHỌN DỰ ÁN NHÂN SỰ (trần 300) PHẢI BÁO KHI BỊ CẮT.
  *
  * Trước bản vá: cắt cứng, không cờ nào — dự án cũ nhất (công nợ cũ chưa thu) biến mất im lặng.
- * Dữ liệu dựng bằng createMany cho MỘT manager (phạm vi "của mình") nên không đụng bài khác.
+ * Dữ liệu dựng bằng createMany cho MỘT manager (phạm vi "của mình"). NHƯNG admin ở bài khác chạy song
+ * song vẫn thấy chúng: /quotes/projects xếp theo ngày báo giá mới nhất, /personnel/projects theo ngày
+ * tạo — 2000 dự án mang ngày LÚC NÀY chen lên đầu và đẩy dự án của bài kia ra khỏi trần 2000 (đo được
+ * 2026-09-24: fe-du-an-tra-y-kien-khach đỏ "không thấy báo giá vừa tạo"). Nên chúng mang ngày CŨ (2001):
+ * vẫn đủ số để chạm trần trong phạm vi của manager này, mà luôn xếp cuối danh sách của người khác.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import bcrypt from "bcryptjs";
@@ -18,13 +22,14 @@ if (!dbAvailable && process.env.REQUIRE_DB_TESTS === "1") {
 
 const TAG = `dbdc${Date.now()}`;
 const MAT_KHAU = "BaoCat1234!ok";
+const NGAY_CU = new Date("2001-01-01T00:00:00.000Z");   // xem chú thích đầu tệp
 
 describe.runIf(dbAvailable)("DB-12 — cờ truncated", () => {
   let app, company, u, ag;
   const taoN = (n, tu = 0) => prisma.quote.createMany({
     data: Array.from({ length: n }, (_, i) => ({
       quoteNumber: `${TAG}-${tu + i}`, title: `${TAG} bg ${tu + i}`, toCompany: "K", companyId: company.id, createdById: u.id,
-      fromContact: "x", fromAddress: "x", city: "x", quoteDate: new Date(), status: "converted",
+      fromContact: "x", fromAddress: "x", city: "x", quoteDate: NGAY_CU, createdAt: NGAY_CU, status: "converted",
     })),
   });
 

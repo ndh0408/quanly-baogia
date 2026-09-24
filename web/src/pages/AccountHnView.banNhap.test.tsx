@@ -517,26 +517,21 @@ describe("L64 — bảng Hà Nội đổi mẫu qua lại không mất số Ngà
 
 describe("dải 'Có bản mới' (lib/phienBan.ts) — màn Account Hà Nội", () => {
   const trinhDuyetHoi = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
-  it("chưa gõ gì → khai tải lại an toàn; gõ giá → hết an toàn", async () => {
+  it("chưa gõ gì → bấm tay tải lại khỏi hỏi (nhưng KHÔNG tự tải); gõ giá → hết an toàn", async () => {
     await mo();
     expect(laTrangAnToan()).toBe(true);
+    expect(laTrangAnToan(true), "không cho TỰ tải màn điền giá").toBe(false);
     goGia("6000000");
     await cho(250);
     expect(laTrangAnToan()).toBe(false);
   });
 
-  it("'Tải luôn' (phien-ban:truoc-tai) → bản nháp ghi NGAY, trình duyệt khỏi hỏi lần hai; ghi không được thì vẫn hỏi", async () => {
+  it("còn giá chưa lưu → hộp 'Tải lại trang?' của trình duyệt LUÔN còn (không cơ chế nào hạ chốt cuối)", async () => {
     await mo();
     goGia("6000000");
     await cho(250);
-    expect(docBanNhap(KHOA, 5)).toBeNull();
-    const day = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("đầy", "QuotaExceededError"); });
-    try {
-      await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
-      expect(trinhDuyetHoi(), "không giữ được bản nháp → trình duyệt phải hỏi lần cuối").toBe(true);
-    } finally { day.mockRestore(); }
+    expect(trinhDuyetHoi()).toBe(true);
     await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
-    expect(giaTrongNhap(KHOA)).toBe(6_000_000);
-    expect(trinhDuyetHoi(), "đã giữ bản nháp → không hỏi lần hai").toBe(false);
+    expect(trinhDuyetHoi()).toBe(true);
   });
 });

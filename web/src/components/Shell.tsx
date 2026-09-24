@@ -5,6 +5,7 @@ import { xoaMoiBanNhap } from "../lib/localDraft";
 import { dangXuat, phatDangXuat } from "../lib/authSync";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
 import { PhienBanChanMenu } from "./PhienBan";
+import { taiLaiTrang } from "../lib/phienBan";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
 async function guardLeave(): Promise<boolean> {
@@ -68,7 +69,9 @@ class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean 
     if (this.state.failed) {
       return (
         <div className="err">⚠ Không tải được trang.
-          <button className="btn btn-sm" onClick={() => location.reload()}>Thử lại</button>
+          {/* Máy chủ đang phát bản khác thì gỡ SW trước — reload trần ở /app2/ lấy lại đúng bản cũ đang vỡ
+              từ kho của SW, phải bấm hai lần (lib/phienBan.ts taiLaiTrang). */}
+          <button className="btn btn-sm" onClick={() => void taiLaiTrang()}>Thử lại</button>
         </div>
       );
     }

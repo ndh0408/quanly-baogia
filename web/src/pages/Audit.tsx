@@ -146,13 +146,15 @@ const RESOURCE_OPTS = Object.entries(RESOURCE_LABEL);
 const PAGE_SIZE = 50;
 
 export function AuditPage() {
-  useTrangAnToan();   // chỉ xem/lọc — tải lại lúc này không mất gì (dải "Có bản mới", lib/phienBan.ts)
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);   // dòng đang mở "Chi tiết"
+  // Dải "Có bản mới" (lib/phienBan.ts): chỉ xem — nhưng bộ lọc / trang / dòng đang mở chỉ nằm trong state,
+  // tải lại là về mặc định. Chỉ khai an toàn khi chưa lọc gì (soát vòng 2).
+  useTrangAnToan(() => !action && !resource && !from && !to && page === 1 && !openId);
   const isMobile = useIsMobile();
 
   useEffect(() => { setPage(1); setOpenId(null); }, [action, resource, from, to]);

@@ -3,10 +3,11 @@
 // Trình soạn báo giá × dải "Có bản mới" (../lib/phienBan.ts). Soát 2026-09-24 bắt được: tự tải lại khi
 // tab nằm nền xoá im lặng báo giá MỚI vừa ra khỏi wizard (#/rnew — chưa gõ gì nên cờ chưa-lưu còn tắt,
 // mà phần điền ở wizard chỉ nằm trong bộ nhớ). Chốt ở đây:
-//   1. Báo giá đã có, chưa sửa → trình soạn khai "tải lại an toàn"; sửa một ô → hết an toàn.
+//   1. Báo giá đã có, chưa sửa → trình soạn khai "bấm tay tải lại khỏi hỏi" nhưng KHÔNG cho tự tải (tự
+//      tải mất sheet đang mở, vị trí cuộn, lịch sử Ctrl+Z — soát vòng 2); sửa một ô → hết an toàn.
 //   2. Báo giá MỚI (#/rnew) → KHÔNG BAO GIỜ khai an toàn, kể cả lúc chưa gõ gì.
-//   3. "Tải luôn" (sự kiện phien-ban:truoc-tai) → bản nháp ghi NGAY, trình duyệt khỏi hỏi lần hai, cờ
-//      dùng chung __editorDirty giữ nguyên (lỡ trang không tải lại thì guardLeave vẫn hỏi khi rời).
+//   3. Còn thay đổi chưa lưu → hộp "Tải lại trang?" của trình duyệt LUÔN còn (soát vòng 2: bản trước hạ
+//      chốt đó sau khi ghi bản nháp, mà bản nháp lệch mốc / bị bóc ảnh thì không khôi phục được).
 // Cùng khuôn giàn dựng với QuoteEditor.chotChuaLuu.test.tsx.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
@@ -75,9 +76,10 @@ afterEach(async () => {
 });
 
 describe("trình soạn × dải 'Có bản mới'", () => {
-  it("báo giá đã có, chưa sửa → khai tải lại an toàn; sửa một ô → hết an toàn (đang có thay đổi chưa lưu)", async () => {
+  it("báo giá đã có, chưa sửa → bấm tay khỏi hỏi nhưng KHÔNG tự tải; sửa một ô → hết an toàn (đang có thay đổi chưa lưu)", async () => {
     await mo(false);
     expect(laTrangAnToan()).toBe(true);
+    expect(laTrangAnToan(true), "không cho TỰ tải trình soạn").toBe(false);
     goTenKhach("Khách MỚI");
     expect(laTrangAnToan()).toBe(false);
     expect(dangDo()).toBe("chua-luu");
@@ -91,25 +93,15 @@ describe("trình soạn × dải 'Có bản mới'", () => {
     expect(dangDo()).toBe("chua-ro");
   });
 
-  it("'Tải luôn' (phien-ban:truoc-tai) → bản nháp ghi NGAY, trình duyệt khỏi hỏi lần hai, __editorDirty giữ nguyên", async () => {
+  it("còn thay đổi chưa lưu → hộp 'Tải lại trang?' của trình duyệt LUÔN còn; rời trang (pagehide) vẫn ghi bản nháp như mọi lần F5", async () => {
     await mo(false);
     goTenKhach("Khách MỚI");
-    const khoa = khoaBanNhap(11, 1);
-    expect(docBanNhap(khoa, 1), "chưa tới hẹn giờ ghi 1,2s").toBeNull();
     expect(trinhDuyetHoi()).toBe(true);
+    // Sự kiện cũ của bản trước (hạ chốt sau khi ghi nháp) không còn ai nghe — bắn thử cũng không hạ được chốt.
     await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
+    expect(trinhDuyetHoi(), "không cơ chế nào được hạ chốt cuối").toBe(true);
+    const khoa = khoaBanNhap(11, 1);
+    await act(async () => { window.dispatchEvent(new Event("pagehide")); });
     expect((docBanNhap(khoa, 1)?.quote as { toCompany?: string } | undefined)?.toCompany).toBe("Khách MỚI");
-    expect(trinhDuyetHoi(), "đã giữ bản nháp → không hỏi lần hai").toBe(false);
-    expect((window as WinDirty).__editorDirty, "cờ dùng chung KHÔNG bị hạ — guardLeave vẫn hỏi nếu trang không tải lại").toBe(true);
-  });
-
-  it("'Tải luôn' mà KHÔNG ghi được bản nháp (bộ nhớ trình duyệt đầy) → GIỮ cờ: trình duyệt vẫn hỏi lần cuối", async () => {
-    await mo(false);
-    goTenKhach("Khách MỚI");
-    const day = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("đầy", "QuotaExceededError"); });
-    try {
-      await act(async () => { window.dispatchEvent(new Event("phien-ban:truoc-tai")); });
-      expect(trinhDuyetHoi()).toBe(true);
-    } finally { day.mockRestore(); }
   });
 });

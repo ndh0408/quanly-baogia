@@ -151,7 +151,7 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     ));
     expect(v.ok, "phải bị chặn dù metadata khai nhỏ — vì giờ đây kiểm THẬT, không đọc số khai").toBe(false);
     expect(v.reason).toMatch(/bom nén|quá lớn/i);
-  }, 60_000);
+  }, 180_000);
 
   it("khai metadata SAI (thấp hơn thật rất nhiều) nhưng nội dung thật KHÔNG PHẢI bom → vẫn được chấp nhận", async () => {
     // Đối chứng cho ca trên: metadata nói dối không còn là tiêu chí — chỉ khi nội dung THẬT vượt
@@ -167,7 +167,7 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     const v = await inspectXlsx(makeZip([...validEntries(), { name: "xl/mot-bom.xml", rawBytes: TRAN + 1024 }]));
     expect(v.ok).toBe(false);
     expect(v.reason).toMatch(/bom nén|quá lớn/i);
-  }, 60_000);
+  }, 180_000);
 
   it("KHÔNG mục nào một mình vượt trần, nhưng TỔNG cộng dồn nhiều mục thì vượt → từ chối", async () => {
     // Mỗi mục ~60% trần — không mục nào tự mình đủ để bị chặn — nhưng 2 mục cộng lại vượt hẳn.
@@ -184,7 +184,7 @@ describe("inspectXlsx — chặn bom nén (giải nén THẬT, không tin số k
     // trình song song tranh CPU và đĩa — nó ĐÃ hết giờ ở 20s và làm cả cổng [4/13] đỏ, trong khi
     // chạy lại một mình thì 20/20 xanh. Một cổng đỏ vì máy bận chứ không vì mã sai là cổng dạy
     // người đọc bỏ qua màu đỏ.
-  }, 60_000);
+  }, 180_000);
 
   it("tổng giải nén thật của workbook hợp lệ (nhỏ) vẫn qua bình thường", async () => {
     const v = await inspectXlsx(makeZip([...validEntries(), { name: "xl/vua-du.xml", rawBytes: 1024 * 1024 }]));

@@ -34,6 +34,7 @@
 // Thẻ `<a download>` gắn vào DOM rồi `.click()` thì không bị chặn.
 import { api, ApiError, isPreviewMode, resetCsrfToken } from "./api";
 import { toast } from "./ui";
+import { batDauViecNen } from "./phienBan";
 
 /** Bấm một thẻ <a download> ẩn — không bị chặn pop-up như window.open sau await. */
 function taiVe(url: string, tenFile: string) {
@@ -132,10 +133,14 @@ export async function xuatBaoGia(quoteId: number, ext: "xlsx" | "pdf"): Promise<
     return false;
   }
   dangChay.add(khoa);
+  // Dải "Có bản mới" (lib/phienBan.ts): đang tạo file thì không tự tải lại — tải lại giữa chừng là file
+  // không bao giờ về và không một lời báo (xuất nền có khi vài phút; soát vòng 2).
+  const xongViec = batDauViecNen();
   try {
     return await chay(quoteId, ext);
   } finally {
     dangChay.delete(khoa);
+    xongViec();
   }
 }
 

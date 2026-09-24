@@ -15,7 +15,8 @@ vi.mock("../lib/ui", async (goc) => ({ ...(await goc<typeof import("../lib/ui")>
 import * as ui from "../lib/ui";
 
 import { ThongBaoBanMoi, PhienBanChanMenu } from "./PhienBan";
-import { _datLai, dangKyTrangAnToan } from "../lib/phienBan";
+import { _datLai, dangKyTrangAnToan, batDauViecNen } from "../lib/phienBan";
+import { setPreviewMode } from "../lib/api";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
@@ -99,7 +100,8 @@ describe("dải thông báo bản mới", () => {
     expect(h.taiBanMoi).not.toHaveBeenCalled();
     expect(nut("Lưu rồi tải bản mới")).toBeDefined();
     expect(nut("Tải luôn")).toBeDefined();
-    expect(dai()?.textContent, "nói thật: Tải luôn thì phần chưa lưu được giữ tạm trên máy").toContain("giữ tạm trên máy này");
+    expect(dai()?.textContent, "nói thật — không hứa 'được giữ' (bản nháp có thể không khôi phục được)").toContain("có thể MẤT");
+    expect(dai()?.textContent).not.toContain("giữ tạm");
     act(() => nut("Hủy")!.click());
     expect(nut("Lưu rồi tải bản mới")).toBeUndefined();
     expect(h.taiBanMoi).not.toHaveBeenCalled();
@@ -127,6 +129,29 @@ describe("dải thông báo bản mới", () => {
     act(() => nut("Tải bản mới")!.click());
     expect(nut("Lưu rồi tải bản mới")).toBeUndefined();
     expect(nut("Tải luôn")).toBeDefined();
+  });
+
+  it("admin đang XEM THỬ quyền → bấm thì HỎI (tải lại là thoát xem thử, sau đó mọi thao tác là thật)", () => {
+    act(() => banMoiTrangAnToan());
+    setPreviewMode(true);
+    try {
+      ve(<ThongBaoBanMoi />);
+      act(() => nut("Tải bản mới")!.click());
+      expect(h.taiBanMoi).not.toHaveBeenCalled();
+      expect(dai()?.textContent).toContain("THOÁT chế độ xem thử");
+    } finally { setPreviewMode(false); }
+  });
+
+  it("đang tạo file Excel/PDF → câu nhắc đợi tải xong; bấm thì HỎI", () => {
+    act(() => banMoiTrangAnToan());
+    const xong = batDauViecNen();
+    try {
+      ve(<ThongBaoBanMoi />);
+      expect(dai()?.textContent).toContain("Đang tạo file — đợi tải xong");
+      act(() => nut("Tải bản mới")!.click());
+      expect(h.taiBanMoi).not.toHaveBeenCalled();
+      expect(dai()?.textContent).toContain("lượt tạo file đang chạy bị huỷ");
+    } finally { xong(); }
   });
 
   it("✕ ẩn dải (nhắc lại sau 30 phút)", () => {

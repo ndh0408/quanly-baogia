@@ -3,20 +3,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Lệnh ghi đang bay (api.ts) — điều khiển được từ test.
-const h = vi.hoisted(() => ({ ghi: 0 }));
-vi.mock("./api", () => ({ soLenhGhiDangBay: () => h.ghi }));
+const h = vi.hoisted(() => ({ ghi: 0, xemThu: false }));
+vi.mock("./api", () => ({ soLenhGhiDangBay: () => h.ghi, isPreviewMode: () => h.xemThu }));
 
 import {
   banCuaToi, khacBan, dangDo, kiemTraBanMoi, nenTuTai, luuRoiBao, nhanPhienBan, layTrangThai, _datLai, anTam, hienLai, AN_TAM_MS,
-  dangKyTrangAnToan, laTrangAnToan, taiBanMoi, taiLaiTrang, batDauTheoDoi, KET_LUAN_MOI_MS, type TrangThai,
+  dangKyTrangAnToan, laTrangAnToan, taiBanMoi, taiLaiTrang, batDauTheoDoi, batDauViecNen, KET_LUAN_MOI_MS, NAM_NEN_TOI_THIEU_MS, CHU_KY_MS,
+  type TrangThai,
 } from "./phienBan";
 
 type WinDirty = Window & { __editorDirty?: boolean };
 const traVe = (body: unknown, ok = true) => vi.fn(async () => ({ ok, json: async () => body }) as unknown as Response);
 const datVisibility = (v: "visible" | "hidden") => Object.defineProperty(document, "visibilityState", { configurable: true, get: () => v });
 const BAN_MOI = { banGiaoDien: "index-MoiBBB22", sha: "9dd30dc", capNhatLuc: null };
-/** Trạng thái "vừa hỏi thành công, có bản mới". */
-const coBanMoi = (p: Partial<TrangThai> = {}) => _datLai({ coBanMoi: true, cuaToi: "index-CuAAA111", mayChu: BAN_MOI, hoiLuc: Date.now(), ...p });
+/** Trạng thái "vừa hỏi thành công, có bản mới, tab đã nằm nền đủ lâu". */
+const coBanMoi = (p: Partial<TrangThai> = {}) => _datLai({ coBanMoi: true, cuaToi: "index-CuAAA111", mayChu: BAN_MOI, hoiLuc: Date.now(), anTuLuc: Date.now() - NAM_NEN_TOI_THIEU_MS - 1000, ...p });
 
 /** Cửa sổ giả cho taiBanMoi / taiLaiTrang: đếm gỡ SW, xoá cache, tải lại, sự kiện bắn ra. */
 function cuaSoGia() {
@@ -44,6 +45,7 @@ function cuaSoGia() {
 beforeEach(() => {
   _datLai();
   h.ghi = 0;
+  h.xemThu = false;
   document.head.innerHTML = '<script type="module" crossorigin src="/app2/assets/index-CuAAA111.js"></script>';
   document.body.innerHTML = "";
   (window as WinDirty).__editorDirty = false;
@@ -169,9 +171,10 @@ describe("nenTuTai — chỉ tự tải khi AN TOÀN", () => {
     expect(nenTuTai()).toBe(false);
   });
   it("kết luận CŨ (hỏi thành công lần cuối quá 2 phút) → không tự tải", () => {
-    coBanMoi({ hoiLuc: 1_000 }); dangKyTrangAnToan(); datVisibility("hidden");
-    expect(nenTuTai(document, window, 1_000 + KET_LUAN_MOI_MS + 1)).toBe(false);
-    expect(nenTuTai(document, window, 1_000 + KET_LUAN_MOI_MS - 1)).toBe(true);
+    const HOI = 10_000_000;   // mốc giả; tab đã nằm nền đủ lâu trước đó
+    coBanMoi({ hoiLuc: HOI, anTuLuc: HOI - NAM_NEN_TOI_THIEU_MS }); dangKyTrangAnToan(); datVisibility("hidden");
+    expect(nenTuTai(document, window, HOI + KET_LUAN_MOI_MS + 1)).toBe(false);
+    expect(nenTuTai(document, window, HOI + KET_LUAN_MOI_MS - 1)).toBe(true);
   });
   it("trình duyệt báo mất mạng → không tự tải (tải lại là ra trang lỗi)", () => {
     coBanMoi(); dangKyTrangAnToan(); datVisibility("hidden");
@@ -187,18 +190,50 @@ describe("nenTuTai — chỉ tự tải khi AN TOÀN", () => {
     datVisibility("hidden");
     expect(nenTuTai()).toBe(false);
   });
+  it("MỚI rời tab vài giây (Alt+Tab chép một con số) → KHÔNG tự tải — quay lại mà thấy trang đang tải lại là tự tải trước mắt", () => {
+    coBanMoi({ anTuLuc: 10_000, hoiLuc: 13_000 }); dangKyTrangAnToan(); datVisibility("hidden");
+    expect(nenTuTai(document, window, 13_000)).toBe(false);
+    expect(nenTuTai(document, window, 10_000 + NAM_NEN_TOI_THIEU_MS - 1)).toBe(false);
+    coBanMoi({ anTuLuc: 10_000, hoiLuc: 10_000 + NAM_NEN_TOI_THIEU_MS }); dangKyTrangAnToan();
+    expect(nenTuTai(document, window, 10_000 + NAM_NEN_TOI_THIEU_MS)).toBe(true);
+  });
+  it("chưa ghi được mốc nằm nền (anTuLuc = 0) → không tự tải", () => {
+    coBanMoi({ anTuLuc: 0 }); dangKyTrangAnToan(); datVisibility("hidden");
+    expect(nenTuTai()).toBe(false);
+  });
+  it("trang chỉ cho BẤM TAY (trình soạn / Account HN đã lưu sạch: tuTai=false) → bấm tay khỏi hỏi, nhưng KHÔNG tự tải", () => {
+    coBanMoi(); dangKyTrangAnToan(() => true, { tuTai: false }); datVisibility("hidden");
+    expect(dangDo(), "bấm tay: không có gì dở").toBeNull();
+    expect(laTrangAnToan(true)).toBe(false);
+    expect(nenTuTai()).toBe(false);
+  });
+  it("admin đang XEM THỬ quyền → không tự tải (tải lại là rớt về quyền THẬT); bấm tay thì hỏi 'xem-thu'", () => {
+    coBanMoi(); dangKyTrangAnToan(); datVisibility("hidden");
+    h.xemThu = true;
+    expect(dangDo()).toBe("xem-thu");
+    expect(nenTuTai()).toBe(false);
+  });
+  it("lượt tạo file Excel/PDF đang chạy → 'dang-tao-file', không tự tải; xong (gọi hai lần vô hại) thì hết", () => {
+    coBanMoi(); dangKyTrangAnToan(); datVisibility("hidden");
+    const xong = batDauViecNen();
+    expect(dangDo()).toBe("dang-tao-file");
+    expect(nenTuTai()).toBe(false);
+    xong(); xong();
+    expect(dangDo()).toBeNull();
+    expect(nenTuTai()).toBe(true);
+  });
 });
 
 describe("taiBanMoi", () => {
   beforeEach(() => { vi.stubGlobal("fetch", traVe(BAN_MOI)); });
-  it("máy chủ phát bản mới → gỡ SW + xoá cache, báo màn soạn ghi bản nháp, rồi tải lại; KHÔNG tự hạ cờ chưa-lưu", async () => {
+  it("máy chủ phát bản mới → gỡ SW + xoá cache rồi tải lại; KHÔNG đụng cờ chưa-lưu (hộp của trình duyệt là chốt cuối)", async () => {
     coBanMoi();
     const g = cuaSoGia();
     (g.w as WinDirty).__editorDirty = true;
     expect(await taiBanMoi(g.w)).toBe(true);
     expect(g.unregister).toHaveBeenCalled();
     expect(g.xoaCache).toHaveBeenCalledWith("workbox-precache-v2");
-    expect(g.suKien).toContain("phien-ban:truoc-tai");
+    expect(g.suKien, "không còn sự kiện nào bảo màn soạn hạ chốt beforeunload (soát vòng 2)").toEqual([]);
     expect(g.reload).toHaveBeenCalledTimes(1);
     expect((g.w as WinDirty).__editorDirty, "hạ cờ ở đây = hết chặn rời trang nếu người dùng Hủy hộp của trình duyệt").toBe(true);
     expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi")).toBe("index-MoiBBB22");
@@ -275,6 +310,29 @@ describe("taiLaiTrang — nút 'Thử lại' / 'Tải lại trang' ở màn lỗ
     expect(g.unregister).not.toHaveBeenCalled();
     expect(g.reload).toHaveBeenCalledTimes(1);
   });
+  it("máy chủ nhận kết nối mà KHÔNG trả lời → hết hạn giờ thì tải lại thường, không treo nút; bấm dồn lúc đang hỏi thì bỏ qua", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((_u: unknown, init?: RequestInit) => new Promise((_ok, loi) => {
+      init?.signal?.addEventListener("abort", () => loi(new DOMException("hết giờ", "AbortError")));
+    })));
+    const g = cuaSoGia();
+    const lan1 = taiLaiTrang(g.w);
+    const lan2 = taiLaiTrang(g.w);
+    await vi.advanceTimersByTimeAsync(4_100);
+    await Promise.all([lan1, lan2]);
+    expect(g.unregister).not.toHaveBeenCalled();
+    expect(g.reload, "bấm dồn chỉ tải lại MỘT lần").toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("kiemTraBanMoi — hạn giờ", () => {
+  it("không trả lời quá hạn → null như mất mạng (dải không kẹt 'Đang tải bản mới…')", async () => {
+    const treo = vi.fn((_u: unknown, init?: RequestInit) => new Promise<Response>((_ok, loi) => {
+      init?.signal?.addEventListener("abort", () => loi(new DOMException("hết giờ", "AbortError")));
+    })) as unknown as typeof fetch;
+    expect(await kiemTraBanMoi(treo, 30)).toBeNull();
+    expect(layTrangThai().hoiHong).toBe(true);
+  });
 });
 
 describe("batDauTheoDoi — lúc nào hỏi, lúc nào tự tải", () => {
@@ -305,14 +363,38 @@ describe("batDauTheoDoi — lúc nào hỏi, lúc nào tự tải", () => {
       expect(f).toHaveBeenCalledTimes(1);
     } finally { go(); }
   });
-  it("tab nằm nền, lần hỏi định kỳ thấy bản mới, trang an toàn → tự tải", async () => {
+  it("tab vừa nằm nền thấy bản mới → CHƯA tải; nằm nền đủ 5 phút thì lần hỏi định kỳ tự tải", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal("fetch", traVe(BAN_MOI));
     dangKyTrangAnToan(); datVisibility("hidden");
     const g = cuaSoGia();
     const go = batDauTheoDoi(g.w, document);
     try {
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
+      expect(layTrangThai().coBanMoi).toBe(true);
+      expect(g.reload, "mới nằm nền — người dùng có thể quay lại ngay").not.toHaveBeenCalled();
+      document.dispatchEvent(new Event("visibilitychange"));   // vẫn hidden
+      await vi.advanceTimersByTimeAsync(50);
+      expect(g.reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(CHU_KY_MS);
       expect(g.reload).toHaveBeenCalledTimes(1);
+    } finally { go(); }
+  });
+  it("quay lại tab thì mốc nằm nền xoá — rời lại thì đếm lại từ đầu", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", traVe({ banGiaoDien: "index-CuAAA111", sha: null, capNhatLuc: null }));
+    datVisibility("hidden");
+    const g = cuaSoGia();
+    const go = batDauTheoDoi(g.w, document);
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      const luc1 = layTrangThai().anTuLuc;
+      expect(luc1).toBeGreaterThan(0);
+      datVisibility("visible"); document.dispatchEvent(new Event("visibilitychange"));
+      expect(layTrangThai().anTuLuc).toBe(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      datVisibility("hidden"); document.dispatchEvent(new Event("visibilitychange"));
+      expect(layTrangThai().anTuLuc).toBeGreaterThan(luc1);
     } finally { go(); }
   });
 });

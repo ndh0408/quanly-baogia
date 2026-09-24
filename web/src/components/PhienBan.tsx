@@ -12,13 +12,18 @@ const CAU_DO: Record<Exclude<DangDo, null>, string> = {
   "chua-luu": "Bạn còn thay đổi CHƯA LƯU — bấm Lưu trước, rồi bấm Tải bản mới.",
   "form-mo": "Lưu hoặc đóng form đang mở trước, rồi bấm Tải bản mới.",
   "dang-go": "Lưu phần đang gõ trước, rồi bấm Tải bản mới.",
+  "dang-tao-file": "Đang tạo file — đợi tải xong rồi bấm Tải bản mới.",
+  "xem-thu": "",
   "chua-ro": "",
 };
-// Câu hỏi lại khi người dùng bấm Tải bản mới lúc đang dở.
+// Câu hỏi lại khi người dùng bấm Tải bản mới lúc đang dở. NÓI THẬT: không hứa "được giữ" — bản nháp tạm
+// có thể không khôi phục được (người khác vừa lưu, báo giá quá lớn, có ảnh), soát vòng 2.
 const CAU_HOI: Record<Exclude<DangDo, null>, [string, string]> = {
-  "chua-luu": ["Còn thay đổi chưa lưu.", "Lưu trước để chắc chắn không mất, hay tải bản mới luôn? (Tải luôn: phần chưa lưu được giữ tạm trên máy này — mở lại sẽ được hỏi “Khôi phục”.)"],
+  "chua-luu": ["Còn thay đổi chưa lưu.", "Bấm “Lưu rồi tải bản mới” để không mất gì. Tải luôn thì trình duyệt sẽ hỏi lại — phần chưa lưu có thể MẤT."],
   "form-mo": ["Đang mở một form.", "Tải bản mới bây giờ thì nội dung đang nhập trong form sẽ mất."],
   "dang-go": ["Đang gõ dở.", "Tải bản mới bây giờ thì phần đang gõ sẽ mất."],
+  "dang-tao-file": ["Đang tạo file.", "Tải bản mới bây giờ thì lượt tạo file đang chạy bị huỷ — phải bấm tải file lại."],
+  "xem-thu": ["Đang xem thử quyền.", "Tải bản mới sẽ THOÁT chế độ xem thử — sau đó mọi thao tác là thật."],
   "chua-ro": ["Trang này có thể còn phần đang nhập chưa lưu.", "Tải bản mới bây giờ thì phần đó sẽ mất — lưu trước nếu cần."],
 };
 // Bấm chuột vào nút làm ô đang gõ mất con trỏ TRƯỚC khi click chạy → lúc hỏi "đang dở không" thì ô đã

@@ -51,10 +51,11 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const ghiNhapNgay = () => {
     if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
     if (!dirtyRef.current || !qRef.current || !khoaNhapRef.current) return;
-    return ghiBanNhap(khoaNhapRef.current, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
+    ghiBanNhap(khoaNhapRef.current, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
   };
-  // Dải "Có bản mới" (lib/phienBan.ts): tải lại an toàn khi không còn giá HN nào chưa lưu.
-  useTrangAnToan(() => !dirtyRef.current);
+  // Dải "Có bản mới" (lib/phienBan.ts): bấm "Tải bản mới" khỏi hỏi lại khi không còn giá HN nào chưa lưu;
+  // không cho TỰ tải (mất bảng đang mở, vị trí cuộn, lịch sử Ctrl+Z — như trình soạn).
+  useTrangAnToan(() => !dirtyRef.current, { tuTai: false });
   const mark = () => {
     // L61 (đợt 3): hộp hỏi trong component con (lưới "Xóa nhiều hàng", "Xoá sheet Hà Nội") trả lời SAU khi
     // view đã gỡ vẫn gọi về đây — bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản
@@ -106,14 +107,7 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
     };
     window.addEventListener("editor:discard", boThayDoi);
-    // "Tải luôn" ở dải báo bản mới (như QuoteEditor): ghi bản nháp NGAY; ghi được thì hạ dirtyRef để trình
-    // duyệt khỏi hỏi lần hai (mở lại được hỏi "Khôi phục?"), không ghi được thì giữ — beforeunload hỏi.
-    const truocTai = () => {
-      const kq = ghiNhapNgayRef.current();
-      if (kq === "da-ghi" || kq === "da-ghi-bo-anh") dirtyRef.current = false;
-    };
-    window.addEventListener("phien-ban:truoc-tai", truocTai);
-    return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); window.removeEventListener("editor:discard", boThayDoi); window.removeEventListener("phien-ban:truoc-tai", truocTai); };
+    return () => { window.removeEventListener("beforeunload", h); window.removeEventListener("pagehide", ghi); document.removeEventListener("visibilitychange", khiAn); window.removeEventListener("editor:discard", boThayDoi); };
   }, []);
 
   // L58: hộp hỏi (confirmModal) là DOM tự dựng, KHÔNG tự đóng khi rời trang — Back lúc hộp đang mở thì

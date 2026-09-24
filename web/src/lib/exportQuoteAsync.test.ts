@@ -342,6 +342,41 @@ describe("xuatBaoGia — phản hồi và chặn bấm lại", () => {
     expect(await xuatBaoGia(7, "xlsx"), "khoá không được mở sau khi xong — nút chết").toBe(true);
   }, 30000);
 
+  it("đang tạo file → dải 'Có bản mới' biết (không tự tải lại cắt ngang lượt tải); xong hay hỏng đều trả lại", async () => {
+    // Soát vòng 2 (lib/phienBan.ts): xuất nền có khi vài phút; tab nằm nền tự tải lại giữa chừng là file
+    // không bao giờ về và không một lời báo.
+    let moKhoa: (() => void) | null = null;
+    let cho = new Promise<void>((r) => { moKhoa = r; });
+    let hong = false;
+    g.fetch = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("/csrf-token")) return new Response(JSON.stringify({ token: "t" }), { status: 200 });
+      await cho;
+      if (hong) throw new TypeError("Failed to fetch");
+      return new Response("x", { status: 200 });
+    });
+    const { xuatBaoGia } = await nap();
+    const { dangDo } = await import("./phienBan");
+    const win = { __editorDirty: false } as unknown as Window;
+    const doc = { querySelector: () => null, activeElement: null } as unknown as Document;
+
+    const dau = xuatBaoGia(7, "xlsx");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dangDo(win, doc)).toBe("dang-tao-file");
+    moKhoa!();
+    await dau;
+    expect(dangDo(win, doc), "xong mà còn giữ → không bao giờ tự tải được nữa").not.toBe("dang-tao-file");
+
+    hong = true;
+    cho = new Promise<void>((r) => { moKhoa = r; });
+    const lan2 = xuatBaoGia(8, "pdf");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dangDo(win, doc)).toBe("dang-tao-file");
+    moKhoa!();
+    await lan2;
+    expect(dangDo(win, doc), "hỏng cũng phải trả lại").not.toBe("dang-tao-file");
+  }, 30000);
+
   it("khoá được mở cả khi lượt trước THẤT BẠI", async () => {
     traLoi = () => new Response(JSON.stringify({ error: "Bạn không có quyền xuất báo giá" }), { status: 403 });
     const { xuatBaoGia } = await nap();

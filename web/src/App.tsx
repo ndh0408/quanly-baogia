@@ -184,9 +184,10 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  // Dải "Có bản mới" (lib/phienBan.ts): màn đăng nhập tải lại không mất gì. Nhưng form này còn được dùng
-  // lại trong LỚP PHỦ đăng nhập lại (lopPhu) đè lên trang đang soạn dở — lúc đó khai KHÔNG an toàn.
-  useTrangAnToan(() => !lopPhu);
+  // Dải "Có bản mới" (lib/phienBan.ts): màn đăng nhập tải lại không mất gì — trừ khi đã gõ mật khẩu hoặc
+  // đang ở bước mã MFA (tải lại là phải gõ lại từ đầu, soát vòng 2). Form này còn được dùng lại trong LỚP
+  // PHỦ đăng nhập lại (lopPhu) đè lên trang đang soạn dở — lúc đó khai KHÔNG an toàn.
+  useTrangAnToan(() => !lopPhu && !mfaShown && !password);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
