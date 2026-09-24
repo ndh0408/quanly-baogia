@@ -232,6 +232,15 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
+// Ô CHỮ ở cột số mà ĐỌC RA 0 (PORT chuKhongRaSo, soát toàn diện đợt 4): sau L17 "ĐG1.500.000", "SL12",
+// "12m2" đọc 0 mà không có cảnh báo dòng nào — tệp không có cột Thành Tiền thì Đơn Giá về 0 không ai thấy.
+// Số 0 viết bằng chữ ("0", "0đ", "(0)") và gạch kế toán ("-") không phải lỗi → không báo.
+const chuKhongRaSo = (s: string, n: number): boolean => {
+  const t = String(s ?? "").trim();
+  if (!t || n || /\d/.test(boCumChuSo(tachNgoacKeToan(t).s))) return false;
+  return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
+};
+
 function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
@@ -707,6 +716,13 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
         if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
         const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
         if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — đã để 0, cần nhập lại`);
+      }
+      // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
+      // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
+      for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
+        if (isGroup && role !== "quantity") continue;
+        const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
+        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, đã để 0, cần nhập lại`);
       }
     }
 

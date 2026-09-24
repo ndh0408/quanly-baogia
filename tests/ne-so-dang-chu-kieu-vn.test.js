@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
-import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal, parseLooseNumber } from "../web/src/lib/clipboard.ts";
+import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal, parseLooseNumber, chuKhongRaSo } from "../web/src/lib/clipboard.ts";
 
 const HDR = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];
 async function tep(rows, hdr = HDR) {
@@ -164,5 +164,74 @@ describe("L17 (đợt 3): chữ số dính sau chữ cái trong ô CHỮ không 
     const s = await tep(rows, ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[2, 1500000], [3, 1500]]);
     expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [parseLooseDecimal(r[3]), parseLooseNumber(r[4])]));
+  });
+});
+
+// Soát toàn diện đợt 4 (việc 1): sau L17 ô CHỮ có chữ cái dính liền trước/sau số ("ĐG1.500.000", "gia1.500",
+// "SL12", "x.5", "1e3", "12m2") đọc 0 — đúng luật "không đoán", nhưng KHÔNG một cảnh báo dòng nào (chỉ có
+// cảnh báo NGÀY THÁNG / ô LỖI). Tệp không có cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy.
+//   ĐÃ ĐO (fed1461): 6 dòng dưới đều nạp số 0 với warn = undefined.
+describe("đợt 4 việc 1: ô CHỮ ở cột số đọc ra 0 phải có cảnh báo dòng", () => {
+  const HDR5 = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"];
+
+  it("không có cột Thành Tiền: 'ĐG1.500.000' / 'gia1.500' / 'SL12' / 'x.5' / '1e3' / '12m2' → 0 KÈM cảnh báo đúng ô", async () => {
+    const rows = [
+      ["1", "Sân khấu", "gói", "1", "ĐG1.500.000"],
+      ["2", "Loa", "cái", "2", "gia1.500"],
+      ["3", "Ghế", "cái", "SL12", "50.000"],
+      ["4", "Thảm", "m2", "x.5", "200.000"],
+      ["5", "Đèn", "cái", "1e3", "10.000"],
+      ["6", "Vách", "m2", "12m2", "95.000"],
+    ];
+    const s = await tep(rows, HDR5);
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual([[1, 0], [2, 0], [0, 50000], [0, 200000], [0, 10000], [0, 95000]]);
+    s.items.forEach((it, k) => expect(it.warn?.join(" | "), rows[k][1]).toMatch(/không đọc được số/));
+    expect(s.items[0].warn.join(" | ")).toMatch(/Đơn Giá.*ĐG1\.500\.000/);
+    expect(s.items[2].warn.join(" | ")).toMatch(/Số Lượng.*SL12/);
+    expect(s.items[0].warn.join(" | ")).not.toMatch(/Số Lượng/);
+  });
+
+  it("chữ KHÔNG có chữ số ('Liên hệ', 'Theo thực tế') ở Đơn Giá cũng về 0 → cảnh báo", async () => {
+    const s = await tep([["1", "Âm thanh", "gói", "1", "Liên hệ"], ["2", "Ánh sáng", "gói", "1", "Theo thực tế"]], HDR5);
+    expect(s.items.map((i) => i.unitPrice)).toEqual([0, 0]);
+    s.items.forEach((it) => expect(it.warn?.join(" | ")).toMatch(/Đơn Giá.*không đọc được số/));
+  });
+
+  it("KHÔNG cảnh báo giả: số 0 viết bằng chữ ('0', '0đ', '-', '(0)', '0,00'), ô trống, ô chữ đọc ra số, ô SỐ thật 0", async () => {
+    const s = await tep([
+      ["1", "Tặng kèm", "cái", "1", "0"],
+      ["2", "Khuyến mãi", "cái", "2", "0đ"],
+      ["3", "Miễn phí", "cái", "3", "-"],
+      ["4", "Bù trừ", "cái", "1", "(0)"],
+      ["5", "Phí 0", "cái", "1", "0,00"],
+      ["6", "Để trống giá", "cái", "1", ""],
+      ["7", "Vách", "m2", "12 m2", "95.000đ/m2"],
+      ["8", "Ghế", "cái", "x2", "VNĐ1.500.000"],
+      ["9", "Bàn", "cái", 0, 0],
+      ["10", "Thảm", "m2", "0 m2", "USD1,500"],
+    ], HDR5);
+    expect(s.items.map((i) => i.warn)).toEqual(s.items.map(() => undefined));
+  });
+
+  it("Số Ngày chữ 'cả tuần' → cảnh báo; Đơn Giá chữ của hàng NHÓM không xét (app tự cộng lại, vốn không nạp)", async () => {
+    const s = await tep([
+      ["A", "Hạng mục chính", "", "", "", "Trọn gói"],
+      ["1", "Nhân sự", "người", "2", "cả tuần", "500.000"],
+    ], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"]);
+    const [nhom, ns] = s.items;
+    expect(nhom.kind).toBe("section");
+    expect(nhom.warn).toBeUndefined();
+    expect(ns).toMatchObject({ quantity: 2, unitPrice: 500000, days: null });
+    expect(ns.warn?.join(" | ")).toMatch(/Số Ngày.*cả tuần.*không đọc được số/);
+  });
+
+  it("KHỚP phía web: chuKhongRaSo ở clipboard.ts (dùng cho đường dán) cho cùng kết luận với bộ nhập", async () => {
+    const giaChu = ["ĐG1.500.000", "gia1.500", "Liên hệ", "0", "0đ", "-", "(0)", "95.000đ/m2", "VNĐ1.500.000", "1e3"];
+    const s = await tep(giaChu.map((g, k) => [String(k + 1), `Mục ${k + 1}`, "cái", "1", g]), HDR5);
+    expect(s.items.map((i) => !!i.warn)).toEqual(giaChu.map((g) => chuKhongRaSo(g, parseLooseNumber(g))));
+    expect(giaChu.map((g) => chuKhongRaSo(g, parseLooseNumber(g)))).toEqual([true, true, true, false, false, false, false, false, false, true]);
+    expect(chuKhongRaSo("SL12", parseLooseDecimal("SL12"))).toBe(true);
+    expect(chuKhongRaSo("", 0)).toBe(false);
+    expect(chuKhongRaSo("12 m2", parseLooseDecimal("12 m2"))).toBe(false);
   });
 });

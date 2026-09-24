@@ -77,6 +77,18 @@ export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? 
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
+// Ô CHỮ ở cột số mà ĐỌC RA 0 (soát toàn diện đợt 4): luật L17 không đoán nên "ĐG1.500.000", "SL12", "12m2",
+// "1e3" đọc 0 — đúng, nhưng phải NÓI ra: bộ nhập Excel không có cảnh báo dòng nào cho ca này, tệp không có
+// cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Còn chữ số sau bước bỏ
+// cụm = đã đọc được một số 0 thật ("0", "0đ", "(0)", "0 m2") → không báo; ô chỉ có gạch / ký hiệu tiền ("-"
+// kiểu kế toán) là ô trống → không báo; còn lại ("Liên hệ", "gia1.500") → báo. PHẢI khớp bản port ở
+// src/excelImport.ts.
+export const chuKhongRaSo = (s: string, n: number): boolean => {
+  const t = String(s ?? "").trim();
+  if (!t || n || /\d/.test(boCumChuSo(tachNgoacKeToan(t).s))) return false;
+  return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
+};
+
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
