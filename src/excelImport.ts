@@ -925,15 +925,23 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
   // TIÊU ĐỀ 2 TẦNG (L52): ô tiêu đề một cột SỐ gộp NGANG nhiều cột, hàng ngay dưới chia cột con
   // ("Đơn giá" → "Vật tư | Nhân công"). App chỉ đọc được cột con ĐẦU — Đơn Giá hụt phần còn lại. Dòng
   // lệch đã có cảnh báo Thành Tiền riêng, nhưng không câu nào nói VÌ SAO; nói ở cấp sheet.
+  // Hàng dưới phải TRÔNG NHƯ hàng tiêu đề con (soát toàn diện đợt 3): CẢ cột con đầu lẫn cột con thứ hai
+  // đều có chữ RIÊNG không phải số. Tiêu đề gộp ngang chỉ để trang trí (F3:G3) mà hàng dưới là dòng chữ
+  // gộp cả bảng ("* Thông tin chương trình: …" A4:H4 — ô mượn giá trị ô chủ cột khác) hay dòng nhóm có
+  // chữ ở cột tiền ("A | PHẦN DỰNG | … | Theo thực tế", cột con thứ hai trống) thì không phải tiêu đề con.
+  const chuRieng = (r: number, col: number) => {
+    const o = ws.getCell(r, col), m = o.isMerged ? o.master : null;
+    if (m && (coordNum(m.row, false) !== r || coordNum(m.col, true) !== col)) return "";   // ô phụ của vùng gộp
+    const t = cellText(o.value).trim();
+    return /^[\d\s.,()%₫đ$-]*$/i.test(t) ? "" : t;   // trống hoặc là SỐ (dữ liệu) → không phải tiêu đề con
+  };
   for (const [role, vn] of [["quantity", "Số Lượng"], ["days", "Số Ngày"], ["unitPrice", "Đơn Giá"], ["_amount", "Thành Tiền"]] as const) {
     const c = colOf[role];
     if (!c) continue;
     const ben = ws.getCell(hit.row, c + 1), m = ben.isMerged ? ben.master : null;
     if (!m || coordNum(m.row, false) !== hit.row || coordNum(m.col, true) !== c) continue;
-    const duoi = ws.getCell(hit.row + 1, c);
-    if (duoi.isMerged && coordNum(duoi.master?.row, false) === hit.row) continue;
-    const t = cellText(duoi.value).trim();
-    if (!t || /^[\d\s.,()%₫đ$-]+$/i.test(t)) continue;   // hàng dưới là SỐ (dữ liệu) → không phải tiêu đề con
+    const t = chuRieng(hit.row + 1, c);
+    if (!t || !chuRieng(hit.row + 1, c + 1)) continue;
     base.warnings.push(`Tiêu đề nhiều tầng: cột ${vn} (${colLetter(c)}) gộp ngang nhiều cột con — app chỉ đọc cột con đầu tiên “${t}”, các cột con còn lại KHÔNG được cộng vào. Kiểm tra lại ${vn} từng dòng.`);
   }
   if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh trong file KHÔNG nạp lại được. Dòng còn khớp với sheet đích giữ nguyên ảnh đang có; dòng mới cần thêm ảnh thủ công sau khi nạp.");
