@@ -1237,6 +1237,16 @@ function GridTableInner(props: GridTableProps) {
     nhoMocEscDo(el, i, f);             // …cả số/cờ đỏ: mốc cũ của lúc vào ô mà Esc trả về là số/cờ của trạng thái đã lùi mất
     editUndoRef.current = null;        // phiên gõ cũ đã bị lùi → gõ tiếp phải ghi mốc MỚI
   };
+  // Ctrl+Enter CHỐT rồi Ở LẠI ô: chỉ dời mốc Esc + mốc hoàn tác như syncActiveCell, KHÔNG viết lại chữ
+  // trong ô. Chữ trong ô chính là chuỗi commitCell vừa đọc nên đã khớp model; syncActiveCell viết lại theo
+  // fmtField — dạng hiển thị chỉ giữ 1 số lẻ — rồi lần rời ô kế tiếp onGridBlur chốt đúng chuỗi đã làm tròn
+  // đó: Đơn Giá 1234,56 thành 1234,6, SL 2,25 thành 2,3 (hồi quy của 4e84e04, soát toàn diện đợt 5).
+  const doiMocEscTaiCho = (el: HTMLInputElement | HTMLTextAreaElement | null, i: number, f: string) => {
+    if (!el) return;
+    el.dataset.escVal = el.value;
+    nhoMocEscDo(el, i, f);
+    editUndoRef.current = null;
+  };
   // SAU KHI LÙI/TIẾN, SỐ HÀNG CÓ THỂ ÍT ĐI (lùi một lần dán 129 dòng) nhưng vùng chọn vẫn trỏ tới
   // các hàng vừa mất → ô "Đếm/TB/Tổng" đọc `items[r]` = undefined và cả trang sập "Không tải được
   // trang" (người dùng báo 2026-09-23, quote #284 trên dev). Co vùng chọn về số hàng còn lại, bỏ
@@ -1747,9 +1757,10 @@ function GridTableInner(props: GridTableProps) {
       // Ctrl/⌘+Enter (Excel): đang gõ + chọn VÙNG → điền nội dung vào TOÀN vùng; còn lại →
       // CHỐT nội dung nhưng Ở LẠI ô (tiện nhìn kết quả).
       // Ở lại ô thì mốc Esc (escVal/escSo/escLoi) và mốc hoàn tác của phiên phải theo nội dung VỪA
-      // CHỐT — syncActiveCell, như dán/điền. Bỏ bước này thì F2 → Esc (kể cả không gõ) thấy model lệch
-      // mốc lúc vào ô → commitCell(escVal CŨ) đè giá trị vừa chốt, rồi dropMark bỏ luôn mốc hoàn tác của
-      // phiên Ctrl+Enter → Ctrl+Z/Ctrl+Y không lấy lại được (soát toàn diện đợt 4, phản biện).
+      // CHỐT. Bỏ bước này thì F2 → Esc (kể cả không gõ) thấy model lệch mốc lúc vào ô → commitCell(escVal
+      // CŨ) đè giá trị vừa chốt, rồi dropMark bỏ luôn mốc hoàn tác của phiên Ctrl+Enter → Ctrl+Z/Ctrl+Y
+      // không lấy lại được (soát toàn diện đợt 4, phản biện). Dời mốc bằng doiMocEscTaiCho, KHÔNG bằng
+      // syncActiveCell: nó viết lại ô theo dạng hiển thị 1 số lẻ, rời ô là model bị làm tròn (đợt 5).
       if (ctrl) {
         const rcFill = rectOf(selRef.current);
         if (editing && rcFill && (rcFill.r0 !== rcFill.r1 || rcFill.c0 !== rcFill.c1)) {
@@ -1757,10 +1768,10 @@ function GridTableInner(props: GridTableProps) {
           const m = editUndoRef.current;
           if (!(m && m.i === i && m.f === f)) pushUndo();   // phiên gõ đã có mốc thì snapshot cũ phủ đủ
           for (let r = rcFill.r0; r <= rcFill.r1; r++) { if (items[r]?.kind === "info") continue; for (let c = rcFill.c0; c <= rcFill.c1; c++) { if (RO_FIELDS.has(FIELDS[c])) continue; commitCell(r, FIELDS[c], raw); } }   // GRID-15: bỏ cột STT (ô tính)
-          recomputeAll(); onChange(); syncActiveCell(); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
+          recomputeAll(); onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); paintSel();   // giữ nguyên vùng chọn như Excel
           return;
         }
-        onChange(); syncActiveCell(); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
+        onChange(); doiMocEscTaiCho(ae, i, f); lockCell(ae); selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); return;
       }
       // Đang chọn VÙNG nhiều ô → Enter chạy VÒNG TRONG vùng (xuống, hết cột thì sang cột kế;
       // Shift+Enter đi ngược lại) — Excel.

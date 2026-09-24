@@ -195,3 +195,90 @@ describe("Ctrl+Enter rồi F2 → Esc: giữ nội dung vừa chốt, hoàn tác
     expect(doi, "F2 → Esc không gõ mà vẫn gọi onChange").toBe(sau);
   });
 });
+
+// Hồi quy của 4e84e04 (soát toàn diện đợt 5 d5-luoi 1): nhánh Ctrl+Enter gọi syncActiveCell, hàm này viết
+// lại ô theo fmtField — dạng HIỂN THỊ chỉ giữ 1 số lẻ. Lần rời ô kế tiếp onGridBlur chốt đúng chuỗi đã làm
+// tròn đó → model mất số lẻ ngay khi rời ô: Đơn Giá 1234,56 thành 1234,6; 0,85 thành 0,9; SL 2,25 thành 2,3.
+describe("Ctrl+Enter rồi rời ô: model giữ nguyên số vừa gõ, không bị làm tròn 1 số lẻ", () => {
+  it("Đơn Giá '1234,56' → Ctrl+Enter → rời ô (↓) → vẫn 1234,56", () => {
+    const items = [mk({ name: "A", unitPrice: 500 }), mk({ name: "B" })];
+    moLuoi(items);
+    const el = o(0, "unitPrice");
+    chotOLai(el, "1234,56");
+    expect(items[0].unitPrice).toBe(1234.56);
+    phim(el, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(o(1, "unitPrice"));
+    expect(items[0].unitPrice, "rời ô sau Ctrl+Enter chốt chuỗi hiển thị 1 số lẻ đè lên model").toBe(1234.56);
+  });
+
+  it("Đơn Giá '0,85' → Ctrl+Enter → bấm ra ngoài (blur) → vẫn 0,85, không thành 0,9", () => {
+    const items = [mk({ name: "A", unitPrice: 500 }), mk({ name: "B" })];
+    moLuoi(items);
+    const el = o(0, "unitPrice");
+    chotOLai(el, "0,85");
+    act(() => { el.blur(); });
+    expect(items[0].unitPrice).toBe(0.85);
+  });
+
+  it("SL '2,25' → Ctrl+Enter → rời ô → vẫn 2,25, không thành 2,3", () => {
+    const items = [mk({ name: "A", unitPrice: 1000 }), mk({ name: "B" })];
+    moLuoi(items);
+    const el = o(0, "quantity");
+    chotOLai(el, "2,25");
+    expect(items[0].quantity).toBe(2.25);
+    phim(el, { key: "ArrowDown" });
+    expect(items[0].quantity).toBe(2.25);
+  });
+
+  it("'1234,56' → Ctrl+Enter → F2 → gõ 999 → Esc → rời ô: về đúng 1234,56 (không phải 1234,6)", () => {
+    const items = [mk({ name: "A", unitPrice: 500 }), mk({ name: "B" })];
+    moLuoi(items);
+    const el = o(0, "unitPrice");
+    chotOLai(el, "1234,56");
+    phim(el, { key: "F2" });
+    go(el, "999");
+    phim(el, { key: "Escape" });
+    expect(items[0].unitPrice, "Esc sau Ctrl+Enter phải trả về đúng số vừa chốt").toBe(1234.56);
+    phim(el, { key: "ArrowDown" });
+    expect(items[0].unitPrice).toBe(1234.56);
+    phim(document.activeElement!, { key: "z", ctrlKey: true });
+    expect(items[0].unitPrice, "Ctrl+Z vẫn lùi đúng phiên Ctrl+Enter").toBe(500);
+  });
+
+  it("'1234,56' → Ctrl+Enter → F2 → Esc (không gõ) → rời ô: không đổi số, không báo đổi", async () => {
+    const items = [mk({ name: "A", unitPrice: 500 }), mk({ name: "B" })];
+    let doi = 0;
+    function VoDem() {
+      const [, b] = useState(0);
+      return <GridTable items={items} usesDays showDetail={false} addrDetail={false} numberSubs={false} editable internalNote={false}
+        groupSubtotal={false} fxBar onChange={() => { doi++; b((v) => v + 1); }} />;
+    }
+    hop = document.createElement("div"); document.body.appendChild(hop); root = createRoot(hop);
+    act(() => root!.render(<VoDem />));
+    const el = o(0, "unitPrice");
+    chotOLai(el, "1234,56");
+    // Lượt vẽ hoãn của các phím vừa gõ (onChangeSoft, 180ms) — để nó chạy xong rồi mới đếm.
+    await act(async () => { await new Promise((r) => setTimeout(r, 220)); });
+    const sau = doi;
+    phim(el, { key: "F2" });
+    phim(el, { key: "Escape" });
+    phim(el, { key: "ArrowDown" });
+    expect(items[0].unitPrice).toBe(1234.56);
+    expect(doi, "F2 → Esc → rời ô không đổi gì mà vẫn gọi onChange").toBe(sau);
+  });
+
+  it("Ctrl+Enter ĐIỀN VÙNG '0,85' rồi rời ô → cả vùng giữ 0,85", () => {
+    const items = [mk({ name: "A", unitPrice: 100 }), mk({ name: "B", unitPrice: 200 }), mk({})];
+    moLuoi(items);
+    const el0 = o(0, "unitPrice");
+    act(() => { el0.focus(); });
+    phim(el0, { key: "ArrowDown", shiftKey: true });
+    const el = o(1, "unitPrice");
+    phim(el, { key: "F2" });
+    go(el, "0,85");
+    phim(el, { key: "Enter", ctrlKey: true });
+    expect(items.slice(0, 2).map((i) => i.unitPrice)).toEqual([0.85, 0.85]);
+    act(() => { el.blur(); });
+    expect(items.slice(0, 2).map((i) => i.unitPrice), "ô đang nhập bị làm tròn khi rời ô sau điền vùng").toEqual([0.85, 0.85]);
+  });
+});
