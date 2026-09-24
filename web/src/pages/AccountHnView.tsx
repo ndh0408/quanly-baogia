@@ -259,7 +259,13 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     finally { setSaving(false); savingRef.current = false; }
   };
   saveRef.current = editable && !saving ? () => save(false) : null;
-  const submit = async () => { if (await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" })) save(true); };
+  // Đợt 3 (họ L58/L61): hộp không tự đóng khi Back — xác nhận nó sau khi view đã gỡ từng Lưu + GỬI DUYỆT
+  // báo giá CŨ (account không tự rút lại được) và hạ cờ bẩn DÙNG CHUNG của trang đang mở.
+  const submit = async () => {
+    if (!(await confirmModal("Gửi duyệt phần Hà Nội", "Sau khi gửi sẽ KHÔNG sửa được cho tới khi quản lý duyệt / trả lại. Tiếp tục?", { confirmText: "Gửi duyệt" }))) return;
+    if (!songRef.current) return;
+    save(true);
+  };
 
   return (
     <div className="account-hn-view ahn-card">

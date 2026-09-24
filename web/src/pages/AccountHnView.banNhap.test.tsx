@@ -179,6 +179,36 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect(giaTrongNhap(KHOA12), "giá HN chưa lưu của #12 bị hộp treo xoá").toBe(9_900_000);
   });
 
+  // Đợt 3 (cùng họ L58/L61): hộp "Gửi duyệt phần Hà Nội" cũng không tự đóng khi Back. Xác nhận nó sau khi
+  // view #12 đã gỡ từng Lưu + GỬI DUYỆT báo giá CŨ (account không tự rút lại được) và hạ cờ bẩn của #11.
+  it("hộp 'Gửi duyệt' của #12 còn treo khi đã sang #11 — xác nhận KHÔNG lưu, KHÔNG gửi duyệt #12", async () => {
+    let traLoi!: (v: boolean) => void;
+    h.getQuote = async () => baoGia({ id: 12 });
+    await mo();
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const nutGui = [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))!;
+    await act(async () => { nutGui.click(); });
+    expect(confirmMock()).toHaveBeenCalledWith("Gửi duyệt phần Hà Nội", expect.any(String), expect.anything());
+    act(() => root!.unmount()); host!.remove();
+    h.getQuote = async () => baoGia();
+    await mo();
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = true;   // #11 đang có thay đổi chưa lưu
+    await act(async () => { traLoi(true); });
+    await cho(30);
+    expect(api.saveHn, "hộp treo lưu phần HN của báo giá đã rời").not.toHaveBeenCalled();
+    expect(api.submitHn, "hộp treo gửi duyệt báo giá đã rời").not.toHaveBeenCalled();
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "cờ bẩn của #11 bị hạ").toBe(true);
+  });
+
+  it("đối chứng: view còn gắn, xác nhận 'Gửi duyệt' → lưu rồi gửi duyệt đúng báo giá đang mở", async () => {
+    await mo();
+    const nutGui = [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))!;
+    await act(async () => { nutGui.click(); });
+    await cho(30);
+    expect((api.saveHn as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    expect(api.submitHn).toHaveBeenCalledWith(11);
+  });
+
   it("L58: bấm Khôi phục trên hộp treo KHÔNG bật cờ 'chưa lưu' của trang #11 đang sạch", async () => {
     const traLoi = await hopTreoCua12();
     await traLoi(true);
