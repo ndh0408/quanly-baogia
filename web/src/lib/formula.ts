@@ -222,6 +222,8 @@ function rutGonHam(s: string): string | null {
   }
   return s;
 }
+/** Hàm mà Excel BỎ QUA đối số rỗng (không coi là 0) — xem goiHam. BẢN SAO ở src/quoteFormula.ts. */
+const HAM_BO_DOI_SO_RONG = new Set(["PRODUCT"]);
 /** Kết quả MỘT lời gọi hàm (đối số đã là số/biểu thức số) dưới dạng chuỗi, lỗi → "NaN". */
 function goiHam(ten: string, trong: string): string {
   const fn = FORMULA_FNS[ten.toUpperCase()];
@@ -238,10 +240,15 @@ function goiHam(ten: string, trong: string): string {
   // Đối số RỖNG giữa các dấu tách ("MIN(F1;)", "ROUND(;2)") là 0 như Excel. Bản trước BỎ nó: app ra
   // MIN = 58.000, AVERAGE = 58.000, ROUND(;2) = 2 trong khi Excel ra 0 / 29.000 / 0 — bộ tự kiểm máy chủ
   // bỏ y như vậy nên tệp vẫn ghi công thức và Excel tính ra số khác app / PDF (soát toàn diện đợt 3).
+  // RIÊNG PRODUCT thì Excel BỎ QUA đối số rỗng (Excel 16 đo qua COM: PRODUCT(A1,) = A1, PRODUCT(A1,,A2) =
+  // A1·A2), còn không sót số nào ("PRODUCT(;)") thì ra 0 — coi rỗng là 0 thì PRODUCT(F1;) ra 0 trong khi
+  // tệp ghi "PRODUCT(G12,)" và Excel ra 58.000 (phản biện đợt 3, 7b).
   // Lời gọi không có đối số nào ("SUM()") giữ như cũ: danh sách rỗng.
   let hong = false;
   const khongDoiSo = doiSo.length === 1 && doiSo[0].trim() === "";
-  const vals = (khongDoiSo ? [] : doiSo).map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  let ds = khongDoiSo ? [] : doiSo;
+  if (!khongDoiSo && HAM_BO_DOI_SO_RONG.has(ten.toUpperCase())) { const con = ds.filter((a) => a.trim() !== ""); ds = con.length ? con : ["0"]; }
+  const vals = ds.map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
   // BỌC NGOẶC (L37): trả chuỗi trần thì kết quả dính vào chữ số đứng cạnh — "=2SUM(F2;F3)" thành
