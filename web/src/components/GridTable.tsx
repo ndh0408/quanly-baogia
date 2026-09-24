@@ -2445,14 +2445,27 @@ function GridTableInner(props: GridTableProps) {
     };
     r.readAsDataURL(file);
   });
+  // Nén là BẤT ĐỒNG BỘ (soát toàn diện đợt 4, cùng lớp L61): trong lúc chờ, hàng phía trên có thể bị
+  // xoá/chèn, ô có thể được chọn thêm ảnh lần hai, lưới có thể đã gỡ (đổi sheet, rời trang) hay nhận
+  // mảng items mới (nạp lại sau Lưu). Bản cũ ghi `items[i].images = [...cur, ...out]` theo chỉ số và
+  // danh sách chụp lúc chọn tệp → ảnh rơi sang hạng mục khác, lần xong sau đè mất ảnh của lần trước,
+  // và onChange của lưới đã gỡ vẫn chạy. Nay: nhận hàng theo `_k` lúc chọn, đọc ảnh HIỆN CÓ lúc ghi,
+  // và chỉ ghi khi lưới còn gắn trên đúng mảng lúc chọn — không thì báo để người dùng chọn lại.
   const addImages = async (i: number, files: FileList | null) => {
     if (!editable || !files || !files.length) return;
-    const cur = (items[i].images || []) as string[];
-    const room = IMG_MAX - cur.length;
+    const room = IMG_MAX - ((items[i].images || []) as string[]).length;
     if (room <= 0) { toast(`Tối đa ${IMG_MAX} ảnh mỗi ô`, "info"); return; }
+    const mangLucChon = items, kHang = items[i]._k;
     const out: string[] = [];
     for (const f of Array.from(files).slice(0, room)) { const d = await fileToImg(f); if (d) out.push(d); }
-    if (out.length) { pushUndo(); (items[i] as Record<string, unknown>).images = [...cur, ...out]; onChange(); setImgVer((v) => v + 1); }
+    if (!out.length) return;
+    const j = conGanRef.current && itemsNayRef.current === mangLucChon ? items.findIndex((it) => it._k === kHang) : -1;
+    if (j < 0) { toast("Ảnh chưa được thêm — bảng đã đổi trong lúc xử lý ảnh (xoá hàng, đổi sheet, nạp lại). Hãy chọn lại ảnh", "error"); return; }
+    const cur = (items[j].images || []) as string[];
+    const them = out.slice(0, IMG_MAX - cur.length);
+    if (them.length < out.length) toast(`Tối đa ${IMG_MAX} ảnh mỗi ô — bỏ ${out.length - them.length} ảnh thừa`, "info");
+    if (!them.length) return;
+    pushUndo(); (items[j] as Record<string, unknown>).images = [...cur, ...them]; onChange(); setImgVer((v) => v + 1);
   };
   const removeImage = (i: number, k: number) => {
     if (!editable) return;
