@@ -138,6 +138,93 @@ describe("L8 — cờ đỏ tham chiếu hỏng không bị recomputeAll gỡ", 
     expect(coDo(hang, "unitPrice")).toBe(true);
   });
 
+  /* ── RỜI Ô ĐỎ MÀ KHÔNG SỬA GÌ (phản biện L8) ────────────────────────────────────────────────
+     onGridFocus hiện công thức gốc trong ô, rời ô thì onGridBlur (và Enter) chốt đúng chuỗi ấy qua
+     commitCell — bản trước coi đó là "người dùng đã sửa ô": gỡ cờ rồi tính lại công thức gốc, nên
+     C "=E1" (A đã xoá) lặng lẽ thành SL của B chỉ vì con trỏ đi ngang qua. */
+  const xoaHangBiTro = () => {
+    const items = [mk({ name: "A", quantity: 6 }), mk({ name: "B", quantity: 4 }), mk({ name: "C", quantity: 6, formulas: { quantity: "=E1" } })];
+    moLuoi(items);
+    act(() => { (hop!.querySelector('tr[data-row="0"] .rm-row') as HTMLButtonElement).click(); });
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    return items;
+  };
+
+  it("lướt mũi tên qua ô đỏ: cờ còn, SL giữ nguyên, không lấy số của hàng khác", () => {
+    const items = xoaHangBiTro();
+    act(() => { o(1, "quantity").focus(); });
+    phim(document.activeElement!, { key: "ArrowRight" });
+    expect(document.activeElement).not.toBe(o(1, "quantity"));
+    expect(coWarn(items[1], "quantity"), "đi ngang ô đỏ bằng mũi tên là gỡ cờ #REF").toBe(true);
+    expect(coDo(1, "quantity")).toBe(true);
+    expect(items[1].quantity, "C lặng lẽ lấy SL của B chỉ vì con trỏ đi qua").toBe(6);
+    expect(items[1].formulas?.quantity).toBe("=E1");
+  });
+
+  it("Enter trên ô đỏ (không gõ gì): cờ còn, SL giữ nguyên", () => {
+    const items = xoaHangBiTro();
+    act(() => { o(1, "quantity").focus(); });
+    phim(document.activeElement!, { key: "Enter" });
+    expect(coWarn(items[1], "quantity"), "Enter không sửa gì mà gỡ cờ #REF").toBe(true);
+    expect(coDo(1, "quantity")).toBe(true);
+    expect(items[1].quantity).toBe(6);
+  });
+
+  it("F2 rồi Enter (không gõ gì): vẫn đỏ — chỉ GÕ vào ô mới là sửa", () => {
+    const items = xoaHangBiTro();
+    const el = o(1, "quantity");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    phim(el, { key: "Enter" });
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    expect(items[1].quantity).toBe(6);
+  });
+
+  it("dán khối Excel có '=Z99*2' rồi bấm vào ô đỏ, bấm sang ô khác: cờ còn, Đơn giá giữ nguyên", () => {
+    const items = [mk({ name: "Cũ" })];
+    moLuoi(items);
+    const tsv = [
+      "STT\tHạng Mục\tChi Tiết\tĐVT\tSố Lượng\tĐơn Giá\tThành Tiền\tGhi Chú",
+      "A\tNhóm 1\t\t\t1\t\t\t",
+      "1\tBanner\t\tm2\t2\t=Z99*2\t200.000\t",
+    ].join("\n");
+    act(() => { o(0, "name").focus(); });
+    act(() => { o(0, "name").dispatchEvent(suKienClip("paste", { "text/plain": tsv })); });
+    const hang = items.findIndex((x) => x.name === "Banner");
+    const giaTruoc = items[hang].unitPrice;
+    act(() => { o(hang, "unitPrice").focus(); });
+    act(() => { o(hang, "notes").focus(); });
+    expect(coWarn(items[hang], "unitPrice"), "toast bảo 'bấm vào kiểm tra' mà bấm vào rồi ra là mất cờ").toBe(true);
+    expect(coDo(hang, "unitPrice")).toBe(true);
+    expect(items[hang].unitPrice).toBe(giaTruoc);
+  });
+
+  it("GÕ lại công thức (dù y nguyên) rồi Enter = người dùng xác nhận → hết đỏ, tính theo bảng hiện tại", () => {
+    const items = xoaHangBiTro();
+    const el = o(1, "quantity");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=E1"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    phim(el, { key: "Enter" });
+    expect(coWarn(items[1], "quantity")).toBe(false);
+    expect(items[1].quantity).toBe(4);
+  });
+
+  it("gõ dở trên ô đỏ rồi Esc: trả cả công thức, cờ lẫn SỐ lúc vào ô — không tính lại công thức gốc", () => {
+    const items = xoaHangBiTro();
+    const el = o(1, "quantity");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=E1*9"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    phim(el, { key: "Escape" });
+    expect(items[1].formulas?.quantity).toBe("=E1");
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    expect(items[1].quantity, "Esc huỷ phiên gõ mà ô đỏ lại ăn SL của B").toBe(6);
+    phim(el, { key: "ArrowDown" });
+    expect(coWarn(items[1], "quantity"), "Esc trả cờ nhưng lần rời ô kế tiếp gỡ mất").toBe(true);
+    expect(items[1].quantity).toBe(6);
+  });
+
   it("sửa tay ô đỏ thành công thức đúng → hết đỏ (commitCell vẫn là nơi gỡ cờ)", () => {
     const items = [mk({ name: "A", quantity: 6 }), mk({ name: "B", quantity: 4 }), mk({ name: "C", quantity: 6, formulas: { quantity: "=E1" } })];
     moLuoi(items);

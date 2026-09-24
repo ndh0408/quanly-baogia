@@ -319,6 +319,8 @@ function GridTableInner(props: GridTableProps) {
     pushUndo(); editUndoRef.current = { i, f };
     cancelCut();   // gõ vào bảng = Excel bỏ chế độ cắt; dán sau đó chỉ CHÉP, không xoá nội dung vừa gõ (L7)
   };
+  /** Ô (i, f) đã có GÕ trong phiên này chưa — mốc undo của phiên chỉ đặt ở ký tự đầu (markEditUndo). */
+  const daGoO = (i: number, f: string) => { const m = editUndoRef.current; return !!m && m.i === i && m.f === f; };
   // dongBo: thao tác vừa GHI ĐÈ model hàng loạt (dán khối / dựng lại) — lượt vẽ kế tiếp kéo ô đang giữ
   // tiêu điểm về model TRƯỚC khi dời tiêu điểm (xem effect đồng bộ ô, soát toàn diện L6).
   const focusCell = (i: number, f: string, preserveSelection = false, dongBo = false) => {
@@ -371,7 +373,8 @@ function GridTableInner(props: GridTableProps) {
      `_fxWarn` — THAM CHIẾU HỎNG / CHƯA DỊCH ĐƯỢC: dán hay Ctrl+D dịch ra ngoài bảng, xoá hàng bị trỏ
        tới (rowEdit), khối Excel không dịch được (retargetPastedFormulas). Công thức gốc giữ nguyên
        nhưng KHÔNG còn trỏ đúng chỗ — tính lại cũng không làm nó đúng ra, nên cờ chỉ gỡ khi người
-       dùng tự sửa ô (commitCell) hoặc ô bị ghi đè (boCoO).
+       dùng tự sửa ô (commitCell) hoặc ô bị ghi đè (boCoO). Chỉ ĐI QUA ô (mũi tên, Enter, Tab, bấm
+       chuột) hay Esc huỷ phiên gõ không tính là sửa — xem giuCoHong.
      `_fxLoi`  — VÒNG LẶP / KHÔNG TÍNH ĐƯỢC: suy ra từ chính lượt eval, nên mỗi lượt tính lại tự bật/
        tắt (ghiCoVong, datCoVong).
      Bản cũ dùng CHUNG `_fxWarn` cho cả hai: recomputeAll chạy ngay sau mọi đường bật cờ #REF và gỡ
@@ -538,8 +541,14 @@ function GridTableInner(props: GridTableProps) {
   const fxLoiLucRef = useRef(0);
   const baoFxLoi = () => { const now = Date.now(); if (now - fxLoiLucRef.current < 1500) return; fxLoiLucRef.current = now; toast("Công thức không tính được — ô viền đỏ. Kiểm tra cú pháp; tách đối số bằng dấu ;", "error"); };
   // commitCell: áp "=" → công thức cho MỌI cột; số/chữ thường ngược lại. Tự bật toggle nhóm khi SL nhóm>1.
-  const commitCell = (i: number, f: string, raw: string) => {
+  // giuCoHong: nơi gọi là RỜI Ô / Enter mà người dùng KHÔNG gõ gì (phản biện L8). onGridFocus hiện công
+  // thức gốc trong ô nên rời ô là chốt lại đúng chuỗi ấy — bản trước coi đó là "đã sửa ô": gỡ `_fxWarn`
+  // rồi tính lại công thức gốc, C "=E1" (A đã xoá) lặng lẽ ăn SL của B chỉ vì con trỏ đi ngang, dù
+  // toast dán Excel còn bảo người dùng "bấm vào kiểm tra". Chuỗi không đổi thì giữ cờ và giữ số,
+  // không tính lại. Có GÕ (kể cả gõ lại y nguyên) thì nơi gọi không bật cờ này → chốt như thường.
+  const commitCell = (i: number, f: string, raw: string, giuCoHong = false) => {
     const it = items[i] as Record<string, unknown>; raw = String(raw);
+    if (giuCoHong && coThamChieuHong(it, f) && raw.trim() === (it.formulas as Record<string, string> | undefined)?.[f]) return;
     // Người dùng đã sửa ô → bỏ cờ "tham chiếu hỏng / công thức Excel chưa dịch được" và cờ lỗi tính
     // cũ của ô này; công thức mới hỏng thì các nhánh dưới bật lại cờ lỗi tính.
     const daDo = !!((it as CoDo)._fxWarn?.[f] || (it as CoDo)._fxLoi?.[f]);   // đã đỏ từ trước (rời ô một công thức lỗi cũ) → không báo lại
@@ -769,7 +778,7 @@ function GridTableInner(props: GridTableProps) {
     const inEl = fxInputRef.current; const sel = selRef.current; if (!inEl || !sel) return;
     const { row, field } = sel.anchor;
     if (!editable || field === "_amount" || field === "_stt") return;
-    commitCell(row, field, inEl.value); recomputeAll(); clearActiveRefs(); onChange();
+    commitCell(row, field, inEl.value, true); recomputeAll(); clearActiveRefs(); onChange();   // thanh fx không ghi live → chuỗi y nguyên = không sửa
     if (move) moveTo(row + 1, field, false);
   };
 
@@ -1429,7 +1438,7 @@ function GridTableInner(props: GridTableProps) {
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[COL_NAME] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
       focusCell(startRow, FIELDS[COL_NAME], true, true);
-      const nGrp =built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
       if (nWarn) toast(`⚠️ ${nWarn} ô công thức KHÔNG tự dịch được từ Excel — ô viền ĐỎ, bấm vào kiểm tra/sửa tay`, "error");
@@ -1443,6 +1452,9 @@ function GridTableInner(props: GridTableProps) {
       // GIỮ cột đang chọn (soát toàn diện L13): bản cũ ép về Hạng Mục, nên chép SL + ĐG rồi dán vào ô SL
       // của nhóm thì số rơi vào Hạng Mục / ĐVT, SL/ĐG = 0. Ô chọn ở cột chỉ đọc (STT/TT) đã được đưa về
       // Hạng Mục ở đầu onPaste; khối nguyên hàng ghép theo tên trường nên không phụ thuộc startCol.
+      // Riêng khối trong app BẮT ĐẦU từ Hạng Mục thì vẫn vào từ Hạng Mục (phản biện L13): giữ cột SL thì
+      // tên rơi vào SL (đọc ra 0), ĐVT/SL/ĐG lệch sang phải — hàng chèn mới nên chỉ có một đích hợp lý.
+      if (internal?.fields?.[0] === "name") startCol = COL_NAME;
       startRow += 1;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
@@ -1664,7 +1676,7 @@ function GridTableInner(props: GridTableProps) {
     }
     if (e.key === "Enter") {
       e.preventDefault(); e.stopPropagation();
-      commitCell(i, f, ae!.value); recomputeAll();
+      commitCell(i, f, ae!.value, !daGoO(i, f)); recomputeAll();
       // Ctrl/⌘+Enter (Excel): đang gõ + chọn VÙNG → điền nội dung vào TOÀN vùng; còn lại →
       // CHỐT nội dung nhưng Ở LẠI ô (tiện nhìn kết quả).
       if (ctrl) {
@@ -1746,11 +1758,15 @@ function GridTableInner(props: GridTableProps) {
           if (!khopMoc) {
             const moc = () => JSON.stringify(items[i].formulas || null) + "|" + String(rec[f]);
             const truoc = moc();
-            // Huỷ phiên gõ trên ô ĐỎ vì tham chiếu hỏng: trả lại công thức gốc thì trả luôn cờ —
-            // commitCell coi đó là người dùng sửa ô và gỡ cờ, ô hỏng thành ô "sạch" im lặng (L8).
+            // Huỷ phiên gõ trên ô ĐỎ vì tham chiếu hỏng: trả lại công thức gốc thì trả luôn cờ và số lúc
+            // vào ô — commitCell coi đó là người dùng sửa ô: gỡ cờ và tính lại công thức gốc, ô hỏng
+            // thành ô "sạch" im lặng mang số của hàng khác (L8).
             const coRef = coThamChieuHong(rec, f);
             commitCell(i, f, escVal);
-            if (coRef && items[i].formulas?.[f] === escVal.trim()) { const c = rec as CoDo; (c._fxWarn || (c._fxWarn = {}))[f] = true; }
+            if (coRef && items[i].formulas?.[f] === escVal.trim()) {
+              const c = rec as CoDo; (c._fxWarn || (c._fxWarn = {}))[f] = true;
+              if (esc.dataset.escSo != null) { try { rec[f] = JSON.parse(esc.dataset.escSo); } catch { /* giữ số vừa tính */ } }
+            }
             if (moc() !== truoc) { recomputeAll(); onChange(); }
           }
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
@@ -1838,18 +1854,22 @@ function GridTableInner(props: GridTableProps) {
     if (!navigatingRef.current) { const sel = selRef.current; if (!sel || sel.anchor.row !== i || sel.anchor.field !== f) { selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); } }
     const fx = items[i]?.formulas?.[f]; if (fx && el) el.value = fx;   // ô có công thức → hiện =… để sửa
     if (el) el.dataset.escVal = el.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
+    // Ô ĐỎ vì tham chiếu hỏng: nhớ cả SỐ lúc vào ô. Gõ công thức thì onNumInput ghi số live vào model;
+    // Esc huỷ phiên phải trả lại số này — tính lại công thức gốc là ăn số của hàng khác (L8).
+    if (el) { if (items[i] && coThamChieuHong(items[i], f)) el.dataset.escSo = JSON.stringify((items[i] as Record<string, unknown>)[f] ?? null); else delete el.dataset.escSo; }
     fitCell(el);
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
   const onGridBlur = (e: { target: EventTarget | null; relatedTarget?: EventTarget | null }) => {
     flushSoft();   // rời ô = chốt ngay lần vẽ đang hoãn (đừng để bấm Lưu trước khi vẽ kịp)
     if (pickingRef.current) return;   // đang point-pick → giữ focus, chưa commit
-    editUndoRef.current = null;       // hết phiên gõ — vào lại chính ô này lần sau phải ghi mốc MỚI
     const el = e.target as HTMLInputElement | HTMLTextAreaElement | null; const f = el?.getAttribute?.("data-f"); const tr = el?.closest?.("tr[data-row]");
+    const i = parseInt(tr?.getAttribute("data-row") || "0", 10);
+    const daGo = !!f && daGoO(i, f);  // đọc TRƯỚC khi xoá mốc: rời ô đỏ mà không gõ gì thì giữ cờ (L8)
+    editUndoRef.current = null;       // hết phiên gõ — vào lại chính ô này lần sau phải ghi mốc MỚI
     if (f && tr && el) {
-      const i = parseInt(tr.getAttribute("data-row") || "0", 10);
       const before = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
-      commitCell(i, f, el.value);
+      commitCell(i, f, el.value, !daGo);
       const after = JSON.stringify(items[i].formulas || null) + "|" + String((items[i] as Record<string, unknown>)[f]);
       if (before !== after) { recomputeAll(); onChange(); }
       // RỜI focus → vẽ ô về GIÁ TRỊ HIỂN THỊ (kết quả nếu là công thức, hoặc số gom nghìn) — vì onGridFocus

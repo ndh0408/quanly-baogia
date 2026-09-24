@@ -203,6 +203,19 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     dan(kho);
     expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
   });
+
+  it("khối trong app BẮT ĐẦU từ Hạng Mục (không nguyên hàng) dán vào ô SL của hàng nhóm: vẫn vào từ Hạng Mục", () => {
+    // Phản biện L13: bỏ hẳn việc ép về Hạng Mục thì khối "Hạng Mục → Đơn Giá" ghép theo vị trí từ cột SL
+    // — tên rơi vào SL (đọc ra 0), ĐVT/SL/ĐG lệch sang phải. Bản trước L13 làm đúng ca này.
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "name")); moRong("ArrowRight", 3);
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:X", "item:X"]);
+    expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice }, "tên hạng mục rơi vào ô SL").toEqual({ u: "m2", q: 2, p: 150000 });
+  });
 });
 
 describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {
@@ -253,5 +266,23 @@ describe("L16 — danh sách tên 1–2 chữ cái (S/M/L/XL) không bị hiểu
     vao(o(0, "name"));
     dan("A\tHCM\t\t\t\t95,000\t\t\r\n1\tHallway\tPP\tm2\t1\t95,000\t95,000\t\r\n");
     expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:HCM", "item:Hallway"]);
+  });
+
+  it("khối CHỈ gồm hàng nhóm chép từ file app xuất (A | Nhóm 1, B | Nhóm 2, đủ cột) vẫn dựng lại thành nhóm", () => {
+    // Phản biện L16: điều kiện "có hàng STT trống/số" loại mất ca này — 'A'/'B' rơi vào Hạng Mục,
+    // tên nhóm sang cột kế bên. Bản xuất (7 cột: STT…Ghi Chú) dài hơn số cột nhập (5) → có cột STT thừa.
+    const items = [mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("A\tNhóm 1\t\t\t\t\t\r\nB\tNhóm 2\t\t2\t\t\t\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm 1", "section:Nhóm 2"]);
+  });
+
+  it("hai cột 'cỡ ⇥ tên' ngắn (S | Áo thun, M | Áo thun) KHÔNG bị coi là các nhóm", () => {
+    const items = [mk({}), mk({})];
+    const o = moLuoi(items);
+    vao(o(0, "name"));
+    dan("S\tÁo thun\r\nM\tÁo thun\r\n");
+    expect(items.map((x) => `${x.kind}:${x.name}:${x.unit}`)).toEqual(["item:S:Áo thun", "item:M:Áo thun"]);
   });
 });
