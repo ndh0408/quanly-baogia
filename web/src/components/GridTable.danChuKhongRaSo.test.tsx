@@ -129,3 +129,38 @@ describe("dán khoảng số vào cột số → 0 + cảnh báo, không ghép t
     expect(baoKhongSo()).toHaveLength(1);
   });
 });
+
+// Soát toàn diện đợt 5 (d5-luoi 4): BỘI SỐ tiếng Việt không được nhân — Đơn Giá "1.5tr" dán vào ra 1,5, "500k"
+// ra 500. Số KHÁC 0 nên không cảnh báo nào bắt. Nay nhân (tr/triệu ×1.000.000, k/nghìn/ngàn ×1.000) và báo MỘT
+// toast "đã hiểu …" cho cả lượt dán để người dùng soát lại.
+//   ĐÃ ĐO (460b8b1): "1.5tr" → 1,5; khối "1,5k ⇥ (500k)" → SL 1,5, Đơn Giá −500; không toast.
+describe("dán '1.5tr' / '500k' vào cột số → nhân đúng + báo 'đã hiểu'", () => {
+  const baoBoiSo = () => toasts().filter((t) => /đã hiểu/i.test(t));
+
+  it("một ô Đơn Giá '1.5tr' → 1.500.000 + báo 'đã hiểu \"1.5tr\" = 1.500.000'", () => {
+    const items = [mk({ name: "A" })];
+    moLuoi(items);
+    dan(0, "unitPrice", "1.5tr");
+    expect(items[0].unitPrice).toBe(1_500_000);
+    expect(baoBoiSo()).toHaveLength(1);
+    expect(baoBoiSo()[0]).toContain('"1.5tr" = 1.500.000');
+  });
+
+  it("khối SL '1,5k' ⇥ Đơn Giá '(500k)' → 1.500 / −500.000 + MỘT báo nêu '2 ô'", () => {
+    const items = [mk({ name: "A" })];
+    moLuoi(items);
+    dan(0, "quantity", "1,5k\t(500k)");
+    expect([items[0].quantity, items[0].unitPrice]).toEqual([1500, -500_000]);
+    expect(baoBoiSo()).toHaveLength(1);
+    expect(baoBoiSo()[0]).toMatch(/2 ô/);
+    expect(baoKhongSo()).toEqual([]);
+  });
+
+  it("không báo cho chữ không phải bội số: SL '1.5kg' = 1,5; Đơn Giá '1.500.000'", () => {
+    const items = [mk({ name: "A" })];
+    moLuoi(items);
+    dan(0, "quantity", "1.5kg\t1.500.000");
+    expect([items[0].quantity, items[0].unitPrice]).toEqual([1.5, 1_500_000]);
+    expect(baoBoiSo()).toEqual([]);
+  });
+});

@@ -4,7 +4,7 @@ import { toast, useEscClose, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { evalFormula, type FormulaRefs } from "../lib/formula";
 import { type ItemK, nextK, autoGrow, chuaDoCao, caretIndexAtPoint, dangGoIME } from "../lib/gridShared";
-import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, laPhanTram, chuKhongRaSo, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
+import { parseClipboardTSV, cellsToTSV, cellsToHTML, parseLooseNumber, parseLooseDecimal, suyQuyUocSo, parseTheoQuyUoc, khopQuyUoc, giaTriGocTuHtml, quyUocTheoGiaTriGoc, soMoHoNghin, khopCotThanhTien, laPhanTram, chuKhongRaSo, coBoiSo, type QuyUocSo, reconstructExportRows, looksLikeExportPaste, isHeaderRow, headerToRoles, retargetPastedFormulas, shiftFormulaRefs, adjustRefsForRowEdit } from "../lib/clipboard";
 import { loadCatalog, searchEntries, dimLabel, fillItemFromEntry, type VenueEntry } from "../lib/venueCatalog";
 import { VenuePicker } from "./VenuePicker";
 import { AnchoredPanel } from "./AnchoredPanel";
@@ -71,7 +71,7 @@ export type GridTableProps = {
 
 type Addr = { row: number; field: string; L: string };
 /** Cảnh báo gom trong MỘT lượt dán (xem pasteCellVal) — onPaste báo một lần khi dán xong. */
-type BaoDan = { moHo: string[]; khongSo: string[] };
+type BaoDan = { moHo: string[]; khongSo: string[]; boiSo: [string, number][] };
 const MULTILINE = new Set(["name", "detail", "notes", "internalNote"]);
 const FN_LIST = ["SUM", "PRODUCT", "AVERAGE", "AVG", "MIN", "MAX", "ROUND", "ROUNDUP", "ROUNDDOWN", "INT", "ABS", "CEILING", "FLOOR"];
 const REF_COLORS = ["#1f7a3d", "#15803d", "#2e7d32", "#4d7c0f", "#0b7a4b", "#3d8b37"];
@@ -1317,9 +1317,10 @@ function GridTableInner(props: GridTableProps) {
     if (moHo && soMoHoNghin(v)) moHo.push(v.trim());
     return parseLooseDecimal(v);
   };
-  // bao: gom cảnh báo của CẢ lượt dán để onPaste báo một lần — moHo (ô SL/Ngày mơ hồ, grid#8) và khongSo
+  // bao: gom cảnh báo của CẢ lượt dán để onPaste báo một lần — moHo (ô SL/Ngày mơ hồ, grid#8), khongSo
   // (ô chữ ở cột số đọc ra 0 — chuKhongRaSo, cùng luật với cảnh báo dòng của bộ nhập Excel; soát toàn diện
-  // đợt 5: "ĐG1.500.000", "Liên hệ" dán vào Đơn Giá từng về 0 im lặng).
+  // đợt 5: "ĐG1.500.000", "Liên hệ" dán vào Đơn Giá từng về 0 im lặng) và boiSo (ô "1.5tr" / "500k" đã được
+  // NHÂN theo hậu tố bội số — báo "đã hiểu …" để người dùng soát lại, đợt 5).
   const pasteCellVal = (i: number, f: string, val: string, dRow = 0, dCol = 0, noiBo = false, quyUoc: QuyUocSo | null = null, bao?: BaoDan) => {
     const it = items[i] as Record<string, unknown>;
     boCoO(it, f);   // nội dung mới thay hẳn ô cũ — cờ đỏ cũ không còn nghĩa
@@ -1334,7 +1335,11 @@ function GridTableInner(props: GridTableProps) {
     }
     if (it.formulas && (it.formulas as Record<string, string>)[f]) delete (it.formulas as Record<string, string>)[f];
     it[f] = NUMERIC.has(f) ? (val.trim() === "" ? 0 : parseSoDan(f, val, noiBo, quyUoc, bao?.moHo)) : (MULTILINE.has(f) ? val : val.trim().replace(/\s+/g, " "));
-    if (bao && NUMERIC.has(f) && chuKhongRaSo(val, Number(it[f]) || 0)) bao.khongSo.push(val.trim());
+    if (bao && NUMERIC.has(f)) {
+      const n = Number(it[f]) || 0;
+      if (chuKhongRaSo(val, n)) bao.khongSo.push(val.trim());
+      else if (n && coBoiSo(val)) bao.boiSo.push([val.trim(), n]);
+    }
     // SL là PHẦN TRĂM ("12,5%" → 0,125): Excel tính Thành Tiền theo đúng 12,5%, còn SL thường bị làm tròn
     // 1 số lẻ (0,1) → lệch tiền. Bật cờ SL chính xác (4 số lẻ) — đúng nghĩa cờ này: dòng Excel ngoài có
     // Thành Tiền tính theo số gốc (L15). "10%" = 0,1 vốn đã đủ 1 số lẻ thì không cần.
@@ -1395,8 +1400,8 @@ function GridTableInner(props: GridTableProps) {
     const quGoc = (r: number, c: number) => quyUocTheoGiaTriGoc(rows[r]?.[c] ?? "", goc?.[r]?.[c]);
     // Ô SL/Ngày vẫn mơ hồ sau mọi cách phân định (không HTML, không tín hiệu khối) → đọc thập phân
     // như GRID-01 đã chọn, nhưng BÁO để người dùng Ctrl+Z nếu ý là hàng nghìn.
-    const bao: BaoDan = { moHo: [], khongSo: [] };
-    const { moHo, khongSo } = bao;
+    const bao: BaoDan = { moHo: [], khongSo: [], boiSo: [] };
+    const { moHo, khongSo, boiSo } = bao;
     const baoSoDan = () => {
       if (moHo.length) {
         const v = moHo[0], thapPhan = parseLooseDecimal(v).toLocaleString("vi-VN", { maximumFractionDigits: 6 });
@@ -1411,6 +1416,12 @@ function GridTableInner(props: GridTableProps) {
         toast(khongSo.length === 1
           ? `⚠️ Ô dán "${v}" không đọc được số — đã để trống, cần nhập lại`
           : `⚠️ ${khongSo.length} ô dán vào cột số không đọc được số (vd "${v}") — đã để trống, cần nhập lại`, "error");
+      }
+      if (boiSo.length) {
+        const [v, n] = boiSo[0], soHieu = n.toLocaleString("vi-VN", { maximumFractionDigits: 4 });
+        toast(boiSo.length === 1
+          ? `Đã hiểu "${v}" = ${soHieu} — kiểm tra lại nếu không đúng ý`
+          : `${boiSo.length} ô có hậu tố bội số đã được nhân (vd đã hiểu "${v}" = ${soHieu}) — kiểm tra lại nếu không đúng ý`, "info");
       }
     };
     const isGrid = rows.length > 1 || (rows[0] && rows[0].length > 1);
@@ -1506,12 +1517,15 @@ function GridTableInner(props: GridTableProps) {
       // chính số liệu trong khối, thay vì mặc định nó trùng bố cục sheet đích — xem lib/doanBoCot.ts.
       const roles = hdrRoles || doanBoCot(rows, ADDR.map((c) => c.f));
       const rebuilt = reconstructExportRows(rows, roles, NUMERIC, numberSubs);
-      // Ô chữ ở cột số đọc ra 0 → gom vào khongSo như đường dán thường. Dòng thông tin không mang số; dòng
+      // Ô chữ ở cột số đọc ra 0 / ô bội số đã nhân → gom như đường dán thường. Dòng thông tin không mang số; dòng
       // nhóm chỉ xét SL (Đơn Giá nhóm là tổng app tự cộng lại) — cùng luật với cảnh báo dòng của bộ nhập Excel.
       rebuilt.forEach((b, k) => roles.forEach((role, c) => {
         if (!NUMERIC.has(role) || b.kind === "info" || ((b.kind === "section" || b.kind === "subsection") && role !== "quantity")) return;
         const v = String(rows[k]?.[c] ?? "");
-        if (!v.trim().startsWith("=") && chuKhongRaSo(v, Number(b[role]) || 0)) khongSo.push(v.trim());
+        if (v.trim().startsWith("=")) return;
+        const n = Number(b[role]) || 0;
+        if (chuKhongRaSo(v, n)) khongSo.push(v.trim());
+        else if (n && coBoiSo(v)) boiSo.push([v.trim(), n]);
       }));
       // Công thức trong khối mang địa chỉ Ô THEO FILE EXCEL → TỰ DỊCH sang toạ độ web (verify bằng
       // Thành Tiền của khối); ca không chắc → giữ công thức gốc + cờ _fxWarn (ô ĐỎ để sửa tay).

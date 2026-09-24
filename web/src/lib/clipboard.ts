@@ -97,6 +97,26 @@ const laKhoangSo = (s: string): boolean => {
   return false;
 };
 
+// BỘI SỐ TIẾNG VIỆT (soát toàn diện đợt 5): bộ lọc ký tự bỏ chữ nên "1.5tr" đọc 1,5, "500k" đọc 500, "2 triệu"
+// đọc 2 — hụt cả nghìn / triệu lần mà ra số KHÁC 0 nên không cảnh báo nào bắt. Hậu tố đứng NGAY sau số (có
+// hoặc không dấu cách) và không dính chữ cái phía sau: "tr" / "triệu" ×1.000.000, "k" / "nghìn" / "ngàn"
+// ×1.000; "kg", "km", "trọn gói", "tháng" không phải. Chỉ nhận khi ô có đúng MỘT con số sau bước bỏ cụm của L17
+// ("ĐG1.5tr" vẫn là 0 — không đoán; "1 triệu 2" hai số → giữ cách đọc cũ). Số trước hậu tố đọc bằng CHÍNH
+// hàm đang gọi (Đơn Giá "1.200k" = 1.200 × 1.000, SL "1,5k" = 1,5 × 1.000). Nơi gọi báo "đã hiểu …" (coBoiSo).
+// PHẢI khớp bản port ở src/excelImport.ts.
+const BOI_SO = /(\d)\s*(triệu|tr|nghìn|ngàn|k)(?!\p{L})/iu;
+const HE_SO_BOI: Record<string, number> = { "triệu": 1e6, tr: 1e6, "nghìn": 1e3, "ngàn": 1e3, k: 1e3 };
+const tachBoiSo = (s: string): { s: string; heSo: number } | null => {
+  const t = boCumChuSo(String(s ?? "").normalize("NFC"));
+  const m = BOI_SO.exec(t);
+  if (!m || (t.match(SO_TOKEN) || []).length !== 1) return null;
+  const con = t.slice(0, m.index + 1) + t.slice(m.index + m[0].length);
+  return BOI_SO.test(con) ? null : { s: con, heSo: HE_SO_BOI[m[2].toLowerCase()] };   // "1 tr tr": không nhân hai lần
+};
+const nhanBoiSo = (n: number, heSo: number) => Number((n * heSo).toPrecision(12));   // 1,1 × 1e6 không kéo đuôi dấu phẩy động
+/** Ô được đọc qua hậu tố bội số ("1.5tr", "(500k)") — nơi gọi báo "đã hiểu …" cho người dùng soát lại. */
+export const coBoiSo = (s: string): boolean => !laKhoangSo(s) && tachBoiSo(tachNgoacKeToan(String(s ?? "")).s) != null;
+
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (soát toàn diện đợt 4): luật L17 không đoán nên "ĐG1.500.000", "SL12", "12m2",
 // "1e3" đọc 0 — đúng, nhưng phải NÓI ra: bộ nhập Excel không có cảnh báo dòng nào cho ca này, tệp không có
 // cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Sau bước bỏ cụm mà còn
@@ -120,6 +140,7 @@ export function parseLooseNumber(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseNumber(bs.s), bs.heSo);
   s = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!s || s === "-") return 0;
   if (s.includes(",") && s.includes(".")) {
@@ -142,6 +163,7 @@ export function parseLooseDecimal(s: string): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseDecimal(bs.s), bs.heSo);
   let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
@@ -217,6 +239,7 @@ export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseTheoQuyUoc(bs.s, qu), bs.heSo);
   let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
