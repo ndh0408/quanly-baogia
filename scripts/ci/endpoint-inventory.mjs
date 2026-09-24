@@ -452,6 +452,7 @@ if (args.includes("--check-guards")) {
     ["GET /api/health", "probe cho load balancer"],
     ["GET /metrics", "Prometheus — chốt riêng bằng METRICS_TOKEN trong chính handler"],
     ["GET /api/csrf-token", "cấp mã CSRF cho phiên hiện tại"],
+    ["GET /api/phien-ban", "bản giao diện đang phát (tên tệp JS vốn công khai trong index.html) để web báo có bản mới; cố ý đặt TRƯỚC cổng phiên"],
     ["GET /app2", "trả index.html của SPA"],
     ["GET /app2/*", "trả index.html của SPA"],
     ["GET *", "catch-all trả index.html của SPA"],

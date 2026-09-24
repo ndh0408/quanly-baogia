@@ -74,7 +74,10 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       saveRef.current?.();
     };
     window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    // "Lưu rồi tải bản mới" (dải báo bản mới, ../lib/phienBan.ts luuRoiBao): cùng save() của Ctrl+S.
+    const luuChoBanMoi = (e: Event) => { const d = (e as CustomEvent<{ hua: Promise<unknown>[] }>).detail; if (saveRef.current && d?.hua) d.hua.push(Promise.resolve(saveRef.current())); };
+    window.addEventListener("phien-ban:luu", luuChoBanMoi);
+    return () => { window.removeEventListener("keydown", h); window.removeEventListener("phien-ban:luu", luuChoBanMoi); };
   }, []);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");

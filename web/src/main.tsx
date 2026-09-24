@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
+import { ThongBaoBanMoi } from "./components/PhienBan";
 import { queryClient, RealtimeBridge } from "./lib/query";
 import { installSafeModalBackdropClicks } from "./lib/safeModalBackdrop";
 import { installGlobalFocusTrap, dungToastHost } from "./lib/ui";
@@ -31,6 +32,8 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <RealtimeBridge />
       <App />
+      {/* Báo "có bản mới" sau deploy — ngoài <App/> để có mặt ở MỌI màn, kể cả đăng nhập / lỗi khởi động. */}
+      <ThongBaoBanMoi />
     </QueryClientProvider>
   </StrictMode>
 );
