@@ -23,6 +23,14 @@ import { KhoiSheet } from "./KhoiSheet";
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
 
+/** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
+ *  danh sách). MỘT luật cho lưới, tổng và đường Lưu (QuoteEditor / AccountHnView dọn `days` theo nó — L64). */
+export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[], companyId?: number): EditorTemplate | undefined {
+  const ds0 = templates.filter((x) => x.companyId === companyId);
+  const ds = ds0.length ? ds0 : templates;
+  return templates.find((x) => x.id === (t.templateId || ds[0]?.id)) || ds[0];
+}
+
 export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
   tables: HnTable[];
@@ -61,15 +69,11 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   const tplList0 = templates.filter((t) => t.companyId === companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
-  const tplOf = (t: HnTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
+  const tplOf = (t: HnTable) => mauBangHn(t, templates, companyId);
 
-  // Dọn `days` cũ cho bảng dùng mẫu KHÔNG có cột Số Ngày — nếu không, tổng phồng lên vì
-  // extraTableSum nhân thêm số ngày của dữ liệu cũ (đối xứng với ExtraTables).
-  if (editable) {
-    let cleaned = false;
-    tables.forEach((x) => { if (!tplOf(x)?.layout?.hasDays) (x.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } }); });
-    if (cleaned) onMarkDirty();
-  }
+  // L64 (đợt 3): KHÔNG còn xoá `days` lúc vẽ khi bảng dùng mẫu không ngày — đổi mẫu qua lại là mất số
+  // Ngày vĩnh viễn, và mở bảng còn days cũ là bị coi "đã sửa". Tổng chỉ nhân ngày khi mẫu CÓ ngày (xem
+  // `tongBang`); đường Lưu của QuoteEditor / AccountHnView gửi days: null cho mẫu không ngày.
 
   let ai = active;
   if (ai >= tables.length) ai = tables.length - 1;
@@ -92,7 +96,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
          mắt đang nhìn, không tốn thêm khối nào.
      Dòng của GridTable tắt ở cả hai ca (`sheetTotalLine={false}`). */
   const ID_LUOI = "hn";
-  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable));
+  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable, !!tplOf(x)?.layout?.hasDays));
   const tong = tongBang.reduce((a, b) => a + b, 0);
   const hienTongTab = tables.length > 1;
 

@@ -408,6 +408,36 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     expect(p.sheets[0].templateId).toBe(1);
     expect(p.sheets[0].items[0].days).toBeNull();
   });
+
+  // Đợt 3 — phần bảng nội bộ / Hà Nội: bước dọn `days` lúc VẼ (ExtraTables / HnTables) đã bỏ để đổi mẫu qua
+  // lại không mất số Ngày. Máy chủ (extraTableSum, tổng đổ sang Quản lý dự án) nhân days bất kể mẫu, nên
+  // Lưu PHẢI tự gửi days: null cho bảng dùng mẫu không ngày — cả bảng HN lẫn bảng nội bộ.
+  it("Lưu: bảng HN và bảng nội bộ dùng mẫu KHÔNG ngày còn days cũ → gửi days: null; mẫu có ngày giữ days", async () => {
+    const hangNgay = (over: Record<string, unknown> = {}) => ({ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid: "x", ...over });
+    h.getQuote.mockImplementationOnce(async () => baoGia({
+      hnTables: [{ name: "HN không ngày", templateId: 1, groupSubtotal: false, items: [hangNgay({ rid: "h1" })] }, { name: "HN có ngày", templateId: 2, groupSubtotal: false, items: [hangNgay({ rid: "h2" })] }],
+      sheets: [trang(101, { extraTables: [{ category: "hcm", name: "HCM", templateId: 1, groupSubtotal: false, items: [hangNgay({ rid: "e1", approved: true })] }, { category: "khach", name: "KH", templateId: 2, groupSubtotal: false, items: [hangNgay({ rid: "e2", approved: true })] }] })],
+    }));
+    await moEditor();
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[]; sheets: { extraTables: { items: { days: unknown }[] }[] }[] };
+    expect(p.hnTables.map((t) => t.items[0].days), "bảng HN").toEqual([null, 3]);
+    expect(p.sheets[0].extraTables.map((t) => t.items[0].days), "bảng nội bộ").toEqual([null, 3]);
+  });
+
+  it("phần HN đã chốt mà người mở KHÔNG quản phần HN → Lưu gửi bảng HN NGUYÊN VĂN (máy chủ so với CSDL — dọn days là 409 cả lần Lưu)", async () => {
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "submitted", hnTables: [{ name: "HN không ngày", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid: "h1" }] }] }));
+    hop = document.createElement("div"); document.body.appendChild(hop);
+    root = createRoot(hop);
+    const khongQuanHn = { ...ME, permissions: ME.permissions.filter((x) => x !== "quote:hn:manage") };
+    await act(async () => { root!.render(<QuoteEditorPage me={khongQuanHn} quoteId={11} isNew={false} />); });
+    await cho(10);
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[] };
+    expect(p.hnTables[0].items[0].days).toBe(3);
+  });
 });
 
 // X2: hộp thanh toán (route /pay bump updatedAt) gọi onQuoteTouched(mốc MỚI) và editor nhận thẳng mốc đó.

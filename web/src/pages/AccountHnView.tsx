@@ -4,7 +4,7 @@ import { toast, confirmModal } from "../lib/ui";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { extraTableSum } from "../components/ExtraTables";
-import { HnTables, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap } from "../lib/localDraft";
 
@@ -182,12 +182,13 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
   const tplList0 = templates.filter((x) => x.companyId === q.companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
-  const tplOf = (id?: number) => templates.find((x) => x.id === (id || defTplId)) || tplList[0];
+  const tplOf = (id?: number) => mauBangHn({ templateId: id }, templates, q.companyId);
   const usesDaysOf = (id?: number) => !!tplOf(id)?.layout?.hasDays;
   const addrDetailOf = (id?: number) => !!(tplOf(id)?.layout?.reserveDetail ?? tplOf(id)?.layout?.hasDetail);
   const newSheetTemplateId = (code?: string | null) => (code ? templates.find((x) => x.code === code)?.id : undefined) ?? hnTables[0]?.templateId ?? defTplId;
 
-  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never), 0);
+  // L64: chỉ nhân Số Ngày khi mẫu của bảng CÓ ngày — cùng luật với tổng đầu khối của HnTables.
+  const tong = hnTables.reduce((a, t) => a + extraTableSum(t as never, usesDaysOf(t.templateId)), 0);
 
   // NẠP TỪ EXCEL — dùng CHUNG modal với trình soạn báo giá (xem trước từng tab rồi mới nạp).
   // Bảng HN có đúng hình dạng { name, templateId, groupSubtotal, items } mà modal cần, nên truyền
@@ -225,10 +226,15 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     setSaving(true); savingRef.current = true;
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
-      const goi = hnTables.map((t) => ({
-        name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
-        items: (t.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
-      }));
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — máy chủ (tổng HN đổ sang Quản lý dự án) nhân
+      // days bất kể mẫu. Việc dọn này trước đây làm ngay LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
+      const goi = hnTables.map((t) => {
+        const coNgay = usesDaysOf(t.templateId);
+        return {
+          name: t.name, templateId: t.templateId, groupSubtotal: !!t.groupSubtotal,
+          items: (t.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+        };
+      });
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       // Đã lên máy chủ → bản nháp hết lý do tồn tại (giữ lại là lần mở sau hỏi khôi phục thứ cũ hơn).

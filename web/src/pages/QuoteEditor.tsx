@@ -6,7 +6,7 @@ import * as M from "../lib/quoteMath";
 import { type ItemK, nextK } from "../lib/gridShared";
 import { GridTable } from "../components/GridTable";
 import { ExtraTables } from "../components/ExtraTables";
-import { HnTables, type HnTable } from "../components/HnTables";
+import { HnTables, mauBangHn, type HnTable } from "../components/HnTables";
 import { ImportExcelModal, NEW_SHEET, type ImportApplyPayload } from "../components/ImportExcelModal";
 import { AnchoredPanel } from "../components/AnchoredPanel";
 import { sapXepTheoFile } from "../lib/importApply";
@@ -768,10 +768,18 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       };
       // Bảng Hà Nội: dọn `_k` (khoá React nội bộ) y như hạng mục của lưới chính. Gửi kèm cả khi
       // rỗng — người dùng xoá hết bảng HN thì server phải ghi lại mảng rỗng, không phải bỏ qua.
-      payload.hnTables = hnTables.map((x) => ({
-        ...x, _k: undefined,
-        items: (x.items || []).map((it) => { const o = { ...it }; delete (o as ItemK)._k; return o; }),
-      })).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (máy chủ nhân days bất kể mẫu) — bước này
+      // trước đây làm ngay LÚC VẼ trong HnTables nên đổi mẫu qua lại là mất số Ngày. CHỈ khi phần HN sửa
+      // được ở đây (đúng điều kiện bước dọn cũ): phần HN đã chốt thì máy chủ so NGUYÊN VĂN với CSDL
+      // (chotHnTables) — dọn thêm là lệch, cả lần Lưu báo giá ăn 409.
+      const hnSuaDuoc = coScope("hanoi") && !hnKhoa;
+      payload.hnTables = hnTables.map((x) => {
+        const coNgay = !hnSuaDuoc || !!mauBangHn(x, templates, q.companyId)?.layout?.hasDays;
+        return {
+          ...x, _k: undefined,
+          items: (x.items || []).map((it) => { const o = { ...it, days: coNgay ? it.days : null }; delete (o as ItemK)._k; return o; }),
+        };
+      }).map((x) => { const o = { ...x }; delete (o as { _k?: number })._k; return o; });
       delete payload._new; delete payload._activeSheet;
       // Khóa lạc quan: gửi mốc updatedAt đã tải → server chặn ghi đè nếu người khác vừa lưu (409).
       // Sau khi lưu, q được refresh từ `saved` (bên dưới) nên base luôn mới cho lần lưu kế.

@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-const MAU = [{ id: 1, code: "gn", name: "GN (có ngày)", companyId: 7, layout: { hasDays: true } }];
+// Mẫu 2 (không ngày) để kiểm L64 — mẫu mặc định (đầu danh sách) vẫn là mẫu 1 như các bài cũ.
+const MAU = [{ id: 1, code: "gn", name: "GN (có ngày)", companyId: 7, layout: { hasDays: true } }, { id: 2, code: "gnk", name: "GN (không ngày)", companyId: 7, layout: { hasDays: false } }];
 const baoGia = (over: Record<string, unknown> = {}) => ({
   id: 11, quoteNumber: "GN26D011", title: "Giao HN", companyId: 7, hnStatus: "assigned",
   updatedAt: "2026-09-16T00:00:00.000Z", hnRev: "a".repeat(32),
@@ -372,5 +373,45 @@ describe("L63 — xem thử quyền không đụng bản nháp giá HN thật", 
     await act(async () => { nutLuu().click(); });
     await cho(20);
     expect(giaTrongNhap(KHOA)).toBe(7_700_000);
+  });
+});
+
+// L64 (đợt 3, phần bảng Hà Nội): HnTables từng xoá `days` LÚC VẼ khi bảng dùng mẫu không ngày — đổi mẫu qua
+// lại là mất số Ngày. Bước dọn nay dời sang lúc Lưu (máy chủ nhân days bất kể mẫu), và tổng cuối màn chỉ
+// nhân ngày khi mẫu CÓ ngày.
+describe("L64 — bảng Hà Nội đổi mẫu qua lại không mất số Ngày", () => {
+  const hang = () => ({ kind: "item", name: "Khung backdrop", quantity: 2, unitPrice: 1_000_000, days: 3 });   // MỚI mỗi bài: bản cũ bị dọn days tại chỗ
+  const theCuoi = () => host!.querySelector(".ahn-grand-card")?.textContent || "";
+  const chonMau = async (id: number) => {
+    act(() => {
+      const sel = host!.querySelector("select.extra-tpl") as HTMLSelectElement;
+      sel.value = String(id); sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await cho(200);                                                  // mark() gom nhịp vẽ 120ms
+  };
+
+  it("có ngày (6.000.000) → không ngày (2.000.000) → có ngày: vẫn 3 ngày; Lưu lúc ở mẫu không ngày gửi days: null", async () => {
+    h.getQuote = async () => baoGia({ hnTables: [{ name: "Giá thuê HN", templateId: 1, groupSubtotal: false, items: [hang()] }] });
+    await mo();
+    expect(theCuoi()).toContain("6.000.000");
+    await chonMau(2);
+    expect(theCuoi(), "mẫu không ngày mà tổng vẫn nhân ngày").toContain("2.000.000");
+    await chonMau(1);
+    expect(theCuoi(), "đổi mẫu qua lại làm mất số Ngày").toContain("6.000.000");
+    await chonMau(2);
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    const goi = (api.saveHn as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as { templateId: number; items: { days: unknown }[] }[];
+    expect(goi[0].templateId).toBe(2);
+    expect(goi[0].items[0].days, "máy chủ nhân days bất kể mẫu — Lưu phải dọn").toBeNull();
+  });
+
+  it("mở bảng mẫu KHÔNG ngày còn days cũ → tổng không nhân ngày, không bị coi là đã sửa", async () => {
+    h.getQuote = async () => baoGia({ hnTables: [{ name: "Giá thuê HN", templateId: 2, groupSubtotal: false, items: [hang()] }] });
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await mo();
+    await cho(200);
+    expect(theCuoi()).toContain("2.000.000");
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "mới mở đã bật cờ chưa lưu").toBe(false);
   });
 });
