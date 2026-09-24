@@ -749,15 +749,18 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; }
 
     // Ô SỐ mà lại là NGÀY THÁNG (khách gõ nhầm ô) → numOf trả 0, phải nói rõ để không âm thầm mất tiền.
+    // Số Ngày và SL của NHÓM về 0 / trống thì app tính ×1 — câu báo nói đúng con số app dùng, như cảnh báo ô
+    // CHỮ bên dưới (soát toàn diện đợt 5; trước đây mọi ô đều ghi "đã để 0").
+    const deLaiO = (role: string) => (role === "days" || (isGroup && role === "quantity") ? "đã bỏ trống (tính như 1)" : "đã để 0");
     for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"]] as const) {
-      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — đã để 0, cần nhập lại`);
+      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — ${deLaiO(role)}, cần nhập lại`);
     }
     // Ô số đang LỖI trong Excel → numOf đọc thành 0. Nói rõ, đừng để lẫn với ô trống (XLSX-08).
     if (kind !== "info") {
       for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["_amount", "Thành Tiền"]] as const) {
         if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
         const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
-        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — đã để 0, cần nhập lại`);
+        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — ${deLaiO(role)}, cần nhập lại`);
       }
       // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
       // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
@@ -766,8 +769,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
         if (isGroup && role !== "quantity") continue;
         const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
-        const deLai = isGroup || role === "days" ? "đã bỏ trống (tính như 1)" : "đã để 0";
-        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLai}, cần nhập lại`);
+        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLaiO(role)}, cần nhập lại`);
         // Bội số "1.5tr" / "500k" đã được NHÂN (soát toàn diện đợt 5) — nói ra con số app hiểu để người nạp soát lại.
         else if (n && coBoiSo(t)) warn.push(`Ô ${vn}: đã hiểu “${t.length > 40 ? t.slice(0, 40) + "…" : t}” = ${n.toLocaleString("vi-VN")}`);
       }

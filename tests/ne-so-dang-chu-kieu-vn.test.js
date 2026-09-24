@@ -457,3 +457,33 @@ describe("đợt 5 việc 4: hậu tố bội số 'tr' / 'triệu' / 'k' / 'ngh
     expect(s.items[0].warn).toEqual(["Ô Đơn Giá: đã hiểu “1.5tr” = 1.500.000"]);
   });
 });
+
+// Soát toàn diện đợt 5 (d5-luoi 5): cảnh báo ô NGÀY THÁNG và ô LỖI Excel (XLSX-08) ghi "đã để 0" cho cả Số
+// Ngày và SL hàng NHÓM, trong khi app tính hai ô đó ×1 khi trống / 0 (Số Ngày trống = ×1; groupMult =
+// max(1, SL || 1)). Cùng lỗi câu chữ mà phản biện đợt 4 đã sửa cho ô CHỮ — câu báo phải nói đúng con số
+// app dùng. Dòng thường (SL / Đơn Giá) vẫn "đã để 0".
+//   ĐÃ ĐO (460b8b1): nhóm SL ngày tháng → "… NGÀY THÁNG, không phải số — đã để 0, cần nhập lại"; Số Ngày
+//   #REF! → "… đang LỖI #REF! trong Excel — đã để 0, cần nhập lại".
+describe("đợt 5 việc 5: ô NGÀY THÁNG / ô LỖI ở Số Ngày và SL hàng nhóm → câu báo 'tính như 1'", () => {
+  it("Số Ngày / SL nhóm → 'đã bỏ trống (tính như 1)'; SL dòng thường → vẫn 'đã để 0'", async () => {
+    const ngay = new Date("2026-08-01T00:00:00Z");
+    const s = await tep([
+      ["A", "Nhóm ngày tháng", "", ngay, "", ""],
+      ["1", "Nhân sự", "người", "2", ngay, "500.000"],
+      ["B", "Nhóm lỗi", "", { error: "#N/A" }, "", ""],
+      ["2", "Loa", "cái", "1", { error: "#REF!" }, "100.000"],
+      ["3", "Đèn", "cái", ngay, "1", "100.000"],
+      ["4", "Mic", "cái", { error: "#VALUE!" }, "1", "100.000"],
+    ], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"]);
+    const [nhomNgay, ns, nhomLoi, loa, den, mic] = s.items;
+    const w = (it) => (it.warn || []).join(" | ");
+    expect([nhomNgay.kind, nhomLoi.kind]).toEqual(["section", "section"]);
+    expect(w(nhomNgay)).toMatch(/Số Lượng đang là NGÀY THÁNG.*đã bỏ trống \(tính như 1\)/);
+    expect(w(ns)).toMatch(/Số Ngày đang là NGÀY THÁNG.*đã bỏ trống \(tính như 1\)/);
+    expect(w(nhomLoi)).toMatch(/Số Lượng đang LỖI #N\/A.*đã bỏ trống \(tính như 1\)/);
+    expect(w(loa)).toMatch(/Số Ngày đang LỖI #REF!.*đã bỏ trống \(tính như 1\)/);
+    for (const it of [nhomNgay, ns, nhomLoi, loa]) expect(w(it), it.name).not.toMatch(/đã để 0/);
+    expect(w(den)).toMatch(/Số Lượng đang là NGÀY THÁNG.*đã để 0/);
+    expect(w(mic)).toMatch(/Số Lượng đang LỖI #VALUE!.*đã để 0/);
+  });
+});
