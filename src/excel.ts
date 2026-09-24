@@ -200,6 +200,15 @@ for (const k of ["dam", "thuong"] as const) {
   for (const [px, chuoi] of Object.entries(RONG_TNR11_PX[k])) for (const ch of chuoi) BANG_RONG[k].set(ch, Number(px));
 }
 const HE_SO_AN_TOAN = 1.05;   // biên cho máy khác DPI/bản Excel khác — xem đo đạc ở trên
+// ── HỆ SỐ RIÊNG CHO TIÊU ĐỀ CỠ LỚN (L44) ─────────────────────────────────────────────────────
+// Bảng trên đo ở cỡ 11 rồi nhân theo tỉ lệ cỡ chữ; ở cỡ 14/18 đậm nó ƯỚC LỐ vài phần trăm (nét
+// chữ cỡ 11 bị hint rộng ra), nên 1,05 làm tiêu đề bật wrap khi Excel vẫn vừa một dòng — hàng tiêu
+// đề nới gấp đôi mà chỉ chứa một dòng chữ. Đo Excel thật: 104 chuỗi × 8 vùng gộp tiêu đề (4 mẫu,
+// có/không cột ảnh) = 832 ca, mỗi ca đặt ô tạm rộng ĐÚNG số px của vùng gộp, bật wrap rồi AutoFit.
+// Hệ số NHỎ NHẤT mà mọi ca Excel cần hai dòng vẫn được bật wrap: cỡ 14 → 1,014; cỡ 18 → 0,98.
+// Chọn chừa ~2% trên đó: 1,035 và 1,0 — số ca wrap sớm giảm từ 23 xuống 10 (trên 292 ca một
+// dòng), 0 ca cắt chữ. Cỡ chưa đo giữ HE_SO_AN_TOAN.
+const HE_SO_TIEU_DE: Record<number, number> = { 14: 1.035, 18: 1.0 };
 const PX_MOI_DON_VI_COT = 7;  // 1 đơn vị bề rộng cột = chữ số '0' của font mặc định (Calibri 11 / Arial 10)
 // Bề rộng LƯU trong .xlsx (thứ ExcelJS đọc/ghi) ĐÃ GỒM 5px đệm của Excel: cột lưu 38 rộng đúng
 // 266px, còn Excel hiển thị "37,29". Phần chữ dùng được = 7 × bề rộng lưu − 5px đệm − 3px biên.
@@ -223,13 +232,13 @@ function rongKyTuPx(ch: string, dam: boolean): number {
  * (đậm hay thường). Mô phỏng lối ngắt tham lam của Excel: ngắt theo TỪ, từ dài hơn cả dòng mới cắt
  * cứng. Xuất ra cho test (tests/xl-cao-hang-theo-be-rong-chu.test.js đối chiếu với số đo Excel thật).
  */
-export function soDongKhiXuongHang(text: unknown, beRongCot: number, { dam = true, co = 11 }: { dam?: boolean; co?: number } = {}): number {
+export function soDongKhiXuongHang(text: unknown, beRongCot: number, { dam = true, co = 11, heSo = HE_SO_AN_TOAN }: { dam?: boolean; co?: number; heSo?: number } = {}): number {
   if (text == null || text === "") return 1;
   // Chữ TỔ HỢP (NFD: "ô" = "o" + U+0302) tính mỗi dấu là một ký tự lạ 15px, nên ước lượng gấp ~2
   // lần số dòng thật (đo Excel COM: cùng câu, NFC cần 4 dòng, NFD bị tính 8). Dựng sẵn về NFC
   // trước khi đo; dấu nào không có dạng dựng sẵn thì `rongKyTuPx` tính rộng 0.
   text = String(text).normalize("NFC");
-  const tiLe = ((Number(co) || 11) / 11) * HE_SO_AN_TOAN;
+  const tiLe = ((Number(co) || 11) / 11) * heSo;
   const doRong = (s: string) => { let px = 0; for (const ch of s) px += rongKyTuPx(ch, dam); return px * tiLe; };
   // Chặn dưới 4 chữ số: cột quá hẹp (hoặc bề rộng hỏng) không được làm vòng cắt-cứng chạy vô hạn.
   const moiDong = Math.max(4 * PX_MOI_DON_VI_COT, Math.trunc(PX_MOI_DON_VI_COT * beRongCot + 0.5) - DEM_EXCEL_PX - LE_O_PX);
@@ -728,7 +737,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   const fontDo = (addr: string, epDam = false) => {
     try { const f = ws.getCell(addr).font || {}; return { dam: epDam || !!f.bold, co: Number(f.size) || 11 }; } catch { return { dam: true, co: 11 }; }
   };
-  const wrapLines = (text: any, letter: any, beRongEp?: number | null, font?: { dam?: boolean; co?: number }) => {
+  const wrapLines = (text: any, letter: any, beRongEp?: number | null, font?: { dam?: boolean; co?: number; heSo?: number }) => {
     if (text == null || text === "") return 1;
     const mergedNameWidth = itemsCfg.removeDetail && letter === cols.name && cols.detail
       ? (colWidthOf(cols.name) || 12) + (colWidthOf(cols.detail) || 12)
@@ -827,7 +836,7 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
       const chu = typeof o.value === "string" ? o.value : "";
       const rong = beRongVungGop(c.title);
       const f = fontDo(c.title);
-      const soDong = chu && rong ? wrapLines(chu, null, rong, f) : 1;
+      const soDong = chu && rong ? wrapLines(chu, null, rong, { ...f, heSo: HE_SO_TIEU_DE[f.co] ?? HE_SO_AN_TOAN }) : 1;
       const r = parseInt(String(c.title).replace(/^[A-Z]+/, ""), 10);
       if (soDong > 1 && r) {
         datStyleRieng(o, (st) => ({ alignment: { ...(st.alignment || {}), wrapText: true, vertical: "middle" } }));
