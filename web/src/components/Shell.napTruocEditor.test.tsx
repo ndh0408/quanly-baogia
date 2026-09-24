@@ -54,7 +54,11 @@ afterEach(() => {
   if (root) act(() => root!.unmount());
   root = null; document.body.innerHTML = ""; location.hash = "";
   delete (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+  localStorage.clear();
 });
+// Gợi ý Shell ghi lại cho lần tải trang SAU: người đăng nhập gần nhất trên trình duyệt này có mở được
+// trình soạn đầy đủ không ("1"/"0"; không có = chưa ai đăng nhập hoặc đã đăng xuất).
+const GOI_Y = "quanly:moTrinhSoan";
 
 /** Nạp Shell TƯƠI (bộ nhớ module sạch) tại một hash — như một lần tải trang mới. */
 async function taiTrang(hash: string) {
@@ -72,7 +76,8 @@ function demKhungCho(hop: HTMLElement) {
 }
 
 describe("L72 — mở báo giá lần đầu không chờ khung xương khi chunk trình soạn đã về", () => {
-  it("F5 / link thẳng #/quotes/5: chunk nạp ngay lúc tải Shell (song song /auth/me) → lần dựng đầu là trình soạn", async () => {
+  it("F5 / link thẳng #/quotes/5 (lần trước trên trình duyệt này là người mở được trình soạn): chunk nạp ngay lúc tải Shell (song song /auth/me) → lần dựng đầu là trình soạn", async () => {
+    localStorage.setItem(GOI_Y, "1");
     const Shell = await taiTrang("#/quotes/5");
     await cho(0);   // ngoài đời: chunk về từ SW trong lúc chờ /api/auth/me (~250 ms)
     const hop = document.createElement("div"); document.body.appendChild(hop);
@@ -104,6 +109,48 @@ describe("L72 — mở báo giá lần đầu không chờ khung xương khi chu
     await act(async () => { location.hash = "#/quotes/7"; await new Promise((r) => setTimeout(r, 20)); });
     expect(hop.querySelector('[data-trang="editor"]')).not.toBeNull();
     expect(soLanNapEditor.n).toBeGreaterThan(0);
+  });
+
+  // Đợt soát 3: nạp theo hash ở cấp module chạy TRƯỚC khi biết `me`, nên trước đây mọi ai mở link
+  // #/quotes/:id — account HN, tài khoản chi phí, người chưa đăng nhập — đều tải chunk trình soạn
+  // (~46 kB + ExtraTables ~96 kB) mà không bao giờ dùng.
+  it("account HN mở link thẳng #/quotes/5: KHÔNG tải chunk trình soạn (lúc tải trang lẫn sau khi vào view HN)", async () => {
+    localStorage.setItem(GOI_Y, "0");   // lần trước trên trình duyệt này: chính account HN
+    const Shell = await taiTrang("#/quotes/5");
+    await cho(0);
+    expect(soLanNapEditor.n, "nạp chunk trình soạn ngay lúc tải trang").toBe(0);
+    const hop = document.createElement("div"); document.body.appendChild(hop);
+    root = createRoot(hop);
+    await act(async () => { root!.render(<Shell me={HN} onMe={() => {}} onPreview={() => {}} />); });
+    await cho(20);
+    expect(soLanNapEditor.n).toBe(0);
+    expect(localStorage.getItem(GOI_Y)).toBe("0");
+  });
+
+  it("chưa đăng nhập / đã đăng xuất (không có gợi ý) mà tải trang ở #/quotes/5: KHÔNG tải chunk trình soạn", async () => {
+    await taiTrang("#/quotes/5");
+    await cho(0);
+    expect(soLanNapEditor.n).toBe(0);
+  });
+
+  it("Shell ghi gợi ý cho lần tải sau: người mở được trình soạn → '1', account HN → '0'", async () => {
+    const Shell = await taiTrang("#/list");
+    const hop = document.createElement("div"); document.body.appendChild(hop);
+    root = createRoot(hop);
+    await act(async () => { root!.render(<Shell me={SALES} onMe={() => {}} onPreview={() => {}} />); });
+    expect(localStorage.getItem(GOI_Y)).toBe("1");
+    await act(async () => { root!.render(<Shell me={HN} onMe={() => {}} onPreview={() => {}} />); });
+    expect(localStorage.getItem(GOI_Y)).toBe("0");
+  });
+
+  it("Đăng xuất xoá gợi ý — màn đăng nhập sau đó không tải chunk trình soạn cho người chưa biết là ai", async () => {
+    const Shell = await taiTrang("#/list");
+    const hop = document.createElement("div"); document.body.appendChild(hop);
+    root = createRoot(hop);
+    await act(async () => { root!.render(<Shell me={SALES} onMe={() => {}} onPreview={() => {}} />); });
+    expect(localStorage.getItem(GOI_Y)).toBe("1");
+    await act(async () => { hop.querySelector<HTMLButtonElement>("button.logout")!.click(); await new Promise((r) => setTimeout(r, 20)); });
+    expect(localStorage.getItem(GOI_Y)).toBeNull();
   });
 
   it("tài khoản không mở trình soạn (account HN → view HN riêng): KHÔNG nạp trước chunk trình soạn", async () => {
