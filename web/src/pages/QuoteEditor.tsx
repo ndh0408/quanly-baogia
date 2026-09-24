@@ -770,9 +770,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             discount: Math.max(0, Number(s.discount) || 0),   // Discount RIÊNG của sheet (server kẹp lại theo tổng sheet)
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
+            // Đợt 4: CÙNG luật chọn mẫu với lưới (ExtraTables.tplOf = mauBangHn: thiếu templateId / mẫu không
+            // còn thì mẫu đầu của công ty). Tra thẳng theo id thì bảng cũ thiếu mẫu mà mẫu dự phòng CÓ ngày bị
+            // xoá days lúc Lưu — trong khi lưới đang hiện cột Số Ngày và nhân nó.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
               const xx = x as { templateId?: number; items?: ItemK[] } & Record<string, unknown>;
-              const xUsesDays = !!templates.find((t) => t.id === xx.templateId)?.layout?.hasDays;
+              const xUsesDays = !!mauBangHn(xx, templates, q.companyId)?.layout?.hasDays;
               return { ...xx, items: (xx.items || []).map((it) => { const o = { ...it, days: xUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }) };
             }),
           };
