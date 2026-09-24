@@ -1438,7 +1438,7 @@ function GridTableInner(props: GridTableProps) {
       recomputeAll(); onChange();
       selRef.current = { anchor: { row: startRow, field: FIELDS[COL_NAME] }, focus: { row: startRow + built.length - 1, field: FIELDS[FIELDS.length - 1] } };
       focusCell(startRow, FIELDS[COL_NAME], true, true);
-      const nGrp =built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
+      const nGrp = built.filter((b) => b.kind === "section").length, nSub = built.filter((b) => b.kind === "subsection").length;
       const nWarn = built.reduce((acc, b) => acc + Object.keys((b as Record<string, unknown>)._fxWarn || {}).length, 0);
       toast(`Đã dán & dựng lại ${built.length} dòng (${nGrp} nhóm, ${nSub} nhóm con)`, "success");
       if (nWarn) toast(`⚠️ ${nWarn} ô công thức KHÔNG tự dịch được từ Excel — ô viền ĐỎ, bấm vào kiểm tra/sửa tay`, "error");
