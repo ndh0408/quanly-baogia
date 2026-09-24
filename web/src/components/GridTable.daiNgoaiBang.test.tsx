@@ -44,7 +44,8 @@ function goRoiChot(el: HTMLInputElement, chu: string) {
   act(() => { el.value = chu; el.dispatchEvent(new Event("input", { bubbles: true })); });
   act(() => { el.blur(); });
 }
-const canhBao = (it: ItemK, f: string) => !!(it as unknown as { _fxWarn?: Record<string, boolean> })._fxWarn?.[f];
+// Ô đỏ = một trong hai cờ: `_fxWarn` (tham chiếu hỏng) hoặc `_fxLoi` (vòng lặp / không tính được) — soát toàn diện L8 tách hai cờ.
+const canhBao = (it: ItemK, f: string) => { const c = it as unknown as { _fxWarn?: Record<string, boolean>; _fxLoi?: Record<string, boolean> }; return !!(c._fxWarn?.[f] || c._fxLoi?.[f]); };
 
 describe("L33 — dải vượt số hàng trên lưới thật", () => {
   it.each(["=SUM(F2:F50)", "=SUM(F2:F5)", "=SUM(F50:F2)"])("%s trên bảng 4 hàng = 115.000, không đỏ (bản cũ 0)", (fx) => {

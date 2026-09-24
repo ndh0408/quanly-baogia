@@ -56,7 +56,8 @@ function goRoiChot(el: HTMLInputElement, chu: string) {
   act(() => { el.value = chu; el.dispatchEvent(new Event("input", { bubbles: true })); });
   act(() => { el.blur(); });
 }
-const canhBao = (it: ItemK, f: string) => !!(it as unknown as { _fxWarn?: Record<string, boolean> })._fxWarn?.[f];
+// Ô đỏ = một trong hai cờ: `_fxWarn` (tham chiếu hỏng) hoặc `_fxLoi` (vòng lặp / không tính được) — soát toàn diện L8 tách hai cờ.
+const canhBao = (it: ItemK, f: string) => { const c = it as unknown as { _fxWarn?: Record<string, boolean>; _fxLoi?: Record<string, boolean> }; return !!(c._fxWarn?.[f] || c._fxLoi?.[f]); };
 
 describe("L30 — công thức ĐÃ LƯU kiểu cũ không bị âm thầm đổi số khi sửa ô khác", () => {
   it("=ROUND(F1*0,5) = 525.000 và =ROUNDDOWN(F1*0,9) = 945.000 vẫn giữ nguyên sau khi sửa SL hàng khác", () => {
