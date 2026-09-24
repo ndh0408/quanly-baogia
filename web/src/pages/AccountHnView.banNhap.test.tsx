@@ -430,6 +430,29 @@ describe("L62 — Lưu phần HN xong sau khi view đã gỡ không được đ�
     expect(WD.__editorDirty).toBe(true);
     expect(docBanNhap(KHOA + ":xungdot", 5)).toBeNull();
   });
+
+  // Đợt 5 (d5-soan 3): khoá bản nháp `hn<quoteId>` DÙNG CHUNG cho mọi lần mở cùng báo giá. Rời ("Rời, bỏ thay
+  // đổi") khi PUT đang bay, mở lại NGAY báo giá đó và gõ trước khi PUT cũ trả lời → nhánh L62 của instance
+  // đã gỡ xoá luôn bản nháp của lần mở MỚI; tab sập sau đó là mất phần vừa gõ.
+  it("PUT cũ trả lời SAU khi đã mở lại cùng báo giá và gõ → bản nháp của lần mở mới còn nguyên", async () => {
+    await mo();
+    goGia("6000000");
+    await cho(1600);
+    let xong!: () => void;
+    h.saveHn = () => new Promise((r) => { xong = () => r({}); });
+    await act(async () => { nutLuu().click(); });
+    await cho(10);
+    await act(async () => { window.dispatchEvent(new Event("editor:discard")); });   // Shell.guardLeave "Rời, bỏ thay đổi"
+    act(() => root!.unmount()); root = null; host?.remove();
+    h.saveHn = async () => ({});
+    await mo();                                                      // mở lại #11 — instance MỚI
+    goGia("7000000");
+    await cho(1600);
+    expect(giaTrongNhap(KHOA)).toBe(7_000_000);
+    await act(async () => { xong(); });
+    await cho(30);
+    expect(giaTrongNhap(KHOA), "PUT cũ của instance đã gỡ xoá bản nháp của lần mở mới").toBe(7_000_000);
+  });
 });
 
 // L63 (cùng gốc bên màn Account HN): xem thử quyền của một Account HN — lệnh ghi chỉ "thành công giả",

@@ -281,7 +281,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   // treo hay nhận phản hồi muộn mà không hỏi cờ này là chạy thao tác lên báo giá người dùng đã rời,
   // bật/tắt cờ `__editorDirty` DÙNG CHUNG của editor đang mở, hoặc kéo hash sang báo giá khác.
   const songRef = useRef(true);
-  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
+  // Đợt 5: LÚC editor này gỡ — mốc để nhánh L62 của save() biết bản nháp ở khoá dùng chung (theo số báo giá /
+  // "moi") còn là của editor này không (xem đó). Sau khi gỡ, editor này không ghi được gì nữa: mark chặn theo
+  // songRef, hẹn giờ và pagehide/visibilitychange đã huỷ cùng cleanup.
+  const goLucRef = useRef(0);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; goLucRef.current = Date.now(); }; }, []);
   // Hộp giữ bản nháp từ Wizard. Lý do phải giữ (effect chạy lại → mất trắng những gì người dùng
   // vừa điền) nằm ở web/src/lib/pendingQuote.ts, hàm `giuBanNhap`.
   const draftRef = useRef<QuoteFull | null>(null);
@@ -806,7 +810,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // bay). Chỉ dọn bản nháp của CHÍNH nó và báo đã lưu. Cờ `__editorDirty` giờ là của editor đang
         // mở, hash là trang người dùng đang đứng — đụng vào là tắt chặn rời trang của họ, hoặc kéo họ
         // sang báo giá vừa tạo mà họ đã chọn bỏ.
-        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        // Đợt 5: khoá bản nháp DÙNG CHUNG cho mọi lần mở cùng báo giá — rời rồi mở lại ngay và gõ trước khi
+        // PUT/POST này trả lời thì bản nháp ở khoá là của lần mở MỚI. Chỉ xoá bản ghi TRƯỚC lúc editor này gỡ.
+        const khoa = khoaNhapRef.current;
+        const nhap = khoa ? docBanNhap(khoa, meIdRef.current) : null;
+        if (khoa && !(nhap && nhap.luuLuc > goLucRef.current)) xoaBanNhap(khoa);
         toast(isNew ? `Đã lưu báo giá mới${(saved as { quoteNumber?: string }).quoteNumber ? " " + (saved as { quoteNumber?: string }).quoteNumber : ""}` : "Đã lưu", "success");
         return false;
       }
