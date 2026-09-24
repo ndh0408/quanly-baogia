@@ -247,6 +247,29 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     dan("Giao trước 5h\r\nKèm VAT\r\n");
     expect([items[1].name, items[1].notes, items[2].notes]).toEqual(["", "Giao trước 5h", "Kèm VAT"]);
   });
+
+  // Phản biện đợt 3: luật "khối trong app vào từ cột NGUỒN" chỉ cần cho ô SỐ (SL) của nhóm — nơi dán theo
+  // vị trí làm chữ đọc thành số. Người dùng CỐ Ý chọn ô CHỮ (Hạng Mục / ĐVT / Ghi chú) thì dán theo vị trí
+  // như Excel, như cả 667191b lẫn 235374f.
+  it("khối trong app chép từ Ghi chú dán vào ô HẠNG MỤC của nhóm: vào Hạng Mục (cột chữ đang chọn được giữ)", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", notes: "g1" }), mk({ name: "Y", notes: "g2" })];
+    const o = moLuoi(items);
+    vao(o(1, "notes")); moRong("ArrowDown", 1);
+    const kho = chep();
+    vao(o(0, "name"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}|${x.name}|${x.notes}`), "chữ bị kéo về cột Ghi chú nguồn").toEqual(["section|Nhóm|", "item|g1|", "item|g2|", "item|X|g1", "item|Y|g2"]);
+  });
+
+  it("khối trong app BẮT ĐẦU từ Hạng Mục dán vào ô ĐVT của nhóm: vẫn vào từ Hạng Mục (như 667191b, 235374f)", () => {
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "name")); moRong("ArrowRight", 3);
+    const kho = chep();
+    vao(o(0, "unit"));
+    dan(kho);
+    expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
+  });
 });
 
 describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {
