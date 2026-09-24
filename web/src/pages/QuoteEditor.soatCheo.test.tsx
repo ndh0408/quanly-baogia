@@ -59,9 +59,10 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-import { QuoteEditorPage } from "./QuoteEditor";
+import { QuoteEditorPage, vanTayMain } from "./QuoteEditor";
 import { ApiError } from "../lib/api";
 import * as ui from "../lib/ui";
+import { khoaBanNhap, docBanNhap } from "../lib/localDraft";
 
 const ME = { id: 1, username: "a", displayName: "A", role: "admin", permissions: ["quote:send", "quote:update:all", "quote:hn:manage", "quote:read:all"] };
 type WinDirty = Window & { __editorDirty?: boolean };
@@ -192,6 +193,28 @@ describe("app#11 — duyệt HN khi dirty không được nuốt lượt lưu c�
     expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe("2026-09-21T05:00:00.000Z");
   });
 
+  // Đợt 4 (409 GIẢ do 36fef19): lượt soát lúc mở của lưới bật cờ phiên `_fxLoi` lên hạng mục bảng HN có
+  // công thức đã lưu nay không tính được. vanTayHn so bảng HN đang soạn (có cờ) với bản máy chủ (zod bỏ
+  // cờ) → tưởng bảng HN đã đổi, không nhận mốc duyệt → lần Lưu kế tự đâm 409.
+  it("bảng HN có công thức đã lưu nay không tính được (lưới gắn `_fxLoi` lúc mở) → vẫn nhận mốc MỚI", async () => {
+    const hnLoi = () => [{ name: "HN", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "cái", quantity: 1, unitPrice: 525_000, formulas: { unitPrice: "=ROUND(F1*0,5)" }, rid: "r1" }] }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnLoi() }));
+    await moEditor();
+    expect(hop!.querySelector(".cell-fx-error"), "lưới HN phải tô đỏ ô công thức lỗi ngay khi mở").not.toBeNull();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", hnTables: hnLoi(), updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt, "cờ phiên `_fxLoi` làm vân tay HN lệch → 409 giả").toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  // Cùng lớp, phía trang chính: vanTayMain hôm nay chỉ nhận JSON máy chủ, nhưng hạng mục trang chính cũng
+  // mang cờ phiên của lưới — hàm vân tay không được phụ thuộc vào chuyện ai gọi nó.
+  it("vanTayMain bỏ cờ phiên của hạng mục trang chính (`_k`, `_fxLoi`, `_fxWarn`)", () => {
+    const coCo = baoGia({ sheets: [trang(101, { items: [{ kind: "item", name: "Backdrop", unit: "cái", quantity: 1, unitPrice: 1000, _k: 7, _fxLoi: { unitPrice: true }, _fxWarn: { total: true } }] })] });
+    expect(vanTayMain(coCo)).toBe(vanTayMain(baoGia()));
+  });
+
   it("đối chứng: vừa tự Lưu (bản máy chủ mới) rồi duyệt HN khi dirty → nhận mốc MỚI", async () => {
     await moEditor();
     goTenKhach("Lần 1");
@@ -253,6 +276,38 @@ describe("app#13 — Hủy ở hộp 'Mở bản của tôi' không được xo�
     await moEditor();
     expect(oTenKhach().value).toBe("Khách CỦA TÔI");
     expect(coKhoaXd()).toBe(false);
+  });
+});
+
+// Đợt 4: người dùng đã GIỮ bản ':xungdot' (Hủy ở "Mở bản của tôi", Hủy ở "Bỏ bản của bạn?" — hộp hứa "lần
+// mở sau sẽ hỏi lại"). Gặp 409 lần hai trong cùng phiên thì nhánh 409 ghi thẳng vào CÙNG khoá → bản đã giữ
+// bị đè im lặng; Hủy ở hộp 409 còn xoá luôn bản mới → mất trắng phần soạn trước xung đột đầu.
+describe("đợt 4 — 409 lần hai không được đè im lặng bản ':xungdot' đã giữ", () => {
+  const tenTrongXd = () => (docBanNhap(khoaBanNhap(11, 1) + ":xungdot", 1)?.quote as { toCompany?: string } | undefined)?.toCompany;
+  async function giuXdRoi409LanHai(traLoi: boolean[]) {
+    await xungDotRoiTaiLai();                                        // bản giữ lại: "Khách CỦA TÔI"
+    h.hang = [false, false];                                         // Hủy, Hủy → GIỮ
+    await moEditor();
+    expect(tenTrongXd()).toBe("Khách CỦA TÔI");
+    confirmMock().mockClear();
+    goTenKhach("Khách LẦN HAI");
+    h.updateQuote.mockImplementationOnce(async () => { throw new ApiError("xung đột", 409, {}); });
+    h.hang = traLoi;
+    await bam(nut("Lưu"));
+  }
+
+  it("giữ bản cũ (Hủy ở hộp hỏi thay) rồi Hủy ở hộp 409 → bản đã giữ còn NGUYÊN, hộp 409 không hứa giữ phần đang soạn", async () => {
+    await giuXdRoi409LanHai([false, false]);
+    expect(tenTrongXd(), "bản đã giữ bị đè / bị xoá").toBe("Khách CỦA TÔI");
+    expect(confirmMock().mock.calls.map((c) => c[0])[0], "đè bản đã giữ mà không hỏi").toBe("Đã có một bản giữ lại từ lần xung đột trước");
+    expect(loiHop("Báo giá đã bị người khác sửa")).not.toMatch(/GIỮ LẠI/);
+    expect(oTenKhach().value, "phần đang soạn vẫn trên màn hình").toBe("Khách LẦN HAI");
+  });
+
+  it("chọn 'Thay bằng bản đang soạn' rồi Tải lại → bản giữ lại là phần đang soạn", async () => {
+    await giuXdRoi409LanHai([true, true]);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Đã có một bản giữ lại từ lần xung đột trước", "Báo giá đã bị người khác sửa"]);
+    expect(tenTrongXd()).toBe("Khách LẦN HAI");
   });
 });
 

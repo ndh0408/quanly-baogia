@@ -98,6 +98,18 @@ type WinDirty = Window & { __editorDirty?: boolean };
  * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
  * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
+/**
+ * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
+ * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
+ * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
+ * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
+ */
+const boKhoaPhien = (o: unknown): Record<string, unknown> => {
+  const r: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
+  return r;
+};
+
 export const vanTayMain = (q: unknown): string => {
   const r = (q || {}) as Record<string, unknown>;
   const dau: Record<string, unknown> = {};
@@ -111,7 +123,7 @@ export const vanTayMain = (q: unknown): string => {
   const trang = ((r.sheets as Sheet[] | undefined) || []).map((s) => ({
     id: s.id ?? null, templateId: s.templateId ?? null, name: s.name ?? "", discount: Number(s.discount) || 0,
     groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
-    items: (s.items || []).map((it) => ({ ...it, _k: undefined })),
+    items: (s.items || []).map(boKhoaPhien),
     noiBo: noiDungBangNoiBo(s.extraTables),
   }));
   return JSON.stringify({ dau, trang });
@@ -758,9 +770,12 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             discount: Math.max(0, Number(s.discount) || 0),   // Discount RIÊNG của sheet (server kẹp lại theo tổng sheet)
             items: (s.items || []).map((it, j) => { const o = { ...it, order: j + 1, days: sUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }),
             // dọn days bảng nội bộ theo template TỪNG bảng (đối xứng lưới chính) → tổng nội bộ không phồng.
+            // Đợt 4: CÙNG luật chọn mẫu với lưới (ExtraTables.tplOf = mauBangHn: thiếu templateId / mẫu không
+            // còn thì mẫu đầu của công ty). Tra thẳng theo id thì bảng cũ thiếu mẫu mà mẫu dự phòng CÓ ngày bị
+            // xoá days lúc Lưu — trong khi lưới đang hiện cột Số Ngày và nhân nó.
             extraTables: (Array.isArray(s.extraTables) ? s.extraTables : []).map((x) => {
               const xx = x as { templateId?: number; items?: ItemK[] } & Record<string, unknown>;
-              const xUsesDays = !!templates.find((t) => t.id === xx.templateId)?.layout?.hasDays;
+              const xUsesDays = !!mauBangHn(xx, templates, q.companyId)?.layout?.hasDays;
               return { ...xx, items: (xx.items || []).map((it) => { const o = { ...it, days: xUsesDays ? it.days : null }; delete (o as ItemK)._k; return o; }) };
             }),
           };
@@ -768,7 +783,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       };
       // Bảng Hà Nội: dọn `_k` (khoá React nội bộ) y như hạng mục của lưới chính. Gửi kèm cả khi
       // rỗng — người dùng xoá hết bảng HN thì server phải ghi lại mảng rỗng, không phải bỏ qua.
-      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (máy chủ nhân days bất kể mẫu) — bước này
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (dữ liệu lưu sạch; tổng máy chủ nay cũng theo mẫu) — bước này
       // trước đây làm ngay LÚC VẼ trong HnTables nên đổi mẫu qua lại là mất số Ngày. CHỈ khi phần HN sửa
       // được ở đây (đúng điều kiện bước dọn cũ): phần HN đã chốt thì máy chủ so NGUYÊN VĂN với CSDL
       // (chotHnTables) — dọn thêm là lệch, cả lần Lưu báo giá ăn 409.
@@ -831,13 +846,27 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
         // lúc đó là dẫn người dùng thẳng tới mất trắng khi tải lại.
         if (hnNhapRef.current) { clearTimeout(hnNhapRef.current); hnNhapRef.current = null; }
         const khoaXd = khoaNhapRef.current && qRef.current ? khoaNhapRef.current + ":xungdot" : null;
-        const kq = khoaXd ? ghiBanNhap(khoaXd, qRef.current, baseNhapRef.current, meIdRef.current) : "khong-ghi-duoc";
+        // Đợt 4: khoá ':xungdot' CÒN một bản từ lần xung đột TRƯỚC — người dùng đã chọn GIỮ nó (hộp hứa "lần
+        // mở sau sẽ hỏi lại"), hoặc chưa được hỏi vì đã khôi phục bản nháp thường. Máy chỉ giữ được MỘT bản:
+        // ghi thẳng là đè im lặng phần soạn trước xung đột đầu. Hỏi; Hủy (mặc định của hộp danger) = giữ bản
+        // cũ, phần đang soạn vẫn nằm trên màn hình và hộp dưới nói thật là nó KHÔNG được giữ.
+        const xdCu = khoaXd ? docBanNhap(khoaXd, meIdRef.current) : null;
+        let giuBanCu = false;
+        if (xdCu) {
+          giuBanCu = !(await confirmModal(
+            "Đã có một bản giữ lại từ lần xung đột trước",
+            `Lúc ${new Date(xdCu.luuLuc).toLocaleString("vi-VN")} bạn đã có một bản soạn được giữ lại sau lần xung đột trước (chưa mở lại). Máy này chỉ giữ được MỘT bản như vậy. Thay nó bằng phần bạn đang soạn bây giờ? Hủy thì bản cũ được giữ nguyên, còn phần đang soạn KHÔNG được giữ trên máy này.`,
+            { danger: true, confirmText: "Thay bằng bản đang soạn" },
+          ));
+          if (!songRef.current) return false;   // hộp treo sau khi đã rời báo giá này — như dưới
+        }
+        const kq = khoaXd && !giuBanCu ? ghiBanNhap(khoaXd, qRef.current, baseNhapRef.current, meIdRef.current) : "khong-ghi-duoc";
         const giuDuoc = kq === "da-ghi" || kq === "da-ghi-bo-anh";
         const reload = await confirmModal(
           "Báo giá đã bị người khác sửa",
           giuDuoc
             ? `Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Tải lại để xem bản mới nhất — phần bạn đang soạn được GIỮ LẠI trên máy này${kq === "da-ghi-bo-anh" ? " (KHÔNG kèm ảnh trong các dòng)" : ""}, và sau khi tải lại bạn sẽ được hỏi có mở lại để chép / ghi đè không. Tải lại ngay?`
-            : "Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy) — hãy chép phần cần giữ trước. Tải lại ngay?",
+            : `Một người khác vừa lưu báo giá này trong lúc bạn đang sửa. Nếu tải lại bản mới nhất, thay đổi CHƯA LƯU của bạn sẽ mất (${giuBanCu ? "bạn đã chọn giữ bản cũ từ lần xung đột trước" : "báo giá quá lớn hoặc trình duyệt không cho giữ bản tạm trên máy"}) — hãy chép phần cần giữ trước. Tải lại ngay?`,
           { danger: true, confirmText: "Tải lại bản mới" }
         );
         // L62: hộp treo, trả lời sau khi đã rời báo giá này → đừng reload / hạ cờ của trang đang đứng.
@@ -970,7 +999,8 @@ Lý do (không bắt buộc):`,
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
       }
-      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...(t as object), _k: undefined, items: ((t as { items?: unknown[] }).items || []).map((it) => ({ ...(it as object), _k: undefined })) })));
+      // Đợt 4: bỏ MỌI khoá '_' (không chỉ `_k`) — xem boKhoaPhien.
+      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...boKhoaPhien(t), items: ((t as { items?: unknown[] }).items || []).map(boKhoaPhien) })));
       const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
       const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
       for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];

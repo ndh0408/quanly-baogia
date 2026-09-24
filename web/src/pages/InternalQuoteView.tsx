@@ -4,6 +4,7 @@ import { api, type Me } from "../lib/api";
 import type { ItemK } from "../lib/gridShared";
 import * as M from "../lib/quoteMath";
 import { ExtraPayDialog, extraTableSum } from "../components/ExtraTables";
+import { mauBangHn } from "../components/HnTables";
 import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
 
 // Màn hình CHỈ XEM BẢNG NỘI BỘ (quyền quote:internal:view) — tài khoản "chi phí": thấy các bảng nội bộ của
@@ -11,8 +12,11 @@ import { codeLabel, errMsg, fmtDate, dash } from "../lib/format";
 
 const catLabel = (c: string) => ({ hcm: "Chi Phí HCM", hanoi: "Báo Giá Hà Nội", khach: "Phí Khách Hàng" } as Record<string, string>)[c] || c;
 const isRow = (it: any) => it && !["section", "subsection", "info"].includes(it.kind);
-const rowTotal = (it: any) => {
-  const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0, days = it.days != null ? Number(it.days) : null;
+// `coNgay` (đợt 4, L64): chỉ nhân Số Ngày khi mẫu của bảng CÓ cột đó — như màn soạn và tổng máy chủ
+// (quoteUtils.extraTableSum + bangNoiBoCoNgay). Bảng mẫu không ngày mà CSDL còn days cũ từng hiện ở đây
+// gấp days lần con số trên màn soạn.
+const rowTotal = (it: any, coNgay: boolean) => {
+  const qty = M.qtyForAmount(it), price = Number(it.unitPrice) || 0, days = coNgay && it.days != null ? Number(it.days) : null;
   return Math.round(days && days > 0 ? qty * days * price : qty * price);
 };
 
@@ -22,12 +26,16 @@ type PayTarget = { sheetId?: number; hn?: boolean; item: Record<string, unknown>
 
 export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) {
   const { data, isPending, error, refetch } = useQuery({ queryKey: ["quote-internal", quoteId], queryFn: () => api.getQuote(quoteId) });
+  // Danh sách mẫu — để biết bảng nào CÓ cột Số Ngày (luật chọn mẫu của HnTables / ExtraTables). Chưa có
+  // thì chưa vẽ số: vẽ tạm kiểu "nhân days bất kể mẫu" là nháy một con số tiền sai.
+  const mau = useQuery({ queryKey: ["meta-templates"], queryFn: () => api.metaTemplates(), staleTime: 5 * 60_000 });
   const canPay = me.permissions.includes("quote:internal:pay");
   const [pay, setPay] = useState<PayTarget>(null);
 
-  if (isPending) return <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
-  if (error || !data) return <div className="err">⚠ {errMsg(error, "Không tải được.")} <button className="btn btn-sm" onClick={() => refetch()}>Thử lại</button></div>;
+  if (isPending || mau.isPending) return <div className="skeleton-wrap">{Array.from({ length: 4 }).map((_, i) => <div className="skeleton-row" key={i} />)}</div>;
+  if (error || !data || mau.error) return <div className="err">⚠ {errMsg(error || mau.error, "Không tải được.")} <button className="btn btn-sm" onClick={() => { void refetch(); void mau.refetch(); }}>Thử lại</button></div>;
   const q = data as Record<string, any>;
+  const coNgay = (t: any) => !!mauBangHn(t, mau.data || [], q.companyId)?.layout?.hasDays;
   // internalSheets = bản server đã lược (tài khoản chi phí thật). Khi XEM THỬ (admin), data đầy đủ → lấy từ sheets.extraTables.
   const sheets: any[] = q.internalSheets || (q.sheets || []).map((s: any) => ({ sheetId: s.id, sheetName: s.name || null, order: s.order, tables: Array.isArray(s.extraTables) ? s.extraTables : [] }));
   // Bảng HÀ NỘI ở CẤP BÁO GIÁ — không thuộc trang nào. Thiếu dòng này thì kế toán/tài khoản chi
@@ -51,6 +59,7 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
         <div className="empty">Báo giá này chưa có bảng nội bộ.</div>
       ) : tables.map(({ s, t }, ti) => {
         const rows = (t.items || []).filter(isRow);
+        const ngay = coNgay(t);
         return (
           <div key={`${s.hn ? "hn" : s.sheetId}-${ti}`} className="list-wrap" style={{ marginBottom: 18 }}>
             <h3 style={{ margin: "4px 0 8px" }}><span className={`extra-cat-badge cat-${t.category}`}>{catLabel(t.category)}</span>{t.name ? ` — ${t.name}` : ""} {s.sheetName ? <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>({s.sheetName})</span> : null}</h3>
@@ -63,7 +72,7 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
                       <td>{it.name || dash}</td>
                       <td className="num">{M.fmtNumCell(it.quantity, !!it.quantityExact)}</td>
                       <td className="num">{M.fmtMoney(Number(it.unitPrice) || 0)}</td>
-                      <td className="num">{M.fmtMoney(rowTotal(it))}</td>
+                      <td className="num">{M.fmtMoney(rowTotal(it, ngay))}</td>
                       <td className="col-pay">
                         {canPay
                           ? <button type="button" className={`btn btn-xs ${it.paid ? "btn-success" : ""}`} title={it.paid && it.paidAt ? `Đã thanh toán ${fmtDate(it.paidAt)}` : undefined} onClick={() => setPay(s.hn ? { hn: true, item: it } : { sheetId: s.sheetId, item: it })}>{it.paid ? "✓ Đã TT" : "Thanh toán"}</button>
@@ -77,7 +86,7 @@ export function InternalQuoteView({ quoteId, me }: { quoteId: number; me: Me }) 
                 <tfoot>
                   <tr>
                     <td colSpan={3} style={{ textAlign: "right", fontWeight: 600 }}>Tổng</td>
-                    <td className="num" style={{ fontWeight: 600 }}>{M.fmtMoney(extraTableSum(t))}</td>
+                    <td className="num" style={{ fontWeight: 600 }}>{M.fmtMoney(extraTableSum(t, ngay))}</td>
                     <td />
                   </tr>
                 </tfoot>

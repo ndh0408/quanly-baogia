@@ -6,6 +6,7 @@ import {
   sanitizeExtraTables,
   sanitizeHnTables,
   extraTableSum,
+  bangNoiBoCoNgay,
   tenFileXuat,
 } from "../src/quoteUtils.js";
 
@@ -121,6 +122,35 @@ describe("quoteUtils (extracted pure helpers)", () => {
       expect(extraTableSum({ category: "hcm", items: rows })).toBe(2000);
       expect(extraTableSum({ category: "khach", items: rows })).toBe(2000);
       expect(extraTableSum({ category: "hanoi", items: rows })).toBe(7000);   // HN: cộng hết
+    });
+  });
+
+  // Đợt 4 (L64 phía máy chủ): web chỉ nhân Số Ngày khi MẪU của bảng có cột Số Ngày, còn máy chủ từng nhân
+  // days bất kể mẫu → dữ liệu CŨ (bảng mẫu không ngày mà CSDL còn days) ra số khác nhau giữa màn soạn và
+  // Quản lý dự án / danh sách của account HN. CÙNG bộ đầu vào với web/src/components/ExtraTables.ngayTheoMau.test.tsx
+  // ("cùng bộ đầu vào với máy chủ") — sửa một bên thì sửa cả bên kia.
+  describe("extraTableSum theo mẫu của bảng — khớp web", () => {
+    const MAU = [{ id: 1, companyId: 7, hasDays: false }, { id: 2, companyId: 7, hasDays: true }, { id: 3, companyId: 8, hasDays: true }];
+    const bang = (templateId) => ({ category: "hanoi", ...(templateId != null ? { templateId } : {}), items: [{ kind: "item", quantity: 2, days: 3, unitPrice: 1000 }] });
+    const CA = [
+      ["mẫu không ngày", 1, 7, 2000],
+      ["mẫu có ngày", 2, 7, 6000],
+      ["thiếu mẫu → mẫu đầu của công ty (không ngày)", null, 7, 2000],
+      ["mẫu không còn trong danh sách → mẫu đầu của công ty", 99, 7, 2000],
+      ["thiếu mẫu, công ty 8 → mẫu đầu của công ty 8 (có ngày)", null, 8, 6000],
+      ["thiếu mẫu, công ty không có mẫu nào → mẫu đầu danh sách", null, 9, 2000],
+      ["mẫu của công ty khác vẫn tra theo id", 3, 7, 6000],
+    ];
+    for (const [ten, tpl, cty, tong] of CA) {
+      it(`${ten} → ${tong}`, () => { expect(extraTableSum(bang(tpl), bangNoiBoCoNgay(bang(tpl), cty, MAU))).toBe(tong); });
+    }
+    it("không truyền mẫu → nhân days như trước (nơi gọi chưa có danh sách mẫu)", () => { expect(extraTableSum(bang(1))).toBe(6000); });
+
+    it("hnTotal của account HN tính theo mẫu khi listQuotes gắn danh sách mẫu", () => {
+      const dong = (over) => presentQuoteRow({ id: 7, company: { id: 7, name: "GN" }, _count: { sheets: 1 }, hnTables: [bang(1), bang(2)], ...over }, { hnOnly: true });
+      expect(dong({ _mauBangNoiBo: MAU }).hnTotal, "bảng mẫu không ngày còn days cũ vẫn bị nhân ngày").toBe(8000);
+      expect(dong({}).hnTotal).toBe(12000);
+      expect(dong({ _mauBangNoiBo: MAU })._mauBangNoiBo, "danh sách mẫu lọt ra phản hồi").toBeUndefined();
     });
   });
 

@@ -226,8 +226,9 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     setSaving(true); savingRef.current = true;
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
-      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — máy chủ (tổng HN đổ sang Quản lý dự án) nhân
-      // days bất kể mẫu. Việc dọn này trước đây làm ngay LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — dữ liệu lưu sạch cho mọi nơi đọc thẳng CSDL (tổng
+      // máy chủ nay cũng tính theo mẫu từ đợt 4 — quoteUtils.bangNoiBoCoNgay). Việc dọn này trước đây làm ngay
+      // LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
       const goi = hnTables.map((t) => {
         const coNgay = usesDaysOf(t.templateId);
         return {
@@ -236,6 +237,14 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         };
       });
       await api.saveHn(q.id, goi, q.updatedAt, q.hnRev);
+      if (!songRef.current) {
+        // L62 (như QuoteEditor): máy chủ trả lời SAU khi người dùng đã rời màn này ("Rời, bỏ thay đổi" lúc
+        // PUT còn bay). Chỉ dọn bản nháp của CHÍNH báo giá này và báo đã lưu. Cờ `__editorDirty` giờ là của
+        // trang đang mở — hạ nó là mất lời nhắc chưa lưu ở đó. Không gửi duyệt: người dùng đã bỏ đi giữa chừng.
+        if (khoaNhapRef.current) xoaBanNhap(khoaNhapRef.current);
+        toast(thenSubmit ? "Đã lưu phần Hà Nội — CHƯA gửi duyệt vì bạn đã rời trang" : "Đã lưu phần Hà Nội", "success");
+        return;
+      }
       dirtyRef.current = false; (window as WinDirty).__editorDirty = false;
       // Đã lên máy chủ → bản nháp hết lý do tồn tại (giữ lại là lần mở sau hỏi khôi phục thứ cũ hơn).
       if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
@@ -244,6 +253,9 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
       else toast("Đã lưu phần Hà Nội", "success");
       await load();
     } catch (ex) {
+      // L62: đã rời màn này → không bật hộp 409 lên trang khác, không hạ cờ / tải lại trang đang đứng, không
+      // giữ bản ':xungdot' của phần người dùng đã chọn bỏ (như QuoteEditor).
+      if (!songRef.current) { toast(`Phần Hà Nội của báo giá vừa rời chưa lưu được: ${ex instanceof ApiError ? ex.message : "Lỗi lưu phần HN"}`, "error"); return; }
       // GRID-16: 409 = phần HN vừa được ghi ở nơi khác (hnRev/updatedAt lệch). Trước đây chỉ là toast:
       // không lối tải lại, mà tự tải lại thì mất phần đang gõ. Nay giữ phần đang gõ vào khoá `…:xungdot`
       // rồi mới tải lại; đường nạp hỏi có mở lại không (y như GRID-08 ở trình soạn báo giá).
@@ -253,6 +265,19 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
         // báo lỗi, giữ nguyên màn hình để người dùng chép phần đang gõ.
         if (henNhapRef.current) { clearTimeout(henNhapRef.current); henNhapRef.current = null; }
         const khoaXd = khoaNhapRef.current + ":xungdot";
+        // Đợt 4 (như QuoteEditor): khoá ':xungdot' CÒN bản từ lần xung đột TRƯỚC mà người dùng đã chọn GIỮ —
+        // máy chỉ giữ được MỘT bản, ghi thẳng là đè im lặng giá gõ trước xung đột đầu. Hỏi; Hủy (mặc định của
+        // hộp danger) = giữ bản cũ, phần đang gõ ở nguyên trên màn và KHÔNG tải lại (như khi không ghi được).
+        const xdCu = docBanNhap(khoaXd, meId);
+        if (xdCu) {
+          const thay = await confirmModal(
+            "Đã có một bản giữ lại từ lần xung đột trước",
+            `Lúc ${new Date(xdCu.luuLuc).toLocaleString("vi-VN")} bạn đã có một bản giá Hà Nội được giữ lại sau lần xung đột trước (chưa mở lại). Máy này chỉ giữ được MỘT bản như vậy. Thay nó bằng phần bạn đang gõ bây giờ? Hủy thì bản cũ được giữ nguyên, còn phần đang gõ KHÔNG được giữ trên máy này.`,
+            { danger: true, confirmText: "Thay bằng bản đang gõ" },
+          );
+          if (!songRef.current) return;
+          if (!thay) { toast(`${ex.message}. Bạn đã chọn giữ bản cũ — phần đang gõ KHÔNG được giữ trên máy này, hãy chép nó trước khi tải lại trang.`, "error"); return; }
+        }
         const kq = ghiBanNhap(khoaXd, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
         if (kq !== "da-ghi" && kq !== "da-ghi-bo-anh") {
           toast(`${ex.message}. Trình duyệt không giữ được bản tạm trên máy này — hãy chép phần đang gõ trước khi tải lại trang.`, "error");

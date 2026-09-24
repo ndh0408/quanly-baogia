@@ -16,6 +16,8 @@ import { createRoot, type Root } from "react-dom/client";
 const MAU = [
   { id: 1, code: "gn", name: "GN (không ngày)", companyId: 7, layout: { hasDays: false } },
   { id: 2, code: "gnd", name: "GN (có ngày)", companyId: 7, layout: { hasDays: true } },
+  // Công ty 8 chỉ có mẫu CÓ ngày — để mẫu dự phòng (mẫu đầu của công ty) của bảng nội bộ có ngày (đợt 4).
+  { id: 3, code: "clfd", name: "CLF (có ngày)", companyId: 8, layout: { hasDays: true } },
 ];
 const CTY = [{ id: 7, name: "Gia Nguyễn" }];
 const MOC_CU = "2026-09-20T00:00:00.000Z";
@@ -424,6 +426,22 @@ describe("L64 — đổi mẫu qua lại không được xoá số Ngày", () =>
     const p = h.updateQuote.mock.calls.at(-1)![1] as { hnTables: { items: { days: unknown }[] }[]; sheets: { extraTables: { items: { days: unknown }[] }[] }[] };
     expect(p.hnTables.map((t) => t.items[0].days), "bảng HN").toEqual([null, 3]);
     expect(p.sheets[0].extraTables.map((t) => t.items[0].days), "bảng nội bộ").toEqual([null, 3]);
+  });
+
+  // Đợt 4: save() chọn mẫu cho bảng nội bộ bằng `templates.find(id === templateId)` KHÔNG dự phòng, còn lưới
+  // (ExtraTables.tplOf) dự phòng về mẫu đầu của công ty. Bảng cũ thiếu templateId (hoặc trỏ mẫu đã ngừng dùng)
+  // mà mẫu dự phòng CÓ ngày: lưới hiện cột Số Ngày và nhân ngày, Lưu lại xoá days → tiền rơi về một ngày.
+  it("Lưu: bảng nội bộ THIẾU templateId / trỏ mẫu không còn, mẫu dự phòng CÓ ngày → giữ days như lưới đang hiện", async () => {
+    const hang = (rid: string) => ({ kind: "item", name: "Khung", unit: "bộ", quantity: 2, days: 3, unitPrice: 1000, rid, approved: true });
+    h.getQuote.mockImplementationOnce(async () => baoGia({ companyId: 8, sheets: [trang(101, { templateId: 3, extraTables: [
+      { category: "hcm", name: "HCM", groupSubtotal: false, items: [hang("e1")] },
+      { category: "khach", name: "KH", templateId: 99, groupSubtotal: false, items: [hang("e2")] },
+    ] })] }));
+    await moEditor();
+    go(oTenKhach(), "Khách MỚI");
+    await bam(nut("Lưu"));
+    const p = h.updateQuote.mock.calls.at(-1)![1] as { sheets: { extraTables: { items: { days: unknown }[] }[] }[] };
+    expect(p.sheets[0].extraTables.map((t) => t.items[0].days), "Lưu xoá số Ngày mà lưới đang hiện và nhân").toEqual([3, 3]);
   });
 
   it("phần HN đã chốt mà người mở KHÔNG quản phần HN → Lưu gửi bảng HN NGUYÊN VĂN (máy chủ so với CSDL — dọn days là 409 cả lần Lưu)", async () => {

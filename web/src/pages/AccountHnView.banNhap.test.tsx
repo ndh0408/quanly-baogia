@@ -346,6 +346,39 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect((window as Window & { __editorDirty?: boolean }).__editorDirty).toBe(false);
   });
 
+  // Đợt 4: bản ':xungdot' đã GIỮ (Hủy, Hủy) bị nhánh 409 lần hai ghi đè im lặng — cùng khoá; Hủy ở hộp 409 còn
+  // xoá luôn bản mới → mất trắng phần giá gõ trước xung đột đầu.
+  async function giuXdRoi409LanHai() {
+    ghiXd();                                                         // bản đã giữ: 6.600.000
+    confirmMock().mockImplementationOnce(async () => false).mockImplementationOnce(async () => false);   // lúc mở: Hủy, Hủy → giữ
+    await mo();
+    confirmMock().mockClear();
+    goGia("7000000");
+    await cho(250);
+    h.saveHn = async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); };
+  }
+
+  it("đợt 4: 409 lần hai, giữ bản cũ (Hủy ở hộp hỏi thay) → bản đã giữ còn NGUYÊN, không tải lại, phần đang gõ còn trên màn", async () => {
+    await giuXdRoi409LanHai();
+    h.confirm = false;                                               // Hủy ở mọi hộp
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(giaTrongNhap(KHOA + ":xungdot"), "bản đã giữ bị đè / bị xoá").toBe(6_600_000);
+    expect(confirmMock().mock.calls.map((c) => c[0])).toEqual(["Đã có một bản giữ lại từ lần xung đột trước"]);
+    expect(host!.textContent).toContain("7.000.000");
+    expect((ui.toast as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).join(" | ")).toMatch(/chép/);
+  });
+
+  it("đợt 4: 409 lần hai, chọn 'Thay bằng bản đang gõ' → hỏi tải lại; bản giữ lại là giá đang gõ", async () => {
+    await giuXdRoi409LanHai();
+    h.confirm = false;                                               // sau đó: Hủy "Mở bản của tôi", Hủy "Bỏ bản?" → giữ
+    confirmMock().mockImplementationOnce(async () => true).mockImplementationOnce(async () => true);    // Thay, Tải lại
+    await act(async () => { nutLuu().click(); });
+    await cho(30);
+    expect(confirmMock().mock.calls.map((c) => c[0]).slice(0, 2)).toEqual(["Đã có một bản giữ lại từ lần xung đột trước", "Phần Hà Nội đã thay đổi ở nơi khác"]);
+    expect(giaTrongNhap(KHOA + ":xungdot")).toBe(7_000_000);
+  });
+
   it("X1 đợt 3: đã khôi phục bản nháp thường (bản ':xungdot' chưa hỏi) → Lưu KHÔNG hỏi bản ':xungdot' giữa chừng", async () => {
     await phien1GiuXdRoiGo();
     await mo();                                                      // Khôi phục bản nháp thường
@@ -354,6 +387,48 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     await cho(30);
     expect(confirmMock().mock.calls.map((c) => c[0])).toEqual([]);
     expect(coXd(), "lần mở sau hỏi tiếp").toBe(true);
+  });
+});
+
+// Đợt 4 (họ L62 bên QuoteEditor): save() không kiểm view còn gắn sau `await api.saveHn(...)`. Back khi PUT đang
+// bay → "Rời, bỏ thay đổi" → view gỡ; máy chủ trả lời sau đó thì instance đã gỡ hạ cờ `__editorDirty` DÙNG
+// CHUNG của trang đang mở (mất lời nhắc chưa lưu ở đó), gửi duyệt tiếp, hoặc bật hộp 409 lên trang khác.
+describe("L62 — Lưu phần HN xong sau khi view đã gỡ không được đụng trang đang mở", () => {
+  const WD = window as Window & { __editorDirty?: boolean };
+  async function luuTreoRoiRoiTrang(ketQua: () => Promise<unknown>, nut: () => HTMLButtonElement = nutLuu) {
+    await mo();
+    goGia("6000000");
+    await cho(1600);                                                // bản nháp #11 đã ghi
+    expect(docBanNhap(KHOA, 5)).not.toBeNull();
+    let xong!: () => void;
+    h.saveHn = () => new Promise((r, loi) => { xong = () => { ketQua().then(r, loi); }; });
+    await act(async () => { nut().click(); });
+    await cho(10);
+    act(() => root!.unmount()); root = null; host?.remove();         // "Rời, bỏ thay đổi" → Shell gỡ view
+    WD.__editorDirty = true;                                         // trang mới đang có thay đổi chưa lưu
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockClear();
+    await act(async () => { xong(); });
+    await cho(30);
+  }
+
+  it("Lưu thành công sau khi đã rời → cờ bẩn của trang đang mở còn, bản nháp CỦA #11 được dọn", async () => {
+    await luuTreoRoiRoiTrang(async () => ({}));
+    expect(WD.__editorDirty, "instance đã gỡ hạ cờ chặn rời trang của trang đang mở").toBe(true);
+    expect(docBanNhap(KHOA, 5), "đã lên máy chủ thì bản nháp #11 hết lý do tồn tại").toBeNull();
+  });
+
+  it("Lưu + Gửi duyệt: rời trang khi đang lưu → KHÔNG gửi duyệt báo giá đã rời", async () => {
+    const nutGui = () => [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))! as HTMLButtonElement;
+    await luuTreoRoiRoiTrang(async () => ({}), nutGui);
+    expect(api.submitHn, "instance đã gỡ vẫn gửi duyệt").not.toHaveBeenCalled();
+    expect(WD.__editorDirty).toBe(true);
+  });
+
+  it("409 sau khi đã rời → không bật hộp xung đột lên trang khác, không hạ cờ, không giữ bản đã chọn bỏ", async () => {
+    await luuTreoRoiRoiTrang(async () => { throw new ApiError("Phần Hà Nội vừa được lưu ở nơi khác", 409, null); });
+    expect(ui.confirmModal).not.toHaveBeenCalled();
+    expect(WD.__editorDirty).toBe(true);
+    expect(docBanNhap(KHOA + ":xungdot", 5)).toBeNull();
   });
 });
 
