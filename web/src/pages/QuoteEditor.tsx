@@ -780,7 +780,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       };
       // Bảng Hà Nội: dọn `_k` (khoá React nội bộ) y như hạng mục của lưới chính. Gửi kèm cả khi
       // rỗng — người dùng xoá hết bảng HN thì server phải ghi lại mảng rỗng, không phải bỏ qua.
-      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (máy chủ nhân days bất kể mẫu) — bước này
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null (dữ liệu lưu sạch; tổng máy chủ nay cũng theo mẫu) — bước này
       // trước đây làm ngay LÚC VẼ trong HnTables nên đổi mẫu qua lại là mất số Ngày. CHỈ khi phần HN sửa
       // được ở đây (đúng điều kiện bước dọn cũ): phần HN đã chốt thì máy chủ so NGUYÊN VĂN với CSDL
       // (chotHnTables) — dọn thêm là lệch, cả lần Lưu báo giá ăn 409.

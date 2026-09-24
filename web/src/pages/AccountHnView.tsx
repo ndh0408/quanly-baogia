@@ -226,8 +226,9 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     setSaving(true); savingRef.current = true;
     try {
       // Dọn `_k` (khoá React nội bộ) trước khi gửi, y như đường lưu của trình soạn báo giá.
-      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — máy chủ (tổng HN đổ sang Quản lý dự án) nhân
-      // days bất kể mẫu. Việc dọn này trước đây làm ngay LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
+      // L64 (đợt 3): bảng dùng mẫu KHÔNG ngày gửi days: null — dữ liệu lưu sạch cho mọi nơi đọc thẳng CSDL (tổng
+      // máy chủ nay cũng tính theo mẫu từ đợt 4 — quoteUtils.bangNoiBoCoNgay). Việc dọn này trước đây làm ngay
+      // LÚC VẼ (HnTables) nên đổi mẫu qua lại là mất số Ngày.
       const goi = hnTables.map((t) => {
         const coNgay = usesDaysOf(t.templateId);
         return {

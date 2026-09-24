@@ -32,6 +32,8 @@ import {
   sanitizeExtraTables,
   sanitizeHnTables,
   extraTableSum,
+  bangNoiBoCoNgay,
+  dsMauBangNoiBo,
   phangThanhVien, vanTayHn } from "../quoteUtils.js";
 import { httpError } from "../httpError.js";
 import { sheetKhongDoi } from "../quoteSheetDiff.js";
@@ -1059,8 +1061,11 @@ export async function listQuotes(req: Request) {
   if (canBangNoiBo && rows.length) {
     // Bảng Hà Nội nay ở CẤP BÁO GIÁ nên phải nạp riêng — `presentQuoteRow` nhánh hnOnly đọc
     // `q.hnTables`. Cũng cắt ảnh ngay tại SQL, cùng lý do với bảng theo trang.
-    const hnTheoBaoGia = await bangHnTheoBaoGia(rows.map((r: any) => r.id));
-    for (const r of rows as any[]) r.hnTables = hnTheoBaoGia.get(r.id) ?? [];
+    const [hnTheoBaoGia, dsMau] = await Promise.all([bangHnTheoBaoGia(rows.map((r: any) => r.id)), dsMauBangNoiBo()]);
+    // Đợt 4: `hnTotal` của account HN tính theo mẫu của từng bảng như màn soạn (xem bangNoiBoCoNgay).
+    // An toàn để gắn: người có bảng nội bộ luôn đi nhánh hnOnly/internalOnly của presentQuoteRow — hai
+    // nhánh đó chọn trường tường minh, không trải `...q` ra phản hồi.
+    for (const r of rows as any[]) { r.hnTables = hnTheoBaoGia.get(r.id) ?? []; r._mauBangNoiBo = dsMau; }
     const theoBaoGia = await bangNoiBoTheoBaoGia(rows.map((r: any) => r.id));
     // Gắn vào ĐÚNG hình dạng mà presentQuoteRow vẫn đọc (`q.sheets[].extraTables`): cả hai nhánh
     // của nó đều flatMap qua MỌI sheet rồi mới đếm/cộng, nên gộp về một phần tử không đổi kết quả.
@@ -1264,6 +1269,7 @@ export async function listProjects(req: Request) {
       title: true, shortTitle: true, status: true, hnStatus: true,
       quoteDate: true, executionDate: true, vatPercent: true,
       subtotal: true, total: true, discount: true,
+      companyId: true,   // luật chọn mẫu dự phòng của bảng nội bộ / HN (bangNoiBoCoNgay) — không trả ra
       company: { select: { name: true, shortName: true } },
       customer: { select: { code: true, name: true, debtDays: true } },
       createdBy: { select: { displayName: true } },
@@ -1296,6 +1302,10 @@ export async function listProjects(req: Request) {
   // cột `hnTables` — nó chứa ảnh uỷ nhiệm chi base64 mà trang này chỉ cần con số tổng (đúng hồi
   // quy 9,6 MB mà tests/b2-projects-no-proof.test.js đã chốt cho `extraTables`).
   const hnTheoBaoGia = quotes.length ? await bangHnTheoBaoGia(quotes.map((q: any) => q.id)) : new Map<number, any[]>();
+  // Đợt 4 (L64 phía máy chủ): tổng hcm / hanoi / khach tính theo MẪU của từng bảng, y như màn soạn —
+  // bảng mẫu không ngày mà CSDL còn days cũ không còn bị nhân ngày ở đây (xem bangNoiBoCoNgay).
+  const dsMau = quotes.length ? await dsMauBangNoiBo() : [];
+  const tongBang = (t: any, companyId: number) => extraTableSum(t, bangNoiBoCoNgay(t, companyId, dsMau));
   const bangTheoSheet = new Map<number, any[]>();
   if (quotes.length) {
     for (const r of await bangNoiBoTheoSheet(quotes.map((q: any) => q.id))) {
@@ -1308,7 +1318,7 @@ export async function listProjects(req: Request) {
     // DÒNG MỖI TRANG. Dồn trọn vào MỘT dòng, các dòng khác để 0: cộng cả cột vẫn ra đúng tổng.
     // Hiện cùng một số trên mọi dòng thì ai cộng cột sẽ ra gấp số-trang lần — con số sai mà trông
     // như tiền thật.
-    const tongHnBaoGia = (hnTheoBaoGia.get(q.id) ?? []).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
+    const tongHnBaoGia = (hnTheoBaoGia.get(q.id) ?? []).reduce((acc: number, t: any) => acc + tongBang(t, q.companyId), 0);
     // `hnInvoiceNo` (Số HĐ Hà Nội) vẫn là cột THEO TRANG. Trên dữ liệu CŨ, bảng HN thường nằm ở
     // trang 2-3 và kế toán đã điền số hoá đơn vào ĐÚNG dòng đó — nếu dòng gánh tổng chỉ đọc
     // `hnInvoiceNo` của riêng nó thì cờ "thiếu số HĐ HN" (Projects.tsx + thẻ việc tồn đọng ở
@@ -1343,7 +1353,7 @@ export async function listProjects(req: Request) {
       createdBy: q.createdBy,
       sheets: q.sheets.map((sh: any, sIdx: number) => {
         const ex = bangTheoSheet.get(sh.id) ?? [];
-        const sumCat = (cat: string) => ex.filter((t: any) => t && t.category === cat).reduce((acc: number, t: any) => acc + extraTableSum(t), 0);
+        const sumCat = (cat: string) => ex.filter((t: any) => t && t.category === cat).reduce((acc: number, t: any) => acc + tongBang(t, q.companyId), 0);
         return {
           id: sh.id,
           name: sh.name || null,

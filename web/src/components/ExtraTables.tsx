@@ -22,8 +22,10 @@ type Sheet = { id?: number; extraTables?: ExtraTable[]; _activeExtra?: number; t
 //
 // `usesDays` (L64, đợt 3): mẫu của bảng có cột Số Ngày không. `false` → KHÔNG nhân days: bảng đang soạn
 // dùng mẫu không ngày vẫn GIỮ số Ngày cũ (đổi mẫu qua lại không mất — trước đây bị xoá ngay lúc vẽ), và
-// đường Lưu (QuoteEditor / AccountHnView) mới gửi days: null. Không truyền → như máy chủ (nhân days > 0):
-// dữ liệu đã lưu vốn đã được dọn lúc Lưu (InternalQuoteView gọi kiểu này).
+// đường Lưu (QuoteEditor / AccountHnView) mới gửi days: null. Không truyền → nhân days > 0 như trước.
+// Đợt 4: mọi nơi hiện tổng đều truyền theo mẫu — kể cả InternalQuoteView và máy chủ (quoteUtils
+// extraTableSum + bangNoiBoCoNgay, cùng luật chọn mẫu với mauBangHn) — để dữ liệu CŨ còn days ở bảng mẫu
+// không ngày ra MỘT con số trên màn soạn, trang chi phí nội bộ và Quản lý dự án.
 export function extraTableSum(t: ExtraTable, usesDays?: boolean): number {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc, it) => {
