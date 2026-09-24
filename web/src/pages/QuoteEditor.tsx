@@ -98,6 +98,18 @@ type WinDirty = Window & { __editorDirty?: boolean };
  * (ngayChoO +7h làm quoteDate cũ ≥17:00 UTC qua ngày — X2). Ngày (`…Date`) vẫn cắt 10 ký tự cho chắc.
  * Sai lệch nào khác chỉ dẫn tới 409 (an toàn, phần đang soạn được giữ qua ":xungdot").
  */
+/**
+ * Đợt 4 — bỏ mọi khoá bắt đầu bằng '_' của một hạng mục / bảng trước khi đem vào vân tay. Đó là cờ PHIÊN
+ * của lưới (`_k`, `_fxWarn`, `_fxLoi`, …): máy chủ không bao giờ trả về (zod bỏ), còn lượt soát lúc mở
+ * của lưới gắn `_fxLoi` lên chính hạng mục đang soạn. Để lọt vào là bản đang soạn lệch bản máy chủ dù
+ * không ai sửa gì → không nhận mốc mới → lần Lưu kế nhận 409 GIẢ.
+ */
+const boKhoaPhien = (o: unknown): Record<string, unknown> => {
+  const r: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((o || {}) as Record<string, unknown>)) if (!k.startsWith("_")) r[k] = v;
+  return r;
+};
+
 export const vanTayMain = (q: unknown): string => {
   const r = (q || {}) as Record<string, unknown>;
   const dau: Record<string, unknown> = {};
@@ -111,7 +123,7 @@ export const vanTayMain = (q: unknown): string => {
   const trang = ((r.sheets as Sheet[] | undefined) || []).map((s) => ({
     id: s.id ?? null, templateId: s.templateId ?? null, name: s.name ?? "", discount: Number(s.discount) || 0,
     groupSubtotal: !!s.groupSubtotal, showImages: !!s.showImages,
-    items: (s.items || []).map((it) => ({ ...it, _k: undefined })),
+    items: (s.items || []).map(boKhoaPhien),
     noiBo: noiDungBangNoiBo(s.extraTables),
   }));
   return JSON.stringify({ dau, trang });
@@ -970,7 +982,8 @@ Lý do (không bắt buộc):`,
         baseNhapRef.current = (u as { updatedAt?: string }).updatedAt ?? null;
         redraw(); return;
       }
-      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...(t as object), _k: undefined, items: ((t as { items?: unknown[] }).items || []).map((it) => ({ ...(it as object), _k: undefined })) })));
+      // Đợt 4: bỏ MỌI khoá '_' (không chỉ `_k`) — xem boKhoaPhien.
+      const vanTayHn = (ts: unknown) => JSON.stringify((Array.isArray(ts) ? ts : []).map((t) => ({ ...boKhoaPhien(t), items: ((t as { items?: unknown[] }).items || []).map(boKhoaPhien) })));
       const giongHn = vanTayHn(cur.hnTables) === vanTayHn(u.hnTables);
       const rec = cur as Record<string, unknown>, moi = u as Record<string, unknown>;
       for (const k of ["hnStatus", "hnRejectNote", "hnAssigneeId", "hnSubmittedAt", "hnReviewedAt", "hnReviewerId", "members"]) if (k in moi) rec[k] = moi[k];

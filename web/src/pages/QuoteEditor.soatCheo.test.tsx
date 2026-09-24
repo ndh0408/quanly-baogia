@@ -59,7 +59,7 @@ vi.mock("../lib/venueCatalog", async (goc) => ({ ...(await goc<typeof import("..
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-import { QuoteEditorPage } from "./QuoteEditor";
+import { QuoteEditorPage, vanTayMain } from "./QuoteEditor";
 import { ApiError } from "../lib/api";
 import * as ui from "../lib/ui";
 
@@ -190,6 +190,28 @@ describe("app#11 — duyệt HN khi dirty không được nuốt lượt lưu c�
     await bam(nut("✓ Duyệt"));
     await bam(nut("Lưu"));
     expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt).toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  // Đợt 4 (409 GIẢ do 36fef19): lượt soát lúc mở của lưới bật cờ phiên `_fxLoi` lên hạng mục bảng HN có
+  // công thức đã lưu nay không tính được. vanTayHn so bảng HN đang soạn (có cờ) với bản máy chủ (zod bỏ
+  // cờ) → tưởng bảng HN đã đổi, không nhận mốc duyệt → lần Lưu kế tự đâm 409.
+  it("bảng HN có công thức đã lưu nay không tính được (lưới gắn `_fxLoi` lúc mở) → vẫn nhận mốc MỚI", async () => {
+    const hnLoi = () => [{ name: "HN", templateId: 1, groupSubtotal: false, items: [{ kind: "item", name: "Khung", unit: "cái", quantity: 1, unitPrice: 525_000, formulas: { unitPrice: "=ROUND(F1*0,5)" }, rid: "r1" }] }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnTables: hnLoi() }));
+    await moEditor();
+    expect(hop!.querySelector(".cell-fx-error"), "lưới HN phải tô đỏ ô công thức lỗi ngay khi mở").not.toBeNull();
+    goTenKhach("Khách MỚI");
+    h.getQuote.mockImplementationOnce(async () => baoGia({ hnStatus: "approved", hnTables: hnLoi(), updatedAt: "2026-09-21T05:00:00.000Z" }));
+    await bam(nut("✓ Duyệt"));
+    await bam(nut("Lưu"));
+    expect((h.updateQuote.mock.calls[0][1] as Record<string, unknown>).baseUpdatedAt, "cờ phiên `_fxLoi` làm vân tay HN lệch → 409 giả").toBe("2026-09-21T05:00:00.000Z");
+  });
+
+  // Cùng lớp, phía trang chính: vanTayMain hôm nay chỉ nhận JSON máy chủ, nhưng hạng mục trang chính cũng
+  // mang cờ phiên của lưới — hàm vân tay không được phụ thuộc vào chuyện ai gọi nó.
+  it("vanTayMain bỏ cờ phiên của hạng mục trang chính (`_k`, `_fxLoi`, `_fxWarn`)", () => {
+    const coCo = baoGia({ sheets: [trang(101, { items: [{ kind: "item", name: "Backdrop", unit: "cái", quantity: 1, unitPrice: 1000, _k: 7, _fxLoi: { unitPrice: true }, _fxWarn: { total: true } }] })] });
+    expect(vanTayMain(coCo)).toBe(vanTayMain(baoGia()));
   });
 
   it("đối chứng: vừa tự Lưu (bản máy chủ mới) rồi duyệt HN khi dirty → nhận mốc MỚI", async () => {
