@@ -227,9 +227,12 @@ function goiHam(ten: string, trong: string): string {
   }
   doiSo.push(trong.slice(dau));
   // Đối số KHÔNG đọc được → cả công thức lỗi (GRID-03), y hệt web: không lọc bỏ im lặng rồi tính
-  // tiếp trên phần còn lại. Đối số rỗng ("SUM()") bỏ qua.
+  // tiếp trên phần còn lại. Đối số RỖNG giữa các dấu tách ("MIN(F1;)") là 0 như Excel, y hệt web — bản
+  // trước bỏ nó nên tự kiểm khớp số lưới (58.000) và tệp ghi "MIN(G12,)" mà Excel ra 0 (soát toàn diện
+  // đợt 3). Lời gọi không có đối số nào ("SUM()") giữ như cũ.
   let hong = false;
-  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  const khongDoiSo = doiSo.length === 1 && doiSo[0].trim() === "";
+  const vals = (khongDoiSo ? [] : doiSo).map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
   // Bọc ngoặc như web (L37): "=2SUM(F2;F3)" không còn ghép thành 21.113.000 mà là lỗi.

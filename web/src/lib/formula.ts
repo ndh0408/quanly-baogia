@@ -227,9 +227,14 @@ function goiHam(ten: string, trong: string): string {
   }
   doiSo.push(trong.slice(dau));
   // Đối số KHÔNG đọc được (vd "123.45,2") → cả công thức lỗi, không lọc bỏ im lặng rồi tính tiếp
-  // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ). Đối số rỗng ("SUM()") bỏ qua.
+  // trên phần còn lại (GRID-03: =ROUND(G3,2) từng ra 0 mà ô không đỏ).
+  // Đối số RỖNG giữa các dấu tách ("MIN(F1;)", "ROUND(;2)") là 0 như Excel. Bản trước BỎ nó: app ra
+  // MIN = 58.000, AVERAGE = 58.000, ROUND(;2) = 2 trong khi Excel ra 0 / 29.000 / 0 — bộ tự kiểm máy chủ
+  // bỏ y như vậy nên tệp vẫn ghi công thức và Excel tính ra số khác app / PDF (soát toàn diện đợt 3).
+  // Lời gọi không có đối số nào ("SUM()") giữ như cũ: danh sách rỗng.
   let hong = false;
-  const vals = doiSo.filter((a) => a.trim() !== "").map((a) => evalArith(a)).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
+  const khongDoiSo = doiSo.length === 1 && doiSo[0].trim() === "";
+  const vals = (khongDoiSo ? [] : doiSo).map((a) => (a.trim() === "" ? 0 : evalArith(a))).filter((v): v is number => { if (v === null || !isFinite(v)) { hong = true; return false; } return true; });
   if (hong) return "NaN";
   const r = fn(vals);
   // BỌC NGOẶC (L37): trả chuỗi trần thì kết quả dính vào chữ số đứng cạnh — "=2SUM(F2;F3)" thành
