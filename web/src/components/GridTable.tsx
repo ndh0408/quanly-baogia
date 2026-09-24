@@ -444,6 +444,10 @@ function GridTableInner(props: GridTableProps) {
     // dòng quantityExact nạp từ Excel). Trước đây trả số THÔ nên =E3*G3 nhân 7,4213 trong khi ô
     // hiện 7,4 và Thành Tiền của hàng (lineAmount → qtyForAmount) nhân 7,4 → hai con số lệch nhau.
     if (p.f === "quantity") return M.qtyForAmount(items[p.row]);
+    // SỐ NGÀY trống (0 / null) đọc là 1 — cùng quy ước days||1 của lineAmount, excel.ts (ô Số Ngày ghi 1)
+    // và bộ tự kiểm máy chủ (editorCellNum). Đọc 0 thì "=E1*50000" ra 0 trên app, tệp Excel tính lại ra
+    // 50.000 nên máy chủ phải ghi số chết thay cho công thức sống (L35).
+    if (p.f === "days") return Number(it.days) || 1;
     if (NUMERIC.has(p.f)) return Number(it[p.f]) || 0; return M.parseVN((it[p.f] as string) || ""); };
   /** Bộ giải tham chiếu GẮN với hàng đang hỏi — cần `hangGoi` để bắt vòng lặp, và cho truyền sẵn
    *  `tn` để một lượt `recomputeAll` không phải dựng lại bảng tổng cho từng ô. */
