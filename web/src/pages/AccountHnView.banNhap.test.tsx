@@ -200,6 +200,30 @@ describe("soát toàn diện — hộp hỏi ở đường nạp (Account Hà N�
     expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "cờ bẩn của #11 bị hạ").toBe(true);
   });
 
+  // Đợt 3 (L61 phần component con): hộp "Xóa nhiều hàng" của lưới HN gọi ngược mark() của view. View đã gỡ
+  // mà mark() vẫn chạy thì bật cờ `__editorDirty` DÙNG CHUNG của #11 và hẹn giờ ghi bản nháp giá HN #12.
+  it("'Xóa nhiều hàng' trong lưới HN #12 còn treo khi đã sang #11: xác nhận KHÔNG bật cờ của #11, KHÔNG ghi bản nháp #12", async () => {
+    let traLoi!: (v: boolean) => void;
+    const hai = [{ kind: "item", name: "Khung backdrop", quantity: 1, unitPrice: 5_000_000, days: 1 }, { kind: "item", name: "Bạt", quantity: 1, unitPrice: 1_000_000, days: 1 }];
+    h.getQuote = async () => baoGia({ id: 12, hnTables: [{ ...baoGia().hnTables[0], items: hai }] });
+    await mo();
+    confirmMock().mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const phim = (init: KeyboardEventInit) => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+    act(() => { (host!.querySelector('tr[data-row="0"] [data-f="name"]') as HTMLElement).focus(); });
+    phim({ key: "ArrowDown", shiftKey: true });
+    phim({ key: " ", code: "Space", shiftKey: true });
+    phim({ key: "-", ctrlKey: true });
+    expect(confirmMock()).toHaveBeenCalledWith("Xóa nhiều hàng", expect.any(String), expect.anything());
+    act(() => root!.unmount()); host!.remove();
+    h.getQuote = async () => baoGia();
+    await mo();
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await act(async () => { traLoi(true); });
+    await cho(1300);
+    expect((window as Window & { __editorDirty?: boolean }).__editorDirty, "hộp treo của #12 bật cờ chặn rời trang trên #11").toBe(false);
+    expect(docBanNhap(KHOA12, 5), "hộp treo của #12 ghi bản nháp giá HN #12 sau khi view đã gỡ").toBeNull();
+  });
+
   it("đối chứng: view còn gắn, xác nhận 'Gửi duyệt' → lưu rồi gửi duyệt đúng báo giá đang mở", async () => {
     await mo();
     const nutGui = [...host!.querySelectorAll("button")].find((b) => /Gửi duyệt/.test(b.textContent || ""))!;

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
@@ -52,6 +52,9 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   const [active, setActive0] = useState(0);
   const [mo, setMo] = useState(moMacDinh);
   const setActive = (i: number) => { setActive0(i); redraw(); };
+  // L61: component còn gắn không — hộp hỏi xoá bảng không tự đóng khi rời trang (xem xoaBang).
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
 
   tables.forEach((x) => { if (x._k == null) x._k = nextK(); (x.items || []).forEach((it) => { if (it._k == null) it._k = nextK(); }); });
 
@@ -101,11 +104,13 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
     onChange();
   };
   const xoaBang = async (i: number) => {
+    // L61 (đợt 3): trả lời hộp treo sau khi editor / màn Account HN đã gỡ = coi như Hủy — không xoá bảng
+    // của báo giá đã rời, không gọi mark() của màn đã gỡ (bật cờ `__editorDirty` DÙNG CHUNG trang mới).
     const r = await removeTableFromList(tables as ExtraTable[], i, ai, (tbl) => confirmModal(
       "Xoá sheet Hà Nội?",
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá" },
-    ));
+    ).then((dong) => dong && songRef.current));
     if (!r.removed) return;
     setActive(r.active);
     onChange();

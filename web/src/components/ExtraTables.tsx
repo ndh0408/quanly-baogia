@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable, safeImgSrc } from "./GridTable";
@@ -111,6 +111,9 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
   /* Khối nào đang mở. Chưa đụng tới thì theo mặc định: ĐÓNG HẾT — trang soạn báo giá vốn đã dài,
      và tiêu đề đã nói đủ số sheet + số tiền nên đóng vẫn đọc được. Xem KhoiSheet.tsx. */
   const [mo, setMo] = useState<Record<string, boolean>>({});
+  // L61: component còn gắn không — hộp hỏi xoá bảng không tự đóng khi rời trang (xem removeTable).
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
 
   if (!Array.isArray(sheet.extraTables)) sheet.extraTables = [];
   const tables = sheet.extraTables;
@@ -145,11 +148,13 @@ export function ExtraTables({ sheet, templates, companyId, editable, editableCat
     sheet._activeExtra = tables.length - 1; onChange();
   };
   const removeTable = async (i: number) => {
+    // L61 (đợt 3): trả lời hộp treo sau khi đã gỡ (Back lúc hộp đang mở) = coi như Hủy — không xoá bảng
+    // của báo giá đã rời, không gọi mark() của editor đã gỡ (bật cờ `__editorDirty` DÙNG CHUNG trang mới).
     const ok = await removeExtraTableAt(sheet, i, (tbl) => confirmModal(
       "Xoá sheet nội bộ?",
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá sheet" },
-    ));
+    ).then((dong) => dong && songRef.current));
     if (ok) onChange();
   };
 

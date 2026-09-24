@@ -277,6 +277,11 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
   const meIdRef = useRef(me.id);   // mark() là useCallback([]) — đọc người ghi bản nháp qua ref
   meIdRef.current = me.id;
   const mark = useCallback(() => {
+    // L61 (đợt 3): hộp hỏi trong component CON (lưới "Xóa nhiều hàng", "Xoá sheet nội bộ / Hà Nội") không
+    // tự đóng khi Back; trả lời nó sau khi editor đã gỡ thì onChange/onMarkDirty gọi về đây. Chạy tiếp là
+    // bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản nháp báo giá cũ SAU cleanup.
+    // Chặn một chỗ cho mọi đường.
+    if (!songRef.current) return;
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
     if (nhapQuaLonRef.current) return;   // đã biết không ghi nổi — đừng tốn CPU nữa
     if (hnNhapRef.current) clearTimeout(hnNhapRef.current);

@@ -53,6 +53,10 @@ export function AccountHnView({ quoteId, meId }: { quoteId: number; meId?: numbe
     ghiBanNhap(khoaNhapRef.current, { hnTables: qRef.current.hnTables }, mocNhapRef.current, meId);
   };
   const mark = () => {
+    // L61 (đợt 3): hộp hỏi trong component con (lưới "Xóa nhiều hàng", "Xoá sheet Hà Nội") trả lời SAU khi
+    // view đã gỡ vẫn gọi về đây — bật cờ `__editorDirty` DÙNG CHUNG của trang đang mở và hẹn giờ ghi bản
+    // nháp giá HN của báo giá đã rời sau khi cleanup đã huỷ hẹn giờ. Cờ còn gắn khai ở dưới (songRef).
+    if (!songRef.current) return;
     dirtyRef.current = true; (window as WinDirty).__editorDirty = true;
     if (henNhapRef.current) clearTimeout(henNhapRef.current);
     henNhapRef.current = setTimeout(ghiNhapNgay, 1200);

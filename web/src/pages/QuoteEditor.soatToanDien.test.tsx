@@ -199,6 +199,29 @@ describe("L61 — hộp lý do còn treo sau khi rời báo giá không được
     expect((window as WinDirty).__editorDirty, "hộp treo của #11 bật cờ chặn rời trang trên #12").toBe(false);
   });
 
+  // Đợt 3: hộp hỏi nằm trong component CON (lưới "Xóa nhiều hàng", "Xoá sheet nội bộ/Hà Nội") gọi ngược
+  // mark() của editor. Editor đã gỡ mà mark() vẫn chạy thì bật cờ `__editorDirty` DÙNG CHUNG của #12 và hẹn
+  // giờ ghi bản nháp #11 (sau khi cleanup đã huỷ hẹn giờ) — lần mở #11 sau bị mời khôi phục phần đã bỏ.
+  it("'Xóa nhiều hàng' trong lưới #11 còn treo khi đã sang #12: xác nhận KHÔNG bật cờ 'chưa lưu' của #12, KHÔNG ghi bản nháp #11", async () => {
+    const hai = [{ kind: "item", name: "Backdrop", unit: "cái", quantity: 1, unitPrice: 1000 }, { kind: "item", name: "Standee", unit: "cái", quantity: 1, unitPrice: 2000 }];
+    h.getQuote.mockImplementationOnce(async () => baoGia({ sheets: [trang(101, { items: hai })] }));
+    await moEditor();
+    let traLoi!: (v: boolean) => void;
+    (ui.confirmModal as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<boolean>((r) => { traLoi = r; }));
+    const phim = (init: KeyboardEventInit) => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+    act(() => { (hop!.querySelector('.editor tr[data-row="0"] [data-f="name"]') as HTMLElement).focus(); });
+    phim({ key: "ArrowDown", shiftKey: true });
+    phim({ key: " ", code: "Space", shiftKey: true });
+    phim({ key: "-", ctrlKey: true });
+    expect(ui.confirmModal).toHaveBeenCalledWith("Xóa nhiều hàng", expect.any(String), expect.anything());
+    await roiSang12();
+    expect((window as WinDirty).__editorDirty).toBe(false);
+    await act(async () => { traLoi(true); });
+    await cho(1300);
+    expect((window as WinDirty).__editorDirty, "hộp treo của lưới #11 bật cờ chặn rời trang trên #12").toBe(false);
+    expect(docBanNhap(khoaBanNhap(11, 1), 1), "hộp treo của lưới #11 ghi bản nháp #11 sau khi editor đã gỡ").toBeNull();
+  });
+
   it("đối chứng: không rời trang → xác nhận 'Khách không chốt' vẫn gọi markLost(11)", async () => {
     await moEditor();
     await bam(nut("Khách không chốt"));
