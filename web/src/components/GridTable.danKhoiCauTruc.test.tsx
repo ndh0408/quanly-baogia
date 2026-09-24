@@ -203,6 +203,19 @@ describe("L13 — dán khối KHÔNG phủ nguyên hàng lên hàng NHÓM: giữ
     dan(kho);
     expect([items[1].name, items[1].unit, items[1].quantity, items[1].unitPrice]).toEqual(["X", "m2", 2, 150000]);
   });
+
+  it("khối trong app BẮT ĐẦU từ Hạng Mục (không nguyên hàng) dán vào ô SL của hàng nhóm: vẫn vào từ Hạng Mục", () => {
+    // Phản biện L13: bỏ hẳn việc ép về Hạng Mục thì khối "Hạng Mục → Đơn Giá" ghép theo vị trí từ cột SL
+    // — tên rơi vào SL (đọc ra 0), ĐVT/SL/ĐG lệch sang phải. Bản trước L13 làm đúng ca này.
+    const items = [nhom({ name: "Nhóm" }), mk({ name: "X", unit: "m2", quantity: 2, unitPrice: 150000 })];
+    const o = moLuoi(items);
+    vao(o(1, "name")); moRong("ArrowRight", 3);
+    const kho = chep();
+    vao(o(0, "quantity"));
+    dan(kho);
+    expect(items.map((x) => `${x.kind}:${x.name}`)).toEqual(["section:Nhóm", "item:X", "item:X"]);
+    expect({ u: items[1].unit, q: items[1].quantity, p: items[1].unitPrice }, "tên hạng mục rơi vào ô SL").toEqual({ u: "m2", q: 2, p: 150000 });
+  });
 });
 
 describe("L18 — dán khối bắt đầu ở DÒNG THÔNG TIN: số vừa dán phải hiện và vào tổng", () => {

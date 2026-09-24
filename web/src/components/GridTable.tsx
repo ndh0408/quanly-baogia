@@ -1452,6 +1452,9 @@ function GridTableInner(props: GridTableProps) {
       // GIỮ cột đang chọn (soát toàn diện L13): bản cũ ép về Hạng Mục, nên chép SL + ĐG rồi dán vào ô SL
       // của nhóm thì số rơi vào Hạng Mục / ĐVT, SL/ĐG = 0. Ô chọn ở cột chỉ đọc (STT/TT) đã được đưa về
       // Hạng Mục ở đầu onPaste; khối nguyên hàng ghép theo tên trường nên không phụ thuộc startCol.
+      // Riêng khối trong app BẮT ĐẦU từ Hạng Mục thì vẫn vào từ Hạng Mục (phản biện L13): giữ cột SL thì
+      // tên rơi vào SL (đọc ra 0), ĐVT/SL/ĐG lệch sang phải — hàng chèn mới nên chỉ có một đích hợp lý.
+      if (internal?.fields?.[0] === "name") startCol = COL_NAME;
       startRow += 1;
     }
     // Khối copy từ cột STT = phủ nguyên hàng → mang theo đủ cấu trúc (loại hàng, nhãn) và ghép cột
