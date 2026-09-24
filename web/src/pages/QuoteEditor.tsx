@@ -464,6 +464,13 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
     khoaNhapRef.current = null;
     (async () => {
       try {
+        // L72 (phần mạng): bắt đầu GET báo giá SONG SONG với meta. Lần mở đầu tiên của phiên (cache meta
+        // còn trống) từng chờ xong meta rồi mới gọi getQuote — thêm trọn một vòng mạng trước khi thấy báo
+        // giá. Kết quả vẫn chỉ được đọc ở `await pQ` bên dưới, đúng chỗ cũ: thứ tự xử lý bản nháp / khoá
+        // không đổi, lỗi thật vẫn vào catch. `.catch` rỗng chỉ để meta hỏng TRƯỚC (thoát khỏi try khi
+        // chưa tới `await pQ`) thì promise này không thành "unhandled rejection".
+        const pQ = isNew ? null : api.getQuote(quoteId!);
+        pQ?.catch(() => {});
         if (!_companies || !_templates) {
           const [cs, ts] = await Promise.all([api.metaCompanies(), api.metaTemplates()]);
           _companies = cs; _templates = ts;
@@ -485,7 +492,7 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
             };
           }
         } else {
-          q = await api.getQuote(quoteId!);
+          q = await pQ!;
         }
         // app#11 / X2: vân tay của bản MÁY CHỦ — lấy TRƯỚC khi bản nháp phủ lên VÀ trước bước chuẩn hoá
         // ngay dưới. Mọi bản đem ra so sau này (bản GET kiểm tra, bản PUT/chốt trả về) đều là JSON thô
