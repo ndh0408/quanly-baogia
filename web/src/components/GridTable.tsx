@@ -1919,22 +1919,6 @@ function GridTableInner(props: GridTableProps) {
     return () => { if (raf) cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
-  // Cột đổi bề ngang → mọi textarea vẫn giữ style.height đo từ bề ngang CŨ: ô từng bị hẹp (chữ wrap
-  // 30 dòng) nên cao ~430px, cột rộng ra rồi vẫn cao y nguyên vì autoGrow chỉ chạy lúc mount / lúc
-  // gõ / lúc đổi giá trị. Đo lại toàn bộ sau mỗi lần bố cục cột thay đổi.
-  useEffect(() => {
-    const tb = tableRef.current;
-    if (!tb || !wrapW) return;
-    // Đo lại chiều cao MỌI textarea là việc nặng (mỗi ô một lần reflow) — dồn về cuối khung hình và
-    // bỏ qua trong lúc người dùng đang gõ, kẻo lưới dài vài trăm hàng bị khựng.
-    const raf = requestAnimationFrame(() => {
-      if (editingRef.current) return;
-      tb.querySelectorAll("textarea").forEach((t) => autoGrow(t as HTMLTextAreaElement));
-    });
-    return () => cancelAnimationFrame(raf);
-    // Cùng bộ phụ thuộc với COLS (khai báo bên dưới) — bố cục cột đổi thì chiều cao ô phải đo lại.
-  }, [wrapW, showDetail, usesDays, internalNote, showImages, approveCol, payCol, editable]);
-
   // Safari/macOS không phải lúc nào cũng blur input khi bấm vùng không nhận focus. Dọn selection
   // ngay từ pointerdown ngoài lưới để màu/target không bị treo khác nhau giữa các trình duyệt.
   useEffect(() => {
@@ -2225,6 +2209,35 @@ function GridTableInner(props: GridTableProps) {
   // Hẹp hơn tổng min → .tbl-scroll CUỘN NGANG thay vì bóp méo. Trước đây .excel-table chỉ có
   // min-width bên trong @media (max-width:920px) nên desktop không hề có chốt chặn nào.
   const tableMinW = COLS.reduce((a, c) => a + c.min, 0);
+
+  // Cột đổi bề ngang → mọi textarea vẫn giữ style.height đo từ bề ngang CŨ: ô từng bị hẹp (chữ wrap
+  // 30 dòng) nên cao ~430px, cột rộng ra rồi vẫn cao y nguyên vì autoGrow chỉ chạy lúc mount / lúc
+  // gõ / lúc đổi giá trị. Đo lại toàn bộ sau mỗi lần bố cục cột thay đổi.
+  //
+  // TRỪ lượt ĐẦU TIÊN wrapW đi từ 0 lên (soát toàn diện L70): lúc dựng lưới (mỗi lần đổi sheet) từng
+  // textarea đã tự đo (ref={autoGrow}) với đúng bề ngang thật của bảng — wrapW = 0 chỉ là COLS chưa
+  // biết khung, còn DOM thì đã nằm trong khung thật. Nếu COLS tính với bề ngang vừa báo TRÙNG chữ ký
+  // lúc dựng và khung không đổi (< 24px, cùng ngưỡng với ResizeObserver) thì bố cục y hệt → đo lại cả
+  // lưới là thừa (lưới 150 ô = 300 lượt đo mỗi lần đổi sheet). Không bỏ qua khi: màn hẹp (cột co thật),
+  // lưới dựng lúc bị ẩn (khung 0 → ô đo ra 0, phải đo lại khi hiện), hay mọi lần đổi cỡ về sau — cột
+  // Hạng Mục `w: null` nở theo khung nên COLS không đổi mà chữ vẫn gấp dòng khác.
+  const lucDungRef = useRef<{ chuKy: string; khung: number } | null | false>(null);   // false = đã qua lượt đầu
+  useEffect(() => {
+    const tb = tableRef.current;
+    const chuKy = COLS.map((c) => `${c.w}/${c.min}`).join(",");
+    if (lucDungRef.current === null) lucDungRef.current = { chuKy, khung: Math.round(scrollRef.current?.clientWidth || 0) };
+    if (!tb || !wrapW) return;
+    const moc = lucDungRef.current; lucDungRef.current = false;
+    if (moc && moc.khung > 0 && moc.chuKy === chuKy && Math.abs(moc.khung - wrapW) < 24) return;
+    // Đo lại chiều cao MỌI textarea là việc nặng (mỗi ô một lần reflow) — dồn về cuối khung hình và
+    // bỏ qua trong lúc người dùng đang gõ, kẻo lưới dài vài trăm hàng bị khựng.
+    const raf = requestAnimationFrame(() => {
+      if (editingRef.current) return;
+      tb.querySelectorAll("textarea").forEach((t) => autoGrow(t as HTMLTextAreaElement));
+    });
+    return () => cancelAnimationFrame(raf);
+    // COLS dựng lại mỗi khi bề ngang hay bộ cột đổi — bố cục cột đổi thì chiều cao ô phải đo lại.
+  }, [wrapW, COLS]);
 
   // ── derived ───────────────────────────────────────────────────────────────────
   const sectionSum = tinhTongNhom().tong;
