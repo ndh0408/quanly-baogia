@@ -62,7 +62,7 @@ lại mỗi request.
 **Quyền nằm ở SERVER.** Ẩn menu ở frontend là tiện lợi cho người dùng, không phải
 phân quyền. Mọi endpoint tự kiểm quyền.
 
-`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 141 endpoint và
+`docs/product/ROLES_PERMISSIONS.md` liệt kê cả 142 endpoint và
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI — **một endpoint không
 có trong ma trận là một endpoint chưa ai soát quyền**.
 

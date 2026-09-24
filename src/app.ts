@@ -46,6 +46,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import permissionsRoutes from "./routes/permissions.routes.js";
 import gdprRoutes from "./routes/gdpr.routes.js";
 import searchRoutes from "./routes/search.routes.js";
+import { phienBanHienTai } from "./phienBan.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PgSession = connectPgSimple(session);
@@ -336,6 +337,15 @@ export function createApp() {
     message: { error: "Quá nhiều yêu cầu, thử lại sau ít phút" },
   });
   app.use("/api/", apiLimiter);
+
+  // PHIÊN BẢN ĐANG PHÁT (src/phienBan.ts) — web hỏi định kỳ để báo "Có bản mới" sau deploy. Công khai
+  // (trang đăng nhập cũng cần biết) và đặt TRƯỚC cổng phiên bên dưới: đi qua phiên thì mỗi lần hỏi (5
+  // phút/tab) lại làm mới cookie rolling → tab bỏ quên KHÔNG BAO GIỜ hết phiên. Vẫn nằm sau apiLimiter.
+  // Chỉ trả tên tệp giao diện (vốn đã công khai trong index.html) + mã commit rút gọn (repo công khai).
+  app.get("/api/phien-ban", (_req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json(phienBanHienTai());
+  });
 
   // Cache-Control: no-store MẶC ĐỊNH cho MỌI /api/* — ultracode audit 2026-09-09 (finding WEB-1).
   //

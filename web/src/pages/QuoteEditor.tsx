@@ -380,7 +380,10 @@ export function QuoteEditorPage({ me, quoteId, isNew }: { me: Me; quoteId?: numb
       saveRef.current?.();
     };
     window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    // "Lưu rồi tải bản mới" (dải báo bản mới, ../lib/phienBan.ts luuRoiBao): cùng save() của nút Lưu.
+    const luuChoBanMoi = (e: Event) => { const d = (e as CustomEvent<{ hua: Promise<unknown>[] }>).detail; if (saveRef.current && d?.hua) d.hua.push(Promise.resolve(saveRef.current())); };
+    window.addEventListener("phien-ban:luu", luuChoBanMoi);
+    return () => { window.removeEventListener("keydown", h); window.removeEventListener("phien-ban:luu", luuChoBanMoi); };
   }, []);
 
   // Cảnh báo CHƯA LƯU: chặn F5/đóng tab (beforeunload) theo dirtyRef; cờ global __editorDirty để Shell

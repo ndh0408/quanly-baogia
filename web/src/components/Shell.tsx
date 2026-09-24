@@ -4,6 +4,7 @@ import { confirmModal, toast } from "../lib/ui";
 import { xoaMoiBanNhap } from "../lib/localDraft";
 import { dangXuat, phatDangXuat } from "../lib/authSync";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
+import { PhienBanChanMenu } from "./PhienBan";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
 async function guardLeave(): Promise<boolean> {
@@ -523,6 +524,7 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
+            <PhienBanChanMenu />
             {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
             <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); quenGoiYMoSoan(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
           </div>

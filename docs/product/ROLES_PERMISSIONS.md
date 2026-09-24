@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 141 endpoint
+# Ma trận phân quyền — toàn bộ 142 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -235,6 +235,7 @@ nhưng "không có dữ liệu" phải là kết luận sau khi kiểm, không p
 | M | Đường dẫn | AUTH | QUYỀN | Ghi chú | TT |
 |---|---|---|---|---|---|
 | GET | `/metrics` | Bearer | `METRICS_TOKEN` | **fail-closed ở prod**: thiếu token → 404. So sánh hằng-thời-gian | OK |
+| GET | `/api/phien-ban` | ✗ | — | Bản giao diện máy chủ đang phát (tên tệp JS chính — vốn công khai trong index.html) + mã commit rút gọn, để web báo "Có bản mới" sau deploy. Công khai CÓ CHỦ Ý (trang đăng nhập cũng cần) và đặt TRƯỚC cổng phiên: web hỏi 5 phút/lần, đi qua phiên thì cookie rolling không bao giờ hết hạn. `no-store` | OK |
 | GET | `/api/csrf-token` | ✗ | — | Cấp mã chống giả mạo GẮN VỚI PHIÊN gọi nó. Công khai một cách CÓ CHỦ Ý: mã chỉ có giá trị với đúng phiên nhận nó, nên lấy được mã của phiên MÌNH không giúp gì cho việc giả mạo phiên NGƯỜI KHÁC. `no-store` để proxy/CDN không phát mã của người này cho người kia | OK |
 | GET | `/livez` · `/api/health` | ✗ | — | chỉ `{ok:true}` | OK |
 | GET | `/readyz` | ✗ | — | không lộ chi tiết lỗi DB | OK |
