@@ -802,8 +802,10 @@ function fillSheetData(ws: any, cfg: any, quote: any, sheet: any, vatPct: any, s
   // 67pt trong khi `toBlockFormat` sinh 5 dòng cỡ 12pt ⇒ cần ≈75pt, nên DÒNG EMAIL BỊ CẮT ngay cả
   // khi mọi trường đều ngắn. Cùng đúng lớp lỗi "xuống hàng bị che" đã chữa cho hàng hạng mục.
   // GN không khai `toBlockCell`/`infoBannerCell` nên không đi qua đây.
-  const beRongVungGop = (addr: string): number | null => {
-    const vung = ((ws.model?.merges || []) as string[]).find((r) => r.startsWith(`${addr}:`));
+  // `dsGop`: danh sách vùng gộp đã lấy sẵn. Đọc `ws.model` là DỰNG LẠI model cả sheet (O(số ô)), nên
+  // vòng đo nhiều ô liền nhau (hàng tiêu đề cột) lấy một lần rồi truyền vào, không đọc lại mỗi ô.
+  const beRongVungGop = (addr: string, dsGop?: string[]): number | null => {
+    const vung = (dsGop ?? ((ws.model?.merges || []) as string[])).find((r) => r.startsWith(`${addr}:`));
     const m = vung && /^([A-Z]+)\d+:([A-Z]+)\d+$/.exec(vung);
     if (!m || m[1].length > 1 || m[2].length > 1) return null;
     let tong = 0;
@@ -1579,7 +1581,10 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
   // GN (33pt, chữ 10) đã đủ nên giữ nguyên. Đặt cuối cùng, sau mọi bước đổi nhãn/gộp ô/cột ảnh.
   if (itemsCfg.headerRow) {
     const hr = itemsCfg.headerRow;
-    const gop = ((ws.model?.merges || []) as string[]).map((m) => /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m)).filter(Boolean) as RegExpExecArray[];
+    // Lấy danh sách vùng gộp MỘT lần cho cả vòng (soát toàn diện đợt 4): trước đây mỗi ô bật wrap còn
+    // gọi `beRongVungGop` tự đọc lại `ws.model` — thêm 2–5 lần dựng model cả sheet mỗi sheet.
+    const dsGop = (ws.model?.merges || []) as string[];
+    const gop = dsGop.map((m) => /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m)).filter(Boolean) as RegExpExecArray[];
     let can = 0;
     for (const L of new Set([...Object.values(cols) as string[], ...(imgCol ? [imgCol] : [])])) {
       const ci = colLetterToIdx(L);
@@ -1592,7 +1597,7 @@ ${ghiChu}`, null, beRongVungGop(oChinh), fGC);
         const chu = typeof v === "string" ? v : Array.isArray(v?.richText) ? v.richText.map((x: any) => x.text).join("") : "";
         if (!chu.trim()) continue;
         const f = fontDo(`${L}${hr}`);
-        const soDong = o.alignment?.wrapText ? wrapLines(chu, L, beRongVungGop(`${L}${hr}`), f) : 1;
+        const soDong = o.alignment?.wrapText ? wrapLines(chu, L, beRongVungGop(`${L}${hr}`, dsGop), f) : 1;
         can = Math.max(can, soDong > 1 ? soDong * caoMotDongPt(f.co) + 3 : caoMotDongPt(f.co));
       } catch { /* bỏ qua ô lạ */ }
     }
