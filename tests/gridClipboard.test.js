@@ -328,6 +328,26 @@ describe("suyQuyUocSo / parseTheoQuyUoc — quy ước số của cả khối", 
     expect(parseTheoQuyUoc("250,000.00", "us")).toBe(250000);
     expect(parseTheoQuyUoc("(1.500.000)", "vn")).toBe(-1500000);
   });
+  // Soát toàn diện đợt 3 (L51): dấu nghìn chỉ là dấu nghìn khi nhóm sau nó đúng 3 chữ số. Bản trước bỏ
+  // mọi "." ở quy ước VN → "0.5" = 5, "1.5" = 15 (và đối xứng "0,5" = 5 ở quy ước US). Bộ nhập Excel
+  // gọi thẳng hàm này (không qua khopQuyUoc như lưới) nên đọc sai tiền 10 lần.
+  it("parseTheoQuyUoc: MỘT dấu nghìn mà nhóm sau không đủ 3 chữ số → là dấu thập phân", () => {
+    expect(parseTheoQuyUoc("0.5", "vn")).toBe(0.5);
+    expect(parseTheoQuyUoc("1.5", "vn")).toBe(1.5);
+    expect(parseTheoQuyUoc("2.25", "vn")).toBe(2.25);
+    expect(parseTheoQuyUoc("-0.5", "vn")).toBe(-0.5);
+    expect(parseTheoQuyUoc("(1.5)", "vn")).toBe(-1.5);
+    expect(parseTheoQuyUoc("0,5", "us")).toBe(0.5);
+    expect(parseTheoQuyUoc("12,25", "us")).toBe(12.25);
+    // Nhóm đủ 3 chữ số vẫn là nghìn như cũ
+    expect(parseTheoQuyUoc("1.500", "vn")).toBe(1500);
+    expect(parseTheoQuyUoc("1.500.000,5", "vn")).toBe(1500000.5);
+    expect(parseTheoQuyUoc("1,500", "us")).toBe(1500);
+  });
+  it("suyQuyUocSo: '0.5' / '1.5' không phải tín hiệu quy ước (kể cả ở cột tiền)", () => {
+    expect(suyQuyUocSo([["0.5", "1.5"]], tien([1]))).toBeNull();
+    expect(suyQuyUocSo([["0,5", "1,5"]], tien([1]))).toBeNull();
+  });
   it("reconstructExportRows: khối VN có giá '95.000' → SL '1.500' là 1500; khối không tín hiệu → '13.524' vẫn thập phân", () => {
     const R = ["_stt", "name", "detail", "unit", "quantity", "unitPrice", "_amount"];
     const N = new Set(["quantity", "unitPrice", "days"]);

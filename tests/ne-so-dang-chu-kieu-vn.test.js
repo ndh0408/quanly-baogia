@@ -9,14 +9,14 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import { parseQuoteWorkbook } from "../src/excelImport.js";
-import { parseTheoQuyUoc, suyQuyUocSo } from "../web/src/lib/clipboard.ts";
+import { parseTheoQuyUoc, suyQuyUocSo, khopQuyUoc, parseLooseDecimal } from "../web/src/lib/clipboard.ts";
 
 const HDR = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"];
-async function tep(rows) {
+async function tep(rows, hdr = HDR) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Báo giá ngoài");
   ws.addRow(["BÁO GIÁ"]); ws.addRow([]);
-  ws.addRow(HDR);
+  ws.addRow(hdr);
   for (const r of rows) ws.addRow(r);
   const res = await parseQuoteWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
   return res.sheets[0];
@@ -53,6 +53,40 @@ describe("L51: số dạng chữ trong tệp ngoài đọc như khi dán vào l�
   it("không có tín hiệu quy ước (không ô chữ nào rõ ràng) → giữ cách đọc cũ: SL '1.5' là 1,5", async () => {
     const s = await tep([["1", "Thảm", "m2", "1.5", 200000, 300000]]);
     expect(s.items[0]).toMatchObject({ quantity: 1.5, unitPrice: 200000 });
+  });
+
+  // Đợt 3: bản đầu của L51 bỏ MỌI dấu "." khi bảng là quy ước VN → SL chữ "0.5" / "1.5" thành 5 / 15.
+  // Có cột Thành Tiền thì dòng còn cảnh báo lệch; KHÔNG có cột đó thì tiền sai 10 lần mà im lặng.
+  // Dấu "." chỉ là dấu nghìn VN khi nhóm sau nó đúng 3 chữ số — "0.5" là thập phân.
+  it("bảng quy ước VN mà SL chữ '0.5' / '1.5' → đọc thập phân, không phải 5 / 15", async () => {
+    const s = await tep([
+      ["1", "Ghế", "cái", "0.5", "1.500.000", "750.000"],
+      ["2", "Thảm", "m2", "1.5", "200.000", "300.000"],
+      ["3", "Vách", "m2", "1.500", "250.000", "375.000.000"],
+    ]);
+    expect(s.items.map((i) => i.quantity)).toEqual([0.5, 1.5, 1500]);
+    expect(s.items.map((i) => i.warn)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("KHÔNG có cột Thành Tiền (không còn cảnh báo nào đỡ): SL '0.5' vẫn là 0,5", async () => {
+    const s = await tep([["1", "Ghế", "cái", "0.5", "1.500.000"]], ["STT", "Hạng mục", "ĐVT", "Số lượng", "Đơn giá"]);
+    expect(s.items[0]).toMatchObject({ name: "Ghế", quantity: 0.5, unitPrice: 1500000 });
+  });
+
+  it("KHỚP đường dán tay cả ở ô lệch khuôn: '0.5' / '2.25' đọc như khi dán (khopQuyUoc → parseLooseDecimal)", async () => {
+    const rows = [
+      ["1", "Ghế", "cái", "0.5", "1.500.000", "750.000"],
+      ["2", "Bàn", "cái", "2.25", "100.000", "225.000"],
+      ["3", "Thảm", "m2", "1.500", "95.000", "142.500.000"],
+    ];
+    const s = await tep(rows);
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 1);
+    expect(qu).toBe("vn");
+    // Lưới (GridTable pasteCellVal / reconstructExportRows): ô khớp khuôn theo quy ước khối, ô lệch
+    // khuôn đọc theo cột (SL = parseLooseDecimal). Nạp tệp phải ra đúng những con số đó.
+    const danTay = (v) => (khopQuyUoc(v, qu) ? parseTheoQuyUoc(v, qu) : parseLooseDecimal(v));
+    expect(s.items.map((i) => i.quantity)).toEqual(rows.map((r) => danTay(r[3])));
+    expect(s.items.map((i) => i.quantity)).toEqual([0.5, 2.25, 1500]);
   });
 
   it("ô SỐ THẬT không đổi gì", async () => {

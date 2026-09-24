@@ -152,14 +152,21 @@ export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
 }
 
 /** Đọc số theo quy ước ĐÃ BIẾT của khối (xem suyQuyUocSo): bỏ dấu nghìn, đổi dấu thập phân thành ".".
- *  Chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần. */
+ *  Lưới chỉ gọi cho ô đã qua khopQuyUoc — ô lệch khuôn mà đọc ép theo quy ước thì ra số sai cả chục lần.
+ *  Bộ nhập Excel (src/excelImport.ts) gọi THẲNG, không qua khopQuyUoc, nên hàm tự giữ luật khuôn cho ca
+ *  hay gặp nhất: đúng MỘT dấu nghìn mà nhóm sau nó không đủ 3 chữ số ("0.5", "1.5", "2.25" ở quy ước VN;
+ *  "0,5" ở US) thì dấu đó là THẬP PHÂN, y như lưới đọc ô lệch khuôn. Bản trước bỏ mọi "." → SL "0.5"
+ *  thành 5, tiền sai 10 lần (soát toàn diện đợt 3, L51). Nhóm đủ 3 chữ số ("1.500") vẫn là nghìn. */
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
-  str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
+  const nhom = str.split(nghin);
+  if (nhom.length === 2 && !str.includes(thapPhan) && nhom[1].length !== 3) str = nhom.join(".");
+  else str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
   return Number(str) || 0;
 }
 

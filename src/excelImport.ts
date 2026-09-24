@@ -274,13 +274,19 @@ function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): Qu
   return vn === us ? null : vn ? "vn" : "us";
 }
 
-/** Đọc số theo quy ước ĐÃ BIẾT của bảng: bỏ dấu nghìn, đổi dấu thập phân thành "." (PORT parseTheoQuyUoc). */
+/** Đọc số theo quy ước ĐÃ BIẾT của bảng: bỏ dấu nghìn, đổi dấu thập phân thành "." (PORT parseTheoQuyUoc).
+ *  Đúng MỘT dấu nghìn mà nhóm sau không đủ 3 chữ số ("0.5" ở bảng VN) là dấu THẬP PHÂN — bản trước bỏ
+ *  mọi "." nên SL "0.5" thành 5, tiền sai 10 lần, và bảng không có cột Thành Tiền thì không một cảnh báo
+ *  (soát toàn diện đợt 3, L51). Lưới đọc ô đó cũng ra 0,5 (khopQuyUoc → parseLooseDecimal). */
 function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   let str = String(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
-  str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
+  const nhom = str.split(nghin);
+  if (nhom.length === 2 && !str.includes(thapPhan) && nhom[1].length !== 3) str = nhom.join(".");
+  else str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
   return Number(str) || 0;
 }
 
