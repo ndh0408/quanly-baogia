@@ -225,6 +225,48 @@ describe("L8 — cờ đỏ tham chiếu hỏng không bị recomputeAll gỡ", 
     expect(items[1].quantity).toBe(6);
   });
 
+  it("gõ trên ô đỏ, SỬA VỀ đúng công thức gốc rồi Esc: vẫn trả SỐ lúc vào ô, Ctrl+Z không mất gì (soát toàn diện đợt 3 L8)", () => {
+    const items = xoaHangBiTro();
+    const el = o(1, "quantity");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=E1*9"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => { el.value = "=E1"; el.dispatchEvent(new Event("input", { bubbles: true })); });   // onNumInput ghi live 4 (SL của B)
+    phim(el, { key: "Escape" });
+    expect(items[1].formulas?.quantity).toBe("=E1");
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    expect(items[1].quantity, "Esc để lại số của hàng khác").toBe(6);
+    phim(el, { key: "ArrowDown" });
+    expect(items[1].quantity).toBe(6);
+    expect(coWarn(items[1], "quantity")).toBe(true);
+    // Phiên gõ đã huỷ trọn → Ctrl+Z lùi đúng thao tác thật trước đó (xoá hàng A), không kẹt số 4.
+    phim(document.activeElement!, { key: "z", ctrlKey: true });
+    expect(items.map((x) => x.name)).toEqual(["A", "B", "C"]);
+    expect(items[2].quantity).toBe(6);
+  });
+
+  it("ô đỏ vì công thức đã lưu không tính được: gõ dở rồi Esc → số lúc vào ô, không thành 0", () => {
+    const items = [mk({ name: "A", unitPrice: 1_050_000 }), mk({ name: "B", unitPrice: 525_000, formulas: { unitPrice: "=ROUND(F1*0,5)" } })];
+    moLuoi(items);
+    expect(coDo(1, "unitPrice")).toBe(true);
+    const el = o(1, "unitPrice");
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=F1"; el.dispatchEvent(new Event("input", { bubbles: true })); });   // live ghi 1.050.000
+    phim(el, { key: "Escape" });
+    expect(items[1].formulas?.unitPrice).toBe("=ROUND(F1*0,5)");
+    expect(items[1].unitPrice, "Esc làm đơn giá thành 0 hoặc giữ số gõ dở").toBe(525_000);
+    expect(coDo(1, "unitPrice")).toBe(true);
+    // Gõ dở rồi SỬA VỀ đúng chuỗi gốc (live không tính được → model còn 1.050.000 của lần gõ trước) rồi Esc.
+    act(() => { el.focus(); });
+    phim(el, { key: "F2" });
+    act(() => { el.value = "=F1"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => { el.value = "=ROUND(F1*0,5)"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    phim(el, { key: "Escape" });
+    expect(items[1].unitPrice).toBe(525_000);
+    expect(coDo(1, "unitPrice")).toBe(true);
+  });
+
   it("sửa tay ô đỏ thành công thức đúng → hết đỏ (commitCell vẫn là nơi gỡ cờ)", () => {
     const items = [mk({ name: "A", quantity: 6 }), mk({ name: "B", quantity: 4 }), mk({ name: "C", quantity: 6, formulas: { quantity: "=E1" } })];
     moLuoi(items);

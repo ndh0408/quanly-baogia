@@ -1783,20 +1783,25 @@ function GridTableInner(props: GridTableProps) {
           const rec = items[i] as Record<string, unknown>;
           const fxNay = items[i].formulas?.[f];
           const khopMoc = escVal.trim().startsWith("=") ? fxNay === escVal.trim() : (!fxNay && (NUMERIC.has(f) ? fmtField(i, f, rec[f]) : String(rec[f] ?? "")) === escVal);
+          const moc = () => JSON.stringify(items[i].formulas || null) + "|" + String(rec[f]);
+          const truoc = moc();
           if (!khopMoc) {
-            const moc = () => JSON.stringify(items[i].formulas || null) + "|" + String(rec[f]);
-            const truoc = moc();
-            // Huỷ phiên gõ trên ô ĐỎ vì tham chiếu hỏng: trả lại công thức gốc thì trả luôn cờ và số lúc
-            // vào ô — commitCell coi đó là người dùng sửa ô: gỡ cờ và tính lại công thức gốc, ô hỏng
-            // thành ô "sạch" im lặng mang số của hàng khác (L8).
+            // Huỷ phiên gõ trên ô ĐỎ vì tham chiếu hỏng: trả lại công thức gốc thì trả luôn cờ — commitCell
+            // coi đó là người dùng sửa ô: gỡ cờ và tính lại công thức gốc, ô hỏng thành ô "sạch" im lặng
+            // mang số của hàng khác (L8).
             const coRef = coThamChieuHong(rec, f);
             commitCell(i, f, escVal);
-            if (coRef && items[i].formulas?.[f] === escVal.trim()) {
-              const c = rec as CoDo; (c._fxWarn || (c._fxWarn = {}))[f] = true;
-              if (esc.dataset.escSo != null) { try { rec[f] = JSON.parse(esc.dataset.escSo); } catch { /* giữ số vừa tính */ } }
-            }
-            if (moc() !== truoc) { recomputeAll(); onChange(); }
+            if (coRef && items[i].formulas?.[f] === escVal.trim()) { const c = rec as CoDo; (c._fxWarn || (c._fxWarn = {}))[f] = true; }
           }
+          // Ô ĐỎ đã về đúng công thức lúc vào ô → trả SỐ lúc vào ô (onGridFocus nhớ ở escSo). Cả khi khopMoc
+          // ĐÚNG: gõ "=E1*9" rồi tự sửa về "=E1" thì onNumInput đã ghi live số của hàng khác (4) vào model,
+          // còn công thức đã lưu nay không tính được thì model giữ số gõ dở trước đó, hay commitCell vừa ghi
+          // 0. Bỏ qua bước này thì ô đỏ mang số sai, mà mốc hoàn tác của phiên lại bị bỏ ngay dưới — Ctrl+Z
+          // không lấy lại được (soát toàn diện đợt 3 L8).
+          if (esc.dataset.escSo != null && items[i].formulas?.[f] === escVal.trim()) {
+            try { const so = JSON.parse(esc.dataset.escSo); if (rec[f] !== so) rec[f] = so; } catch { /* giữ số đang có */ }
+          }
+          if (moc() !== truoc) { recomputeAll(); onChange(); }
           // Phiên sửa đã bị huỷ → bỏ luôn mốc undo của nó, nếu không Ctrl+Z kế tiếp chỉ "nuốt"
           // một nhịp rỗng thay vì lùi thao tác thật trước đó.
           const m = editUndoRef.current;
@@ -1882,9 +1887,10 @@ function GridTableInner(props: GridTableProps) {
     if (!navigatingRef.current) { const sel = selRef.current; if (!sel || sel.anchor.row !== i || sel.anchor.field !== f) { selRef.current = { anchor: { row: i, field: f }, focus: { row: i, field: f } }; paintSel(); } }
     const fx = items[i]?.formulas?.[f]; if (fx && el) el.value = fx;   // ô có công thức → hiện =… để sửa
     if (el) el.dataset.escVal = el.value;   // lưu giá trị lúc VÀO ô — ESC hủy về giá trị này (như Excel)
-    // Ô ĐỎ vì tham chiếu hỏng: nhớ cả SỐ lúc vào ô. Gõ công thức thì onNumInput ghi số live vào model;
-    // Esc huỷ phiên phải trả lại số này — tính lại công thức gốc là ăn số của hàng khác (L8).
-    if (el) { if (items[i] && coThamChieuHong(items[i], f)) el.dataset.escSo = JSON.stringify((items[i] as Record<string, unknown>)[f] ?? null); else delete el.dataset.escSo; }
+    // Ô ĐỎ (tham chiếu hỏng `_fxWarn`, hoặc lỗi tính `_fxLoi`): nhớ cả SỐ lúc vào ô. Gõ công thức thì
+    // onNumInput ghi số live vào model; Esc huỷ phiên phải trả lại số này — tính lại công thức gốc là ăn
+    // số của hàng khác (L8), hay ra null → 0 với công thức đã lưu nay không tính được.
+    if (el) { const c = items[i] as CoDo | undefined; if (c && (c._fxWarn?.[f] || c._fxLoi?.[f])) el.dataset.escSo = JSON.stringify((items[i] as Record<string, unknown>)[f] ?? null); else delete el.dataset.escSo; }
     fitCell(el);
     highlightActiveFormulaRefs(el?.value || ""); syncFxBar();
   };
