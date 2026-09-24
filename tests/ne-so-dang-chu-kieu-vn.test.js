@@ -320,3 +320,70 @@ describe("đợt 4 việc 2: ngoặc kế toán kèm đơn vị '/bộ' / EUR / 
     expect(s.items.map((i) => i.warn)).toEqual(s.items.map(() => undefined));
   });
 });
+
+// Soát toàn diện đợt 5 (d5-luoi 3): KHOẢNG SỐ bị bộ lọc ký tự [^\d.,-] ghép thành MỘT số khác 0 rất lớn —
+// gạch dài / "~" / "đến" bị bỏ nên chữ số hai đầu dính liền; SL/Số Ngày (parseLooseDecimal) còn bỏ cả "-".
+// Đọc ra số KHÁC 0 nên cảnh báo "không đọc được số" của đợt 4 không bắt; tệp không có cột Thành Tiền thì
+// tiền phình mà không ai thấy. Lỗi có từ trước, ở cả dán lẫn nạp tệp.
+//   ĐÃ ĐO (460b8b1): Đơn Giá "500.000 – 700.000" → 500.000.700.000, "1.500.000 ~ 2.000.000" →
+//   15.000.002.000.000; SL "10-12" → 1012, "2 - 3" → 23, "1.500.000 - 2.000.000" → 15.000.002.000.000.
+// Luật: hai số ngăn bởi -, –, —, ~, "đến" là KHÔNG đọc được số → 0 + cảnh báo như ô chữ, không đoán số nào.
+describe("đợt 5 việc 3: khoảng số không bị ghép thành một số — 0 + cảnh báo, hai phía khớp", () => {
+  const KHOANG = [
+    "10-12", "2 - 3", "500.000 – 700.000", "1.500.000 ~ 2.000.000", "1.500.000 - 2.000.000", "500.000 — 700.000",
+    "10 đến 12", "10 den 12", "1.500.000đ - 2.000.000đ", "(10-12)", "1,5 – 2,5", "2026-09-24",
+  ];
+
+  it("clipboard.ts: cả ba hàm đọc ra 0 (không phải số ghép) và chuKhongRaSo báo", () => {
+    for (const k of KHOANG) {
+      expect(parseLooseNumber(k), k).toBe(0);
+      expect(parseLooseDecimal(k), k).toBe(0);
+      expect(parseTheoQuyUoc(k, "vn"), k).toBe(0);
+      expect(parseTheoQuyUoc(k, "us"), k).toBe(0);
+      expect(chuKhongRaSo(k, parseLooseDecimal(k)), k).toBe(true);
+    }
+    expect(parseLooseNumber("10 đến 12".normalize("NFD")), "chữ tổ hợp NFD").toBe(0);
+  });
+
+  it("không bắt nhầm: số âm, âm kế toán, ngăn nghìn bằng dấu cách, '~' / '-' đứng một đầu", () => {
+    expect(parseLooseNumber("-500.000")).toBe(-500000);
+    expect(parseLooseNumber("(500.000)")).toBe(-500000);
+    expect(parseLooseNumber("-1.500.000đ")).toBe(-1500000);
+    expect(parseLooseDecimal("-2,5")).toBe(-2.5);
+    expect(parseLooseDecimal("(2,5)")).toBe(-2.5);
+    expect(parseTheoQuyUoc("-1.500", "vn")).toBe(-1500);
+    expect(parseLooseNumber("1 500 000")).toBe(1500000);
+    expect(parseLooseNumber("~500.000")).toBe(500000);
+    expect(parseLooseDecimal("12 m2")).toBe(12);
+    expect(parseLooseNumber("95.000đ/m2")).toBe(95000);
+  });
+
+  it("nạp tệp: SL / Số Ngày / Đơn Giá là khoảng số → 0 kèm cảnh báo đúng ô; số âm vẫn đúng, không cảnh báo", async () => {
+    const hdr = ["STT", "Hạng mục", "ĐVT", "Số lượng", "Số ngày", "Đơn giá"];
+    const rows = [
+      ["1", "Nhân sự", "người", "10-12", "2 - 3", "500.000 – 700.000"],
+      ["2", "Loa", "cái", "2", "1", "1.500.000 ~ 2.000.000"],
+      ["3", "Đèn", "cái", "1.500.000 - 2.000.000", "1", "100.000"],
+      ["4", "Giảm giá", "gói", "1", "1", "(500.000)"],
+      ["5", "Bù trừ", "gói", "1", "1", "-200.000"],
+    ];
+    const s = await tep(rows, hdr);
+    const [ns, loa, den, giam, bu] = s.items;
+    expect(ns).toMatchObject({ quantity: 0, days: null, unitPrice: 0 });
+    const w = (it) => (it.warn || []).join(" | ");
+    expect(w(ns)).toMatch(/Số Lượng.*10-12.*không đọc được số/);
+    expect(w(ns)).toMatch(/Số Ngày.*2 - 3.*không đọc được số/);
+    expect(w(ns)).toMatch(/Đơn Giá.*500\.000 – 700\.000.*không đọc được số/);
+    expect(loa.unitPrice).toBe(0);
+    expect(w(loa)).toMatch(/Đơn Giá.*không đọc được số/);
+    expect(den.quantity).toBe(0);
+    expect(w(den)).toMatch(/Số Lượng.*không đọc được số/);
+    expect(giam).toMatchObject({ quantity: 1, unitPrice: -500000 });
+    expect(bu).toMatchObject({ quantity: 1, unitPrice: -200000 });
+    expect([giam.warn, bu.warn]).toEqual([undefined, undefined]);
+    // KHỚP đường dán: cùng khối chữ → cùng con số với clipboard.ts.
+    const qu = suyQuyUocSo(rows.map((r) => r.slice(3)), (c) => c >= 2);
+    const doc = (v, soDo) => (qu ? parseTheoQuyUoc(v, qu) : soDo ? parseLooseDecimal(v) : parseLooseNumber(v));
+    expect(s.items.map((i) => [i.quantity, i.unitPrice])).toEqual(rows.map((r) => [doc(r[3], true), doc(r[5], false)]));
+  });
+});

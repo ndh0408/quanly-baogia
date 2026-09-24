@@ -104,3 +104,28 @@ describe("dán ô chữ vào cột số đọc ra 0 → báo MỘT lần cho c�
     expect(baoKhongSo(), "báo 'không đọc được số' cho ô không có vấn đề").toEqual([]);
   });
 });
+
+// Soát toàn diện đợt 5 (d5-luoi 3): KHOẢNG SỐ bị ghép thành MỘT số khác 0 — SL "10-12" dán vào ra 1012, Đơn
+// Giá "500.000 – 700.000" ra 500.000.700.000 — nên cảnh báo "không đọc được số" ở trên không bắt được.
+//   ĐÃ ĐO (460b8b1): hai ô dưới ra [1012, 500000700000], toast rỗng.
+describe("dán khoảng số vào cột số → 0 + cảnh báo, không ghép thành một số", () => {
+  it("SL '10-12' / Đơn Giá '500.000 – 700.000' → 0 + MỘT cảnh báo '2 ô'", () => {
+    const items = [mk({ name: "A" })];
+    moLuoi(items);
+    dan(0, "quantity", "10-12\t500.000 – 700.000");
+    expect([items[0].quantity, items[0].unitPrice]).toEqual([0, 0]);
+    expect(baoKhongSo()).toHaveLength(1);
+    expect(baoKhongSo()[0]).toMatch(/2 ô/);
+  });
+
+  it("một ô SL '2 - 3' → 0 + cảnh báo; số âm '-2' vẫn là −2, không báo", () => {
+    const items = [mk({ name: "A" }), mk({ name: "B" })];
+    moLuoi(items);
+    dan(0, "quantity", "2 - 3");
+    expect(items[0].quantity).toBe(0);
+    expect(baoKhongSo()).toHaveLength(1);
+    dan(1, "quantity", "-2");
+    expect(items[1].quantity).toBe(-2);
+    expect(baoKhongSo()).toHaveLength(1);
+  });
+});

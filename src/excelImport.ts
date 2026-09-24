@@ -235,6 +235,19 @@ const chia100 = (n: number) => Number((n / 100).toPrecision(12));
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
+// KHOẢNG SỐ (PORT laKhoangSo, soát toàn diện đợt 5): bộ lọc ký tự ghép chữ số hai đầu của khoảng thành MỘT số
+// khác 0 — Đơn Giá "500.000 – 700.000" nạp 500.000.700.000, SL "10-12" nạp 1012, không cảnh báo nào (tệp không
+// có cột Thành Tiền thì tiền phình không ai thấy). Hai số ngăn bởi -, –, —, ~, "đến" → không đọc được số (0),
+// vòng quét dòng báo "không đọc được số" như ô chữ. Một số có dấu trừ đầu ("-500.000") không phải khoảng.
+const SO_TOKEN = /\d(?:[\d.,]*\d)?/g;
+const NOI_KHOANG = /[-–—~]|(?<!\p{L})(?:đến|den)(?!\p{L})/iu;
+const laKhoangSo = (s: string): boolean => {
+  const t = String(s ?? "").normalize("NFC");
+  const so = [...t.matchAll(SO_TOKEN)];
+  for (let k = 1; k < so.length; k++) if (NOI_KHOANG.test(t.slice(so[k - 1].index! + so[k - 1][0].length, so[k].index))) return true;
+  return false;
+};
+
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (PORT chuKhongRaSo, soát toàn diện đợt 4): sau L17 "ĐG1.500.000", "SL12",
 // "12m2" đọc 0 mà không có cảnh báo dòng nào — tệp không có cột Thành Tiền thì Đơn Giá về 0 không ai thấy.
 // Còn chữ số KHÁC 0 mà đọc ra 0 (khoảng giá "1.500.000 - 2.000.000" → NaN → 0) cũng báo. Số 0 viết bằng chữ
@@ -249,6 +262,7 @@ const chuKhongRaSo = (s: string, n: number): boolean => {
 };
 
 function parseLooseNumber(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
@@ -268,6 +282,7 @@ function parseLooseNumber(s: string): number {
 }
 /** Cột SỐ LƯỢNG / SỐ NGÀY là SỐ ĐO NHỎ: 1 dấu chấm/phẩy = THẬP PHÂN (13.5 ≠ 13500). */
 function parseLooseDecimal(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
@@ -316,6 +331,7 @@ function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): Qu
  *  mọi "." nên SL "0.5" thành 5, tiền sai 10 lần, và bảng không có cột Thành Tiền thì không một cảnh báo
  *  (soát toàn diện đợt 3, L51). Lưới đọc ô đó cũng ra 0,5 (khopQuyUoc → parseLooseDecimal). */
 function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));

@@ -81,6 +81,22 @@ export const laPhanTram = (s: string) => boPhanTram(tachNgoacKeToan(String(s ?? 
 const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
 const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
 
+// KHOẢNG SỐ (soát toàn diện đợt 5): bộ lọc ký tự [^\d.,-] bỏ gạch dài / "~" / "đến" nên chữ số hai đầu dính
+// liền — Đơn Giá "500.000 – 700.000" đọc 500.000.700.000, "1.500.000 ~ 2.000.000" đọc 15.000.002.000.000;
+// SL/Ngày (parseLooseDecimal bỏ cả "-") "10-12" đọc 1012, "2 - 3" đọc 23. Số KHÁC 0 nên chuKhongRaSo không bắt,
+// tệp không có cột Thành Tiền thì tiền phình không ai thấy. Hai số mà giữa chúng có -, –, —, ~ hay "đến" là
+// khoảng → KHÔNG đọc được số (0, nơi gọi cảnh báo), không đoán lấy đầu nào. Xét trên chuỗi GỐC (chưa bỏ cụm):
+// "SL10-12" bỏ cụm "SL10" thì còn "-12" và đọc thành −12. Một số có dấu trừ đầu ("-500.000") chỉ có MỘT số,
+// không phải khoảng. PHẢI khớp bản port ở src/excelImport.ts.
+const SO_TOKEN = /\d(?:[\d.,]*\d)?/g;
+const NOI_KHOANG = /[-–—~]|(?<!\p{L})(?:đến|den)(?!\p{L})/iu;
+const laKhoangSo = (s: string): boolean => {
+  const t = String(s ?? "").normalize("NFC");
+  const so = [...t.matchAll(SO_TOKEN)];
+  for (let k = 1; k < so.length; k++) if (NOI_KHOANG.test(t.slice(so[k - 1].index! + so[k - 1][0].length, so[k].index))) return true;
+  return false;
+};
+
 // Ô CHỮ ở cột số mà ĐỌC RA 0 (soát toàn diện đợt 4): luật L17 không đoán nên "ĐG1.500.000", "SL12", "12m2",
 // "1e3" đọc 0 — đúng, nhưng phải NÓI ra: bộ nhập Excel không có cảnh báo dòng nào cho ca này, tệp không có
 // cột Thành Tiền thì Đơn Giá về 0 mà không ai thấy. `n` là số hàm đọc đã trả cho ô. Sau bước bỏ cụm mà còn
@@ -100,6 +116,7 @@ export const chuKhongRaSo = (s: string, n: number): boolean => {
 // "1.000.000" / "1,000,000" → 1000000 ; "12,5" → 12.5 ; "1.234,56" → 1234.56 ; "1.234" → 1234 (nghìn VN).
 // "(1.500.000)" → -1500000 (âm kiểu kế toán). "10%" → 0,1.
 export function parseLooseNumber(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
@@ -121,6 +138,7 @@ export function parseLooseNumber(s: string): number {
 // Riêng cột SỐ LƯỢNG / SỐ NGÀY: là SỐ ĐO NHỎ (vd 13.524 m2). 1 dấu "." hoặc "," → THẬP PHÂN
 // (KHÔNG đoán "nghìn" như parseLooseNumber); NHIỀU dấu → ngăn nghìn. Tránh "13.524"→13524.
 export function parseLooseDecimal(s: string): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
@@ -195,6 +213,7 @@ export function khopQuyUoc(s: string, qu: QuyUocSo): boolean {
  *  "0,5" ở US) thì dấu đó là THẬP PHÂN, y như lưới đọc ô lệch khuôn. Bản trước bỏ mọi "." → SL "0.5"
  *  thành 5, tiền sai 10 lần (soát toàn diện đợt 3, L51). Nhóm đủ 3 chữ số ("1.500") vẫn là nghìn. */
 export function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  if (laKhoangSo(s)) return 0;
   const kt = tachNgoacKeToan(s);
   if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
   const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
