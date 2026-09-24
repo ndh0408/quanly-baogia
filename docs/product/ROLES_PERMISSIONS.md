@@ -1,4 +1,4 @@
-# Ma trận phân quyền — toàn bộ 140 endpoint
+# Ma trận phân quyền — toàn bộ 141 endpoint
 
 Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/archive/audits/SECURITY_AUDIT_2026-08.md](../archive/audits/SECURITY_AUDIT_2026-08.md).
 
@@ -35,7 +35,7 @@ Chốt ngày 2026-08-11, nhánh `feat/venue-suggest`. Phụ lục của [docs/ar
 | **N.CẢM** | mức dữ liệu trả về: `PII` · `$` tiền/giá · `SEC` bí mật hệ thống · `—` thường |
 | **TT** | `OK` đúng sẵn · `VÁ` sửa trong đợt này · `NỢ` còn thiếu, đã ghi nhận |
 
-Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (nạp lại vai trò + quyền + trạng thái khoá từ DB **mỗi request**) → `csrfGuard` → `apiLimiter` (120/phút).
+Middleware áp cho **mọi** `/api/*`, theo đúng thứ tự trong `src/app.ts`: `apiLimiter` (120/phút, đứng TRƯỚC giải nén + parse thân) → phiên → `bearerAuth` → `enforceActiveUser` (nạp lại vai trò + quyền + trạng thái khoá từ DB **mỗi request**) → `csrfGuard`.
 
 ---
 
@@ -68,7 +68,7 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | GET | `/assignable-users` | ✓ | `quote:create` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/projects` | ✓ | `user:manage`\|`invoice:read`\|`invoice:page` **hoặc** `quote:read:own` | all/own | — | chỉ `converted` | $ PII | AUTH-005 | **VÁ** |
 | POST | `/sheets/:sheetId/sign` | ✓ | `quote:sign:all`\|`:own` | all/own | qua `sheet.quote.createdById` | chỉ `converted`, chưa xoá | — | — | OK |
-| POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá | — | — | OK |
+| POST | `/sheets/:sheetId/customer-decision` | ✓ | `quote:send` | own | `canOnQuote(update)` | chưa xoá · đã xuất HĐ → 409 | — | — | OK |
 | PUT | `/sheets/:sheetId/invoice` | ✓ | `invoice:read`\|`page` vào; `invoice:edit`/`pay` **theo từng field** | global | qua sheet→quote | chỉ `converted` | $ | — | OK |
 | POST | `/:id/extra/:sheetId/:rid/pay` | ✓ | `quote:internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | `FOR UPDATE` khoá hàng · báo giá xoá mềm → 404 | $ | `rbacscope-extra-idor` | **VÁ** |
 | GET | `/:id/extra/:sheetId/:rid/proof` | ✓ | `internal:view`\|`internal:pay` | all/own ⁴ | `assertQuoteInScope` → `canOnQuote(read)` **+** sheet phải thuộc `:id` | báo giá xoá mềm → 404 · ghi audit `quote.internal.proof-view` | **PII** | `rbacscope-extra-idor` | **VÁ** |
@@ -77,7 +77,7 @@ Middleware áp cho **mọi** `/api/*`: `bearerAuth` → `enforceActiveUser` (n�
 | GET | `/hn/accounts` | ✓ | `quote:hn:manage` | global | — | chỉ user `active` | PII | — | OK |
 | GET | `/:id` | ✓ | `quote:read:*` | all/own | `canOnQuote(read)` | — | $ PII | AUTH-002 | OK |
 | POST | `/` | ✓ | `quote:create` | — | route **+** service | — | — | AUTH-001 | **VÁ** |
-| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` | terminal bất biến + khoá lạc quan | $ | `quotes.workflow` | OK |
+| PUT | `/:id` | ✓ | `quote:update:*` | all/own | `canEdit` | khoá khi đã xuất hoá đơn (`daXuatHoaDon`); `converted`/`lost` sửa được bởi người có `quote:send` + khoá lạc quan | $ | `quotes.workflow` | OK |
 | POST | `/:id/hn/assign` | ✓ | `quote:hn:manage` | own | `canOnQuote(update)` | — | — | — | OK |
 | PUT | `/:id/hn` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chặn khi đã gửi/duyệt | $ | — | OK |
 | POST | `/:id/hn/submit` | ✓ | `quote:hn:fill` | được-giao | `hnAssigneeId === me` | chỉ `assigned`/`rejected` | — | — | OK |
@@ -189,14 +189,14 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 |---|---|---|---|---|---|---|---|---|---|
 | GET | `/gdpr/me/export` | ✓ | — | self | ghim `session.userId` | limiter 8/giờ · `no-store` · `nosniff` | **PII đầy đủ** | GDPR-001 | **VÁ** |
 | GET | `/gdpr/users/:id/export` | ✓ | `user:manage` | global | — | `no-store` · `nosniff` | **PII đầy đủ** | GDPR-001 | **VÁ** |
-| POST | `/gdpr/me/delete` | ✓ | — | self | đòi gõ `DELETE-MY-ACCOUNT` | transaction vô danh hoá + thu hồi token | — | — | OK |
+| POST | `/gdpr/me/delete` | ✓ | — | self | đòi gõ `DELETE-MY-ACCOUNT` **+ mật khẩu**; admin cuối cùng → 400 | transaction vô danh hoá + thu hồi token | — | `gd-gdpr-xoa-va-xuat-nhat-ky` | OK |
 | POST | `/gdpr/users/:id/delete` | ✓ | `user:manage` | global | chặn tự xoá mình | như trên | — | — | OK |
 | GET | `/audit/` | ✓ | `audit:view` | global | — | **lược `before`/`after`/`ip`/`ua`** nếu thiếu `audit:view:full` | PII | `gd1-audit-beforeafter` | OK |
 | GET | `/search/` | ✓ | **theo từng domain** | all/own | quote→scope · customer→`readScopeWhere` · product→`product:read` | domain thiếu quyền **biến mất** + liệt kê trong `denied` | $ PII | AUTH-004 | **VÁ** |
 | GET | `/analytics/overview` · `/funnel` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `quoteScopeWhereOrThrow` | — | $ | AUTH-006 | **VÁ** |
 | GET | `/analytics/revenue-by-day` · `/top-sales` | ✓ | `quote:create` **và** `quote:read:*` | all/own | `seesAllQuotes()` | — | $ | AUTH-006 | **VÁ** |
 
-## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (2) · `/api/quotes/import-excel` (1)
+## `/api/employees` (4) · `/api/notifications` (4) · `/api/meta` (2) · `/api/mfa` (3) · `/api/stream` (2) · `/api/export` (2) · `/api/jobs` (3) · `/api/quotes/import-excel` (1)
 
 | M | Đường dẫn | AUTH | QUYỀN | P.VI | T.NGUYÊN | T.THÁI | N.CẢM | TEST | TT |
 |---|---|---|---|---|---|---|---|---|---|
@@ -212,14 +212,15 @@ hiện tại lại để lần sau ai đổi thì thấy đỏ.
 | POST | `/stream/presence` | ✓ | — | own | `canOnQuote(read)` | **gửi có địa chỉ**, không phát tán toàn hệ thống | PII | — | **VÁ** |
 | GET | `/export/:id.xlsx` · `:id.pdf` | ✓ | `quote:export` | all/own | `canOnQuote(read)` | trần 100 sheet / 20k dòng · limiter 30/ph · `no-store` | $ | — | OK |
 | POST | `/quotes/:id/export` (async) | ✓ | `quote:export` | all/own | `canOnQuote(read)` | — | $ | — | OK |
-| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** `quote:read:all` | **chỉ mở queue `export`** ³ | $ | — | OK |
+| GET | `/jobs/:queue/:id` | ✓ | — | own | chỉ người đặt job **hoặc** (`quote:read:all` **+** `quote:export`) | **chỉ mở queue `export`** ³ · `url` trả về là đường cùng origin `…/file` | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
+| GET | `/jobs/:queue/:id/file` | ✓ | — | own | **cùng hàm gác** với dòng trên (`layJobXuat`) | chỉ khoá `exports/…` · stream từ kho qua app (kho không lộ ra Internet) | $ | `xn-tai-file-xuat-nen-qua-app` | OK |
 | POST | `/quotes/import-excel` | ✓ | `quote:create` | own | `canOnQuote(update)` nếu có `quoteId` | chặn `account_hn` · terminal → 409 · magic bytes · limiter 12/ph | — | `excelImport.test.js` | OK |
 
 ² Danh bạ nhân sự **vẫn là kho dùng chung khi GHI** cho mọi tài khoản Account thật, nhưng phạm vi ghi
 bám theo **phạm vi ĐỌC**, không theo `employee:edit:*`. `:own` trong TÊN QUYỀN `employee:edit:own` /
 `employee:delete:own` vẫn không phải phạm vi dữ liệu; phạm vi dữ liệu do `assertEmployeeInReadScope`
 (`src/services/employeeService.ts`) áp bằng `employee:read:*`. Vì EMPLOYEE nền — và MANAGER/ADMIN kế
-thừa — đều có `employee:read:all` (`src/permissions.ts:266`), sửa/xoá chéo **không đổi**; chỉ tập
+thừa — đều có `employee:read:all` (`src/permissions.ts`, hằng `EMPLOYEE`), sửa/xoá chéo **không đổi**; chỉ tập
 quyền per-user bị bó về `employee:read:own` mới hết PUT/DELETE mục người khác. Bỏ chốt đó thì `PUT`
 chính là một kênh **ĐỌC PII đầy đủ** — nó trả bản ghi đã giải mã và body rỗng `{}` vẫn hợp lệ, nên
 chặn `GET` mà để ngỏ `PUT` là hàng rào rỗng. Xem `src/routes/employees.routes.ts`.
@@ -290,7 +291,8 @@ Hợp đồng mới:
   (`web/src/components/HnTables.tsx`, dùng chung cho cả màn của chủ).
 - **Không thấy** thông tin khách / người gửi / ngày / VAT / lời chào: những thứ đó theo báo giá gốc.
 - Chống ghi đè chuyển từ phép suy đoán "trang đã chết" sang **khoá lạc quan thật**: client gửi
-  `baseUpdatedAt`, lệch thì 409 kèm lời nhắc chép lại phần vừa gõ.
+  `baseHnRev` (băm bảng Hà Nội — chủ lưu thứ khác KHÔNG làm lệch), lệch thì 409 kèm lời nhắc chép
+  lại phần vừa gõ. `baseUpdatedAt` chỉ còn là đường tương thích cho tab mở trước lần deploy đó.
 - Giá HN **đã gửi duyệt/đã duyệt** thì đường lưu báo giá thường trả **409** (trước đây lặng lẽ lấy
   lại bản CSDL rồi trả 200) — trừ người có `quote:hn:manage`.
 - Payload hình dạng **cũ** (`hnSheets`) bị **400** kèm hướng dẫn tải lại, KHÔNG hiểu thành "xoá hết

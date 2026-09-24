@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { ghiPhuThuoc } from "./observability.js";
 
 /** Send a Telegram message. No-op if TELEGRAM_BOT_TOKEN not set. */
 export async function sendTelegram({ chatId, text, parseMode = "" }: { chatId: string | number; text: string; parseMode?: string }) {
@@ -18,12 +19,15 @@ export async function sendTelegram({ chatId, text, parseMode = "" }: { chatId: s
     });
     const body: any = await r.json().catch(() => ({}));
     if (!r.ok) {
+      ghiPhuThuoc("telegram", false);
       logger.warn({ chatId, status: r.status, body }, "telegram non-ok");
       return { error: body.description || `status ${r.status}` };
     }
+    ghiPhuThuoc("telegram", true);
     return { ok: true, messageId: body.result?.message_id };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    ghiPhuThuoc("telegram", false);
     logger.error({ err: msg, chatId }, "telegram send failed");
     return { error: msg };
   }

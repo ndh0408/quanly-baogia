@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "./logger.js";
 import { verifyAccessToken } from "./jwt.js";
 import { prisma } from "./db.js";
+import { config } from "./config.js";
 import { resolveUserPermissions } from "./permissions.js";
 
 // Hình dạng id truy vết được CHẤP NHẬN từ client. Cố ý hẹp: chữ-số cùng `. _ -`, tối đa 64 ký tự —
@@ -49,6 +50,8 @@ export function requestId(req: Request, res: Response, next: NextFunction) {
  * This lets the same route handlers serve browser (session) and API/mobile (JWT) clients.
  */
 export async function bearerAuth(req: Request, _res: Response, next: NextFunction) {
+  // Cờ đọc LÚC REQUEST (không phải lúc mount) để bật/tắt không cần dựng lại app — xem JWT_API_ENABLED.
+  if (!config.JWT_API_ENABLED) return next();
   if (req.session?.userId) return next();
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
@@ -59,13 +62,17 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
     // Number() trả số ↔ chính nó; bám đúng giá trị id runtime để Prisma where nhận number.
     const sub = typeof payload === "string" ? payload : payload.sub;
     // SECURITY: never trust role/active from the token claim. Re-load the user on
-    // every request so a deactivated / demoted / locked account loses access
+    // every request so a deactivated / demoted account loses access
     // immediately (within the access-token TTL the token is otherwise valid).
+    //
+    // `lockedUntil` KHÔNG thu hồi chứng thư đã cấp (AUTH-02) — xem chú thích ở enforceActiveUser.
+    // Chốt lockedUntil nằm ở nơi CẤP chứng thư mới: authCore.authenticateCredentials và
+    // jwt.rotateRefreshToken.
     const user = await prisma.user.findUnique({
       where: { id: Number(sub) },
-      select: { id: true, role: true, username: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
+      select: { id: true, role: true, username: true, active: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
-    if (!user || !user.active || (user.lockedUntil && user.lockedUntil > new Date())) {
+    if (!user || !user.active) {
       return next(); // fall through unauthenticated → requireAuth/requireRole reject
     }
     // Access token phát hành TRƯỚC lần đổi mật khẩu gần nhất → coi như không có token.
@@ -121,9 +128,16 @@ export async function enforceActiveUser(req: Request, res: Response, next: NextF
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.session.userId },
-      select: { role: true, active: true, lockedUntil: true, permissions: true, canSign: true, passwordChangedAt: true },
+      select: { role: true, active: true, permissions: true, canSign: true, passwordChangedAt: true },
     });
-    if (!user || user.active === false || (user.lockedUntil && user.lockedUntil > new Date())) {
+    // KHOÁ TẠM DO GÕ SAI (`lockedUntil`) KHÔNG GIẾT PHIÊN ĐANG MỞ (AUTH-02, audit 2026-09-23).
+    //
+    // lockedUntil là tín hiệu "ai đó đang đoán mật khẩu", không phải "phiên này bị đánh cắp". Nó chặn
+    // việc CẤP chứng thư mới (/login, /token/refresh) — đúng mục đích của lockout. Trước đây chốt
+    // này còn huỷ luôn phiên đã xác thực bằng mật khẩu (+MFA), nên một kẻ lạ ngoài Internet chỉ cần
+    // 5 lần gõ sai ẩn danh là đá văng chủ tài khoản giữa lúc soạn báo giá, rồi lặp lại mỗi 15 phút.
+    // Thu hồi phiên thật sự vẫn đủ đường: active=false, đổi mật khẩu (passwordChangedAt), xoá tài khoản.
+    if (!user || user.active === false) {
       return req.session.destroy(() =>
         res.status(401).json({
           error: "Phiên đã kết thúc — tài khoản bị khóa hoặc vô hiệu hóa",
@@ -305,10 +319,14 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   // là xoá đúng phần thông tin người dùng cần để tự thoát (chờ rồi thử lại / tách bớt trang), và
   // biến một tình huống có cách xử lý thành một lỗi bí ẩn.
   const exposed = status < 500 || (status === 503 && !!err.retryAfter);
-  logger.error(
-    { reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack },
-    "request failed"
-  );
+  // 4xx là KẾT QUẢ nghiệp vụ dự kiến (403/404/409/422…), không phải sự cố: ghi `warn`, KHÔNG stack.
+  // Trước đây mọi lỗi đều `error` + stack, nên panel "Log LỖI gần nhất" (level=error) và nguồn chẩn
+  // đoán duy nhất ở production (Sentry tắt) ngập 4xx, lỗi thật khó thấy (audit 2026-09-22, OBS-11).
+  if (status >= 500) {
+    logger.error({ reqId: req.id, path: req.path, method: req.method, status, err: err.message, stack: err.stack }, "request failed");
+  } else {
+    logger.warn({ reqId: req.id, path: req.path, method: req.method, status, err: err.message }, "request failed");
+  }
   // 503 kèm `retryAfter` là "quá tải thoáng qua do chính hệ thống tự khai", KHÔNG phải sự cố —
   // bắn Sentry cho nó là biến một đợt bận thành một trận lụt cảnh báo, đúng lúc người trực cần
   // nhìn thấy tín hiệu thật.
@@ -318,7 +336,9 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
       captureError(err, { reqId: req.id, path: req.path, method: req.method, userId: req.session?.userId });
     }).catch(() => {});
   }
-  if (res.headersSent) return;
+  // Header đã gửi (vd đang stream file) thì không trả JSON được nữa — nhưng PHẢI chuyển tiếp cho
+  // finalhandler của Express để nó đóng socket. `return` trần để kết nối treo tới khi proxy bỏ cuộc.
+  if (res.headersSent) return _next(err);
   // Retry-After cho 429/503: nói cho client BAO LÂU thì thử lại. Không có header này thì client
   // (và mọi proxy ở giữa) chỉ biết thử lại ngay lập tức, đúng lúc hệ thống đang quá tải — biến
   // một đợt bận thoáng qua thành bão retry tự duy trì.
@@ -327,7 +347,9 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   }
   res.status(status).json({
     error: exposed ? err.message : "Lỗi server",
-    ...(err.code ? { code: err.code } : {}),
+    // `code` chỉ đi kèm lỗi ĐƯỢC PHÉP lộ. Với 5xx thật nó là mã nội bộ ("P2010", "ECONNREFUSED"…) —
+    // manh mối trinh sát, người dùng không làm gì được với nó; reqId đã đủ để tra log.
+    ...(exposed && err.code ? { code: err.code } : {}),
     reqId: req.id,
   });
 }

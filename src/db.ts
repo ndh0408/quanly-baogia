@@ -12,13 +12,26 @@ import { config } from "./config.js";
 //  • sau mỗi WRITE vào Quote/Customer/User → bắn SSE để client tự refresh list.
 // LƯU Ý: chuyển delete→update gọi `base.<model>.update()` (vì $extends không đổi được op qua query()).
 // AN TOÀN vì codebase KHÔNG soft-delete BÊN TRONG $transaction (đã kiểm: chỉ dùng prisma.x.delete
-// top-level). NẾU sau này cần soft-delete trong transaction → phải xử khác (dùng thư viện chuyên).
+// top-level). NẾU sau này cần soft-delete trong transaction → dùng `tx.<model>.update({ data: { deletedAt } })`.
+// Chốt bằng tests/db-mem-trong-transaction.test.js (cấm `tx.<model-mềm>.delete`).
 const SOFT_DELETE_MODELS = new Set(["User", "Company", "QuoteTemplate", "Quote", "Customer", "Product", "PersonnelRecord", "Employee"]);
 const READS = new Set(["findUnique", "findFirst", "findMany", "findUniqueOrThrow", "findFirstOrThrow", "count", "aggregate", "groupBy"]);
 const RT_ENTITY: Record<string, string> = { Quote: "quote", Customer: "customer", User: "user" };
 const RT_WRITES = new Set(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"]);
 
 const lc = (m: string) => m.charAt(0).toLowerCase() + m.slice(1);
+
+// Cột User chỉ mang trạng thái PHIÊN/BẢO MẬT — ghi vào chúng KHÔNG đổi gì mà màn hình nào hiển thị
+// theo danh sách (RT-10). Trước đây mọi lượt đăng nhập, mọi lượt SAI mật khẩu (kể cả của người CHƯA
+// đăng nhập) và mỗi mã TOTP đều emitChange('user','update') → broadcast tới MỌI phiên → mọi tab
+// invalidateQueries() toàn bộ. Người ngoài điều khiển được tải đọc của cả công ty, và mọi phiên thấy
+// nhịp đăng nhập của người khác.
+const USER_COT_PHIEN = new Set(["lastLoginAt", "lastLoginIp", "failedAttempts", "lockedUntil", "mfaLastStep"]);
+export function chiGhiCotPhienUser(model: string, action: string, a: any): boolean {
+  if (model !== "User" || (action !== "update" && action !== "updateMany")) return false;
+  const khoa = a?.data && typeof a.data === "object" ? Object.keys(a.data) : [];
+  return khoa.length > 0 && khoa.every((k) => USER_COT_PHIEN.has(k));
+}
 
 // Prisma 7: kết nối qua driver adapter @prisma/adapter-pg (pg Pool) — engine TS, không còn engine Rust.
 // max: nâng trần kết nối từ mặc định 10/process (dễ thành nút thắt concurrency khi đông user) lên cấu-hình-được
@@ -91,6 +104,25 @@ export async function kiemTraCsdlChoDoSanSang() {
     c.release();
   }
 }
+/**
+ * Số kết nối đang dùng / trần `max_connections` — cho gauge `db_up` + `db_connections_*` của /metrics.
+ *
+ * Đi qua pool RIÊNG của /readyz (max 1), KHÔNG qua pool người dùng (audit 2026-09-22, OBS-02): pool
+ * người dùng cạn thì phép đo xếp hàng và bị đọc thành "CSDL chết". Hai người dùng pool này đều
+ * single-flight + nhớ đệm 5s nên không tranh nhau đáng kể.
+ */
+export async function doSoKetNoiCsdl(): Promise<{ dung: number; tran: number } | null> {
+  const c = await poolDoSanSang.connect();
+  try {
+    const r = await c.query(
+      "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database())::int AS dung, current_setting('max_connections')::int AS tran"
+    );
+    return (r.rows[0] as { dung: number; tran: number }) ?? null;
+  } finally {
+    c.release();
+  }
+}
+
 // transactionOptions: KHÔNG để Prisma dùng mặc định (maxWait 2s / timeout 5s).
 // Đường LƯU báo giá gói cả việc nặng vào MỘT transaction: xoá sạch sheet → tạo lại toàn bộ item →
 // đọc lại báo giá qua QUOTE_INCLUDE → snapshot phiên bản (đọc thêm lần nữa + ghi khối jsonb). Trần
@@ -158,7 +190,9 @@ export const prisma = base.$extends({
           const aa = { ...a };
           delete aa.hardDelete; delete aa.includeDeleted;
           if (a.hardDelete === true) {
-            result = await (base as any)[lc(model)][operation](aa); // xoá thật
+            // Xoá thật: phép KHÔNG đổi nên chạy qua `query()` — giữ đúng ngữ cảnh transaction của
+            // người gọi (bản cũ gọi `base`, tức chạy ngoài tx và không rollback theo tx — DB-04/DB-06).
+            result = await query(aa); // xoá thật
           } else {
             action = operation === "delete" ? "update" : "updateMany";
             const data = { ...(aa.data || {}), deletedAt: new Date() };
@@ -170,9 +204,12 @@ export const prisma = base.$extends({
           delete aa.includeDeleted;
           const where = aa.where || {};
           if (where.deletedAt === undefined) aa.where = { ...where, deletedAt: null };
-          if (operation === "findUnique") result = await (base as any)[lc(model)].findFirst(aa);
-          else if (operation === "findUniqueOrThrow") result = await (base as any)[lc(model)].findFirstOrThrow(aa);
-          else result = await query(aa);
+          // findUnique GIỮ NGUYÊN là findUnique, chạy qua `query()` (DB-04, audit 2026-09-23). Bản cũ đổi
+          // sang `base.findFirst` — tức chạy trên client GỐC, NGOÀI interactive transaction: trong
+          // `prisma.$transaction(async tx => …)`, `tx.user.findUnique` không thấy hàng tx vừa tạo và không
+          // chờ khoá của tx. Prisma ≥5 nhận trường thường (deletedAt) cạnh khoá unique trong where của
+          // findUnique, nên không cần đổi phép nữa.
+          result = await query(aa);
         } else {
           // op khác: strip cờ điều khiển còn sót (chỉ cho model soft-delete, như bản cũ) rồi chạy.
           let aa = a;
@@ -184,7 +221,7 @@ export const prisma = base.$extends({
 
         // Realtime: sau WRITE vào Quote/Customer/User → bắn SSE (soft-delete đã thành 'update').
         const entity = RT_ENTITY[model];
-        if (entity && RT_WRITES.has(action)) {
+        if (entity && RT_WRITES.has(action) && !chiGhiCotPhienUser(model, action, a)) {
           import("./sse.js").then(({ emitChange }) => emitChange(entity, action, result?.id)).catch(() => {});
         }
         return result;

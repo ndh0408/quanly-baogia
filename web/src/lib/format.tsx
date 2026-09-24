@@ -77,6 +77,23 @@ export const ROLE_LABEL: Record<string, string> = {
 export const roleLabel = (r?: string | null) => ROLE_LABEL[r || ""] || r || "—";
 
 /* Thông điệp lỗi từ ApiError — thay chuỗi `error instanceof ApiError ? …` lặp mọi trang. */
+/**
+ * FE-09: trang khách KHÔNG duyệt của một báo giá ĐÃ CHỐT không phải việc cần xuất hoá đơn / thu tiền.
+ * `convertedTotal` (doanh thu ghi nhận, quoteService.markConverted) đã trừ nó; Hóa đơn / Quản lý dự án /
+ * "Cần xử lý" mà vẫn cộng thì công nợ phải thu phồng và kế toán có thể đòi tiền hạng mục khách đã từ chối.
+ * Báo giá CHƯA chốt thì giữ nguyên — trang bị từ chối lúc đó vẫn có thể được đồng ý lại.
+ *
+ * TRANG ĐÃ CÓ CHỨNG TỪ THÌ KHÔNG ẨN (soát chéo money#1): số HĐ hoặc ngày thu nghĩa là hoá đơn đã phát
+ * hành thật và công nợ còn đó, dù cờ ý kiến khách nói gì (cờ cũ trước khi có bộ lọc này, hoặc bấm nhầm).
+ * Ẩn đi thì dòng biến khỏi trang Hóa đơn — nơi DUY NHẤT sửa được số HĐ / ngày thu — và "Chưa thu" hụt.
+ * Số HĐ toàn khoảng trắng coi như chưa có, cùng luật `daXuatHoaDon` ở máy chủ.
+ * `listProjects` ở máy chủ chọn dòng gánh tổng Hà Nội theo ĐÚNG điều kiện này — đổi ở đây thì đổi cả ở đó.
+ */
+export const trangKhachTuChoi = (
+  q: { status?: string },
+  sh: { custStatus?: string | null; invoiceNo?: string | null; paidAt?: string | null },
+) => q.status === "converted" && sh.custStatus === "rejected" && !String(sh.invoiceNo ?? "").trim() && !sh.paidAt;
+
 export const errMsg = (e: unknown, fallback = "Lỗi tải dữ liệu") => (e instanceof ApiError ? e.message : fallback);
 
 /* Ô trống — dùng thống nhất thay vì mỗi trang tự chế. */

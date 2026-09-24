@@ -74,6 +74,29 @@ describe(".env.example ↔ src/config.ts", () => {
     ).toEqual([]);
   });
 
+  // HTTP-04: test trên chỉ đối chiếu TÊN. `.env.example` từng ghi `# SAVE_BUDGET_ROWS=20000` (mặc
+  // định thật 40000) kèm lời khuyên đặt 60000 — đúng con số config.ts ghi là đã tái hiện oom-kill;
+  // và `# RETAIN_EXPORT_DAYS=30` trong khi mặc định là 0 (tắt xoá vĩnh viễn). Quy ước: dòng ví dụ
+  // ĐÃ COMMENT (`# X=giá_trị`) là bản ghi của MẶC ĐỊNH — bỏ comment ra không được đổi hành vi.
+  it("dòng ví dụ comment `# X=giá_trị` phải bằng đúng mặc định trong src/config.ts", () => {
+    // Nạp config trong tiến trình con với môi trường TRẦN — process.env của vitest đã bị setup.js
+    // và người chạy đặt thêm biến, đọc ở đây sẽ ra giá trị của môi trường chứ không phải mặc định.
+    const { execFileSync } = require("node:child_process");
+    const env = { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, NODE_ENV: "development",
+      DATABASE_URL: "postgresql://a:b@127.0.0.1:5432/x", SESSION_SECRET: "x".repeat(40) };
+    const out = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
+      "const { config } = await import('./src/config.ts'); process.stdout.write(JSON.stringify(config));"],
+    { cwd: ROOT, env, encoding: "utf8" });
+    const macDinh = JSON.parse(out);
+    const lech = [];
+    for (const m of envExample.matchAll(/^#\s*([A-Z][A-Z0-9_]*)=(\S+)\s*$/gm)) {
+      const [, k, v] = m;
+      if (!(k in macDinh)) continue;   // biến không có mặc định (undefined) → bỏ qua
+      if (String(macDinh[k]) !== v) lech.push(`${k}: ví dụ ghi ${v}, mặc định thật ${macDinh[k]}`);
+    }
+    expect(lech, "Dòng ví dụ đã comment lệch khỏi mặc định — người vận hành bỏ comment là đổi hành vi mà không biết").toEqual([]);
+  });
+
   it("KHÔNG được lọt bí mật thật vào .env.example", () => {
     // Giá trị có nội dung thật (khác chuỗi rỗng / placeholder) trên một dòng KHÔNG comment.
     const dongCoGiaTri = [...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.+)$/gm)]

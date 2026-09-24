@@ -80,7 +80,7 @@ describe.runIf(dbAvailable)("sign-download phải ghi nhật ký khi trao URL ch
 
   // ĐÃ SỬA (cụm W5): bài này trước đây khoá cứng miễn trừ `logos/` với lý do "SPA gọi liên tục".
   // Đo lại thì SPA KHÔNG gọi endpoint này lần nào — `grep -rn "sign-download" web/src` chỉ ra một
-  // dòng duy nhất, là nhãn mã hành động ở web/src/pages/Audit.tsx:58, không phải lời gọi. Miễn trừ
+  // dòng duy nhất, là nhãn mã hành động ở web/src/pages/Audit.tsx (bảng nhãn), không phải lời gọi. Miễn trừ
   // đã bị bỏ; nay MỌI khoá đều ghi nhật ký. Chi tiết + bài đo ở tests/w5-signdownload-logo-audit.test.js.
   it("logo công ty CŨNG ghi nhật ký — không còn miễn trừ theo tiền tố", async () => {
     const khoaLogo = `logos/${TAG}.png`;

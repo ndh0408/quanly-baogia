@@ -45,7 +45,8 @@ describe("translateFormula — tham chiếu ô (đổi toạ độ editor → Ex
 
 describe("translateFormula — fallback an toàn (trả null → ghi số)", () => {
   const ctx = gnCtx();
-  it("hàm KHÔNG an toàn (CEILING) → null", () => expect(translateFormula("=CEILING(F3)", ctx)).toBeNull());
+  it("CEILING MỘT đối số (Excel bắt buộc bội số) → null", () => expect(translateFormula("=CEILING(F3)", ctx)).toBeNull());
+  it("hàm KHÔNG an toàn (IF) → null", () => expect(translateFormula("=IF(F3;1;2)", ctx)).toBeNull());
   it("tham chiếu cột CHỮ (name=B) → null", () => expect(translateFormula("=B3*2", ctx)).toBeNull());
   it("tham chiếu _stt (A) → null", () => expect(translateFormula("=A3+1", ctx)).toBeNull());
   it("ref hàng ngoài bảng → null", () => expect(translateFormula("=F99*2", ctx)).toBeNull());

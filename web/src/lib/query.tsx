@@ -27,8 +27,26 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
   return v;
 }
 
-// Cầu nối realtime: SSE 'changed' (Shell dispatch 'realtime:changed') → làm MỌI query cũ → active query
-// tự refetch. Mirror đúng hành vi "đổi dữ liệu → list tự tải lại" của app cũ. Mount dưới QueryClientProvider.
+// FE-18: sự kiện nào làm tươi query nào. Máy chủ (src/db.ts RT_ENTITY → src/sse.ts emitChange) chỉ
+// bắn 'changed' cho ba thực thể và payload có sẵn `entity`. Trước đây client bỏ qua payload và làm tươi
+// MỌI query đang mở: kế toán mở Hóa đơn thì mỗi lần Sales bấm Lưu là tải lại cả /quotes/projects
+// (≤2000 báo giá), Dashboard gọi lại 4 lệnh analytics — kể cả khi thứ đổi chỉ là một khách hàng.
+// Khoá nào hiện TÊN của thực thể kia (tên khách trên danh sách báo giá, tên người tạo trên Dashboard)
+// cũng nằm trong danh sách. Nhật ký hoạt động đổi theo mọi lần ghi. Không rõ thực thể → làm tươi tất cả
+// (hành vi cũ) — thà thừa còn hơn hiện số cũ.
+// "personnel" nằm trong entity=quote (soát chéo files#5): danh sách Nhân sự ghép cột "Tiền trước thuế"
+// và tham chiếu dự án từ báo giá ĐÃ CHỐT (personnelService.listPersonnel → buildProjectRef) — lưu, chốt,
+// bỏ chốt, xoá báo giá đều làm đổi các cột đó. invalidateQueries chỉ refetch query ĐANG MỞ, nên chỉ tốn
+// khi có người đang ở trang Nhân sự. KHÔNG cần ở customer/user: accountName/company được CHÉP vào hồ sơ
+// lúc chọn dự án, danh sách không hiện tên người tạo báo giá.
+export const KHOA_THEO_THUC_THE: Record<string, string[]> = {
+  quote: ["quotes", "quoteProjects", "dashboard", "quote-internal", "audit", "personnel"],
+  customer: ["customers", "quotes", "quoteProjects", "dashboard", "audit"],
+  user: ["users", "permissions", "perm-catalog", "quotes", "quoteProjects", "dashboard", "audit"],
+};
+
+// Cầu nối realtime: SSE 'changed' (Shell dispatch 'realtime:changed' kèm detail {entity, action}) →
+// làm tươi đúng các query liên quan → query đang mở tự refetch. Mount dưới QueryClientProvider.
 export function RealtimeBridge() {
   const qc = useQueryClient();
   useEffect(() => {
@@ -38,11 +56,22 @@ export function RealtimeBridge() {
     let last = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const WINDOW = 800;
-    const on = () => {
+    // Gom các khoá cần làm tươi trong một nhịp; `null` = không rõ thực thể → làm tươi tất cả.
+    let cho: Set<string> | null = new Set();
+    const xa = () => {
+      const k = cho; cho = new Set();
+      if (k === null) { qc.invalidateQueries(); return; }
+      for (const key of k) qc.invalidateQueries({ queryKey: [key] });
+    };
+    const on = (ev: Event) => {
+      const entity = (ev as CustomEvent<{ entity?: string } | null>).detail?.entity;
+      const ds = entity ? KHOA_THEO_THUC_THE[entity] : undefined;
+      if (!ds) cho = null;
+      else if (cho) ds.forEach((k) => cho!.add(k));
       const now = Date.now();
-      if (now - last >= WINDOW) { last = now; qc.invalidateQueries(); }
+      if (now - last >= WINDOW) { last = now; xa(); }
       else if (!timer) {
-        timer = setTimeout(() => { timer = undefined; last = Date.now(); qc.invalidateQueries(); }, WINDOW - (now - last));
+        timer = setTimeout(() => { timer = undefined; last = Date.now(); xa(); }, WINDOW - (now - last));
       }
     };
     window.addEventListener("realtime:changed", on);

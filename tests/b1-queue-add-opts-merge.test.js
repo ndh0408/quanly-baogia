@@ -4,7 +4,7 @@
 // src/queue.ts đặt `backoff: { type: "exponential", delay: 2000, jitter: 0.5 }` cho ba hàng đợi
 // gọi dịch vụ NGOÀI. Nhưng BullMQ trộn NÔNG: node_modules/bullmq/dist/cjs/classes/queue.js:192
 // `Object.assign(Object.assign({}, this.jobsOpts), opts)` — cả ĐỐI TƯỢNG `backoff` bị thay thế,
-// không phải hợp nhất. Mà đường dispatch webhook DUY NHẤT (src/webhooks.ts:186) truyền
+// không phải hợp nhất. Mà đường dispatch webhook DUY NHẤT (`emit` trong src/webhooks.ts) truyền
 // `{ attempts: 5, backoff: { type: "exponential", delay: 5_000 } }` — không có jitter.
 // Hệ quả: MỌI job webhook thật chạy KHÔNG jitter, tức đúng cái "thundering herd khi dịch vụ ngoài
 // sống lại" mà bản vá trước tuyên bố đã đóng. tests/qs-queue-job-options.test.js không bắt được

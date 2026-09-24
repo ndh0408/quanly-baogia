@@ -37,10 +37,19 @@ export type BanNhapCuc = {
   /** Ảnh base64 đã bị bóc để lọt trần dung lượng. */
   bocAnh: boolean;
   quote: unknown;
+  /** Người GHI bản nháp. Bản ghi trước FE-04 không có trường này. */
+  userId?: number;
 };
 
-/** `id` là số báo giá, hoặc "moi" cho bản chưa từng lưu (#/rnew). */
-export const khoaBanNhap = (id: string | number) => `${TIEN_TO}${id}`;
+/**
+ * `id` là số báo giá, hoặc "moi" cho bản chưa từng lưu (#/rnew).
+ *
+ * FE-04: khoá nay gắn theo NGƯỜI DÙNG. Khoá cũ chỉ theo số báo giá, nên trên máy dùng chung mà phiên
+ * của A hết hạn (không bấm Đăng xuất — đường duy nhất xoá nháp), B đăng nhập từ màn Login rồi mở đúng
+ * báo giá đó là được đề nghị khôi phục phần CHƯA LƯU của A (giá, khách, bảng nội bộ) và Lưu dưới tên B.
+ * Không truyền `userId` = khoá kiểu cũ — chỉ còn dùng để đọc/chuyển bản nháp ghi trước bản vá.
+ */
+export const khoaBanNhap = (id: string | number, userId?: number) => (userId != null ? `${TIEN_TO}u${userId}:${id}` : `${TIEN_TO}${id}`);
 
 /** localStorage NÉM ở chế độ riêng tư của một số trình duyệt — chỉ chạm vào nó qua đây. */
 function kho(): Storage | null {
@@ -70,10 +79,10 @@ export function bocAnhKhoiBaoGia<T>(q: T): T {
 
 export type KetQuaGhi = "da-ghi" | "da-ghi-bo-anh" | "qua-lon" | "khong-ghi-duoc";
 
-export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string | null): KetQuaGhi {
+export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string | null, userId?: number): KetQuaGhi {
   const s = kho();
   if (!s) return "khong-ghi-duoc";
-  const dong = (q: unknown, bocAnh: boolean): BanNhapCuc => ({ luuLuc: Date.now(), baseUpdatedAt, bocAnh, quote: q });
+  const dong = (q: unknown, bocAnh: boolean): BanNhapCuc => ({ luuLuc: Date.now(), baseUpdatedAt, bocAnh, quote: q, ...(userId != null ? { userId } : {}) });
   let than: string;
   let bocAnh = false;
   try {
@@ -101,7 +110,68 @@ export function ghiBanNhap(khoa: string, quote: unknown, baseUpdatedAt: string |
   return bocAnh ? "da-ghi-bo-anh" : "da-ghi";
 }
 
-export function docBanNhap(khoa: string): BanNhapCuc | null {
+export function docBanNhap(khoa: string, userId?: number): BanNhapCuc | null {
+  const d = docBanNhapTho(khoa);
+  // Bản nháp mang tên người KHÁC thì không bao giờ trả ra — kể cả khi khoá trùng vì lý do nào đó.
+  if (d && userId != null && d.userId != null && d.userId !== userId) return null;
+  return d;
+}
+
+/**
+ * Bản nháp ghi TRƯỚC FE-04 nằm ở khoá kiểu cũ (không có người dùng). Chuyển nguyên văn sang khoá
+ * của người đang dùng — giữ lưới an toàn cho ai đang có phần chưa lưu đúng lúc triển khai bản vá.
+ *
+ * Chỉ an toàn nhờ `ghiNhanNguoiDung` đã chạy trước (app#16):
+ *   · người KHÁC người dùng lần trước đăng nhập → mọi bản nháp đã bị xoá;
+ *   · `lastUser` còn trống (lần đầu sau deploy) mà là một lượt ĐĂNG NHẬP MỚI → không biết khoá cũ là
+ *     của ai, nên khoá cũ đã bị xoá;
+ *   · còn lại là cùng người với lần trước, hoặc danh tính đến từ một phiên CÒN SỐNG lúc khởi động
+ *     (cùng cookie phiên) — bản cũ gần như chắc chắn là của chính người này.
+ */
+export function chuyenBanNhapCu(id: string | number, userId: number): void {
+  const s = kho();
+  if (!s) return;
+  try {
+    const cu = s.getItem(khoaBanNhap(id));
+    if (cu == null) return;
+    const moi = khoaBanNhap(id, userId);
+    if (s.getItem(moi) == null) s.setItem(moi, cu);
+    s.removeItem(khoaBanNhap(id));
+  } catch {
+    /* hạn ngạch / chế độ riêng tư — bỏ qua, bản cũ tự hết hạn sau 7 ngày */
+  }
+}
+
+const KHOA_NGUOI_CUOI = "quanly:lastUser";
+/**
+ * Gọi MỖI LẦN xác lập danh tính (khởi động có phiên sẵn, đăng nhập, kích hoạt tài khoản). Người đăng
+ * nhập khác người dùng lần trước trên trình duyệt này → xoá sạch bản nháp trước khi họ kịp mở gì.
+ * Trước đây chỉ Đăng xuất / session:revoked / lớp phủ đổi người mới xoá; màn Login sau khi phiên hết
+ * hạn thì không. Trả `true` khi đã xoá.
+ *
+ * `dangNhapMoi` (app#16): lượt đăng nhập từ màn Login / kích hoạt tài khoản, KHÔNG phải khởi động với
+ * phiên còn sống. Lần đầu trên trình duyệt này (`lastUser` còn trống — đúng tình trạng ngay sau khi
+ * triển khai FE-04) thì không biết bản nháp KHOÁ CŨ là của ai: phiên của A hết hạn, B đăng nhập, rồi
+ * `chuyenBanNhapCu` chép nháp của A sang khoá của B. Nên xoá khoá cũ (khoá mới `u<id>:` giữ nguyên).
+ * Khởi động có phiên sẵn thì giữ: cùng cookie phiên, bản cũ gần như chắc chắn là của người này.
+ */
+export function ghiNhanNguoiDung(userId: number, opts: { dangNhapMoi?: boolean } = {}): boolean {
+  const s = kho();
+  if (!s) return false;
+  let doiNguoi = false;
+  try {
+    const cu = s.getItem(KHOA_NGUOI_CUOI);
+    doiNguoi = cu != null && cu !== String(userId);
+    if (doiNguoi) xoaMoiBanNhap(s);
+    else if (cu == null && opts.dangNhapMoi) xoaBanNhapKhoaCu(s);
+    s.setItem(KHOA_NGUOI_CUOI, String(userId));
+  } catch {
+    /* bỏ qua */
+  }
+  return doiNguoi;
+}
+
+function docBanNhapTho(khoa: string): BanNhapCuc | null {
   const s = kho();
   if (!s) return null;
   let than: string | null;
@@ -161,6 +231,22 @@ export function xoaMoiBanNhap(s: Storage | null = kho()): number {
     for (const k of khoas) { try { s.removeItem(k); n++; } catch { /* bỏ qua */ } }
   } catch {
     /* localStorage bị chặn (chế độ riêng tư) — không có gì để xoá */
+  }
+  return n;
+}
+
+/** Xoá các bản nháp KHOÁ CŨ (trước FE-04, không gắn người dùng) — khoá mới `…u<id>:` không đụng. */
+function xoaBanNhapKhoaCu(s: Storage): number {
+  let n = 0;
+  try {
+    const khoas: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && k.startsWith(TIEN_TO) && !/^u\d+:/.test(k.slice(TIEN_TO.length))) khoas.push(k);
+    }
+    for (const k of khoas) { try { s.removeItem(k); n++; } catch { /* bỏ qua */ } }
+  } catch {
+    /* bỏ qua */
   }
   return n;
 }

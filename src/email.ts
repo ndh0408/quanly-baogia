@@ -1,8 +1,38 @@
 import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
+import { ghiPhuThuoc } from "./observability.js";
+
+/** Chỉ tên miền người nhận — email là PII, không ghi nguyên văn vào log (audit 2026-09-22, OBS-16). */
+export function mienNguoiNhan(to: unknown): string[] {
+  const ds = Array.isArray(to) ? to : String(to ?? "").split(",");
+  return ds.map((x) => String(x).trim().split("@")[1] || "?").filter(Boolean);
+}
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+export const SMTP_TIMEOUT_MS = Math.max(1_000, Number(process.env.SMTP_TIMEOUT_MS) || 10_000);
 let configured = false;
+
+// Máy BẮT THƯ cục bộ (MailHog trên dev/staging, máy dev) — không có chặng nào qua Internet để MITM,
+// và MailHog KHÔNG hỗ trợ STARTTLS: ép requireTLS ở đó là mọi thư mời/đặt lại mật khẩu đều lỗi.
+const MAY_BAT_THU_CUC_BO = new Set(["mailhog", "localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Có BẮT BUỘC STARTTLS không (AUTH-08, audit 2026-09-23).
+ *
+ * Không dùng TLS ngầm (465) thì mặc định BẮT BUỘC STARTTLS: thiếu cờ này nodemailer chỉ nâng cấp khi
+ * máy chủ quảng bá STARTTLS — kẻ MITM gỡ lời quảng bá là đọc được token đặt lại mật khẩu trong thư.
+ * Máy chủ không hỗ trợ TLS thì gửi thư LỖI (ghi log) thay vì gửi trần. Hai lối ra:
+ *   · SMTP_HOST là máy bắt thư cục bộ (danh sách trên, hoặc tên kết thúc `.local`) → tự miễn;
+ *   · SMTP_REQUIRE_TLS=false → tắt tường minh (relay nội bộ không có TLS).
+ * Export để kiểm từng ca mà không phải dựng transporter.
+ */
+export function canBatStartTls(env: Record<string, string | undefined>): boolean {
+  if (env.SMTP_SECURE === "true") return false;   // TLS ngầm — STARTTLS không áp dụng
+  if (/^(0|false|no|off)$/i.test(String(env.SMTP_REQUIRE_TLS ?? "").trim())) return false;
+  const host = String(env.SMTP_HOST ?? "").trim().toLowerCase();
+  if (MAY_BAT_THU_CUC_BO.has(host) || host.endsWith(".local")) return false;
+  return true;
+}
 
 function init() {
   if (configured) return transporter;
@@ -13,9 +43,19 @@ function init() {
     return null;
   }
   transporter = nodemailer.createTransport({
+    // TRẦN THỜI GIAN (RT-11). Mặc định nodemailer: connectionTimeout 120s, greetingTimeout 30s,
+    // socketTimeout 600s. Đường MỜI thành viên gửi thư ĐỒNG BỘ trong request (userService) — SMTP
+    // nuốt gói tin (tường lửa/NAT DROP) là admin chờ tới khi Cloudflare cắt 524, không thấy
+    // `inviteUrl` dự phòng, bấm lại thì nhận 409 vì tài khoản đã được tạo. Job email ở worker cũng
+    // chiếm slot tới 10 phút. SMTP_TIMEOUT_MS chỉnh trần kết nối/chào (mặc định 10s); socket ×3.
+    // (RT-11 và OBS-09 sửa cùng lỗi — khi gộp giữ bản chỉnh được qua env này.)
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS * 3,
     host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
+    requireTLS: canBatStartTls(process.env),
     auth: process.env.SMTP_USER
       ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
       : undefined,
@@ -91,7 +131,7 @@ export function brandedEmailHtml({ name, paragraphs = [], button, note }: { name
 export async function sendEmail({ to, subject, html, text, attachments }: { to?: any; subject?: any; html?: any; text?: any; attachments?: any }) {
   const t = init();
   if (!t) {
-    logger.info({ to, subject }, "email skipped (no SMTP)");
+    logger.info({ toDomain: mienNguoiNhan(to), subject }, "email skipped (no SMTP)");
     return { skipped: true };
   }
   try {
@@ -103,10 +143,12 @@ export async function sendEmail({ to, subject, html, text, attachments }: { to?:
       text,
       attachments,
     });
+    ghiPhuThuoc("smtp", true);
     return { messageId: info.messageId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error({ err: msg, to, subject }, "email send failed");
+    ghiPhuThuoc("smtp", false);
+    logger.error({ err: msg, toDomain: mienNguoiNhan(to), subject }, "email send failed");
     return { error: msg };
   }
 }

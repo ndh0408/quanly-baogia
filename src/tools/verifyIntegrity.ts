@@ -21,8 +21,11 @@
 //
 // Thoát 0 = đạt. Thoát 1 = có thứ không khôi phục được.
 // KHÔNG in ra giá trị PII nào — chỉ đếm.
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { prisma } from "../db.js";
-import { PII_FIELDS } from "../piiFields.js";
+import { PII_FIELDS, piiCutoverBat } from "../piiFields.js";
+import { demCotThoConLai } from "./piiScrub.js";
 import { moTheoKhoa, dangXoayKhoa, isPiiEncrypted, isPiiEncryptionEnabled } from "../piiBox.js";
 import { getObjectBytes, isStorageEnabled } from "../storage.js";
 import { sha256, MAX_PROOF_BYTES, decodeDataUrl } from "../paymentProof.js";
@@ -88,14 +91,21 @@ async function kiemPii(): Promise<Ket> {
     }
   }
 
+  // CỘT THÔ CÒN SÓT (FILE-04). Bản mã đọc được mà cột thô vẫn nằm cạnh thì dump vẫn lộ nguyên
+  // CCCD/STK/lương — trước đây bước kiểm này in ✓ mà không ai biết còn bao nhiêu hàng như vậy.
+  // Chỉ là ✖ khi ĐÃ bật cutover: trước cutover cột thô còn là CỐ Ý (giai đoạn ghi song song).
+  // Đếm cả hàng xoá mềm (cùng lý do includeDeleted ở trên). Xoá bằng: node dist/tools/piiScrub.js
+  const thoConLai = await demCotThoConLai();
+  const cutover = piiCutoverBat();
+
   // Còn hàng nằm ở khoá cũ KHÔNG phải lỗi trong lúc cửa sổ xoay còn mở — đó là trạng thái mong đợi.
   // Nhưng nó PHẢI hiện ra, và phải là ĐỎ khi không hề đang xoay khoá (nghĩa là dữ liệu chỉ đọc được
   // nhờ một khoá mà cấu hình không còn khai — quả bom hẹn giờ).
   const dangXoay = dangXoayKhoa();
-  const dat = undecryptable === 0 && mismatch === 0 && (conKhoaCu === 0 || dangXoay);
-  const ghiChu = conKhoaCu > 0
+  const dat = undecryptable === 0 && mismatch === 0 && (conKhoaCu === 0 || dangXoay) && !(cutover && thoConLai > 0);
+  const ghiChu = (conKhoaCu > 0
     ? ` · ${conKhoaCu} trường CÒN Ở KHOÁ CŨ — chạy pii-backfill.mjs --rotate TRƯỚC KHI gỡ PII_ENC_KEY_OLD`
-    : "";
+    : "") + ` · ${thoConLai} ô PII THÔ còn trong CSDL${thoConLai > 0 ? (cutover ? " — ĐÃ cutover mà còn thô: chạy node dist/tools/piiScrub.js" : " (chưa cutover — ghi song song, chấp nhận)") : ""}`;
   return {
     ten: "PII",
     dat,
@@ -103,8 +113,11 @@ async function kiemPii(): Promise<Ket> {
   };
 }
 
-/** Tải object chứng từ về và đối chiếu SHA-256 với hash lưu trong CSDL. */
-async function kiemChungTu(): Promise<Ket> {
+/**
+ * Tải object chứng từ về và đối chiếu SHA-256 với hash lưu trong CSDL.
+ * `chiId` chỉ để bài kiểm khoanh đúng hàng của nó; diễn tập khôi phục gọi không tham số.
+ */
+export async function kiemChungTu({ chiId }: { chiId?: number[] } = {}): Promise<Ket> {
   if (!isStorageEnabled()) {
     return {
       ten: "Chứng từ",
@@ -113,10 +126,15 @@ async function kiemChungTu(): Promise<Ket> {
     };
   }
 
+  // KỂ CẢ HỒ SƠ ĐÃ XOÁ MỀM (DB-13, audit 2026-09-23) — cùng lý lẽ phần PII ở trên đã dùng
+  // includeDeleted: hàng xoá mềm vẫn là dữ liệu có thể phải khôi phục, và chứng từ của nó vẫn phải
+  // còn nguyên trong kho. Bản trước lọc `deletedAt: null` nên object của hồ sơ xoá mềm không bao giờ
+  // được đối chiếu.
   const rows = await prisma.personnelRecord.findMany({
-    where: { paymentProofKey: { not: null }, deletedAt: null },
+    where: { paymentProofKey: { not: null }, ...(chiId ? { id: { in: chiId } } : {}) },
     select: { id: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true },
-  });
+    includeDeleted: true,
+  } as never) as unknown as { id: number; paymentProof: string | null; paymentProofKey: string | null; paymentProofSha256: string | null }[];
 
   let ok = 0, missing = 0, hashMismatch = 0, noHash = 0;
   for (const r of rows) {
@@ -141,6 +159,12 @@ async function kiemChungTu(): Promise<Ket> {
   };
 }
 
+// CHỈ chạy như CLI khi được gọi trực tiếp (node dist/tools/verifyIntegrity.js) — để bài kiểm import
+// được kiemChungTu mà không kích process.exit.
+const laCli = !!process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (laCli) await chayCli();
+
+async function chayCli() {
 const args = process.argv.slice(2);
 const chiPii = args.includes("--pii");
 const chiProof = args.includes("--proof");
@@ -156,3 +180,4 @@ for (const k of ketQua) {
 
 await prisma.$disconnect().catch(() => {});
 process.exit(ketQua.every((k) => k.dat) ? 0 : 1);
+}

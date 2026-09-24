@@ -44,6 +44,8 @@ ENVS=(
   -e JWT_SECRET=smoke-jwt-secret-different-from-session-and-long-enough
   -e MFA_ENC_KEY=smoke-mfa-encryption-key-for-ci-only
   -e APP_BASE_URL=http://localhost:3000
+  # Tiến trình web production BẮT BUỘC có TRUST_PROXY (src/server.ts) — đúng giá trị compose prod ghim.
+  -e TRUST_PROXY=1
 )
 
 echo "▶ migrate schema bằng CHÍNH image (chứng minh prisma CLI có trong image production)"
@@ -104,9 +106,10 @@ docker exec "$APP" sh -c 'test -x node_modules/.bin/prisma' \
   || { echo "::error::--omit=dev đã loại mất prisma CLI — deploy sẽ chết ở bước migrate"; exit 1; }
 
 echo "▶ KHÔNG có bộ đồ nghề test/lint trong image production"
-# typescript và tsx CÓ mặt hợp lệ: `tsx` khai ở dependencies, `typescript` là phụ thuộc bắc cầu
-# của prisma/@prisma/client. Chỉ soi những gói chỉ dùng lúc phát triển.
-docker exec "$APP" sh -c 'for m in vitest eslint supertest prettier husky; do test -d "node_modules/$m" && exit 1; done; exit 0' \
+# `typescript` CÓ mặt hợp lệ: phụ thuộc bắc cầu của prisma/@prisma/client. `tsx` và `pino-pretty` nay
+# là devDependency (audit 2026-09-22, DEP-10 — trước đó nằm nhầm ở dependencies, kéo esbuild vào image
+# trong khi chú thích trong src/exportWorker.js khẳng định image "không cài tsx"), nên cũng bị soi.
+docker exec "$APP" sh -c 'for m in vitest eslint supertest prettier husky tsx pino-pretty; do test -d "node_modules/$m" && exit 1; done; exit 0' \
   || { echo "::error::image production chứa bộ đồ nghề test/lint"; exit 1; }
 
 echo "▶ LOG KHỞI ĐỘNG KHÔNG ĐƯỢC CÓ VẾT STACK"

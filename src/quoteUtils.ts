@@ -144,6 +144,9 @@ export const QUOTE_UPDATE_STATE_SELECT = {
   id: true, updatedAt: true, quoteNumber: true, projectCode: true, title: true,
   toCompany: true, toContact: true, status: true, hnStatus: true, currentVersion: true,
   companyId: true, vatPercent: true, discount: true, total: true, createdById: true,
+  // Sửa giá SAU KHI CHỐT phải tính lại doanh thu chốt (MONEY-01) — cần biết cột đang null (chốt
+  // trước khi có cột, giữ hành vi COALESCE) hay đã có số.
+  convertedTotal: true,
   // Bảng Hà Nội cấp báo giá: đường lưu đọc bản CSDL để gác "giá HN đã chốt thì không ai ghi đè"
   // (xem chotHnTables trong quoteService). Cột này KHÔNG chứa ảnh nặng như QuoteItem.images —
   // ảnh chứng từ chỉ có khi kế toán tích thanh toán, và reconcileExtraPayments cần đúng bản CSDL đó.
@@ -154,6 +157,7 @@ export const QUOTE_UPDATE_STATE_SELECT = {
     select: {
       id: true, name: true, order: true, groupSubtotal: true, discount: true,
       invoiceNo: true,   // canEdit khoá theo HOÁ ĐƠN — thiếu cột này là khoá không bao giờ đóng
+      custStatus: true,  // nhánh chỉ-đổi-VAT tính lại doanh thu chốt trừ trang khách từ chối (MONEY-01)
       items: {
         orderBy: { order: "asc" },
         select: { kind: true, quantity: true, quantityExact: true, unitPrice: true, days: true },
@@ -383,7 +387,8 @@ export function presentQuoteRow(q: any, { hnOnly = false, internalOnly = false }
       createdBy: q.createdBy ? { id: q.createdBy.id, displayName: q.createdBy.displayName } : null,
       hnStatus: q.hnStatus ?? null,
       hnSheetCount: hanoi.length,
-      hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t), 0),
+      // Đợt 4: theo mẫu của từng bảng như web (listQuotes gắn `_mauBangNoiBo`); thiếu thì như trước.
+      hnTotal: hanoi.reduce((a: number, t: any) => a + extraTableSum(t, q._mauBangNoiBo ? bangNoiBoCoNgay(t, q.companyId ?? q.company?.id, q._mauBangNoiBo) : undefined), 0),
       // KHÔNG trả `sheetCount`: đó là số trang của CHỦ báo giá — cùng loại thông tin với tên trang
       // mà bản 2026-09-15 vừa bỏ khỏi màn account Hà Nội. Họ chỉ cần biết phần của chính mình.
       _accountHnRow: true,
@@ -473,16 +478,49 @@ export function sanitizeHnTables(tables: any) {
   return sanitizeExtraTables(tables, { boCategory: true }) ?? [];
 }
 
-export function extraTableSum(t: any) {
+/**
+ * `usesDays` (đợt 4, L64 phía máy chủ): mẫu của bảng có cột Số Ngày không — tính bằng `bangNoiBoCoNgay`.
+ * `false` → KHÔNG nhân days, y như extraTableSum của web (web/src/components/ExtraTables.tsx). Dữ liệu CŨ
+ * (bảng mẫu không ngày mà CSDL còn days) từng ra số khác nhau giữa màn soạn (không nhân) với Quản lý dự
+ * án / danh sách của account HN (nhân). Không truyền → nhân days > 0 như trước (nơi gọi chưa có mẫu).
+ */
+export function extraTableSum(t: any, usesDays?: boolean) {
   const approvedOnly = t && (t.category === "hcm" || t.category === "khach");
   return (t?.items || []).reduce((acc: number, it: any) => {
     if (it.kind === "section" || it.kind === "subsection" || it.kind === "info") return acc;   // nhóm/nhóm con/info không cộng (đơn giá nhóm là tổng tự tính)
     if (approvedOnly && !it.approved) return acc;   // HCM/Phí KH: chưa duyệt → KHÔNG tính
     const qty = it.quantityExact ? Math.round((Number(it.quantity) || 0) * 10_000) / 10_000 : qtyRound(it.quantity);
     const price = Number(it.unitPrice) || 0;
-    const days = it.days != null ? Number(it.days) : null;
+    const days = usesDays !== false && it.days != null ? Number(it.days) : null;
     return acc + Math.round(days && days > 0 ? qty * days * price : qty * price);   // Thành Tiền làm tròn từng dòng
   }, 0);
+}
+
+/** Một mẫu cột — chỉ những gì luật chọn mẫu của bảng nội bộ / Hà Nội cần. */
+export type MauBangNoiBo = { id: number; companyId: number | null; hasDays: boolean };
+
+/**
+ * Bảng nội bộ / Hà Nội dùng mẫu CÓ cột Số Ngày không — ĐÚNG luật chọn mẫu của web (HnTables.mauBangHn,
+ * ExtraTables.tplOf): `templateId` của bảng; thiếu, hoặc id không còn trong danh sách mẫu đang dùng, thì
+ * mẫu ĐẦU của công ty báo giá; công ty không có mẫu nào thì mẫu đầu danh sách. `dsMau` phải cùng thứ
+ * tự /api/meta/templates trả cho web (mẫu active, theo tên — xem dsMauBangNoiBo): lệch thứ tự là lệch
+ * "mẫu đầu", lệch luôn con số. Hàm thuần — test không cần CSDL.
+ */
+export function bangNoiBoCoNgay(t: any, companyId: number | null | undefined, dsMau: MauBangNoiBo[]): boolean {
+  const cuaCty = dsMau.filter((m) => m.companyId === companyId);
+  const ds = cuaCty.length ? cuaCty : dsMau;
+  const id = (t?.templateId != null ? Number(t.templateId) : 0) || ds[0]?.id;
+  return !!(dsMau.find((m) => m.id === id) ?? ds[0])?.hasDays;
+}
+
+/** Danh sách mẫu cho bangNoiBoCoNgay — cùng truy vấn với metaService.listTemplates (web nạp qua đó). */
+export async function dsMauBangNoiBo(): Promise<MauBangNoiBo[]> {
+  const ds = await prisma.quoteTemplate.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, companyId: true, code: true } });
+  return ds.map((m) => {
+    let hasDays = false;
+    try { hasDays = !!(getConfig(m.code) as any)?.items?.columns?.days; } catch { /* mẫu chưa có config → metaService cũng trả hasDays: false */ }
+    return { id: m.id, companyId: m.companyId, hasDays };
+  });
 }
 
 // sheetTotals (theo ĐÚNG thứ tự sheets, từ computeQuoteTotals) → lưu materialized subtotal/sheet.

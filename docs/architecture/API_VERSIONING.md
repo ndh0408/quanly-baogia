@@ -1,6 +1,6 @@
 # Phiên bản API và chính sách ngừng hỗ trợ
 
-> §9 đòi *chuẩn bị* kiến trúc `/api/v1/`, **không** đòi viết lại 140 endpoint chỉ để gắn số. Và nó
+> §9 đòi *chuẩn bị* kiến trúc `/api/v1/`, **không** đòi viết lại 141 endpoint chỉ để gắn số. Và nó
 > nói thẳng điều kiện: *"Nếu SPA và backend release cùng nhau thì `/api` cũ có thể giữ."*
 >
 > Ở repo này SPA và backend **nằm trong cùng một image** và deploy cùng một lệnh. Nên tài liệu này
@@ -18,7 +18,7 @@
 
 ### Vì sao chưa dựng
 
-Một bề mặt API thứ hai **không phải là một dòng cấu hình**: nó là 140 endpoint nữa phải nằm trong
+Một bề mặt API thứ hai **không phải là một dòng cấu hình**: nó là 141 endpoint nữa phải nằm trong
 ma trận phân quyền (`docs/product/ROLES_PERMISSIONS.md`), nữa phải được `endpoint-inventory --check`
 soát, và nữa phải được nhớ tới trong mọi lần rà bảo mật sau này. Dựng nó cho **không consumer nào**
 là nhân đôi bề mặt tấn công để đổi lấy một dòng đánh dấu trong tài liệu.
@@ -53,7 +53,7 @@ Nghĩa là việc dựng `/api/v1` sau này chỉ còn là **gắn thêm mount**
 ### Cách gắn khi tới lúc
 
 1. Mount lặp lại các router dưới tiền tố `/api/v1` **sau** toàn bộ chuỗi gác hiện có
-   (`bearerAuth` → `enforceActiveUser` → `csrfGuard` → `apiLimiter` đều gắn ở `app.use("/api/", …)`
+   (`apiLimiter` → `bearerAuth` → `enforceActiveUser` → `csrfGuard` đều gắn ở `app.use("/api/", …)`
    nên tự phủ `/api/v1/`).
 2. Nhân đôi hai middleware gắn theo ĐƯỜNG DẪN CỤ THỂ — nếu quên, lưu báo giá lớn qua v1 sẽ 413:
    `decompressBody(16MB)` và `express.json({ limit: "16mb" })`, cả hai đang gắn ở

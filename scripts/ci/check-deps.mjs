@@ -20,8 +20,19 @@
 //   3. GỌI QUA BINARY trong npm script: `prisma migrate deploy`, `vitest run`…
 //
 // Bỏ sót ba kiểu này thì cổng báo động giả, và một cổng hay báo động giả sẽ bị tắt.
+//
+// ── CHIỀU NGƯỢC: PHỤ THUỘC "MA" (audit 2026-09-22, DEP-03) ────────────────────
+// Gói được IMPORT mà KHÔNG khai trong package.json — nó chỉ có mặt vì một gói khác kéo nó vào và npm
+// hoist lên node_modules/. `jszip` là ví dụ thật: src/xlsxStitcher.ts và src/services/contractDocx.ts
+// import nó trên ĐÚNG đường xuất Excel/hợp đồng, nhưng nó chỉ tồn tại nhờ exceljs. exceljs đổi cây
+// phụ thuộc là xuất Excel hỏng lúc chạy, và tsc không bắt được. Luật:
+//   · src/ và shared/  → mọi gói import phải nằm trong `dependencies` (image production chỉ có chúng);
+//   · scripts/ và tests/ → trong `dependencies` ∪ `devDependencies`.
+// (web/ có package.json riêng, không soát ở đây.)
 import { readFileSync, readdirSync } from "node:fs";
+import { builtinModules } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const GOC = path.resolve(import.meta.dirname, "../..");
 const BO_QUA_THU_MUC = new Set(["node_modules", "dist", ".git", "coverage", "_bmad", "_bmad-output", ".claude", "public"]);
@@ -66,6 +77,47 @@ export function cachDung(ten, maNguon, npmScripts, cauHinh) {
   return null;
 }
 
+const BUILTIN = new Set(builtinModules);
+
+/** Tên GÓI của mọi bare import trong một đoạn mã (bỏ đường dẫn tương đối, `node:`, builtin). Hàm THUẦN. */
+export function goiDuocImport(maNguon) {
+  const ra = new Set();
+  // Bỏ chú thích trước khi dò: chú thích hay trích mẫu `from "x"` làm ví dụ (chính tệp này cũng vậy).
+  maNguon = maNguon.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  const re = /(?:^|[^\w.$])(?:import\s+(?:type\s+)?(?:[\w*${}\s,]+\s+from\s+)?|export\s+[\w*${}\s,]+\s+from\s+|require\(\s*|import\(\s*)["']([^"'./][^"']*)["']/g;
+  for (const m of maNguon.matchAll(re)) {
+    const spec = m[1];
+    if (spec.startsWith("node:") || spec.startsWith("#")) continue;
+    const ten = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+    if (BUILTIN.has(ten) || !/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i.test(ten)) continue;
+    ra.add(ten);
+  }
+  return ra;
+}
+
+/**
+ * Gói DEV mà src/ được phép import, kèm lý do. Chỉ hợp lệ khi lời gọi nằm trong nhánh KHÔNG BAO GIỜ
+ * chạy ở image production — và gói vẫn phải được khai (ở devDependencies).
+ */
+export const DEV_DUOC_PHEP_TRONG_SRC = new Map([
+  ["tsx", "src/exportWorker.js + src/importWorker.js chỉ `import(\"tsx/esm/api\")` khi chạy TỪ NGUỒN .ts (dev/test), trong try/catch; image production chạy dist/ nên không bao giờ tới nhánh đó"],
+]);
+
+/** Lượt import gói KHÔNG khai. `tepTheoThuMuc` = [{ tep: đường dẫn tương đối gốc repo, noiDung }]. Hàm THUẦN. */
+export function timGoiMa(tepTheoThuMuc, pkg) {
+  const deps = new Set(Object.keys(pkg.dependencies || {}));
+  const tatCa = new Set([...deps, ...Object.keys(pkg.devDependencies || {})]);
+  const loi = [];
+  for (const { tep, noiDung } of tepTheoThuMuc) {
+    const runtime = /^(src|shared)\//.test(tep);
+    for (const g of goiDuocImport(noiDung)) {
+      const hopLe = runtime ? deps.has(g) || (DEV_DUOC_PHEP_TRONG_SRC.has(g) && tatCa.has(g)) : tatCa.has(g);
+      if (!hopLe) loi.push({ tep, goi: g, can: runtime ? "dependencies" : "dependencies/devDependencies" });
+    }
+  }
+  return loi;
+}
+
 function main() {
   const pkg = JSON.parse(readFileSync(path.join(GOC, "package.json"), "utf8"));
   const deps = Object.keys(pkg.dependencies || {});
@@ -76,6 +128,10 @@ function main() {
 
   const kq = deps.map((d) => ({ ten: d, cach: cachDung(d, maNguon, npmScripts, cauHinh) }));
   const chet = kq.filter((k) => !k.cach && !CHO_PHEP.has(k.ten));
+  const tepSoat = ["src", "shared", "scripts", "tests"].flatMap((d) => {
+    try { return moiNguon(path.join(GOC, d)); } catch { return []; }
+  }).map((f) => ({ tep: path.relative(GOC, f).split(path.sep).join("/"), noiDung: readFileSync(f, "utf8") }));
+  const ma = timGoiMa(tepSoat, pkg);
 
   if (!process.argv.includes("--check")) {
     for (const k of kq.sort((a, b) => a.ten.localeCompare(b.ten))) {
@@ -85,6 +141,11 @@ function main() {
     return;
   }
 
+  if (ma.length) {
+    console.error(`✖ ${ma.length} lượt import gói KHÔNG khai trong package.json (phụ thuộc "ma" — chỉ có nhờ gói khác kéo vào):`);
+    for (const m of ma.slice(0, 30)) console.error(`    ${m.tep} → "${m.goi}" (phải nằm trong ${m.can})`);
+    process.exit(1);
+  }
   if (chet.length) {
     console.error(`✖ ${chet.length} phụ thuộc RUNTIME không thấy ai dùng: ${chet.map((c) => c.ten).join(", ")}`);
     console.error("  Mỗi gói thừa = bề mặt tấn công thừa + một mục nữa trong SBOM phải soát khi có CVE.");
@@ -96,4 +157,8 @@ function main() {
   console.log(`✓ ${deps.length} phụ thuộc runtime — đều tìm được nơi dùng`);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();
+// So bằng `pathToFileURL`, KHÔNG ghép chuỗi `file://${argv[1]}` (audit 2026-09-22, DEP-02): trên Windows
+// argv[1] là `D:\QuanLY\…` còn import.meta.url là `file:///D:/QuanLY/…` — hai chuỗi không bao giờ bằng
+// nhau, main() không chạy, script thoát 0 với stdout RỖNG và verify-local in ✓. Máy Windows lại là
+// nơi DUY NHẤT cổng thật sự chạy. tests/ops-ci-guard-windows.test.js chốt lớp lỗi này.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

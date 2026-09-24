@@ -54,6 +54,16 @@ export async function assignHn(req: Request) {
 }
 
 /**
+ * `hnAssigneeId` KHÔNG ĐỦ để ghi phần Hà Nội (RBAC-08, audit 2026-09-23): chủ báo giá gỡ account HN
+ * khỏi danh sách thành viên thì GET /:id của họ đã 403, nhưng hnAssigneeId không đổi nên trước đây
+ * họ vẫn lưu/gửi duyệt được. Đường ghi phải đòi đúng điều kiện của đường đọc: còn đọc được báo giá
+ * (canOnQuote "read" — thành viên, hoặc có quote:read:all).
+ */
+function assertConLaThanhVien(req: Request, q: { createdById: number; members: { userId: number; scopes: string[] }[] }) {
+  if (!canOnQuote(req.session, "read", q)) throw httpError(403, "Bạn không còn được giao báo giá này");
+}
+
+/**
  * Account Hà Nội LƯU phần của mình — `PUT /api/quotes/:id/hn`.
  *
  * Từ 2026-09-15 bảng HN nằm ở `Quote.hnTables` (cấp báo giá), KHÔNG còn rải trong
@@ -69,9 +79,10 @@ export async function assignHn(req: Request) {
  */
 export async function saveHn(req: Request) {
   const id = Number((req.params as any).id);
-  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, hnStatus: true, hnAssigneeId: true, updatedAt: true } });
+  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, hnStatus: true, hnAssigneeId: true, updatedAt: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Chỉ Account Hà Nội được giao mới điền được phần này");
+  assertConLaThanhVien(req, existing);
   if (["submitted", "approved"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN đã gửi duyệt/đã duyệt — không sửa được");
   // Tab chạy bundle CŨ gửi `hnSheets` (hình dạng theo trang, đã bỏ). Không được hiểu thành "xoá
   // hết bảng": nói thẳng để họ tải lại, và nhắc chép phần vừa gõ trước khi tải.
@@ -153,9 +164,10 @@ export async function saveHn(req: Request) {
 /** Account_hn GỬI DUYỆT phần HN → thông báo quản lý (người tạo báo giá). */
 export async function submitHn(req: Request) {
   const id = (req.params as any).id;
-  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, quoteNumber: true, title: true, hnAssigneeId: true, hnStatus: true, createdById: true } });
+  const existing = await prisma.quote.findFirst({ where: { id }, select: { id: true, quoteNumber: true, title: true, hnAssigneeId: true, hnStatus: true, createdById: true, members: { select: { userId: true, scopes: true } } } });
   if (!existing) throw httpError(404, "Không tìm thấy báo giá");
   if (!can(req.session, P.QUOTE_HN_FILL) || existing.hnAssigneeId !== req.session.userId) throw httpError(403, "Không có quyền gửi duyệt phần này");
+  assertConLaThanhVien(req, existing);
   if (!["assigned", "rejected"].includes(existing.hnStatus ?? "")) throw httpError(400, "Phần HN không ở trạng thái có thể gửi duyệt");
   const quote = await prisma.quote.update({ where: { id }, data: { hnStatus: "submitted", hnSubmittedAt: new Date(), hnRejectNote: null }, include: QUOTE_INCLUDE });
   await notify(existing.createdById, { title: `Phần Hà Nội chờ duyệt: ${quote.quoteNumber}`, body: `${quote.title} — Account đã gửi giá HN, mở để duyệt/trả.`, link: `/#/quotes/${id}`, resource: "quote", resourceId: id, important: true });

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as M from "../lib/quoteMath";
 import { type ItemK, nextK, type ThanhChung } from "../lib/gridShared";
 import { GridTable } from "./GridTable";
@@ -22,6 +22,14 @@ import { KhoiSheet } from "./KhoiSheet";
 // lưới chính mới bật fxBar; phần HN là nơi người ta gõ giá nên cần đúng bộ Excel đó: công thức,
 // copy/cắt/dán nhiều ô, fill-down, Ctrl+Z/Y, gõ tiếng Việt bằng IME.
 export type HnTable = Omit<ExtraTable, "category"> & { category?: string };
+
+/** Mẫu cột của một bảng HN: `templateId` của bảng, thiếu thì mẫu đầu của công ty (không có thì mẫu đầu
+ *  danh sách). MỘT luật cho lưới, tổng và đường Lưu (QuoteEditor / AccountHnView dọn `days` theo nó — L64). */
+export function mauBangHn(t: { templateId?: number }, templates: EditorTemplate[], companyId?: number): EditorTemplate | undefined {
+  const ds0 = templates.filter((x) => x.companyId === companyId);
+  const ds = ds0.length ? ds0 : templates;
+  return templates.find((x) => x.id === (t.templateId || ds[0]?.id)) || ds[0];
+}
 
 export function HnTables({ tables, templates, companyId, editable, canApprove, canPay, quoteId, onMarkDirty, onQuoteTouched, moMacDinh = false, thanhChung, phuHieu, dieuKhien }: {
   /** Mảng bảng HN — MUTATE TẠI CHỖ, đúng quy ước state của editor (qRef giữ object, không copy). */
@@ -52,21 +60,20 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
   const [active, setActive0] = useState(0);
   const [mo, setMo] = useState(moMacDinh);
   const setActive = (i: number) => { setActive0(i); redraw(); };
+  // L61: component còn gắn không — hộp hỏi xoá bảng không tự đóng khi rời trang (xem xoaBang).
+  const songRef = useRef(true);
+  useEffect(() => { songRef.current = true; return () => { songRef.current = false; }; }, []);
 
   tables.forEach((x) => { if (x._k == null) x._k = nextK(); (x.items || []).forEach((it) => { if (it._k == null) it._k = nextK(); }); });
 
   const tplList0 = templates.filter((t) => t.companyId === companyId);
   const tplList = tplList0.length ? tplList0 : templates;
   const defTplId = tplList[0]?.id;
-  const tplOf = (t: HnTable) => templates.find((x) => x.id === (t.templateId || defTplId)) || tplList[0];
+  const tplOf = (t: HnTable) => mauBangHn(t, templates, companyId);
 
-  // Dọn `days` cũ cho bảng dùng mẫu KHÔNG có cột Số Ngày — nếu không, tổng phồng lên vì
-  // extraTableSum nhân thêm số ngày của dữ liệu cũ (đối xứng với ExtraTables).
-  if (editable) {
-    let cleaned = false;
-    tables.forEach((x) => { if (!tplOf(x)?.layout?.hasDays) (x.items || []).forEach((it) => { if (it.days != null) { it.days = null; cleaned = true; } }); });
-    if (cleaned) onMarkDirty();
-  }
+  // L64 (đợt 3): KHÔNG còn xoá `days` lúc vẽ khi bảng dùng mẫu không ngày — đổi mẫu qua lại là mất số
+  // Ngày vĩnh viễn, và mở bảng còn days cũ là bị coi "đã sửa". Tổng chỉ nhân ngày khi mẫu CÓ ngày (xem
+  // `tongBang`); đường Lưu của QuoteEditor / AccountHnView gửi days: null cho mẫu không ngày.
 
   let ai = active;
   if (ai >= tables.length) ai = tables.length - 1;
@@ -89,7 +96,7 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
          mắt đang nhìn, không tốn thêm khối nào.
      Dòng của GridTable tắt ở cả hai ca (`sheetTotalLine={false}`). */
   const ID_LUOI = "hn";
-  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable));
+  const tongBang = tables.map((x) => extraTableSum(x as ExtraTable, !!tplOf(x)?.layout?.hasDays));
   const tong = tongBang.reduce((a, b) => a + b, 0);
   const hienTongTab = tables.length > 1;
 
@@ -101,11 +108,13 @@ export function HnTables({ tables, templates, companyId, editable, canApprove, c
     onChange();
   };
   const xoaBang = async (i: number) => {
+    // L61 (đợt 3): trả lời hộp treo sau khi editor / màn Account HN đã gỡ = coi như Hủy — không xoá bảng
+    // của báo giá đã rời, không gọi mark() của màn đã gỡ (bật cờ `__editorDirty` DÙNG CHUNG trang mới).
     const r = await removeTableFromList(tables as ExtraTable[], i, ai, (tbl) => confirmModal(
       "Xoá sheet Hà Nội?",
       `Sheet "${tbl.name || `Bảng ${i + 1}`}" đã có dòng điền — xoá là mất luôn ngăn hoàn tác của lưới, Ctrl+Z không lấy lại được. Tiếp tục?`,
       { danger: true, confirmText: "Xoá" },
-    ));
+    ).then((dong) => dong && songRef.current));
     if (!r.removed) return;
     setActive(r.active);
     onChange();

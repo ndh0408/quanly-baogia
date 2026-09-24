@@ -15,12 +15,16 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 
 ## Ứng dụng
 
+
+> Phiên bản ghi **major** thôi (audit 2026-09-22, DOC-12: số minor ở đây trôi khỏi package-lock ngay bản
+> nâng kế tiếp — chỉ ghi MAJOR). Bản chính xác: đọc `package-lock.json`.
+
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
 | React | 19.0 (SPA, Vite) | **KEEP** | — | Ứng dụng nghiệp vụ nội bộ, **có xác thực**, không cần SSR/SEO. Phụ lục §11 cấm đổi sang Next.js đúng cảnh này. Lưới báo giá là DOM thủ công hiệu năng cao — đổi framework là viết lại nó. | — |
-| Vite | 8.1 | **KEEP** | — | Build 42 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
+| Vite | 8.1 | **KEEP** | — | Build 125 file test web + bundle production trong vài giây. Không có vấn đề đo được. | — |
 | Express | 4.22 | **KEEP** | — | Phụ lục §11 cấm đổi sang NestJS chỉ vì DI/modules. Ranh giới module đạt được bằng cấu trúc thư mục TypeScript. Express 5 thì `DEFER` (xem dưới). | — |
-| Express | 4.22 | **DEFER** | Express 5 | Express 5 đổi cách xử lý lỗi async và pattern route. Lợi ích thật: bỏ được `asyncHandler`. Chưa đủ để đánh đổi rủi ro trên 140 endpoint. Xem lại khi Express 4 hết hỗ trợ. ⚠️ Đây là lý do **kiến trúc**, KHÔNG phải bảo mật: lỗ `qs` (GHSA-x5fp / GHSA-4mjr) vá được **trong nhánh 4** bằng `npm audit fix` (express 4.22.3 · qs 6.16.0 · body-parser 1.20.8) — đừng viện lỗ hổng để ép nâng Express 5. | Trung bình — mọi route phải test lại |
+| Express | 4.22 | **DEFER** | Express 5 | Express 5 đổi cách xử lý lỗi async và pattern route. Lợi ích thật: bỏ được `asyncHandler`. Chưa đủ để đánh đổi rủi ro trên 141 endpoint. Xem lại khi Express 4 hết hỗ trợ. ⚠️ Đây là lý do **kiến trúc**, KHÔNG phải bảo mật: lỗ `qs` (GHSA-x5fp / GHSA-4mjr) vá được **trong nhánh 4** bằng `npm audit fix` (express 4.22.3 · qs 6.16.0 · body-parser 1.20.8) — đừng viện lỗ hổng để ép nâng Express 5. | Trung bình — mọi route phải test lại |
 | TypeScript | 5.7 | **KEEP** | — | `strict` đã bật, typecheck chạy trong cổng. | — |
 | Zod | 4.4 | **KEEP** | — | Đã migrate v3→v4 (cú pháp v3 bị **bỏ qua âm thầm** và làm lọt thông báo tiếng Anh ra giao diện — xem AGENTS.md). | — |
 | @tanstack/react-query | 5.101 | **KEEP** | — | Đang gánh cache + invalidation của SPA. | — |
@@ -39,10 +43,10 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
-| Node.js | 22 (`.nvmrc`) | **KEEP** | — | LTS. | — |
+| Node.js | 24 (`.nvmrc`, `engines`, `ARG NODE_IMAGE` ghim digest, `@types/node` — cùng major) | **KEEP** | — | LTS tới 2028-04. Đổi từ 22 ngày 2026-09-23 (audit DEP-04): máy chạy cổng đã dùng 24, production dùng 22 tag trôi — toàn bộ test chạy trên major khác production. `npm run verify` chặn khi Node của máy khác major. | — |
 | Build pipeline | `tsc -p tsconfig.build.json` → `dist/` (backend) · Vite → `public/app2/` (web, `base: "/app2/"`) | **KEEP** | — | Hai trình biên dịch cho hai đích, gặp nhau ở **một** artifact: Dockerfile multi-stage chép `dist/` và `public/app2/` vào ảnh cuối rồi `CMD ["node","dist/server.js"]`. Cùng artifact đó chạy ở **cả bốn** đường triển khai (Dockerfile · docker-compose · manifest `infra/k8s/` · Helm chart) — `scripts/ci/check-runtime-command.sh` chặn mọi lệnh khởi động trỏ vào `src/`. Không thêm bundler cho backend: Node chạy thẳng ESM đã biên dịch, và bundling sẽ làm hỏng `import.meta.url` cùng các đường dẫn tới `templates/`, `fonts/`. | — |
 | Chạy production | `node dist/*.js` | **ĐÃ MIGRATE** ✔ | từ `tsx src/*.ts` | Phụ lục §3. Trước đây Docker chạy qua `tsx` còn Helm gọi `node src/server.js` (**file không tồn tại** → pod chết vòng lặp). Nay bốn đường triển khai dùng **chung một artifact**. Khoá bằng `scripts/ci/check-runtime-command.sh` + `scripts/ci/smoke-image.sh`. | Đã hoàn tất |
-| BullMQ | 5.77 | **KEEP** | — | Phụ lục §13: không thêm Kafka/RabbitMQ/NATS cho một ứng dụng nghiệp vụ nội bộ. | — |
+| BullMQ | 5 | **KEEP** | — | Phụ lục §13: không thêm Kafka/RabbitMQ/NATS cho một ứng dụng nghiệp vụ nội bộ. | — |
 | Nhập Excel | `node:worker_threads` **trong tiến trình API** | **KEEP** (soát lại 2026-08-27, trước đó ghi REFACTOR) | — | Phụ lục §4 nói job nặng nên đi qua hàng đợi, và bảng này từng ghi REFACTOR theo mặt chữ đó. Soát lại đường mã thì danh sách của §4 khớp **kém** với cái đang có: `POST /api/quotes/import-excel` là **XEM TRƯỚC ĐỒNG BỘ** — nó KHÔNG ghi CSDL, kết quả CHÍNH LÀ phản hồi (dữ liệu lưới để người dùng soát rồi mới bấm Lưu). BullMQ sinh ra cho việc bắn-rồi-quên có kết quả là một tệp hoặc một tác dụng phụ. Và những gì §4 thật sự đòi thì đường này **đã có**: rời event loop (worker thread), **concurrency** (`IMPORT_MAX_CONCURRENT`), **queue limit** + từ chối sớm 429 kèm `Retry-After` (`IMPORT_MAX_QUEUED`, `IMPORT_WAIT_MS`), **timeout** (`terminate()` luồng khi hết hạn), trần tệp 10MB, soi mục lục zip trước khi giải nén. Ba mục còn lại của §4 vô nghĩa ở đây: *retry/backoff* (người dùng bấm lại — máy tự thử lại một file hỏng là vô ích), *idempotency/dedup* (không có tác dụng phụ để trùng), *failure retention* (`audit` đã ghi lượt bị từ chối). Đổi sang BullMQ đổi lại **hợp đồng API + UX trang nhập** (tải lên → mã job → hỏi → tải kết quả) và phải cất payload xem trước vài MB ở đâu đó — chi phí thật, đổi lấy lợi ích không đo được. §19: không trả lời được "vấn đề ĐO ĐƯỢC nào đang tồn tại" thì KHÔNG migrate. | — |
 | SSE | Express + Redis Pub/Sub | **KEEP** | — | Phụ lục §6: một chiều là đủ, không đổi sang WebSocket. Backplane Redis đã có nên chạy được nhiều replica. | — |
 | ExcelJS + ghép OOXML thủ công | 4.4 | **KEEP** | — | `src/xlsxStitcher.ts` ghép XML để giữ **file mẫu của công ty** (logo, phông, viền, ô gộp, vùng in). Thư viện sinh workbook mới sẽ làm mất chính thứ đó. | — |
@@ -57,10 +61,10 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 | Helm / Kubernetes | chart có, chưa dùng ở production | **KEEP (chưa kích hoạt)** | — | Phụ lục §15 Level 3: chỉ khi quy mô vận hành xứng đáng. Chart phải **thật sự render được** — `scripts/ci/check-helm.mjs` chốt bằng kubeconform + 4 bất biến. | — |
 | Ảnh production | `quanly-app:prod` (**tag di động**) | **DEFER** | digest bất biến | Phụ lục §18 đòi artifact bất biến. Đường digest đã có (`IMAGE_REF=…@sha256:`) nhưng **mặc định vẫn dựng trên VM** — quyết định của chủ hệ thống. | Thấp khi bật |
 | Log | Pino → stdout | **KEEP** | — | Có `requestId` xuyên suốt; nhật ký kiểm toán nay cũng mang mã đó. | — |
-| Gom log tập trung | cấu hình CÓ SẴN, **chưa bật** | **DEFER (bật được ngay)** | Loki + Promtail + Grafana | Phụ lục §16 khuyến nghị. Ngăn xếp đã viết sẵn ở `infra/observability/` — một lệnh compose overlay là chạy. Chưa bật mặc định vì production một VM và bốn container nữa (Loki · Promtail · Prometheus · Grafana) ăn RAM của chính ứng dụng. Bảng điều khiển đặt log CẠNH metric; mọi PromQL trong đó được `check-alerts.mjs [A4]` đối chiếu với `src/observability.ts`. | Thấp |
+| Gom log tập trung | **ĐANG CHẠY trên production từ 2026-09-16** | **KEEP** | Loki + Promtail + Grafana | Hiện trạng: [MONITORING.md](../operations/MONITORING.md) (nguồn duy nhất). Loki giữ log 30 ngày (`infra/observability/loki.yaml`). Bảng điều khiển đặt log CẠNH metric; mọi PromQL trong đó được `check-alerts.mjs [A4]` đối chiếu với `src/observability.ts`. | Thấp |
 | Lưu báo giá (xoá-tạo-lại mọi trang) | full rewrite | **ĐÃ LÀM** ✔ (sau cờ, mặc định TẮT) | bỏ qua trang KHÔNG ĐỔI | §16 đòi benchmark trước/sau — đã đo: 10.000 dòng đi từ 3.255 ms xuống 930 ms (3,5×), 98% thời gian nằm ở ghi CSDL nên đây đúng chỗ cần chạm. Mức TRANG chứ không mức DÒNG: mức dòng đòi id bền + luật ghép dòng, tức một tầng lỗi mới giữa đường tiền bạc. Số liệu đầy đủ: `docs/architecture/QUOTE_SAVE_PERFORMANCE.md`. | Trung bình — nên bật ở staging trước; gỡ biến môi trường là quay lại đường cũ, không cần rollback mã |
-| Metrics | Prometheus (`prom-client` 15.1) | **KEEP** | — | 29 metric riêng + bộ mặc định (đếm: `grep -coE 'name: "[a-z_]+"' src/observability.ts`). `/metrics` gác bằng Bearer, **404 ở production nếu thiếu token**. | — |
-| Cảnh báo | 22 rule ở `infra/prometheus/alerts.yaml` (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) | **KEEP (ĐANG CHẠY từ 2026-09-16)** | — | Có bài `promtool test rules` chốt logic. Ngăn xếp quan sát nay **ĐÃ BẬT trên production**: Prometheus quét `quanly-app` và `quanly-worker` (cả hai target `health":"up"`), nạp đủ quy tắc từ tệp gốc mount thẳng vào. Trước 2026-09-16 production KHÔNG đặt `METRICS_TOKEN` nên `/metrics` trả 404 và KHÔNG có container Prometheus nào — tức 22 quy tắc là bản đặc tả đúng mà **chưa canh gác gì**. Vẫn **không có Alertmanager**: cảnh báo dừng ở giao diện Prometheus/Grafana, không tự đánh thức ai — đó là phần còn thiếu duy nhất. | — |
+| Metrics | Prometheus (`prom-client` 15.1) | **KEEP** | — | 33 metric riêng + bộ mặc định (đếm: `grep -coE 'name: "[a-z_]+"' src/observability.ts`). `/metrics` gác bằng Bearer, **404 ở production nếu thiếu token**. | — |
+| Cảnh báo | 26 rule ở `infra/prometheus/alerts.yaml` (`grep -c '^      - alert:' infra/prometheus/alerts.yaml`) | **KEEP (ĐANG CHẠY từ 2026-09-16)** | — | Có bài `promtool test rules` chốt logic. Ngăn xếp quan sát nay **ĐÃ BẬT trên production**: Prometheus quét `quanly-app` và `quanly-worker` (cả hai target `health":"up"`), nạp đủ quy tắc từ tệp gốc mount thẳng vào. Trước 2026-09-16 production KHÔNG đặt `METRICS_TOKEN` nên `/metrics` trả 404 và KHÔNG có container Prometheus nào — tức các quy tắc là bản đặc tả đúng mà **chưa canh gác gì**. Alertmanager → Telegram chạy từ 2026-09-17; phần còn thiếu là giám sát từ NGOÀI (xem [MONITORING.md](../operations/MONITORING.md)). | — |
 | Sentry | 10.55 | **KEEP** | — | Phụ lục §16: giữ cho lỗi ứng dụng, không dựng chồng 3–4 hệ giám sát. | — |
 | Bí mật | `.env` + quy ước `*_FILE` | **KEEP** | — | Phụ lục §17: `*_FILE` cho Docker secrets / K8s Secret / Vault mà không đổi cách triển khai. ⚠️ Chưa đường triển khai nào dùng. | — |
 | Kho object | S3 API (`@aws-sdk/client-s3` 3.x) | **KEEP** | — | Phụ lục §7: có lớp trừu tượng `src/storage.ts`, không hard-code nhà cung cấp. | — |
@@ -78,9 +82,9 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 
 | Component | Current | Decision | Target | Reason | Migration Risk |
 |---|---|---|---|---|---|
-| Vitest | 4.1 (backend + web) | **KEEP** | — | Một runner cho cả hai phía. | — |
+| Vitest | 4 (backend + web) | **KEEP** | — | Một runner cho cả hai phía. | — |
 | Playwright | 1.62 | **KEEP** | — | Dùng cho smoke giao diện chạy **cục bộ** (`scripts/ci/ui-smoke.mjs`), không phải bộ E2E đầy đủ. | — |
-| GitHub Actions | `ci.yml` có, **chưa bao giờ chạy** | **REPLACE** ✔ | `npm run verify` cục bộ | Tài khoản không bật Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 13 bước gõ tay. | Đã hoàn tất |
+| GitHub Actions | `ci.yml` có, **chỉ chạy tay** (`workflow_dispatch`) | **REPLACE** ✔ | `npm run verify` cục bộ (= CI, ghi dấu xanh cho `deploy.sh prod`) | Tài khoản bị khoá vì billing — mọi lượt từng kích hoạt đều hỏng sau 2–3 giây; chủ repo chốt 2026-09-23 không dùng Actions. Lượt chạy thật đầu tiên của job `security` lộ ra **hai chốt vô tác dụng** (`.gitleaks.toml` sai cú pháp allowlist, `.trivyignore.yaml` sai tiền tố ID). Cổng thật nay là 13 bước gõ tay. | Đã hoàn tất |
 | gitleaks · trivy · semgrep | ghim theo tag, chạy qua Docker | **KEEP** | — | Phụ lục §22: không phụ thuộc `latest` cho image quét. | — |
 | Ký ảnh (Cosign) | **chưa có** | **DEFER** | Cosign + OIDC | §22 nói "nếu infrastructure hỗ trợ". Không có registry nào đang phát hành ảnh đã ký, và production dựng ảnh **trên VM** — không có gì để ký. Bật cùng lúc với đường digest. | Thấp |
 
@@ -90,7 +94,7 @@ Chúng sẽ trôi; con số chính xác luôn đọc từ file gốc.
 
 | Quyết định | Số mục | Ghi chú |
 |---|---|---|
-| KEEP | 33 | Không có vấn đề đo được nào biện minh cho việc thay. MỘT trong số này là **KEEP (chưa kích hoạt)** — Helm/k8s: có file, chưa phải thứ đang chạy. (22 rule cảnh báo đã chuyển sang ĐANG CHẠY từ 2026-09-16.) |
+| KEEP | 33 | Không có vấn đề đo được nào biện minh cho việc thay. MỘT trong số này là **KEEP (chưa kích hoạt)** — Helm/k8s: có file, chưa phải thứ đang chạy. (26 rule cảnh báo — ngăn xếp đã chuyển sang ĐANG CHẠY từ 2026-09-16.) |
 | ĐÃ MIGRATE ✔ | 1 | `tsx src/*.ts` → `node dist/*.js` |
 | ĐÃ LÀM ✔ | 1 | Lưu báo giá incremental (sau cờ, **mặc định TẮT**) |
 | REPLACE ✔ | 1 | CI GitHub Actions → `npm run verify` cục bộ |

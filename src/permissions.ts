@@ -245,8 +245,13 @@ export const PERMISSION_GROUPS = [
   // Nhóm "Sản phẩm" ĐÃ BỎ khỏi ma trận: app KHÔNG có tính năng sản phẩm (price book chưa làm) — quyền
   // product:* là tàn dư RBAC gốc, không route/trang/check nào dùng → ẩn cho khỏi rối giám đốc.
   // (Hằng số quyền + role default vẫn giữ để không vỡ test/SPA cũ; chỉ bỏ HIỂN THỊ.)
+  // role:assign / template:manage / company:manage ĐÃ BỎ KHỎI MA TRẬN (RBAC-10, audit 2026-09-23):
+  // không endpoint nào kiểm chúng (không có trang quản lý mẫu/công ty; phân vai trò đi qua
+  // user:manage). Ô không có tác dụng làm người cấp quyền hiểu sai hệ thống. Hằng số + ADMIN_ONLY
+  // vẫn giữ — y như product:* — để không vỡ dữ liệu quyền đã lưu. Khoá bằng
+  // tests/rb-ma-tran-quyen-co-tac-dung.test.js.
   { key: "admin", label: "Quản trị", perms: [
-    P.USER_MANAGE, P.ROLE_ASSIGN, P.TEMPLATE_MANAGE, P.COMPANY_MANAGE,
+    P.USER_MANAGE,
     P.AUDIT_VIEW, P.AUDIT_VIEW_FULL, P.SETTINGS_MANAGE,
   ] },
   { key: "personnel", label: "Nhân sự (hồ sơ)", perms: [
@@ -397,12 +402,27 @@ function sessionPermSet(session: SessionLike): Set<string> {
   return effectiveRoleSet(session?.role) ?? new Set();
 }
 
+/**
+ * PHẦN TỬ CANH GÁC "đã tuỳ biến thành rỗng" trong `User.permissions` (RBAC-01, audit 2026-09-23).
+ *
+ * Trước đây admin bỏ tích MỌI ô quyền của một tài khoản → lưu `permissions = []` → middleware hiểu
+ * `[]` là "chưa tuỳ biến" và trả lại NGUYÊN bộ quyền mặc định của vai trò (manager: 30 quyền, gồm
+ * đọc toàn bộ khách hàng và danh bạ CCCD/số tài khoản). Thao tác "tước hết quyền" làm điều ngược lại.
+ * Không thêm cột để khỏi cần migration: một chuỗi KHÔNG nằm trong PERMISSIONS nên `can()` không
+ * bao giờ khớp nó, và resolveUserPermissions gỡ nó ra khỏi tập hiệu lực.
+ */
+export const KHONG_CO_QUYEN = "__none__";
+
 /** Resolve tập quyền của 1 TÀI KHOẢN để nạp vào session (gọi ở middleware mỗi request).
  *  admin → luôn full (chống tự khóa). Có quyền-riêng-user → dùng đúng tập đó. Chưa có → quyền role mặc định.
  *  canSign (cờ cũ "được Ký Chứng từ") → BẮC CẦU thành quyền quote:sign:own để hợp nhất vào ma trận. */
 export function resolveUserPermissions(role: string | undefined, userPerms?: string[] | null, canSign = false): string[] {
   if (role === "admin") return [...ROLE_PERMISSIONS.admin];
+  // Mảng RỖNG = "chưa tuỳ biến → theo vai trò". Muốn biểu diễn "tuỳ biến thành KHÔNG CÓ QUYỀN NÀO"
+  // thì userService.updateUser ghi phần tử canh gác KHONG_CO_QUYEN (RBAC-01): mảng khác rỗng nên
+  // KHÔNG rơi về bộ mặc định của vai trò, và phần tử đó bị gỡ ra khỏi tập hiệu lực ngay dưới.
   const set = new Set<string>(userPerms && userPerms.length ? userPerms : [...(effectiveRoleSet(role) ?? [])]);
+  set.delete(KHONG_CO_QUYEN);
   if (canSign) set.add(PERMISSIONS.QUOTE_SIGN_OWN);
   // Bắc cầu quyền GỘP cũ → quyền nguyên tử (tương thích user đã lưu quyền cũ trước khi tách).
   const Pm = PERMISSIONS;
@@ -412,6 +432,17 @@ export function resolveUserPermissions(role: string | undefined, userPerms?: str
   if (set.has(Pm.PERSONNEL_MANAGE_OWN)) { set.add(Pm.PERSONNEL_EDIT_OWN); set.add(Pm.PERSONNEL_DELETE_OWN); }
   if (set.has(Pm.PERSONNEL_MANAGE_ALL)) { set.add(Pm.PERSONNEL_EDIT_ALL); set.add(Pm.PERSONNEL_DELETE_ALL); }
   return [...set];
+}
+
+/**
+ * VIEW BỊ LƯỢC: tài khoản có `quote:hn:fill` hoặc `quote:internal:view` chỉ được thấy PHẦN ĐƯỢC GIAO
+ * của báo giá (presentQuoteForAccountHn / presentQuoteForInternal giấu giá bán, khách, tổng).
+ * MỘT hàm cho mọi đường có thể lộ báo giá đầy đủ — GET chi tiết, lịch sử phiên bản, XUẤT FILE (đồng
+ * bộ + nền + tải lại qua khoá exports/), NHÂN BẢN — vì quyền cấp per-user nên tổ hợp
+ * "internal:view + export" tích được trên ma trận mà không có cảnh báo nào (RBAC-06).
+ */
+export function biLuocView(session: SessionLike) {
+  return can(session, PERMISSIONS.QUOTE_HN_FILL) || can(session, PERMISSIONS.QUOTE_INTERNAL_VIEW);
 }
 
 /** Does this role hold the given permission? (`:all` implies `:own`.) Giữ cho các đường chỉ có role. */

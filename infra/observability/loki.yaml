@@ -1,0 +1,55 @@
+# ── CẤU HÌNH LOKI (thay cho /etc/loki/local-config.yaml mặc định của ảnh) ──────────────────────
+#
+# VÌ SAO CÓ TỆP NÀY (audit 2026-09-22, OBS-15): trước đây Loki chạy cấu hình MẶC ĐỊNH của ảnh — không
+# `retention_period`, không compactor bật retention — nên volume `loki-data` lớn MÃI, trên CÙNG hệ tệp
+# với `quanly-pgdata` và `/opt/quanly-backups`. Đĩa đầy thì Postgres ngừng ghi. QuanlyDiaSapDay chỉ
+# là cảnh báo MUỘN.
+#
+# Mọi khối dưới đây CHÉP NGUYÊN VĂN cấu hình mặc định của grafana/loki:3.3.2 (đọc bằng
+# `docker run --rm --entrypoint cat grafana/loki:3.3.2 /etc/loki/local-config.yaml`, 2026-09-23) —
+# đặc biệt `schema_config` và `path_prefix` PHẢI giữ y hệt, đổi là Loki không đọc được dữ liệu cũ
+# trên volume. Chỉ THÊM: `compactor` + `limits_config.retention_period` + tắt gửi thống kê.
+# Đã chạy thử bằng docker thật: container lên, /ready trả "ready".
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+# ── THÊM: RETENTION ─────────────────────────────────────────────────────────
+# 30 ngày: đủ để điều tra một sự cố phát hiện muộn (cuối tuần + nghỉ lễ), mà không để log ăn dần
+# đĩa chung với CSDL. Log là dữ liệu vận hành, không phải hồ sơ — hồ sơ nằm trong AuditLog của CSDL.
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: 720h
+
+analytics:
+  reporting_enabled: false

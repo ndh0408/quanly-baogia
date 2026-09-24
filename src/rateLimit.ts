@@ -46,8 +46,9 @@ export function createLimiter(prefix: string, options: Partial<import("express-r
         // LƯỢT LỆNH ĐẦU TIÊN ĐƯỢC CHỜ KẾT NỐI LÊN, mọi lượt sau trượt nhanh như cũ.
         //
         // `new RedisStore(...)` → `store.init()` bắn ngay hai lệnh `SCRIPT LOAD`, mà lúc `createApp()`
-        // dựng 15 limiter thì ioredis chưa nối xong và kết nối này cố ý KHÔNG xếp hàng ngoại tuyến →
-        // 15 vết stack ở đầu mỗi log khởi động production (đo trong scripts/ci/smoke-image.sh).
+        // dựng mọi limiter (hơn chục cái — đừng chép số, nó trôi) thì ioredis chưa nối xong và kết nối
+        // này cố ý KHÔNG xếp hàng ngoại tuyến → mỗi limiter một vết stack ở đầu log khởi động production
+        // (đo trong scripts/ci/smoke-image.sh).
         //
         // Chờ ở đây KHÔNG làm chậm đường xử lý request: handler bên dưới chỉ gọi `limiterRedis` khi
         // `isRateLimitRedisReady()` đã đúng, nên `cho` luôn đã được tiêu thụ và gán null từ lúc khởi
@@ -68,8 +69,19 @@ export function createLimiter(prefix: string, options: Partial<import("express-r
         // Không truyền `store` → express-rate-limit tự dựng MemoryStore RIÊNG cho limiter này, nên
         // hai limiter khác prefix không ăn chung quota. Bộ đếm giờ dọn của nó đã `unref()`.
         const duPhong = rateLimit({ ...opts });
-        return (req: Request, res: Response, next: NextFunction) =>
-          isRateLimitRedisReady() ? limiterRedis(req, res, next) : duPhong(req, res, next);
+        // REDIS "READY" MÀ LỆNH LỖI cũng phải rơi về dự phòng (RT-01). `isRateLimitRedisReady()` chỉ
+        // nhìn trạng thái KẾT NỐI; khi kết nối còn sống mà lệnh bị từ chối — OOM với noeviction,
+        // LOADING, READONLY, commandTimeout khi Redis treo — express-rate-limit (passOnStoreError
+        // mặc định false) gọi next(err) → errorHandler 500 cho MỌI /api, kể cả đăng nhập.
+        // Không dùng passOnStoreError:true: đó là bỏ hẳn giới hạn, đúng cái đã bác bỏ ở trên.
+        return (req: Request, res: Response, next: NextFunction) => {
+          if (!isRateLimitRedisReady()) return duPhong(req, res, next);
+          limiterRedis(req, res, (err?: unknown) => {
+            if (!err) return next();
+            logger.warn({ err: err instanceof Error ? err.message : String(err), prefix }, "rate limit Redis lỗi lệnh — dùng bộ đếm bộ nhớ");
+            return duPhong(req, res, next);
+          });
+        };
       }
     } catch (e) {
       logger.warn({ err: e instanceof Error ? e.message : String(e), prefix }, "rate limiter falling back to in-memory store");

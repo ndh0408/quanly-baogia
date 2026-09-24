@@ -22,8 +22,26 @@ const nowVN = (d: Date = new Date()) => new Date(d.getTime() + BU_VN_MS);
 /** Năm theo lịch Việt Nam. Đây là năm dùng để khoá bộ đếm và để ghép vào mã. */
 export const namVN = (d?: Date) => nowVN(d).getUTCFullYear();
 
+/**
+ * NGÀY HÔM NAY THEO LỊCH VIỆT NAM, biểu diễn là NỬA ĐÊM UTC của ngày đó (MONEY-07 / XLSX-11).
+ *
+ * Ngày chứng từ (Quote.quoteDate) là một NGÀY, không phải thời điểm: editor cắt 10 ký tự ISO, Excel
+ * đọc getDate() trên container UTC. Lưu `new Date()` thì báo giá tạo/nhân bản lúc 00:00–06:59 giờ VN
+ * mang ngày HÔM QUA trên cả hai chỗ. Nửa đêm UTC của ngày VN thì mọi cách đọc đều ra đúng ngày VN.
+ */
+export function homNayVN(d?: Date) {
+  const t = nowVN(d);
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
+}
+
 /** Hai số cuối của năm VN: 2026 → "26". */
 export const namNganVN = (d?: Date) => String(namVN(d)).slice(-2);
+
+/** Ngày/tháng/năm theo lịch Việt Nam của một mốc thời gian (XLSX-11 — ngày in trên tệp gửi khách). */
+export function ngayThangNamVN(d: Date | string | number) {
+  const t = nowVN(d instanceof Date ? d : new Date(d));
+  return { ngay: t.getUTCDate(), thang: t.getUTCMonth() + 1, nam: t.getUTCFullYear() };
+}
 
 /** "MMDD" theo lịch Việt Nam — dùng đặt tên file tải về (tháng rồi tới ngày). */
 export function thangNgayVN(d?: Date) {

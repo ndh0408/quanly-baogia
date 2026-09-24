@@ -3,12 +3,21 @@
 # Mặc định là TAG để bản clone nào cũng build được ngay. Production nên GHIM THEO DIGEST cho
 # build tái lập được — nay ghim bằng tham số, không phải sửa file:
 #
-#   docker build --build-arg NODE_IMAGE=node:22-alpine@sha256:<digest> .
+#   docker build --build-arg NODE_IMAGE=node:24.21.0-alpine@sha256:<digest> .
 #
 # Tham số này còn là đường để `scripts/ci/docker-smoke.sh` chèn một ảnh nền có sẵn CA của proxy
 # MITM khi máy build nằm sau proxy đó (xem chú thích trong script). CA KHÔNG được nướng vào
 # Dockerfile: nó là chuyện của MỘT môi trường build, không phải của image.
-ARG NODE_IMAGE=node:22-alpine
+#
+# ── NODE 24, GHIM DIGEST (audit 2026-09-22, DEP-04 / INFRA-12) ─────────────
+# Trước đây mặc định là `node:22-alpine` — TAG TRÔI: mỗi lượt deploy dựng trên VM kéo bản 22.x mới
+# nhất lúc đó, nên hai lượt deploy cùng commit ra hai runtime khác nhau. Trong khi đó máy DUY NHẤT
+# chạy cổng kiểm (npm run verify) chạy Node 24, và tsc kiểm theo @types/node 26 — tức toàn bộ test
+# chạy trên một major KHÁC production. Chọn MỘT phiên bản: Node 24 (LTS tới 2028-04; Node 22 hết
+# hỗ trợ 2027-04), vì đó là thứ bộ test đã chạy hằng ngày. .nvmrc, `engines`, @types/node cùng major;
+# tests/ops-deps-node.test.js khoá điều đó, verify-local.sh chặn khi Node của máy lệch major.
+# Làm mới CÓ CHỦ Ý (hằng tháng): `docker buildx imagetools inspect node:24.<x>.<y>-alpine`.
+ARG NODE_IMAGE=node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 
 ##### deps stage — PRODUCTION-ONLY deps + generated Prisma client #####
 # `prisma` (the migrate CLI) is a runtime dependency in this project because

@@ -50,14 +50,29 @@ export function fieldErrorsFrom(ex: unknown): Record<string, string> {
   return out;
 }
 
-export function toast(message: string, type: "success" | "error" | "info" = "info") {
+/**
+ * Vùng thông báo (live region). FE-17: trước đây chỉ được tạo lúc có toast ĐẦU TIÊN — trình đọc màn
+ * hình thường không đọc nội dung chèn vào một live region VỪA sinh ra cùng lúc, nên thông báo đầu
+ * (hay là lỗi Lưu) bị câm. main.tsx gọi hàm này ngay lúc khởi động.
+ */
+export function dungToastHost(): HTMLElement {
   let host = document.getElementById("toast-host");
   if (!host) {
     host = document.createElement("div");
     host.id = "toast-host";
     host.setAttribute("aria-atomic", "false");
+    host.setAttribute("aria-live", "polite");
     document.body.appendChild(host);
   }
+  return host;
+}
+
+export function toast(message: string, type: "success" | "error" | "info" = "info") {
+  const host = dungToastHost();
+  // Đang ở trình soạn báo giá thì thanh nút dính đáy chiếm đúng góc phải-dưới: nâng toast lên TRÊN
+  // thanh để nó không đè nút "⋯" (Tải Excel/PDF) — luồng "Lưu → ⋯ → Tải" mất cú bấm đầu tiên
+  // (audit 2026-09-22, GAP1-05). Đọc MỘT LẦN lúc tạo toast, không dùng selector CSS `:has()` động.
+  host.style.bottom = document.querySelector(".editor .actions") ? "84px" : "";
   // aria-live so screen readers announce toasts (errors = assertive). Trước đây React
   // hoàn toàn câm với screen reader — đây là sửa a11y.
   host.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
@@ -95,6 +110,9 @@ export function toast(message: string, type: "success" | "error" | "info" = "inf
   x.addEventListener("click", () => { disarm(); dismiss(); });
   el.addEventListener("mouseenter", disarm);
   el.addEventListener("mouseleave", arm);
+  // FE-17 (WCAG 2.2.1): người dùng BÀN PHÍM cũng phải dừng được đồng hồ tự tắt — Tab tới nút × là dừng.
+  el.addEventListener("focusin", disarm);
+  el.addEventListener("focusout", arm);
   arm();
 }
 
@@ -183,6 +201,20 @@ function trapFocus(box: HTMLElement) {
   };
 }
 
+/** Esc đã được hộp thoại xử lý → không để listener Esc nào khác (form/modal bên dưới) nhận nữa. */
+const chanEsc = (e: KeyboardEvent) => { e.preventDefault(); e.stopImmediatePropagation(); };
+/**
+ * Chỉ hộp thoại TRÊN CÙNG được xử lý phím. Listener của mọi hộp cùng nằm ở pha capture của window,
+ * chạy theo thứ tự ĐĂNG KÝ — tức hộp mở TRƯỚC (nằm dưới) chạy trước. Không có cổng này thì với hai hộp
+ * chồng nhau, Esc đóng hộp DƯỚI rồi chanEsc chặn luôn hộp trên. Hộp đã bị gỡ khỏi DOM mà chưa kịp
+ * dọn listener cũng không được ăn phím.
+ */
+const laHopTrenCung = (back: HTMLElement) => {
+  if (!back.isConnected) return false;
+  const tren = [...document.querySelectorAll('[data-focus-trap="own"]')].pop();
+  return !tren || back.contains(tren);
+};
+
 export function confirmModal(
   title: string,
   message: string,
@@ -199,19 +231,31 @@ export function confirmModal(
         <button class="btn ${opts.danger ? "btn-danger" : "btn-primary"}" data-yes>${esc(opts.confirmText ?? "Đồng ý")}</button>
       </div></div>`;
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const done = (v: boolean) => { cleanup(); resolve(v); };
+    // FE-02: Enter trước đây LUÔN = "Đồng ý" bất kể tiêu điểm đang ở đâu — Tab sang "Hủy" rồi Enter
+    // vẫn Xoá / Khoá / Đặt lại MFA / "Rời, bỏ thay đổi". Nay Enter kích hoạt ĐÚNG nút đang có tiêu
+    // điểm (như mọi nút HTML), tiêu điểm ở chỗ khác thì Enter không làm gì.
+    // Esc: nghe ở pha CAPTURE của WINDOW (chạy trước mọi listener ở document) và chặn lan truyền —
+    // không thì listener Esc của form bên dưới (đăng ký
+    // trước, pha bubble) chạy tiếp và mở lại hộp "Bỏ thay đổi?" mỗi lần Esc, người dùng kẹt vô hạn.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") done(false);
-      else if (e.key === "Enter") done(true);
+      if (!laHopTrenCung(back)) return;
+      if (e.key === "Escape") { chanEsc(e); done(false); }
+      else if (e.key === "Enter") {
+        const a = document.activeElement as HTMLElement | null;
+        if (a?.hasAttribute("data-no")) { e.preventDefault(); done(false); }
+        else if (a?.hasAttribute("data-yes")) { e.preventDefault(); done(true); }
+      }
     };
     back.addEventListener("click", (e) => { if (e.target === back) done(false); });
     back.querySelector("[data-no]")?.addEventListener("click", () => done(false));
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(true));
-    document.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);
-    (back.querySelector("[data-yes]") as HTMLElement | null)?.focus();
+    // Hành động phá huỷ: tiêu điểm mặc định ở "Hủy" — Enter theo phản xạ không được xoá gì.
+    (back.querySelector(opts.danger ? "[data-no]" : "[data-yes]") as HTMLElement | null)?.focus();
   });
 }
 
@@ -227,21 +271,22 @@ export function promptModal(
     back.innerHTML = `<div class="modal modal-sm" role="dialog" aria-modal="true" data-focus-trap="own" aria-label="${esc(title)}">
       <div class="modal-head"><h3>${esc(title)}</h3></div>
       <div class="modal-body"><p style="margin:0 0 8px">${esc(message)}</p>
-        <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
+        <textarea class="pm-input" rows="2" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);border-radius:6px;font:inherit;resize:vertical"></textarea></div>
       <div class="modal-foot"><button class="btn" data-no>Hủy</button><button class="btn btn-primary" data-yes>${esc(opts.confirmText ?? "Xác nhận")}</button></div></div>`;
     const input = back.querySelector(".pm-input") as HTMLTextAreaElement;
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const done = (v: string | null) => { cleanup(); resolve(v); };
     // Ctrl/⌘+Enter gửi (Enter trần phải để xuống dòng vì ô là textarea) — khớp thói quen soạn thảo.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") done(null);
+      if (!laHopTrenCung(back)) return;
+      if (e.key === "Escape") { chanEsc(e); done(null); }
       else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value.trim()); }
     };
     back.addEventListener("click", (e) => { if (e.target === back) done(null); });
     back.querySelector("[data-no]")?.addEventListener("click", () => done(null));
     back.querySelector("[data-yes]")?.addEventListener("click", () => done(input.value.trim()));
-    document.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);
     input.focus();
@@ -391,7 +436,7 @@ export function modalChotBaoGia(
     };
 
     let releaseFocus = () => {};
-    const cleanup = () => { releaseFocus(); back.remove(); document.removeEventListener("keydown", onKey); };
+    const cleanup = () => { releaseFocus(); back.remove(); window.removeEventListener("keydown", onKey, true); };
     const huy = () => { cleanup(); resolve(null); };
     const chot = () => {
       if (nutChot.disabled) return;
@@ -403,13 +448,14 @@ export function modalChotBaoGia(
       resolve(doi);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (!laHopTrenCung(back)) return;
       // KHÔNG chốt bằng Enter: đây là thao tác không đảo lại được, phải bấm đúng nút.
-      if (e.key === "Escape") huy();
+      if (e.key === "Escape") { chanEsc(e); huy(); }
     };
     back.addEventListener("click", (e) => { if (e.target === back) huy(); });
     back.querySelector("[data-no]")?.addEventListener("click", huy);
     nutChot.addEventListener("click", chot);
-    document.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     ve();
     document.body.appendChild(back);
     releaseFocus = trapFocus(back);

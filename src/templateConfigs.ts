@@ -247,12 +247,12 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
       //     "Backdrop: / . KT: 14mW x 5mH / . Khung sắt…").
       // Cấu hình cũ đặt `removeDetail: true` + bóp `D: 10` rồi gộp vào Hạng Mục, tức xoá đúng
       // cột kể nội dung của mẫu. Và nó xoá THẬT dữ liệu người dùng đã có: đường nhập Excel
-      // (`src/excelImport.ts:493`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
+      // (`src/excelImport.ts`, dòng `it.detail = textAt(r, "detail")`) vẫn đọc cột này vào `it.detail` — đo trên production 2026-09-18 có
       // 64 hạng mục đang giữ nội dung Chi Tiết — nên file Colorfull gửi sang CÓ cột đó, app lưu
       // lại, rồi trả về cho khách một file MẤT cột đó.
       //
       // BẬT LẠI KHÔNG DỊCH ĐỊA CHỈ Ô NÀO. `detail: "D"` vốn đã khai, nên `metaService` trả
-      // `reserveDetail: true` và `web/src/components/GridTable.tsx:354` (`keepDetailSlot`) vẫn chừa khe D từ trước:
+      // `reserveDetail: true` và `web/src/components/GridTable.tsx` (`keepDetailSlot`) vẫn chừa khe D từ trước:
       // cờ này chỉ đổi việc HIỆN cột, không đổi sơ đồ chữ cột. Mọi công thức đã lưu giữ nguyên
       // nghĩa, kể cả loại trỏ theo địa chỉ (`{"quantity":"=E3"}` — E vẫn là Số Lượng).
       //
@@ -330,7 +330,7 @@ export const TEMPLATE_CONFIGS: Record<string, any> = {
 // ===== GN (không ngày) — bản BANNER =====
 // Y HỆT GN không ngày (cùng cột/công thức/cách xuất), CHỈ khác
 // ── FILE MẪU: `templates/Marico_Decor.xlsx`, kế thừa qua phép spread bên dưới. KHÔNG phải
-// GN_KhongNgay.xlsx như chú thích cũ ghi — `src/excel.ts:1704` đọc `cfg.filePath`, tức đường dẫn
+// GN_KhongNgay.xlsx như chú thích cũ ghi — `src/excel.ts` (chỗ đọc `cfg.filePath`) đọc `cfg.filePath`, tức đường dẫn
 // trong config này, chứ KHÔNG đọc `QuoteTemplate.filePath` dưới CSDL. Nên nhãn "Ms." nhúng cứng
 // ở B3/E3 của Marico_Decor.xlsx dính CẢ gn_banner, và bản vá xoá nhãn cũng theo spread mà sang.
 // cách đánh STT: NHÓM CON đánh số 1,2,3… (reset theo từng nhóm chính), các MỤC bên dưới

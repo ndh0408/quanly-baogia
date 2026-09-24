@@ -15,6 +15,7 @@
 // `searchText` là cột phẳng, KHÔNG mã hoá, nằm ngay cạnh trong cùng bản dump. Để CCCD trong đó thì
 // việc mã hoá cột `idCard` chỉ là trang trí. Thay bằng chỉ mục mù: tra CCCD BẰNG-ĐÚNG vẫn chạy.
 
+import { logger } from "./logger.js";
 import { encryptPii, decryptPii, decryptPiiOrThrow, blindIndex, blindIndexCandidates, isPiiEncryptionEnabled, isPiiEncrypted } from "./piiBox.js";
 
 /** Một trường được mã hoá: cột thô ↔ cột bản mã (+ cột chỉ mục mù nếu cần tra cứu). */
@@ -115,9 +116,38 @@ export function decodePiiOnRead<T extends Record<string, any>>(model: string, ro
   return out as T;
 }
 
-/** Tiện dụng cho danh sách. */
+/**
+ * Giải mã cho DANH SÁCH — một hàng hỏng không được làm sập cả trang (FILE-12).
+ *
+ * `decodePiiOnRead` NÉM khi bản mã không giải được (fail-closed: không bao giờ rơi về plaintext).
+ * Đúng cho đường chi tiết/hợp đồng. Nhưng ở danh sách, ném nghĩa là MỘT hàng hỏng (khoá cũ gỡ sớm,
+ * byte hỏng) biến cả trang Nhân sự/Danh bạ thành 500 cho mọi người đọc tới khi ai đó sửa bằng SQL.
+ * Ở đây hàng hỏng vẫn fail-closed — các trường PII của nó thành null, KHÔNG có plaintext nào —
+ * kèm cờ `piiLoi: true` để giao diện/người vận hành thấy, và một dòng log error mang id.
+ */
 export const decodePiiList = <T extends Record<string, any>>(model: string, rows: T[]): T[] =>
-  rows.map((r) => decodePiiOnRead(model, r) as T);
+  rows.map((r) => {
+    try {
+      return decodePiiOnRead(model, r) as T;
+    } catch (e) {
+      if (!(e as { piiIntegrity?: boolean })?.piiIntegrity) throw e;
+      logger.error({ model, id: (r as Record<string, unknown>)?.id }, "PII không giải mã được — trả hàng với trường PII rỗng (piiLoi)");
+      return anHangPiiLoi(model, r) as T;
+    }
+  });
+
+/** Bản sao của hàng với MỌI trường PII (thô, bản mã, chỉ mục mù) bị gỡ/null, gắn `piiLoi: true`. */
+export function anHangPiiLoi<T extends Record<string, any>>(model: string, row: T): T & { piiLoi: true } {
+  const out: Record<string, any> = { ...row };
+  for (const f of PII_FIELDS[model] || []) {
+    out[f.plain] = null;
+    delete out[f.enc];
+    if (f.idx) delete out[f.idx];
+  }
+  delete out.piiVersion;
+  out.piiLoi = true;
+  return out as T & { piiLoi: true };
+}
 
 /**
  * Điều kiện Prisma để tìm BẰNG-ĐÚNG theo CCCD, dùng được ở cả hai giai đoạn.

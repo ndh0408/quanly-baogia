@@ -37,6 +37,41 @@ export type ProjectRef = {
  * cắt cụt thì sheet rơi ra ngoài vết cắt mất số tiền, và việc một hàng có số hay không phụ thuộc
  * các hàng khác cùng trang. Nạp theo lô giữ được cả hai: mọi sheet tính đủ, bộ nhớ vẫn O(một lô).
 
+/** Ứng viên để truy vấn hẹp: mã đầy đủ + bỏ hậu tố sheet (_1/_2) + bỏ version (_vN). */
+function ungVienMa(wanted: Iterable<string>): string[] {
+  const candidates = new Set<string>();
+  for (const c of wanted) {
+    candidates.add(c);
+    const noSheet = c.replace(/_\d+$/, "");
+    candidates.add(noSheet);
+    candidates.add(noSheet.replace(/_v\d+$/, ""));
+    candidates.add(c.replace(/_v\d+$/, ""));
+  }
+  return [...candidates];
+}
+
+/**
+ * NGƯỜI TẠO của (các) báo giá đã chốt mà một mã sản xuất trỏ tới — khớp ĐÚNG như buildProjectRef.
+ * Rỗng = mã không trỏ vào dự án nào (hồ sơ nhập mã tự do), khi đó buildProjectRef cũng không trả
+ * gì để lộ. Dùng cho chốt phạm vi ghi hồ sơ Nhân sự (RBAC-03).
+ */
+export async function nguoiTaoCuaMaSanXuat(code: string): Promise<number[]> {
+  const c = code.trim();
+  if (!c) return [];
+  const arr = ungVienMa([c]);
+  const quotes = await prisma.quote.findMany({
+    where: { status: "converted", deletedAt: null, OR: [{ projectCode: { in: arr } }, { quoteNumber: { in: arr } }] },
+    take: 1000,
+    select: { quoteNumber: true, projectCode: true, projectVersion: true, createdById: true, sheets: { orderBy: { order: "asc" }, select: { id: true, codeNo: true } } },
+  });
+  const out = new Set<number>();
+  for (const q of quotes) {
+    const sheets = q.sheets.length ? q.sheets : [{ id: -1 } as any];
+    if (sheets.some((sh: any, i: number) => sheetCode(q, soMa(sh, i), sheets.length) === c)) out.add(q.createdById);
+  }
+  return [...out];
+}
+
 /**
  * Trả về Map[mã sản xuất → dữ liệu tham chiếu] cho TẬP mã đang cần (các projectCode ở trang hiện tại).
  * Truy vấn hẹp: chỉ lấy báo giá đã chốt có projectCode/quoteNumber khớp ứng viên (đã bỏ hậu tố _sheet/_vN).
@@ -50,16 +85,7 @@ export async function buildProjectRef(codes: Array<string | null | undefined>): 
   const out = new Map<string, ProjectRef>();
   if (!wanted.size) return out;
 
-  // Ứng viên để truy vấn hẹp: mã đầy đủ + bỏ hậu tố sheet (_1/_2) + bỏ version (_vN).
-  const candidates = new Set<string>();
-  for (const c of wanted) {
-    candidates.add(c);
-    const noSheet = c.replace(/_\d+$/, "");
-    candidates.add(noSheet);
-    candidates.add(noSheet.replace(/_v\d+$/, ""));
-    candidates.add(c.replace(/_v\d+$/, ""));
-  }
-  const arr = [...candidates];
+  const arr = ungVienMa(wanted);
 
   const quotes = await prisma.quote.findMany({
     where: { status: "converted", deletedAt: null, OR: [{ projectCode: { in: arr } }, { quoteNumber: { in: arr } }] },

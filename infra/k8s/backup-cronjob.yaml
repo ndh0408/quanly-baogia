@@ -27,6 +27,13 @@ spec:
     spec:
       backoffLimit: 2
       template:
+        # NHÃN BẮT BUỘC (audit 2026-09-22, INFRA-08): networkpolicy.yaml `postgres-allow-app-only` chỉ
+        # cho pod mang `app: quanly` vào cổng 5432. Pod template này trước đây KHÔNG có nhãn nào →
+        # trên CNI có thi hành NetworkPolicy, pg_dump không bao giờ nối được Postgres, tức đường k8s
+        # KHÔNG có backup CSDL nào mà không cảnh báo nào. `component: db-backup` giữ pod này ngoài
+        # selector của Service/PDB (chúng chọn theo component api/worker).
+        metadata:
+          labels: { app: quanly, component: db-backup }
         spec:
           restartPolicy: Never
           securityContext:

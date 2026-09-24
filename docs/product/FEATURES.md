@@ -6,7 +6,7 @@ lại stack, cách dựng máy, bảng lệnh npm hay cây thư mục — nhữn
 - [README.md](../../README.md) — công nghệ và hai bài toán khó của sản phẩm
 - [docs/development/SETUP.md](../development/SETUP.md) — dựng môi trường, bảng npm script
 - [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — hệ thống ghép lại thế nào
-- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (140 endpoint)
+- [docs/product/ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md) — ai được gọi endpoint nào (141 endpoint)
 
 QuanLY là **công cụ nội bộ** của Gia Nguyễn / Colorfull. Không có khách hàng ngoài,
 không có gói cước, không có self-service đăng ký: tài khoản do admin mời.
@@ -79,7 +79,7 @@ Có Ctrl+Z / Ctrl+Y và fill-down (Ctrl+D); hoàn tác vẫn đúng sau khi dán
 |---|---|---|---|
 | **Nhóm** (A, B, C…) | — | ✅ | có Thành Tiền nhóm, nhân Số Lượng nếu bật |
 | **Nhóm con** | ❌ | ✅ | thụt lề + dấu `↳`; **không chiếm chữ A/B/C** |
-| **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục |
+| **Hàng con** (`↳`) | ✅ | ✅ | chi tiết trong một hạng mục. **Nút "↳ thêm hàng con" trên lưới đã bỏ (2026-09-23, chủ repo: "không còn cần sử dụng")** — hàng con có sẵn trong báo giá cũ vẫn hiển thị, tính tiền và xuất Excel như trước |
 | **Dòng thông tin** | ❌ | ❌ | ghi chú thuần, không tính tiền |
 
 Giảm giá = nhập **đơn giá âm**. Khi xuất Excel, nhóm con hiển thị **giống hệt trên
@@ -107,8 +107,9 @@ VAT và Tổng cộng cập nhật ngay khi gõ. **Cùng một công thức ti�
 
 ### 1.5 Bảng nội bộ và duyệt theo hàng
 
-Mỗi sheet báo giá có thêm các **bảng nội bộ** ba loại — **Chi Phí HCM**, **Báo Giá
-Hà Nội**, **Phí Khách Hàng**. Chúng là lưới đầy đủ (template, công thức, nhóm,
+Mỗi sheet báo giá có thêm các **bảng nội bộ** hai loại — **Chi Phí HCM**, **Phí Khách Hàng**
+(**Báo Giá Hà Nội** thì từ 2026-09-15 nằm ở cấp BÁO GIÁ, `Quote.hnTables`, không theo sheet — xem
+DATA_FLOW.md mục 3.4). Chúng là lưới đầy đủ (template, công thức, nhóm,
 copy/paste) nhưng **KHÔNG bao giờ xuất ra Excel/PDF cho khách**; tổng từng loại đổ
 sang trang Quản lý dự án.
 
@@ -342,7 +343,7 @@ liệu" — thiếu `quote:read:own` thì các endpoint analytics trả 403.
 | **Tìm kiếm không dấu** | Cột `searchText` chuẩn-hoá bỏ dấu + chỉ mục GIN trigram (`pg_trgm`) trên báo giá, khách hàng, nhân sự → gõ sai dấu / không dấu vẫn ra. Thêm `GET /api/search` tìm toàn cục. |
 | **Thông báo trong app** | Danh sách thẻ đã/chưa đọc, lọc, "đánh dấu đã đọc tất cả", bấm vào là deep-link sang đúng báo giá. Khử trùng lặp ở **cả hai đầu**: backend bỏ qua bản giống hệt chưa đọc trong 5 phút, frontend gộp lại lần nữa cho dữ liệu cũ. |
 | **Realtime** | SSE (`/api/stream/events`) đẩy tín hiệu để client làm mới cache — không phải WebSocket, xem [ADR 0004](../adr/0004-sse-not-websocket.md). |
-| **Webhook ra ngoài** | Đăng ký endpoint theo sự kiện (`quote.created`, `quote.updated`, `quote.converted`, `customer.created`…), xem lại lịch sử gửi (`/:id/deliveries`). |
+| **Webhook ra ngoài** | Đăng ký endpoint theo sự kiện (`quote.created`, `quote.converted` — hai sự kiện duy nhất hệ thống thật sự bắn), mỗi lượt gửi mang `X-QLY-Delivery` ổn định qua các lần thử lại để bên nhận khử trùng; xem lại lịch sử gửi (`/:id/deliveries`). |
 | **Email / Telegram** | Gửi qua hàng đợi nền khi có Redis; kênh và mức độ ồn cấu hình ở `Setting` `notif.channels`. |
 | **Nhật ký hoạt động** | Lọc theo hoạt động / đối tượng / khoảng ngày, phân trang, nhãn tiếng Việt. Danh sách mã hoạt động ở frontend bị khoá hai chiều với backend bằng test `w2-auditActionCoverage` — thiếu **hoặc thừa** một mã đều làm CI đỏ. Quyền xem chi tiết (`audit:view:full`) tách riêng khỏi quyền xem danh sách. |
 | **Phân quyền động** | Admin sửa được ma trận **vai trò × quyền** ngay trên giao diện, và tick **quyền cho từng tài khoản**. Vai trò `admin` **khoá cứng** (luôn đủ quyền — chống tự khoá mình ra ngoài). |
@@ -369,7 +370,7 @@ ghi đè ở hai mức:
 
 Cả hai được resolve lại **mỗi request** từ CSDL. Vì vậy **đừng đọc bảng vai trò như
 một danh sách cố định** — nguồn sự thật là
-[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 140 endpoint ở
+[`src/permissions.ts`](../../src/permissions.ts) và ma trận đầy đủ 141 endpoint ở
 [ROLES_PERMISSIONS.md](ROLES_PERMISSIONS.md), có
 `scripts/ci/endpoint-inventory.mjs --check` đối chiếu ở CI.
 

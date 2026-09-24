@@ -1,8 +1,15 @@
-# Ngăn xếp quan sát (tuỳ chọn)
+# Ngăn xếp quan sát
 
-> **Không bật mặc định.** `docs/architecture/TECHNOLOGY_DECISIONS.md` xếp "gom log tập trung" là
-> `DEFER`: production hiện là MỘT VM và `docker logs` còn đủ. Thư mục này để lúc cần thì là một
-> lệnh, không phải một dự án.
+> **Đang chạy trên production** từ 2026-09-16 (Alertmanager → Telegram từ 2026-09-17) — xem mục
+> "Ngăn xếp quan sát" trong `docs/operations/MONITORING.md`, nguồn duy nhất về hiện trạng. Bản trước
+> của dòng này ghi "không bật mặc định", mâu thuẫn với chính mục cuối tệp (audit 2026-09-22, DOC-08).
+>
+> Biến cần trong `.env` của máy (ngoài METRICS_TOKEN/GRAFANA_PASSWORD/SMTP_*/TELEGRAM_*):
+> `QUANLY_ENV` (prod | staging | dev — in đầu mọi cảnh báo) và `HEARTBEAT_URL` (URL ping của dịch vụ
+> giám sát NGOÀI; trống = không có ai bên ngoài biết khi cả máy chết).
+> **Dòng `HEARTBEAT_URL=` phải CÓ trong `.env`** (để trống được): thiếu hẳn dòng thì compose dựng lại
+> alertmanager rồi không start được (`environment variable "HEARTBEAT_URL" required by secret
+> "heartbeat_url" is not set`) — không còn cảnh báo nào. Chi tiết: `docs/operations/MONITORING.md`.
 
 ```text
 ứng dụng (pino → stdout)              ứng dụng /metrics  ←── app:3000
@@ -43,8 +50,8 @@ hỏng tệ nhất của một hệ giám sát.
 **Số liệu HIỆN TẠI** (đo lại bằng lệnh, đừng chép tay — số ở đây trôi rất nhanh):
 
 ```bash
-grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 29 metric ứng dụng
-grep -c '^      - alert:' infra/prometheus/alerts.yaml    # 22 quy tắc cảnh báo
+grep -oE 'name: "[a-z_]+"' src/observability.ts | wc -l   # 33 metric ứng dụng
+grep -c '^      - alert:' infra/prometheus/alerts.yaml    # 26 quy tắc cảnh báo
 ```
 
 Trước đợt 2026-08-27 hai con số này là **14 metric và 14 quy tắc**. Đợt đó thêm 7 metric
@@ -143,7 +150,7 @@ bằng `tests/xf-observability-gaps.test.js`.
 
 ## ALERTMANAGER — cảnh báo đi tới đâu
 
-**TRƯỚC 2026-09-16**, mục này mang tiêu đề "KHÔNG CÓ ALERTMANAGER" và nói thẳng rằng 22 quy tắc
+**TRƯỚC 2026-09-16**, mục này mang tiêu đề "KHÔNG CÓ ALERTMANAGER" và nói thẳng rằng 22 quy tắc <!-- so-lich-su -->
 được đánh giá thật, chuyển sang `firing` thật, rồi **DỪNG LẠI** ở giao diện Prometheus — không
 email, không ai bị đánh thức. Đó là "có cảnh báo" theo nghĩa **kỹ thuật**, chưa phải theo nghĩa
 **vận hành**.
@@ -227,14 +234,15 @@ Dựng MailHog + Alertmanager bằng đúng hai tệp trong thư mục này, đ�
 nguyên vẹn; một cảnh báo `warning` cùng instance với `critical` đang kêu thì ở trạng thái
 `suppressed` đúng như luật nén im lặng mô tả.
 
-Đường báo động **thứ hai** vẫn giữ nguyên và vẫn **cố ý** không đi qua Prometheus: backup watchdog
-qua Telegram (`scripts/backup/backup-watchdog.sh`, cron mỗi 6 giờ). Một hệ giám sát chết không được
+Đường báo động **thứ hai** vẫn **cố ý** không đi qua Prometheus: backup watchdog qua Telegram
+(`scripts/backup/backup-watchdog.sh`, timer mỗi 6 giờ) — ⚠️ **chưa được cài trên production** (đo
+2026-09-22), xem docs/operations/BACKUP_RESTORE.md. Một hệ giám sát chết không được
 phép làm im luôn cả báo động về sao lưu — kể cả khi hệ giám sát đó nay đã biết gửi email.
 
 ## Chưa làm (có chủ ý)
 
 * ~~**Chưa chạy thử bằng Docker thật.**~~ Đã bật trên production ngày 2026-09-16: 3/3 target
-  Prometheus `up`, 22 quy tắc được nạp. Phần Alertmanager cũng đã chạy thử end-to-end với MailHog
+  Prometheus `up`, 22 quy tắc được nạp. Phần Alertmanager cũng đã chạy thử end-to-end với MailHog <!-- so-lich-su -->
   (xem mục trên) — thư thật sự tới nơi, không chỉ qua `check-config`.
 * ~~**Cảnh báo chỉ có MỘT kênh (email).**~~ Từ 2026-09-17 production và dev đều gửi cảnh báo hệ
   thống vào NHÓM Telegram (bot `@GiaNguyenOpsBot`, `chat_id` âm = nhóm). Đã thử end-to-end trên
@@ -244,8 +252,9 @@ phép làm im luôn cả báo động về sao lưu — kể cả khi hệ giám
   cảnh báo ở mục trên). Đổi lại: nhóm có nhiều người đọc, nên một người tắt thông báo không làm
   cả đội mù như hòm thư cá nhân.
 * **Chưa có lịch trực.** Mọi cảnh báo đi về cùng một hòm thư, không phân ca, không leo thang.
-* **Không giữ log lâu.** Loki chạy cấu hình mặc định (giữ trong volume, không phân tầng). Cần giữ
-  theo tháng thì phải cấu hình `limits_config.retention_period` + compactor.
+* **Log giữ 30 ngày.** `loki.yaml` bật compactor + `retention_period: 720h` (audit 2026-09-22,
+  OBS-15). Trước đó Loki chạy cấu hình mặc định và không xoá gì — volume lớn mãi trên cùng đĩa với
+  CSDL. Đổi cấu hình này thì phải `up -d` lại service loki (deploy.sh không dựng lại ngăn quan sát).
 * **Prometheus giữ 15 ngày.** Đủ để điều tra sự cố và để rút phân vị thật cho
   `docs/operations/SLO.md`. Muốn giữ lâu hơn thì cân đĩa của VM trước — và nhớ rằng
   `QuanlyDiaSapDay` sẽ là thứ kêu nếu quên.

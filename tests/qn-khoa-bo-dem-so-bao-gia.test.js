@@ -169,9 +169,12 @@ describe.runIf(dbAvailable)("Khoá bộ đếm số báo giá", () => {
     const ranh = mau.filter(Boolean).length;
     const tiLe = ranh / mau.length;
     // Trước bản vá tỉ lệ này ≈ 0: khoá bị giữ từ câu lệnh đầu tới lúc commit.
-    // Ngưỡng 0,7 chừa chỗ cho phần cuối transaction (cấp số → cập nhật → snapshot → commit).
+    // Ngưỡng 0,5 chừa chỗ cho phần cuối transaction (cấp số → cập nhật → snapshot → commit). Bản
+    // trước đặt 0,7: chạy riêng đo được > 0,9, nhưng trong lượt test đầy đủ (vitest chạy song song,
+    // CPU tranh nhau) phần đuôi dài ra và đo được ĐÚNG 0,70 (35/50) → đỏ chập chờn dù mã không đổi
+    // (2026-09-23). 0,5 vẫn tách bạch hẳn với ≈ 0 của lỗi thật.
     expect(tiLe, `khoá chỉ rảnh ${(tiLe * 100).toFixed(0)}% thời gian (${ranh}/${mau.length} mẫu, lượt tạo ${giay.toFixed(2)}s) — bộ đếm đang bị giữ gần như suốt lượt tạo`)
-      .toBeGreaterThan(0.7);
+      .toBeGreaterThan(0.5);
   }, 120_000);
 
   it("KHÔNG báo giá nào giữ lại số tạm", async () => {

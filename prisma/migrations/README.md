@@ -137,3 +137,21 @@ partial-unique cho `Customer.taxCode`, ĐÃ LÀM — xem migration `202608261200
 
 Always take a backup first (`pg_dump -Fc`) — a migration is the one operation
 that can change/drop data. (Daily backup task `QuanLY-DB-Backup` already runs.)
+
+## Expand / contract — luật cho migration HUỶ hoặc ĐỔI DẠNG
+
+`deploy.sh` chạy `prisma migrate deploy` ([4/6]) **trước** khi thay app, và lùi (`deploy.sh rollback`)
+chỉ lùi **ảnh**, không lùi schema. Nên mọi migration phải để **bản app đang chạy** vẫn chạy được trên
+schema mới:
+
+1. **Expand** (lượt N): thêm cột/bảng mới, mã mới ghi cả hai chỗ hoặc đọc chỗ mới. Không xoá gì.
+2. **Chuyển** (lượt N hoặc N+1): mã ngừng đọc/ghi thứ cũ. Deploy, để chạy ổn.
+3. **Contract** (lượt SAU lượt đã ngừng dùng): `DROP COLUMN` / `DROP TABLE` / `RENAME` / đổi kiểu.
+
+Gộp 1–3 vào một lượt là đúng cái bẫy của `20260915090000_quote_member_scopes`: nó `DROP TABLE
+"_QuoteMembers"` mà code ngay trước `f84a4ff` còn dùng — lùi ảnh sau lượt đó là mọi truy vấn chạm
+thành viên báo giá trả 500, và đường lùi duy nhất còn lại là restore dump trước-deploy (mất ghi mới).
+
+Chốt: bước [3c/6] của `deploy.sh` đọc migration **đang chờ** trên máy chủ và **chặn prod** khi có
+lệnh huỷ, cho tới khi người deploy xác nhận đã theo đúng luật trên bằng `CHO_PHEP_MIGRATION_HUY=1`.
+`scripts/ci/check-destructive-sql.mjs` vẫn đòi khai lý do cho từng lệnh huỷ.

@@ -14,7 +14,7 @@ import { renderQuotePdf } from "./pdf.js";
 import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
 import { runExportJob, isTimeoutError, EXPORT_GEN_TIMEOUT_NEN_MS, capNhatCongSuatXuat } from "./exportQueue.js";
 import { MAX_SAVE_SHEETS, MAX_ASYNC_EXPORT_ITEMS } from "./validators.js";
-import { putObject, presignDownload, isStorageEnabled } from "./storage.js";
+import { putObject, isStorageEnabled } from "./storage.js";
 import { sendEmail } from "./email.js";
 import { sendTelegram } from "./telegram.js";
 import { initSentry, captureError, flushSentry, exportJobsTotal, registry, khopTokenBearer, dangKyChanSuCoTienTrinh } from "./observability.js";
@@ -224,23 +224,19 @@ export const processors = {
       chanBaoGiaQuaLon(quote);
       const buf = await sinhFileXuat("xlsx", quote, () => buildQuoteBuffer(quote));
       if (isStorageEnabled()) {
-        const key = `exports/${quote.quoteNumber}-${Date.now()}.xlsx`;
+        // Khoá THEO JOB (RT-12): job bị cắt rồi chạy lại (stalled) GHI ĐÈ đúng object của nó thay vì đẻ
+        // thêm một object mồ côi mỗi lượt (RETAIN_EXPORT_DAYS mặc định 0 = không bao giờ dọn).
+        const key = `exports/${quote.quoteNumber}-${job.id ?? Date.now()}.xlsx`;
         await putObject({
           key, body: buf,
           contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
-        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
-        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
-        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
-        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
-        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
-        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
-        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
-        // chính lượt vá gộp hàm đã xoá.)
-        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote, quoteId, "xlsx") });
-        return { key, url, size: buf.length };
+        // KHÔNG ký URL ở đây nữa (RT-02/FILE-08): URL đã ký mang host của S3_ENDPOINT — ở production
+        // là `http://minio:9000`, trình duyệt không mở được. GET /api/jobs/export/:id trả đường tải
+        // CÙNG ORIGIN (/api/jobs/export/:id/file) phát file qua app. `filename` dùng CHUNG
+        // `tenFileXuat` với đường xuất đồng bộ nên hai đường không lệch tên.
+        return { key, size: buf.length, filename: tenFileXuat(quote, quoteId, "xlsx") };
       }
       // KHÔNG nhét file vào giá trị trả về của job.
       //
@@ -278,22 +274,16 @@ export const processors = {
       };
       const buf: any = await sinhFileXuat("pdf", pdfQuote, () => renderQuotePdf(pdfQuote));
       if (isStorageEnabled()) {
-        const key = `exports/${quote.quoteNumber}-${Date.now()}.pdf`;
+        const key = `exports/${quote.quoteNumber}-${job.id ?? Date.now()}.pdf`;   // theo job — xem nhánh xlsx
         await putObject({
           key, body: buf, contentType: "application/pdf",
           metadata: { quoteId: String(quoteId), requestedBy: String(requestedBy || "") },
         } as any);
-        // TRUYỀN `filename`: đường tải của xuất NỀN là một URL đã ký trỏ thẳng vào kho object, tức
-        // KHÁC ORIGIN với ứng dụng. Trình duyệt BỎ QUA thuộc tính `download` của thẻ <a> khi khác
-        // origin, nên tên file mà người dùng nhận được do MÁY CHỦ KHO quyết định, không phải client.
-        // Không truyền thì nó lấy phần cuối của khoá — "BG-2026-001-1787803214822.xlsx", có cả dấu
-        // thời gian — trong khi đường xuất ĐỒNG BỘ cho ra "BaoGia_BG-2026-001.xlsx". Cùng một nút
-        // bấm mà ra hai kiểu tên tuỳ báo giá to hay nhỏ.
-        // Dùng CHUNG `tenFileXuat` (src/quoteUtils.ts) với đường xuất đồng bộ — cùng một hàm,
-        // nên hai đường không thể lệch tên nữa. (Bản trước trỏ tới biến `safeName`, thứ mà
-        // chính lượt vá gộp hàm đã xoá.)
-        const url = await presignDownload(key, { expiresIn: 24 * 3600, filename: tenFileXuat(quote, quoteId, "pdf") });
-        return { key, url, size: buf.length };
+        // KHÔNG ký URL ở đây nữa (RT-02/FILE-08): URL đã ký mang host của S3_ENDPOINT — ở production
+        // là `http://minio:9000`, trình duyệt không mở được. GET /api/jobs/export/:id trả đường tải
+        // CÙNG ORIGIN (/api/jobs/export/:id/file) phát file qua app. `filename` dùng CHUNG
+        // `tenFileXuat` với đường xuất đồng bộ nên hai đường không lệch tên.
+        return { key, size: buf.length, filename: tenFileXuat(quote, quoteId, "pdf") };
       }
       // KHÔNG nhét file vào giá trị trả về của job.
       //

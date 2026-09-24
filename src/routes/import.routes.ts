@@ -150,6 +150,13 @@ export const _tranNhap = {
   MAX_QUEUED: IMPORT_MAX_QUEUED,
 };
 
+/** Lỗi 'error' của worker nhập → lỗi trả cho người dùng. Tách ra để test được ca OOM (XLSX-05). */
+export function _loiTuWorkerNhap(e: unknown): unknown {
+  return (e as { code?: string })?.code === "ERR_WORKER_OUT_OF_MEMORY"
+    ? new LoiNhap("File Excel quá lớn để xử lý. Hãy tách bớt sheet hoặc bớt dòng rồi thử lại.", 413)
+    : e;
+}
+
 function docWorkbookTrongWorker(buffer: Buffer): Promise<any> {
   return new Promise((resolve, reject) => {
     let xong = false;
@@ -170,7 +177,10 @@ function docWorkbookTrongWorker(buffer: Buffer): Promise<any> {
         ? new LoiNhap("File Excel quá lớn để xử lý. Hãy tách bớt sheet hoặc bớt dòng rồi thử lại.", 413)
         : new LoiNhap(`Không đọc được file Excel: ${m?.error || "file hỏng hoặc sai định dạng"}`, 422));
     });
-    w.once("error", (e) => ket(reject, e));
+    // Chạm trần heap thì Node phát 'error' mang code ERR_WORKER_OUT_OF_MEMORY TRƯỚC 'exit' (XLSX-05).
+    // Chuyển nguyên lỗi đó đi là người dùng nhận 422 "Worker terminated due to reaching memory limit…"
+    // bằng tiếng Anh cho một tệp QUÁ LỚN — sai loại lỗi, sai lời khuyên.
+    w.once("error", (e) => ket(reject, _loiTuWorkerNhap(e)));
     // Chạm trần heap thì worker CHẾT HẲN, không kịp gửi message nào — bắt ở đây mới thấy.
     w.once("exit", (code) => {
       if (!xong && code !== 0) ket(reject, new LoiNhap("File Excel quá lớn để xử lý. Hãy tách bớt sheet hoặc bớt dòng rồi thử lại.", 413));

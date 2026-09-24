@@ -43,6 +43,7 @@ const baoGia = () => ({
 
 vi.mock("../lib/api", () => ({
   ApiError: class ApiError extends Error {},
+  isPreviewMode: () => false,   // đường nạp hỏi chế độ Xem thử quyền trước khi đụng bản nháp (L63)
   api: {
     metaTemplates: vi.fn(async () => MAU),
     getQuote: vi.fn(async () => baoGia()),

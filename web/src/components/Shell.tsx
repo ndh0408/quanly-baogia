@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense, Component, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type Me } from "../lib/api";
-import { confirmModal } from "../lib/ui";
+import { confirmModal, toast } from "../lib/ui";
 import { xoaMoiBanNhap } from "../lib/localDraft";
+import { dangXuat, phatDangXuat } from "../lib/authSync";
 import { statusLabel, ROLE_LABEL } from "../lib/format";
 
 // Chặn rời editor khi có thay đổi chưa lưu (QuoteEditor đặt cờ window.__editorDirty) — giống leaveEditorGuard SPA.
@@ -9,7 +10,9 @@ async function guardLeave(): Promise<boolean> {
   const w = window as Window & { __editorDirty?: boolean };
   if (!w.__editorDirty) return true;
   const ok = await confirmModal("Rời khỏi mà chưa lưu?", "Bạn có thay đổi chưa lưu trong báo giá. Rời đi sẽ mất các thay đổi này.", { danger: true, confirmText: "Rời, bỏ thay đổi" });
-  if (ok) w.__editorDirty = false;
+  // FE-12: chọn bỏ → báo editor xoá bản nháp cục bộ (không thì lần mở sau lại hỏi khôi phục đúng phần
+  // người dùng vừa quyết định bỏ).
+  if (ok) { w.__editorDirty = false; window.dispatchEvent(new Event("editor:discard")); }
   return ok;
 }
 
@@ -21,6 +24,16 @@ function PageFallback() {
 // CHẶN Ở FRONTEND (defense-in-depth): trang chứa dữ liệu nhạy cảm (Nhân sự/Danh bạ: căn cước, MST,
 // STK…) đã được API gác quyền, nhưng nếu gõ thẳng #/personnel không quyền thì KHÔNG được render page
 // rồi mới lỗi API — hiện thẳng màn "không có quyền". Áp cho MỌI trang nav có `perm`.
+function NotFound() {
+  return (
+    <div className="access-denied">
+      <div className="ad-ico" aria-hidden="true">🧭</div>
+      <h2>Không tìm thấy trang</h2>
+      <p className="muted">Đường dẫn này không tồn tại. Chọn một mục ở menu bên trái.</p>
+    </div>
+  );
+}
+
 function AccessDenied() {
   return (
     <div className="access-denied">
@@ -74,9 +87,43 @@ import { DashboardPage } from "../pages/Dashboard";
 import { QuoteListPage } from "../pages/QuoteList";
 import { ProjectsPage } from "../pages/Projects";
 import { InvoicesPage } from "../pages/Invoices";
+// CHỈ lấy kiểu — `import type` bị xoá khi biên dịch nên trình soạn vẫn ở chunk riêng.
+import type { QuoteEditorPage as QuoteEditorThat } from "../pages/QuoteEditor";
 // Lazy-load các trang NẶNG/route-riêng (editor + lưới + công thức/clipboard, wizard, view HN) → tách
 // thành chunk riêng, KHÔNG vào bundle chính: HR/Account-list không phải tải editor mới mở app.
-const QuoteEditorPage = lazy(() => import("../pages/QuoteEditor").then((m) => ({ default: m.QuoteEditorPage })));
+// L72 — TRÌNH SOẠN NẠP TRƯỚC, KHÔNG CHỜ KHUNG XƯƠNG. lazy() LUÔN treo ở lần dựng đầu, kể cả khi chunk
+// về từ service worker sau vài ms, và React 19 giữ khung chờ tối thiểu FALLBACK_THROTTLE_MS = 300 ms rồi
+// mới thay bằng trang thật (trace trên dev: bộ hẹn giờ 260 ms, luồng chính rảnh suốt khoảng đó) — mỗi
+// lần mở báo giá ĐẦU TIÊN của phiên / sau F5. Nên nạp chunk TRƯỚC khi cần: mở thẳng link #/quotes/:id
+// thì nạp ngay lúc tải module này (song song với /api/auth/me), còn lại thì lúc rảnh sau khi vào app
+// (effect trong Shell, chỉ cho ai mở được trình soạn). Chunk đã sẵn → dựng THẲNG component, không treo.
+let editorSan: typeof QuoteEditorThat | null = null;
+let dangNapEditor: Promise<typeof QuoteEditorThat> | null = null;
+function napEditor() {
+  // Lỗi (ChunkLoadError…) thì quên promise hỏng để lần mở thật nạp lại — LazyBoundary lo phần báo lỗi.
+  return (dangNapEditor ??= import("../pages/QuoteEditor").then((m) => (editorSan = m.QuoteEditorPage), (e: unknown) => { dangNapEditor = null; throw e; }));
+}
+const napEditorNgam = () => { napEditor().catch(() => { /* nạp trước hỏng: lúc mở thật lazy() tự nạp lại */ }); };
+// NẠP THEO HASH CHỈ CHO NGƯỜI MỞ ĐƯỢC TRÌNH SOẠN (soát toàn diện đợt 3). Dòng dưới chạy lúc tải module,
+// TRƯỚC khi biết `me` — bản trước nạp cho MỌI ai mở link #/quotes/:id: account HN, tài khoản chi phí
+// (hai loại này có view riêng) và cả người chưa đăng nhập, tức tải ~46 kB trình soạn + ~96 kB
+// ExtraTables mà không bao giờ dùng. Đợi `me` thì mất đúng cái lợi của L72 (lần dựng đầu treo lazy →
+// khung chờ ≥ 300 ms), nên dựa vào GỢI Ý Shell ghi lại cho lần tải sau: người đăng nhập gần nhất trên
+// trình duyệt này có mở được trình soạn đầy đủ không. Đăng xuất thì xoá gợi ý. Gợi ý sai (người khác
+// đăng nhập) chỉ tốn một lượt tải thừa hoặc một lần khung chờ — không chạm quyền: chunk là JS tĩnh, cổng
+// quyền vẫn ở Shell + máy chủ.
+const GOI_Y_MO_SOAN = "quanly:moTrinhSoan";
+const quenGoiYMoSoan = () => { try { localStorage.removeItem(GOI_Y_MO_SOAN); } catch { /* bộ nhớ bị chặn */ } };
+const lanTruocMoDuocSoan = () => { try { return localStorage.getItem(GOI_Y_MO_SOAN) === "1"; } catch { return false; } };
+if (typeof location !== "undefined" && /^#\/?(?:(?:quotes|redit)\/\d|rnew)/.test(location.hash) && lanTruocMoDuocSoan()) napEditorNgam();
+const QuoteEditorLazy = lazy(() => napEditor().then((C) => ({ default: C })));
+/** Chốt MỘT lần lúc dựng (mỗi route một lần — LazyBoundary có key): chunk sẵn → component thật, chưa →
+ *  lazy. KHÔNG đổi qua lại khi đang hiển thị: đổi kiểu phần tử là React dựng lại trình soạn từ đầu,
+ *  mất phần đang gõ. */
+function QuoteEditorPage(props: Parameters<typeof QuoteEditorThat>[0]) {
+  const [C] = useState(() => editorSan ?? QuoteEditorLazy);
+  return <C {...props} />;
+}
 const NewQuoteWizard = lazy(() => import("../pages/NewQuoteWizard").then((m) => ({ default: m.NewQuoteWizard })));
 const AccountHnView = lazy(() => import("../pages/AccountHnView").then((m) => ({ default: m.AccountHnView })));
 const InternalQuoteView = lazy(() => import("../pages/InternalQuoteView").then((m) => ({ default: m.InternalQuoteView })));
@@ -282,6 +329,23 @@ function GlobalSearch({ me, query, setQuery, navItems }: { me: Me; query: string
   );
 }
 
+/**
+ * Xử lý sự kiện `open` của EventSource — NỐI LẠI thì kéo lại dữ liệu (RT-09).
+ *
+ * Máy chủ không ghi `id:` và không có Last-Event-ID, nên sự kiện `changed`/`notification` phát
+ * trong khoảng đứt (deploy, hết tuổi thọ 30 phút của luồng, rớt mạng, đóng luồng khi đổi mật khẩu)
+ * mất hẳn: danh sách và badge đứng yên tới lần tương tác kế. Lần `open` ĐẦU là bắt tay bình thường
+ * (trang vừa tự tải dữ liệu) — không làm gì; từ lần thứ hai trở đi coi như vừa lỡ sự kiện: làm mới
+ * badge và bắn `realtime:changed` để trang đang mở tự tải lại. Chi phí: một lượt tải mỗi lần nối lại.
+ */
+export function taoXuLyMoSse(lamMoi: { refreshBadge: () => void; batSuKienDoi: () => void }) {
+  let daMo = false;
+  return () => {
+    if (daMo) { lamMoi.refreshBadge(); lamMoi.batSuKienDoi(); }
+    daMo = true;
+  };
+}
+
 export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; onPreview?: (perms: string[], label: string) => void }) {
   const [key, setKey] = useState(currentKey());
   const [query, setQuery] = useState("");
@@ -334,6 +398,8 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
     let hen: number | null = null;
     let lan = 0;
     let song = true;
+    // Ngoài `noi()`: phải nhớ qua các lần dựng EventSource mới (nối lại do lùi dần) — xem taoXuLyMoSse.
+    const khiMo = taoXuLyMoSse({ refreshBadge, batSuKienDoi: () => window.dispatchEvent(new Event("realtime:changed")) });
 
     // NỐI LẠI KHI BẮT TAY HỎNG — không có lớp này thì mất realtime là mất VĨNH VIỄN cho tab đó.
     //
@@ -351,14 +417,15 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
       if (!song) return;
       try {
         es = new EventSource("/api/stream/events");
-        es.addEventListener("open", () => { lan = 0; });   // nối được thì quên lịch sử lùi
+        es.addEventListener("open", () => { lan = 0; khiMo(); });   // nối được thì quên lịch sử lùi; nối LẠI thì kéo lại dữ liệu
         es.addEventListener("notification", () => { refreshBadge(); window.dispatchEvent(new Event("realtime:notification")); });
-        es.addEventListener("changed", () => { window.dispatchEvent(new Event("realtime:changed")); });
+        // FE-18: chuyển tiếp payload {entity, action} để RealtimeBridge chỉ làm tươi query liên quan.
+        es.addEventListener("changed", (ev) => { let detail: unknown = null; try { detail = JSON.parse((ev as MessageEvent).data); } catch { /* payload lạ → làm tươi tất cả */ } window.dispatchEvent(new CustomEvent("realtime:changed", { detail })); });
         es.addEventListener("presence", (e) => { try { window.dispatchEvent(new CustomEvent("realtime:presence", { detail: JSON.parse((e as MessageEvent).data) })); } catch { /* ignore */ } });
         es.addEventListener("session:refresh", () => { api.me().then((m) => onMe(m)).catch(() => { /* ignore */ }); });
         // Phiên bị thu hồi (khoá tài khoản / gỡ MFA / đổi mật khẩu) — dọn luôn bản nháp cục bộ,
         // cùng lý do như nút Đăng xuất bên dưới (máy dùng chung).
-        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); });
+        es.addEventListener("session:revoked", async () => { song = false; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); quenGoiYMoSoan(); location.reload(); });
         es.onerror = () => {
           // CLOSED = bắt tay hỏng (429/401/5xx) → trình duyệt sẽ KHÔNG tự thử lại, ta phải tự hẹn.
           // CONNECTING = đứt giữa chừng → trình duyệt tự lo, đừng dựng thêm kết nối thứ hai.
@@ -407,6 +474,17 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
   const isWizard = key === "new" && !isAccountHn && !isInternalViewer;
   const hnEditId = isAccountHn && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // account_hn mở BG → view điền HN React
   const internalViewId = isInternalViewer && anyQuoteM ? Number(anyQuoteM[1]) : undefined;   // chi phí mở BG → view chỉ-nội-bộ
+  // L72: nạp trước chunk trình soạn lúc rảnh — báo giá đầu tiên mở từ Danh sách không phải chờ khung
+  // xương. Chỉ cho ai mở được trình soạn (account HN / tài khoản chi phí có view riêng).
+  const moDuocTrinhSoan = has("quote:read:own") && !isAccountHn && !isInternalViewer;
+  useEffect(() => { try { localStorage.setItem(GOI_Y_MO_SOAN, moDuocTrinhSoan ? "1" : "0"); } catch { /* bộ nhớ bị chặn: lần sau không nạp trước */ } }, [moDuocTrinhSoan]);
+  useEffect(() => {
+    if (!moDuocTrinhSoan || editorSan) return;
+    const w: Partial<Pick<Window, "requestIdleCallback" | "cancelIdleCallback">> = window;
+    if (w.requestIdleCallback) { const id = w.requestIdleCallback(napEditorNgam, { timeout: 5000 }); return () => w.cancelIdleCallback?.(id); }
+    const hen = window.setTimeout(napEditorNgam, 2000);   // Safari chưa có requestIdleCallback
+    return () => clearTimeout(hen);
+  }, [moDuocTrinhSoan]);
 
   return (
     <>
@@ -445,22 +523,27 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
             <strong>{me.displayName}</strong>
             <span>@{me.username}</span><br />
             <span className="role-pill">{ROLE_LABEL[me.role] ?? me.role}</span>
-            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; try { await api.logout(); } catch { /* ignore */ } xoaMoiBanNhap(); location.reload(); }}>Đăng xuất</button>
+            {/* FE-05: chỉ nạp lại khi máy chủ đã huỷ phiên — lỗi mạng thì nói thật là CHƯA thoát. */}
+            <button className="logout" onClick={async () => { if (!(await guardLeave())) return; if (!(await dangXuat(() => api.logout()))) { toast("Chưa đăng xuất được — kiểm tra mạng rồi thử lại", "error"); return; } xoaMoiBanNhap(); quenGoiYMoSoan(); phatDangXuat(); location.reload(); }}>Đăng xuất</button>
           </div>
         </aside>
         {isWizard ? (
           // Chặn quyền CẢ nhánh wizard (trước đây gõ thẳng #/new không có quote:create vẫn render rồi mới lỗi API).
-          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary><NewQuoteWizard me={me} /></LazyBoundary>}</main>
+          <main className="main" id="main" tabIndex={-1}>{denied ? <AccessDenied /> : <LazyBoundary key={key}><NewQuoteWizard me={me} /></LazyBoundary>}</main>
         ) : hnEditId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><AccountHnView quoteId={hnEditId} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><AccountHnView quoteId={hnEditId} meId={me.id} /></LazyBoundary></main>
         ) : internalViewId !== undefined ? (
-          <main className="main" id="main" tabIndex={-1}><LazyBoundary><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
+          <main className="main" id="main" tabIndex={-1}><LazyBoundary key={key}><InternalQuoteView quoteId={internalViewId} me={me} /></LazyBoundary></main>
         ) : isEditor ? (
           <main className="main" id="main" tabIndex={-1}>
-            {editorDenied ? <AccessDenied /> : <LazyBoundary><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
+            {editorDenied ? <AccessDenied /> : <LazyBoundary key={key}><QuoteEditorPage me={me} isNew={isNewEditor} quoteId={editId} /></LazyBoundary>}
           </main>
         ) : (
           <main className="main" id="main" tabIndex={-1}>
+            {/* FE-16: lỗi render của MỘT trang chỉ khoá trang đó. `key={key}` dựng lại ranh giới lỗi mỗi khi
+                đổi route — trước đây lỗi ở trang thường làm ErrorBoundary cấp App thay CẢ app (phải F5), còn
+                LazyBoundary không key thì giữ failed=true sang route lazy kế tiếp cùng vị trí cây. */}
+            <LazyBoundary key={key}>
             {denied ? <AccessDenied />
               : key === "dashboard" ? <DashboardPage me={me} />
               : key === "list" ? <QuoteListPage me={me} />
@@ -475,7 +558,11 @@ export function Shell({ me, onMe, onPreview }: { me: Me; onMe: (m: Me) => void; 
               : key === "notifications" ? <NotificationsPage onBadge={refreshBadge} />
               : key === "employees" ? <EmployeesPage me={me} query={query} onQuery={setQuery} />
               : key === "new" ? <AccessDenied />
-              : <PersonnelPage me={me} query={query} onQuery={setQuery} />}
+              : key === "personnel" ? <PersonnelPage me={me} query={query} onQuery={setQuery} />
+              // FE-14: hash lạ (#/abc, gõ sai, link cũ) trước đây rơi vào trang Nhân sự mà KHÔNG qua cổng
+              // quyền (key không có trong NAV → denied=false) → người không có quyền nhân sự thấy lỗi 403.
+              : <NotFound />}
+            </LazyBoundary>
           </main>
         )}
       </div>

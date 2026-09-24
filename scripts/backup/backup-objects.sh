@@ -17,15 +17,25 @@
 #
 # Cấu hình qua /etc/quanly-backup.env (KHÔNG hardcode secret):
 #   BACKUP_DIR (/opt/quanly-backups)   KEEP_MANIFESTS (30)
-#   S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET   ← BẮT BUỘC
+#   S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+#                        Thiếu trong tệp env thì ĐỌC TỪ container app ($APP_CONTAINER, mặc định
+#                        quanly-app) — đúng bộ khoá app đang dùng. Lý do: production đo 2026-09-22
+#                        KHÔNG có timer này và /etc/quanly-backup.env chưa có S3_*, tức kho chứng từ
+#                        chưa từng được sao lưu; bắt chủ repo chép tay thêm một bộ khoá nữa là thêm
+#                        một bước để bị bỏ quên. Khoá riêng cho backup (quyền chỉ-đọc) vẫn tốt hơn —
+#                        đặt S3_* trong tệp env là nó thắng.
 #   OBJ_TARBALL=1        (tuỳ chọn) đóng gói .tar.gz để đẩy off-host
 #   OBJ_TARBALL_MAX_MB   (2048) — vượt ngưỡng thì bỏ đóng gói, chỉ đẩy manifest
 #   OBJ_VERSIONING=1     (tuỳ chọn, MẶC ĐỊNH TẮT) bật versioning trên bucket nguồn nếu provider
 #                        hỗ trợ — xem bước [0/5] và DISASTER_RECOVERY.md để biết vì sao mặc định tắt
 #   OBJ_VERSIONING_KEEP_DAYS (30) số ngày giữ phiên bản cũ khi OBJ_VERSIONING=1
-#   NAS_SHARE/NAS_USER/NAS_PASS/NAS_SUBDIR                 (off-host — tuỳ chọn)
+#   NAS_SHARE/NAS_USER/NAS_PASS/NAS_SUBDIR                 (off-host NAS)
+#   OFFHOST_RCLONE_REMOTE/OFFHOST_RCLONE_CONFIG            (off-host rclone crypt — offhost-lib.sh)
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT                (alert — tuỳ chọn)
-#   MC_IMAGE (minio/mc:RELEASE.2024-11-21T17-21-54Z)
+#   MC_IMAGE (quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:…)
+#
+# Off-host CHƯA cấu hình → vẫn exit 0 (bản gương local vẫn là bản sao lưu), in cảnh báo
+# OFFHOST-CHUA-CAU-HINH và ghi tệp trạng thái; KHÔNG gửi Telegram mỗi đêm (chủ repo chốt 2026-09-23).
 # ============================================================================
 set -uo pipefail
 # Bản gương chứa ẢNH CHỨNG TỪ THANH TOÁN. umask kế thừa của systemd (0022) cho ra 0644/0755,
@@ -36,7 +46,10 @@ umask 077
 BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
 MIRROR_DIR="$BACKUP_DIR/objects"
 KEEP_MANIFESTS="${KEEP_MANIFESTS:-30}"
-MC_IMAGE="${MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}"
+# Docker Hub đã GỠ minio/mc (đo 2026-09-23: hub.docker.com/v2/repositories/minio/mc → 404), nên tên
+# cũ không kéo được trên máy mới. quay.io vẫn phát hành đúng bản đó, cùng digest — ghim theo digest
+# để "cùng tên" không thể thành "khác nội dung". Đã `docker pull` thử theo digest ngày 2026-09-23.
+MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112}"
 OBJ_TARBALL_MAX_MB="${OBJ_TARBALL_MAX_MB:-2048}"
 TS="$(date +%F-%H%M%S)"
 MANIFEST="$BACKUP_DIR/objects-manifest-$TS.tsv"
@@ -49,18 +62,28 @@ alert() {
   echo "ERROR: $1" >&2
 }
 
+LIB="$(cd "$(dirname "$0")" && pwd)/offhost-lib.sh"
+CO_LIB=0
+# shellcheck source=offhost-lib.sh
+[ -f "$LIB" ] && . "$LIB" && CO_LIB=1
+OFFHOST_LOI=0
+
+# Khoá kho object: tệp env thắng; thiếu thì lấy của app (xem chú thích đầu tệp). Đọc bằng
+# `docker exec printenv` vào biến của shell này — không đi qua argv của tiến trình nào khác.
+APP_CONTAINER="${APP_CONTAINER:-quanly-app}"
+for v in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET; do
+  if [ -z "${!v:-}" ]; then
+    val="$(docker exec "$APP_CONTAINER" printenv "$v" 2>/dev/null)" || val=""
+    [ -n "$val" ] && printf -v "$v" '%s' "$val"
+  fi
+done
+unset val
 for v in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY; do
-  [ -n "${!v:-}" ] || { alert "thiếu $v trong /etc/quanly-backup.env — không biết sao lưu kho nào"; exit 1; }
+  [ -n "${!v:-}" ] || { alert "thiếu $v (không có trong /etc/quanly-backup.env, cũng không đọc được từ $APP_CONTAINER) — không biết sao lưu kho nào"; exit 1; }
 done
 BUCKET="${S3_BUCKET:-quanly}"
 
 mkdir -p "$MIRROR_DIR"
-
-# Chỗ trống đĩa: sao lưu mà làm đầy đĩa thì kéo sập luôn Postgres đang chạy cùng host.
-AVAIL_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2{print $4}')"
-if [ "${AVAIL_MB:-0}" -lt 500 ]; then
-  alert "đĩa chứa backup chỉ còn ${AVAIL_MB}MB — dừng trước khi làm đầy đĩa"; exit 1
-fi
 
 # `mc` chạy trong container để host không phải cài gì. --quiet để log không ngập tên từng object.
 #
@@ -115,14 +138,48 @@ mc() {
 # mục "Versioning kho object". Ba ý đo được, tóm tắt:
 #   1. Kho DEV chạy MinIO SINGLE-NODE SINGLE-DRIVE (docker-compose.yml: `server /data`, một volume).
 #      MinIO ghi rõ chế độ này KHÔNG hỗ trợ versioning/object-lock/replication → không có gì để bật.
-#   2. Production KHÔNG dùng compose có minio (docker-compose.prod.yml không có service ấy), nên
-#      provider do /etc/quanly-backup.env quyết định và REPO KHÔNG BIẾT nó là gì. Vì vậy phải ĐO lúc
-#      chạy, không giả định — đó là toàn bộ lý do bước này tồn tại.
+#   2. Production CŨNG chạy MinIO một-node-một-ổ (docker-compose.prod.yml, service `minio` — chú
+#      thích cũ ở đây ghi "không có service ấy" đã lỗi thời từ fc053c2). Nhưng provider vẫn do
+#      S3_ENDPOINT quyết định lúc chạy, nên vẫn ĐO chứ không giả định — đó là lý do bước này tồn tại.
 #   3. Version nằm CÙNG bucket. Mất bucket / mất host / xoá cả bucket thì mọi version đi theo. Nó
 #      chỉ bù được vế "ghi đè hoặc xoá nhầm MỘT object", mà vế đó bản gương cộng dồn đã phủ.
 # Bật thì đặt OBJ_VERSIONING=1 (kèm OBJ_VERSIONING_KEEP_DAYS, mặc định 30) — script sẽ bật versioning
 # VÀ đặt quy tắc hết hạn phiên bản cũ. Bật mà không có quy tắc hết hạn thì dung lượng tăng không
-# trần, đúng vào cái rủi ro mà cổng "còn < 500MB thì dừng" bên trên đang canh.
+# trần, đúng vào cái rủi ro mà chốt chỗ trống đĩa bên trên đang canh.
+# ── CHỖ TRỐNG ĐĨA (soát chéo ops#4) ─────────────────────────────────────────────────────────────
+# Sao lưu mà làm đầy đĩa thì kéo sập luôn Postgres đang chạy cùng host: bản gương nằm CÙNG đĩa với
+# volume pgdata và miniodata. Chốt cũ chỉ đòi "còn ≥ 500MB lúc bắt đầu" — lượt ĐẦU (chép cả bucket)
+# với bucket 6GB trên đĩa còn 4GB vẫn qua, rồi `mc mirror` ghi tới khi đầy đĩa. `mc` chạy bằng root
+# nên còn lấn vào 5% dự trữ của ext4 mà Postgres (không phải root) không dùng được → Postgres hết chỗ
+# ghi WAL trước khi mc gặp ENOSPC. `mc mirror` không tự kiểm chỗ trống.
+# Nên: liệt kê bucket TRƯỚC khi mirror, cộng cỡ các object CHƯA có trong bản gương — đúng cho cả lượt
+# đầu (thiếu cả bucket) lẫn lượt đêm (chỉ phần mới) — rồi đòi còn đủ chỗ cho phần đó CỘNG một khoản
+# dự trữ OBJ_DISK_RESERVE_MB (mặc định 1024). Không có gì mới để chép thì giữ sàn cũ 500MB, để không
+# biến một đêm không có gì mới thành cảnh báo. Phân tích "key"/"size" bằng awk trên HOST (ảnh mc không
+# có jq), không phụ thuộc thứ tự trường trong JSON.
+OBJ_DISK_RESERVE_MB="${OBJ_DISK_RESERVE_MB:-1024}"
+PRE_LIST="$(mktemp)"
+if ! mc ls --recursive --json "q/$BUCKET" > "$PRE_LIST" 2>"$PRE_LIST.err"; then
+  alert "mc ls thất bại — không đo được cỡ phần sắp chép, KHÔNG mirror: $(head -c 300 "$PRE_LIST.err" | tr '\n' ' ')"
+  rm -f "$PRE_LIST" "$PRE_LIST.err"; exit 1
+fi
+MISSING_MB="$(awk '
+  match($0, /"key":"[^"]*"/) { k = substr($0, RSTART + 7, RLENGTH - 8); s = 0
+    if (match($0, /"size":[0-9]+/)) s = substr($0, RSTART + 7, RLENGTH - 7)
+    print k "\t" s }' "$PRE_LIST" \
+  | while IFS=$'\t' read -r k s; do [ -n "$k" ] && [ ! -f "$MIRROR_DIR/$k" ] && printf '%s\n' "${s:-0}"; done \
+  | awk '{ t += $1 } END { if (t > 0) print int((t + 1048575) / 1048576); else print 0 }')"
+rm -f "$PRE_LIST" "$PRE_LIST.err"
+AVAIL_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2{print $4}' | tr -cd '0-9')"
+[ -n "$AVAIL_MB" ] || { alert "không đọc được chỗ trống đĩa của $BACKUP_DIR — KHÔNG mirror"; exit 1; }
+if [ "${MISSING_MB:-0}" -gt 0 ]; then NEED_MB=$(( MISSING_MB + OBJ_DISK_RESERVE_MB )); else NEED_MB=0; fi
+[ "$NEED_MB" -lt 500 ] && NEED_MB=500
+if [ "$AVAIL_MB" -lt "$NEED_MB" ]; then
+  alert "bản gương cần chép thêm ~${MISSING_MB}MB + giữ dự trữ ${OBJ_DISK_RESERVE_MB}MB, đĩa chứa backup chỉ còn ${AVAIL_MB}MB — KHÔNG mirror (tránh làm đầy đĩa chung với Postgres)"
+  exit 1
+fi
+echo "   đĩa còn ${AVAIL_MB}MB · phần sắp chép ~${MISSING_MB}MB · dự trữ ${OBJ_DISK_RESERVE_MB}MB"
+
 echo "▶ [0/5] Versioning bucket q/$BUCKET"
 VER_OUT="$(mc version info "q/$BUCKET" 2>&1)"; VER_RC=$?
 # THỨ TỰ QUAN TRỌNG: xét mã thoát TRƯỚC rồi mới đọc chữ. Đọc chữ trước thì một thông báo lỗi có
@@ -240,8 +297,14 @@ chmod -R go-rwx "$MIRROR_DIR"
 MIRROR_MB="$(du -sm "$MIRROR_DIR" | cut -f1)"
 echo "   $LOCAL_N object · ${MIRROR_MB}MB · manifest: $(basename "$MANIFEST")"
 
-echo "▶ [4/5] Off-host (tuỳ chọn)"
-if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
+echo "▶ [4/5] Off-host"
+# Hai đích độc lập (xem offhost-lib.sh). Dấu .offhost-objects-last-success chỉ ghi khi MỌI đích đã
+# cấu hình đều đẩy xong.
+if [ "$CO_LIB" != 1 ]; then
+  alert "thiếu $LIB — KHÔNG đẩy được off-host. Cài lại bằng scripts/backup/install-backup.sh (bản gương local vẫn giữ)"
+  OFFHOST_LOI=1
+fi
+if [ "$CO_LIB" = 1 ] && offhost_nas_configured; then
   PUSH_FILES=("$(basename "$MANIFEST")" "$(basename "$MANIFEST").sha256")
   TARBALL=""
   if [ "${OBJ_TARBALL:-1}" = "1" ]; then
@@ -271,11 +334,25 @@ if [ -n "${NAS_SHARE:-}" ] && [ -n "${NAS_USER:-}" ]; then
        apk add --no-cache samba-client >/dev/null 2>&1 || exit 1
        smbclient "$NAS_SHARE" -A /tmp/cred -m SMB2 -c "$NAS_CMDS"'; then
     alert "đẩy kho object lên NAS thất bại — bản gương local vẫn giữ"
+    OFFHOST_LOI=1
   fi
   # tarball chỉ là phương tiện vận chuyển off-host; bản gương mới là bản sao lưu chính.
   [ -n "$TARBALL" ] && rm -f "$TARBALL"
-else
-  echo "   NAS_* chưa cấu hình → CHỈ có bản sao trên CÙNG HOST. Mất host là mất luôn chứng từ."
+fi
+if [ "$CO_LIB" = 1 ] && offhost_rclone_configured; then
+  # Bản gương (cộng dồn, chỉ gửi tệp mới) + manifest của lượt này. Mã hoá do remote crypt đảm nhận.
+  if ! LY="$(offhost_rclone_day_thu_muc objects objects)"; then
+    alert "đẩy kho object off-host (rclone) thất bại: $LY — bản gương local vẫn giữ"; OFFHOST_LOI=1
+  elif ! LY="$(offhost_rclone_day_tep objects-manifests "$(basename "$MANIFEST")" "$(basename "$MANIFEST").sha256")"; then
+    alert "đẩy manifest kho object off-host (rclone) thất bại: $LY"; OFFHOST_LOI=1
+  fi
+fi
+if [ "$CO_LIB" = 1 ]; then
+  if ! offhost_configured; then
+    offhost_canh_bao_chua_cau_hinh "Kho object (ảnh chứng từ thanh toán)"
+  elif [ "$OFFHOST_LOI" = 0 ]; then
+    date +%s > "$BACKUP_DIR/.offhost-objects-last-success"
+  fi
 fi
 
 echo "▶ [5/5] Retention manifest (giữ $KEEP_MANIFESTS bản)"
@@ -286,5 +363,10 @@ done
 
 # Dấu vết cho watchdog kiểm "backup có còn tươi không".
 date +%s > "$BACKUP_DIR/.objects-last-success"
+[ "$CO_LIB" = 1 ] && backup_ghi_trang_thai
 
 echo "✓ backup object OK: $LOCAL_N object (${MIRROR_MB}MB) → $MIRROR_DIR"
+if [ "$OFFHOST_LOI" != 0 ]; then
+  echo "✖ off-host THẤT BẠI ở lượt này — xem cảnh báo phía trên" >&2
+  exit 1
+fi

@@ -33,14 +33,21 @@ const so = (s: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Số hàng của khối mà bố cục `roles` giải ra SL × ĐG (× Ngày) ≈ Thành Tiền. */
+/** Số hàng của khối mà bố cục `roles` giải ra SL × ĐG (× Ngày) ≈ Thành Tiền.
+ *
+ *  Hàng mà bố cục đọc ra ĐVT là SỐ thì KHÔNG được phiếu — ĐVT thật không bao giờ là số ("người",
+ *  "m2", "bộ"…), đọc ra "1" nghĩa là bố cục đang lệch một cột. Thiếu chốt này thì khối GN CÓ NGÀY
+ *  mà mọi SL = 1 ("1 người × N ngày") hoà điểm với bố cục "không ngày" (Ngày đọc thành SL vẫn ra
+ *  SL × ĐG = TT), bố cục đứng trước thắng → Chi Tiết "người", ĐVT "1", SL = số ngày (soát toàn diện L17). */
 export function diemBoCot(rows: string[][], roles: string[]): number {
   const iq = roles.indexOf("quantity"), ip = roles.indexOf("unitPrice"), ia = roles.indexOf("_amount"), id = roles.indexOf("days");
+  const iu = roles.indexOf("unit");
   if (iq < 0 || ip < 0 || ia < 0) return 0;
   let diem = 0;
   for (const r of rows) {
     const q = so(r[iq]), p = so(r[ip]), a = so(r[ia]);
     if (q == null || p == null || a == null || !a) continue;
+    if (iu >= 0 && so(r[iu]) != null) continue;   // ĐVT đọc ra SỐ → bố cục lệch cột
     const d = id >= 0 ? so(r[id]) : null;
     if (id >= 0 && d == null && String(r[id] ?? "").trim() !== "") continue;   // ô Ngày có chữ → sai bố cục
     const ky = q * p * (d || 1);

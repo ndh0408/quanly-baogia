@@ -1,8 +1,9 @@
-import { Component, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, setPreviewMode, type Me } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { promptModal, toast } from "./lib/ui";
-import { xoaMoiBanNhap } from "./lib/localDraft";
+import { xoaMoiBanNhap, ghiNhanNguoiDung } from "./lib/localDraft";
+import { ngheAuth, phatDangNhap } from "./lib/authSync";
 
 export type PreviewState = { perms: string[]; label: string };
 
@@ -45,6 +46,15 @@ export function App() {
   // Nay: giữ nguyên cây đang mount, phủ một hộp đăng nhập lại lên trên. Đăng nhập xong đóng hộp,
   // dữ liệu trong state editor còn nguyên vẹn, bấm Lưu lại là xong.
   const [matPhien, setMatPhien] = useState(false);
+  const [loiKhoiDong, setLoiKhoiDong] = useState(false);
+  // FE-05: tab khác vừa đăng xuất / đăng nhập người KHÁC → danh tính của tab này đã sai (cookie phiên
+  // dùng chung) → nạp lại sạch. `useRef` để listener đọc được `me` mới nhất mà không phải đăng ký lại.
+  const meIdRef = useRef<number | null>(null);
+  meIdRef.current = me?.id ?? null;
+  useEffect(() => ngheAuth(() => meIdRef.current, () => location.reload()), []);
+  // app#16: đăng nhập từ màn Login / kích hoạt = lượt ĐĂNG NHẬP MỚI (khác đường khởi động có phiên sẵn
+  // bên dưới) — lần đầu trên trình duyệt thì bản nháp khoá cũ không rõ chủ, bị xoá (xem localDraft.ts).
+  const daDangNhap = (m: Me) => { ghiNhanNguoiDung(m.id, { dangNhapMoi: true }); phatDangNhap(m.id); };
 
   useEffect(() => {
     // `im401`: 401 Ở LẦN DÒ KHỞI ĐỘNG KHÔNG PHẢI LÀ MẤT PHIÊN.
@@ -54,7 +64,14 @@ export function App() {
     // trước cả khi người dùng kịp làm gì. Ở màn đăng nhập thường thì vô hại (nhánh `!me` phía dưới
     // tự xoá cờ), nhưng ở #/onboard thì cờ đó NẰM LẠI: kích hoạt xong, người dùng đã đăng nhập
     // hợp lệ mà vẫn bị hộp "Phiên đăng nhập đã hết" đè lên — tưởng kích hoạt hỏng.
-    api.me({ im401: true }).then(setMe).catch(() => setMe(null)).finally(() => setLoading(false));
+    // ghiNhanNguoiDung: người khác người dùng lần trước trên trình duyệt này → xoá bản nháp của họ
+    // NGAY, trước khi kịp mở báo giá nào (FE-04). Gọi ở mọi đường xác lập danh tính bên dưới.
+    // FE-11: CHỈ 401/403 mới là "chưa đăng nhập". Mất mạng hay 502 lúc máy chủ đang khởi động lại (khung
+    // deploy) trước đây cũng rơi về màn Login — người có phiên hợp lệ tưởng bị đăng xuất, đăng nhập lại
+    // thì báo "Đăng nhập thất bại" (vì máy chủ vẫn chưa lên). Nay nói đúng nguyên nhân + cho thử lại.
+    api.me({ im401: true }).then((m) => { ghiNhanNguoiDung(m.id); setMe(m); })
+      .catch((e) => { if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setMe(null); else setLoiKhoiDong(true); })
+      .finally(() => setLoading(false));
     const onExpired = () => setMatPhien(true);
     // ĐÓNG lớp phủ khi có bằng chứng phiên vẫn sống — xem chú thích "auth:ok" ở api.ts.
     //
@@ -81,17 +98,28 @@ export function App() {
   // XOÁ CỜ MẤT-PHIÊN y như nhánh <Login> ngay dưới. Kích hoạt xong là một lần ĐĂNG NHẬP THÀNH CÔNG,
   // nên mọi nghi ngờ về phiên trước đó đều hết hiệu lực. Truyền thẳng `setMe` (bản cũ) thì cờ do lần
   // dò khởi động bật lên còn nguyên, và lớp phủ đăng nhập lại nhảy ra đè lên phiên vừa tạo.
-  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { setMatPhien(false); setMe(m); }} />;
+  if (hash.startsWith("#/onboard")) return <OnboardPage onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   if (loading) return <div className="center muted">Đang tải…</div>;
+  if (loiKhoiDong && !me) {
+    return (
+      <div className="center" role="alert" style={{ flexDirection: "column", gap: 12, padding: 24, textAlign: "center" }}>
+        <h2>Không kết nối được máy chủ</h2>
+        <p className="muted">Có thể mạng đang chập chờn hoặc hệ thống đang cập nhật. Phiên đăng nhập của bạn KHÔNG bị mất — thử lại sau ít giây.</p>
+        <button className="btn btn-primary" onClick={() => location.reload()}>Thử lại</button>
+      </div>
+    );
+  }
   // Chưa từng đăng nhập → màn đăng nhập đầy đủ. (Lớp phủ chỉ dành cho phiên MẤT giữa chừng.)
-  if (!me) return <Login onLogin={(m) => { setMatPhien(false); setMe(m); }} />;
+  if (!me) return <Login onLogin={(m) => { daDangNhap(m); setMatPhien(false); setMe(m); }} />;
   // Khi xem thử: GIỮ identity admin (server) nhưng ĐỔI permissions sang tài khoản đang xem → UI hiện đúng quyền đó.
   const shellMe: Me = preview ? { ...me, permissions: preview.perms } : me;
   return (
     <ErrorBoundary>
       {preview && (
         <div className="preview-banner">
-          <span>🔍 ĐANG XEM THỬ với quyền của <b>{preview.label}</b> — mọi thao tác chỉ chạy thử, <b>KHÔNG lưu thật</b>.</span>
+          {/* FE-15: menu/nút theo quyền xem thử, nhưng DỮ LIỆU vẫn do máy chủ trả theo phiên admin (vd quyền
+              chỉ-của-mình vẫn thấy mọi báo giá). Không nói ra thì admin kết luận sai "tài khoản này thấy gì". */}
+          <span>🔍 ĐANG XEM THỬ với quyền của <b>{preview.label}</b> — mọi thao tác chỉ chạy thử, <b>KHÔNG lưu thật</b>. Chỉ menu và nút theo quyền này; <b>dữ liệu hiển thị vẫn theo phạm vi của bạn (admin)</b>.</span>
           <button className="btn btn-sm" onClick={exitPreview}>✕ Thoát xem thử</button>
         </div>
       )}
@@ -113,7 +141,8 @@ export function App() {
             // đúng báo giá đó sẽ thấy modal "Khôi phục bản nháp?" chứa giá/khách/bảng nội bộ CỦA
             // NGƯỜI A — hai đường xoá-nháp còn lại (nút Đăng xuất, sự kiện SSE session:revoked ở
             // Shell.tsx) đều đã gọi hàm này; đây là đường thứ ba bị bỏ sót.
-            if (m.id !== me.id) { xoaMoiBanNhap(); location.reload(); return; }
+            if (m.id !== me.id) { xoaMoiBanNhap(); daDangNhap(m); location.reload(); return; }
+            phatDangNhap(m.id);
             setMe(m);
           }}
         />
@@ -199,7 +228,7 @@ function Login({ onLogin, lopPhu = false, tenGoiY }: { onLogin: (m: Me) => void;
           <label><span>Mật khẩu</span>
             <span className="pw-wrap">
               <input type={showPw ? "text" : "password"} name="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-              <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
+              <button type="button" className="pw-toggle" aria-label="Hiện / ẩn mật khẩu" aria-pressed={showPw} onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button>
             </span>
           </label>
           {/* pattern PHẢI khớp regex của server (src/validators.ts): 6 chữ số = TOTP, 10–20 ký tự
@@ -304,7 +333,7 @@ export function OnboardPage({ onLogin }: { onLogin: (m: Me) => void }) {
               </>}
               <label><span>Mật khẩu mới</span>
                 <span className="pw-wrap"><input type={showPw ? "text" : "password"} autoComplete="new-password" minLength={8} required autoFocus={datLai} placeholder="Tối thiểu 8 ký tự, gồm chữ và số" value={form.password} onChange={(e) => set("password", e.target.value)} />
-                  <button type="button" className="pw-toggle" tabIndex={-1} aria-label="Hiện / ẩn mật khẩu" onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
+                  <button type="button" className="pw-toggle" aria-label="Hiện / ẩn mật khẩu" aria-pressed={showPw} onClick={() => setShowPw((s) => !s)}>{showPw ? "🙈" : "👁"}</button></span></label>
               <label><span>Nhập lại mật khẩu</span><input type={showPw ? "text" : "password"} autoComplete="new-password" required value={form.password2} onChange={(e) => set("password2", e.target.value)} /></label>
               {/* Cùng pattern với ô MFA ở màn đăng nhập — khớp regex server, KHÔNG hẹp hơn, nếu
                   không thì trình duyệt tự chặn mã dự phòng và người dùng hết đường phục hồi. */}

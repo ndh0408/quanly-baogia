@@ -458,6 +458,25 @@ describe("xuatBaoGia — ba ca hỏng câm", () => {
     expect(toastRa.some((t) => t.loai === "error" && /không còn tồn tại/.test(t.msg))).toBe(true);
   }, 30000);
 
+  // RT-03: máy chủ hỏi getState quá trần (Redis chậm một nhịp) nay trả 503 job_state_timeout thay vì
+  // state "unknown". Job vẫn đang chạy → client phải nghỉ rồi hỏi lại, không bỏ chờ.
+  it("503 job_state_timeout → hỏi lại, xong thì vẫn tải được", async () => {
+    let lanHoi = 0;
+    traLoi = (u, m) => {
+      if (/\/api\/export\//.test(u)) return new Response(JSON.stringify({ error: "quá lớn" }), { status: 413 });
+      if (m === "POST") return new Response(JSON.stringify({ jobId: "j-7", queue: "export" }), { status: 202 });
+      lanHoi++;
+      if (lanHoi === 1) {
+        return new Response(JSON.stringify({ error: "Hàng đợi đang chậm", code: "job_state_timeout" }), { status: 503 });
+      }
+      return new Response(JSON.stringify({ id: "j-7", state: "completed", failedReason: null, returnvalue: { url: "/api/jobs/export/j-7/file", key: "exports/x.xlsx" } }), { status: 200 });
+    };
+    const { xuatBaoGia } = await nap();
+    expect(await xuatBaoGia(7, "xlsx"), "một nhịp Redis chậm làm người dùng mất lượt chờ").toBe(true);
+    expect(lanHoi).toBe(2);
+    expect(daTai.map((t) => t.href)).toEqual(["/api/jobs/export/j-7/file"]);
+  }, 30000);
+
   it("thẻ <a> KHÔNG bị gỡ ngay trong tick của click() (Safari cũ huỷ mất lượt tải)", async () => {
     // Bằng chứng đo được: ghi lại thứ tự click/remove trên chính thẻ giả.
     const nhatKy: string[] = [];

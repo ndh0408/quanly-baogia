@@ -49,12 +49,13 @@ export async function purgeSoftDeleted(req: Request) {
     // hàng loạt đặt actorId = NULL trên mọi nhật ký của người đó: dòng còn, người mất.
     //
     // PHẠM VI cửa này RỘNG, không phải một nhóm vai trò hẹp, và cũng không chỉ là đăng nhập THÀNH
-    // CÔNG. MƯỜI vị trí gọi dưới đây (chín mã hành động) đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
+    // CÔNG. MƯỜI MỘT vị trí gọi dưới đây (chín mã hành động) đều truyền `actorId: user.id` vào `audit()`, tức đều để lại hàng
     // AuditEvent mang tên chính chủ tài khoản:
-    //   · src/routes/auth.routes.ts:93/135/186 — login.success / logout / login.token
+    //   · src/routes/auth.routes.ts (POST /login, /logout, /token) — login.success / logout / login.token
     //   · src/authCore.ts:173/214/245          — login.locked / login.failed / login.mfa.failed
-    //   · src/services/authService.ts:248      — user.invite.accept
-    //   · src/services/authService.ts:62/72/96 — profile.update / password.change.*
+    //   · src/services/authService.ts `acceptInvite`   — user.invite.accept
+    //   · src/services/authService.ts `updateProfile`, `changePassword` (hai nhánh thành công: phiên
+    //     cookie và client Bearer) — user.profile.update / password.change.failed / password.change.success
     // Nghĩa là gõ SAI mật khẩu đúng một lần, hoặc chỉ bấm nhận lời mời, là đã đủ để không qua được
     // bước "user" của purge nữa — cho tới khi `pruneOldRecords` (src/retention.ts) dọn hết nhật ký của họ theo
     // RETAIN_AUDIT_DAYS (mặc định 730 ngày — khai trong schema zod ở src/config.ts). Trên thực tế bước "user" chỉ xoá
@@ -65,14 +66,21 @@ export async function purgeSoftDeleted(req: Request) {
     // vài hàng User. Sửa ở tầng ỨNG DỤNG chứ KHÔNG đổi khoá ngoại sang RESTRICT: đường dọn dữ liệu
     // quá hạn (src/retention.ts) phải DELETE được hàng AuditEvent, và nhiều đường xoá cứng hợp lệ
     // khác sẽ ngã thành lỗi 500 thay vì bị bỏ qua êm như ở đây.
-    ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} }, auditEvents: { none: {} } }],
+    // `personnelRecords`/`employees` (DB-06): hai FK createdById là RESTRICT (migration
+    // 20260622000006, 20260623000001). Thiếu hai cửa này thì user còn hồ sơ Nhân sự/danh bạ mà
+    // không còn nhật ký → P2003 → 500 ở bước cuối.
+    ["user", { ...base, createdQuotes: { none: {} }, approvedQuotes: { none: {} }, ownedCustomers: { none: {} }, memberQuotes: { none: {} }, auditEvents: { none: {} }, personnelRecords: { none: {} }, employees: { none: {} } }],
   ];
-  for (const [model, where] of steps) {
-    // Let errors propagate to the global handler (500 + logged) instead of being
-    // hidden — a failed purge must be visible, not reported as "done".
-    const r = await (prisma as any)[model].deleteMany({ where, hardDelete: true });
-    result[model] = r?.count ?? 0;
-  }
+  // MỘT TRANSACTION cho cả năm bước (DB-06): trước đây mỗi bước commit riêng, nên bước sau hỏng
+  // thì các bước trước đã xoá cứng xong — purge nửa vời, không hoàn tác được.
+  await prisma.$transaction(async (tx) => {
+    for (const [model, where] of steps) {
+      // Let errors propagate to the global handler (500 + logged) instead of being
+      // hidden — a failed purge must be visible, not reported as "done".
+      const r = await (tx as any)[model].deleteMany({ where, hardDelete: true });
+      result[model] = r?.count ?? 0;
+    }
+  });
   await audit(req, "admin.purge", { resource: "system", after: { cutoff, result } });
   return { cutoff, result };
 }

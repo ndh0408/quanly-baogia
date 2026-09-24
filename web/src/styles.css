@@ -636,20 +636,28 @@ legend {
 
    Cách chữa là cho chuột ĐI XUYÊN hộp chứa, còn từng toast tự nhận lại chuột (để nút × vẫn bấm
    được). KHÔNG dùng `body:has(...)` để đẩy toast lên trên thanh: nó bắt trình duyệt tính lại kiểu
-   theo cây con và đã làm bài U13 đỏ 2/3 lượt — đổi lấy một chút thẩm mỹ thì không đáng. */
-#toast-host {
-  bottom: 84px;
-}
+   theo cây con và đã làm bài U13 đỏ 2/3 lượt. Thay vào đó `toast()` (web/src/lib/ui.ts) đọc MỘT
+   LẦN lúc tạo toast: đang ở trình soạn (có `.editor .actions`) thì đặt `bottom: 84px` inline để
+   toast nổi TRÊN thanh.
 
+   SỬA 2026-09-23 (audit GAP1-05): chú thích này và commit ad017aa khẳng định đã có
+   `pointer-events: none` — nhưng CSS chưa từng có dòng đó, và luật `bottom: 84px` bị khối thứ hai
+   ghi đè thành mã chết. Đo được: `elementFromPoint` tại tâm nút ⋯ trả về `.toast-msg` sau khi Lưu. */
 #toast-host {
   position: fixed;
   right: 18px;
   bottom: 18px;
+  pointer-events: none;
   display: flex;
   flex-direction: column-reverse;
   gap: 8px;
-  z-index: 100;
+  /* 1100 > .modal-backdrop 1000 (GAP1-04, xem khối lớp chồng ở cuối tệp): lỗi Lưu trong form phải nổi
+     TRÊN modal. Chỉ MỘT khối #toast-host — khối thứ hai ghi đè khối này (GAP1-05). */
+  z-index: 1100;
   max-width: min(380px, 92vw);
+}
+#toast-host > .toast {
+  pointer-events: auto;
 }
 .toast {
   display: flex;
@@ -1668,7 +1676,7 @@ textarea[aria-invalid="true"] {
 }
 .perm-preview-count {
   font-weight: 700;
-  color: var(--gold-d);
+  color: var(--primary-hover); /* --gold-d trên nền vàng 22%: 1.8:1 sáng, 3.3:1 tối */
   font-size: 11.5px;
   background: color-mix(in srgb, var(--gold) 22%, transparent);
   padding: 1px 7px;
@@ -1679,6 +1687,10 @@ textarea[aria-invalid="true"] {
 }
 .perm-preview-row b {
   color: var(--soft);
+}
+/* "TOÀN QUYỀN" (Users.tsx) — trước là style nội tuyến var(--gold-d): 2.0:1 ở chế độ sáng. */
+.perm-preview-row b.perm-all {
+  color: var(--primary-hover);
 }
 .perm-preview-caps {
   margin-top: 5px;
@@ -2655,6 +2667,7 @@ textarea[aria-invalid="true"] {
 .vs-line1 {
   font-weight: 600;
   font-size: 13px;
+  color: var(--text); /* #24303f cứng của public/style.css: 1.3:1 ở chế độ tối */
 }
 .vs-venue {
   color: var(--soft);
@@ -2666,7 +2679,7 @@ textarea[aria-invalid="true"] {
   margin-top: 1px;
 }
 .vs-cat {
-  opacity: 0.75;
+  color: var(--muted); /* #aab2bd × opacity .75 cũ: 1.7:1 ở chế độ sáng */
 }
 .vs-hint {
   padding: 5px 10px;
@@ -2749,7 +2762,7 @@ textarea[aria-invalid="true"] {
 .vs-pick-head .btn-link {
   background: none;
   border: none;
-  color: var(--gold-d);
+  color: var(--primary); /* --gold-d #e0a200 trên nền gần trắng: 2.1:1 ở chế độ sáng */
   cursor: pointer;
   padding: 0;
   font: inherit;
@@ -2904,7 +2917,7 @@ textarea[aria-invalid="true"] {
 }
 .vn-vsub em {
   font-style: normal;
-  color: var(--gold-d);
+  color: var(--primary-hover); /* --gold-d: 2.0–2.25:1 ở chế độ sáng */
   font-weight: 600;
 }
 .vn-none {
@@ -3139,6 +3152,23 @@ textarea[aria-invalid="true"] {
 .modal.import-modal {
   max-width: 1120px;
   width: 96vw;
+  /* NEO MÉP TRÊN (L76): nền mờ căn giữa theo chiều dọc, nên khi phần giới thiệu + vùng kéo thả (~360px)
+     được thay bằng bảng kế hoạch + xem trước (tới 92vh), mép trên nhảy lên (cao mới − cao cũ)/2 — đo ở
+     cửa sổ 950px: 297px → 38px (CLS 0,188), nút ✕ chạy theo. Neo ở đúng chỗ mép trên của hộp cỡ tối đa
+     khi còn căn giữa: 20px padding nền + (100vh − 40px − 92vh)/2 = 4vh → hộp chỉ dài xuống. Chỉ hộp
+     này — .modal-backdrop dùng chung vẫn căn giữa mọi hộp khác. */
+  align-self: start;
+  margin-top: max(0px, calc(4vh - 20px));
+}
+/* Màn hẹp ≤ 760px: .modal cao tối đa 96vh chứ không phải 92vh (khối @media gần đầu tệp), nên chỗ neo
+   4vh ở trên sai số — và khi cửa sổ thấp hơn 500px (điện thoại xoay ngang 667×375) hộp cỡ tối đa đi từ
+   20px tới 20 + 96vh, TRÀN mép dưới vài px. Neo lại theo 96vh: 20px + (100vh − 40px − 96vh)/2 = 2vh; và
+   không cho hộp cao quá phần nền mờ còn lại (100vh − 40px) để mép dưới luôn nằm trong cửa sổ. */
+@media (max-width: 760px) {
+  .modal.import-modal {
+    margin-top: max(0px, calc(2vh - 20px));
+    max-height: min(96vh, calc(100vh - 40px));
+  }
 }
 /* Bảng kế hoạch: chia cột theo TỈ LỆ CỐ ĐỊNH. Để bảng tự co giãn thì ô "Nạp vào" (select có chữ
    dài) và ô thống kê giành hết bề ngang, bóp cột tên sheet còn ~120px → chữ rơi mỗi dòng 1 từ. */
@@ -3730,10 +3760,16 @@ textarea[aria-invalid="true"] {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--danger);
-  opacity: 0.85;
 }
+/* Làm nhạt bằng MÀU, không bằng opacity: opacity .6/.85 pha đỏ vào nền tab → 2.8–3.8:1 cả hai chế độ. */
 .sheet-tab:not(.active) .sheet-tab-tong {
-  opacity: 0.6;
+  color: var(--text-soft);
+}
+.sheet-tab.active .sheet-tab-tong {
+  color: #a61b1b; /* đỏ --danger #c62828 trên tab cam #ffcc99 chỉ 3.8:1 */
+}
+:root[data-theme="dark"] .sheet-tab.active .sheet-tab-tong {
+  color: var(--danger);
 }
 
 .sheet-tab .rm-tab {
@@ -3793,12 +3829,540 @@ textarea[aria-invalid="true"] {
    `fitCell` trong GridTable.tsx. Bề rộng do JS đặt; đây chỉ lo nổi lên trên, có nền và khung để
    không lẫn với chữ của ô bị đè. Canh TRÁI để đầu công thức ("=0.8*…") luôn nằm ngay chỗ ô gốc. */
 .excel-table td input.cell-grow {
-  position: relative;
+  /* Phủ trọn ô (td là position: relative) và kéo dài sang phải — trông như ô Excel đang sửa, không
+     phải một hộp nhỏ lệch khỏi ô. Viền trong 2px cùng màu viền ô đang chọn nên hai viền liền nhau. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  box-sizing: border-box;
+  padding-left: 8px;
   z-index: 6;
   max-width: none;
   text-align: left;
   background: #fffbe8;
   box-shadow:
-    0 0 0 1px #1769d6,
-    0 2px 6px rgba(0, 0, 0, 0.18);
+    inset 0 0 0 2px #1769d6,
+    2px 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+/* GAP1-03: TÊN NHÓM và chữ STT (A/B/C) — chữ to nhất của hàng nhóm — vẫn rơi về luật chung
+   `.excel-table td.col-hangmuc textarea` / `td.col-stt` = #0066cc (xanh dương) của public/style.css,
+   trong khi src/excel.ts tô sectionTextColor / subTextColor cho MỌI cột của hàng nhóm, kể cả tên và
+   STT. Commit c450a46 đo màu chữ trên ô <input> (ĐVT) nên kết luận "khớp". CHỈ Colorfull: Gia Nguyễn
+   để yên theo chủ repo. `:not(.subgroup-row)` vì hàng nhóm con cũng mang lớp section-row. */
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-stt,
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td.col-hangmuc textarea {
+  color: #953735;
+}
+.excel-table.clf-theme tr.subgroup-row td.col-stt {
+  color: #4f513e;
+}
+
+/* FE-06 BẮT ĐẦU — TƯƠNG PHẢN WCAG AA (4.5:1) cho nút/chữ trạng thái.
+   Token gốc ở public/style.css (tệp đóng băng) đo được: chữ trắng trên nút cảnh báo #e9920b 2.45:1,
+   nút thành công #2fa85a 3.06:1, nút nguy hiểm #e5484d 3.91:1; chữ lỗi #e5484d trên nền hồng 3.3:1.
+   Ba biến `--warn-bg` / `--warn-border` / `--danger-bg` được dùng mà KHÔNG định nghĩa ở đâu: banner
+   "đang có người khác mở báo giá này" rơi về nền #fff7e6 cả ở dark mode, chữ #e8eaf0 trên đó 1.13:1 —
+   đúng thông điệp giúp tránh ghi đè nhau thì không đọc được; khung .err mất nền.
+   Kiểm bằng web/src/styles.contrast.test.ts. Chỉ đổi token GIAO DIỆN ỨNG DỤNG — màu của mẫu báo giá
+   (GN/Colorfull) trên lưới là mã màu cứng riêng, không đi qua các biến này. */
+:root {
+  --danger: #c62828;
+  --success: #166534;
+  --warn: #9a4a06;
+  --danger-bg: #fdecea;
+  --warn-bg: #fff7e6;
+  --warn-border: #ffd591;
+}
+[data-theme="dark"] {
+  --danger: #f87171;
+  --success: #2fa85a;
+  --warn: #e9920b;
+  --danger-bg: #3a1616;
+  --warn-bg: #3a2a10;
+  --warn-border: #7a5a1a;
+}
+/* Nền nút chữ trắng: tách khỏi token chữ để dark mode giữ được chữ sáng mà nút vẫn đủ tương phản. */
+.btn-danger,
+.btn-danger:hover {
+  background: #c62828;
+}
+.btn-success,
+.btn-success:hover {
+  background: #15803d;
+}
+.btn-warn,
+.btn-warn:hover {
+  background: #b45309;
+}
+.toast-success {
+  background: #0f7a34;
+}
+/* FE-06 HẾT */
+
+/* GAP1-04 — LỚP CHỒNG: modal phải nằm TRÊN thanh đầu trang mobile và sidebar.
+   `.modal-backdrop` ở trên đặt z-index 50, thấp hơn `.mobile-topbar` (sticky, 60), `.sidebar` (70) và
+   `.sidebar-backdrop` (65) của public/style.css ở màn ≤920px. Modal không portal, không tạo stacking
+   context riêng, nên so thẳng ở gốc: đo ở 456×800, elementFromPoint tại nút ✕ của modal cao trả về
+   `.mobile-topbar` — không đóng được form dài, còn bấm xuyên được nút mở sidebar để điều hướng đi.
+   1000 = đúng giá trị gốc của public/style.css. Toast phải nổi TRÊN modal (lỗi Lưu trong form). */
+.modal-backdrop {
+  z-index: 1000;
+}
+/* #toast-host: z-index 1100 đặt ngay trong khối chính của nó (GAP1-05 cấm khối #toast-host thứ hai). */
+
+/* ══ CHẾ ĐỘ TỐI CHO VÙNG SOẠN BÁO GIÁ — DỊU MẮT ═════════════════════════════════════════════════
+   public/style.css (đóng băng) giữ "tờ giấy" (.editor, .excel-table, .summary-table) luôn nền trắng
+   "vì nó là tài liệu in". Người dùng chốt 2026-09-23: sáng/tối chỉ là GIAO DIỆN WEB, không dính gì
+   tới Excel, và tối thì phải "dễ chịu". Để giấy trắng thì hỏng thật, đo trên dev bằng tương phản:
+     · chữ ô nhập (tên khách, người liên hệ, ghi chú…) = --text sáng #e8eaf0 trên giấy trắng: 1.2:1;
+     · dòng của bảng "Tổng báo giá" = mực giấy #1b2034 trên --surface-2 tối #1a1f2a: 1.02:1.
+   Hàng mang MÀU CỦA MẪU (tiêu đề cột, nhóm/nhóm con, dòng tổng) KHÔNG giữ nguyên màu in — cam đào /
+   ô-liu / xanh ngọc sáng giữa nền tối là mấy dải chói. Dùng BẢN TỐI của chính màu đó (pha ~20% với nền)
+   + chữ tông SÁNG cùng họ màu: vẫn nhận ra mẫu nào, nhóm hay nhóm con, mà không chói. Excel không đổi.
+
+   `:root[data-theme="dark"]` để thắng các luật `.excel-table … td` nhiều tầng của public/style.css.
+   Riêng hàng nhóm / tiêu đề có thêm `:not(#nhom-toi)` — KHÔNG phần tử nào mang id này nên nó luôn
+   khớp; nó chỉ cộng độ ưu tiên cấp id, thắng các luật tô màu hàng nhóm theo từng cột / từng mẫu (tới
+   (0,5,3)) mà không phải rải !important. */
+
+/* Ô nhập / ô chọn / thanh cuộn gốc của trình duyệt theo NÚT sáng/tối của app, không theo Windows:
+   index.html khai `color-scheme: light dark` nên máy để Windows sáng mà app bật tối thì ô tìm kiếm
+   (trang Phân quyền…) vẫn nền trắng của trình duyệt với chữ sáng của app — đọc không ra. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Ba nền "-soft" chưa từng có giá trị dark → nút ƒ (chữ --success sáng) nằm trên nền xanh NHẠT
+     #e2f6e9 của bản sáng: 2.7:1. Chữ đi kèm (--success / --warn / --danger) ở dark đều là màu sáng. */
+  --success-soft: #15301f;
+  --warn-soft: #3a2a10;
+  --danger-soft: #3a1616;
+  /* Viền lưới: đen #000 của giấy → xám dịu, vẫn đủ thấy khung ô. */
+  --luoi-vien: #434c5c;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+/* Chữ gợi ý mặc định của Chrome là #757575 ở CẢ hai color-scheme: trên nền tối chỉ 3.58–3.92:1 (ô tìm
+   thanh công cụ, ô trong hộp thoại, phần đầu báo giá, "(không xuất Excel)"…). --text-muted tối #9aa3b3
+   ≈ 6.5–7.1:1, vẫn nhạt hơn chữ thật. `:where` → độ ưu tiên chỉ còn của `::placeholder` (0,0,1): luật
+   riêng (#fx-input, hàng nhóm tối, ô tìm thanh bên) vẫn thắng. Chỉ chế độ tối: #9aa3b3 trên nền trắng
+   chỉ 2.5:1. opacity: Firefox mặc định làm mờ placeholder 0.54. */
+:where(:root[data-theme="dark"]) ::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+/* Chữ gợi ý chế độ SÁNG (soát toàn diện đợt 3) — hai chỗ còn dưới 4.5:1:
+   · ô công thức: public/style.css (đóng băng) đặt #aab2bd — 2.14:1 trên nền trắng. --text-muted sáng
+     #5b6575 cùng tông xám-xanh, 5.5–5.9:1 trên nền trắng / nền focus #fffbe8 / nền chỉ-đọc #f6f7f9, vẫn
+     nhạt hơn hẳn chữ công thức #111. Luật tối riêng bên dưới (độ ưu tiên cao hơn) vẫn thắng ở dark.
+   · hàng nhóm / nhóm con: #757575 mặc định của Chrome trên nền màu của hàng chỉ 3.05–3.89:1. Giữ XÁM
+     TRUNG TÍNH như mặc định (khác sắc chữ thật nâu / xanh / đỏ gạch / rêu nên không lẫn với tên nhóm đã
+     gõ), chỉ đậm lên vừa đủ cho TỪNG nền: 4.64–4.67:1. Hàng nhóm GN có chữ thật chỉ 4.57:1 nên gợi ý
+     đứng ngang chữ thật — tách nhau bằng sắc. Luật tối (có #nhom-toi) vẫn thắng ở dark. opacity: Firefox
+     mặc định làm mờ placeholder 0.54. */
+#fx-input::placeholder {
+  color: var(--text-muted);
+}
+.excel-table tr.section-row:not(.subgroup-row) td :is(input, textarea)::placeholder {
+  color: #696969; /* 4.64:1 trên #fae9db */
+  opacity: 1;
+}
+.excel-table tr.subgroup-row td :is(input, textarea)::placeholder {
+  color: #5c5c5c; /* 4.67:1 trên #c9d9ef */
+  opacity: 1;
+}
+.excel-table.clf-theme tr.section-row:not(.subgroup-row) td :is(input, textarea)::placeholder {
+  color: #5b5b5b; /* 4.66:1 trên #f4cfb0 */
+  opacity: 1;
+}
+.excel-table.clf-theme tr.subgroup-row td :is(input, textarea)::placeholder {
+  color: #595959; /* 4.64:1 trên #cad8aa */
+  opacity: 1;
+}
+
+/* ── Khung soạn + phần đầu báo giá ── */
+:root[data-theme="dark"] .editor {
+  background: var(--surface);
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row) label {
+  color: var(--text-soft);
+}
+/* Phần đầu báo giá (QuoteEditor: .meta-2col > fieldset.meta-col, .meta-row) + ô chọn Template. Không có
+   luật nền riêng → trước chỉ nhờ color-scheme mà thành ô xám #3b3b3b của trình duyệt, lệch tông app.
+   Khai CẢ `border` (không chỉ màu): ô có nền riêng thì Chrome vẽ viền mặc định 2px lõm hai màu. */
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row, .sheet-meta) :is(input, select, textarea) {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 3px;
+}
+:root[data-theme="dark"] .editor :is(.meta-col, .meta-row, .sheet-meta) :is(input, select):focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--ring);
+  outline: none;
+}
+:root[data-theme="dark"] .editor :is(.center-line, .quote-no, .greeting) {
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .editor .greeting {
+  border-bottom-color: var(--border);
+}
+:root[data-theme="dark"] .editor .title-input {
+  color: var(--text);
+}
+:root[data-theme="dark"] .editor .title-input:is(:hover, :focus) {
+  border-color: var(--border-strong);
+}
+
+/* ── Lưới: hàng thường ── */
+:root[data-theme="dark"] .excel-table {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea) {
+  color: var(--text);
+}
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc),
+:root[data-theme="dark"] .excel-table td:is(.col-stt, .col-hangmuc) :is(input, textarea) {
+  color: #8ab8f0; /* xanh #0066cc của giấy chỉ 3:1 trên nền tối */
+}
+:root[data-theme="dark"] .excel-table td.col-internal-note textarea {
+  color: #d9b36a;
+}
+:root[data-theme="dark"] .excel-table td :is(input, textarea):focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] .excel-table td input.cell-grow {
+  background: var(--surface-2);
+  box-shadow:
+    inset 0 0 0 2px #60a5fa,
+    2px 2px 6px rgba(0, 0, 0, 0.45);
+}
+:root[data-theme="dark"] .excel-table td.col-amount {
+  background: transparent;
+}
+:root[data-theme="dark"] .excel-table td.cell-fx-error input {
+  background: #3a1616;
+  color: #fca5a5;
+}
+:root[data-theme="dark"] .excel-table td.cell-anchor {
+  box-shadow: inset 0 0 0 2px #60a5fa; /* #1769d6 chỉ 2.0–2.5:1 trên nền hàng nhóm tối */
+}
+:root[data-theme="dark"] .excel-table td.cell-ref-pick {
+  background: rgba(47, 168, 90, 0.22);
+  box-shadow: inset 0 0 0 2px #4ade80;
+}
+/* Ô được công thức trỏ tới: REF_COLORS (GridTable.tsx) là xanh lá đậm chọn cho giấy trắng. */
+:root[data-theme="dark"] .excel-table td.cell-ref-active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ref-color, #1769d6) 45%, #bbf7d0);
+  background: color-mix(in srgb, var(--ref-color, #1769d6) 24%, transparent);
+}
+:root[data-theme="dark"] .fill-handle {
+  background: #60a5fa;
+}
+:root[data-theme="dark"] .excel-table td.col-action {
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table td.col-action button.rm-row {
+  color: #f87171;
+}
+:root[data-theme="dark"] .excel-table td.col-action button.rm-row:hover {
+  background: #7f1d1d; /* nền đỏ #c0392b của bản sáng + chữ #f87171 = 2:1, ✕ biến mất lúc sắp bấm */
+  color: #fecaca;
+}
+/* Cột HÌNH ẢNH: ô "＋" thêm ảnh và khung ảnh — #fafbfc / #c9ccd4 cứng = một cột ô sáng ở mọi hàng. */
+:root[data-theme="dark"] .img-add {
+  background: var(--surface-2);
+  border-color: var(--luoi-vien);
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] .img-add:hover {
+  background: #1b2740;
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .cell-img img {
+  border-color: var(--luoi-vien);
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .excel-table thead tr.col-letters th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* ── Lưới: tiêu đề cột + hàng nhóm theo MÀU MẪU, bản tối ──
+   --nen: màu mẫu pha ~20% với nền; --chu: tông sáng cùng họ màu. Gia Nguyễn trước, Colorfull đè sau. */
+:root[data-theme="dark"] .excel-table {
+  --tieu-de-nen: color-mix(in srgb, #f3c9a1 22%, var(--surface));
+  --tieu-de-chu: #f3c9a1;
+}
+:root[data-theme="dark"] .excel-table.clf-theme {
+  --tieu-de-nen: color-mix(in srgb, #9dccc9 22%, var(--surface));
+  --tieu-de-chu: #b4dcd9;
+}
+:root[data-theme="dark"] .excel-table:not(#nhom-toi) thead tr:not(.col-letters) th {
+  background: var(--tieu-de-nen);
+  color: var(--tieu-de-chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #fae9db 16%, var(--surface));
+  --chu: #f0b877;
+}
+:root[data-theme="dark"] .excel-table tr.subgroup-row {
+  --nen: color-mix(in srgb, #9dbde6 16%, var(--surface));
+  --chu: #a9c9ef;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.section-row:not(.subgroup-row) {
+  --nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --chu: #f2b39a;
+}
+:root[data-theme="dark"] .excel-table.clf-theme tr.subgroup-row {
+  --nen: color-mix(in srgb, #cad8aa 17%, var(--surface));
+  --chu: #d2dfaa;
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td {
+  background: var(--nen);
+  color: var(--chu);
+}
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea) {
+  color: var(--chu);
+}
+/* Chữ gợi ý ("Tên nhóm (vd: Wallsticker)", "Ghi chú nhóm", "(không xuất Excel)"): pha 90% — thấp nhất là
+   hàng nhóm Colorfull 4.97:1 trên --nen, vẫn nhạt hơn chữ thật (5.96–8.34:1). Pha 55% trước đây chỉ
+   2.32–3.08:1, kém cả bản sáng; 85% vừa chạm 4.5 nên không chừa dư. opacity: Firefox mặc định làm mờ
+   placeholder 0.54, cộng dồn sẽ tụt dưới ngưỡng. */
+:root[data-theme="dark"] .excel-table tr.section-row:not(#nhom-toi) td :is(input, textarea)::placeholder {
+  color: color-mix(in srgb, var(--chu) 90%, var(--surface));
+  opacity: 1;
+}
+:root[data-theme="dark"] .excel-table tfoot :is(td.label, td.value) {
+  background: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  color: #f5d0a9;
+}
+:root[data-theme="dark"] .excel-table tfoot td.value {
+  color: #fca5a5; /* #f87171 trên nền cam pha tối chỉ 3.9:1 */
+}
+
+/* ── Thanh công thức, gợi ý hàm / rạp, khung xem công thức ── */
+:root[data-theme="dark"] .fx-bar {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+:root[data-theme="dark"] .fx-addr {
+  background: var(--surface-2);
+  color: #93c5fd;
+  border-right-color: var(--border-strong);
+}
+:root[data-theme="dark"] #fx-input {
+  background: var(--surface); /* luật theo id ở public/style.css: #fff + chữ #111 */
+  color: var(--text);
+}
+:root[data-theme="dark"] #fx-input:focus {
+  background: var(--primary-soft);
+}
+:root[data-theme="dark"] #fx-input::placeholder {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] #fx-input[readonly] {
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+:root[data-theme="dark"] .fx-fx {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-right-color: var(--border);
+}
+:root[data-theme="dark"] :is(.fx-auto, .vs-auto, .fx-peek) {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-auto-item {
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .fx-auto-item span {
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] :is(.fx-auto-item.active, .fx-auto-item:hover) {
+  background: #1e2a44;
+}
+:root[data-theme="dark"] .fx-peek-f {
+  color: var(--text);
+}
+:root[data-theme="dark"] .fx-peek-v {
+  color: #93c5fd;
+  border-top-color: var(--border);
+}
+:root[data-theme="dark"] .fx-peek-h {
+  color: #4ade80;
+}
+
+/* ── Bảng phụ / tab sheet ── */
+:root[data-theme="dark"] .extra-del-table {
+  background: transparent;
+  border-color: #7f3a3a;
+  color: #f87171;
+}
+:root[data-theme="dark"] .extra-del-table:hover {
+  background: #3a1616;
+}
+:root[data-theme="dark"] .extra-here.cat-hcm {
+  background: #1b2740;
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .extra-here.cat-hanoi {
+  background: #15301f;
+  color: #86efac;
+}
+:root[data-theme="dark"] .extra-here.cat-khach {
+  background: #2e2615;
+  color: #e3b765;
+}
+:root[data-theme="dark"] .extra-table-inline {
+  border-top-color: color-mix(in srgb, #f0c674 35%, var(--surface)); /* vạch vàng sáng → dịu */
+}
+:root[data-theme="dark"] .extra-cat-group .sheet-tab {
+  border-bottom-color: var(--border-strong);
+}
+:root[data-theme="dark"] .sheet-tabs {
+  border-bottom-color: color-mix(in srgb, #ffcc99 35%, var(--surface)); /* vạch cam sáng → dịu */
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab {
+  color: #f87171;
+}
+:root[data-theme="dark"] .sheet-tab .rm-tab:hover {
+  background: var(--surface-hover);
+}
+
+/* ── Bảng "Tổng báo giá" ── */
+:root[data-theme="dark"] .summary-table {
+  color: var(--text);
+  --tong-nen: color-mix(in srgb, #ffcc99 20%, var(--surface));
+  --tong-chu: #f5d0a9;
+}
+:root[data-theme="dark"] .summary-table.clf-theme {
+  --tong-nen: color-mix(in srgb, #f4cfb0 20%, var(--surface));
+  --tong-chu: #f2c7a8;
+}
+:root[data-theme="dark"] .summary-table :is(th, td) {
+  border-color: var(--luoi-vien);
+}
+:root[data-theme="dark"] .summary-table:not(#nhom-toi) :is(thead th, tfoot td) {
+  background: var(--tong-nen);
+  color: var(--tong-chu);
+}
+:root[data-theme="dark"] .summary-table tfoot .summary-formula-value.danger {
+  color: #fca5a5; /* "Thành tiền": #f87171 trên --tong-nen chỉ 3.9:1 */
+}
+
+/* ── Công thức hiện ngay trong ô khi BẤM ĐÚP (GridTable toggleCellFormula) ──
+   Trước là style nội tuyến #15803d: 3.5:1 trên nền tối, 2.1–2.6:1 trên hàng nhóm tối, và cả bản SÁNG
+   trên nền nhóm con / nhóm Colorfull cũng chỉ 3.3–3.5:1. !important vì luật tô chữ hàng nhóm (có id)
+   và các luật màu theo cột đều thắng một bộ chọn thuộc tính. */
+:root {
+  --fx-cell: #166534;
+}
+:root[data-theme="dark"] {
+  --fx-cell: #4ade80;
+}
+[data-fx-shown] {
+  color: var(--fx-cell) !important;
+}
+
+/* ── Chỗ lẻ ngoài vùng soạn (đo trên dev + rà mã) ── */
+/* Link "Bỏ qua tới nội dung" (Tab lần đầu): chữ trắng trên vàng --primary của dark = 1.67:1. */
+:root[data-theme="dark"] .skip-link {
+  color: var(--on-primary);
+}
+/* Nhãn nhóm "CÔNG VIỆC / QUẢN TRỊ / TÀI KHOẢN" ở thanh bên (nền thanh bên tối ở CẢ hai chế độ):
+   #6b7488 trên #111726 = 3.8:1 → #8a93a8 ≈ 5.6:1, vẫn nhạt hơn chữ menu #c2c8d6. */
+.sidebar .menu .nav-group-label {
+  color: #8a93a8;
+}
+/* "Thành tiền" đỏ trên dòng tổng màu cam (bản SÁNG): --danger #c62828 trên #ffcc99 / #f4cfb0 = 3.8:1. */
+.summary-table tfoot .summary-formula-value.danger {
+  color: #a61b1b;
+}
+/* Số thông báo chưa đọc ở thanh bên: chữ trắng trên vàng --accent = 1.7–1.8:1 CẢ hai chế độ. */
+.badge-num:not(:empty) {
+  color: var(--on-primary);
+}
+/* Tooltip biểu đồ doanh số: bản đảo màu (nền = --text) thành hộp gần trắng chói giữa trang tối. */
+:root[data-theme="dark"] .chart-tip {
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+/* Ô chọn / ô nhập TRẦN trong hộp thoại (lịch sử phiên bản, chọn khách, nhập Excel…): không nằm trong
+   <label> nên không ăn luật `.modal label select`, rơi về ô xám #3b3b3b của trình duyệt. Cả cụm bọc
+   trong :where → độ ưu tiên 0, không đè luật riêng nào.
+   Ngoài hộp thoại còn đúng ba ô trần (quét input/select/textarea trên 15 trang ở dev, L65): ô tìm + ô
+   chọn vai trò trang Phân quyền (lớp gắn ở Permissions.tsx) và ô "Ghi chú cuối báo giá" của trình soạn
+   — style nội tuyến chỉ có viền; bắt theo cấu trúc (ô nằm ngay trong khối đứng sau nhãn tick "Thêm Ghi
+   chú") vì QuoteEditor.tsx không gắn lớp. Không mở rộng thành "mọi ô trong main": ô có nền riêng mà
+   không khai viền (ô lưới…) sẽ bị gắn thêm viền. */
+:where(
+  :root[data-theme="dark"] .modal :is(select, textarea, input[type="search"]),
+  :root[data-theme="dark"] :is(.perm-user-search, .perm-user-role),
+  :root[data-theme="dark"] .editor .toggle-totals + div > textarea
+) {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+/* Nhãn "fx" của thanh công thức: #8a94a3 trên #fafbfc = 2.96:1 ở bản SÁNG. */
+.fx-fx {
+  color: var(--text-muted);
+}
+/* Dấu "–" (không có quyền) ở ma trận Phân quyền: --border-strong chỉ 1.4–1.6:1 ở CẢ hai chế độ. */
+.perm-no {
+  color: var(--text-muted);
+}
+/* Số của bước đang làm (khuôn .num cũ của public/style.css): chữ trắng trên vàng 1.7–1.8:1. Thanh bước
+   của NewQuoteWizard.tsx tô bằng style nội tuyến nên sửa ở chính tệp đó. */
+.step-dot.active .num {
+  color: var(--on-primary);
+}
+
+/* BẢNG "TỔNG BÁO GIÁ" CỦA COLORFULL (bản SÁNG) — khớp sheet "Tổng Báo Giá" của tệp Excel
+   (src/excel.ts `sumHeaderFill`: có sheet clofull → F4CFB0), người dùng chốt bằng ảnh chụp
+   2026-09-23. Cùng quy tắc nhận diện với tệp: MỘT sheet Colorfull là đủ. Gia Nguyễn giữ nguyên. */
+.summary-table.clf-theme thead th,
+.summary-table.clf-theme tfoot td {
+  background: #f4cfb0;
+}
+
+/* VÙNG CHỌN NHIỀU Ô TRÊN HÀNG NHÓM / NHÓM CON (cả hai chế độ, GN lẫn Colorfull).
+   Ý định của public/style.css (luật `.excel-table td.cell-selected`) là lớp xanh BÁN TRONG SUỐT phủ lên
+   màu hàng, nhưng luật đó (0,2,1) thua màu hàng nhóm `.excel-table tr.section-row td` (0,2,2), các luật
+   `.clf-theme` và luật tối có `:not(#nhom-toi)`: ô nhóm vẫn mang lớp cell-selected mà nền y như ô chưa
+   chọn — người dùng không thấy ô nhóm nào nằm trong vùng sắp copy / xoá / điền.
+   Phủ bằng background-IMAGE nên không đụng background-color của hàng (phân cấp nhóm vẫn lộ ra), cùng
+   độ đậm 13% với hàng thường. `:not(#nhom-toi)` (không phần tử nào mang id này) cộng độ ưu tiên cấp id
+   → (1,5,2) thắng luật tối (1,4,2); hàng nhóm con cũng mang lớp section-row nên một bộ chọn phủ cả hai.
+   `:not(.cell-anchor)`: ô neo giữ nền gốc như Excel, chỉ có viền. */
+:root .excel-table tr.section-row:not(#nhom-toi) td.cell-selected:not(.cell-anchor) {
+  background-image: linear-gradient(rgb(23 105 214 / 0.13), rgb(23 105 214 / 0.13));
+}
+
+/* GIẢM CHUYỂN ĐỘNG: KHÔNG tạo transition nào (L74). public/style.css (đóng băng) đặt
+   `transition-duration: 0.001ms !important` cho `*` — transition-property mặc định là `all`, nên duration
+   > 0 biến MỌI phần tử thành có transition: bấm đổi sáng/tối khi đang mở báo giá lớn là mỗi thuộc tính đổi
+   màu của hàng nghìn ô sinh transitionrun/start/end, cả ba đi qua listener gốc của React — đo trên #284:
+   9.676 transitionrun mỗi lần, INP 224–256 ms. `none` = không transition, không sự kiện; nhìn thì y hệt
+   0.001ms (đổi tức thì). Không mã nào chờ transitionend (đã rà web/src). Animation giữ luật gốc (rút còn
+   0.001ms, một vòng). Cùng độ ưu tiên + cùng !important, tệp này nạp sau → thắng. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
 }

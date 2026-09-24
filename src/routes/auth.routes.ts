@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { closeUserStreams } from "../sse.js";
 import { createHash } from "node:crypto";
 import { ipKeyGenerator } from "express-rate-limit";
 import type { Request, Response } from "express";
@@ -138,10 +139,30 @@ const tokenLimiter = createLimiter("auth-token", {
   message: { error: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút" },
 });
 
+// ĐƯỜNG CẤP PHIÊN COOKIE ĐÒI PHIÊN THẬT (HTTP-11, soát chéo auth#7).
+//
+// Bearer không kèm cookie (khi JWT_API_ENABLED bật) → cổng phiên ở src/app.ts bỏ qua middleware
+// phiên → không có `req.session.regenerate` → establishSession ném. Chặn bằng MỘT middleware dùng
+// chung, và ĐẶT NÓ TRƯỚC MỌI LIMITER:
+//   · /login: `loginRequestWasSuccessful` chỉ tha status < 400, nên một chốt nằm SAU limiter (như bản
+//     trước, trong handler) vẫn tính mỗi lần 400 là một lần đăng nhập SAI. Client cấu hình sai lặp
+//     ~10 lần là khoá /login LẪN /token của chính username đó 15 phút (hai limiter dùng chung).
+//   · /accept-invite: phải chặn TRƯỚC svc.acceptInvite — hàm đó ghi CSDL (kích hoạt, đổi mật khẩu,
+//     tiêu token mời) rồi mới tới establishSession. Bản trước: token mời mất, client nhận 500.
+// /change-password KHÔNG dùng chốt này: đổi mật khẩu là tính năng hợp lệ của client Bearer, và
+// authService.changePassword có nhánh riêng cho nó (trả `reauth: true`).
+function canPhienThat(req: Request, res: Response, next: () => void) {
+  if (!svc.coPhienThat(req)) {
+    return res.status(400).json({ error: `Client dùng Bearer phải xác thực bằng POST /api/auth/token, không phải ${req.baseUrl}${req.path}`, code: "dung_auth_token" });
+  }
+  next();
+}
+
 // Đăng nhập/token KHÔNG bê được hết vào service: body lỗi cần thêm cờ `mfaRequired` (khác shape
 // errorHandler) → route giữ phần map kết quả → response; credentials/lockout đã ở authCore.ts.
 router.post(
   "/login",
+  canPhienThat,
   loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
@@ -199,6 +220,9 @@ router.post("/logout", asyncHandler(async (req: Request, res: Response) => {
     // động thì phải lưu "họ" token vào req.session lúc cấp rồi thu hồi theo họ — đã ghi vào
     // docs/REMAINING_RISKS.md. Muốn dọn sạch mọi thiết bị ngay bây giờ thì dùng /token/revoke-all.
     await revokeAllForUser(userId).catch(() => {});
+    // Luồng SSE của phiên vừa huỷ vẫn mở (không đi qua bảng phiên sau lúc bắt tay) — đóng lại
+    // (RT-04). Tab ở trình duyệt KHÁC của chính người này tự nối lại bằng phiên còn hợp lệ của nó.
+    closeUserStreams(userId);
     await audit(req, "logout", { resource: "user", resourceId: userId, actorId: userId });
   }
   res.json({ ok: true });
@@ -217,17 +241,45 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.updateProfile(req)))
 );
 
+// TRẦN THỬ MẬT KHẨU CŨ, KHOÁ THEO TÀI KHOẢN (AUTH-03, audit 2026-09-23).
+//
+// /change-password so `oldPassword` bằng bcrypt mà trước đây không có trần nào ngoài apiLimiter
+// 120/phút/IP — tức một phiên bị bỏ quên trên máy dùng chung (hoặc một lỗ XSS) là một máy dò mật
+// khẩu cũ ~170.000 lần/ngày. Biết mật khẩu là leo từ "chiếm phiên tạm" lên "chiếm tài khoản lâu dài".
+//
+// CHỈ ĐẾM 401 (sai mật khẩu cũ): mật khẩu MỚI bị chính sách từ chối (400) là người dùng thật đang
+// gõ, không phải dò — đếm nó thì người chọn mật khẩu yếu vài lần là tự khoá mình.
+// KHÔNG dùng failedAttempts/lockedUntil: bộ đếm đó khoá cả đường /login, tức kẻ cầm phiên tự khoá
+// được chủ tài khoản ra ngoài.
+const changePasswordLimiter = createLimiter("change-pw", {
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req: Request) => `cpw:${req.session.userId}`,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: (_req: Request, res: Response) => res.statusCode !== 401,
+  message: { error: "Quá nhiều lần nhập sai mật khẩu cũ, thử lại sau 15 phút" },
+});
+
 router.post(
   "/change-password",
   requireAuth,
+  changePasswordLimiter,
   validate({ body: ChangePasswordSchema }),
   asyncHandler(async (req: Request, res: Response) => res.json(await svc.changePassword(req)))
 );
 
 // === JWT API surface (for mobile / SDK / public API clients) ===
 
+// Cổng cờ JWT_API_ENABLED (AUTH-04). Đứng TRƯỚC limiter và validate: khi tắt, endpoint trông y như
+// không tồn tại (cùng thân 404 với notFound) thay vì trả 400/401 lộ ra rằng có một cửa đăng nhập thứ hai.
+function chiKhiBatJwt(_req: Request, res: Response, next: () => void) {
+  if (!config.JWT_API_ENABLED) return res.status(404).json({ error: "Không tìm thấy tài nguyên" });
+  next();
+}
+
 router.post(
   "/token",
+  chiKhiBatJwt,
   loginIpLimiter,
   loginLimiter,
   validate({ body: LoginSchema.extend({ mfaToken: mfaTokenSchema }) }),
@@ -262,6 +314,7 @@ router.post(
 
 router.post(
   "/token/refresh",
+  chiKhiBatJwt,
   tokenLimiter,
   validate({ body: z.object({ refreshToken: z.string().min(20, "Phiên đăng nhập không hợp lệ") }) }),
   asyncHandler(async (req: Request, res: Response) => {
@@ -329,6 +382,7 @@ router.get("/invite/:token", tokenLimiter, asyncHandler(async (req: Request, res
 // Accept an invite: set own password + phone, activate, then log in.
 router.post(
   "/accept-invite",
+  canPhienThat,
   acceptInviteIpLimiter,
   acceptInviteLimiter,
   validate({ body: AcceptInviteSchema }),

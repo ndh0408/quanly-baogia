@@ -11,7 +11,7 @@ comes out of it.
 
 ![Quote editor](editor.png)
 
-**30 Prisma models · 140 HTTP endpoints · 241 test files**
+**30 Prisma models · 141 HTTP endpoints · 314 test files**
 
 <sub>Mọi con số ở trên được **sinh từ mã nguồn**, không đếm tay:
 `node scripts/ci/repo-stats.mjs` và `node scripts/ci/endpoint-inventory.mjs`.
@@ -64,7 +64,7 @@ The parts that took the actual work:
 
 | Layer | Technology |
 |---|---|
-| API | Node.js 22 · **TypeScript 5.7** · Express 4 · Zod 4 validation |
+| API | Node.js 24 · **TypeScript 6** · Express 4 · Zod 4 validation |
 | Data | PostgreSQL · **Prisma 7** (30 models) · Redis (ioredis) |
 | Auth | Cookie sessions + JWT access/refresh · bcrypt · TOTP 2FA (speakeasy) · role + per-user permissions |
 | Realtime | Server-Sent Events ([`src/sse.ts`](src/sse.ts)) with a Redis Pub/Sub backplane |
@@ -151,8 +151,8 @@ phát hiện trong đó đã được sửa. **Nguồn sự thật luôn là mã
 ước mã nguồn, chốt chặn, và những thứ tuyệt đối không được phá (Excel round-trip,
 clipboard, IME tiếng Việt).
 
-⚠️ GitHub Actions **không bật** trên tài khoản của repo này — cổng duy nhất thật
-sự chạy là `npm run verify` gõ tay.
+⚠️ Repo này **không dùng GitHub Actions** — CI là `npm run verify`
+(`scripts/verify-local.sh`) gõ tay trên máy dev; `deploy.sh prod` đòi dấu xanh của nó.
 
 ## License
 

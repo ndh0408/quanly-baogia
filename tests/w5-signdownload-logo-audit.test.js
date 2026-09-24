@@ -5,7 +5,7 @@
 // phép đo không đúng: "SPA xin chữ ký cho logo ở gần như mỗi lần mở báo giá". Đo lại:
 //
 //   $ grep -rn "sign-download\|signDownload" web/src --include=*.ts --include=*.tsx | grep -v '\.test\.'
-//   web/src/pages/Audit.tsx:58: ["file.sign-download", "Xin URL tải tệp về"]
+//   web/src/pages/Audit.tsx (bảng nhãn): ["file.sign-download", "Xin URL tải tệp về"]
 //
 // ĐÚNG MỘT dòng, và nó là NHÃN tiếng Việt của mã hành động trong bộ lọc trang Nhật ký — không phải
 // lời gọi. web/src/lib/api.ts không có hàm nào chạm endpoint này. Logo khách hàng trong SPA là

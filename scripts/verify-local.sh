@@ -8,9 +8,11 @@
 #                                         # thuộc dist/, bỏ nó là cổng kiểm mã của lần build trước.
 #
 # ── VÌ SAO TỒN TẠI ─────────────────────────────────────────────────────────
-# CI trên GitHub KHÔNG chạy được (tài khoản không bật Actions). Nghĩa là mọi câu kiểu
-# "cứ đẩy lên, CI sẽ bắt" đều SAI ở repo này: cổng duy nhất thật sự chạy là cổng bạn
-# gõ tay. File này gom đúng những gì .github/workflows/ci.yml khai, để một lệnh là đủ.
+# ĐÂY LÀ CI CỦA REPO (chủ repo chốt 2026-09-23): GitHub Actions không dùng — tài khoản bị khoá vì
+# billing, và .github/workflows/ci.yml nay chỉ chạy tay. Mọi câu kiểu "cứ đẩy lên, CI sẽ bắt" đều
+# SAI ở repo này: cổng duy nhất thật sự chạy là cổng bạn gõ tay. File này gom đúng những gì
+# ci.yml khai, để một lệnh là đủ — và khi chạy ĐỦ trên cây SẠCH thì ghi DẤU XANH cho commit HEAD mà
+# `deploy.sh prod` đòi (xem cuối tệp).
 #
 # ── ĐIỂM KHÁC BIỆT QUAN TRỌNG SO VỚI `npm run test:run` ────────────────────
 # Đặt REQUIRE_DB_TESTS=1. Không có nó, các bài đụng CSDL hoặc KHO OBJECT tự BỎ QUA khi
@@ -93,6 +95,14 @@ fi
 [ "${1:-}" = "--kiem-hatang" ] && { printf 'hạ tầng trông như hạ tầng test\n'; exit 0; }
 
 do=0
+# ── ĐIỀU KIỆN CỦA DẤU XANH, CHỤP LÚC BẮT ĐẦU (soát chéo ops#3 + ops#5) ──────────────────────
+# BO_QUA: bước nào bị BỎ QUA vì máy thiếu công cụ (docker, playwright) thì ghi vào đây. Bỏ qua ≠ đỏ
+# (vẫn in vàng, `do` không đổi), nhưng cũng KHÔNG phải "chạy ĐỦ" — dấu xanh không được ghi.
+# SHA_DAU/BAN_DAU: dấu phải gắn với commit và cây LÚC BẮT ĐẦU. Chụp ở cuối thì một commit B chen vào
+# giữa lượt (hoặc cây bẩn lúc đầu rồi bị stash) sẽ nhận dấu dù chưa từng qua đủ các bước.
+BO_QUA=()
+SHA_DAU="$(git rev-parse HEAD 2>/dev/null)"
+BAN_DAU="$(git status --porcelain 2>/dev/null)"
 buoc() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
 ket()  { if [ "$1" -eq 0 ]; then printf '  \033[32m✓ %s\033[0m\n' "$2"; else printf '  \033[31m✗ %s\033[0m\n' "$2"; do=1; fi; }
 
@@ -114,6 +124,14 @@ redis-cli -h "${RD_HOST:-127.0.0.1}" -p "${RD_PORT:-6379}" ping >/dev/null 2>&1
 ket $? "Redis tại ${RD_HOST:-?}:${RD_PORT:-?} (nếu đỏ: redis-server --daemonize yes)"
 curl -fsS --noproxy '*' -o /dev/null "$S3_ENDPOINT/minio/health/live" 2>/dev/null
 ket $? "Kho object tại $S3_ENDPOINT (nếu đỏ: minio server /tmp/minio-data --address :9000)"
+# Node của máy PHẢI cùng major với production (audit 2026-09-22, DEP-04 / INFRA-12). Trước đây máy
+# này chạy Node 24 còn image production là node:22 — toàn bộ test kiểm một runtime KHÁC thứ đang
+# chạy thật, mà không dòng nào nói ra. .nvmrc, `engines`, Dockerfile (ARG NODE_IMAGE) và @types/node
+# nay cùng một major — tests/ops-deps-node.test.js khoá điều đó; ở đây khoá MÁY đang chạy cổng.
+NODE_CAN="$(tr -d '[:space:]' < .nvmrc 2>/dev/null)"
+NODE_DANG="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+[ -n "$NODE_CAN" ] && [ "$NODE_DANG" = "$NODE_CAN" ]
+ket $? "Node của máy (v${NODE_DANG:-?}) cùng major với .nvmrc/production (v${NODE_CAN:-?}) — đổi bằng nvm/fnm/volta"
 [ "$do" -eq 0 ] || { printf '\n\033[31mDỪNG: thiếu hạ tầng. Chạy tiếp cũng chỉ ra một dòng "skipped" trông như xanh.\033[0m\n'; exit 1; }
 
 # ── CÂY PHỤ THUỘC PHẢI KHỚP LOCKFILE ──────────────────────────────────────
@@ -328,7 +346,7 @@ node scripts/ci/check-doc-numbers.mjs --check >/dev/null;          ket $? "check
 node scripts/ci/check-architecture.mjs >/dev/null;                  ket $? "check-architecture (ranh giới tầng)"
 # CHANGELOG.md sinh từ `git log`, không viết tay (§34: không ghi số liệu dễ trôi bằng tay). Cổng
 # này bắt lúc nó lệch khỏi lịch sử — tức lúc ai đó sửa tay hoặc quên sinh lại sau khi commit.
-node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run check:changelog)"
+node scripts/ci/gen-changelog.mjs --check >/dev/null;              ket $? "changelog khớp lịch sử git (sinh lại: npm run changelog)"
 
 buoc "[9/13] Hạ tầng triển khai"
 bash scripts/ci/check-runtime-command.sh >/dev/null;                ket $? "mọi đường triển khai dùng chung artifact dist/"
@@ -436,6 +454,7 @@ if [ "$NHANH" -eq 0 ]; then
     ket $ma_ds "docker-smoke (chạy riêng để xem chi tiết: bash scripts/ci/docker-smoke.sh)"
   else
     printf '  \033[33m— docker không dùng được trên máy này, bỏ qua smoke image\033[0m\n'
+    BO_QUA+=("[11] smoke image — docker không chạy")
   fi
 else
   buoc "[11/13] Bỏ qua smoke image (--nhanh)"
@@ -466,6 +485,7 @@ if [ "$NHANH" -eq 0 ]; then
     ket $ma_ui "ui-smoke (chạy riêng để xem chi tiết: npm run smoke:ui)"
   else
     printf '  \033[33m— gói playwright chưa cài, bỏ qua smoke giao diện (npm ci)\033[0m\n'
+    BO_QUA+=("[12] smoke giao diện — thiếu playwright")
   fi
 else
   buoc "[12/13] Bỏ qua smoke giao diện (--nhanh)"
@@ -486,6 +506,10 @@ if [ "$NHANH" -eq 0 ]; then
   # BA lượt verify liên tiếp trong khi `npm run scan` chạy riêng thì XANH TOÀN BỘ, và không có
   # cách nào biết đó là "trivy hết giờ vì máy đang bận" hay "có lỗ hổng thật" ngoài việc chạy lại
   # cả hai mươi phút. Giữ `/dev/null` cho ca XANH (bốn bước con in rất dài), ca ĐỎ thì in ra.
+  # Không docker thì security-scan.sh tự lùi về CHỈ SBOM (bỏ gitleaks/trivy/semgrep) mà vẫn thoát 0 —
+  # giữ nguyên hành vi đó cho `npm run scan` chạy riêng, nhưng ở đây ghi nhận là BỎ QUA (ops#3).
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 \
+    || BO_QUA+=("[13] gitleaks/trivy/semgrep — docker không chạy, chỉ còn SBOM")
   log_bm="$(mktemp)"
   bash scripts/ci/security-scan.sh > "$log_bm" 2>&1
   ma_bm=$?
@@ -501,6 +525,38 @@ fi
 
 if [ "$do" -eq 0 ]; then
   printf '\n\033[32m✅ TẤT CẢ CỔNG XANH\033[0m\n'
+  # ── DẤU XANH CHO deploy.sh (audit 2026-09-22, INFRA-04; chủ repo chốt 2026-09-23: CI = verify-local)
+  # GitHub Actions không dùng, nên đây là nơi DUY NHẤT nối "commit X đã qua đủ cổng" với lượt deploy
+  # commit X. `deploy.sh prod` từ chối commit không có dấu (có cờ khẩn cấp), staging chỉ cảnh báo.
+  # Chỉ ghi khi: chạy ĐỦ (không --nhanh — --nhanh bỏ test web, smoke image, smoke UI, quét bảo mật)
+  # VÀ cây làm việc SẠCH — cổng chạy trên cây làm việc, còn deploy ship `git archive <commit>`; cây
+  # bẩn thì thứ vừa kiểm KHÔNG phải thứ sẽ ship.
+  # Nằm trong thư mục git chung (--git-common-dir) chứ không trong cây: không commit nhầm được, và mọi
+  # worktree cùng thấy.
+  # Soát chéo ops#3: bước bị BỎ QUA (docker/playwright không có) cũng là "chưa chạy đủ".
+  # Soát chéo ops#5: dấu ghi cho commit LÚC BẮT ĐẦU, và chỉ khi cây sạch cả lúc đầu lẫn lúc cuối và HEAD
+  # không đổi giữa lượt.
+  SHA_CUOI="$(git rev-parse HEAD 2>/dev/null)"
+  if [ "$NHANH" -eq 1 ]; then
+    printf '  (--nhanh: KHÔNG ghi dấu xanh cho deploy.sh prod — chạy đủ npm run verify)\n'
+  elif [ ${#BO_QUA[@]} -gt 0 ]; then
+    printf '  \033[33mKHÔNG ghi dấu xanh — các cổng sau CHƯA CHẠY trên máy này:\033[0m\n'
+    printf '  \033[33m  · %s\033[0m\n' "${BO_QUA[@]}"
+    printf '  \033[33m  Bật Docker Desktop (hoặc npm ci) rồi chạy lại; thật sự khẩn thì DEPLOY_KHAN_CAP.\033[0m\n'
+  elif [ -n "$BAN_DAU" ]; then
+    printf '  \033[33m(cây làm việc BẨN lúc bắt đầu: KHÔNG ghi dấu xanh — thứ vừa kiểm không phải một commit; commit hết rồi chạy lại)\033[0m\n'
+  elif [ -z "$SHA_DAU" ] || [ "$SHA_CUOI" != "$SHA_DAU" ]; then
+    printf '  \033[33m(HEAD đổi trong lúc verify (%s → %s): KHÔNG ghi dấu xanh — chạy lại trên commit mới)\033[0m\n' "${SHA_DAU:0:9}" "${SHA_CUOI:0:9}"
+  elif [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    printf '  \033[33m(cây làm việc BẨN lúc kết thúc: KHÔNG ghi dấu xanh — commit hết rồi chạy lại để deploy.sh prod nhận)\033[0m\n'
+  else
+    SHA_XANH="$SHA_DAU"
+    THU_MUC_DAU="${QUANLY_VERIFY_DIR:-$(git rev-parse --git-common-dir 2>/dev/null)/quanly-verify}"
+    if mkdir -p "$THU_MUC_DAU" 2>/dev/null && \
+       printf 'sha=%s\nluc=%s\nnode=%s\nmay=%s\n' "$SHA_XANH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(node -v)" "$(hostname)" > "$THU_MUC_DAU/ok-$SHA_XANH"; then
+      printf '  dấu xanh: %s (deploy.sh prod đọc dấu này)\n' "$THU_MUC_DAU/ok-$SHA_XANH"
+    fi
+  fi
 else
   printf '\n\033[31m❌ CÓ CỔNG ĐỎ — xem các dòng ✗ ở trên\033[0m\n'
 fi

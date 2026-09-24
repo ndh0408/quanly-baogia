@@ -2,7 +2,10 @@
 // thứ hai, trong đó có HAI lỗ nằm trong chính bản vá của đợt 1.
 //
 // Cần Postgres + schema. CI/`test-on-dev.sh` đặt REQUIRE_DB_TESTS=1 để cấm bỏ qua âm thầm.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+// Một phần bài này đo bề mặt Bearer JWT, mà từ AUTH-04 (2026-09-23) bề mặt đó MẶC ĐỊNH TẮT
+// (JWT_API_ENABLED). Bật cờ TRƯỚC khi config.ts được nạp — vi.hoisted chạy trước mọi import tĩnh.
+vi.hoisted(() => { process.env.JWT_API_ENABLED = "true"; });
 import request from "supertest";
 import { agentWithCsrf } from "./helpers/agent.js";
 import bcrypt from "bcryptjs";

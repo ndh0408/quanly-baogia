@@ -10,7 +10,7 @@
 // TRẬT TỰ và TRẠNG THÁI của ngăn xếp: lùi/tiến ra đúng mốc nào, nhánh redo sống chết lúc nào,
 // trần 100 cắt đầu nào, và tổ hợp phím nào ra lệnh gì.
 import { describe, it, expect } from "vitest";
-import { createUndoStack, undoRedoKey, UNDO_LIMIT } from "./gridUndo";
+import { createUndoStack, createImagePool, undoRedoKey, UNDO_LIMIT } from "./gridUndo";
 
 /**
  * "Lưới giả": một ô dữ liệu duy nhất, nối đúng thứ tự mà GridTable nối.
@@ -221,5 +221,42 @@ describe("bảng phím lùi/tiến (undoRedoKey)", () => {
       expect(undoRedoKey(true, false, k)).toBeNull();
       expect(undoRedoKey(true, true, k)).toBeNull();
     }
+  });
+});
+
+// GRID-09: mỗi mốc là JSON cả lưới KÈM ảnh base64 → 100 mốc trên sheet có 30 ảnh ≈ 1,5GB.
+describe("kho ảnh dùng chung cho mốc undo (GRID-09)", () => {
+  const anh = (n: number, c: string) => "data:image/jpeg;base64," + c.repeat(n);
+  const luoi = () => Array.from({ length: 10 }, (_, i) => ({ name: `Hạng mục ${i}`, quantity: 1, unitPrice: 1000, images: [anh(250_000, String.fromCharCode(65 + i))] }));
+
+  it("mốc KHÔNG mang base64: 10 ảnh × 250KB → mỗi mốc dưới 5KB (bản cũ ~2,5MB)", () => {
+    const kho = createImagePool();
+    const items = luoi();
+    expect(kho.snap(items).length).toBeLessThan(5_000);
+    expect(JSON.stringify(items).length).toBeGreaterThan(2_500_000);   // đối chứng: cách chụp cũ
+  });
+
+  it("100 mốc trên cùng bộ ảnh: kho chỉ giữ 10 ảnh, tổng dung lượng mốc dưới 0,5MB", () => {
+    const kho = createImagePool();
+    const items = luoi();
+    const st = createUndoStack();
+    for (let k = 0; k < 100; k++) { items[k % 10].unitPrice = k; st.mark(kho.snap(items)); }
+    expect(kho.size).toBe(10);
+    expect(st.undo.reduce((s, m) => s + m.length, 0)).toBeLessThan(500_000);
+  });
+
+  it("khôi phục trả về ĐÚNG ảnh (và thứ tự ảnh), đúng mọi trường khác", () => {
+    const kho = createImagePool();
+    const items = luoi();
+    items[3].images = [anh(10, "x"), anh(10, "y")];
+    const moc = kho.snap(items);
+    items[3].images = [];                      // xoá ảnh (thay cả mảng, như removeImage)
+    expect(kho.parse(moc)).toEqual(JSON.parse(JSON.stringify(luoi().map((it, i) => (i === 3 ? { ...it, images: [anh(10, "x"), anh(10, "y")] } : it)))));
+  });
+
+  it("chuỗi thường trùng tiền tố mã (không phải ảnh) không bị đổi", () => {
+    const kho = createImagePool();
+    const items = [{ name: "\u0001anh#0", images: [] as string[] }];
+    expect(kho.parse<typeof items>(kho.snap(items))[0].name).toBe("\u0001anh#0");
   });
 });

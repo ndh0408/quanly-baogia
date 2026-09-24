@@ -1,5 +1,6 @@
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
+import { closeUserStreams } from "./sse.js";
 
 /**
  * Destroy every persisted cookie session of a user (connect-pg-simple rows in
@@ -19,4 +20,7 @@ export async function destroyAllSessions(userId: number, keepSid: string | null 
     // log loudly: this is a security control, not a best-effort cleanup.
     logger.error({ err: e instanceof Error ? e.message : String(e), userId }, "destroyAllSessions failed");
   }
+  // Luồng SSE đang mở KHÔNG đi qua bảng phiên sau lúc bắt tay — xoá hàng phiên không cắt được nó.
+  // Đóng hết (kể cả tab của keepSid: nó tự nối lại với sid còn hợp lệ). Xem closeUserStreams.
+  closeUserStreams(Number(userId));
 }

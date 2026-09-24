@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { prisma } from "../db.js";
 import { audit } from "../audit.js";
 import { can, canScoped, PERMISSIONS as P } from "../permissions.js";
-import { buildProjectRef, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
+import { buildProjectRef, nguoiTaoCuaMaSanXuat, computeTax, codeLabel, sheetCode, soMa, type ProjectRef } from "./projectRef.js";
 import { httpError } from "../httpError.js";
 import { normalizeSearch, searchTextFilter } from "../searchText.js";
 import { buildContractDocx } from "./contractDocx.js";
@@ -71,6 +71,17 @@ function coPhamViDocPersonnel(req: Request, rec: { createdById: number | null })
   return !!canScoped(req.session, "personnel", "read", rec, "createdById");
 }
 
+/**
+ * Giải mã bản ghi để TRẢ VỀ sau một lượt ghi tại chỗ (thanh toán, xác nhận, ghi chú) — KHÔNG ném.
+ *
+ * Soát chéo files#2: bốn đường này ghi CSDL + nhật ký XONG rồi mới `decodePiiOnRead` để trả về. Hàng có
+ * bản mã hỏng (FILE-12 nay cho nó hiện trên danh sách, bấm được) làm lệnh giải mã ném 500 SAU khi đã
+ * commit: người dùng thấy "thất bại" trong khi paidAt/ghi chú đã lưu, bấm lại là thêm object chứng từ mồ
+ * côi và dòng audit trùng. Các thao tác này không đụng cột PII, nên không chặn chúng (kế toán vẫn phải
+ * đánh dấu được hồ sơ); chỉ trả hàng với PII = null + cờ piiLoi, khớp đúng trạng thái đã commit.
+ */
+const giaiMaPhanHoiSauGhi = (rec: Record<string, any>): any => decodePiiList("PersonnelRecord", [rec])[0];
+
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 
 // 🔵 Gắn field công thức (pit, taxableIncome) + 🩷 field tham chiếu Dự án vào bản ghi khi TRẢ VỀ.
@@ -103,9 +114,14 @@ export async function listPersonnel(req: Request) {
     const byIdCard = idCardLookupWhere(q);
     where.OR = byIdCard ? [{ searchText: searchTextFilter(q) }, byIdCard] : [{ searchText: searchTextFilter(q) }];
   }
-  const [total, data, salaryRows] = await Promise.all([
+  // SẮP THEO LƯƠNG khi đã mã hoá (FILE-07): ORDER BY "salary" chạy trên cột THÔ, mà sau cutover
+  // (PII_PLAINTEXT_CUTOVER) cột thô của mọi hồ sơ tạo/sửa sau đó là NULL → chúng dồn về một đầu theo
+  // thứ tự tuỳ ý, chỉ hàng cũ còn cột thô mới được xếp. Sắp trên giá trị ĐÃ GIẢI MÃ của toàn tập lọc
+  // (đúng tập 2 cột mà tổng lương bên dưới vốn đã phải quét), rồi lấy trang theo id.
+  const sapTheoLuongGiaiMa = sort === "salary" && isPiiEncryptionEnabled();
+  const [total, dataTheoCot, salaryRows] = await Promise.all([
     prisma.personnelRecord.count({ where }),
-    prisma.personnelRecord.findMany({
+    sapTheoLuongGiaiMa ? Promise.resolve(null) : prisma.personnelRecord.findMany({
       where, orderBy: { [sort]: order }, skip: (page - 1) * size, take: size, include: ownerSelect,
       omit: { paymentProof: true },   // ảnh chứng từ NẶNG (base64) → KHÔNG tải ở list; lấy on-demand
     }),
@@ -116,8 +132,31 @@ export async function listPersonnel(req: Request) {
     // SUM bỏ qua NULL theo ngữ nghĩa chuẩn → tổng lương/thuế TNCN thiếu dần theo thời gian, không ai
     // báo lỗi vì phép tính vẫn "chạy được", chỉ ra số sai. Chỉ SELECT 2 cột (không phải cả hồ sơ) nên
     // rẻ ngay cả khi quét TOÀN BỘ tập lọc (không phân trang, vì tổng phải tính trên "toàn bộ lọc").
-    prisma.personnelRecord.findMany({ where, select: { salary: true, salaryEnc: true } }),
+    prisma.personnelRecord.findMany({ where, select: { id: true, salary: true, salaryEnc: true } }),
   ]);
+  // Giải mã tập lương MỘT lần, dùng chung cho nhánh sắp theo lương và phần cộng tổng (log lỗi của hàng
+  // hỏng chỉ ghi một lần mỗi request). Qua decodePiiList (không ném): một hàng hỏng không làm sập cả
+  // trang + tổng lương (FILE-12) — hàng đó tính như chưa có lương và mang cờ piiLoi.
+  const luongDaGiai = decodePiiList("PersonnelRecord", salaryRows as any[]).map((r: any) => ({
+    id: r.id as number,
+    v: r.salary == null || r.salary === "" ? null : Number(r.salary),
+    loi: !!r.piiLoi,
+  }));
+  let data = dataTheoCot;
+  if (!data) {
+    // Cùng ngữ nghĩa NULL với Postgres: ASC → NULL cuối, DESC → NULL đầu. Hoà thì theo id cho ổn định.
+    const huong = order === "asc" ? 1 : -1;
+    const idTrang = [...luongDaGiai]
+      .sort((a, b) => {
+        if (a.v == null || b.v == null) return a.v == null && b.v == null ? a.id - b.id : (a.v == null ? 1 : -1) * huong;
+        return a.v === b.v ? a.id - b.id : (a.v - b.v) * huong;
+      })
+      .slice((page - 1) * size, page * size)
+      .map((x) => x.id);
+    const hang = await prisma.personnelRecord.findMany({ where: { id: { in: idTrang } }, include: ownerSelect, omit: { paymentProof: true } });
+    const theoId = new Map(hang.map((h) => [h.id, h]));
+    data = idTrang.map((id) => theoId.get(id)).filter((h): h is NonNullable<typeof h> => !!h);
+  }
   // 🩷 Tra cứu dữ liệu Dự án theo mã sản xuất — CHỈ cho các dòng đang hiển thị (truy vấn hẹp).
   const refMap = await buildProjectRef(data.map((r) => r.projectCode));
   // Chỉ báo "có ảnh chứng từ" mà KHÔNG tải base64 (truy vấn id hẹp).
@@ -126,26 +165,35 @@ export async function listPersonnel(req: Request) {
   })).map((r) => r.id));
   const decorated = decodePiiList("PersonnelRecord", data).map((r) => ({ ...decorate(r as any, refMap), hasPaymentProof: proofIds.has(r.id) }));
   // Tổng (toàn bộ lọc): Thuế TNCN = ΣLương/9, Thu nhập chịu thuế = ΣLương×10/9 (công thức đã chốt).
-  const salarySum = salaryRows.reduce((s, r) => s + Number(decodePiiOnRead("PersonnelRecord", r as any)?.salary ?? 0), 0);
+  const salarySum = luongDaGiai.reduce((s, r) => s + (r.v ?? 0), 0);
   const tax = computeTax(salarySum);
-  const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0 };
+  // `piiLoi` = số hồ sơ trong tập lọc có bản mã không giải mã được — lương của chúng KHÔNG nằm trong
+  // tổng (soát chéo files#1). Trước FILE-12 cả trang trả 500 nên người dùng biết có lỗi; sau FILE-12
+  // tổng thiếu tiền mà trông như số thật. Giao diện dựa vào trường này để cảnh báo "tổng thiếu N hồ sơ".
+  const summary = { salary: salarySum, pit: tax.pit ?? 0, taxableIncome: tax.taxableIncome ?? 0, piiLoi: luongDaGiai.filter((r) => r.loi).length };
   return { ...phanTrang(decorated, total, page, size), summary };
 }
 
 // Danh sách DỰ ÁN (báo giá ĐÃ CHỐT) để CHỌN khi tạo hồ sơ — tự điền Tên dự án / Mã dự án /
 // Account / CTY. Account chỉ thấy dự án của CHÍNH MÌNH (createdById); admin/
 // người có read:all thấy hết. Mỗi "mã sản xuất" (mỗi sheet, hậu tố _1/_2…) là 1 dòng chọn.
+/** Trần số báo giá của ô chọn dự án (DB-12). */
+export const TRAN_CHON_DU_AN = 300;
+
 export async function listProjects(req: Request) {
   const { q } = req.query as any;
   const where: Record<string, any> = { status: "converted", deletedAt: null };
   if (!can(req.session, P.PERSONNEL_READ_ALL)) where.createdById = req.session.userId;   // Account: chỉ dự án của mình
+  // + cột searchText đã chuẩn hoá của Quote (có GIN trgm) để gõ KHÔNG DẤU vẫn ra tên dự án (DB-08);
+  // giữ các vế ILIKE cũ để không mất kết quả nào (vd mã sản xuất có hậu tố).
   if (q) where.OR = [
+    { searchText: searchTextFilter(q) },
     { title: { contains: q, mode: "insensitive" } },
     { projectCode: { contains: q, mode: "insensitive" } },
     { quoteNumber: { contains: q, mode: "insensitive" } },
   ];
   const quotes = await prisma.quote.findMany({
-    where, take: 300, orderBy: { createdAt: "desc" },
+    where, take: TRAN_CHON_DU_AN, orderBy: { createdAt: "desc" },
     select: {
       quoteNumber: true, projectCode: true, projectVersion: true, title: true,
       company: { select: { name: true } },
@@ -166,10 +214,32 @@ export async function listProjects(req: Request) {
       });
     });
   }
-  return { data };
+  // Chạm trần thì dự án cũ hơn không có trong ô chọn — báo để giao diện nhắc gõ thêm từ khoá (DB-12).
+  return { data, truncated: quotes.length >= TRAN_CHON_DU_AN };
+}
+
+/**
+ * MÃ DỰ ÁN GHI VÀO HỒ SƠ PHẢI THUỘC PHẠM VI NGƯỜI GHI (RBAC-03, audit 2026-09-23).
+ *
+ * Picker ở GET /api/personnel/projects chỉ đưa ra dự án CỦA MÌNH cho người không có read:all, nhưng
+ * đường ghi nhận `projectCode` tuỳ ý — và phản hồi được `decorate` bằng buildProjectRef (không lọc
+ * người dùng): số HĐ bán, PO, ngày ký, tiền trước thuế của DỰ ÁN NGƯỜI KHÁC. Mã sản xuất đoán được
+ * (FE_A26_001, GN26050…), nên manager chỉ có quote:read:own vẫn đọc ngang doanh số của Account khác.
+ *
+ * Luật đúng bằng picker: người có personnel:read:all ghi mã nào cũng được; người khác chỉ bị chặn khi
+ * mã trỏ vào dự án đã chốt của NGƯỜI KHÁC mà không trỏ vào dự án nào của chính mình. Mã không khớp
+ * dự án nào (nhập tay tự do) vẫn cho — buildProjectRef không trả gì cho mã đó nên không có gì để lộ.
+ */
+async function assertProjectCodeInScope(req: Request, code: unknown) {
+  if (typeof code !== "string" || !code.trim() || can(req.session, P.PERSONNEL_READ_ALL)) return;
+  const chu = await nguoiTaoCuaMaSanXuat(code);
+  if (chu.length && !chu.includes(Number(req.session.userId))) {
+    throw httpError(403, "Mã dự án không thuộc dự án của bạn");
+  }
 }
 
 export async function createPersonnel(req: Request) {
+  await assertProjectCodeInScope(req, req.body.projectCode);
   const rec = await prisma.personnelRecord.create({
     data: encodePiiForWrite("PersonnelRecord", { ...req.body, createdById: req.session.userId, searchText: personnelSearchText(req.body) }) as any,   // người tạo = chủ sở hữu
     include: ownerSelect,
@@ -189,12 +259,32 @@ export async function getPersonnel(req: Request) {
 
 export async function updatePersonnel(req: Request) {
   const before = await loadAuthorized(req, "edit");   // hr/accountant không có edit → 403
-  // searchText tính trên giá trị SẼ ghi (merge before + body) → update phần lẻ không làm stale index.
-  const merged = { ...before, ...req.body };
-  const rec = await prisma.personnelRecord.update({
-    where: { id: (req.params as any).id },
-    data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
-    include: ownerSelect,
+  // Chỉ kiểm khi mã ĐỔI: hồ sơ cũ đã mang sẵn mã (ghi trước bản vá) vẫn sửa được các trường khác.
+  if (req.body.projectCode !== undefined && req.body.projectCode !== before.projectCode) {
+    await assertProjectCodeInScope(req, req.body.projectCode);
+  }
+  // searchText tính trên giá trị SẼ ghi (merge bản TƯƠI + body) → update phần lẻ không làm stale index.
+  // Bản tươi đọc TRONG transaction sau khi khoá hàng (DB-10): hai lượt sửa song song khác trường không
+  // còn làm cột tìm kiếm thiếu thay đổi của lượt kia. PII giải mã trước khi ghép (bản thô có thể NULL).
+  const id = Number((req.params as any).id);
+  const rec = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PersonnelRecord" WHERE id = ${id} FOR UPDATE`;
+    const tuoi = await tx.personnelRecord.findFirst({ where: { id }, omit: { paymentProof: true } });
+    // Bản mã hỏng (piiLoi ở danh sách) → 409 kèm lời giải thích, cùng nếp updateEmployee. Lỗi vẫn ném
+    // TRƯỚC lệnh ghi như cũ (không mất byte nào), chỉ đổi "Lỗi server" 500 thành thông báo hiểu được.
+    let cu: Record<string, any>;
+    try {
+      cu = decodePiiOnRead("PersonnelRecord", (tuoi ?? before) as any) as Record<string, any>;
+    } catch (e) {
+      if (!(e as { piiIntegrity?: boolean })?.piiIntegrity) throw e;
+      throw httpError(409, "Hồ sơ này có CCCD/số tài khoản/lương đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá) — không sửa được để khỏi xoá mất dữ liệu. Báo quản trị khôi phục khoá.");
+    }
+    const merged = { ...cu, ...req.body };
+    return tx.personnelRecord.update({
+      where: { id },
+      data: encodePiiForWrite("PersonnelRecord", { ...req.body, searchText: personnelSearchText(merged) }) as any,
+      include: ownerSelect,
+    });
   });
   await audit(req, "personnel.update", { resource: "personnel", resourceId: rec.id });
   const refMap = await buildProjectRef([rec.projectCode]);
@@ -212,7 +302,7 @@ export async function deletePersonnel(req: Request) {
 export async function markPayment(req: Request) {
   const id = (req.params as any).id;
   // Lấy TRẠNG THÁI CŨ để ghi before/after vào audit — thao tác TÀI CHÍNH cần truy vết.
-  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true } });
+  const before = await prisma.personnelRecord.findFirst({ where: { id }, select: { id: true, createdById: true, paidAt: true, paidById: true, paymentProof: true, paymentProofKey: true, paymentProofSha256: true } });
   if (!before) throw httpError(404, "Không tìm thấy hồ sơ nhân sự");
   const coQuyenDoc = coPhamViDocPersonnel(req, before);   // quyết định HÌNH DẠNG phản hồi — xem chú thích ở hàm này
   const paid = (req.body as any).paid as boolean;
@@ -223,36 +313,54 @@ export async function markPayment(req: Request) {
     paymentProof: null, paymentProofKey: null, paymentProofMime: null,
     paymentProofSize: null, paymentProofSha256: null, paymentProofUploadedAt: null,
   };
+  // ẢNH CŨ KHÔNG BỊ XOÁ KHỎI KHO — cả khi thay ảnh lẫn khi "Bỏ đánh dấu" (FILE-01, FILE-03).
+  //
+  // Bản trước gọi `removeProof(before.paymentProofKey)` ở ba nhánh, và gọi TRƯỚC `update`:
+  //   · kho object là bản DUY NHẤT của ảnh (cột base64 bị null khi ghi mới; MinIO một ổ không có
+  //     versioning) → một cú bấm "Bỏ đánh dấu" là mất vĩnh viễn chứng từ uỷ nhiệm chi;
+  //   · `update` hỏng sau khi đã xoá (statement_timeout, pool cạn, hồ sơ vừa bị xoá mềm) → hàng
+  //     vẫn trỏ khoá cũ ĐÃ bị xoá, còn ảnh mới thành mồ côi: mất cả hai.
+  // Nay: CSDL là nguồn sự thật và được ghi TRƯỚC; object cũ nằm lại (khoá ghi vào audit để truy
+  // lại). Object không còn hàng nào trỏ tới là việc của một job dọn riêng, không phải của thao tác
+  // tài chính này. Chỉ object MỚI vừa PUT mới bị dọn — và chỉ khi CSDL từ chối nó.
+  let anhMoi: string | null = null;
   if (paid) {
     data.paidAt = new Date();
     data.paidById = req.session.userId;
     if (proof !== undefined) {
       if (proof) {
         const meta = await storeProof(id, proof);
+        anhMoi = meta.paymentProofKey;
         // Ảnh MỚI luôn vào kho; đồng thời XOÁ cột base64 để hàng này không còn giữ hai bản.
         Object.assign(data, meta, { paymentProof: null });
-        await removeProof(before.paymentProofKey);   // dọn ảnh cũ nếu thay ảnh
       } else {
         Object.assign(data, clearProofCols);
-        await removeProof(before.paymentProofKey);
       }
     }
   } else {
     Object.assign(data, { paidAt: null, paidById: null }, clearProofCols);
-    await removeProof(before.paymentProofKey);
   }
-  const rec = await prisma.personnelRecord.update({
-    where: { id }, data,
-    include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
-    omit: { paymentProof: true },   // không trả base64 về client
-  });
+  let rec;
+  try {
+    rec = await prisma.personnelRecord.update({
+      where: { id }, data,
+      include: { ...ownerSelect, paidBy: { select: { id: true, displayName: true } } },
+      omit: { paymentProof: true },   // không trả base64 về client
+    });
+  } catch (e) {
+    await removeProof(anhMoi);   // CSDL không nhận → ảnh vừa PUT không ai trỏ tới
+    throw e;
+  }
   const newProof = paid
     ? (proof !== undefined ? (proof || null) : (before.paymentProofKey || before.paymentProof))
     : null;
   await audit(req, paid ? "personnel.pay" : "personnel.unpay", {
     resource: "personnel", resourceId: id,
-    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!before.paymentProof },
-    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof },   // audit chỉ ghi CÓ/KHÔNG ảnh (không lưu base64)
+    // hasProof phải xét CẢ khoá kho object: mọi ảnh ghi sau khi có storeProof có cột base64 = null,
+    // nên `!!before.paymentProof` luôn ra false và nhật ký nói "trước đó không có ảnh" (FILE-02).
+    // proofKey/proofSha256 là thứ duy nhất để tìm lại đúng object sau khi hàng đã bị null cột.
+    before: { paidAt: before.paidAt, paidById: before.paidById, hasProof: !!(before.paymentProofKey || before.paymentProof), proofKey: before.paymentProofKey ?? null, proofSha256: before.paymentProofSha256 ?? null },
+    after: { paidAt: rec.paidAt, paidById: rec.paidById, hasProof: !!newProof, proofKey: rec.paymentProofKey ?? null },   // không lưu base64
   });
   if (!coQuyenDoc) {
     // KHÔNG decorate/decodePiiOnRead: người không đọc được hồ sơ này chỉ nhận đúng vài trường giao
@@ -260,7 +368,7 @@ export async function markPayment(req: Request) {
     return { id: rec.id, paidAt: rec.paidAt, paidById: rec.paidById, payment: rec.paidAt ? "Đã thanh toán" : "Chưa thanh toán", hasPaymentProof: !!newProof };
   }
   const refMap = await buildProjectRef([rec.projectCode]);
-  return { ...decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap), hasPaymentProof: !!newProof };
+  return { ...decorate(giaiMaPhanHoiSauGhi(rec), refMap), hasPaymentProof: !!newProof };
 }
 
 // Lấy ảnh chứng từ thanh toán (base64) on-demand — gác theo quyền XEM hồ sơ (read own/all).
@@ -310,7 +418,7 @@ export async function writeTeamNote(req: Request) {
   const rec = await prisma.personnelRecord.update({ where: { id: before.id }, data: { teamNote: value }, include: ownerSelect, omit: { paymentProof: true } });
   await audit(req, "personnel.team-note", { resource: "personnel", resourceId: rec.id, before: { teamNote: before.teamNote }, after: { teamNote: value } });
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
+  return decorate(giaiMaPhanHoiSauGhi(rec), refMap);
 }
 // KẾ TOÁN GHI CHÚ (route gác personnel:accounting-note) + NOTE (route gác personnel:manage:all = admin).
 export async function writeAccountingNote(req: Request) { return writeNoteField(req, "accountingNote", "personnel.accounting-note"); }
@@ -325,7 +433,7 @@ async function writeNoteField(req: Request, field: "accountingNote" | "note", ac
   await audit(req, action, { resource: "personnel", resourceId: id, before: { [field]: before[field] }, after: { [field]: value } });
   if (!coQuyenDoc) return { id: rec.id, [field]: (rec as any)[field] };   // xem chú thích ở coPhamViDocPersonnel
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
+  return decorate(giaiMaPhanHoiSauGhi(rec), refMap);
 }
 
 // ADMIN xác nhận "đã ký" / BỎ xác nhận cho 1 hồ sơ — lưu NGÀY + người.
@@ -355,5 +463,5 @@ export async function markConfirm(req: Request) {
     return { id: rec.id, confirmedAt: rec.confirmedAt, confirmedById: rec.confirmedById, confirmed: rec.confirmedAt ? "Đã ký" : null };
   }
   const refMap = await buildProjectRef([rec.projectCode]);
-  return decorate(decodePiiOnRead("PersonnelRecord", rec) as any, refMap);
+  return decorate(giaiMaPhanHoiSauGhi(rec), refMap);
 }

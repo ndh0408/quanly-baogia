@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Me, type EditorCompany, type EditorTemplate, type AssignableUser, type Customer, type QuoteFull } from "../lib/api";
-import { toast, useEscClose } from "../lib/ui";
+import { toast, useEscClose, toLocalInputDate } from "../lib/ui";
 import { setPendingNewQuote } from "../lib/pendingQuote";
 
 // Port "Tạo báo giá mới" (renderNewQuote) — 3 bước: chọn công ty → chọn mẫu (nhiều = nhiều sheet) →
@@ -32,7 +32,9 @@ export function NewQuoteWizard({ me }: { me: Me }) {
   const [info, setInfo] = useState({
     title: "", shortTitle: "", toCompany: "", toContact: "",
     fromContact: me.senderName || me.displayName || "", fromPhone: me.phone || "", fromTitle: me.title || "",
-    fromAddress: "", vatPercent: 8, quoteDate: new Date().toISOString().slice(0, 10),
+    // Ngày ĐỊA PHƯƠNG (giờ VN), như QuoteEditor #/rnew — toISOString().slice(0,10) là ngày UTC, lùi một
+    // ngày trước 07:00 sáng. Draft luôn mang quoteDate nên homNayVN() của máy chủ không đỡ được (excel#9).
+    fromAddress: "", vatPercent: 8, quoteDate: toLocalInputDate(new Date()),
   });
 
   useEffect(() => {
@@ -82,8 +84,8 @@ export function NewQuoteWizard({ me }: { me: Me }) {
       <div className="stepper" style={{ display: "flex", gap: 8, margin: "10px 0 16px", flexWrap: "wrap" }}>
         {STEPS.map((s, i) => { const n = i + 1; const state = n === step ? "active" : n < step ? "done" : ""; return (
           <button key={s} className={`step-dot ${state}`} disabled={n > step} onClick={() => n < step && setStep(n)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border-strong)", background: n === step ? "var(--accent, #1a73e8)" : n < step ? "var(--surface)" : "transparent", color: n === step ? "#fff" : "inherit", cursor: n < step ? "pointer" : "default", fontWeight: 600, fontSize: 13 }}>
-            <span style={{ display: "inline-flex", width: 20, height: 20, borderRadius: 999, background: n <= step ? "rgba(0,0,0,.15)" : "var(--soft)", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{n < step ? "✓" : n}</span>{s}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border-strong)", background: n === step ? "var(--accent, #1a73e8)" : n < step ? "var(--surface)" : "transparent", color: n === step ? "var(--on-primary)" : "inherit", cursor: n < step ? "pointer" : "default", fontWeight: 600, fontSize: 13 }}>
+            <span style={{ display: "inline-flex", width: 20, height: 20, borderRadius: 999, background: n < step ? "color-mix(in srgb, currentColor 15%, transparent)" : n === step ? "rgba(0,0,0,.15)" : "var(--surface-2)", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{n < step ? "✓" : n}</span>{s}
           </button>); })}
       </div>
 
@@ -177,7 +179,7 @@ export function NewQuoteWizard({ me }: { me: Me }) {
         </div>
       </div>
 
-      {pickOpen && <CustomerPicker onClose={() => setPickOpen(false)} onPick={(c) => { setCustomer({ id: c.id, code: c.code, name: c.name || "" }); setPickOpen(false); }} />}
+      {pickOpen && <CustomerPicker onClose={() => setPickOpen(false)} onPick={(c) => { setCustomer({ id: c.id, code: c.code, name: c.name || "" }); setInfo((f) => ({ ...f, toCompany: f.toCompany || c.name || "" })); setPickOpen(false); }} />}   {/* FE-14: chọn mã khách thì điền sẵn "Khách hàng (To)" nếu còn trống */}
     </div>
   );
 }

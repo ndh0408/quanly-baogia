@@ -189,10 +189,20 @@ services:
     # GHIM THEO DIGEST — cùng lý lẽ với postgres/redis ở trên, và cổng b7-compose-hardening bắt buộc:
     # tag (kể cả RELEASE.*) vẫn có thể bị đẩy lại, digest thì không. Đọc từ registry 2026-09-08 bằng
     #   docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z   (dòng Digest)
-    # Làm mới CÓ CHỦ Ý bằng `docker buildx imagetools inspect minio/minio:<tag mới>`.
-    # Lưu ý: container dev đang chạy `minio/minio:latest` (tạo trước khi compose dev thêm ghim, chưa
-    # recreate) — prod là môi trường ĐẦU TIÊN chạy đúng bản ghim này.
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    #
+    # ── REGISTRY: quay.io, KHÔNG phải Docker Hub (audit 2026-09-23, DEP-01) ──────────────────────
+    # Docker Hub đã GỠ minio/minio và minio/mc (đo 2026-09-23: hub.docker.com/v2/repositories/
+    # minio/minio → 404, kéo theo digest → 401). Máy prod hiện sống nhờ ảnh CÒN TRONG CACHE — dựng
+    # máy mới (đúng kịch bản khôi phục thảm hoạ) thì `compose up` hỏng ở bước kéo ảnh, và vì app/worker
+    # `depends_on: minio (service_healthy)` nên TOÀN BỘ ứng dụng không lên. quay.io vẫn phát hành
+    # đúng bản này với CÙNG digest sha256:14cea493… — tức cùng từng byte, chỉ đổi nơi kéo. Đã
+    # `docker pull` theo digest ngày 2026-09-23.
+    # ⛔ ĐỪNG `docker image prune -a` trên host production trước khi lượt deploy có dòng này đã chạy:
+    #    ảnh cũ mang tên docker.io/minio/minio là bản DUY NHẤT còn trên máy nếu quay.io có sự cố.
+    # Làm mới CÓ CHỦ Ý bằng `docker buildx imagetools inspect quay.io/minio/minio:<tag mới>`.
+    # Bản cộng đồng MinIO đã lưu trữ upstream và còn advisory HIGH sau bản này (cổng S3 9000 KHÔNG
+    # publish — chỉ mạng internal tới được). Hướng dài hạn ghi ở docs/operations/DISASTER_RECOVERY.md.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: quanly-minio
     logging: *default-logging
     # TRẦN TÀI NGUYÊN — bắt buộc bởi cổng b7-compose-hardening (mọi service phải có cả RAM lẫn CPU).
@@ -243,6 +253,9 @@ services:
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     logging: *default-logging
+    # Ân hạn DỪNG > SHUTDOWN_TIMEOUT_MS (70s, src/config.ts) > trần transaction 60s. Mặc định 10s
+    # của Docker SIGKILL ngay giữa lượt lưu báo giá lớn đang chạy lúc deploy (HTTP-08 / INFRA-10).
+    stop_grace_period: 75s
     # exceljs/pdfkit dựng workbook trong bộ nhớ; vượt trần thì CHỈ app chết và tự restart.
     # ── TRẦN BỘ NHỚ: NAY LÀ SỐ ĐO ĐƯỢC, KHÔNG CÒN LÀ PHỎNG ĐOÁN ────────────
     # Bản trước ghi thẳng "⚠️ TRẦN NÀY LÀ SỐ PHỎNG ĐOÁN, CHƯA ĐO TRÊN VM THẬT". Nay đã đo, và
@@ -258,10 +271,14 @@ services:
     # không còn chỗ cho nền, cho phân mảnh, cho một lượt xuất file chạy cùng lúc.
     #
     # 3g là ~2× khoảng trống so với con số đo được, KHÔNG phải con số bốc. Và quan trọng hơn con
-    # số: `--max-old-space-size` giữ ở ~2/3 trần để V8 ném heap-OOM BẮT ĐƯỢC (errorHandler ghi log,
-    # trả 500 cho ĐÚNG MỘT request, container sống tiếp) TRƯỚC khi nhân hệ điều hành SIGKILL cả
-    # container — lúc đó mọi request đang bay của MỌI người đứt, SSE đứt, lần Lưu đang gửi dở mất
-    # trắng. Đặt heap CAO HƠN trần cgroup là đảo ngược đúng thứ tự đó.
+    # số: `--max-old-space-size` giữ ở ~2/3 trần để V8 tự abort với dòng "FATAL ERROR: Reached heap
+    # limit" trong log TRƯỚC khi nhân hệ điều hành SIGKILL cả container không để lại dấu vết gì.
+    # ⚠️ SỬA LẠI (audit 2026-09-22, OBS-03 — ĐÃ ĐO): heap-OOM của V8 KHÔNG bắt được. Nó không đi qua
+    # errorHandler, không qua uncaughtException, không flush Sentry — tiến trình abort (exit 134),
+    # Docker dựng lại, và mọi request đang bay của MỌI người vẫn đứt. Chú thích cũ ở đây ("trả 500 cho
+    # ĐÚNG MỘT request, container sống tiếp") là SAI. Giá trị thật của heap < trần cgroup chỉ là:
+    # có dòng log để chẩn đoán + cảnh báo QuanlyTienTrinhVuaKhoiDongLai. Bảo vệ THẬT là trần đầu vào
+    # (MAX_SAVE_TOTAL_ROWS / SAVE_BUDGET_ROWS, trần nhập Excel).
     # tests/mem-tran-bo-nho.test.js khoá tỉ lệ này ở cả hai file compose.
     #
     # Đặt cgroup limit mà KHÔNG bảo V8 biết là tự bắn vào chân: Node KHÔNG đọc cgroup limit để
@@ -270,8 +287,8 @@ services:
     # Lưu báo giá đang gửi dở mất trắng; `restart: unless-stopped` dựng lại rồi người dùng bấm
     # lại là chết lại. Trước khi có trần, cùng đầu vào đó chỉ làm VM chậm.
     #
-    # Nên `--max-old-space-size` đặt ở ~70% trần: V8 GC gắt trước, rồi ném heap-OOM BẮT ĐƯỢC —
-    # errorHandler ghi log và trả 500 cho đúng một request, container sống tiếp.
+    # Nên `--max-old-space-size` đặt ở ~70% trần: V8 GC gắt trước, rồi abort CÓ DÒNG LOG (không bắt
+    # được — xem chú thích sửa lại ở trên) thay vì bị SIGKILL im lặng.
     #
     # Repo BIẾT còn đường tiêu bộ nhớ chưa chặn (nhập Excel nạp cả workbook trên event loop).
     # Việc phải làm: chạy `docker stats` một tuần, xem đỉnh RSS thật khi xuất báo giá lớn nhất,
@@ -299,7 +316,16 @@ services:
       #
       # Đặt "1" chứ KHÔNG đặt "true": "true" tin mọi chặng, nghĩa là client tự thêm X-Forwarded-For
       # là giả được IP nguồn và lách rate-limit.
+      # ⚠️ "Đúng MỘT chặng" là THIẾT KẾ, CHƯA ĐO trên host thật (có Coolify/Traefik trên mạng `edge`
+      # dùng chung) — audit 2026-09-22 DOC-14/INFRA-07. Cách đo + cách sửa: docs/operations/REVERSE_PROXY.md.
       TRUST_PROXY: "1"
+      # Tệp trạng thái sao lưu do scripts/backup/* ghi TRÊN HOST (chỉ dấu thời gian, không dữ liệu) —
+      # app phơi ra /metrics: backup_last_success_timestamp_seconds, backup_offhost_configured. Chỉ
+      # service app, KHÔNG đặt cho worker (hai tiến trình phát cùng chuỗi = nhân đôi, xem bullmq_jobs).
+      # Thư mục chưa có trên host thì Docker tự tạo rỗng → không có chuỗi nào, app vẫn chạy bình thường.
+      BACKUP_STATUS_FILE: /run/quanly-backup/quanly_backup.prom
+    volumes:
+      - /var/lib/quanly-backup:/run/quanly-backup:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware.js";
+import { requireAuth, asyncHandler } from "../middleware.js";
 import { attach, setPresence } from "../sse.js";
 import { prisma } from "../db.js";
 import { canOnQuote } from "../permissions.js";
@@ -15,7 +15,10 @@ router.get("/events", requireAuth, (req, res) => {
 
 // PRESENCE: editor báo "tôi đang MỞ / heartbeat / ĐÓNG báo giá Z" (tạm thời, không lưu DB).
 // Trả về danh sách người đang sửa báo giá đó (gồm cả mình) → FE lọc bỏ mình rồi hiện "X đang sửa".
-router.post("/presence", requireAuth, async (req, res) => {
+// asyncHandler: Express 4 không bắt promise bị reject. Không bọc thì prisma ném (cạn pool, CSDL
+// chết) thành unhandledRejection và request treo tới khi Cloudflare trả 524 — mỗi editor đang mở
+// giữ thêm một kết nối treo sau mỗi nhịp heartbeat 30s, đúng lúc CSDL đang quá tải (HTTP-06).
+router.post("/presence", requireAuth, asyncHandler(async (req, res) => {
   const userId = req.session.userId;
   if (userId === undefined) return res.status(401).json({ error: "Chưa đăng nhập" });
   const quoteId = Number(req.body?.quoteId);
@@ -36,6 +39,6 @@ router.post("/presence", requireAuth, async (req, res) => {
     name = u?.displayName || name;
   }
   res.json({ editing: setPresence(quoteId, userId, name, action) });
-});
+}));
 
 export default router;

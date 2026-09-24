@@ -20,12 +20,13 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const GOC = path.resolve(import.meta.dirname, "../..");
 const CHECK = process.argv.includes("--check");
 
 // Chỉ quét file được git theo dõi: node_modules/dist/.git nằm ngoài, và bản clone nào cũng như nhau.
-const FILES = execFileSync("git", ["ls-files"], { cwd: GOC, encoding: "utf8", maxBuffer: 64 << 20 })
+const dsTep = () => execFileSync("git", ["ls-files"], { cwd: GOC, encoding: "utf8", maxBuffer: 64 << 20 })
   .split("\n")
   .filter(Boolean)
   // Nhị phân và ảnh chụp thì không có chú thích.
@@ -53,15 +54,20 @@ const RE_PHU = /:(\d+)\b/g;
  * lúc đó còn tệ hơn không có cổng nào. Nên phần chắc chắn thì chặn, phần mờ thì nói ra để người
  * đọc tự quyết.
  */
-function dongVoNghia(dong) {
+export function dongVoNghia(dong) {
   const t = dong.trim();
   if (t === "") return { muc: "cung", ly: "dòng trống" };
-  if (/^[}\])];,]+$/.test(t)) return { muc: "cung", ly: `chỉ có dấu đóng: ${t}` };
+  // `]` PHẢI escape bên trong lớp ký tự (audit 2026-09-22, DOC-11). Bản trước viết `[}\])];,]` — lớp
+  // ký tự ĐÓNG ở `]` thứ hai, phần còn lại thành chuỗi phải khớp nguyên văn `];,]`, nên `}`, `});`, `]`
+  // đều KHÔNG bị bắt. Cổng mà AGENTS/CONTRIBUTING khai "bắt tham chiếu trỏ vào `}` lẻ" chưa từng bắt.
+  if (/^[})\];,]+$/.test(t)) return { muc: "cung", ly: `chỉ có dấu đóng: ${t}` };
   if (/^(fi|esac|done|end|else|EOF)$/.test(t)) return { muc: "cung", ly: `chỉ có từ khoá đóng: ${t}` };
   if (/^(\*|\/\/|#)/.test(t)) return { muc: "mem", ly: "trỏ vào một dòng chú thích" };
   return null;
 }
 
+function main() {
+const FILES = dsTep();
 const noiDung = new Map();
 const doc = (f) => {
   if (!noiDung.has(f)) {
@@ -137,3 +143,6 @@ console.log(`\nSố dòng trôi mỗi lần ai đó thêm/bớt dòng ở file �
 console.log(`  · cập nhật số cho đúng, hoặc`);
 console.log(`  · BỎ số, trỏ bằng TÊN HÀM/HẰNG — grep ra được và không trôi (cách nên dùng).`);
 process.exit(CHECK ? 1 : 0);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

@@ -244,7 +244,9 @@ export const UserUpdateSchema = z.object({
   password: pwd.optional(),
   projectCode,
   canSign: zbool.optional(),
-  permissions: z.array(z.string().max(60)).max(100).optional(), // tích quyền per-user (tập đầy đủ; [] = theo role)
+  // Tích quyền per-user (tập đầy đủ). `[]` = KHÔNG CÒN QUYỀN NÀO (RBAC-01); `null` = bỏ tuỳ biến,
+  // quay về bộ mặc định của vai trò. Hai ý khác nhau nên phải có hai cách nói.
+  permissions: z.array(z.string().max(60)).max(100).nullable().optional(),
 });
 
 // POST /api/auth/profile — trang "Tài khoản" tự sửa hồ sơ của CHÍNH MÌNH.
@@ -294,7 +296,7 @@ const itemSchema = z.object({
   quantity: z.coerce.number({ error: "Số lượng phải là số" }).gte(-1e12, "Số lượng không hợp lệ").lte(1e12, "Số lượng không hợp lệ").default(0),
   quantityExact: z.boolean().optional().default(false),
   unitPrice: z.coerce.number({ error: "Đơn giá phải là số" }).gte(-1e12, "Đơn giá không hợp lệ").lte(1e12, "Đơn giá không hợp lệ").default(0),
-  days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").optional().nullable(),
+  days: z.coerce.number({ error: "Số ngày phải là số" }).nonnegative("Số ngày không được âm").max(9_999_999, "Số ngày quá lớn").optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   internalNote: z.string().max(2000).optional().nullable(),   // ghi chú nội bộ — KHÔNG xuất Excel
   // Raw Excel-style formulas per numeric field (editor metadata only, e.g.
@@ -684,7 +686,10 @@ export function validate(schemas: { body?: z.ZodType; query?: z.ZodType; params?
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       if (schemas.body) req.body = schemas.body.parse(req.body ?? {});
-      if (schemas.query) req.query = schemas.query.parse(req.query ?? {}) as any;
+      // defineProperty chứ KHÔNG gán (audit 2026-09-22, DEP-08): Express 5 khai `req.query` là getter
+      // KHÔNG có setter trên prototype — phép gán ném TypeError trong ESM strict và 16 route có
+      // query-schema trả 400 cho mọi request. Cách này chạy đúng trên cả Express 4 lẫn 5.
+      if (schemas.query) Object.defineProperty(req, "query", { value: schemas.query.parse(req.query ?? {}), writable: true, configurable: true, enumerable: true });
       if (schemas.params) req.params = schemas.params.parse(req.params ?? {}) as any;
       next();
     } catch (e) {

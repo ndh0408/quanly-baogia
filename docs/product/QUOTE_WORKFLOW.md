@@ -46,8 +46,8 @@ Chỉ trục thứ nhất mới khoá được việc sửa báo giá. Ba trục
 │ converted │    │   lost    │
 │ khách CHỐT│    │ không chốt│
 └───────────┘    └───────────┘
-   BẤT BIẾN         xoá mềm được
-   KHÔNG xoá được
+   KHÔNG xoá được   xoá mềm được
+   sửa được tới khi XUẤT HOÁ ĐƠN (có invoiceNo) — người có quote:send
 ```
 
 ### Ai được làm gì
@@ -56,7 +56,7 @@ Chỉ trục thứ nhất mới khoá được việc sửa báo giá. Ba trục
 |---|---|---|
 | Tạo | `quote:create` | — |
 | Xem | `quote:read:own` (chủ **hoặc** thành viên) hoặc `quote:read:all` | — |
-| Sửa | `quote:update:own` / `:all` | `canEdit`: **không** phải `converted`/`lost`. Ai **không** có `quote:send` thì chỉ sửa được `draft`/`rejected` |
+| Sửa | `quote:update:own` / `:all` | `canEdit`: Khoá sửa = đã có `invoiceNo` ở bất kỳ sheet nào (`daXuatHoaDon`, `src/quoteUtils.ts`) → cấm mọi người. Chưa xuất hoá đơn: người có `quote:send` sửa được **mọi** trạng thái kể cả `converted`/`lost`; người không có `quote:send` chỉ sửa `draft`/`rejected`. (Từ 2026-09-07 — khách chốt không còn là mốc khoá; tài liệu cũ ghi "bất biến" là sai, audit 2026-09-22 DOC-04) |
 | Chốt / Không chốt | `quote:send` | `canOnQuote(update)`; chưa ở trạng thái cuối |
 | Xoá | `quote:delete:own` (chỉ `draft`/`rejected`) hoặc `quote:delete:all` | **`converted` thì KHÔNG AI xoá được**, kể cả `delete:all` |
 | Nhân bản | `quote:create` **và** đọc được bản nguồn | — |
@@ -96,6 +96,10 @@ POST /api/quotes/sheets/{sheetId}/customer-decision
 
 Cần `quote:send` **và** `canOnQuote(update)` trên báo giá. Ghi kèm người đánh
 dấu (`custStatusById`), thời điểm, và ghi chú/lý do — rồi vào nhật ký kiểm toán.
+
+Báo giá **đã xuất hoá đơn** (có ít nhất một sheet mang số HĐ — `daXuatHoaDon`) thì
+endpoint trả **409**: cùng mốc khoá với `canEdit`, vì đổi ý kiến khách sau khi chốt sẽ
+tính lại `convertedTotal`, tức đổi doanh thu sau khi con số đã ra chứng từ kế toán.
 
 `Quote.status` **không** tự đổi theo. Nó chỉ đổi khi người phụ trách bấm Chốt /
 Không chốt ở trục 1. Đó là cố ý: ý kiến của khách trên một sheet không phải quyết
@@ -172,7 +176,8 @@ trắng báo giá**.
 
 Quyền mặc định của vai trò này là **tối thiểu**: `quote:read:own`,
 `quote:update:own`, `quote:hn:fill`. Server **lược** dữ liệu trước khi trả:
-`presentQuote` với cờ `hnOnly` chỉ giữ lại bảng nội bộ `"hanoi"`. Không tạo báo
+`presentQuote` với cờ `hnOnly` chỉ giữ lại phần Hà Nội (`Quote.hnTables`, cấp báo giá — không còn
+nằm trong từng trang). Không tạo báo
 giá, không thấy báo giá của người khác, **không export**.
 
 ---
@@ -263,8 +268,10 @@ nhân sự: `hr` chỉ có `personnel:read:all`; `accountant` có thêm
 
 ## Bất biến — thứ không được phá
 
-1. **`converted` là bất biến.** Không sửa, không xoá, kể cả `quote:delete:all`.
-   Nó là dữ liệu KPI và là gốc của luồng hoá đơn.
+1. **`converted` không xoá được**, kể cả `quote:delete:all` (`deleteQuote`). Nó là dữ liệu KPI và
+   là gốc của luồng hoá đơn. **Nhưng SỬA được** bởi người có `quote:send` cho tới khi xuất hoá đơn:
+   Khoá sửa = đã có `invoiceNo` ở bất kỳ sheet nào (`daXuatHoaDon`, `src/quoteUtils.ts`). Tức con số của một báo giá đã chốt CÓ THỂ còn đổi — đối chiếu doanh thu/KPI phải tính tới
+   điều đó. (Tài liệu trước 2026-09-23 ghi "converted là bất biến, không sửa" — sai từ 2026-09-07.)
 2. **Bảng nội bộ không lọt vào Excel gửi khách.** Được bảo vệ bằng kiến trúc chứ
    không bằng bộ lọc: `src/excel.ts` chỉ đọc `sheet.items`, còn `extraTables`
    không hề xuất hiện trong file đó.

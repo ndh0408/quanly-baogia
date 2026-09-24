@@ -20,6 +20,7 @@
 import ExcelJS from "exceljs";
 import { TEMPLATE_CONFIGS } from "./templateConfigs.js";
 import { excelFormulaToEditor, unwrapRound, evalEditorFormula } from "./quoteFormula.js";
+import { nhanLamTronDong } from "./tienDong.js";
 
 // ===== Kiểu dữ liệu trả về =====
 export type ImportedKind = "item" | "sub" | "section" | "subsection" | "info";
@@ -197,8 +198,92 @@ function cellText(v: unknown): string {
 }
 
 // Số kiểu VN/US — PORT từ web/src/lib/clipboard.ts (giữ khớp hành vi dán tay).
+//
+// GIỮ KHỚP MỌI MẢNH của clipboard.ts: tachNgoacKeToan (GRID-13), boPhanTram (L15), suyQuyUocSo + parseTheoQuyUoc.
+// Trước soát toàn diện L51 bản port dừng ở hai hàm đầu: dán vào lưới đọc "(500.000)" = −500.000 và
+// SL "1.500" (bảng quy ước VN) = 1500, còn nạp CÙNG dữ liệu từ tệp (ô định dạng Text) ra +500.000 và
+// 1,5 — chiết khấu thành khoản CỘNG mà không một cảnh báo dòng nào (Đơn Giá lẫn Thành Tiền cùng sai dấu).
+
+// Số âm kiểu KẾ TOÁN: định dạng Accounting hiện "(1.500.000)" thay vì "-1.500.000". Ngoặc bao TRỌN giá
+// trị thì đảo dấu (bộ lọc ký tự bên dưới bỏ ngoặc, không có bước này là số âm thành DƯƠNG). Phần TRONG
+// ngoặc phải là SỐ thuần: Đơn Giá chữ "(Tạm tính) 500.000 (chưa VAT)" cũng mở "(" đóng ")" nhưng là hai
+// chú thích — bản trước nạp thành −500.000, không cảnh báo (soát toàn diện đợt 3). Chữ tiền được gỡ gồm cả
+// "đồng" / "dong" / "US$" — thiếu thì "(1.500.000 đồng)" nạp +1.500.000 (phản biện đợt 3) — và từ đợt 4
+// cả đơn vị sau "/" ("/bộ", "/m²"), "EUR" / "€", bội số đứng riêng "k" / "nghìn" / "ngàn" / "tr" / "triệu":
+// thiếu thì "(1.500.000 đ/bộ)" nạp +1.500.000, khoản giảm thành khoản cộng.
+const AM_KE_TOAN = /^\((.*)\)$/;
+const SO_TRONG_NGOAC = /^[\s\d.,%-]*\d[\s\d.,%-]*$/;
+const DON_VI_TRONG_NGOAC = /\s*\/\s*\p{L}[\p{L}\p{N}]*\s*$|(?<!\p{L})(?:eur|nghìn|ngàn|triệu|tr|k)(?!\p{L})/giu;
+const tachNgoacKeToan = (s: string): { s: string; am: boolean } => {
+  const t = String(s).trim().replace(/\s*[₫đ$€]$|^[₫đ$€]\s*/gi, "").trim();
+  const m = AM_KE_TOAN.exec(t);
+  return m && SO_TRONG_NGOAC.test(m[1].normalize("NFC").replace(DON_VI_TRONG_NGOAC, "").replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€]/gi, "")) ? { s: m[1], am: true } : { s: String(s), am: false };
+};
+
+// PHẦN TRĂM (PORT boPhanTram, soát toàn diện L15): ô CHỮ "10%" ở cột SL/Đơn Giá — bộ lọc ký tự bỏ "%"
+// nên trước đây nạp thành 10, "Phí quản lý 10% × 50.000.000" ra 500.000.000. Dán vào lưới đã đọc 0,1
+// từ b98716d. Chỉ nhận "%" đứng CUỐI một chuỗi toàn số: "10% VAT" vẫn đọc như cũ. (Ô SỐ định dạng %
+// trong xlsx vốn đã là 0,1 — không đi qua nhánh chữ.)
+const PHAN_TRAM = /^-?[\d.,\s]*\d[\d.,\s]*%$/;
+const boPhanTram = (s: string): string | null => { const t = String(s ?? "").trim(); return PHAN_TRAM.test(t) ? t.slice(0, -1) : null; };
+const chia100 = (n: number) => Number((n / 100).toPrecision(12));
+
+// CHỮ SỐ DÍNH SAU CHỮ CÁI (PORT boCumChuSo, soát toàn diện đợt 3 L17): ô chữ SL "12 m2" từng nạp 122,
+// Đơn Giá "95.000đ/m2" nạp 95,0002 — bộ lọc ký tự bỏ chữ mà giữ chữ số của "m2". Cụm có chữ cái ĐỨNG
+// TRƯỚC chữ số bị bỏ cả cụm; chữ đứng SAU số ("95.000đ", "10bộ") vẫn là đơn vị. Tiền tố "x" / mã tiền viết
+// liền ở ĐẦU ô ("x2", "VNĐ1.500.000") được gỡ trước, không bị bỏ cả cụm (phản biện đợt 3).
+const TIEN_TO_SO = /^(?:vnđ|vnd|usd|đ|x)(?=\d)/iu;
+const boCumChuSo = (s: string) => String(s ?? "").trim().replace(TIEN_TO_SO, "").replace(/[\p{L}\d.,]+/gu, (m) => (/\p{L}[.,]?\d/u.test(m) ? " " : m));
+
+// KHOẢNG SỐ (PORT laKhoangSo, soát toàn diện đợt 5): bộ lọc ký tự ghép chữ số hai đầu của khoảng thành MỘT số
+// khác 0 — Đơn Giá "500.000 – 700.000" nạp 500.000.700.000, SL "10-12" nạp 1012, không cảnh báo nào (tệp không
+// có cột Thành Tiền thì tiền phình không ai thấy). Hai số ngăn bởi -, –, —, ~, "đến" → không đọc được số (0),
+// vòng quét dòng báo "không đọc được số" như ô chữ. Một số có dấu trừ đầu ("-500.000") không phải khoảng.
+const SO_TOKEN = /\d(?:[\d.,]*\d)?/g;
+const NOI_KHOANG = /[-–—~]|(?<!\p{L})(?:đến|den)(?!\p{L})/iu;
+const laKhoangSo = (s: string): boolean => {
+  const t = String(s ?? "").normalize("NFC");
+  const so = [...t.matchAll(SO_TOKEN)];
+  for (let k = 1; k < so.length; k++) if (NOI_KHOANG.test(t.slice(so[k - 1].index! + so[k - 1][0].length, so[k].index))) return true;
+  return false;
+};
+
+// BỘI SỐ TIẾNG VIỆT (PORT tachBoiSo / coBoiSo, soát toàn diện đợt 5): "1.5tr" từng nạp 1,5, "500k" nạp 500 —
+// hụt cả nghìn / triệu lần, số khác 0 nên không cảnh báo nào bắt. Hậu tố đứng NGAY sau số, không dính chữ cái
+// sau: "tr" / "triệu" ×1.000.000, "k" / "nghìn" / "ngàn" ×1.000 ("kg", "km", "trọn gói" không phải). Chỉ khi ô
+// có đúng MỘT con số sau bước bỏ cụm. Vòng quét dòng báo "đã hiểu “1.5tr” = 1.500.000" để người nạp soát lại.
+const BOI_SO = /(\d)\s*(triệu|tr|nghìn|ngàn|k)(?!\p{L})/iu;
+const HE_SO_BOI: Record<string, number> = { "triệu": 1e6, tr: 1e6, "nghìn": 1e3, "ngàn": 1e3, k: 1e3 };
+const tachBoiSo = (s: string): { s: string; heSo: number } | null => {
+  const t = boCumChuSo(String(s ?? "").normalize("NFC"));
+  const m = BOI_SO.exec(t);
+  if (!m || (t.match(SO_TOKEN) || []).length !== 1) return null;
+  const con = t.slice(0, m.index + 1) + t.slice(m.index + m[0].length);
+  return BOI_SO.test(con) ? null : { s: con, heSo: HE_SO_BOI[m[2].toLowerCase()] };
+};
+const nhanBoiSo = (n: number, heSo: number) => Number((n * heSo).toPrecision(12));
+const coBoiSo = (s: string): boolean => !laKhoangSo(s) && tachBoiSo(tachNgoacKeToan(String(s ?? "")).s) != null;
+
+// Ô CHỮ ở cột số mà ĐỌC RA 0 (PORT chuKhongRaSo, soát toàn diện đợt 4): sau L17 "ĐG1.500.000", "SL12",
+// "12m2" đọc 0 mà không có cảnh báo dòng nào — tệp không có cột Thành Tiền thì Đơn Giá về 0 không ai thấy.
+// Còn chữ số KHÁC 0 mà đọc ra 0 (khoảng giá "1.500.000 - 2.000.000" → NaN → 0) cũng báo. Số 0 viết bằng chữ
+// ("0", "0đ", "(0)") và gạch kế toán ("-") không phải lỗi → không báo.
+const chuKhongRaSo = (s: string, n: number): boolean => {
+  const t = String(s ?? "").trim();
+  if (!t || n) return false;
+  const conLai = boCumChuSo(tachNgoacKeToan(t).s);
+  if (/[1-9]/.test(conLai)) return true;
+  if (/\d/.test(conLai)) return false;
+  return t.replace(/vnđ|vnd|usd|us\$|đồng|dong|[₫đ$€\s().,\-–—−]/gi, "") !== "";
+};
+
 function parseLooseNumber(s: string): number {
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (laKhoangSo(s)) return 0;
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseNumber(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseNumber(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseNumber(bs.s), bs.heSo);
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   if (str.includes(",") && str.includes(".")) {
     str = str.lastIndexOf(",") > str.lastIndexOf(".") ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
@@ -214,7 +299,12 @@ function parseLooseNumber(s: string): number {
 }
 /** Cột SỐ LƯỢNG / SỐ NGÀY là SỐ ĐO NHỎ: 1 dấu chấm/phẩy = THẬP PHÂN (13.5 ≠ 13500). */
 function parseLooseDecimal(s: string): number {
-  let str = String(s).trim().replace(/[^\d.,-]/g, "");
+  if (laKhoangSo(s)) return 0;
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseLooseDecimal(kt.s); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseLooseDecimal(pt));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseLooseDecimal(bs.s), bs.heSo);
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
   if (!str || str === "-") return 0;
   const neg = str.startsWith("-"); str = str.replace(/-/g, "");
   const dots = (str.match(/\./g) || []).length, commas = (str.match(/,/g) || []).length;
@@ -223,6 +313,54 @@ function parseLooseDecimal(s: string): number {
   else str = str.replace(",", ".");
   const n = Number(str) || 0;
   return neg ? -n : n;
+}
+
+/**
+ * QUY ƯỚC SỐ của cả bảng, suy từ những ô số dạng CHỮ không mơ hồ (PORT suyQuyUocSo). "1.500" đứng
+ * riêng thì mơ hồ (1500 cái máy VN hay 1,5 m² máy US), nhưng bảng thường có ô rõ ràng: "1.500.000"
+ * (≥ 2 nhóm nghìn) / "1.234,5" → VN; "1,500,000" / "1,234.5" → US; ở cột TIỀN, một nhóm "250.000"
+ * đã là nghìn VN (tiền VND không có 3 số lẻ). Không tín hiệu hoặc hai phía mâu thuẫn → null: giữ
+ * cách đọc cũ (SL/Ngày thập phân, tiền đoán nghìn).
+ */
+type QuyUocSo = "vn" | "us";
+function suyQuyUocSo(matrix: string[][], laCotTien?: (c: number) => boolean): QuyUocSo | null {
+  let vn = false, us = false;
+  for (const row of matrix) {
+    row.forEach((raw, c) => {
+      const v0 = String(raw ?? "").trim();
+      if (!v0 || v0.startsWith("=")) return;
+      const s = tachNgoacKeToan(v0).s.replace(/[\s₫đ$]/gi, "").replace(/^-/, "");
+      if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return;
+      const d = s.lastIndexOf("."), p = s.lastIndexOf(",");
+      if (d >= 0 && p >= 0) { if (p > d) vn = true; else us = true; return; }
+      if (/^\d{1,3}(\.\d{3}){2,}$/.test(s)) { vn = true; return; }
+      if (/^\d{1,3}(,\d{3}){2,}$/.test(s)) { us = true; return; }
+      if (laCotTien?.(c)) {
+        if (/^\d{1,3}\.\d{3}$/.test(s)) vn = true;
+        else if (/^\d{1,3},\d{3}$/.test(s)) us = true;
+      }
+    });
+  }
+  return vn === us ? null : vn ? "vn" : "us";
+}
+
+/** Đọc số theo quy ước ĐÃ BIẾT của bảng: bỏ dấu nghìn, đổi dấu thập phân thành "." (PORT parseTheoQuyUoc).
+ *  Đúng MỘT dấu nghìn mà nhóm sau không đủ 3 chữ số ("0.5" ở bảng VN) là dấu THẬP PHÂN — bản trước bỏ
+ *  mọi "." nên SL "0.5" thành 5, tiền sai 10 lần, và bảng không có cột Thành Tiền thì không một cảnh báo
+ *  (soát toàn diện đợt 3, L51). Lưới đọc ô đó cũng ra 0,5 (khopQuyUoc → parseLooseDecimal). */
+function parseTheoQuyUoc(s: string, qu: QuyUocSo): number {
+  if (laKhoangSo(s)) return 0;
+  const kt = tachNgoacKeToan(s);
+  if (kt.am) { const n = parseTheoQuyUoc(kt.s, qu); return n ? -Math.abs(n) : 0; }
+  const pt = boPhanTram(s); if (pt != null) return chia100(parseTheoQuyUoc(pt, qu));
+  const bs = tachBoiSo(s); if (bs) return nhanBoiSo(parseTheoQuyUoc(bs.s, qu), bs.heSo);
+  let str = boCumChuSo(s).trim().replace(/[^\d.,-]/g, "");
+  if (!str || str === "-") return 0;
+  const nghin = qu === "vn" ? "." : ",", thapPhan = qu === "vn" ? "," : ".";
+  const nhom = str.split(nghin);
+  if (nhom.length === 2 && !str.includes(thapPhan) && nhom[1].length !== 3) str = nhom.join(".");
+  else str = qu === "vn" ? str.replace(/\./g, "").replace(",", ".") : str.replace(/,/g, "");
+  return Number(str) || 0;
 }
 
 /** Làm tròn Số Lượng 1 chữ số — KHỚP qtyRound ở excel.ts / money (để đối chiếu Thành Tiền). */
@@ -254,8 +392,11 @@ const isDateCell = (cell: Cell | null) => {
   return typeof v === "number" && !!fmt && DATE_FMT_RE.test(fmt);
 };
 
-/** Số của 1 ô: ưu tiên số thật / kết quả công thức; chuỗi thì đọc kiểu VN. */
-function numOf(cell: Cell | null, decimal = false): number {
+/**
+ * Số của 1 ô: ưu tiên số thật / kết quả công thức; chuỗi thì đọc kiểu VN — theo `qu` (quy ước của cả
+ * bảng, suyQuyUocSo) khi đã suy ra được. Ô số thật KHÔNG bao giờ đi qua nhánh chữ.
+ */
+function numOf(cell: Cell | null, decimal = false, qu: QuyUocSo | null = null): number {
   if (!cell) return 0;
   const v = cell.value as unknown;
   if (typeof v === "number") return v;
@@ -266,9 +407,21 @@ function numOf(cell: Cell | null, decimal = false): number {
   }
   const t = cellText(v).trim();
   if (!t) return 0;
+  if (qu) return parseTheoQuyUoc(t, qu);
   return decimal ? parseLooseDecimal(t) : parseLooseNumber(t);
 }
 const isBlank = (cell: Cell | null) => !cell || cellText(cell.value).trim() === "";
+/**
+ * Mã lỗi Excel của ô (`#N/A`, `#REF!`, `#DIV/0!`…) — cả ô lỗi trần lẫn công thức có KẾT QUẢ lỗi.
+ * numOf/cellText coi chúng như ô TRỐNG (→ 0), nên không có dòng này thì một Đơn Giá `#N/A` nạp vào
+ * thành 0 mà không có cảnh báo nào phân biệt với ô bỏ trống thật (XLSX-08).
+ */
+function errOf(cell: Cell | null): string | null {
+  const v = cell?.value as Record<string, any> | null | undefined;
+  if (!v || typeof v !== "object") return null;
+  const e = v.error ?? v.result?.error;
+  return typeof e === "string" && e ? e : null;
+}
 /** Công thức của ô (ExcelJS tự dịch shared-formula khi khách kéo công thức xuống). */
 function fxOf(cell: Cell | null): string | null {
   if (!cell) return null;
@@ -380,13 +533,26 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
   // Dòng nhóm của file ngoài thường vẫn có ĐVT + Số Lượng, còn Đơn Giá là tổng các ô Thành Tiền
   // bên dưới (vd `=SUM(H13:H18)` hoặc `=H30`). Đây là dấu hiệu cấu trúc mạnh hơn việc ô ĐVT trống.
+  //
+  // Hai điều kiện cho "tổng nhóm" (soát toàn diện L46):
+  //   · HƯỚNG — mọi tham chiếu nằm ở dòng BÊN DƯỚI. Trước đây chỉ hỏi "mọi tham chiếu có ở cột Thành
+  //     Tiền không", nên dòng PHÍ tính theo các mục BÊN TRÊN (`=SUM(H7:H8)*10%` — "Phí quản lý 10%" có
+  //     ĐVT + SL) bị xếp thành nhóm con, Đơn Giá ép 0, mất tiền phí; STT là số thì còn lật numberSubs
+  //     của CẢ sheet → đoán ra mẫu Banner → web không ghép được vào sheet đang có, mặc định TẠO SHEET MỚI.
+  //   · KHÔNG NHÂN / CHIA hệ số (`*` `/` `%` `^`) — "10% tổng các mục dưới" là PHÍ, không phải tổng nhóm.
+  // Hình dạng còn lại để MỞ, CÓ CHỦ Ý: tệp ngoài viết tổng nhóm đủ kiểu — `SUBTOTAL(9,F5:F6)`,
+  // `ROUND(SUM(F5:F6),0)`, `=+SUM(..)`, `=(F5+F6)`. Bản đầu của chốt này dùng danh sách TRẮNG (chỉ
+  // `SUM(..)` / `=Hx` / `=Hx+Hy`) và các dạng đó rơi xuống nhánh hạng mục: dòng nhóm mang đơn giá bằng
+  // tổng các mục bên dưới → tiền CỘNG ĐÔI, không một cảnh báo dòng nào.
   const amountLetter = colOf._amount ? colLetter(colOf._amount) : "";
-  const hasGroupPriceFormula = (r: number) => {
+  /** Đơn Giá dòng r là công thức gom các ô ở dòng BÊN DƯỚI, chỉ trong các cột `cot`, không nhân hệ số. */
+  const tongCacDongDuoi = (r: number, cot: string[]) => {
     const fx = fxOf(cellAt(r, "unitPrice"));
-    if (!fx || !amountLetter) return false;
-    const refs = [...fx.matchAll(/\$?([A-Z]{1,3})\$?\d+/gi)].map((m) => m[1].toUpperCase());
-    return refs.length > 0 && refs.every((L) => L === amountLetter);
+    if (!fx || /[*/%^]/.test(fx)) return false;
+    const refs = [...fx.matchAll(/\$?([A-Z]{1,3})\$?(\d+)/gi)];
+    return refs.length > 0 && refs.every((m) => cot.includes(m[1].toUpperCase()) && Number(m[2]) > r);
   };
+  const hasGroupPriceFormula = (r: number) => !!amountLetter && tongCacDongDuoi(r, [amountLetter]);
 
   // ── Quét thô: chốt dòng cuối của bảng + nhận diện kiểu BANNER (nhóm con đánh SỐ) ──
   const lastSheetRow = ws.rowCount || hit.row;
@@ -402,6 +568,14 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     // File do app xuất có thể dùng hàng ngay sau tiêu đề chỉ để in mã + lời chào. Không đưa hàng
     // metadata đó vào bảng; nếu có nội dung chương trình thật thì giữ lại để dựng item `info`.
     if (r === appBannerRow && appBannerInfo == null) continue;
+    // Nửa dưới của hàng TIÊU ĐỀ cao 2 hàng (ô gộp dọc 3:4 — kiểu rất hay gặp ở báo giá VN): ExcelJS
+    // trả giá trị ô chủ cho ô phụ, cellAt chỉ loại ô gộp NGANG, nên hàng này đọc ra STT="STT",
+    // ĐVT="ĐVT", Ghi chú="Ghi chú" và ô Hạng Mục gộp dọc → thành "hàng con" rác đứng đầu danh sách
+    // nạp (soát toàn diện L52). Ô Hạng Mục thuộc vùng gộp có ô chủ ở chính hàng tiêu đề → bỏ qua.
+    if (colOf.name) {
+      const nc = ws.getCell(r, colOf.name);
+      if (nc.isMerged && coordNum(nc.master?.row, false) === hit.row) continue;
+    }
     const allBlank = !stt && !name && isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity"))
       && isBlank(cellAt(r, "unitPrice")) && isBlank(cellAt(r, "_amount"));
     if (allBlank) { if (++blankRun >= 4) { stopRow = r; break; } continue; }
@@ -416,16 +590,58 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     bodyRows.push(r);
     lastRow = r;
   }
+  // Sheet TỔNG nhận theo CẤU TRÚC, không chỉ theo chữ ở A1 (soát toàn diện L50). Khách đổi tiêu đề
+  // ("TỔNG HỢP BÁO GIÁ") hay chèn một hàng logo lên đầu là luật A1 ở trên trượt, còn hàng
+  // "STT | Hạng mục | Thành tiền" vẫn đủ làm hàng tiêu đề → mỗi sheet con thành một hạng mục 0đ, mẫu
+  // đoán GN kể cả tệp Colorfull, modal mặc định "Thay toàn bộ" → sheet rác hoặc ĐÈ một sheet GN.
+  // Bảng KHÔNG có cột ĐVT / Số Lượng / Đơn Giá mới xét, và phải thêm một trong hai:
+  //   · tên tab là "Tổng Báo Giá" (app đặt; khách dán giá trị đè công thức thì chỉ còn dấu hiệu này);
+  //   · mọi ô Thành Tiền có chữ đều là công thức trỏ sang SHEET KHÁC ('Décor'!H20) — đúng thứ app
+  //     ghi; bảng chỉ-có-Thành-Tiền của tệp ngoài ghi số thường thì vẫn nạp như cũ.
+  if (!colOf.unit && !colOf.quantity && !colOf.unitPrice && colOf._amount && bodyRows.length) {
+    const coChu = bodyRows.filter((r) => !isBlank(cellAt(r, "_amount")));
+    const troSheetKhac = coChu.length > 0 && coChu.every((r) => (fxOf(cellAt(r, "_amount")) || "").includes("!"));
+    if (troSheetKhac || /^TONG BAO GIA/.test(normHdr(ws.name))) {
+      return { ...emptySheet(index, base.name), skipped: "Sheet tổng hợp do app tự sinh — không cần nạp" };
+    }
+  }
+
   base.firstRow = bodyRows[0];
   base.lastRow = lastRow;
   base.stats.rows = bodyRows.length;
 
+  // Quy ước số của CẢ bảng (L51) — suy từ ô số dạng CHỮ của cột SL / Ngày / Đơn Giá / Thành Tiền; hai
+  // cột sau là cột tiền. Tệp app xuất ghi số THẬT nên không có ô nào ở đây → qu = null, y như cũ.
+  const chuSo = (cell: Cell | null): string => {
+    const v = cell?.value as unknown;
+    if (v == null || typeof v === "number" || v instanceof Date) return "";
+    if (typeof v === "object" && ((v as { formula?: unknown }).formula !== undefined || (v as { sharedFormula?: unknown }).sharedFormula !== undefined)) return "";
+    return cellText(v).trim();
+  };
+  const bangChuSo: string[][] = [];
+  for (const r of bodyRows) {
+    const hang = (["quantity", "days", "unitPrice", "_amount"] as const).map((role) => chuSo(cellAt(r, role)));
+    if (hang.some(Boolean)) bangChuSo.push(hang);
+  }
+  const qu = suyQuyUocSo(bangChuSo, (c) => c >= 2);
+
+  // Dòng có đủ ĐVT + SL + Đơn Giá THƯỜNG — hình dạng hạng mục. "Không thường" = Đơn Giá gom các ô ở
+  // dòng BÊN DƯỚI, tính cả cột ĐƠN GIÁ chứ không chỉ Thành Tiền: nhóm CHÍNH bản BANNER có nhóm con được
+  // app ghi `=SUM(G7,G9)` (Đơn Giá các nhóm con — src/excel.ts subSectionRows), hoặc
+  // `=SUM(H6:H6)+SUM(G7,G9)` khi có cả mục lẻ. Chỉ xét cột Thành Tiền thì nhóm chính nhãn SỐ ("1" — nhãn
+  // tự đặt hợp lệ) + ĐVT + SL bị coi là hạng mục, hạ màu nhóm → tiền cộng đôi (soát toàn diện L49).
+  const priceLetter = colOf.unitPrice ? colLetter(colOf.unitPrice) : "";
+  const dangHangMuc = (r: number) => !isBlank(cellAt(r, "unit")) && !isBlank(cellAt(r, "quantity"))
+    && !isBlank(cellAt(r, "unitPrice")) && !tongCacDongDuoi(r, [amountLetter, priceLetter].filter(Boolean));
+
   // Bản BANNER: nhóm con đánh SỐ (STT số + có tên + KHÔNG ĐVT + có giá) → hàng STT-trống là MỤC.
+  // Nền nhóm con chỉ được tính khi dòng KHÔNG mang hình dạng hạng mục: hàng khách chèn dưới nhóm
+  // con ("Format Same As Above") mang nền đó + STT "1" không được lật cách đánh số của CẢ sheet (L49).
   const numberedSub = bodyRows.some((r) => {
     const stt = textAt(r, "_stt"), name = textAt(r, "name");
     if (!/^\d+$/.test(stt) || !name) return false;
     const fill = fillOf(cellAt(r, "name")) || fillOf(cellAt(r, "_stt"));
-    return FILL_SUB.has(fill) || hasGroupPriceFormula(r)
+    return (FILL_SUB.has(fill) && !dangHangMuc(r)) || hasGroupPriceFormula(r)
       || (isBlank(cellAt(r, "unit")) && isBlank(cellAt(r, "quantity")) && !isBlank(cellAt(r, "unitPrice")));
   });
   const effectiveNumberSubs = markerCode ? !!TEMPLATE_CONFIGS[markerCode]?.items?.numberSubsections : numberedSub;
@@ -448,20 +664,45 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const groupPriceFormula = hasGroupPriceFormula(r);
 
     // Ô Hạng Mục GỘP DỌC và dòng này không phải dòng đầu ô gộp → HÀNG CON (tên nằm ở dòng cha).
-    const merged = !!nameCell?.isMerged && coordNum(nameCell.master?.row, false) < r;
+    // Cũng là hàng con khi Ô STT là ô phụ của vùng gộp dọc từ hàng trên mà ô tên TRỐNG: tệp
+    // Colorfull xuất trước bản sửa L47 có hàng con ở hàng 17–18 chỉ gộp được STT (ô Hạng Mục là
+    // ô trống riêng) — nhận theo ô tên thì ra hạng mục TÊN RỖNG, xuất lại thành STT mới trống.
+    const sttGopDoc = !!sttCell?.isMerged && coordNum(sttCell.master?.row, false) < r;
+    const merged = (!!nameCell?.isMerged && coordNum(nameCell.master?.row, false) < r)
+      || (sttGopDoc && cellText(nameCell?.value).trim() === "");
     let name = merged ? "" : cellText(nameCell?.value).trim();
 
     // Dòng CHỮ TỰ DO chạy ngang cả bảng (mẫu CLF gộp B5:I5 "* Thông tin chương trình: …") — chữ
     // nằm ở ô chủ thuộc cột STT. Đây chính là dòng kind="info" của app → trả về đúng dạng đó.
     const bannerText = (!name && stt && stt.length > 12 && !hasUnit && !hasQty && !hasPrice && !hasAmt) ? stt : "";
 
+    // MÀU NHÓM MÀ HÌNH DẠNG HẠNG MỤC (soát toàn diện L49): khách Insert Row ngay dưới hàng nhóm thì
+    // Excel "Format Same As Above" → hàng mới mang nền nhóm. Xét màu trước hình dạng là "1 | Hạng mục
+    // mới | cái | 2 | 500.000" thành NHÓM: Đơn Giá ép 0, SL 2 thành hệ số nhân các mục bên dưới.
+    // Chỉ để màu THUA khi đủ cả bốn: STT là số + ĐVT + SL + Đơn Giá thường (không phải tổng các dòng
+    // dưới — xem dangHangMuc). Nhóm thật của app CÓ THỂ mang STT số (nhãn tự đặt "1"/"2") và có ĐVT +
+    // SL, nhưng khi đó Đơn Giá của nó là công thức gom các dòng dưới (Thành Tiền mục con, hoặc Đơn Giá
+    // nhóm con ở bản BANNER) nên không đủ bốn. Nhóm con bản BANNER (đánh số) CÓ STT thì màu luôn thắng:
+    // khách gõ số đè Đơn Giá nhóm con là ca có thật — xem chú thích FILL_SECTION ở đầu tệp.
+    // Nền nhóm CHÍNH còn nhận cả STT TRỐNG (soát toàn diện đợt 3): mẫu Banner mục vốn không đánh số nên
+    // khách chèn hàng hay để trống STT, mà nhóm chính do app xuất LUÔN có nhãn ở ô STT (sectionLetter
+    // hoặc nhãn tự đặt — src/excel.ts). Nền nhóm CON mẫu thường thì không: nhóm con mẫu thường vốn để
+    // trống STT, và khách gõ số đè Đơn Giá của nó (đủ bốn điều kiện) vẫn phải là nhóm con. Nhưng bản
+    // BANNER (đánh số nhóm con) thì nhóm con app xuất LUÔN có STT (`label || String(++subNo)`), nên nền
+    // nhóm con + STT TRỐNG + đủ hình dạng hạng mục là hàng chèn — mục Banner vốn không đánh số (phản biện
+    // đợt 3: "Hạng mục mới | cái | 2 | 500.000" dưới "Nhóm con A1" từng nạp thành nhóm con, tổng hụt).
+    const sttSo = /^\d+$/.test(stt);
+    const mauNhomMaLaHangMuc = dangHangMuc(r) && (FILL_SUB.has(fill)
+      ? effectiveNumberSubs ? stt === "" : sttSo
+      : FILL_SECTION.has(fill) && (sttSo || stt === ""));
+
     const prevKind = raws.length ? raws[raws.length - 1].kind : null;
     let kind: ImportedKind;
     if (r === appBannerRow && appBannerInfo != null) { kind = "info"; name = appBannerInfo; }
     else if (bannerText) { kind = "info"; name = bannerText.replace(/^\*\s*Thông tin chương trình\s*:\s*/i, "").trim(); }
     else if (merged) kind = "sub";
-    else if (FILL_SECTION.has(fill)) kind = "section";
-    else if (FILL_SUB.has(fill)) kind = "subsection";
+    else if (FILL_SECTION.has(fill) && !mauNhomMaLaHangMuc) kind = "section";
+    else if (FILL_SUB.has(fill) && !mauNhomMaLaHangMuc) kind = "subsection";
     // STT chữ A/B thường là nhóm; nếu dòng vẫn có ĐVT thì chỉ coi là nhóm khi Đơn Giá tổng hợp
     // từ cột Thành Tiền. Tránh nuốt file ngoài dùng A/B/C để đánh số hạng mục thường.
     else if (/^[A-Z]{1,2}$/.test(stt) && (!hasUnit || groupPriceFormula)) kind = "section";
@@ -478,6 +719,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     const it: ImportedItem = { kind, name: kind === "sub" ? "" : name, quantity: 0, unitPrice: 0, row: r };
     const warn: string[] = [];
+    if (mauNhomMaLaHangMuc && kind === "item") warn.push(`Dòng tô màu nhóm nhưng có ${stt ? "STT số" : "STT trống"} + ĐVT + Số Lượng + Đơn Giá — đã nạp thành hạng mục, kiểm tra lại`);
 
     // Chữ nhóm: app tự đánh A/B/C (banner: nhóm con 1/2/3) → chỉ giữ label khi khách đặt KHÁC.
     if (kind === "section") {
@@ -501,20 +743,42 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
     // Số. Dòng NHÓM: Đơn Giá / Thành Tiền là TỔNG do app tự tính → KHÔNG nạp (app cộng lại),
     // chỉ giữ SỐ LƯỢNG (hệ số nhân của nhóm).
-    it.quantity = numOf(cellAt(r, "quantity"), true);
-    it.unitPrice = isGroup ? 0 : numOf(cellAt(r, "unitPrice"));
-    if (colOf.days) it.days = isGroup ? null : (numOf(cellAt(r, "days"), true) || null);
+    it.quantity = numOf(cellAt(r, "quantity"), true, qu);
+    it.unitPrice = isGroup ? 0 : numOf(cellAt(r, "unitPrice"), false, qu);
+    if (colOf.days) it.days = isGroup ? null : (numOf(cellAt(r, "days"), true, qu) || null);
     if (kind === "info") { it.unit = ""; it.quantity = 0; it.unitPrice = 0; it.days = null; }
 
     // Ô SỐ mà lại là NGÀY THÁNG (khách gõ nhầm ô) → numOf trả 0, phải nói rõ để không âm thầm mất tiền.
+    // Số Ngày và SL của NHÓM về 0 / trống thì app tính ×1 — câu báo nói đúng con số app dùng, như cảnh báo ô
+    // CHỮ bên dưới (soát toàn diện đợt 5; trước đây mọi ô đều ghi "đã để 0").
+    const deLaiO = (role: string) => (role === "days" || (isGroup && role === "quantity") ? "đã bỏ trống (tính như 1)" : "đã để 0");
     for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"]] as const) {
-      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — đã để 0, cần nhập lại`);
+      if (colOf[role] && isDateCell(cellAt(r, role))) warn.push(`Ô ${vn} đang là NGÀY THÁNG, không phải số — ${deLaiO(role)}, cần nhập lại`);
+    }
+    // Ô số đang LỖI trong Excel → numOf đọc thành 0. Nói rõ, đừng để lẫn với ô trống (XLSX-08).
+    if (kind !== "info") {
+      for (const [role, vn] of [["quantity", "Số Lượng"], ["unitPrice", "Đơn Giá"], ["days", "Số Ngày"], ["_amount", "Thành Tiền"]] as const) {
+        if (isGroup && role !== "quantity") continue;   // nhóm: Đơn Giá/Thành Tiền do app tự tính lại
+        const loi = colOf[role] ? errOf(cellAt(r, role)) : null;
+        if (loi) warn.push(`Ô ${vn} đang LỖI ${loi} trong Excel — ${deLaiO(role)}, cần nhập lại`);
+      }
+      // Ô CHỮ không đọc được số → 0 (soát toàn diện đợt 4): "ĐG1.500.000" / "Liên hệ" ở Đơn Giá mà tệp
+      // không có cột Thành Tiền thì không cảnh báo nào khác bắt được. Nhóm: như trên, chỉ xét SL.
+      // SL của NHÓM và Số Ngày trống / 0 thì app tính ×1 (groupMult = max(1, SL || 1); ngày trống = ×1) —
+      // câu báo phải nói đúng con số app dùng, không phải "đã để 0" (phản biện đợt 4).
+      for (const [role, vn, n] of [["quantity", "Số Lượng", it.quantity], ["unitPrice", "Đơn Giá", it.unitPrice], ["days", "Số Ngày", it.days ?? 0]] as const) {
+        if (isGroup && role !== "quantity") continue;
+        const t = colOf[role] ? chuSo(cellAt(r, role)) : "";
+        if (chuKhongRaSo(t, n)) warn.push(`Ô ${vn} ghi chữ “${t.length > 40 ? t.slice(0, 40) + "…" : t}” — không đọc được số, ${deLaiO(role)}, cần nhập lại`);
+        // Bội số "1.5tr" / "500k" đã được NHÂN (soát toàn diện đợt 5) — nói ra con số app hiểu để người nạp soát lại.
+        else if (n && coBoiSo(t)) warn.push(`Ô ${vn}: đã hiểu “${t.length > 40 ? t.slice(0, 40) + "…" : t}” = ${n.toLocaleString("vi-VN")}`);
+      }
     }
 
     // Thành Tiền trong file có khớp SL × ĐG (× Ngày) không? Lệch = khách sửa tay ô tổng → cảnh báo,
     // KHÔNG tự ý sửa số của khách.
     if ((kind === "item" || kind === "sub") && hasAmt) {
-      const amt = numOf(cellAt(r, "_amount"));
+      const amt = numOf(cellAt(r, "_amount"), false, qu);
       const factor = (colOf.days ? (Number(it.days) || 1) : 1) * it.unitPrice;
       const rounded = Math.round(qtyRound(it.quantity) * factor);
       const exact = Math.round(qtyExact(it.quantity) * factor);
@@ -563,7 +827,7 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
     const it = x.it;
     if (field === "_amount") {
       if (x.kind === "section" || x.kind === "subsection") return NaN;   // tổng nhóm: app tự tính
-      return Math.round(qtyForAmount(it) * (colOf.days ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+      return nhanLamTronDong(qtyForAmount(it), colOf.days ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);   // chính xác — XLSX-06
     }
     if (field === "quantity") return qtyForAmount(it);
     if (field === "unitPrice") return Number(it.unitPrice) || 0;
@@ -625,6 +889,9 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       const cell = cellAt(x.row, f.field);
       const raw = fxOf(cell);
       if (!raw) continue;
+      // Công thức ra LỖI: đã có cảnh báo "đang LỖI … đã để 0" ở vòng quét; câu "đã giữ con số" dưới
+      // đây sẽ sai (con số là 0) — XLSX-08.
+      if (errOf(cell)) continue;
       // Bóc lớp ROUND(...,1) mà CHÍNH app bọc quanh công thức Số Lượng lúc xuất.
       const rawBody = expandGroupRefs(raw.replace(/^=/, ""));
       const src = f.round1 ? unwrapRound(rawBody, 1) : rawBody;
@@ -685,7 +952,10 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       if (t && RE_TOTALS.test(t)) { label = t; break; }
     }
     if (!label) continue;
-    const val = numOf(ws.getCell(r, amountCol));
+    // Ô tổng đang LỖI (#REF!…) → KHÔNG ghi 0 vào tổng đối chiếu (XLSX-08): "Tổng cộng lệch với 0"
+    // là cảnh báo sai hướng; bỏ qua ô đó như không có.
+    if (errOf(ws.getCell(r, amountCol))) continue;
+    const val = numOf(ws.getCell(r, amountCol), false, qu);
     if (/^VAT/.test(label)) {
       totals.vat = val;
       let pctText = "";
@@ -726,7 +996,31 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
       base.warnings.push(`Còn ${tail.length} dòng trông như hạng mục nằm DƯỚI phần tổng (dòng ${tail[0]}…) — app chỉ nạp phần bảng phía trên, hãy kiểm tra lại file.`);
     }
   }
-  if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh KHÔNG nạp lại được, cần thêm ảnh thủ công sau khi nạp.");
+  // Chế độ Thay trên web giữ ảnh đang có của dòng còn khớp (importApply.giuTruongChiApp, L48) — câu này
+  // chỉ còn nói phần đúng: ảnh NẰM TRONG FILE không đọc được, dòng mới phải thêm ảnh tay.
+  // TIÊU ĐỀ 2 TẦNG (L52): ô tiêu đề một cột SỐ gộp NGANG nhiều cột, hàng ngay dưới chia cột con
+  // ("Đơn giá" → "Vật tư | Nhân công"). App chỉ đọc được cột con ĐẦU — Đơn Giá hụt phần còn lại. Dòng
+  // lệch đã có cảnh báo Thành Tiền riêng, nhưng không câu nào nói VÌ SAO; nói ở cấp sheet.
+  // Hàng dưới phải TRÔNG NHƯ hàng tiêu đề con (soát toàn diện đợt 3): CẢ cột con đầu lẫn cột con thứ hai
+  // đều có chữ RIÊNG không phải số. Tiêu đề gộp ngang chỉ để trang trí (F3:G3) mà hàng dưới là dòng chữ
+  // gộp cả bảng ("* Thông tin chương trình: …" A4:H4 — ô mượn giá trị ô chủ cột khác) hay dòng nhóm có
+  // chữ ở cột tiền ("A | PHẦN DỰNG | … | Theo thực tế", cột con thứ hai trống) thì không phải tiêu đề con.
+  const chuRieng = (r: number, col: number) => {
+    const o = ws.getCell(r, col), m = o.isMerged ? o.master : null;
+    if (m && (coordNum(m.row, false) !== r || coordNum(m.col, true) !== col)) return "";   // ô phụ của vùng gộp
+    const t = cellText(o.value).trim();
+    return /^[\d\s.,()%₫đ$-]*$/i.test(t) ? "" : t;   // trống hoặc là SỐ (dữ liệu) → không phải tiêu đề con
+  };
+  for (const [role, vn] of [["quantity", "Số Lượng"], ["days", "Số Ngày"], ["unitPrice", "Đơn Giá"], ["_amount", "Thành Tiền"]] as const) {
+    const c = colOf[role];
+    if (!c) continue;
+    const ben = ws.getCell(hit.row, c + 1), m = ben.isMerged ? ben.master : null;
+    if (!m || coordNum(m.row, false) !== hit.row || coordNum(m.col, true) !== c) continue;
+    const t = chuRieng(hit.row + 1, c);
+    if (!t || !chuRieng(hit.row + 1, c + 1)) continue;
+    base.warnings.push(`Tiêu đề nhiều tầng: cột ${vn} (${colLetter(c)}) gộp ngang nhiều cột con — app chỉ đọc cột con đầu tiên “${t}”, các cột con còn lại KHÔNG được cộng vào. Kiểm tra lại ${vn} từng dòng.`);
+  }
+  if (base.showImages) base.warnings.push("File có cột HÌNH ẢNH — ảnh trong file KHÔNG nạp lại được. Dòng còn khớp với sheet đích giữ nguyên ảnh đang có; dòng mới cần thêm ảnh thủ công sau khi nạp.");
   if (base.stats.formulasDropped) base.warnings.push(`${base.stats.formulasDropped} công thức không nạp được (đã giữ con số) — xem cột Cảnh báo từng dòng.`);
   if (!base.items.length) base.warnings.push("Không đọc được hạng mục nào trong bảng.");
   if (daCat)
@@ -761,7 +1055,8 @@ function parseSheet(ws: ExcelJS.Worksheet, index: number): ImportedSheet {
 
 /** Tổng tiền của sheet theo đúng cách app tính (mục con cộng vào nhóm; nhóm ×SL khi bật). */
 export function computeSubtotal(s: Pick<ImportedSheet, "items" | "hasDays" | "groupSubtotal">): number {
-  const line = (it: ImportedItem) => Math.round(qtyForAmount(it) * (s.hasDays ? (Number(it.days) || 1) : 1) * (Number(it.unitPrice) || 0));
+  // Nhân CHÍNH XÁC rồi làm tròn — khớp src/money.ts (XLSX-06). Double lệch 1đ ở giá không chia hết 10.
+  const line = (it: ImportedItem) => nhanLamTronDong(qtyForAmount(it), s.hasDays ? (Number(it.days) || 1) : 1, Number(it.unitPrice) || 0);
   if (!s.groupSubtotal) return s.items.reduce((a, it) => (it.kind === "item" || it.kind === "sub" ? a + line(it) : a), 0);
   let total = 0, mult = 1, seen = false;
   for (const it of s.items) {

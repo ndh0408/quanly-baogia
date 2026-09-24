@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { api, type Me } from "../lib/api";
 import { toast, fieldErrorsFrom, useEscClose } from "../lib/ui";
 import { ROLE_LABEL, errMsg } from "../lib/format";
@@ -147,14 +146,22 @@ function MfaSetupModal({ onClose, onEnabled }: { onClose: () => void; onEnabled:
   const [codes, setCodes] = useState<string[] | null>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
 
-  // Tải mã QR/secret qua TanStack Query (thay api.mfaSetup().then(...) thủ công). Giữ nguyên hiển thị
-  // "Đang tạo mã…" / lỗi "Lỗi tạo mã" (+ nút Thử lại khi lỗi mạng).
-  const { data: setup, error, refetch } = useQuery({
-    queryKey: ["mfaSetup"],
-    queryFn: () => api.mfaSetup(),
-    gcTime: 0,
-  });
-  const err = error ? errMsg(error, "Lỗi tạo mã") : "";
+  // POST /mfa/setup SINH secret mới mỗi lần gọi — nó là một HÀNH ĐỘNG, không phải dữ liệu để đọc.
+  // FE-03: trước đây nằm trong useQuery, nên mọi sự kiện SSE 'changed' của BẤT KỲ ai (RealtimeBridge
+  // gọi invalidateQueries() không lọc) làm nó refetch: QR/khoá đổi giữa lúc người dùng đang quét,
+  // "Xác nhận bật" gửi secret MỚI kèm mã 6 số của secret CŨ → lỗi, và mỗi lần refetch tiêu một lượt
+  // mfaLimiter (10/15 phút) → có thể dính 429 trước khi bật được. Gọi đúng MỘT lần khi mở hộp;
+  // "Thử lại" (khi lỗi) là lần gọi thứ hai do chính người dùng bấm.
+  const [setup, setSetup] = useState<{ qr: string; secret: string } | null>(null);
+  const [err, setErr] = useState("");
+  const [lanTao, setLanTao] = useState(0);
+  useEffect(() => {
+    let song = true;
+    setErr("");
+    api.mfaSetup().then((r) => { if (song) setSetup(r); }, (e) => { if (song) setErr(errMsg(e, "Lỗi tạo mã")); });
+    return () => { song = false; };
+  }, [lanTao]);
+  const refetch = () => setLanTao((n) => n + 1);
 
   // ESC: chưa có mã dự phòng → Hủy; ĐÃ có mã (MFA đã bật) → khớp hành vi nút ✕ = Xong.
   useEscClose(codes ? onEnabled : onClose);

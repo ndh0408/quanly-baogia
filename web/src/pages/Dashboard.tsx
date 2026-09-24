@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, type Me, type OverviewResp, type RevenuePoint, type TopSaleRow, type ProjectQuote, type ProjectSheet } from "../lib/api";
-import { fmtMoney, fmtPct, sheetCode, soMa, statusLabel, errMsg } from "../lib/format";
+import { fmtMoney, fmtPct, sheetCode, soMa, statusLabel, errMsg, trangKhachTuChoi } from "../lib/format";
 
 // "Tổng quan" THÔNG MINH: chọn kỳ (7/30/90 ngày · quý · năm) → KPI có xu hướng so kỳ trước,
 // biểu đồ doanh số theo ngày (SVG), phễu/pipeline theo kỳ kèm tỷ lệ thắng, "Cần xử lý" (AR/chứng từ
@@ -217,12 +217,13 @@ function Leaderboard({ rows }: { rows: TopSaleRow[] }) {
 type ActItem = { quoteId: number; code: string; hangMuc: string | null; customer: string; amount: number };
 type ActCat = { key: string; title: string; cls: string; items: ActItem[]; total: number; showAmount: boolean };
 
-function buildActionItems(projects: ProjectQuote[]): ActCat[] {
+export function buildActionItems(projects: ProjectQuote[]): ActCat[] {
   const A: ActItem[] = [], B: ActItem[] = [], C: ActItem[] = [], D: ActItem[] = [];
   for (const p of projects) {
     const sheets: ProjectSheet[] = p.sheets && p.sheets.length ? p.sheets : [{ subtotal: p.subtotal, name: null }];
     const customer = p.customerName || p.customerCode || p.title || "—";
     sheets.forEach((sh, i) => {
+      if (trangKhachTuChoi(p, sh)) return;   // FE-09 — không phải việc cần xuất HĐ / thu tiền
       const baoGia = Number(sh.subtotal || 0);
       const vatAmt = Math.round(baoGia * Number(p.vatPercent || 0) / 100);
       const amount = baoGia + vatAmt;

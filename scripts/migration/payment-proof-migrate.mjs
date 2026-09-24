@@ -39,9 +39,11 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 // BỎ QUA bản ghi đã xoá-mềm. Script này dùng PrismaClient THUẦN (không qua extension ở src/db.ts)
-// nên không tự lọc `deletedAt` — phải lọc tay. Chuyển ảnh của hàng đã xoá sẽ tạo object MỒ CÔI: hàng
-// đó rồi sẽ bị `purgeSoftDeleted` xoá hẳn, nhưng object trong kho thì không ai dọn. Để base64 nằm lại
-// cùng hàng và cùng biến mất khi purge là gọn hơn.
+// nên không tự lọc `deletedAt` — phải lọc tay. Hàng đã xoá mềm được để nguyên base64 tại chỗ.
+// LƯU Ý (sửa chú thích sai, FILE-05): `purgeSoftDeleted` (src/services/adminService.ts) KHÔNG xoá
+// cứng PersonnelRecord/Employee — chỉ quote, quoteTemplate, customer, company, user. Hồ sơ nhân sự
+// xoá mềm (kể cả PII và ảnh chứng từ) nằm lại VÔ THỜI HẠN; xoá thật là quyết định nghiệp vụ/pháp lý
+// (thời hạn lưu chứng từ kế toán) chưa được chốt.
 const PENDING = { paymentProof: { not: null }, paymentProofKey: null, deletedAt: null };
 
 async function counts() {

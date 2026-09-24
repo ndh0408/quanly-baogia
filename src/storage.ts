@@ -2,6 +2,13 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, Head
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { ghiPhuThuoc } from "./observability.js";
+
+/** Lỗi S3 là KẾT QUẢ BÌNH THƯỜNG, không phải phụ thuộc hỏng (404 của HeadObject/GetObject khi hỏi xem object có không). */
+export function laLoiS3BinhThuong(e: unknown) {
+  const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  return x?.$metadata?.httpStatusCode === 404 || x?.name === "NotFound" || x?.name === "NoSuchKey";
+}
 
 let client: S3Client | null = null;
 
@@ -46,6 +53,22 @@ export function getClient() {
     requestHandler: { requestTimeout: S3_REQUEST_TIMEOUT_MS, connectionTimeout: S3_CONNECT_TIMEOUT_MS },
     maxAttempts: S3_MAX_ATTEMPTS,
   });
+  // Đếm MỌI lệnh tới kho object ở MỘT chỗ (audit 2026-09-22, OBS-09): trước đây MinIO chết chỉ lộ qua
+  // 5xx nếu đủ lưu lượng. Middleware của SDK bọc mọi `send()` — kể cả lệnh thêm sau này.
+  // `?.`: bài test giả lập S3Client (không có middlewareStack) — đếm là phụ, không được làm hỏng việc dựng client.
+  client.middlewareStack?.add(
+    (next) => async (args) => {
+      try {
+        const r = await next(args);
+        ghiPhuThuoc("s3", true);
+        return r;
+      } catch (e) {
+        ghiPhuThuoc("s3", laLoiS3BinhThuong(e));
+        throw e;
+      }
+    },
+    { step: "initialize", name: "quanlyDemPhuThuocS3" }
+  );
   return client;
 }
 
@@ -220,6 +243,28 @@ export async function getObjectBytes(key: string, maxBytes: number, bucket = con
     return Buffer.concat(chunks);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Mở object thành LUỒNG để ứng dụng tự phát cho trình duyệt (proxy tải), không kéo cả file vào RAM.
+ *
+ * Vì sao cần: URL đã ký của `presignDownload` mang host của S3_ENDPOINT — ở production là
+ * `http://minio:9000`, tên chỉ phân giải được trong mạng docker. Trình duyệt người dùng không mở
+ * được nó (RT-02/FILE-08). Proxy qua app giữ MinIO đóng kín, và dùng được cookie phiên để gác quyền.
+ *
+ * null khi chưa cấu hình kho hoặc object không tồn tại; lỗi khác (kho chết, hết giờ) ném ra.
+ */
+export async function getObjectStream(key: string, bucket = config.S3_BUCKET): Promise<{ body: NodeJS.ReadableStream; contentType: string; contentLength: number | undefined } | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const r = await c.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!r.Body) return null;
+    return { body: r.Body as unknown as NodeJS.ReadableStream, contentType: r.ContentType || "", contentLength: r.ContentLength == null ? undefined : Number(r.ContentLength) };
+  } catch (e: any) {
+    if (e?.name === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404) return null;
+    throw e;
   }
 }
 

@@ -58,8 +58,16 @@ export const nextK = () => _kSeq++;
 // những lần đọc sau KHÔNG có thao tác ghi xen vào nên trình duyệt trả lời từ bố cục đã tính.
 const pendingGrow = new Set<HTMLTextAreaElement>();
 let growRaf = 0;
+// GIÁ TRỊ của ô ở lần ĐO chiều cao gần nhất (soát toàn diện L1). Ô trống lúc dựng lưới là textarea
+// "chưa bẩn": vẽ lại dòng thì React ghi defaultValue và ô TỰ nhận nội dung mới, nên lượt đồng bộ
+// ô (so `el.value` với model) thấy đã khớp và không bao giờ đo lại — dán khối/Ctrl+D/Redo chữ nhiều
+// dòng vào ô trống chỉ thấy dòng đầu. So với giá trị lúc đo thì bắt được đúng ca đó. WeakMap chứ
+// không dùng dataset: ghi attribute là thêm một lần ghi DOM cho mọi ô, đúng thứ lưới dài phải tránh.
+const doCao = new WeakMap<HTMLTextAreaElement, string>();
+/** Ô đã đổi nội dung kể từ lần đo chiều cao gần nhất (hoặc chưa đo lần nào)? */
+export const chuaDoCao = (el: HTMLTextAreaElement) => doCao.get(el) !== el.value;
 /** Đo một ô lẻ. CHỈ dùng khi không có rAF — trong lô thì phải đi theo ba lượt bên dưới. */
-const measureNow = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+const measureNow = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; doCao.set(el, el.value); };
 export const autoGrow = (el: HTMLTextAreaElement | null) => {
   if (!el) return;
   if (typeof requestAnimationFrame !== "function") { measureNow(el); return; }
@@ -73,7 +81,7 @@ export const autoGrow = (el: HTMLTextAreaElement | null) => {
     if (!els.length) return;
     for (const t of els) t.style.height = "auto";               // 1. GHI hết
     const hs = els.map((t) => t.scrollHeight);                   // 2. ĐỌC hết — một lượt bố cục
-    for (let i = 0; i < els.length; i++) els[i].style.height = hs[i] + "px";   // 3. GHI hết
+    for (let i = 0; i < els.length; i++) { els[i].style.height = hs[i] + "px"; doCao.set(els[i], els[i].value); }   // 3. GHI hết
   });
 };
 

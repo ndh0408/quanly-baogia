@@ -39,7 +39,7 @@ vi.mock("./lib/api", async () => {
   return { api: { getInvite: (t: string) => getInvite(t), acceptInvite: (d: GoiNhan) => acceptInvite(d) }, ApiError, setPreviewMode: () => {} };
 });
 vi.mock("./lib/ui", () => ({ toast: () => {}, promptModal: async () => null }));
-vi.mock("./lib/localDraft", () => ({ xoaMoiBanNhap: () => {} }));
+vi.mock("./lib/localDraft", () => ({ xoaMoiBanNhap: () => {}, ghiNhanNguoiDung: () => false }));
 vi.mock("./components/Shell", () => ({ Shell: () => null }));
 
 import { OnboardPage } from "./App";

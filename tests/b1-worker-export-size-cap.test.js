@@ -81,7 +81,9 @@ describe("processor xuất nền — trần kích thước RỘNG HƠN đường
     h.quote = baoGia(30, 1_000);   // 30 000 dòng: > 20 000 (đồng bộ 413) nhưng < 60 000
     h.daSinhFile = 0;
     const r = await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
-    expect(r.url, "đường nền cũng từ chối ⇒ báo giá lớn hết đường tải về").toBe("https://vi-du/tai-ve");
+    // Worker trả KHOÁ object (không còn URL đã ký — RT-02: đường tải là proxy cùng origin
+    // /api/jobs/export/:id/file, xem tests/xn-tai-file-xuat-nen-qua-app.test.js).
+    expect(r.key, "đường nền cũng từ chối ⇒ báo giá lớn hết đường tải về").toMatch(/^exports\//);
     expect(h.daSinhFile).toBe(1);
   });
 
@@ -89,7 +91,7 @@ describe("processor xuất nền — trần kích thước RỘNG HƠN đường
     h.quote = baoGia(60, 1_000);
     h.daSinhFile = 0;
     const r = await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
-    expect(r.url).toBe("https://vi-du/tai-ve");
+    expect(r.key).toMatch(/^exports\//);
   });
 
   it("lỗi vượt trần KHÔNG được thử lại: 3 lượt nghiến CPU cho cùng một kết quả là vô ích", async () => {
@@ -115,7 +117,7 @@ describe("processor xuất nền — trần kích thước RỘNG HƠN đường
     h.quote = baoGia(50, 200); // 10 000 dòng — đúng cỡ "báo giá lớn" mô tả trong mã
     h.daSinhFile = 0;
     const r = await processors[QUEUES.EXPORT].xlsx({ data: { quoteId: 1, requestedBy: 1 } });
-    expect(r.url).toBe("https://vi-du/tai-ve");
+    expect(r.key).toMatch(/^exports\//);
     expect(h.daSinhFile).toBe(1);
   });
 });

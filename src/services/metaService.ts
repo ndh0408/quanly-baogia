@@ -51,7 +51,9 @@ export async function listCompanies() {
     orderBy: { name: "asc" },
     select: {
       ...COMPANY_FIELDS,
-      templates: { where: { active: true }, orderBy: { name: "asc" }, select: TEMPLATE_FIELDS },
+      // `deletedAt: null` TƯỜNG MINH: extension xoá mềm (src/db.ts) chỉ lọc truy vấn GỐC, không lọc
+      // quan hệ lồng — mẫu đã xoá mềm (active vẫn true) sẽ còn hiện trong trình chọn (DB-04).
+      templates: { where: { active: true, deletedAt: null }, orderBy: { name: "asc" }, select: TEMPLATE_FIELDS },
     },
   });
   return companies.map((c) => ({ ...c, templates: c.templates.map(withLayout) }));

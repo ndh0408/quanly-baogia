@@ -8,8 +8,8 @@
 // `paidProof` base64). Bản đọc đó CHỈ dùng cho: kiểm quyền sửa, mốc `updatedAt`, vài cột vô hướng,
 // và (khi payload KHÔNG có `sheets`) tính lại tổng tiền từ `items`. KHÔNG dòng nào đụng `images`.
 // Cuối hàm còn một lần đọc nữa (`tx.quote.update(... include: QUOTE_INCLUDE)`) — lần này BẮT BUỘC
-// phải có ảnh vì đó là phản hồi mà editor lấy nguyên về làm state (web/src/pages/QuoteEditor.tsx:265
-// `qRef.current = { ...saved }`), bỏ ảnh ở đó là xoá trắng ảnh trên màn hình sau mỗi lần Lưu.
+// phải có ảnh vì đó là phản hồi mà editor lấy nguyên về làm state (hàm `save` trong
+// web/src/pages/QuoteEditor.tsx: `qRef.current = { ...saved, … }`), bỏ ảnh ở đó là xoá trắng ảnh trên màn hình sau mỗi lần Lưu.
 // Vậy chi phí ĐÚNG của một lần Lưu là MỘT lần đọc ảnh, không phải hai.
 //
 // ── ĐO CÁI GÌ ───────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import type { Job, JobsOptions, Processor, WorkerOptions } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { bullQueueDepth } from "./observability.js";
+import { bullQueueDepth, bullJobsFailedTotal } from "./observability.js";
 
 let connection: any = null;
 export function getRedis() {
@@ -161,7 +161,11 @@ export async function xepViecCoHan<T>(
   } catch (e) {
     logger.error(
       { err: e instanceof Error ? e.message : String(e), ...ctx, hanMs },
-      "không xếp được việc vào hàng đợi (Redis chậm/chết) — BỎ việc này để không treo request",
+      // KHÔNG nói "đã bỏ việc" (RT-13): Promise.race chỉ NGỪNG CHỜ, không huỷ lệnh. Kết nối BullMQ
+      // dùng maxRetriesPerRequest:null + hàng đợi offline của ioredis, nên lệnh add vẫn nằm đó và có
+      // thể được thực hiện khi Redis hồi phục — email/thông báo tới MUỘN chứ không mất, và một lượt
+      // xuất đã báo 503 vẫn có thể được sinh. Log cũ khiến người trực tưởng việc đã mất.
+      "quá hạn chờ hàng đợi (Redis chậm/chết) — request đi tiếp; lệnh có thể VẪN được thực hiện khi Redis hồi phục",
     );
     return null;
   } finally {
@@ -202,6 +206,13 @@ const QUEUE_DEPTH_TIMEOUT_MS = Number(process.env.QUEUE_DEPTH_TIMEOUT_MS) || 200
  */
 export async function capNhatDoSauHangDoi(): Promise<boolean> {
   if (!isQueueEnabled()) return false;
+  // Redis CHƯA sẵn sàng thì KHÔNG gửi lệnh (audit 2026-09-22, OBS-12). Kết nối BullMQ đặt
+  // `maxRetriesPerRequest: null` + offline queue: `getJobCounts` gửi lúc Redis chết nằm lại trong hàng
+  // đợi ngoại tuyến VÔ HẠN (Promise.race dưới chỉ bỏ mặc, lệnh vẫn còn) — mỗi 15s × 2 tiến trình × 5
+  // hàng đợi, tích cả đêm rồi xả dồn khi Redis sống lại. Đúng lý lẽ `doRedis` (src/observability.ts)
+  // đã viết cho PING. `status` là thuộc tính đọc tại chỗ, không tốn gì.
+  const ketNoi = getRedis() as { status?: string } | null;
+  if (!ketNoi || ketNoi.status !== "ready") return false;
   const quaHan = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("getJobCounts quá hạn")), QUEUE_DEPTH_TIMEOUT_MS).unref?.()
   );
@@ -298,7 +309,13 @@ const EXPORT_LOCK_MS = Number(process.env.EXPORT_JOB_LOCK_MS) || 300_000;
 // `concurrency` do src/worker.ts truyền vào từ WORKER_CONCURRENCY (mặc định 4). Đặt biến này = 8 vẫn
 // cho ra 4 — muốn NÂNG thông lượng xuất file thì phải nâng WORKER_CONCURRENCY. Cố ý giữ trần trên như
 // vậy: đây là việc nặng CPU trong MỘT tiến trình, nới rộng chỉ làm mọi job cùng chậm và cùng chẹn.
-const EXPORT_WORKER_CONCURRENCY = Number(process.env.EXPORT_WORKER_CONCURRENCY) || 2;
+//
+// MẶC ĐỊNH 1 (RT-12, trước là 2). Hai job cỡ tối đa chạy song song vượt ân hạn dừng 150s của worker:
+// job 1 sinh file ~77-90s trong khi job 2 CHỜ ngân sách dòng (EXPORT_BUDGET_ROWS tuần tự hoá job lớn)
+// rồi tới lượt thêm 90s sinh + ~40s tải lên → SIGKILL giữa chừng, khoá 5 phút, người dùng chờ 5-6 phút
+// đúng lúc deploy. Cổng ngân sách vốn đã chạy job lớn lần lượt, và đường nền chỉ dành cho báo giá
+// lớn, nên suất thứ hai gần như không mang lại thông lượng mà chỉ nới ca xấu nhất.
+const EXPORT_WORKER_CONCURRENCY = Number(process.env.EXPORT_WORKER_CONCURRENCY) || 1;
 
 export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerOptions> & { concurrency: number } {
   if (name === QUEUES.EXPORT) {
@@ -315,7 +332,17 @@ export function workerOptionsFor(name: string, concurrency = 4): Partial<WorkerO
 export function createWorker(name: string, handler: Processor, concurrency = 4) {
   if (!isQueueEnabled()) return null;
   const w = new Worker(name, handler, { connection: getRedis(), ...workerOptionsFor(name, concurrency) });
-  w.on("failed", (job: Job | undefined, err: Error) => logger.error({ job: job?.id, err: err.message }, `${name} job failed`));
+  // Chuỗi 0 ngay khi worker của hàng đợi này lên (soát chéo ops#9): không có mẫu 0 thì job hỏng HẲN
+  // đầu tiên sau mỗi lần khởi động làm chuỗi xuất hiện ở giá trị 1, `increase()` = 0, và
+  // QuanlyJobNenThatBai im. Chỉ tiến trình worker phát counter này nên khởi tạo ở đây, không ở module init.
+  bullJobsFailedTotal.inc({ queue: name }, 0);
+  w.on("failed", (job: Job | undefined, err: Error) => {
+    logger.error({ job: job?.id, err: err.message }, `${name} job failed`);
+    // Đếm theo SỰ KIỆN, chỉ khi đã hết lượt thử (audit 2026-09-22, OBS-05). Quy tắc cũ đọc gauge
+    // bullmq_jobs{state="failed"} — job hỏng nằm trong tập failed tới removeOnFail.age (7–90 ngày), nên
+    // MỘT sự cố đã qua kêu Telegram mỗi 4h suốt cả tuần. Counter chỉ tăng đúng lúc hỏng.
+    if (job && job.attemptsMade >= (job.opts?.attempts ?? 1)) bullJobsFailedTotal.inc({ queue: name });
+  });
   w.on("completed", (job: Job) => logger.info({ job: job.id }, `${name} job done`));
   return w;
 }

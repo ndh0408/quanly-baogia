@@ -107,6 +107,9 @@ export type ProjectSheet = {
   // Trang Hóa đơn (kế toán nhập — Quản lý dự án chỉ tham chiếu)
   invoiceDate?: string | null; paymentMethod?: string | null; orderClosedAt?: string | null;
   invoiceYear?: number | null; invoiceCompany?: string | null; invoiceDesc?: string | null; invoiceNote?: string | null;
+  // Ý kiến khách cho trang này (approved | rejected | null). Máy chủ cần trả kèm trong /quotes/projects —
+  // thiếu thì các trang dưới coi như chưa có ý kiến (hành vi cũ). Xem trangKhachTuChoi ở lib/format.
+  custStatus?: string | null;
 };
 export type ProjectQuote = {
   shortTitle?: string | null;
@@ -197,7 +200,9 @@ export type SearchResp = {
   };
 };
 
-export type Summary = { salary: number; pit: number; taxableIncome: number };
+// `piiLoi` = số hồ sơ trong tập lọc có bản mã không giải mã được — lương của chúng KHÔNG nằm trong tổng
+// (soát chéo files#1). Tuỳ chọn: máy chủ cũ không gửi trường này.
+export type Summary = { salary: number; pit: number; taxableIncome: number; piiLoi?: number };
 export type ListResult = {
   data: Personnel[];
   meta: { total: number; page: number; size: number; pageCount: number };
@@ -571,7 +576,7 @@ export const api = {
   jobStatus: (queue: string, id: string) =>
     req<{
       id: string; state: string; progress: unknown;
-      returnvalue: { url?: string; key?: string; size?: number } | null;
+      returnvalue: { url?: string; key?: string; size?: number; filename?: string } | null;
       failedReason: string | null;
     }>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`),
   versionDiff: (id: number, a: number, b: number) => req<{ from: number; to: number; changes: { key: string; before: unknown; after: unknown }[] }>(`/quotes/${id}/versions/${a}/diff/${b}`),

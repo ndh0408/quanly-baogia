@@ -37,14 +37,16 @@ set -uo pipefail
 # Cấu hình qua /etc/quanly-backup.env:
 #   BACKUP_DIR, PG_CONTAINER, APP_DIR (/opt/stacks/quanly/quanly)
 #   PII_ENC_KEY                       ← BẮT BUỘC để kiểm giải mã được
-#   S3_*                              ← BẮT BUỘC để kiểm toàn vẹn chứng từ + diễn tập khôi phục object
+#   S3_*                              ← cần để kiểm toàn vẹn chứng từ + diễn tập khôi phục object.
+#                                       Thiếu trong tệp env thì ĐỌC TỪ container app ($APP_CONTAINER),
+#                                       cùng cách backup-objects.sh làm (soát chéo ops#2, 2026-09-24).
 #   TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT (alert — tuỳ chọn)
 #   DRILL_RESTORE_BUCKET  (mặc định "<S3_BUCKET>-restore-drill") — bucket TẠM để đẩy ngược
 #   DRILL_RESTORE_N       (20)   số object lấy mẫu đẩy ngược; DRILL_RESTORE_ALL=1 để đẩy tất
 #   DRILL_RESTORE_MAX_MB  (256)  trần tổng dung lượng một lượt đẩy ngược
 #   DRILL_MAX_OBJ_MB      (64)   bỏ qua object đơn lẻ lớn hơn ngưỡng này khi lấy mẫu
 #   DRILL_SMOKE_WAIT_S    (60)   trần chờ app lên ở bước 7
-#   MC_IMAGE              (minio/mc:RELEASE.2024-11-21T17-21-54Z)
+#   MC_IMAGE              (quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:… — Docker Hub đã gỡ minio/mc)
 #
 # ⛔ KHÔNG đụng PRODUCTION. Ba lớp cách ly, và cả ba đều có trap dọn dẹp ở EXIT:
 #     CSDL   → CSDL TẠM riêng ($TESTDB), DROP khi thoát.
@@ -59,9 +61,21 @@ BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
 PG_CONTAINER="${PG_CONTAINER:-quanly-postgres}"
 APP_DIR="${APP_DIR:-/opt/stacks/quanly/quanly}"
 APP_CONTAINER="${APP_CONTAINER:-quanly-app}"
+# Khoá kho object: tệp env thắng; thiếu thì lấy của app — ĐÚNG khuôn backup-objects.sh (soát chéo
+# ops#2). Mẫu /etc/quanly-backup.env của install-backup.sh bảo "để TRỐNG S3_* thì script tự đọc từ
+# quanly-app"; trước đây chỉ backup-objects.sh làm vậy, còn diễn tập thì alert "S3_* chưa cấu hình"
+# ở bước 4 và 6 MỖI Chủ nhật → FAILED → watchdog báo "diễn tập CHƯA TỪNG đạt" mỗi 6h, mãi mãi.
+# PHẢI đứng TRƯỚC dòng BUCKET/DRILL_BUCKET bên dưới: hai biến đó suy ra từ S3_BUCKET.
+for v in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET; do
+  if [ -z "${!v:-}" ]; then
+    val="$(docker exec "$APP_CONTAINER" printenv "$v" 2>/dev/null)" || val=""
+    [ -n "$val" ] && printf -v "$v" '%s' "$val"
+  fi
+done
+unset val
 TESTDB="quanly_restore_drill"
 MIRROR_DIR="$BACKUP_DIR/objects"
-MC_IMAGE="${MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}"
+MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112}"
 BUCKET="${S3_BUCKET:-quanly}"
 DRILL_BUCKET="${DRILL_RESTORE_BUCKET:-$BUCKET-restore-drill}"
 DRILL_RESTORE_N="${DRILL_RESTORE_N:-20}"
@@ -181,6 +195,10 @@ ENVFILE="$(mktemp)"; chmod 600 "$ENVFILE"
 {
   printf 'DATABASE_URL=postgresql://%s:%s@%s:5432/%s?schema=public\n' "$PGUSER" "$PGPASS" "$PG_CONTAINER" "$TESTDB"
   printf 'NODE_ENV=production\n'
+  # Tiến trình web production BẮT BUỘC có TRUST_PROXY (src/server.ts, HTTP-12) — thiếu là exit 1 ngay
+  # lúc khởi động, bước [7/7] hỏng CHẮC CHẮN mỗi lượt (soát chéo ops#1). Đúng giá trị compose prod ghim.
+  # Đặt trong ENVFILE chứ không `-e` ở `docker run` để in_app và container smoke dùng chung một bộ env.
+  printf 'TRUST_PROXY=1\n'
   printf 'SESSION_SECRET=drill-only-session-secret-not-used-for-anything\n'
   printf 'JWT_SECRET=drill-only-jwt-secret-not-used-for-anything-here\n'
   printf 'MFA_ENC_KEY=drill-only-mfa-key\n'

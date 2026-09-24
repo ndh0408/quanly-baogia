@@ -30,7 +30,7 @@
 //
 // Siết theo phạm vi ĐỌC (không phải theo `employee:edit:*`) là chỗ then chốt để KHÔNG đổi hành vi
 // production: EMPLOYEE nền — và MANAGER/ADMIN kế thừa — đều có `employee:read:all`
-// (src/permissions.ts:266), nên mọi tài khoản Account thật vẫn sửa/xoá chéo được y như cũ. Chỉ tập
+// (src/permissions.ts, hằng EMPLOYEE), nên mọi tài khoản Account thật vẫn sửa/xoá chéo được y như cũ. Chỉ tập
 // quyền per-user bị bó về "Xem danh bạ của mình" mới mất đường ghi chéo — mà tài khoản đó vốn đã
 // không nhìn thấy mục người khác để mà sửa.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -65,7 +65,7 @@ describe.runIf(dbAvailable)("danh bạ nhân sự: employee:read:own phải gi�
     adminU = await prisma.user.create({ data: { username: `${TAG}-admin`, displayName: `${TAG} admin`, role: "admin", passwordHash: hash } });
     ownU = await prisma.user.create({ data: { username: `${TAG}-own`, displayName: `${TAG} own`, role: "hr", passwordHash: hash, permissions: [P.EMPLOYEE_READ_OWN, P.EMPLOYEE_CREATE, P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_DELETE_OWN] } });
     allU = await prisma.user.create({ data: { username: `${TAG}-all`, displayName: `${TAG} all`, role: "hr", passwordHash: hash, permissions: [P.EMPLOYEE_READ_ALL] } });
-    // Bản sao ĐÚNG tập quyền của EMPLOYEE nền (permissions.ts:266): read:all + edit/delete:own.
+    // Bản sao ĐÚNG tập quyền của EMPLOYEE nền (permissions.ts, hằng EMPLOYEE): read:all + edit/delete:own.
     // Đây là ca ĐỐI CHỨNG cho việc sửa/xoá CHÉO của mọi tài khoản Account thật vẫn phải chạy.
     nhanVienU = await prisma.user.create({ data: { username: `${TAG}-nv`, displayName: `${TAG} nv`, role: "hr", passwordHash: hash, permissions: [P.EMPLOYEE_READ_ALL, P.EMPLOYEE_CREATE, P.EMPLOYEE_EDIT_OWN, P.EMPLOYEE_DELETE_OWN] } });
 

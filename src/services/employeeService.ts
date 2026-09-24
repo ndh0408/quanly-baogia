@@ -9,6 +9,7 @@ import { httpError } from "../httpError.js";
 import { canScoped, readScopeWhereOrThrow } from "../permissions.js";
 import { encodePiiForWrite, decodePiiOnRead, decodePiiList, idCardLookupWhere } from "../piiFields.js";
 import { phanTrang } from "../pagination.js";
+import { normalizeSearch } from "../searchText.js";
 
 const ownerSelect = { createdBy: { select: { id: true, displayName: true, username: true } } };
 
@@ -24,7 +25,17 @@ export async function listEmployees(req: Request) {
     // Đổi sang khớp CHÍNH XÁC qua chỉ mục mù cho CCCD; số tài khoản bỏ khỏi tìm kiếm (không ai tìm
     // nhân viên theo một phần số tài khoản). Chưa bật mã hoá thì giữ nguyên hành vi cũ.
     const byIdCard = idCardLookupWhere(q);
+    // TÌM KHÔNG DẤU (DB-08, audit 2026-09-23): trang Báo giá/Khách hàng/Nhân sự tìm trên cột
+    // searchText đã chuẩn hoá ("nguyen" ra "Nguyễn"), còn Danh bạ thì ILIKE cột thô — gõ không dấu
+    // là không ra ai. Employee KHÔNG có cột searchText; thêm cột thì phải backfill bằng một script
+    // tay nằm ngoài quy trình deploy (đúng loại bước bị quên — xem DB-01/DB-02). Danh bạ là bảng nhỏ
+    // (một công ty), nên chuẩn hoá ngay trong bộ nhớ trên TẬP ĐÃ LỌC PHẠM VI rồi lọc theo id. Giữ
+    // nguyên các vế cũ (MST/SĐT chứa chuỗi thô, CCCD qua chỉ mục mù) để không mất kết quả nào.
+    const nq = normalizeSearch(q);
+    const ungVien = nq ? await prisma.employee.findMany({ where: { ...where }, select: { id: true, fullName: true, taxCode: true, phone: true } }) : [];
+    const idKhop = ungVien.filter((e) => normalizeSearch(e.fullName, e.taxCode, e.phone).includes(nq)).map((e) => e.id);
     where.OR = [
+      { id: { in: idKhop } },
       { fullName: { contains: q, mode: "insensitive" } },
       { taxCode: { contains: q } },
       { phone: { contains: q } },
@@ -54,7 +65,7 @@ export async function createEmployee(req: Request) {
  * sạch CCCD + số tài khoản toàn công ty qua đúng cái endpoint GHI, đi vòng qua lớp chặn ở GET.
  *
  * Cố ý gác theo phạm vi ĐỌC (`employee:read:*`) chứ KHÔNG theo `employee:edit:*`: EMPLOYEE nền —
- * và MANAGER/ADMIN kế thừa — đều có `employee:read:all` (src/permissions.ts:266), nên kho danh bạ
+ * và MANAGER/ADMIN kế thừa — đều có `employee:read:all` (src/permissions.ts, hằng EMPLOYEE), nên kho danh bạ
  * DÙNG CHUNG khi ghi vẫn y nguyên cho mọi tài khoản Account thật. Nếu gác theo `edit:*` thì mọi
  * người chỉ có `edit:own` sẽ mất luôn việc sửa mục đồng nghiệp thêm — đổi hành vi đang chạy.
  * Chỉ tập quyền per-user bị bó về "Xem danh bạ của mình" mới hết ghi chéo, mà tài khoản đó vốn
@@ -66,12 +77,57 @@ function assertEmployeeInReadScope(req: Request, rec: { createdById: number | nu
   }
 }
 
+// Trường tài chính/định danh: nhật ký chỉ giữ 4 ký tự cuối — đủ để truy "ai đổi số tài khoản nhận
+// lương từ …1234 sang …9876", không nhân bản PII đầy đủ sang bảng nhật ký (bảng đó không mã hoá).
+const CHE_TRONG_NHAT_KY = new Set(["bankAccount", "idCard"]);
+const cheBot = (v: unknown) => {
+  if (v == null || v === "") return v ?? null;
+  const s = String(v);
+  return s.length <= 4 ? "•".repeat(s.length) : "…" + s.slice(-4);
+};
+const soSanhDuoc = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
+
+/**
+ * Giá trị TRƯỚC/SAU của đúng những trường vừa đổi (RBAC-04, audit 2026-09-23). Trước đây nhật ký
+ * chỉ ghi "employee.update #id" — một Account đổi số tài khoản ngân hàng của người trong danh bạ
+ * (kho dùng chung) rồi kế toán trả lương vào đó, mà không còn gì để truy giá trị cũ.
+ */
+function thayDoiDanhBa(truoc: Record<string, any>, than: Record<string, any>) {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const k of Object.keys(than)) {
+    if (soSanhDuoc(truoc[k]) === soSanhDuoc(than[k])) continue;
+    const che = CHE_TRONG_NHAT_KY.has(k);
+    before[k] = che ? cheBot(truoc[k]) : truoc[k] ?? null;
+    after[k] = che ? cheBot(than[k]) : than[k] ?? null;
+  }
+  return { before, after };
+}
+
 export async function updateEmployee(req: Request) {
-  const before = await prisma.employee.findFirst({ where: { id: (req.params as any).id } });
-  if (!before) throw httpError(404, "Không tìm thấy nhân viên");
-  assertEmployeeInReadScope(req, before);
-  const rec = await prisma.employee.update({ where: { id: (req.params as any).id }, data: encodePiiForWrite("Employee", req.body) as any, include: ownerSelect });
-  await audit(req, "employee.update", { resource: "employee", resourceId: rec.id });
+  const id = Number((req.params as any).id);
+  // GIẢI MÃ BẢN CŨ TRƯỚC KHI GHI, trong CÙNG transaction (hồi quy do gộp FILE-12 × RBAC-04, soát chéo
+  // 2026-09-23). FILE-12 cho danh sách trả hàng có bản mã hỏng với CCCD/STK = null + cờ piiLoi; form
+  // Sửa gửi lại NGUYÊN form nên hai ô trống đi lên thành null. Bản trước GHI trước (encodePiiForWrite
+  // null → xoá bản mã) rồi mới giải mã `before` cho nhật ký — ném 500 SAU khi lệnh ghi đã commit: bản
+  // mã duy nhất (khôi phục được nếu đặt lại khoá cũ) mất vĩnh viễn, nhật ký trống. Nay hàng không giải
+  // mã được bị từ chối 409, KHÔNG ghi byte nào — cùng nếp updatePersonnel.
+  const { rec, truoc, sau } = await prisma.$transaction(async (tx) => {
+    const before = await tx.employee.findFirst({ where: { id } });
+    if (!before) throw httpError(404, "Không tìm thấy nhân viên");
+    assertEmployeeInReadScope(req, before);
+    let cu: Record<string, any>;
+    try {
+      cu = decodePiiOnRead("Employee", before) as Record<string, any>;
+    } catch (e) {
+      if (!(e as { piiIntegrity?: boolean })?.piiIntegrity) throw e;
+      throw httpError(409, "Hồ sơ này có CCCD/số tài khoản đã mã hoá nhưng KHÔNG giải mã được (sai hoặc thiếu khoá) — không sửa được để khỏi xoá mất dữ liệu. Báo quản trị khôi phục khoá.");
+    }
+    const ghi = await tx.employee.update({ where: { id }, data: encodePiiForWrite("Employee", req.body) as any, include: ownerSelect });
+    const doi = thayDoiDanhBa(cu, req.body);
+    return { rec: ghi, truoc: doi.before, sau: doi.after };
+  });
+  await audit(req, "employee.update", { resource: "employee", resourceId: rec.id, before: truoc, after: sau });
   return decodePiiOnRead("Employee", rec);
 }
 

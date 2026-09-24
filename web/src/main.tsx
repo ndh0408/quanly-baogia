@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { queryClient, RealtimeBridge } from "./lib/query";
 import { installSafeModalBackdropClicks } from "./lib/safeModalBackdrop";
-import { installGlobalFocusTrap } from "./lib/ui";
+import { installGlobalFocusTrap, dungToastHost } from "./lib/ui";
 // Design-system dùng-chung (app cũ vẫn nạp tĩnh file này) — IMPORT vào bundle để VITE TỰ hash/cache-bust
 // → KHÔNG còn phải bump ?v= tay khi sửa CSS chung. Phải đứng TRƯỚC styles.css (React override thắng).
 import "../../public/style.css";
@@ -23,6 +23,8 @@ try {
 installSafeModalBackdropClicks();
 // Giam Tab + trả tiêu điểm cho MỌI hộp thoại role="dialog" (19 modal React) — xem chú thích ở ui.ts.
 installGlobalFocusTrap();
+// Vùng thông báo có mặt TRƯỚC thông báo đầu tiên — trình đọc màn hình mới đọc được nó (FE-17).
+dungToastHost();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   khoaBanNhap, ghiBanNhap, docBanNhap, xoaBanNhap, donBanNhapQuaHan, xoaMoiBanNhap, bocAnhKhoiBaoGia,
+  ghiNhanNguoiDung, chuyenBanNhapCu,
   TRAN_BYTE, HAN_MS,
 } from "./localDraft";
 
@@ -168,5 +169,78 @@ describe("localDraft — lưới cuối chống mất phần đang gõ", () => {
     it("không có gì để xoá → trả 0, không ném", () => {
       expect(xoaMoiBanNhap()).toBe(0);
     });
+  });
+});
+
+// FE-04: phiên của A hết hạn (không bấm Đăng xuất), B đăng nhập từ màn Login trên CÙNG trình duyệt rồi
+// mở đúng báo giá #7 → trước đây được đề nghị khôi phục phần chưa lưu của A và Lưu dưới tên B.
+describe("FE-04 — bản nháp gắn theo người dùng", () => {
+  it("nháp của user 1 KHÔNG đọc được bằng user 2 (khoá khác nhau)", () => {
+    ghiBanNhap(khoaBanNhap(7, 1), { ...baoGia(), title: "Của A" }, null, 1);
+    expect(khoaBanNhap(7, 1)).not.toBe(khoaBanNhap(7, 2));
+    expect(docBanNhap(khoaBanNhap(7, 2), 2)).toBeNull();
+    expect((docBanNhap(khoaBanNhap(7, 1), 1)!.quote as { title: string }).title).toBe("Của A");
+  });
+
+  it("bản nháp mang userId người khác thì không trả ra dù khoá trùng", () => {
+    ghiBanNhap(khoaBanNhap(7, 1), baoGia(), null, 1);
+    expect(docBanNhap(khoaBanNhap(7, 1), 2)).toBeNull();
+  });
+
+  it("đăng nhập người KHÁC người dùng lần trước → xoá sạch nháp (kể cả khoá kiểu cũ); cùng người → giữ", () => {
+    expect(ghiNhanNguoiDung(1)).toBe(false);                  // lần đầu: chưa biết ai trước → giữ
+    ghiBanNhap(khoaBanNhap(7, 1), baoGia(), null, 1);
+    ghiBanNhap(khoaBanNhap(8), baoGia(), null);                 // khoá kiểu cũ
+    expect(ghiNhanNguoiDung(1)).toBe(false);
+    expect(docBanNhap(khoaBanNhap(7, 1), 1)).not.toBeNull();
+    expect(ghiNhanNguoiDung(2)).toBe(true);
+    expect(docBanNhap(khoaBanNhap(7, 1))).toBeNull();
+    expect(docBanNhap(khoaBanNhap(8))).toBeNull();
+  });
+
+  it("chuyenBanNhapCu: bản nháp khoá cũ chuyển sang khoá của người dùng, khoá cũ bị xoá", () => {
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Cũ" }, "2026-08-27T00:00:00.000Z");
+    chuyenBanNhapCu(7, 5);
+    expect(docBanNhap(khoaBanNhap(7))).toBeNull();
+    const d = docBanNhap(khoaBanNhap(7, 5), 5)!;
+    expect((d.quote as { title: string }).title).toBe("Cũ");
+    expect(d.baseUpdatedAt).toBe("2026-08-27T00:00:00.000Z");
+  });
+});
+
+// app#16 (soát chéo): lần xác lập danh tính ĐẦU TIÊN trên trình duyệt (`quanly:lastUser` còn null) mà là
+// một lượt ĐĂNG NHẬP MỚI từ màn Login → không biết bản nháp khoá cũ (trước FE-04) là của ai, nên phải
+// xoá; chỉ đường khởi động có phiên sẵn (cùng cookie phiên) mới được chuyển nó sang khoá người dùng.
+describe("app#16 — khoá cũ ở lần đăng nhập đầu sau deploy", () => {
+  it("đăng nhập MỚI khi chưa có lastUser → nháp khoá cũ của người trước KHÔNG lọt sang người này", () => {
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Của A" }, "2026-08-27T00:00:00.000Z");
+    ghiBanNhap(khoaBanNhap("moi"), { ...baoGia(), title: "Mới của A" }, null);
+    ghiNhanNguoiDung(2, { dangNhapMoi: true });
+    chuyenBanNhapCu(7, 2);
+    chuyenBanNhapCu("moi", 2);
+    expect(docBanNhap(khoaBanNhap(7, 2), 2)).toBeNull();
+    expect(docBanNhap(khoaBanNhap("moi", 2), 2)).toBeNull();
+    expect(docBanNhap(khoaBanNhap(7))).toBeNull();
+  });
+
+  it("đăng nhập MỚI khi chưa có lastUser → KHÔNG đụng khoá mới đã gắn người dùng", () => {
+    ghiBanNhap(khoaBanNhap(7, 2), { ...baoGia(), title: "Của 2" }, null, 2);
+    ghiNhanNguoiDung(2, { dangNhapMoi: true });
+    expect((docBanNhap(khoaBanNhap(7, 2), 2)!.quote as { title: string }).title).toBe("Của 2");
+  });
+
+  it("đối chứng: khởi động có phiên sẵn (không dangNhapMoi) → vẫn chuyển được nháp khoá cũ", () => {
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Cũ" }, "2026-08-27T00:00:00.000Z");
+    ghiNhanNguoiDung(5);
+    chuyenBanNhapCu(7, 5);
+    expect((docBanNhap(khoaBanNhap(7, 5), 5)!.quote as { title: string }).title).toBe("Cũ");
+  });
+
+  it("đối chứng: đã có lastUser là chính người này → đăng nhập mới vẫn giữ và chuyển được nháp khoá cũ", () => {
+    ghiNhanNguoiDung(5);
+    ghiBanNhap(khoaBanNhap(7), { ...baoGia(), title: "Cũ" }, "2026-08-27T00:00:00.000Z");
+    ghiNhanNguoiDung(5, { dangNhapMoi: true });
+    chuyenBanNhapCu(7, 5);
+    expect((docBanNhap(khoaBanNhap(7, 5), 5)!.quote as { title: string }).title).toBe("Cũ");
   });
 });

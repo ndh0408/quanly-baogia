@@ -64,15 +64,13 @@ export default defineConfig(({ mode, command }) => {
           navigateFallback: "/app2/index.html",
           navigateFallbackDenylist: [/^\/api/],
           globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-          runtimeCaching: [
-            {
-              // Font Google: cache lâu (ít đổi) → tải lại nhanh, đỡ phụ thuộc mạng.
-              urlPattern: ({ url }: { url: URL }) =>
-                url.origin === "https://fonts.googleapis.com" || url.origin === "https://fonts.gstatic.com",
-              handler: "CacheFirst",
-              options: { cacheName: "google-fonts", expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 } },
-            },
-          ],
+          // KHÔNG có route runtimeCaching cho Google Fonts (L73). Route CacheFirst cũ bắt yêu cầu font vào
+          // SW rồi fetch() tới Google TỪ BÊN TRONG SW — mà SW chịu CSP gửi kèm sw.js, helmet (src/app.ts)
+          // gắn `connect-src 'self'` cho MỌI phản hồi → net::ERR_FAILED: từ lần mở thứ hai trở đi cả app
+          // mất Be Vietnam Pro, rơi về system-ui. Không route khớp thì Workbox không respondWith, trình
+          // duyệt tự tải theo CSP của TRANG (style-src/font-src đã cho Google) + cache HTTP của Google.
+          // ĐỪNG sửa bằng cách nới connect-src: một CSP cho cả app. Muốn font chạy offline thì tự phục vụ
+          // woff2 trong web/public/ (globPatterns đã gồm woff2 → vào precache). Chốt: tests/sw-font-khong-bi-csp-chan.test.js.
         },
         devOptions: { enabled: false },
       }),

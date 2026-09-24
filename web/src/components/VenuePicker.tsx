@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadCatalog, norm, dimLabel, type VenueCatalog, type VenueEntry } from "../lib/venueCatalog";
 import { toast, useEscClose } from "../lib/ui";
+import { dangGoIME } from "../lib/gridShared";
 
 // Modal "📐 Chèn từ rạp": chọn rạp → tick hạng mục → chèn hàng loạt vào lưới kèm kích thước.
 // Dùng chung class .modal-* của app (không tự chế khung modal).
@@ -73,7 +74,7 @@ export function VenuePicker({ onInsert, onClose }: { onInsert: (list: VenueEntry
             <>
               <input className="vs-pick-search" autoFocus placeholder="Gõ tên rạp để tìm… (vd: aeon tan phu, lotte 7, landmark)"
                 value={q} onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && rows.length === 1) { e.preventDefault(); openGroup(rows[0]); } }} />
+                onKeyDown={(e) => { if (dangGoIME(e)) return; /* GRID-12: Enter chốt cụm chữ IME */ if (e.key === "Enter" && rows.length === 1) { e.preventDefault(); openGroup(rows[0]); } }} />
               <div className="vs-pick-body">
                 {rows.length === 0 && <div className="vs-empty muted">Không thấy rạp nào khớp “{q}”</div>}
                 {rows.map((g) => (

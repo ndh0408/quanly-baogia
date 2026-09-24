@@ -6,10 +6,11 @@ import { logger } from "./logger.js";
 import { initSentry, dangKyChanSuCoTienTrinh, flushSentry } from "./observability.js";
 import { prisma, dongPoolDoSanSang } from "./db.js";
 import { createApp } from "./app.js";
-import { reloadRoleOverrides } from "./roleOverrides.js";
+import { reloadRoleOverrides, napRoleOverridesKhiKhoiDong } from "./roleOverrides.js";
 import { ensureBucket, isStorageEnabled } from "./storage.js";
 import { closeAllSse } from "./sse.js";
 import { kiemBatBienXuatLucKhoiDong } from "./validators.js";
+import { ganTatMayEm } from "./tatMayHttp.js";
 
 initSentry();
 
@@ -17,7 +18,31 @@ initSentry();
 // xuất lớn hơn cả ngân sách dòng nghĩa là có báo giá hợp lệ mà không bao giờ xuất được.
 kiemBatBienXuatLucKhoiDong();
 
+// TRUST_PROXY BẮT BUỘC Ở TIẾN TRÌNH WEB PRODUCTION (HTTP-12). Cookie phiên đặt `secure: isProd`,
+// mà express-session CHỈ phát cookie Secure khi `req.secure` — sau TLS ở Cloudflare kết nối vào Node
+// là HTTP thuần, nên thiếu trust proxy thì `req.secure` = false và KHÔNG có Set-Cookie nào: đăng
+// nhập "thành công" rồi mọi request sau 401, không một dòng log. Kiểm ở ĐÂY (không ở config.ts) vì
+// tiến trình worker cũng nạp config mà không cần biến này.
+if (config.NODE_ENV === "production" && !config.TRUST_PROXY) {
+  console.error("❌ TRUST_PROXY phải đặt ở production (vd 1 cho Cloudflare Tunnel → cloudflared → app): cookie phiên Secure chỉ được phát khi req.secure, mà req.secure cần trust proxy.");
+  process.exit(1);
+}
+
 const app = createApp();
+
+// QUYỀN GHI ĐÈ VAI TRÒ PHẢI NẠP XONG TRƯỚC KHI NHẬN REQUEST (RBAC-09). Bản trước `void` nó bên trong
+// callback của listen và nuốt lỗi → phục vụ với quyền mặc định cứng nếu CSDL chậm lúc khởi động.
+try {
+  await napRoleOverridesKhiKhoiDong();
+} catch (e) {
+  logger.fatal({ err: e instanceof Error ? e.message : String(e) }, "KHÔNG nạp được quyền ghi đè vai trò — dừng tiến trình thay vì chạy với quyền mặc định");
+  process.exit(1);
+}
+// Nạp lại định kỳ: phòng khi sau này chạy nhiều tiến trình (admin lưu ở tiến trình A thì B không
+// biết). Lỗi giữ nguyên bản tốt gần nhất — không bao giờ rơi về mặc định.
+setInterval(() => {
+  reloadRoleOverrides().catch((e) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "nạp lại quyền ghi đè vai trò thất bại — giữ bản cũ"));
+}, 5 * 60_000).unref();
 
 // (Quote expiry was removed entirely by request — no auto-expiry sweep, no
 // "expired" status, and no validUntil field. Quotes stay in their last status
@@ -29,7 +54,6 @@ const server = app.listen(config.PORT, () => {
   // hoá PII không", "email có thật sự gửi không" thì phải đi đọc mã nguồn hoặc so biến môi trường
   // bằng tay. Nay một dòng log trả lời hết.
   logger.info({ features: featureStatus() }, "cấu hình tính năng");
-  void reloadRoleOverrides(); // phân quyền động: nạp quyền ghi-đè vai trò từ DB (lỗi → dùng mặc định)
 
   // KIỂM KHO OBJECT NGAY LÚC KHỞI ĐỘNG.
   //
@@ -54,6 +78,18 @@ const server = app.listen(config.PORT, () => {
   }
 });
 
+// KEEP-ALIVE DÀI HƠN PROXY PHÍA TRƯỚC (HTTP-07). Mặc định Node đóng kết nối rỗi sau 5s, trong khi
+// cloudflared/Traefik giữ pool kết nối tới app ~90s. Proxy gửi request lên đúng socket Node vừa đóng
+// → EOF → Go transport chỉ tự thử lại request idempotent → POST (Lưu, đăng nhập) nhận 502 lẻ tẻ.
+// headersTimeout phải lớn hơn keepAliveTimeout (quy tắc của Node).
+const KEEP_ALIVE_TIMEOUT_MS = 95_000;
+const HEADERS_TIMEOUT_MS = 96_000;
+server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+server.headersTimeout = HEADERS_TIMEOUT_MS;
+// Keep-alive 95s dài hơn hạn tắt 70s: `server.close()` trần sẽ để socket của request đang dở sống
+// qua hạn cưỡng bức ở MỌI lượt deploy có người đang dùng. Tắt qua đường êm — src/tatMayHttp.ts.
+const tatMayHttp = ganTatMayEm(server);
+
 function shutdown(sig: string) {
   logger.info({ sig }, "shutting down");
   // ĐÓNG SSE TRƯỚC. `server.close()` chờ mọi kết nối đang mở kết thúc, mà kết nối SSE thì theo
@@ -63,7 +99,7 @@ function shutdown(sig: string) {
   const n = closeAllSse();
   if (n) logger.info({ sse: n }, "đã đóng kết nối SSE");
 
-  server.close(async () => {
+  tatMayHttp.tat(async () => {
     await prisma.$disconnect().catch(() => {});
     // Pool dò sẵn sàng KHÔNG đi qua Prisma nên `$disconnect()` không đụng tới nó. Bỏ sót dòng này
     // là để lại một kết nối Postgres mở sau mỗi lần tắt — vô hại trên một VM, nhưng trên cụm thì
@@ -74,11 +110,12 @@ function shutdown(sig: string) {
     await flushSentry();
     process.exit(0);
   });
-  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày.
+  // Vẫn giữ lưới an toàn, nhưng nay nó là NGOẠI LỆ chứ không phải đường thoát thường ngày. Hạn đủ
+  // dài để một lượt lưu/xuất đồng bộ đang dở (trần transaction 60s) kịp xong — xem SHUTDOWN_TIMEOUT_MS.
   setTimeout(() => {
-    logger.error("tắt máy quá hạn 10s — thoát cưỡng bức (còn kết nối chưa đóng?)");
+    logger.error({ hanMs: config.SHUTDOWN_TIMEOUT_MS }, "tắt máy quá hạn — thoát cưỡng bức (còn kết nối chưa đóng?)");
     process.exit(1);
-  }, 10_000).unref();
+  }, config.SHUTDOWN_TIMEOUT_MS).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

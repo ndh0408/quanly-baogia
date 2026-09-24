@@ -16,6 +16,12 @@
 #   - backup CSDL thành công gần nhất   < 26h
 #   - sao lưu kho object gần nhất       < 26h
 #   - diễn tập khôi phục gần nhất       < 8 ngày
+#   - bản OFF-HOST gần nhất (CSDL + kho object) < 26h — CHỈ khi đã cấu hình đích off-host.
+#
+# OFF-HOST CHƯA CẤU HÌNH: KHÔNG tính là sự cố để gửi Telegram (chủ repo chốt 2026-09-23 — chuyện
+# đã biết, báo mỗi 6h chỉ làm nhờn kênh cảnh báo duy nhất). Nó vẫn được IN ra ở dòng tóm tắt và ghi
+# vào tệp trạng thái (backup_offhost_configured 0) để dashboard thấy. Đã cấu hình mà dấu off-host cũ
+# hoặc chưa từng có → đó là đẩy đang hỏng → cảnh báo như mọi hạng mục khác.
 # ============================================================================
 set -uo pipefail
 [ -f /etc/quanly-backup.env ] && set -a && . /etc/quanly-backup.env && set +a
@@ -24,7 +30,12 @@ BACKUP_DIR="${BACKUP_DIR:-/opt/quanly-backups}"
 MAX_DB_H="${WATCHDOG_MAX_DB_HOURS:-26}"
 MAX_OBJ_H="${WATCHDOG_MAX_OBJECT_HOURS:-26}"
 MAX_DRILL_D="${WATCHDOG_MAX_DRILL_DAYS:-8}"
+MAX_OFF_H="${WATCHDOG_MAX_OFFHOST_HOURS:-26}"
 PROBLEMS=()
+LIB="$(cd "$(dirname "$0")" && pwd)/offhost-lib.sh"
+CO_LIB=0
+# shellcheck source=offhost-lib.sh
+[ -f "$LIB" ] && . "$LIB" && CO_LIB=1
 
 alert_all() {
   local msg="$1"
@@ -59,11 +70,41 @@ elif [ "$OBJ_AGE" -gt "$MAX_OBJ_H" ]; then
   PROBLEMS+=("• KHO OBJECT: lần thành công gần nhất ${OBJ_AGE}h trước (ngưỡng ${MAX_OBJ_H}h)")
 fi
 
-if [ "$DRILL_AGE" = never ]; then
+# ÂN HẠN SAU KHI CÀI (soát chéo ops#2): install-backup.sh ghi mốc .installed-at MỘT lần. Diễn tập chỉ
+# chạy CN 03:30 (hoặc ngay lúc cài nếu không đặt INSTALL_SKIP_DRILL=1), nên trong MAX_DRILL_D ngày đầu
+# "chưa từng đạt" là chuyện đương nhiên — báo Telegram lúc đó là báo ngay lúc cài rồi lặp mỗi 6h tới
+# Chủ nhật, làm nhờn kênh cảnh báo. Quá hạn mà vẫn chưa đạt thì lại là sự cố như cũ. Không có mốc
+# (host cài bằng bản cũ) → giữ hành vi cũ.
+INSTALL_AGE="$(age_hours "$BACKUP_DIR/.installed-at")"
+DRILL_NOTE="$(( ${DRILL_AGE/never/0} / 24 )) ngày"
+if [ "$DRILL_AGE" = never ] && [ "$INSTALL_AGE" != never ] && [ "$INSTALL_AGE" -le $(( MAX_DRILL_D * 24 )) ]; then
+  DRILL_NOTE="chưa chạy (mới cài ${INSTALL_AGE}h, lượt đầu CN 03:30)"
+  echo "ℹ️  diễn tập khôi phục chưa chạy lần nào — mới cài ${INSTALL_AGE}h trước, còn trong ân hạn ${MAX_DRILL_D} ngày" >&2
+elif [ "$DRILL_AGE" = never ]; then
   PROBLEMS+=("• DIỄN TẬP KHÔI PHỤC: CHƯA TỪNG chạy thành công — bản sao lưu chưa được chứng minh là dùng được")
 elif [ "$DRILL_AGE" -gt $(( MAX_DRILL_D * 24 )) ]; then
   PROBLEMS+=("• DIỄN TẬP KHÔI PHỤC: lần thành công gần nhất $(( DRILL_AGE / 24 )) ngày trước (ngưỡng ${MAX_DRILL_D} ngày)")
 fi
+
+# Off-host: chỉ là SỰ CỐ khi đã cấu hình. Chưa cấu hình thì chỉ ghi nhận (xem đầu tệp).
+OFF_NOTE=""
+if [ "$CO_LIB" != 1 ]; then
+  PROBLEMS+=("• THIẾU $LIB — cài lại bằng scripts/backup/install-backup.sh")
+elif offhost_configured; then
+  for k in db objects; do
+    a="$(age_hours "$BACKUP_DIR/.offhost-$k-last-success")"
+    if [ "$a" = never ]; then
+      PROBLEMS+=("• OFF-HOST ($k): đã cấu hình nhưng CHƯA TỪNG đẩy thành công")
+    elif [ "$a" -gt "$MAX_OFF_H" ]; then
+      PROBLEMS+=("• OFF-HOST ($k): lần đẩy thành công gần nhất ${a}h trước (ngưỡng ${MAX_OFF_H}h)")
+    fi
+  done
+  OFF_NOTE=" · off-host: đã cấu hình"
+else
+  OFF_NOTE=" · ⚠ off-host: CHƯA cấu hình (mọi bản sao nằm trên cùng host)"
+  echo "⚠️  OFFHOST-CHUA-CAU-HINH: không có bản sao lưu nào nằm ngoài máy này." >&2
+fi
+[ "$CO_LIB" = 1 ] && backup_ghi_trang_thai
 
 # Timer có còn được bật không — bắt kiểu chết "ai đó disable rồi quên".
 for t in quanly-backup.timer quanly-backup-objects.timer quanly-restore-drill.timer; do
@@ -77,4 +118,4 @@ if [ "${#PROBLEMS[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập $(( DRILL_AGE / 24 )) ngày"
+echo "✓ sao lưu còn tươi: CSDL ${DB_AGE}h · kho object ${OBJ_AGE}h · diễn tập ${DRILL_NOTE}${OFF_NOTE}"

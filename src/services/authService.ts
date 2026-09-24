@@ -14,13 +14,31 @@ import { revokeAllForUser } from "../jwt.js";
 import { findLoginUser, verifyMfaChallenge } from "../authCore.js";
 import { destroyAllSessions } from "../sessions.js";
 import { permissionsForUser, resolveUserPermissions } from "../permissions.js";
-import { sendEmail, brandedEmailHtml } from "../email.js";
+import { sendEmail, brandedEmailHtml, mienNguoiNhan } from "../email.js";
 
 type SessionSeed = { id: number; username: string; role: string; displayName: string; permissions?: string[]; canSign?: boolean };
 
+/**
+ * Request này có PHIÊN THẬT của express-session (xoay/lưu được) không?
+ *
+ * KHÔNG, khi JWT_API_ENABLED bật và request mang Bearer mà không kèm cookie `qly.sid`: cổng phiên ở
+ * src/app.ts bỏ qua middleware phiên, nên `req.session` hoặc vắng mặt hoặc chỉ là object trần do
+ * `bearerAuth` dựng — không có `regenerate`/`save`. Mọi đường CẤP PHIÊN phải hỏi câu này TRƯỚC khi
+ * ghi CSDL (soát chéo auth#7): hỏi muộn là đã đổi mật khẩu / tiêu token mời rồi mới báo lỗi.
+ */
+export function coPhienThat(req: Request): boolean {
+  return !!req.session && typeof req.session.regenerate === "function";
+}
+
 // Thiết lập session sau xác thực thành công: regenerate (chống session fixation) → gán → save.
-// Dùng chung cho /login và /accept-invite.
+// Dùng chung cho /login, /change-password và /accept-invite.
 export async function establishSession(req: Request, user: SessionSeed) {
+  // Lưới cuối (soát chéo auth#7): không có phiên thật thì `req.session.regenerate(...)` là TypeError
+  // → 500 "Lỗi server". Ném 400 có mã để client biết mình đi nhầm đường. Đây KHÔNG thay được việc
+  // kiểm sớm — tới được đây thì nơi gọi thường đã ghi CSDL xong (xem coPhienThat).
+  if (!coPhienThat(req)) {
+    throw Object.assign(httpError(400, "Client dùng Bearer phải xác thực bằng POST /api/auth/token — đường này cấp phiên cookie"), { code: "dung_auth_token" });
+  }
   await new Promise<void>((resolve, reject) =>
     req.session.regenerate((err: unknown) => (err ? reject(err) : resolve()))
   );
@@ -113,10 +131,25 @@ export async function changePassword(req: Request) {
   }
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST), passwordChangedAt: new Date() },
+    // Đốt luôn token mời/đặt-lại đang sống (AUTH-06): đổi mật khẩu là lúc người dùng nói "tôi nghi bị
+    // lộ" — một liên kết đặt lại còn hạn trong hộp thư (có thể chính kẻ kia vừa bấm "Quên mật khẩu")
+    // không được sống sót qua đó. Tài khoản đang đổi mật khẩu thì đã kích hoạt, không có lời mời nào để mất.
+    data: { passwordHash: await bcrypt.hash(newPassword, config.BCRYPT_COST), passwordChangedAt: new Date(), inviteTokenHash: null, inviteExpiresAt: null },
   });
   // Thu hồi mọi refresh token — chúng sống độc lập với cookie nên không tự chết theo phiên.
   await revokeAllForUser(user.id);
+
+  // CLIENT BEARER (không cookie) — soát chéo auth#7. Không có phiên nào để xoay: bản trước vẫn gọi
+  // establishSession, ném TypeError → 500 SAU KHI mật khẩu đã đổi và refresh token đã bị thu hồi.
+  // Client tin là đổi thất bại, rồi thử lại bằng mật khẩu cũ. Đổi mật khẩu là tính năng hợp lệ của
+  // client di động nên không chặn: trả `reauth: true` — access token đang cầm đã chết theo
+  // passwordChangedAt (bearerAuth so iat), client lấy cặp mới qua POST /api/auth/token.
+  // Không có sid "của mình" để giữ, nên dọn MỌI phiên cookie của tài khoản.
+  if (!coPhienThat(req)) {
+    await destroyAllSessions(user.id);
+    await audit(req, "password.change.success", { resource: "user", resourceId: user.id, actorId: user.id });
+    return { ok: true, reauth: true };
+  }
 
   // XOAY ĐỊNH DANH PHIÊN của chính người vừa đổi mật khẩu.
   //
@@ -162,6 +195,14 @@ export function sendPasswordReset(req: Request) {
     // phục hồi duy nhất hỏng theo đúng cách khó nhận ra nhất.
     const user = await findLoginUser(email);
     if (!user) return;
+    // TÀI KHOẢN KHÔNG CÓ EMAIL THÌ KHÔNG CÓ ĐÍCH GỬI HỢP LỆ (AUTH-05). findLoginUser OR cả cột
+    // `username`, và bản trước gửi tới `user.email || email` — tức tới ĐỊA CHỈ DO NGƯỜI GỌI GÕ. Tài
+    // khoản mời có username = email cũ, nên tài khoản bị xoá email (GDPR, hay trước khi updateUser
+    // chặn xoá trắng) vẫn nhận thư đặt lại ở HỘP THƯ CŨ — đúng hộp thư mà admin muốn cắt.
+    if (!user.email) {
+      logger.warn({ userId: user.id }, "quên mật khẩu: tài khoản không có email — bỏ");
+      return;
+    }
     // TÀI KHOẢN CHƯA KÍCH HOẠT VẪN ĐƯỢC CẤP LIÊN KẾT — NHƯNG TÀI KHOẢN ĐÃ BỊ KHOÁ THÌ KHÔNG.
     //
     // Trước 2026-09-07 nhánh này là `if (!user || !user.active) return;`. Mà endpoint LUÔN trả 200
@@ -188,7 +229,22 @@ export function sendPasswordReset(req: Request) {
     //                       y hệt hành vi trước 2026-09-07.
     // Không cần migration: tín hiệu có sẵn, không nhầm chiều, và giữ nguyên ca đã vá (tài khoản mời
     // — kể cả acceptInvite dở dang do đổi ý — luôn có `passwordChangedAt: null` cho tới khi kích hoạt).
-    if (!user.active && user.passwordChangedAt) return;
+    //
+    // AUTH-01 (audit 2026-09-23): `passwordChangedAt` MỘT MÌNH KHÔNG ĐỦ. Cột này NULL ở cả những tài
+    // khoản ĐÃ dùng hệ thống thật: mọi hàng có từ trước migration 20260811160000 (cố ý để NULL) mà
+    // chưa đổi mật khẩu, tài khoản tạo bằng `createUser` trước bản vá cùng ngày, admin seed. Khoá một
+    // người thuộc nhóm đó rồi họ bấm "Quên mật khẩu" là họ tự mở lại được — đúng lỗ vừa kể ở trên.
+    // Nên ghép hai tín hiệu:
+    //   · ĐÃ TỪNG KÍCH HOẠT = passwordChangedAt HOẶC lastLoginAt (lastLoginAt chỉ được ghi ở nhánh
+    //     đăng nhập THÀNH CÔNG, authCore.ts — người được mời chưa kích hoạt không thể có nó);
+    //   · ĐANG CHỜ LỜI MỜI = còn inviteTokenHash hoặc inviteExpiresAt. Lệnh khoá ở updateUser LUÔN
+    //     đốt cả hai, và không job nào dọn lời mời hết hạn, nên tài khoản khoá mà hai cột đều trống
+    //     là tài khoản bị admin khoá — kể cả khi người đó chưa đăng nhập lần nào (tạo tay rồi khoá,
+    //     hoặc GDPR đã đưa lastLoginAt về null).
+    // Chỉ ca "khoá + chưa từng kích hoạt + đang chờ lời mời" mới được cấp token — đúng ca ngõ cụt đã vá.
+    const daTungKichHoat = !!(user.passwordChangedAt || user.lastLoginAt);
+    const dangChoMoi = !!(user.inviteTokenHash || user.inviteExpiresAt);
+    if (!user.active && (daTungKichHoat || !dangChoMoi)) return;
     const chuaKichHoat = !user.active;
     const token = randomBytes(24).toString("hex");
     await prisma.user.update({
@@ -206,7 +262,7 @@ export function sendPasswordReset(req: Request) {
           html: "Bạn vừa yêu cầu <b>đặt lại mật khẩu</b> cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Nhấn nút bên dưới để tạo mật khẩu mới.",
           text: "Bạn vừa yêu cầu đặt lại mật khẩu cho hệ thống Quản lý Báo Giá – Gia Nguyễn. Mở liên kết bên dưới để tạo mật khẩu mới" };
     const gui = await sendEmail({
-      to: user.email || email,
+      to: user.email,
       subject: nhan.subject,
       text: `Chào ${user.displayName || ""},\n\n${nhan.text} (hết hạn sau 2 giờ):\n${url}\n\nNếu không phải bạn yêu cầu, hãy bỏ qua email này.`,
       html: brandedEmailHtml({
@@ -224,8 +280,9 @@ export function sendPasswordReset(req: Request) {
     // nhận được thư" sẽ không có gì để tra — đúng cảnh vừa xảy ra với thư mời trên production.
     const loiGui = (gui as { error?: string } | null)?.error;
     const boQua = (gui as { skipped?: boolean } | null)?.skipped;
-    if (loiGui) logger.error({ err: loiGui, to: user.email || email, chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
-    else if (boQua) logger.warn({ to: user.email || email }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
+    // Chỉ tên miền người nhận: email là PII, log có vòng đời khác CSDL (audit 2026-09-22, OBS-16).
+    if (loiGui) logger.error({ err: loiGui, toDomain: mienNguoiNhan(user.email), chuaKichHoat }, "gửi thư đặt lại mật khẩu THẤT BẠI");
+    else if (boQua) logger.warn({ toDomain: mienNguoiNhan(user.email) }, "chưa cấu hình SMTP — thư đặt lại mật khẩu bị bỏ");
     await audit(req, "password.forgot", {
       resource: "user", resourceId: user.id,
       after: { chuaKichHoat, emailSent: !loiGui && !boQua, emailError: loiGui ?? null },
@@ -253,6 +310,11 @@ export async function acceptInvite(req: Request) {
   const { token, displayName, phone, title, senderName, password, mfaToken } = req.body;
   const user = await findInvitee(token);
   if (!user) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
+  // CHỐT LỚP HAI (AUTH-01): tài khoản đang KHOÁ mà đã từng kích hoạt thì không token nào được mở
+  // lại nó — kể cả token còn hạn phát ra theo lỗ cũ của sendPasswordReset trước bản vá. Trả CÙNG
+  // câu 404 như token sai để không lộ trạng thái khoá. Đặt TRƯỚC cổng MFA: không cho người bị khoá
+  // dùng đường này làm máy thử mã TOTP.
+  if (!user.active && (user.passwordChangedAt || user.lastLoginAt)) throw httpError(404, "Lời mời không hợp lệ hoặc đã hết hạn");
 
   // CỔNG MFA cho đường ĐẶT LẠI MẬT KHẨU.
   //

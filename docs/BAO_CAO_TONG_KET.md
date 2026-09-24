@@ -9,9 +9,9 @@
 ## A. Executive Summary
 
 **Trước.** Một hệ quản lý báo giá đang chạy thật, kiến trúc lành mạnh (React SPA → Express →
-Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 140 endpoint, tiền dùng `Decimal`. Nhưng
+Service → Prisma → PostgreSQL, cộng Redis/BullMQ/SSE), 141 endpoint, tiền dùng `Decimal`. Nhưng
 lớp *bảo đảm* thì mỏng ở đúng những chỗ đắt nhất: `ci.yml` khai đủ cổng mà **chưa bao giờ chạy**
-(tài khoản không bật GitHub Actions), không có E2E, không có quy tắc cảnh báo, không ai đo đường
+(tài khoản GitHub bị khoá vì billing — mọi lượt Actions hỏng sau vài giây; nay CI là `verify-local.sh`), không có E2E, không có quy tắc cảnh báo, không ai đo đường
 lưu báo giá, và bản thân `npm run verify` có năm lỗ khiến nó xanh trong khi không kiểm gì.
 
 **Sau.** Cổng kiểm là thứ **chạy được và đỏ được**: 13 bước, 39 khẳng định, gồm dựng + smoke image
@@ -172,8 +172,8 @@ quét đắt nhất.
 
 | Hạng mục | Trạng thái |
 |---|---|
-| Sao lưu CSDL tự động | ✅ `scripts/backup/backup-db.sh`, có watchdog Telegram |
-| Sao lưu kho object | ✅ `scripts/backup/backup-objects.sh` |
+| Sao lưu CSDL tự động | ✅ `scripts/backup/backup-db.sh` chạy trên production — ⚠️ nhưng bản trên host khác md5 với repo, và watchdog CHƯA cài ở đó (đo 2026-09-22) |
+| Sao lưu kho object | ⚠️ script có (`scripts/backup/backup-objects.sh`) nhưng **chưa chạy trên production** — không có timer, kho chứng từ chưa từng được sao lưu (đo 2026-09-22) |
 | Diễn tập khôi phục | ✅ `scripts/backup/restore-test.sh` |
 | Kiểm toàn vẹn | ✅ `src/tools/verifyIntegrity.ts` |
 | Diễn tập migration | ✅ `scripts/db/migration-rehearsal.sh` (đã vá lỗi nuốt migration hỏng qua `\| grep \| tail` không có `pipefail`) |
@@ -283,7 +283,7 @@ Không che giấu. Đầy đủ ở `docs/REMAINING_RISKS.md`; những mục cò
    Ghi `DEFER` trong bảng công nghệ.
 9. **Lưới báo giá: phần cần layout hoặc ảnh THẬT vẫn không có cổng.** Đợt 2026-08-28 đóng được
    dây nối bàn phím — đo được rằng **18 trong 19** chỗ gọi `pushUndo()` đều chụp ảnh TRƯỚC khi
-   ghi vào `items`. Chỗ thứ 19 là `addImages` (`web/src/components/GridTable.tsx:1642`): nó chờ
+   ghi vào `items`. Chỗ thứ 19 là `addImages` (`web/src/components/GridTable.tsx`, hàm `addImages`): nó chờ
    `Image.onload`, mà jsdom không giải mã ảnh nên promise treo — giả lập được thì cũng chỉ là
    giả lập chính hàm mình định kiểm. Cùng nhóm chưa có cổng: `onCopyCut` (chiều GHI vào
    clipboard), chọn vùng bằng chuột, `caretIndexAtPoint`, nút kéo-fill, và mọi phép tính bề
@@ -313,7 +313,7 @@ Chỉ những thứ **thật sự cần**, theo thứ tự.
 | **6–12 tháng** | Bật Loki/Grafana khi lên nhiều instance | Một VM thì `docker logs` còn đủ |
 | **6–12 tháng** | Chuyển sang kéo ảnh theo digest làm mặc định | Cần VM đăng nhập được registry |
 | **12–24 tháng** | Dựng `/api/v1` — **chỉ khi** có consumer ngoài repo | Phiên bản là lời hứa với người khác; hứa với không ai thì chỉ còn là chi phí |
-| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 140 endpoint. Xem lại khi Express 4 hết hỗ trợ |
+| **12–24 tháng** | Express 5 | Bỏ được `asyncHandler`, nhưng phải test lại 141 endpoint. Xem lại khi Express 4 hết hỗ trợ |
 | **khi có áp lực TỔ CHỨC** | Ranh giới dọc (`src/modules/`) | Đọc lại bảng bảy câu ở ADR 0008: lúc đó cột "vấn đề đo được" mới không còn rỗng |
 
 **Không đề xuất:** microservices · NestJS · Next.js · Kafka · event sourcing/CQRS · Kubernetes bắt
