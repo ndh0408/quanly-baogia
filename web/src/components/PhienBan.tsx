@@ -37,6 +37,7 @@ export function ThongBaoBanMoi() {
   const s = usePhienBan();
   const [, nhip] = useState(0);
   const [hoi, setHoi] = useState<DangDo>(null);   // đang hỏi lại vì người dùng còn làm dở
+  const [dangLuu, setDangLuu] = useState(false);
   useEffect(() => batDauTheoDoi(), []);
   // Câu nhắc đổi theo việc người dùng đang làm (mở form, gõ dở…) và dải hiện lại khi hết giờ ẩn tạm.
   useEffect(() => {
@@ -44,13 +45,24 @@ export function ThongBaoBanMoi() {
     const t = window.setInterval(() => nhip((n) => n + 1), 2000);
     return () => window.clearInterval(t);
   }, [s.coBanMoi]);
+  const dd = s.coBanMoi ? dangDo() : null;
+  // Câu hỏi đi theo trạng thái THẬT, không giữ nguyên từ lúc bấm (soát vòng 3): được hỏi "đang tạo file"
+  // / "form đang mở" rồi mới sửa báo giá → chuyển sang "chưa lưu" (chỉ còn "Lưu rồi tải", không "Tải
+  // luôn"); đã "Rời, bỏ thay đổi" → câu "chưa lưu" cũ hết hiệu lực, về dải bình thường.
+  useEffect(() => {
+    if (!hoi || dangLuu) return;
+    if (dd === "chua-luu" && hoi !== "chua-luu") setHoi("chua-luu");
+    else if (hoi === "chua-luu" && dd !== "chua-luu") setHoi(null);
+  }, [hoi, dd, dangLuu]);
 
   if (!s.coBanMoi || Date.now() < s.anDenLuc) return null;
-  const dd = dangDo();
 
   const tai = async () => {
+    // Lượt vẽ có thể trễ tới 2 giây: kiểm LẠI ngay lúc bấm — vừa sửa báo giá sau khi được hỏi thì hỏi lại.
+    if (dangDo() === "chua-luu") { setHoi("chua-luu"); return; }
     setHoi(null);
     if (await taiBanMoi()) return;
+    if (dangDo() === "chua-luu") { setHoi("chua-luu"); return; }   // gõ tiếp trong lúc chờ → không tải
     // Không tải được mà vẫn còn bản mới (máy chủ vừa lùi bản thì dải tự biến mất, khỏi báo).
     if (layTrangThai().coBanMoi) toast("Chưa tải được bản mới — mạng chập chờn, máy chủ đang cập nhật hoặc đang lưu dở. Thử lại sau ít phút.", "error");
   };
@@ -61,7 +73,14 @@ export function ThongBaoBanMoi() {
     void tai();
   };
   const luuRoiTai = async () => {
-    if (await luuRoiBao()) { void tai(); return; }
+    // Không còn gì để lưu (vd vừa "Rời, bỏ thay đổi"): đừng báo "Chưa lưu được" giả — đi tiếp như bấm
+    // Tải bản mới (còn dở gì khác thì hỏi đúng câu đó).
+    const bayGio = dangDo();
+    if (bayGio !== "chua-luu") { if (bayGio) setHoi(bayGio); else void tai(); return; }
+    setDangLuu(true);
+    let daLuu = false;
+    try { daLuu = await luuRoiBao(); } finally { setDangLuu(false); }
+    if (daLuu) { void tai(); return; }
     toast("Chưa lưu được — xem thông báo lỗi trên màn hình, sửa rồi bấm Tải bản mới lại", "error");
     setHoi(null);
   };
@@ -82,7 +101,7 @@ export function ThongBaoBanMoi() {
         ) : hoi ? (
           <>
             {hoi === "chua-luu"
-              ? <button type="button" className="btn btn-sm btn-primary" onClick={() => void luuRoiTai()}>Lưu rồi tải bản mới</button>
+              ? <button type="button" className="btn btn-sm btn-primary" disabled={dangLuu} onClick={() => void luuRoiTai()}>{dangLuu ? "Đang lưu…" : "Lưu rồi tải bản mới"}</button>
               : <button type="button" className="btn btn-sm btn-danger" onClick={() => void tai()}>Tải luôn</button>}
             <button type="button" className="btn btn-sm" onClick={() => setHoi(null)}>Hủy</button>
           </>

@@ -116,7 +116,8 @@ describe("dải thông báo bản mới", () => {
     await act(async () => { nut("Lưu rồi tải bản mới")!.click(); });
     expect(h.taiBanMoi, "lưu hỏng mà vẫn tải lại → mất dữ liệu").not.toHaveBeenCalled();
     act(() => nut("Tải bản mới")!.click());
-    h.luuRoiBao.mockResolvedValueOnce(true);
+    // Lưu thật xong thì màn soạn hạ cờ chưa-lưu — giả đúng như vậy (lưu "được" mà cờ còn bật thì KHÔNG tải).
+    h.luuRoiBao.mockImplementationOnce(async () => { (window as Window & { __editorDirty?: boolean }).__editorDirty = false; return true; });
     await act(async () => { nut("Lưu rồi tải bản mới")!.click(); });
     expect(h.taiBanMoi).toHaveBeenCalledTimes(1);
   });
@@ -152,6 +153,50 @@ describe("dải thông báo bản mới", () => {
       expect(h.taiBanMoi).not.toHaveBeenCalled();
       expect(dai()?.textContent).toContain("lượt tạo file đang chạy bị huỷ");
     } finally { xong(); }
+  });
+
+  it("được hỏi 'đang tạo file' RỒI mới sửa báo giá → bấm 'Tải luôn' KHÔNG tải, chuyển sang 'Lưu rồi tải' (iPad không có hộp hỏi)", async () => {
+    act(() => banMoiTrangAnToan());
+    const xong = batDauViecNen();
+    try {
+      ve(<ThongBaoBanMoi />);
+      act(() => nut("Tải bản mới")!.click());
+      expect(dai()?.textContent).toContain("Đang tạo file.");
+      (window as Window & { __editorDirty?: boolean }).__editorDirty = true;   // sửa báo giá sau khi được hỏi
+      await act(async () => { nut("Tải luôn")!.click(); });                     // bấm NGAY, trước nhịp vẽ 2 giây
+      expect(h.taiBanMoi, "câu hỏi cũ không được mở đường tải lúc còn chưa lưu").not.toHaveBeenCalled();
+      expect(nut("Lưu rồi tải bản mới")).toBeDefined();
+      expect(nut("Tải luôn")).toBeUndefined();
+    } finally { xong(); }
+  });
+
+  it("câu 'chưa lưu' cũ sau khi đã 'Rời, bỏ thay đổi' → bấm 'Lưu rồi tải' đi tiếp, KHÔNG báo lỗi 'Chưa lưu được' giả", async () => {
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = true;
+    act(() => banMoiTrangAnToan());
+    ve(<ThongBaoBanMoi />);
+    act(() => nut("Tải bản mới")!.click());
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;   // Rời, bỏ thay đổi
+    await act(async () => { nut("Lưu rồi tải bản mới")!.click(); });
+    expect(h.luuRoiBao).not.toHaveBeenCalled();
+    expect(h.taiBanMoi).toHaveBeenCalledTimes(1);
+    expect(ui.toast).not.toHaveBeenCalledWith(expect.stringContaining("Chưa lưu được"), "error");
+  });
+
+  it("'Lưu rồi tải' đang chạy → nút khoá 'Đang lưu…' (bấm dồn không gọi lưu lần hai)", async () => {
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = true;
+    act(() => banMoiTrangAnToan());
+    let xongLuu: ((v: boolean) => void) | null = null;
+    h.luuRoiBao.mockImplementationOnce(() => new Promise<boolean>((r) => { xongLuu = r; }));
+    ve(<ThongBaoBanMoi />);
+    act(() => nut("Tải bản mới")!.click());
+    await act(async () => { nut("Lưu rồi tải bản mới")!.click(); });
+    const b = nut("Đang lưu…")!;
+    expect(b.disabled).toBe(true);
+    await act(async () => { b.click(); });
+    expect(h.luuRoiBao).toHaveBeenCalledTimes(1);
+    (window as Window & { __editorDirty?: boolean }).__editorDirty = false;
+    await act(async () => { xongLuu!(true); });
+    expect(h.taiBanMoi).toHaveBeenCalledTimes(1);
   });
 
   it("✕ ẩn dải (nhắc lại sau 30 phút)", () => {

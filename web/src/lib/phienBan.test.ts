@@ -239,19 +239,47 @@ describe("nenTuTai — chỉ tự tải khi AN TOÀN", () => {
 
 describe("taiBanMoi", () => {
   beforeEach(() => { vi.stubGlobal("fetch", traVe(BAN_MOI)); });
-  it("máy chủ phát bản mới → gỡ SW + xoá cache rồi tải lại; KHÔNG đụng cờ chưa-lưu (hộp của trình duyệt là chốt cuối)", async () => {
+  it("máy chủ phát bản mới → gỡ SW + xoá cache rồi tải lại; không bắn sự kiện nào bảo màn soạn hạ chốt", async () => {
     coBanMoi();
     const g = cuaSoGia();
-    (g.w as WinDirty).__editorDirty = true;
     expect(await taiBanMoi(g.w)).toBe(true);
     expect(g.unregister).toHaveBeenCalled();
     expect(g.xoaCache).toHaveBeenCalledWith("workbox-precache-v2");
     expect(g.suKien, "không còn sự kiện nào bảo màn soạn hạ chốt beforeunload (soát vòng 2)").toEqual([]);
     expect(g.reload).toHaveBeenCalledTimes(1);
-    expect((g.w as WinDirty).__editorDirty, "hạ cờ ở đây = hết chặn rời trang nếu người dùng Hủy hộp của trình duyệt").toBe(true);
     expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi"), "chưa rời trang thật thì chưa ghi khoá").toBeNull();
     g.roiTrang();
     expect(sessionStorage.getItem("quanly:phien-ban:da-tai-lai-toi")).toBe("index-MoiBBB22");
+  });
+  it("còn thay đổi chưa lưu → KHÔNG tải (không gỡ SW, không reload) — iPhone/iPad không có hộp 'Tải lại trang?' để đỡ", async () => {
+    coBanMoi();
+    const g = cuaSoGia();
+    (g.w as WinDirty).__editorDirty = true;
+    expect(await taiBanMoi(g.w)).toBe(false);
+    expect(g.unregister).not.toHaveBeenCalled();
+    expect(g.reload).not.toHaveBeenCalled();
+    expect(layTrangThai().dangTai).toBe(false);
+  });
+  it("gõ tiếp TRONG LÚC chờ hỏi máy chủ → dừng ngay trước reload", async () => {
+    coBanMoi();
+    let traLoi: ((r: Response) => void) | null = null;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { traLoi = r; })));
+    const g = cuaSoGia();
+    const hua = taiBanMoi(g.w);
+    await new Promise((r) => setTimeout(r, 10));
+    (g.w as WinDirty).__editorDirty = true;   // người dùng gõ tiếp
+    traLoi!({ ok: true, json: async () => BAN_MOI } as unknown as Response);
+    expect(await hua).toBe(false);
+    expect(g.reload).not.toHaveBeenCalled();
+    expect(layTrangThai().dangTai).toBe(false);
+  });
+  it("đang xem thử quyền: 'chưa lưu' là lưu giả → không chặn tải (dải đã hỏi 'sẽ thoát xem thử')", async () => {
+    coBanMoi();
+    h.xemThu = true;
+    const g = cuaSoGia();
+    (g.w as WinDirty).__editorDirty = true;
+    expect(await taiBanMoi(g.w)).toBe(true);
+    expect(g.reload).toHaveBeenCalledTimes(1);
   });
   it("hộp 'Tải lại trang?' bị Hủy (không có pagehide) → KHÔNG để lại khoá chống vòng tròn — tab đó vẫn tự lên bản này được về sau", async () => {
     vi.useFakeTimers();

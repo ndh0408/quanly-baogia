@@ -220,8 +220,15 @@ const ngu = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * trước hạ chốt đó sau khi ghi bản nháp — nhưng bản nháp lệch mốc (người khác vừa lưu, account HN vừa gửi
  * giá) bị bỏ im lặng lúc mở lại, quá 1MB thì bị bóc ảnh: hạ chốt là mất dữ liệu đúng lúc app hứa "được giữ".
  */
+/** Còn thay đổi THẬT chưa lưu (lúc xem thử quyền thì mọi lệnh Lưu là giả — không tính). */
+const conChuaLuu = (win: Window) => !isPreviewMode() && !!(win as Window & { __editorDirty?: boolean }).__editorDirty;
+
 export async function taiBanMoi(win: Window = window, { tuDong = false }: { tuDong?: boolean } = {}): Promise<boolean> {
   if (st.dangTai) return false;
+  // Còn thay đổi chưa lưu thì KHÔNG tải — kể cả khi phía gọi quên hỏi (iPhone/iPad không có hộp "Tải lại
+  // trang?" để đỡ). Kiểm cả ở đầu lẫn ngay trước reload: người dùng có thể gõ tiếp trong lúc chờ hỏi máy
+  // chủ / gỡ SW (soát vòng 3).
+  if (conChuaLuu(win)) return false;
   dat({ dangTai: true });
   const thoi = () => { dat({ dangTai: false }); return false; };
   for (let cho = 0; soLenhGhiDangBay() > 0; cho += 250) {
@@ -231,6 +238,7 @@ export async function taiBanMoi(win: Window = window, { tuDong = false }: { tuDo
   if ((await kiemTraBanMoi()) !== true) return thoi();
   await goBoNhoDem(win);
   if (tuDong && !tuTaiDuocLucNay(win.document, win, Date.now())) return thoi();   // SW đã gỡ không sao — lần tải sau tự đăng ký lại
+  if (conChuaLuu(win)) return thoi();
   // Khoá chống tải vòng tròn chỉ ghi khi trang THẬT SỰ rời đi: ghi trước reload mà hộp "Tải lại trang?"
   // bị Hủy thì khoá nằm lại và tab đó không bao giờ tự lên bản này nữa (soát vòng 3).
   const dich = st.mayChu?.banGiaoDien;
